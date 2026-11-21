@@ -6,3 +6,4 @@ export const sendEmail=async(message:{subject:string;text:string}):Promise<boole
 export const dispatch={calls:0,listCalls:0,notices:[] as {subject:string;text:string}[],outcome:'retry' as 'sent'|'waiting'|'retry'|'refused'};
 export async function sendBatch(..._args:unknown[]):Promise<'sent'|'retry'|'refused'>{dispatch.calls++;return dispatch.outcome==='waiting'?'retry':dispatch.outcome;}
 export async function sendListBatch(..._args:unknown[]):Promise<'sent'|'waiting'|'retry'|'refused'>{dispatch.calls++;dispatch.listCalls++;return dispatch.outcome;}
+export async function sendBatchOutcome(..._args:unknown[]):Promise<'sent'|'retry'|'uncertain'|'refused'>{dispatch.calls++;return dispatch.outcome==='waiting'?'retry':dispatch.outcome;}

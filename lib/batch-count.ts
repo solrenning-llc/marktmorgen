@@ -1,0 +1,67 @@
+/**
+ * The count kept for a batch of emails whose answer was not known.
+ *
+ * sendBatchOutcome (lib/email.ts) answers "uncertain" when Resend may have
+ * taken a batch (a post whose answer never came, a 5xx or 408), and
+ * "unconfirmed" when Amazon's acknowledgement was lost. Both keep the count
+ * already reserved, never given back, and mark it for a retry of the same
+ * batch key to the same people. Resend drops a repeat under its idempotency
+ * key; for Amazon, dispatchBatch leaves out whoever it may have taken
+ * (notMaybeTaken). So the kept count covers that retry while its mark lasts.
+ * Reserving the count again took the creator's monthly emails twice, or once
+ * per unknown answer, for emails that went once (#4073 MEDIUM 1; Codex X6's
+ * correction of this note).
+ *
+ * So the caller marks the batch when it keeps the count, and a retry that
+ * finds the mark sends under the count already kept instead of reserving
+ * again. The mark is never a reason to give anything back: a later answer
+ * that nothing went cannot prove the first did not go, so the count stays.
+ *
+ * The mark lasts less than the service's idempotency window (Resend keeps a
+ * key 24 hours; SES's own record, lib/ses.ts, two days): a retry after it,
+ * which the service could send anew, is counted anew. A mark that cannot be
+ * read is no mark, so the retry is counted again: more counted, never less.
+ */
+import { createHash } from "node:crypto";
+import { redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
+
+export const BATCH_KEPT_SECONDS = 23 * 3_600;
+
+/**
+ * Database commands a batch of a sender that takes from a monthly figure runs besides its emails: batchCountKept's GET,
+ * then keepBatchCount's SET or batchCountSettled's DEL (at most one of the two). Priced on every email at its worst, a
+ * batch of one (tests/plan-cost-registry.ts, the list-email and imports lines).
+ */
+export const BATCH_COUNT_EXTRA_COMMANDS = 2;
+
+/** The mark's key: the batch key and its people, sorted, hashed (no address is written in a key). */
+export function batchKeptKey(batchKey: string, to: readonly string[]): string {
+  const people = [...to].map((t) => t.trim().toLowerCase()).sort().join(",");
+  return `nl:mail:kept:${createHash("sha256").update(`${batchKey}\n${people}`).digest("hex").slice(0, 40)}`;
+}
+
+/** Whether this batch, to exactly these people, already holds its count. Unknown is no. */
+export async function batchCountKept(batchKey: string, to: readonly string[]): Promise<boolean> {
+  if (!to.length) return false;
+  try {
+    const reply = repliesFor(await redisPipeline([["GET", batchKeptKey(batchKey, to)]]), 1);
+    return reply?.[0] === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Marks that this batch's count is kept, after an answer not known. A mark not written only costs a second count. */
+export async function keepBatchCount(batchKey: string, to: readonly string[]): Promise<void> {
+  if (!to.length) return;
+  await redisPipeline([["SET", batchKeptKey(batchKey, to), "1", "EX", BATCH_KEPT_SECONDS]]).catch((error: unknown) => {
+    console.error("the count kept for a batch could not be marked; a retry counts it again", error);
+  });
+}
+
+/** The batch went: its mark goes, so nothing is left to excuse another batch from its count. */
+export async function batchCountSettled(batchKey: string, to: readonly string[]): Promise<void> {
+  if (!to.length) return;
+  await redisPipeline([["DEL", batchKeptKey(batchKey, to)]]).catch(() => {});
+}

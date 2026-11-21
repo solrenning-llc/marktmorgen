@@ -77,6 +77,7 @@ import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_R
 import { BATCH_BYTES, HELD_UPLOAD_SWEEP_COMMANDS, IMPORT_END_EXTRA_COMMANDS, JOB_WRITE_IF_EXTRA_COMMANDS, MAX_REPORT_ROWS, MOVED_EMAIL_EXTRA_COMMANDS, MOVE_HELD_PASSES, MOVE_HELD_PASS_COMMANDS, PAUSED_IMPORT_CHECKS, PAUSED_IMPORT_CHECKS_MONTH, PAUSED_IMPORT_PASSES, PAUSED_IMPORT_PASSES_MONTH, PAUSED_IMPORT_PASS_BYTES, PAUSED_IMPORT_PASS_COMMANDS, PAUSED_IMPORT_SKIP_BYTES, PAUSED_IMPORT_SKIP_COMMANDS } from "@/lib/imports";
 import { INVITE_GONE_READ_COMMANDS } from "@/lib/move-members";
 import { GIVE_BACK_FLOOR_EXTRA_COMMANDS } from "@/lib/mail";
+import { BATCH_COUNT_EXTRA_COMMANDS } from "@/lib/batch-count";
 import { MAX_TRIMMED_PAGE_CHARS } from "@/lib/clickfunnels-page";
 import { IMPORTS_PER_SHARE_MONTH, MAX_APPLY_PAGES, PREVIEWS_PER_SHARE_MONTH, SHARE_LIMITS } from "@/lib/funnel-share-rules";
 import { SHARE_FENCE_EXTRA_COMMANDS } from "@/lib/funnel-share-store";
@@ -2089,17 +2090,19 @@ export const COST_LINES: CostLine[] = [
   {
     id: "list-email",
     feature: "The monthly emails: list email, sequences and workflows (#507), their notices to the owner, and emails to people brought over on Studio and Scale",
-    monthlyUsd: (tier) => monthlyEmails(tier) * PER_EMAIL,
+    // Each batch also reads, and then writes or deletes, its kept-count mark (lib/batch-count.ts): a batch of one at its worst.
+    monthlyUsd: (tier) => monthlyEmails(tier) * (PER_EMAIL + BATCH_COUNT_EXTRA_COMMANDS * COMMAND),
     sources: [
       { file: "lib/plan.ts", names: ["PRO_MONTHLY_EMAILS", "SCALE_MONTHLY_EMAILS", "TRIAL_MONTHLY_EMAILS"] },
       { file: "lib/mail.ts", names: ["reserve", "takeFromMonth", "stopWriting(store.listId as string, r.to, \"refused\")"] },
       { file: "lib/email.ts", names: ["notYetTaken(batchKey, [...result.taken, ...result.refused.map((r) => r.message)])", "REFUSED_ADDRESS", "notMaybeTaken(batchKey, pending)"] },
+      { file: "lib/batch-count.ts", names: ["BATCH_COUNT_EXTRA_COMMANDS", "batchCountKept", "keepBatchCount", "batchCountSettled"] },
       { file: "lib/ses.ts", names: ["markMaybe", "unmarkMaybe", "notMaybeTaken"] },
       // A community announcement batch reads its members' list rows once (one HMGET of at most CHECKED_BATCH_SIZE fields), far
       // inside what the batch's emails cost at PER_EMAIL (14 November 2026).
       { file: "lib/community-mail.ts", names: ["keptOnList"] },
     ],
-    basis: "Every monthly email sent, at the most an email costs. A plain batch's email that goes by Amazon (sendBatch: product updates, community announcements, review asks, imports; never a list batch) takes at most three commands more for its possibly-taken mark (lib/ses.ts, 13 November 2026): a SET NX before Amazon is asked, a GET when the batch is tried again, a DEL when Amazon says for certain it did not take it, kept two days at most; about $0.000006 at Upstash's $2 a million, inside what an email is priced at. One the email service refuses for good in a list batch (lib/email.ts ListBatchOutcome, 9 November 2026) is taken from the month before it is tried like any other and stays taken: it pays for asking Amazon (nothing for a refusal), for its own did mark read back with the batch (one GET; each accepted one reads its own inside its own email) and, refused as an address, for taking it off the list (lib/contacts.ts stopWriting: at most three rounds of an HGET and the CAS_HSET script with its read-back, then an INCR, about sixteen commands), about $0.00004 at Upstash's $2 a million, inside what an email is priced at. The address is then off the list for good, so it is never paid for twice; nothing more is kept.",
+    basis: "Every monthly email sent, at the most an email costs, plus BATCH_COUNT_EXTRA_COMMANDS commands for its batch's kept-count mark (lib/batch-count.ts: a GET, then a SET or a DEL; #4073), priced as if every email went in a batch of its own. A plain batch's email that goes by Amazon (sendBatch: product updates, community announcements, review asks, imports; never a list batch) takes at most three commands more for its possibly-taken mark (lib/ses.ts, 13 November 2026): a SET NX before Amazon is asked, a GET when the batch is tried again, a DEL when Amazon says for certain it did not take it, kept two days at most; about $0.000006 at Upstash's $2 a million, inside what an email is priced at. One the email service refuses for good in a list batch (lib/email.ts ListBatchOutcome, 9 November 2026) is taken from the month before it is tried like any other and stays taken: it pays for asking Amazon (nothing for a refusal), for its own did mark read back with the batch (one GET; each accepted one reads its own inside its own email) and, refused as an address, for taking it off the list (lib/contacts.ts stopWriting: at most three rounds of an HGET and the CAS_HSET script with its read-back, then an INCR, about sixteen commands), about $0.00004 at Upstash's $2 a million, inside what an email is priced at. The address is then off the list for good, so it is never paid for twice; nothing more is kept.",
   },
   {
     id: "winback-commands",
@@ -2232,7 +2235,7 @@ export const COST_LINES: CostLine[] = [
       const pausedChecks = Math.min(a.starts * PAUSED_IMPORT_CHECKS, PAUSED_IMPORT_CHECKS_MONTH) * (PAUSED_IMPORT_PASS_COMMANDS * COMMAND + PAUSED_IMPORT_PASS_BYTES * DB_BYTE);
       const pausedReads = Math.min(a.starts * PAUSED_IMPORT_PASSES, PAUSED_IMPORT_PASSES_MONTH) * (PAUSED_IMPORT_SKIP_COMMANDS * COMMAND + PAUSED_IMPORT_SKIP_BYTES * DB_BYTE);
       const paused = pausedChecks + pausedReads;
-      return rows + uploads + starts + steps + reports + a.movedEmails * PER_EMAIL + movedExtra + paused;
+      return rows + uploads + starts + steps + reports + a.movedEmails * (PER_EMAIL + BATCH_COUNT_EXTRA_COMMANDS * COMMAND) + movedExtra + paused;
     },
     sources: [
       { file: "lib/import-limits.ts", names: ["IMPORT_ALLOWANCES", "IMPORT_WORST_COMMANDS_PER_ROW", "IMPORT_WORST_BYTES_PER_ROW", "IMPORT_MIN_ROWS_PER_UPLOAD"] },
@@ -2243,6 +2246,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/contacts.ts", names: ["leftListAmong"] },
       { file: "lib/checkout-recovery.ts", names: ["moveStopLink", "remindersStoppedAmong"] },
       { file: "lib/mail.ts", names: ["GIVE_BACK_FLOOR_EXTRA_COMMANDS"] },
+      { file: "lib/batch-count.ts", names: ["BATCH_COUNT_EXTRA_COMMANDS"] },
       { file: "app/api/store/import/route.ts", names: ["import-start-month", "import-step-month", "import-report-month"] },
       // The store's deleted people, checked where a chunk of past buyers or members is written (review of #3383).
       { file: "lib/imported-purchases.ts", names: ["GRANT_UNLESS_ERASED", "grantUnlessErased"] },
@@ -3227,7 +3231,7 @@ export function nonPayingWorst(): number {
     // Every page reading the trial's window counts (line page-readings, 639 [GL7](25)).
     + readingsCost(REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS)
     + TRIAL_ORDERS * ORDER_COST
-    + TRIAL_MONTHLY_EMAILS * PER_EMAIL
+    + TRIAL_MONTHLY_EMAILS * (PER_EMAIL + BATCH_COUNT_EXTRA_COMMANDS * COMMAND)
     + CONTACT_LIVE_MONTH
     + TRIAL_VIDEO_HOURS * hourCost()
     + TRIAL_DAILY_RUNS * 15 * WORST_COMMANDS_PER_RUN * COMMAND

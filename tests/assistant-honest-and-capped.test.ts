@@ -307,7 +307,9 @@ async function main(): Promise<void> {
   is("the questions inside the window are still shown", shown.map((m) => m.question.slice(0, 18)), ["Is there a gluten-", "Do you ship to Por"]);
 
   part("C. A model call refused by the provider keeps what the facts read cost");
-  await redis.pipeline([["DEL", poolKey]]);
+  // A fresh month: the pool and its "opened" mark both gone (#4073's ASSISTANT_POOL v2 refuses a pool deleted under
+  // its mark as unknown, which is not what this part tests).
+  await redis.pipeline([["DEL", poolKey], ["DEL", `${poolKey}:opened`]]);
   refuse = true;
   const r = await askAssistant({ store, text: "Is it a PDF?", now });
   refuse = false;
@@ -336,7 +338,7 @@ async function main(): Promise<void> {
   is("nothing of the catalog or its pages is read before the refusal", catalogReads, []);
 
   part("C. Facts that cannot be read whole: failed, not thrown, and the reads are paid (with main's unit B)");
-  await redis.pipeline([["DEL", poolKey]]);
+  await redis.pipeline([["DEL", poolKey], ["DEL", `${poolKey}:opened`]]);
   (redis as unknown as { pipeline: typeof original }).pipeline = async (cmds: (string | number)[][]) => {
     if (cmds.some((c) => c[0] !== "EVAL" && !String(c[1]).startsWith("nl:assist:"))) throw new Error("synthetic read failure");
     return original(cmds);

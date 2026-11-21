@@ -7,7 +7,7 @@
  * again with the same batchKey. The second call must not write to the
  * recipient whose acceptance is unknown.
  */
-import { sendBatch } from "@/lib/email";
+import { sendBatch, sendBatchOutcome } from "@/lib/email";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -113,6 +113,22 @@ async function main(): Promise<void> {
     is(`rate ${rate}: still three emails in all`, posted.length, 3);
   }
   maxSendRate = 10;
+  // Codex X6 on #4073: sendBatchOutcome tells Amazon's lost answer as "unconfirmed", and the same batch tried again
+  // never posts to whoever Amazon may have taken (notMaybeTaken), so a caller must not count that retry again.
+  part("sendBatchOutcome: Amazon's answer lost, then the same batch tried again posts the maybe-taken one never again");
+  {
+    posted.length = 0;
+    lossKind = "throw";
+    loseReplyFor = "unknown@example.com";
+    const key = "cm:probe-unconfirmed:0:3";
+    const batch = [letter("ok@example.com"), letter("unknown@example.com"), letter("later@example.com")];
+    is("the first call is unconfirmed", await sendBatchOutcome(batch, key, { by: "company" }), "unconfirmed");
+    loseReplyFor = null;
+    is("the retry is sent", await sendBatchOutcome(batch, key, { by: "company" }), "sent");
+    for (const to of ["ok@example.com", "unknown@example.com", "later@example.com"]) {
+      is(`unconfirmed, then retried: ${to} is posted exactly once`, posted.filter((t) => t === to).length, 1);
+    }
+  }
   done();
 }
 

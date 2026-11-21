@@ -11,7 +11,9 @@
  *   - a second suggestion replaces the benefits the box put in, never adds a
  *     second "What you get:" list;
  *   - "Put back what was there" restores the three boxes, and the focus goes
- *     to what was said, never to the top of the page.
+ *     to what was said, never to the top of the page;
+ *   - it never takes away what the creator wrote after a suggestion: a box
+ *     goes back only while it still holds what the suggestion put there.
  */
 import { ProductPdfAssist } from "@/components/product-pdf-assist";
 import { AiDraftReview } from "@/components/ai-draft-review";
@@ -124,6 +126,52 @@ async function main(): Promise<void> {
     click(button(b.mounted.tree(), PDF_ASSIST_COPY.undo));
     await b.mounted.settle();
     is("put back what was there: no draft left, no checks drawn, the form told so", [review(), b.reviews.at(-1)], [undefined, null]);
+    b.mounted.unmount();
+  }
+
+  // Claude 7's LEVE 3 on #3447 (6893971795), re-checked open by Codex X6 and Claude 4 3rC (7066025481): putting back
+  // never takes away what the creator wrote after the suggestion (AX274 item 6: no change to their content without
+  // their approval). A box goes back only while it still holds what the suggestion put there.
+  part("An edit made after the suggestion is kept when the rest is put back");
+  {
+    const b = await box("ready");
+    stepsBox(b.mounted.tree())?.onResult?.(FIRST);
+    await b.mounted.settle();
+    // The creator rewrites the name by hand, as the form would keep it.
+    b.fields.title = "My own name";
+    click(button(b.mounted.tree(), PDF_ASSIST_COPY.undo));
+    await b.mounted.settle();
+    is("the name the creator wrote after the suggestion stays", b.fields.title, "My own name");
+    is("the short description and the full description go back", [b.fields.summary, b.fields.about], [ORIGINAL.summary, ORIGINAL.about]);
+    // Read by name, so this check fails (not the build) while the words are missing.
+    const undoneKept = (PDF_ASSIST_COPY as unknown as { undoneKept?: (kept: string[]) => string }).undoneKept;
+    is("and it says the creator's later change was kept", texts(status(b.mounted.tree())?.props?.children).join(""), undoneKept?.(["name"]) ?? "missing");
+    b.mounted.unmount();
+  }
+  {
+    const b = await box("ready");
+    stepsBox(b.mounted.tree())?.onResult?.(FIRST);
+    await b.mounted.settle();
+    // The creator adds a sentence at the end of the full description, after the benefits the box put in front.
+    b.fields.about = `${b.fields.about} Each recipe serves four.`;
+    click(button(b.mounted.tree(), PDF_ASSIST_COPY.undo));
+    await b.mounted.settle();
+    is("the benefits the box put in front go, and the sentence the creator added stays", b.fields.about, `${ORIGINAL.about} Each recipe serves four.`);
+    is("the name and the short description go back", [b.fields.title, b.fields.summary], [ORIGINAL.title, ORIGINAL.summary]);
+    b.mounted.unmount();
+  }
+  {
+    const b = await box("ready");
+    stepsBox(b.mounted.tree())?.onResult?.(FIRST);
+    await b.mounted.settle();
+    // The creator writes their own short description, then asks for a second suggestion, which replaces it.
+    b.fields.summary = "My own short description.";
+    stepsBox(b.mounted.tree())?.onResult?.(SECOND);
+    await b.mounted.settle();
+    click(button(b.mounted.tree(), PDF_ASSIST_COPY.undo));
+    await b.mounted.settle();
+    is("putting back after a second suggestion brings back what the creator wrote in between", b.fields.summary, "My own short description.");
+    is("the rest is as it was before the first suggestion", [b.fields.title, b.fields.about], [ORIGINAL.title, ORIGINAL.about]);
     b.mounted.unmount();
   }
 

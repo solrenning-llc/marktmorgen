@@ -5,6 +5,7 @@ import {
   HEALTH_ID,
   LIST_TAG,
   MOVE_TAG,
+  STOP_TAG,
   STORE_TAG,
   heardFromSender,
   MAIL_HEALTH_DAY_SECONDS,
@@ -109,11 +110,11 @@ export async function mailReportDay(store: string, campaign: string, now = Date.
 }
 
 /** Apply one already-authenticated SES outcome. Kept separate so its aggregate behavior is tested without bypassing POST authentication. */
-export async function recordSesEvent(event: SesEvent): Promise<"paused" | "counted" | "delivered" | "temporary" | "ignored" | null> {
+export async function recordSesEvent(event: SesEvent): Promise<"paused" | "counted" | "stopped" | "delivered" | "temporary" | "ignored" | null> {
   const results: string[] = [];
   if ((event.kind === "bounced" || event.kind === "complained") && (event.kind === "complained" || event.permanent)) {
     for (const to of event.recipients) {
-      results.push(await heardFromSender({ kind: event.kind, permanent: event.permanent, to, store: event.tags[STORE_TAG] ?? "", list: event.tags[LIST_TAG] ?? "", move: event.tags[MOVE_TAG] ?? "" }));
+      results.push(await heardFromSender({ kind: event.kind, permanent: event.permanent, to, store: event.tags[STORE_TAG] ?? "", list: event.tags[LIST_TAG] ?? "", stop: event.tags[STOP_TAG] ?? "", move: event.tags[MOVE_TAG] ?? "" }));
     }
   }
   const reportEvent: MailReportEvent = event.kind === "delivered"
@@ -124,5 +125,5 @@ export async function recordSesEvent(event: SesEvent): Promise<"paused" | "count
   const reported = await noteMailReportEvent(event.tags[STORE_TAG] ?? "", event.tags[MAIL_REPORT_TAG] ?? "", reportEvent, event.recipients.length, event.messageId ? `ses:${event.messageId}` : "", event.occurredAt);
   if (!reported && (event.kind === "delivered" || event.kind === "delayed")) return null;
   const reportResult = reportEvent === "delivered" ? "delivered" : reportEvent === "temporary-bounce" ? "temporary" : "counted";
-  return results.includes("paused") ? "paused" : results.includes("counted") ? "counted" : reported ? reportResult : "ignored";
+  return results.includes("paused") ? "paused" : results.includes("counted") ? "counted" : results.includes("stopped") ? "stopped" : reported ? reportResult : "ignored";
 }

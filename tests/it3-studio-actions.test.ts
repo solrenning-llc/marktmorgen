@@ -144,9 +144,21 @@ is("\"discount\" (another word for a sale) opens the store sale", first("discoun
 is("\"refund\" finds the plan's refund", ids("refund").includes("refund"), true);
 is("\"refund\" finds the buyers, where refunds show", ids("refund").includes("people"), true);
 is("\"refnd\" (a typo) still finds the refund", ids("refnd").includes("refund"), true);
+is("a bare \"refund\" puts the buyers first, where a buyer's money back is", first("refund"), "people");
+is("a typo of \"refund\" also puts the buyers first", first("refnud"), "people");
+is("\"plan refund\" opens the plan's own refund", first("plan refund"), "refund");
+is("\"refund my plan\" opens the plan's own refund", first("refund my plan"), "refund");
 is("\"afiliate\" (a typo) opens Affiliates", first("afiliate"), "affiliates");
 is("\"affiliates\" (plural) opens Affiliates", first("affiliates"), "affiliates");
 is("\"invoice\" opens Payment requests", first("invoice"), "requests");
+is("\"invoice\" also finds the plan's own invoices", ids("invoice").includes("plan-bills"), true);
+is("\"plan invoice\" opens the plan's own invoices", first("plan invoice"), "plan-bills");
+is("a bare \"receipt\" puts the buyers first, where a buyer's order receipt is", first("receipt"), "people");
+is("\"receipt\" still finds the plan's own invoices", ids("receipt").includes("plan-bills"), true);
+is("\"plan receipt\" opens the plan's own invoices", first("plan receipt"), "plan-bills");
+is("\"companies\" opens the companies", first("companies"), "companies");
+is("\"company\" (singular) opens the companies", first("company"), "companies");
+is("\"b2b\" finds the companies", ids("b2b").includes("companies"), true);
 is("\"zoom\" opens video calls", first("zoom"), "meetings");
 is("\"move from gumroad\" opens the import", first("move from gumroad"), "import");
 is("\"tax\" opens the tax report", first("tax"), "tax");
@@ -173,6 +185,7 @@ for (const role of ["owner", "admin", "editor", "support"] as const) {
 }
 is("support: no plan refund (billing)", ids("refund", context("support")).includes("refund"), false);
 is("support: buyers still found for \"refund\" (orders)", ids("refund", context("support")).includes("people"), true);
+is("support: no plan invoices (billing)", ids("receipt", context("support")).includes("plan-bills"), false);
 is("Discord never found without Discord's keys", ids("discord", context("owner", { has: { ...everything, discord: false } })), []);
 is("video calls never found without a meeting app", ids("zoom", context("owner", { has: { ...everything, meet: false } })).includes("meetings"), false);
 
@@ -202,5 +215,12 @@ is("a broken kept value reads as none", readRecent("{not json"), []);
 is("a kept object reads as none", readRecent(JSON.stringify({ 0: "tax" })), []);
 is("unknown ids and repeats are dropped", readRecent(["tax", "constructor", "tax", 3, "email"]), ["tax", "email"]);
 is("null reads as none", readRecent(null), []);
+
+part("A buyer is still found by what they paid (Claude 5 on #3525)");
+is("\"what a buyer paid\" finds the buyers", ids("what a buyer paid").includes("people"), true);
+is("\"buyer paid\" finds the buyers", ids("buyer paid").includes("people"), true);
+is("\"they paid\" finds the buyers", ids("they paid").includes("people"), true);
+is("\"paid\" for the owner finds the buyers too", ids("paid").includes("people"), true);
+is("\"paid\" for support finds the buyers, never an empty box", ids("paid", context("support")).includes("people"), true);
 
 done();

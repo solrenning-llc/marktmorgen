@@ -28,6 +28,10 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
+// The PayPal reading below is counted and bounded for a 60 s function (lib/paypal-payouts.ts, PAYPAL_READING_MS and
+// PAYPAL_READING_BASE_UNITS; C5-20261121-1459-PAYPAL-READING): never the platform's longer default.
+export const maxDuration = 60;
+
 /**
  * The creator's affiliate programme: its terms, who applied, who is owed
  * what, and a record of what the creator paid them. On every plan. The money
@@ -85,7 +89,8 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
           .filter((code) => code.active && code.off !== null)
           .map((code) => ({ id: code.id, code: code.code, label: offLabel(code.off as NonNullable<typeof code.off>) }))
       : [];
-  const book = await readBook(store).catch((error) => {
+  // The studio draws Undo, so it alone asks which payouts PayPal sent (payoutUndo).
+  const book = await readBook(store, undefined, { payoutUndo: true }).catch((error) => {
     console.error("reading the affiliate book failed", error);
     return null;
   });

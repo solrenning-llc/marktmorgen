@@ -77,6 +77,7 @@ import { windowCount, windowCountOf } from "@/lib/window-count";
 import { rememberAffiliate } from "@/lib/affiliate-hub";
 import { BOOK_KEPT_SLICE, type Paid, backKey as paypalBackKey, paypalPaymentId, readPaidExact, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
 import { ERASING_KEY, MAX_STORE_BYTES, erasingField, saleHandles, storeForEmailSeen, storeForId, storeIdCommand, storeRef } from "@/lib/store";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { storeForIdExactly } from "@/lib/store-exact";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -2868,7 +2869,7 @@ export async function addPayout(store: Store, input: PayoutInput): Promise<Payou
 
 /**
  * The id of the payout that writes down one PayPal payout item (lib/paypal-payouts.ts, settlePayPal): the same item
- * gives the same id, 12 hex characters like any payout's, so the creator can still remove it (removePayout).
+ * gives the same id, 12 hex characters like any payout's. It is never removed (removePayout, #4606).
  */
 export function payoutIdForItem(item: string): string {
   return createHash("sha256").update(`paypal-payout-item|${item}`).digest("hex").slice(0, 12);
@@ -2920,11 +2921,57 @@ export async function payoutReferences(store: Store): Promise<Set<string>> {
   return references;
 }
 
-export async function removePayout(store: Store, id: string): Promise<boolean> {
+export async function removePayout(store: Store, id: string): Promise<boolean | "sent"> {
   if (!store.statsId || !/^[0-9a-f]{12}$/.test(id)) return false;
-  const [held, removed] = await redisPipeline([["HGET", payoutsKey(store.statsId), id], ["HDEL", payoutsKey(store.statsId), id]]);
-  if (Number(removed) === 1 && typeof held === "string") await giveData(store, [{ slot: PAYOUTS_SLOT, bytes: dataBytes([id, held], 1) }]);
+  // A payout PayPal sent is never taken off the book (#4606): the book would owe it again, and the next payday (or
+  // "Pay now") would send the same money a second time from the creator's PayPal. Only a payout the creator wrote
+  // down by hand is undone. Read first; a value of any other shape is not removed either.
+  const [held] = await redisPipeline([["HGET", payoutsKey(store.statsId), id]]);
+  if (held === null || held === undefined) return false;
+  if (typeof held !== "string") throw new UnknownReplyError("a payout before it is taken off");
+  const payout = parsePayout(held);
+  // Text that does not read as a payout may be one PayPal sent: never taken off on a guess (Claude 4 cloud Z on #4614).
+  if (!payout) throw new UnknownReplyError("a payout before it is taken off");
+  if ((await sentThroughPayPal([payout]))[0]) return "sent";
+  const [removed] = await redisPipeline([["HDEL", payoutsKey(store.statsId), id]]);
+  if (Number(removed) === 1) await giveData(store, [{ slot: PAYOUTS_SLOT, bytes: dataBytes([id, held], 1) }]);
   return Number(removed) === 1;
+}
+
+/**
+ * Whether a payout in the book is one PayPal sent (lib/paypal-payouts.ts, settlePayPal): written under the id of its
+ * PayPal item (payoutIdForItem) with the reference "PayPal <item>". A payout the creator wrote down by hand has a
+ * random id, so a reference they typed as "PayPal ..." is still theirs to undo.
+ */
+export function paidThroughPayPal(payout: Payout): boolean {
+  const item = paypalItemOf(payout);
+  return item !== null && payoutIdForItem(item) === payout.id;
+}
+
+/** The PayPal item a payout's reference names ("PayPal <item>"), or null. */
+const paypalItemOf = (payout: Payout): string | null => /^PayPal (\S+)$/.exec(payout.reference)?.[1] ?? null;
+
+/**
+ * Whether each payout is one PayPal sent, also for those written before 08/11/2026 (Claude 2 cloud H on #4614): a run
+ * then wrote a PayPal payout under a random id with the reference "PayPal <item>", and marked the item
+ * nl:pp:item:<item> (lib/paypal-payouts.ts, earlierItemMark: the same key). Such a payout is sent when its item's
+ * mark is there. The marks are read exactly, in one round trip, and only for payouts with a PayPal reference whose id
+ * is not their item's: nil is not sent; any text is sent; any other answer throws UnknownReplyError, so nothing is
+ * taken off the book on a guess.
+ */
+export async function sentThroughPayPal(payouts: Payout[]): Promise<boolean[]> {
+  const answers = payouts.map((payout) => paidThroughPayPal(payout));
+  const asked = payouts.map((payout, i) => ({ i, item: answers[i] ? null : paypalItemOf(payout) })).filter((a): a is { i: number; item: string } => a.item !== null);
+  if (!asked.length) return answers;
+  const replies = repliesFor(await redisPipeline(asked.map(({ item }) => ["GET", `nl:pp:item:${item}`])), asked.length);
+  if (!replies) throw new UnknownReplyError("a PayPal payout item's mark");
+  asked.forEach(({ i }, k) => {
+    const mark = replies[k];
+    if (mark === null) return;
+    if (typeof mark === "string" && mark !== "") answers[i] = true;
+    else throw new UnknownReplyError("a PayPal payout item's mark");
+  });
+  return answers;
 }
 
 /** Where what the creator says they paid their affiliates is counted in the store's data room (lib/store-data.ts). */
@@ -4467,7 +4514,6 @@ export async function noteSession(
   const opened = exactSeconds(session.created);
   const at = opened ?? Math.floor(Date.now() / 1000);
   const orderProducts = [meta.product ?? "", ...bumpsFromMeta(meta).map((b) => b.id)].filter(Boolean);
-  const paidAt = await paidForPartners(store, session, opened, at, base, orderProducts, partners);
 
   // Partners first, and whatever happens next. A partner shares in the
   // product, so how the buyer arrived is beside the point — and this is the
@@ -4483,6 +4529,7 @@ export async function noteSession(
     if (partnerFailure) throw partnerFailure.error;
   };
   try {
+    const paidAt = await paidForPartners(store, session, opened, at, base, orderProducts, partners);
     const lines = orderLines(meta, session.amount_subtotal);
     const shipping = lines ? shippingOf(session.total_details, base, meta.ship === "yes") : undefined;
     await notePartners(
@@ -4611,30 +4658,31 @@ export async function noteCharge(store: Store, pi: Record<string, unknown>): Pro
   // is unknown and thrown, so the five-minute job reads its payment again with the charge (lib/upsell.ts creditAgain).
   // The partners are read once, for both the end's check and the shares, and only when that check needs them.
   const paid = { payment_intent: pi } as SessionLike;
-  const partners = paidAtOf(paid) === null && amount > 0 && meta.product && store.statsId && isRedisConfigured() ? await listPartners(store) : undefined;
-  const paidAt = await paidForPartners(store, paid, made, at, amount, meta.product ? [meta.product] : [], partners);
-
   // A partner shares in the product whether or not an affiliate's link was
   // involved, and an offer taken after paying is a sale of a product. A partner step that fails is thrown once the
   // affiliate's step is done, so the job credits the offer again (creditCharge); both writes are once (HSETNX).
   let partnerFailure: { error: unknown } | null = null;
-  await notePartners(store, {
-    ref: pi.id,
-    pi: pi.id,
-    at: paidAt,
-    product: meta.product ?? "",
-    title: `${(meta.title ?? "").slice(0, 180)} (added after paying)`,
-    // A one-click charge never carries tax: the whole amount is the base.
-    base: amount,
-    total: amount,
-    currency,
-    buyer,
-  }, partners).catch((error) => {
+  try {
+    const partners = paidAtOf(paid) === null && amount > 0 && meta.product && store.statsId && isRedisConfigured() ? await listPartners(store) : undefined;
+    const paidAt = await paidForPartners(store, paid, made, at, amount, meta.product ? [meta.product] : [], partners);
+    await notePartners(store, {
+      ref: pi.id,
+      pi: pi.id,
+      at: paidAt,
+      product: meta.product ?? "",
+      title: `${(meta.title ?? "").slice(0, 180)} (added after paying)`,
+      // A one-click charge never carries tax: the whole amount is the base.
+      base: amount,
+      total: amount,
+      currency,
+      buyer,
+    }, partners);
+  } catch (error) {
     console.error("noting a partner's share failed; the offer is credited again by the job", error);
     partnerFailure = { error };
-  });
+  }
   const settle = (): void => {
-    if (partnerFailure) throw (partnerFailure as { error: unknown }).error;
+    if (partnerFailure) throw partnerFailure.error;
   };
 
   // An offer on an order whose link was pending follows that order once it is credited (owner's decision 6).
@@ -4757,7 +4805,8 @@ export type HoldFlag = "paid-search" | "same-address";
 export type Book = {
   rows: Row[];
   lines: Line[];
-  payouts: Payout[];
+  /** `sent` when PayPal sent it (paidThroughPayPal): never undone, so the studio shows it without Undo (#4606). */
+  payouts: (Payout & { sent?: boolean })[];
   /**
    * What the rows' totals are in: the store's currency. Sales and payouts in
    * another one — from before the store changed its currency — are listed
@@ -5354,7 +5403,7 @@ async function markRefunds(account: string, marks: { key: string; field: string;
  * product (its title is ""), and nothing is read for the names: for a reader
  * that prints no product, as the payout file (lib/affiliate-payouts.ts).
  */
-export async function readBook(store: Store, only?: string, limits: { deadline?: number; titles?: boolean; keptPaid?: boolean } = {}): Promise<Book> {
+export async function readBook(store: Store, only?: string, limits: { deadline?: number; titles?: boolean; keptPaid?: boolean; payoutUndo?: boolean } = {}): Promise<Book> {
   if (!store.statsId || !isRedisConfigured()) return { rows: [], lines: [], payouts: [], refundsChecked: true, invoicesChecked: true, unlinkedInvoices: 0, currency: store.currency, elsewhere: 0 };
   const statsId = store.statsId;
   // Read exactly, every reply and every record (rule 24): the book decides what is paid (payWithPayPal, the payday,
@@ -5695,7 +5744,13 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     lines.filter((l) => l.currency !== store.currency).length + paid.filter((p) => p.currency !== store.currency).length;
   // Sales, not lines: a sale waiting on both tiers is one.
   const unconfirmed = new Set(lines.filter((l) => l.unconfirmed === 1 && l.commission > 0).map((l) => l.ref.replace(/^tier2:/, ""))).size;
-  return { rows, lines, payouts: paid, refundsChecked, invoicesChecked, invoicesPastCeiling, unlinkedInvoices, currency: store.currency, elsewhere, unconfirmed };
+  // Each payout says whether PayPal sent it (#4606), also an older one under a random id with its item's mark: the
+  // studio draws no Undo on those. Marks that cannot be read draw no Undo either; the route refuses all the same.
+  // Only the studio's Undo asks (payoutUndo; Codex V's MEDIUM on #4614): every other reader (the payout file, the API,
+  // the rebuild) reads no legacy item mark, so its cost never grows with the older payouts, outside bookWork.
+  const sent = limits.payoutUndo ? await sentThroughPayPal(paid).catch(() => paid.map(() => true)) : null;
+  const shownPayouts = sent ? paid.map((payout, i) => ({ ...payout, sent: sent[i] })) : paid;
+  return { rows, lines, payouts: shownPayouts, refundsChecked, invoicesChecked, invoicesPastCeiling, unlinkedInvoices, currency: store.currency, elsewhere, unconfirmed };
 }
 
 /** How many invoice pages of a hundred are read when the book is opened. */
@@ -5854,12 +5909,12 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
     if (keep?.walk) {
       keep.walk.fails += 1;
       if (keep.walk.fails >= INVOICE_WALK_TRIES) keep.walk = null;
-      await writeInvoiceKeep(statsId, keep).catch(() => undefined);
+      await writeInvoiceKeep(store, statsId, keep).catch(() => undefined);
     }
     throw error;
   }
   if (changed && keep) {
-    const wrote = await writeInvoiceKeep(statsId, keep);
+    const wrote = await writeInvoiceKeep(store, statsId, keep);
     if (wrote === "ceiling") over = start;
     else if (wrote === "kept" && keep.kept) over = null;
     if (wrote !== "kept") complete = false;
@@ -6018,10 +6073,24 @@ async function readInvoiceKeep(statsId: string, account: string, tag: string, si
 }
 
 /**
- * Keeps them for the next reading: "kept"; "ceiling" when they are past INVOICES_KEPT_MAX_LINES or
- * INVOICES_KEPT_MAX_BYTES, and only the mark of it is kept; "failed" when Redis does not say it kept them.
+ * The kept invoices (or the mark of going past their ceiling) written only while the store is live (Codex
+ * L-20261119-1003; lib/store-live-cache.ts setWhileStoreLive): the store's own key is there (its id key, or for a store
+ * kept from before ids its record under its owner's address, Claude 4's MEDIUM on #4951) and its erasure has not begun
+ * (ERASING_KEY, written before anything of the store is deleted, removed with its record and its id in the same fenced
+ * step, lib/store.ts). A reading that started before the erasure and writes after it, or after it has finished, writes
+ * nothing, so the invoice, payment and affiliate ids never come back. EVAL, EXISTS, HGET and SET: four commands in
+ * place of the SET.
  */
-async function writeInvoiceKeep(statsId: string, keep: InvoiceKeep): Promise<"kept" | "ceiling" | "failed"> {
+async function keepIfLive(store: Store, statsId: string, value: string): Promise<boolean> {
+  return (await setWhileStoreLive(store, invoiceKeepKey(statsId), value, INVOICE_KEEP_SECONDS)) === "kept";
+}
+
+/**
+ * Keeps them for the next reading, only while the store is live (keepIfLive): "kept"; "ceiling" when they are past
+ * INVOICES_KEPT_MAX_LINES or INVOICES_KEPT_MAX_BYTES, and only the mark of it is kept; "failed" when Redis does not
+ * say it kept them, the store's erasure included.
+ */
+async function writeInvoiceKeep(store: Store, statsId: string, keep: InvoiceKeep): Promise<"kept" | "ceiling" | "failed"> {
   const once = (set: InvoiceSet): InvoiceSet => {
     const seen = new Set<string>();
     return {
@@ -6044,11 +6113,10 @@ async function writeInvoiceKeep(statsId: string, keep: InvoiceKeep): Promise<"ke
     // Only the mark of it, in place of what was kept (one command, as the DEL it replaces): the readings that begin
     // again carry it, so the creator is told reloading will not help, not "try again in a moment".
     const mark = JSON.stringify({ v: 1, account: keep.account, handles: keep.handles, since: keep.since, kept: null, walk: null, over: Math.floor(Date.now() / 1000) });
-    await redisPipeline([["SET", invoiceKeepKey(statsId), mark, "EX", INVOICE_KEEP_SECONDS]]).catch(() => undefined);
+    await keepIfLive(store, statsId, mark).catch(() => undefined);
     return "ceiling";
   }
-  const [set] = await redisPipeline([["SET", invoiceKeepKey(statsId), value, "EX", INVOICE_KEEP_SECONDS]]);
-  return set === "OK" ? "kept" : "failed";
+  return (await keepIfLive(store, statsId, value)) ? "kept" : "failed";
 }
 
 /** What one invoice listed gives the book. */

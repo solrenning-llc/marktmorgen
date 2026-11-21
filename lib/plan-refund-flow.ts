@@ -419,6 +419,8 @@ export async function endPlanNow(store: Store, id: string): Promise<boolean> {
     if (!sub || !ENDED.includes(String(sub.status))) return false;
     for (const status of ["open", "draft"] as const) {
       const listed = await onPlatform("GET", `/invoices?${new URLSearchParams({ subscription: id, status, limit: "10" })}`, undefined, { version: AT });
+      // An unnamed or differently named reply cannot prove that no invoice remains payable.
+      if (ownValue(listed, "object") !== "list") return false;
       // Read exactly (rule 24): a page that is not a list, a row with no id of its own or of another status than the one
       // asked for proves nothing about what is still payable, so the plan is not taken as ended (false; the daily job
       // tries again). readStripePage throws on a page that does not read, caught below as false too.
@@ -677,9 +679,19 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
         counts.dropped += 1;
         continue;
       }
-      const store = note ? await storeForId(sid) : null;
-      if (!note || !store) {
-        if (!note) console.error(`plan-refund: an unreadable note for store ${sid} is dropped`);
+      if (!note) {
+        console.error(`plan-refund: an unreadable note for store ${sid} is dropped`);
+        await dropNote(sid);
+        counts.dropped += 1;
+        continue;
+      }
+      const store = await storeForIdExactly(sid);
+      if (store === "unknown") {
+        console.error(`plan-refund: store ${sid}'s recovery note is retained: its store could not be read exactly`);
+        counts.left += 1;
+        continue;
+      }
+      if (store === "none") {
         await dropNote(sid);
         counts.dropped += 1;
         continue;

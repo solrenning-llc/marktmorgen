@@ -27,6 +27,8 @@ const stripe: StripeWorld = { sessions: [], memberships: [], posted: [] };
 /** A member's payment on a store's own account: its charge, the refunds on it, and every refund asked for. */
 type Payment = { intent: string; amount: number; refunded: number; list: Record<string, unknown>[] };
 const payments = new Map<string, Payment>();
+/** Each invoice a member paid, by the one payment that paid it. */
+const invoicePaidBy = new Map<string, string>();
 const refundPosts: { intent: string; amount: number; key: string }[] = [];
 const listReads: string[] = [];
 const journey = standIns(stripe, sent, null);
@@ -36,6 +38,14 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const method = init?.method ?? "GET";
   if (url.hostname === "api.stripe.com") {
     if (path === "/balance") return Response.json({ object: "balance", available: [{ amount: 1_000_000, currency: "usd" }] });
+    // The invoice and its whole list of payments, read before every refund since #4428 (Codex X5: a payment kept when the
+    // member was held is a hint, never proof that it is the invoice's only one): each paid by its one payment.
+    if (path.startsWith("/invoices/")) return Response.json({ id: decodeURIComponent(path.slice("/invoices/".length)), object: "invoice", payment_intent: null });
+    if (path === "/invoice_payments") {
+      const invoice = url.searchParams.get("invoice") ?? "";
+      const paidBy = invoicePaidBy.get(invoice);
+      return Response.json({ object: "list", has_more: false, data: paidBy ? [{ id: `inpay_${invoice.slice(3)}`, object: "invoice_payment", invoice, status: "paid", payment: { type: "payment_intent", payment_intent: paidBy } }] : [] });
+    }
     const paying = [...payments.values()].find((p) => path === `/payment_intents/${p.intent}`);
     if (paying) return Response.json({ id: paying.intent, object: "payment_intent", latest_charge: { id: `ch_${paying.intent.slice(3)}`, object: "charge", payment_intent: paying.intent, amount: paying.amount, currency: "usd", amount_refunded: paying.refunded, disputed: false, balance_transaction: null } });
     if (path === "/refunds" && method === "POST") {
@@ -86,6 +96,7 @@ async function paidMember(owner: string, member: string, intent: string, invoice
   const folder = await storeFolder(storeRef((await storeForEmail(owner))!));
   const daySeconds = Math.floor(day / 1000);
   payments.set(intent, { intent, amount: 1_000, refunded: 0, list: [] });
+  invoicePaidBy.set(invoice, intent);
   await redis.pipeline([
     ["HSET", paidKey(folder), member, JSON.stringify({ inv: invoice, pi: intent, amt: 1_000, tot: 1_000, cur: "usd", ps: daySeconds - 15 * 86_400, pe: daySeconds + 15 * 86_400, e: "member@example.com" })],
     ["HSET", workKey(folder), "calls", 20, "rcalls", 10, `m:${member}`, "member@example.com"],

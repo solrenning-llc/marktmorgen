@@ -1,0 +1,13 @@
+{
+  "@/lib/request-guard": "submission-upload-world.ts",
+  "@/lib/store": "submission-upload-world.ts",
+  "@/lib/store-exact": "submission-upload-world.ts",
+  "@/lib/buyer-actions": "submission-upload-world.ts",
+  "@/lib/catalog": "submission-upload-world.ts",
+  "@/lib/course": "submission-upload-world.ts",
+  "@/lib/learn": "submission-upload-world.ts",
+  "@/lib/upload-budget": "submission-upload-world.ts",
+  "@/lib/vault-storage": "submission-upload-world.ts",
+  "@/lib/vault": "submission-upload-world.ts",
+  "@/lib/submission-switch": "submission-switch-on.ts"
+}

@@ -1,5 +1,5 @@
 import { checkQuiet, isQuiet, saleTimes } from "@/lib/quiet-sales";
-import type { Store } from "@/lib/store";
+import { type Store, claimHandle, ensureStoreId, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is } from "./check";
 
@@ -8,7 +8,16 @@ process.env.RESEND_API_KEY = "re_test_quiet_coverage";
 process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
 const now = Date.UTC(2026, 9, 20, 12);
 const day = 86_400_000;
-const store = { handle: "harbor", previousHandles: [], name: "Harbor", email: "owner@example.com", stripeAccountId: "acct_test", subscriptionActive: true } as unknown as Store;
+const bare = { handle: "harbor", previousHandles: [], name: "Harbor", email: "owner@example.com", stripeAccountId: "acct_test", subscriptionActive: true } as unknown as Store;
+let store = bare;
+// The stretch's mark is taken only while the store is live (claimWhileStoreLive, Codex L-20261120-1852): each
+// notification case starts from the store's identity kept, its other fields as before.
+async function seed() {
+  redis.clear();
+  await claimHandle("owner@example.com", "harbor", "Harbor", "");
+  await ensureStoreId("owner@example.com");
+  store = { ...bare, sid: (await storeForEmail("owner@example.com"))!.sid } as Store;
+}
 let pages: unknown[] = [];
 let calls = 0;
 let emails = 0;
@@ -69,23 +78,23 @@ async function main() {
   ], has_more: false }]), [now - day]);
   const times = Array.from({ length: 30 }, (_, i) => now - (20 + i) * day);
   is("complete quiet history still qualifies", isQuiet(times, now).quiet, true);
-  redis.clear(); pages = [{ data: times.map((at, i) => paid(`cs_${i}`, at)), has_more: true }]; calls = 0;
+  await seed(); pages = [{ data: times.map((at, i) => paid(`cs_${i}`, at)), has_more: true }]; calls = 0;
   is("partial reading skips notification", await checkQuiet(store, now), "skipped");
   is("no email from partial history", emails, 0);
-  redis.clear(); fail = true;
+  await seed(); fail = true;
   is("provider failure skips notification", await checkQuiet(store, now), "skipped");
   is("no email from provider failure", emails, 0);
   fail = false;
-  redis.clear(); pages = [{ data: [...times.map((at, i) => paid(`cs_${i}`, at)),
+  await seed(); pages = [{ data: [...times.map((at, i) => paid(`cs_${i}`, at)),
     { ...paid("cs_recent", now - day), payment_status: null }], has_more: false }]; calls = 0;
   is("an unreadable recent checkout cannot send a quiet-sales alert", await checkQuiet(store, now), "skipped");
   is("an unreadable recent checkout did not send an email", emails, 0);
   emails = 0;
-  redis.clear(); pages = [{ data: Array.from({ length: 8 }, () => paid("cs_same", now - 42 * day)), has_more: false }]; calls = 0;
+  await seed(); pages = [{ data: Array.from({ length: 8 }, () => paid("cs_same", now - 42 * day)), has_more: false }]; calls = 0;
   is("eight copies of one sale do not qualify for an alert", await checkQuiet(store, now), "skipped");
   is("the repeated checkout did not send an email", emails, 0);
   emails = 0;
-  redis.clear(); pages = [{ data: times.map((at, i) => paid(`cs_${i}`, at)), has_more: false }]; calls = 0;
+  await seed(); pages = [{ data: times.map((at, i) => paid(`cs_${i}`, at)), has_more: false }]; calls = 0;
   is("complete quiet reading sends notification", await checkQuiet(store, now), "sent");
   is("exactly one mocked email", emails, 1);
   is("daily deduplication retained", await checkQuiet(store, now), "seen");

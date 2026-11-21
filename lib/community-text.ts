@@ -76,6 +76,7 @@ export const RATE_LIMITS = {
   report: { limit: 20, seconds: 24 * 60 * 60, words: "20 reports a day" },
   upload: { limit: 10, seconds: 60 * 60, words: "10 pictures an hour" },
   rsvp: { limit: 30, seconds: 60 * 60, words: "30 RSVPs or canceled RSVPs an hour" },
+  challenge: { limit: 30, seconds: 60 * 60, words: "30 challenge joins or check-ins an hour" },
   dm: { limit: 60, seconds: 60 * 60, words: "60 messages an hour" },
   dmNew: { limit: 10, seconds: 24 * 60 * 60, words: "10 new conversations a day" },
 } as const;
@@ -101,6 +102,23 @@ export const MAX_EVENT_AHEAD_DAYS = 365;
 export const JOIN_EARLY_MINUTES = 15;
 /** Events a creator may schedule or change in an hour: a person is nowhere near it. */
 export const EVENT_WRITES_PER_HOUR = 60;
+
+/**
+ * Challenges inside the community (lib/community-challenges.ts): how many may
+ * be on (not yet over) at once, how many are kept in all, how long one runs,
+ * how far ahead it may be put, what one may say, and how long one that is
+ * over stays for its members to see before it is let go.
+ */
+export const MAX_OPEN_CHALLENGES = 3;
+export const MAX_KEPT_CHALLENGES = 20;
+export const MAX_CHALLENGE_DAYS = 90;
+export const MAX_CHALLENGE_AHEAD_DAYS = 365;
+export const MAX_CHALLENGE_TITLE = 120;
+export const MAX_CHALLENGE_ABOUT = 1_000;
+export const MAX_CHALLENGE_TASK = 300;
+export const CHALLENGE_KEEP_DAYS = 30;
+/** Challenges a creator may make or delete in an hour: a person is nowhere near it. */
+export const CHALLENGE_WRITES_PER_HOUR = 30;
 
 /** Ids of spaces, posts and comments: short, random, and nothing else. */
 export const ITEM_ID = /^[0-9a-f]{12}$/;

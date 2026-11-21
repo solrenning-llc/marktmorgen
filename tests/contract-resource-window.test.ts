@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test,{mock} from 'node:test';
 import assert from 'node:assert/strict';
 import {RESERVE_PAID_RESOURCE_WINDOW,reservePaidResourceWindow} from '@/lib/contract-resource-window';
 import {reserveContractFunding,activateCheckoutContract} from '@/lib/contract-funding';
@@ -8,6 +8,12 @@ import {reserveStoreUpload,reserveUploadControl} from '@/lib/upload-budget';
 import {contractFixture} from './contract-funding-fixture';
 import {applyContractTaxCoverage} from './contract-tax-fixture';
 import {reset,seed,ledger,calls,resourceSettings} from './contract-resource-redis';
+// contractFixture() names the review month when it is made (tests/margin-test-fixtures.ts zeroExposureFixture) and the
+// code reads the month again at every acknowledgement (lib/contract-funding.ts): a run crossing 00:00 UTC on a month's
+// last day refused the cohort. Only Date is stopped, for the whole run (the two tests that move the clock move this one
+// and put it back); timers and performance.now() run as usual.
+const STARTED=Date.now();
+mock.timers.enable({apis:['Date'],now:STARTED});
 const ledgerKey='nl:contract-reserve:v1',statsId='a'.repeat(32);
 async function setup(cycle:'month'|'year'='month',options:{admissionMs?:number;durationSeconds?:number;taxCoverage?:boolean}={}){
  reset();resourceSettings({lost:false,failure:false,response:null,afterAck:null,acknowledge:null});const f=contractFixture();
@@ -105,27 +111,27 @@ test('resource request payload remains below its enforced financial byte ceiling
  assert.ok(new TextEncoder().encode(JSON.stringify(command)).length<=12288);
 });
 
-test('a cohort acknowledgement cannot outlive its window, admission deadline or review month',async(t)=>{
+test('a cohort acknowledgement cannot outlive its window, admission deadline or review month',async()=>{
  for(const scenario of ['window','admission','review'] as const){
-  t.mock.timers.enable({apis:['Date'],now:new Date(scenario==='review'?'2026-10-31T23:59:59Z':'2026-10-10T12:00:00Z')});
+  mock.timers.setTime(new Date(scenario==='review'?'2026-10-31T23:59:59Z':'2026-10-10T12:00:00Z').getTime());
   try{
    const f=await setup('month',scenario==='window'?{durationSeconds:30}:scenario==='admission'?{admissionMs:1000}:{});
-   resourceSettings({afterAck:()=>t.mock.timers.tick(scenario==='window'?30000:scenario==='admission'?1001:2000)});
+   resourceSettings({afterAck:()=>mock.timers.tick(scenario==='window'?30000:scenario==='admission'?1001:2000)});
    assert.equal(await reservePaidResourceWindow(f.store,f.policy,f.context),false,scenario);
    assert.ok(f.h.has('resource:ctr_resources:0'),scenario+' retains its committed cohort');
-  }finally{t.mock.timers.reset();}
+  }finally{mock.timers.setTime(STARTED);}
  }
 });
 
-test('a backwards clock refuses first and repeated cohort acknowledgements even inside the same valid window',async(t)=>{
- t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-10T12:00:00Z')});
+test('a backwards clock refuses first and repeated cohort acknowledgements even inside the same valid window',async()=>{
+ try{
  for(const existing of [false,true]){
-  t.mock.timers.setTime(new Date('2026-10-10T12:00:00Z').getTime());
+  mock.timers.setTime(new Date('2026-10-10T12:00:00Z').getTime());
   const f=await setup();
   if(existing)assert.equal(await reservePaidResourceWindow(f.store,f.policy,f.context),true);
-  t.mock.timers.tick(1000);
+  mock.timers.tick(1000);
   const before=new Map(f.h),count=calls.length;
-  resourceSettings({afterAck:()=>t.mock.timers.setTime(Date.now()-1)});
+  resourceSettings({afterAck:()=>mock.timers.setTime(Date.now()-1)});
   assert.equal(await reservePaidResourceWindow(f.store,f.policy,f.context),false);
   assert.ok(Date.now()>f.store.period.start*1000,'clock remains inside the paid window');
   for(const [key,value] of before)assert.equal(f.h.get(key),value,'committed financial fields remain exact');
@@ -134,6 +140,7 @@ test('a backwards clock refuses first and repeated cohort acknowledgements even 
   assert.equal(f.h.size,before.size+(existing?0:1),'only the first cohort field may be added');
   assert.equal(calls.length,count+1,'no compensating Redis request');
  }
+ }finally{mock.timers.setTime(STARTED);}
 });
 
 test('resource ACK own-data bounds retain committed cohorts and never grant unknown work',async()=>{

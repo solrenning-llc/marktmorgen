@@ -27,6 +27,7 @@ import { speechFor } from "@/lib/buyer-words";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { paidIntentReply } from "./paid-intent-standin";
 
 type Sent = { to: string[]; subject: string; text: string };
 const emails: Sent[] = [];
@@ -41,6 +42,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     posted.push((JSON.parse(String(init?.body)) as { text: string }).text);
     return new Response("ok");
   }
+  // A gift and a pre-order read their payment before handing anything over (lib/gifts.ts, lib/preorders.ts): a plain
+  // paid one here, as every fixture of paid payments answers it (tests/paid-intent-standin.ts).
+  const paid = paidIntentReply(input, init?.method ?? "GET");
+  if (paid) return paid;
   return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
 }) as typeof fetch;
 

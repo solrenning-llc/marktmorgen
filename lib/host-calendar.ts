@@ -36,12 +36,13 @@
 import { CALENDAR_LIST_PAUSED, integrationPauseWord } from "@/lib/integration-pause";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import type { Busy } from "@/lib/call-setup";
 import { readFeed, providerOf } from "@/lib/calendar-sync";
 import { checkUrl, problemWords as fetchProblemWords, SafeFetchError } from "@/lib/safe-fetch";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
-import { NotConnected, accessFor, disconnectFor, hostConnectionFrom, hostConnectionKey, hostConnectionView } from "@/lib/meet-connect";
+import { type MeetStore, NotConnected, accessFor, disconnectFor, hostConnectionFrom, hostConnectionKey, hostConnectionView } from "@/lib/meet-connect";
 import { type GoogleCalendar, MAX_READ_CALENDARS, ProviderError, googleCalendars, googleFreeBusy, grantedParts, hostSyncOn } from "@/lib/meet-providers";
 import { HOST_STALE_MINUTES, HOST_SYNC_MINUTES } from "@/lib/team-scheduling-rules";
 import { hostId } from "@/lib/host-claims";
@@ -93,6 +94,13 @@ const cfgKey = (host: string) => `nl:hostcal:cfg:${host}`;
 const goodKey = (host: string) => `nl:hostcal:good:${host}`;
 const errKey = (host: string) => `nl:hostcal:err:${host}`;
 const lockKey = (host: string) => `nl:hostcal:lock:${host}`;
+/** How long a host's reading holds its lock. */
+const HOST_LOCK_SECONDS = 20;
+/**
+ * What the lock costs beyond the plain SET NX and DEL it was: the compare-and-delete script's EVAL and GET
+ * (releaseMark) in place of the DEL. The SET NX is the same one command, under a value of its own.
+ */
+export const HOST_LOCK_OWNER_COMMANDS = 2;
 /** Every key a host's calendar keeps, by the host: for a store that closes, when it was the host's last (lib/closed-store-data.ts). */
 export const hostCalendarKeys = (host: string): string[] => [cfgKey(host), goodKey(host), errKey(host), lockKey(host)];
 const icsContext = (host: string) => `hostcal|${host}|ics`;
@@ -226,9 +234,9 @@ function result(source: HostSource, state: SyncState, good: Good | null, message
 /** Test seams: a stand-in for the calendar feed fetch; production passes nothing. */
 export type SyncHooks = { feed?: Parameters<typeof readFeed>[3] };
 
-async function readBusyNow(statsId: string, host: string, config: Config, tz: string, now: number, hooks: SyncHooks): Promise<[number, number][]> {
+async function readBusyNow(store: MeetStore, host: string, config: Config, tz: string, now: number, hooks: SyncHooks): Promise<[number, number][]> {
   if (config.source === "google") {
-    const access = await accessFor(statsId, "google", undefined, host);
+    const access = await accessFor(store.statsId ?? "", "google", undefined, host, store);
     return googleFreeBusy(access.token, config.read, now - 86_400_000, now + HOST_LOOKAHEAD_DAYS * 86_400_000);
   }
   const opened = unseal(config.ics, icsContext(host));
@@ -277,7 +285,7 @@ export async function prefetchHosts(store: Pick<Store, "statsId">, emails: strin
  * cannot be known blocks the host.
  */
 export async function hostSync(
-  store: Pick<Store, "statsId">,
+  store: MeetStore,
   email: string,
   tz: string,
   options: { now?: number; refresh?: boolean; force?: boolean; hooks?: SyncHooks; known?: HostPrefetch } = {},
@@ -324,9 +332,13 @@ export async function hostSync(
   // Failed automatic reads share the same host-wide retry interval as good reads.
   // A kept failure must not turn each booking-page view into another provider call.
   if (!options.force && failure && Number.isFinite(failure.at) && failure.at <= now && now - failure.at < SYNC_SECONDS * 1000) return fallback();
+  // The lock under a value only this reading writes (claimValue, lib/claim-mark.ts), let go only while it still holds it: a
+  // reading that outlived its twenty seconds never deletes the lock a later reading took (Claude 4, 20/11).
+  // Only an exact "OK" is the lock; any other reply sends nothing more (tests/host-calendar-read-evidence.test.ts).
+  const lock = claimValue();
   let mine: string | null;
   try {
-    [mine] = storedValues(await redisPipeline([["SET", lockKey(host), "1", "NX", "EX", 20]]), 1);
+    [mine] = storedValues(await redisPipeline([["SET", lockKey(host), lock, "NX", "EX", HOST_LOCK_SECONDS]]), 1);
   } catch {
     return fallback();
   }
@@ -334,7 +346,7 @@ export async function hostSync(
   try {
     let busy: [number, number][];
     try {
-      busy = await readBusyNow(store.statsId, host, config, tz, now, options.hooks ?? {});
+      busy = await readBusyNow(store, host, config, tz, now, options.hooks ?? {});
     } catch (error) {
       const message = syncWords(error);
       const kept = configRead !== null && await keepReading(host, configRead, JSON.stringify({ at: now, message }), "error").catch(() => false);
@@ -348,7 +360,7 @@ export async function hostSync(
     if (!kept) return result(source, "failed", null, "Your calendar settings could not be read just now.");
     return result(source, "ok", reading);
   } finally {
-    await redisPipeline([["DEL", lockKey(host)]]).catch(() => {});
+    await releaseMark(lockKey(host), lock);
   }
 }
 
@@ -392,7 +404,7 @@ export async function hostCalendarView(store: Store, email: string, tz: string):
       calendarsError = "Calendar choices are temporarily unavailable. Try again later.";
     } else {
       try {
-        const access = await accessFor(statsId, "google", undefined, host);
+        const access = await accessFor(statsId, "google", undefined, host, store);
         calendars = await googleCalendars(access.token);
       } catch (error) {
         calendarsError = syncWords(error);
@@ -452,7 +464,7 @@ export async function setHostCalendars(store: Store, email: string, read: string
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "unavailable";
   let listed: GoogleCalendar[];
   try {
-    const access = await accessFor(store.statsId, "google", undefined, host);
+    const access = await accessFor(store.statsId, "google", undefined, host, store);
     listed = await googleCalendars(access.token);
   } catch {
     return "google_none";

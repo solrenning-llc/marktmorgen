@@ -18,7 +18,7 @@
  */
 import { decimalsOf } from "@/lib/money";
 import type { ConsumerPlace } from "@/lib/eu-vat-supply";
-import type { VatOnTop } from "@/lib/eu-vat-amount";
+import { MAX_BASIS_POINTS, type VatOnTop } from "@/lib/eu-vat-amount";
 import type { ViesAnswer } from "@/lib/eu-vat-vies";
 
 export const EU_VAT_RECORD_VERSION = 1;
@@ -82,6 +82,12 @@ export function euVatRecord(sale: EuVatSale): EuVatRecord | null {
   const vat = sale.vat;
   if (!vat || !whole(vat.priceCents) || !whole(vat.vatCents) || !whole(vat.totalCents) || !whole(vat.basisPoints)) return null;
   if (vat.priceCents < 0 || vat.vatCents < 0 || vat.totalCents !== vat.priceCents + vat.vatCents) return null;
+  // The rate and the amount must agree (Codex U-20261120-2120): a rate an EU table can hold, and the VAT exactly the
+  // half-up amount vatOnTop (lib/eu-vat-amount.ts) works out at it, so ossReturn never declares an amount under a rate
+  // it was not charged at. A sale reverse-charged to a business makes its own record (euReverseChargeRecord).
+  if (vat.basisPoints <= 0 || vat.basisPoints > MAX_BASIS_POINTS) return null;
+  const product = vat.priceCents * vat.basisPoints;
+  if (!Number.isSafeInteger(product) || vat.vatCents !== Math.floor((product + 5000) / 10000)) return null;
   const place = sale.place;
   if (!place || place.kind !== "eu" || place.country !== vat.country) return null;
   if (!Array.isArray(sale.payments) || sale.payments.length === 0) return null;

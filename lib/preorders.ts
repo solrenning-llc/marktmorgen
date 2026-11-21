@@ -582,10 +582,14 @@ export async function confirmPreorder(store: Store, session: Session, product: L
       const payment = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(read.pi)}?expand[]=latest_charge`);
       if (!payment || typeof payment !== "object" || (payment as { id?: unknown }).id !== read.pi) throw new UnknownReplyError("a pre-order's payment");
       if (await givenBack(store.stripeAccountId, payment)) {
+        // Written just above (recordPreorder): an entry that is now gone cannot be taken as handled, so the
+        // confirmation is tried again rather than skipped (Codex X6's LOW on #4408).
         const current = await readPreorderExact(store.statsId, product.id, read.id);
-        if (current && !current.given && !current.revoked) {
-          const wrote = repliesFor(await redisPipeline([["HSET", entriesKey(store.statsId, product.id), read.id, JSON.stringify({ ...current, revoked: now() } satisfies Preorder)], keep(store.statsId, product.id)]), 2)?.[0];
-          if (typeof wrote !== "number") throw new UnknownReplyError("a pre-order given back");
+        if (!current) throw new UnknownReplyError("a pre-order given back, whose entry is gone");
+        if (!current.given && !current.revoked) {
+          const replies = repliesFor(await redisPipeline([["HSET", entriesKey(store.statsId, product.id), read.id, JSON.stringify({ ...current, revoked: now() } satisfies Preorder)], keep(store.statsId, product.id)]), 2);
+          // Both replies are read: the HSET's count and the EXPIRE's 1 (the entries were just written, so 0 is unknown).
+          if (!replies || typeof replies[0] !== "number" || replies[1] !== 1) throw new UnknownReplyError("a pre-order given back");
         }
         return "skip";
       }

@@ -30,7 +30,7 @@ function response(body: unknown) {
 
 for (const [name, guard] of [
   ["withinLimit", () => withinLimit("provider-envelope", "buyer@example.test", 5, 60)],
-  ["withinMonth", () => withinMonth("provider-envelope", "buyer@example.test", 5, "2026-11")],
+  ["withinMonth", () => withinMonth("provider-envelope", "buyer@example.test", 5, "2026-11", 32 * 86_400)],
 ] as const) {
   for (const [label, body] of [
     ["empty batch", []],

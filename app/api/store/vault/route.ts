@@ -1,6 +1,7 @@
 import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import { reserveStoreUpload, reserveUploadControl, uploadBudgetCouldOpen } from "@/lib/upload-budget";
 import { openReservedVault, closeReservedVault, abortReservedVault } from "@/lib/vault-storage";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import type { NextRequest } from "next/server";
 import { deliveredFile, readDelivery, readKind } from "@/lib/catalog";
 import { ITEM_ID_PATTERN, findLesson, readCourses } from "@/lib/course";
@@ -96,7 +97,10 @@ export async function POST(request: NextRequest) {
         await rememberFolderOwner(folder, ref);
         return true;
       };
-      const opened = await openReservedVault({ folder, ownerId, name: safeFileName(text(body.name, 200)), bytes, type, multipart: true }, storageBrakeFor(standing, store.tier), undefined, admit);
+
+      // Fenced on the store (Codex L-20261120-0141): a provider that answers after its erasure began writes nothing back.
+      const fence = await storeLiveFence(store);
+      const opened = await openReservedVault({ folder, ownerId, name: safeFileName(text(body.name, 200)), bytes, type, multipart: true, fence }, storageBrakeFor(standing, store.tier), undefined, admit);
       if (!opened.ok && opened.reason === "budget") return fail("upload_budget_unavailable", 503);
       if (!opened.ok) return fail(opened.reason === "off" ? "off" : opened.reason === "invalid" ? "invalid" : "files_unavailable", opened.reason === "off" ? 404 : opened.reason === "invalid" ? 400 : 503);
       return Response.json({ ok: true, upload: opened.upload }, { headers: { "Cache-Control": "no-store" } });

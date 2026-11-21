@@ -37,6 +37,8 @@ The lowest of them is **77.62%**. One percentage for every plan, as most program
 
 The original Stripe pages were read on 11 November 2026. Recipient availability and dispute timing were checked again on 18 November 2026 by Codex X4 (report X4-20261118-1405-fix-pr-3764), not by the session that wrote this file.
 
+Both Stripe channels below would send from the US LLC's platform account, which does not exist yet (468 [SR2]). On the Brazilian platform account, SR5 records no separate charges and transfers outside Brazil, so neither channel applies there.
+
 **Stripe Connect, paying an affiliate who has their own connected account**
 - Source: https://stripe.com/connect/pricing, read on 11 November 2026.
 - When the platform sets the pricing:
@@ -59,7 +61,7 @@ The original Stripe pages were read on 11 November 2026. Recipient availability 
 - **Wise**: its transfer fee could not be read. The creators' payout batch file is already shaped for it (`lib/affiliate-payouts.ts`).
 - The IRS forms a US company collects before paying:
   - **W-9** for a US person could not be read;
-  - **W-8BEN** for anyone else could not be read;
+  - **W-8BEN** for a foreign individual, or **W-8BEN-E** for a foreign entity, could not be read;
   - whether a **1099** is due, and from what amount, could not be read.
 
   Any withholding on a payment to a foreign person also stays unknown. TX point 8 (no US federal tax on the LLC's foreign-source income) is about the LLC's own income, not about what it pays others.

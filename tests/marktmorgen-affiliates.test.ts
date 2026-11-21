@@ -60,6 +60,11 @@ is("a PROPOSAL, said first", doc.split("\n").slice(0, 4).join("\n").includes("PR
 is("the payout cost abroad is unknown, never zero, and no percentage is certified", [/unknown/i.test(doc), /never zero/i.test(doc), /no percentage is certified/i.test(doc)], [true, true, true]);
 is("the commission is owed only after payment and the 30-day refund window, and taken back on refund or dispute", [/30 days/.test(doc), /refund/i.test(doc), /dispute/i.test(doc)], [true, true, true]);
 is("it has an Acessibilidade section", doc.includes("## Acessibilidade"), true);
+// Claude 6's LEVE 1 on #3764: W-8BEN is a foreign individual's certificate; a foreign entity gives W-8BEN-E.
+is("the foreign certificates are named by who gives them, W-8BEN for an individual and W-8BEN-E for an entity", /\*\*W-8BEN\*\* for a foreign individual/.test(doc) && /\*\*W-8BEN-E\*\* for a foreign entity/.test(doc) && !/W-8BEN\*\* for anyone else/.test(doc), true);
+// Claude 6's LEVE 2 on #3764: both Stripe channels assume the future US LLC platform account (468 [SR2]); on the
+// Brazilian platform account, SR5 records no separate charges and transfers outside Brazil.
+is("the payout channels say which account would send the payment", /US LLC'?s? platform account/.test(doc) && /468 \[SR2\]/.test(doc) && /Brazilian platform/i.test(doc), true);
 
 part("Claude 5's review of #3756 (6910906486): the rules match the refund policy and the table prints what is paid");
 // HIGH: a yearly plan is refunded at any time, less the months already started (app/refunds/page.tsx section 3,

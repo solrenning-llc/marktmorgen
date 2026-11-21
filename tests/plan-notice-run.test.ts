@@ -196,6 +196,43 @@ async function main() {
     controls.push(lost.unknown, again.unknown);
   }
   is("none of the controls is counted as unknown", controls, [0, 0, 0, 0]);
+
+  // Codex X6 (@a8bd96a695, NOT FIXED): the claim's write landed, and both its answer and the read-back were lost.
+  // The run sends nothing and says unknown; it must let go of its own mark, or the next 60 days see it taken.
+  async function withBothLost<T>(run: () => Promise<T>): Promise<T> {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const one = commands.length === 1 && String(commands[0][1]).startsWith("nl:remind:");
+      if (one && commands[0][0] === "SET" && commands[0].includes("NX")) {
+        await original.call(redis, commands);
+        throw new Error("synthetic: the answer was lost");
+      }
+      if (one && commands[0][0] === "GET") throw new Error("synthetic: the read-back was lost");
+      return original.call(redis, commands);
+    }) as typeof redis.pipeline;
+    try {
+      return await run();
+    } finally {
+      redis.pipeline = original;
+    }
+  }
+  part("a send claim that landed with its answer and its read-back both lost: let go, sent once by the next run");
+  {
+    const at = TODAY + 30 * DAY + 20 * 3600;
+    subscriptions = [yearly("sub_noticeboth1", at)];
+    const odd = await withBothLost(() => sendReminders(NOW));
+    is("nothing sent, counted as unknown", [odd.sent, odd.unknown], [0, 1]);
+    const next = await sendReminders(NOW + 3600);
+    is("the next run sends it, once", [next.sent, emails.filter((to) => to.startsWith("sub_noticeboth1")).length], [1, 1]);
+  }
+  part("a missed-notice claim that landed with both answers lost: let go, counted once by the next run");
+  {
+    const at = TODAY + 80 * DAY + 5 * 3600;
+    subscriptions = [yearly("sub_noticeboth2", at)];
+    const odd = await withBothLost(() => sendReminders(at - 12 * 3600));
+    is("not counted as missed, counted as unknown", [odd.missed, odd.unknown], [0, 1]);
+    const next = await sendReminders(at - 6 * 3600);
+    is("the next run counts it as missed once", [next.missed, next.unknown], [1, 0]);
+  }
   done();
 }
 

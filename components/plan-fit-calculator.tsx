@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { PLAN_TITLES, monthlyEmails, publishedPriceWords, type Tier } from "@/lib/plan";
-import { findPlanFit } from "@/lib/plan-fit-rules";
+import { PLAN_FIT_ALLOWANCES_GROUP, findPlanFit } from "@/lib/plan-fit-rules";
 
 function numberWords(value: number): string {
   return value.toLocaleString("en-US");
@@ -26,7 +26,7 @@ export function PlanFitCalculator({ domains = false }: { domains?: boolean }) {
   } else if (result.kind === "invalid") {
     answer = <>Enter a whole, non-negative number of list emails per month.</>;
   } else if (result.kind === "no-fit") {
-    answer = <>No current plan covers {numberWords(result.monthlyListEmails)} list emails per month. Scale includes up to {numberWords(result.maximumMonthlyListEmails)}; see the published allowances below.</>;
+    answer = <>No current plan covers {numberWords(result.monthlyListEmails)} list emails per month. {PLAN_TITLES.scale} includes up to {numberWords(result.maximumMonthlyListEmails)}; see the published allowances below.</>;
   } else {
     const tier: Tier = result.tier;
     const emailAllowance = monthlyEmails(tier);
@@ -39,7 +39,7 @@ export function PlanFitCalculator({ domains = false }: { domains?: boolean }) {
         <p className="mt-2">
           {emailAllowance > 0
             ? `List email: up to ${numberWords(emailAllowance)} per month.`
-            : "List email is not included in Store."}
+            : `List email is not included in ${PLAN_TITLES[tier]}.`}
         </p>
         <p className="mt-2">
           This check covers list email and the selected built-in Pro tools only. It does not check every allowance or feature.
@@ -53,7 +53,7 @@ export function PlanFitCalculator({ domains = false }: { domains?: boolean }) {
       <h2 id="plan-fit-heading" className="t-h2">Find a plan that fits</h2>
       <p className="mt-4 text-ink-soft">
         Check the list email allowance and the built-in Pro tools you need. This runs in your browser and does not create an account or change a plan.
-        For other needs, compare the <a href="#selling-and-delivery" className="underline underline-offset-4">published allowances</a>.
+        For other needs, compare the <a href={`#${PLAN_FIT_ALLOWANCES_GROUP}`} className="underline underline-offset-4">published allowances</a>.
       </p>
 
       <div className="mt-6 rounded-2xl border border-line bg-white p-6 sm:p-8">

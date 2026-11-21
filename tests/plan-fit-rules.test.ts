@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PlanFitCalculator } from "@/components/plan-fit-calculator";
-import { findPlanFit } from "@/lib/plan-fit-rules";
+import { PLAN_FIT_ALLOWANCES_GROUP, findPlanFit } from "@/lib/plan-fit-rules";
+import { PLAN_TITLES } from "@/lib/plan";
+import { PRICING_GROUPS } from "@/lib/pricing-page-data";
 import { done, is, part } from "./check";
 
 const empty = {
@@ -36,7 +38,12 @@ const html = renderToStaticMarkup(createElement(PlanFitCalculator));
 is("the number input has an associated label", /<label[^>]*for="plan-fit-list-emails"[^>]*>List emails/.test(html) && /<input[^>]*id="plan-fit-list-emails"/.test(html), true);
 is("the tools are grouped under a legend", /<fieldset[^>]*>[\s\S]*<legend[^>]*>Built-in tools you need<\/legend>/.test(html), true);
 is("changes are announced through a status region", /<div[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/.test(html), true);
-is("the published allowance comparison remains linked", /href="#selling-and-delivery"/.test(html), true);
+// Codex X6's LOW on #3662 (6990726181): the link went to "Selling and delivery", while the list-email allowance it measures
+// is listed under "Email, AI and workflows". Held to the pricing table itself, so a regrouping fails here.
+const listEmailGroup = PRICING_GROUPS.find((group) => group.rows.some((row) => row.key === "list-email"))?.id;
+is("the list-email allowance is in one published pricing group", typeof listEmailGroup, "string");
+is("the calculator's allowance link names that group", PLAN_FIT_ALLOWANCES_GROUP, listEmailGroup);
+is("the published allowance comparison links to that group", html.includes(`href="#${listEmailGroup}"`), true);
 
 part("A custom domain is offered only where this deployment can connect one");
 const withoutDomains = renderToStaticMarkup(createElement(PlanFitCalculator, { domains: false }));
@@ -45,6 +52,11 @@ is("without domain support the calculator never offers a custom domain", without
 is("by default (unknown) the custom domain is not offered", html.includes("Use a custom domain"), false);
 is("with domain support the custom domain choice is shown", withDomains.includes("Use a custom domain"), true);
 is("the other two tools stay offered without domain support", withoutDomains.includes("Send email to a list") && withoutDomains.includes("Remove Marktmorgen branding"), true);
+// Codex X6's LOW on #3662 (6990726181): "Scale" and "Store" were literals in the calculator's copy. Every plan name it
+// shows comes from PLAN_TITLES, so a renamed plan cannot leave the calculator saying the old name.
+const calculatorSource = readFileSync("components/plan-fit-calculator.tsx", "utf8");
+is("the calculator writes no plan title by hand", Object.values(PLAN_TITLES).filter((title) => new RegExp(`\\b${title}\\b`).test(calculatorSource)), []);
+
 const page = readFileSync("app/pricing/page.tsx", "utf8");
 is("the pricing page passes its real domain availability", /<PlanFitCalculator\s+domains=\{DOMAINS\}\s*\/>/.test(page), true);
 

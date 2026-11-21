@@ -1,5 +1,12 @@
 import { hasPro, monthlyEmails, TIERS, type Tier } from "@/lib/plan";
 
+/**
+ * The pricing page group (lib/pricing-page-data.ts, PRICING_GROUPS) that lists the list-email allowance the check
+ * measures; the calculator links "published allowances" there. tests/plan-fit-rules.test.ts holds it to the group
+ * whose rows include "list-email", so a regrouped table fails the test instead of leaving a wrong link.
+ */
+export const PLAN_FIT_ALLOWANCES_GROUP = "email-and-workflows";
+
 /** Inputs to the public plan-fit check. Text stays text until it is validated exactly. */
 export type PlanFitInput = {
   monthlyListEmails: string;

@@ -355,6 +355,19 @@ export class MemoryRedis {
           if (this.run(["GET", lock]) !== token) return [-9, 0];
           return this.run(["EVAL", "-- marktmorgen:path-forget:v1\n", "4", room, target, boardKey, mapKey, month, sid]);
         }
+
+        // lib/community-events.ts KEEP_RSVP_IF_NOT_ERASED: an RSVP is admitted only while its person is not erased.
+        if (key.startsWith("-- marktmorgen:event-rsvp-add:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, list, erased, member, print, mark] = args;
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          if (call(["HEXISTS", erased, print]) === 1) return [-1, 0];
+          const added = call(["HSETNX", list, member, mark]);
+          return [added, call(["HLEN", list])];
+        }
+
         // lib/flow-runs.ts HOLD_LAYOUT_IF_LEASED: the same lease and run versions must still be live.
         if (key.startsWith("-- marktmorgen:flow-hold-layout-if-leased:v1\n") && args[0] === "5" && args.length === 17) {
           const [, lease, run, log, held, index, member, score, stamp, open, email, step, note, now, entry, heldMember, person] = args;

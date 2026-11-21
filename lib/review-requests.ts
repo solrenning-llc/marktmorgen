@@ -489,6 +489,9 @@ export async function sendReviewRequests(
     let maybeSent = false;
     let ready: Ready[] = prepared;
     let unheld = 0;
+    // A batch refused for good went nowhere: its whole share is owed back, and the finally gives it once, so a throw in
+    // its clean-up (a ZREM in drop) never keeps the month counted for an email that never went (Codex G on #4360).
+    let refusedOwed = 0;
     // Every give-back goes to the day the allowance was taken from (lib/mail.ts mailDay, #3928), never to a later one.
     const day = mailDay();
     try {
@@ -524,12 +527,13 @@ export async function sendReviewRequests(
       `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`, { by: "monthly" },
     );
     if (outcome === "refused") {
-      // Refused for good, so nothing went: the undo comes before the give-back, and a give-back that throws leaves it
-      // done (Codex X2 on #4360). The order leaves the list, as on main.
+      // Refused for good, so nothing went: its share is owed back from here, given once by the finally even when the
+      // undo below throws (Codex G on #4360), and a give-back that throws leaves the undo done (Codex X2 on #4360).
+      // The order leaves the list, as on main.
+      refusedOwed = ready.length;
       await unclaim(ready, null);
       for (const item of ready) await drop(item.member);
       undone = true;
-      await release(store, ready.length, day);
       continue;
     }
     if (outcome !== "sent") {
@@ -551,9 +555,11 @@ export async function sendReviewRequests(
       console.error("sending a store's review requests failed", error);
       if (!sent && !undone && !maybeSent) await unclaim(ready, nowSeconds + RETRY_SECONDS.sender).catch(() => undefined);
     } finally {
-      // Nothing went for the claims not stretched: their share of the allowance is given back, best effort (a give-back
-      // that fails only leaves the month counted higher, never an email sent past it).
-      if (unheld > 0) await release(store, unheld, day).catch((error) => console.error("giving back a review request's allowance failed", error));
+      // Nothing went for the claims not stretched, nor for a batch refused for good: their share of the allowance is
+      // given back once, best effort (a give-back that fails only leaves the month counted higher, never an email sent
+      // past it).
+      const owed = unheld + refusedOwed;
+      if (owed > 0) await release(store, owed, day).catch((error) => console.error("giving back a review request's allowance failed", error));
     }
   }
   return counts;

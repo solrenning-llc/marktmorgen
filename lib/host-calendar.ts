@@ -80,6 +80,10 @@ async function keepReading(host: string, config: string, value: string, kind: "g
   return reply[0] === 1;
 }
 export const MAX_ICS_URL = 1000;
+/** Writer-format bound: escaped email/calendar ids plus a sealed UTF-8 ICS URL and record overhead. */
+export const HOST_READING_CONFIG_BYTES = 2_048 + 6 * (320 + MAX_READ_CALENDARS * 300 + 300) + 4 * MAX_ICS_URL;
+/** The exact config is sent again, alongside the short script, keys and command envelope. */
+export const HOST_READING_FENCE_BYTES = HOST_READING_CONFIG_BYTES + 2_048;
 
 export type HostSource = "google" | "ics" | "none";
 
@@ -124,7 +128,7 @@ function storedReply(reply: unknown, count: number): (string | null)[] {
 
 function parseConfig(raw: unknown): Config | null {
   if (raw === null) return null;
-  if (typeof raw !== "string") throw unreadable();
+  if (typeof raw !== "string" || raw.length > HOST_READING_CONFIG_BYTES || new TextEncoder().encode(raw).byteLength > HOST_READING_CONFIG_BYTES) throw unreadable();
   try {
     const v = JSON.parse(raw) as Partial<Config>;
     if (!v || (v.source !== "google" && v.source !== "ics" && v.source !== "none") ||

@@ -6316,8 +6316,10 @@ async function tierFor(store: Store, aff: string, buyer: string): Promise<{ tier
   const decided = await decideBuyer(store, aff, buyer);
   // Not known: both tiers wait (rule 30 on #3485), and the five-minute job reads the buyer again (settleUnconfirmed).
   if (decided === "unknown") return { buyerUnknown: 1, selfUnknown: 1 };
-  // The affiliate's own purchase, as this exact read finds it (the writers' isSelf throws on a record that does not
-  // read, rule 24, so both readings agree; the job's re-read of a waiting sale sets it the same way).
+  // The affiliate's own purchase, as this exact read finds it. The writers' isSelf reads a stored record that does not
+  // parse as no affiliate (self false), but this read finds it unknown (selfUnknown), so the sale waits out of what is
+  // paid (settleLine, unconfirmed) until the job's re-read of the waiting sale or the creator decides it (Codex X6 on
+  // #4413; tests/affiliate-tier-review.test.ts, M2).
   return { ...(decided.tierOff ? { tierOff: 1 as const } : {}), ...(decided.self ? { self: true as const } : {}) };
 }
 

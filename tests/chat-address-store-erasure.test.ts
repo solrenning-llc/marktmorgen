@@ -34,3 +34,20 @@ test("removal, invalid and refused provider remain honest",async()=>{
  assert.equal(await setChatAddress(scope.statsId,"Synthetic","https://example.test",scope),"invalid");
  assert.equal(await setChatAddress(scope.statsId,"Synthetic","",scope),"removed");
 });
+// Claude 6's MÉDIO on #4936 (7057602752): a store from before ids is told from its owner's next store only by its
+// statsId, as in lib/store-live-cache.ts store-cache-live:v2. The owner key existing again is not enough.
+test("legacy store erased and reopened under the same address during provider wait",async()=>{
+ redis.clear();const record=await ownerKey(scope.email);redis.run(["SET",record,JSON.stringify({statsId:scope.statsId})]);
+ globalThis.fetch=async()=>{redis.run(["DEL",record,setting]);redis.run(["SET",record,JSON.stringify({statsId:"e".repeat(32)})]);return new Response(null,{status:204});};
+ assert.notEqual(await setChatAddress(scope.statsId,"Synthetic",URL,{...scope,sid:""}),"saved");assert.equal(redis.run(["GET",setting]),null);
+});
+test("legacy store still its own: the address is saved (healthy control)",async()=>{
+ redis.clear();const record=await ownerKey(scope.email);redis.run(["SET",record,JSON.stringify({statsId:scope.statsId})]);
+ globalThis.fetch=async()=>new Response(null,{status:204});
+ assert.equal(await setChatAddress(scope.statsId,"Synthetic",URL,{...scope,sid:""}),"saved");assert.equal(await chatAddress(scope.statsId),URL);
+});
+test("legacy owner record unreadable: unknown, nothing saved",async()=>{
+ redis.clear();const record=await ownerKey(scope.email);redis.run(["SET",record,"not json"]);
+ globalThis.fetch=async()=>new Response(null,{status:204});
+ await assert.rejects(setChatAddress(scope.statsId,"Synthetic",URL,{...scope,sid:""}));assert.equal(redis.run(["GET",setting]),null);
+});

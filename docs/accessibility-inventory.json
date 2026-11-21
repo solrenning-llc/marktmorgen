@@ -1104,6 +1104,18 @@
       "parameters": []
     },
     {
+      "source": "app/studio/declines/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/declines",
+      "parameters": []
+    },
+    {
+      "source": "app/studio/devices/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/devices",
+      "parameters": []
+    },
+    {
       "source": "app/studio/discord/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/discord",
@@ -1562,6 +1574,7 @@
     "components/mark-shipped.tsx",
     "components/meeting-connections.tsx",
     "components/member-discount.tsx",
+    "components/member-price.tsx",
     "components/more-from.tsx",
     "components/morning-header.tsx",
     "components/mrr-chart.tsx",
@@ -1636,6 +1649,7 @@
     "components/plan-dispute-notice.tsx",
     "components/plan-invoices-list.tsx",
     "components/podcast-editor.tsx",
+    "components/podcast-public-feed.tsx",
     "components/podcast-toggle.tsx",
     "components/post-cover.tsx",
     "components/preview-frame.tsx",
@@ -1646,7 +1660,9 @@
     "components/problem-notice.tsx",
     "components/product-about-view.tsx",
     "components/product-editor.tsx",
+    "components/product-ideas.tsx",
     "components/product-image-editor.tsx",
+    "components/product-safety-facts.tsx",
     "components/product-update-box.tsx",
     "components/promotion-planner.tsx",
     "components/purchase-card.tsx",
@@ -1742,6 +1758,8 @@
     "components/studio-start.tsx",
     "components/studio-store-pin.tsx",
     "components/studio-tools.tsx",
+    "components/submission-review.tsx",
+    "components/submission-settings.tsx",
     "components/takedown-actions.tsx",
     "components/task-editor.tsx",
     "components/tasks-agenda.tsx",
@@ -1803,6 +1821,7 @@
     "app/api/auth/request/route.ts",
     "app/api/auth/rescue/route.ts",
     "app/api/auth/signout-all/route.ts",
+    "app/api/auth/signout-others/route.ts",
     "app/api/auth/signout/route.ts",
     "app/api/auth/two-step/route.ts",
     "app/api/backup/files/route.ts",
@@ -1855,6 +1874,7 @@
     "app/api/mcp/route.ts",
     "app/api/numbers-link/route.ts",
     "app/api/operator/search-console/route.ts",
+    "app/api/operator/traffic-reset/route.ts",
     "app/api/outreach/stop/route.ts",
     "app/api/photo/[id]/route.ts",
     "app/api/privacy/erase/route.ts",
@@ -1941,6 +1961,8 @@
     "app/api/store/course/quiz/route.ts",
     "app/api/store/course/route.ts",
     "app/api/store/course/start/route.ts",
+    "app/api/store/course/submission/route.ts",
+    "app/api/store/course/submissions/route.ts",
     "app/api/store/course/task/route.ts",
     "app/api/store/course/task/upload/route.ts",
     "app/api/store/creator-card/route.ts",
@@ -2064,6 +2086,7 @@
     "app/api/store/podcast/link/route.ts",
     "app/api/store/podcast/open/route.ts",
     "app/api/store/podcast/play/[token]/[episode]/route.ts",
+    "app/api/store/podcast/public-settings/route.ts",
     "app/api/store/podcast/public/[handle]/[product]/route.ts",
     "app/api/store/podcast/route.ts",
     "app/api/store/preorder/route.ts",
@@ -2236,6 +2259,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 152
+    "pageTemplates": 154
   }
 }

@@ -334,6 +334,52 @@ async function main(): Promise<void> {
     is("the next try finds it and the deleted address is kept nowhere in the index", indexState().some((line) => line.includes(OLD)), false);
   }
 
+  part("A delete count no single-key DEL or HDEL can give never confirms an erasure (Codex G on #3625, MEDIUM)");
+  {
+    // Each delete here names one key or one field, so 0 or 1 is all it can answer: anything else proves nothing.
+    const sides = [
+      { command: "HDEL", prefix: "nl:pm:into:", name: "the old address's reverse line" },
+      { command: "DEL", prefix: "nl:pm:moved:", name: "the new address's line" },
+    ];
+    let n = 0;
+    for (const side of sides) {
+      for (const reply of [-1, 0.5, 2, 1000]) {
+        n += 1;
+        const OLD = `odd${n}.old@example.com`;
+        const NEW = `odd${n}.new@example.com`;
+        const request = await asked(OLD, NEW);
+        is(`${side.name} ${reply}: moved`, (await applyPurchaseMove(moss, request.id)).state, "moved");
+        const before = indexState().filter((line) => line.includes(OLD));
+        odd = { command: side.command, prefix: side.prefix, reply, times: 1 };
+        let threw = false;
+        try {
+          await forgetMovedPerson(moss, OLD);
+        } catch (error) {
+          threw = error instanceof UnknownReplyError;
+        }
+        odd = null;
+        is(`${side.name} answering ${reply}: unknown`, threw, true);
+        is(`${side.name} answering ${reply}: the room is not given back before a confirmed delete`, roomField(OLD), true);
+        await forgetMovedPerson(moss, OLD);
+        is(`${side.name} answering ${reply}: the next try finishes`, indexState().some((line) => line.includes(OLD)), false);
+        is(`${side.name} answering ${reply}: the index had lines to delete`, before.length > 0, true);
+      }
+    }
+    // Control: 0 (a delete that found nothing left, as after a stopped try) is a count a delete can give, so it is no error.
+    const OLD = "zero.old@example.com";
+    const request = await asked(OLD, "zero.new@example.com");
+    is("zero: moved", (await applyPurchaseMove(moss, request.id)).state, "moved");
+    odd = { command: "HDEL", prefix: "nl:pm:into:", reply: 0, times: 1 };
+    let zeroThrew = false;
+    try {
+      await forgetMovedPerson(moss, OLD);
+    } catch {
+      zeroThrew = true;
+    }
+    odd = null;
+    is("a 0 from a delete is accepted, never unknown", zeroThrew, false);
+  }
+
   part("An address erased after a move that stopped before its lines were written gives its room back (Claude 1 on #3625)");
   {
     const OLD = "room.old@example.com";

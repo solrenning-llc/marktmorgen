@@ -38,12 +38,16 @@ import { emptyCourse, editCourse, saveCourse } from "@/lib/course";
 import { courseAccess, dropEnrollment, recordEnrollment, mintPass, passCookieName, forgetPaid } from "@/lib/learn";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { paidIntentReply } from "./paid-intent-standin";
 import { paidPeriod } from "./billing-period-fixture";
 
 let pages: unknown[] = [];
 const mails: { to: string[]; text: string }[] = [];
 const reads: { after: string | null; version: string | null }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  // The payment a purchase for several is read with before it is settled (lib/group-buy.ts settleGroup): paid, not given back.
+  const paid = paidIntentReply(input, init?.method ?? "GET");
+  if (paid) return paid;
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
     mails.push(JSON.parse(String(init?.body)) as { to: string[]; text: string });

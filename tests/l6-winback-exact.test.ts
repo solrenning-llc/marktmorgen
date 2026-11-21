@@ -129,7 +129,7 @@ async function main(): Promise<void> {
   await setWinBack(OWNER, { percent: 25, months: 2, days: 7, coupon: "co_Back0001", address: "1 Main St, Portland, OR 97201" });
   const store = (await storeForEmail(OWNER))!;
   const meta = { store: "lsixback", product: club.product.id };
-  const people = ["ann", "bob", "cat", "dan", "eve", "fay", "gus", "fox", "hal", "ivy", "jo"];
+  const people = ["ann", "bob", "cat", "dan", "eve", "fay", "gus", "fox", "hal", "ivy", "jo", "hoa", "ida"];
   for (const name of people) {
     const id = `cus_${name[0].toUpperCase()}${name.slice(1)}0000001`.slice(0, 18);
     customers.set(id, `${name}@example.com`);
@@ -177,8 +177,25 @@ async function main(): Promise<void> {
   await sendWinBacks(Date.now() + 30_000, now);
   is("and never twice", sentTo().filter((to) => to === "fay@example.com" || to === "cat@example.com").length, 2);
   ended("sub_Gus0000001", cus("gus"), 8, meta);
-  await withReply("SET", (command) => String(command[1]).includes("once") || String(command[1]).includes(":o:"), () => ["QUEUED"], () => sendWinBacks(Date.now() + 30_000, now));
+  // Since #4807 the once-a-while mark is made inside WINBACK_CLAIM with the grant and its erasure note, so the odd
+  // answer is the script's own: one that landed holds this claim's value and is read back as ours.
+  const isClaim = (command: (string | number)[]) => String(command[1]).startsWith("-- marktmorgen:winback-claim:");
+  await withReply("EVAL", isClaim, () => ["QUEUED"], () => sendWinBacks(Date.now() + 30_000, now));
   is("the once-a-while mark answered oddly but ours: Gus is written to, not held back for months", sentTo().filter((to) => to === "gus@example.com").length, 1);
+  // One that did not land (nothing written) is not ours: nothing is sent, the membership's own mark is let go, and the
+  // next run claims it whole and writes once.
+  ended("sub_Hoa0000001", cus("hoa"), 8, meta);
+  await withReplyOnly("EVAL", isClaim, [undefined], () => sendWinBacks(Date.now() + 30_000, now));
+  is("the claim answered in an unknown shape that did not land: Hoa is not written to", sentTo().includes("hoa@example.com"), false);
+  await sendWinBacks(Date.now() + 30_000, now);
+  is("the next run writes to Hoa, once", sentTo().filter((to) => to === "hoa@example.com").length, 1);
+  // The deletion print read again before the email (stillFree) answered in an unknown shape: not known to be free, so
+  // nothing is sent; the once-mark and the link stay, so the person is never written to twice.
+  ended("sub_Ida0000001", cus("ida"), 8, meta);
+  await withReplyOnly("HEXISTS", (command) => String(command[1]).startsWith("nl:erased:"), ["1?"], () => sendWinBacks(Date.now() + 30_000, now));
+  is("the print read again in an unknown shape: Ida is not written to", sentTo().includes("ida@example.com"), false);
+  await sendWinBacks(Date.now() + 30_000, now);
+  is("nor on the next run, her once-a-while mark being made", sentTo().includes("ida@example.com"), false);
 
 
   part("Every ended membership of the window, past the first page");

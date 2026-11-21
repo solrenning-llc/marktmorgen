@@ -1,3 +1,5 @@
+import {applyUntilHeld,waitForReactHandler,waitForReactHydrated} from "./react-hydration.mjs";
+
 /** Existing package settings only; synthetic intercepted replies, no checkout or booking. */
 export async function checkPackageAcknowledgment({browser,LOCAL,fixture,is}){
  const common=[
@@ -30,7 +32,16 @@ export async function checkPackageAcknowledgment({browser,LOCAL,fixture,is}){
    const section=page.locator('[data-package-editor="'+fixture.product+'"]');await section.waitFor();
    await section.evaluate(node=>{node.open=true;});
    const sessions=section.locator("select").nth(0),price=section.locator("input"),days=section.locator("select").nth(1);
-   await sessions.selectOption("5");await price.fill("500.00");await days.selectOption("90");
+   const offer=section.getByRole("button",{name:"Offer the package",exact:true});
+   // Choose only once React has hydrated the editor and owns its button: in WebKit the press reached a server-drawn
+   // button and sent nothing (common cause no. 2, PACKAGE_ACTION_DIAGNOSTIC with requests 0). Then act only once the
+   // screen holds the choices, since a late commit can draw the editor again from its saved values.
+   await waitForReactHydrated(page,sessions);await waitForReactHandler(page,offer,"onClick");
+   await applyUntilHeld(page,"package "+width,async()=>{await sessions.selectOption("5");await price.fill("500.00");await days.selectOption("90");},()=>section.evaluate(node=>{
+    const [first,second]=node.querySelectorAll("select"),input=node.querySelector("input"),button=[...node.querySelectorAll("button")].find(b=>b.textContent.trim()==="Offer the package");
+    const owned=button?Object.keys(button).some(key=>key.startsWith("__reactProps$")&&typeof button[key]?.onClick==="function"):false;
+    return first?.value==="5"&&input?.value==="500.00"&&second?.value==="90"&&button?.disabled===false&&owned;
+   }));
    for(const [action,cases] of [["save",saveCases],["stop",stopCases]]){
     for(const scenario of cases){
      let release;const held=new Promise(resolve=>{release=resolve;});pending={scenario,release:held};

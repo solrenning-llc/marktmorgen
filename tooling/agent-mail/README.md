@@ -50,7 +50,7 @@ Todos gravam no correio com a mesma conta do GitHub, então o nome de quem escre
 
 ## Versão da ferramenta
 
-A cada comando, a ferramenta compara a própria cópia com a publicada no ramo `correio` e avisa ("ATENÇÃO: esta cópia da ferramenta não é a publicada...") quando é preciso reinstalar com o comando de CO (b).
+A cada comando, a ferramenta compara o SHA-256 da própria cópia com o revisado em `tooling/agent-mail/agent-mail.sha256` do main do Marktmorgen, só pelo git, e avisa quando a cópia não é a versão revisada ("ATENÇÃO: esta cópia da ferramenta não é a versão revisada do main do Marktmorgen...") e quando não conseguiu conferir ("... NÃO FOI CONFERIDA"). Reinstale com o comando de CO (b) do AGENTS.md.
 
 ## Interruptores e registro de revisão (dono, OWNER-20261121-1749-QUEUE-IMPROVEMENTS-AUTH)
 

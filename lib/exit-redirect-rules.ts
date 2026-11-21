@@ -169,3 +169,47 @@ export function exitAnswer(input: { record: ExitNotice | null; holder: ExitHolde
   if (now >= until) return { kind: "gone" };
   return { kind: "moved", to: record.to, host: record.host, until };
 }
+
+/**
+ * The value of a closed store's old address key (lib/store.ts,
+ * closeStoreRecord) is "released:" and the time; with a notice, the notice
+ * follows it in the same value. A visit to an old address already reads that
+ * key, so the notice costs no command more per visit, and the value is gone
+ * with the key: when another store takes the address, the notice goes with
+ * it. The value still starts "released:", so it never leads to a store
+ * (handleLeadsToStore in lib/store.ts, held by tests/exit-released-value.test.ts).
+ */
+const RELEASED = "released:";
+const EXIT_PART = " exit:";
+
+/**
+ * The longest such value: "released:", the longest time toISOString writes
+ * (27 characters for a year past 9999), the notice's part and its record as
+ * JSON, its address at the longest with every character written twice (a
+ * backslash in the query is the one character an address keeps that JSON
+ * escapes), its host at the longest a name may be (253) and two dates of 16
+ * digits.
+ */
+export const EXIT_RELEASED_MAX_BYTES =
+  RELEASED.length + 27 + EXIT_PART.length + '{"to":"","host":"","closedAt":,"setAt":}'.length + 2 * EXIT_DESTINATION_MAX + 253 + 2 * 16;
+
+/** The value written for an old address released at `at`, with the notice when there is one that reads. An invalid time throws. */
+export function releasedValue(at: Date, notice: ExitNotice | null): string {
+  const base = `${RELEASED}${at.toISOString()}`;
+  const kept = notice ? readExitNotice(notice) : null;
+  if (!kept) return base;
+  const value = `${base}${EXIT_PART}${JSON.stringify({ to: kept.to, host: kept.host, closedAt: kept.closedAt, setAt: kept.setAt })}`;
+  return value.length <= EXIT_RELEASED_MAX_BYTES ? value : base;
+}
+
+/** The notice kept in an old address's value, read whole or not at all. */
+export function exitFromReleased(raw: unknown): ExitNotice | null {
+  if (typeof raw !== "string" || raw.length > EXIT_RELEASED_MAX_BYTES || !raw.startsWith(RELEASED)) return null;
+  const split = raw.indexOf(EXIT_PART);
+  if (split < 0) return null;
+  const at = raw.slice(RELEASED.length, split);
+  // Only a time as releasedValue writes it: toISOString of itself (no bare number, no day that does not exist).
+  const ms = Date.parse(at);
+  if (!at || !Number.isFinite(ms) || new Date(ms).toISOString() !== at) return null;
+  return readExitNotice(raw.slice(split + EXIT_PART.length));
+}

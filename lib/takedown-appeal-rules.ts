@@ -51,7 +51,8 @@ const NEXT: Record<AppealState, readonly AppealState[]> = {
   reversed: [],
 };
 
-export const DECISION_KINDS = ["link", "product", "kit", "store"] as const;
+/** "other": a decision whose kind the kept record does not say (unit 2 reads decisions from the store's strikes). */
+export const DECISION_KINDS = ["link", "product", "kit", "store", "other"] as const;
 export type DecisionKind = (typeof DECISION_KINDS)[number];
 
 /** One decision a creator can ask us to look at again: one takedown of lib/takedown.ts, as the creator was told it. */
@@ -78,7 +79,7 @@ export const decisionKey = (d: Pick<Decision, "report" | "kind" | "id">) => `${d
  * switched off, so they can be. The words below say which, so a request is never answered with a promise the code
  * cannot keep.
  */
-export const restorable = (kind: DecisionKind) => kind !== "link";
+export const restorable = (kind: DecisionKind) => kind === "product" || kind === "kit" || kind === "store";
 
 /** At least six months (DSA Art. 20(1)). */
 export const APPEAL_WINDOW_MONTHS = 6;
@@ -167,7 +168,7 @@ function readDecision(raw: unknown): Decision | null {
   if (!kind || typeof d.report !== "string" || !d.report || typeof d.id !== "string" || typeof d.what !== "string" || !d.what ||
       typeof d.informedAt !== "string" || typeof d.automated !== "boolean") return null;
   // A link or a product names itself; the media kit and the store are one per store.
-  if ((kind === "link" || kind === "product") !== (d.id.length > 0)) return null;
+  if (kind !== "other" && (kind === "link" || kind === "product") !== (d.id.length > 0)) return null;
   return { report: d.report, kind, id: d.id, informedAt: d.informedAt, what: d.what, automated: d.automated };
 }
 
@@ -275,6 +276,34 @@ export function moveAppeal(appeal: Appeal, to: AppealState, by: { role: "creator
   return { ok: true, appeal: { ...appeal, state: to, moves: [...appeal.moves, move] } };
 }
 
+/**
+ * Whether a kept request's moves lead, one allowed step at a time, to the state it says it is in (Codex X5 on #3533,
+ * MÉDIO): the first move is the creator's own "received"; every later one is a person at Marktmorgen's, to a state
+ * NEXT allows from the one before; a final one carries its reason; and the last move is the record's state. Each move
+ * has a time. A record whose moves do not lead to its state is read as unknown, never shown (rule 24).
+ */
+export function movesLeadTo(state: unknown, moves: unknown): boolean {
+  if (!Array.isArray(moves) || moves.length === 0 || moves.length > APPEAL_STATES.length) return false;
+  let at = null as AppealState | null;
+  for (const raw of moves) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+    const move = raw as Record<string, unknown>;
+    const to = move.state;
+    if (typeof to !== "string" || !(APPEAL_STATES as readonly string[]).includes(to)) return false;
+    if (typeof move.at !== "string" || Number.isNaN(Date.parse(move.at))) return false;
+    if (move.reason !== undefined && (typeof move.reason !== "string" || move.reason.length > MAX_APPEAL_REASON)) return false;
+    const next = to as AppealState;
+    if (at === null) {
+      if (next !== "received" || move.by !== "creator") return false;
+    } else {
+      if (move.by !== "operator" || !NEXT[at].includes(next)) return false;
+      if (isFinal(next) && !(typeof move.reason === "string" && move.reason.trim())) return false;
+    }
+    at = next;
+  }
+  return at === state;
+}
+
 /** A request is seen only from the store that sent it. */
 export const appealVisibleTo = (appeal: Pick<Appeal, "store">, store: string) => Boolean(store) && appeal.store === store;
 
@@ -304,7 +333,7 @@ export function decisionNotice(decision: Decision, now: Date, can: StillPossible
   } else {
     lines.push(told ? `You can ask us to look again until ${appealDate(told.shown)}. It is free.` : "You can ask us to look again. It is free.");
     lines.push("The decision stays in place while we look, and we cannot tell you in advance what we will decide.");
-    if (!restorable(decision.kind)) lines.push("The link and its file were deleted, so they cannot be put back. If we change our decision, you can add the link again.");
+    if (decision.kind === "link") lines.push("The link and its file were deleted, so they cannot be put back. If we change our decision, you can add the link again.");
   }
   lines.push(COURT);
   return lines.filter(Boolean);
@@ -323,7 +352,8 @@ export function appealStateWords(appeal: Pick<Appeal, "number" | "state" | "move
   if (appeal.state === "reversed") {
     lines.push(kind && restorable(kind)
       ? restored ? "What was taken down is back as it was." : "We are putting back what was taken down. This page will say when it is back."
-      : "The link and its file were deleted, so they cannot be put back. You can add the link again.");
+      : kind === "link" ? "The link and its file were deleted, so they cannot be put back. You can add the link again."
+      : "The reason above says what changes.");
   }
   if (appeal.state === "upheld") lines.push(COURT);
   return lines;

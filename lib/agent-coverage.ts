@@ -107,6 +107,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/announcement": row("pages", draft),
   "POST store/answers": row("pages", draft),
   "POST store/api-keys": row("access", never(ACCESS)),
+  "POST store/appeal": row("settings", never("Asking us to look again at a takedown is the creator's own statement to Marktmorgen, in their own words (646 [WG6]); an agent never writes or sends one.")),
   "GET store/assistant-memory": row("settings", read),
   "POST store/assistant-memory": row("settings", draft, "The creator's own notes for their assistant: the agent may propose one, which the creator confirms; it never keeps one by itself."),
   "POST store/assistant-settings": row("settings", draft),

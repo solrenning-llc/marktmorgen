@@ -4911,6 +4911,20 @@ export async function setProductStamp(email: string, id: string, on: boolean): P
   return changeProduct(email, id, (product) => ({ ...product, stamp: on }));
 }
 
+/**
+ * The creator's answer to whether a product is an electronically supplied publication, for VAT (lib/catalog.ts,
+ * Product.publication; 789 [IV1] step 3, unit 5a): `true` or `false` is kept as answered, `null` clears it back to not
+ * answered. The route (app/api/store/publication/route.ts) refuses anything else, so a bad value never reads as "not a
+ * publication".
+ */
+export async function setProductPublication(email: string, id: string, value: boolean | null): Promise<ProductPartResult> {
+  return changeProduct(email, id, (product) => {
+    const rest: Product = { ...product };
+    delete rest.publication;
+    return value === null ? rest : { ...rest, publication: value };
+  });
+}
+
 /** How many first pages of a product's PDF anyone may read before buying (lib/pdf-preview.ts); 0 switches it off. */
 export async function setProductPreview(email: string, id: string, pages: number): Promise<ProductPartResult> {
   const kept = Number.isInteger(pages) && pages > 0 ? Math.min(pages, 10) : 0;

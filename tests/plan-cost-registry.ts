@@ -2365,7 +2365,7 @@ export const COST_LINES: CostLine[] = [
       // A sign-up credited to an affiliate takes one of these before its lead is written (18 October 2026).
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
-      { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
+      { file: "lib/cart-offers.ts", names: ["takeBuyerReadExact(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
       // A course's "Next step" reads what the student has through the same door, only when nothing else keeps the card away (560 [AS1], 10 November 2026).
       { file: "lib/course-next-step.ts", names: ["takeBuyerRead(store, 1)", "readListing(store, step.productId)", "takeBuyerRead(store, CART_OFFER_REQUEST_UNITS - 1)", "ownedHere(store, input.email)", "paypalOwned(store, input.email", "if (!nextStepShown({ step, courseProductId, product, owned: false, dismissed: false }).shown"] },
       // A member price's proof reads what the visitor holds from the creator's Stripe account (two calls at most) and the purchases
@@ -2426,7 +2426,7 @@ export const COST_LINES: CostLine[] = [
       { file: "app/[handle]/orders/page.tsx", names: ["await askBundle(store, token,", "await askOlder(store, token, asked)", "if (token && (bundleAsked || olderAsked))"] },
       // A certificate's PDF takes one before its record is read and the rest of CERTIFICATE_PDF_UNITS before it is drawn, on the public side; a sample
       // is kept by the CDN five minutes (C3, 4 November 2026; CERTIFICATE_PDF_READ in tests/plan-cost-registry.test.ts).
-      { file: "app/[handle]/certificate/[id]/pdf/route.ts", names: ["takePublicRequest(store, \"public\", now, 1)", "takePublicRequest(store, \"public\", now, CERTIFICATE_PDF_UNITS - 1)", "public, max-age=0, s-maxage=300"] },
+      { file: "app/[handle]/certificate/[id]/pdf/route.ts", names: ["takePublicRequestExact(store, \"public\", now, 1)", "takePublicRequestExact(store, \"public\", now, CERTIFICATE_PDF_UNITS - 1)", "public, max-age=0, s-maxage=300"] },
       { file: "lib/certificate-pdf.ts", names: ["CERTIFICATE_PDF_UNITS = 2", "CERTIFICATE_PDF_MAX_BYTES = 256_000"] },
       // A short link that opens takes one after its link and store are read, and comes off the site's hour of unpaid opens
       // (Claude 5, 7 November 2026; SHORT_LINK_OPEN_READ in tests/plan-cost-registry.test.ts).

@@ -33,10 +33,13 @@ import { createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { type DataStore, dataKey, giveData, needData, noteData, takeData } from "@/lib/store-data";
+import { type DataStore, dataKey, giveData, needData, noteData, takeData, takeDataCommands } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { UPLOAD_SECONDS, readVaultPath } from "@/lib/vault-rules";
 import { reserveStoreUpload, reserveUploadControl, type UploadStore } from "@/lib/upload-budget";
+import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
+import { allowanceWindow } from "@/lib/allowance-window";
+import type { Tier } from "@/lib/plan";
 import { abortReservedVault, closeReservedVault, openReservedVault } from "@/lib/vault-storage";
 import { deleteVault, signPieces, type OpenedUpload } from "@/lib/vault";
 import { LockBusyError, withLock, type Held } from "@/lib/redis-lock";
@@ -77,8 +80,12 @@ const LIVE_SECONDS = MAX_SUBMISSION_KEEP_DAYS * DAY + SUBMISSION_SWEEP_GRACE_SEC
 // Opening also writes the slot's turn on the store's list (two commands) and pays for the sweep's turn on it
 // (SUBMISSION_SLOT_SWEEP_COMMANDS; review of #3568, Claude 6); closing moves that turn to the kept file's keeping time
 // (two commands, the same one sweep).
+/** Store commands one start sends for the buyer's count (SUBMISSION_BUYER_OPEN): the EVAL, its HGET, HINCRBY and EXPIRE. */
+export const SUBMISSION_BUYER_OPEN_COMMANDS = 4;
+// Opening also counts the buyer's start in the store's window and, on the window's first start, takes the count's
+// bytes in the store's data room (one TAKE_DATA of one slot; Codex X6 on #3574).
 export const SUBMISSION_STEP_COMMANDS = {
-  open: 14 + 2 + 10,
+  open: 14 + 2 + 10 + SUBMISSION_BUYER_OPEN_COMMANDS + takeDataCommands(1),
   sign: 1,
   done: 20 + 2,
   abort: 11,
@@ -105,6 +112,8 @@ const liveKey = (folder: string, courseId: string, lessonId: string, who: string
   `nl:sub:live:${part(folder)}:${part(courseId)}:${part(lessonId)}:${part(who)}`;
 const doorKey = (folder: string, id: string) => `nl:sub:door:${part(folder)}:${part(id)}`;
 const whoKey = (folder: string, who: string) => `nl:sub:who:${part(folder)}:${part(who)}`;
+/** One buyer's upload starts in one store, one field a window (SUBMISSION_BUYER_OPEN; Codex X6 on #3574). */
+const opensKey = (folder: string, who: string) => `nl:sub:opens:${part(folder)}:${part(who)}`;
 const DUE_KEY = "nl:sub:due";
 const listKey = (folder: string, courseId: string) => `nl:sub:list:${part(folder)}:${part(courseId)}`;
 const listMember = (lessonId: string, id: string) => `${part(lessonId)}|${part(id)}`;
@@ -525,7 +534,66 @@ export type DoorAsk = {
 
 export type DoorOpened =
   | { ok: true; upload: OpenedUpload }
-  | { ok: false; reason: "busy" | "full" | "budget" | "room" | "pending" | "off" | "invalid" | "unavailable" };
+  | { ok: false; reason: "busy" | "full" | "budget" | "buyer_limit" | "room" | "pending" | "off" | "invalid" | "unavailable" };
+
+/**
+ * The upload starts one buyer may make in one store in one allowance window: a fifth of the plan's monthly upload
+ * starts (lib/upload-budget-policy.ts, PAID_UPLOAD_OPENS), rounded up (Codex X6 on #3574, MEDIUM; the coordinator's
+ * figure). Counted before the store's own allowance is asked and, like it, never given back: a buyer who opens and
+ * gives up again and again spends at most this share of the store's month, and is then told it is their own limit
+ * ("buyer_limit"), never that the store has no room.
+ */
+export const SUBMISSION_BUYER_OPENS: Readonly<Record<Tier, number>> = Object.freeze({
+  creator: Math.ceil(PAID_UPLOAD_OPENS.creator / 5),
+  pro: Math.ceil(PAID_UPLOAD_OPENS.pro / 5),
+  scale: Math.ceil(PAID_UPLOAD_OPENS.scale / 5),
+});
+/** Days the count outlives its window's end, so a late start in the window still finds it. */
+const OPENS_KEEP_EXTRA_SECONDS = 2 * 86_400;
+/**
+ * The buyer's count for one window, taken in one step: 1, counted and the first of this window; 2, counted; 0, the
+ * share is used, nothing counted; -1, the count does not read, nothing counted. The first line names it for the local
+ * stand-in (lib/redis-memory.ts).
+ */
+const SUBMISSION_BUYER_OPEN = [
+  "-- marktmorgen:submission-buyer-open:v1",
+  'local used = redis.call("HGET", KEYS[1], ARGV[1])',
+  "local n = 0",
+  "if used then n = tonumber(used) if not n or n < 1 or n ~= math.floor(n) then return -1 end end",
+  "if n >= tonumber(ARGV[2]) then return 0 end",
+  'redis.call("HINCRBY", KEYS[1], ARGV[1], 1)',
+  'redis.call("EXPIRE", KEYS[1], ARGV[3])',
+  "if n == 0 then return 1 end",
+  "return 2",
+].join("\n");
+/** What the buyer's count weighs in the store's data room: its key with two windows' fields at their longest. */
+const OPENS_BYTES = (folder: string, who: string) => dataBytes([opensKey(folder, who), "2026-10-19", "99999", "2026-11-19", "99999"], 1);
+
+/**
+ * Counts one start of the buyer's in this store's window: "counted", "limit" (their share is used), "full" (the first
+ * start of a window takes the count's bytes in the store's data room until the count ends, and the room is full) or
+ * "unwindowed": the store has no allowance window, so nothing is counted here and the store's own allowance, which
+ * reserves only in a window (lib/upload-budget.ts), answers for it. Anything not read exactly throws: nothing opens
+ * on a guess.
+ */
+async function countBuyerOpen(ask: DoorAsk): Promise<"counted" | "limit" | "full" | "unwindowed"> {
+  const window = allowanceWindow(ask.store, ask.nowSeconds * 1000);
+  if (!window) return "unwindowed";
+  const share = SUBMISSION_BUYER_OPENS[ask.store.tier];
+  const keepSeconds = Math.max(1, Math.ceil((window.end - ask.nowSeconds * 1000) / 1000)) + OPENS_KEEP_EXTRA_SECONDS;
+  const key = opensKey(ask.folder, ask.who);
+  const answer = repliesFor(await redisPipeline([["EVAL", SUBMISSION_BUYER_OPEN, 1, key, window.id, share, keepSeconds]]), 1)?.[0];
+  if (answer === 0) return "limit";
+  if (answer !== 1 && answer !== 2) throw new UnknownReplyError("a buyer's upload starts");
+  if (answer === 1) {
+    const room = await takeData(ask.data, [{ until: (ask.nowSeconds + keepSeconds) * 1000, bytes: OPENS_BYTES(ask.folder, ask.who) }], ask.nowSeconds * 1000);
+    if (!room.ok) {
+      if (room.reason === "full") return "full";
+      throw new UnknownReplyError("the store's data room");
+    }
+  }
+  return "counted";
+}
 
 /**
  * Opens the upload: the place's and the entry's bytes taken in the store's
@@ -571,6 +639,13 @@ export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_
   }
   let opened: Awaited<ReturnType<typeof openReservedVault>> | null = null;
   try {
+    // The buyer's own share first (Codex X6 on #3574): past it, nothing of the store's allowance is asked.
+    const counted = await countBuyerOpen(ask);
+    if (counted === "limit" || counted === "full") {
+      await givePlace(place);
+      await giveBack();
+      return { ok: false, reason: counted === "limit" ? "buyer_limit" : counted };
+    }
     if (!(await steps.reserveStoreUpload(ask.store, ask.file.bytes, "r2"))) {
       await givePlace(place);
       await giveBack();
@@ -1030,7 +1105,8 @@ export async function forgetSubmissionsPerson(
   }
   // Delete the doors again, after the live places went above (Claude 6 on #3570). A refused close or abort that put a
   // door back before those places were removed is undone here. Once the live place is gone, the put-back check refuses it.
-  const keys = entries.map((entry) => doorKey(folder, entry.id));
+  // And the buyer's count of upload starts in this store (Codex X6 on #3574): it names them.
+  const keys = [...entries.map((entry) => doorKey(folder, entry.id)), opensKey(folder, who)];
   // And their slots' turns on the store's list (review of #3568, Claude 6): each names the buyer, taken off with them.
   const turns = [...lessons].flatMap((at) => {
     const [courseId, lessonId] = at.split("|");

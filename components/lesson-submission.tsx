@@ -142,6 +142,8 @@ export function LessonSubmission({
     if (reason === "busy") return w.busy(MAX_WAITING_PER_BUYER);
     if (reason === "slow") return w.slow;
     if (reason === "room" || reason === "pending" || reason === "full" || reason === "plan" || reason === "upload_budget_unavailable") return w.noRoom(storeName);
+    // The buyer's own monthly share of upload starts in this store, never said as the store having no room (Codex X6 on #3574).
+    if (reason === "buyer_limit") return w.buyerLimit(storeName);
     if (reason === "resting") return w.resting(storeName);
     if (reason === "signed-out" || reason === "signed_out") return w.signedOut;
     if (reason === "not-buyer" || reason === "owner" || reason === "off") return w.notBuyer;

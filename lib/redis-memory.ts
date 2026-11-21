@@ -249,7 +249,7 @@ export class MemoryRedis {
     // Redis checks command arity before looking up or changing any key.
     const minimum = name === "HSET" || name === "ZADD" ? 4
       : name === "DEL" || name === "MGET" ? 2
-      : ["HDEL", "SADD", "SREM", "ZREM", "LPUSH", "RPUSH", "HMGET"].includes(name) ? 3 : 0;
+      : ["HDEL", "SADD", "SREM", "ZREM", "LPUSH", "RPUSH", "HMGET", "ZMSCORE"].includes(name) ? 3 : 0;
     if (command.length < minimum || (name === "HSET" && command.length % 2 !== 0)) {
       throw new Error(`ERR wrong number of arguments for '${name.toLowerCase()}' command`);
     }
@@ -838,6 +838,20 @@ export class MemoryRedis {
           }
           return queued;
         }
+        // One buyer's upload starts in a store's window (lib/submission-store.ts, SUBMISSION_BUYER_OPEN).
+        if (key.startsWith("-- marktmorgen:submission-buyer-open:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, counts, windowId, share, seconds] = args;
+          const used = this.run(["HGET", counts, windowId]);
+          let n = 0;
+          if (used !== null) {
+            n = Number(used);
+            if (!Number.isSafeInteger(n) || n < 1) return -1;
+          }
+          if (n >= Number(share)) return 0;
+          this.run(["HINCRBY", counts, windowId, "1"]);
+          this.run(["EXPIRE", counts, seconds]);
+          return n === 0 ? 1 : 2;
+        }
         // A creator's reply and the removal of its buyer's waiting place are one atomic step.
         if (key.startsWith("-- marktmorgen:submission-reply-write:v1\n") && args[0] === "3" && args.length === 9) {
           const [, lock, record, live, token, expected, id, json, seconds] = args;
@@ -967,6 +981,11 @@ export class MemoryRedis {
             if ((record as { h?: unknown }).h === handle) return 0;
           }
           return this.run(["HDEL", handles, handle]);
+        }
+        // lib/learn.ts TAKE_OFF_IF: a refunded course taken off a ledger only while its entry is still the value read.
+        if (key.startsWith("-- marktmorgen:learn-take-off-if:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, ledger, field, held] = args;
+          return this.run(["HGET", ledger, field]) === held ? this.run(["HDEL", ledger, field]) : 0;
         }
         // lib/group-buy.ts REFUNDS_END: a pass over a store's refunds ended, its anchor and the account it is of in one step.
         if (key.startsWith("-- marktmorgen:group-refunds-end:v1\n") && args[0] === "4" && args.length === 7) {
@@ -1920,6 +1939,25 @@ export class MemoryRedis {
           this.until.set(marker, this.now() + 3456000 * 1000);
           return 1;
         }
+        // lib/page-funnel-store.ts SAVE_STORE_PAGE_FUNNEL: the store-live guard (v2: a store with an id's id key must hold its ref), then funnel-save:v1's body.
+        if (key.startsWith("-- marktmorgen:funnel-save-live:v3\n") && args[0] === "3" && args.length === 11) {
+          const [, target, live, erasing, id, body, max, mode, field, statsId, ref] = args;
+          if (this.run(["HGET", erasing, field]) !== null) return -4;
+          if (statsId === "") {
+            const held = this.run(["GET", live]);
+            if (held === null) return -4;
+            if (held !== ref) return -5;
+          } else {
+            const raw = this.run(["GET", live]);
+            if (raw === null) return -4;
+            if (typeof raw !== "string") throw new Error("WRONGTYPE funnel-save-live: the store's record");
+            let record: unknown;
+            try { record = JSON.parse(raw); } catch { return -3; }
+            if (!record || typeof record !== "object" || Array.isArray(record)) return -3;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return -4;
+          }
+          return this.run(["EVAL", `-- marktmorgen:funnel-save:v1\n`, "1", target, id, body, max, mode]);
+        }
         if (key.startsWith("-- marktmorgen:funnel-save:v1\n") && args[0] === "1" && args.length === 6) {
           const target = args[1];
           this.live(target);
@@ -2643,6 +2681,18 @@ export class MemoryRedis {
           this.data.set(target, args[3]);
           if (!this.until.has(target)) this.until.set(target, this.now() + Number(args[4]) * 1000);
           return 1;
+        }
+        // lib/webhooks.ts SKIP_COUNT: the day's count of messages not kept, taken once a message: a message already
+        // counted (its mark) answers its place and counts nothing.
+        if (key.startsWith("-- marktmorgen:webhook-skip-count:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, day, mark, at] = args;
+          const had = this.run(["GET", mark]);
+          if (typeof had === "string") return Number(had);
+          const n = this.run(["INCR", day]);
+          this.run(["EXPIREAT", day, at]);
+          this.run(["SET", mark, String(n)]);
+          this.run(["EXPIREAT", mark, at]);
+          return n;
         }
         if (key.startsWith("-- marktmorgen:crm-deal-save:v5\n") && ((args[0] === "1" && args.length === 6) || (args[0] === "2" && args.length === 9))) {
           if (args[0] === "2") {

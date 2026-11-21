@@ -156,6 +156,9 @@ async function main(): Promise<void> {
     await b.mounted.settle();
     is("the benefits the box put in front go, and the sentence the creator added stays", b.fields.about, `${ORIGINAL.about} Each recipe serves four.`);
     is("the name and the short description go back", [b.fields.title, b.fields.summary], [ORIGINAL.title, ORIGINAL.summary]);
+    // Claude 4 3Rj's LEVE on #3447 (4761a4eba2): the full description keeps the creator's words, so the status says so,
+    // never that every box is back as it was.
+    is("and it says the creator's later change to the full description was kept", texts(status(b.mounted.tree())?.props?.children).join(""), undoneKept(["full description"]));
     b.mounted.unmount();
   }
   {

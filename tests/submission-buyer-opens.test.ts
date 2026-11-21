@@ -116,6 +116,31 @@ async function main(): Promise<void> {
     }
   }
 
+  // Claude 6 i51q on #3574 (LOW): the count was taken before its bytes in the store's data room, so a room that was
+  // full (or did not answer) left a start counted, spent, and its count's bytes counted nowhere for the window.
+  part("A data room that is full refuses the start before the buyer's count is taken");
+  {
+    const fay = "f".repeat(32);
+    const original = redis.pipeline.bind(redis);
+    // The room answers full only for the count's own take: the one entry kept until a time ("~" and a month).
+    redis.pipeline = (async (list: (string | number)[][]) => {
+      const take = list.length === 1 && String(list[0][0]).toUpperCase() === "EVAL" && String(list[0][1]).startsWith("-- marktmorgen:store-data:v1");
+      if (take && list[0].slice(3).some((part) => String(part).startsWith("~"))) return [[0, 0]];
+      return original(list);
+    }) as typeof redis.pipeline;
+    let first: string;
+    try {
+      first = await openAndGiveUp(fay, lesson(1), world().steps);
+    } finally {
+      redis.pipeline = original;
+    }
+    is("control: the start is refused as full", first, "full");
+    is("and no start of theirs was counted", (await redis.pipeline([["EXISTS", `nl:sub:opens:${FOLDER}:${fay}`]]))[0], 0);
+    const answers: string[] = [];
+    for (let i = 0; i < SHARE; i += 1) answers.push(await openAndGiveUp(fay, lesson(1), world().steps));
+    is("so their whole share is still theirs", answers.every((a) => a === "opened"), true);
+  }
+
   part("The count goes with the person");
   {
     const dee = "d".repeat(32);

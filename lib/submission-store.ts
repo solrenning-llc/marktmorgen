@@ -570,28 +570,28 @@ const SUBMISSION_BUYER_OPEN = [
 const OPENS_BYTES = (folder: string, who: string) => dataBytes([opensKey(folder, who), "2026-10-19", "99999", "2026-11-19", "99999"], 1);
 
 /**
- * Counts one start of the buyer's in this store's window: "counted", "limit" (their share is used), "full" (the first
- * start of a window takes the count's bytes in the store's data room until the count ends, and the room is full) or
- * "unwindowed": the store has no allowance window, so nothing is counted here and the store's own allowance, which
- * reserves only in a window (lib/upload-budget.ts), answers for it. Anything not read exactly throws: nothing opens
- * on a guess.
+ * Counts one start of the buyer's in this store's window: "counted", "limit" (their share is used), "full" (the store's
+ * data room has no place for the count) or "unwindowed": the store has no allowance window, so nothing is counted here
+ * and the store's own allowance, which reserves only in a window (lib/upload-budget.ts), answers for it. The count's
+ * bytes are taken in the data room first, until the count ends, on every start (Claude 6 i51q on #3574, LOW): a full
+ * or unknown room refuses before anything is counted, so no start is spent on it and no count is ever kept without
+ * its bytes. Taken again at each start, they only make the room look fuller, never emptier. Anything not read exactly
+ * throws: nothing opens on a guess.
  */
 async function countBuyerOpen(ask: DoorAsk): Promise<"counted" | "limit" | "full" | "unwindowed"> {
   const window = allowanceWindow(ask.store, ask.nowSeconds * 1000);
   if (!window) return "unwindowed";
   const share = SUBMISSION_BUYER_OPENS[ask.store.tier];
   const keepSeconds = Math.max(1, Math.ceil((window.end - ask.nowSeconds * 1000) / 1000)) + OPENS_KEEP_EXTRA_SECONDS;
+  const room = await takeData(ask.data, [{ until: (ask.nowSeconds + keepSeconds) * 1000, bytes: OPENS_BYTES(ask.folder, ask.who) }], ask.nowSeconds * 1000);
+  if (!room.ok) {
+    if (room.reason === "full") return "full";
+    throw new UnknownReplyError("the store's data room");
+  }
   const key = opensKey(ask.folder, ask.who);
   const answer = repliesFor(await redisPipeline([["EVAL", SUBMISSION_BUYER_OPEN, 1, key, window.id, share, keepSeconds]]), 1)?.[0];
   if (answer === 0) return "limit";
   if (answer !== 1 && answer !== 2) throw new UnknownReplyError("a buyer's upload starts");
-  if (answer === 1) {
-    const room = await takeData(ask.data, [{ until: (ask.nowSeconds + keepSeconds) * 1000, bytes: OPENS_BYTES(ask.folder, ask.who) }], ask.nowSeconds * 1000);
-    if (!room.ok) {
-      if (room.reason === "full") return "full";
-      throw new UnknownReplyError("the store's data room");
-    }
-  }
   return "counted";
 }
 

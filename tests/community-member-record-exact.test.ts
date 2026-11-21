@@ -37,7 +37,9 @@ async function seed() {
   ]);
 }
 
-const isRecordDelete = (commands: Command[]) => commands.some((c) => c[0] === "HDEL" && c[1] === membersKey && c[2] === member);
+// Since #2576 the record is taken only while it holds what was read (lib/redis-take.ts HASH_DEL_IF, last of the
+// pipeline after the directory's ZREM and the rate keys' DEL), so its delete is that EVAL on the members' hash.
+const isRecordDelete = (commands: Command[]) => commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:hash-del-if:") && c[3] === membersKey && c[4] === member);
 const recordKept = async () => (await call([["HGET", membersKey, member]]))[0] !== null;
 
 /** The record's delete pipeline answered `reply`; with `run`, its commands ran first (the delete landed, the answer was lost). */
@@ -56,15 +58,15 @@ async function answered<T>(reply: (real: unknown[]) => unknown, run: boolean, wo
 
 const SHAPES: [string, (real: unknown[]) => unknown][] = [
   ["an empty list", () => []],
-  ["a short list", () => [1, 1]],
-  ["a list one too long", () => [1, 1, 0, 0]],
-  ["not a list", () => ({ result: [1, 1, 0] })],
-  ["HDEL as 2", () => [2, 1, 0]],
-  ["HDEL as text", () => ["1", 1, 0]],
-  ["HDEL as null", () => [null, 1, 0]],
-  ["ZREM as -1", () => [1, -1, 0]],
-  ["DEL past the rate keys", () => [1, 1, 99]],
-  ["DEL as 1.5", () => [1, 1, 1.5]],
+  ["a short list", () => [1, 0]],
+  ["a list one too long", () => [1, 0, 1, 0]],
+  ["not a list", () => ({ result: [1, 0, 1] })],
+  ["the record's take as 2", () => [1, 0, 2]],
+  ["the record's take as text", () => [1, 0, "1"]],
+  ["the record's take as null", () => [1, 0, null]],
+  ["ZREM as -1", () => [-1, 0, 1]],
+  ["DEL past the rate keys", () => [1, 99, 1]],
+  ["DEL as 1.5", () => [1, 1.5, 1]],
 ];
 
 for (const [name, reply] of SHAPES) {
@@ -72,7 +74,7 @@ for (const [name, reply] of SHAPES) {
     await seed();
     await assert.rejects(() => answered(reply, false, () => forgetCommunityPerson(community, member, email, [])), { name: "UnknownReplyError" });
     assert.equal(await recordKept(), true, "the record is still there for the retry");
-    assert.equal(await forgetCommunityPerson(community, member, email, []), 1, "the retry counts the record's own HDEL");
+    assert.equal(await forgetCommunityPerson(community, member, email, []), 1, "the retry counts the record's own delete");
     assert.equal(await recordKept(), false);
   });
 }

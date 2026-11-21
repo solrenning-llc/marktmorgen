@@ -29,14 +29,14 @@ import {
   within,
   withPin,
 } from "@/lib/community";
-import { communityViewer, maySeeSpace } from "@/lib/community-access";
+import { communityViewer, maySeeSpace, spaceAnswer, unknownForGood } from "@/lib/community-access";
 import { approvalFor, holdComment, holdPost, mustHold, withdrawHeld } from "@/lib/community-approval";
 import { MAX_POLL_DAYS, parsePoll, vote } from "@/lib/community-polls";
 import { mentionsIn, whoIs } from "@/lib/community-mentions";
 import { tell } from "@/lib/community-notify";
 import { communityWords } from "@/lib/buyer-words/community";
-import { checkCommunityImage } from "@/lib/community-image";
-import { blobImages, dropCommunityImage, noteCommunityUpload, takeCommunityUpload } from "@/lib/community-files";
+import { checkCommunityImage, ownsCommunityImage } from "@/lib/community-image";
+import { blobImages, dropCommunityImage, takeCommunityUpload, untakeCommunityUpload } from "@/lib/community-files";
 import { RecipientsUnreadError, advanceAnnouncement, queueAnnouncement } from "@/lib/community-mail";
 import {
   ITEM_ID,
@@ -189,7 +189,9 @@ export async function POST(request: NextRequest) {
       if (chosen.creatorOnly && !owner) return back(fromPage, "creatoronly");
       // A space kept for the buyers of some products: the same gate the feed
       // asks, asked again here, because a form can be sent from anywhere.
-      if (!(await maySeeSpace(store, config, chosen, { owner, email: viewer.email }))) return back(home, "spacelocked");
+      // Not known is said as not checked, never as a space that is not theirs (CX-123 rule 24).
+      const may = await spaceAnswer(store, config, chosen, { owner, email: viewer.email, holdings: viewer.holdings });
+      if (may !== true) return back(home, may === "unknown" ? (unknownForGood(viewer.holdings) ? "spaceunknownlasting" : "spaceunknown") : "spacelocked");
       // A space that opens for posting at a level (lib/community-points.ts).
       // Reading and commenting stay open to every member.
       if (!owner && chosen.level >= 2) {
@@ -236,16 +238,18 @@ export async function POST(request: NextRequest) {
         };
         const w = side(field("img_w", 6));
         const h = side(field("img_h", 6));
-        if (!(await takeCommunityUpload(path, key))) return back(fromPage, "image");
+        // Only a picture of this community's own folder is ever taken (Claude 6 on #3414): one taken and then refused
+        // by the check below as "path" would keep a mark nothing removes.
+        if (!ownsCommunityImage(path, id) || !(await takeCommunityUpload(path, key))) return back(fromPage, "image");
         let checked: Awaited<ReturnType<typeof checkCommunityImage>>;
         try {
           checked = await checkCommunityImage(path, id, blobImages);
         } catch (error) {
-          // Still this member's, for when they send the form again.
-          await noteCommunityUpload(path, key).catch(() => {});
+          // Still this member's, for when they send the form again (never anybody else's: lib/community-files.ts).
+          await untakeCommunityUpload(path, key).catch(() => {});
           throw error;
         }
-        if (checked === "missing") await noteCommunityUpload(path, key).catch(() => {});
+        if (checked === "missing") await untakeCommunityUpload(path, key).catch(() => {});
         if (checked !== "ok" || !w || !h) {
           // A picture refused here was deleted by the check, or is deleted now: its place goes back.
           if (checked !== "missing" && checked !== "path") await dropCommunityImage(path);
@@ -323,9 +327,8 @@ export async function POST(request: NextRequest) {
     const post = await readPost(id, postId);
     if (!post || (post.hid && !owner)) return back(home, "gone");
     const itsSpace = config.spaces.find((s) => s.id === post.sp);
-    if (itsSpace && !(await maySeeSpace(store, config, itsSpace, { owner, email: viewer.email }))) {
-      return back(home, "spacelocked");
-    }
+    const may = itsSpace ? await spaceAnswer(store, config, itsSpace, { owner, email: viewer.email, holdings: viewer.holdings }) : true;
+    if (may !== true) return back(home, may === "unknown" ? (unknownForGood(viewer.holdings) ? "spaceunknownlasting" : "spaceunknown") : "spacelocked");
 
     if (action === "comment") {
       const text = cleanText(form.get("text"), MAX_COMMENT_TEXT);

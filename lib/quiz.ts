@@ -30,8 +30,10 @@
 import { MAX_WAIT_MINUTES, drawn, trySeed, waitLeft } from "@/lib/quiz-bank-rules";
 import { QUIZ_MONTHLY_SUBMISSIONS, QUIZ_USAGE_POLICY, QUIZ_USAGE_RETENTION_SECONDS, quizUsageKey } from "@/lib/quiz-usage-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataChange, type DataStore, giveData, needData, noteData } from "@/lib/store-data";
+import { SET_AND_VALUES_TAKE } from "@/lib/redis-take";
+import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, ITEM_ID_PATTERN, lessonsInOrder, newItemId } from "@/lib/course";
 
@@ -751,33 +753,73 @@ export async function resetTries(course: Course, who: string, room: DataStore): 
   if (!passed) throw new UnknownReplyError("a student's passed quizzes");
   const lessons = lessonsInOrder(course).filter(({ lesson }) => lesson.quiz && !passed.has(lesson.id));
   if (lessons.length === 0) return;
-  // What the tries weighed comes back to the store's data room.
-  const held = repliesFor(await redisPipeline(lessons.flatMap(({ lesson }) => [["GET", resultKey(course.id, lesson.id, who)], ["GET", triesKey(course.id, lesson.id, who)]])), lessons.length * 2);
-  // Each GET answers a string or null; anything else is not evidence of what would be deleted (Codex D2 on #2875).
-  if (!held || held.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a student's quiz tries");
-  const freed = held.reduce((sum: number, raw) => sum + kept(raw), 0);
+  // Read exactly first (Codex D2 on #2875): each GET answers a string or null, and anything else is not evidence of
+  // what would be deleted, so nothing is deleted on it.
+  const keys = lessons.flatMap(({ lesson }) => [resultKey(course.id, lesson.id, who), triesKey(course.id, lesson.id, who)]);
+  const seen = repliesFor(await redisPipeline(keys.map((key) => ["GET", key])), keys.length);
+  if (!seen || seen.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a student's quiz tries");
+  // Then each is read and deleted in one step (GETDEL), so what the tries weighed comes back to the store's data room
+  // once, by what this step itself removed, even beside a deletion of the student. A GETDEL answered in another shape
+  // gives nothing back: the room stays counted, never short.
+  const held = repliesFor(await redisPipeline(keys.map((key) => ["GETDEL", key])), keys.length);
+  const freed = held ? held.reduce((sum: number, raw) => sum + (typeof raw === "string" ? kept(raw) : typeof raw === "number" ? kept(String(raw)) : 0), 0) : 0;
   if (freed) await giveData(room, [{ slot: TRIES_SLOT(course.id), bytes: freed }]);
-  await redisPipeline(
-    lessons.flatMap(({ lesson }) => [
-      ["DEL", triesKey(course.id, lesson.id, who)],
-      ["DEL", resultKey(course.id, lesson.id, who)],
-    ]),
-  );
 }
 
 /**
- * Deletes one student's tries, results and passes in these courses' quizzes (lib/person-erasure.ts). `who` is
- * lib/learn.ts emailKey. Only the exact one-slot DEL count, from zero up to the distinct keys sent, says how many
- * were deleted; any other reply throws UnknownReplyError, so the erasure reports this part as not done for a retry
- * instead of a finished part that may have deleted nothing (CX-123 rule 24).
+ * Deletes one student's tries, results and passes in these courses' quizzes
+ * (lib/person-erasure.ts). `who` is lib/learn.ts emailKey. Each course's are
+ * read and deleted in one step, and what they weighed (each try's count and
+ * result as resetTries gives them back, each lesson passed as markPassed
+ * counts it) goes back to `room`, when it is given, once.
  */
-export async function forgetQuizPerson(courses: { courseId: string; lessonIds: string[] }[], who: string): Promise<number> {
+export async function forgetQuizPerson(courses: { courseId: string; lessonIds: string[] }[], who: string, room?: DataStore): Promise<number> {
   if (!courses.length || !isRedisConfigured()) return 0;
-  const keys = [
-    ...new Set(courses.flatMap((c) => [passedKey(c.courseId, who), ...c.lessonIds.flatMap((l) => [triesKey(c.courseId, l, who), resultKey(c.courseId, l, who)])])),
-  ];
-  const replies = repliesFor(await redisPipeline([["DEL", ...keys]]), 1);
-  const gone = replies ? countOf(replies[0]) : null;
-  if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of a student's quiz tries, results and passes");
-  return gone;
+  const what = "the deletion of a student's quiz tries";
+  const replies = exactReplies(
+    await redisPipeline(
+      courses.map((c) => {
+        const keys = [passedKey(c.courseId, who), ...c.lessonIds.flatMap((l) => [triesKey(c.courseId, l, who), resultKey(c.courseId, l, who)])];
+        return ["EVAL", SET_AND_VALUES_TAKE, keys.length, ...keys];
+      }),
+    ),
+    courses.length,
+    what,
+  );
+  let records = 0;
+  let unknown = false;
+  const freed: { slot: string; bytes: number }[] = [];
+  courses.forEach((c, i) => {
+    // Exactly {the passes, one value per lesson key, how many keys went}; any
+    // other shape leaves this course's deletion unknown, and its room kept.
+    // Every level read as a plain list (lib/redis-exact.ts plainList): no hole, no getter, read once (Codex G on #2576).
+    const outer = plainList(replies[i]);
+    const [passedRaw, valuesRaw, gone] = outer && outer.length === 3 ? outer : [];
+    const passed = plainList(passedRaw);
+    const values = plainList(valuesRaw);
+    if (
+      !passed ||
+      !passed.every((lessonId) => typeof lessonId === "string") ||
+      !values ||
+      values.length !== c.lessonIds.length * 2 ||
+      !values.every((raw) => raw === null || typeof raw === "string" || typeof raw === "number") ||
+      typeof gone !== "number" ||
+      !Number.isSafeInteger(gone) ||
+      // The same DEL took exactly the keys this reply says were there (Codex G on #2576): the passes' set when it held
+      // any, and each value that was not none. Any other count is a reply that contradicts itself: unknown.
+      gone !== (passed.length > 0 ? 1 : 0) + values.filter((raw) => raw !== null).length
+    ) {
+      unknown = true;
+      return;
+    }
+    records += gone;
+    const bytes =
+      passed.reduce((sum: number, lessonId) => sum + dataBytes([lessonId as string], 1), 0) +
+      values.reduce((sum: number, raw) => sum + kept(typeof raw === "number" ? String(raw) : raw), 0);
+    if (bytes > 0) freed.push({ slot: TRIES_SLOT(c.courseId), bytes });
+  });
+  // What was confirmed taken comes back; a course whose reply is unknown keeps its room.
+  if (room && freed.length) await giveData(room, freed);
+  if (unknown) throw new UnknownReply(what);
+  return records;
 }

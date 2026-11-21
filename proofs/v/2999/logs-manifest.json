@@ -1,0 +1,138 @@
+{
+  "decodedJsonBytes": 198030,
+  "decodedJsonSha256": "b0cf5872809c83602170fea4dfea86901f3626dd6f3bb15c04b2e5286e191755",
+  "files": {
+    "current-limits.log": {
+      "bytes": 889,
+      "sha256": "1cce7c4896814d8931ced2cb867b4c998fd64e1486e48f67f8b43ba36e6a85b3"
+    },
+    "green-closing.log": {
+      "bytes": 670,
+      "sha256": "07e67043568e34562cf5d4d7216a3b12d45c81d598785ab5783d36aac926ad09"
+    },
+    "green-recount.log": {
+      "bytes": 1119,
+      "sha256": "8fc1250c8eecabd333640d108a77d6b551aae67cdf08cf5b101744486f2de38b"
+    },
+    "linked-checkout-key-count.log": {
+      "bytes": 2081,
+      "sha256": "6ca3b6b05d668d1b9eac1c63f0277db65e63a60170d221bd2c90fad0bc53eb5f"
+    },
+    "linked-closed-store.log": {
+      "bytes": 4625,
+      "sha256": "79e7210e44def7bcb987054bb0a6ed84c89bfbb721de885ecd1d6a1f473f29d9"
+    },
+    "linked-discount-impact.log": {
+      "bytes": 857,
+      "sha256": "e075a2fe61f75b8c825c1bad68cb1a57b9d3a0c88828366acaca5ed0eb220fb1"
+    },
+    "linked-fair-price.log": {
+      "bytes": 2096,
+      "sha256": "263cd5e10c41649266e39cefa2c13151e372580c8967ce28e8ab914fb3178d06"
+    },
+    "linked-gifts.log": {
+      "bytes": 3490,
+      "sha256": "2ec39d4ce6125396baa7ee11776a46285358bdcada9094ac4312931ab64d8490"
+    },
+    "linked-group-buy.log": {
+      "bytes": 2985,
+      "sha256": "304b37d84639be35242915466150b0dd4a4ca7b0996e28f7dee0e5ea2e878acb"
+    },
+    "linked-intro-price.log": {
+      "bytes": 2049,
+      "sha256": "f30540123d7e50d4189f6e4c6fc31b0117126e1a4bf09bdfca9334a9c1143085"
+    },
+    "linked-order-admission.log": {
+      "bytes": 5152,
+      "sha256": "42e77f439f3831980e324eb546f50888c262cffdc68eb36b69ff1d0a3a2d5b5f"
+    },
+    "linked-order-confirmation-paid.log": {
+      "bytes": 1912,
+      "sha256": "da02e900150609e31326104ffaae04b0d0ae92c76cb6fc9ab40e79a1c389962f"
+    },
+    "linked-person-data-registry.log": {
+      "bytes": 1520,
+      "sha256": "4a4016d40f53a0b0487f1f1bf0cc0a190864d4525a7f3bb3f2f5da7efb7ddea6"
+    },
+    "linked-plan-cost-registry.log": {
+      "bytes": 4632,
+      "sha256": "661b0e6b6b3e00b50045eaeca723eff62857487023a0c53071dbb9b5cf4def9a"
+    },
+    "linked-platform-us-english.log": {
+      "bytes": 2246,
+      "sha256": "7250276c36ed8e1c670b6bbec9d6f41a179e6900e8b9fd660feffeabfd98124f"
+    },
+    "linked-single-digital-confirmation.log": {
+      "bytes": 1010,
+      "sha256": "233eb7cd30e792a82080c89d461d6fb0d072853bb663dd2f7219f5528595de39"
+    },
+    "linked-store-data-registry.log": {
+      "bytes": 1223,
+      "sha256": "fed99d8f199e7d1745f775a0a3e54d6eb5d1f4ce14242a11141d884d69657a49"
+    },
+    "linked-store-sale.log": {
+      "bytes": 934,
+      "sha256": "7b188b4a843f6f91c1331e9abc57df419a8d37a8fbd465e6a9fb354b653e5d7e"
+    },
+    "linked-welcome-offer.log": {
+      "bytes": 1552,
+      "sha256": "aa52a5c7fa3939b29a97a90aca50482fec56aae83e73cb501b5d3858b89c4638"
+    },
+    "lint.log": {
+      "bytes": 362,
+      "sha256": "0ea87422795ac0c773b4808a076a28702edf2ec243c51ffbcc606080dc216e24"
+    },
+    "main-registry-unions.patch": {
+      "bytes": 33696,
+      "sha256": "bd2fa0179db9fdda9da610aff7de37cc59148adc6352af4a835991d141f8186f"
+    },
+    "member-gaps.log": {
+      "bytes": 1909,
+      "sha256": "27d71eec58712592c1de2f7ffa9772a6fd75602e10ec70c5acbe8c913a22dd5b"
+    },
+    "member-price.log": {
+      "bytes": 6594,
+      "sha256": "7953985e45f9c3604aa582b00b0442eb8f6fbbcf58c64c793cce1ef82ade3080"
+    },
+    "own-green-final.log": {
+      "bytes": 550,
+      "sha256": "6d180f8c6f8ffc5a4d5d69d11319cb65d04fea3cec6cb7612b25deb0de4a379a"
+    },
+    "own-green.log": {
+      "bytes": 549,
+      "sha256": "69bc5ee96f5f85f27822beed6953f40275a59e40469292f01392c75768cf9009"
+    },
+    "own-red-final.log": {
+      "bytes": 2901,
+      "sha256": "48e72cb295f0b60de458e9c9c8ed260f2216beed47cdc1c8b8ddf120cbcf231c"
+    },
+    "own-red.log": {
+      "bytes": 2901,
+      "sha256": "d31e9207b94efc5a6f9559ab3b36a9188a9ffc2bf29c916c35931f76929131a9"
+    },
+    "product-delta.patch": {
+      "bytes": 74804,
+      "sha256": "4392c70b6f0cfcd0227ad458bd2bf869902c5f5bba7d0531fdb4cefd48abf986"
+    },
+    "red-closing.log": {
+      "bytes": 1674,
+      "sha256": "7528c530fe2cf16369cd65f8b667825acaa504fcb65120807e4f55d374e95489"
+    },
+    "red-recount.log": {
+      "bytes": 19430,
+      "sha256": "e6f19359b66354859cad2bcc39b952136f0091fd85636e8c117cf5f80d44619a"
+    },
+    "scanner.log": {
+      "bytes": 69,
+      "sha256": "5c3eeccadbc70b69f93b6ce1f45d71a1bf3e89f4896a0ac0176265dfd813efde"
+    },
+    "types.log": {
+      "bytes": 538,
+      "sha256": "5d9bb38fefbcfa86a22281fdf5040c6a3060d0727807583f98560132423ce287"
+    },
+    "initial-member-family.proof.ts": {
+      "bytes": 1673,
+      "sha256": "95dad2a0989f700a03617be04659757ea266b53cb12c4a444579ed52595f8791"
+    }
+  }
+}

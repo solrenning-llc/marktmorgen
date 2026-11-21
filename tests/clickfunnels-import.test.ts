@@ -61,7 +61,8 @@ async function main(): Promise<void> {
   part("ClickFunnels' words");
   is("statuses as the contacts page writes them", ["Subscribed", "Unsubscribed", "Undeliverable", "", "maybe", "yes", "no"].map(readClickFunnelsStatus), ["subscribed", "unsubscribed", "undeliverable", "none", "unknown", "subscribed", "none"]);
   is("only Subscribed and confirmed may be emailed", [consentFrom("subscribed", true), consentFrom("subscribed", false), consentFrom("none", true), consentFrom("unsubscribed", true), consentFrom("unknown", true)], ["agreed", "none", "none", "unsubscribed", "none"]);
-  is("order states", ["Paid", "", "Refunded", "Failed", "Canceled", "pending", "who knows"].map(readOrderStatus), ["paid", "paid", "unpaid", "unpaid", "unpaid", "unpaid", "unknown"]);
+  is("order states: an empty one in a file with a status column is not known, never paid", ["Paid", "", "Refunded", "Failed", "Canceled", "pending", "who knows"].map((s) => readOrderStatus(s)), ["paid", "unknown", "unpaid", "unpaid", "unpaid", "unpaid", "unknown"]);
+  is("and read as paid only in a file with no status column", readOrderStatus("", false), "paid");
 
   await claimHandle(OWNER, "cfstore", "Moving Kitchen", "");
   await ensureStatsId(OWNER);
@@ -182,7 +183,7 @@ async function main(): Promise<void> {
     ["5", "dee@example.com", "The Guide"],
   ];
   const oview = await previewImport(store, "purchases", { expected: orders.length, file: "orders.csv", source: "clickfunnels" }, orders);
-  is("only paid orders give anything; a row without a status reads as before", oview.ok ? outcome(oview.rows) : oview.reason, ["2:added", "3:skipped", "4:error", "5:added"]);
+  is("only paid orders give anything; a row without a status in a file with a status column gives nothing", oview.ok ? outcome(oview.rows) : oview.reason, ["2:added", "3:skipped", "4:error", "5:error"]);
 
   part("A saved page into blocks");
   const saved = `<!doctype html><html><head><title>Meal Prep | Moving Kitchen</title><script src="https://connect.facebook.net/fbevents.js"></script><script>window.cfData={"secret":"x"}</script><style>body{}</style></head><body>

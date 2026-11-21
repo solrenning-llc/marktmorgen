@@ -111,6 +111,7 @@ is("and names the other actions LOCKED_ACTIONS holds that are not deleting: a ne
 // The account's own actions that refuse a locked session by themselves, each read in its route and named in the note.
 const ACCOUNT_LOCKS: Record<string, RegExp> = {
   "app/api/auth/signout-all/route.ts": /"Sign out everywhere"/,
+  "app/api/auth/signout-others/route.ts": /"Log out of other devices"/,
   "app/api/auth/passkey/route.ts": /\badd or remove a passkey\b/,
   "app/api/auth/two-step/route.ts": /\bchange two-step login\b/,
   "app/api/auth/recovery-address/route.ts": /\bchange your recovery address\b/,

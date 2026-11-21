@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { cartWords } from "@/lib/buyer-words/cart";
 import { MAX_CART } from "@/lib/cart-rules";
-import type { LanguageCode } from "@/lib/store-language";
+import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
 import { AssistReminderBox } from "@/components/assistant-reminder-box";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
 import { WithdrawalWhere } from "@/components/withdrawal-where";
+import { BillingCountryField } from "@/components/billing-country-field";
 
 /**
  * A store's cart (lib/cart-rules.ts), kept in the visitor's own browser and
@@ -126,7 +127,7 @@ export function CartButton({
 }: {
   handle: string;
   lang: LanguageCode;
-  notice: "changed" | "error" | "consent" | null;
+  notice: "changed" | "error" | "consent" | "abroad" | "country" | null;
   /** The store's name when its checkout offers the Store assistant's box for one reminder (lib/assistant-reminder.ts); "" when not. */
   remind?: string;
   /** A cart put back as it was, from a reminder's link or the way back from its checkout (lib/checkout-recovery.ts, cartLink). */
@@ -371,7 +372,7 @@ export function CartButton({
             </button>
           </div>
           {notice && notice !== "consent" ? (
-            <p className="st-note mt-3 text-sm" role="alert">{notice === "changed" ? c.changed : c.error}</p>
+            <p className="st-note mt-3 text-sm" role="alert">{notice === "changed" ? c.changed : notice === "abroad" ? c.abroad : notice === "country" ? c.country : c.error}</p>
           ) : null}
           {ids.length === 0 ? (
             <p className="st-muted mt-3 text-sm">{c.empty}</p>
@@ -514,6 +515,8 @@ export function CartButton({
                   )}
                   {remind ? <AssistReminderBox id={`r-cart-${handle}`} lang={lang} store={remind} /> : null}
                   {/* Asked when anything in the cart is handed over digitally; a cart of shipped products only has nothing to start at once, and is told in its place where the withdrawal function is (art. 6(1)(h)). */}
+                  {/* Where the buyer is buying from (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate). */}
+                  <BillingCountryField id={`bc-cart-${handle}`} locale={LANGUAGES[lang].locale} label={c.billingCountry} choose={c.chooseCountry} />
                   {digital ? <DigitalConsentBox id={`dc-cart-${handle}`} lang={lang} refused={notice === "consent"} /> : <WithdrawalWhere lang={lang} />}
                   <button type="submit" className="btn st-btn btn-block">{current && total ? c.checkout(total) : c.checkoutUnpriced}</button>
                   <p className="st-muted text-xs">{c.note}</p>

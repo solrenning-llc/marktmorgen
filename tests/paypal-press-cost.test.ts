@@ -19,6 +19,7 @@ import { bookWork } from "@/lib/api-read-rules";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 import {
   COST_LINES, PAYPAL_PRESS, PAYPAL_PRESS_BOOK_COMMANDS, PAYPAL_PRESS_COMMANDS, PAYPAL_PRESS_LOCK_TRIES, PAYPAL_PRESS_SECONDS,
@@ -88,6 +89,7 @@ async function seed(store: Store, people: number, open: number): Promise<void> {
     commands.push(["HSET", `nl:pp:open:${STATS}`, `OPEN${b}BATCHX`, JSON.stringify({ at: Date.now(), currency: "usd", lines: [{ a: `z${String(b).padStart(11, "0")}`, c: 100 }] })]);
   }
   await pipeline(commands);
+  await markLive(store);
   if (!(await connectPayPal(store, CLIENT, SECRET)).ok) throw new Error("synthetic PayPal app not kept");
 }
 

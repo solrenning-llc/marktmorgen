@@ -694,6 +694,14 @@ export class MemoryRedis {
           this.run(["EXPIRE", log, keep]);
           return 1;
         }
+        // lib/store.ts PRODUCT_WITH_ABOUT: a product's record and its description, written together.
+        if (key.startsWith("-- marktmorgen:product-with-about:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, record, about, json, text] = args;
+          this.run(["SET", record, json]);
+          if (text === "") this.run(["DEL", about]);
+          else this.run(["SET", about, text]);
+          return 1;
+        }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
         // lib/store-allowance.ts GIVE_ALLOWANCE_BACK: a missing counter left missing, one never below zero, its expiry kept.
         if (key.startsWith("-- marktmorgen:allowance-give-back:v1\n") && args[0] === "1" && args.length === 3) {

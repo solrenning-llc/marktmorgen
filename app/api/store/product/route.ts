@@ -219,6 +219,16 @@ export async function POST(request: NextRequest) {
   if (action !== "add" && !id) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
+  // The revision the studio's form opened the product at (lib/catalog.ts Product.rev): a save from an older one is
+  // refused under the store's lock in editProduct, never taken over what another tab saved since. Absent only from a
+  // screen older than this check; anything sent that is not a whole number from 0 up is refused, never ignored.
+  let baseRev: number | undefined;
+  if (action === "edit" && body.rev !== undefined) {
+    if (typeof body.rev !== "number" || !Number.isSafeInteger(body.rev) || body.rev < 0) {
+      return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+    }
+    baseRev = body.rev;
+  }
 
   // What the Terms forbid ("anything that promises fast or easy money, or income
   // for little effort") is not published (567 [GD1] (d)): a new product, which
@@ -307,11 +317,22 @@ export async function POST(request: NextRequest) {
       const done =
         action === "add"
           ? await addProduct(ref, title, summary, price, recurring, suggested)
-          : await editProduct(ref, id, title, summary, price, recurring, suggested);
+          : await editProduct(ref, id, title, summary, price, recurring, suggested, baseRev, { intro, yearly, about });
+      if (!done.ok && done.reason === "stale") {
+        // Nothing was written. What is saved now goes back with the refusal, so the studio can show it beside the
+        // creator's unsaved words and let them choose: one read of the product and, when it has one, its description.
+        const now = await readListing(guarded.store, id);
+        if (!now) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+        const words = now.about && guarded.store.statsId ? await readAbout(guarded.store.statsId, now.id) : "";
+        return Response.json(
+          { ok: false, error: "stale", current: { ...now, about: words, hasAbout: now.about } },
+          { status: 409, headers: { "Cache-Control": "private, no-store" } },
+        );
+      }
       result = done.ok ? { ok: true, product: done.product } : done;
       // What is taken off goes first, so the one put on in its place is never refused for the other.
       const steps: (() => Promise<{ ok: true; product: Product } | { ok: false; reason: string }>)[] = [];
-      if (done.ok) {
+      if (done.ok && action === "add") {
         const productId = done.product.id;
         const introStep = intro !== undefined && (intro !== null || done.product.intro) ? () => setProductIntro(ref, productId, intro ?? null) : null;
         const yearlyStep = yearly !== undefined && (yearly !== null || done.product.yearly) ? () => setProductYearly(ref, productId, yearly ?? null) : null;
@@ -325,7 +346,7 @@ export async function POST(request: NextRequest) {
         const priced = await step();
         result = priced.ok ? { ok: true, product: priced.product } : { ok: false, reason: priced.reason };
       }
-      if (result.ok && result.product && about !== null) {
+      if (action === "add" && result.ok && result.product && about !== null) {
         const saved = result.product;
         if (about !== "" || saved.about) {
           const marked = await setProductAbout(ref, saved.id, about !== "");

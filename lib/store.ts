@@ -93,6 +93,7 @@ import { type AffiliateSetting, parseAffiliateSetting } from "@/lib/affiliate-se
 import { type ReviewAsk, parseReviewAsk } from "@/lib/review-ask";
 import { type PwywProblem, pwywProblem } from "@/lib/pay-what-you-want";
 import { type CheckoutField } from "@/lib/checkout-fields";
+import { aboutKeyOf, takeAboutRoom } from "@/lib/product-about";
 import { type Currency, DEFAULT_CURRENCY, currencyRule, parseCurrency, priceBounds, priceInRange, readMoney } from "@/lib/money";
 import { type Intro, type IntroProblem, introProblem } from "@/lib/intro-price";
 import { type Yearly, type YearlyProblem, yearlyProblem } from "@/lib/yearly-price";
@@ -1837,7 +1838,22 @@ type ProductChange = {
   put?: Product[];
   /** Products taken off. Their records are forgotten once the store no longer lists them. */
   drop?: string[];
+  /**
+   * One put product's description, written with that product's record in one step (PRODUCT_WITH_ABOUT), so the
+   * description and the record's `rev` land together or not at all (Codex N1 on #4238). Its room is taken before.
+   */
+  about?: { product: string; key: string; text: string };
 };
+
+/**
+ * A product's record and its description in one step (Codex N1 on #4238): the record carries the product's `rev`, so
+ * a save whose catalog commit fails never leaves its new description beside the old revision. KEYS: the record, the
+ * description. ARGV: the record, the description ("" deletes it). Writes both, answers 1.
+ */
+export const PRODUCT_WITH_ABOUT = `-- marktmorgen:product-with-about:v1
+redis.call("SET", KEYS[1], ARGV[1])
+if ARGV[2] == "" then redis.call("DEL", KEYS[2]) else redis.call("SET", KEYS[2], ARGV[2]) end
+return 1`;
 
 type Save = (next: Store, change?: ProductChange) => Promise<Store>;
 
@@ -1910,7 +1926,15 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
   const put = change.put ?? [];
   const drop = new Set(change.drop ?? []);
   // Refused before anything is written, like the record's own ceiling below.
-  const writes = put.flatMap((product) => productWrites(id, product));
+  const writes = put.flatMap((product) => {
+    const own = productWrites(id, product);
+    if (change.about?.product !== product.id) return own;
+    // The record's SET and the description in one script, so they land together (PRODUCT_WITH_ABOUT).
+    const [record, ...rest] = own;
+    if (record?.[0] !== "SET") throw new Error("a product's record write is not a SET");
+    return [["EVAL", PRODUCT_WITH_ABOUT, 2, record[1], change.about.key, record[2], change.about.text], ...rest];
+  });
+  if (change.about && !put.some((product) => product.id === change.about?.product)) throw new Error("a description without its product");
 
   const items: Item[] = next.catalog.items.filter((item) => !drop.has(item.id));
   for (const product of put) {
@@ -3023,16 +3047,17 @@ function refused<R extends string>(value: unknown): value is Refusal<R> {
 async function onProduct<R extends string>(
   email: string,
   id: string,
-  change: (product: Product, store: Store) => Product | Refusal<R> | Promise<Product | Refusal<R>>,
+  change: (product: Product, store: Store, held: Held, save: Save) => Product | Refusal<R> | Promise<Product | Refusal<R>>,
   extra: (store: Store, product: Product) => Partial<Store> = () => ({}),
   after?: (store: Store, product: Product) => Promise<void>,
+  about?: () => ProductChange["about"],
 ): Promise<{ ok: true; store: Store; product: Product; before: Product } | Refusal<R | "none" | "unknown">> {
-  const result = await withStore(email, async (store, save) => {
+  const result = await withStore(email, async (store, save, held) => {
     const product = await readProduct(store, id);
     if (!product) return { ok: false as const, reason: "unknown" as const };
-    const changed = await change(product, store);
+    const changed = await change(product, store, held, save);
     if (refused<R>(changed)) return changed;
-    const saved = await save({ ...store, ...extra(store, changed) }, { put: [changed] });
+    const saved = await save({ ...store, ...extra(store, changed) }, { put: [changed], about: about?.() });
     // Still under the lock: what has to be written with the record, so no other write of the product comes between.
     if (after) await after(saved, changed);
     return { ok: true as const, store: saved, product: changed, before: product };
@@ -3915,6 +3940,13 @@ export async function addProduct(
   return result ?? { ok: false, reason: "none" };
 }
 
+/** Parts submitted with the studio form: omitted fields keep their saved values. */
+export type StudioProductParts = { intro?: Intro | null; yearly?: Yearly | null; about?: string | null };
+
+export type ProductEditResult =
+  | Extract<ProductResult, { ok: true }>
+  | { ok: false; reason: Extract<ProductResult, { ok: false }>["reason"] | "stale" | `intro_${IntroProblem}` | `yearly_${YearlyProblem}`; limit?: number; pwyw?: PwywProblem };
+
 /** Changes something already on the store, keeping its place in the list. */
 export async function editProduct(
   email: string,
@@ -3924,16 +3956,24 @@ export async function editProduct(
   rawPrice: string,
   recurring: Recurring | null = null,
   rawSuggested: string | null = null,
-): Promise<ProductResult> {
+  baseRev?: number,
+  parts?: StudioProductParts,
+): Promise<ProductEditResult> {
   let pwywWhy: PwywProblem | undefined;
   let refusal: "title" | "price" | null = null;
   // Written only when the product is changed, so the store's own list id is
   // what a free product gets (below) whatever the price turned out to be.
   let freeNow = false;
-  const result = await onProduct<"free" | "call" | "course" | "pwyw" | "title" | "price" | "bundle" | "shipped">(
+  let descriptionId: string | null = null;
+  // The description, written with the product's record in the catalog commit (PRODUCT_WITH_ABOUT, Codex N1 on #4238).
+  let aboutWrite: ProductChange["about"];
+  const result = await onProduct<"free" | "call" | "course" | "pwyw" | "title" | "price" | "bundle" | "shipped" | "stale" | `intro_${IntroProblem}` | `yearly_${YearlyProblem}`>(
     email,
     id,
-    (product, store) => {
+    async (product, store, _held, save) => {
+      // A form opened before another save of this product would put the older words back over the newer ones: refused,
+      // here under the store's lock, so two saves from the same revision can never both be taken.
+      if (baseRev !== undefined && (product.rev ?? 0) !== baseRev) return { ok: false, reason: "stale" };
       // Read in the store's own currency, as the store is under the lock.
       const fields = readFields(rawTitle, rawPrice, store.currency);
       if (typeof fields === "string") {
@@ -3968,6 +4008,7 @@ export async function editProduct(
         priceCents: fields.priceCents,
         recurring,
         pwyw: null,
+        rev: (product.rev ?? 0) + 1,
       };
       if (pwywCents !== null) {
         const problem = pwywProblem(next, pwywCents, store.currency);
@@ -3977,9 +4018,37 @@ export async function editProduct(
         }
         next.pwyw = { suggestedCents: pwywCents };
       }
+      // The revision covers the whole form, not just its first write. Validate the final pair together, so replacing
+      // an intro with a yearly price (or the reverse) needs no visible intermediate product or second store lock.
+      if (parts?.intro !== undefined) next.intro = parts.intro ? { cents: parts.intro.cents, count: parts.intro.count } : null;
+      if (parts?.yearly !== undefined) next.yearly = parts.yearly ? { cents: parts.yearly.cents } : null;
+      if (parts && (parts.intro !== undefined || parts.yearly !== undefined)) {
+        if (next.intro) {
+          const problem = introProblem(next, next.intro, priceBounds(store.currency).min, store.tiers);
+          if (problem) return { ok: false, reason: `intro_${problem}` };
+        }
+        if (next.yearly) {
+          const problem = yearlyProblem(next, next.yearly, priceBounds(store.currency).min, store.tiers);
+          if (problem) return { ok: false, reason: `yearly_${problem}` };
+        }
+      }
+      if (typeof parts?.about === "string" && (parts.about !== "" || next.about)) {
+        // A legacy store's namespace must be durable before text is put under it; a refused catalog commit must
+        // never leave text in a newly allocated namespace that the store's erasure cannot find.
+        const room = store.statsId ? store : await save({ ...store, statsId: newListId() });
+        descriptionId = room.statsId;
+        if (!descriptionId) throw new StoreBusyError();
+        // Its room first, as writeAbout takes it; the text itself goes with the product's record and its `rev` in the
+        // catalog commit, so a commit that fails keeps neither (Codex N1 on #4238).
+        await takeAboutRoom(room, id, parts.about);
+        aboutWrite = { product: id, key: aboutKeyOf(descriptionId, id), text: parts.about };
+        next.about = parts.about !== "";
+      }
       return next;
     },
-    (store) => ({ listId: store.listId ?? (freeNow ? newListId() : null) }),
+    (store) => ({ listId: store.listId ?? (freeNow ? newListId() : null), ...(descriptionId ? { statsId: descriptionId } : {}) }),
+    undefined,
+    () => aboutWrite,
   );
   if (!result.ok) {
     if (result.reason === "pwyw") return { ok: false, reason: "pwyw", pwyw: pwywWhy };

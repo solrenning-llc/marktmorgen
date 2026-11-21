@@ -556,7 +556,16 @@ export function EmailStudio(props: {
       <div className="min-w-0">
         <div className="card mt-8 p-6 sm:p-8 lg:mt-0">
           <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">This month</h2>
-          <MonthUsage used={props.used} allowance={props.allowance} trial={props.trial} />
+          {props.used === null ? (
+            <p role="status" className="mt-2 text-ink">Your email use could not be loaded. You can keep writing drafts. Reload this page to check your count.</p>
+          ) : (
+            <p className="mt-2 text-ink">Your current count and monthly limit are shown above the editor.</p>
+          )}
+          <p className="mt-1 text-sm text-ink-soft">
+            {props.trial
+              ? `During the free trial a month holds ${TRIAL_MONTHLY_EMAILS.toLocaleString("en-US")}; the full ${PRO_MONTHLY_EMAILS.toLocaleString("en-US")} opens with your first payment.`
+              : "One-off list emails and sequences share the monthly limit. The count starts again on the day your plan's month renews."}
+          </p>
           {!props.trial && emailEquivalence(props.allowance) ? (
             <p className="mt-2 text-sm text-ink-soft" data-email-equivalence>{emailEquivalence(props.allowance)}</p>
           ) : null}

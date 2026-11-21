@@ -2533,6 +2533,10 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/download/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now, \"buyer\", { shared: true })", "givePublicRequests(store, units, now, { shared: true })", "copyMeter(store)"] },
       { file: "app/api/store/preview/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now)", "givePublicRequests(store, units, now)"] },
       { file: "lib/file-store.ts", names: ["for (let page = 0; page < BLOB_LIST_PAGES; page += 1)"] },
+      // A join request's grant and erasure note are written in SAVE_GRANT_IF_LIVE (Codex L-20261120-2002): one EVAL and at
+      // most JOIN_GRANT_CALLS inside it, in place of the plain four-command pipeline, inside the join's own request
+      // (withinStore "join-ip"); a store whose erasure began writes nothing and sends no email.
+      { file: "lib/store-join.ts", names: ["SAVE_GRANT_IF_LIVE", "JOIN_GRANT_CALLS", "withinStore(\"join-ip\""] },
       { file: "lib/vault.ts", names: ["for (let page = 0; page < VAULT_LIST_PAGES; page += 1)"] },
       // A waitlist's confirm press writes its entry back in WAIT_CONFIRM (#4268), one EVAL and WAIT_CONFIRM_CALLS inside it, and takes WAIT_CONFIRM_UNITS more of the store's requests before it writes (#4404).
       { file: "lib/waitlist.ts", names: ["WAIT_CONFIRM", "WAIT_CONFIRM_CALLS", "WAIT_CONFIRM_UNITS", "takePublicRequest(store, \"public\", Date.now(), WAIT_CONFIRM_UNITS)"] },

@@ -11,7 +11,8 @@
  *     exactly as for an unpaid renewal (lib/plan-standing.ts, costsPaused);
  *   - decided for us ("won", or an inquiry closed without a chargeback):
  *     everything starts again;
- *   - decided for the creator ("lost" for us): the money went back, so the
+ *   - decided for the creator ("lost" for us, also a dispute prevented or a
+ *     charge refunded): the money went back, so the
  *     period that payment covered is unpaid and stays paused to its end.
  *     When the end could not be read, a year from the dispute, the longest
  *     period any plan has (unknown is never read as "no time").
@@ -39,10 +40,23 @@ const PARSE_CAP = 100;
 const YEAR = 366 * 24 * 60 * 60;
 const DISPUTE_ID = /^du_[A-Za-z0-9]{1,200}$/;
 
+/**
+ * Stripe's closed dispute statuses where the money went back to the creator,
+ * read as "lost" (the period that payment covered stays paused to its end):
+ * `lost`; `prevented` (the payment was given back before a chargeback, as
+ * lib/plan-refund-rules.ts RETURNED and lib/checkup-rules.ts CLOSED read it);
+ * and the legacy `charge_refunded` (the charge was refunded), which API
+ * versions up to 2022-11-15 could still send. Statuses read in stripe-node's
+ * generated types: v22.6.0 (2026-08-26.dahlia) src/resources/Disputes.ts,
+ * v12.18.0 (2022-11-15) types/Disputes.d.ts, and its CHANGELOG (13.0.0
+ * removed `charge_refunded`, 19.0.0 added `prevented`).
+ */
+const MONEY_RETURNED = new Set(["lost", "prevented", "charge_refunded"]);
+
 /** Stripe's dispute statuses, read as what the bank decided. Unknown reads as open. */
 export function disputeStatusOf(stripeStatus: unknown): PlanDisputeStatus {
   if (stripeStatus === "won" || stripeStatus === "warning_closed") return "won";
-  if (stripeStatus === "lost") return "lost";
+  if (typeof stripeStatus === "string" && MONEY_RETURNED.has(stripeStatus)) return "lost";
   return "open";
 }
 

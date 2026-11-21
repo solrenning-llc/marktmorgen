@@ -33,6 +33,7 @@ import { MAX_LETTER_PRODUCTS, membersOnly, parseLetter } from "@/lib/letter-rule
 import { letterIdFor, listLetters, publishLetter, publishedLetters, readLetter } from "@/lib/letters";
 import { letterReader } from "@/lib/letter-access";
 import { holdsProducts, holdsProductsOrThrow, paidForAny } from "@/lib/community-access";
+import { TICKET_CUSTOMERS } from "@/lib/community-read-rules";
 import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { mintPass, passCookieName } from "@/lib/learn";
 import LetterPage, { generateMetadata } from "@/app/[handle]/letters/[letter]/page";
@@ -142,14 +143,28 @@ function filesUnder(dir: string): string[] {
 }
 
 /**
- * EXPIRE with an option (NX, XX, GT, LT) is refused here, as a Redis or REST
- * service that does not take it would: the code keeps to SET NX EX and INCR,
- * the pattern every counter already uses.
+ * EXPIRE with an option (NX, XX, GT, LT) is refused here, as a Redis or REST service that does not take it would:
+ * lib/letter-access.ts keeps to SET NX EX and INCR, and repairs a key left with no expiry itself.
+ *
+ * One exception, written out (#4698): the store's monthly allowances that this path takes (lib/store-allowance.ts,
+ * nl:allow:studio:<store>:<window> for the creator's actions and nl:allow:transactional:<store>:<window> for the
+ * emailed link) count with INCRBY then EXPIRE … NX (lib/window-count.ts, windowCountBy), so a key that expires between
+ * the two never comes back without an expiry. Only those two key shapes, and only NX, are let through; each is
+ * counted, and the checks below hold that the emailed link took exactly one and that no letter's key ever got an
+ * option.
  */
 let expireOptions = 0;
+const allowanceNx: Record<"studio" | "transactional", number> = { studio: 0, transactional: 0 };
+const ALLOWANCE_NX = /^nl:allow:(studio|transactional):[^:]+:[^:]+$/;
 const realPipeline = redis.pipeline.bind(redis);
 (redis as unknown as { pipeline: typeof realPipeline }).pipeline = (commands) => {
-  if (commands.some((c) => String(c[0]).toUpperCase() === "EXPIRE" && c.length > 3)) {
+  for (const c of commands) {
+    if (String(c[0]).toUpperCase() !== "EXPIRE" || c.length <= 3) continue;
+    const allowance = c.length === 4 && c[3] === "NX" ? ALLOWANCE_NX.exec(String(c[1])) : null;
+    if (allowance) {
+      allowanceNx[allowance[1] as "studio" | "transactional"] += 1;
+      continue;
+    }
     expireOptions += 1;
     return Promise.reject(new Error("ERR syntax error"));
   }
@@ -351,7 +366,9 @@ async function main(): Promise<void> {
       const url=new URL(String(input instanceof Request?input.url:input));
       if(url.hostname!=="api.stripe.com")return answer(input,init);
       if(url.pathname.endsWith(endpoint)) return new Response(JSON.stringify(payload),{status:200});
-      if(endpoint==="/payment_intents" && url.pathname.endsWith("/checkout/sessions")) return new Response(JSON.stringify({data:[paid("cs_test_otherCust01",other.product.id)],has_more:false}));
+      // Rule 23 (the pre-review of 9 November 2026, round 2): the other purchase now carries the offers after paying
+      // (metadata upsell_key), since only such a checkout's customer can hold a one-click addition and is read.
+      if(endpoint==="/payment_intents" && url.pathname.endsWith("/checkout/sessions")) return new Response(JSON.stringify({data:[{...paid("cs_test_otherCust01",other.product.id),metadata:{store:HANDLE,product:other.product.id,upsell_key:"offers1"}}],has_more:false}));
       return answer(input,init);
     }) as typeof fetch;
     try {
@@ -367,20 +384,24 @@ async function main(): Promise<void> {
       is(`${label}: strict throws`,thrown,true);
     } finally {globalThis.fetch=answer;forgetAnswers();}
   }
-  for(const count of [10,11]) {
+  // Rule 23 (the pre-review of 9 November 2026, round 2): the boundary was ten customers, all read whatever made them;
+  // it is TICKET_CUSTOMERS customers of checkouts that carried the offers after paying (metadata upsell_key), the only
+  // ones that can hold a one-click addition, and a customer made for anything else is not read at all.
+  for(const [count, offers] of [[TICKET_CUSTOMERS, true], [TICKET_CUSTOMERS + 1, true], [TICKET_CUSTOMERS + 1, false]] as const) {
     const answer=globalThis.fetch;
     let piCalls=0;
     globalThis.fetch=(async(input:string | URL | Request)=>{
       const url=new URL(String(input instanceof Request?input.url:input));
-      if(url.pathname.endsWith("/checkout/sessions")) return new Response(JSON.stringify({data:Array.from({length:count},(_,i)=>({...paid(`cs_test_bound${i}`,other.product.id),customer:`cus_TestBoundary${i}`})),has_more:false}));
+      if(url.pathname.endsWith("/checkout/sessions")) return new Response(JSON.stringify({data:Array.from({length:count},(_,i)=>({...paid(`cs_test_bound${i}`,other.product.id),customer:`cus_TestBoundary${i}`,metadata:{store:HANDLE,product:other.product.id,...(offers?{upsell_key:`offers${i}`}:{})}})),has_more:false}));
       piCalls+=1;
       return new Response(JSON.stringify({data:[],has_more:false}));
     }) as typeof fetch;
+    const label=`${count} customers${offers?" with offers":" without offers"}`;
     try {
       let result:unknown;
       try { result=await paidForAny(store,"ana@example.com",new Set([club])); } catch {result="unknown";}
-      is(`${count} customers: result`,result,count===10?false:"unknown");
-      is(`${count} customers: at most ten payment queries`,piCalls,10);
+      is(`${label}: result`,result,offers&&count>TICKET_CUSTOMERS?"unknown":false);
+      is(`${label}: at most ${TICKET_CUSTOMERS} payment queries, none without offers`,piCalls,offers?TICKET_CUSTOMERS:0);
     } finally {globalThis.fetch=answer;}
   }
   part("The link form: its field is named and described, and a notice after it is reached");
@@ -431,7 +452,9 @@ async function main(): Promise<void> {
   await runAfter();
   is("and after it, no email", mails.length, before);
   is("a holder: the very same answer, the same nothing done before it", await atAnswer("ana@example.com", "203.0.113.7"), [303, true, 0, 0, 0, 1]);
+  const transactionalBefore = allowanceNx.transactional;
   await runAfter();
+  is("the emailed link took the store's transactional allowance with exactly one EXPIRE NX", allowanceNx.transactional - transactionalBefore, 1);
   is("and after it, one email to it", [mails.length, mails.at(-1)?.to], [before + 1, "ana@example.com"]);
   is("the email holds a link to open, never the words", [/\/api\/store\/letters\/open\?token=[0-9a-f]{64}/.test(mails.at(-1)?.text ?? ""), (mails.at(-1)?.text ?? "").includes(SECRET)], [true, false]);
   mailDown = true;
@@ -548,8 +571,8 @@ async function main(): Promise<void> {
   is("the studio's route takes the products", [viaRoute.status, routeBody.ok, (await readLetter(store, letter.id))?.products], [200, true, [club]]);
   const badRoute = await publishRoute(new NextRequest("https://marktmorgen.com/api/store/letters", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${owner}` }, body: JSON.stringify({ action: "publish", id: kept.id, products: ["nope_not_a_product"] }) }));
   is("and refuses one the store does not have", badRoute.status, 409);
-  is("no EXPIRE with an option was ever sent", expireOptions, 0);
-  is("the store lists all four", (await listLetters(store)).length, 4);
+  is("no EXPIRE with an option was ever sent, besides the allowances' NX written out above", expireOptions, 0);
+  is("the store lists all four", (await listLetters(store))?.length, 4);
 
   part("The feature page says what is true of an email kept for members");
   // lib/help-content.ts says the same and waits: it is reserved by another agent (Claude 2, 513 [PF1]).

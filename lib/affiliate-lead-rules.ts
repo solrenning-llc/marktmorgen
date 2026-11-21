@@ -157,7 +157,33 @@ export type LeadRecord = {
   d: number;
   /** Why it was reversed; empty otherwise. */
   why: LeadReason | "";
+  /**
+   * The connected Stripe account a booking was paid into, written with the lead since 13 November 2026; absent on
+   * other leads, PayPal bookings and older records. Its refunds can only be read there (lib/affiliates.ts readBook),
+   * which is all it is read for: never on a line or in a person's copy.
+   */
+  acct?: string;
+  /**
+   * A booking's refund as last read on its own account (`acct`), in cents written in base 36 (lib/affiliates.ts,
+   * AFFILIATE_REFUND_MARK), kept so it still counts after a move to another one; only ever raised. Like `acct`, read
+   * only by the book: never on a line or in a person's copy.
+   */
+  rf?: string;
 };
+
+/**
+ * The most a refund mark (lib/affiliates.ts, AFFILIATE_REFUND_MARK) adds to a record: `,"rf":"` (7), the largest safe
+ * whole number in base 36 (11, "2gosa7pa2gv") and the closing quote (1). Counted in an order's parts
+ * (tests/store-data-registry.ts) and in the room a lead takes when it is written (lib/affiliate-leads.ts).
+ */
+export const REFUND_MARK_MAX_BYTES = 7 + Number.MAX_SAFE_INTEGER.toString(36).length + 1;
+
+/** A refund mark's cents, read exactly: base 36 digits of a whole number from 0 up to the largest safe one; else null. */
+export function readRefundMark(text: string): number | null {
+  if (!/^(0|[1-9a-z][0-9a-z]{0,10})$/.test(text)) return null;
+  const n = parseInt(text, 36);
+  return Number.isSafeInteger(n) && n >= 0 && n.toString(36) === text ? n : null;
+}
 
 export type LeadStatus =
   | "waiting for the call"
@@ -215,10 +241,35 @@ export function parseLead(raw: unknown): LeadRecord | null {
       state: v.state === "approved" || v.state === "reversed" ? v.state : "open",
       d: n(v.d),
       why: (LEAD_REASONS as readonly string[]).includes(String(v.why)) ? (v.why as LeadReason) : "",
+      // Kept exactly as written, so a decision written back keeps it: any other value is still another account than the store's.
+      ...(v.acct !== undefined ? { acct: typeof v.acct === "string" ? v.acct : "" } : {}),
+      // Kept whole when a decision is written back, so a refund once read is never lost; one not whole is not a mark.
+      ...(typeof v.rf === "string" && readRefundMark(v.rf) !== null ? { rf: v.rf } : {}),
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * A kept lead read exactly, or null (CX-123 rule 24): every field in the type recordLead and decideLeads write it
+ * with, so nothing that settles the caps, the budget or a booking's readiness (its time, amount, currency, terms,
+ * state, call's end, payment) and nothing a person's copy reads (the address) is ever filled in with a default.
+ * parseLead fills a field of another type with 0, "usd" or "open", which can take a lead out of the month's budget
+ * or the day's cap; it is what the book shows, never what a decision, a credit or a deletion is made from.
+ */
+export function parseLeadExact(raw: unknown): LeadRecord | null {
+  const lead = parseLead(raw);
+  if (!lead) return null;
+  // parseLead read it as a JSON object with its id, affiliate and kind: what is left is every other field's type.
+  const v = JSON.parse(raw as string) as Record<string, unknown>;
+  const whole = (x: unknown) => typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
+  if (!(["at", "end", "paid", "cents", "hold", "daily", "budget", "d"] as const).every((k) => whole(v[k]))) return null;
+  if (!(["ref", "pi", "title", "email"] as const).every((k) => typeof v[k] === "string")) return null;
+  if (typeof v.currency !== "string" || !/^[a-z]{3}$/.test(v.currency)) return null;
+  if (v.state !== "open" && v.state !== "approved" && v.state !== "reversed") return null;
+  if (v.why !== "" && !(LEAD_REASONS as readonly unknown[]).includes(v.why)) return null;
+  return lead;
 }
 
 /**

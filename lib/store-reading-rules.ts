@@ -9,9 +9,10 @@ export const STORE_READINGS_PER_DAY = 8;
 /**
  * Of them, the heavy ones: its sales (every PayPal sale and refund record read,
  * lib/read-ceilings.ts SALES_READ_SHAPE). The rest of the day's readings are
- * light. The most the first-payment refund the owner funds allows
- * (tests/plan-margin.test.ts, US$ 65; inbox C4-18, C4-33), held there: one more
- * a day would pass it.
+ * light. The most the first-payment refund the owner funds allowed
+ * (tests/plan-margin.test.ts, sized under US$ 65; inbox C4-18, C4-33), held
+ * there: one more a day would pass it. The US$ 66 of 6 November 2026
+ * (C4-20261106-2640-DONO-156) is room for picture uploads, not for more of these.
  */
 export const HEAVY_READINGS_PER_DAY = 2;
 /** How long a reading is shown as it is before it is read again. */

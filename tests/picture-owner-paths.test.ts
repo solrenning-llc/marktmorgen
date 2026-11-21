@@ -31,7 +31,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addOption, addProduct, addStoreLink, claimHandle, ensureStatsId, imageFolder, setProductImage, setSitePages, storeFolder, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { fileFolder } from "@/lib/product-file";
-import { keepReviewPhoto } from "@/lib/review-photo";
+import { checkReviewPhoto, putReviewPhoto } from "@/lib/review-photo";
 import { readPodcast, savePodcast } from "@/lib/podcast";
 import { picturePaths } from "@/lib/sales-page";
 import { readPage } from "@/lib/sales-page-store";
@@ -165,7 +165,11 @@ async function main(): Promise<void> {
   files.set(audio, { bytes: MP3, contentType: "audio/mpeg" });
   files.set(other, { bytes: MP3, contentType: "audio/mpeg" });
   is("an episode put out", await result(await podcast(post("/api/store/podcast", session, { action: "add", id: show, pathname: audio, title: "Episode one", notes: "" }))), [200, "ok"]);
-  is("the episode's audio as the product's file: refused, a podcast takes no file", await result(await fileAttach(post("/api/store/file/attach", session, { id: show, pathname: audio, name: "audio.mp3" }))), [400, "course"]);
+  // Since 5 November 2026 the file route names the episode's audio first (tests/picture-owner-followup.test.ts).
+  is("the episode's audio as the product's file: refused, it is an episode's audio", await result(await fileAttach(post("/api/store/file/attach", session, { id: show, pathname: audio, name: "audio.mp3" }))), [400, "in_use"]);
+  const showOwn = `${showFolder}${"a".repeat(20)}.pdf`;
+  files.set(showOwn, { bytes: PDF, contentType: "application/pdf" });
+  is("a file of its own on the podcast: refused, a podcast takes no file", await result(await fileAttach(post("/api/store/file/attach", session, { id: show, pathname: showOwn, name: "guide.pdf" }))), [400, "course"]);
   is("the same audio as a second episode: refused", await result(await podcast(post("/api/store/podcast", session, { action: "add", id: show, pathname: audio, title: "Episode two", notes: "" }))), [400, "in_use"]);
   is("a second episode with its own audio", await result(await podcast(post("/api/store/podcast", session, { action: "add", id: show, pathname: other, title: "Episode two", notes: "" }))), [200, "ok"]);
   const listed0 = (await readPodcast((await readListing((await storeForEmail(OWNER))!, show))!.podcast!.id))!;
@@ -178,8 +182,9 @@ async function main(): Promise<void> {
   is("its own audio is deleted", files.has(other), false);
 
   part("A buyer's review photo, in the same picture folder");
-  const photo = await keepReviewPhoto(OWNER, REVIEW_JPEG);
-  if (photo === "photo") throw new Error("review photo");
+  const checkedPhoto = checkReviewPhoto(REVIEW_JPEG);
+  if (checkedPhoto === "photo") throw new Error("review photo");
+  const photo = await putReviewPhoto(OWNER, checkedPhoto);
   is("stored in the store's picture folder", photo.path.startsWith(`images/${folder}/`), true);
   is("on product C: refused", await attach(c, photo.path), [400, "in_use"]);
   is("on a link: refused", await linkAttach(linkTwo, photo.path), [400, "in_use"]);

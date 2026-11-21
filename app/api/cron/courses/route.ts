@@ -10,13 +10,19 @@ import { SITE_URL } from "@/lib/site-url";
 import { sweepTaskUploads } from "@/lib/assignment";
 import { deleteFile } from "@/lib/file-store";
 import { sweepCommunityUploads } from "@/lib/community-files";
+import { noticeHeldStores } from "@/lib/community-held-notice";
+import { settleSubmissionSlots, sweepSubmissions } from "@/lib/submission-store";
 
 /**
  * Run on a schedule by Vercel: tells each student when a module of their
  * course opens for them. Once per student and module, one run at a time.
  * And deletes files students uploaded for an assignment and never handed
  * in (lib/assignment.ts), and community pictures never put in a post
- * (lib/community-files.ts), a day on.
+ * (lib/community-files.ts), a day on. And deletes the files buyers sent for
+ * review whose keeping time ended, and their records (lib/submission-store.ts), and sets back the room a buyer's
+ * upload opened and left still held, once its day is over (settleSubmissionSlots). And tells each creator
+ * whose community has posts or comments waiting for approval, once a day
+ * (lib/community-held-notice.ts, 543 [CM2]).
  */
 export async function GET(request: NextRequest) {
   // Vercel sends the secret with every scheduled run, compared here in
@@ -36,12 +42,50 @@ export async function GET(request: NextRequest) {
   if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   try {
     const counts = await sendDripEmails(storeForHandle, readCourse, SITE_URL);
-    const stale = await sweepTaskUploads(deleteFile).catch((error: unknown) => {
+    // Not swept (the list could not be read, or a reply was in an unknown shape): said in the log and the answer,
+    // never "0 swept", as the pictures below (#4279); the uploads stay on the list and the next run sweeps them.
+    const stale = await sweepTaskUploads((paths) => deleteFile(paths, "site_cleanup")).catch((error: unknown) => {
       console.error("could not sweep unused assignment uploads", error);
-      return [] as string[];
+      return null;
     });
-    const pictures = await sweepCommunityUploads().catch(() => 0);
-    return Response.json({ ok: true, ...counts, unusedUploads: stale.length, unusedPictures: pictures }, { headers: { "Cache-Control": "no-store" } });
+    // Not swept (the list could not be read exactly): said in the log and the answer, never "0 swept"; the next run sweeps.
+    const pictures = await sweepCommunityUploads().catch((error: unknown) => {
+      console.error("could not sweep unused community pictures", error);
+      return null;
+    });
+    // Not swept (the list could not be read exactly): said, never "0 deleted"; the next run sweeps.
+    const submissions = await sweepSubmissions(Math.floor(Date.now() / 1000)).catch((error: unknown) => {
+      console.error("could not sweep submissions past their keeping time", error);
+      return null;
+    });
+    // Not read exactly: said, never "0 settled"; every slot keeps its turn for the next run.
+    const slots = await settleSubmissionSlots(Math.floor(Date.now() / 1000)).then(
+      (done) => done.settled,
+      (error: unknown) => {
+        console.error("could not set back the room of buyer uploads left open", error);
+        return null;
+      },
+    );
+    const held = await noticeHeldStores({ until: Date.now() + 20_000 }).catch((error) => {
+      console.error("telling creators about held community items failed", error);
+      return null;
+    });
+    return Response.json(
+      {
+        ok: true,
+        ...counts,
+        unusedUploads: stale === null ? null : stale.length,
+        ...(stale === null ? { uploadsFailed: true } : {}),
+        unusedPictures: pictures,
+        ...(pictures === null ? { picturesFailed: true } : {}),
+        expiredSubmissions: submissions,
+        ...(submissions === null ? { submissionsFailed: true } : {}),
+        submissionSlots: slots,
+        ...(slots === null ? { submissionSlotsFailed: true } : {}),
+        heldNotices: held,
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     console.error("sending course emails failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

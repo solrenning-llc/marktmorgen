@@ -67,27 +67,29 @@ export function togetherFrom(sales: SaleRow[]): Together {
       counts.set(a, row);
     }
   }
-  const out: Together = {};
+  // A product id is read from the sale's metadata, which the creator's own Stripe account can set to anything, even
+  // "__proto__": gathered in a Map and handed on as a plain record of own keys only (tests/proto-keys.test.ts).
+  const out = new Map<string, [string, number][]>();
   for (const [a, row] of counts) {
     const kept = [...row.entries()]
       .filter(([, n]) => n >= MIN_TOGETHER)
       .sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]))
       .slice(0, TOGETHER_KEPT);
-    if (kept.length) out[a] = kept;
+    if (kept.length) out.set(a, kept);
   }
-  return out;
+  return Object.fromEntries(out);
 }
 
 /** Whatever came back from storage, made safe to use. */
 export function parseTogether(raw: unknown): Together {
   if (!raw || typeof raw !== "object") return {};
-  const out: Together = {};
+  const out = new Map<string, [string, number][]>();
   for (const [id, list] of Object.entries(raw as Record<string, unknown>)) {
     if (!Array.isArray(list)) continue;
     const kept = list
       .filter((pair): pair is [string, number] => Array.isArray(pair) && typeof pair[0] === "string" && Number.isInteger(pair[1]) && (pair[1] as number) >= MIN_TOGETHER)
       .slice(0, TOGETHER_KEPT);
-    if (kept.length) out[id] = kept;
+    if (kept.length) out.set(id, kept);
   }
-  return out;
+  return Object.fromEntries(out);
 }

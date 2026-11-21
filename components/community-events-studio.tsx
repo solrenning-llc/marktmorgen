@@ -49,8 +49,9 @@ export type StudioEvent = {
   /** "Tuesday, October 6, 6:00 PM (EDT)". */
   when: string;
   length: string;
-  going: number;
-  /** The first people coming, in the order they said so. */
+  /** How many are coming; null when who is coming could not be read just now (never 0 for that). */
+  going: number | null;
+  /** The first people coming, in the order they said so; empty when `going` is null. */
   people: { name: string; email: string; at: number }[];
   post: string;
 };
@@ -72,6 +73,7 @@ const MESSAGES: Record<string, string> = {
   meet: "Pick where the event happens.",
   meet_google: "Google Calendar is not connected to this store anymore. Connect it again under Video calls in your studio, or pick another place.",
   meet_zoom: "Zoom is not connected to this store anymore. Connect it again under Video calls in your studio, or pick another place.",
+  meet_unknown: "Your video call connections could not be checked just now, so nothing was saved. They may still be connected, so you do not need to connect again. Try again in a moment.",
   only: "One of those products no longer opens the community. Reload the page.",
   too_many: `${MAX_UPCOMING_EVENTS} events are coming up already. Cancel one, or wait for one to be over.`,
   started: "It has started, so it can no longer be moved. Its words, link and cap can still change.",
@@ -99,7 +101,14 @@ const MESSAGES: Record<string, string> = {
 const ROOM_CHECK = roomOnLeave(MESSAGES.link);
 const LINK_CHECK: LinkCheck = (raw) => (raw.trim() ? ROOM_CHECK(raw) : { problem: MESSAGES.link, fix: null });
 
-type Answer = { ok?: boolean; error?: string; moved?: boolean };
+/**
+ * `notice`, after a move or a cancellation that was made: "waiting" when who is coming could not be read just then
+ * (the email goes out once it can), "failed" when the email could not be started at all.
+ */
+type Answer = { ok?: boolean; error?: string; moved?: boolean; notice?: "waiting" | "failed" };
+
+/** What the studio says when the email about a change could not be started. */
+const UNSENT = "but the email to anyone coming could not be started. Tell them in the community.";
 
 async function send(payload: Record<string, unknown>): Promise<Answer> {
   try {
@@ -147,6 +156,7 @@ export function CommunityEventsStudio({
   handle,
   roomNote,
   meetings = [],
+  meetUnread = false,
   hostStore = null,
 }: {
   events: StudioEvent[];
@@ -160,6 +170,8 @@ export function CommunityEventsStudio({
   roomNote: string;
   /** Google Calendar and Zoom accounts connected and working (lib/meet-connect.ts); empty offers neither. */
   meetings?: MeetAccount[];
+  /** The connections could not be read just now (CX-123 rule 24): said so, never "connect it again". */
+  meetUnread?: boolean;
   /** The store's id, when this person may start a Zoom meeting as its host ("settings"); null otherwise. */
   hostStore?: string | null;
 }) {
@@ -208,6 +220,7 @@ export function CommunityEventsStudio({
             spaces={spaces}
             roomNote={roomNote}
             meetings={meetings}
+            meetUnread={meetUnread}
             busy={busy}
             onCancel={() => setEditing(null)}
             onSave={async (payload) => {
@@ -248,11 +261,18 @@ export function CommunityEventsStudio({
                   spaces={spaces}
                   roomNote={roomNote}
                   meetings={meetings}
+                  meetUnread={meetUnread}
                   busy={busy}
                   onCancel={() => setEditing(null)}
                   onSave={async (payload) => {
                     const ok = await run(`e-${event.id}`, { action: "edit", event: event.id, ...payload }, (a) =>
-                      a.moved ? (event.going ? `Moved. ${event.going === 1 ? "The person" : `The ${event.going} people`} coming ${event.going === 1 ? "is" : "are"} being emailed.` : "Moved.") : "Saved.",
+                      a.moved
+                        ? a.notice === "failed"
+                          ? `Moved, ${UNSENT}`
+                          : a.notice === "waiting" || event.going === null
+                            ? "Moved. Anyone coming is being emailed."
+                            : event.going ? `Moved. ${event.going === 1 ? "The person" : `The ${event.going} people`} coming ${event.going === 1 ? "is" : "are"} being emailed.` : "Moved."
+                        : "Saved.",
                     );
                     if (ok) setEditing(null);
                   }}
@@ -271,9 +291,15 @@ export function CommunityEventsStudio({
                     setEditing(event.id);
                   }}
                   onCancelEvent={() => {
-                    const who = event.going ? ` The ${event.going === 1 ? "person" : `${event.going} people`} coming will be emailed once.` : "";
+                    const who = event.going === null ? " Anyone coming will be emailed once." : event.going ? ` The ${event.going === 1 ? "person" : `${event.going} people`} coming will be emailed once.` : "";
                     if (window.confirm(`Cancel "${event.title}"?${who} This cannot be undone.`)) {
-                      run(`e-${event.id}`, { action: "cancel", event: event.id }, event.going ? "Canceled. Everyone coming is being emailed." : "Canceled.");
+                      run(`e-${event.id}`, { action: "cancel", event: event.id }, (a) =>
+                        a.notice === "failed"
+                          ? `Canceled, ${UNSENT}`
+                          : a.notice === "waiting" || event.going === null
+                            ? "Canceled. Anyone coming is being emailed."
+                            : event.going ? "Canceled. Everyone coming is being emailed." : "Canceled.",
+                      );
                     }
                   }}
                   onDelete={() => {
@@ -350,7 +376,10 @@ function EventRow({
   const meetName = event.where === "meet" && event.meet ? MEET_NAMES[event.meet] : null;
   const made = Boolean(meetName && event.meeting?.made);
   const only = event.only.map((id) => products.find((p) => p.id === id)?.title).filter(Boolean);
-  const places = event.over ? `${event.going} RSVP'd` : event.cap ? `${event.going} of ${event.cap} ${event.cap === 1 ? "place" : "places"} taken` : `${event.going} going`;
+  // Who is coming did not read: no count at all, and the notice below says why.
+  const places = event.going === null
+    ? event.over ? "Not known how many RSVP'd" : event.cap ? `Not known how many of ${event.cap} ${event.cap === 1 ? "place is" : "places are"} taken` : "Not known how many are going"
+    : event.over ? `${event.going} RSVP'd` : event.cap ? `${event.going} of ${event.cap} ${event.cap === 1 ? "place" : "places"} taken` : `${event.going} going`;
   return (
     <div>
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
@@ -415,7 +444,11 @@ function EventRow({
         ) : null}
       </div>
 
-      {event.people.length ? (
+      {event.going === null ? (
+        <p className="mt-2 rounded-[10px] bg-amber-brand/10 px-3 py-2 text-sm text-ink" role="status">
+          Who is coming could not be read just now, so the number and the names are not shown. Reload the page to try again.
+        </p>
+      ) : event.people.length ? (
         <details className="mt-3">
           <summary className="inline-flex min-h-11 cursor-pointer items-center text-sm font-semibold text-ink">
             {`Who is coming (${event.going})`}
@@ -428,7 +461,7 @@ function EventRow({
               </li>
             ))}
           </ul>
-          {event.going > event.people.length ? <p className="mt-2 text-xs text-ink-mute">{`The first ${event.people.length} of ${event.going}.`}</p> : null}
+          {event.going !== null && event.going > event.people.length ? <p className="mt-2 text-xs text-ink-mute">{`The first ${event.people.length} of ${event.going}.`}</p> : null}
         </details>
       ) : null}
 
@@ -482,6 +515,7 @@ function EventForm({
   spaces,
   roomNote,
   meetings,
+  meetUnread,
   busy,
   onCancel,
   onSave,
@@ -493,6 +527,7 @@ function EventForm({
   spaces: Space[];
   roomNote: string;
   meetings: MeetAccount[];
+  meetUnread: boolean;
   busy: string | null;
   onCancel: () => void;
   onSave: (payload: Payload) => void;
@@ -515,6 +550,8 @@ function EventForm({
     space: spaces[0]?.id ?? "",
   }));
   const set = (change: Partial<Payload>) => setDraft((d) => ({ ...d, ...change }));
+  // Google Meet or Zoom choices drawn under "Where": a connected one, or the saved choice of this event.
+  const meetChoices = (["google", "zoom"] as const).filter((p) => meetings.some((m) => m.provider === p) || (draft.where === "meet" && draft.meet === p));
   const id = (name: string) => `ev-${event?.id ?? "new"}-${name}`;
   const locked = Boolean(event?.started);
   const zoneOptions = zoneList.includes(draft.tz) ? zoneList : [draft.tz, ...zoneList];
@@ -595,9 +632,7 @@ function EventForm({
           while connected stays on screen after a disconnect, so the creator
           sees why it no longer works rather than a silent switch.
         */}
-        {(["google", "zoom"] as const)
-          .filter((p) => meetings.some((m) => m.provider === p) || (draft.where === "meet" && draft.meet === p))
-          .map((p) => {
+        {meetChoices.map((p) => {
             const account = meetings.find((m) => m.provider === p) ?? null;
             return (
               <label key={p} className="mt-1 flex min-h-[44px] cursor-pointer items-start gap-3 rounded-[var(--r-sm)] px-2 py-2 hover:bg-white">
@@ -609,12 +644,20 @@ function EventForm({
                       ? p === "google"
                         ? `A Google Calendar event with a Meet link is made on ${account.account}, with nobody on its guest list: members get the link on the event's page and ask to join, and you let them in.`
                         : `A Zoom meeting is made on ${account.account}. Members get its link on the event's page and come in once you start it, from Zoom or with Start in Zoom here.`
-                      : `${p === "google" ? "Google Calendar" : "Zoom"} is not connected anymore: connect it again under Video calls in your studio, or pick another place.`}
+                      : meetUnread
+                        ? `We could not check your ${p === "google" ? "Google Calendar" : "Zoom"} connection just now. It may still be connected, so you do not need to connect it again. Reload this page in a moment.`
+                        : `${p === "google" ? "Google Calendar" : "Zoom"} is not connected anymore: connect it again under Video calls in your studio, or pick another place.`}
                   </span>
                 </span>
               </label>
             );
           })}
+        {/* Only when no Google or Zoom choice is drawn above: a saved one already says it could not be checked. */}
+        {meetUnread && meetChoices.length === 0 ? (
+          <p className="mt-1 text-sm text-ink-soft" role="status">
+            Your Google Calendar and Zoom connections could not be checked just now, so they are not offered here. Reload this page in a moment.
+          </p>
+        ) : null}
         <label className="mt-1 flex min-h-[44px] cursor-pointer items-start gap-3 rounded-[var(--r-sm)] px-2 py-2 hover:bg-white">
           <input type="radio" name={id("where")} className="mt-1 h-5 w-5 shrink-0" checked={draft.where === "room"} onChange={() => set({ where: "room", meet: null })} />
           <span className="min-w-0">

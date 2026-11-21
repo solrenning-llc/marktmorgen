@@ -238,3 +238,46 @@ export async function forgetFormsPerson(statsId: string | null, email: string, r
   if (room && freed.size) await giveData(room, [...freed].map(([id, bytes]) => ({ slot: ANSWERS_SLOT(id), bytes })));
   return removed;
 }
+
+/**
+ * Finds one kept response by its id inside Redis (ARGV[1], 32 hex digits) and
+ * answers only that response's text, or nil: the list is read there in blocks
+ * of 50 up to ARGV[2] (KEPT_RESPONSES), newest first, as readResponses reads
+ * it, and the first response written with that id is the one (addResponse
+ * writes JSON.stringify, so its id stands as "id":"..."). A response whose
+ * words hold the id but that is another one is passed over; one that holds it
+ * and does not decode is answered as it is, for the reader to refuse.
+ */
+export const FIND_FORM_RESPONSE = `-- marktmorgen:form-find:v1
+local needle = '"id":"' .. ARGV[1] .. '"'
+local last = tonumber(ARGV[2]) - 1
+local from = 0
+while from <= last do
+  local to = math.min(from + 49, last)
+  local items = redis.call("LRANGE", KEYS[1], from, to)
+  for _, raw in ipairs(items) do
+    if string.find(raw, needle, 1, true) then
+      local ok, value = pcall(cjson.decode, raw)
+      if not ok or type(value) ~= "table" or value.id == ARGV[1] then return raw end
+    end
+  end
+  if #items < to - from + 1 then return false end
+  from = to + 1
+end
+return false`;
+
+/**
+ * One response to a form by its id, or null when it is not kept (a confirmed
+ * nil). Found in Redis (FIND_FORM_RESPONSE), so only that response travels,
+ * never every response kept. A reply in any other shape, or a text that does
+ * not read as that response, throws UnknownReply (rule 24): never "gone".
+ */
+export async function readResponse(statsId: string | null, formId: string, responseId: string): Promise<FormResponse | null> {
+  if (!statsId || !FORM_ID.test(formId) || !FORM_RESPONSE_ID.test(responseId) || !isRedisConfigured()) return null;
+  const what = "a form response";
+  const [raw] = exactReplies(await redisPipeline([["EVAL", FIND_FORM_RESPONSE, 1, responsesKey(statsId, formId), responseId, KEPT_RESPONSES]]), 1, what);
+  if (raw === null) return null;
+  const response = parseResponse(raw);
+  if (!response || response.id !== responseId) throw new UnknownReply(what);
+  return response;
+}

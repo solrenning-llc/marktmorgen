@@ -2,7 +2,8 @@ import { PATH_BOARD_KEY, PATH_BOARD_OWNERS_KEY } from "@/lib/path-board";
 import { readPathBoard, pathBoardScore, type PathBoardEntry } from "@/lib/path-board-rules";
 import { createHash, randomBytes } from "node:crypto";
 import {readReturnStep,pathReturnMission,type PathReturnStep} from "@/lib/path-return-rules";
-import { WRITE_PATH, FORGET_PATH } from "@/lib/path-atomic";
+import { WRITE_PATH, FORGET_PATH, FORGET_PATH_HELD } from "@/lib/path-atomic";
+import { LockBusyError } from "@/lib/redis-lock";
 /**
  * Where a store's Marktmorgen Path is kept (lib/path-rules.ts says what it
  * is): one small record, counted in the store's data room like everything
@@ -37,6 +38,7 @@ import { WRITE_PATH, FORGET_PATH } from "@/lib/path-atomic";
  * (lib/person-data.ts, "account"). Answers and money remain private; only explicit\n * board consent shares a pseudonym, verified mission count and reading time.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 import { dataBytes, contentRoomFor } from "@/lib/store-data-rules";
 import { dataKey, monthOf } from "@/lib/store-data";
@@ -152,11 +154,20 @@ export function pathJson(record: PathRecord): string {
   return JSON.stringify({ v: 1, r: record.revision ?? "", a: record.answers, at: record.startedAt, c: record.checkins, b: record.best, bAt: record.bestAt, m: record.money, n: record.counts, g: record.board ?? null,...(record.returnStep?{w:record.returnStep}:{}) });
 }
 
-/** The store's path, or null when it has not begun one (or nothing can be read). */
+/**
+ * The store's path, or null when it has not begun one. The GET answer is read exactly (rule 24): no reply, extra
+ * replies or a value that is neither text nor null throws, never "not started". A record kept as text is read by
+ * parsePath as before; kept text that parsePath does not take for a record throws too, because only this file
+ * writes the key, always as pathJson. Only a GET of null (no key) is "not started".
+ */
 export async function readPath(store: Pick<Store, "sid">): Promise<PathRecord | null> {
   if (!SID.test(store.sid) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", key(store.sid)]]);
-  return parsePath(raw);
+  const reply = repliesFor(await redisPipeline([["GET", key(store.sid)]]), 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError("a store's Path");
+  if (reply[0] === null) return null;
+  const record = parsePath(reply[0]);
+  if (!record) throw new UnknownReplyError("a store's Path");
+  return record;
 }
 
 /**
@@ -238,12 +249,19 @@ export async function visitPath(store: Store, record: PathRecord, now = Date.now
   return { record: next, facts: read };
 }
 
-/** Forgets the store's path: from its deletion and its closing. Safe to call twice. */
-export async function forgetPath(store: Store): Promise<void> {
+/**
+ * Forgets the store's path: from its deletion and its closing. Safe to call twice. With `held`, only while that lock
+ * is still its holder's, read in the same step (FORGET_PATH_HELD): the closing walk's, which forgets a closing store's
+ * Path only while it holds the store's lock, and stops with LockBusyError, nothing forgotten, once it does not.
+ */
+export async function forgetPath(store: Store, held?: { key: string; token: string }): Promise<void> {
   if (!SID.test(store.sid) || !isRedisConfigured()) return;
   const room = dataKey(store);
   if (!room) return;
-  const [reply] = await redisPipeline([["EVAL", FORGET_PATH, 4, room, key(store.sid), PATH_BOARD_KEY, PATH_BOARD_OWNERS_KEY, monthOf(Date.now()), store.sid]]);
+  const keys = [room, key(store.sid), PATH_BOARD_KEY, PATH_BOARD_OWNERS_KEY];
+  const args = [monthOf(Date.now()), store.sid];
+  const [reply] = await redisPipeline([held ? ["EVAL", FORGET_PATH_HELD, 5, ...keys, held.key, ...args, held.token] : ["EVAL", FORGET_PATH, 4, ...keys, ...args]]);
+  if (held && Array.isArray(reply) && Number(reply[0]) === -9) throw new LockBusyError("a closing store's lock ran out before its Path was forgotten");
   if (!Array.isArray(reply) || Number(reply[0]) !== 1) throw new Error("the Path could not be forgotten");
 }
 

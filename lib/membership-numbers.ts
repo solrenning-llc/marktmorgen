@@ -36,6 +36,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { type Invoice, type Movements, movementsFrom, pricesFrom, UnreadInvoiceError } from "@/lib/mrr-movements";
 import { LEAVE_NAMES, LEAVE_REASONS, type LeaveReason, isLeaveReason, isOwnReasonId } from "@/lib/leave-rules";
+import { stopsBeforeSoldEnd } from "@/lib/fixed-end-rules";
 
 const MAX_PAGES = 20;
 const CACHE_SECONDS = 10 * 60;
@@ -438,6 +439,8 @@ type Raw = {
   ended_at?: unknown;
   trial_end?: unknown;
   canceled_at?: unknown;
+  cancel_at?: unknown;
+  billing_cycle_anchor?: unknown;
   cancellation_details?: { reason?: unknown; feedback?: unknown; comment?: unknown } | null;
   items?: { data?: { quantity?: unknown; price?: { unit_amount?: unknown; recurring?: { interval?: unknown; interval_count?: unknown } | null } | null }[] } | null;
 };
@@ -461,30 +464,59 @@ function feedbackOf(raw: Raw): { feedback: string; feedbackText: string } {
   return { feedback: typeof raw.cancellation_details?.feedback === "string" ? raw.cancellation_details.feedback : "", feedbackText: "" };
 }
 
+/** The intervals a Stripe price recurs by. */
+const SUB_INTERVALS = new Set(["day", "week", "month", "year"]);
+/** A whole number Stripe gave, at least `least`: null when it gave none (absent or null); any other shape throws. */
+function exactCount(v: unknown, least: number, what: string): number | null {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== "number" || !Number.isSafeInteger(v) || v < least) throw new Error(`Stripe gave ${what} in a shape that cannot be read`);
+  return v;
+}
+
+/** A record Stripe gave: undefined when it gave none (absent or null); any other shape (text, a list) throws. */
+function exactRecord(v: unknown, what: string): Record<string, unknown> | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "object" || Array.isArray(v)) throw new Error(`Stripe gave ${what} in a shape that cannot be read`);
+  return v as Record<string, unknown>;
+}
+
 /** A membership as Stripe holds it, when it is one of this store's (not a plan). */
 export function readSub(raw: Raw, handles: Set<string>): Sub | null {
   const meta = raw.metadata ?? {};
   if (!handles.has(meta.store ?? "") || !meta.product || meta.kind === "plan") return null;
-  const item = raw.items?.data?.[0];
-  const unit = num(item?.price?.unit_amount);
-  const quantity = num(item?.quantity) || 1;
+  // What a member is worth a month is shown as a fact, so its parts are read in their exact shape (CX-123 rule 24):
+  // absent or null reads as before (no price, one, a month, once); any other shape throws, never one, a month or free.
+  // The records that hold them too (Codex Z on #3055; rule 30): a price or a recurrence in text or as a list is unknown.
+  const items = exactRecord(raw.items, "a membership's items");
+  const list = items?.data;
+  if (list !== undefined && list !== null && !Array.isArray(list)) throw new Error("Stripe gave a membership's items in a shape that cannot be read");
+  const item = exactRecord(list?.[0], "a membership's item");
+  const price = exactRecord(item?.price, "a membership's price");
+  const recurring = exactRecord(price?.recurring, "a membership's recurrence");
+  const unit = exactCount(price?.unit_amount, 0, "a membership's price") ?? 0;
+  const quantity = exactCount(item?.quantity, 0, "a membership's quantity") ?? 1;
+  const every = recurring?.interval;
+  if (every !== undefined && every !== null && (typeof every !== "string" || !SUB_INTERVALS.has(every))) throw new Error("Stripe gave a membership's interval in a shape that cannot be read");
+  const count = exactCount(recurring?.interval_count, 1, "a membership's interval count") ?? 1;
   return {
     id: typeof raw.id === "string" ? raw.id : "",
     status: typeof raw.status === "string" ? raw.status : "",
     product: meta.product,
     amount: unit * quantity,
     currency: typeof raw.currency === "string" ? raw.currency : "",
-    interval: typeof item?.price?.recurring?.interval === "string" ? item.price.recurring.interval : "month",
-    count: num(item?.price?.recurring?.interval_count) || 1,
+    interval: typeof every === "string" ? every : "month",
+    count,
     start: num(raw.start_date),
     ended: num(raw.ended_at),
     trialEnd: num(raw.trial_end),
     channel: "channel" in meta ? (meta.channel && meta.channel !== "direct" ? meta.channel : "direct") : meta.utm_source || "unrecorded",
     entry: entryOf(meta),
     // A membership with a set number of payments is given its end when it is
-    // bought; that is not somebody leaving.
-    canceledAt: meta.ends_after ? 0 : num(raw.canceled_at),
-    cancelCause: !meta.ends_after && typeof raw.cancellation_details?.reason === "string" ? raw.cancellation_details.reason : "",
+    // bought; that is not somebody leaving. Stopped before that end, it is
+    // (lib/fixed-end-rules.ts): counted from when the member asked, written by
+    // the store's page, else Stripe's own moment.
+    canceledAt: meta.ends_after ? (stopsBeforeSoldEnd(raw) ? num(Number(meta.cancel_requested_at)) || num(raw.canceled_at) : 0) : num(raw.canceled_at),
+    cancelCause: (!meta.ends_after || stopsBeforeSoldEnd(raw)) && typeof raw.cancellation_details?.reason === "string" ? raw.cancellation_details.reason : "",
     ...feedbackOf(raw),
     customer: typeof raw.customer === "string" ? raw.customer : raw.customer && typeof raw.customer === "object" && typeof (raw.customer as { id?: unknown }).id === "string" ? (raw.customer as { id: string }).id : "",
     // The customer's address, when Stripe gives the customer whole (expand[]=data.customer): to leave out what an erased member wrote.
@@ -614,6 +646,9 @@ async function readMemberships(
   if (beforeStripe && !(await beforeStripe())) return "refused";
   const handles = saleHandles(store);
   const subs: Sub[] = [];
+  // Every membership's id as listed: one listed twice, on a page or across pages, is not two members, and a cursor
+  // read that repeats is not known to have covered the list (#4421). Its id read exactly, as the cursor reads it.
+  const seen = new Set<string>();
   let after = "";
   let complete = false;
   for (let page = 0; page < MAX_PAGES; page += 1) {
@@ -628,6 +663,10 @@ async function readMemberships(
     if (typeof listed.has_more !== "boolean") throw new Error("Stripe gave whether there are more memberships in a shape that cannot be read");
     const rows = listed.data as Raw[];
     for (const raw of rows) {
+      const id = raw && typeof raw === "object" ? (raw as { id?: unknown }).id : undefined;
+      if (typeof id !== "string" || !id) throw new Error("Stripe gave a membership with no id to tell it apart");
+      if (seen.has(id)) throw new Error("Stripe listed the same membership twice, so the list is not known to be whole");
+      seen.add(id);
       const sub = readSub(raw, handles);
       if (sub) subs.push(sub);
     }

@@ -13,6 +13,7 @@
  * one of them quietly missing a header.
  */
 
+import { parseStripeText, stripeJson } from "@/lib/stripe-http-error";
 import { STRIPE_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { DEMO_CONNECTED_ACCOUNT, demoKey } from "@/lib/demo-account";
 
@@ -79,6 +80,78 @@ export class StripeError extends Error {
 }
 
 /**
+ * A Stripe answer heavier than its reader's ceiling (onAccount's `maxBytes`): stopped as it streams in, never read
+ * whole into memory, and so not known (CX-123 rule 24, 9 November 2026). The same answer would be as heavy again,
+ * so asking again tells no more.
+ */
+export class StripeBodyTooLarge extends Error {
+  readonly maxBytes: number;
+  constructor(maxBytes: number) {
+    super(`Stripe answered with more than ${maxBytes} bytes`);
+    this.name = "StripeBodyTooLarge";
+    this.maxBytes = maxBytes;
+  }
+}
+
+/** A Stripe answer's JSON, read up to `maxBytes` (none when 0): past it the reading stops and StripeBodyTooLarge is thrown. */
+async function jsonWithin(response: Response, maxBytes: number): Promise<Record<string, unknown>> {
+  if (!maxBytes) return stripeJson(response);
+  const declared = Number(response.headers?.get?.("content-length") ?? NaN);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => {});
+    throw new StripeBodyTooLarge(maxBytes);
+  }
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    // A response with no stream to read (a stand-in in a test): its whole text, measured before it is parsed.
+    const text = typeof response.text === "function" ? await response.text() : JSON.stringify(await response.json());
+    if (Buffer.byteLength(text, "utf8") > maxBytes) throw new StripeBodyTooLarge(maxBytes);
+    return parseStripeText(text, response);
+  }
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new StripeBodyTooLarge(maxBytes);
+    }
+    parts.push(value);
+  }
+  return parseStripeText(Buffer.concat(parts).toString("utf8"), response);
+}
+
+/**
+ * Whether work may have asked Stripe to open a checkout (Claude 4's review of
+ * #1732, 6 November 2026): a stock hold is given back at once when its
+ * checkout failed before that request was made, since nothing can exist at
+ * Stripe then (lib/stock.ts, withCartStockHolds). Marked when the request is
+ * about to be sent, before any answer, so a request that may have reached
+ * Stripe always counts as asked. Kept in the server's AsyncLocalStorage, found
+ * when it runs as lib/fetch-timeout.ts finds it (this module is imported by
+ * pages for its constants); where there is none, every work counts as having
+ * asked, the safe way to be wrong.
+ */
+type OpeningMark = { asked: boolean };
+type OpeningStore = { getStore(): OpeningMark | undefined; run<R>(store: OpeningMark, fn: () => R): R };
+const openings: OpeningStore | null = (() => {
+  const g = globalThis as { AsyncLocalStorage?: new () => OpeningStore };
+  if (typeof g.AsyncLocalStorage === "function") return new g.AsyncLocalStorage();
+  const node = typeof process === "undefined" ? undefined : (process as { getBuiltinModule?: (id: string) => unknown }).getBuiltinModule;
+  const hooks = node?.("node:async_hooks") as { AsyncLocalStorage?: new () => OpeningStore } | undefined;
+  return hooks?.AsyncLocalStorage ? new hooks.AsyncLocalStorage() : null;
+})();
+
+/** Runs `work`, and tells afterwards whether it may have asked Stripe to open a checkout (true when that cannot be known). */
+export function watchCheckoutOpening<T>(work: () => Promise<T>): { done: Promise<T>; asked: () => boolean } {
+  if (!openings) return { done: work(), asked: () => true };
+  const mark: OpeningMark = { asked: false };
+  return { done: openings.run(mark, work), asked: () => mark.asked };
+}
+
+/**
  * One request, made on a connected account.
  *
  * `version` pins the API version for this call. Left out, Stripe uses whatever
@@ -101,12 +174,19 @@ export async function onAccount(
   idempotencyKey?: string,
   /** A read-only workflow may choose a shorter ceiling; existing callers keep the default. */
   timeoutMs = STRIPE_TIMEOUT_MS,
+  /** The most bytes of the answer read (0: no ceiling); past it StripeBodyTooLarge is thrown (jsonWithin). */
+  maxBytes = 0,
 ): Promise<Record<string, unknown>> {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 50 || timeoutMs > STRIPE_TIMEOUT_MS) {
     throw new Error("Invalid Stripe request ceiling");
   }
   const key = keyFor(account);
   if (!key) throw new Error("Selling is not configured");
+  // A checkout may exist at Stripe from here on (watchCheckoutOpening).
+  if (method === "POST" && path === "/checkout/sessions") {
+    const mark = openings?.getStore();
+    if (mark) mark.asked = true;
+  }
 
   // Given up after STRIPE_TIMEOUT_MS (lib/fetch-timeout.ts) as a network
   // failure is: never a StripeError, so a charge that timed out is "no
@@ -127,7 +207,9 @@ export async function onAccount(
       cache: "no-store",
       signal,
     });
-    return { response, data: (await response.json()) as Record<string, unknown> };
+    // A status that is not OK with a body that is not JSON keeps its status (lib/stripe-http-error.ts), read within
+    // maxBytes when the caller gives one (jsonWithin).
+    return { response, data: await jsonWithin(response, maxBytes) };
   });
   if (!response.ok) {
     const error = data.error as

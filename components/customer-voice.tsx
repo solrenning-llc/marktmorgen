@@ -6,6 +6,7 @@ import type { VoiceSource, VoiceSummary } from "@/lib/customer-voice";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
+  unread: "Some of what customers said could not be read just now, so no summary was made: it would leave them out for the whole month. No AI job was used. Try again in a moment.",
   few: "Not enough yet: fewer than 8 things customers wrote or searched for in the last 90 days. It is worth reading once there are more.",
   used: "This month's AI jobs are used up. They come back with your next billing month.",
   off: "This summary is not available right now.",
@@ -22,13 +23,22 @@ const SOURCE_WORDS: Record<VoiceSource, [string, string]> = {
   question: ["unanswered question", "unanswered questions"],
   review: ["review", "reviews"],
   search: ["search with no result", "searches with no result"],
+  assistant: ["question the assistant could not answer", "questions the assistant could not answer"],
+  waitlist: ["waitlist of a product coming soon", "waitlists of products coming soon"],
 };
-const SOURCES: VoiceSource[] = ["cancel", "question", "review", "search"];
+const SOURCES: VoiceSource[] = ["cancel", "question", "review", "search", "assistant", "waitlist"];
 
 const said = (counts: Partial<Record<VoiceSource, number>>) =>
   SOURCES.filter((s) => counts[s])
     .map((s) => `${counts[s]} ${SOURCE_WORDS[s][counts[s] === 1 ? 0 : 1]}`)
     .join(" · ");
+
+/** The lists named in plain words, the first capitalized: "Reviews and searches with no result". Pure. */
+export function unreadWords(unread: VoiceSource[]): string {
+  const names = SOURCES.filter((s) => unread.includes(s)).map((s) => SOURCE_WORDS[s][1]);
+  const list = names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  return list ? `${list[0].toUpperCase()}${list.slice(1)}` : "";
+}
 
 function monthName(month: string): string {
   const [y, m] = month.split("-").map(Number);
@@ -37,11 +47,13 @@ function monthName(month: string): string {
 
 /**
  * What customers are saying (lib/customer-voice.ts): the last 90 days of
- * cancellation words, unanswered questions, reviews and searches that found
+ * cancellation words, unanswered questions (the pages' and the Store
+ * assistant's), reviews and searches that found
  * nothing, sorted into themes once a month, each with its count and the
  * customers' own words.
  */
 export function CustomerVoice({ initial }: { initial: VoiceSummary | null }) {
+  // oxlint-disable-next-line react/purity -- pre-existing read of today's date, not flagged by the former ESLint React Compiler rule; changing render behavior is outside the lint swap
   const thisMonth = new Date().toISOString().slice(0, 7);
   const [summary, setSummary] = useState<VoiceSummary | null>(initial);
   const [busy, setBusy] = useState(false);
@@ -54,9 +66,15 @@ export function CustomerVoice({ initial }: { initial: VoiceSummary | null }) {
     setError(null);
     try {
       const response = await fetch("/api/store/voice", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; summary?: VoiceSummary };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string; summary?: VoiceSummary; unread?: VoiceSource[] | null };
       if (data.ok && data.summary) setSummary(data.summary);
-      else setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
+      else {
+        // The studio's requests used up, or not countable: their own words, never "AI jobs" (review of #3731).
+        const own = (data.error === "studio_used" || data.error === "unavailable") && typeof data.message === "string" && data.message ? data.message : "";
+        const message = own || (MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
+        const named = data.error === "unread" && Array.isArray(data.unread) ? unreadWords(data.unread) : "";
+        setError(named ? `${message} Not read: ${named}.` : message);
+      }
     } catch {
       setError(MESSAGES.server_error);
     } finally {
@@ -70,7 +88,7 @@ export function CustomerVoice({ initial }: { initial: VoiceSummary | null }) {
         What customers are saying
       </p>
       <p className="mt-1 text-xs text-ink-soft">
-        The last 90 days of what members wrote when leaving, questions your pages could not answer, reviews and searches that found nothing, sorted into the themes they repeat. AI only names each theme: the counts and the words under it are your customers&apos; own. What members wrote when leaving is counted but not quoted here: nothing kept with it says who wrote it, so it could not be left out for someone who was deleted. Once a month, as one of the month&apos;s AI jobs.
+        The last 90 days of what members wrote when leaving, questions your pages or your Store assistant could not answer, reviews and searches that found nothing, with how many are on the waitlist of each product coming soon so far (confirmed or not), sorted into the themes they repeat. AI only names each theme: the counts and the words under it are your customers&apos; own. What members wrote when leaving is counted but not quoted here: nothing kept with it says who wrote it, so it could not be left out for someone who was deleted. Once a month, as one of the month&apos;s AI jobs.
       </p>
       {summary ? (
         <div className="mt-3">

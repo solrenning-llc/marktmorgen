@@ -77,9 +77,59 @@ export function stringList(reply: unknown): string[] | null {
   return slots as string[];
 }
 
+/**
+ * A list of any members (an EVAL that answers a list of numbers), as a fresh
+ * plain list read from the reply's own data slots, or null: a Proxy, a hole,
+ * an inherited member or a getter is refused (ownSlots). The caller checks
+ * each member's shape.
+ */
+export function replyList(reply: unknown): unknown[] | null {
+  return ownSlots(reply);
+}
+
+/**
+ * A list's own data slots, whatever each holds, as a fresh plain list, or null for anything that is not a plain list
+ * (a Proxy, a hole, an inherited slot or a getter). For a reply whose members are read one by one, so a member that
+ * cannot be read is told apart from the ones that can; nothing of the reply is run.
+ */
+export function listSlots(reply: unknown): unknown[] | null {
+  return ownSlots(reply);
+}
+
 /** A count (DEL, EXISTS, SCARD, HLEN, an EVAL that answers one): a whole number from zero up, or null. */
 export function countOf(reply: unknown): number | null {
   return typeof reply === "number" && Number.isSafeInteger(reply) && reply >= 0 ? reply : null;
+}
+
+/**
+ * A deletion's or write's count read exactly, and only when the command sent could give it (CX-123 rule 24; #4795,
+ * #4796, #4798, #4794, Codex V): DEL and UNLINK at most their distinct keys; ZREM, SREM and HDEL at most their distinct
+ * members or fields; HSET at most its distinct fields; SADD and ZADD at most their distinct members (ZADD CH without
+ * NX counts changes, including repeated updates, so its bound is the number of score/member pairs). A larger count cannot come from that command, so it does not
+ * prove what was removed or written, and it is null (unknown), as any other shape is. Other commands: countOf alone.
+ */
+export function countWithin(reply: unknown, command: readonly (string | number)[]): number | null {
+  const count = countOf(reply);
+  if (count === null) return null;
+  const op = String(command[0] ?? "").toUpperCase();
+  const args = command.slice(1).map(String);
+  let most: number;
+  if (op === "DEL" || op === "UNLINK") most = new Set(args).size;
+  else if (op === "ZREM" || op === "SREM" || op === "HDEL") most = new Set(args.slice(1)).size;
+  else if (op === "HSET") most = new Set(args.slice(1).filter((_, i) => i % 2 === 0)).size;
+  else if (op === "SADD") most = new Set(args.slice(1)).size;
+  else if (op === "ZADD") {
+    // Its options first (NX, XX, GT, LT, CH), then score and member pairs; INCR answers a score, not a count.
+    let at = 1;
+    while (at < args.length && ["NX", "XX", "GT", "LT", "CH", "INCR"].includes(args[at].toUpperCase())) at += 1;
+    const options = args.slice(1, at).map((a) => a.toUpperCase());
+    if (options.includes("INCR")) return count;
+    // CH counts each change, including repeated updates of one member. NX permits only its first addition.
+    most = options.includes("CH") && !options.includes("NX")
+      ? Math.floor((args.length - at) / 2)
+      : new Set(args.slice(at).filter((_, i) => i % 2 === 1)).size;
+  } else return count;
+  return count <= most ? count : null;
 }
 
 /**
@@ -93,6 +143,32 @@ export function countOf(reply: unknown): number | null {
 export function repliesFor(replies: unknown, commands: number): unknown[] | null {
   return ownSlots(replies, commands);
 }
+
+/**
+ * One page of a SCAN, SSCAN, HSCAN or ZSCAN, read exactly (rules 24 and 30, review of #2921): the pipeline's one
+ * reply, a [cursor, items] pair whose cursor is a string of digits and whose items are strings; null for anything
+ * else. A page that does not read is unknown: never the end of the walk ("0"), never a page with nothing on it.
+ * The caller throws UnknownReplyError on null, and bounds its walk with a page ceiling past which it is unknown too.
+ */
+export function scanPage(replies: unknown): { next: string; items: string[] } | null {
+  const reply = ownSlots(replies, 1);
+  const page = reply ? ownSlots(reply[0], 2) : null;
+  if (!page) return null;
+  const next = page[0];
+  // "", "abc", " 0" or a number is not a cursor (Codex T on #2921): it would end the walk or mislead it.
+  if (typeof next !== "string" || !/^[0-9]+$/.test(next)) return null;
+  const items = stringList(page[1]);
+  return items ? { next, items } : null;
+}
+
+/**
+ * Deletes one hash field only while it holds the value given (KEYS[1] the hash, ARGV[1] the field, ARGV[2] the value):
+ * 1 when deleted, 0 when the field is absent or holds another value; a key of another type answers an error, which is
+ * neither. So taking back what one write put there (lib/paypal-delivery.ts takeBack) keeps a later write's value.
+ */
+export const HDEL_IF_EQUAL = `-- marktmorgen:hdel-if-equal:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] then return redis.call("HDEL", KEYS[1], ARGV[1]) end
+return 0`;
 
 /** Thrown where a reply was not in its exact shape, so what depended on it is said as not done. */
 export class UnknownReplyError extends Error {

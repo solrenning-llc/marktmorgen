@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isSenderConfigured } from "@/lib/email";
 import { visitedFolders } from "@/lib/traffic";
@@ -39,11 +40,31 @@ export async function GET(request: NextRequest) {
     const lastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15));
     const folders = [...new Set([...(await visitedFolders(monthKey(now))), ...(await visitedFolders(monthKey(lastMonth)))])].sort();
     const atKey = `nl:quiet:at:${now.toISOString().slice(0, 10)}`;
-    const [atRaw] = await redisPipeline([["GET", atKey]]);
-    let at = Math.max(0, Number(atRaw) || 0);
+    // Where today's walk goes on from, read exactly (CX-123 rule 24): nil is the start, a whole number the place;
+    // anything else is unknown, and nothing is read on it and the place is left as it was. Within one UTC day the
+    // list only grows (lib/traffic.ts adds folders and keeps them 400 days), so this pass never wrote a place past
+    // its end: that is unknown too.
+    const kept = repliesFor(await redisPipeline([["GET", atKey]]), 1);
+    const place = kept ? kept[0] : undefined;
+    let at = place === null ? 0 : typeof place === "string" && /^(0|[1-9][0-9]{0,8})$/.test(place) ? Number(place) : -1;
+    if (at < 0 || at > folders.length) {
+      console.error("quiet: where today's walk goes on from is unknown; nothing read this run");
+      return Response.json({ ok: false, error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    }
     while (at < folders.length && Date.now() - started <= TIME_BUDGET_MS) {
-      const store = await storeOf(folders[at]).catch(() => null);
+      // A store that cannot be read is tried again at once. If it still cannot be, it is counted as failed and said
+      // in the log, never passed over as "no store"; the walk goes on to the stores after it, so one store never
+      // holds back the rest, and the next day's walk tries it again.
+      const folder = folders[at];
       at += 1;
+      const store = await storeOf(folder).catch(() => storeOf(folder)).catch((error: unknown) => {
+        console.error(`quiet: the store of folder ${folder} could not be read twice; counted as failed, tried again on the next day's walk`, error);
+        return undefined;
+      });
+      if (store === undefined) {
+        out.failed += 1;
+        continue;
+      }
       if (!store) continue;
       const result = await checkQuiet(store).catch((error) => {
         console.error("checking a store's sales failed", error);

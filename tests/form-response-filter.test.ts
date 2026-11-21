@@ -36,7 +36,7 @@ test("CSV contains only selected responses and preserves existing consent wordin
   const selected=filterFormResponses({...form,offerList:true},responses,"ana","");
   const csv=responsesCsv({...form,offerList:true},selected);
   assert.match(csv,/Ana/);assert.doesNotMatch(csv,/José|Lee|Sam/);
-  assert.match(csv,/Asked to hear from you/);assert.match(csv,/,No\r\n/);
+  assert.match(csv,/Asked to hear from you/);assert.match(csv,/,"No"\r\n/);
 });
 test("filtered exports keep spreadsheet formula protection",()=>{
   const row={...responses[0],answers:{...responses[0].answers,name00:'=HYPERLINK("https://example.com")'}};

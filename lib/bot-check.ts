@@ -42,3 +42,40 @@ export async function isAutomated(): Promise<boolean> {
     if (timer) clearTimeout(timer);
   }
 }
+
+/**
+ * What the host's check says of the browser that sent this request, for a
+ * count that a program must never be able to spend: a store's visits
+ * (app/api/store/hit). Unlike isAutomated, which may only ever refuse a
+ * program and so lets a request through on any doubt, this one counts only
+ * on a clear yes:
+ *
+ *   - "human": the host's check answered, in its own shape, that a person's
+ *     browser sent it;
+ *   - "automated": it answered that a program did;
+ *   - "unknown": it failed, did not answer within ANSWER_WITHIN_MS, or
+ *     answered in another shape (CX-123 rule 24): never read as a person.
+ *
+ * Off the host (a local run, the tests) there is no check at all, and the
+ * answer is "human", as every count was before the check existed.
+ */
+export type BrowserProof = "human" | "automated" | "unknown";
+
+export async function browserProof(): Promise<BrowserProof> {
+  if (process.env.VERCEL !== "1") return "human";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const late = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), ANSWER_WITHIN_MS);
+    });
+    const verdict: unknown = await Promise.race([checkBotId(), late]);
+    if (!verdict || typeof verdict !== "object") return "unknown";
+    const isBot = (verdict as { isBot?: unknown }).isBot;
+    if (typeof isBot !== "boolean") return "unknown";
+    return isBot ? "automated" : "human";
+  } catch {
+    return "unknown";
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}

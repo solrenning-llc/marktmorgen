@@ -6,6 +6,7 @@ import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { MAX_FILE_BYTES, maxFileLabel, readableSize } from "@/lib/product-file";
 import { EPISODE_ACCEPT, EPISODE_TYPES, type Episode, MAX_EPISODES, MAX_EPISODE_NOTES, MAX_EPISODE_TITLE, type Podcast } from "@/lib/podcast-rules";
+import { PodcastPublicFeed } from "@/components/podcast-public-feed";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -16,8 +17,8 @@ const MESSAGES: Record<string, string> = {
   not_empty: "Delete its episodes first.",
   busy: "The podcast is being changed right now. Try again in a moment.",
   unknown: "That episode is no longer there. Reload the page.",
-  // The same audio is another episode's already (app/api/store/podcast).
-  in_use: "That audio file is already another episode. Choose the file from your device again.",
+  // The same audio is another episode's already, or the product's own file (app/api/store/podcast).
+  in_use: "That audio file is already used on this product. Choose the file from your device again.",
 };
 
 type Answer = { ok: boolean; error?: string; podcast?: Podcast };
@@ -152,6 +153,8 @@ export function PodcastEditor({ productId, folder, initial }: { productId: strin
           </ol>
         )}
       </section>
+
+      <PodcastPublicFeed productId={productId} episodes={podcast.episodes} />
     </div>
   );
 }

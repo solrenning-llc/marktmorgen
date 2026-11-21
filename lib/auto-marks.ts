@@ -10,15 +10,18 @@
  * product's creation, a sale's dates — so nothing on the chart is guessed.
  * Days are UTC, like every day of the numbers.
  */
-import { listBroadcasts } from "@/lib/broadcasts";
+import { type PayFirst, readBroadcastHeads } from "@/lib/broadcasts";
 import { readListings } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
+import { countStudio } from "@/lib/studio-route";
 
 export type MarkKind = "email" | "product" | "sale";
 export type AutoMark = { day: string; kind: MarkKind; text: string };
 
 const dayOf = (seconds: number) => new Date(seconds * 1000).toISOString().slice(0, 10);
 const MAX_MARKS = 200;
+/** The newest emails a chart is marked with. */
+const MARK_EMAILS = 50;
 
 type EmailLike = { subject: string; status: string; sendAt: number; finishedAt: number; sent: number };
 type ProductLike = { title: string; createdAt: string; hidden?: boolean };
@@ -50,11 +53,25 @@ export function marksFrom(input: { emails: EmailLike[]; products: ProductLike[];
     .slice(-MAX_MARKS);
 }
 
-/** The marks for the days the chart can show, read from the store's own records: one list of emails and the catalog. */
-export async function readMarks(store: Store, from: string, to: string, now = Date.now()): Promise<AutoMark[]> {
+/** The store's own studio requests, taken before what they pay for is read (lib/studio-route.ts, countStudio). */
+const fromStudio = (store: Store): PayFirst => async (units) => {
+  const counted = await countStudio(store, null, units);
+  return counted.ok ? { ok: true } : { ok: false, message: counted.message };
+};
+
+/**
+ * The marks for the days the chart can show, read from the store's own records: one list of emails and the catalog.
+ * The emails are read without their bodies, and what that comes to is taken from the store's studio requests (`pay`)
+ * before any is read (lib/broadcasts.ts, readBroadcastHeads): not taken, the chart has no email marks. A read that
+ * fails rejects: marks that could not be read are unknown, never none (VR2 audit, rule 24), and the caller says so.
+ */
+export async function readMarks(store: Store, from: string, to: string, now = Date.now(), pay: PayFirst = fromStudio(store)): Promise<AutoMark[]> {
   const [emails, products] = await Promise.all([
-    listBroadcasts(store.listId, 50).catch(() => []),
-    readListings(store).catch(() => []),
+    // Strict: a malformed list or record reply rejects instead of reading as no campaigns; a record Redis answers as
+    // its own nil expired (RECORD_DAYS) and is left out, known (Codex M, #3146).
+    // Requests the plan did not give (`pay` refused) are a known limit: the chart has no email marks, the sale's stay.
+    readBroadcastHeads(store.listId, pay, MARK_EMAILS, { expired: "skip" }).then((read) => (read.ok ? read.heads : [])),
+    readListings(store),
   ]);
   return marksFrom({ emails, products, sales: [...(store.pastSales ?? []), store.sale], from, to, now });
 }

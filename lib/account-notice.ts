@@ -21,6 +21,7 @@
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
+import { MEET_ACCESS_UNCONFIRMED, type MeetProvider, meetAccessRemoveWords } from "@/lib/call-setup";
 
 export type AccountChange =
   | { kind: "stripe-connected" }
@@ -38,7 +39,7 @@ export type AccountChange =
   | { kind: "email-platform-removed"; name: string }
   | { kind: "phone-added"; label: string }
   | { kind: "meeting-connected"; name: string; account: string }
-  | { kind: "meeting-disconnected"; name: string; account: string; byProvider?: boolean }
+  | { kind: "meeting-disconnected"; name: string; account: string; byProvider?: boolean; provider?: MeetProvider; providerAccessRemoved?: false }
   | { kind: "meeting-broken"; name: string }
   | { kind: "discord-connected"; server: string }
   | { kind: "metaads-connected"; account: string }
@@ -47,7 +48,8 @@ export type AccountChange =
 
 const SUPPORT = "support@marktmorgen.com";
 
-function describe(change: AccountChange): { subject: string; line: string } {
+/** The subject and the first line of one change's notice. */
+export function accountChangeWords(change: AccountChange): { subject: string; line: string } {
   switch (change.kind) {
     case "stripe-connected":
       return {
@@ -148,7 +150,9 @@ function describe(change: AccountChange): { subject: string; line: string } {
         subject: `${change.name} was disconnected from your store`,
         line: change.byProvider
           ? `The app was removed from the ${change.name} account ${change.account}, so your store no longer makes meetings on it. Calls set to use it now give buyers your own link, or a private video room. Meetings already made stay where they are.`
-          : `The ${change.name} account ${change.account} was disconnected from your store and its access was given back. Calls set to use it now give buyers your own link, or a private video room. Meetings already made stay where they are.`,
+          : change.providerAccessRemoved === false && change.provider
+            ? `The ${change.name} account ${change.account} was disconnected from your store, but ${MEET_ACCESS_UNCONFIRMED[change.provider].company} did not confirm that it removed our access. ${meetAccessRemoveWords(change.provider)} Calls set to use it now give buyers your own link, or a private video room. Meetings already made stay where they are.`
+            : `The ${change.name} account ${change.account} was disconnected from your store and its access was given back. Calls set to use it now give buyers your own link, or a private video room. Meetings already made stay where they are.`,
       };
     case "meeting-broken":
       return {
@@ -166,7 +170,7 @@ function describe(change: AccountChange): { subject: string; line: string } {
 /** Sends the notice for one change. Never throws; false when nothing was sent. */
 export async function noticeCreator(store: Pick<Store, "email" | "handle">, change: AccountChange): Promise<boolean> {
   if (!isSenderConfigured()) return false;
-  const { subject, line } = describe(change);
+  const { subject, line } = accountChangeWords(change);
   const when = new Date().toISOString().replace("T", " ").slice(0, 16);
   try {
     return await sendEmail({ meter: { by: "company" },

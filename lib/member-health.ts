@@ -8,9 +8,11 @@
  * is written about anybody to work it out, and nothing is read on a visit to
  * the store.
  *
- *   nl:health:<statsId>   JSON Health, ten minutes
+ *   nl:health:<statsId>   JSON Health, ten minutes, never with a person the store deleted (keepCopy)
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, listSlots, repliesFor } from "@/lib/redis-reply";
+import { keepUnlessErased, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
@@ -20,6 +22,7 @@ import { lastSeenMany } from "@/lib/learn";
 import { lastSeenIn, readConfig } from "@/lib/community";
 import { normaliseEmail } from "@/lib/auth";
 import { type Band, type HealthFactor, bandOf, scoreOf } from "@/lib/member-health-rules";
+import { stopsBeforeSoldEnd } from "@/lib/fixed-end-rules";
 
 const MAX_PAGES = 10;
 const CACHE_SECONDS = 10 * 60;
@@ -69,6 +72,8 @@ type Raw = PauseSub & {
   cancel_at_period_end?: unknown;
   cancel_at?: unknown;
   current_period_end?: unknown;
+  trial_end?: unknown;
+  billing_cycle_anchor?: unknown;
   metadata?: Record<string, string> | null;
   customer?: { email?: unknown } | string | null;
   items?: { data?: { quantity?: unknown; current_period_end?: unknown; price?: { unit_amount?: unknown; metadata?: Record<string, string> | null; recurring?: { interval?: unknown; interval_count?: unknown } | null } | null }[] };
@@ -183,7 +188,8 @@ async function scoredMembers(store: Store, rows: Raw[], now = Date.now()): Promi
       const course = listing?.course?.id ?? "";
       const meta = raw.metadata ?? {};
       // A membership sold to end after a set number of payments has its end from the start: that is not a choice to leave.
-      const ending = !meta.ends_after && (raw.cancel_at_period_end === true || num(raw.cancel_at) > 0);
+      // Set to stop before that end, it is (lib/fixed-end-rules.ts).
+      const ending = meta.ends_after ? stopsBeforeSoldEnd(raw) : raw.cancel_at_period_end === true || num(raw.cancel_at) > 0;
       const { score, factors } = scoreOf(
         {
           status: String(raw.status),
@@ -248,13 +254,85 @@ export async function memberHealth(store: Store, fresh = false, now = Date.now()
     else atRisk += m.monthly;
   }
   const health: Health = { at: Math.floor(now / 1000), currency: store.currency, members, counts, atRisk, atRiskElsewhere, unscored, complete };
-  if (isRedisConfigured()) await redisPipeline([["SET", cacheKey(store), JSON.stringify(health), "EX", CACHE_SECONDS]]).catch(() => {});
+  // The studio is answered with the certified copy itself, never the unfiltered refresh (#4749): a member this store
+  // deleted stays out of the answer as of the copy, and a refresh whose copy cannot be certified answers nothing.
+  if (isRedisConfigured()) {
+    try {
+      return await keepCopy(store, health);
+    } catch (error) {
+      console.error("the members' scores copy could not be kept", error);
+      return null;
+    }
+  }
   return health;
+}
+
+/**
+ * The members of `members` this store has deleted (lib/suppression.ts prints, written first by a person's erasure),
+ * by address, read in one HMGET; null when the reply does not read as one slot a member, each nil or text (rule 24).
+ * A snapshot without a list id cannot certify no erasures; keepCopy refuses member-bearing copies from it.
+ */
+async function erasedOf(store: Store, members: MemberRow[]): Promise<Set<string> | null> {
+  const listId = store.listId;
+  if (!listId || !members.length) return new Set();
+  const prints = members.map((m) => suppressionPrint(listId, m.email));
+  const replies = repliesFor(await redisPipeline([["HMGET", suppressedKey(listId), ...prints]]), 1);
+  const slots = replies ? listSlots(replies[0]) : null;
+  if (!slots || slots.length !== prints.length || slots.some((slot) => slot !== null && typeof slot !== "string")) return null;
+  return new Set(members.filter((_, i) => slots[i] !== null).map((m) => m.email));
+}
+
+/**
+ * Keeps the ten-minute copy without anybody this store has deleted (#3967, Codex L): a membership stays on the
+ * creator's Stripe account after the person's erasure, so a refresh reads them again; their row stays out of the
+ * copy and its numbers stay whole. A person's erasure writes their print before it deletes the copy
+ * (lib/person-erasure.ts, forgetHealthCopy), so the prints are read again once the copy is written: one deleted
+ * meanwhile, or a read that does not answer, deletes the copy, never leaving it with them in it. Prints that do not
+ * read before the write keep no copy at all.
+ */
+async function keepCopy(store: Store, health: Health): Promise<Health | null> {
+  // A legacy snapshot can predate the namespace created by an erasure already completed in another request.
+  // Without its id no print can be checked, so no copy containing a person may be kept from this snapshot.
+  if (!store.listId && health.members.length) return null;
+  const erased = await erasedOf(store, health.members);
+  if (!erased) return null;
+  let copy = erased.size ? { ...health, members: health.members.filter((m) => !erased.has(m.email)) } : health;
+  // A person deleted at the commit or just after it is taken out and the copy written again, at most three times;
+  // past that, or on prints that do not read, no copy is kept and nothing is answered.
+  for (let tries = 0; tries < 3; tries += 1) {
+    if (!store.listId || !copy.members.length) {
+      await redisPipeline([["SET", cacheKey(store), JSON.stringify(copy), "EX", CACHE_SECONDS]]);
+      return copy;
+    }
+    // The pre-read and a later deletion cannot protect the gap after SET. Check and write in one Redis step.
+    const atCommit = await keepUnlessErased(cacheKey(store), store.listId, JSON.stringify(copy), CACHE_SECONDS, copy.members.map((m) => m.email));
+    if (atCommit.size) {
+      copy = { ...copy, members: copy.members.filter((m) => !atCommit.has(m.email)) };
+      continue;
+    }
+    const after = await erasedOf(store, copy.members).catch(() => null);
+    if (after === null) {
+      await redisPipeline([["DEL", cacheKey(store)]]);
+      return null;
+    }
+    if (after.size) {
+      await redisPipeline([["DEL", cacheKey(store)]]);
+      copy = { ...copy, members: copy.members.filter((m) => !after.has(m.email)) };
+      continue;
+    }
+    return copy;
+  }
+  await redisPipeline([["DEL", cacheKey(store)]]);
+  return null;
 }
 
 /** Lets the ten-minute copy of the members' scores go, so a deleted person is not in it (lib/person-erasure.ts). */
 export async function forgetHealthCopy(store: Store): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", cacheKey(store)]]);
-  return Number(gone) || 0;
+  const replies = repliesFor(await redisPipeline([["DEL", cacheKey(store)]]), 1);
+  const gone = countOf(replies?.[0]);
+  // One key: 0 (it was not there) or 1 (deleted). Any other reply is unknown, so the step is not done and the
+  // erasure says so, never a copy with the person in it counted as gone (CX-123 rule 24).
+  if (gone === null || gone > 1) throw new UnknownReplyError("the deletion of the members' scores copy");
+  return gone;
 }

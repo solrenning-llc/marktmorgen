@@ -31,7 +31,7 @@ export async function checkTaxScope({browser,LOCAL,session,sid,is}){
    const sent=route.request().postDataJSON();
    is("explicit discount read sends only list action",sent,{action:"list"});
    listed++;
-   await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({ok:true,codes:[]})});
+   await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({ok:true,codes:[],schedules:[]})});
   });
   // The preceding checks intentionally read server text before hydration.
   // Settle that navigation before the separate, explicit client action.

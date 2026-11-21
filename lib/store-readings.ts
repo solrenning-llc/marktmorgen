@@ -30,6 +30,8 @@
 import { nextUtcMidnight } from "@/lib/local-clock";
 import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY } from "@/lib/store-reading-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { windowCountBy } from "@/lib/window-count";
+import { UnknownReplyError, countOf, replyList, repliesFor } from "@/lib/redis-reply";
 import { keyFor } from "@/lib/stripe-account";
 import { KEEP_UNLESS_ERASED, suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Store, ensureListId, storeRef } from "@/lib/store";
@@ -44,8 +46,15 @@ export const READING_KEEP_SECONDS = 86_400;
 /** The largest reading kept, in bytes; one larger is read each time, from the budget. */
 export const READING_COPY_MAX_BYTES = 131_072;
 
-export type ReadingKind = "stats" | "sales" | "members";
-export const READING_KINDS: readonly ReadingKind[] = ["stats", "sales", "members"];
+export type ReadingKind = "stats" | "sales" | "members" | "earnings";
+/** Every kind kept; each copy is priced in the store-readings line (tests/plan-cost-registry.ts), READING_KINDS.length of them. */
+export const READING_KINDS: readonly ReadingKind[] = ["stats", "sales", "members", "earnings"];
+/**
+ * The kinds that read the store's sales (every PayPal sale and refund record, lib/read-ceilings.ts SALES_READ_SHAPE):
+ * each takes one of the day's HEAVY_READINGS_PER_DAY. The twelve months of earnings (lib/earnings-read.ts) are one,
+ * read within the same shape (426 [BX2]), so the line's two heavy readings a day price them.
+ */
+export const HEAVY_KINDS: ReadonlySet<ReadingKind> = new Set<ReadingKind>(["sales", "earnings"]);
 
 const copyKey = (kind: ReadingKind, statsId: string) => `nl:reading:${kind}:${statsId}`;
 const dayKey = (statsId: string, day: string) => `nl:reading:day:${statsId}:${day}`;
@@ -145,15 +154,17 @@ export async function takeStoreReading(store: Pick<Store, "statsId">, now = Date
   const key = dayKey(store.statsId, utcDay(now));
   const heavyKey = `${key}:heavy`;
   try {
-    const [, raw, , , rawHeavy] = await redisPipeline([
+    const [, raw, , rawHeavy, heavyExpire] = await redisPipeline([
       ["SET", key, "0", "NX", "EX", 2 * 86_400],
       ["INCRBY", key, 1],
       ["EXPIRE", key, 2 * 86_400, "NX"],
-      ...(heavy ? [["SET", heavyKey, "0", "NX", "EX", 2 * 86_400], ["INCRBY", heavyKey, 1]] : []),
+      // The heavy count as lib/window-count.ts counts: INCRBY, then the expiry when the key has none, so a key that
+      // expires between two commands never comes back without one (Claude 7 on #3369).
+      ...(heavy ? windowCountBy(heavyKey, 2 * 86_400, 1) : []),
     ]);
     const n = Number(raw);
     const h = heavy ? Number(rawHeavy) : 0;
-    if (!Number.isSafeInteger(n) || n < 1 || !Number.isSafeInteger(h) || (heavy && h < 1)) return false;
+    if (!Number.isSafeInteger(n) || n < 1 || !Number.isSafeInteger(h) || (heavy && (h < 1 || (heavyExpire !== 0 && heavyExpire !== 1)))) return false;
     if (n <= STORE_READINGS_PER_DAY && h <= HEAVY_READINGS_PER_DAY) return true;
     await redisPipeline([["DECRBY", key, 1], ...(heavy ? [["DECRBY", heavyKey, 1]] : [])]).catch(() => {});
     return false;
@@ -202,9 +213,11 @@ export type ReadingGuard<T> = {
  * was spent; inbox C4-53): the last one kept is shown, stale and `failed`, or
  * ReadingFailed is thrown when there is none. One that stopped before calling
  * anyone (NotRead) gives its unit back. With a `guard` naming people, it is
- * kept by READING_COPY, never over someone deleted since `read` looked.
+ * kept by READING_COPY, never over someone deleted since `read` looked. With
+ * `accept`, a kept copy it refuses (the earnings of another time zone) is
+ * taken as none at all, never shown fresh or stale (review of #3022).
  */
-export async function keptReading<T>(store: Pick<Store, "statsId">, kind: ReadingKind, read: () => Promise<T>, now = Date.now(), fresh = false, guard?: ReadingGuard<T>): Promise<Kept<T> | null> {
+export async function keptReading<T>(store: Pick<Store, "statsId">, kind: ReadingKind, read: () => Promise<T>, now = Date.now(), fresh = false, guard?: ReadingGuard<T>, accept?: (value: unknown) => boolean): Promise<Kept<T> | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const key = copyKey(kind, store.statsId);
   let kept: Kept<T> | null = null;
@@ -212,13 +225,13 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     const [raw] = await redisPipeline([["GET", key]]);
     if (typeof raw === "string" && raw) {
       const parsed = JSON.parse(raw) as { at?: unknown; value?: unknown; unnamed?: unknown };
-      if (typeof parsed.at === "number" && parsed.value !== undefined) kept = { value: parsed.value as T, at: parsed.at, stale: false, ...(parsed.unnamed === true ? { unnamed: true } : {}) };
+      if (typeof parsed.at === "number" && parsed.value !== undefined && (!accept || accept(parsed.value))) kept = { value: parsed.value as T, at: parsed.at, stale: false, ...(parsed.unnamed === true ? { unnamed: true } : {}) };
     }
   } catch {
     kept = null;
   }
   if (kept && !fresh && now - kept.at < READING_FRESH_SECONDS * 1000) return kept;
-  if (!(await takeStoreReading(store, now, kind === "sales"))) {
+  if (!(await takeStoreReading(store, now, HEAVY_KINDS.has(kind)))) {
     if (kept) return { ...kept, stale: true };
     throw new ReadingsUsed();
   }
@@ -227,7 +240,7 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     value = await read();
   } catch (error) {
     if (error instanceof NotRead) {
-      await giveStoreReading(store, now, kind === "sales");
+      await giveStoreReading(store, now, HEAVY_KINDS.has(kind));
       if (kept) return { ...kept, stale: true };
       throw error;
     }
@@ -259,9 +272,11 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     return { value: guard.without(value, new Set(names)), at: now, stale: false };
   };
   try {
-    const replies = await redisPipeline([["EVAL", READING_COPY, 2, key, suppressedKey(listId), text, READING_KEEP_SECONDS, ...names.map((e) => suppressionPrint(listId, e))]]);
-    const reply: unknown = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
-    const places = Array.isArray(reply) && reply.every((i) => Number.isInteger(i) && (i as number) >= 1 && (i as number) <= names.length) ? (reply as number[]) : null;
+    const replies = repliesFor(await redisPipeline([["EVAL", READING_COPY, 2, key, suppressedKey(listId), text, READING_KEEP_SECONDS, ...names.map((e) => suppressionPrint(listId, e))]]), 1);
+    // Each place read from the list's own slots (lib/redis-reply.ts), as keepUnlessErased does: a hole or a getter is
+    // not a place, where Array#every would skip a hole (review of #2865).
+    const list = replies ? replyList(replies[0]) : null;
+    const places = list && list.every((i) => Number.isSafeInteger(i) && (i as number) >= 1 && (i as number) <= names.length) ? (list as number[]) : null;
     if (!places) return await closed();
     if (!places.length) return { value, at: now, stale: false };
     return { value: guard.without(value, new Set(places.map((i) => names[i - 1]))), at: now, stale: false };
@@ -379,7 +394,10 @@ export async function keptNumbers(store: Store, now = Date.now()): Promise<Stats
  */
 export async function forgetStoreReadings(statsId: string | null | undefined): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", ...READING_KINDS.map((kind) => copyKey(kind, statsId))]]);
+  const keys = READING_KINDS.map((kind) => copyKey(kind, statsId));
+  // Confirmed only on a count from 0 up to the keys named (as forgetRecentSales, #4752).
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
+  if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of a store's kept readings");
 }
 
 /**
@@ -393,6 +411,40 @@ export async function forgetStoreReadings(statsId: string | null | undefined): P
 export async function forgetReadingsPerson(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   // And the memberships' own cache, which keeps what members wrote when leaving (Codex E2 on #2111).
-  const [gone] = await redisPipeline([["DEL", copyKey("sales", statsId), copyKey("members", statsId), membershipCacheKey(statsId)]]);
-  return Number(gone) || 0;
+  const keys = [copyKey("sales", statsId), copyKey("members", statsId), membershipCacheKey(statsId)];
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
+  // Never 0 removed on a reply of another shape (CX-123 rule 24; as forgetLedgerCopy, lib/segments.ts): thrown, so the
+  // erasure says this part did not finish (lib/person-erasure.ts) while a copy naming the person may still be kept.
+  if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of the store's kept sales and memberships readings");
+  return gone;
+}
+
+/**
+ * The store's kept memberships reading as it is, never read again ("Do this next", 484 [IT1] complement WG, unit 2;
+ * lib/next-actions-read.ts): one GET, no supplier, nothing taken from the day's readings, so it is inside the three
+ * kept readings KEPT_READINGS_SHAPE already prices for a studio page (lib/read-ceilings.ts). null when no copy is
+ * kept (none read yet, or it expired); "unknown" when the database did not answer or the copy is not in its shape,
+ * never taken for none (CX-123 rule 24).
+ */
+export async function keptMembersCopy(store: Pick<Store, "statsId">): Promise<{ at: number; value: Numbers | null } | null | "unknown"> {
+  if (!store.statsId || !isRedisConfigured()) return null;
+  let replies: unknown;
+  try {
+    replies = await redisPipeline([["GET", copyKey("members", store.statsId)]]);
+  } catch {
+    return "unknown";
+  }
+  if (!Array.isArray(replies) || replies.length !== 1) return "unknown";
+  const raw: unknown = replies[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string" || !raw) return "unknown";
+  try {
+    const parsed = JSON.parse(raw) as { at?: unknown; value?: unknown };
+    if (typeof parsed.at !== "number" || !Number.isFinite(parsed.at)) return "unknown";
+    if (parsed.value === null) return { at: parsed.at, value: null };
+    if (!parsed.value || typeof parsed.value !== "object") return "unknown";
+    return { at: parsed.at, value: parsed.value as Numbers };
+  } catch {
+    return "unknown";
+  }
 }

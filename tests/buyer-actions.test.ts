@@ -105,11 +105,15 @@ test("each picture door takes one of the community's places; deleting gives it b
   await noteCommunityUpload(path(4), "member-b", now - 2 * 86_400_000);
   await takePicturePlace(path(4), 5);
   assert.equal(await takeCommunityUpload(path(2), "member-a"), true);
+  // A day on for the database as well (9 November 2026): the sweep deletes only a door whose note is gone, and the
+  // notes above were written now, whatever time they were listed at.
+  redis.advance(86_400_000 + 1_000);
   assert.equal(await sweepCommunityUploads(now), 1);
   assert.deepEqual([deleted.includes(path(4)), deleted.includes(path(2)), await picturesKept(folder)], [true, false, 1]);
   // A sweep that cannot delete gives nothing back, and tries again later.
   await noteCommunityUpload(path(5), "member-c", now - 2 * 86_400_000);
   await takePicturePlace(path(5), 5);
+  redis.advance(86_400_000 + 1_000);
   setFailDeletes(true);
   const quiet = console.error;
   console.error = () => {};
@@ -150,6 +154,7 @@ test("every route a buyer acts through takes from the store's month before it wr
   const routes: [string, RegExp][] = [
     ["app/api/store/community/route.ts", /takeBuyerAction\(store, owner \? "owner" : "buyer"\)/],
     ["app/api/store/community/rsvp/route.ts", /takeBuyerAction\(store\)/],
+    ["app/api/store/community/challenge/route.ts", /takeBuyerAction\(store\)/],
     ["app/api/store/community/chat/route.ts", /takeBuyerAction\(store, owner \? "owner" : "buyer"\)/],
     ["app/api/store/community/messages/route.ts", /takeBuyerAction\(store, owner \? "owner" : "buyer"\)/],
     ["app/api/store/community/push/route.ts", /takeBuyerAction\(store, viewer\.owner \? "owner" : "buyer"\)/],
@@ -163,6 +168,7 @@ test("every route a buyer acts through takes from the store's month before it wr
     ["app/api/store/course/task/upload/route.ts", /takeBuyerAction\(on\.store\)/],
     ["app/api/store/course/progress/route.ts", /takeBuyerAction\(store, access\.learner\.owner \? "owner" : "buyer"\)/],
     ["app/api/store/course/certificate/route.ts", /takeBuyerAction\(store\)/],
+    ["app/api/store/course/note/route.ts", /takeBuyerAction\(store\)/],
     ["app/api/store/course/file/route.ts", /takePublicRequest\(store, found\.lesson\.preview \? "public" : "buyer"\)/],
     ["app/api/store/course/open/route.ts", /takeBuyerRead\(store\)/],
     ["app/api/store/course/link/route.ts", /takeBuyerRead\(store\)/],

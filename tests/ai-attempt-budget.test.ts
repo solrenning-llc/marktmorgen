@@ -1,5 +1,5 @@
 import { UnknownReplyError } from '@/lib/redis-reply';
-import { consumeAiCallBudget } from '@/lib/ai-call-budget';
+import { consumeAiCallBudget, noteAiDispatch, withAiCallBudget } from '@/lib/ai-call-budget';
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { counted, aiAllowance, aiLeft, aiMonthKey } from "@/lib/ai";
@@ -22,7 +22,7 @@ test("concurrent failed attempts cannot exceed any tier's monthly allowance", as
     const allowance = aiAllowance(store, now);
     let runs = 0;
     const results = await Promise.all(Array.from({length: allowance + 10}, () =>
-      counted(store, now, async () => { runs++; return null; })));
+      counted(store, now, async () => { runs++; noteAiDispatch(store.statsId!); return null; })));
     assert.equal(runs, allowance);
     assert.equal(results.filter(r => !r.ok && r.reason === "used").length, 10);
     assert.equal(await aiLeft(store, now), 0);
@@ -32,9 +32,40 @@ test("concurrent failed attempts cannot exceed any tier's monthly allowance", as
 test("timeouts and unusable answers retain their reservation", async () => {
   const store = customer("failures");
   const before = await aiLeft(store, now);
-  assert.deepEqual(await counted(store, now, async () => { throw new Error("provider timeout after work"); }), {ok: false, reason: "failed"});
-  assert.deepEqual(await counted(store, now, async () => null, 3), {ok: false, reason: "failed"});
+  assert.deepEqual(await counted(store, now, async () => { noteAiDispatch("failures"); throw new Error("provider timeout after work"); }), {ok: false, reason: "failed"});
+  assert.deepEqual(await counted(store, now, async () => { noteAiDispatch("failures"); return null; }, 3), {ok: false, reason: "failed"});
   assert.equal(await aiLeft(store, now), before - 4);
+});
+test("a job whose money reservation refused before any provider call is given back (R32 finding 1)", async () => {
+  const store = customer("no-dispatch");
+  const before = await aiLeft(store, now);
+  assert.deepEqual(await counted(store, now, async () => { consumeAiCallBudget("no-dispatch"); return null; }), {ok: false, reason: "failed"});
+  assert.deepEqual(await counted(store, now, async () => { throw new Error("refused before the provider"); }, 3), {ok: false, reason: "failed"});
+  assert.equal(await aiLeft(store, now), before);
+  // A dispatch noted after the job ended is refused, and the job stays given back.
+  let late: Promise<boolean> | undefined;
+  assert.deepEqual(await counted(store, now, async () => { late = Promise.resolve().then(() => new Promise<boolean>(r => setTimeout(() => r(noteAiDispatch("no-dispatch")), 5))); return null; }), {ok: false, reason: "failed"});
+  assert.equal(await late, false);
+  assert.equal(await aiLeft(store, now), before);
+  // An unknown give-back reply is never retried and never read as given back twice.
+  const original = redis.run.bind(redis);
+  try {
+    for (const value of [null, undefined, "1", -1, {}]) {
+      let decrements = 0;
+      redis.run = ((command: (string | number)[]) => {
+        if (command[0] !== "DECRBY") return original(command);
+        decrements += 1; original(command); return value;
+      }) as typeof redis.run;
+      assert.deepEqual(await counted(store, now, async () => null), {ok: false, reason: "failed"});
+      assert.equal(decrements, 1);
+    }
+  } finally { redis.run = original; }
+  assert.equal(await aiLeft(store, now), before);
+  // Inside a parent's budget its calls cannot be told apart: the job stays counted.
+  const nested = customer("nested-budget");
+  const nestedBefore = await aiLeft(nested, now);
+  await withAiCallBudget("nested-budget", 2, async () => { noteAiDispatch("nested-budget"); return counted(nested, now, async () => null); });
+  assert.equal(await aiLeft(nested, now), nestedBefore - 1);
 });
 test("invalid job weights never execute work or alter accounting", async () => {
   const store = customer("invalid-weights");

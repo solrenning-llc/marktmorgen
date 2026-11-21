@@ -128,17 +128,22 @@ export async function watchedFolders(month = calendarWindow().id): Promise<strin
 }
 
 /**
- * The window a folder's store counts its video in: its billing month when it
- * pays and the period is known, the calendar month otherwise (watching that
- * happened is counted somewhere, never nowhere).
+ * The window a folder's store counts its video in: the store's own window
+ * (its billing month when it pays, the calendar month when it does not), the
+ * calendar month when the folder is known to belong to no store (watching
+ * that happened is counted somewhere, never nowhere). Null when whose it is
+ * could not be read, or when the store pays and its window is unknown (CX-123
+ * rule 24): the calendar month then would put the seconds where the store's
+ * own window, which the video admission reads, never sees them.
  */
-async function windowOfFolder(folder: string, now: number): Promise<string> {
+async function windowOfFolder(folder: string, now: number): Promise<string | null> {
   try {
     const [key] = await storeKeysOf([folder]);
     const store = key ? await storeForEmail(key) : null;
-    if (store && (await storeFolder(storeRef(store))) === folder) return (allowanceWindow(store, now) ?? calendarWindow(now)).id;
+    if (store && (await storeFolder(storeRef(store))) === folder) return allowanceWindow(store, now)?.id ?? null;
   } catch (error) {
-    console.error("could not read whose video was watched", error);
+    console.error("could not read whose video was watched; measured again soon", error);
+    return null;
   }
   return calendarWindow(now).id;
 }
@@ -146,7 +151,8 @@ async function windowOfFolder(folder: string, now: number): Promise<string> {
 /**
  * Reads one store at the video service and adds what was watched since the
  * reading before. Answers the seconds added; null when the service, or the
- * last totals kept here, could not be read, and then nothing was changed.
+ * last totals kept here, or whose store it is, could not be read, and then
+ * nothing was changed.
  */
 export async function measure(folder: string, now = Date.now()): Promise<number | null> {
   if (!isRedisConfigured() || !FOLDER_PATTERN.test(folder)) return 0;
@@ -198,6 +204,9 @@ export async function measure(folder: string, now = Date.now()): Promise<number 
     // Added to the store's window (lib/allowance-window.ts), where its video
     // stops; the line of stores is kept by the calendar month.
     const window = await windowOfFolder(folder, now);
+    // Unknown: nothing is written, the last totals included, so the next
+    // reading adds this growth to the right window, once.
+    if (window === null) return null;
     const month = calendarWindow(now).id;
     writes.push(
       ["INCRBY", secondsKey(folder, window), added],
@@ -213,15 +222,19 @@ export async function measure(folder: string, now = Date.now()): Promise<number 
 /**
  * The hourly reading, run from the five-minute video job: reads each store
  * that is due, the longest-waiting first. Stops at `deadline`; what is left
- * is still due, and is first in line next time.
+ * is still due, and is first in line next time. Throws UnknownReplyError
+ * when the line itself cannot be read: never "nobody due".
  */
 export async function measureDue(deadline: number, now = Date.now()): Promise<{ read: number; seconds: number }> {
   const counts = { read: 0, seconds: 0 };
   if (!isRedisConfigured() || !isStreamConfigured()) return counts;
-  const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE, 0, now, "LIMIT", 0, 60]]);
-  for (const folder of Array.isArray(due) ? due : []) {
+  // Read exactly (CX-123 rule 24; audit R24, finding 7.3): a list of strings, [] when nobody is due. A reply of any
+  // other shape is unknown and throws, so the video job answers 500 rather than "nothing to measure": the stores stay
+  // in line and the next run reads them, so the watching reaches the window the video admission reads.
+  const due = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", DUE, 0, now, "LIMIT", 0, 60]]), 1)?.[0]);
+  if (!due) throw new UnknownReplyError("the stores due to have their video measured");
+  for (const folder of due) {
     if (Date.now() > deadline) return counts;
-    if (typeof folder !== "string") continue;
     const added = await measure(folder, now);
     if (added === null) {
       await redisPipeline([["ZADD", DUE, now + AGAIN_MS, folder]]);

@@ -43,7 +43,7 @@ const INVITED = LONG_PAST + 15;
 const NOW = Date.UTC(2026, 9, 16, 12);
 const nowS = Math.floor(NOW / 1000);
 
-type Txn = { id: string; amount: number; currency: string; metadata: Record<string, string> };
+type Txn = { object?: string; customer?: string; id: string; amount: number; currency: string; metadata: Record<string, string> };
 const invoices = new Map<string, Record<string, unknown>[]>();
 const refunds = new Map<string, { amount: number; status: string }[]>();
 const balance = new Map<string, Txn[]>();
@@ -82,6 +82,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const form = new URLSearchParams(String(init?.body ?? ""));
     const txn: Txn = {
       id: `cbtxn_${posts}abcdef`,
+      object: "customer_balance_transaction",
+      customer: txns[1],
       amount: Number(form.get("amount")),
       currency: form.get("currency") ?? "",
       metadata: { nimbus_invite_credit: form.get("metadata[nimbus_invite_credit]") ?? "" },
@@ -183,7 +185,7 @@ async function main(): Promise<void> {
   is("half of it, rounded down", inviteShare(2900), 1450);
   is("an odd cent is not rounded up", inviteShare(2901), 1450);
   is("nothing paid, nothing earned", inviteShare(0), 0);
-  is("a refund comes off first", paidOn({ amount_paid: 2900 }, 900), 2000);
+  is("a refund comes off first", paidOn({ amount_paid: 2900, post_payment_credit_notes_amount: 0 }, 900), 2000);
   is("so does a credit note", paidOn({ amount_paid: 2900, post_payment_credit_notes_amount: 2900 }, 0), 0);
 
   // Everyone who has started paying has a customer.

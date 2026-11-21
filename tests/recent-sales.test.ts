@@ -17,7 +17,7 @@
 import { readFileSync } from "node:fs";
 import { recentSales, rememberSale, showable } from "@/lib/recent-sales";
 import { listensToSales } from "@/lib/sale-events";
-import { addProduct, claimHandle, ensureStatsId, storeForEmail, setProductHidden } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, ERASING_KEY, erasingField, storeForEmail, setProductHidden, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -26,9 +26,15 @@ let refunds: Record<string, unknown>[] = [];
 let stripeDown = false;
 let asked = 0;
 let refundReply: unknown;
+let eraseDuringRefundLookup: { storeIdKey: string; feedKey: string } | null = null;
 globalThis.fetch = (async (input: string | URL | Request) => {
   if (String(input).includes("/refunds")) {
     asked += 1;
+    if (eraseDuringRefundLookup) {
+      const keys = eraseDuringRefundLookup;
+      eraseDuringRefundLookup = null;
+      await redis.pipeline([["DEL", keys.storeIdKey, keys.feedKey]]);
+    }
     if (stripeDown) return new Response(JSON.stringify({ error: { message: "down" } }), { status: 500 });
     return new Response(JSON.stringify(refundReply === undefined ? { object: "list", data: refunds, has_more: false } : refundReply), { status: 200 });
   }
@@ -146,6 +152,21 @@ async function main(): Promise<void> {
   await recentSales(on);
   is("confirmed empty page keeps the existing cache behavior", asked, cachedCalls);
   refundReply = undefined;
+
+  part("Erasure while Stripe is being asked");
+  if (!base.sid) throw new Error("store has no id");
+  const liveStoreKey = `nl:store:id:${base.sid}`;
+  const publicFeedKey = `nl:recent:feed:${base.statsId}`;
+  await redis.pipeline([["DEL", publicFeedKey]]);
+  eraseDuringRefundLookup = { storeIdKey: liveStoreKey, feedKey: publicFeedKey };
+  const afterErasure = await recentSales(on);
+  is("erasure removed the store's live id", await redis.pipeline([["EXISTS", liveStoreKey]]), [0]);
+  is("the late Stripe answer did not recreate the public feed", await redis.pipeline([["EXISTS", publicFeedKey]]), [0]);
+  is("the late answer is not returned after the store is gone", afterErasure, []);
+  const ref = storeRef(base);
+  await redis.pipeline([["SET", liveStoreKey, ref], ["HSET", ERASING_KEY, await erasingField(ref), String(Date.now())], ["DEL", publicFeedKey]]);
+  is("the erasing mark also refuses the late feed", await recentSales(on), []);
+  is("the erasing mark leaves no public feed", await redis.pipeline([["EXISTS", publicFeedKey]]), [0]);
 
   part("Unknown or stale cached evidence is not public proof");
   await redis.pipeline([["SET",`nl:recent:feed:${base.statsId}`,JSON.stringify([{product:bread.product.id,title:"Sourdough course",at:NOW+3600,country:"DE"}])]]);

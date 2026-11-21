@@ -37,10 +37,11 @@ export async function reviewPhotoPath(ref: string, type: CheckedPhoto["type"]): 
   return imagePath(await imageFolder(ref), randomBytes(16).toString("hex"), type);
 }
 
-/** What the form sent, made into a kept photo; "photo" when it is not one we keep. */
-export async function keepReviewPhoto(ref: string, raw: string): Promise<ReviewPhoto | PhotoProblem> {
-  const checked = checkReviewPhoto(raw);
-  if (checked === "photo") return checked;
+/**
+ * A checked photo, kept: one put to the file store (a paid operation). The review route makes it only once the
+ * review's own write granted it a slot (lib/reviews.ts, saveReview, MAX_REVIEW_PHOTOS); throws when the put fails.
+ */
+export async function putReviewPhoto(ref: string, checked: CheckedPhoto): Promise<ReviewPhoto> {
   const path = await reviewPhotoPath(ref, checked.type);
   await put(path, Buffer.from(checked.bytes), { access: "private", contentType: checked.type, addRandomSuffix: false, allowOverwrite: false });
   return { path, width: checked.width, height: checked.height };

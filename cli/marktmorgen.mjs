@@ -25,6 +25,9 @@
  * the key was refused, or the server could not be reached.
  */
 
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 export const DEFAULT_URL = "https://marktmorgen.com";
 export const USER_AGENT = "marktmorgen-cli/0.1.0";
 
@@ -246,6 +249,16 @@ export async function run(argv, { env = {}, fetchImpl = globalThis.fetch, write 
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("/marktmorgen")) {
+/** Whether node was asked to run this file: compared as real paths, so any folder name, link or platform matches, and an import does not. */
+function isProgram() {
+  try {
+    const self = import.meta.url;
+    return typeof self === "string" && Boolean(process.argv[1]) && realpathSync(fileURLToPath(self)) === realpathSync(process.argv[1]);
+  } catch {
+    return false;
+  }
+}
+
+if (isProgram()) {
   run(process.argv.slice(2), { env: process.env }).then((code) => process.exit(code));
 }

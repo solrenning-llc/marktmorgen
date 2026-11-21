@@ -10,6 +10,7 @@ import { CommunityBar, communityNotices } from "@/components/community-parts";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { EventCard } from "@/components/community-events";
+import { EmptyState } from "@/components/empty-state";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -50,26 +51,18 @@ export default async function CommunityEventsPage({ params, searchParams }: Para
   const all = [...upcoming, ...past.events];
   const [numbers, allowed] = await Promise.all([
     rsvpNumbers(id, all, viewer.owner ? null : viewer.key),
-    // Asked once for each set of products events are kept for, not once per event.
-    (async () => {
-      const bySet = new Map<string, Promise<boolean>>();
-      return Promise.all(
-        all.map((e) => {
-          const set = [...e.only].sort().join(",");
-          if (!bySet.has(set)) bySet.set(set, mayAttend(store, viewer.config, e, { owner: viewer.owner, email: viewer.email }));
-          return bySet.get(set) as Promise<boolean>;
-        }),
-      );
-    })(),
+    // Every event answered from the one reading of what this member holds (viewer.holdings), never one per event.
+    Promise.all(all.map((e) => mayAttend(store, viewer.config, e, { owner: viewer.owner, email: viewer.email, holdings: viewer.holdings }))),
   ]);
-  const locked = new Set(all.filter((_, i) => !allowed[i]).map((e) => e.id));
+  // Kept for some members: one this member does not hold, or whose answer was not known (its page says which).
+  const locked = new Set(all.filter((_, i) => allowed[i] !== true).map((e) => e.id));
   const card = (event: CommunityEvent) => (
     <li key={event.id}>
       <EventCard
         store={store}
         event={event}
-        going={numbers.get(event.id)?.going ?? 0}
-        mine={numbers.get(event.id)?.mine ?? false}
+        going={numbers.get(event.id)?.going ?? null}
+        mine={numbers.get(event.id)?.mine ?? null}
         locked={locked.has(event.id)}
         now={now}
       />
@@ -94,10 +87,7 @@ export default async function CommunityEventsPage({ params, searchParams }: Para
             {upcoming.length ? (
               <ul className="mt-3 space-y-3">{upcoming.map(card)}</ul>
             ) : (
-              <div className="st-note mt-3 text-center">
-                <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.nothingScheduled}</p>
-                <p className="mt-1 text-sm">{viewer.owner ? w.ownerScheduleNote : w.whenScheduled(store.name)}</p>
-              </div>
+              <EmptyState level={3} title={w.nothingScheduled} body={viewer.owner ? w.ownerScheduleNote : w.whenScheduled(store.name)} className="mt-3" />
             )}
           </section>
         ) : null}

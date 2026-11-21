@@ -33,7 +33,7 @@ async function main() {
     if (!edit.ok) throw new Error("Fixture revision missing");
     let hit = 0;
     redis.pipeline = async commands => {
-      if (mode !== "success-control" && !hit && commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === `nl:agree:r:${a.id}` && !commands[0].includes("NX")) {
+      if (mode !== "success-control" && !hit && commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:agreement-save:v1") && commands[0][4] === `nl:agree:r:${a.id}`) {
         hit++;
         if (mode !== "not-applied-control") await pipeline(commands);
         if (mode.endsWith("throw") || mode === "not-applied-control") throw new Error("Synthetic uncertain agreement save");

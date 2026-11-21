@@ -565,6 +565,10 @@ export class MemoryRedis {
             if (!record || typeof record !== "object" || Array.isArray(record)) return -1;
             if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
           }
+          // The notes' type is read before any write (Codex L on #4995): on Redis a ZADD on another type fails the
+          // script after its SET has run, and nothing is undone.
+          const notesType = this.run(["TYPE", notes]);
+          if (notesType !== "none" && notesType !== "zset") return -1;
           // On Redis a SET that does not answer OK fails the whole script with an error; here that is -1, unknown.
           if (this.run(["SET", grantKey, grant, "EX", seconds]) !== "OK") return -1;
           this.run(["ZADD", notes, at, grantKey]);

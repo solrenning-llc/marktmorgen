@@ -34,14 +34,16 @@ export const JOIN_TOKEN = /^[0-9a-f]{48}$/;
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const tokenKey = (token: string) => `nl:join:t:${sha(`nimbus-join:${token}`)}`;
 
-/** The calls inside SAVE_GRANT_IF_LIVE at its worst (HGET, EXISTS or GET, SET, ZADD, ZREMRANGEBYSCORE, EXPIRE): with
- * its EVAL, one more than the four commands of the plain pipeline it replaced (tests/plan-cost-registry.ts). */
-export const JOIN_GRANT_CALLS = 6;
+/** The calls inside SAVE_GRANT_IF_LIVE at its worst (HGET, EXISTS or GET, TYPE, SET, ZADD, ZREMRANGEBYSCORE, EXPIRE):
+ * with its EVAL, eight commands where the plain pipeline it replaced sent four (tests/plan-cost-registry.ts). The TYPE
+ * is Codex L's on #4995: the notes' type is read before any write. */
+export const JOIN_GRANT_CALLS = 7;
 
 // The grant and its erasure note, written only while the store asked is still live (Codex L-20261120-2002): its
 // erasing mark absent and its identity still its own, the same rule as lib/store-live-cache.ts. For a store with an id
 // (ARGV[7] is "") its id key must exist; for one from before ids, its owner's record must decode and hold this store's
-// statsId (ARGV[7]). 1: written; 0: erasing or gone, nothing written; -1: the record could not be read, nothing written.
+// statsId (ARGV[7]). 1: written; 0: erasing or gone, nothing written; -1: the record could not be read, or the person's
+// erasure notes (KEYS[4]) hold another type than a sorted set, nothing written.
 const SAVE_GRANT_IF_LIVE = `-- marktmorgen:join-grant-if-live:v1
 if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
 if ARGV[7] == "" then
@@ -53,6 +55,8 @@ else
   if not ok or type(record) ~= "table" then return -1 end
   if record["statsId"] ~= ARGV[7] then return 0 end
 end
+local notes = redis.call("TYPE", KEYS[4]).ok
+if notes ~= "none" and notes ~= "zset" then return -1 end
 redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
 redis.call("ZADD", KEYS[4], ARGV[4], KEYS[3])
 redis.call("ZREMRANGEBYSCORE", KEYS[4], "-inf", ARGV[5])

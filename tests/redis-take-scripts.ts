@@ -52,9 +52,24 @@ const SCRIPTS: Record<string, Script> = {
     run(["DEL", set]);
     return n;
   },
-  // lib/store-live-cache.ts SET_IF_STORE_LIVE: a store's cache written only while its key exists and it is not erasing.
-  "store-cache-live:v1": (run, [live, erasing, key], [field, value, seconds]) => {
-    if (Number(run(["EXISTS", live])) !== 1 || run(["HGET", erasing, field]) !== null) return 0;
+  // lib/store-live-cache.ts SET_IF_STORE_LIVE: a store's cache written only while it is not erasing and its key is
+  // still its own: the id key exists, or (from before ids) the owner's record carries this store's statsId.
+  "store-cache-live:v2": (run, [live, erasing, key], [field, value, seconds, statsId]) => {
+    if (run(["HGET", erasing, field]) !== null) return 0;
+    if (statsId === "") {
+      if (Number(run(["EXISTS", live])) !== 1) return 0;
+    } else {
+      const raw = run(["GET", live]);
+      if (raw === null) return 0;
+      let record: unknown;
+      try {
+        record = JSON.parse(String(raw));
+      } catch {
+        return -1;
+      }
+      if (!record || typeof record !== "object") return -1;
+      if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+    }
     run(["SET", key, value, "EX", seconds]);
     return 1;
   },

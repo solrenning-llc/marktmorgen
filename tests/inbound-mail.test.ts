@@ -300,6 +300,22 @@ async function main(): Promise<void> {
   const countRetry = await POST(announce(countUnread, { id: "msg_count_unread" }));
   is("and the retry is heard and sent", [countRetry.status, ((await countRetry.json()) as { result?: string }).result, sent.length - sentBeforeCount], [200, "sent", 1]);
   is("to the creator", sent.at(-1)?.body.to, ["ana@example.org"]);
+  // Only this pass's own undecided mark is let go: a mark another pass holds by now (another value) stays.
+  for (const key of redis.keys().filter((k) => k.startsWith("nl:rl:creator-inbound:"))) redis.run(["DEL", key]);
+  const otherPass = newMailLike(E);
+  const otherMark = `nl:inbound:counted:${otherPass}`;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const first = commands[0] ?? [];
+    if (first[0] === "INCR" && String(first[1]).startsWith("nl:rl:creator-inbound:")) {
+      // While this pass counts, its mark ran out and another pass claimed it, with its own value.
+      redis.run(["SET", otherMark, "1700000000000.000000001", "EX", 3_600]);
+      return [];
+    }
+    return realPipe(commands);
+  }) as typeof redis.pipeline;
+  const raced = await POST(announce(otherPass, { id: "msg_count_raced" }));
+  redis.pipeline = realPipe;
+  is("a count that cannot be read with another pass's mark there: a failure, and that pass's mark is kept", [raced.status, redis.run(["GET", otherMark])], [500, "1700000000000.000000001"]);
   delete process.env.MARKETING_FROM_DOMAIN;
 
   part("Names and addresses");

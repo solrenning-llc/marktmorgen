@@ -54,7 +54,7 @@ import { PLAN_INVOICES_READ, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD } from "./pl
 import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
 import { STUDIO_REQUEST_BYTES, flowHistoryUnits, keepVersionBytes, listVersionsBytes, restoreBytes, restoreTryBytes } from "@/lib/flow-versions-rules";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
-import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request, SHORT_LINK_OPEN_READ } from "./plan-cost-registry";
+import { ADD_ON_LINES, ASSIST_REMIND_READ, POLL_VOTE_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request, SHORT_LINK_OPEN_READ } from "./plan-cost-registry";
 import { SHORT_LINK_OPEN_UNITS } from "@/lib/short-link-open-rules";
 import { MAX_FUNNEL_PAGES } from "@/lib/page-funnel";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
@@ -62,6 +62,7 @@ import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { RETURNING_CODE_REQUEST_UNITS } from "@/lib/returning-code";
 import { SHELF_REQUEST_UNITS } from "@/lib/course-shelf";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
+import { POLL_VOTE_REQUEST_UNITS } from "@/lib/email-poll-rules";
 import { WINBACK_OPEN_REQUEST_UNITS } from "@/lib/winback";
 import { WINBACK_OPEN_READ } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES, ORDERS_METERED_PROGRESS } from "./plan-cost-registry";
@@ -313,6 +314,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // And its checkout reminder is ASSIST_REMIND_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(ASSIST_REMIND_REQUEST_UNITS * laterPageCost() >= ASSIST_REMIND_READ, `${ASSIST_REMIND_REQUEST_UNITS} x ${laterPageCost()} < ${ASSIST_REMIND_READ}`);
   console.log(`a Store assistant checkout reminder: $${ASSIST_REMIND_READ.toFixed(6)} at most besides its email and model, counted as ${ASSIST_REMIND_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // A confirmed answer to a poll in a broadcast is POLL_VOTE_REQUEST_UNITS public requests, taken before it is kept: more than its reads and writes cost.
+  assert.ok(POLL_VOTE_REQUEST_UNITS * laterPageCost() >= POLL_VOTE_READ, `${POLL_VOTE_REQUEST_UNITS} x ${laterPageCost()} < ${POLL_VOTE_READ}`);
+  console.log(`a confirmed answer to an email poll: $${POLL_VOTE_READ.toFixed(6)} at most, counted as ${POLL_VOTE_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   // Opening a come-back link's checkout reads whether the person has a membership still running (lib/winback-send.ts): WINBACK_OPEN_REQUEST_UNITS
   // public requests, taken before it, more than its calls to the creator's Stripe account cost.
   assert.ok(WINBACK_OPEN_REQUEST_UNITS * laterPageCost() >= WINBACK_OPEN_READ, `${WINBACK_OPEN_REQUEST_UNITS} x ${laterPageCost()} < ${WINBACK_OPEN_READ}`);

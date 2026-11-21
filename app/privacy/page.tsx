@@ -731,6 +731,36 @@ export default function PrivacyPage() {
           course. Clearing the browser&apos;s site data removes all of it at
           any time.
         </p>
+        <p id="quiz-drafts">
+          <strong className="text-black">A quiz you are answering.</strong>{" "}
+          While a student answers a lesson&apos;s quiz, their own browser keeps
+          the choices they made, so reloading the page, going back or losing
+          the connection loses nothing. They are kept under{" "}
+          <code>mm:quiz:</code> followed only by a code made on our server
+          from the course, the lesson and their email address. The code cannot
+          be worked out from the address and does not name the store, the
+          course or the lesson, so another student on the same browser never
+          gets it back. By default they are kept only for that tab, in the
+          browser&apos;s session storage, and closing the tab removes them.
+          They are kept on the device instead, in its storage, only if the
+          student checks &quot;Keep my answers on this device for 7 days&quot;,
+          which is off by default; none older than 7 days is used. What is kept
+          holds which choices were picked for which questions, the questions
+          that try showed, how many tries were already recorded, and when, and
+          is never sent to us: pressing the quiz&apos;s own button sends the
+          answers as before. Coming back to the lesson asks whether to put the
+          choices back, and puts nothing back unless the student presses
+          &quot;Restore&quot;; &quot;Start over&quot; and
+          &quot;Clear my answers&quot; remove them at once (after the latter,
+          &quot;Undo&quot; puts them back until the next answer). Once a try is
+          recorded, or for a quiz that draws its questions again, what was kept
+          is never put back and is removed the next time that lesson opens in
+          that browser.
+          Each time a lesson or the library opens in that browser, any quiz
+          draft older than 7 days or unreadable is removed, for any lesson or
+          student, and signing out removes them all. Clearing the
+          browser&apos;s site data removes all of it at any time.
+        </p>
         <p id="lesson-comments">
           <strong className="text-black">Comments under lessons.</strong>{" "}
           A student who comments under a lesson chooses a name, and we keep that

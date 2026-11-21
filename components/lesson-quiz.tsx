@@ -2,6 +2,8 @@ import type { Attempt, Quiz } from "@/lib/quiz";
 import { questionsPerTry, triesLeft } from "@/lib/quiz";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import type { LanguageCode } from "@/lib/store-language";
+import { QuizForget, QuizKeep } from "@/components/quiz-keep";
+import { quizVersion } from "@/lib/quiz-keep-key";
 
 /**
  * A lesson's quiz, as a student meets it: the questions to answer, and after
@@ -30,6 +32,7 @@ export function LessonQuiz({
   waitSeconds = 0,
   stale = false,
   language = "en",
+  keeper = null,
 }: {
   quiz: Quiz;
   attempt: Attempt | null;
@@ -45,6 +48,8 @@ export function LessonQuiz({
   /** Came back because the questions sent were no longer this try's: nothing was counted. */
   stale?: boolean;
   language?: LanguageCode;
+  /** The server's code for this student's draft of this lesson in their own browser (lib/quiz-keep-key.ts); null keeps none. */
+  keeper?: string | null;
 }) {
   const w = coursesWords(language);
   const total = questionsPerTry(quiz);
@@ -129,6 +134,32 @@ export function LessonQuiz({
           <input key={name} type="hidden" name={name} value={value} />
         ))}
         {canAnswer ? <input type="hidden" name="shown" value={quiz.questions.map((q) => q.id).join(",")} /> : null}
+        {/* 297 [SQ8]: the answers are kept in the student's own browser until they press the button, and put back if they leave. */}
+        {canAnswer && keeper && hidden.handle && hidden.product && hidden.lesson ? (
+          <QuizKeep
+            who={keeper}
+            shown={quiz.questions.map((q) => q.id).join(",")}
+            tries={used}
+            version={quizVersion(quiz.questions)}
+            language={language}
+            words={{
+              quizKeptBack: w.quizKeptBack,
+              quizKeptClear: w.quizKeptClear,
+              quizKeptCleared: w.quizKeptCleared,
+              quizKeepDevice: w.quizKeepDevice,
+              quizKeepDeviceHint: w.quizKeepDeviceHint,
+              quizKeptAsk: w.quizKeptAsk,
+              quizKeptRestore: w.quizKeptRestore,
+              quizKeptStartOver: w.quizKeptStartOver,
+              quizKeptUndo: w.quizKeptUndo,
+              quizKeptUndone: w.quizKeptUndone,
+            }}
+          />
+        ) : null}
+        {/* While it cannot be answered, a draft a recorded try made useless is removed, even on the result-only view (review of #4324). */}
+        {mode === "student" && !canAnswer && keeper && hidden.handle && hidden.product && hidden.lesson ? (
+          <QuizForget who={keeper} tries={used} final={passed || left === 0} />
+        ) : null}
         <ol className="space-y-6">
           {quiz.questions.map((question, qi) => {
             const picked = last?.answers[question.id] ?? [];

@@ -241,6 +241,20 @@ const en = {
   gotIt: "✓ You got this one right.",
   notQuite: "✗ Not quite.",
   checkAgain: "Check my answers again",
+  // 297 [SQ8]: a quiz's answers kept in the student's browser (components/quiz-keep.tsx).
+  quizKeptBack: "Your answers from last time are back. They are not checked until you press the button below.",
+  quizKeptClear: "Clear my answers",
+  quizKeptCleared: "Your answers are cleared.",
+  /** Review of #4324: off by default; only then is a draft kept on the device, not just in the tab. */
+  quizKeepDevice: "Keep my answers on this device for 7 days",
+  /** Review of #4324: asked before anything is put back; `{when}` is the draft's date in the reader's own clock. */
+  quizKeptAsk: "Restore your answers from {when}?",
+  quizKeptRestore: "Restore",
+  quizKeptStartOver: "Start over",
+  /** Review of #4324: clearing the answers can be undone until the next change. */
+  quizKeptUndo: "Undo",
+  quizKeptUndone: "Your answers are back.",
+  quizKeepDeviceHint: "Off: they stay only in this tab and go when you close it. Leave it off on a shared computer.",
   check: "Check my answers",
   triesLeft: (left: number) => `${left} ${plural(left, "try", "tries")} left`,
   /** A stretch of time in minutes, said in hours when it is whole hours. */
@@ -579,6 +593,20 @@ const es: CoursesWords = {
   gotIt: "✓ Acertaste esta.",
   notQuite: "✗ No del todo.",
   checkAgain: "Volver a comprobar mis respuestas",
+  // 297 [SQ8]: a quiz's answers kept in the student's browser (components/quiz-keep.tsx).
+  quizKeptBack: "Tus respuestas de la última vez están de vuelta. No se comprueban hasta que pulses el botón de abajo.",
+  quizKeptClear: "Borrar mis respuestas",
+  quizKeptCleared: "Tus respuestas se han borrado.",
+  /** Review of #4324: off by default; only then is a draft kept on the device, not just in the tab. */
+  quizKeepDevice: "Guardar mis respuestas en este dispositivo durante 7 días",
+  /** Review of #4324: asked before anything is put back; `{when}` is the draft's date in the reader's own clock. */
+  quizKeptAsk: "¿Recuperar tus respuestas del {when}?",
+  quizKeptRestore: "Recuperar",
+  quizKeptStartOver: "Empezar de nuevo",
+  /** Review of #4324: clearing the answers can be undone until the next change. */
+  quizKeptUndo: "Deshacer",
+  quizKeptUndone: "Tus respuestas han vuelto.",
+  quizKeepDeviceHint: "Desactivado: solo se quedan en esta pestaña y se borran al cerrarla. Déjalo desactivado en un ordenador compartido.",
   check: "Comprobar mis respuestas",
   triesLeft: (left) => `${plural(left, "Queda", "Quedan")} ${left} ${plural(left, "intento", "intentos")}`,
   span: (minutes) =>
@@ -907,6 +935,20 @@ const fr: CoursesWords = {
   gotIt: "✓ Vous avez trouvé la bonne réponse.",
   notQuite: "✗ Pas tout à fait.",
   checkAgain: "Vérifier à nouveau mes réponses",
+  // 297 [SQ8]: a quiz's answers kept in the student's browser (components/quiz-keep.tsx).
+  quizKeptBack: "Vos réponses de la dernière fois sont revenues. Elles ne sont vérifiées que lorsque vous appuyez sur le bouton ci-dessous.",
+  quizKeptClear: "Effacer mes réponses",
+  quizKeptCleared: "Vos réponses sont effacées.",
+  /** Review of #4324: off by default; only then is a draft kept on the device, not just in the tab. */
+  quizKeepDevice: "Garder mes réponses sur cet appareil pendant 7 jours",
+  /** Review of #4324: asked before anything is put back; `{when}` is the draft's date in the reader's own clock. */
+  quizKeptAsk: `Récupérer vos réponses du {when}${S}?`,
+  quizKeptRestore: "Récupérer",
+  quizKeptStartOver: "Recommencer",
+  /** Review of #4324: clearing the answers can be undone until the next change. */
+  quizKeptUndo: "Annuler",
+  quizKeptUndone: "Vos réponses sont revenues.",
+  quizKeepDeviceHint: `Désactivé${S}: elles restent seulement dans cet onglet et disparaissent quand vous le fermez. Laissez désactivé sur un ordinateur partagé.`,
   check: "Vérifier mes réponses",
   triesLeft: (left) => `${left}${S}${frPlural(left, "tentative restante", "tentatives restantes")}`,
   span: (minutes) =>
@@ -1229,6 +1271,20 @@ const de: CoursesWords = {
   gotIt: "✓ Diese haben Sie richtig.",
   notQuite: "✗ Nicht ganz.",
   checkAgain: "Meine Antworten erneut prüfen",
+  // 297 [SQ8]: a quiz's answers kept in the student's browser (components/quiz-keep.tsx).
+  quizKeptBack: "Ihre Antworten vom letzten Mal sind wieder da. Sie werden erst geprüft, wenn Sie unten auf die Schaltfläche drücken.",
+  quizKeptClear: "Meine Antworten löschen",
+  quizKeptCleared: "Ihre Antworten sind gelöscht.",
+  /** Review of #4324: off by default; only then is a draft kept on the device, not just in the tab. */
+  quizKeepDevice: "Meine Antworten 7 Tage auf diesem Gerät behalten",
+  /** Review of #4324: asked before anything is put back; `{when}` is the draft's date in the reader's own clock. */
+  quizKeptAsk: "Ihre Antworten vom {when} wiederherstellen?",
+  quizKeptRestore: "Wiederherstellen",
+  quizKeptStartOver: "Neu beginnen",
+  /** Review of #4324: clearing the answers can be undone until the next change. */
+  quizKeptUndo: "Rückgängig machen",
+  quizKeptUndone: "Ihre Antworten sind wieder da.",
+  quizKeepDeviceHint: "Aus: Sie bleiben nur in diesem Tab und verschwinden, wenn Sie ihn schließen. Auf einem gemeinsam genutzten Computer ausgeschaltet lassen.",
   check: "Meine Antworten prüfen",
   triesLeft: (left) => `Noch ${left} ${plural(left, "Versuch", "Versuche")}`,
   span: (minutes) =>
@@ -1553,6 +1609,20 @@ const it: CoursesWords = {
   gotIt: "✓ Questa è giusta.",
   notQuite: "✗ Non proprio.",
   checkAgain: "Controlla di nuovo le mie risposte",
+  // 297 [SQ8]: a quiz's answers kept in the student's browser (components/quiz-keep.tsx).
+  quizKeptBack: "Le tue risposte dell'ultima volta sono tornate. Vengono controllate solo quando premi il pulsante qui sotto.",
+  quizKeptClear: "Cancella le mie risposte",
+  quizKeptCleared: "Le tue risposte sono state cancellate.",
+  /** Review of #4324: off by default; only then is a draft kept on the device, not just in the tab. */
+  quizKeepDevice: "Conserva le mie risposte su questo dispositivo per 7 giorni",
+  /** Review of #4324: asked before anything is put back; `{when}` is the draft's date in the reader's own clock. */
+  quizKeptAsk: "Ripristinare le tue risposte del {when}?",
+  quizKeptRestore: "Ripristina",
+  quizKeptStartOver: "Ricomincia",
+  /** Review of #4324: clearing the answers can be undone until the next change. */
+  quizKeptUndo: "Annulla",
+  quizKeptUndone: "Le tue risposte sono tornate.",
+  quizKeepDeviceHint: "Disattivato: restano solo in questa scheda e spariscono quando la chiudi. Lascialo disattivato su un computer condiviso.",
   check: "Controlla le mie risposte",
   triesLeft: (left) => `${plural(left, "Resta", "Restano")} ${left} ${plural(left, "tentativo", "tentativi")}`,
   span: (minutes) =>
@@ -1878,6 +1948,20 @@ const nl: CoursesWords = {
   gotIt: "✓ Deze had je goed.",
   notQuite: "✗ Niet helemaal.",
   checkAgain: "Controleer mijn antwoorden opnieuw",
+  // 297 [SQ8]: a quiz's answers kept in the student's browser (components/quiz-keep.tsx).
+  quizKeptBack: "Je antwoorden van de vorige keer zijn terug. Ze worden pas gecontroleerd als je op de knop hieronder drukt.",
+  quizKeptClear: "Mijn antwoorden wissen",
+  quizKeptCleared: "Je antwoorden zijn gewist.",
+  /** Review of #4324: off by default; only then is a draft kept on the device, not just in the tab. */
+  quizKeepDevice: "Mijn antwoorden 7 dagen op dit apparaat bewaren",
+  /** Review of #4324: asked before anything is put back; `{when}` is the draft's date in the reader's own clock. */
+  quizKeptAsk: "Je antwoorden van {when} terugzetten?",
+  quizKeptRestore: "Terugzetten",
+  quizKeptStartOver: "Opnieuw beginnen",
+  /** Review of #4324: clearing the answers can be undone until the next change. */
+  quizKeptUndo: "Ongedaan maken",
+  quizKeptUndone: "Je antwoorden zijn terug.",
+  quizKeepDeviceHint: "Uit: ze blijven alleen in dit tabblad en verdwijnen als je het sluit. Laat het uit op een gedeelde computer.",
   check: "Controleer mijn antwoorden",
   triesLeft: (left) => `Nog ${left} ${plural(left, "poging", "pogingen")} over`,
   span: (minutes) =>
@@ -2203,6 +2287,20 @@ const pt: CoursesWords = {
   gotIt: "✓ Acertou nesta.",
   notQuite: "✗ Não exatamente.",
   checkAgain: "Verificar de novo as minhas respostas",
+  // 297 [SQ8]: a quiz's answers kept in the student's browser (components/quiz-keep.tsx).
+  quizKeptBack: "As suas respostas da última vez voltaram. Só são verificadas quando carregar no botão abaixo.",
+  quizKeptClear: "Apagar as minhas respostas",
+  quizKeptCleared: "As suas respostas foram apagadas.",
+  /** Review of #4324: off by default; only then is a draft kept on the device, not just in the tab. */
+  quizKeepDevice: "Guardar as minhas respostas neste dispositivo durante 7 dias",
+  /** Review of #4324: asked before anything is put back; `{when}` is the draft's date in the reader's own clock. */
+  quizKeptAsk: "Recuperar as suas respostas de {when}?",
+  quizKeptRestore: "Recuperar",
+  quizKeptStartOver: "Recomeçar",
+  /** Review of #4324: clearing the answers can be undone until the next change. */
+  quizKeptUndo: "Anular",
+  quizKeptUndone: "As suas respostas voltaram.",
+  quizKeepDeviceHint: "Desligado: ficam só neste separador e desaparecem quando o fechar. Deixe desligado num computador partilhado.",
   check: "Verificar as minhas respostas",
   triesLeft: (left) => `${plural(left, "Resta", "Restam")} ${left} ${plural(left, "tentativa", "tentativas")}`,
   span: (minutes) =>

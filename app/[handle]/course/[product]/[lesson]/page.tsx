@@ -32,7 +32,9 @@ import { NewTab } from "@/components/new-tab";
 import { StampedPlayer } from "@/components/video-stamp";
 import { LessonPlayer } from "@/components/lesson-player";
 import { deviceLastKey, devicePlaceKey } from "@/lib/lesson-position";
+import { deviceQuizKey } from "@/lib/quiz-keep-key";
 import { RememberLastLesson } from "@/components/remember-last-lesson";
+import { QuizSweep } from "@/components/quiz-sweep";
 import { lessonPath } from "@/lib/lesson-position-rules";
 import { resumeWordsOf } from "@/lib/lesson-position-rules";
 import { videoStampText } from "@/lib/video-stamp";
@@ -178,6 +180,9 @@ export default async function LessonPage({ params, searchParams }: Params) {
   // Where the student stopped, kept on their device and offered back (650 [WG10], components/lesson-player.tsx),
   // under a key only the server can make (lib/lesson-position.ts); never for the creator or a visitor.
   const placeKey = student ? devicePlaceKey(course.id, student.email) : null;
+  // 297 [SQ8]: the code this student's draft of this lesson's quiz is kept under in their own browser, the whole key
+  // after its prefix, so the key names no course and no one else's comes back (review of #4324, MEDIUM 6).
+  const quizKeeper = student ? deviceQuizKey(course.id, lesson.id, student.email) : null;
   // This lesson kept on the student's device as the last one they opened, offered back in their library (650 [WG10],
   // unit 2, components/library-continue.tsx), under a key made from their address alone; never for the creator or a visitor.
   const lastPerson = student ? deviceLastKey(student.email) : null;
@@ -193,6 +198,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
       style={lookStyle(store.look) as React.CSSProperties}
     >
       <main id="content" className="relative mx-auto max-w-5xl px-4 py-8 sm:py-12">
+        {/* Old or unreadable quiz drafts in this browser go each time a lesson opens (review of #4324). */}
+        <QuizSweep />
         {lastPerson && lastPath ? <RememberLastLesson person={lastPerson} path={lastPath} courseId={course.id} lesson={lesson.title} course={product.title} store={store.name} /> : null}
         {/* 295 [SQ6]: "Focus mode" hides everything here marked group-data-[focus=on]/focus:hidden. */}
         <LessonFocus words={{ focusOn: w.focusOn, focusOff: w.focusOff, focusOnSaid: w.focusOnSaid, focusOffSaid: w.focusOffSaid }}>
@@ -367,6 +374,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 storeName={store.name}
                 justMarked={query.quiz === "marked"}
                 language={store.language}
+                keeper={quizKeeper}
               />
             ) : null}
 

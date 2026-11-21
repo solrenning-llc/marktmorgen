@@ -14,6 +14,7 @@ Needs numpy and scipy (scipy.optimize.milp, the HiGHS solver), pinned in
 scripts/requirements-solver.txt.
 """
 import json
+import os
 import sys
 
 import numpy as np
@@ -102,7 +103,18 @@ def solve(data, scenario, alternative):
 
 def main():
     data = json.loads(sys.stdin.read())
-    solutions = [solve(data, str(e) if e != int(e) else str(int(e)), alt) for e in data["elasticities"] for alt in data["alternatives"]]
+    # HiGHS can write a diagnostic straight to file descriptor 1 whatever options={"disp": False} says (21/11/2026:
+    # "HighsMipSolverData::transformNewIntegerFeasibleSolution ..."), so fd 1 points to stderr while it runs and
+    # stdout carries only the JSON (tests/generated-on-demand.test.ts).
+    sys.stdout.flush()
+    saved = os.dup(1)
+    try:
+        os.dup2(sys.stderr.fileno(), 1)
+        solutions = [solve(data, str(e) if e != int(e) else str(int(e)), alt) for e in data["elasticities"] for alt in data["alternatives"]]
+    finally:
+        sys.stdout.flush()
+        os.dup2(saved, 1)
+        os.close(saved)
     out = {"solver": f"scipy.optimize.milp (HiGHS), scipy {scipy.__version__.split('.')[0]}.x", "solutions": solutions}
     sys.stdout.write(json.dumps(out, indent=1) + "\n")
     if any(not s["plans"] for s in solutions):

@@ -244,8 +244,14 @@ export function mailReportCallbackCost(deliveries: number, attempts: number, sns
   if (!Number.isFinite(totalUsd)) return null;
   return { notices: deliveries, invocations, redisCommands, snsUsd, hostingUsd, redisUsd, providerAllowanceUsd: totalUsd - snsUsd - hostingUsd - redisUsd, totalUsd };
 }
-/** An order's pages and jobs, set well over a visit's whole page (tests/traffic-cost.ts). */
-export const ORDER_COMPUTE = 0.0003;
+/**
+ * An order's pages and jobs, set well over a visit's whole page (tests/traffic-cost.ts). 0.0003 until 21 November 2026,
+ * when an order's contact write at its worst (lib/buyer-list.ts putOnList, a cart of MAX_CART products: 86 commands) was
+ * found over its declared quarter; at 0.0004 the shares one cart order spends together (its stock holds, its stock
+ * confirmation, its contact write and a group's settling waits) fit with room for its pages
+ * (tests/order-compute-shares.test.ts).
+ */
+export const ORDER_COMPUTE = 0.0004;
 /**
  * A cart's stock work at its worst (lib/stock.ts, withCartStockHolds; 513 [PF1], the independent review of 5 November 2026):
  * every limited product of a cart of MAX_CART, its lock taken at its most tries, its count, its provisional hold, the admission
@@ -257,7 +263,7 @@ export const ORDER_COMPUTE = 0.0003;
  * so the waiting is at most CART_STOCK_STRIPE_WAIT_MS besides the locks' own short waits.
  */
 export const CART_STOCK_COMMANDS_MOST = 71;
-export const CART_STOCK_SHARE_OF_ORDER_COMPUTE = 0.5;
+export const CART_STOCK_SHARE_OF_ORDER_COMPUTE = 0.36;
 export const CART_STOCK_STRIPE_WAIT_MS = 5 * 2_000;
 /**
  * A limited product's units counted as sold (lib/stock.ts, STOCK_SELL; Claude 3's performance audit, 13 November 2026, and
@@ -282,12 +288,15 @@ export const STOCK_PAGE_SETTLE_COMMANDS_MOST = 1 + STOCK_SELL_COMMANDS;
  * and Stripe says paid; whichever comes second finds no field and counts nothing, and a page's settling is priced in
  * STOCK_PAGE_SETTLE_COMMANDS_MOST, not here). A thanks page opened again sends the HEXISTS only, as main's confirmation
  * did. Measured in tests/stock-sell-cost.test.ts, held inside its own share of ORDER_COMPUTE, which with the cart's stock
- * share and the contact's quarter stays inside one order's compute.
+ * share and the contact's share stays inside one order's compute.
  */
 export const STOCK_CONFIRM_COMMANDS_MOST = 16;
-export const STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE = 0.12;
-/** The quarter of ORDER_COMPUTE an order's contact write may take at the most (lib/contacts.ts, tests/contacts-write-cost.test.ts). */
-export const CONTACT_SHARE_OF_ORDER_COMPUTE = 0.25;
+export const STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE = 0.09;
+/**
+ * The share of ORDER_COMPUTE an order's contact write may take at the most (lib/contacts.ts, tests/contacts-write-cost.test.ts):
+ * a paid cart of MAX_CART products put on the list (lib/buyer-list.ts putOnList), held in tests/order-compute-shares.test.ts.
+ */
+export const CONTACT_SHARE_OF_ORDER_COMPUTE = 0.44;
 /**
  * Every look the five-minute job takes at one offer after paying still waiting on Stripe (lib/upsell.ts,
  * settlePendingOffers), from its first minute to the day it is let go: a payment the bank asked the buyer to confirm,
@@ -2068,7 +2077,7 @@ export const COST_LINES: CostLine[] = [
       // Since Codex G2's review (5 November 2026) the admission and the hand-over are one script each (STOCK_ADMIT, which also lets the locks go,
       // and STOCK_BIND: 1 + 3 commands a product each); Stripe is never asked under a lock and a lock waits LOCK_WAIT_MS at most. The whole of it,
       // at its worst for MAX_CART limited products, is measured in tests/cart-stock.test.ts (68 commands on 5 November 2026) and held under
-      // CART_STOCK_COMMANDS_MOST, half of ORDER_COMPUTE at most. An opening whose answer is unknown asks nothing more: its holds lapse.
+      // CART_STOCK_COMMANDS_MOST, inside CART_STOCK_SHARE_OF_ORDER_COMPUTE. An opening whose answer is unknown asks nothing more: its holds lapse.
       { file: "lib/stock.ts", names: ["withCartStockHolds", "PENDING_MS", "releaseCartStockHolds", "STOCK_ADMIT", "STOCK_BIND", "stripeRefusedOpening", "LOCK_WAIT_MS = 500", "countStock(store, product, now, false)"] },
       // Its units counted as sold when the buyer is back (Claude 7's MÉDIO on #4472, 15 November 2026): one HEXISTS a product, and
       // STOCK_SELL (the EVAL and its HDEL and HINCRBY) only where the checkout still holds its field, once in each order's life; at most

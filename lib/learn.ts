@@ -525,9 +525,12 @@ async function courseLedger(store: Store, email: string, exact = false): Promise
   // bundle that was. Nothing was paid through Stripe, so nothing there can
   // take it back; the creator can still take a student off (setBlocked).
   const given = new Map<string, number>();
-  for (const purchase of importedFrom(broughtOver)) {
-    for (const id of [purchase.productId, ...(purchase.items ?? [])]) {
-      if (!given.has(id)) given.set(id, purchase.at);
+  if (imported) {
+    // The exact readers (paidCoursesExact) never take an illegible row for "not had" (Claude 6's LEVE 1 on #2794).
+    for (const purchase of importedFrom(broughtOver, { complete: exact })) {
+      for (const id of [purchase.productId, ...(purchase.items ?? [])]) {
+        if (!given.has(id)) given.set(id, purchase.at);
+      }
     }
   }
 

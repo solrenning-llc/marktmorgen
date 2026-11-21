@@ -20,7 +20,8 @@ import { DataRoomError } from "@/lib/store-data";
 import { withinLimit } from "@/lib/request-guard";
 import { isPaidUp } from "@/lib/billing";
 import { type AddResult, upsertContact } from "@/lib/contacts";
-import type { Store } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
+import { repliesFor } from "@/lib/redis-reply";
 import { takePublicRequest } from "@/lib/traffic";
 import { isHouseStore } from "@/lib/house-store";
 import { joinWords } from "@/lib/buyer-words/join";
@@ -33,6 +34,57 @@ export const JOIN_TOKEN = /^[0-9a-f]{48}$/;
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const tokenKey = (token: string) => `nl:join:t:${sha(`nimbus-join:${token}`)}`;
+
+/** The calls inside SAVE_GRANT_IF_LIVE at its worst (HGET, GET, TYPE, SET, ZADD, ZREMRANGEBYSCORE, EXPIRE):
+ * with its EVAL, eight commands where the plain pipeline it replaced sent four (tests/plan-cost-registry.ts). The TYPE
+ * is Codex L's on #4995: the notes' type is read before any write. */
+export const JOIN_GRANT_CALLS = 7;
+
+// The grant and its erasure note, written only while the store asked is still live (Codex L-20261120-2002): its
+// erasing mark absent and its identity still its own, the same rule as lib/store-live-cache.ts. For a store with an id
+// (ARGV[7] is "") its id key must hold this store's very ref (ARGV[8]), not only exist, since moveAccount repoints it
+// (Codex L-20261121-0043); for one from before ids, its owner's record must decode and hold this store's
+// statsId (ARGV[7]). 1: written; 0: erasing or gone, nothing written; -1: the record could not be read, or the person's
+// erasure notes (KEYS[4]) hold another type than a sorted set, nothing written.
+const SAVE_GRANT_IF_LIVE = `-- marktmorgen:join-grant-if-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[7] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[8] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[7] then return 0 end
+end
+local notes = redis.call("TYPE", KEYS[4]).ok
+if notes ~= "none" and notes ~= "zset" then return -1 end
+redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
+redis.call("ZADD", KEYS[4], ARGV[4], KEYS[3])
+redis.call("ZREMRANGEBYSCORE", KEYS[4], "-inf", ARGV[5])
+redis.call("EXPIRE", KEYS[4], ARGV[6])
+return 1`;
+
+/**
+ * Saves a join grant and its erasure note in one step, only while `store` is live: "saved"; "closed" when its erasure
+ * has begun or its identity is gone or another store's (nothing written); "unknown" for any other answer, a failed
+ * request included (nothing known to be written). The note is lib/erasure-index.ts noteForErasure's own, unchanged.
+ */
+async function saveGrantIfLive(store: Store, key: string, grant: Grant): Promise<"saved" | "closed" | "unknown"> {
+  const [add, prune, keep] = noteForErasure(store.statsId, grant.e, key);
+  if (!add || !prune || !keep) return "unknown";
+  const ref = storeRef(store);
+  const withId = STORE_ID_PATTERN.test(store.sid);
+  try {
+    const live = withId ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+    const answer = repliesFor(await redisPipeline([
+      ["EVAL", SAVE_GRANT_IF_LIVE, 4, live, ERASING_KEY, key, add[1], await erasingField(ref), JSON.stringify(grant), JOIN_SECONDS, add[2], prune[3], keep[2], withId ? "" : store.statsId ?? "", ref],
+    ]), 1)?.[0];
+    return answer === 1 ? "saved" : answer === 0 ? "closed" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
 
 /** `k`: they also allowed their link use in sequences to be seen (lib/mail-clicks.ts). */
 /** `f`: the store's form it was asked from (lib/forms.ts), so a sequence that starts with that form starts on confirming. */
@@ -83,9 +135,11 @@ export async function askToJoin(input: { store: Store; email: string; clicks?: b
 
   const token = randomBytes(24).toString("hex");
   const grant: Grant = { s: store.statsId, h: store.handle, e: email, at: new Date().toISOString(), ...(input.clicks ? { k: true } : {}), ...(input.formId && /^[a-z0-9]{10}$/.test(input.formId) ? { f: input.formId, ...(input.formOutcome && /^[a-z0-9]{6}$/.test(input.formOutcome) ? { r: input.formOutcome } : {}) } : {}), ...(input.site && /^https:\/\/[^/\s]{1,300}$/.test(input.site) ? { w: input.site } : {}), ...(input.lead && /^[0-9a-f]{12}$/.test(input.lead) ? { a: input.lead } : {}) };
-  const [saved] = await redisPipeline([["SET", tokenKey(token), JSON.stringify(grant), "EX", JOIN_SECONDS], ...noteForErasure(store.statsId, grant.e, tokenKey(token))]);
+  const saved = await saveGrantIfLive(store, tokenKey(token), grant);
+  // A store whose erasure began while this request waited makes no link and writes to nobody (Codex L-20261120-2002).
+  if (saved === "closed") return "closed";
   // Never spend an email on a confirmation link whose grant was not saved.
-  if (saved !== "OK") return "error";
+  if (saved !== "saved") return "error";
 
   const w = joinWords(store.language);
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "transactional", asked: true },

@@ -14,6 +14,7 @@ export const ON_DEMAND_REPORTS: readonly OnDemandReport[] = [
   { file: "docs/feature-videos-cost.md", command: "node scripts/feature-videos-cost.mjs", json: false },
   { file: "docs/limits-proposal-2026-10-18.md", command: "node scripts/limits-proposal.mjs", json: false },
   { file: "docs/margin-alignment-2026-10-18.md", command: "node scripts/margin-alignment.mjs", json: false },
+  { file: "docs/marktmorgen-affiliates.md", command: "node scripts/marktmorgen-affiliates.mjs", json: false },
   { file: "docs/pack-cost-decomposition-2026-10-18.md", command: "node scripts/pack-cost-decomposition.mjs", json: false },
   { file: "docs/per-use-resale-2026-10-18.md", command: "node scripts/per-use-resale.mjs", json: false },
   { file: "docs/pricing-optimization-2026-10-18.md", command: "node scripts/pricing-optimization.mjs", json: false },

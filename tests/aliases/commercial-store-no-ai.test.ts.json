@@ -1,0 +1,5 @@
+{
+  "@/lib/ai-spend-policy": "commercial-store-no-ai-policy.ts",
+  "@/lib/llc-fixed-costs": "llc-fixed-approved-policy.ts",
+  "@/lib/upload-budget-policy": "upload-budget-approved-policy.ts"
+}

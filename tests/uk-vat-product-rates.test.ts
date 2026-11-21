@@ -21,19 +21,25 @@ const text = (raw: string): string =>
     .replace(/\s+/g, " ")
     .trim();
 
-/** The page's own tables, row by row, under the section heading each sits in. */
+/**
+ * The page's own tables, body row by body row, under the section heading each sits in. A table's header is its
+ * <thead> (whatever its first column is called, "Goods or services" or "Installed goods"), never data: only the rows
+ * of each <tbody>, whose cells are <td>, are read (Claude 1's LEVE on #5045, 7070733228).
+ */
 function rowsOfThePage(): UkProductRateRow[] {
   const page = JSON.parse(bytes.toString("utf8")) as { details: { body: string } };
   const rows: UkProductRateRow[] = [];
   let section = "";
-  for (const match of page.details.body.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>|<tr>([\s\S]*?)<\/tr>/g)) {
+  for (const match of page.details.body.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>|<tbody>([\s\S]*?)<\/tbody>/g)) {
     if (match[1] !== undefined) {
       section = text(match[1]);
       continue;
     }
-    const cells = [...match[2].matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/g)].map((cell) => text(cell[1]));
-    if (cells[0] === "Goods or services" && cells[1] === "VAT rate") continue;
-    rows.push({ section, item: cells[0] ?? "", rate: cells[1] ?? "", more: cells[2] ?? "" });
+    for (const row of match[2].matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
+      assert.doesNotMatch(row[1], /<th[\s>]/, "a header cell inside a table body");
+      const cells = [...row[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((cell) => text(cell[1]));
+      rows.push({ section, item: cells[0] ?? "", rate: cells[1] ?? "", more: cells[2] ?? "" });
+    }
   }
   return rows;
 }
@@ -51,6 +57,14 @@ test("every row of the table is exactly a row of the page, in the page's order, 
   const page = rowsOfThePage();
   assert.ok(page.length > 100, `${page.length} rows read`);
   assert.deepEqual([...UK_VAT_PRODUCT_RATES], page);
+});
+
+test("no row is a table header: no rate or item is a column title", () => {
+  const titles = new Set(["VAT rate", "More information", "More\u00a0information", "Goods or services", "Installed goods"]);
+  for (const row of UK_VAT_PRODUCT_RATES) {
+    assert.ok(!titles.has(row.rate), `${row.item}: rate "${row.rate}" is a column title`);
+    assert.ok(!titles.has(row.item), `item "${row.item}" is a column title`);
+  }
 });
 
 const day = "2026-11-21";

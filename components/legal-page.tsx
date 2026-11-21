@@ -2,7 +2,7 @@ import { Children, isValidElement } from "react";
 import Link from "next/link";
 import { Icon } from "./icons";
 import { SiteFooter } from "./site-footer";
-import { SiteNav } from "./site-nav";
+import { SiteNav } from "./site-nav-server";
 
 /** An anchor for a section, from its title: "3. Selling through a store" → "selling-through-a-store". */
 export function sectionId(title: string): string {

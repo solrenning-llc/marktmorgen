@@ -198,7 +198,9 @@ async function main(): Promise<void> {
   const early = browserName(folder, "pdf");
   is("the door opens", (await ask(early)).status, 200);
   is("handed in before the browser's PUT landed: missing", await handIn(early), "missing");
-  is("the name is held for the sweep", await held(early), true);
+  // Since #2836 the file is measured before its door is taken: a hand-in that finds no file takes nothing, so the name
+  // stays on the doors' list for the sweep (and the same file can still be handed in once it lands), never held.
+  is("not taken: its name stays on the doors' list for the sweep", [await listed(early), await held(early)], [true, false]);
   store(early);
   const late = await sweepTaskUploads(deleteFile, Date.now() + DAY_MS + 3_600_000);
   is("the file that landed later is swept the next day", [late.includes(early), files.has(early)], [true, false]);
@@ -278,7 +280,7 @@ async function main(): Promise<void> {
   // The browser's PUT, the hand-in's delete and the sweep's: each an Advanced Operation of the file store.
   is("its upload and every delete of it are priced", typeof advancedPriced === "number" && 1 + deletes <= advancedPriced, true);
   const handInLine = registry.COST_LINES.flatMap((line) => line.sources).find((source) => source.file === "app/api/store/course/task/route.ts");
-  is("the hand-in's own head and deletes are named in a cost line", ["headFile(path)", "deleteFile(path)"].every((name) => handInLine?.names.includes(name)), true);
+  is("the hand-in's own head and deletes are named in a cost line", ["headFile(path)", "deleteFile(path, \"site_cleanup\")"].every((name) => handInLine?.names.includes(name)), true);
   const workBytes = (registry as Record<string, unknown>).TASK_WORK_BYTES;
   is("the sweep's read of the work is counted in bytes", typeof workBytes === "number" && workBytes >= rules.MAX_ANSWER_TEXT + rules.MAX_FEEDBACK, true);
 

@@ -10,9 +10,10 @@ import { countHit } from "@/lib/visit";
 import { openOrder, paypalReady } from "@/lib/paypal-sales";
 import { cameFrom } from "@/lib/came-from";
 import { channelOfRequest } from "@/lib/visit-channel";
-import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
+import { affiliateCookieName, attributionOrPending, pendingChannel } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
 import { readCountry } from "@/lib/fair-price";
+import { consumerGate } from "@/lib/eu-vat-gate";
 
 /**
  * Starts a purchase paid with PayPal, into the creator's own PayPal account
@@ -30,8 +31,11 @@ export async function POST(request: NextRequest) {
   // The box to start access at once (lib/digital-consent.ts): from the PayPal
   // form, or from the card checkout's form when its PayPal button sent it.
   let digitalConsent: DigitalConsent | null = null;
+  // The form as sent, for the billing country the EU VAT gate reads (lib/eu-vat-gate.ts consumerGate).
+  let sent: FormData = new FormData();
   try {
     const form = await (await limited(request, 8_000)).formData();
+    sent = form;
     digitalConsent = consentFromForm(form);
     const h = form.get("handle");
     const p = form.get("product");
@@ -51,23 +55,34 @@ export async function POST(request: NextRequest) {
   const comingSoon = await isComingSoon(store, product.id).catch(() => null);
   if (comingSoon === null) return away(`/@${store.handle}?status=error`);
   if (comingSoon) return away(`/@${store.handle}/p/${product.id}#waitlist`);
-  if (product.bundle && deliverableItems(product, await readListings(store, product.bundle)).length < MIN_BUNDLE_ITEMS) {
+  const bundled = product.bundle ? await readListings(store, product.bundle) : [];
+  if (product.bundle && deliverableItems(product, bundled).length < MIN_BUNDLE_ITEMS) {
     return away(`/@${store.handle}`);
   }
+  // EU VAT art. 9a (lib/eu-vat-gate.ts consumerGate), as the card checkout asks it: before PayPal is asked for anything,
+  // a paid sale to the EU or the UK is refused, and a sale without the billing country asks for it.
+  const gate = consumerGate({ product, members: product.bundle ? new Map(bundled.map((listing) => [listing.id, listing])) : undefined, headers: request.headers, form: sent });
+  if (!gate.ok) return away(`/@${store.handle}/p/${product.id}?status=${gate.reason === "refused" ? "abroad" : "country"}#buy`);
   // What the visit carried, as a Stripe checkout carries it: the channel this
   // sale is credited to (lib/visit-channel.ts) and the affiliate who sent the
-  // buyer, if one did (lib/affiliates.ts). A lookup that fails never stops the sale.
+  // buyer, if one did (lib/affiliates.ts). A lookup that does not answer never
+  // stops the sale: the click rides on the order as pending, and is decided at
+  // the hand-over (owner's decision 6, creditPayPalSale).
   const host = new URL(origin).hostname;
-  const via = await attributionFor(store, product.id, {
+  const credit = await attributionOrPending(store, product.id, {
     via: request.cookies.get(viaCookieName(store.handle))?.value,
     session: request.cookies.get(affiliateCookieName(store.handle))?.value,
-  }).catch(() => null);
+  });
+  const via = credit.known ? credit.via : null;
   const meta = {
     ...channelOfRequest(request, store.handle, host, Date.now() / 1000, store.attributionDays),
     ...(() => {
       const page = cameFrom(request.headers.get("referer"), host);
       return { ...(page.source ? { utm_source: page.source } : {}), ...(page.medium ? { utm_medium: page.medium } : {}), ...(page.campaign ? { utm_campaign: page.campaign } : {}) };
     })(),
+    // Last, after the visit's tags: at most five channel keys, three tags, this one and the consent the order adds
+    // (lib/paypal-sales.ts cleanMeta keeps twenty), so none of them is ever left out.
+    ...pendingChannel(credit),
   };
   // Where the buyer's connection is, for the fair price the page showed them: from the edge, as the Stripe
   // checkout reads it (app/api/store/checkout/route.ts), never from the form.

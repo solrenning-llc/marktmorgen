@@ -24,7 +24,7 @@ import type { Store } from "@/lib/store";
 import { formatMoney } from "@/lib/money";
 import { channelName } from "@/lib/channel-names";
 import { DISCOUNT_NAMES } from "@/lib/discount-impact";
-import { readSpends } from "@/lib/ad-spend";
+import { readSpendLines } from "@/lib/ad-spend";
 import { spendBy, type AdSpend } from "@/lib/ad-spend-rules";
 import { campaignResultsFrom } from "@/lib/campaign-results";
 import { paymentComparisonFrom, paymentChange, paymentShareChange } from "@/lib/payment-comparison";
@@ -222,11 +222,17 @@ export function figureIn(context: string, value: string): boolean {
 
 const line = (value: unknown, max: number) => (typeof value === "string" ? value : "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
 
+/** Every spend line only when all of it is known; otherwise undefined, which the context says is unknown, never 0. */
+async function knownSpends(statsId: string | null): Promise<AdSpend[] | undefined> {
+  const read = await readSpendLines(statsId).catch(() => null);
+  return read && !read.metaUnread ? read.spends : undefined;
+}
+
 /** One question about the store's numbers, answered from them only. One of the month's jobs. */
 export async function askNumbers(store: Store, question: string, data: StatsData, now = Date.now()): Promise<AiResult<NumbersAnswer>> {
   const asked = line(question, MAX_QUESTION);
   if (!asked) return { ok: false, reason: "notes" };
-  const spends = await readSpends(store.statsId).catch(() => undefined);
+  const spends = await knownSpends(store.statsId);
   const context = JSON.stringify(numbersContext(data, spends));
   return counted(store, now, async () => {
     const system = [
@@ -261,7 +267,7 @@ export async function askNumbers(store: Store, question: string, data: StatsData
  * goes without it.
  */
 export async function weeklySummary(store: Store, data: StatsData, now = Date.now()): Promise<string | null> {
-  const spends = await readSpends(store.statsId).catch(() => undefined);
+  const spends = await knownSpends(store.statsId);
   const context = JSON.stringify(numbersContext(data, spends));
   const done = await counted(store, now, async () => {
     const system = [

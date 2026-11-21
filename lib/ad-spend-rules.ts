@@ -31,6 +31,16 @@ export type AdSpend = {
   source?: "meta";
 };
 
+/**
+ * Which part of a store's ad spend could not be read just now: Meta's lines ("meta", the typed lines are known),
+ * the typed lines ("typed", nothing is known), or none (null). While any part is unread, every figure that uses ad
+ * spend is left out, never shown with one part as all of it or with nothing as $0 (Claude 5 on #2924).
+ */
+export type SpendUnread = "meta" | "typed" | null;
+
+/** What the studio's numbers say where the figures that use ad spend are left out because a part is unread. */
+export const SPEND_FIGURES_UNREAD = "Ad spend could not be read in full just now, so the results after ads are not shown. Reload to try again.";
+
 export const MAX_SPEND_ENTRIES = 300;
 /** A million in the store's currency, which no single line a creator types should be over. */
 export const MAX_SPEND_CENTS = 100_000_000;

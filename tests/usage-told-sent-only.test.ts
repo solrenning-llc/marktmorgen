@@ -27,12 +27,17 @@
  *
  * Synthetic only: the Redis stub and the SES mail fixture, no real IO.
  */
-import { recordDelivery, rememberFolderOwner, DELIVERY_ALLOWANCE_BYTES } from "@/lib/delivery";
+import { recordDelivery, rememberFolderOwner, DELIVERY_ALLOWANCE_BYTES, monthKey } from "@/lib/delivery";
 import { GET } from "@/app/api/cron/usage/route";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { store as redis } from "./redis-stub";
 import { installSesMailFixture } from "./ses-mail-fixture";
 import { done, is, part } from "./check";
+import { withinOneUtcDay } from "./one-utc-day";
+
+// Deliveries are recorded in the month the clock is in and the watch reads the month it runs in; a real month end
+// passing between the two found nobody over the allowance (got [200,0,[]]). The clock stays inside one UTC day.
+withinOneUtcDay();
 
 delete process.env.RESEND_API_KEY;
 delete process.env.CRON_SECRET;
@@ -73,7 +78,7 @@ async function run(): Promise<{ status: number; told: unknown; emails: string[];
 }
 
 async function toldList(): Promise<string[]> {
-  const [raw] = await redis.pipeline([["GET", "nl:usage-watch:told"]]);
+  const [raw] = await redis.pipeline([["GET", `nl:usage-watch:told:${monthKey()}`]]);
   return typeof raw === "string" ? (JSON.parse(raw) as string[]) : [];
 }
 

@@ -52,7 +52,7 @@ async function main() {
   is("reordered fields are equivalent",sameDraftSubjectTest(valid,{by:"visits",hours:4,share:20,subjectB:"Second subject"}),true);
   is("disabled and absent are not equivalent",sameDraftSubjectTest(null,undefined),false);
   const original=redis.pipeline;let writes=0;
-  redis.pipeline=async commands=>{writes+=commands.filter(c=>c[0]==="HSET").length;if(commands.some(c=>c[0]==="HGET"))return [];return original.call(redis,commands);};
+  redis.pipeline=async commands=>{writes+=commands.filter(c=>c[0]==="HSET"||(c[0]==="EVAL"&&String(c[1]).startsWith("-- marktmorgen:draft-set-held:"))).length;if(commands.some(c=>c[0]==="HGET"))return [];return original.call(redis,commands);};
   try{let failed=false;try{await saveDraft(store,"owner@example.com",{...content,id});}catch(e){failed=e instanceof DraftReadUnavailable;}
     is("unreadable legacy record cannot discard the experiment",failed,true);is("no write after unavailable previous record",writes,0);
   }finally{redis.pipeline=original;}

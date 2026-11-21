@@ -144,7 +144,7 @@ export function BlogCard({ post, lead = false }: { post: BlogPost; lead?: boolea
           {post.title}
         </Link>
       </h3>
-      <p className={`mt-3 flex-1 leading-relaxed text-ink-soft ${lead ? "text-base" : "text-[0.9375rem]"}`}>
+      <p className={`mt-3 max-w-[46ch] flex-1 leading-relaxed text-ink-soft ${lead ? "text-base" : "text-[0.9375rem]"}`}>
         {post.excerpt}
       </p>
       <p className="mt-6 flex items-center justify-between border-t border-line pt-4 text-sm">

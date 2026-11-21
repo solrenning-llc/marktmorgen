@@ -495,6 +495,7 @@ async function main(): Promise<void> {
     "photo": ["act:page:remove", "lockedFor"],
     "podcast": ["act:products:remove"],
     "podcast/public-settings": ["act:products:remove"],
+    "podcast/public/[handle]/[product]": ["not:a public feed letting go of its own in-memory copy once its store is not live; nothing of the store is deleted"],
     "product": ["act:products:remove", "lockedFor"],
     "review": ["not:a buyer deleting their own review, proved by their order"],
     "reviews": ["act:reviews:photo"],

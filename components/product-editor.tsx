@@ -34,6 +34,7 @@ import type { CoverLook } from "@/components/cover-maker";
 import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
 import { LicenceKeyEditor } from "@/components/licence-key-editor";
 import { PdfStampToggle } from "@/components/pdf-stamp-toggle";
+import { PublicationChoice } from "@/components/publication-choice";
 import { PdfPreviewToggle } from "@/components/pdf-preview-toggle";
 import { toast } from "@/components/toast";
 import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
@@ -2694,6 +2695,8 @@ export function ProductEditor({
                 {/* A physical product the creator ships (lib/shipping.ts), on one that hands over nothing else. */}
                 <ShippingEditor product={product} />
                 {product.shipping ? <PhysicalLegalEditor product={product} /> : null}
+                {/* Whether it is an e-publication, for EU and UK VAT (789 [IV1] step 3, unit 5b): only while VAT there can be collected. */}
+                {product.shipping || product.call || product.callPackage ? null : <PublicationChoice product={product} />}
                 {/* Shipped at several prices: sizes or versions, each shipped the same way. */}
                 {product.shipping ? (
                   <OptionsBlock

@@ -195,7 +195,9 @@ export function PayPalPayouts({
                   if (data) {
                     toast(
                       data.unavailable
-                        ? data.retryNow
+                        ? data.limit
+                          ? "Your studio's requests left this month are not enough for this check. Nothing was asked of PayPal. We still check these payments with PayPal once a day on our own."
+                          : data.retryNow
                           ? "We could not check these payments with PayPal just now. Nothing was asked of PayPal, so you can try again right away."
                           : "We could not check these payments with PayPal just now. Nothing was asked of PayPal. Try again in a minute."
                         : data.asked === false

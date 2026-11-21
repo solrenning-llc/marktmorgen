@@ -17,6 +17,7 @@ type Answer = number | "throws" | "timeout" | "abort";
 let answer: Answer = 200;
 const requests: string[] = [];
 
+const scope = { sid: "c".repeat(32), email: "chat-fixture@example.test", extra: false, statsId: "st-fixture" };
 async function main(): Promise<void> {
   globalThis.fetch = (async (input: string | URL | Request) => {
     const url = new URL(String(input));
@@ -44,16 +45,16 @@ async function main(): Promise<void> {
   is("an address of neither kind is refused before any request", [await postToChat("https://example.com/hook", "x"), requests.length], ["refused", 0]);
 
   part("setChatAddress: anything but sent is refused, and the address is not kept");
-  redis.clear();
+  redis.clear(); redis.run(["SET", "nl:store:id:" + scope.sid, scope.email]);
   for (const a of [404, 503, "throws", "timeout"] as const) {
     answer = a;
-    is(`the first message answered ${a}: refused, not kept`, [await setChatAddress("st-fixture", "Fixture Store", SLACK), await chatSetup("st-fixture")], ["refused", null]);
+    is(`the first message answered ${a}: refused, not kept`, [await setChatAddress("st-fixture", "Fixture Store", SLACK, scope), await chatSetup("st-fixture")], ["refused", null]);
   }
   answer = 200;
-  is("a first message taken: saved", [await setChatAddress("st-fixture", "Fixture Store", SLACK), await chatSetup("st-fixture")], ["saved", "slack"]);
+  is("a first message taken: saved", [await setChatAddress("st-fixture", "Fixture Store", SLACK, scope), await chatSetup("st-fixture")], ["saved", "slack"]);
 
   part("sendPart: an unknown outcome keeps the part's mark, so a later try never sends it again");
-  redis.clear();
+  redis.clear(); redis.run(["SET", "nl:store:id:" + scope.sid, scope.email]);
   const period = weekPeriod("fixture-store", Date.parse("2026-11-09T09:00:00Z"));
   let sends = 0;
   const unknown = async () => { sends += 1; return "unknown" as const; };
@@ -63,18 +64,18 @@ async function main(): Promise<void> {
   is("a later try answers earlier and does not send", [await sendPart(period, "posted", sent), sends], ["earlier", 1]);
 
   part("sendPart controls: a definite refusal lets the mark go; sent and true are sent");
-  redis.clear();
+  redis.clear(); redis.run(["SET", "nl:store:id:" + scope.sid, scope.email]);
   sends = 0;
   const refused = async () => { sends += 1; return "refused" as const; };
   is("refused is missed", await sendPart(period, "posted", refused), "missed");
   is("its mark is let go", redis.run(["GET", `${period.key}:posted`]), null);
   is("a later try sends", [await sendPart(period, "posted", sent), sends], ["sent", 2]);
-  redis.clear();
+  redis.clear(); redis.run(["SET", "nl:store:id:" + scope.sid, scope.email]);
   is("a boolean true (the email's answer) is sent", await sendPart(period, "emailed", async () => true), "sent");
-  redis.clear();
+  redis.clear(); redis.run(["SET", "nl:store:id:" + scope.sid, scope.email]);
   is("a boolean false, with no key window, may be an unknown: unconfirmed, and the mark is kept",
     [await sendPart(period, "emailed", async () => false), redis.run(["GET", `${period.key}:emailed`]) !== null], ["unconfirmed", true]);
-  redis.clear();
+  redis.clear(); redis.run(["SET", "nl:store:id:" + scope.sid, scope.email]);
   is("a send that throws may have gone: unconfirmed, and the mark is kept",
     [await sendPart(period, "emailed", async () => { throw new Error("synthetic"); }), redis.run(["GET", `${period.key}:emailed`]) !== null], ["unconfirmed", true]);
 
@@ -86,7 +87,7 @@ async function main(): Promise<void> {
   let clock = start;
   Date.now = () => clock;
   try {
-    redis.clear();
+    redis.clear(); redis.run(["SET", "nl:store:id:" + scope.sid, scope.email]);
     sends = 0;
     const no = async () => { sends += 1; return false; };
     const window = { keyHoldsMs: EMAIL_KEY_HOLDS_MS };
@@ -100,7 +101,7 @@ async function main(): Promise<void> {
     is("and its mark is kept, so no later try sends it", [redis.run(["GET", `${period.key}:emailed`]) !== null, await sendPart(period, "emailed", sent, window), sends], [true, "earlier", 2]);
 
     for (const [label, reply] of [["a number", 7], ["a list", ["1"]], ["a non-numeric string", "soon"]] as const) {
-      redis.clear();
+      redis.clear(); redis.run(["SET", "nl:store:id:" + scope.sid, scope.email]);
       sends = 0;
       redis.run(["SET", `${period.key}:emailed:first`, "placeholder"]);
       const oldPipeline = redis.pipeline.bind(redis);
@@ -116,13 +117,13 @@ async function main(): Promise<void> {
       }
     }
 
-    redis.clear();
+    redis.clear(); redis.run(["SET", "nl:store:id:" + scope.sid, scope.email]);
     sends = 0;
     clock = start;
     is("control: sent inside the window is sent", [await sendPart(period, "emailed", sent, window), sends], ["sent", 1]);
-    redis.clear();
+    redis.clear(); redis.run(["SET", "nl:store:id:" + scope.sid, scope.email]);
     is("control: refused inside the window is missed", await sendPart(period, "emailed", refused, window), "missed");
-    redis.clear();
+    redis.clear(); redis.run(["SET", "nl:store:id:" + scope.sid, scope.email]);
     is("control: unknown inside the window is unconfirmed", await sendPart(period, "emailed", unknown, window), "unconfirmed");
   } finally {
     Date.now = realNow;

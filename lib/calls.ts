@@ -1935,11 +1935,17 @@ async function tellMoved(input: {
   const room = place ? null : await roomOf(store.callsId, { product: product.id, setup, session, start, end });
   const video = isVideoRoom(room);
   // A link replaced after a failure counts too, so this file replaces every one sent before.
-  const sequence = moves + (await linkUpdates(store.callsId, { session, product: product.id, start }));
+  // Unknown (the record could not be read): no calendar file with an invented
+  // sequence is attached, but both sides are still told the new time.
+  const updates = await linkUpdates(store.callsId, { session, product: product.id, start }).catch((error) => {
+    console.error("reading a booking's link updates failed; the move emails go without a calendar file", error);
+    return null;
+  });
+  const sequence = updates === null ? null : moves + updates;
   const invite = (note: string, words?: BookingWords) =>
-    Buffer.from(
+    sequence === null ? [] : [{ filename: "call.ics", content: Buffer.from(
       callInvite({ uid: session, start, end, title: product.title, storeName: store.name, room, place, note, sequence, words }),
-    ).toString("base64");
+    ).toString("base64") }];
   const at = (ms: number, tz: string) => `${readableTime(ms, tz)} (${zoneName(ms, tz)})`;
 
   if (email) {
@@ -1962,12 +1968,12 @@ async function tellMoved(input: {
         place ? b.whereAt(placeLine(place)) : room ? b.joinAtNewTime(room) : b.willSendLink(store.name),
         ...(video ? [b.videoRoomNote] : []),
         "",
-        b.newTimeAttached,
+        sequence === null ? b.moveOldEvent : b.newTimeAttached,
         again ? b.moveAgainLink(moveLink(origin, store, product.id, session), MAX_MOVES) : b.cannotMoveAgain(store.name),
         b.toCancel(store.name),
       ].join("\n"),
       replyTo: store.email,
-      attachments: [{ filename: "call.ics", content: invite(buyerNote(b, store, room, place), b) }],
+      attachments: invite(buyerNote(b, store, room, place), b),
     });
   }
 
@@ -1982,12 +1988,14 @@ async function tellMoved(input: {
       `Now: ${at(start, setup.tz)}, your time zone`,
       `Was: ${at(from.start, setup.tz)}`,
       "",
-      "The old time is free again for somebody else. The calendar file attached has the new time; delete the old event from your calendar if it is still there.",
+      sequence === null
+        ? "The old time is free again for somebody else. Move the event in your calendar to the new time."
+        : "The old time is free again for somebody else. The calendar file attached has the new time; delete the old event from your calendar if it is still there.",
       ...(place ? ["", `In person, at: ${placeLine(place)}`] : room ? ["", `${video ? "The video room" : "The meeting link"}: ${room}`, ...(video ? [VIDEO_ROOM_NOTE] : [])] : []),
       "Every booking is also in your studio, under Upcoming calls.",
     ].join("\n"),
     ...(email ? { replyTo: email } : {}),
-    attachments: [{ filename: "call.ics", content: invite(place ? `With ${email ?? "your buyer"}. In person, at: ${placeLine(place)}` : `With ${email ?? "your buyer"}.${room ? ` Join: ${room}` : ""}${video ? `\n\n${VIDEO_ROOM_NOTE}` : ""}`) }],
+    attachments: invite(place ? `With ${email ?? "your buyer"}. In person, at: ${placeLine(place)}` : `With ${email ?? "your buyer"}.${room ? ` Join: ${room}` : ""}${video ? `\n\n${VIDEO_ROOM_NOTE}` : ""}`),
   });
 }
 
@@ -2345,7 +2353,7 @@ export async function confirmBooking(input: {
     const b = bookingWords(store.language);
     const locale = LANGUAGES[parseLanguage(store.language)].locale;
     const hours = Math.max(setup.noticeHours, 1);
-    await sendEmail({ meter: { by: "order" },
+    await sendEmail({ meter: { by: "order", store },
       idempotencyKey: confirmEmailKey(session, "buyer"),
       from: storeSender(store),
       to: buyerEmail,
@@ -2387,7 +2395,8 @@ export async function confirmBooking(input: {
   const theirs = onTheirCalendar(meeting, creatorSide, store.email);
   // The reminders before the call go to the store's own address (lib/call-reminders.ts, remindCreator).
   const toOwner = creatorSide.trim().toLowerCase() === store.email.trim().toLowerCase();
-  await sendEmail({ meter: { by: "order" },
+  // A notice to the creator's side (the store or a host), never to a list member: no list tag (lib/email.ts messageTags).
+  await sendEmail({ meter: { by: "order", store }, tags: {},
     idempotencyKey: confirmEmailKey(session, "creator"),
     from: `"Marktmorgen" <${senderAddress()}>`,
     to: creatorSide,

@@ -30,6 +30,9 @@ const waitlistSource = readFileSync("lib/waitlist.ts", "utf8");
 const waitConfirmText = waitlistSource.match(/const WAIT_CONFIRM = \[([\s\S]*?)\]\.join/)?.[1] ?? "";
 /** The most redis.call one run of WAIT_CONFIRM makes, read off its text. */
 const waitConfirmCalls = (waitConfirmText.match(/redis\.call\(/g) ?? []).length;
+/** MARK_RETURNED's calls (lib/crm.ts, personReturned: a confirmed place takes away a CRM deletion mark), read off its text. */
+const crmSource = readFileSync("lib/crm.ts", "utf8");
+const markReturnedCalls = ((crmSource.match(/export const MARK_RETURNED = `([\s\S]*?)`;/)?.[1] ?? "").match(/redis\.call\(/g) ?? []).length;
 /** The figure lib/waitlist.ts states for it. */
 const statedCalls = Number(waitlistSource.match(/export const WAIT_CONFIRM_CALLS = (\d+);/)?.[1] ?? NaN);
 
@@ -49,6 +52,7 @@ function billed(commands: Commands): { commands: number; taken: number; signUp: 
     if (c[0] !== "EVAL") total += 1;
     else if (head.startsWith("-- marktmorgen:store-data:")) continue;
     else if (head.startsWith("-- marktmorgen:waitlist-confirm:")) total += 1 + waitConfirmCalls;
+    else if (head.startsWith("-- marktmorgen:crm-erased-returned:")) total += 1 + markReturnedCalls;
     else if (head.startsWith("-- marktmorgen:contact-fenced-write-if:")) total += 1 + CONTACT_FENCED_WRITE_CALLS;
     else total += 1000; // a script this test does not know is not free
   }
@@ -108,6 +112,7 @@ async function main(): Promise<void> {
 
   part("WAIT_CONFIRM is a charged script, stated and named");
   is("(control) WAIT_CONFIRM's text was found", waitConfirmCalls > 0, true);
+  is("(control) MARK_RETURNED's text was found (lib/crm.ts personReturned runs on a confirmed place)", markReturnedCalls > 0, true);
   is("WAIT_CONFIRM_CALLS is the most redis.call a run of WAIT_CONFIRM makes", statedCalls, waitConfirmCalls);
   const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
   for (const name of ["WAIT_CONFIRM", "WAIT_CONFIRM_CALLS", "WAIT_CONFIRM_UNITS"]) {

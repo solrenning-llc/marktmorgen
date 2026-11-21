@@ -74,7 +74,16 @@ const ID = /^[0-9a-f]{32}$/;
 const TOKEN = /^[0-9a-f]{96}$/;
 const HASH = /^[0-9a-f]{64}$/;
 const KINDS = ["child_safety", "intimate_image"] as const;
-const OUTCOMES: readonly HoldOutcome[] = ["held", "files_unconfirmed", "no_product", "not_held", "capped", "unknown", "failed"];
+const OUTCOME_TEXT: Record<HoldOutcome, string> = {
+  held: "When it came in, the product it points at was taken off the store automatically, and it stays held.",
+  files_unconfirmed: "When it came in, the product it points at was taken off the store, but keeping its files could not be confirmed: suspend the store, as docs/incident-response.md section 9 says.",
+  no_product: "When it came in, nothing was taken off automatically: act on it by hand, as docs/incident-response.md section 9 says.",
+  not_held: "Nothing was taken off automatically: act on it by hand, as docs/incident-response.md section 9 says.",
+  outside: "When it came in, the address was not a Marktmorgen address, so nothing was taken off automatically: act on it by hand, as docs/incident-response.md section 9 says.",
+  capped: "When it came in, nothing was taken off automatically (the store's daily cap was reached): act on it by hand, as docs/incident-response.md section 9 says.",
+  unknown: "When it came in, taking it off the store could not be confirmed: act on it by hand, as docs/incident-response.md section 9 says.",
+  failed: "When it came in, taking it off the store did not work: act on it by hand, as docs/incident-response.md section 9 says.",
+};
 
 type Kind = (typeof KINDS)[number];
 type Alert = {
@@ -127,7 +136,7 @@ function parse(value: unknown): Alert | null {
   }
   if (!data || typeof data !== "object" || Array.isArray(data)) return null;
   const a = data as Record<string, unknown>;
-  if (a.v !== 1 || !KINDS.includes(a.kind as Kind) || !OUTCOMES.includes(a.outcome as HoldOutcome)) return null;
+  if (a.v !== 1 || !KINDS.includes(a.kind as Kind) || typeof a.outcome !== "string" || !Object.hasOwn(OUTCOME_TEXT, a.outcome)) return null;
   if (typeof a.url !== "string" || a.url.length > 2_100 || typeof a.handle !== "string" || a.handle.length > 64) return null;
   if (!safeTime(a.firstAt) || !safeTime(a.lastSentAt) || !safeTime(a.deadline) || typeof a.warned !== "boolean") return null;
   if (typeof a.sends !== "number" || !Number.isSafeInteger(a.sends) || a.sends < 1 || a.sends > ALERT_SENDS) return null;
@@ -243,16 +252,6 @@ function reminderText(alert: Alert, n: number, now: number, link: string, last: 
   const child = alert.kind === "child_safety";
   const what = child ? "child safety report" : "request to remove an intimate image";
   const about = alert.handle ? ` about @${alert.handle}` : "";
-  const done: Record<HoldOutcome, string> = {
-    held: "When it came in, the product it points at was taken off the store automatically, and it stays held.",
-    files_unconfirmed: "When it came in, the product it points at was taken off the store, but keeping its files could not be confirmed: suspend the store, as docs/incident-response.md section 9 says.",
-    no_product: "When it came in, nothing was taken off automatically: act on it by hand, as docs/incident-response.md section 9 says.",
-    not_held: "Nothing was taken off automatically: act on it by hand, as docs/incident-response.md section 9 says.",
-    outside: "When it came in, the address was not a Marktmorgen address, so nothing was taken off automatically: act on it by hand, as docs/incident-response.md section 9 says.",
-    capped: "When it came in, nothing was taken off automatically (the store's daily cap was reached): act on it by hand, as docs/incident-response.md section 9 says.",
-    unknown: "When it came in, taking it off the store could not be confirmed: act on it by hand, as docs/incident-response.md section 9 says.",
-    failed: "When it came in, taking it off the store did not work: act on it by hand, as docs/incident-response.md section 9 says.",
-  };
   const deadline = utcTime(alert.deadline);
   const timing = child
     ? []
@@ -265,7 +264,7 @@ function reminderText(alert: Alert, n: number, now: number, link: string, last: 
     `This ${what} is still open since ${utcTime(alert.firstAt)}: it has not been marked handled.`,
     "",
     `Where: ${alert.url}`,
-    ...(child ? [done[alert.outcome]] : timing),
+    ...(child ? [OUTCOME_TEXT[alert.outcome]] : timing),
     "",
     child
       ? "Do not open, download, forward or describe the reported content, and do not ask any AI agent to look at it."

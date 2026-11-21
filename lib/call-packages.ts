@@ -484,9 +484,19 @@ export type BookResult =
  * once its time is held.
  */
 export async function prepareSession(store: Store, token: string, origin: string): Promise<BookResult & { checkout?: string }> {
-  const found = await boughtByToken(token);
-  if (!found || found.bought.s !== store.statsId || !store.stripeAccountId) return { ok: false, reason: "gone" };
-  const state = await packageState(found.bought);
+  // The package and its sessions left are read inside the same answer as the rest: a read that does not answer, or
+  // answers in another shape, is "error" (try again, nothing charged), never a page error and never "used" or "gone"
+  // (Codex X6's LOW on #2617, 7052207176; CX-123 rule 24).
+  let found: Awaited<ReturnType<typeof boughtByToken>>;
+  let state: Awaited<ReturnType<typeof packageState>>;
+  try {
+    found = await boughtByToken(token);
+    if (!found || found.bought.s !== store.statsId || !store.stripeAccountId) return { ok: false, reason: "gone" };
+    state = await packageState(found.bought);
+  } catch (error) {
+    console.error("reading a package before its session failed", error);
+    return { ok: false, reason: "error" };
+  }
   if (state.expired) return { ok: false, reason: "expired" };
   if (state.left <= 0) return { ok: false, reason: "used" };
   try {

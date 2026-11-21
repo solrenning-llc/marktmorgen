@@ -54,6 +54,18 @@ export function personIndexName(sid: string, email: string): string | null {
  * #3542). Never a key's hash (those are 64 hex).
  */
 const ERASED_MARK = "erased";
+/**
+ * The final keep of a keyed write's answer (Codex L's MEDIUM on #3542): in one step, the answer replaces the record
+ * only while the record is still exactly this request's own pending claim and, for an answer about a person, while no
+ * erasure has marked that person. A plain SET XX checked only that some record was there: a request paused before it
+ * could, after the person's erasure deleted its record and another request claimed the freed key, write the erased
+ * address over that other claim, out of the person's index and so out of any later erasure's reach. Nothing is written
+ * unless both checks pass.
+ *
+ *   KEYS[1] the record, KEYS[2] the person's index (only for an answer about a person)
+ *   ARGV[1] this request's pending claim, as it was written; ARGV[2] the answer's record; ARGV[3] seconds left; ARGV[4] the erasure's mark
+ */
+export const KEEP_IDEMPOTENT_IF_CLAIM = '-- marktmorgen:api-idempotency-keep:v1\nif redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end\nif #KEYS == 2 and redis.call("ZSCORE", KEYS[2], ARGV[4]) then return 0 end\nredis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3])\nreturn 1';
 /** How long past its end a line is still listed: a clock between the server and the database that runs apart by less than this never drops a line of an answer still kept. */
 const LINE_SLACK_MS = 60_000;
 /** Records deleted, and lines taken out of the index, per pipeline: no pipeline nears the database's request size. */
@@ -99,8 +111,11 @@ export async function onceForKey(request: Request, sid: string, path: string, bo
     // the write began), so this try runs nothing and is told to send the same key again.
     return answer(409, "idempotency_key", "A request with this Idempotency-Key is still being closed. Nothing was done this time. Send it again with the same key in a moment.");
   }
+  // The claim this request writes: its final keep replaces exactly this value, never another request's.
+  let mine: string | null = null;
   if (decision.kind === "run") {
     // Claimed only where no record is: two tries at once, one claim takes.
+    mine = decision.claim;
     const claimed = await claim(rk, decision.claim);
     if (claimed === "unknown") return answer(503, "unavailable", UNKNOWN_WORDS);
     if (claimed === "taken") {
@@ -149,7 +164,12 @@ export async function onceForKey(request: Request, sid: string, path: string, bo
       ]).catch(() => null), 4)
       : null;
     const listed = (!about && pk === null) || (indexed !== null && typeof indexed[0] === "number" && (indexed[1] === 0 || indexed[1] === 1) && indexed[2] === 1 && indexed[3] === null);
-    if (listed) await redisPipeline([["SET", rk, after.record, "XX", "EX", left]]).catch(() => {});
+    // Kept only over this request's own pending claim and, for an answer about a person, only while no erasure has
+    // marked them, both read in the same step as the write (KEEP_IDEMPOTENT_IF_CLAIM).
+    if (listed && mine !== null) {
+      const keys = pk ? [rk, pk] : [rk];
+      await redisPipeline([["EVAL", KEEP_IDEMPOTENT_IF_CLAIM, keys.length, ...keys, mine, after.record, left, ERASED_MARK]]).catch(() => {});
+    }
   }
   return done.response;
 }

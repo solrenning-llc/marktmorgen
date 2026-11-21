@@ -79,7 +79,12 @@ async function main(): Promise<void> {
   const sent: string[] = [];
   const pipeline = redis.pipeline.bind(redis);
   (redis as unknown as { pipeline: typeof pipeline }).pipeline = async (commands: (string | number)[][]) => {
-    for (const c of commands) if (String(c[1] ?? "").startsWith("nl:api:idem:")) sent.push(String(c[0]));
+    // An EVAL names its keys after the script and the key count; it is billed once, and every command it runs inside is
+    // billed too, so the keep counts as itself and what it can run (GET, ZSCORE, SET: Codex L on #3542).
+    for (const c of commands) {
+      if (c[0] === "EVAL" && String(c[3] ?? "").startsWith("nl:api:idem:")) sent.push("EVAL", "GET", "ZSCORE", "SET");
+      else if (String(c[1] ?? "").startsWith("nl:api:idem:")) sent.push(String(c[0]));
+    }
     return pipeline(commands);
   };
   try {
@@ -182,6 +187,47 @@ async function main(): Promise<void> {
     setPipe(plain);
     is(`${when}: the erasure finished`, erased.ok, true);
     is(`${when}: no answer naming the person is kept`, await keptAbout(a.sid, who), []);
+  }
+
+  part("A late keep never writes an erased answer over another request's claim (Codex L on #3542)");
+  // Codex L's MEDIUM on #3542 @45c07a2f6f: the final keep was a plain SET XX, which checks only that some record is
+  // there. Request A pauses just before it; Ava is erased (her record goes); request B, about another person, claims the
+  // freed key and its own final keep is lost, so B's pending claim stays; then A's keep lands on B's claim and puts
+  // Ava's address back for the rest of the day, where no erasure can find it any more.
+  {
+    const ava = "ava-late@example.test", bea = "bea-late@example.test";
+    const idem = "a-late-keep";
+    const rk = record(a.sid, idem);
+    const isKeep = (commands: (string | number)[][]) => commands.length === 1 && (
+      (commands[0][0] === "SET" && commands[0][1] === rk && commands[0].includes("XX")) ||
+      (commands[0][0] === "EVAL" && commands[0][2] === 1 && commands[0][3] === rk) ||
+      (commands[0][0] === "EVAL" && commands[0][2] === 2 && commands[0][3] === rk));
+    let keeps = 0;
+    let erasedOk = false;
+    let bClaim: unknown = undefined;
+    let bStatus = 0;
+    setPipe(async (commands) => {
+      if (!isKeep(commands)) return plain(commands);
+      keeps += 1;
+      if (keeps === 1) {
+        // A, paused at its final keep: Ava is erased, then B runs with the same key and its final keep is lost.
+        erasedOk = (await erasePerson(await storeNow(), ava, { kind: "person" })).ok;
+        bStatus = (await call(postAccess, a.key, { email: bea, product: a.product }, idem)).status;
+        [bClaim] = (await plain([["GET", rk]])) as unknown[];
+        return plain(commands);
+      }
+      // B's own final keep: lost on its way, so B's pending claim is what the key holds.
+      return [] as unknown[];
+    });
+    const aStatus = (await call(postAccess, a.key, { email: ava, product: a.product }, idem)).status;
+    setPipe(plain);
+    const [after] = (await plain([["GET", rk]])) as unknown[];
+    const pending = (raw: unknown) => { try { return (JSON.parse(String(raw)) as { state?: string }).state !== "done"; } catch { return false; } };
+    is("A, Ava's erasure and B all ran", [aStatus, erasedOk, bStatus, keeps], [200, true, 200, 2]);
+    is("B held a pending claim when A's late keep came", pending(bClaim), true);
+    is("no erased address was put back in the response cache", await keptAbout(a.sid, ava), []);
+    is("the other request's pending claim was not overwritten", after, bClaim);
+    await plain([["DEL", rk]]);
   }
 
   part("The person's index lists only answers still kept");

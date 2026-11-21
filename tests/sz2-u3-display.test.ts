@@ -63,7 +63,10 @@ const SAFETY = {
 const PROP65 = "WARNING: This product can expose you to lead, which is known to the State of California to cause cancer. For more information go to www.P65Warnings.ca.gov.";
 const FULL: PhysicalLegal = { safety: SAFETY, prop65: PROP65, quantities: [{ price: "", amount: "1.2", unit: "kg" }] };
 const IMAGE = { path: `images/${"a".repeat(24)}/${"b".repeat(32)}.jpg`, width: 1200, height: 800, alt: "The Supper Book", bytes: 1, small: null };
-const RAW = { id: "book1", title: "The Supper Book", priceCents: 3500, shipping: { cents: 600, region: "custom", countries: ["US", "FR", "DE"], note: "" } };
+// Norway and Iceland, in the EEA but outside the EU, not France and Germany: since 789 [IV1] unit 1 the EU and the UK
+// stay closed until the opening whatever is filled (lib/eu-vat-goods.ts), so only EEA countries outside the EU show
+// the safety lock opening once the fields are filled (changed fixture, noted; Claude 5's agreement, 7043575410).
+const RAW = { id: "book1", title: "The Supper Book", priceCents: 3500, shipping: { cents: 600, region: "custom", countries: ["US", "NO", "IS"], note: "" } };
 
 async function main(): Promise<void> {
   redis.clear();
@@ -73,7 +76,7 @@ async function main(): Promise<void> {
   const bare = parseProduct(RAW)!;
   is("nothing filled: the EU/EEA countries are left out, the rest kept", [shippingNow(bare)?.countries, shippingNow(bare)?.region, shippingNow(bare)?.cents], [["US"], "custom", 600]);
   const filled = parseProduct({ ...RAW, legal: FULL, image: IMAGE })!;
-  is("everything filled, with a picture: every country", shippingNow(filled)?.countries, ["US", "FR", "DE"]);
+  is("everything filled, with a picture: every country", shippingNow(filled)?.countries, ["US", "NO", "IS"]);
   is("filled without a picture: still closed", shippingNow(parseProduct({ ...RAW, legal: FULL })!)?.countries, ["US"]);
   is("a product that is not shipped has no shipping", shippingNow(parseProduct({ id: "pdf1", title: "PDF", priceCents: 1200 })!), null);
   const euOnly = parseProduct({ ...RAW, shipping: { cents: 600, region: "custom", countries: ["FR", "DE"], note: "" } })!;
@@ -92,24 +95,28 @@ async function main(): Promise<void> {
   is("shipped to Réunion, Guadeloupe and the US, not filled: only the US", shippingNow(parseProduct({ ...RAW, shipping: { cents: 600, region: "custom", countries: ["RE", "GP", "US"], note: "" } })!)?.countries, ["US"]);
   is("Svalbard and Jan Mayen share one code, and Jan Mayen is in the EEA: closed while not filled", worldNow.countries.includes("SJ"), false);
   const worldFilled = shippingNow(parseProduct({ ...RAW, shipping: { cents: 600, region: "world", note: "" }, legal: FULL, image: IMAGE })!)!;
-  is("filled: every one of them opens again, and the region is kept", [[...TERRITORIES, "SJ"].every((code) => worldFilled.countries.includes(code)), worldFilled.region], [true, "world"]);
+  // Changed assertion, noted (789 [IV1] unit 1): filled opens what the safety lock closed, SJ and the EEA outside the
+  // EU, never what the VAT lock closes, which holds Åland and the French outermost regions until the opening.
+  is("filled: Svalbard and the EEA outside the EU open again; the EU's own territories stay closed by the VAT lock", [["SJ", "NO", "IS", "LI"].every((code) => worldFilled.countries.includes(code)), TERRITORIES.filter((code) => worldFilled.countries.includes(code)), worldFilled.region, worldFilled.except], [true, [], "custom", "eu-uk"]);
   is("a manufacturer in Réunion is in the Union: no responsible person asked for", safetyGaps({ ...SAFETY, manufacturer: { ...SAFETY.manufacturer, country: "RE" }, responsible: null }, true), []);
   is("a responsible person in Martinique is in the Union", safetyGaps({ ...SAFETY, responsible: { ...SAFETY.responsible, country: "MQ" } }, true), []);
   is("a manufacturer on Svalbard, outside the EEA, still needs one", safetyGaps({ ...SAFETY, manufacturer: { ...SAFETY.manufacturer, country: "SJ" }, responsible: null }, true).includes("responsible"), true);
   const worldWords = deliveryWords(listingOf(world));
   is("the delivery fact of a world product not filled stays short", [worldWords.length < 400, worldWords.includes("AD, AE")], [true, false]);
-  is("it names the region and what is left out", worldWords.includes("to: everywhere Stripe can ship to, except for now the European Union, Iceland, Liechtenstein and Norway."), true);
-  is("the buy box says it in a few words", shipsToWords(worldNow, "en-US", SHIPPING_WORDS.en), "most countries, except for now the European Union, Iceland, Liechtenstein and Norway");
+  // Changed assertions, noted (789 [IV1] unit 1): the United Kingdom, Monaco and the Isle of Man are left out too, until
+  // the opening.
+  is("it names the region and what is left out", worldWords.includes("to: everywhere Stripe can ship to, except for now the European Union, the United Kingdom, Monaco, the Isle of Man, Iceland, Liechtenstein and Norway."), true);
+  is("the buy box says it in a few words", shipsToWords(worldNow, "en-US", SHIPPING_WORDS.en), "most countries, except for now the European Union, the United Kingdom, Monaco, the Isle of Man, Iceland, Liechtenstein and Norway");
   for (const code of LANGUAGE_CODES) is(`${code}: said, not listed`, shipsToWords(worldNow, code, SHIPPING_WORDS[code]).length < 160, true);
   is("a custom list stays a list", shipsToWords(shippingNow(bare)!, "en-US", SHIPPING_WORDS.en), "United States");
   const cartRoute = readFileSync("app/api/store/cart/route.ts", "utf8");
-  is("the cart says it the same way", /everywhereButGpsr\(sending\.countries\)/.test(cartRoute), true);
+  is("the cart says it the same way", /everywhereBut\(sending\.countries\)/.test(cartRoute), true);
 
   part("The listing carries a computed mark, never the record");
   const listing = listingOf(filled);
   is("filled: the mark, and no legal record on the listing", [listing.safetyFilled, Object.hasOwn(listing, "legal")], [true, false]);
   is("not filled: no mark", Object.hasOwn(listingOf(bare), "safetyFilled"), false);
-  is("the store page and the cart read the mark", shippingNow(listing)?.countries, ["US", "FR", "DE"]);
+  is("the store page and the cart read the mark", shippingNow(listing)?.countries, ["US", "NO", "IS"]);
   is("a mark typed into the record is not believed: a full product is read from its own record", shippingNow(parseProduct({ ...RAW, safetyFilled: true })!)?.countries, ["US"]);
   is("a listing without the mark is closed", shippingNow(listingOf(bare))?.countries, ["US"]);
 
@@ -121,7 +128,7 @@ async function main(): Promise<void> {
   const made = await addProduct(OWNER, "The Supper Book", "Printed, 120 pages.", "35", null);
   if (!made.ok) throw new Error("no product");
   const id = made.product.id;
-  await setProductShipping(OWNER, id, parseShipping({ cents: 600, region: "custom", countries: ["US", "FR", "DE"], note: "" })!);
+  await setProductShipping(OWNER, id, parseShipping({ cents: 600, region: "custom", countries: ["US", "NO", "IS"], note: "" })!);
   await addOption(OWNER, id, "Signed", "45");
   let store = (await storeForEmail(OWNER))!;
   const optionId = (await readProduct(store, id))!.options[0].id;
@@ -179,7 +186,7 @@ async function main(): Promise<void> {
   const record = catalogRecord(store.catalog);
   const forged = parseCatalog({ ...record, head: [{ ...JSON.parse(String(savedListing)), safetyFilled: "yes" }] }, null).head[0];
   const kept = parseCatalog({ ...record, head: [JSON.parse(String(savedListing))] }, null).head[0];
-  is("read back from the store record, the mark is kept only when exactly true", [shippingNow(forged)?.countries, shippingNow(kept)?.countries, kept.safetyFilled], [["US"], ["US", "FR", "DE"], true]);
+  is("read back from the store record, the mark is kept only when exactly true", [shippingNow(forged)?.countries, shippingNow(kept)?.countries, kept.safetyFilled], [["US"], ["US", "NO", "IS"], true]);
   await setProductImage(OWNER, id, null);
   store = (await storeForEmail(OWNER))!;
   is("the picture taken off: the mark goes with it", (await readListing(store, id))?.safetyFilled ?? false, false);
@@ -190,7 +197,7 @@ async function main(): Promise<void> {
   let product = (await readProduct(store, id))!;
   await createCheckout(store, product, "https://marktmorgen.com", optionId, {});
   let sent = checkouts.at(-1)!;
-  is("filled: Stripe asks for an address in every country", sent.getAll("shipping_address_collection[allowed_countries][0]").concat(sent.getAll("shipping_address_collection[allowed_countries][1]"), sent.getAll("shipping_address_collection[allowed_countries][2]")), ["US", "FR", "DE"]);
+  is("filled: Stripe asks for an address in every country", sent.getAll("shipping_address_collection[allowed_countries][0]").concat(sent.getAll("shipping_address_collection[allowed_countries][1]"), sent.getAll("shipping_address_collection[allowed_countries][2]")), ["US", "NO", "IS"]);
   await setProductLegal(OWNER, id, { ...legal, safety: { ...SAFETY, productType: "" } });
   store = (await storeForEmail(OWNER))!;
   product = (await readProduct(store, id))!;
@@ -210,7 +217,7 @@ async function main(): Promise<void> {
   const cartBook = parseProduct({ ...RAW, id: "cartbook" })!;
   const cartMug = parseProduct({ ...RAW, id: "cartmug", title: "Mug", legal: FULL, image: IMAGE })!;
   is("one address, in the countries both reach now", cartShipping([cartBook, cartMug].map(cartItemOf)), { kind: "ships", countries: ["US"], cents: 1200, each: [{ id: "cartbook", cents: 600 }, { id: "cartmug", cents: 600 }] });
-  is("both filled: every country they share", cartShipping([parseProduct({ ...RAW, id: "a", legal: FULL, image: IMAGE })!, cartMug].map(cartItemOf)).kind === "ships" ? (cartShipping([parseProduct({ ...RAW, id: "a", legal: FULL, image: IMAGE })!, cartMug].map(cartItemOf)) as { countries: string[] }).countries : [], ["US", "FR", "DE"]);
+  is("both filled: every country they share", cartShipping([parseProduct({ ...RAW, id: "a", legal: FULL, image: IMAGE })!, cartMug].map(cartItemOf)).kind === "ships" ? (cartShipping([parseProduct({ ...RAW, id: "a", legal: FULL, image: IMAGE })!, cartMug].map(cartItemOf)) as { countries: string[] }).countries : [], ["US", "NO", "IS"]);
   is("a product that ships nowhere now cannot be paid for in a cart", cartShipping([euOnly].map(cartItemOf)).kind, "unreadable");
 
   part("The buyer's words, in every store language");
@@ -308,11 +315,17 @@ async function main(): Promise<void> {
     ["not filled, shipped worldwide", studioWorld],
     ["not filled, EU/EEA only", studioEuOnly],
   ] as const) {
-    const closes = shippingNow(product)!.countries.length < activeShipping(product)!.countries.length;
+    // Changed, noted (789 [IV1] unit 1): this sentence is the safety lock's, so it is said exactly when that lock closes
+    // one of the product's countries, read from the checkout's own rule on Norway (in the area, never VAT-closed); the
+    // VAT lock's closing is said by the shipping editor (components/shipping-editor.tsx, VAT_LOCK_NOTE), below.
+    const safetyLockHolds = shippingNow({ ...product, shipping: { ...product.shipping!, region: "custom", countries: ["NO"] } })!.countries.length === 0;
+    const closes = activeShipping(product)!.countries.some(gpsrCloses) && safetyLockHolds;
     // Changed assertion, noted (after the RED commit): either closing sentence counts, "no one can buy" included.
     is(`${name}: the studio says buyers can't buy exactly when the checkout closes a country`, [SOME_CANT, PARTLY_CANT, BOTH_CANT, NO_ONE].some((words) => said(product).endsWith(` ${words}`)), closes);
   }
   is("the form shows the closing in the studio's notice style, from the same rule", /safetyClosed\(product\.shipping\.countries, /.test(editor) && /notice notice-warn/.test(editor), true);
+  const shippingEditor = readFileSync("components/shipping-editor.tsx", "utf8");
+  is("the shipping editor says the VAT lock's closing, from the same rule", [/\.some\(vatShipCloses\) \?/.test(shippingEditor), /\{VAT_LOCK_NOTE\}/.test(shippingEditor), shippingEditor.includes("can't have it shipped to the European Union, the United Kingdom, Monaco or the Isle of Man")], [true, true, true]);
 
   done();
 }

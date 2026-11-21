@@ -86,10 +86,11 @@ async function main(): Promise<void> {
   is("a line about when it ships only when there is one to say", [sharedShipNote(["Ships in 3 days"]), sharedShipNote(["Ships in 3 days", "Ships in 3 days "]), sharedShipNote(["Ships in 3 days", ""]), sharedShipNote(["A", "B"])], ["Ships in 3 days", "Ships in 3 days", "", ""]);
 
   part("The checkout");
-  await createCartCheckout(shop(), [physical("box", ["US", "CA", "GB"], 700, "Ships in 3 days"), physical("poster", ["GB", "US"], 300, "Ships in 3 days")], "https://marktmorgen.com", { country: "US" });
+  // Australia, not Great Britain: the EU and the UK stay off every checkout until the opening (789 [IV1] unit 1).
+  await createCartCheckout(shop(), [physical("box", ["US", "CA", "AU"], 700, "Ships in 3 days"), physical("poster", ["AU", "US"], 300, "Ships in 3 days")], "https://marktmorgen.com", { country: "US" });
   let body = sent.at(-1)!;
   is("the order's own product and the one added, in the cart's order", [body.get("metadata[product]"), body.get("metadata[bump]")], ["box", "poster"]);
-  is("an address only where both ship, once each", body.getAll("shipping_address_collection[allowed_countries][0]").concat(body.getAll("shipping_address_collection[allowed_countries][1]"), body.getAll("shipping_address_collection[allowed_countries][2]")), ["US", "GB"]);
+  is("an address only where both ship, once each", body.getAll("shipping_address_collection[allowed_countries][0]").concat(body.getAll("shipping_address_collection[allowed_countries][1]"), body.getAll("shipping_address_collection[allowed_countries][2]")), ["US", "AU"]);
   is("each one's shipping added on one line, with the line they share", [body.get("shipping_options[0][shipping_rate_data][type]"), body.get("shipping_options[0][shipping_rate_data][fixed_amount][amount]"), body.get("shipping_options[0][shipping_rate_data][fixed_amount][currency]"), body.get("shipping_options[0][shipping_rate_data][display_name]")], ["fixed_amount", "1000", "usd", "Shipping · Ships in 3 days"]);
   is("the order marked as shipped, on the checkout and the payment", [body.get("metadata[ship]"), body.get("payment_intent_data[metadata][ship]")], ["yes", "yes"]);
   is("no tax codes while Stripe Tax is off", [...body.keys()].filter((key) => key.includes("tax_code")), []);

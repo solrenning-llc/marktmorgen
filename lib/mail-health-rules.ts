@@ -49,3 +49,21 @@ const percent = (rate: number) => `${Number((rate * 100).toFixed(2))}%`;
 export function healthRuleWords(): string {
   return `If, over ${HEALTH_WINDOW_DAYS} days, ${BOUNCE_FLOOR} or more of a store's emails and ${percent(BOUNCE_RATE)} or more of them go to addresses that do not exist, or ${COMPLAINT_FLOOR} or more and ${percent(COMPLAINT_RATE)} or more are reported as spam, email to that store's list pauses for ${PAUSE_DAYS} days and then goes on by itself.`;
 }
+
+/**
+ * The tag a store's email that is NOT a list email carries (a checkout
+ * reminder, a review request, an update notice, a community announcement, a
+ * receipt): the store's list id, so a permanent bounce or a spam complaint on
+ * it takes the address off that list (lib/mail-health.ts heardFromSender,
+ * lib/contacts.ts stopWriting) like one on a list email (ALL-160). It is
+ * never the health tag: such an email is not counted for the store, so its
+ * bounces neither count against nor pause the store's list email.
+ */
+export const STOP_TAG = "nl_stop";
+const LIST_ID = /^[0-9a-f]{32}$/;
+
+/** The tag for one of a store's non-list emails; none for a store without a list, which has nobody to take off. */
+export function stopTags(store: { listId?: string | null } | null | undefined): Record<string, string> {
+  const listId = store?.listId;
+  return typeof listId === "string" && LIST_ID.test(listId) ? { [STOP_TAG]: listId } : {};
+}

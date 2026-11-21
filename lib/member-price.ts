@@ -46,7 +46,7 @@ import { SESSION_COOKIE, emailForSession, normaliseEmail } from "@/lib/auth";
 import { takeBuyerRead } from "@/lib/buyer-actions";
 import { readListings } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
-import { importedFrom, importedRead } from "@/lib/imported-purchases";
+import { importedRead, importedRows } from "@/lib/imported-purchases";
 import { TOKEN_PATTERN, learnerFrom, passCookieName } from "@/lib/learn";
 import { memberState } from "@/lib/membership-access";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
@@ -212,7 +212,10 @@ async function heldHere(store: Store, email: string, kinds: ReadonlyMap<string, 
     const pairs = readImported ? stringList(imported) : [];
     if (pairs === null || pairs.length % 2 !== 0) complete = false;
     else {
-      for (const purchase of importedFrom(pairs)) {
+      // A row that does not read leaves "not held" unknown (Claude 6's LEVE 1 on #2794): the legible rows still count.
+      const rows = importedRows(pairs);
+      if (rows.unknown) complete = false;
+      for (const purchase of rows.found) {
         if (!BOUGHT_JOB.test(purchase.job)) continue;
         for (const id of [purchase.productId, ...(purchase.items ?? [])]) {
           const kind = kinds.get(id);

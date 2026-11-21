@@ -5,6 +5,7 @@ import {PATH_WORDING_PRIVACY} from "@/lib/path-wording-rules";
 import {RETURN_PRIVACY_LINE} from "@/lib/path-return-rules";
 import { PAST_CALL_DAYS } from "@/lib/store-data-rules";
 import { CLOSING_DAYS, ERASE_WITHIN_DAYS } from "@/lib/plan-closing-rules";
+import { MAX_SUBMISSION_KEEP_DAYS } from "@/lib/submission-rules";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
@@ -876,6 +877,20 @@ export default function PrivacyPage() {
           you are not written to by that creator again unless you check their
           box again yourself.
         </p>
+        <p id="email-polls">
+          <strong className="text-black">Polls in a creator&apos;s emails.</strong>{" "}
+          A creator&apos;s email may ask a question with a few answers to choose
+          from. When you choose one, we keep which answer you chose under your
+          place in the list that email went to, never your email address. You
+          may change your answer, or take it back, while the poll is open. The
+          creator sees only how many people chose each answer, never who chose
+          what. Your answer is kept until the poll closes and for
+          30 days after the poll closes, so at most 60 days after the email was
+          sent, and then it is deleted by itself; it is also deleted if the
+          creator closes their store. Because it is kept under your place in the list and not under
+          your address, deleting your data from that creator does not find it,
+          but it is still deleted by itself within that time.
+        </p>
         <p id="community">
           <strong className="text-black">A creator&apos;s community.</strong>{" "}
           When a creator opens a community on their store, we decide who may
@@ -1337,6 +1352,25 @@ export default function PrivacyPage() {
           asks AI to draft a reply, the assignment and what the student wrote
           are sent to Anthropic to write it, never the file. A student who
           wants their work deleted asks the creator.
+        </p>
+        <p id="lesson-submissions">
+          <strong className="text-black">Files sent for review.</strong> When a
+          creator asks the buyers of a course to send a video, a photo or a PDF
+          for review on a lesson, we keep each file a buyer sends with its
+          name, size and type, the note they wrote with it, when they sent it,
+          their email address, and the creator&apos;s reply once there is
+          one. The file goes straight from the buyer&apos;s browser to the
+          creator&apos;s private store files, where it counts toward the
+          creator&apos;s storage. When the keeping time the creator chose ends
+          (at most {MAX_SUBMISSION_KEEP_DAYS} days after the file was sent),
+          the file is deleted within about a day, and its record with it; if
+          the file could not be deleted that day, we try again every day until
+          it is. When a buyer is deleted from the store, their files and
+          records are deleted at once (a file within a day, if the file
+          store does not answer right away), and an upload they had started
+          is canceled. A buyer who wants what they sent deleted sooner can delete
+          themselves from the store with the privacy link at the foot of its
+          page, or ask the creator.
         </p>
         <p id="discord">
           <strong className="text-black">Discord access.</strong> When a
@@ -2122,7 +2156,9 @@ export default function PrivacyPage() {
           The files a creator sells, their lessons&apos; videos and their
           podcast&apos;s episodes, the files their students hand in and the
           pictures in their community&apos;s posts are kept until they are
-          removed with what they belong to. Where a
+          removed with what they belong to. Files buyers send for review are
+          kept only for the keeping time their creator chose, at most{" "}
+          {MAX_SUBMISSION_KEEP_DAYS} days. Where a
           store&apos;s plan has ended, they are deleted 30 days after the plan
           ended, after three emails to the store&apos;s owner; for a plan that
           ended before October 18, 2026, only where the store keeps more than a

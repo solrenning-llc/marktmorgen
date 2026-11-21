@@ -17,7 +17,7 @@
  */
 import { placeLine } from "@/lib/call-place";
 import { listedLengths } from "@/lib/call-lengths";
-import { windowId } from "@/lib/allowance-window";
+import { windowId, windowKeySeconds } from "@/lib/allowance-window";
 import { SHIP_REGIONS } from "@/lib/shipping";
 import { shippingNow } from "@/lib/physical-legal-ship";
 import { createHash } from "node:crypto";
@@ -100,9 +100,12 @@ export function deliveryWords(product: Listing, currency = "usd"): string {
   const shipping = shippingNow(product);
   if (shipping && shipping.countries.length === 0) return "It is a physical product the creator ships themselves; it is not shipped anywhere right now, so it cannot be bought yet.";
   if (shipping) {
-    // Everywhere but the closed EU/EEA: said in a few words, so this first-tier fact never fills an input cap with ~200 codes.
-    const where = shipping.exceptGpsr
-      ? "everywhere Stripe can ship to, except for now the European Union, Iceland, Liechtenstein and Norway"
+    // Everywhere but the closed countries: said in a few words, so this first-tier fact never fills an input cap with
+    // ~200 codes. The EU and the UK are closed until the opening (lib/eu-vat-goods.ts); the EEA too while not filled.
+    const where = shipping.except === "eea-uk"
+      ? "everywhere Stripe can ship to, except for now the European Union, the United Kingdom, Monaco, the Isle of Man, Iceland, Liechtenstein and Norway"
+      : shipping.except === "eu-uk"
+        ? "everywhere Stripe can ship to, except for now the European Union, the United Kingdom, Monaco and the Isle of Man"
       : shipping.region === "custom"
         ? shipping.countries.join(", ")
         : SHIP_REGIONS[shipping.region].label;
@@ -437,7 +440,7 @@ export async function answerQuestion(input: {
 export async function takeAnswer(store: Store, now = Date.now()): Promise<boolean> {
   const key = monthKey(store, new Date(now));
   if (!store.statsId || !key) return false;
-  const [used, expires] = await redisPipeline([["INCR", key], ["EXPIRE", key, 40 * 86_400]]);
+  const [used, expires] = await redisPipeline([["INCR", key], ["EXPIRE", key, windowKeySeconds(store, 40 * 86_400, now)]]);
   const count = typeof used === "number" ? used : typeof used === "string" && /^[1-9]\d*$/.test(used) ? Number(used) : NaN;
   if (!Number.isSafeInteger(count) || count < 1 || (expires !== 1 && expires !== "1")) return false;
   if (count > answersAllowance(store, now)) {

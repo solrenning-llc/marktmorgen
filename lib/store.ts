@@ -161,8 +161,9 @@ import {
 } from "@/lib/catalog";
 import { type Announcement, type StoreSection, parseAnnouncement, parseSections, sectionsWithout } from "@/lib/store-sections";
 import { type VisitUs, parseVisitUs, readVisitUs } from "@/lib/visit-us";
-import { besideHeld, giveBeside, noteData, takeBeside, takeData } from "@/lib/store-data";
-import { BESIDE_PRODUCT_BYTES as BESIDE_PRODUCT } from "@/lib/store-data-rules";
+import { besideHeld, besideSwept, giveBeside, giveData, markBesideSwept, noteData, poolTakeCommands, roomSlots, takeBeside, takeData, takeDataCommands } from "@/lib/store-data";
+import { BESIDE_PRODUCT_BYTES as BESIDE_PRODUCT, besidePoolFor } from "@/lib/store-data-rules";
+import { standingOf } from "@/lib/plan-standing";
 import { type Collection, type CollectionsProblem, MAX_PAIRS, collectionsWithout, parseCollections, readCollectionsInput, readProductIds } from "@/lib/store-collections";
 import { type SitePage, parseSitePages, MAX_SITE_PAGES, slugProblem } from "@/lib/site-page-rules";
 import { type AnswersSetting, NO_ANSWERS, parseAnswers } from "@/lib/answers-rules";
@@ -2010,6 +2011,27 @@ async function withStore<T>(email: string, work: (store: Store, save: Save, held
 }
 
 /**
+ * Runs `work` only while this very store is live, under the same lock closeStoreRecord takes (Codex L-20261120-1151):
+ * for a write beside the record (a key of a family the closing walk deletes) that read the store before and writes
+ * after. The walk writes the erasing mark and deletes the live store's data under this lock, so either the work ends
+ * first and the walk deletes what it wrote, or the walk has begun (the mark is there) or ended (no record) and the work
+ * does not run. Null then. The same store is the same sid, or for a store from before ids the same statsId (as
+ * closeStoreRecord's sameLegacy). An erasing mark that cannot be read throws UnknownReplyError, with nothing run.
+ */
+export async function withLiveStore<T>(
+  known: Pick<Store, "email" | "sid" | "extra" | "statsId">,
+  work: (current: Store) => Promise<T>,
+): Promise<T | null> {
+  const ref = storeRef(known);
+  return withStore(ref, async (current) => {
+    const same = STORE_ID_PATTERN.test(known.sid) ? current.sid === known.sid : Boolean(known.statsId) && current.statsId === known.statsId;
+    if (!same) return null;
+    if ((await erasingSince(ref)) !== null) return null;
+    return work(current);
+  });
+}
+
+/**
  * Holds the locks of several stores at once, one inside the other, and hands
  * `work` the stores as they are with all of them held. A key with no store
  * behind it is left out. Only for a change that has to write several stores
@@ -2558,7 +2580,9 @@ export async function setSubscription(
   const source = expected ? { sid: expected.sid, statsId: expected.statsId,
     stripeCustomerId: expected.stripeCustomerId, subscriptionId: expected.subscriptionId,
     subscriptionActive: expected.subscriptionActive, tier: expected.tier, cycle: expected.cycle } : null;
+  let standingAtStart: ReturnType<typeof standingOf> | null = null;
   const result = await withStore<Store | null>(email, async (store, save) => {
+    standingAtStart = standingOf(store);
     // No plan runs on a store whose erasure has begun (Codex N1's HIGH on #3156): read under the store's lock, exactly,
     // so a start racing the walk's first delete is refused; a payment for it is returned (closingSince).
     if (fields.active && (await erasingSince(storeRef(store))) !== null) return null;
@@ -2656,6 +2680,14 @@ export async function setSubscription(
     }
     return saved;
   });
+  // A store that starts paying (from a trial, from nothing, back from an end): what its products keep beside them moves
+  // to its beside pool, after the lock is let go (moveBesideToPool takes it a batch at a time). Never on a write that
+  // finds it paying already, so opening the studio sweeps nothing; a sweep that fails leaves the room fuller.
+  // A sweep that cannot run is caught here (Claude 4's LOW on #4847): the plan is saved, and what stays in the room
+  // errs fuller and moves when it is saved again.
+  if (result && standingAtStart !== "paid" && standingOf(result) === "paid") {
+    await moveBesideToPool(email).catch((error) => console.error("sweeping a store's products into its beside pool failed", error));
+  }
   return result ?? null;
 }
 
@@ -4002,6 +4034,59 @@ export async function setProductSummary(email: string, id: string, rawSummary: s
   return result.ok ? { ok: true, store: result.store, product: result.product } : result;
 }
 
+/** How many products the beside pool's sweep moves a lock at the most (C1-20261117-1500-c6c4-1, PR 2). */
+export const MOVE_BESIDE_BATCH = 250;
+/**
+ * The most batches one sweep runs: enough for MAX_PRODUCTS. Each batch, under the store's lock, at the most: the lock
+ * taken and let go, the store read (withStore), the pool's fields and the room's slots read (two HMGETs), the lock
+ * held on (holdLock), then the pool's TAKE_DATA taking the batch's shares and the room's giving them back, each at
+ * its inner commands as Upstash bills them (lib/store-data.ts, poolTakeCommands and takeDataCommands; Claude 4's
+ * MEDIUM on #4847); and the sweep's mark read and written once a sweep.
+ */
+export const MOVE_BESIDE_BATCHES = Math.ceil(MAX_PRODUCTS / MOVE_BESIDE_BATCH);
+export const MOVE_BESIDE_BATCH_COMMANDS = 3 + 1 + 2 + 1 + poolTakeCommands(MOVE_BESIDE_BATCH) + takeDataCommands(MOVE_BESIDE_BATCH);
+export const MOVE_BESIDE_SWEEP_COMMANDS = 2;
+
+/**
+ * Moves the beside share of a paying store's products that were counted whole in its room (saved before it paid) to
+ * its beside pool, MOVE_BESIDE_BATCH products a lock, letting the lock go between batches so no edit waits long.
+ * Only a product whose room slot holds the whole share moves, and its slot comes down by exactly that share, so the
+ * room never counts less than it holds. The pool is taken first and the room given back after: a give-back that is
+ * lost leaves both counting it, fuller, never emptier. Stops at a batch the pool cannot take (full or unknown) or the
+ * store cannot be read: what is left stays counted in the room, as before, and moves when it is saved again (lazily,
+ * in commit). A store sweeps once: a sweep that started is marked when it ends, however it ended, so a store that
+ * starts paying again reads one field and sweeps nothing (MOVE_BESIDE_SWEEP_COMMANDS); a mark that cannot be read is
+ * not "not swept". Returns how many products moved.
+ */
+export async function moveBesideToPool(email: string): Promise<number> {
+  const first = await storeForEmail(email);
+  if (!first || besidePoolFor(first) <= 0 || (await besideSwept(first)) !== false) return 0;
+  let moved = 0;
+  for (let batch = 0; batch < MOVE_BESIDE_BATCHES; batch += 1) {
+    const step = await withStore<number | "end" | "stop">(email, async (store, _save, held) => {
+      if (besidePoolFor(store) <= 0) return "stop";
+      const ids = store.catalog.items.slice(batch * MOVE_BESIDE_BATCH, (batch + 1) * MOVE_BESIDE_BATCH).map((item) => item.id);
+      if (ids.length === 0) return "end";
+      const pooled = await besideHeld(store, ids);
+      const slots = pooled ? await roomSlots(store, ids.map((id) => `p:${id}`)) : null;
+      if (!pooled || !slots) return "stop";
+      const toPool = ids.filter((id, i) => !pooled.has(id) && slots[i] > BESIDE_PRODUCT);
+      if (toPool.length === 0) return ids.length < MOVE_BESIDE_BATCH ? "end" : 0;
+      if (!(await holdLock(held))) return "stop";
+      if (!(await takeBeside(store, toPool, BESIDE_PRODUCT))) return "stop";
+      await giveData(store, toPool.map((id) => ({ slot: `p:${id}`, bytes: BESIDE_PRODUCT })));
+      moved += toPool.length;
+      return ids.length < MOVE_BESIDE_BATCH ? "end" : toPool.length;
+    }).catch((error) => {
+      console.error("moving a store's products beside its room stopped", error);
+      return "stop" as const;
+    });
+    if (step === null || step === "stop" || step === "end") break;
+  }
+  await markBesideSwept(first);
+  return moved;
+}
+
 /** Takes something off the store. Returns the product as it was, for its files. */
 export async function removeProduct(
   email: string,
@@ -4844,6 +4929,20 @@ export async function setPostCount(email: string, count: number): Promise<Store 
 /** Switches stamping the buyer's email into a product's PDFs on or off. */
 export async function setProductStamp(email: string, id: string, on: boolean): Promise<ProductPartResult> {
   return changeProduct(email, id, (product) => ({ ...product, stamp: on }));
+}
+
+/**
+ * The creator's answer to whether a product is an electronically supplied publication, for VAT (lib/catalog.ts,
+ * Product.publication; 789 [IV1] step 3, unit 5a): `true` or `false` is kept as answered, `null` clears it back to not
+ * answered. The route (app/api/store/publication/route.ts) refuses anything else, so a bad value never reads as "not a
+ * publication".
+ */
+export async function setProductPublication(email: string, id: string, value: boolean | null): Promise<ProductPartResult> {
+  return changeProduct(email, id, (product) => {
+    const rest: Product = { ...product };
+    delete rest.publication;
+    return value === null ? rest : { ...rest, publication: value };
+  });
 }
 
 /** How many first pages of a product's PDF anyone may read before buying (lib/pdf-preview.ts); 0 switches it off. */

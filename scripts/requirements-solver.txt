@@ -1,0 +1,5 @@
+# The pricing optimization's solver (scripts/pricing-optimization-milp.py), run on demand by the tests and by
+# node scripts/pricing-optimization.mjs (owner, 20/11/2026: its input and output are not stored). Exact versions,
+# installed in the test job's own environment (.github/workflows/product-checks.yml, behavior-regressions).
+numpy==2.5.3
+scipy==1.18.1

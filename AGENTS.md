@@ -142,7 +142,7 @@ Pedido do dono, nas palavras dele: "quero regra e politica para nao ocorrer mais
 - workflow: 2, mais o SIM do dono registrado para o head exato (FQ (1));
 - código comum (telas, textos do site, testes): 1;
 - só texto interno (AGENTS.md, documentos): 1;
-- junção do main ou correção de achado num PR já aprovado: 1 revisão focal no head novo.
+- junção do main ou correção de achado num PR já aprovado: revisão focal no head novo, tantas quantas o tipo do PR pede acima (2 nos PRs de dinheiro, imposto, cobrança, custo, segurança, apagamento e workflow; 1 nos demais). Se uma junção sem outra mudança pode ter só 1 nesses tipos é pergunta aberta ao dono; até ele decidir, valem 2 (na dúvida, o número maior).
 
 Na dúvida, vale o número maior. Quem classifica é o coordenador, pela lista de arquivos, nunca o autor (FQ, "Depende do dono").
 

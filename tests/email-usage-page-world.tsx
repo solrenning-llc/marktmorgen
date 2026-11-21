@@ -63,6 +63,7 @@ export const HEALTH_NOTE = "";
 export function healthAdvice() { return null; }
 export function healthLevels() { return null; }
 export function healthLine() { return ""; }
+export const PLAN_TITLES = { creator: "Store", pro: "Studio", scale: "Scale" } as const;
 export const PRO_MONTHLY_EMAILS = 10_000, SCALE_MONTHLY_EMAILS = 20_000, TRIAL_MONTHLY_EMAILS = 100, TRIAL_DAYS = 14;
 export const PRO_ON_SALE = false;
 export function hasPro() { return true; }

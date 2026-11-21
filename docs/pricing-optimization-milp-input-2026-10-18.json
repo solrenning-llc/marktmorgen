@@ -2279,7 +2279,7 @@
     }
    ],
    "baseMonth": 1165,
-   "baseYear": 13609,
+   "baseYear": 13610,
    "coefMonth": {
     "ai": 335,
     "video": 46,
@@ -2291,14 +2291,14 @@
     "visits": 261
    },
    "coefYear": {
-    "ai": 4025,
-    "video": 554,
-    "storage": 1218,
-    "orders": 1136,
-    "store-email": 327,
-    "transactional-email": 451,
+    "ai": 4024,
+    "video": 553,
+    "storage": 1217,
+    "orders": 1135,
+    "store-email": 326,
+    "transactional-email": 450,
     "list-email": 7560,
-    "visits": 3143
+    "visits": 3142
    }
   },
   "scale": {

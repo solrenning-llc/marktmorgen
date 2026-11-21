@@ -18,7 +18,7 @@
  *     as Stripe counts it: anchored on the 31st, a period ending 28 Feb is
  *     followed by one ending 31 Mar, not 28 Mar.
  */
-import { dueReminder, fullPeriodAfter, missedReminder } from "@/lib/billing-reminders";
+import { dueReminder, fullPeriodAfter, missedReminder, reminderEmail } from "@/lib/billing-reminders";
 import { done, is, part } from "./check";
 
 const NOW = 1_791_700_000;
@@ -105,6 +105,24 @@ is("28 Feb 2027 + a year is 28 Feb 2028 (control)", iso(fullPeriodAfter(utc(2027
   is("and counted as missed if first found on its last day", missedReminder(trial, trialEnd - 12 * 3600)?.kind, "trial");
   const short = { ...trial, cancel_at: utc(2027, 1, 27) };
   is("canceling a day before Stripe's end (prorated): no notice (control)", dueReminder(short, trialEnd - 7.5 * DAY), null);
+}
+{
+  // Codex N1/X6 (@a8bd96a695, NOT FIXED): a trial already set to end must not be told it is charged "every month,
+  // until you cancel". It is told the one charge and the day the plan ends.
+  const trialEnd = utc(2027, 0, 31);
+  const base = { ...sub("month", 0, "trialing"), trial_end: trialEnd, billing_cycle_anchor: trialEnd };
+  const words = (cancelAt?: number) => {
+    const due = dueReminder(cancelAt ? { ...base, cancel_at: cancelAt } : base, trialEnd - 7.5 * DAY);
+    return due ? reminderEmail(due).text : "";
+  };
+  const once = words(utc(2027, 1, 28));
+  is("set to end after the first month: no promise of a charge every month", /every month|until you cancel/.test(once), false);
+  is("it says the plan's end day and that this is the only charge", [once.includes("February 28, 2027"), /only charge/.test(once)], [true, true]);
+  const twice = words(utc(2027, 2, 31));
+  is("set to end after two months: no 'until you cancel'", /until you cancel/.test(twice), false);
+  is("it says the end day, renewing until then and nothing after", [twice.includes("March 31, 2027"), /renews every month until then/.test(twice), /nothing is charged after/.test(twice)], [true, true, true]);
+  const open = words();
+  is("no cancellation set: the words are as before (control)", /and then \$29 every month, until you cancel/.test(open), true);
 }
 {
   // A yearly plan renewing 29 Feb 2028, cancel_at at Stripe's own end of that year: 28 Feb 2029.

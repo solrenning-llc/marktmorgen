@@ -141,6 +141,11 @@ export function euSaleGate(input: {
  * The cart route's gate (app/api/store/cart/route.ts), one product at a time as euSaleGate decides each: the first
  * refusal is the cart's, exactly as the route's loop over consumerGate returns it today. A cart collects only when every
  * product that needs VAT names the same country; products that disagree refuse the cart. Test inputs as euSaleGate's.
+ *
+ * A bundle in a cart is refused for now, even when the same bundle bought alone would be collected (Claude 6's LEVE on
+ * #5014): the cart route does not read the bundle's members, so notAPublication cannot see their answers and stays
+ * false. Reading them would add a read to every cart checkout with a bundle, a cost change for its own reviewed unit;
+ * until then a bundle in a cart is refused, never collected on a guess.
  */
 export function euCartGate(input: {
   products: readonly EuSupplyFields[];

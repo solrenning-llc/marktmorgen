@@ -88,6 +88,12 @@ async function main(): Promise<void> {
   is("a cart of two courses: collected", euCartGate({ products: [COURSE, COURSE], ...DE, ...ON }), { ok: true, collect: { country: "DE" } });
   is("a cart of an e-book beside a course: refused as today", euCartGate({ products: [COURSE, EBOOK], ...DE, ...ON }), consumerGate({ product: EBOOK, ...DE }));
   is("a cart with an unanswered product: refused as today", euCartGate({ products: [UNANSWERED, COURSE], ...DE, ...ON }), consumerGate({ product: UNANSWERED, ...DE }));
+  // Claude 6's LEVE on #5014: the cart reads no bundle members, so a bundle in a cart is refused for now, even though the
+  // same bundle bought alone (its members read, as the checkout route does) is collected. Refused, never collected.
+  const BUNDLE: EuSupplyFields = { ...COURSE, link: null, bundle: ["c", "c2"] };
+  const bundleMembers = new Map<string, EuSupplyFields>([["c", COURSE], ["c2", { ...COURSE, link: "https://example.com/two" }]]);
+  is("a bundle bought alone, its members answered not one: collected", euSaleGate({ product: BUNDLE, members: bundleMembers, ...DE, ...ON }), { ok: true, collect: { country: "DE" } });
+  is("the same bundle in a cart: refused as today (its members are not read there)", euCartGate({ products: [BUNDLE, COURSE], ...DE, ...ON }).ok, false);
 
   part("Nothing collects today: the real values");
   is("a course answered not a publication, a German buyer: exactly consumerGate", euSaleGate({ product: COURSE, ...DE }), consumerGate({ product: COURSE, ...DE }));

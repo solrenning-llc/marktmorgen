@@ -11,6 +11,7 @@ import { connectPayPal, onTheirWay, payWithPayPal, settlePayPal } from "@/lib/pa
 import { readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statsid1";
@@ -101,6 +102,8 @@ async function main(): Promise<void> {
     created.length = 0;
     itemStatus = {};
     batchStatus = "SUCCESS";
+    // Main keeps a PayPal link only for a live store (10d6abb3d); seed() cleared the store's id key.
+    await markLive(store);
     if (!(await connectPayPal(store, CLIENT, SECRET)).ok) throw new Error("not connected");
     const paid = await payWithPayPal(store);
     if (!paid.ok) throw new Error(`not sent: ${paid.reason}`);

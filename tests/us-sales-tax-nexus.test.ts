@@ -8,7 +8,7 @@
  * module yet. Synthetic data only.
  */
 import { strict as assert } from "node:assert";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { TaxSalesLedger } from "@/lib/tax-sales-counter";
@@ -204,10 +204,11 @@ test("the sale decision: below goes on; near or over only with collection on; un
 test("nothing reads the module yet: no checkout, counter store or flag", () => {
   const readers: string[] = [];
   const walk = (dir: string) => {
-    for (const name of readdirSync(dir)) {
-      const path = join(dir, name);
-      if (statSync(path).isDirectory()) walk(path);
-      else if (/\.(ts|tsx|mjs|js)$/.test(name) && readFileSync(path, "utf8").includes("us-sales-tax-nexus")) readers.push(path);
+    // The entry's own type from the listing, not a separate stat before the read (CodeQL js/file-system-race).
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.isFile() && /\.(ts|tsx|mjs|js)$/.test(entry.name) && readFileSync(path, "utf8").includes("us-sales-tax-nexus")) readers.push(path);
     }
   };
   for (const dir of ["app", "lib", "components"]) walk(dir);

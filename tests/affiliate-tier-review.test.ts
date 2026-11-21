@@ -118,6 +118,15 @@ async function main(): Promise<void> {
     const line = await tier(ref);
     is(`${who}'s record unreadable: the inviter's own purchase is not paid a second tier`, [line?.status ?? "none", line?.status === "earned"], ["buyer not confirmed", false]);
   }
+  // The first tier too (Codex X6 on #4413, LOW): the affiliate's own record does not read and the affiliate buys
+  // through their own link. Whether it is their own purchase is not known, so the sale waits, it never earns.
+  await redis.pipeline([["HSET", people, BEA, "{not json"]]);
+  await noteSession(await store(), order("cs_unreadself", "bea@example.com"));
+  await reset();
+  const book = await readBook(await store());
+  const own = book.lines.find((l) => l.ref === "cs_unreadself");
+  is("the affiliate's own record unreadable: their own purchase is written as not known to be theirs or not", [own?.self ?? false, own?.selfUnknown ?? 0, own?.unconfirmed ?? 0], [false, 1, 1]);
+  is("and it waits out of what is paid: nothing payable to the affiliate", book.rows.find((r) => r.affiliate.id === BEA)?.payable ?? 0, 0);
   // A reply that is not text at all, for the inviter's record only.
   const pipeline = redis.pipeline.bind(redis);
   let once = true;

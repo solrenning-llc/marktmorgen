@@ -52,6 +52,14 @@ export const PICTURE_DOOR_MAX = 1_000;
 /** The doors a store may open in an hour, counted before the file store is asked or anything is signed. */
 export const PICTURE_DOORS_PER_HOUR = 200;
 
+/** A save refused because a check made again could not be paid for: the routes answer studio_used with its words. */
+export class PictureCheckRefused extends Error {
+  constructor(readonly words: string) {
+    super(words);
+    this.name = "PictureCheckRefused";
+  }
+}
+
 /** The store already holds PICTURE_DOOR_MAX fresh doors: nothing was noted, and the door is not opened. */
 export class PictureDoorFull extends Error {
   constructor() {
@@ -164,4 +172,32 @@ export async function dropTakenPictures(taken: Map<string, number>, paths: strin
     if (Number.isFinite(stored) && stored > noted) ours.push(path);
   }
   if (ours.length) await del(ours).catch(() => {});
+}
+
+/**
+ * Whether a note was put back on the door once already (returnToDoor): its time carries half a millisecond. A picture
+ * taken with such a note is checked again only paid for as a studio request (lib/picture-check.ts pictureChecker).
+ */
+export const putBackOnce = (noted: number): boolean => !Number.isInteger(noted);
+
+/**
+ * Puts pictures this request took from the door back on it, each at the time given (ms), after a check of the file
+ * did not finish (Claude 2 on #2843, 6750890970): the file is kept, and a later save finds the picture and checks it
+ * again. Only a path with a door list; best effort, nothing here throws (a note not put back leaves a file nothing
+ * shows, kept: storage, never a picture deleted).
+ *
+ * PICTURE_DOOR_MAX is not applied here, on purpose (Codex N1 on #2843, LOW 1): each note put back was on the list when
+ * this request took it, and is of a file already stored, so putting it back opens no door and writes nothing to the
+ * file store. The list can then hold more than PICTURE_DOOR_MAX only by the notes in flight between a take and its
+ * put-back, and while it does, notePictureDoor refuses every new door (it counts the whole list), which is stricter,
+ * never looser. Dropping a note to keep the figure would leave its file shown by nothing, the cost the cap prevents.
+ */
+export async function returnToDoor(entries: ReadonlyArray<readonly [string, number]>): Promise<void> {
+  const commands: (string | number)[][] = [];
+  for (const [path, at] of entries) {
+    const key = doorsKey(path);
+    if (!key || !Number.isFinite(at) || at <= 0) continue;
+    commands.push(["ZADD", key, at, path], ["EXPIRE", key, PICTURE_DOOR_SECONDS]);
+  }
+  if (commands.length && isRedisConfigured()) await redisPipeline(commands).catch(() => {});
 }

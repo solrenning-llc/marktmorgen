@@ -6,13 +6,13 @@ import { StoreFullError, imageFolder, isFree, setProductPage } from "@/lib/store
 import { productIdFor, readListing } from "@/lib/catalog";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { EMPTY_PAGE, MAX_BLOCKS, type SalesPage, copyOfPage, declareMeasure, oversized, pageProblem, parsePage, picturePaths } from "@/lib/sales-page";
-import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { countStudio, jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { lockRead } from "@/lib/two-step-unknown";
-import { claimNewPictures, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
+import { claimNewPictures, letGoUnlessShown, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { deleteOrSweep } from "@/lib/file-drop";
 import { imagePaths, ownsImagePath } from "@/lib/product-image";
-import { isStoredPicture } from "@/lib/picture-check";
+import { PictureCheckRefused, paidFromStudio, pictureChecker } from "@/lib/picture-check";
 
 /**
  * Thirty full blocks as JSON, twice — a page and a second version tested
@@ -105,18 +105,21 @@ export async function POST(request: NextRequest) {
     if (lock instanceof Response) return lock;
     if (lock) return refusedJson("locked");
     const fresh = shown.filter((path) => !before.includes(path));
+    // What this save claims from the door, let go of if the page is then not kept (Codex N1 on #2843, MEDIUM).
+    const claimed = new Map<string, number>();
     if (fresh.length > 0) {
       if (!store.statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
       const folder = await imageFolder(guarded.ref);
       const own = new Set(imagePaths(product.image));
-      for (const path of fresh) {
-        if (!ownsImagePath(path, folder) || own.has(path) || !(await isStoredPicture(path))) {
-          return Response.json({ ok: false, error: "pictures" }, { status: 400 });
-        }
+      if (fresh.some((path) => !ownsImagePath(path, folder) || own.has(path))) {
+        return Response.json({ ok: false, error: "pictures" }, { status: 400 });
       }
       // Each new one fresh from the picture door or already this page's, never another record's picture from the
       // shared folder, so taking it off later deletes only this page's own (lib/sales-page-store.ts, claimNewPictures).
-      if (!(await claimNewPictures(store.statsId, id, fresh))) {
+      // Only those this save takes from the door are checked in the file store (MR audit gap 1): one taken by an earlier
+      // save was checked then. A picture is asked about again only after its check did not finish: put back on the door
+      // once, its check made again is paid for first, one studio request each (lib/picture-check.ts, pictureChecker).
+      if (!(await claimNewPictures(store.statsId, id, fresh, pictureChecker(async (units) => paidFromStudio(await countStudio(store, "products", units))), claimed))) {
         return Response.json({ ok: false, error: "pictures" }, { status: 400 });
       }
     }
@@ -126,6 +129,8 @@ export async function POST(request: NextRequest) {
     // Checked again on the product as it is now, and written under the lock that publishes it: a draft published
     // since the check above never takes a page that check would have refused (754 [STN1], Codex P on #3693).
     let onStore: { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft> } | null = null;
+    const statsId = store.statsId;
+    const letGo = () => (statsId ? letGoUnlessShown(statsId, id, claimed).catch(() => {}) : Promise.resolve());
     const marked = await setProductPage(guarded.ref, id, has, {
       refuse: (now) => {
         if (now.hidden === true) return null;
@@ -134,9 +139,14 @@ export async function POST(request: NextRequest) {
       },
       write: async (written) => {
         if (!written.statsId) throw new Error("a product page has nowhere to be kept");
-        await writePage(written.statsId, id, saved, written);
+        await writePage(written.statsId, id, saved, written, false, claimed);
       },
+    }).catch(async (error: unknown) => {
+      await letGo();
+      throw error;
     });
+    // Not kept (refused on the product as it is now, or any other reason): what this save claimed goes back.
+    if (!marked.ok) await letGo();
     if (!marked.ok && marked.reason === "on_store" && onStore) {
       const { fast, left } = onStore as { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft> };
       if (fast) return Response.json({ ok: false, error: "fast_money", passage: fast }, { status: 409 });
@@ -154,6 +164,8 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: true, blocks: saved.blocks.length, page: saved });
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "store_full" }, { status: 409 });
+    // A picture's check made again that the studio's requests could not pay for: said as that (Codex N1 on #2843).
+    if (error instanceof PictureCheckRefused) return Response.json({ ok: false, error: "studio_used", message: error.words }, { status: 429 });
     console.error("saving a product page failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

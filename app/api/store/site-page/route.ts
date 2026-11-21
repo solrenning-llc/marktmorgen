@@ -3,7 +3,7 @@ import { lockRead } from "@/lib/two-step-unknown";
 import type { NextRequest } from "next/server";
 import { type Store, StoreFullError, appendSitePages, changeSitePages, ensureStatsId, imageFolder, storeForEmailSeen } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { refusedJson } from "@/lib/studio-route";
+import { countStudio, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { EMPTY_PAGE, MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, picturePaths, type PageBlock, type SalesPage } from "@/lib/sales-page";
 import { pageCopy } from "@/lib/site-page-copy";
@@ -12,10 +12,10 @@ import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { MAX_FORMS } from "@/lib/forms";
 import { exactReplies } from "@/lib/redis-exact";
-import { claimNewPictures, dropPage, picturesOfFailedDrop, readPage, readPageExact, releasePictures, writePage } from "@/lib/sales-page-store";
+import { claimNewPictures, dropPage, letGoUnlessShown, picturesOfFailedDrop, readPage, readPageExact, releasePictures, writePage } from "@/lib/sales-page-store";
 import { deleteOrSweep } from "@/lib/file-drop";
 import { ownsImagePath } from "@/lib/product-image";
-import { isStoredPicture } from "@/lib/picture-check";
+import { PictureCheckRefused, paidFromStudio, pictureChecker } from "@/lib/picture-check";
 import { templateLeft } from "@/lib/template-text";
 import { MAX_SITE_PAGES, SITE_KINDS, SITE_PAGE_ID, SITE_STARTERS, type SitePage, outFrom, parseSitePages, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
 
@@ -317,16 +317,21 @@ export async function POST(request: NextRequest) {
       if (lock instanceof Response) return lock;
       if (lock) return refusedJson("locked");
       const fresh = shown.filter((path) => !before.includes(path));
+      // What this save claims from the door, let go of if the page is then not written (Codex N1 on #2843, MEDIUM).
+      const claimed = new Map<string, number>();
       if (fresh.length) {
         const folder = await imageFolder(ref);
-        for (const path of fresh) {
-          if (!ownsImagePath(path, folder) || !(await isStoredPicture(path))) return refuse("pictures");
-        }
+        if (fresh.some((path) => !ownsImagePath(path, folder))) return refuse("pictures");
         // Fresh from the picture door or already this page's, never a product's, a link's or another page's picture
-        // from the shared folder (lib/sales-page-store.ts, claimNewPictures).
-        if (!(await claimNewPictures(statsId, key, fresh))) return refuse("pictures");
+        // from the shared folder (lib/sales-page-store.ts, claimNewPictures). Only those this save takes from the door
+        // are checked in the file store (MR audit gap 1); one whose check did not finish is checked once more, paid for
+        // first as a studio request (lib/picture-check.ts, pictureChecker).
+        if (!(await claimNewPictures(statsId, key, fresh, pictureChecker(async (units) => paidFromStudio(await countStudio(store, "page", units))), claimed))) return refuse("pictures");
       }
-      await writePage(statsId, key, page, store);
+      await writePage(statsId, key, page, store, false, claimed).catch(async (error: unknown) => {
+        await letGoUnlessShown(statsId, key, claimed).catch(() => {});
+        throw error;
+      });
       // When it is out, kept on the list so the menu reads nothing more (lib/site-page-rules.ts).
       const from = outFrom(page);
       // Only this page's moment is changed, on the latest list; a page removed meanwhile stays removed.
@@ -351,6 +356,8 @@ export async function POST(request: NextRequest) {
     return refuse("invalid");
   } catch (error) {
     if (error instanceof StoreFullError) return refuse("store_full", 409);
+    // A picture's check made again that the studio's requests could not pay for: said as that (Codex N1 on #2843).
+    if (error instanceof PictureCheckRefused) return Response.json({ ok: false, error: "studio_used", message: error.words }, { status: 429 });
     console.error("changing a store's pages failed", error);
     return refuse("server_error", 500);
   }

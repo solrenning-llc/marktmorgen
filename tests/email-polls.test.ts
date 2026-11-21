@@ -9,7 +9,10 @@
  *     does not read taken as a count without it (rule 24);
  *   - votes kept past the poll's end and the time after it.
  */
+import { readFileSync } from "node:fs";
 import { POLL_RESULTS_DAYS, pollResults, recordVote } from "@/lib/email-polls";
+import { MAX_POLL_DAYS } from "@/lib/email-poll-rules";
+import { PERSON_DATA } from "@/lib/person-data";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -81,6 +84,40 @@ const closesAt = now + 7 * DAY;
   part("Only a broadcast's own id, as lib/broadcasts.ts makes it (Claude 3 on #3673, LEVE)");
   is("an id in another shape keeps no vote", await recordVote("bc0123456789abcdef", 3, 1, closesAt, now), "invalid");
   is("and reads no totals", await pollResults("bc0123456789abcdef", 2), { known: false });
+
+  // Codex X6's LOW on #3673 (7059280556): an exception from EXPIREAT after HSET aborted the script before its rollback,
+  // so the vote stayed with no end. The tests above inject a 0 reply; these inject a thrown error.
+  part("An expiry that throws leaves no vote behind, first vote or changed answer");
+  const ERROR = "b0123456789abcdef0123456";
+  const errorKey = `nl:mail:bc:${ERROR}:poll`;
+  const throwingExpiry = (c: (string | number)[]) => {
+    if (String(c[0]).toUpperCase() === "EXPIREAT") throw new Error("synthetic expiry refused");
+    return run(c);
+  };
+  redis.run = throwingExpiry;
+  is("a first vote whose expiry throws is unknown", await recordVote(ERROR, 2, 1, closesAt, now), "unknown");
+  redis.run = run;
+  is("and leaves no key without an end", Number(redis.run(["TTL", errorKey])), -2);
+  is("and no vote is counted", await pollResults(ERROR, 2), { known: true, counts: [0, 0], votes: 0 });
+  const oldAnswer = redis.run(["HGET", key, "3"]);
+  redis.run = throwingExpiry;
+  is("a changed answer whose expiry throws is unknown", await recordVote(BC, 3, 0, closesAt, now), "unknown");
+  redis.run = run;
+  is("and the earlier answer stays", redis.run(["HGET", key, "3"]), oldAnswer);
+
+  // Codex X6's second LOW on #3673 (7059280556): what a vote keeps about a person was said nowhere. The scan of
+  // tests/person-data-registry.test.ts does not find it, because a vote is kept under the recipient's place, not their
+  // address; a place in the list is not anonymous, so it is said here and on the privacy page.
+  part("What a vote keeps about a person is said, in lib/person-data.ts and on the privacy page");
+  const line = PERSON_DATA.find((d) => d.file === "lib/email-polls.ts");
+  is("lib/person-data.ts has a line for lib/email-polls.ts", Boolean(line), true);
+  is("a vote goes by itself, within the longest poll and its results' time", line?.how === "expires" && line.days >= MAX_POLL_DAYS + POLL_RESULTS_DAYS && line.days <= 400, true);
+  const privacy = readFileSync("app/privacy/page.tsx", "utf8");
+  const start = privacy.indexOf('<p id="email-polls">');
+  const section = start < 0 ? "" : privacy.slice(start, privacy.indexOf("</p>", start));
+  is("the privacy page has the section lib/email-polls.ts points to (app/privacy#email-polls)", start >= 0, true);
+  is("it says the answer is kept under the place in the list, never the address", /place in the list/.test(section) && /never your (email )?address/.test(section), true);
+  is("it says how long: until the poll closes and 30 days after", section.includes(`${POLL_RESULTS_DAYS} days after the poll closes`), true);
 
   done();
 })();

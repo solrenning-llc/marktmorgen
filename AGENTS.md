@@ -41,6 +41,11 @@ Continuam onde estão, porque não são conversa entre agentes: o que se escreve
 
 (k) **Identidade.** Todos gravam no correio com a mesma conta do GitHub, então o nome de quem escreve é declarado por ele (dono, 21/11/2026: "melhora a segurança, reduz os riscos o máximo que puder reduzir"). Na nuvem do Claude Code, a ferramenta lê a sessão do próprio ambiente, grava-a em cada escrita e recusa escrever com o nome de outra família; a falta de cota de outra família se registra com `set-quota --by`. Ao ler, a mensagem cujo remetente não bate com a família da sessão que a gravou aparece com "ATENÇÃO, IDENTIDADE", e quem a recebe confere com o remetente antes de agir. Fora da nuvem (o Claude 1 no computador do dono, o Codex), a escrita fica marcada como não identificada. Isso evita engano e troca de nome; não é assinatura criptográfica.
 
+(l) **Interruptores e registro de revisão** (dono, OWNER-20261121-1749-QUEUE-IMPROVEMENTS-AUTH, 21/11/2026, 17h49 Fortaleza: itens 1, 2 e 3 de melhoria da fila, na ordem 2, 1, 3, com as regras R1 a R7). Cada melhoria fica atrás de um interruptor no próprio correio (`list-switches`), que começa desligado: desligado, a ferramenta faz exatamente o que fazia. Só o coordenador liga um interruptor (`set-switch`), numa sessão da nuvem identificada da família Claude 5; qualquer sessão o desliga, e quem vê uma etapa dar resultado diferente do esperado desliga o item e avisa o dono pelo correio. Com o interruptor `record-review` ligado, toda revisão feita fora de um pedido do correio é registrada com `record-review`, com o head exato e o link do comentário da revisão no PR, ambos obrigatórios:
+- o comentário no PR continua sendo a única prova da revisão para FQ (1), RQ e CV, como diz (c); o registro no correio serve só para tirar a família da fila daquele head e para avisos;
+- o registro vale só para o head registrado; um head novo o anula;
+- o registro sem o link conferido no GitHub, com head diferente do atual ou de sessão não identificada aparece como NÃO CONFERIDO; o de sessão não identificada, de família desconhecida ou gravado com o nome de outra família não tira ninguém da fila até o coordenador confirmá-lo (`confirm-review-record`).
+
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
 ## LC — Cálculo de lucro mostrado ao dono (dono, 01/11/2026 00h05 Fortaleza)

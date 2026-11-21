@@ -61,7 +61,7 @@ const keys = async (pattern: string) => ((await redis.pipeline([["SCAN", "0", "M
 
 async function openDuringErasure(n: number) {
   const field = await erasingField(REF);
-  const fence = { live: LIVE, erasing: ERASING_KEY, field };
+  const fence = { live: LIVE, erasing: ERASING_KEY, field, statsId: "" };
   await redis.pipeline([["SET", LIVE, REF]]);
   let release: () => void = () => undefined;
   hold = new Promise<void>((done) => { release = done; });
@@ -103,7 +103,7 @@ test("an erasure between the record's write and the bind: the session is retired
   asked.length = 0;
   await redis.pipeline([["SET", LIVE, REF]]);
   const field = await erasingField(REF);
-  const fence = { live: LIVE, erasing: ERASING_KEY, field };
+  const fence = { live: LIVE, erasing: ERASING_KEY, field, statsId: "" };
   const pipeline = redis.pipeline.bind(redis);
   let erased = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
@@ -133,7 +133,7 @@ test("an erasure begun before the bind, its storage row still there: the bind is
   asked.length = 0;
   await redis.pipeline([["SET", LIVE, REF]]);
   const field = await erasingField(REF);
-  const fence = { live: LIVE, erasing: ERASING_KEY, field };
+  const fence = { live: LIVE, erasing: ERASING_KEY, field, statsId: "" };
   const pipeline = redis.pipeline.bind(redis);
   let erased = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
@@ -160,7 +160,7 @@ test("control: a live store's upload opens, with its record and its storage row"
   redis.clear();
   sessions.clear();
   await redis.pipeline([["SET", LIVE, REF]]);
-  const fence = { live: LIVE, erasing: ERASING_KEY, field: await erasingField(REF) };
+  const fence = { live: LIVE, erasing: ERASING_KEY, field: await erasingField(REF), statsId: "" };
   const opened = await openReservedVault({ folder: folder(3), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, fence } as never, 10, measure);
   assert.equal(opened.ok, true);
   assert.equal((await keys("nl:vault:up:*")).length, 1);
@@ -173,7 +173,7 @@ test("the fence's commands on an open stay within what each upload start is pric
   const count = async (n: number, fenced: boolean) => {
     redis.clear();
     await redis.pipeline([["SET", LIVE, REF]]);
-    const fence = { live: LIVE, erasing: ERASING_KEY, field: await erasingField(REF) };
+    const fence = { live: LIVE, erasing: ERASING_KEY, field: await erasingField(REF), statsId: "" };
     const run = redis.run.bind(redis);
     let commands = 0;
     redis.run = ((command: (string | number)[]) => { commands += 1; return run(command); }) as typeof redis.run;
@@ -191,7 +191,10 @@ test("the fence's commands on an open stay within what each upload start is pric
   // its own extra is read from the script: its EVAL and its calls, in place of one SET.
   const storage = (await count(6, true)) - (await count(7, false));
   assert.equal(storage, 3 * 2, `the three storage writes add ${storage} commands`);
-  const record = 1 + (SET_IF_STORE_LIVE.match(/redis\.call\(/g)?.length ?? 0) - 1;
+  // Its calls at the worst path: the script's EXISTS (a store with an id) and GET (one from before ids) are the two
+  // branches of one check, so one of them runs, never both.
+  const calls = (SET_IF_STORE_LIVE.match(/redis\.call\(/g)?.length ?? 0) - 1;
+  const record = 1 + calls - 1;
   assert.equal(record, 3);
   // The worst path adds a release's write (2) and the record's DEL (1).
   const worst = storage + record + 2 + 1;

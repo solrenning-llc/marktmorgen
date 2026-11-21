@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { idsOfKind, readListings } from "@/lib/catalog";
 import { FUNNEL_ID, MAX_FUNNEL_NAME, MAX_FUNNEL_PAGES, MAX_PAGE_FUNNELS, type PageFunnelStep, funnelSlugFrom, funnelSlugProblem, newFunnelId, productStepProblem, readFunnelInput } from "@/lib/page-funnel";
-import { dropPageFunnel, readPageFunnels, writePageFunnel } from "@/lib/page-funnel-store";
+import { PageFunnelStoreGoneError, dropPageFunnel, readPageFunnels, writeStorePageFunnel } from "@/lib/page-funnel-store";
 import { randomBytes } from "node:crypto";
 import { can } from "@/lib/team-roles";
 import { appendSitePages } from "@/lib/store";
@@ -158,7 +158,7 @@ export async function POST(request: NextRequest) {
       let slug = funnelSlugFrom(name) || "funnel";
       for (let n = 2; funnelSlugProblem(slug, existing) !== null && n < 100; n += 1) slug = `${(funnelSlugFrom(name) || "funnel").slice(0, 36)}-${n}`;
       setupStarted = true;
-      const kept = await writePageFunnel(statsId, { id: newFunnelId(), name, slug, steps, on: false, since: Math.floor(Date.now() / 1000) }, existing, store);
+      const kept = await writeStorePageFunnel(statsId, { id: newFunnelId(), name, slug, steps, on: false, since: Math.floor(Date.now() / 1000) }, existing, store);
       return Response.json({ ok: true, funnel: kept, pages: made.map((m) => ({ id: m.page.id, title: m.page.title, slug: m.page.slug })), forms: formsMade });
     }
 
@@ -179,10 +179,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const kept = await writePageFunnel(statsId, funnel, existing, store);
+    const kept = await writeStorePageFunnel(statsId, funnel, existing, store);
     return Response.json({ ok: true, funnel: kept });
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "store_full", message: error.message }, { status: 409 });
+    // The store was erased, or is being erased, while the funnel was being saved: nothing was written (Codex L-20261120-2144).
+    if (error instanceof PageFunnelStoreGoneError) return Response.json({ ok: false, error: "gone" }, { status: 410 });
     console.error("saving a funnel of pages failed", error);
     return Response.json({ ok: false, error: setupStarted ? "setup_incomplete" : "server_error" }, { status: 500 });
   }

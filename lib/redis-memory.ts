@@ -1910,6 +1910,25 @@ export class MemoryRedis {
           this.until.set(marker, this.now() + 3456000 * 1000);
           return 1;
         }
+        // lib/page-funnel-store.ts SAVE_STORE_PAGE_FUNNEL: the store-live guard (v2: a store with an id's id key must hold its ref), then funnel-save:v1's body.
+        if (key.startsWith("-- marktmorgen:funnel-save-live:v3\n") && args[0] === "3" && args.length === 11) {
+          const [, target, live, erasing, id, body, max, mode, field, statsId, ref] = args;
+          if (this.run(["HGET", erasing, field]) !== null) return -4;
+          if (statsId === "") {
+            const held = this.run(["GET", live]);
+            if (held === null) return -4;
+            if (held !== ref) return -5;
+          } else {
+            const raw = this.run(["GET", live]);
+            if (raw === null) return -4;
+            if (typeof raw !== "string") throw new Error("WRONGTYPE funnel-save-live: the store's record");
+            let record: unknown;
+            try { record = JSON.parse(raw); } catch { return -3; }
+            if (!record || typeof record !== "object" || Array.isArray(record)) return -3;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return -4;
+          }
+          return this.run(["EVAL", `-- marktmorgen:funnel-save:v1\n`, "1", target, id, body, max, mode]);
+        }
         if (key.startsWith("-- marktmorgen:funnel-save:v1\n") && args[0] === "1" && args.length === 6) {
           const target = args[1];
           this.live(target);

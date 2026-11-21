@@ -9,7 +9,7 @@ import { readCourse, findLesson } from "@/lib/course";
 import { readListing } from "@/lib/catalog";
 import { jsonAccess } from "@/lib/studio-route";
 import { studentOnTask } from "@/lib/assignment-access";
-import { HandInChangedError, handIn, oneHandInAtATime, releaseBytes, releaseTaskHold, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
+import { HandInChangedError, HandInClosedError, handIn, oneHandInAtATime, releaseBytes, releaseTaskHold, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
 import { LockBusyError } from "@/lib/redis-lock";
 import { tellCreatorOfWork } from "@/lib/assignment-notify";
 import {
@@ -102,22 +102,22 @@ export async function POST(request: NextRequest) {
           // deletes a file left behind a day on (lib/assignment.ts, takeTaskUpload).
           const extension = taskExtension(found.contentType);
           if (!extension || !path.endsWith(`.${extension}`)) {
-            await deleteFile(path).catch(() => {});
+            await deleteFile(path, "site_cleanup").catch(() => {});
             return no("type");
           }
           if (found.size > MAX_TASK_FILE_BYTES) {
-            await deleteFile(path).catch(() => {});
+            await deleteFile(path, "site_cleanup").catch(() => {});
             return no("too_big");
           }
           // An unknown reply from the room's counter throws (CX-123 rule 24): the file sent is deleted first, never left
           // in the store unaccounted for, and the bytes it may have taken are given back only if its mark says they entered.
           const roomTaken = await takeRoom(room, found.size, taskRoomFor(store), path).catch(async (error: unknown) => {
-            await deleteFile(path).catch(() => {});
+            await deleteFile(path, "site_cleanup").catch(() => {});
             await undoTakeRoom(room, found.size, path).catch((undoError: unknown) => console.error("giving back a task file's room failed", undoError));
             throw error;
           });
           if (!roomTaken) {
-            await deleteFile(path).catch(() => {});
+            await deleteFile(path, "site_cleanup").catch(() => {});
             return no("full");
           }
           taken = found.size;
@@ -174,6 +174,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof DataRoomError) return no("noroom", 409);
     // Another hand-in of the same work still running: nothing was read or taken, the student hands in again.
     if (error instanceof LockBusyError) return no("busy", 409);
+    if (error instanceof HandInClosedError) return no("closed", 409);
     // Another hand-in of the same work was written while this one waited past its lease: this one wrote nothing.
     if (error instanceof HandInChangedError) return no("busy", 409);
     console.error("handing in an assignment failed", error);

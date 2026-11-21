@@ -95,7 +95,8 @@ export function StoreGuideBox({ handle, storeName, lang }: { handle: string; sto
                           <span className="font-bold">{pick.title}</span>
                           <span className="st-price shrink-0 text-xs">{pick.price}</span>
                         </span>
-                        <span className="st-muted mt-1 block text-sm leading-relaxed">{pick.why}</span>
+                        {/* A reason the catalog does not back is dropped (lib/store-guide.ts): then only the title and price. */}
+                        {pick.why ? <span className="st-muted mt-1 block text-sm leading-relaxed">{pick.why}</span> : null}
                       </Link>
                     </li>
                   ))}

@@ -23,8 +23,9 @@ const DAY = 86_400;
 
 type Mode = "whole" | "endless" | "not-a-list" | "page-not-a-list";
 let mode: Mode = "whole";
-type Subs = "whole" | "not-a-list" | "more-as-text" | "more-without-last";
+type Subs = "whole" | "not-a-list" | "more-as-text" | "more-without-last" | "repeat" | "repeat-in-page";
 let subsMode: Subs = "whole";
+let subsPages = 0;
 let invoicePages = 0;
 const sub = {
   id: "sub_listing1", object: "subscription", status: "active", currency: "usd", start_date: S - 120 * DAY, customer: "cus_listing1",
@@ -42,6 +43,9 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     if (subsMode === "not-a-list") return json({ data: "sub_listing1", has_more: false });
     if (subsMode === "more-as-text") return json({ data: [sub], has_more: "true" });
     if (subsMode === "more-without-last") return json({ data: [], has_more: true });
+    // #4421: the same membership on a page and again on the next one, or twice on one page.
+    if (subsMode === "repeat") return json(++subsPages === 1 ? { data: [sub], has_more: true } : { data: [sub], has_more: false });
+    if (subsMode === "repeat-in-page") return json({ data: [sub, sub], has_more: false });
     return json({ data: [sub], has_more: false });
   }
   if (url.pathname.endsWith("/invoices")) {
@@ -88,6 +92,7 @@ async function main(): Promise<void> {
   part("The memberships' list in an unknown shape");
   const members = async (m: Subs) => {
     subsMode = m;
+    subsPages = 0;
     mode = "whole";
     try {
       const numbers = await membershipNumbers(store, true, NOW);
@@ -102,6 +107,9 @@ async function main(): Promise<void> {
   is("data that is not a list: unread, never no members", await members("not-a-list"), "unread");
   is("more said in text: unread, never the end of the list", await members("more-as-text"), "unread");
   is("more said with no last membership to go on from: unread, never the end of the list", await members("more-without-last"), "unread");
+  // #4421: a membership listed twice is not two members, and a list that repeats is not known to be whole.
+  is("the same membership on the next page: unread, never counted twice", await members("repeat"), "unread");
+  is("the same membership twice on one page: unread, never counted twice", await members("repeat-in-page"), "unread");
   done();
 }
 main().catch((error) => {

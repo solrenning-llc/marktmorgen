@@ -52,6 +52,7 @@ export const DARK_TOKENS = {
   danger: "#ff7b6e",
   "amber-soft": "#2e2210",
   amber: "#ffcf8a",
+  "amber-text": "#ffcf8a",
 } as const;
 
 export type DarkToken = keyof typeof DARK_TOKENS;
@@ -76,6 +77,7 @@ export const DARK_PAIRS: readonly DarkPair[] = [
   { fg: "danger-text", bg: "paper", role: "text", what: "error copy on the page" },
   { fg: "amber", bg: "amber-soft", role: "text", what: "warning copy on its band" },
   { fg: "amber", bg: "paper", role: "text", what: "warning copy on the page" },
+  { fg: "amber-text", bg: "amber-soft", role: "text", what: "a waiting tag on its band" },
   ...PLAIN_SURFACES.map((bg): DarkPair => ({ fg: "accent-large", bg, role: "large-text", what: "an accent heading, large text only" })),
   ...PLAIN_SURFACES.flatMap((bg): DarkPair[] => [
     { fg: "action-border", bg, role: "ui", what: "a button's edge" },

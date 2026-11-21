@@ -649,6 +649,34 @@ export class MemoryRedis {
           }
           return queued;
         }
+        // A creator's reply and the removal of its buyer's waiting place are one atomic step.
+        if (key.startsWith("-- marktmorgen:submission-reply-write:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, lock, record, live, token, expected, id, json, seconds] = args;
+          if (this.run(["GET", lock]) !== token) return 2;
+          const current = this.run(["GET", record]);
+          if (current === null) return 0;
+          if (current !== expected) return 2;
+          this.run(["ZREM", live, id]);
+          this.run(["SET", record, json, "XX", "EX", seconds]);
+          return 1;
+        }
+        // lib/submission-store.ts SUBMISSION_SLOT_TAKE: a slot's turn taken off only while still at the score read.
+        if (key.startsWith("-- marktmorgen:submission-slot-take:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, list, member, score] = args;
+          const held = this.run(["ZSCORE", list, member]);
+          if (held === null || held === undefined || Number(held) !== Number(score)) return 0;
+          this.run(["ZREM", list, member]);
+          return 1;
+        }
+        // lib/submission-store.ts SUBMISSION_SLOT_STORE_NEXT: the store's turn taken off when its list is empty, else
+        // set to the soonest turn on it.
+        if (key.startsWith("-- marktmorgen:submission-slot-store-next:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, list, stores, store] = args;
+          const first = this.zset(list)[0];
+          if (first === undefined) this.run(["ZREM", stores, store]);
+          else this.run(["ZADD", stores, String(first.score), store]);
+          return 1;
+        }
         // lib/flow-runs.ts LEFT_IF_RUN: a run that still holds its address ends as left; one erased meanwhile is not written back,
         // and one of another generation (started again meanwhile) is left as it is.
         if (key.startsWith("-- marktmorgen:flow-left-if-run:v2\n") && args[0] === "3" && args.length === 10) {
@@ -1402,6 +1430,35 @@ export class MemoryRedis {
           this.run(["SET", target, value]);
           return 1;
         }
+        // A submission door put back after a refused vault step (lib/submission-store.ts, SUBMISSION_DOOR_PUT_BACK): only
+        // while the buyer's index entry and the lesson's live entry are still there, then SET NX.
+        if (key.startsWith("-- marktmorgen:submission-door-put-back:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, door, who, live, entry, id, json, seconds] = args;
+          if (this.run(["ZSCORE", who, entry]) === null || this.run(["ZSCORE", live, id]) === null) return 0;
+          if (Number(this.run(["EXISTS", door])) === 1) return 2;
+          if (this.run(["SET", door, json, "EX", seconds]) !== "OK") throw new Error("a submission door was not put back");
+          return 1;
+        }
+        // A submission's close (lib/submission-store.ts, SUBMISSION_CLOSE_WRITE): written only while the buyer's place and
+        // entry are still there, and only when no record is.
+        if (key.startsWith("-- marktmorgen:submission-close-write:v1\n") && ((args[0] === "4" && args.length === 13) || (args[0] === "5" && args.length === 15))) {
+          const five = args[0] === "5";
+          const [live, who, due, record, list] = args.slice(1, five ? 6 : 5);
+          const [id, entry, keepUntil, until, liveSeconds, dueMember, json, seconds, listMember] = args.slice(five ? 6 : 5);
+          if (this.run(["ZSCORE", live, id]) === null || this.run(["ZSCORE", who, entry]) === null) return 0;
+          if (Number(this.run(["EXISTS", record])) === 1) return -1;
+          this.run(["ZADD", live, "XX", keepUntil, id]);
+          this.run(["EXPIRE", live, liveSeconds]);
+          this.run(["ZADD", who, "XX", until, entry]);
+          this.run(["EXPIRE", who, liveSeconds]);
+          this.run(["ZADD", due, keepUntil, dueMember]);
+          this.run(["SET", record, json, "EX", seconds]);
+          if (five) {
+            this.run(["ZADD", list, until, listMember]);
+            this.run(["EXPIRE", list, liveSeconds]);
+          }
+          return 1;
+        }
         // An agreement's record, written with its expiry only while the agreement's lock is the writer's (lib/agreement-store.ts, AGREEMENT_SAVE).
         if (key.startsWith("-- marktmorgen:agreement-save:v1\n") && args[0] === "2" && args.length === 6) {
           const [, lock, target, token, value, seconds] = args;
@@ -1612,6 +1669,27 @@ export class MemoryRedis {
             if (held instanceof Map && held.size >= Number(args[4])) return 0;
           } else if (args[5] !== "edit" || !exists) return -2;
           this.hash(target).set(args[2], args[3]);
+          return 1;
+        }
+        // lib/funnel-share-store.ts CREATE_STORE_SHARE: CREATE_SHARE only while the store's erasing mark is absent and its id
+        // key exists (-4 otherwise, nothing written).
+        if (key.startsWith("-- marktmorgen:funnel-share-live:v1\n") && args[0] === "4" && args.length === 13) {
+          const [, list, lookup, idKey, erasing, id, meta, rec, sum, bundle, limit, ttl, field] = args;
+          this.live(idKey);
+          if (this.run(["HGET", erasing, field]) !== null) return -4;
+          if (!this.data.has(idKey)) return -4;
+          this.live(list);
+          this.live(lookup);
+          const held = this.data.get(list);
+          if (held !== undefined && !(held instanceof Map)) return -3;
+          if (this.data.has(lookup) || (held instanceof Map && held.has(id))) return -2;
+          if (held instanceof Map && held.size >= Number(limit)) return 0;
+          this.hash(list).set(id, meta);
+          const record = this.hash(lookup);
+          record.set("rec", rec);
+          record.set("sum", sum);
+          record.set("bundle", bundle);
+          this.until.set(lookup, this.now() + Number(ttl) * 1000);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:funnel-share:v1\n") && args[0] === "2" && args.length === 10) {
@@ -2349,6 +2427,12 @@ export class MemoryRedis {
           } else if (what === "active") this.run(["SADD", args[2], value]);
           this.run(["SET", args[1], text, "EX", seconds]);
           return 1;
+        }
+        // lib/purchase-moves.ts MOVE_DAY_COUNT: INCR then EXPIRE in one step; the new count.
+        if (key.startsWith("-- marktmorgen:purchase-move-day:v1\n") && args[0] === "1" && args.length === 3) {
+          const made = this.run(["INCR", args[1]]);
+          this.run(["EXPIRE", args[1], args[2]]);
+          return made;
         }
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {
           this.live(args[1]);
@@ -3888,6 +3972,8 @@ export class MemoryRedis {
     if (!Number.isFinite(limit) || limit < 0 || !/^\d{4}-\d{2}$/.test(month ?? "") || rest.length % 3 !== 0) return [-1, 0];
     const held = this.data.get(target);
     if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+    // A give-back ("2") on a room that is not there writes nothing (TAKE_DATA, Codex L 20/11).
+    if (always === "2" && !(held instanceof Map && held.has("#"))) return [1, 0];
     const room = this.hash(target);
     let total = Number(room.get("#") ?? "0");
     if (!Number.isFinite(total)) return [-1, 0];
@@ -3942,7 +4028,7 @@ export class MemoryRedis {
       if (old === 0 && next > 0) delta += 64;
       else if (old > 0 && next === 0) delta -= 64;
     }
-    if (delta > 0 && always !== "1" && total + delta > limit) {
+    if (delta > 0 && always !== "1" && always !== "2" && total + delta > limit) {
       keep();
       return [0, total];
     }

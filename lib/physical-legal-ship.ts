@@ -3,7 +3,9 @@
  * docs/sz2-physical-legal-fields.md): its shipping (lib/shipping.ts,
  * activeShipping) without the EU/EEA countries while the product safety
  * information the creator fills (lib/physical-legal.ts, safetyGaps) is not
- * complete. The rest of its countries keep selling.
+ * complete, and, until the opening, without the EU and the UK, whose VAT on
+ * goods is not collected yet (789 [IV1] unit 1, lib/eu-vat-goods.ts). The rest
+ * of its countries keep selling.
  *
  * Unknown is closed, never open:
  *   - a full product (read with its own record, so it has `fields`) is judged
@@ -21,6 +23,7 @@
 import { type PhysicalLegal } from "./physical-legal-record";
 import { gpsrCloses, gpsrClosedCountries, safetyGaps } from "./physical-legal";
 import { SHIP_COUNTRIES, type ShipCandidate, type Shipping, activeShipping } from "./shipping";
+import { vatShipCloses } from "./eu-vat-goods";
 
 export type SafetyCandidate = ShipCandidate & {
   shipping?: Shipping | null;
@@ -45,36 +48,45 @@ function filled(product: SafetyCandidate): boolean {
 }
 
 /**
- * Whether these are every country Stripe ships to except the ones closed
- * while safety fields are not filled: said in a few words, not as a list of
- * some two hundred codes (review of #3029, finding 2).
+ * What a shipping list that lost countries can be said as, in a few words rather than some two hundred codes (review
+ * of #3029, finding 2): "eu-uk" when it is every country Stripe ships to but the ones the VAT lock closes
+ * (lib/eu-vat-goods.ts), "eea-uk" when the closed EU/EEA of a product whose safety fields are not filled is left out
+ * too; null for any other list, which is said country by country.
  */
-export function everywhereButGpsr(countries: readonly string[]): boolean {
-  const open = SHIP_COUNTRIES.filter((code) => !gpsrCloses(code));
-  return countries.length === open.length && open.every((code) => countries.includes(code));
+export type ShipsExcept = "eu-uk" | "eea-uk";
+export function everywhereBut(countries: readonly string[]): ShipsExcept | null {
+  const same = (open: readonly string[]) => countries.length === open.length && open.every((code) => countries.includes(code));
+  if (same(SHIP_COUNTRIES.filter((code) => !vatShipCloses(code)))) return "eu-uk";
+  if (same(SHIP_COUNTRIES.filter((code) => !vatShipCloses(code) && !gpsrCloses(code)))) return "eea-uk";
+  return null;
 }
 
-/** The shipping a product offers now; `exceptGpsr` when it is everywhere Stripe ships to but the closed EU/EEA. */
-export type ShippingNow = Shipping & { exceptGpsr?: true };
+/** The shipping a product offers now; `except` when it is everywhere Stripe ships to but the closed countries. */
+export type ShippingNow = Shipping & { except?: ShipsExcept };
 
 /**
- * The shipping a product offers now, or null when it is not shipped. Never
- * null for a shipped product (that would read as digital): when every country
- * is closed, the countries are empty and nothing can be paid for. A region
- * that loses countries becomes "custom", so nothing reads its countries back
- * from the region and reopens them.
+ * The shipping a product offers now, or null when it is not shipped. Two locks, each on its own, close countries:
+ *   - the VAT lock (lib/eu-vat-goods.ts, vatShipCloses), always until the opening: the EU, its outermost regions and
+ *     Åland, Monaco and the United Kingdom with the Isle of Man, where the checkout refuses a consumer;
+ *   - the product safety lock (618 [SZ2]), while the safety fields are not filled: every EU/EEA country.
+ * Filling the safety fields never opens a country the VAT lock closes. Never null for a shipped product (that would
+ * read as digital): when every country is closed, the countries are empty and nothing can be paid for. A region that
+ * loses countries becomes "custom", so nothing reads its countries back from the region and reopens them.
  */
 export function shippingNow(product: SafetyCandidate): ShippingNow | null {
   const shipping = activeShipping(product);
   if (!shipping) return null;
   // Not filled: gpsrClosedCountries with nothing filled closes every EU/EEA country it ships to.
-  const closed = filled(product) ? [] : gpsrClosedCountries(shipping.countries, null, false);
-  if (closed.length === 0) return shipping;
-  const countries = shipping.countries.filter((code) => !closed.includes(code));
-  return { ...shipping, region: "custom", countries, ...(everywhereButGpsr(countries) ? { exceptGpsr: true as const } : {}) };
+  const gpsr = filled(product) ? [] : gpsrClosedCountries(shipping.countries, null, false);
+  const closed = (code: string) => vatShipCloses(code) || gpsr.includes(code);
+  if (!shipping.countries.some(closed)) return shipping;
+  const countries = shipping.countries.filter((code) => !closed(code));
+  const except = everywhereBut(countries);
+  return { ...shipping, region: "custom", countries, ...(except ? { except } : {}) };
 }
 
-/** A shipped product with no country it can be sent to now: not sold until its safety fields are filled. */
+/** A shipped product with no country it can be sent to now: not sold until its safety fields are filled, or, for one
+ * shipped only where the VAT lock closes, until the opening. */
 export function shipsNowhere(product: SafetyCandidate): boolean {
   const shipping = shippingNow(product);
   return shipping !== null && shipping.countries.length === 0;

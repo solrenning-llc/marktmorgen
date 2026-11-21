@@ -77,6 +77,7 @@ import { INVITE_GONE_READ_COMMANDS } from "@/lib/move-members";
 import { GIVE_BACK_FLOOR_EXTRA_COMMANDS } from "@/lib/mail";
 import { MAX_TRIMMED_PAGE_CHARS } from "@/lib/clickfunnels-page";
 import { IMPORTS_PER_SHARE_MONTH, MAX_APPLY_PAGES, PREVIEWS_PER_SHARE_MONTH, SHARE_LIMITS } from "@/lib/funnel-share-rules";
+import { SHARE_FENCE_EXTRA_COMMANDS } from "@/lib/funnel-share-store";
 import { MAX_SECTION_BYTES } from "@/lib/saved-blocks";
 import { MAX_PAGE_BYTES } from "@/lib/sales-page";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
@@ -90,7 +91,7 @@ import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
 import { PERSON_ARG_BYTES } from "@/lib/crm";
 import { BUYER_NOTICE_DAYS, BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
 import { PAYPAL_PAGE, buyerPagesCap } from "@/lib/closing-buyers";
-import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORES_PER_ACCOUNT, MAX_STORE_BYTES } from "@/lib/store";
+import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORES_PER_ACCOUNT, MAX_STORE_BYTES, MOVE_BESIDE_BATCH, MOVE_BESIDE_BATCHES, MOVE_BESIDE_BATCH_COMMANDS, MOVE_BESIDE_SWEEP_COMMANDS } from "@/lib/store";
 import { NOTE_RUN_BYTES, NOTE_RUN_COMMANDS } from "@/lib/podcast-access";
 import { BODIES_PER_READ } from "@/lib/course";
 import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ, bookWork } from "@/lib/api-read-rules";
@@ -125,7 +126,8 @@ import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
 import { SNS_RECEIPT_COMMANDS_MOST, SNS_RECEIPT_VALUE_BYTES_MOST } from "@/lib/sns-receipt-rules";
 import { ALL_TIME_PAGES } from "@/lib/stats";
-import { BOOK_KEPT_SLICE, MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
+import { BOOK_KEPT_SLICE, MAX_PAID_BYTES, PAYPAL_REFUNDS_READ, REFUND_TELL_TRIES_AT_MOST } from "@/lib/paypal-sales";
+import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
 import { LIFE_WRITE_MAX } from "@/lib/stats";
 import { EMAIL_KEY_HOLDS_MS, SUMMARY_TRIES, SUMMARY_TRY_COMMANDS_MOST } from "@/lib/stats-report";
@@ -1073,9 +1075,10 @@ export const LOCKED_UNTIL_STAR_EXTRA = request("studio", 20 + TAKE_COMMANDS + LO
  * only a message too large to keep, which writes its line instead of a try, reads it with none. A read with no answer
  * takes the event's mark back: a Stripe event is read again next run, as the watcher's other lookups are (one event
  * waits a store a run, inside the five-minute job's own schedule, STRIPE_WAIT_RUNS in lib/webhooks.ts); PayPal's
- * refund is owed: its order stays on the refund watch and is told again when it is looked at an hour later
- * (REFUND_TELL_AGAIN_SECONDS in lib/paypal-sales.ts; review of #3491, MEDIUM), each look priced by PAYPAL_REFUND_WATCH
- * and PAYPAL_REFUND_TOLD, so each try reads this print once more.
+ * refund is owed: what the payment gave is taken back at once, and its order stays on the refund watch, told again when
+ * it is looked at an hour later (REFUND_TELL_AGAIN_SECONDS in lib/paypal-sales.ts; review of #3491, MEDIUM), at most
+ * REFUND_TELL_TRIES_AT_MOST times (PAYPAL_REFUND_TELL_RETRY, #3499), each look priced by PAYPAL_REFUND_WATCH and
+ * PAYPAL_REFUND_TOLD, so each try reads this print once more.
  */
 export const WEBHOOK_ERASED_READ_COMMANDS = 1;
 /**
@@ -1092,6 +1095,51 @@ export const COMMUNITY_DEVICES_READ = {
   deviceBytes: DEVICE_SENT_BYTES,
   bytes: (2 + MAX_MENTIONS) * MAX_MEMBER_DEVICES * DEVICE_SENT_BYTES,
 } as const;
+/**
+ * PayPal's refund.issued told again when telling it failed (lib/paypal-sales.ts watchPayPal, REFUND_TELL_RETRY_SECONDS;
+ * Claude 5's L4 on #3491), in Redis commands, each held to what the real sweep sends by
+ * tests/paypal-refund-told-retry.test.ts:
+ * - triesAtMost: one telling an hour, the first included, for REFUND_TELL_RETRY_SECONDS (REFUND_TELL_TRIES_AT_MOST);
+ * - ownCommandsPerFailedTry: a failed try's own commands: the SET NX and GET of the first failure's time
+ *   (nl:ppsell:tell:; after the try at the first look, before it at every later one, which tells only once that time
+ *   reads back known, not ahead of the clock and inside the bound: Codex C2's M1 on #3499) and the write that keeps
+ *   the order watched an hour, put back only while the store is live (PAYPAL_WATCH_IF_LIVE, #4892: the EVAL and its
+ *   EXISTS, HEXISTS and ZADD, putBackCommandsPerTry; none at the last try, which goes on). A later look whose time
+ *   is not known tells nothing and sends these same commands, plus unknownNoticeDateReadCommands below. The
+ *   independent durable refund date ends this retry once its existing window elapsed (N1 on #3499), without
+ *   authorizing a telling while the notice mark is unknown. If both dates are unreadable, the look remains unknown like the paid record or capture,
+ *   inside the job's 25 orders a store a run; that storage-failure reconciliation is not certified as a bounded retry;
+ * - lookCommandsPerFailedTry: each try after the first looks at the order again: the GET of its paid record and the
+ *   ZADD and EXPIRE of its refund mark, besides one read of the capture from PayPal, which bills no API call; and
+ *   emitEvent up to the read that failed, inside the webhook unit's own commands (UNIT_COST.webhook);
+ * - notSentCommandsAtMost: once, at the last try, the "Not sent" lines (lib/webhooks.ts notSentLines): the SET NX of
+ *   the event's mark and, when its answer is lost, the GET that reads it back (lib/claim-mark.ts; Codex L and Codex U
+ *   on #3499), one SET of a line a live endpoint (MAX_ENDPOINTS at most), the log's LRANGE when a line was already
+ *   there, one LPUSH a line and the LTRIM, and the EVAL that lets go of the mark when the lines could not be written,
+ *   besides the configuration read emitEvent makes too.
+ * A telling that works writes none of them. The work is the five-minute job's sweep, bounded by the tries a refunded
+ * order: a company fixed cost like NOT_A_COST.HAND_OVER_BATCH, not a plan's allowance; like the job's other per-store
+ * work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.
+ */
+export const PAYPAL_REFUND_TELL_RETRY = {
+  triesAtMost: REFUND_TELL_TRIES_AT_MOST,
+  ownCommandsPerFailedTry: 6,
+  /** Of those, the fenced put-back on the watch (PAYPAL_WATCH_IF_LIVE): the EVAL and its three calls. */
+  putBackCommandsPerTry: 4,
+  /** One HGET of the immutable backKey observation, only when the notice's date cannot be read. */
+  unknownNoticeDateReadCommands: 1,
+  lookCommandsPerFailedTry: 3,
+  notSentCommandsAtMost: 2 + 2 * MAX_ENDPOINTS + 2 + 1,
+} as const;
+/**
+ * One sweep of a store's beside pool at its most (lib/store.ts, moveBesideToPool; C1-20261117-1500-c6c4-1, PR 2):
+ * MOVE_BESIDE_BATCHES batches, each a heavy request's time with MOVE_BESIDE_BATCH_COMMANDS commands, the store's
+ * record read at MAX_STORE_BYTES and each of its MOVE_BESIDE_BATCH products' pool field, room slot and two changes at
+ * 256 bytes, plus the sweep's mark read and written. A store sweeps once; priced whole in every month.
+ */
+export const BESIDE_SWEEP_USD =
+  MOVE_BESIDE_BATCHES * request("heavy", MOVE_BESIDE_BATCH_COMMANDS, MAX_STORE_BYTES + MOVE_BESIDE_BATCH * 256) + MOVE_BESIDE_SWEEP_COMMANDS * COMMAND;
+
 /**
  * The beside pool's commands on product saves (lib/store-data.ts, BESIDE_SAVE_COMMANDS), at Upstash's count of a
  * script's inner commands, priced on every studio request of the month as if each were a product save that the room
@@ -2101,10 +2149,11 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/answers-rules.ts", names: ["ANSWERS_MONTHLY", "ASKS_PER_DAY"] },
       { file: "lib/ai-request-rules.ts", names: ["AI_REQUEST_LIMITS"] },
       { file: "lib/funnel-ai.ts", names: ["askModel"] },
+      { file: "lib/product-ideas.ts", names: ["askModel", "IDEAS_OUTPUT_TOKENS"] },
       // An AI explanation of one funnel check (26 [E9]): one writing job (FUNNEL_EXPLAIN_JOBS), taken before its one bounded request (tests/funnel-explain.test.ts).
       { file: "lib/funnel-explain.ts", names: ["askModel", "counted", "FUNNEL_EXPLAIN_JOBS", "FUNNEL_EXPLAIN_CALL"] },
     ],
-    basis: "The automatic monthly AI ceiling, reserved before every call; a funnel draft takes writing jobs from it like any other. A page drafted step by step (758 [STN5], lib/ai-steps.ts) adds, at the most and counted for every writing job of the month though a stepped page takes at least two: AI_STOP_COMMANDS database commands (the stop's mark read between the steps, written by a stop, the jobs of the step not run given back) and AI_STEP_EXTRA_BYTES sent to the browser (the kilobyte of padding some browsers wait for, the step lines and the result's own fields). No model call is added; a stop only leaves one out.",
+    basis: "The automatic monthly AI ceiling, reserved before every call; a funnel draft takes writing jobs from it like any other. A page drafted step by step (758 [STN5], lib/ai-steps.ts) adds, at the most and counted for every writing job of the month though a stepped page takes at least two: AI_STOP_COMMANDS database commands (the stop's mark read between the steps, written by a stop, the jobs of the step not run given back) and AI_STEP_EXTRA_BYTES sent to the browser (the kilobyte of padding some browsers wait for, the step lines and the result's own fields). No model call is added; a stop only leaves one out. Product ideas (758 [STN5] unit 2, lib/product-ideas.ts) take one writing job each, one request on the cheapest model at IDEAS_SYSTEM_BYTES + IDEAS_PROMPT_BYTES in and IDEAS_OUTPUT_TOKENS out, whose most expensive reservation on every model a deployment may pick is at most the priced writing job (tests/product-ideas.test.ts), so the line does not move.",
   },
   {
     id: "uploads",
@@ -2201,13 +2250,14 @@ export const COST_LINES: CostLine[] = [
       const own = l.importsPerMonth * request("write", 300, l.bundleBytes + 30 * MAX_PAGE_BYTES)
         + l.previewsPerMonth * request("light", 30, 50_000)
         + l.appliesPerMonth * request("write", MAX_APPLY_PAGES * 10, MAX_APPLY_PAGES * 4 * MAX_PAGE_BYTES)
-        + l.sharesPerMonth * request("write", 60, 10 * MAX_PAGE_BYTES + 3 * l.bundleBytes)
+        // Each link's creation fenced by the store's erasure (CREATE_STORE_SHARE: its HGET and EXISTS more, Codex L-20261120-1836).
+        + l.sharesPerMonth * request("write", 60 + SHARE_FENCE_EXTRA_COMMANDS, 10 * MAX_PAGE_BYTES + 3 * l.bundleBytes)
         + l.exportsPerMonth * request("write", 40, 10 * MAX_PAGE_BYTES + l.bundleBytes);
       return kept + linkReads + own;
     },
     sources: [
       { file: "lib/funnel-share-rules.ts", names: ["SHARE_LIMITS", "IMPORTS_PER_SHARE_MONTH", "PREVIEWS_PER_SHARE_MONTH", "PREVIEWS_PER_STORE_HOUR", "MAX_APPLY_PAGES"] },
-      { file: "lib/funnel-share-store.ts", names: ["storeMonthKey", "shareMonthKey"] },
+      { file: "lib/funnel-share-store.ts", names: ["storeMonthKey", "shareMonthKey", "SHARE_FENCE_EXTRA_COMMANDS", "CREATE_STORE_SHARE"] },
       { file: "lib/saved-blocks.ts", names: ["MAX_SECTION_BYTES"] },
     ],
     basis: "Links and sections kept, every link read by others at its monthly figure in both calendar months a billing month touches, and every import, preview, update from a section, link made and file exported of the store's window, each page read and written with its earlier version.",
@@ -2745,6 +2795,10 @@ export const COST_LINES: CostLine[] = [
       // The assignment door also asks the file store once whether the browser's name is already a file (one head, and
       // a listing it may take back), after its buyer action is taken (9 November 2026).
       { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)", "head(pathname)", "dropTaskDoor(pathname)"] },
+      // A buyer's file for review (750 [CD1] unit 2): every step takes one public request first (takeBuyerRead), opening
+      // and closing one buyer action each; this route's own commands are SUBMISSION_STEP_COMMANDS, inside the hundred.
+      { file: "app/api/store/course/submission/route.ts", names: ["takeBuyerRead(store)", "takeBuyerAction(store)"] },
+      { file: "lib/submission-store.ts", names: ["SUBMISSION_STEP_COMMANDS"] },
       { file: "app/api/store/course/progress/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/course/certificate/route.ts", names: ["takeBuyerAction(store)"] },
       // The download takes one buyer read, then, before any note is read, the rest of what its most costs to read
@@ -2788,9 +2842,12 @@ export const COST_LINES: CostLine[] = [
     id: "database-storage",
     feature: "What a store keeps in the database: its data room, and every record kept outside it (18 October 2026: a room by plan)",
     // The beside pool (C1-20261117) is kept beside the room, never inside it: MAX_PRODUCTS products' worth, all held.
-    monthlyUsd: (tier) => (DATA_ROOM_BYTES[tier] + BESIDE_POOL_BYTES + reserveBytes(tier)) * DB_BYTE_MONTH,
+    // Its sweep (PR 2), once in a store's life, priced whole in every month: every batch reads the store and moves
+    // MOVE_BESIDE_BATCH products' fields, slots and shares (BESIDE_SWEEP_USD).
+    monthlyUsd: (tier) => (DATA_ROOM_BYTES[tier] + BESIDE_POOL_BYTES + reserveBytes(tier)) * DB_BYTE_MONTH + BESIDE_SWEEP_USD,
     sources: [
       { file: "lib/store-data-rules.ts", names: ["DATA_ROOM_BYTES", "NON_PAYING_DATA_ROOM_BYTES", "ORDER_DATA_BYTES", "ITEM_DATA_BYTES", "orderReserveFor", "contentRoomFor", "BESIDE_POOL_BYTES"] },
+      { file: "lib/store.ts", names: ["moveBesideToPool", "MOVE_BESIDE_BATCH", "MOVE_BESIDE_BATCHES", "MOVE_BESIDE_BATCH_COMMANDS", "MOVE_BESIDE_SWEEP_COMMANDS"] },
       { file: "lib/store-data.ts", names: ["TAKE_DATA", "needData", "keepFor"] },
       { file: "lib/order-data.ts", names: ["ORDER_WRITE", "orderWrite", "ORDER_KEY_BYTES", "ORDER_ENTRY_BYTES"] },
       { file: "lib/order-admission.ts", names: ["used + holding + bytes > room", "orderDataBytes(items)"] },
@@ -3620,7 +3677,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "assist-store": guard("A per-minute limit per store under the Store assistant's monthly pool (add-on line store-assistant)."),
   "assist-ask": PUBLIC, "assist-read": PUBLIC, "assist-handoff": PUBLIC, "assist-next-dismiss": PUBLIC,
   "quiz-connection": BURST("public-requests"), "quiz-student": BURST("public-requests"),
-  "lesson-comment": BURST("buyer-actions"), "lesson-comment-day": BURST("buyer-actions"), "task-hand-in": BURST("buyer-actions"), "lesson-note": BURST("buyer-actions"), "task-upload": BURST("buyer-actions"),
+  "lesson-comment": BURST("buyer-actions"), "lesson-comment-day": BURST("buyer-actions"), "task-hand-in": BURST("buyer-actions"), "submission-open": BURST("buyer-actions"), "lesson-note": BURST("buyer-actions"), "task-upload": BURST("buyer-actions"),
   // Per store, under a figure of the window.
   "api-add": BURST("rest-api"), "api-give": BURST("rest-api"),
   "picture-door": BURST("studio"),

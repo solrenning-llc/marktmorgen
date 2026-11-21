@@ -27,7 +27,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
   "nl:pod:t:", "nl:ppsell:back:", "nl:preview:", "nl:product:about:", "nl:product:landing:", "nl:product:note:", "nl:product:page:",
   "nl:product:pages:", "nl:product:pics:", "nl:rcpt:n:", "nl:rcpt:seq:", "nl:recover:off:", "nl:rev:", "nl:rev:all:", "nl:rev:new:",
   "nl:rev:hid:", "nl:rev:off:", "nl:rev:pay:", "nl:rev:stop:", "nl:rev:sum:", "nl:rev:vis:", "nl:save:", "nl:sblock:uses:",
-  "nl:sold:", "nl:stamp:copy:", "nl:stock:", "nl:store:leads:", "nl:stream:cap:", "nl:stream:v:",
+  "nl:sold:", "nl:stamp:copy:", "nl:stock:", "nl:store:leads:", "nl:stream:cap:", "nl:stream:v:", "nl:sub:door:", "nl:sub:list:", "nl:sub:live:", "nl:sub:rec:", "nl:sub:setup:", "nl:sub:slots:", "nl:sub:who:",
   "nl:taxobs:v1:", "nl:tben:given:", "nl:tben:who:", "nl:tier:price:", "nl:upd:last:", "nl:upd:latest:", "nl:upd:off:", "nl:upd:stop:", "nl:vcard:", "nl:watch:last:",
   "nl:wf:held:", "nl:wf:log:", "nl:wf:run:", "nl:wf:runs:", "nl:wf:ver:", "nl:wf:ver:idx:", "nl:wl:", "nl:wl:t:", "nl:yearask:",
   "nl:yearly:price:",
@@ -85,9 +85,10 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:forget:q", "nl:forget:kept", "nl:forget:month:",
   "nl:phone:st:", "nl:picture-r2:drop", "nl:pictures:doors:", "nl:pinv:", "nl:pathlead:", "nl:pk:", "nl:pk:auth:", "nl:pk:cred:", "nl:pk:drop:", "nl:pk:lock:", "nl:pk:reg:", "nl:plan-disputes:seen", "nl:plan-refund:", "nl:plan-refund:ending", "nl:plan-refund:next", "nl:plan-withdraw:", "nl:plan:closing:",
   "nl:plan:closing:after", "nl:plan:ended", "nl:plan:paying", "nl:plans:late-told:", "nl:plans:lock", "nl:plans:pending", "nl:plans:retry",
+  "nl:pm:c:", "nl:pm:day:", "nl:pm:done:", "nl:pm:r:", "nl:pm:t:",
   "nl:pod:by:*", "nl:pod:n:", "nl:pod:ok:", "nl:podnote:walk", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:pace:", "nl:pp:press:", "nl:pp:settle:after", "nl:pp:stores", "nl:pp:unk:month:", "nl:ppsell:o:",
   "nl:ppsell:canceled:", "nl:ppsell:handover:", "nl:ppsell:own:", "nl:ppsell:paid:", "nl:ppsell:pending:", "nl:ppsell:refunded:", "nl:ppsell:reversed:", "nl:ppsell:sales:", "nl:ppsell:tell",
-  "nl:ppsell:watch:", "nl:pre:", "nl:pre:give:", "nl:pre:jobs", "nl:pre:pi:", "nl:pwyw:", "nl:quiet:at:",
+  "nl:ppsell:tell:", "nl:ppsell:watch:", "nl:pre:", "nl:pre:give:", "nl:pre:jobs", "nl:pre:pi:", "nl:pwyw:", "nl:quiet:at:",
   "nl:ppsell:sum:", "nl:quiet:lock", "nl:quiet:seen:", "nl:quiet:sent:", "nl:quiz:usage:", "nl:read:once:", "nl:recent:", "nl:recent:feed:",
   "nl:recount:", "nl:recount:ids", "nl:recount:lock", "nl:recount:state", "nl:recount:sum",
   "nl:recover:asks", "nl:recover:asks:s:", "nl:recover:link:", "nl:recover:once:", "nl:recover:sent:", "nl:recover:tries:", "nl:ref:all", "nl:ref:by:",
@@ -109,7 +110,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:store:delivery:over:", "nl:store:folder-owner:", "nl:store:handle:", "nl:store:id:", "nl:store:lock:",
   "nl:store:owner:", "nl:store:owner:*", "nl:store:photo:", "nl:stream:auto:", "nl:stream:autoowed:", "nl:stream:autoq",
   "nl:stream:col:", "nl:stream:due", "nl:stream:gone", "nl:stream:lock", "nl:stream:peek:",
-  "nl:rsum:", "nl:rsum:last:", "nl:rsum:lock:", "nl:rsum:ver:", "nl:search:", "nl:search:build:", "nl:status:views:", "nl:stripe-check:last", "nl:stripe-check:lock", "nl:stripe-check:runs", "nl:sweep:cursor", "nl:sweep:walk:", "nl:tasks:bytes:", "nl:tasks:doors", "nl:tasks:held", "nl:tasks:taken:",
+  "nl:rsum:", "nl:rsum:last:", "nl:rsum:lock:", "nl:rsum:ver:", "nl:search:", "nl:search:build:", "nl:status:views:", "nl:stripe-check:last", "nl:stripe-check:lock", "nl:stripe-check:runs", "nl:sub:due", "nl:sub:slotdue", "nl:sweep:cursor", "nl:sweep:walk:", "nl:tasks:bytes:", "nl:tasks:doors", "nl:tasks:held", "nl:tasks:taken:",
   "nl:teams:state:", "nl:team:", "nl:team:invite:", "nl:team:lock:", "nl:team:log:", "nl:team:of:", "nl:tben:", "nl:ticket:in:", "nl:tier:", "nl:tier:resume:",
   "nl:traffic:c:", "nl:traffic:day:", "nl:traffic:folders:", "nl:traffic:n:", "nl:traffic:r:", "nl:traffic:read:", "nl:traffic:x:", "nl:trialnudge:cursor", "nl:upd:job:",
   "nl:operator:traffic-log", "nl:operator:traffic-reset:lock", "nl:traffic:spike-day:", "nl:traffic:spike:",
@@ -313,6 +314,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:learn:rate:addr:": X(1), "nl:learn:rate:ip:": X(1),
   "nl:leave:": E,
   "nl:lib:": L, "nl:lib:joined:": L, "nl:lib:link:": X(1),
+  "nl:pm:c:": X(1), "nl:pm:day:": X(2), "nl:pm:done:": X(2), "nl:pm:r:": X(1), "nl:pm:t:": X(1),
   "nl:listed:": X(8),
   "nl:lostdispute:cursor:": X(30), // a job's place in a store's lost disputes (lib/refunds.ts), thirty days at the most
   // ---------------------------------------------------------------- m
@@ -392,6 +394,9 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // nl:pp:settle:after: one store id for the whole company, where the daily PayPal settling stopped, gone in 7 days.
   "nl:pp:": E, "nl:pp:item:": X(400), "nl:pp:open:": E, "nl:pp:pace:": X(1), "nl:pp:press:": X(1), "nl:pp:settle:after": Cr(7), "nl:pp:stores": I, "nl:pp:unk:month:": Cr(400),
   "nl:ppsell:o:": T("nl:ppsell:sales:", 30), "nl:ppsell:own:": E, "nl:ppsell:paid:": T("nl:ppsell:sales:"), "nl:ppsell:pending:": E,
+  // When telling a PayPal refund's webhooks first failed (lib/paypal-sales.ts, watchPayPal): only that time, named by
+  // the order, gone within REFUND_TELL_MARK_SECONDS.
+  "nl:ppsell:tell:": X(30),
   "nl:ppsell:back:": E, "nl:ppsell:refunded:": E, "nl:ppsell:reversed:": E, "nl:ppsell:sales:": E, "nl:ppsell:watch:": E, "nl:ppsell:handover:": E,
   // A PayPal order canceled because PayPal never confirmed it (lib/paypal-sales.ts, CANCELED_KEPT_SECONDS): named by the
   // order, written once and gone within thirty days; the company's line of its notices the sender refused, each member
@@ -464,6 +469,11 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:stats:": E,
   "nl:stock:": E, "nl:stock:back:": E, "nl:stock:lock:": E,
   "nl:storage:pending:": X(1),
+  // A buyer's files for review (750 [CD1]): the setup is named by the course, the record and the places by the store's files' folder.
+  "nl:sub:door:": X(1), "nl:sub:due": I, "nl:sub:list:": E, "nl:sub:live:": E, "nl:sub:rec:": E, "nl:sub:setup:": E, "nl:sub:who:": E,
+  // The buyer slots an upload was opened on (review of #3568, Claude 6): the store's list is erased with it, and the
+  // company's list of stores with one due is a list naming stores, taken out by the walk.
+  "nl:sub:slots:": E, "nl:sub:slotdue": I,
   "nl:store:before-catalog:": T("prepare"), "nl:store:delivery:": E, "nl:store:delivery:over:": I, "nl:store:folder-owner:": E,
   "nl:store:handle:": Cr(30), "nl:store:id:": E, "nl:store:leads:": E, "nl:store:lock:": E, "nl:store:owner:*": C,
   "nl:store:owner:": T("prepare"), "nl:store:photo:": E,

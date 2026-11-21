@@ -34,7 +34,7 @@ const isPlace = (place: unknown): place is number => typeof place === "number" &
 /**
  * One vote, or its taking back, in one step with the poll's end (recordVote). KEYS[1] the poll's votes; ARGV the
  * recipient's place, the answer's index ("" to take it back) and the end in seconds. Answers {fields changed, EXPIREAT's
- * answer}. A vote whose end did not set (EXPIREAT other than 1) is undone in the same step: the key it made is
+ * answer}. A vote whose end did not set (EXPIREAT other than 1, or an error from it) is undone in the same step: the key it made is
  * deleted, an answer it replaced is put back, a field it added is taken out, so no vote is kept without its end.
  * Modelled by lib/redis-memory.ts.
  */
@@ -47,7 +47,9 @@ end
 local existed = redis.call('EXISTS', key)
 local before = redis.call('HGET', key, field)
 local n = redis.call('HSET', key, field, ARGV[2])
-local e = redis.call('EXPIREAT', key, ARGV[3])
+-- An error from EXPIREAT is an end not set: the same rollback, never a vote kept without its end (Codex X6, #3673).
+local ok, e = pcall(redis.call, 'EXPIREAT', key, ARGV[3])
+if not ok then e = 0 end
 if e ~= 1 then
   if existed == 0 then redis.call('DEL', key)
   elseif before then redis.call('HSET', key, field, before)

@@ -282,7 +282,13 @@ export class MemoryRedis {
           const existed = this.run(["EXISTS", hash]);
           const before = this.run(["HGET", hash, field]);
           const n = this.run(["HSET", hash, field, option]);
-          const e = this.run(["EXPIREAT", hash, until]);
+          // The script calls EXPIREAT under pcall: an error is an end not set, undone the same way.
+          let e: unknown;
+          try {
+            e = this.run(["EXPIREAT", hash, until]);
+          } catch {
+            e = 0;
+          }
           if (e !== 1) {
             if (existed === 0) this.run(["DEL", hash]);
             else if (typeof before === "string") this.run(["HSET", hash, field, before]);

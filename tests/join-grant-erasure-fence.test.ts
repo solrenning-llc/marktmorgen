@@ -130,6 +130,18 @@ async function main(): Promise<void> {
   undo();
   is("no email went out", sent.length - mailed, 0);
 
+  // Codex L on #4995 (L-20261120-2142, MEDIUM): on Redis a ZADD on a key of another type fails the script after its SET
+  // has already run, and nothing is undone, so the grant would stay with no note for the person's erasure to find it.
+  part("The person's erasure notes hold another type: no grant without its note, nobody written to");
+  const email = "hal@join-fence.example";
+  const notes = `nl:erase:ix:${live.statsId}:${createHash("sha256").update(`nimbus-erase-ix:${live.statsId}:${normaliseEmail(email)}`).digest("hex").slice(0, 32)}:z`;
+  await redis.pipeline([["SET", notes, "not-a-sorted-set"]]);
+  grantsBefore = grants();
+  mailed = sent.length;
+  is("the request is an error", await ask(live, email), "error");
+  is("no grant is made", grants(), grantsBefore);
+  is("no email went out", sent.length - mailed, 0);
+
   done();
 }
 

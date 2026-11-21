@@ -1,5 +1,5 @@
 import { reserveStorage, bindStorage, releaseStorage, retireStorage } from "@/lib/storage-reservations";
-import { storageUsed, type StorageUse } from "@/lib/storage-quota";
+import { storageUsedToday, type StorageUse } from "@/lib/storage-quota";
 import { openVaultUpload, closeVaultUpload, abortVaultUpload, vaultReservationId, retireVaultSession, retireExpiredVaultSession, forgetVaultUploadRecord, headVault } from "@/lib/vault";
 import { readVaultPath, UPLOAD_SECONDS } from "@/lib/vault-rules";
 
@@ -18,7 +18,7 @@ import { readVaultPath, UPLOAD_SECONDS } from "@/lib/vault-rules";
  * forgot it would open a session with nothing paid for (review of #4019).
  */
 export async function openReservedVault(input: Parameters<typeof openVaultUpload>[0], limit: number, measure: (() => Promise<StorageUse>) | undefined, admit: () => Promise<boolean>) {
-  measure ??= () => storageUsed(input.folder, limit);
+  measure ??= () => storageUsedToday(input.folder, limit);
   const fence = input.fence;
   // Opportunistic cleanup is bounded to one session per admission attempt.
   await retireStorage(input.folder, Date.now() - UPLOAD_SECONDS * 1000,

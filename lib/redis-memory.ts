@@ -2041,12 +2041,20 @@ export class MemoryRedis {
           const kept = this.run(["GET", receipt]);
           return kept === null ? [written === "OK" ? 1 : 0] : [written === "OK" ? 1 : 0, kept];
         }
-        // lib/paypal-payouts.ts, KEEP_LINK_IF_LIVE: the PayPal link written only while its store's key exists and it is
-        // not being erased; 1 written, 0 not.
-        if (key.startsWith("-- marktmorgen:paypal-link-live:v1\n") && args[0] === "3" && args.length === 6) {
-          const [, live, erasing, link, field, value] = args;
+        // The link's two identity reads and write mirror paypal-link-live:v2, including the legacy byte cap.
+        if (key.startsWith("-- marktmorgen:paypal-link-live:v2\n") && args[0] === "3" && args.length === 9) {
+          const [, live, erasing, link, field, value, statsId, ref, byteCap] = args;
           this.scriptCalls += 2;
-          if (Number(this.run(["EXISTS", live])) !== 1 || this.run(["HGET", erasing, field]) !== null) return 0;
+          if (this.run(["HGET", erasing, field]) !== null) return 0;
+          if (statsId === "") {
+            if (this.run(["GET", live]) !== ref) return 0;
+          } else {
+            const raw = this.run(["GETRANGE", live, 0, byteCap]);
+            if (typeof raw !== "string" || raw === "" || new TextEncoder().encode(raw).byteLength > Number(byteCap)) return 0;
+            let record: unknown;
+            try { record = JSON.parse(raw); } catch { return 0; }
+            if (!record || typeof record !== "object" || Array.isArray(record) || (record as { statsId?: unknown }).statsId !== statsId) return 0;
+          }
           this.scriptCalls += 1;
           this.run(["SET", link, value]);
           return 1;
@@ -2054,12 +2062,12 @@ export class MemoryRedis {
         // lib/paypal-payouts.ts KEEP_OPEN_IF_LIVE: an open PayPal batch written (and its store watched) only while the
         // store is live; -1, nothing written, when it is gone, being erased or (from before ids) its owner's record is
         // another store's.
-        if (key.startsWith("-- marktmorgen:paypal-open-live:v2\n") && args[0] === "4" && args.length === 10) {
-          const [, live, erasing, open, stores, field, batch, value, sid, statsId] = args;
+        if (key.startsWith("-- marktmorgen:paypal-open-live:v3\n") && args[0] === "4" && args.length === 11) {
+          const [, live, erasing, open, stores, field, batch, value, sid, statsId, ref] = args;
           this.scriptCalls += 2;
           if (this.run(["HGET", erasing, field]) !== null) return -1;
           if (statsId === "") {
-            if (Number(this.run(["EXISTS", live])) !== 1) return -1;
+            if (this.run(["GET", live]) !== ref) return -1;
           } else {
             const raw = this.run(["GET", live]);
             if (raw === null) return -1;

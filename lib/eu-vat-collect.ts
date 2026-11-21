@@ -22,9 +22,11 @@
  *
  * Unknown is never zero and never collects nothing: an unreadable gate answer, no sourced rate, an unknown cost of
  * receiving the VAT, or a body applyEuVatLines will not take each refuse the checkout before Stripe is asked
- * (EuVatCollectRefused). The cost of receiving the VAT (the conversion of the fee, the exchange-rate ceiling until the
- * return, the remittance) has no reviewed figure yet (789 [IV1] step 2): euVatCollectionCostCents answers null, so
- * even with the switch on, every sale would be refused until that figure is reviewed. Pure but for nothing: no IO.
+ * (EuVatCollectRefused). The cost of receiving the VAT is computed part by part in lib/eu-vat-collection-cost.ts
+ * (unit 6), but its exchange-rate allowance until the return is paid is not reviewed yet: euVatCollectionCostCents
+ * answers null, so even with the switch on, every sale would be refused until one is. It reads only euros and pounds,
+ * so a sale in any other currency is refused too, while the euro or pound amount owed on it is not known at the sale.
+ * Pure but for nothing: no IO.
  *
  * Unit 2 (coordinator C5-20261120-2130): the UK, the same way, with the "UK" record and UK_VAT_COLLECT_REVIEWED's whole
  * switch (ukVatCollectOn), decided by lib/uk-vat.ts ukCheckout (two agreeing items placing the buyer in GB, an

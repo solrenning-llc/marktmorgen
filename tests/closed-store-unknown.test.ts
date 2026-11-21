@@ -18,11 +18,13 @@
  * way the closing job leaves it (tests/closed-for-erasure.ts): the walk erases only a store really due (#3156).
  */
 import { createHash } from "node:crypto";
-import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, eraseClosed, markDue } from "@/lib/closed-store-data";
+import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, eraseClosed, markDue, walkPage, type Batched } from "@/lib/closed-store-data";
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { putMember } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
 import { hostId } from "@/lib/host-claims";
+import { packageKeys, packagesKey } from "@/lib/call-packages";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 import { closeForErasure } from "./closed-for-erasure";
 import { done, is, part } from "./check";
@@ -75,6 +77,35 @@ async function main(): Promise<void> {
   await makeStore(A, "unknowna");
   await makeStore(B, "readableb");
   if (redis.run(["GET", ownerKey(A)]) === null) throw new Error("setup: the owner key formula does not match lib/store.ts");
+
+  // Codex X5 (X5-20261118-0342): a package record that answers a text with no token is unknown, never an empty record.
+  part("A closing store keeps the package index until the stored token can be read");
+  {
+    const statsId = "a".repeat(40);
+    const checkout = "cs_test_packageClosure123";
+    const token = "a".repeat(48);
+    const [record, , door, used] = packageKeys(checkout, token);
+    const index = packagesKey(statsId);
+    const entry: Batched = {
+      ref: "test-closed-package", email: "", sid: "", statsId, name: "",
+      handle: "closedpackage", handles: [], marks: [statsId], endedAt: 0, at: 0,
+    };
+    const batch = new Map([[entry.ref, entry]]);
+    const owners = {
+      byMark: new Map([[statsId, entry.ref]]),
+      byHandle: new Map<string, string>(),
+      byRef: new Map([[entry.ref, entry.ref]]),
+    };
+    await redis.pipeline([["SADD", index, checkout], ["SET", record, ""], ["SET", door, checkout], ["SADD", used, "u123456789abcdef"]]);
+    const retriable = await walkPage([index], batch, owners).then(() => false, error => error instanceof UnknownReplyError);
+    const keys = [index, record, door, used];
+    is("an unreadable token refuses the page and keeps every lookup key",
+      [retriable, await redis.pipeline(keys.map(key => ["EXISTS", key]))], [true, [1, 1, 1, 1]]);
+    await redis.pipeline([["SADD", index, checkout, "cs_test_expiredHistory123"], ["SET", record, JSON.stringify({ token })]]);
+    await walkPage([index], batch, owners);
+    is("after a healthy read, the index and package keys are removed; an expired record does not block the walk",
+      await redis.pipeline(keys.map(key => ["EXISTS", key])), [0, 0, 0, 0]);
+  }
 
   part("The erasing walk keeps an unreadable store in line");
   const T = Date.now();

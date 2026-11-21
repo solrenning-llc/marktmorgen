@@ -3,6 +3,7 @@ import { connectPayPal, payWithPayPal } from "@/lib/paypal-payouts";
 import { readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statsidrp01";
@@ -63,6 +64,8 @@ function invoice(over: Record<string, unknown> = {}): Record<string, unknown> {
     currency: "usd",
     created: NOW,
     status_transitions: { paid_at: NOW },
+    // A buyer who is somebody else: an invoice paid with no address waits for its buyer (rule 30 on #3485).
+    customer_email: "renewal-buyer@example.com",
     total_taxes: [],
     parent: { subscription_details: { metadata: META } },
     payments: payments([paid("pi_inv_1")]),
@@ -90,6 +93,7 @@ async function fresh(store: Store): Promise<void> {
   await redis.pipeline([["HSET", `nl:aff:${STATS}:people`, "aaaaaaaaaaaa", JSON.stringify({
     id: "aaaaaaaaaaaa", email: "sara@example.com", code: "sara", status: "approved", appliedAt: 1, decidedAt: 2, note: "",
   })]]);
+  await markLive(store);
   if (!(await connectPayPal(store, CLIENT, SECRET)).ok) throw new Error("PayPal stand-in not connected");
 }
 async function isolatedRound(store: Store): Promise<[boolean, boolean, number, number, number]> {

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { ASK_ERASE_BATCH } from "@/lib/erasure-rules";
 import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/path-board-rules";
 
 /** lib/store-data.ts NOTES_TOTAL_FIELD: the room's one slot for every student's lesson notes (lib/lesson-notes.ts). */
@@ -271,6 +272,17 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/assistant-reminder.ts FORGET_PERSON: a person's reminder sessions read, checked and deleted in one step.
+        if (key.startsWith("-- marktmorgen:assist-reminder-forget:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, who, prefix] = args;
+          // As Redis does: a list that is not there reads as none and deletes nothing (SMEMBERS here would leave an empty set).
+          const members = this.run(["EXISTS", who]) === 1 ? (this.run(["SMEMBERS", who]) as string[]) : [];
+          if (members.some((session) => !/^cs_(test|live)_[A-Za-z0-9]{10,200}$/.test(session))) return [-1, members.length];
+          let gone = 0;
+          for (const session of members) gone += Number(this.run(["DEL", prefix + session]));
+          if (members.length) gone += Number(this.run(["DEL", who]));
+          return [gone, members.length];
+        }
         // lib/closed-store-data.ts CLOSING_UNHELD: what the walk deletes of what an id a live store may hold names,
         // only while no live store holds it, read in the same step.
         if (key.startsWith("-- marktmorgen:closing-unheld:v1\n")) {
@@ -343,6 +355,29 @@ export class MemoryRedis {
           if (this.run(["GET", lock]) !== token) return [-9, 0];
           return this.run(["EVAL", "-- marktmorgen:path-forget:v1\n", "4", room, target, boardKey, mapKey, month, sid]);
         }
+        // lib/flow-runs.ts HOLD_LAYOUT_IF_LEASED: the same lease and run versions must still be live.
+        if (key.startsWith("-- marktmorgen:flow-hold-layout-if-leased:v1\n") && args[0] === "5" && args.length === 17) {
+          const [, lease, run, log, held, index, member, score, stamp, open, email, step, note, now, entry, heldMember, person] = args;
+          const currentScore = this.run(["ZSCORE", lease, member]);
+          if (currentScore === null || Number(currentScore) !== Number(score) || String(this.run(["HGET", run, "updatedAt"]) ?? "") !== stamp) return 0;
+          this.run(["HSET", run, "open", open, "email", email, "status", "held", "step", step, "note", note, "updatedAt", now]);
+          this.run(["RPUSH", log, entry]);
+          this.run(["ZADD", held, now, heldMember]);
+          this.run(["ZADD", index, now, person]);
+          this.run(["ZREM", lease, member]);
+          return 1;
+        }
+        // lib/buyer-profile.ts ADD_RUN_NOTE: a run's note, only while the run holds its take at its exact score.
+        if (key.startsWith("-- marktmorgen:person-run-note:v1\n") && args[0] === "3" && args.length === 10) {
+          const [, notes, who, lease, id, json, seconds, member, score, person] = args;
+          const held = this.run(["ZSCORE", lease, member]);
+          if (held === null || Number(held) !== Number(score)) return 3;
+          this.run(["HSET", notes, id, json]);
+          this.run(["EXPIRE", notes, seconds]);
+          this.run(["SADD", who, person]);
+          this.run(["EXPIRE", who, seconds]);
+          return 1;
+        }
         // lib/community-events.ts RELEASE_RSVP: a place deleted only while it holds this request's own mark.
         // lib/affiliate-directory.ts PUBLISH_IF_OWNER and FAIL_IF_OWNER: a build's page kept, or its mark failed, only while
         // the mark is still its own (Codex N1 on #2921).
@@ -362,6 +397,165 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:event-rsvp-release:v1\n") && args[0] === "1" && args.length === 4) {
           const [, list, member, mark] = args;
           return this.run(["HGET", list, member]) === mark ? this.run(["HDEL", list, member]) : 0;
+        }
+        // lib/flow-runs.ts CLAIM_IF_RUN, WAIT_IF_RUN, RETRY_IF_RUN and NOTE_IF_RUN: a run's writes only while the run is there.
+        const genOk = (runK: string, want: string) => want === "*" || ((this.run(["HGET", runK, "gen"]) as string | null) ?? "") === want;
+        // lib/flow-runs.ts LEASE_AND_GEN: a step's lease entry and its run's generation, in one command.
+        if (key.startsWith("-- marktmorgen:flow-lease-gen:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, leaseK, runK, member] = args;
+          const score = this.run(["ZSCORE", leaseK, member]);
+          const gen = this.run(["EXISTS", runK]) === 1 ? this.run(["HGET", runK, "gen"]) : null;
+          return [score ?? null, gen ?? null];
+        }
+        // CLAIM_IF_RUN: the lease held at the take's score, the run holding its address and its generation, then the
+        // attempt; on 1 its event, the run and history kept again and its place in the list of runs renewed.
+        if (key.startsWith("-- marktmorgen:flow-claim:v3\n") && args[0] === "4" && args.length === 13) {
+          const [, runK, logK, listK, leaseK, member, score, open, attempted, gen, keep, person, now] = args;
+          if (member !== "") {
+            const held = this.run(["ZSCORE", leaseK, member]);
+            if (held === null || held === undefined || Number(held) !== Number(score)) return -1;
+          }
+          if (this.run(["HEXISTS", runK, "email"]) !== 1 || !genOk(runK, gen)) return -1;
+          if (this.run(["HSETNX", runK, "open", open]) !== 1) return 0;
+          this.run(["RPUSH", logK, attempted]);
+          this.run(["EXPIRE", runK, keep]);
+          this.run(["EXPIRE", logK, keep]);
+          this.run(["ZADD", listK, now, person]);
+          this.run(["ZREMRANGEBYSCORE", listK, 0, Number(now) - Number(keep)]);
+          this.run(["EXPIRE", listK, keep]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:flow-wait:v3\n") && args[0] === "1" && args.length === 7) {
+          const [, runK, step, now, gen, counted, other] = args;
+          if (this.run(["EXISTS", runK]) !== 1 || !genOk(runK, gen)) return [-1];
+          const n = this.run(["HINCRBY", runK, counted, 1]);
+          const kept = (this.run(["HGET", runK, other]) as string | null) ?? "";
+          const at = this.run(["HGET", runK, "waitAt"]);
+          const found = typeof at === "string" ? /^(-?\d+):(\d+)$/.exec(at) : null;
+          if (found && found[1] === step && Number(found[2]) > 0) return [n, kept, Number(found[2])];
+          this.run(["HSET", runK, "waitAt", `${step}:${now}`]);
+          return [n, kept, Number(now)];
+        }
+        // lib/flow-runs.ts PARK_IF_RUN: one SES park counted only while the run is there and is this run.
+        if (key.startsWith("-- marktmorgen:flow-ses-park:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, runK, step, now, gen] = args;
+          if (this.run(["EXISTS", runK]) !== 1 || !genOk(runK, gen)) return [-1];
+          const parks = this.run(["HINCRBY", runK, "sesParks", 1]);
+          this.run(["HDEL", runK, "waitAt"]);
+          const at = this.run(["HGET", runK, "sesAt"]);
+          const found = typeof at === "string" ? /^(-?\d+):(\d+)$/.exec(at) : null;
+          if (found && found[1] === step && Number(found[2]) > 0 && Number(found[2]) <= Number(now)) return [parks, Number(found[2])];
+          this.run(["HSET", runK, "sesAt", `${step}:${now}`]);
+          return [parks, Number(now)];
+        }
+        // lib/flow-runs.ts RELEASE_IF_OPEN: the creator's choice on a held run, only over its exact open.
+        if (key.startsWith("-- marktmorgen:flow-release-hold:v2\n") && ((args[0] === "4" && args.length === 14) || (args[0] === "5" && args.length === 17))) {
+          const keyCount = Number(args[0]);
+          const [, runK, logK, heldK, indexK] = args;
+          const [open, resolved, kept, status, step, now, member, person, keep, due, nextMember] = args.slice(keyCount + 1);
+          if (this.run(["HGET", runK, "open"]) !== open) return 0;
+          this.run(["HDEL", runK, "open"]);
+          this.run(["RPUSH", logK, resolved]);
+          this.run(["LTRIM", logK, String(-Number(kept)), "-1"]);
+          this.run(["HSET", runK, "status", status, "step", step, "note", "", "updatedAt", now]);
+          this.run(["ZREM", heldK, member]);
+          this.run(["ZADD", indexK, now, person]);
+          this.run(["EXPIRE", runK, keep]);
+          this.run(["EXPIRE", logK, keep]);
+          if (keyCount === 5) this.run(["ZADD", args[5], due, nextMember]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:flow-retry:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, runK, by] = args;
+          if (this.run(["EXISTS", runK]) !== 1) return -1;
+          return this.run(["HINCRBY", runK, "retries", by]);
+        }
+        if (key.startsWith("-- marktmorgen:flow-note:v2\n") && args[0] === "3" && args.length === 12) {
+          const [, runK, logK, indexK, noted, email, status, step, at, person, keep, gen] = args;
+          if (this.run(["EXISTS", runK]) !== 1 || !genOk(runK, gen)) return 0;
+          this.run(["RPUSH", logK, noted]);
+          this.run(["HSET", runK, "email", email, "status", status, "step", step, "note", "", "updatedAt", at]);
+          this.run(["ZADD", indexK, at, person]);
+          if (keep !== "") {
+            this.run(["EXPIRE", runK, keep]);
+            this.run(["EXPIRE", logK, keep]);
+          }
+          return 1;
+        }
+        // lib/flow-runs.ts SETTLE_IF_OPEN: a workflow step's outcome written only while its run still holds an open attempt.
+        if (key.startsWith("-- marktmorgen:flow-settle:v2\n") && args[0] === "4" && args.length === 17) {
+          const [, runK, logK, heldK, indexK, mode, pushed, email, status, step, note, at, member, person, keep, gen, wantOpen] = args;
+          // EXISTS first: this model's HEXISTS makes an empty hash of a missing key, which Redis never does.
+          if (this.run(["EXISTS", runK]) !== 1 || this.run(["HEXISTS", runK, "open"]) !== 1) return 0;
+          if (!genOk(runK, gen) || (wantOpen !== "*" && this.run(["HGET", runK, "open"]) !== wantOpen)) return 0;
+          if (mode === "uncertain") {
+            this.run(["RPUSH", logK, pushed]);
+            this.run(["HSET", runK, "email", email, "status", status, "step", step, "note", note, "updatedAt", at]);
+            this.run(["ZADD", heldK, at, member]);
+            this.run(["ZADD", indexK, at, person]);
+            if (keep !== "") {
+              this.run(["EXPIRE", runK, keep]);
+              this.run(["EXPIRE", logK, keep]);
+            }
+            return 1;
+          }
+          this.run(["HDEL", runK, "open"]);
+          if (mode === "deferred") this.run(["LREM", logK, "-1", pushed]);
+          else this.run(["RPUSH", logK, pushed]);
+          this.run(["HSET", runK, "email", email, "status", status, "step", step, "note", note, "updatedAt", at]);
+          this.run(["ZADD", indexK, at, person]);
+          if (keep !== "") {
+            this.run(["EXPIRE", runK, keep]);
+            this.run(["EXPIRE", logK, keep]);
+          }
+          return 1;
+        }
+        // lib/traffic-reset.ts RESET_SCRIPT: under the caller's own lock token only, the record first, then the people
+        // lowered by the delta, with the live room's parts as they are now; nothing written on a lost lock or a count or
+        // a room read otherwise.
+        if (key.startsWith("-- marktmorgen:traffic-reset:v2\n") && args[0] === "4" && args.length === 11) {
+          const [, visits, log, lock, room, before, delta, entry, token, keep, keepSeconds] = args;
+          if (this.run(["GET", lock]) !== token) return [-2];
+          const held = this.run(["GET", visits]);
+          const current = held === null ? "0" : held;
+          if (typeof current !== "string" || !/^\d+$/.test(current)) return [-3];
+          const roomHeld = this.run(["GET", room]);
+          const parts = roomHeld === null ? "0" : roomHeld;
+          if (typeof parts !== "string" || !/^\d+$/.test(parts)) return [-3];
+          if (Number(current) < Number(before)) return [-1, Number(current)];
+          // Redis stops the script on a record key of another type, before anything is written.
+          this.live(log);
+          const record = this.data.get(log);
+          if (record !== undefined && !Array.isArray(record)) throw new Error("WRONGTYPE");
+          this.run(["LPUSH", log, entry]);
+          this.run(["LTRIM", log, 0, Number(keep) - 1]);
+          this.run(["EXPIRE", log, keepSeconds]);
+          return [1, this.run(["DECRBY", visits, delta]), Number(parts)];
+        }
+        // lib/traffic-reset.ts RELEASE_SCRIPT: the lock let go only by the token that took it.
+        if (key.startsWith("-- marktmorgen:traffic-reset-release:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, lock, token] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          return this.run(["DEL", lock]);
+        }
+        // lib/mail-health.ts: count once, but keep pause evaluation recoverable.
+        if (key.startsWith("-- marktmorgen:mail-health-outcome:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, seen, daily, field, dailySeconds, seenSeconds] = args;
+          const state = this.run(["GET", seen]);
+          if (state === "done" || state === "1") return 0;
+          if (state === "pending") return 2;
+          if (state !== null) return -1;
+          this.run(["HINCRBY", daily, field, 1]);
+          this.run(["EXPIRE", daily, dailySeconds]);
+          this.run(["SET", seen, "pending", "EX", seenSeconds]);
+          return 1;
+        }
+        // lib/plans.ts MOVE_IF_LIVE: a plan put back in the line of plans tried only while its store is live.
+        if (key.startsWith("-- marktmorgen:plan-move-if-live:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, retry, idKey, erasing, at, member, ref, field] = args;
+          if (this.run(["GET", idKey]) !== ref) return -1;
+          if (this.run(["HGET", erasing, field]) !== null) return -1;
+          return this.run(["ZADD", retry, at, member]);
         }
         // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
         if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {
@@ -425,6 +619,31 @@ export class MemoryRedis {
           this.run(["ZADD", line, due, id]);
           return 1;
         }
+        // lib/store-join.ts SAVE_GRANT_IF_LIVE: a join grant and its erasure note, only while the store is live.
+        if (key.startsWith("-- marktmorgen:join-grant-if-live:v1\n") && args[0] === "4" && args.length === 13) {
+          const [, live, erasing, grantKey, notes, field, grant, seconds, at, cutoff, keep, statsId, ref] = args;
+          if (this.run(["HGET", erasing, field]) !== null) return 0;
+          if (statsId === "") {
+            if (this.run(["GET", live]) !== ref) return 0;
+          } else {
+            const raw = this.run(["GET", live]);
+            if (typeof raw !== "string") return 0;
+            let record: unknown;
+            try { record = JSON.parse(raw); } catch { return -1; }
+            if (!record || typeof record !== "object" || Array.isArray(record)) return -1;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+          }
+          // The notes' type is read before any write (Codex L on #4995): on Redis a ZADD on another type fails the
+          // script after its SET has run, and nothing is undone.
+          const notesType = this.run(["TYPE", notes]);
+          if (notesType !== "none" && notesType !== "zset") return -1;
+          // On Redis a SET that does not answer OK fails the whole script with an error; here that is -1, unknown.
+          if (this.run(["SET", grantKey, grant, "EX", seconds]) !== "OK") return -1;
+          this.run(["ZADD", notes, at, grantKey]);
+          this.run(["ZREMRANGEBYSCORE", notes, "-inf", cutoff]);
+          this.run(["EXPIRE", notes, keep]);
+          return 1;
+        }
         // lib/licence-keys.ts POOL_PUSH: the first keys pushed onto the pool while it is under its bound, and how many.
         if (key.startsWith("-- marktmorgen:license-pool-push:v1\n") && args[0] === "1" && args.length >= 3) {
           const [, pool, bound, ...keys] = args;
@@ -433,13 +652,68 @@ export class MemoryRedis {
           for (const k of keys.slice(0, n)) this.run(["RPUSH", pool, k]);
           return n;
         }
+        // lib/winback-send.ts WINBACK_CLAIM: a come-back offer's once-mark, only while the address has no deletion print.
+        if (key.startsWith("-- marktmorgen:winback-claim:v2\n") && args[0] === "2" && args.length === 6) {
+          const [, prints, once, print, onceValue, onceSeconds] = args;
+          if (this.run(["HEXISTS", prints, print]) === 1) return 2;
+          if (this.run(["SET", once, onceValue, "NX", "EX", onceSeconds]) !== "OK") return 0;
+          return 1;
+        }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
+        // lib/checkout-ask.ts ASK_AGAIN: a retried ask put back only while the entry it was taken with waits in its index.
+        if (key.startsWith("-- marktmorgen:ask-again:v2\n") && args[0] === "2" && args.length === 6) {
+          const [, queue, index, was, at, member] = args;
+          if (this.run(["ZSCORE", index, was]) === null) return -1;
+          const added = this.run(["ZADD", queue, at, member]);
+          this.run(["ZREM", index, was]);
+          this.run(["ZADD", index, at, member]);
+          this.run(["PERSIST", index]);
+          return added;
+        }
+        // lib/checkout-ask.ts ASK_FORGET: validate, then remove the current own index and its global members atomically.
+        if (key.startsWith("-- marktmorgen:ask-forget:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, queue, index, statsId, email, rawMost] = args;
+          const most = Number(rawMost);
+          if (!Number.isSafeInteger(most) || most < 0) return [-1, -1];
+          const members = this.run(["ZRANGEBYSCORE", index, "-inf", "+inf"]) as string[];
+          if (members.length > most) return [-1, -1];
+          for (const member of members) {
+            let ask: unknown;
+            try { ask = JSON.parse(member); } catch { return [-1, -1]; }
+            if (!Array.isArray(ask) || ask[0] !== statsId || typeof ask[1] !== "string" || !ask[1]
+              || typeof ask[2] !== "string" || !ask[2] || ask[3] !== email || typeof ask[4] !== "number" || !Number.isFinite(ask[4])) return [-1, -1];
+          }
+          if (!members.length) return [0, 0];
+          let taken = 0;
+          for (let i = 0; i < members.length; i += ASK_ERASE_BATCH) taken += Number(this.run(["ZREM", queue, ...members.slice(i, i + ASK_ERASE_BATCH)]));
+          this.run(["DEL", index]);
+          return [taken, members.length];
+        }
+        // lib/checkout-ask.ts ASK_KEEP: an ask kept, with its index, only while its person is not erased from the store.
+        if (key.startsWith("-- marktmorgen:ask-keep:v2\n") && args[0] === "3" && args.length === 7) {
+          const [, queue, index, erased, at, member, print] = args;
+          if (this.run(["HEXISTS", erased, print]) === 1) return -1;
+          this.run(["ZADD", queue, at, member]);
+          this.run(["ZADD", index, at, member]);
+          this.run(["PERSIST", index]);
+          return 1;
+        }
         // lib/outreach.ts PITCH_IF_READ: a pitch written only over the exact record read.
         if (key.startsWith("-- marktmorgen:outreach-pitch-if-read:v1\n") && args[0] === "1" && args.length === 5) {
           const [, pitches, id, before, after] = args;
           if (this.run(["HGET", pitches, id]) !== before) return 0;
           this.run(["HSET", pitches, id, after]);
           return 1;
+        }
+        // lib/outreach.ts SAVE_SENDER_IF_LIVE: the two guards and SET are one operation, billed inside the EVAL.
+        if (key.startsWith("-- marktmorgen:outreach-sender-save:v1\n") && args[0] === "3" && args.length === 6) {
+          const [, identity, erasing, sender, field, record] = args;
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", identity]) !== 1) return "gone";
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) === 1) return "gone";
+          this.scriptCalls += 1;
+          return this.run(["SET", sender, record]);
         }
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;
@@ -450,13 +724,61 @@ export class MemoryRedis {
           if (n >= Number(below)) return -1;
           return this.run(["INCR", counter]);
         }
-        // lib/flow-runs.ts LEFT_IF_RUN: a run that still holds its address ends as left; one erased meanwhile is not written back.
-        if (key.startsWith("-- marktmorgen:flow-left-if-run:v1\n") && args[0] === "3" && args.length === 9) {
-          const [, run, log, index, email, now, entry, keep, person] = args;
+        // lib/flows.ts FLOW_QUEUED: each claim still pending becomes the 400-day mark and its run is queued, in one step.
+        if (key.startsWith("-- marktmorgen:flow-queued:v1\n") && Number(args[0]) >= 3) {
+          const keys = args.slice(1, 1 + Number(args[0])), argv = args.slice(1 + Number(args[0]));
+          let queued = 0;
+          for (let i = 2; i < keys.length; i++) {
+            this.scriptCalls += 1;
+            if (this.run(["GET", keys[i]]) !== argv[2]) continue;
+            this.run(["SET", keys[i], "1", "EX", argv[1]]);
+            this.run(["ZADD", keys[0], argv[0], argv[i + 1]]);
+            this.scriptCalls += 2;
+            queued += 1;
+          }
+          if (queued > 0) {
+            this.run(["HINCRBY", keys[1], "started", String(queued)]);
+            this.scriptCalls += 1;
+          }
+          return queued;
+        }
+        // A creator's reply and the removal of its buyer's waiting place are one atomic step.
+        if (key.startsWith("-- marktmorgen:submission-reply-write:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, lock, record, live, token, expected, id, json, seconds] = args;
+          if (this.run(["GET", lock]) !== token) return 2;
+          const current = this.run(["GET", record]);
+          if (current === null) return 0;
+          if (current !== expected) return 2;
+          this.run(["ZREM", live, id]);
+          this.run(["SET", record, json, "XX", "EX", seconds]);
+          return 1;
+        }
+        // lib/submission-store.ts SUBMISSION_SLOT_TAKE: a slot's turn taken off only while still at the score read.
+        if (key.startsWith("-- marktmorgen:submission-slot-take:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, list, member, score] = args;
+          const held = this.run(["ZSCORE", list, member]);
+          if (held === null || held === undefined || Number(held) !== Number(score)) return 0;
+          this.run(["ZREM", list, member]);
+          return 1;
+        }
+        // lib/submission-store.ts SUBMISSION_SLOT_STORE_NEXT: the store's turn taken off when its list is empty, else
+        // set to the soonest turn on it.
+        if (key.startsWith("-- marktmorgen:submission-slot-store-next:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, list, stores, store] = args;
+          const first = this.zset(list)[0];
+          if (first === undefined) this.run(["ZREM", stores, store]);
+          else this.run(["ZADD", stores, String(first.score), store]);
+          return 1;
+        }
+        // lib/flow-runs.ts LEFT_IF_RUN: a run that still holds its address ends as left; one erased meanwhile is not written back,
+        // and one of another generation (started again meanwhile) is left as it is.
+        if (key.startsWith("-- marktmorgen:flow-left-if-run:v2\n") && args[0] === "3" && args.length === 10) {
+          const [, run, log, index, email, now, entry, keep, person, gen] = args;
           if (this.run(["HEXISTS", run, "email"]) !== 1) {
             this.run(["DEL", run, log]);
             return 0;
           }
+          if (!genOk(run, gen)) return 0;
           this.run(["HDEL", run, "open"]);
           this.run(["RPUSH", log, entry]);
           this.run(["HSET", run, "email", email, "status", "left", "step", "-1", "note", "", "updatedAt", now]);
@@ -649,6 +971,13 @@ export class MemoryRedis {
           this.run(["HSET", members, field, json]);
           return 1;
         }
+        // lib/ad-events.ts KEEP_LAST_IF_LIVE: the ad platforms' last answers kept only while the store is live and not being erased.
+        if (key.startsWith("-- marktmorgen:ads-last-live:v1\n") && args[0] === "3" && args.length === 7) {
+          const [, storeId, erasing, last, field, json, seconds] = args;
+          if (Number(this.run(["EXISTS", storeId])) !== 1 || Number(this.run(["HEXISTS", erasing, field])) === 1) return 0;
+          this.run(["SET", last, json, "EX", seconds]);
+          return 1;
+        }
         // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
         if (key.startsWith("-- marktmorgen:agent-book-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, book, token, json] = args;
@@ -695,6 +1024,19 @@ export class MemoryRedis {
           this.scriptCalls += 1;
           if (this.run(["EXISTS", link]) === 0) return 0;
           this.scriptCalls += 1;
+          if (this.run(["HGET", list, email]) !== read) return 0;
+          this.run(["HSET", list, email, entry]);
+          this.scriptCalls += 1;
+          return 1;
+        }
+        // lib/waitlist.ts WAIT_JOIN: a join's place written only while its product is still coming soon (#4462).
+        // -1 when no longer coming soon; "" as the place read writes only if still absent (HSETNX), else only over it.
+        if (key.startsWith("-- marktmorgen:waitlist-join:v2\n") && args[0] === "2" && args.length === 7) {
+          const [, soon, list, product, email, read, entry] = args;
+          this.scriptCalls += 1;
+          if (this.run(["SISMEMBER", soon, product]) === 0) return -1;
+          this.scriptCalls += 1;
+          if (read === "") return this.run(["HSETNX", list, email, entry]);
           if (this.run(["HGET", list, email]) !== read) return 0;
           this.run(["HSET", list, email, entry]);
           this.scriptCalls += 1;
@@ -804,6 +1146,17 @@ export class MemoryRedis {
           const [, slots, who, expected, id] = args;
           if (this.run(["HGET", slots, who]) !== expected) return 0;
           this.run(["HSET", slots, who, id]);
+          return 1;
+        }
+        // lib/community-polls.ts POLL_VOTE_SWAP: a member's vote swapped, and the tally and trace moved with it, only while it holds what was read.
+        if (key.startsWith("-- marktmorgen:community-poll-vote:v1\n") && args[0] === "3" && args.length >= 9 && (args.length - 9) % 2 === 0) {
+          const [, votes, tally, trace, who, expected, next, entry, traceMove, ...deltas] = args;
+          const now = this.run(["HGET", votes, who]);
+          if ((typeof now === "string" ? now : "") !== expected) return 0;
+          for (let i = 0; i < deltas.length; i += 2) this.run(["HINCRBY", tally, deltas[i], deltas[i + 1]]);
+          this.run(next === "" ? ["HDEL", votes, who] : ["HSET", votes, who, next]);
+          if (traceMove === "1") this.run(["SADD", trace, entry]);
+          else if (traceMove === "-1" && this.run(["SREM", trace, entry]) === 1) return 2;
           return 1;
         }
         // lib/certificate.ts CERT_SLOT_FREE: a student's slot freed only while it still names the certificate withdrawn.
@@ -1140,6 +1493,16 @@ export class MemoryRedis {
           this.run(["DEL", record]);
           return 1;
         }
+        // lib/share-settle.ts KEEP_MARKER_IF_LIVE: no owner ref is restored after store erasure.
+        if (key.startsWith("-- marktmorgen:share-marker-live:v1\n") && args[0] === "3" && args.length === 7) {
+          const [, identity, erasing, target, field, ref, value] = args;
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", identity]) === 0) return -1;
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) === 1) return -1;
+          this.scriptCalls += 1;
+          return this.run(["HSET", target, ref, value]);
+        }
         // lib/sns-receipt.ts: an Amazon notice's receipt taken over, or marked done, only while it holds the value given.
         if (key.startsWith("-- marktmorgen:sns-receipt-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, receipt, from, to, seconds] = args;
@@ -1153,11 +1516,64 @@ export class MemoryRedis {
           this.run(["HSET", diary, field, value]);
           return 1;
         }
+        // The same fenced write, also fenced on the store (lib/storage-reservations.ts WRITE_LIVE): -1 when it is erased,
+        // its id key holds another ref, or (a store from before ids, statsId given) its owner's record is another
+        // store's; -2 for a record that does not parse.
+        if (key.startsWith("-- marktmorgen:fenced-set-live:v3\n") && args[0] === "4" && args.length === 10) {
+          const [, lock, target, live, erasing, token, value, field, statsId, ref] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          if (this.run(["HGET", erasing, field]) !== null) return -1;
+          if (statsId === "") {
+            if (this.run(["GET", live]) !== ref) return -1;
+          } else {
+            const raw = this.run(["GET", live]);
+            if (raw === null) return -1;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -2;
+            }
+            if (!record || typeof record !== "object") return -2;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return -1;
+          }
+          this.run(["SET", target, value]);
+          return 1;
+        }
         // The fenced writes of lib/redis-lock.ts that never fall back: modeled step for step.
         if (key.startsWith("-- marktmorgen:fenced-set:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, target, token, value] = args;
           if (this.run(["GET", lock]) !== token) return 0;
           this.run(["SET", target, value]);
+          return 1;
+        }
+        // A submission door put back after a refused vault step (lib/submission-store.ts, SUBMISSION_DOOR_PUT_BACK): only
+        // while the buyer's index entry and the lesson's live entry are still there, then SET NX.
+        if (key.startsWith("-- marktmorgen:submission-door-put-back:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, door, who, live, entry, id, json, seconds] = args;
+          if (this.run(["ZSCORE", who, entry]) === null || this.run(["ZSCORE", live, id]) === null) return 0;
+          if (Number(this.run(["EXISTS", door])) === 1) return 2;
+          if (this.run(["SET", door, json, "EX", seconds]) !== "OK") throw new Error("a submission door was not put back");
+          return 1;
+        }
+        // A submission's close (lib/submission-store.ts, SUBMISSION_CLOSE_WRITE): written only while the buyer's place and
+        // entry are still there, and only when no record is.
+        if (key.startsWith("-- marktmorgen:submission-close-write:v1\n") && ((args[0] === "4" && args.length === 13) || (args[0] === "5" && args.length === 15))) {
+          const five = args[0] === "5";
+          const [live, who, due, record, list] = args.slice(1, five ? 6 : 5);
+          const [id, entry, keepUntil, until, liveSeconds, dueMember, json, seconds, listMember] = args.slice(five ? 6 : 5);
+          if (this.run(["ZSCORE", live, id]) === null || this.run(["ZSCORE", who, entry]) === null) return 0;
+          if (Number(this.run(["EXISTS", record])) === 1) return -1;
+          this.run(["ZADD", live, "XX", keepUntil, id]);
+          this.run(["EXPIRE", live, liveSeconds]);
+          this.run(["ZADD", who, "XX", until, entry]);
+          this.run(["EXPIRE", who, liveSeconds]);
+          this.run(["ZADD", due, keepUntil, dueMember]);
+          this.run(["SET", record, json, "EX", seconds]);
+          if (five) {
+            this.run(["ZADD", list, until, listMember]);
+            this.run(["EXPIRE", list, liveSeconds]);
+          }
           return 1;
         }
         // An agreement's record, written with its expiry only while the agreement's lock is the writer's (lib/agreement-store.ts, AGREEMENT_SAVE).
@@ -1187,6 +1603,28 @@ export class MemoryRedis {
           const targets = args.slice(2, count + 1);
           if (this.run(["GET", lock]) !== args[count + 1]) return 0;
           for (const target of targets) this.run(["DEL", target]);
+          return 1;
+        }
+        // lib/paypal-sales.ts PAYPAL_WATCH_IF_LIVE: an order put back on a store's refund watch only while the store is live.
+        if (key.startsWith("-- marktmorgen:paypal-watch-if-live:v1\n") && args[0] === "3" && args.length === 7) {
+          const [, storeId, erasing, watch, field, score, order] = args;
+          if (this.run(["EXISTS", storeId]) === 0 || this.run(["HEXISTS", erasing, field]) === 1) return -1;
+          return this.run(["ZADD", watch, score, order]);
+        }
+        // lib/payment-request-store.ts: the observed request and every index deleted together, only by its holder.
+        if (key.startsWith("-- marktmorgen:payreq-delete:v1\n") && args[0] === "6" && args.length === 11) {
+          const [, lock, target, store, open, due, person, token, observed, id, member] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          if (this.run(["GET", target]) !== observed) return 2;
+          for (const [at, index] of [store, open, due, person].entries()) {
+            this.live(index);
+            const value = this.data.get(index);
+            // Redis removes an empty zset; the stand-in retains its empty array.
+            const kind = Array.isArray(value) && value.length === 0 ? "none" : this.run(["TYPE", index]);
+            if (kind !== "none" && kind !== (at === 3 ? "set" : "zset")) return 3;
+          }
+          this.run(["ZREM", store, id]); this.run(["ZREM", open, id]); this.run(["ZREM", due, member]);
+          this.run(["SREM", person, id]); this.run(["DEL", target]);
           return 1;
         }
         // lib/payment-request-store.ts SAVE: a request's record written only while its write lock is the writer's,
@@ -1348,6 +1786,27 @@ export class MemoryRedis {
             if (held instanceof Map && held.size >= Number(args[4])) return 0;
           } else if (args[5] !== "edit" || !exists) return -2;
           this.hash(target).set(args[2], args[3]);
+          return 1;
+        }
+        // lib/funnel-share-store.ts CREATE_STORE_SHARE: CREATE_SHARE only while the store's erasing mark is absent and its id
+        // key exists (-4 otherwise, nothing written).
+        if (key.startsWith("-- marktmorgen:funnel-share-live:v1\n") && args[0] === "4" && args.length === 13) {
+          const [, list, lookup, idKey, erasing, id, meta, rec, sum, bundle, limit, ttl, field] = args;
+          this.live(idKey);
+          if (this.run(["HGET", erasing, field]) !== null) return -4;
+          if (!this.data.has(idKey)) return -4;
+          this.live(list);
+          this.live(lookup);
+          const held = this.data.get(list);
+          if (held !== undefined && !(held instanceof Map)) return -3;
+          if (this.data.has(lookup) || (held instanceof Map && held.has(id))) return -2;
+          if (held instanceof Map && held.size >= Number(limit)) return 0;
+          this.hash(list).set(id, meta);
+          const record = this.hash(lookup);
+          record.set("rec", rec);
+          record.set("sum", sum);
+          record.set("bundle", bundle);
+          this.until.set(lookup, this.now() + Number(ttl) * 1000);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:funnel-share:v1\n") && args[0] === "2" && args.length === 10) {
@@ -1575,6 +2034,40 @@ export class MemoryRedis {
           const kept = this.run(["GET", receipt]);
           return kept === null ? [written === "OK" ? 1 : 0] : [written === "OK" ? 1 : 0, kept];
         }
+        // lib/paypal-payouts.ts, KEEP_LINK_IF_LIVE: the PayPal link written only while its store's key exists and it is
+        // not being erased; 1 written, 0 not.
+        if (key.startsWith("-- marktmorgen:paypal-link-live:v1\n") && args[0] === "3" && args.length === 6) {
+          const [, live, erasing, link, field, value] = args;
+          this.scriptCalls += 2;
+          if (Number(this.run(["EXISTS", live])) !== 1 || this.run(["HGET", erasing, field]) !== null) return 0;
+          this.scriptCalls += 1;
+          this.run(["SET", link, value]);
+          return 1;
+        }
+        // lib/paypal-payouts.ts KEEP_OPEN_IF_LIVE: an open PayPal batch written (and its store watched) only while the
+        // store is live; -1, nothing written, when it is gone, being erased or (from before ids) its owner's record is
+        // another store's.
+        if (key.startsWith("-- marktmorgen:paypal-open-live:v2\n") && args[0] === "4" && args.length === 10) {
+          const [, live, erasing, open, stores, field, batch, value, sid, statsId] = args;
+          this.scriptCalls += 2;
+          if (this.run(["HGET", erasing, field]) !== null) return -1;
+          if (statsId === "") {
+            if (Number(this.run(["EXISTS", live])) !== 1) return -1;
+          } else {
+            const raw = this.run(["GET", live]);
+            if (raw === null) return -1;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -1;
+            }
+            if (!record || typeof record !== "object" || Array.isArray(record) || (record as { statsId?: unknown }).statsId !== statsId) return -1;
+          }
+          this.scriptCalls += sid === "" ? 1 : 2;
+          const held = this.run(["HSET", open, batch, value]);
+          return [held, sid === "" ? 0 : this.run(["SADD", stores, sid])];
+        }
         // lib/imported-purchases.ts GRANT_UNLESS_ERASED: each grant written only when its print is not among the
         // store's deleted people (-1, nothing written); its address noted once among the buyers brought, its product HSETNX.
         if (key.startsWith("-- marktmorgen:grant-unless-erased:v1\n") && Number(args[0]) >= 3 && args.length === 1 + Number(args[0]) + 1 + 4 * (Number(args[0]) - 2)) {
@@ -1692,6 +2185,64 @@ export class MemoryRedis {
           }
           return n;
         }
+        // New inbox conversations and the contact form's pre-mail check share the live-store fence.
+        if ((key.startsWith("-- marktmorgen:inbox-open-write:v2\n") || key.startsWith("-- marktmorgen:inbox-store-live:v1\n"))) {
+          const n = Number(args[0]);
+          const opening = key.startsWith("-- marktmorgen:inbox-open-write:v2\n");
+          if ((opening ? n !== 6 && n !== 7 : n !== 2) || args.length !== 1 + n + (opening ? 12 : 3)) throw new Error("bad inbox live fence arguments");
+          const keys = args.slice(1, 1 + n);
+          const [field, ref, legacy] = args.slice(-3);
+          const call = (command: (string | number)[]) => { this.scriptCalls += 1; return this.run(command); };
+          const identity = legacy === "" ? call(["GET", keys[n - 2]]) : call(["GETRANGE", keys[n - 2], 0, 1_000_000]);
+          if (legacy === "") { if (identity !== ref) return -1; }
+          else {
+            if (typeof identity !== "string" || !identity || Buffer.byteLength(identity) > 1_000_000) return -1;
+            try { if ((JSON.parse(identity) as { statsId?: unknown })?.statsId !== legacy) return -1; } catch { return -1; }
+          }
+          if (call(["HEXISTS", keys[n - 1], field]) !== 0) return -1;
+          if (!opening) return 1;
+          const [record, index, list, episode] = keys;
+          // The token key, only when there is one (7 keys): never the fence's identity key (Claude 6's LEVE on #5000).
+          const token = n === 7 ? keys[4] : null;
+          const [expected, next, keep, score, id, message, max, tokenValue, endEpisode] = args.slice(1 + n, -3);
+          const current = call(["GET", record]);
+          if (expected === "" ? current !== null : current !== expected) return 0;
+          call(["SET", record, next, "EX", keep]);
+          call(["ZADD", index, score, id]);
+          if (message !== "") { call(["RPUSH", list, message]); call(["LTRIM", list, -Number(max), -1]); }
+          call(["EXPIRE", list, keep]);
+          if (token) call(["SET", token, tokenValue, "EX", keep]);
+          if (endEpisode === "1") call(["DEL", episode]);
+          return 1;
+        }
+        // lib/summary-live.ts: period, part/time, AI-read and retry admissions share the store erasure fence.
+        if (key.startsWith("-- marktmorgen:summary-live:v1\n")) {
+          if (args[0] !== "4" || args.length !== 14) return [-2, 0];
+          const [live, erasing, mark, related] = args.slice(1, 5);
+          const [field, ref, legacy, keep, value, mode, now, window, ceiling] = args.slice(5);
+          const call = (command: (string | number)[]) => { this.scriptCalls += 1; return this.run(command); };
+          const identity = legacy === "" ? call(["GET", live]) : call(["GETRANGE", live, 0, 1_000_000]);
+          if (legacy === "") { if (identity !== ref) return [-1, 0]; }
+          else {
+            if (typeof identity !== "string" || !identity) return [-1, 0];
+            if (Buffer.byteLength(identity) > 1_000_000) return [-2, 0];
+            try { const row: unknown = JSON.parse(identity); if (!row || typeof row !== "object") return [-2, 0]; if ((row as { statsId?: unknown }).statsId !== legacy) return [-1, 0]; } catch { return [-2, 0]; }
+          }
+          if (call(["HEXISTS", erasing, field]) !== 0) return [-1, 0];
+          if (mode === "peek") return [call(["GET", mark]) === null ? 1 : 0, 0];
+          if (mode === "retry") {
+            const count = Number(call(["INCR", mark])); call(["EXPIRE", mark, keep]);
+            if (count < 1) return [-2, count];
+            if (count < Number(ceiling)) { call(["DEL", related]); return [1, count]; }
+            return [0, count];
+          }
+          if (mode !== "claim" && mode !== "part") return [-2, 0];
+          if (call(["SET", mark, value, "NX", "EX", keep]) !== "OK") return [0, 0];
+          if (mode === "part" && Number(window) > 0) {
+            call(["SET", related, now, "NX", "EX", keep]); return [1, call(["GETRANGE", related, 0, 16])];
+          }
+          return [1, now];
+        }
         // lib/inbox.ts INBOX_WRITE: a conversation's record, index entry, message, expiries, chat token and unread
         // episode written in one step, only over exactly the record read ("" for a new one, which must not exist).
         if (key.startsWith("-- marktmorgen:inbox-write:v1\n") && (args[0] === "4" || args[0] === "5") && args.length === 1 + Number(args[0]) + 9) {
@@ -1771,7 +2322,15 @@ export class MemoryRedis {
           return [1, n];
         }
         // Models only the explicitly supported application scripts. Not a Lua interpreter.
-        if (key.startsWith("-- marktmorgen:crm-deal-move:v2\n") && args[0] === "1" && args.length === 5) {
+        if (key.startsWith("-- marktmorgen:crm-deal-move:v4\n") && ((args[0] === "1" && args.length === 5) || (args[0] === "2" && args.length === 8))) {
+          if (args[0] === "2") {
+            const held = this.run(["ZSCORE", args[2], args[6]]);
+            if (held === null || Number(held) !== Number(args[7])) {
+              const kept = this.run(["HGET", args[1], args[3]]);
+              return typeof kept === "string" ? [3, new TextEncoder().encode(kept).length] : [3];
+            }
+            return this.run(["EVAL", key, "1", args[1], args[3], args[4], args[5]]);
+          }
           const target = args[1];
           this.live(target);
           const held = this.data.get(target);
@@ -1789,6 +2348,23 @@ export class MemoryRedis {
           this.run(["SET", link, value, "EX", seconds]);
           return 1;
         }
+        if (key.startsWith("-- marktmorgen:flow-queue-if-leased:v2\n") && args[0] === "2" && args.length === 7) {
+          const [, lease, queue, member, score, next, take] = args;
+          const held = this.run(["ZSCORE", lease, member]);
+          if (held === null || Number(held) !== Number(take)) return 0;
+          this.run(["ZADD", queue, score, next]);
+          return 1;
+        }
+        // lib/flows.ts DROP_OWN_LEASES: each member taken away only while it is held at the take's own score.
+        if (key.startsWith("-- marktmorgen:flow-lease-drop-own:v1\n") && args[0] === "1") {
+          const [, lease, take, ...members] = args;
+          return members.map((member) => {
+            const held = this.run(["ZSCORE", lease, member]);
+            if (held === null || Number(held) !== Number(take)) return 0;
+            this.run(["ZREM", lease, member]);
+            return 1;
+          });
+        }
         // lib/flows.ts FLOW_MOVE: each member off KEYS[1] and onto KEYS[2] at ARGV[1], only by whoever took it off; 1 or 0 each.
         if (key.startsWith("-- marktmorgen:flow-move:v1\n") && args[0] === "2" && args.length >= 4) {
           const [, from, to, score, ...members] = args;
@@ -1798,11 +2374,16 @@ export class MemoryRedis {
             return 1;
           });
         }
-        if (key.startsWith("-- marktmorgen:flow-queue-if-leased:v1\n") && args[0] === "2" && args.length === 6) {
-          const [, lease, queue, member, score, next] = args;
-          if (this.run(["ZSCORE", lease, member]) === null) return 0;
-          this.run(["ZADD", queue, score, next]);
-          return 1;
+        // lib/flows.ts FLOW_MOVE_OWN: each member back from the lease to the queue only while held at the take's own score.
+        if (key.startsWith("-- marktmorgen:flow-move-own:v1\n") && args[0] === "2" && args.length >= 5) {
+          const [, from, to, take, score, ...members] = args;
+          return members.map((member) => {
+            const held = this.run(["ZSCORE", from, member]);
+            if (held === null || Number(held) !== Number(take)) return 0;
+            this.run(["ZREM", from, member]);
+            this.run(["ZADD", to, score, member]);
+            return 1;
+          });
         }
         // lib/sent-links.ts APPEND_SENT_LINK: an email's link changes written only over exactly the record read, with their expiry.
         if (key.startsWith("-- marktmorgen:sent-link-append:v1\n") && args[0] === "1" && args.length === 5) {
@@ -1839,7 +2420,15 @@ export class MemoryRedis {
           if (!this.until.has(target)) this.until.set(target, this.now() + Number(args[4]) * 1000);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-deal-save:v2\n") && args[0] === "1" && args.length === 6) {
+        if (key.startsWith("-- marktmorgen:crm-deal-save:v5\n") && ((args[0] === "1" && args.length === 6) || (args[0] === "2" && args.length === 9))) {
+          if (args[0] === "2") {
+            const held = this.run(["ZSCORE", args[2], args[7]]);
+            if (held === null || Number(held) !== Number(args[8])) {
+              const kept = this.run(["HGET", args[1], args[3]]);
+              return typeof kept === "string" ? [3, new TextEncoder().encode(kept).length] : [3];
+            }
+            return this.run(["EVAL", key, "1", args[1], args[3], args[4], args[5], args[6]]);
+          }
           const target = args[1];
           this.live(target);
           const held = this.data.get(target);
@@ -1847,8 +2436,9 @@ export class MemoryRedis {
           const there = held instanceof Map && held.has(args[2]);
           if (!there && args[5] === "edit") return 2;
           if (!there && held instanceof Map && held.size >= Number(args[4])) return 0;
+          const was = there ? (held as Map<string, string>).get(args[2]) : undefined;
           this.hash(target).set(args[2], args[3]);
-          return 1;
+          return typeof was === "string" ? [1, new TextEncoder().encode(was).length] : [1];
         }
         if (key.startsWith("-- marktmorgen:crm-companies-write:v1\n") && args[0] === "2" && args.length >= 4 && (args.length - 4) % 2 === 0) {
           // lib/crm-companies.ts WRITE_COMPANIES: written only while the lock still holds this change's token. It differs
@@ -1871,9 +2461,10 @@ export class MemoryRedis {
           }
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-tasks-write:v1\n") && args[0] === "1" && args.length === 8) {
+        if (key.startsWith("-- marktmorgen:crm-tasks-write:v2\n") && args[0] === "2" && args.length === 10) {
           // lib/crm.ts WRITE_PERSON_TASKS: a person's tasks and the store's count, in one step.
-          const [, target, person, read, value, added, start, field] = args;
+          const [, target, lock, person, read, value, added, start, field, token] = args;
+          if (this.run(["GET", lock]) !== token) return -2;
           this.live(target);
           const held = this.data.get(target);
           if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
@@ -1889,9 +2480,10 @@ export class MemoryRedis {
           if (hash.size === 0) this.data.delete(target);
           return n === null && kept !== undefined ? 2 : 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-tasks-count-save:v1\n") && args[0] === "1" && args.length === 4) {
+        if (key.startsWith("-- marktmorgen:crm-tasks-count-save:v2\n") && args[0] === "2" && args.length === 6) {
           // lib/crm.ts SAVE_TASK_COUNT: the count saved once made, never over a whole number.
-          const [, target, field, value] = args;
+          const [, target, lock, field, value, token] = args;
+          if (this.run(["GET", lock]) !== token) return -1;
           this.live(target);
           const held = this.data.get(target);
           if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
@@ -1932,7 +2524,79 @@ export class MemoryRedis {
           held.delete(args[2]);
           return value;
         }
-        if (key.startsWith("-- marktmorgen:host-claim:v1\n")) return this.hostClaim(args);
+        // lib/crm.ts MARK_RETURNED: a deletion mark taken away only by an act after the deletion it records.
+        if (key.startsWith("-- marktmorgen:crm-erased-returned:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, target, at] = args;
+          const raw = this.run(["GET", target]);
+          const mark = typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : null;
+          if (mark === null || !(mark < Number(at))) return 0;
+          this.run(["DEL", target]);
+          return 1;
+        }
+        // lib/crm.ts SET_CRM_VALUE: a person's value written unless they are marked deleted or the save carries another generation, answering what it replaced.
+        if (key.startsWith("-- marktmorgen:crm-value-set:v6\n") && ((args[0] === "3" && args.length === 7) || (args[0] === "4" && args.length === 10))) {
+          const leased = args[0] === "4";
+          const [, target, erased, generation] = args;
+          const [person, value, carried, member, score] = args.slice(leased ? 5 : 4);
+          if (Number(this.run(["EXISTS", erased])) === 1) return 2;
+          if (leased && Number(this.run(["ZSCORE", args[4], member]) ?? "-1") !== Number(score)) return 2;
+          if (Number(this.run(["GET", generation]) ?? "0") !== Number(carried)) return 2;
+          const before = this.run(["HGET", target, person]);
+          this.run(value === "" ? ["HDEL", target, person] : ["HSET", target, person, value]);
+          return typeof before === "string" ? [1, before] : [1];
+        }
+        // lib/auth.ts MARK_BROKEN_MOVE: a place taken and both records written, only below the cap.
+        if (key.startsWith("-- marktmorgen:move-broken-mark:v1\n") && args[0] === "3") {
+          const [, open, from, to, op, value, cap, at] = args;
+          if (Number(this.run(["ZCARD", open])) >= Number(cap)) return 0;
+          this.run(["SET", from, value]);
+          this.run(["SET", to, value]);
+          this.run(["ZADD", open, at, op]);
+          return 1;
+        }
+        // lib/auth.ts CLEAR_BROKEN_MOVE: only the records of the move ARGV[1] names deleted, its place given back.
+        if (key.startsWith("-- marktmorgen:move-broken-clear:v2\n") && args[0] === "3") {
+          const [, open, from, to, named] = args;
+          let gone = 0;
+          for (const target of [from, to]) {
+            const held = this.run(["GET", target]);
+            if (typeof held !== "string") continue;
+            let record: unknown = null;
+            try { record = JSON.parse(held); } catch { record = null; }
+            if (!record || typeof record !== "object" || Array.isArray(record)) continue;
+            const op = (record as { op?: unknown }).op;
+            if (!((typeof op === "string" && op === named) || (op === undefined && named === ""))) continue;
+            if (typeof op === "string") this.run(["ZREM", open, op]);
+            gone += Number(this.run(["DEL", target]));
+          }
+          return gone;
+        }
+        // lib/auth.ts NOTE_MOVE_COPY: a move's record written over only where it still carries that move's token.
+        if (key.startsWith("-- marktmorgen:move-copy-note:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const [op, value] = args.slice(1 + count);
+          let written = 0;
+          for (const target of keys) {
+            const held = this.run(["GET", target]);
+            if (typeof held !== "string") continue;
+            let record: unknown = null;
+            try { record = JSON.parse(held); } catch { record = null; }
+            if (record && typeof record === "object" && (record as { op?: unknown }).op === op) {
+              this.run(["SET", target, value]);
+              written += 1;
+            }
+          }
+          return written;
+        }
+        // lib/store.ts SETTLE_MOVE_COPY: only the unchanged copy of the same id, at the selected home.
+        if (key.startsWith("-- marktmorgen:move-copy-settle:v1\n") && args[0] === "5" && args.length === 10) {
+          const [, lockA, lockB, handle, id, target, tokenA, tokenB, home, value] = args;
+          if (this.run(["GET", lockA]) !== tokenA || this.run(["GET", lockB]) !== tokenB) return 0;
+          if (this.run(["GET", handle]) !== home || this.run(["GET", id]) !== home || this.run(["GET", target]) !== value) return 0;
+          return this.run(["DEL", target]);
+        }
+        if (key.startsWith("-- marktmorgen:host-claim:v2\n")) return this.hostClaim(args);
         // lib/api-keys.ts RECORD_SWAP: each record written only over exactly the text read; nothing for one gone.
         if (key.startsWith("-- marktmorgen:api-key-record-swap:v1\n") && args[0] === "1" && (args.length - 2) % 3 === 0) {
           const [, list, ...triples] = args;
@@ -2022,6 +2686,12 @@ export class MemoryRedis {
           } else if (what === "active") this.run(["SADD", args[2], value]);
           this.run(["SET", args[1], text, "EX", seconds]);
           return 1;
+        }
+        // lib/purchase-moves.ts MOVE_DAY_COUNT: INCR then EXPIRE in one step; the new count.
+        if (key.startsWith("-- marktmorgen:purchase-move-day:v1\n") && args[0] === "1" && args.length === 3) {
+          const made = this.run(["INCR", args[1]]);
+          this.run(["EXPIRE", args[1], args[2]]);
+          return made;
         }
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {
           this.live(args[1]);
@@ -2660,6 +3330,22 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
         if (key.startsWith("-- marktmorgen:order-write-if-new:v1\n")) return this.orderWriteIfNew(args);
+        // lib/order-data.ts ORDER_WRITE_IF_STORE_LIVE: the ordinary measured write, only while the store id still
+        // exists and the closing walk has not installed its erasure field. The final two keys and final argument are
+        // the fence and are removed before the ordinary write is modelled.
+        if (key.startsWith("-- marktmorgen:order-write-if-store-live:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          if (!Number.isSafeInteger(count) || count < 3 || argv.length < 2 || argv.at(-1) === "") return [-1];
+          const [storeId, erasing] = keys.slice(-2);
+          const field = argv.at(-1) as string;
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", storeId]) !== 1) return [-3];
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) === 1) return [-3];
+          return this.orderWrite([String(count - 2), ...keys.slice(0, -2), ...argv.slice(0, -1)]);
+        }
         // lib/licence-keys.ts SALE_SWAP: a sale's place among the keys given changed only while it holds the expected mark.
         if (key.startsWith("-- marktmorgen:license-sale-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, sales, reference, expected, next] = args;
@@ -3032,6 +3718,10 @@ export class MemoryRedis {
         return this.hash(key).get(args[0]) ?? null;
       case "HEXISTS":
         return this.hash(key).has(args[0]) ? 1 : 0;
+      case "HSTRLEN": {
+        const value = this.hash(key).get(args[0]);
+        return typeof value === "string" ? new TextEncoder().encode(value).length : 0;
+      }
       case "HMGET":
         return args.map((field) => this.hash(key).get(field) ?? null);
       case "HDEL": {
@@ -3545,6 +4235,8 @@ export class MemoryRedis {
     if (!Number.isFinite(limit) || limit < 0 || !/^\d{4}-\d{2}$/.test(month ?? "") || rest.length % 3 !== 0) return [-1, 0];
     const held = this.data.get(target);
     if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+    // A give-back ("2") on a room that is not there writes nothing (TAKE_DATA, Codex L 20/11).
+    if (always === "2" && !(held instanceof Map && held.has("#"))) return [1, 0];
     const room = this.hash(target);
     let total = Number(room.get("#") ?? "0");
     if (!Number.isFinite(total)) return [-1, 0];
@@ -3599,7 +4291,7 @@ export class MemoryRedis {
       if (old === 0 && next > 0) delta += 64;
       else if (old > 0 && next === 0) delta -= 64;
     }
-    if (delta > 0 && always !== "1" && total + delta > limit) {
+    if (delta > 0 && always !== "1" && always !== "2" && total + delta > limit) {
       keep();
       return [0, total];
     }
@@ -3893,6 +4585,7 @@ export class MemoryRedis {
       if (held !== undefined && !(held instanceof Map)) return [-3, i + 1];
     }
     const drops: string[][] = [];
+    const paid: boolean[] = [];
     for (let i = 0; i < keys.length; i += 1) {
       const [gap, d0, d1, cap] = argv.slice(6 + i * 4, 10 + i * 4).map(Number);
       if (![gap, d0, d1, cap].every(Number.isFinite) || gap < 0) return [-3, i + 1];
@@ -3904,7 +4597,9 @@ export class MemoryRedis {
         if (!m) return [-3, i + 1];
         const [a, b, u] = [Number(m[1]), Number(m[2]), Number(m[3])];
         if ((u > 0 && u < now) || b < now - 172_800_000) stale.push(field);
-        else if (field !== claim) {
+        else if (field === claim) {
+          if (u === 0) paid[i] = true;
+        } else {
           if (s < b + gap && e + gap > a) return [-1, i + 1];
           if (a >= d0 && a < d1) today += 1;
         }
@@ -3916,7 +4611,7 @@ export class MemoryRedis {
     keys.forEach((k, i) => {
       const hash = this.hash(k);
       for (const field of drops[i]) hash.delete(field);
-      hash.set(claim, `${s}|${e}|${hold}|${ref}`);
+      hash.set(claim, `${s}|${e}|${paid[i] ? 0 : hold}|${ref}`);
       const ends = this.until.get(k);
       const left = ends === undefined ? -1 : ends - this.now();
       if (left < keep) this.until.set(k, this.now() + keep);

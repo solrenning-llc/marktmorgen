@@ -26,6 +26,7 @@ import { connectPayPal, onTheirWay, payoutUnknownMonth, paypalChecks, payWithPay
 import { autoPayEmail } from "@/lib/affiliate-payday";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statswex01";
@@ -94,6 +95,7 @@ async function seed(store: Store): Promise<void> {
     ["HSET", `nl:aff:${STATS}:sales`, "cs_1", sale("cs_1", "aaaaaaaaaaaa", 10000)],
     ["HSET", `nl:aff:${STATS}:sales`, "cs_2", sale("cs_2", "bbbbbbbbbbbb", 5000)],
   ]);
+  await markLive(store);
   const linked = await connectPayPal(store, CLIENT, SECRET);
   if (!linked.ok) throw new Error(`not linked: ${JSON.stringify(linked)}`);
 }
@@ -117,7 +119,10 @@ async function withFault<T>(match: (commands: Commands) => boolean, fault: (comm
   }
 }
 const isUnknownDelete = (commands: Commands) => commands[0]?.[0] === "HDEL" && commands[0][1] === OPEN && String(commands[0][2]).startsWith("?");
-const isUnknownWrite = (commands: Commands) => commands[0]?.[0] === "HSET" && commands[0][1] === OPEN && String(commands[0][2]).startsWith("?");
+// The "?" entry's write: one EVAL that writes it only while the store is live (KEEP_OPEN_IF_LIVE, Codex
+// L-20261120-0448), with the open batches as its third key and the entry's field as its second argument.
+const isUnknownWrite = (commands: Commands) =>
+  commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:paypal-open-live:v2") && commands[0][5] === OPEN && String(commands[0][8]).startsWith("?");
 const openFields = async () => {
   const [all] = await real([["HGETALL", OPEN]]);
   return (Array.isArray(all) ? all.filter((_, i) => i % 2 === 0) : Object.keys((all ?? {}) as object)).map(String).sort();

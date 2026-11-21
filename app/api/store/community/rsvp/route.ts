@@ -3,9 +3,9 @@ import { DataRoomError } from "@/lib/store-data";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite } from "@/lib/studio-route";
 import { limited } from "@/lib/request-guard";
-import { normaliseHandle, storeForHandle } from "@/lib/store";
+import { ensureListId, normaliseHandle, storeForHandle, storeRef } from "@/lib/store";
 import { within } from "@/lib/community";
-import { communityViewer } from "@/lib/community-access";
+import { communityViewer, unknownForGood } from "@/lib/community-access";
 import { ITEM_ID } from "@/lib/community-text";
 import { cancelRsvp, mayAttend, readEvent, rsvp } from "@/lib/community-events";
 import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
@@ -57,14 +57,19 @@ export async function POST(request: NextRequest) {
     const id = store.community.id;
     const event = await readEvent(id, eventId);
     if (!event) return back(`${home}/events`, "gone");
-    if (!(await mayAttend(store, viewer.config, event, { owner: false, email: viewer.email }))) return back(page, "eventlocked");
+    // Not known is said as not checked, never as an event that is not theirs (the pre-review of 9 November 2026, P4).
+    const may = await mayAttend(store, viewer.config, event, { owner: false, email: viewer.email, holdings: viewer.holdings });
+    if (may !== true) return back(page, may === "unknown" ? (unknownForGood(viewer.holdings) ? "eventunknownlasting" : "eventunknown") : "eventlocked");
     if (!(await within(id, viewer.key, "rsvp"))) return back(page, "slow");
 
     if (field("action", 12) === "notgoing") {
       await cancelRsvp(id, event, viewer.key, store);
       return back(page, "notgoing");
     }
-    const answer = await rsvp(id, event, viewer.key, store);
+    // The store's stable list id, so the write is fenced by the person's erasure print (Codex L, L-20261120-1245).
+    const listId = store.listId ?? (await ensureListId(storeRef(store)))?.listId;
+    if (!listId) return back(page, "error");
+    const answer = await rsvp(id, event, viewer.key, store, Date.now(), { listId, email: viewer.email });
     if (answer === "full") return back(page, "eventfull");
     if (answer === "closed") return back(page, event.cancelled ? "eventcancelled" : "eventover");
     return back(page, viewer.member.mail ? "going" : "goingnomail");

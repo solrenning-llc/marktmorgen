@@ -8,7 +8,7 @@
  * go through the studio's own request (`request`).
  */
 import { useEffect, useState } from "react";
-import { type FlowAction, type FlowGoal, type StepCondition, isCourseIf } from "@/lib/flow-rules";
+import { LAYOUT_HOLD_START, type FlowAction, type FlowGoal, type StepCondition, isCourseIf } from "@/lib/flow-rules";
 import { END, type RoutedStep, type SampleContact, previewRun } from "@/lib/flow-paths";
 import { flowMapLayout } from "@/lib/flow-map";
 import { WorkflowDiagram } from "@/components/workflow-diagram";
@@ -350,7 +350,7 @@ export function WorkflowPreview({
       {confirm ? (
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <button type="button" className="btn btn-primary btn-sm" disabled={confirm.busy} aria-busy={confirm.busy} onClick={confirm.onConfirm}>{confirm.label}</button>
-          <button type="button" className="text-sm font-bold text-ink-soft underline underline-offset-4" onClick={confirm.onCancel}>Not now</button>
+          <button type="button" className="inline-flex min-h-11 min-w-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4" onClick={confirm.onCancel}>Not now</button>
         </div>
       ) : null}
     </div>
@@ -494,7 +494,7 @@ export function WorkflowRuns({ flowId, steps, request }: { flowId: string; steps
               <span className="flex flex-wrap items-center gap-2">
                 <span className={r.status === "held" ? "tag tag-next" : "tag"}>{RUN_STATUS_WORDS[r.status] ?? r.status}</span>
                 <span className="text-ink-soft">{when(r.updatedAt)}</span>
-                <button type="button" className="font-bold text-ink-soft underline underline-offset-4" disabled={busy} onClick={() => show(r.person)}>History</button>
+                <button type="button" className="inline-flex min-h-11 min-w-11 items-center font-bold text-ink-soft underline underline-offset-4" disabled={busy} onClick={() => show(r.person)}>History</button>
               </span>
             </li>
           ))}
@@ -530,11 +530,15 @@ export function WorkflowRuns({ flowId, steps, request }: { flowId: string; steps
           {open.run.status === "held" ? (
             <div className="notice notice-warn mt-3 text-sm">
               <p className="font-semibold">What should happen with this step?</p>
-              <p className="mt-1">Its outcome could not be confirmed, so it was not repeated. Check what you can (the person&apos;s inbox, their page, your deals board), then choose.</p>
+              {open.run.note.startsWith(LAYOUT_HOLD_START) ? (
+                <p className="mt-1">{open.run.note}</p>
+              ) : (
+                <p className="mt-1">Its outcome could not be confirmed, so it was not repeated. Check what you can (the person&apos;s inbox, their page, your deals board), then choose.</p>
+              )}
               <p className="mt-1">{open.run.retries >= MAX_RETRIES_BY_YOU ? `It has been tried again ${n(MAX_RETRIES_BY_YOU)} times, the most one run may: choose whether it went through, or end it.` : `A run may be tried again up to ${n(MAX_RETRIES_BY_YOU)} times; this one has been tried again ${n(open.run.retries)} ${open.run.retries === 1 ? "time" : "times"}.`}</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => resolve("continue")}>It went through: continue</button>
-                <button type="button" className="btn btn-secondary btn-sm" disabled={busy || open.run.retries >= MAX_RETRIES_BY_YOU} onClick={() => resolve("retry")}>Try it again (may arrive twice)</button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => resolve("continue")}>{open.run.note.startsWith(LAYOUT_HOLD_START) ? `Skip step ${open.run.step + 1}` : "It went through: continue"}</button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={busy || open.run.retries >= MAX_RETRIES_BY_YOU} onClick={() => resolve("retry")}>{open.run.note.startsWith(LAYOUT_HOLD_START) ? `Send step ${open.run.step + 1} now` : "Try it again (may arrive twice)"}</button>
                 <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => resolve("end")}>End this run</button>
               </div>
             </div>

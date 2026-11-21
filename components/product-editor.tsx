@@ -34,6 +34,7 @@ import type { CoverLook } from "@/components/cover-maker";
 import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
 import { LicenceKeyEditor } from "@/components/licence-key-editor";
 import { PdfStampToggle } from "@/components/pdf-stamp-toggle";
+import { PublicationChoice } from "@/components/publication-choice";
 import { PdfPreviewToggle } from "@/components/pdf-preview-toggle";
 import { toast } from "@/components/toast";
 import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
@@ -48,10 +49,13 @@ import { type Currency, fieldPrefix, formatMoney, moneyField, priceExample, pric
 import { StoreCurrency, useStoreCurrency } from "@/components/store-currency";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import { ProductIdeas } from "@/components/product-ideas";
+import { AiFileAssist } from "@/components/ai-file-assist";
+import { ProductPdfAssist } from "@/components/product-pdf-assist";
 import {
   ACCEPT_ATTRIBUTE,
   MAX_FILE_BYTES,
   maxFileLabel,
+  readableFile,
   readableSize,
   type ProductFile,
 } from "@/lib/product-file";
@@ -349,6 +353,7 @@ export function ProductForm({
   onCancel,
   product,
   loadingAbout = false,
+  aboutUnread = false,
   ownHosts = [],
   preview = null,
 }: {
@@ -363,6 +368,8 @@ export function ProductForm({
   product?: Product;
   /** Whether the long description is still being read. */
   loadingAbout?: boolean;
+  /** Whether the long description could not be read, so the form does not hold it. */
+  aboutUnread?: boolean;
   /** The store's own hosts besides its marktmorgen.com address (its own domain), not warned as "another site". */
   ownHosts?: string[];
   /** The store's look and language, so the product's own words are previewed as buyers see them (487 [IT4], pattern 7). */
@@ -377,8 +384,10 @@ export function ProductForm({
   // MEDIUM on #3441).
   const [describeChecks, setDescribeChecks] = useState<boolean[] | null>(null);
   const [ideaChecks, setIdeaChecks] = useState<boolean[] | null>(null);
+  // The PDF box's own (name, short description and benefits from the product's PDF; Codex G's MEDIUM on #3447).
+  const [pdfChecks, setPdfChecks] = useState<boolean[] | null>(null);
   // The save waits while any drawn review is incomplete.
-  const aiHold = aiDraftHold(ideaChecks) ?? aiDraftHold(describeChecks);
+  const aiHold = aiDraftHold(ideaChecks) ?? aiDraftHold(describeChecks) ?? aiDraftHold(pdfChecks);
   const [aiHeld, setAiHeld] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const aboutField = useRef<HTMLTextAreaElement>(null);
@@ -487,6 +496,17 @@ export function ProductForm({
           titleFieldId={`product-title-${id}`}
           onUse={(next) => setDraft({ ...draft, title: next.title, summary: next.summary })}
           onReviewChange={setIdeaChecks}
+        />
+      ) : null}
+
+      {/* A name, a short description and benefits from the product's own PDF (758 [STN5], unit 4): only once it has one to read. */}
+      {product && readableFile(product) ? (
+        <ProductPdfAssist
+          productId={product.id}
+          fields={{ title: draft.title, summary: draft.summary, about: draft.about }}
+          aboutState={loadingAbout ? "loading" : aboutUnread ? "unread" : "ready"}
+          onChange={(next) => setDraft({ ...draft, ...next })}
+          onReviewChange={setPdfChecks}
         />
       ) : null}
 
@@ -2416,6 +2436,7 @@ export function ProductEditor({
                 submitLabel="Save"
                 product={product}
                 loadingAbout={loadingAbout}
+                aboutUnread={aboutUnread}
                 onSubmit={() => {
                   if (loadingAbout) return;
                   if (priceChanged && priceReview !== product.id) {
@@ -2693,6 +2714,8 @@ export function ProductEditor({
                 {/* A physical product the creator ships (lib/shipping.ts), on one that hands over nothing else. */}
                 <ShippingEditor product={product} />
                 {product.shipping ? <PhysicalLegalEditor product={product} /> : null}
+                {/* Whether it is an e-publication, for EU and UK VAT (789 [IV1] step 3, unit 5b): only while VAT there can be collected. */}
+                {product.shipping || product.call || product.callPackage ? null : <PublicationChoice product={product} />}
                 {/* Shipped at several prices: sizes or versions, each shipped the same way. */}
                 {product.shipping ? (
                   <OptionsBlock
@@ -2728,6 +2751,10 @@ export function ProductEditor({
                     onUnlink={() => unlink(product.id)}
                     membership={product.recurring !== null}
                   />
+                ) : null}
+                {/* A draft that hands over nothing yet may have its file written with AI (758 [STN5] unit 3); the server checks the same. */}
+                {product.hidden && !product.file && !product.link && product.options.length === 0 ? (
+                  <AiFileAssist productId={product.id} onSaved={() => router.refresh()} />
                 ) : null}
 
                 {/* Several prices would put a price on something free, and a chosen price is chosen once. */}

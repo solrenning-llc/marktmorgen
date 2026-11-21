@@ -55,6 +55,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/flows.ts", how: "erased", what: "Their way through every sequence and workflow, and any step still waiting to reach them" },
   { file: "lib/flow-runs.ts", how: "erased", via: "lib/flows.ts", what: "Each workflow run's record and history" },
   { file: "lib/broadcasts.ts", how: "expires", days: 60, what: "A broadcast already going out keeps its list of addresses until it finishes; a deleted address on it is passed over, never written to" },
+  { file: "lib/email-polls.ts", how: "expires", days: 60, what: "The answer a recipient gives to a poll in a broadcast, kept under their place in the broadcast's list, never their address; it goes by itself 30 days after the poll closes, so at most 60 days after the email was sent, and only the totals are shown" },
   { file: "lib/product-updates.ts", how: "expires", days: 60, what: "An update email already going out keeps its addresses until it finishes; a deleted address is passed over" },
   { file: "lib/product-updates.ts", how: "suppression", what: "If they had pressed stop on update emails, that one-way mark stays, as their own no" },
   { file: "lib/review-requests.ts", how: "suppression", what: "If they had pressed stop on review requests, that one-way mark stays, as their own no" },
@@ -87,6 +88,7 @@ export const PERSON_DATA: PersonData[] = [
 
   // ---------------------------------------------------------------- what the store keeps about them
   { file: "lib/crm.ts", how: "erased", what: "Your fields about them, every deal with them, and your team's tasks about them" },
+  { file: "lib/crm.ts", how: "kept", what: "A one-way mark that they were deleted, and the time of their last deletion, for 31 days at the most", why: "So a field saved late, from a page opened or a workflow step taken before the deletion, never puts anything about them back. It holds only a time and a number, cannot be turned back into the address, and goes by itself. The mark goes at once if they come back on their own: an order they start and pay for after the deletion, at a store with a mailing list; a sign-up or a place they confirm; or a free product they claim through the link emailed to them. A form they send does not take it away." },
   { file: "lib/crm-companies.ts", how: "erased", what: "Their link to any of your companies (the company stays)" },
   { file: "lib/agreement-store.ts", how: "erased", what: "Every proposal and agreement you sent them, each version's text and any signature they gave: their name and address, the name they typed, when, and the one-way code made from their internet address. One waiting for a signature stops taking one. The signed copies already emailed stay with whoever received them" },
   { file: "lib/api-idempotency.ts", how: "erased", what: "An answer our API kept for your tools for up to 24 hours, after a product was given to them or they were put on your list with an Idempotency-Key, so a repeated request is not done twice" },
@@ -213,6 +215,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/returning-code.ts", how: "expires", days: 1, what: "A code only for buyers who bought from your store before: only when the email typed with it paid for an order here, a link that works once is emailed to it, kept with the code, the product and that email for 30 minutes, then deleted; whoever asked is told the same either way" },
   { file: "lib/next-offer.ts", how: "expires", days: 3, what: "The one next product your Store assistant suggested after an order, under the order's reference and with no name or address, deleted three days later; what the buyer already owns is read from your Stripe account to leave it out, and not kept" },
   { file: "lib/yearly-ask.ts", how: "none", what: "Marks that a membership's yearly offer went, by its Stripe subscription, never by address" },
+  { file: "lib/certificate-refunds.ts", how: "none", what: "The pass that withdraws a certificate whose course was refunded reads the buyer's address from the store's Stripe account only to find their certificate, and keeps no address: only the ids of the refunds and closed disputes it handled, and how far it read" },
 ];
 
 /** Whether a line is said today: the backup's deletion records only once their reviews are filled (VR item 2). */

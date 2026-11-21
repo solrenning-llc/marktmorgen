@@ -169,6 +169,20 @@ function historicalEvent(raw: unknown): { id: string; fee: string | null; charge
   return { id, fee: null, charge };
 }
 
+/**
+ * The marks a sale carries when its platform fee also holds VAT collected for the tax office (lib/eu-vat-lines.ts,
+ * lib/eu-vat-collect.ts): fee = share + VAT + the costs of receiving it. Settling compares the fee with the share only,
+ * so it would give the VAT back to the creator. Until the VAT refund design is built (AGENTS.md IV (b): the VAT goes
+ * back with the buyer's money and the return is corrected), such a fee is unknown here: refused, never refunded.
+ */
+const VAT_HELD_MARKS = ["eu_vat", "uk_vat", "uk_vat_gbp"] as const;
+
+function holdsVat(fee: Fee, meta: unknown): void {
+  if (meta && typeof meta === "object" && VAT_HELD_MARKS.some((mark) => Object.hasOwn(meta, mark))) {
+    throw new UnknownAmount(fee.id, "Fee holds VAT collected for the tax office");
+  }
+}
+
 /** What was paid for the goods on a payment made through a checkout: after discounts, without tax or shipping. */
 function goodsOfSession(session: Record<string, unknown>): number | null {
   const total = num(session.amount_total);
@@ -248,6 +262,8 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
     // what the store owes on the day the invoice was made, which is none
     // inside the trial or once its plan has ended.
     const meta = ((invoice.subscription_details as { metadata?: unknown } | null)?.metadata ?? {}) as Record<string, string>;
+    holdsVat(fee, meta);
+    holdsVat(fee, invoice.metadata);
     const handle = str(meta.store);
     const store = handle ? await storeForHandle(handle) : null;
     const written = metadataInteger(meta.share_bps), created = num(invoice.created);
@@ -263,6 +279,8 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
   if (intent && (paymentReference(intent.latest_charge, "charge", /^(ch|py)_[A-Za-z0-9]+$/, fee.id) !== fee.charge
     || currency(intent.currency) !== fee.currency || num(intent.amount) !== amount)) throw new UnknownAmount(fee.id, "Payment intent does not match this charge");
   const meta = (intent ? intent.metadata : charge.metadata) as Record<string, string> | null;
+  holdsVat(fee, meta);
+  holdsVat(fee, charge.metadata);
   // The rate the sale was made at, written on it when the checkout opened.
   const bps = metadataInteger(meta?.share_bps);
   if (bps === null || bps > 10_000) throw new UnknownAmount(fee.id);

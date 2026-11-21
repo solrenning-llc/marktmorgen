@@ -85,6 +85,10 @@ redis.pipeline = async (commands: Commands) => {
   return out;
 };
 const writes = (commands: Commands, verb: string, key: string) => commands.some((c) => c[0] === verb && c[1] === key);
+// The owner route writes a new key through CREATE_KEY_IF_LIVE (Codex L-20261120-0937); fixtures still write it directly.
+const createsKey = (commands: Commands, sid: string) => commands.some((c) =>
+  (c[0] === "HSET" && c[1] === `nl:api:keys:${sid}`) ||
+  (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:api-key-create-live:v1\n") && c[5] === `nl:api:keys:${sid}`));
 
 const ORIGIN = "https://marktmorgen.com";
 const OWNER = "owner-keys@example.com";
@@ -346,7 +350,7 @@ async function main(): Promise<void> {
   await team(ownerPasskey, { action: "two-step", on: false });
   const louLink = await openSession(LOU);
   hook = async (commands) => {
-    if (!commands.some((c) => c[0] === "HSET" && c[1] === `nl:api:keys:${store.sid}`)) return;
+    if (!createsKey(commands, store.sid)) return;
     hook = null;
     const current = JSON.parse(await teamRaw()) as Record<string, unknown>;
     await realPipeline([["SET", `nl:team:${store.sid}`, JSON.stringify({ ...current, requireTwoStep: true })]]);
@@ -408,7 +412,7 @@ async function main(): Promise<void> {
   await newDay();
   part("G1: a key written after its maker was taken off, as the door let them in before, is theirs who left");
   hook = async (commands) => {
-    if (!commands.some((c) => c[0] === "HSET" && c[1] === `nl:api:keys:${third.sid}`)) return;
+    if (!createsKey(commands, third.sid)) return;
     hook = null;
     await teamSet(third, (t) => ({ ...t, members: t.members.filter((m) => m.email !== ADA) }));
   };
@@ -786,7 +790,7 @@ async function main(): Promise<void> {
   part("N1: a key written as its maker is demoted, checked against the old role, is refused at the door by the new one");
   let keyWritten = false;
   afterHook = async (commands) => {
-    if (commands.some((c) => c[0] === "HSET" && c[1] === `nl:api:keys:${fourth.sid}`)) keyWritten = true;
+    if (createsKey(commands, fourth.sid)) keyWritten = true;
     else if (keyWritten && commands.some((c) => c[0] === "GET" && c[1] === `nl:team:${fourth.sid}`)) {
       // The route read the team (still an Admin); the demotion is saved right after, its pause having read the keys before.
       afterHook = null;

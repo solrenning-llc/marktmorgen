@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { MAX_KEY_NAME, makeKey } from "@/lib/api-keys";
+import { MAX_KEY_NAME, makeKeyForStore } from "@/lib/api-keys";
 import { afterMake, makerFor, revokeChecked, shownKeys, turnKeyOn } from "@/lib/api-key-pause";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
       const step = (await liveSecondStep(email, session)) !== null;
       if (!step && (await hasSecondStep(email))) return Response.json({ ok: false, error: "second_step" }, { status: 403 });
       const maker = makerFor(store.sid, role, email, step);
-      const made = await makeKey(store.sid, text(body.name, MAX_KEY_NAME * 2), Date.now(), write, "none", maker);
+      const made = await makeKeyForStore(store, text(body.name, MAX_KEY_NAME * 2), Date.now(), write, "none", maker);
       if (!made.ok) return Response.json({ ok: false, error: made.reason }, { status: made.reason === "unavailable" ? 503 : 400 });
       // Checked again once written: the door let them in a moment before (owner C3-100).
       const paused = await afterMake(store, made.made.id, maker, email, write);

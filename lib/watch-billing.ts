@@ -19,7 +19,7 @@
  *   nl:watch:told:<folder>:<month>      the creator was written to about that month
  *   nl:watch:monthly:<subscription>     a yearly plan was set to bill added lines monthly
  */
-import { type Meter, type Settled as Used, firstWordOf, settleAllUsage, settleUsage, storeOf } from "@/lib/usage-billing";
+import { type Meter, type Settled as Used, firstWordOf, giveFirstWordBack, takeFirstWordOf, settleAllUsage, settleUsage, storeOf } from "@/lib/usage-billing";
 import { watchedFolders, watchedIn } from "@/lib/watch";
 import { VIDEO_HOURS_INCLUDED, VIDEO_SECONDS_INCLUDED, hoursWords, monthWords } from "@/lib/watch-rules";
 
@@ -60,4 +60,14 @@ export async function settleAll(now = Date.now()): Promise<Settled[]> {
 /** Whether the creator still has to be written to about this month: true the first time it is asked, and never again. */
 export async function firstWord(folder: string, month: string): Promise<boolean> {
   return firstWordOf(VIDEO, folder, month);
+}
+
+/** firstWord, keeping the mark's value: given back with giveVideoWordBack when the notice was certainly not sent. */
+export function takeVideoWord(folder: string, month: string): Promise<string | null> {
+  return takeFirstWordOf(VIDEO, folder, month);
+}
+
+/** Gives the month's mark back after a certain refusal, while it still holds this run's value (lib/usage-billing.ts). */
+export function giveVideoWordBack(folder: string, month: string, value: string): Promise<void> {
+  return giveFirstWordBack(VIDEO, folder, month, value);
 }

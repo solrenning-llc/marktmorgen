@@ -7,6 +7,7 @@
  * every list, and the copy of their data shows where they were. No route,
  * page or email yet: those are the next unit.
  */
+import { createHash } from "node:crypto";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, storeForEmail } from "@/lib/store";
 import {
   ALERT_TOKEN,
@@ -176,6 +177,19 @@ async function main(): Promise<void> {
   const cy2 = await askStockAlert({ store: s3, productId: a.product.id, email: "cy@example.com", left: 0 });
   is("control: asked again, its leave link works and says done", [cy2.ok, cy2.ok && (await leaveStockAlert(cy2.leave, s3)), (await confirmedForRestock(s3, a.product.id)).includes("cy@example.com")], [true, true, false]);
   void pid2;
+
+  part("A leave link whose kept value does not read is unknown, never 'no link' (Codex G on #3616)");
+  const dy = await askStockAlert({ store: s3, productId: a.product.id, email: "dy@example.com", left: 0 });
+  if (!dy.ok) throw new Error("not asked");
+  await confirmStockAlert(dy.confirm, s3);
+  const dyLink = `nl:sa:t:${createHash("sha256").update(dy.leave).digest("hex")}`;
+  for (const bent of ["{}", "{not json", 42]) {
+    const back = answer("GET", dyLink, bent);
+    is(`the link answered ${JSON.stringify(bent)}: unknown, never "no link"`, await rejects(() => leaveStockAlert(dy.leave, s3)), "unknown");
+    back();
+  }
+  is("and the address is still on the restock list", (await confirmedForRestock(s3, a.product.id)).includes("dy@example.com"), true);
+  is("control: the link read again leaves", [await leaveStockAlert(dy.leave, s3), (await confirmedForRestock(s3, a.product.id)).includes("dy@example.com")], [true, false]);
   part("Leaving between a confirmation's read and its write: the place stays gone (Codex G on #3616)");
   {
     const rae = await ask("rae@example.com");

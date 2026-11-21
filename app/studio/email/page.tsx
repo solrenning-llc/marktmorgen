@@ -29,8 +29,9 @@ import { readFlowListStrict } from "@/lib/flow-list";
 import { inTrial, monthlyAllowance, usedThisMonth } from "@/lib/mail";
 import { healthId, listHealth, pauseForSending, pauseWords, pausedFor } from "@/lib/mail-health";
 import { HEALTH_NOTE, healthAdvice, healthLevels, healthLine } from "@/lib/mail-health-levels";
-import { PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";
+import { PLAN_TITLES, PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";
 import { EmailStudio } from "@/components/email-studio";
+import { AutomationDraftBox } from "@/components/automation-draft";
 import { emailEquivalence } from "@/lib/email-equivalence";
 import { readForms } from "@/lib/form-store";
 import { readFields, readPipelines } from "@/lib/crm";
@@ -131,6 +132,10 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   };
   const letterMembers = (id: string) => published?.get(letterIdFor(store.sid, id))?.members ?? false;
 
+  // The writing help, read once for the Email Studio and the workflow drafted from a goal (20 [E3]).
+  // An allowance that could not be read is said in words by the AI boxes, never shown as "0 left" (rule 24, VR item 2).
+  const ai = aiAvailableFor(store) && can(role, "draft") ? aiOnValue(true, await aiLeft(store).catch(() => null)) : aiOnValue(false, null);
+
   return (
     <div className="min-h-screen bg-paper text-ink">
       <StudioHeader
@@ -172,7 +177,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
         ) : allowance === 0 ? (
           <div className="card mt-8 p-6 sm:p-8">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Part of Pro</h2>
+              <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">{`Part of the ${PLAN_TITLES.pro} plan`}</h2>
               <span className="tag tag-brand">{priceWords("pro", "month")}</span>
             </div>
             <ul className="mt-4 space-y-2 text-ink-soft">
@@ -184,24 +189,24 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               <li>Import the list you already have, and take it with you as a file whenever you like.</li>
             </ul>
             <p className="mt-4 text-sm text-ink-soft">
-              {`${PLANS_ON_SALE ? "" : "When plans open, Pro is "}${priceWords("pro", "month")}, or ${priceWords("pro", "year")} — $${(yearSaving("pro") / 100).toLocaleString("en-US")} less. Everything else in your store stays exactly as it is.`}
+              {`${PLANS_ON_SALE ? "" : `When plans open, the ${PLAN_TITLES.pro} plan is `}${priceWords("pro", "month")}, or ${priceWords("pro", "year")} — $${(yearSaving("pro") / 100).toLocaleString("en-US")} less. Everything else in your store stays exactly as it is.`}
             </p>
             {!can(role, "billing") ? (
               <p className="mt-5 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">
-                The store&apos;s owner chooses its plan. When they move it to Pro, email opens here for you too.
+                {`The store's owner chooses its plan. When they move it to the ${PLAN_TITLES.pro} plan, email opens here for you too.`}
               </p>
             ) : !PLANS_ON_SALE || !isBillingConfigured() ? (
               // The checkout and the switch both refuse then (app/api/billing/checkout, app/api/billing/switch),
               // so no button offers either.
               <p className="mt-5 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">
-                Paid plans are not on sale yet, so this store cannot move to Pro for now.
+                {`Paid plans are not on sale yet, so this store cannot move to the ${PLAN_TITLES.pro} plan for now.`}
               </p>
             ) : store.subscriptionActive ? (
               store.subscriptionId ? (
                 <form action={`/api/billing/switch?store=${store.sid}`} method="post" className="mt-5">
                   <input type="hidden" name="tier" value="pro" />
                   <input type="hidden" name="cycle" value={store.cycle} />
-                  <button type="submit" className="btn btn-primary">Move up to Pro</button>
+                  <button type="submit" className="btn btn-primary">{`Move up to the ${PLAN_TITLES.pro} plan`}</button>
                 </form>
               ) : null
             ) : (
@@ -209,11 +214,11 @@ export default async function StudioEmailPage({ searchParams }: Params) {
                 <input type="hidden" name="tier" value="pro" />
                 <button type="submit" name="cycle" value="month" className="btn btn-primary btn-wrap">
                   {trialOffered(store)
-                    ? `Start the ${TRIAL_DAYS}-day trial on Pro — ${priceWords("pro", "month")} after that`
-                    : `Start Pro — ${priceWords("pro", "month")}, from today`}
+                    ? `Start the ${TRIAL_DAYS}-day trial on the ${PLAN_TITLES.pro} plan — ${priceWords("pro", "month")} after that`
+                    : `Start the ${PLAN_TITLES.pro} plan — ${priceWords("pro", "month")}, from today`}
                 </button>
                 <button type="submit" name="cycle" value="year" className="btn btn-secondary btn-wrap">
-                  {`Or Pro yearly: ${priceWords("pro", "year")}`}
+                  {`Or the ${PLAN_TITLES.pro} plan yearly: ${priceWords("pro", "year")}`}
                 </button>
               </form>
             )}
@@ -324,7 +329,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             draftsReadFailed={loadedDrafts === null}
             flows={flows.map((f) => ({ ...f, statsAvailable: stats?.has(f.id) ?? false, stats: stats?.get(f.id) ?? { started: 0, sent: 0, reached: 0, skipped: 0, acted: 0 }, money: flowMoney(revenue, f.id) }))}
             links={Object.fromEntries([...listings].map(([id]) => [id, productLink(store, id)]))}
-            ai={aiAvailableFor(store) && can(role, "draft") ? aiOnValue(true, await aiLeft(store).catch(() => null)) : aiOnValue(false, null)}
+            ai={ai}
             segments={await listSegments(store.listId).catch(() => [])}
             preset={typeof query.who === "string" && (WHO as readonly string[]).includes(query.who) ? { who: query.who as Who } : undefined}
             courses={idsOfKind(store, "course")}
@@ -349,6 +354,9 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             switchedOff={Boolean(store.suspended)}
             assignees={can(role, "send") ? [store.email.toLowerCase(), ...(await readTeam(store.sid).catch(() => ({ members: [] as { email: string; role: Parameters<typeof can>[0] }[] }))).members.filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())] : []}
           />
+          {can(role, "send") ? (
+            <AutomationDraftBox ai={ai} />
+          ) : null}
           </>
         )}
       </main>

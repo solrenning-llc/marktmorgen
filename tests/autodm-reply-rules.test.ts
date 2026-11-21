@@ -11,9 +11,12 @@
  *   - a post's whole rule: every part checked by unit 1's readers, the first
  *     problem named with its field (and its keyword or test account), the
  *     product one the store sells now, defaults for what was left out;
+ *   - how keywords match (759 [STN6]): the exact word by default, kept in
+ *     the rule, "forgiving" only when chosen, anything else refused; the
+ *     decision and the test box both follow the rule's choice;
  *   - test before live: a rule saved live only when its test reply went out
- *     for exactly this rule, so any change to what people get asks for a new
- *     test;
+ *     for exactly this rule, so any change to what people get (the match
+ *     choice included) asks for a new test;
  *   - the decision for one comment, in a fixed order: the rule off, no
  *     account id, the account's own comment, the person out of reach, no
  *     keyword, too soon; never a send while AUTODM_LIVE is false outside test
@@ -25,7 +28,7 @@
  *   - the studio's test box, which never promises a reply decideReply would
  *     refuse, and every problem said in plain US English, never "keyword 0".
  */
-import { AUTODM_LIVE, DEFAULT_MODE, DEFAULT_REPEAT, KEYWORD_MAX_CHARS, MAX_KEYWORDS_PER_POST, MAX_TESTERS, mayReachPerson } from "@/lib/autodm-rules";
+import { AUTODM_LIVE, DEFAULT_MATCH, DEFAULT_MODE, DEFAULT_REPEAT, KEYWORD_MAX_CHARS, MAX_KEYWORDS_PER_POST, MAX_TESTERS, mayReachPerson } from "@/lib/autodm-rules";
 import {
   REPLY_MAX_CHARS,
   REPLY_MAX_CODE_POINTS,
@@ -169,6 +172,7 @@ check("a complete rule is read with every part as typed", () => {
       id: "rule42abc",
       post: "17890012345",
       keywords: ["Guide", "free"],
+      match: "exact",
       repeat: "12h",
       mode: "test",
       testers: ["my_test_account"],
@@ -178,10 +182,11 @@ check("a complete rule is read with every part as typed", () => {
     },
   });
 });
-check("what was left out takes the defaults: 12 hours, test mode, no test accounts, never tested", () => {
+check("what was left out takes the defaults: the exact word, 12 hours, test mode, no test accounts, never tested", () => {
   const result = readAutoDmRule({ id: "rule42abc", post: "1789", keywords: ["guide"], reply: "Here it is", product: "p1a2b3c4" }, PRODUCTS);
   if (!result.ok) throw new Error(JSON.stringify(result));
-  equal([result.rule.repeat, result.rule.mode, result.rule.testers, result.rule.tested], [DEFAULT_REPEAT, DEFAULT_MODE, [], null]);
+  equal([result.rule.match, result.rule.repeat, result.rule.mode, result.rule.testers, result.rule.tested], [DEFAULT_MATCH, DEFAULT_REPEAT, DEFAULT_MODE, [], null]);
+  equal(DEFAULT_MATCH, "exact");
 });
 check("a rule that is not an object is refused at its id", () => {
   for (const value of [null, undefined, "x", 3, []]) equal(readAutoDmRule(value, PRODUCTS), { ok: false, field: "id", problem: "bad" }, String(value));
@@ -195,9 +200,20 @@ check("a post id must be 1 to 64 letters, digits, '_' or '-'", () => {
 });
 check("keyword problems come back with the keyword's place, from unit 1's reader", () => {
   equal(readAutoDmRule(input({ keywords: [] }), PRODUCTS), { ok: false, field: "keywords", problem: "empty", index: -1 });
-  equal(readAutoDmRule(input({ keywords: ["guide", "Guides"] }), PRODUCTS), { ok: false, field: "keywords", problem: "duplicate", index: 1, other: 0 });
+  equal(readAutoDmRule(input({ keywords: ["guide", "Guide"] }), PRODUCTS), { ok: false, field: "keywords", problem: "duplicate", index: 1, other: 0 });
+  equal(readAutoDmRule(input({ keywords: ["guide", "Guides"], match: "forgiving" }), PRODUCTS), { ok: false, field: "keywords", problem: "duplicate", index: 1, other: 0 });
   equal(readAutoDmRule(input({ keywords: ["x".repeat(KEYWORD_MAX_CHARS + 1)] }), PRODUCTS), { ok: false, field: "keywords", problem: "too_long", index: 0 });
   equal(readAutoDmRule(input({ keywords: Array.from({ length: MAX_KEYWORDS_PER_POST + 1 }, (_, i) => `word${i}`) }), PRODUCTS), { ok: false, field: "keywords", problem: "too_many", index: MAX_KEYWORDS_PER_POST });
+});
+check("the match choice is kept in the rule; with the exact word a plural is its own keyword", () => {
+  equal(rule().match, "exact");
+  equal(rule({ match: "forgiving" }).match, "forgiving");
+  equal(rule({ match: "exact", keywords: ["guide", "Guides"] }).keywords, ["guide", "Guides"]);
+});
+check("a match choice that is not one of the two is refused, not replaced by the default", () => {
+  for (const match of ["fuzzy", "Exact", "", null, 1, true]) equal(readAutoDmRule(input({ match }), PRODUCTS), { ok: false, field: "match", problem: "bad" }, String(match));
+  equal(readAutoDmRule(input({ match: "fuzzy", keywords: [] }), PRODUCTS), { ok: false, field: "keywords", problem: "empty", index: -1 }, "keywords come first in field order");
+  equal(readAutoDmRule(input({ match: "fuzzy", reply: "" }), PRODUCTS), { ok: false, field: "match", problem: "bad" }, "the match before the reply");
 });
 check("a repeat or a mode that is not one of the choices is refused, not replaced by the default", () => {
   equal(readAutoDmRule(input({ repeat: "2h" }), PRODUCTS), { ok: false, field: "repeat", problem: "bad" });
@@ -235,7 +251,7 @@ check("a rule whose test reply went out for exactly this rule can be saved live"
 });
 check("changing what people get, who gets it again or which post after the test asks for a new test", () => {
   const tested = noteTested(rule());
-  for (const change of [{ keywords: ["guide"] }, { reply: "Changed text" }, { product: "k9x8y7z6" }, { repeat: "1h" }, { post: "999" }]) {
+  for (const change of [{ keywords: ["guide"] }, { match: "forgiving" }, { reply: "Changed text" }, { product: "k9x8y7z6" }, { repeat: "1h" }, { post: "999" }]) {
     equal(readAutoDmRule({ ...tested, ...change, mode: "live" }, PRODUCTS, tested.tested), { ok: false, field: "mode", problem: "untested" }, JSON.stringify(change));
   }
 });
@@ -310,6 +326,12 @@ check("no keyword in the comment: nothing is sent", () => {
   equal(decide({ comment: "love this" }), { send: false, why: "no_match" });
   equal(decide({ comment: "guidebook" }), { send: false, why: "no_match" });
 });
+check("by default only the exact word sends; a similar word sends only when the creator chose forgiving", () => {
+  equal(decide({ comment: "GUIDE!!" }), { send: true, keyword: "guide" });
+  for (const comment of ["guides please", "a guided tour", "send the gude"]) equal(decide({ comment }), { send: false, why: "no_match" }, comment);
+  equal(decide({ rule: rule({ match: "forgiving" }), comment: "guides please" }), { send: true, keyword: "guide" });
+  equal(decide({ rule: rule({ match: "forgiving" }), comment: "send the gude" }), { send: true, keyword: "guide" });
+});
 check("the same person again inside the repeat interval: too soon; after it: sent", () => {
   equal(decide({ lastSentAtSeconds: NOW - 43_199 }), { send: false, why: "too_soon" });
   equal(decide({ lastSentAtSeconds: NOW - 43_200 }), { send: true, keyword: "guide" });
@@ -369,7 +391,7 @@ check("the link never names the person, the post or the keyword", () => {
 
 // The studio's test box and the words.
 check("the test box says which keyword matched and who would get the reply in each mode", () => {
-  equal(tryComment(rule(), "GUIDES!!"), { matched: "guide", words: 'This comment matches "guide". In test mode, only your test accounts get the reply.' });
+  equal(tryComment(rule(), "GUIDE!!"), { matched: "guide", words: 'This comment matches "guide". In test mode, only your test accounts get the reply.' });
   equal(tryComment(rule({ mode: "off" }), "guide"), { matched: "guide", words: 'This comment matches "guide". This rule is off, so nobody gets the reply.' });
   const live = { ...noteTested(rule()), mode: "live" as const };
   equal(tryComment(live, "guide").words, AUTODM_LIVE ? 'This comment matches "guide". Everyone who comments it gets the reply.' : 'This comment matches "guide". AutoDM can\'t send replies yet, so nobody gets the reply.');
@@ -385,8 +407,13 @@ check("the test box never says someone gets a reply that decideReply would refus
 check("the test box says plainly when nothing matches", () => {
   equal(tryComment(rule(), "love this"), { matched: null, words: "This comment doesn't match any keyword, so no reply is sent." });
 });
+check("the test box follows the rule's match choice, as decideReply does", () => {
+  equal(tryComment(rule(), "GUIDES!!").matched, null);
+  equal(tryComment(rule({ match: "forgiving" }), "GUIDES!!").matched, "guide");
+});
 check("the test box shows the keyword as the creator typed it", () => {
-  equal(tryComment(rule({ keywords: ["Free Guide"] }), "free guides").matched, "Free Guide");
+  equal(tryComment(rule({ keywords: ["Free Guide"] }), "free, guide!").matched, "Free Guide");
+  equal(tryComment(rule({ keywords: ["Free Guide"], match: "forgiving" }), "free guides").matched, "Free Guide");
 });
 check("every problem has one plain US English sentence, numbered from 1 for people", () => {
   const sentences = [
@@ -399,6 +426,7 @@ check("every problem has one plain US English sentence, numbered from 1 for peop
     ruleProblemWords({ ok: false, field: "keywords", problem: "too_many_words", index: 0 }),
     ruleProblemWords({ ok: false, field: "keywords", problem: "no_letters", index: 0 }),
     ruleProblemWords({ ok: false, field: "keywords", problem: "duplicate", index: 1, other: 0 }),
+    ruleProblemWords({ ok: false, field: "match", problem: "bad" }),
     ruleProblemWords({ ok: false, field: "repeat", problem: "bad" }),
     ruleProblemWords({ ok: false, field: "mode", problem: "bad" }),
     ruleProblemWords({ ok: false, field: "mode", problem: "untested" }),

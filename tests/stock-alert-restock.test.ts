@@ -167,7 +167,25 @@ async function main(): Promise<void> {
   is("waits", Number(due()) > Date.now(), true);
   makeDue();
   const refused = sender("refused");
-  is("a refusal (a spent figure) sends nothing either", await runRestocks(Date.now() + 30_000, { ...real, send: refused.send }), 0);
+  const cap = process.env.MARKETING_DAILY_CAP;
+  const dayCommands: (string | number)[][] = [];
+  const runBeforeRefund = redis.run;
+  redis.run = (command: (string | number)[]) => {
+    if ((command[0] === "INCRBY" || command[0] === "DECRBY") && String(command[1]).startsWith("nl:mail:day:")) dayCommands.push(command);
+    return runBeforeRefund.call(redis, command);
+  };
+  process.env.MARKETING_DAILY_CAP = "10"; // Synthetic nonzero cap so the real reservation and refund both write.
+  try {
+    is("a refusal (a spent figure) sends nothing either", await runRestocks(Date.now() + 30_000, { ...real, send: refused.send }), 0);
+  } finally {
+    redis.run = runBeforeRefund;
+    if (cap === undefined) delete process.env.MARKETING_DAILY_CAP;
+    else process.env.MARKETING_DAILY_CAP = cap;
+  }
+  is("the refused batch gives back exactly what it reserved on the same day", dayCommands, [
+    ["INCRBY", dayCommands[0]?.[1], 2],
+    ["DECRBY", dayCommands[0]?.[1], 2],
+  ]);
   is("the same batch, under the same key", [refused.calls[0]?.key, refused.calls[0]?.messages.map((m) => m.to).sort()], [failing.calls[0].key, ["dee@example.com", "eli@example.com"]]);
   is("still kept", redis.run(["HEXISTS", listKey, "dee@example.com"]), 1);
 
@@ -210,6 +228,29 @@ async function main(): Promise<void> {
   await runRestocks(Date.now() + 30_000, { ...real, send: second.send });
   is("tried again as the same batch under the same key, which the email service sends to nobody twice", second.calls[0]?.key, first.calls[0].key);
   is("then cleaned up", [redis.run(["HEXISTS", listKey, "fay@example.com"]), redis.run(["EXISTS", `${listKey}:job`])], [0, 0]);
+
+  part("An unreadable address during cleanup keeps the same batch");
+  const cleanupEmail = "restock-cleanup@example.test";
+  await place(cleanupEmail);
+  makeDue();
+  const sentBeforeCleanup = sender("sent");
+  redis.run = (c) => (c[0] === "HGET" && c[1] === listKey && c[2] === cleanupEmail ? "{unreadable" : run(c));
+  try {
+    await runRestocks(Date.now() + 30_000, { ...real, send: sentBeforeCleanup.send });
+  } finally {
+    redis.run = run;
+  }
+  is("the provider got one batch", sentBeforeCleanup.calls.length, 1);
+  is("an unreadable cleanup keeps the batch and its address for retry", [
+    redis.run(["EXISTS", `${listKey}:job`]), redis.run(["HEXISTS", listKey, cleanupEmail]),
+  ], [1, 1]);
+  makeDue();
+  const finishCleanup = sender("sent");
+  await runRestocks(Date.now() + 30_000, { ...real, send: finishCleanup.send });
+  is("cleanup is retried under the same provider key", finishCleanup.calls[0]?.key, sentBeforeCleanup.calls[0]?.key);
+  is("the address and batch are cleaned up when the reply is readable", [
+    redis.run(["EXISTS", `${listKey}:job`]), redis.run(["HEXISTS", listKey, cleanupEmail]),
+  ], [0, 0]);
 
   part("The Portuguese words are Portugal's (the store's pt locale is pt-PT; Codex U on #3620)");
   const pt = STOCK_ALERT_WORDS.pt;

@@ -456,7 +456,7 @@ FUNNEL_STARTERS.push(
 // health, beauty or other result, no rating, badge or "best seller", no
 // delivery date.
 const SHIP_FIRST =
-  "Choose a product you ship. Only a paid product bought once can ship. A membership, a call, a bundle, a payment plan or a price the buyer chooses cannot. Neither can a product with a file, link, course or podcast to hand over. In its editor, turn on “Ship it: a physical product, sent by you”. Its page then shows what shipping costs and where it ships. The checkout asks for an address.";
+  "Choose a product you ship. Only a paid product bought once can ship. A membership, a call, a bundle or a payment plan cannot. Neither can a product with a file, link, course or podcast to hand over. In its editor, turn on “Ship it: a physical product, sent by you”. Its page then shows what shipping costs and where it ships. The checkout asks for an address.";
 FUNNEL_STARTERS.push({
   id: "physical-product",
   label: "Sell something you ship",

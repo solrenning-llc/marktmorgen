@@ -20,7 +20,7 @@ let lease: "refused" | "emulated" = "refused";
 let garbleConfig = false;
 redis.pipeline = (async (batch: Batch) => {
   const [command] = batch;
-  if (batch.length === 1 && command?.[0] === "EVAL") {
+  if (batch.length === 1 && command?.[0] === "EVAL" && !String(command[1]).startsWith("-- marktmorgen:")) {
     if (lease === "refused") return [0];
     const [, , , key, member, now, until] = command;
     const due = redis.run(["ZSCORE", String(key), String(member)]);

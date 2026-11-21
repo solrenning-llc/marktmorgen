@@ -1814,12 +1814,12 @@ export class MemoryRedis {
           this.until.set(marker, this.now() + 3456000 * 1000);
           return 1;
         }
-        // lib/page-funnel-store.ts SAVE_STORE_PAGE_FUNNEL: the store-live guard (store-cache-live:v2's), then funnel-save:v1's body.
-        if (key.startsWith("-- marktmorgen:funnel-save-live:v1\n") && args[0] === "3" && args.length === 10) {
-          const [, target, live, erasing, id, body, max, mode, field, statsId] = args;
+        // lib/page-funnel-store.ts SAVE_STORE_PAGE_FUNNEL: the store-live guard (v2: a store with an id's id key must hold its ref), then funnel-save:v1's body.
+        if (key.startsWith("-- marktmorgen:funnel-save-live:v2\n") && args[0] === "3" && args.length === 11) {
+          const [, target, live, erasing, id, body, max, mode, field, statsId, ref] = args;
           if (this.run(["HGET", erasing, field]) !== null) return -4;
           if (statsId === "") {
-            if (this.run(["EXISTS", live]) !== 1) return -4;
+            if (this.run(["GET", live]) !== ref) return -4;
           } else {
             const raw = this.run(["GET", live]);
             if (raw === null) return -4;

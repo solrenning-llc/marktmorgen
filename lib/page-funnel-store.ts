@@ -20,7 +20,8 @@ import { dataBytes } from "@/lib/store-data-rules";
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
-import { ERASING_KEY, STORE_ID_PATTERN, type Listing, type Store, erasingField, ownerKey, storeIdCommand, storeRef } from "@/lib/store";
+import type { Listing, Store } from "@/lib/store";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { readListings } from "@/lib/catalog";
 import { pageOut } from "@/lib/site-page-rules";
 import { productSegment } from "@/lib/product-slug";
@@ -146,15 +147,18 @@ const countsLeft = (funnel: PageFunnel, now: number): DataChange => ({ until: no
  * must still exist and its erasing mark (lib/store.ts ERASING_KEY) must be absent, in the same step as the capacity,
  * id and address checks and the HSET. A save prepared before the store's erasure, and sent after the closing walk
  * passed this hash or while it is still running, would otherwise write the erased store's private funnel back, its
- * name, address and steps, with no expiry. The guard is the fence of lib/store-live-cache.ts (store-cache-live:v2):
- * a store with an id is fenced on its id key; one from before ids, on its owner's record, and only while that record
- * is still this store's own (its statsId); -4 means the store is gone or being erased, and nothing was written.
- * KEYS[1] and ARGV[1..4] are SAVE_PAGE_FUNNEL's own. Two more commands than it (the HGET and the EXISTS or GET).
+ * name, address and steps, with no expiry. The guard is the fence of lib/store-live-cache.ts (storeLiveFence): a
+ * store with an id is fenced on its id key still holding this store's ref, ARGV[7] (v2, the rule of
+ * store-claim-live:v1, lib/live-fence.ts: moveAccount repoints the id key, and an erasure begun after a move marks
+ * the new ref's field, so the key's mere existence let a save prepared under the old ref land); one from before ids,
+ * on its owner's record, and only while that record is still this store's own (its statsId); -4 means the store is
+ * gone, moved or being erased, and nothing was written. KEYS[1] and ARGV[1..4] are SAVE_PAGE_FUNNEL's own. Two more
+ * commands than it (the HGET and the GET).
  */
-export const SAVE_STORE_PAGE_FUNNEL = `-- marktmorgen:funnel-save-live:v1
+export const SAVE_STORE_PAGE_FUNNEL = `-- marktmorgen:funnel-save-live:v2
 if redis.call("HGET", KEYS[3], ARGV[5]) then return -4 end
 if ARGV[6] == "" then
-  if redis.call("EXISTS", KEYS[2]) ~= 1 then return -4 end
+  if redis.call("GET", KEYS[2]) ~= ARGV[7] then return -4 end
 else
   local raw = redis.call("GET", KEYS[2])
   if not raw then return -4 end
@@ -179,7 +183,7 @@ for i = 1, #rows, 2 do
 end
 redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
 return 1`;
-/** Commands SAVE_STORE_PAGE_FUNNEL adds to SAVE_PAGE_FUNNEL: the erasing mark's HGET and the store key's EXISTS or GET. */
+/** Commands SAVE_STORE_PAGE_FUNNEL adds to SAVE_PAGE_FUNNEL: the erasing mark's HGET and the store key's GET. */
 export const FUNNEL_LIVE_GUARD_COMMANDS = 2;
 
 /** The funnel's store is gone or being erased: nothing was written, and nothing is given back to its room. */
@@ -233,11 +237,9 @@ export async function writePageFunnel(statsId: string, funnel: PageFunnel, exist
  */
 export async function writeStorePageFunnel(statsId: string, funnel: PageFunnel, existing: readonly PageFunnel[], store: Store, now = Date.now()): Promise<PageFunnel> {
   if (!statsId || store.statsId !== statsId) throw new UnknownReplyError("a funnel's store");
-  const ref = storeRef(store);
-  const withId = STORE_ID_PATTERN.test(store.sid);
   return saveFunnel(funnel, existing, store, now, async (made, isNew) => {
-    const live = withId ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
-    return ["EVAL", SAVE_STORE_PAGE_FUNNEL, 3, funnelsKey(statsId), live, ERASING_KEY, made.id, JSON.stringify(made), MAX_PAGE_FUNNELS, isNew ? "new" : "edit", await erasingField(ref), withId ? "" : statsId];
+    const fence = await storeLiveFence(store);
+    return ["EVAL", SAVE_STORE_PAGE_FUNNEL, 3, funnelsKey(statsId), fence.live, fence.erasing, made.id, JSON.stringify(made), MAX_PAGE_FUNNELS, isNew ? "new" : "edit", fence.field, fence.statsId === "" ? "" : statsId, fence.ref];
   });
 }
 

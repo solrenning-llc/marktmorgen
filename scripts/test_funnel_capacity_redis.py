@@ -72,17 +72,21 @@ def main():
         # The store-live guard (Codex L-20261120-2144): a store's key, its erasing mark, and a legacy record's statsId.
         hold, live, erasing = prefix + "live-funnels", prefix + "live-store", prefix + "live-erasing"
         keys.extend([hold, live, erasing])
-        def save_live(index, field="f1", stats=""):
+        def save_live(index, field="f1", stats="", ref="store-ref"):
             identity = str(index).zfill(10)
             body = json.dumps({"id": identity, "slug": "live-" + str(index)})
-            return redis.command("EVAL", live_script, 3, hold, live, erasing, identity, body, cap, "new", field, stats)
+            return redis.command("EVAL", live_script, 3, hold, live, erasing, identity, body, cap, "new", field, stats, ref)
         assert save_live(1) == -4 and redis.command("EXISTS", hold) == 0
         redis.command("SET", live, "store-ref")
         assert save_live(2) == 1 and redis.command("HLEN", hold) == 1
         redis.command("HSET", erasing, "f1", "1")
         assert save_live(3) == -4 and redis.command("HLEN", hold) == 1
         assert save_live(4, field="f2") == 1 and redis.command("HLEN", hold) == 2
-        print("PASS: a store with an id saves only while its key exists and its erasing mark is absent")
+        # v2 (store-claim-live:v1): the account moved, so the id key holds another ref; a save under the old one is refused.
+        redis.command("SET", live, "moved-ref")
+        assert save_live(8, field="f2") == -4 and redis.command("HLEN", hold) == 2
+        assert save_live(9, field="f2", ref="moved-ref") == 1 and redis.command("HLEN", hold) == 3
+        print("PASS: a store with an id saves only while its id key holds its own ref and its erasing mark is absent")
 
         redis.command("DEL", hold)
         redis.command("SET", live, json.dumps({"statsId": "other-stats"}))

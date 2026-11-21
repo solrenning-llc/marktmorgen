@@ -111,6 +111,9 @@ export function isOneOff(product: Listing): boolean {
 export function canBeBumped(product: Listing): boolean {
   return (
     isOneOff(product) &&
+    // Something shipped needs an address and a shipping line, which a box on another product's checkout adds neither of;
+    // a bundle saved with shipping is not sold at all (lib/product-option.ts handsOver; tests/bundle-physical-owner.test.ts).
+    !product.shipping &&
     product.options.length === 0 &&
     !product.pwyw &&
     product.stock === null &&
@@ -139,6 +142,8 @@ export type BumpPause =
   | "pwyw"
   /** The product it offers is no longer in the store. */
   | "gone"
+  /** That product is a draft, which buyers do not see and cannot buy (MM-SA-33). */
+  | "targetDraft"
   /** It ended up pointing at itself. */
   | "itself"
   /** That product is given away now, and there is no price to offer it at. */
@@ -173,6 +178,9 @@ export function bumpTargetPause(target: Listing): BumpPause | null {
   // Three separate reasons, said separately. One sentence offering the creator
   // a choice of three things that might be wrong is the same defect the room's
   // refusals had: the code knows which, so it says which.
+  // A draft first: it is not on sale, so its title and price are never drawn
+  // on a published page nor charged as a line (MM-SA-33, as canSellProduct).
+  if (target.hidden) return "targetDraft";
   if (target.call !== null) return "targetCall";
   if (target.recurring !== null) return "targetRecurring";
   if (target.priceCents <= 0) return "targetFree";
@@ -180,6 +188,8 @@ export function bumpTargetPause(target: Listing): BumpPause | null {
   if (target.pwyw) return "targetPwyw";
   if (target.stock !== null) return "targetLimited";
   if (target.bundle && target.pick) return "targetPick";
+  // Shipped (a bundle saved with shipping included): nothing a box can hand over without an address and its shipping.
+  if (target.shipping) return "targetEmpty";
   if (target.file === null && target.link === null && (target.bundle?.length ?? 0) < MIN_BUNDLE_ITEMS) return "targetEmpty";
   return null;
 }
@@ -263,6 +273,8 @@ export function bumpPauseWords(why: BumpPause, offer: string, where: OfferPlace 
       return `The product ${here} offered is no longer in your store. Pick another one.`;
     case "itself":
       return `${Here} points at this same product. Pick another one.`;
+    case "targetDraft":
+      return `${it} is a draft, so buyers cannot see it or buy it. Publish ${it}, or offer something else.`;
     case "targetFree":
       return `${it} is given away now, so there is no price to offer it at. Put a price on ${it}, or offer something else.`;
     case "targetRecurring":

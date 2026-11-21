@@ -37,6 +37,7 @@ export { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin,
 import { MAX_LINKS, type NumbersLink, parseLinks } from "@/lib/numbers-links";
 import { type ShipProblem, type Shipping, shipProblem, readShippingSku } from "@/lib/shipping";
 import { type CartDeal, NO_DEAL, parseCartDeal } from "@/lib/cart-rules";
+import { HELD_INDEX, type HeldLink, parseHeldLinks } from "@/lib/takedown-hold";
 import { type Video, parseVideo } from "@/lib/sales-page";
 import { type FaqItem, parseFaq } from "@/lib/store-faq";
 import { type FaqAddRefusal, faqAddition } from "@/lib/faq-from-inbox";
@@ -695,6 +696,13 @@ export type Store = {
    */
   suspended: string;
   strikes: Strike[];
+  /**
+   * Links taken down for a copyright notice and held until the counter-notice window ends (lib/takedown-hold.ts):
+   * on no page, still counted against MAX_STORE_LINKS so one can always go back. `heldUnread` keeps, as stored, an
+   * entry not in its exact shape, never acted on. Absent on stores that never had one.
+   */
+  heldLinks?: HeldLink[];
+  heldUnread?: unknown[];
   /** The store's own questions and answers, on its page (lib/store-faq.ts). */
   faq: FaqItem[];
   /**
@@ -1013,6 +1021,16 @@ export async function imageFolder(email: string): Promise<string> {
   return (await sha256Hex(`nimbus-images:${email.toLowerCase()}`)).slice(0, 24);
 }
 
+/** A record's held links, and the entries it could not read, kept as they are (lib/takedown-hold.ts). */
+function heldOf(value: Record<string, unknown>): Pick<Store, "heldLinks" | "heldUnread"> {
+  const all = [...(Array.isArray(value.heldLinks) ? value.heldLinks : []), ...(Array.isArray(value.heldUnread) ? value.heldUnread : [])];
+  const { held, unread } = parseHeldLinks(all);
+  return { ...(held.length ? { heldLinks: held } : {}), ...(unread.length ? { heldUnread: unread } : {}) };
+}
+
+/** How many places in the list of links held links keep (lib/takedown-hold.ts). */
+const heldPlaces = (store: Pick<Store, "heldLinks" | "heldUnread">) => (store.heldLinks?.length ?? 0) + (store.heldUnread?.length ?? 0);
+
 /**
  * A store's allowance anchor as read: none, a whole one, or one that cannot be read, kept as an anchor that is never
  * a window (lib/allowance-window.ts isAllowanceAnchor), never dropped to none.
@@ -1167,6 +1185,7 @@ function parseStore(raw: unknown): Store | null {
             ? value.suspended
             : "unknown",
       strikes: parseStrikes(value.strikes),
+      ...heldOf(value as Record<string, unknown>),
       faq: parseFaq(value.faq),
       intro: parseVideo(value.intro),
       order: parseOrder(value.order),
@@ -1236,6 +1255,17 @@ export async function storeForEmailSeen(
   if (!store || typeof store.email !== "string" ||
       storeRef(store).toLowerCase() !== email.toLowerCase()) return null;
   return store;
+}
+
+/**
+ * Whether a store's record is kept under this ref: false only when Redis answers that no record is there, true when
+ * one is, and null for anything else (rule 24): an unknown reply is never taken for a store that is gone.
+ */
+export async function storeRecordKept(ref: string): Promise<boolean | null> {
+  if (!ref || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["EXISTS", await ownerKey(ref)]]), 1);
+  const there = replies ? countOf(replies[0]) : null;
+  return there === 0 ? false : there === 1 ? true : null;
 }
 
 /**
@@ -2299,6 +2329,7 @@ export async function deleteStore(email: string, queue: (store: Store) => Promis
       ["SREM", await accountKey(store.email), store.sid],
       ["ZREM", ENDED_INDEX, storeRef(store)],
       ["SREM", SHARING_INDEX, storeRef(store)],
+      ["ZREM", HELD_INDEX, storeRef(store)],
     ];
     let replies: unknown[] | null = null;
     try {
@@ -2383,6 +2414,8 @@ export async function closeStoreRecord(
       ...(STORE_ID_PATTERN.test(sid) ? [{ op: "DEL", key: storeIdKey(sid), words: [] }, ...[...accounts].map((account) => ({ op: "SREM", key: account, words: [sid] }))] : []),
       { op: "ZREM", key: ENDED_INDEX, words: [storeRef(store)] },
       { op: "SREM", key: SHARING_INDEX, words: [storeRef(store)] },
+      // This PR's held links (lib/takedown-hold.ts): the closing store leaves the index of stores holding one.
+      { op: "ZREM", key: HELD_INDEX, words: [storeRef(store)] },
       // The record is the very last change, so it goes in the last step even when the changes take more than one
       // (applyIfHeld splits them past FENCED_KEYS or FENCED_WORDS; Claude 5's LOW on #3156).
       // The erasing mark goes in the same step as the record (Codex N1's HIGH on #3156), never before it.
@@ -3800,6 +3833,8 @@ function freshId(store: Store): string {
   // somebody else. Products, their options and links are all counted.
   const taken = usedIds(store);
   for (const link of store.links) taken.add(link.id);
+  // A held link goes back under its own id (lib/takedown-hold.ts): never given to another one meanwhile.
+  for (const held of store.heldLinks ?? []) taken.add(held.link.id);
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const id = crypto.randomUUID().replace(/-/g, "").slice(0, 10);
     if (!taken.has(id)) return id;
@@ -4300,7 +4335,8 @@ export async function addStoreLink(
   if (!title) return { ok: false, reason: "title" };
 
   const result = await withStore<LinkResult>(email, async (store, save) => {
-    if (store.links.length >= MAX_STORE_LINKS) {
+    // A link held after a copyright notice keeps its place, so it can always go back (lib/takedown-hold.ts).
+    if (store.links.length + heldPlaces(store) >= MAX_STORE_LINKS) {
       return { ok: false, reason: "too_many", limit: MAX_STORE_LINKS };
     }
     const link: StoreLink = {
@@ -4350,6 +4386,77 @@ export async function removeStoreLink(
     return { ok: true, store: await save({ ...store, links: store.links.filter((link) => link.id !== id) }), removed: going.image ?? null };
   });
   return result ?? { ok: false, reason: "none" };
+}
+
+export type HoldResult = { ok: true } | { ok: false; reason: "none" | "unknown" | "changed" };
+
+/**
+ * Takes a link off the page and keeps it, held after a copyright notice (lib/takedown-hold.ts): at the end of the
+ * list of held links, with its place, its notice and where its picture is kept. "unknown" when the link is not on
+ * the page; "changed" when its picture is no longer `picture`, the one copied before this (lib/takedown.ts).
+ */
+export async function holdStoreLink(email: string, id: string, picture: string | null, entry: Omit<HeldLink, "link" | "place">): Promise<HoldResult> {
+  const result = await withStore<HoldResult>(email, async (store, save) => {
+    const place = store.links.findIndex((link) => link.id === id && !link.header);
+    if (place < 0) return { ok: false, reason: "unknown" };
+    const link = store.links[place];
+    if ((link.image?.path ?? null) !== picture) return { ok: false, reason: "changed" };
+    await save({ ...store, links: store.links.filter((l) => l.id !== id), heldLinks: [...(store.heldLinks ?? []), { link, place, ...entry }] });
+    return { ok: true };
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
+const sameHold = (held: HeldLink, report: string, id: string, heldAt: string) => held.report === report && held.link.id === id && held.heldAt === heldAt;
+
+/**
+ * Puts a held link back at its place, under its own id, with its picture at its old address (copied back first,
+ * lib/takedown.ts). "none" when it is not held any more.
+ */
+export async function restoreHeldLink(email: string, report: string, id: string, heldAt: string): Promise<{ ok: true } | { ok: false; reason: "none" | "full" }> {
+  const result = await withStore<{ ok: true } | { ok: false; reason: "none" | "full" }>(email, async (store, save) => {
+    const held = (store.heldLinks ?? []).find((h) => sameHold(h, report, id, heldAt));
+    if (!held) return { ok: false, reason: "none" };
+    // Its place was kept (addStoreLink counts it), so this is never past the list's limit; a record that somehow is
+    // keeps it held rather than lose a link when the list is read (parseStoreLinks stops at MAX_STORE_LINKS).
+    if (store.links.length >= MAX_STORE_LINKS) return { ok: false, reason: "full" };
+    const taken = store.links.some((l) => l.id === held.link.id);
+    const link = taken ? { ...held.link, id: freshId(store) } : held.link;
+    const links = [...store.links];
+    links.splice(Math.min(held.place, links.length), 0, link);
+    const rest = (store.heldLinks ?? []).filter((h) => h !== held);
+    const { heldLinks: _was, ...without } = store;
+    void _was;
+    await save({ ...without, links, ...(rest.length ? { heldLinks: rest } : {}) });
+    return { ok: true };
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
+/** Forgets a held link, once its picture is deleted (lib/takedown.ts). False when it is not held any more. */
+export async function dropHeldLink(email: string, report: string, id: string, heldAt: string): Promise<boolean> {
+  const result = await withStore<boolean>(email, async (store, save) => {
+    const rest = (store.heldLinks ?? []).filter((h) => !sameHold(h, report, id, heldAt));
+    if (rest.length === (store.heldLinks ?? []).length) return false;
+    const { heldLinks: _was, ...without } = store;
+    void _was;
+    await save({ ...without, ...(rest.length ? { heldLinks: rest } : {}) });
+    return true;
+  });
+  return result ?? false;
+}
+
+/** Writes on a held link that its counter-notice came in, or that the sender went to court; the entry as it is now. */
+export async function markHeldLink(email: string, report: string, id: string, heldAt: string, mark: { counter: string } | { court: true }): Promise<HeldLink | null> {
+  const result = await withStore<HeldLink | null>(email, async (store, save) => {
+    const all = store.heldLinks ?? [];
+    const at = all.findIndex((h) => sameHold(h, report, id, heldAt));
+    if (at < 0) return null;
+    const next = { ...all[at], ...mark };
+    await save({ ...store, heldLinks: all.map((h, i) => (i === at ? next : h)) });
+    return next;
+  });
+  return result ?? null;
 }
 
 /**

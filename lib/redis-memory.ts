@@ -1688,6 +1688,27 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
+        // lib/funnel-share-store.ts CREATE_STORE_SHARE: CREATE_SHARE only while the store's erasing mark is absent and its id
+        // key exists (-4 otherwise, nothing written).
+        if (key.startsWith("-- marktmorgen:funnel-share-live:v1\n") && args[0] === "4" && args.length === 13) {
+          const [, list, lookup, idKey, erasing, id, meta, rec, sum, bundle, limit, ttl, field] = args;
+          this.live(idKey);
+          if (this.run(["HGET", erasing, field]) !== null) return -4;
+          if (!this.data.has(idKey)) return -4;
+          this.live(list);
+          this.live(lookup);
+          const held = this.data.get(list);
+          if (held !== undefined && !(held instanceof Map)) return -3;
+          if (this.data.has(lookup) || (held instanceof Map && held.has(id))) return -2;
+          if (held instanceof Map && held.size >= Number(limit)) return 0;
+          this.hash(list).set(id, meta);
+          const record = this.hash(lookup);
+          record.set("rec", rec);
+          record.set("sum", sum);
+          record.set("bundle", bundle);
+          this.until.set(lookup, this.now() + Number(ttl) * 1000);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:funnel-share:v1\n") && args[0] === "2" && args.length === 10) {
           const [, list, lookup, id, meta, rec, sum, bundle, limit, ttl] = args;
           this.live(list);
@@ -3968,6 +3989,8 @@ export class MemoryRedis {
     if (!Number.isFinite(limit) || limit < 0 || !/^\d{4}-\d{2}$/.test(month ?? "") || rest.length % 3 !== 0) return [-1, 0];
     const held = this.data.get(target);
     if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+    // A give-back ("2") on a room that is not there writes nothing (TAKE_DATA, Codex L 20/11).
+    if (always === "2" && !(held instanceof Map && held.has("#"))) return [1, 0];
     const room = this.hash(target);
     let total = Number(room.get("#") ?? "0");
     if (!Number.isFinite(total)) return [-1, 0];
@@ -4022,7 +4045,7 @@ export class MemoryRedis {
       if (old === 0 && next > 0) delta += 64;
       else if (old > 0 && next === 0) delta -= 64;
     }
-    if (delta > 0 && always !== "1" && total + delta > limit) {
+    if (delta > 0 && always !== "1" && always !== "2" && total + delta > limit) {
       keep();
       return [0, total];
     }

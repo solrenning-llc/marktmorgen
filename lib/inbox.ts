@@ -157,8 +157,13 @@ if redis.call('HEXISTS', KEYS[#KEYS], ARGV[#ARGV - 2]) ~= 0 then return -1 end
 `;
 export const INBOX_STORE_LIVE = `-- marktmorgen:inbox-store-live:v1
 ${INBOX_STORE_LIVE_LUA}return 1`;
-export const INBOX_OPEN_WRITE = `-- marktmorgen:inbox-open-write:v1
-${INBOX_STORE_LIVE_LUA}${INBOX_WRITE.slice(INBOX_WRITE.indexOf("\n") + 1)}`;
+// The plain writer's body, with its token key taken by position: here the fence's identity and erasing keys come
+// last, so the token key (KEYS[5]) is there only with 7 keys. With "#KEYS >= 5", a new conversation without a token
+// (6 keys) would write "" over the store's identity key (Claude 6's LEVE on #5000).
+const OPEN_WRITE_BODY = INBOX_WRITE.slice(INBOX_WRITE.indexOf("\n") + 1).replace("if #KEYS >= 5 then", "if #KEYS >= 7 then");
+if (!OPEN_WRITE_BODY.includes("if #KEYS >= 7 then")) throw new Error("the inbox open writer lost its token test");
+export const INBOX_OPEN_WRITE = `-- marktmorgen:inbox-open-write:v2
+${INBOX_STORE_LIVE_LUA}${OPEN_WRITE_BODY}`;
 /** Two extra redis.call operations in the open writer; the pre-mail check is EVAL plus those same two calls. */
 export const INBOX_OPEN_FENCE_COMMANDS = 2;
 export const CONTACT_LIVE_COMMANDS = 1 + INBOX_OPEN_FENCE_COMMANDS;

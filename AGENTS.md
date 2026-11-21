@@ -48,6 +48,28 @@ Autorização do dono, nas palavras dele: "se não faz a construção andar mais
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
+## FQ — Regras da fila (dono, 20/11/2026 18h41 Fortaleza)
+
+Decisão do dono DONO-20261120-1841-REGRAS-FILA (substitui DONO-20261120-1840-REGRAS-FILA, enviada ao destinatário errado), publicada inteira e sem alteração no canal pela Claude 6 (comentário 7051324952 do #4932), em resposta às seis propostas de C6-20261120-1834-todos-1 (comentário 7051183055) e às respostas das famílias (Claude 3, 5 e 6). Nas palavras dele: "Aprovo as seis propostas, com as condições abaixo. Juntar tudo num PR único, que muda o AGENTS.md só nestes pontos. As regras valem quando esse PR entrar." Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão. O texto de 1 a 6 é o do dono, sem alteração.
+
+1. Fila abaixo de 6 por 30 minutos: qualquer família que não seja a do autor coloca na fila os PRs prontos. "Pronto" significa: as revisões exigidas válidas no head exato; as 9 verificações verdes nesse head; git merge-tree limpo contra o origin/main buscado há menos de 1 hora; nenhum HOLD nem CLAIMED ativo de outra sessão; nenhum achado sem correção; issue main-vermelho fechada. PR de custo também precisa dos testes de teto da regra AC (l) sobre a junção e da sua vez de custo. PR que muda workflow só com o SIM do dono registrado para aquele head. Formato sempre "fila #N @sha", com o nome de quem enfileirou. Quem enfileira o PR de outro avisa o autor no próprio PR.
+
+2. PR esperando revisão há mais de 2 horas: revisar um antes de abrir PR novo, começando pelo mais antigo (regra PV (a)). Antes dele, só o que mexe com dinheiro, a segurança e a correção do main vermelho. A revisão é de verdade: ler o diff, rodar os testes dos arquivos tocados e escrever o veredito com o número e o head. Nunca aprovar sem conferir. A revisão é de uma família diferente da do autor. Exceções que não esperam: a correção do main vermelho e as correções GRAVE ou ALTO.
+
+3. A espera da vez de custo segura só os PRs de custo. Quem decide se um PR é de custo é a checagem do CI, pela lista de arquivos (registro de custos, lib/receiving-costs.ts, tabelas de margem, lib/plan.ts, tetos e todo arquivo usado por worstCost ou netOf), nunca o próprio autor. PR que não é de custo segue a fila normal. Todo PR continua rodando os testes de teto e de margem.
+
+4. Com mais de 200 PRs abertos, só se abre PR novo depois de fechar ou incorporar um. Fechar só vale para PR redundante ou obsoleto (regra PV (b)), com nota dizendo onde o trabalho entrou; nunca fechar trabalho bom só para abrir vaga. Exceções que não esperam: a correção do main vermelho, as correções GRAVE ou ALTO, as de segurança e as que o dono mandar. Continua valendo o limite de 15 PRs por agente da regra MV (b).
+
+5. Pilha cuja base está parada há mais de 3 dias: primeiro, o autor da base corrige os achados. Se ele estiver sem uso ou não responder, a pilha é juntada num PR só, se o resultado ficar revisável (de preferência com menos de 400 linhas fora dos testes, regra AC (f)); senão, é fechada com nota. Fechar nunca apaga o ramo, e o PR pode ser reaberto (regra PV (d)). Valem as exceções da regra PV (d): o autor sem uso anunciado no canal e o PR esperando outra etapa não contam no prazo.
+
+6. "Resolvido" exige o PR sem conflito com a base e também com o main: git merge-tree limpo contra os dois, com o origin/main buscado há menos de 1 hora, escrito no aviso junto do head. Substitui a regra AC (i) nesse ponto.
+
+**Estado (regra VR):** a checagem do CI do item 3, que classifica o PR de custo pela lista de arquivos, ainda não existe. Construí-la muda um workflow, o que precisa do SIM do dono para aquele head.
+
+**Depende do dono** (Pedidos repetidos, passo 3 (c)): até essa checagem existir, quem decide se um PR é de custo. Hoje quem decide é o coordenador, pela mesma lista de arquivos, como vinha sendo feito, e a classificação é escrita no canal.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
 ## CV — "CI verde" só com prova (dono, 09/11/2026, por volta das 13h20 Fortaleza)
 
 Autorização do dono, nas palavras dele: "faça o correto. e tambem quero mais cuidados para que episodios assim e outros nao ocorram mais". Vale para todo agente deste repositório (Claude 1 a 6, cada Codex e qualquer agente novo), em toda sessão. Motivo: em 09/11/2026 um PR foi dado como verde sem nunca ter rodado GitHub Actions, depois de um incidente do próprio GitHub, porque o estado geral do commit aparecia como SUCCESS só com a verificação da Vercel; o PR ficou parado por quase 3 horas. Na mesma semana, um limite de tempo do CodeQL derrubou a fila por dias, relatado PR a PR, sem que ninguém o tratasse como causa comum.

@@ -47,7 +47,7 @@ test("every key family in the code is in the registry, and every entry is in the
 
 test("each family is bounded one way at least, and what it says can be checked", () => {
   const lines = new Set([...COST_LINES, ...PER_PAYMENT_LINES, ...ADD_ON_LINES].map((line) => line.id));
-  const writes = /\b(takeData|needData|needDataBytes|takeDataBytes|keepFor|noteData|giveData|giveDataBytes)\(|\$\{TAKE_DATA\}/;
+  const writes = /\b(takeData|needData|needDataBytes|takeDataBytes|keepFor|noteData|noteDataConfirmed|giveData|giveDataBytes)\(|\$\{TAKE_DATA\}/;
   for (const [name, family] of Object.entries(FAMILIES)) {
     assert.ok(family.what.length > 3, `${name}: say what it is`);
     const ways = [family.room?.length ? "room" : "", family.company ? "company" : "", family.line ? "line" : "", family.parts?.length ? "parts" : ""].filter(Boolean);

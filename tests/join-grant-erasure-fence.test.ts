@@ -99,6 +99,18 @@ async function main(): Promise<void> {
   is("no email went out", sent.length - mailed, 0);
   await redis.pipeline([["SET", idKey, String(record)]]);
 
+  // Codex L-20261121-0043 (on the funnel-share fence): moveAccount repoints a store's id key to another ref, so an id
+  // key that exists is not enough; it must still hold this store's very ref.
+  part("The store's id key names another ref (an account moved) while the request waits");
+  mailed = sent.length;
+  grantsBefore = grants();
+  undo = beforeGrantWrite(() => redis.pipeline([["SET", idKey, "someone-else@join-fence.example"]]));
+  is("the request is refused as closed", await ask(live, "dee@join-fence.example"), "closed");
+  undo();
+  is("no grant is made", grants() - grantsBefore, 0);
+  is("no email went out", sent.length - mailed, 0);
+  await redis.pipeline([["SET", idKey, String(record)]]);
+
   part("An unknown answer to the step: no email for a link that may not exist");
   mailed = sent.length;
   const original = redis.pipeline.bind(redis);

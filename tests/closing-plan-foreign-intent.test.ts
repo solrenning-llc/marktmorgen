@@ -36,6 +36,8 @@ const world = {
   paymentReads: [] as string[],
   /** A payment whose read answers for another payment (#4423): the reply given instead. */
   foreign: new Map<string, unknown>(),
+  /** A refund creation whose reply belongs to another payment: the reply given instead. */
+  foreignPost: new Map<string, unknown>(),
   /** Payments whose charge names them as an expanded object rather than by id (a form Stripe also answers with). */
   expandedIntent: new Set<string>(),
 };
@@ -102,6 +104,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/refunds" && method === "GET") return json({ object: "list", data: world.refunds.filter((row) => row.charge === url.searchParams.get("charge")), has_more: false });
   if (path === "/refunds" && method === "POST") {
     const pi = String(form.get("payment_intent"));
+    if (world.foreignPost.has(pi)) return json(world.foreignPost.get(pi));
     const kept = world.refunds.find((row) => row.key === key);
     if (kept) return json(kept);
     const refund: Refund = { id: `re_${String(world.refunds.length + 1).padStart(8, "0")}`, charge: `ch_${pi.slice(3)}`, payment_intent: pi, amount: Number(form.get("amount")), status: "succeeded", key };
@@ -213,6 +216,28 @@ async function main() {
   }
 
   console.error = quiet;
+  // Codex G (G-20261119-0134): the refund creation's own reply must be the asked payment's.
+  part("The refund creation for payment A answers with payment B's successful refund");
+  {
+    const tag = "foreignpost01";
+    const a = `pi_${tag}`;
+    const one = await inLine(tag, [invoiceRow(`in_${tag}`, "paid", 4_000, { payment_intent: a })]);
+    world.payments.set(`in_${tag}`, [paidPart(`in_${tag}`, a, 4_000, S(day) + 120)]);
+    world.charges.set(a, 4_000);
+    world.foreignPost.set(a, {
+      id: "re_foreignpostb",
+      object: "refund",
+      charge: "ch_foreignpostb",
+      payment_intent: "pi_foreignpostb",
+      amount: 12_000,
+      status: "succeeded",
+      currency: "usd",
+    });
+    is("not settled from another payment's refund", await settleOne(one.id).catch(() => false), false);
+    is("the right payment was not refunded", refundsOf(a), []);
+    is("still in line, not done", await settledOf(one.id), false);
+    is("the creator is not told money came back", lettersTo(one.to).length, 0);
+  }
   done();
 }
 

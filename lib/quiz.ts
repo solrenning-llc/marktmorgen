@@ -27,12 +27,13 @@
  *
  * Pure rules at the top, storage at the bottom.
  */
-import { reserveQuizSubmission } from "@/lib/quiz-usage";
 import { MAX_WAIT_MINUTES, drawn, trySeed, waitLeft } from "@/lib/quiz-bank-rules";
-import { QUIZ_USAGE_POLICY } from "@/lib/quiz-usage-rules";
+import { QUIZ_MONTHLY_SUBMISSIONS, QUIZ_USAGE_POLICY, QUIZ_USAGE_RETENTION_SECONDS, quizUsageKey } from "@/lib/quiz-usage-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { type DataChange, type DataStore, giveData, needData, noteData } from "@/lib/store-data";
+import { SET_AND_VALUES_TAKE } from "@/lib/redis-take";
+import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, ITEM_ID_PATTERN, lessonsInOrder, newItemId } from "@/lib/course";
 
@@ -509,12 +510,72 @@ function parseAttempt(raw: string | null, used: string | null): Attempt {
 /** How this student has done on this quiz. `who` is lib/learn.ts emailKey. */
 export async function attemptOf(courseId: string, lessonId: string, who: string): Promise<Attempt> {
   if (!isRedisConfigured()) return NO_ATTEMPT;
+  return (await attemptRead(courseId, lessonId, who)).attempt;
+}
+
+/** The attempt and the two stored values it was read from, exactly as they were. */
+async function attemptRead(courseId: string, lessonId: string, who: string): Promise<{ attempt: Attempt; raw: string | null; used: string | null }> {
   const reply = await redisPipeline([
     ["GET", resultKey(courseId, lessonId, who)],
     ["GET", triesKey(courseId, lessonId, who)],
   ]);
   const [raw, used] = exactAttemptReply(reply);
-  return parseAttempt(raw, used);
+  return { attempt: parseAttempt(raw, used), raw, used };
+}
+
+/**
+ * One try checked, counted, charged to the store and written, all at once.
+ *
+ * KEYS: the student's tries, their last try, their passes, and, for a quiz
+ * under the monthly allowance, the store's submissions this window.
+ * ARGV: the tries and the last try as the caller read them ("" for none:
+ * neither is ever kept empty), the quiz's tries (0 for no ceiling), the try to
+ * write, the lesson, "1" when it passed, the store's allowance and how long
+ * its count is kept.
+ *
+ * Anything changed since the caller read it answers "stale" and nothing is
+ * taken, so the caller's checks (passed, out of tries, the creator's wait,
+ * the questions drawn) hold for the try written. A try that does not fit takes
+ * nothing from the store's allowance, which never moves past its figure.
+ * Answers {outcome, tries}.
+ */
+export const QUIZ_TRY = `-- marktmorgen:quiz-try:v1
+local tries = redis.call("GET", KEYS[1])
+local last = redis.call("GET", KEYS[2])
+if (tries or "") ~= ARGV[1] or (last or "") ~= ARGV[2] then return {"stale", 0} end
+local used = 0
+if ARGV[1] ~= "" then used = tonumber(ARGV[1]) end
+local most = tonumber(ARGV[3])
+if most > 0 and used >= most then return {"no_tries", used} end
+if #KEYS == 4 then
+  local spent = redis.call("GET", KEYS[4])
+  local count = 0
+  if spent then count = tonumber(spent) end
+  if count == nil or count < 0 or count ~= math.floor(count) then return {"unavailable", 0} end
+  if count >= tonumber(ARGV[7]) then return {"usage_limit", used} end
+  redis.call("INCR", KEYS[4])
+  redis.call("EXPIRE", KEYS[4], ARGV[8])
+end
+local now = redis.call("INCR", KEYS[1])
+redis.call("SET", KEYS[2], ARGV[4])
+if ARGV[6] == "1" then redis.call("SADD", KEYS[3], ARGV[5]) end
+return {"ok", now}`;
+
+/** Rounds of reading again when another try was written between the read and the write. */
+const TRY_ROUNDS = 3;
+
+type TryOutcome = "ok" | "stale" | "no_tries" | "usage_limit" | "unavailable";
+
+/** QUIZ_TRY's answer in its exact shape, or null when it cannot be known what happened. */
+function tryReply(reply: unknown): { outcome: TryOutcome; tries: number } | null {
+  const replies = repliesFor(reply, 1);
+  const pair = replies ? repliesFor(replies[0], 2) : null;
+  if (!pair) return null;
+  const [outcome, tries] = pair;
+  if (!Number.isSafeInteger(tries) || (tries as number) < 0) return null;
+  if (outcome === "ok") return (tries as number) >= 1 ? { outcome, tries: tries as number } : null;
+  if (outcome === "stale" || outcome === "no_tries" || outcome === "usage_limit" || outcome === "unavailable") return { outcome, tries: tries as number };
+  return null;
 }
 
 export type SubmitResult =
@@ -524,18 +585,25 @@ export type SubmitResult =
 /**
  * Marks a try and keeps it.
  *
- * The try is counted first, with one atomic increment, and only then marked:
- * two answers sent at the same moment from two tabs both count, so a limit
- * of three tries is three and never four. A student who has passed is not
- * marked again, so a pass can never be undone by a worse try afterward.
+ * The try is checked, counted, charged to the store's monthly allowance and
+ * written in one step (QUIZ_TRY), against the tries and the last try exactly
+ * as they were read: a try sent while another was being written is read again
+ * and checked again, up to TRY_ROUNDS times (then "unavailable", nothing
+ * counted), so a burst of tries from one student marks no more than the quiz
+ * gives and spends no more of the store's allowance than it marks, and the
+ * creator's wait between tries holds against it. A student who has passed is not marked again, so a pass can never be
+ * undone by a worse try afterward.
  *
  * With a question bank (630 [HN6](7)) the try is marked on the questions it
  * draws, worked out again here from the student and the try's number, never
  * taken from the form. `shown` is the question ids the page showed: when the
  * quiz draws and they are not this try's (another tab tried first, or the
  * creator changed the questions), nothing is counted ("stale"). A try before
- * the creator's wait is over is refused ("wait"). Two answers sent at the very
- * same moment both pass the wait; each still counts as a try.
+ * the creator's wait is over is refused ("wait").
+ *
+ * What the try leaves takes room in the store's data room before it is
+ * written, and a try that is refused after that gives back exactly what it
+ * took; one whose outcome cannot be known keeps it.
  */
 export async function submitQuiz(
   courseId: string,
@@ -551,49 +619,61 @@ export async function submitQuiz(
   /** The question ids the page showed; needed when the quiz draws from a bank. */
   shown: string[] | null = null,
 ): Promise<SubmitResult> {
-  let before: Attempt;
-  try {
-    before = await attemptOf(courseId, lessonId, who);
-  } catch (error) {
-    if (error instanceof QuizAttemptReadError) return { ok: false, reason: "unavailable" };
-    throw error;
+  if (!isRedisConfigured()) return { ok: false, reason: "unavailable" };
+  for (let round = 1; ; round += 1) {
+    let read: Awaited<ReturnType<typeof attemptRead>>;
+    try {
+      read = await attemptRead(courseId, lessonId, who);
+    } catch (error) {
+      if (error instanceof QuizAttemptReadError) return { ok: false, reason: "unavailable" };
+      throw error;
+    }
+    const before = read.attempt;
+    if (before.passed) return { ok: false, reason: "passed" };
+    if (quiz.attempts > 0 && before.used >= quiz.attempts) return { ok: false, reason: "no_tries" };
+    const now = Date.now();
+    if (quizWait(quiz, before, now) > 0) return { ok: false, reason: "wait" };
+    const asked = quizForTry(quiz, courseId, lessonId, who, before.used + 1);
+    if (quiz.draw && !sameQuestions(shown, asked)) return { ok: false, reason: "stale" };
+    const usage = quiz.usagePolicy === QUIZ_USAGE_POLICY ? quizUsageKey(storeSid ?? "", now, window) : null;
+    if (quiz.usagePolicy === QUIZ_USAGE_POLICY && !usage) return { ok: false, reason: "unavailable" };
+    const mine: Answers = Object.fromEntries(asked.questions.map((q) => [q.id, answers[q.id] ?? []]));
+    const grade = gradeQuiz(asked, mine);
+    const attempt: Attempt = {
+      used: before.used + 1,
+      last: { answers: mine, grade, at: Math.floor(now / 1000) },
+      best: Math.max(before.best, grade.percent),
+      passed: grade.passed,
+    };
+    const json = JSON.stringify(attempt);
+    // What the try leaves takes room first: its answers and marks rewritten
+    // over the last, its count the first time (at the most it can weigh), and its pass.
+    const grown = dataBytes([json], 1) - kept(read.raw) + (before.used ? 0 : dataBytes(["9999"], 1)) + (grade.passed ? dataBytes([lessonId], 1) : 0);
+    const taken: DataChange[] = grown > 0 ? [{ slot: TRIES_SLOT(courseId), bytes: grown }] : [];
+    if (taken.length) await needData(room, taken);
+    let reply: { outcome: TryOutcome; tries: number } | null = null;
+    try {
+      reply = tryReply(await redisPipeline([[
+        "EVAL", QUIZ_TRY, usage ? 4 : 3,
+        triesKey(courseId, lessonId, who), resultKey(courseId, lessonId, who), passedKey(courseId, who), ...(usage ? [usage] : []),
+        read.used ?? "", read.raw ?? "", quiz.attempts, json, lessonId, grade.passed ? "1" : "0", QUIZ_MONTHLY_SUBMISSIONS, QUIZ_USAGE_RETENTION_SECONDS,
+      ]]));
+    } catch {
+      reply = null;
+    }
+    // Whether the try was written cannot be known: its room stays taken.
+    if (!reply) return { ok: false, reason: "unavailable" };
+    if (reply.outcome === "ok") {
+      if (reply.tries !== attempt.used) return { ok: false, reason: "unavailable" };
+      return { ok: true, grade, attempt };
+    }
+    // Refused, with nothing written: what it took goes back, exactly.
+    if (taken.length) await giveData(room, taken);
+    if (reply.outcome !== "stale") return { ok: false, reason: reply.outcome };
+    // Still losing to other tries after its rounds: nothing was counted, and
+    // the questions did not change, so it is said as a moment's unavailability.
+    if (round >= TRY_ROUNDS) return { ok: false, reason: "unavailable" };
   }
-  if (before.passed) return { ok: false, reason: "passed" };
-  if (quiz.attempts > 0 && before.used >= quiz.attempts) return { ok: false, reason: "no_tries" };
-  if (quizWait(quiz, before, Date.now()) > 0) return { ok: false, reason: "wait" };
-  const asked = quizForTry(quiz, courseId, lessonId, who, before.used + 1);
-  if (quiz.draw && !sameQuestions(shown, asked)) return { ok: false, reason: "stale" };
-  const mine: Answers = Object.fromEntries(asked.questions.map((q) => [q.id, answers[q.id] ?? []]));
-  // What the try leaves takes room first, at the most it can weigh: its
-  // answers and marks rewritten over the last, its count the first time, and
-  // its pass. Nothing is counted against the store's quizzes without it.
-  const last = await redisPipeline([["GET", resultKey(courseId, lessonId, who)]]);
-  const draft = JSON.stringify({ used: 9_999, last: { answers: mine, grade: gradeQuiz(asked, mine), at: Math.floor(Date.now() / 1000) }, best: 100, passed: true });
-  const grown = dataBytes([draft], 1) - kept(last[0]) + (before.used ? 0 : dataBytes(["9999"], 1)) + dataBytes([lessonId], 1);
-  if (grown > 0) await needData(room, [{ slot: TRIES_SLOT(courseId), bytes: grown }]);
-  if (quiz.usagePolicy === QUIZ_USAGE_POLICY) {
-    const reserved = await reserveQuizSubmission(storeSid ?? "", Date.now(), window);
-    if (reserved !== "ok") return { ok: false, reason: reserved };
-  }
-  const [count] = await redisPipeline([["INCR", triesKey(courseId, lessonId, who)]]);
-  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) return { ok: false, reason: "unavailable" };
-  const used = count;
-  if (quiz.attempts > 0 && used > quiz.attempts) {
-    await redisPipeline([["DECR", triesKey(courseId, lessonId, who)]]);
-    return { ok: false, reason: "no_tries" };
-  }
-  const grade = gradeQuiz(asked, mine);
-  const attempt: Attempt = {
-    used,
-    last: { answers: mine, grade, at: Math.floor(Date.now() / 1000) },
-    best: Math.max(before.best, grade.percent),
-    passed: grade.passed,
-  };
-  await redisPipeline([
-    ["SET", resultKey(courseId, lessonId, who), JSON.stringify(attempt)],
-    ...(grade.passed ? [["SADD", passedKey(courseId, who), lessonId]] : []),
-  ]);
-  return { ok: true, grade, attempt };
 }
 
 /**
@@ -673,33 +753,73 @@ export async function resetTries(course: Course, who: string, room: DataStore): 
   if (!passed) throw new UnknownReplyError("a student's passed quizzes");
   const lessons = lessonsInOrder(course).filter(({ lesson }) => lesson.quiz && !passed.has(lesson.id));
   if (lessons.length === 0) return;
-  // What the tries weighed comes back to the store's data room.
-  const held = repliesFor(await redisPipeline(lessons.flatMap(({ lesson }) => [["GET", resultKey(course.id, lesson.id, who)], ["GET", triesKey(course.id, lesson.id, who)]])), lessons.length * 2);
-  // Each GET answers a string or null; anything else is not evidence of what would be deleted (Codex D2 on #2875).
-  if (!held || held.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a student's quiz tries");
-  const freed = held.reduce((sum: number, raw) => sum + kept(raw), 0);
+  // Read exactly first (Codex D2 on #2875): each GET answers a string or null, and anything else is not evidence of
+  // what would be deleted, so nothing is deleted on it.
+  const keys = lessons.flatMap(({ lesson }) => [resultKey(course.id, lesson.id, who), triesKey(course.id, lesson.id, who)]);
+  const seen = repliesFor(await redisPipeline(keys.map((key) => ["GET", key])), keys.length);
+  if (!seen || seen.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a student's quiz tries");
+  // Then each is read and deleted in one step (GETDEL), so what the tries weighed comes back to the store's data room
+  // once, by what this step itself removed, even beside a deletion of the student. A GETDEL answered in another shape
+  // gives nothing back: the room stays counted, never short.
+  const held = repliesFor(await redisPipeline(keys.map((key) => ["GETDEL", key])), keys.length);
+  const freed = held ? held.reduce((sum: number, raw) => sum + (typeof raw === "string" ? kept(raw) : typeof raw === "number" ? kept(String(raw)) : 0), 0) : 0;
   if (freed) await giveData(room, [{ slot: TRIES_SLOT(course.id), bytes: freed }]);
-  await redisPipeline(
-    lessons.flatMap(({ lesson }) => [
-      ["DEL", triesKey(course.id, lesson.id, who)],
-      ["DEL", resultKey(course.id, lesson.id, who)],
-    ]),
-  );
 }
 
 /**
- * Deletes one student's tries, results and passes in these courses' quizzes (lib/person-erasure.ts). `who` is
- * lib/learn.ts emailKey. Only the exact one-slot DEL count, from zero up to the distinct keys sent, says how many
- * were deleted; any other reply throws UnknownReplyError, so the erasure reports this part as not done for a retry
- * instead of a finished part that may have deleted nothing (CX-123 rule 24).
+ * Deletes one student's tries, results and passes in these courses' quizzes
+ * (lib/person-erasure.ts). `who` is lib/learn.ts emailKey. Each course's are
+ * read and deleted in one step, and what they weighed (each try's count and
+ * result as resetTries gives them back, each lesson passed as markPassed
+ * counts it) goes back to `room`, when it is given, once.
  */
-export async function forgetQuizPerson(courses: { courseId: string; lessonIds: string[] }[], who: string): Promise<number> {
+export async function forgetQuizPerson(courses: { courseId: string; lessonIds: string[] }[], who: string, room?: DataStore): Promise<number> {
   if (!courses.length || !isRedisConfigured()) return 0;
-  const keys = [
-    ...new Set(courses.flatMap((c) => [passedKey(c.courseId, who), ...c.lessonIds.flatMap((l) => [triesKey(c.courseId, l, who), resultKey(c.courseId, l, who)])])),
-  ];
-  const replies = repliesFor(await redisPipeline([["DEL", ...keys]]), 1);
-  const gone = replies ? countOf(replies[0]) : null;
-  if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of a student's quiz tries, results and passes");
-  return gone;
+  const what = "the deletion of a student's quiz tries";
+  const replies = exactReplies(
+    await redisPipeline(
+      courses.map((c) => {
+        const keys = [passedKey(c.courseId, who), ...c.lessonIds.flatMap((l) => [triesKey(c.courseId, l, who), resultKey(c.courseId, l, who)])];
+        return ["EVAL", SET_AND_VALUES_TAKE, keys.length, ...keys];
+      }),
+    ),
+    courses.length,
+    what,
+  );
+  let records = 0;
+  let unknown = false;
+  const freed: { slot: string; bytes: number }[] = [];
+  courses.forEach((c, i) => {
+    // Exactly {the passes, one value per lesson key, how many keys went}; any
+    // other shape leaves this course's deletion unknown, and its room kept.
+    // Every level read as a plain list (lib/redis-exact.ts plainList): no hole, no getter, read once (Codex G on #2576).
+    const outer = plainList(replies[i]);
+    const [passedRaw, valuesRaw, gone] = outer && outer.length === 3 ? outer : [];
+    const passed = plainList(passedRaw);
+    const values = plainList(valuesRaw);
+    if (
+      !passed ||
+      !passed.every((lessonId) => typeof lessonId === "string") ||
+      !values ||
+      values.length !== c.lessonIds.length * 2 ||
+      !values.every((raw) => raw === null || typeof raw === "string" || typeof raw === "number") ||
+      typeof gone !== "number" ||
+      !Number.isSafeInteger(gone) ||
+      // The same DEL took exactly the keys this reply says were there (Codex G on #2576): the passes' set when it held
+      // any, and each value that was not none. Any other count is a reply that contradicts itself: unknown.
+      gone !== (passed.length > 0 ? 1 : 0) + values.filter((raw) => raw !== null).length
+    ) {
+      unknown = true;
+      return;
+    }
+    records += gone;
+    const bytes =
+      passed.reduce((sum: number, lessonId) => sum + dataBytes([lessonId as string], 1), 0) +
+      values.reduce((sum: number, raw) => sum + kept(typeof raw === "number" ? String(raw) : raw), 0);
+    if (bytes > 0) freed.push({ slot: TRIES_SLOT(c.courseId), bytes });
+  });
+  // What was confirmed taken comes back; a course whose reply is unknown keeps its room.
+  if (room && freed.length) await giveData(room, freed);
+  if (unknown) throw new UnknownReply(what);
+  return records;
 }

@@ -25,8 +25,7 @@ import { addMonthsMs, allowanceWindow, anchorAfter, windowAt, windowId, type All
 import { takeAllowance } from "@/lib/store-allowance";
 import { ALLOWANCE_KINDS, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { MOST_CORRECT_READING } from "@/lib/receiving-costs";
-import { netOf, worstCost } from "./plan-cost-model";
+import { worstMonthKept } from "./worst-month-kept";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -539,42 +538,18 @@ async function main(): Promise<void> {
     is("10g: a stop written inside the grace keeps the anchor", anchorAfter(lastPaidG, inGraceG, Date.UTC(2027, 3, 29, 11))?.subscriptionId, SUB);
 
     part("11. The worst month this keeps: one window per paid month, every limit used (the figures in the PR body)");
-    // The repository's own model: a month's receipts after every fee and reserve (netOf, lib/receiving-costs.ts), less
-    // every cost line at its limit (worstCost, tests/plan-cost-registry.ts), then the LC rule's taxes on that profit:
-    // IRPF 15% and IOF 0.38% (MOST_CORRECT_READING), the IOF taken on the profit sent home before the IRPF.
-    const taxShare = (MOST_CORRECT_READING.profitTaxBps + MOST_CORRECT_READING.incomingExchangeIofBps) / 10_000;
-    const worstMonth = (cycle: Cycle) => (["creator", "pro", "scale"] as const).map((tier) => ((netOf(tier, cycle) - worstCost(tier)) * (1 - taxShare)).toFixed(2));
-    // Main's model since 124dc5fc3 (#3384, members import holds the month's emails): its extra import commands
-    // raised the imports line by $0.009 on Studio and $0.016 on Scale, one cent less kept than this PR first showed.
-    // With #4015 (a moved call's records kept 730 days, lib/data-families.ts), Scale's monthly worst month keeps one
-    // cent less: 703.26 where 703.27 was, still above zero (MR); Store and Studio are unchanged. Cost is not lowered.
-    // #4542 (C7, 14 November 2026): a person's erasure also reads the store's dropped courses and probes each
-    // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
-    // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
-    // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
-    // Merge of main into #3457 (15 November 2026): main's latest model and this PR's ticket-code records together
-    // cost Studio's monthly month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
-    // #4319 (the webhook outbox): a request whose queueing failed pays two commands more; less kept a month, still above zero.
-    // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
-    // Merged with main of 15 November 2026 (Claude 1 cloud O): main's model with this PR's costs together; computed, not chosen, each still above zero (MR).
-    // Merge of main into #2803 (16 November 2026): main's outbox and this PR's Blob costs together; computed, still above zero (MR).
-    // Merge of main into #3457 (16 November 2026, Claude 4 cloud AB): both together; figures as the model computes them.
-    // Merge of main into #2803 (16 November 2026, Claude 5 fix H): main's latest model and this PR's Blob costs together; computed, not chosen, each still above zero (MR).
-    // Merge of main into #4291 (15 November 2026): main's model and #4291's vault wrong-size release cost line together
-    // cost Studio's monthly worst month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
-    // Merge of main into #4291 (16 November 2026): main's costs and this PR's change together, monthly 45.10, 313.80, 703.18 -> 45.10, 313.80, 703.17;
-    // figures as the model computes them; still above zero (MR), cost not lowered.
-    // Merge of main into #4291 (16 November 2026, second pass): main's model and #4291's vault release line together;
-    // figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #2803 (16 November 2026): main's latest model and this PR's costs together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    is("11: Store, Studio and Scale keep 44.34, 311.91 and 697.49 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.34", "311.91", "697.49"]);
-    // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
-    // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
-    // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
-    // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
-    // Merge of main into #2803 (16 November 2026, Claude 5 cloud iacVn3r): main's costs and this PR's upload costs
-    // together keep one cent less on Store's yearly month, 36.28 where 36.29 was; still above zero (MR). Cost is not lowered.
-    is("11: and 36.28, 256.78 and 574.21 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.28", "256.78", "574.21"]);
+    // The repository's own model, one formula (tests/worst-month-kept.ts): a month's receipts after every fee and
+    // reserve, less every cost line at its limit, then the LC rule's taxes on that profit.
+    // MR (owner, 27 October 2026): no plan may lose money in its worst month, on a monthly plan or in a month of a
+    // yearly one. That is what is checked here, above zero, and no figure is written: every cost change used to edit
+    // the figures and the notes beside them, and two such pull requests always conflicted on these lines (AGENTS.md
+    // AC (n); 33 of the 80 conflicts measured on 18 November 2026). The six exact figures are in
+    // docs/margin-alignment-2026-10-18.md, from the same formula, held by that document's staleness test (Claude 4's
+    // LOW on #4854). A refunded Store first year under US$66 is held by tests/email-logo-region.test.ts.
+    const month = worstMonthKept("month");
+    const year = worstMonthKept("year");
+    is(`11: Store, Studio and Scale keep more than zero in their worst month on a monthly plan (now ${month.join(", ")})`, month.every((v) => Number(v) > 0), true);
+    is(`11: and in a month of a yearly plan, a twelfth of the year paid (now ${year.join(", ")})`, year.every((v) => Number(v) > 0), true);
   } finally {
     Date.now = realNow;
   }

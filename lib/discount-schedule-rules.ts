@@ -28,7 +28,14 @@ export const ACTIVATION_TRIES = 3;
 /** Seconds between tries: the next five-minute run. */
 export const RETRY_SECONDS = 300;
 /**
- * Times the email that a code failed is tried (lib/discount-schedule-notice.ts):
+ * Times the job asks Stripe to switch a code off when the last try left it live and the stop was not confirmed
+ * (issue #4466). Past them it leaves the due list, kept as failed with its stop unconfirmed, so the studio says it may
+ * still be live; it never asks again (Claude 6 on #4522: an unbounded stop ran every five minutes to the code's end).
+ */
+export const STOP_TRIES = 3;
+/**
+ * Attempts to notify that a code failed (lib/discount-schedule-notice.ts): a failed enqueue consumes an attempt too.
+ * A successful enqueue does not consume one separately from the send that tellOne counts:
  * one send at the failure, and again after NOTICE_RETRY_SECONDS if it did not
  * go, then never. A send that went is never made again.
  */
@@ -36,12 +43,11 @@ export const NOTICE_TRIES = 3;
 /** Seconds between tries of that email: an hour, so a short outage passes. */
 export const NOTICE_RETRY_SECONDS = 3600;
 /**
- * Studio requests taken when a code is scheduled: one for each try the job
- * may make to switch it on, and one for each try of the email that it failed
- * (its few database commands; the email itself comes from the store's own
- * email figure as it is sent).
+ * Studio requests taken when a code is scheduled: one for each try the job may make to switch it on, one for each
+ * run that may switch it off when the last try left it live (STOP_TRIES, #4522), and one for each try of the email
+ * that it failed (its few database commands; the email itself comes from the store's own email figure as it is sent).
  */
-export const SCHEDULE_UNITS = ACTIVATION_TRIES + NOTICE_TRIES;
+export const SCHEDULE_UNITS = ACTIVATION_TRIES + STOP_TRIES + NOTICE_TRIES;
 /**
  * How long past its start a code may still read as starting: every try's
  * run and an hour more. Past it, a code the job has not switched on reads as
@@ -88,8 +94,11 @@ export function readWindow(body: Record<string, unknown>, nowSeconds: number): (
   return { ok: true, start, end };
 }
 
-/** One scheduled code, as the studio is told about it. */
-export type ScheduleEntry = { id: string; code: string; start: number; end: number; tries: number; failed: boolean };
+/**
+ * One scheduled code, as the studio is told about it. `stopUnconfirmed`: failed after its stop tries without Stripe
+ * confirming it off, so it may still be live on the creator's Stripe account.
+ */
+export type ScheduleEntry = { id: string; code: string; start: number; end: number; tries: number; failed: boolean; stopUnconfirmed?: boolean };
 
 export type ScheduleState = "scheduled" | "starting" | "failed" | "live" | "ended" | "off";
 
@@ -131,12 +140,13 @@ export function readScheduleConfirmation(raw: unknown): ScheduleEntry[] | null {
   const ids = new Set<string>();
   for (const row of raw.schedules) {
     if (!plain(row)) return null;
-    const { id, code, start, end, tries, failed } = row;
+    const { id, code, start, end, tries, failed, stopUnconfirmed } = row;
     if (typeof id !== "string" || !id || ids.has(id) || typeof code !== "string" || !code) return null;
     if (!seconds(start) || !seconds(end) || end <= start) return null;
     if (typeof tries !== "number" || !Number.isSafeInteger(tries) || tries < 0 || typeof failed !== "boolean") return null;
+    if (stopUnconfirmed !== undefined && typeof stopUnconfirmed !== "boolean") return null;
     ids.add(id);
-    out.push({ id, code, start, end, tries, failed });
+    out.push({ id, code, start, end, tries, failed, ...(stopUnconfirmed ? { stopUnconfirmed: true } : {}) });
   }
   return out;
 }

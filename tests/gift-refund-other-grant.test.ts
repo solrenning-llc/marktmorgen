@@ -29,6 +29,8 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   const path = url.pathname.replace(/^\/v1/, "");
   if (path === "/events") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   if (path === "/refunds") return new Response(JSON.stringify({ object: "list", data: refunds, has_more: false }));
+  // The payment a gift reads before it is given (lib/gifts.ts deliverGift): paid, not refunded, not disputed.
+  if (path.startsWith("/payment_intents/")) return new Response(JSON.stringify({ id: path.split("/")[2], object: "payment_intent", status: "succeeded", latest_charge: { object: "charge", refunded: false, disputed: false, amount: 4900, amount_refunded: 0 } }));
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${path}` } }), { status: 404 });
 }) as typeof fetch;
 

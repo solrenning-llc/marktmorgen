@@ -16,15 +16,20 @@ import { startGroup } from "@/lib/group-buy";
 import { confirmPurchase } from "@/lib/purchase-email";
 import { ADMITTED_FIELD, admitOrders } from "@/lib/order-admission";
 import { paidPeriod } from "./billing-period-fixture";
+import { paidIntentReply } from "./paid-intent-standin";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
-globalThis.fetch = (async (input: string | URL | Request) =>
-  new URL(String(input)).hostname === "api.resend.com"
+// A gift reads its payment before handing anything over (lib/gifts.ts, #4408): a plain paid one here, as every
+// fixture of paid payments answers it (tests/paid-intent-standin.ts; merge of main into #4408).
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+  // The payment a purchase for several is read with before it is settled (lib/group-buy.ts settleGroup, #4494): paid, not given back.
+  paidIntentReply(input, init?.method ?? "GET") ??
+  (new URL(String(input)).hostname === "api.resend.com"
     ? new Response(JSON.stringify({ id: "email_1" }), { status: 200 })
-    : new Response(JSON.stringify({ error: { message: "no stand-in" } }), { status: 404 })) as typeof fetch;
+    : new Response(JSON.stringify({ error: { message: "no stand-in" } }), { status: 404 }))) as typeof fetch;
 const outcome = <T>(p: Promise<T>): Promise<T | "threw"> => p.then((v) => v, () => "threw" as const);
 /** Every pipeline runs as usual, except that a lone command `match` picks is answered in an unknown shape, landed or not. */
 function unknownFor(match: (c: Command) => boolean, lands: boolean): void {

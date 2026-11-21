@@ -59,7 +59,9 @@ async function main(): Promise<void> {
   });
   is(`the run read at most the ${PER_RUN} members it settles, not the whole set`, widest <= PER_RUN, true);
   is("it looked at 200 and kept each open one for its two days", [counts!.open, counts!.done, counts!.dropped, counts!.failed], [PER_RUN, 0, 0, 0]);
-  is("nothing open was let go", redis.run(["SCARD", "nl:plans:pending"]), OPENED);
+  // A checkout kept open waits in the retry line (nl:plans:retry, lib/plans.ts moveTo), out of the new ones: still kept.
+  is("nothing open was let go", Number(redis.run(["SCARD", "nl:plans:pending"])) + Number(redis.run(["ZCARD", "nl:plans:retry"])), OPENED);
+  is("and each looked at waits once, in one line or the other", Number(redis.run(["ZCARD", "nl:plans:retry"])), PER_RUN);
   done();
 }
 

@@ -460,8 +460,9 @@ async function noticeCards(store: Store, deadline: number): Promise<Swept> {
   // crons item 6): the cursor is moved only past the members handled, never past one read and not yet told.
   const due: { sub: RunningSub; card: Card; customer: string; email: string; payAt: number; from: string }[] = [];
   let lookups = 0;
+  let page = 0;
 
-  for (let page = 0; page < CARD_PAGES && Date.now() < deadline; page += 1) {
+  for (; page < CARD_PAGES && Date.now() < deadline; page += 1) {
     const query = new URLSearchParams({ status: "active", limit: "100" });
     query.append("expand[]", "data.default_payment_method");
     query.append("expand[]", "data.customer");
@@ -509,9 +510,13 @@ async function noticeCards(store: Store, deadline: number): Promise<Swept> {
   const moveCursor = async (to: string) => {
     await redisPipeline([to ? ["SET", cardCursorKey(account), to, "EX", 30 * 86_400] : ["DEL", cardCursorKey(account)]]);
   };
+  // Stopped by the run's time, not by the end of the list or the page cap: the store's cards were not read through
+  // this run, so it is not done, exactly as remindFailed reads a past-due list cut by time (Claude 1, 6834038662 on
+  // #3215). The page cap is not "more to do" now: the next run reads on from where this one stopped.
+  const cutByTime = !ended && page < CARD_PAGES;
   if (!due.length) {
     await moveCursor(after);
-    return { sent: 0, complete: true };
+    return { sent: 0, complete: !cutByTime };
   }
 
   const ids = [...new Set(due.map((d) => d.sub.metadata?.product ?? "").filter(Boolean))];
@@ -613,7 +618,7 @@ async function noticeCards(store: Store, deadline: number): Promise<Swept> {
   const stopAt = notHandledFrom[0] ?? null;
   if (!ended && stopAt === start) console.error("card notices: a member at the start of this run was not handled again; the walk goes on and reads it when the list comes round", store.handle);
   await moveCursor(ended ? "" : stopAt === null ? after : stopAt === start ? (notHandledFrom[1] ?? after) : stopAt);
-  return { sent, complete: stopAt === null };
+  return { sent, complete: stopAt === null && !cutByTime };
 }
 
 /** A store's failed payments, then its cards about to stop working. */

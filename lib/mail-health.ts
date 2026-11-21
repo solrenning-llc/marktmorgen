@@ -284,8 +284,17 @@ async function pauseIfOver(id: string, now: number): Promise<Pause | null> {
   const over = overTheLine(health);
   if (!over) return null;
   const pause: Pause = { reason: over.reason, until: Math.floor(now / 1000) + PAUSE_DAYS * 86_400, sent: health.sent, count: over.count };
-  const [set] = await redisPipeline([["SET", pausedKey(id), JSON.stringify(pause), "NX", "EX", PAUSE_DAYS * 86_400]]);
+  const value = JSON.stringify(pause);
+  // Read exactly (CX-123 rule 24, Claude 6's LEVE 3 on #2687): "OK" is this run's pause, null one already running.
+  // Any other answer is read back by its value, so a pause that landed with its reply lost still starts its ramp and a
+  // running pause's end is never moved; a read-back that does not read throws, and the notice is heard again.
+  const set = exactRedisReply(await redisPipeline([["SET", pausedKey(id), value, "NX", "EX", PAUSE_DAYS * 86_400]]), 1)?.[0];
   if (set === null) return null;
+  if (set !== "OK") {
+    const held = exactRedisReply(await redisPipeline([["GET", pausedKey(id)]]), 1)?.[0];
+    if (typeof held === "string" && held !== value) return null;
+    if (held !== value) throw new Error("The mail health pause is unconfirmed");
+  }
   await redisPipeline([["SET", fromKey(id), dayOf(pause.until * 1000), "EX", (PAUSE_DAYS + HEALTH_WINDOW_DAYS + 1) * 86_400]]);
   // When the week is over it starts again with a hundred people, not with
   // everyone who is left: what is left of a bad list is still a bad list.

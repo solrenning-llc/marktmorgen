@@ -36,9 +36,13 @@
  *   nl:dir:page   the rows, as JSON, kept 10 minutes; dropped whenever a
  *                 creator saves their program, so taking a store out is
  *                 immediate
+ *   nl:dir:build  the build mark (lib/directory-index.ts, DIRECTORY_BUILD):
+ *                 one build at a time, and none for 10 minutes after one
+ *                 that could not finish
  */
+import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type Store, storeForId } from "@/lib/store";
+import { type Store, storeForIdExact } from "@/lib/store";
 import { recordListings, type Listing } from "@/lib/catalog";
 import { RECURRING_ALWAYS, commissionOn, commissionRate } from "@/lib/affiliate-setting";
 import { activeIntro } from "@/lib/intro-price";
@@ -46,10 +50,11 @@ import { activePlan } from "@/lib/product-extras";
 import { canSell } from "@/lib/store-checkout";
 import { isHouseStore } from "@/lib/house-store";
 import { imageUrl } from "@/lib/product-image";
-import { DIRECTORY_CACHE, listedStores, wouldList } from "@/lib/directory-index";
+import { DIRECTORY_BUILD, DIRECTORY_CACHE, listedStores, wouldList } from "@/lib/directory-index";
 import type { LanguageCode } from "@/lib/store-language";
 import { programNumbers } from "@/lib/affiliates";
 import { MIN_CLICKS_FOR_RATES } from "@/lib/affiliate-directory-rules";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 export { MIN_CLICKS_FOR_RATES };
 
@@ -59,8 +64,76 @@ export const PRODUCTS_PER_ROW = 4;
 /** How long the rows are kept before they are read again. */
 const KEEP_SECONDS = 600;
 
+/**
+ * How long one build holds the build mark before another may start: past the
+ * longest a healthy build takes, so a build cut short (a function stopped
+ * mid-way) holds the page "unavailable" for at most this long.
+ */
+const BUILD_HOLD_SECONDS = 60;
+
+/**
+ * How long, after a build that could not finish, the page answers "could not
+ * be checked" without building again: the time a kept page is kept, so a
+ * failure that persists costs one build in it, as a kept page does.
+ */
+const FAILED_SECONDS = KEEP_SECONDS;
+/** Looks a read that finds the build mark held takes for the other build's page (otherBuildsPage), and the wait between them. */
+export const BUILD_WAIT_LOOKS = 5;
+const BUILD_WAIT_MS = 250;
+/**
+ * How long a page with a row whose numbers could not be read is kept: as long
+ * as a whole one, as on main, so it costs no more builds than a healthy page;
+ * that row shows no numbers, never $0, until a build reads them.
+ */
+const PARTIAL_KEEP_SECONDS = KEEP_SECONDS;
+
+/**
+ * The directory as the page shows it: the rows read, and how many listed
+ * stores could not be read and are left out (Codex N1 on #2921). A store left
+ * out is not a store that is not there: the page says how many, and the next
+ * build reads them again.
+ */
+export type DirectoryPage = { rows: DirectoryRow[]; omitted: number };
+
+/** A kept page: a bare list of rows (nothing left out), or { rows, omitted }. Any other shape is not a page. */
+function keptPage(raw: string): DirectoryPage | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (Array.isArray(value)) return { rows: value as DirectoryRow[], omitted: 0 };
+  if (!value || typeof value !== "object") return null;
+  const { rows, omitted } = value as { rows?: unknown; omitted?: unknown };
+  if (!Array.isArray(rows) || typeof omitted !== "number" || !Number.isSafeInteger(omitted) || omitted < 0) return null;
+  return { rows: rows as DirectoryRow[], omitted };
+}
+
+/** What a page is kept as: a bare list when nothing is left out, as before, so a page kept by an older build still reads. */
+function pageToKeep(page: DirectoryPage): string {
+  return JSON.stringify(page.omitted > 0 ? page : page.rows);
+}
+
 /** The most programs read for the page: far past what one page lists. */
 const MAX_ROWS = 2_000;
+
+/** Sids asked of the listed set in one SSCAN page. */
+const SCAN_COUNT = 200;
+
+/**
+ * The most SSCAN pages one build of the directory reads, so its Redis commands
+ * have a ceiling before they are sent (MR: a ceiling before every spend). A
+ * healthy walk takes MAX_ROWS / SCAN_COUNT = 10 pages at the most; the rest is
+ * room for a set whose table is still sparse after many removals, where SCAN
+ * legally answers pages with few or no members (R2/C4 on #2921 measured about
+ * one more page per 15,000 members of past peak, so 64 covers a peak near a
+ * million). A cursor still not back at "0" after these pages, with fewer than
+ * MAX_ROWS stores read, is unknown: the read fails and nothing is kept, never a
+ * partial list kept as the whole one. Counted in tests/plan-cost-registry.ts
+ * (NOT_A_COST.DIRECTORY_SCAN_PAGES).
+ */
+export const DIRECTORY_SCAN_PAGES = 64;
 
 export type DirectoryProduct = {
   id: string;
@@ -218,37 +291,185 @@ export function sortRows(rows: DirectoryRow[]): DirectoryRow[] {
   return [...rows].sort((a, b) => b.topRate - a.topRate || b.earning - a.earning || a.name.localeCompare(b.name, "en"));
 }
 
-/** Every listed program, read from the stores themselves, kept a few minutes. */
+/**
+ * Every listed program, read from the stores themselves, kept a few minutes.
+ *
+ * At most one build runs at a time, and none for FAILED_SECONDS after one that
+ * could not finish (no program read while a store read failed, a numbers read
+ * that failed, the SSCAN page ceiling; #2921, CX-116 A1): before building, the build mark
+ * (DIRECTORY_BUILD) is taken with SET NX. A read that finds no kept page and
+ * cannot take the mark waits up to a second for the page of a build still
+ * running (otherBuildsPage); without it, it throws UnknownReplyError, so the page shows its own
+ * "The program list is unavailable just now" state; it never builds again and
+ * never shows a list that was not read whole. A finished build keeps the page
+ * and drops the mark; one that could not finish sets the mark to "failed" for
+ * FAILED_SECONDS. A numbers read that failed shows that build's rows, those
+ * numbers null: a read that did not arrive (the network) keeps no page and holds
+ * the mark as failed, as above; a reply that arrived off its exact shape (a bad
+ * record, which lasts) keeps that page PARTIAL_KEEP_SECONDS, so one store's bad
+ * record never hides every other program.
+ */
 export async function readDirectory(): Promise<DirectoryRow[]> {
-  if (!isRedisConfigured()) return [];
+  return (await readDirectoryPage()).rows;
+}
+
+/**
+ * readDirectory with the count of listed stores that could not be read and are
+ * left out of the rows (Codex N1 on #2921, MEDIUM). A store read that fails
+ * leaves that one store out: the page lists the others, says how many it left
+ * out, and is kept PARTIAL_KEEP_SECONDS, so a store that cannot be read for as
+ * long as it lasts costs one build in ten minutes, never the whole directory.
+ * When no program could be read and at least one store was left out, the build
+ * could not finish (above): never "no program is listed yet".
+ */
+export async function readDirectoryPage(): Promise<DirectoryPage> {
+  if (!isRedisConfigured()) return { rows: [], omitted: 0 };
   const [kept] = await redisPipeline([["GET", DIRECTORY_CACHE]]);
   if (typeof kept === "string") {
-    try {
-      const rows = JSON.parse(kept) as DirectoryRow[];
-      if (Array.isArray(rows)) return rows;
-    } catch {
-      // Read again below.
-    }
+    const page = keptPage(kept);
+    if (page) return page;
+    // Read again below.
   }
-  const sids: string[] = [];
+  // Each build holds its own mark (Codex N1 on #2921): it publishes its page and lets the mark go, or marks it failed, only
+  // while the mark is still its own, so a build that outlived its hold never undoes the next one's.
+  const token = `${BUILDING}${randomBytes(12).toString("hex")}`;
+  const [claim] = await redisPipeline([["SET", DIRECTORY_BUILD, token, "EX", BUILD_HOLD_SECONDS, "NX"]]);
+  // null: another build is running, or one could not finish FAILED_SECONDS ago. Any other shape is unknown, and builds nothing either.
+  if (claim === null) {
+    const other = await otherBuildsPage();
+    if (other) return other;
+  }
+  if (claim !== "OK") throw new UnknownReplyError(claim === null ? "the directory's build mark, held," : "the directory's build mark");
+  let built: Awaited<ReturnType<typeof buildDirectory>>;
+  try {
+    built = await buildDirectory();
+  } catch (error) {
+    await markFailed(token);
+    throw error;
+  }
+  const page: DirectoryPage = { rows: built.rows, omitted: built.omitted };
+  if (built.partial === "failed") {
+    await markFailed(token);
+    return page;
+  }
+  if (built.partial === "unknown" || built.omitted > 0) {
+    // A numbers reply off its exact shape is a bad record in one store, which lasts until
+    // someone fixes it: holding the build as failed would show "unavailable" to every
+    // other visitor for as long as it lasts (Claude 7 and Claude 1, MEDIUM on #2921).
+    // The page is kept, with that row's numbers null (never $0), for PARTIAL_KEEP_SECONDS,
+    // at no more builds than a healthy page. A store that could not be read is the same
+    // (Codex N1, MEDIUM on #2921): left out, counted on the page, read again next build.
+    await publishIfOwner(token, page, PARTIAL_KEEP_SECONDS);
+    return page;
+  }
+  await publishIfOwner(token, page, KEEP_SECONDS);
+  return page;
+}
+
+/** What a build's own mark starts with; the rest is its token. */
+const BUILDING = "building:";
+/** Keeps the page and lets the mark go, only while the mark is the build's own (Codex N1 on #2921). */
+const PUBLISH_IF_OWNER = `-- marktmorgen:directory-build-publish:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
+redis.call("DEL", KEYS[1])
+return 1`;
+/** Marks the build failed for FAILED_SECONDS, only while the mark is the build's own (Codex N1 on #2921). */
+const FAIL_IF_OWNER = `-- marktmorgen:directory-build-fail:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("SET", KEYS[1], "failed", "EX", ARGV[2])
+return 1`;
+
+/** A late build (its mark taken by the next one) answers its page but keeps nothing over the next build's. */
+async function publishIfOwner(token: string, page: DirectoryPage, seconds: number): Promise<void> {
+  await redisPipeline([["EVAL", PUBLISH_IF_OWNER, 2, DIRECTORY_BUILD, DIRECTORY_CACHE, token, pageToKeep(page), seconds]]).catch(() => null);
+}
+
+/**
+ * The page another visitor's healthy build is making (Codex X6, LOW on #2921): while the mark reads "building:" and a build's token, the
+ * read looks for the kept page again, at most BUILD_WAIT_LOOKS times BUILD_WAIT_MS apart (one second in all), so a
+ * visitor who came during a rebuild sees the list instead of "unavailable". It never builds. Null when the mark
+ * is "failed" or gone, when the page is still not there, or on any reply off its shape; the caller then throws.
+ */
+async function otherBuildsPage(): Promise<DirectoryPage | null> {
+  for (let look = 0; look < BUILD_WAIT_LOOKS; look += 1) {
+    if (look > 0) await new Promise((resolve) => setTimeout(resolve, BUILD_WAIT_MS));
+    const replies = await redisPipeline([["GET", DIRECTORY_CACHE], ["GET", DIRECTORY_BUILD]]).catch(() => null);
+    if (!Array.isArray(replies) || replies.length !== 2) return null;
+    const [kept, mark] = replies;
+    const page = typeof kept === "string" ? keptPage(kept) : null;
+    if (page) return page;
+    if (typeof mark !== "string" || !mark.startsWith(BUILDING)) return null;
+  }
+  return null;
+}
+
+/**
+ * A build that could not finish: the next ones wait FAILED_SECONDS. A mark that cannot be written still ends by its
+ * BUILD_HOLD_SECONDS. Only the build's own mark is turned into "failed": a late build leaves the next one's alone.
+ */
+async function markFailed(token: string): Promise<void> {
+  await redisPipeline([["EVAL", FAIL_IF_OWNER, 1, DIRECTORY_BUILD, token, FAILED_SECONDS]]).catch(() => null);
+}
+
+/**
+ * One build of the rows from the listed set and the stores. `partial` is
+ * "failed" when a numbers read did not arrive, else "unknown" when one arrived
+ * off its exact shape (UnknownReplyError), else false. `omitted` counts the
+ * listed stores whose read failed, left out of the rows; when it is not zero
+ * and no row was read, the build throws the first of those failures.
+ */
+async function buildDirectory(): Promise<{ rows: DirectoryRow[]; partial: false | "unknown" | "failed"; omitted: number }> {
+  // SSCAN may return a member more than once, in a page or across pages: each store is one row (Codex T on #2921).
+  const sids = new Set<string>();
   let cursor = "0";
+  let pages = 0;
   do {
-    const page = await listedStores(cursor, 200);
-    sids.push(...page.sids);
+    // Repeats and empty pages do not grow `sids`, so only a page count bounds a cursor that never ends (R2/C4 on #2921).
+    if (pages === DIRECTORY_SCAN_PAGES) throw new UnknownReplyError(`the directory's SSCAN, not at its end after ${DIRECTORY_SCAN_PAGES} pages,`);
+    const page = await listedStores(cursor, SCAN_COUNT);
+    pages += 1;
+    for (const sid of page.sids) sids.add(sid);
     cursor = page.next;
-  } while (cursor !== "0" && sids.length < MAX_ROWS);
-  const stores = await Promise.all(sids.slice(0, MAX_ROWS).map((sid) => storeForId(sid).catch(() => null)));
+  } while (cursor !== "0" && sids.size < MAX_ROWS);
+  // A store read that failed is not a program that is not there: that store is
+  // left out and counted, and the page says how many could not be read. One store
+  // never takes the whole directory down (Codex N1, MEDIUM on #2921). Read exactly
+  // (storeForIdExact, the same two GETs): a reply in another shape or a record that
+  // cannot be read throws and is counted too, never taken for no store (rvB4 on #2921).
+  const failures: unknown[] = [];
+  const stores = await Promise.all(
+    [...sids].slice(0, MAX_ROWS).map((sid) =>
+      storeForIdExact(sid).catch((error: unknown) => {
+        failures.push(error);
+        return null;
+      }),
+    ),
+  );
+  // A failed numbers read still shows the row without numbers, but that page is
+  // not kept for the next visitors.
+  let partial: false | "unknown" | "failed" = false;
   const rows = sortRows(
     (
       await Promise.all(
         stores.map(async (store) => {
           const row = store ? directoryRow(store) : null;
           if (!row || !store || !store.affiliates.numbers) return row;
-          return { ...row, numbers: directoryNumbers(await programNumbers(store).catch(() => null)) };
+          const numbers = await programNumbers(store).catch((error: unknown) => {
+            if (error instanceof UnknownReplyError) {
+              if (partial === false) partial = "unknown";
+            } else partial = "failed";
+            return null;
+          });
+          return { ...row, numbers: directoryNumbers(numbers) };
         }),
       )
     ).filter((row): row is DirectoryRow => row !== null),
   );
-  await redisPipeline([["SET", DIRECTORY_CACHE, JSON.stringify(rows), "EX", KEEP_SECONDS]]).catch(() => null);
-  return rows;
+  if (failures.length) {
+    // No program read and some could not be: the list could not be checked, never "no program is listed yet".
+    if (!rows.length) throw failures[0];
+    console.warn(`affiliate directory: ${failures.length} listed store(s) could not be read and are left out of this build`);
+  }
+  return { rows, partial, omitted: failures.length };
 }

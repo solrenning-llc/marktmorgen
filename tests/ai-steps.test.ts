@@ -16,6 +16,7 @@
  *   - every command and byte a stepped generation adds is priced in the ai
  *     line of tests/plan-cost-registry.ts.
  */
+import type { AiStepId, AiStepState } from "@/lib/ai-steps";
 import { PDFDocument } from "pdf-lib";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import * as ai from "@/lib/ai";
@@ -31,7 +32,8 @@ import { paidPeriod } from "./billing-period-fixture";
 import { refuse, reservations as spent } from "./ai-steps-spend-stub";
 
 type Step = { step: string; state: string };
-type Steps = { run: string; onStep: (step: "read" | "write", state: "started" | "done") => void };
+// The library's own step types: a run that writes a file has a step per part too (`section-N`, #3474).
+type Steps = { run: string; onStep: (step: AiStepId, state: AiStepState) => void };
 type Stopped = { ok: false; reason: "stopped" | "failed" | "empty"; returned: number | null; left: number | null };
 const writePage = ai.writePage as unknown as (
   store: Parameters<typeof ai.writePage>[0],

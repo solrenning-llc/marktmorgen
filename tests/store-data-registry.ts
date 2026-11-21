@@ -326,6 +326,8 @@ export const FAMILIES: Record<string, Family> = {
   // One a PDF that could not be read for the AI assistance, so it is not downloaded again for a day (Codex N1 on #3447).
   "nl:ai:pdfno:@app/api/store/ai/route.ts": short("A product's PDF that could not be read for the AI assistance, so it is not read again for a day", "studio", 1),
   // One a stop: each stop is a studio request, and the mark goes by itself after AI_STOP_KEEP_SECONDS (five minutes), held here at a day.
+  // One a run of a file's parts (758 [STN5] unit 3), each run at least one writing job: the one save it allows, gone by itself after AI_FILE_KEEP_SECONDS (a day).
+  "nl:ai:file:@lib/ai-file.ts": short("The one save of a file written with AI that a run of its parts allows (lib/ai-file-rules.ts)", "ai", 1),
   "nl:ai:stop:@lib/ai.ts": short("A stop asked for one run of a page drafted step by step (lib/ai-steps.ts)", "studio", 1),
   "nl:assist:pool:@lib/store-assistant.ts": { what: "The Store assistant's pool of replies for one month of the add-on", line: "store-assistant" },
   "nl:assist:c:@lib/store-assistant.ts": { what: "A conversation with the Store assistant, a day after its last message", line: "store-assistant" },
@@ -860,6 +862,7 @@ export const FAMILIES: Record<string, Family> = {
   // Claude 3, MEDIUM on #3473: a membership is noted before its removal and taken off once its invitations are deleted.
   "nl:mv:pend:@lib/move-members.ts": { what: "Memberships removed whose invitations a person's erasure must still reach", parts: [capped(PENDING_MAX * MARK + KEY, "One set a store, at most PENDING_MAX product ids (a removal that would add one more is refused); each taken off once its invitations are deleted.", src("lib/move-members.ts", `PENDING_MAX = ${PENDING_MAX};`))] },
   "nl:mv:link:@lib/move-members.ts": room("An invite's link, until a while after the renewal it is for", "lib/move-members.ts"),
+  "nl:mv:open:@lib/move-members.ts": short("The checkout an invitation's link opened: one key an invitation, as long as Stripe keeps that checkout open and a minute, never more than a day and a minute", "request", 2, LINK_BYTES),
   // ---------------------------------------------------------------- lib/ n–p
   "nl:next:@lib/next-bought.ts": { what: "What buyers bought next, cached", parts: [capped(256 * KB, "One cached view.")] },
   "nl:next:lock:@lib/next-bought.ts": short("One reading at a time", "studio", 1, 128),

@@ -16,7 +16,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { is, part, done } from "./check";
 import {
-  LABEL, ROLL_AT, COMMENT_LIMIT, PANEL_COMMENT_ID, PANEL_MARK, BODY_LIMIT, BOT, partOf, nextTitle, pointerLine, withPointer, pointedTo,
+  LABEL, ROLL_AT, COMMENT_LIMIT, PANEL_COMMENT_ID, TRUSTED, PANEL_MARK, BODY_LIMIT, BOT, partOf, nextTitle, pointerLine, withPointer, pointedTo,
   panelProblem, panelWith, firstLine, fenced, fortaleza, trusted, previousOf, warnOnce, warningLine, rollover, httpApi, type Api,
 } from "../scripts/coordination_rollover.mjs";
 
@@ -38,8 +38,26 @@ is("the job runs by hand, or on a comment on an issue (never a pull request) lab
   "or on a comment on a coordination part caught mid-rollover (its pending pointer), so a run that died between the two label calls is finished by the next comment",
   condition, `github.event_name == 'workflow_dispatch' || (!github.event.issue.pull_request && (vars.COORDINATION_ROLLOVER == 'on' || vars.COORDINATION_ROLLOVER == 'dry-run') && ` +
   `((contains(github.event.issue.labels.*.name, '${LABEL}') && (vars.COORDINATION_ROLLOVER == 'dry-run' || github.event.issue.comments >= ${ROLL_AT})) || ` +
-  `(startsWith(github.event.issue.title, 'Agent coordination') && contains(github.event.issue.body, '(opening: keep writing here until the label'))))`);
-is("the pending pointer the condition looks for is exactly the one the script writes", pointerLine(5000, true).includes("(opening: keep writing here until the label"), true);
+  `(startsWith(github.event.issue.title, 'Agent coordination') && contains(github.event.issue.body, 'keep writing here until the label') && ` +
+  `(contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) || github.event.issue.user.login == 'github-actions[bot]'))))`);
+// Owner, DONO-20261120-2254-4941: an outside account's issue that only looks mid-rollover must not even start a job, which
+// would enter the concurrency group and replace a legitimate pending run (the script refused it, but the run was delayed).
+is("the mid-rollover path admits only an issue opened from inside the repository or by this workflow, the same rule as trusted()",
+  [condition.includes(`fromJSON('["OWNER","MEMBER","COLLABORATOR"]')`), [...TRUSTED].sort().join(), /author_association\) \|\| github\.event\.issue\.user\.login == 'github-actions\[bot\]'/.test(condition)],
+  [true, "COLLABORATOR,MEMBER,OWNER", true]);
+is("the comment on the concurrency group says only what holds: an outsider's look-alike issue skips the job",
+  [/it can never replace a pending run/.test(workflow), /opened by an outside account also skips the job/.test(workflow)], [false, true]);
+is("the pending pointer the condition looks for is in the one the script writes, and only there (never in the final line)",
+  [pointerLine(5000, true).includes("keep writing here until the label"), pointerLine(5000).includes("keep writing here until the label")], [true, false]);
+// No YAML parser runs in CI, so the two things that break a plain YAML value are checked by hand on every line: ": " (it
+// starts a new key; c4425f2e14 broke the whole file on "(opening: keep") and " #" (it starts a comment).
+const plainBreaks = workflow.split("\n").map((line, i) => [i + 1, line] as const).filter(([, line]) => !/^\s*(#|- |$)/.test(line))
+  .flatMap(([n, line]) => {
+    const m = /^\s*(?:- )?[\w-]+: (.*)$/.exec(line);
+    const value = m?.[1] ?? "";
+    return !value || /^["'|>]/.test(value) ? [] : /: | #/.test(value) ? [`line ${n}: ${value.slice(0, 80)}`] : [];
+  });
+is("every plain YAML value in the workflow is valid: no ': ' and no ' #' inside it", plainBreaks, []);
 // GitHub evaluates the condition itself; the same sub-expressions reach the script as values, which a dry run prints.
 is("the values GitHub evaluates for the condition, and the switch, reach the script through env, never a shell line", [
   /\n {10}MODE: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.mode \|\| vars\.COORDINATION_ROLLOVER \}\}\n/.test(workflow),

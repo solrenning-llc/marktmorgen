@@ -38,9 +38,10 @@ permissions:
 jobs:
   rollover:
     name: Coordination rollover
-    if: ${{ github.event_name == 'workflow_dispatch' || (!github.event.issue.pull_request && (vars.COORDINATION_ROLLOVER == 'on' || vars.COORDINATION_ROLLOVER == 'dry-run') && ((contains(github.event.issue.labels.*.name, 'canal-ativo') && (vars.COORDINATION_ROLLOVER == 'dry-run' || github.event.issue.comments >= 2250)) || (startsWith(github.event.issue.title, 'Agent coordination') && contains(github.event.issue.body, '(opening: keep writing here until the label')))) }}
-    # On the job, not the workflow: a run whose job is skipped (every other comment in the repository) never enters the
-    # group, so it can never replace a pending run that would roll the channel over.
+    if: ${{ github.event_name == 'workflow_dispatch' || (!github.event.issue.pull_request && (vars.COORDINATION_ROLLOVER == 'on' || vars.COORDINATION_ROLLOVER == 'dry-run') && ((contains(github.event.issue.labels.*.name, 'canal-ativo') && (vars.COORDINATION_ROLLOVER == 'dry-run' || github.event.issue.comments >= 2250)) || (startsWith(github.event.issue.title, 'Agent coordination') && contains(github.event.issue.body, 'keep writing here until the label') && (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) || github.event.issue.user.login == 'github-actions[bot]')))) }}
+    # On the job, not the workflow: a run whose job is skipped never enters the group. Every other comment in the repository
+    # skips it. A comment on a look-alike "Agent coordination" issue opened by an outside account also skips the job (owner,
+    # DONO-20261120-2254-4941), so an outsider cannot replace a pending run; the runs that do enter are equivalent.
     concurrency:
       group: coordination-rollover
       cancel-in-progress: false

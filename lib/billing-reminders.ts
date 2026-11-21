@@ -9,7 +9,8 @@
  * a subscription should treat the person paying for it. Each is sent once per
  * charge, and says the date, the amount and the one click that stops it.
  */
-import { claimMark } from "@/lib/claim-mark";
+import { claimMark, claimValue } from "@/lib/claim-mark";
+import { RELEASE } from "@/lib/redis-lock";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { isAddOn, keepCardThatPays, listSubscriptions, ownLatestInvoice, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
@@ -107,14 +108,16 @@ async function legacyHeld(legacy: string): Promise<"held" | "absent" | "unknown"
 /**
  * Lets a reminder's mark go after its email did not go, so the next run tries again (rule 24, R24 crons item 6): tried
  * twice, and a mark still held is said (false, logged with its key), never swallowed, because it keeps that reminder
- * from being tried again until it runs out.
+ * from being tried again until it runs out. Only this run's own claim (`value`) is let go, compared and deleted in one
+ * script (lib/redis-lock.ts, RELEASE), as lib/payment-recovery.ts does with releaseMark: a mark that ran out and was
+ * taken by another run is that run's, and stays (Claude 1, 6834038662 on #3215). Read exactly (rule 24): 1, deleted,
+ * or 0, not ours (any more): nothing of ours is held. Any other answer, or none: tried once more, then said.
  */
-async function letGo(key: string): Promise<boolean> {
+async function letGo(key: string, value: string): Promise<boolean> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const reply = repliesFor(await redisPipeline([["DEL", key]]), 1);
-      const deleted = reply ? countOf(reply[0]) : null;
-      if (deleted === 0 || deleted === 1) return true;
+      const reply = repliesFor(await redisPipeline([["EVAL", RELEASE, 1, key, value]]), 1);
+      if (reply && (reply[0] === 0 || reply[0] === 1)) return true;
     } catch {
       // Tried once more, then said.
     }
@@ -339,8 +342,9 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
     if (!due) return true;
     // Claimed before anything is done, so a second run never writes twice.
     const key = `nl:remind:failed:${due.invoice}`;
+    const value = claimValue();
     // Ours, someone else's (told already), or unknown: no email on a guess, read again on the next run (rule 24).
-    const claimed = await claimMark(key, 90 * DAY);
+    const claimed = await claimMark(key, 90 * DAY, value);
     if (claimed === "taken") return true;
     if (claimed !== "ours") return false;
     try {
@@ -358,7 +362,7 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
       counts.failed += 1;
       console.error("telling a creator their payment failed did not work", error);
       // Tried again on the next run rather than never.
-      if (!(await letGo(key))) counts.unreleased += 1;
+      if (!(await letGo(key, value))) counts.unreleased += 1;
       return false;
     }
   });
@@ -400,7 +404,8 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
       if (before === "held") return true;
       if (before !== "absent") return false;
       // Ours, someone else's (sent already), or unknown: no email on a guess, read again on the next run (rule 24).
-      const claimed = await claimMark(key, 60 * DAY);
+      const value = claimValue();
+      const claimed = await claimMark(key, 60 * DAY, value);
       if (claimed === "taken") return true;
       if (claimed !== "ours") return false;
       const { subject, text } = reminderEmail(reminder);
@@ -411,7 +416,7 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
       }
       counts.failed += 1;
       // Tried again on the next run rather than never.
-      if (!(await letGo(key))) counts.unreleased += 1;
+      if (!(await letGo(key, value))) counts.unreleased += 1;
       return false;
     });
     counts.seen += walked.seen;

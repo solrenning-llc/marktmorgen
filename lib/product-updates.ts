@@ -36,7 +36,7 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
-import { type BatchMessage, type SendOutcome, NIMBUS_FROM, sendBatch, sendEmailOutcome } from "@/lib/email";
+import { type BatchMessage, type BatchReceipt, type SendOutcome, NIMBUS_FROM, sendBatchNoting, sendEmailOutcome } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -590,9 +590,11 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
           });
           messages.push({ from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers });
         }
-        const outcome = await sendBatch(messages, `upd:${id}:${job.done}:${emails.length}`, { by: "monthly" });
+        const receipt: BatchReceipt = { maybeSent: false };
+        const outcome = await sendBatchNoting(messages, `upd:${id}:${job.done}:${emails.length}`, { by: "monthly" }, receipt);
         if (outcome !== "sent") {
-          await giveBack(store, recipients.length, day);
+          // Given back only when no provider can have taken any of it (lib/email.ts sendBatchNoting).
+          if (!receipt.maybeSent) await giveBack(store, recipients.length, day);
           const failures = job.failures + 1;
           job =
             // Only a refusal ends it: a provider that is down or slow keeps the update waiting in the queue, never

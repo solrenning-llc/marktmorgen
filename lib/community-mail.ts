@@ -28,7 +28,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
-import { type BatchMessage, sendBatch } from "@/lib/email";
+import { type BatchMessage, type BatchReceipt, sendBatchNoting } from "@/lib/email";
 import { CHECKED_BATCH_SIZE, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, canWrite, fromLine, mailDay, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { SITE_URL } from "@/lib/site-url";
 import { leadsKey } from "@/lib/contact-rules";
@@ -488,9 +488,11 @@ export async function advanceAnnouncement(
           });
           messages.push({ from: fromLine(store), to: member.e, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers });
         }
-        const outcome = await sendBatch(messages, `cm:${id}:${job.done}:${keys.length}`, { by: "monthly" });
+        const receipt: BatchReceipt = { maybeSent: false };
+        const outcome = await sendBatchNoting(messages, `cm:${id}:${job.done}:${keys.length}`, { by: "monthly" }, receipt);
         if (outcome !== "sent") {
-          await release(store, recipients.length, day);
+          // Given back only when no provider can have taken any of it (lib/email.ts sendBatchNoting).
+          if (!receipt.maybeSent) await release(store, recipients.length, day);
           const failures = job.failures + 1;
           // Only a refusal ends it: a provider that is down keeps the email waiting, never abandoned (outage drill).
           job = outcome === "refused"

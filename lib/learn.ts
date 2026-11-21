@@ -71,8 +71,8 @@ export const PASS_SECONDS = 90 * 24 * 60 * 60;
 /** How long an emailed link works, and how many times it opens. */
 export const LINK_SECONDS = 60 * 60;
 const MAX_LINK_OPENS = 10;
-/** How long an answer from Stripe about who bought what is reused. */
-const PAID_SECONDS = 10 * 60;
+/** How long an answer from Stripe about who bought what is reused (lib/certificate-refunds.ts waits past it). */
+export const PAID_SECONDS = 10 * 60;
 const IP_LIMIT = 10;
 const ADDRESS_LIMIT = 5;
 const RATE_WINDOW_SECONDS = 60 * 60;
@@ -679,6 +679,28 @@ export async function courseAccess(store: Store, product: Listing, cookies: Cook
   if (state === "unknown" || endsAt === "unknown") return { state: "unchecked", learner };
   if (state === "ended") return { state: "expired", learner, endedAt: endsAt! };
   return { state: "open", learner, start, endsAt, stamp };
+}
+
+/**
+ * Whether an address can still open a course here, as every door decides it, asked of Stripe afresh: its kept answer
+ * is forgotten first, so an answer kept from before a refund never decides. "shut" only on a whole reading; "unknown"
+ * when Stripe could not be read whole (`undecided`, CX-123 rule 24), never "shut". A course handed over at a community
+ * level is read again here, and a read of it that throws throws here too, never "not earned" (the ledger's own read of
+ * it only logs a failure). The certificate of a course whose payment was given back is withdrawn only on "shut"
+ * (lib/certificate-refunds.ts).
+ */
+export async function courseStandingFor(store: Store, email: string, productId: string): Promise<"open" | "shut" | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  const forgot = countOf(repliesFor(await redisPipeline([["DEL", paidCacheKey(store, email)]]), 1)?.[0]);
+  if (forgot !== 0 && forgot !== 1) throw new UnknownReplyError("forgetting the kept answer about an address's courses");
+  const { paid, undecided } = await courseLedger(store, email);
+  if (paid.has(productId)) return "open";
+  if (undecided.has(productId)) return "unknown";
+  if (store.community?.id) {
+    const earned = await earnedCourses(store.community.id, emailKey(email), Date.now(), store.community.on, store);
+    if (earned.has(productId)) return "open";
+  }
+  return "shut";
 }
 
 // ------------------------------------------------------------ progress

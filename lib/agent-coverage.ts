@@ -239,6 +239,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/podcast": row("podcast", draft),
   "POST store/podcast/public-settings": row("podcast", execute, "Turning a podcast's public feed on, or putting an episode in it, publishes it to podcast apps outside the studio, which keep their copies after it is turned off: confirmed one change at a time, after the notice the studio shows."),
   "POST store/preorder": row("products", draft),
+  "GET store/draft-preview": row("products", never("Whether a draft's preview link is open, read by the studio's editor when its panel opens; the link itself is the creator's to make and share.")),
   "POST store/draft-preview": row("products", never("A preview link is a secret that lets its holder see a draft; the creator makes it in the studio and shares it themselves.")),
   "GET store/preview": row("files", read),
   "POST store/preview": row("files", draft),

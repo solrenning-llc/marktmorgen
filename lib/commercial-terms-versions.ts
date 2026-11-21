@@ -10,5 +10,5 @@
  * Pure data: no environment, no network, no database.
  */
 export const PUBLISHED_COMMERCIAL_TERMS: Readonly<Record<number, string>> = Object.freeze({
-  29: 'v29:sha256:15dd09d803d9462b01c581af264366e8b1266d06d15d267290c9e636b37f4e7b',
+  29: 'v29:sha256:f7a557e4db1d5fb6b05d6f49aef4091ed9c3b5b784b6ae3711c4265f7d93b175',
 });

@@ -52,6 +52,9 @@ async function main(): Promise<void> {
     ["a negative count", (r) => r.map((row, i) => (i === 2 ? ["0", "-20", "1"] : row))],
     ["a day row of two fields", (r) => r.map((row, i) => (i === 2 ? ["0", "20"] : row))],
     ["a pause's end that is not a day", (r) => ["soon", ...r.slice(1)]],
+    // A day the calendar does not have reads as unknown, never as a pause that empties the window (Codex V, LOW on #2314).
+    ["a day beyond the end of November", (r) => ["2026-11-31", ...r.slice(1)]],
+    ["a month beyond December", (r) => ["2026-13-01", ...r.slice(1)]],
   ];
   for (const [label, alter] of damaged) is(label, await outcome(alter), "unknown");
 

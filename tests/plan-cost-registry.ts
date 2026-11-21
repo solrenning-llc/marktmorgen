@@ -2681,6 +2681,9 @@ export const COST_LINES: CostLine[] = [
       // A reading of PayPal asked for by a view or a press takes paypalReadingUnits studio requests before PayPal is asked,
       // and ends its calls inside PAYPAL_READING_MS of a 60 s function; refused, it reads nothing (C5-20261121-1459-PAYPAL-READING).
       { file: "lib/paypal-payouts.ts", names: ["paypalReadingUnits", "PAYPAL_READING_BASE_UNITS", "PAYPAL_READING_MS", "takeAllowance(store, \"studio\", paypalReadingUnits(open.size, lines))"] },
+      // The daily job's try of a batch whose answer is not known reads the whole affiliate book: unknownRetryUnits studio
+      // requests first, at the programme's size; not counted or no room, nothing is read or sent (unit #96).
+      { file: "lib/paypal-payouts.ts", names: ["unknownRetryUnits", "UNKNOWN_RETRY_BASE_UNITS", "takeAllowance(store, \"studio\", unknownRetryUnits(sizes))"] },
       { file: "app/studio/affiliates/page.tsx", names: ["export const maxDuration = 60", "settlePayPal(store, { paced: true })"] },
       { file: "app/api/store/affiliates/paypal/route.ts", names: ["export const maxDuration = 60", "settlePayPal(store, { press: true })"] },
       // The invoices of a store's own plan take one billing request of the day (the essential counter) before Stripe is asked, none without a plan subscription (601 [KB22] U5).

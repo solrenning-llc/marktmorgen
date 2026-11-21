@@ -30,6 +30,21 @@ test("nothing is recorded: the real list stays empty and sales stay closed", () 
   assert.equal(recordedTreatment("UK"), null);
 });
 
-test("the paths still open are said, not hidden", () => {
-  assert.ok(REFUSE_CONSUMERS_OPEN.length > 0);
+// Since 789 [IV1] unit 1 no path is open. The list is empty only because each path the queue named is closed by a
+// mechanism the drafts name, so emptying it without one fails here (it said "length > 0" while paths were open).
+test("the paths still open are said, not hidden: none is open, and each one closed is named", () => {
+  assert.deepEqual(REFUSE_CONSUMERS_OPEN, []);
+  for (const draft of REFUSE_CONSUMERS_DRAFTS) {
+    for (const closer of [
+      "lib/eu-vat-gate.ts (consumerGate",
+      "app/api/store/pay-request/route.ts",
+      "app/api/store/tip/route.ts",
+      "lib/upsell.ts (offerGate)",
+      "lib/eu-vat-goods.ts (vatShipCloses)",
+      "lib/physical-legal-ship.ts (shippingNow)",
+    ]) {
+      assert.equal(draft.implementedIn.includes(closer), true, `${draft.jurisdiction}: ${closer}`);
+    }
+    assert.equal(draft.evidence.includes("tests/eu-vat-open-paths.test.ts"), true, draft.jurisdiction);
+  }
 });

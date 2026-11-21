@@ -423,6 +423,42 @@ test("a batch the provider refused whose give-back throws still lets its claims 
   } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
 });
 
+// Codex G on #4360 (MEDIUM, 20/11 21:44 UTC): a batch the provider refused for good went nowhere, so its whole share of
+// the month is given back even when taking the order off the list throws part-way; before, the throw jumped to the
+// catch before the give-back, and the store's review-request allowance was spent on an email that never went.
+test("a batch the provider refused whose clean-up throws still gives its allowance back", async () => {
+  const oldFetch = globalThis.fetch;
+  const oldLog = console.error;
+  const r = await setup();
+  const realFetch = globalThis.fetch;
+  let posts = 0;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.hostname === "api.resend.com" && url.pathname === "/emails/batch") {
+      posts += 1;
+      return new Response("synthetic refusal", { status: 422 });
+    }
+    return realFetch(input, init);
+  }) as typeof fetch;
+  const before = Number(redis.run(["GET", monthKey(r.shop)]) ?? 0);
+  let threw = false;
+  redis.pipeline = async (commands) => {
+    if (posts > 0 && !threw && commands.some((c) => c[0] === "ZREM" && c[1] === ASK_DUE_KEY && c[2] === r.member)) {
+      threw = true;
+      throw new Error("synthetic ZREM timeout");
+    }
+    return r.original(commands);
+  };
+  try {
+    console.error = () => {};
+    const run = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+    console.error = oldLog;
+    assert.deepEqual([posts > 0, threw], [true, true], "the provider refused and the clean-up threw (diagnostic)");
+    assert.equal(run.sent, 0, "nothing went");
+    assert.equal(Number(redis.run(["GET", monthKey(r.shop)]) ?? 0), before, "the month's count is back where it was");
+  } finally { console.error = oldLog; redis.pipeline = r.base; globalThis.fetch = oldFetch; }
+});
+
 // Codex X2 on #4360: "retry" also means the provider may have taken the batch (a lost answer). When giving the
 // allowance back then throws, the claims are kept stretched, as main keeps them: the order is never put in another
 // batch under another key, so an email that went is never sent twice.

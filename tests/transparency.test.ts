@@ -26,8 +26,8 @@ async function main(): Promise<void> {
   const counts = await transparencyCounts(nov);
   is("from the first day counted", counts.since, "2026-01-15");
   const y = counts.years[0];
-  is("received, by kind", y.notices, { copyright: 2, other: 1 });
-  is("acted on once per notice, however many steps", y.acted, { copyright: 1, other: 1 });
+  is("received, by kind", y.notices, { copyright: 2, other: 1, child_safety: 0, intimate_image: 0 });
+  is("acted on once per notice, however many steps", y.acted, { copyright: 1, other: 1, child_safety: 0, intimate_image: 0 });
   is("each step counted", y.steps, { link: 1, product: 1, kit: 0, store: 1 });
   is("a made-up notice id is not counted", (await countStep({ id: "not-an-id", kind: "other" }, "kit", nov), (await transparencyCounts(nov)).years[0].steps.kit), 0);
   is("and a later year starts at nothing", (await transparencyCounts(Date.UTC(2027, 1, 1))).years.map((x) => [x.year, x.notices.copyright]), [["2027", 0], ["2026", 2]]);

@@ -1157,14 +1157,17 @@ export function besideSaveUsd(tier: Tier): number {
  * The activity log's fence (lib/team.ts KEEP_LOG_IF_LIVE; Codex X5, 20/11): a line is written only while its store's
  * id still names the store and its erasure has not begun, TEAM_LOG_FENCE_COMMANDS more than the plain LPUSH and LTRIM
  * (which stay inside the studio unit's twenty commands). TEAM_LOG_LINES_PER_STUDIO_REQUEST lines are priced on every
- * studio request of the month: studioAccess writes at most one for a request it counts, and a route adds at most one
+ * studio request of the month, and on every essential request (ESSENTIAL_PER_DAY a day, counted apart from the
+ * studio figure): studioAccess writes at most one for a request it counts, and a route adds at most one
  * of its own (a person's deletion, lib/person-erasure.ts; the team route's action and its paused keys, which
  * studioAccess leaves to it); a Meet, Meta or Discord connection's callback writes one, after its counted start.
  * A move of the sign-in address (lib/team.ts moveMemberships, dropMemberships) is the company's, under move-done.
  */
 export const TEAM_LOG_LINES_PER_STUDIO_REQUEST = 2;
 export function teamLogFenceUsd(tier: Tier): number {
-  return STORE_ALLOWANCES[tier].studio * TEAM_LOG_LINES_PER_STUDIO_REQUEST * TEAM_LOG_FENCE_COMMANDS * COMMAND;
+  // And on every essential request of the month (Claude 6 i51q on #4988), counted apart from the studio figure: a
+  // teammate's export goes through studioAccess, a teammate leaving through the team route.
+  return (STORE_ALLOWANCES[tier].studio + ESSENTIAL_PER_DAY * DAY_WINDOWS) * TEAM_LOG_LINES_PER_STUDIO_REQUEST * TEAM_LOG_FENCE_COMMANDS * COMMAND;
 }
 
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */

@@ -5,9 +5,9 @@
  * (docs/margin-alignment-2026-10-18.md).
  *
  * Nothing in the document is typed: `node scripts/margin-alignment.mjs`
- * writes it from renderMarginAlignment(), and tests/margin-alignment.test.ts
- * fails when the file on disk is not what this renders, so a change to a
- * price, a limit, a fee or a reading that is not regenerated is caught.
+ * prints renderMarginAlignment() on demand (owner, 20/11/2026: the path holds
+ * only that command), and tests/margin-alignment.test.ts checks what it
+ * prints, so every price, limit, fee and reading is checked as it is today.
  */
 import { worstMonthKept } from "./worst-month-kept";
 import { MOST_CORRECT_READING, POSITIVE_NET_CENTS, receivingOf, type UnitResult } from "@/lib/receiving-costs";
@@ -27,7 +27,11 @@ import { MAX_AUTO_LANGUAGES, MAX_AUTO_MINUTES, autoCaptionCents } from "@/lib/au
  * The same 15.38% as tests/worst-month-kept.ts.
  */
 export const CURRENT_PROFIT_TAX_BPS = MOST_CORRECT_READING.profitTaxBps + MOST_CORRECT_READING.incomingExchangeIofBps;
-const taxOnProfit = (pretaxCents: number) => Math.ceil((Math.max(0, pretaxCents) * CURRENT_PROFIT_TAX_BPS) / 10_000);
+/** IRPF and IOF each rounded up on its own, as lib/receiving-costs.ts rounds them (IOF per entry, IRPF on the profit). */
+const taxOnProfit = (pretaxCents: number) => {
+  const profit = Math.max(0, pretaxCents);
+  return Math.ceil((profit * MOST_CORRECT_READING.profitTaxBps) / 10_000) + Math.ceil((profit * MOST_CORRECT_READING.incomingExchangeIofBps) / 10_000);
+};
 
 /** The smallest pretax profit that still leaves the positive net cent rule MR asks for after the tax above. */
 const SMALLEST_KEEPING_PRETAX = (() => { let p = 1; while (p - taxOnProfit(p) < POSITIVE_NET_CENTS) p += 1; return p; })();

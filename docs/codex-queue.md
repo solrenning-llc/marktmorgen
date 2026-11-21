@@ -23921,6 +23921,8 @@ Acessibilidade (AX274, Parte A, integral): desempenho em celular simples e rede 
 
 Proibido: deixar de contar qualquer visita; mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; usar dados reais nos testes.
 
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
 ## FZ — Horários no fuso do cliente (21/11/2026)
 
 ### 792 [FZ1] — Todo horário visível ao cliente no fuso dele, que pode trocá-lo

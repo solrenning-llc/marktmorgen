@@ -1,10 +1,14 @@
 import {planPaymentDisputeFixture, zeroExposureFixture } from './margin-test-fixtures';
 import {fundedCustomerScenario,fundedCustomerWithAi} from './margin-test-fixtures';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { assessMinimumCustomerBase, type CustomerBaseReview, type CustomerBaseUnit } from '../lib/customer-base-rules';
 import { type CustomerWorstCase } from '../lib/net-margin-rules';
 import { commercialMarginReady, CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, REQUIRED_MARGIN_SCENARIOS, BASE_PLAN_REVENUE_CEILINGS, type CommercialMarginReview } from '../lib/commercial-margin';
+// The synthetic review names this month when it is made (tests/margin-test-fixtures.ts zeroExposureFixture) and the
+// code reads the month again on every call: a run crossing 00:00 UTC on a month's last day failed the review. Only Date
+// is stopped, for the whole run; timers and performance.now() run as usual.
+mock.timers.enable({ apis: ['Date'], now: Date.now() });
 const scenario = (gross=10000,net=7000,months:1|12=1): CustomerWorstCase => fundedCustomerScenario(gross,net,months===12?'creator_year_full':'creator_month_full');
 const fixed=(amount=10000,count=10):CustomerBaseReview=>({monthlyFixedCostsCeilingCents:amount,monthlyFixedTaxesCeilingCents:0,allFixedCostsBounded:true,allFixedTaxesReviewed:true,fixedCostsEvidence:'TEST ONLY',fixedTaxEvidence:'TEST ONLY',reviewedPayingCustomers:count});
 const unit=(gross=10000,net=7000,months:1|12=1):CustomerBaseUnit=>({months,scenario:scenario(gross,net,months)});

@@ -46,7 +46,14 @@ export async function POST(request: NextRequest) {
       if (!email) return Response.json({ ok: false, error: "expired" }, { status: 410 });
       const result = await erasePerson(guarded.store, email, { kind: "team", who: guarded.email, role: guarded.role });
       if (result.ok) {
-        await forgetFindToken(token);
+        // The search token holds the address (#4800): not confirmed deleted, the erasure is not finished. Answered as the
+        // erasure's own unfinished parts are, so pressing again (the token still opens the page) deletes it.
+        try {
+          await forgetFindToken(token);
+        } catch (error) {
+          console.error("deleting a buyer page's search token after an erasure was not confirmed", error);
+          return Response.json({ ok: false, error: "incomplete", failed: ["lib/buyer-profile.ts"] }, { status: 503 });
+        }
         const left = result.notes.includes("discord-roles") ? "&discord=1" : "";
         return Response.json({ ok: true, records: result.records, notes: result.notes, href: studioPath(guarded.store, `erased=1${left}`, "people") }, noStore);
       }

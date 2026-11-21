@@ -20,11 +20,13 @@ import { MAX_TAG_LENGTH, readTags } from "@/lib/contact-rules";
 import { confirmedRecipientCount, confirmedDraftId, draftRemovalAnswer, confirmedMailCopy, keptWaitHours, mailAnswer, type MailAnswer } from "@/lib/mail-response";
 import { toast } from "@/components/toast";
 import { MailAccent, MailBodyEditor } from "@/components/mail-designer";
+import { MailAccessReview } from "@/components/mail-access-review";
 import { flowConfigurationIssues } from "@/lib/flow-review";
 import type { Flow, FlowCounts, FlowStep } from "@/lib/flows";
 import { flowWaitHours, type FlowAction, type FlowGoal, type FlowTrigger, MAX_CONDITION_TAG, type StepCondition, type StepIf, isCourseIf } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_STEPS } from "@/lib/flow-limits";
 import { type MapStep, WorkflowMap, WorkflowPreview, WorkflowRuns, editorFocusPhase, focusBack, mapEditId } from "@/components/workflow-tools";
+import { WorkflowVersions } from "@/components/workflow-versions";
 import type { MailSettings } from "@/lib/store";
 import { StoreField } from "@/components/studio-store-pin";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
@@ -94,7 +96,9 @@ const MESSAGES: Record<string, string> = {
   draft_read_unavailable: "Your saved drafts could not be checked before saving. Your text is still here. Try saving again in a moment.",
   broadcast_read_unavailable: "That email could not be read just now, so nothing was changed. Try again in a moment.",
   draft_write_unconfirmed: "The draft save could not be confirmed. Your text is still here. Check your saved drafts before saving again; the draft may already exist.",
+  history_unconfirmed: "The sequence was removed, but its earlier versions could not be confirmed deleted just now. They are kept listed and are deleted with your store's data.",
   flow_write_unconfirmed: "The sequence change could not be confirmed. Reload the saved sequences and check the result before trying again. The change may already have happened.",
+  flow_write_busy: "Someone else changed these sequences at the same time, so nothing was saved. Try again.",
   starters_nothing: "Your store already has a sequence for each of those moments. They are under Sequences.",
   keep_unsent: "Only an email that has finished going out can be kept sending.",
   keep_excludes:
@@ -119,7 +123,7 @@ const MESSAGES: Record<string, string> = {
 type Answer = MailAnswer;
 
 async function call(payload: Record<string, unknown>): Promise<Answer> {
-  const sequenceWrite = ["keep", "flow", "flow-remove", "starters", "flow-activate", "flow-resolve"].includes(String(payload.action));
+  const sequenceWrite = ["keep", "flow", "flow-remove", "starters", "flow-activate", "flow-resolve", "flow-restore"].includes(String(payload.action));
   const draftWrite = payload.action === "draft-save";
   try {
     const response = await fetch("/api/store/mail", {
@@ -592,6 +596,7 @@ function Settings({ name, mail }: { name: string; mail: MailSettings | null }) {
   const router = useRouter();
   const [fromName, setFromName] = useState(mail?.fromName ?? name);
   const [address, setAddress] = useState(mail?.address ?? "");
+  const [onPolicies, setOnPolicies] = useState(mail?.onPolicies === true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
@@ -601,7 +606,7 @@ function Settings({ name, mail }: { name: string; mail: MailSettings | null }) {
         e.preventDefault();
         setBusy(true);
         setError(null);
-        const a = await call({ action: "settings", fromName, address });
+        const a = await call({ action: "settings", fromName, address, onPolicies });
         setBusy(false);
         if (a.ok) {
           toast("Email settings saved.");
@@ -617,9 +622,17 @@ function Settings({ name, mail }: { name: string; mail: MailSettings | null }) {
         <span className="field-label">Postal address at the bottom of each email</span>
         <input className="field mt-2" maxLength={200} placeholder="Street, city, ZIP or postal code, country — or a PO box" value={address} onChange={(e) => setAddress(e.target.value)} />
       </label>
+      <label className="flex min-h-11 items-start gap-3">
+        <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" checked={onPolicies} onChange={(e) => setOnPolicies(e.target.checked)} />
+        <span>
+          {"Also show this address on my store's policies page"}
+          <span className="block text-sm text-ink-soft">Anyone can see that page. Leave this off to keep the address in your emails only.</span>
+        </span>
+      </label>
       <p className="text-sm text-ink-soft">
         Replies go to the email address the store&apos;s owner logs in with. The postal address is required by the CAN-SPAM Act for emails
-        like these; a PO box or a mail service address counts.
+        like these; a PO box or a mail service address counts. It is shown publicly on your store&apos;s policies page only if you check
+        the box above; if you do, you may prefer one of those to a home address.
       </p>
       <button type="submit" aria-busy={busy} disabled={busy} className="btn btn-secondary">Save</button>
       <Feedback error={error} done={null} />
@@ -832,6 +845,12 @@ function Compose(props: {
   function changeAnswer(id: string) {
     setConfirming(false);
     requestAnimationFrame(() => document.getElementById(id)?.focus());
+  }
+  // "Show it in the text" from "Can everyone read it?": the review closes, as with "Change", and the text box shows that place.
+  const [reveal, setReveal] = useState<{ start: number; end: number; key: number } | null>(null);
+  function showInText(start: number, end: number) {
+    setConfirming(false);
+    setReveal((was) => ({ start, end, key: (was?.key ?? 0) + 1 }));
   }
   const [error, setError] = useState<string | null>(null);
   // What the writing help is asked to write, and about which product.
@@ -1089,6 +1108,7 @@ function Compose(props: {
           boxRef={(el) => {
             bodyBox.current = el;
           }}
+          reveal={reveal}
         />
         <p className="text-sm text-ink-soft">
           Blank lines make paragraphs, lines starting with &quot;- &quot; make a list, web addresses become links, and a picture you add shows where its line is. Design lays it out in blocks, with headings, buttons and templates. Why they are getting it, the unsubscribe link and your postal address are added at the bottom.
@@ -1342,6 +1362,8 @@ function Compose(props: {
               </div>
             </dl>
             <SubjectTestReview preview={testPreview} />
+            {/* AX274 Part A item 6: what a reader cannot use, with fixes the creator presses; it never stops the email. */}
+            <MailAccessReview body={body} onChange={setBody} onShow={showInText} />
             <p id="mail-send-note" className="mt-2">
               Eligibility is checked again when sending starts.
               {/* A narrowed email holds its later readings of the buyers in the month it goes out (lib/broadcasts.ts, createBroadcast). */}
@@ -2123,6 +2145,7 @@ function Flows({
   // A saved workflow being switched on: its preview is shown first (WorkflowPreview), then the explicit button.
   const [activating, setActivating] = useState<string | null>(null);
   const [runsOpen, setRunsOpen] = useState<string | null>(null);
+  const [versionsOpen, setVersionsOpen] = useState<string | null>(null);
   const activeCount = flows.filter((f) => f.active).length;
   const availableSlots = sequenceDraftSlots(draft?.steps ?? []);
   const availableCounts = SEQUENCE_DRAFT_COUNTS.filter(count => count <= availableSlots);
@@ -2483,6 +2506,7 @@ function Flows({
                 </div>
               ) : null}
               {runsOpen === f.id ? <WorkflowRuns flowId={f.id} steps={f.steps} request={call} /> : null}
+              {versionsOpen === f.id ? <WorkflowVersions flowId={f.id} request={call} onRestored={refreshFlows} /> : null}
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm font-bold">
                 {f.active ? (
                   <button type="button" className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 hover:text-violet-deep" disabled={locked || draft !== null} onClick={() => setActive(f, false)}>
@@ -2501,6 +2525,15 @@ function Flows({
                 )}
                 <button type="button" className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 hover:text-violet-deep" onClick={() => setRunsOpen(runsOpen === f.id ? null : f.id)}>
                   {runsOpen === f.id ? "Hide runs" : "Runs"}
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 hover:text-violet-deep"
+                  aria-expanded={versionsOpen === f.id}
+                  disabled={locked || draft !== null}
+                  onClick={() => setVersionsOpen(versionsOpen === f.id ? null : f.id)}
+                >
+                  {versionsOpen === f.id ? "Hide earlier versions" : "Earlier versions"}
                 </button>
                 <button
                   type="button"
@@ -2524,6 +2557,13 @@ function Flows({
                     setError(null);
                     const a = await call({ action: "flow-remove", id: f.id });
                     setBusy(false);
+                    if (!a.ok && a.error === "history_unconfirmed") {
+                      // Removed: only its earlier versions were not confirmed deleted, so it is said as done, with that note,
+                      // and the list no longer shows it (Claude 1 on #1927).
+                      toast(message(a));
+                      refreshFlows();
+                      return;
+                    }
                     if (!a.ok) {
                       if (a.error === "flow_write_unconfirmed") onWriteUnconfirmed();
                       setError("Removal of “" + f.name + "” could not be confirmed. Reload to check its current status. " + message(a));

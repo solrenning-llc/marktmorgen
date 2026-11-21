@@ -10,6 +10,7 @@
 import { connectPayPal, payWithPayPal } from "@/lib/paypal-payouts";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statslockx1";
@@ -86,6 +87,7 @@ async function seed(store: Store): Promise<void> {
     ["HSET", `nl:aff:${STATS}:people`, SARA, JSON.stringify({ id: SARA, email: "sara@example.com", code: "sara", status: "approved", appliedAt: 1, decidedAt: 2, note: "" })],
     ["HSET", `nl:aff:${STATS}:sales`, "cs_1", JSON.stringify({ ref: "cs_1", pi: "pi_cs_1", aff: SARA, at, product: "p1", title: "Guide", base: 10000, total: 10000, currency: "usd", rate: 30, self: false })],
   ]);
+  await markLive(store);
   if (!(await connectPayPal(store, CLIENT, SECRET)).ok) throw new Error("synthetic PayPal app not kept");
 }
 

@@ -74,6 +74,8 @@ Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibiçã
 
 Pedido do dono, nas palavras dele: "quero regra e politica para nao ocorrer mais de faltar revisor e revisoes na quantidade e qualidade correta". Sobre a escala de revisores: "MAS AS VEZES OCORRE DE UM AGENTE ESTAR SEM USO E DE AS VEZES ELE NAO PODER SER POR MOTIVO TECNICO". Aprovação da proposta do coordenador (Claude 5): "faça o correto". Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão. Motivo: na noite de 20 para 21/11/2026, o #4984 e o #4999, de imposto, ficaram prontos sem revisor; o gargalo era revisor, não código. Esta seção completa a FQ (2) e não a substitui.
 
+**Precedência do correio (CO).** A regra CO, o correio dos agentes (#5012, dono, 21/11/2026, por volta da 00h50 Fortaleza), é ordem posterior a esta: onde as duas divergirem, vale CO (Pedidos repetidos, passo 3 (b)). Quando CO estiver no main, o pedido de revisão, a sua entrega ao revisor e o CLAIMED passam pelo correio (CO (c) e (e)), no lugar da escala de (c) e dos prazos de (d). Continuam valendo o número de revisões de (a), as exclusões técnicas de (b), a revisão antes de produzir de (e) e o conteúdo da revisão de (f).
+
 (a) **Quantas revisões, por tipo de PR**, todas de família diferente da do autor:
 - dinheiro, imposto, cobrança, custo, segurança e apagamento de dados: 2, de duas famílias diferentes;
 - workflow: 2, mais o SIM do dono registrado para o head exato (FQ (1));
@@ -122,6 +124,8 @@ Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibiçã
 ## CN — Um canal só, conferido e confirmado (dono, 20/11/2026, por volta das 23h Fortaleza)
 
 Pedido do dono, nas palavras dele: "precisa corrigir de vez o canal. estou suspeitando de problema no canal, de agente nao saber por o canal ja ter mudado ou de o agente nao conferir frequentemente o canal". Aprovação da proposta do coordenador (Claude 5): "faça o correto". Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão.
+
+**Precedência do correio (CO).** A regra CO, o correio dos agentes (#5012, dono, 21/11/2026, por volta da 00h50 Fortaleza), é ordem posterior a esta: onde as duas divergirem, vale CO (Pedidos repetidos, passo 3 (b)). Quando CO estiver no main, (a) a (e) abaixo valem só durante a transição de CO (i), até cada família confirmar a mensagem de boas-vindas do correio; depois disso, ficam como histórico.
 
 **Diagnóstico**, conferido em 21/11/2026 às 02:03 UTC:
 - só a #4932 tinha o rótulo `canal-ativo`, e ninguém escrevia nas partes antigas (#4858, #4848, #4827) desde as 20h UTC;

@@ -86,7 +86,7 @@ import { MAX_PAGE_BYTES } from "@/lib/sales-page";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { TEAM_LIMITS } from "@/lib/team-scheduling-rules";
 import { HOST_LOCK_OWNER_COMMANDS, HOST_READING_FENCE_BYTES, HOST_READING_FENCE_COMMANDS, SYNC_SECONDS } from "@/lib/host-calendar";
-import { MAX_TEAM, MEMBER_STORES_READ } from "@/lib/team";
+import { MAX_TEAM, MEMBER_STORES_READ, TEAM_LOG_FENCE_COMMANDS } from "@/lib/team";
 import { MAX_ANSWER_TEXT, MAX_FEEDBACK, MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
 import { CLAIM_PAGES, CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
@@ -1166,6 +1166,23 @@ export const BESIDE_SWEEP_USD =
  */
 export function besideSaveUsd(tier: Tier): number {
   return STORE_ALLOWANCES[tier].studio * BESIDE_SAVE_COMMANDS * COMMAND;
+}
+
+/**
+ * The activity log's fence (lib/team.ts KEEP_LOG_IF_LIVE; Codex X5, 20/11): a line is written only while its store's
+ * id still names the store and its erasure has not begun, TEAM_LOG_FENCE_COMMANDS more than the plain LPUSH and LTRIM
+ * (which stay inside the studio unit's twenty commands). TEAM_LOG_LINES_PER_STUDIO_REQUEST lines are priced on every
+ * studio request of the month, and on every essential request (ESSENTIAL_PER_DAY a day, counted apart from the
+ * studio figure): studioAccess writes at most one for a request it counts, and a route adds at most one
+ * of its own (a person's deletion, lib/person-erasure.ts; the team route's action and its paused keys, which
+ * studioAccess leaves to it); a Meet, Meta or Discord connection's callback writes one, after its counted start.
+ * A move of the sign-in address (lib/team.ts moveMemberships, dropMemberships) is the company's, under move-done.
+ */
+export const TEAM_LOG_LINES_PER_STUDIO_REQUEST = 2;
+export function teamLogFenceUsd(tier: Tier): number {
+  // And on every essential request of the month (Claude 6 i51q on #4988), counted apart from the studio figure: a
+  // teammate's export goes through studioAccess, a teammate leaving through the team route.
+  return (STORE_ALLOWANCES[tier].studio + ESSENTIAL_PER_DAY * DAY_WINDOWS) * TEAM_LOG_LINES_PER_STUDIO_REQUEST * TEAM_LOG_FENCE_COMMANDS * COMMAND;
 }
 
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
@@ -2625,7 +2642,7 @@ export const COST_LINES: CostLine[] = [
     feature: "The studio's own reads and writes: every page of it drawn (STUDIO_PAGE_UNITS each), every save and read, its refreshing; and the never-paused plan, cancel, delete and data-download requests (17 October 2026)",
     // And the beside pool's read, take and give-back on a product save while the store pays, priced on every studio
     // request (besideSaveUsd; TAKE_DATA's inner commands, as Upstash bills them).
-    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8) + besideSaveUsd(tier),
+    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8) + besideSaveUsd(tier) + teamLogFenceUsd(tier),
     sources: [
       // Goal save/removal: EVAL plus EXISTS, HEXISTS and one SET or DEL; four billed commands inside the studio request.
       { file: "lib/sales-goal.ts", names: ["SALES_GOAL_WRITE_COMMANDS"] },
@@ -2633,6 +2650,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/studio-allowance-rules.ts", names: ["STUDIO_PAGE_UNITS", "ESSENTIAL_PER_DAY", "ESSENTIAL_NEEDS"] },
       { file: "lib/store-data.ts", names: ["BESIDE_SAVE_COMMANDS", "poolTakeCommands"] },
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },
+      // The activity log's fence, priced on every studio request (teamLogFenceUsd).
+      { file: "lib/team.ts", names: ["TEAM_LOG_COMMANDS", "TEAM_LOG_FENCE_COMMANDS", "KEEP_LOG_IF_LIVE"] },
+      { file: "lib/studio-route.ts", names: ["logTeam(access.store.sid"] },
       // A product's removal admits its ordinary request and WAITLIST_DROP_UNITS together before anything goes, for its
       // waitlist's hold and drop (or its drop finished when asked again): at most WAITLIST_DROP_COMMANDS commands and
       // WAITLIST_DROP_BYTES bytes inside the additional unit (#4462; tests/waitlist-removed-drop-pending.test.ts).

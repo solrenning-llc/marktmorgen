@@ -283,6 +283,15 @@ export class MemoryRedis {
           if (members.length) gone += Number(this.run(["DEL", who]));
           return [gone, members.length];
         }
+        // lib/calendar-sync.ts KEEP_NEW_FEED_READING: a new feed's first reading, only while the settings still list it.
+        if (key.startsWith("-- marktmorgen:calendar-new-feed-reading:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, cfg, busy, good, mark, value, cache, stale] = args;
+          const held = this.run(["GET", cfg]);
+          if (typeof held !== "string" || !held.includes(mark)) return 0;
+          this.run(["SET", busy, value, "EX", cache]);
+          this.run(["SET", good, value, "EX", stale]);
+          return 1;
+        }
         // lib/calendar-sync.ts: one config fence for the whole refresh, and only each claim's own release.
         if (key.startsWith("-- marktmorgen:calendar-readings-current:v1\n")) {
           const count = Number(args[0]);

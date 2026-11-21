@@ -148,6 +148,20 @@ for i = 0, (#KEYS - 1) / 4 - 1 do
 end
 return kept and 1 or 0`;
 
+/**
+ * A new feed's first reading (addFeed), written only while the store's settings still list that feed (Claude 5 on
+ * #4983): a removeFeed or the store's erasure between the settings saved and this write leaves nothing behind. The
+ * feed's id is 16 hex characters, and in the stored JSON a value's quotes are escaped, so `"id":"<id>"` appears
+ * only as the feed's own id. Billed EVAL + GET + two SETs: NEW_FEED_READING_FENCE_COMMANDS more than the two SETs.
+ */
+const KEEP_NEW_FEED_READING = `-- marktmorgen:calendar-new-feed-reading:v1
+local cfg = redis.call("GET", KEYS[1])
+if not cfg or not string.find(cfg, ARGV[1], 1, true) then return 0 end
+redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
+redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[4])
+return 1`;
+export const NEW_FEED_READING_FENCE_COMMANDS = 2;
+
 /** Commit all refreshed feeds over the same config and release only their own marks, in one operation. */
 async function keepFeedReadings(statsId: string, config: string, entries: FeedCommit[]): Promise<boolean> {
   const keys = [cfgKey(statsId), ...entries.flatMap(e => [lockKey(e.id), busyKey(e.id), goodKey(e.id), errKey(e.id)])];
@@ -623,10 +637,9 @@ export async function addFeed(store: Store, raw: string, now = Date.now(), hooks
   if (changed.state === "busy") return { ok: false, reason: "busy", message: CALENDAR_CHANGE_BUSY };
   if (changed.result) return changed.result;
   const saved = JSON.stringify(reading);
-  await redisPipeline([
-    ["SET", busyKey(feed.id), saved, "EX", CACHE_SECONDS],
-    ["SET", goodKey(feed.id), saved, "EX", STALE_SECONDS],
-  ]);
+  // Kept only while the settings still list this feed: one removed or erased since is not written back. A reading
+  // not kept is only a cache: the next calendarBusy reads the calendar again.
+  await redisPipeline([["EVAL", KEEP_NEW_FEED_READING, 3, cfgKey(statsId), busyKey(feed.id), goodKey(feed.id), `"id":"${feed.id}"`, saved, CACHE_SECONDS, STALE_SECONDS]]);
   return { ok: true, view: await calendarView(store), busyTimes: reading.busy.length };
 }
 

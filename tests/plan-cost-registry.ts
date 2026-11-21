@@ -110,7 +110,7 @@ import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { MAX_BUMPS } from "@/lib/product-extras";
 import { AFFILIATE_ROW_CAP, PRODUCT_CARD_CPU_SECONDS, PRODUCT_CARD_HELD_SECONDS, PRODUCT_CARD_MAX_BYTES, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
 import { BOOK_STRIPE_READS } from "@/lib/book-page-rules";
-import { FEED_READING_CONFIG_BYTES, FEED_READING_FENCE_COMMANDS, FEED_TIMEOUT_MS, MAX_FEEDS } from "@/lib/calendar-sync";
+import { FEED_READING_CONFIG_BYTES, FEED_READING_FENCE_COMMANDS, FEED_TIMEOUT_MS, MAX_FEEDS, NEW_FEED_READING_FENCE_COMMANDS } from "@/lib/calendar-sync";
 import { CALENDAR_CALLS, LISTING_READ_BYTES } from "@/lib/read-ceilings";
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { SEARCH_PAGE } from "@/lib/community-search";
@@ -1150,6 +1150,15 @@ export const BESIDE_SWEEP_USD =
  */
 export function besideSaveUsd(tier: Tier): number {
   return STORE_ALLOWANCES[tier].studio * BESIDE_SAVE_COMMANDS * COMMAND;
+}
+
+/**
+ * A new store calendar's first reading, written only while the settings still list it (lib/calendar-sync.ts addFeed,
+ * KEEP_NEW_FEED_READING; Claude 5 on #4983): NEW_FEED_READING_FENCE_COMMANDS more than its two plain SETs. A calendar
+ * can be removed and added again, so adds are bounded only by the studio figure: priced on every studio request.
+ */
+export function newFeedFenceUsd(tier: Tier): number {
+  return STORE_ALLOWANCES[tier].studio * NEW_FEED_READING_FENCE_COMMANDS * COMMAND;
 }
 
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
@@ -2529,11 +2538,13 @@ export const COST_LINES: CostLine[] = [
     feature: "The studio's own reads and writes: every page of it drawn (STUDIO_PAGE_UNITS each), every save and read, its refreshing; and the never-paused plan, cancel, delete and data-download requests (17 October 2026)",
     // And the beside pool's read, take and give-back on a product save while the store pays, priced on every studio
     // request (besideSaveUsd; TAKE_DATA's inner commands, as Upstash bills them).
-    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8) + besideSaveUsd(tier),
+    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8) + besideSaveUsd(tier) + newFeedFenceUsd(tier),
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "studio"] },
       { file: "lib/studio-allowance-rules.ts", names: ["STUDIO_PAGE_UNITS", "ESSENTIAL_PER_DAY", "ESSENTIAL_NEEDS"] },
       { file: "lib/store-data.ts", names: ["BESIDE_SAVE_COMMANDS", "poolTakeCommands"] },
+      // A new calendar's first reading, fenced on the settings (newFeedFenceUsd).
+      { file: "lib/calendar-sync.ts", names: ["NEW_FEED_READING_FENCE_COMMANDS", "KEEP_NEW_FEED_READING"] },
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },
       // A product's removal admits its ordinary request and WAITLIST_DROP_UNITS together before anything goes, for its
       // waitlist's hold and drop (or its drop finished when asked again): at most WAITLIST_DROP_COMMANDS commands and

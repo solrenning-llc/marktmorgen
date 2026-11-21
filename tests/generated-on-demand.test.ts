@@ -54,13 +54,20 @@ test("running each command prints its report, leaves the stored text unchanged, 
 });
 
 test("the test job installs the solver's pinned packages, so the solver runs on demand there", () => {
-  const pins = read("scripts/requirements-solver.txt").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+  // Each requirement is one logical line ("\" continues it): the exact version, then the sha256 of each prebuilt wheel the
+  // job may take (owner's SIM of 20/11/2026, condition 3: --only-binary :all: and --require-hashes).
+  const pins = read("scripts/requirements-solver.txt").replace(/\\\n/g, " ").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
   assert.deepEqual(pins.map((l) => l.split("==")[0]).sort(), ["numpy", "scipy"]);
-  for (const pin of pins) assert.match(pin, /^[a-z]+==\d+\.\d+\.\d+$/, `${pin} is an exact version`);
+  for (const pin of pins) {
+    assert.match(pin, /^[a-z]+==\d+\.\d+\.\d+ /, `${pin.split(" ")[0]} is an exact version`);
+    const hashes = pin.match(/--hash=sha256:[0-9a-f]{64}\b/g) ?? [];
+    assert.ok(hashes.length >= 1 && hashes.length === pin.split("--hash=").length - 1, `${pin.split(" ")[0]} is locked by the sha256 of its wheels`);
+  }
   const workflow = read(".github/workflows/product-checks.yml");
   const job = workflow.slice(workflow.indexOf("\n  behavior-regressions:"), workflow.indexOf("\n  store-copy:"));
   assert.match(job, /python3 -m venv "\$RUNNER_TEMP\/solver"/);
-  assert.match(job, /"\$RUNNER_TEMP\/solver\/bin\/pip" install -r scripts\/requirements-solver\.txt/);
+  // Only prebuilt wheels, each checked against its hash: no install script runs in CI, and a swapped package fails.
+  assert.match(job, /"\$RUNNER_TEMP\/solver\/bin\/pip" install --only-binary :all: --require-hashes -r scripts\/requirements-solver\.txt/);
   assert.match(job, /MILP_PYTHON=\$RUNNER_TEMP\/solver\/bin\/python/);
   assert.ok(job.indexOf("requirements-solver") < job.indexOf("run: npm test"), "the solver is installed before the tests run");
 });

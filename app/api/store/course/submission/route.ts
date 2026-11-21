@@ -10,6 +10,7 @@ import { costPauseCode, costStandingOf } from "@/lib/plan-standing";
 import { checkSubmissionFile, maySubmit } from "@/lib/submission-rules";
 import { abortSubmissionDoor, closeSubmissionDoor, liveCount, openSubmissionDoor, readSetupFor, signSubmissionDoor } from "@/lib/submission-store";
 import { PIECES_PER_ASK } from "@/lib/vault-rules";
+import { SUBMISSIONS_READY } from "@/lib/submission-switch";
 
 /** Uploads one buyer may open on a store in an hour: a few tries at the right file, never a file host. */
 const SUBMISSION_OPENS_PER_HOUR = 10;
@@ -39,11 +40,13 @@ const text = (value: unknown, max: number) => (typeof value === "string" ? value
  * this buyer opened on this lesson of this store, read from the door kept for
  * it, never from the request. Anything that could not be read is refused.
  *
- * Not reachable yet: no lesson has a creator's settings until the studio's
- * settings unit, and the trainers' page still says "Not yet".
+ * Off while SUBMISSIONS_READY is false (lib/submission-switch.ts): the
+ * trainers' page still says "Not yet".
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return no("forbidden", 403);
+  // Off until the buyer's side of the lesson page and the notices work (lib/submission-switch.ts).
+  if (!SUBMISSIONS_READY) return no("off", 404);
   let body: Record<string, unknown>;
   try {
     body = (await (await limited(request, BODY_BYTES)).json()) as Record<string, unknown>;

@@ -281,13 +281,14 @@ async function main(): Promise<void> {
       const timed = Number((await redis.pipeline([["HGET", room, `~${month}`]]))[0] ?? 0);
       is("its record's bytes are counted in the data room until it expires", timed >= dataBytes([recKey, recJson], 1), true);
       const slot = Number((await redis.pipeline([["HGET", room, buyerSlotFor(FOLDER, COURSE, lesson, ANA) ?? ""]]))[0] ?? -1);
-      // One place weighs its member on the lesson, its entry in the store, with a path at its longest, and its slot's
-      // turn on the store's list at its longest (review of #3568, Claude 6).
+      // One place weighs its member on the lesson, its entry in the store (with a path at its longest), its line on the
+      // course's list, and its slot's turn on the store's list at its longest (review of #3568, Claude 6).
       const longestPath = "v".repeat("vault/".length + 32 + 1 + 36 + 1 + 16 + 1 + 120);
       const turn = dataBytes([`nl:sub:slots:${"f".repeat(64)}`, `sbl:${"0".repeat(32)}|${"c".repeat(64)}|${"l".repeat(64)}|${"b".repeat(64)}`], 1);
       const onePlace =
         dataBytes([`nl:sub:live:${FOLDER}:${COURSE}:${lesson}:${ANA}`, "0".repeat(32)], 1) +
         dataBytes([`nl:sub:who:${FOLDER}:${ANA}`, [COURSE, lesson, "0".repeat(32), longestPath].join("|")], 1) +
+        dataBytes([`nl:sub:list:${FOLDER}:${COURSE}`, `${lesson}|${"0".repeat(32)}`], 1) +
         turn;
       is("the buyer's slot holds the one place, not the upload's door", slot, onePlace);
       is("so the room is lighter than with the upload open", ((await dataUsed(SHOP))?.used ?? -1) < usedBefore + dataBytes([recKey, recJson], 1), true);

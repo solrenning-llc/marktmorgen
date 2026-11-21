@@ -68,6 +68,8 @@ export type EuSupplyFields = {
   bundle: readonly string[] | null;
   shipping?: unknown;
   pwyw: unknown;
+  /** The creator's answer to whether it is an electronically supplied publication (lib/catalog.ts, Product.publication). */
+  publication?: unknown;
 };
 
 const present = (value: unknown) => value !== null && value !== undefined && value !== false && value !== "";

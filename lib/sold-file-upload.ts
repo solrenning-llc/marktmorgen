@@ -8,12 +8,15 @@
  * option's, a lesson's, an episode's — goes through here, so none of them
  * can be left sending files to the dearer store.
  *
- * Resolves with the path to tell the product, lesson or episode. Throws what
- * the store's own uploader throws: `uploadReason` reads either kind.
+ * Resolves with the path to tell the product, lesson or episode. A door that
+ * says no throws its own reason (lib/upload-refusal.ts), on either store:
+ * `uploadReason` reads its word and `uploadMessage` the creator's sentence.
  */
-import { uploadPresigned } from "@vercel/blob/client";
 import { MULTIPART_ABOVE_BYTES, fileFolder, safeFileName } from "@/lib/product-file";
-import { VaultUploadError, vaultUpload } from "@/lib/vault-upload";
+import { refusalOf, uploadThroughDoor } from "@/lib/upload-refusal";
+import { vaultUpload } from "@/lib/vault-upload";
+
+export { uploadMessage } from "@/lib/upload-refusal";
 
 export async function uploadSoldFile(
   file: File,
@@ -23,9 +26,10 @@ export async function uploadSoldFile(
   const kept = await vaultUpload(file, where.ownerId, safeFileName(file.name), { onProgress });
   if (kept) return kept.pathname;
 
-  const result = await uploadPresigned(fileFolder(where.folder, where.ownerId) + safeFileName(file.name), file, {
+  // Through the door that reads its own answer, so a refusal says why (lib/upload-refusal.ts).
+  const result = await uploadThroughDoor(fileFolder(where.folder, where.ownerId) + safeFileName(file.name), file, {
     access: "private",
-    handleUploadUrl: "/api/store/file",
+    door: "/api/store/file",
     clientPayload: JSON.stringify({ productId: where.ownerId }),
     // In parts once it is worth it, so a dropped connection costs one part
     // rather than the whole upload.
@@ -36,13 +40,12 @@ export async function uploadSoldFile(
 }
 
 /**
- * Why an upload failed, as one of the words the studio has a sentence for:
- * `wrong_type`, `too_big`, `storage_full`, `slow_down`, `upload_stopped`,
- * `files_unavailable`, `signed_out`, `unknown`, or `server_error` for
- * anything else.
+ * Why an upload failed, as the word its door answered (`wrong_type`,
+ * `too_big`, `storage_full`, `slow_down`, `upload_stopped`, `studio_used`,
+ * `two_step_required`, `locked`, `renewal_unpaid`, `files_unavailable`,
+ * `signed_out`, `unknown` and the rest), or `server_error` when nobody gave
+ * one. For the sentence, `uploadMessage`.
  */
 export function uploadReason(thrown: unknown): string {
-  if (thrown instanceof VaultUploadError) return thrown.reason;
-  if (thrown instanceof Error && /content type|not allowed/i.test(thrown.message)) return "wrong_type";
-  return "server_error";
+  return refusalOf(thrown).reason || "server_error";
 }

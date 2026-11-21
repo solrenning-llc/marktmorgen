@@ -133,7 +133,7 @@ Pedido do dono, nas palavras dele: "precisa corrigir de vez o canal. estou suspe
 
 (b) **Vigia em toda sessão.** Toda sessão que pode manter processos em segundo plano deixa um vigia que, a cada 30 segundos:
 - acha a issue pelo rótulo, nunca por um número fixo, e assim segue sozinho a troca de parte;
-- mostra os comentários novos que citam o nome do agente, a sua família, "todos" ou "ALL".
+- lê cada comentário novo inteiro, não só a primeira linha, sem distinguir maiúsculas de minúsculas, e mostra os que citam o nome do agente, a sua família, "todos", "ALL" ou "everyone"; quem enfileira mostra também os pedidos de fila ("fila #N", "MERGE WHEN READY"). Em 20/11/2026, um pedido de fila do #4958 que começava por "Owner's decision" esperou cerca de uma hora porque o vigia de quem enfileira só lia a primeira linha (Claude 6, 7056303941).
 
 O vigia é religado quando expira, e religá-lo é a primeira ação depois de cada reinício. O Codex lê o canal em cada execução da tarefa agendada (AV9).
 

@@ -9,6 +9,7 @@ import socket
 import time
 import uuid
 from test_form_opportunity_redis import Redis
+from test_contract_funding_redis import measured_command
 
 
 class LocalRedis(Redis):
@@ -20,9 +21,43 @@ class LocalRedis(Redis):
         self.stream = self.sock.makefile("rb")
 
 
+def measure_commands(client, run):
+    """Adapt the existing atomic command observer to this suite's EVAL budget."""
+    result, counts = measured_command(client, run)
+    assert counts.get("eval") == 1 and counts.get("multi", 0) == 0 and counts.get("exec", 0) == 0, counts
+    return result, sum(counts.values())
+
+
+def measurement_controls():
+    observer = LocalRedis()
+
+    class HealthcheckedRedis(LocalRedis):
+        def command(self, *parts):
+            result = super().command(*parts)
+            # A separate client models a service health check. Its command
+            # must not be charged as an application Lua command.
+            if parts[0] == "INFO":
+                assert observer.command("PING") == "PONG"
+            return result
+
+    client = HealthcheckedRedis()
+    try:
+        result, calls = measure_commands(client, lambda: client.command("EVAL", "return redis.call('PING')", 0))
+        assert result == "PONG" and calls == 2, (result, calls)
+        # An INFO inside the application Lua is real work, unlike the single
+        # observer INFO needed by the measurement itself.
+        _, calls = measure_commands(client, lambda: client.command("EVAL", "return redis.call('INFO','server')", 0))
+        assert calls == 2, calls
+        print("PASS: external health PING is excluded; application PING/INFO remain billed")
+    finally:
+        client.close()
+        observer.close()
+
+
 def main():
     if os.environ.get("MARKTMORGEN_REDIS_INTEGRATION") != "1":
         raise RuntimeError("Run only against disposable CI Redis on loopback")
+    measurement_controls()
     root = Path(__file__).resolve().parents[1]
     source = (root / "lib/orders.ts").read_text(encoding="utf-8")
     match = re.search(r"export const COMMIT_ORDER_CONFIRMATION = `([^`]+)`;", source)
@@ -48,15 +83,10 @@ def main():
     def state():
         return [redis.command("GET", keys[1]), redis.command("HGETALL", keys[2]), redis.command("HGETALL", keys[3])]
 
-    def command_stats():
-        return {m[1]: int(m[2]) for m in re.finditer(r"cmdstat_([^:]+):calls=(\d+),", redis.command("INFO", "COMMANDSTATS")) if m[1] != "info"}
-
     try:
         setup()
-        before = command_stats()
-        assert commit() == 1
-        after = command_stats()
-        commands = sum(n - before.get(name, 0) for name, n in after.items())
+        result, commands = measure_commands(redis, commit)
+        assert result == 1
         assert commands <= 27, commands
         assert state() == ["1", [str(hour), "1"], [str(hour), "8960"]]
         assert redis.command("PTTL", keys[0]) > 399 * 86_400_000
@@ -231,3 +261,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # Keep the priced live legacy receipt inside this existing CI entry point.
+    # Its exact command budget is stricter than the protected-source ceiling.
+    from test_legacy_order_accounting_redis import main as legacy_cost_main
+    legacy_cost_main()

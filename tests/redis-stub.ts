@@ -1,6 +1,9 @@
 import { MemoryRedis } from "@/lib/redis-memory";
 import { withTakeScripts } from "./redis-take-scripts";
+import { isOrderAccounting, orderAccounting } from "./order-accounting-memory";
 export const store = withTakeScripts(new MemoryRedis());
+store.pipeline = async commands => commands.map(command =>
+  isOrderAccounting(command) ? orderAccounting(store, command) : store.run(command));
 export const isRedisConfigured = () => true;
 export const redisPipeline = (commands: (string | number)[][]) => store.pipeline(commands);
 /** Moves the test clock, for a cooldown that has to be outlasted. */

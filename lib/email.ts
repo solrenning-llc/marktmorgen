@@ -321,7 +321,7 @@ const onceKey = (key: string) => `nl:ses:once:${createHash("sha256").update(key)
  * acceptance is unknown, including a pre-existing legacy claim. A claim is
  * not proof of delivery, nor a source-funded lifetime reservation.
  */
-async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey: string | undefined): Promise<boolean | null> {
+async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey: string | undefined, authorization?: MeterAuthorization): Promise<boolean | null> {
   const config = sesConfig();
   if (!config || !(await sesReady())) return false;
   // Amazon keeps no record of a key, so the once-only promise is kept here.
@@ -356,7 +356,7 @@ async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey
       replyTo: oneAddress(message.replyTo),
       headers,
       attachments: message.attachments,
-    });
+    }, authorization?.beforePost);
     // A timeout or server error may follow acceptance. Keep any existing
     // claim, report unknown, and make no second SES attempt or Resend send.
     // This does not prove delivery or provide lifetime idempotency.
@@ -418,14 +418,15 @@ export async function sendEmailOutcome(message: OneMessage, runtime: ResendTrans
   // Keep one identity across awaits and both routes. Preserve the original
   // string and the existing structural contract, including inherited keys.
   const originalIdempotencyKey = message.idempotencyKey;
+  const authorization = lazyMeter(message.meter, 1);
+  if (!(await authorization.preflight())) return "refused";
   if (isSesConfigured()) {
-    if (!(await metered(message.meter, 1))) return "refused";
-    const amazon = await viaAmazon(message, to, originalIdempotencyKey);
+    const amazon = await viaAmazon(message, to, originalIdempotencyKey, authorization);
     if (amazon === true) return "sent";
     if (amazon === null) return "uncertain";
-    return resendOutcome(message, originalIdempotencyKey, runtime); // The existing SES path already took its allowance.
+    return resendOutcome(message, originalIdempotencyKey, runtime, authorization);
   }
-  return resendOutcome(message, originalIdempotencyKey, runtime, lazyMeter(message.meter, 1));
+  return resendOutcome(message, originalIdempotencyKey, runtime, authorization);
 }
 
 /** Durable shipment work owns its lifetime claim in the outbox, not the
@@ -701,29 +702,35 @@ async function dispatchBatch(
   if (going.length && (only === "resend"
     ? currentResendFallbackProofIsMissing(runtime)
     : serviceMailKnownUnavailable(runtime))) return "retry";
-  const resendSelected = only === "resend" || !(config && isSesConfigured());
   let authorization: MeterAuthorization | undefined;
-  // What this call took from a store's own figure up front (metered, the Amazon path), given back when the batch then
-  // answers "retry" or "waiting" with nothing handed to Amazon: a list sender tries such a batch again each run, and an
-  // outage must never spend the store's emails on mail that never went (outage drill, 14 November 2026).
+  // A known no-send may return only this invocation's unchanged store/window.
+  const debitStore = meter.by === "store" ? { ...meter.store,
+    ...(meter.store.period ? { period: { ...meter.store.period } } : {}),
+  } : null;
+  const debitWindow = debitStore ? allowanceWindow(debitStore) : null;
   let debited = 0;
   const nothingSent = async <T>(answer: T): Promise<T> => {
-    if (debited > 0 && meter.by === "store") await giveAllowance(meter.store, meter.kind, debited);
+    const current = debitStore ? allowanceWindow(debitStore) : null;
+    if (debited > 0 && meter.by === "store" && debitStore && debitWindow && current &&
+        debitWindow.id === current.id && debitWindow.start === current.start && debitWindow.end === current.end) {
+      await giveAllowance(debitStore, meter.kind, debited);
+    }
     debited = 0;
     return answer;
   };
   if (going.length) {
-    if (resendSelected) {
-      // Keep the same recipients/content through tags/domain variants and
-      // bind the lazy debit to their filtered, bounded occurrence count.
-      going = going.map(message => ({ ...message,
-        ...(message.headers ? { headers: { ...message.headers } } : {}),
-        ...(message.tags ? { tags: { ...message.tags } } : {}),
-      }));
-      authorization = lazyMeter(meter, going.length);
-      if (!(await authorization.preflight())) return "refused";
-    } else if (!(await metered(meter, going.length))) return "refused";
-    else if (meter.by === "store") debited = going.length;
+    going = going.map(message => ({ ...message,
+      ...(message.headers ? { headers: { ...message.headers } } : {}),
+      ...(message.tags ? { tags: { ...message.tags } } : {}),
+    }));
+    const selected = lazyMeter(meter, going.length);
+    const count = going.length;
+    authorization = { preflight: selected.preflight, beforePost: async () => {
+      const allowed = await selected.beforePost();
+      if (allowed && meter.by === "store") debited = count;
+      return allowed;
+    } };
+    if (!(await authorization.preflight())) return "refused";
   }
   let idempotencyKey = batchKey;
   // Whether Amazon took anyone in this call. Until it has, a "retry" further down (Amazon only, the Resend handoff
@@ -788,7 +795,7 @@ async function dispatchBatch(
           original: m,
         })),
         batchKey,
-        { maybeMarks: !listOnly },
+        { maybeMarks: !listOnly, beforePost: authorization?.beforePost },
       );
       await countSesSent(result.taken.length);
       if (result.taken.length > 0) amazonTook = true;
@@ -800,6 +807,7 @@ async function dispatchBatch(
       // its caller without another SES wave or a switch to Resend. A durable
       // caller checkpoint is still needed before a later invocation.
       if (result.uncertain === true) return "retry";
+      if (result.notPosted === true) return result.taken.length > 0 ? "retry" : nothingSent("refused");
       // Nor one whose marks could not be written: nothing more was asked of Amazon, and it is not Amazon's doing,
       // so the rest waits for it, never handed to Resend for good (lib/ses.ts, markMaybe).
       if (result.stalled === true) return result.taken.length === 0 ? nothingSent("retry") : "retry";

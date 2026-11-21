@@ -31,6 +31,7 @@ import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import { type Admission, countHeldOrders, heldOrdersKey, orderConfirmationAdmission, orderConfirmationHoldKeys } from "@/lib/order-admission";
 import { countOf, repliesFor } from "@/lib/redis-reply";
+import { MAX_ORDER_ITEMS, orderDataBytes } from "@/lib/store-data-rules";
 
 const seenKey = (reference: string) => `nl:orders:seen:${createHash("sha256").update(reference).digest("hex").slice(0, 32)}`;
 const countKey = (folder: string, month: string) => `nl:orders:n:${folder}:${month}`;
@@ -447,6 +448,51 @@ export async function countOrder(store: Store, reference: string, paidCents: num
     return true;
   } catch (error) {
     console.error("could not count an order", error);
+    return "unknown";
+  }
+}
+
+/** Compatibility accounting for an already settled legacy checkout, not an
+ * original funded-confirmation token or permission to dispatch its email.
+ * Reuse the existing atomic counter/hold Lua and its intent protocol. The
+ * legacy 45-day horizon is fixed to checkout creation and is never renewed
+ * by a retry; after it, refuse instead of counting again after expiry. */
+/** Durable count result for a paid legacy checkout; unknown blocks email. */
+export type LegacyCheckoutCountOutcome = "committed" | "already" | "unknown";
+
+/** Record a settled legacy checkout before any confirmation is sent.
+ * Missing amounts are counted as one order because share coverage cannot
+ * safely be established from an unknown value.
+ */
+export async function countLegacyCheckoutForConfirmation(store: Store, reference: string, paidCents: number | null, now: number,
+  admission: { hour: unknown; items: number; createdAtMs: number }): Promise<LegacyCheckoutCountOutcome> {
+  try {
+    if (!CHECKOUT_REFERENCE.test(reference) || (paidCents !== null && (!Number.isSafeInteger(paidCents) || paidCents < 0)) ||
+        !Number.isSafeInteger(now) || !Number.isSafeInteger(admission.createdAtMs) || admission.createdAtMs <= 0 ||
+        now < admission.createdAtMs || now >= admission.createdAtMs + SEEN_SECONDS * 1000 ||
+        !Number.isSafeInteger(admission.items) || admission.items < 1 || admission.items > MAX_ORDER_ITEMS) return "unknown";
+    const hour = typeof admission.hour === "number" && Number.isSafeInteger(admission.hour) && admission.hour >= 0 ? String(admission.hour)
+      : typeof admission.hour === "string" && /^(0|[1-9][0-9]{0,8})$/.test(admission.hour) ? admission.hour : "";
+    const owner = storeRef(store), folder = await storeFolder(owner);
+    if (!FOLDER_PATTERN.test(folder)) return "unknown";
+    const known = allowanceWindow(store, now), month = calendarWindow(now).id;
+    const counter = known ? countKey(folder, known.id) : heldOrdersKey(folder);
+    const bytes = orderDataBytes(admission.items), count = paidCents === null ? 1 : coveredByShare(store, paidCents, now / 1000) ? 0 : 1;
+    const receipt = `oc1:${fingerprint(JSON.stringify(["legacy-checkout-v1", reference, folder, paidCents, hour, bytes, count, admission.createdAtMs]))}`;
+    const [open, held] = orderConfirmationHoldKeys(folder);
+    const reply: unknown = await redisPipeline([["EVAL", COMMIT_ORDER_CONFIRMATION, 6, seenKey(reference), counter, open, held,
+      foldersKey(month), `nl:store:folder-owner:${folder}`, receipt, hour, bytes, count, folder, owner,
+      admission.createdAtMs + SEEN_SECONDS * 1000, now, KEEP_SECONDS]]);
+    if (!Array.isArray(reply)) return "unknown";
+    const length = Object.getOwnPropertyDescriptor(reply, "length"), value = Object.getOwnPropertyDescriptor(reply, "0");
+    if (!length || !("value" in length) || length.value !== 1 || !value || !("value" in value)) return "unknown";
+    if (value.value === 1 && known) await countHeldOrders(folder, known.id).catch((error) => {
+      console.error("previously held orders remain for the next pass", error);
+      return 0;
+    });
+    return value.value === 1 ? "committed" : value.value === 2 ? "already" : "unknown";
+  } catch (error) {
+    console.error("could not count a legacy checkout", error);
     return "unknown";
   }
 }

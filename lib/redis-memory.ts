@@ -1689,6 +1689,27 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
+        // lib/funnel-share-store.ts CREATE_STORE_SHARE: CREATE_SHARE only while the store's erasing mark is absent and its id
+        // key exists (-4 otherwise, nothing written).
+        if (key.startsWith("-- marktmorgen:funnel-share-live:v1\n") && args[0] === "4" && args.length === 13) {
+          const [, list, lookup, idKey, erasing, id, meta, rec, sum, bundle, limit, ttl, field] = args;
+          this.live(idKey);
+          if (this.run(["HGET", erasing, field]) !== null) return -4;
+          if (!this.data.has(idKey)) return -4;
+          this.live(list);
+          this.live(lookup);
+          const held = this.data.get(list);
+          if (held !== undefined && !(held instanceof Map)) return -3;
+          if (this.data.has(lookup) || (held instanceof Map && held.has(id))) return -2;
+          if (held instanceof Map && held.size >= Number(limit)) return 0;
+          this.hash(list).set(id, meta);
+          const record = this.hash(lookup);
+          record.set("rec", rec);
+          record.set("sum", sum);
+          record.set("bundle", bundle);
+          this.until.set(lookup, this.now() + Number(ttl) * 1000);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:funnel-share:v1\n") && args[0] === "2" && args.length === 10) {
           const [, list, lookup, id, meta, rec, sum, bundle, limit, ttl] = args;
           this.live(list);

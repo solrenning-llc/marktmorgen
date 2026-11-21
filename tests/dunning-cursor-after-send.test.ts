@@ -62,6 +62,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (status === "past_due" && slow.has(account)) shift += 60_000;
     const all = (status === "past_due" ? pastDue : status === "active" ? active : new Map<string, Record<string, unknown>[]>()).get(account) ?? [];
     const after = url.searchParams.get("starting_after");
+    // Stripe refuses a starting_after it does not know (a subscription gone): 400 resource_missing on that parameter.
+    if (after && !all.some((s) => s.id === after)) {
+      return answer({ error: { type: "invalid_request_error", code: "resource_missing", param: "starting_after", message: `No such subscription: '${after}'` } }, 400);
+    }
     const from = after ? all.findIndex((s) => s.id === after) + 1 : 0;
     const limit = Number(url.searchParams.get("limit")) || 10;
     if (status === "active" && slowActive.get(account) === after) {
@@ -393,6 +397,65 @@ async function main(): Promise<void> {
       [first, second, third].map((s) => [on(s.account, ["GET"]), on(s.account, ["SET", "DEL"])]),
       [first, second, third].map(() => [1, DUNNING_CURSOR_COMMANDS.dueCursorPerStoreSweep - 1]),
     );
+  }
+
+  part("LEVE (Claude 1 focal, 6872538009): a run that starts past its deadline keeps the held store held");
+  reset();
+  {
+    const [first, second, third] = await threeStores();
+    for (const s of [first, second, third]) pastDue.set(s.account, behind(s.handle, s.product, 1));
+    // The last run held the first store and stopped at the third. This run has no time at all: nothing is swept, and
+    // the hold stays as it was, never dropped to the frontier alone.
+    await redis.pipeline([["SET", "nl:dun:cursor", "0|0|1|0|2"]]);
+    await recoverFailedPayments(Date.now() - 1);
+    is("the held store and the frontier are both kept, the hold not counted (it was not tried)", (await redis.pipeline([["GET", "nl:dun:cursor"]]))[0], "0|0|1|0|2");
+    await run();
+    is("the next run sweeps the held store first", told(`${first.handle}-due-0000@example.com`), 1);
+  }
+
+  part("LEVE (Claude 1, 6834038662): card pages cut by the deadline are not a store done");
+  reset();
+  {
+    const account = "acct_1CardCutTime01";
+    const product = await makeStore("cards-cut@example.com", "cardcut", account, true);
+    // No card stops: nothing is due on the pages read, but the third page's read takes the rest of the run, so the
+    // store's cards were not read through. The store is held for the next run, as a past-due list cut by time is.
+    active.set(account, running("cardcut", product, 600, []));
+    slowActive.set(account, "sub_cardcutRun0199");
+    await run();
+    const parts = String((await redis.pipeline([["GET", "nl:dun:cursor"]]))[0] ?? "").split("|");
+    is("cut by the deadline: the store is held (cursor|done|held|frontier)", parts.length, 5);
+  }
+
+  part("LEVE (Claude 3, 6806672663 item 1): a member at the start of the run that time left untried is tried next run");
+  reset();
+  {
+    const account = "acct_1DueUntried01";
+    const product = await makeStore("due-untried@example.com", "dueuntried", account, false);
+    pastDue.set(account, behind("dueuntried", product, 150));
+    // The first page's read takes the rest of the run: nobody is tried. The next run must start at the first member,
+    // not a whole lap of the list later.
+    slow.add(account);
+    await run();
+    is("this run: nobody written to", told("dueuntried-due-0000@example.com"), 0);
+    slow.clear();
+    await run();
+    is("the next run writes to the first member", told("dueuntried-due-0000@example.com"), 1);
+  }
+
+  part("LEVE (Claude 3, 6806672663 item 2): a cursor Stripe refuses is cleared at once, not kept until it runs out");
+  reset();
+  {
+    const account = "acct_1DueGoneCur01";
+    const product = await makeStore("due-gone@example.com", "duegone", account, true);
+    pastDue.set(account, behind("duegone", product, 1));
+    active.set(account, running("duegone", product, 30, [3]));
+    await redis.pipeline([["SET", `nl:dun:due:${account}`, "sub_GoneAway00001", "EX", 86_400], ["SET", `nl:dun:cards:${account}`, "sub_GoneAway00002", "EX", 86_400]]);
+    await run();
+    is("both cursors Stripe refused are gone after one run", (await redis.pipeline([["EXISTS", `nl:dun:due:${account}`], ["EXISTS", `nl:dun:cards:${account}`]])), [0, 0]);
+    await run();
+    await run();
+    is("the next runs read from the top: the member behind and the card that stops are told", [told("duegone-due-0000@example.com"), told("duegone-0003@example.com")], [1, 1]);
   }
 
   done();

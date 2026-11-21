@@ -32,6 +32,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (method === "GET" && url.pathname === "/v1/subscriptions") {
       const all = lists[url.searchParams.get("status") ?? ""] ?? [];
       const after = url.searchParams.get("starting_after");
+      // Stripe refuses a starting_after it does not know (a subscription gone): 400 resource_missing on that parameter.
+      if (after && !all.some((s) => s.id === after)) {
+        return answer({ error: { type: "invalid_request_error", code: "resource_missing", param: "starting_after", message: `No such subscription: '${after}'` } }, 400);
+      }
       const from = after ? all.findIndex((s) => s.id === after) + 1 : 0;
       const limit = Number(url.searchParams.get("limit")) || 10;
       return answer({ object: "list", data: all.slice(from, from + limit), has_more: from + limit < all.length });
@@ -69,12 +73,22 @@ function failing(id: string): Record<string, unknown> {
   };
 }
 
-/** Runs `run` with the first `times` pipelines that DEL a key starting `prefix` failing, as Redis can. */
+/**
+ * The key a command lets a mark go on: a plain DEL's, or a compare-and-delete script's (EVAL source 1 key value,
+ * lib/redis-lock.ts), which deletes the mark only while it holds this run's own claim (Claude 1, 6834038662).
+ */
+function lettingGo(command: (string | number)[] | undefined): string {
+  if (command?.[0] === "DEL") return String(command[1] ?? "");
+  if (command?.[0] === "EVAL" && command[2] === 1) return String(command[3] ?? "");
+  return "";
+}
+
+/** Runs `run` with the first `times` pipelines that let a mark starting `prefix` go failing, as Redis can. */
 async function delFails<T>(prefix: string, times: number, run: () => Promise<T>): Promise<T> {
   const real = redis.pipeline.bind(redis);
   let left = times;
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (left > 0 && commands[0]?.[0] === "DEL" && String(commands[0]?.[1] ?? "").startsWith(prefix)) {
+    if (left > 0 && lettingGo(commands[0]).startsWith(prefix)) {
       left -= 1;
       throw new Error("Redis did not answer");
     }
@@ -184,7 +198,7 @@ async function main(): Promise<void> {
     let failDel = "";
     redis.pipeline = (async (commands: (string | number)[][]) => {
       sent.push(...commands);
-      if (failDel && commands[0]?.[0] === "DEL" && String(commands[0]?.[1] ?? "").startsWith(failDel)) throw new Error("Redis did not answer");
+      if (failDel && lettingGo(commands[0]).startsWith(failDel)) throw new Error("Redis did not answer");
       return real(commands);
     }) as typeof redis.pipeline;
     const on = (prefix: string, names: string[]) => sent.filter((c) => names.includes(String(c[0])) && String(c[1] ?? "").startsWith(prefix)).length;
@@ -206,13 +220,54 @@ async function main(): Promise<void> {
       emailWorks = false;
       failDel = "nl:remind:trial:";
       await sendReminders(NOW);
-      is("an email that did not go: its mark's DEL tried at most twice, however long Redis fails", on("nl:remind:trial:", ["DEL"]), DUNNING_CURSOR_COMMANDS.letGoDeletesPerFailedEmail);
+      is("an email that did not go: letting its mark go tried at most twice, however long Redis fails", sent.filter((c) => lettingGo(c).startsWith("nl:remind:trial:")).length, DUNNING_CURSOR_COMMANDS.letGoDeletesPerFailedEmail);
     } finally {
       redis.pipeline = real;
       emailWorks = true;
       lists.trialing = [];
     }
   }
+
+  part("LEVE (Claude 1, 6834038662): an email that did not go lets go only its own mark, never another run's");
+  {
+    const real = redis.pipeline.bind(redis);
+    // Between the claim and the letting go, the mark ran out and another run took it with its own value.
+    let mark = "";
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const key = lettingGo(commands[0]);
+      if (key.startsWith("nl:remind:trial:")) {
+        mark = key;
+        await real([["SET", key, "another-run's-claim"]]);
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    try {
+      redis.clear();
+      lists.past_due = [];
+      lists.trialing = [trial("sub_TrialOther001", 7)];
+      emailWorks = false;
+      const result = await sendReminders(NOW);
+      redis.pipeline = real;
+      const held = mark ? (await real([["GET", mark]]))[0] : null;
+      is("the other run's mark is kept", held, "another-run's-claim");
+      is("and nothing of ours is left held: not counted as unreleased", (result as { unreleased?: unknown }).unreleased, 0);
+    } finally {
+      redis.pipeline = real;
+      emailWorks = true;
+      lists.trialing = [];
+    }
+  }
+
+  part("LEVE (Claude 3, 6806672663 item 2): a list cursor Stripe refuses is read from the top at once");
+  redis.clear();
+  lists.past_due = [];
+  lists.trialing = [trial("sub_TrialCursor01", 7)];
+  await redis.pipeline([["SET", "nl:remind:after:trialing", "sub_GoneAway0001", "EX", 86_400]]);
+  const refused = await sendReminders(NOW).then((r) => r, (error: unknown) => error);
+  is("the run reads the list from the top and sends what is due", sentTo("sub_TrialCursor01@example.com"), 1);
+  is("and does not fail on the refused cursor", refused instanceof Error, false);
+  is("the refused cursor is gone", (await redis.pipeline([["EXISTS", "nl:remind:after:trialing"]]))[0], 0);
+  lists.trialing = [];
 
   done();
 }

@@ -59,6 +59,7 @@ import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
 import { RECEIPT_BATCH_SHAPE } from "@/lib/receipt-batch";
 import { monthlyEmails, type Tier } from "@/lib/plan";
+import { SALE_FEES_READINGS_PER_DAY, SALE_FEES_READ_SHAPE } from "@/lib/sale-fees-reading";
 import { BESIDE_SAVE_COMMANDS } from "@/lib/store-data";
 import { WINBACK_OFFER_COMMANDS } from "@/lib/winback";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
@@ -2633,6 +2634,15 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/mail/route.ts", names: ["payFlowHistory(store, listVersionsBytes(", "FlowHistoryNotPaid"] },
     ],
     basis: "A list file or the buyers audience, which walks the whole list, takes from the figure the units of its commands and of every byte it reads and sends (lib/list-download.ts): each read held before it is made at the most it can answer with (a page of the list at the whole list as counted, the store's fields' values for the page's people at their longest), counted at what it moved, and the file held before it is sent; a read the figure has not the units for is never made, and what was held and not used is given back. Its fields' values are read for the people in the file only, never the whole of a field's values. Once a plan has ended it takes ENDED_LIST_DOWNLOADS of its own instead, priced in the line closure. Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. What a page reads of the store's numbers past that is the store's own readings (line store-readings), never more of these.",
+  },
+  {
+    id: "sale-fees-reading",
+    feature: "Fees and what you keep (282 [HG1], 11 November 2026): the store's readings of its own Stripe balance transactions, kept for the studio page and its download",
+    monthlyUsd: () => DAY_WINDOWS * SALE_FEES_READINGS_PER_DAY * readShapeCost(SALE_FEES_READ_SHAPE),
+    sources: [
+      { file: "lib/sale-fees-reading.ts", names: ["SALE_FEES_READINGS_PER_DAY", "SALE_FEES_PAGES", "SALE_FEES_COPY_MAX_BYTES", "SALE_FEES_READ_SHAPE", "takeReading", "if (!(await takeReading(statsId, now)))"] },
+    ],
+    basis: "At most SALE_FEES_READINGS_PER_DAY readings a UTC day, each taken before Stripe is called and kept counted once it was; each at its worst shape: SALE_FEES_PAGES pages of the creator's account waited on one after another, the copy read and written at its largest and the day's count. The page and the download are counted in the studio's requests as every page and route; the copy's day is in the data room (nl:salefees:copy:).",
   },
   {
     id: "store-readings",

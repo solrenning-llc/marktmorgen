@@ -3,7 +3,7 @@
  *
  * A shipped product does not ask for the box at the first check; its digital extra (an order bump) asks for it when
  * the checkout is built (DigitalConsentMissing). The buyer is sent back to the product page with the link still in it,
- * so ticking the box and trying again opens the checkout with the discount. Fixture copied from
+ * so checking the box and trying again opens the checkout with the discount. Fixture copied from
  * tests/returning-code.test.ts (that file is untouched); synthetic Stripe, email and Redis, the real route handler,
  * with "next/server" from tests/next-server-after-world.ts (tests/aliases/returning-consent-extra.test.ts.json).
  */
@@ -131,7 +131,7 @@ async function main(): Promise<void> {
   const retried = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: withConsent(withBox), headers: { host: "marktmorgen.com", "x-forwarded-for": "198.51.100.54" } }));
   await runAfter();
   const session = opened.at(-1)!;
-  is("with the box ticked, the same link opens the checkout", [retried.headers.get("location"), opened.length - before], ["https://checkout.stripe.com/c/pay/test", 1]);
+  is("with the box checked, the same link opens the checkout", [retried.headers.get("location"), opened.length - before], ["https://checkout.stripe.com/c/pay/test", 1]);
   is("with the discount, for that address, and the digital extra", [session.get("discounts[0][coupon]"), session.get("customer_email"), session.get("metadata[bump]")], [VIP.coupon, PAST, pastProduct]);
 
   done();

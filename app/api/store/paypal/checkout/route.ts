@@ -4,6 +4,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readListings, readProduct } from "@/lib/catalog";
 import { MIN_BUNDLE_ITEMS, deliverableItems } from "@/lib/bundle-rules";
+import { heldIdsAmong } from "@/lib/child-safety-holds";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { isComingSoon } from "@/lib/preorders";
 import { countHit } from "@/lib/visit";
@@ -55,8 +56,13 @@ export async function POST(request: NextRequest) {
   const comingSoon = await isComingSoon(store, product.id).catch(() => null);
   if (comingSoon === null) return away(`/@${store.handle}?status=error`);
   if (comingSoon) return away(`/@${store.handle}/p/${product.id}#waitlist`);
+  // Nothing kept for a child-safety report is sold: the product's own mark (its hidden write may not have landed,
+  // Claude 6's MEDIUM on #3471) and, for a bundle, its items'. A hold that cannot be read refuses.
+  const held = await heldIdsAmong(store, [...new Set([product.id, ...(product.bundle ?? [])])]).catch(() => null);
+  if (!held) return away(`/@${store.handle}?status=error`);
+  if (held.has(product.id)) return away(`/@${store.handle}`);
   const bundled = product.bundle ? await readListings(store, product.bundle) : [];
-  if (product.bundle && deliverableItems(product, bundled).length < MIN_BUNDLE_ITEMS) {
+  if (product.bundle && deliverableItems(product, bundled, held).length < MIN_BUNDLE_ITEMS) {
     return away(`/@${store.handle}`);
   }
   // EU VAT art. 9a (lib/eu-vat-gate.ts consumerGate), as the card checkout asks it: before PayPal is asked for anything,

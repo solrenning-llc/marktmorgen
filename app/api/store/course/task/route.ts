@@ -28,6 +28,7 @@ import { essentialLimitState, fromAnotherSite, limited } from "@/lib/request-gua
 import { noteIfFinished } from "@/lib/course-finish";
 import { takeBuyerAction, takeBuyerRead } from "@/lib/buyer-actions";
 import { speech } from "@/lib/buyer-words";
+import { isHeldForReport } from "@/lib/child-safety";
 
 /** Hand-ins one student may make in an hour. */
 const HAND_INS_PER_HOUR = 20;
@@ -60,6 +61,12 @@ export async function POST(request: NextRequest) {
     const on = await studentOnTask(body.handle, body.product, body.lesson, await cookies());
     if (!on.ok) return no(on.reason === "unknown" ? "unknown" : "closed", on.reason === "unknown" ? 404 : 403);
     const { store, product, course, lesson, task, who, email } = on;
+    // A course kept for a child-safety report takes no hand-in: a new one would replace, and delete, the one before.
+    try {
+      if (await isHeldForReport(store, product.id)) return no("unknown", 404);
+    } catch {
+      return no("unavailable", 503);
+    }
     // Past the hour's hand-ins, "slow"; a count that cannot be read is "unavailable", never "slow down" (rule 24).
     const tries = await essentialLimitState("task-hand-in", who, HAND_INS_PER_HOUR, 3_600);
     if (tries === "exceeded") return no("slow", 429);

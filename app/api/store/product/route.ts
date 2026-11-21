@@ -67,6 +67,7 @@ import { templateLeft } from "@/lib/template-text";
 import { keptPageBytes, readPage } from "@/lib/sales-page-store";
 import { publishPageUnits } from "@/lib/sales-page";
 import { quietedBy } from "@/lib/extras-notes";
+import { heldRefusal } from "@/lib/child-safety";
 
 /**
  * Takes the studio units of a draft's two sales-page reads before its publish makes either (the check, then again
@@ -218,6 +219,14 @@ export async function POST(request: NextRequest) {
 
   if (action !== "add" && !id) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+  }
+
+  // A product kept for a child-safety report (lib/child-safety.ts) is not removed, edited, published again, nor
+  // given a link or none in place of its file or an option's, while the hold lasts; a hold that cannot be read
+  // refuses too, never lets the change through. Only reordering it stays open: it changes nothing of it.
+  if (action !== "add" && action !== "move") {
+    const held = await heldRefusal(guarded.store, id);
+    if (held) return held;
   }
 
   // What the Terms forbid ("anything that promises fast or easy money, or income

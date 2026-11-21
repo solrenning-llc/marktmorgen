@@ -5,6 +5,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { stampProblems } from "@/lib/pdf-stamp";
 import { readListing } from "@/lib/catalog";
 import { isEpub } from "@/lib/product-file";
+import { heldRefusal } from "@/lib/child-safety";
 
 /**
  * Stamping a product's PDFs and EPUBs with each buyer's email.
@@ -44,6 +45,8 @@ export async function POST(request: NextRequest) {
   if (!guarded.ok) return guarded.response;
   const id = text(guarded.body.id, 40);
   if (!id) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
+  const onHold = await heldRefusal(guarded.store, id);
+  if (onHold) return onHold;
   try {
     const result = await setProductStamp(guarded.ref, id, guarded.body.on === true);
     if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: result.reason === "unknown" ? 404 : 400 });

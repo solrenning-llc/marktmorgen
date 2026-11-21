@@ -5,6 +5,7 @@ import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { canSellProduct } from "@/lib/store-checkout";
+import { isHeldForReport } from "@/lib/child-safety";
 import { isCallProduct } from "@/lib/calls";
 import { countHit } from "@/lib/visit";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
@@ -35,6 +36,11 @@ export async function POST(request: NextRequest) {
   // (lib/call-packages.ts packageCheckout): limited per connection and store first, in the same count as every
   // other checkout (app/api/store/checkout, cart, paypal/checkout), so a script fills neither (audit of 11 Nov 2026).
   if (!(await withinLimit("checkout", `${clientAddress(request)}|${store.handle}`, 20, 600))) return away(`/@${store.handle}/book/${product.id}?status=slow`);
+  // A product kept for a child-safety report is not sold as a package, even when its hide did not go in (Claude 4 and
+  // Claude 1 on #3471): its own mark is read; one that cannot be read refuses.
+  const kept = await isHeldForReport(store, product.id).catch(() => null);
+  if (kept === null) return away(`/@${store.handle}/book/${product.id}?status=error`);
+  if (kept) return away(`/@${store.handle}/book/${product.id}?status=unavailable`);
   const comingSoon = await isComingSoon(store, product.id).catch(() => null);
   if (comingSoon === null) return away(`/@${store.handle}/book/${product.id}?status=error`);
   if (comingSoon) return away(`/@${store.handle}/book/${product.id}?status=unavailable`);

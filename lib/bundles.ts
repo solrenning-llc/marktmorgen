@@ -7,7 +7,8 @@
  *
  *   - What a bundle offers a buyer who has not paid yet is its list as the
  *     creator saved it, each product as it is now, leaving out anything that
- *     can no longer be handed over whole (deliverableItems).
+ *     can no longer be handed over whole (deliverableItems), and nothing at
+ *     all while one of its products is kept for a child-safety report.
  *   - What a buyer who paid gets is the list written on their order when
  *     they paid (lib/bundle-rules.ts, bundleFromMeta), each product as it is
  *     now — its current file, link or lessons, exactly as a buyer of that
@@ -18,6 +19,7 @@
 import type { Listing, Store } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
 import { MIN_BUNDLE_ITEMS, deliverableItems } from "@/lib/bundle-rules";
+import { heldOrUnreadable } from "@/lib/child-safety-holds";
 
 /** What an order's bundle hands over now, and how many of its products are gone. */
 export type BundleContents = { items: Listing[]; missing: number };
@@ -52,7 +54,12 @@ export async function offeredItems(store: Store, listings: Listing[]): Promise<M
   const missing = bundleItemsToRead(listings);
   const read = missing.length ? await readListings(store, missing) : [];
   const all = [...listings, ...read];
-  for (const bundle of bundles) out.set(bundle.id, deliverableItems(bundle, all));
+  // Every product of a bundle is read for a child-safety hold, hidden or not: a hold whose hide did not go in leaves
+  // the product listed (Claude 4 and Claude 1 on #3471). One read for the page's bundles; a hold that cannot be read
+  // counts as held (lib/child-safety-holds.ts).
+  const inside = [...new Set(bundles.flatMap((p) => p.bundle ?? []))];
+  const held = inside.length ? await heldOrUnreadable(store, inside) : undefined;
+  for (const bundle of bundles) out.set(bundle.id, deliverableItems(bundle, all, held));
   return out;
 }
 
@@ -68,15 +75,17 @@ export async function holdsCourse(store: Store, bundle: Pick<Listing, "bundle">)
 }
 
 /**
- * The listings a one-click offer after paying may name, from `listings`: a
+ * The listings a one-click offer after paying may name, from `listings`: none
+ * kept for a child-safety report, hidden or not (its own mark is read, Claude 4
+ * and Claude 1 on #3471; a mark that cannot be read leaves it out), and a
  * bundle only while it holds enough to hand over and no course (holdsCourse).
- * Everything else is passed through untouched, and a list without bundles is
- * returned as it came, with nothing read.
  */
 export async function offerableAfterPaying(store: Store, listings: Listing[]): Promise<Listing[]> {
-  if (!listings.some((p) => p.bundle && p.bundle.length > 0)) return listings;
-  const inside = await offeredItems(store, listings);
-  return listings.filter((p) => {
+  const kept = listings.length ? await heldOrUnreadable(store, listings.map((p) => p.id)) : new Set<string>();
+  const open = listings.filter((p) => !kept.has(p.id));
+  if (!open.some((p) => p.bundle && p.bundle.length > 0)) return open;
+  const inside = await offeredItems(store, open);
+  return open.filter((p) => {
     if (!p.bundle?.length) return true;
     const items = inside.get(p.id) ?? [];
     return items.length >= MIN_BUNDLE_ITEMS && !items.some((item) => item.course !== null);

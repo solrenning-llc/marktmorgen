@@ -38,6 +38,8 @@ import { cache } from "react";
 import { type Listing, type Store, isFree, normaliseHandle, storeForPage } from "@/lib/store";
 import { moneyField } from "@/lib/money";
 import { productIdFromAddress, readAsking, readListing, readListings, readProductLegal } from "@/lib/catalog";
+import { offerableTargets } from "@/lib/child-safety-holds";
+import { holdState } from "@/lib/child-safety";
 import { activeShipping } from "@/lib/shipping";
 import { ProductSafetyFacts } from "@/components/product-safety-facts";
 import { canSell, canSellProduct, sellableOptions } from "@/lib/store-checkout";
@@ -127,8 +129,11 @@ const load = cache(async (raw: string, id: string): Promise<{ store: Store; prod
   if (await isResting(store)) return { store, asked, resting: true };
   // The id alone, or the title's words with the id at the end (lib/product-slug.ts).
   const product = await readListing(store, productIdFromAddress(store, id) ?? id);
-  // A draft has no page until the creator publishes it.
-  return product && !product.hidden ? { store, product, asked, resting: false } : null;
+  // A draft has no page until the creator publishes it, nor has a product held for a child-safety report, even when
+  // taking it off the store did not go through after its mark was written; a mark that cannot be read is not a yes
+  // (lib/child-safety.ts; Revisor 2 on #3588). One GET, for the head and the page alike (cache).
+  if (!product || product.hidden) return null;
+  return (await holdState(store, product.id)) === "free" ? { store, product, asked, resting: false } : null;
 });
 
 /** The product's description and its sales page, each read once a request, by the title and by the page (React cache). */
@@ -339,7 +344,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
     pageOf(store.statsId, product.id, product.page),
     summaryOf(store.statsId, product.id).catch(() => null),
     // What its order bump offers, drawn in the same box as on the store page.
-    product.bumps.length ? readListings(store, bumpTargets(product)) : Promise.resolve([]),
+    // A product kept for a child-safety report is never drawn as a box (lib/child-safety-holds.ts).
+    product.bumps.length ? readListings(store, bumpTargets(product)).then((found) => offerableTargets(store, found)) : Promise.resolve([]),
     // What a bundle holds now, each product as it is today (lib/bundles.ts).
     product.bundle ? offeredItems(store, [product]).then((m) => m.get(product.id) ?? []).catch(() => []) : Promise.resolve(null),
     // How many times it was bought, when the creator chose to say so (lib/sold-count.ts).

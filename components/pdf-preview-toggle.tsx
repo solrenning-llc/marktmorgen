@@ -6,6 +6,14 @@ import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import type { Product } from "@/lib/store";
 import { MAX_STAMP_BYTES, isPdf, readableSize } from "@/lib/product-file";
+import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+
+const UNCONFIRMED = "We could not confirm whether your preview setting was saved. Reload this page to check before trying again.";
+
+/** What the preview switch says when a change is not confirmed: the hold's words (cloud P on #3471), or to reload and check. */
+export function previewRefusal(code: unknown): string {
+  return code === "on_hold" || code === "hold_unread" ? STUDIO_MESSAGES[code] : UNCONFIRMED;
+}
 
 /** The choices a creator has: off, or 1 to 10 pages (lib/pdf-preview.ts). */
 const CHOICES = [0, 1, 2, 3, 5, 10];
@@ -40,13 +48,13 @@ export function PdfPreviewToggle({ product }: { product: Product }) {
       const raw: unknown = await response.json();
       const data: Record<string, unknown> = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
       if (!response.ok || data.ok !== true || data.error !== undefined || data.id !== product.id || data.pages !== pages) {
-        setError("We could not confirm whether your preview setting was saved. Reload this page to check before trying again.");
+        setError(previewRefusal(data.ok === false ? data.error : undefined));
         return;
       }
       toast(pages ? "Preview setting saved." : "Preview switched off.");
       router.refresh();
     } catch {
-      setError("We could not confirm whether your preview setting was saved. Reload this page to check before trying again.");
+      setError(UNCONFIRMED);
     } finally {
       setBusy(false);
     }

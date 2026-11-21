@@ -4,6 +4,7 @@
  */
 import { MAX_LEADS, MAX_CONTACT_NAME, MAX_CONTACT_TAGS, MAX_TAG_LENGTH } from "@/lib/contact-rules";
 import { contactBytes, type Contact } from "@/lib/contacts";
+import { contactCeiling, smallestContact } from "@/lib/contact-ceiling";
 import { MAX_TITLE_LENGTH } from "@/lib/catalog-rules";
 import { DATA_ROOM_BYTES } from "@/lib/store-data-rules";
 import { PLAN_TITLES, TIERS, type Tier } from "@/lib/plan";
@@ -13,11 +14,6 @@ const ISO = new Date(0).toISOString();
 const MAX_TITLES = 20;
 /** The longest product id lib/product-extras.ts accepts. */
 const LONGEST_PRODUCT_ID = 40;
-
-/** A yes from a form, with nothing else: the least a contact can take. */
-export function smallestContact(): Contact {
-  return { agreed: true, agreedAt: ISO, firstAt: ISO, lastAt: ISO, titles: [], ids: [], source: "free", unsub: false, unsubAt: "", t: "", name: "", tags: [], importedAt: "" };
-}
 
 /** Every title, id, name, label and mark at its longest. */
 export function largestContact(): Contact {
@@ -32,6 +28,8 @@ export function largestContact(): Contact {
   };
 }
 
+export { smallestContact };
+
 export type ContactRow = { tier: Tier; roomBytes: number; smallestBytes: number; largestBytes: number; fitSmallest: number; fitLargest: number; realCeiling: number };
 
 export function contactRows(): ContactRow[] {
@@ -40,7 +38,7 @@ export function contactRows(): ContactRow[] {
   return TIERS.map((tier) => {
     const roomBytes = DATA_ROOM_BYTES[tier];
     const fitSmallest = Math.floor(roomBytes / smallestBytes);
-    return { tier, roomBytes, smallestBytes, largestBytes, fitSmallest, fitLargest: Math.floor(roomBytes / largestBytes), realCeiling: Math.min(MAX_LEADS, fitSmallest) };
+    return { tier, roomBytes, smallestBytes, largestBytes, fitSmallest, fitLargest: Math.floor(roomBytes / largestBytes), realCeiling: contactCeiling(tier) };
   });
 }
 

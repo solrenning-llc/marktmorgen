@@ -3,7 +3,7 @@ import { DataRoomError } from "@/lib/store-data";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite } from "@/lib/studio-route";
 import { limited } from "@/lib/request-guard";
-import { normaliseHandle, storeForHandle } from "@/lib/store";
+import { ensureListId, normaliseHandle, storeForHandle, storeRef } from "@/lib/store";
 import { within } from "@/lib/community";
 import { communityViewer, unknownForGood } from "@/lib/community-access";
 import { ITEM_ID } from "@/lib/community-text";
@@ -66,7 +66,10 @@ export async function POST(request: NextRequest) {
       await cancelRsvp(id, event, viewer.key, store);
       return back(page, "notgoing");
     }
-    const answer = await rsvp(id, event, viewer.key, store);
+    // The store's stable list id, so the write is fenced by the person's erasure print (Codex L, L-20261120-1245).
+    const listId = store.listId ?? (await ensureListId(storeRef(store)))?.listId;
+    if (!listId) return back(page, "error");
+    const answer = await rsvp(id, event, viewer.key, store, Date.now(), { listId, email: viewer.email });
     if (answer === "full") return back(page, "eventfull");
     if (answer === "closed") return back(page, event.cancelled ? "eventcancelled" : "eventover");
     return back(page, viewer.member.mail ? "going" : "goingnomail");

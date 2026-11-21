@@ -125,7 +125,7 @@ async function main(): Promise<void> {
   await setStripeAccount(OWNER, "acct_1TestHarbor0001", true);
   await setSubscription(OWNER, { customerId: "cus_Owner00001", subscriptionId: "sub_Owner00001", active: true, period: paidPeriod() });
   let store = (await storeForEmail(OWNER))!;
-  await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK);
+  await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK, store);
   await setChatSales(OWNER, true);
   store = (await storeForEmail(OWNER))!;
   posted.length = 0;
@@ -140,7 +140,7 @@ async function main(): Promise<void> {
     metadata: { store: "harbor", product: "nope", title: "Weeknight Club", channel: "instagram", ...meta },
   });
   sessions = [paid("cs_test_goal0000000001", 0, 60_000)];
-  await setSalesGoal(store.statsId!, 50_000, "usd");
+  await setSalesGoal(store, 50_000, "usd");
   const first = await checkAlerts(store);
   is("the goal reached, said once", first.said, 1);
   is("by email", emails.map((e) => [e.to, e.subject.startsWith("Harbor Kitchen reached its $500 goal")]), [[OWNER, true]]);

@@ -541,9 +541,10 @@ async function main(): Promise<void> {
   is("all six were tried", tried, 6);
   is("Redis commands within readCommandsPerRun + tried x ownCommandsPerPlanTried", commands <= (declared?.readCommandsPerRun ?? 0) + tried * (declared?.ownCommandsPerPlanTried ?? 0), true);
   is("Stripe calls within tried x stripeCallsPerPlanTried", stripeCalls <= tried * (declared?.stripeCallsPerPlanTried ?? 0), true);
-  // Rule 23 (item 12 of 9 November 2026): stripeCallsPerPlanTried was 3; a plan past its end now also gives back its
+  // ownCommandsPerPlanTried was 4: a plan naming its store is put back only while that store is live (Codex
+  // L-20261120-2008, MOVE_IF_LIVE), four commands more. Rule 23 (item 12 of 9 November 2026): stripeCallsPerPlanTried was 3; a plan past its end now also gives back its
   // late payments, at most LATE_REFUND_CALLS (8) more calls: 11.
-  is("the registry's figures", declared && [declared.readCommandsPerRun, declared.ownCommandsPerPlanTried, declared.stripeCallsPerPlanTried, declared.runMs, declared.tellCommandsPerPlan], [2, 4, 11, 25_000, 15]);
+  is("the registry's figures", declared && [declared.readCommandsPerRun, declared.ownCommandsPerPlanTried, declared.stripeCallsPerPlanTried, declared.runMs, declared.tellCommandsPerPlan], [2, 8, 11, 25_000, 15]);
   redis.clear();
   emails.length = 0;
   setClock(Math.floor(realNow() / 1000));

@@ -50,9 +50,9 @@ def main():
     counter = "marktmorgen:integration:rcpt:seq:" + uuid.uuid4().hex
     redis = Redis()
 
-    def take(client, limit, *triples, always=False, month="2026-10"):
+    def take(client, limit, *triples, always=False, give=False, month="2026-10"):
         flat = [str(part) for triple in triples for part in triple]
-        return client.command("EVAL", take_data, 1, room, limit, "1" if always else "0", month, *flat)
+        return client.command("EVAL", take_data, 1, room, limit, "2" if give else "1" if always else "0", month, *flat)
 
     def total():
         return int(redis.command("HGET", room, "#") or 0)
@@ -76,6 +76,18 @@ def main():
         assert take(redis, 100, ("a", "p:x", 1)) == [0, 5_064]
         assert take(redis, 100, ("a", "o", -64)) == [1, 5_000]
         print("PASS: what is taken always passes the room, and nothing else does after it")
+
+        redis.command("DEL", room)
+        # A give-back ("2") on a room that is not there writes nothing: one that lands after the store's erasure must
+        # never recreate its key (Codex L, 20/11). On a live room it shrinks as before.
+        assert take(redis, 10, ("a", "p:gone", -500), give=True) == [1, 0]
+        assert take(redis, 10, ("s", "p:gone", 0), give=True) == [1, 0]
+        assert redis.command("EXISTS", room) == 0
+        assert take(redis, 1_000, ("s", "p:one", 400)) == [1, 464]
+        assert take(redis, 1_000, ("a", "p:one", -100), give=True) == [1, 364]
+        assert take(redis, 1_000, ("a", "p:one", -300), give=True) == [1, 0]
+        assert redis.command("EXISTS", room) == 1 and total() == 0
+        print("PASS: a give-back never recreates a room that is not there, and still shrinks a live one")
 
         redis.command("DEL", room)
         # Two changes: all or nothing.

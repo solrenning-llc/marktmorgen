@@ -12,9 +12,7 @@ import {syntheticTaxContext} from "./customer-tax-review-fixture";
 import { commercialMarginReady } from "@/lib/commercial-margin";
 import { AUTOMATIC_AI_STORE_MICRO_USD, currentAiSpendPolicy } from "@/lib/ai-spend-policy";
 import { currentUploadBudgetPolicy } from "@/lib/upload-budget-policy";
-import { AI_MONTHLY } from "@/lib/ai-rules";
-import { ANSWERS_MONTHLY } from "@/lib/answers-rules";
-import { ANSWER_MICRO_USD, WRITING_JOB_MICRO_USD } from "@/lib/spend-cost-table";
+import { aiEntitlementsFunded, requiredAiRightsMicroUsd } from "@/lib/ai-entitlement-rules";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { aiCeilingUsd, perPaymentCost, uploadOpsUsd, worstCost, worstLines } from "./plan-cost-model";
 
@@ -35,8 +33,10 @@ function sum(tier: Tier, cycle: Cycle) {
   return { paid, allowed, receiving, other, ai, uploads, after, total, room: allowed - total, unit };
 }
 
-test("each plan's AI ceiling is its published writing jobs and answers at the priced units", () => {
-  for (const tier of TIERS) assert.equal(AUTOMATIC_AI_STORE_MICRO_USD[tier], AI_MONTHLY[tier] * WRITING_JOB_MICRO_USD + ANSWERS_MONTHLY[tier] * ANSWER_MICRO_USD);
+test("each plan's AI ceiling funds its published writing jobs, PDF reads and answers at each feature's worst request", () => {
+  // 433 [PV3] (b): no longer a reference job and answer, which left the published rights unfunded (tests/ai-funded-rights.test.ts).
+  for (const tier of TIERS) assert.equal(AUTOMATIC_AI_STORE_MICRO_USD[tier], Number(requiredAiRightsMicroUsd(tier)));
+  assert.equal(aiEntitlementsFunded(currentAiSpendPolicy()!), true);
   const ai = currentAiSpendPolicy()!, uploads = currentUploadBudgetPolicy()!;
   for (const tier of TIERS) assert.equal(ai.storeMicroUsd[tier], AUTOMATIC_AI_STORE_MICRO_USD[tier]);
   for (const scope of ["trial", "setup", "ended"] as const) {

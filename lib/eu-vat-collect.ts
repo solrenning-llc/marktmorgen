@@ -25,15 +25,24 @@
  * (EuVatCollectRefused). The cost of receiving the VAT (the conversion of the fee, the exchange-rate ceiling until the
  * return, the remittance) has no reviewed figure yet (789 [IV1] step 2): euVatCollectionCostCents answers null, so
  * even with the switch on, every sale would be refused until that figure is reviewed. Pure but for nothing: no IO.
+ *
+ * Unit 2 (coordinator C5-20261120-2130): the UK, the same way, with the "UK" record and UK_VAT_COLLECT_REVIEWED's whole
+ * switch (ukVatCollectOn), decided by lib/uk-vat.ts ukCheckout (two agreeing items placing the buyer in GB, an
+ * electronically supplied service, the rate read before UK_VAT_RATE_VALID_UNTIL) and collected at the UK rate on the
+ * line's real amount, marked `uk_vat`, never `eu_vat`, so neither return reads the other's sale. Two more unknowns
+ * refuse, never collect zero: whether the product is an e-publication (zero-rated in the UK; no product carries that
+ * classification yet, so ukCheckout refuses every UK sale), and the sterling rate of a sale in another currency (HMRC's
+ * rate at the time of the supply, VAT Notice 700, 7.6, is not read here), so only a sale in pounds can collect.
  */
 import { consumerGate } from "@/lib/eu-vat-gate";
 import { type EuSupplyFields, euSupplyOf } from "@/lib/eu-vat-supply";
 import { checkoutEvidence } from "@/lib/eu-vat-evidence";
 import { euCheckout } from "@/lib/eu-vat-checkout";
-import { EU_VAT_RATES, type EuVatRate, vatOnTop } from "@/lib/eu-vat-amount";
+import { EU_VAT_RATES, type EuVatRate, type VatOnTop, vatOnTop } from "@/lib/eu-vat-amount";
 import { applyEuVatLines } from "@/lib/eu-vat-lines";
 import { recordedTreatment } from "@/lib/deemed-supplier";
-import { type SwitchInput, euVatCollectOn } from "@/lib/vat-registrations";
+import { UK_VAT_RATE_VALID_UNTIL, ukCheckout, ukVatOnTop } from "@/lib/uk-vat";
+import { type SwitchInput, euVatCollectOn, ukVatCollectOn } from "@/lib/vat-registrations";
 
 /** What the checkout route does with the buyer before anything is held: go on, collect EU VAT, or refuse. */
 export type EuSaleGate =
@@ -61,9 +70,15 @@ function collectingEu(records: unknown, vatSwitch: Omit<SwitchInput, "now"> | un
   return recordedTreatment("EU", records) === "collect" && euVatCollectOn({ ...(vatSwitch ?? {}), now }) === true;
 }
 
+/** Whether the UK may be collected now: the UK record says "collect" and the UK's whole switch is on. */
+function collectingUk(records: unknown, vatSwitch: Omit<SwitchInput, "now"> | undefined, now: Date): boolean {
+  return recordedTreatment("UK", records) === "collect" && ukVatCollectOn({ ...(vatSwitch ?? {}), now }) === true;
+}
+
 /**
- * The checkout route's EU gate. `records`, `vatSwitch`, `now` and `rates` are for tests only: the route passes none of
- * them, so it reads DEEMED_SUPPLIER_RECORDS, the reviewed switch, the clock and the official rate table.
+ * The checkout route's EU and UK gate. `records`, `vatSwitch`, `now`, `rates` and `publication` are for tests only: the
+ * route passes none of them, so it reads DEEMED_SUPPLIER_RECORDS, the reviewed switches, the clock and the official
+ * rate table, and no product is classified as an e-publication or not (so no UK sale collects).
  */
 export function euSaleGate(input: {
   product: EuSupplyFields;
@@ -74,11 +89,15 @@ export function euSaleGate(input: {
   vatSwitch?: Omit<SwitchInput, "now">;
   now?: Date;
   rates?: readonly EuVatRate[];
+  /** Whether the product is an e-publication (zero-rated in the UK): only an explicit `false` lets UK VAT be collected. */
+  publication?: boolean;
 }): EuSaleGate {
   const base = consumerGate({ product: input.product, members: input.members, headers: input.headers, form: input.form });
   const now = input.now ?? new Date();
+  const eu = collectingEu(input.records, input.vatSwitch, now);
+  const uk = collectingUk(input.records, input.vatSwitch, now);
   // Not collecting: exactly consumerGate, so the checkout is what it is today.
-  if (!collectingEu(input.records, input.vatSwitch, now)) return base.ok ? { ok: true, collect: null } : base;
+  if (!eu && !uk) return base.ok ? { ok: true, collect: null } : base;
   // A buyer consumerGate lets through is outside the EU and the UK; one with no billing country is asked for it.
   if (base.ok) return { ok: true, collect: null };
   if (base.reason === "billing") return base;
@@ -86,16 +105,18 @@ export function euSaleGate(input: {
   // agreeing items of evidence, an electronically supplied service and a sourced rate. Only "collect" collects; every
   // other answer (the UK, evidence that disagrees or is missing, goods, a live service, no rate, the review) keeps
   // consumerGate's refusal, as today.
-  const answer = euCheckout({
-    supply: euSupplyOf(input.product, input.members),
-    priceCents: input.product.priceCents,
-    items: checkoutEvidence(input.headers, input.form),
-    rates: input.rates,
-    records: input.records,
-    vatSwitch: input.vatSwitch,
-    now,
-  });
-  if (answer.kind === "collect" && answer.vat.country === answer.place.country) return { ok: true, collect: { country: answer.place.country } };
+  const supply = euSupplyOf(input.product, input.members);
+  const items = checkoutEvidence(input.headers, input.form);
+  if (eu) {
+    const answer = euCheckout({ supply, priceCents: input.product.priceCents, items, rates: input.rates, records: input.records, vatSwitch: input.vatSwitch, now });
+    if (answer.kind === "collect" && answer.vat.country === answer.place.country) return { ok: true, collect: { country: answer.place.country } };
+  }
+  // The UK (lib/uk-vat.ts ukCheckout): both items in GB, an electronically supplied service that is not an
+  // e-publication, the switch and the rate's review date. Every other answer keeps consumerGate's refusal.
+  if (uk) {
+    const answer = ukCheckout({ supply, priceCents: input.product.priceCents, items, vatSwitch: input.vatSwitch, now, publication: input.publication });
+    if (answer.kind === "collect" && answer.place.evidence.ip === "GB") return { ok: true, collect: { country: "GB" } };
+  }
   return base;
 }
 
@@ -135,9 +156,22 @@ export function applyEuCollect(
   const currency = body.get("line_items[0][price_data][currency]") ?? "";
   if (!/^(0|[1-9]\d{0,14})$/.test(amount) || !/^[a-z]{3}$/i.test(currency)) refuse("the line's amount or currency");
   const now = input.now ?? new Date();
-  const vat = vatOnTop(Number(amount), input.country, input.rates ?? EU_VAT_RATES, now);
-  if (!vat || vat.country !== input.country) refuse("no sourced rate");
+  const vat = input.country === "GB" ? ukVat(Number(amount), currency, now) : vatOnTop(Number(amount), input.country, input.rates ?? EU_VAT_RATES, now);
+  if (!vat || vat.country !== input.country) refuse("no sourced rate, or no sterling rate");
   const cost = (input.costsCents ?? euVatCollectionCostCents)(vat!.vatCents, currency);
   if (cost === null || !Number.isSafeInteger(cost) || cost < 0) refuse("the cost of receiving the VAT is unknown");
-  if (applyEuVatLines(body, { vat: vat!, recurring: false, vatCostsCents: cost, currency }) !== "ok") refuse("the VAT line");
+  const mark = input.country === "GB" ? "uk_vat" : "eu_vat";
+  if (applyEuVatLines(body, { vat: vat!, recurring: false, vatCostsCents: cost, currency, mark }) !== "ok") refuse("the VAT line");
+}
+
+/**
+ * The UK VAT on a line, at the rate read on gov.uk while it is not past UK_VAT_RATE_VALID_UNTIL; null otherwise, and
+ * null for a sale in any currency but pounds: its VAT must be stated in sterling at HMRC's rate at the time of the
+ * supply (VAT Notice 700, 7.6), which is not read here.
+ */
+function ukVat(amountCents: number, currency: string, now: Date): VatOnTop | null {
+  if (currency.toLowerCase() !== "gbp") return null;
+  if (!Number.isFinite(now.getTime()) || now.toISOString().slice(0, 10) > UK_VAT_RATE_VALID_UNTIL) return null;
+  const vat = ukVatOnTop(amountCents);
+  return vat ? { ...vat, country: "GB" } : null;
 }

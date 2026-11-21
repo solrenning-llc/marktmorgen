@@ -1562,7 +1562,9 @@ export async function readPdfThenWrite<T>(
     const writing = await flow.step("write", 1, () => askModel(store, request.system, request.prompt, write.maxTokens, answerModel()));
     if (!writing.reached || !writing.value) return null;
     return write.keep(writing.value, request);
-  }, 1 + READ_PDF_JOBS, unrun);
+    // The run took the PDF's jobs, so it may read the PDF once (DOCUMENT_READS_PER_PDF_RUN, as writePage's PDF run):
+    // without it, askModel refuses the reading before the provider is asked.
+  }, 1 + READ_PDF_JOBS, unrun, DOCUMENT_READS_PER_PDF_RUN);
 }
 
 export async function writePage(

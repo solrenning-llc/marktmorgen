@@ -535,6 +535,30 @@ export class MemoryRedis {
           this.run(["SET", seen, "pending", "EX", seenSeconds]);
           return 1;
         }
+        if (key.startsWith("-- marktmorgen:path-paypal-sales-match:v1\n")) {
+          const count = Number(args[0]) - 2;
+          if (!Number.isSafeInteger(count) || count < 1 || args.length !== 6 + 6 * count) return 0;
+          const [, refundedKey, watchKey] = args;
+          const [statsId, merchant, late, ...expected] = args.slice(3 + count);
+          for (let i = 0; i < count; i += 1) {
+            const [order, capture, amount, currency, refunded] = expected.slice(5 * i, 5 * (i + 1));
+            const row = this.run(["GET", args[i + 3]]);
+            if (typeof row !== "string") return 0;
+            try {
+              const paid = JSON.parse(row);
+              if (!paid || paid.store !== statsId || paid.merchant !== merchant || paid.order !== order
+                || typeof paid.capture !== "string" || `paypal:${paid.capture}` !== capture
+                || paid.cents !== Number(amount) || paid.currency !== currency
+                || paid.live !== true || paid.takenOff !== undefined || paid.blind !== undefined) return 0;
+              if ((this.run(["ZSCORE", refundedKey, order]) !== null) !== (refunded === "1")) return 0;
+              const watchedAt = this.run(["ZSCORE", watchKey, order]);
+              if (watchedAt !== null && Number(watchedAt) <= Number(late)) return 0;
+            } catch {
+              return 0;
+            }
+          }
+          return 1;
+        }
         // lib/plans.ts MOVE_IF_LIVE: a plan put back in the line of plans tried only while its store is live.
         if (key.startsWith("-- marktmorgen:plan-move-if-live:v1\n") && args[0] === "3" && args.length === 8) {
           const [, retry, idKey, erasing, at, member, ref, field] = args;

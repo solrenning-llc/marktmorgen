@@ -134,6 +134,11 @@ async function main(): Promise<void> {
   const fencedPutBack = (c: (string | number)[], order: string) =>
     c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:paypal-watch-if-live:v1") && c.includes(watch) && c[c.length - 1] === order;
   const billed = (c: (string | number)[]) => 1 + (String(c[1]).match(/redis\.call\(/g) ?? []).length;
+  // The order put late before PayPal is asked (Codex U on #3443): a fenced put-back at a score already past
+  // WATCH_LATE_SECONDS, part of each look's own commands (PAYPAL_REFUND_WATCH.ownCommandsPerOrderLook), not the telling's.
+  const lateMark = (c: (string | number)[], order: string) =>
+    fencedPutBack(c, order) && Number(c[7]) <= Math.floor(Date.now() / 1000) - sales.WATCH_LATE_SECONDS;
+  const tellPutBack = (c: (string | number)[], order: string) => fencedPutBack(c, order) && !lateMark(c, order);
   is("an endpoint listening for refunds is kept", (await addEndpoint(store, "https://hooks.example.net/in", ["refund.issued"])).ok, true);
   const product = (await readListing(store, added.product.id))!;
   const retrySeconds = (sales as Record<string, unknown>).REFUND_TELL_RETRY_SECONDS;
@@ -212,7 +217,7 @@ async function main(): Promise<void> {
     const pass = sent.slice(before);
     if (pass.some((c) => c[0] === "HGET" && keyOf(c).startsWith("nl:erased:"))) tries += 1;
     const lineAt = pass.findIndex((c) => c[0] === "SET" && keyOf(c).startsWith("nl:hooks:evt:") && pass.some((d) => d[0] === "SET" && keyOf(d).startsWith("nl:hooks:d:") && d.includes("NX")));
-    own.push(pass.reduce((sum, c) => sum + (keyOf(c).startsWith("nl:ppsell:tell:") ? 1 : fencedPutBack(c, lost.order) ? billed(c) : 0), 0));
+    own.push(pass.reduce((sum, c) => sum + (keyOf(c).startsWith("nl:ppsell:tell:") ? 1 : tellPutBack(c, lost.order) ? billed(c) : 0), 0));
     looks.push(pass.filter((c) => (c[0] === "GET" && keyOf(c) === `nl:ppsell:paid:${lost.order}`) || ((c[0] === "ZADD" || c[0] === "EXPIRE") && keyOf(c) === `nl:ppsell:refunded:${statsId}`)).length);
     // The last pass: what the "Not sent" lines took, from the event's mark taken for them to the log's LTRIM.
     const lastEvt = pass.map((c, at) => (c[0] === "SET" && keyOf(c).startsWith("nl:hooks:evt:") ? at : -1)).filter((at) => at >= 0).pop();
@@ -295,7 +300,7 @@ async function main(): Promise<void> {
       await sweep();
       const pass = sent.slice(before);
       if (pass.some((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:erased:"))) n += 1;
-      ownLooks.push(pass.reduce((sum, c) => sum + (String(c[1]) === `nl:ppsell:tell:${order}` || (c[0] === "HGET" && String(c[1]) === sales.backKey(statsId)) ? 1 : fencedPutBack(c, order) ? billed(c) : 0), 0));
+      ownLooks.push(pass.reduce((sum, c) => sum + (String(c[1]) === `nl:ppsell:tell:${order}` || (c[0] === "HGET" && String(c[1]) === sales.backKey(statsId)) ? 1 : tellPutBack(c, order) ? billed(c) : 0), 0));
       hour();
     }
     return n;

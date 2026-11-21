@@ -35,6 +35,7 @@ import { SUPPORTED_AI_MODELS, boundedAiRequest } from "@/lib/ai-request-rules";
 import { aiRequestHoldMicroUsd, WRITING_JOB_MICRO_USD } from "@/lib/spend-cost-table";
 import { MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH } from "@/lib/catalog-rules";
 import { firstPages } from "@/lib/pdf-preview";
+import { LANGUAGES } from "@/lib/store-language";
 import { keptProposal, pdfAssistRequest, writeFromPdf } from "@/lib/product-pdf-assist";
 import {
   BENEFITS_HEADING,
@@ -162,6 +163,17 @@ async function main(): Promise<void> {
     "the widest product still asks within the priced bytes",
     [worst !== null, bytes(worst?.system ?? "x".repeat(99_999)) <= PDF_ASSIST_SYSTEM_BYTES, bytes(worst?.prompt ?? "x".repeat(99_999)) <= PDF_ASSIST_PROMPT_BYTES],
     [true, true, true],
+  );
+  // Claude 3's LEVE 2 on #3447 (6807021579): the rules are written in the store's language, and a longer language name
+  // adds bytes; a system part past its cap gives no request, after the reading was already charged. Every language
+  // the site offers keeps it inside the priced bytes, with the widest product.
+  is(
+    "in every store language, the widest product still asks within the priced system bytes",
+    Object.keys(LANGUAGES).filter((code) => {
+      const asked = pdfAssistRequest(shape({ name: wide, language: code }), { title: wide, summary: wide, about: "😀".repeat(5_000), notes: "😀".repeat(MAX_AI_NOTES) }, `${"😀".repeat(1_000)}\n${FACT_TEXT}`);
+      return !asked || bytes(asked.system) > PDF_ASSIST_SYSTEM_BYTES;
+    }),
+    [],
   );
   is("the facts are kept whole when the creator's words are cut to fit", worst?.prompt.includes("Week 1: Pantry basics") ?? false, true);
   is(

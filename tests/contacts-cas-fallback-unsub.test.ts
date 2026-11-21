@@ -15,8 +15,11 @@ async function main(){
  await changeLabels(list,[email],()=>["before"],ROOM);
  const token=(await tokensFor(list,[email],handle)).get(email);
  if(!token||!(await readUnsubToken(token)))throw Error("G valid initial token setup");
+ // Claude 5, consent audit of 9 November 2026 (rule 23): unsubscribe now writes through the same CAS script, so the
+ // failure is injected only into the first one, the label write's, as G's case means; the real unsubscribe made inside
+ // the read-back runs as Redis would. Nothing else changed.
  redis.pipeline=async commands=>{
-  if(commands.length===1&&commands[0][0]==="EVAL"&&String(commands[0][1]).includes("redis.sha1hex")){
+  if(!failedEval&&commands.length===1&&commands[0][0]==="EVAL"&&String(commands[0][1]).includes("redis.sha1hex")){
    failedEval=true;throw Error("G synthetic CAS request failed before application");
   }
   if(failedEval&&!readBack&&commands.length===1&&commands[0][0]==="HMGET"&&commands[0][1]===leadsKey(list)){

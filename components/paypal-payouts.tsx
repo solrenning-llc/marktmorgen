@@ -21,12 +21,16 @@ const MESSAGES: Record<string, string> = {
   reconnect: "Connect your PayPal app again: its Secret has to be entered once more.",
   nothing: "Nobody is owed anything that has cleared right now.",
   refunds: "We could not check every refund on your Stripe account just now, so nothing was sent. Try again in a minute.",
+  invoices: "We could not check every membership and plan payment on your Stripe account just now, so what is owed is not known and nothing was sent. Try again in a minute.",
+  invoices_ceiling: "Your store has more membership and plan payments from affiliate links than we can keep track of, so what is owed is not known and nothing was sent. Trying again will not change that: pay each affiliate yourself and write it down with Mark as paid.",
+  invoices_unlinked: "Some membership or plan payments from affiliate links were paid in parts or outside Stripe, so their commission cannot be worked out here and nothing was sent. Trying again will not change that: pay each affiliate yourself and write it down with Mark as paid.",
   funds: "Your PayPal balance does not cover this batch. Nothing was sent. Add money to your PayPal balance and try again.",
   busy: "A payment is being sent right now. Wait a moment and reload.",
   off: "Switch your affiliate program on first.",
   slow: "Too many tries for now. Try again in an hour.",
   error: "PayPal could not be reached. Nothing was sent. Try again in a moment.",
   unknown: "We sent the batch to PayPal, but its answer did not reach us, so we do not know whether it was paid. Nobody in it will be sent again: they show as on their way. Look at your PayPal activity to see whether it went.",
+  pending: "Nobody was paid just now. But we could not confirm that this payment was cleared from our records, so our daily check may still send it from your PayPal, to the same people for the same amounts. Until then, they show as on their way. Do not pay them another way, or they could be paid twice.",
 };
 
 async function send(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -42,6 +46,7 @@ export function PayPalPayouts({
   initial,
   people,
   cents,
+  leftOutNote = "",
   currency,
   onTheirWay,
   checking = 0,
@@ -52,6 +57,11 @@ export function PayPalPayouts({
   /** Who can be paid right now, and how much in all. */
   people: number;
   cents: number;
+  /**
+   * Said when anyone owed is left out of every PayPal batch because PayPal cannot take their address (Claude 7 on
+   * #4318); empty when nobody is. Written by the server (paypalLeftOutText).
+   */
+  leftOutNote?: string;
   currency: string;
   /** Payments sent through PayPal and not yet confirmed. */
   onTheirWay: number;
@@ -169,9 +179,10 @@ export function PayPalPayouts({
                 </>
               )}
             </div>
-          ) : (
+          ) : leftOutNote ? null : (
             <p className="mt-3 text-sm text-ink-soft">Nobody is owed anything that has cleared right now.</p>
           )}
+          {leftOutNote ? <p className="notice notice-warn mt-3 text-sm">{leftOutNote}</p> : null}
           {onTheirWay > 0 ? (
             <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-ink-soft">
               <span>{`${onTheirWay} ${onTheirWay === 1 ? "payment is" : "payments are"} on the way through PayPal. Each shows as paid once PayPal confirms it; anyone PayPal cannot pay stays owed.`}</span>
@@ -182,7 +193,17 @@ export function PayPalPayouts({
                 onClick={async () => {
                   const data = await act("settle");
                   if (data) {
-                    toast(Number(data.paid) ? `${data.paid} confirmed as paid.` : "Nothing new from PayPal yet.");
+                    toast(
+                      data.unavailable
+                        ? data.retryNow
+                          ? "We could not check these payments with PayPal just now. Nothing was asked of PayPal, so you can try again right away."
+                          : "We could not check these payments with PayPal just now. Nothing was asked of PayPal. Try again in a minute."
+                        : data.asked === false
+                          ? "PayPal was asked less than a minute ago. Try again in a minute."
+                          : Number(data.paid)
+                            ? `${data.paid} confirmed as paid.`
+                            : "Nothing new from PayPal yet.",
+                    );
                     router.refresh();
                   }
                 }}
@@ -239,6 +260,49 @@ export function PayPalPayouts({
           </button>
         </>
       )}
+      {error ? (
+        <p className="notice notice-error mt-3 text-sm" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Shown instead of the panel when the creator's PayPal connection could not be read (lib/paypal-payouts.ts readLink,
+ * rule 24): paying from PayPal is unavailable, and Disconnect is the way out of a connection in an unknown shape, so
+ * the creator is never stuck. Disconnecting deletes the connection whatever it holds; nothing is paid.
+ */
+export function PayPalUnread() {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="notice notice-warn mt-5">
+      <p role="alert">
+        Your PayPal connection could not be read just now, so paying from PayPal is unavailable here. Nothing was changed.
+        Reload the page to try again. If this keeps happening, disconnect PayPal and connect it again.
+      </p>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm mt-2"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setError(null);
+          const data = await send({ op: "disconnect" });
+          setBusy(false);
+          if (!data.ok) {
+            setError(MESSAGES[String(data.error)] ?? MESSAGES.error);
+            return;
+          }
+          toast("PayPal disconnected. Its Secret is deleted.");
+          router.refresh();
+        }}
+      >
+        Disconnect PayPal
+      </button>
       {error ? (
         <p className="notice notice-error mt-3 text-sm" role="alert">
           {error}

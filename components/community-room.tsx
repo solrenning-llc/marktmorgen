@@ -57,6 +57,7 @@ export function CommunityRoom({
   leave,
   resting: firstResting,
   quiet,
+  labelledBy,
   words: t,
 }: {
   handle: string;
@@ -81,6 +82,11 @@ export function CommunityRoom({
   resting: boolean;
   /** Seconds since the room was last spoken in when the page was drawn; -1 for a room nobody has spoken in. */
   quiet: number;
+  /**
+   * The id of the heading that names the room: the list of messages is a live log (role="log") named by it, so a
+   * screen reader says each new message as it comes (WCAG 4.1.3, 274 [AX1]).
+   */
+  labelledBy?: string;
   /** Everything it says, in the store's language (lib/buyer-words/community.ts). */
   words: RoomWords;
 }) {
@@ -373,6 +379,8 @@ export function CommunityRoom({
 
   return (
     <div className="mt-5">
+      {/* New messages arrive by asking every few seconds: said as they come, politely, never the ones already there. */}
+      <div role="log" aria-live="polite" aria-relevant="additions" aria-labelledby={labelledBy}>
       <ul
         ref={list}
         className="cm-room"
@@ -411,6 +419,7 @@ export function CommunityRoom({
           })
         )}
       </ul>
+      </div>
 
       {canWrite && (!creatorOnly || owner) ? (
         <form onSubmit={send} className="mt-3">

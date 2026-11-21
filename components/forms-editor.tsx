@@ -2,6 +2,7 @@
 
 import { StudioEmptyState } from "@/components/empty-state";
 import { FORM_STARTERS } from "@/lib/form-starters";
+import { canCopy, formCopy } from "@/lib/form-copy";
 import { FormAnswers } from "@/components/form-answers";
 import { FormResponseDeal } from "@/components/form-response-deal";
 import { mergeFormOpportunities, type FormDealMatch } from "@/lib/form-deal";
@@ -89,6 +90,8 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  /** The name of the form the open draft was copied from (582 [KB3]), or null. */
+  const [copiedFrom, setCopiedFrom] = useState<string | null>(null);
   useLeaveGuard(draft !== null && !busy);
 
   const patch = (change: Partial<FormDef>) => setDraft((d) => (d ? { ...d, ...change } : d));
@@ -166,8 +169,9 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
   }
   // A new form, blank or from an example: the button pressed goes away with the list, so the focus moves to the form's name.
   const nameField = useRef<HTMLInputElement>(null);
-  const openNew = (def: FormDef) => {
+  const openNew = (def: FormDef, from: string | null = null) => {
     setError(null);
+    setCopiedFrom(from);
     setDraft(def);
     requestAnimationFrame(() => nameField.current?.focus());
   };
@@ -200,6 +204,10 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
           </button>
         ) : null}
       </div>
+
+      {draft === null && !canCopy(saved.length) ? (
+        <p className="notice mt-4" data-forms-full="">{`This store has ${MAX_FORMS} forms, the most it can keep. Remove one to make a new form or a copy.`}</p>
+      ) : null}
 
       {saved.length === 0 && draft === null ? (
         <div className="mt-6 rounded-2xl bg-paper p-4 text-sm text-ink-soft ring-1 ring-line" data-form-starters="">
@@ -252,9 +260,20 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
                     Download all answers
                   </a>
                 ) : null}
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setError(null); setDraft(structuredClone(form)); }} disabled={draft !== null || dealDraft !== null}>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setError(null); setCopiedFrom(null); setDraft(structuredClone(form)); }} disabled={draft !== null || dealDraft !== null}>
                   Edit
                 </button>
+                {canCopy(saved.length) ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    aria-label={`Make a copy of ${form.name}`}
+                    onClick={() => openNew(formCopy(form, saved.map((s) => s.form.name)), form.name)}
+                    disabled={draft !== null || dealDraft !== null}
+                  >
+                    Make a copy
+                  </button>
+                ) : null}
                 {removing === form.id ? (
                   <>
                     <button type="button" className="btn btn-danger btn-sm" onClick={() => void send({ action: "remove", id: form.id }, "Form removed.")} disabled={busy}>
@@ -288,6 +307,11 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
 
       {draft ? (
         <div className="mt-6 rounded-2xl border border-line bg-white p-4 sm:p-6">
+          {copiedFrom !== null && !draft.id ? (
+            <p className="notice mb-4" role="status" data-form-copy-note="">
+              {`A copy of “${copiedFrom}”, not saved yet. It has the same questions and results, and none of the answers: those stay with the original. Its open and close times are empty. Press Save form to keep it.`}
+            </p>
+          ) : null}
           <label className="block">
             <span className="field-label">Name, for you</span>
             <input ref={nameField} className="field mt-2" value={draft.name} maxLength={MAX_FORM_NAME} placeholder="Application for coaching" onChange={(e) => patch({ name: e.target.value })} />
@@ -574,7 +598,7 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
             <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void send({ form: { ...draft, id: draft.id || undefined } }, draft.id ? "Form saved." : "Form made.")}>
               {busy ? "Saving…" : "Save form"}
             </button>
-            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => { setDraft(null); setError(null); }}>
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => { setDraft(null); setError(null); setCopiedFrom(null); }}>
               Cancel
             </button>
           </div>

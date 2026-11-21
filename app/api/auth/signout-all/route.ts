@@ -7,6 +7,7 @@ import {
 } from "@/lib/auth";
 import { fromAnotherSite } from "@/lib/request-guard";
 import { lockedUntil } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 
 /**
  * Closes every session this creator has open, on every device.
@@ -30,7 +31,10 @@ export async function POST(request: NextRequest) {
     email = undefined;
   }
   // A session let in without its second step cannot log the others out (lib/two-step.ts).
-  if (email && (await lockedUntil(id)) > 0) {
+  // A lock that could not be read is never read as free: nobody is logged out, and it is said (rule 24).
+  const until = email ? await lockRead(lockedUntil(id), { back: `${originFrom(request)}/studio`, to: "your studio" }) : 0;
+  if (until instanceof Response) return until;
+  if (until > 0) {
     return new Response(null, { status: 303, headers: { Location: `${originFrom(request)}/studio?two-step=locked` } });
   }
   // Said as done only when it was: sessions that could not be read are said as such (audit SG2, rule 27).

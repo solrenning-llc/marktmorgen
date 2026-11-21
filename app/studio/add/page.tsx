@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { can, type Permission } from "@/lib/team-roles";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { AddGallery } from "@/components/add-gallery";
 import { galleryFor } from "@/lib/studio-modules";
@@ -81,6 +82,7 @@ export default async function StudioAddPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
+          <StudioTrail store={store} here="Add to your store" />
           <AddGallery sections={sections} />
         </main>
       </StudioStorePin>

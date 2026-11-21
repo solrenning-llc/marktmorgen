@@ -109,7 +109,7 @@ function main(): void {
   is("short of it: roomLine under the table", render(h(1000, 4, 1)).includes(roomLine(roomBeforePause(h(1000, 4, 1)))), true);
   is("near: still said", render(h(1000, 21, 0)).includes("At this many emails, 4 more bounces or 5 more spam reports would pause it."), true);
   const over = render(h(1000, 30, 0));
-  is("an address already counted is not counted again (heardFromSender), and more email sent first can bring the share under: hence 'new address' and 'unless'", [/redisPipeline\(\[\["SET", seenKey\(notice\.store, email\), "1", "NX", "EX", [A-Z_]+\]\]\);\s*if \(first === null\) return "ignored";/.test(readFileSync("lib/mail-health.ts", "utf8")), overTheLine(h(1000, 25)) !== null, overTheLine(h(1400, 26)) === null], [true, true, true]);
+  is("an address already counted is not counted again (heardFromSender), and more email sent first can bring the share under: hence 'new address' and 'unless'", [/const seen = seenKey\(notice\.store, email\);[\s\S]{0,400}if \(begun === 0\) return "ignored";/.test(readFileSync("lib/mail-health.ts", "utf8")), overTheLine(h(1000, 25)) !== null, overTheLine(h(1400, 26)) === null], [true, true, true]);
   is("at the level: both room cells say the next notice of either kind pauses", [cells(over, "Bounced for good")[4], cells(over, "Reported as spam")[4]], ["The next bounce or spam report from a new address, unless more email goes out first", "The next bounce or spam report from a new address, unless more email goes out first"]);
   const bounceLine = render(h(1000, 25, 1));
   is("at the bounce line with 1 spam report: the next spam report pauses too (overTheLine answers bounces)", [cells(bounceLine, "Bounced for good")[4], cells(bounceLine, "Reported as spam")[4]], ["The next bounce or spam report from a new address, unless more email goes out first", "The next bounce or spam report from a new address, unless more email goes out first"]);
@@ -150,7 +150,8 @@ function main(): void {
   is("imported from the component", page.includes('import { ListHealthTable, ListHealthUnread } from "@/components/list-health-table";'), true);
   is("a read that failed with no pause confirmed: the health section says so, never hidden as if nothing were there", /confirmedPause === null && health === null \? \([\s\S]{0,600}<ListHealthUnread \/>/.test(page), true);
   is("one reading of the seven days on the page, read exactly (lib/list-health-read.ts; #2314)", count(page, /listHealthExact\(/g), 1);
-  is("no reading of its own: the page imports nothing from Redis", /@\/lib\/redis/.test(page), false);
+  // Main's email usage summary checks whether Redis is set up (isRedisConfigured), which reads nothing; anything else from Redis would be a reading of the page's own.
+  is("no reading of its own: from Redis the page imports only isRedisConfigured, which reads nothing", [...page.matchAll(/import \{([^}]*)\} from "@\/lib\/redis";/g)].map((m) => m[1].trim()).join("|") === "isRedisConfigured" && !/redisPipeline|redisCommand/.test(page), true);
   const component = readFileSync("components/list-health-table.tsx", "utf8");
   is("the component reads nothing and runs on the server", /@\/lib\/redis|@\/lib\/mail-health"|"use client"|await /.test(component), false);
 }

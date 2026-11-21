@@ -65,3 +65,20 @@ test("an empty selection reads nothing", async () => {
   assert.deepEqual(await readRecords([]), []);
   assert.equal(reads, 0);
 });
+
+// Codex X6's LOW on #2619 (6952486935): meetingFor never answers an unreadable record with the fallback link, which may
+// differ from the link already given; the read's error goes to the caller (callMeeting's and eventMeeting's callers
+// keep the booking or the event without a meeting record).
+test("meetingFor does not hand out a fallback in place of a record that does not read", async () => {
+  const { meetingFor } = await import("@/lib/meet-links");
+  reply = ["{broken"];
+  let fallbackAsked = 0;
+  const ask = {
+    store: { statsId: "stats-proof", handle: "recordproof", callsId: "calls-proof" },
+    provider: "google" as const, scope, group: false, product: "call", session: record.session, title: "A call", description: "",
+    start: record.start, end: record.end, tz: "UTC", guest: null,
+    fallback: async () => { fallbackAsked += 1; return "https://example.com/fallback"; },
+  } as unknown as Parameters<typeof meetingFor>[0];
+  await assert.rejects(meetingFor(ask));
+  assert.equal(fallbackAsked, 0, "no fallback link in place of an unknown record");
+});

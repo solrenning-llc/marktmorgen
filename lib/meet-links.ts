@@ -261,8 +261,11 @@ export async function meetingFor(ask: MeetingAsk): Promise<MeetRecord> {
     return await withLock(lockKey(ask.scope), 45, lockWait(15_000), work);
   } catch (error) {
     if (!(error instanceof LockBusyError)) console.error("arranging a meeting failed", error);
-    // Whatever is there is the link; failing that, the fallback, unrecorded.
-    const there = await readRecord(ask.scope).catch(() => null);
+    // Whatever is there is the link; failing that, the fallback, unrecorded. A record that is there but does not read
+    // is unknown, never "no record": its link may already be in people's hands, so a fallback is not handed out in its
+    // place and the read's error goes to the caller, which keeps the booking or the event without a meeting record
+    // (CX-123 rule 24; Codex X6's LOW on #2619, 6952486935).
+    const there = await readRecord(ask.scope);
     return there ?? { ...emptyRecord(ask), link: (await ask.fallback().catch(() => null)) ?? "" };
   }
 }

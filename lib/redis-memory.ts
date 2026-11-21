@@ -489,9 +489,9 @@ export class MemoryRedis {
           if (this.run(["GET", lock]) !== token) return 0;
           return this.run(["DEL", lock]);
         }
-        // lib/phone-alerts.ts PHONE_STATE_IF_LISTED: a device's last send kept only while it is still on its store's list.
-        if (key.startsWith("-- marktmorgen:phone-state-if-listed:v1\n") && args[0] === "2" && args.length === 5) {
-          const [, list, states, id, state] = args;
+        // lib/phone-alerts.ts PHONE_STATE_IF_LISTED: devices' last sends, each kept only while it is still on its store's list.
+        if (key.startsWith("-- marktmorgen:phone-state-if-listed:v1\n") && args[0] === "2" && args.length >= 5 && (args.length - 3) % 2 === 0) {
+          const [, list, states, ...pairs] = args;
           this.scriptCalls += 1;
           const raw = this.run(["GET", list]);
           if (raw === null || raw === undefined) return 0;
@@ -503,10 +503,15 @@ export class MemoryRedis {
           }
           const devices = config && typeof config === "object" && !Array.isArray(config) ? (config as { devices?: unknown }).devices : undefined;
           if (!Array.isArray(devices)) return -2;
-          if (!devices.some((device) => !!device && typeof device === "object" && (device as { id?: unknown }).id === id)) return 0;
-          this.scriptCalls += 1;
-          this.run(["HSET", states, id, state]);
-          return 1;
+          const listed = new Set(devices.flatMap((device) => (!!device && typeof device === "object" && typeof (device as { id?: unknown }).id === "string" ? [(device as { id: string }).id] : [])));
+          let written = 0;
+          for (let i = 0; i + 1 < pairs.length; i += 2) {
+            if (!listed.has(pairs[i])) continue;
+            this.scriptCalls += 1;
+            this.run(["HSET", states, pairs[i], pairs[i + 1]]);
+            written += 1;
+          }
+          return written;
         }
         // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
         if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {

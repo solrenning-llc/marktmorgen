@@ -37,6 +37,15 @@ async function main(): Promise<void> {
   is("id key gone: gone", await claimWhileStoreLive(gone, "nl:test:mark:c", 60), "gone");
   is("nothing written", await read("nl:test:mark:c"), null);
 
+  // Codex L-20261121-0043 (on the funnel-share fence): moveAccount repoints a store's id key to another ref, so an id
+  // key that exists is not enough; it must hold this store's very ref.
+  part("Its id key now names another ref (an account moved): gone, nothing written");
+  const moved = await shop("claim-moved@example.com", "claimmoved");
+  const [, movedKey] = storeIdCommand(moved.sid);
+  await redis.pipeline([["SET", movedKey, "someone-else@example.com"]]);
+  is("another ref under its id key: gone", await claimWhileStoreLive(moved, "nl:test:mark:m", 60), "gone");
+  is("nothing written", await read("nl:test:mark:m"), null);
+
   part("A store from before ids: its owner's record must still be its own");
   const made = await shop("claim-legacy@example.com", "claimlegacy");
   const legacy: Store = { ...made, sid: "", extra: false };

@@ -1169,7 +1169,7 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // public request, so their PATH_LEAD_COMMANDS are priced here, with the email that carried the link.
   transactional: PER_EMAIL + (6 + PATH_LEAD_COMMANDS + TAKE_COMMANDS) * COMMAND,
   // A call out, waited on at 2 GB for ten seconds.
-  integration: request("wait", 10 + TAKE_COMMANDS, 20_000),
+  integration: request("wait", 10 + TAKE_COMMANDS, 21_024), // +1 KiB for the exact ref/legacy cap in paypal-link-live:v2; the owner record stays inside Redis.
   // What a buyer does inside what they bought (lib/buyer-actions.ts): the
   // heaviest is a post or comment that tells up to eleven people, their
   // devices pushed at once and waited on (their read at most
@@ -1208,8 +1208,9 @@ export const PAYPAL_PRESS_LOCK_TRIES = lockTriesAtMost(5_000);
  * The Redis commands one press of "Pay with PayPal" sends besides its book read (lib/paypal-payouts.ts,
  * payWithPayPal; Claude 7 on #4488): the link read, the lock's tries, who is on their way, the link read again for the
  * token, who is on their way again, the lock held again (EVAL), the batch written down as on its way with its store
- * (one EVAL, only while the store is live: billed 1 + EXISTS + HGET + HSET + SADD = 5, three more than the HSET and
- * SADD it replaced; lib/paypal-payouts.ts KEEP_OPEN_IF_LIVE, Codex L-20261120-0448), its settling at the most (held under PayPal's id and the "?" entry taken off, or the month's two
+ * (one EVAL, only while the store is live: billed 1 + GET + HGET + HSET + SADD = 5, three more than the HSET and
+ * SADD it replaced; lib/paypal-payouts.ts KEEP_OPEN_IF_LIVE, Codex L-20261120-0448; since v3 the GET reads the store's
+ * id key and compares it with the exact owner ref that began the work, in place of an EXISTS, Codex L-20261121-0634), its settling at the most (held under PayPal's id and the "?" entry taken off, or the month's two
  * counts when the answer is not known), and the lock let go (EVAL). Counted through the Redis stand-in on each path in
  * tests/paypal-press-cost.test.ts.
  */
@@ -1227,11 +1228,14 @@ export const PAYPAL_PRESS_SECONDS = 60;
  * 2 GB for all its seconds, every command of its own above, the book's and the store figure's take. What the book read
  * moves through the database by the byte (its records grow with the program) is not in it: the same open question for
  * every reader of the whole book (the studio's affiliates page, the payout file, payday's email), not settled here
- * and never read as zero.
+ * and never read as zero. The same open question holds the bytes of the settling's own write-backs (settlePayPal, a
+ * known batch's lines and an unknown entry's try, each through KEEP_OPEN_IF_LIVE v3): each carries the owner ref as one
+ * more argument and reads it back once, at most 2 × MAX_EMAIL_LENGTH bytes more a write-back (Claude 4's LEVE 2 on
+ * #5025); their commands are unchanged, GET in place of EXISTS.
  */
 export function paypalPressCost(bookCommands: number): number {
   return CALL + SHAPES.wait.cpu * CPU_SECOND + PAYPAL_PRESS_SECONDS * MEMORY_SECOND
-    + (PAYPAL_PRESS_COMMANDS + bookCommands + TAKE_COMMANDS) * COMMAND + 20_000 * DB_BYTE;
+    + (PAYPAL_PRESS_COMMANDS + bookCommands + TAKE_COMMANDS) * COMMAND + 21_024 * DB_BYTE; // +1 KiB for the exact owner ref passed/read by paypal-open-live:v3 (Codex L).
 }
 /** One press at the most: its book read at the caps. */
 export const PAYPAL_PRESS = paypalPressCost(PAYPAL_PRESS_BOOK_COMMANDS);

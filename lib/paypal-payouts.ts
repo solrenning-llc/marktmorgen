@@ -42,7 +42,7 @@ import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
-import { ERASING_KEY, type Store, erasingField, ownerKey, storeForId, storeIdCommand, storeIdGone, storeRef } from "@/lib/store";
+import { ERASING_KEY, MAX_STORE_BYTES, type Store, erasingField, ownerKey, storeForId, storeIdCommand, storeIdGone, storeRef } from "@/lib/store";
 
 /** Local tests may point this at a stand-in on 127.0.0.1; nothing else is taken. */
 const PAYPAL_API = /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.PAYPAL_API_BASE ?? "")
@@ -111,12 +111,23 @@ const context = (statsId: string) => `paypal-payouts|${statsId}`;
  * to check the app, and the store's erasure can begin or end meanwhile; a plain SET after it would write the sealed
  * Secret back into nl:pp:<statsId>, an erased family, with no expiry. KEYS[1] the store's own key (its id key, or
  * for a store from before ids its record), KEYS[2] the erasing marks (lib/store.ts ERASING_KEY), KEYS[3] the link;
- * ARGV[1] the store's erasing field, ARGV[2] the link. 1 written, 0 not (gone or erasing). Billed 1 + 3, in place of
+ * ARGV[1] the store's erasing field, ARGV[2] the link; the remaining arguments fence its exact identity (below).
+ * 1 written, 0 not (gone, erasing, moved or unconfirmed identity). Billed at most 1 + 3, in place of
  * the SET's 1: a connection stays inside the integration unit's 10 commands (tests/paypal-link-store-erasure.test.ts).
  * lib/redis-memory.ts runs it the same way.
  */
-export const KEEP_LINK_IF_LIVE = `-- marktmorgen:paypal-link-live:v1
-if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+// ARGV[3]: "" for a sid mapping, otherwise the legacy statsId; ARGV[4]: expected ref; ARGV[5]: record byte cap.
+// A move preserves sid but repoints its ref. Never check the old ref's marker while accepting another mapped ref.
+export const KEEP_LINK_IF_LIVE = `-- marktmorgen:paypal-link-live:v2
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[3] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[4] then return 0 end
+else
+  local raw = redis.call("GETRANGE", KEYS[1], 0, ARGV[5])
+  if raw == "" or #raw > tonumber(ARGV[5]) then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" or record["statsId"] ~= ARGV[3] then return 0 end
+end
 redis.call("SET", KEYS[3], ARGV[2])
 return 1`;
 
@@ -129,7 +140,8 @@ return 1`;
  * key, or for a store from before ids its record), KEYS[2] the erasing marks (lib/store.ts ERASING_KEY), KEYS[3] the
  * open batches, KEYS[4] the settling's set of stores; ARGV[1] the store's erasing field, ARGV[2] the batch's field,
  * ARGV[3] the batch, ARGV[4] the store's id to put in the settling's set, or "" for none, ARGV[5] "" for a store with
- * an id (its id key fenced on with EXISTS) or, for a store from before ids, its statsId, compared with its owner's
+ * an id (its id key read and compared with ARGV[6], the ref that began this work); for a store from before ids,
+ * its statsId, compared with its owner's
  * record's own: after that store's erasure its owner may make a new store under the same key, and that record's being
  * there must not let the erased store's batch back in (Codex P on #4963; the v2 identity of #4964,
  * lib/store-live-cache.ts). A record that does not parse is not this store. Answers -1, nothing written, when the
@@ -137,10 +149,12 @@ return 1`;
  * three more than the plain writes it replaces (tests/plan-cost-registry.ts, PAYPAL_PRESS_COMMANDS). lib/redis-memory.ts
  * runs it the same way.
  */
-export const KEEP_OPEN_IF_LIVE = `-- marktmorgen:paypal-open-live:v2
+// Codex L: moveAccount keeps the sid but changes its mapped ref. A response begun under the old ref must not
+// republish a private batch after the moved store's closing walk passed it. GET replaces EXISTS (same command count).
+export const KEEP_OPEN_IF_LIVE = `-- marktmorgen:paypal-open-live:v3
 if redis.call("HGET", KEYS[2], ARGV[1]) then return -1 end
 if ARGV[5] == "" then
-  if redis.call("EXISTS", KEYS[1]) ~= 1 then return -1 end
+  if redis.call("GET", KEYS[1]) ~= ARGV[6] then return -1 end
 else
   local raw = redis.call("GET", KEYS[1])
   if not raw then return -1 end
@@ -341,7 +355,7 @@ export async function connectPayPal(store: Store, client: string, secret: string
   const ref = storeRef(store);
   const live = store.sid ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
   const written = repliesFor(await redisPipeline([
-    ["EVAL", KEEP_LINK_IF_LIVE, 3, live, ERASING_KEY, linkKey(store.statsId), await erasingField(ref), JSON.stringify(link)],
+    ["EVAL", KEEP_LINK_IF_LIVE, 3, live, ERASING_KEY, linkKey(store.statsId), await erasingField(ref), JSON.stringify(link), store.sid ? "" : store.statsId, ref, MAX_STORE_BYTES],
   ]), 1);
   // Kept only on its exact 1: 0 is a store gone or being erased, and any other answer is not known to be kept.
   if (written?.[0] !== 1) {
@@ -553,7 +567,7 @@ async function keepOpenCommand(store: Store, field: string, value: string, watch
   // The store's id key; for a store from before ids (sid ""), its record under its owner, as connectPayPal reads it.
   const ref = storeRef(store);
   const live = store.sid ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
-  return ["EVAL", KEEP_OPEN_IF_LIVE, 4, live, ERASING_KEY, openKey(store.statsId as string), STORES, await erasingField(ref), field, value, watch ? store.sid : "", store.sid ? "" : (store.statsId as string)];
+  return ["EVAL", KEEP_OPEN_IF_LIVE, 4, live, ERASING_KEY, openKey(store.statsId as string), STORES, await erasingField(ref), field, value, watch ? store.sid : "", store.sid ? "" : (store.statsId as string), ref];
 }
 
 /** Takes one open-batch entry away: true only when Redis answers the HDEL with exactly 0 or 1 (rule 24). */

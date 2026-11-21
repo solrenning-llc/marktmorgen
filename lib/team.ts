@@ -545,14 +545,16 @@ redis.call('LTRIM', KEYS[3], 0, tonumber(ARGV[4]) - 1)
 return n`;
 
 /** Writes one line into a live store's activity log. Never throws; true only for a confirmed write. */
-export async function logTeam(sid: string, line: Omit<LogLine, "at">): Promise<boolean> {
+export async function logTeam(sid: string, line: Omit<LogLine, "at">, knownRef?: string): Promise<boolean> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return false;
   const entry: LogLine = { at: new Date().toISOString(), who: normaliseEmail(line.who), role: line.role, what: line.what.slice(0, 200), ...(line.access ? { access: line.access } : {}) };
   try {
-    // Read the ref to derive its erasing field, then compare it again inside the script: a separate live read is not
-    // permission to write. TEAM_LOG_COMMANDS at most: this GET, EVAL, GET, HEXISTS, LPUSH and LTRIM.
+    // The ref derives the erasing field, and the script compares it again with the store's id: a ref read or passed
+    // earlier is never permission to write. A caller that already holds it (studioAccess, storeRef(access.store))
+    // passes it and saves the GET's round trip (Claude 7 on #4988: a teammate's CRM save stays at
+    // CRM_VALUE_SAVE_TRIPS). TEAM_LOG_COMMANDS at most: that GET, EVAL, GET, HEXISTS, LPUSH and LTRIM.
     const identity = storeIdCommand(sid)[1];
-    const [ref] = repliesFor(await redisPipeline([["GET", identity]]), 1) ?? [];
+    const ref = knownRef ? knownRef : (repliesFor(await redisPipeline([["GET", identity]]), 1) ?? [])[0];
     if (typeof ref !== "string" || !ref) return false;
     const answer = repliesFor(await redisPipeline([["EVAL", KEEP_LOG_IF_LIVE, 3, identity, ERASING_KEY, logKey(sid), ref, await erasingField(ref), logLineRecord(entry), LOG_LINES]]), 1);
     const pushed = answer?.[0];

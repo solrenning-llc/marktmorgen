@@ -161,7 +161,7 @@ async function main(): Promise<void> {
   for (const file of [...routes.sort(), ...LIB]) {
     const source = readFileSync(file, "utf8");
     const lines = source.split("\n");
-    lines.forEach((line, i) => {
+    lines.forEach((line) => {
       // deleteOrSweep (lib/file-drop.ts) deletes as del does, and hands a failed delete to the daily job.
       const call = line.match(/\b(del|deleteFile|dropFresh|deleteOrSweep)\(/);
       if (!call || call.index === undefined || /^\s*(\/\/|\*)/.test(line) || /^\s*const dropFresh/.test(line)) return;
@@ -200,6 +200,7 @@ async function main(): Promise<void> {
     "link-image dropFresh(path)": "only a path this request took from the picture door",
     "link-image dropFresh(image.path)": "only a path this request took from the picture door",
     'link-image deleteOrSweep(result.removed.path, "a replaced link picture")': "the link's own picture the new one replaced, after the record that replaced it was written; attach admits only a fresh or own name",
+    "ai-file deleteFile(pathname)": "only the PDF this request just drew and wrote under a fresh random name (lib/ai-file.ts saveAiFile), when it could not be kept on the draft; never a name the browser sent",
     'course deleteOrSweep(files, "handed-in work")': "handed-in work of a removed assignment, read from its own records",
     'course deleteOrSweep(file.pathname, "a lesson file")': "lesson files the course no longer holds, after it was written",
     "course/task deleteFile(path, \"site_cleanup\")": "a student's upload taken once through the door (takeTaskUpload)",

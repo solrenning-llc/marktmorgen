@@ -79,7 +79,7 @@ const expired = (table: readonly EuVatRate[], today: Date) => table === EU_VAT_R
 export const euVatRatesExpired = (table: readonly EuVatRate[] = EU_VAT_RATES, today = new Date()): boolean => expired(table, today);
 
 /** The highest standard rate any Member State may set is far below this; anything above is a typing error. */
-const MAX_BASIS_POINTS = 3500;
+export const MAX_BASIS_POINTS = 3500;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const realDay = (value: string) => {
   if (!DAY.test(value)) return false;

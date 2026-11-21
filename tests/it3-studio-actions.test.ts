@@ -96,7 +96,10 @@ for (const action of STUDIO_ACTIONS.filter((entry) => entry.anchor)) {
   }
   is(`${action.id}: #${action.anchor} is drawn (${where})`, at >= 0, true);
   if (at < 0) continue;
-  is(`${action.id}: drawn under ${action.permission === "member" ? "no condition" : `may("${action.permission}") alone`}`, gateAt(at), action.permission === "member" ? null : `may("${action.permission}")`);
+  // The plan's section (onPlanPage) is drawn only where billing is set up too, the same condition as the context's
+  // planHref (lib/studio-actions-offered.ts), which available() reads before offering it (Codex T on #3525).
+  const gate = action.permission === "member" ? null : action.onPlanPage ? `billingReady && may("${action.permission}")` : `may("${action.permission}")`;
+  is(`${action.id}: drawn under ${gate === null ? "no condition" : gate === `may("${action.permission}")` ? `${gate} alone` : gate}`, gateAt(at), gate);
 }
 
 part("the list reads well");

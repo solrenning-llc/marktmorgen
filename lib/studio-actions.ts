@@ -28,7 +28,9 @@
  * permission its own screen asks studioView for
  * (tests/it3-studio-actions.test.ts reads both). An action on the studio
  * home names the section it scrolls to, and that section is drawn for every
- * role with the action's permission, under that permission alone.
+ * role with the action's permission, under that permission alone; the plan's
+ * section (onPlanPage) also needs billing to be set up, as the context's
+ * planHref says.
  */
 import type { Permission } from "@/lib/team-roles";
 
@@ -49,6 +51,11 @@ export type StudioAction = {
   segment: string;
   /** On the studio home: the id of the section it scrolls to. */
   anchor?: string;
+  /**
+   * Drawn only where the plan page is (the studio home's #billing: billingReady && may("billing"), the context's
+   * planHref), so the action is offered only to someone who can use it (Codex T on #3525).
+   */
+  onPlanPage?: true;
   /** What the role needs: the screen's own studioView(...) permission; "member" is anyone on the store. */
   permission: Permission | "member";
   /** Other words people type for it. */
@@ -63,6 +70,7 @@ export const STUDIO_ACTIONS: readonly StudioAction[] = [
   { id: "stripe", title: "Connect or check your Stripe account", segment: "", anchor: "stripe", permission: "payments", words: ["stripe", "payout", "bank", "get paid", "money", "balance", "connect payments"] },
   { id: "ways-to-pay", title: "Choose the ways buyers can pay", segment: "", anchor: "ways-to-pay", permission: "settings", words: ["payment methods", "apple pay", "google pay", "card", "wallet", "ways to pay", "checkout"] },
   { id: "sale", title: "Put the whole store on sale", segment: "", anchor: "sale-title", permission: "settings", words: ["sale", "discount", "promotion", "promo", "percent off", "markdown", "black friday"] },
+  { id: "plan", title: "Change or cancel your Marktmorgen plan", segment: "", anchor: "billing", onPlanPage: true, permission: "billing", words: ["plan", "change plan", "cancel plan", "cancel subscription", "subscription", "upgrade", "downgrade", "switch plan", "billing"] },
   { id: "account", title: "Change how you sign in", segment: "", anchor: "account", permission: "member", words: ["sign in", "login", "log in", "passkey", "two step", "security", "password", "email address", "account"] },
   // Screens of their own.
   { id: "add", title: "Add a tool to your store", segment: "add", permission: "member", words: ["add", "modules", "features", "apps", "tools", "gallery"] },

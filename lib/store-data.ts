@@ -334,6 +334,16 @@ export async function noteData(store: DataStore, changes: DataChange[], now = Da
 }
 
 /**
+ * noteData that says whether the count was confirmed: true only when TAKE_DATA answered an exact receipt that it took
+ * the change (dataTakenOf). A lost, malformed or refused receipt is false, never "counted", so a caller that removes its
+ * own record of a size (lib/data-recount.ts, applySums) keeps it until the room confirms it (CX-123 rule 24; the HOLD of
+ * Codex Y on #2501, proof 102a47d531). Same one EVAL as noteData.
+ */
+export async function noteDataConfirmed(store: DataStore, changes: DataChange[], now = Date.now()): Promise<boolean> {
+  return (await run(store, changes, "count", now / 1000)).ok;
+}
+
+/**
  * The store's beside pool (lib/store-data-rules.ts, BESIDE_POOL_BYTES): the same TAKE_DATA count as its room, under
  * a key of its own, a slot "b:<product>" a product whose share it holds.
  */

@@ -89,7 +89,7 @@ export function ReportForm({ url: given }: { url: string }) {
       </fieldset>
       <div>
         <label htmlFor="report-url" className="field-label">The page on Marktmorgen</label>
-        <UrlField id="report-url" value={fields.url} onChange={(url) => setFields({ ...fields, url })} check={REPORT_URL_CHECK} describedBy="report-url-help" placeholder="https://marktmorgen.com/@store/p/…" className={field} />
+        <UrlField id="report-url" value={fields.url} onChange={(url) => setFields({ ...fields, url })} check={REPORT_URL_CHECK} describedBy="report-url-help" placeholder="https://marktmorgen.com/@harborkitchen" className={field} />
         <p id="report-url-help" className="mt-1 text-sm text-ink-soft">The store page or the product page, and in what you write below, which part of it.</p>
       </div>
       <div>

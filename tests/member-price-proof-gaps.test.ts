@@ -15,7 +15,7 @@
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
-import { memberPriceFor } from "@/lib/member-price";
+import { memberPriceFor, sessionDecidable } from "@/lib/member-price";
 import { addProduct, claimHandle, ensureStatsId, setMemberPrices, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { mintPass, passCookieName } from "@/lib/learn";
@@ -140,6 +140,11 @@ async function main(): Promise<void> {
     rows = [joined(club.product.id), bought(pi)];
     is(`club member, the guide's row with ${label}: unknown (the 30% may rest on it), not 20%`, await memberPriceFor(store, product, proved), { state: "unknown" });
   }
+  // JSON.parse turns 1e400 into Infinity, which a page fetched from Stripe could carry; the row is undecidable too.
+  const decidable = (amount: unknown) => sessionDecidable(bought({ ...kept, latest_charge: { ...kept.latest_charge, amount_refunded: amount } }));
+  is("an amount refunded that is not a whole number of cents from zero up is undecidable (Infinity, NaN, -1, 0.5, 2^53)",
+    [decidable(Infinity), decidable(Number.NaN), decidable(-1), decidable(0.5), decidable(2 ** 53)], [false, false, false, false, false]);
+  is("control: zero and a whole amount refunded are decidable", [decidable(0), decidable(1200)], [true, true]);
   rows = [{ ...joined(club.product.id), subscription: "sub_C1Member0001" }];
   is("the club's row with its subscription not expanded: unknown, not none", await memberPriceFor(store, product, proved), { state: "unknown" });
   // Codex U on #2999 (U-20261117-0045): a subscription in part. Its tier (items, metadata) and its pause decide whether

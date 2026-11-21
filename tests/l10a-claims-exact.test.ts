@@ -198,7 +198,7 @@ async function storeAlerts(): Promise<void> {
   });
   const fresh = async () => {
     const store = await storeAlertsAndSales();
-    await setSalesGoal(store.statsId!, 50_000, "usd");
+    await setSalesGoal(store, 50_000, "usd");
     sessions = [paid("cs_test_ltenalert00001")];
     emails.length = 0;
     posted.length = 0;

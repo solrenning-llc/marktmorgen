@@ -34,9 +34,12 @@ is("its only triggers are issue_comment (created) and workflow_dispatch", [event
 is("the manual run offers dry-run and run, dry-run by default",
   /\n {6}mode:\n(?: {8}.*\n)*? {8}options: \[dry-run, run\]\n {8}default: dry-run\n/.test(onBlock), true);
 const condition = /\n {4}if: \$\{\{ (.+) \}\}\n/.exec(workflow)?.[1] ?? "";
-is("the job runs by hand, or on a comment on an issue (never a pull request) labeled canal-ativo: at the rollover count when the variable is on, at any count when it is dry-run",
-  condition, `github.event_name == 'workflow_dispatch' || (!github.event.issue.pull_request && contains(github.event.issue.labels.*.name, '${LABEL}') && ` +
-  `((vars.COORDINATION_ROLLOVER == 'on' && github.event.issue.comments >= ${ROLL_AT}) || vars.COORDINATION_ROLLOVER == 'dry-run'))`);
+is("the job runs by hand, or on a comment on an issue (never a pull request) labeled canal-ativo (at the rollover count when the variable is on, at any count when it is dry-run), " +
+  "or on a comment on a coordination part caught mid-rollover (its pending pointer), so a run that died between the two label calls is finished by the next comment",
+  condition, `github.event_name == 'workflow_dispatch' || (!github.event.issue.pull_request && (vars.COORDINATION_ROLLOVER == 'on' || vars.COORDINATION_ROLLOVER == 'dry-run') && ` +
+  `((contains(github.event.issue.labels.*.name, '${LABEL}') && (vars.COORDINATION_ROLLOVER == 'dry-run' || github.event.issue.comments >= ${ROLL_AT})) || ` +
+  `(startsWith(github.event.issue.title, 'Agent coordination') && contains(github.event.issue.body, '(opening: keep writing here until the label'))))`);
+is("the pending pointer the condition looks for is exactly the one the script writes", pointerLine(5000, true).includes("(opening: keep writing here until the label"), true);
 // GitHub evaluates the condition itself; the same sub-expressions reach the script as values, which a dry run prints.
 is("the values GitHub evaluates for the condition, and the switch, reach the script through env, never a shell line", [
   /\n {10}MODE: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.mode \|\| vars\.COORDINATION_ROLLOVER \}\}\n/.test(workflow),
@@ -155,7 +158,7 @@ const member = { author_association: "MEMBER", user: { login: "owner" } };
 const agentLine = "\n- an agent's line added during the rollover";
 type Options = { comments?: number; extraLabeled?: boolean; noLabeled?: boolean; existingNext?: string; outsiderNext?: boolean; outsiderMarker?: boolean;
   panel?: string; panelGone?: boolean; agentEditAtPanelRead?: number; agentEditAfterPatch?: boolean; failAdd?: boolean; failBack?: boolean;
-  filler?: number; activeBody?: string; deleteApplied404?: boolean; repeatPart?: boolean };
+  filler?: number; activeBody?: string; deleteApplied404?: boolean; repeatPart?: boolean; dieAfterDelete?: boolean };
 function github(options: Options = {}) {
   const calls: Call[] = [];
   const issue = (number: number, title: string, body: string, comments: number, extra: Partial<Issue> = {}): Issue =>
@@ -177,6 +180,8 @@ function github(options: Options = {}) {
   for (let n = 0; n < (options.filler ?? 0); n += 1) issues.push(issue(6000 + n, "Other " + n, "", 0));
   let panel = options.panel ?? REAL_PANEL;
   let panelReads = 0;
+  // The job killed right after a successful label DELETE (cancelled, timed out, runner lost): nothing after it happens.
+  let dead = false;
   const pageOf = <T,>(items: T[], path: string) => { const page = Number(/[?&]page=(\d+)/.exec(path)?.[1] ?? "1"); return items.slice((page - 1) * 100, page * 100); };
   // An issue's comments, oldest first: agents' comments (placeholders), with each posted one at the position it was posted.
   const thread = (i: Issue) => {
@@ -222,6 +227,12 @@ function github(options: Options = {}) {
     const labels = /^issues\/(\d+)\/labels$/.exec(path);
     if (method === "GET" && labels) return find(labels[1]).labels;
     const del = /^issues\/(\d+)\/labels\/(.+)$/.exec(path);
+    if (dead) throw new Error("the process is gone: no call after the label DELETE ever reaches GitHub");
+    if (method === "DELETE" && del && options.dieAfterDelete) {
+      const i = issues.find((x) => x.number === Number(del[1]))!; i.labels = i.labels.filter((l) => l.name !== del[2]);
+      dead = true;
+      return [];
+    }
     if (method === "DELETE" && del) {
       const i = find(del[1]);
       const had = i.labels.some((l) => l.name === del[2]);
@@ -433,6 +444,61 @@ async function wholeRuns() {
   }
 }
 
+async function hardStops() {
+  part("a run killed between the two label calls (Codex N1/X6): the next run finishes it");
+  const gh = github({ comments: ROLL_AT, dieAfterDelete: true });
+  await fails(gh);
+  is("the killed run left no issue with the label, and the old part saying 'keep writing here' about part 8",
+    [labeled(gh.issues), gh.issues.find((i) => i.number === 4932)!.body!.startsWith(pointerLine(5000, true))], [[], true]);
+  for (const [how, event] of [
+    ["the next comment on the old part (the event names it)", { issue: "4932", labeled: "false", pullRequest: "false", count: "2251", atRoll: "true" }],
+    ["a manual run (no event: it finds the part mid-rollover itself)", null],
+  ] as const) {
+    const fresh = github({ comments: ROLL_AT });
+    fresh.issues.splice(0, fresh.issues.length, ...gh.issues.map((i) => ({ ...i, labels: [...i.labels], posted: [...i.posted] })));
+    const result = await rollover({ api: fresh.api, now: NOW, log: quiet, event });
+    is(`${how}: exactly one label, on part 8; no second part; no second first comment; the old part's final line`,
+      [result.action, labeled(fresh.issues), parts8(fresh.issues), botPosts(fresh.issues, 5000, FIRST).length,
+        fresh.issues.find((i) => i.number === 4932)!.body, fresh.calls.some((c) => c.method === "POST" && c.path === "issues")],
+      ["rolled", [5000], [5000], 1, pointerLine(5000) + "\n\nContinuation of #4858.", false]);
+  }
+  {
+    const fresh = github({ comments: ROLL_AT, noLabeled: true, activeBody: pointerLine(5000, true) + "\n\nContinuation of #4858." });
+    fresh.issues.find((i) => i.number === 4932)!.author_association = "NONE";
+    fresh.issues.find((i) => i.number === 4932)!.user = { login: "stranger" };
+    const error = await fails(fresh);
+    is("a part mid-rollover opened by an outside account is never taken for one: the run fails and writes nothing", [error.includes("exactly one issue"), writesOf(fresh.calls).length], [true, 0]);
+  }
+}
+
+async function killedAnywhere() {
+  part("a run killed after any call of a rollover: the next comment's run (or a manual run) finishes it");
+  const clean = github({ comments: ROLL_AT });
+  let total = 0;
+  await rollover({ api: async (m, p, b) => { total += 1; return clean.api(m, p, b); }, now: NOW, log: quiet });
+  const broken: string[] = [];
+  for (let k = 1; k <= total; k += 1) {
+    const gh = github({ comments: ROLL_AT });
+    let calls = 0;
+    // The job is killed right after its k-th call reached GitHub: nothing after it happens, not even a catch.
+    const dying: Api = async (m, p, b) => { if (calls >= k) throw new Error("killed"); calls += 1; return gh.api(m, p, b); };
+    try { await rollover({ api: dying, now: NOW, log: quiet }); } catch { /* killed */ }
+    if (labeled(gh.issues).length > 1) broken.push(`killed after call ${k}: two labeled issues`);
+    const event = { issue: "4932", labeled: String(labeled(gh.issues).includes(4932)), pullRequest: "false", count: String(ROLL_AT + 1), atRoll: "true" };
+    for (let run = 0; run < 3; run += 1) {
+      try { await rollover({ api: gh.api, now: NOW, log: quiet, event }); } catch (error) { broken.push(`killed after call ${k}, run ${run}: ${String(error).slice(0, 120)}`); }
+    }
+    const p8 = parts8(gh.issues);
+    if (p8.length !== 1 || labeled(gh.issues).join() !== String(p8[0]) || botPosts(gh.issues, p8[0], FIRST).length !== 1 ||
+      !firstLine(gh.panel()).includes(`#${p8[0]} `) || !restBytes(gh.panel()).equals(restBytes(REAL_PANEL)) ||
+      gh.issues.find((i) => i.number === 4932)!.body !== pointerLine(p8[0]) + "\n\nContinuation of #4858.") {
+      broken.push(`killed after call ${k}: not finished (labeled ${labeled(gh.issues)}, parts ${p8})`);
+    }
+  }
+  is(`killed after each of the ${total} calls of a rollover: never two labeled issues, and the next runs finish it with one part, one first comment, the PAINEL and the final pointer`,
+    broken, []);
+}
+
 async function dryRuns() {
   part("the manual dry run: reads, prints what it would do, never writes");
   for (const count of [100, ROLL_AT, 2499]) {
@@ -571,5 +637,5 @@ function agentsRule() {
   is("no rule defines the channel as the newest open part, or by a fixed number", [/mais nova[^.]{0,40}(parte|part|aberta)/i.test(agents), /hoje (o|a) #\d+/.test(agents)], [false, false]);
 }
 
-wholeRuns().then(dryRuns).then(serverErrors).then(() => { agentsRule(); done(); },
+wholeRuns().then(hardStops).then(killedAnywhere).then(dryRuns).then(serverErrors).then(() => { agentsRule(); done(); },
   (error) => { console.log("  FAIL  the whole run threw: " + String(error)); process.exitCode = 1; });

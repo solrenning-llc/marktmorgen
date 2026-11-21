@@ -15,6 +15,9 @@
 #   - "dry-run": every comment on the labeled issue runs that dry run and prints the values GitHub evaluated for the
 #     job's condition (labeled, pull request, comment count, at or above 2,250);
 #   - "on": a comment on the labeled issue at 2,250 comments or more rolls the channel over.
+# A run killed between its two label calls leaves no labeled issue (Codex N1/X6); the part it was leaving still starts
+# with the pending pointer ("opening: keep writing here until the label ..."), so the next comment there also runs the job,
+# and the script finishes that rollover from it (a manual run finds it too).
 # Every other comment skips the job, which costs no runner minute (standard runners are free in public repositories);
 # a skipped run still shows in the Actions list. The text of the triggering comment is never read. Not a required check
 # and not part of CI: it has no final check (tests/coordination-rollover.test.ts).
@@ -35,7 +38,7 @@ permissions:
 jobs:
   rollover:
     name: Coordination rollover
-    if: ${{ github.event_name == 'workflow_dispatch' || (!github.event.issue.pull_request && contains(github.event.issue.labels.*.name, 'canal-ativo') && ((vars.COORDINATION_ROLLOVER == 'on' && github.event.issue.comments >= 2250) || vars.COORDINATION_ROLLOVER == 'dry-run')) }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (!github.event.issue.pull_request && (vars.COORDINATION_ROLLOVER == 'on' || vars.COORDINATION_ROLLOVER == 'dry-run') && ((contains(github.event.issue.labels.*.name, 'canal-ativo') && (vars.COORDINATION_ROLLOVER == 'dry-run' || github.event.issue.comments >= 2250)) || (startsWith(github.event.issue.title, 'Agent coordination') && contains(github.event.issue.body, '(opening: keep writing here until the label')))) }}
     # On the job, not the workflow: a run whose job is skipped (every other comment in the repository) never enters the
     # group, so it can never replace a pending run that would roll the channel over.
     concurrency:

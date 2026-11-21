@@ -238,6 +238,25 @@ async function putPointer(api, number, next, pending) {
   }
 }
 
+/** A coordination part opened from inside the repository whose body starts with the pending pointer: left mid-rollover. */
+const pendingPart = (i) => Boolean(i) && !i.pull_request && i.state === "open" && partOf(i.title) !== null && trusted(i) &&
+  POINTER.test(String(i.body ?? "")) && String(i.body).startsWith(pointerLine(pointedTo(i.body), true));
+
+/**
+ * The part left mid-rollover: the issue of the comment that started this run when it is one, or else the one open part
+ * whose body starts with the pending pointer. More than one is never guessed.
+ */
+async function midRollover(api, eventIssue) {
+  if (/^\d+$/.test(String(eventIssue ?? ""))) {
+    const issue = await api("GET", `issues/${eventIssue}`);
+    if (pendingPart(issue)) return issue;
+  }
+  const found = [...new Map((await all(api, "issues?state=open&sort=created&direction=desc", "open issue listing"))
+    .filter(pendingPart).map((i) => [i.number, i])).values()];
+  if (found.length > 1) throw new Error(`no issue has the label ${LABEL} and more than one part is mid-rollover: ${found.map((i) => "#" + i.number).join(", ")}`);
+  return found[0] ?? null;
+}
+
 /**
  * After a rollover whose very last write (the final pointer line) failed, a manual run finishes it: the previous part
  * still says "opening: keep writing here" about the part that now has the label. Returns that part's number, or null.
@@ -310,8 +329,19 @@ async function editPanel(api, next, part, now, comments) {
  *   event?: null | { issue?: string, labeled?: string, pullRequest?: string, count?: string, atRoll?: string } }} options
  */
 export async function rollover({ api, now, log = console.log, dryRun = false, event = null }) {
-  const labeled = list(await api("GET", `issues?labels=${LABEL}&state=all&per_page=100`), "labeled issue listing")
+  let labeled = list(await api("GET", `issues?labels=${LABEL}&state=all&per_page=100`), "labeled issue listing")
     .filter((i) => !i?.pull_request);
+  // No issue with the label: a run was killed between the two label calls (Codex N1/X6). The part it was leaving still
+  // carries the pending pointer, so the rollover is finished from that part, as if it still had the label.
+  let resumed = false;
+  if (labeled.length === 0) {
+    const stuck = await midRollover(api, event?.issue);
+    if (stuck) {
+      log(`no issue has the label ${LABEL}; #${stuck.number} was left mid-rollover, finishing it`);
+      labeled = [stuck];
+      resumed = true;
+    }
+  }
   if (labeled.length !== 1) throw new Error(`exactly one issue must have the label ${LABEL}; found ${labeled.length}: ${labeled.map((i) => "#" + i?.number).join(", ")}. ` +
     "Fix the label by hand, then run the workflow by hand (Actions, Coordination rollover, Run workflow).");
   const active = labeled[0];
@@ -323,7 +353,7 @@ export async function rollover({ api, now, log = console.log, dryRun = false, ev
     log(`GitHub evaluated for this event: issue #${event.issue}, labeled ${LABEL}: ${event.labeled}, pull request: ${event.pullRequest}, ` +
       `comments: ${event.count}, at or above ${ROLL_AT}: ${event.atRoll}`);
   }
-  const atRoll = active.comments >= ROLL_AT;
+  const atRoll = active.comments >= ROLL_AT || resumed;
   if (!atRoll && !dryRun) {
     // Below the count there is no rollover to do; a manual run in mode run finishes what the last one could not.
     const finished = await finishPointer(api, active);

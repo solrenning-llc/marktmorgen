@@ -1,6 +1,7 @@
 /** #3988: real preview reader must reject a valid course record returned under a different course's key. */
 import { emptyCourse, readCourse, saveCourse } from "@/lib/course";
 import { readPageFacts } from "@/lib/page-facts-read";
+import { FINISHED_FACT_READY } from "@/lib/sales-page";
 import type { Listing, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
@@ -33,7 +34,9 @@ async function main() {
   const product = { id: "p", course: { id: a.id, lessons: 1 }, bundle: null } as unknown as Listing;
   try {
     const result = await readPageFacts(store, product);
-    is("mismatched identity is unread and no certificate counter is queried", [result.facts.finished, result.factsUnread.includes("finished"), counts], [undefined, true, []]);
+    // Off (FINISHED_FACT_READY false, Claude 6 review of #3988): nothing is read, so nothing is unread; once on, the
+    // mismatched record is unread. Either way no certificate counter is queried.
+    is("mismatched identity is unread once the count is on, and no certificate counter is queried", [result.facts.finished, result.factsUnread.includes("finished"), counts], [undefined, FINISHED_FACT_READY, []]);
   } finally { redis.pipeline = real; }
 }
 main().then(done, (error) => { console.error(error); process.exit(1); });

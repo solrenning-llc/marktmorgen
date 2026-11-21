@@ -57,7 +57,7 @@ import { isHouseStore } from "@/lib/house-store";
 import { sellsInTestMode } from "@/lib/stripe-connect";
 import { DemoNote } from "@/components/demo-notes";
 import { SITE_URL } from "@/lib/site-url";
-import { EMPTY_PAGE, type SalesPage, asVersion, livePage, runningTest, declaredMeasure } from "@/lib/sales-page";
+import { EMPTY_PAGE, FINISHED_FACT_READY, type SalesPage, asVersion, livePage, runningTest, declaredMeasure } from "@/lib/sales-page";
 import { readPage } from "@/lib/sales-page-store";
 import { type Summary, REVIEWS_ON_PAGE, average, showsRating, summaryOf, visibleReviews } from "@/lib/reviews";
 import { BuyBox, GiftBox, GroupBox, PriceTag, ProductFacts, RemindBox, pageAction, productPath, saleNow } from "@/components/store-product";
@@ -394,7 +394,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // How many earned the course's certificate (93 [D2-VERIFIED-SOCIAL]): one HLEN, read only when a "By the numbers"
   // block of this page asks for it and the course gives a certificate now (a course that no longer does would seem to
   // promise one); a read that fails says nothing (lib/certificate.ts, earnedCount).
-  const finished = product.course && certificateOn && page.blocks.some((block) => block.kind === "facts" && block.show.includes("finished"))
+  const finished = FINISHED_FACT_READY && product.course && certificateOn && page.blocks.some((block) => block.kind === "facts" && block.show.includes("finished"))
     ? await earnedCount(product.course.id).catch(() => null)
     : null;
   if (store.look.sold && stale(soldCounts)) after(() => refreshSoldCounts(store, readAllTimeSales).then(() => undefined));

@@ -9,7 +9,7 @@
  * factsUnread, so the editor and the coach say it could not be read just now instead of "not shown yet".
  */
 import type { Listing, Store } from "@/lib/store";
-import type { FactKey } from "@/lib/sales-page";
+import { FINISHED_FACT_READY, type FactKey } from "@/lib/sales-page";
 import { summaryOf } from "@/lib/reviews";
 import { SHOWN_FROM, readSoldCounts } from "@/lib/sold-count";
 import { offeredItems } from "@/lib/bundles";
@@ -33,7 +33,8 @@ export async function readPageFacts(store: Store, product: Listing): Promise<Rea
     readSoldCounts(store).catch(() => UNREAD),
     product.bundle ? offeredItems(store, [product]).then((m) => m.get(product.id) ?? []).catch(() => UNREAD) : Promise.resolve(null),
     // How many earned the course's certificate (93 [D2-VERIFIED-SOCIAL]), for a course that gives one now only.
-    courseId
+    // Off until an exact reader exists (FINISHED_FACT_READY): no read, so never "unread" (Claude 6, MÉDIO 1, #3988).
+    courseId && FINISHED_FACT_READY
       ? readCourseExact(courseId).then((course) => (course?.certificate === true ? earnedCount(courseId) : null)).catch(() => UNREAD)
       : Promise.resolve(null),
   ]);

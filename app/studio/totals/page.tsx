@@ -5,12 +5,13 @@ import { redirect } from "next/navigation";
 import { countStudio, studioPath, studioView } from "@/lib/studio-route";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { can } from "@/lib/team-roles";
-import { readNumbers } from "@/lib/stats-report";
-import { membershipNumbers } from "@/lib/membership-numbers";
+import { ReadingsUsed, keptMembers, keptNumbers, readingsBackAt } from "@/lib/store-readings";
+import { UtcAndLocal } from "@/components/local-clock";
 import { formatMoney } from "@/lib/money";
-import { LEFT_WORDS, type Money, type StoreFigures, type StoreRead, TOTAL_WINDOWS, sumStores } from "@/lib/account-totals";
+import { LEFT_WORDS, type StoreFigures, type StoreRead, TOTAL_WINDOWS, memberLines, membersOf, moneyWords, sumStores } from "@/lib/account-totals";
 import type { Store } from "@/lib/store";
 
 export const metadata: Metadata = {
@@ -22,9 +23,16 @@ type Params = { searchParams: Promise<{ [key: string]: string | string[] | undef
 
 const WINDOW_NAMES = { d7: "Last 7 days", d30: "Last 30 days", d90: "Last 90 days" } as const;
 const count = (n: number) => n.toLocaleString("en-US");
-const moneyLines = (lines: Money[]) => (lines.length ? lines.map((m) => formatMoney(m.cents, m.currency)).join(" + ") : formatMoney(0, "USD"));
 
-/** One store's figures, read the way its own studio reads them, inside its own allowance. */
+/**
+ * One store's figures, read the way its own studio reads them, inside its own
+ * allowance: a page of each other store's studio (STUDIO_PAGE_UNITS, as the
+ * Terms say; this page's own store was counted by studioView). Its visits,
+ * sales, renewals, refunds, disputes and memberships come from its kept
+ * readings, read again from its counts and its Stripe account only from the
+ * store's own daily budget (lib/store-readings.ts; owner's decision of 4
+ * November 2026, inbox C4-18), never more of the studio's requests.
+ */
 async function readStore(store: Store, mayRead: boolean, alreadyCounted: boolean): Promise<StoreRead> {
   if (!mayRead) return { state: "no_access" };
   if (!alreadyCounted) {
@@ -33,9 +41,12 @@ async function readStore(store: Store, mayRead: boolean, alreadyCounted: boolean
     if (!counted.ok) return { state: "paused" };
   }
   try {
-    const [data, club] = await Promise.all([readNumbers(store), membershipNumbers(store).catch(() => null)]);
-    return { state: "ok", data, members: club ? { currency: club.currency, paying: club.paying, trialing: club.trialing, mrr: club.mrr } : null };
+    // Members that could not be read stay "unread" and are named on the page, never added in as none (sweep app5, finding 3).
+    const [data, members] = await Promise.all([keptNumbers(store), membersOf(keptMembers(store))]);
+    return { state: "ok", data, members };
   } catch (error) {
+    // Said as what it is: read as often as the day allows, never as an error or as no numbers (inbox C4-33).
+    if (error instanceof ReadingsUsed) return { state: "used" };
     console.error("reading one store's numbers for the totals failed", error);
     return { state: "error" };
   }
@@ -67,13 +78,14 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
       )
     : [];
   const totals = sumStores(figures);
+  const members = memberLines(totals);
 
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink">
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Numbers</p>
+          <StudioTrail store={store} here="Numbers" />
           <h1 className="t-h2 mt-3">All your stores</h1>
           {!several ? (
             <p className="mt-3 max-w-2xl text-ink-soft">
@@ -92,10 +104,10 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
               ) : null}
               {!totals.salesWhole ? (
                 <p className="notice notice-info mt-4" role="status">
-                  Some sales could not be read in full just now, so the sales and money below may be lower than they are. Reload the page in a moment.
+                  Some sales could not be read in full, so the sales and money below may be lower than they are. Each store&apos;s studio home says when its numbers were last read and when they are read again.
                 </p>
               ) : null}
-              <section aria-labelledby="sums-title" className="card mt-6 overflow-x-auto p-6 sm:p-8">
+              <section aria-labelledby="sums-title" className="card mt-6 overflow-x-auto p-6 sm:p-8" tabIndex={0}>
                 <h2 id="sums-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Visits and sales</h2>
                 <table className="mt-4 w-full text-sm">
                   <caption className="sr-only">Visitors, checkouts started, sales and money from sales, for all your stores added up</caption>
@@ -115,7 +127,7 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
                         <td className="py-2.5 pr-4 text-right tabular-nums">{count(totals.windows[w].visitors)}</td>
                         <td className="py-2.5 pr-4 text-right tabular-nums">{count(totals.windows[w].checkouts)}</td>
                         <td className="py-2.5 pr-4 text-right tabular-nums">{count(totals.windows[w].sales)}</td>
-                        <td className="py-2.5 text-right tabular-nums">{moneyLines(totals.windows[w].revenue)}</td>
+                        <td className="py-2.5 text-right tabular-nums">{moneyWords(totals.windows[w].revenue)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -123,18 +135,21 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
               </section>
               <section aria-labelledby="members-title" className="card mt-6 p-6 sm:p-8">
                 <h2 id="members-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Members</h2>
+                {members.note ? (
+                  <p className="notice notice-info mt-4" role="status">{members.note}</p>
+                ) : null}
                 <dl className="mt-4 grid gap-4 sm:grid-cols-3">
                   <div>
                     <dt className="text-sm text-ink-soft">Paying members</dt>
-                    <dd className="mt-1 text-2xl font-semibold tabular-nums">{count(totals.members.paying)}</dd>
+                    <dd className="mt-1 text-2xl font-semibold tabular-nums">{members.paying}</dd>
                   </div>
                   <div>
                     <dt className="text-sm text-ink-soft">On a free trial</dt>
-                    <dd className="mt-1 text-2xl font-semibold tabular-nums">{count(totals.members.trialing)}</dd>
+                    <dd className="mt-1 text-2xl font-semibold tabular-nums">{members.trialing}</dd>
                   </div>
                   <div>
                     <dt className="text-sm text-ink-soft">Monthly recurring revenue</dt>
-                    <dd className="mt-1 text-2xl font-semibold tabular-nums">{moneyLines(totals.members.mrr)}</dd>
+                    <dd className="mt-1 text-2xl font-semibold tabular-nums">{members.mrr}</dd>
                   </div>
                 </dl>
               </section>
@@ -150,7 +165,16 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
                       {f.read.state === "ok" && f.read.data ? (
                         <span className="tabular-nums text-ink-soft">{`${count(f.read.data.totals.d30.sales)} sales, ${formatMoney(f.read.data.totals.d30.cents, f.read.data.currency)} in the last 30 days`}</span>
                       ) : (
-                        <span className="text-ink-soft">{LEFT_WORDS[f.read.state === "ok" ? "no_numbers" : f.read.state]}</span>
+                        <span className="text-ink-soft">
+                          {f.read.state === "used" ? (
+                            <>
+                              {LEFT_WORDS.used.replace(/ 00:00 UTC$/, " ")}
+                              <UtcAndLocal ms={readingsBackAt()} />
+                            </>
+                          ) : (
+                            LEFT_WORDS[f.read.state === "ok" ? "no_numbers" : f.read.state]
+                          )}
+                        </span>
                       )}
                     </li>
                   ))}

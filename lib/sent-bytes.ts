@@ -25,7 +25,49 @@ export function sentBytes(json: string): number {
   return htmlBytes(json) + utf8(JSON.stringify(json).replace(/[<>&\u2028\u2029]/g, "\\u0000"));
 }
 
-/** Studio requests sending `bytes` costs beyond the page's own: none within PAGE_INCLUDED_BYTES, then one a megabyte. */
-export function sentUnits(bytes: number): number {
-  return bytes <= PAGE_INCLUDED_BYTES ? 0 : Math.ceil(bytes / STUDIO_UNIT_SENT_BYTES);
+/**
+ * The fifty kilobytes one studio request's own price moves (PAGE_INCLUDED_BYTES),
+ * spent once for the whole request (C3-112 (2)): a page that reads or sends
+ * several parts (the buyers page's agenda, its tasks, its reading of the
+ * buyers and what it sends on) makes one and hands it to each, so the included
+ * bytes are never counted once a part. A part that fits in what is left counts
+ * nothing beyond the request and spends that much; a part that does not fit
+ * counts, by itself, one studio request each `perUnit` bytes, every byte of it
+ * (exactly what it counted before alone), and leaves what is left to a later,
+ * smaller part. So no part counts less than it did alone, and all the parts of
+ * a request move at most PAGE_INCLUDED_BYTES without a request of their own.
+ * Asked before each part is read or sent; an unknown size is never none.
+ */
+export class IncludedBytes {
+  #left = PAGE_INCLUDED_BYTES;
+
+  /** Bytes still within the request's own price. */
+  get left(): number {
+    return this.#left;
+  }
+
+  /**
+   * Studio requests `bytes` costs beyond the request's own, at one each
+   * `perUnit` bytes past what is left; and how many bytes those (or the
+   * included bytes it spent) cover, which is as far as the part may be read.
+   */
+  take(bytes: number, perUnit: number): { units: number; covers: number } {
+    if (!Number.isSafeInteger(bytes) || bytes < 0) throw new RangeError(`unknown size: ${bytes}`);
+    if (!Number.isSafeInteger(perUnit) || perUnit <= 0) throw new RangeError(`unknown rate: ${perUnit}`);
+    if (bytes <= this.#left) {
+      this.#left -= bytes;
+      return { units: 0, covers: bytes };
+    }
+    const units = Math.ceil(bytes / perUnit);
+    return { units, covers: units * perUnit };
+  }
+}
+
+/**
+ * Studio requests sending `bytes` costs beyond the request's own: none within
+ * what is left of its included bytes (`included`, one per request; a fresh one
+ * when the sending is the request's only part), then one a megabyte.
+ */
+export function sentUnits(bytes: number, included: IncludedBytes = new IncludedBytes()): number {
+  return included.take(bytes, STUDIO_UNIT_SENT_BYTES).units;
 }

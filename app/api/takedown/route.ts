@@ -1,15 +1,26 @@
 import type { NextRequest } from "next/server";
+import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
-import { type TakedownAction, openReport, takeDown } from "@/lib/takedown";
+import { isOperator } from "@/lib/search-console";
+import { type TakedownAction, TakedownNoticeUnsent, openReport, sendOwedNotice, takeDown } from "@/lib/takedown";
 
 /**
  * Acts on a notice (app/takedown/[token]): `{ token, action }`, where the
  * token is the one in the email the notice was sent in. Only the store the
- * notice is about can be touched with it.
+ * notice is about can be touched with it. With `owed: true` (the page's
+ * "Send the email to the creator") it only sends the notice still owed, in
+ * its kept words, and never takes anything down, even content up again; a
+ * takedown never confirmed as landed, whose content is up, answers 409
+ * "unconfirmed" and sends nothing.
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
+  // The token travels in a support email that replies to the reporter, so holding it proves nothing (#4036): only
+  // the operator's session acts, and anybody else is answered exactly as an unknown token is. With no operator
+  // configured (DEMO_STUDIO_ADMIN), nobody acts: closed, never open.
+  const email = await emailForSession(request.cookies.get(SESSION_COOKIE)?.value ?? "").catch(() => null);
+  if (!isOperator(email)) return Response.json({ ok: false, error: "gone" }, { status: 404 });
   let body: Record<string, unknown>;
   try {
     const raw: unknown = await (await limited(request, 4_000)).json();
@@ -32,11 +43,24 @@ export async function POST(request: NextRequest) {
     : raw.type === "store" ? { type: "store", on: raw.on === true }
     : null;
   if (!action) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+  const owed = body.owed === true;
+  if (owed && action.type === "store" && !action.on) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   try {
+    if (owed) {
+      const sent = await sendOwedNotice(opened.report, opened.store, action, originFrom(request));
+      if (sent === "unconfirmed") return Response.json({ ok: false, error: "unconfirmed" }, { status: 409 });
+      if (!sent) return Response.json({ ok: false, error: "nothing" }, { status: 409 });
+      return Response.json({ ok: true, done: sent.done });
+    }
     const done = await takeDown(opened.report, opened.store, action, originFrom(request));
     if (!done) return Response.json({ ok: false, error: "nothing" }, { status: 409 });
     return Response.json({ ok: true, done });
   } catch (error) {
+    // Down, but the creator was not told: the operator presses again to send the notice (lib/takedown.ts).
+    if (error instanceof TakedownNoticeUnsent) {
+      console.error("the takedown notice to the creator was not sent");
+      return Response.json({ ok: false, error: "notice_unsent" }, { status: 500 });
+    }
     console.error("taking content down failed", error);
     return Response.json({ ok: false, error: "error" }, { status: 500 });
   }

@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
-import { type ApiKey, MAX_KEY_NAME, MAX_KEYS } from "@/lib/api-key-rules";
+import { MAKER_UNRECORDED, MAX_KEY_NAME, MAX_KEYS, pausedWords, type ShownKey, turnOnNote } from "@/lib/api-key-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
@@ -16,6 +16,16 @@ const MESSAGES: Record<string, string> = {
   signed_out: "Your session ended. Log in again.",
   role: "Only the store's owner and Admins can make a key that writes.",
   server_error: "Something went wrong on our side. Nothing was changed; try again in a moment.",
+  second_step:
+    "You logged in this time with the emailed link alone, and your account has a passkey or an authenticator app. Log in again with your passkey, or with the emailed link and your app's code, then make the key. Nothing was made.",
+  second_step_on:
+    "To turn a key back on, log in with a second step: your passkey, or the emailed link and your authenticator app's code. No second step yet? Add a passkey or turn on an app under Two-step login, then log in again with it.",
+  not_yours: "Only whoever made this key can turn it back on. You can revoke it instead.",
+  two_step_required: "This store's owner asks everyone on the team to log in with a second step. Log in again with your passkey, or with the emailed link and your app's code, then try again.",
+  not_paused: "That key is already on. Reload the page.",
+  whose: "Choose whose key it is: yours, or a person on the team.",
+  role_disallows: "That person's role does not allow such a key. Change their role first, choose someone else, or revoke the key.",
+  owner_only: "Only the store's owner can revoke a key made by someone no longer on the team.",
 };
 
 /** When, in the creator's own time zone: this runs in their browser. */
@@ -24,24 +34,32 @@ function when(seconds: number): string {
   return new Date(seconds * 1000).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+/** Said where the list of keys could not be read: never shown as no keys (audit SG2, finding 23). */
+export const KEYS_UNREAD = "We could not read your keys just now, so they are not listed here. Reload the page to try again.";
+
 /**
  * The keys a creator gives their own tools to read the store with.
  *
  * Shown in full once, when it is made, and never again: the studio keeps only
  * a fingerprint of it, so there is nothing here to show a second time and
- * nothing in the database for anybody to lift.
+ * nothing in the database for anybody to lift. "unread": the list could not
+ * be read, which is said as such, never as no keys.
  */
-export function ApiKeyEditor({ keys: first }: { keys: ApiKey[] }) {
-  const [keys, setKeys] = useState<ApiKey[]>(first);
+export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] | "unread" }) {
+  const [keys, setKeys] = useState<ShownKey[] | null>(first === "unread" ? null : first);
   const [name, setName] = useState("");
   const [write, setWrite] = useState(false);
-  const [made, setMade] = useState<{ key: string; name: string } | null>(null);
+  const [made, setMade] = useState<{ key: string; name: string; paused: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Revoking asks twice, in the page: a key revoked by a slip stops a
   // creator's automation, and there is no putting it back.
   const [revoking, setRevoking] = useState<string | null>(null);
+  // Turning a paused key back on asks once too, saying what it means (turnOnNote): it is not paused again by the rule.
+  const [turning, setTurning] = useState<string | null>(null);
+  // For a key that could not be linked to anyone, or nobody is recorded as making: whose the owner says it is, "owner" or a teammate's address.
+  const [whose, setWhose] = useState("");
 
   async function send(payload: Record<string, unknown>, which: string) {
     setBusy(which);
@@ -52,12 +70,13 @@ export function ApiKeyEditor({ keys: first }: { keys: ApiKey[] }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; key?: string; keys?: ApiKey[] };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; key?: string; paused?: boolean; keys?: ShownKey[] | null };
       if (!data.ok) {
         setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
         return null;
       }
-      if (data.keys) setKeys(data.keys);
+      // Sent as null when the list could not be read after the change.
+      if ("keys" in data) setKeys(Array.isArray(data.keys) ? data.keys : null);
       return data;
     } catch {
       setError(MESSAGES.server_error);
@@ -71,7 +90,7 @@ export function ApiKeyEditor({ keys: first }: { keys: ApiKey[] }) {
     event.preventDefault();
     const data = await send({ action: "make", name, write }, "make");
     if (data?.key) {
-      setMade({ key: data.key, name: name.trim() });
+      setMade({ key: data.key, name: name.trim(), paused: data.paused === true });
       setName("");
       setWrite(false);
       setCopied(false);
@@ -86,6 +105,13 @@ export function ApiKeyEditor({ keys: first }: { keys: ApiKey[] }) {
     }
   }
 
+  // A key the team's two-step rule paused (owner C3-100), turned back on by whoever made it.
+  async function turnOn(id: string, as = "") {
+    const data = await send({ action: "turn_on", id, ...(as ? { as } : {}) }, `on:${id}`);
+    setTurning(null);
+    if (data) toast("Key turned back on. Anything using it works again.");
+  }
+
   async function copy() {
     if (!made) return;
     try {
@@ -97,7 +123,7 @@ export function ApiKeyEditor({ keys: first }: { keys: ApiKey[] }) {
     }
   }
 
-  const full = keys.length >= MAX_KEYS;
+  const full = keys !== null && keys.length >= MAX_KEYS;
 
   return (
     <section id="api" className="card mt-8 scroll-mt-32 p-6 sm:p-8" aria-labelledby="api-title">
@@ -105,7 +131,7 @@ export function ApiKeyEditor({ keys: first }: { keys: ApiKey[] }) {
         <h2 id="api-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
           API keys
         </h2>
-        <span className={`tag ${keys.length ? "tag-live" : ""}`}>{`${keys.length} of ${MAX_KEYS}`}</span>
+        {keys ? <span className={`tag ${keys.length ? "tag-live" : ""}`}>{`${keys.length} of ${MAX_KEYS}`}</span> : null}
       </div>
       <p className="mt-2 text-ink-soft">
         Let your own tools read your store: your list, your members, your students, your affiliates and your bookings.
@@ -123,6 +149,11 @@ export function ApiKeyEditor({ keys: first }: { keys: ApiKey[] }) {
             Shown this once. Keep it where only your tool can read it, and never in a web page: anybody who opens the page
             could copy it.
           </p>
+          {made.paused ? (
+            <p className="mt-1 text-sm font-semibold text-ink">
+              It is paused: the team now logs in with a second step. Log in again with yours, then press Turn back on below.
+            </p>
+          ) : null}
           <div className="mt-3 flex flex-col gap-2 sm:flex-row">
             <label htmlFor="api-key" className="sr-only">API key</label>
             <input id="api-key" readOnly value={made.key} onFocus={(e) => e.currentTarget.select()} className="field min-w-0 flex-1 font-mono text-sm" />
@@ -137,7 +168,9 @@ export function ApiKeyEditor({ keys: first }: { keys: ApiKey[] }) {
         </div>
       ) : null}
 
-      {keys.length ? (
+      {keys === null ? (
+        <p className="notice notice-warn mt-5" role="status">{KEYS_UNREAD}</p>
+      ) : keys.length ? (
         <ul className="mt-5 space-y-3">
           {keys.map((key) => (
             <li key={key.id} className="rounded-[12px] bg-paper px-4 py-3 ring-1 ring-line">
@@ -146,21 +179,71 @@ export function ApiKeyEditor({ keys: first }: { keys: ApiKey[] }) {
                   <span className="block font-semibold text-ink">{key.name}</span>
                   <span className="mt-1 block text-sm text-ink-soft">
                     <span className="font-mono">{`nl_live_${key.hint}…`}</span>
-                    {` · ${key.write ? "Reads and writes" : "Reads only"} · Made ${when(key.madeAt)} · ${key.usedAt ? `Last used ${when(key.usedAt)}` : "Never used"}`}
+                    {` · ${key.write ? "Reads and writes" : "Reads only"} · ${key.maker === MAKER_UNRECORDED ? `Made ${when(key.madeAt)} (who made it was not recorded)` : `Made by ${key.maker} on ${when(key.madeAt)}`} · ${key.usedAt ? `Last used ${when(key.usedAt)}` : "Never used"}`}
                   </span>
+                  {key.paused ? (
+                    <span className="mt-1 block text-sm">
+                      <span className="font-semibold text-ink">Paused.</span>{" "}
+                      <span className="text-ink-soft">
+                        {pausedWords(key)}
+                      </span>
+                    </span>
+                  ) : null}
                 </span>
-                {revoking === key.id ? (
+                {turning === key.id ? (
                   <span className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="font-semibold text-ink">Revoke it? Anything using it stops working.</span>
+                    <span className="max-w-xl text-ink">
+                      <span className="font-semibold">Turn it back on?</span> {turnOnNote(key, whose)}
+                    </span>
+                    {key.why === "unmatched" || key.why === "unrecorded" ? (
+                      <label className="flex flex-wrap items-center gap-2" htmlFor={`whose-${key.id}`}>
+                        <span className="font-semibold text-ink">Whose key is it?</span>
+                        <select id={`whose-${key.id}`} value={whose} onChange={(e) => setWhose(e.target.value)} className="field min-h-11 w-auto">
+                          <option value="">Choose a person</option>
+                          <option value="owner">Mine</option>
+                          {key.whoseChoices.map((email) => (
+                            <option key={email} value={email}>
+                              {email}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => turnOn(key.id, key.why === "unmatched" || key.why === "unrecorded" ? whose : "")}
+                      disabled={busy !== null || ((key.why === "unmatched" || key.why === "unrecorded") && !whose)}
+                      aria-busy={busy === `on:${key.id}`}
+                      className="btn btn-primary btn-sm"
+                    >
+                      {busy === `on:${key.id}` ? "Turning on…" : "Yes, turn it on"}
+                    </button>
+                    <button type="button" onClick={() => setTurning(null)} className="btn btn-ghost btn-sm">Keep it paused</button>
+                  </span>
+                ) : revoking === key.id ? (
+                  <span className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="font-semibold text-ink">Revoke it? Anything using it stops working, and so do the webhook endpoints it added.</span>
                     <button type="button" onClick={() => revoke(key.id)} disabled={busy !== null} aria-busy={busy === `revoke:${key.id}`} className="btn btn-danger btn-sm">
                       {busy === `revoke:${key.id}` ? "Revoking…" : "Yes, revoke"}
                     </button>
                     <button type="button" onClick={() => setRevoking(null)} className="btn btn-ghost btn-sm">Keep it</button>
                   </span>
                 ) : (
-                  <button type="button" onClick={() => setRevoking(key.id)} disabled={busy !== null} className="btn btn-secondary btn-sm">
-                    Revoke
-                  </button>
+                  <span className="flex flex-wrap items-center gap-2">
+                    {key.mayTurnOn ? (
+                      <button type="button" onClick={() => {
+                          setTurning(key.id);
+                          setWhose("");
+                        }} disabled={busy !== null} className="btn btn-primary btn-sm">
+                        Turn back on
+                      </button>
+                    ) : null}
+                    {key.mayRevoke ? (
+                      <button type="button" onClick={() => setRevoking(key.id)} disabled={busy !== null} className="btn btn-secondary btn-sm">
+                        Revoke
+                      </button>
+                    ) : null}
+                  </span>
                 )}
               </div>
             </li>

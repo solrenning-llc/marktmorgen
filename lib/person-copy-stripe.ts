@@ -27,12 +27,29 @@ export async function paidCheckoutsOf(store: Store, email: string): Promise<Paid
   try {
     for (const variant of [...new Set([email.trim(), normaliseEmail(email)])]) {
       const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
-      const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as { data?: unknown; has_more?: unknown };
-      if (listed.has_more === true) return null;
-      for (const session of Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : []) {
-        const meta = (session.metadata ?? {}) as Record<string, string>;
-        const id = typeof session.id === "string" ? session.id : "";
-        if (!SESSION.test(id) || !handles.has(meta.store ?? "") || !isSettled(session)) continue;
+      const listed: unknown = await onAccount("GET", account, `/checkout/sessions?${query}`);
+      // A missing list or continuation flag cannot prove that nothing is
+      // retained by payment. Reject the whole copy, including earlier rows.
+      if (!listed || typeof listed !== "object" || Array.isArray(listed)) return null;
+      const page = listed as Record<string, unknown>;
+      if (page.object !== "list" || page.has_more !== false || !Array.isArray(page.data) || page.data.length > 100) return null;
+      for (let i = 0; i < page.data.length; i++) {
+        if (!Object.hasOwn(page.data, i)) return null;
+        const value: unknown = page.data[i];
+        if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+        const session = value as Record<string, unknown>;
+        const id = session.id;
+        if (typeof id !== "string" || !SESSION.test(id) ||
+            !["open", "complete", "expired"].includes(session.status as string) ||
+            !["paid", "unpaid", "no_payment_required"].includes(session.payment_status as string) ||
+            (session.payment_intent !== undefined && session.payment_intent !== null && typeof session.payment_intent !== "string")) return null;
+        // Stripe can explicitly return null metadata for an untagged checkout.
+        // Missing or malformed metadata cannot identify which store owns it.
+        const metadata: unknown = session.metadata === null ? {} : session.metadata;
+        if (!metadata || typeof metadata !== "object" || Array.isArray(metadata) ||
+            Object.values(metadata).some(item => typeof item !== "string")) return null;
+        const meta = metadata as Record<string, string>;
+        if (!handles.has(meta.store ?? "") || !isSettled(session)) continue;
         out.set(id, { id, meta, payment: typeof session.payment_intent === "string" ? session.payment_intent : "" });
       }
     }

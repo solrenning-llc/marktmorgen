@@ -139,7 +139,7 @@ async function main(): Promise<void> {
 
   part("The file of answers");
   const csv = responsesCsv(form, [{ at: 0, page: "", answers: { aaaaaa: "a@example.com", bbbbbb: "opt002" }, outcome: "res002", joined: false, score: 5, scores: { catmnd: 0, catmkt: 5 } }]).split("\r\n");
-  is("a score column, one for each category, then the result", [csv[0], csv[1]], ["Sent,Your email,Do you have an audience?,What have you done?,How sure?,Score,Score: Mindset,Score: Marketing,Result", "1970-01-01T00:00:00.000Z,a@example.com,Some,,,5,0,5,Almost there"]);
+  is("a score column, one for each category, then the result", [csv[0], csv[1]], ['"Sent","Your email","Do you have an audience?","What have you done?","How sure?","Score","Score: Mindset","Score: Marketing","Result"', '"1970-01-01T00:00:00.000Z","a@example.com","Some","","","5","0","5","Almost there"']);
 
   part("In a funnel file");
   const starter = FUNNEL_STARTERS.find((s) => s.bundle.forms.length > 0)!;

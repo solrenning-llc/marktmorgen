@@ -20,6 +20,9 @@ import { done, is, part } from "./check";
 import { readFileSync } from "node:fs";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { skipWaits } from "./skip-waits";
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 
 let reply: string | null = null;
 const prompts: { system: string; prompt: string }[] = [];
@@ -51,7 +54,7 @@ async function main(): Promise<void> {
     await saveReview(statsId, { productId, email: `buyer${i}@example.com`, reference: `cs_test_sum${i}0000000000`, pi: `pi_sum${i}`, rating: i === 5 ? 1 : 5, text, name: `Buyer ${i}` }, ROOM);
   }
   let store = (await storeForEmail(OWNER))!;
-  const now = Date.UTC(2026, 10, 4, 12);
+  const now = Date.now() - 2 * 86_400_000;
 
   part("Made from the reviews");
   // The numbers the reviews are sent under, newest first: the model's themes cite the ones that say them.

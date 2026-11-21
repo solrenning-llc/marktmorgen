@@ -1,0 +1,9 @@
+/*
+ * A tall linked topic card can end with its center just below a short viewport
+ * after Firefox advances native Tab focus. Give those cards a small logical
+ * margin for native focus scrolling. This rule neither assigns focus nor
+ * scrolls the page from JavaScript and stays scoped to dynamic topic pages.
+ */
+[data-topic-focus-inset] a.card {
+  scroll-margin-block: 3rem;
+}

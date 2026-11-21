@@ -12,6 +12,7 @@ import { isSesConfigured } from "@/lib/ses";
 import { isStreamConfigured } from "@/lib/stream";
 import { isVaultConfigured } from "@/lib/vault";
 import { GOOGLE_SIGNIN_APPROVED } from "@/lib/google-signin";
+import { HELD_DAYS, TOLD_DAYS } from "@/lib/community-approval-rules";
 
 export const metadata: Metadata = {
   title: "Privacy Policy — Marktmorgen",
@@ -28,7 +29,7 @@ export default function PrivacyPage() {
   // Named only while the files creators sell are kept there (lib/vault.ts).
   const cloudflare = isVaultConfigured();
   return (
-    <LegalPage title="Privacy Policy" lastUpdated="November 4, 2026">
+    <LegalPage title="Privacy Policy" lastUpdated="November 13, 2026">
       <p>
         Marktmorgen (“Marktmorgen,” “we,” “us,” or “our”) is operated by
         Solrenning, an independent software studio. This Privacy Policy
@@ -74,7 +75,11 @@ export default function PrivacyPage() {
           you put on the page, and the files you upload for delivery to your
           buyers. Your photo is shrunk on your own device before it is sent, is
           shown publicly on your store page and in previews of links to it, and
-          is deleted from our storage when you remove or replace it.
+          is deleted from our storage when you remove or replace it. The
+          postal address you type for the bottom of your emails goes in those
+          emails only; it is shown on your store&apos;s public policies page too only
+          if you check the box for that where you type it, and comes off the
+          page as soon as you uncheck it and save.
         </p>
         <p>
           <strong className="text-black">Buyer information.</strong> When
@@ -160,7 +165,10 @@ export default function PrivacyPage() {
           another of the store&apos;s plans, the change is made on the
           creator&apos;s Stripe account, which keeps the record of it, and we
           email the member a receipt and the creator a note with the
-          member&apos;s email address and the two plans. We keep nothing more
+          member&apos;s email address and the two plans. The same goes for a
+          switch to yearly payments. Each asks the box about starting before
+          the 14 days end again, and keeps its answer on the membership (see{" "}
+          <a href="#instant-access" className="underline">Starting before the 14 days end</a>). We keep nothing more
           about it.
         </p>
         <p>
@@ -300,15 +308,22 @@ export default function PrivacyPage() {
           the creator&apos;s list (sign-ups are not sent to Google). With each
           we send its id, time, amount, currency and products, whether the
           buyer had paid that creator before, the page, the email address
-          hashed with SHA-256, the network address and browser of the request
+          hashed with SHA-256 (a sign-up for something free or a waitlist is
+          sent without it, because the address is not confirmed yet), the
+          network address and browser of the request
           that opened the checkout or sent the sign-up (not with a later
           membership payment), and the platform&apos;s own cookies and ad click
           id from that browser. It goes to that platform on the creator&apos;s
           behalf and under its own privacy policy. A visitor who did not allow
-          ad measurement is never sent. We keep the token sealed; for four days,
-          the request that opened a checkout; for 400 days, the cookies and ad
+          ad measurement is never sent, and neither is a purchase, payment or
+          sign-up of somebody deleted from the store, unless it was already
+          being sent when they were deleted. We keep the token sealed; for
+          four days at the most, the request that opened a checkout, deleted
+          once its purchase is known; for 400 days, the cookies and ad
           click id a membership&apos;s later payments are sent with, never an
-          address or browser; for three days (40 for a membership payment) that
+          address or browser, deleted with the buyer when they are deleted
+          from the store;
+          for three days (40 for a membership payment) that
           each was sent; and the platform&apos;s last answer for the creator to
           see.
         </p>
@@ -393,8 +408,9 @@ export default function PrivacyPage() {
           that names the booking and its time, and we keep a mark that each
           reminder was sent for 14 days. If the buyer moves the booking
           to another time from the link in their email, we keep the new time
-          and how many times it was moved, tied to that checkout, for 200
-          days. The line in the creator&apos;s diary that keeps the time taken
+          and how many times it was moved, tied to that checkout, until 200
+          days after the call it was moved to, and never longer than two
+          years. The line in the creator&apos;s diary that keeps the time taken
           is let go {PAST_CALL_DAYS} days after the call ends; the booking
           itself stays on the creator&apos;s Stripe account. The same kind of cookie, for
           the same 32 minutes, is set when someone starts to buy a product sold
@@ -418,7 +434,11 @@ export default function PrivacyPage() {
           an episode, we check that your address still holds the podcast, and
           we count those reads to stop a feed from being shared; we do not
           keep which episodes you play. The creator sees neither your feed nor
-          what you listen to.
+          what you listen to. We keep your feed until you ask the store to
+          delete your data or the store closes, even after the creator removes
+          the podcast. Right after some updates, usually for less than an
+          hour, a deletion may not yet reach every feed. Then it says it is
+          not finished, and you can ask again.
         </p>
         <p id="packages">
           <strong className="text-black">Packages of sessions.</strong>{" "}
@@ -485,7 +505,8 @@ export default function PrivacyPage() {
           box about starting before a 14-day right to cancel ends. When you
           check it, we write &ldquo;yes&rdquo;, the version and kind of that
           sentence and the time on the order, and the confirmation email quotes
-          it back to you. For a card payment it is kept on the order itself, in
+          it back to you. Switching a membership to another plan or to yearly
+          payments asks the same box again, and the receipt quotes it. For a card payment it is kept on the order itself (on a switch, on the membership), in
           the creator&apos;s own Stripe account, for as long as the creator
           keeps their Stripe records. For a PayPal payment it is kept with our
           own record of that PayPal order, which we keep for 400 days for
@@ -614,7 +635,8 @@ export default function PrivacyPage() {
           page is drawn and when you start paying. It is not stored. When a
           lower price was given, the country and the percentage are written on
           that order on the creator&apos;s own Stripe account, so they can see
-          why it cost what it did.
+          why it cost what it did. On an order paid with PayPal, only the
+          percentage is kept, with that order&apos;s record, never the country.
         </p>
         <p id="team-places">
           <strong className="text-black">Bought for several people.</strong>{" "}
@@ -657,6 +679,32 @@ export default function PrivacyPage() {
           on a list so the course stays closed to them. To check who bought a
           course, we ask the creator&apos;s own Stripe account by email address.
         </p>
+        <p id="lesson-places">
+          <strong className="text-black">Where you stopped in a lesson video.</strong>{" "}
+          When a student watches a lesson video a store hosts with us, their
+          own browser keeps where they stopped, so the lesson can offer to
+          continue from there: in its storage, under <code>mm:lp:</code>{" "}
+          followed by the course, the lesson and a code made on our server
+          that cannot be worked out from their email address. It holds the
+          second they reached and when, and is never sent to us. The speed
+          they chose is kept the same way, under{" "}
+          <code>mm:lp-speed</code>. A place is removed when the video is
+          watched to its end and when they press Start over. One older than
+          90 days is never used, and is removed the next time that lesson is
+          opened in that browser. Whenever the course page opens in that
+          browser without confirming their access (because it ended, or
+          because it could not be checked at that moment), all their places in
+          that course are removed. The same browser also keeps
+          the last lesson they opened, so their library on this site can offer &quot;Continue
+          where you left off&quot;: under <code>mm:ll:</code> followed by
+          another code made on our server from their email address alone, it
+          holds that lesson&apos;s address, its name, the course&apos;s and the
+          store&apos;s names and when, and is never sent to us. It is never
+          used after 90 days, and it is also removed with their places when
+          the course page opens without confirming their access to that
+          course. Clearing the browser&apos;s site data removes all of it at
+          any time.
+        </p>
         <p id="lesson-comments">
           <strong className="text-black">Comments under lessons.</strong>{" "}
           A student who comments under a lesson chooses a name, and we keep that
@@ -667,6 +715,27 @@ export default function PrivacyPage() {
           wrote it, at most once an hour for each lesson. A creator who asked
           for it gets a notification on their phone with the lesson and the
           start of the comment, without the name.
+        </p>
+        <p id="lesson-notes">
+          <strong className="text-black">Private notes on lessons.</strong>{" "}
+          A student can write notes on each lesson of a course they are taking.
+          We keep what they wrote and when, for that student alone: the
+          creator, the creator&apos;s team and the other students never see
+          them. A note holds at most 4,000 characters, and a student keeps at
+          most 300 notes in one store, together at most 256 KB. All the
+          students&apos; notes in one store together take at most a tenth of
+          the store&apos;s data room, so at least nine tenths of it always stay
+          the creator&apos;s: past that, a new or longer note is refused and
+          the notes already saved stay. The creator can neither see nor delete
+          them. While signed in with the address they took the course with,
+          the student can download its notes as a text file: from each lesson
+          while the course is open to them, and from the course&apos;s own page
+          also after the course is no longer open to them (after a refund, for
+          example, or when a membership ends). The notes stay kept until the
+          student empties them on the lesson or,
+          after their access to the course ends, deletes them on the
+          course&apos;s page, asks to be deleted from the store, or the store
+          is closed.
         </p>
         <p>
           <strong className="text-black">A one-click offer after paying.</strong>{" "}
@@ -732,12 +801,24 @@ export default function PrivacyPage() {
           when the creator is trying two, each sent to a part of the list
           chosen at random. The tag is the same for everyone who got that
           email or that subject line: it lets the store count visits and sales
-          by email, and says nothing about who you are. Which of a
+          by email, and says nothing about who you are. In a one-off email
+          sent since November 6, 2026, each link first opens an address of
+          ours, the same for everyone who got the email, so the creator can
+          change where a wrong link leads after sending. Opening it counts as
+          one request of the store, as a page of the store does. Nothing about
+          who opened it, or when, is kept for that email or shown to the
+          creator. As on every page of the store, to limit abuse, a one-way
+          hash of the network address it is opened from is counted with that
+          day&apos;s requests from the same address, never with the email.
+          Which of a
           creator&apos;s automatic emails reach you is decided by what their
           list already holds about you — what you got or bought from them, and
           any labels their import brought or their automatic emails gave you
           (a step can give a label, take one off, or start another of their
           automatic emails) — and never by whether you open an email.
+          When a creator narrows an email to some of their buyers, opens their task agenda or looks a buyer up, we read their sales once and keep that copy of who bought what for one hour,
+          so the count they see says when it was read; it is then deleted,
+          and deleted at once if you ask us to delete your data.
         </p>
         <p id="links">
           <strong className="text-black">Which links you use, only if you allow it.</strong>{" "}
@@ -790,6 +871,13 @@ export default function PrivacyPage() {
           creator and never by other members. What is written is kept while
           the community exists, until its author or the creator deletes it;
           deleting a post deletes its comments, likes, reports and picture.
+          A creator may choose to approve posts or comments before they are
+          published. Until then, what is waiting for approval is seen only by
+          its author and the creator; if the creator does not publish it, the
+          author is told, and if nobody answers within {HELD_DAYS} days it is not
+          published. A short note about what was not published is kept for its
+          author for at most another {TOLD_DAYS} days. Deleting a member deletes
+          what they had waiting too.
           Who reported something is kept for 90 days, so each member&apos;s
           report counts once. The answer about whether someone may come in is
           kept for up to five minutes, a record of each announcement emailed
@@ -865,7 +953,8 @@ export default function PrivacyPage() {
           saying what moved and how to open it. We send it on the
           creator&apos;s instruction and on their word that these people
           bought from them and may be told so, which we cannot check against
-          the other platform. A store may send up to 20,000 of these in 30
+          the other platform. Nobody who left that creator&apos;s list is
+          written to. A store may send up to 20,000 of these in 30
           days, and for that we keep only a count.
         </p>
         <p id="moved-members">
@@ -887,7 +976,12 @@ export default function PrivacyPage() {
           the membership, so somebody who kept it is not written to. We send
           these on the creator&apos;s instruction and on their word that these
           people are their members, which we cannot check against the other
-          platform; they count within the same 20,000 in 30 days. Keeping the
+          platform; they count within the same 20,000 in 30 days. Nobody who
+          left that creator&apos;s list is written to. Each of these emails
+          carries the creator&apos;s postal address and a link that stops
+          them, tied to the address and the store, for 400 days; pressing it
+          keeps a one-way hash of the address for that store for good, so
+          that store never sends them a reminder again. Keeping the
           membership is a checkout on the creator&apos;s own Stripe account,
           like any purchase in their store.
         </p>
@@ -905,7 +999,10 @@ export default function PrivacyPage() {
           email from the store&apos;s name, through our email provider, saying
           what they were given, within the same 20,000 in 30 days as the
           emails above. We keep how many of these a store made each day, for a
-          day, to hold them to their limits.
+          day, to hold them to their limits. Any key of a store, one that only
+          reads included, can also list the store&apos;s sales with each
+          buyer&apos;s email address and name, read from the creator&apos;s own
+          Stripe account when the tool asks; we do not keep that list.
         </p>
         <p id="code-links">
           <strong className="text-black">
@@ -969,11 +1066,21 @@ export default function PrivacyPage() {
           section&apos;s count. On a store&apos;s own page it sends the furthest
           item they saw &mdash; a product, a link or a part of the page &mdash;
           where it stood, and the item they clicked, if any, and we add one to
-          that day&apos;s count of it. Each page decides at random to send this
-          for one visitor in eight, and for nobody else. On a sales page it can
+          that day&apos;s count of it. Our server picks one page view in eight
+          at random and gives only that page a random code, good for two hours
+          from when the page was shown; the page sends this once, with that
+          code, and we keep the code for those two hours only, so the same reading is
+          never counted twice. Each store counts at most a set number of these
+          readings a month, the same for every store on its plan, and past it a
+          reading is not counted. We keep how many readings came that month,
+          and nothing about who sent them, until a day after the month ends. On a sales page it can
           also say how far into the page&apos;s video they got, and, where the
           creator turned the question on, which of five answers they tapped
-          when asked what was stopping them from buying. No cookie is set and
+          when asked what was stopping them from buying. On a sales page it also
+          says how long the page was open in front of them, as one of six ranges
+          (from under 10 seconds to 10 minutes or more), measured until they first
+          switch to another tab or app or leave, and we add one to that
+          range&apos;s count. No cookie is set and
           nothing about the visitor is sent or kept; the device remembers only
           that the question was asked, so it is not asked again.
         </p>
@@ -1125,7 +1232,10 @@ export default function PrivacyPage() {
           creator also gets a private address of their own that lists their
           upcoming calls and sessions with the name and email address of each
           buyer, for the calendar app they subscribe with; replacing that
-          address turns the old one off.
+          address turns the old one off. We keep the last copy of that list
+          made for their calendar app for up to 40 days; once the store is
+          deleted or closed, that copy is never shown again, and it is erased
+          within those 40 days.
         </p>
         <p id="webhooks">
           <strong className="text-black">Webhooks a creator adds.</strong> A
@@ -1138,7 +1248,10 @@ export default function PrivacyPage() {
           creator&apos;s choice and responsibility. We keep each address and its
           signing secret until the creator removes it, a mark of each event
           sent for 30 days so it is never sent twice, and each delivery, with
-          the answer the address gave, for up to seven days.
+          the answer the address gave, for up to seven days. When a free copy
+          or a list sign-up could not be passed on to those addresses at once,
+          we keep that event, with the same details, for up to seven days to
+          try again, and never send it about someone deleted from the store.
         </p>
         <p id="store-forms">
           <strong className="text-black">Forms and quizzes on a store&apos;s pages.</strong>{" "}
@@ -1159,7 +1272,13 @@ export default function PrivacyPage() {
           went to, when, and the buyer&apos;s email address, so the buyer can
           see it again and the creator can see who has it, and whether the
           creator revoked it. Anyone can ask whether a key is valid; the answer
-          says nothing about who bought it. Keys are kept with the
+          says nothing about who bought it. When a creator limits a key to a
+          few devices, we keep, for each device their software names, a one-way
+          code made with a key only our server holds, different for every
+          license key and never the identifier the software sent, and when the
+          buyer freed a device. Nobody can turn a code back into the device or
+          match it on another key. These codes are kept with the key and go by
+          themselves 400 days after their last change. Keys are kept with the
           store&apos;s records.
         </p>
         <p id="quizzes">
@@ -1485,13 +1604,18 @@ export default function PrivacyPage() {
           it, its ID, link, title and time and, on Google, its guest list,
           until 60 days after the meeting. We keep a short log of problems with a
           connection for 30 days, and each consent in progress for ten
-          minutes. When a creator disconnects from the studio, we give the
-          token back to Google or Zoom so that access ends on their side too,
-          and delete the connection and its tokens; meetings already made
+          minutes. When a creator disconnects from the studio, we ask Google
+          or Zoom to cancel the token, so that access ends on their side too,
+          and delete the connection and its tokens. If Google or Zoom does not
+          confirm that our access ended, we say so on the screen and tell the
+          creator how to remove our app in their Google or Zoom account
+          themselves. Meetings already made
           stay on the creator&apos;s calendar or Zoom account. If the creator
           removes our app from their Zoom account, Zoom tells us and we delete
-          every connection that user made, with its tokens, at once. If the
-          creator withdraws our access in their Google account, we stop using
+          every connection that user made, with its tokens, at once. We then
+          keep, for one day, a scrambled form of that Zoom user ID and the time
+          Zoom told us, only so that a connection being finished at that very
+          moment is not kept either. If the creator withdraws our access in their Google account, we stop using
           the connection and tell them, and disconnecting deletes it.
         </p>
         <p id="meta-ads" className="scroll-mt-24">
@@ -1511,7 +1635,10 @@ export default function PrivacyPage() {
           and delete the connection, its token and every figure read from
           it. If they remove our app in their Facebook settings, or ask Meta
           for their data to be deleted, Meta tells us and we do the same at
-          once, and tell the store&apos;s owner.
+          once, and tell the store&apos;s owner. We then keep, for one day,
+          a scrambled form of that Meta user ID and the time Meta told us,
+          only so that a connection being finished at that very moment is
+          not kept either.
         </p>
         <p id="comparisons" className="scroll-mt-24">
           <strong className="text-black">Comparisons between stores.</strong>{" "}
@@ -1733,9 +1860,10 @@ export default function PrivacyPage() {
             serves the site, stores the files, pictures and videos creators
             upload (Vercel Blob) and, when a creator adds their own domain,
             receives that domain&apos;s name to check its records and issue its
-            certificate, and, when a login link is asked for, checks that a
-            person&apos;s browser sent the request rather than a program, by
-            reading the browser&apos;s answer to a small challenge;
+            certificate, and, when a login link is asked for or a store&apos;s
+            page counts its visit, checks that a person&apos;s browser sent the
+            request rather than a program, by reading the browser&apos;s answer
+            to a small challenge;
           </li>
           <li>
             <strong className="text-black">Resend</strong>, our email
@@ -2136,7 +2264,7 @@ export default function PrivacyPage() {
             and their photos, and waitlist places; your way through its
             sequences and workflows, and any email still waiting to reach you;
             your progress, quiz results, handed-in work and its files, lesson
-            comments and certificates in its courses, and your private podcast
+            comments, private lesson notes and certificates in its courses, and your private podcast
             feeds; your community profile, points, notifications, private
             conversations and what you said in its room; your Discord
             account&apos;s link to the store, whose roles are taken back; the
@@ -2158,7 +2286,8 @@ export default function PrivacyPage() {
             their sales and tax records and are not stored by us; and the few
             order records a purchase still needs for a refund or for delivery,
             each with only what it needs and for the time section 1 gives it:
-            PayPal orders, license keys you bought, gifts and group places,
+            PayPal orders, license keys you bought and the codes of the devices
+            they run on, gifts and group places,
             pre-orders, packages of calls, your place on a booked group
             call&apos;s guest list until 60 days after it, and when a physical
             order shipped. The links emailed to you before stop working. A few
@@ -2166,7 +2295,9 @@ export default function PrivacyPage() {
             link that opens a page for a day or less; the list of addresses an
             email already going out is sent down, which passes a deleted address
             over (until it finishes, at most 60 days); a reminder waiting for its
-            hour, which is then not sent (at most a week); an import&apos;s file
+            hour, which is then not sent (at most a week); an event for the
+            creator&apos;s webhooks still waiting to be sent, which is then not
+            sent (at most a week); an import&apos;s file
             (14 days after it began); the events a store&apos;s webhooks already
             sent to the creator (7 days); and one-way marks that limit how often
             something is sent or asked (at most 32 days).
@@ -2177,6 +2308,10 @@ export default function PrivacyPage() {
             shown without your name. Delete them in the community first if you
             want them gone, or ask the creator. What a creator copied elsewhere
             (their email platform, their own files) is theirs to delete there.
+            If a creator removed a course before we began keeping a record of
+            removed courses, the records you left in that course (lessons
+            done, quiz answers, work you handed in, a certificate) are not
+            reached when you ask us to delete your data from that store.
           </p>
         </div>
         <p>

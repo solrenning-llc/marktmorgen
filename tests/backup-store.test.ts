@@ -9,7 +9,8 @@
  *     signed, and a 412 is a failure, never a success);
  *   - the sold files' bucket or keys used for backups;
  *   - a read past its cap held whole, or an unreadable answer taken as a backup;
- *   - any request not signed, or any delete at all.
+ *   - any request not signed; a delete of anything but one of its own objects by
+ *     id, or a listing it cannot read whole taken as an empty bucket.
  */
 import { backupStoreConfig, r2BackupStore } from "@/lib/backup-store";
 import { verifyBackupRoundtrip } from "@/lib/backup-roundtrip";
@@ -24,6 +25,11 @@ let down = false;
 let answer: number | null = null;
 /** When set, reads stream their bytes with no content-length, in chunks. */
 let unstated = false;
+/** When each object was written, as the listing says; objects listed a page of at most listPage; a listing body to answer instead. */
+const listedAt = new Map<string, number>();
+let listPage = 1_000;
+let listing: string | null = null;
+const deleted: string[] = [];
 /** Every PUT whose x-amz-content-sha256 is not the SHA-256 of its body. */
 const badHashes: string[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -41,6 +47,23 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (headers["if-none-match"] === "*" && objects.has(path)) return new Response("<Error><Code>PreconditionFailed</Code></Error>", { status: 412 });
     objects.set(path, new Uint8Array(init?.body as Uint8Array));
     return new Response("", { status: 200 });
+  }
+  if (method === "GET" && new URL(url).searchParams.get("list-type") === "2") {
+    if (listing !== null) return new Response(listing, { status: 200 });
+    const query = new URL(url).searchParams;
+    const prefix = `${path}/${query.get("prefix") ?? ""}`;
+    const names = [...objects.keys()].filter((name) => name.startsWith(prefix)).sort();
+    const from = Number(query.get("continuation-token") ?? "0");
+    const most = Number(query.get("max-keys"));
+    const page = names.slice(from, from + Math.min(most, listPage));
+    const more = from + page.length < names.length;
+    const contents = page.map((name) => `<Contents><Key>${name.slice(path.length + 1)}</Key><LastModified>${new Date(listedAt.get(name) ?? 0).toISOString()}</LastModified><Size>${objects.get(name)!.byteLength}</Size></Contents>`).join("");
+    return new Response(`<?xml version="1.0" encoding="UTF-8"?><ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>b</Name><IsTruncated>${more}</IsTruncated><KeyCount>${page.length}</KeyCount><MaxKeys>${most}</MaxKeys>${contents}${more ? `<NextContinuationToken>${from + page.length}</NextContinuationToken>` : ""}</ListBucketResult>`, { status: 200 });
+  }
+  if (method === "DELETE") {
+    deleted.push(path);
+    objects.delete(path);
+    return new Response(null, { status: 204 });
   }
   if (method === "GET") {
     const held = objects.get(path);
@@ -109,7 +132,43 @@ async function main(): Promise<void> {
   is("one object, under backups/, named by its id", [objects.size, put.url.endsWith(`/marktmorgen-backups/backups/${proof.id}.mmbk`)], [1, true]);
   is("create-only, and signed with it", [put.headers["if-none-match"], put.headers.authorization?.startsWith("AWS4-HMAC-SHA256 "), /SignedHeaders=[^,]*if-none-match/.test(put.headers.authorization ?? "")], ["*", true, true]);
   is("every request signed, the body's hash the body's", [calls.every((c) => c.headers.authorization?.startsWith("AWS4-HMAC-SHA256 ")), badHashes], [true, []]);
-  is("never a delete, and no way to ask for one", [calls.some((c) => c.method === "DELETE"), Object.hasOwn(store, "delete")], [false, false]);
+  is("the round trip never deletes", calls.some((c) => c.method === "DELETE"), false);
+
+  part("It lists its own objects and deletes one by its id (inbox C4-49: the run's retention)");
+  const mine = `/marktmorgen-backups/backups/${proof.id}.mmbk`;
+  listedAt.set(mine, Date.parse("2026-10-01T10:00:00.000Z"));
+  objects.set("/marktmorgen-backups/backups/notes.txt", new Uint8Array([1]));
+  objects.set("/marktmorgen-backups/elsewhere/33333333-3333-4333-8333-333333333333.mmbk", new Uint8Array([1]));
+  const listed = await store.list(null);
+  const ask = calls[calls.length - 1];
+  const query = new URL(ask.url).searchParams;
+  is("one page under backups/, signed, at most 1,000 names", [ask.method, query.get("list-type"), query.get("prefix"), query.get("max-keys"), ask.headers.authorization?.startsWith("AWS4-HMAC-SHA256 ")], ["GET", "2", "backups/", "1000", true]);
+  is("only its own objects, each with the time the bucket wrote it and its size; another name is never offered for deletion", listed, { objects: [{ id: proof.id, writtenAt: Date.parse("2026-10-01T10:00:00.000Z"), bytes: objects.get(mine)!.byteLength }], next: null });
+  for (const n of ["44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555"]) objects.set(`/marktmorgen-backups/backups/${n}.mmbk`, new Uint8Array([2]));
+  listPage = 2;
+  const first = await store.list(null);
+  const second = first.next === null ? null : await store.list(first.next);
+  listPage = 1_000;
+  is("a long listing goes on from where it stopped", [first.objects.length, first.next !== null, second?.next, [...first.objects, ...(second?.objects ?? [])].length], [2, true, null, 3]);
+  for (const [name, body] of [
+    ["not a listing", "<html>busy</html>"],
+    ["a truncated listing with nowhere to go on", '<ListBucketResult><IsTruncated>true</IsTruncated><Contents><Key>backups/44444444-4444-4444-8444-444444444444.mmbk</Key><LastModified>2026-10-01T10:00:00.000Z</LastModified></Contents></ListBucketResult>'],
+    ["a time that is not one", '<ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>backups/44444444-4444-4444-8444-444444444444.mmbk</Key><LastModified>soon</LastModified><Size>1</Size></Contents></ListBucketResult>'],
+    ["no size", '<ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>backups/44444444-4444-4444-8444-444444444444.mmbk</Key><LastModified>2026-10-01T10:00:00.000Z</LastModified></Contents></ListBucketResult>'],
+    ["a count that does not match", '<ListBucketResult><IsTruncated>false</IsTruncated><KeyCount>2</KeyCount><Contents><Key>backups/44444444-4444-4444-8444-444444444444.mmbk</Key><LastModified>2026-10-01T10:00:00.000Z</LastModified></Contents></ListBucketResult>'],
+  ] as const) {
+    listing = body;
+    is(`${name}: refused, never read as an empty bucket`, await refuses(() => store.list(null)), true);
+    listing = null;
+  }
+  await store.delete(proof.id);
+  const removal = calls[calls.length - 1];
+  is("a delete: of that object only, signed", [removal.method, removal.url.endsWith(mine), removal.headers.authorization?.startsWith("AWS4-HMAC-SHA256 "), deleted, objects.has(mine)], ["DELETE", true, true, [mine], false]);
+  is("an id that is not one: refused before any request", [await refuses(() => store.delete("../notes")), deleted.length], [true, 1]);
+  answer = 403;
+  is("a delete answered 403: refused, never taken as done", await refuses(() => store.delete("44444444-4444-4444-8444-444444444444")), true);
+  answer = null;
+  objects.set(mine, new Uint8Array(1_000));
 
   part("What is never taken as a backup");
   is("an id that is not one: refused before any request", await refuses(() => store.putNew("../other", new Uint8Array([1]))), true);

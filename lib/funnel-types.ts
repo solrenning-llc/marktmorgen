@@ -27,8 +27,12 @@ export type ProductSlot = {
   kind: "product";
   key: string;
   label: string;
-  /** What it has to be: free (it asks for an email), paid, or either. */
-  wants: "free" | "paid" | "any";
+  /**
+   * What it has to be: free (it asks for an email), paid, either, or a
+   * bundle (lib/bundle-rules.ts: one product that hands over two or more of
+   * the store's others).
+   */
+  wants: "free" | "paid" | "any" | "bundle";
 };
 
 /** One of the store's own pages, made for the funnel, empty and kept back until the creator lets it out. */
@@ -155,6 +159,19 @@ export const FUNNEL_TYPES: FunnelType[] = [
       thanks,
     ],
   },
+  {
+    // 576 [FT8]. The bundle's own page already lists what is inside, says what
+    // those products cost on their own only when that is more than the bundle
+    // (worthWords), takes the payment and hands over what it holds, each product
+    // as if it was bought alone: all of them, or only the ones the buyer chose
+    // when the bundle lets them choose (lib/bundle-rules.ts picks, chosenItems).
+    // So the hint promises what the bundle hands over, never "each product in it".
+    // The type adds no sales page of its own.
+    id: "bundle",
+    label: "Product bundle",
+    hint: "Your bundle's page, which shows what is in it and its price, then a page that says what happens next. Buyers get what the bundle hands over, each product as if they bought it on its own.",
+    slots: [{ kind: "product", key: "bundle", label: "Your bundle: one product that holds two or more of your products", wants: "bundle" }, thanks],
+  },
 ];
 
 export function funnelType(id: unknown): FunnelType | null {
@@ -171,18 +188,34 @@ export function choicesOf(type: FunnelType): (ProductSlot | TargetSlot)[] {
   return type.slots.filter((slot): slot is ProductSlot | TargetSlot => slot.kind !== "page");
 }
 
-/** What a product has to be for a slot, as the catalog knows it. */
-export type ProductFacts = { free: boolean; call: boolean };
+/**
+ * What a product has to be for a slot, as the catalog knows it. A caller that
+ * does not say whether it is a bundle never has it taken for one.
+ */
+export type ProductFacts = { free: boolean; call: boolean; bundle?: boolean };
 
 /** Why a product cannot fill a slot, or null when it can. */
-export function slotProblem(slot: ProductSlot | TargetSlot, product: ProductFacts | null): "missing" | "free" | "paid" | "call" | null {
+export function slotProblem(slot: ProductSlot | TargetSlot, product: ProductFacts | null): "missing" | "free" | "paid" | "call" | "bundle" | null {
   if (!product) return "missing";
   if (slot.wants === "call") return product.call ? null : "call";
+  if (slot.wants === "bundle") return product.bundle === true ? null : "bundle";
   // A call is booked on a page of its own, so it is never a step (lib/page-funnel.ts).
   if (product.call) return "call";
   if (slot.wants === "free" && !product.free) return "free";
   if (slot.wants === "paid" && product.free) return "paid";
   return null;
+}
+
+/**
+ * What the studio says when no product of the store fits a slot, and where
+ * the creator makes one: a bundle on the Bundles page, anything else under
+ * Products.
+ */
+export function noneYet(slot: ProductSlot | TargetSlot): { text: string; where: "products" | "bundles" } {
+  if (slot.wants === "bundle") return { text: "You have no bundle yet. A bundle is one product that holds two or more of your products. Make one under Bundles, then come back.", where: "bundles" };
+  if (slot.wants === "free") return { text: "You have no free product yet. Add one under Products, then come back.", where: "products" };
+  if (slot.wants === "call") return { text: "You have no call yet. Add one under Products, then come back.", where: "products" };
+  return { text: "You have no paid product yet. Add one under Products, then come back.", where: "products" };
 }
 
 /** An address under the store not yet taken by its pages, numbered when the plain one is. */

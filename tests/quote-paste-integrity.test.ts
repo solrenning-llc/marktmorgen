@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 const { transformSync } = createRequire(path.resolve("package.json"))("esbuild") as typeof import("esbuild");
 import { pasteExceedsLimit } from "@/lib/paste-limit";
+import { itemAddId, itemRemoveId } from "@/lib/block-insert";
 import { is, done } from "./check";
 
 is("400 units fit", pasteExceedsLimit("", 0, 0, "a".repeat(400), 400), false);
@@ -22,9 +23,9 @@ const code = transformSync("export " + source.slice(start, end), { loader: "tsx"
 let blocked = false;
 const jsx = (type: unknown, props: unknown) => ({ type, props });
 const mod = { exports: {} as { QuotesEditor?: (props: unknown) => unknown } };
-const wrapper = vm.runInNewContext("(function(require,module,exports,useState,pasteExceedsLimit,MAX_QUOTE,MAX_QUOTES,MAX_QUOTE_NAME,MAX_QUOTE_URL,quoteUrl,Icon){" + code + "\n})");
+const wrapper = vm.runInNewContext("(function(require,module,exports,useState,pasteExceedsLimit,MAX_QUOTE,MAX_QUOTES,MAX_QUOTE_NAME,MAX_QUOTE_URL,quoteUrl,Icon,itemRemoveId,itemAddId,focusItemAfterRemoval){" + code + "\n})");
 wrapper((name: string) => { assert.equal(name, "react/jsx-runtime"); return { jsx, jsxs: jsx, Fragment: "fragment" }; },
-  mod, mod.exports, () => [blocked, (value: boolean) => { blocked = value; }], pasteExceedsLimit, 400, 6, 80, 2000, () => true, "icon");
+  mod, mod.exports, () => [blocked, (value: boolean) => { blocked = value; }], pasteExceedsLimit, 400, 6, 80, 2000, () => true, "icon", itemRemoveId, itemAddId, () => {});
 type Node = { type?: string; props?: { children?: unknown; [key: string]: unknown } };
 function nodes(value: unknown): Node[] {
   if (!value || typeof value !== "object") return [];

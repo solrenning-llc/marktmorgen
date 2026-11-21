@@ -22,6 +22,7 @@ import threading
 import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from test_contract_funding_redis import measured_command
 
 
 class Redis:
@@ -217,10 +218,6 @@ def main():
         if op == "dispatch" and result[0] == "dispatch":
             dispatches[identity] = result[4]
         return result
-
-    def stats():
-        raw = client.command("INFO", "commandstats")
-        return {name: int(calls) for name, calls in re.findall(r"^cmdstat_([^:]+):calls=(\d+)", raw, re.M)}
 
     def in_flight_race(lua_override=None):
         """Real local HTTP POST A stays in flight while B refuses locally.
@@ -587,19 +584,24 @@ def main():
         measured = account()
         def measured_commands(work):
             at = redis_now()  # Fixture clock read is outside the measured path.
-            before = stats(); work(at); after = stats()
-            return sum(after.get(key, 0) - before.get(key, 0) for key in set(before) | set(after) if key != "info")
-        counts = {"initialize": measured_commands(lambda at: initialize(measured, now=at))}
-        saved_box = []
-        counts["reserve"] = measured_commands(lambda at: saved_box.append(call(measured, "measured", now=at)))
-        saved = saved_box[0]
-        counts["dispatch"] = measured_commands(lambda at: claim_call(measured, "measured", saved, "dispatch", now=at))
-        counts["settle_accepted"] = measured_commands(lambda at: claim_call(measured, "measured", saved, "settle", "accepted", now=at))
-        counts["read_accepted"] = measured_commands(lambda at: call(measured, "measured", "receipt", now=at))
+            reply, observed = measured_command(client, lambda: work(at))
+            return reply, sum(observed.values())
+        initialized, total = measured_commands(lambda at: call(measured, "bootstrap", "initialize", now=at))
+        assert initialized == ["initialized"]
+        counts = {"initialize": total}
+        saved, counts["reserve"] = measured_commands(lambda at: call(measured, "measured", now=at))
+        dispatched, counts["dispatch"] = measured_commands(lambda at: claim_call(measured, "measured", saved, "dispatch", now=at))
+        assert dispatched[0] == "dispatch"
+        # The fixture observes the real dispatch only after EXEC, never QUEUED.
+        dispatches[(measured, "measured", saved[1])] = dispatched[4]
+        _, counts["settle_accepted"] = measured_commands(lambda at: claim_call(measured, "measured", saved, "settle", "accepted", now=at))
+        _, counts["read_accepted"] = measured_commands(lambda at: call(measured, "measured", "receipt", now=at))
         canceled = call(measured, "measured-cancel")
-        counts["cancel_reserved"] = measured_commands(lambda at: claim_call(measured, "measured-cancel", canceled, "cancel", now=at))
+        _, counts["cancel_reserved"] = measured_commands(lambda at: claim_call(measured, "measured-cancel", canceled, "cancel", now=at))
         print(json.dumps({"observed_redis_commands_including_eval_and_redis_call": counts, "supplier_invoice": False}))
         assert counts == {"initialize": 4, "reserve": 11, "dispatch": 11, "settle_accepted": 14, "read_accepted": 10, "cancel_reserved": 13}, counts
+        from test_resend_command_observation import check_observer
+        check_observer(client, port)
         print("PASS: exact application Lua, atomicity and observed Redis command counts")
     finally:
         try:

@@ -18,6 +18,19 @@ const en = {
   dealHint: (min: number, percent: number) => `${percent}% off when you buy ${min} or more together.`,
   total: "Total",
   checkout: (total: string) => `Check out · ${total}`,
+  /** The button when the prices could not be checked: no amount it cannot vouch for (Stripe's page shows the exact total). */
+  checkoutUnpriced: "Check out",
+  /** Said instead of the total when the cart's prices could not be read again. */
+  unchecked: "We could not check the prices just now, so no total is shown. The payment page shows the exact total before you pay.",
+  /** Said when products in the cart have not been checked at all (the first read, or one just added, failed): nothing can be paid for yet. */
+  uncheckedSome: (count: number) =>
+    count === 1
+      ? "We could not check 1 product in your cart just now, so you cannot pay yet."
+      : `We could not check ${count} products in your cart just now, so you cannot pay yet.`,
+  /** The button beside either sentence above that reads the cart again. */
+  retry: "Try again",
+  /** Said instead of the cart when its store answered that it does not exist: no "Try again" and no checkout. */
+  storeClosed: "This store is not taking orders right now, so nothing in your cart can be paid for here. Nothing was charged.",
   note: "You pay once, on Stripe's secure page. Each product is handed over exactly as if you had bought it on its own.",
   empty: "Your cart is empty.",
   gone: "Not available in a cart right now: buy it from its own page.",
@@ -30,9 +43,16 @@ const en = {
   notTo: (country: string) => `${country} is not one of them.`,
   /** A cart holding both shipped products and products handed over online (lib/cart-shipping.ts, shipsWithOnline). */
   mixed: "Shipped products and products you get online cannot be paid for together in one cart. Remove one kind to check out, and buy the others separately.",
+  /** A limited product in the cart with none left (lib/stock.ts): not in what is paid for. */
+  soldOut: "Sold out. It is not in your total.",
   loading: "Checking the prices…",
   close: "Close",
   changed: "Something in your cart changed since you added it. Look it over and check out again.",
+  /** The billing country (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate), and the two answers about it. */
+  billingCountry: "Country you're buying from",
+  chooseCountry: "Choose your country",
+  abroad: "This can't be bought from the European Union or the United Kingdom yet, because we can't charge the VAT those countries require on it. Nothing was charged. If you are outside them, choose your country and check out again.",
+  country: "Choose the country you're buying from, then check out again. Nothing was charged.",
   error: "The payment page could not be opened. Nothing was charged. Try again in a moment.",
   // ---- A reminder of a cart left at checkout (lib/checkout-recovery.ts) ----
   leftTitle: "You left before paying for your cart",
@@ -72,6 +92,16 @@ const es: CartWords = {
   dealHint: (min, percent) => `${percent}% de descuento si compras ${min} o más juntos.`,
   total: "Total",
   checkout: (total) => `Pagar · ${total}`,
+  /** The button when the prices could not be checked: no amount it cannot vouch for (Stripe's page shows the exact total). */
+  checkoutUnpriced: "Pagar",
+  /** Said instead of the total when the cart's prices could not be read again. */
+  unchecked: "No pudimos comprobar los precios ahora, así que no se muestra ningún total. La página de pago muestra el total exacto antes de que pagues.",
+  uncheckedSome: (count) =>
+    count === 1
+      ? "No pudimos comprobar 1 producto de tu carrito ahora, así que todavía no puedes pagar."
+      : `No pudimos comprobar ${count} productos de tu carrito ahora, así que todavía no puedes pagar.`,
+  retry: "Intentar de nuevo",
+  storeClosed: "Esta tienda no está aceptando pedidos ahora, así que no se puede pagar nada de tu carrito aquí. No se cobró nada.",
   note: "Pagas una sola vez, en la página segura de Stripe. Cada producto se entrega igual que si lo compraras por separado.",
   empty: "Tu carrito está vacío.",
   gone: "No está disponible en un carrito ahora mismo: cómpralo desde su propia página.",
@@ -81,9 +111,15 @@ const es: CartWords = {
       : `No se pueden enviar con el resto de tu carrito (país de envío: ${country}): ${titles}. Quítalos para pagar y cómpralos desde sus propias páginas.`,
   notTo: (country) => `${country} no está entre ellos.`,
   mixed: "Los productos que se envían y los que recibes en línea no se pueden pagar juntos en un carrito. Quita un tipo para pagar y compra los otros por separado.",
+  soldOut: "Agotado. No está en tu total.",
   loading: "Comprobando los precios…",
   close: "Cerrar",
   changed: "Algo de tu carrito cambió desde que lo añadiste. Revísalo y vuelve a pagar.",
+  /** The billing country (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate), and the two answers about it. */
+  billingCountry: "País desde el que compras",
+  chooseCountry: "Elige tu país",
+  abroad: "Todavía no se puede comprar desde la Unión Europea ni el Reino Unido, porque aún no podemos cobrar el IVA que esos países exigen. No se ha cobrado nada. Si estás fuera de ellos, elige tu país y vuelve a pagar.",
+  country: "Elige el país desde el que compras y vuelve a pagar. No se ha cobrado nada.",
   error: "No se pudo abrir la página de pago. No se cobró nada. Inténtalo de nuevo en un momento.",
   leftTitle: "Te fuiste antes de pagar tu carrito",
   backToCart: "Volver a tu carrito",
@@ -120,6 +156,16 @@ const fr: CartWords = {
   dealHint: (min, percent) => `${percent}${S}% de remise dès ${min} achetés ensemble.`,
   total: "Total",
   checkout: (total) => `Payer · ${total}`,
+  /** The button when the prices could not be checked: no amount it cannot vouch for (Stripe's page shows the exact total). */
+  checkoutUnpriced: "Payer",
+  /** Said instead of the total when the cart's prices could not be read again. */
+  unchecked: "Nous n'avons pas pu vérifier les prix pour le moment, donc aucun total n'est affiché. La page de paiement affiche le total exact avant que vous payiez.",
+  uncheckedSome: (count) =>
+    count <= 1
+      ? "Nous n'avons pas pu vérifier 1 produit de votre panier pour le moment, vous ne pouvez donc pas encore payer."
+      : `Nous n'avons pas pu vérifier ${count} produits de votre panier pour le moment, vous ne pouvez donc pas encore payer.`,
+  retry: "Réessayer",
+  storeClosed: `Cette boutique ne prend pas de commandes pour le moment${S}: rien dans votre panier ne peut être payé ici. Rien n'a été débité.`,
   note: "Vous payez une seule fois, sur la page sécurisée de Stripe. Chaque produit est remis exactement comme s'il était acheté seul.",
   empty: "Votre panier est vide.",
   gone: `Pas disponible dans un panier pour l'instant${S}: achetez-le depuis sa propre page.`,
@@ -129,9 +175,15 @@ const fr: CartWords = {
       : `Ne peuvent pas être livrés avec le reste de votre panier (pays de livraison${S}: ${country})${S}: ${titles}. Retirez-les pour payer, et achetez-les depuis leurs propres pages.`,
   notTo: (country) => `${country} n'en fait pas partie.`,
   mixed: `Les produits livrés et les produits reçus en ligne ne peuvent pas être payés ensemble dans un panier. Retirez-en un type pour payer, et achetez les autres à part.`,
+  soldOut: `Épuisé. Il n'est pas compté dans votre total.`,
   loading: "Vérification des prix…",
   close: "Fermer",
   changed: "Quelque chose a changé dans votre panier depuis votre ajout. Vérifiez-le et payez de nouveau.",
+  /** The billing country (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate), and the two answers about it. */
+  billingCountry: "Pays depuis lequel vous achetez",
+  chooseCountry: "Choisissez votre pays",
+  abroad: "Ce panier ne peut pas encore être payé depuis l'Union européenne ni le Royaume-Uni, car nous ne pouvons pas encore facturer la TVA que ces pays exigent. Rien n'a été débité. Si vous êtes en dehors de ces pays, choisissez votre pays et payez de nouveau.",
+  country: "Choisissez le pays depuis lequel vous achetez, puis payez de nouveau. Rien n'a été débité.",
   error: "La page de paiement n'a pas pu s'ouvrir. Rien n'a été débité. Réessayez dans un instant.",
   leftTitle: "Vous avez quitté la page avant de payer votre panier",
   backToCart: "Retour à votre panier",
@@ -168,6 +220,16 @@ const de: CartWords = {
   dealHint: (min, percent) => `${percent}${S}% Rabatt, wenn Sie ${min} oder mehr zusammen kaufen.`,
   total: "Gesamt",
   checkout: (total) => `Zur Kasse · ${total}`,
+  /** The button when the prices could not be checked: no amount it cannot vouch for (Stripe's page shows the exact total). */
+  checkoutUnpriced: "Zur Kasse",
+  /** Said instead of the total when the cart's prices could not be read again. */
+  unchecked: "Wir konnten die Preise gerade nicht prüfen, daher wird keine Summe angezeigt. Die Zahlungsseite zeigt die genaue Summe, bevor Sie bezahlen.",
+  uncheckedSome: (count) =>
+    count === 1
+      ? "Wir konnten 1 Produkt in Ihrem Warenkorb gerade nicht prüfen, daher können Sie noch nicht bezahlen."
+      : `Wir konnten ${count} Produkte in Ihrem Warenkorb gerade nicht prüfen, daher können Sie noch nicht bezahlen.`,
+  retry: "Erneut versuchen",
+  storeClosed: "Dieser Shop nimmt gerade keine Bestellungen an, daher kann hier nichts aus Ihrem Warenkorb bezahlt werden. Es wurde nichts abgebucht.",
   note: "Sie bezahlen einmal, auf der sicheren Seite von Stripe. Jedes Produkt wird genau so übergeben, als hätten Sie es einzeln gekauft.",
   empty: "Ihr Warenkorb ist leer.",
   gone: "Gerade nicht im Warenkorb erhältlich: Kaufen Sie es auf seiner eigenen Seite.",
@@ -177,9 +239,15 @@ const de: CartWords = {
       : `Können nicht mit dem Rest Ihres Warenkorbs geliefert werden (Lieferland: ${country}): ${titles}. Entfernen Sie sie, um zu bezahlen, und kaufen Sie sie auf ihren eigenen Seiten.`,
   notTo: (country) => `${country} gehört nicht dazu.`,
   mixed: "Versandprodukte und Online-Produkte können nicht zusammen in einem Warenkorb bezahlt werden. Entfernen Sie eine Art, um zu bezahlen, und kaufen Sie die anderen einzeln.",
+  soldOut: "Ausverkauft. Es ist nicht in Ihrer Summe.",
   loading: "Preise werden geprüft…",
   close: "Schließen",
   changed: "Seit dem Hinzufügen hat sich etwas in Ihrem Warenkorb geändert. Prüfen Sie ihn und gehen Sie erneut zur Kasse.",
+  /** The billing country (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate), and the two answers about it. */
+  billingCountry: "Land, aus dem Sie kaufen",
+  chooseCountry: "Land auswählen",
+  abroad: "Aus der Europäischen Union und dem Vereinigten Königreich kann noch nicht gekauft werden, weil wir die dort verlangte Mehrwertsteuer noch nicht berechnen können. Es wurde nichts berechnet. Wenn Sie sich außerhalb davon befinden, wählen Sie Ihr Land und gehen Sie erneut zur Kasse.",
+  country: "Wählen Sie das Land, aus dem Sie kaufen, und gehen Sie erneut zur Kasse. Es wurde nichts berechnet.",
   error: "Die Zahlungsseite konnte nicht geöffnet werden. Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal.",
   leftTitle: "Sie haben die Seite verlassen, bevor Sie Ihren Warenkorb bezahlt haben",
   backToCart: "Zurück zu Ihrem Warenkorb",
@@ -216,6 +284,16 @@ const it: CartWords = {
   dealHint: (min, percent) => `${percent}% di sconto comprandone ${min} o più insieme.`,
   total: "Totale",
   checkout: (total) => `Paga · ${total}`,
+  /** The button when the prices could not be checked: no amount it cannot vouch for (Stripe's page shows the exact total). */
+  checkoutUnpriced: "Paga",
+  /** Said instead of the total when the cart's prices could not be read again. */
+  unchecked: "Non è stato possibile controllare i prezzi in questo momento, quindi non è mostrato alcun totale. La pagina di pagamento mostra il totale esatto prima che tu paghi.",
+  uncheckedSome: (count) =>
+    count === 1
+      ? "Non è stato possibile controllare 1 prodotto del tuo carrello in questo momento, quindi non puoi ancora pagare."
+      : `Non è stato possibile controllare ${count} prodotti del tuo carrello in questo momento, quindi non puoi ancora pagare.`,
+  retry: "Riprova",
+  storeClosed: "Questo negozio non accetta ordini in questo momento, quindi qui non si può pagare nulla del tuo carrello. Non è stato addebitato nulla.",
   note: "Paghi una volta sola, sulla pagina sicura di Stripe. Ogni prodotto viene consegnato esattamente come se lo comprassi da solo.",
   empty: "Il tuo carrello è vuoto.",
   gone: "Al momento non disponibile in un carrello: compralo dalla sua pagina.",
@@ -225,9 +303,15 @@ const it: CartWords = {
       : `Non possono essere spediti con il resto del carrello (paese di spedizione: ${country}): ${titles}. Toglili per pagare e comprali dalle loro pagine.`,
   notTo: (country) => `${country} non è tra questi.`,
   mixed: "I prodotti spediti e quelli che ricevi online non si possono pagare insieme in un carrello. Togli un tipo per pagare e compra gli altri a parte.",
+  soldOut: "Esaurito. Non è nel tuo totale.",
   loading: "Controllo dei prezzi…",
   close: "Chiudi",
   changed: "Qualcosa nel tuo carrello è cambiato da quando l'hai aggiunto. Controllalo e paga di nuovo.",
+  /** The billing country (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate), and the two answers about it. */
+  billingCountry: "Paese da cui acquisti",
+  chooseCountry: "Scegli il tuo paese",
+  abroad: "Non si può ancora acquistare dall'Unione europea o dal Regno Unito, perché non possiamo ancora addebitare l'IVA che questi paesi richiedono. Non è stato addebitato nulla. Se ti trovi fuori da questi paesi, scegli il tuo paese e paga di nuovo.",
+  country: "Scegli il paese da cui acquisti e paga di nuovo. Non è stato addebitato nulla.",
   error: "Non è stato possibile aprire la pagina di pagamento. Non è stato addebitato nulla. Riprova tra poco.",
   leftTitle: "Hai lasciato la pagina prima di pagare il tuo carrello",
   backToCart: "Torna al tuo carrello",
@@ -264,6 +348,16 @@ const nl: CartWords = {
   dealHint: (min, percent) => `${percent}% korting als je er ${min} of meer samen koopt.`,
   total: "Totaal",
   checkout: (total) => `Afrekenen · ${total}`,
+  /** The button when the prices could not be checked: no amount it cannot vouch for (Stripe's page shows the exact total). */
+  checkoutUnpriced: "Afrekenen",
+  /** Said instead of the total when the cart's prices could not be read again. */
+  unchecked: "We konden de prijzen nu niet controleren, dus er wordt geen totaal getoond. De betaalpagina toont het exacte totaal voordat je betaalt.",
+  uncheckedSome: (count) =>
+    count === 1
+      ? "We konden 1 product in je winkelwagen nu niet controleren, dus je kunt nog niet betalen."
+      : `We konden ${count} producten in je winkelwagen nu niet controleren, dus je kunt nog niet betalen.`,
+  retry: "Opnieuw proberen",
+  storeClosed: "Deze winkel neemt nu geen bestellingen aan, dus niets in je winkelwagen kan hier worden betaald. Er is niets afgeschreven.",
   note: "Je betaalt één keer, op de beveiligde pagina van Stripe. Elk product wordt precies zo geleverd als wanneer je het los koopt.",
   empty: "Je winkelwagen is leeg.",
   gone: "Nu niet beschikbaar in een winkelwagen: koop het op zijn eigen pagina.",
@@ -273,9 +367,15 @@ const nl: CartWords = {
       : `Kunnen niet met de rest van je winkelwagen worden verzonden (verzendland: ${country}): ${titles}. Haal ze eruit om te betalen en koop ze op hun eigen pagina's.`,
   notTo: (country) => `${country} hoort er niet bij.`,
   mixed: "Producten die worden verzonden en producten die je online krijgt, kunnen niet samen in één winkelwagen worden betaald. Haal één soort eruit om te betalen en koop de andere apart.",
+  soldOut: "Uitverkocht. Het telt niet mee in je totaal.",
   loading: "Prijzen controleren…",
   close: "Sluiten",
   changed: "Er is iets in je winkelwagen veranderd sinds je het toevoegde. Bekijk het en reken opnieuw af.",
+  /** The billing country (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate), and the two answers about it. */
+  billingCountry: "Land waaruit je koopt",
+  chooseCountry: "Kies je land",
+  abroad: "Kopen vanuit de Europese Unie of het Verenigd Koninkrijk kan nog niet, omdat we de btw die die landen vragen nog niet kunnen berekenen. Er is niets afgeschreven. Ben je daarbuiten, kies dan je land en reken opnieuw af.",
+  country: "Kies het land waaruit je koopt en reken opnieuw af. Er is niets afgeschreven.",
   error: "De betaalpagina kon niet worden geopend. Er is niets afgeschreven. Probeer het zo opnieuw.",
   leftTitle: "Je ging weg voordat je je winkelwagen had betaald",
   backToCart: "Terug naar je winkelwagen",
@@ -312,6 +412,16 @@ const pt: CartWords = {
   dealHint: (min, percent) => `${percent}% de desconto ao comprar ${min} ou mais em conjunto.`,
   total: "Total",
   checkout: (total) => `Pagar · ${total}`,
+  /** The button when the prices could not be checked: no amount it cannot vouch for (Stripe's page shows the exact total). */
+  checkoutUnpriced: "Pagar",
+  /** Said instead of the total when the cart's prices could not be read again. */
+  unchecked: "Não foi possível verificar os preços agora, por isso nenhum total é mostrado. A página de pagamento mostra o total exato antes de pagar.",
+  uncheckedSome: (count) =>
+    count === 1
+      ? "Não foi possível verificar 1 produto do seu carrinho agora, por isso ainda não é possível pagar."
+      : `Não foi possível verificar ${count} produtos do seu carrinho agora, por isso ainda não é possível pagar.`,
+  retry: "Tentar novamente",
+  storeClosed: "Esta loja não está a aceitar pedidos agora, por isso nada no seu carrinho pode ser pago aqui. Nada foi cobrado.",
   note: "Paga uma única vez, na página segura da Stripe. Cada produto é entregue exatamente como se o comprasse em separado.",
   empty: "O seu carrinho está vazio.",
   gone: "Não está disponível num carrinho neste momento: compre-o na sua própria página.",
@@ -321,9 +431,15 @@ const pt: CartWords = {
       : `Não podem ser enviados com o resto do carrinho (país de envio: ${country}): ${titles}. Retire-os para pagar e compre-os nas suas próprias páginas.`,
   notTo: (country) => `${country} não está entre eles.`,
   mixed: "Os produtos enviados e os produtos que recebe online não podem ser pagos juntos num carrinho. Retire um dos tipos para pagar e compre os outros à parte.",
+  soldOut: "Esgotado. Não está no seu total.",
   loading: "A verificar os preços…",
   close: "Fechar",
   changed: "Algo no seu carrinho mudou desde que o adicionou. Reveja-o e pague novamente.",
+  /** The billing country (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate), and the two answers about it. */
+  billingCountry: "País a partir do qual compra",
+  chooseCountry: "Escolha o seu país",
+  abroad: "Ainda não é possível comprar a partir da União Europeia nem do Reino Unido, porque ainda não conseguimos cobrar o IVA que esses países exigem. Nada foi cobrado. Se estiver fora destes países, escolha o seu país e pague novamente.",
+  country: "Escolha o país a partir do qual compra e pague novamente. Nada foi cobrado.",
   error: "Não foi possível abrir a página de pagamento. Nada foi cobrado. Tente novamente daqui a pouco.",
   leftTitle: "Saiu antes de pagar o seu carrinho",
   backToCart: "Voltar ao seu carrinho",

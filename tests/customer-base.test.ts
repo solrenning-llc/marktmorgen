@@ -1,10 +1,14 @@
 import {planPaymentDisputeFixture, zeroExposureFixture } from './margin-test-fixtures';
 import {fundedCustomerScenario,fundedCustomerWithAi} from './margin-test-fixtures';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { assessMinimumCustomerBase, type CustomerBaseReview, type CustomerBaseUnit } from '../lib/customer-base-rules';
 import { type CustomerWorstCase } from '../lib/net-margin-rules';
 import { commercialMarginReady, CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, REQUIRED_MARGIN_SCENARIOS, BASE_PLAN_REVENUE_CEILINGS, type CommercialMarginReview } from '../lib/commercial-margin';
+// The synthetic review names this month when it is made (tests/margin-test-fixtures.ts zeroExposureFixture) and the
+// code reads the month again on every call: a run crossing 00:00 UTC on a month's last day failed the review. Only Date
+// is stopped, for the whole run; timers and performance.now() run as usual.
+mock.timers.enable({ apis: ['Date'], now: Date.now() });
 const scenario = (gross=10000,net=7000,months:1|12=1): CustomerWorstCase => fundedCustomerScenario(gross,net,months===12?'creator_year_full':'creator_month_full');
 const fixed=(amount=10000,count=10):CustomerBaseReview=>({monthlyFixedCostsCeilingCents:amount,monthlyFixedTaxesCeilingCents:0,allFixedCostsBounded:true,allFixedTaxesReviewed:true,fixedCostsEvidence:'TEST ONLY',fixedTaxEvidence:'TEST ONLY',reviewedPayingCustomers:count});
 const unit=(gross=10000,net=7000,months:1|12=1):CustomerBaseUnit=>({months,scenario:scenario(gross,net,months)});
@@ -89,7 +93,7 @@ test('minimum-base binds the mandatory TX review to the captured unit period',()
  assert.equal(assessMinimumCustomerBase([{months:1,scenario:scenario(10000,7000,12)}],fixed()).status,'unknown');
  assert.equal(assessMinimumCustomerBase([unit(22000,15401,12)],fixed(18342,15)).minimumCustomers,15);
 });
-test('minimum-base tax period uses the captured own months without a second supplied read',()=>{
+test('minimum-base tax period rejects a proxied unit before descriptor substitution',()=>{
  let monthDescriptors=0,getReads=0;
  const supplied=new Proxy(unit(),{
   get(){getReads++;throw new Error('unreviewed read');},
@@ -102,8 +106,8 @@ test('minimum-base tax period uses the captured own months without a second supp
   },
  });
  assert.deepEqual(assessMinimumCustomerBase([supplied],fixed(10000,2)),
-  {status:'calculated',minimumCustomers:2,reviewedBaseSufficient:true});
- assert.equal(monthDescriptors,1);
+  {status:'unknown',minimumCustomers:null,reviewedBaseSufficient:false});
+ assert.equal(monthDescriptors,0);
  assert.equal(getReads,0);
  const mismatch={months:12 as const,scenario:scenario(10000,7000,1)};
  assert.equal(assessMinimumCustomerBase([mismatch],fixed()).minimumCustomers,null);

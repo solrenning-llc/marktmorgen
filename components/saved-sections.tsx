@@ -144,7 +144,7 @@ export function SavedSections({
         if (event.currentTarget.open && sections === null) void load();
       }}
     >
-      <summary className="cursor-pointer text-sm font-semibold text-ink">
+      <summary className="-my-3 cursor-pointer py-3 text-sm font-semibold text-ink">
         <span className="inline-flex items-center gap-2">
           <Icon name="layout" size={17} />
           Saved sections

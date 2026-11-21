@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
-import { setProductCall, storeForEmail } from "@/lib/store";
+import { type Store, setProductCall, storeForEmail } from "@/lib/store";
 import { type CallSetup, readSetup } from "@/lib/call-setup";
-import { checkCallChange } from "@/lib/calls";
+import { checkCallChange, withCallLock } from "@/lib/calls";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { usableProviders } from "@/lib/meet-connect";
 import { readTeams, writeTeam } from "@/lib/team-booking";
@@ -20,8 +20,11 @@ import { toMajor } from "@/lib/money";
  * that account connected and working (lib/meet-connect.ts).
  */
 export async function POST(request: NextRequest) {
-  // Fifty dated sessions, each with its own meeting link, fit well inside this.
-  const guarded = await guardStoreWrite(request, "products", 40_000);
+  // Fifty dated sessions, each with its own meeting link, fit well inside this. Turning a call back into a product
+  // deletes its whole setup (hours, dated sessions with their meeting links, place) and its team of hosts for good,
+  // so it is named "remove" to the guard: a locked session (lib/two-step.ts LOCKED_ACTIONS.products) waits for it.
+  // Adding and editing a call stay open.
+  const guarded = await guardStoreWrite(request, "products", 40_000, (sent) => (sent.remove === true ? "remove" : ""));
   if (!guarded.ok) return guarded.response;
 
   const id = text(guarded.body.id, 40);
@@ -49,8 +52,15 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // The store whose bookings the change is checked against, under its calendar lock below. Read for a removal too, so
+    // turning the call off also waits for a booking in flight to let the lock go (Codex P on #4023): never a call
+    // removed while a buyer's checkout for it opens.
+    const store: Store | null = await storeForEmail(guarded.ref);
+    // guardStoreWrite has already read this store, so null here is a read that could not be had (rule 24; Claude 6 on
+    // #4023), never "a store with no calendar": nothing is written, a change or a removal, rather than one made
+    // without the lock a booking takes.
+    if (!store) return Response.json({ ok: false, error: "error" }, { status: 503 });
     if (setup) {
-      const store = await storeForEmail(guarded.ref);
       if (store) {
         // Other lengths than the call's own, each with its price (lib/call-lengths.ts): the call's own first, at the product's price.
         const extra = guarded.body.lengths;
@@ -73,14 +83,29 @@ export async function POST(request: NextRequest) {
           if (!read.ok) return Response.json({ ok: false, error: "lengths", problem: read.problem, ...(read.index !== undefined ? { index: read.index } : {}), ...(read.minutes ? { minutes: read.minutes } : {}) }, { status: 400 });
           setup = { ...setup, lengths: read.lengths };
         }
-        const checked = await checkCallChange(store, id, setup);
-        if (typeof checked === "string") {
-          return Response.json({ ok: false, error: checked }, { status: checked === "error" ? 503 : 400 });
-        }
-        setup = checked;
       }
     }
-    const result = await setProductCall(guarded.ref, id, setup);
+    // The check against what buyers booked and the write, under the lock a booking takes (lib/calls.ts withCallLock;
+    // issue #3983): no buyer books between them, and a booking in flight reads the call again once the lock is its own.
+    const asked = setup;
+    const checkedStore = store;
+    const saved = await withCallLock(checkedStore, async (keep) => {
+      let next = asked;
+      if (next && checkedStore) {
+        const checked = await checkCallChange(checkedStore, id, next);
+        if (typeof checked === "string") return { refused: checked };
+        next = checked;
+      }
+      // A check that outlasted the lock writes nothing: a buyer may have booked since.
+      if (!(await keep())) return { refused: "error" as const };
+      return { result: await setProductCall(guarded.ref, id, next), next };
+    });
+    if (saved === "error" || "refused" in saved) {
+      const error = saved === "error" ? "error" : saved.refused;
+      return Response.json({ ok: false, error }, { status: error === "error" ? 503 : 400 });
+    }
+    setup = saved.next;
+    const result = saved.result;
     if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
     // No longer a call: its team, if it had one, goes with it (lib/team-booking.ts).
     if (!setup) await writeTeam(result.store, id, null).catch((error) => console.error("dropping a call's team failed", error));

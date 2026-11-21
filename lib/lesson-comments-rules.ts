@@ -58,15 +58,22 @@ export function parseComment(raw: unknown): LessonComment | null {
   if (typeof raw !== "string") return null;
   try {
     const v = JSON.parse(raw) as Record<string, unknown>;
-    if (typeof v.id !== "string" || !COMMENT_ID_PATTERN.test(v.id)) return null;
-    if (typeof v.l !== "string" || typeof v.b !== "string" || typeof v.t !== "string") return null;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    if (!Object.hasOwn(v, "id") || typeof v.id !== "string" || !COMMENT_ID_PATTERN.test(v.id)) return null;
+    if (!Object.hasOwn(v, "l") || typeof v.l !== "string") return null;
+    if (!Object.hasOwn(v, "b") || typeof v.b !== "string") return null;
+    if (!Object.hasOwn(v, "t") || typeof v.t !== "string") return null;
+    if (!Object.hasOwn(v, "a") || typeof v.a !== "number" || !Number.isSafeInteger(v.a) || v.a < 0) return null;
+    if (Object.hasOwn(v, "n") && typeof v.n !== "string") return null;
+    if (Object.hasOwn(v, "r") && v.r !== null && (typeof v.r !== "string" || !COMMENT_ID_PATTERN.test(v.r))) return null;
+    if (Object.hasOwn(v, "h") && typeof v.h !== "boolean") return null;
     return {
       id: v.id,
       lesson: v.l,
       by: v.b,
       name: typeof v.n === "string" ? v.n : "",
       text: v.t,
-      at: Number(v.a) || 0,
+      at: v.a,
       parent: typeof v.r === "string" && COMMENT_ID_PATTERN.test(v.r) ? v.r : null,
       hidden: v.h === true,
     };

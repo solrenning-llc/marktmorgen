@@ -25,6 +25,7 @@ import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, claimHandle, ensureStatsId, setCartDeal, setProductBundle, setProductFunnel, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { funnelView, newUpsellKey, readUpsell, takeUpsell } from "@/lib/upsell";
+import { shownRef } from "./upsell-ref-fixture";
 import { CART_OFFER_REQUEST_UNITS, cartOfferFrom, cartOfferOwner } from "@/lib/cart-offers";
 import { createCartCheckout } from "@/lib/cart-checkout";
 import { store as redis } from "./redis-stub";
@@ -192,8 +193,8 @@ async function main(): Promise<void> {
     ...more,
   });
   const breadListing = (await readListing(store, bread))!;
-  const take = (session: string, step: string, answer: "yes" | "no", secret: string | undefined = browser.secret) =>
-    takeUpsell({ store, session, secret, origin, step, answer, consent: TEST_CONSENT });
+  const take = async (session: string, step: string, answer: "yes" | "no", secret: string | undefined = browser.secret) =>
+    takeUpsell({ store, session, secret, origin, step: await shownRef(store, step), answer, consent: TEST_CONSENT });
   // As the thanks page asks: the cart's first line, and every other line of the order (its "bumps").
   const view = (session: string, email: string, offerFrom: string | null = course, secret: string | undefined = browser.secret, alsoOwned: string[] = [course]) =>
     funnelView({ store, session, product: breadListing, alsoOwned, eligible: true, created: NOW - 60, secret, upsellKey: browser.fingerprint, cart: { offerFrom, email } });

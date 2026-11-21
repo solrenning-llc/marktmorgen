@@ -143,7 +143,9 @@ function mappedFunnel(funnel: Product["funnel"], map: IdMap, left: ProductLeft):
 /**
  * The copy of one product, as a draft of the other store with the id `id`:
  * the creator's words, prices, schedules, checkout questions and offers,
- * with every product it names mapped to that product's copy. Never its file
+ * its shipping and the legal information filled for it (only the main
+ * price's net quantity, since options are not copied), with every product it
+ * names mapped to that product's copy. Never its file
  * or picture (the first store's storage), its thank-you note or anything
  * sold, counted or answered.
  */
@@ -168,6 +170,7 @@ export function copiedProduct(product: Product, id: string, map: IdMap, now: str
     }
     return [{ ...bump, productId }];
   });
+  const legal = product.legal ? { ...product.legal, quantities: product.legal.quantities.filter((quantity) => quantity.price === "") } : null;
   return {
     id,
     title: product.title,
@@ -202,6 +205,7 @@ export function copiedProduct(product: Product, id: string, map: IdMap, now: str
     intro: product.intro ?? null,
     yearly: product.yearly ?? null,
     shipping: product.shipping ?? null,
+    ...(legal ? { legal } : {}),
     hidden: true,
   };
 }
@@ -216,7 +220,8 @@ export const emptyBlocksLeft = (): BlocksLeft => ({ pictures: 0, refs: 0, review
  * first left out (reviews are the first store's buyers'), every product and
  * form named mapped to its copy, and no tie to a section saved in the first
  * store. The blocks keep their ids, so writing the same copy again writes
- * the same page.
+ * the same page. A divider or a space (375 [TB1]) holds nothing of the first
+ * store's, so it comes across as it is.
  */
 export function copiedBlocks(blocks: readonly PageBlock[], products: IdMap, forms: IdMap, left: BlocksLeft): PageBlock[] {
   return blocks.flatMap((original): PageBlock[] => {

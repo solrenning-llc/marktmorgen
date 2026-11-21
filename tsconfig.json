@@ -12,6 +12,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
+    "jsxImportSource": "@/lib/content-jsx",
     "incremental": true,
     "plugins": [
       {

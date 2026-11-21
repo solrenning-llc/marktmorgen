@@ -57,6 +57,9 @@ export function keyName(name: string): string {
     .replace(/[^A-Za-z0-9._-]+/g, "-")
     .replace(/-{2,}/g, "-")
     .replace(/-+\./g, ".")
+    // Dots in a row become one ("…" is three once NFKD has taken it apart): a path holding ".." is refused by
+    // isVaultPath, so an upload under one would open at the store and could never be signed, joined or cancelled.
+    .replace(/\.{2,}/g, ".")
     .replace(/^[-.]+|[-.]+$/g, "");
   return plain.slice(-120) || "file";
 }
@@ -86,7 +89,11 @@ export function readVaultPath(pathname: unknown): { folder: string; ownerId: str
 export function isVaultPath(pathname: unknown): boolean {
   if (typeof pathname !== "string" || pathname.includes("..") || pathname.includes("//")) return false;
   const parts = pathname.split("/");
-  return parts.length >= 4 && parts[0] === VAULT_PREFIX && FOLDER_PATTERN.test(parts[1]) && parts.slice(2).every((piece) => KEY_NAME_PATTERN.test(piece));
+  // A piece is a plain name, or a file's own last piece: its 16-hex token, "-" and a name of up to 120 characters
+  // (vaultPath), so a name the store keeps never makes a path this refuses (Codex X5 on #4356).
+  const piece = (part: string) =>
+    KEY_NAME_PATTERN.test(part) || (TOKEN_PATTERN.test(part.slice(0, 16)) && part[16] === "-" && KEY_NAME_PATTERN.test(part.slice(17)));
+  return parts.length >= 4 && parts[0] === VAULT_PREFIX && FOLDER_PATTERN.test(parts[1]) && parts.slice(2).every(piece);
 }
 
 /** Whether a path is a file of this store, on this product, option or lesson. */

@@ -24,8 +24,15 @@ export async function resetVoiceOverRunner(options={}){
    throw Error("VoiceOver process inventory is unknown");
   return result;
  }
- function owned(pid){
-  const line=command("/bin/ps",["-p",String(pid),"-o","uid=","-o","stat=","-o","comm="]).trim();
+ function owned(pid,allowMissing=false){
+  let line;
+  try{line=command("/bin/ps",["-p",String(pid),"-o","uid=","-o","stat=","-o","comm="]).trim();}
+  catch(error){
+   // Only a process whose exact identity was proved above may disappear after
+   // it was signalled. Other ps failures remain unknown and fail closed.
+   if(allowMissing&&error.status===1&&error.signal==null)return null;
+   throw error;
+  }
   const match=/^(\d+)\s+([A-Za-z+<>=-]{1,16})\s+(.+)$/.exec(line);
   if(!match||Number(match[1])!==uid||match[3]!==EXECUTABLE)
    throw Error("Refusing VoiceOver reset outside the runner user and exact Apple executable");
@@ -34,7 +41,7 @@ export async function resetVoiceOverRunner(options={}){
  const found=pids();
  // A verified zombie has exited and cannot speak or handle events; it is not a live reader.
  // Keep it in the identity inventory, never signal it, and never treat an unknown state as stopped.
- const initial=found.map(owned);
+ const initial=found.map(pid=>owned(pid));
  // Ask the application to end its session before force-stopping a stuck process.
  // Guidepup 0.36.4 uses the same graceful-first lifecycle. A separate running
  // query avoids compiling a quit tell-block for an already closed application.
@@ -61,18 +68,19 @@ export async function resetVoiceOverRunner(options={}){
  if(initial.some(process=>!process.zombie))await wait(250);
  const remaining=pids().map(pid=>{
   if(!found.includes(pid))throw Error("VoiceOver process changed during runner preflight");
-  return owned(pid);
- });
+  return owned(pid,true);
+ }).filter(Boolean);
  let forced=0;
  for(const process of remaining)if(!process.zombie){
-  if(!owned(process.pid).zombie){kill(process.pid,"SIGKILL");forced++;}
+  const current=owned(process.pid,true);
+  if(current&&!current.zombie){kill(process.pid,"SIGKILL");forced++;}
  }
  let observed=[];
  for(let attempt=0;attempt<20;attempt++){
   observed=pids().map(pid=>{
    if(!found.includes(pid))throw Error("VoiceOver process changed during runner preflight");
-   return owned(pid);
-  });
+   return owned(pid,true);
+  }).filter(Boolean);
   if(observed.every(process=>process.zombie))
    return {initialProcesses:found.length,forcedProcesses:forced};
   await wait(100);

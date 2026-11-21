@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { reserveFundedExposure } from "@/lib/exposure-budget";
 import { CURRENT_EXPOSURE_BUDGET_POLICY, exposureBudgetConfiguration, type ExposureBudgetPolicy, type ExposureFundingContext } from "@/lib/exposure-budget-policy";
@@ -14,10 +15,26 @@ const dayOf = (now: number): string | null => {
   return /^\d{4}-\d{2}-\d{2}$/.test(day) && !day.startsWith("0000") ? day : null;
 };
 const number = (value: unknown): number | null => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : null;
+/** Redis replies are evidence only as ordinary, dense arrays of own data.
+ * Native Proxy detection must precede every reflective operation, so a reply
+ * cannot run a trap while pretending to be complete. */
+const exactArray = (reply: unknown): unknown[] | null => {
+  if (!Array.isArray(reply) || types.isProxy(reply) || Object.getPrototypeOf(reply) !== Array.prototype) return null;
+  if (Object.getOwnPropertySymbols(reply).length) return null;
+  const length = Object.getOwnPropertyDescriptor(reply, "length");
+  if (!length || !Object.hasOwn(length, "value") || !Number.isSafeInteger(length.value) || length.value < 0) return null;
+  if (Reflect.ownKeys(reply).length !== length.value + 1) return null;
+  const values: unknown[] = [];
+  for (let index = 0; index < length.value; index += 1) {
+    const field = Object.getOwnPropertyDescriptor(reply, String(index));
+    if (!field || !field.enumerable || !Object.hasOwn(field, "value")) return null;
+    values.push(field.value);
+  }
+  return values;
+};
 const ack = (reply: unknown): boolean => {
-  if (!Array.isArray(reply) || Object.getOwnPropertySymbols(reply).length) return false;
-  const length = Object.getOwnPropertyDescriptor(reply, "length"), value = Object.getOwnPropertyDescriptor(reply, "0");
-  return Boolean(length && Object.hasOwn(length, "value") && length.value === 1 && value && Object.hasOwn(value, "value") && value.value === 1);
+  const values = exactArray(reply);
+  return values?.length === 1 && values[0] === 1;
 };
 
 /** One store/day and a site-wide day ceiling, committed before any Stripe read.
@@ -60,15 +77,18 @@ export async function claimHeldRecheck(ref: string, now: number): Promise<boolea
   } catch { return false; }
 }
 export async function heldStoreKnown(ref: string): Promise<boolean> {
-  const [score] = await redisPipeline([["ZSCORE", INDEX, ref]]);
+  const reply = exactArray(await redisPipeline([["ZSCORE", INDEX, ref]]));
+  if (!reply || reply.length !== 1) throw new Error("held store observation is unknown");
+  const score = reply[0];
   if (score === null) return false;
   if (number(score) === null) throw new Error("held store observation is unknown");
   return true;
 }
 export async function heldStoresDue(now: number): Promise<string[]> {
   if (dayOf(now) === null) return [];
-  const [rows] = await redisPipeline([["ZRANGEBYSCORE", INDEX, "-inf", now, "LIMIT", 0, HELD_RECHECKS_PER_DAY]]);
-  if (!Array.isArray(rows) || rows.some(ref => !refValid(ref))) throw new Error("held store candidates are unknown");
+  const reply = exactArray(await redisPipeline([["ZRANGEBYSCORE", INDEX, "-inf", now, "LIMIT", 0, HELD_RECHECKS_PER_DAY]]));
+  const rows = reply?.length === 1 ? exactArray(reply[0]) : null;
+  if (!rows || rows.some(ref => typeof ref !== "string" || !refValid(ref))) throw new Error("held store candidates are unknown");
   return rows as string[];
 }
 /** Index changes invalidate the monthly observation in the same Redis operation. */
@@ -110,16 +130,110 @@ export async function recordHeldMonth(now: number, complete: boolean): Promise<v
   const reply = await redisPipeline([["EVAL", RECORD_HELD_MONTH, 2, INDEX, "nl:held:month:" + day.slice(0, 7), day, complete ? 1 : 0, HELD_MONTH_COUNT_SECONDS]]);
   if (!ack(reply)) throw new Error("held store count is unknown");
 }
+/**
+ * DONO-3: counted once per store in a month, in the same monthly hash as the held count: a mark under the store's
+ * hashed identity and its count, in one script, so a run tried again never counts it twice.
+ */
+export const HELD_ONCE = `-- marktmorgen:held-once:v1
+local t=redis.call('TYPE',KEYS[1]).ok
+if t~='none' and t~='hash' then return -1 end
+local raw=redis.call('HGET',KEYS[1],ARGV[2])
+if raw and (not string.match(raw,'^%d+$') or (raw~='0' and string.sub(raw,1,1)=='0')) then return -1 end
+if redis.call('HSETNX',KEYS[1],ARGV[1],'1')==1 then redis.call('HINCRBY',KEYS[1],ARGV[2],1) end
+redis.call('EXPIRE',KEYS[1],ARGV[3])
+return 1
+`;
+async function countOnce(ref: string, at: number, field: string): Promise<void> {
+  const day = dayOf(at);
+  if (!refValid(ref) || day === null) throw new Error("held store identity or clock is unknown");
+  const reply = await redisPipeline([["EVAL", HELD_ONCE, 1, "nl:held:month:" + day.slice(0, 7), field + ":" + identity(ref), field, HELD_MONTH_COUNT_SECONDS]]);
+  if (!ack(reply)) throw new Error("held store count is unknown");
+}
+/**
+ * A closed store closed without Stripe at its deadline (lib/plan-closing.ts, STRIPE_SILENT_DAYS), counted once in
+ * the month of `at`, the moment its record says it lapsed, so a run tried again in another month counts it there
+ * too never. Throws when not confirmed: the closing is then tried again, and counts it once.
+ */
+export async function recordLapsed(ref: string, at: number): Promise<void> {
+  await countOnce(ref, at, "lapsed");
+}
+/** Why a closing store is kept past the published time (ERASE_WITHIN_DAYS after its closing day). */
+export const OVERDUE_REASONS = ["key", "answer", "notice", "other"] as const;
+export type OverdueReason = (typeof OVERDUE_REASONS)[number];
+/** A closing store kept past the published time, counted once a month by reason, for the owner's report. */
+export async function recordOverdue(ref: string, reason: OverdueReason, now: number): Promise<void> {
+  await countOnce(ref, now, "over:" + reason);
+}
+/**
+ * Fourth pre-review of DONO-3: which creator accounts refused us (403 account_invalid) or answered on a UTC day,
+ * under hashed identities, kept ACCOUNT_NOTE_SECONDS. A creator who disconnects is one account; several distinct
+ * accounts refusing together is ours (Connect suspended for the platform, account ids gone wrong), never a lapse.
+ */
+export const ACCOUNT_NOTE_SECONDS = 3 * 86400;
+/** How a creator account replied on a day: refused us, gave no answer at all (Claude 3's H1 on #3463), or answered. */
+export type AccountReply = "refused" | "silent" | "answered";
+const accountsKey = (kind: AccountReply, day: string) => (kind === "refused" ? "nl:held:refused:" : kind === "silent" ? "nl:held:silent:" : "nl:held:answered:") + day;
+export async function noteAccountReply(account: string, reply: AccountReply | boolean, now: number): Promise<void> {
+  const day = dayOf(now);
+  if (!refValid(account) || day === null) throw new Error("account reply identity or clock is unknown");
+  const key = accountsKey(reply === true ? "refused" : reply === false ? "answered" : reply, day);
+  const values = exactArray(await redisPipeline([["HSET", key, identity(account), 1], ["EXPIRE", key, ACCOUNT_NOTE_SECONDS]]));
+  if (!values || values.length !== 2 || number(values[0]) === null || values[1] !== 1) throw new Error("account reply note is unknown");
+}
+/**
+ * Whether creator accounts refused together today or yesterday: three or more distinct accounts, or two or more
+ * and more than answered. Not known is together: it never lets a refusal delete.
+ */
+export async function accountsRefuseTogether(now: number): Promise<boolean> {
+  return accountsTogether("refused", now);
+}
+/** The same for accounts that gave no answer at all (Claude 3's H1 on #3463): several silent together is ours. */
+export async function accountsSilentTogether(now: number): Promise<boolean> {
+  return accountsTogether("silent", now);
+}
+async function accountsTogether(kind: "refused" | "silent", now: number): Promise<boolean> {
+  const today = dayOf(now), yesterday = dayOf(now - 86400_000);
+  if (today === null || yesterday === null) return true;
+  try {
+    const values = exactArray(await redisPipeline([["HLEN", accountsKey(kind, today)], ["HLEN", accountsKey("answered", today)], ["HLEN", accountsKey(kind, yesterday)], ["HLEN", accountsKey("answered", yesterday)]]));
+    const n = values?.map(number);
+    if (!n || n.length !== 4 || n.some((value) => value === null)) return true;
+    const together = (refused: number, answered: number) => refused >= 3 || (refused >= 2 && refused > answered);
+    return together(n[0] as number, n[1] as number) || together(n[2] as number, n[3] as number);
+  } catch { return true; }
+}
+/** The month's figures, known only once its last day was observed (as readHeldMonth); otherwise unknown, never zero. */
+async function monthFields(month: string, fields: string[]): Promise<(number | null)[] | null> {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;
+  try {
+    const reply = exactArray(await redisPipeline([["HMGET", "nl:held:month:" + month, "day", ...fields]]));
+    const values = reply?.length === 1 ? exactArray(reply[0]) : null;
+    if (!values || values.length !== fields.length + 1) return null;
+    const [year, m] = month.split("-").map(Number);
+    const last = new Date(0);
+    last.setUTCFullYear(year, m, 0);
+    if (values[0] !== last.toISOString().slice(0, 10)) return null;
+    return values.slice(1).map((value) => (value === null ? 0 : number(value)));
+  } catch { return null; }
+}
+/** The month's lapses (DONO-3): none recorded once its last day was observed is zero; otherwise unknown. */
+export async function readLapsedMonth(month: string): Promise<number | null> {
+  const values = await monthFields(month, ["lapsed"]);
+  return values?.[0] ?? null;
+}
+/** The month's closing stores kept past the published time, by reason; unknown, never zero, as above. */
+export async function readOverdueMonth(month: string): Promise<Record<OverdueReason, number> | null> {
+  const values = await monthFields(month, OVERDUE_REASONS.map((reason) => "over:" + reason));
+  if (!values || values.some((value) => value === null)) return null;
+  return Object.fromEntries(OVERDUE_REASONS.map((reason, i) => [reason, values[i] as number])) as Record<OverdueReason, number>;
+}
 export type HeldMonthCount = { month: string; count: number; peak: number };
 export async function readHeldMonth(month: string): Promise<HeldMonthCount | null> {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;
   try {
-    const [raw] = await redisPipeline([["HMGET", "nl:held:month:" + month, "count", "peak", "day", "complete"]]);
-    if (!Array.isArray(raw) || raw.length !== 4) return null;
-    if (Object.getOwnPropertySymbols(raw).length) return null;
-    const entries = Array.from({ length: 4 }, (_, i) => Object.getOwnPropertyDescriptor(raw, String(i)));
-    if (entries.some(entry => !entry || !Object.hasOwn(entry, "value"))) return null;
-    const values = entries.map(entry => entry!.value);
+    const reply = exactArray(await redisPipeline([["HMGET", "nl:held:month:" + month, "count", "peak", "day", "complete"]]));
+    const values = reply?.length === 1 ? exactArray(reply[0]) : null;
+    if (!values || values.length !== 4) return null;
     const count = number(values[0]), peak = number(values[1]);
     const [year, m] = month.split("-").map(Number);
     const last = new Date(0);

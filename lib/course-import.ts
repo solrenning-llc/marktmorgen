@@ -24,6 +24,8 @@ const title = (value: unknown): value is string =>
 /** No absolute paths, traversal, URL/drive syntax, escapes or hidden direction controls. */
 function localPath(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 256 &&
+    // UTF-8 replaces unpaired surrogates, so distinct inputs could name one file.
+    !/[\ud800-\udfff]/u.test(value) &&
     value === value.trim() && !/[\\:%?#\u0000-\u001f\u007f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/.test(value) &&
     value.split("/").every((part) => part !== "" && part !== "." && part !== ".." && part === part.trim());
 }

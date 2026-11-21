@@ -1,6 +1,7 @@
 import { EmailField } from "@/components/email-field";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
@@ -10,6 +11,8 @@ import { appLinks } from "@/lib/podcast-rules";
 import { SITE_URL } from "@/lib/site-url";
 import { speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { seesDrafts } from "@/lib/draft-view";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -52,6 +55,11 @@ export default async function PodcastPage({ params, searchParams }: Params) {
   const status = typeof query.status === "string" ? query.status : "";
   const grant = token ? await readFeedToken(token) : null;
   const mine = grant && grant.s === store.statsId && grant.p === product.id ? token : null;
+  // A draft podcast is for its listeners, with their own feed's token, and for
+  // the store's owner and team, signed in; anyone else goes where an id that
+  // does not exist goes (MM-SA-30). A listener without the token asks for it
+  // from their orders page, which lists their feeds.
+  if (product.hidden && !mine && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
   const feed = mine ? `${SITE_URL}/api/store/podcast/feed/${mine}.xml` : null;
   const notice = w.podcastNotices[status];
 

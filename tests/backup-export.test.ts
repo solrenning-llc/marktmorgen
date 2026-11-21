@@ -54,6 +54,8 @@ let page: number | null = null;
 let stuck = false;
 /** A key deleted just before the first DUMP request reaches the stand-in. */
 let dropBeforeDump: string | null = null;
+/** When set, every PEXPIRETIME reply is replaced by this value, one the code cannot read as a time. */
+let oddExpiry: { value: unknown } | null = null;
 const real = redis.pipeline.bind(redis);
 (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (list: (string | number)[][]) => {
   for (const command of list) sent.push(command.map(String));
@@ -70,6 +72,10 @@ const real = redis.pipeline.bind(redis);
   if (dropBeforeDump && list.some((command) => command[0] === "DUMP")) {
     redis.run(["DEL", dropBeforeDump]);
     dropBeforeDump = null;
+  }
+  if (oddExpiry && list.some((command) => command[0] === "PEXPIRETIME")) {
+    const replies = await real(list);
+    return replies.map((reply, i) => (list[i][0] === "PEXPIRETIME" ? oddExpiry!.value : reply));
   }
   return real(list);
 }) as typeof redis.pipeline;
@@ -138,6 +144,12 @@ async function main(): Promise<void> {
   const loop = await exportSnapshot({ maxRows: 1_000, maxCommands: 10_000, batch: 16, maxBytes: 4_000_000, now: T0 });
   stuck = false;
   is("a cursor that does not move: refused, not walked until the budget is spent", [loop.ok, !loop.ok && loop.reason, !loop.ok && loop.commands], [false, "unreadable", 2]);
+  for (const value of [true, "01", [1], "1792640000000"]) {
+    oddExpiry = { value };
+    const odd = await exportSnapshot({ maxRows: 1_000, maxCommands: 10_000, batch: 16, maxBytes: 4_000_000, now: T0 });
+    oddExpiry = null;
+    is(`an expiry answered as ${JSON.stringify(value)}: unreadable, never a key left out as already ended (CX-123 rule 24)`, [odd.ok, !odd.ok && odd.reason], [false, "unreadable"]);
+  }
   dropBeforeDump = "nl:queue:x";
   const dropped = await exportSnapshot({ maxRows: 1_000, maxCommands: 10_000, batch: 16, maxBytes: 4_000_000, now: T0 });
   is("a key deleted between the walk and its copy: the copy is made, without it", [dropped.ok, dropped.ok && dropped.snapshot.rows.length, dropped.ok && dropped.snapshot.rows.some((r) => r.key === "nl:queue:x")], [true, 44, false]);

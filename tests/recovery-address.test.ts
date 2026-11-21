@@ -15,6 +15,7 @@
  *     send it to the recovery address again, and a right code opens everything;
  *   - moving the sign-in address carries the recovery address.
  */
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { emailForSession } from "@/lib/auth";
@@ -22,7 +23,8 @@ import { studioAccess } from "@/lib/studio-route";
 import { LOCK_DAYS, confirmRecoveryAddress, keepRecoveryAddress, moveRecoveryAddress, recoveryAddress, recoveryLockUntil, sendLostEmailLink, startRecoveryAddress } from "@/lib/recovery-address";
 import { finishSetup, lockedUntil, startSetup } from "@/lib/two-step";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
-import { POST as lostRoute } from "@/app/api/auth/lost/route";
+import { POST as lostAnswer } from "@/app/api/auth/lost/route";
+import { afterTasks } from "./next-server-after-world";
 import { POST as lostConfirm } from "@/app/api/auth/lost/confirm/route";
 import { POST as callback } from "@/app/api/auth/callback/route";
 import { POST as codeRoute } from "@/app/api/auth/code/route";
@@ -59,6 +61,16 @@ async function linkFor(email: string): Promise<string> {
   const token = createHash("sha256").update(String(Math.random())).digest("hex");
   await redis.pipeline([["SET", `nl:auth:link:${createHash("sha256").update(`nimbus-auth-link:${token}`).digest("hex").slice(0, 40)}`, email, "EX", 900]]);
   return token;
+}
+
+/**
+ * The lost-inbox route, then what it leaves for after its answer (next/server `after`, held by
+ * tests/next-server-after-world.ts): since MM-SA-21 the link and the notice go after the answer.
+ */
+async function lostRoute(request: NextRequest): Promise<Response> {
+  const answer = await lostAnswer(request);
+  for (const task of afterTasks.splice(0)) await (task as () => Promise<unknown>)();
+  return answer;
 }
 
 const ME = "maker@example.com";
@@ -125,6 +137,19 @@ async function main(): Promise<void> {
   is("the recovery address goes with it", [await recoveryAddress(ME), await recoveryAddress("new@example.com")], ["", "spare@example.org"]);
   await moveRecoveryAddress("new@example.com", "spare@example.org");
   is("moved onto the recovery address itself, there is none left", await recoveryAddress("spare@example.org"), "");
+
+  part("Codes drawn evenly");
+  // A random byte taken modulo a million favours the low codes (CodeQL js/biased-cryptographic-random).
+  const source = readFileSync("lib/recovery-address.ts", "utf8");
+  is("the six digits come from randomInt, never a random value modulo a number", [/randomInt\(1_000_000\)/.test(source), /%\s*(?:[\w.]+\.length\b|\d[\d_]*\b)/.test(source)], [true, false]);
+  const lines: string[] = [];
+  for (let i = 0; i < 4; i += 1) {
+    await startRecoveryAddress(`even${i}@example.com`, SESSION, `spare-even${i}@example.org`);
+    lines.push(/^Your code: .*$/m.exec(lastTo(`spare-even${i}@example.org`))?.[0] ?? "");
+  }
+  is("each code sent is exactly six digits, zeros kept in front", lines.every((line) => /^Your code: \d{6}$/.test(line)), true);
+  await startRecoveryAddress("even9@example.com", SESSION, "spare-even9@example.org");
+  is("and a code sent is the one taken", await confirmRecoveryAddress("even9@example.com", SESSION, codeTo("spare-even9@example.org")), { address: "spare-even9@example.org" });
 
   part("The security warning tells only what the sender confirmed");
   // The official test transport uses the REAL guard with a synthetic review,

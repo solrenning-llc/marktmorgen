@@ -2,7 +2,7 @@ import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
 import { isMeetProvider } from "@/lib/call-setup";
-import { ACCOUNT_NAMES, NotConnected, disconnect, logProblem, meetView } from "@/lib/meet-connect";
+import { ACCOUNT_NAMES, NotConnected, disconnectFor, logProblem, meetView } from "@/lib/meet-connect";
 import { ProviderError, isConfigured } from "@/lib/meet-providers";
 import { makeTest, moveTest, removeTest, TestMeetingUnavailable } from "@/lib/meet-test";
 import { guardStoreWrite } from "@/lib/store-request";
@@ -18,7 +18,8 @@ export const maxDuration = 30;
  * The store's Google Calendar or Zoom connection, `{ action, provider }`:
  *
  *   disconnect   the access is given back to the provider, the tokens are
- *                deleted, and the owner is told by email (lib/meet-connect.ts)
+ *                deleted, and the owner is told by email (lib/meet-connect.ts);
+ *                `providerAccessRemoved: false` when the provider did not confirm it
  *   test         makes one test meeting on the connected account, or gives
  *                back the one already there (lib/meet-test.ts)
  *   movetest     moves that test meeting an hour later, as a buyer's move does
@@ -69,9 +70,13 @@ export async function POST(request: NextRequest) {
     }
   }
   try {
-    const was = await disconnect(store.statsId, provider);
-    if (was) after(() => noticeCreator(store, { kind: "meeting-disconnected", name: ACCOUNT_NAMES[provider], account: was.account }));
-    return Response.json({ ok: true, view: await meetView(store.statsId, store) });
+    const { view: was, providerAccessRemoved } = await disconnectFor(store.statsId, provider);
+    // Forgotten here either way; when the provider did not confirm it took the access back in this request, the page
+    // and the email say so. Nothing there counts as not confirmed: an earlier try may have stopped after forgetting it,
+    // its answer lost, and the retry has nothing to ask the provider (G review 5815599962).
+    const unconfirmed = providerAccessRemoved === false;
+    if (was) after(() => noticeCreator(store, { kind: "meeting-disconnected", name: ACCOUNT_NAMES[provider], account: was.account, ...(unconfirmed ? { provider, providerAccessRemoved: false as const } : {}) }));
+    return Response.json({ ok: true, view: await meetView(store.statsId, store), ...(providerAccessRemoved === false ? { providerAccessRemoved: false } : {}) });
   } catch (error) {
     console.error("disconnecting a meeting account failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

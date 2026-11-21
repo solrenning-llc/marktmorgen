@@ -3,10 +3,11 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { withinLimit, withinMonth } from "@/lib/request-guard";
 import { importAllowanceFor } from "@/lib/import-limits";
-import { costPauseCode } from "@/lib/plan-standing";
+import { newCostCode } from "@/lib/plan-standing";
 import { can } from "@/lib/team-roles";
 import { MAX_TRIMMED_PAGE_CHARS, convertSavedPage } from "@/lib/clickfunnels-page";
 import { planFunnelImport, saveFunnelImport } from "@/lib/clickfunnels-funnel";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * Moving a funnel from ClickFunnels (lib/clickfunnels-page.ts reads a page,
@@ -41,8 +42,9 @@ export async function POST(request: NextRequest) {
   // worst month counts (tests/plan-cost-registry.ts); the short windows only spread the work.
   const allowance = importAllowanceFor(store);
   // Nothing of a funnel migration runs while the plan's renewal is unpaid or a
-  // payment for it is disputed (232 [CA1] unit 4b2, lib/plan-standing.ts).
-  const paused = costPauseCode(store);
+  // payment for it is disputed (232 [CA1] unit 4b2, lib/plan-standing.ts),
+  // nor once the plan has ended (the original 4c, newCostCode).
+  const paused = newCostCode(store);
   if (paused) return refuse(paused, 409);
 
   try {
@@ -79,6 +81,9 @@ export async function POST(request: NextRequest) {
 
     return refuse("invalid");
   } catch (error) {
+    // The run ledger read in an unknown shape: nothing was made, and it may be tried again (lib/clickfunnels-funnel.ts readLedger,
+    // readRun). Not "unavailable": imports are switched on, the read failed.
+    if (error instanceof UnknownReplyError) return refuse("try_again", 503);
     console.error("a ClickFunnels funnel import failed", error);
     return refuse(action === "save" ? "setup_incomplete" : "server_error", 500);
   }

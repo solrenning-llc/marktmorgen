@@ -146,7 +146,14 @@ async function main() {
   is("an offer after paying, before it is charged", /admitOrders\(store, 1\)/.test(read("lib/upsell.ts")), true);
   is("a PayPal order, which is now counted too", [/admitOrders\(store, 1\)/.test(read("lib/paypal-sales.ts")), /countOrder\(store, `paypal:/.test(read("lib/paypal-sales.ts"))], [true, true]);
   is("a free copy", /admitOrders\(store, 1\)/.test(read("lib/free.ts")), true);
-  is("a counted checkout gives its original hour and item count to atomic accounting", /hour: session\.metadata\?\.\[ADMITTED_FIELD\], items, createdAtMs/.test(read("lib/purchase-email.ts")) && read("lib/orders.ts").includes('"EVAL", COMMIT_ORDER_CONFIRMATION, 6, seenKey(reference)'), true);
+  // Through settlePaidCheckout since the review of #4232 (Claude 4 cloud X): the same settle for every paid session but a
+  // Stripe recovery copy, which settles only by taking its original's record (tests/abandoned-checkout-hold.test.ts).
+  is("a counted checkout gives its hour back, and what it held", [
+    /settlePaidCheckout\(store, read\.session, read\.items \?\? 1\)/.test(read("lib/purchase-email.ts")),
+    /return settleAdmitted\(store, hour, 1, items\);/.test(read("lib/order-admission.ts")),
+    /if \(taken === holdMark\(Number\(hour\), store\)\) await settleAdmitted\(store, hour, 1, items\);/.test(read("lib/order-admission.ts")),
+  ], [true, true, true]);
+  is("a normal legacy checkout gives its captured hour and item count to atomic accounting", /\{ hour, items, createdAtMs \}/.test(read("lib/purchase-email.ts")) && read("lib/orders.ts").includes('"EVAL", COMMIT_ORDER_CONFIRMATION, 6, seenKey(reference)'), true);
   is("the field it travels in", ADMITTED_FIELD, "mm_admit");
   is("a refused buyer is told plainly, with nothing charged", [/OrdersPausedError/.test(read("app/api/store/checkout/route.ts")), read("app/api/store/checkout/route.ts").includes('status=${error.reason === "paused" ? "paused"'), /paused: \{ title:/.test(read("lib/buyer-words/en.ts"))], [true, true, true]);
   done();

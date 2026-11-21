@@ -79,6 +79,17 @@ export const CELL_NO = "\u2717";
 export const MAX_PAGE_BYTES = 120_000;
 /** The most a stored record is read at: the page and a second version, with room to spare. */
 export const MAX_STORED_PAGE_BYTES = MAX_PAGE_BYTES * 3;
+/**
+ * The studio units a draft's publish takes before it reads its sales page (app/api/store/product/route.ts,
+ * "visibility"), for a kept record of `bytes` UTF-8 bytes (STRLEN, lib/sales-page-store.ts keptPageBytes): the record is
+ * read twice, for the check and again under the store lock its saves are written under (Codex P on #3693), each read
+ * one GET of the whole record, the page and its second version, which moves its bytes, not its code units (Claude 6 on
+ * #3693), at the 50,000 bytes one studio unit is priced at (UNIT_COST.studio in tests/plan-cost-registry.ts). Taken
+ * besides the request's own unit (Claude 7 on #3693); a record grown past them before the second read is not read.
+ */
+export function publishPageUnits(bytes: number): number {
+  return Math.ceil((2 * Math.max(0, bytes)) / 50_000);
+}
 /** Things said about it elsewhere, in one block; the words of one, the name beside it, and its link. */
 export const MAX_QUOTES = 6;
 export const MAX_QUOTE = 400;
@@ -108,7 +119,9 @@ export type BlockKind =
   | "quotes"
   | "form"
   | "row"
-  | "booking";
+  | "booking"
+  | "divider"
+  | "space";
 
 export const BLOCK_KINDS: { kind: BlockKind; label: string; hint: string }[] = [
   { kind: "hero", label: "Hero", hint: "The big headline at the top, with the product's picture or a video." },
@@ -134,6 +147,9 @@ export const BLOCK_KINDS: { kind: BlockKind; label: string; hint: string }[] = [
   { kind: "form", label: "Form", hint: "One of your forms, surveys or quizzes, made under Forms: the questions, and where the answers lead. On your own pages." },
   // On a product's page only: not in SITE_KINDS (lib/site-page-rules.ts) nor in a saved section (lib/saved-blocks.ts, NOT_IN_SECTIONS).
   { kind: "row", label: "Columns", hint: "One to three columns side by side, each with headings, words, a list, icons, buttons, pictures or a video. One column on a phone." },
+  // On a product's page and a store's own pages (SITE_KINDS, lib/site-page-rules.ts).
+  { kind: "divider", label: "Divider", hint: "A thin line across the page, between two parts. Nothing to write." },
+  { kind: "space", label: "Space", hint: "Extra empty room between two parts of the page, on top of the usual gap: small, medium or large. Nothing to write." },
 ];
 
 export type VideoProvider = "youtube" | "vimeo" | "loom";
@@ -449,6 +465,25 @@ export const ROW_ELEMENT_KINDS: readonly RowElementKind[] = ["heading", "subhead
 export type RowBlock = { id: string; kind: "row"; columns: RowElement[][] };
 
 /**
+ * Two blocks that only arrange the page (375 [TB1], fifth complement, 29
+ * October 2026): a divider, one line across it, and a space, empty room of
+ * one of three sizes. Neither holds a word, a file or an address of the
+ * creator's, so neither has anything to translate, copy, check or pay for;
+ * each is drawn by the page's own markup and style, never the creator's.
+ * They count toward the page's MAX_BLOCKS like any other block.
+ */
+export type DividerBlock = { id: string; kind: "divider" };
+export type SpaceSize = "small" | "medium" | "large";
+export const SPACE_SIZES: { value: SpaceSize; label: string }[] = [
+  { value: "small", label: "Small" },
+  { value: "medium", label: "Medium" },
+  { value: "large", label: "Large" },
+];
+/** What a space is when no size, or one it does not know, was sent. */
+export const DEFAULT_SPACE_SIZE: SpaceSize = "medium";
+export type SpaceBlock = { id: string; kind: "space"; size: SpaceSize };
+
+/**
  * Where a block shows (added 8 October 2026): on every screen, which is
  * left unsaid, or only on phones, or only on computers and tablets — a
  * shorter list for a phone, a wide table only where it fits. The line
@@ -493,6 +528,8 @@ export type PageBlock = { screens?: BlockShow; saved?: string } & (
   | FormBlock
   | RowBlock
   | BookingBlock
+  | DividerBlock
+  | SpaceBlock
 );
 
 export type SalesPage = {
@@ -1143,6 +1180,11 @@ function parseBlock(raw: unknown): PageBlock | null {
     // Kept whole or not at all: without a call it books nothing, and its heading is never cut short (blocksProblem tells it back).
     case "booking":
       return bookingSentWhole(value) ? { id, kind: "booking", product: value.product as string, heading } : null;
+    // Only arrangement: its id, and a space's size, one of the three or the default. Nothing else sent is kept.
+    case "divider":
+      return { id, kind: "divider" };
+    case "space":
+      return { id, kind: "space", size: SPACE_SIZES.some((s) => s.value === value.size) ? (value.size as SpaceSize) : DEFAULT_SPACE_SIZE };
     default:
       return null;
   }
@@ -1395,6 +1437,10 @@ export function emptyBlock(kind: BlockKind, id = newBlockId()): PageBlock {
       return { id, kind, columns: [[], []] };
     case "booking":
       return { id, kind, product: "", heading: "" };
+    case "divider":
+      return { id, kind };
+    case "space":
+      return { id, kind, size: DEFAULT_SPACE_SIZE };
   }
 }
 

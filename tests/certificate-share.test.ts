@@ -5,7 +5,8 @@
  * issued in, its ID and the page that proves it, all read from the record;
  * the link to a LinkedIn post carries the page; the words on both buttons
  * are in every store language; and the picture a shared link unfolds into
- * says only what the record says, and nothing for a certificate withdrawn.
+ * says only what the record says, and nothing for a certificate withdrawn
+ * or expired (tests/certificate-card-standing.test.ts draws it).
  */
 import { linkedInAddUrl, linkedInShareUrl } from "@/lib/certificate";
 import { coursesWords } from "@/lib/buyer-words/courses";
@@ -33,7 +34,7 @@ async function main(): Promise<void> {
 
   part("The picture a shared link unfolds into");
   const card = readFileSync("app/[handle]/certificate/[id]/opengraph-image.tsx", "utf8");
-  is("drawn only for a certificate of that store that still stands", /found\.store === storeKey\(store\) && found\.withdrawnAt === 0/.test(card), true);
+  is("drawn only for a certificate of that store that still stands, neither withdrawn nor expired", /found\.store === storeKey\(store\) && standingOf\(found, [^)]+\)\) === "valid"/.test(card), true);
   is("from the record's own name, course and teacher", ["certificate.name", "certificate.title", "certificate.creator"].every((field) => card.includes(field)), true);
 
   done();

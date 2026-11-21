@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "@/components/toast";
-import { MAX_LETTER_PRODUCTS, MEMBERS_PUBLISH_WARNING, PUBLISH_WARNING } from "@/lib/letter-rules";
+import { LETTER_PREVIEW_MAX, MAX_LETTER_PRODUCTS, MEMBERS_PUBLISH_WARNING, PUBLISH_WARNING } from "@/lib/letter-rules";
 
 /** The studio's words for a request that failed on our side (components/email-studio.tsx says the same). */
 const SERVER_ERROR = "Something went wrong on our side. Try again in a moment.";
@@ -14,23 +14,27 @@ const SERVER_ERROR = "Something went wrong on our side. Try again in a moment.";
  * words (lib/letter-access.ts). Once published it says whether it is for
  * members only (lib/letters.ts, publishedLetters); when that could not be
  * read it says so and offers nothing that could publish it on a guess.
+ * With products checked, the creator may let everyone read its first parts
+ * (previewOf); none is the default.
  */
 export function PublishControl({ id, path, members, unknown, disabled, onDone, products }: { id: string; path: string | null; members: boolean; unknown: boolean; disabled: boolean; onDone: () => void; products: readonly { id: string; title: string }[] }) {
   const [asking, setAsking] = useState(false);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chosen, setChosen] = useState<string[]>([]);
+  const [preview, setPreview] = useState(0);
   async function act(action: "publish" | "unpublish") {
     if (working) return;
     setWorking(true);
     setError(null);
     try {
-      const response = await fetch("/api/store/letters", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action === "publish" ? { action, id, products: chosen } : { action, id }) });
+      const response = await fetch("/api/store/letters", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action === "publish" ? { action, id, products: chosen, preview: chosen.length ? preview : 0 } : { action, id }) });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; message?: string };
       if (data.ok !== true) setError(data.message ?? SERVER_ERROR);
       else {
         toast(action === "publish" ? (chosen.length ? "Published on your store for members." : "Published on your store.") : "Taken off your store.");
         setChosen([]);
+        setPreview(0);
         setAsking(false);
         onDone();
       }
@@ -80,10 +84,22 @@ export function PublishControl({ id, path, members, unknown, disabled, onDone, p
           </div>
         </fieldset>
       ) : null}
+      {chosen.length ? (
+        <label className="mb-3 block">
+          <span className="font-bold">What everyone else sees</span>
+          <span className="mt-1 block text-ink-soft">A part is a heading, a paragraph, a list, a button or a picture. The last part always stays for members.</span>
+          <select className="mt-2 block min-h-11 rounded-[var(--r-sm)] border border-line bg-paper px-3" value={preview} disabled={working} onChange={(e) => setPreview(Number(e.target.value))}>
+            <option value={0}>Only the subject</option>
+            {Array.from({ length: LETTER_PREVIEW_MAX }, (_, i) => i + 1).map((n) => (
+              <option key={n} value={n}>{n === 1 ? "The subject and the first part" : `The subject and the first ${n} parts`}</option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <span className="block" aria-live="polite">{chosen.length ? MEMBERS_PUBLISH_WARNING : PUBLISH_WARNING}</span>
       <span className="mt-2 flex flex-wrap gap-3">
         <button type="button" className="btn btn-primary btn-sm" disabled={disabled || working} aria-busy={working} onClick={() => act("publish")}>Publish it</button>
-        <button type="button" className="btn btn-secondary btn-sm" disabled={working} onClick={() => { setAsking(false); setChosen([]); }}>Not now</button>
+        <button type="button" className="btn btn-secondary btn-sm" disabled={working} onClick={() => { setAsking(false); setChosen([]); setPreview(0); }}>Not now</button>
       </span>
       {error ? <span role="alert" className="mt-2 block text-danger">{error}</span> : null}
     </div>

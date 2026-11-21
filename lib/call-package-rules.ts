@@ -29,14 +29,21 @@ export const MAX_PACKAGE_SESSIONS = 20;
 export const PACKAGE_DAYS = [0, 30, 60, 90, 180, 365] as const;
 
 export function parseCallPackage(raw: unknown): CallPackage | null {
-  if (!raw || typeof raw !== "object") return null;
-  const v = raw as Record<string, unknown>;
-  const sessions = Number(v.sessions);
-  const priceCents = Number(v.priceCents);
-  const days = Number(v.days);
-  if (!Number.isInteger(sessions) || sessions < MIN_PACKAGE_SESSIONS || sessions > MAX_PACKAGE_SESSIONS) return null;
-  if (!Number.isInteger(priceCents) || priceCents <= 0) return null;
-  return { sessions, priceCents, days: (PACKAGE_DAYS as readonly number[]).includes(days) ? days : 0 };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  try {
+    const number = (key: string): number | null => {
+      const field = Object.getOwnPropertyDescriptor(raw, key);
+      return field && "value" in field && typeof field.value === "number" && Number.isSafeInteger(field.value) ? field.value : null;
+    };
+    const sessions = number("sessions");
+    const priceCents = number("priceCents");
+    const days = number("days");
+    if (sessions === null || sessions < MIN_PACKAGE_SESSIONS || sessions > MAX_PACKAGE_SESSIONS) return null;
+    if (priceCents === null || priceCents <= 0 || days === null || !(PACKAGE_DAYS as readonly number[]).includes(days)) return null;
+    return { sessions, priceCents, days };
+  } catch {
+    return null;
+  }
 }
 
 /** What it saves against the sessions bought one by one, when it saves anything. */

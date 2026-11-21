@@ -21,8 +21,10 @@
  * orderDataBytes, the most each of them can take): an order's records are written whatever happens once it
  * is paid, so their room is held here, before anybody pays. When its
  * order is counted, its hour gives it back (settleAdmitted), so a busy day
- * is not counted twice. A checkout nobody pays falls out of the window by
- * itself after a day. What a month counts can therefore never pass the
+ * is not counted twice. A checkout nobody pays gives its place back when
+ * Stripe closes it unpaid and the five-minute sweep reads it closed
+ * (releaseExpiredHolds, #3970; only a checkout recorded by holdCheckout), and falls out of the window by itself after
+ * a day in any case. What a month counts can therefore never pass the
  * figure through a checkout opened here; a buyer who is already paying is
  * never refused, because the refusal happens before Stripe's page opens.
  *
@@ -31,12 +33,14 @@
  * charged. A store in its free trial or with no plan is not counted here;
  * its paid orders stay what they were (docs/funded-exposure-review.md).
  *
- * scripts/test_order_admission_redis.py runs both scripts on a real Redis.
+ * scripts/test_order_admission_redis.py runs the scripts on a real Redis.
  */
 import { allowanceWindow } from "@/lib/allowance-window";
+import { refreshPeriodOnce } from "@/lib/billing-sync";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { admitNonPaying } from "@/lib/free-pool";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { paidOrdersLimitFor } from "@/lib/order-rules";
 import { dataKey } from "@/lib/store-data";
@@ -124,6 +128,88 @@ const countKey = (folder: string, month: string) => `nl:orders:n:${folder}:${mon
 const openKey = (folder: string) => `nl:orders:open:${folder}`;
 const heldKey = (folder: string) => `nl:orders:open:${folder}:b`;
 const hourOf = (now: number) => Math.floor(now / 3_600_000);
+/** Orders paid while their paying store's billing window was unknown, by its folder, until the window is known (rule 30). */
+const pendingKey = (folder: string) => `nl:orders:pending:${folder}`;
+/** As long as a window's count is kept (lib/orders.ts, KEEP_SECONDS). */
+const COUNT_KEEP_SECONDS = 400 * 86_400;
+
+/**
+ * Where one paid order of a paying store whose billing window is unknown is
+ * held (lib/orders.ts, countOrder, which marks and holds it in one step):
+ * never counted in the calendar month, which the admission below never reads
+ * for it, but kept to be counted in the window once it is known
+ * (countHeldOrders), as long as a window's count (lib/orders.ts, KEEP_SECONDS).
+ */
+export const heldOrdersKey = (folder: string) => pendingKey(folder);
+
+/**
+ * KEYS[1] the orders held while the window was unknown, KEYS[2] the window's
+ * count; ARGV[1] seconds to keep the count. Moves the held orders into the
+ * count in one step, so no admission can read the count while they are in
+ * neither key (Claude 4 on #3150). Answers how many it moved (0 when none was
+ * held), or -1, with nothing written, when either key is not a whole count or
+ * the keep is not a number. Nothing is written before both are read and known
+ * to be counts, because Redis keeps a script's earlier writes when a later
+ * command fails: an INCRBY refused after the held orders were taken would lose
+ * them. Both stay under 16 digits, so INCRBY cannot overflow.
+ */
+export const MOVE_HELD_ORDERS = `-- marktmorgen:orders-held-move:v1
+local function whole(raw)
+  if #raw > 15 then return nil end
+  if raw ~= '0' and not string.match(raw, '^%-?[1-9]%d*$') then return nil end
+  return tonumber(raw)
+end
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+local n = whole(raw)
+if not n or n < 0 then return -1 end
+local have = redis.call('GET', KEYS[2])
+if have and not whole(have) then return -1 end
+local keep = tonumber(ARGV[1])
+if not keep or keep < 1 then return -1 end
+redis.call('DEL', KEYS[1])
+if n == 0 then return 0 end
+redis.call('INCRBY', KEYS[2], n)
+redis.call('EXPIRE', KEYS[2], keep)
+return n`;
+
+/**
+ * Counts in a known window the orders held while it was unknown, and answers
+ * how many, in one atomic step (MOVE_HELD_ORDERS). Throws when the reply is
+ * not exactly a count from zero up (rule 24): nothing may then be admitted on
+ * a count that may be short of them. A lost reply never loses them and never
+ * counts them twice: the script ran whole or not at all, so they are either in
+ * the window already or still held for the next reading, and nothing here
+ * writes them again. A held key that is not a count is kept, never dropped:
+ * unknown is not zero, so admissions stay refused, as ADMIT_ORDERS refuses on
+ * an unreadable month's count.
+ */
+export async function countHeldOrders(folder: string, window: string): Promise<number> {
+  const reply: unknown = await redisPipeline([["EVAL", MOVE_HELD_ORDERS, 2, pendingKey(folder), countKey(folder, window), COUNT_KEEP_SECONDS]]);
+  const [answer] = repliesFor(reply, 1) ?? [undefined];
+  if (answer === -1) throw new Error("the orders held for an unknown window, or the window's count, could not be read; nothing was moved");
+  const moved = countOf(answer);
+  if (moved === null) throw new UnknownReplyError("the orders held for an unknown window");
+  return moved;
+}
+
+/**
+ * The orders counted in a store's window, read exactly (rule 24) for a screen that says the figure: null when the
+ * count cannot be read (no Redis, a lost or malformed reply, text INCRBY never writes), 0 only for a count never
+ * made. lib/orders.ts ordersIn answers 0 for an unread count; a page that read it said "0 orders counted" and
+ * never that new orders were paused. Deciding stays with ADMIT_ORDERS, which refuses on an unread count.
+ */
+export async function ordersCountedExact(folder: string, window: string): Promise<number | null> {
+  if (!folder || !window || !isRedisConfigured()) return null;
+  try {
+    const [raw] = repliesFor(await redisPipeline([["GET", countKey(folder, window)]]), 1) ?? [undefined];
+    if (raw === null) return 0;
+    if (typeof raw === "string") return /^(0|[1-9][0-9]*)$/.test(raw) && Number.isSafeInteger(Number(raw)) ? Number(raw) : null;
+    return countOf(raw);
+  } catch {
+    return null;
+  }
+}
 
 /** What a checkout carries so its order can give its hour back: the hour, as metadata. */
 export const ADMITTED_FIELD = "mm_admit";
@@ -181,7 +267,10 @@ export function orderConfirmationHoldKeys(folder: string): [string, string] {
  * otherwise it goes on the checkout, as ADMITTED_FIELD, and back to
  * settleAdmitted with its order.
  */
-export async function admitOrders(store: Store, n = 1, now = Date.now(), items = 1): Promise<Admission> {
+export async function admitOrders(given: Store, n = 1, now = Date.now(), items = 1): Promise<Admission> {
+  // A store that pays but whose billing month the record lacks (a trial just turned into its first paid month) has
+  // it read from Stripe here, once per store at a time (lib/billing-sync.ts, refreshPeriodOnce); still unknown, refused below.
+  const store = allowanceWindow(given, now) ? given : await refreshPeriodOnce(given, now);
   const limit = paidOrdersLimitFor(store, now / 1000);
   if (limit === null) {
     const result: Admission={ok:true,hour:null};
@@ -205,6 +294,8 @@ export async function admitOrders(store: Store, n = 1, now = Date.now(), items =
     const folder = await storeFolder(storeRef(store));
     const room = dataKey(store);
     if (!room) return { ok: false, reason: "unavailable" };
+    // Orders paid while this window was unknown are in it before it is read (rule 30).
+    await countHeldOrders(folder, window.id);
     const hour = hourOf(now);
     const evidence=confirmationEvidence(store,window,hour,folder,n,items,now);
     const reply: unknown = await redisPipeline([
@@ -244,6 +335,127 @@ export async function settleAdmitted(store: Store, hour: unknown, n = 1, items =
     await redisPipeline([["EVAL", SETTLE_ADMITTED, 2, openKey(folder), heldKey(folder), String(at), n, n * orderDataBytes(items)]]);
   } catch (error) {
     console.error("could not settle an admitted order", error);
+  }
+}
+
+/**
+ * Our own record that a checkout we opened holds a place (#3970; review of #4232, Claude 2 cloud B's MEDIUM):
+ * `<hour>|<store sid>`, written by the checkout that opened it right after Stripe answers with its id
+ * (holdCheckout), and taken by the sweep with GETDEL only once it has read as matching (releaseExpiredHolds). A Checkout
+ * Session's metadata is the creator's to write on their own account, so a closed one with our hour copied into
+ * it, but no record of ours, gives nothing back: it can never lower the figure below what was admitted (the
+ * plan's limit is a cost ceiling, MR). Taken once, so a page read again never gives a place back twice. Kept
+ * until the checkout's hour has left the window (OPEN_HOURS), after which there is nothing of it to give back.
+ */
+const holdMarkKey = (session: string) => `nl:orders:held:${session}`;
+const CHECKOUT_SESSION = /^cs_(?:test|live)_[A-Za-z0-9]{10,200}$/;
+const holdMark = (hour: number, store: Store) => `${hour}|${store.sid}`;
+const holdSeconds = (hour: number, nowSeconds: number) => Math.max(60, (hour + OPEN_HOURS + 1) * 3_600 - nowSeconds);
+
+/**
+ * Records that the checkout Stripe just opened as `session` holds the place `admitted` took (holdCheckout): one SET
+ * with its expiry. Without it the place is never given back early, only when its hour leaves the window, as before
+ * #3970; so a failure here only keeps a place held, never frees one. Never throws.
+ */
+export async function holdCheckout(store: Store, session: unknown, admitted: Admission, now = Date.now()): Promise<void> {
+  if (!admitted.ok || admitted.hour === null || typeof session !== "string" || !CHECKOUT_SESSION.test(session) || !store.sid) return;
+  try {
+    if (!isRedisConfigured()) return;
+    await redisPipeline([["SET", holdMarkKey(session), holdMark(admitted.hour, store), "EX", holdSeconds(admitted.hour, Math.floor(now / 1000))]]);
+  } catch (error) {
+    console.error("a checkout's held place could not be recorded; it stays held until its hour leaves the window", error);
+  }
+}
+
+/**
+ * Gives back, once its order is counted, the place a paid Checkout Session's checkout held (confirmPurchase).
+ *
+ * A session Stripe made from an expired one's recovery link (`recovered_from`; opened with recovery on,
+ * lib/recovery-setting.ts) carries the original's metadata, so the same mm_admit hour, but it never held a place of
+ * its own: the place is the original's. That place may already have been given back when the original closed unpaid
+ * (releaseExpiredHolds), and giving the hour back again would take another live checkout's place, so the store would
+ * admit one order over the plan's limit (review of #4232, Claude 4 cloud X, MEDIUM). So a copy gives the place back
+ * only by taking the original's own record of it (GETDEL, the same record the sweep takes): whichever of the two
+ * takes it gives the place back, once. Without that record (already given back, never recorded, or a reply that does
+ * not read) the copy gives nothing, and a place still held is kept until its hour leaves the window, never freed
+ * twice. Any other session gives its hour back as before. Never throws.
+ */
+export async function settlePaidCheckout(store: Store, session: { metadata?: Record<string, string> | null; recovered_from?: unknown }, items = 1): Promise<void> {
+  const meta = session.metadata && typeof session.metadata === "object" ? session.metadata : null;
+  const hour = meta && Object.hasOwn(meta, ADMITTED_FIELD) ? meta[ADMITTED_FIELD] : undefined;
+  if (session.recovered_from === undefined || session.recovered_from === null) return settleAdmitted(store, hour, 1, items);
+  const original = session.recovered_from;
+  if (typeof original !== "string" || !CHECKOUT_SESSION.test(original) || typeof hour !== "string" || !/^\d{1,9}$/.test(hour) || !store.sid) return;
+  try {
+    if (!isRedisConfigured()) return;
+    const [taken] = repliesFor(await redisPipeline([["GETDEL", holdMarkKey(original)]]), 1) ?? [undefined];
+    if (taken === holdMark(Number(hour), store)) await settleAdmitted(store, hour, 1, items);
+  } catch (error) {
+    console.error("a recovered checkout's place could not be given back; it stays held until its hour leaves the window", error);
+  }
+}
+
+/** What releaseExpiredHolds reads of one Checkout Session, as Stripe lists it on the creator's own account. */
+export type ClosedCheckout = { id?: unknown; status?: unknown; payment_status?: unknown; metadata?: Record<string, string> | null };
+
+/**
+ * Gives back the place a checkout held when Stripe closed it unpaid (#3970, decision ALL-160: a place held by an
+ * unpaid checkout is released when that checkout expires, never kept past it; a paid one is never released here).
+ * `rows` are the store's checkouts as its own Stripe account lists them with `status=expired` (the five-minute
+ * sweep, lib/checkout-sweep.ts; there is no incoming Stripe webhook), `handles` the store's own handles.
+ *
+ * Only a checkout we recorded as holding a place in this store at that hour (holdCheckout) gives one back, and
+ * only once: its record is taken (GETDEL), so a forged or edited session, another store's or one read again
+ * gives nothing. Gives back one order and the room of one product: the least any admitted checkout held, so it
+ * never gives back more than the checkout held (a purchase for several people, or a bundle, keeps the rest until
+ * its hour leaves the window, as before). A lost reply leaves the place held until its hour leaves the window,
+ * never given back twice. An answer that does not read gives nothing back. A checkout whose hour has left the
+ * window costs no command.
+ *
+ * Commands: one MGET a call when any row names an hour still in the window, then for each checkout whose record
+ * matches one GETDEL and, when it was taken, one EVAL of SETTLE_ADMITTED; a taken record is gone, so
+ * each checkout costs those two once. Answers how many places were given back. Never throws.
+ */
+export async function releaseExpiredHolds(store: Store, rows: readonly ClosedCheckout[], handles: ReadonlySet<string>, now = Date.now()): Promise<number> {
+  try {
+    if (!isRedisConfigured() || !store.sid) return 0;
+    const current = hourOf(now);
+    const due: { id: string; hour: number }[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      if (!row || typeof row.id !== "string" || !CHECKOUT_SESSION.test(row.id) || seen.has(row.id)) continue;
+      if (row.status !== "expired" || row.payment_status === "paid") continue;
+      const meta = row.metadata;
+      if (!meta || typeof meta !== "object") continue;
+      const owner = Object.hasOwn(meta, "store") ? meta.store : undefined;
+      const raw = Object.hasOwn(meta, ADMITTED_FIELD) ? meta[ADMITTED_FIELD] : undefined;
+      if (typeof owner !== "string" || !handles.has(owner) || typeof raw !== "string" || !/^\d{1,9}$/.test(raw)) continue;
+      const hour = Number(raw);
+      // Its hour already left the window (ADMIT_ORDERS no longer counts it), or is not a past hour: nothing to give.
+      if (hour < current - (OPEN_HOURS - 1) || hour > current) continue;
+      seen.add(row.id);
+      due.push({ id: row.id, hour });
+    }
+    if (!due.length) return 0;
+    const [marks] = repliesFor(await redisPipeline([["MGET", ...due.map((row) => holdMarkKey(row.id))]]), 1) ?? [undefined];
+    const read = Array.isArray(marks) && marks.length === due.length && marks.every((mark) => mark === null || typeof mark === "string") ? (marks as (string | null)[]) : null;
+    if (!read) return 0;
+    const ours = due.filter((row, i) => read[i] === holdMark(row.hour, store));
+    if (!ours.length) return 0;
+    // GETDEL: whoever takes the record gives the place back, so two sweeps reading the same page give it once.
+    const taken = repliesFor(await redisPipeline(ours.map((row) => ["GETDEL", holdMarkKey(row.id)])), ours.length);
+    if (!taken) return 0;
+    const giving = ours.filter((row, i) => taken[i] === holdMark(row.hour, store));
+    if (!giving.length) return 0;
+    const folder = await storeFolder(storeRef(store));
+    const given = repliesFor(
+      await redisPipeline(giving.map((row) => ["EVAL", SETTLE_ADMITTED, 2, openKey(folder), heldKey(folder), String(row.hour), 1, orderDataBytes(1)])),
+      giving.length,
+    );
+    return given ? given.filter((answer) => answer === 1).length : 0;
+  } catch (error) {
+    console.error("could not give back the places of checkouts that closed unpaid", error);
+    return 0;
   }
 }
 

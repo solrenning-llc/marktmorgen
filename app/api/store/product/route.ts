@@ -1,9 +1,15 @@
-import { dropCourseTasks } from "@/lib/assignment";
+import { runningSubscriptions } from "@/lib/payment-methods";
+import { applyCourseTaskDrops, noteTaskUpload, readCourseTaskDrops } from "@/lib/assignment";
+import { noteRemovedCourse } from "@/lib/removed-courses";
+import { courseIndexes } from "@/lib/certificate";
+import { handsOver, takesLastDelivery } from "@/lib/product-option";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
+import { dropMirroredPicture } from "@/lib/picture-r2-copy";
 import { waitingCount } from "@/lib/preorders";
 import type { NextRequest } from "next/server";
 import { deleteFile as del } from "@/lib/file-store";
+import { deleteOrSweep } from "@/lib/file-drop";
 import {
   MAX_SUMMARY_LENGTH,
   MAX_TITLE_LENGTH,
@@ -22,27 +28,55 @@ import {
   type Product,
 } from "@/lib/store";
 import { MAX_LINK_LENGTH, readLink } from "@/lib/product-link";
-import { readRecurring } from "@/lib/product-recurring";
+import { everyOf, readRecurring } from "@/lib/product-recurring";
+import { everyProblem } from "@/lib/recurring-every-rules";
 import { type Intro, introProblem } from "@/lib/intro-price";
 import { type Yearly, yearlyProblem } from "@/lib/yearly-price";
 import { priceBounds, readMoney } from "@/lib/money";
 import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout, writeAbout } from "@/lib/product-about";
-import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { countStudio, jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
-import { dropPage } from "@/lib/sales-page-store";
+import { lockRead } from "@/lib/two-step-unknown";
+import { dropPage, picturesOfFailedDrop } from "@/lib/sales-page-store";
+import { finishLandingsDrop } from "@/lib/campaign-landing-store";
+
+/** A product's id, as the catalog makes it (lib/sales-page.ts PRODUCT_ID_PATTERN). */
+const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { dropCourse, filesInCourse, readCourse } from "@/lib/course";
+import { dropCourse, filesInCourse, lessonsInOrder, readCourse, readCourseExact } from "@/lib/course";
+import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments";
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { dropStream } from "@/lib/stream";
 import { dropStamped } from "@/lib/pdf-stamp";
+import { InvitesPendingFullError, InvitesUnpaidError, dropProductInvites, notePendingInvites } from "@/lib/move-members";
+import { studioRefusal } from "@/lib/person-tasks";
 import { deliveredFile, idsOfKind, readAllListings, readDelivery, readListing, readProducts } from "@/lib/catalog";
 import { fastMoneyOnPage, fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
 import { pageWords } from "@/lib/page-translate";
-import { readPage } from "@/lib/sales-page-store";
+import { templateLeft } from "@/lib/template-text";
+import { keptPageBytes, readPage } from "@/lib/sales-page-store";
+import { publishPageUnits } from "@/lib/sales-page";
 import { quietedBy } from "@/lib/extras-notes";
+
+/**
+ * Takes the studio units of a draft's two sales-page reads before its publish makes either (the check, then again
+ * under the store lock), by the kept record's own bytes (publishPageUnits; Claude 7 and Claude 6 on #3693), and says
+ * how many bytes were paid for. No page: nothing read or taken. A size that does not read: page_unread (503), never
+ * "unknown", which this route answers for a product that is gone (Claude 6 on #3693, rule 24); nothing is read.
+ * Units refused: the studio's own "used" answer, and nothing is read.
+ */
+async function payPageReads(store: Parameters<typeof countStudio>[0], draft: { id: string; page?: unknown }): Promise<{ paid: number } | Response> {
+  if (!draft.page || !store.statsId) return { paid: 0 };
+  const bytes = await keptPageBytes(store.statsId, draft.id);
+  if (bytes === null) return Response.json({ ok: false, error: "page_unread" }, { status: 503 });
+  const units = publishPageUnits(bytes);
+  if (units === 0) return { paid: 0 };
+  const paid = await countStudio(store, null, units);
+  return paid.ok ? { paid: bytes } : Response.json({ ok: false, error: "studio_used", message: paid.message }, { status: 429 });
+}
 
 const ACTIONS = new Set(["add", "edit", "remove", "move", "link", "unlink", "visibility"]);
 
@@ -100,6 +134,7 @@ async function silenced(email: string, changedId: string): Promise<string[]> {
 const STATUS: Record<string, number> = {
   too_many: 409,
   unknown: 404,
+  unavailable: 503,
 };
 
 /**
@@ -154,8 +189,9 @@ export async function POST(request: NextRequest) {
   // Absent or unrecognised means a single sale, which is what a product is
   // unless the creator says otherwise. A trial or a payment count that was
   // typed and is not a whole number in range is said, not dropped.
-  const recurring = readRecurring(text(body.every, 10), body.trial, body.payments);
-  if (recurring === "trial" || recurring === "payments") {
+  // How often it charges (609 [WP8]): `everyCount`, absent or 1 for every interval; only a listed choice is kept.
+  const recurring = readRecurring(text(body.every, 10), body.trial, body.payments, body.everyCount);
+  if (recurring === "trial" || recurring === "payments" || recurring === "every") {
     return Response.json({ ok: false, error: recurring }, { status: 400 });
   }
   // The suggested price, when the buyer chooses what to pay, as typed: it is
@@ -236,8 +272,23 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Charged every N (609 [WP8]): what is still counted in single weeks or months is refused with its reason, against
+  // the product as this save leaves it, so nothing is ever charged on a schedule its page does not say.
+  if ((action === "add" || action === "edit") && recurring && everyOf(recurring) > 1) {
+    const current = action === "edit" ? await readListing(guarded.store, id) : null;
+    const problem = everyProblem(everyOf(recurring), {
+      intro: intro === undefined ? current?.intro : intro,
+      yearly: yearly === undefined ? current?.yearly : yearly,
+      inTiers: action === "edit" && guarded.store.tiers.includes(id),
+      payments: recurring.payments,
+    });
+    if (problem) return Response.json({ ok: false, error: `every_${problem}` }, { status: 400 });
+  }
+
   try {
     let result: Outcome;
+    // A removal whose campaign landings could not be confirmed gone (lib/sales-page-store.ts PageDropIncomplete).
+    let cleanupPending = false;
     if (action === "add" || action === "edit") {
       const done =
         action === "add"
@@ -273,33 +324,156 @@ export async function POST(request: NextRequest) {
     } else if (action === "remove") {
       // Paid pre-orders wait for it (lib/preorders.ts): it stays until they
       // are handed over or refunded, so nobody paid for something deleted.
-      if ((await waitingCount(guarded.store, id)) > 0) {
+      // A count that cannot be read is unknown, never "nobody waits" (sweep APP3): 503, and the product is kept.
+      let waiting: number;
+      try {
+        waiting = await waitingCount(guarded.store, id);
+      } catch (error) {
+        console.error("could not read a product's pre-orders before removing it", error);
+        return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      }
+      if (waiting > 0) {
         return Response.json({ ok: false, error: "preorders" }, { status: 409 });
       }
       // The product comes back as it was, so the storage its files used can
       // be released once the removal is safely written. A product with price
       // options holds one file per option as well as its own.
-      const removed = await removeProduct(ref, id);
+      // A course's handed-in work is read before the product goes (Revisor 1 on #2810): a read that fails answers 503
+      // and removes nothing, so the work, its files and the room they take stay findable for the next try.
+      let before: Awaited<ReturnType<typeof readListing>>;
+      let preparedCourse: Awaited<ReturnType<typeof readCourseExact>> = null;
+      let taskDrops: Awaited<ReturnType<typeof readCourseTaskDrops>> = [];
+      try {
+        before = await readListing(guarded.store, id);
+        if (before?.course) {
+          preparedCourse = await readCourseExact(before.course.id);
+          if (preparedCourse) taskDrops = await readCourseTaskDrops(preparedCourse);
+        }
+      } catch (error) {
+        console.error("could not read a product or its course before removing it", error);
+        return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      }
+      // Members and payment plans charge again on the creator's Stripe account whatever this store says: a product
+      // is not removed while any of them still runs for it, so nobody keeps paying for something deleted. Asked for
+      // every product, not only one paid now: a membership edited to free first still charges its members (#4074).
+      // Not known (Stripe did not answer, or had more than could be read) is "some", never "none" (as for a currency).
+      if (before && guarded.store.stripeAccountId) {
+        const running = await runningSubscriptions(guarded.store, id);
+        if (running === null) return Response.json({ ok: false, error: "stripe" }, { status: 502 });
+        if (running > 0) return Response.json({ ok: false, error: "memberships", running }, { status: 409 });
+      }
+      // The invitations an import gave members to keep it here (lib/move-members.ts), with their links and reminders:
+      // kept under its id, a person's erasure would never reach them once it is gone. Main's refusal while a membership
+      // or payment plan still runs comes first (above), so a removal it refuses deletes no invitation. Each page is paid
+      // for in studio requests first; not finished (a reply not known, the studio's requests used up): nothing is
+      // removed, and the same removal asked again goes on where this stopped.
+      const refusal: { reason?: string; message?: string } = {};
+      const pay = async (units: number): Promise<boolean> => {
+        const counted = await countStudio(guarded.store, null, units);
+        if (!counted.ok) Object.assign(refusal, { reason: counted.reason, message: counted.message });
+        return counted.ok;
+      };
+      // Deleted only once the product is (below): a removal that does not go through keeps every invitation and its
+      // emailed link (Claude 7, MEDIUM on #3473). Asked again for a product already removed, what an earlier removal
+      // left is deleted now.
+      if (!before && id && PRODUCT_ID.test(id)) {
+        try {
+          await dropProductInvites(guarded.store, id, pay);
+        } catch (error) {
+          if (error instanceof InvitesUnpaidError) {
+            const refused = studioRefusal(refusal.reason ?? "unknown", refusal.message ?? "");
+            return Response.json(refused.body, { status: refused.status });
+          }
+          console.error("could not delete the invitations to a removed membership", error);
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
+      }
+      // A product still here is noted first among the memberships whose invitations wait to be deleted (Claude 3, MEDIUM
+      // on #3473), in the studio request that also pays for their deletion's first page below: that one deletion runs
+      // after the product is gone, when the studio can no longer ask for it again, so if it does not finish, a person's
+      // erasure and the copy of their data still reach every invitation through the note. Not noted (refused, a reply
+      // not known, the note full): nothing is removed.
+      if (before) {
+        try {
+          await notePendingInvites(guarded.store, id, pay);
+        } catch (error) {
+          if (error instanceof InvitesUnpaidError) {
+            const refused = studioRefusal(refusal.reason ?? "unknown", refusal.message ?? "");
+            return Response.json(refused.body, { status: refused.status });
+          }
+          if (error instanceof InvitesPendingFullError) return Response.json({ ok: false, error: "member_invites" }, { status: 409 });
+          console.error("could not note a membership's invitations before removing it", error);
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
+      }
+      let course: Awaited<ReturnType<typeof readCourseExact>> = null;
+      const removed = await removeProduct(ref, id, async (going, store) => {
+        if (!going.course) return true;
+        try {
+          const found = await readCourseExact(going.course.id);
+          if (found) {
+            if (!preparedCourse || JSON.stringify(found) !== JSON.stringify(preparedCourse)) return false;
+            course = found;
+            // Noted as dropped before anything goes (lib/removed-courses.ts), so its learners' records stay reachable
+            // by their erasure; a list that is full or a note not confirmed keeps the product.
+            if ((await noteRemovedCourse(store.statsId, { productId: going.id, courseId: found.id, lessonIds: lessonsInOrder(found).map(({ lesson }) => lesson.id), moduleIds: found.modules.map((m) => m.id) }, store, courseIndexes)) !== "noted") return false;
+            await dropComments(found.id, lessonsInOrder(found).map(({ lesson }) => lesson.id), store);
+          } else {
+            if (preparedCourse) return false;
+            await dropCommentsAfterCourseGone(going.course.id, store);
+          }
+          return true;
+        } catch {
+          return false;
+        }
+      });
       result = removed.ok ? { ok: true, product: null } : removed;
+      // Asked again for a product already removed whose campaign landings were not confirmed gone then (Codex G,
+      // #1947): they are deleted now; not confirmed again, it is said, and can be asked again.
+      // Only a product's own id (never "<product>:gone" or any other key of the family: Codex G, #1947).
+      if (!removed.ok && removed.reason === "unknown" && id && PRODUCT_ID.test(id)) {
+        const finished = await finishLandingsDrop(guarded.store.statsId, id, guarded.store).catch(() => null);
+        if (finished === null) return Response.json({ ok: false, error: "unavailable", cleanupPending: true }, { status: 503 });
+        if (finished === "dropped") result = { ok: true, product: null };
+      }
       if (removed.ok) {
         const going = removed.product;
+        // Its invitations, now that it is gone (above): not finished (a reply not known, the studio's requests used up),
+        // it is said to the caller (cleanupPending), and the same removal asked again deletes what is left. Until then the
+        // note made before the removal keeps them within a person's erasure and data copy. Its first page is paid for by
+        // the request that made the note.
+        await dropProductInvites(removed.store, id, pay, !!before).catch((error: unknown) => {
+          console.error("could not delete the invitations to a removed membership", error);
+          cleanupPending = true;
+        });
+        const removedCourse = course as Awaited<ReturnType<typeof readCourseExact>>;
         const had: { pathname: string }[] = filesOnProduct(going);
         // Its picture goes with it, and so does its long description.
         had.push(...imagePaths(going.image).map((pathname) => ({ pathname })));
+        // And its copy in the pictures' own bucket, when it was copied there (#4237, item 4).
+        if (going.image?.r2) await dropMirroredPicture(imagePaths(going.image));
         // A course takes its lessons with it: their records, and their files.
-        const course = going.course ? await readCourse(going.course.id).catch(() => null) : null;
-        if (course) had.push(...filesInCourse(course));
+        if (removedCourse) had.push(...filesInCourse(removedCourse));
         // And the work its students handed in for its assignments (lib/assignment.ts).
-        if (course) {
-          const handed = await dropCourseTasks(course, storeKey(removed.store), removed.store).catch(() => [] as string[]);
+        if (removedCourse) {
+          // Prepared from the same exact course snapshot that removal accepted,
+          // before that course identity can be detached.
+          const handed = await applyCourseTaskDrops(removedCourse, taskDrops, storeKey(removed.store), removed.store);
           had.push(...handed.map((pathname) => ({ pathname })));
         }
         if (going.about) await dropAbout(removed.store.statsId, id, removed.store).catch(() => {});
         if (going.note) await dropThanksNote(removed.store.statsId, id, removed.store).catch(() => {});
-        // Its page of blocks, and the reviews of a product nobody can buy any more.
-        if (going.page) {
+        // Its page of blocks, and the reviews of a product nobody can buy any more. Dropped whether or not the
+        // product still shows a page: one emptied first keeps its versions and its campaigns' landings, which are
+        // kept by the product, not by its page (Claude 5 on #1947).
+        {
           // And the pictures on that page (lib/sales-page-store.ts).
-          const pictures = await dropPage(removed.store.statsId, id, removed.store).catch(() => [] as string[]);
+          // Anything not confirmed gone is said to the caller (cleanupPending), never a removal finished: the same
+          // removal asked again finishes its landings (finishLandingsDrop below), and a closed store's walk erases them.
+          const pictures = await dropPage(removed.store.statsId, id, removed.store).catch((error: unknown) => {
+            cleanupPending = true;
+            return picturesOfFailedDrop(error);
+          });
           had.push(...pictures.map((pathname) => ({ pathname })));
         }
         // And the photos buyers added to them (lib/reviews.ts).
@@ -310,12 +484,20 @@ export async function POST(request: NextRequest) {
           return [] as string[];
         });
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
-        if (course) await dropCourse(course, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
+        if (removedCourse) {
+          await dropCourse(removedCourse, removed.store, id, courseIndexes).catch((error: unknown) => console.error("could not drop a removed course", error));
+        }
         for (const file of had) {
           // A lesson video the video service keeps is taken away there (lib/stream.ts).
           if (await dropStream(file.pathname, removed.store).catch(() => false)) continue;
-          await del(file.pathname).catch((error: unknown) => {
-            console.error("could not delete the file of a removed product", error);
+          // A delete that fails is not lost: nothing points at the file any more, so the creator could never delete it
+          // and it would count against the store's storage for good. It goes to the daily job that deletes uploads
+          // nobody keeps (sweepTaskUploads, app/api/cron/courses), as a deleted person's files do (lib/person-erasure.ts).
+          await del(file.pathname).catch(async (error: unknown) => {
+            console.error("could not delete the file of a removed product; it goes to the daily job", error);
+            await noteTaskUpload(file.pathname, 0).catch((noteError: unknown) =>
+              console.error("could not hand a removed product's file to the daily job; it is kept until the store closes", noteError),
+            );
           });
         }
         for (const file of filesOnProduct(going)) await dropStamped(file);
@@ -326,7 +508,9 @@ export async function POST(request: NextRequest) {
       // A link over the file deletes the file and the buyers' stamped copies: a session let in
       // without its second step waits (lib/two-step.ts). The id may name a price option, whose file
       // is its own, so the file is read where the id points (readDelivery), not on a product only.
-      if ((await lockedFor(request, "products", "replace")) && deliveredFile(await readDelivery(guarded.store, id))) return refusedJson("locked");
+      const lock = await lockRead(lockedFor(request, "products", "replace"));
+      if (lock instanceof Response) return lock;
+      if (lock && deliveredFile(await readDelivery(guarded.store, id))) return refusedJson("locked");
       const read = readLink(link);
       if (!read.ok) {
         return Response.json(
@@ -338,36 +522,80 @@ export async function POST(request: NextRequest) {
       // released only after the record that pointed at it is written.
       const linked = await setProductLink(ref, id, read.url);
       if (linked.ok && linked.removed) {
-        await del(linked.removed.pathname).catch((error: unknown) => {
-          console.error("could not delete a file replaced by a link", error);
-        });
+        await deleteOrSweep(linked.removed.pathname, "a file replaced by a link");
         await dropStamped(linked.removed);
       }
       result = linked.ok ? { ok: true, product: null } : { ok: false, reason: asProductReason(linked.reason) };
     } else if (action === "visibility") {
       // A draft published, or a product taken off the store and kept.
       if (typeof body.hidden !== "boolean") return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+      // A publish reads its sales page twice (the check, then under the lock), by the kept record's own bytes: those reads
+      // are paid for in studio units before either is made, or nothing is read (payPageReads; Claude 7 on #3693).
+      let pagePaid = 0;
       if (body.hidden === false) {
         // Published only when nothing a buyer reads promises fast or easy money (the Terms; 567 [GD1] (d)).
         const draft = await readListing(guarded.store, id);
         if (draft) {
+          const pay = await payPageReads(guarded.store, draft);
+          if (pay instanceof Response) return pay;
           const words = draft.about && guarded.store.statsId ? await readAbout(guarded.store.statsId, draft.id) : "";
           const shownPage = draft.page && guarded.store.statsId ? await readPage(guarded.store.statsId, draft.id) : null;
           const refused = fastMoneyRefusal({ title: draft.title, summary: draft.summary, about: words }) ?? (shownPage ? fastMoneyOnPage(pageWords(shownPage)) : null);
           if (refused) return Response.json({ ok: false, error: "fast_money", passage: { ...refused, product: draft.title } }, { status: 409 });
+          pagePaid = pay.paid;
           const promptLeft = productPromptsLeft({ title: draft.title, summary: draft.summary, about: words })[0];
           if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft, product: draft.title }, { status: 409 });
+          // Nor while its sales page, in either version, still holds a part a template left to write: saving it
+          // is refused once the product is on the store, so publishing never takes it there (754 [STN1], Revisor 2 on #3593).
+          const pageLeft = shownPage ? templateLeft(shownPage) : null;
+          if (pageLeft) return Response.json({ ok: false, error: "placeholder", ...pageLeft, product: draft.title }, { status: 409 });
           // A course from a ready structure is published only once its example titles are replaced (540 [CU1]).
           if (draft.course) {
             const course = await readCourse(draft.course.id);
             if (!course) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
             if (exampleTitlesLeft(course) > 0) return Response.json({ ok: false, error: "course_examples" }, { status: 409 });
           }
+          // Published only once it hands something over by the checkout's own rule (754 [STN1]).
+          if (!handsOver(draft)) return Response.json({ ok: false, error: "nothing_to_hand_over", product: draft.title }, { status: 409 });
         }
       }
-      const done = await setProductHidden(ref, id, body.hidden);
-      result = done.ok ? { ok: true, product: done.product } : done;
+      // The sales page read again under the lock its saves are written under, so a part saved since the read above
+      // is never published with it (754 [STN1], Codex P on #3693). A page that cannot be read publishes nothing.
+      let pageChanged = false;
+      let pageUnread = false;
+      let heldBy: { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string } | null = null;
+      const done = await setProductHidden(ref, id, body.hidden, async (store, now) => {
+        if (!now.page || !store.statsId) return true;
+        // A page added since the read above was not paid for: nothing is published, and the creator is told to try again.
+        // As one grown past the bytes paid for: read only once its size, read exactly, is still within them.
+        const keptBytes = await keptPageBytes(store.statsId, now.id);
+        if (keptBytes === null) {
+          pageUnread = true;
+          return false;
+        }
+        if (keptBytes > pagePaid) {
+          pageChanged = true;
+          return false;
+        }
+        const page = await readPage(store.statsId, now.id);
+        const fast = fastMoneyOnPage(pageWords(page));
+        const left = templateLeft(page);
+        heldBy = { fast, left, title: now.title };
+        return !fast && !left;
+      });
+      if (!done.ok && done.reason === "held" && pageUnread) return Response.json({ ok: false, error: "page_unread" }, { status: 503 });
+      if (!done.ok && done.reason === "held" && pageChanged) return Response.json({ ok: false, error: "page_changed" }, { status: 409 });
+      if (!done.ok && done.reason === "held" && heldBy) {
+        const { fast, left, title } = heldBy as { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string };
+        if (fast) return Response.json({ ok: false, error: "fast_money", passage: { ...fast, product: title } }, { status: 409 });
+        if (left) return Response.json({ ok: false, error: "placeholder", ...left, product: title }, { status: 409 });
+      }
+      result = done.ok ? { ok: true, product: done.product } : { ok: false, reason: done.reason === "held" ? "unknown" : done.reason };
     } else if (action === "unlink") {
+      // The last thing a product on the store hands over is not taken off: it is replaced, or the product unpublished
+      // first (754 [STN1]; Claude 6 on #3432). Read like the publish check above, from the store record the guard loaded.
+      const found = await readDelivery(guarded.store, id);
+      if (found && takesLastDelivery(found.product, id, "link")) return Response.json({ ok: false, error: "last_delivery", product: found.product.title }, { status: 409 });
       const cleared = await setProductLink(ref, id, null);
       result = cleared.ok ? { ok: true, product: null } : { ok: false, reason: asProductReason(cleared.reason) };
     } else {
@@ -388,7 +616,7 @@ export async function POST(request: NextRequest) {
     // everything that offered it does).
     const quiet =
       (action === "edit" || action === "visibility" || action === "remove") && id ? await silenced(ref, id) : [];
-    return Response.json({ ok: true, product: result.product, quiet: quiet.length ? quiet : undefined });
+    return Response.json({ ok: true, product: result.product, quiet: quiet.length ? quiet : undefined, cleanupPending: cleanupPending || undefined });
   } catch (error) {
     if (error instanceof StoreFullError) {
       return Response.json({ ok: false, error: "store_full" }, { status: 409 });

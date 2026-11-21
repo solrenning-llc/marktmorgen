@@ -1,12 +1,13 @@
 import { EmailField } from "@/components/email-field";
+import { ACCESS_END_FIELD } from "@/lib/course-access-end";
 import { servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { packageSaving } from "@/lib/call-package-rules";
-import { fromPrice, lengthList, listedLengths } from "@/lib/call-lengths";
+import { lengthList, listedLengths } from "@/lib/call-lengths";
 import { saleClock, saleOff, salePrice } from "@/lib/store-sale";
 import { activeIntro } from "@/lib/intro-price";
 import { activeYearly, yearlySaving } from "@/lib/yearly-price";
 import { fairOff } from "@/lib/fair-price";
-import { endsLine, membershipLine, planLine, speech, worthLine } from "@/lib/buyer-words";
+import { endsLine, everyPhrase, membershipLine, planLine, speech, worthLine } from "@/lib/buyer-words";
 import Link from "next/link";
 import { isFree, syncTakesBuyer, type Listing, type Store } from "@/lib/store";
 import { canSellProduct, fromPriceCents, sellableOptions } from "@/lib/store-checkout";
@@ -21,10 +22,11 @@ import { RatingLine } from "@/components/review-list";
 import type { Summary } from "@/lib/review-summary";
 import { MIN_BUNDLE_ITEMS, bundleReady, picks } from "@/lib/bundle-rules";
 import { payPalPrice, paypalReady } from "@/lib/paypal-sales";
-import { comparable, startingOption } from "@/lib/product-option";
+import { comparable, optionsInPickOrder } from "@/lib/product-option";
 import { DEFAULT_PEOPLE, MAX_PEOPLE, MIN_PEOPLE } from "@/lib/group-rules";
 import { givableOptions } from "@/lib/gift-rules";
 import { productSegment } from "@/lib/product-slug";
+import { pricePill } from "@/lib/product-pill";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { preorderWords } from "@/lib/buyer-words/preorder";
 import { pickWords } from "@/lib/buyer-words/pick";
@@ -32,11 +34,13 @@ import { PickBundleForm } from "@/components/pick-bundle-form";
 import { AddToCart } from "@/components/store-cart";
 import { AssistReminderBox } from "@/components/assistant-reminder-box";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
+import { WithdrawalWhere } from "@/components/withdrawal-where";
 import { consentKind, deliversDigitally } from "@/lib/digital-consent";
 import { assistReminderOffered } from "@/lib/assistant-reminder";
 import { type AskWhen, isAskWhen } from "@/lib/ask-when";
 import { type UnitLine, unitLines } from "@/lib/option-units";
 import { hasDateOnSale } from "@/lib/call-on-sale";
+import { BillingCountryField } from "@/components/billing-country-field";
 
 /**
  * How many price options are drawn as cards before they become a list to pick
@@ -57,20 +61,8 @@ export function productPath(store: Store, product: Listing): string {
   return `/@${store.handle}/p/${productSegment(product)}`;
 }
 
-/** The figure on the price pill: "$27", "from €9 a month", "¥500+", "Free", in the store's currency and language. */
-export function pricePill(store: Store, product: Listing): string {
-  const { w, money } = speech(store);
-  if (isFree(product)) return w.free;
-  if (activePwyw(product)) return `${money(product.priceCents)}+`;
-  const options = sellableOptions(product);
-  const every = product.recurring ? ` ${w.every(product.recurring.interval)}` : "";
-  // A call with several lengths (lib/call-lengths.ts): from the lowest of their prices.
-  const lengths = product.call ? listedLengths(product.call, product.priceCents) : [];
-  if (lengths.length) return w.fromPrice(money(fromPrice(lengths) as number));
-  const price = `${money(fromPriceCents(product))}${every}`;
-  return options.length > 1 ? w.fromPrice(price) : price;
-}
-
+/* The figure on the price pill lives in lib/product-pill.ts, so a server module can use it without this file's client components. */
+export { pricePill };
 
 /** "Subscribe — $5 the first month", for a membership with an introductory price (lib/intro-price.ts); null without one. */
 export function introButton(store: Store, product: Listing): string | null {
@@ -97,6 +89,16 @@ export function fairNow(store: Store, product: Listing): number {
  */
 export function offNow(store: Store, product: Listing): number {
   return Math.max(saleNow(store, product), fairNow(store, product));
+}
+
+/**
+ * The price pill as the checkout charges it now while a store-wide sale covers the product, with no old price beside
+ * it: for words that cannot cross a price out (a shared link's picture, the store guide's picks). Never a fair price
+ * for a country, which is the visitor's own; a sale is the same for everybody (lib/store-sale.ts).
+ */
+export function salePill(store: Store, product: Listing): string {
+  const off = saleNow(store, product);
+  return off ? speech(store).money(salePrice(product.priceCents, off)) : pricePill(store, product);
 }
 
 /**
@@ -173,12 +175,25 @@ export function ProductFacts({
   product,
   linkCourse = true,
   bundleItems = null,
+  videoLine = null,
+  accessEndLine = null,
 }: {
   store: Store;
   product: Listing;
   linkCourse?: boolean;
   /** For a bundle: what it hands over now (lib/bundles.ts, offeredItems). */
   bundleItems?: Listing[] | null;
+  /**
+   * For a course: how long its video runs, worked out by the code
+   * (lib/course-facts.ts, 292 [SQ3]); only the page that read it passes it,
+   * and null when any video's length is unknown.
+   */
+  videoLine?: string | null;
+  /**
+   * For a course: when access to it ends, a date the creator set and still ahead (24 [E7]), said before anyone pays;
+   * only the page that read the course passes it.
+   */
+  accessEndLine?: string | null;
 }) {
   const pwyw = activePwyw(product);
   const options = sellableOptions(product);
@@ -227,6 +242,7 @@ export function ProductFacts({
       {course ? (
         <p className="mt-1 text-sm font-semibold">
           <span className="st-muted">{w.course(course.lessons)}</span>
+          {videoLine ? <span className="st-muted">{` · ${videoLine}`}</span> : null}
           {linkCourse ? (
             <>
               <span className="st-muted">{" · "}</span>
@@ -237,6 +253,7 @@ export function ProductFacts({
           ) : null}
         </p>
       ) : null}
+      {course && accessEndLine ? <p className="mt-1 text-sm font-semibold" style={{ color: "var(--st-text)" }}>{accessEndLine}</p> : null}
     </>
   );
 }
@@ -266,18 +283,22 @@ export function PackageOffer({ store, product }: { store: Store; product: Listin
 
 /**
  * Which of a product's prices is being bought for somebody else: a list to
- * pick from, each with its price, opened on the creator's pick. Nothing for
+ * pick from, each with its price, the creator's pick listed first and none
+ * chosen for the buyer (487 [IT4]): the form asks for a choice. Nothing for
  * a product sold at one price. The price charged is read on the server from
  * the option's id, never from this list.
  */
 function GivenOptionPicker({ store, product, each = false }: { store: Store; product: Listing; each?: boolean }) {
-  const options = givableOptions(product);
+  const options = optionsInPickOrder(givableOptions(product));
   if (options.length === 0) return null;
   const { w, money } = speech(store);
   return (
     <label className="block">
       <span className="st-label">{w.whichOne}</span>
-      <select className="st-field mt-2" name="option" required defaultValue={(startingOption(options) ?? options[0]).id}>
+      <select className="st-field mt-2" name="option" required defaultValue="">
+        <option value="" disabled>
+          {w.chooseOne}
+        </option>
         {options.map((option) => (
           <option key={option.id} value={option.id}>
             {w.priced(option.label, `${money(option.priceCents)}${each ? w.perPerson : ""}`)}
@@ -320,7 +341,8 @@ export function GiftBox({ store, product, problem = "", consentAgain = false }: 
           <span className="st-label">{w.messageOptional}</span>
           <textarea className="st-field mt-2" name="gift_message" rows={3} maxLength={500} />
         </label>
-        {deliversDigitally(product) ? <DigitalConsentBox id={`dc-gift-${product.id}`} kind={consentKind(product)} lang={store.language} refused={consentAgain && problem === "consent"} /> : null}
+        <CountryAsk store={store} product={product} id={`bc-gift-${product.id}`} />
+        {deliversDigitally(product) ? <DigitalConsentBox id={`dc-gift-${product.id}`} kind={consentKind(product)} lang={store.language} refused={consentAgain && problem === "consent"} /> : <WithdrawalWhere lang={store.language} />}
         <button type="submit" className="btn st-btn btn-block">
           {product.options.length > 0 ? w.buyAsGift : w.buyAsGiftFor(money(salePrice(product.priceCents, offNow(store, product))))}
         </button>
@@ -434,7 +456,8 @@ export function GroupBox({ store, product, problem = "", consentAgain = false }:
             inputMode="numeric"
           />
         </label>
-        {deliversDigitally(product) ? <DigitalConsentBox id={`dc-group-${product.id}`} kind={consentKind(product)} lang={store.language} refused={consentAgain && problem === "consent"} /> : null}
+        <CountryAsk store={store} product={product} id={`bc-group-${product.id}`} />
+        {deliversDigitally(product) ? <DigitalConsentBox id={`dc-group-${product.id}`} kind={consentKind(product)} lang={store.language} refused={consentAgain && problem === "consent"} /> : <WithdrawalWhere lang={store.language} />}
         <button type="submit" className="btn st-btn btn-block">
           {product.options.length > 0 ? w.buyForTeam : w.buyForTeamEach(each)}
         </button>
@@ -468,7 +491,7 @@ export function WaitlistForm({ store, product, writes = false }: { store: Store;
         {w.yourEmail}
       </label>
       <EmailField id={`w-${product.id}`} name="email" className="st-field" required autoComplete="email" placeholder={w.emailPlaceholder} language={store.language} />
-      <label htmlFor={`wc-${product.id}`} className="st-muted flex cursor-pointer items-start gap-3 text-sm">
+      <label htmlFor={`wc-${product.id}`} className="st-muted flex min-h-11 cursor-pointer items-start gap-3 text-sm">
         <input id={`wc-${product.id}`} type="checkbox" name="consent" value="yes" data-joins="" className="mt-0.5 h-4 w-4 shrink-0" />
         <span>{w.alsoOtherEmails(store.name)}</span>
       </label>
@@ -499,7 +522,8 @@ export function PreorderForm({ store, product, day, writes = false, consentAgain
         <input type="hidden" name="product" value={product.id} />
         <input type="hidden" name="preorder" value="yes" />
         <p className="text-sm font-bold" style={{ color: "var(--st-accent-text)" }}>{p.expected(expected)}</p>
-        {deliversDigitally(product) ? <DigitalConsentBox id={`dc-pre-${product.id}`} lang={store.language} refused={consentAgain} /> : null}
+        <CountryAsk store={store} product={product} id={`bc-pre-${product.id}`} />
+        {deliversDigitally(product) ? <DigitalConsentBox id={`dc-pre-${product.id}`} lang={store.language} refused={consentAgain} /> : <WithdrawalWhere lang={store.language} />}
         <button type="submit" className="btn st-btn btn-block">
           {p.button(price)}
         </button>
@@ -533,7 +557,7 @@ export function PreorderForm({ store, product, day, writes = false, consentAgain
  */
 export function ClicksBox({ id, label, className = "", always = false }: { id: string; label: string; className?: string; always?: boolean }) {
   return (
-    <label htmlFor={id} className={`st-muted cursor-pointer items-start gap-3 text-sm ${always ? "flex" : "ask-clicks"} ${className}`} data-clicks-box="">
+    <label htmlFor={id} className={`st-muted min-h-11 cursor-pointer items-start gap-3 text-sm ${always ? "flex" : "ask-clicks"} ${className}`} data-clicks-box="">
       <input id={id} type="checkbox" name="clicks" value="yes" className="mt-0.5 h-4 w-4 shrink-0" />
       <span>{label}</span>
     </label>
@@ -548,6 +572,7 @@ export function BuyBox({
   selling,
   related,
   ready = true,
+  unread = false,
   soon = false,
   preorder = null,
   bundleItems = null,
@@ -555,6 +580,10 @@ export function BuyBox({
   place = "",
   consentAgain = false,
   embed = null,
+  stepped = false,
+  accessEnd = null,
+  chosenOption = null,
+  countryProblem = false,
 }: {
   store: Store;
   product: Listing;
@@ -568,6 +597,12 @@ export function BuyBox({
   selling: boolean;
   /** For a bundle: whether it holds enough to hand over right now. */
   ready?: boolean;
+  /**
+   * Whether it can be bought could not be read just now: its license keys left (lib/licence-keys.ts outOfKeys). Unknown
+   * is never "keys left" (CX-123 rule 24): no way to buy is drawn, and the box says buying is not available just now,
+   * as the card on the creator's own site does.
+   */
+  unread?: boolean;
   /** Coming soon: a waitlist instead of a way to pay (lib/waitlist.ts). */
   soon?: boolean;
   /** Coming soon and taking pre-orders: the day it is expected (lib/preorders.ts, preorderDay). */
@@ -586,11 +621,44 @@ export function BuyBox({
   consentAgain?: boolean;
   /** Opened from a card on one of the creator's listed sites: carried to the checkout, which checks it against the store's list. */
   embed?: { site: string; back: string } | null;
+  /**
+   * Drawn on a card in a list of products (the store page, a collection): where buying asks for the box to start
+   * access at once (lib/digital-consent.ts), the card leads to the product's own buy step instead, so the box, its
+   * note and the closing sentence are drawn once, directly above the Buy button they belong to (Encanto 3,
+   * C4-20261106-0520-TODOS-19), not repeated on every card.
+   */
+  stepped?: boolean;
+  /**
+   * For a course on its own sales page (24 [E7]): the end that page says ("none" or the end in seconds), sent with the
+   * form so the checkout refuses a sale whose end changed and stamps the one shown. Null everywhere else: a card that
+   * draws no date sells with no end.
+   */
+  accessEnd?: string | null;
+  /**
+   * The price option a link to this page named (630 [HN6](27), lib/option-link-rules.ts linkedOption): drawn chosen,
+   * and said so above the options, because the buyer clicked a link for it. Null chooses nothing, as always (487 [IT4]).
+   */
+  chosenOption?: string | null;
+  /** The product page shows the refused-country notice (#country-notice): the main form's field points to it. */
+  countryProblem?: boolean;
 }) {
+  // The card's way to the buy step: the words the product page's own buttons use (pageAction), and its name for a
+  // screen reader, so the link says on its own what it is for (WCAG 2.4.9).
+  const toStep = (anchor: string) => (
+    <Link prefetch={false} href={`${productPath(store, product)}${anchor}`} className="btn st-btn btn-block mt-4" data-buy-step="">
+      {pageAction(store, product, remaining, selling, related, soon, preorder).label}
+      <span className="sr-only">{`: ${product.title}`}</span>
+    </Link>
+  );
+  if (unread) return <p className="st-muted mt-4 text-sm">{speech(store).w.cardBuyUnread}</p>;
+  if (soon && !isFree(product) && preorder && stepped) return toStep("#preorder");
   if (soon && !isFree(product)) return preorder ? <PreorderForm store={store} product={product} day={preorder} writes={writes} consentAgain={consentAgain} /> : <WaitlistForm store={store} product={product} writes={writes} />;
   const { w, money } = speech(store);
   const options = sellableOptions(product);
-  const every = product.recurring ? ` ${w.every(product.recurring.interval)}` : "";
+  // Only an option this box offers right now can be the one the link chose.
+  const linked = chosenOption && options.some((option) => option.id === chosenOption) ? options.find((option) => option.id === chosenOption)! : null;
+  // How often, as charged: "a month", or "every 3 months" (609 [WP8]).
+  const every = product.recurring ? ` ${everyPhrase(store, product.recurring.interval, product.recurring.every)}` : "";
   // What one costs in each option whose name says how many (lib/option-units.ts); not for a membership's price.
   const units = product.recurring ? new Map<string, UnitLine>() : unitLines(options);
   const unitWords = (u: UnitLine) => [w.perUnit(money(u.perUnitCents), u.unit), u.savePercent ? w.unitSaving(u.savePercent) : ""].filter(Boolean).join(" · ");
@@ -635,7 +703,7 @@ export function BuyBox({
           {w.yourEmail}
         </label>
         <EmailField id={`e-${place}${product.id}`} name="email" className="st-field" required autoComplete="email" placeholder={w.emailPlaceholder} language={store.language} />
-        <label htmlFor={`c-${place}${product.id}`} className="st-muted flex cursor-pointer items-start gap-3 text-sm">
+        <label htmlFor={`c-${place}${product.id}`} className="st-muted flex min-h-11 cursor-pointer items-start gap-3 text-sm">
           <input id={`c-${place}${product.id}`} type="checkbox" name="consent" value="yes" data-joins="" className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{w.alsoEmails(store.name)}</span>
         </label>
@@ -672,7 +740,7 @@ export function BuyBox({
   // The creator's own PayPal, as well as Stripe or instead of it (lib/paypal-sales.ts).
   const withPayPal = ready && paypalReady(store, product);
   if (!canSellProduct(store, product) || !ready) {
-    if (withPayPal) return <PayPalButton store={store} product={product} alone consentAgain={consentAgain} />;
+    if (withPayPal) return stepped ? toStep("#buy") : <PayPalButton store={store} product={product} alone consentAgain={consentAgain} />;
     /*
       Sellable store, but this one has nothing attached to hand over. Better to
       say so than to take the money and work out the delivery afterward.
@@ -704,6 +772,7 @@ export function BuyBox({
         again={pickAgain}
         place={place}
         consentAgain={consentAgain}
+        country={{ label: speech(store).w.billingCountry, choose: speech(store).w.chooseCountry }}
       />
     );
   }
@@ -716,13 +785,15 @@ export function BuyBox({
   // checked, where only an added product does (beside a shipped one). Its
   // form also carries the PayPal button, so one box serves both.
   const formId = `buy-${place}${product.id}`;
-  const digitalHere = deliversDigitally(product, startingOption(options)?.id ?? null);
+  const digitalHere = deliversDigitally(product, null);
   const digitalAdded = !digitalHere && extras.some((extra) => deliversDigitally(extra.target));
+  if (stepped && (digitalHere || digitalAdded)) return toStep("#buy");
   return (
     <>
     <form id={formId} action="/api/store/checkout" method="post" target="_top" className="mt-4" data-checkout="">
       <input type="hidden" name="handle" value={store.handle} />
       <input type="hidden" name="product" value={product.id} />
+      {accessEnd !== null ? <input type="hidden" name={ACCESS_END_FIELD} value={accessEnd} /> : null}
       {embed?.site ? <input type="hidden" name="site" value={embed.site} /> : null}
       {embed?.back ? <input type="hidden" name="return" value={embed.back} /> : null}
       {/*
@@ -747,8 +818,12 @@ export function BuyBox({
         */
         <div className="mb-4">
           <label htmlFor={`os-${product.id}`} className="st-label">{w.chooseOptionFor(product.title)}</label>
-          <select id={`os-${product.id}`} name="option" defaultValue={startingOption(options)?.id} className="st-field mt-2">
-            {options.map((option) => (
+          {linked ? <p className="st-muted mt-1 text-sm" data-option-from-link="">{w.optionFromLink(linked.label)}</p> : null}
+          <select id={`os-${product.id}`} name="option" required defaultValue={linked ? linked.id : ""} className="st-field mt-2">
+            <option value="" disabled>
+              {w.chooseOne}
+            </option>
+            {optionsInPickOrder(options).map((option) => (
               <option key={option.id} value={option.id}>
                 {`${w.priced(option.label, `${money(option.priceCents)}${every}`)}${units.get(option.id) ? ` (${unitWords(units.get(option.id)!)})` : ""}${planAt(option.id) ? ` · ${w.orPlan(planAt(option.id)!)}` : ""}${option.best ? w.recommendedAfter : ""}`}
               </option>
@@ -758,14 +833,17 @@ export function BuyBox({
       ) : options.length > 0 ? (
         <fieldset className="mb-4">
           <legend className="sr-only">{w.chooseOptionFor(product.title)}</legend>
+          {linked ? <p className="st-muted mb-2 text-sm" data-option-from-link="">{w.optionFromLink(linked.label)}</p> : null}
           {/*
             With what each includes written down, the cards stand side by side
             on a wide screen so the buyer can compare them; on a phone they
-            stack. The creator's pick opens chosen and says so, in the
-            creator's voice: "Recommended", never a claim about other buyers.
+            stack. The creator's pick is listed first and says so, in the
+            creator's voice: "Recommended", never a claim about other buyers;
+            nothing is chosen for the buyer, and the form asks for a choice
+            (487 [IT4]).
           */}
           <div className={comparable(options) ? `st-compare st-compare-${Math.min(options.length, 3)}` : "space-y-2"}>
-            {options.map((option) => (
+            {optionsInPickOrder(options).map((option) => (
               <label key={option.id} htmlFor={`o-${option.id}`} className={comparable(options) ? "st-option st-option-card" : "st-option"}>
                 <span className="flex items-center gap-3">
                   <input
@@ -773,7 +851,8 @@ export function BuyBox({
                     type="radio"
                     name="option"
                     value={option.id}
-                    defaultChecked={option.id === startingOption(options)?.id}
+                    required
+                    defaultChecked={linked?.id === option.id}
                     className="h-4 w-4"
                   />
                   <span className="font-bold">{option.label}</span>
@@ -866,7 +945,7 @@ export function BuyBox({
            Offered where the creator writes to their list here, or sends this
            product's buyers to their own email platform (lib/email-sync.ts). */
         <>
-          <label htmlFor={`n-${product.id}`} className="st-muted mb-4 flex cursor-pointer items-start gap-3 text-sm">
+          <label htmlFor={`n-${product.id}`} className="st-muted mb-4 flex min-h-11 cursor-pointer items-start gap-3 text-sm">
             <input id={`n-${product.id}`} type="checkbox" name="news" value="yes" data-joins="" className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{w.alsoEmails(store.mail?.fromName || store.name)}</span>
           </label>
@@ -875,7 +954,8 @@ export function BuyBox({
       ) : null}
       {/* Starts unchecked: one reminder if this checkout is left unpaid, only when asked for here (lib/assistant-reminder.ts). */}
       {assistReminderOffered(store, product) ? <AssistReminderBox id={`r-${place}${product.id}`} lang={store.language} store={store.name} className="mb-4" /> : null}
-      {digitalHere || digitalAdded ? <DigitalConsentBox id={`dc-${place}${product.id}`} kind={consentKind(product)} lang={store.language} refused={consentAgain} required={digitalHere} className="mb-4" /> : null}
+      <CountryAsk store={store} product={product} id={`bc-${place}${product.id}`} className="mb-4" problem={countryProblem && !place ? "country-notice" : undefined} />
+      {digitalHere || digitalAdded ? <DigitalConsentBox id={`dc-${place}${product.id}`} kind={consentKind(product)} lang={store.language} refused={consentAgain} required={digitalHere} className="mb-4" /> : <WithdrawalWhere lang={store.language} className="mb-4" />}
       <button type="submit" className="btn st-btn btn-block">
         <span className="bump-off">
           {pwyw
@@ -964,6 +1044,21 @@ export function BuyBox({
 }
 
 /**
+ * Where the buyer is buying from, asked beside every paid checkout (EU VAT art. 9a: lib/eu-vat-gate.ts consumerGate
+ * refuses a paid sale to the EU or the UK until the VAT there is collected). Nothing for a free product, which is
+ * no sale and goes on wherever the buyer is.
+ */
+function CountryAsk({ store, product, id, className = "", problem }: { store: Store; product: Listing; id: string; className?: string; problem?: string }) {
+  if (product.priceCents === 0 && !product.pwyw) return null;
+  const { w, lang } = speech(store);
+  return (
+    <div className={className}>
+      <BillingCountryField id={id} locale={lang.locale} label={w.billingCountry} choose={w.chooseCountry} problem={problem} />
+    </div>
+  );
+}
+
+/**
  * Paying with PayPal, into the creator's own PayPal account: one product at
  * its one price, nothing added. A plain form; the price is read on the server.
  */
@@ -987,6 +1082,7 @@ function PayPalButton({ store, product, alone, formId = "", consentAgain = false
       <input type="hidden" name="handle" value={store.handle} />
       <input type="hidden" name="product" value={product.id} />
       {/* Everything PayPal sells here is handed over digitally (lib/paypal-sales.ts, sellsWithPayPal). */}
+      <CountryAsk store={store} product={product} id={`bc-pp-${product.id}`} className="mb-4" />
       <DigitalConsentBox id={`dc-pp-${product.id}`} lang={store.language} refused={consentAgain} className="mb-4" />
       <button type="submit" className={`btn btn-block ${alone ? "st-btn" : "st-btn-ghost"}`}>
         {w.payPal(alone, money(payPalPrice(store, product)))}
@@ -1065,7 +1161,7 @@ export function pageAction(
       : trial
         ? w.startTrial(trial)
         : product.recurring
-          ? introButton(store, product) ?? w.subscribeFor(money(product.priceCents), w.every(product.recurring.interval))
+          ? introButton(store, product) ?? w.subscribeFor(money(product.priceCents), everyPhrase(store, product.recurring.interval, product.recurring.every))
           : w.buyFor(money(salePrice(product.priceCents, offNow(store, product)))),
   };
 }
@@ -1081,6 +1177,12 @@ export function pageAction(
  * Every style carries the same facts and the same buy box. The title, and the
  * picture, lead to the product's own page, where the long description is.
  */
+/**
+ * A product's title on its card: a 44 × 44 px target (WCAG 2.5.5 AAA), wide enough even for a title of one letter.
+ * The padding keeps the hover line under the words, drawn in the content box, not at the foot of the taller box.
+ */
+const TITLE_LINK = "st-title-link inline-flex min-h-11 min-w-11 items-center py-2.5 [background-clip:content-box] [background-origin:content-box]";
+
 export function ProductCard({
   store,
   product,
@@ -1097,6 +1199,8 @@ export function ProductCard({
   preorder = null,
   cart = false,
   sold = null,
+  grid = false,
+  unread = false,
 }: {
   store: Store;
   product: Listing;
@@ -1126,6 +1230,10 @@ export function ProductCard({
   bundleItems?: Listing[] | null;
   /** "Bought N times", from the creator's own Stripe account, when they chose to show it (lib/sold-count.ts). */
   sold?: string | null;
+  /** It stands in the store page's grid, two to a row on a computer (Encanto 3): its cover is described at that width. */
+  grid?: boolean;
+  /** Its license keys left could not be read just now (CX-123 rule 24): no way to buy it, and no count, is drawn. */
+  unread?: boolean;
 }) {
   const href = productPath(store, product);
   const { w, num } = speech(store);
@@ -1143,7 +1251,7 @@ export function ProductCard({
     <img
       src={servedImageUrl(image)}
       srcSet={servedSrcSet(image)}
-      sizes={image.small ? (style === "preview" ? IMAGE_SIZES.cover : IMAGE_SIZES.thumb) : undefined}
+      sizes={image.small ? (style === "preview" ? (grid ? IMAGE_SIZES.grid : IMAGE_SIZES.cover) : IMAGE_SIZES.thumb) : undefined}
       alt={image.alt}
       width={image.width}
       height={image.height}
@@ -1151,14 +1259,24 @@ export function ProductCard({
       fetchPriority={first ? "high" : undefined}
       decoding="async"
       className={style === "preview" ? "st-cover" : style === "callout" ? "st-callout-img" : "st-thumb"}
-      style={style === "preview" ? { aspectRatio: `${image.width} / ${image.height}` } : undefined}
+      // The picture's color under it while it loads (Encanto 5b), when it has one.
+      style={style === "preview" || image.tone ? { ...(style === "preview" ? { aspectRatio: `${image.width} / ${image.height}` } : {}), ...(image.tone ? { backgroundColor: image.tone } : {}) } : undefined}
     />
   ) : null;
+
+  // "Read more" says, to a screen reader, which product it is for (WCAG 2.4.9), its visible words first (2.5.3); a
+  // 44 px target like the title (2.5.5). The title's own words, not new ones, so every buyer language reads it.
+  const readMore = (
+    <Link prefetch={false} href={href} className="inline-flex min-h-11 items-center underline underline-offset-4" style={{ color: "var(--st-text)" }}>
+      {w.readMore}
+      <span className="sr-only">{`: ${product.title}`}</span>
+    </Link>
+  );
 
   const heading = (
     <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
       <h2 className="font-display min-w-0 text-lg font-semibold leading-snug">
-        <Link prefetch={false} href={href} className="st-title-link">
+        <Link prefetch={false} href={href} className={TITLE_LINK}>
           {product.title}
         </Link>
       </h2>
@@ -1174,22 +1292,16 @@ export function ProductCard({
       {sold ? <p className="st-sold mt-1 text-sm font-semibold">{sold}</p> : null}
       <ProductFacts store={store} product={product} bundleItems={bundleItems} />
       {summary}
-      {product.about || product.page ? (
-        <p className="mt-2 text-sm font-semibold">
-          <Link prefetch={false} href={href} className="underline underline-offset-4" style={{ color: "var(--st-text)" }}>
-            {w.readMore}
-          </Link>
-        </p>
-      ) : null}
+      {product.about || product.page ? <p className="mt-2 text-sm font-semibold">{readMore}</p> : null}
     </>
   );
 
   const rest = (
     <>
-      {plan && canSellProduct(store, product) && !soon ? (
+      {plan && canSellProduct(store, product) && !soon && !unread ? (
         <p className="st-muted mt-1 text-sm font-semibold">{w.orPlan(planLine(store, plan))}</p>
       ) : null}
-      {remaining !== null && !soon ? (
+      {remaining !== null && !soon && !unread ? (
         <p className="mt-2 text-sm font-bold" style={{ color: "var(--st-accent-text)" }}>
           {soldOut ? w.soldOut : w.left(remaining, num(remaining))}
         </p>
@@ -1204,8 +1316,10 @@ export function ProductCard({
         ready={!product.bundle || (bundleItems?.length ?? 0) >= MIN_BUNDLE_ITEMS}
         soon={soon}
         preorder={preorder}
+        stepped
+        unread={unread}
       />
-      {cart ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
+      {cart && !unread ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {product.recurring && manageable ? (
         <p className="mt-3 text-center text-sm">
           <Link href={`/@${store.handle}/manage`} className="st-footer-link font-semibold">
@@ -1240,7 +1354,7 @@ export function ProductCard({
           </Link>
           <div className="min-w-0 flex-1">
             <h2 className="font-display text-lg font-semibold leading-snug">
-              <Link prefetch={false} href={href} className="st-title-link">
+              <Link prefetch={false} href={href} className={TITLE_LINK}>
                 {product.title}
               </Link>
             </h2>
@@ -1252,13 +1366,7 @@ export function ProductCard({
           </div>
         </div>
         <div className="sm:hidden">{summary}</div>
-        {product.about || product.page ? (
-          <p className="mt-2 text-sm font-semibold">
-            <Link prefetch={false} href={href} className="underline underline-offset-4" style={{ color: "var(--st-text)" }}>
-              {w.readMore}
-            </Link>
-          </p>
-        ) : null}
+        {product.about || product.page ? <p className="mt-2 text-sm font-semibold">{readMore}</p> : null}
         {rest}
       </li>
     );

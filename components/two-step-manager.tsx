@@ -25,9 +25,16 @@ const MESSAGES: Record<string, string> = {
   same: "The recovery address has to be another inbox than the one you log in with: that is what makes it a way back in.",
   unsent: "The code could not be emailed to that address just now. Check it, and try again.",
   "backup-wrong": "The code from your recovery address is not right. Type the six digits in the email we sent there.",
+  sessions: "Two-step login was not turned on: we could not check your other browsers just now. Try again in a moment.",
 };
 
-type Answer = { ok?: boolean; error?: string; secret?: string; uri?: string; codes?: string[] };
+type Answer = { ok?: boolean; error?: string; secret?: string; uri?: string; codes?: string[]; loggedOut?: boolean };
+
+/** Said when the request is canceled but the browsers let in without the second step could not be logged out (review of #2556). */
+export const CANCEL_NOT_LOGGED_OUT = "Canceled. Two-step login stays on, but the browsers let in without it could not be logged out just now. They stay locked until they are. Choose “Log out of all devices” at the bottom of your studio.";
+
+/** Said when the app is off but the browsers it let in could not be logged out (audit SG2, finding 6). */
+export const OFF_NOT_LOGGED_OUT = "Two-step login is off, but the browsers it let in could not be logged out just now. Choose “Log out of all devices” at the bottom of your studio.";
 
 async function call(payload: Record<string, unknown>): Promise<Answer> {
   try {
@@ -89,12 +96,26 @@ function Codes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
   );
 }
 
+/** Said in place of every change when this browser's lock could not be read just now (`lockUnknown`). */
+const LOCK_UNKNOWN = "This page could not check just now whether this browser got in without its second step, so two-step login cannot be changed from here. Nothing was changed. Open this page again in a moment.";
+
+/** Said in place of the recovery sentence or the turn-on form when the recovery address could not be read just now. */
+const RECOVERY_UNKNOWN = "Your recovery address could not be read just now.";
+
 /**
  * The person's two-step login (lib/two-step.ts), in the studio's Account part,
  * beside their passkeys: turn it on with an authenticator app, see how many
  * recovery codes are left, make new ones, or turn it off.
+ *
+ * `unread`: the page could not read it, so it is neither on nor off here, and
+ * nothing is offered that would change it (CX-123 rule 24, lib/redis-reply.ts).
+ * `recoveryUnknown`: the recovery address could not be read just now, so the
+ * manager never says there is none and does not ask for one to turn it on.
+ * `lockUnknown`: whether this browser is locked (`locked`) could not be read
+ * just now, so it is never taken for "not locked": nothing a lock would refuse
+ * is offered (turn on, turn off, new codes, Cancel), and the manager says why.
  */
-export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: initialReset, backup: backupShown, fresh, locked = false }: { on: boolean; codesLeft: number; reset: number; backup: string; fresh: boolean; locked?: boolean }) {
+export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: initialReset, backup: backupShown, recoveryUnknown = false, fresh, locked = false, lockUnknown = false, unread = false }: { on: boolean; codesLeft: number; reset: number; backup: string; recoveryUnknown?: boolean; fresh: boolean; locked?: boolean; lockUnknown?: boolean; unread?: boolean }) {
   const [reset, setReset] = useState(initialReset);
   const [recoveryShown, setRecoveryShown] = useState(backupShown);
   const [on, setOn] = useState(initialOn);
@@ -134,15 +155,29 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
     </label>
   );
 
+  const title = (
+    <h3 id="two-step-title" className="flex items-center gap-2 font-semibold text-ink">
+      <Icon name="lock" size={18} className="text-violet-deep" />
+      Two-step login
+    </h3>
+  );
+
+  if (unread)
+    return (
+      <section id="two-step" aria-labelledby="two-step-title" className="mt-8 scroll-mt-32 border-t border-line pt-6">
+        {title}
+        <p className="notice notice-warn mt-4 text-sm" role="status">
+          Two-step login could not be read just now, so this page cannot show whether it is on, or change it. Open this page again in a moment.
+        </p>
+      </section>
+    );
+
   return (
     <section id="two-step" aria-labelledby="two-step-title" className="mt-8 scroll-mt-32 border-t border-line pt-6">
-      <h3 id="two-step-title" className="flex items-center gap-2 font-semibold text-ink">
-        <Icon name="lock" size={18} className="text-violet-deep" />
-        Two-step login
-      </h3>
+      {title}
       <p className="mt-2 text-sm text-ink-soft">
         {on
-          ? `On. Logging in with the emailed link also asks for the code in your authenticator app; a passkey needs no code. ${left} recovery ${left === 1 ? "code" : "codes"} left.${recoveryShown ? ` Lose your phone and your codes, and a link to your recovery address, ${recoveryShown}, lets you back in.` : " There is no recovery address: add one above, so losing your phone never keeps you out."}`
+          ? `On. Logging in with the emailed link also asks for the code in your authenticator app; a passkey needs no code. ${left} recovery ${left === 1 ? "code" : "codes"} left.${recoveryShown ? ` Lose your phone and your codes, and a link to your recovery address, ${recoveryShown}, lets you back in.` : recoveryUnknown ? ` ${RECOVERY_UNKNOWN}` : " There is no recovery address: add one above, so losing your phone never keeps you out."}`
           : "After the emailed link, ask for a six-digit code from an authenticator app, such as Google Authenticator, Microsoft Authenticator, 1Password or Authy. Someone who gets into your email still cannot open your studio without your phone. A passkey needs no code."}
       </p>
 
@@ -150,26 +185,34 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
         <p className="notice mt-4 text-sm" role="status">
           You got in without your second step, so two-step login cannot be changed from this browser until it turns off; the date is at the top of your studio.
         </p>
+      ) : lockUnknown ? (
+        <p className="notice notice-warn mt-4 text-sm" role="status">
+          {LOCK_UNKNOWN}
+        </p>
       ) : null}
 
       {!locked && on && reset > 0 ? (
         <div className="notice notice-warn mt-4" role="status">
           <p className="text-sm text-ink">
-            {`Set to turn off on ${new Date(reset).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}, asked from the login page by somebody without a code or a passkey. If that was not you, cancel it and change your email password.`}
+            {`Set to turn off on ${new Date(reset).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}, asked from the login page by somebody without a code or a passkey. If that was not you, ${lockUnknown ? "open this page again in a moment to cancel it" : "cancel it"} and change your email password.`}
           </p>
+          {lockUnknown ? null : (
           <button
             type="button"
             className="btn btn-primary mt-3"
             disabled={busy}
             onClick={() =>
-              void run({ action: "cancel" }, () => {
+              void run({ action: "cancel" }, (answer) => {
                 setReset(0);
-                toast("Canceled. Two-step login stays on.");
+                // Something to act on stays inline, never in a toast that goes (components/toast.tsx).
+                if (answer.loggedOut === false) setError(CANCEL_NOT_LOGGED_OUT);
+                else toast("Canceled. Two-step login stays on.");
               })
             }
           >
             Cancel: keep two-step login on
           </button>
+          )}
         </div>
       ) : null}
 
@@ -183,13 +226,15 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
         />
       ) : null}
 
-      {locked ? null : stale && !on ? (
+      {locked || lockUnknown ? null : stale && !on ? (
         <div className="mt-4 rounded-[12px] bg-paper px-4 py-4 ring-1 ring-line">
           <p className="text-sm text-ink-soft">{MESSAGES.reauth}</p>
           <Link href="/signin?status=reauth" className="btn btn-secondary mt-3">
             Log in again
           </Link>
         </div>
+      ) : !on && !setup && !recoveryShown && recoveryUnknown ? (
+        <p className="mt-4 text-sm text-ink-soft">{`${RECOVERY_UNKNOWN} Turning on two-step login asks for it, so reload the page in a moment.`}</p>
       ) : !on && !setup ? (
         <form
           className="mt-4 flex flex-wrap items-end gap-3"
@@ -252,10 +297,12 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
           onSubmit={(e) => {
             e.preventDefault();
             if (asking === "off") {
-              void run({ action: "off", code }, () => {
+              void run({ action: "off", code }, (answer) => {
                 setOn(false);
                 setAsking(null);
-                toast("Two-step login is off.");
+                // Something to act on stays inline, never in a toast that goes (components/toast.tsx).
+                if (answer.loggedOut === false) setError(OFF_NOT_LOGGED_OUT);
+                else toast("Two-step login is off.");
               });
             } else {
               void run({ action: "codes", code }, (answer) => {

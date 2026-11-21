@@ -14,8 +14,13 @@
  * (lib/buyer-words/index.ts, speech): a sentence here only places them.
  */
 import { type LanguageCode, parseLanguage } from "@/lib/store-language";
+import { membershipWords } from "@/lib/buyer-words/membership";
 
 type Interval = "day" | "week" | "month" | "year";
+
+/** Charged every few weeks or months (609 [WP8]): the membership words' own "every 3 months"; once an interval keeps `once`. */
+const often = (code: LanguageCode, interval: Interval, count: number, once: string): string =>
+  count > 1 ? membershipWords(code).every(interval, count) : once;
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 /** French takes the singular for 0 and 1. */
@@ -66,7 +71,7 @@ const en = {
   emailYouPaidWith: "The email you paid with",
   emailMe: "Email me my purchases",
   formNote: (store: string) =>
-    `If that address bought something from ${store}, a link to all of it usually arrives within a minute and works for 24 hours. We say the same thing whether or not it did, so nobody can use this page to find out who bought what.`,
+    `If that address bought something from ${store}, we try to email a link to all of it. Any link sent works for 24 hours. We say the same thing whether or not it did, so nobody can use this page to find out who bought what.`,
   checkInbox: "Check your inbox",
   sentBody: (store: string) =>
     `If that address bought something from ${store}, a link is normally on its way. It comes from ${store} via Marktmorgen and can take a few minutes. If it is not there, look in spam.`,
@@ -81,6 +86,8 @@ const en = {
   /** Each link names what it opens, so two of them never read the same (WCAG 2.4.9). `due` is a date already said, or "". */
   openRequest: (amount: string, due: string): string => (due ? `Open the ${amount} payment request due ${due}` : `Open the ${amount} payment request`),
   openToSign: (title: string): string => `Read and sign “${title}”`,
+  /** The heading over nothingToOpen (656 [WG16], components/empty-state.tsx). */
+  nothingToOpenTitle: "Nothing to open here",
   nothingToOpen: (store: string) =>
     `There is nothing to open here anymore. A purchase that was refunded in full is no longer listed. If something is missing, reply to the order confirmation you were emailed when you paid, and it reaches ${store}.`,
   everythingSold: (store: string) =>
@@ -99,8 +106,14 @@ const en = {
   boughtOn: (date: string) => `Bought on ${date}`,
   endedNote:
     "This membership is no longer running, so what it gave you access to is closed now. Renew it and everything opens again right away.",
+  /** The same, for a store that is not taking payments after a report: the first sentence alone. */
+  endedClosedNote: "This membership is no longer running, so what it gave you access to is closed now.",
   renew: "Renew your membership",
   openCourse: "Open the course",
+  /** How far the buyer is in a course on the list (560 [AS1]): lessons done of the lessons it has now. */
+  lessonsDone: (done: number, total: number) => `${done} of ${total} ${plural(total, "lesson", "lessons")} done`,
+  /** Said when that could not be read just now: never as 0 done. */
+  progressUnread: "We could not check your progress in this course just now. Open the course to see where you are.",
   bookSession: (left: number) => `Book a session (${left} left)`,
   packageExpired: "The time to book this package's sessions has passed.",
   packageAllBooked: "Every session of this package is booked.",
@@ -216,13 +229,13 @@ const en = {
     `Type ${email} on that page and a link to your own private feed comes right away. It works in Apple Podcasts, Overcast, Pocket Casts and most other podcast apps, for as long as you have it.`,
   startCourseAt: (url: string) => `Start the course: ${url}`,
   courseNote: (email: string) =>
-    `If you pressed "Start the course" after paying, it opens right away on that device. Anywhere else, the course page asks for your email: type ${email}, and a link that lets that device in usually arrives within a minute. There is no password to make.`,
+    `If you pressed "Start the course" after paying, it opens right away on that device. Anywhere else, the course page asks for your email: type ${email} and request an email link that lets that device in. There is no password to make.`,
   openWhatYouBought: (url: string) => `Open what you bought: ${url}`,
   threeDays: (ordersUrl: string, email: string, store: string) =>
     `That page has your download or your link for the next 3 days. After that it is not lost: open ${ordersUrl}, type ${email}, and a link to everything you bought from ${store} is emailed to you, at any time.`,
   startTitleAt: (title: string, url: string) => `Start ${title}: ${url}`,
   bundleCourseNote: (email: string) =>
-    `A course you started after paying opens right away on that device. Anywhere else, its page asks for your email: type ${email}, and a link that lets that device in usually arrives within a minute.`,
+    `A course you started after paying opens right away on that device. Anywhere else, its page asks for your email: type ${email} and request an email link that lets that device in.`,
   /** `label` is yourKey or yourKeyFor. */
   keyIssued: (label: string, key: string) => `${label}: ${key}`,
   keyOnItsWay: (label: string, store: string) =>
@@ -232,9 +245,12 @@ const en = {
     `Nothing was charged today. Your first payment here of ${price}${hasTax ? " plus any sales tax" : ""} is taken on ${date}, from the card you gave. Cancel before then and you are not charged at all.`,
   trialCharge: (price: string, hasTax: boolean, days: number, date: string) =>
     `Nothing was charged today. Your first payment of ${price}${hasTax ? " plus any sales tax" : ""} is taken when the ${days}-day trial ends, on ${date}, from the card you gave. Cancel before then and you are not charged at all.`,
-  /** How a membership renews: for a set number of payments, or until cancelled (payments 0). */
-  renews: (interval: Interval, payments: number) => {
-    const every = { day: "a day", week: "a week", month: "a month", year: "a year" }[interval];
+  /**
+   * How a membership renews: for a set number of payments, or until cancelled (payments 0); `count` of the interval
+   * between charges, "every 3 months" for more than one (609 [WP8]).
+   */
+  renews: (interval: Interval, payments: number, count: number) => {
+    const every = often("en", interval, count, { day: "a day", week: "a week", month: "a month", year: "a year" }[interval]);
     return payments > 0
       ? `This renews once ${every} for ${payments} payments in all and then ends by itself.`
       : `This renews once ${every} until you cancel it.`;
@@ -252,6 +268,15 @@ const en = {
   discountCovered: (zero: string) => `${zero}. A discount code covered the whole price.`,
   /** "$9 a month, 12 payments in all". */
   paymentsInAll: (every: string, payments: number) => `${every}, ${payments} payments in all`,
+  /**
+   * A membership whose discount came off the first charge: what was paid today and what each charge after it is,
+   * from the checkout (lib/purchase-email.ts). `then` is null when that price does not read; `isOpenEnded` when how long
+   * the discount keeps coming off could not be read, so it is never said to end or to go on.
+   */
+  discountToday: (now: string, then: string | null, hasTax: boolean, isOpenEnded: boolean) =>
+    `${now} today, with your discount. ${then ? `Each charge after this one: ${then}` : "Each charge after this one is at the membership's regular price"}${hasTax ? " plus any sales tax" : ""}${isOpenEnded ? ", less your discount for as long as it lasts" : ""}.`,
+  /** An introductory price with sales tax added on top: what was charged today, then the schedule. */
+  introTaxed: (now: string, schedule: string) => `${now} today. The price: ${schedule}, plus any sales tax.`,
 
   // ---- The confirmation of an offer taken after paying -------------------------------------
   offerSubject: (store: string, title: string) => `Added to your order from ${store}: ${title}`,
@@ -290,6 +315,8 @@ const en = {
     addedToOrderNoPart: "The product added to this order has no such part.",
     noSuchProduct: "This order has no such product in it.",
     tooOften: "This link has been opened very many times in the last hour. Please try again in a little while.",
+    /** A copy marked with the buyer's email could not be made just now (lib/pdf-stamp.ts, "retry"): never the file unmarked instead. */
+    stampNotReady: "Your copy, marked with your email, could not be made just now. Please try again in a few minutes.",
   },
 };
 
@@ -340,7 +367,7 @@ const es: OrdersWords = {
   emailYouPaidWith: "El email con el que pagaste",
   emailMe: "Envíame mis compras por email",
   formNote: (store) =>
-    `Si esa dirección le compró algo a ${store}, normalmente en menos de un minuto llega un enlace a todo ello, que funciona durante 24 horas. Decimos lo mismo tanto si compró como si no, para que nadie pueda usar esta página para averiguar quién compró qué.`,
+    `Si esa dirección le compró algo a ${store}, intentamos enviarle por email un enlace a todo ello. Cualquier enlace enviado funciona durante 24 horas. Decimos lo mismo tanto si compró como si no, para que nadie pueda usar esta página para averiguar quién compró qué.`,
   checkInbox: "Revisa tu bandeja de entrada",
   sentBody: (store) =>
     `Si esa dirección le compró algo a ${store}, normalmente el enlace va en camino. Llega de ${store} vía Marktmorgen y puede tardar unos minutos. Si no está, mira en la carpeta de spam.`,
@@ -352,6 +379,7 @@ const es: OrdersWords = {
   waitingUnread: "No pudimos leer ahora lo que te espera. Vuelve a abrir esta página en un momento.",
   openRequest: (amount, due) => (due ? `Abrir la solicitud de pago de ${amount} con vencimiento el ${due}` : `Abrir la solicitud de pago de ${amount}`),
   openToSign: (title) => `Leer y firmar «${title}»`,
+  nothingToOpenTitle: "Nada que abrir aquí",
   nothingToOpen: (store) =>
     `Aquí ya no hay nada que abrir. Una compra reembolsada por completo deja de aparecer. Si falta algo, responde a la confirmación del pedido que te llegó por email cuando pagaste, y le llegará a ${store}.`,
   everythingSold: (store) =>
@@ -367,8 +395,11 @@ const es: OrdersWords = {
   givenByStore: (store, date) => `Te lo dio ${store}${date ? ` el ${date}` : ""}`,
   boughtOn: (date) => `Comprado el ${date}`,
   endedNote: "Esta membresía ya no está activa, así que lo que te daba acceso está cerrado ahora. Renuévala y todo se abre de nuevo al instante.",
+  endedClosedNote: "Esta membresía ya no está activa, así que lo que te daba acceso está cerrado ahora.",
   renew: "Renueva tu membresía",
   openCourse: "Abrir el curso",
+  lessonsDone: (done, total) => `${done} de ${total} ${plural(total, "lección completada", "lecciones completadas")}`,
+  progressUnread: "No pudimos comprobar tu progreso en este curso en este momento. Abre el curso para ver por dónde vas.",
   bookSession: (left) => `Reservar una sesión (${left === 1 ? "queda 1" : `quedan ${left}`})`,
   packageExpired: "Ya pasó el plazo para reservar las sesiones de este paquete.",
   packageAllBooked: "Todas las sesiones de este paquete están reservadas.",
@@ -470,13 +501,13 @@ const es: OrdersWords = {
     `Escribe ${email} en esa página y al instante te llegará un enlace a tu propio feed privado. Funciona en Apple Podcasts, Overcast, Pocket Casts y la mayoría de las demás apps de pódcast, mientras lo tengas.`,
   startCourseAt: (url) => `Empieza el curso: ${url}`,
   courseNote: (email) =>
-    `Si pulsaste «${esStart}» después de pagar, se abre al instante en ese dispositivo. En cualquier otro, la página del curso te pide tu email: escribe ${email} y normalmente en menos de un minuto te llega un enlace que da acceso a ese dispositivo. No hay contraseña que crear.`,
+    `Si pulsaste «${esStart}» después de pagar, se abre al instante en ese dispositivo. En cualquier otro, la página del curso te pide tu email: escribe ${email} y pide por email un enlace que dé acceso a ese dispositivo. No hay contraseña que crear.`,
   openWhatYouBought: (url) => `Abre lo que compraste: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Esa página tiene tu descarga o tu enlace durante los próximos 3 días. Después no se pierde: abre ${ordersUrl}, escribe ${email} y te enviaremos por email un enlace a todo lo que le compraste a ${store}, en cualquier momento.`,
   startTitleAt: (title, url) => `Empieza ${title}: ${url}`,
   bundleCourseNote: (email) =>
-    `Un curso que empezaste después de pagar se abre al instante en ese dispositivo. En cualquier otro, su página te pide tu email: escribe ${email} y normalmente en menos de un minuto te llega un enlace que da acceso a ese dispositivo.`,
+    `Un curso que empezaste después de pagar se abre al instante en ese dispositivo. En cualquier otro, su página te pide tu email: escribe ${email} y pide por email un enlace que dé acceso a ese dispositivo.`,
   keyIssued: (label, key) => `${label}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}: en camino. A ${store} se le acabaron las claves justo cuando pagaste; te llegará por email en cuanto añada más.`,
@@ -485,10 +516,10 @@ const es: OrdersWords = {
     `Hoy no se cobró nada. Tu primer pago aquí de ${price}${hasTax ? " más los impuestos sobre las ventas que correspondan" : ""} se cobra el ${date}, a la tarjeta que indicaste. Cancela antes y no se te cobrará nada.`,
   trialCharge: (price, hasTax, days, date) =>
     `Hoy no se cobró nada. Tu primer pago de ${price}${hasTax ? " más los impuestos sobre las ventas que correspondan" : ""} se cobra cuando termine la prueba de ${days} ${plural(days, "día", "días")}, el ${date}, a la tarjeta que indicaste. Cancela antes y no se te cobrará nada.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `Esta membresía se renueva ${esOnce(interval)} durante ${payments} ${plural(payments, "pago", "pagos")} en total y luego termina sola.`
-      : `Esta membresía se renueva ${esOnce(interval)} hasta que la canceles.`,
+      ? `Esta membresía se renueva ${often("es", interval, count, esOnce(interval))} durante ${payments} ${plural(payments, "pago", "pagos")} en total y luego termina sola.`
+      : `Esta membresía se renueva ${often("es", interval, count, esOnce(interval))} hasta que la canceles.`,
   manageAt: (hasEnd, url, email) =>
     `Para gestionarla o cancelarla por tu cuenta${hasEnd ? " antes de que termine" : ""}, en cualquier momento y sin escribir a nadie, abre ${url} y escribe ${email}.`,
   cancelByReply: (hasEnd, store) => `Para cancelarla${hasEnd ? " antes de que termine" : ""}, responde a este email y le llegará a ${store}.`,
@@ -500,6 +531,9 @@ const es: OrdersWords = {
   trialStarted: (zero, days) => `${zero} hoy. Tu prueba gratuita de ${days} ${plural(days, "día", "días")} ha empezado.`,
   discountCovered: (zero) => `${zero}. Un código de descuento cubrió el precio completo.`,
   paymentsInAll: (every, payments) => `${every}, ${payments} ${plural(payments, "pago", "pagos")} en total`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} hoy, con tu descuento. ${then ? `Cada cobro después de este: ${then}` : "Cada cobro después de este es al precio habitual de la membresía"}${hasTax ? " más los impuestos sobre las ventas que correspondan" : ""}${isOpenEnded ? ", menos tu descuento mientras dure" : ""}.`,
+  introTaxed: (now, schedule) => `${now} hoy. El precio: ${schedule}, más los impuestos sobre las ventas que correspondan.`,
 
   offerSubject: (store, title) => `Añadido a tu pedido de ${store}: ${title}`,
   offerIntro: (store) => `Añadiste algo a tu pedido de ${store}. Esta es tu confirmación.`,
@@ -535,6 +569,7 @@ const es: OrdersWords = {
     addedToOrderNoPart: "El producto añadido a este pedido no tiene esa parte.",
     noSuchProduct: "Este pedido no contiene ese producto.",
     tooOften: "Este enlace se ha abierto muchísimas veces en la última hora. Vuelve a intentarlo dentro de un rato.",
+    stampNotReady: "Ahora mismo no pudimos preparar tu copia, marcada con tu correo electrónico. Vuelve a intentarlo dentro de unos minutos.",
   },
 };
 
@@ -583,7 +618,7 @@ const fr: OrdersWords = {
   emailYouPaidWith: "L'e-mail avec lequel vous avez payé",
   emailMe: "M'envoyer mes achats par e-mail",
   formNote: (store) =>
-    `Si cette adresse a acheté quelque chose chez ${store}, un lien vers tous ses achats arrive généralement en moins d'une minute et reste valable 24${S}heures. Nous affichons le même message dans tous les cas, pour que personne ne puisse se servir de cette page pour savoir qui a acheté quoi.`,
+    `Si cette adresse a acheté quelque chose chez ${store}, nous essayons de lui envoyer par e-mail un lien vers tous ses achats. Tout lien envoyé reste valable 24${S}heures. Nous affichons le même message dans tous les cas, pour que personne ne puisse se servir de cette page pour savoir qui a acheté quoi.`,
   checkInbox: "Consultez votre boîte de réception",
   sentBody: (store) =>
     `Si cette adresse a acheté quelque chose chez ${store}, le lien est normalement en route. Il vient de ${store} via Marktmorgen et peut mettre quelques minutes. S'il n'y est pas, regardez dans les spams.`,
@@ -595,6 +630,7 @@ const fr: OrdersWords = {
   waitingUnread: "Ce qui vous attend n’a pas pu être lu pour le moment. Rouvrez cette page dans un instant.",
   openRequest: (amount, due) => (due ? `Ouvrir la demande de paiement de ${amount} à régler le ${due}` : `Ouvrir la demande de paiement de ${amount}`),
   openToSign: (title) => `Lire et signer «${S}${title}${S}»`,
+  nothingToOpenTitle: "Rien à ouvrir ici",
   nothingToOpen: (store) =>
     `Il n'y a plus rien à ouvrir ici. Un achat remboursé en totalité n'apparaît plus. S'il manque quelque chose, répondez à la confirmation de commande reçue par e-mail lors de votre paiement, et votre message parviendra à ${store}.`,
   everythingSold: (store) =>
@@ -610,8 +646,11 @@ const fr: OrdersWords = {
   givenByStore: (store, date) => `Offert par ${store}${date ? ` le ${date}` : ""}`,
   boughtOn: (date) => `Acheté le ${date}`,
   endedNote: "Cet abonnement n'est plus actif, l'accès qu'il vous donnait est donc fermé. Renouvelez-le et tout s'ouvre de nouveau immédiatement.",
+  endedClosedNote: "Cet abonnement n'est plus actif, l'accès qu'il vous donnait est donc fermé.",
   renew: "Renouveler votre abonnement",
   openCourse: "Ouvrir la formation",
+  lessonsDone: (done, total) => `${done} ${pluralFr(done, "leçon terminée", "leçons terminées")} sur ${total}`,
+  progressUnread: "Nous n'avons pas pu vérifier votre progression dans cette formation pour le moment. Ouvrez la formation pour voir où vous en êtes.",
   bookSession: (left) => `Réserver une séance (${left}${S}${pluralFr(left, "restante", "restantes")})`,
   packageExpired: "Le délai pour réserver les séances de ce forfait est dépassé.",
   packageAllBooked: "Toutes les séances de ce forfait sont réservées.",
@@ -711,13 +750,13 @@ const fr: OrdersWords = {
     `Saisissez ${email} sur cette page et un lien vers votre propre flux privé arrive aussitôt. Il fonctionne dans Apple Podcasts, Overcast, Pocket Casts et la plupart des autres applications de podcasts, aussi longtemps que vous l'avez.`,
   startCourseAt: (url) => `Commencez la formation${S}: ${url}`,
   courseNote: (email) =>
-    `Si vous avez cliqué sur «${S}${frStart}${S}» après le paiement, elle s'ouvre immédiatement sur cet appareil. Ailleurs, la page de la formation vous demande votre e-mail${S}: saisissez ${email}, et un lien qui donne accès à cet appareil arrive généralement en moins d'une minute. Aucun mot de passe à créer.`,
+    `Si vous avez cliqué sur «${S}${frStart}${S}» après le paiement, elle s'ouvre immédiatement sur cet appareil. Ailleurs, la page de la formation vous demande votre e-mail${S}: saisissez ${email} et demandez par e-mail un lien qui donne accès à cet appareil. Aucun mot de passe à créer.`,
   openWhatYouBought: (url) => `Ouvrez votre achat${S}: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Cette page contient votre téléchargement ou votre lien pendant les 3${S}prochains jours. Ensuite, rien n'est perdu${S}: ouvrez ${ordersUrl}, saisissez ${email}, et un lien vers tout ce que vous avez acheté chez ${store} vous est envoyé par e-mail, à tout moment.`,
   startTitleAt: (title, url) => `Commencez ${title}${S}: ${url}`,
   bundleCourseNote: (email) =>
-    `Une formation commencée après le paiement s'ouvre immédiatement sur cet appareil. Ailleurs, sa page vous demande votre e-mail${S}: saisissez ${email}, et un lien qui donne accès à cet appareil arrive généralement en moins d'une minute.`,
+    `Une formation commencée après le paiement s'ouvre immédiatement sur cet appareil. Ailleurs, sa page vous demande votre e-mail${S}: saisissez ${email} et demandez par e-mail un lien qui donne accès à cet appareil.`,
   keyIssued: (label, key) => `${label}${S}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}${S}: en route. ${store} n'avait plus de clés au moment de votre paiement${S}; elle vous sera envoyée par e-mail dès que de nouvelles clés seront ajoutées.`,
@@ -726,10 +765,10 @@ const fr: OrdersWords = {
     `Rien n'a été débité aujourd'hui. Votre premier paiement ici, de ${price}${hasTax ? ", plus les éventuelles taxes de vente," : ""} est prélevé le ${date}, sur la carte que vous avez indiquée. Annulez avant cette date et rien ne vous sera débité.`,
   trialCharge: (price, hasTax, days, date) =>
     `Rien n'a été débité aujourd'hui. Votre premier paiement de ${price}${hasTax ? ", plus les éventuelles taxes de vente," : ""} est prélevé à la fin de l'essai de ${days}${S}${pluralFr(days, "jour", "jours")}, le ${date}, sur la carte que vous avez indiquée. Annulez avant cette date et rien ne vous sera débité.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `Cet abonnement se renouvelle ${frOnce(interval)} pendant ${payments}${S}${pluralFr(payments, "paiement", "paiements")} au total, puis prend fin de lui-même.`
-      : `Cet abonnement se renouvelle ${frOnce(interval)} jusqu'à ce que vous l'annuliez.`,
+      ? `Cet abonnement se renouvelle ${often("fr", interval, count, frOnce(interval))} pendant ${payments}${S}${pluralFr(payments, "paiement", "paiements")} au total, puis prend fin de lui-même.`
+      : `Cet abonnement se renouvelle ${often("fr", interval, count, frOnce(interval))} jusqu'à ce que vous l'annuliez.`,
   manageAt: (hasEnd, url, email) =>
     `Pour le gérer ou l'annuler vous-même${hasEnd ? " d'ici là" : ""}, à tout moment et sans écrire à personne, ouvrez ${url} et saisissez ${email}.`,
   cancelByReply: (hasEnd, store) => `Pour l'annuler${hasEnd ? " d'ici là" : ""}, répondez à cet e-mail et votre message parviendra à ${store}.`,
@@ -741,6 +780,9 @@ const fr: OrdersWords = {
   trialStarted: (zero, days) => `${zero} aujourd'hui. Votre essai gratuit de ${days}${S}${pluralFr(days, "jour", "jours")} a commencé.`,
   discountCovered: (zero) => `${zero}. Un code de réduction a couvert la totalité du prix.`,
   paymentsInAll: (every, payments) => `${every}, ${payments}${S}${pluralFr(payments, "paiement", "paiements")} au total`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} aujourd'hui, avec votre réduction. ${then ? `Chaque paiement suivant${S}: ${then}` : "Chaque paiement suivant est au prix habituel de l'abonnement"}${hasTax ? ", plus les éventuelles taxes de vente" : ""}${isOpenEnded ? ", moins votre réduction tant qu'elle s'applique" : ""}.`,
+  introTaxed: (now, schedule) => `${now} aujourd'hui. Le prix${S}: ${schedule}, plus les éventuelles taxes de vente.`,
 
   offerSubject: (store, title) => `Ajouté à votre commande chez ${store}${S}: ${title}`,
   offerIntro: (store) => `Vous avez ajouté quelque chose à votre commande chez ${store}. Voici votre confirmation.`,
@@ -776,6 +818,7 @@ const fr: OrdersWords = {
     addedToOrderNoPart: "Le produit ajouté à cette commande ne contient pas cet élément.",
     noSuchProduct: "Cette commande ne contient pas ce produit.",
     tooOften: "Ce lien a été ouvert un très grand nombre de fois dans la dernière heure. Réessayez dans un moment.",
+    stampNotReady: "Votre copie, marquée avec votre adresse e-mail, n'a pas pu être préparée pour le moment. Réessayez dans quelques minutes.",
   },
 };
 
@@ -824,7 +867,7 @@ const de: OrdersWords = {
   emailYouPaidWith: "Die E-Mail-Adresse, mit der Sie bezahlt haben",
   emailMe: "Meine Käufe per E-Mail senden",
   formNote: (store) =>
-    `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, kommt ein Link zu allem in der Regel innerhalb einer Minute an und gilt 24 Stunden. Wir sagen dasselbe, ob das der Fall ist oder nicht, damit niemand über diese Seite herausfinden kann, wer was gekauft hat.`,
+    `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, versuchen wir, per E-Mail einen Link zu allem zu senden. Jeder gesendete Link gilt 24 Stunden. Wir sagen dasselbe, ob das der Fall ist oder nicht, damit niemand über diese Seite herausfinden kann, wer was gekauft hat.`,
   checkInbox: "Sehen Sie in Ihrem Posteingang nach",
   sentBody: (store) =>
     `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, ist der Link normalerweise unterwegs. Er kommt von ${store} über Marktmorgen und kann ein paar Minuten dauern. Wenn er nicht da ist, sehen Sie im Spam-Ordner nach.`,
@@ -836,6 +879,7 @@ const de: OrdersWords = {
   waitingUnread: "Was auf Sie wartet, konnte gerade nicht gelesen werden. Öffnen Sie diese Seite gleich noch einmal.",
   openRequest: (amount, due) => (due ? `Zahlungsanfrage über ${amount}, fällig am ${due}, öffnen` : `Zahlungsanfrage über ${amount} öffnen`),
   openToSign: (title) => `„${title}“ lesen und unterschreiben`,
+  nothingToOpenTitle: "Hier gibt es nichts zu öffnen",
   nothingToOpen: (store) =>
     `Hier gibt es nichts mehr zu öffnen. Ein vollständig erstatteter Kauf wird nicht mehr aufgeführt. Wenn etwas fehlt, antworten Sie auf die Bestellbestätigung, die Sie beim Bezahlen per E-Mail erhalten haben, dann erreicht Ihre Nachricht ${store}.`,
   everythingSold: (store) =>
@@ -851,8 +895,11 @@ const de: OrdersWords = {
   givenByStore: (store, date) => `Von ${store} erhalten${date ? ` am ${date}` : ""}`,
   boughtOn: (date) => `Gekauft am ${date}`,
   endedNote: "Diese Mitgliedschaft läuft nicht mehr, daher ist der Zugang, den sie Ihnen gab, jetzt geschlossen. Verlängern Sie sie, und alles ist sofort wieder offen.",
+  endedClosedNote: "Diese Mitgliedschaft läuft nicht mehr, daher ist der Zugang, den sie Ihnen gab, jetzt geschlossen.",
   renew: "Mitgliedschaft verlängern",
   openCourse: "Kurs öffnen",
+  lessonsDone: (done, total) => `${done} von ${total} ${plural(total, "Lektion", "Lektionen")} erledigt`,
+  progressUnread: "Wir konnten Ihren Fortschritt in diesem Kurs gerade nicht prüfen. Öffnen Sie den Kurs, um zu sehen, wo Sie stehen.",
   bookSession: (left) => `Termin buchen (noch ${left} übrig)`,
   packageExpired: "Die Frist, um die Termine dieses Pakets zu buchen, ist abgelaufen.",
   packageAllBooked: "Alle Termine dieses Pakets sind gebucht.",
@@ -953,13 +1000,13 @@ const de: OrdersWords = {
     `Geben Sie auf dieser Seite ${email} ein, und ein Link zu Ihrem eigenen privaten Feed kommt sofort. Er funktioniert in Apple Podcasts, Overcast, Pocket Casts und den meisten anderen Podcast-Apps, solange Sie den Podcast haben.`,
   startCourseAt: (url) => `Kurs starten: ${url}`,
   courseNote: (email) =>
-    `Wenn Sie nach dem Bezahlen auf „${deStart}“ geklickt haben, öffnet sich der Kurs auf diesem Gerät sofort. Überall sonst fragt die Kursseite nach Ihrer E-Mail-Adresse: Geben Sie ${email} ein, und ein Link, der dieses Gerät freischaltet, kommt in der Regel innerhalb einer Minute. Sie müssen kein Passwort anlegen.`,
+    `Wenn Sie nach dem Bezahlen auf „${deStart}“ geklickt haben, öffnet sich der Kurs auf diesem Gerät sofort. Überall sonst fragt die Kursseite nach Ihrer E-Mail-Adresse: Geben Sie ${email} ein und fordern Sie per E-Mail einen Link an, der dieses Gerät freischaltet. Sie müssen kein Passwort anlegen.`,
   openWhatYouBought: (url) => `Ihren Kauf öffnen: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Auf dieser Seite finden Sie Ihren Download oder Ihren Link für die nächsten 3 Tage. Danach ist nichts verloren: Öffnen Sie ${ordersUrl}, geben Sie ${email} ein, und ein Link zu allem, was Sie bei ${store} gekauft haben, wird Ihnen jederzeit per E-Mail geschickt.`,
   startTitleAt: (title, url) => `${title} starten: ${url}`,
   bundleCourseNote: (email) =>
-    `Ein Kurs, den Sie nach dem Bezahlen gestartet haben, öffnet sich auf diesem Gerät sofort. Überall sonst fragt seine Seite nach Ihrer E-Mail-Adresse: Geben Sie ${email} ein, und ein Link, der dieses Gerät freischaltet, kommt in der Regel innerhalb einer Minute.`,
+    `Ein Kurs, den Sie nach dem Bezahlen gestartet haben, öffnet sich auf diesem Gerät sofort. Überall sonst fragt seine Seite nach Ihrer E-Mail-Adresse: Geben Sie ${email} ein und fordern Sie per E-Mail einen Link an, der dieses Gerät freischaltet.`,
   keyIssued: (label, key) => `${label}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}: unterwegs. ${store} hatte genau bei Ihrer Zahlung keine Schlüssel mehr; Ihr Schlüssel wird Ihnen per E-Mail geschickt, sobald neue hinzugefügt werden.`,
@@ -968,10 +1015,10 @@ const de: OrdersWords = {
     `Heute wurde nichts berechnet. Ihre erste Zahlung hier von ${price}${hasTax ? " zuzüglich eventuell anfallender Umsatzsteuer" : ""} wird am ${date} von der angegebenen Karte abgebucht. Kündigen Sie vorher, wird Ihnen gar nichts berechnet.`,
   trialCharge: (price, hasTax, days, date) =>
     `Heute wurde nichts berechnet. Ihre erste Zahlung von ${price}${hasTax ? " zuzüglich eventuell anfallender Umsatzsteuer" : ""} wird am Ende des ${days}-tägigen Testzeitraums, am ${date}, von der angegebenen Karte abgebucht. Kündigen Sie vorher, wird Ihnen gar nichts berechnet.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `Die Mitgliedschaft verlängert sich ${deOnce(interval)} für insgesamt ${payments} ${plural(payments, "Zahlung", "Zahlungen")} und endet dann von selbst.`
-      : `Die Mitgliedschaft verlängert sich ${deOnce(interval)}, bis Sie sie kündigen.`,
+      ? `Die Mitgliedschaft verlängert sich ${often("de", interval, count, deOnce(interval))} für insgesamt ${payments} ${plural(payments, "Zahlung", "Zahlungen")} und endet dann von selbst.`
+      : `Die Mitgliedschaft verlängert sich ${often("de", interval, count, deOnce(interval))}, bis Sie sie kündigen.`,
   manageAt: (hasEnd, url, email) =>
     `Um sie${hasEnd ? " vorher" : ""} selbst zu verwalten oder zu kündigen, jederzeit und ohne jemandem zu schreiben, öffnen Sie ${url} und geben Sie ${email} ein.`,
   cancelByReply: (hasEnd, store) => `Um sie${hasEnd ? " vorher" : ""} zu kündigen, antworten Sie auf diese E-Mail, dann erreicht Ihre Nachricht ${store}.`,
@@ -983,6 +1030,9 @@ const de: OrdersWords = {
   trialStarted: (zero, days) => `${zero} heute. Ihr ${days}-tägiger kostenloser Testzeitraum hat begonnen.`,
   discountCovered: (zero) => `${zero}. Ein Rabattcode hat den gesamten Preis abgedeckt.`,
   paymentsInAll: (every, payments) => `${every}, insgesamt ${payments} ${plural(payments, "Zahlung", "Zahlungen")}`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} heute, mit Ihrem Rabatt. ${then ? `Jede weitere Zahlung: ${then}` : "Jede weitere Zahlung erfolgt zum regulären Preis der Mitgliedschaft"}${hasTax ? " zuzüglich eventuell anfallender Umsatzsteuer" : ""}${isOpenEnded ? ", abzüglich Ihres Rabatts, solange er gilt" : ""}.`,
+  introTaxed: (now, schedule) => `${now} heute. Der Preis: ${schedule}, zuzüglich eventuell anfallender Umsatzsteuer.`,
 
   offerSubject: (store, title) => `Zu Ihrer Bestellung bei ${store} hinzugefügt: ${title}`,
   offerIntro: (store) => `Sie haben Ihrer Bestellung bei ${store} etwas hinzugefügt. Dies ist Ihre Bestätigung.`,
@@ -1018,6 +1068,7 @@ const de: OrdersWords = {
     addedToOrderNoPart: "Das zu dieser Bestellung hinzugefügte Produkt hat keinen solchen Teil.",
     noSuchProduct: "Diese Bestellung enthält kein solches Produkt.",
     tooOften: "Dieser Link wurde in der letzten Stunde sehr oft geöffnet. Bitte versuchen Sie es in Kürze noch einmal.",
+    stampNotReady: "Ihre mit Ihrer E-Mail-Adresse gekennzeichnete Kopie konnte gerade nicht erstellt werden. Bitte versuchen Sie es in ein paar Minuten noch einmal.",
   },
 };
 
@@ -1070,7 +1121,7 @@ const it: OrdersWords = {
   emailYouPaidWith: "L'email con cui hai pagato",
   emailMe: "Inviami i miei acquisti via email",
   formNote: (store) =>
-    `Se quell'indirizzo ha acquistato qualcosa da ${store}, di solito entro un minuto arriva un link a tutto, valido per 24 ore. Diciamo la stessa cosa in ogni caso, così nessuno può usare questa pagina per scoprire chi ha comprato cosa.`,
+    `Se quell'indirizzo ha acquistato qualcosa da ${store}, proviamo a inviare via email un link a tutto. Ogni link inviato è valido per 24 ore. Diciamo la stessa cosa in ogni caso, così nessuno può usare questa pagina per scoprire chi ha comprato cosa.`,
   checkInbox: "Controlla la tua casella di posta",
   sentBody: (store) =>
     `Se quell'indirizzo ha acquistato qualcosa da ${store}, di norma il link è in arrivo. Arriva da ${store} tramite Marktmorgen e può richiedere qualche minuto. Se non lo trovi, guarda nella cartella spam.`,
@@ -1082,6 +1133,7 @@ const it: OrdersWords = {
   waitingUnread: "Non è stato possibile leggere ora cosa ti aspetta. Riapri questa pagina tra un momento.",
   openRequest: (amount, due) => (due ? `Apri la richiesta di pagamento di ${amount} con scadenza ${due}` : `Apri la richiesta di pagamento di ${amount}`),
   openToSign: (title) => `Leggi e firma «${title}»`,
+  nothingToOpenTitle: "Niente da aprire qui",
   nothingToOpen: (store) =>
     `Qui non c'è più nulla da aprire. Un acquisto rimborsato per intero non compare più. Se manca qualcosa, rispondi alla conferma d'ordine che hai ricevuto via email quando hai pagato, e il messaggio arriverà a ${store}.`,
   everythingSold: (store) =>
@@ -1097,8 +1149,11 @@ const it: OrdersWords = {
   givenByStore: (store, date) => `Ricevuto da ${store}${date ? ` ${itOn(date)}` : ""}`,
   boughtOn: (date) => `Acquistato ${itOn(date)}`,
   endedNote: "Questo abbonamento non è più attivo, quindi ciò a cui ti dava accesso ora è chiuso. Rinnovalo e tutto si riapre subito.",
+  endedClosedNote: "Questo abbonamento non è più attivo, quindi ciò a cui ti dava accesso ora è chiuso.",
   renew: "Rinnova il tuo abbonamento",
   openCourse: "Apri il corso",
+  lessonsDone: (done, total) => `${done} di ${total} ${plural(total, "lezione completata", "lezioni completate")}`,
+  progressUnread: "Non siamo riusciti a controllare i tuoi progressi in questo corso in questo momento. Apri il corso per vedere a che punto sei.",
   bookSession: (left) => `Prenota una sessione (${left === 1 ? "ne resta 1" : `ne restano ${left}`})`,
   packageExpired: "Il tempo per prenotare le sessioni di questo pacchetto è scaduto.",
   packageAllBooked: "Tutte le sessioni di questo pacchetto sono prenotate.",
@@ -1199,13 +1254,13 @@ const it: OrdersWords = {
     `Inserisci ${email} in quella pagina e ricevi subito un link al tuo feed privato. Funziona con Apple Podcasts, Overcast, Pocket Casts e la maggior parte delle altre app di podcast, per tutto il tempo in cui lo hai.`,
   startCourseAt: (url) => `Inizia il corso: ${url}`,
   courseNote: (email) =>
-    `Se dopo il pagamento hai premuto «${itStart}», si apre subito su quel dispositivo. Altrove, la pagina del corso ti chiede la tua email: inserisci ${email} e di solito entro un minuto arriva un link che dà accesso a quel dispositivo. Non c'è nessuna password da creare.`,
+    `Se dopo il pagamento hai premuto «${itStart}», si apre subito su quel dispositivo. Altrove, la pagina del corso ti chiede la tua email: inserisci ${email} e richiedi via email un link che dia accesso a quel dispositivo. Non c'è nessuna password da creare.`,
   openWhatYouBought: (url) => `Apri ciò che hai acquistato: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Quella pagina contiene il tuo download o il tuo link per i prossimi 3 giorni. Dopo non va perso: apri ${ordersUrl}, inserisci ${email} e ti verrà inviato via email un link a tutto ciò che hai acquistato da ${store}, in qualsiasi momento.`,
   startTitleAt: (title, url) => `Inizia ${title}: ${url}`,
   bundleCourseNote: (email) =>
-    `Un corso che hai iniziato dopo il pagamento si apre subito su quel dispositivo. Altrove, la sua pagina ti chiede la tua email: inserisci ${email} e di solito entro un minuto arriva un link che dà accesso a quel dispositivo.`,
+    `Un corso che hai iniziato dopo il pagamento si apre subito su quel dispositivo. Altrove, la sua pagina ti chiede la tua email: inserisci ${email} e richiedi via email un link che dia accesso a quel dispositivo.`,
   keyIssued: (label, key) => `${label}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}: in arrivo. Le chiavi di ${store} si sono esaurite proprio mentre pagavi; ti verrà inviata via email appena ne verranno aggiunte altre.`,
@@ -1214,10 +1269,10 @@ const it: OrdersWords = {
     `Oggi non ti è stato addebitato nulla. Il tuo primo pagamento qui di ${price}${hasTax ? " più le eventuali imposte sulle vendite" : ""} viene addebitato ${itOn(date)}, sulla carta che hai indicato. Se annulli prima, non ti viene addebitato nulla.`,
   trialCharge: (price, hasTax, days, date) =>
     `Oggi non ti è stato addebitato nulla. Il tuo primo pagamento di ${price}${hasTax ? " più le eventuali imposte sulle vendite" : ""} viene addebitato alla fine della prova di ${days} ${plural(days, "giorno", "giorni")}, ${itOn(date)}, sulla carta che hai indicato. Se annulli prima, non ti viene addebitato nulla.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `L'abbonamento si rinnova ${itOnce(interval)} per ${payments} ${plural(payments, "pagamento", "pagamenti")} in tutto e poi termina da solo.`
-      : `L'abbonamento si rinnova ${itOnce(interval)} finché non lo annulli.`,
+      ? `L'abbonamento si rinnova ${often("it", interval, count, itOnce(interval))} per ${payments} ${plural(payments, "pagamento", "pagamenti")} in tutto e poi termina da solo.`
+      : `L'abbonamento si rinnova ${often("it", interval, count, itOnce(interval))} finché non lo annulli.`,
   manageAt: (hasEnd, url, email) =>
     `Per gestirlo o annullarlo in autonomia${hasEnd ? " prima che termini" : ""}, in qualsiasi momento e senza scrivere a nessuno, apri ${url} e inserisci ${email}.`,
   cancelByReply: (hasEnd, store) => `Per annullarlo${hasEnd ? " prima che termini" : ""}, rispondi a questa email e il messaggio arriverà a ${store}.`,
@@ -1229,6 +1284,9 @@ const it: OrdersWords = {
   trialStarted: (zero, days) => `${zero} oggi. La tua prova gratuita di ${days} ${plural(days, "giorno", "giorni")} è iniziata.`,
   discountCovered: (zero) => `${zero}. Un codice sconto ha coperto l'intero prezzo.`,
   paymentsInAll: (every, payments) => `${every}, ${payments} ${plural(payments, "pagamento", "pagamenti")} in tutto`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} oggi, con il tuo sconto. ${then ? `Ogni addebito successivo: ${then}` : "Ogni addebito successivo è al prezzo normale dell'abbonamento"}${hasTax ? " più le eventuali imposte sulle vendite" : ""}${isOpenEnded ? ", meno il tuo sconto finché vale" : ""}.`,
+  introTaxed: (now, schedule) => `${now} oggi. Il prezzo: ${schedule}, più le eventuali imposte sulle vendite.`,
 
   offerSubject: (store, title) => `Aggiunto al tuo ordine da ${store}: ${title}`,
   offerIntro: (store) => `Hai aggiunto qualcosa al tuo ordine da ${store}. Questa è la tua conferma.`,
@@ -1264,6 +1322,7 @@ const it: OrdersWords = {
     addedToOrderNoPart: "Il prodotto aggiunto a questo ordine non contiene quella parte.",
     noSuchProduct: "Questo ordine non contiene quel prodotto.",
     tooOften: "Questo link è stato aperto moltissime volte nell'ultima ora. Riprova tra poco.",
+    stampNotReady: "Al momento non è stato possibile preparare la tua copia, contrassegnata con la tua email. Riprova tra qualche minuto.",
   },
 };
 
@@ -1312,7 +1371,7 @@ const nl: OrdersWords = {
   emailYouPaidWith: "Het e-mailadres waarmee je hebt betaald",
   emailMe: "Mail me mijn aankopen",
   formNote: (store) =>
-    `Als met dat adres iets is gekocht bij ${store}, komt er meestal binnen een minuut een link naar alles, die 24 uur werkt. We zeggen hetzelfde, of dat nu zo is of niet, zodat niemand via deze pagina kan uitzoeken wie wat heeft gekocht.`,
+    `Als met dat adres iets is gekocht bij ${store}, proberen we per e-mail een link naar alles te sturen. Elke verstuurde link werkt 24 uur. We zeggen hetzelfde, of dat nu zo is of niet, zodat niemand via deze pagina kan uitzoeken wie wat heeft gekocht.`,
   checkInbox: "Kijk in je inbox",
   sentBody: (store) =>
     `Als met dat adres iets is gekocht bij ${store}, is de link normaal gesproken onderweg. Hij komt van ${store} via Marktmorgen en kan een paar minuten duren. Staat hij er niet, kijk dan in je spam.`,
@@ -1324,6 +1383,7 @@ const nl: OrdersWords = {
   waitingUnread: "Wat op je wacht, kon nu niet worden gelezen. Open deze pagina zo meteen opnieuw.",
   openRequest: (amount, due) => (due ? `Het betaalverzoek van ${amount}, te betalen op ${due}, openen` : `Het betaalverzoek van ${amount} openen`),
   openToSign: (title) => `‘${title}’ lezen en ondertekenen`,
+  nothingToOpenTitle: "Hier is niets te openen",
   nothingToOpen: (store) =>
     `Hier valt niets meer te openen. Een aankoop die volledig is terugbetaald, staat er niet meer bij. Mist er iets, beantwoord dan de orderbevestiging die je per e-mail kreeg toen je betaalde, dan komt je bericht bij ${store} aan.`,
   everythingSold: (store) =>
@@ -1339,8 +1399,11 @@ const nl: OrdersWords = {
   givenByStore: (store, date) => `Gekregen van ${store}${date ? ` op ${date}` : ""}`,
   boughtOn: (date) => `Gekocht op ${date}`,
   endedNote: "Dit lidmaatschap loopt niet meer, dus waar het je toegang toe gaf, is nu gesloten. Verleng het en alles gaat meteen weer open.",
+  endedClosedNote: "Dit lidmaatschap loopt niet meer, dus waar het je toegang toe gaf, is nu gesloten.",
   renew: "Verleng je lidmaatschap",
   openCourse: "Open de cursus",
+  lessonsDone: (done, total) => `${done} van ${total} ${plural(total, "les", "lessen")} afgerond`,
+  progressUnread: "We konden je voortgang in deze cursus op dit moment niet controleren. Open de cursus om te zien waar je bent.",
   bookSession: (left) => `Boek een sessie (nog ${left} over)`,
   packageExpired: "De tijd om de sessies van dit pakket te boeken is verstreken.",
   packageAllBooked: "Alle sessies van dit pakket zijn geboekt.",
@@ -1440,13 +1503,13 @@ const nl: OrdersWords = {
     `Vul op die pagina ${email} in en je krijgt meteen een link naar je eigen privéfeed. Die werkt in Apple Podcasts, Overcast, Pocket Casts en de meeste andere podcastapps, zolang je de podcast hebt.`,
   startCourseAt: (url) => `Start de cursus: ${url}`,
   courseNote: (email) =>
-    `Als je na het betalen op ‘${nlStart}’ hebt gedrukt, opent de cursus meteen op dat apparaat. Op elk ander apparaat vraagt de cursuspagina om je e-mailadres: vul ${email} in, en meestal komt er binnen een minuut een link die dat apparaat toegang geeft. Je hoeft geen wachtwoord aan te maken.`,
+    `Als je na het betalen op ‘${nlStart}’ hebt gedrukt, opent de cursus meteen op dat apparaat. Op elk ander apparaat vraagt de cursuspagina om je e-mailadres: vul ${email} in en vraag per e-mail een link aan die dat apparaat toegang geeft. Je hoeft geen wachtwoord aan te maken.`,
   openWhatYouBought: (url) => `Open wat je hebt gekocht: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Op die pagina staat je download of je link de komende 3 dagen. Daarna is het niet kwijt: open ${ordersUrl}, vul ${email} in en je krijgt op elk moment een link gemaild naar alles wat je bij ${store} hebt gekocht.`,
   startTitleAt: (title, url) => `Start ${title}: ${url}`,
   bundleCourseNote: (email) =>
-    `Een cursus die je na het betalen hebt gestart, opent meteen op dat apparaat. Op elk ander apparaat vraagt de pagina om je e-mailadres: vul ${email} in, en meestal komt er binnen een minuut een link die dat apparaat toegang geeft.`,
+    `Een cursus die je na het betalen hebt gestart, opent meteen op dat apparaat. Op elk ander apparaat vraagt de pagina om je e-mailadres: vul ${email} in en vraag per e-mail een link aan die dat apparaat toegang geeft.`,
   keyIssued: (label, key) => `${label}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}: onderweg. De sleutels van ${store} waren op net toen je betaalde; je sleutel wordt je gemaild zodra er nieuwe zijn toegevoegd.`,
@@ -1455,10 +1518,10 @@ const nl: OrdersWords = {
     `Vandaag is er niets afgeschreven. Je eerste betaling hier van ${price}${hasTax ? " plus eventuele omzetbelasting" : ""} wordt op ${date} afgeschreven van de kaart die je hebt opgegeven. Zeg je daarvoor op, dan betaal je helemaal niets.`,
   trialCharge: (price, hasTax, days, date) =>
     `Vandaag is er niets afgeschreven. Je eerste betaling van ${price}${hasTax ? " plus eventuele omzetbelasting" : ""} wordt afgeschreven als de proefperiode van ${days} ${plural(days, "dag", "dagen")} afloopt, op ${date}, van de kaart die je hebt opgegeven. Zeg je daarvoor op, dan betaal je helemaal niets.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `Het lidmaatschap wordt ${nlOnce(interval)} verlengd, voor in totaal ${payments} ${plural(payments, "betaling", "betalingen")}, en stopt daarna vanzelf.`
-      : `Het lidmaatschap wordt ${nlOnce(interval)} verlengd tot je het opzegt.`,
+      ? `Het lidmaatschap wordt ${often("nl", interval, count, nlOnce(interval))} verlengd, voor in totaal ${payments} ${plural(payments, "betaling", "betalingen")}, en stopt daarna vanzelf.`
+      : `Het lidmaatschap wordt ${often("nl", interval, count, nlOnce(interval))} verlengd tot je het opzegt.`,
   manageAt: (hasEnd, url, email) =>
     `Om het zelf te beheren of op te zeggen${hasEnd ? " voor die tijd" : ""}, op elk moment en zonder iemand te schrijven, open je ${url} en vul je ${email} in.`,
   cancelByReply: (hasEnd, store) => `Om het op te zeggen${hasEnd ? " voor die tijd" : ""}, beantwoord je deze e-mail; dan komt je bericht bij ${store} aan.`,
@@ -1470,6 +1533,9 @@ const nl: OrdersWords = {
   trialStarted: (zero, days) => `${zero} vandaag. Je gratis proefperiode van ${days} ${plural(days, "dag", "dagen")} is begonnen.`,
   discountCovered: (zero) => `${zero}. Een kortingscode dekte de volledige prijs.`,
   paymentsInAll: (every, payments) => `${every}, ${payments} ${plural(payments, "betaling", "betalingen")} in totaal`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} vandaag, met je korting. ${then ? `Elke volgende betaling: ${then}` : "Elke volgende betaling is tegen de normale prijs van het lidmaatschap"}${hasTax ? " plus eventuele omzetbelasting" : ""}${isOpenEnded ? ", min je korting zolang die geldt" : ""}.`,
+  introTaxed: (now, schedule) => `${now} vandaag. De prijs: ${schedule}, plus eventuele omzetbelasting.`,
 
   offerSubject: (store, title) => `Toegevoegd aan je bestelling bij ${store}: ${title}`,
   offerIntro: (store) => `Je hebt iets toegevoegd aan je bestelling bij ${store}. Dit is je bevestiging.`,
@@ -1505,6 +1571,7 @@ const nl: OrdersWords = {
     addedToOrderNoPart: "Het product dat aan deze bestelling is toegevoegd, heeft zo'n onderdeel niet.",
     noSuchProduct: "Deze bestelling bevat zo'n product niet.",
     tooOften: "Deze link is het afgelopen uur heel vaak geopend. Probeer het over een poosje opnieuw.",
+    stampNotReady: "Je exemplaar, gemarkeerd met je e-mailadres, kon nu niet worden gemaakt. Probeer het over een paar minuten opnieuw.",
   },
 };
 
@@ -1553,7 +1620,7 @@ const pt: OrdersWords = {
   emailYouPaidWith: "O email com que pagou",
   emailMe: "Enviar-me as minhas compras por email",
   formNote: (store) =>
-    `Se esse endereço comprou algo a ${store}, uma ligação para tudo chega normalmente em menos de um minuto e funciona durante 24 horas. Dizemos o mesmo quer tenha comprado quer não, para que ninguém possa usar esta página para descobrir quem comprou o quê.`,
+    `Se esse endereço comprou algo a ${store}, tentamos enviar-lhe por email uma ligação para tudo. Qualquer ligação enviada funciona durante 24 horas. Dizemos o mesmo quer tenha comprado quer não, para que ninguém possa usar esta página para descobrir quem comprou o quê.`,
   checkInbox: "Verifique a sua caixa de entrada",
   sentBody: (store) =>
     `Se esse endereço comprou algo a ${store}, a ligação normalmente está a caminho. Chega de ${store} via Marktmorgen e pode demorar alguns minutos. Se não estiver lá, veja na pasta de spam.`,
@@ -1565,6 +1632,7 @@ const pt: OrdersWords = {
   waitingUnread: "Não foi possível ler agora o que está à sua espera. Volte a abrir esta página daqui a pouco.",
   openRequest: (amount, due) => (due ? `Abrir o pedido de pagamento de ${amount} que vence a ${due}` : `Abrir o pedido de pagamento de ${amount}`),
   openToSign: (title) => `Ler e assinar «${title}»`,
+  nothingToOpenTitle: "Nada para abrir aqui",
   nothingToOpen: (store) =>
     `Já não há nada para abrir aqui. Uma compra reembolsada na totalidade deixa de aparecer. Se faltar alguma coisa, responda à confirmação da encomenda que recebeu por email quando pagou, e a mensagem chega a ${store}.`,
   everythingSold: (store) =>
@@ -1580,8 +1648,11 @@ const pt: OrdersWords = {
   givenByStore: (store, date) => `Oferecido por ${store}${date ? ` a ${date}` : ""}`,
   boughtOn: (date) => `Comprado a ${date}`,
   endedNote: "Esta subscrição já não está ativa, por isso aquilo a que lhe dava acesso está agora fechado. Renove-a e tudo volta a abrir de imediato.",
+  endedClosedNote: "Esta subscrição já não está ativa, por isso aquilo a que lhe dava acesso está agora fechado.",
   renew: "Renovar a sua subscrição",
   openCourse: "Abrir o curso",
+  lessonsDone: (done, total) => `${done} de ${total} ${plural(total, "aula concluída", "aulas concluídas")}`,
+  progressUnread: "Não foi possível verificar o seu progresso neste curso agora. Abra o curso para ver onde está.",
   bookSession: (left) => `Marcar uma sessão (${left === 1 ? "resta 1" : `restam ${left}`})`,
   packageExpired: "O prazo para marcar as sessões deste pacote já terminou.",
   packageAllBooked: "Todas as sessões deste pacote estão marcadas.",
@@ -1682,13 +1753,13 @@ const pt: OrdersWords = {
     `Introduza ${email} nessa página e recebe de imediato uma ligação para o seu próprio feed privado. Funciona no Apple Podcasts, Overcast, Pocket Casts e na maioria das outras aplicações de podcasts, enquanto o tiver.`,
   startCourseAt: (url) => `Comece o curso: ${url}`,
   courseNote: (email) =>
-    `Se carregou em «${ptStart}» depois de pagar, o curso abre de imediato nesse dispositivo. Em qualquer outro, a página do curso pede o seu email: introduza ${email} e uma ligação que dá acesso a esse dispositivo chega normalmente em menos de um minuto. Não há palavra-passe para criar.`,
+    `Se carregou em «${ptStart}» depois de pagar, o curso abre de imediato nesse dispositivo. Em qualquer outro, a página do curso pede o seu email: introduza ${email} e peça por email uma ligação que dê acesso a esse dispositivo. Não há palavra-passe para criar.`,
   openWhatYouBought: (url) => `Abra o que comprou: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Essa página tem o seu ficheiro para descarregar ou a sua ligação durante os próximos 3 dias. Depois disso não se perde: abra ${ordersUrl}, introduza ${email} e é-lhe enviada por email uma ligação para tudo o que comprou a ${store}, a qualquer momento.`,
   startTitleAt: (title, url) => `Comece ${title}: ${url}`,
   bundleCourseNote: (email) =>
-    `Um curso que começou depois de pagar abre de imediato nesse dispositivo. Em qualquer outro, a página do curso pede o seu email: introduza ${email} e uma ligação que dá acesso a esse dispositivo chega normalmente em menos de um minuto.`,
+    `Um curso que começou depois de pagar abre de imediato nesse dispositivo. Em qualquer outro, a página do curso pede o seu email: introduza ${email} e peça por email uma ligação que dê acesso a esse dispositivo.`,
   keyIssued: (label, key) => `${label}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}: a caminho. As chaves de ${store} esgotaram-se no momento em que pagou; a sua ser-lhe-á enviada por email assim que forem adicionadas mais.`,
@@ -1697,10 +1768,10 @@ const pt: OrdersWords = {
     `Hoje não foi cobrado nada. O seu primeiro pagamento aqui, de ${price}${hasTax ? " mais os impostos sobre vendas aplicáveis" : ""}, é cobrado a ${date}, no cartão que indicou. Se cancelar antes disso, não paga nada.`,
   trialCharge: (price, hasTax, days, date) =>
     `Hoje não foi cobrado nada. O seu primeiro pagamento de ${price}${hasTax ? " mais os impostos sobre vendas aplicáveis" : ""} é cobrado quando terminar o período de teste de ${days} ${plural(days, "dia", "dias")}, a ${date}, no cartão que indicou. Se cancelar antes disso, não paga nada.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `Esta subscrição renova-se ${ptOnce(interval)} durante ${payments} ${plural(payments, "pagamento", "pagamentos")} no total e depois termina automaticamente.`
-      : `Esta subscrição renova-se ${ptOnce(interval)} até a cancelar.`,
+      ? `Esta subscrição renova-se ${often("pt", interval, count, ptOnce(interval))} durante ${payments} ${plural(payments, "pagamento", "pagamentos")} no total e depois termina automaticamente.`
+      : `Esta subscrição renova-se ${often("pt", interval, count, ptOnce(interval))} até a cancelar.`,
   manageAt: (hasEnd, url, email) =>
     `Para a gerir ou cancelar por si${hasEnd ? " antes disso" : ""}, a qualquer momento e sem escrever a ninguém, abra ${url} e introduza ${email}.`,
   cancelByReply: (hasEnd, store) => `Para a cancelar${hasEnd ? " antes disso" : ""}, responda a este email e a mensagem chega a ${store}.`,
@@ -1712,6 +1783,9 @@ const pt: OrdersWords = {
   trialStarted: (zero, days) => `${zero} hoje. O seu período de teste grátis de ${days} ${plural(days, "dia", "dias")} começou.`,
   discountCovered: (zero) => `${zero}. Um código de desconto cobriu o preço total.`,
   paymentsInAll: (every, payments) => `${every}, ${payments} ${plural(payments, "pagamento", "pagamentos")} no total`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} hoje, com o seu desconto. ${then ? `Cada pagamento seguinte: ${then}` : "Cada pagamento seguinte é ao preço normal da subscrição"}${hasTax ? " mais os impostos sobre vendas aplicáveis" : ""}${isOpenEnded ? ", menos o seu desconto enquanto se aplicar" : ""}.`,
+  introTaxed: (now, schedule) => `${now} hoje. O preço: ${schedule}, mais os impostos sobre vendas aplicáveis.`,
 
   offerSubject: (store, title) => `Adicionado à sua encomenda de ${store}: ${title}`,
   offerIntro: (store) => `Adicionou algo à sua encomenda de ${store}. Esta é a sua confirmação.`,
@@ -1747,6 +1821,7 @@ const pt: OrdersWords = {
     addedToOrderNoPart: "O produto adicionado a esta encomenda não tem essa parte.",
     noSuchProduct: "Esta encomenda não contém esse produto.",
     tooOften: "Esta ligação foi aberta muitíssimas vezes na última hora. Tente novamente daqui a pouco.",
+    stampNotReady: "Não foi possível preparar agora a sua cópia, marcada com o seu e-mail. Tente novamente dentro de alguns minutos.",
   },
 };
 

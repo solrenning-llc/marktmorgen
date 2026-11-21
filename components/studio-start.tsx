@@ -1,22 +1,33 @@
 import type { ActivationTiming } from "@/lib/store-activation";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
-import { startList, startProgressWords } from "@/lib/studio-start-rules";
+import { START_STEP_UNKNOWN, startList, startProgressWords } from "@/lib/studio-start-rules";
 
 export type StartStep = {
   key: string;
   title: string;
   hint: string;
   done: boolean;
+  /** Its check mark could not be read just now: shown as such, never done and never the next step. */
+  unknown?: boolean;
   href: string;
 };
+
+/** A span of whole minutes in plain English: "less than a minute", "1 minute", "12 minutes" (never "1 minutes"). */
+export function minutesWords(minutes: number | null): string {
+  const n = minutes ?? 0;
+  if (n < 1) return "less than a minute";
+  return n === 1 ? "1 minute" : `${n.toLocaleString("en-US")} minutes`;
+}
+const upperFirst = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 /**
  * The first steps of a new store, in order, with what is already done ticked
  * (484 [IT1]): at most five steps to the first sale, then the rest
  * (lib/studio-start-rules.ts). Every tick is read from the store itself, so
  * nothing here can be ticked by pressing it; it disappears on its own once
- * every step is done. The steps can be collapsed and opened again (a native
+ * every step is done. A step whose check mark could not be read just now is
+ * not done here: it says so, and the list stays. The steps can be collapsed and opened again (a native
  * disclosure, so it works by keyboard and without scripts); the title, the
  * progress, the next step and the first offer's timing stay in sight.
  */
@@ -24,7 +35,7 @@ export function StudioStart({ steps: all, activation, launchChecklist }: { steps
   const { phase, steps, toSale } = startList(all);
   const done = steps.filter((s) => s.done).length;
   if (steps.length === 0 || (done === steps.length && !activation)) return null;
-  const next = steps.find((s) => !s.done);
+  const next = steps.find((s) => !s.done && !s.unknown);
   const percent = Math.round((done / steps.length) * 100);
 
   return (
@@ -44,7 +55,7 @@ export function StudioStart({ steps: all, activation, launchChecklist }: { steps
         ) : null}
       </div>
       {activation ? <p className="mt-3 text-sm text-ink-soft" data-activation-timing>
-        {activation.state === "published" ? `First offer published ${activation.minutes} minutes after this store was registered.` : activation.state === "waiting" ? `${activation.minutes} minutes since this store was registered. Your first offer is still in preparation.` : "The original first-publication time is not recorded for this store."}
+        {activation.state === "published" ? `First offer published ${minutesWords(activation.minutes)} after this store was registered.` : activation.state === "waiting" ? `${upperFirst(minutesWords(activation.minutes))} since this store was registered. Your first offer is still in preparation.` : "The original first-publication time is not recorded for this store."}
         {" "}This measures store registration, not an earlier sign-in or a sale. Drafts do not count as published offers.
       </p> : null}
       <div
@@ -73,8 +84,8 @@ export function StudioStart({ steps: all, activation, launchChecklist }: { steps
                   step.done ? "bg-mint-soft text-mint-deep" : step === next ? "bg-violet-brand text-white" : "bg-sand text-ink-soft"
                 }`}
               >
-                {step.done ? <Icon name="check" size={14} strokeWidth={2.6} /> : i + 1}
-                <span className="sr-only">{step.done ? " (done)" : ""}</span>
+                {step.done ? <Icon name="check" size={14} strokeWidth={2.6} /> : step.unknown ? <span aria-hidden="true">?</span> : i + 1}
+                <span className="sr-only">{step.done ? " (done)" : step.unknown ? " (could not be checked just now)" : ""}</span>
               </span>
               <span className="min-w-0 [overflow-wrap:anywhere]">
                 {step.done ? (
@@ -85,6 +96,7 @@ export function StudioStart({ steps: all, activation, launchChecklist }: { steps
                   </Link>
                 )}
                 <span className="block text-sm text-ink-soft">{step.hint}</span>
+                {step.unknown && !step.done ? <span className="block text-sm text-ink-soft">{START_STEP_UNKNOWN}</span> : null}
               </span>
             </li>
           ))}

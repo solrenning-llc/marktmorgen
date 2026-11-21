@@ -34,7 +34,7 @@ function sub(id: string, over: Record<string, unknown> = {}, invoice: Record<str
     status: "past_due",
     created: NOW - 90 * DAY,
     trial_end: NOW - 76 * DAY,
-    customer: { email: `${id}@example.com` },
+    customer: { id: `cus_${id.slice(4)}`, email: `${id}@example.com` },
     items: {
       data: [
         {
@@ -46,6 +46,9 @@ function sub(id: string, over: Record<string, unknown> = {}, invoice: Record<str
     },
     latest_invoice: {
       id: `in_${id.slice(4)}inv`,
+      // The subscription's own invoice, as Stripe names it (lib/billing.ts, ownLatestInvoice; #4449).
+      subscription: id,
+      customer: `cus_${id.slice(4)}`,
       status: "open",
       amount_due: 2900,
       hosted_invoice_url: `https://invoice.stripe.com/i/${id}`,

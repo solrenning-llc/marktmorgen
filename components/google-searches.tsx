@@ -27,6 +27,8 @@ export function GoogleSearches({
   operator: { connected: boolean; account: string } | null;
   result: string;
 }) {
+  // ?gsc= is typed into the link: a name every object inherits (constructor, toString) is not a result.
+  const resultText = Object.hasOwn(RESULTS, result) ? RESULTS[result] : undefined;
   return (
     <>
       {searches && searches.rows.length ? (
@@ -80,9 +82,9 @@ export function GoogleSearches({
               ? `Connected${operator.account ? ` with ${operator.account}` : ""}. Every store on marktmorgen.com sees the Google searches that found it. Only you see this card.`
               : "Connect the Google account that holds marktmorgen.com in Search Console, and every store on marktmorgen.com sees the Google searches that found it. Read-only. Only you see this card."}
           </p>
-          {result && RESULTS[result] ? (
+          {resultText ? (
             <p className={`mt-3 notice ${result === "connected" || result === "disconnected" ? "notice-info" : "notice-warn"}`} role="status">
-              {RESULTS[result]}
+              {resultText}
             </p>
           ) : null}
           <form action="/api/operator/search-console" method="post" className="mt-4">

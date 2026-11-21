@@ -31,10 +31,16 @@
  * sales (app/api/cron/quiet), from the numbers the studio shows: the visits
  * kept by day, the sales and refunds on the creator's own Stripe account.
  *
+ * Each kind's email follows the creator's choice, kept in the store record
+ * this job already holds (alertEmailsOff, lib/notify-prefs-rules.ts; queue
+ * item 601 [KB22] U6): a kind switched off is still said on the phone and in
+ * the chat, as their own settings say, and not emailed. No extra reading.
+ *
  *   nl:alert:seen:<day>:<statsId>        looked at today
  *   nl:alert:<statsId>:<kind>[:<month>]  said this week, or this month
  */
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { formatMoney } from "@/lib/money";
@@ -48,6 +54,7 @@ import { goalProgress, goalMoneyByDay, monthTitle } from "@/lib/sales-goal-rules
 import { paidFiguresComplete } from "@/lib/paid-coverage";
 import { ledgerPaymentsComplete } from "@/lib/payment-ledger-coverage";
 import { goalForMonth, readSalesGoal } from "@/lib/sales-goal";
+import { notifyPrefsPath, wantsAlertEmail } from "@/lib/notify-prefs-rules";
 
 export type AlertKind = "traffic" | "conversion" | "refunds" | "goal-pace" | "goal-reached";
 export type StoreAlert = { kind: AlertKind; title: string; lines: string[] };
@@ -199,8 +206,9 @@ export async function checkAlerts(store: Store, now = Date.now()): Promise<Alert
   const standing = standingOf(store);
   if (standing !== "paid" && standing !== "trial") return { said: 0, skipped: true };
   const today = new Date(now).toISOString().slice(0, 10);
-  const [first] = await redisPipeline([["SET", seenKey(today, store.statsId), "1", "NX", "EX", 2 * 86400]]);
-  if (first === null) return { said: 0, skipped: true };
+  // The day's look and each alert are ours only on an exact claim (lib/claim-mark.ts): an unknown answer
+  // reads and says nothing this run, and lets nothing go.
+  if ((await claimMark(seenKey(today, store.statsId), 2 * 86400)) !== "ours") return { said: 0, skipped: true };
 
   const [stats, sales, goal] = await Promise.all([readStats(store, now), readSales(store, now), readSalesGoal(store.statsId, store.currency)]);
   if (!stats || !sales) return { said: 0, skipped: false };
@@ -215,20 +223,22 @@ export async function checkAlerts(store: Store, now = Date.now()): Promise<Alert
   });
   if (!alerts.length) return { said: 0, skipped: false };
 
-  const emailing = isSenderConfigured() && !(await weeklyOff(store.handle));
+  // A damaged choice holds every optional email (keptOff -> null); it is said here so it is seen (Claude 7's LEVE on #3013).
+  if (store.alertEmailsOff === null) console.error(`store-alerts: the alert email choice of ${store.handle} cannot be read; optional alert emails are held until the owner saves it again`);
+  // The stop link is read only when some alert is one the creator wants by email (alertEmailsOff).
+  const emailing = isSenderConfigured() && alerts.some((alert) => wantsAlertEmail(store.alertEmailsOff, alert.kind)) && !(await weeklyOff(store.handle));
   const chat = store.chatSales ? await chatAddress(store.statsId).catch(() => null) : null;
   let said = 0;
   for (const alert of alerts) {
     const key = saidKey(store.statsId, alert, today);
-    const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", alert.kind.startsWith("goal") ? 40 * 86400 : 7 * 86400]]);
-    if (claimed === null) continue;
+    if ((await claimMark(key, alert.kind.startsWith("goal") ? 40 * 86400 : 7 * 86400)) !== "ours") continue;
     said += 1;
     const studio = `/studio${store.sid ? `?store=${store.sid}` : ""}#numbers`;
     await alertCreator(store, "alert", { title: alert.title, body: alert.lines[0], url: studio }, { seed: key, at: now }).catch((error) =>
       console.error("an alert notification failed", error),
     );
     if (chat) await postToChat(chat, [alert.title, ...alert.lines].join("\n")).catch(() => false);
-    if (emailing) {
+    if (emailing && wantsAlertEmail(store.alertEmailsOff, alert.kind)) {
       const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(weeklyToken(store.handle))}`;
       await sendEmail({ meter: { by: "company" },
         from: NIMBUS_FROM,
@@ -239,7 +249,8 @@ export async function checkAlerts(store: Store, now = Date.now()): Promise<Alert
           "",
           `Your numbers, day by day: ${SITE_URL}${studio}`,
           "",
-          `Each kind of alert comes at most once a week, the goal ones once a month. To stop these emails and the weekly one: ${stopUrl}`,
+          `Each kind of alert comes at most once a week, the goal ones once a month. To choose which of these you get: ${SITE_URL}${notifyPrefsPath(store.sid)}`,
+          `To stop these emails and the weekly one: ${stopUrl}`,
         ].join("\n"),
         headers: { "List-Unsubscribe": `<${stopUrl}>` },
       }).catch(() => false);

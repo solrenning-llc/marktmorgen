@@ -42,7 +42,7 @@ const ALLOWED: { pattern: RegExp; why: string }[] = [
   { pattern: /^nl:lc:[^:]+:(seen|r)$/, why: "comment counts" },
   { pattern: /^nl:wl:[^:]+:[^:]+:send$/, why: "a launch's list, with the deleted address written over (lib/erasure-lists.ts)" },
   { pattern: /^nl:store:leads:[^:]+:(agreed|unsub)$/, why: "the list's counts" },
-  { pattern: /^nl:(health|stats:[0-9a-f]+:ledger)/, why: "ten-minute copies, worked out again when next read" },
+  { pattern: /^nl:(health|stats:[0-9a-f]+:ledger)/, why: "short-lived copies (ten minutes, the buyers' an hour), worked out again when next read" },
   { pattern: /^nl:(sender|wf:day):/, why: "counts of emails and workflow runs, never who" },
   { pattern: /^nl:tasks:doors$/, why: "files waiting for the daily job to delete them, when the file store did not answer" },
   { pattern: /^nl:rsum:(ver|last):[0-9a-f]+:[A-Za-z0-9_-]+$/, why: "a random mark that a product's reviews changed, so an AI summary counting the deleted review is not kept (lib/reviews.ts), and when the week's last summary was made, never who" },
@@ -119,7 +119,8 @@ export async function runJourney(is: Check, sent: Sent[], counted: { commands: n
   const left = [...after].filter(([key, value]) => marks(statsId, tess).some((m) => key.includes(m) || value.includes(m)));
   is("no key or value names them, by address or by any key made from it", left.map(([key]) => key), []);
   const suppressionOnly = [...after].filter(([key]) => /^nl:erased:/.test(key));
-  is("only a fingerprint is kept, under the store's list", suppressionOnly.map(([key, value]) => [key, (JSON.parse(value) as string[]).length]), [[`nl:erased:${listId}`, 1]]);
+  // The fingerprint, and the same fingerprint noted as their own request (lib/suppression.ts ownErasureField).
+  is("only a fingerprint is kept, under the store's list, noted as their own request", suppressionOnly.map(([key, value]) => [key, (JSON.parse(value) as string[]).length]), [[`nl:erased:${listId}`, 2]]);
   is("which cannot be read back to the address", suppressionOnly.some(([, value]) => value.includes(tess) || value.includes("@")), false);
   is("the other person is untouched", parseContact((await redisPipeline([["HGET", leadsKey(listId), other]]))[0])?.agreed, true);
 

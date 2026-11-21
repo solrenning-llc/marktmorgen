@@ -15,11 +15,13 @@
  * a day, for the currencies their country can charge in.
  */
 import { saleHandles } from "@/lib/store";
+import { productOfSub } from "@/lib/tier-rules";
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { DELAYED_METHODS } from "@/lib/instant-pay";
 import { CURRENCIES, type Currency } from "@/lib/money";
 import type { Store } from "@/lib/store";
+import { STRIPE_LIST_VERSION, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 /** How each method is named in the studio, and the one thing worth knowing about it. */
 const METHODS: Record<string, { name: string; note?: string; group: WayGroup }> = {
@@ -209,9 +211,11 @@ const CURRENCIES_SECONDS = 12 * 60 * 60;
 /**
  * Which of the store currencies (lib/money.ts) the creator's Stripe account
  * can charge in, from the list Stripe publishes for its country. Null when
- * there is no account, or Stripe could not be asked: every currency on the
- * list is then offered, since each is one Stripe settles in the countries
- * the studio offers.
+ * there is no account, or Stripe could not be asked or answered a list in an
+ * unknown shape (an entry that is not text): every currency on the list is
+ * then offered, since each is one Stripe settles in the countries the studio
+ * offers. A kept list that does not read back as store currencies is not
+ * known either: Stripe is asked again, never "none" (review of #2993).
  */
 export async function chargeableCurrencies(store: Store): Promise<Currency[] | null> {
   const account = store.stripeAccountId;
@@ -221,7 +225,8 @@ export async function chargeableCurrencies(store: Store): Promise<Currency[] | n
     const [kept] = await redisPipeline([["GET", currenciesKey(account)]]).catch(() => [null]);
     if (typeof kept === "string" && kept) {
       const codes = kept.split(",");
-      return CURRENCIES.map((c) => c.code).filter((code) => codes.includes(code));
+      const known: string[] = CURRENCIES.map((c) => c.code);
+      if (codes.every((code) => known.includes(code))) return CURRENCIES.map((c) => c.code).filter((code) => codes.includes(code));
     }
   }
   try {
@@ -229,10 +234,10 @@ export async function chargeableCurrencies(store: Store): Promise<Currency[] | n
     const country = typeof found.country === "string" ? found.country.toUpperCase() : "";
     if (!/^[A-Z]{2}$/.test(country)) return null;
     const spec = await onAccount("GET", account, `/country_specs/${country}`);
-    const supported = Array.isArray(spec.supported_payment_currencies)
-      ? (spec.supported_payment_currencies as unknown[]).filter((c): c is string => typeof c === "string").map((c) => c.toLowerCase())
-      : [];
-    if (supported.length === 0) return null;
+    const listed: unknown[] = Array.isArray(spec.supported_payment_currencies) ? spec.supported_payment_currencies : [];
+    // An entry that is not text is a list not known whole: never the shorter list, and never kept.
+    if (listed.length === 0 || !listed.every((c): c is string => typeof c === "string")) return null;
+    const supported = listed.map((c) => c.toLowerCase());
     const ours = CURRENCIES.map((c) => c.code).filter((code) => supported.includes(code));
     if (cache) await redisPipeline([["SET", currenciesKey(account), ours.join(","), "EX", CURRENCIES_SECONDS]]).catch(() => {});
     return ours;
@@ -246,42 +251,78 @@ export async function chargeableCurrencies(store: Store): Promise<Currency[] | n
 const RUNNING = ["active", "trialing", "past_due"] as const;
 /** Pages of a hundred read for each status before giving up on knowing. */
 const RUNNING_PAGES = 10;
+/** A subscription's own id: a row with another id is not readable, never one of this store's nor another's. */
+const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9]{6,128}$/;
 
 /**
  * How many memberships and payment plans of this store are still running on
  * Stripe: each one charges again, in the currency it began in, whatever the
  * store says afterward. Null when Stripe could not be asked, or had more than
  * could be read — which is treated as "some", never as "none".
+ * With `product`, only those sold for that product (subscription metadata.product, lib/store-checkout.ts), so a
+ * product is never removed while its members or payment plans are still charged for it.
  */
-export async function runningSubscriptions(store: Store): Promise<number | null> {
+export async function runningSubscriptions(store: Store, product?: string): Promise<number | null> {
   const account = store.stripeAccountId;
   if (!account) return 0;
   const handles = saleHandles(store);
   let count = 0;
+  // A row not readable (lib/stripe-list.ts) may be one of this store's: the count is then "at least", never "none".
+  let unreadable = 0;
   try {
     for (const status of RUNNING) {
       let after = "";
       let done = false;
       for (let page = 0; page < RUNNING_PAGES; page += 1) {
-        const listed = await onAccount(
-          "GET",
-          account,
-          `/subscriptions?status=${status}&limit=100${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+        const read = readStripePage(
+          await onAccount(
+            "GET",
+            account,
+            `/subscriptions?status=${status}&limit=100${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+            undefined,
+            STRIPE_LIST_VERSION,
+          ),
+          // Whose it is is read from metadata.store: absent is a readable "not this store's"; any store that is not
+          // text is not readable (Codex CX1 on #2759), so the count is never "none" on it.
+          (row) => {
+            const meta = ownField(row, "metadata");
+            if (!plainObject(meta)) return false;
+            const soldBy = ownField(meta, "store");
+            if (product !== undefined) {
+              const soldFor = ownField(meta, "product");
+              if (soldFor !== undefined && typeof soldFor !== "string") return false;
+            }
+            return soldBy === undefined || typeof soldBy === "string";
+          },
+          SUBSCRIPTION_ID,
         );
-        const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-        for (const row of rows) {
-          const meta = (row.metadata ?? {}) as Record<string, string>;
-          if (handles.has(meta.store ?? "")) count += 1;
+        unreadable += read.unreadable;
+        for (const row of read.rows) {
+          const meta = ownField(row, "metadata") as Record<string, unknown>;
+          const soldBy = ownField(meta, "store");
+          if (typeof soldBy !== "string" || !handles.has(soldBy)) continue;
+          if (product === undefined) {
+            count += 1;
+            continue;
+          }
+          // The product a member pays for now is the price's after a tier switch, the subscription's otherwise
+          // (productOfSub, lib/tier-rules.ts; a subscription item carries its whole price, metadata included). One of
+          // this store's with no product to read may be this product's: "at least", never "not this one" (#4074).
+          const on = productOfSub(row);
+          if (!on) unreadable += 1;
+          else if (on === product) count += 1;
         }
-        const last = rows[rows.length - 1];
-        if (listed.has_more !== true || !last || typeof last.id !== "string") {
+        if (!read.hasMore) {
           done = true;
           break;
         }
-        after = last.id;
+        // More pages, and no readable last row to read them from: not read whole.
+        if (!read.lastId) break;
+        after = read.lastId;
       }
       if (!done) return count > 0 ? count : null;
     }
+    if (unreadable) return count > 0 ? count : null;
     return count;
   } catch (error) {
     console.error("counting running memberships failed", error);

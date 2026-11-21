@@ -8,6 +8,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { GROWTH_GOALS, growthActions, growthGoal, growthCampaignGoal, growthReview } from "@/lib/growth-plan";
@@ -39,7 +40,7 @@ export default async function GrowthPage({ searchParams }: Params) {
     <StudioHeader current={store} role={role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
     <StudioStorePin sid={store.sid}>
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Growth</p>
+        <StudioTrail store={store} here="Growth" />
         <h1 className="t-h2 mt-3">Choose your next business goal</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">Choose one goal, review the steps, then open the tools you need. These are starting points, not forecasts or promises of sales.</p>
         {can(role,"stats") ? <p className="mt-5"><Link href={studioPath(store)+"#grow-your-sales"} prefetch={false} className="link inline-flex min-h-11 items-center">Grow your sales — settings and measured payment records</Link></p> : null}
@@ -92,8 +93,9 @@ export default async function GrowthPage({ searchParams }: Params) {
         <TemplateLibrary
           cards={templateLibraryCards({fromName:store.mail?.fromName || store.name,storeLink:storeBase(store),ordersLink:storeBase(store)+"/orders",product:null,paidCount:0})}
           sid={store.sid}
-          products={(store.catalog.inline ?? store.catalog.head).map(product => ({id:product.id,title:product.title,free:isFree(product)}))}
+          products={(store.catalog.inline ?? store.catalog.head).map(product => ({id:product.id,title:product.title,free:isFree(product),course:Boolean(product.course)}))}
           canPage={can(role,"products") && can(role,"page")}
+          canCourse={can(role,"products")}
           canEmail={can(role,"draft")}
           canSequence={can(role,"send")}
         />

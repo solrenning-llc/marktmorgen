@@ -57,6 +57,17 @@ export const OFFER_DAYS = 14;
 /** At most one come-back email per person and product in this long. */
 export const ONCE_PER_DAYS = 180;
 export const MAX_WINBACK_ADDRESS = 200;
+/**
+ * Calls to the creator's Stripe account one opening of a come-back link makes at the most, to read whether the person
+ * already has a membership that has not ended (lib/winback-send.ts, openWinBack): the address's customers listed and
+ * searched, and up to ten pages of their memberships. Past them the answer is unknown, and nothing is opened.
+ */
+export const WINBACK_OPEN_STRIPE_CALLS = 12;
+/**
+ * Public requests of the store's window that reading counts as, taken before it: its worst cost with a tenth to spare
+ * (WINBACK_OPEN_READ in tests/plan-cost-registry.ts, held by tests/plan-cost-registry.test.ts).
+ */
+export const WINBACK_OPEN_REQUEST_UNITS = 9;
 
 export const NO_WINBACK: WinBack = { percent: 0, months: 1, days: 7, coupon: "", address: "" };
 

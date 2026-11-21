@@ -7,10 +7,13 @@
  *   - the model only sorts: a number it was not handed, a text already in a
  *     theme, a theme of one text and a name with a figure are dropped; counts
  *     and examples come from the texts themselves;
+ *   - what members wrote when leaving is counted but never quoted, and a
+ *     person's erasure deletes every month a summary may be kept for
+ *     (tests/voice-erasure.test.ts has the erasure itself);
  *   - made only with enough to read, once a calendar month, as one of the
  *     month's AI jobs, and given back unchanged after that.
  */
-import { MIN_TEXTS, cleanVoice, gatherVoice, makeVoice, readVoice, themesFrom, voicePrompt, type VoiceItem } from "@/lib/customer-voice";
+import { KEEP_SECONDS, LOCK_SECONDS, MIN_TEXTS, cleanVoice, keptMonths, gatherVoice, makeVoice, readVoice, themesFrom, voicePrompt, type VoiceItem } from "@/lib/customer-voice";
 import { keepAnswer } from "@/lib/answers";
 import { saveReview } from "@/lib/reviews";
 import { countSearchMiss } from "@/lib/stats";
@@ -20,6 +23,13 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { mock } from "node:test";
+
+// The checks pass one moment (`now` below) to the code, which still reads the clock itself in places: a run crossing
+// 00:00 UTC (any day) between the two failed "questions, reviews and searches, never the old question" and "fewer
+// than 8 texts: nothing asked, nothing counted". Only Date is stopped, for the whole run; timers and
+// performance.now() run as usual.
+mock.timers.enable({ apis: ["Date"], now: Date.now() });
 
 let reply: string | null = null;
 const prompts: string[] = [];
@@ -71,9 +81,17 @@ async function main(): Promise<void> {
   ]);
   is("the examples are the customers' own words, the most repeated first", sorted.themes[0].examples.map((e) => e.text), ["printable", "Is there a printable version?", "Great, but I wish I could print it"]);
   is("a name with a figure and a theme of one are dropped; the rest is counted apart", sorted.other, 1);
+  is("what members wrote when leaving is counted, never quoted: nobody beside it can be checked against the deleted", [sorted.themes[1].count, sorted.themes[1].examples], [2, []]);
   is("nothing usable, nothing said", themesFrom({ themes: "x" }, items).themes, []);
   const prompt = voicePrompt(items);
   is("handed by number, with where each came from", [prompt.includes("[3] (words searched for on the store that found nothing, searched 5 times) printable"), prompt.includes("[1] (a visitor's question the page could not answer, about Meal Planner)")], [true, true]);
+
+  part("The months a person's erasure deletes");
+  const nov5 = Date.UTC(2026, 10, 5);
+  is("every month a summary kept now may be of, from 70 days back", keptMonths(nov5), ["2026-11", "2026-10", "2026-09", "2026-08"]);
+  is("one written on the last day of the oldest is still among them", keptMonths(Date.UTC(2026, 7, 31, 23) + KEEP_SECONDS * 1000 - 1).at(-1), "2026-08");
+  is("a reading begun on the last second of a month writes that month's key up to its lock's time later, kept 70 days from then", keptMonths(Date.UTC(2026, 8, 1) + (KEEP_SECONDS + LOCK_SECONDS) * 1000 - 1).at(-1), "2026-08");
+  is("and none older than it can be kept", keptMonths(Date.UTC(2026, 9, 1) + (KEEP_SECONDS + LOCK_SECONDS + 60) * 1000).at(-1), "2026-10");
 
   part("Read together, from the last 90 days");
   const OWNER = "owner@example.com";
@@ -94,7 +112,30 @@ async function main(): Promise<void> {
   }
   await countSearchMiss(statsId, ["printable"]);
   await countSearchMiss(statsId, ["printable"]);
-  const gathered = await gatherVoice(store, now);
+  const { items: gathered } = await gatherVoice(store, now);
+
+  part("Provider errors are not copied into server logs (through the real reads)");
+  {
+    // Every Redis read fails with customers' words in its error (Claude 3 M LEVE on #3733: the
+    // check now drives gatherVoice instead of calling logVoiceFailure directly).
+    const realPipeline = redis.pipeline.bind(redis);
+    const originalConsoleError = console.error;
+    const logged: unknown[][] = [];
+    redis.pipeline = (async () => { throw new Error("buyer@example.test wrote private health details"); }) as typeof redis.pipeline;
+    console.error = (...args: unknown[]) => { logged.push(args); };
+    let failedReads: string[] = [];
+    try {
+      failedReads = (await gatherVoice(store, now)).unread;
+    } finally {
+      redis.pipeline = realPipeline;
+      console.error = originalConsoleError;
+    }
+    const text = logged.flat().map((value) => (value instanceof Error ? `${value.message}\n${value.stack}` : String(value))).join("\n");
+    is("the failed lists are named", failedReads.length > 0, true);
+    is("something was logged for them", logged.length > 0, true);
+    is("the log never carries what customers wrote", text.includes("buyer@example.test") || text.includes("health details"), false);
+    is("every line is a fixed label alone", logged.every((args) => args.length === 1 && typeof args[0] === "string"), true);
+  }
   is("questions, reviews and searches, never the old question", gathered.map((g) => `${g.source}|${g.text}|${g.n}`).sort(), [
     "question|Can I print the planner?|1",
     "question|Does it work in metric?|1",

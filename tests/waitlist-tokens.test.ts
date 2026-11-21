@@ -16,6 +16,42 @@ test("legacy store token identities and grants remain compatible after extractio
   assert.equal(parseStoreWaitlistGrant("{bad"), null);
   assert.equal(parseStoreWaitlistGrant(JSON.stringify({ ...storeGrant, k: "launch" })), null);
 });
+for (const [name, changed] of [
+  ["missing store id", { h: storeGrant.h, p: storeGrant.p, e: storeGrant.e, k: storeGrant.k }],
+  ["missing handle", { s: storeGrant.s, p: storeGrant.p, e: storeGrant.e, k: storeGrant.k }],
+  ["missing product", { s: storeGrant.s, h: storeGrant.h, e: storeGrant.e, k: storeGrant.k }],
+  ["missing address", { s: storeGrant.s, h: storeGrant.h, p: storeGrant.p, k: storeGrant.k }],
+  ["non-string store id", { ...storeGrant, s: 7 }],
+  ["non-string handle", { ...storeGrant, h: null }],
+  ["non-string product", { ...storeGrant, p: [] }],
+  ["non-string address", { ...storeGrant, e: {} }],
+  ["empty routing field", { ...storeGrant, p: "" }],
+  ["control character", { ...storeGrant, h: "harbor\nother" }],
+] as const) {
+  test(`creator grant rejects ${name}`, () => {
+    assert.equal(parseStoreWaitlistGrant(JSON.stringify(changed)), null);
+  });
+}
+test("creator grant is byte-bounded", () => {
+  assert.equal(parseStoreWaitlistGrant(JSON.stringify({ ...storeGrant, note: "x".repeat(2048) })), null);
+});
+test("creator grant returns only validated routing data", () => {
+  assert.deepEqual(
+    parseStoreWaitlistGrant(JSON.stringify({ ...storeGrant, email: "other@example.invalid", consent: true, paid: true })),
+    storeGrant,
+  );
+});
+for (const field of ["s", "h", "p", "e", "k"] as const) {
+  test(`creator grant rejects conflicting duplicate ${field}`, () => {
+    const first = field === "k" ? "leave" : "different";
+    const raw = `{${JSON.stringify(field)}:${JSON.stringify(first)},${JSON.stringify(storeGrant).slice(1)}`;
+    assert.equal(parseStoreWaitlistGrant(raw), null);
+  });
+}
+test("creator grant rejects an escaped duplicate routing member", () => {
+  const raw = '{"\\u0065":"other@example.invalid",' + JSON.stringify(storeGrant).slice(1);
+  assert.equal(parseStoreWaitlistGrant(raw), null);
+});
 test("fresh opaque tokens do not carry an email or a reversible Redis key", () => {
   const first = newWaitlistToken(), second = newWaitlistToken();
   assert.match(first, WAIT_TOKEN);
@@ -54,4 +90,15 @@ test("platform grants return only routing data and never imply consent or consum
   const parsed = parsePlatformWaitlistGrant(JSON.stringify(nextGeneration), "confirm", now);
   assert.equal(parsed?.generation, nextGeneration.generation);
   assert.notEqual(parsed?.generation, platform.generation);
+});
+for (const field of ["scope", "version", "entryId", "generation", "k", "issuedAt", "expiresAt"] as const) {
+  test(`platform grant rejects conflicting duplicate ${field}`, () => {
+    const first = typeof platform[field] === "number" ? 0 : "different";
+    const raw = `{${JSON.stringify(field)}:${JSON.stringify(first)},${JSON.stringify(platform).slice(1)}`;
+    assert.equal(parsePlatformWaitlistGrant(raw, "confirm", now), null);
+  });
+}
+test("platform grant rejects an escaped duplicate routing member", () => {
+  const raw = '{"\\u0065ntryId":"' + "c".repeat(64) + '",' + JSON.stringify(platform).slice(1);
+  assert.equal(parsePlatformWaitlistGrant(raw, "confirm", now), null);
 });

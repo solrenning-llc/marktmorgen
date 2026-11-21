@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
+import { NewTab } from "@/components/new-tab";
 import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { formatMoney } from "@/lib/money";
@@ -25,6 +26,8 @@ const MESSAGES: Record<string, string> = {
   off: "Switch your affiliate program on first.",
   slow: "Too many tries for now. Try again in an hour.",
   error: "PayPal could not be reached. Nothing was sent. Try again in a moment.",
+  unknown: "We sent the batch to PayPal, but its answer did not reach us, so we do not know whether it was paid. Nobody in it will be sent again: they show as on their way. Look at your PayPal activity to see whether it went.",
+  pending: "Nobody was paid just now. But we could not confirm that this payment was cleared from our records, so our daily check may still send it from your PayPal, to the same people for the same amounts. Until then, they show as on their way. Do not pay them another way, or they could be paid twice.",
 };
 
 async function send(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -40,17 +43,29 @@ export function PayPalPayouts({
   initial,
   people,
   cents,
+  leftOutNote = "",
   currency,
   onTheirWay,
+  checking = 0,
+  manualCheck = 0,
   payday,
 }: {
   initial: View | null;
   /** Who can be paid right now, and how much in all. */
   people: number;
   cents: number;
+  /**
+   * Said when anyone owed is left out of every PayPal batch because PayPal cannot take their address (Claude 7 on
+   * #4318); empty when nobody is. Written by the server (paypalLeftOutText).
+   */
+  leftOutNote?: string;
   currency: string;
   /** Payments sent through PayPal and not yet confirmed. */
   onTheirWay: number;
+  /** Of those, the ones whose answer from PayPal did not reach us, asked again once a day (lib/paypal-payouts.ts). */
+  checking?: number;
+  /** Of those, the ones PayPal could not confirm after a week, or said exist without saying which: not sent again. */
+  manualCheck?: number;
   /** The day of the month the creator pays; 0 when none is set. */
   payday: number;
 }) {
@@ -161,9 +176,10 @@ export function PayPalPayouts({
                 </>
               )}
             </div>
-          ) : (
+          ) : leftOutNote ? null : (
             <p className="mt-3 text-sm text-ink-soft">Nobody is owed anything that has cleared right now.</p>
           )}
+          {leftOutNote ? <p className="notice notice-warn mt-3 text-sm">{leftOutNote}</p> : null}
           {onTheirWay > 0 ? (
             <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-ink-soft">
               <span>{`${onTheirWay} ${onTheirWay === 1 ? "payment is" : "payments are"} on the way through PayPal. Each shows as paid once PayPal confirms it; anyone PayPal cannot pay stays owed.`}</span>
@@ -174,7 +190,17 @@ export function PayPalPayouts({
                 onClick={async () => {
                   const data = await act("settle");
                   if (data) {
-                    toast(Number(data.paid) ? `${data.paid} confirmed as paid.` : "Nothing new from PayPal yet.");
+                    toast(
+                      data.unavailable
+                        ? data.retryNow
+                          ? "We could not check these payments with PayPal just now. Nothing was asked of PayPal, so you can try again right away."
+                          : "We could not check these payments with PayPal just now. Nothing was asked of PayPal. Try again in a minute."
+                        : data.asked === false
+                          ? "PayPal was asked less than a minute ago. Try again in a minute."
+                          : Number(data.paid)
+                            ? `${data.paid} confirmed as paid.`
+                            : "Nothing new from PayPal yet.",
+                    );
                     router.refresh();
                   }
                 }}
@@ -182,6 +208,21 @@ export function PayPalPayouts({
                 Check with PayPal
               </button>
             </div>
+          ) : null}
+          {checking > 0 ? (
+            <p className="mt-3 text-sm text-ink-soft" role="status">
+              {`${checking} of these ${checking === 1 ? "is" : "are"} being checked with PayPal: its answer to the payment did not reach us, so the same payment request is sent to PayPal once a day until it answers. Nobody is paid twice.`}
+            </p>
+          ) : null}
+          {manualCheck > 0 ? (
+            <p className="notice notice-warn mt-3 text-sm" role="status">
+              {`PayPal could not confirm ${manualCheck} ${manualCheck === 1 ? "payment" : "payments"}, so we will not send ${manualCheck === 1 ? "it" : "them"} again. Please check them in your PayPal activity, and pay anyone PayPal did not pay from there: `}
+              <a className="underline underline-offset-2" href="https://www.paypal.com/myaccount/activities/" target="_blank" rel="noreferrer">
+                your PayPal activity
+                <NewTab />
+              </a>
+              .
+            </p>
           ) : null}
           <label className="mt-4 flex min-h-[44px] items-center gap-3 text-sm text-ink">
             <input
@@ -216,6 +257,49 @@ export function PayPalPayouts({
           </button>
         </>
       )}
+      {error ? (
+        <p className="notice notice-error mt-3 text-sm" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Shown instead of the panel when the creator's PayPal connection could not be read (lib/paypal-payouts.ts readLink,
+ * rule 24): paying from PayPal is unavailable, and Disconnect is the way out of a connection in an unknown shape, so
+ * the creator is never stuck. Disconnecting deletes the connection whatever it holds; nothing is paid.
+ */
+export function PayPalUnread() {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="notice notice-warn mt-5">
+      <p role="alert">
+        Your PayPal connection could not be read just now, so paying from PayPal is unavailable here. Nothing was changed.
+        Reload the page to try again. If this keeps happening, disconnect PayPal and connect it again.
+      </p>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm mt-2"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setError(null);
+          const data = await send({ op: "disconnect" });
+          setBusy(false);
+          if (!data.ok) {
+            setError(MESSAGES[String(data.error)] ?? MESSAGES.error);
+            return;
+          }
+          toast("PayPal disconnected. Its Secret is deleted.");
+          router.refresh();
+        }}
+      >
+        Disconnect PayPal
+      </button>
       {error ? (
         <p className="notice notice-error mt-3 text-sm" role="alert">
           {error}

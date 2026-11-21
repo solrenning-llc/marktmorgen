@@ -34,7 +34,9 @@ export function RevealOnScroll() {
           }
         });
       },
-      { rootMargin: "0px 0px -6% 0px", threshold: 0.1 },
+      // A section can exceed ten viewports after its answers open.
+      // Reveal on the first intersection, not an unreachable fraction of it.
+      { rootMargin: "0px 0px -6% 0px", threshold: 0 },
     );
     const fold = window.innerHeight;
     // Snapshot geometry first. Revealing one node can change layout/style;

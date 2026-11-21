@@ -22,7 +22,7 @@ export function membershipBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = 
   return [
     {
       q: "What is a membership here?",
-      a: "A product that charges again every day, week, month or year on your own Stripe account, and stays open while the membership runs. It can deliver a file, a link, a course or a private podcast, and can open your community. The member cancels on their own from “Manage or cancel” under the membership, ending on Stripe's own page, without writing to you.",
+      a: "A product that charges again every day, week, month or year on your own Stripe account. Access to files and courses hosted here follows the membership. It can also deliver a link or a private podcast, and open your community. For a link to a file or page on another service, you manage access on that service. The member cancels on their own from “Manage or cancel” under the membership, ending on Stripe's own page, without writing to you.",
     },
     {
       q: "How do I start a membership?",

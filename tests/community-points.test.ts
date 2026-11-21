@@ -15,7 +15,7 @@
  */
 import { addProduct, claimHandle, setCommunity, setProductCourse, setStripeAccount, storeForEmail } from "@/lib/store";
 import { memberKey, readMember, touchMember } from "@/lib/community";
-import { LEVELS, award, board, earnedCourses, levelOf, parseRewards, pointsOf, saveRewards, toNextLevel } from "@/lib/community-points";
+import { LEVELS, REMOVE_POINT, award, board, earnedCourses, levelOf, parseRewards, pointsOf, saveRewards, toNextLevel } from "@/lib/community-points";
 import { paidCourses } from "@/lib/learn";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -24,9 +24,39 @@ globalThis.fetch = (async () => new Response(JSON.stringify({ object: "list", da
 
 const DAY = 86_400_000;
 
+const pipeline = redis.pipeline.bind(redis);
+
+/** The shared memory Redis has no general Lua interpreter; model this one script exactly for the linked behavior suite. */
+function installPointRemoval(): void {
+  redis.pipeline = (async (batch) => {
+    const command = batch[0];
+    if (batch.length !== 1 || command?.[0] !== "EVAL" || command[1] !== REMOVE_POINT) return pipeline(batch);
+    const totalKey = String(command[3]);
+    const todayKey = String(command[4]);
+    const member = String(command[5]);
+    const values = await pipeline([["ZSCORE", totalKey, member], ["ZSCORE", todayKey, member]]);
+    const score = (raw: unknown): number | null => {
+      if (raw === null) return 0;
+      const value = typeof raw === "string" ? Number(raw) : Number.NaN;
+      return Number.isSafeInteger(value) ? value : null;
+    };
+    const total = score(values[0]);
+    const today = score(values[1]);
+    if (total === null || today === null) return [[-1, -1]];
+    const writes: (string | number)[][] = [];
+    if (total < 0) writes.push(["ZADD", totalKey, 0, member]);
+    else if (total > 0) writes.push(["ZINCRBY", totalKey, -1, member]);
+    if (today < 0) writes.push(["ZADD", todayKey, 0, member]);
+    else if (today > 0) writes.push(["ZINCRBY", todayKey, -1, member]);
+    if (writes.length) await pipeline(writes);
+    return [[total > 0 ? 1 : 0, today > 0 ? 1 : 0]];
+  }) as typeof redis.pipeline;
+}
+
 async function main(): Promise<void> {
   process.env.STRIPE_SECRET_KEY = "sk_test_points_only_a_stand_in";
   redis.clear();
+  installPointRemoval();
 
   part("Levels are where the page says");
   is("0 points is Level 1", levelOf(0), 1);

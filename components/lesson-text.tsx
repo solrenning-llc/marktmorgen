@@ -1,13 +1,16 @@
 import { Fragment } from "react";
 import { NewTab } from "@/components/new-tab";
 import { lessonBlocks } from "@/lib/lesson-blocks";
+import { lessonHtmlDocument } from "@/lib/lesson-html";
 
 /**
  * A lesson's text, the way the creator typed it: paragraphs separated by a
  * blank line, lines starting with "- " as a list, blocks of code between
  * lines of three backticks (lib/lesson-blocks.ts), and web addresses that can
  * be clicked outside code. Nothing else is interpreted, so nothing a creator
- * types can turn into markup on a student's screen.
+ * types can turn into markup on a student's screen. Paragraphs and lists are
+ * drawn at most 46ch wide, under 80 characters a line (WCAG 1.4.8 AAA,
+ * tests/lesson-text-line-length.test.ts); code keeps the column.
  */
 const URL_PATTERN = /(https:\/\/[^\s<>"')\]]+)/g;
 
@@ -28,19 +31,32 @@ function Linked({ text }: { text: string }) {
   );
 }
 
-/** `codeLabel` names each block of code for a screen reader, in the page's language (the lesson page passes its own word; the studio's preview is in English). */
-export function LessonText({ text, codeLabel = "Code" }: { text: string; codeLabel?: string }) {
+/**
+ * `codeLabel` names each block of code for a screen reader, in the page's language (the lesson page passes its own word; the studio's preview is in English).
+ * `lang` is the store's language, the one the page around it is marked with; an HTML block's frame is a document of its own and does not inherit it (#4158).
+ */
+export function LessonText({ text, lang, codeLabel = "Code", htmlPreviewLabel }: { text: string; lang: string; codeLabel?: string; htmlPreviewLabel?: string }) {
   return (
     <div className="space-y-4 leading-relaxed">
       {lessonBlocks(text).map((block, i) =>
         block.kind === "list" ? (
-          <ul key={i} className="list-disc space-y-1 pl-6">
+          <ul key={i} className="list-disc max-w-[46ch] space-y-1 pl-6">
             {block.items.map((item, k) => (
               <li key={k}>
                 <Linked text={item} />
               </li>
             ))}
           </ul>
+        ) : block.kind === "html" ? (
+          <iframe
+            key={i}
+            title={htmlPreviewLabel ?? `${codeLabel}: HTML`}
+            sandbox=""
+            referrerPolicy="no-referrer"
+            loading="lazy"
+            srcDoc={lessonHtmlDocument(block.source, lang)}
+            className="min-h-64 w-full rounded-[var(--r-sm)] border border-[var(--st-line)] bg-white"
+          />
         ) : block.kind === "code" ? (
           // Code as saved, as text: scrolled sideways rather than wrapped, reachable by keyboard to scroll, in the store's own colors (lib/store-look.ts) with a focus ring like its buttons'. A named group, not a landmark, so the stop it makes has a name and a lesson with many blocks adds no regions; never translated by the browser.
           <pre
@@ -55,7 +71,7 @@ export function LessonText({ text, codeLabel = "Code" }: { text: string; codeLab
             <code>{block.code}</code>
           </pre>
         ) : (
-          <p key={i} className="whitespace-pre-line break-words">
+          <p key={i} className="max-w-[46ch] whitespace-pre-line break-words">
             <Linked text={block.lines.join("\n")} />
           </p>
         ),

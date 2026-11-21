@@ -1,8 +1,7 @@
 import { MemoryRedis } from "@/lib/redis-memory";
+import { withTakeScripts } from "./redis-take-scripts";
 import { isOrderAccounting, orderAccounting } from "./order-accounting-memory";
-export const store = new MemoryRedis();
-// Keep this isolated from the shared production-side emulator file. Other
-// scripts retain their original implementation and fail if unsupported.
+export const store = withTakeScripts(new MemoryRedis());
 store.pipeline = async commands => commands.map(command =>
   isOrderAccounting(command) ? orderAccounting(store, command) : store.run(command));
 export const isRedisConfigured = () => true;

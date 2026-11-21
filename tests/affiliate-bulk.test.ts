@@ -50,7 +50,8 @@ async function main(): Promise<void> {
   is("a non-pending state sent in an undo is ignored", (await post({ action: "bulk-undo", decision: "decline", before: [{ id: ids[3], status: "approved", decidedAt: 0 }] })).undone, 0);
   await post({ action: "bulk", decision: "decline", ids: [ids[2]] });
   const late = await undoMany(await store(), [{ id: ids[2], status: "pending", decidedAt: 0 }], "decline", Date.now() + BULK_UNDO_MS + 1);
-  is("after ten minutes nothing goes back", [late, await status(ids[2])], [0, "declined"]);
+  // Altered 2026-11-07 (rule 23): undoMany answers what it did ({ undone, left, used }), not a bare count.
+  is("after ten minutes nothing goes back", [late.undone, late.used, await status(ids[2])], [0, false, "declined"]);
 
   part("The studio");
   const studio = readFileSync("components/affiliate-studio.tsx", "utf8");

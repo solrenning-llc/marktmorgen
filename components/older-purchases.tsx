@@ -35,7 +35,7 @@ export function OlderPurchases({ older, left: initialLeft }: { older: string; le
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [problem, setProblem] = useState("");
-  const focusTo = useRef<HTMLParagraphElement | null>(null);
+  const focusTo = useRef<HTMLHeadingElement | null>(null);
   const statusRef = useRef<HTMLParagraphElement | null>(null);
   const moveFocus = useRef<"card" | "status" | null>(null);
 

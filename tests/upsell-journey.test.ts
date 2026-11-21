@@ -19,6 +19,7 @@
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, claimHandle, ensureStatsId, setProductFunnel, setProductLink, setStripeAccount, setSubscription, setTax, storeForEmail } from "@/lib/store";
 import { readUpsell, settleUpsells, takeUpsell, newUpsellKey } from "@/lib/upsell";
+import { shownRef } from "./upsell-ref-fixture";
 import { NO_TAX } from "@/lib/tax";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -123,8 +124,8 @@ async function main(): Promise<void> {
 
   part("Only the browser that paid, within the hour");
   sessions = { cs_test_order0000000001: paidCheckout("cs_test_order0000000001", front, browser.fingerprint) };
-  const take = (session: string, step: string, answer: "yes" | "no", secret: string | undefined = browser.secret) =>
-    takeUpsell({ store, session, secret, origin, step, answer, consent: TEST_CONSENT });
+  const take = async (session: string, step: string, answer: "yes" | "no", secret: string | undefined = browser.secret) =>
+    takeUpsell({ store, session, secret, origin, step: await shownRef(store, step), answer, consent: TEST_CONSENT });
   is("another browser, even with the order's address, is offered nothing", (await take("cs_test_order0000000001", "kit001", "yes", newUpsellKey().secret)).kind, "unavailable");
   is("no browser key at all: nothing", (await take("cs_test_order0000000001", "kit001", "yes", "")).kind, "unavailable");
   sessions.cs_test_order0000000002 = paidCheckout("cs_test_order0000000002", front, browser.fingerprint, { created: NOW - 2 * 3600 });
@@ -144,8 +145,8 @@ async function main(): Promise<void> {
   is("still nothing charged", charges.length, 0);
 
   part("Each offer asks its own box to start access at once (lib/digital-consent.ts)");
-  const bare = (step: string, consent: typeof TEST_CONSENT | null) =>
-    takeUpsell({ store, session: "cs_test_order0000000001", secret: browser.secret, origin, step, answer: "yes", consent });
+  const bare = async (step: string, consent: typeof TEST_CONSENT | null) =>
+    takeUpsell({ store, session: "cs_test_order0000000001", secret: browser.secret, origin, step: await shownRef(store, step), answer: "yes", consent });
   is("a yes without it charges nothing and asks for it", (await bare("kit001", null)).kind, "consent");
   is("a yes with another version of the words: the same", (await bare("kit001", { ...TEST_CONSENT, version: "2020-01-01.1" })).kind, "consent");
   is("and nothing is written, so the same offer can still be answered", [charges.length, await readUpsell("cs_test_order0000000001", "")], [0, null]);

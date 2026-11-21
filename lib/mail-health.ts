@@ -84,7 +84,21 @@ export { BOUNCE_FLOOR, BOUNCE_RATE, COMPLAINT_FLOOR, COMPLAINT_RATE, HEALTH_WIND
 export const STORE_TAG = "nl_store";
 /** And, on a list email, the list the address is on, so it can be taken off it. */
 export const LIST_TAG = "nl_list";
+/**
+ * And, on a moved member's email (lib/imports.ts: their first email and their reminder), the store's stats id that
+ * its reminders' stop mark is kept under, so a bounce for good or a spam report stops them (heardFromSender; review
+ * of #3476, MEDIUM 2). Those emails carry no list tag: the member may be on no list.
+ */
+export const MOVE_TAG = "nl_move";
+/** The email shared by all of its recipients, for aggregate delivery reporting. */
+export const MAIL_REPORT_TAG = "nl_mail";
 export const HEALTH_ID = /^[0-9a-f]{32}$/;
+const REPORT_CAMPAIGN = /^[bs]-[A-Za-z0-9_-]{1,38}$/;
+
+/** A campaign made by lib/mail-links.ts, or an empty string for an untrusted tag. */
+export function mailReportCampaign(value: unknown): string {
+  return typeof value === "string" && REPORT_CAMPAIGN.test(value) ? value : "";
+}
 
 /** What a store's watched email is counted under. "" for a store with neither id, which sends none. */
 export function healthId(store: Pick<Store, "sid" | "listId">): string {
@@ -93,29 +107,42 @@ export function healthId(store: Pick<Store, "sid" | "listId">): string {
 }
 
 /** The tags for one watched email, as the sender takes them. */
-export function healthTags(store: Pick<Store, "sid" | "listId">, onList: boolean): Record<string, string> {
+export function healthTags(store: Pick<Store, "sid" | "listId">, onList: boolean, campaign?: string): Record<string, string> {
   const id = healthId(store);
   if (!id) return {};
-  return { [STORE_TAG]: id, ...(onList && store.listId && HEALTH_ID.test(store.listId) ? { [LIST_TAG]: store.listId } : {}) };
+  const report = mailReportCampaign(campaign);
+  return {
+    [STORE_TAG]: id,
+    ...(onList && store.listId && HEALTH_ID.test(store.listId) ? { [LIST_TAG]: store.listId } : {}),
+    ...(report ? { [MAIL_REPORT_TAG]: report } : {}),
+  };
 }
 
+
+/** The tags of a moved member's email: a watched email off the list, with its store's stats id (MOVE_TAG). */
+export function moveTags(store: Pick<Store, "sid" | "listId" | "statsId">): Record<string, string> {
+  const tags = healthTags(store, false);
+  return tags[STORE_TAG] && store.statsId && HEALTH_ID.test(store.statsId) ? { ...tags, [MOVE_TAG]: store.statsId } : tags;
+}
 
 export type PauseReason = "bounces" | "complaints";
 export type Pause = { reason: PauseReason; until: number; sent: number; count: number };
 export type Health = { sent: number; bounced: number; complained: number };
 
 const dayOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-const dayKey = (id: string, ms: number) => `nl:mail:health:${id}:${dayOf(ms)}`;
+export const mailHealthDayKey = (id: string, ms: number) => `nl:mail:health:${id}:${dayOf(ms)}`;
 const seenKey = (id: string, email: string) => `nl:mail:health:${id}:seen:${createHash("sha256").update(email).digest("hex").slice(0, 32)}`;
 const pausedKey = (id: string) => `nl:mail:paused:${id}`;
 const fromKey = (id: string) => `nl:mail:health:${id}:from`;
-const KEPT_SECONDS = (HEALTH_WINDOW_DAYS + 3) * 86_400;
+/** Unit 2 gives daily report hashes their reviewed 30-day lifetime and cost ceiling. */
+export const MAIL_HEALTH_DAY_SECONDS = (HEALTH_WINDOW_DAYS + 3) * 86_400;
+const MAIL_HEALTH_SEEN_SECONDS = (HEALTH_WINDOW_DAYS + 3) * 86_400;
 
 async function add(id: string, field: "s" | "b" | "c", n: number, now: number): Promise<void> {
-  const key = dayKey(id, now);
+  const key = mailHealthDayKey(id, now);
   await redisPipeline([
     ["HINCRBY", key, field, n],
-    ["EXPIRE", key, KEPT_SECONDS],
+    ["EXPIRE", key, MAIL_HEALTH_DAY_SECONDS],
   ]);
 }
 
@@ -319,7 +346,7 @@ export const PORTION_NOTE = `Going out in growing portions: addresses were broug
 export async function forgetHealth(id: string, emails: string[], now = Date.now()): Promise<void> {
   if (!HEALTH_ID.test(id) || !isRedisConfigured()) return;
   const keys = [pausedKey(id), fromKey(id), rampKey(id), ...emails.map((email) => seenKey(id, normaliseEmail(email)))];
-  for (let i = -1; i <= HEALTH_WINDOW_DAYS; i += 1) keys.push(dayKey(id, now - i * 86_400_000));
+  for (let i = -1; i <= HEALTH_WINDOW_DAYS; i += 1) keys.push(mailHealthDayKey(id, now - i * 86_400_000));
   await redisPipeline([["DEL", ...keys]]);
 }
 
@@ -334,6 +361,8 @@ export type SenderNotice = {
   /** The email's tags, as it was sent with them. */
   store: string;
   list: string;
+  /** A moved member's email only (MOVE_TAG): the store's stats id. */
+  move?: string;
 };
 
 /**
@@ -354,7 +383,15 @@ export async function heardFromSender(notice: SenderNotice, now = Date.now()): P
   // Off the list first, and every time: this is the part that must not be
   // skipped because a count had already been made.
   if (HEALTH_ID.test(notice.list)) await stopWriting(notice.list, email, notice.kind);
-  const [first] = await redisPipeline([["SET", seenKey(notice.store, email), "1", "NX", "EX", KEPT_SECONDS]]);
+  // A moved member's email has no list to take them off: their no is kept as the stop mark of that store's reminders,
+  // the one their stop link writes, so the move's reminder never goes to them (lib/checkout-recovery.ts
+  // stopRemindersFor; review of #3476, MEDIUM 2). Every time as well, and a write not confirmed throws, so the notice
+  // is heard again. Imported when needed: lib/checkout-recovery.ts reaches this file through lib/mail.ts.
+  if (notice.move && HEALTH_ID.test(notice.move)) {
+    const { stopRemindersFor } = await import("@/lib/checkout-recovery");
+    await stopRemindersFor(notice.move, email);
+  }
+  const [first] = await redisPipeline([["SET", seenKey(notice.store, email), "1", "NX", "EX", MAIL_HEALTH_SEEN_SECONDS]]);
   if (first === null) return "ignored";
   await add(notice.store, notice.kind === "complained" ? "c" : "b", 1, now);
   return (await pauseIfOver(notice.store, now)) ? "paused" : "counted";

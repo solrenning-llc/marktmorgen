@@ -25,6 +25,52 @@ import type { Store } from "@/lib/store";
 export type MailMoney = { sales: number; cents: number; elsewhere?: number };
 export type MailRevenue = { by: Record<string, MailMoney>; partial: boolean };
 
+const isPlainRecord = (value: unknown): value is Record<string, unknown> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+
+const hasOnlyKeys = (value: Record<string, unknown>, required: string[], optional: string[] = []): boolean => {
+  const keys = Object.keys(value);
+  return required.every((key) => Object.hasOwn(value, key))
+    && keys.every((key) => required.includes(key) || optional.includes(key));
+};
+
+const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+
+function mailRevenueEvidence(value: unknown): MailRevenue | null {
+  if (!isPlainRecord(value) || !hasOnlyKeys(value, ["by", "partial"]) || typeof value.partial !== "boolean" || !isPlainRecord(value.by)) return null;
+  const by: Record<string, MailMoney> = Object.create(null) as Record<string, MailMoney>;
+  for (const [campaign, raw] of Object.entries(value.by)) {
+    if (!campaign || !isPlainRecord(raw) || !hasOnlyKeys(raw, ["sales", "cents"], ["elsewhere"]) || !count(raw.sales) || !count(raw.cents)) return null;
+    if (Object.hasOwn(raw, "elsewhere") && !count(raw.elsewhere)) return null;
+    by[campaign] = Object.hasOwn(raw, "elsewhere")
+      ? { sales: raw.sales, cents: raw.cents, elsewhere: raw.elsewhere as number }
+      : { sales: raw.sales, cents: raw.cents };
+  }
+  return { by, partial: value.partial };
+}
+
+type VisitEvidence = { known: true; value: Record<string, number>; complete: boolean } | { known: false };
+
+function visitEvidence(value: unknown, broadcastIds: string[]): VisitEvidence {
+  if (!isPlainRecord(value)) return { known: false };
+  const by: Record<string, number> = Object.create(null) as Record<string, number>;
+  for (const [broadcastId, raw] of Object.entries(value)) {
+    if (!broadcastId || !count(raw)) return { known: false };
+    by[broadcastId] = raw;
+  }
+  return { known: true, value: by, complete: broadcastIds.every((id) => Object.hasOwn(by, id)) };
+}
+
+type CacheReply = { known: true; value: string | null } | { known: false };
+function oneCacheReply(reply: unknown): CacheReply {
+  if (!Array.isArray(reply) || reply.length !== 1) return { known: false };
+  const value = reply[0];
+  return value === null || typeof value === "string" ? { known: true, value } : { known: false };
+}
+
 // v2: with the sales in another currency counted apart (22 [E5], unit 2d).
 const cacheKey = (statsId: string) => `nl:stats:${statsId}:mailsales:v2`;
 const CACHE_SECONDS = 600;
@@ -36,10 +82,11 @@ export function moneyByCampaign(
   sales: { source: string; campaign: string; cents: number; currency: string }[],
   currency: string,
 ): Record<string, MailMoney> {
-  const by: Record<string, MailMoney> = {};
+  const by = new Map<string, MailMoney>();
   for (const sale of sales) {
     if (sale.source !== MAIL_SOURCE || !sale.campaign) continue;
-    const row = (by[sale.campaign] ??= { sales: 0, cents: 0 });
+    const row = by.get(sale.campaign) ?? { sales: 0, cents: 0 };
+    by.set(sale.campaign, row);
     if (sale.currency !== currency) {
       row.elsewhere = (row.elsewhere ?? 0) + 1;
       continue;
@@ -47,7 +94,7 @@ export function moneyByCampaign(
     row.sales += 1;
     row.cents += sale.cents;
   }
-  return by;
+  return Object.fromEntries(by);
 }
 
 /**
@@ -58,6 +105,7 @@ export function broadcastMoney(revenue: MailRevenue | null, broadcastId: string)
   if (!revenue) return null;
   const total: MailMoney = { sales: 0, cents: 0 };
   for (const campaign of broadcastCampaigns(broadcastId)) {
+    if (!Object.hasOwn(revenue.by, campaign)) continue;
     const money = revenue.by[campaign];
     if (!money) continue;
     total.sales += money.sales;
@@ -88,9 +136,8 @@ export function flowMoney(revenue: MailRevenue | null, flowId: string): MailMone
  */
 export async function keptMailRevenueBytes(store: Store): Promise<number | null> {
   if (!store.stripeAccountId || !store.statsId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["STRLEN", cacheKey(store.statsId)]]);
-  const bytes = Number(n);
-  return Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+  const reply: unknown = await redisPipeline([["STRLEN", cacheKey(store.statsId)]]);
+  return Array.isArray(reply) && reply.length === 1 && count(reply[0]) ? reply[0] : null;
 }
 
 /** The store's email sales, from the cache when it is fresh. Never throws: a page is not lost over a number. */
@@ -115,10 +162,11 @@ export async function readMailRevenuePaid(
   if (!store.stripeAccountId || !store.statsId) return null;
   try {
     if (isRedisConfigured()) {
-      const [cached] = await redisPipeline([["GET", cacheKey(store.statsId)]]);
-      if (typeof cached === "string") {
-        sized?.({ read: Buffer.byteLength(cached) });
-        return JSON.parse(cached) as MailRevenue;
+      const cached = oneCacheReply(await redisPipeline([["GET", cacheKey(store.statsId)]]));
+      if (!cached.known) return null;
+      if (cached.value !== null) {
+        sized?.({ read: Buffer.byteLength(cached.value) });
+        return mailRevenueEvidence(JSON.parse(cached.value));
       }
     }
     if (beforeStripe && !(await beforeStripe())) return "refused";
@@ -153,19 +201,20 @@ const visitsKey = (statsId: string) => `nl:stats:${statsId}:mailvisits`;
 export async function readMailVisits(store: Pick<Store, "statsId">, broadcastIds: string[]): Promise<Record<string, number> | null> {
   if (!store.statsId || !isRedisConfigured() || !broadcastIds.length) return null;
   try {
-    const [cached] = await redisPipeline([["GET", visitsKey(store.statsId)]]);
+    const cached = oneCacheReply(await redisPipeline([["GET", visitsKey(store.statsId)]]));
+    if (!cached.known) return null;
     let by: Record<string, number> | null = null;
-    if (typeof cached === "string") {
-      const kept = JSON.parse(cached) as Record<string, number>;
+    if (cached.value !== null) {
+      const kept = visitEvidence(JSON.parse(cached.value), broadcastIds);
+      if (!kept.known) return null;
       // The cache answers only when it was made for every email asked about:
       // one sent a minute ago is read afresh rather than shown as nothing.
-      if (broadcastIds.every((id) => typeof kept[id] === "number")) by = kept;
+      if (kept.complete) by = kept.value;
     }
     if (!by) {
       const views = await campaignViews(store.statsId, broadcastIds.flatMap(broadcastCampaigns));
       if (!views) return null;
-      by = {};
-      for (const id of broadcastIds) by[id] = broadcastCampaigns(id).reduce((sum, campaign) => sum + (views[campaign] ?? 0), 0);
+      by = Object.fromEntries(broadcastIds.map((id) => [id, broadcastCampaigns(id).reduce((sum, campaign) => sum + (Object.hasOwn(views, campaign) ? views[campaign] : 0), 0)]));
       await redisPipeline([["SET", visitsKey(store.statsId), JSON.stringify(by), "EX", CACHE_SECONDS]]).catch(() => {});
     }
     return by;

@@ -22,18 +22,23 @@
  *     request that was held up past its lock's expiry — a slow network, a
  *     paused function — cannot land a stale copy over a newer one.
  *
- * Upstash runs these scripts (EVAL). Where a Redis does not, each falls back
- * to the same checks made as separate commands, which keeps the rules and
- * only loses the single step; the stand-ins the local checks use are like
- * that.
+ * Upstash runs these scripts (EVAL). When a script cannot run, nothing falls
+ * back to the same checks made as separate commands (Codex G on #2721): read
+ * then act as two steps leaves a gap in which a lock that ran out is another
+ * holder's, and our DEL, EXPIRE or SET would land on it. So a release that
+ * cannot run leaves the lock to run out at its own expiry, a hold says the
+ * lock is not held, and a fenced write writes nothing. The first line of each
+ * script names it for the local stand-in (lib/redis-memory.ts), which runs it
+ * as one step, as Redis does.
  */
 import { redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 
-const RELEASE = 'if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end';
-const EXTEND = 'if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("EXPIRE", KEYS[1], ARGV[2]) else return 0 end';
-const FENCED_SET = 'if redis.call("GET", KEYS[1]) == ARGV[1] then redis.call("SET", KEYS[2], ARGV[2]) return 1 else return 0 end';
-const FENCED_SET_NEW =
-  'if redis.call("GET", KEYS[1]) == ARGV[1] and redis.call("EXISTS", KEYS[2]) == 0 then redis.call("SET", KEYS[2], ARGV[2]) return 1 else return 0 end';
+/** Deletes KEYS[1] only while it holds ARGV[1]; also used by lib/domains.ts to let a domain's key go. */
+export const RELEASE = '-- marktmorgen:release:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end';
+/** RELEASE for any text one writer put under a key: deleted only while the key still holds exactly that text (1), else 0. */
+export const DELETE_IF_SAME = RELEASE;
+const EXTEND = '-- marktmorgen:extend:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("EXPIRE", KEYS[1], ARGV[2]) else return 0 end';
 
 export type Held = { key: string; token: string; ttlSeconds: number };
 
@@ -46,12 +51,14 @@ export class LockBusyError extends Error {
   }
 }
 
-async function script(source: string, keys: string[], args: (string | number)[], fallback: () => Promise<number>): Promise<number> {
+/** One script's answer: 1 when it ran and did what it says; 0 when it ran and did not, or could not run at all. */
+async function script(source: string, keys: string[], args: (string | number)[]): Promise<number> {
   try {
-    const [result] = await redisPipeline([["EVAL", source, keys.length, ...keys, ...args]]);
-    return result === 1 ? 1 : 0;
+    // Exactly one reply, in its own data slot, and exactly 1 (lib/redis-reply.ts): anything else did not confirm.
+    const replies = repliesFor(await redisPipeline([["EVAL", source, keys.length, ...keys, ...args]]), 1);
+    return replies?.[0] === 1 ? 1 : 0;
   } catch {
-    return fallback();
+    return 0;
   }
 }
 
@@ -64,9 +71,9 @@ export async function takeLock(key: string, ttlSeconds: number, waitMs: number):
   const token = crypto.randomUUID();
   const giveUpAt = Date.now() + waitMs;
   for (let wait = 20; ; wait = Math.min(wait * 2, 250)) {
-    const receipt = await redisPipeline([["SET", key, token, "NX", "EX", ttlSeconds]]);
-    // One acquisition command needs exactly one reply before work can start.
-    if (!Array.isArray(receipt) || receipt.length !== 1) throw new LockBusyError();
+    // One acquisition command needs exactly one reply, in its own data slot, before work can start.
+    const receipt = repliesFor(await redisPipeline([["SET", key, token, "NX", "EX", ttlSeconds]]), 1);
+    if (!receipt) throw new LockBusyError();
     const got: unknown = receipt[0];
     if (got === "OK") return { key, token, ttlSeconds };
     if (got !== null) throw new LockBusyError();
@@ -75,44 +82,30 @@ export async function takeLock(key: string, ttlSeconds: number, waitMs: number):
   }
 }
 
-/** Lets go of a lock, only if it is still ours. Never throws. */
-export async function releaseLock(held: Held): Promise<void> {
-  await script(RELEASE, [held.key], [held.token], async () => {
-    const [now] = await redisPipeline([["GET", held.key]]);
-    if (now !== held.token) return 0;
-    const [gone] = await redisPipeline([["DEL", held.key]]);
-    return Number(gone);
-  }).catch(() => 0);
+/**
+ * Lets go of a lock, only if it is still ours, in one script. When the script cannot run, the lock is left to run
+ * out at its own expiry: never read and deleted as two steps (Codex G on #2721). Never throws. True only when the
+ * script confirmed it deleted this holder's lock; false when it was not ours or the answer is not known, so a caller
+ * that tells someone to try again at once can say so only on true (Codex L on #4212).
+ */
+export async function releaseLock(held: Held): Promise<boolean> {
+  return (await script(RELEASE, [held.key], [held.token]).catch(() => 0)) === 1;
 }
 
 /**
- * Makes the lock last another full term, if it is still ours. False when it
- * ran out and somebody else may have written since: the caller must not
- * write what it read.
+ * Makes the lock last another full term, if it is still ours, in one script. False when it ran out and somebody
+ * else may have written since, or when the script cannot run: the caller must not write what it read.
  */
 export async function holdLock(held: Held): Promise<boolean> {
-  const kept = await script(EXTEND, [held.key], [held.token, held.ttlSeconds], async () => {
-    const [now] = await redisPipeline([["GET", held.key]]);
-    if (now !== held.token) return 0;
-    const [renewed] = await redisPipeline([["EXPIRE", held.key, held.ttlSeconds]]);
-    return renewed === 1 ? 1 : 0;
-  });
-  return kept === 1;
+  return (await script(EXTEND, [held.key], [held.token, held.ttlSeconds])) === 1;
 }
 
 /**
- * Sets `key` to `value` only while the lock is still ours — and, with
- * `absent`, only when nothing is there yet. False, and nothing written,
- * otherwise.
+ * Sets `key` to `value` only while the lock is still ours — and, with `absent`, only when nothing is there yet — in
+ * one script. False, and nothing written, otherwise, or when the script cannot run (setIfHeldOnly).
  */
 export async function setIfHeld(held: Held, key: string, value: string, options: { absent?: boolean } = {}): Promise<boolean> {
-  const done = await script(options.absent ? FENCED_SET_NEW : FENCED_SET, [held.key, key], [held.token, value], async () => {
-    const [now, there] = await redisPipeline([["GET", held.key], ["EXISTS", key]]);
-    if (now !== held.token || (options.absent && there !== 0)) return 0;
-    const [written] = await redisPipeline([["SET", key, value]]);
-    return written === "OK" ? 1 : 0;
-  });
-  return done === 1;
+  return setIfHeldOnly(held, key, value, options);
 }
 
 /**
@@ -129,8 +122,8 @@ const FENCED_DEL_ONLY =
 
 async function strictScript(source: string, keys: string[], args: string[]): Promise<boolean> {
   try {
-    const [result] = await redisPipeline([["EVAL", source, keys.length, ...keys, ...args]]);
-    return result === 1;
+    const replies = repliesFor(await redisPipeline([["EVAL", source, keys.length, ...keys, ...args]]), 1);
+    return replies?.[0] === 1;
   } catch {
     return false;
   }
@@ -147,14 +140,41 @@ export async function deleteIfHeldOnly(held: Held, keys: string[]): Promise<bool
   return strictScript(FENCED_DEL_ONLY, [held.key, ...keys], [held.token]);
 }
 
-/** Runs `work` with the lock at `key` held, and lets go of it after, whatever happens. */
-export async function withLock<T>(key: string, ttlSeconds: number, waitMs: number, work: (held: Held) => Promise<T>): Promise<T> {
+/** Runs `work` with the lock at `key` held, and lets go of it after, whatever happens, unless `keepHeld` says to keep it for that result. */
+export async function withLock<T>(
+  key: string,
+  ttlSeconds: number,
+  waitMs: number,
+  work: (held: Held) => Promise<T>,
+  /** True for a result after which the lock is held a full term from then (keepFullTerm) and left to run out, not let go (lib/tier-switch.ts, keepWhileUnconfirmed). */
+  keepHeld?: (result: T) => boolean,
+): Promise<T> {
   const held = await takeLock(key, ttlSeconds, waitMs);
+  let keep = false;
   try {
-    return await work(held);
+    const result = await work(held);
+    keep = keepHeld?.(result) === true;
+    return result;
   } finally {
-    await releaseLock(held);
+    if (keep) await keepFullTerm(held);
+    else await releaseLock(held);
   }
+}
+
+/**
+ * A lock kept for a result is held a full term from now, not from when it was taken (Claude 2 on #3287): the work's own
+ * reads before its last call may have taken most of the term. Ours still: its term starts again. Run out and free: taken
+ * again with the same token. Taken by somebody else: theirs, and said. Never throws.
+ */
+async function keepFullTerm(held: Held): Promise<void> {
+  if (await holdLock(held)) return;
+  try {
+    const again = repliesFor(await redisPipeline([["SET", held.key, held.token, "NX", "EX", held.ttlSeconds]]), 1);
+    if (again?.[0] === "OK") return;
+  } catch {
+    // Said below.
+  }
+  console.error("a lock kept after an unconfirmed result could not be held again; it may already be somebody else's", held.key);
 }
 
 /**
@@ -236,4 +256,84 @@ export async function releaseLockStrict(held: Held): Promise<StrictLockReleaseRe
     if (!ack || !Object.hasOwn(ack, "value")) return "unknown";
     return ack.value === 1 ? "released" : ack.value === 0 ? "not-owned" : "unknown";
   } catch { return "unknown"; }
+}
+
+/**
+ * Changes made only while `held` is still the holder's: a closing store's deletes (lib/closed-store-data.ts, fencedBy) and its record's closing (lib/store.ts, closeStoreRecord), read in the same step (Codex M's
+ * focal M1 on #3156). KEYS: the lock, then the keys changed. ARGV: the walk's token, then each change as its word, the
+ * place of its key in KEYS and how many words of it follow: DEL (none), SREM, ZREM or HDEL (its members), SETEX (the
+ * value and its seconds). Every change is read before any is made. 1 done; 0 the lock is not the walk's any more,
+ * nothing done; -1 a change it does not make, nothing done.
+ */
+const CLOSING_FENCED = `-- marktmorgen:closing-fenced:v1
+local i, plan = 2, {}
+while i <= #ARGV do
+  local op, at, n = ARGV[i], tonumber(ARGV[i + 1]), tonumber(ARGV[i + 2])
+  if not at or not n or at < 2 or at > #KEYS or n < 0 or i + 2 + n > #ARGV then return -1 end
+  if op == "DEL" then
+    if n ~= 0 then return -1 end
+  elseif op == "SREM" or op == "ZREM" or op == "HDEL" then
+    if n < 1 then return -1 end
+  elseif op == "SETEX" then
+    if n ~= 2 or not tonumber(ARGV[i + 4]) then return -1 end
+  elseif op == "HSET" then
+    if n ~= 2 then return -1 end
+  else
+    return -1
+  end
+  plan[#plan + 1] = {op, at, i + 3, n}
+  i = i + 3 + n
+end
+if #plan == 0 then return -1 end
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+for _, step in ipairs(plan) do
+  local op, key, from, n = step[1], KEYS[step[2]], step[3], step[4]
+  if op == "DEL" then
+    redis.call("DEL", key)
+  elseif op == "SETEX" then
+    redis.call("SET", key, ARGV[from], "EX", ARGV[from + 1])
+  elseif op == "HSET" then
+    redis.call("HSET", key, ARGV[from], ARGV[from + 1])
+  else
+    for j = from, from + n - 1, 500 do
+      redis.call(op, key, unpack(ARGV, j, math.min(j + 499, from + n - 1)))
+    end
+  end
+end
+return 1`;
+
+/** The most keys, and the most words beside them, one CLOSING_FENCED step carries. */
+const FENCED_KEYS = 1000;
+const FENCED_WORDS = 4000;
+
+/** One change CLOSING_FENCED makes: DEL of a key, SREM, ZREM or HDEL of its members, SETEX (value, seconds), HSET (field, value). */
+export type FencedChange = { op: string; key: string; words: string[] };
+
+/**
+ * Makes `changes` only while the lock is still `held`'s, each script reading the lock in the same step as its changes
+ * (CLOSING_FENCED): true when every step made them, false when the lock was not the holder's any more (the steps before
+ * that one made, none of that step). Anything else throws: never taken as done.
+ */
+export async function applyIfHeld(held: Held, changes: FencedChange[]): Promise<boolean> {
+  for (let at = 0; at < changes.length; ) {
+    const keys: string[] = [];
+    const place = new Map<string, number>();
+    const argv: string[] = [];
+    while (at < changes.length) {
+      const { op, key, words } = changes[at];
+      const fresh = !place.has(key);
+      if (argv.length && ((fresh && keys.length >= FENCED_KEYS) || argv.length + 3 + words.length > FENCED_WORDS)) break;
+      if (fresh) {
+        keys.push(key);
+        place.set(key, keys.length + 1);
+      }
+      argv.push(op, String(place.get(key)), String(words.length), ...words);
+      at += 1;
+    }
+    const replies = repliesFor(await redisPipeline([["EVAL", CLOSING_FENCED, 1 + keys.length, held.key, ...keys, held.token, ...argv]]), 1);
+    const answer = replies?.[0];
+    if (answer === 0) return false;
+    if (answer !== 1) throw new Error("Redis answered changes made only while a lock is held (EVAL) in an unknown shape");
+  }
+  return true;
 }

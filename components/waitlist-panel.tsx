@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
-import { MAX_LAUNCH_ADDRESS, MAX_LAUNCH_NOTE } from "@/lib/waitlist-rules";
+import { LAUNCH_HOLD_SECONDS, MAX_LAUNCH_ADDRESS, MAX_LAUNCH_NOTE } from "@/lib/waitlist-rules";
 import type { WaitlistView } from "@/lib/waitlist";
 import type { PreorderView } from "@/lib/preorders";
 import { MAX_PREORDER_DAYS, PREORDER_PROBLEMS, type PreorderProblem, addDays, todayOf } from "@/lib/preorder-rules";
@@ -13,6 +13,7 @@ const MESSAGES: Record<string, string> = {
   free: "A free product already takes addresses. A waitlist is for something paid.",
   address: "Add a postal address for the bottom of the email: US law asks for one in any email about something for sale.",
   busy: "The launch email is still going out. Wait for it to finish.",
+  switched_off: "Your store is switched off after notices about its content, so no launch email can go out. Check the notice at the top of your studio.",
   unknown: "That product is no longer in your store. Reload the page.",
   empty: "Buyers have pre-ordered it, and they get it the moment it goes on sale. Add its file, its link or a lesson first.",
   soon: "Mark it coming soon first: pre-orders are taken instead of a buy button.",
@@ -38,14 +39,16 @@ function dayWords(day: string): string {
   return new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
-async function post(payload: Record<string, unknown>): Promise<{ ok: boolean; error?: string; view?: WaitlistView }> {
+type WaitlistAnswer = { ok: boolean; error?: string; view?: WaitlistView; viewsUnread?: boolean };
+
+async function post(payload: Record<string, unknown>): Promise<WaitlistAnswer> {
   try {
     const response = await fetch("/api/store/waitlist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    return (await response.json().catch(() => ({ ok: false, error: "server_error" }))) as { ok: boolean; error?: string; view?: WaitlistView };
+    return (await response.json().catch(() => ({ ok: false, error: "server_error" }))) as WaitlistAnswer;
   } catch {
     return { ok: false, error: "server_error" };
   }
@@ -63,6 +66,7 @@ export function WaitlistPanel({
   preorderBlocked = null,
   hasContent = true,
   price,
+  canLaunch = true,
 }: {
   productId: string;
   initial: WaitlistView | null;
@@ -75,14 +79,18 @@ export function WaitlistPanel({
   hasContent?: boolean;
   /** Its price, in the store's currency, as the waitlist's email carries it. */
   price: string;
+  /** Whether this role may put it on sale: that emails the waitlist, so it needs "send" (lib/team-roles.ts). */
+  canLaunch?: boolean;
 }) {
-  const [view, setView] = useState<WaitlistView>(initial ?? { soon: false, confirmed: 0, waiting: 0, launch: null });
+  const [view, setView] = useState<WaitlistView>(initial ?? { soon: false, confirmed: 0, waiting: 0, launch: null, switchedOff: false });
   const [pre, setPre] = useState<PreorderView>(preorders ?? { day: null, waiting: 0, given: 0, refunded: 0 });
   const [day, setDay] = useState(preorders?.day ?? "");
   const [agree, setAgree] = useState(false);
   const [editingDay, setEditingDay] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Saved, but the numbers could not be read after it (the route's `viewsUnread`).
+  const [saved, setSaved] = useState(false);
   const [note, setNote] = useState("");
   // "Change" on a row of the review before the sale: back to that field, the review closed (487 [IT4], pattern 8).
   function changeAnswer(id: string) {
@@ -95,9 +103,11 @@ export function WaitlistPanel({
   async function act(payload: Record<string, unknown>) {
     setBusy(true);
     setError(null);
+    setSaved(false);
     const answer = await post({ id: productId, ...payload });
     setBusy(false);
     if (answer.ok && answer.view) setView(answer.view);
+    else if (answer.ok && answer.viewsUnread) setSaved(true);
     else setError(MESSAGES[answer.error ?? ""] ?? MESSAGES.server_error ?? "Something went wrong. Try again.");
     return answer.ok;
   }
@@ -224,7 +234,7 @@ export function WaitlistPanel({
               ? `It goes on sale at once, and ${view.confirmed === 1 ? "the confirmed address gets" : `each of the ${view.confirmed.toLocaleString("en-US")} confirmed addresses gets`} one email with its link and price. Then the waitlist's addresses are deleted; whoever also asked to hear from you is on your list already.`
               : "Nobody has confirmed yet, so no email goes out: it just goes on sale."}
           </p>
-          {view.confirmed ? (
+          {canLaunch && view.confirmed ? (
             <>
               <label className="block">
                 <span className="field-label">A note in the email (optional)</span>
@@ -253,7 +263,7 @@ export function WaitlistPanel({
               </label>
             </>
           ) : null}
-          {confirming && view.confirmed ? (
+          {canLaunch && confirming && view.confirmed ? (
             <div id={`waitlist-${productId}-review`} className="rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">
               <h3 id={`waitlist-${productId}-review-title`} tabIndex={-1} className="font-semibold">Check before it goes out</h3>
               {/* A summary list, one answer a row (GOV.UK "Check answers"). */}
@@ -283,6 +293,7 @@ export function WaitlistPanel({
               </dl>
             </div>
           ) : null}
+          {canLaunch ? (
           <button
             type="button"
             className="btn btn-primary btn-sm"
@@ -307,14 +318,38 @@ export function WaitlistPanel({
                 ? "Put it on sale and tell the waitlist"
                 : "Put it on sale"}
           </button>
+          ) : (
+            // An Editor has no sending to the list (lib/team-roles.ts): the server refuses the launch, so it is not offered.
+            <p className="text-sm text-ink-soft">
+              Putting it on sale emails its waitlist, so it is done by someone on your team who can send to your list: the owner or an Admin.
+            </p>
+          )}
         </div>
       ) : null}
 
       {launch ? (
         <p className="mt-3 text-sm text-ink-soft" role="status">
-          {launch.finished
-            ? `Launched. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out.`
-            : `On sale. The waitlist email is going out: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} so far, sent in batches every five minutes.`}
+          {launch.stopped
+            ? `The waitlist email stopped because your store stayed switched off: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} went out. Whoever did not get it is still on the waitlist. To email them, mark it coming soon again, then put it on sale.`
+            : launch.finished
+              ? launch.total === 0
+                ? "Launched. Nobody on the waitlist had confirmed, so no email went out."
+                : `Launched. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out.`
+              : view.switchedOff
+                ? `Paused while your store is switched off: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails sent so far. The rest go out by themselves once your store is back on. If it is still switched off on ${dayWords(new Date((launch.started + LAUNCH_HOLD_SECONDS) * 1000).toISOString().slice(0, 10))}, the email stops, and whoever did not get it stays on the waitlist.`
+                : launch.total === 0
+                  ? // Nobody to email: only the waitlist's deletion is left, done by the next run.
+                    "On sale. Nobody on the waitlist had confirmed, and the waitlist is being deleted."
+                  : launch.cursor >= launch.total
+                    ? // Every email went: only the waitlist's deletion is left, done by the next run.
+                      `On sale. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out, and the waitlist is being deleted.`
+                    : `On sale. The waitlist email is going out: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} so far, sent in batches every five minutes.`}
+        </p>
+      ) : null}
+
+      {saved && !error ? (
+        <p className="notice mt-3 text-sm" role="status">
+          Saved. The waitlist could not be read just now, so what this panel shows may be out of date. Reload this page to see it.
         </p>
       ) : null}
 

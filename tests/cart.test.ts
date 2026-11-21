@@ -2,8 +2,9 @@
  * A store's cart (lib/cart-rules.ts, lib/cart-checkout.ts; added 10 October
  * 2026). Checked:
  *
- *   - only a paid product at one price, sold once, with nothing to choose,
- *     book or hold, goes in a cart, and a store offers one only with two;
+ *   - only a paid product at one price, sold once, with nothing to choose
+ *     or book, goes in a cart, limited or not, and a store offers one only
+ *     with two;
  *   - a cart names each product once, four at most;
  *   - each line is charged at the price the store shows now: its sale, or
  *     the fair price for the buyer's country when that takes off more;
@@ -59,14 +60,14 @@ async function main(): Promise<void> {
 
   part("What goes in a cart");
   is("a paid product at one price, sold once", cartable(product("a", 1900)), true);
-  is("never something free, a membership, a call, a choice of prices, a price the buyer names or a limited one", [
+  is("never something free, a membership, a call, a choice of prices or a price the buyer names", [
     cartable(product("a", 0)),
     cartable(product("a", 1900, { recurring: { interval: "month" } as never })),
     cartable(product("a", 1900, { call: {} as never })),
     cartable(product("a", 1900, { options: [{}] as never })),
     cartable(product("a", 1900, { pwyw: {} as never })),
-    cartable(product("a", 1900, { stock: 5 })),
-  ], [false, false, false, false, false, false]);
+  ], [false, false, false, false, false]);
+  is("a limited one can, its unit held at checkout (513 [PF1], unit 3; tests/cart-stock.test.ts)", cartable(product("a", 1900, { stock: 5 })), true);
   is("nor a draft, a bundle the buyer builds, or something with nothing to hand over", [
     cartable(product("a", 1900, { hidden: true })),
     cartable(product("a", 1900, { link: null, bundle: ["x", "y", "z"], pick: 2 })),

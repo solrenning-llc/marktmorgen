@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Icon, iconFor } from "@/components/icons";
 import { CreatorResearchForm } from "@/components/creator-research-form";
 import { SiteFooter } from "@/components/site-footer";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 
 export const metadata: Metadata = {

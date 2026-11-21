@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { AI_PER_MINUTE } from "@/lib/ai-rules";
 import { makeReviewSummary } from "@/lib/review-ai-summary";
 
@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
   if (!guarded.ok) return guarded.response;
   const { body, store } = guarded;
   const product = typeof body.product === "string" ? body.product : "";
-  if (!(await withinLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return Response.json({ ok: false, error: "slow" }, { status: 429 });
+  if (!(await withinEssentialLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return Response.json({ ok: false, error: "slow" }, { status: 429 });
   try {
     const done = await makeReviewSummary(store, product);
     if (!done.ok) return Response.json({ ok: false, error: done.reason, reviews: done.reviews ?? null, next: done.next ?? null }, { status: done.reason === "failed" || done.reason === "empty" ? 502 : done.reason === "busy" ? 409 : done.reason === "week" || done.reason === "used" ? 429 : 400 });

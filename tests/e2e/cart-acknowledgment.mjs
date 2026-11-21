@@ -1,3 +1,5 @@
+import {waitForReactChangeHandler} from "./react-hydration.mjs";
+
 /** Intercept every cart-setting write; no checkout or payment occurs. */
 export async function checkCartAcknowledgment({browser,LOCAL,fixture,is}){
  const cases=[
@@ -25,7 +27,7 @@ export async function checkCartAcknowledgment({browser,LOCAL,fixture,is}){
    await page.goto(LOCAL+"/studio?store="+fixture.sid,{waitUntil:"networkidle",timeout:60000});
    await page.locator("main details").evaluateAll(nodes=>nodes.forEach(n=>{n.open=true;}));
    const section=page.locator("#cart-deal");await section.waitFor();
-   const check=section.getByRole("checkbox");await check.check();
+   const check=section.getByRole("checkbox");await waitForReactChangeHandler(page,check);await check.check();
    await section.locator("#deal-min").selectOption("3");
    await section.locator("#deal-percent").fill("15");
    for(const on of [true,false]){

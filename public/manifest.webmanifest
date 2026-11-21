@@ -1,7 +1,7 @@
 {
   "name": "Marktmorgen — creator store",
   "short_name": "Marktmorgen",
-  "description": "A storefront for creators selling digital products, courses, memberships and booked sessions. Payments are processed through your own Stripe account.",
+  "description": "Set up your creator storefront for digital products, courses, memberships and booked sessions.",
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",

@@ -6,6 +6,13 @@ import { commercialMarginReady, commercialPlansMayOpen, CURRENT_PRICE_AND_RIGHTS
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { done, is } from "./check";
 import {txCustomerFixture} from './customer-tax-review-fixture';
+import { withinOneUtcDay } from "./one-utc-day";
+
+// The upload budget fixture's month is fixed once the check below sets it back (and the exposure names its month
+// once), while commercialMarginReady reads the month at each call; a real month end between them failed the TX
+// baseline checks (RED when started 1 s before a month's last midnight). The clock stays inside one UTC day
+// (tests/one-utc-day.ts).
+withinOneUtcDay();
 const zeroCosts=()=>Object.fromEntries(CUSTOMER_COST_CATEGORIES.map(key=>[key,0])) as Record<typeof CUSTOMER_COST_CATEGORIES[number],number>;
 const scenario=(changes:Partial<CustomerWorstCase>={}):CustomerWorstCase=>({...fundedCustomerScenario(),...changes});
 is("owner percentage floor is retired",MINIMUM_NET_MARGIN_BPS,0);

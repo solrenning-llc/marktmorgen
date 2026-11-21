@@ -1,12 +1,17 @@
 import type { NextRequest } from "next/server";
-import { deleteFile as del, headFile as head } from "@/lib/file-store";
+import { lockRead } from "@/lib/two-step-unknown";
+import { headFile as head } from "@/lib/file-store";
+import { deleteOrSweep } from "@/lib/file-drop";
 import { setProductFile, storeForEmail, storeFolder } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsPath, safeFileName, type ProductFile } from "@/lib/product-file";
 import { dropStamped } from "@/lib/pdf-stamp";
 import { deliveredFile, readDelivery } from "@/lib/catalog";
+import { audioPlayedBy } from "@/lib/podcast";
+import { takesLastDelivery } from "@/lib/product-option";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { forgetFreshUpload, retireFreshUpload } from "@/lib/vault";
 
 /**
  * Puts the file that was just uploaded onto the product, or takes it off.
@@ -42,13 +47,45 @@ export async function POST(request: NextRequest) {
     // A new file deletes the one there, with the buyers' stamped copies: not from a session let in
     // without its second step (lib/two-step.ts). The id may name a price option, whose file is its
     // own, so the file is read where the id points (readDelivery), not on a product only.
-    if (!detach && (await lockedFor(request, "products", "replace")) && deliveredFile(await readDelivery(store, id))) return refusedJson("locked");
+    // Read once, only for a new file (the lock and the episodes need it); a detach reads it after its write instead.
+    const delivery = detach ? null : await readDelivery(store, id);
+    // The lock read exactly (main): an unknown read answers its own error, never "not locked".
+    const lock = detach ? false : await lockRead(lockedFor(request, "products", "replace"));
+    if (lock instanceof Response) return lock;
+    if (lock && deliveredFile(delivery)) {
+      // An upload this session finished after another one attached a file first (the "open" check passed while there
+      // was none) is deleted, not left held against the store and billed (Codex V on #4022). Only a finished upload
+      // never attached, in this item's own folder and not its file (retireFreshUpload): never a path on the client's word.
+      if (pathname && pathname !== deliveredFile(delivery)?.pathname && ownsPath(pathname, await storeFolder(ref), id)) {
+        await retireFreshUpload(pathname).catch((error: unknown) => console.error("a refused upload could not be deleted", error));
+      }
+      return refusedJson("locked");
+    }
+
+    // The last thing a product on the store hands over is not taken off: it is replaced, or the product unpublished
+    // first (754 [STN1]; Claude 6 on #3432). A read that fails throws, so nothing is taken off (rule 24).
+    if (detach) {
+      const before = await readDelivery(store, id);
+      if (before && takesLastDelivery(before.product, id, "file")) return Response.json({ ok: false, error: "last_delivery", product: before.product.title }, { status: 409 });
+    }
 
     let file: ProductFile | null = null;
     if (!detach) {
       const folder = await storeFolder(ref);
       if (!ownsPath(pathname, folder, id)) {
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+      }
+      // The product's folder also holds its podcast episodes' audio: none of it is ever the product's file, so taking
+      // the file off or replacing it later can never delete an episode's audio. Today a podcast takes no file
+      // (lib/store.ts changeDelivery) and an option's file sits in the option's own folder, so this is a defence for
+      // a record written before those rules. Episodes that cannot be read refuse the file, nothing written.
+      // Only for the product itself: an option's file is in the option's own folder (ownsPath above), where no
+      // episode is, so a bonus file on a podcast's price option is never held up by its episodes.
+      if (!delivery) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+      if (!delivery.option) {
+        const audio = await audioPlayedBy(delivery.product);
+        if (!audio) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
+        if (audio.has(pathname)) return Response.json({ ok: false, error: "in_use" }, { status: 400 });
       }
 
       const found = await head(pathname);
@@ -61,6 +98,9 @@ export async function POST(request: NextRequest) {
       };
     }
 
+    // Attached from here on: no longer a finished upload a refused attach may delete, and forgotten before the write so
+    // it never is one while it is the item's file. A note that is not forgotten refuses the attach (nothing written).
+    if (file) await forgetFreshUpload(file.pathname);
     const result = await setProductFile(ref, id, file);
     if (!result.ok) {
       return Response.json(
@@ -71,12 +111,19 @@ export async function POST(request: NextRequest) {
 
     // Best effort, and deliberately after the write. A file left behind costs
     // a fraction of a cent; a product pointing at nothing costs a sale.
-    if (result.removed && result.removed.pathname !== file?.pathname) {
-      await del(result.removed.pathname).catch((error: unknown) => {
-        console.error("could not delete the replaced file", error);
-      });
+    // Nor an episode's audio (a record written before a podcast took no file): read after the write, kept when the
+    // episodes cannot be read. A file left behind costs storage; an episode deleted from under a feed costs listeners.
+    const removed = result.removed;
+    // A new file reuses what was read before the write (no second read of the listing, Claude 4 on #2657); a detach reads
+    // it once here. A read that throws is unknown (kept), and when no product was found, audioPlayedBy answers unknown
+    // (kept), never "no episodes".
+    const stillPlayed = !removed
+      ? new Set<string>()
+      : await (delivery ? Promise.resolve(delivery) : readDelivery(result.store, id)).then((found) => audioPlayedBy(found?.product)).catch(() => null);
+    if (removed && removed.pathname !== file?.pathname && stillPlayed && !stillPlayed.has(removed.pathname)) {
+      await deleteOrSweep(removed.pathname, "the replaced file");
       // Buyers' stamped copies of it go with it.
-      await dropStamped(result.removed);
+      await dropStamped(removed);
     }
 
     return Response.json({ ok: true });

@@ -1,9 +1,10 @@
 import type { NextRequest } from "next/server";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
-import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
+import { DEVICE_COOKIE, SESSION_COOKIE, endSession, isMoving, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
 import { LockBusyError } from "@/lib/redis-lock";
 import { repairMove } from "@/lib/move-repair";
 import { isRedisConfigured } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { PASSKEY_COOKIE, listPasskeys, pendingRemoval, signInOptions, signInWith, unlessSetToGo } from "@/lib/passkeys";
 import { cancelReset, endRecoveryAccess } from "@/lib/two-step";
@@ -56,15 +57,33 @@ export async function POST(request: NextRequest) {
       // A move left broken is repaired before any session opens, as at every other login (lib/move-repair.ts):
       // nobody gets into a copy of the store the repair is about to settle. When the repair moved this passkey
       // to the address that holds the store, the person is asked to try again, and lands there.
-      await repairMove(email).catch((error) => console.error("repairing a broken move failed", error));
-      if (!(await listPasskeys(email)).some((p) => p.id === signed.id)) return Response.json({ ok: false, error: "busy" }, { status: 503 });
+      // Only a move that is settled lets a session open, as at the emailed link and the recovery
+      // (lib/signin-finish.ts, app/api/auth/lost/confirm): repairMove answers false on purpose while a move is still
+      // running, cannot be told apart or holds ways in on both sides, and a repair that fails counts as one that did not.
+      const blocked = (await isMoving(email)) && !(
+        (await repairMove(email).catch((error) => {
+          console.error("repairing a broken move failed", error);
+          return false;
+        })) && !(await isMoving(email))
+      );
+      if (blocked || !(await listPasskeys(email)).some((p) => p.id === signed.id)) return Response.json({ ok: false, error: "busy" }, { status: 503 });
 
       // Opened with its second step: a passkey (lib/auth.ts SecondStep), which a team that asks for one reads (lib/team.ts).
       const id = await openSession(email, "passkey", signed.id);
       // Removed between its check and this session (its wait ran out, applied here first, or it was removed
       // in the studio): the session it would have opened is closed again, as the removal closes what it opened.
-      const waiting = await pendingRemoval(email);
-      if (!(await listPasskeys(email)).some((p) => p.id === signed.id)) {
+      // What could not be read here (CX-123 rule 24) closes the session it would have opened, as a refusal does:
+      // the error below answers without a session cookie, and no session is left open behind it.
+      let waiting: Awaited<ReturnType<typeof pendingRemoval>>;
+      let listed: boolean;
+      try {
+        waiting = await pendingRemoval(email);
+        listed = (await listPasskeys(email)).some((p) => p.id === signed.id);
+      } catch (error) {
+        await endSession(id).catch((ended) => console.error("closing a passkey session that could not be checked failed", ended));
+        throw error;
+      }
+      if (!listed) {
         await endSession(id);
         return Response.json({ ok: false, error: "not_recognised" }, { status: 401 });
       }
@@ -101,6 +120,12 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // Another change to the same passkeys held them past the wait (lib/passkeys.ts): said so, to try again.
     if (error instanceof LockBusyError) return Response.json({ ok: false, error: "busy" }, { status: 503 });
+    // A record that could not be read in its exact shape (lib/passkeys.ts, CX-123 rule 24): the login is refused, no
+    // session is opened, and the person is told, without detail, that it failed on our side and to try again.
+    if (error instanceof UnknownReplyError) {
+      console.error("logging in with a passkey was refused: a record could not be read", error);
+      return Response.json({ ok: false, error: "server_error" }, { status: 503 });
+    }
     console.error("logging in with a passkey failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

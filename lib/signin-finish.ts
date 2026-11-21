@@ -4,6 +4,7 @@ import { pendingRemoval } from "@/lib/passkeys";
 import { DEVICE_COOKIE, SESSION_COOKIE, endSession, isMoving, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
 import { repairMove } from "@/lib/move-repair";
 import { HOLD_SECONDS, TWO_STEP_COOKIE, endRecoveryAccess, holdSignIn, resetIfDue, twoStepOn } from "@/lib/two-step";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * What happens once an address has proved it holds its inbox: by the emailed
@@ -25,7 +26,7 @@ import { HOLD_SECONDS, TWO_STEP_COOKIE, endRecoveryAccess, holdSignIn, resetIfDu
 export async function finishProvenSignIn(
   request: NextRequest,
   owner: string | null,
-  way: "link" | "google",
+  way: "link" | "code" | "google",
   next: string,
   failed = "/signin?status=expired",
 ): Promise<Response> {
@@ -53,6 +54,12 @@ export async function finishProvenSignIn(
     if (owner) await endRecoveryAccess(owner).catch((error) => console.error("closing a recovery login failed", error));
   } catch (error) {
     console.error("finishing a login failed", error);
+    // Whether the account asks for a second step could not be read (CX-123 rule 24): no session is opened on the
+    // link alone, and the person is told that, not that their link expired. One opened before the read failed goes.
+    if (error instanceof UnknownReplyError) {
+      if (sessionId) await endSession(sessionId).catch((end: unknown) => console.error("closing a login that could not be finished failed", end));
+      return redirect("/signin?status=login-unknown");
+    }
   }
   if (!sessionId || !owner) return redirect(failed);
 

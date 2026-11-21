@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {resetVoiceOverRunner} from "./reset-voiceover.mjs";
 function fixture(){
- const signals=[],requests=[],state={running:true,foreign:false,unknown:false,changed:false,zombie:false,keepAlive:false,postKillZombie:false};
+ const signals=[],requests=[],state={running:true,foreign:false,unknown:false,changed:false,zombie:false,keepAlive:false,postKillZombie:false,disappearAfterTerm:false,psMissing:false};
  const options={platform:"darwin",uid:501,env:{GITHUB_ACTIONS:"true",GITHUB_REPOSITORY:"viniciussucupira/marktmorgen",AX2_PUBLIC_DISPOSABLE_RUNNER:"true"},
   now:()=>1,wait:async()=>{},
   run:(file,args)=>{
@@ -12,9 +12,10 @@ function fixture(){
     if(!state.running)throw Object.assign(Error("no process"),{status:1});
     return state.changed?"43\n":"42\n";
    }
+   if(state.psMissing)throw Object.assign(Error("process disappeared"),{status:1,signal:null});
    return (state.foreign?"0":"501")+(state.zombie?" Z ":" S ")+"/System/Library/CoreServices/VoiceOver.app/Contents/MacOS/VoiceOver\n";
   },
-  kill:(pid,signal)=>{signals.push([pid,signal]);if(signal==="SIGKILL"){if(state.postKillZombie)state.zombie=true;else if(!state.keepAlive)state.running=false;}},
+  kill:(pid,signal)=>{signals.push([pid,signal]);if(signal==="SIGTERM"&&state.disappearAfterTerm)state.psMissing=true;if(signal==="SIGKILL"){if(state.postKillZombie)state.zombie=true;else if(!state.keepAlive)state.running=false;}},
  };
  return {options,signals,state,requests};
 }
@@ -26,12 +27,13 @@ test("an explicit empty inventory needs no signal",async()=>{
  const f=fixture();f.state.running=false;assert.deepEqual(await resetVoiceOverRunner(f.options),{initialProcesses:0,forcedProcesses:0});assert.deepEqual(f.signals,[]);
 });
 test("foreign user, unmarked host, unknown inventory and changed process refuse",async()=>{
- for(const mode of ["foreign","host","inventory","path","changed"]){
+ for(const mode of ["foreign","host","inventory","path","missing","changed"]){
   const f=fixture();
   if(mode==="foreign")f.state.foreign=true;
   if(mode==="host")f.options.env.AX2_PUBLIC_DISPOSABLE_RUNNER="false";
   if(mode==="inventory")f.state.unknown=true;
   if(mode==="path"){const original=f.options.run;f.options.run=(file)=>file.endsWith("ps")?"501 S /tmp/VoiceOver\n":original(file);}
+  if(mode==="missing")f.state.psMissing=true;
   if(mode==="changed")f.options.wait=async()=>{f.state.changed=true;};
   await assert.rejects(resetVoiceOverRunner(f.options),undefined,mode);
   if(mode!=="changed")assert.deepEqual(f.signals,[],mode);
@@ -51,6 +53,29 @@ test("post-kill zombie is distinguished from a persistent live reader",async()=>
  const live=fixture();live.state.keepAlive=true;
  await assert.rejects(resetVoiceOverRunner(live.options),/did not prove a stopped reader.*"state":"S"/);
  assert.equal(live.signals.length,2,"no retry or additional signal after the existing kill ceiling");
+});
+test("a verified process disappearing after SIGTERM is stopped evidence",async()=>{
+ const f=fixture();f.state.disappearAfterTerm=true;
+ assert.deepEqual(await resetVoiceOverRunner(f.options),{initialProcesses:1,forcedProcesses:0});
+ assert.deepEqual(f.signals,[[42,"SIGTERM"]]);
+});
+test("a never-verified process cannot disappear from the initial inventory",async()=>{
+ const f=fixture(),run=f.options.run;let inventories=0;
+ f.state.running=false;
+ f.options.run=(file,args)=>{
+  if(file.endsWith("pgrep")){
+   inventories++;
+   if(inventories===1)return "42\n43\n";
+   if(inventories===2)return "42\n";
+   throw Object.assign(Error("no process"),{status:1,signal:null});
+  }
+  if(file.endsWith("ps")&&args[1]==="43")throw Object.assign(Error("process disappeared"),{status:1,signal:null});
+  return run(file,args);
+ };
+ let error;
+ try{await resetVoiceOverRunner(f.options);}catch(caught){error=caught;}
+ assert.deepEqual({message:error?.message??null,signals:f.signals},
+  {message:"process disappeared",signals:[]});
 });
 test("foreign or replacement zombie cannot bypass ownership and identity checks",async()=>{
  const foreign=fixture();foreign.state.zombie=true;foreign.state.foreign=true;

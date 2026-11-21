@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { StudioApp } from "@/components/studio-app";
+import { SkipLink } from "@/components/skip-link";
 
 /**
  * Around every page of the studio: its own web app manifest, so a creator can
@@ -23,7 +24,11 @@ export const viewport: Viewport = {
 export default function StudioLayout({ children }: LayoutProps<"/studio">) {
   return (
     <>
-      {children}
+      <SkipLink />
+      {/* Marks the studio's pages for the 44 px target floor in app/globals.css (WCAG 2.5.5); draws no box of its own. */}
+      <div data-studio="" className="contents">
+        {children}
+      </div>
       <StudioApp />
     </>
   );

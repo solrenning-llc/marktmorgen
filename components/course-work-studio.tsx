@@ -149,6 +149,7 @@ function WorkItem({ productId, row }: { productId: string; row: StudioWork }) {
 export function CourseWorkStudio({
   productId,
   rows,
+  unread = 0,
   total,
   showing,
   hrefs,
@@ -156,6 +157,8 @@ export function CourseWorkStudio({
 }: {
   productId: string;
   rows: StudioWork[];
+  /** Work handed in whose record could not be read: said, never left out. */
+  unread?: number;
   total: number;
   showing: "waiting" | "all";
   hrefs: { waiting: string; all: string };
@@ -180,7 +183,12 @@ export function CourseWorkStudio({
             ? `What students handed in for your assignments and is waiting for you, oldest first${total > rows.length ? `: the first ${rows.length} of ${total}` : ""}. Approving finishes the lesson for the student; asking for another try sends them what to change.`
             : `Everything students handed in, newest first${total > rows.length ? `: the latest ${rows.length} of ${total}` : ""}.`}
         </p>
-        {rows.length === 0 ? (
+        {unread > 0 ? (
+          <p className="mt-5 rounded-[var(--r-md)] bg-sand p-5 text-sm text-ink-soft" role="status">
+            {`${unread === 1 ? "1 piece of work" : `${unread} pieces of work`} could not be read just now, so it is not shown here. It is still kept; open this page again in a few minutes.`}
+          </p>
+        ) : null}
+        {rows.length === 0 && unread === 0 ? (
           <p className="mt-5 rounded-[var(--r-md)] bg-sand p-5 text-sm text-ink-soft">
             {showing === "waiting" ? "Nothing is waiting. When a student hands in work you read, it is here, and you get an email." : "Nothing handed in yet."}
           </p>

@@ -33,6 +33,9 @@ export type CameFrom = { source: string; medium: string; campaign: string; conte
 
 export const NO_SOURCE: CameFrom = { source: "", medium: "", campaign: "" };
 
+/** The longest campaign tag the store keeps, in characters. */
+export const CAMPAIGN_TAG_MAX = 40;
+
 /** Lower case, letters, digits and a few marks, and short. Nothing else survives. */
 function tidy(raw: string | null, max = 30): string {
   if (!raw) return "";
@@ -60,7 +63,7 @@ export function cameFrom(referer: string | null, ownHost: string): CameFrom {
     // The same word the visit was counted under (lib/source-rules.ts): ChatGPT's own tag is "chatgpt".
     source: sourceAlias(tidy(url.searchParams.get("utm_source"))),
     medium: tidy(url.searchParams.get("utm_medium")),
-    campaign: tidy(url.searchParams.get("utm_campaign"), 40),
+    campaign: tidy(url.searchParams.get("utm_campaign"), CAMPAIGN_TAG_MAX),
     content: tidy(url.searchParams.get("utm_content"), 40),
   };
 }

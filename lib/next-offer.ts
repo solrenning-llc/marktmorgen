@@ -17,6 +17,8 @@
  * id, for three days; never who bought.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { boundedAiRequest } from "@/lib/ai-request-rules";
 import { aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
 import { modelKeySet, postToModel } from "@/lib/ai";
@@ -24,6 +26,7 @@ import { deliveryWords, priceWords } from "@/lib/answers";
 import { readListing, readListings, readProduct, visibleIds } from "@/lib/catalog";
 import { isHouseStore } from "@/lib/house-store";
 import { onAccount } from "@/lib/stripe-account";
+import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { isSettled } from "@/lib/instant-pay";
 import { bundleFromMeta, deliveredIds } from "@/lib/bundle-rules";
 import { importedFor } from "@/lib/imported-purchases";
@@ -84,21 +87,49 @@ export function nextOfferShown(store: Store, now = Date.now()): boolean {
 }
 
 type Kept = { s: string; p: string; r: NextReason; w: string; x?: 1 };
+const KEPT_FIELDS = new Set(["s", "p", "r", "w", "x"]);
 
-async function readKept(store: Store, session: string): Promise<Kept | null> {
-  const [raw] = await redisPipeline([["GET", keptKey(session)]]);
-  if (typeof raw !== "string") return null;
+/**
+ * A kept record exactly as `keep` writes it, or null for any other string: its own s (this store's), p and w in
+ * text, r one of the reasons, x only as 1 when there, and no other key (Claude 2's review of #3265: a dismissal
+ * whose x is "1", true or 2 is not one `keep` wrote, and is never read as a live choice).
+ */
+function keptOf(raw: string, statsId: string | null): Kept | null {
+  let value: unknown;
   try {
-    const value = JSON.parse(raw) as Kept;
-    if (!value || value.s !== store.statsId || typeof value.p !== "string" || !REASONS.includes(value.r)) return null;
-    return { s: value.s, p: value.p, r: value.r, w: typeof value.w === "string" ? readReason(value.w) : "", ...(value.x === 1 ? { x: 1 as const } : {}) };
+    value = JSON.parse(raw);
   } catch {
     return null;
   }
+  if (!statsId || !plainObject(value) || Object.getOwnPropertyNames(value).some((name) => !KEPT_FIELDS.has(name))) return null;
+  const [s, p, r, w, x] = ["s", "p", "r", "w", "x"].map((name) => ownField(value, name));
+  if (s !== statsId || typeof p !== "string" || !REASONS.includes(r as NextReason) || typeof w !== "string") return null;
+  if (Object.hasOwn(value, "x") && x !== 1) return null;
+  return { s, p, r: r as NextReason, w: readReason(w), ...(x === 1 ? { x: 1 as const } : {}) };
 }
 
-async function keep(store: Store, session: string, kept: Kept): Promise<void> {
-  await redisPipeline([["SET", keptKey(session), JSON.stringify({ ...kept, s: store.statsId }), "EX", NEXT_OFFER_KEEP_SECONDS]]);
+/**
+ * The order's kept choice, read in its exact shape (CX-123 rule 24): null only
+ * for a confirmed absent key. Any other reply — not one reply, not a string,
+ * or a string that is not this store's kept record — throws, so the page does
+ * not choose again (no model call, no reply of the pool, the buyer's "no
+ * thanks" not overwritten), a dismissal says not done and the email carries
+ * nothing. Every caller already answers a throw with nothing shown.
+ */
+async function readKept(store: Store, session: string): Promise<Kept | null> {
+  const replies = repliesFor(await redisPipeline([["GET", keptKey(session)]]), 1);
+  if (!replies) throw new UnknownReplyError("the order's kept next product");
+  const [raw] = replies;
+  if (raw === null) return null;
+  const kept = typeof raw === "string" ? keptOf(raw, store.statsId) : null;
+  if (!kept) throw new UnknownReplyError("the order's kept next product");
+  return kept;
+}
+
+/** Whether the choice was kept: only the SET's one reply "OK" says so (CX-123 rule 24); any other answer is not kept. */
+async function keep(store: Store, session: string, kept: Kept): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["SET", keptKey(session), JSON.stringify({ ...kept, s: store.statsId }), "EX", NEXT_OFFER_KEEP_SECONDS]]), 1);
+  return replies !== null && replies[0] === "OK";
 }
 
 /** A kept choice, as it is shown now: only while the product is still listed and on sale. */
@@ -109,12 +140,45 @@ async function shownOf(store: Store, kept: Kept): Promise<NextOffer | null> {
   return { product, ai: kept.r === "ai", why: kept.r === "ai" ? kept.w : "" };
 }
 
+/** Metadata as Stripe gives it: a plain object whose every own value is text. */
+const stringMap = (value: unknown) =>
+  plainObject(value) && Object.getOwnPropertyNames(value).every((name) => typeof ownField(value, name) === "string");
+const SESSION_STATUSES = new Set(["open", "complete", "expired"]);
+const SESSION_PAYMENT_STATUSES = new Set(["paid", "unpaid", "no_payment_required"]);
+const INTENT_STATUSES = new Set(["requires_payment_method", "requires_confirmation", "requires_action", "processing", "requires_capture", "canceled", "succeeded"]);
+const oneOf = (values: Set<string>, value: unknown) => typeof value === "string" && values.has(value);
+
+/**
+ * A checkout session in Stripe's shape at the pinned version (STRIPE_LIST_VERSION) on every field the decision
+ * reads (Claude 2's review of #3265): metadata null or text values only, status and payment_status Stripe's own
+ * values, customer null (a guest) or a customer id. Anything else would drop a purchase silently, so the row is
+ * unreadable and what the address owns is unknown.
+ */
+const sessionLegible = (row: Record<string, unknown>) => {
+  const meta = ownField(row, "metadata");
+  const customer = ownField(row, "customer");
+  return (
+    (meta === null || stringMap(meta)) &&
+    oneOf(SESSION_STATUSES, ownField(row, "status")) &&
+    oneOf(SESSION_PAYMENT_STATUSES, ownField(row, "payment_status")) &&
+    (customer === null || (typeof customer === "string" && CUSTOMER_PATTERN.test(customer)))
+  );
+};
+
+/** A payment intent in Stripe's shape on every field the decision reads: metadata of text values, status Stripe's own. */
+const intentLegible = (row: Record<string, unknown>) => stringMap(ownField(row, "metadata")) && oneOf(INTENT_STATUSES, ownField(row, "status"));
+
 /**
  * Every product this address has from this store, by id: what its completed
  * checkouts handed over (each box ticked and each bundle's products too, a
  * gift or a place bought for others included: they chose it), what it added
  * in one click after paying, and what the creator brought over or gave it.
  * Null when that cannot be read in full: nothing is offered on a guess.
+ * Each Stripe list is read in its exact shape (CX-123 rule 24,
+ * lib/stripe-list.ts): a page that is not one throws, and a row without its
+ * id or with any field the decision reads out of Stripe's shape
+ * (`sessionLegible`, `intentLegible`), or more pages than are read, leave
+ * what is owned unknown, never "nothing".
  */
 export async function ownedHere(store: Store, email: string): Promise<Set<string> | null> {
   const account = store.stripeAccountId;
@@ -128,9 +192,9 @@ export async function ownedHere(store: Store, email: string): Promise<Set<string
   try {
     for (const variant of [...new Set([email.trim(), normaliseEmail(email)])]) {
       const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
-      const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as { data?: unknown; has_more?: unknown };
-      if (listed.has_more === true) return null;
-      for (const session of Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : []) {
+      const listed = readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`), sessionLegible);
+      if (listed.hasMore || listed.unreadable) return null;
+      for (const session of listed.rows as Record<string, unknown>[]) {
         const meta = (session.metadata ?? {}) as Record<string, string>;
         if (!handles.has(meta.store ?? "") || !isSettled(session)) continue;
         add(meta.product);
@@ -141,9 +205,9 @@ export async function ownedHere(store: Store, email: string): Promise<Set<string
     }
     if (customers.size > 3) return null;
     for (const customer of customers) {
-      const listed = (await onAccount("GET", account, `/payment_intents?${new URLSearchParams({ customer, limit: "50" })}`)) as { data?: unknown; has_more?: unknown };
-      if (listed.has_more === true) return null;
-      for (const intent of Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : []) {
+      const listed = readStripePage(await onAccount("GET", account, `/payment_intents?${new URLSearchParams({ customer, limit: "50" })}`), intentLegible);
+      if (listed.hasMore || listed.unreadable) return null;
+      for (const intent of listed.rows) {
         const meta = (intent.metadata ?? {}) as Record<string, string>;
         if (meta.kind !== "upsell" || !handles.has(meta.store ?? "") || intent.status !== "succeeded") continue;
         add(meta.product);
@@ -281,14 +345,16 @@ export async function nextOfferFor(input: {
   if (!nextOfferShown(store, now) || !SESSION.test(session) || !input.email || !bought.length) return null;
   const kept = await readKept(store, session);
   if (kept) return shownOf(store, kept);
-  // One choice per order: another opening while it is being made shows nothing yet.
-  const [claimed] = await redisPipeline([["SET", lockKey(session), "1", "NX", "EX", LOCK_SECONDS]]);
-  if (claimed === null) return null;
+  // One choice per order: another opening while it is being made shows nothing yet. Read exactly (CX-123 rule 24): a
+  // lock that cannot be read shows nothing now either, and the page opened again chooses.
+  const mine = claimValue();
+  if ((await claimMark(lockKey(session), LOCK_SECONDS, mine)) !== "ours") return null;
   // Its reads and calls are counted with the store's public requests, before any is made.
   if (!(await takeBuyerRead(store, NEXT_OFFER_REQUEST_UNITS))) return null;
   const owned = await ownedHere(store, input.email);
   if (!owned) {
-    await redisPipeline([["DEL", lockKey(session)]]).catch(() => null);
+    // Only while it is still ours: a lock that ran out and was taken by another opening is that one's.
+    await releaseMark(lockKey(session), mine);
     return null;
   }
   for (const id of [...bought.map((p) => p.id), ...input.alsoOwned]) owned.add(id);
@@ -322,7 +388,9 @@ export async function nextOfferFor(input: {
   let choice: NextChoice | null = picked?.choice ?? null;
   if (picked && modelAddsValue(picked.choice, picked.ranked)) choice = (await askForNext(store, bought, picked.ranked, now)) ?? picked.choice;
   const next: Kept = { s: store.statsId!, p: choice?.productId ?? "", r: choice?.reason ?? "order", w: choice?.why ?? "" };
-  await keep(store, session, next);
+  // Shown only once kept, so the page and the email say the same. A SET not answered "OK" shows nothing and leaves
+  // the lock for its minute: no other opening asks the model in it.
+  if (!(await keep(store, session, next))) return null;
   return shownOf(store, next);
 }
 
@@ -331,8 +399,7 @@ export async function dismissNextOffer(store: Store, session: unknown): Promise<
   if (typeof session !== "string" || !SESSION.test(session) || !store.statsId || !isRedisConfigured()) return false;
   const kept = await readKept(store, session);
   if (!kept) return false;
-  await keep(store, session, { ...kept, x: 1 });
-  return true;
+  return keep(store, session, { ...kept, x: 1 });
 }
 
 /**

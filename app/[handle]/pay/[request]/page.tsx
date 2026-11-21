@@ -16,6 +16,7 @@ import { requestsOpen, settleFromReturn } from "@/lib/payment-requests";
 import { confirmPurchase } from "@/lib/purchase-email";
 import { PrintButton } from "@/components/print-button";
 import { StoreResting } from "@/components/store-resting";
+import { WhoAnswers } from "@/components/who-answers";
 
 type Params = {
   params: Promise<{ handle: string; request: string }>;
@@ -59,6 +60,7 @@ export default async function PaymentRequestPage({ params, searchParams }: Param
     // The receipt and the order's count, once, whichever of this page and the five-minute job is first.
     if (request.state === "paid" && request.session === sessionId) await confirmPurchase(store, sessionId).catch((error) => console.error("confirming a payment request failed", error));
   }
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const now = new Date().getTime();
   const status = statusOf(request, now);
   const said = speechFor(store.language, request.currency);
@@ -83,7 +85,7 @@ export default async function PaymentRequestPage({ params, searchParams }: Param
       <main id="content" className="relative mx-auto max-w-xl px-4 py-12 sm:py-16">
         <div className="st-card p-6 sm:p-10">
           <p className="st-muted text-sm font-semibold">{w.eyebrow(store.name)}</p>
-          <h1 className="mt-2 font-display text-3xl font-semibold leading-tight sm:text-4xl">{heading}</h1>
+          <h1 id="pay-request-title" className="mt-2 font-display text-3xl font-semibold leading-tight sm:text-4xl">{heading}</h1>
           {status === "paid" ? (
             <p className="st-muted mt-4 text-lg">
               {request.outside
@@ -104,7 +106,7 @@ export default async function PaymentRequestPage({ params, searchParams }: Param
             </div>
           ) : null}
 
-          <table className="mt-6 w-full text-left text-sm">
+          <table aria-labelledby="pay-request-title" className="mt-6 w-full text-left text-sm">
             <thead>
               <tr className="st-muted">
                 <th scope="col" className="py-2 pr-3 font-semibold">{w.item}</th>
@@ -142,6 +144,7 @@ export default async function PaymentRequestPage({ params, searchParams }: Param
               <input type="hidden" name="request" value={request.id} />
               <button type="submit" className="btn st-btn w-full">{w.pay(total)}</button>
               <p className="st-muted mt-3 text-sm">{w.secure(store.name)}</p>
+              <WhoAnswers store={store} className="st-muted mt-1 text-sm" />
               {store.tax.enabled ? <p className="st-muted mt-1 text-sm">{w.tax}</p> : null}
               <p className="st-muted mt-1 text-sm">{w.until(said.date(request.expiresAt))}</p>
               {rehearsal ? <p className="st-muted mt-1 text-sm font-semibold">{w.testMode}</p> : null}

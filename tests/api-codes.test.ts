@@ -45,6 +45,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return Response.json(row);
   }
   const stop = url.pathname.match(/^\/v1\/promotion_codes\/(promo_\w+)$/);
+  if (init?.method === "GET" && stop) {
+    const row = promos.get(stop[1]);
+    return row ? Response.json(row) : Response.json({ error: { type: "invalid_request_error", code: "resource_missing", message: "No such promotion code" } }, { status: 404 });
+  }
   if (init?.method === "POST" && stop) {
     writes.push(`stop ${stop[1]}`);
     const row = promos.get(stop[1]);

@@ -92,6 +92,8 @@ export const RESERVED_SLUGS = new Set([
   "p",
   // A payment request's page (app/[handle]/pay/[request]).
   "pay",
+  // The store's policies, built from its settings (app/[handle]/policies, 617 [SZ1]).
+  "policies",
   "podcast",
   "renew",
   // A proposal or agreement's page to sign (app/[handle]/sign/[agreement]).
@@ -167,6 +169,9 @@ export const SITE_KINDS: readonly BlockKind[] = [
   "cta",
   // A form, survey or quiz (lib/forms.ts): asked on the store's own pages only, where it can lead a funnel on.
   "form",
+  // Arrangement only (375 [TB1]): a line and empty room, nothing of the creator's to write, check or pay for.
+  "divider",
+  "space",
 ];
 
 /** The key a page's blocks are kept under, beside the products' (lib/sales-page-store.ts). */

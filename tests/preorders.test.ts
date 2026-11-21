@@ -47,7 +47,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "api.stripe.com") {
     const intent = url.pathname.match(/\/v1\/payment_intents\/(pi_\w+)/)?.[1];
     if (intent) return new Response(JSON.stringify({ id: intent, object: "payment_intent", latest_charge: { object: "charge", refunded: refunded.has(intent), amount: 2500, amount_refunded: refunded.has(intent) ? 2500 : 0 } }));
-    if (url.pathname === "/v1/refunds") return new Response(JSON.stringify({ data: refunds }));
+    if (url.pathname === "/v1/refunds") return new Response(JSON.stringify({ object: "list", data: refunds, has_more: false }));
   }
   return new Response("{}", { status: 404 });
 }) as typeof fetch;
@@ -162,7 +162,8 @@ async function main(): Promise<void> {
   is("and its buyer is emailed the way in, once", out.map((e) => [([] as string[]).concat(e.to)[0], e.subject]), [["ana@example.com", "It is out: The Bread Book"]]);
   is("with the link to their purchases", out[0]?.text.includes("https://marktmorgen.com/@bakery/orders?for=ana%40example.com"), true);
   const [kept] = await redis.pipeline([["HGET", importedKey(STATS, "ana@example.com"), product.id]]);
-  is("written down under their address", JSON.parse(String(kept)).job, `pre:${session(1, "").id}`);
+  // The job says it does not ship, so the grant, which outlives the entry, keeps that (Claude 1's H on #2827).
+  is("written down under their address, as not shipped", JSON.parse(String(kept)).job, `pre:${session(1, "").id}:d`);
   is("marked given, and the refunded one marked refunded", [Boolean((await readPreorder(store, product.id, session(1, "").id))?.given), Boolean((await readPreorder(store, product.id, session(2, "").id))?.revoked)], [true, true]);
   is("nothing left to hand over, and run again it sends nothing", [await waitingCount(store, product.id), await runPreorderReleases(async () => store, async () => product, () => deps, Date.now() + 10_000)], [0, 0]);
 
@@ -172,6 +173,10 @@ async function main(): Promise<void> {
 
   part("Refunded after it was handed over");
   refunds = [{ id: "re_preorder1", created: Math.floor(NOW / 1000), status: "succeeded", payment_intent: session(1, "").payment_intent, charge: { refunded: true } }];
+  // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the purchase,
+  // so the next run takes both away again.
+  await revokeRefundedPreorders(store, Date.now() + 10_000, async () => { throw new Error("the ledger did not answer"); }).catch(() => 0);
+  is("a course removal that fails keeps the purchase for the next run", typeof (await redis.pipeline([["HGET", importedKey(STATS, "ana@example.com"), product.id]]))[0], "string");
   is("one taken back", await revokeRefundedPreorders(store, Date.now() + 10_000, async (email, id) => void dropped.push(`${email}|${id}`)), 1);
   const [gone, stays] = await redis.pipeline([["HGET", importedKey(STATS, "ana@example.com"), product.id], ["HGET", importedKey(STATS, "cy@example.com"), product.id]]);
   is("from its buyer only", [gone, typeof stays === "string"], [null, true]);

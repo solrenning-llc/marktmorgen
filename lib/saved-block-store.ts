@@ -11,12 +11,26 @@
  * page that has since dropped the section; whoever reads it checks the page.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type SavedSection, parseSection } from "@/lib/saved-blocks";
 
 const sectionsKey = (statsId: string) => `nl:sblocks:${statsId}`;
 export const sectionUsesKey = (statsId: string, id: string) => `nl:sblock:uses:${statsId}:${id}`;
 
 /** Every section of a store, newest change first. Throws when the list cannot be read, so an empty list is never a guess. */
+/**
+ * How many sections the library holds, read exactly (HLEN), so a reading of
+ * them is paid for before it is made (lib/mcp-tools.ts savedBlocksTool);
+ * null when Redis answered in another shape.
+ */
+export async function countSections(statsId: string | null): Promise<number | null> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const replies: unknown = await redisPipeline([["HLEN", sectionsKey(statsId)]]);
+  if (!Array.isArray(replies) || replies.length !== 1) return null;
+  const n = replies[0];
+  return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : null;
+}
+
 export async function readSections(statsId: string | null): Promise<SavedSection[]> {
   if (!statsId || !isRedisConfigured()) throw new Error("Saved sections unavailable");
   const replies = await redisPipeline([["HVALS", sectionsKey(statsId)]]);
@@ -31,6 +45,32 @@ export async function readSections(statsId: string | null): Promise<SavedSection
       }
     })
     .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
+}
+
+/**
+ * The library exactly as kept, for a reader that must never leave a section
+ * out unsaid (the MCP tools): throws when Redis's answer is not exactly one
+ * list of texts or a kept section is not one.
+ */
+export async function readSectionsExact(statsId: string): Promise<{ sections: SavedSection[]; bytes: number }> {
+  if (!isRedisConfigured()) throw new Error("Saved sections unavailable");
+  const replies: unknown = await redisPipeline([["HVALS", sectionsKey(statsId)]]);
+  if (!Array.isArray(replies) || replies.length !== 1 || !Array.isArray(replies[0])) throw new Error("Saved sections unavailable");
+  const sections: SavedSection[] = [];
+  let bytes = 0;
+  for (const value of replies[0] as unknown[]) {
+    if (typeof value !== "string") throw new Error("Saved sections unavailable");
+    bytes += Buffer.byteLength(value, "utf8");
+    let section: SavedSection | null = null;
+    try {
+      section = parseSection(JSON.parse(value));
+    } catch {
+      section = null;
+    }
+    if (!section) throw new Error("Saved sections unavailable");
+    sections.push(section);
+  }
+  return { sections, bytes };
 }
 
 export async function readSection(statsId: string, id: string): Promise<SavedSection | null> {
@@ -60,9 +100,11 @@ return 1`;
 
 /** Keeps a section. "full" when the library has no room for a new one, "gone" when an edited one was removed meanwhile. */
 export async function writeSection(statsId: string, section: SavedSection, isNew: boolean, limit: number): Promise<"ok" | "full" | "gone"> {
-  const replies = await redisPipeline([["EVAL", SAVE_SECTION, 1, sectionsKey(statsId), section.id, JSON.stringify(section), limit, isNew ? "new" : "edit"]]);
-  if (replies.length !== 1) throw new Error("Saved section write could not be confirmed");
-  const reply = Number(replies[0]);
+  const replies = repliesFor(await redisPipeline([["EVAL", SAVE_SECTION, 1, sectionsKey(statsId), section.id, JSON.stringify(section), limit, isNew ? "new" : "edit"]]), 1);
+  if (!replies) throw new Error("Saved section write could not be confirmed");
+  // Only the script's own whole number counts (CX-123 rule 24): a "1" or a [1] is not a section kept.
+  const [answer] = replies;
+  const reply = typeof answer === "number" && Number.isSafeInteger(answer) ? answer : null;
   if (reply === 1) return "ok";
   if (reply === 0) return "full";
   if (reply === -2) return "gone";
@@ -71,8 +113,11 @@ export async function writeSection(statsId: string, section: SavedSection, isNew
 
 /** Removes a section from the library. Pages keep the blocks they have; they are simply no longer tied to it. */
 export async function dropSection(statsId: string, id: string): Promise<boolean> {
-  const replies = await redisPipeline([["HDEL", sectionsKey(statsId), id], ["DEL", sectionUsesKey(statsId, id)]]);
-  return Number(replies[0]) === 1;
+  const replies = repliesFor(await redisPipeline([["HDEL", sectionsKey(statsId), id], ["DEL", sectionUsesKey(statsId, id)]]), 2);
+  // HDEL's own count, exactly (CX-123 rule 24): anything else is not known to be removed, nor known to be absent.
+  const removed = replies ? countOf(replies[0]) : null;
+  if (removed === null) throw new UnknownReplyError("a saved section's removal");
+  return removed === 1;
 }
 
 /** The pages that carry a section, as written down; each still has to be read to be sure. */

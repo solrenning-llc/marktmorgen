@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { FormsEditor, type SavedForm } from "@/components/forms-editor";
 import { MAX_CONVERTIBLE_FORM_RESPONSES, formOpportunityRef } from "@/lib/form-opportunity";
@@ -59,7 +60,9 @@ export default async function StudioFormsPage({ searchParams }: Params) {
   const dealAssignees = team ? [...new Set([store.email, ...team.members.filter(member => can(member.role, "orders")).map(member => member.email)])] : [];
   const saved: SavedForm[] = await Promise.all(
     forms.map(async (form) => {
-      const { responses, total } = reads ? await readResponses(store.statsId, form.id, SHOWN) : { responses: [], total: 0 };
+      const result = reads ? await readResponses(store.statsId, form.id, SHOWN).catch(() => null) : { responses: [], total: 0 };
+      const total = result === null ? null : result.total;
+      const responses = result === null ? [] : result.responses;
       return { form, total, latest: responses.map(response => ({ ...response, opportunityRef: canCreateDeals && store.statsId ? formOpportunityRef(store.statsId, form.id, response) : undefined })) };
     }),
   );
@@ -78,13 +81,13 @@ export default async function StudioFormsPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Forms</p>
+          <StudioTrail store={store} here="Forms" />
           <h1 className="t-h2 mt-3">Forms, surveys and quizzes</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             Ask your questions on one of your own pages: add a Form block to it under Pages. On a page that is a step of a funnel, sending the form leads on to the
             next step.
           </p>
-          {canCreateDeals && !reviewData.available && saved.some(item => item.total > 0) ? <p className="notice notice-warn mt-6" role="status">Opportunities could not be checked. Answers and exports remain available; reload Forms before creating another opportunity. <a className="underline" href={`/studio/deals?store=${encodeURIComponent(sid)}`}>Open Deals</a></p> : null}
+          {canCreateDeals && !reviewData.available && saved.some(item => item.total !== null && item.total > 0) ? <p className="notice notice-warn mt-6" role="status">Opportunities could not be checked. Answers and exports remain available; reload Forms before creating another opportunity. <a className="underline" href={`/studio/deals?store=${encodeURIComponent(sid)}`}>Open Deals</a></p> : null}
           <div className="mt-8">
             <FormsEditor key={sid} existingDealsAvailable={reviewData.available} existingDeals={existingDeals} currency={store.currency} dealAssignees={dealAssignees} sid={sid} dealStages={dealStages} saved={saved} products={products} exportBase={`/api/store/forms/export?${sid ? `store=${sid}&` : ""}id=`} />
           </div>

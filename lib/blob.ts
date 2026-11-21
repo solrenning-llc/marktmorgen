@@ -32,6 +32,11 @@ export function del(pathnames: string | string[], options: Options<typeof sdk.de
   return timed(BLOB_TIMEOUT_MS, (abortSignal) => sdk.del(pathnames, { ...options, abortSignal }));
 }
 
+/** A copy made inside the file store (nothing passes through us), BLOB_TIMEOUT_MS to an answer. */
+export function copy(from: string, to: string, options: Options<typeof sdk.copy, 2>): ReturnType<typeof sdk.copy> {
+  return timed(BLOB_TIMEOUT_MS, (abortSignal) => sdk.copy(from, to, { ...options, abortSignal }));
+}
+
 export function list(options: Options<typeof sdk.list, 0> = {}): ReturnType<typeof sdk.list> {
   return timed(BLOB_TIMEOUT_MS, (abortSignal) => sdk.list({ ...options, abortSignal }));
 }

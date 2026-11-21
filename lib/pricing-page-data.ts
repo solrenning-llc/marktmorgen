@@ -13,8 +13,8 @@ import { DATA_ROOM_BYTES, dataWords } from "@/lib/store-data-rules";
 import { VISITS_INCLUDED, publicVisitLimit } from "@/lib/traffic-rules";
 import { ORDERS_INCLUDED, CALL_ORDER_UNITS } from "@/lib/order-rules";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
-import { AUTOMATIC_UPLOAD_CAPS } from "@/lib/upload-budget-policy";
-import { ALLOWANCE_KINDS, STORE_ALLOWANCES, KIND_WORDS, API_WRITE_UNITS } from "@/lib/store-allowance-rules";
+import { AUTOMATIC_UPLOAD_CAPS, uploadBackendOpen } from "@/lib/upload-budget-policy";
+import { ALLOWANCE_KINDS, STORE_ALLOWANCES, KIND_WORDS, API_WRITE_UNITS, API_SALES_UNITS } from "@/lib/store-allowance-rules";
 import { AI_MONTHLY } from "@/lib/ai-rules";
 import { ANSWERS_MONTHLY } from "@/lib/answers-rules";
 import { ACTIVE_FLOWS_BY_TIER, DAILY_RUNS_BY_TIER, MAX_FLOWS, MAX_STEPS } from "@/lib/flow-limits";
@@ -86,12 +86,13 @@ export const PRICING_GROUPS:PricingGroup[]=[
  ]},
  {id:"operating-allowances",title:"Other monthly allowances",period:"These counters share the store's billing-month window, including on annual plans. A request or action can use more than one unit.",rows:
   ALLOWANCE_KINDS.map(kind=>row("operation-"+kind,KIND_WORDS[kind].what,t=>count(STORE_ALLOWANCES[t][kind]),
-   kind==="api"?"Each contact added or product given through the API uses "+API_WRITE_UNITS+" units; key permissions and endpoint rules still apply.":undefined)),
+   kind==="api"?"Each contact added or product given through the API uses "+API_WRITE_UNITS+" units, and each page of sales read "+API_SALES_UNITS+"; key permissions and endpoint rules still apply.":undefined)),
  },
 ];
 export const PRICING_ADDONS=[
  {key:"assistant",title:"Store assistant",price:pricingDollars(ASSISTANT_PRICE_CENTS)+" a month per store",body:count(ASSISTANT_MESSAGES_MONTHLY)+" messages a month in its own allowance. A separate subscription, with its own cancellation and refund terms. Paid availability remains closed with the plans.",href:"/refunds#store-assistant"},
- {key:"captions",title:"AI captions for a lesson video",price:pricingDollars(CENTS_PER_MINUTE)+" per rounded-up minute, per requested language",body:"At least "+pricingDollars(MIN_CENTS)+" per request in total; up to "+MAX_AUTO_LANGUAGES+" languages and "+MAX_AUTO_MINUTES+" minutes of video. The quote is shown before purchase. For example, 10 minutes in two languages is "+pricingDollars(autoCaptionCents(600,2))+".",href:"/platform/courses"},
+ // AI captions exist only for a lesson video the video service keeps; listed only while its upload door can open (lib/upload-budget-policy.ts).
+ ...(uploadBackendOpen("stream")?[{key:"captions",title:"AI captions for a lesson video",price:pricingDollars(CENTS_PER_MINUTE)+" per rounded-up minute, per requested language",body:"At least "+pricingDollars(MIN_CENTS)+" per request in total; up to "+MAX_AUTO_LANGUAGES+" languages and "+MAX_AUTO_MINUTES+" minutes of video. The quote is shown before purchase. For example, 10 minutes in two languages is "+pricingDollars(autoCaptionCents(600,2))+".",href:"/platform/courses"}]:[]),
 ];
 export const PRICING_QUESTIONS: HomeQuestion[]=[
  ...decisionQuestions(),

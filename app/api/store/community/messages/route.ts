@@ -3,7 +3,7 @@ import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite } from "@/lib/studio-route";
 import { limited } from "@/lib/request-guard";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { CREATOR, within } from "@/lib/community";
+import { CREATOR, readMember, within } from "@/lib/community";
 import { communityViewer } from "@/lib/community-access";
 import {
   MAX_MESSAGE_TEXT,
@@ -17,6 +17,10 @@ import {
 } from "@/lib/community-dm";
 import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
 import { DataRoomError } from "@/lib/store-data";
+import { communityWords } from "@/lib/buyer-words/community";
+
+/** How far a request got before something failed: the store's language once read, and whether a write had begun. */
+type Progress = { language?: unknown; writing: boolean };
 
 /** A member key, or the creator. */
 const WHO = /^(creator|[0-9a-f]{12,64})$/;
@@ -34,6 +38,24 @@ const PAIR = /^(creator|[0-9a-f]{12,64})\.(creator|[0-9a-f]{12,64})$/;
  * that draws no box is a courtesy; this is the door.
  */
 export async function POST(request: NextRequest) {
+  const progress: Progress = { writing: false };
+  try {
+    return await act(request, progress);
+  } catch (error) {
+    // Redis did not answer, or answered a count in a shape nobody knows
+    // (CX-123 rule 24). Before any write, nothing changed and it is said so;
+    // once a message, an answer or an unblock was being written, whether it
+    // went through is not known, and the person is asked to look first.
+    console.error("a community message action failed", error);
+    const notices = communityWords(progress.language).notices;
+    return new Response(progress.writing ? notices.unconfirmed : notices.error, {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+    });
+  }
+}
+
+async function act(request: NextRequest, progress: Progress): Promise<Response> {
   const origin = originFrom(request);
   // Read only as far as 32 KB (a message's 2,000 characters, written out as a form), whether or not a length was declared (MM-SA-10).
   const form = await limited(request, 32_000).then((r) => r.formData()).catch(() => null);
@@ -42,6 +64,7 @@ export async function POST(request: NextRequest) {
   const handle = normaliseHandle(field("handle", 60));
   const store = handle ? await storeForHandle(handle) : null;
   if (!store || fromAnotherSite(request)) return new Response("Not Found", { status: 404 });
+  progress.language = store.language;
 
   const home = `${origin}/@${store.handle}/community`;
   const box = `${home}/messages`;
@@ -73,11 +96,41 @@ export async function POST(request: NextRequest) {
     if (!text) return back(`${box}/${pairOf(key, to)}`, "empty");
     // Starting a conversation is limited harder than continuing one: the cost
     // of a stranger is in the opening, not in the tenth message of a talk
-    // somebody chose to have.
-    const started = await within(id, key, "dmNew");
+    // somebody chose to have. So the day's openings are counted only when this
+    // message is a new request (send asks), never for a message to the creator
+    // or in a conversation already going.
+    // Asked before send writes anything: a count it cannot read is "nothing was changed", never "could not confirm".
+    const started = owner
+      ? true
+      : async () => {
+          progress.writing = false;
+          const ok = await within(id, key, "dmNew");
+          progress.writing = true;
+          return ok;
+        };
+    // Only to somebody in the community: a key nobody holds, or a member the
+    // creator removed, gets nothing written under it (no request waiting where
+    // nobody can read or decline it, no room taken). The sender is answered
+    // exactly as for a member they have not written to yet, in the same state:
+    // a key is a plain hash of an address, so a different answer would tell
+    // who is a member. With requests on, that is a request sent, or "slow"
+    // past the day's openings (counted as for a member); with requests off, or
+    // from the creator, the message sent into the conversation.
+    if (to !== CREATOR) {
+      const them = await readMember(id, to);
+      if (!them || them.removed) {
+        const asking = config.dm.ask && key !== CREATOR;
+        if (!asking) return back(`${box}/${pairOf(key, to)}`, "dmsent");
+        const ok = typeof started === "function" ? await started() : started;
+        return back(box, ok ? "dmasked" : "slow");
+      }
+    }
     let sent: Awaited<ReturnType<typeof send>>;
+    progress.writing = true;
     try {
-      sent = await send(id, config.dm, key, to, text, store);
+      // Past the day's openings, a new request is refused before it is written
+      // (never written and then answered "slow", which invites a second copy).
+      sent = await send(id, config.dm, key, to, text, store, { mayAsk: started });
     } catch (error) {
       // No room in the store's data room: nothing was sent (lib/store-data.ts).
       if (error instanceof DataRoomError) return back(`${box}/${pairOf(key, to)}`, "noroom");
@@ -93,19 +146,21 @@ export async function POST(request: NextRequest) {
               ? "dmbetween"
               : sent.reason === "empty"
                 ? "empty"
-                : "dmoff";
+                : sent.reason === "slow"
+                  ? "slow"
+                  : "dmoff";
       // "declined" answers exactly as success does, on purpose: somebody who
       // was turned down learns that their message went, and nothing else.
       // Telling them they were declined turns a quiet no into an argument.
-      return back(why === "dmsent" ? box : `${box}/${pairOf(key, to)}`, why);
+      return back(why === "dmsent" || why === "slow" ? box : `${box}/${pairOf(key, to)}`, why);
     }
-    if (!owner && !started && sent.asked) return back(box, "slow");
     return sent.asked ? back(box, "dmasked") : back(`${box}/${pairOf(key, to)}`, "dmsent");
   }
 
   const pair = field("pair", 140);
   if (!PAIR.test(pair) || !otherIn(pair, key)) return back(box, "gone");
 
+  progress.writing = true;
   if (action === "accept") {
     return (await accept(id, key, pair)) ? back(`${box}/${pair}`, "dmaccepted") : back(box, "gone");
   }

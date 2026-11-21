@@ -37,8 +37,8 @@
 import { CLOSING_ACCESS_SENTENCE, CLOSING_TERMS_PATH, CLOSING_TERMS_WORDS } from "@/lib/closing-buyers-rules";
 import { deliversDigitally } from "@/lib/digital-consent";
 import { consentEmailLines } from "@/lib/digital-consent-email";
-import { ADMITTED_FIELD } from "@/lib/order-admission";
-import { countLegacyCheckoutForConfirmation, countOrder } from "@/lib/orders";
+import { ADMITTED_FIELD, OPEN_HOURS, settlePaidCheckout } from "@/lib/order-admission";
+import { countLegacyCheckoutForConfirmation } from "@/lib/orders";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
 import { recordPackage } from "@/lib/call-packages";
@@ -63,17 +63,21 @@ import type { Listing, Store } from "@/lib/store";
 import { listingsNamed, readListing, recordListings } from "@/lib/catalog";
 import { recordEnrollment } from "@/lib/learn";
 import { type HandOverDeps, confirmPreorder, resendPreorder } from "@/lib/preorders";
-import { speechFor } from "@/lib/buyer-words";
+import { everyPhrase, speechFor } from "@/lib/buyer-words";
+import { paidEveryOf } from "@/lib/recurring-every-rules";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { firstCharge } from "@/lib/move-rules";
+import { firstChargeCents } from "@/lib/yearly-price";
 import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
 import { purchaseRefunded } from "@/lib/refunds";
 import { scheduleReviewAsk } from "@/lib/review-ask";
 import { type BundleSlot, bumpsFromMeta, bundleFromMeta, deliveredIds } from "@/lib/bundle-rules";
 import { type NextOffer, nextOfferForEmail } from "@/lib/next-offer";
 import { nextOfferWords } from "@/lib/buyer-words/next-offer";
-import { pricePill } from "@/components/store-product";
+import { pricePill } from "@/lib/product-pill";
 import { productSegment } from "@/lib/product-slug";
+import { readConfig } from "@/lib/community";
+import { thanksWords } from "@/lib/buyer-words/thanks";
 
 /** The fixed sentence as a receipt carries it, with the address of the Terms that explain its limit (queue item 307 EC1). */
 const closingAccessLine = () => `${CLOSING_ACCESS_SENTENCE} ${CLOSING_TERMS_WORDS}: ${SITE_URL}${CLOSING_TERMS_PATH}`;
@@ -95,6 +99,27 @@ const SENT_MARK_SECONDS = 40 * 24 * 60 * 60;
 const SENDING_MARK_SECONDS = 15 * 60;
 
 export const confirmationKey = (session: string) => `nl:confirm:${session}`;
+/**
+ * A checkout whose admitted room was given back (confirmPurchase), kept an hour past the hours that room is held
+ * (lib/order-admission.ts OPEN_HOURS), so a second give-back for it can never reach a room still held.
+ */
+const roomGivenKey = (session: string) => `nl:confirm-room:${session}`;
+const ROOM_GIVEN_SECONDS = (OPEN_HOURS + 1) * 60 * 60;
+
+/**
+ * True only for the one run that gives a checkout's admitted room back (Claude 3, CX-116 on #2872): a gift or a
+ * purchase for several whose caller's "sent" mark was lost is told again within the day and answers "sent" a second
+ * time, and a second give-back would free another checkout's room in that hour, so the store could admit an order
+ * past its figure. Claimed with SET NX and answered exactly "OK"; taken already, an answer of another shape or a failed
+ * call give nothing back, and the room stays held until its hours end (CX-123 rule 24: never given back twice).
+ */
+async function firstToGiveRoomBack(sessionId: string): Promise<boolean> {
+  const claimed = await redisPipeline([["SET", roomGivenKey(sessionId), "1", "NX", "EX", ROOM_GIVEN_SECONDS]]).then(
+    (replies) => (Array.isArray(replies) && replies.length === 1 ? replies[0] : undefined),
+    () => undefined,
+  );
+  return claimed === "OK";
+}
 
 /** A checkout as Stripe lists or returns it, with only the fields read here. */
 export type SessionRecord = {
@@ -107,11 +132,17 @@ export type SessionRecord = {
   amount_total?: unknown;
   amount_subtotal?: unknown;
   currency?: unknown;
+  /** What came off, as Stripe sums it (`amount_discount`). */
+  total_details?: unknown;
+  /** The coupons and promotion codes on it; each coupon's `duration` only when Stripe returned it expanded. */
+  discounts?: unknown;
   customer_email?: unknown;
   metadata?: Record<string, string> | null;
   customer_details?: { email?: unknown } | null;
   consent?: { promotions?: unknown } | null;
   after_expiration?: { recovery?: { enabled?: unknown } | null } | null;
+  /** The expired session this one was made from by Stripe's recovery link, or null (lib/order-admission.ts, settlePaidCheckout). */
+  recovered_from?: unknown;
 };
 
 /** A name that can sit inside the quotes of an email's From line. */
@@ -173,6 +204,9 @@ export type Confirmation = { to: string; subject: string; text: string };
 /** A license key the email carries, with the product it is for. */
 export type KeyLine = { title: string; key: SaleKey };
 
+/** The creator's members' community this order lets its buyer into, by its name (lib/community-access.ts). */
+export type OpensCommunity = { name: string };
+
 /**
  * The email for one checkout, or null when this checkout is not one to
  * confirm: not settled, not this store's, a booked call, or too old.
@@ -192,8 +226,14 @@ export function confirmationFor(
    * and the buyer agreed at checkout to hear from them. No email of its own.
    */
   next: NextOffer | null = null,
+  /**
+   * The members' community this order opens, read by the caller (communityFor): the page after paying says so with
+   * the way in, and so does the email, so a buyer who closed that page still knows (found walking the buyer path).
+   */
+  community: OpensCommunity | null = null,
 ): Confirmation | null {
-  return renderConfirmation(store, session, nowSeconds, keys, listings, note, next, true);
+  const letter = renderConfirmation(store, session, nowSeconds, keys, listings, note, next, true, community);
+  return letter === UNREAD_CHARGE ? null : letter;
 }
 
 /** Only the selected, protected physical origin may outlive the old sweep.
@@ -207,11 +247,87 @@ export function originalPhysicalConfirmation(store: Store, session: SessionRecor
       !Number.isSafeInteger(session.amount_total) || Number(session.amount_total) < 0 ||
       session.payment_status === "no_payment_required" && session.amount_total !== 0 ||
       typeof session.currency !== "string" || !/^[a-z]{3}$/.test(session.currency)) return null;
-  return renderConfirmation(store, session, Date.now() / 1000, [], [product], null, null, false);
+  const letter = renderConfirmation(store, session, Date.now() / 1000, [], [product], null, null, false);
+  return letter === UNREAD_CHARGE ? null : letter;
+}
+
+/**
+ * What renderConfirmation answers for a checkout it would confirm but whose amount, currency or discount figure does
+ * not read in its exact shape (CX-123 rule 24): no email is written with a value it does not know, and confirmOnce
+ * takes no mark, so the next run reads the checkout again.
+ */
+const UNREAD_CHARGE = "unread-charge";
+
+/** What was charged and in what, as Stripe returned it: a whole number of the currency's smallest unit, and its code. */
+function chargeReads(session: SessionRecord): boolean {
+  return Number.isSafeInteger(session.amount_total) && Number(session.amount_total) >= 0 &&
+    typeof session.currency === "string" && /^[a-z]{3}$/.test(session.currency);
+}
+
+/** A coupon's `duration` on one of the checkout's discounts, when Stripe returned the coupon expanded; null otherwise. */
+function couponDuration(entry: unknown): "once" | "repeating" | "forever" | null {
+  if (!entry || typeof entry !== "object") return null;
+  const { coupon, promotion_code: code } = entry as { coupon?: unknown; promotion_code?: unknown };
+  const promotion = code && typeof code === "object" ? (code as { promotion?: { coupon?: unknown } | null; coupon?: unknown }) : null;
+  const found = [coupon, promotion?.promotion?.coupon, promotion?.coupon].find((c) => c && typeof c === "object") as { duration?: unknown } | undefined;
+  const duration = found?.duration;
+  return duration === "once" || duration === "repeating" || duration === "forever" ? duration : null;
+}
+
+/**
+ * Whether a discount came off a membership's first charge, and how long it keeps coming off, read exactly from the
+ * checkout: "none" when Stripe says nothing came off (or says nothing and nothing names a discount); "once" when only
+ * this charge had it: Stripe's own coupon says so, or it is the store sale or the welcome offer, whose coupons are
+ * always made for the first charge only (app/api/store/sale/route.ts, app/api/store/welcome-offer/route.ts);
+ * "every" when Stripe's coupon says every charge; "unsure" when something came off and how long it lasts does not
+ * read (a code, which the creator may have made in their own Stripe dashboard, one typed at checkout, a come-back
+ * offer); "unread" when the amount that came off is there but not a whole number (CX-123 rule 24).
+ */
+function firstChargeDiscount(session: SessionRecord): "none" | "once" | "every" | "unsure" | "unread" {
+  const meta = session.metadata ?? {};
+  const details = session.total_details;
+  if (details !== undefined && details !== null) {
+    const off = typeof details === "object" ? (details as { amount_discount?: unknown }).amount_discount : undefined;
+    if (!Number.isSafeInteger(off) || Number(off) < 0) return "unread";
+    if (off === 0) return "none";
+  }
+  const coupons = Array.isArray(session.discounts) ? session.discounts : [];
+  const named = Boolean(meta.code || meta.sale || meta.welcome || meta.winback);
+  if ((details === undefined || details === null) && coupons.length === 0 && !named) {
+    // Stripe gave no total_details and nothing names a discount: what came off is read from the price before discounts.
+    // Above what was charged, something came off whose length does not read; a price before discounts that does not
+    // read is not taken for "nothing came off" (CX-123 rule 24).
+    const subtotal = session.amount_subtotal;
+    if (!Number.isSafeInteger(subtotal) || Number(subtotal) < 0 || !Number.isSafeInteger(session.amount_total)) return "unread";
+    return Number(subtotal) > Number(session.amount_total) ? "unsure" : "none";
+  }
+  const durations = coupons.map(couponDuration);
+  if (durations.length > 0 && durations.every((d) => d === "once")) return "once";
+  if (durations.length > 0 && durations.every((d) => d === "forever")) return "every";
+  if (durations.every((d) => d === null) && (meta.sale || meta.welcome) && !meta.code && !meta.winback) return "once";
+  return "unsure";
+}
+
+/**
+ * For the thanks page (rule 27): a membership charged at checkout whose discount came off its first charge, said in
+ * the same words as the confirmation's "Paid:" line; "unread" when what was charged or what came off does not read, so
+ * the page names no price; null when the price is said as before (nothing off, every charge off, a free trial, a moved
+ * membership, a payment plan or an introductory price, which the page says itself).
+ */
+export function firstChargeSaid(store: Pick<Store, "language" | "tax">, session: SessionRecord, product: Listing): string | "unread" | null {
+  if (!product.recurring) return null;
+  const meta = session.metadata ?? {};
+  if (introOf(meta) || wholeNumber(meta.trial_days) > 0 || firstCharge(meta) || (meta.kind === "plan" && Number(meta.plan_payments) >= 2)) return null;
+  if (!chargeReads(session)) return "unread";
+  const discount = firstChargeDiscount(session);
+  if (discount === "unread") return "unread";
+  if (discount !== "once" && discount !== "unsure") return null;
+  const every = meta.every === "year" ? "year" : product.recurring.interval;
+  return paidLine(store, product, session.amount_total as number, session.currency as string, null, 0, wholeNumber(meta.ends_after), null, every, discount, regularOf(session, meta));
 }
 
 function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: number, keys: KeyLine[], listings: Listing[],
-  note: ThanksNote | null, next: NextOffer | null, ageLimited: boolean): Confirmation | null {
+  note: ThanksNote | null, next: NextOffer | null, ageLimited: boolean, community: OpensCommunity | null = null): Confirmation | null | typeof UNREAD_CHARGE {
   const id = typeof session.id === "string" ? session.id : "";
   if (!SESSION_ID_PATTERN.test(id)) return null;
   if (!isSettled(session)) return null;
@@ -226,6 +342,10 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
   const typed = session.customer_details?.email;
   const email = typeof typed === "string" && typed ? typed : typeof session.customer_email === "string" ? session.customer_email : "";
   if (!email) return null;
+  // What it cost, in what, and for a membership what came off, never assumed (CX-123 rule 24).
+  if (!chargeReads(session)) return UNREAD_CHARGE;
+  const discount = product.recurring ? firstChargeDiscount(session) : "none";
+  if (discount === "unread") return UNREAD_CHARGE;
 
   const option = product.options.find((entry) => entry.id === meta.option) ?? null;
   // What a bundle bought or ticked hands over, from the list on the order.
@@ -244,9 +364,9 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
     meta.kind === "plan" && Number(meta.plan_payments) >= 2
       ? { payments: Number(meta.plan_payments), weekly: meta.plan_interval === "week" }
       : null;
-  const amount = typeof session.amount_total === "number" ? session.amount_total : 0;
-  // What Stripe charged it in; the store's own currency for a record that says none.
-  const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
+  const amount = session.amount_total as number;
+  // What Stripe charged it in.
+  const currency = session.currency as string;
   const title = option ? `${product.title} (${option.label})` : product.title;
   const base = storeBase(store);
   const name = store.name;
@@ -259,8 +379,11 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
   const endsAfter = product.recurring ? wholeNumber(meta.ends_after) : 0;
   // And its introductory price, when it had one (lib/intro-price.ts): what the first payments cost, and the price after.
   const intro = product.recurring ? introOf(meta) : null;
-  // A monthly membership may have been paid yearly (lib/yearly-price.ts): said as it was bought.
-  const every = product.recurring ? (meta.every === "year" ? "year" : product.recurring.interval) : "month";
+  // How often it is charged, as it was bought, from the order (609 [WP8]): a monthly membership may have been paid
+  // yearly (lib/yearly-price.ts), and one charged every few months is said so even if the product changed meanwhile.
+  const paidAs = product.recurring ? paidEveryOf(meta, product.recurring) : null;
+  const every = paidAs ? paidAs.interval : "month";
+  const everyCount = paidAs ? paidAs.count : 1;
 
   const words = ordersWords(store.language);
   const said = speaking(store, currency);
@@ -270,7 +393,7 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
   const paid =
     firstChargeAt && amount === 0
       ? words.movedToday(speaking(store, currency).money(0))
-      : paidLine(store, product, amount, currency, plan, trialDays, endsAfter, intro, every);
+      : paidLine(store, product, amount, currency, plan, trialDays, endsAfter, intro, every, discount, regularOf(session, meta), everyCount);
   const lines: string[] = [
     words.confirmIntro(name),
     "",
@@ -309,22 +432,28 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
     lines.push("", words.bundleCourseNote(email));
   }
 
+  // The members' community it opens, in the words of the page after paying (lib/buyer-words/thanks.ts), with the way in.
+  if (community) {
+    const tw = thanksWords(store.language);
+    lines.push("", `${tw.alsoYours}: ${community.name}`, tw.communityOpens(name, email), `${tw.goCommunity}: ${base}/community`);
+  }
+
   for (const line of keys) {
     const label = keys.length > 1 ? words.yourKeyFor(line.title) : words.yourKey;
     lines.push("", line.key.state === "issued" ? words.keyIssued(label, line.key.key) : words.keyOnItsWay(label, name));
   }
 
   if (product.recurring) {
+    // The first charge is what the checkout made it: the year's price when paid yearly (lib/yearly-price.ts).
+    const firstCents = firstChargeCents(product, option, every, store.tiers);
     if (firstChargeAt) {
-      const firstCents = option ? option.priceCents : product.priceCents;
-      lines.push("", words.movedCharge(said.money(firstCents), store.tax.enabled && !store.tax.included, said.date(firstChargeAt * 1000)));
-    } else if (trialDays > 0) {
-      const firstCents = option ? option.priceCents : product.priceCents;
+      if (firstCents !== null) lines.push("", words.movedCharge(said.money(firstCents), store.tax.enabled && !store.tax.included, said.date(firstChargeAt * 1000)));
+    } else if (trialDays > 0 && firstCents !== null) {
       const tax = store.tax.enabled && !store.tax.included;
       const firstOn = said.date((created + trialDays * 86400) * 1000);
       lines.push("", words.trialCharge(said.money(firstCents), tax, trialDays, firstOn));
     }
-    const schedule = words.renews(every, endsAfter);
+    const schedule = words.renews(every, endsAfter, everyCount);
     lines.push(
       "",
       canManage(store)
@@ -369,9 +498,24 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
 
   return {
     to: email,
-    subject: words.confirmSubject(name, product.title).slice(0, 200),
+    // Every product the order hands over is named, as the page after paying names them ("Sunday Baking and Pantry
+    // Checklist"): a cart or a box ticked at checkout is not filed under its first product only.
+    subject: words.confirmSubject(name, ticked.length ? listed([product.title, ...ticked.map((added) => added.listing.title)]) : product.title).slice(0, 200),
     text: lines.join("\n"),
   };
+}
+
+/**
+ * The members' community an order opens: the creator's community is switched on and lets in the product bought, one
+ * ticked at checkout or one inside a bundle bought (deliveredIds, as the page after paying and the community's door
+ * count them). Its setup that cannot be read just now is left out of the email, never said to be closed.
+ */
+export async function communityFor(store: Store, session: SessionRecord): Promise<OpensCommunity | null> {
+  if (!store.community?.on) return null;
+  const config = await readConfig(store.community.id).catch(() => null);
+  if (!config) return null;
+  const opens = deliveredIds(session.metadata).some((id) => config.access.includes(id));
+  return opens ? { name: config.name } : null;
 }
 
 /** The note after paying of the product an order is for, when it has one (lib/thanks-note.ts). */
@@ -394,8 +538,18 @@ function wholeNumber(raw: string | undefined): number {
   return Number.isInteger(n) && n > 0 ? n : 0;
 }
 
+/**
+ * What each charge of a membership is before any discount, as Stripe returned the checkout (`amount_subtotal`), or
+ * null when it does not read or when products ticked at checkout are in it too: never a catalog price that may have
+ * changed since.
+ */
+function regularOf(session: SessionRecord, meta: Record<string, string>): number | null {
+  const subtotal = session.amount_subtotal;
+  return Number.isSafeInteger(subtotal) && Number(subtotal) > 0 && bumpsFromMeta(meta).length === 0 ? Number(subtotal) : null;
+}
+
 function paidLine(
-  store: Pick<Store, "language">,
+  store: Pick<Store, "language" | "tax">,
   product: Listing,
   amount: number,
   currency: string,
@@ -404,17 +558,32 @@ function paidLine(
   endsAfter: number,
   intro: { cents: number; count: number; regular: number } | null = null,
   every: "day" | "week" | "month" | "year" = product.recurring?.interval ?? "month",
+  discount: ReturnType<typeof firstChargeDiscount> = "none",
+  regular: number | null = null,
+  /** How many of `every` between charges, as the order was charged (lib/recurring-every-rules.ts, paidEveryOf). */
+  everyCount = 1,
 ): string {
   const words = ordersWords(store.language);
   const { w, money } = speaking(store, currency);
+  const taxOnTop = store.tax.enabled && !store.tax.included;
   if (trialDays > 0 && amount === 0) return words.trialStarted(money(0), trialDays);
+  // A membership whose discount came off the first charge: today's amount, and each charge after it at its price
+  // before the discount, saying the discount may go on when how long it lasts does not read. Never today's amount as
+  // the price of every charge.
+  if (product.recurring && !plan && !intro && (discount === "once" || discount === "unsure")) {
+    const then = regular === null ? null : `${money(regular)} ${everyCount > 1 ? everyPhrase({ language: store.language, currency }, every, everyCount) : w.every(every)}`;
+    return words.discountToday(money(amount), then && endsAfter > 0 ? words.paymentsInAll(then, endsAfter) : then, taxOnTop, discount === "unsure");
+  }
   if (amount === 0) return words.discountCovered(money(0));
   if (plan) return w.today(money(amount));
   if (product.recurring && intro) {
-    return w.introThen(money(intro.cents), intro.count, product.recurring.interval, `${money(intro.regular)} ${w.every(product.recurring.interval)}`);
+    const schedule = w.introThen(money(intro.cents), intro.count, product.recurring.interval, `${money(intro.regular)} ${w.every(product.recurring.interval)}`);
+    // With sales tax added on top, what was charged today is said first, as a one-time order says what it charged.
+    return taxOnTop ? words.introTaxed(money(amount), schedule) : schedule;
   }
   if (product.recurring) {
-    const line = `${money(amount)} ${w.every(every)}`;
+    // Charged every few weeks or months (609 [WP8]): said as charged, never as a single one; a yearly payment is a year.
+    const line = `${money(amount)} ${every === "year" ? w.every("year") : everyPhrase({ language: store.language, currency }, every, everyCount)}`;
     return endsAfter > 0 ? words.paymentsInAll(line, endsAfter) : line;
   }
   return money(amount);
@@ -434,13 +603,23 @@ export async function confirmPurchase(
   sessionId: string,
   known?: SessionRecord,
 ): Promise<ConfirmOutcome> {
-  return confirmOnce(store, sessionId, known);
+  const read: { session?: SessionRecord; items?: number } = {};
+  const outcome = await confirmOnce(store, sessionId, known, read);
+  // Normal legacy checkouts settle their original admission atomically with their
+  // count before delivery. A recovery copy owns no new place: only the main's
+  // original hold record may return that place, once, after confirmation.
+  if (outcome === "sent" && read.session?.recovered_from !== undefined && read.session.recovered_from !== null &&
+      read.session.metadata?.[ADMITTED_FIELD] !== undefined && (await firstToGiveRoomBack(sessionId))) {
+    await settlePaidCheckout(store, read.session, read.items ?? 1);
+  }
+  return outcome;
 }
 
 async function confirmOnce(
   store: Store,
   sessionId: string,
   known: SessionRecord | undefined,
+  read: { session?: SessionRecord; items?: number },
 ): Promise<ConfirmOutcome> {
   if (!canConfirm(store) || !SESSION_ID_PATTERN.test(sessionId)) return "skip";
   const key = confirmationKey(sessionId);
@@ -464,27 +643,25 @@ async function confirmOnce(
   // The original reserved source owns confirmation and accounting. The
   // thanks page/sweep must never start a second legacy sender or counter.
   if (["physical-v1", "single-digital-v1"].includes(session.metadata?.mm_order_origin ?? "")) return "skip";
+  read.session = session;
   // A gift through "Support my work" has nothing to hand over or confirm (lib/store-tips.ts).
   if (session.metadata?.kind === "tip") return "skip";
   // A payment request (lib/payment-requests.ts): written down as paid, and its receipt emailed.
   if (session.metadata?.kind === "request") {
     if (isSettled(session) && saleHandles(store).has(session.metadata.store ?? "") && typeof session.metadata.request === "string") {
-      const accounting = await accountPaidCheckout(store, session, 1);
-      if (accounting === "unknown") return "failed";
+      if ((await accountPaidCheckout(store, session, 1)) === "unknown") return "failed";
     }
     return confirmRequest(store, session, key);
   }
   const listings = await listingsNamed(store, session.metadata);
-  // Admission holds the purchased roots, each with its captured bundle slot.
-  // listingsNamed also includes the expanded members and affiliate extras;
-  // neither those extra rows nor a later catalog edit can grow this footprint.
+  // Use the roots and bundle slots captured by admission, never a later catalog edit.
   const items = bumpsFromMeta(session.metadata).reduce((n, bump) =>
     n + (bundleFromMeta(session.metadata, `${bump.key}_bundle`).length || 1),
   bundleFromMeta(session.metadata, "bundle").length || 1);
+  read.items = items;
   if (isSettled(session) && saleHandles(store).has(session.metadata?.store ?? "") && session.metadata?.kind !== "call" &&
       (listings.length || session.metadata?.gift || session.metadata?.group || session.metadata?.preorder)) {
-    const accounting = await accountPaidCheckout(store, session, items);
-    if (accounting === "unknown") return "failed";
+    if ((await accountPaidCheckout(store, session, items)) === "unknown") return "failed";
   }
   // Bought for somebody else: handed to them, and the buyer gets a receipt
   // that says so (lib/gifts.ts), instead of the usual confirmation.
@@ -503,18 +680,13 @@ async function confirmOnce(
     if (bought) await redisPipeline([["SET", key, "sent", "EX", SENT_MARK_SECONDS]]);
     return bought ? "sent" : "skip";
   }
-  if (!confirmationFor(store, session, Date.now() / 1000, [], listings)) return "skip";
+  const first = renderConfirmation(store, session, Date.now() / 1000, [], listings, null, null, true);
+  // A charge that does not read: failed, with no mark taken, so the next run reads the checkout again (CX-123 rule 24).
+  if (first === UNREAD_CHARGE) return "failed";
+  if (!first) return "skip";
   const next = await nextOfferForEmail(store, sessionId, session.metadata ?? {}).catch(() => null);
-  const letter = confirmationFor(store, session, Date.now() / 1000, await keysFor(store, session, listings), listings, await noteFor(store, session, listings), next);
+  const letter = confirmationFor(store, session, Date.now() / 1000, await keysFor(store, session, listings), listings, await noteFor(store, session, listings), next, await communityFor(store, session));
   if (!letter) return "skip";
-
-  // A paid order goes on the store's review list independently of the receipt
-  // outcome. Trials/fully discounted orders are not asked; the existing
-  // per-checkout ZADD NX makes scheduling idempotent.
-  if (typeof session.amount_total === "number" && session.amount_total > 0) {
-    const paidAt = typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000);
-    await scheduleReviewAsk(store, sessionId, paidAt).catch((error) => console.error("putting an order on the review list failed", error));
-  }
 
   const [claimed] = await redisPipeline([["SET", key, "sending", "NX", "EX", SENDING_MARK_SECONDS]]);
   if (claimed === null) return "already";
@@ -534,19 +706,27 @@ async function confirmOnce(
     // pass of the job, or the next open of the thanks page, tries again.
     await redisPipeline(sent ? [["SET", key, "sent", "EX", SENT_MARK_SECONDS]] : [["DEL", key]]);
   }
+  // A paid order confirmed while the store asks for reviews goes on the list
+  // to be asked, once (lib/review-ask.ts). Nothing is asked of a trial that
+  // charged nothing or of an order paid in full by a discount, and an offer
+  // taken after paying is not asked about on its own: one email per order.
+  if (sent && typeof session.amount_total === "number" && session.amount_total > 0) {
+    const paidAt = typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000);
+    await scheduleReviewAsk(store, sessionId, paidAt).catch((error) => console.error("putting an order on the review list failed", error));
+  }
   return sent ? "sent" : "failed";
 }
 
+/** Exact paid evidence before committing a legacy receipt. A later healthy read
+ * must not conflict with a receipt that guessed an unreadable amount. */
 async function accountPaidCheckout(store: Store, session: SessionRecord, items: number): Promise<"committed" | "already" | "unknown"> {
-  // Missing payment amounts cannot prove a share-covered order, so count one
-  // conservatively. This accepts the same explicit zero as isSettled for a
-  // fully discounted checkout.
-  const paid = Number.isSafeInteger(session.amount_total) && Number(session.amount_total) >= 0
-    ? Number(session.amount_total) : null;
+  if (typeof session.amount_total !== "number" || !Number.isSafeInteger(session.amount_total) || session.amount_total < 0 ||
+      typeof session.currency !== "string" || !/^[a-zA-Z]{3}$/.test(session.currency)) return "unknown";
   const createdAtMs = typeof session.created === "number" && Number.isSafeInteger(session.created) ? session.created * 1000 : NaN;
-  return countLegacyCheckoutForConfirmation(store, `checkout:${session.id}`, paid, Date.now(), {
-    hour: session.metadata?.[ADMITTED_FIELD], items, createdAtMs,
-  });
+  // A Stripe recovery copy must not release an aggregate-hour place itself.
+  // settlePaidCheckout claims the original hold record, just as on main.
+  const hour = session.recovered_from === undefined || session.recovered_from === null ? session.metadata?.[ADMITTED_FIELD] : undefined;
+  return countLegacyCheckoutForConfirmation(store, `checkout:${session.id}`, session.amount_total, Date.now(), { hour, items, createdAtMs });
 }
 
 /**
@@ -656,9 +836,10 @@ export type TakenOffer = {
   parent: string;
   product: Listing;
   email: string;
-  amountCents: number;
-  /** What Stripe charged it in. */
-  currency: string;
+  /** What Stripe charged, in cents; null when its answer did not say it exactly, and the "Paid" line is left out. */
+  amountCents: number | null;
+  /** What Stripe charged it in; null with an amount not read exactly. */
+  currency: string | null;
   /** When what was added is a bundle: the products it hands over. */
   items?: Listing[];
   /** The offer's own payment metadata, where its yes to start access at once is kept (lib/digital-consent.ts). */
@@ -671,13 +852,13 @@ export function offerConfirmationFor(store: Store, offer: TakenOffer, key: SaleK
   const name = store.name;
   const base = storeBase(store);
   const words = ordersWords(store.language);
-  const { money } = speaking(store, offer.currency);
+  const paid = offer.amountCents !== null && offer.currency !== null ? speaking(store, offer.currency).money(offer.amountCents) : null;
   const lines: string[] = [
     words.offerIntro(name),
     "",
     words.whatYouAdded(offer.product.title),
     ...(offer.items?.length ? [words.insideIt(offer.items.map((p) => p.title).join(", "))] : []),
-    words.paidOnce(money(offer.amountCents)),
+    ...(paid ? [words.paidOnce(paid)] : []),
     words.reference(offer.reference),
     ...consentEmailLines(store, offer.metadata),
     "",
@@ -748,8 +929,7 @@ export async function confirmOffer(store: Store, offer: TakenOffer): Promise<Con
   } finally {
     await redisPipeline(sent ? [["SET", mark, "sent", "EX", SENT_MARK_SECONDS]] : [["DEL", mark]]);
   }
-  // One of the month's orders (lib/orders.ts), by its own payment.
-  if (sent) await countOrder(store, `offer:${offer.reference}`, offer.amountCents);
+  // Counted by the caller, which knows it was paid, whether or not this email went (lib/upsell.ts, afterPaid).
   return sent ? "sent" : "failed";
 }
 
@@ -831,7 +1011,7 @@ export async function resendPurchase(store: Store, sessionId: string): Promise<R
   }
   // Read by id, so a sale of any product of a store of any size is found.
   const listings = await listingsNamed(store, session.metadata);
-  const letter = confirmationFor(store, session, created, await keysFor(store, session, listings), listings, await noteFor(store, session, listings));
+  const letter = confirmationFor(store, session, created, await keysFor(store, session, listings), listings, await noteFor(store, session, listings), null, await communityFor(store, session));
   if (!letter) return "unknown";
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: fromStore(store),

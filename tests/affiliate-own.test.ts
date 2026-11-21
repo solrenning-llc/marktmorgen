@@ -15,6 +15,7 @@
  *     every change; a bad address changes nothing.
  */
 import { commissionRate } from "@/lib/affiliate-setting";
+import { createHash } from "node:crypto";
 import { attributionFor, funnelRate, payAddress, readAffiliate, setAffiliateRate, setPayAddress } from "@/lib/affiliates";
 import { paypalCsv } from "@/lib/affiliate-payouts";
 import { batchBody } from "@/lib/paypal-payouts";
@@ -22,7 +23,8 @@ import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
-const STATS = "statsid1";
+// Rule 23: a statistics id of the shape a real store has (lib/store.ts LIST_ID_PATTERN), so the store kept below reads back as itself.
+const STATS = "5a7151d1".repeat(4);
 const AFF = "0123456789ab";
 const emails: { to: string; subject: string; text: string }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -54,6 +56,10 @@ async function main(): Promise<void> {
   await redis.pipeline([
     ["HSET", `nl:aff:${STATS}:people`, AFF, JSON.stringify({ id: AFF, email: "sara@example.com", code: "sara", status: "approved", appliedAt: 1, decidedAt: 2, note: "" })],
     ["HSET", `nl:aff:${STATS}:codes`, "sara", AFF],
+    // Rule 23 (#2995 follow-up): a share that may raise the commission is now checked against the 90% cap with the
+    // store read again under the partner lock, and an unreadable store refuses it. So the store is kept where the
+    // site keeps it (lib/store.ts ownerKey), as it would be for a real creator, instead of living only in this test.
+    ["SET", `nl:store:owner:${createHash("sha256").update("nimbus-store:owner@example.com").digest("hex").slice(0, 40)}`, JSON.stringify(shop())],
   ]);
   const store = shop();
   const cookie = { via: `sara.${Math.floor(Date.now() / 1000)}`, session: undefined };
@@ -81,7 +87,7 @@ async function main(): Promise<void> {
   const line = [{ affiliate: sara, cents: 3000 }];
   const body = JSON.parse(batchBody(store, line, "nl-x")) as { items: { receiver: string }[] };
   is("PayPal is sent there", body.items[0].receiver, "sara.pay@example.com");
-  is("and the file for PayPal says the same", paypalCsv(line, "usd", "note").split(",")[0], "sara.pay@example.com");
+  is("and the file for PayPal says the same", paypalCsv(line, "usd", "note").split(",")[0], '"sara.pay@example.com"');
   await setPayAddress(store, sara, "");
   is("emptied: back to the address they joined with", payAddress((await readAffiliate(store, AFF))!), "sara@example.com");
   is("told again", emails.length, 2);

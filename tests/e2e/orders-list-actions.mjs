@@ -92,6 +92,8 @@ try {
   await settled();
   check("after the final batch focus is its FIRST new purchase, not an earlier purchase or body", await page.evaluate(() => document.activeElement?.textContent), "First of final batch");
   check("the final button has left the page", await button.count(), 0);
+  // WCAG 2.4.10: each purchase the batches added is a heading at the list's purchase level, h2.
+  check("each purchase the batches added is an h2, before the bundle's h3 the harness also draws", await page.evaluate(() => [...document.querySelectorAll("h1, h2, h3, h4, h5, h6")].map((node) => `${node.tagName}:${node.textContent}`)), ["H2:First batch", "H2:First of final batch", "H2:Second of final batch", "H3:Inside this bundle"]);
 
   await page.evaluate(() => window.mount([{ ok: true, cards: [], older: null, left: "", said: "No purchases in this batch" }]));
   await button.click();
@@ -108,6 +110,8 @@ try {
   await page.getByRole("button", { name: "Show bundle products" }).click();
   await page.getByRole("link", { name: "Download", exact: true }).waitFor();
   check("an expanded bundle has only its outer named region", await page.locator("section").count(), 1);
+  // WCAG 2.4.10: the bundle's name a heading under its purchase's h2, each of its products one under that.
+  check("an expanded bundle's name and each of its products are headings, h3 then h4", await page.evaluate(() => [...document.querySelectorAll("h1, h2, h3, h4, h5, h6")].map((node) => `${node.tagName}:${node.textContent}`)), ["H3:Inside this bundle", "H4:A book"]);
 
   for (const theme of ["light", "sand", "bold", "night"]) {
     await page.locator(".st-page").evaluate((node, theme) => { node.className = `st-page st-theme-${theme}`; }, theme);

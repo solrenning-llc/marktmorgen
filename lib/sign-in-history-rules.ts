@@ -116,6 +116,7 @@ export type SignInEntry = { at: number; way: HistoryWay; via: Via; second: Secon
 /** What each way is said as, and through which addresses it can come. A new way gets both, or the types refuse it. */
 const WAY_RULES: Record<HistoryWay, { via: readonly Via[]; words: (via: Via) => string }> = {
   link: { via: ["sign-in", "recovery"], words: (via) => (via === "recovery" ? "with a login link sent to your recovery address" : "with a login link") },
+  code: { via: ["sign-in"], words: () => "with a login code" },
   passkey: { via: ["sign-in"], words: () => "with a passkey" },
   invitation: { via: ["sign-in"], words: () => "by accepting a team invitation" },
   google: { via: ["sign-in"], words: () => "with Google" },

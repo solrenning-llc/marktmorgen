@@ -31,11 +31,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const fixed: { path: string; priority: number }[] = [
     { path: "/", priority: 1 },
     { path: "/pricing", priority: 0.8 },
+    { path: "/start-here", priority: 0.6 },
     { path: "/blog", priority: 0.8 },
     { path: "/platform", priority: 0.8 },
     { path: "/grow-sales", priority: 0.8 },
     { path: "/mission", priority: 0.6 },
     { path: "/help", priority: 0.6 },
+    { path: "/help/buyers", priority: 0.5 },
     { path: "/developers", priority: 0.4 },
     { path: "/developers/checkout-script", priority: 0.4 },
     { path: "/creators", priority: 0.5 },

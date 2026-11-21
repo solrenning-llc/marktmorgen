@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { StudioEmptyState } from "@/components/empty-state";
 import { toast } from "@/components/toast";
 import { MAX_PERSON_TASKS, MAX_TASK_TEXT, type PersonTask, dayIn } from "@/lib/person-tasks";
 
@@ -428,9 +429,12 @@ export function PersonTasks({ person, initial, owner, assignees: drawnTeam, toda
   const open = tasks.filter((task) => !task.done).length;
   return (
     <div>
-      <p ref={countLine} tabIndex={-1} className="mt-1 text-sm text-ink-soft">
+      <p ref={countLine} tabIndex={-1} className={tasks.length ? "mt-1 text-sm text-ink-soft" : "sr-only focus:not-sr-only mt-1 text-sm text-ink-soft"}>
         {tasks.length ? `${open} open, ${tasks.length - open} done.` : "No tasks yet."}
       </p>
+      {tasks.length ? null : (
+        <StudioEmptyState title="No tasks for this person yet" body="A task you add here lists what you still owe this person, and shows in your team's tasks to do." action={{ href: "#task-text", label: "Add the first task" }} className="mt-4" />
+      )}
       {tasks.length ? (
         <ul className="mt-4 space-y-3">
           {tasks.map((task) => {

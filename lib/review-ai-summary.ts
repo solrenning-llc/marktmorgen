@@ -30,6 +30,7 @@
  *   nl:rsum:lock:<statsId>              one at a time, two minutes
  */
 import { randomBytes } from "node:crypto";
+import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 import { answerModel, askModel, counted, jsonIn } from "@/lib/ai";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
@@ -125,8 +126,11 @@ export function parseReviewSummary(head: unknown, entries: unknown): ReviewSumma
 }
 
 const lastOf = (raw: unknown): number => {
-  const at = typeof raw === "string" && /^\d{1,12}$/.test(raw) ? Number(raw) : typeof raw === "number" && Number.isSafeInteger(raw) ? raw : 0;
-  return at > 0 ? at : 0;
+  if (raw === null) return 0;
+  if (typeof raw !== "string" || !/^(0|[1-9][0-9]{0,11})$/.test(raw)) throw new UnknownReplyError("review summary weekly timestamp");
+  const at = Number(raw);
+  if (!Number.isSafeInteger(at) || at < 0) throw new UnknownReplyError("review summary weekly timestamp");
+  return at;
 };
 
 /** What one product's summary is read with: its head, its themes' entries, and when the week's last one was kept. */
@@ -138,15 +142,17 @@ const readCommands = (statsId: string, productId: string): (string | number)[][]
 
 /** A product's kept summary (or null), every themes entry there now, and when the week's last one was kept. */
 type Read = { summary: ReviewSummary | null; entries: string[]; token: string | null; lastAt: number };
-const readOf = (head: unknown, entries: unknown, last: unknown): Read => ({
-  summary: parseReviewSummary(head, entries),
-  entries: (Array.isArray(entries) ? entries : []).filter((e): e is string => typeof e === "string"),
-  token: parseHead(head)?.g ?? null,
-  lastAt: lastOf(last),
-});
+const readOf = (head: unknown, entries: unknown, last: unknown): Read => {
+  if (head !== null && typeof head !== "string") throw new UnknownReplyError("review summary head");
+  const rows = stringList(entries);
+  if (!rows) throw new UnknownReplyError("review summary themes");
+  return { summary: parseReviewSummary(head, rows), entries: rows, token: parseHead(head)?.g ?? null, lastAt: lastOf(last) };
+};
 
 async function readOne(statsId: string, productId: string): Promise<Read> {
-  const [head, entries, last] = await redisPipeline(readCommands(statsId, productId));
+  const reply = repliesFor(await redisPipeline(readCommands(statsId, productId)), 3);
+  if (!reply) throw new UnknownReplyError("review summary read");
+  const [head, entries, last] = reply;
   return readOf(head, entries, last);
 }
 
@@ -167,7 +173,8 @@ export async function readReviewSummaries(statsId: string | null, productIds: re
   const out = new Map<string, { summary: ReviewSummary | null; lastAt: number }>();
   const ids = [...new Set(productIds)].filter((id) => PRODUCT_ID.test(id));
   if (!statsId || !ids.length || !isRedisConfigured()) return out;
-  const replies = await redisPipeline(ids.flatMap((id) => readCommands(statsId, id)));
+  const replies = repliesFor(await redisPipeline(ids.flatMap((id) => readCommands(statsId, id))), ids.length * 3);
+  if (!replies) throw new UnknownReplyError("review summaries read");
   ids.forEach((id, i) => {
     const read = readOf(replies[i * 3], replies[i * 3 + 1], replies[i * 3 + 2]);
     out.set(id, { summary: read.summary, lastAt: read.lastAt });
@@ -246,7 +253,7 @@ export async function makeReviewSummary(store: Store, productId: string, now = D
     // What the set held under the lock that is not the kept head's is from a try that was not kept: it goes first,
     // so the set holds the kept summary's, this one's and at most one a failed clean-up left.
     const leftover = now2.entries.filter((e) => parseEntry(e)?.g !== now2.token);
-    const replies = await redisPipeline([
+    const commands: (string | number)[][] = [
       ...(leftover.length ? [["ZREM", readKey, ...leftover]] : []),
       ["ZADD", readKey, newest, entry],
       ["EXPIRE", readKey, KEEP_SECONDS],
@@ -254,8 +261,14 @@ export async function makeReviewSummary(store: Store, productId: string, now = D
         "EVAL", KEEP_REVIEW_SUMMARY, 4, markKey(statsId, productId), summaryKey(statsId, productId), lastKey(statsId, productId), lockKey(statsId),
         typeof mark === "string" && mark ? mark : NO_MARK, head, KEEP_SECONDS, done.value.at, mine,
       ],
-    ]);
-    if (Number(replies[replies.length - 1]) !== 1) {
+    ];
+    const replies = await redisPipeline(commands);
+    let exact: unknown[] | null;
+    try { exact = repliesFor(replies, commands.length); } catch { exact = null; }
+    const offset = leftover.length ? 1 : 0;
+    const removed = leftover.length && exact ? countOf(exact[0]) : 0;
+    if (!exact || removed === null || removed > leftover.length ||
+        exact[offset] !== 1 || exact[offset + 1] !== 1 || exact[offset + 2] !== 1) {
       // Not kept: its themes go too (when this fails, they stay unread, under no head, until they expire).
       await redisPipeline([["ZREM", readKey, entry]]).catch(() => undefined);
       return { ok: false, reason: "failed" };

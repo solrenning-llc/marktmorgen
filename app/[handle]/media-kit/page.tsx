@@ -30,8 +30,13 @@ async function load(raw: string) {
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle } = await params;
-  const store = await load(handle);
-  if (!store) return { title: "Not found — Marktmorgen", robots: { index: false, follow: false } };
+  const decoded = decodeURIComponent(handle);
+  const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)) : null;
+  if (!store || store.suspended) return { title: "Not found — Marktmorgen", robots: { index: false, follow: false } };
+  if (!kitShown(store.kit)) return {
+    title: `${speech(store).w.missingTitle} — ${store.name}`,
+    robots: { index: false, follow: false },
+  };
   const w = kitWords(store.language);
   return {
     title: `${store.name}: ${w.title}`,

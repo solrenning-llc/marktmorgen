@@ -93,8 +93,12 @@ export const R2_CLASS_B_MICRO_USD_PER_MILLION = 360_000;
 /** Upload doors (lib/upload-budget.ts): each request is a function call held
  * at 2 GB for up to 10 seconds with one CPU-second and twenty database
  * commands. An upload start is allowed twenty Class A operations (create,
- * complete, abort and the storage listing pages that admission reads) and two
- * Class B; each signed piece is one Class A part upload. */
+ * complete, abort and the storage listing pages that admission reads) and four
+ * Class B: the close's read-back of the joined file (a HEAD, and a one-byte read
+ * when no length is stated), and the same once more when a close is refused, to
+ * confirm a wrong-size file it deleted is gone before its reserved bytes are
+ * given back (lib/vault-storage.ts, #4283); each signed piece is one Class A
+ * part upload. */
 export const UPLOAD_REQUEST_WAIT_SECONDS = 10;
 export const UPLOAD_REQUEST_INFRA_MICRO_USD = Number(
   ceilDiv(BigInt(VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR * VERCEL_FUNCTION_GB * UPLOAD_REQUEST_WAIT_SECONDS), BigInt(3600))
@@ -102,7 +106,7 @@ export const UPLOAD_REQUEST_INFRA_MICRO_USD = Number(
   + ceilDiv(BigInt(VERCEL_CPU_MICRO_USD_PER_HOUR), BigInt(3600))
   + ceilDiv(BigInt(UPSTASH_MICRO_USD_PER_MILLION_COMMANDS * 20), BigInt(1_000_000)));
 export const UPLOAD_OPEN_CLASS_A_OPS = 20;
-export const UPLOAD_OPEN_CLASS_B_OPS = 2;
+export const UPLOAD_OPEN_CLASS_B_OPS = 4;
 /** Requests an upload start brings besides itself: completing and canceling it. */
 export const UPLOAD_REQUESTS_PER_OPEN = 3;
 

@@ -6,6 +6,8 @@ import { toast } from "@/components/toast";
 import type { TaxSetting } from "@/lib/tax";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
+import Link from "next/link";
+import { useStudioHref } from "@/components/studio-store-pin";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -14,7 +16,7 @@ const MESSAGES: Record<string, string> = {
   series: "A series of calls is still running in your store. Its sessions were booked without sales tax, so you can switch tax on once the last series is over or canceled. Nothing was changed.",
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
-  unavailable: "Stores are not switched on yet, so nothing was saved.",
+  unavailable: "We could not check your store just now, so nothing was saved. Try again in a few minutes.",
   server_error: "We could not confirm whether your tax settings were saved. Reload this page to check before trying again.",
 };
 
@@ -38,6 +40,7 @@ export function TaxEditor({
 }) {
   const ready = useSyncExternalStore(subscribeToReadiness, clientReady, serverReady);
   const router = useRouter();
+  const studioHref = useStudioHref();
   const [enabled, setEnabled] = useState(tax.enabled);
   const [included, setIncluded] = useState(tax.included);
   const [ids, setIds] = useState(tax.ids);
@@ -110,6 +113,12 @@ export function TaxEditor({
             ) : (
               <span className="text-ink-soft">Stripe could not be asked about your tax setup just now.</span>
             )}
+          </p>
+          {/* The page that reads where the account collects tax (655 [WG15], app/studio/tax/page.tsx). */}
+          <p className="text-sm">
+            <Link href={studioHref("/studio/tax")} className="link inline-flex min-h-11 items-center font-semibold">
+              See where you are registered to collect tax
+            </Link>
           </p>
 
           <label className="flex items-start gap-3 text-sm font-semibold text-ink">

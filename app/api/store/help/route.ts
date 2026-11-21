@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { AI_PER_MINUTE, MAX_HELP_QUESTION } from "@/lib/ai-rules";
 import { HELP_NOT_COVERED, answerHelp } from "@/lib/ai";
 import { looksForeign, pickHelp } from "@/lib/help-ask";
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
   const { store, body } = guarded;
   const question = text(body.question, MAX_HELP_QUESTION).trim();
   if (question.length < 3) return Response.json({ ok: false, error: "notes" }, { status: 400 });
-  if (!(await withinLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return Response.json({ ok: false, error: "slow" }, { status: 429 });
+  if (!(await withinEssentialLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return Response.json({ ok: false, error: "slow" }, { status: 429 });
   // A question in English that no answer shares a word with is answered here, at no cost;
   // one in another language is put into English first, inside the one job (lib/ai.ts).
   const foreign = looksForeign(question);

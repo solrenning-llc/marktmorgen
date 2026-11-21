@@ -20,17 +20,23 @@
  * last sale before it.
  *
  * Who. Only a store with a plan running and Stripe connected, and never one
- * whose creator stopped the numbers emails (the weekly one stops all three).
+ * whose creator stopped the numbers emails (the weekly one stops all three)
+ * or switched this one off (alertEmailsOff in the store record,
+ * lib/notify-prefs-rules.ts; queue item 601 [KB22] U6). That choice is read
+ * from the store this job already holds, before anything is claimed or read
+ * from Stripe, so a store that does not want it costs no reading at all.
  * Read once a day per store by an hourly job (app/api/cron/quiet).
  */
 import { type Store, saleHandles } from "@/lib/store";
 import { onAccount } from "@/lib/stripe-account";
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
 import { weeklyOff, weeklyToken } from "@/lib/stats-report";
 import { daysCounts } from "@/lib/stats";
+import { notifyPrefsPath, wantsAlertEmail } from "@/lib/notify-prefs-rules";
 
 /** Days of sales the usual pace is read from. */
 export const QUIET_PACE_DAYS = 60;
@@ -93,16 +99,22 @@ export async function checkQuiet(store: Store, now = Date.now()): Promise<QuietO
   if (!isRedisConfigured() || !isSenderConfigured() || !store.stripeAccountId) return "skipped";
   const standing = standingOf(store);
   if (standing !== "paid" && standing !== "trial") return "skipped";
+  if (store.alertEmailsOff === null) console.error(`quiet-sales: the alert email choice of ${store.handle} cannot be read; optional alert emails are held until the owner saves it again`);
+  if (!wantsAlertEmail(store.alertEmailsOff, "quiet-sales")) return "skipped";
   if (await weeklyOff(store.handle)) return "skipped";
   const day = new Date(now).toISOString().slice(0, 10);
-  const [first] = await redisPipeline([["SET", checkedKey(day, store.handle), "1", "NX", "EX", 2 * 86400]]);
-  if (first === null) return "seen";
+  // The day's look and the email are ours only on an exact claim (lib/claim-mark.ts): an unknown answer
+  // reads nothing and sends nothing this run, and lets nothing go.
+  const first = await claimMark(checkedKey(day, store.handle), 2 * 86400);
+  if (first === "taken") return "seen";
+  if (first !== "ours") return "skipped";
   const times = await saleTimes(store, now).catch(() => null);
   if (times === null) return "skipped";
   const verdict = isQuiet(times, now);
   if (!verdict.quiet) return "fine";
-  const [claimed] = await redisPipeline([["SET", sentKey(store.handle, verdict.last), "1", "NX", "EX", 90 * 86400]]);
-  if (claimed === null) return "fine";
+  const claimed = await claimMark(sentKey(store.handle, verdict.last), 90 * 86400);
+  if (claimed === "taken") return "fine";
+  if (claimed !== "ours") return "skipped";
 
   // What the quiet days look like from the store's side: people still coming,
   // people starting to pay and not finishing, or nobody coming at all.
@@ -132,7 +144,8 @@ export async function checkQuiet(store: Store, now = Date.now()): Promise<QuietO
     "",
     `Your numbers, day by day: ${SITE_URL}/studio`,
     "",
-    `This comes once for each quiet stretch. To stop these emails, the busy-day one and the weekly one: ${stopUrl}`,
+    `This comes once for each quiet stretch. To choose which alerts you get: ${SITE_URL}${notifyPrefsPath(store.sid)}`,
+    `To stop these emails, the busy-day one and the weekly one: ${stopUrl}`,
   );
   const ok = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,

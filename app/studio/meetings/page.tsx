@@ -6,6 +6,7 @@ import { notFound, redirect } from "next/navigation";
 import { ensureStatsId } from "@/lib/store";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { MeetingConnections } from "@/components/meeting-connections";
 import { ToastOnLoad } from "@/components/toast";
@@ -45,6 +46,10 @@ function outcome(word: string, provider: string): { tone: "ok" | "warn" | "error
       return { tone: "error", text: "Access cannot be stored safely on this deployment yet, so nothing was connected." };
     case "expired":
       return { tone: "warn", text: "That connection attempt had expired or was started in another session. Start it again from this page." };
+    // While it was connecting, the provider told us this account removed our app (lib/meet-connect.ts KEEP_UNLESS_GONE).
+    // The give-back is asked for, never confirmed here (revoke(...).catch), so the words say "asked", not "gave back".
+    case "removed":
+      return { tone: "warn", text: `${name} was not connected. While it was connecting, ${name} told us this account removed our app, so we kept nothing and asked ${name} to cancel the access. Connect again if you still want it.` };
     case "limited":
       return { tone: "warn", text: "That is too many attempts in a few minutes. Wait a moment and try again." };
     // The paid period's resources could not be reserved (lib/contract-resource-window.ts): not a matter of tries.
@@ -94,9 +99,13 @@ export default async function StudioMeetingsPage({ searchParams }: Params) {
   // What the store is offered, and any account it has connected either way.
   const offered = view ? view.providers : offeredProviders(store, review);
   if (view !== null && offered.length === 0 && configured.length > 0) notFound();
-  // The test meeting each connected account has, where one was made (lib/meet-test.ts).
+  // The test meeting each connected account has, where one was made (lib/meet-test.ts). A failed read is null,
+  // never "none": the page then offers no "Make a test meeting" over one that may be there (CX-123 rule 24).
   const tests = view
-    ? await readTests(store.statsId, offered.filter((p) => configured.includes(p) && view.connected[p])).catch(() => ({}))
+    ? await readTests(store.statsId, offered.filter((p) => configured.includes(p) && view.connected[p])).catch((error) => {
+        console.error("reading the test meetings failed", error);
+        return null;
+      })
     : {};
   // The store's calls to connected services used, no place this month, or not counted (lib/metered-limits.ts).
   const allowance = typeof query.meet === "string" ? serviceAllowanceWords(store, query.meet) : null;
@@ -115,7 +124,7 @@ export default async function StudioMeetingsPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Video calls</p>
+          <StudioTrail store={store} here="Video calls" />
           <h1 className="t-h2 mt-3">{active.length ? `${names.join(" and ")} links, made for your bookings` : "Your video call connections"}</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             {active.length

@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { Icon, type IconName } from "@/components/icons";
 import { type ImportJob, IMPORT_LIMITS, storeImports } from "@/lib/imports";
@@ -107,7 +108,8 @@ export default async function StudioImportPage({ searchParams }: Params) {
       : "contacts";
   const canFunnel = can(access.role, "page") && can(access.role, "products");
   const [jobs, counts, moved, listings] = await Promise.all([
-    storeImports(store).catch(() => []),
+    // A list that cannot be read is unknown (rule 24), never "None yet".
+    storeImports(store).catch(() => null),
     listCounts(store.listId).catch(() => null),
     kind === "members" ? moveCounts(store).catch(() => null) : Promise.resolve(null),
     // One read of every product's name and price; what kind each is, from the store's own index.
@@ -131,8 +133,8 @@ export default async function StudioImportPage({ searchParams }: Params) {
         ];
       })
     : [];
-  const running = jobs.find((job) => job.state === "receiving" || job.state === "queued" || job.state === "running" || job.state === "mailing") ?? null;
-  const past = jobs.filter((job) => job.id !== running?.id);
+  const running = (jobs ?? []).find((job) => job.state === "receiving" || job.state === "queued" || job.state === "running" || job.state === "mailing") ?? null;
+  const past = jobs === null ? null : jobs.filter((job) => job.id !== running?.id);
   const tab = TABS.find((t) => t.kind === kind)!;
   const facts: Record<ImportKind, string> = {
     contacts: counts ? `Your list has ${counts.mailable.toLocaleString("en-US")} people you may email now.` : "",
@@ -154,7 +156,7 @@ export default async function StudioImportPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Moving from another platform</p>
+          <StudioTrail store={store} here="Moving from another platform" />
           <h1 className="t-h2 mt-3">Bring your store with you</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             Export a spreadsheet from Stan, Gumroad, Kajabi, Patreon, Mailchimp or anywhere else, choose it here, and say which column is
@@ -227,7 +229,12 @@ export default async function StudioImportPage({ searchParams }: Params) {
                   </h3>
                   {cfStep === "funnel" ? (
                     <div className="mt-5">
-                      {canFunnel ? (
+                      {canFunnel && listings === null ? (
+                        // Products that cannot be read are unknown (rule 24), never "No product of yours fits yet".
+                        <p className="text-sm text-ink-soft" role="status">
+                          Your products could not be read just now. Nothing was changed. Reload the page in a moment.
+                        </p>
+                      ) : canFunnel ? (
                         <ClickFunnelsFunnel
                           products={funnelProducts}
                           pagesLeft={Math.max(0, MAX_SITE_PAGES - store.sitePages.length)}
@@ -321,13 +328,15 @@ export default async function StudioImportPage({ searchParams }: Params) {
 }
 
 /** The store's last imports, each with its counts and report. */
-function PastImports({ past }: { past: ImportJob[] }) {
+function PastImports({ past }: { past: ImportJob[] | null }) {
   return (
     <aside className="card min-w-0 p-5 sm:p-6" aria-labelledby="past-title">
       <h2 id="past-title" className="text-base font-semibold text-ink">
         Your last imports
       </h2>
-      {past.length === 0 ? (
+      {past === null ? (
+        <p className="mt-2 text-sm text-ink-soft" role="status">Your last imports could not be read just now. Nothing was changed. Reload the page in a moment.</p>
+      ) : past.length === 0 ? (
         <p className="mt-2 text-sm text-ink-soft">None yet. Each one is listed here for two weeks, with its report.</p>
       ) : (
         <ul className="mt-3 space-y-4">

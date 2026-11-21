@@ -22,7 +22,7 @@ export const REVEAL_WATCH =
   'var n=d.querySelectorAll(".reveal");if(!n.length)return;' +
   'var o=new IntersectionObserver(function(e){e.forEach(function(x){' +
   'if(x.isIntersecting){x.target.classList.add("is-in");o.unobserve(x.target)}})},' +
-  '{rootMargin:"0px 0px -6% 0px",threshold:0.1});' +
+  '{rootMargin:"0px 0px -6% 0px",threshold:0});' +
   'var h=window.innerHeight||0,i,v=[];' +
   // Read every position before any class write: no layout/read-write alternation.
   'for(i=0;i<n.length;i++){v[i]=n[i].getBoundingClientRect().top<h}' +
@@ -31,4 +31,4 @@ export const REVEAL_WATCH =
   '}catch(e){try{document.documentElement.removeAttribute("data-reveal")}catch(_){}}})()';
 
 /** Their hashes, as a Content-Security-Policy source list writes them. */
-export const REVEAL_HASHES = ["'sha256-UzjXCD2NFSKilatygvZxFi37JZElmzLnHlfQpL3R7Ss='", "'sha256-2rn+meqpHSkMfuIJdLnSBS380apwLI+LfxR30CY1iic='"];
+export const REVEAL_HASHES = ["'sha256-UzjXCD2NFSKilatygvZxFi37JZElmzLnHlfQpL3R7Ss='", "'sha256-lQ+CzFpsEfynlk8+zSFlLISRuRj0eEZXhBCBgsuazcg='"];

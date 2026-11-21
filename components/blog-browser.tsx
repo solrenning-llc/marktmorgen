@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { PostCover } from "@/components/post-cover";
 import type { BlogPost } from "@/lib/blog";
-import { formatPostDate } from "@/lib/blog";
+import { formatPostDate } from "@/lib/post-date";
 
 /**
  * The search box and the category picker for the blog index. Everything is
@@ -41,7 +41,7 @@ export function BlogBrowser({
   return (
     <div>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 sm:flex-wrap sm:overflow-visible lg:min-w-0 lg:flex-1" role="group" aria-label="Filter articles by category">
+        <div className="-mx-1 flex flex-wrap gap-1.5 px-1 pb-1 lg:min-w-0 lg:flex-1" role="group" aria-label="Filter articles by category">
           {options.map((option) => {
             const active = option === category;
             return (
@@ -50,7 +50,7 @@ export function BlogBrowser({
                 type="button"
                 onClick={() => setCategory(option)}
                 aria-pressed={active}
-                className={`h-10 shrink-0 rounded-[10px] px-3.5 text-[0.9375rem] font-medium transition-colors ${
+                className={`h-11 shrink-0 rounded-[10px] px-3.5 text-[0.9375rem] font-medium transition-colors ${
                   active ? "bg-ink text-white" : "bg-white text-ink-soft ring-1 ring-line hover:text-ink hover:ring-line-strong"
                 }`}
               >
@@ -144,7 +144,7 @@ export function BlogCard({ post, lead = false }: { post: BlogPost; lead?: boolea
           {post.title}
         </Link>
       </h3>
-      <p className={`mt-3 flex-1 leading-relaxed text-ink-soft ${lead ? "text-base" : "text-[0.9375rem]"}`}>
+      <p className={`mt-3 max-w-[46ch] flex-1 leading-relaxed text-ink-soft ${lead ? "text-base" : "text-[0.9375rem]"}`}>
         {post.excerpt}
       </p>
       <p className="mt-6 flex items-center justify-between border-t border-line pt-4 text-sm">

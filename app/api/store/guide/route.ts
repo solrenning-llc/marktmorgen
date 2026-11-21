@@ -1,11 +1,11 @@
 import type { NextRequest } from "next/server";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { canSell } from "@/lib/store-checkout";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
-import { productIds, readListings } from "@/lib/catalog";
+import { clientAddress, fromAnotherSite, limited, essentialLimitState } from "@/lib/request-guard";
+import { readListings, visibleIds } from "@/lib/catalog";
 import { ASKS_PER_DAY, ASKS_PER_TEN_MINUTES, STORE_ASKS_PER_MINUTE } from "@/lib/answers-rules";
 import { GUIDE_PRODUCTS, guideVisitor } from "@/lib/store-guide";
-import { pricePill, productPath } from "@/components/store-product";
+import { productPath, salePill } from "@/components/store-product";
 
 /** The model is given twenty seconds; the route a little more. */
 export const maxDuration = 30;
@@ -34,22 +34,25 @@ export async function POST(request: NextRequest) {
   if (!canSell(store)) return Response.json({ ok: false, error: "off" }, { status: 400 });
 
   const who = `${clientAddress(request)}|${store.handle}`;
-  if (
-    !(await withinLimit("ask", who, ASKS_PER_TEN_MINUTES, 600)) ||
-    !(await withinLimit("ask-day", who, ASKS_PER_DAY, 86_400)) ||
-    !(await withinLimit("ask-store", store.handle, STORE_ASKS_PER_MINUTE, 60))
-  ) {
-    return Response.json({ ok: false, error: "slow" }, { status: 429 });
+  for (const check of [
+    () => essentialLimitState("ask", who, ASKS_PER_TEN_MINUTES, 600),
+    () => essentialLimitState("ask-day", who, ASKS_PER_DAY, 86_400),
+    () => essentialLimitState("ask-store", store.handle, STORE_ASKS_PER_MINUTE, 60),
+  ]) {
+    const state = await check();
+    if (state === "unknown") return Response.json({ ok: false, error: "try again in a moment" }, { status: 503 });
+    if (state === "exceeded") return Response.json({ ok: false, error: "slow" }, { status: 429 });
   }
 
   try {
-    const products = (await readListings(store, productIds(store).slice(0, GUIDE_PRODUCTS * 2))).filter((p) => !p.hidden).slice(0, GUIDE_PRODUCTS);
+    // The first GUIDE_PRODUCTS published ones, from the store's own index: drafts never cut the list, nor are read.
+    const products = (await readListings(store, visibleIds(store).slice(0, GUIDE_PRODUCTS))).filter((p) => !p.hidden);
     const result = await guideVisitor({ store, products, goal });
     if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: result.reason === "failed" ? 502 : 400 });
     const byId = new Map(products.map((p) => [p.id, p]));
     const picks = result.picks.flatMap((pick) => {
       const product = byId.get(pick.id);
-      return product ? [{ title: product.title, href: productPath(store, product), price: pricePill(store, product), why: pick.why }] : [];
+      return product ? [{ title: product.title, href: productPath(store, product), price: salePill(store, product), why: pick.why }] : [];
     });
     return Response.json({ ok: true, picks }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

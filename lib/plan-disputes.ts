@@ -26,6 +26,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isAddOn, isBillingConfigured, onPlatformAt } from "@/lib/billing";
 import { type PlanDisputeStatus, coveredUntil, disputeStatusOf } from "@/lib/plan-dispute-rules";
 import { recordPlanDispute, storeForHandle, storeForId, storeRef } from "@/lib/store";
+import { type StripePage, readStripePage } from "@/lib/stripe-list";
 
 /** The version whose charge still names its invoice and whose invoice names its subscription. */
 const DISPUTE_VERSION = "2024-06-20";
@@ -51,6 +52,12 @@ export type DisputeCounts = { seen: number; recorded: number; unmatched: number;
 
 const objectOf = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+/**
+ * Whether Stripe's reply is the object asked for, by its own id (rule 30): another's, or one with none, decides nothing.
+ * A reply that is not an object (a JSON null, a string, a number) is not its own either, never a TypeError (Claude 6 on #3098).
+ */
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
 const idOf = (value: unknown): string => (typeof value === "string" ? value : typeof objectOf(value)?.id === "string" ? String(objectOf(value)!.id) : "");
 
 async function remember(id: string, what: string): Promise<void> {
@@ -90,6 +97,9 @@ async function applyDispute(dispute: Record<string, unknown>, known: string | un
     return "unmatched";
   }
   const subscription = await onPlatformAt(DISPUTE_VERSION, "GET", `/subscriptions/${encodeURIComponent(subscriptionId)}`);
+  // Another subscription's reply, or one with no id: neither written on a store nor remembered as unmatched. Counted as
+  // failed, and the dispute is read again whole on the next run.
+  if (!isOwnReply(subscription, subscriptionId)) throw new Error("Stripe answered for another subscription");
   const handle = objectOf(subscription.metadata)?.store;
   const store = isAddOn(subscription) || typeof handle !== "string" || !handle ? null : await storeForHandle(handle);
   // Only a subscription this store wrote down as its plan, or one of the same Stripe customer.
@@ -121,13 +131,28 @@ export async function syncPlanDisputes(deadline: number, nowSeconds = Math.floor
   const since = nowSeconds - LOOKBACK_DAYS * 24 * 60 * 60;
   let after = "";
   let listDone = false;
+  let readable = true;
   for (let page = 0; page < MAX_PAGES && !listDone; page += 1) {
     if (Date.now() > deadline) return counts;
     const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
     query.append("expand[]", "data.charge.invoice");
     if (after) query.set("starting_after", after);
-    const list = await onPlatformAt(DISPUTE_VERSION, "GET", `/disputes?${query}`);
-    const rows = Array.isArray(list.data) ? (list.data as unknown[]).map(objectOf).filter((row): row is Record<string, unknown> => row !== null) : [];
+    // Read in its exact shape (lib/stripe-list.ts): a page in another shape stops the reading here, and a row not readable
+    // is a failure counted; either way the run is not complete, so nothing is taken as read that was not.
+    let read: StripePage;
+    try {
+      read = readStripePage(await onPlatformAt(DISPUTE_VERSION, "GET", `/disputes?${query}`), () => true, DISPUTE_ID);
+    } catch (error) {
+      counts.failed += 1;
+      readable = false;
+      console.error("reading plan disputes failed", error);
+      break;
+    }
+    if (read.unreadable) {
+      counts.failed += read.unreadable;
+      readable = false;
+    }
+    const rows: Record<string, unknown>[] = read.rows;
     for (const dispute of rows) {
       if (Date.now() > deadline) return counts;
       counts.seen += 1;
@@ -143,7 +168,12 @@ export async function syncPlanDisputes(deadline: number, nowSeconds = Math.floor
       }
       if (DISPUTE_ID.test(id)) after = id;
     }
-    listDone = list.has_more !== true || !rows.length;
+    if (!read.hasMore) listDone = true;
+    else if (!read.lastId) {
+      // More pages, and no readable last row to read them from: not complete.
+      readable = false;
+      break;
+    }
   }
   if (!listDone) console.error("plan disputes: more than one run's pages; the oldest wait for the next run");
   // Still open, and no longer in the list: asked by id.
@@ -161,6 +191,6 @@ export async function syncPlanDisputes(deadline: number, nowSeconds = Math.floor
       console.error(`re-reading plan dispute ${id} failed`, error);
     }
   }
-  counts.complete = listDone && stale.length < MAX_REREADS;
+  counts.complete = listDone && readable && stale.length < MAX_REREADS;
   return counts;
 }

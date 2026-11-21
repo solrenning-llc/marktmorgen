@@ -104,6 +104,23 @@ async function main(): Promise<void> {
 
   part("Who is emailed");
   const base = { store, product, courseId: COURSE, lessonTitle: "Your starter", origin: "https://marktmorgen.com" };
+  // CX-123 rule 24, L9: the once-an-hour mark answered oddly, without landing, sends nothing.
+  {
+    const real = redis.pipeline.bind(redis);
+    let used = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!used && commands[0]?.[0] === "SET" && String(commands[0]?.[1] ?? "").startsWith(`nl:lc:${COURSE}:mail:`)) {
+        used = true;
+        return ["QUEUED"];
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    try {
+      is("a mark answered oddly that did not land sends nothing", [await tellStudent({ ...base, parent: first.comment, reply: answer.comment }), emails.length], [false, 0]);
+    } finally {
+      redis.pipeline = real;
+    }
+  }
   const sent = await tellStudent({ ...base, parent: first.comment, reply: answer.comment });
   is("the student the creator answered", [sent, emails.length, emails[0]?.to], [true, 1, ["dana@example.com"]]);
   is("with the answer and the way back to it", emails[0]?.text.includes("75 to 80°F.") && emails[0]?.text.includes(`/@harbor/course/p1aaaaaa/${L1}#c-${answer.comment.id}`), true);

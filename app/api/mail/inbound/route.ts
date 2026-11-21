@@ -4,7 +4,7 @@ import { HEALTH_ID, LIST_TAG, MOVE_TAG, STORE_TAG, heardFromSender, mailReportCa
 import { MAIL_REPORT_TAG, type MailReportEvent, noteMailReportEvent } from "@/lib/mail-report";
 import { redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
-import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 
 /** An announcement names a message; it does not carry it. Anything bigger is not one. */
 const MAX_BODY_BYTES = 256_000;
@@ -80,7 +80,10 @@ function tagOf(tags: unknown, name: string): string {
  */
 export async function POST(request: NextRequest) {
   if (!canHearResend()) return new Response("Not found.", { status: 404 });
-  if (!(await withinLimit("mail-inbound", clientAddress(request), PER_MINUTE, 60))) {
+  const room = await withinLimit("mail-inbound", clientAddress(request), PER_MINUTE, 60).catch(unknownLimit);
+  // A count that could not be read is unknown (rule 24): 503, so the notice is sent again, never "too many".
+  if (room === "unknown") return Response.json({ ok: false }, { status: 503 });
+  if (!room) {
     return Response.json({ ok: false }, { status: 429 });
   }
   let body: string;
@@ -167,7 +170,11 @@ export async function POST(request: NextRequest) {
   const emailId = typeof notice.data?.email_id === "string" ? notice.data.email_id : "";
 
   // The addresses the announcement names, so support's daily count is taken before the message is read.
-  const result = await forwardInbound(emailId, Date.now(), notice.data?.to, notice.data?.from);
+  // A throw (a count that could not be read, rule 24) is a retry too: the mark is let go of, so Resend's retry is heard.
+  const result = await forwardInbound(emailId, Date.now(), notice.data?.to, notice.data?.from).catch((error: unknown) => {
+    console.error("an inbound message could not be sent on", error);
+    return "retry" as const;
+  });
   if (result === "retry") {
     await letGo(seenKey);
     return Response.json({ ok: false }, { status: 500 });

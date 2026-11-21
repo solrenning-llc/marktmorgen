@@ -1431,6 +1431,121 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
 }
 
 /**
+ * The longest string of the record a count reads (storeForHit): past it the field reads as missing. Every field the
+ * script answers is held to this or is a number or a flag, so its answer is bounded whatever the record holds.
+ */
+export const HIT_FIELD_MAX_BYTES = 320;
+
+/** The record's text fields a count reads (storeForHit): ids, the plan and its window, nothing a page shows. */
+export const HIT_TEXT_FIELDS = ["handle", "name", "email", "sid", "statsId", "tier", "cycle", "subscriptionId", "planEndedAt"] as const;
+
+/**
+ * The most bytes storeForHit's script answers: every text field at HIT_FIELD_MAX_BYTES and the rest (flags, numbers,
+ * the period and the anchor with its id, the names of the fields) inside 1,024. Held in tests/hit-store-fields.test.ts.
+ */
+export const HIT_FIELDS_MAX_BYTES = (HIT_TEXT_FIELDS.length + 1) * HIT_FIELD_MAX_BYTES + 1_024;
+
+/**
+ * The fields of a store's record a count needs (app/api/store/hit), read inside Redis: one script reads the record,
+ * decodes it there and answers only them, so the rest of the record (its products, pages and words, up to
+ * MAX_STORE_BYTES) never crosses the wire (#1496, option A; coordinator, 21 November 2026). Nothing is written and no
+ * second copy is kept: the record stays the one source. KEYS[1] the record; ARGV the link id and the product id to
+ * look for ("" for none) and HIT_FIELD_MAX_BYTES. A link is known as parseStoreLinks keeps it (lib/store-link.ts, the
+ * first MAX_STORE_LINKS kept); a product as productIdFor names it (lib/catalog.ts, parseItems: the first of each id,
+ * MAX_PRODUCTS at most), and only on a catalog with its own id: on a record from before catalogs a product is not
+ * known. Modelled by lib/redis-memory.ts.
+ */
+export const STORE_FOR_HIT = `-- marktmorgen:store-for-hit:v1
+local raw = redis.call('GET', KEYS[1])
+if not raw then return false end
+local ok, r = pcall(cjson.decode, raw)
+if not ok or type(r) ~= 'table' then return '' end
+local cap = tonumber(ARGV[3])
+local function str(v) if type(v) == 'string' and #v <= cap then return v end return nil end
+local function num(v) if type(v) == 'number' then return v end return nil end
+local function safe(v) return type(v) == 'string' and #v >= 1 and #v <= 64 and v:match('^[%w_%-]+$') ~= nil end
+local out = {}
+for _, k in ipairs({'${HIT_TEXT_FIELDS.join("', '")}'}) do out[k] = str(r[k]) end
+out.extra = r.extra == true
+out.subscriptionActive = r.subscriptionActive == true
+out.trialEnds = num(r.trialEnds)
+if type(r.period) == 'table' then
+  local p = r.period
+  out.period = {start = num(p.start), ['end'] = num(p['end'])}
+  if type(p.renews) == 'boolean' then out.period.renews = p.renews end
+  if p.funded == true then out.period.funded = true end
+end
+if type(r.allowanceAnchor) == 'table' then
+  local a = r.allowanceAnchor
+  out.allowanceAnchor = {subscriptionId = str(a.subscriptionId), start = num(a.start), ['end'] = num(a['end'])}
+end
+out.affiliatesEnabled = type(r.affiliates) == 'table' and r.affiliates.enabled == true
+out.linkKnown = false
+if ARGV[1] ~= '' and type(r.links) == 'table' then
+  local kept = 0
+  for _, l in ipairs(r.links) do
+    if type(l) == 'table' and type(l.id) == 'string' and l.id ~= '' and type(l.title) == 'string' and l.title ~= '' and type(l.url) == 'string' and (l.header == true or l.url ~= '') then
+      if l.id == ARGV[1] then out.linkKnown = true break end
+      kept = kept + 1
+      if kept >= ${MAX_STORE_LINKS} then break end
+    end
+  end
+end
+out.productKnown = false
+if ARGV[2] ~= '' then
+  local c = r.catalog
+  if type(c) == 'table' and type(c.id) == 'string' and #c.id == 32 and c.id:match('^[0-9a-f]+$') and type(c.items) == 'table' then
+    local seen, count = {}, 0
+    for _, item in ipairs(c.items) do
+      if type(item) == 'table' and safe(item[1]) and not seen[item[1]] then
+        seen[item[1]] = true
+        if item[1] == ARGV[2] then out.productKnown = true break end
+        local named = false
+        for i = 3, #item do if safe(item[i]) and item[i] == ARGV[2] then named = true break end end
+        if named then break end
+        count = count + 1
+        if count >= ${MAX_PRODUCTS} then break end
+      end
+    end
+  end
+end
+return cjson.encode(out)`;
+
+/** A store as a count reads it (storeForHit), and whether the link and the product it asked about are the store's. */
+export type HitStore = { store: Store; linkKnown: boolean; productKnown: boolean };
+
+/**
+ * The store behind a public address with only the fields a count needs (STORE_FOR_HIT), or null if that handle is
+ * free, let go, or its record cannot be read. The Store it gives has no links and no products: a count asks about the
+ * one link or product it names (`ask`), and every field it reads is one the script answers (held in
+ * tests/hit-store-fields.test.ts). Never to be saved or shown: it is not the whole record.
+ */
+export async function storeForHit(handle: string, ask: { link?: string; product?: string } = {}): Promise<HitStore | null> {
+  if (!isRedisConfigured()) return null;
+  if (handleProblem(handle)) return null;
+  const [email] = await redisPipeline([["GET", handleKey(handle)]]);
+  if (typeof email !== "string" || !email) return null;
+  // A name that was let go is held, not owned: it leads nowhere on purpose.
+  if (email.startsWith(RELEASED_PREFIX)) return null;
+  const link = typeof ask.link === "string" ? ask.link.slice(0, 64) : "";
+  const product = typeof ask.product === "string" ? ask.product.slice(0, 64) : "";
+  const [reply] = await redisPipeline([["EVAL", STORE_FOR_HIT, 1, await ownerKey(email), link, product, HIT_FIELD_MAX_BYTES]]);
+  if (typeof reply !== "string" || !reply || reply.length > HIT_FIELDS_MAX_BYTES) return null;
+  let fields: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(reply) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    fields = parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const { affiliatesEnabled, linkKnown, productKnown, ...rest } = fields;
+  const store = parseStore(JSON.stringify({ ...rest, affiliates: { enabled: affiliatesEnabled === true } }));
+  if (!store) return null;
+  return { store, linkKnown: linkKnown === true, productKnown: productKnown === true };
+}
+
+/**
  * storeForHandle on Redis's exact answer only (rule 24): null only where the
  * handle is free or was let go, or the record it leads to is truly not there;
  * a reply missing or in any other shape, and a record that is there but

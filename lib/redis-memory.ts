@@ -3554,6 +3554,7 @@ export class MemoryRedis {
           return 1;
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
+        if (key.startsWith("-- marktmorgen:store-for-hit:v1\n") && args[0] === "1" && args.length === 5) return this.storeForHit(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
         if (key.startsWith("-- marktmorgen:order-write-if-new:v1\n")) return this.orderWriteIfNew(args);
         // lib/order-data.ts ORDER_WRITE_IF_STORE_LIVE: the ordinary measured write, only while the store id still
@@ -4452,6 +4453,65 @@ export class MemoryRedis {
     if (value === null || value === undefined) return 0;
     if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) return null;
     return Number(value);
+  }
+
+  /**
+   * lib/store.ts STORE_FOR_HIT: the record's fields a count needs, decoded where the record is and answered alone, with
+   * whether the link and the product asked about are the store's. The same rules as the script, line for line.
+   */
+  private storeForHit(args: string[]): unknown {
+    const [recordKey, link, product, capText] = args;
+    const raw = this.run(["GET", recordKey]);
+    if (typeof raw !== "string") return null;
+    let r: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "";
+      r = parsed as Record<string, unknown>;
+    } catch {
+      return "";
+    }
+    const cap = Number(capText);
+    const str = (v: unknown) => (typeof v === "string" && Buffer.byteLength(v) <= cap ? v : undefined);
+    const num = (v: unknown) => (typeof v === "number" ? v : undefined);
+    const safe = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(v);
+    const table = (v: unknown) => (v && typeof v === "object" ? (v as Record<string, unknown>) : null);
+    const out: Record<string, unknown> = {};
+    for (const k of ["handle", "name", "email", "sid", "statsId", "tier", "cycle", "subscriptionId", "planEndedAt"]) out[k] = str(r[k]);
+    out.extra = r.extra === true;
+    out.subscriptionActive = r.subscriptionActive === true;
+    out.trialEnds = num(r.trialEnds);
+    const p = table(r.period);
+    if (p) out.period = { start: num(p.start), end: num(p.end), ...(typeof p.renews === "boolean" ? { renews: p.renews } : {}), ...(p.funded === true ? { funded: true } : {}) };
+    const a = table(r.allowanceAnchor);
+    if (a) out.allowanceAnchor = { subscriptionId: str(a.subscriptionId), start: num(a.start), end: num(a.end) };
+    out.affiliatesEnabled = table(r.affiliates)?.enabled === true;
+    out.linkKnown = false;
+    if (link !== "" && Array.isArray(r.links)) {
+      let kept = 0;
+      for (const entry of r.links) {
+        const l = table(entry);
+        if (!l || typeof l.id !== "string" || l.id === "" || typeof l.title !== "string" || l.title === "" || typeof l.url !== "string" || !(l.header === true || l.url !== "")) continue;
+        if (l.id === link) { out.linkKnown = true; break; }
+        kept += 1;
+        if (kept >= 100) break;
+      }
+    }
+    out.productKnown = false;
+    const c = table(r.catalog);
+    if (product !== "" && c && typeof c.id === "string" && /^[0-9a-f]{32}$/.test(c.id) && Array.isArray(c.items)) {
+      const seen = new Set<string>();
+      let count = 0;
+      for (const item of c.items) {
+        if (!Array.isArray(item) || !safe(item[0]) || seen.has(item[0])) continue;
+        seen.add(item[0]);
+        if (item[0] === product) { out.productKnown = true; break; }
+        if (item.slice(2).some((option) => safe(option) && option === product)) break;
+        count += 1;
+        if (count >= 2_000) break;
+      }
+    }
+    return JSON.stringify(out);
   }
 
   private storeData(args: string[]): unknown {

@@ -365,6 +365,35 @@ async function main(): Promise<void> {
     is("the new link confirms the current address: both", await confirmMoveLink({ store: moss, token: fresh, origin: ORIGIN }), "both");
   }
 
+  part("A same-day retry of the same ask reuses the new address's link, never a second live one (Codex V's MEDIUM on #3621, redone on to-only)");
+  {
+    const token = await signIn("again.buyer@example.com");
+    const requests = () => moveKeys().filter((k) => k.startsWith("nl:pm:r:"));
+    const grants = () => moveKeys().filter((k) => k.startsWith("nl:pm:t:"));
+    const [r0, g0, m] = [requests().length, grants().length, mails.length];
+    // The new address's email is taken by the sender and its answer lost: the buyer cannot tell it went, and asks again.
+    ackLost = { skip: 1, times: 1 };
+    is("the first ask: received", await askToMovePurchases({ store: moss, token, to: "again.new@example.com", origin: ORIGIN }), "received");
+    ackLost = { skip: 0, times: 0 };
+    const first = linkTo("again.new@example.com", m);
+    is("the first ask made one request and one link", [requests().length - r0, grants().length - g0, Boolean(first)], [1, 1, true]);
+    const m2 = mails.length;
+    is("the same ask again: received", await askToMovePurchases({ store: moss, token, to: " Again.New@example.com", origin: ORIGIN }), "received");
+    const second = linkTo("again.new@example.com", m2);
+    is("still one request and one live link for the new address", [requests().length - r0, grants().length - g0], [1, 1]);
+    is("the retry emails the very same link again", [Boolean(second), second === first], [true, true]);
+    is("and the current address gets no link on the retry either", mails.slice(m2).filter((x) => x.to === "again.buyer@example.com").map((x) => linkIn(x.text)), [null]);
+
+    const m3 = mails.length;
+    is("another new address the same day is another request", await askToMovePurchases({ store: moss, token, to: "again.other@example.com", origin: ORIGIN }), "received");
+    const other = linkTo("again.other@example.com", m3);
+    is("with its own link", [requests().length - r0, grants().length - g0, Boolean(other), other !== first], [2, 2, true, true]);
+
+    const m4 = mails.length;
+    is("the reused link confirms the new address once", await confirmMoveLink({ store: moss, token: first, origin: ORIGIN }), "waiting");
+    is("and the current address gets its link once", mails.slice(m4).filter((x) => x.to === "again.buyer@example.com").length, 1);
+  }
+
   part("Three a day");
   {
     const token = await signIn("tri.buyer@example.com");

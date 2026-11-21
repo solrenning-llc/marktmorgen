@@ -326,6 +326,8 @@ try {
   const moveAway = async (id, stage) => {
     await page.locator("#deal-stage-" + id).selectOption(stage);
     await press("deal-move-" + id);
+    // Into a won or lost stage the board asks first (553 [DB1]): the move is the one confirmed.
+    await page.locator("#deal-close-yes-" + id).waitFor({ timeout: 1000 }).then(() => press("deal-close-yes-" + id), () => {});
     await page.waitForFunction((id) => !document.getElementById("deal-stage-" + id), id, { timeout: 5000 });
     await settled();
     await page.waitForTimeout(200);
@@ -338,7 +340,12 @@ try {
     w.versions = { ...w.versions, dealoooo01: "e".repeat(32) };
     window.harness.refreshDelay = 1000;
   });
+  const sentBefore = (await writes()).length;
   await press("deal-move-dealoooo01");
+  // 553 [DB1]: closing a deal asks first, with focus on the question, and sends nothing until "Close as won".
+  await page.waitForFunction(() => document.activeElement?.id === "deal-close-dealoooo01", null, { timeout: 5000 }).catch(() => {});
+  is("Move into a won stage asks first, with focus on the question, and sends nothing", [await active(), await text("deal-close-dealoooo01-title"), (await writes()).length - sentBefore], ["deal-close-dealoooo01", "Close \u201cOverdue one\u201d as won?", 0]);
+  await press("deal-close-yes-dealoooo01");
   // L-F: once answered, the board says it is loading, never that a change is still being saved.
   await page.waitForFunction(() => document.getElementById("deal-board-why")?.textContent?.includes("loading"), null, { timeout: 5000 }).catch(() => {});
   is("after the answer, while the board loads, it says so (not \"still being saved\")", await page.evaluate(() => document.getElementById("deal-board-why")?.textContent ?? ""), "Please wait. The latest deals are loading.");
@@ -374,6 +381,24 @@ try {
   await settled();
   await page.waitForTimeout(200);
   is("a refused move of a deal now in another pipeline names it, and focus goes to the stage's heading", [await page.locator("#deal-board-alert").textContent(), await active()], ["This deal changed a moment ago and is now in Coaching, so it was not moved. Open Coaching to check it.", "deal-column-lead00"]);
+
+  // #4164 review: the editor's closing question belongs to the deal it was asked for. Asked for one deal and canceled,
+  // it never opens on another deal already in that stage, nor on a deal whose stage is changed before any Save.
+  await mount(world({ deals: [deal("dealqqqq01", "Asked one", "lead00"), deal("dealqqqq02", "Already won", "won000"), deal("dealqqqq03", "Moved later", "lead00")], versions: { dealqqqq01: v(31), dealqqqq02: v(32), dealqqqq03: v(33) } }));
+  await press("deal-edit-dealqqqq01");
+  await page.locator("#deal-field-stage").selectOption("won000");
+  await press("deal-save");
+  await page.locator("#deal-save-close").waitFor({ timeout: 5000 });
+  is("the editor asks before saving a deal moved into a won stage", await page.locator("#deal-save-close").count(), 1);
+  await press("deal-cancel");
+  await press("deal-edit-dealqqqq02");
+  await page.locator("#deal-field-title").waitFor({ timeout: 5000 });
+  is("canceled, then a deal already in that stage opened: no question on it", await page.locator("#deal-save-close").count(), 0);
+  await press("deal-cancel");
+  await press("deal-edit-dealqqqq03");
+  await page.locator("#deal-field-stage").selectOption("won000");
+  is("another deal moved to that stage, before any Save: no question yet", await page.locator("#deal-save-close").count(), 0);
+  await press("deal-cancel");
 
   // C3-118: a removal question left unanswered closes for good once its deal leaves the board (hidden by a search or a filter,
   // the agenda shown, or the deal moved): it never comes back by itself on the card, and focus stays where the person put it.

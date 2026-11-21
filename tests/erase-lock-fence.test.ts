@@ -105,7 +105,9 @@ async function walk(at: (index: number, commands: Command[]) => Promise<void>, n
   let inside = false;
   redis.pipeline = (async (commands: Command[]) => {
     if (inside) return original(commands);
-    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:release:v1"))) holding = false;
+    // Only the store's own lock's release ends the hold: the PayPal press's lock, taken around the erasing mark
+    // (Codex L-20261120-0448), is let go inside it.
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:release:v1") && String(c[3]).startsWith("nl:store:lock:"))) holding = false;
     if (holding && changes(commands)) {
       inside = true;
       try {
@@ -192,7 +194,10 @@ async function main() {
     // opened again once one of them is made. The erasing mark is the walk's very first fenced change (step 0): before
     // it, the plan starts and the store keeps everything; from it on, the plan is refused (setSubscription), and the
     // store is erased to the end by the next walk, its mark going with its record.
-    is("the plan starts again only before the erasing mark", [restarted, marked], [n === 0, n > 0]);
+    // The mark's own step is the first that names the erasing key: since Codex L-20261120-0448 the PayPal press's lock
+    // is taken just before it (step 0), so the mark is step 1, and up to and including its step the plan starts again.
+    const markStep = census.findIndex((line) => line.includes(ERASING_KEY));
+    is("the plan starts again only before the erasing mark", [restarted, marked], [n <= markStep, n > markStep]);
     if (restarted) {
       is("the store runs, its record there", [Boolean(current), Boolean(current?.subscriptionActive)], [true, true]);
       is("nothing of the store that runs again is deleted or changed", [...running.keys()].filter((key) => !ours(key) && now.get(key) !== running.get(key)).map((key) => key.replace(/[0-9a-f]{24,}/g, "…")), []);

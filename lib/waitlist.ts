@@ -110,6 +110,27 @@ export async function isSoon(store: Store, productId: string): Promise<boolean> 
   throw new UnknownReplyError("whether a product is coming soon");
 }
 
+/** Products coming soon a customer-voice reading counts the waitlists of: more than this is unknown, never all of them. */
+export const WAITLIST_VOICE_PRODUCTS = 50;
+
+/**
+ * How many people joined the waitlist of each product coming soon, read
+ * exactly (HLEN: confirmed or not, never who), most first, for the summary of
+ * what customers are saying (95 [D2-DEMAND-RADAR]; lib/customer-voice.ts).
+ * A reply that is not a whole count, or more products coming soon than
+ * WAITLIST_VOICE_PRODUCTS, throws UnknownReplyError: never "nobody waiting".
+ */
+export async function waitlistSizes(store: Store): Promise<{ productId: string; people: number }[]> {
+  const soon = [...(await soonProducts(store))].sort();
+  if (soon.length > WAITLIST_VOICE_PRODUCTS) throw new UnknownReplyError("the products coming soon, more than are read");
+  if (!soon.length || !store.statsId) return [];
+  const replies = repliesFor(await redisPipeline(soon.map((p) => ["HLEN", listKey(store.statsId!, p)])), soon.length);
+  if (!replies) throw new UnknownReplyError("the waitlists' sizes");
+  const sizes = soon.map((productId, i) => ({ productId, people: countOf(replies[i]) }));
+  if (sizes.some((s) => s.people === null)) throw new UnknownReplyError("a waitlist's size");
+  return (sizes as { productId: string; people: number }[]).sort((a, b) => b.people - a.people || a.productId.localeCompare(b.productId));
+}
+
 export async function setSoon(store: Store, productId: string, on: boolean): Promise<void> {
   if (!store.statsId) return;
   await redisPipeline([[on ? "SADD" : "SREM", soonKey(store.statsId), productId]]);

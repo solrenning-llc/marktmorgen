@@ -7459,6 +7459,10 @@ Head `3afaed2e75b540d150295f1999d3dd6af5e71f7e` reprovado, sem incorporação/pu
 
 ### Ordem vinculante do Bloco de abertura
 
+**Condição de abertura — termos comerciais guardados, passo 2 (dono, 21/11/2026, 00h00 Fortaleza; OWNER-20261121-0000-COMMERCIAL-TERMS-STORAGE, que completa DONO-20261120-1814-CONTRATO-HASH; repassada pelo Claude 4, sessão 01S9eVA38w, no comentário 7056381951 do #4932, e gravada aqui pelo coordenador, Claude 5 ibqho, porque um PR de produto não edita esta fila, AC (d)):** sem este passo, as vendas não abrem. Num PR próprio e pequeno, aberto só depois que o PR `claude4/contract-terms-digest` estiver no main, sem empilhar (AC (g)), e antes da abertura; só esse PR liga `COMMERCIAL_TERMS_STORED`, e até lá a trava do código continua recusando toda política de custeio de contrato (escolha que o dono deixou ao Claude 4, sessão 01S9eVA38w, em 21/11/2026: "faça o que for mais seguro e correto", comentário 7057394872 do #4932; a gravação anterior, "no PR que liga a admissão de contratos", fica substituída nesse ponto, Pedidos repetidos, passo 3 (b)): (1) cada versão dos termos é gravada uma única vez no Redis pelo seu SHA-256, sem prazo de expiração, na família de dados da empresa, quando o primeiro contrato que a cita é admitido, e nada é gravado sem uso; (2) nunca é alterada nem apagada enquanto um contrato a cita, e fica guardada pelo menos enquanto esse contrato existir; (3) entra no backup diário existente e é conferida na restauração; (4) na leitura, o SHA-256 é recalculado, e uma divergência ou um texto ausente é recusado de forma visível; (5) espaço, leituras e backup entram no registro de custos com teto, e custo desconhecido reprova. O passo 1 (texto de cada versão no código, com teste que falha se o texto publicado mudar sem versão nova, e teste que bloqueia admitir contrato enquanto o passo 2 não existir) fica no PR `claude4/contract-terms-digest`. Os dois PRs: RED antes, revisão do Codex (dinheiro) e de outra família, 9/9 no head exato, `git merge-tree` limpo, CV, MV e AC. Nenhum preço, limite, comissão, imposto, teto, trava, flag ou texto dos termos muda por este registro; PLANS_ON_SALE e OPENING_REQUESTED continuam false.
+
+**Condição de abertura — auditoria do Codex nos PRs de dinheiro revisados sem ele (dono, 21/11/2026, 14h37 Fortaleza; OWNER-20261121-1437-CODEX-ABSENT-MONEY-REVIEW, repassada pelo Claude 4, sessão 01S9eVA38w, no comentário 7066639814 do #4932, e gravada aqui pelo coordenador, Claude 5 ibqho, porque um PR de produto não edita esta fila, AC (d)):** enquanto o Codex estiver sem uso (até 25/11/2026, 11h05 Fortaleza), nada espera por ele e nada chega ao cliente sem a revisão dele. (1) #5016 e #5017: a revisão de dinheiro do Codex é substituída por uma revisão de dinheiro de uma família fora do Claude 4 no head exato, além das demais revisões exigidas, que vale só se leu o diff e rodou, sobre a junção com o main, o conjunto de teto da AC (l) e os testes de margem, com o resultado escrito no PR; depois disso, a fila normal (9/9 no head exato, `git merge-tree` limpo contra um `origin/main` buscado há menos de uma hora, ordem de vez, `fila #N @sha` pedido por outra família). (2) O PR `claude4/contract-terms-digest`: a revisão do Codex é substituída por duas revisões de dinheiro, de duas famílias diferentes fora do Claude 4, no head exato, que conferem o que o dono listou (o contrato prova exatamente o que o cliente aceitou; a reconstrução é idêntica byte a byte ao formato antigo; digest errado ou texto ausente é recusado; o teste que bloqueia a admissão de contrato sem o armazenamento do passo 2; os cinco testes de contrato `contract-admission-ack`, `restart-activation-ack`, `restart-recovery-ack`, `restart-result-ack` e `restart-submission-ack`; o maior contrato cabe em 1.048.576 bytes sobre a junção); um achado é corrigido na causa, com teste, e as revisões valem então para o head novo. (3) **Antes da abertura, quando o Codex voltar, ele revisa os três PRs já incorporados por esta regra; todo achado vira correção com teste antes de qualquer venda.** Sem essa auditoria registrada como feita, as vendas não abrem. Nenhum preço, limite, comissão, imposto, teto, trava, flag ou texto dos termos muda por este registro; PLANS_ON_SALE e OPENING_REQUESTED continuam false.
+
 **Exceção PV8, dono25/10/2026 16h47Fortaleza:** após registrarPV8,permitida execução(a)–(c)de desperdíciosCI semesperarPV e seminterromperAB(a);coberturacompletaantesdeproduçãocontinuaobrigatória. RestantePV8segueposiçãoPV. Não privatizar repositório.
 
 
@@ -23851,5 +23855,61 @@ Custo: custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornec
 REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação. O imposto recebido pela taxa da plataforma nunca sai da receita nem da comissão. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima. Leitura tributária pela política TX.
 
 Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, EU_VAT_COLLECT_REVIEWED, UK_VAT_COLLECT_REVIEWED, o tax gate, a revisão comercial ou stripePlatformEligibilityReady; preencher DEEMED_SUPPLIER_RECORDS ou os registros fiscais sem o registro real do dono; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados (a parte do imposto devido pela LLC, recebida na própria cobrança, é a exceção da seção IV de AGENTS.md); propor de novo o crédito pré-pago ou a fatura posterior; criar contas, aceitar termos, contratar (inclusive o intermediário de importação), pagar ou contatar terceiros, inclusive a Stripe; usar dados reais nos testes.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## IV2 — Endereço de cobrança em toda compra paga (20/11/2026)
+
+Etiqueta: [IV2], item 790.
+
+Solicitação do dono (20/11/2026, por volta da 00h20, horário de Fortaleza), na sessão do Claude 4. O texto literal está em docs/eu-uk-us-tax-collection-decision-2026-11-19.md, seção "Complemento: endereço de cobrança em toda compra paga", e a regra está em AGENTS.md, seção IV, item (i). Complementa o 789 [IV1].
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. A busca no main e nos PRs abertos, por `billing_address_collection`, pela data e pela etiqueta [IV2] (livre), não achou registro equivalente.
+
+Estado inicial: na fila. Posição: condição do Bloco de abertura, junto do 789 [IV1]. A ordem dos outros itens não muda.
+
+Problema concreto que resolve (VR, item 3):
+- a oferta de um clique ficava escondida quando a Stripe não guardava o endereço, inclusive fora da UE;
+- faltava a segunda prova de localização exigida pelos arts. 24b e 24f;
+- faltava o local do comprador para o sales tax americano.
+
+Como se confere: fluxo completo sintético, com a sessão de checkout pedindo o endereço e os testes da oferta e dos registros. Como traz lucro: a oferta de um clique volta a aparecer para todo comprador, e o imposto da abertura fica correto.
+
+O que fazer, em unidades pequenas:
+1. **Checkouts pagos:** `billing_address_collection=required` em todo checkout pago da Stripe, como cartão, carrinho, pedidos de pagamento, gorjetas, chamadas e renovação. Compra gratuita fica sem endereço. Um teste lista cada lugar que abre uma cobrança e prova que todos pedem o endereço.
+2. **Oferta de um clique (`offerGate`, lib/upsell.ts):** as provas passam a ser o endereço e o país do cartão (`payment_intent.payment_method.card.country`, já lido). Uma contradição recusa, como hoje.
+3. **Privacidade:** a política de privacidade (app/privacy/page.tsx, arquivo compartilhado) e lib/person-data.ts dizem para que serve o endereço e por quanto tempo fica guardado (10 anos nas vendas da UE, art. 63c; nas demais, o prazo legal), e que nunca é usado para marketing. As regras de apagar dados continuam onde a lei permite.
+4. **Sales tax americano:** o local do comprador vem desse endereço, com os contadores por estado do 9 [C-US].
+
+Acessibilidade (AX274, Parte A, integral): o formulário de endereço é o da própria Stripe. Cada PR registra o que muda para o comprador. Os passos aumentam com os campos do endereço, preenchidos automaticamente quando possível.
+
+Custo: nenhum fornecedor novo. Custo desconhecido reprova, nunca é zero.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, a revisão comercial ou stripePlatformEligibilityReady; usar o endereço para marketing; pedir telefone ou outro dado; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; usar dados reais nos testes.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## FZ — Horários no fuso do cliente (21/11/2026)
+
+### 792 [FZ1] — Todo horário visível ao cliente no fuso dele, que pode trocá-lo
+
+Orientação do dono (21/11/2026, por volta das 00h11 Fortaleza), repassada pelo Claude 4 (sessão 01S9eVA6MR) na mensagem C4-20261121-0016-c3-sem-uso-fuso e gravada pelo coordenador (Claude 5 ibqho), nas palavras transcritas: "No site, sempre que um horário estiver visível ao cliente, ele deverá ser exibido automaticamente no fuso horário do próprio cliente, que poderá alterá-lo." A regra permanente está em AGENTS.md, seção FZ.
+
+Recebido novamente em 21/11/2026, às 03h31 (Fortaleza), pelo Claude 1 no correio (20261121T063115Z-claude-1-03b2 e 20261121T063122Z-claude-1-b12a), nas palavras do dono: "todos os agentes ao falarem comigo, escrevam apenas as horas no horário de fortaleza, mas que no site, quando o horário estiver visível para o cliente, deve ser escrito no fuso horário do cliente e permitir que o cliente altere o fuso horário em que ele quer visualizar o horário". É o mesmo item, sem número novo (Pedidos repetidos, passo 3 (b)). O trabalho passa a pedir também: (1) um levantamento de toda data e hora visível no site e nos e-mails; (2) uma só fonte do fuso, nesta ordem: escolha guardada, fuso do navegador, fuso declarado na conta; (3) o seletor acessível (AX274, WCAG 2.2 AAA) no rodapé e nas telas com horário, com a escolha guardada em cookie e, com login, na conta; (4) o nome do fuso sempre ao lado da hora; (5) o primeiro desenho do servidor sem hora errada (rótulo do fuso ou hidratação sem salto); (6) testes de horário de verão e de fuso inválido. Já existem e são reaproveitados: lib/local-clock.ts e components/local-clock.tsx (fuso do navegador), lib/reader-time.ts (367 [EZ4]), slot-picker e session-picker (chamadas no fuso de quem compra). Nenhum preço, limite, comissão ou trava muda.
+
+Pedidos repetidos: conferidos o main, os PRs abertos e a fila em 21/11/2026. Não há item nem regra igual; o item 367 [EZ4] cobre só a entrega às 9h no fuso do leitor e continua como está.
+
+Estado: na fila. O dono pediu que o trabalho seja distribuído já a uma sessão com uso, em PRs pequenos e sem sobrecarregar a fila; o coordenador nomeia a sessão no canal. O número 792 é o próximo livre (790 é [IV2] no main e 791 está no #4981; conferido em 21/11/2026 às 06:05 UTC no main e nos 23 PRs abertos que mexem nesta fila), localizador e não prioridade.
+
+Unidades, nesta ordem, uma por PR:
+1. O fuso único: detecção no navegador (`Intl.DateTimeFormat().resolvedOptions().timeZone`), validação do identificador IANA no servidor, cookie próprio lido na renderização do servidor, uma opção visível para o cliente trocar o fuso e um único formatador reaproveitado por todas as telas. Teste: um fuso inválido nunca é aceito; a hidratação não diverge; o horário de verão vem do `Intl`.
+2. A migração tela por tela, começando pelo estúdio (12 ocorrências de `timeZone: "UTC"` em app/studio/page.tsx) e pelas páginas do comprador. Cada uma das 100 ocorrências em app/ e components/ é classificada como horário exibido (converte) ou regra em UTC (fica em UTC, com o horário exibido convertido, como `utcAndLocal` em lib/local-clock.ts).
+3. E-mails (o fuso salvo na conta, ou o fuso escrito ao lado do horário), exportações (ISO 8601 com deslocamento) e datas de cobrança e prazos legais (data e fuso explícitos).
+
+Acessibilidade (AX274): rótulo visível na opção de troca, operação por teclado, alvo de pelo menos 44 × 44 px, e o fuso dito por extenso para leitores de tela.
+
+Custo: o cookie não gera custo de fornecedor. Guardar a escolha no perfil (servidor) entra no pior caso de cada plano, com teto, antes de ser ligado (regra MR); custo desconhecido reprova, nunca é zero.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; mudar a hora UTC de qualquer regra que seja de fato em UTC; usar dados reais nos testes.
 
 Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.

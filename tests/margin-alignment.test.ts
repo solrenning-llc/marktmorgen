@@ -16,9 +16,10 @@ import {reviewedReceivingTaxInput} from './reviewed-receiving-fixture';
 import {syntheticTaxContext} from './customer-tax-review-fixture';
 import {netOf} from './plan-cost-model';
 import {worstMonthKept} from './worst-month-kept';
+import {onDemandReport,onDemandText} from './generated-on-demand';
 
 test('the dated report holds the worst month each plan keeps under the LC reading, exactly (Claude 4 LOW on #4854)',()=>{
- const doc=readFileSync('docs/margin-alignment-2026-10-18.md','utf8');
+ const doc=renderMarginAlignment(PLANS_ON_SALE,ASSISTANT_ON_SALE); // generated on demand (owner, 20/11/2026)
  for(const cycle of ['month','year'] as const){
   const label=cycle==='month'?'Monthly plan':'A month of a yearly plan';
   const row=['',label,...worstMonthKept(cycle).map((v)=>'US$'+v),''].join(' | ').trim();
@@ -28,7 +29,7 @@ test('the dated report holds the worst month each plan keeps under the LC readin
 test('the report uses the TX reading and matches its reproducible figures',()=>{
  const generated=renderMarginAlignment(PLANS_ON_SALE,ASSISTANT_ON_SALE);
  assert.ok(generated.startsWith(CURRENT_TAX_NOTICE));
- assert.equal(readFileSync('docs/margin-alignment-2026-10-18.md','utf8'),generated);
+ assert.equal(readFileSync('docs/margin-alignment-2026-10-18.md','utf8'),onDemandText(onDemandReport('docs/margin-alignment-2026-10-18.md')),'the path holds only its fixed text: the report is generated on demand');
  // Owner, 19 November 2026: the legally correct reading only; the old 27.5% floor, the most-tax reading and ISS are gone.
  assert.doesNotMatch(generated,/Binding reading: most-tax|78\.18%|ISS ?5%|most onerous/);
 });
@@ -38,13 +39,16 @@ test('the unit tax is IRPF 15% plus IOF 0.38% on the profit, with no 27.5% floor
  for(const [price,usage] of [[6900,595],[44900,2754],[99900,5791],[690000,6789]]){
   const u=unitUnder(price,usage),r=receivingOf(price);
   assert.equal(u.pretaxCents,r.revenueCents-r.totalCents-usage);
-  assert.equal(u.taxCents,Math.ceil(u.pretaxCents*1538/10000));
+  // IRPF and IOF each rounded up on its own, as lib/receiving-costs.ts rounds them (Claude 2's LEVE on #4916).
+  assert.equal(u.taxCents,Math.ceil(u.pretaxCents*1500/10000)+Math.ceil(u.pretaxCents*38/10000));
   assert.ok(u.taxCents<Math.ceil(u.pretaxCents*2750/10000),'below the old 27.5% floor');
  }
  assert.equal(unitUnder(6900,100_000).taxCents,0);assert.equal(unitUnder(6900,100_000).meetsFloor,false);
  for(const price of [3600,6900,69000]){
   const room=unitUnder(price,0).usageRoomCents;
   assert.equal(unitUnder(price,room).meetsFloor,true);assert.equal(unitUnder(price,room+1).meetsFloor,false);
+  // The smallest pretax profit that keeps a net cent: 3 (1 IRPF cent and 1 IOF cent), not 2 as one 15.38% rounding gave.
+  assert.equal(unitUnder(price,room).pretaxCents,3);assert.equal(unitUnder(price,room).taxCents,2);assert.equal(unitUnder(price,room).netCents,1);
  }
 });
 test('the unchanged dearest receiving fee and every reserve use the whole amount charged',()=>{

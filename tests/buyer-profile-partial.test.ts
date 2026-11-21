@@ -330,6 +330,13 @@ async function main(): Promise<void> {
     [true, true],
   );
 
+  // Claude 6's LEVE 2 on #2794 (7057905304): one legible and one illegible imported row is a partial read, never a
+  // complete one; what read is still shown.
+  part("A mixed imported read: what read is shown, and the page is partial");
+  await seed();
+  await redis.pipeline([["HSET", importedKey(STATS, EMAIL), "kit1", JSON.stringify({ at: NOW - 50, job: `paypal:${PAYPAL_ORDER}`, option: "not a valid option" })]]);
+  const mixed = await buyerProfile(store, EMAIL);
+  is("the legible import is listed, the reading is partial and no part is named", [mixed.orders.some((o) => o.title === "Bread School"), mixed.partial, unreadOf(mixed)], [true, true, []]);
   done();
 }
 

@@ -13,6 +13,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, listSlots, repliesFor } from "@/lib/redis-reply";
 import { keepUnlessErased, suppressedKey, suppressionPrint } from "@/lib/suppression";
+import { listForNaming } from "@/lib/store-readings";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
@@ -254,7 +255,16 @@ export async function memberHealth(store: Store, fresh = false, now = Date.now()
     else atRisk += m.monthly;
   }
   const health: Health = { at: Math.floor(now / 1000), currency: store.currency, members, counts, atRisk, atRiskElsewhere, unscored, complete };
-  if (isRedisConfigured()) await keepCopy(store, health).catch((error) => console.error("the members' scores copy could not be kept", error));
+  // The studio is answered with the certified copy itself, never the unfiltered refresh (#4749): a member this store
+  // deleted stays out of the answer as of the copy, and a refresh whose copy cannot be certified answers nothing.
+  if (isRedisConfigured()) {
+    try {
+      return await keepCopy(store, health);
+    } catch (error) {
+      console.error("the members' scores copy could not be kept", error);
+      return null;
+    }
+  }
   return health;
 }
 
@@ -281,21 +291,49 @@ async function erasedOf(store: Store, members: MemberRow[]): Promise<Set<string>
  * meanwhile, or a read that does not answer, deletes the copy, never leaving it with them in it. Prints that do not
  * read before the write keep no copy at all.
  */
-async function keepCopy(store: Store, health: Health): Promise<void> {
-  // A legacy snapshot can predate the namespace created by an erasure already completed in another request.
-  // Without its id no print can be checked, so no copy containing a person may be kept from this snapshot.
-  if (!store.listId && health.members.length) return;
-  const erased = await erasedOf(store, health.members);
-  if (!erased) return;
-  const copy = erased.size ? { ...health, members: health.members.filter((m) => !erased.has(m.email)) } : health;
-  if (store.listId && copy.members.length) {
-    // The pre-read and a later deletion cannot protect the gap after SET. Check and write in one Redis step.
-    await keepUnlessErased(cacheKey(store), store.listId, JSON.stringify(copy), CACHE_SECONDS, copy.members.map((m) => m.email));
-  } else {
-    await redisPipeline([["SET", cacheKey(store), JSON.stringify(copy), "EX", CACHE_SECONDS]]);
+async function keepCopy(snapshot: Store, health: Health): Promise<Health | null> {
+  // A snapshot with no list id (a store from before lists, or one read before an erasure in another request gave it
+  // one) has its list read fresh (lib/store-readings.ts, listForNaming: the record read again, a list made for a
+  // store that truly has none, tried at most once a UTC day and priced in the store-readings line; the day's try mark,
+  // one SET NX whether or not the try is this refresh's, LIST_TRY_COMMANDS in the studio line), so the prints are
+  // checked against the namespace an erasure would have written (Claude 3's and Claude 2's LOW on #4914). None to be
+  // had: no print can be checked, so no copy naming a person is kept or answered from this snapshot.
+  let store = snapshot;
+  if (!store.listId && health.members.length) {
+    const listId = await listForNaming(store).catch(() => null);
+    if (!listId) return null;
+    store = { ...store, listId };
   }
-  const after = await erasedOf(store, copy.members).catch(() => null);
-  if (after === null || after.size) await redisPipeline([["DEL", cacheKey(store)]]);
+  const erased = await erasedOf(store, health.members);
+  if (!erased) return null;
+  let copy = erased.size ? { ...health, members: health.members.filter((m) => !erased.has(m.email)) } : health;
+  // A person deleted at the commit or just after it is taken out and the copy written again, at most three times;
+  // past that, or on prints that do not read, no copy is kept and nothing is answered.
+  for (let tries = 0; tries < 3; tries += 1) {
+    if (!store.listId || !copy.members.length) {
+      await redisPipeline([["SET", cacheKey(store), JSON.stringify(copy), "EX", CACHE_SECONDS]]);
+      return copy;
+    }
+    // The pre-read and a later deletion cannot protect the gap after SET. Check and write in one Redis step.
+    const atCommit = await keepUnlessErased(cacheKey(store), store.listId, JSON.stringify(copy), CACHE_SECONDS, copy.members.map((m) => m.email));
+    if (atCommit.size) {
+      copy = { ...copy, members: copy.members.filter((m) => !atCommit.has(m.email)) };
+      continue;
+    }
+    const after = await erasedOf(store, copy.members).catch(() => null);
+    if (after === null) {
+      await redisPipeline([["DEL", cacheKey(store)]]);
+      return null;
+    }
+    if (after.size) {
+      await redisPipeline([["DEL", cacheKey(store)]]);
+      copy = { ...copy, members: copy.members.filter((m) => !after.has(m.email)) };
+      continue;
+    }
+    return copy;
+  }
+  await redisPipeline([["DEL", cacheKey(store)]]);
+  return null;
 }
 
 /** Lets the ten-minute copy of the members' scores go, so a deleted person is not in it (lib/person-erasure.ts). */

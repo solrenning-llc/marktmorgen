@@ -84,10 +84,12 @@ export async function takeLock(key: string, ttlSeconds: number, waitMs: number):
 
 /**
  * Lets go of a lock, only if it is still ours, in one script. When the script cannot run, the lock is left to run
- * out at its own expiry: never read and deleted as two steps (Codex G on #2721). Never throws.
+ * out at its own expiry: never read and deleted as two steps (Codex G on #2721). Never throws. True only when the
+ * script confirmed it deleted this holder's lock; false when it was not ours or the answer is not known, so a caller
+ * that tells someone to try again at once can say so only on true (Codex L on #4212).
  */
-export async function releaseLock(held: Held): Promise<void> {
-  await script(RELEASE, [held.key], [held.token]).catch(() => 0);
+export async function releaseLock(held: Held): Promise<boolean> {
+  return (await script(RELEASE, [held.key], [held.token]).catch(() => 0)) === 1;
 }
 
 /**
@@ -254,4 +256,84 @@ export async function releaseLockStrict(held: Held): Promise<StrictLockReleaseRe
     if (!ack || !Object.hasOwn(ack, "value")) return "unknown";
     return ack.value === 1 ? "released" : ack.value === 0 ? "not-owned" : "unknown";
   } catch { return "unknown"; }
+}
+
+/**
+ * Changes made only while `held` is still the holder's: a closing store's deletes (lib/closed-store-data.ts, fencedBy) and its record's closing (lib/store.ts, closeStoreRecord), read in the same step (Codex M's
+ * focal M1 on #3156). KEYS: the lock, then the keys changed. ARGV: the walk's token, then each change as its word, the
+ * place of its key in KEYS and how many words of it follow: DEL (none), SREM, ZREM or HDEL (its members), SETEX (the
+ * value and its seconds). Every change is read before any is made. 1 done; 0 the lock is not the walk's any more,
+ * nothing done; -1 a change it does not make, nothing done.
+ */
+const CLOSING_FENCED = `-- marktmorgen:closing-fenced:v1
+local i, plan = 2, {}
+while i <= #ARGV do
+  local op, at, n = ARGV[i], tonumber(ARGV[i + 1]), tonumber(ARGV[i + 2])
+  if not at or not n or at < 2 or at > #KEYS or n < 0 or i + 2 + n > #ARGV then return -1 end
+  if op == "DEL" then
+    if n ~= 0 then return -1 end
+  elseif op == "SREM" or op == "ZREM" or op == "HDEL" then
+    if n < 1 then return -1 end
+  elseif op == "SETEX" then
+    if n ~= 2 or not tonumber(ARGV[i + 4]) then return -1 end
+  elseif op == "HSET" then
+    if n ~= 2 then return -1 end
+  else
+    return -1
+  end
+  plan[#plan + 1] = {op, at, i + 3, n}
+  i = i + 3 + n
+end
+if #plan == 0 then return -1 end
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+for _, step in ipairs(plan) do
+  local op, key, from, n = step[1], KEYS[step[2]], step[3], step[4]
+  if op == "DEL" then
+    redis.call("DEL", key)
+  elseif op == "SETEX" then
+    redis.call("SET", key, ARGV[from], "EX", ARGV[from + 1])
+  elseif op == "HSET" then
+    redis.call("HSET", key, ARGV[from], ARGV[from + 1])
+  else
+    for j = from, from + n - 1, 500 do
+      redis.call(op, key, unpack(ARGV, j, math.min(j + 499, from + n - 1)))
+    end
+  end
+end
+return 1`;
+
+/** The most keys, and the most words beside them, one CLOSING_FENCED step carries. */
+const FENCED_KEYS = 1000;
+const FENCED_WORDS = 4000;
+
+/** One change CLOSING_FENCED makes: DEL of a key, SREM, ZREM or HDEL of its members, SETEX (value, seconds), HSET (field, value). */
+export type FencedChange = { op: string; key: string; words: string[] };
+
+/**
+ * Makes `changes` only while the lock is still `held`'s, each script reading the lock in the same step as its changes
+ * (CLOSING_FENCED): true when every step made them, false when the lock was not the holder's any more (the steps before
+ * that one made, none of that step). Anything else throws: never taken as done.
+ */
+export async function applyIfHeld(held: Held, changes: FencedChange[]): Promise<boolean> {
+  for (let at = 0; at < changes.length; ) {
+    const keys: string[] = [];
+    const place = new Map<string, number>();
+    const argv: string[] = [];
+    while (at < changes.length) {
+      const { op, key, words } = changes[at];
+      const fresh = !place.has(key);
+      if (argv.length && ((fresh && keys.length >= FENCED_KEYS) || argv.length + 3 + words.length > FENCED_WORDS)) break;
+      if (fresh) {
+        keys.push(key);
+        place.set(key, keys.length + 1);
+      }
+      argv.push(op, String(place.get(key)), String(words.length), ...words);
+      at += 1;
+    }
+    const replies = repliesFor(await redisPipeline([["EVAL", CLOSING_FENCED, 1 + keys.length, held.key, ...keys, held.token, ...argv]]), 1);
+    const answer = replies?.[0];
+    if (answer === 0) return false;
+    if (answer !== 1) throw new Error("Redis answered changes made only while a lock is held (EVAL) in an unknown shape");
+  }
+  return true;
 }

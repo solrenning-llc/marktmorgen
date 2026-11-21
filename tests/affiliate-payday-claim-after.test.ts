@@ -56,13 +56,18 @@ async function main(): Promise<void> {
   const statsId = await storeWithPayday(15);
   const pipeline = redis.pipeline.bind(redis);
   let failOnce = true;
+  let claimed = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    // The next step after the claim: whether the creator pays from their PayPal by itself.
-    if (failOnce && commands.some((c) => c[0] === "GET" && c[1] === `nl:pp:${statsId}`)) {
+    // The next step after the month's claim, whatever it is. Whether the creator pays from their PayPal by itself is
+    // read before the claim (#2844: a link that cannot be read sends the manual reminder), so the stop is the first
+    // command sent once the claim was taken.
+    if (failOnce && claimed) {
       failOnce = false;
       throw new Error("the function stopped here (test)");
     }
-    return pipeline(commands);
+    const replies = await pipeline(commands);
+    if (commands.some((c) => c[0] === "SET" && c[1] === `nl:aff:payday:${statsId}:2026-11` && c.includes("NX"))) claimed = true;
+    return replies;
   }) as typeof redis.pipeline;
   const stopped = await run();
   redis.pipeline = pipeline;

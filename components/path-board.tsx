@@ -35,7 +35,7 @@ export function PathBoard({joined,alias,rows,privacyHref,withdrawOnly=false}:{jo
     <p className="mt-3">Optional, ordered only by recorded missions. No sales amounts or levels are shared. Your real name, store address, answers and goal stay private.</p>
     {joined?<><p className="mt-3">You appear as <strong>{alias}</strong>.</p><button type="button" className="btn mt-3" disabled={!ready||busy||uncertain} onClick={()=>void change(false)}>Leave the mission board</button></>:withdrawOnly?<p className="mt-3">You are not on the mission board.</p>:<>
       <p className="mt-3 text-sm text-ink-soft">Joining uses four studio requests and about 2 KB of your data room, plus the small private record. Leaving stays available through privacy controls when your monthly studio allowance is used.</p>
-      <label className="mt-4 flex items-start gap-3"><input type="checkbox" autoComplete="off" className="mt-1" checked={consent} onChange={event=>setConsent(event.target.checked)} disabled={!ready||busy||uncertain}/><span>Share my recorded mission count, a generated pseudonym and the reading time with other Path owners on the board.</span></label>
+      <label className="mt-4 flex min-h-11 items-start gap-3"><input type="checkbox" autoComplete="off" className="mt-1" checked={consent} onChange={event=>setConsent(event.target.checked)} disabled={!ready||busy||uncertain}/><span>Share my recorded mission count, a generated pseudonym and the reading time with other Path owners on the board.</span></label>
       <button type="button" className="btn mt-4" disabled={!ready||!consent||busy||uncertain} onClick={()=>void change(true)}>Join the mission board</button>
     </>}
     <p className="mt-3 text-sm" role="status" aria-live="polite">{message}</p>

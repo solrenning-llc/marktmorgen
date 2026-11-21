@@ -22,6 +22,9 @@ const serverReady = () => false;
 
 const NO_ACTIONS: readonly OfferedAction[] = [];
 
+/** The field's name, drawn by its label and also carried on the field itself (see the input below). */
+const FIELD_NAME = "Search the studio";
+
 type Reply = { status: number; body: SearchAnswer & { ok?: boolean; error?: string; message?: string } };
 type Option = { key: string; group: string; title: string; detail: string; href?: string; buyer?: string };
 
@@ -219,7 +222,7 @@ export function StudioSearch({ sid, buyers, actions = NO_ACTIONS }: { sid: strin
     <div role="search" aria-label="Studio" inert={!ready} className={`border-b border-line bg-white${ready ? "" : " invisible"}`}>
       <div className="container-page py-3">
         <label htmlFor={inputId} className="field-label">
-          Search the studio
+          {FIELD_NAME}
         </label>
         <p id={hintId} className="mt-1 text-sm text-ink-soft">
           {buyers
@@ -234,6 +237,10 @@ export function StudioSearch({ sid, buyers, actions = NO_ACTIONS }: { sid: strin
           aria-expanded={expanded}
           aria-controls={listId}
           aria-activedescendant={expanded && active >= 0 ? optionId(active) : undefined}
+          // The same words as the label, on the field itself: axe takes a label's words only while the label is drawn,
+          // and WebKit's audit once read the label hidden for an instant while the field was not, leaving a field named
+          // by its hint alone (label-title-only). A name the field carries does not depend on another node's frame.
+          aria-label={FIELD_NAME}
           aria-describedby={hintId}
           autoComplete="off"
           spellCheck={false}

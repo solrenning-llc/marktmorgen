@@ -56,7 +56,7 @@
  * import will check it, against the store as it is, and nothing written.
  */
 import { DataRoomError } from "@/lib/store-data";
-import { allowanceWindow, resetWords, windowId } from "@/lib/allowance-window";
+import { allowanceWindow, resetWords, windowId, windowKeySeconds } from "@/lib/allowance-window";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { namesAddress } from "@/lib/address-match";
@@ -68,6 +68,7 @@ import {
   type DraftProduct,
   type Store,
   MAX_PRODUCTS,
+  MAX_STORE_BYTES,
   MAX_SUMMARY_LENGTH,
   MAX_TITLE_LENGTH,
   addDraftProducts,
@@ -91,8 +92,9 @@ import { deliverableItems } from "@/lib/bundle-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
 import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, mailDay, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
-import { costsPaused } from "@/lib/plan-standing";
-import { healthTags, moveTags, noteSent, pausedFor, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
+import { newCostCode } from "@/lib/plan-standing";
+import { healthTags, moveTags, noteSent, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
+import { stopTags } from "@/lib/mail-health-rules";
 import { isPaidUp } from "@/lib/billing";
 import { storeBase } from "@/lib/purchase-email";
 import { movedPurchaseWords } from "@/lib/buyer-words/moved-purchases";
@@ -175,7 +177,7 @@ async function holdMoved(store: Store, n: number, now = Date.now()): Promise<num
 /**
  * Store's own figure (IMPORT_ALLOWANCES.creator.movedEmails a month): takes up to `n`, all over it given back at once.
  * The replies are read exactly (CX-123 rule 24): the INCRBY a whole number (a give-back can take the count below zero),
- * then the EXPIRE NX's 0 or 1 (lib/window-count.ts, so the month's key never outlives its window); any other shape
+ * then the EXPIRE NX's 0 or 1 (lib/window-count.ts; windowKeySeconds, so the key outlives its window, stretched or not); any other shape
  * throws UnknownReplyError. Before, the count was read with Number(),
  * which took a list or `true` for a small number.
  */
@@ -187,7 +189,7 @@ async function takeMovedCount(store: Store, n: number, now: number): Promise<num
   const key = movedKey(store.sid, window);
   const replies = repliesFor(
     await redisPipeline([
-      ...windowCountBy(key, 32 * 86_400, n),
+      ...windowCountBy(key, windowKeySeconds(store, 32 * 86_400, now), n),
     ]),
     2,
   );
@@ -229,8 +231,8 @@ export async function takeImportRows(store: Store, n: number, now = Date.now(), 
   try {
     // Read exactly (CX-123 rule 24), as takeMovedCount reads the same pair: the INCRBY a whole number, the EXPIRE's
     // 0 or 1 (main's windowCountBy). Any other shape (true, a list, a fraction) is not a count and takes nothing; what
-    // an INCRBY may have added stays counted (more, never less).
-    const replies = repliesFor(await redisPipeline(windowCountBy(key, 32 * 86_400, n)), 2);
+    // an INCRBY may have added stays counted (more, never less). Kept as long as the window (windowKeySeconds, #4561).
+    const replies = repliesFor(await redisPipeline(windowCountBy(key, windowKeySeconds(store, 32 * 86_400, now), n)), 2);
     const total = replies?.[0];
     const counted = typeof total === "number" ? total : typeof total === "string" && /^(0|-?[1-9][0-9]{0,14})$/.test(total) ? Number(total) : NaN;
     if (!replies || (replies[1] !== 0 && replies[1] !== 1) || !Number.isSafeInteger(counted)) return { ok: false, reason: "unavailable", limit };
@@ -244,6 +246,37 @@ export async function takeImportRows(store: Store, n: number, now = Date.now(), 
 const KEEP_SECONDS = 14 * 86_400;
 /** How long an import's records are kept, as the store is told (lib/person-data.ts): read by tests/import-mail-putback-retention.test.ts. */
 export const IMPORT_KEEP_SECONDS = KEEP_SECONDS;
+/** The five-minute job's interval (vercel.json, /api/cron/imports). */
+const IMPORT_PASS_SECONDS = 5 * 60;
+/**
+ * The five-minute job's passes over an import paused by its plan (newCostCode in runImport) until its keeping runs
+ * out, the one that ends it included (Codex L on #3980). Priced in tests/plan-cost-registry.ts (imports).
+ */
+export const PAUSED_IMPORT_PASSES = Math.floor(KEEP_SECONDS / IMPORT_PASS_SECONDS) + 1;
+/**
+ * The most of those passes a billing month (31 days) can hold: one import holds the store's one slot at a time, and a
+ * new one starts only on a plan running, so paused passes in a month never pass the job's passes in it.
+ */
+export const PAUSED_IMPORT_PASSES_MONTH = (31 * 86_400) / IMPORT_PASS_SECONDS;
+/**
+ * How often the five-minute job works on a paused import: every two hours, which keeps a refunded Store year under its
+ * ceiling (tests/plan-margin.test.ts). In between, a pass only reads its record and goes on (PAUSED_IMPORT_SKIP_COMMANDS);
+ * the creator's own step still runs at once once the plan runs again.
+ */
+export const PAUSED_IMPORT_CHECK_SECONDS = 2 * 60 * 60;
+/** The passes that work on a paused import, the first and the one that ends it included, and the most a billing month holds. */
+export const PAUSED_IMPORT_CHECKS = Math.floor(KEEP_SECONDS / PAUSED_IMPORT_CHECK_SECONDS) + 2;
+export const PAUSED_IMPORT_CHECKS_MONTH = (31 * 86_400) / PAUSED_IMPORT_CHECK_SECONDS + 1;
+/**
+ * The commands of a pass that works on one at the most: the job's list and record read, then runImport's lock, record,
+ * store, write and key renewals (12, measured in tests/import-paused.test.ts), and the one that ends it (14).
+ */
+export const PAUSED_IMPORT_PASS_COMMANDS = 14;
+/** The bytes such a pass moves at the most: the store's record at its ceiling, and the import's own (3 × 4 KB). */
+export const PAUSED_IMPORT_PASS_BYTES = MAX_STORE_BYTES + 3 * 4_096;
+/** A pass that only reads the paused import's record and goes on: the job's list and the record (measured there too). */
+export const PAUSED_IMPORT_SKIP_COMMANDS = 2;
+export const PAUSED_IMPORT_SKIP_BYTES = 2 * 4_096;
 /**
  * How long the rows themselves are kept while they wait to be brought in
  * (since 18 October 2026): what they weigh is counted in the database's
@@ -375,6 +408,11 @@ export type ImportJob = {
     statusColumn?: boolean;
   };
   finishedAt: number;
+  /**
+   * While its plan pauses its work (newCostCode), when the five-minute job next works on it: every two hours, not every
+   * pass (PAUSED_IMPORT_CHECK_SECONDS), so a store nobody pays costs one such pass in 24, not each (Codex L on #3980).
+   */
+  pausedUntil?: number;
   /**
    * Members: the emails to people brought over still held for this import, taken for the whole file when it started
    * (startImport), with the window and the counter they came from (the plan's monthly emails, or Store's own figure).
@@ -1577,6 +1615,10 @@ async function membersStep(job: ImportJob, store: Store, rows: string[][], now =
     if (field === false) {
       skipped.push({ line: fresh[i].line, column: "email", problem: DELETED, value: "" });
       unseen.push(`m:${fresh[i].email}|${fresh[i].productId}`);
+    } else if (field === "gone") {
+      // Its membership was removed from the store after this step read the catalog (Claude 7, MEDIUM on #3473): nothing was written.
+      problems.push({ line: fresh[i].line, column: "product", problem: "This membership was removed from your store while the file was being brought in", value: fresh[i].productId });
+      unseen.push(`m:${fresh[i].email}|${fresh[i].productId}`);
     } else if (field) {
       job.counts.added += 1;
       toMail.push(field);
@@ -1643,7 +1685,11 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   // bounced, or been answered with a spam report, the rest are not written
   // to (lib/mail-health.ts): they are counted as not emailed, and the report
   // says so.
-  const paused = await pausedFor(job.sid);
+  // Read exactly (CX-123 rule 24, Claude 6's MEDIUM on #2687): a pause read in an unknown shape is not "no pause";
+  // the step is tried again later, and nobody is taken off the queue.
+  const pause = await pauseForSending(job.sid);
+  if (pause === undefined) return "retry";
+  const paused = pause !== null;
   // And until then they go out in portions that double, a hundred buyers
   // first, so that a file of dead addresses is found while few have been
   // written to. A portion not yet open is waited for; nobody is dropped.
@@ -1731,6 +1777,11 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
       const listId = await listFor(store).catch(() => {
         throw new UnknownReplyError("the store's list");
       });
+      // Every store email names its list (stopTags), so a bounce for good or a spam report on it takes the address off
+      // that list too (ALL-160 item 7; Codex L and U on #4245). The list read here, so a store given its list just now
+      // has it named as well.
+      const suppression = stopTags({ listId });
+      for (const message of messages) message.tags = { ...message.tags, ...suppression };
       const tos = messages.map((m) => m.to);
       deleted = await deletedAmong(listId, tos);
       refused = await leftListAmong(listId, tos);
@@ -1979,7 +2030,20 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
     // Rows not yet brought in are kept RAW_DAYS from their upload, as always;
     // the job and the addresses still to be emailed are kept alive meanwhile
     // (one write each, every five minutes), so a long pause loses neither.
-    if (costsPaused(store, Date.now() / 1000)) {
+    // The same once the plan has ended (the original 4c, newCostCode): the
+    // store is closing, and its records go with it on the closing day.
+    if (newCostCode(store, Date.now() / 1000)) {
+      // Never longer than the record's own keeping (Claude 7 on #3980): past it, the paused import ends, says so, and
+      // leaves the five-minute job's line, so a store nobody pays costs no pass after that. What was brought in stays.
+      if (Date.now() - job.at > KEEP_SECONDS * 1000) {
+        await note(job, [{ line: 0, column: "", problem: `This import waited ${KEEP_SECONDS / 86_400} days while the store's plan was not running, so it stopped. What was already brought in stays. Start the import again once the plan is running.`, value: "" }], "errors");
+        job.state = "failed";
+        job.finishedAt = Date.now();
+        await saveThenGiveBack([saveJob(job), ["SREM", ACTIVE_KEY, id], ["DEL", rowsKey(id), mailKey(id)]], job.sid, heldLeft(job), store);
+        await releaseBusy(job);
+        return job;
+      }
+      job.pausedUntil = Date.now() + PAUSED_IMPORT_CHECK_SECONDS * 1000;
       const [, , , holder] = await redisPipeline([saveJob(job), ["EXPIRE", mailKey(id), KEEP_SECONDS], ["EXPIRE", errorsKey(id), KEEP_SECONDS], ["GET", busyKey(job.sid)]]);
       // The store's one-import slot only while this import holds it.
       if (holder === id) await redisPipeline([["EXPIRE", busyKey(job.sid), KEEP_SECONDS]]);
@@ -2110,6 +2174,8 @@ export async function advanceImports(deadline: number): Promise<{ worked: number
     // An upload that holds the month's emails is on the list from its start: left alone while it may still be under
     // way, given up by runImport once it is past RECEIVING_MS, which saves it without the hold and then gives it back.
     if (job.state === "receiving" && Date.now() - job.at <= RECEIVING_MS) continue;
+    // Paused by its plan and worked on less than PAUSED_IMPORT_CHECK_SECONDS ago: its record was read, nothing more.
+    if (job.pausedUntil && Date.now() < job.pausedUntil) continue;
     try {
       const after = await runImport(job.id, deadline);
       counts.worked += 1;
@@ -2158,6 +2224,9 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       await remindLater(sid, field, now - 3_600 * 1000);
       continue;
     }
+    // The renewal date, once read: no reminder can go after it (reminderEmail), so an answer that stays unknown is
+    // tried again only before it, never for ever (Claude 4's LEVE on #3598).
+    let renews: number | null = null;
     // The line only leases what it hands out (dueReminders): a reminder put back for later says so, and every other
     // way out of this turn (sent, nothing to send, no longer wanted) takes it off the line at the end.
     let later = false;
@@ -2170,6 +2239,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       if (!store?.statsId || !isPaidUp(store)) continue;
       const invite = await readInvite(store.statsId, field);
       if (!invite || invite.kept) continue;
+      renews = invite.r * 1000;
       // It carries the creator's postal address: with none, it is not sent now. Checked before any other read (review
       // of #3476, Claude 7's cost MEDIUM 1), and tried again once a day while the renewal date is still more than a day
       // away, so a creator who saves the address again still has it sent (review of #3476, LOW 2); after that there is
@@ -2240,7 +2310,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
             html: letterHtml(store, text),
             replyTo: store.email,
             headers: { "List-Unsubscribe": `<${stop.oneClick}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
-            tags: moveTags(store),
+            tags: { ...moveTags(store), ...stopTags(store) },
           },
         ],
         `nimbus-move-remind:${store.statsId}:${field}`, { by: "monthly" },
@@ -2255,7 +2325,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       }
     } catch (error) {
       console.error("sending a moved member's reminder failed", error);
-      await putBack(now);
+      if (renews === null || now < renews) await putBack(now);
     } finally {
       // A drop that cannot reach Redis leaves the lease to bring it back, where the send's own key keeps it once.
       if (!later) await dropReminder(sid, field).catch((error) => console.error("taking a finished moved member's reminder off the line failed", error));

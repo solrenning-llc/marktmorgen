@@ -113,12 +113,13 @@ test("a closing's last steps pay for the record's going under the store's lock, 
   assert.match(close, /takeLock\(lockKeyOf\(owner\), LOCK_SECONDS, LOCK_WAIT_MS\)/);
   assert.match(source, /const LOCK_WAIT_MS = 8_000;/);
   assert.match(close, /\["GET", owner\]/);
-  assert.match(close, /deleteIfHeldOnly\(held,/);
+  // The record's closing (its addresses held back, its id and places released, the record deleted) in steps fenced by the lock (#3156 on #3643).
+  assert.match(close, /applyIfHeld\(held, changes\)/);
   assert.match(close, /releaseLock\(held\)/);
   // Its id leaves the account's list at both addresses read: one more SREM than the first read's (Claude 6 on #3643).
   // The id is the record's own: a store from before ids given one while it closes releases that one (Claude 7 on #3643).
   assert.match(close, /const sid = sameLegacy && fresh \? fresh\.sid : store\.sid;/);
-  assert.match(close, /\["SREM", account, sid\]/);
+  assert.match(close, /\{ op: "SREM", key: account, words: \[sid\] \}/);
   const hosts = (1 + MAX_TEAM) * (2 * 50 + 5);
   // The lock's tries, the GET, the entry's HSET again, the second account's SREM, the fenced delete's script (EVAL, GET,
   // DEL) and the release's (EVAL, GET, DEL), and the walk's own read of the record before it starts (one GET per entry,

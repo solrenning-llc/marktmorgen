@@ -5,6 +5,7 @@
  * and the creator are still told the new time. Synthetic Redis, Stripe and
  * email only.
  */
+import { bookingWords } from "@/lib/buyer-words/booking";
 import { readSetup, type CallSetup } from "@/lib/call-setup";
 import { confirmBooking, moveBooking, holdAndCheckout, type CallListing } from "@/lib/calls";
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -78,6 +79,8 @@ async function main(): Promise<void> {
   is("the buyer and the creator are still told the new time and where", [Boolean(buyer?.text.includes("Where: Bela Studio")), Boolean(creator?.text.includes("In person, at: Bela Studio"))], [true, true]);
   is("no calendar file with an invented sequence is attached", [buyer?.ics ?? "", creator?.ics ?? ""], ["", ""]);
   is("and neither email says a calendar file is attached", [/calendar file attached/i.test(buyer?.text ?? ""), /calendar file attached/i.test(creator?.text ?? "")], [false, false]);
+  // Codex X6's LOW on #2619 (6952486935): with no calendar file, the buyer was not told what to do with the old event.
+  is("both are told to move the event in their own calendar", [Boolean(buyer?.text.includes(bookingWords("en").moveOldEvent)), Boolean(creator?.text.includes("Move the event in your calendar to the new time."))], [true, true]);
   done();
 }
 

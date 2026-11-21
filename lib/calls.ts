@@ -1968,7 +1968,7 @@ async function tellMoved(input: {
         place ? b.whereAt(placeLine(place)) : room ? b.joinAtNewTime(room) : b.willSendLink(store.name),
         ...(video ? [b.videoRoomNote] : []),
         "",
-        ...(sequence === null ? [] : [b.newTimeAttached]),
+        sequence === null ? b.moveOldEvent : b.newTimeAttached,
         again ? b.moveAgainLink(moveLink(origin, store, product.id, session), MAX_MOVES) : b.cannotMoveAgain(store.name),
         b.toCancel(store.name),
       ].join("\n"),

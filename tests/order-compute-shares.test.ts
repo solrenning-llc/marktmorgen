@@ -4,11 +4,12 @@
  * not meet in one order).
  *
  * Holds:
- *   - an order's contact write, at its worst, stays inside CONTACT_SHARE_OF_ORDER_COMPUTE. Its worst is a paid cart
- *     of MAX_CART products put on the list (lib/buyer-list.ts putOnList): with the box ticked, one upsertContact and a
- *     noteProduct for every other product; without it, a noteProduct for every product. Each is counted at
- *     CONTACT_COMMANDS_MOST (lib/contacts.ts), which tests/contacts-write-cost.test.ts checks against the real scripts;
- *   - the shares one paid cart order can spend together (its stock holds, its stock confirmation, its contact write
+ *   - an order's contact write, at its worst, is priced in its own line (order-contact-write, ORDER_CONTACT_WRITE), not
+ *     inside ORDER_COMPUTE (Claude 5's decision of 21 November 2026). Its worst is a paid cart of MAX_CART products put
+ *     on the list (lib/buyer-list.ts putOnList): with the box ticked, one upsertContact and a noteProduct for every other
+ *     product; without it, a noteProduct for every product. Each is counted at CONTACT_COMMANDS_MOST (lib/contacts.ts),
+ *     which tests/contacts-write-cost.test.ts checks against the real scripts;
+ *   - the shares one paid cart order can spend together inside ORDER_COMPUTE (its stock holds, its stock confirmation
  *     and a purchase for several's settling waits) stay inside one ORDER_COMPUTE;
  *   - an offer after paying is an order of its own: lib/upsell.ts admits it as one more order before anything is
  *     charged and puts nothing on the list or in stock. So OFFER_WATCH_SHARE_OF_ORDER_COMPUTE is a share of that
@@ -19,15 +20,13 @@ import { join } from "node:path";
 import { MAX_CART } from "@/lib/cart-rules";
 import { CONTACT_COMMANDS_MOST } from "@/lib/contacts";
 import { done, is, part } from "./check";
-import {
-  CART_STOCK_SHARE_OF_ORDER_COMPUTE,
-  COMMAND,
-  CONTACT_SHARE_OF_ORDER_COMPUTE,
-  GROUP_SETTLE_STRIPE_WAIT,
-  OFFER_WATCH_SHARE_OF_ORDER_COMPUTE,
-  ORDER_COMPUTE,
-  STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE,
-} from "./plan-cost-registry";
+import * as registry from "./plan-cost-registry";
+
+const { CART_STOCK_SHARE_OF_ORDER_COMPUTE, COMMAND, GROUP_SETTLE_STRIPE_WAIT, OFFER_WATCH_SHARE_OF_ORDER_COMPUTE, ORDER_COMPUTE, STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE } = registry;
+// Read by name, so this test also fails while the line is missing (RED on main), not only fails to build.
+const contactLine = (registry as Record<string, unknown>).ORDER_CONTACT_WRITE;
+const contactCommands = (registry as Record<string, unknown>).ORDER_CONTACT_WRITE_COMMANDS;
+const contactShare = (registry as Record<string, unknown>).CONTACT_SHARE_OF_ORDER_COMPUTE;
 
 const source = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
 
@@ -38,17 +37,19 @@ part("An order's contact write at its worst (lib/buyer-list.ts putOnList, a cart
   const unticked = MAX_CART * t.noteProduct;
   const worst = Math.max(ticked, unticked);
   is("putOnList writes the contact the way this test counts it", /upsertContact\(/.test(source("lib/buyer-list.ts")) && /noteProduct\(/.test(source("lib/buyer-list.ts")), true);
-  is(
-    "RED: its commands stay inside CONTACT_SHARE_OF_ORDER_COMPUTE",
-    [worst, worst * COMMAND <= CONTACT_SHARE_OF_ORDER_COMPUTE * ORDER_COMPUTE],
-    [worst, true],
-  );
+  is("RED: ORDER_CONTACT_WRITE_COMMANDS is that worst", contactCommands, worst);
+  is("RED: its own line prices at least every one of those commands", typeof contactLine === "number" && contactLine >= worst * COMMAND, true);
+  is("and it is no longer a share of ORDER_COMPUTE", contactShare, undefined);
+  const lines = registry.COST_LINES as unknown as readonly { id: string; monthlyUsd: (tier: "creator" | "pro" | "scale") => number }[];
+  const line = lines.find((l) => l.id === "order-contact-write");
+  is("the line order-contact-write is in the registry", Boolean(line), true);
+  is("and prices every order of the plan's figure at that worst", line ? line.monthlyUsd("creator") > 0 : false, true);
 }
 
 part("The shares one paid cart order can spend together");
 {
-  const together = CART_STOCK_SHARE_OF_ORDER_COMPUTE + STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE + CONTACT_SHARE_OF_ORDER_COMPUTE + GROUP_SETTLE_STRIPE_WAIT / ORDER_COMPUTE;
-  is("its stock holds, stock confirmation, contact write and a group's settling waits stay inside one ORDER_COMPUTE", together <= 1, true);
+  const together = CART_STOCK_SHARE_OF_ORDER_COMPUTE + STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE + GROUP_SETTLE_STRIPE_WAIT / ORDER_COMPUTE;
+  is("its stock holds, stock confirmation and a group's settling waits stay inside one ORDER_COMPUTE", together <= 1, true);
 }
 
 part("An offer after paying is an order of its own, so its watch is not added to the cart's shares");

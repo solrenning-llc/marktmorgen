@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { CONTACT_COMMANDS_MOST, CONTACT_FENCED_WRITE_CALLS, CONTACT_FENCED_WRITE_IF, CONTACT_WRITE_CALLS, CONTACT_WRITE_IF, leadsKey, noteProduct, takeBackClicks, tokensFor, unsubscribe, upsertContact } from "@/lib/contacts";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
-import { COMMAND, ORDER_COMPUTE } from "./plan-cost-registry";
+import { COMMAND, ORDER_CONTACT_WRITE } from "./plan-cost-registry";
 import { COMMANDS } from "./traffic-cost";
 import { done, is, part } from "./check";
 
@@ -76,7 +76,7 @@ async function main() {
     is("a purchase noted: the row, the checked write (1 + 2) and, once, its read back", [t.noteProductRound, t.noteProduct], [4, t.tries * 4 + 1]);
     is("taking back the permission: the row, the checked write (1 + 2) and, once, its read back", [t.takeBackRound, t.takeBack], [4, t.tries * 4 + 1]);
     is("links for n addresses: per round both reads, a record and a checked write (1 + 2) and a taken-back record each", [t.tokens(1), t.tokens(10)], [t.tries * (2 + 1 + 3 + 1), t.tries * (2 + 10 * (1 + 3 + 1))]);
-    is("an order's sign-up is inside the order's own compute", t.upsert * COMMAND <= ORDER_COMPUTE, true);
+    is("an order's sign-up is inside its own line, order-contact-write", t.upsert * COMMAND <= ORDER_CONTACT_WRITE, true);
   }
 
   part("one round of each really stays inside its figure");

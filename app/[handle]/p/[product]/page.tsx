@@ -66,6 +66,7 @@ import { type BlockContext, HeroView, type PageAction, PageSections } from "@/co
 import { MemberPriceBack, MemberPriceNote, MemberPriceTag, memberPriceCanShow, memberShown, readMemberBack } from "@/components/member-price";
 import { type MemberCheck, memberPriceFor } from "@/lib/member-price";
 import { pageFacts } from "@/lib/page-facts";
+import { earnedCount } from "@/lib/certificate";
 import { LANGUAGES } from "@/lib/store-language";
 import { RatingLine, ReviewsSection } from "@/components/review-list";
 import { StoreTracking } from "@/components/store-tracking";
@@ -348,13 +349,17 @@ export default async function ProductPage({ params, searchParams }: Params) {
     // And when access to it ends, a date the creator set and still ahead (24 [E7]), said before anyone pays: a term
     // of the sale, so the record is read exactly. When it cannot be read, no way to buy the course is drawn (the buy
     // box says buying is not available just now), never a buy box without the date. The video total stays lenient.
-    product.course ? readCourseForSale(product.course.id).then(async ({ course, unread }) => ({
+    // Whether finishing gives a certificate now is kept too: "N students earned the certificate" is said only then (93 [D2-VERIFIED-SOCIAL]).
+    product.course ? readCourseForSale(product.course.id).then(async ({ course, unread }) => {
+      return {
+          certificateOn: course?.certificate === true,
           facts: course ? await readCourseFacts(course).catch(() => null) : null,
           accessEndLine: course && !product.recurring ? accessEndFact(course, store.language) : null,
           // What the buy form sends back (24 [E7]): the end this page says, or "none"; never for a membership.
           shownEnd: course && !product.recurring ? shownAccessEnd(course) : product.recurring ? null : "none",
           unread,
-        })) : Promise.resolve(null),
+        };
+    }) : Promise.resolve(null),
     // The legal information of a product the creator ships (618 [SZ2]): one read of its own record, only then.
     activeShipping(product) ? readProductLegal(store, product.id).catch(() => null) : Promise.resolve(null),
     // Whether it asks questions at checkout: then it is bought here, from the buy box that asks them, and is not
@@ -379,12 +384,19 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // recordOpenEnrollment), so a course sold here through PayPal alone never shows a date (Claude 5's M1 on #3445).
   const accessEndLine = canSellProduct(store, product) ? courseFacts?.accessEndLine ?? null : null;
   const courseUnread = courseFacts?.unread === true;
+  const certificateOn = courseFacts?.certificateOn === true;
   // What was read goes with the product to its buy box, so the countries it says it ships to are the ones
   // its checkout offers (lib/physical-legal-ship.ts); a record not read is not filled.
   const shippedNow = activeShipping(product) ? { ...product, legal } : product;
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.
   const page = await shownVersion(store, product.id, savedPage, product.priceCents > 0);
+  // How many earned the course's certificate (93 [D2-VERIFIED-SOCIAL]): one HLEN, read only when a "By the numbers"
+  // block of this page asks for it and the course gives a certificate now (a course that no longer does would seem to
+  // promise one); a read that fails says nothing (lib/certificate.ts, earnedCount).
+  const finished = product.course && certificateOn && page.blocks.some((block) => block.kind === "facts" && block.show.includes("finished"))
+    ? await earnedCount(product.course.id).catch(() => null)
+    : null;
   if (store.look.sold && stale(soldCounts)) after(() => refreshSoldCounts(store, readAllTimeSales).then(() => undefined));
   const soldCount = soldCounts?.byProduct[product.id];
   const sold = soldCount && soldCount >= SHOWN_FROM ? w.bought(num(soldCount)) : null;
@@ -747,6 +759,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       bundleItems: product.bundle ? (pick ?? inside?.length ?? 0) : null,
       sold: soldCount && soldCount >= SHOWN_FROM ? soldCount : null,
       reviews: summary,
+      finished,
     }),
     // Other products the page shows as cards, from what the store record holds (lib/featured-cards.ts).
     featured: page.blocks.some((block) => block.kind === "product")

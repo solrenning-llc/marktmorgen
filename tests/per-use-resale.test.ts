@@ -9,6 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { onDemandReport, onDemandText } from "./generated-on-demand";
 import { join } from "node:path";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { MOST_TAX_READING, unitUnder } from "./historical-margin-model";
@@ -17,8 +18,8 @@ import { AMOUNTS, DOC_FILE, candidates, data, rateOf, renderPerUseResale } from 
 const read = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
 
 test("the document is what the numbers render today (run node scripts/per-use-resale.mjs)", () => {
-  assert.equal(read(DOC_FILE), renderPerUseResale(), `${DOC_FILE} is stale`);
-  assert.match(read(DOC_FILE), /\*\*An analysis for the owner, not a change\.\*\*/);
+  assert.equal(read(DOC_FILE), onDemandText(onDemandReport(DOC_FILE)), `${DOC_FILE} holds only its fixed text: the report is generated on demand`);
+  assert.match(renderPerUseResale(), /\*\*An analysis for the owner, not a change\.\*\*/);
   assert.equal(PLANS_ON_SALE, false);
 });
 

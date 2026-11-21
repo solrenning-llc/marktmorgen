@@ -1,6 +1,11 @@
 /** Request-size controls, not token estimates or a monetary quota. */
 export const AI_REQUEST_LIMITS = { systemBytes: 16384, textBytes: 65536, contentBlocks: 3, mediaBlocks: 1, encodedMediaBytes: 12 * 1024 * 1024, bodyBytes: 13 * 1024 * 1024, outputTokens: 6000 } as const;
 export const SUPPORTED_AI_MODELS = ['claude-sonnet-5-5', 'claude-haiku-5-5'] as const;
+/** The model of each feature, fixed in code (433 [PV3] (b), 20 November 2026): the plans' AI ceilings are computed for
+ * these two (lib/ai-entitlement-rules.ts), so no deployment setting may move a feature to another. Writing jobs ask
+ * WRITING_MODEL; visitor answers, the store guide and the reading of a product's PDF ask ANSWER_MODEL. */
+export const WRITING_MODEL: typeof SUPPORTED_AI_MODELS[number] = 'claude-sonnet-5-5';
+export const ANSWER_MODEL: typeof SUPPORTED_AI_MODELS[number] = 'claude-haiku-5-5';
 export const isSupportedAiModel = (name: string): boolean => (SUPPORTED_AI_MODELS as readonly string[]).includes(name);
 const bytes = (text: string) => new TextEncoder().encode(text).byteLength;
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);

@@ -31,7 +31,8 @@
 import { DISCOUNT_KINDS, type DiscountKind, entryOf } from "@/lib/discount-impact";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { normaliseEmail } from "@/lib/auth";
-import { keepUnlessErasedWhileLive, setWhileStoreLive } from "@/lib/store-live-cache";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
+import { keepUnlessErasedWhileLive } from "@/lib/store-live-copy";
 import { suppressedAmong } from "@/lib/suppression";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";

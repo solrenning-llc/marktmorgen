@@ -35,7 +35,8 @@ import { UnknownReplyError, countOf, replyList, repliesFor } from "@/lib/redis-r
 import { keyFor } from "@/lib/stripe-account";
 import { KEEP_UNLESS_ERASED, suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Store, ensureListId, storeRef } from "@/lib/store";
-import { KEEP_UNLESS_ERASED_LIVE, keepUnlessErasedWhileLive, setWhileStoreLive } from "@/lib/store-live-cache";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
+import { KEEP_UNLESS_ERASED_LIVE, keepUnlessErasedWhileLive } from "@/lib/store-live-copy";
 import { type SalesStats, type Stats, type StatsData, readSales, readStats, readsSales, studioStats } from "@/lib/stats";
 import { type Numbers, membershipCacheKey, membershipNumbersNamed, withoutMemberWords } from "@/lib/membership-numbers";
 
@@ -195,7 +196,7 @@ export type Kept<T> = { value: T; at: number; stale: boolean; failed?: boolean; 
 export const READING_COPY = KEEP_UNLESS_ERASED;
 /**
  * READING_COPY for a whole store, fenced on its erasure in the same step (Codex L-20261119-2235): the shared
- * KEEP_UNLESS_ERASED_LIVE (lib/store-live-cache.ts), run by keepUnlessErasedWhileLive. Billed 2 more than
+ * KEEP_UNLESS_ERASED_LIVE (lib/store-live-copy.ts), run by keepUnlessErasedWhileLive. Billed 2 more than
  * READING_COPY (EXISTS, HGET; lib/read-ceilings.ts, READING_LIVE_FENCE_COMMANDS).
  */
 export const READING_COPY_LIVE = KEEP_UNLESS_ERASED_LIVE;

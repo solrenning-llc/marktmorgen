@@ -1,5 +1,5 @@
 /**
- * A copy naming people is kept only while that same store is live (lib/store-live-cache.ts, keepUnlessErasedWhileLive,
+ * A copy naming people is kept only while that same store is live (lib/store-live-copy.ts, keepUnlessErasedWhileLive,
  * KEEP_UNLESS_ERASED_LIVE; the same rule as setWhileStoreLive v2, Codex X8 on #4951 and X5 on #4942). A store kept from
  * before ids (its sid is "") is fenced on its owner's record. After that store is erased, its owner may make a new store
  * under the same owner key: that record's being there must not let a late copy of the erased store's readings back in.
@@ -8,7 +8,7 @@
  * Every identifier here is a local synthetic stand-in.
  */
 import { ERASING_KEY, claimHandle, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
-import { keepUnlessErasedWhileLive } from "@/lib/store-live-cache";
+import { keepUnlessErasedWhileLive } from "@/lib/store-live-copy";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 

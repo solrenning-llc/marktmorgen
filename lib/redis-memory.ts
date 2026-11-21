@@ -2003,7 +2003,7 @@ export class MemoryRedis {
           else this.run(["SET", copy, value, "EX", seconds]);
           return gone;
         }
-        // lib/store-live-cache.ts, KEEP_UNLESS_ERASED_LIVE: READING_COPY behind the store's fence in the same step:
+        // lib/store-live-copy.ts, KEEP_UNLESS_ERASED_LIVE: READING_COPY behind the store's fence in the same step:
         // the store's key gone, no longer holding its ref, or its erasing mark set, the copy goes and [0] is answered.
         if (key.startsWith("-- marktmorgen:reading-copy-live:v3\n") && args[0] === "4" && args.length >= 11) {
           const [, live, erasing, copy, erased, field, value, seconds, statsId, ref, ...prints] = args;

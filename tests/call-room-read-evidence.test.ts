@@ -15,8 +15,13 @@ beforeEach(() => {
   redis.clear(); writes = 0;
   redis.pipeline = (async (commands: (string | number)[][]) => {
     if (commands[0]?.[0] === "SET") { writes += 1; return made as never; }
-    // One booking's four keys are read at one MGET (lib/call-rooms.ts, ROOM_KEYS_PER_MGET): its reply holds the values.
-    return (commands[0]?.[0] === "MGET" ? [initial] : initial) as never;
+    // A booking's two room keys are read at one MGET and its two meeting records a GET each (lib/call-rooms.ts, #3079:
+    // no MGET lot could bound a record's reply). `initial` is the four values in that order, [own room, time's room,
+    // own record, group record]; a reply off its shape is given to the MGET as it is, so every shape case still reaches
+    // the reader.
+    const whole = Array.isArray(initial) && initial.length === 4 && [0, 1, 2, 3].every((i) => Object.prototype.hasOwnProperty.call(initial, i));
+    if (commands[0]?.[0] === "MGET") return [whole ? (initial as unknown[]).slice(0, 2) : initial] as never;
+    return (whole ? (initial as unknown[]).slice(2) : [null, null]) as never;
   }) as typeof redis.pipeline;
 });
 afterEach(() => { redis.pipeline = pipeline; });

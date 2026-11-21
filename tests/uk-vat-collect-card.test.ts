@@ -53,11 +53,12 @@ const SWITCH = {
   uk: { vatNumber: "123456789", effectiveFrom: "2026-11-01" },
   reviews: [{ jurisdiction: "UK", registration: "123456789", reviewedOn: "2026-11-15", reviewer: "owner" }],
 };
-const ON = { records: [UK_RECORD], vatSwitch: SWITCH, now: NOW, publication: false };
+const ON = { records: [UK_RECORD], vatSwitch: SWITCH, now: NOW };
 /** The day after the UK rate's review date. */
 const LATE = new Date(Date.parse(`${UK_VAT_RATE_VALID_UNTIL}T12:00:00Z`) + 86_400_000);
 
-const ESS: EuSupplyFields = { priceCents: 2900, file: null, link: "https://example.com/pack", keys: null, course: null, recurring: null, call: null, bundle: null, pwyw: null };
+// The creator answered that it is not an e-publication (unit 5a): without that answer, nothing collects.
+const ESS: EuSupplyFields = { priceCents: 2900, file: null, link: "https://example.com/pack", keys: null, course: null, recurring: null, call: null, bundle: null, pwyw: null, publication: false };
 const GOODS: EuSupplyFields = { ...ESS, link: null, shipping: { countries: ["GB"] } };
 const evidence = (ip: string | null, billing: string | null) => {
   const headers = new Headers();
@@ -104,13 +105,13 @@ async function main(): Promise<void> {
   const base = consumerGate({ product: ESS, ...GB });
   is("a UK buyer: exactly consumerGate's refusal", euSaleGate({ product: ESS, ...GB }), base);
   is("and consumerGate refuses them", base.ok, false);
-  is("even a product classified as not an e-publication: the real switch is off", euSaleGate({ product: ESS, ...GB, publication: false }), base);
+  is("even a product classified as not an e-publication: the real switch is off", euSaleGate({ product: ESS, ...GB }), base);
 
   part("The UK on, injected here only: who is collected");
   is("both items in GB, an electronic service, not an e-publication: collected", euSaleGate({ product: ESS, ...GB, ...ON }), COLLECT);
   // RED → GREEN: unknown classification refuses, never collects at zero or at 20% on a guess.
-  is("the product's classification unknown: refused as today", euSaleGate({ product: ESS, ...GB, ...ON, publication: undefined }), base);
-  is("an e-publication (zero-rated in the UK): refused as today", euSaleGate({ product: ESS, ...GB, ...ON, publication: true }), base);
+  is("the product's classification unknown: refused as today", euSaleGate({ product: { ...ESS, publication: undefined }, ...GB, ...ON }), base);
+  is("an e-publication (zero-rated in the UK): refused as today", euSaleGate({ product: { ...ESS, publication: true }, ...GB, ...ON }), base);
   is("the IP in GB, the billing country in France: refused as today", euSaleGate({ product: ESS, ...evidence("GB", "FR"), ...ON }), consumerGate({ product: ESS, ...evidence("GB", "FR") }));
   is("the Isle of Man: refused as today", euSaleGate({ product: ESS, ...evidence("IM", "IM"), ...ON }), consumerGate({ product: ESS, ...evidence("IM", "IM") }));
   is("goods shipped to the UK: refused as today", euSaleGate({ product: GOODS, ...GB, ...ON }), consumerGate({ product: GOODS, ...GB }));

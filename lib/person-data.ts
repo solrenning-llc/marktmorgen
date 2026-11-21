@@ -55,6 +55,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/flows.ts", how: "erased", what: "Their way through every sequence and workflow, and any step still waiting to reach them" },
   { file: "lib/flow-runs.ts", how: "erased", via: "lib/flows.ts", what: "Each workflow run's record and history" },
   { file: "lib/broadcasts.ts", how: "expires", days: 60, what: "A broadcast already going out keeps its list of addresses until it finishes; a deleted address on it is passed over, never written to" },
+  { file: "lib/email-polls.ts", how: "expires", days: 60, what: "The answer a recipient gives to a poll in a broadcast, kept under their place in the broadcast's list, never their address; it goes by itself 30 days after the poll closes, so at most 60 days after the email was sent, and only the totals are shown" },
   { file: "lib/product-updates.ts", how: "expires", days: 60, what: "An update email already going out keeps its addresses until it finishes; a deleted address is passed over" },
   { file: "lib/product-updates.ts", how: "suppression", what: "If they had pressed stop on update emails, that one-way mark stays, as their own no" },
   { file: "lib/review-requests.ts", how: "suppression", what: "If they had pressed stop on review requests, that one-way mark stays, as their own no" },
@@ -214,6 +215,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/returning-code.ts", how: "expires", days: 1, what: "A code only for buyers who bought from your store before: only when the email typed with it paid for an order here, a link that works once is emailed to it, kept with the code, the product and that email for 30 minutes, then deleted; whoever asked is told the same either way" },
   { file: "lib/next-offer.ts", how: "expires", days: 3, what: "The one next product your Store assistant suggested after an order, under the order's reference and with no name or address, deleted three days later; what the buyer already owns is read from your Stripe account to leave it out, and not kept" },
   { file: "lib/yearly-ask.ts", how: "none", what: "Marks that a membership's yearly offer went, by its Stripe subscription, never by address" },
+  { file: "lib/certificate-refunds.ts", how: "none", what: "The pass that withdraws a certificate whose course was refunded reads the buyer's address from the store's Stripe account only to find their certificate, and keeps no address: only the ids of the refunds and closed disputes it handled, and how far it read" },
 ];
 
 /** Whether a line is said today: the backup's deletion records only once their reviews are filled (VR item 2). */

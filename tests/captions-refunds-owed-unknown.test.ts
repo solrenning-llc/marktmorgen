@@ -60,7 +60,8 @@ async function main(): Promise<void> {
   is("control: a stuck refund still says to write to support", /A refund of \$35\.00 for AI captions was not confirmed by Stripe/.test(known) && !UNREAD.test(known), true);
 
   const page = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
-  is("the page never reads unknown refunds as none", /autoRefundsOwed\(folder\)\.catch\(\(\) => null\)/.test(page) && !/autoRefundsOwed\(folder\)\.catch\(\(\) => \[\]\)/.test(page), true);
+  // #3346 merge: the page reads refunds owed and charges kept for a person in one exact read (autoCaptionsMoney).
+  is("the page never reads unknown refunds as none", /autoCaptionsMoney\(folder\)\.catch\(\(\) => null\)/.test(page) && !/autoCaptionsMoney\(folder\)\.catch\(\(\) => \(?[[{]/.test(page) && /const owedRows = captionsMoney \? captionsMoney\.owed : null;/.test(page), true);
   is("the page draws the section from the component", /<CaptionsRefundsOwed rows=\{owedRows\} \/>/.test(page), true);
 
   done();

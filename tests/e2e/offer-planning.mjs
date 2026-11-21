@@ -13,7 +13,9 @@ export async function checkOfferPlanning({browser,LOCAL,fixture,axeSource,is}){
  const draft=panel.getByRole("textbox",{name:"Your unsaved offer plan",exact:true});is("HT14 accepted reference is unsaved "+width,(await draft.inputValue()).includes("Starting price reference:"),true);
  await draft.fill((await draft.inputValue())+"\n\nMy own delivery check.");is("HT14 creator can edit proposed plan "+width,(await draft.inputValue()).endsWith("My own delivery check."),true);
  is("HT14 no automatic save/AI/activation "+width,writes,0);
- await panel.scrollIntoViewIfNeeded();await page.addScriptTag({content:axeSource});const audit=await page.evaluate(async()=>await window.axe.run(document.querySelector("[data-offer-planning]"),{runOnly:{type:"tag",values:["wcag2a","wcag2aa","wcag21aa","wcag22aa"]}}));is("HT14 planner accessibility "+width,audit.violations.map(v=>v.id),[]);
+ // The panel's top under the sticky studio header (html scroll-padding-top), as a creator scrolling to it sees it: a
+ // position left by the edits above can leave its first field half behind the header, which axe reads as a small target.
+ await panel.evaluate(node=>node.scrollIntoView({block:"start",behavior:"instant"}));await page.addScriptTag({content:axeSource});const audit=await page.evaluate(async()=>await window.axe.run(document.querySelector("[data-offer-planning]"),{runOnly:{type:"tag",values:["wcag2a","wcag2aa","wcag21aa","wcag22aa"]}}));is("HT14 planner accessibility "+width,audit.violations.map(v=>v.id),[]);
  is("HT14 planner fits "+width,await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  await panel.getByRole("button",{name:"Discard this plan",exact:true}).click();
  }finally{await context.close();}

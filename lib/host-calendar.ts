@@ -42,7 +42,7 @@ import type { Busy } from "@/lib/call-setup";
 import { readFeed, providerOf } from "@/lib/calendar-sync";
 import { checkUrl, problemWords as fetchProblemWords, SafeFetchError } from "@/lib/safe-fetch";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
-import { NotConnected, accessFor, disconnectFor, hostConnectionFrom, hostConnectionKey, hostConnectionView } from "@/lib/meet-connect";
+import { type MeetStore, NotConnected, accessFor, disconnectFor, hostConnectionFrom, hostConnectionKey, hostConnectionView } from "@/lib/meet-connect";
 import { type GoogleCalendar, MAX_READ_CALENDARS, ProviderError, googleCalendars, googleFreeBusy, grantedParts, hostSyncOn } from "@/lib/meet-providers";
 import { HOST_STALE_MINUTES, HOST_SYNC_MINUTES } from "@/lib/team-scheduling-rules";
 import { hostId } from "@/lib/host-claims";
@@ -234,9 +234,9 @@ function result(source: HostSource, state: SyncState, good: Good | null, message
 /** Test seams: a stand-in for the calendar feed fetch; production passes nothing. */
 export type SyncHooks = { feed?: Parameters<typeof readFeed>[3] };
 
-async function readBusyNow(statsId: string, host: string, config: Config, tz: string, now: number, hooks: SyncHooks): Promise<[number, number][]> {
+async function readBusyNow(store: MeetStore, host: string, config: Config, tz: string, now: number, hooks: SyncHooks): Promise<[number, number][]> {
   if (config.source === "google") {
-    const access = await accessFor(statsId, "google", undefined, host);
+    const access = await accessFor(store.statsId ?? "", "google", undefined, host, store);
     return googleFreeBusy(access.token, config.read, now - 86_400_000, now + HOST_LOOKAHEAD_DAYS * 86_400_000);
   }
   const opened = unseal(config.ics, icsContext(host));
@@ -285,7 +285,7 @@ export async function prefetchHosts(store: Pick<Store, "statsId">, emails: strin
  * cannot be known blocks the host.
  */
 export async function hostSync(
-  store: Pick<Store, "statsId">,
+  store: MeetStore,
   email: string,
   tz: string,
   options: { now?: number; refresh?: boolean; force?: boolean; hooks?: SyncHooks; known?: HostPrefetch } = {},
@@ -346,7 +346,7 @@ export async function hostSync(
   try {
     let busy: [number, number][];
     try {
-      busy = await readBusyNow(store.statsId, host, config, tz, now, options.hooks ?? {});
+      busy = await readBusyNow(store, host, config, tz, now, options.hooks ?? {});
     } catch (error) {
       const message = syncWords(error);
       const kept = configRead !== null && await keepReading(host, configRead, JSON.stringify({ at: now, message }), "error").catch(() => false);
@@ -404,7 +404,7 @@ export async function hostCalendarView(store: Store, email: string, tz: string):
       calendarsError = "Calendar choices are temporarily unavailable. Try again later.";
     } else {
       try {
-        const access = await accessFor(statsId, "google", undefined, host);
+        const access = await accessFor(statsId, "google", undefined, host, store);
         calendars = await googleCalendars(access.token);
       } catch (error) {
         calendarsError = syncWords(error);
@@ -464,7 +464,7 @@ export async function setHostCalendars(store: Store, email: string, read: string
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "unavailable";
   let listed: GoogleCalendar[];
   try {
-    const access = await accessFor(store.statsId, "google", undefined, host);
+    const access = await accessFor(store.statsId, "google", undefined, host, store);
     listed = await googleCalendars(access.token);
   } catch {
     return "google_none";

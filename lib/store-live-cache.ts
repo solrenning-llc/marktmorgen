@@ -41,20 +41,22 @@ export async function setWhileStoreLive(store: Pick<Store, "email" | "sid" | "ex
  * KEEP_UNLESS_ERASED (lib/suppression.ts) behind the store fence, in one step (Codex L-20261119-2235): a copy naming
  * people kept only while the store is live and nobody it names was deleted from it. KEYS[1] the store's own key,
  * KEYS[2] the erasing marks, KEYS[3] the copy, KEYS[4] the store's prints; ARGV[1] the store's erasing field,
- * ARGV[2] the copy, ARGV[3] its seconds, ARGV[4] "" for a store with an id (its id key fenced on with EXISTS) or, for a
- * store from before ids, its statsId, compared with its owner's record's own (v2, as SET_IF_STORE_LIVE: after that
- * store's erasure its owner may make a new one under the same key; X5 on #4942), ARGV[5..] the prints of who it names
- * (at least one). The store gone, erasing or no longer its owner's: the copy goes and {0} is answered, never a place;
- * an owner record that does not parse answers -1, nothing written. Otherwise as KEEP_UNLESS_ERASED. Billed 2 more than
- * it (EXISTS or GET, HGET). lib/redis-memory.ts runs it the same way. Used for the kept readings (lib/store-readings.ts,
+ * ARGV[2] the copy, ARGV[3] its seconds, ARGV[4] "" for a store with an id or, for a store from before ids, its
+ * statsId, compared with its owner's record's own (as SET_IF_STORE_LIVE: after that store's erasure its owner may make
+ * a new one under the same key; X5 on #4942), ARGV[5] the store's ref, which a store with an id's id key must still
+ * hold (v3, the rule of store-claim-live:v1, lib/live-fence.ts: moveAccount repoints the id key, and an erasure begun
+ * after a move marks the new ref's field, so EXISTS alone let a copy built under the old ref land), ARGV[6..] the
+ * prints of who it names (at least one). The store gone, erasing, moved or no longer its owner's: the copy goes and
+ * {0} is answered, never a place; an owner record that does not parse answers -1, nothing written. Otherwise as
+ * KEEP_UNLESS_ERASED. Billed 2 more than it (GET, HGET). lib/redis-memory.ts runs it the same way. Used for the kept readings (lib/store-readings.ts,
  * READING_COPY_LIVE), the memberships' cache (lib/membership-numbers.ts) and the members' health copy
  * (lib/member-health.ts).
  */
-export const KEEP_UNLESS_ERASED_LIVE = `-- marktmorgen:reading-copy-live:v2
+export const KEEP_UNLESS_ERASED_LIVE = `-- marktmorgen:reading-copy-live:v3
 local live = redis.call("HGET", KEYS[2], ARGV[1]) == false
 if live then
   if ARGV[4] == "" then
-    live = redis.call("EXISTS", KEYS[1]) == 1
+    live = redis.call("GET", KEYS[1]) == ARGV[5]
   else
     local raw = redis.call("GET", KEYS[1])
     if raw then
@@ -70,7 +72,7 @@ if not live then
   redis.call("DEL", KEYS[3])
   return {0}
 end
-local found = redis.call("HMGET", KEYS[4], unpack(ARGV, 5))
+local found = redis.call("HMGET", KEYS[4], unpack(ARGV, 6))
 local gone = {}
 for i = 1, #found do
   if found[i] then gone[#gone + 1] = i end
@@ -91,14 +93,11 @@ return gone`;
 export async function keepUnlessErasedWhileLive(store: Pick<Store, "email" | "sid" | "extra" | "statsId">, key: string, listId: string, text: string, seconds: number, emails: string[]): Promise<Set<string>> {
   const names = [...new Set(emails)];
   if (!names.length) throw new Error("nobody to look up");
-  const ref = storeRef(store);
-  const withId = STORE_ID_PATTERN.test(store.sid);
+  const fence = await storeLiveFence(store);
   // A store from before ids is told from its owner's next store only by its statsId: without one, nothing is known.
-  const statsId = store.statsId ?? "";
-  if (!withId && !statsId) throw new UnknownReplyError("a store from before ids with no statsId, behind the store's fence");
-  const live = withId ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  if (fence.statsId === null) throw new UnknownReplyError("a store from before ids with no statsId, behind the store's fence");
   const replies = repliesFor(await redisPipeline([
-    ["EVAL", KEEP_UNLESS_ERASED_LIVE, 4, live, ERASING_KEY, key, suppressedKey(listId), await erasingField(ref), text, seconds, withId ? "" : statsId, ...names.map((e) => suppressionPrint(listId, e))],
+    ["EVAL", KEEP_UNLESS_ERASED_LIVE, 4, fence.live, fence.erasing, key, suppressedKey(listId), fence.field, text, seconds, fence.statsId, fence.ref, ...names.map((e) => suppressionPrint(listId, e))],
   ]), 1);
   // Each place read from the list's own slots: a hole is not a place (Array#every would skip it).
   const places = replies ? replyList(replies[0]) : null;

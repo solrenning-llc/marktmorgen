@@ -26,6 +26,7 @@ import { PURCHASE_MOVE_DELIVERED } from "@/lib/purchase-move-open";
 import { moveWords } from "@/lib/purchase-move-words";
 import {
   MOVE_ASK_COMMANDS,
+  MOVE_ASK_RECHECK_COMMANDS,
   MOVE_ASK_UNITS,
   MOVE_CONFIRM_COMMANDS,
   MOVE_ISSUE_COMMANDS,
@@ -184,7 +185,8 @@ async function main(): Promise<void> {
     seen = [];
     const answer = await askToMovePurchases({ store: moss, token, to: "ana.new@example.com", origin: ORIGIN });
     // The day's count is one script: its EVAL is billed too, besides the INCR and EXPIRE it runs (lib/purchase-moves.ts MOVE_DAY_COUNT).
-    const commands = seen.filter((c) => /nl:(orders:link|erased|pm):/.test(c) || c.startsWith("EVAL -- marktmorgen:purchase-move-day:")).length;
+    // So is the same-day ask's: its EVAL besides the GET and SETs it runs (lib/purchase-moves.ts MOVE_ASK_TO_ONCE).
+    const commands = seen.filter((c) => /nl:(orders:link|erased|pm):/.test(c) || /^EVAL -- marktmorgen:purchase-move-(day|ask-to-once):/.test(c)).length;
     seen = null;
     is("received", answer, "received");
     const sent = mails.slice(m);
@@ -195,7 +197,7 @@ async function main(): Promise<void> {
     is("the current address's email names neither the new address nor a link", sent[0]?.text.includes("ana.new@example.com"), false);
     is("the new address's email names the current one", sent[1]?.text.includes("ana.buyer@example.com"), true);
     is("the subjects say what happened and what to do", [sent[0]?.subject, sent[1]?.subject], ["You asked to move your purchases from Moss Notes", "Confirm this address for your purchases from Moss Notes"]);
-    is(`what the ask reads and writes is MOVE_ASK_COMMANDS (${MOVE_ASK_COMMANDS})`, commands, MOVE_ASK_COMMANDS);
+    is(`what the ask reads and writes is MOVE_ASK_COMMANDS (${MOVE_ASK_COMMANDS}) less the lost answer's recheck`, commands, MOVE_ASK_COMMANDS - MOVE_ASK_RECHECK_COMMANDS);
   }
 
   part("Opening a link confirms nothing; Confirm records that address once; the current address's link goes after the new one confirms");
@@ -388,6 +390,25 @@ async function main(): Promise<void> {
     is("another new address the same day is another request", await askToMovePurchases({ store: moss, token, to: "again.other@example.com", origin: ORIGIN }), "received");
     const other = linkTo("again.other@example.com", m3);
     is("with its own link", [requests().length - r0, grants().length - g0, Boolean(other), other !== first], [2, 2, true, true]);
+
+    // The script's answer lost on a retry: the index is read back and the same link goes again, nothing more is made.
+    // (Another buyer each: a retry still takes one of the day's three asks.)
+    const lostToken = await signIn("again.lost@example.com");
+    const m5 = mails.length;
+    await askToMovePurchases({ store: moss, token: lostToken, to: "again.lost.new@example.com", origin: ORIGIN });
+    const lostFirst = linkTo("again.lost.new@example.com", m5);
+    const r5 = requests().length;
+    odd = { command: "EVAL", prefix: "-- marktmorgen:purchase-move-ask-to-once:", reply: "not an answer", times: 1, skip: 0 };
+    is("a retry whose answer was lost: received", await askToMovePurchases({ store: moss, token: lostToken, to: "again.lost.new@example.com", origin: ORIGIN }), "received");
+    odd = null;
+    is("read back: the same link again, no new request", [Boolean(lostFirst), linkTo("again.lost.new@example.com", m5) === lostFirst, mails.slice(m5).filter((x) => x.to === "again.lost.new@example.com").length, requests().length - r5], [true, true, 2, 0]);
+    // A first ask whose answer is lost and whose index cannot be found: unknown, so no request and no link at all.
+    const unknownToken = await signIn("again.unread@example.com");
+    const m6 = mails.length;
+    odd = { command: "EVAL", prefix: "-- marktmorgen:purchase-move-ask-to-once:", reply: "not an answer", times: 1, skip: 0 };
+    is("a first ask whose answer was lost: still received", await askToMovePurchases({ store: moss, token: unknownToken, to: "again.unread.new@example.com", origin: ORIGIN }), "received");
+    odd = null;
+    is("nothing made and nothing sent to the new address", [requests().length - r5, mails.slice(m6).filter((x) => x.to === "again.unread.new@example.com").length], [0, 0]);
 
     const m4 = mails.length;
     is("the reused link confirms the new address once", await confirmMoveLink({ store: moss, token: first, origin: ORIGIN }), "waiting");

@@ -8,6 +8,8 @@
  *   nl:pm:c:<id>:<side>      string  that address confirmed, and when (a mark, taken once)
  *   nl:pm:done:<id>          string  the request was claimed for its move (a mark, taken once)
  *   nl:pm:day:<fingerprint>  string  how many requests an address started today, under a one-way fingerprint
+ *   nl:pm:retry:<fingerprint> string the request an ask of the day already made for the same addresses and scope, and
+ *                                    a private nonce, under a one-way fingerprint (a same-day retry reuses it)
  *
  * Everything ends by itself: the request, its links and its confirmations
  * when its day is up (MOVE_CONFIRM_SECONDS), the claim and the day's count
@@ -21,7 +23,7 @@
  * two links for the caller to email, after taking each email from a store's
  * allowance, and a claim says only that the move may now be made.
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import {
@@ -60,10 +62,36 @@ const doneKey = (id: string) => `nl:pm:done:${id}`;
 const sentKey = (id: string, side: MoveSide) => `nl:pm:c:${id}:sent-${side}`;
 /** One address's count of the day (UTC), under a fingerprint that cannot be turned back into the address. */
 const dayKey = (address: string, nowMs: number) => `nl:pm:day:${sha(`nimbus-pm-day:${Math.floor(nowMs / 86_400_000)}:${address}`).slice(0, 32)}`;
+/**
+ * The same ask of the day (the same addresses and scope), under a fingerprint that cannot be turned back into either
+ * address: a retry finds the request the first ask made instead of making a second one with a second live link
+ * (Codex V's MEDIUM on #3621, redone on the to-only design by Claude 5 on #3659).
+ */
+const retryKey = (made: Pick<MoveRequest, "from" | "to" | "scope">, nowMs: number) =>
+  `nl:pm:retry:${sha(`nimbus-pm-retry:v1:${Math.floor(nowMs / 86_400_000)}:${JSON.stringify([made.scope, made.from, made.to])}`).slice(0, 32)}`;
+/**
+ * The new address's link of a request asked with `links: "to"`, made again from the request's random id and the
+ * server's data key, so a retry can email the very same link without the link's secret being kept anywhere. Null
+ * without the key: no link is made then.
+ */
+const toLinkToken = (id: string): string | null => {
+  const key = process.env.NIMBUS_DATA_KEY;
+  if (!key) return null;
+  return createHmac("sha256", key).update(`nimbus-pm-link:v1:${id}:to`).digest("hex").slice(0, 48);
+};
 const seconds = (ms: number) => Math.floor(ms / 1000);
 
 type Kept = Pick<MoveRequest, "from" | "to" | "scope" | "createdAt">;
 type Grant = { id: string; side: MoveSide };
+type RetryIndex = { id: string; nonce: string };
+
+function parseRetryIndex(raw: unknown): RetryIndex | null {
+  const value = parseJson(raw) as { id?: unknown; nonce?: unknown } | undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (Object.keys(value).sort().join(",") !== "id,nonce") return null;
+  if (typeof value.id !== "string" || !ID.test(value.id) || typeof value.nonce !== "string" || !ID.test(value.nonce)) return null;
+  return { id: value.id, nonce: value.nonce };
+}
 
 function parseJson(raw: unknown): unknown {
   if (typeof raw !== "string" || raw.length > MAX_MOVE_RECORD_BYTES) return undefined;
@@ -100,6 +128,22 @@ export const MOVE_DAY_COUNT = `-- marktmorgen:purchase-move-day:v1
 local n = redis.call('INCR', KEYS[1])
 redis.call('EXPIRE', KEYS[1], ARGV[1])
 return n`;
+
+/**
+ * The same-day ask, its request and its new address's link, chosen and written in one step: Redis runs a script whole,
+ * so two asks at the same moment cannot both make a request. The index is written first: if a later write is refused,
+ * every later ask finds that one index and fails closed rather than making another request. Answers {1, index} when it
+ * made them, {0, index} when an ask of the day already had (nothing written), {-1, ...} when a write was refused. A SET
+ * ... NX answers Lua a status table or false, never the string 'OK', so each write is tested for truth. Billed as four
+ * commands (the EVAL, GET and up to three SETs); lib/redis-memory.ts models it for the tests.
+ */
+export const MOVE_ASK_TO_ONCE = `-- marktmorgen:purchase-move-ask-to-once:v1
+local current = redis.call('GET', KEYS[1])
+if current then return {0, current} end
+if not redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[4], 'NX') then return {-1, ''} end
+if not redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[4], 'NX') then return {-1, ARGV[1]} end
+if not redis.call('SET', KEYS[3], ARGV[3], 'EX', ARGV[4], 'NX') then return {-1, ARGV[1]} end
+return {1, ARGV[1]}`;
 
 const DAY_TAKEN = Symbol("purchase move day taken");
 export type MoveDayTaken = { ok: true; from: string; now: number; [DAY_TAKEN]: true };
@@ -156,6 +200,8 @@ export async function askPurchaseMove(input: MoveAskInput & { links?: "both" | "
       if (!day.ok) return { ok: false, reason: day.reason === "email" ? "unknown" : day.reason };
     }
 
+    if (input.links === "to") return await askToOnce(made, json, now);
+
     const id = randomBytes(16).toString("hex");
     const fromToken = input.links === "to" ? null : randomBytes(24).toString("hex");
     const toToken = randomBytes(24).toString("hex");
@@ -172,6 +218,57 @@ export async function askPurchaseMove(input: MoveAskInput & { links?: "both" | "
     if (error instanceof UnknownReplyError) return { ok: false, reason: "unknown" };
     throw error;
   }
+}
+
+/**
+ * The new address's link for an ask made with `links: "to"`, once a day for the same addresses and scope: the first
+ * ask makes the request and its link; a retry of the same day finds them and answers the very same link, so an email
+ * whose answer was lost, asked for again, never leaves a second live link (Codex V's MEDIUM on #3621). The current
+ * address's link is not made here: it comes from issueMoveLink once the new address confirmed. A reply that is not
+ * exactly what was asked for is unknown: the index is read back and the request it names checked, and no second
+ * request is ever made on an uncertain answer.
+ */
+async function askToOnce(made: Kept, json: string, now: number): Promise<MoveAskTo> {
+  const retry = retryKey(made, now);
+  const id = randomBytes(16).toString("hex");
+  const nonce = randomBytes(16).toString("hex");
+  const index = JSON.stringify({ id, nonce } satisfies RetryIndex);
+  const toToken = toLinkToken(id);
+  if (!toToken) return { ok: false, reason: "unknown" };
+
+  const reuse = async (raw: unknown): Promise<MoveAskTo> => {
+    const kept = parseRetryIndex(raw);
+    const keptToken = kept && toLinkToken(kept.id);
+    if (!kept || !keptToken) return { ok: false, reason: "unknown" };
+    const existing = repliesFor(await redisPipeline([["GET", requestKey(kept.id)], ["GET", tokenKey(keptToken)]]), 2);
+    if (!existing || typeof existing[0] !== "string") return { ok: false, reason: "unknown" };
+    const prior = parseJson(existing[0]) as Partial<Kept> | undefined;
+    const request = prior && parseMoveRequest({ ...prior, fromConfirmedAt: null, toConfirmedAt: null, appliedAt: null });
+    const grant = parseGrant(existing[1]);
+    if (
+      !request || request.from !== made.from || request.to !== made.to || JSON.stringify(request.scope) !== JSON.stringify(made.scope) ||
+      seconds(now) >= request.createdAt + MOVE_CONFIRM_SECONDS || !grant || grant.id !== kept.id || grant.side !== "to"
+    ) return { ok: false, reason: "unknown" };
+    return { ok: true, id: kept.id, fromToken: null, toToken: keptToken };
+  };
+
+  const reply = repliesFor(
+    await redisPipeline([[
+      "EVAL", MOVE_ASK_TO_ONCE, 3, retry, requestKey(id), tokenKey(toToken),
+      index, json, JSON.stringify({ id, side: "to" } satisfies Grant), MOVE_CONFIRM_SECONDS,
+    ]]),
+    1,
+  )?.[0];
+  const answer = Array.isArray(reply) && reply.length === 2 && (reply[0] === -1 || reply[0] === 0 || reply[0] === 1) && typeof reply[1] === "string"
+    ? { status: reply[0], index: reply[1] }
+    : null;
+  if (answer?.status === 1) return answer.index === index ? { ok: true, id, fromToken: null, toToken } : { ok: false, reason: "unknown" };
+  if (answer?.status === 0) return reuse(answer.index);
+  if (answer?.status === -1) return { ok: false, reason: "unknown" };
+  // The script may have run before its answer was lost: read the index it would have written, never make another.
+  const again = repliesFor(await redisPipeline([["GET", retry]]), 1);
+  if (!again || typeof again[0] !== "string") return { ok: false, reason: "unknown" };
+  return reuse(again[0]);
 }
 
 /**

@@ -2376,7 +2376,7 @@ export const COST_LINES: CostLine[] = [
       // request (takePublicRequest), a later page of its own, refused past the store's window (C2's L-1 on #3445).
       { file: "app/api/store/course/start/route.ts", names: ["purchaseStamp(store, email, product.id)", "noteStudentStamp(", "takePublicRequest(store, \"buyer\")"] },
       // A buyer's move of purchases (611 [WP10]): the ask, a link's page and its Confirm each hold a public request before they read (tests/purchase-move-flow.test.ts holds the reads under it).
-      { file: "lib/purchase-move-flow.ts", names: ["MOVE_ASK_UNITS", "MOVE_LINK_UNITS", "MOVE_ASK_COMMANDS", "MOVE_LINK_COMMANDS", "MOVE_CONFIRM_COMMANDS", "MOVE_ISSUE_COMMANDS"] },
+      { file: "lib/purchase-move-flow.ts", names: ["MOVE_ASK_UNITS", "MOVE_LINK_UNITS", "MOVE_ASK_COMMANDS", "MOVE_ASK_RECHECK_COMMANDS", "MOVE_LINK_COMMANDS", "MOVE_CONFIRM_COMMANDS", "MOVE_ISSUE_COMMANDS"] },
       // A license key's device activation or release (610 [WP9] unit 2): at most ACTIVATION_COMMANDS commands and the record's
       // bytes, counted as ACTIVATION_REQUEST_UNITS requests before anything is read (the price is held in tests/licence-activations.test.ts);
       // its record takes its room in the store's data room before it is written (tests/store-data-registry.ts).

@@ -1,0 +1,6 @@
+{
+  "encoding": "utf-8",
+  "bytes": 382,
+  "sha256": "6004cf5431f5fec2cd41e5f0bffc80d0d311e238328911ab51e90d3ca10f492f",
+  "content": "✔ the real server page preserves the existing exact count and reads it only once (20.306939ms)\n✔ the real page keeps draft work available when the count is unknown (4.027405ms)\n✔ missing count prerequisites are unknown without adding a counter read (2.202228ms)\nℹ tests 3\nℹ suites 0\nℹ pass 3\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 31.829059\n"
+}

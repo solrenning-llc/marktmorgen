@@ -1,6 +1,8 @@
-import { copyAttachedPicture } from "@/lib/picture-r2-copy";
+import { copyAttachedPicture, dropMirroredPicture } from "@/lib/picture-r2-copy";
+import { lockRead } from "@/lib/two-step-unknown";
 import type { NextRequest } from "next/server";
-import { del, head } from "@/lib/blob";
+import { head } from "@/lib/blob";
+import { deleteOrSweep } from "@/lib/file-drop";
 import { firstBytes } from "@/lib/uploaded-image";
 import {
   StoreFullError,
@@ -83,7 +85,9 @@ export async function POST(request: NextRequest) {
       if (!store) return Response.json({ ok: false, error: "none" }, { status: 400 });
       const product = await readListing(store, id);
       // A new picture deletes the one there: not from a session let in without its second step (lib/two-step.ts).
-      if ((await lockedFor(request, "products", "replace")) && product?.image) return refusedJson("locked");
+      const lock = await lockRead(lockedFor(request, "products", "replace"));
+      if (lock instanceof Response) return lock;
+      if (lock && product?.image) return refusedJson("locked");
       // What this product shows now: the only names besides a fresh upload it may be given (picture-door.ts).
       const own = new Set(imagePaths(product?.image));
       const path = text(body.path, 200);
@@ -164,7 +168,11 @@ export async function POST(request: NextRequest) {
 
     const result = await setProductImage(ref, id, image);
     if (!result.ok) {
-      if (image) await dropFresh(imagePaths(image));
+      if (image) {
+        await dropFresh(imagePaths(image));
+        // Copied to the pictures' own bucket just now: it goes from there too (#4237, item 4).
+        if (image.r2) await dropMirroredPicture(imagePaths(image));
+      }
       return Response.json({ ok: false, error: result.reason }, { status: result.reason === "unknown" ? 404 : 400 });
     }
     // Best effort, and deliberately after the write.
@@ -172,9 +180,9 @@ export async function POST(request: NextRequest) {
     const still = new Set(imagePaths(image));
     const replaced = imagePaths(result.removed).filter((removed) => !still.has(removed));
     if (replaced.length) {
-      await del(replaced).catch((error: unknown) => {
-        console.error("could not delete a replaced product picture", error);
-      });
+      await deleteOrSweep(replaced, "a replaced product picture");
+      // A replaced picture copied to the pictures' own bucket goes from there too (#4237, item 4).
+      if (result.removed?.r2) await dropMirroredPicture(replaced);
     }
     return Response.json({ ok: true });
   } catch (error) {

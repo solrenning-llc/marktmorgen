@@ -94,6 +94,8 @@ async function main(): Promise<void> {
     status: "complete",
     payment_status: "paid",
     mode: "subscription",
+    // As Stripe returns it: the price before discounts too, which says nothing came off (lib/purchase-email.ts).
+    amount_subtotal: 20000,
     amount_total: 20000,
     currency: "usd",
     created: Math.floor(Date.now() / 1000),

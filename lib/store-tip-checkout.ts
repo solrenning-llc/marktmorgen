@@ -12,6 +12,7 @@
  */
 import { createHash } from "node:crypto";
 import type { Store } from "@/lib/store";
+import { askBillingAddress } from "@/lib/billing-address";
 import { saleHandles, storeRef } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
@@ -104,6 +105,8 @@ export async function createTipCheckout(
   });
   onlyInstantMethods(body);
   inTheCurrencyShown(body);
+  // A gift is paid: the buyer's full billing address (790 [IV2]).
+  askBillingAddress(body);
   // The share, when the store's plan has one (lib/platform-share.ts): a tip is
   // money paid through the store like any sale, and nothing comes off it.
   applyShare(body, store, { recurring: false, least: amount });
@@ -138,7 +141,30 @@ export async function createTipCheckout(
   return { url: session.url, id: session.id };
 }
 
-export type TipOutcome = { state: "paid"; amount: number; currency: string } | { state: "waiting" };
+/**
+ * Paid with what Stripe took, or paid with `amount` and `currency` both null
+ * when Stripe did not answer them in their documented shape: an amount it did
+ * not tell is unknown, never zero, and never in the store's currency instead.
+ */
+export type TipOutcome =
+  | { state: "paid"; amount: number; currency: string }
+  | { state: "paid"; amount: null; currency: null }
+  | { state: "waiting" };
+
+/**
+ * What a settled tip's checkout says it took: a whole, safe, non-negative
+ * amount in three lowercase letters of currency, as Stripe documents them.
+ * Zero is kept only when Stripe says no payment was required; a paid
+ * checkout of zero contradicts itself and is unknown, like any other shape.
+ */
+function chargedOf(session: { payment_status?: unknown; amount_total?: unknown; currency?: unknown }): { amount: number; currency: string } | null {
+  const amount = session.amount_total;
+  const currency = session.currency;
+  if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0) return null;
+  if (typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) return null;
+  if ((amount === 0) !== (session.payment_status === "no_payment_required")) return null;
+  return { amount, currency };
+}
 
 /**
  * What the page a visitor comes back to says: paid, with the amount Stripe
@@ -169,11 +195,8 @@ export async function readTip(store: Store, sessionId: string): Promise<TipOutco
     };
     const meta = session.metadata ?? {};
     if (meta.kind !== "tip" || !saleHandles(store).has(meta.store ?? "") || !isSettled(session)) return { state: "waiting" };
-    return {
-      state: "paid",
-      amount: typeof session.amount_total === "number" ? session.amount_total : 0,
-      currency: typeof session.currency === "string" && session.currency ? session.currency : store.currency,
-    };
+    const charged = chargedOf(session);
+    return charged ? { state: "paid", ...charged } : { state: "paid", amount: null, currency: null };
   } catch (error) {
     if (!(error instanceof StripeError && error.status === 404)) console.error("reading a gift's checkout failed", error);
     return { state: "waiting" };

@@ -43,6 +43,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { HASH_TAKE_ALL, takenPairs } from "@/lib/redis-take";
+import { exactReplies, replyCount } from "@/lib/redis-exact";
 import { onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { saleChannel } from "@/lib/stats";
@@ -52,6 +54,7 @@ import { bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { type Contact, leadsKey, parseContact } from "@/lib/contacts";
 import { type Flow, readFlows, flowsStartedFor } from "@/lib/flows";
 import { doneLessons, studentDates } from "@/lib/learn";
+import { lessonsInOrder, readCourse } from "@/lib/course";
 import { importedFor } from "@/lib/imported-purchases";
 import { isGroupJob } from "@/lib/group-buy";
 import { callsFor, type BookedCall } from "@/lib/buyer-orders";
@@ -169,6 +172,8 @@ function parsePersonNotes(replies: unknown): PersonNote[] {
 /** Where notes about people are counted in the store's data room (lib/store-data.ts). */
 const NOTES_SLOT = "pn";
 const noteBytes = (note: PersonNote) => dataBytes([note.id, JSON.stringify({ at: note.at, by: note.by, text: note.text })], 1);
+/** What one note took when it was added (addPersonNote): its own bytes and its person's place, given back whole when it goes. */
+const noteTaken = (person: string, id: string, json: string) => dataBytes([id, json], 1) + dataBytes([person], 1);
 
 /** A buyer's notes, newest first; throws UnknownReplyError when they could not be read exactly (parsePersonNotes). */
 export async function readPersonNotes(statsId: string | null, person: string): Promise<PersonNote[]> {
@@ -187,7 +192,7 @@ export async function addPersonNote(statsId: string, person: string, by: string,
   const id = randomBytes(4).toString("hex");
   const json = JSON.stringify({ at: Math.floor(now / 1000), by: normaliseEmail(by), text });
   // Its room in the store's data room first (DataRoomError when it does not fit), its person's place with it.
-  await needData(room, [{ slot: NOTES_SLOT, bytes: dataBytes([id, json], 1) + dataBytes([person], 1) }]);
+  await needData(room, [{ slot: NOTES_SLOT, bytes: noteTaken(person, id, json) }]);
   // Each reply read exactly (rule 24; Codex X5 on #3159): HSET answers 1 for a new field, the two EXPIREs 1, SADD 0 or 1.
   // Anything else is unknown: the note may or may not be kept, so its room stays taken and the save is not answered
   // as done.
@@ -209,7 +214,8 @@ export async function addPersonNote(statsId: string, person: string, by: string,
     // already gone (its room went with it), and any other reply keeps its room (never given back on a guess).
     const removed = repliesFor(await redisPipeline(dropped.map((n) => ["HDEL", notesKey(statsId, person), n.id])), dropped.length);
     const gone = removed ? dropped.filter((_, i) => countOf(removed[i]) === 1) : [];
-    if (gone.length) await giveData(room, [{ slot: NOTES_SLOT, bytes: gone.reduce((sum, n) => sum + noteBytes(n), 0) }]);
+    // Each with its person's place, as it was taken (noteTaken).
+    if (gone.length) await giveData(room, [{ slot: NOTES_SLOT, bytes: gone.reduce((sum, n) => sum + noteBytes(n) + dataBytes([person], 1), 0) }]);
     if (!removed || gone.length + removed.filter((r) => countOf(r) === 0).length !== dropped.length) {
       console.error("pruning a buyer's oldest notes was not confirmed; their room stays counted", dropped.length);
     }
@@ -218,12 +224,56 @@ export async function addPersonNote(statsId: string, person: string, by: string,
   return notes;
 }
 
+/**
+ * A note a workflow run writes (lib/flows.ts), only while the run still holds its own take of its lease at its exact
+ * score (KEYS[3], ARGV[4] the member, ARGV[5] the score), in the same step as the write: 3, and nothing written, when it
+ * was taken out or taken over by a later run (Codex G2 on #2287, C3-141). KEYS: the notes, the people; ARGV: the
+ * note's id, the note, how long they are kept. Modelled by lib/redis-memory.ts.
+ */
+export const ADD_RUN_NOTE = `-- marktmorgen:person-run-note:v1
+if tonumber(redis.call("ZSCORE", KEYS[3], ARGV[4]) or "-1") ~= tonumber(ARGV[5]) then return 3 end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
+redis.call("EXPIRE", KEYS[1], ARGV[3])
+redis.call("SADD", KEYS[2], ARGV[6])
+redis.call("EXPIRE", KEYS[2], ARGV[3])
+return 1`;
+/** What ADD_RUN_NOTE runs inside, which Upstash bills one by one beside the EVAL. */
+export const ADD_RUN_NOTE_CALLS = 5;
+
+/**
+ * A note written by a workflow run's step under its own take (`take`, lib/crm.ts RunTake): "written", "superseded"
+ * (nothing written, its room given back) or null when it is not a note. Kept as addPersonNote keeps notes.
+ */
+export async function addRunNote(statsId: string, person: string, by: string, textRaw: unknown, room: DataStore, take: { key: string; member: string; score: number }, now = Date.now()): Promise<"written" | "superseded" | null> {
+  const text = personNoteText(textRaw);
+  if (!text || !PERSON_KEY.test(person) || !isRedisConfigured()) return null;
+  const id = randomBytes(4).toString("hex");
+  const json = JSON.stringify({ at: Math.floor(now / 1000), by: normaliseEmail(by), text });
+  const bytes = dataBytes([id, json], 1) + dataBytes([person], 1);
+  await needData(room, [{ slot: NOTES_SLOT, bytes }]);
+  const reply: unknown = await redisPipeline([["EVAL", ADD_RUN_NOTE, 3, notesKey(statsId, person), whoKey(statsId), take.key, id, json, NOTES_SECONDS, take.member, String(take.score), person]]);
+  const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+  if (answer === 3) {
+    await giveData(room, [{ slot: NOTES_SLOT, bytes }]).catch(() => {});
+    return "superseded";
+  }
+  if (answer !== 1) throw new Error("the note could not be confirmed");
+  // As addPersonNote: past MAX_PERSON_NOTES, the oldest go and give their room back.
+  const notes = await readPersonNotes(statsId, person);
+  if (notes.length > MAX_PERSON_NOTES) {
+    const dropped = notes.slice(MAX_PERSON_NOTES);
+    await redisPipeline([["HDEL", notesKey(statsId, person), ...dropped.map((n) => n.id)]]);
+    await giveData(room, [{ slot: NOTES_SLOT, bytes: dropped.reduce((sum, n) => sum + noteBytes(n), 0) }]);
+  }
+  return "written";
+}
+
 /** Takes one note away, and gives back its room; the notes as they are after. */
 export async function removePersonNote(statsId: string, person: string, id: unknown, room: DataStore): Promise<PersonNote[]> {
   if (typeof id === "string" && NOTE_ID.test(id) && PERSON_KEY.test(person) && isRedisConfigured()) {
     const gone = (await readPersonNotes(statsId, person)).find((n) => n.id === id);
     const [removed] = repliesFor(await redisPipeline([["HDEL", notesKey(statsId, person), id]]), 1) ?? [null];
-    if (gone && countOf(removed) === 1) await giveData(room, [{ slot: NOTES_SLOT, bytes: noteBytes(gone) }]);
+    if (gone && countOf(removed) === 1) await giveData(room, [{ slot: NOTES_SLOT, bytes: noteBytes(gone) + dataBytes([person], 1) }]);
   }
   return readPersonNotes(statsId, person);
 }
@@ -294,15 +344,16 @@ export type ProfileCourse = { title: string; done: number; lessons: number; sinc
 
 /**
  * A part of the page read apart from the payments, which may fail on its own
- * (rule 24): the calls coming up, the sequences they were started on, the
- * team's notes about them. A part that could not be read is named, never
+ * (rule 24): how far they are in their courses, the calls coming up, the
+ * sequences they were started on, the team's notes about them. A part that could not be read is named, never
  * shown as "none". Purchases handed over without a Stripe payment and the
  * amount of a PayPal sale are not named here: an unread one makes the reading
  * `partial`, which the page already says in the tiles and the orders box (#2908).
  */
-export type ProfilePart = "calls" | "sequences" | "notes";
-const PROFILE_PARTS: ProfilePart[] = ["calls", "sequences", "notes"];
+export type ProfilePart = "courses" | "calls" | "sequences" | "notes";
+const PROFILE_PARTS: ProfilePart[] = ["courses", "calls", "sequences", "notes"];
 const PART_WORDS: Record<ProfilePart, string> = {
+  courses: "how far they are in their courses",
   calls: "their calls coming up",
   sequences: "the sequences they were started on",
   notes: "your team's notes about them",
@@ -707,11 +758,23 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
     seen.add(id);
     const listing = await find(id);
     if (!listing?.course) continue;
-    const [done, dates] = await Promise.all([doneLessons(listing.course.id, email), studentDates(listing.course.id, email)]);
+    // A read that fails (the outline, the lessons marked done, the dates) leaves this course off the page and names
+    // its progress as unread (rule 24): never a figure nobody read, and never the whole buyer page lost with it.
+    const read = await Promise.all([doneLessons(listing.course.id, email), studentDates(listing.course.id, email), readCourse(listing.course.id)]).catch((error) => {
+      console.error("reading a buyer's course progress failed", error);
+      unread.add("courses");
+      return null;
+    });
+    if (!read) continue;
+    const [done, dates, outline] = read;
+    // Counted against the course's lessons now: a mark kept for a lesson the
+    // creator took out is not a lesson done, and the listing's count can be
+    // older than the outline. Without the outline, the listing's count, as before.
+    const current = outline ? lessonsInOrder(outline).map(({ lesson }) => lesson.id) : null;
     courses.push({
       title: listing.title,
-      done: Math.min(done.size, listing.course.lessons),
-      lessons: listing.course.lessons,
+      done: current ? current.filter((id) => done.has(id)).length : Math.min(done.size, listing.course.lessons),
+      lessons: current ? current.length : listing.course.lessons,
       since: dates?.since ?? 0,
       lastSeen: dates?.lastSeen ?? 0,
     });
@@ -745,15 +808,30 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
   };
 }
 
-/** Deletes the team's notes about one person (lib/person-erasure.ts). */
-export async function forgetNotesPerson(statsId: string | null, person: string): Promise<number> {
+/**
+ * Deletes the team's notes about one person (lib/person-erasure.ts), and
+ * gives back to `room`, when it is given, what each note took when it was
+ * added: its own bytes and its person's place. The notes are read and
+ * deleted in one step, so two deletions at once give them back once. A reply
+ * that is not exactly the two asked for throws (UnknownReply): the notes are
+ * not taken for gone and nothing is given back.
+ */
+export async function forgetNotesPerson(statsId: string | null, person: string, room?: DataStore): Promise<number> {
   if (!statsId || !PERSON_KEY.test(person) || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", notesKey(statsId, person)], ["SREM", whoKey(statsId), person]]);
-  return Number(gone) || 0;
+  const what = "the deletion of a person's notes";
+  const [taken, who] = exactReplies(await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, notesKey(statsId, person)], ["SREM", whoKey(statsId), person]]), 2, what);
+  const notes = takenPairs(taken, what);
+  replyCount(who, what);
+  const freed = notes.reduce((sum, [id, json]) => sum + noteTaken(person, id, json), 0);
+  if (room && freed > 0) await giveData(room, [{ slot: NOTES_SLOT, bytes: freed }]);
+  return notes.length ? 1 : 0;
 }
 
 /** Spends a search's token once the person it found is deleted (lib/person-erasure.ts). */
 export async function forgetFindToken(token: string): Promise<void> {
   if (!FIND_TOKEN.test(token) || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", findKey(token)]]);
+  // Read exactly (#4800): the token holds the address, so only one reply, 0 (already gone) or 1, is done; any other
+  // throws UnknownReplyError and the erasure is said not finished, never complete with the token kept.
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", findKey(token)]]), 1)?.[0]);
+  if (gone === null || gone > 1) throw new UnknownReplyError("a buyer page's search token deleted");
 }

@@ -1417,6 +1417,19 @@ export class MemoryRedis {
           this.run(["SET", receipt, to, "EX", seconds]);
           return 1;
         }
+        // lib/team.ts KEEP_LOG_IF_LIVE: the reference and erasing fence are checked at the personal write.
+        if (key.startsWith("-- marktmorgen:team-log-live:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, identity, erasing, log, ref, field, entry, limit] = args;
+          this.scriptCalls += 1;
+          if (this.run(["GET", identity]) !== ref) return 0;
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) === 1) return 0;
+          this.scriptCalls += 1;
+          const n = this.run(["LPUSH", log, entry]);
+          this.scriptCalls += 1;
+          this.run(["LTRIM", log, "0", String(Number(limit) - 1)]);
+          return n;
+        }
         if (key.startsWith("-- marktmorgen:call-hold-if-locked:v1\n") && args[0] === "2" && args.length === 6) {
           const [, lock, diary, token, field, value] = args;
           if (this.run(["GET", lock]) !== token) return 0;

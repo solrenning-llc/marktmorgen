@@ -43,6 +43,6 @@ test('the versioned commercial snapshot and all component facts remain mandatory
  const row=txCustomerFixture();assert.equal(assessCustomerWorstCase(row).approved,true);
  row.taxReview!.components.usFederal.evidence.facts='';row.taxesCeilingCents=9000;
  assert.equal(assessCustomerWorstCase(row).reason,'tax_review_unknown');
- assert.equal(CURRENT_COMMERCIAL_TERMS.schemaVersion,29);
+ assert.equal(CURRENT_COMMERCIAL_TERMS.schemaVersion,30);
  assert.equal(commercialMarginReady(),false);
 });

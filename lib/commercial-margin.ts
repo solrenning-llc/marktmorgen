@@ -77,7 +77,8 @@ function scenarioWithPlanRoom(key: MarginScenario, scenario: CustomerWorstCase |
 export const CURRENT_COMMERCIAL_TERMS = {
  // Since 18 October 2026 (schema 22): the price list of the owner's decision of 11:21, one list with no share of a sale, and the limits raised with it.
  // Schema24: a complete LLC inventory and its ceilings bind every financial review.
- schemaVersion: 29,
+ // Schema 30 (owner's decision 3 (b), 20/11/2026, #5017): the review requires only the six plan scenarios.
+ schemaVersion: 30,
  customerTaxReview: CUSTOMER_TAX_REVIEW_POLICY,
  planPaymentDisputes: PLAN_PAYMENT_DISPUTE_COST_RULES,
  marginPolicy: { decision: '2026-10-27T07:42:00-03:00', unit: 'strictly-positive-net-cents', minimumNetProfitCents: MINIMUM_NET_PROFIT_CENTS, company: 'nonnegative-at-computed-minimum-base', companyTargetBps: 6000, targetBasis: 'monthly-reconciled-actual-not-a-sales-gate', spendFloorRoom: COMMERCIAL_SPEND_FLOOR_ROOM_CENTS, assistantCostRoomCents: ADD_ON_ROOM_CENTS },

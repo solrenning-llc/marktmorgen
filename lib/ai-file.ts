@@ -251,7 +251,7 @@ export type FileSaveIo = {
   rememberOwner: (folder: string) => Promise<void>;
 };
 
-export type FileSaveResult = { ok: true; file: ProductFile; pages: number } | { ok: false; error: "letters" | "too_big" | "upload_budget_unavailable" | "storage_full" | "storage_unknown" | "failed" | "changed" | "displaced" };
+export type FileSaveResult = { ok: true; file: ProductFile; pages: number } | { ok: false; error: "letters" | "too_big" | "upload_budget_unavailable" | "storage_full" | "storage_unknown" | "failed" | "changed" | "displaced" | "unconfirmed" };
 
 /** The refusals that come before the PDF is drawn: only after one of these does the run get its one save back. */
 const UNDRAWN: ReadonlySet<string> = new Set(["letters", "storage_full", "storage_unknown", "upload_budget_unavailable"]);
@@ -313,7 +313,16 @@ export async function saveAiFile(store: Store, productId: string, draft: FileDra
       return { ok: false, error: "failed" };
     }
     const file: ProductFile = { pathname: path, name, bytes: size, contentType: "application/pdf", addedAt: at.toISOString() };
-    const attached = await io.attach(file);
+    // An attach that throws gave no answer: the write may have been kept and its reply lost, so the product may point at
+    // this PDF. It is kept, never deleted under the product, and the save says it could not be confirmed (Claude 4 3rC's
+    // LOW on #3474); the run's save is spent, since the PDF was drawn.
+    let attached: Awaited<ReturnType<FileSaveIo["attach"]>>;
+    try {
+      attached = await io.attach(file);
+    } catch (error) {
+      console.error("attaching a file written with AI gave no answer; the file is kept, since the product may point at it", path, error);
+      return { ok: false, error: "unconfirmed" };
+    }
     if (!attached.ok) {
       await io.remove(path).catch(() => {});
       return { ok: false, error: attached.reason === "changed" ? "changed" : "failed" };

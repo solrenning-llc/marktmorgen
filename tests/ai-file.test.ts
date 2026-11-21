@@ -322,6 +322,10 @@ async function main(): Promise<void> {
     },
   });
   is("a put-back that throws: the same, nothing deleted", [await saveAiFile(store, "prod000001", draft, restoreThrows.io), restoreThrows.log.removed.length], [{ ok: false, error: "displaced" }, 0]);
+  // Claude 4 3rC's LOW on #3474: an attach that throws gives no answer (the write may have been kept and its reply lost),
+  // so the product may point at the new PDF: it is kept, the save says it could not be confirmed, and the run's save is spent.
+  const attachThrows = fake({ attach: async (attached) => { attachThrows.log.attached.push(attached); throw new Error("reply lost"); } });
+  is("an attach that throws: unconfirmed, the PDF the product may point at is not deleted, its room released", [await saveAiFile(store, "prod000001", draft, attachThrows.io), attachThrows.log.removed.length, attachThrows.log.released.length, saveGivenBack("unconfirmed")], [{ ok: false, error: "unconfirmed" }, 0, 1, false]);
   let firstAsk = true;
   const askedHow: (boolean | undefined)[] = [];
   const restoreFlag = fake({

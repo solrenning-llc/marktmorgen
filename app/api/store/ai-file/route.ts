@@ -145,7 +145,7 @@ export async function POST(request: NextRequest) {
   if (!saved.ok) {
     // Nothing was kept. The run's one save comes back only when this save drew nothing (a refusal before the PDF), so one run draws one PDF at the most.
     if (saveGivenBack(saved.error)) await grantFileSave(store, run).catch(() => false);
-    return fail(saved.error, saved.error === "failed" ? 502 : saved.error === "upload_budget_unavailable" || saved.error === "storage_unknown" ? 503 : 409);
+    return fail(saved.error, saved.error === "failed" ? 502 : saved.error === "upload_budget_unavailable" || saved.error === "storage_unknown" || saved.error === "unconfirmed" ? 503 : 409);
   }
   return Response.json({ ok: true, file: { name: saved.file.name, bytes: saved.file.bytes }, pages: saved.pages });
 }

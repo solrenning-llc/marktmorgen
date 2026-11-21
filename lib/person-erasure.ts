@@ -106,6 +106,7 @@ import { forgetRequestsPerson } from "@/lib/payment-request-store";
 import { forgetAgreementsPerson } from "@/lib/agreement-store";
 import { forgetShipmentMail } from "@/lib/shipment-mail-outbox";
 import { forgetOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
+import { ERASE_BATCH, forgetIdempotentPerson, idempotentLines } from "@/lib/api-idempotency";
 
 
 /**
@@ -136,6 +137,7 @@ export const ERASERS: Eraser[] = [
   { module: "lib/crm-companies.ts", run: (s) => forgetCompanyPerson(s.statsId, s.person, undefined, s.store) },
   { module: "lib/payment-request-store.ts", run: (s) => forgetRequestsPerson(s.sid, s.email) },
   { module: "lib/agreement-store.ts", run: (s) => forgetAgreementsPerson(s.sid, s.email) },
+  { module: "lib/api-idempotency.ts", run: (s) => forgetIdempotentPerson(s.sid, s.email) },
   { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person, s.store) },
   { module: "lib/form-store.ts", run: (s) => forgetFormsPerson(s.statsId, s.email, s.store) },
   {
@@ -306,13 +308,14 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
 /** How big this erasure is: the store's catalogue and courses, and the few things counted to know it. */
 export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
   const id = scope.communityId;
-  const [deals, conversations, dmConversations, roomMessages, events, certificates, podcastProducts, checkoutAsks] = await Promise.all([
+  const [deals, conversations, dmConversations, roomMessages, events, certificates, apiAnswers, podcastProducts, checkoutAsks] = await Promise.all([
     dealCount(scope.statsId),
     conversationCount(scope.statsId),
     id ? dmCount(id, scope.learner) : 0,
     id ? roomSize(id) : 0,
     id ? eventCount(id) : 0,
     certificateCount(scope.courses.map((c) => c.courseId)),
+    idempotentLines(scope.sid, scope.email),
     podcastProductCount(scope.statsId),
     checkoutAskCount(scope.statsId, scope.email),
   ]);
@@ -328,6 +331,8 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
     certificates,
     droppedCourses: scope.droppedCourses ?? 0,
     droppedRecords: scope.droppedRecords ?? 0,
+    apiAnswers,
+    apiAnswerBatches: Math.ceil(apiAnswers / ERASE_BATCH),
     podcastProducts,
     checkoutAsks,
     waitlists: scope.waitlistMarks ?? 0,

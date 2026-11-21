@@ -84,6 +84,13 @@ export type ErasureSize = {
    * removed ones included, which a deletion looks for the person's feeds in beside the catalog (#4471).
    */
   podcastProducts: number;
+  /**
+   * The lines of the person's index of API answers kept under an Idempotency-Key (lib/api-idempotency.ts,
+   * idempotentLines): each a record to delete and a line to take out (since 12 November 2026, review of #3542).
+   */
+  apiAnswers: number;
+  /** Those lines in batches of ERASE_BATCH (lib/api-idempotency.ts): one DEL and one ZREM each. */
+  apiAnswerBatches: number;
   /** The checkout-ask count paid for before the erasers run (lib/checkout-ask.ts checkoutAskCount, #4290). */
   checkoutAsks: number;
   /** Waitlist marks read (lib/waitlist.ts waitlistMarks): coming soon and still dropping, at most MAX_WAITLIST_MARKS. */
@@ -124,17 +131,19 @@ export const ERASE_SUBMISSIONS: readonly [number, number] = [301, 70_000];
  */
 // 567 before #4290 and #4462; four more cover the own ask count and the atomic ask eraser's fixed work (ZCARD, EVAL,
 // ZRANGEBYSCORE, DEL), and #4462's four for the waitlist marks: 575; and (750 [CD1]) a person's files sent for review,
-// ERASE_SUBMISSIONS: 575 before them.
-export const ERASE_FIXED_COMMANDS = 575 + ERASE_SUBMISSIONS[0];
+// ERASE_SUBMISSIONS: 575 before them; and (#3542, since 12 November 2026) the four on a person's index of kept API
+// answers (lib/api-idempotency.ts: its count, then the erasure's mark, its expiry and the read), whatever it lists: 579.
+export const ERASE_FIXED_COMMANDS = 579 + ERASE_SUBMISSIONS[0];
 /**
  * Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read
  * again, and those commands; 310,000 before (Claude 3 on #3473) the memberships whose invitations wait to be deleted
  * (lib/move-members.ts PENDING_MAX, 20): their ids read once (40 bytes each) and, for each, one more field of the
  * person's invitations asked (73 bytes) and its record (at most about 600 bytes with a full address), counted at 15,000;
  * 325,000 before (#4290) the atomic ask eraser's script, two keys, arguments and its two counts, 5,000; and (750 [CD1])
- * a person's files sent for review, ERASE_SUBMISSIONS: 330,000 before them.
+ * a person's files sent for review, ERASE_SUBMISSIONS: 330,000 before them; and (#3542) the four on the index of kept API
+ * answers, under 1,000 bytes with their replies, which also cover the erasure's mark kept for a day: 331,000.
  */
-export const ERASE_FIXED_BYTES = 330_000 + ERASE_SUBMISSIONS[1];
+export const ERASE_FIXED_BYTES = 331_000 + ERASE_SUBMISSIONS[1];
 /** Members removed per command in the atomic checkout-ask eraser; not a cap on a person's erasure. */
 export const ASK_ERASE_BATCH = 512;
 /** Per thing counted: [commands, bytes]. */
@@ -158,6 +167,10 @@ export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   // REMOVED_COURSE_RECORD_BYTES (lib/removed-courses.ts, 15,442) at most, counted at 16,000; held by
   // tests/erasure-dropped-list-budget.test.ts.
   droppedRecords: [1, 16_000],
+  // A line read (a key's hash, 64 hex), its record named in a DEL (nl:api:idem:<sid>:<hash>, 109) and the line in a
+  // ZREM (64), each quoted: under 250 bytes.
+  apiAnswers: [0, 300],
+  apiAnswerBatches: [2, 0],
   // A noted podcast product (#4471, lib/podcast-access.ts): the GET of the person's index for it, and its index's and
   // cached answer's names in the deletion's DEL; its member in the set read (an id of at most 80 bytes), its index's
   // name in a SCAN page (at most 204 bytes) and the index's reply (a 48-character token): counted at 1,000 bytes. A

@@ -25,7 +25,8 @@ import { saleHandles } from "@/lib/store";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { windowCount, windowCountOf } from "@/lib/window-count";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { orderWrite } from "@/lib/order-data";
 import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
@@ -110,26 +111,19 @@ const configKey = (account: string, language: unknown = "en") => {
 const stripeLocale = (store: Store) => LANGUAGES[parseLanguage(store.language)].stripe;
 
 /**
- * Counts one more open of an emailed link and answers the count, or null when Redis answered in a shape it does
- * not know (CX-123 rule 24; Claude 5, sweep APP2 finding 2). Only a whole count from 1 up is a count: a missing
- * reply, nil or a word is not "under the limit", so the caller refuses the press and opens nothing at Stripe.
+ * One count of `key` in a window of `seconds` (lib/window-count.ts: INCR, then EXPIRE … NX), read only in its exact
+ * shape. An incomplete reply cannot prove that a request fits its funded limit, so it is null, never a count; and a
+ * key the INCR made after its window ran out is given its expiry back by the EXPIRE, never kept counting for good
+ * (review of #2498: the SET NX EX + INCR pair left such a key with no expiry, and the link or address refused forever).
  */
-async function countOpen(key: string): Promise<number | null> {
-  const replies = repliesFor(await redisPipeline([
-    ["SET", key, "0", "EX", MANAGE_LINK_SECONDS, "NX"],
-    ["INCR", key],
-  ]), 2);
-  if (!replies || (replies[0] !== "OK" && replies[0] !== null)) return null;
-  const count = countOf(replies[1]);
-  return count !== null && count >= 1 ? count : null;
+async function confirmedCount(key: string, seconds: number): Promise<number | null> {
+  return windowCountOf(await redisPipeline(windowCount(key, seconds)));
 }
 
 async function within(key: string, limit: number): Promise<boolean> {
-  const [, count] = await redisPipeline([
-    ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-    ["INCR", key],
-  ]);
-  return Number(count) <= limit;
+  const count = await confirmedCount(key, RATE_WINDOW_SECONDS);
+  if (count === null) throw new Error("Membership request limit could not be confirmed");
+  return count <= limit;
 }
 
 /** Whether members of this store can be offered the way out. */
@@ -288,9 +282,17 @@ export async function requestManageLink(input: {
 
   const token = randomToken();
   const grant = grantRecord(store.stripeAccountId as string, store.handle, found.customers, found.more);
-  await redisPipeline([
-    ["SET", await tokenKey(token), JSON.stringify(grant), "EX", MANAGE_LINK_SECONDS],
-  ]);
+  // The paid email goes only once its token is known stored (Codex X6's LOW on #2498, CX-123 rule 24): "OK" is stored;
+  // any other answer, or a thrown one, is read back by the grant's own value, so a write that landed with its reply
+  // lost still sends, and one that did not (or a read-back that does not read) throws: the form says something went
+  // wrong, and no email carries a dead link.
+  const key = await tokenKey(token);
+  const value = JSON.stringify(grant);
+  const written = await redisPipeline([["SET", key, value, "EX", MANAGE_LINK_SECONDS]]).then((reply) => repliesFor(reply, 1)?.[0], () => undefined);
+  if (written !== "OK") {
+    const held = repliesFor(await redisPipeline([["GET", key]]), 1)?.[0];
+    if (held !== value) throw new UnknownReplyError("a membership link's token write");
+  }
 
   const name = store.name;
   const link = `${origin}/@${store.handle}/manage?token=${token}`;
@@ -428,7 +430,8 @@ export async function openPortal(store: Store, token: string, origin: string, su
   const grant = parseGrant(raw);
   if (!grant || grant.a !== store.stripeAccountId) return { ok: false, reason: "expired" };
 
-  const count = await countOpen(await opensKey(token));
+  const key = await opensKey(token);
+  const count = await confirmedCount(key, MANAGE_LINK_SECONDS);
   if (count === null) return { ok: false, reason: "error" };
   if (count > MAX_OPENS) return { ok: false, reason: "used" };
 
@@ -837,7 +840,8 @@ export async function openCancel(store: Store, token: string, subscription: stri
 
   // The same counter as the portal button: one link opens Stripe a limited
   // number of times, whichever button is pressed.
-  const count = await countOpen(await opensKey(token));
+  const key = await opensKey(token);
+  const count = await confirmedCount(key, MANAGE_LINK_SECONDS);
   if (count === null) return { ok: false, reason: "error" };
   if (count > MAX_OPENS) return { ok: false, reason: "used" };
 

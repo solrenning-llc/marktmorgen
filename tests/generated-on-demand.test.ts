@@ -53,6 +53,29 @@ test("running each command prints its report, leaves the stored text unchanged, 
   }
 });
 
+test("the solver's stdout carries only its JSON, even when HiGHS writes straight to fd 1", () => {
+  // HiGHS can print a diagnostic to file descriptor 1 whatever options={"disp": False} says (seen on 21/11/2026 with
+  // #4888's cost lines: "HighsMipSolverData::transformNewIntegerFeasibleSolution tmpSolver.run();"), which made the
+  // solver's output unreadable. The real script runs here with milp wrapped to write such a line to fd 1 first.
+  const input = spawnSync(process.execPath, ["scripts/pricing-optimization.mjs", "--milp-input"], { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  assert.equal(input.status, 0, input.stderr);
+  const line = "HighsMipSolverData::transformNewIntegerFeasibleSolution tmpSolver.run();";
+  const wrapped = [
+    "import importlib.util, os",
+    "spec = importlib.util.spec_from_file_location('solver', 'scripts/pricing-optimization-milp.py')",
+    "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)",
+    "real = m.milp",
+    `def noisy(*a, **k):\n    os.write(1, b${JSON.stringify(line + "\n")})\n    return real(*a, **k)`,
+    "m.milp = noisy",
+    "m.main()",
+  ].join("\n");
+  const run = spawnSync(process.env.MILP_PYTHON || "python3", ["-c", wrapped], { cwd: root, input: input.stdout, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 120_000 });
+  assert.equal(run.status, 0, run.stderr);
+  const parsed = JSON.parse(run.stdout);
+  assert.ok(Array.isArray(parsed.solutions) && parsed.solutions.length > 0, "the JSON on stdout has the solutions");
+  assert.ok(run.stderr.includes(line), "what HiGHS writes to fd 1 goes to stderr, not lost and not into the JSON");
+});
+
 test("the test job installs the solver's pinned packages, so the solver runs on demand there", () => {
   // Each requirement is one logical line ("\" continues it): the exact version, then the sha256 of each prebuilt wheel the
   // job may take (owner's SIM of 20/11/2026, condition 3: --only-binary :all: and --require-hashes).

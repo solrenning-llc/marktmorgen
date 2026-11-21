@@ -102,6 +102,7 @@ export const NOT_MODULES: Readonly<Record<string, string>> = {
   totals: "Figures for the stores of the account, a report rather than a part of the store.",
   paused: "Shown only when the studio's requests for the period are used up.",
   "closing-refunds": "The review before members get unused time back when a store closes.",
+  moved: "Where a closing store's owner gives its new address, reached from the closing notice (97 [D2-OPEN-EXIT]).",
   refund: "The review before a refund of the store's own Marktmorgen plan.",
   disputes: "The review of one disputed purchase, opened from Payment requests.",
   invite: "Credits on the store's own Marktmorgen plan for inviting other creators, not a part of the store.",

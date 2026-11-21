@@ -1,6 +1,6 @@
 import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
-import { MetaIncompleteForget, forgetMetaUser, isMetaConfigured, signedUser } from "@/lib/meta-ads";
+import { MetaIncompleteForget, NOTICE_SKEW_MS, forgetMetaUser, isMetaConfigured, signedNotice } from "@/lib/meta-ads";
 import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
 import { SITE_URL } from "@/lib/site-url";
 
@@ -24,13 +24,15 @@ export async function POST(request: NextRequest) {
   } catch {
     return Response.json({ error: "invalid" }, { status: 400 });
   }
-  const user = signedUser(raw);
-  if (!user) return Response.json({ error: "invalid" }, { status: 400 });
+  const notice = signedNotice(raw);
+  if (!notice) return Response.json({ error: "invalid" }, { status: 400 });
+  const { user } = notice;
   // Nothing is confirmed to Meta unless every store was read and forgotten exactly (CX-123 rule 24): an unknown reply
   // answers 503 with no confirmation code, the user's index kept, so Meta asks again.
   let forgot: Awaited<ReturnType<typeof forgetMetaUser>>;
   try {
-    forgot = await forgetMetaUser(user);
+    // Only connections made before Meta issued the notice: a replayed old one never reaches a store connected since (#4585).
+    forgot = await forgetMetaUser(user, notice.issuedAt + NOTICE_SKEW_MS);
   } catch (error) {
     console.error("forgetting a Meta user failed", error);
     // The stores this pass did forget are told now: the next pass reads them as gone (Claude 5 on #2869).

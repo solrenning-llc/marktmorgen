@@ -25,7 +25,7 @@ import { CURRENT_LLC_FIXED_COST_CEILINGS, FIXED_COST_SOURCE_OBSERVATIONS, LLC_FI
 import { done, is, part } from "./check";
 
 // The design as built: one part of at most 4 MiB, 10,000 keys, 20,210 commands (20,000 for the copy, 200 SCAN pages,
-// the run's ten: the lock, the day's count (SET NX and INCRBY), the last good copy's GET, its outcome, three at the
+// the run's ten: the lock, the day's count (INCRBY and EXPIRE NX), the last good copy's GET, its outcome, three at the
 // most, and the lock let go only if it is its own, a script and the GET and DEL inside it), 30 days kept. One set's stored bound: 4,194,304 + one part's seal room 65,536 + the manifest's 160 + 65,536 =
 // 4,325,536 bytes; 30 + 2 = 32 sets (lib/backup-run.ts, backupPeakSets) = 138,417,152 bytes. 64 runs a month: 2 a day
 // on each of 32 UTC days.

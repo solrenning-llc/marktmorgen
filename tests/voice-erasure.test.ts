@@ -38,6 +38,12 @@ import { linesOf } from "@/lib/person-data";
 import { aiMonthKey } from "@/lib/ai";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { mock } from "node:test";
+
+// The checks pass one moment (`now` below) to the code, which still reads the clock itself in places: a run crossing
+// 00:00 UTC (any day) between the two failed "enough to read ... with the person's review among them" or "the erasure
+// ran in the middle of the reading". Only Date is stopped, for the whole run; timers and performance.now() run.
+mock.timers.enable({ apis: ["Date"], now: Date.now() });
 
 const PERSON = "tess.voice@example.com";
 /** The person's review words, as lib/reviews.ts keeps them (tests/erasure-world.ts, seedPerson). */

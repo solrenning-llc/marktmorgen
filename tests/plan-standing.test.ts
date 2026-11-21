@@ -77,7 +77,7 @@ async function main(): Promise<void> {
     const door = read(path);
     if (name === "files") {
       const reserved = read("lib/vault-storage.ts");
-      is("R2 admission measures confirmed usage under its shared reservation", [/openReservedVault/.test(door), /storageBrakeFor\(standing, store\.tier\)/.test(door), /storageUsed\(input.folder, limit\)/.test(reserved), /held.available !== true/.test(reserved), /reserveStorage/.test(reserved)], [true, true, true, true, true]);
+      is("R2 admission measures confirmed usage under its shared reservation", [/openReservedVault/.test(door), /storageBrakeFor\(standing, store\.tier\)/.test(door), /storageUsedToday\(input.folder, limit\)/.test(reserved), /held.available !== true/.test(reserved), /reserveStorage/.test(reserved)], [true, true, true, true, true]);
     } else {
       is(`the door for ${name} measures a store against its own figure and holds a file to what is left`, [/storageUsed\(folder, storageBrakeFor\(standing, store\.tier\)\)/.test(door), /!fits\(held, bytes\)/.test(door), /storageRefusal\(standing\)/.test(door)], [true, true, true]);
     }
@@ -110,7 +110,7 @@ async function main(): Promise<void> {
   is("so does the page about courses", ["paidVideoWords()", "hoursWords(TRIAL_VIDEO_SECONDS)", "hoursWords(SETUP_VIDEO_SECONDS)"].every(piece => read("lib/feature-pages.ts").includes(piece)), true);
   const studio = read("app/studio/page.tsx");
   is("the studio shows a store its own figures", [/storageBrakeFor\(standing, store\.tier\)/.test(studio), /videoLimitFor\(store\)/.test(studio), /SETUP_VIDEO_SECONDS/.test(studio)], [true, true, true]);
-  is("and the lesson page pauses by the store's own hours", /lessonVideo\(lesson\.video, videoLimitFor\(store\), windowId\(store\), store\)/.test(read("app/[handle]/course/[product]/[lesson]/page.tsx")), true);
+  is("and the lesson page pauses by the store's own hours", /lessonVideo\(lesson\.video, videoLimitFor\(store\), windowId\(store\), store, \{ free: access\.state !== "open" \}\)/.test(read("app/[handle]/course/[product]/[lesson]/page.tsx")), true);
 
   done();
 }

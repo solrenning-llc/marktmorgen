@@ -7,7 +7,7 @@
  *
  *   nl:orders:told:<folder>:<month>     the creator was written to about that month
  */
-import { type Meter, firstWordOf } from "@/lib/usage-billing";
+import { type Meter, firstWordOf, giveFirstWordBack, takeFirstWordOf } from "@/lib/usage-billing";
 import { orderedFolders, ordersIn } from "@/lib/orders";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 
@@ -24,4 +24,14 @@ const ORDERS: Meter = {
 /** Whether the creator still has to be written to about this month's orders: true the first time it is asked, and never again. */
 export function firstWordOnOrders(folder: string, month: string): Promise<boolean> {
   return firstWordOf(ORDERS, folder, month);
+}
+
+/** firstWordOnOrders, keeping the mark's value: given back with giveOrdersWordBack when the notice was certainly not sent. */
+export function takeOrdersWord(folder: string, month: string): Promise<string | null> {
+  return takeFirstWordOf(ORDERS, folder, month);
+}
+
+/** Gives the month's mark back after a certain refusal, while it still holds this run's value (lib/usage-billing.ts). */
+export function giveOrdersWordBack(folder: string, month: string, value: string): Promise<void> {
+  return giveFirstWordBack(ORDERS, folder, month, value);
 }

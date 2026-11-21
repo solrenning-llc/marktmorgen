@@ -56,7 +56,8 @@ export function openAgreementsFor(agreements: readonly Agreement[], email: strin
  */
 export async function waitingFor(store: Store, email: string, now = Date.now(), withRequests = true): Promise<Waiting> {
   // Requests are not read at all where their page does not take payment (lib/payment-requests.ts, requestsOpen).
-  const [requests, agreements] = await Promise.all([withRequests ? requestsOfPerson(store, email).catch(() => null) : Promise.resolve([]), agreementsOfPerson(store, email).catch(() => null)]);
+  // Proposals and agreements are not read for a store switched off after a report (lib/takedown.ts): nothing new is agreed there.
+  const [requests, agreements] = await Promise.all([withRequests ? requestsOfPerson(store, email).catch(() => null) : Promise.resolve([]), store.suspended ? Promise.resolve([]) : agreementsOfPerson(store, email).catch(() => null)]);
   const allRequests = openRequestsFor(requests ?? [], email, now);
   const allAgreements = openAgreementsFor(agreements ?? [], email, now);
   let unread = requests === null || agreements === null;

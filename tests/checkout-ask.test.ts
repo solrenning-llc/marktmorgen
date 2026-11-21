@@ -49,8 +49,8 @@ test("the form cannot be turned on somebody's inbox, or run up a bill", () => {
   assert.ok(ASKS_PER_STORE_DAY * 0.0009 < 0.25);
   assert.equal(ASK_AFTER_SECONDS, 3600, "the same hour the other reminder waits");
   const src = code("lib/checkout-ask.ts");
-  assert.match(src, /withinLimit\("remind-ask", ip, ASKS_PER_ADDRESS_HOUR, 3600\)/);
-  assert.match(src, /withinLimit\("remind-store", statsId, ASKS_PER_STORE_DAY, 86_400\)/);
+  assert.match(src, /withinEssentialLimit\("remind-ask", ip, ASKS_PER_ADDRESS_HOUR, 3600\)/);
+  assert.match(src, /withinEssentialLimit\("remind-store", statsId, ASKS_PER_STORE_DAY, 86_400\)/);
   // A product's ask and a cart's go through the one place those limits are.
   assert.equal((src.match(/return keep\(store, /g) ?? []).length, 2);
 });
@@ -70,7 +70,8 @@ test("it is taken off the queue before anything is sent, and put back only after
   // the most and only inside its six hours (tests/reminders-requeue.test.ts): a reminder hours late is worse than none.
   // Only a failure before the email service was asked is put back (Claude 2 on #3214): its answer cannot tell a refusal
   // from a passing failure, and each ask takes the store's email room again, so "failed" (it was asked) is never.
-  assert.match(body, /outcome === "retry" && \(await again\(ask, now\)\)/);
+  // With the entry it was taken with, so a person erased while it was in flight is never written back (Codex L on #4290).
+  assert.match(body, /outcome === "retry" && \(await again\(ask, member, now\)\)/);
   assert.ok(!/outcome === "failed" && \(await again/.test(body), "a send the email service was asked for is never put back");
   assert.match(body, /store && store\.statsId === ask\.statsId/, "and only for the store it was asked on");
 });
@@ -78,7 +79,8 @@ test("it is taken off the queue before anything is sent, and put back only after
 test("every kind of yes goes through the one set of limits", () => {
   const src = code("lib/checkout-recovery.ts");
   // Stripe's box, the buyer's own ask, and the Store assistant's box at checkout (lib/assistant-reminder.ts, remindAssisted).
-  assert.equal((src.match(/return deliver\(store, \{ kind: "product", product \},/g) ?? []).length, 3, "Stripe's box, the buyer's own ask and the assistant's box");
+  // A checkout's own reminder carries whether it was a pre-order, so the plan line follows the checkout (630 [HN6](15)).
+  assert.equal((src.match(/return deliver\(store, \{ kind: "product", product(?:, preorder: meta\.preorder === "yes")? \},/g) ?? []).length, 3, "Stripe's box, the buyer's own ask and the assistant's box");
   assert.equal((src.match(/return deliver\(store, \{ kind: "cart", items \},/g) ?? []).length, 3, "and the same three for a whole cart");
   const deliver = src.slice(src.indexOf("async function deliver("));
   for (const guard of ["offKey(statsId, email)", "onceKey(statsId, email, onceFor)", "parseContact(contact)?.unsub", "paidSince(store, email, ids, how.since)"]) {

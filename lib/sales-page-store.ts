@@ -32,8 +32,8 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { dropLandings } from "@/lib/campaign-landing-store";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
-import { takePictureDoor } from "@/lib/picture-door";
+import { HDEL_IF_EQUAL, UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { returnToDoor, takePictureDoor } from "@/lib/picture-door";
 import { EMPTY_PAGE, MAX_STORED_PAGE_BYTES, type SalesPage, parsePage, picturePaths } from "@/lib/sales-page";
 import { sectionsOn } from "@/lib/saved-blocks";
 import { usesCommands } from "@/lib/saved-block-store";
@@ -104,12 +104,28 @@ export async function claimPictures(statsId: string, productId: string, paths: s
  * Another page's picture is refused as before. A picture from before the door
  * existed stays on the page that shows it: it is never new there.
  *
- * Those taken from the door are claimed even when another is refused, so the
- * creator's save tried again still finds them; nothing is deleted here.
+ * A save that is refused writes none of them down as this page's (Codex N1 on
+ * #2843, MEDIUM): written down and then refused, a picture the creator's next
+ * save left out was owned for good by a page that never showed it, kept and
+ * refused to every other page. What this call took from the door goes back on
+ * it instead: unchecked, as it was noted; checked, as put back once
+ * (lib/picture-door.ts putBackOnce), so the next save that shows it checks it
+ * again only paid for as a studio request (lib/picture-check.ts), and the
+ * studio-blob line holds. A name the door did not give this save refuses it
+ * before anything is read. Nothing is deleted here.
+ * `check` is given the ones this call took from the door, before any of them is
+ * written down as this page's, and answers which are pictures (MR audit gap 1:
+ * each is asked about in the file store once, when taken). Only those become
+ * the page's, so being this page's always means checked (Codex Z on #2843): a
+ * take whose check never finished, a lost reply or a crash, leaves a picture
+ * neither in the door nor owned, refused by every later save, never put on
+ * unchecked.
  * A take from the door that cannot be confirmed throws (takePictureDoor), so
  * the page is refused with server_error before it is written.
  */
-export async function claimNewPictures(statsId: string, pageId: string, paths: string[]): Promise<boolean> {
+export async function claimNewPictures(
+  statsId: string, pageId: string, paths: string[], check?: (taken: ReadonlyMap<string, number>) => Promise<{ good: string[]; unknown: string[] }>,
+): Promise<boolean> {
   const unique = [...new Set(paths)];
   if (unique.length === 0) return true;
   // Not known is ours to say, never "add the picture again" (Claude 4 on #2156): it throws, and the route answers
@@ -123,14 +139,39 @@ export async function claimNewPictures(statsId: string, pageId: string, paths: s
   if (unique.some((_, i) => typeof list[i] === "string" && list[i] !== "" && list[i] !== pageId)) return false;
   const unclaimed = unique.filter((_, i) => list[i] !== pageId);
   const taken = await takePictureDoor(unclaimed);
-  const fresh = unclaimed.filter((path) => taken.has(path));
-  if (fresh.length) {
-    await redisPipeline(fresh.map((path) => ["HSETNX", picsKey(statsId), path, pageId]));
-    const [after] = await redisPipeline([["HMGET", picsKey(statsId), ...fresh]]);
-    const now = Array.isArray(after) ? after : [];
-    if (fresh.some((_, i) => now[i] !== pageId)) return false;
+  const tookNow = unclaimed.filter((path) => taken.has(path));
+  // One the door did not give this save can never be claimed: refused before anything is read, and what it took goes
+  // back on the door as it was noted, unchecked (Codex N1 on #2843).
+  if (tookNow.length !== unclaimed.length) {
+    await returnToDoor(tookNow.map((path) => [path, taken.get(path) as number]));
+    return false;
   }
-  return fresh.length === unclaimed.length;
+  // Checked before they are written down as this page's, and only those that are pictures are (Codex Z on #2843).
+  // A check that did not finish puts its picture back on the door (lib/picture-check.ts), and the save throws, so the
+  // route answers server_error and the creator's save tried again checks it again (Claude 2 on #2843, 6750890970).
+  const checks = check && tookNow.length ? await check(new Map(tookNow.map((path) => [path, taken.get(path) as number]))) : { good: tookNow, unknown: [] };
+  const checked = new Set(checks.good);
+  const fresh = tookNow.filter((path) => checked.has(path));
+  // Those that passed go back on the door, as put back once, whenever the save is not taken whole: written down first
+  // and then refused, one the next save left out would stay this page's for good (Codex N1 on #2843, MEDIUM).
+  const backChecked = (paths: string[]) => returnToDoor(paths.map((path) => [path, Math.floor(taken.get(path) as number) + 0.5]));
+  if (checks.unknown.length || fresh.length !== unclaimed.length) {
+    await backChecked(fresh);
+    if (checks.unknown.length) throw new Error("page pictures: a check of the file store did not finish");
+    return false;
+  }
+  if (fresh.length === 0) return true;
+  await redisPipeline(fresh.map((path) => ["HSETNX", picsKey(statsId), path, pageId]));
+  const [after] = await redisPipeline([["HMGET", picsKey(statsId), ...fresh]]);
+  if (Array.isArray(after) && after.length === fresh.length && fresh.every((_, i) => after[i] === pageId)) return true;
+  // Not all written down as this page's (another page's first, or a reply not known): only this attempt's own are let
+  // go of, each only while it still names this page (HDEL_IF_EQUAL), and those go back on the door; none was this
+  // page's before (unclaimed), so a field naming it now was written by this save.
+  const undone = repliesFor(await redisPipeline(fresh.map((path) => ["EVAL", HDEL_IF_EQUAL, 1, picsKey(statsId), path, pageId])), fresh.length);
+  const counts = undone ? undone.map(countOf) : null;
+  if (!counts || counts.some((c) => c !== 0 && c !== 1)) throw new UnknownReplyError("page pictures: letting go of a refused claim");
+  await backChecked(fresh.filter((_, i) => counts[i] === 1));
+  return false;
 }
 
 /**
@@ -158,6 +199,45 @@ export async function readPage(statsId: string | null, productId: string): Promi
   const replies = repliesFor(await redisPipeline([["GET", pageKey(statsId, productId)]]), 1);
   if (!replies) throw new UnknownReplyError("a page read");
   return pageOf(replies[0]);
+}
+
+/**
+ * The UTF-8 bytes a product's kept page record weighs (STRLEN, Redis's own count), read exactly: 0 when none is kept,
+ * null for any other answer or a failed request, never a size guessed (rule 24). What a publish pays its reads by.
+ */
+export async function keptPageBytes(statsId: string, productId: string): Promise<number | null> {
+  try {
+    const replies = repliesFor(await redisPipeline([["STRLEN", pageKey(statsId, productId)]]), 1);
+    const bytes = replies ? replies[0] : undefined;
+    return typeof bytes === "number" && Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A page that grew past what was counted for reading it: nothing was read whole, and nothing is decided from it. */
+export class PageGrown extends Error {
+  constructor() {
+    super("The page changed while it was being read. Try again in a moment.");
+    this.name = "PageGrown";
+  }
+}
+
+/**
+ * A product's page, read no further than `most` bytes (what keptPageBytes measured and the caller counted): a page grown
+ * since is read cut, cannot be read, and throws PageGrown, so never more is read than was paid for.
+ */
+export async function readPageWithin(statsId: string | null, productId: string, most: number): Promise<SalesPage> {
+  if (!statsId || !isRedisConfigured() || most <= 0) return { ...EMPTY_PAGE, blocks: [] };
+  const [raw] = repliesFor(await redisPipeline([["GETRANGE", pageKey(statsId, productId), 0, most - 1]]), 1) ?? [undefined];
+  if (typeof raw !== "string") throw new UnknownReplyError("a page");
+  if (!raw) return { ...EMPTY_PAGE, blocks: [] };
+  try {
+    JSON.parse(raw);
+  } catch {
+    throw new PageGrown();
+  }
+  return pageOf(raw);
 }
 
 /** A kept page from its GET or MGET slot: null is "none kept", a page's JSON is the page, anything else throws. */
@@ -311,8 +391,11 @@ export async function readVersionsExact(statsId: string, productId: string): Pro
 
 export async function readVersions(statsId: string | null, productId: string): Promise<PageVersion[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [list] = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);
-  if (!Array.isArray(list)) return [];
+  const reply: unknown = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);
+  // An answer that is not one list is unknown, never "no earlier versions" (CX-123 rule 24; audit of the API routes,
+  // 11 Nov 2026): app/api/store/page-versions then refuses, and the editor says they could not be read just now.
+  if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0])) throw new Error("the page's versions could not be read");
+  const list: unknown[] = reply[0];
   const out: PageVersion[] = [];
   for (const entry of list) {
     if (typeof entry !== "string") continue;

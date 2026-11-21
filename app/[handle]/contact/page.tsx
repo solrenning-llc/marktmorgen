@@ -75,13 +75,17 @@ export default async function ContactPage({ params, searchParams }: Params) {
         <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
           <CreatorCardView card={card} handle={store.handle} storeName={store.name} words={w.card} />
           {/* A visitor leaves their name and address for the creator, by the store's own contact form (lib/store-contact.ts), when it is on. */}
-          {contactOpen(store) ? <StoreContactBox store={store} /> : null}
+          {contactOpen(store) ? <StoreContactBox store={store} from="card" /> : null}
           <StoreTracking store={store} presence event={null} />
         </main>
       </div>
     );
   }
   const notice = status === "sent" ? { title: w.sentTitle, body: w.sentBody(store.name) } : (w.notices[status] ?? w.notices.error);
+  // Sent from under the business card (only the fixed marker the route keeps; any other value is the store's way back):
+  // back to the card, and to the form under it when the message was not sent (WCAG 2.4.8, 3.2.3).
+  const fromCard = query.from === "card";
+  const back = fromCard ? `/@${store.handle}/contact` : `/@${store.handle}`;
   return (
     <div lang={said.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
       <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
@@ -89,8 +93,8 @@ export default async function ContactPage({ params, searchParams }: Params) {
           <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{notice.title}</h1>
           <p className="st-muted mt-4 text-lg">{notice.body}</p>
           <div className="mt-8 flex flex-wrap gap-x-6 gap-y-2">
-            <Link href={`/@${store.handle}${status === "sent" ? "" : "#contact"}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
-              {said.w.backTo(store.name)}
+            <Link href={`${back}${status === "sent" ? "" : "#contact"}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
+              {fromCard ? w.card.back : said.w.backTo(store.name)}
             </Link>
             <StoreTracking store={store} presence event={null} />
           </div>

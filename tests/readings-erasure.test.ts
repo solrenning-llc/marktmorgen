@@ -23,6 +23,13 @@ import { readFileSync } from "node:fs";
 import { OWNER, makeWorld, seedPerson } from "./erasure-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { withinOneUtcDay } from "./one-utc-day";
+
+// The checks name the day once (the calendar's makings, the readings' and the list's tries of the day) while the code
+// reads the day again at each call; a real midnight mid-file moved the code to the next day's counters and the checks
+// read the first day's (RED when started 2 s before 00:00 UTC). The clock stays inside one UTC day
+// (tests/one-utc-day.ts).
+withinOneUtcDay();
 
 process.env.STRIPE_SECRET_KEY = "sk_test_readings_erasure_only";
 /** The checkouts the stand-in for Stripe lists (the races below); none otherwise. */
@@ -97,7 +104,43 @@ async function erasedDuring<T>(store: Store, email: string, work: () => Promise<
   }
 }
 
+/**
+ * The file's clock, kept inside one UTC day: it runs at its real pace from noon of the day the file started. The day's
+ * keys the checks name (the day's readings, the list's one try a day, the feed's makings) are read by the code at
+ * each call (Date.now(), or the `now` passed); a real midnight passing mid-file moved the code to the next day's keys
+ * while the checks still named the first day's (the feed's list tries read [0,0,0,0]). Time still passes, so a busy
+ * lock still gives up at its deadline (lib/redis-lock.ts, takeLock). Restored at the end.
+ */
+function withinOneDay(): () => void {
+  const RealDate = Date;
+  const started = RealDate.now();
+  const noon = Math.floor(started / 86_400_000) * 86_400_000 + 43_200_000;
+  const now = () => noon + (RealDate.now() - started);
+  class OneDay extends RealDate {
+    constructor(...args: unknown[]) {
+      if (args.length) super(...(args as [number]));
+      else super(now());
+    }
+    static now(): number {
+      return now();
+    }
+  }
+  globalThis.Date = OneDay as DateConstructor;
+  return () => {
+    globalThis.Date = RealDate;
+  };
+}
+
 async function main(): Promise<void> {
+  const realClock = withinOneDay();
+  try {
+    await checks();
+  } finally {
+    realClock();
+  }
+}
+
+async function checks(): Promise<void> {
   redis.clear();
   const world = await makeWorld("readings-erasure");
   const person = normaliseEmail("rhea.reader@example.com");
@@ -302,6 +345,31 @@ async function main(): Promise<void> {
   const listTry = `nl:list:try:${store.statsId}:${day}`;
   // The parts above may have taken today's try; this store is read here as on a new day.
   redis.run(["DEL", listTry]);
+  /**
+   * While the store's lock is held by a write that never lets go (above, until it is deleted below), every read that
+   * wants it waits lib/redis-lock.ts takeLock's whole LOCK_WAIT_MS before it gives up. Inside `waitsSkipped` each of
+   * takeLock's own pauses is skipped and the clock (Date.now, and with it the Redis stub's) moves on by that pause
+   * instead, as if it had passed: the same loop, the same tries and the same give-up time, without sitting through
+   * them. Any other timer (a request's cutoff) stays on the real clock, and the clock never moves back, as real time
+   * would not.
+   */
+  const realNow = Date.now.bind(Date), realSetTimeout = globalThis.setTimeout;
+  let skipped = 0;
+  Date.now = () => realNow() + skipped;
+  const waitsSkipped = async <T>(work: () => Promise<T>): Promise<T> => {
+    globalThis.setTimeout = ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+      if (typeof ms === "number" && ms > 0 && /\bat takeLock\d* \(/.test(new Error().stack ?? "")) {
+        skipped += ms;
+        return realSetTimeout(fn, 0, ...args);
+      }
+      return realSetTimeout(fn, ms, ...args);
+    }) as typeof setTimeout;
+    try {
+      return await work();
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
+  };
   /** How many of `work`'s commands tried the store's lock. */
   const lockTries = async <T>(work: () => Promise<T>): Promise<{ value: T | Error; tries: number }> => {
     const real = redis.pipeline;
@@ -311,7 +379,7 @@ async function main(): Promise<void> {
       return real(batch);
     };
     try {
-      return { value: await work(), tries };
+      return { value: await waitsSkipped(work), tries };
     } catch (error) {
       return { value: error as Error, tries };
     } finally {
@@ -339,7 +407,7 @@ async function main(): Promise<void> {
   is(`the numbers still shown on every call, from the copy kept once the day's readings are used (${JSON.stringify(salesStates)})`, salesStates.includes("ReadingsUsed"), false);
   is("a copy is kept, with its totals, naming nobody", [salesKept !== "", /"cents":\d/.test(salesKept), salesKept.includes(shy), salesKept.includes(bold)], [true, true, false, false]);
   is("and nothing shown names them either", [salesShown.includes(shy), salesShown.includes(bold)], [false, false]);
-  const flagged = await keptSales(busyStore, Date.now() + 5, true).catch(() => null);
+  const flagged = await waitsSkipped(() => keptSales(busyStore, Date.now() + 5, true)).catch(() => null);
   is("and the studio is told the biggest buyers were left out for lack of a list, from the copy kept too (not from an empty list)", [flagged?.stale, flagged?.unnamed], [true, true]);
 
   redis.run(["DEL", listTry]);

@@ -19,7 +19,7 @@ import { done, is, part } from "./check";
 let reply: unknown = null;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
-  const counter = commands[0]?.[0] === "SET" && /^nl:rl:/.test(String(commands[0][1]));
+  const counter = commands[0]?.[0] === "INCR" && /^nl:rl:/.test(String(commands[0][1]));
   if (counter && reply === "throw") throw new Error("the database did not answer");
   if (counter && reply !== null) return reply;
   return pipeline(commands);
@@ -33,15 +33,16 @@ const uninspectable = new Proxy([], {
 
 const MALFORMED: [string, unknown][] = [
   ["an empty reply", []],
-  ["only the SET's answer", ["OK"]],
-  ["a third answer", ["OK", 1, 1]],
-  ["a SET answered false", [false, 1]],
-  ["a count that is null", ["OK", null]],
-  ["a count written as text", ["OK", "1"]],
-  ["a count of zero", ["OK", 0]],
-  ["a count that is true", ["OK", true]],
-  ["a fractional count", ["OK", 1.5]],
-  ["a negative count", ["OK", -1]],
+  // The counter's two replies (lib/window-count.ts): the INCR's count, then the EXPIRE NX's 0 or 1.
+  ["only the INCR's answer", [1]],
+  ["a third answer", [1, 1, 1]],
+  ["an EXPIRE answered false", [1, false]],
+  ["a count that is null", [null, 1]],
+  ["a count written as text", ["1", 1]],
+  ["a count of zero", [0, 1]],
+  ["a count that is true", [true, 1]],
+  ["a fractional count", [1.5, 1]],
+  ["a negative count", [-1, 1]],
   ["a reply that is not a list", { result: 1 }],
   ["a returned list whose shape cannot be inspected", uninspectable],
   ["a Redis that cannot be asked", "throw"],
@@ -61,17 +62,17 @@ async function main(): Promise<void> {
   }
 
   part("the exact reply");
-  reply = ["OK", 1];
+  reply = [1, 1];
   is("the first of the window: within", await state(), "within");
   is("the first of the window: withinEssentialLimit yes", await within(), true);
-  reply = [null, 5];
+  reply = [5, 0];
   is("the last within: within", await state(), "within");
-  reply = [null, 6];
+  reply = [6, 0];
   is("past the limit: exceeded", await state(), "exceeded");
   is("past the limit: withinEssentialLimit no", await within(), false);
 
   part("arguments and configuration");
-  reply = ["OK", 1];
+  reply = [1, 1];
   for (const [label, limit, window] of [
     ["a limit of 0", 0, 60],
     ["a fractional limit", 1.5, 60],

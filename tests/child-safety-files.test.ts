@@ -131,7 +131,7 @@ async function main(): Promise<void> {
   let metered = 0;
   const meter = { take: async () => { metered += 1; return true; }, give: async () => {} };
   is("no stamped copy of a held file, not even one kept from before nor one stamped on the fly", [await stampedDelivery(heldPdf, { reference: "pi_placeholder", email: "buyer@example.com", paidAt: 1 }, ROOM, meter), metered], [{ kind: "original" }, 0]);
-  is("no preview copy either", await previewCopy(heldPdf, 2, ROOM), null);
+  is("no preview copy either, and nothing taken from the store's requests", [await previewCopy(heldPdf, 2, ROOM, meter), metered], [null, 0]);
 
   part("A mark that cannot be read keeps the file and hands nothing out");
   const real = redis.pipeline.bind(redis);

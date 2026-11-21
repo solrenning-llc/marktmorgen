@@ -108,6 +108,24 @@ function main(): void {
   is("an expiry that does not read: refused", tryCollect(unreadable, { sterlingRates: [NOV, ROW], now: lateNov }), "refused");
   is("a sale in pounds is not held to the month", tryCollect(body("gbp"), { now: lateNov }), "collected");
 
+  part("The month is the UK's month, not UTC's (Claude 2's LOW on #5032, 7068670312)");
+  // 2026 summer time ends on 25/10: on 30/09 London is UTC+1, so 23:10 UTC is already 01/10 00:10 in the UK.
+  const SEP: HmrcPeriodRate = { ...ROW, month: "2026-09", perPound: "1.1700", readOn: "2026-09-01", source: "https://example.invalid/hmrc/2026-09" };
+  const OCT: HmrcPeriodRate = { ...ROW, month: "2026-10", perPound: "1.1800", readOn: "2026-09-01", source: "https://example.invalid/hmrc/2026-10" };
+  const at = (now: string, closes: string) => {
+    const b = body("eur");
+    b.set("expires_at", String(Date.parse(closes) / 1000));
+    return { b, result: tryCollect(b, { sterlingRates: [SEP, OCT], now: new Date(now) }) };
+  };
+  const ukOctober = at("2026-09-30T23:10:00Z", "2026-09-30T23:41:00Z");
+  is("RED: 30/09 23:10 UTC is 01/10 in the UK: never September's rate; refused, untouched", [ukOctober.result, ukOctober.b.has("line_items[1][quantity]")], ["refused", false]);
+  const ukSeptember = at("2026-09-30T22:10:00Z", "2026-09-30T22:40:00Z");
+  is("30/09 22:10 UTC is still 30/09 in the UK: September's rate", [ukSeptember.result, ukSeptember.b.get("payment_intent_data[metadata][uk_vat_gbp]")], ["collected", `${toPence(580, "1.1700")}:1.1700:2026-09`]);
+  const ukOctoberBoth = at("2026-10-01T00:10:00Z", "2026-10-01T00:40:00Z");
+  is("01/10 00:10 UTC, 01:10 in the UK: October's rate", [ukOctoberBoth.result, ukOctoberBoth.b.get("payment_intent_data[metadata][uk_vat_gbp]")], ["collected", `${toPence(580, "1.1800")}:1.1800:2026-10`]);
+  const closesIntoUkOctober = at("2026-09-30T22:10:00Z", "2026-09-30T23:30:00Z");
+  is("opened on 30/09 in the UK, payable until 01/10 00:30 UK time: refused", closesIntoUkOctober.result, "refused");
+
   part("The cost of receiving reads the return's currency");
   const allowances: VatFxAllowance[] = [
     { currency: "eur", bps: 300, source: "https://example.invalid/fx-eur", checkedOn: "2026-11-20", validThrough: "2027-03-31" },

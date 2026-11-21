@@ -309,9 +309,28 @@ function ukVat(amountCents: number, currency: string, now: Date, table: readonly
   // the checkout is opened now: it is collected only while it cannot be paid in another month. Without its own
   // `expires_at`, a Stripe Checkout Session stays open 24 hours (Claude 1's LOW on #5032).
   const closes = expiresAt === null ? now.getTime() + 86_400_000 : /^[1-9]\d{0,11}$/.test(expiresAt) ? Number(expiresAt) * 1000 : Number.NaN;
-  if (!Number.isFinite(closes) || closes < now.getTime() || new Date(closes).toISOString().slice(0, 7) !== today.slice(0, 7)) return null;
-  const rate = hmrcPeriodRate(code, today, table);
+  if (!Number.isFinite(closes) || closes < now.getTime()) return null;
+  // The month is the UK's (Claude 2's LOW on #5032): in summer time the last hour of a UTC month is already the next
+  // month in London. Both ends must fall in one month in London and in UTC alike, so the rate never depends on which.
+  const opened = ukDay(now.getTime());
+  const shut = ukDay(closes);
+  if (!opened || !shut) return null;
+  const month = opened.slice(0, 7);
+  if (shut.slice(0, 7) !== month || today.slice(0, 7) !== month || new Date(closes).toISOString().slice(0, 7) !== month) return null;
+  const rate = hmrcPeriodRate(code, opened, table);
   const pence = rate ? toPence(vat.vatCents, rate.perPound) : null;
   if (!rate || pence === null) return null;
-  return { vat: { ...vat, country: "GB" }, sterling: { pence, perPound: rate.perPound, month: today.slice(0, 7) } };
+  return { vat: { ...vat, country: "GB" }, sterling: { pence, perPound: rate.perPound, month } };
+}
+
+/** The calendar day in the UK (Europe/London) at an instant, as YYYY-MM-DD; null when it cannot be read. */
+function ukDay(ms: number): string | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(ms));
+    const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    const day = `${part("year")}-${part("month")}-${part("day")}`;
+    return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null;
+  } catch {
+    return null;
+  }
 }

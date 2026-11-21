@@ -2593,6 +2593,17 @@ export class MemoryRedis {
           this.run(["SET", args[1], text, "EX", seconds]);
           return 1;
         }
+        // lib/purchase-moves.ts MOVE_ASK_TO_ONCE: the same-day ask's index, request and new address's link in one step.
+        if (key.startsWith("-- marktmorgen:purchase-move-ask-to-once:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, retry, request, link, index, json, grant, seconds] = args;
+          this.scriptCalls += 1;
+          const current = this.run(["GET", retry]);
+          if (current !== null) return [0, current];
+          if (this.run(["SET", retry, index, "EX", seconds, "NX"]) === null) return [-1, ""];
+          if (this.run(["SET", request, json, "EX", seconds, "NX"]) === null) return [-1, index];
+          if (this.run(["SET", link, grant, "EX", seconds, "NX"]) === null) return [-1, index];
+          return [1, index];
+        }
         // lib/purchase-moves.ts MOVE_DAY_COUNT: INCR then EXPIRE in one step; the new count.
         if (key.startsWith("-- marktmorgen:purchase-move-day:v1\n") && args[0] === "1" && args.length === 3) {
           const made = this.run(["INCR", args[1]]);

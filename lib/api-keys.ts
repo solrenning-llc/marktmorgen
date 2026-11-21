@@ -577,26 +577,15 @@ export async function resolveKey(presented: string, now = Date.now()): Promise<{
   // The team is read in the same trip, one command more (within an API request's own price, UNIT_COST.api in
   // tests/plan-cost-registry.ts): a teammate's key is refused once its maker is not on the team.
   const evidence = repliesFor(await redisPipeline([["HGET", listKey(sid), id], ["HGET", holdKey(sid), id], ["HGET", usedKey(sid), id], ["GET", teamRecordKey(sid)]]), 4);
-  if (!evidence || evidence.some((reply) => reply !== null && typeof reply !== "string")) throw new UnknownReplyError("an API key's access evidence");
-  const [listed, hold, used, team] = evidence as (string | null)[];
+  // The team (the fourth reply) is left to teamOf below, as on main: a team record in any unknown shape holds the
+  // key paused for an unknown reason, never no team (tests/team-unknown-reply.test.ts, rule 30).
+  if (!evidence || evidence.slice(0, 3).some((reply) => reply !== null && typeof reply !== "string")) throw new UnknownReplyError("an API key's access evidence");
+  const [listed, hold, used] = evidence as (string | null)[];
+  const team: unknown = evidence[3];
   // A hold read as text but not one this file knows (a later version's, say) is not unread evidence: it is a
   // refusing hold (holdOf "unknown", below), so the key is paused and its owner can still see and revoke it
   // (tests/r24-api-key-hold-team.test.ts). Only a reply in another shape, checked above, throws.
   if (used !== null && (!/^\d+$/.test(used) || countOf(Number(used)) === null)) throw new UnknownReplyError("an API key's last use");
-  if (team !== null) {
-    let value: unknown;
-    try { value = JSON.parse(team); } catch { throw new UnknownReplyError("an API key's team"); }
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new UnknownReplyError("an API key's team");
-    const fields = value as Record<string, unknown>;
-    if ((fields.members !== undefined && !Array.isArray(fields.members)) ||
-        (fields.invites !== undefined && !Array.isArray(fields.invites)) ||
-        (fields.requireTwoStep !== undefined && typeof fields.requireTwoStep !== "boolean")) throw new UnknownReplyError("an API key's team");
-    // parseTeam filters unsupported members, but a null entry would throw
-    // and make it return an empty team with the two-step rule switched off.
-    for (const entries of [fields.members, fields.invites]) {
-      if (Array.isArray(entries) && entries.some((entry) => !entry || typeof entry !== "object" || Array.isArray(entry))) throw new UnknownReplyError("an API key's team");
-    }
-  }
   if (listed === null) return null;
   const stored = parseStored(listed);
   if (!stored || stored.id !== id) throw new UnknownReplyError("an API key record");

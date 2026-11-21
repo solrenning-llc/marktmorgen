@@ -31,13 +31,8 @@ for (const [label, mutate] of [
   ["object listed record", (r: unknown[]) => [{}, r[1], r[2], r[3]]],
   ["invalid listed JSON", (r: unknown[]) => ["broken", r[1], r[2], r[3]]],
   ["numeric hold", (r: unknown[]) => [r[0], 0, r[2], r[3]]],
-  ["object team", (r: unknown[]) => [r[0], r[1], r[2], {}]],
   ["numeric last use", (r: unknown[]) => [r[0], r[1], 0, r[3]]],
   ["invalid last use", (r: unknown[]) => [r[0], r[1], "unread", r[3]]],
-  ["invalid team JSON", (r: unknown[]) => [r[0], r[1], r[2], "broken"]],
-  ["invalid rule type", (r: unknown[]) => [r[0], r[1], r[2], '{"members":[],"invites":[],"requireTwoStep":"true"}']],
-  ["null member under a required rule", (r: unknown[]) => [r[0], r[1], r[2], '{"members":[null],"invites":[],"requireTwoStep":true}']],
-  ["null invite under a required rule", (r: unknown[]) => [r[0], r[1], r[2], '{"members":[],"invites":[null],"requireTwoStep":true}']],
 ] as const) {
   test(`unknown resolution ${label} refuses read and write before admission`, async () => {
     const made = await key();
@@ -91,6 +86,46 @@ test("a hold read as text this code does not know refuses read and write as paus
     assert.equal(later, 0, "no rate, allowance or touch operation for a refused key");
   } finally { redis.pipeline = original; }
 });
+
+// A team record in an unknown shape is main's rule 30 (tests/team-unknown-reply.test.ts): the key is held paused for an
+// unknown reason, refused for reading and writing, and still resolvable so its owner can see and revoke it; never no team,
+// which would turn the two-step rule off. Merged from main into #2899 (Claude 5 iacVn3r); before main's rule these cases
+// expected 503 "unavailable", and they still refuse before admission, with no later operation.
+for (const [label, team] of [
+  ["object team", {}],
+  ["numeric team", 7],
+  ["invalid team JSON", "broken"],
+  ["invalid rule type", '{"members":[],"invites":[],"requireTwoStep":"true"}'],
+  ["null member under a required rule", '{"members":[null],"invites":[],"requireTwoStep":true}'],
+  ["null invite under a required rule", '{"members":[],"invites":[null],"requireTwoStep":true}'],
+] as const) {
+  test(`a team record read as ${label} refuses read and write as paused, before admission`, async () => {
+    const made = await key();
+    let intercepted = 0;
+    let later = 0;
+    redis.pipeline = async (commands) => {
+      if (commands.length === 4 && commands[0]?.[1] === `nl:api:keys:${sid}`) {
+        intercepted += 1;
+        const r = await original(commands);
+        return [r[0], r[1], r[2], team];
+      }
+      if (intercepted && commands[0]?.[0] !== "GET") later += 1;
+      return original(commands);
+    };
+    try {
+      for (const admit of [apiStore, apiWriter]) {
+        const response = await admit(new Request(`${origin}/api/v1/store`, { headers: { authorization: `Bearer ${made.key}` } }));
+        assert.ok(response instanceof Response);
+        assert.equal(response.status, 403);
+        assert.equal((await response.json()).error, "key_paused");
+      }
+      const resolved = await resolveKey(made.key);
+      assert.deepEqual([resolved?.paused, resolved?.why], [true, "unknown"]);
+      assert.equal(intercepted, 3);
+      assert.equal(later, 0, "no rate, allowance or touch operation for a refused key");
+    } finally { redis.pipeline = original; }
+  });
+}
 
 for (const bad of [-1, 2, "1"]) {
   test(`a one-key deletion receipt of ${typeof bad}:${bad} cannot confirm revocation`, async () => {

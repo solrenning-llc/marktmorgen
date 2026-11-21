@@ -113,6 +113,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:rsum:", "nl:rsum:last:", "nl:rsum:lock:", "nl:rsum:ver:", "nl:search:", "nl:search:build:", "nl:status:views:", "nl:stripe-check:last", "nl:stripe-check:lock", "nl:stripe-check:runs", "nl:sub:due", "nl:sub:slotdue", "nl:sweep:cursor", "nl:sweep:walk:", "nl:tasks:bytes:", "nl:tasks:doors", "nl:tasks:held", "nl:tasks:taken:",
   "nl:teams:state:", "nl:team:", "nl:team:invite:", "nl:team:lock:", "nl:team:log:", "nl:team:of:", "nl:tben:", "nl:ticket:in:", "nl:tier:", "nl:tier:resume:",
   "nl:traffic:c:", "nl:traffic:day:", "nl:traffic:folders:", "nl:traffic:n:", "nl:traffic:r:", "nl:traffic:read:", "nl:traffic:x:", "nl:trialnudge:cursor", "nl:upd:job:",
+  "nl:traffic:gap:", "nl:traffic:s:", "nl:traffic:sc:", "nl:traffic:sp:",
   "nl:operator:traffic-log", "nl:operator:traffic-reset:lock", "nl:traffic:spike-day:", "nl:traffic:spike:",
   "nl:updheld", "nl:updq", "nl:upload-budget:v2:{", "nl:upload-budget:v2:{YYYY-MM}", "nl:upsell-slots:", "nl:upsell:",
   "nl:upsell:pending", "nl:usage-watch:lock", "nl:usage-watch:told", "nl:usage-watch:told:", "nl:vault:ctl:", "nl:vault:fresh:", "nl:vault:up:", "nl:verified:", "nl:verified:cursor",
@@ -220,7 +221,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:bench:ranges": C, "nl:bench:s:": Cr(21),
   "nl:billing:period-read:": C, "nl:billing:sync:after": C, "nl:billing:sync:cursor": C,
   "nl:blog:body:": E, "nl:blog:meta:": E, "nl:blog:pub:": E,
-  "nl:busy:": Cr(1),
+  "nl:busy:": Cr(2),
   // ---------------------------------------------------------------- c
   "nl:cal:busy:": T("nl:cal:cfg:", 1), "nl:cal:cfg:": E, "nl:cal:err:": T("nl:cal:cfg:", 1), "nl:cal:good:": T("nl:cal:cfg:", 1),
   "nl:cal:lock:": T("nl:cal:cfg:", 1), "nl:cal:out:": E, "nl:cal:tok:": T("nl:cal:cfg:"),
@@ -492,6 +493,9 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:ticket:in:": X(401),
   "nl:tier:": X(1), "nl:tier:price:": E, "nl:tier:resume:": X(128),
   "nl:traffic:c:": E, "nl:traffic:day:": E, "nl:traffic:folders:": I, "nl:traffic:n:": E, "nl:traffic:r:": E, "nl:traffic:x:": E,
+  // Signals that are not a page (lib/traffic.ts, takeSignal), each connection's share of them, affiliates' paid-search arrivals: with the store.
+  // When a count of the store was not made (markCountGap): by handle, erased with the store.
+  "nl:traffic:gap:": { how: "erase", by: "handle" }, "nl:traffic:s:": E, "nl:traffic:sc:": E, "nl:traffic:sp:": E,
   // A store's page readings counted in its window (lib/page-read.ts, 639 [GL7](25)): by its statistics id, gone a day after the window ends.
   "nl:traffic:read:": E,
   // The operator's early-use alarm (lib/traffic-spike.ts): a claim a store, window and mark, kept until a day after

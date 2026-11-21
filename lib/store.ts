@@ -1431,6 +1431,18 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
 }
 
 /**
+ * Whether a public address leads to a store, from its small index alone, not
+ * the store's record: what a refused count reads before writing down that the
+ * store's counts were not whole (app/api/store/hit, lib/traffic.ts
+ * markCountGap), so a made-up address leaves nothing behind.
+ */
+export async function handleTaken(handle: string): Promise<boolean> {
+  if (!isRedisConfigured() || handleProblem(handle)) return false;
+  const [email] = await redisPipeline([["GET", handleKey(handle)]]);
+  return typeof email === "string" && email !== "" && !email.startsWith(RELEASED_PREFIX);
+}
+
+/**
  * storeForHandle on Redis's exact answer only (rule 24): null only where the
  * handle is free or was let go, or the record it leads to is truly not there;
  * a reply missing or in any other shape, and a record that is there but

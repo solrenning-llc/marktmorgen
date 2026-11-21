@@ -61,6 +61,14 @@ export const PARTS_PER_VISIT = 100;
  * What those minutes of the room count as, in hundredths of a visit: with
  * people talking, when it asks every few seconds, and with the room quiet,
  * when it asks twice a minute.
+ *
+ * 260 with people talking, kept by the owner on 4 November 2026 (C2-58).
+ * Neither figure is tied to a cost above never being below it, held by
+ * tests/room.test.ts. A visit is costed as Upstash bills it (313 [CV1]),
+ * with the reads of the store's whole record a visit makes (4 November
+ * 2026), so ten minutes of a talking room now cost about 142.8 hundredths
+ * of a visit (260 is about 82% over) and of a quiet one about 36.8 (60 is
+ * about 63% over). Lowering either is the owner's decision.
  */
 export const ROOM_LIVE_PARTS = 260;
 export const ROOM_IDLE_PARTS = 60;
@@ -134,6 +142,88 @@ export function requestLimitFor(store: PlanFields & { tier?: Tier }, nowSeconds 
   const standing = standingOf(store, nowSeconds);
   const extra = standing === "paid" ? EXTRA_REQUESTS[store.tier ?? "creator"] ?? EXTRA_REQUESTS.creator : standing === "trial" ? TRIAL_EXTRA_REQUESTS : SETUP_EXTRA_REQUESTS;
   return REQUESTS_PER_VISIT * visitLimitFor(store, nowSeconds) + extra;
+}
+
+/**
+ * What a store's pages say happened that is not a page of a visit
+ * (app/api/store/hit, kinds "l", "a" and "f"): a click on one of its links,
+ * an arrival through an affiliate's link and a step of a funnel of pages.
+ * Counted in the store's window on a count of their own (lib/traffic.ts,
+ * takeSignal; 4 November 2026, independent review of #1496), never against
+ * the requests its pages are drawn from, so a funnel or a link-in-bio never
+ * brings a store's pages to rest sooner than the visits its plan prints.
+ * Past them a signal is simply not counted; nothing rests.
+ *
+ * Six for each visit of the plan's figure, the fewest that covers a whole
+ * funnel and a link-in-bio in the same visit: a visit is sized at three pages
+ * (REQUESTS_PER_VISIT), and each page of a funnel sends one step, so a visit
+ * that walks a three-page funnel sends three; it can have come through an
+ * affiliate's link, one more; and somebody who opens a store as a link in
+ * bio clicks one or two of its links, two more. The count is the store's
+ * for the window, not each visit's, so a visit that sends more is paid for
+ * by the many that send none. Each is priced at what it costs on its own
+ * line (tests/plan-cost-registry.ts, signals).
+ */
+export const SIGNALS_PER_VISIT = 6;
+
+/**
+ * Arrivals through an affiliate's link reached from a paid search ad
+ * (app/api/store/hit, k "a" with p "1"): counted on a pool of their own, one
+ * for each visit of the plan's figure, never the signals above, so that the
+ * mark a creator's paid-search hold is read from (lib/affiliates.ts) never
+ * stops because the store's other clicks were many. An arrival is a visit:
+ * past the plan's visits its pages rest, so a real one never goes past them.
+ */
+export const PAID_ARRIVALS_PER_VISIT = 1;
+
+/**
+ * What one store's links, affiliates' visits and funnel steps may send in ten
+ * minutes from every address together, before its record is read
+ * (app/api/store/hit). Sized at the largest plan's busiest hour: a tenth of
+ * its month's signals in an hour, so a real launch on Scale stays under it.
+ * A store's views and pages ("v", "p") are never under it. Past it the counts
+ * are not made and the store's rates say they are not complete.
+ */
+export const HIT_STORE_LIMIT = Math.ceil((SIGNALS_PER_VISIT * Math.max(...Object.values(VISITS_INCLUDED)) * 0.1) / 6);
+
+/** A day as the pages print it: "November 4, 2026". */
+const dayWords = (ms: number) => new Date(ms).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+/** The kinds of count a rate is made from, each written down apart when one is not made (lib/traffic.ts, markCountGap). */
+export type CountKind = "clicks" | "steps" | "visits";
+
+/**
+ * Said instead of a rate made from counts that stopped (lib/traffic.ts,
+ * countGap): the affiliate directory's rates, a funnel's steps, the
+ * benchmark's visits that became a sale. "" when nothing of the period the
+ * rate covers (from `since`) went uncounted; a count that cannot be read is
+ * said to be incomplete too, never taken as whole.
+ */
+export function countGapWords(gap: { first: number; last: number } | null | "unknown", what: CountKind, since: number): string {
+  if (gap === null) return "";
+  if (gap === "unknown") return `Not complete: we could not check that every one of these ${what} was counted, so no rate is shown.`;
+  if (gap.last < since) return "";
+  const from = Math.max(gap.first, since);
+  const a = dayWords(from);
+  const b = dayWords(gap.last);
+  return a === b
+    ? `Not complete: some ${what} on ${a} were not counted, so no rate is shown.`
+    : `Not complete: some ${what} from ${a} to ${b} were not counted, so no rate is shown.`;
+}
+
+/**
+ * The help center's and the Terms' sentence on them (lib/help-content.ts,
+ * app/terms/page.tsx), its figures from these rules: what is counted, up to
+ * how many, one connection's share, and what happens past them.
+ */
+export function signalsWords(): string {
+  const month = (tier: Tier) => countWords(SIGNALS_PER_VISIT * VISITS_INCLUDED[tier]);
+  return `Clicks on your store's links, visits through an affiliate's link and steps of your page funnels are counted up to ${countWords(SIGNALS_PER_VISIT)} for each visit your plan covers: ${month("creator")} a billing month on Store, ${month("pro")} on Studio and ${month("scale")} on Scale. Visits through an affiliate's link from a paid search ad are counted apart, up to one for each visit your plan covers. One connection is counted for only part of them in a day, and what one connection sends many times in a few minutes is left out as a repeat, without a note. Apart from those, at the busiest moments some of them may not be counted, and whenever any of them were not counted, the rates made from them (the share of clicks that became a sale, a funnel's steps, visits that became a sale) say they are not complete instead of showing a number. Nothing else stops.`;
+}
+
+/** The signals a store's window holds: SIGNALS_PER_VISIT for each visit of its figure. */
+export function signalLimitFor(store: PlanFields & { tier?: Tier }, nowSeconds = Date.now() / 1000): number {
+  return SIGNALS_PER_VISIT * visitLimitFor(store, nowSeconds);
 }
 
 /**

@@ -51,6 +51,8 @@ export function studioStats() {
 }
 export async function sourcesToday() { return []; }
 export async function viewsBefore() { return 0; }
+/** lib/benchmarks.ts reads lib/traffic.ts countGap: no gap, every synthetic visit counted. */
+export async function countGap(): Promise<null> { return null; }
 
 /** Live synthetic identity, seeded by each test reset, never by the production admission or by storeOf. */
 export function seedNumbersStore(): void { summaryRedis.run(["SET", storeIdCommand("f".repeat(32))[1], "owner@example.test"]); }

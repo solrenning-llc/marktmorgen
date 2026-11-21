@@ -108,6 +108,8 @@ import { CLOSING_DAYS, KEEP_NOTHING_FROM, WARN_WEEK_DAYS, keptRoomFor } from "@/
 import { LONGEST_PAUSE_MONTHS, PAID_MONTHS_BEFORE_PAUSE } from "@/lib/plan-pause-rules";
 import { REQUESTS_PER_VISIT, SETUP_EXTRA_REQUESTS, SETUP_VISITS, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS, VISITS_INCLUDED, VISIT_CENTS_PER_THOUSAND_OVER } from "@/lib/traffic-rules";
 import { visitCost } from "./traffic-cost";
+import { allUnits, evaluate, roomKept } from "./margin-alignment-table";
+import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
 import { readingsCost } from "./plan-cost-registry";
 import { ORDERS_INCLUDED, ORDER_CENTS_PER_THOUSAND_OVER, TRIAL_ORDERS, freeCopiesLimitFor } from "@/lib/order-rules";
 import { coveredByShare } from "@/lib/orders";
@@ -206,6 +208,22 @@ for (const [schedule, prices] of SCHEDULES) for (const tier of TIERS) {
     );
   });
 }
+
+test("net profit > 0 with the spend floor's room on every unit, monthly and yearly", () => {
+  // The MR rule (owner, 27 October 2026): every unit, alone at full use in
+  // its worst month, makes a profit after every cost and tax, with the room
+  // the spend floor keeps. It replaces "Scale keeps more than Pro does in its
+  // own worst month" (Claude 1, C2-63, 4 November 2026; 465 [MR2]): which
+  // plan keeps the larger share was never the owner's rule. Main kept that
+  // test with a tolerance (C3-64, below); both are held since the merge of
+  // 21 November 2026 (Claude 1's decision for the owner).
+  const units = allUnits(PLANS_ON_SALE, ASSISTANT_ON_SALE);
+  for (const tier of ["creator", "pro", "scale"] as const) for (const cycle of ["month", "year"] as const) assert.ok(units.some((unit) => unit.id.startsWith(`${tier}-${cycle}-`)), `${tier} ${cycle} is a unit`);
+  for (const unit of units) {
+    const withRoom = evaluate({ ...unit, usageCents: unit.usageCents + roomKept(unit) });
+    assert.ok(withRoom.netCents > 0, `${unit.id}: ${withRoom.netCents} cents net with ${roomKept(unit)} cents of room`);
+  }
+});
 
 /**
  * How far below Pro Scale's share may sit: 0.05 of a percentage point. A

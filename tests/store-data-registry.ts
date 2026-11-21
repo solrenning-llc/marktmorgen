@@ -1132,7 +1132,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:sold:@lib/sold-count.ts": { what: "Copies sold, by product: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:sold:lock:@lib/sold-count.ts": short("One count at a time", "request", 1, 128, REQ("checkout")),
   "nl:stats:@lib/stats-notes.ts": { what: "Notes on the store's numbers", parts: [capped(MAX_NOTES * (MAX_STATS_NOTE * 3 + ENTRY_BYTES + 64), "MAX_NOTES notes.", src("lib/stats-notes.ts", "MAX_NOTES", "MAX_NOTE_LENGTH"))] },
-  "nl:busy:@lib/stats-report.ts": company("A report being made", "The company's report to a creator, a day."),
+  "nl:busy:@lib/stats-report.ts": company("A report being made", "The company's busy-day email to a creator, a day: its claim, and under :before the fourteen daily view counts read once that day (or that it was sent), each gone by itself in two days."),
   "nl:monthly:seen:@lib/stats-report.ts": company("The stores the monthly job decided for a month", "One set a month for every store with visits, kept 40 days like the claims."),
   "nl:monthly:sent:@lib/stats-report.ts": company("A monthly report sent", "The company's email to a creator."),
   "nl:weekly:off@lib/stats-report.ts": company("Creators who switched the weekly report off", "One set for every store."),
@@ -1223,9 +1223,14 @@ export const FAMILIES: Record<string, Family> = {
   // One field a connection a day, written SHARE_BATCH requests at a time and kept with the window (MM-SA-01): at most a tenth of the window's requests, 64 bytes each.
   "nl:traffic:c:@lib/traffic.ts": { what: "Each connection's share of the window's requests, by day", parts: [per("request", 33, 7, "A field for every ten requests at the most, kept to the window's end and a day.")] },
   "nl:traffic:folders:@lib/traffic.ts": company("The stores with visits, a month", "One set a month for every store."),
+  "nl:traffic:gap:@lib/traffic.ts": { what: "When the store's counts were first and last not made", parts: [capped(2 * KEY, "Two fields under each address the store has answered to.")] },
   "nl:traffic:n:@lib/traffic.ts": { what: "Visits in the window", parts: [capped(14 * KEY, "One a window, 400 days.")] },
   "nl:traffic:r:@lib/traffic.ts": { what: "Requests in the window", parts: [capped(2 * KEY, "One a window.")] },
   "nl:traffic:read:@lib/page-read.ts": { what: "Page readings counted in the window (639 [GL7](25))", parts: [capped(2 * KEY, "One a window, kept to the window's end and a day.")] },
+  "nl:traffic:s:@lib/traffic.ts": { what: "Signals that are not a page in the window: link clicks, affiliate arrivals, funnel steps", parts: [capped(2 * KEY, "One a window.")] },
+  // One field a connection a day, written SHARE_BATCH signals at a time and kept with the window: signals are SIGNALS_PER_VISIT a visit, at most twice a window's requests, so twice the requests' share.
+  "nl:traffic:sc:@lib/traffic.ts": { what: "Each connection's share of the window's signals, by day", parts: [per("request", 33, 14, "A field for every ten signals at the most, kept to the window's end and a day.")] },
+  "nl:traffic:sp:@lib/traffic.ts": { what: "Affiliates' visits from a paid search ad in the window", parts: [capped(2 * KEY, "One a window.")] },
   "nl:traffic:x:@lib/traffic.ts": { what: "The live room in the window", parts: [capped(14 * KEY, "One a window, 400 days.")] },
   "nl:traffic:spike:@lib/traffic-spike.ts": company("A store's early-use alarm, claimed for one mark of one window", "Written only when an INCRBY carries a store's window of requests across one of three marks before its share of the window's time: at most three keys a store a window (one a mark), each \"1\", kept until a day after the window ends; the company's own alarm, with the email it sends (at most SPIKE_ALERTS_PER_DAY a day in all)."),
   "nl:traffic:spike-day:@lib/traffic-spike.ts": company("How many early-use alarms the company sent in a UTC day", "One counter a UTC day, kept two days; it caps the alarm's emails at SPIKE_ALERTS_PER_DAY a day, whatever the number of stores."),

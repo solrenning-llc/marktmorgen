@@ -552,8 +552,11 @@ export const CHAVES = ["record-review", "ready-check", "on-call"];
 //  1. só a sessão nomeada (Claude 5 ibqho) age; a reserva (Claude 1 A) só em três casos: 60 minutos sem sinal da
 //     nomeada no correio, a família Claude 5 declarada sem cota, ou mensagem do dono (--owner-message, gravada);
 //  3. nunca num PR que a sessão escreveu (trailer Claude-Session nos commits), revisou ou enfileirou (no correio);
-//  4. só com o pedido do coordenador publicado na #4932, conferido na hora pelo gh (--request), que cita a ação; a ação
-//     é avisada a todos no mesmo commit, com o pedido. Desligar continua livre para todos.
+//  4. só com o pedido do coordenador publicado na #4932, conferido na hora pelo gh (--request): um comentário com a linha
+//     "AGENT-MAIL-REQUEST <identificador C1-...> <comando> <alvo>", de no máximo PEDIDO_MAX_H horas, usado uma vez só
+//     (revisão do Claude 4 3Kc no #5052); a ação é avisada a todos no mesmo commit, com o pedido. Desligar continua livre.
+// O sinal da sessão nomeada é lido do histórico local do correio; num clone raso que não cobre os 60 minutos, a falta de
+// sinal fica NÃO CONFERIDA e a reserva não age (mesma revisão).
 // Limite, sem esconder (VR): o identificador vem de uma variável de ambiente, pode ser copiado e é herdado por subagente
 // e por roteiro; e todos gravam no correio com a mesma conta do GitHub, então um "ON" escrito pelo git direto, com a
 // linha da sessão e a do pedido copiadas, ainda é lido como válido. Isto evita engano e ação fora da regra; não é
@@ -563,6 +566,8 @@ export const SESSAO_NOMEADA = "session_012ST5ibqhoHCYrphJXU5az3"; // Claude 5 ib
 export const SESSAO_RESERVA = "session_01DKvYQaxPrZTrVdXNwosXYi"; // Claude 1 A
 export const CANAL_PEDIDOS = 4932;
 export const SINAL_MIN = 60;
+export const PEDIDO_MAX_H = 2;
+export const PREFIXO_COORDENADOR = "C1"; // o coordenador é o Claude 1 (C1-20261121-2036-C6-1, condição 5)
 const LINK_PEDIDO = /^(?:https:\/\/github\.com\/solrenning-llc\/marktmorgen\/issues\/4932#issuecomment-)?(\d+)$/;
 const LINHA_PEDIDO = /^Pedido: https:\/\/github\.com\/solrenning-llc\/marktmorgen\/issues\/4932#issuecomment-\d+$/m;
 const sessaoInteira = (s) => String(s?.texto ?? "").split(" ")[0];
@@ -574,36 +579,58 @@ export function privilegioValido(texto, por) {
   return familia(por) === SESSOES[id.slice(8, 15)] && LINHA_PEDIDO.test(texto);
 }
 
-/** Quando a sessão gravou no correio pela última vez (a linha Mail-Session de cada commit), ou null. */
-export function ultimoSinal(sessao, commit = buscar()) {
-  if (!commit) return null;
+/**
+ * Quando a sessão gravou no correio pela última vez (a linha Mail-Session de cada commit). { quando, conferido }:
+ * sem sinal achado, conferido só se o histórico local é completo ou, num clone raso, cobre os últimos SINAL_MIN minutos.
+ */
+export function ultimoSinal(sessao, commit = buscar(), agora = new Date()) {
+  if (!commit) return { quando: null, conferido: true };
   const t = git(["log", "-1", "--format=%ct", "-F", `--grep=Mail-Session: ${sessao}`, commit]);
-  return t ? new Date(Number(t) * 1000) : null;
+  if (t) return { quando: new Date(Number(t) * 1000), conferido: true };
+  if (git(["rev-parse", "--is-shallow-repository"]) !== "true") return { quando: null, conferido: true };
+  // Num clone raso, os commits da borda aparecem sem pais: o mais antigo deles diz até onde o histórico local chega.
+  const bordas = git(["log", "--format=%ct", "--max-parents=0", commit]).split("\n").filter(Boolean).map(Number);
+  const inicio = bordas.length ? Math.min(...bordas) * 1000 : Infinity;
+  return { quando: null, conferido: inicio <= agora.getTime() - SINAL_MIN * 60000 };
 }
 
-/** Confere no GitHub, agora, que o pedido é um comentário da #4932 que cita o alvo; devolve o endereço dele. */
-export function conferirPedido(pedido, alvo) {
+/**
+ * Confere no GitHub, agora, que o pedido é um comentário da #4932, de no máximo PEDIDO_MAX_H horas, com a linha
+ * "AGENT-MAIL-REQUEST <identificador do coordenador> <comando> <alvo>", ainda não usado; devolve o endereço e o identificador.
+ */
+export function conferirPedido(pedido, comando, alvo, commit = buscar(), agora = new Date()) {
   const m = LINK_PEDIDO.exec(String(pedido === true ? "" : pedido ?? "").trim());
   if (!m) throw new Error(`--request é obrigatório: o comentário do coordenador na #${CANAL_PEDIDOS} que pede esta ação (https://github.com/solrenning-llc/marktmorgen/issues/${CANAL_PEDIDOS}#issuecomment-N), C1-20261121-2036-C6-1, condição 4`);
   const esperado = `https://github.com/solrenning-llc/marktmorgen/issues/${CANAL_PEDIDOS}#issuecomment-${m[1]}`;
-  let url, corpo;
+  let url, corpo, criado;
   try {
     if (process.env.CORREIO_SEM_GH === "1") throw new Error("sem gh");
-    const saida = execFileSync("gh", ["api", `repos/solrenning-llc/marktmorgen/issues/comments/${m[1]}`, "--jq", "[.html_url, (.body // \"\")] | @json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
-    [url, corpo] = JSON.parse(saida.trim()); // o gh imprime o texto do @json sem aspas: uma camada só
+    const saida = execFileSync("gh", ["api", `repos/solrenning-llc/marktmorgen/issues/comments/${m[1]}`, "--jq", "[.html_url, (.body // \"\"), (.created_at // \"\")] | @json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
+    [url, corpo, criado] = JSON.parse(saida.trim()); // o gh imprime o texto do @json sem aspas: uma camada só
   } catch {
     throw new Error(`o pedido ${m[1]} NÃO FOI CONFERIDO no GitHub agora; nada foi feito (passo 4: nada NÃO CONFERIDO segue)`);
   }
   if (url !== esperado) throw new Error(`o comentário ${m[1]} não é da #${CANAL_PEDIDOS}: ${url}`);
-  if (!String(corpo).includes(alvo)) throw new Error(`o comentário ${m[1]} não cita "${alvo}"; o pedido do coordenador nomeia a ação`);
-  return esperado;
+  const quando = new Date(criado);
+  if (Number.isNaN(quando.getTime()) || agora - quando > PEDIDO_MAX_H * 3600000 || quando - agora > 5 * 60000) {
+    throw new Error(`o comentário ${m[1]} não é um pedido recente (de no máximo ${PEDIDO_MAX_H} horas): ${criado || "sem data"}`);
+  }
+  const linha = String(corpo).split(/\r?\n/).map((l) => l.trim())
+    .map((l) => new RegExp(`^AGENT-MAIL-REQUEST (${PREFIXO_COORDENADOR}-\\d{8}-\\d{4}-[A-Z0-9-]+) (\\S+) (\\S+)$`).exec(l))
+    .find((x) => x && x[2] === comando && x[3] === alvo);
+  if (!linha) throw new Error(`o comentário ${m[1]} não traz a linha "AGENT-MAIL-REQUEST <identificador ${PREFIXO_COORDENADOR}-AAAAMMDD-HHMM-ASSUNTO> ${comando} ${alvo}"`);
+  let achados = [];
+  try { achados = git(["grep", "-l", "-F", `Pedido: ${esperado}`, commit, "--", "chaves", "revisao/confirmados"]).split("\n").filter(Boolean); } catch { /* nenhum (o git grep sai com 1) */ }
+  const usado = achados.map((l) => l.slice(String(commit).length + 1)).find((c) => conteudo(commit, c).split("\n").includes(`Pedido: ${esperado}`));
+  if (usado) throw new Error(`o pedido ${m[1]} já foi usado (${usado}); cada ação precisa de um pedido próprio`);
+  return { url: esperado, id: linha[1] };
 }
 
 /**
  * Confere as condições 1 e 4 para a sessão atual; devolve a sessão, o pedido conferido e, para a reserva, o caso dela.
  * `acao` descreve a ação na mensagem de erro; `alvo` é o que o pedido precisa citar.
  */
-export function conferirPrivilegio({ eu, acao, alvo, pedido, dono = "", agora = new Date(), commit = buscar() }) {
+export function conferirPrivilegio({ eu, acao, comando, alvo, pedido, dono = "", agora = new Date(), commit = buscar() }) {
   const s = sessaoAtual();
   if (!s || (s.id !== SESSAO_NOMEADA && s.id !== SESSAO_RESERVA)) {
     throw new Error(`só a sessão nomeada (Claude 5 ibqho, ${SESSAO_NOMEADA}) ${acao}, ou a reserva (Claude 1 A, ${SESSAO_RESERVA}) nos três casos dela; esta sessão é ${s ? s.id : "não identificada"} (C1-20261121-2036-C6-1, condição 1)`);
@@ -611,14 +638,18 @@ export function conferirPrivilegio({ eu, acao, alvo, pedido, dono = "", agora = 
   if (familia(eu) !== s.familia) throw new Error(`identidade: esta sessão é da família ${s.familia} e não age como "${eu}"`);
   let reserva = "";
   if (s.id === SESSAO_RESERVA) {
-    const sinal = ultimoSinal(SESSAO_NOMEADA, commit);
     const ownerMsg = String(dono === true ? "" : dono ?? "").trim();
     if (ownerMsg) reserva = `mensagem do dono: ${ownerMsg}`;
     else if (cotas(agora, commit)["claude-5"]?.sem) reserva = "a família Claude 5 está sem cota";
-    else if (!sinal || agora - sinal >= SINAL_MIN * 60000) reserva = `${SINAL_MIN} minutos sem sinal da sessão nomeada (último: ${sinal ? sinal.toISOString() : "nenhum"})`;
-    else throw new Error(`a reserva só age em três casos: ${SINAL_MIN} minutos sem sinal da sessão nomeada (último: ${sinal.toISOString()}), a família Claude 5 sem cota, ou mensagem do dono (--owner-message <identificador>); condição 2`);
+    else {
+      const { quando, conferido } = ultimoSinal(SESSAO_NOMEADA, commit, agora);
+      if (!conferido) throw new Error(`o sinal da sessão nomeada NÃO FOI CONFERIDO: o histórico local do correio é raso e não cobre ${SINAL_MIN} minutos; a reserva não age (aprofunde o clone com git fetch --unshallow, ou use os outros dois casos)`);
+      if (quando && agora - quando < SINAL_MIN * 60000) throw new Error(`a reserva só age em três casos: ${SINAL_MIN} minutos sem sinal da sessão nomeada (último: ${quando.toISOString()}), a família Claude 5 sem cota, ou mensagem do dono (--owner-message <identificador>); condição 2`);
+      reserva = `${SINAL_MIN} minutos sem sinal da sessão nomeada (último: ${quando ? quando.toISOString() : "nenhum no histórico"})`;
+    }
   }
-  return { s, reserva, pedido: conferirPedido(pedido, alvo) };
+  const p = conferirPedido(pedido, comando, alvo, commit, agora);
+  return { s, reserva, pedido: p.url, idPedido: p.id };
 }
 
 /** Condição 3: o que a sessão fez no PR (escreveu, revisou, enfileirou); lança erro se fez algo ou se não deu para ler. */
@@ -634,7 +665,7 @@ export function conferirDistancia(pr, sessao, commit = buscar()) {
 
 /** As linhas que todo registro privilegiado leva, e o aviso a todos no mesmo commit. */
 function linhasPrivilegio(p) {
-  return [`Pedido: ${p.pedido}`, ...(p.reserva ? [`Reserva: ${p.reserva}`] : [])];
+  return [`Pedido: ${p.pedido}`, `Identificador do pedido: ${p.idPedido}`, ...(p.reserva ? [`Reserva: ${p.reserva}`] : [])];
 }
 function avisoPrivilegio({ eu, assunto, p, agora }) {
   return montarMensagem({ de: eu, para: "todos", assunto, agora,
@@ -654,7 +685,7 @@ export function chave(nome, commit = buscar()) {
   const { c: ultimo, t } = lista[lista.length - 1];
   const texto = conteudo(commit, ultimo);
   const [estado, por, ...resto] = texto.split("\n");
-  const motivo = resto.filter((l) => !/^(Sessão|Pedido|Reserva): /.test(l)).join(" ").trim();
+  const motivo = resto.filter((l) => !/^(Sessão|Pedido|Identificador do pedido|Reserva): /.test(l)).join(" ").trim();
   if (!ligacaoValida(estado, por, texto)) return { ligada: false, por, quando: new Date(t), motivo: `ON IGNORADO: sem a sessão nomeada e o pedido do coordenador (${motivo})` };
   return { ligada: estado === "ON", por, quando: new Date(t), motivo };
 }
@@ -667,7 +698,7 @@ export function mudarChave({ nome, eu, ligar, motivo = "", pedido = "", dono = "
     acrescentar({ [caminho]: `OFF\n${eu}\n${String(motivo).trim()}\nSessão: ${linhaSessao()}\n` }, `${eu}: interruptor ${nome} desligado`);
     return;
   }
-  const p = conferirPrivilegio({ eu, acao: "liga um interruptor", alvo: nome, pedido, dono, agora });
+  const p = conferirPrivilegio({ eu, acao: "liga um interruptor", comando: "set-switch", alvo: nome, pedido, dono, agora });
   acrescentar({
     [caminho]: [`ON`, eu, String(motivo).trim(), ...linhasPrivilegio(p), `Sessão: ${linhaSessao()}`, ""].join("\n"),
     ...avisoPrivilegio({ eu, assunto: `interruptor ${nome} LIGADO por ${eu}`, p, agora }),
@@ -721,7 +752,7 @@ export function registrarRevisao({ eu, pr, sha, resultado, link, agora = new Dat
 
 export function confirmarRegistro({ eu, id, motivo = "", pedido = "", dono = "", agora = new Date() }) {
   const commit = buscar();
-  const p = conferirPrivilegio({ eu, acao: "confirma um registro de revisão", alvo: String(id), pedido, dono, agora, commit });
+  const p = conferirPrivilegio({ eu, acao: "confirma um registro de revisão", comando: "confirm-review-record", alvo: String(id), pedido, dono, agora, commit });
   if (!/^[0-9A-Za-z-]+$/.test(String(id ?? "")) || !arquivos(commit, `revisao/registros/${id}.md`).length) throw new Error(`registro não encontrado: ${id}`);
   const pr = campo(conteudo(commit, `revisao/registros/${id}.md`), "PR");
   conferirDistancia(pr, p.s.id, commit);

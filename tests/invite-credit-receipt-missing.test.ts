@@ -29,6 +29,14 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (method === "GET" && path === "/invoices") return answer({ object: "list", data: invoices.get(url.searchParams.get("customer") ?? "") ?? [], has_more: false });
   if (method === "GET" && path === "/refunds") return answer({ object: "list", data: [], has_more: false });
+  // Merge of main with #4514 (16 November 2026): an invite credit also reads the payment's disputes (takenBackOn); none here.
+  if (method === "GET" && path === "/disputes") return answer({ object: "list", data: [], has_more: false });
+  // And reads a credit's invoice again by its id before sending (paidNow): the same invoice the list gave.
+  const oneInvoice = path.match(/^\/invoices\/(in_[A-Za-z0-9_]+)$/);
+  if (oneInvoice && method === "GET") {
+    const row = [...invoices.values()].flat().find((inv) => inv.id === oneInvoice[1]);
+    return row ? answer(row) : answer({ error: { message: "no such invoice" } }, 404);
+  }
   const txns = path.match(/^\/customers\/(cus_[A-Za-z0-9]+)\/balance_transactions$/);
   // The history never shows the credit: only the POST's own answer could confirm it.
   if (txns && method === "GET") return answer({ object: "list", data: [], has_more: false });

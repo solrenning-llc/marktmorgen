@@ -75,7 +75,7 @@ export default async function InvitePage({ params }: { params: Promise<{ code: s
               {
                 icon: "gift" as const,
                 title: `${bonus} of credit`,
-                text: `On your plan ${INVITE_HOLD_DAYS} days after your first payment, when its refund window has closed. It pays your next bill.`,
+                text: `On your plan ${INVITE_HOLD_DAYS} days after your first payment, once the time for a card dispute on it has passed. It pays your next bill.`,
               },
               { icon: "percent" as const, title: feeWords().inviteCardTitle, text: feeWords().inviteCardText },
             ].map((item) => (

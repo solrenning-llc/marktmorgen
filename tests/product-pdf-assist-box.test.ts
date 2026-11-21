@@ -18,7 +18,7 @@
 import { ProductPdfAssist } from "@/components/product-pdf-assist";
 import { AiDraftReview } from "@/components/ai-draft-review";
 import { AiStepsAssist } from "@/components/ai-steps-assist";
-import { BENEFITS_HEADING, PDF_ASSIST_COPY, type PdfProposal } from "@/lib/product-pdf-assist-rules";
+import { BENEFITS_HEADING, PDF_ASSIST_COPY, type PdfProposal, undoneKept } from "@/lib/product-pdf-assist-rules";
 import { find, mount, texts } from "./client-hooks";
 import { done, is, part } from "./check";
 
@@ -143,9 +143,7 @@ async function main(): Promise<void> {
     await b.mounted.settle();
     is("the name the creator wrote after the suggestion stays", b.fields.title, "My own name");
     is("the short description and the full description go back", [b.fields.summary, b.fields.about], [ORIGINAL.summary, ORIGINAL.about]);
-    // Read by name, so this check fails (not the build) while the words are missing.
-    const undoneKept = (PDF_ASSIST_COPY as unknown as { undoneKept?: (kept: string[]) => string }).undoneKept;
-    is("and it says the creator's later change was kept", texts(status(b.mounted.tree())?.props?.children).join(""), undoneKept?.(["name"]) ?? "missing");
+    is("and it says the creator's later change was kept", texts(status(b.mounted.tree())?.props?.children).join(""), undoneKept(["name"]));
     b.mounted.unmount();
   }
   {

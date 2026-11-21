@@ -61,12 +61,19 @@ export const PDF_ASSIST_COPY = {
   empty: "We found nothing to suggest from in this PDF's first pages, so nothing was suggested. Nothing was changed here. Write the name and descriptions yourself, or upload a PDF whose first pages say what it is.",
   undo: "Put back what was there",
   undone: "The name and both descriptions are back as they were.",
+  /** Said in place of `undone` when a box the creator changed after the suggestion was left as they wrote it (undoneKept). */
+  undoneKept: "What the suggestion filled in was taken out. Your own later changes to the {boxes} were kept.",
   keptTitle: "The name was not changed: the suggested one did not stick to what the PDF says.",
   keptSummary: "The short description was not changed: the suggested one did not stick to what the PDF says.",
   tooLong: "The benefits did not fit in the full description, so it was not changed. Shorten it, then try again.",
   aboutLoading: "Suggestions from your PDF open once your full description has been read.",
   aboutUnread: "Suggestions from your PDF are off here: your full description could not be read just now, and they would be put in front of it. Close this product and open it again to try.",
 } as const;
+
+/** The words said when the creator's later changes to some boxes were kept by the undo, naming those boxes. */
+export function undoneKept(kept: readonly string[]): string {
+  return PDF_ASSIST_COPY.undoneKept.replace("{boxes}", kept.join(" and the "));
+}
 
 /** Whether the form holds the creator's full description: suggestions are put in front of it only when it does. */
 export type AboutState = "ready" | "loading" | "unread";

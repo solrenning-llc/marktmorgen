@@ -6,7 +6,7 @@ import { AiStepsAssist } from "@/components/ai-steps-assist";
 import { freshChecks } from "@/lib/ai-draft-review";
 import { READ_PDF_JOBS } from "@/lib/ai-rules";
 import { MAX_ABOUT_LENGTH } from "@/lib/product-about";
-import { type AboutState, PDF_ASSIST_COPY, type PdfProposal, benefitsList, pdfAssistSteps, readProposal, withBenefits, withoutList } from "@/lib/product-pdf-assist-rules";
+import { type AboutState, PDF_ASSIST_COPY, type PdfProposal, benefitsList, pdfAssistSteps, readProposal, undoneKept, withBenefits, withoutList } from "@/lib/product-pdf-assist-rules";
 
 type Fields = { title: string; summary: string; about: string };
 
@@ -20,8 +20,10 @@ const isProposal = (value: unknown): value is PdfProposal => readProposal(value)
  * in front of the full description, never cutting what the creator wrote; a
  * second suggestion replaces the list the first one put there. A name or
  * short description that did not stick to the PDF is left as it was, and
- * said so. "Put back what was there" restores all three boxes and moves the
- * focus to what was said. It saves nothing: the creator reads, changes
+ * said so. "Put back what was there" restores each box that still holds what
+ * a suggestion put there, keeps what the creator wrote in a box after it (in
+ * the full description, the list it put in front is taken out and the rest
+ * stays), says so, and moves the focus to what was said. It saves nothing: the creator reads, changes
  * anything and presses the form's Save. What it fills in is an AI draft
  * (756 [STN3]): the three checks are drawn under it, afresh at each
  * suggestion, and told to the form through onReviewChange, which holds its
@@ -52,6 +54,8 @@ export function ProductPdfAssist({
   const [status, setStatus] = useState("");
   // The list this box put in front of the description, so the next suggestion replaces it instead of adding another.
   const inserted = useRef<string | null>(null);
+  // What the last suggestion left in the three boxes, so a box the creator changed after it is told apart.
+  const filled = useRef<Fields | null>(null);
   const statusRef = useRef<HTMLParagraphElement>(null);
   // What the boxes hold now, read when the draft arrives rather than when it was asked for.
   // The same for the form's own change, so what was typed meanwhile in the other boxes is kept.
@@ -71,11 +75,25 @@ export function ProductPdfAssist({
 
   function fill(proposal: PdfProposal) {
     const now = { ...latest.current };
-    const about = withBenefits(withoutList(now.about, inserted.current), proposal.benefits, MAX_ABOUT_LENGTH);
+    const list = inserted.current;
+    const about = withBenefits(withoutList(now.about, list), proposal.benefits, MAX_ABOUT_LENGTH);
     if (about !== null) inserted.current = benefitsList(proposal.benefits);
-    // The undo puts back what the boxes had before the first suggestion used, not one used before this one.
-    setBefore((kept) => kept ?? now);
-    change.current({ title: proposal.title ?? now.title, summary: proposal.summary ?? now.summary, about: about ?? now.about });
+    const next = { title: proposal.title ?? now.title, summary: proposal.summary ?? now.summary, about: about ?? now.about };
+    // What each box goes back to: what it held before the first suggestion, or, for a box the creator changed since
+    // the last suggestion, what they wrote (the full description without the list this box put in front of it), so
+    // a later suggestion never makes the undo take away the creator's own words.
+    const was = filled.current;
+    setBefore((kept) =>
+      kept && was
+        ? {
+            title: now.title === was.title ? kept.title : now.title,
+            summary: now.summary === was.summary ? kept.summary : now.summary,
+            about: now.about === was.about ? kept.about : withoutList(now.about, list),
+          }
+        : now,
+    );
+    filled.current = next;
+    change.current(next);
     // A new draft, whatever was checked under the one before: its three checks start again.
     tell(freshChecks());
     setStatus(
@@ -87,11 +105,25 @@ export function ProductPdfAssist({
 
   function undo() {
     if (!before) return;
-    change.current(before);
+    // A box goes back only while it still holds what the suggestion put there; one the creator changed since keeps
+    // their words (AX274 item 6: nothing of theirs changed without their approval). In the full description, the list
+    // this box put in front is taken out when it is still there whole, and the rest of what they wrote stays.
+    const now = latest.current;
+    const set = filled.current ?? now;
+    const kept: string[] = [];
+    const title = now.title === set.title ? before.title : (kept.push("name"), now.title);
+    const summary = now.summary === set.summary ? before.summary : (kept.push("short description"), now.summary);
+    let about = before.about;
+    if (now.about !== set.about) {
+      about = withoutList(now.about, inserted.current);
+      if (about === now.about) kept.push("full description");
+    }
+    change.current({ title, summary, about });
     inserted.current = null;
+    filled.current = null;
     setBefore(null);
     tell(null);
-    setStatus(PDF_ASSIST_COPY.undone);
+    setStatus(kept.length ? undoneKept(kept) : PDF_ASSIST_COPY.undone);
     // The button goes away: the focus moves to what was said, never to the top of the page.
     statusRef.current?.focus();
   }

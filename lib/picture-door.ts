@@ -191,6 +191,8 @@ export const putBackOnce = (noted: number): boolean => !Number.isInteger(noted);
  * file store. The list can then hold more than PICTURE_DOOR_MAX only by the notes in flight between a take and its
  * put-back, and while it does, notePictureDoor refuses every new door (it counts the whole list), which is stricter,
  * never looser. Dropping a note to keep the figure would leave its file shown by nothing, the cost the cap prevents.
+ * The bound is held by tests/picture-door-overflow.test.ts: at most 2 x PICTURE_DOOR_MAX notes, the doors' own never
+ * past PICTURE_DOOR_MAX, no door while over, and every note gone with the day.
  */
 export async function returnToDoor(entries: ReadonlyArray<readonly [string, number]>): Promise<void> {
   const commands: (string | number)[][] = [];

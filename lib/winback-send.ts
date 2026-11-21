@@ -12,7 +12,8 @@
  * The window is two days wide so a day the job did not run is caught the next
  * day; the mark per subscription keeps that from ever meaning two emails.
  *
- *   nl:wb:<account>:<subscription>     that membership's email went
+ *   nl:wb:<account>:<subscription>     that membership's email went (taken only while the address has no deletion
+ *                                      print, and noted for erasure with it: WINBACK_MARK)
  *   nl:wb:once:<statsId>:<hash>        that person heard about that product lately
  *   nl:wb:link:<token>                 who a link in an email is for
  *   nl:wb:open:<token>                 the checkout that link opened, while Stripe keeps it open
@@ -40,7 +41,7 @@ import { OFFER_DAYS, ONCE_PER_DAYS, WINBACK_OPEN_REQUEST_UNITS, WINBACK_OPEN_STR
 import { takeBuyerRead } from "@/lib/buyer-actions";
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
-import { noteForErasure } from "@/lib/erasure-index";
+import { INDEX_SECONDS, noteForErasure, notesKey } from "@/lib/erasure-index";
 import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 
 const CURSOR_KEY = "nl:wb:cursor";
@@ -77,6 +78,55 @@ const OPENING_SECONDS = 60;
 export const OPEN_URL_MAX = 1_000;
 const CHECKOUT_URL = /^https:\/\/\S+$/;
 const countKey = (statsId: string) => `nl:wb:n:${statsId}`;
+
+/**
+ * The membership's mark, only while the address has no deletion print for the store, and noted for erasure in the same
+ * step (C5-20261119-1050-wb; Codex X7 and L on #4877). The mark is a pseudonymous id of the member's subscription
+ * (lib/person-data.ts): an erased person never gets one, and one taken before the erasure is in the address's notes,
+ * which the erasure deletes after writing the print (lib/person-erasure.ts, lib/erasure-index.ts forgetNoted), so no
+ * release of it is ever needed for an erasure. The notes' type is read before any write and the mark is written last,
+ * so a script Redis stops halfway never leaves a mark without its note (a note without its mark deletes nothing; one
+ * added for a mark another run holds names the same membership of the same address). KEYS: the store's prints, the mark, the address's notes. ARGV: the
+ * print, the mark's value and seconds, the note's score (ms), the oldest score kept and the notes' seconds (as
+ * lib/erasure-index.ts noteForErasure). Answers 1 marked and noted, 0 the mark already there, 2 the address erased,
+ * -1 the notes of another type; nothing is written but on 1.
+ */
+export const WINBACK_MARK = `-- marktmorgen:winback-mark:v1
+if redis.call("HEXISTS", KEYS[1], ARGV[1]) == 1 then return 2 end
+local t = redis.call("TYPE", KEYS[3]).ok
+if t ~= "none" and t ~= "zset" then return -1 end
+redis.call("ZADD", KEYS[3], ARGV[4], KEYS[2])
+redis.call("ZREMRANGEBYSCORE", KEYS[3], "-inf", ARGV[5])
+redis.call("EXPIRE", KEYS[3], ARGV[6])
+if not redis.call("SET", KEYS[2], ARGV[2], "NX", "EX", ARGV[3]) then return 0 end
+return 1`;
+
+/**
+ * WINBACK_MARK, read exactly: 1 ours, 0 taken, 2 erased, -1 unknown. A reply of another shape is read back from the
+ * mark, as claimMark does: it holds this claim's own value only when the whole script ran, its note with it.
+ */
+async function markMembership(listId: string, statsId: string, email: string, mark: string, value: string): Promise<WinbackClaim> {
+  const noted = Date.now();
+  let reply: unknown;
+  try {
+    reply = repliesFor(await redisPipeline([["EVAL", WINBACK_MARK, 3, suppressedKey(listId), mark, notesKey(statsId, email),
+      suppressionPrint(listId, email), value, 90 * 86_400, noted, noted - INDEX_SECONDS * 1000, INDEX_SECONDS]]), 1)?.[0];
+  } catch {
+    reply = undefined;
+  }
+  if (reply === 1) return "ours";
+  if (reply === 0) return "taken";
+  if (reply === 2) return "erased";
+  if (reply === -1) return "unknown";
+  try {
+    const held = repliesFor(await redisPipeline([["GET", mark]]), 1);
+    if (held && held[0] === value) return "ours";
+    if (held && typeof held[0] === "string") return "taken";
+  } catch {
+    // unknown below
+  }
+  return "unknown";
+}
 
 /**
  * The offer's once-mark, only while the address has no deletion print for the store (#4807): a run that read the
@@ -306,8 +356,12 @@ const OFFERS_PER_RUN = 100;
  */
 export const UNWRITTEN_LINKS_PER_RUN = 1;
 
-/** A mark taken (lib/claim-mark.ts claimMark): its SET NX and, answered in another shape, the GET that reads it back. */
-const MARK_COMMANDS = 2;
+/**
+ * The membership's mark (WINBACK_MARK, C5-20261119-1050-wb): the EXISTS read before the customer, the script's EVAL
+ * and the six commands it runs (the print's HEXISTS, the notes' TYPE, the note's ZADD, ZREMRANGEBYSCORE and EXPIRE,
+ * and the mark's SET NX, as Upstash bills a script) and, answered in another shape, the GET that reads it back.
+ */
+const MARK_COMMANDS = 1 + 1 + 6 + 1;
 /**
  * The once-mark taken by WINBACK_CLAIM (#4807): the script's EVAL and the two commands it runs (the deletion print's
  * HEXISTS and the once-mark's SET NX, as Upstash bills a script) and, answered in another shape, the GET that reads
@@ -390,15 +444,23 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
     const count = typeof recurring?.interval_count === "number" ? recurring.interval_count : 1;
     if (!canWinBack(store.winback, interval, count)) continue;
 
-    // Ours only when Redis says OK or, answered in another shape, the key holds this claim's own value read back
-    // (CX-123 rule 24, L6; Claude 4 on #2714). Somebody else's mark, or unknown: nothing is sent and nothing let go.
-    const claim = claimValue();
-    if ((await claimMark(sentKey(account, subId), 90 * 86_400, claim)) !== "ours") continue;
+    // No list, no agreement to write under: nothing is marked (sendWinBacks runs only stores with one).
+    if (!store.listId) continue;
+    // A membership already marked was looked at by an earlier run (or one running now): skipped before its customer
+    // is read, as when the mark was the first step. Read exactly; anything but 0 sends nothing.
+    const mark = sentKey(account, subId);
+    if (countOf(repliesFor(await redisPipeline([["EXISTS", mark]]).catch(() => null), 1)?.[0]) !== 0) continue;
     lookedAt += 1;
+    const claim = claimValue();
     try {
       const found = await onAccount("GET", account, `/customers/${customer}`);
       const email = typeof found.email === "string" && EMAIL_PATTERN.test(found.email) ? normaliseEmail(found.email) : "";
       if (!email || found.deleted === true) continue;
+      // The mark only while the address has no deletion print, noted for erasure with it (C5-20261119-1050-wb, Codex X7
+      // and L on #4877): an erased person never gets it. Ours only when the script says so or, answered in another
+      // shape, the mark holds this claim's own value read back (CX-123 rule 24, L6; Claude 4 on #2714). Somebody
+      // else's mark, erased or unknown: nothing is sent and nothing let go.
+      if ((await markMembership(store.listId, statsId, email, mark, claim)) !== "ours") continue;
       const back = await cameBackUnder(account, customer, found.email as string, product.id);
       if (back === null) {
         // Not known whether they came back: nothing is sent, and the mark (ours) is let go for a whole reading next run.
@@ -409,7 +471,6 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       // Somebody who agreed to hear from the creator and has not left the
       // list: the list's own token is what the unsubscribe link carries, and
       // no token means no agreement to write under.
-      if (!store.listId) continue;
       const tokens = await tokensFor(store.listId, [email], store.handle);
       const unsub = tokens.get(email);
       if (!unsub) continue;
@@ -419,19 +480,10 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       if (once !== "ours") {
         // Heard one lately, erased, or unknown: nothing is sent. On unknown the membership's own mark is let go, so the
         // next run asks again. A once-mark answered oddly that did land holds this claim's value and reads as ours above.
+        // On erased the membership's mark is left to the erasure that wrote the print: it is in the address's notes
+        // (WINBACK_MARK), which that erasure deletes after the print (C5-20261119-1050-wb). Releasing it here would race
+        // that delete, and a release Redis refused would leave it behind (Codex X7 and L on #4877).
         if (once === "unknown") await releaseMark(sentKey(account, subId), claim);
-        if (once === "erased") {
-          // The membership's mark is a pseudonymous id of the erased person's subscription (Codex X7 on #4877): let go
-          // with the erasure, its release read (Codex L on #4877). Not confirmed, it is tried once more at once; still
-          // not confirmed, Redis is not answering as asked, so the store's run stops there, counted with the links not
-          // written (UNWRITTEN_LINKS_PER_RUN), and the mark is never taken as cleaned.
-          const letGo = (await releaseMark(sentKey(account, subId), claim)) || (await releaseMark(sentKey(account, subId), claim));
-          if (!letGo) {
-            console.error("a come-back mark of an erased person could not be let go; the store's run stops", store.handle);
-            unwritten += 1;
-            break;
-          }
-        }
         continue;
       }
 

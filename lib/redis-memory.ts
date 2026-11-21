@@ -595,6 +595,18 @@ export class MemoryRedis {
           if (this.run(["SET", once, onceValue, "NX", "EX", onceSeconds]) !== "OK") return 0;
           return 1;
         }
+        // lib/winback-send.ts WINBACK_MARK: a membership's come-back mark, only while the address has no deletion print,
+        // noted for erasure in the same step; the notes' type is read before any write, and the mark is written last.
+        if (key.startsWith("-- marktmorgen:winback-mark:v1\n") && args[0] === "3" && args.length === 10) {
+          const [, prints, mark, notes, print, value, seconds, score, oldest, notesSeconds] = args;
+          if (this.run(["HEXISTS", prints, print]) === 1) return 2;
+          const type = this.run(["TYPE", notes]);
+          if (type !== "none" && type !== "zset") return -1;
+          this.run(["ZADD", notes, score, mark]);
+          this.run(["ZREMRANGEBYSCORE", notes, "-inf", oldest]);
+          this.run(["EXPIRE", notes, notesSeconds]);
+          return this.run(["SET", mark, value, "NX", "EX", seconds]) === "OK" ? 1 : 0;
+        }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         // lib/checkout-ask.ts ASK_AGAIN: a retried ask put back only while the entry it was taken with waits in its index.
         if (key.startsWith("-- marktmorgen:ask-again:v2\n") && args[0] === "2" && args.length === 6) {

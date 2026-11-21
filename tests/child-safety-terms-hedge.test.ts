@@ -16,5 +16,10 @@ is("the section is there", start !== -1, true);
 is("no unconditional promise to take it off at once", section.includes("we take it off the store at once"), false);
 is("as the form says: usually at once, otherwise by hand", [section.includes("usually at once"), section.includes("by hand")], [true, true]);
 is("it still says it is reported to NCMEC, as the law requires", [section.includes("(NCMEC)"), section.includes("2258A")], [true, true]);
+// Codex N1 on #3587 (MEDIUM): nothing closes or suspends the account by itself. The hold takes the product off, and the
+// owner suspends the store by hand when the case is real (docs/incident-response.md section 9), so the Terms never say
+// the account "is closed" as if it always happened.
+is("no unconditional promise that the account is closed", /the account is closed/i.test(section), false);
+is("the closure is said as what may follow, as the Terms say elsewhere", section.includes("may also suspend the store or close the account"), true);
 
 done();

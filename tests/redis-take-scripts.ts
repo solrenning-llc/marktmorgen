@@ -62,10 +62,10 @@ const SCRIPTS: Record<string, Script> = {
   },
   // lib/store-live-cache.ts CLAIM_IF_STORE_LIVE: a mark taken once (SET NX) only while the store is its own and not
   // erasing, by the same identity rule; -1 gone or erasing, -2 an owner's record that does not parse, 1 ours, 0 taken.
-  "store-claim-live:v1": (run, [live, erasing, key], [field, value, seconds, statsId]) => {
+  "store-claim-live:v1": (run, [live, erasing, key], [field, value, seconds, statsId, ref]) => {
     if (run(["HGET", erasing, field]) !== null) return -1;
     if (statsId === "") {
-      if (Number(run(["EXISTS", live])) !== 1) return -1;
+      if (run(["GET", live]) !== ref) return -1;
     } else {
       const raw = run(["GET", live]);
       if (raw === null) return -1;

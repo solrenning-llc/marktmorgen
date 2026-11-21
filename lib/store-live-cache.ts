@@ -56,11 +56,13 @@ export async function setWhileStoreLive(store: Pick<Store, "email" | "sid" | "ex
 // The same identity rule as SET_IF_STORE_LIVE, for a mark taken once (lib/claim-mark.ts claimMark's SET NX): a job that
 // read slowly on an old Store takes its mark only while that store is still its own and not erasing, in one step, so a
 // late run never recreates an erased store's family nor goes on to contact its old addresses (Codex L-20261120-1852 and
-// L-20261120-1842). -1: gone or erasing, nothing written; -2: the owner's record could not be read; 1: ours; 0: taken.
+// L-20261120-1842). For a store with an id, its id key must hold this store's very ref (ARGV[5]), not only exist:
+// moveAccount repoints it (Codex L-20261121-0043). -1: gone or erasing, nothing written; -2: the owner's record could
+// not be read; 1: ours; 0: taken.
 const CLAIM_IF_STORE_LIVE = `-- marktmorgen:store-claim-live:v1
 if redis.call("HGET", KEYS[2], ARGV[1]) then return -1 end
 if ARGV[4] == "" then
-  if redis.call("EXISTS", KEYS[1]) ~= 1 then return -1 end
+  if redis.call("GET", KEYS[1]) ~= ARGV[5] then return -1 end
 else
   local raw = redis.call("GET", KEYS[1])
   if not raw then return -1 end
@@ -86,7 +88,7 @@ export async function claimWhileStoreLive(store: Pick<Store, "email" | "sid" | "
   const live = withId ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
   try {
     const answer = repliesFor(await redisPipeline([
-      ["EVAL", CLAIM_IF_STORE_LIVE, 3, live, ERASING_KEY, key, await erasingField(ref), value, seconds, withId ? "" : statsId],
+      ["EVAL", CLAIM_IF_STORE_LIVE, 3, live, ERASING_KEY, key, await erasingField(ref), value, seconds, withId ? "" : statsId, ref],
     ]), 1)?.[0];
     if (answer === 1) return "ours";
     if (answer === 0) return "taken";

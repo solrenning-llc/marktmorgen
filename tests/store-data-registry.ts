@@ -43,6 +43,8 @@
  * (PER_PAYMENT_LINES).
  */
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
+import { POLL_RESULTS_DAYS, POLL_VOTE_BYTES } from "@/lib/email-polls";
+import { MAX_POLL_DAYS } from "@/lib/email-poll-rules";
 import type { Tier } from "@/lib/plan";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { ESSENTIAL_PER_DAY } from "@/lib/studio-allowance-rules";
@@ -377,6 +379,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:plan-disputes:seen@lib/plan-disputes.ts": company("What each dispute on our own Stripe account turned out to be (232 [CA1] unit 5)", "One hash, the company's job: dispute ids with 'final', 'unmatched:<seconds>' or 'open:<store id>', never an address; 400 days from the last write; a deleted store's id reads as unmatched."),
   "nl:mail:bc:@lib/broadcasts.ts": { what: "Broadcasts and who each goes to", room: ["lib/broadcasts.ts"], parts: [per("studio", 1, KEY, "A broadcast's lock while it sends, minutes.")] },
   "nl:mail:bcs:@lib/broadcasts.ts": { what: "A store's broadcasts, newest first", room: ["lib/broadcasts.ts"] },
+  "nl:mail:bc:@lib/email-polls.ts": short("A broadcast poll's votes (125 [F2-EMAIL-POLLS]): one field a recipient, under their place, written by the recipient of one of the store's monthly emails, gone by itself POLL_RESULTS_DAYS after the poll closes (MAX_POLL_DAYS at the most), or with the broadcast", "monthly", MAX_POLL_DAYS + POLL_RESULTS_DAYS, POLL_VOTE_BYTES),
   "nl:mail:bcs:@lib/sent-links.ts": { what: "A store's broadcasts, newest first, read by the studio page that changes where sent links go (readShownSentEmails, #3034): never written there", room: ["lib/broadcasts.ts"] },
   "nl:mail:bc:@lib/sent-links.ts": { what: "Where a sent email's links were sent since it went out, every change kept with the original (124 [F2-EDIT-SENT-LINKS])", room: ["lib/sent-links.ts"] },
   "nl:mail:queue@lib/broadcasts.ts": company("Broadcasts waiting or under way", "One set for every store, each member gone when its broadcast is done; a store's are counted with its broadcasts."),

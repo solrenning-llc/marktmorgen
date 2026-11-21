@@ -272,6 +272,30 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/email-polls.ts POLL_VOTE: a vote and the poll's end in one step, the vote undone when its end did not set.
+        if (key.startsWith("-- marktmorgen:email-poll-vote:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, hash, field, option, until] = args;
+          if (option === "") {
+            const n = this.run(["HDEL", hash, field]);
+            return [n, this.run(["EXPIREAT", hash, until])];
+          }
+          const existed = this.run(["EXISTS", hash]);
+          const before = this.run(["HGET", hash, field]);
+          const n = this.run(["HSET", hash, field, option]);
+          // The script calls EXPIREAT under pcall: an error is an end not set, undone the same way.
+          let e: unknown;
+          try {
+            e = this.run(["EXPIREAT", hash, until]);
+          } catch {
+            e = 0;
+          }
+          if (e !== 1) {
+            if (existed === 0) this.run(["DEL", hash]);
+            else if (typeof before === "string") this.run(["HSET", hash, field, before]);
+            else this.run(["HDEL", hash, field]);
+          }
+          return [n, e];
+        }
         // lib/assistant-reminder.ts FORGET_PERSON: a person's reminder sessions read, checked and deleted in one step.
         if (key.startsWith("-- marktmorgen:assist-reminder-forget:v1\n") && args[0] === "1" && args.length === 3) {
           const [, who, prefix] = args;

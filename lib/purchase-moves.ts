@@ -203,17 +203,17 @@ export async function askPurchaseMove(input: MoveAskInput & { links?: "both" | "
     if (input.links === "to") return await askToOnce(made, json, now);
 
     const id = randomBytes(16).toString("hex");
-    const fromToken = input.links === "to" ? null : randomBytes(24).toString("hex");
+    const fromToken = randomBytes(24).toString("hex");
     const toToken = randomBytes(24).toString("hex");
     const writes: (string | number)[][] = [
       ["SET", requestKey(id), json, "EX", MOVE_CONFIRM_SECONDS],
-      ...(fromToken ? [["SET", tokenKey(fromToken), JSON.stringify({ id, side: "from" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS]] : []),
+      ["SET", tokenKey(fromToken), JSON.stringify({ id, side: "from" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
       ["SET", tokenKey(toToken), JSON.stringify({ id, side: "to" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
     ];
     const wrote = repliesFor(await redisPipeline(writes), writes.length);
     // Not exactly written: no link goes out.
     if (!wrote || wrote.some((reply) => reply !== "OK")) return { ok: false, reason: "unknown" };
-    return fromToken ? { ok: true, id, fromToken, toToken } : { ok: true, id, fromToken: null, toToken };
+    return { ok: true, id, fromToken, toToken };
   } catch (error) {
     if (error instanceof UnknownReplyError) return { ok: false, reason: "unknown" };
     throw error;

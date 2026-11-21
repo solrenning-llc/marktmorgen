@@ -153,6 +153,19 @@ async function main(): Promise<void> {
     const big = await vault({ status: 400, body: { ok: false, error: "too_big" } });
     is("control: too big keeps its reason", uploadReason(big), "too_big");
     is("control: and the form's own words", said(big, { too_big: "That file is too big." }), "That file is too big.");
+
+    // The vault door's words are read as the file door's are (askForDoor's reader), never passed on unchecked
+    // (Claude 5 iacVn3r, LOW on #3171, 7069637734): no words with a server error, nor longer than the studio sends, nor
+    // words that are not text, nor any for a reason that is not one word.
+    const { uploadWords } = soldFileUpload;
+    const withError = await vault({ status: 500, body: { ok: false, error: "server_error", message: "Internal details." } });
+    is("a server error carries no words", [uploadReason(withError), uploadWords(withError)], ["server_error", undefined]);
+    const long = await vault({ status: 429, body: { ok: false, error: "studio_used", message: "x".repeat(5_000) } });
+    is("words longer than the studio sends are dropped", [uploadReason(long), uploadWords(long)], ["studio_used", undefined]);
+    const shaped = await vault({ status: 429, body: { ok: false, error: "studio_used", message: { not: "text" } } });
+    is("words that are not text are dropped", uploadWords(shaped), undefined);
+    const odd = await vault({ status: 400, body: { ok: false, error: "Not A Word!", message: "Hello." } });
+    is("a reason that is not one word is a server error, with no words", [uploadReason(odd), uploadWords(odd)], ["server_error", undefined]);
   }
 
   part("a door that said yes is read once, and what it issued is what the client carries back");

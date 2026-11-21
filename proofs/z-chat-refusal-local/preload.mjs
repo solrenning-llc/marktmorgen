@@ -1,0 +1,14 @@
+import {syncBuiltinESMExports} from 'node:module';
+import http from 'node:http';
+import https from 'node:https';
+import net from 'node:net';
+import tls from 'node:tls';
+import dns from 'node:dns';
+const state=globalThis.__zReview={redis:0,http:0,network:0};
+globalThis.__zRedis=()=>{if(++state.redis>20000){process.stderr.write('Z_REDIS_CAP\n');process.exit(86)}};
+const deny=()=>{state.network++;throw Error('Z_NETWORK_DENIED')};
+for(const [service,keys] of [[http,['request','get']],[https,['request','get']],[net,['connect','createConnection']],[tls,['connect']],[dns,['lookup','resolve']]])for(const key of keys)service[key]=deny;
+let fetchValue=deny;
+Object.defineProperty(globalThis,'fetch',{configurable:false,get(){return fetchValue},set(fn){fetchValue=(...args)=>{if(++state.http>100){process.stderr.write('Z_HTTP_CAP\n');process.exit(87)}return fn(...args)}}});
+syncBuiltinESMExports();
+process.on('exit',()=>process.stderr.write('Z_COUNTS '+JSON.stringify(state)+'\n'));

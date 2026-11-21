@@ -94,15 +94,6 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
     if (!owner && !(await within(id, key, "dm"))) return back(box, "slow");
     const text = field("text", MAX_MESSAGE_TEXT);
     if (!text) return back(`${box}/${pairOf(key, to)}`, "empty");
-    // Only to somebody in the community: a key nobody holds, or a member the
-    // creator removed, gets nothing written under it (no request waiting where
-    // nobody can read or decline it, no room taken). The sender is answered as
-    // a request sent, exactly as for a decline: a key is a plain hash of an
-    // address, so a different answer would tell who is a member.
-    if (to !== CREATOR) {
-      const them = await readMember(id, to);
-      if (!them || them.removed) return back(box, "dmasked");
-    }
     // Starting a conversation is limited harder than continuing one: the cost
     // of a stranger is in the opening, not in the tenth message of a talk
     // somebody chose to have. So the day's openings are counted only when this
@@ -117,6 +108,23 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
           progress.writing = true;
           return ok;
         };
+    // Only to somebody in the community: a key nobody holds, or a member the
+    // creator removed, gets nothing written under it (no request waiting where
+    // nobody can read or decline it, no room taken). The sender is answered
+    // exactly as for a member they have not written to yet, in the same state:
+    // a key is a plain hash of an address, so a different answer would tell
+    // who is a member. With requests on, that is a request sent, or "slow"
+    // past the day's openings (counted as for a member); with requests off, or
+    // from the creator, the message sent into the conversation.
+    if (to !== CREATOR) {
+      const them = await readMember(id, to);
+      if (!them || them.removed) {
+        const asking = config.dm.ask && key !== CREATOR;
+        if (!asking) return back(`${box}/${pairOf(key, to)}`, "dmsent");
+        const ok = typeof started === "function" ? await started() : started;
+        return back(box, ok ? "dmasked" : "slow");
+      }
+    }
     let sent: Awaited<ReturnType<typeof send>>;
     progress.writing = true;
     try {

@@ -48,7 +48,9 @@ export async function POST(request: NextRequest) {
         country,
         displayName: store.name || store.handle,
       });
-      const saved = await setStripeAccount(ref, accountId);
+      // Written only while the store still has none: when two tabs connect at once, the first account written
+      // stays the store's, and the late tab is not sent to onboard one the store does not keep.
+      const saved = await setStripeAccount(ref, accountId, false, { expected: null });
       if (!saved.ok) return away(origin, studio("stripe=error"));
       // Where sales are paid is the setting worth stealing a session for, so
       // the creator is told at their sign-in address (lib/account-notice.ts).

@@ -2,7 +2,7 @@
 
 AV3: can core resource allocations start off without breaking subscription or customer rights? No. Paid allowance/delivery rights remain. Optional operations need their own assessment. This change fixes actual takeAllowance admission, not full resource lifecycle coverage.
 
-The existing SET NX + INCRBY response must have exactly two own data entries: explicit null/OK for SET and a numeric safe integer at least the requested amount for the count. No string coercion, accessor, inherited entry, extra member/property/symbol or missing reply authorizes work. A committed but unconfirmed increment stays consumed. No retry, readback or compensating decrement is added on unknown evidence. Confirmed over-limit behavior remains as before.
+The INCRBY + EXPIRE NX response (lib/window-count.ts, `windowCountBy`; it replaced SET NX EX + INCRBY, whose key could come back with no expiry when it expired between the two) must have exactly two own data entries: a numeric safe integer at least the requested amount for the count, then explicit 0 or 1 for the EXPIRE. No string coercion, accessor, inherited entry, extra member/property/symbol or missing reply authorizes work. A committed but unconfirmed increment stays consumed. No retry, readback or compensating decrement is added on unknown evidence. Confirmed over-limit behavior remains as before.
 
 Synthetic tests call the real function against MemoryRedis and replace only the acknowledgement after the actual increment commits. They assert refusal, one two-command call, retained consumption, no getter invocation and later confirmed recovery counting both attempts. Existing all-kind/maintenance/free-pool/limit tests remain. This is not a real Redis transport or complete source-funding proof.
 

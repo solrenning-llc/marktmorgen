@@ -3,7 +3,7 @@ import { allocateEntireLlcFixedCosts, CURRENT_LLC_FIXED_COST_CEILINGS, LLC_FIXED
 import {CONTRACT_FUNDING_RULES,contractLifecycleReady,CURRENT_CONTRACT_FUNDING_POLICY,contractFundingConfiguration,canonicalFinancialSnapshot} from '@/lib/contract-funding-rules';
 import { CURRENT_EXPOSURE_BUDGET_POLICY, exposureBudgetConfiguration, EXPOSURE_ADMISSION_RULES } from '@/lib/exposure-budget-policy';
 import { assessFundedExposure, FUNDED_EXPOSURE_RULES, type FundedExposureReview } from '@/lib/funded-exposure-rules';
-import { AI_ENTITLEMENT_RULES, aiEntitlementsFunded } from '@/lib/ai-entitlement-rules';
+import { AI_ENTITLEMENT_RULES, aiEntitlementsFunded, requiredAiStoreMicroUsd } from '@/lib/ai-entitlement-rules';
 import { AUTOMATIC_UPLOAD_BUDGET_CEILINGS, UPLOAD_BUDGET_RULES, currentUploadBudgetPolicy, isUploadBudgetConfigured } from "@/lib/upload-budget-policy";
 /** Client-safe release policy. No secrets, tax rates inferred from residence, or optimistic defaults.
  * Paid plans remain closed until every individual worst case is reviewed and passes the owner's floor.
@@ -185,7 +185,8 @@ function commercialOwnReviewData(review:unknown):CommercialMarginReview|null{
   return data&&typeof data==='object'&&!Array.isArray(data)?data as CommercialMarginReview:null;
  }catch{return null;}
 }
-function commercialReviewData(review:CommercialMarginReview|null):CommercialMarginReview|null{
+/** Exported read-only for lib/opening-readiness.ts, which reports each part of commercialPlansMayOpen with this same check. */
+export function commercialReviewData(review:CommercialMarginReview|null):CommercialMarginReview|null{
  const original=commercialOwnReviewData(review);
  if(!original)return null;
  const taxState=customerTaxCollectionState(original);
@@ -202,7 +203,8 @@ export function commercialMarginReady(review:CommercialMarginReview|null=CURRENT
  return data!==null&&commercialMarginDataReady(data);
 }
 /** Called only with the detached own-data snapshot produced above. */
-function commercialMarginDataReady(review:CommercialMarginReview):boolean{
+/** Exported read-only for lib/opening-readiness.ts, which reports each part of commercialPlansMayOpen with this same check. */
+export function commercialMarginDataReady(review:CommercialMarginReview):boolean{
  const uploadPolicy=currentUploadBudgetPolicy();
  if(!isUploadBudgetConfigured(uploadPolicy))return false;
  const aiPolicy=currentAiSpendPolicy();
@@ -252,7 +254,14 @@ function commercialMarginDataReady(review:CommercialMarginReview):boolean{
  }
  // Until an authenticated plan mix is bound to this review, fund enough
  // upload allocations for any mix of the reviewed paid customer base.
- if((["creator","pro","scale"] as const).some(tier=>uploadPolicy.fundedStores[tier]<review.companyBase!.reviewedPayingCustomers! || aiPolicy.fundedStores[tier]<review.companyBase!.reviewedPayingCustomers! || aiPolicy.storeMicroUsd[tier]<Math.max(...SUPPORTED_AI_MODELS.map(model=>aiPolicy.requestMicroUsd[model]))))return false;
+ // A plan that publishes an AI right needs a ceiling of at least one largest
+ // request; that every right is funded in full is held above by
+ // aiEntitlementsFunded. A plan whose rights need nothing (Store: no writing
+ // jobs, no answers) needs no ceiling: the cost model gives it 0, and every
+ // reservation against it refuses before the provider is asked (owner,
+ // 20/11/2026, decision 3 (a)). An unreadable requirement (null) is held.
+ const publishesAi=(tier:"creator"|"pro"|"scale")=>requiredAiStoreMicroUsd(tier,aiPolicy.requestMicroUsd)!==BigInt(0);
+ if((["creator","pro","scale"] as const).some(tier=>uploadPolicy.fundedStores[tier]<review.companyBase!.reviewedPayingCustomers! || aiPolicy.fundedStores[tier]<review.companyBase!.reviewedPayingCustomers! || (publishesAi(tier)&&aiPolicy.storeMicroUsd[tier]<Math.max(...SUPPORTED_AI_MODELS.map(model=>aiPolicy.requestMicroUsd[model])))))return false;
  return REQUIRED_MARGIN_SCENARIOS.every(key=>{
   const scenario=review.scenarios[key]??null;
   const ceiling=BASE_PLAN_REVENUE_CEILINGS[key];

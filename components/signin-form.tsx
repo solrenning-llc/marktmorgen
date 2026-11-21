@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { startBrowserCheck } from "@/lib/browser-check-client";
 import { Icon } from "@/components/icons";
 import { EmailSuggestion } from "@/components/email-suggestion";
@@ -63,8 +63,16 @@ export function SignInForm({ handle = "" }: { handle?: string } = {}) {
   // The address the link was really asked for, said back on the next screen.
   const [sentTo, setSentTo] = useState("");
   const [wait, setWait] = useState(0);
+  // The "Check that inbox" title: the focus goes there when the form it replaces is gone (WCAG 2.4.3).
+  const sentTitle = useRef<HTMLParagraphElement>(null);
 
   useEffect(startChallenge, []);
+
+  // The button that was pressed is no longer on the page once the link is sent: without this the focus
+  // falls to the top of the document, and a keyboard or screen-reader user is left with no place.
+  useEffect(() => {
+    if (state.kind === "sent") sentTitle.current?.focus();
+  }, [state.kind]);
 
   // The count before "Send it again" opens, one second at a time.
   useEffect(() => {
@@ -133,16 +141,23 @@ export function SignInForm({ handle = "" }: { handle?: string } = {}) {
 
   if (state.kind === "sent") {
     return (
-      <div role="status" className="text-center">
-        <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-mint-soft text-mint-deep">
-          <Icon name="mail" size={24} />
-        </span>
-        <p className="mt-4 text-xl font-semibold text-ink">Check that inbox</p>
-        <p className="mt-2 text-ink-soft">
-          If <span className="font-medium text-ink [overflow-wrap:anywhere]">{sentTo || email}</span> can log in, a link and a 6-digit code are on their way from Marktmorgen.
-          They work once, together, and stop working in 15 minutes.
-        </p>
-        <p className="mt-3 text-sm text-ink-soft">Not there within a minute? Look in spam or promotions.</p>
+      <div className="text-center" data-signin-sent>
+        {/*
+          Only what was sent is the status. The code form and the "Send it again in 29s" count are
+          outside it: inside a live region, a count that changes every second is read out every second
+          (WCAG 2.2.4, 4.1.3), and a field's own error is said by its own alert.
+        */}
+        <div role="status" data-signin-sent-status>
+          <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-mint-soft text-mint-deep">
+            <Icon name="mail" size={24} />
+          </span>
+          <p ref={sentTitle} tabIndex={-1} className="mt-4 text-xl font-semibold text-ink focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-violet-brand">Check that inbox</p>
+          <p className="mt-2 text-ink-soft">
+            If <span className="font-medium text-ink [overflow-wrap:anywhere]">{sentTo || email}</span> can log in, a link and a 6-digit code are on their way from Marktmorgen.
+            They work once, together, and stop working in 15 minutes.
+          </p>
+          <p className="mt-3 text-sm text-ink-soft">Not there within a minute? Look in spam or promotions.</p>
+        </div>
         {state.request ? <EmailCodeForm request={state.request} /> : null}
         <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
           <button type="button" onClick={() => void send()} disabled={wait > 0} className="btn btn-secondary btn-sm">

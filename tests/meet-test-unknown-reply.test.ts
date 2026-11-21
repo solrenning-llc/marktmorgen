@@ -56,7 +56,7 @@ async function fresh(): Promise<{ shop: Store; statsId: string }> {
   await ensureStatsId(OWNER);
   const shop = (await storeForEmail(OWNER))!;
   const statsId = shop.statsId as string;
-  const connected = await finishConsent("zoom", { statsId, code: "code-1", verifier: "v".repeat(43), by: OWNER, owner: { email: OWNER, handle: shop.handle } });
+  const connected = await finishConsent("zoom", { statsId, code: "code-1", verifier: "v".repeat(43), by: OWNER, owner: { email: OWNER, handle: shop.handle }, startedAt: Date.now() });
   if (!connected.ok) throw new Error("not connected");
   return { shop, statsId };
 }
@@ -66,7 +66,7 @@ async function main(): Promise<void> {
   {
     const { shop, statsId } = await fresh();
     is("readTests: none", await readTests(statsId, ["zoom"]), {});
-    is("removeTest: false, nothing deleted on Zoom", [await removeTest(statsId, "zoom"), providerCalls()], [false, []]);
+    is("removeTest: false, nothing deleted on Zoom", [await removeTest(shop, "zoom"), providerCalls()], [false, []]);
     is("moveTest: null, nothing moved on Zoom", [await moveTest(shop, "zoom"), providerCalls()], [null, []]);
   }
 
@@ -81,21 +81,21 @@ async function main(): Promise<void> {
     const moved = await moveTest(shop, "zoom");
     is("moved an hour later", [moved?.id, moved ? moved.start - first.start : null, providerCalls()], [first.id, 3_600_000, [`PATCH https://api.zoom.us/v2/meetings/${first.id}`]]);
     seen.length = 0;
-    is("removed: deleted on Zoom and forgotten", [await removeTest(statsId, "zoom"), providerCalls(), await readTests(statsId, ["zoom"])], [true, [`DELETE https://api.zoom.us/v2/meetings/${first.id}`], {}]);
+    is("removed: deleted on Zoom and forgotten", [await removeTest(shop, "zoom"), providerCalls(), await readTests(statsId, ["zoom"])], [true, [`DELETE https://api.zoom.us/v2/meetings/${first.id}`], {}]);
   }
 
   part("removeTest reads its DEL: a reply that is not a count is said as not done");
   for (const [label, odd] of [["undefined", undefined], ['"OK"', "OK"], ["-1", -1]] as [string, unknown][]) {
-    const { shop, statsId } = await fresh();
+    const { shop } = await fresh();
     const first = await makeTest(shop, "zoom");
     const real = redis.pipeline;
     // The DEL is not carried out and its reply is lost: the record stays, as after a cut-off write.
     redis.pipeline = async (cmds) => (cmds.some((c) => c[0] === "DEL") ? cmds.map(() => odd) : real(cmds));
-    const removed = await removeTest(statsId, "zoom").then((r) => `answered ${r}`, named);
+    const removed = await removeTest(shop, "zoom").then((r) => `answered ${r}`, named);
     redis.pipeline = real;
     is(`DEL answers ${label}: removeTest refuses`, removed, "TestMeetingUnavailable");
     seen.length = 0;
-    is("asked again with healthy replies: removed, the delete repeated safely", await removeTest(statsId, "zoom"), true);
+    is("asked again with healthy replies: removed, the delete repeated safely", await removeTest(shop, "zoom"), true);
     is("the same meeting, never another", providerCalls(), [`DELETE https://api.zoom.us/v2/meetings/${first.id}`]);
   }
 

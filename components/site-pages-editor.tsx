@@ -5,8 +5,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { MAX_SITE_PAGES, MAX_SITE_TITLE, MAX_SLUG, SITE_STARTERS, type SitePage, slugFrom } from "@/lib/site-page-rules";
+import { pageFileName } from "@/lib/site-page-file";
 
-const MESSAGES: Record<string, string> = {
+export const MESSAGES: Record<string, string> = {
   too_many: `A store has up to ${MAX_SITE_PAGES} pages of its own. Remove one first.`,
   title: "Give the page a title.",
   slug: "An address is lowercase letters and numbers, with a dash between words.",
@@ -14,17 +15,30 @@ const MESSAGES: Record<string, string> = {
   taken: "Another of your pages has that address.",
   unknown: "That is not there anymore. Reload the page.",
   forbidden: "Your role on this store does not include its pages.",
+  page_unread: "This page could not be read just now, so no copy was made. Try again in a moment.",
+  copy_conflict: "Your pages changed while the copy was being made, so none was made. Reload the page and try again.",
+  copy_failed: "The page could not be saved just now. Reload to check your pages before trying again.",
+  copy_unknown: "We could not tell whether the copy was made. Reload to see your pages before trying again.",
+  copy_full: "Your store has no room left for this page's blocks, so none was added. Remove something you no longer need first.",
+  file: "That file is not a page from Marktmorgen, or it was changed so its blocks cannot be kept as they are. Nothing was added.",
+  too_big: "That page is bigger than a page may be. Nothing was added.",
+  kind: "That file holds a kind of block a store's own page cannot have. Nothing was added.",
+  forms_unread: "Your forms could not be read just now, so the page was not brought in. Try again in a moment.",
+  copy_empty: "This page has no blocks yet, so there is nothing to copy. Add a new page instead.",
+  import_empty: "That file has no blocks to bring in, so nothing was added. Add a new page instead.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 
-async function call(payload: Record<string, unknown>): Promise<{ ok?: boolean; error?: string; pages?: SitePage[]; id?: string }> {
+type Answer = { ok?: boolean; error?: string; pages?: SitePage[]; id?: string; pictures?: number; file?: unknown; left?: { pictures: number; refs: number; reviewPicks: number } };
+
+async function call(payload: Record<string, unknown>): Promise<Answer> {
   try {
     const response = await fetch("/api/store/site-page", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    return (await response.json().catch(() => ({ ok: false, error: "server_error" }))) as { ok?: boolean; error?: string; pages?: SitePage[]; id?: string };
+    return (await response.json().catch(() => ({ ok: false, error: "server_error" }))) as Answer;
   } catch {
     return { ok: false, error: "server_error" };
   }
@@ -52,6 +66,28 @@ export function SitePagesList({ pages, selected, sid }: { pages: SitePage[]; sel
     if (!a.ok || !a.id) return setError(MESSAGES[a.error ?? ""] ?? MESSAGES.server_error);
     setTitle("");
     toast("Page added. Fill in its blocks and press Save.");
+    open(a.id);
+    router.refresh();
+  }
+
+  /** 582 [KB3]: a page from a file "Download as a file" made, here or in another store; then it is opened. */
+  async function bring(chosen: File | undefined) {
+    if (!chosen) return;
+    setError(null);
+    // Read only a file that could be a page at all, then measured as the route receives it: compact.
+    if (chosen.size > MAX_PAGE_FILE_BYTES * 4) return setError(MESSAGES.too_big);
+    let file: unknown;
+    try {
+      file = JSON.parse(await chosen.text());
+    } catch {
+      return setError(MESSAGES.file);
+    }
+    if (new TextEncoder().encode(JSON.stringify({ action: "import", file })).length > MAX_PAGE_FILE_BYTES) return setError(MESSAGES.too_big);
+    setBusy(true);
+    const a = await call({ action: "import", file });
+    setBusy(false);
+    if (!a.ok || !a.id) return setError(MESSAGES[a.error ?? ""] ?? MESSAGES.server_error);
+    toast(importDoneWords(a.left ?? { pictures: 0, refs: 0, reviewPicks: 0 }));
     open(a.id);
     router.refresh();
   }
@@ -94,6 +130,26 @@ export function SitePagesList({ pages, selected, sid }: { pages: SitePage[]; sel
               </div>
             </>
           ) : null}
+          <div className="mt-3 px-1 text-xs font-semibold text-ink-soft">
+          <label className="block" htmlFor="site-page-file">
+            <span className="block">Or bring in a page from a file</span>
+          </label>
+            <input
+              id="site-page-file"
+              type="file"
+              accept=".json,application/json"
+              disabled={busy}
+              aria-describedby="site-page-file-help"
+              className="mt-1 block min-h-11 w-full text-sm text-ink"
+              onChange={(e) => {
+                const chosen = e.target.files?.[0];
+                e.target.value = "";
+                void bring(chosen);
+              }}
+            />
+            {/* A description only, outside the label, so the box's name is the label alone (LEVE on #3538). */}
+            <p id="site-page-file-help" className="mt-1 block font-normal">{IMPORT_HELP}</p>
+          </div>
           <form
             className="mt-3 flex gap-2 px-1"
             onSubmit={(e) => {
@@ -114,6 +170,41 @@ export function SitePagesList({ pages, selected, sid }: { pages: SitePage[]; sel
       ) : null}
     </nav>
   );
+}
+
+/** The most a page's file may weigh: the route's own body (app/api/store/site-page/route.ts, MAX_BODY_BYTES). */
+export const MAX_PAGE_FILE_BYTES = 200_000;
+
+/** What "Download as a file" keeps, said before it is pressed (582 [KB3]). */
+export const EXPORT_HELP = "Download as a file: this page's title and blocks, as last saved, to keep or to bring into another of your stores. Pictures are not in the file.";
+
+/** What a file brings, said beside the file box (582 [KB3]). */
+export const IMPORT_HELP = "A page you downloaded from a store here. It comes in hidden from visitors and out of the menu. Pictures, and the products and forms this store does not have, are left out.";
+// The file names the page's products and forms by their ids, never resolved in another store; no buyer, order or address is in it.
+
+/** What is said once a page is downloaded. */
+export function exportDoneWords(pictures: number): string {
+  return pictures ? `Page downloaded. Its ${pictures === 1 ? "picture is" : `${pictures} pictures are`} not in the file.` : "Page downloaded.";
+}
+
+/** What is said once a page is brought in, with what was left out counted. */
+export function importDoneWords(left: { pictures: number; refs: number; reviewPicks: number }): string {
+  const out = [
+    left.pictures ? `${left.pictures === 1 ? "a picture" : `${left.pictures} pictures`}` : "",
+    left.refs ? `${left.refs === 1 ? "a product, form or call" : `${left.refs} products, forms or calls`} this store does not have` : "",
+    left.reviewPicks ? "the reviews picked to show first" : "",
+  ].filter(Boolean);
+  return out.length ? `Page brought in and opened, hidden from visitors. Left out: ${out.join(", ")}.` : "Page brought in and opened, hidden from visitors.";
+}
+
+/** What "Make a copy" makes, said before it is pressed (582 [KB3]). */
+export const COPY_HELP = "Make a copy: the same blocks and words, as last saved, on a new page, hidden from visitors and out of the menu until you show it. Pictures stay with this page, so add them again in the copy.";
+
+/** What is said once the copy is made, with the pictures left out counted. */
+export function copyDoneWords(pictures: number): string {
+  return pictures
+    ? `Copy made and opened, hidden from visitors. Its ${pictures === 1 ? "picture" : `${pictures} pictures`} stayed with the original: add ${pictures === 1 ? "it" : "them"} again here.`
+    : "Copy made and opened, hidden from visitors.";
 }
 
 /** The settings of the page that is open: title, address, menu, where its buttons lead, order, removal. */
@@ -153,6 +244,34 @@ export function SitePageSettings({
     router.refresh();
   }
 
+  /** 582 [KB3]: this page as a file on the creator's computer, as last saved. */
+  async function download() {
+    setBusy(true);
+    setError(null);
+    const a = await call({ action: "export", id: page.id });
+    setBusy(false);
+    if (!a.ok || !a.file) return setError(MESSAGES[a.error ?? ""] ?? MESSAGES.server_error);
+    const url = URL.createObjectURL(new Blob([JSON.stringify(a.file, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = pageFileName(page);
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    toast(exportDoneWords(typeof a.pictures === "number" ? a.pictures : 0));
+  }
+
+  /** 582 [KB3]: a copy of this page, kept back; then the copy is opened, its address in the list. */
+  async function copy() {
+    setBusy(true);
+    setError(null);
+    const a = await call({ action: "copy", id: page.id });
+    setBusy(false);
+    if (!a.ok || !a.id) return setError(MESSAGES[a.error ?? ""] ?? MESSAGES.server_error);
+    toast(copyDoneWords(typeof a.pictures === "number" ? a.pictures : 0));
+    router.push(`/studio/site?${sid ? `store=${sid}&` : ""}page=${a.id}`);
+    router.refresh();
+  }
+
   const move = (by: -1 | 1) => {
     const ids = pages.map((p) => p.id);
     const to = at + by;
@@ -186,7 +305,7 @@ export function SitePageSettings({
             ))}
           </select>
         </label>
-        <label className="flex items-start gap-3 self-end text-sm text-ink">
+        <label className="flex min-h-11 items-start gap-3 self-end text-sm text-ink">
           <input type="checkbox" className="mt-1 h-4 w-4" checked={nav} onChange={(e) => setNav(e.target.checked)} />
           <span>In the menu at the top of your store and its pages</span>
         </label>
@@ -206,6 +325,14 @@ export function SitePageSettings({
         </button>
         <button type="button" className="btn btn-secondary btn-sm" disabled={busy || at >= pages.length - 1} onClick={() => move(1)} aria-label="Move this page down in the menu">
           Move down
+        </button>
+        {pages.length < MAX_SITE_PAGES ? (
+          <button type="button" className="btn btn-secondary btn-sm" disabled={busy || dirty} aria-busy={busy} aria-describedby="site-page-copy-help" onClick={() => void copy()}>
+            Make a copy
+          </button>
+        ) : null}
+        <button type="button" className="btn btn-secondary btn-sm" disabled={busy} aria-busy={busy} aria-describedby="site-page-export-help" onClick={() => void download()}>
+          Download as a file
         </button>
         {confirm ? (
           <span className="flex flex-wrap items-center gap-2 text-sm">
@@ -228,6 +355,14 @@ export function SitePageSettings({
           </button>
         )}
       </div>
+      <p id="site-page-export-help" className="mt-3 text-xs text-ink-soft">{EXPORT_HELP}</p>
+      <p id="site-page-copy-help" className="mt-1 text-xs text-ink-soft">
+        {pages.length < MAX_SITE_PAGES
+          ? dirty
+            ? "Save these settings first to make a copy."
+            : COPY_HELP
+          : `A store has up to ${MAX_SITE_PAGES} pages of its own, so there is no room for a copy. Remove one first.`}
+      </p>
       {error ? (
         <p className="notice notice-error mt-3 text-sm" role="alert">{error}</p>
       ) : null}

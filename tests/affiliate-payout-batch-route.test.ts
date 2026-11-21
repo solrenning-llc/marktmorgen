@@ -78,7 +78,8 @@ async function main(): Promise<void> {
   const healthy = await batch();
   is("the file is handed out", healthy.status, 200);
   is("as a CSV", healthy.type.startsWith("text/csv"), true);
-  is("naming the affiliate and the 30% owed", [healthy.body.includes(ANA_EMAIL), healthy.body.includes("30.00")], [true, true]);
+  const csvParts = healthy.body.trim().split(/\r?\n/)[0]?.split(",");
+is("the PayPal row names the affiliate and contains exactly $30.00 in USD", [csvParts?.[0], csvParts?.[1], csvParts?.[2]], [`"${ANA_EMAIL}"`, "30.00", "USD"]);
 
   part("Refunds unreadable");
   refundsWork = false;

@@ -9,6 +9,8 @@
  * that each says every sentence with the numbers and names it was given.
  */
 import { formatMoney } from "@/lib/money";
+import { parseEvery } from "@/lib/recurring-every-rules";
+import { membershipWords } from "./membership";
 import { MIN_BUNDLE_ITEMS, worthOf } from "@/lib/bundle-rules";
 import { DEFAULT_LANGUAGE, LANGUAGES, type LanguageCode, type LanguageInfo, parseLanguage, timeLeft } from "@/lib/store-language";
 import { en } from "./en";
@@ -105,16 +107,40 @@ export function planLine(store: Speaks, plan: { payments: number; interval: "wee
   return w.planWords(plan.payments, plan.interval, money(plan.amountCents));
 }
 
+/**
+ * How often a membership charges, in the store's language: "a month" for one,
+ * "every 3 months" for more (609 [WP8]; the words the membership page already
+ * says, lib/buyer-words/membership.ts every).
+ */
+export function everyPhrase(store: Speaks, interval: "day" | "week" | "month" | "year", count = 1): string {
+  const n = parseEvery(interval, count);
+  return n > 1 ? membershipWords(store.language).every(interval, n) : speech(store).w.every(interval);
+}
+
+/**
+ * A membership line said every few weeks or months: the line's own last words, the single interval, swapped for
+ * `phrase`. Should a language ever end the line otherwise, the line falls back to the price and the phrase alone,
+ * never to the single interval (tests/recurring-every-wired.test.ts holds every language to the first path).
+ */
+function everyLine(line: string, single: string, phrase: string, price: string): string {
+  return line.endsWith(single) ? `${line.slice(0, line.length - single.length)}${phrase}` : `${price} ${phrase}`;
+}
+
 /** "7-day free trial, then $9 a month", in the store's language; `price` is already written. */
 export function membershipLine(
   store: Speaks,
-  recurring: { trialDays: number; payments: number; interval: "day" | "week" | "month" | "year" },
+  recurring: { trialDays: number; payments: number; interval: "day" | "week" | "month" | "year"; every?: number },
   price: string,
   /** An introductory price it offers now (lib/intro-price.ts, activeIntro): said first, before the regular price. */
   intro: { cents: number; count: number } | null = null,
 ): string {
   const { w, money } = speech(store);
-  const regular = w.membershipPrice(recurring.trialDays, recurring.payments, recurring.interval, price);
+  // Charged every N (609 [WP8]): said as "every 3 months", in the store's language, never as a single month.
+  const count = parseEvery(recurring.interval, recurring.every);
+  const once = w.membershipPrice(recurring.trialDays, recurring.payments, recurring.interval, price);
+  // Every language ends a running membership's line with its interval ("…$9 a month"): that last part is said as
+  // charged, so the trial before it keeps its own words (a set number of payments is refused above one, WP8 unit 2).
+  const regular = count > 1 && recurring.payments === 0 ? everyLine(once, w.every(recurring.interval), everyPhrase(store, recurring.interval, count), price) : once;
   return intro ? w.introThen(money(intro.cents), intro.count, recurring.interval, regular) : regular;
 }
 

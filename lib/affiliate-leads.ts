@@ -48,6 +48,7 @@ import {
   leadsKey,
   parseLead,
   parseLeadExact,
+  REFUND_MARK_MAX_BYTES,
   settleLeads,
 } from "@/lib/affiliate-lead-rules";
 
@@ -136,26 +137,29 @@ function isOwn(store: Store, affiliate: { email: string; paypal: string }, email
  * (forgetLeadPerson), and what is left is only there so they are not counted
  * as a lead again, never to tie a new purchase back to them. Whether the
  * affiliate is still approved is checked by the caller, as for a code or a bond.
- * A lead that does not read exactly (parseLeadExact) credits nobody: a reversal
- * whose state no longer reads is never taken for an open lead (rule 24).
+ * A lead that does not read exactly (parseLeadExact) credits nobody, and is
+ * never taken for "no lead" either (rule 24): it throws, as a read that fails
+ * or a reply in another shape does (Claude 6 on #4413). Otherwise the sweep
+ * would settle the checkout with no credit and never pass it on again
+ * (lib/checkout-sweep.ts); thrown, it leaves the order for the next run. The
+ * only caller is noteSession, whose every caller catches, and the sale itself
+ * is never touched by this read. No lead is an exact nil.
  */
 export async function contactFor(store: Store, email: string, before: number, checkout = ""): Promise<string> {
   if (!affiliatesOn(store) || !creditsContacts(store.affiliates) || !store.statsId || !email || !isRedisConfigured()) return "";
   const address = normaliseEmail(email);
   if (!EMAIL_PATTERN.test(address)) return "";
-  try {
-    const [raw] = await redisPipeline([["HGET", leadsKey(store.statsId), leadId(store.statsId, address)]]);
-    const lead = parseLeadExact(raw);
-    if (!lead || !lead.email || lead.state === "reversed") return "";
-    if (!(lead.at > 0 && lead.at < before) || (checkout && lead.ref === checkout)) return "";
-    // The fingerprint is of the address written any way; the address kept must be the same person's.
-    if (canonicalEmail(lead.email) !== canonicalEmail(address)) return "";
-    return lead.aff;
-  } catch (error) {
-    // A read that fails costs this sale its contact credit, never the sale.
-    console.error("reading an affiliate's contact failed", error);
-    return "";
-  }
+  const reply = repliesFor(await redisPipeline([["HGET", leadsKey(store.statsId), leadId(store.statsId, address)]]), 1);
+  if (!reply) throw new UnknownReplyError("an affiliate's contact");
+  const [raw] = reply;
+  if (raw === null) return "";
+  const lead = parseLeadExact(raw);
+  if (!lead) throw new UnknownReplyError("an affiliate's contact");
+  if (!lead.email || lead.state === "reversed") return "";
+  if (!(lead.at > 0 && lead.at < before) || (checkout && lead.ref === checkout)) return "";
+  // The fingerprint is of the address written any way; the address kept must be the same person's.
+  if (canonicalEmail(lead.email) !== canonicalEmail(address)) return "";
+  return lead.aff;
 }
 
 export type LeadResult = "recorded" | "duplicate" | "self" | "off" | "full" | "unavailable";
@@ -213,10 +217,14 @@ export async function recordLead(
       state: "open",
       d: 0,
       why: "",
+      // A booking paid on Stripe names the account it was paid into, so its refund is never looked for on another one
+      // (lib/affiliates.ts readBook), as a sale does (writeReferral).
+      ...(input.pi && !input.pi.startsWith("paypal:") && store.stripeAccountId ? { acct: store.stripeAccountId } : {}),
     };
     const json = JSON.stringify(lead);
-    // A decision later writes its time and reason into the same record: room for them is taken now.
-    const bytes = dataBytes([lead.id, json, "0000000000other"], 1);
+    // A decision later writes its time and reason into the same record, and the book its refund mark
+    // (REFUND_MARK_MAX_BYTES, lib/affiliates.ts AFFILIATE_REFUND_MARK): room for them is taken now.
+    const bytes = dataBytes([lead.id, json, "0000000000other", "0".repeat(REFUND_MARK_MAX_BYTES)], 1);
     try {
       await needData(store, [{ slot: LEADS_SLOT, bytes }]);
     } catch (error) {
@@ -379,7 +387,10 @@ export async function forgetLeadPerson(store: Store, email: string): Promise<num
     // Only the address changes: every other field is written back as it was kept, never filled in with parseLead's
     // defaults, so a money field of another type stays unreadable to readLeads instead of becoming a readable 0.
     const json = JSON.stringify({ ...kept, email: "" });
-    await redisPipeline([["HSET", leadsKey(statsId), id, json]]);
+    // Read exactly (CX-123 rule 24): a reply cut short or in another shape may mean the address is still there, so it is
+    // never reported forgotten; the deletion reports this part as not done and tries again.
+    const written = countOf(repliesFor(await redisPipeline([["HSET", leadsKey(statsId), id, json]]), 1)?.[0]);
+    if (written === null) throw new UnknownReplyError("the deletion of a person's affiliate lead");
     await forgetBookSnapshot(statsId);
     const freed = dataBytes([id, String(raw)], 1) - dataBytes([id, json], 1);
     if (freed > 0) await giveData(store, [{ slot: LEADS_SLOT, bytes: freed }]);

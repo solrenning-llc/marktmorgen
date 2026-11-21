@@ -66,7 +66,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (account === "fails") return json({ error: { type: "api_error", message: "Synthetic outage" } }, 500);
     if (account === "no-merchant") return json({ id: ACCOUNT, configuration: {}, requirements: {} });
     const status = account === "no-status" ? undefined : account === "odd-status" ? "switched_off" : account;
-    return json({ id: ACCOUNT, configuration: { merchant: { capabilities: { card_payments: status === undefined ? {} : { status } } } }, requirements: { summary: { minimum_deadline: { status: account === "active" ? null : "past_due" } } } });
+    return json({ id: ACCOUNT, configuration: { merchant: { capabilities: { card_payments: status === undefined ? {} : { status } } } }, requirements: { summary: { minimum_deadline: account === "active" ? null : { status: "past_due" } } } });
   }
   if (url.pathname === "/v1/checkout/sessions" && method === "POST") {
     sessionsTried += 1;
@@ -103,6 +103,7 @@ async function main(): Promise<void> {
     const before = { reads: accountReads, sessions: sessionsTried };
     const form = new FormData();
     form.set("handle", HANDLE);
+    form.set("billing_country", "US");
     form.set("product", productId);
     const response = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: withConsent(form), headers: { host: "marktmorgen.com" } }));
     return [response.headers.get("location"), sessionsTried - before.sessions, accountReads - before.reads] as const;
@@ -110,6 +111,7 @@ async function main(): Promise<void> {
   const buyCart = async () => {
     const form = new FormData();
     form.set("handle", HANDLE);
+    form.set("billing_country", "US");
     form.set("id", productId);
     const response = await cartRoute(new NextRequest("https://marktmorgen.com/api/store/cart", { method: "POST", body: withConsent(form), headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com" } }));
     return response.headers.get("location");
@@ -124,6 +126,7 @@ async function main(): Promise<void> {
     if (!request.ok) throw new Error(request.reason);
     const form = new FormData();
     form.set("handle", HANDLE);
+    form.set("billing_country", "US");
     form.set("request", request.request.id);
     const response = await payRequestRoute(new NextRequest("https://marktmorgen.com/api/store/pay-request", { method: "POST", body: form, headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com" } }));
     return [response.headers.get("location")?.replace(/\/pay\/[^?]+/, "/pay/<id>"), request.request.id] as const;

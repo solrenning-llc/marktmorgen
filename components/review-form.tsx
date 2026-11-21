@@ -164,7 +164,7 @@ export function ReviewForm({
         <button type="submit" className="btn st-btn">
           {existing ? g.updateReview : g.postReview}
         </button>
-        <p className="st-muted text-xs leading-relaxed">{g.reviewPublic(storeName)}</p>
+        <p className="st-muted max-w-[46ch] text-xs leading-relaxed">{g.reviewPublic(storeName)}</p>
       </form>
       {existing && asking ? (
         // The question after the first press. The answer's address opens the page on it (#r-…-delete) and tabindex -1

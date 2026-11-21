@@ -22,9 +22,11 @@
  *
  * Unknown is never zero and never collects nothing: an unreadable gate answer, no sourced rate, an unknown cost of
  * receiving the VAT, or a body applyEuVatLines will not take each refuse the checkout before Stripe is asked
- * (EuVatCollectRefused). The cost of receiving the VAT (the conversion of the fee, the exchange-rate ceiling until the
- * return, the remittance) has no reviewed figure yet (789 [IV1] step 2): euVatCollectionCostCents answers null, so
- * even with the switch on, every sale would be refused until that figure is reviewed. Pure but for nothing: no IO.
+ * (EuVatCollectRefused). The cost of receiving the VAT is computed part by part in lib/eu-vat-collection-cost.ts
+ * (unit 6), but its exchange-rate allowance until the return is paid is not reviewed yet: euVatCollectionCostCents
+ * answers null, so even with the switch on, every sale would be refused until one is. It reads only euros and pounds,
+ * so a sale in any other currency is refused too, while the euro or pound amount owed on it is not known at the sale.
+ * Pure but for nothing: no IO.
  *
  * Unit 2 (coordinator C5-20261120-2130): the UK, the same way, with the "UK" record and UK_VAT_COLLECT_REVIEWED's whole
  * switch (ukVatCollectOn), decided by lib/uk-vat.ts ukCheckout (two agreeing items placing the buyer in GB, an
@@ -41,6 +43,7 @@ import { checkoutEvidence } from "@/lib/eu-vat-evidence";
 import { euCheckout } from "@/lib/eu-vat-checkout";
 import { EU_VAT_RATES, type EuVatRate, type VatOnTop, vatOnTop } from "@/lib/eu-vat-amount";
 import { applyEuVatLines } from "@/lib/eu-vat-lines";
+import { euVatCollectionCostCents } from "@/lib/eu-vat-collection-cost";
 import { recordedTreatment } from "@/lib/deemed-supplier";
 import { UK_VAT_RATE_VALID_UNTIL, ukCheckout, ukVatOnTop } from "@/lib/uk-vat";
 import { type SwitchInput, euVatCollectOn, ukVatCollectOn } from "@/lib/vat-registrations";
@@ -60,11 +63,11 @@ export class EuVatCollectRefused extends Error {
 }
 
 /**
- * The cost of receiving one sale's EU VAT through the platform's fee, in the charge's currency: the conversion of the
- * fee, the exchange-rate ceiling until the OSS return and the remittance. No reviewed figure yet (789 [IV1] step 2):
- * null, which refuses. Never zero.
+ * The cost of receiving one sale's EU or UK VAT through the platform's fee, in the charge's currency, part by part from
+ * lib/receiving-costs.ts (lib/eu-vat-collection-cost.ts, 789 [IV1] step 3, unit 6). The exchange-rate movement until
+ * the return is paid has no reviewed allowance yet, so it answers null, which refuses. Never zero.
  */
-export const euVatCollectionCostCents: (vatCents: number, currency: string) => number | null = () => null;
+export { euVatCollectionCostCents };
 
 /** Whether the EU may be collected now: the EU record says "collect" and the whole switch (lib/vat-registrations.ts) is on. */
 function collectingEu(records: unknown, vatSwitch: Omit<SwitchInput, "now"> | undefined, now: Date): boolean {

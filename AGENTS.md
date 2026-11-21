@@ -14,7 +14,13 @@ Pedido do dono, nas palavras dele: "HÁ UM SÉRIO PROBLEMA. VCS NAO SE COMUNICAM
 
 (d) **Confirmação de leitura.** Toda mensagem é confirmada (`confirmar`) assim que lida, e respondida quando pede resposta. Mensagem sem confirmação continua acordando o destinatário e, depois de 30 minutos, aparece como atrasada para os dois lados (`pendentes`).
 
-(e) **Revisão.** Sempre de uma família diferente da do autor (FQ (2)). Cada pedido é entregue a um revisor só, do mais antigo para o mais novo. A preferência por um revisor (`--para`) vale por 30 minutos e só enquanto ele tem cota; depois, qualquer outra família com cota o pega. O veredito chega à caixa do autor.
+(e) **Revisão.** Sempre de uma família diferente da do autor (FQ (2)) e sem nenhum commit no PR, nem de sessão antiga, nem de junção do main. Pedido do dono (21/11/2026, por volta das 03h55 Fortaleza, depois de uma família com commit no #3929 receber o pedido de revisão dele), nas palavras dele: "gera regra para erro assim nao ocorrer mais, para quem pedir revisao só pedir a quem realmente pode fazer". Por isso:
+- o pedido de revisão é feito com `pedir-revisao`, que lê os commits do PR além do main e deixa de fora, sozinho, toda família com commit nele (pelo trailer `Claude-Session`, pelo nome "Claude N" do autor e, sem trailer, pelo Codex); quem pede confere a lista "podem revisar" que ele mostra e acrescenta com `--exclui` a família de uma sessão "sem família conhecida";
+- na hora de pegar, `pegar-revisao` confere de novo, porque o head pode ter mudado, e devolve sozinho o pedido à família que tem commit nele;
+- um pedido feito fora do correio (no PR ou no canal) só nomeia revisor de família sem commit no PR, conferida nos commits do PR, e diz quais famílias têm commits;
+- quem pegar uma revisão e achar commit da própria família no PR devolve na hora (`devolver-revisao`), sem revisar.
+
+Cada pedido é entregue a um revisor só, do mais antigo para o mais novo. A preferência por um revisor (`--para`) vale por 30 minutos e só enquanto ele tem cota; depois, qualquer outra família com cota o pega. O veredito chega à caixa do autor.
 
 (f) **Fila, na ordem.** Os enfileiramentos respeitam a fila: `pegar-fila` só entrega o pedido mais antigo ainda aberto, um de cada vez, a uma família diferente da do autor, que confere as condições de FQ (1), inclusive o `estado-pr` do PR e os comentários do próprio PR, e enfileira, ou conclui como `recusado`, com o motivo. Nenhum pedido mais novo passa na frente. Enquanto o primeiro da fila tiver HOLD, ou CLAIMED de outra família, no correio, `pegar-fila` não o entrega e a fila espera. Uma tomada sem conclusão em 30 minutos, ou de quem ficou sem cota, cai, e o pedido volta a ser o primeiro da fila.
 
@@ -23,6 +29,15 @@ Pedido do dono, nas palavras dele: "HÁ UM SÉRIO PROBLEMA. VCS NAO SE COMUNICAM
 (h) **Pedir ao dono para passar um recado** só em caso de problema: o correio fora do ar, ou uma mensagem importante sem confirmação depois de 2 horas sem outro agente com cota que possa atendê-la.
 
 (i) **Transição.** A issue com o rótulo `canal-ativo` (AC (p) e (y)) e a caixa do Claude 1 (AV11) continuam sendo lidas até cada família confirmar a mensagem de boas-vindas do correio; até lá, o que for urgente vai pelo correio e também por elas. Depois disso, ficam só como histórico.
+
+(j) **Depois da transição, "o canal" das outras regras é o correio** (dono, 21/11/2026, por volta das 03h40 Fortaleza: "faça o que for mais correto e seguro", sobre as regras que ainda mandavam escrever no canal antigo). A transição de (i) termina quando `pendentes` do aviso de boas-vindas do correio não mostrar mais nenhuma família; quem vir isso primeiro avisa `todos` pelo correio. Daí em diante, toda remissão das outras seções deste arquivo ao canal de coordenação (a issue com o rótulo `canal-ativo`, "no canal", "issue de coordenação") e à caixa ou ao canal `para-claude-1` quer dizer o correio, assim:
+- `fila #N @sha` (FQ (1), CV (c), (f) e (g), AC (k)): o autor pede com `pedir-fila`; quem enfileira conclui com `concluir-fila`, com `fila #N @sha` e o próprio nome no texto;
+- "re-review needed #N @sha", pedido de revisor e "pode entrar" (CV (f), AC (b) e (f)): `pedir-revisao` e `concluir-revisao`;
+- CLAIMED, UNCLAIMED e HOLD (FQ (1), AC (m) e (p)): `reivindicar`, `liberar` e `segurar`, com a mesma marca numa linha no próprio PR, como em (c);
+- recados, perguntas, bloqueios, colisões, causa comum, adoção e confirmações de leitura (AV9, AV11, MV (c), CV (d), (e) e (g), AC (a), (c) e (e)): `enviar` a quem precisa (o coordenador, o autor ou a família), e `todos` só para aviso geral;
+- falta de uso anunciada (PV (d), AC (a)): `cota --sem --ate`.
+
+Continuam onde estão, porque não são conversa entre agentes: o que se escreve no próprio PR (a revisão e o veredito, CLAIMED, HOLD e `fila #N @sha`), a issue `main-vermelho` (MV (a)), o relatório `prs-parados` (PV (c)) e a troca automática do canal (AC (p)), que só age se a issue voltar a ser usada. Até o fim da transição, vale (i): o urgente vai pelo correio e também pelo canal antigo.
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
@@ -36,7 +51,9 @@ Vale para todo agente deste repositório (Claude 1, Claude 2 e Codex), em toda s
 
 ## CP — Texto para o dono copiar vai num bloco com botão de copiar (dono, 19/11/2026, por volta das 22h Fortaleza)
 
-Pedido do dono, nas palavras dele: "sempre que colocar um texto para eu copiar e colar, coloque facil de copiar e coloca um botao para eu clicar para copiar". Vale para todo agente deste repositório, em toda sessão. Todo texto que o dono vai copiar e colar em outro lugar, como um e-mail, uma mensagem, uma resposta a fornecedor ou um comando, vai sozinho dentro de um bloco de código cercado por três crases, com o tipo `text` para texto comum ou `bash` para comando. Assim a tela mostra o botão de copiar. Cada texto fica no próprio bloco, sem comentário, sem marcador de citação (">") e sem nada que não deva ser colado; a explicação fica fora do bloco. Complemento do dono (20/11/2026, por volta das 00h19 Fortaleza), nas palavras dele: "sempre que fizer um texto para eu colar, faça um cabeçalho e coloque: título da mensagem, remerente, destinatário, assunto da mensagem, identificador único, data, horário". Todo texto que o dono vai colar começa, dentro do mesmo bloco, por um cabeçalho com estas linhas, nesta ordem: Título; Remetente; Destinatário; Assunto; Identificador (único, no padrão do canal: agente, data, hora e assunto curto, por exemplo C3-20261120-0019-tx2-fila); Data (DD/MM/AAAA); Horário (de Fortaleza e UTC). A data e o horário são lidos no relógio da máquina na hora de escrever o texto, nunca estimados. Um comando que o dono vai colar no terminal não leva cabeçalho, porque o cabeçalho quebraria o comando. Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+Pedido do dono, nas palavras dele: "sempre que colocar um texto para eu copiar e colar, coloque facil de copiar e coloca um botao para eu clicar para copiar". Vale para todo agente deste repositório, em toda sessão. Todo texto que o dono vai copiar e colar em outro lugar, como um e-mail, uma mensagem, uma resposta a fornecedor ou um comando, vai sozinho dentro de um bloco de código cercado por três crases, com o tipo `text` para texto comum ou `bash` para comando. Assim a tela mostra o botão de copiar. Cada texto fica no próprio bloco, sem comentário, sem marcador de citação (">") e sem nada que não deva ser colado; a explicação fica fora do bloco. Complemento do dono (20/11/2026, por volta das 00h19 Fortaleza), nas palavras dele: "sempre que fizer um texto para eu colar, faça um cabeçalho e coloque: título da mensagem, remerente, destinatário, assunto da mensagem, identificador único, data, horário". Todo texto que o dono vai colar começa, dentro do mesmo bloco, por um cabeçalho com estas linhas, nesta ordem: Título; Remetente; Destinatário; Assunto; Identificador (único, no padrão do canal: agente, data, hora e assunto curto, por exemplo C3-20261120-0019-tx2-fila); Data (DD/MM/AAAA); Horário (de Fortaleza e UTC). A data e o horário são lidos no relógio da máquina na hora de escrever o texto, nunca estimados. Um comando que o dono vai colar no terminal não leva cabeçalho, porque o cabeçalho quebraria o comando. Complemento do dono (21/11/2026, entre 00h05 e 00h16 Fortaleza, repassado pelo Claude 4, sessão 01S9eVA6MR, na mensagem C4-20261121-0016-c3-sem-uso-fuso): (a) a ordem do cabeçalho passa a ser Título; Remetente; Destinatário; Assunto; Data; Hora; Identificador único (ordem divergente da regra do próprio dono, abaixo; ver "Depende do dono" no fim desta seção); (b) o remetente é sempre o agente que escreve o texto, nomeado expressamente, com a sessão (e, quando o destinatário precisa encontrá-la, o nome da conversa), e, quando o texto transmite orientações do dono, isso é dito; (c) os horários informados ao dono são sempre no horário de Fortaleza; complemento do dono (21/11/2026, às 03h31 Fortaleza, repassado pelo Claude 1 no correio, mensagem 20261121T063115Z-claude-1-03b2), nas palavras dele: "todos os agentes ao falarem comigo, escrevam apenas as horas no horário de fortaleza, mas que no site, quando o horário estiver visível para o cliente, deve ser escrito no fuso horário do cliente e permitir que o cliente altere o fuso horário em que ele quer visualizar o horário": com o dono, toda hora vem só no horário de Fortaleza (por exemplo, 03h31), sem UTC ao lado, em qualquer texto, tabela, resumo ou cabeçalho; por isso a linha "Horário (de Fortaleza e UTC)" do cabeçalho acima passa a ser "Hora (só de Fortaleza)", e prevalece sobre ela (Pedidos repetidos, passo 3 (b)); entre agentes (correio, canal, PRs, commits), o UTC continua permitido; (d) toda transcrição de texto do dono é redigida em tom educado, gentil e cortês, com gramática correta, na norma culta, e tecnicamente correta. Regra do próprio dono, publicada pela sessão dele no canal (#4932, comentário 7055443558), DONO-20261120-2251-REGRA-CABECALHO (20/11/2026, 22h51 Fortaleza): todo texto destinado à cópia ou ao encaminhamento traz um cabeçalho com estes campos, um por linha, nesta ordem: Título; Assunto; Remetente; Destinatário; Cópia (se houver); Data (DD/MM/AAAA); Hora (HHhMM, horário de Fortaleza); Identificador; Substitui (só quando o texto substitui outro, com o identificador do anterior); depois, uma linha em branco e o corpo. A mesma regra pede uma única resposta com as condições completas, sem alternativas ao dono, o nome Solrenning LLC sempre que a LLC for mencionada, perguntas ao dono só sobre o que só ele decide, já com a recomendação única, e o identificador de cada decisão do dono citada. Atualização do dono, OWNER-20261121-0000-HEADER-ID-ENGLISH (21/11/2026, 00h00 Fortaleza, comentário 7056314587): o identificador usa termos técnicos em inglês americano, em maiúsculas, no formato PREFIXO-AAAAMMDD-HHMM-ASSUNTO, com o prefixo OWNER para o dono (no lugar de DONO) e o próprio prefixo de cada agente; os identificadores já publicados são citados exatamente como foram escritos; "o resto do cabeçalho não muda", com a ordem de 22h51 e o texto em português do Brasil.
+
+**Depende do dono** (Pedidos repetidos, passo 3 (c)): a ordem do cabeçalho. A regra DONO-20261120-2251-REGRA-CABECALHO, confirmada pelo dono em OWNER-20261121-0000-HEADER-ID-ENGLISH, diz "Título, Assunto, Remetente, Destinatário, Cópia, Data, Hora, Identificador e Substitui, nesta ordem". O complemento das 00h05–00h16, repassado pelo Claude 4 (C4-20261121-0016-c3-sem-uso-fuso), diz "Título; Remetente; Destinatário; Assunto; Data; Hora; Identificador único". O repasse é posterior, mas não cita a regra das 22h51, e as duas mensagens do dono foram publicadas pela sessão dele. Até o dono decidir, vale a ordem de 22h51, a única escrita pelo próprio dono e confirmada por ele às 00h00 (revisão do Claude 6 no #5018, 20261121T074716Z-claude-6-z5v4-a2f6). Os demais pontos de (a) a (d) valem como estão. Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
 ## RQ — Revisão dita com quem pode fazer e quantas precisa (dono, 21/11/2026, por volta da 01h30 Fortaleza)
 
@@ -130,6 +147,58 @@ Autorização do dono, nas palavras dele: "faça o correto. e tambem quero mais 
 (h) **PR empilhado.** Quando a base entrar no main, o autor muda a base do PR para `main` na mesma rodada, sem push novo se não houver conflito.
 
 (i) **Próximo responsável.** Todo aviso de "aguardando" diz quem age em seguida e por quê: autor, revisor nomeado, coordenador ou dono.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
+## SU — Agente sem uso e prazo de quem recebe a vez (dono, 21/11/2026, 00h16 Fortaleza)
+
+Pedido do dono, repassado pelo Claude 4 (sessão 01S9eVA6MR) na mensagem C4-20261121-0016-c3-sem-uso-fuso e gravado pelo coordenador (Claude 5 ibqho) no próximo PR de documentação, como o dono pediu. Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão. Motivo: em 20 e 21/11/2026, o Claude 3 ficou sem uso a partir de 20/11, por volta das 21h17 Fortaleza, sem que a coordenação percebesse. A vez de custo do #4963 e do #4974 foi dada a ele às 00h00 de 21/11, e a ordem de custo ficou parada até o dono avisar.
+
+(a) **Conferir a última atividade antes de dar a vez.** Antes de dar a vez de custo ou de indicar o "próximo a agir", o coordenador e os demais agentes conferem a última atividade da sessão indicada: o último comentário dela no canal de coordenação e o último envio ou comentário nos PRs dela. Sem atividade há mais de 2 horas, a sessão é tratada como sem uso, e o PR é adotado na mesma rodada (AC (a)), com "Adopted by ... until the author returns" no PR e o CLAIMED no canal (AC (p)).
+
+(b) **Prazo de quem recebe a vez.** O autor que recebe a vez na ordem de custo responde no canal em até 30 minutos. Sem resposta, a vez passa a uma sessão adotante, sem nova decisão do coordenador.
+
+(c) **Linha fixa no painel.** O painel do coordenador tem sempre a linha "Sem uso: sessão, desde quando, volta quando", atualizada a cada rodada.
+
+(d) **Aviso de uso acabando.** Cada agente avisa no canal quando o próprio uso semanal chegar a 10% ou menos, com a data e a hora da renovação, em horário de Fortaleza (complementa a AV10, item 5). Esse aviso não depende de o uso já ter acabado: é dado antes, para a coordenação redistribuir o trabalho a tempo.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
+## FZ — Horários no fuso do cliente (dono, 21/11/2026, por volta das 00h11 Fortaleza)
+
+Orientação do dono, repassada pelo Claude 4 (sessão 01S9eVA6MR) na mensagem C4-20261121-0016-c3-sem-uso-fuso, nas palavras transcritas: "No site, sempre que um horário estiver visível ao cliente, ele deverá ser exibido automaticamente no fuso horário do próprio cliente, que poderá alterá-lo." Vale para todo agente deste repositório, em todo trabalho novo ou alterado que mostre um horário a um criador, comprador ou visitante: páginas, estúdio, e-mails, notificações e exportações.
+
+(a) Os instantes continuam guardados em UTC (milissegundos desde a época ou ISO 8601) e só são convertidos na exibição.
+
+(b) O fuso do cliente é um identificador IANA (por exemplo, America/Fortaleza), detectado automaticamente no navegador (`Intl.DateTimeFormat().resolvedOptions().timeZone`) e validado no servidor. O horário de verão e as mudanças de regra de cada fuso ficam a cargo do próprio `Intl`, sem tabela feita à mão.
+
+(c) O cliente pode trocar o fuso numa opção visível. A escolha fica num cookie próprio, para o servidor já renderizar no fuso certo, sem divergência na hidratação do React. Para quem tem conta, ela pode ficar também no perfil.
+
+(d) Regras que são de fato em UTC, como a virada dos contadores diários à 00h00 UTC, continuam em UTC, mas o horário exibido é convertido para o fuso do cliente, como já faz `utcAndLocal` em `lib/local-clock.ts`.
+
+(e) Nos e-mails, renderizados no servidor, usa-se o fuso salvo na conta; na falta dele, o fuso é escrito ao lado do horário. Nas exportações (CSV e afins), ISO 8601 com o deslocamento do fuso. Nas datas de cobrança e nos prazos legais, a data e o fuso aparecem sempre de forma explícita, para nunca parecerem de outro dia.
+
+(f) A opção de troca de fuso cumpre a AX274: rótulo visível, operação por teclado e alvo de pelo menos 44 × 44 px.
+
+(g) O cookie não gera custo de fornecedor. Se a escolha também for guardada no servidor, essa leitura e essa gravação entram no pior caso de cada plano, com teto, antes de serem ligadas (regra MR); custo desconhecido reprova.
+
+Recebido novamente em 21/11/2026, às 03h31 (Fortaleza), pelo Claude 1 no correio (20261121T063115Z-claude-1-03b2), nas palavras do dono: "todos os agentes ao falarem comigo, escrevam apenas as horas no horário de fortaleza, mas que no site, quando o horário estiver visível para o cliente, deve ser escrito no fuso horário do cliente e permitir que o cliente altere o fuso horário em que ele quer visualizar o horário". No ponto do site é o mesmo pedido (Pedidos repetidos, passo 3 (b)); acrescenta: (h) a escolha do fuso vale em todo o site e fica guardada; a fonte do fuso é uma só, nesta ordem: a escolha guardada, depois o fuso do navegador, depois o fuso declarado na conta; (i) o nome do fuso aparece sempre ao lado da hora, e o primeiro desenho do servidor nunca mostra uma hora errada (rótulo do fuso ou hidratação sem salto); (j) o seletor fica no rodapé e nas telas com horário, e a regra vale para comprador, leitor, aluno e criador. A parte de falar com o dono está na regra CP, item (c).
+
+**Estado (regra VR):** nada disso está construído. O item 792 [FZ1] de docs/codex-queue.md guarda o trabalho, em PRs pequenos: primeiro o fuso único (detecção, troca pelo cliente e cookie), depois a migração tela por tela. Conferido pelo Claude 4 no main em 21/11/2026, às 00h12 Fortaleza: algumas telas já usam o fuso do navegador, cada uma por conta própria; há 100 ocorrências de `timeZone: "UTC"` em app/ e components/ (recontadas no main 4bb6c9d29c em 21/11/2026, às 06h05 UTC; eram 101 às 00h12), a classificar uma a uma; não existe opção de troca. O item 367 [EZ4] cobre só a entrega de e-mails às 9h no fuso do leitor.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
+## AD — Faixa de adoção dos achados do Codex (dono, 21/11/2026, por volta das 00h45 Fortaleza)
+
+Decisão do dono DONO-20261121-0045-ADOCAO, que respondeu "faça" aos itens A, B e D da proposta do Claude 5 iacVn3r, repassada por ele no comentário 7056788842 do #4932; o item C foi deixado ao coordenador, que o decidiu no comentário 7056798441. Vale para todo agente deste repositório, em toda sessão. Esta regra não muda nenhum preço, limite, comissão, trava ou flag.
+
+(a) **Faixa de adoção.** O Claude 5 iacVn3r é a faixa de adoção das correções do Codex e faz só isso: pega uma correção do Codex pronta, aplica, roda RED e GREEN e os testes relacionados, abre o PR e pede as revisões (RV). A ordem é: primeiro as correções em que o Codex já rodou RED e GREEN; depois os ALTOs; depois os MÉDIOs do mesmo padrão, sobre um auxiliar compartilhado. Um defeito que já tem dono (C5-20261121-0310-donos-defeitos) continua com o dono; a faixa só o assume se o dono desistir ou perder o prazo do CLAIMED.
+
+(b) **Exceção ao FQ (4) e ao MV (b).** A correção de um achado do Codex MÉDIO ou mais grave, com RED sintético que falha antes e passa depois, abre mesmo com o autor no limite, como já abrem as de ALTO, com no máximo 5 PRs abertos na faixa de adoção ao mesmo tempo, cada um de um assunto só e pequeno. Não mudam as regras de revisão, a CI, a ordem de custo nem as conferências de envio da AC (m).
+
+(c) **Um PR por defeito** continua a regra (decisão do coordenador sobre o item C). Exceção: até 3 correções do mesmo padrão, com o mesmo auxiliar compartilhado, podem ir num PR só, com menos de 400 linhas fora dos testes (AC (f)), cada uma com o próprio RED e o próprio teste, e o corpo do PR listando cada relatório. O primeiro PR de um auxiliar leva o auxiliar e o seu primeiro uso, para que ele seja revisado com um chamador de verdade.
+
+(d) **Quadro único.** Uma única issue, "Codex findings: owner, PR, main", lista cada achado aberto do Codex com o relatório, a gravidade, o dono, o PR e o estado. O transcritor do Codex (Claude 5 `012ST5ib`) acrescenta os achados novos; os donos e a faixa atualizam o estado.
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
@@ -252,6 +321,60 @@ Até lá, `PLANS_ON_SALE` continua false e a trava que recusa consumidores da UE
   - a política de privacidade diz para que serve e por quanto tempo fica guardado: 10 anos nas vendas da UE (art. 63c); nas demais, o prazo que a lei exigir;
   - as regras de apagar dados continuam onde a lei permite;
   - os registros fiscais ficam com a Solrenning LLC.
+
+(j) **Decisões do dono sobre as três pendências do art. 9a** (OWNER-20261121-1529-ART9A-PENDING-DECISIONS, 21/11/2026, 15h29 Fortaleza, recebidas pelo Claude 4, sessão 01S9eVA5BC; item 793 [IV3]). Texto literal do dono, sem alteração:
+
+> Título: Respostas do dono às três decisões pendentes do tratamento de imposto do art. 9a (trava 3)
+> Assunto: Download das taxas do HMRC autorizado; a taxa de processamento da Stripe sobre a parte do IVA fica com o criador e nenhuma comissão incide sobre imposto; registros fiscais guardados pelo prazo de cada lei (UE 10 anos, Reino Unido 6 anos)
+> Remetente: dono (Vinicius)
+> Destinatário: Claude 4, sessão "Claude 4 - Construir o tratamento de imposto do art. 9a (trava 3), país por país"
+> Cópia: Claude 5 (coordenador), pelo canal ativo (gh issue list --label canal-ativo)
+> Data: 21/11/2026
+> Hora: 15h29 (Fortaleza)
+> Identificador: OWNER-20261121-1529-ART9A-PENDING-DECISIONS
+> Substitui: OWNER-20261121-1459-ART9A-PENDING-DECISIONS (não enviado; não usar)
+>
+> 1. Download das taxas do HMRC: autorizado. Baixe só a publicação oficial e pública "VAT rates on different goods and services" (https://www.gov.uk/guidance/vat-rates-on-different-goods-and-services; última atualização conferida em 21/11/2026: 10 July 2026), sem criar conta, sem chave de API e sem aceitar termos; se o download exigir algum desses, pare e me avise. Guarde no repositório a tabela com o endereço exato, a data da consulta, a data de atualização da página e a impressão digital (SHA-256) do que foi baixado, com teste que confere a tabela contra esse arquivo. Taxa ausente ou desconhecida para um produto recusa a venda daquele produto ao Reino Unido, nunca vira 0%. Antes da abertura, a tabela é conferida de novo na fonte, com data.
+>
+> 2. Taxa de processamento da Stripe sobre a parte do IVA: o criador arca com ela. Ela é cobrada pela Stripe na conta do criador, como a taxa de toda venda dele, e o Marktmorgen não devolve. É o modelo da Stan, a concorrente com o mesmo desenho do Marktmorgen (só assinatura, 0% por venda, venda na conta Stripe do criador), em que o criador paga todas as taxas da Stripe; o Paddle também calcula a sua taxa sobre o total com o IVA. Skool e Hotmart absorvem esse custo só porque ficam com uma porcentagem de cada venda; o Marktmorgen não recebe o dinheiro da venda (decisão de 29/09/2026) e tem 0% de comissão nas vendas das lojas, então absorver seria pagar, a cada venda, um custo sem receita, o que a regra de margem proíbe. O Marktmorgen recolhe o IVA sem cobrar nada a mais do criador, como fazem a Skool e o Teachable. A regra:
+>    (a) fica escrita nos Termos e na página de preços e taxas, em inglês americano simples, antes de o criador assinar, com um exemplo em números;
+>    (b) aparece como linha própria no extrato de cada venda;
+>    (c) nunca é cobrada do comprador como sobretaxa de cartão, que é proibida na UE;
+>    (d) nenhuma comissão do Marktmorgen incide sobre imposto: se um dia houver comissão (hoje é 0%), ela é calculada sobre o preço sem o imposto, como fazem a Skool, a Hotmart, a Amazon, a Apple e o Patreon;
+>    (e) até isso estar construído, testado e publicado, o pior caso do Marktmorgen continua contando esse custo, como hoje.
+>    A receita, a comissão e a margem do Marktmorgen não pagam esse custo.
+>
+> 3. Registros fiscais: atualize a política de privacidade e os Termos no mesmo PR que construir o registro, nunca antes:
+>    (a) UE: a Solrenning LLC guarda, das vendas a consumidores da UE em que ela é a fornecedora presumida, só as informações que a lei exige (art. 63c do Regulamento de Execução 282/2011 e as duas provas de localização dos arts. 24b e 24f), por 10 anos a partir do fim do ano da venda, como manda o art. 369(2) da Diretiva 2006/112/CE (regime extra-UE; os arts. 369k e 369x dão o mesmo prazo para o Union OSS e o IOSS dos produtos físicos); base legal: obrigação legal (RGPD, art. 6(1)(c));
+>    (b) Reino Unido: pelo menos 6 anos (HMRC, VAT Notice 700/21, item 2.4: "at least 6 years"), porque a Solrenning LLC registra direto no HMRC; conferir de novo na fonte, com data, antes da abertura;
+>    (c) Noruega, Suíça e Canadá: o prazo que a lei de cada um exigir, conferido em fonte oficial datada; prazo não conferido reprova, nunca é inventado;
+>    (d) esses registros nunca são usados para marketing nem para outra finalidade, ficam protegidos e são apagados automaticamente no fim do prazo;
+>    (e) num pedido de exclusão do comprador, todo o resto é apagado na hora, e esses registros ficam só até o fim do prazo legal (RGPD, art. 17(3)(b): "for compliance with a legal obligation"), o que a resposta ao comprador diz; o acesso e a exportação dos dados incluem esses registros;
+>    (f) o checkout mostra ao comprador da UE e do Reino Unido, antes de pagar, um aviso curto com link para essa parte da política;
+>    (g) o espaço guardado entra no registro de custos com teto; custo desconhecido reprova.
+>    Acessibilidade e linguagem simples conferidas e registradas no PR.
+>
+> Cada PR tem teste que falha antes, revisão de duas famílias de fora do Claude 4 (imposto, dinheiro e dados pessoais), as 9 verificações verdes no head exato e git merge-tree limpo, seguindo as regras CV, MV e AC.
+>
+> Nenhum preço, limite, comissão, teto, trava ou flag muda.
+
+Complemento do dono, OWNER-20261121-HHMM-HMRC-EXCHANGE-RATES (21/11/2026, por volta das 15h35 Fortaleza; o campo de hora veio sem preencher e o identificador é citado exatamente como foi escrito), depois de o Claude 4 mostrar que a página do item 1 traz as alíquotas por produto e não as taxas de câmbio de que o #5032 precisa. Texto literal:
+
+> Título: Autorização do download das taxas de câmbio mensais do HMRC
+> Assunto: Download das taxas de câmbio mensais oficiais do HMRC para o #5032
+> Remetente: dono (Vinicius)
+> Destinatário: Claude 4, sessão "Claude 4 - Construir o tratamento de imposto do art. 9a (trava 3), país por país"
+> Cópia: Claude 5 (coordenador)
+> Data: 21/11/2026
+> Hora: (preencher)
+> Identificador: OWNER-20261121-HHMM-HMRC-EXCHANGE-RATES
+>
+> Autorizo baixar as taxas de câmbio mensais oficiais do HMRC (HMRC monthly exchange rates), só a publicação pública em https://www.trade-tariff.service.gov.uk/exchange_rates, dos meses necessários, sem criar conta, sem chave de API e sem aceitar termos; se exigir algum desses, pare e me avise. Guarde no repositório cada mês com o endereço exato, a data da consulta e a impressão digital (SHA-256) do arquivo baixado, com teste que confere a tabela contra esse arquivo. Mês ou moeda sem taxa recusa a venda, nunca é estimado. Antes da abertura, conferir de novo na fonte, com data.
+
+Como se aplica:
+- **Item 1 e o complemento:** são duas tabelas. A página "VAT rates on different goods and services" dá a alíquota de cada tipo de produto; os arquivos mensais do HMRC dão a taxa de câmbio para declarar em libras uma venda feita em outra moeda (VAT Notice 700, 7.6). As taxas de novembro e dezembro de 2026 entram no #5032, guardadas em `docs/hmrc-exchange-rates/`. A tabela de alíquotas por produto é uma unidade própria do 793 [IV3].
+- **Item 2:** substitui, nesse ponto, o "Depende do dono" do #5024. A taxa de processamento sobre a parte do IVA nunca entra em `application_fee_amount`, como o #5024 já faz, e o pior caso do Marktmorgen continua contando esse custo (`worstCaseCents`) até (a) a (d) estarem construídos, testados e publicados.
+- **Item 3:** complementa o item (i) desta seção, que já guarda o endereço de cobrança por 10 anos nas vendas da UE; o prazo do Reino Unido e o dos outros países seguem este item.
 
 Continuam TX, MR, LC, SR5, 495 [SR6] e VR. Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo além do que diz (f).
 

@@ -220,11 +220,11 @@ export function importedRead(store: Store, email: string): (string | number)[] |
 }
 
 /**
- * What such a read answered, as purchases. By default a legible row is enough (access); with
- * `complete`, any illegible row refuses the whole read, for a reader that must list everything
- * (a person's data copy) or must not guess what is not owned (the next offer).
+ * What such a read answered, row by row: the purchases that read, and whether any row (or the read itself) did not
+ * (Claude 6's LEVE 1 on #2794). A reader that must tell "not owned" from "not known" uses this, so a legible row still
+ * counts and an illegible one is never a definite no.
  */
-export function importedFrom(raw: unknown, options: { complete?: boolean } = {}): ImportedPurchase[] {
+export function importedRows(raw: unknown): { found: ImportedPurchase[]; unknown: boolean } {
   const read = pairs(raw);
   const found: ImportedPurchase[] = [];
   let unknown = !read.complete;
@@ -233,6 +233,16 @@ export function importedFrom(raw: unknown, options: { complete?: boolean } = {})
     if (purchase) found.push(purchase);
     else unknown = true;
   }
+  return { found, unknown };
+}
+
+/**
+ * What such a read answered, as purchases. By default a legible row is enough (access); with
+ * `complete`, any illegible row refuses the whole read, for a reader that must list everything
+ * (a person's data copy) or must not guess what is not owned (the next offer).
+ */
+export function importedFrom(raw: unknown, options: { complete?: boolean } = {}): ImportedPurchase[] {
+  const { found, unknown } = importedRows(raw);
   // A legible row is enough to establish access. Only a complete, legible
   // empty read may establish that there is none.
   if (found.length && !(options.complete && unknown)) return found;
@@ -240,19 +250,41 @@ export function importedFrom(raw: unknown, options: { complete?: boolean } = {})
   return [];
 }
 
-/** Everything this address was given here by an import; [] for a store that never imported buyers. */
-export async function importedFor(store: Store, email: string, options: { complete?: boolean } = {}): Promise<ImportedPurchase[]> {
+async function readImported(store: Store, email: string): Promise<{ found: ImportedPurchase[]; unknown: boolean } | null> {
   const read = importedRead(store, email);
-  if (!read || !isRedisConfigured()) return [];
+  if (!read || !isRedisConfigured()) return null;
   const replies = repliesFor(await redisPipeline([read]), 1);
   if (!replies) throw new UnknownReplyError("imported purchases");
-  const found = importedFrom(replies[0], options);
-  // Brought over before the list of who was brought existed: noted the first time they are read.
+  return importedRows(replies[0]);
+}
+
+/** Brought over before the list of who was brought existed: noted the first time they are read. */
+async function noteBrought(store: Store, email: string, found: ImportedPurchase[]): Promise<void> {
   const brought = found.filter((p) => IMPORT_JOB.test(p.job));
   if (brought.length && store.statsId) {
     await orderWrite(store, [["HSETNX", importedWhoKey(store.statsId), normaliseEmail(email), String(Math.min(...brought.map((p) => p.at)))]]).catch(() => {});
   }
-  return found;
+}
+
+/** Everything this address was given here by an import; [] for a store that never imported buyers. */
+export async function importedFor(store: Store, email: string, options: { complete?: boolean } = {}): Promise<ImportedPurchase[]> {
+  const rows = await readImported(store, email);
+  if (!rows) return [];
+  if (!(rows.found.length && !(options.complete && rows.unknown)) && rows.unknown) throw new UnknownReplyError("imported purchases");
+  await noteBrought(store, email, rows.found);
+  return rows.found;
+}
+
+/**
+ * Everything this address was given here, with whether any row did not read: for a reader that shows what it could
+ * read and says the rest is not known (the buyer profile), or that must not take an unreadable row for "not held"
+ * (a community door). Throws only when the read itself has no reply in the shape asked.
+ */
+export async function importedRowsFor(store: Store, email: string): Promise<{ found: ImportedPurchase[]; unknown: boolean }> {
+  const rows = await readImported(store, email);
+  if (!rows) return { found: [], unknown: false };
+  await noteBrought(store, email, rows.found);
+  return rows;
 }
 
 /** Where what an import or the API's gift gives is counted in the store's data room (lib/store-data.ts). */

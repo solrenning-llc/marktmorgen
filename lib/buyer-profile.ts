@@ -55,7 +55,7 @@ import { type Contact, leadsKey, parseContact } from "@/lib/contacts";
 import { type Flow, readFlows, flowsStartedFor } from "@/lib/flows";
 import { doneLessons, studentDates } from "@/lib/learn";
 import { lessonsInOrder, readCourse } from "@/lib/course";
-import { importedFor } from "@/lib/imported-purchases";
+import { importedRowsFor } from "@/lib/imported-purchases";
 import { isGroupJob } from "@/lib/group-buy";
 import { callsFor, type BookedCall } from "@/lib/buyer-orders";
 
@@ -601,8 +601,10 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
   // gift, a place someone bought for several, or a sale paid with PayPal.
   if (store.pastBuyers && store.statsId) {
     // A failed read is not "nothing handed over": the page says the reading is partial.
-    const handed = await importedFor(store, email).catch(() => null);
-    if (!handed) partial = true;
+    // A row that does not read makes the page partial too (Claude 6's LEVE 2 on #2794), while what read is shown.
+    const rows = await importedRowsFor(store, email).catch(() => null);
+    if (!rows || rows.unknown) partial = true;
+    const handed = rows?.found ?? null;
     for (const given of handed ?? []) {
       const listing = await find(given.productId);
       productIds.push(given.productId, ...(given.items ?? []));

@@ -18,6 +18,9 @@ for (const code of LANGUAGE_CODES) {
 }
 part("The sent result must not disclose access or certify inbox delivery");
 const source = readFileSync("lib/podcast-access.ts", "utf8");
-is("no access still returns the same sent result without sending", source.includes('if (!(await mayListen(store, product.id, raw))) return "sent";'), true);
+// Changed on #3717 (Claude 3, adopting): the access reading moved into a `listens` variable so that an unreadable one
+// answers "sent" too (Claude 1 and Codex H2); both no access and an unknown reading still return the same sent result.
+is("no access still returns the same sent result without sending", source.includes('if (!listens) return "sent";'), true);
+is("an access reading that cannot be made returns the same sent result too", /listens = await mayListen\(store, product\.id, raw\);\n  \} catch \(error\) \{\n[^\n]*\n    return "sent";/.test(source), true);
 is("the sending path maps acceptance to sent or error", source.includes('return sent ? "sent" : "error";'), true);
 done();

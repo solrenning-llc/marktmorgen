@@ -5,10 +5,12 @@
  *
  * Holds:
  *   - an order's contact write, at its worst, is priced in its own line (order-contact-write, ORDER_CONTACT_WRITE), not
- *     inside ORDER_COMPUTE (Claude 5's decision of 21 November 2026). Its worst is a paid cart of MAX_CART products put
- *     on the list (lib/buyer-list.ts putOnList): with the box ticked, one upsertContact and a noteProduct for every other
- *     product; without it, a noteProduct for every product. Each is counted at CONTACT_COMMANDS_MOST (lib/contacts.ts),
- *     which tests/contacts-write-cost.test.ts checks against the real scripts;
+ *     inside ORDER_COMPUTE (Claude 5's decision of 21 November 2026). Its worst is one checkout handing over
+ *     MAX_DELIVERED products (lib/bundle-rules.ts: the product, each bump, a bundle's items for each and the
+ *     affiliate's extras; Claude 6's review of #5026) put on the list (lib/buyer-list.ts putOnList): with the box
+ *     ticked, one upsertContact and a noteProduct for every other product; without it, a noteProduct for every product.
+ *     Each is counted at CONTACT_COMMANDS_MOST (lib/contacts.ts), which tests/contacts-write-cost.test.ts checks
+ *     against the real scripts. Both callers of putOnList hand over at most MAX_DELIVERED products;
  *   - the shares one paid cart order can spend together inside ORDER_COMPUTE (its stock holds, its stock confirmation
  *     and a purchase for several's settling waits) stay inside one ORDER_COMPUTE;
  *   - an offer after paying is an order of its own: lib/upsell.ts admits it as one more order before anything is
@@ -17,7 +19,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { MAX_CART } from "@/lib/cart-rules";
+import { BUMP_KEYS, MAX_AFFILIATE_EXTRAS, MAX_BUNDLE_ITEMS, MAX_DELIVERED, deliveredIds } from "@/lib/bundle-rules";
 import { CONTACT_COMMANDS_MOST } from "@/lib/contacts";
 import { done, is, part } from "./check";
 import * as registry from "./plan-cost-registry";
@@ -30,11 +32,42 @@ const contactShare = (registry as Record<string, unknown>).CONTACT_SHARE_OF_ORDE
 
 const source = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
 
-part("An order's contact write at its worst (lib/buyer-list.ts putOnList, a cart of MAX_CART products)");
+part("What one order hands to putOnList is at most MAX_DELIVERED products");
+{
+  const ids = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+  // The fullest checkout deliveredIds can read: a product, three bumps, a full bundle under each and every extra.
+  const meta: Record<string, string> = { product: "p", aff_extra: ids("x", MAX_AFFILIATE_EXTRAS + 2).join(",") };
+  BUMP_KEYS.forEach((key, i) => {
+    meta[key] = `b${i}`;
+    meta[`${key}_bundle`] = ids(`${key}i`, MAX_BUNDLE_ITEMS + 5).join(",");
+  });
+  meta.bundle = ids("pi", MAX_BUNDLE_ITEMS + 5).join(",");
+  const delivered = deliveredIds(meta);
+  is("the fullest checkout hands over exactly MAX_DELIVERED products", delivered.length, MAX_DELIVERED);
+  const sweep = source("lib/checkout-sweep.ts");
+  is("the sweep lists only what deliveredIds names (listingsNamed)", /const products = await listingsNamed\(store, row\.metadata\);\s*const outcome = await putOnList\(/.test(sweep), true);
+  is("listingsNamed reads only deliveredIds", /const ids = deliveredIds\(meta\);/.test(source("lib/catalog.ts")), true);
+  const thanks = source("app/[handle]/thanks/page.tsx");
+  is(
+    "the thanks page lists the product, its bumps and their bundles' items, never more than deliveredIds would",
+    thanks.includes("products: [order.product, ...order.bumps.map((added) => added.product), ...bundled]") &&
+      thanks.includes("[...(order.items?.items ?? []), ...order.bumps.flatMap((added) => added.items?.items ?? [])]"),
+    true,
+  );
+  const checkout = source("lib/store-checkout.ts");
+  is(
+    "readOrder reads each bundle's items through bundleFromMeta, at most MAX_BUNDLE_ITEMS each",
+    checkout.includes('const mainList = bundleFromMeta(metadata, "bundle");') && checkout.includes("const list = bundleFromMeta(metadata, `${key}_bundle`);"),
+    true,
+  );
+  is("and a page's bundles stay inside their bound", 1 + BUMP_KEYS.length + MAX_BUNDLE_ITEMS * (1 + BUMP_KEYS.length) <= MAX_DELIVERED, true);
+}
+
+part("An order's contact write at its worst (lib/buyer-list.ts putOnList, MAX_DELIVERED products)");
 {
   const t = CONTACT_COMMANDS_MOST;
-  const ticked = t.upsert + (MAX_CART - 1) * t.noteProduct;
-  const unticked = MAX_CART * t.noteProduct;
+  const ticked = t.upsert + (MAX_DELIVERED - 1) * t.noteProduct;
+  const unticked = MAX_DELIVERED * t.noteProduct;
   const worst = Math.max(ticked, unticked);
   is("putOnList writes the contact the way this test counts it", /upsertContact\(/.test(source("lib/buyer-list.ts")) && /noteProduct\(/.test(source("lib/buyer-list.ts")), true);
   is("RED: ORDER_CONTACT_WRITE_COMMANDS is that worst", contactCommands, worst);

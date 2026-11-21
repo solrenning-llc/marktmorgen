@@ -97,6 +97,14 @@ import { HANDLE_PATTERN, anyStoreNamed, ownsAStore, storeForEmail, storeForHandl
 import { RESEND_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { SITE_URL } from "@/lib/site-url";
 
+/**
+ * Our short header line above a message sent on to a creator ("From ...", "To ..."), escaped, one line each. In US
+ * English whatever language the sender wrote in, and marked so (WCAG 3.1.2; tests/inbound-forward-header-lang.test.ts).
+ */
+export function forwardedHeaderHtml(lines: string[]): string {
+  return `<div lang="en-US" style="font:13px/1.5 system-ui,sans-serif;color:#555;border-bottom:1px solid #ddd;padding:0 0 8px;margin:0 0 12px">${lines.map(escapeHtml).join("<br>")}</div>`;
+}
+
 /** The header a message sent on by this file carries. */
 export const FORWARD_HEADER = "X-Marktmorgen-Forwarded";
 /** Files sent on with one message, together, before base64. */
@@ -717,9 +725,7 @@ export async function forwardInbound(id: string, now = Date.now(), announcedTo?:
     text: `${lines.join("\n")}\n\n${text}`,
     ...(html
       ? {
-          html: `<div style="font:13px/1.5 system-ui,sans-serif;color:#555;border-bottom:1px solid #ddd;padding:0 0 8px;margin:0 0 12px">${lines
-            .map(escapeHtml)
-            .join("<br>")}</div>${html}`,
+          html: `${forwardedHeaderHtml(lines)}${html}`,
         }
       : {}),
     replyTo,

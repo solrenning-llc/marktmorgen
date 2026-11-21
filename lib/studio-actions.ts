@@ -97,9 +97,11 @@ export const STUDIO_ACTIONS: readonly StudioAction[] = [
   { id: "path", title: "See your next steps", segment: "path", permission: "settings", words: ["path", "next step", "guide", "checklist", "getting started", "setup", "onboarding"] },
   { id: "tax", title: "See where you collect tax", segment: "tax", permission: "payments", words: ["tax", "vat", "sales tax", "gst", "registration"] },
   { id: "team", title: "Invite someone to help run your store", segment: "team", permission: "team", words: ["team", "staff", "helper", "role", "permission", "admin", "assistant", "activity log"] },
+  // Before invite and refund: "plan" alone ties on their title words, and the creator's own plan comes first (Codex X6
+  // 6997739189, Claude 5 6906524419 on #3525). Still after people, so "paid" and "receipt" keep the buyers first.
+  { id: "plan-bills", title: "See what you paid for your Marktmorgen plan", segment: "invoices", permission: "billing", words: ["billing history", "plan receipt", "subscription billing", "what i paid", "plan payments", "invoice", "plan invoice", "past payments"] },
   { id: "invite", title: "Invite other creators for plan credit", segment: "invite", permission: "billing", words: ["invite", "refer", "referral", "credit", "invite creator"] },
   { id: "refund", title: "Ask for a refund of your Marktmorgen plan", segment: "refund", permission: "billing", words: ["refund", "money back", "plan refund", "refund plan"] },
-  { id: "plan-bills", title: "See what you paid for your Marktmorgen plan", segment: "invoices", permission: "billing", words: ["billing history", "plan receipt", "subscription billing", "what i paid", "plan payments", "invoice", "plan invoice", "past payments"] },
   { id: "copy", title: "Copy this store into another of your stores", segment: "copy", permission: "page", words: ["copy", "duplicate", "clone"] },
   { id: "agent", title: "Review what the AI proposes", segment: "agent", permission: "settings", words: ["ai", "agent", "proposed changes", "api", "confirm changes"] },
 ];

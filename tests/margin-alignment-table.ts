@@ -5,9 +5,9 @@
  * (docs/margin-alignment-2026-10-18.md).
  *
  * Nothing in the document is typed: `node scripts/margin-alignment.mjs`
- * writes it from renderMarginAlignment(), and tests/margin-alignment.test.ts
- * fails when the file on disk is not what this renders, so a change to a
- * price, a limit, a fee or a reading that is not regenerated is caught.
+ * prints renderMarginAlignment() on demand (owner, 20/11/2026: the path holds
+ * only that command), and tests/margin-alignment.test.ts checks what it
+ * prints, so every price, limit, fee and reading is checked as it is today.
  */
 import { worstMonthKept } from "./worst-month-kept";
 import { MOST_CORRECT_READING, POSITIVE_NET_CENTS, receivingOf, type UnitResult } from "@/lib/receiving-costs";

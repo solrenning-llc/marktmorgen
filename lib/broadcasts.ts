@@ -40,7 +40,7 @@ import { type Counted, type SubjectTest, MIN_TEST_REACH, chooseSubject, newTest,
 import { campaignViews, readPaidSales } from "@/lib/stats";
 import { moneyByCampaign } from "@/lib/mail-revenue";
 import { BUYER_LEDGER_UNITS, LedgerNotCounted, type Narrow, isNarrowed, keepFor, ledgerReadBytes, ledgerReadingUnits, ledgerUnits, readNarrow, readsBuyers } from "@/lib/segments";
-import { sameNarrow } from "@/lib/segments-rules";
+import { sameAskedNarrow, sameNarrow } from "@/lib/segments-rules";
 
 export type BroadcastStatus = "scheduled" | "sending" | "sent" | "waiting" | "cancelled" | "failed";
 
@@ -628,7 +628,7 @@ export type CreateResult =
   // `keep`: the narrowing read and counted here, for a send that starts in the same request (advanceBroadcast's `given`).
   // `startsNow`: it is due already, so the request that wrote it starts it (the scheduled job takes up the rest).
   | { ok: true; broadcast: Broadcast; keep: ((email: string) => boolean) | undefined; startsNow: boolean }
-  | { ok: false; reason: "subject" | "body" | "when" | "product" | "empty" | "allowance" | "setup" | "plan" | "test_subject" | "test_small" | "test_links" | "placeholder" }
+  | { ok: false; reason: "subject" | "body" | "when" | "product" | "empty" | "allowance" | "setup" | "plan" | "test_subject" | "test_small" | "test_links" | "placeholder" | "who" | "narrow" | "label" }
   // Its readings of the buyers could not be held (lib/store-allowance.ts holdAllowanceAt): the sentence says why.
   | { ok: false; reason: "studio_used"; message: string };
 
@@ -661,6 +661,11 @@ export function linksToStore(body: string, store: Pick<Store, "handle" | "domain
  * sentence when that month has too few left after what is already held in
  * it, or when the plan does not pay for that month as it stands.
  */
+/** A field left out (undefined, null or ""), or one given as text: anything else is malformed. */
+function omittedOrText(value: unknown): boolean {
+  return value === undefined || value === null || typeof value === "string";
+}
+
 export async function createBroadcast(
   store: Store,
   input: { subject: unknown; body: unknown; productId: unknown; notProductId: unknown; sendAt: unknown; who?: unknown; test?: unknown; narrow?: unknown; label?: unknown },
@@ -674,14 +679,23 @@ export async function createBroadcast(
   if (!body) return { ok: false, reason: "body" };
   // A template's part left to write is a direction, never words sent in the creator's name (lib/mail-body.ts).
   if (hasPlaceholder(subject) || hasPlaceholder(body)) return { ok: false, reason: "placeholder" };
+  // Each choice that narrows who it reaches is read exactly: left out (undefined, null or "") keeps its default, and
+  // anything else that is not a string is refused, never read as left out and so as the whole list (Codex L on #3925).
+  if (!omittedOrText(input.productId) || !omittedOrText(input.notProductId)) return { ok: false, reason: "product" };
+  if (!omittedOrText(input.label)) return { ok: false, reason: "label" };
   const productId = typeof input.productId === "string" && input.productId ? input.productId : null;
   if (productId && !hasProduct(store, productId)) return { ok: false, reason: "product" };
   const notProductId = typeof input.notProductId === "string" && input.notProductId ? input.notProductId : null;
   if (notProductId && !hasProduct(store, notProductId)) return { ok: false, reason: "product" };
   // "Only the people who got X, who have not got X" is nobody, every time.
   if (notProductId && notProductId === productId) return { ok: false, reason: "empty" };
-  const who: Who = WHO.includes(input.who as Who) ? (input.who as Who) : "all";
+  // A group or a narrowing that cannot be read exactly is refused, never read as a wider one (the whole list): the
+  // same rule a draft and a kept record follow (sameNarrow); a field left out is none there. Nothing asked is everyone, as before.
+  const askedWho = input.who === undefined || input.who === null || input.who === "" ? "all" : input.who;
+  if (!WHO.includes(askedWho as Who)) return { ok: false, reason: "who" };
+  const who = askedWho as Who;
   const asNarrowed = readNarrow(input.narrow);
+  if (input.narrow !== undefined && input.narrow !== null && (typeof input.narrow !== "object" || Array.isArray(input.narrow) || !sameAskedNarrow(input.narrow as Record<string, unknown>, asNarrowed))) return { ok: false, reason: "narrow" };
   const narrow = isNarrowed(asNarrowed) ? asNarrowed : null;
   // A label as a file or a sequence writes one: cleaned, at most MAX_TAG_LENGTH; empty is none.
   const label = typeof input.label === "string" ? readTags([input.label])[0] ?? null : null;

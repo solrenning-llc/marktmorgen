@@ -435,11 +435,23 @@ function payloadFor(event: PhoneEvent | "test", alert: Alert): string {
 }
 
 /**
- * Sends one message to one device and writes down how it went (unless `keep` is false: an alert writes all its
- * devices' states in one script after they answered, keepStates); forgets a device that is gone.
+ * Sends one message to one device (a test push), writes down how it went and forgets the device if it is gone. An
+ * alert does the same for all its devices at once: pushTo for each, every state in one script (keepStates), then
+ * each gone device's removal (forgetGone).
  */
-async function deliver(store: Store, device: Device, event: PhoneEvent | "test", alert: Alert, keep = true): Promise<DeviceState> {
-  const statsId = store.statsId as string;
+async function deliver(store: Store, device: Device, event: PhoneEvent | "test", alert: Alert): Promise<DeviceState> {
+  const { state, gone } = await pushTo(store, device, event, alert);
+  // Written only while the device is still on the store's list (Codex G-20261120-1824): the push waited on the push
+  // service, and meanwhile the store's erasure may have deleted the list and the states (forgetStorePhones), or the
+  // device's removal or its person's erasure taken it off the list before deleting its state. Then nothing is written,
+  // so neither the hash nor the device's field comes back. A list that does not read writes nothing either.
+  await keepStates(store.statsId as string, [{ id: device.id, state }]);
+  if (gone) await forgetGone(store, device);
+  return state;
+}
+
+/** Sends one push and says how it went; writes nothing (deliver and alertCreator keep the state). */
+async function pushTo(store: Store, device: Device, event: PhoneEvent | "test", alert: Alert): Promise<{ state: DeviceState; gone: boolean }> {
   const subscription: Subscription = { endpoint: device.endpoint, p256dh: device.p256dh, auth: device.auth };
   const result = await sendPush(subscription, payloadFor(event, alert), {
     // A sale, a booking or a live event about to start wakes a phone that is
@@ -453,19 +465,16 @@ async function deliver(store: Store, device: Device, event: PhoneEvent | "test",
     keys: vapidKeysFor(device.kid),
   });
   const state: DeviceState = { at: Date.now(), ok: result.ok, status: result.status, error: result.error };
-  // Written only while the device is still on the store's list (Codex G-20261120-1824): the push waited on the push
-  // service, and meanwhile the store's erasure may have deleted the list and the states (forgetStorePhones), or the
-  // device's removal or its person's erasure taken it off the list before deleting its state. Then nothing is written,
-  // so neither the hash nor the device's field comes back. A list that does not read writes nothing either.
-  if (keep) await keepStates(statsId, [{ id: device.id, state }]);
-  if (result.gone && event !== "path") {
-    // Read again, so a device added a moment ago is never lost with this one.
-    const left = await changeConfig(store, (config) =>
-      config && config.devices.some((d) => d.id === device.id) ? { ...config, devices: config.devices.filter((d) => d.id !== device.id) } : null,
-    );
-    if (left) await redisPipeline([["HDEL", stateKey(statsId), device.id]]);
-  }
-  return state;
+  return { state, gone: result.gone && event !== "path" };
+}
+
+/** Takes a device the push service says is gone off the list, then its state. */
+async function forgetGone(store: Store, device: Device): Promise<void> {
+  // Read again, so a device added a moment ago is never lost with this one.
+  const left = await changeConfig(store, (config) =>
+    config && config.devices.some((d) => d.id === device.id) ? { ...config, devices: config.devices.filter((d) => d.id !== device.id) } : null,
+  );
+  if (left) await redisPipeline([["HDEL", stateKey(store.statsId as string), device.id]]);
 }
 
 /**
@@ -512,9 +521,16 @@ export async function alertCreator(
   await soon(async () => {
     const told = await Promise.all(listening.map(async (device) => {
       if (event === "path" && !maySendPathReminder(options.pathTimeZone || "", Date.now())) return null;
-      return { id: device.id, state: await deliver(store, device, event, alert, false) };
+      return { device, ...(await pushTo(store, device, event, alert)) };
     }));
-    await keepStates(statsId, told.filter((one): one is { id: string; state: DeviceState } => one !== null));
+    const sent = told.filter((one): one is { device: Device; state: DeviceState; gone: boolean } => one !== null);
+    // Every device's state first, as each device's own write did before (Claude 6's LEVE 1 on #5001): a gone
+    // device's removal that fails afterwards takes nobody else's state with it.
+    await keepStates(statsId, sent.map((one) => ({ id: one.device.id, state: one.state })));
+    // Each removal settles on its own; the first failure is still raised, so it is logged as before.
+    const removed = await Promise.allSettled(sent.filter((one) => one.gone).map((one) => forgetGone(store, one.device)));
+    const failed = removed.find((one): one is PromiseRejectedResult => one.status === "rejected");
+    if (failed) throw failed.reason;
   });
   return listening.length;
 }

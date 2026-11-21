@@ -158,6 +158,7 @@ import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
 import { MAX_COMPANIES_BYTES, MAX_COMPANY_RECORD_BYTES, STUDIO_UNIT_SENT_BYTES } from "@/lib/crm-companies-rules";
 import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE, CALENDAR_REFUSED_PRICED_PER_HOUR, CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, LIFE_FILL_SHAPE, LIST_MADE_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE, STORE_LOCK_TRIES } from "@/lib/read-ceilings";
 import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
+import { PLAY_CLAIM_READS, PLAY_CLAIM_WAIT_MS } from "@/lib/lesson-play-rules";
 import { PATH_LEAD_COMMANDS } from "@/lib/path-lead";
 import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY } from "@/lib/store-readings";
 import { SUPPORT_ANNOUNCED_DAILY, SUPPORT_DAILY, SUPPORT_FILE_BYTES_DAILY, SUPPORT_HELD_NOTICES_DAILY } from "@/lib/inbound-mail";
@@ -1917,6 +1918,44 @@ export function hourCost(): number {
   return gigabytes * STREAM_DELIVERY_PER_GB;
 }
 
+/**
+ * Holding a lesson token's playback (lib/watch.ts, holdPlayback; 9 November 2026) is done by a press of Play
+ * (app/api/store/course/play/route.ts), never by the drawing of a lesson page (pre-review of the same day: a free
+ * preview is open to anyone, and draws that held let 26 anonymous loads take a Studio plan's 32 hours). The page now
+ * reads the video's record and the window's measured figure, and takes a ticket once after a press (GETDEL): no more
+ * commands than it sent before 9 November (the figure, the record, the opened mark's SET and ZADD), so nothing is
+ * added to its later page. A press is PLAY_REQUEST_UNITS of the store's public requests, taken before its hold, which
+ * cost at least PLAY_READ (tests/plan-cost-registry.test.ts): so it is inside the lines visits and public-requests.
+ *
+ * PLAY_READ, at the most: a request held at the page's shape with PLAY_COMMANDS commands (its connection's,
+ * person's or store's pace, SET and INCR each; the store, the listing, the course, the session, the learner's courses
+ * and a draft's team, as the page reads them; the gate; the public requests taken; a token kept or the video's record
+ * with its peek; the hold's three commands and its give-back's four, ZREM, ZADD XX, ZADD NX and ZRANGEBYSCORE; the
+ * token kept and the ticket; the contract's funding where a store has it), PLAY_BYTES read and an answer of a
+ * redirect. Since the review of #3402 (9 November 2026), PLAY_EXTRA_COMMANDS more at the most: a signed-in person's
+ * claim (SET NX) and, while another press of theirs holds, PLAY_CLAIM_READS more of its GET and SET NX, and the
+ * claim replaced by the token or let go, in one script and only while it is still theirs (lib/lesson-play.ts
+ * PLAYING_IF, Codex N1's LOW on #3402; a script counted as one plus each call inside it: EVAL, GET, and SET or DEL),
+ * in place of the token's SET above or, when nothing is signed, of the token and the ticket, two more; or an
+ * anonymous press's count and give-back (INCRBY, EXPIRE, DECRBY), never both, an anonymous press having no place to
+ * claim; and a grant's opened mark (SET). The wait for another press of theirs,
+ * PLAY_CLAIM_WAIT_MS at the most, is priced as the function's memory held that long beyond the light shape's wall
+ * time.
+ */
+const PLAY_EXTRA_COMMANDS = Math.max(1 + 2 * PLAY_CLAIM_READS + 2, 3) + 1;
+const PLAY_COMMANDS = 44 + PLAY_EXTRA_COMMANDS;
+const PLAY_BYTES = 64 * 1024;
+export const PLAY_READ = request("light", PLAY_COMMANDS, PLAY_BYTES) + (PLAY_CLAIM_WAIT_MS / 1000) * MEMORY_SECOND + 1_000 * ORIGIN_PER_BYTE;
+
+/**
+ * The hourly reading's own hold commands (lib/watch.ts): the ZCARD measureDue sends with the opened mark's GET, and
+ * the ZREMRANGEBYSCORE measure sends with what was watched. A store is read at most once a reading's interval
+ * (MEASURE_EVERY_MS) while it is in line, and once more MEASURE_SOON_MS after it joins it again: counted here as two
+ * readings an hour every hour of a 31-day month, more than it can be read.
+ */
+export const VIDEO_READING_HOLD_COMMANDS = 2;
+export const VIDEO_READINGS_PER_MONTH = 2 * 24 * 31;
+
 export type Source = { file: string; names: string[] };
 export type CostLine = {
   id: string;
@@ -1997,12 +2036,18 @@ export const COST_LINES: CostLine[] = [
   {
     id: "video",
     feature: "Lesson video watched",
-    monthlyUsd: (tier) => PAID_VIDEO_HOURS[tier] * hourCost(),
+    monthlyUsd: (tier) => PAID_VIDEO_HOURS[tier] * hourCost() + VIDEO_READINGS_PER_MONTH * VIDEO_READING_HOLD_COMMANDS * COMMAND,
     sources: [
       { file: "lib/video-admission-rules.ts", names: ["PAID_VIDEO_HOURS"] },
-      { file: "lib/watch-rules.ts", names: ["VIDEO_HOURS_INCLUDED", "VIDEO_SECONDS_INCLUDED", "VIDEO_CENTS_PER_HOUR_OVER"] },
+      { file: "lib/watch-rules.ts", names: ["VIDEO_HOURS_INCLUDED", "VIDEO_SECONDS_INCLUDED", "VIDEO_CENTS_PER_HOUR_OVER", "HOLD_UNIT_SECONDS", "HOLD_MIN_SECONDS", "HOLD_SETTLE_MS"] },
+      { file: "lib/watch.ts", names: ["holdPlayback", "ZREMRANGEBYSCORE", "ZCARD", "[\"ZCARD\", holdKey(folder)]", "keepBps"] },
+      { file: "lib/watch-rules.ts", names: ["PREVIEW_KEEP_BPS", "MEASURE_EVERY_MS", "MEASURE_SOON_MS"] },
+      { file: "lib/learn.ts", names: ["holdPlayback(folder, window, limit, Math.min(lessonTokenSeconds(record.seconds), PLAY_BLOCK_SECONDS)", "lessonPageVideo"] },
+      { file: "lib/lesson-play-rules.ts", names: ["PLAY_REQUEST_UNITS", "PLAYS_PER_CONNECTION_WINDOW", "PLAYS_PER_LEARNER_WINDOW", "PREVIEW_PLAYS_PER_STORE_WINDOW", "PLAY_WINDOW_SECONDS", "PLAY_TICKET_SECONDS", "PLAY_REUSE_MIN_SECONDS", "PLAY_BLOCK_SECONDS", "PLAY_CLAIM_SECONDS", "PLAY_CLAIM_POLL_MS", "PLAY_CLAIM_WAIT_MS", "PLAY_CLAIM_READS"] },
+      { file: "app/api/store/course/play/route.ts", names: ["takePublicRequest(store, anonymous ? \"public\" : \"buyer\", Date.now(), PLAY_REQUEST_UNITS)"] },
+      { file: "lib/stream.ts", names: ["life ? await life(record) : PLAYER_SECONDS"] },
     ],
-    basis: "Every admitted hour watched. The legacy invoice line past 400 hours is never reached: admission stops at the plan's hours (tests/plan-cost-registry.test.ts holds it below).",
+    basis: "Every hour of the plan watched, and no more: since 9 November 2026 (audit of spending ceilings, finding 1) a lesson's player token, which nothing takes back, is signed only for the playback held for it against the window's room (the plan's seconds less those measured less every unit still held, read and held in one step), and the hourly reading gives back what a token held once it ran out an interval before (lib/watch.ts, holdPlayback; tests/video-hours-ceiling.test.ts). Before, a token of four hours was signed whenever the hourly figure was under the plan: 200 opens with one second left were 800 hours. So the legacy invoice line past 400 hours is never reached (tests/plan-cost-registry.test.ts holds it below). The hold is made by a press of Play, never by a page drawn (pre-review of 9 November 2026: 26 anonymous loads of a free preview held a Studio plan's 32 hours); a press is PLAY_REQUEST_UNITS of the store's public requests, taken before its hold, which cost at least PLAY_READ, so it is inside the visits and public-requests lines, and an anonymous press never takes the window below PREVIEW_KEEP_BPS of what it has left, nor anonymous previews past the rest of the plan's hours over the window (review of #3402, M2). A signed-in person holds one block at a time in a store: another lesson pressed while their token is live is refused until it ends, nothing signed and nothing held (the owner's decision B of 11 November 2026), and presses at once are one claim, replaced or let go only while it is still that press's (review of #3402, M1; Codex N1's LOW). A press holds and signs a block of PLAY_BLOCK_SECONDS at most (the owner's decision 16), the next press going on: the hours held are still the plan's own, so the line does not move. The hourly reading's own hold commands, VIDEO_READING_HOLD_COMMANDS, are priced at VIDEO_READINGS_PER_MONTH readings, more than a store can be read in a month. Not verified, unknown and never zero (not an OPEN item: main keeps that list empty, BROADCAST-250 b; this line is priced at the plan's hours exactly, which it does not certify until a dated official source or a measured test closes each): whether the service stops a video already playing when its token runs out, how late its watched count can be (a unit goes back an interval after its token ran out, HOLD_SETTLE_MS), and one token's link shared with others watching at once, which only the service could refuse. Meanwhile a grant keeps the store in line to be read for PLAYER_SECONDS and an hour after its token was signed (lib/watch.ts, WATCHING_FOR_MS), so watching past a block is measured and stops the next presses; a student's day is one visit however many lessons are opened (the visits line's convention).",
   },
   {
     id: "visits",
@@ -3628,6 +3673,9 @@ const METERED_EMAIL = guard("Per connection or person; the email it sends is tak
 
 export const SCOPES: Record<string, ScopeClass> = {
   // Counted in a line.
+  // A press of Play on a lesson video (app/api/store/course/play/route.ts): paces that only refuse, each press first
+  // PLAY_REQUEST_UNITS of the store's public requests (line public-requests, PLAY_READ), its hold the plan's hours.
+  "lesson-play-ip": BURST("public-requests"), "lesson-play-learner": BURST("public-requests"), "lesson-play-preview": BURST("public-requests"),
   "import-preview": line("clickfunnels"), "import-preview-month": line("clickfunnels"), "import-preview-buyers-month": line("clickfunnels"),
   "import-cf-page": line("clickfunnels"), "import-cf-page-month": line("clickfunnels"), "import-cf-plan": line("clickfunnels"),
   "import-cf-plan-month": line("clickfunnels"), "import-cf-save": line("clickfunnels"), "import-cf-save-month": line("clickfunnels"),

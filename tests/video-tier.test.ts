@@ -5,6 +5,7 @@ import { PAID_VIDEO_HOURS, paidVideoSeconds, paidVideoWords, TRIAL_VIDEO_SECONDS
 import { SETUP_VIDEO_SECONDS, videoLimitFor } from '../lib/plan-standing';
 import { VIDEO_HOURS_INCLUDED, videoOwedCents } from '../lib/watch-rules';
 import { lessonVideo } from '../lib/learn';
+import { HOLD_MIN_SECONDS } from '../lib/watch';
 import { set } from './video-admission-redis';
 import { players, reset } from './video-admission-stream';
 const now = 1_800_000_000;
@@ -15,8 +16,12 @@ for (const [tier, hours] of Object.entries(PAID_VIDEO_HOURS) as [Tier,number][])
   test(tier+' grants playback below its own cap and pauses exactly at it', async()=>{
     const limit=videoLimitFor({...paid,tier},now);
     assert.equal(limit,hours*3600);
-    set([String(limit-1)]);reset();
+    // Rule 23 (9 November 2026): was limit-1 plays. A token is now good only for the time held for it
+    // (lib/watch.ts, holdPlayback), never under HOLD_MIN_SECONDS: a minute left plays, less than that pauses.
+    set([String(limit-HOLD_MIN_SECONDS)]);reset();
     assert.equal((await lessonVideo(file,limit))?.kind,'stream');assert.equal(players,1);
+    set([String(limit-1)]);reset();
+    assert.deepEqual(await lessonVideo(file,limit),{kind:'paused'});assert.equal(players,0);
     set([String(limit)]);reset();
     assert.deepEqual(await lessonVideo(file,limit),{kind:'paused'});assert.equal(players,0);
   });

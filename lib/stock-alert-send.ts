@@ -272,7 +272,6 @@ async function sendJob(store: Store, product: Listing, job: Job, deps: RestockDe
   // An outcome unknown long enough is taken as sent: the service may have written to them, so nobody is written to again.
   const settled = job.unknownSince !== undefined && Date.now() - job.unknownSince >= UNKNOWN_SETTLED_MS;
   if (going.length && !settled) {
-    // The day is fixed at the counters by reserveDay; the give-back below reuses that exact key (lib/mail.ts MailDay).
     const day = mailDay();
     if (!(await reserveDay(going.length, day))) return { sent: 0, next: "later" };
     const messages: BatchMessage[] = going.map(({ email, leave }) => {

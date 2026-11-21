@@ -135,7 +135,7 @@ function countedJson(contact: Contact): string {
   void _g;
   return JSON.stringify(rest);
 }
-const contactBytes = (contact: Contact | null) => (contact ? dataBytes([countedJson(contact)], 1) + TOKEN_BYTES : 0);
+export const contactBytes = (contact: Contact | null) => (contact ? dataBytes([countedJson(contact)], 1) + TOKEN_BYTES : 0);
 
 /**
  * What a write grows a contact counted in the orders' part by, the way

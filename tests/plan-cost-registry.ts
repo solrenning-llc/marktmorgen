@@ -2671,6 +2671,9 @@ export const COST_LINES: CostLine[] = [
       // with no list, the day's try mark (SET NX, LIST_TRY_COMMANDS), whether or not the try is its own (Claude 3's
       // LOW on #4944); the list's making itself is priced once a day in the store-readings line.
       { file: "lib/member-health.ts", names: ["memberHealth", "keepUnlessErased", "listForNaming", "LIST_TRY_COMMANDS"] },
+      // A Search Console page's delayed cache write is fenced on the store's own key and its erasure in one step:
+      // EVAL + EXISTS + HEXISTS + SET, three billed commands over its former SET, within the studio request that opened it.
+      { file: "lib/search-console.ts", names: ["storeSearches", "KEEP_SEARCHES_IF_LIVE"] },
       // A deal entering a stage takes one more studio request before the workflow its stage starts is checked (17 October 2026).
       { file: "lib/deal-stage-trigger.ts", names: ["STAGE_TRIGGER_UNITS", "countStudio(store, null, STAGE_TRIGGER_UNITS)"] },
       // A store that kept tasks about people before their count has every task read once to make it, after tasksRecountUnits studio requests are taken (review of #1959, 4 November 2026).

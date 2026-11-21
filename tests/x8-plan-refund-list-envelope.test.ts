@@ -66,7 +66,7 @@ test("a failed pre-write note never posts and releases the lock", async () => {
   assert.equal((await redisPipeline([["GET", lockKeyOf(store.sid)]]))[0], null);
 });
 
-test("a note that uses the write budget never posts afterwards", async () => {
+test("a note that uses the write budget never posts afterward", async () => {
   redis.clear();
   const shop = await paidShop(), store = await shop.store();
   const realNow = Date.now;

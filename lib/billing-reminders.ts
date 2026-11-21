@@ -10,7 +10,7 @@
  * charge, and says the date, the amount and the one click that stops it.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { claimMark, claimValue } from "@/lib/claim-mark";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { repliesFor } from "@/lib/redis-reply";
 import { isAddOn, keepCardThatPays, listSubscriptions, ownLatestInvoice, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -340,10 +340,14 @@ export async function sendFailedPlanNotices(): Promise<{
       // Done only on an exact claim (lib/claim-mark.ts): taken is an email
       // already sent; unknown does nothing, and the next run asks again.
       const key = `nl:remind:failed:${due.invoice}`;
-      const claimed = await claimMark(key, 90 * DAY, claimValue());
+      const mine = claimValue();
+      const claimed = await claimMark(key, 90 * DAY, mine);
       if (claimed === "unknown") {
         counts.unknown += 1;
         console.warn("failed plan payment claim unknown: not sent; tried again on the next run");
+        // Its write may have landed with both answers lost: our own mark is let go, or the next run reads it as
+        // taken for 90 days and the email never goes. Only our value is deleted, never another run's.
+        await releaseMark(key, mine).catch(() => {});
       }
       if (claimed !== "ours") continue;
       try {
@@ -434,13 +438,16 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
             // on an exact claim (lib/claim-mark.ts); somebody else's is a sent
             // or counted notice; unknown is neither, and the next run asks again.
             const before = await legacyMark(missed);
-            const unsent = before === "free" ? await claimMark(reminderKey(missed), 60 * DAY, claimValue()) : before;
+            const mine = claimValue();
+            const unsent = before === "free" ? await claimMark(reminderKey(missed), 60 * DAY, mine) : before;
             if (unsent === "ours") {
               counts.missed += 1;
               console.warn(`billing reminder missed: ${missed.kind}, ${daysWords(missed.at, nowSeconds)} before the charge`);
             } else if (unsent === "unknown") {
               counts.unknown += 1;
               console.warn(`billing reminder claim unknown: ${missed.kind}, not counted as missed; tried again on the next run`);
+              // A write that landed unseen is let go (only our own value), so the next run can count it.
+              await releaseMark(reminderKey(missed), mine).catch(() => {});
             }
           }
           continue;
@@ -451,10 +458,13 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
         // date (legacyMark), so nobody is written to twice for it.
         const key = reminderKey(reminder);
         const before = await legacyMark(reminder);
-        const claimed = before === "free" ? await claimMark(key, 60 * DAY, claimValue()) : before;
+        const mine = claimValue();
+        const claimed = before === "free" ? await claimMark(key, 60 * DAY, mine) : before;
         if (claimed === "unknown") {
           counts.unknown += 1;
           console.warn(`billing reminder claim unknown: ${reminder.kind}, not sent; tried again on the next run`);
+          // A write that landed unseen is let go (only our own value), or the next run reads it as taken for 60 days.
+          await releaseMark(key, mine).catch(() => {});
         }
         if (claimed !== "ours") continue;
         const { subject, text } = reminderEmail(reminder);

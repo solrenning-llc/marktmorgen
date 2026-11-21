@@ -373,6 +373,25 @@ export function deviceLabel(userAgent: string): string {
 
 // ---- Sending ----------------------------------------------------------------
 
+/**
+ * A device's last send, kept only while that device is still on its store's list (Codex G-20261120-1824): the list
+ * (KEYS[1], a JSON record with `devices`) must decode and hold a device whose id is ARGV[1]; then its state (ARGV[2])
+ * is written to the states (KEYS[2]). 1 written; 0 the list or the device is gone; -2 the list does not read. Modelled
+ * by lib/redis-memory.ts.
+ */
+export const PHONE_STATE_IF_LISTED = `-- marktmorgen:phone-state-if-listed:v1
+local raw = redis.call("GET", KEYS[1])
+if not raw then return 0 end
+local ok, config = pcall(cjson.decode, raw)
+if not ok or type(config) ~= "table" or type(config["devices"]) ~= "table" then return -2 end
+for _, device in ipairs(config["devices"]) do
+  if type(device) == "table" and device["id"] == ARGV[1] then
+    redis.call("HSET", KEYS[2], ARGV[1], ARGV[2])
+    return 1
+  end
+end
+return 0`;
+
 /** Test seams for the request to the push service; production passes nothing. */
 let hooksForTests: PushFetchHooks | undefined;
 /** Lets a local check point pushes at a stand-in. Never called by the app. */
@@ -419,7 +438,11 @@ async function deliver(store: Store, device: Device, event: PhoneEvent | "test",
     keys: vapidKeysFor(device.kid),
   });
   const state: DeviceState = { at: Date.now(), ok: result.ok, status: result.status, error: result.error };
-  await redisPipeline([["HSET", stateKey(statsId), device.id, JSON.stringify(state)]]);
+  // Written only while the device is still on the store's list (Codex G-20261120-1824): the push waited on the push
+  // service, and meanwhile the store's erasure may have deleted the list and the states (forgetStorePhones), or the
+  // device's removal or its person's erasure taken it off the list before deleting its state. Then nothing is written,
+  // so neither the hash nor the device's field comes back. A list that does not read writes nothing either.
+  await redisPipeline([["EVAL", PHONE_STATE_IF_LISTED, 2, cfgKey(statsId), stateKey(statsId), device.id, JSON.stringify(state)]]);
   if (result.gone && event !== "path") {
     // Read again, so a device added a moment ago is never lost with this one.
     const left = await changeConfig(store, (config) =>

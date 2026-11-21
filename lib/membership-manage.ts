@@ -26,7 +26,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { windowCount, windowCountOf } from "@/lib/window-count";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { orderWrite } from "@/lib/order-data";
 import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
@@ -282,9 +282,17 @@ export async function requestManageLink(input: {
 
   const token = randomToken();
   const grant = grantRecord(store.stripeAccountId as string, store.handle, found.customers, found.more);
-  await redisPipeline([
-    ["SET", await tokenKey(token), JSON.stringify(grant), "EX", MANAGE_LINK_SECONDS],
-  ]);
+  // The paid email goes only once its token is known stored (Codex X6's LOW on #2498, CX-123 rule 24): "OK" is stored;
+  // any other answer, or a thrown one, is read back by the grant's own value, so a write that landed with its reply
+  // lost still sends, and one that did not (or a read-back that does not read) throws: the form says something went
+  // wrong, and no email carries a dead link.
+  const key = await tokenKey(token);
+  const value = JSON.stringify(grant);
+  const written = await redisPipeline([["SET", key, value, "EX", MANAGE_LINK_SECONDS]]).then((reply) => repliesFor(reply, 1)?.[0], () => undefined);
+  if (written !== "OK") {
+    const held = repliesFor(await redisPipeline([["GET", key]]), 1)?.[0];
+    if (held !== value) throw new UnknownReplyError("a membership link's token write");
+  }
 
   const name = store.name;
   const link = `${origin}/@${store.handle}/manage?token=${token}`;

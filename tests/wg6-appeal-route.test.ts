@@ -80,8 +80,9 @@ async function main() {
 
   part("Each strike is one decision, of the kind its words say");
   // The words each kind is written with, taken from lib/takedown.ts itself: a change of wording there fails here.
+  // Only the words, never the code around them (AC (n)): main moved the link's into a const (`const what = ...`).
   const takedownSource = readFileSync("lib/takedown.ts", "utf8");
-  is("lib/takedown.ts still writes each kind with the words kindOfStrike reads", ['what: `The link "', 'what: `The product "', 'what: "Your media kit', 'return { what: "Your store\'s pages and sales'].map((w) => takedownSource.includes(w)), [true, true, true, true]);
+  is("lib/takedown.ts still writes each kind with the words kindOfStrike reads", ['`The link "', '`The product "', '"Your media kit', '"Your store\'s pages and sales'].map((w) => takedownSource.includes(w)), [true, true, true, true]);
   is("kinds read from lib/takedown.ts's words", [kindOfStrike(PRODUCT.what), kindOfStrike(LINK.what), kindOfStrike("Your media kit, now unpublished"), kindOfStrike(STORE_OFF.what), kindOfStrike("Something else")], ["product", "link", "kit", "store", "other"]);
   is("two decisions, newest first", decisions.map((d) => d.kind), ["link", "product"]);
   is("no told-date is invented: the request is never refused as late", decisions.map((d) => d.informedAt), ["", ""]);

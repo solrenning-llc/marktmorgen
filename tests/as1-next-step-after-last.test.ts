@@ -25,6 +25,10 @@ test("the moment a student finishes: the last lesson, marked done, with every le
   assert.equal(finishedNow({ lessons, done: all, at: "lessonaaaaa2", hasNext: true }), false, "a lesson with one after it");
   assert.equal(finishedNow({ lessons, done: new Set(["lessonaaaaa1", "lessonaaaaa3"]), at: "lessonaaaaa3", hasNext: false }), false, "one lesson still to do");
   assert.equal(finishedNow({ lessons, done: new Set(["lessonaaaaa1", "lessonaaaaa2"]), at: "lessonaaaaa3", hasNext: false }), false, "this lesson not marked done");
+  // Codex X6 (LOW, @2f266dee22): every lesson done, an earlier lesson revisited, and the one after it not reachable
+  // now (moved behind a drip date): no reachable next is not "the last lesson", so it is never the finishing moment.
+  assert.equal(finishedNow({ lessons, done: all, at: "lessonaaaaa2", hasNext: false }), false, "an earlier lesson revisited while the next is out of reach");
+  assert.equal(finishedNow({ lessons, done: all, at: "lessonaaaaa1", hasNext: false }), false, "the first lesson, likewise");
   assert.equal(finishedNow({ lessons, done: null, at: "lessonaaaaa3", hasNext: false }), false, "lessons done not read: not finished");
   assert.equal(finishedNow({ lessons: [], done: new Set(), at: "lessonaaaaa3", hasNext: false }), false, "a course with no lessons");
   // A mark kept for a lesson since taken out does not stand in for one the course has now.

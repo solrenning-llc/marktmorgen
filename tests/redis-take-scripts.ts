@@ -39,12 +39,12 @@ const SCRIPTS: Record<string, Script> = {
     run(["DEL", set]);
     return n;
   },
-  // lib/store-live-cache.ts SET_IF_STORE_LIVE: a store's cache written only while it is not erasing and its key is
-  // still its own: the id key exists, or (from before ids) the owner's record carries this store's statsId.
-  "store-cache-live:v2": (run, [live, erasing, key], [field, value, seconds, statsId]) => {
+  // lib/live-fence.ts SET_IF_STORE_LIVE: a store's cache written only while it is not erasing and its key is still
+  // its own: the id key holds this store's ref, or (from before ids) the owner's record carries its statsId.
+  "store-cache-live:v3": (run, [live, erasing, key], [field, value, seconds, statsId, ref]) => {
     if (run(["HGET", erasing, field]) !== null) return 0;
     if (statsId === "") {
-      if (Number(run(["EXISTS", live])) !== 1) return 0;
+      if (run(["GET", live]) !== ref) return 0;
     } else {
       const raw = run(["GET", live]);
       if (raw === null) return 0;

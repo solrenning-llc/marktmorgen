@@ -58,11 +58,11 @@ async function seed(owner: string, name: string): Promise<Store> {
   await setStripeAccount(owner, "acct_alertErase01", true);
   await setSubscription(owner, { customerId: `cus_${name}`, subscriptionId: `sub_${name}`, active: true, period: paidPeriod() });
   let store = (await storeForEmail(owner))!;
-  await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK);
+  await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK, store);
   await setChatSales(owner, true);
   store = (await storeForEmail(owner))!;
   // The month's goal, reached by the one sale: the alert this test waits for.
-  await setSalesGoal(store.statsId!, 50_000, "usd");
+  await setSalesGoal(store, 50_000, "usd");
   return store;
 }
 

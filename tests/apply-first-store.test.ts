@@ -27,8 +27,8 @@ import {
 const DAY = 86_400_000;
 const START = Date.UTC(2026, 10, 10, 12);
 let clock = START;
-const shop = { sid: "s".repeat(24) };
-const other = { sid: "t".repeat(24) };
+const shop = { sid: "s".repeat(24), listId: "u".repeat(24) };
+const other = { sid: "t".repeat(24), listId: "v".repeat(24) };
 const offer = "prod_synthetic01";
 const ann = "Ann@Example.invalid ";
 const bob = "bob@example.invalid";
@@ -44,8 +44,9 @@ const inner = (command: Cmd) => base(command);
 function runScript(command: Cmd): unknown {
   const [, script, , ...rest] = command.map(String);
   if (script === APPLY_NEW) {
-    const [record, stores, person, id, text, ttl, until, now, most, mostPerson] = rest;
-    if (inner(["EXISTS", record]) !== 0) return 3;
+    const [record, stores, person, erased, id, text, ttl, until, now, most, mostPerson, print] = rest;
+    if (inner(["HEXISTS", erased, print]) !== 0) return 6;
+    const kept = inner(["GET", record]); if (kept !== null && kept !== undefined) return kept;
     inner(["ZREMRANGEBYSCORE", stores, "-inf", now]);
     inner(["ZREMRANGEBYSCORE", person, "-inf", now]);
     if (Number(inner(["ZCARD", stores])) >= Number(most)) return 4;
@@ -92,8 +93,11 @@ beforeEach(() => {
   fault = null;
 });
 
+let attempt = 0;
+const nextAttempt = () => (++attempt).toString(16).padStart(32, "0");
+
 async function submit(email = ann, where = shop, what = offer) {
-  const done = await submitApplication(where, { offer: what, email }, clock);
+  const done = await submitApplication(where, { offer: what, email, key: nextAttempt() }, clock);
   assert.equal(done.ok, true, JSON.stringify(done));
   return (done as { ok: true; application: { id: string } }).application;
 }
@@ -124,7 +128,7 @@ test("the store's day is counted before anything is kept, and a store past it ke
   await submit();
   const before = keys();
   sent = [];
-  assert.deepEqual(await submitApplication(shop, { offer, email: bob }, clock), { ok: false, reason: "day" });
+  assert.deepEqual(await submitApplication(shop, { offer, email: bob, key: nextAttempt() }, clock), { ok: false, reason: "day" });
   assert.deepEqual(sent.map((c) => c[0]), ["INCR", "EXPIRE"], "nothing but the day's count is sent");
   assert.deepEqual(keys(), before);
   // The next UTC day counts again.
@@ -135,12 +139,12 @@ test("the store's day is counted before anything is kept, and a store past it ke
 test("the store's and the address's caps are checked with the write, which keeps nothing past them", async () => {
   for (let i = 0; i < APPLY_MAX_PER_PERSON; i++) await submit();
   const before = keys().length;
-  assert.deepEqual(await submitApplication(shop, { offer, email: ann }, clock), { ok: false, reason: "person" });
+  assert.deepEqual(await submitApplication(shop, { offer, email: ann, key: nextAttempt() }, clock), { ok: false, reason: "person" });
   assert.equal(keys().length, before);
   // A full store: its index holds APPLY_MAX_KEPT live entries.
   const stores = `nl:apply:s:${other.sid}`;
   for (let i = 0; i < APPLY_MAX_KEPT; i++) base(["ZADD", stores, String(START + DAY), i.toString(16).padStart(32, "0")]);
-  assert.deepEqual(await submitApplication(other, { offer, email: bob }, clock), { ok: false, reason: "full" });
+  assert.deepEqual(await submitApplication(other, { offer, email: bob, key: nextAttempt() }, clock), { ok: false, reason: "full" });
   assert.equal(base(["ZCARD", `nl:apply:p:${other.sid}:${personKey(other.sid, bob)}`]), 0);
   // Entries whose record is gone leave first: once they are past, the store takes one again.
   at(START + DAY);
@@ -150,10 +154,10 @@ test("the store's and the address's caps are checked with the write, which keeps
 test("a form that is not right sends nothing to the database", async () => {
   for (const [email, what] of [["not an address", offer], ["", offer], [ann, ""], [ann, "has space"], [ann, "x".repeat(65)]]) {
     sent = [];
-    assert.deepEqual(await submitApplication(shop, { offer: what, email }, clock), { ok: false, reason: "bad-input" });
+    assert.deepEqual(await submitApplication(shop, { offer: what, email, key: nextAttempt() }, clock), { ok: false, reason: "bad-input" });
     assert.equal(sent.length, 0);
   }
-  assert.deepEqual(await submitApplication({ sid: "" }, { offer, email: ann }, clock), { ok: false, reason: "unavailable" });
+  assert.deepEqual(await submitApplication({ sid: "", listId: shop.listId }, { offer, email: ann, key: nextAttempt() }, clock), { ok: false, reason: "unavailable" });
 });
 
 test("approving answers the link's token once; the record keeps only its digest and lives past the link", async () => {
@@ -233,25 +237,25 @@ test("rule 24: a reply that is not exact is never a saved application, a decisio
   // The day's count in another shape: nothing kept.
   for (const reply of ["1", null, -1, 1.5]) {
     fault = (command) => (command[0] === "INCR" ? reply : undefined);
-    assert.deepEqual(await submitApplication(shop, { offer, email: ann }, clock), { ok: false, reason: "unavailable" });
+    assert.deepEqual(await submitApplication(shop, { offer, email: ann, key: nextAttempt() }, clock), { ok: false, reason: "unavailable" });
   }
   fault = (command) => (command[0] === "EXPIRE" && String(command[1]).startsWith("nl:apply:d:") ? 0 : undefined);
-  assert.deepEqual(await submitApplication(shop, { offer, email: ann }, clock), { ok: false, reason: "unavailable" });
+  assert.deepEqual(await submitApplication(shop, { offer, email: ann, key: nextAttempt() }, clock), { ok: false, reason: "unavailable" });
   assert.equal(keys().some((k) => k.startsWith("nl:apply:r:")), false);
-  // The script ran but its answer was lost: the record read back says it was kept.
+  // The script ran but its answer was lost: unavailable; the same attempt can be retried.
   fault = (command) => {
     if (String(command[1]) !== APPLY_NEW) return undefined;
     runScript(command);
     return "OK";
   };
-  const landed = await submitApplication(shop, { offer, email: ann }, clock);
-  assert.equal(landed.ok, true);
+  const landed = await submitApplication(shop, { offer, email: ann, key: nextAttempt() }, clock);
+  assert.equal(landed.ok, false);
   // The script did not run and its answer was lost: not kept.
   fault = (command) => (String(command[1]) === APPLY_NEW ? null : undefined);
-  assert.deepEqual(await submitApplication(shop, { offer, email: bob }, clock), { ok: false, reason: "unavailable" });
+  assert.deepEqual(await submitApplication(shop, { offer, email: bob, key: nextAttempt() }, clock), { ok: false, reason: "unavailable" });
   fault = null;
   assert.equal((await listApplications(shop, clock))?.length, 1);
-  const id = (landed as { ok: true; application: { id: string } }).application.id;
+  const id = (await listApplications(shop, clock))![0].id;
   // A decision whose answer was lost, read back: landed or not.
   fault = (command) => {
     if (String(command[1]) !== APPLY_CHANGE) return undefined;
@@ -323,7 +327,7 @@ test("an approval applied whose reply was lost (a throw after the script ran) is
   assert.equal(base(["GET", `nl:apply:r:${shop.sid}:${two.id}`]), before);
 });
 
-test("an application kept whose reply was lost (a throw after the script ran) is read back, so a retry never keeps it twice", async () => {
+test("a lost application ACK stays unknown, with or without a second lost answer", async () => {
   // Codex N1's probe on #3564: APPLY_NEW runs, then the acknowledgment is lost as a thrown transport error.
   fault = (command) => {
     if (String(command[1]) !== APPLY_NEW) return undefined;
@@ -331,9 +335,9 @@ test("an application kept whose reply was lost (a throw after the script ran) is
     runScript(command);
     throw new Error("synthetic: the reply to a kept application was lost");
   };
-  const done = await submitApplication(shop, { offer, email: ann }, clock);
-  assert.equal(done.ok, true, JSON.stringify(done));
-  const one = (done as { ok: true; application: { id: string } }).application;
+  const done = await submitApplication(shop, { offer, email: ann, key: nextAttempt() }, clock);
+  assert.equal(done.ok, false, JSON.stringify(done));
+  const one = (await listApplications(shop, clock))![0];
   assert.equal(base(["EXISTS", `nl:apply:r:${shop.sid}:${one.id}`]), 1);
   assert.deepEqual((await listApplications(shop, clock))?.map((app) => app.id), [one.id]);
   // The script did not run and the call threw: nothing is said to be kept.
@@ -342,7 +346,7 @@ test("an application kept whose reply was lost (a throw after the script ran) is
     fault = null;
     throw new Error("synthetic: the request never reached the database");
   };
-  assert.deepEqual(await submitApplication(shop, { offer, email: bob }, clock), { ok: false, reason: "unavailable" });
+  assert.deepEqual(await submitApplication(shop, { offer, email: bob, key: nextAttempt() }, clock), { ok: false, reason: "unavailable" });
   // The script ran, its reply was lost and the read back was lost too: unknown, never said to be kept.
   let lost = false;
   fault = (command) => {
@@ -357,7 +361,7 @@ test("an application kept whose reply was lost (a throw after the script ran) is
     }
     return undefined;
   };
-  assert.deepEqual(await submitApplication(shop, { offer, email: bob }, clock), { ok: false, reason: "unavailable" });
+  assert.deepEqual(await submitApplication(shop, { offer, email: bob, key: nextAttempt() }, clock), { ok: false, reason: "unavailable" });
   assert.equal((await listApplications(shop, clock))?.length, 2);
 });
 
@@ -456,12 +460,12 @@ test("deleting a person takes every application of theirs in that store, and onl
 });
 
 test("each call stays within its stated command ceiling, scripts' own commands counted", async () => {
-  assert.equal(scriptSteps(APPLY_NEW), 12);
+  assert.equal(scriptSteps(APPLY_NEW), 13);
   assert.equal(scriptSteps(APPLY_CHANGE), 8);
   const counted = () => sent.reduce((n, c) => n + 1 + (String(c[1]) === APPLY_NEW ? scriptSteps(APPLY_NEW) : String(c[1]) === APPLY_CHANGE ? scriptSteps(APPLY_CHANGE) : 0), 0);
   sent = [];
   const one = await submit();
-  assert.ok(counted() + 1 <= APPLY_SUBMIT_COMMANDS, `submit ${counted()} and a read back`);
+  assert.ok(counted() <= APPLY_SUBMIT_COMMANDS, `submit ${counted()}, no read back`);
   sent = [];
   await decideApplication(shop, one.id, { kind: "approve" }, clock + 1);
   assert.ok(counted() + 1 <= APPLY_DECIDE_COMMANDS, `decide ${counted()} and a read back`);

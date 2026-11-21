@@ -37,9 +37,10 @@
  * digest, and the same press sent again finds its own approval and answers a
  * fresh token in place of the kept one, so the lost one stops working.
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { personKey } from "@/lib/person-key";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, listSlots, repliesFor, stringList } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
@@ -76,8 +77,8 @@ export const APPLY_DAY_SECONDS = 2 * 86_400;
 /**
  * The most Redis commands each call runs, scripts' own commands included, for
  * the cost line of the route that calls it (a later unit): sending one is the
- * day count (2), the script (1 and 12 inside) and a read back when its reply
- * is unknown (1); a decision is its read (1), the script (1 and 8 inside) and
+ * day count (2), the script (1 and 13 inside, including the erasure print); an unknown reply
+ * stays unavailable and the same attempt is sent again. There is no read back; a decision is its read (1), the script (1 and 8 inside) and
  * a read back (1); the creator's list is 2; a person's copy is 2; a person's
  * deletion is its read (1), a DEL for each id its index can name (twice
  * APPLY_MAX_PER_PERSON) and the two index removals (2).
@@ -94,16 +95,17 @@ const personIndex = (sid: string, email: string) => `nl:apply:p:${sid}:${personK
 const dayKey = (sid: string, now: number) => `nl:apply:d:${sid}:${new Date(now).toISOString().slice(0, 10).replace(/-/g, "")}`;
 
 /**
- * A new application, in one step: 3 when its id is taken already (nothing
- * written); 4 when the store keeps APPLY_MAX_KEPT; 5 when the address keeps
+ * A new application, in one step: its exact kept text when the attempt
+ * already exists (nothing written); 6 when the person is erased; 4 when the store keeps APPLY_MAX_KEPT; 5 when the address keeps
  * APPLY_MAX_PER_PERSON; 1 written, with both index entries. Index entries
  * whose record is gone (their score is past) leave first. Each index's expiry
  * is only ever moved later, to the record's own, so an index goes with the
  * last record it names. The first line names it for a stand-in.
  */
 export const APPLY_NEW =
-  "-- marktmorgen:apply-first-new:v1\n" +
-  'if redis.call("EXISTS", KEYS[1]) ~= 0 then return 3 end\n' +
+  "-- marktmorgen:apply-first-new:v2\n" +
+  'if redis.call("HEXISTS", KEYS[4], ARGV[8]) ~= 0 then return 6 end\n' +
+  'local kept = redis.call("GET", KEYS[1]); if kept then return kept end\n' +
   'redis.call("ZREMRANGEBYSCORE", KEYS[2], "-inf", ARGV[5])\n' +
   'redis.call("ZREMRANGEBYSCORE", KEYS[3], "-inf", ARGV[5])\n' +
   'if redis.call("ZCARD", KEYS[2]) >= tonumber(ARGV[6]) then return 4 end\n' +
@@ -144,6 +146,8 @@ export type ApplicationView = {
 
 /** One press of "approve" (16 random bytes, hex), chosen by the caller and sent again with the same press. */
 export const APPROVAL_KEY = /^[0-9a-f]{32}$/;
+/** One form attempt: the caller chooses 16 random bytes and reuses them on every retry. Never kept in plain text. */
+export const SUBMISSION_KEY = /^[0-9a-f]{32}$/;
 const DIGEST = /^[0-9a-f]{64}$/;
 
 /**
@@ -219,17 +223,23 @@ export type Submitted =
   | { ok: false; reason: "bad-input" | "day" | "full" | "person" | "unavailable" };
 
 /**
- * Keeps one application from the form, within the store's day, the store's
- * and the address's caps. "day" is refused before anything else is kept.
+ * Keeps one form attempt, within the store's day and storage caps. The caller must keep the same key on
+ * a retry (also after an unknown answer). The list id is required: the script checks the person's erasure
+ * print before a replay or a new write. "day" is refused before anything else is kept.
  */
 export async function submitApplication(
-  store: Pick<Store, "sid">,
-  input: { offer: string; email: string },
+  store: Pick<Store, "sid" | "listId">,
+  input: { offer: string; email: string; key: string },
   now = Date.now(),
 ): Promise<Submitted> {
-  if (!store.sid || !isRedisConfigured()) return { ok: false, reason: "unavailable" };
+  if (!store.sid || !store.listId || !isRedisConfigured()) return { ok: false, reason: "unavailable" };
+  if (typeof input.key !== "string" || !SUBMISSION_KEY.test(input.key)) return { ok: false, reason: "bad-input" };
   const sid = store.sid;
-  const app = newApplication({ id: randomBytes(16).toString("hex"), offer: input.offer, email: input.email, now });
+  const applicant = applicantDigest(input.email);
+  if (!applicant) return { ok: false, reason: "bad-input" };
+  // Bound to the store, the keyed address digest and this attempt; the offer is checked on a replay.
+  const id = createHash("sha256").update(JSON.stringify(["apply-first-submit:v1", sid, applicant, input.key])).digest("hex").slice(0, 32);
+  const app = newApplication({ id, offer: input.offer, email: input.email, now });
   if (!app) return { ok: false, reason: "bad-input" };
   const kept: Kept = { email: normaliseEmail(input.email), app };
   const text = storedText(kept);
@@ -244,21 +254,25 @@ export async function submitApplication(
     if (taken > APPLY_PER_STORE_DAY) return { ok: false, reason: "day" };
     const until = untilOf(app);
     const reply = repliesFor(await redisPipeline([[
-      "EVAL", APPLY_NEW, 3, key, storeIndex(sid), personIndex(sid, kept.email),
-      app.id, text, seconds(until, now), until, now, APPLY_MAX_KEPT, APPLY_MAX_PER_PERSON,
+      "EVAL", APPLY_NEW, 4, key, storeIndex(sid), personIndex(sid, kept.email), suppressedKey(store.listId),
+      app.id, text, seconds(until, now), until, now, APPLY_MAX_KEPT, APPLY_MAX_PER_PERSON, suppressionPrint(store.listId, kept.email),
     ]]), 1);
     const answer = reply?.[0];
     if (answer === 1) return { ok: true, application: viewOf(kept) };
     if (answer === 4) return { ok: false, reason: "full" };
     if (answer === 5) return { ok: false, reason: "person" };
-    if (answer === 3) return { ok: false, reason: "unavailable" };
-    // Answered in another shape, or not at all: the script may have run. Only the record itself says so.
-    return (await landed(key, text)) ? { ok: true, application: viewOf(kept) } : { ok: false, reason: "unavailable" };
+    // A replay returns the existing record in the same atomic step as the erasure check. Never rewrite it.
+    if (typeof answer === "string") {
+      const previous = readKept(answer, app.id);
+      if (previous && previous.email === kept.email) {
+        return previous.app.offer === app.offer ? { ok: true, application: viewOf(previous) } : { ok: false, reason: "bad-input" };
+      }
+    }
+    // An unknown ACK is not success. Retrying the same key finds this very record, even after a double loss.
+    return { ok: false, reason: "unavailable" };
   } catch (error) {
     console.error("keeping an application failed", error);
-    // A throw may come after the script ran (the reply lost in transport): only the record itself says so,
-    // and a read back that fails too stays unknown, never kept. A retry then never keeps it twice.
-    return (await landed(key, text)) ? { ok: true, application: viewOf(kept) } : { ok: false, reason: "unavailable" };
+    return { ok: false, reason: "unavailable" };
   }
 }
 
@@ -408,9 +422,9 @@ async function personIds(sid: string, email: string, what: string): Promise<stri
 
 /**
  * Deletes every application one address sent to the store, with its entries
- * in both indexes (lib/person-erasure.ts): how many records were deleted. An
- * application sent while this runs is in the person's index after it, so a
- * second run finds it. A reply that is not exactly what was asked for throws
+ * in both indexes (lib/person-erasure.ts): how many records were deleted. The outer erasure installs
+ * the person's suppression print before this scan; APPLY_NEW refuses a late submission atomically.
+ * A reply that is not exactly what was asked for throws
  * UnknownReplyError: never "nothing was there".
  */
 export async function forgetApplyFirstPerson(sid: string | null, email: string): Promise<number> {
@@ -418,19 +432,20 @@ export async function forgetApplyFirstPerson(sid: string | null, email: string):
   const what = "deleting a person's applications";
   const ids = await personIds(sid, email, what);
   if (!ids.length) return 0;
-  const commands: (string | number)[][] = [
-    ...ids.map((id) => ["DEL", recordKey(sid, id)]),
+  // X5-20261117-2142: keep retry references until every record delete is confirmed.
+  const records = repliesFor(await redisPipeline(ids.map((id) => ["DEL", recordKey(sid, id)])), ids.length);
+  if (!records) throw new UnknownReplyError(what);
+  let deleted = 0;
+  for (const reply of records) {
+    const n = countOf(reply);
+    if (n !== 0 && n !== 1) throw new UnknownReplyError(what);
+    deleted += n;
+  }
+  const indexes = repliesFor(await redisPipeline([
     ["ZREM", storeIndex(sid), ...ids],
     ["ZREM", personIndex(sid, email), ...ids],
-  ];
-  const replies = repliesFor(await redisPipeline(commands), commands.length);
-  if (!replies) throw new UnknownReplyError(what);
-  let deleted = 0;
-  replies.forEach((reply, i) => {
-    const n = countOf(reply);
-    if (n === null || (i < ids.length && n > 1)) throw new UnknownReplyError(what);
-    if (i < ids.length) deleted += n;
-  });
+  ]), 2)?.map(countOf);
+  if (!indexes || indexes.some((n) => n === null || n > ids.length)) throw new UnknownReplyError(what);
   return deleted;
 }
 

@@ -231,8 +231,8 @@ export function FunnelEditor({
           {/* A badge, not a button: the 44px floor is for things a thumb presses. */}
           <span className="inline-flex min-h-8 min-w-0 max-w-full items-center gap-2 rounded-full bg-white px-3 font-semibold text-ink ring-1 ring-line">
             <Icon name="card" size={16} />
-            <span className="max-w-[12rem] truncate">{owner.title}</span>
-            <span className="text-ink-mute">{ownerPrice}</span>
+            <span className="min-w-0 max-w-[12rem] truncate">{owner.title}</span>
+            <span className="shrink-0 text-ink-mute">{ownerPrice}</span>
           </span>
           <span className="text-ink-mute">paid</span>
         </div>

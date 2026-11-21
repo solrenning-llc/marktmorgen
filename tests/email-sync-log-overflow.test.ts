@@ -226,3 +226,18 @@ test("a lost reply while the five-minute run retires a waiting send already out 
     await stillFoundOrGone(id, step, "the five-minute run");
   }
 });
+
+test("an impossible finished-job DEL count keeps the address-bearing record in the log", async () => {
+  const id = await seed(LOG_SIZE - 1);
+  redis.run(["ZREM", QUEUE_KEY, `${STATS}|${id}`]);
+  const held = record(id);
+  alter = (batch, answers) => {
+    if (batch.length !== 1 || batch[0]?.[0] !== "DEL" || batch[0]?.[1] !== jobKey(id)) return answers;
+    redis.run(["SET", jobKey(id), String(held)]);
+    return [2];
+  };
+  await queuePerson(store, person("pusher@example.com", false));
+  alter = (_batch, answers) => answers;
+  assert.equal(record(id) !== null, true);
+  assert.equal(logged(id), true);
+});

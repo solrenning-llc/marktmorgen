@@ -7,6 +7,8 @@ import { done, is, part } from "./check";
 const store = {
   handle: "health-evidence", previousHandles: [], releasedHandles: [],
   stripeAccountId: "acct_test_health_evidence", statsId: "e".repeat(32),
+  // A real store has its list id: without it no print can be checked, so no named answer is certified (#4749).
+  listId: "f".repeat(32),
   currency: "usd", community: { on: false }, catalog: { items: [] },
 } as unknown as Store;
 const member = (id: string, extra: Record<string, unknown> = {}) => ({

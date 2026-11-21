@@ -1903,10 +1903,25 @@ export class MemoryRedis {
         }
         // lib/store-live-cache.ts, KEEP_UNLESS_ERASED_LIVE: READING_COPY behind the store's fence in the same step:
         // the store's key gone or its erasing mark set, the copy goes and [0] is answered.
-        if (key.startsWith("-- marktmorgen:reading-copy-live:v1\n") && args[0] === "4" && args.length >= 9) {
-          const [, live, erasing, copy, erased, field, value, seconds, ...prints] = args;
+        if (key.startsWith("-- marktmorgen:reading-copy-live:v2\n") && args[0] === "4" && args.length >= 10) {
+          const [, live, erasing, copy, erased, field, value, seconds, statsId, ...prints] = args;
           this.scriptCalls += 2;
-          if (Number(this.run(["EXISTS", live])) !== 1 || this.run(["HGET", erasing, field]) !== null) {
+          let alive = this.run(["HGET", erasing, field]) === null;
+          if (alive && statsId === "") alive = Number(this.run(["EXISTS", live])) === 1;
+          else if (alive) {
+            const raw = this.run(["GET", live]);
+            if (raw !== null) {
+              let record: unknown;
+              try {
+                record = JSON.parse(String(raw));
+              } catch {
+                return -1;
+              }
+              if (!record || typeof record !== "object" || Array.isArray(record)) return -1;
+              alive = (record as { statsId?: unknown }).statsId === statsId;
+            } else alive = false;
+          }
+          if (!alive) {
             this.scriptCalls += 1;
             this.run(["DEL", copy]);
             return [0];

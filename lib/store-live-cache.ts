@@ -57,18 +57,36 @@ export async function setWhileStoreLive(store: Pick<Store, "email" | "sid" | "ex
  * KEEP_UNLESS_ERASED (lib/suppression.ts) behind the store fence, in one step (Codex L-20261119-2235): a copy naming
  * people kept only while the store is live and nobody it names was deleted from it. KEYS[1] the store's own key,
  * KEYS[2] the erasing marks, KEYS[3] the copy, KEYS[4] the store's prints; ARGV[1] the store's erasing field,
- * ARGV[2] the copy, ARGV[3] its seconds, ARGV[4..] the prints of who it names (at least one). The store gone or
- * erasing: the copy goes and {0} is answered, never a place. Otherwise as KEEP_UNLESS_ERASED. Billed 2 more than it
- * (EXISTS, HGET). lib/redis-memory.ts runs it the same way. Used for the kept readings (lib/store-readings.ts,
+ * ARGV[2] the copy, ARGV[3] its seconds, ARGV[4] "" for a store with an id (its id key fenced on with EXISTS) or, for a
+ * store from before ids, its statsId, compared with its owner's record's own (v2, as SET_IF_STORE_LIVE: after that
+ * store's erasure its owner may make a new one under the same key; X5 on #4942), ARGV[5..] the prints of who it names
+ * (at least one). The store gone, erasing or no longer its owner's: the copy goes and {0} is answered, never a place;
+ * an owner record that does not parse answers -1, nothing written. Otherwise as KEEP_UNLESS_ERASED. Billed 2 more than
+ * it (EXISTS or GET, HGET). lib/redis-memory.ts runs it the same way. Used for the kept readings (lib/store-readings.ts,
  * READING_COPY_LIVE), the memberships' cache (lib/membership-numbers.ts) and the members' health copy
  * (lib/member-health.ts).
  */
-export const KEEP_UNLESS_ERASED_LIVE = `-- marktmorgen:reading-copy-live:v1
-if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HGET", KEYS[2], ARGV[1]) then
+export const KEEP_UNLESS_ERASED_LIVE = `-- marktmorgen:reading-copy-live:v2
+local live = redis.call("HGET", KEYS[2], ARGV[1]) == false
+if live then
+  if ARGV[4] == "" then
+    live = redis.call("EXISTS", KEYS[1]) == 1
+  else
+    local raw = redis.call("GET", KEYS[1])
+    if raw then
+      local ok, record = pcall(cjson.decode, raw)
+      if not ok or type(record) ~= "table" then return -1 end
+      live = record["statsId"] == ARGV[4]
+    else
+      live = false
+    end
+  end
+end
+if not live then
   redis.call("DEL", KEYS[3])
   return {0}
 end
-local found = redis.call("HMGET", KEYS[4], unpack(ARGV, 4))
+local found = redis.call("HMGET", KEYS[4], unpack(ARGV, 5))
 local gone = {}
 for i = 1, #found do
   if found[i] then gone[#gone + 1] = i end
@@ -86,13 +104,17 @@ return gone`;
  * the store is gone or being erased. Throws when the step cannot run or its reply is not {0} or a list of places
  * among them: the caller keeps nothing.
  */
-export async function keepUnlessErasedWhileLive(store: Pick<Store, "email" | "sid" | "extra">, key: string, listId: string, text: string, seconds: number, emails: string[]): Promise<Set<string>> {
+export async function keepUnlessErasedWhileLive(store: Pick<Store, "email" | "sid" | "extra" | "statsId">, key: string, listId: string, text: string, seconds: number, emails: string[]): Promise<Set<string>> {
   const names = [...new Set(emails)];
   if (!names.length) throw new Error("nobody to look up");
   const ref = storeRef(store);
-  const live = STORE_ID_PATTERN.test(store.sid) ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  const withId = STORE_ID_PATTERN.test(store.sid);
+  // A store from before ids is told from its owner's next store only by its statsId: without one, nothing is known.
+  const statsId = store.statsId ?? "";
+  if (!withId && !statsId) throw new UnknownReplyError("a store from before ids with no statsId, behind the store's fence");
+  const live = withId ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
   const replies = repliesFor(await redisPipeline([
-    ["EVAL", KEEP_UNLESS_ERASED_LIVE, 4, live, ERASING_KEY, key, suppressedKey(listId), await erasingField(ref), text, seconds, ...names.map((e) => suppressionPrint(listId, e))],
+    ["EVAL", KEEP_UNLESS_ERASED_LIVE, 4, live, ERASING_KEY, key, suppressedKey(listId), await erasingField(ref), text, seconds, withId ? "" : statsId, ...names.map((e) => suppressionPrint(listId, e))],
   ]), 1);
   // Each place read from the list's own slots: a hole is not a place (Array#every would skip it).
   const places = replies ? replyList(replies[0]) : null;

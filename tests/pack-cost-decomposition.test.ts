@@ -10,6 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { onDemandReport, onDemandText } from "./generated-on-demand";
 import { join } from "node:path";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { PLAN_PRICES } from "@/lib/plan";
@@ -23,10 +24,13 @@ import {
 
 const DOC = "docs/pack-cost-decomposition-2026-10-18.md";
 const read = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
+// The report, computed on demand from today's code: DOC holds only its fixed text (owner, 20/11/2026).
+let generated: string | undefined;
+const doc = () => (generated ??= renderPackCostDecomposition());
 
 test("the document is what the numbers render today (run node scripts/pack-cost-decomposition.mjs)", () => {
-  assert.equal(read(DOC), renderPackCostDecomposition(), `${DOC} is stale: run node scripts/pack-cost-decomposition.mjs`);
-  assert.match(read(DOC), /\*\*An analysis for the owner, not a change\.\*\*/);
+  assert.equal(read(DOC), onDemandText(onDemandReport(DOC)), `${DOC} holds only its fixed text: the report is generated on demand`);
+  assert.match(doc(), /\*\*An analysis for the owner, not a change\.\*\*/);
 });
 
 test("it changes nothing in force: the price list, the receiving model, the tax floor and the unit costs are as the analysis read them", () => {
@@ -105,6 +109,6 @@ test("every supplier rate has its page and the day it was read, or says it was n
   for (const s of SUPPLIER_RATES) {
     assert.match(s.url, /^https:\/\//);
     assert.ok(/^18 October 2026/.test(s.read) || /^not re-read/.test(s.read), s.line);
-    assert.ok(read(DOC).includes(s.url));
+    assert.ok(doc().includes(s.url));
   }
 });

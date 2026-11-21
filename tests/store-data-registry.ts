@@ -58,7 +58,7 @@ import { MAX_REMOVED_COURSES } from "@/lib/removed-courses";
 import { MAX_LESSONS, MAX_MODULES } from "@/lib/course";
 import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { ENTRY_BYTES } from "@/lib/store-data-rules";
-import { TASK_COUNT_WEIGHT } from "@/lib/crm";
+import { ERASED_MARK_SECONDS, TASK_COUNT_WEIGHT } from "@/lib/crm";
 import { MAX_STORE_BYTES, PHOTO_LEFT_MAX } from "@/lib/store";
 import { SEARCH_INDEX_MAX_BYTES } from "@/lib/store-search-index";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
@@ -258,6 +258,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:weekly:lock@app/api/cron/weekly/route.ts": lock("The weekly job"),
   "nl:meet:zoomseen:@app/api/integrations/zoom/deauthorize/route.ts": company("Zoom's notices already handled", "Zoom's own notices, kept a day: the company's."),
   "nl:inbound:seen:@app/api/mail/inbound/route.ts": company("Inbound mail already handled", "The email provider's notices, kept a few days: the company's."),
+  "nl:inbound:counted:@lib/inbound-mail.ts": company("Inbound mail already counted in a store's hourly allowance", "One mark a message written to a store, kept the allowance's hour: the company's."),
   "nl:inbound:support:bytes:@lib/inbound-mail.ts": company("Bytes of files sent on to our own support in a UTC day", "One counter a day, kept two days: the company's (docs/funded-exposure-review.md)."),
   "nl:inbound:support:counted:@lib/inbound-mail.ts": company("The counts one support message has taken, and its files' bytes", "One small hash a message, kept two days: the company's."),
   "nl:inbound:support:held:@lib/inbound-mail.ts": company("That the support inbox was told today that messages are held", "One key a day, kept two days: the company's."),
@@ -618,6 +619,8 @@ export const FAMILIES: Record<string, Family> = {
   },
   "nl:crm:tasks:@lib/person-agenda-read.ts": { what: "Tasks about a person, only counted here (one HLEN, tasksKept) before the agenda reads them; kept and counted by lib/crm.ts", room: ["lib/crm.ts"] },
   "nl:crm:tasklock:@lib/crm.ts": short("One change of a store's tasks at a time, ten seconds at the most", "studio", 1, 128),
+  "nl:crm:erased:@lib/crm.ts": short("A person deleted from the store and not come back (the server's time, no personal data): no value is set about them (SET_CRM_VALUE) until a paid order, a confirmed sign-up or place, or a free product claimed through its emailed link takes it away (a form never does); one key an erasure, ERASED_MARK_SECONDS (31 days: the longest a studio page's session, 30 days, lets a save prepared before arrive), counted at every studio request", "studio", ERASED_MARK_SECONDS / 86_400, KEY),
+  "nl:crm:gen:@lib/crm.ts": short("A person's generation, the time of their last deletion (a number of milliseconds, never one it had): a page read before a deletion is refused (SET_CRM_VALUE); one key an erasure, ERASED_MARK_SECONDS from the last, counted at every studio request", "studio", ERASED_MARK_SECONDS / 86_400, KEY),
   "nl:crm:taskrecount:@lib/crm.ts": short("One paid recount of a store's tasks at a time, thirty seconds at the most", "studio", 1, 128),
   "nl:crm:fields:@lib/crm.ts": { what: "The store's own fields", parts: [capped(MAX_CRM_FIELDS * (MAX_FIELD_OPTIONS + 2) * 160, "MAX_CRM_FIELDS fields and their choices.", src("lib/crm-rules.ts", "MAX_CRM_FIELDS", "MAX_FIELD_OPTIONS"))] },
   "nl:crm:stages:@lib/crm.ts": { what: "The first pipeline's stages, as the board kept them before pipelines", parts: [capped(MAX_STAGES * 256, "MAX_STAGES stages.", src("lib/crm-rules.ts", "MAX_STAGES"))] },

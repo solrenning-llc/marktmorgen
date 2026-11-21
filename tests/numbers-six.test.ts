@@ -265,18 +265,18 @@ async function main(): Promise<void> {
 
   part("Slack and Discord");
   is("only a Slack or Discord webhook address is taken", [chatKind(SLACK), chatKind(DISCORD), chatKind("https://example.com/hook"), chatKind("http://hooks.slack.com/services/T0000/B0000/abcdefghijk"), chatKind("https://discord.com.evil.io/api/webhooks/123456/abcdefghijklmnopqrstuvwxyz")], ["slack", "discord", null, null, null]);
-  is("anything else is refused before a request is made", [await setChatAddress(store.statsId!, "Harbor Kitchen", "https://127.0.0.1/x"), posted.length], ["invalid", 0]);
+  is("anything else is refused before a request is made", [await setChatAddress(store.statsId!, "Harbor Kitchen", "https://127.0.0.1/x", store), posted.length], ["invalid", 0]);
   chatAnswers = 404;
-  is("an address the chat will not post to is not kept", [await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK), await chatSetup(store.statsId)], ["refused", null]);
+  is("an address the chat will not post to is not kept", [await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK, store), await chatSetup(store.statsId)], ["refused", null]);
   chatAnswers = 200;
-  is("one that took a first message is kept", [await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK), await chatSetup(store.statsId), await chatAddress(store.statsId)], ["saved", "slack", SLACK]);
+  is("one that took a first message is kept", [await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK, store), await chatSetup(store.statsId), await chatAddress(store.statsId)], ["saved", "slack", SLACK]);
   const [kept] = await redisPipeline([["GET", `nl:chatsum:${store.statsId}`]]);
   is("sealed, never as given", [typeof kept, String(kept).includes("hooks.slack.com")], ["string", false]);
   is("Slack's marks escaped, so a name cannot ping a channel", chatBody("slack", "<!channel> & co"), { text: "&lt;!channel&gt; &amp; co" });
   is("Discord pings nobody and stays under its length", [chatBody("discord", "@everyone").allowed_mentions, String(chatBody("discord", "x".repeat(3000)).content).length], [{ parse: [] }, 1986]);
   is("the email's lines about stopping it are not posted", forChat("Sales: 3\n\nYou get this every Monday while your store has visitors. To stop it: https://x"), "Sales: 3");
   is("kept by the store, not by its address, so another store with the same handle never reaches the channel", [await chatAddress("harbor"), await chatAddress(null)], [null, null]);
-  is("forgotten when emptied", [await setChatAddress(store.statsId!, "Harbor Kitchen", ""), await chatSetup(store.statsId)], ["removed", null]);
+  is("forgotten when emptied", [await setChatAddress(store.statsId!, "Harbor Kitchen", "", store), await chatSetup(store.statsId)], ["removed", null]);
 
   done();
 }

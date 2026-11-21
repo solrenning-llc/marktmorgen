@@ -14,6 +14,12 @@ test("TX4 dates the Swiss primary evidence and keeps actual applicability condit
     "https://www.estv.admin.ch/en/paying-vat",
     "https://fedlex.data.admin.ch/filestore/fedlex.data.admin.ch/eli/cc/2009/615/20250331/fr/html/fedlex-data-admin-ch-eli-cc-2009-615-20250331-fr-html.html",
     "31 March 2025", "not a conclusion about this LLC", "TX4 remains incomplete",
+    // The LOW of Claude 5 and Claude 1 on #2445: the central threshold, the two FTA sources it also rests on and the
+    // late-interest article, so editing the threshold or dropping a source fails here.
+    "worldwide annual turnover of at least CHF 100,000",
+    "https://www.estv.admin.ch/dam/en/sd-web/GA0jYju0R9hn/mwst-publ-foreign-businesses-en.pdf",
+    "https://www.estv.admin.ch/en/questions-and-answers",
+    "Article 87 addresses late interest",
   ]) assert.ok(document.includes(fact), fact);
 });
 

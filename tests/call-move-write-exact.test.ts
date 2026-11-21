@@ -283,7 +283,10 @@ async function main(): Promise<void> {
   sent = mails;
   is("a further retry, the move now whole, is \"same\" and sends nothing", [await move(half, H, H + 2 * HOUR), mails - sent], [{ ok: false, reason: "same" }, 0]);
 
-  part("A half-written move whose new time was taken since is refused by its retry, never booked twice");
+  // Before Codex V's HIGH on #3490, this part sold the new time to another buyer while the half-written move already
+  // gave it to this booking (readMoves), then refused the retry. The move may be written, so its new time is kept:
+  // another buyer cannot hold it, and the retry finishes the move. Never booked twice either way.
+  part("A half-written move keeps its new time: no other buyer can hold it, and its retry finishes the move, once");
   const T = days[1] + 4 * HOUR;
   const halfTaken = await sellSession(w, T);
   await run([["DEL", lockOf(w)]]);
@@ -292,15 +295,13 @@ async function main(): Promise<void> {
   await move(halfTaken, T, T + 2 * HOUR);
   unswap();
   await run([["DEL", lockOf(w)]]);
-  const other = await sellSession(w, T + 2 * HOUR);
+  const other = await holdAndCheckout({ store: w.store, product: w.full, start: T + 2 * HOUR, buyerTz: NY, origin: "https://marktmorgen.com" });
+  is("another buyer cannot hold the new time the move may already hold", other.ok ? "held" : other.reason, "taken");
   await run([["DEL", lockOf(w)]]);
   sent = mails;
-  is("the retry is refused as taken", await move(halfTaken, T, T + 2 * HOUR), { ok: false, reason: "taken" });
-  is(
-    "…with no email, this booking still at its old time only and the other buyer's alone at the new one",
-    [mails - sent, (await diaryOfSession(w, halfTaken)).map((e) => e.s), (await diaryOfSession(w, other)).map((e) => e.s)],
-    [0, [T], [T + 2 * HOUR]],
-  );
+  const finished = await move(halfTaken, T, T + 2 * HOUR);
+  is("the retry finishes the move, counted once", finished.ok ? [finished.start, finished.moves] : finished, [T + 2 * HOUR, 1]);
+  is("this booking holds the new time only, and no other booking does", [(await diaryOfSession(w, halfTaken)).map((e) => e.s)], [[T + 2 * HOUR]]);
 
   part("A team booking's half-written move: the retry keeps the hosts' claim at the new time only");
   const team = await callStoreAs("movewriteteam@example.com", "movewriteteam", "acct_1MoveWriteTeam", "pro");

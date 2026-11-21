@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { lockRead } from "@/lib/two-step-unknown";
 import type { NextRequest } from "next/server";
 import { type Store, StoreFullError, appendSitePages, changeSitePages, ensureStatsId, imageFolder, storeForEmailSeen } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -12,7 +13,7 @@ import { UnknownReplyError } from "@/lib/redis-reply";
 import { MAX_FORMS } from "@/lib/forms";
 import { exactReplies } from "@/lib/redis-exact";
 import { claimNewPictures, dropPage, picturesOfFailedDrop, readPage, readPageExact, releasePictures, writePage } from "@/lib/sales-page-store";
-import { del } from "@/lib/blob";
+import { deleteOrSweep } from "@/lib/file-drop";
 import { ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
 import { templateLeft } from "@/lib/template-text";
@@ -271,7 +272,7 @@ export async function POST(request: NextRequest) {
       const saved = await changeSitePages(ref, (latest) => (latest.some((page) => page.id === id) ? latest.filter((page) => page.id !== id) : { refuse: "gone" }));
       if (!saved.ok) return saved.reason === "gone" ? refuse("unknown", 404) : refuse(saved.reason);
       const gone = await dropPage(saved.store.statsId, siteKey(id), saved.store).catch(picturesOfFailedDrop);
-      if (gone.length) await del(gone).catch((error: unknown) => console.error("could not delete a removed page's pictures", error));
+      if (gone.length) await deleteOrSweep(gone, "a removed page's pictures");
       return Response.json({ ok: true, pages: saved.store.sitePages });
     }
 
@@ -312,7 +313,9 @@ export async function POST(request: NextRequest) {
       const before = picturePaths(held);
       const shown = picturePaths(page);
       // A picture taken off the page is deleted for good: not from a session let in without its second step (lib/two-step.ts).
-      if (before.some((path) => !shown.includes(path)) && (await lockedFor(request, "page", "replace"))) return refusedJson("locked");
+      const lock = before.some((path) => !shown.includes(path)) ? await lockRead(lockedFor(request, "page", "replace")) : false;
+      if (lock instanceof Response) return lock;
+      if (lock) return refusedJson("locked");
       const fresh = shown.filter((path) => !before.includes(path));
       if (fresh.length) {
         const folder = await imageFolder(ref);
@@ -337,11 +340,11 @@ export async function POST(request: NextRequest) {
       // with its pictures, and the creator is told the page is gone, never that it was saved.
       if (!listed.ok && listed.reason === "gone") {
         const dropped = await dropPage(statsId, key, store).catch(picturesOfFailedDrop);
-        if (dropped.length) await del(dropped).catch((error: unknown) => console.error("could not delete a removed page's pictures", error));
+        if (dropped.length) await deleteOrSweep(dropped, "a removed page's pictures");
         return refuse("unknown", 404);
       }
       const gone = await releasePictures(statsId, key, before.filter((path) => !shown.includes(path))).catch(() => [] as string[]);
-      if (gone.length) await del(gone).catch((error: unknown) => console.error("could not delete pictures taken off a page", error));
+      if (gone.length) await deleteOrSweep(gone, "pictures taken off a page");
       return Response.json({ ok: true, blocks: page.blocks.length, page });
     }
 

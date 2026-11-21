@@ -116,7 +116,7 @@ export default async function SwitchPage({ params, searchParams }: Params) {
             </>
           ) : (
             <div className="st-note">
-              <p className="font-bold" style={{ color: "var(--st-text)" }}>{m.switchProblems[result.reason].title}</p>
+              <h1 className="font-bold" style={{ color: "var(--st-text)" }}>{m.switchProblems[result.reason].title}</h1>
               <p className="mt-1 text-sm">{m.switchProblems[result.reason].body}</p>
             </div>
           )}
@@ -191,7 +191,7 @@ async function YearlyPage({ store, token, sub, fromOffer, consentNeeded }: { sto
             </>
           ) : problem ? (
             <div className="st-note">
-              <p className="font-bold" style={{ color: "var(--st-text)" }}>{problem.title}</p>
+              <h1 className="font-bold" style={{ color: "var(--st-text)" }}>{problem.title}</h1>
               <p className="mt-1 text-sm">{problem.body}</p>
             </div>
           ) : null}

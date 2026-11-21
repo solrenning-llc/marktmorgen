@@ -1,7 +1,11 @@
 /** Actual sender/guard with synthetic HTTP and MemoryRedis. No real account. */
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import {auditMeterPreflight} from './email-meter-preflight-world';
+// The senders' monthly figures are read again at each send (lib/email.ts): a run crossing 00:00 UTC on a month's last
+// day sent no single post where one must go out. Only Date is stopped, for the whole run; timers and performance.now()
+// run as usual.
+mock.timers.enable({ apis: ['Date'], now: Date.now() });
 
 test('selected known-unavailable routes preserve mail allowances before dispatch',async t=>{
  const report=await auditMeterPreflight();

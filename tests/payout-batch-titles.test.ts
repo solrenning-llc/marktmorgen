@@ -75,7 +75,10 @@ async function main(): Promise<void> {
     status_transitions: { paid_at: NOW - 10 * DAY - i },
     total_taxes: [],
     parent: { subscription_details: { metadata: { store: "harbor", product, via: SARA, via_rate: "30", via_months: "12", via_at: String(NOW - 30 * DAY) } } },
-    payments: { data: [{ payment: { type: "payment_intent", payment_intent: `pi_batch_${i}` } }] },
+    // Rule 23 (claude5/affiliate-refund-list-exact2, merging main): the expanded `payments` list in the shape Stripe gives it
+    // (object "list", has_more false, the row status "paid"); the book now counts a payment only when that list is read whole,
+    // so the shorter fixture this test was written with read as an unknown payment. What the test asserts is unchanged.
+    payments: { object: "list", has_more: false, data: [{ object: "invoice_payment", status: "paid", payment: { type: "payment_intent", payment_intent: `pi_batch_${i}` } }] },
   }));
   const session = await openSession(OWNER);
   const download = async (provider: string) => {

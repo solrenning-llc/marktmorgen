@@ -34,7 +34,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
-import { type Store, storeForHandle, storeForId } from "@/lib/store";
+import { type Store, storeForHandleExact, storeForId } from "@/lib/store";
 import { storeForIdExactly } from "@/lib/store-exact";
 import { leadsKey } from "@/lib/contacts";
 import { storesKnownFor } from "@/lib/buyer-library";
@@ -127,7 +127,10 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
   if (!(await withinLimit("erase-ip", input.ip, ERASE_ASKS_PER_IP_HOUR, 3_600))) return { status: "limited" };
   if (!(await withinLimit("erase-address", sha(email), ERASE_ASKS_PER_ADDRESS_HOUR, 3_600))) return { status: "limited" };
   if (input.handle) {
-    const store = await storeForHandle(input.handle).catch(() => null);
+    // Read exactly: only a store confirmed not there is "none". A read that fails or answers in an unknown
+    // shape throws to the route's catch (status=error), never "sent" with no link made (review of #2970,
+    // rule 24). It is the store's read, before anything about the address, so it tells nothing about who buys.
+    const store = await storeForHandleExact(input.handle);
     if (store?.sid) {
       // The store's room is read before anything about the address: "full" comes to every address alike.
       const room = await askedRoom(store);
@@ -186,7 +189,15 @@ function afterAnswer(task: () => Promise<void>): void {
 async function emailLink(stores: Store[], email: string, origin: string): Promise<EraseAnswer> {
   const token = randomBytes(32).toString("hex");
   const grant: Grant = { e: email, s: stores.map((s) => s.sid) };
-  await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", ERASE_LINK_SECONDS]]);
+  const key = linkKey(token);
+  const kept = await redisPipeline([["SET", key, JSON.stringify(grant), "EX", ERASE_LINK_SECONDS]]);
+  // Never email a link unless Redis confirmed that its whole deletion scope exists (Codex L, MEDIUM). A reply that is
+  // not exactly one "OK" may still hide a write that landed, so that possible grant is deleted before answering the
+  // error, which names no address.
+  if (!exactGrantReply(kept, 1) || kept[0] !== "OK") {
+    await redisPipeline([["DEL", key]]).catch(() => {});
+    return { status: "error" };
+  }
   const names = stores.map((s) => s.name).slice(0, 10);
   const more = stores.length - names.length;
   const text = [
@@ -231,7 +242,7 @@ async function emailLink(stores: Store[], email: string, origin: string): Promis
     full = true;
     opens = sooner(opens, after.opens);
   }
-  await redisPipeline([["DEL", linkKey(token)]]).catch(() => {});
+  await redisPipeline([["DEL", key]]).catch(() => {});
   return full ? { status: "full", ...(opens ? { opens } : {}) } : { status: "error" };
 }
 

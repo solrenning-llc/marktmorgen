@@ -18,7 +18,8 @@
 import { placeLine } from "@/lib/call-place";
 import { listedLengths } from "@/lib/call-lengths";
 import { windowId } from "@/lib/allowance-window";
-import { SHIP_REGIONS, activeShipping } from "@/lib/shipping";
+import { SHIP_REGIONS } from "@/lib/shipping";
+import { shippingNow } from "@/lib/physical-legal-ship";
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
@@ -26,7 +27,7 @@ import { aiAvailableFor, answerModel, askModel, jsonIn } from "@/lib/ai";
 import { inTrial } from "@/lib/mail";
 import { formatMoney } from "@/lib/money";
 import { speech } from "@/lib/buyer-words";
-import { speaksOfTerms } from "@/lib/store-assistant-rules";
+import { heldToFacts, speaksOfTerms } from "@/lib/store-assistant-rules";
 import { type Listing, type Store, isFree } from "@/lib/store";
 import { membershipPrice } from "@/lib/product-recurring";
 import { activeIntro, introLineEnglish } from "@/lib/intro-price";
@@ -95,9 +96,19 @@ export function deliveryWords(product: Listing, currency = "usd"): string {
   if (product.bundle && product.pick) return `It is a bundle the buyer builds: they choose any ${product.pick} of the ${product.bundle.length} products in it before paying, and get exactly those.`;
   if (product.bundle) return "It is a bundle: after paying, the buyer gets each product inside it.";
   // A physical product the creator ships (lib/shipping.ts): where to, and what shipping costs.
-  const shipping = activeShipping(product);
+  // Where it ships now (618 [SZ2], lib/physical-legal-ship.ts), as its checkout offers it.
+  const shipping = shippingNow(product);
+  if (shipping && shipping.countries.length === 0) return "It is a physical product the creator ships themselves; it is not shipped anywhere right now, so it cannot be bought yet.";
   if (shipping) {
-    const where = shipping.region === "custom" ? shipping.countries.join(", ") : SHIP_REGIONS[shipping.region].label;
+    // Everywhere but the closed countries: said in a few words, so this first-tier fact never fills an input cap with
+    // ~200 codes. The EU and the UK are closed until the opening (lib/eu-vat-goods.ts); the EEA too while not filled.
+    const where = shipping.except === "eea-uk"
+      ? "everywhere Stripe can ship to, except for now the European Union, the United Kingdom, Monaco, the Isle of Man, Iceland, Liechtenstein and Norway"
+      : shipping.except === "eu-uk"
+        ? "everywhere Stripe can ship to, except for now the European Union, the United Kingdom, Monaco and the Isle of Man"
+      : shipping.region === "custom"
+        ? shipping.countries.join(", ")
+        : SHIP_REGIONS[shipping.region].label;
     return `It is a physical product the creator ships themselves, to: ${where}. Shipping is ${shipping.cents > 0 ? `${formatMoney(shipping.cents, currency)} per order` : "free"}, added on the payment page.${shipping.note ? ` ${shipping.note}.` : ""} The buyer gives the address on the payment page and gets an email when it ships.`;
   }
   if (product.file || product.options.some((o) => o.file)) return "It is a download: after paying, the buyer downloads the file from the page they land on, and the link comes by email too.";
@@ -370,7 +381,9 @@ export async function answerQuestion(input: {
   if (typeof kept === "string") {
     try {
       const value = JSON.parse(kept) as { answer?: unknown; known?: unknown };
-      if (typeof value.answer === "string" && value.answer) return { ok: true, answer: value.answer, known: value.known === true };
+      // An answer kept before it was held to the page (#4050) is never served: the model is asked anew.
+      const held = value.known !== true || (typeof value.answer === "string" && heldToFacts(value.answer, facts));
+      if (typeof value.answer === "string" && value.answer && held) return { ok: true, answer: value.answer, known: value.known === true };
     } catch {}
   }
 
@@ -395,9 +408,15 @@ export async function answerQuestion(input: {
   const said = shaped && typeof json.answer === "string" ? json.answer.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, MAX_ANSWER) : "";
   // Never shown, whatever the model was told: an answer about terms on a page cut short (see above).
   const termsCut = cut && said !== "" && speaksOfTerms(said);
-  const known = shaped && json.known === true && said !== "" && !termsCut;
+  // Never shown, and never kept: a code, a discount, a deadline, a number, a link or an address the page does not
+  // state (#4050), held exactly as the store assistant's chat is (heldToFacts). The visitor reads the plain
+  // "not known" sentence; the question is not filed, since the model said the page answers it.
+  const invented = shaped && json.known === true && said !== "" && !termsCut && !heldToFacts(said, facts);
+  const known = shaped && json.known === true && said !== "" && !termsCut && !invented;
   // Said in the store's language (lib/buyer-words), like the rest of its page.
   const answer = known ? said : termsCut ? speech(store).w.askTermsCut() : speech(store).w.askUnknown(store.name);
+  // Not kept either, so the same question is put to the model again rather than answered "not known" for a day.
+  if (invented) return { ok: true, answer, known };
 
   const commands: (string | number)[][] = [["SET", answerKey(hash), JSON.stringify({ answer, known }), "EX", ANSWER_KEPT_SECONDS]];
   // The page does say it, so it is not on the creator's list of what pages are missing.

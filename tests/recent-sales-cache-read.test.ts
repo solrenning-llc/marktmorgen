@@ -54,9 +54,10 @@ async function main() {
       if(scenario.empty)await pipeline([["DEL",list]]);
       let injected=false,writes=0,commands=0;refunds=0;
       redis.pipeline=async batch=>{
-        if(commands+batch.length>5)throw Error("Five application Redis commands across both visits is the proof ceiling");
-        commands+=batch.length;
-        if(batch.some(c=>c[0]==="SET"&&c[1]===feed))writes++;
+        const charged=batch.reduce((n,c)=>n+1+(c[0]==="EVAL"?(String(c[1]).match(/redis\.call/g)??[]).length:0),0);
+        if(commands+charged>8)throw Error("Eight billed Redis commands across both visits is the proof ceiling");
+        commands+=charged;
+        if(batch.some(c=>(c[0]==="SET"&&c[1]===feed)||(c[0]==="EVAL"&&String(c[1]).startsWith("-- marktmorgen:recent-feed-live:v1\n")&&c[5]===feed)))writes++;
         if(!injected&&batch.length===2&&batch[0][0]==="GET"&&batch[0][1]===feed&&batch[1][0]==="LRANGE"){
           injected=true;
           if(scenario.answer!==undefined)return scenario.answer;

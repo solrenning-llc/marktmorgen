@@ -86,7 +86,11 @@ async function readGrant(token: string): Promise<Grant | null> {
   const replies = repliesFor(await redisPipeline([["GET", tokenKey(token)]]), 1);
   if (!replies) throw new UnknownReplyError("a back-in-stock link");
   if (replies[0] === null) return null;
-  return parseGrant(replies[0]);
+  // Only Redis's own nil is "no link" (Codex G on #3616, rule 24): a kept value that does not read is unknown, so a
+  // leave is never answered as an expired link while the address stays on the list.
+  const grant = parseGrant(replies[0]);
+  if (!grant) throw new UnknownReplyError("a back-in-stock link");
+  return grant;
 }
 
 /**
@@ -306,8 +310,11 @@ export async function clearStockAlerts(store: DataStore, productId: string, emai
   const read = repliesFor(await redisPipeline(addresses.map((email) => ["HGET", key, email])), addresses.length);
   if (!read) throw new UnknownReplyError("a back-in-stock list");
   const places = addresses.flatMap((email, i) => {
-    const entry = parseEntry(read[i]);
-    return entry ? [{ email, entry }] : [];
+    const raw = read[i];
+    if (raw === null) return [];
+    const entry = parseEntry(raw);
+    if (!entry) throw new UnknownReplyError("a back-in-stock place being cleared");
+    return [{ email, entry }];
   });
   if (!places.length) return 0;
   const gone = repliesFor(

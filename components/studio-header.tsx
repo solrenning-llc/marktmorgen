@@ -5,6 +5,10 @@ import type { Store } from "@/lib/store";
 import { MAX_STORES_PER_ACCOUNT } from "@/lib/store";
 import { type Role, ROLE_NAMES, can } from "@/lib/team-roles";
 import { StudioSearch } from "@/components/studio-search";
+import { ScreenHelp } from "@/components/screen-help";
+import { StudioBell } from "@/components/studio-bell";
+import type { BellFacts } from "@/lib/bell-rules";
+import { type DrawnStore, offeredActions } from "@/lib/studio-actions-offered";
 
 type Entry = { store: Pick<Store, "sid" | "name" | "handle">; role: Role };
 
@@ -20,7 +24,8 @@ type Entry = { store: Pick<Store, "sid" | "name" | "handle">; role: Role };
  *
  * Under the bar, in the page rather than over it, the studio's one search box
  * (components/studio-search.tsx, 766 [STN13]), with a buyer's address offered
- * only to the roles that may read orders.
+ * only to the roles that may read orders, and the things this role may do on
+ * this store (486 [IT3]), worked out here with no read.
  */
 export function StudioHeader({
   current,
@@ -29,7 +34,7 @@ export function StudioHeader({
   owned,
   action,
 }: {
-  current: Pick<Store, "sid" | "name" | "handle">;
+  current: DrawnStore & BellFacts;
   role: Role;
   stores: Entry[];
   /** How many stores this person owns, for the "New store" line. */
@@ -42,7 +47,8 @@ export function StudioHeader({
     <>
     <header className="sticky top-0 z-40 border-b border-line bg-white/90 backdrop-blur-xl">
       <div className="container-page flex h-16 items-center justify-between gap-2 sm:gap-3">
-        <Link href="/" className="shrink-0 rounded-[10px]" aria-label="Marktmorgen, home">
+        {/* A 44 x 44 target (2.5.5 AAA): the full logo was 40 px tall, the mark alone on a phone 32 x 32 (tests/studio-header-targets.test.ts). */}
+        <Link href="/" className="inline-flex min-h-11 min-w-11 shrink-0 items-center rounded-[10px]" aria-label="Marktmorgen, home">
           <span className="hidden sm:inline">
             <Logo />
           </span>
@@ -145,7 +151,8 @@ export function StudioHeader({
         </div>
       </div>
     </header>
-    <StudioSearch sid={current.sid} buyers={can(role, "orders")} />
+    <StudioSearch sid={current.sid} buyers={can(role, "orders")} actions={offeredActions(current, role)} />
+    <div className="border-b border-line bg-white"><div className="container-page flex flex-wrap items-start gap-2 py-2"><ScreenHelp checkup={can(role, "settings") ? "/studio/checkup?store=" + encodeURIComponent(current.sid) : null} /><StudioBell store={current} role={role} /></div></div>
     </>
   );
 }

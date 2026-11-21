@@ -78,6 +78,7 @@ import { INVITE_GONE_READ_COMMANDS } from "@/lib/move-members";
 import { GIVE_BACK_FLOOR_EXTRA_COMMANDS } from "@/lib/mail";
 import { MAX_TRIMMED_PAGE_CHARS } from "@/lib/clickfunnels-page";
 import { IMPORTS_PER_SHARE_MONTH, MAX_APPLY_PAGES, PREVIEWS_PER_SHARE_MONTH, SHARE_LIMITS } from "@/lib/funnel-share-rules";
+import { SHARE_FENCE_EXTRA_COMMANDS } from "@/lib/funnel-share-store";
 import { MAX_SECTION_BYTES } from "@/lib/saved-blocks";
 import { MAX_PAGE_BYTES } from "@/lib/sales-page";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
@@ -2255,13 +2256,14 @@ export const COST_LINES: CostLine[] = [
       const own = l.importsPerMonth * request("write", 300, l.bundleBytes + 30 * MAX_PAGE_BYTES)
         + l.previewsPerMonth * request("light", 30, 50_000)
         + l.appliesPerMonth * request("write", MAX_APPLY_PAGES * 10, MAX_APPLY_PAGES * 4 * MAX_PAGE_BYTES)
-        + l.sharesPerMonth * request("write", 60, 10 * MAX_PAGE_BYTES + 3 * l.bundleBytes)
+        // Each link's creation fenced by the store's erasure (CREATE_STORE_SHARE: its HGET and EXISTS more, Codex L-20261120-1836).
+        + l.sharesPerMonth * request("write", 60 + SHARE_FENCE_EXTRA_COMMANDS, 10 * MAX_PAGE_BYTES + 3 * l.bundleBytes)
         + l.exportsPerMonth * request("write", 40, 10 * MAX_PAGE_BYTES + l.bundleBytes);
       return kept + linkReads + own;
     },
     sources: [
       { file: "lib/funnel-share-rules.ts", names: ["SHARE_LIMITS", "IMPORTS_PER_SHARE_MONTH", "PREVIEWS_PER_SHARE_MONTH", "PREVIEWS_PER_STORE_HOUR", "MAX_APPLY_PAGES"] },
-      { file: "lib/funnel-share-store.ts", names: ["storeMonthKey", "shareMonthKey"] },
+      { file: "lib/funnel-share-store.ts", names: ["storeMonthKey", "shareMonthKey", "SHARE_FENCE_EXTRA_COMMANDS", "CREATE_STORE_SHARE"] },
       { file: "lib/saved-blocks.ts", names: ["MAX_SECTION_BYTES"] },
     ],
     basis: "Links and sections kept, every link read by others at its monthly figure in both calendar months a billing month touches, and every import, preview, update from a section, link made and file exported of the store's window, each page read and written with its earlier version.",

@@ -83,8 +83,11 @@ def main():
         assert save_live(3) == -4 and redis.command("HLEN", hold) == 1
         assert save_live(4, field="f2") == 1 and redis.command("HLEN", hold) == 2
         # v2 (store-claim-live:v1): the account moved, so the id key holds another ref; a save under the old one is refused.
+        # v3 (Claude 4 3Kc's LOW on #5030): refused with -5 while nothing is being erased (the store is live under its new
+        # ref, so the caller gives its room back), and with -4 once its erasing mark is set.
         redis.command("SET", live, "moved-ref")
-        assert save_live(8, field="f2") == -4 and redis.command("HLEN", hold) == 2
+        assert save_live(8, field="f2") == -5 and redis.command("HLEN", hold) == 2
+        assert save_live(7, field="f1") == -4 and redis.command("HLEN", hold) == 2
         assert save_live(9, field="f2", ref="moved-ref") == 1 and redis.command("HLEN", hold) == 3
         print("PASS: a store with an id saves only while its id key holds its own ref and its erasing mark is absent")
 

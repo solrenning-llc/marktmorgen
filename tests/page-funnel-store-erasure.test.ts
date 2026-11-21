@@ -62,10 +62,10 @@ async function postWith(body: Record<string, unknown>, step: () => Promise<void>
 async function main(): Promise<void> {
   process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
 
-  for (const kind of ["primary", "legacy"] as const) for (const state of ["live", "gone", "erasing", "reopened", "moved"] as const) {
+  for (const kind of ["primary", "legacy"] as const) for (const state of ["live", "gone", "erasing", "reopened", "moved", "moved-live"] as const) {
     if (kind === "primary" && state === "reopened") continue;
     // A store from before ids has no id key to repoint: the move is a store with an id's case.
-    if (kind === "legacy" && state === "moved") continue;
+    if (kind === "legacy" && (state === "moved" || state === "moved-live")) continue;
     const label = `${kind}/${state}`;
     part(label);
     redis.clear();
@@ -109,6 +109,13 @@ async function main(): Promise<void> {
         redis.run(["DEL", key]);
         redis.run(["DEL", room]);
       }
+      if (state === "moved-live") {
+        // moveAccount repointed the id key and nothing is being erased: the store is live under its new ref, and its
+        // room (keyed by its sid, which the move keeps) is still its own (Claude 4 3Kc's LOW on #5030).
+        const idKey = await ownerIdKey();
+        if (!idKey) throw new Error("no id key");
+        redis.run(["SET", idKey, "funnel-erasure-moved@example.invalid"]);
+      }
       if (state === "erasing") {
         redis.run(["HSET", ERASING_KEY, await erasingField(ref), "1"]);
         redis.run(["DEL", key]);
@@ -123,6 +130,12 @@ async function main(): Promise<void> {
     }
     is(label + " answers that the store is gone (410), not saved", [sent.status, sent.json.ok, sent.json.error], [410, false, "gone"]);
     is(label + " does not write the erased store's private funnel back", redis.run(["HGETALL", key]), []);
+    if (state === "moved-live") {
+      // The live store's room keeps no slot for a funnel that was never written: it is given back.
+      const fields = redis.run(["HGETALL", room]) as string[];
+      is(label + " gives the new funnel's room back to the live store", fields.filter((f, i) => i % 2 === 0 && f.startsWith("pf:")), []);
+      continue;
+    }
     is(label + " nor its data room", redis.run(["EXISTS", room]), 0);
   }
 

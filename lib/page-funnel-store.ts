@@ -155,10 +155,12 @@ const countsLeft = (funnel: PageFunnel, now: number): DataChange => ({ until: no
  * gone, moved or being erased, and nothing was written. KEYS[1] and ARGV[1..4] are SAVE_PAGE_FUNNEL's own. Two more
  * commands than it (the HGET and the GET).
  */
-export const SAVE_STORE_PAGE_FUNNEL = `-- marktmorgen:funnel-save-live:v2
+export const SAVE_STORE_PAGE_FUNNEL = `-- marktmorgen:funnel-save-live:v3
 if redis.call("HGET", KEYS[3], ARGV[5]) then return -4 end
 if ARGV[6] == "" then
-  if redis.call("GET", KEYS[2]) ~= ARGV[7] then return -4 end
+  local held = redis.call("GET", KEYS[2])
+  if not held then return -4 end
+  if held ~= ARGV[7] then return -5 end
 else
   local raw = redis.call("GET", KEYS[2])
   if not raw then return -4 end
@@ -186,7 +188,13 @@ return 1`;
 /** Commands SAVE_STORE_PAGE_FUNNEL adds to SAVE_PAGE_FUNNEL: the erasing mark's HGET and the store key's GET. */
 export const FUNNEL_LIVE_GUARD_COMMANDS = 2;
 
-/** The funnel's store is gone or being erased: nothing was written, and nothing is given back to its room. */
+/**
+ * The funnel's store is gone or being erased, or no longer the store this save read: nothing was written. On -4
+ * (gone or being erased) nothing is given back to its room, since giving back would write its room's key again; on -5
+ * (the id key holds another ref and nothing is being erased: a store moved by moveAccount, live under its new ref) the
+ * new funnel's slot is given back first, because the room, keyed by the sid the move keeps, is still the live store's
+ * (Claude 4 3Kc's LOW on #5030).
+ */
 export class PageFunnelStoreGoneError extends Error {
   constructor() {
     super("This store is gone or being closed, so the funnel was not saved.");
@@ -212,6 +220,11 @@ async function saveFunnel(funnel: PageFunnel, existing: readonly PageFunnel[], r
   }
   // A store known gone or being erased has no room left to give back to: giving it back would write its room's key again.
   if (replies.length === 1 && replies[0] === -4) throw new PageFunnelStoreGoneError();
+  // A store moved and live under another ref: its room is still its own, so the new funnel's slot goes back to it.
+  if (replies.length === 1 && replies[0] === -5) {
+    if (isNew) await giveData(room, [{ slot: slotOf(funnel.id), bytes: 0, set: true }], now);
+    throw new PageFunnelStoreGoneError();
+  }
   if (replies.length !== 1 || replies[0] !== 1) {
     if (isNew) await giveData(room, [{ slot: slotOf(funnel.id), bytes: 0, set: true }], now);
     throw new Error("Funnel save could not be confirmed; review saved funnels before retrying");

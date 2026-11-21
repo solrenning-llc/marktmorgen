@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
-import { uploadMessage, uploadSoldFile } from "@/lib/sold-file-upload";
+import { uploadReason, uploadSoldFile, uploadWords } from "@/lib/sold-file-upload";
 import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { MAX_FILE_BYTES, maxFileLabel, readableSize } from "@/lib/product-file";
@@ -74,8 +74,8 @@ export function PodcastEditor({ productId, folder, initial }: { productId: strin
         setFile(null);
       }
     } catch (thrown) {
-      // The door's own reason (a spent studio window, a second step, a full storage...), or that it did not finish.
-      setError(uploadMessage(thrown, { ...MESSAGES, wrong_type: MESSAGES.type }));
+      const reason = uploadReason(thrown);
+      setError(uploadWords(thrown) ?? (reason === "wrong_type" ? MESSAGES.type : MESSAGES[reason] ?? MESSAGES.server_error ?? "Something went wrong."));
     } finally {
       setPercent(null);
     }

@@ -2,7 +2,8 @@
  * Codex L's MEDIUM on main (relatorios-codex/L-20261120-2144-fix-main-page-funnel-record-after-erasure.md): a funnel
  * save through the real studio route, paused just before its final metadata EVAL, must not write the store's private
  * funnel back once the store's erasure began (its erasing mark) or ended (its keys gone). A store with an id and one
- * from before ids (legacy), whose owner may open a new store under the same address meanwhile. The live control still
+ * from before ids (legacy), whose owner may open a new store under the same address meanwhile, and a store with an id
+ * whose account moved and began erasing under the new ref (store-claim-live:v1). The live control still
  * saves. And every production caller saves through the fenced writer, never the bare one.
  * Synthetic: the Redis stand-in only.
  */
@@ -61,8 +62,10 @@ async function postWith(body: Record<string, unknown>, step: () => Promise<void>
 async function main(): Promise<void> {
   process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
 
-  for (const kind of ["primary", "legacy"] as const) for (const state of ["live", "gone", "erasing", "reopened"] as const) {
+  for (const kind of ["primary", "legacy"] as const) for (const state of ["live", "gone", "erasing", "reopened", "moved"] as const) {
     if (kind === "primary" && state === "reopened") continue;
+    // A store from before ids has no id key to repoint: the move is a store with an id's case.
+    if (kind === "legacy" && state === "moved") continue;
     const label = `${kind}/${state}`;
     part(label);
     redis.clear();
@@ -93,6 +96,18 @@ async function main(): Promise<void> {
         // The owner opens a new store under the same address: the same owner key, another statsId.
         const kept = JSON.parse(JSON.stringify(real)) as Store;
         redis.run(["SET", await ownerKey(EMAIL), JSON.stringify({ ...kept, sid: "", statsId: "0123456789abcdef0123456789abcdef" })]);
+      }
+      if (state === "moved") {
+        // The rule of store-claim-live:v1 (lib/live-fence.ts): moveAccount repoints the id key to the new ref, and an
+        // erasure begun after the move marks the new ref's field. The id key still exists, so only its value tells the
+        // save prepared under the old ref that this store is no longer the one it read.
+        const idKey = await ownerIdKey();
+        if (!idKey) throw new Error("no id key");
+        const moved = "funnel-erasure-moved@example.invalid";
+        redis.run(["SET", idKey, moved]);
+        redis.run(["HSET", ERASING_KEY, await erasingField(moved), "1"]);
+        redis.run(["DEL", key]);
+        redis.run(["DEL", room]);
       }
       if (state === "erasing") {
         redis.run(["HSET", ERASING_KEY, await erasingField(ref), "1"]);

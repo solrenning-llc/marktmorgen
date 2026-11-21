@@ -56,7 +56,7 @@
  * import will check it, against the store as it is, and nothing written.
  */
 import { DataRoomError } from "@/lib/store-data";
-import { allowanceWindow, resetWords, windowId } from "@/lib/allowance-window";
+import { allowanceWindow, resetWords, windowId, windowKeySeconds } from "@/lib/allowance-window";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { namesAddress } from "@/lib/address-match";
@@ -176,7 +176,7 @@ async function holdMoved(store: Store, n: number, now = Date.now()): Promise<num
 /**
  * Store's own figure (IMPORT_ALLOWANCES.creator.movedEmails a month): takes up to `n`, all over it given back at once.
  * The replies are read exactly (CX-123 rule 24): the INCRBY a whole number (a give-back can take the count below zero),
- * then the EXPIRE NX's 0 or 1 (lib/window-count.ts, so the month's key never outlives its window); any other shape
+ * then the EXPIRE NX's 0 or 1 (lib/window-count.ts; windowKeySeconds, so the key outlives its window, stretched or not); any other shape
  * throws UnknownReplyError. Before, the count was read with Number(),
  * which took a list or `true` for a small number.
  */
@@ -188,7 +188,7 @@ async function takeMovedCount(store: Store, n: number, now: number): Promise<num
   const key = movedKey(store.sid, window);
   const replies = repliesFor(
     await redisPipeline([
-      ...windowCountBy(key, 32 * 86_400, n),
+      ...windowCountBy(key, windowKeySeconds(store, 32 * 86_400, now), n),
     ]),
     2,
   );
@@ -230,8 +230,8 @@ export async function takeImportRows(store: Store, n: number, now = Date.now(), 
   try {
     // Read exactly (CX-123 rule 24), as takeMovedCount reads the same pair: the INCRBY a whole number, the EXPIRE's
     // 0 or 1 (main's windowCountBy). Any other shape (true, a list, a fraction) is not a count and takes nothing; what
-    // an INCRBY may have added stays counted (more, never less).
-    const replies = repliesFor(await redisPipeline(windowCountBy(key, 32 * 86_400, n)), 2);
+    // an INCRBY may have added stays counted (more, never less). Kept as long as the window (windowKeySeconds, #4561).
+    const replies = repliesFor(await redisPipeline(windowCountBy(key, windowKeySeconds(store, 32 * 86_400, now), n)), 2);
     const total = replies?.[0];
     const counted = typeof total === "number" ? total : typeof total === "string" && /^(0|-?[1-9][0-9]{0,14})$/.test(total) ? Number(total) : NaN;
     if (!replies || (replies[1] !== 0 && replies[1] !== 1) || !Number.isSafeInteger(counted)) return { ok: false, reason: "unavailable", limit };

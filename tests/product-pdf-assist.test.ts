@@ -183,6 +183,19 @@ async function main(): Promise<void> {
     REFUSED.map((b) => kept({ ...PROPOSAL, benefits: [b, ...BENEFITS.slice(0, 3)] })?.benefits.includes(b) ?? "none"),
     REFUSED.map(() => false),
   );
+  // Claude 1's LOW on #3447 (6787599738): a site written without http or www is a link too. The facts are the reading
+  // model's account with links taken out, so no link in an answer can come from them; one in a benefit would be put in
+  // the full description and shown on the product page once the creator saves.
+  is(
+    "a site written without http or www, in a benefit, a name or a short description, is left out",
+    [
+      kept({ ...PROPOSAL, benefits: ["See sam.bread/club for more", ...BENEFITS.slice(0, 3)] })?.benefits.includes("See sam.bread/club for more"),
+      kept({ ...PROPOSAL, title: "Dinners at bread.club" })?.title,
+      kept({ ...PROPOSAL, summary: "Forty dinners, more at recipes.example.co/week." })?.summary,
+    ],
+    [false, null, null],
+  );
+  is("a plain sentence with a full stop is still kept", kept({ ...PROPOSAL, benefits: ["One recipe per page. Easy to print", ...BENEFITS.slice(0, 3)] })?.benefits.includes("One recipe per page. Easy to print"), true);
   is("a refused benefit is left out whole, never changed", kept({ ...PROPOSAL, benefits: [REFUSED[0], ...BENEFITS.slice(0, 3)] })?.benefits, BENEFITS.slice(0, 3));
   is("more than five: the first five", kept({ ...PROPOSAL, benefits: [...BENEFITS, "Shopping notes for each week"] })?.benefits.length, PDF_BENEFITS_MAX);
   is("fewer than three kept: nothing comes back", kept({ ...PROPOSAL, benefits: [...REFUSED.slice(0, 4), ...BENEFITS.slice(0, 2)] }), null);

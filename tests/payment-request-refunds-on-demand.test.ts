@@ -134,6 +134,10 @@ async function main(): Promise<void> {
   is("below the cap the list is read in full and nothing changes: checked, nothing offered", [l.shown.refundsChecked, l.shown.refundsOnDemand, l.singleReads], [true, false, 0]);
   l = await drawList([{ status: 500, body: {} }]);
   is("a list that failed is not the cap: nothing offered (a reload is)", [l.shown.refundsChecked, l.shown.refundsRetry, l.shown.refundsOnDemand], [false, true, false]);
+  // Codex U's MEDIUM (U-20261119-0141): Stripe cannot have refunded more than the payment took. A 200 list that says so
+  // is an unknown shape, never money returned: nothing written, the request still paid and not checked.
+  l = await drawList([list([ours("re_too_much_list", PAID + 1)], false)]);
+  is("the list: an impossible refund above the amount paid is not trusted or written", [l.shown.state, l.shown.refunded, l.shown.refundsChecked, (await kept()).refunded], ["paid", 0, false, 0]);
 
   part("Opened on its own, the request shows what Stripe says");
   is("there is a way to check one request's refunds", typeof api.checkRequestRefunds, "function");
@@ -199,6 +203,9 @@ async function main(): Promise<void> {
   is("a page that is not Stripe's list: not checked, nothing written", [d.request?.refundsChecked, d.kept.refunded, d.why], [false, 0, "shape"]);
   d = await check2([list([], false)]);
   is("control: none on that payment, read whole: checked, nothing refunded", [d.request?.state, d.request?.refunded, d.request?.refundsChecked, d.why], ["paid", 0, true, ""]);
+  advance(61_000);
+  d = await check2([list([ours("re_too_much", PAID + 1)], false)]);
+  is("one payment: an impossible refund above the amount paid is not trusted or written (Codex U-20261119-0141)", [d.request?.state, d.request?.refundsChecked, d.request?.refunded, d.kept.refunded, d.why], ["paid", false, 0, 0, "shape"]);
 
   part("Past the store's checks for the minute, Stripe is not asked");
   redis.clear();

@@ -2011,6 +2011,27 @@ async function withStore<T>(email: string, work: (store: Store, save: Save, held
 }
 
 /**
+ * Runs `work` only while this very store is live, under the same lock closeStoreRecord takes (Codex L-20261120-1151):
+ * for a write beside the record (a key of a family the closing walk deletes) that read the store before and writes
+ * after. The walk writes the erasing mark and deletes the live store's data under this lock, so either the work ends
+ * first and the walk deletes what it wrote, or the walk has begun (the mark is there) or ended (no record) and the work
+ * does not run. Null then. The same store is the same sid, or for a store from before ids the same statsId (as
+ * closeStoreRecord's sameLegacy). An erasing mark that cannot be read throws UnknownReplyError, with nothing run.
+ */
+export async function withLiveStore<T>(
+  known: Pick<Store, "email" | "sid" | "extra" | "statsId">,
+  work: (current: Store) => Promise<T>,
+): Promise<T | null> {
+  const ref = storeRef(known);
+  return withStore(ref, async (current) => {
+    const same = STORE_ID_PATTERN.test(known.sid) ? current.sid === known.sid : Boolean(known.statsId) && current.statsId === known.statsId;
+    if (!same) return null;
+    if ((await erasingSince(ref)) !== null) return null;
+    return work(current);
+  });
+}
+
+/**
  * Holds the locks of several stores at once, one inside the other, and hands
  * `work` the stores as they are with all of them held. A key with no store
  * behind it is left out. Only for a change that has to write several stores
@@ -4656,19 +4677,22 @@ export async function setProductImage(
 export async function moveProductImage(
   email: string,
   id: string,
-  from: { path: string; small: string | null },
-  to: { path: string; small: string | null },
+  from: { path: string; small: string | null; thumb?: string | null },
+  to: { path: string; small: string | null; thumb?: string | null },
 ): Promise<{ ok: true } | { ok: false; reason: "none" | "unknown" } | { ok: false; reason: "changed"; shown: string[] }> {
   let shown: string[] = [];
   const done = await onProduct<"changed">(email, id, (product) => {
     const image = product.image;
-    shown = image ? [image.path, ...(image.small ? [image.small.path] : [])] : [];
-    if (!image || image.path !== from.path || (image.small?.path ?? null) !== from.small) {
+    shown = image ? [image.path, ...(image.small ? [image.small.path] : []), ...(image.thumb ? [image.thumb.path] : [])] : [];
+    if (!image || image.path !== from.path || (image.small?.path ?? null) !== from.small || (image.thumb?.path ?? null) !== (from.thumb ?? null)) {
       return { ok: false, reason: "changed" } as const;
     }
-    const { r2: _r2, ...rest } = image;
+    const { r2: _r2, thumb: _thumb, ...rest } = image;
     void _r2;
-    return { ...product, image: { ...rest, path: to.path, small: image.small && to.small ? { ...image.small, path: to.small } : null, withdrawn: true as const } };
+    void _thumb;
+    // The thumbnail copy moves with the picture (#2801); one with no new name is dropped, never left at its old name.
+    const thumb = image.thumb && to.thumb ? { thumb: { ...image.thumb, path: to.thumb } } : {};
+    return { ...product, image: { ...rest, path: to.path, small: image.small && to.small ? { ...image.small, path: to.small } : null, ...thumb, withdrawn: true as const } };
   });
   if (done.ok) return { ok: true };
   return done.reason === "changed" ? { ok: false, reason: "changed", shown } : { ok: false, reason: done.reason };

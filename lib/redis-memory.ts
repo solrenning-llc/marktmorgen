@@ -511,6 +511,18 @@ export class MemoryRedis {
           if (this.run(["GET", lock]) !== token) return 0;
           return this.run(["DEL", lock]);
         }
+        // lib/mail-health.ts: count once, but keep pause evaluation recoverable.
+        if (key.startsWith("-- marktmorgen:mail-health-outcome:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, seen, daily, field, dailySeconds, seenSeconds] = args;
+          const state = this.run(["GET", seen]);
+          if (state === "done" || state === "1") return 0;
+          if (state === "pending") return 2;
+          if (state !== null) return -1;
+          this.run(["HINCRBY", daily, field, 1]);
+          this.run(["EXPIRE", daily, dailySeconds]);
+          this.run(["SET", seen, "pending", "EX", seenSeconds]);
+          return 1;
+        }
         // lib/plans.ts MOVE_IF_LIVE: a plan put back in the line of plans tried only while its store is live.
         if (key.startsWith("-- marktmorgen:plan-move-if-live:v1\n") && args[0] === "3" && args.length === 8) {
           const [, retry, idKey, erasing, at, member, ref, field] = args;
@@ -578,6 +590,31 @@ export class MemoryRedis {
           if (Number(this.run(["ZCARD", line])) >= Number(ceiling)) return -1;
           this.run(["SET", record, value, "NX", "EX", seconds]);
           this.run(["ZADD", line, due, id]);
+          return 1;
+        }
+        // lib/store-join.ts SAVE_GRANT_IF_LIVE: a join grant and its erasure note, only while the store is live.
+        if (key.startsWith("-- marktmorgen:join-grant-if-live:v1\n") && args[0] === "4" && args.length === 13) {
+          const [, live, erasing, grantKey, notes, field, grant, seconds, at, cutoff, keep, statsId, ref] = args;
+          if (this.run(["HGET", erasing, field]) !== null) return 0;
+          if (statsId === "") {
+            if (this.run(["GET", live]) !== ref) return 0;
+          } else {
+            const raw = this.run(["GET", live]);
+            if (typeof raw !== "string") return 0;
+            let record: unknown;
+            try { record = JSON.parse(raw); } catch { return -1; }
+            if (!record || typeof record !== "object" || Array.isArray(record)) return -1;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+          }
+          // The notes' type is read before any write (Codex L on #4995): on Redis a ZADD on another type fails the
+          // script after its SET has run, and nothing is undone.
+          const notesType = this.run(["TYPE", notes]);
+          if (notesType !== "none" && notesType !== "zset") return -1;
+          // On Redis a SET that does not answer OK fails the whole script with an error; here that is -1, unknown.
+          if (this.run(["SET", grantKey, grant, "EX", seconds]) !== "OK") return -1;
+          this.run(["ZADD", notes, at, grantKey]);
+          this.run(["ZREMRANGEBYSCORE", notes, "-inf", cutoff]);
+          this.run(["EXPIRE", notes, keep]);
           return 1;
         }
         // lib/licence-keys.ts POOL_PUSH: the first keys pushed onto the pool while it is under its bound, and how many.
@@ -2120,6 +2157,36 @@ export class MemoryRedis {
             }
           }
           return n;
+        }
+        // New inbox conversations and the contact form's pre-mail check share the live-store fence.
+        if ((key.startsWith("-- marktmorgen:inbox-open-write:v2\n") || key.startsWith("-- marktmorgen:inbox-store-live:v1\n"))) {
+          const n = Number(args[0]);
+          const opening = key.startsWith("-- marktmorgen:inbox-open-write:v2\n");
+          if ((opening ? n !== 6 && n !== 7 : n !== 2) || args.length !== 1 + n + (opening ? 12 : 3)) throw new Error("bad inbox live fence arguments");
+          const keys = args.slice(1, 1 + n);
+          const [field, ref, legacy] = args.slice(-3);
+          const call = (command: (string | number)[]) => { this.scriptCalls += 1; return this.run(command); };
+          const identity = legacy === "" ? call(["GET", keys[n - 2]]) : call(["GETRANGE", keys[n - 2], 0, 1_000_000]);
+          if (legacy === "") { if (identity !== ref) return -1; }
+          else {
+            if (typeof identity !== "string" || !identity || Buffer.byteLength(identity) > 1_000_000) return -1;
+            try { if ((JSON.parse(identity) as { statsId?: unknown })?.statsId !== legacy) return -1; } catch { return -1; }
+          }
+          if (call(["HEXISTS", keys[n - 1], field]) !== 0) return -1;
+          if (!opening) return 1;
+          const [record, index, list, episode] = keys;
+          // The token key, only when there is one (7 keys): never the fence's identity key (Claude 6's LEVE on #5000).
+          const token = n === 7 ? keys[4] : null;
+          const [expected, next, keep, score, id, message, max, tokenValue, endEpisode] = args.slice(1 + n, -3);
+          const current = call(["GET", record]);
+          if (expected === "" ? current !== null : current !== expected) return 0;
+          call(["SET", record, next, "EX", keep]);
+          call(["ZADD", index, score, id]);
+          if (message !== "") { call(["RPUSH", list, message]); call(["LTRIM", list, -Number(max), -1]); }
+          call(["EXPIRE", list, keep]);
+          if (token) call(["SET", token, tokenValue, "EX", keep]);
+          if (endEpisode === "1") call(["DEL", episode]);
+          return 1;
         }
         // lib/summary-live.ts: period, part/time, AI-read and retry admissions share the store erasure fence.
         if (key.startsWith("-- marktmorgen:summary-live:v1\n")) {

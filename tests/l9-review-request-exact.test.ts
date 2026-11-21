@@ -104,5 +104,9 @@ test("a claim answered oddly that did not land sends nothing; the next run sends
     assert.deepEqual(await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now), { sent: 1, dropped: 0, waiting: 0 });
     assert.deepEqual(await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now + 1), { sent: 0, dropped: 0, waiting: 0 });
     assert.equal(r.batches.flat().length, 1);
+    // The real review request names the store's list, so a bounce for good or a complaint on it takes the address off
+    // the list (Claude 1 cloud's MEDIUM 2 on #4245: the bounce test sent a stand-in, never this sender).
+    const asked = r.batches.flat()[0] as { tags?: { name: string; value: string }[] };
+    assert.equal((asked.tags ?? []).find((t) => t.name === "nl_stop")?.value, r.shop.listId, "the review request names the store's list");
   } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
 });

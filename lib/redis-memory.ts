@@ -283,6 +283,28 @@ export class MemoryRedis {
           if (members.length) gone += Number(this.run(["DEL", who]));
           return [gone, members.length];
         }
+        // lib/chat-summary.ts KEEP_ADDRESS_IF_LIVE: a chat address written only while its store is live and not being
+        // erased: a store with an id while its id key holds this very ref (argv[3]); a store from before ids (argv[2] its
+        // statsId) only while its owner's record still carries that statsId.
+        if (key.startsWith("-- marktmorgen:chat-address-live:v3\n")) {
+          const n = Number(args[0]), keys = args.slice(1, 1 + n), argv = args.slice(1 + n);
+          if (this.run(["HEXISTS", keys[1], argv[0]]) !== 0) return 0;
+          if (!argv[2]) {
+            if (this.run(["GET", keys[0]]) !== argv[3]) return 0;
+          } else {
+            const raw = this.run(["GET", keys[0]]);
+            if (raw === null) return 0;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -1;
+            }
+            if (!record || typeof record !== "object") return -1;
+            if ((record as { statsId?: unknown }).statsId !== argv[2]) return 0;
+          }
+          return this.run(["SET", keys[2], argv[1]]);
+        }
         // lib/closed-store-data.ts CLOSING_UNHELD: what the walk deletes of what an id a live store may hold names,
         // only while no live store holds it, read in the same step.
         if (key.startsWith("-- marktmorgen:closing-unheld:v1\n")) {
@@ -355,6 +377,19 @@ export class MemoryRedis {
           if (this.run(["GET", lock]) !== token) return [-9, 0];
           return this.run(["EVAL", "-- marktmorgen:path-forget:v1\n", "4", room, target, boardKey, mapKey, month, sid]);
         }
+
+        // lib/community-events.ts KEEP_RSVP_IF_NOT_ERASED: an RSVP is admitted only while its person is not erased.
+        if (key.startsWith("-- marktmorgen:event-rsvp-add:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, list, erased, member, print, mark] = args;
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          if (call(["HEXISTS", erased, print]) === 1) return [-1, 0];
+          const added = call(["HSETNX", list, member, mark]);
+          return [added, call(["HLEN", list])];
+        }
+
         // lib/flow-runs.ts HOLD_LAYOUT_IF_LEASED: the same lease and run versions must still be live.
         if (key.startsWith("-- marktmorgen:flow-hold-layout-if-leased:v1\n") && args[0] === "5" && args.length === 17) {
           const [, lease, run, log, held, index, member, score, stamp, open, email, step, note, now, entry, heldMember, person] = args;
@@ -535,6 +570,30 @@ export class MemoryRedis {
           this.run(["SET", seen, "pending", "EX", seenSeconds]);
           return 1;
         }
+        // lib/phone-alerts.ts PHONE_STATE_IF_LISTED: devices' last sends, each kept only while it is still on its store's list.
+        if (key.startsWith("-- marktmorgen:phone-state-if-listed:v1\n") && args[0] === "2" && args.length >= 5 && (args.length - 3) % 2 === 0) {
+          const [, list, states, ...pairs] = args;
+          this.scriptCalls += 1;
+          const raw = this.run(["GET", list]);
+          if (raw === null || raw === undefined) return 0;
+          let config: unknown;
+          try {
+            config = JSON.parse(String(raw));
+          } catch {
+            return -2;
+          }
+          const devices = config && typeof config === "object" && !Array.isArray(config) ? (config as { devices?: unknown }).devices : undefined;
+          if (!Array.isArray(devices)) return -2;
+          const listed = new Set(devices.flatMap((device) => (!!device && typeof device === "object" && typeof (device as { id?: unknown }).id === "string" ? [(device as { id: string }).id] : [])));
+          let written = 0;
+          for (let i = 0; i + 1 < pairs.length; i += 2) {
+            if (!listed.has(pairs[i])) continue;
+            this.scriptCalls += 1;
+            this.run(["HSET", states, pairs[i], pairs[i + 1]]);
+            written += 1;
+          }
+          return written;
+        }
         // lib/plans.ts MOVE_IF_LIVE: a plan put back in the line of plans tried only while its store is live.
         if (key.startsWith("-- marktmorgen:plan-move-if-live:v1\n") && args[0] === "3" && args.length === 8) {
           const [, retry, idKey, erasing, at, member, ref, field] = args;
@@ -602,6 +661,14 @@ export class MemoryRedis {
           if (Number(this.run(["ZCARD", line])) >= Number(ceiling)) return -1;
           this.run(["SET", record, value, "NX", "EX", seconds]);
           this.run(["ZADD", line, due, id]);
+          return 1;
+        }
+        // lib/host-calendar.ts: compare the exact config and keep the reading in the same operation.
+        if (key.startsWith("-- marktmorgen:host-reading-current:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, config, target, failure, expected, value, seconds, kind] = args;
+          if (this.run(["GET", config]) !== expected) return 0;
+          this.run(["SET", target, value, "EX", seconds]);
+          if (kind === "good") this.run(["DEL", failure]);
           return 1;
         }
         // lib/store-join.ts SAVE_GRANT_IF_LIVE: a join grant and its erasure note, only while the store is live.

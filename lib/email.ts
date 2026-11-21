@@ -67,13 +67,13 @@ async function meterCohortReady(meter: EmailMeter): Promise<boolean> {
 }
 
 /** Takes a store's figure for `n` emails before they go; true for the meters already counted elsewhere. */
-async function metered(meter: EmailMeter, n: number): Promise<boolean> {
+async function metered(meter: EmailMeter, n: number, now = Date.now()): Promise<boolean> {
   if (!(await meterCohortReady(meter))) return false;
-  return takeMeteredAllowance(meter, n);
+  return takeMeteredAllowance(meter, n, now);
 }
-async function takeMeteredAllowance(meter: EmailMeter, n: number): Promise<boolean> {
+async function takeMeteredAllowance(meter: EmailMeter, n: number, now = Date.now()): Promise<boolean> {
   if (meter.by !== "store") return true;
-  const taken = await takeAllowance(meter.store, meter.kind, n, Date.now(), meter.asked === true);
+  const taken = await takeAllowance(meter.store, meter.kind, n, now, meter.asked === true);
   if (!taken.ok) console.error(`an email was not sent: the store's ${meter.kind} figure (${taken.reason})`);
   return taken.ok;
 }
@@ -483,7 +483,9 @@ export function queuedShipmentMailSender(runtime: ResendTransportRuntime = {}): 
       if (result.kind === "blocked") return "waiting";
       if (result.kind !== "response") return "unknown";
       if (result.response.ok) { await countSent(1); return "accepted"; }
-      return result.response.status === 429 ? "not_accepted" : "refused";
+      // A key that may not send from this domain (401/403, lib/mail-from.ts) is the account's answer, not the email's
+      // own fault, as SES's "account" is below: kept queued for a later try, never refused for good (mail-queue hunt).
+      return result.response.status === 429 || notThisDomain(result.response.status) ? "not_accepted" : "refused";
     }
     if (!(await beforePost())) return "unknown";
     const result = await sesSend(config, {
@@ -749,8 +751,11 @@ async function dispatchBatch(
   // answers "retry" or "waiting" with nothing handed to Amazon: a list sender tries such a batch again each run, and an
   // outage must never spend the store's emails on mail that never went (outage drill, 14 November 2026).
   let debited = 0;
+  // The moment it was taken: given back into that same window, never the one running when the answer came (a call
+  // that crossed the window's end debited the old month and would have credited the new one; Codex N1's LOW 2 on #3926).
+  let debitedAt = 0;
   const nothingSent = async <T>(answer: T): Promise<T> => {
-    if (debited > 0 && meter.by === "store") await giveAllowance(meter.store, meter.kind, debited);
+    if (debited > 0 && meter.by === "store") await giveAllowance(meter.store, meter.kind, debited, debitedAt);
     debited = 0;
     return answer;
   };
@@ -764,8 +769,14 @@ async function dispatchBatch(
       }));
       authorization = lazyMeter(meter, going.length);
       if (!(await authorization.preflight())) return "refused";
-    } else if (!(await metered(meter, going.length))) return "refused";
-    else if (meter.by === "store") debited = going.length;
+    } else {
+      const at = Date.now();
+      if (!(await metered(meter, going.length, at))) return "refused";
+      if (meter.by === "store") {
+        debited = going.length;
+        debitedAt = at;
+      }
+    }
   }
   let idempotencyKey = batchKey;
   // Whether Amazon took anyone in this call. Until it has, a "retry" further down (Amazon only, the Resend handoff
@@ -808,6 +819,9 @@ async function dispatchBatch(
     }
     if (listOnly && toResend && going.length) return nothingSent("retry"); // A prior provider handoff needs reconciliation, not another sender.
     const state = going.length && !toResend ? await sesReady() : null;
+    // Whether SES was asked and definitively took nobody for a reason that is
+    // not an account refusal (it was only asked to slow down).
+    let throttledNoneTaken = false;
     // Many at a time use Amazon's day only up to a share of it; past that
     // they go through Resend, and the rest of the day is kept for the
     // emails that go one at a time (lib/ses.ts).
@@ -874,9 +888,12 @@ async function dispatchBatch(
         return { refused: refusals };
       }
       going = result.left.map((m) => m.original);
+      throttledNoneTaken = result.taken.length === 0 && !result.down && going.length === all;
     }
     if (going.length === 0) return "sent";
-    if (only === "amazon") return nothingYet();
+    // List mail that Amazon throttled before taking anyone is known not sent: it waits in the queue for Amazon, its
+    // figure given back (this PR); anything else is main's: held as "retry", given back only when Amazon took nobody.
+    if (only === "amazon") return listOnly && throttledNoneTaken ? nothingSent("waiting") : nothingYet();
     if (!toResend) {
       try {
         const reply: unknown = await redisPipeline([["SET", handed, "1", "EX", 2 * 86_400]]);

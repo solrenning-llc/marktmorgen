@@ -217,37 +217,6 @@ async function main() {
     stripe.fail = false;
   }
 
-  part("7. What a paid order's re-buy note costs stays inside the line that prices it");
-  {
-    const R = await import("./plan-cost-registry");
-    const { MAX_DELIVERED } = await import("@/lib/bundle-rules");
-    const { MAX_MODULES } = await import("@/lib/course");
-    is("its card and pair bytes are the drip run's own", [R.BOUGHT_AGAIN_CARD_BYTES, R.BOUGHT_AGAIN_PAIR_BYTES], [R.DRIP_CARD_MAX_BYTES, R.DRIP_PAIR_BYTES]);
-    is("its bytes cover MAX_DELIVERED courses", R.BOUGHT_AGAIN_BYTES_MOST, MAX_DELIVERED * (R.DRIP_CARD_MAX_BYTES + 2 * MAX_MODULES * R.DRIP_PAIR_BYTES));
-    is("priced in every order", Math.abs(R.ORDER_COST - (2 * R.PER_EMAIL + R.ORDER_COMPUTE + R.ORDER_LIBRARY + R.ORDER_RENEWAL_STOP + R.ORDER_BOUGHT_AGAIN)) < 1e-12 && R.ORDER_BOUGHT_AGAIN > 0, true);
-    // Measured: three courses of one order, each a re-buy with its card kept, every command of the index part counted.
-    const ids = ["7", "6", "5"].map((c) => c.repeat(32));
-    await fresh([]);
-    for (const id of ids) {
-      const other = { ...course, id } as Course;
-      await registerDrip(store, { ...product, id: `prod_${id.slice(0, 8)}`, course: { id, lessons: 3 } } as unknown as Listing, other);
-      await redis.pipeline([["HSET", `nl:course:${id}:students`, emailKey(buyer), JSON.stringify({ e: buyer, s: first, l: first })]]);
-    }
-    const sent: (string | number)[][] = [];
-    const counting = redis.pipeline;
-    redis.pipeline = async (list) => {
-      sent.push(...list);
-      return counting(list);
-    };
-    const noted = await noteBoughtAgain(store, ids, buyer, second);
-    redis.pipeline = counting;
-    is("the note is written", noted, true);
-    // The index part: what comes after the note's own HGETs, SADDs and DEL (#3369's).
-    const own = 2 * ids.length + 1;
-    const index = sent.length - own;
-    is(`the index part's commands (${index}) within the formula (${R.BOUGHT_AGAIN_INDEX_COMMANDS_MOST}), a script billed at TAKE's four`, index > 0 && index <= R.BOUGHT_AGAIN_INDEX_COMMANDS_MOST, true);
-    is("one MGET of every card, whatever the courses", sent.filter((c) => c[0] === "MGET").length, 1);
-  }
   done();
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

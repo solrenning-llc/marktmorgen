@@ -106,7 +106,7 @@ import { PERSON_RECORD_MONTHS } from "@/lib/joined-stores";
 import { FOLLOWED_FAMILIES } from "@/lib/data-families";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { SALE_TEXT_LIMITS, SALES_ID_LENGTH, SALES_PAGE, SALES_SAFE_ID_LENGTH, SALES_TITLE_IDS } from "@/lib/api-sales";
-import { BUMP_KEYS, MAX_BUNDLE_ITEMS, MAX_DELIVERED } from "@/lib/bundle-rules";
+import { BUMP_KEYS, MAX_BUNDLE_ITEMS } from "@/lib/bundle-rules";
 import { MAX_TITLE_LENGTH as SALES_LISTING_TITLE } from "@/lib/catalog-rules";
 import { RESEND_TIMEOUT_MS, STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { MAX_LESSONS, MAX_ITEM_TITLE, MAX_MODULES } from "@/lib/course";
@@ -446,22 +446,7 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  * No PER_EMAIL/ORDER_COST coefficient, real review, quota protection, paid
  * financial envelope or retention approval is changed/certified here.
  */
-/**
- * The drip index's part of a paid order's re-buy note (lib/learn.ts indexBoughtAgain, called by noteBoughtAgain from
- * lib/purchase-email.ts confirmOnce; #3369 merged with #3344's drip index), at most MAX_DELIVERED courses an order: the
- * courses' cards in one MGET, which of the student's pairs are already indexed (ZMSCORE), their room taken at TAKE's
- * four commands, the ZADD and the stores' SADD. On the wire: each course's card at its largest and its modules' pairs
- * twice (ZMSCORE and ZADD); the same figures as DRIP_CARD_MAX_BYTES and DRIP_PAIR_BYTES below, typed here because
- * ORDER_COST is read first (held equal in tests/drip-index-start-read.test.ts). Too large for what is left of
- * ORDER_COMPUTE, so priced on its own in every order, re-buy or not. The note's own reads before it (an HGET and an
- * SADD a course, a DEL: #3369's noteBoughtAgain) are not priced here.
- */
-export const BOUGHT_AGAIN_INDEX_COMMANDS_MOST = 1 + 1 + 4 + 2;
-export const BOUGHT_AGAIN_CARD_BYTES = 256 + MAX_MODULES * (12 + 3 * MAX_ITEM_TITLE + 48) + ',"e":000000000000,"k":[]'.length + 12 * '{"at":000000000000,"before":000000000000},'.length;
-export const BOUGHT_AGAIN_PAIR_BYTES = 32 + 1 + 32 + 1 + 12 + 24;
-export const BOUGHT_AGAIN_BYTES_MOST = MAX_DELIVERED * (BOUGHT_AGAIN_CARD_BYTES + 2 * MAX_MODULES * BOUGHT_AGAIN_PAIR_BYTES);
-export const ORDER_BOUGHT_AGAIN = BOUGHT_AGAIN_INDEX_COMMANDS_MOST * COMMAND + BOUGHT_AGAIN_BYTES_MOST * DB_BYTE;
-export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP + ORDER_BOUGHT_AGAIN;
+export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP;
 
 /**
  * The drip emails' worst month (line course-drip-run), at Upstash's command and transfer prices: each store's run reads

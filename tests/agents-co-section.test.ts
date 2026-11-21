@@ -36,6 +36,8 @@ for (const command of ["enviar", "confirmar", "pedir-revisao", "pegar-revisao", 
   "cota", "quem", "reivindicar", "segurar", "liberar", "estado-pr", "pendentes"]) is(`names \`${command}\``, co.includes(`\`${command}`), true);
 is("the queue keeps its order: only the oldest open request, one at a time, another family", [/mais antigo ainda aberto, um de cada vez/.test(co), /Nenhum pedido mais novo passa na frente/.test(co)], [true, true]);
 is("review goes to another family, and past a reviewer without quota", [/família diferente da do autor/.test(co), /só enquanto ele tem cota/.test(co)], [true, true]);
+is("a mark set in the mailbox is also written on the PR, where FQ (1), AC (m) and AC (p) read it", [/além do CLAIMED, do UNCLAIMED e do HOLD/.test(co), /no próprio PR, que é onde FQ \(1\), AC \(m\) e AC \(p\) a leem/.test(co), /no lugar do CLAIMED/.test(co)], [true, true, false]);
+is("the enqueuer checks `estado-pr` and the PR's comments, and a held first request waits", [/inclusive o `estado-pr` do PR e os comentários do próprio PR/.test(co), /HOLD, ou CLAIMED de outra família, no correio, `pegar-fila` não o entrega/.test(co)], [true, true]);
 is("the sender learns that the recipient has no quota", /Quem envia para um agente sem cota é avisado na hora/.test(co), true);
 is("asking the owner to relay only when there is a problem", /\(h\) \*\*Pedir ao dono para passar um recado\*\* só em caso de problema/.test(co), true);
 is("it ends with the standard sentence", co.trim().endsWith("Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo."), true);

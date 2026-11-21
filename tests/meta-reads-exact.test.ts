@@ -71,7 +71,7 @@ async function fresh(edit?: (record: Record<string, unknown>) => Record<string, 
   await ensureStatsId(OWNER);
   const store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
-  const connected = await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect: "https://marktmorgen.com/api/integrations/meta/callback", by: OWNER, owner: { email: store.email, handle: store.handle }, currency: store.currency });
+  const connected = await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect: "https://marktmorgen.com/api/integrations/meta/callback", by: OWNER, owner: { email: store.email, handle: store.handle }, currency: store.currency, startedAt: Date.now() });
   assert.ok(connected.ok, "connected");
   const [raw] = await real([["GET", connKey(statsId)]]);
   const record = JSON.parse(String(raw)) as Record<string, unknown>;
@@ -109,8 +109,10 @@ async function settle<T>(work: () => Promise<T>): Promise<{ value?: T; error?: u
 }
 
 const connGet = (statsId: string) => (commands: Command[]) => commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === connKey(statsId);
-const connSet = (statsId: string) => (commands: Command[]) => commands[0]?.[0] === "SET" && commands[0][1] === connKey(statsId);
-const linesSet = (statsId: string) => (commands: Command[]) => commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === linesKey(statsId);
+// A write held to the connection read is one EVAL (WRITE_IF_CONNECTED, #3322): KEYS[1] the connection, KEYS[2] the key written.
+const heldWrite = (commands: Command[], key: string) => commands.length === 1 && commands[0][0] === "EVAL" && commands[0][4] === key;
+const connSet = (statsId: string) => (commands: Command[]) => (commands[0]?.[0] === "SET" && commands[0][1] === connKey(statsId)) || heldWrite(commands, connKey(statsId));
+const linesSet = (statsId: string) => (commands: Command[]) => (commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === linesKey(statsId)) || heldWrite(commands, linesKey(statsId));
 const ODD: [string, unknown][] = [["no reply", []], ["a number", [7]], ["a record cut short", ["{"]], ["a list", [["x"]]]];
 
 // ---- 1. readMetaSpend ------------------------------------------------------------------------------------------------
@@ -155,7 +157,8 @@ for (const [label, edit] of [
 
 test('readMetaSpend: the connection unknown just before the lines are written is never "none", and the kept lines stay', async () => {
   const { statsId, currency } = await fresh();
-  answerNth(connGet(statsId), 2, []);
+  // The connection is checked in the same step as the lines' write (WRITE_IF_CONNECTED, #3322): that step unanswered.
+  answerNth(linesSet(statsId), 1, []);
   const seen = await settle(() => readMetaSpend(statsId, currency));
   assert.equal(seen.value, "error", `answers ${JSON.stringify(seen)}`);
   assert.deepEqual((await lines(statsId)).map((l) => l.id), [OLD_LINE.id]);
@@ -163,7 +166,8 @@ test('readMetaSpend: the connection unknown just before the lines are written is
 
 test('readMetaSpend: the lines written but not answered in their shape are never "read"', async () => {
   const { statsId, currency } = await fresh();
-  answerNth(linesSet(statsId), 1, (got: unknown[]) => got.map(() => 1));
+  // A reply the write never gives: the one-step write (#3322) answers a count, where 1 is written, so a text stands in.
+  answerNth(linesSet(statsId), 1, (got: unknown[]) => got.map(() => "?"));
   const seen = await settle(() => readMetaSpend(statsId, currency));
   assert.equal(seen.value, "error", `answers ${JSON.stringify(seen)}`);
 });

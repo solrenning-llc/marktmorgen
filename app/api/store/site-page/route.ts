@@ -3,7 +3,7 @@ import { lockRead } from "@/lib/two-step-unknown";
 import type { NextRequest } from "next/server";
 import { type Store, StoreFullError, appendSitePages, changeSitePages, ensureStatsId, imageFolder, storeForEmailSeen } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { refusedJson } from "@/lib/studio-route";
+import { countStudio, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { EMPTY_PAGE, MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, picturePaths, type PageBlock, type SalesPage } from "@/lib/sales-page";
 import { pageCopy } from "@/lib/site-page-copy";
@@ -13,9 +13,9 @@ import { UnknownReplyError } from "@/lib/redis-reply";
 import { MAX_FORMS } from "@/lib/forms";
 import { exactReplies } from "@/lib/redis-exact";
 import { claimNewPictures, dropPage, picturesOfFailedDrop, readPage, readPageExact, releasePictures, writePage } from "@/lib/sales-page-store";
-import { del } from "@/lib/blob";
+import { deleteOrSweep } from "@/lib/file-drop";
 import { ownsImagePath } from "@/lib/product-image";
-import { isStoredPicture } from "@/lib/picture-check";
+import { pictureChecker } from "@/lib/picture-check";
 import { templateLeft } from "@/lib/template-text";
 import { MAX_SITE_PAGES, SITE_KINDS, SITE_PAGE_ID, SITE_STARTERS, type SitePage, outFrom, parseSitePages, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
 
@@ -272,7 +272,7 @@ export async function POST(request: NextRequest) {
       const saved = await changeSitePages(ref, (latest) => (latest.some((page) => page.id === id) ? latest.filter((page) => page.id !== id) : { refuse: "gone" }));
       if (!saved.ok) return saved.reason === "gone" ? refuse("unknown", 404) : refuse(saved.reason);
       const gone = await dropPage(saved.store.statsId, siteKey(id), saved.store).catch(picturesOfFailedDrop);
-      if (gone.length) await del(gone).catch((error: unknown) => console.error("could not delete a removed page's pictures", error));
+      if (gone.length) await deleteOrSweep(gone, "a removed page's pictures");
       return Response.json({ ok: true, pages: saved.store.sitePages });
     }
 
@@ -319,12 +319,11 @@ export async function POST(request: NextRequest) {
       const fresh = shown.filter((path) => !before.includes(path));
       if (fresh.length) {
         const folder = await imageFolder(ref);
-        for (const path of fresh) {
-          if (!ownsImagePath(path, folder) || !(await isStoredPicture(path))) return refuse("pictures");
-        }
+        if (fresh.some((path) => !ownsImagePath(path, folder))) return refuse("pictures");
         // Fresh from the picture door or already this page's, never a product's, a link's or another page's picture
-        // from the shared folder (lib/sales-page-store.ts, claimNewPictures).
-        if (!(await claimNewPictures(statsId, key, fresh))) return refuse("pictures");
+        // from the shared folder (lib/sales-page-store.ts, claimNewPictures). Only those this save takes from the door
+        // are checked in the file store, and once (MR audit gap 1).
+        if (!(await claimNewPictures(statsId, key, fresh, pictureChecker(async (units) => (await countStudio(store, "page", units)).ok)))) return refuse("pictures");
       }
       await writePage(statsId, key, page, store);
       // When it is out, kept on the list so the menu reads nothing more (lib/site-page-rules.ts).
@@ -340,11 +339,11 @@ export async function POST(request: NextRequest) {
       // with its pictures, and the creator is told the page is gone, never that it was saved.
       if (!listed.ok && listed.reason === "gone") {
         const dropped = await dropPage(statsId, key, store).catch(picturesOfFailedDrop);
-        if (dropped.length) await del(dropped).catch((error: unknown) => console.error("could not delete a removed page's pictures", error));
+        if (dropped.length) await deleteOrSweep(dropped, "a removed page's pictures");
         return refuse("unknown", 404);
       }
       const gone = await releasePictures(statsId, key, before.filter((path) => !shown.includes(path))).catch(() => [] as string[]);
-      if (gone.length) await del(gone).catch((error: unknown) => console.error("could not delete pictures taken off a page", error));
+      if (gone.length) await deleteOrSweep(gone, "pictures taken off a page");
       return Response.json({ ok: true, blocks: page.blocks.length, page });
     }
 

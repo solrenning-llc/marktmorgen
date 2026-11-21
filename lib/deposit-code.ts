@@ -27,8 +27,16 @@
 import { onAccount } from "@/lib/stripe-account";
 import { type Currency, currencyRule } from "@/lib/money";
 import { CODES_API_VERSION, codeProblem, readCode } from "@/lib/discount";
+import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 
 /** A code as read for a deposit: only what this file decides on. */
+/**
+ * Public requests of the store's window one deposit code's read counts as (lib/traffic.ts, takeBuyerRead), taken
+ * before the creator's Stripe account is read (app/api/store/book/route.ts; rule MR, audit G2): the same figure as a
+ * returning code's or the next product's read, priced in tests/plan-cost-registry.ts.
+ */
+export const DEPOSIT_CODE_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS;
+
 export type DepositCode = {
   id: string;
   code: string;

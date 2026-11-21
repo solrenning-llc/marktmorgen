@@ -46,6 +46,7 @@ import { activePlan } from "@/lib/product-extras";
 import { canSell } from "@/lib/store-checkout";
 import { isHouseStore } from "@/lib/house-store";
 import { imageUrl } from "@/lib/product-image";
+import { sellableOptions } from "@/lib/product-option";
 import { DIRECTORY_CACHE, listedStores, wouldList } from "@/lib/directory-index";
 import type { LanguageCode } from "@/lib/store-language";
 import { programNumbers } from "@/lib/affiliates";
@@ -78,6 +79,8 @@ export type DirectoryProduct = {
   months?: number;
   /** A membership's billing interval, so "a monthly payment" says how often (lib/product-recurring.ts). */
   interval?: "day" | "week" | "month" | "year";
+  /** How many intervals one payment covers, when more than one (609 [WP8]): "a payment every 3 months". */
+  every?: number;
   /** A membership's free days: the months above count from sign-up, the free days included (lib/affiliates.ts withinMonths). */
   trialDays?: number;
   /** Its first payments are at an introductory price, which earns less than the price shown. */
@@ -143,7 +146,9 @@ function earns(store: Store, listing: Listing): DirectoryProduct | null {
   if (listing.recurring && months < RECURRING_ALWAYS && trialDays >= months * 28) return null;
   const rate = commissionRate(store.affiliates, listing.id);
   if (rate <= 0) return null;
-  const price = listing.options.length ? Math.min(...listing.options.map((option) => option.priceCents)) : listing.priceCents;
+  // Only the prices a buyer can pick today (lib/product-option.ts, sellableOptions): never one taken off sale (642 [WG2]).
+  const offered = sellableOptions(listing);
+  const price = listing.options.length ? (offered.length ? Math.min(...offered.map((option) => option.priceCents)) : 0) : listing.priceCents;
   if (!(price > 0)) return null;
   return {
     id: listing.id,
@@ -151,7 +156,7 @@ function earns(store: Store, listing: Listing): DirectoryProduct | null {
     priceCents: price,
     rate,
     earnCents: commissionOn(price, rate),
-    ...(listing.recurring ? { months, interval: listing.recurring.interval, ...(trialDays > 0 ? { trialDays } : {}) } : {}),
+    ...(listing.recurring ? { months, interval: listing.recurring.interval, ...((listing.recurring.every ?? 1) > 1 ? { every: listing.recurring.every } : {}), ...(trialDays > 0 ? { trialDays } : {}) } : {}),
     ...(activeIntro(listing, store.tiers) ? { intro: true } : {}),
     ...(!listing.recurring && activePlan(listing) && months <= 0 ? { paidInFull: true } : {}),
     image: listing.image ? imageUrl(listing.image.small ? { path: listing.image.small.path } : listing.image) : null,

@@ -4,6 +4,13 @@ import {setupOwnedReader} from "./setup-owned-reader.mjs";
 const env={GITHUB_ACTIONS:"true",GITHUB_REPOSITORY:"viniciussucupira/marktmorgen",AX2_PUBLIC_DISPOSABLE_RUNNER:"true"};
 const ok={status:0,signal:null};
 const denied={status:1,signal:null,stderr:'Failed to enable "Do not disturb" mode; osascript is not allowed to send keystrokes'};
+test("every attempt's own output and exit stay in the job log",async()=>{
+ const written=[];let calls=0;
+ await assert.rejects(setupOwnedReader({env,platform:"darwin",write:text=>written.push(text),wait:async()=>{},
+  run:()=>{calls++;return {status:null,signal:"SIGTERM",stdout:"Enabling AppleScript control\n",stderr:""};}}));
+ assert.equal(calls,1);
+ assert.deepEqual(written,['Enabling AppleScript control\nReader preparation attempt: {"status":null,"signal":"SIGTERM","error":null}\n']);
+});
 test("refuses every unowned or non-disposable host before running",async()=>{
  for(const opts of [{env:{}},{env:{...env,AX2_PUBLIC_DISPOSABLE_RUNNER:"false"}},{env:{...env,GITHUB_REPOSITORY:"other/repo"}},{platform:"linux"}]){
   let calls=0;await assert.rejects(setupOwnedReader({env,platform:"darwin",...opts,run:()=>{calls++;return ok;}}));assert.equal(calls,0);

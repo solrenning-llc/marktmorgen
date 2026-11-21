@@ -58,12 +58,15 @@ export async function resetVoiceOverRunner(options={}){
    catch{/* One bounded graceful request may fail on a stuck reader; inventory must still prove ownership below. */}
   }
  }
+ // Every pid here was verified above; the graceful quit may end it between the
+ // inventory and its ps read (job 130080843453), which is stopped evidence.
  const beforeSignal=pids().map(pid=>{
   if(!found.includes(pid))throw Error("VoiceOver process changed during runner preflight");
-  return owned(pid);
- });
+  return owned(pid,true);
+ }).filter(Boolean);
  for(const process of beforeSignal)if(!process.zombie){
-  if(!owned(process.pid).zombie)kill(process.pid,"SIGTERM");
+  const current=owned(process.pid,true);
+  if(current&&!current.zombie)kill(process.pid,"SIGTERM");
  }
  if(initial.some(process=>!process.zombie))await wait(250);
  const remaining=pids().map(pid=>{

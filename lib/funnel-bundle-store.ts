@@ -14,7 +14,7 @@ import { appendSitePages, type Store } from "@/lib/store";
 import { readPage, writePage } from "@/lib/sales-page-store";
 import { MAX_SITE_PAGES, type SitePage, siteKey, slugProblem } from "@/lib/site-page-rules";
 import { MAX_PAGE_FUNNELS, type PageFunnel, type PageFunnelStep, funnelSlugFrom, funnelSlugProblem, newFunnelId } from "@/lib/page-funnel";
-import { readPageFunnel, readPageFunnelsStrict, writePageFunnel } from "@/lib/page-funnel-store";
+import { readPageFunnel, readPageFunnelsStrict, writeStorePageFunnel } from "@/lib/page-funnel-store";
 import { freeSlug } from "@/lib/funnel-types";
 import { MAX_FORMS, type FormDef } from "@/lib/forms";
 import { canAddForms, readForm, readForms, writeForm } from "@/lib/form-store";
@@ -148,7 +148,7 @@ export async function importBundle(ref: string, store: Store, bundle: FunnelBund
     let slug = base;
     for (let n = 2; funnelSlugProblem(slug, existing) !== null && n < 100; n += 1) slug = `${base.slice(0, 36)}-${n}`;
     started = true;
-    const funnel = await writePageFunnel(statsId, { id: newFunnelId(), name: label, slug, steps, on: false, since: now }, existing, store);
+    const funnel = await writeStorePageFunnel(statsId, { id: newFunnelId(), name: label, slug, steps, on: false, since: now }, existing, store);
     return { ok: true, funnel, pages: made.map((m) => ({ id: m.page.id, title: m.page.title, slug: m.page.slug })), lines: plan.lines };
   } catch (error) {
     if (!started) throw error;

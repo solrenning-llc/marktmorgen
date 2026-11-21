@@ -167,9 +167,13 @@ test("Hotmart current fixed fee, microtransactions and policy conflict stay expl
 
 test("HighLevel comparison preserves real CRM caps and does not turn unlimited accounts into free usage", () => {
  const h=COMPETITOR_PRICES.highlevel;assert.ok(h.plans.every(p=>p.platformFeeBps===null));
- assert.deepEqual(h.plans.map(p=>p.annualCents),[97000,297000,497000]);
+ // #4571 batch 6: read November 15, 2026, the pricing page pairs $4,970/year with the $297 plan and $2,970/year with
+ // the $497 one, the reverse of October 20; neither pairing is confirmed, so neither annual quote is shown as read.
+ assert.deepEqual(h.plans.map(p=>p.annualCents),[97000,null,null]);
  const page=findPage("proof","highlevel");assert.ok(page && page.seo?.title==="Marktmorgen vs HighLevel");
  const table=page.blocks.find(b=>b.kind==="table");assert.ok(table && table.kind==="table");
+ const annual=table.rows.find(r=>r[0]==="Annual subscription")![1];
+ assert.ok(annual.includes("Starter: $970/year") && annual.includes("unconfirmed") && !/Unlimited: \$[\d,]+\/year|Agency Pro: \$[\d,]+\/year/.test(annual));
  assert.ok(table.rows.find(r=>r[0]==="CRM and accounts")![2].includes(pipelineLimitWords()));
  assert.ok(table.rows.find(r=>r[0]==="Communication channels")![2].includes("no SMS, WhatsApp"));
  assert.ok(table.rows.find(r=>r[0]==="Usage charges")![1].includes("not an all-in"));
@@ -216,4 +220,29 @@ test("uncertain quotes, legacy cohorts and conditional payment fees are not favo
  assert.deepEqual(COMPETITOR_PRICES.thinkific.plans.map(p=>p.externalProviderFeeBps),[500,200,100]);
  assert.ok(COMPETITOR_PRICES.thinkific.plans.every(p=>p.annualCents===null));
  assert.ok(COMPETITOR_PRICES.systeme.plans.slice(1).every(p=>p.annualCents===null && p.platformFeeBps===0));
+});
+
+test("Whop comparison does not claim a directory its cited address no longer shows", () => {
+ // #4571 batch 6: read November 15, 2026, https://whop.com/discover/ is one business's page named Discover (22 members,
+ // no posts) and Whop's home page links no directory; the directory read there in October is unconfirmed, not assumed.
+ const w=COMPETITOR_PRICES.whop.discovery.source;
+ assert.equal(w.readOn,"2026-11-15");
+ assert.ok(!/directory/i.test(w.label));
+ const page=findPage("proof","whop");assert.ok(page);
+ const text=JSON.stringify(page);
+ assert.ok(!text.includes("Whop has a public discovery directory") && !text.includes("A public Discover directory with business search"));
+ assert.ok(text.includes("could not be confirmed"));
+});
+
+test("Beacons comparison says only what Beacons' help center states, its pricing page being unreadable", () => {
+ // #4571 batch 6: read November 15, 2026, beacons.ai/pricing returns Cloudflare's block page. Beacons' help center
+ // ("Beacons Pricing Plans", "Beacons Pro Page") lists order bumps, memberships and courses with video hosting on the
+ // $30 Creator Plus plan, and none of its 174 articles mentions a 12,000-brand affiliate network.
+ const page=findPage("proof","beacons");assert.ok(page);
+ const text=JSON.stringify(page);
+ assert.ok(!text.includes("the free one included") && !text.includes("12,000") && !text.includes("but only one"));
+ assert.ok(!/read on September \d+, 2026/.test(text));
+ const table=page.blocks.find(b=>b.kind==="table");assert.ok(table && table.kind==="table");
+ assert.ok(table.rows.find(r=>r[0]==="Order bumps and upsells")![1].includes("$30"));
+ assert.ok(table.note?.includes("was not read"));
 });

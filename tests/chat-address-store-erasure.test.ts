@@ -51,3 +51,10 @@ test("legacy owner record unreadable: unknown, nothing saved",async()=>{
  globalThis.fetch=async()=>new Response(null,{status:204});
  await assert.rejects(setChatAddress(scope.statsId,"Synthetic",URL,{...scope,sid:""}));assert.equal(redis.run(["GET",setting]),null);
 });
+// Claude 2's MEDIUM on #4936 (7058499875): the id key exists again after an account move (moveAccount repoints it to
+// the new ref), so a store with an id is live only while its id key holds this very ref, as store-claim-live:v1 reads.
+test("a store with an id whose key was repointed to another ref (a move) during provider wait keeps no address",async()=>{
+ redis.clear();control.reply=undefined;redis.run(["SET",live,scope.email]);
+ globalThis.fetch=async()=>{redis.run(["SET",live,"moved-elsewhere@example.test"]);redis.run(["DEL",setting]);return new Response(null,{status:204});};
+ assert.notEqual(await setChatAddress(scope.statsId,"Synthetic",URL,scope),"saved");assert.equal(redis.run(["GET",setting]),null);
+});

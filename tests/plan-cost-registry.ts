@@ -61,6 +61,9 @@ import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
 import { RECEIPT_BATCH_SHAPE } from "@/lib/receipt-batch";
 import { monthlyEmails, type Tier } from "@/lib/plan";
+import { MAIL_GAP_COMMANDS_PER_CHECK, MAIL_GAP_TRIAL_CHECKS, mailGapCheckLimit } from "@/lib/mail-frequency";
+/** A gap mark moved: its key (the gate's, the longest, is 92 characters with a 32-character store id: nl:mgap:gate:{32}:{32}:{13}) with a time or a claim value (23), rounded up (tests/store-data-registry.ts, MARK). */
+const MAIL_GAP_MARK_BYTES = 160;
 import { BESIDE_SAVE_COMMANDS } from "@/lib/store-data";
 import { WINBACK_OFFER_COMMANDS } from "@/lib/winback";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
@@ -2102,6 +2105,15 @@ export const COST_LINES: CostLine[] = [
     basis: "Every monthly email sent, at the most an email costs. A plain batch's email that goes by Amazon (sendBatch: product updates, community announcements, review asks, imports; never a list batch) takes at most three commands more for its possibly-taken mark (lib/ses.ts, 13 November 2026): a SET NX before Amazon is asked, a GET when the batch is tried again, a DEL when Amazon says for certain it did not take it, kept two days at most; about $0.000006 at Upstash's $2 a million, inside what an email is priced at. One the email service refuses for good in a list batch (lib/email.ts ListBatchOutcome, 9 November 2026) is taken from the month before it is tried like any other and stays taken: it pays for asking Amazon (nothing for a refusal), for its own did mark read back with the batch (one GET; each accepted one reads its own inside its own email) and, refused as an address, for taking it off the list (lib/contacts.ts stopWriting: at most three rounds of an HGET and the CAS_HSET script with its read-back, then an INCR, about sixteen commands), about $0.00004 at Upstash's $2 a million, inside what an email is priced at. The address is then off the list for good, so it is never paid for twice; nothing more is kept.",
   },
   {
+    id: "mail-gap",
+    feature: "Nobody gets too many emails (374 [SU7], 11 November 2026): each person checked against the store's gap before a list email or automation",
+    monthlyUsd: (tier) => 2 * mailGapCheckLimit(tier, false) * (MAIL_GAP_COMMANDS_PER_CHECK * COMMAND + 2 * MAIL_GAP_MARK_BYTES * DB_BYTE),
+    sources: [
+      { file: "lib/mail-frequency.ts", names: ["MAIL_GAP_CHECKS_PER_EMAIL", "MAIL_GAP_COMMANDS_PER_CHECK", "takeChecks", "mailGapCheckLimit", "MAIL_GAP_TRIAL_CHECKS", "if (count > limit) return false"] },
+    ],
+    basis: "Checks are taken from the store's calendar month before any read, at most MAIL_GAP_CHECKS_PER_EMAIL for each monthly email of the plan (none on Store); a billing month touches two calendar months. Each check costs at most MAIL_GAP_COMMANDS_PER_CHECK commands (the count, its give-back, the read, the claim, its read-back and the record) and moves two marks; what the marks keep for seven days is in the data room's families nl:mgap:*. A send past the checks reads nothing; a send refused there still costs its count's three commands (INCRBY, EXPIRE NX, DECRBY), bounded and counted by its caller's own attempts (the runs and studio requests that send) when the gap is wired into a send. A store in its free trial checks at MAIL_GAP_TRIAL_CHECKS, priced in the trial's own exposure (nonPayingWorst), not here.",
+    },
+    {
     id: "winback-commands",
     feature: "A come-back offer's sending, in Redis commands: the membership's claim, the list token, the once-mark taken only while the address was not erased, then the offer's link and its erasure notes, the print read again before the email (#4807), the count (15 November 2026)",
     // Every store email of the plan sent as a come-back offer from a run of its own (the dearest way).
@@ -3228,6 +3240,8 @@ export function nonPayingWorst(): number {
     + readingsCost(REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS)
     + TRIAL_ORDERS * ORDER_COST
     + TRIAL_MONTHLY_EMAILS * PER_EMAIL
+    // The email gap's checks at the trial's figure, over the two calendar months a billing month touches (line mail-gap).
+    + 2 * MAIL_GAP_TRIAL_CHECKS * (MAIL_GAP_COMMANDS_PER_CHECK * COMMAND + 2 * MAIL_GAP_MARK_BYTES * DB_BYTE)
     + CONTACT_LIVE_MONTH
     + TRIAL_VIDEO_HOURS * hourCost()
     + TRIAL_DAILY_RUNS * 15 * WORST_COMMANDS_PER_RUN * COMMAND

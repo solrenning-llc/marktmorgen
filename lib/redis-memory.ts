@@ -489,6 +489,13 @@ export class MemoryRedis {
           if (this.run(["GET", lock]) !== token) return 0;
           return this.run(["DEL", lock]);
         }
+        // lib/plans.ts MOVE_IF_LIVE: a plan put back in the line of plans tried only while its store is live.
+        if (key.startsWith("-- marktmorgen:plan-move-if-live:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, retry, idKey, erasing, at, member, ref, field] = args;
+          if (this.run(["GET", idKey]) !== ref) return -1;
+          if (this.run(["HGET", erasing, field]) !== null) return -1;
+          return this.run(["ZADD", retry, at, member]);
+        }
         // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
         if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {
           const [, pass, token] = args;

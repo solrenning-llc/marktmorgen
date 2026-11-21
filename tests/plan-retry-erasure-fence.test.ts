@@ -13,6 +13,7 @@
 import { ERASING_KEY, claimHandle, ensureStatsId, ensureStoreId, erasingField, setStripeAccount, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
 import { PLAN_GIVE_UP_DAYS, settlePlans } from "@/lib/plans";
 import { PENDING, memberOf } from "@/lib/plan-remember";
+import { PLAN_SETTLE_RUN } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -109,7 +110,25 @@ async function main(): Promise<void> {
   is("its creator is not emailed about it", emailsSent - before, 0);
   await restore();
 
+  part("A plan naming its store, put back: its commands stay within the registry's figures (PLAN_SETTLE_RUN)");
+  stripeStatus = 500;
+  const counted = member("cs_test_planfencecost01", now);
+  await redis.pipeline([["SADD", PENDING, counted]]);
+  const real = redis.pipeline.bind(redis);
+  let commands = 0;
+  redis.pipeline = (async (sent: (string | number)[][]) => {
+    // A script counts as one command plus the calls inside it (tests/plan-cost-registry.ts): MOVE_IF_LIVE's GET, HGET, ZADD.
+    commands += sent.reduce((n, c) => n + (String(c[1] ?? "").startsWith("-- marktmorgen:plan-move-if-live:v1") ? 4 : 1), 0);
+    return real(sent);
+  }) as typeof redis.pipeline;
+  await settlePlans(10);
+  redis.pipeline = real;
+  is("it is put back", retryMembers().length, 1);
+  is("within readCommandsPerRun + ownCommandsPerPlanTried", commands <= PLAN_SETTLE_RUN.readCommandsPerRun + PLAN_SETTLE_RUN.ownCommandsPerPlanTried, true);
+  await restore();
+
   part("The same stuck plan on a live store is still kept and its creator still told");
+  stripeStatus = 403;
   const kept = member("cs_test_planfencekept01", now - (PLAN_GIVE_UP_DAYS + 1) * DAY);
   await redis.pipeline([["ZADD", RETRY, now - 1, kept]]);
   const sentBefore = emailsSent;

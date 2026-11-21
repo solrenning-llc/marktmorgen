@@ -3,7 +3,8 @@ import json
 import sys
 from pathlib import Path
 
-FORBIDDEN = ["braces", "micromatch", "fast-glob", "eslint-config-next", "@next/eslint-plugin-next"]
+# The development-only chains reviewed for the audit gate, including GHSA-fc5q-39xc-vjpf's picomatch path.
+FORBIDDEN = ["braces", "micromatch", "fast-glob", "eslint-config-next", "@next/eslint-plugin-next", "picomatch", "tinyglobby", "fdir"]
 
 
 def check_traces(root):

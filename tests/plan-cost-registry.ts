@@ -94,6 +94,7 @@ import { MAX_TEAM, MEMBER_STORES_READ, TEAM_LOG_FENCE_COMMANDS } from "@/lib/tea
 import { MAX_ANSWER_TEXT, MAX_FEEDBACK, MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
 import { MAX_IMAGE_BYTES } from "@/lib/product-image";
+import { MAX_STORE_LINKS } from "@/lib/store-link";
 import { CLAIM_PAGES, CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
 import { PERSON_ARG_BYTES } from "@/lib/crm";
@@ -2461,10 +2462,11 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/ai-request-rules.ts", names: ["AI_REQUEST_LIMITS"] },
       { file: "lib/funnel-ai.ts", names: ["askModel"] },
       { file: "lib/product-ideas.ts", names: ["askModel", "IDEAS_OUTPUT_TOKENS"] },
+      { file: "lib/product-pdf-assist.ts", names: ["readPdfThenWrite", "PDF_ASSIST_OUTPUT_TOKENS"] },
       // An AI explanation of one funnel check (26 [E9]): one writing job (FUNNEL_EXPLAIN_JOBS), taken before its one bounded request (tests/funnel-explain.test.ts).
       { file: "lib/funnel-explain.ts", names: ["askModel", "counted", "FUNNEL_EXPLAIN_JOBS", "FUNNEL_EXPLAIN_CALL"] },
     ],
-    basis: "The automatic monthly AI ceiling, reserved before every call; a funnel draft takes writing jobs from it like any other. A page drafted step by step (758 [STN5], lib/ai-steps.ts) adds, at the most and counted for every writing job of the month though a stepped page takes at least two: AI_STOP_COMMANDS database commands (the stop's mark read between the steps, written by a stop, the jobs of the step not run given back) and AI_STEP_EXTRA_BYTES sent to the browser (the kilobyte of padding some browsers wait for, the step lines and the result's own fields). No model call is added; a stop only leaves one out. Product ideas (758 [STN5] unit 2, lib/product-ideas.ts) take one writing job each, one request on the cheapest model at IDEAS_SYSTEM_BYTES + IDEAS_PROMPT_BYTES in and IDEAS_OUTPUT_TOKENS out, whose most expensive reservation on every model a deployment may pick is at most the priced writing job (tests/product-ideas.test.ts), so the line does not move.",
+    basis: "The automatic monthly AI ceiling, reserved before every call; a funnel draft takes writing jobs from it like any other. A page drafted step by step (758 [STN5], lib/ai-steps.ts) adds, at the most and counted for every writing job of the month though a stepped page takes at least two: AI_STOP_COMMANDS database commands (the stop's mark read between the steps, written by a stop, the jobs of the step not run given back) and AI_STEP_EXTRA_BYTES sent to the browser (the kilobyte of padding some browsers wait for, the step lines and the result's own fields). No model call is added; a stop only leaves one out. Product ideas (758 [STN5] unit 2, lib/product-ideas.ts) take one writing job each, one request on the cheapest model at IDEAS_SYSTEM_BYTES + IDEAS_PROMPT_BYTES in and IDEAS_OUTPUT_TOKENS out, whose most expensive reservation on every model a deployment may pick is at most the priced writing job (tests/product-ideas.test.ts), so the line does not move. A title and benefits from a product's PDF (758 [STN5] unit 4, lib/product-pdf-assist.ts) is a stepped job of READ_PDF_JOBS + 1 writing jobs: the PDF read at its priced reservation, then one request on the cheapest model at PDF_ASSIST_SYSTEM_BYTES + PDF_ASSIST_PROMPT_BYTES in and PDF_ASSIST_OUTPUT_TOKENS out, whose most expensive reservation on every model a deployment may pick is at most the priced writing job (tests/product-pdf-assist.test.ts); its step lines and result fit AI_STEP_EXTRA_BYTES, so the line does not move.",
   },
   {
     id: "uploads",
@@ -3197,6 +3199,20 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/cron/courses/route.ts", names: ["sweepCommunityUploads"] },
     ],
     basis: "Every picture the plan lets a community keep, each at the most one may weigh, at the dearest store a file may be in. A door takes a place before it is given; a picture deleted, or a door never used (swept a day on), gives it back.",
+  },
+  {
+    id: "takedown-held-links",
+    feature: "Links held after a copyright notice, with their pictures, until they go back or their window ends (C6-92, 10 November 2026)",
+    monthlyUsd: () => ((MAX_STORE_LINKS * MAX_IMAGE_BYTES) / GB) * STORAGE_PER_GB,
+    sources: [
+      { file: "lib/store-link.ts", names: ["MAX_STORE_LINKS"] },
+      { file: "lib/product-image.ts", names: ["MAX_IMAGE_BYTES"] },
+      { file: "lib/store.ts", names: ["heldPlaces(store) >= MAX_STORE_LINKS", "holdStoreLink", "restoreHeldLink", "dropHeldLink"] },
+      { file: "lib/takedown-hold.ts", names: ["COUNTER_NOTICE_DAYS", "RESTORE_BY_WEEKDAYS", "heldDue"] },
+      { file: "lib/takedown.ts", names: ["holdLink", "settleHeld", "deleteHeld"] },
+      { file: "vercel.json", names: ["/api/cron/takedowns"] },
+    ],
+    basis: "A held link keeps its place in the store's list (addStoreLink counts it against MAX_STORE_LINKS), so a store holds at most MAX_STORE_LINKS pictures between its live and held links, each at the most a picture may weigh, all month, at the dearest store a file may be in, although a link picture is drawn at 320 px. Its record stays inside the store record's own ceiling (MAX_STORE_BYTES). The copies, deletes and the daily job's reads that hold, put back or delete a link follow a takedown the company presses on a notice: a company cost, outside this line.",
   },
 ];
 

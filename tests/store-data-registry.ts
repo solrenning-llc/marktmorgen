@@ -76,6 +76,7 @@ import { MAX_FORMS, MAX_FIELDS, MAX_OPTIONS, MAX_OUTCOMES } from "@/lib/forms";
 import { MAX_DRAFTS } from "@/lib/mail-drafts";
 import { MAX_MAIL_BODY } from "@/lib/mail";
 import { MAX_SEGMENTS } from "@/lib/segments-rules";
+import { MAX_SAVED_FILTERS, SAVED_FILTER_BYTES } from "@/lib/sales-filter-rules";
 import { HOLDINGS_RECORD_BYTES } from "@/lib/community-access";
 import { MAX_CHAT_KEPT, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
 import { MAX_REPORT_QUEUE, MAX_SPACES, MAX_QUESTIONS, MAX_WELCOME } from "@/lib/community-text";
@@ -318,6 +319,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ai-spend:v2:{@lib/ai-spend-policy.ts": company("The company's AI spending ledger, a month", "One key a month with a field a store: the company's ledger, carried by its fixed costs."),
   "nl:ai-spend:v2:{YYYY-MM}@lib/ai-spend-policy.ts": company("The ledger's name, as the policy states it", "The same ledger."),
   "nl:ai:@lib/ai.ts": short("Writing jobs counted in the window, kept at least as long as it (windowKeySeconds)", "day", 63, 128),
+  // One a PDF that could not be read for the AI assistance, so it is not downloaded again for a day (Codex N1 on #3447).
+  "nl:ai:pdfno:@app/api/store/ai/route.ts": short("A product's PDF that could not be read for the AI assistance, so it is not read again for a day", "studio", 1),
   // One a stop: each stop is a studio request, and the mark goes by itself after AI_STOP_KEEP_SECONDS (five minutes), held here at a day.
   "nl:ai:stop:@lib/ai.ts": short("A stop asked for one run of a page drafted step by step (lib/ai-steps.ts)", "studio", 1),
   "nl:assist:pool:@lib/store-assistant.ts": { what: "The Store assistant's pool of replies for one month of the add-on", line: "store-assistant" },
@@ -364,8 +367,10 @@ export const FAMILIES: Record<string, Family> = {
   "nl:auth:sessions:@lib/auth.ts": company("An account's sessions", "An account's."),
   "nl:rl:address:@lib/auth.ts": company("Sign-in links per address", "An account's, an hour."),
   "nl:rl:signin:@lib/auth.ts": company("Sign-ins per connection", "An account's, an hour."),
-  "nl:stream:auto:@lib/auto-captions.ts": { what: "Captions being written for a video, and their charge", parts: [per("upload", 400, KB, "One record a video asked for: seven days, or up to 400 days while a refund Stripe has not confirmed is owed or the charge's order is not settled from Stripe's invoice.")] },
-  "nl:stream:autoowed:@lib/auto-captions.ts": short("The videos of a store with a captions refund owed", "upload", 400),
+  "nl:stream:auto:@lib/auto-captions.ts": { what: "Captions being written for a video, and their charge", parts: [per("upload", 400, KB, "One record a video asked for: seven days, or up to 400 days while a refund Stripe has not confirmed is owed or the charge's order is not settled from Stripe's invoice, or kept for a person when what was delivered stayed unknown.")] },
+  "nl:stream:autoowed:@lib/auto-captions.ts": short("The videos of a store with captions money not settled: a refund owed, or a charge kept for a person", "upload", 400),
+  "nl:stream:autokeptcase:@lib/auto-captions.ts": company("That one case kept for a person was counted in the monthly report", "One \"1\" a case (kind, video id and the time its order was written), no person; kept 400 days, so a retry never counts it again."),
+  "nl:stream:autokept:month:@lib/auto-captions.ts": company("Monthly counts of AI captions kept for a person", "Three counts a month (delivery, order, refund), no store or person; at most 14 monthly keys alive for 400 days."),
   "nl:stream:autoq@lib/auto-captions.ts": company("Videos to ask about", "One sorted set, its members gone within days."),
   "nl:bench:ranges@lib/benchmarks.ts": company("The benchmark ranges", "One key, the company's, a month."),
   "nl:bench:s:@lib/benchmarks.ts": company("Each store's sample a week", "One key a week with a field a store, three weeks: the company's."),
@@ -1079,6 +1084,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:gsc:conn@lib/search-console.ts": company("The company's Search Console connection", "One key, the company's."),
   "nl:gsc:q:@lib/search-console.ts": { what: "What people searched for, cached", parts: [capped(256 * KB, "One cached view.")] },
   "nl:gsc:state:@lib/search-console.ts": company("A consent in progress", "The company's, minutes."),
+  "nl:sales:filters:@lib/sales-filters.ts": { what: "Saved sales filters", parts: [capped(KEY + MAX_SAVED_FILTERS * (SAVED_FILTER_BYTES + ENTRY_BYTES), "MAX_SAVED_FILTERS filters of at most SAVED_FILTER_BYTES each, refused past either.", src("lib/sales-filter-rules.ts", "MAX_SAVED_FILTERS", "SAVED_FILTER_BYTES"))] },
   "nl:mail:segs:@lib/segments.ts": { what: "Saved groups", parts: [capped(MAX_SEGMENTS * 2 * KB, "MAX_SEGMENTS.", src("lib/segments-rules.ts", "MAX_SEGMENTS"))] },
   "nl:stats:@lib/segments.ts": { what: "Buyers' ledger, cached an hour", parts: [capped(ALL_TIME_PAGES * 100 * 4 * 512, "One row per buyer, at most one for each of ALL_TIME_PAGES pages of checkouts, offers after paying, PayPal sales and renewals (270 [GR1], unit 2).", src("lib/stats.ts", "ALL_TIME_PAGES"))] },
   "nl:ses:did:@lib/ses.ts": company("A send already handed to Amazon", "The company's, minutes."),
@@ -1216,7 +1222,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:stream:v:@lib/stream.ts": { what: "What is known about a video", room: ["app/api/store/stream/route.ts", "lib/stream.ts"] },
 
   // ---------------------------------------------------------------- lib/ t–z
-  "nl:report:@lib/takedown.ts": company("A takedown report", "Reports to the company."),
+  "nl:report:@lib/takedown.ts": company("A takedown report; each takedown's steps and the time its notice went out to the creator (noticeSentAt), and the daily job's run mark and one-store locks, all 400 days at most", "Reports to the company."),
+  "nl:report:held@lib/takedown-hold.ts": company("The daily job's list of stores holding links after a copyright notice (store ref -> when to look next): a store's entry is kept only while it holds a link, and dropped when nothing is held, when the store is deleted or closed (lib/store.ts), or when the job finds its record gone", "Reports to the company."),
   "nl:report:t:@lib/takedown.ts": company("A takedown report's token", "Reports to the company."),
   "nl:callteam:@lib/team-booking.ts": { what: "A team event type: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:callteam:rr:@lib/team-booking.ts": { what: "Round-robin counts of a team event type: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },

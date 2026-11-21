@@ -62,12 +62,13 @@
  *   nl:phone:st:<statsId>           device -> how the last send went
  *   nl:phone:seen:<hash>            an event already sent, forty days
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { maySendPathReminder } from "@/lib/path-reminder-rules";
 import { createHash, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { SAVE_CRM_PIPELINES as COMPARE_AND_SET } from "@/lib/crm";
-import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
+import { repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 import { type Store, accountStores, setPhoneSales, storeRef } from "@/lib/store";
 import { normaliseEmail } from "@/lib/auth";
 import { type Permission, type Role, can } from "@/lib/team-roles";
@@ -372,6 +373,37 @@ export function deviceLabel(userAgent: string): string {
 
 // ---- Sending ----------------------------------------------------------------
 
+/**
+ * Devices' last sends, each kept only while that device is still on its store's list (Codex G-20261120-1824): the list
+ * (KEYS[1], a JSON record with `devices`) must decode; then each pair of ARGV (a device's id, its state) is written to
+ * the states (KEYS[2]) only when that id is on the list. One alert writes all its devices' states in one script, its
+ * GET and one HSET for each device still listed (Claude 4's M1 on #5001). The number written; -2 the list does not
+ * read (nothing written). Modelled by lib/redis-memory.ts.
+ */
+export const PHONE_STATE_IF_LISTED = `-- marktmorgen:phone-state-if-listed:v1
+local raw = redis.call("GET", KEYS[1])
+if not raw then return 0 end
+local ok, config = pcall(cjson.decode, raw)
+if not ok or type(config) ~= "table" or type(config["devices"]) ~= "table" then return -2 end
+local listed = {}
+for _, device in ipairs(config["devices"]) do
+  if type(device) == "table" and type(device["id"]) == "string" then listed[device["id"]] = true end
+end
+local written = 0
+for i = 1, #ARGV - 1, 2 do
+  if listed[ARGV[i]] then
+    redis.call("HSET", KEYS[2], ARGV[i], ARGV[i + 1])
+    written = written + 1
+  end
+end
+return written`;
+
+/** Writes the states of the devices just told, in one script, each only while it is still listed (PHONE_STATE_IF_LISTED). */
+async function keepStates(statsId: string, states: { id: string; state: DeviceState }[]): Promise<void> {
+  if (states.length === 0) return;
+  await redisPipeline([["EVAL", PHONE_STATE_IF_LISTED, 2, cfgKey(statsId), stateKey(statsId), ...states.flatMap(({ id, state }) => [id, JSON.stringify(state)])]]);
+}
+
 /** Test seams for the request to the push service; production passes nothing. */
 let hooksForTests: PushFetchHooks | undefined;
 /** Lets a local check point pushes at a stand-in. Never called by the app. */
@@ -402,9 +434,24 @@ function payloadFor(event: PhoneEvent | "test", alert: Alert): string {
   return JSON.stringify({ title: clip(alert.title, MAX_TITLE), body: clip(alert.body, MAX_BODY), url, tag: event });
 }
 
-/** Sends one message to one device and writes down how it went; forgets a device that is gone. */
+/**
+ * Sends one message to one device (a test push), writes down how it went and forgets the device if it is gone. An
+ * alert does the same for all its devices at once: pushTo for each, every state in one script (keepStates), then
+ * each gone device's removal (forgetGone).
+ */
 async function deliver(store: Store, device: Device, event: PhoneEvent | "test", alert: Alert): Promise<DeviceState> {
-  const statsId = store.statsId as string;
+  const { state, gone } = await pushTo(store, device, event, alert);
+  // Written only while the device is still on the store's list (Codex G-20261120-1824): the push waited on the push
+  // service, and meanwhile the store's erasure may have deleted the list and the states (forgetStorePhones), or the
+  // device's removal or its person's erasure taken it off the list before deleting its state. Then nothing is written,
+  // so neither the hash nor the device's field comes back. A list that does not read writes nothing either.
+  await keepStates(store.statsId as string, [{ id: device.id, state }]);
+  if (gone) await forgetGone(store, device);
+  return state;
+}
+
+/** Sends one push and says how it went; writes nothing (deliver and alertCreator keep the state). */
+async function pushTo(store: Store, device: Device, event: PhoneEvent | "test", alert: Alert): Promise<{ state: DeviceState; gone: boolean }> {
   const subscription: Subscription = { endpoint: device.endpoint, p256dh: device.p256dh, auth: device.auth };
   const result = await sendPush(subscription, payloadFor(event, alert), {
     // A sale, a booking or a live event about to start wakes a phone that is
@@ -418,15 +465,16 @@ async function deliver(store: Store, device: Device, event: PhoneEvent | "test",
     keys: vapidKeysFor(device.kid),
   });
   const state: DeviceState = { at: Date.now(), ok: result.ok, status: result.status, error: result.error };
-  await redisPipeline([["HSET", stateKey(statsId), device.id, JSON.stringify(state)]]);
-  if (result.gone && event !== "path") {
-    // Read again, so a device added a moment ago is never lost with this one.
-    const left = await changeConfig(store, (config) =>
-      config && config.devices.some((d) => d.id === device.id) ? { ...config, devices: config.devices.filter((d) => d.id !== device.id) } : null,
-    );
-    if (left) await redisPipeline([["HDEL", stateKey(statsId), device.id]]);
-  }
-  return state;
+  return { state, gone: result.gone && event !== "path" };
+}
+
+/** Takes a device the push service says is gone off the list, then its state. */
+async function forgetGone(store: Store, device: Device): Promise<void> {
+  // Read again, so a device added a moment ago is never lost with this one.
+  const left = await changeConfig(store, (config) =>
+    config && config.devices.some((d) => d.id === device.id) ? { ...config, devices: config.devices.filter((d) => d.id !== device.id) } : null,
+  );
+  if (left) await redisPipeline([["HDEL", stateKey(store.statsId as string), device.id]]);
 }
 
 /**
@@ -465,15 +513,25 @@ export async function alertCreator(
   const fresh = repliesFor(await redisPipeline([["SET", seenKey(statsId, event, options.seed), "1", "NX", "EX", SEEN_SECONDS]]), 1)?.[0];
   if (fresh !== "OK") return 0;
   if (event === "report" || event === "affiliate" || event === "comment" || event === "message") {
-    const replies = repliesFor(await redisPipeline([
-      ["SET", quietKey(statsId, event), "0", "EX", 3600, "NX"],
-      ["INCR", quietKey(statsId, event)],
-    ]), 2);
     // A count in any other shape is unknown (CX-123 rule 24): nothing is sent on it.
-    const count = countOf(replies?.[1]);
+    const count = windowCountOf(await redisPipeline(windowCount(quietKey(statsId, event), 3600)));
     if (count === null || count > QUIET_PER_HOUR) return 0;
   }
-  await soon(() => Promise.all(listening.map((device) => event === "path" && !maySendPathReminder(options.pathTimeZone || "", Date.now()) ? Promise.resolve(null) : deliver(store, device, event, alert))));
+  // Every device is told at once; their states are then written in one script (keepStates; Claude 4's M1 on #5001).
+  await soon(async () => {
+    const told = await Promise.all(listening.map(async (device) => {
+      if (event === "path" && !maySendPathReminder(options.pathTimeZone || "", Date.now())) return null;
+      return { device, ...(await pushTo(store, device, event, alert)) };
+    }));
+    const sent = told.filter((one): one is { device: Device; state: DeviceState; gone: boolean } => one !== null);
+    // Every device's state first, as each device's own write did before (Claude 6's LEVE 1 on #5001): a gone
+    // device's removal that fails afterwards takes nobody else's state with it.
+    await keepStates(statsId, sent.map((one) => ({ id: one.device.id, state: one.state })));
+    // Each removal settles on its own; the first failure is still raised, so it is logged as before.
+    const removed = await Promise.allSettled(sent.filter((one) => one.gone).map((one) => forgetGone(store, one.device)));
+    const failed = removed.find((one): one is PromiseRejectedResult => one.status === "rejected");
+    if (failed) throw failed.reason;
+  });
   return listening.length;
 }
 
@@ -669,9 +727,10 @@ export async function forgetPerson(store: Store, who: string): Promise<number> {
 }
 
 /** Forgets every device of a deleted store, whoever's they were. */
-export async function forgetStorePhones(statsId: string | null): Promise<void> {
+export async function forgetStorePhones(statsId: string | null, apply: (commands: (string | number)[][]) => Promise<unknown> = redisPipeline): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", cfgKey(statsId), stateKey(statsId)]]);
+  // `apply` sends the deletes: the closing walk's makes them only while it still holds the store's lock (lib/closed-store-data.ts, fencedBy).
+  await apply([["DEL", cfgKey(statsId), stateKey(statsId)]]);
 }
 
 /** Sends one test notification to one of this person's devices, now, and says how it went. */
@@ -687,12 +746,8 @@ export async function sendTest(
   const device = config?.devices.find((d) => d.id === id && isMine(store, d, who));
   if (!device || !keys) return { ok: false, reason: "missing" };
   if (!vapidKeysFor(device.kid)) return { ok: false, reason: "stale" };
-  const replies = repliesFor(await redisPipeline([
-    ["SET", testsKey(store.statsId), "0", "EX", 60, "NX"],
-    ["INCR", testsKey(store.statsId)],
-  ]), 2);
   // A count in any other shape is unknown (CX-123 rule 24): no test is sent on it.
-  const count = countOf(replies?.[1]);
+  const count = windowCountOf(await redisPipeline(windowCount(testsKey(store.statsId), 60)));
   if (count === null || count > TESTS_PER_MINUTE) return { ok: false, reason: "limited" };
   const state = await deliver(store, device, "test", {
     title: "Marktmorgen Studio",

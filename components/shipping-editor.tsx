@@ -9,6 +9,14 @@ import { useStoreCurrency } from "@/components/store-currency";
 import { MAX_SHIP_NOTE, MAX_SHIPPING_SKU, SHIP_REGIONS, type ShipRegion, readCountries, shipProblem, parseShipping } from "@/lib/shipping";
 
 import { confirmsShipping } from "@/lib/shipping-confirmation";
+import { vatShipCloses } from "@/lib/eu-vat-goods";
+
+/**
+ * Said wherever a product ships to a country the VAT lock closes (lib/eu-vat-goods.ts, 789 [IV1] unit 1), so the
+ * studio never shows a country the checkout leaves out as open (VR, item 2).
+ */
+const VAT_LOCK_NOTE =
+  "For now, buyers can't have it shipped to the European Union, the United Kingdom, Monaco or the Isle of Man, because we can't charge the VAT those countries require on goods yet. Your other countries keep selling.";
 
 const UNKNOWN_SAVE = "Shipping was not confirmed. Reload to check its status before trying again.";
 
@@ -24,7 +32,6 @@ const MESSAGES: Record<string, string> = {
   ship_membership: "A product you ship is sold once, not as a membership.",
   ship_call: "A call delivers a time, so it cannot be shipped.",
   ship_options: "A product you ship has one price. Take its options off first.",
-  ship_pwyw: "A product you ship has a set price, so buyers cannot choose it.",
   ship_plan: "A product you ship is paid in full. Stop its payment plan first.",
   ship_delivery: "This product already hands over a file, a link, a course, a podcast or a bundle. Take that off first, or make a new product to ship.",
   store_full: "Your store is full. Remove something before adding more.",
@@ -89,6 +96,12 @@ export function ShippingEditor({ product }: { product: Product }) {
   if (!open) {
     return (
       <div className="mt-3 text-sm text-ink-soft">
+        {current && product.bundle ? (
+          <p role="status" className="mb-2 font-semibold text-ink">
+            This bundle is not on sale while it has shipping: a bundle hands over the products in it, and its checkout would
+            charge no shipping and ask for no address. Stop shipping it, or make a new product to ship.
+          </p>
+        ) : null}
         {current ? (
           <p>
             <span className="font-semibold text-ink">
@@ -123,7 +136,11 @@ export function ShippingEditor({ product }: { product: Product }) {
               {ready ? "Stop shipping it" : "Stop shipping it — Loading…"}
             </button>
           </p>
-        ) : (
+        ) : null}
+        {current && (current.region === "custom" ? current.countries : SHIP_REGIONS[current.region].countries).some(vatShipCloses) ? (
+          <p className="mt-2 text-xs">{VAT_LOCK_NOTE}</p>
+        ) : null}
+        {current ? null : (
           <button
             type="button"
             className={opener}
@@ -188,6 +205,7 @@ export function ShippingEditor({ product }: { product: Product }) {
         address is on the sale under What you have sold, where &ldquo;Mark as shipped&rdquo; emails the buyer, with a tracking link if you have one.
         Sold once: at one price, or at several for sizes or versions, added under Prices. No gifts or carts.
       </p>
+      <p className="mt-2 text-xs text-ink-soft">{VAT_LOCK_NOTE}</p>
       {error ? <p className="notice notice-error mt-3" role="alert">{error}</p> : null}
       <div className="mt-3 flex flex-wrap gap-3">
         <button type="submit" aria-busy={busy} disabled={busy} className="btn btn-primary btn-sm">{busy ? "Saving…" : "Save shipping"}</button>

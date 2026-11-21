@@ -1,0 +1,122 @@
+/**
+ * Outage drill (Claude 7, 13 November 2026; synthetic only): SES accepts an email of a batch, then the
+ * reply is lost (timeout / TypeError "fetch failed", or a 5xx after
+ * acceptance). sendBatch reports "retry", documented as "nothing was sent and
+ * the same batch may be tried again later". Every sendBatch caller
+ * (product updates, community mail, waitlist, review requests...) then calls
+ * again with the same batchKey. The second call must not write to the
+ * recipient whose acceptance is unknown.
+ */
+import { sendBatch } from "@/lib/email";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+
+const REGION = "us-east-1";
+const posted: string[] = [];
+let loseReplyFor: string | null = null;
+let lossKind: "throw" | 500 = "throw";
+let maxSendRate = 10;
+
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input));
+  const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
+  if (url.hostname === `email.${REGION}.amazonaws.com`) {
+    if (url.pathname === "/v2/email/account") {
+      return json({ ProductionAccessEnabled: true, SendingEnabled: true, EnforcementStatus: "HEALTHY", SendQuota: { Max24HourSend: 50_000, MaxSendRate: maxSendRate, SentLast24Hours: 0 } });
+    }
+    if (url.pathname === "/v2/email/outbound-emails") {
+      const body = JSON.parse(String(init?.body)) as { Destination: { ToAddresses: string[] } };
+      const to = body.Destination.ToAddresses[0];
+      posted.push(to); // SES took it.
+      if (to === loseReplyFor) {
+        if (lossKind === "throw") throw new TypeError("fetch failed");
+        return json({ message: "internal" }, 500);
+      }
+      return json({ MessageId: `m-${posted.length}` });
+    }
+    return json({}, 404);
+  }
+  if (url.hostname === `sts.${REGION}.amazonaws.com`) {
+    const credentials = { AccessKeyId: "ASIAEXAMPLEPROBE0001", SecretAccessKey: "probe-secret-0000000000000000000000000000", SessionToken: "probe-token", Expiration: Math.floor(Date.now() / 1000) + 3_600 };
+    return json({ AssumeRoleWithWebIdentityResponse: { AssumeRoleWithWebIdentityResult: { Credentials: credentials } } });
+  }
+  if (url.hostname === "api.resend.com") return json({ data: [] });
+  return json({}, 404);
+}) as typeof fetch;
+
+const letter = (to: string) => ({ from: "Marktmorgen <hello@marktmorgen.com>", to, subject: "Update", text: "Hello.", html: "<p>Hello.</p>" });
+
+async function main(): Promise<void> {
+  redis.clear();
+  process.env.RESEND_API_KEY = "re_test_probe_stand_in";
+  process.env.AWS_SES_REGION = REGION;
+  process.env.AWS_SES_CONFIGURATION_SET = "marktmorgen";
+  process.env.AWS_SES_TOPIC_ARN = `arn:aws:sns:${REGION}:123456789012:marktmorgen-email`;
+  process.env.AWS_SES_ROLE_ARN = "arn:aws:iam::123456789012:role/synthetic-probe";
+  process.env.VERCEL_OIDC_TOKEN = "aGVhZGVy.cGF5bG9hZA.c2lnbmF0dXJl";
+
+  for (const kind of ["throw", 500] as const) {
+    part(`SES reply lost (${kind}) after acceptance, then the caller retries the same batch`);
+    posted.length = 0;
+    lossKind = kind;
+    loseReplyFor = "unknown@example.com";
+    const key = `upd:probe-${kind}:0:3`;
+    const batch = [letter("ok@example.com"), letter("unknown@example.com"), letter("later@example.com")];
+    const first = await sendBatch(batch, key, { by: "company" });
+    is(`${kind}: first call reports retry`, first, "retry");
+    is(`${kind}: SES took unknown@ once in the first call`, posted.filter((t) => t === "unknown@example.com").length, 1);
+    // The provider recovers; the caller (e.g. lib/product-updates.ts) runs again
+    // with the same key, exactly as its "retry" branch does.
+    loseReplyFor = null;
+    await sendBatch(batch, key, { by: "company" });
+    is(`${kind}: unknown@ is never written to twice`, posted.filter((t) => t === "unknown@example.com").length, 1);
+    is(`${kind}: the rest of the batch is not stuck behind it`, posted.filter((t) => t === "later@example.com").length, 1);
+    is(`${kind}: the confirmed one is not written to again`, posted.filter((t) => t === "ok@example.com").length, 1);
+  }
+  part("Redis cannot write down who may have been taken, while SES loses an answer");
+  {
+    posted.length = 0;
+    lossKind = "throw";
+    loseReplyFor = "unknown@example.com";
+    const key = "upd:probe-marks-down:0:3";
+    const batch = [letter("ok@example.com"), letter("unknown@example.com"), letter("later@example.com")];
+    const pipeline = redis.pipeline.bind(redis);
+    let marksDown = true;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (marksDown && commands.some((c) => String(c[1] ?? "").startsWith("nl:ses:maybe:") && c[0] === "SET")) throw new Error("Redis request timed out");
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    is("marks down: the batch is not reported sent", await sendBatch(batch, key, { by: "company" }), "retry");
+    marksDown = false;
+    loseReplyFor = null;
+    await sendBatch(batch, key, { by: "company" });
+    redis.pipeline = pipeline;
+    for (const to of ["ok@example.com", "unknown@example.com", "later@example.com"]) {
+      is(`marks down: ${to} is written to exactly once`, posted.filter((t) => t === to).length, 1);
+    }
+  }
+  // Review of #4530 (Claude 1 review worker A, 15 November 2026): two emails to one address in a plain batch (one
+  // review ask per order, lib/review-requests.ts) made the second possibly-taken mark answer "already there", so the
+  // batch stalled on every run and nobody from that wave on was written to.
+  for (const rate of [10, 1] as const) {
+    part(`One address twice in a plain batch, ${rate === 10 ? "in the same wave" : "in different waves"}: both go, once each`);
+    posted.length = 0;
+    loseReplyFor = null;
+    maxSendRate = rate;
+    await redis.pipeline([["DEL", "nl:ses:state"]]); // Amazon is asked again for the account's rate.
+    const key = `rev:probe-twice-${rate}:0:3`;
+    const batch = [letter("ana@example.com"), letter("ben@example.com"), { ...letter("ana@example.com"), subject: "Second order" }];
+    is(`rate ${rate}: the batch is sent`, await sendBatch(batch, key, { by: "company" }), "sent");
+    is(`rate ${rate}: ana@ gets both emails`, posted.filter((t) => t === "ana@example.com").length, 2);
+    is(`rate ${rate}: ben@ gets one`, posted.filter((t) => t === "ben@example.com").length, 1);
+    is(`rate ${rate}: the same batch tried again writes to nobody`, await sendBatch(batch, key, { by: "company" }), "sent");
+    is(`rate ${rate}: still three emails in all`, posted.length, 3);
+  }
+  maxSendRate = 10;
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

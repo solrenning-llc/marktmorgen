@@ -1,0 +1,4 @@
+{
+  "@/lib/blob": "failure-cleanup-world.ts",
+  "@vercel/blob/client": "failure-cleanup-world.ts"
+}

@@ -29,8 +29,10 @@ export async function POST(request: NextRequest) {
   const action = text(body.action, 10);
 
   if (action === "find") {
-    const [subs, codes] = await Promise.all([memberSubs(store, email), listCodes(store.stripeAccountId)]);
-    if (subs === null || codes.state !== "ok") return refuse("stripe", "Your Stripe account could not be read just now. Try again in a minute.", 502);
+    // The live codes alone, so a live code behind newer switched-off ones is
+    // still offered; an empty page is "no live code" only when it is the last.
+    const [subs, codes] = await Promise.all([memberSubs(store, email), listCodes(store.stripeAccountId, { active: true })]);
+    if (subs === null || codes.state !== "ok" || (!codes.complete && codes.codes.length === 0)) return refuse("stripe", "Your Stripe account could not be read just now. Try again in a minute.", 502);
     return Response.json({
       ok: true,
       memberships: subs,

@@ -27,7 +27,8 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
   return new Response(answer.body, { status: answer.status, headers: { "Content-Type": "application/json" } });
 }) as typeof fetch;
 
-const store = { sid: "s_domain_unknown" };
+// The key below holds "shapes": the store whose proof it is (LOW on #4248, live only for its own proof).
+const store = { sid: "s_domain_unknown", handle: "shapes", previousHandles: [] as string[] };
 const live = (s: Awaited<ReturnType<typeof domainStatus>>) => (s === null ? "unknown" : s.live ? "live" : "not live");
 
 async function main(): Promise<void> {

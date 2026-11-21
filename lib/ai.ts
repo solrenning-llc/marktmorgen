@@ -1,11 +1,11 @@
 import { countOf, repliesFor, UnknownReplyError } from '@/lib/redis-reply';
 import { type SourceHooks, readSourcePage, sourceReadingOn } from "@/lib/source-page";
-import { allowanceWindow, windowId } from "@/lib/allowance-window";
+import { allowanceWindow, windowId, windowKeySeconds } from "@/lib/allowance-window";
 import { BUYER_LENSES, type BuyerLens, PREDICTS } from "@/lib/page-coach";
 import { reservePaidResourceWindow } from '@/lib/contract-resource-window';
 import { reserveFundedExposure } from '@/lib/exposure-budget';
-import { consumeAiCallBudget, hasAiCallBudget, noteAiDispatch, withAiCallBudget, type AiCallReport } from '@/lib/ai-call-budget';
-import { AI_ENTITLEMENT_RULES } from '@/lib/ai-entitlement-rules';
+import { aiDispatchCount, consumeAiCallBudget, consumeAiDocumentRead, hasAiCallBudget, noteAiDispatch, withAiCallBudget, type AiCallReport } from '@/lib/ai-call-budget';
+import { AI_ENTITLEMENT_RULES, DOCUMENT_READS_PER_PDF_RUN } from '@/lib/ai-entitlement-rules';
 /**
  * The writing help in the studio (lib/ai-rules.ts), on the server: asking the
  * model, counting what each store uses, and reading back only what fits.
@@ -19,6 +19,7 @@ import { AI_ENTITLEMENT_RULES } from '@/lib/ai-entitlement-rules';
  * buyer, ever.
  *
  *   nl:ai:<statsId>:<YYYY-MM>   writing jobs a store asked for this month
+ *   nl:ai:stop:<statsId>:<run>  a stop asked for one run of named steps (lib/ai-steps.ts), kept AI_STOP_KEEP_SECONDS
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { aiBudgetScopeFor, isAiBudgetConfigured, reserveAiSpend } from "@/lib/ai-spend";
@@ -26,7 +27,7 @@ import { currentAiSpendPolicy } from "@/lib/ai-spend-policy";
 import { costPauseCode, costStandingOf, standingOf } from "@/lib/plan-standing";
 import { hasPro } from "@/lib/plan";
 import { timed } from "@/lib/fetch-timeout";
-import { boundedAiRequest, isSupportedAiModel } from "@/lib/ai-request-rules";
+import { ANSWER_MODEL, WRITING_MODEL, boundedAiRequest, isSupportedAiModel } from "@/lib/ai-request-rules";
 import { aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
 import { inTrial } from "@/lib/mail";
 import type { Store } from "@/lib/store";
@@ -46,6 +47,7 @@ import {
 import { type PageBlock, type SalesPage, emptyBlock, parsePage } from "@/lib/sales-page";
 import { MAX_TRANSLATE_PARTS, keepEveryBlock, pageWords, translateParts, withWords } from "@/lib/page-translate";
 import { READ_PDF_JOBS, READ_PDF_PAGES } from "@/lib/ai-rules";
+import { AI_RUN_ID, AI_STOP_KEEP_SECONDS, type AiGivenBack, type AiStepId, type AiStepState } from "@/lib/ai-steps";
 import { type DraftedQuestion, MAX_QUIZ_SOURCE, readDrafted, shuffleAnswers } from "@/lib/quiz-draft";
 import { type DraftedStep, readDraftedSteps } from "@/lib/sequence-draft";
 import { MAX_CHOICE_LENGTH, MAX_EXPLANATION_LENGTH, MAX_QUESTIONS, MAX_QUESTION_LENGTH } from "@/lib/quiz";
@@ -72,10 +74,9 @@ export function isAiConfigured(): boolean {
   return isAiBudgetConfigured() && apiKey() !== null && isSupportedAiModel(model()) && isSupportedAiModel(answerModel());
 }
 
-/** The model asked. A deployment may name another in AI_MODEL. */
+/** The model that writes, fixed in code (WRITING_MODEL): the plans' AI ceilings are computed for it (433 [PV3] (b)). */
 function model(): string {
-  const named = process.env.AI_MODEL?.trim();
-  return named && /^claude-[a-z0-9.-]{3,60}$/.test(named) ? named : "claude-sonnet-5-5";
+  return WRITING_MODEL;
 }
 
 function jobCount(value: unknown): number | null {
@@ -128,6 +129,26 @@ export function aiAvailableFor(store: Store | null | undefined, now = Date.now()
 export function aiAllowance(store: Store, now = Date.now()): number {
   if (inTrial(store, now / 1000)) return AI_MONTHLY.trial;
   return AI_MONTHLY[store.tier];
+}
+
+/**
+ * Whether a job of `jobs` could be admitted at all, read only: nothing is
+ * reserved or counted. Checked before work that costs time and transfer
+ * ahead of the job's own admission (a product's PDF read from storage), so
+ * a plan without enough writing jobs, a month with fewer left, or a
+ * deployment without the writing help, never pays for it. The month's
+ * balance is one exact read (aiLeft): a reply that is not one known, or no
+ * reply, refuses ("off"), never counts as a full month. Null when it may go
+ * on to counted's own check.
+ */
+export async function aiJobRefusal(store: Store, jobs: number, now = Date.now()): Promise<"off" | "used" | null> {
+  if (!isAiConfigured() || !store.statsId || !isRedisConfigured()) return "off";
+  const allowance = aiAllowance(store, now);
+  if (!Number.isSafeInteger(allowance) || allowance < 0) return "off";
+  if (jobs > allowance) return "used";
+  const left = await aiLeft(store, now).catch(() => null);
+  if (left === null || !Number.isSafeInteger(left)) return "off";
+  return jobs > left ? "used" : null;
 }
 
 /** What is left of this month's writing jobs. */
@@ -194,12 +215,11 @@ export type AiResult<T> = { ok: true; value: T; left: number } | { ok: false; re
 /**
  * The model that answers visitors' questions (lib/answers.ts): the smallest
  * current one, because each answer is short, read from a page it is handed,
- * and paid for by a store's plan. A deployment may name another in
- * AI_ANSWER_MODEL.
+ * and paid for by a store's plan. Fixed in code (ANSWER_MODEL), as the plans'
+ * AI ceilings are computed for it (433 [PV3] (b)).
  */
 export function answerModel(): string {
-  const named = process.env.AI_ANSWER_MODEL?.trim();
-  return named && /^claude-[a-z0-9.-]{3,60}$/.test(named) ? named : "claude-haiku-5-5";
+  return ANSWER_MODEL;
 }
 
 /** One question to the model, counted against the store's month. The answer's text, or null. */
@@ -227,6 +247,12 @@ export async function askModel(
   // Standalone visitor calls get one slot; counted writing jobs share theirs.
   if (!hasAiCallBudget()) return withAiCallBudget(store.statsId, 1, () => askModel(store, system, prompt, maxTokens, named, timeoutMs));
   if (!consumeAiCallBudget(store.statsId)) return null;
+  // A document (a product's PDF) is held at the model's whole context: only the answer model reads one, and only in a
+  // run that took the PDF's jobs (consumeAiDocumentRead), so the plan's ceiling funds it (lib/ai-entitlement-rules.ts).
+  if (bounded.shape.media === "document" && (named !== ANSWER_MODEL || !consumeAiDocumentRead(store.statsId))) {
+    console.error("AI document request refused before provider call: not a paid PDF read");
+    return null;
+  }
   const scope=aiBudgetScopeFor(store);
   const exposure=scope==='trial'?'trial':scope==='setup'?'setup':scope==='ended'?'post_cancellation':null;
   if(exposure&&!(await reserveFundedExposure(store.statsId,exposure)))return null;
@@ -263,6 +289,26 @@ export function modelKeySet(): boolean {
   return apiKey() !== null;
 }
 
+/** The first few hundred characters of an error answer, for the log; the rest of its body is never read (cancelled). */
+async function errorStart(response: Response, max = 300): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const decoder = new TextDecoder();
+  let text = "";
+  try {
+    while (text.length < max) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+  } catch {
+    // An error body that cannot be read says nothing more.
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  return text.slice(0, max);
+}
+
 /**
  * One request to the model, already bounded (lib/ai-request-rules.ts), for
  * a caller that reserved its own worst cost before calling and settles it
@@ -290,7 +336,7 @@ export async function postToModel(body: string, timeoutMs: number): Promise<{ ok
     return { ok: false, billed: true };
   }
   if (!response.ok) {
-    console.error("the model refused", response.status, (await response.text().catch(() => "")).slice(0, 300));
+    console.error("the model refused", response.status, await errorStart(response));
     return { ok: false, billed: false };
   }
   try {
@@ -385,8 +431,36 @@ const block = (value: unknown, max: number) =>
  * is asked. Started attempts stay counted because provider work may be billable.
  */
 export async function counted<T>(store: Store, now: number, run: () => Promise<T | null>, jobs = 1): Promise<AiResult<T>> {
+  return countedRun(store, now, run, jobs) as Promise<AiResult<T>>;
+}
+
+/**
+ * A job told in named steps (lib/ai-steps.ts) that ended with a step that
+ * never reached the model: "stopped" when the creator asked, "empty" when
+ * the product's PDF, read, gave nothing to write from, "failed" otherwise.
+ * `returned` is the jobs of those steps given back, and `left` the month's
+ * after it; both null when the give-back could not be confirmed.
+ */
+export type AiStopped = { ok: false; reason: AiGivenBack; returned: number | null; left: number | null };
+
+/** A job told in steps that still drafted while a step's jobs were given back: `returned` is those jobs, null when not confirmed. */
+export type AiDraftedGiven<T> = { ok: true; value: T; left: number; returned: number | null };
+
+/**
+ * What a job told in steps leaves undone: the jobs of the steps whose call
+ * never reached the model (stopped, nothing to write from, or its money
+ * refused), and whether the creator asked for the stop (false when the
+ * stop's mark could not be read, which starts no further step either).
+ */
+type Unrun = { jobs: number; asked: boolean; empty?: boolean };
+
+const givenReason = (unrun: Unrun): AiGivenBack => (unrun.asked ? "stopped" : unrun.empty ? "empty" : "failed");
+
+async function countedRun<T>(store: Store, now: number, run: () => Promise<T | null>, jobs: number, unrun?: Unrun, documents = 0): Promise<AiResult<T> | AiStopped | AiDraftedGiven<T>> {
   if (!isAiConfigured() || !store.statsId || !isRedisConfigured()) return { ok: false, reason: "off" };
   if (!Number.isSafeInteger(jobs) || jobs <= 0) return { ok: false, reason: "notes" };
+  // A PDF read is paid for by its own 1 + READ_PDF_JOBS jobs (lib/ai-entitlement-rules.ts); fewer jobs read none.
+  if (!Number.isSafeInteger(documents) || documents < 0 || documents * (1 + READ_PDF_JOBS) > jobs) return { ok: false, reason: "notes" };
   const allowance = aiAllowance(store, now);
   if (!Number.isSafeInteger(allowance) || allowance < 0) return { ok: false, reason: "off" };
   if (jobs > allowance) return { ok: false, reason: "used" };
@@ -395,7 +469,7 @@ export async function counted<T>(store: Store, now: number, run: () => Promise<T
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "off" };
   const replies = repliesFor(await redisPipeline([
     ["INCRBY", key, jobs],
-    ["EXPIRE", key, 40 * 86_400],
+    ["EXPIRE", key, windowKeySeconds(store, 40 * 86_400, now)],
   ]), 2);
   const count = countOf(replies?.[0]);
   // A partial reservation is unknown; never undo an unconfirmed increment.
@@ -407,23 +481,138 @@ export async function counted<T>(store: Store, now: number, run: () => Promise<T
   let value: T | null = null;
   const calls: AiCallReport = { owned: false, dispatched: 0 };
   try {
-    value = await withAiCallBudget(store.statsId, jobs * AI_ENTITLEMENT_RULES.writingCallsPerJob, run, calls);
+    // Only a run that says it reads a PDF (writePage, which took 1 + READ_PDF_JOBS jobs for it) may send a document.
+    value = await withAiCallBudget(store.statsId, jobs * AI_ENTITLEMENT_RULES.writingCallsPerJob, run, calls, documents);
   } catch (error) {
     console.error("a writing job failed", error);
   }
-  // Provider work may cost money even when the response is unusable: a
-  // started attempt stays counted. A job whose own budget saw no call reach
-  // the provider (its dollar reservation refused, or it stopped before one)
-  // is given back, once: its reply is read in its exact shape, and one that
-  // cannot be confirmed is logged, never retried (R32 finding 1).
-  if (value === null) {
-    if (calls.owned && calls.dispatched === 0) {
-      const back = repliesFor(await redisPipeline([["DECRBY", key, jobs]]).catch(() => null), 1);
-      if (!back || countOf(back[0]) === null) console.error("a writing job with no provider call could not be confirmed given back");
-    }
-    return { ok: false, reason: "failed" };
+  // A job whose own budget saw no call reach the provider is given back
+  // whole, once: its reply is read in its exact shape, and one that cannot
+  // be confirmed is logged, never retried (R32 finding 1).
+  if (value === null && calls.owned && calls.dispatched === 0) {
+    const back = repliesFor(await redisPipeline([["DECRBY", key, jobs]]).catch(() => null), 1);
+    const after = back ? countOf(back[0]) : null;
+    if (after === null) console.error("a writing job with no provider call could not be confirmed given back");
+    if (!unrun) return { ok: false, reason: "failed" };
+    return settled(givenReason(unrun), jobs, after);
   }
-  return { ok: true, value, left: Math.max(0, allowance - count) };
+  // Provider work may cost money even when the response is unusable: a
+  // started step stays counted. The jobs of steps whose call never reached
+  // the model are given back, once, read in their exact shape, never
+  // retried; an unknown answer is said as not confirmed, never as a number
+  // (758 [STN5]).
+  const give = unrun && Number.isSafeInteger(unrun.jobs) && unrun.jobs > 0 && unrun.jobs < jobs ? unrun.jobs : 0;
+  let after: number | null = null;
+  if (give > 0) {
+    const back = repliesFor(await redisPipeline([["DECRBY", key, give]]).catch(() => null), 1);
+    after = back ? countOf(back[0]) : null;
+    if (after === null) console.error("the jobs of steps not run could not be confirmed given back");
+  }
+  if (value === null) return give > 0 && unrun ? settled(givenReason(unrun), give, after) : { ok: false, reason: "failed" };
+  const left = Math.max(0, allowance - (give > 0 && after !== null ? after : count));
+  // A draft that came while a step's jobs were given back says how many, or that it could not be confirmed.
+  return give > 0 ? { ok: true, value, left, returned: after === null ? null : give } : { ok: true, value, left };
+
+  function settled(reason: AiGivenBack, returned: number, now: number | null): AiStopped {
+    return now === null ? { ok: false, reason, returned: null, left: null } : { ok: false, reason, returned, left: Math.max(0, allowance - now) };
+  }
+}
+
+const stopKey = (statsId: string, run: string) => `nl:ai:stop:${statsId}:${run}`;
+
+/**
+ * A run of named steps as it starts: its live mark ("0"), under the store's own name, gone by itself after
+ * AI_STOP_KEEP_SECONDS. Written only where there is none (NX), so a stop already written is kept. Best effort: a
+ * mark not written only means a stop for this run is not taken, which the page says.
+ */
+async function markAiRunLive(store: Store, run: string): Promise<void> {
+  if (!store.statsId) return;
+  await redisPipeline([["SET", stopKey(store.statsId, run), "0", "EX", AI_STOP_KEEP_SECONDS, "NX"]]).catch((error: unknown) => console.error("a run's live mark could not be written", error));
+}
+
+/**
+ * A stop asked for one run of named steps: its mark set to "1" only over the run's own live mark (XX), so a stop for
+ * a run that is not running writes nothing, and made-up run ids cost no write (cloud I on #3435, MEDIUM 1). True only
+ * once it is confirmed kept; a run not running, or a reply that cannot be read, is false.
+ */
+export async function markAiStop(store: Store, run: string): Promise<boolean> {
+  if (!store.statsId || !AI_RUN_ID.test(run) || !isRedisConfigured()) return false;
+  const replies = repliesFor(await redisPipeline([["SET", stopKey(store.statsId, run), "1", "EX", AI_STOP_KEEP_SECONDS, "XX"]]).catch(() => null), 1);
+  return replies !== null && replies[0] === "OK";
+}
+
+/** Whether the creator asked to stop this run: true, false only for a confirmed absent mark, null when the reply cannot be read. */
+async function stopAsked(store: Store, run: string): Promise<boolean | null> {
+  if (!store.statsId) return null;
+  const replies = repliesFor(await redisPipeline([["GET", stopKey(store.statsId, run)]]).catch(() => null), 1);
+  if (!replies) return null;
+  // No mark, or the run's own live mark ("0"): no stop was asked.
+  if (replies[0] === null || replies[0] === "0") return false;
+  return replies[0] === "1" ? true : null;
+}
+
+/** A run of named steps as the route tells it: its id, and what is said as each step starts and ends. */
+export type AiStepsRun = { run: string; onStep: (step: AiStepId, state: AiStepState) => void };
+
+/**
+ * How a job told in steps runs each step (758 [STN5]), shared by every
+ * writer that has steps. A step is said as it starts, and as done only once
+ * its call reached the model: whether it did is read from the job's own
+ * budget (noteAiDispatch), so a step whose call never did is not charged,
+ * whatever the path that ended it (review of #3435, M1); a count that cannot
+ * be read is taken as sent, so what may have been billed stays counted.
+ * Between steps, a stop asked for is honored, and a mark that cannot be read
+ * starts nothing more either (rule 24). What is not run is added to `unrun`,
+ * whose jobs countedRun gives back once.
+ */
+function stepsOf(store: Store, steps: AiStepsRun | undefined, unrun: Unrun) {
+  const say = (step: AiStepId, state: AiStepState) => {
+    try {
+      steps?.onStep(step, state);
+    } catch (error) {
+      console.error("a step could not be said", error);
+    }
+  };
+  return {
+    /**
+     * One step's call. `reached` is false when it never reached the model; its jobs are then given back.
+     * `later` is the jobs of the steps after it: when the call throws (a rejected fetch, an answer that
+     * is not JSON), those steps never start and are given back, with this step's own jobs if its call
+     * never reached the model; what was sent stays counted (review of #3447, M1).
+     */
+    async step<R>(id: AiStepId, jobs: number, call: () => Promise<R>, later = 0): Promise<{ reached: boolean; value: R }> {
+      say(id, "started");
+      const before = aiDispatchCount();
+      const sent = () => {
+        const after = aiDispatchCount();
+        return before === null || after === null || after > before;
+      };
+      let value: R;
+      try {
+        value = await call();
+      } catch (error) {
+        unrun.jobs += (sent() ? 0 : jobs) + later;
+        throw error;
+      }
+      const reached = sent();
+      if (reached) say(id, "done");
+      else unrun.jobs += jobs;
+      return { reached, value };
+    },
+    /** A step left out before it started: its jobs are given back. */
+    skip(jobs: number) {
+      unrun.jobs += jobs;
+    },
+    /** Whether to go on to the steps left, worth `jobs`; when not, their jobs are given back. */
+    async goOn(jobs: number): Promise<boolean> {
+      if (!steps) return true;
+      const asked = await stopAsked(store, steps.run);
+      if (asked === false) return true;
+      unrun.jobs += jobs;
+      unrun.asked = asked === true;
+      return false;
+    },
+  };
 }
 
 // ------------------------------------------------------------------ jobs
@@ -1291,7 +1480,12 @@ export const REFUND_WORDS = /refund|money.?back|guarantee|reembols|devoluci|devo
  * (lib/ai-rules.ts).
  */
 
-async function readPdfFacts(store: Store, pdf: Uint8Array): Promise<string | null> {
+/**
+ * What the product's first pages show, or null. `seen.answered` is set only when the model answered with a reading in
+ * its JSON shape, so a caller tells "read, and nothing in it" apart from "could not be read" (a refused or failed call,
+ * or an answer with no JSON): only the first is ever said to the creator as an empty PDF (Claude 2 and Codex M on #3435).
+ */
+async function readPdfFacts(store: Store, pdf: Uint8Array, seen?: { answered: boolean }): Promise<string | null> {
   const system = [
     "You read the first pages of a product a creator sells, given as a PDF.",
     "List only what these pages actually show. Never add a chapter, a number, a result or a claim that is not on them, and never guess at the pages you were not given.",
@@ -1304,6 +1498,7 @@ async function readPdfFacts(store: Store, pdf: Uint8Array): Promise<string | nul
   const answer = await askModel(store, system, content, 1_500, answerModel());
   const json = answer ? jsonIn(answer) : null;
   if (!json) return null;
+  if (seen) seen.answered = true;
   const parts = (Array.isArray(json.parts) ? json.parts : [])
     .map((p: unknown) => (p && typeof p === "object" ? (p as Record<string, unknown>) : {}))
     .map((p: Record<string, unknown>) => ({ title: line(p.title, 80), detail: line(p.detail, 160) }))
@@ -1321,6 +1516,57 @@ async function readPdfFacts(store: Store, pdf: Uint8Array): Promise<string | nul
     .join("\n");
 }
 
+/**
+ * A job in two named steps from a product's own PDF (758 [STN5], unit 4,
+ * lib/product-pdf-assist.ts): its first pages read (readPdfFacts), then one
+ * writing call on the cheapest model, made from what they show. Both steps'
+ * jobs, READ_PDF_JOBS + 1, are taken before the first call; each call
+ * reserves its own money right before it is sent (askModel). A stop between
+ * the steps, a reading with nothing in it (said as "empty" in a run told in
+ * steps), a reading whose call throws or a request that cannot be made
+ * leaves the writing step out, and its job is given back; a step that ran
+ * stays counted, even when what it wrote is refused by `keep`.
+ */
+export async function readPdfThenWrite<T>(
+  store: Store,
+  pdf: Uint8Array,
+  now: number,
+  steps: AiStepsRun | undefined,
+  write: {
+    maxTokens: number;
+    /** The writing step's request, from the reading's facts, or null when none can be made. */
+    request: (fileFacts: string) => { system: string; prompt: string } | null;
+    /** What may be shown from the writing step's answer, or null. */
+    keep: (answer: string, request: { system: string; prompt: string }) => T | null;
+  },
+): Promise<AiResult<T> | AiStopped | AiDraftedGiven<T>> {
+  if (steps && !AI_RUN_ID.test(steps.run)) return { ok: false, reason: "off" };
+  if (!(pdf instanceof Uint8Array) || pdf.length === 0) return { ok: false, reason: "notes" };
+  const unrun: Unrun = { jobs: 0, asked: false };
+  const flow = stepsOf(store, steps, unrun);
+  return countedRun(store, now, async () => {
+    // Live before its first step, once its jobs are reserved, as writePage's run (#3435): a stop is written only over it.
+    if (steps) await markAiRunLive(store, steps.run);
+    const reading = { answered: false };
+    const read = await flow.step("read", READ_PDF_JOBS, () => readPdfFacts(store, pdf, reading), 1);
+    const fileFacts = read.value;
+    const request = fileFacts ? write.request(fileFacts) : null;
+    if (!request) {
+      flow.skip(1);
+      // The PDF, read, gave nothing to work from: a run told in steps says so, so the box does not ask for a retry that
+      // would read the same pages. A reading that failed (no readable answer) is said as failed, never as an empty PDF.
+      unrun.empty = !fileFacts && read.reached && reading.answered && steps !== undefined;
+      return null;
+    }
+    if (!(await flow.goOn(1))) return null;
+    const writing = await flow.step("write", 1, () => askModel(store, request.system, request.prompt, write.maxTokens, answerModel()));
+    if (!writing.reached || !writing.value) return null;
+    return write.keep(writing.value, request);
+    // The run took the PDF's jobs, so it may read the PDF once (DOCUMENT_READS_PER_PDF_RUN, as writePage's PDF run):
+    // without it, askModel refuses the reading before the provider is asked.
+  }, 1 + READ_PDF_JOBS, unrun, DOCUMENT_READS_PER_PDF_RUN);
+}
+
 export async function writePage(
   store: Store,
   input: {
@@ -1333,7 +1579,10 @@ export async function writePage(
     pdf?: Uint8Array | null | (() => Promise<Uint8Array | null>);
   },
   now = Date.now(),
-): Promise<AiResult<PageDraft> | { ok: false; reason: "file" }> {
+  steps?: AiStepsRun,
+): Promise<AiResult<PageDraft> | AiStopped | AiDraftedGiven<PageDraft> | { ok: false; reason: "file" }> {
+  // A run told in steps is named by the page; one that is not a run is refused before anything is taken.
+  if (steps && !AI_RUN_ID.test(steps.run)) return { ok: false, reason: "off" };
   const notes = block(input.notes, MAX_AI_NOTES);
   const about = block(input.about, MAX_ABOUT_LENGTH);
   const summary = line(input.summary, MAX_SUMMARY_LENGTH);
@@ -1341,20 +1590,39 @@ export async function writePage(
   const pdf = typeof given === "function" ? given : given && given.length > 0 ? given : null;
   // Something has to be said about the product, by the creator or by its own file.
   if (!notes && !about && !summary && !pdf) return { ok: false, reason: "notes" };
-  const jobs = pdf ? 1 + READ_PDF_JOBS : 1;
+  const unrun: Unrun = { jobs: 0, asked: false };
   // The file may be given as how to read it (6 November 2026): it is read only once the jobs are taken, so a store
   // with no allowance left (Creator's is 0) never spends a paid file-store read on a request that is refused. A file
-  // that cannot be read then gives every job back (counted does it, once), since nothing was asked of the model.
+  // that cannot be read then gives every job back (countedRun does it, once: no call reached the model), and the
+  // answer says the file, not a failed step.
   const unread = { file: false };
-  const done = await counted(store, now, async () => {
-    const pages = typeof pdf === "function" ? await pdf().catch(() => null) : pdf;
+  const flow = stepsOf(store, steps, unrun);
+  const done = await countedRun(store, now, async () => {
+    // A stepped run marks itself live before its first step, so the page's Stop (offered only once a step is said)
+    // finds it; a stop is written over nothing else. Only once the month's allowance is reserved: a refused
+    // request writes nothing (cloud O's LOW on #3435).
+    if (steps) await markAiRunLive(store, steps.run);
+    // What the product's own first pages hold, when the creator asked for them to be read.
+    const reading = { answered: false };
+    const pages = pdf ? (typeof pdf === "function" ? await pdf().catch(() => null) : pdf) : null;
     if (pdf && (!pages || pages.length === 0)) {
       unread.file = true;
       return null;
     }
-    // What the product's own first pages hold, when the creator asked for them to be read.
-    const fileFacts = pages ? await readPdfFacts(store, pages) : null;
-    if (pdf && !fileFacts && !notes && !about && !summary) return null;
+    const read = pages ? await flow.step("read", READ_PDF_JOBS, () => readPdfFacts(store, pages, reading), 1) : null;
+    const fileFacts = read ? read.value : null;
+    // Nothing to write from: the writing step never starts, and its job is
+    // given back. A run told in steps says the PDF, read, gave nothing, so
+    // the page can ask for a few words instead of a retry of the same; a
+    // reading that failed (no readable answer) is said as failed instead.
+    if (pdf && !fileFacts && !notes && !about && !summary) {
+      flow.skip(1);
+      unrun.empty = read !== null && read.reached && reading.answered && steps !== undefined;
+      return null;
+    }
+    // Between the two steps, a stop asked for is honored: the page is not
+    // asked for, and its job is given back.
+    if (pdf && !(await flow.goOn(1))) return null;
     const free = input.kind === "free";
     const system = [
       free
@@ -1389,7 +1657,10 @@ export async function writePage(
     ]
       .filter((l) => l !== "")
       .join("\n");
-    const answer = await ask(store, system, prompt, 3_000);
+    const writing = await flow.step("write", 1, () => ask(store, system, prompt, 3_000));
+    // Its money refused or its call never sent: not charged, and never said done.
+    if (!writing.reached) return null;
+    const answer = writing.value;
     const json = answer ? jsonIn(answer) : null;
     if (!json) return null;
     const list = (value: unknown) => (Array.isArray(value) ? value : []);
@@ -1416,8 +1687,8 @@ export async function writePage(
       seoDescription: line(json.seoDescription, 160),
     };
     return draft.headline && draft.benefits.length ? draft : null;
-  }, jobs);
-  // Every job is given back by counted itself, once: nothing was asked of the model (the merge of main into #2975).
+  }, pdf ? 1 + READ_PDF_JOBS : 1, unrun, pdf ? DOCUMENT_READS_PER_PDF_RUN : 0);
+  // Every job is given back by countedRun itself, once: nothing was asked of the model (the merge of main into #2975).
   if (!unread.file) return done;
   return { ok: false, reason: "file" };
 }

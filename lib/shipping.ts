@@ -20,9 +20,11 @@
  * with a tracking link if there is one (lib/shipments.ts).
  *
  * It is sold once, at one price or at several (sizes or versions: S, M, L;
- * signed or not): not with a price the buyer names, a payment plan, a gift
- * or a group purchase, and it delivers no file, link, course or call
- * besides. A limited quantity and the boxes at checkout work as they do on
+ * signed or not), or at a price the buyer chooses at or above the creator's
+ * lowest (514 [PF2], 16 November 2026: the creator's choose-your-price Price
+ * on Stripe, made for goods where the store collects tax,
+ * lib/pay-what-you-want.ts); not with a payment plan, a gift or a group
+ * purchase, and it delivers no file, link, course or call besides. A limited quantity and the boxes at checkout work as they do on
  * any product. At one price, limited or not, it goes in a cart with other
  * products the creator ships, to one address in a country they all ship to
  * (lib/cart-shipping.ts; 513 [PF1], unit 2b, 2 November 2026); not yet with
@@ -125,15 +127,19 @@ export type ShipCandidate = {
   bundle: unknown;
 };
 
-export type ShipProblem = "free" | "membership" | "call" | "pwyw" | "plan" | "delivery";
+export type ShipProblem = "free" | "membership" | "call" | "plan" | "delivery";
 
-/** Why this product cannot be shipped, or null when it can: sold once, at one price, delivering nothing else. */
+/**
+ * Why this product cannot be shipped, or null when it can: sold once, for a
+ * price (a set one, one per version, or one the buyer chooses at or above
+ * the lowest; 514 [PF2]), delivering nothing else.
+ */
 export function shipProblem(product: ShipCandidate): ShipProblem | null {
   if (product.priceCents <= 0) return "free";
   if (product.recurring) return "membership";
   if (product.call) return "call";
   // Several prices are sizes or versions of the same thing (added 11 October 2026): each ships the same way.
-  if (product.pwyw) return "pwyw";
+  // A price the buyer chooses ships too (514 [PF2]): Stripe adds the shipping on its own line beside it.
   if (product.plan) return "plan";
   if (product.file || product.link || product.course || product.podcast || product.bundle) return "delivery";
   if (product.options.some((option) => option.file || option.link)) return "delivery";
@@ -146,9 +152,19 @@ export function activeShipping(product: ShipCandidate & { shipping?: Shipping | 
   return shipping && shipProblem(product) === null ? shipping : null;
 }
 
-/** "the United States and Canada", "France, Belgium and 3 more", in the reader's language. */
-export function shipsToWords(shipping: Pick<Shipping, "region" | "countries">, locale: string, words: { and: string; more: (n: number) => string; everywhere: string }): string {
+/**
+ * "the United States and Canada", "France, Belgium and 3 more", in the reader's language.
+ * `except` (lib/physical-legal-ship.ts): everywhere but the EU and the UK while their VAT on goods is not collected,
+ * or but the EU/EEA and the UK while a product's safety fields are not filled too, said in a few words.
+ */
+export function shipsToWords(
+  shipping: Pick<Shipping, "region" | "countries"> & { except?: "eu-uk" | "eea-uk" },
+  locale: string,
+  words: { and: string; more: (n: number) => string; everywhere: string; everywhereElse?: string; everywhereElseEu?: string },
+): string {
   if (shipping.region === "world") return words.everywhere;
+  if (shipping.except === "eea-uk" && words.everywhereElse) return words.everywhereElse;
+  if (shipping.except === "eu-uk" && words.everywhereElseEu) return words.everywhereElseEu;
   let names: string[];
   try {
     const display = new Intl.DisplayNames([locale], { type: "region" });

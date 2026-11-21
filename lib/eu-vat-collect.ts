@@ -22,17 +22,20 @@
  *
  * Unknown is never zero and never collects nothing: an unreadable gate answer, no sourced rate, an unknown cost of
  * receiving the VAT, or a body applyEuVatLines will not take each refuse the checkout before Stripe is asked
- * (EuVatCollectRefused). The cost of receiving the VAT (the conversion of the fee, the exchange-rate ceiling until the
- * return, the remittance) has no reviewed figure yet (789 [IV1] step 2): euVatCollectionCostCents answers null, so
- * even with the switch on, every sale would be refused until that figure is reviewed. Pure but for nothing: no IO.
+ * (EuVatCollectRefused). The cost of receiving the VAT is computed part by part in lib/eu-vat-collection-cost.ts
+ * (unit 6), but its exchange-rate allowance until the return is paid is not reviewed yet: euVatCollectionCostCents
+ * answers null, so even with the switch on, every sale would be refused until one is. It reads only euros and pounds,
+ * so a sale in any other currency is refused too, while the euro or pound amount owed on it is not known at the sale.
+ * Pure but for nothing: no IO.
  *
  * Unit 2 (coordinator C5-20261120-2130): the UK, the same way, with the "UK" record and UK_VAT_COLLECT_REVIEWED's whole
  * switch (ukVatCollectOn), decided by lib/uk-vat.ts ukCheckout (two agreeing items placing the buyer in GB, an
  * electronically supplied service, the rate read before UK_VAT_RATE_VALID_UNTIL) and collected at the UK rate on the
  * line's real amount, marked `uk_vat`, never `eu_vat`, so neither return reads the other's sale. Two more unknowns
- * refuse, never collect zero: whether the product is an e-publication (zero-rated in the UK; no product carries that
- * classification yet, so ukCheckout refuses every UK sale), and the sterling rate of a sale in another currency (HMRC's
- * rate at the time of the supply, VAT Notice 700, 7.6, is not read here), so only a sale in pounds can collect.
+ * refuse, never collect zero: whether the product is an e-publication (zero-rated in the UK; since unit 5a the
+ * creator's own answer on each product, lib/catalog.ts Product.publication, read by notAPublication), and the sterling
+ * rate of a sale in another currency (HMRC's rate at the time of the supply, VAT Notice 700, 7.6, is not read here),
+ * so only a sale in pounds can collect.
  */
 import { EU_UK_REFUSED, consumerGate } from "@/lib/eu-vat-gate";
 import { type EuSupplyFields, euSupplyOf } from "@/lib/eu-vat-supply";
@@ -40,6 +43,7 @@ import { checkoutEvidence } from "@/lib/eu-vat-evidence";
 import { euCheckout } from "@/lib/eu-vat-checkout";
 import { EU_VAT_RATES, type EuVatRate, type VatOnTop, vatOnTop } from "@/lib/eu-vat-amount";
 import { applyEuVatLines } from "@/lib/eu-vat-lines";
+import { euVatCollectionCostCents } from "@/lib/eu-vat-collection-cost";
 import { recordedTreatment } from "@/lib/deemed-supplier";
 import { UK_VAT_RATE_VALID_UNTIL, ukCheckout, ukVatOnTop } from "@/lib/uk-vat";
 import { type SwitchInput, euVatCollectOn, ukVatCollectOn } from "@/lib/vat-registrations";
@@ -59,11 +63,11 @@ export class EuVatCollectRefused extends Error {
 }
 
 /**
- * The cost of receiving one sale's EU VAT through the platform's fee, in the charge's currency: the conversion of the
- * fee, the exchange-rate ceiling until the OSS return and the remittance. No reviewed figure yet (789 [IV1] step 2):
- * null, which refuses. Never zero.
+ * The cost of receiving one sale's EU or UK VAT through the platform's fee, in the charge's currency, part by part from
+ * lib/receiving-costs.ts (lib/eu-vat-collection-cost.ts, 789 [IV1] step 3, unit 6). The exchange-rate movement until
+ * the return is paid has no reviewed allowance yet, so it answers null, which refuses. Never zero.
  */
-export const euVatCollectionCostCents: (vatCents: number, currency: string) => number | null = () => null;
+export { euVatCollectionCostCents };
 
 /** Whether the EU may be collected now: the EU record says "collect" and the whole switch (lib/vat-registrations.ts) is on. */
 function collectingEu(records: unknown, vatSwitch: Omit<SwitchInput, "now"> | undefined, now: Date): boolean {
@@ -76,9 +80,23 @@ function collectingUk(records: unknown, vatSwitch: Omit<SwitchInput, "now"> | un
 }
 
 /**
- * The checkout route's EU and UK gate. `records`, `vatSwitch`, `now`, `rates` and `publication` are for tests only: the
- * route passes none of them, so it reads DEEMED_SUPPLIER_RECORDS, the reviewed switches, the clock and the official
- * rate table, and no product is classified as an e-publication or not (so no EU or UK sale collects).
+ * Unit 5a (Claude 5 ibqho's LEVE on #5008): whether the creator answered, on the product itself, that it is not an
+ * electronically supplied publication, and so did every member of a bundle. Anything else (not answered, answered that
+ * it is one, a member missing) is false, so EU and UK VAT are never collected on a guess. Read per product, so a cart
+ * holding an e-book beside a course is refused, and one answer never stands for another product.
+ */
+export function notAPublication(product: EuSupplyFields, members?: ReadonlyMap<string, EuSupplyFields>): boolean {
+  if (!product || product.publication !== false) return false;
+  if (product.bundle === null || product.bundle === undefined) return true;
+  if (!Array.isArray(product.bundle) || product.bundle.length === 0 || !members) return false;
+  return product.bundle.every((id) => typeof id === "string" && members.get(id)?.publication === false);
+}
+
+/**
+ * The checkout route's EU and UK gate. `records`, `vatSwitch`, `now` and `rates` are for tests only: the route passes
+ * none of them, so it reads DEEMED_SUPPLIER_RECORDS, the reviewed switches, the clock and the official rate table.
+ * Whether the product is an e-publication is the creator's own answer on the product (and on every bundle member):
+ * see notAPublication.
  */
 export function euSaleGate(input: {
   product: EuSupplyFields;
@@ -89,11 +107,6 @@ export function euSaleGate(input: {
   vatSwitch?: Omit<SwitchInput, "now">;
   now?: Date;
   rates?: readonly EuVatRate[];
-  /**
-   * Whether the product is an e-publication (zero-rated in the UK, possibly reduced-rated in a Member State): only an
-   * explicit `false` lets EU or UK VAT be collected. No product carries the classification yet, so nothing collects.
-   */
-  publication?: boolean;
 }): EuSaleGate {
   const base = consumerGate({ product: input.product, members: input.members, headers: input.headers, form: input.form });
   const now = input.now ?? new Date();
@@ -113,14 +126,15 @@ export function euSaleGate(input: {
   // Unit 4: the EU collects only for a product explicitly classified as not an e-publication (Directive 2006/112/EC
   // annex III, point 6, lets a Member State tax those at a reduced rate, and EU_VAT_RATES holds only the standard rate):
   // an e-publication or an unclassified product keeps the refusal, never the standard rate on a guess (TX policy).
-  if (eu && input.publication === false) {
+  const answered = notAPublication(input.product, input.members);
+  if (eu && answered) {
     const answer = euCheckout({ supply, priceCents: input.product.priceCents, items, rates: input.rates, records: input.records, vatSwitch: input.vatSwitch, now });
     if (answer.kind === "collect" && answer.vat.country === answer.place.country) return { ok: true, collect: { country: answer.place.country } };
   }
   // The UK (lib/uk-vat.ts ukCheckout): both items in GB, an electronically supplied service that is not an
   // e-publication, the switch and the rate's review date. Every other answer keeps consumerGate's refusal.
   if (uk) {
-    const answer = ukCheckout({ supply, priceCents: input.product.priceCents, items, vatSwitch: input.vatSwitch, now, publication: input.publication });
+    const answer = ukCheckout({ supply, priceCents: input.product.priceCents, items, vatSwitch: input.vatSwitch, now, publication: answered ? false : undefined });
     if (answer.kind === "collect" && answer.place.evidence.ip === "GB") return { ok: true, collect: { country: "GB" } };
   }
   return base;
@@ -130,6 +144,11 @@ export function euSaleGate(input: {
  * The cart route's gate (app/api/store/cart/route.ts), one product at a time as euSaleGate decides each: the first
  * refusal is the cart's, exactly as the route's loop over consumerGate returns it today. A cart collects only when every
  * product that needs VAT names the same country; products that disagree refuse the cart. Test inputs as euSaleGate's.
+ *
+ * A bundle in a cart is refused for now, even when the same bundle bought alone would be collected (Claude 6's LEVE on
+ * #5014): the cart route does not read the bundle's members, so notAPublication cannot see their answers and stays
+ * false. Reading them would add a read to every cart checkout with a bundle, a cost change for its own reviewed unit;
+ * until then a bundle in a cart is refused, never collected on a guess.
  */
 export function euCartGate(input: {
   products: readonly EuSupplyFields[];
@@ -139,7 +158,6 @@ export function euCartGate(input: {
   vatSwitch?: Omit<SwitchInput, "now">;
   now?: Date;
   rates?: readonly EuVatRate[];
-  publication?: boolean;
 }): EuSaleGate {
   let collect: { country: string } | null = null;
   for (const product of input.products) {

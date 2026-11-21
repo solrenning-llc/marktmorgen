@@ -1665,6 +1665,7 @@
     "components/product-safety-facts.tsx",
     "components/product-update-box.tsx",
     "components/promotion-planner.tsx",
+    "components/publication-choice.tsx",
     "components/purchase-card.tsx",
     "components/quiz-editor.tsx",
     "components/quiz-scoring.tsx",

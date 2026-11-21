@@ -20,7 +20,7 @@ import { isRedisConfigured } from "@/lib/redis";
 import { essentialLimitState } from "@/lib/request-guard";
 import { isHouseStore } from "@/lib/house-store";
 import type { Store } from "@/lib/store";
-import { fileContact } from "@/lib/inbox";
+import { contactStoreLive, fileContact } from "@/lib/inbox";
 
 import { MAX_MESSAGE, MAX_NAME, MIN_MESSAGE } from "@/lib/store-contact-rules";
 /** Messages one store receives in a day, at most. */
@@ -55,6 +55,8 @@ export async function sendContact(input: { store: Store; name: string; email: st
   if (byIp !== "within") return byIp === "exceeded" ? "limited" : "error";
   const byStore = await essentialLimitState("contact-store", who, MAX_PER_DAY, 86_400);
   if (byStore !== "within") return byStore === "exceeded" ? "limited" : "error";
+  const live = await contactStoreLive(store);
+  if (live !== true) return live === false ? "closed" : "error";
   const from = name || email;
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,

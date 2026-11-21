@@ -1,3 +1,6 @@
+import { CHAT_ADDRESS_FENCE_EXTRA_COMMANDS, CHAT_ADDRESS_FENCE_EXTRA_BYTES } from "@/lib/chat-summary";
+import { CONTACT_LIVE_COMMANDS, INBOX_LIVE_BYTES, INBOX_OPEN_FENCE_COMMANDS } from "@/lib/inbox";
+import { MAX_PER_DAY as CONTACTS_PER_DAY } from "@/lib/store-contact";
 import { HELD_RECHECKS_PER_DAY, HELD_RETRY_COUNTER_SECONDS, HELD_MONTH_COUNT_SECONDS, heldRecheckMemoryUsd } from "@/lib/held-store-rules";
 import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
 /**
@@ -132,7 +135,7 @@ import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
 import { CRM_VALUE_SAVE_BYTES, CRM_VALUE_SAVE_COMMANDS, CRM_VALUE_SAVE_TRIPS } from "@/lib/crm";
 import { LIFE_WRITE_MAX } from "@/lib/stats";
-import { EMAIL_KEY_HOLDS_MS, SUMMARY_TRIES, SUMMARY_TRY_COMMANDS_MOST } from "@/lib/stats-report";
+import { EMAIL_KEY_HOLDS_MS, SUMMARY_TRIES, SUMMARY_TRY_COMMANDS_MOST, SUMMARY_TRY_EXTRA_BYTES } from "@/lib/stats-report";
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
 import {
   PROVIDER_CHARGES_BPS, R2_CLASS_A_MICRO_USD_PER_MILLION, R2_CLASS_B_MICRO_USD_PER_MILLION, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
@@ -1168,7 +1171,7 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // An API request: the key, the store and the answer.
   api: request("light", 20 + TAKE_COMMANDS, 20_000),
   // A message written to the inbox, and its index.
-  inbox: request("light", 12 + TAKE_COMMANDS, 4_000),
+  inbox: request("light", 12 + TAKE_COMMANDS + INBOX_OPEN_FENCE_COMMANDS, 4_000 + INBOX_LIVE_BYTES),
   // An email sent from inside a request or a job already counted, and its count.
   email: PER_EMAIL + TAKE_COMMANDS * COMMAND,
   // An access email; and since 9 November 2026 (13 [D10], review 6748073377 of #3431, M2) the Path lead its link may
@@ -1478,7 +1481,8 @@ export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTries
  * - routeCommandsPerTry: the route's own Redis commands on its longest try, measured with a post and the owner's
  *   email both refused (every part's mark taken, its first try's time kept with SET NX EX and GET, the mark let go,
  *   the tries counted with INCR and EXPIRE, the claim let go with DEL, and on the week the GET of firstTryOf), on both
- *   routes (tests/numbers-summary-retry-cost.test.ts: weekly 20, monthly 16): SUMMARY_TRY_COMMANDS_MOST;
+ *   routes (tests/numbers-summary-retry-cost.test.ts), counting the store-fenced EVALs and their inner calls: SUMMARY_TRY_COMMANDS_MOST;
+ * - extraWireBytesPerTry: SUMMARY_TRY_EXTRA_BYTES covers the five bounded store-fenced admissions and uncertain-claim reads. A legacy store is read only within Redis, with GETRANGE capped before JSON decode; its JSON is not returned on the wire. The period claim, each part with its first timestamp, AI first-try read and retry increment/release check identity and erasing atomically (lib/summary-live.ts). A gone store is decided without new tries or notices;
  * - emailsPerTry: at most one owner's email, through sendEmailPinned under `numbers-summary:<claim key>` (lib/email.ts),
  *   a company email (EMAIL_SITES, meter company), let go for another try only while its first try is younger than
  *   EMAIL_KEY_HOLDS_MS (23 h); the pinned sender's own commands (keepSender, moveToResend) and its one request a sender
@@ -1489,7 +1493,7 @@ export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTries
  * A scheduled job, bounded by its schedule and SUMMARY_TRIES, a company cost like the other per-store cron work, not a
  * plan's allowance; its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.
  */
-export const NUMBERS_SUMMARY_RETRY = { triesPerPeriod: SUMMARY_TRIES, routeCommandsPerTry: SUMMARY_TRY_COMMANDS_MOST, emailsPerTry: 1, aiJobsPerPeriod: 1, emailKeyHoldsMs: EMAIL_KEY_HOLDS_MS } as const;
+export const NUMBERS_SUMMARY_RETRY = { triesPerPeriod: SUMMARY_TRIES, routeCommandsPerTry: SUMMARY_TRY_COMMANDS_MOST, extraWireBytesPerTry: SUMMARY_TRY_EXTRA_BYTES, emailsPerTry: 1, aiJobsPerPeriod: 1, emailKeyHoldsMs: EMAIL_KEY_HOLDS_MS } as const;
 export const NUMBERS_SUMMARY_RETRY_COMMANDS = NUMBERS_SUMMARY_RETRY.triesPerPeriod * NUMBERS_SUMMARY_RETRY.routeCommandsPerTry;
 /**
  * What a PayPal return sends before PayPal is asked to take the payment (lib/paypal-sales.ts, watchFirst; #3404), in
@@ -1765,6 +1769,12 @@ export const TEAM_COMMANDS_PER_VIEW = 2;
 
 /** Windows of a counter that a 31-day month can touch. */
 export const DAY_WINDOWS = 32;
+/** The read-only contact admission is after the existing rolling-day store cap, before mail or an inbox unit.
+ * Price every possible admission (sent, failed or gone), at 32 daily windows, including its own light compute.
+ * Two possible store-limit identities are covered: handle before statsId, then the immutable statsId.
+ * The inbox writer's two additional calls and bounded bytes are in UNIT_COST.inbox above. */
+export const CONTACT_LIVE_MONTH = 2 * CONTACTS_PER_DAY * DAY_WINDOWS * request("light", CONTACT_LIVE_COMMANDS, INBOX_LIVE_BYTES);
+
 
 /** CX-61: two bounded provider reads, independent of released-name history.
  * Vercel's official regional table read 2026-11-04 has a highest memory rate
@@ -2193,10 +2203,12 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: (tier) => micro(uploadWorstCostMicroUsd(tier)),
     sources: [
       { file: "lib/upload-budget-policy.ts", names: ["uploadWorstCostMicroUsd", "PAID_UPLOAD_OPENS"] },
-      { file: "lib/spend-cost-table.ts", names: ["UPLOAD_OPEN_CLASS_A_OPS", "UPLOAD_OPEN_CLASS_B_OPS", "UPLOAD_OPEN_BLOB_ADVANCED_OPS", "BLOB_ADVANCED_MICRO_USD_PER_MILLION", "UPLOAD_REQUESTS_PER_OPEN", "VAULT_LIST_PAGES", "VAULT_MEASURE_REQUESTS", "BLOB_LIST_PAGES", "VAULT_CONTROL_CALLS_PER_UPLOAD", "UPLOAD_OPEN_STREAM_API_READS", "STREAM_API_ALLOWANCE_MICRO_USD_PER_MILLION"] },
+      { file: "lib/live-fence.ts", names: ["SET_IF_STORE_LIVE"] },
+      { file: "lib/spend-cost-table.ts", names: ["UPLOAD_OPEN_CLASS_A_OPS", "UPLOAD_OPEN_CLASS_B_OPS", "UPLOAD_OPEN_BLOB_ADVANCED_OPS", "BLOB_ADVANCED_MICRO_USD_PER_MILLION", "UPLOAD_REQUESTS_PER_OPEN", "VAULT_LIST_PAGES", "VAULT_MEASURE_REQUESTS", "BLOB_LIST_PAGES", "VAULT_CONTROL_CALLS_PER_UPLOAD", "UPLOAD_OPEN_STREAM_API_READS", "STREAM_API_ALLOWANCE_MICRO_USD_PER_MILLION", "UPLOAD_OPEN_FENCE_EXTRA_COMMANDS"] },
+      { file: "lib/storage-reservations.ts", names: ["WRITE_LIVE", "STORAGE_FENCE_EXTRA_COMMANDS"] },
       { file: "lib/stream-rules.ts", names: ["STREAM_HELD_REQUESTS"] },
     ],
-    basis: "Every upload operation the automatic upload allowance can start, each start priced at the most operations its own path makes: on R2, every page of the vault listing admission reads, the multipart create and complete, and three file measurements; on Vercel Blob, every page of the host file store's listing admission reads, as Advanced Operations at the top regional rate; on Bunny Stream, the read of the store's collection admission makes, at a stated allowance, since no rate for it is cited (tests/vault-open-class-a.test.ts). Two finish or cancel requests per upload: a finish and a confirmed cancel are written down and a repeat answered from that record, an unconfirmed cancel may be asked again inside the two, a finish refused for its piece list asks R2 nothing, and a request past them is refused before R2 is asked (tests/vault-control-once.test.ts).",
+    basis: "Every upload operation the automatic upload allowance can start, each start priced at the most operations its own path makes: on R2, every page of the vault listing admission reads, the multipart create and complete, and three file measurements; on Vercel Blob, every page of the host file store's listing admission reads, as Advanced Operations at the top regional rate; on Bunny Stream, the read of the store's collection admission makes, at a stated allowance, since no rate for it is cited (tests/vault-open-class-a.test.ts). Two finish or cancel requests per upload: a finish and a confirmed cancel are written down and a repeat answered from that record, an unconfirmed cancel may be asked again inside the two, a finish refused for its piece list asks R2 nothing, and a request past them is refused before R2 is asked (tests/vault-control-once.test.ts). Since 20 November 2026 (Codex L-20261120-0141) every write of an upload's open is fenced on the store, so a provider answering after the store's erasure writes nothing back: each start is priced with UPLOAD_OPEN_FENCE_EXTRA_COMMANDS (12) more database commands at its worst path, held by tests/vault-erasure-fence.test.ts.",
   },
   {
     id: "workflows",
@@ -2357,6 +2369,16 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: ALL_TIERS_SAME(0),
     sources: [{ file: "app/[handle]/certificate/[id]/page.tsx", names: ["const load = cache(", "if (await isResting(store)) return { store, resting: true as const };", "if (found.resting) return <StoreResting store={found.store} />;"] }],
     basis: "A public page of the store: the page and its title share one load, which takes one of the store's public requests before the certificate, or the sample's listing and course, is read, and rests with the public pages. It reads no more than a product's page (the store, a listing, a course), 5 commands measured against COMMANDS.laterPage + COMMANDS.laterCount, so it is inside the visits and public-requests lines (tests/certificate-page-admission.test.ts).",
+  },
+  {
+    id: "chat-address-fence",
+    feature: "Atomic chat webhook setting: only the additional live-store fence",
+    monthlyUsd: () => 10 * 24 * DAY_WINDOWS * (CHAT_ADDRESS_FENCE_EXTRA_COMMANDS * COMMAND + CHAT_ADDRESS_FENCE_EXTRA_BYTES * DB_BYTE),
+    sources: [
+      { file: "lib/chat-summary.ts", names: ["CHAT_ADDRESS_FENCE_EXTRA_COMMANDS", "CHAT_ADDRESS_FENCE_EXTRA_BYTES"] },
+      { file: "app/api/store/chat-summary/route.ts", names: ['essentialLimitState("chat-summary", store.handle, 10, 3600)'] },
+    ],
+    basis: "At most ten first-message attempts per hour; 32 times 24 hours bounds a billing month of at most 31 days and its partial boundary hour. EVAL plus EXISTS, HEXISTS and SET replaces one SET, three extra billed Redis commands. The existing request and provider budgets are not re-certified by this incremental line. Includes 2 KiB of extra script/key/envelope transfer per attempt, above the sealed value already in the SET. No extra retained key.",
   },
   {
     id: "public-requests",
@@ -2535,6 +2557,10 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/download/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now, \"buyer\", { shared: true })", "givePublicRequests(store, units, now, { shared: true })", "copyMeter(store)"] },
       { file: "app/api/store/preview/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now)", "givePublicRequests(store, units, now)"] },
       { file: "lib/file-store.ts", names: ["for (let page = 0; page < BLOB_LIST_PAGES; page += 1)"] },
+      // A join request's grant and erasure note are written in SAVE_GRANT_IF_LIVE (Codex L-20261120-2002): one EVAL and at
+      // most JOIN_GRANT_CALLS inside it, in place of the plain four-command pipeline, inside the join's own request
+      // (withinStore "join-ip"); a store whose erasure began writes nothing and sends no email.
+      { file: "lib/store-join.ts", names: ["SAVE_GRANT_IF_LIVE", "JOIN_GRANT_CALLS", "withinStore(\"join-ip\""] },
       { file: "lib/vault.ts", names: ["for (let page = 0; page < VAULT_LIST_PAGES; page += 1)"] },
       // A waitlist's confirm press writes its entry back in WAIT_CONFIRM (#4268), one EVAL and WAIT_CONFIRM_CALLS inside it, and takes WAIT_CONFIRM_UNITS more of the store's requests before it writes (#4404).
       { file: "lib/waitlist.ts", names: ["WAIT_CONFIRM", "WAIT_CONFIRM_CALLS", "WAIT_CONFIRM_UNITS", "takePublicRequest(store, \"public\", Date.now(), WAIT_CONFIRM_UNITS)"] },
@@ -2753,13 +2779,14 @@ export const COST_LINES: CostLine[] = [
   {
     id: "inbox",
     feature: "The inbox: visitors' chats and messages, contact forms filed (17 October 2026)",
-    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "inbox"),
+    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "inbox") + CONTACT_LIVE_MONTH,
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "inbox"] },
-      { file: "lib/inbox.ts", names: ["takeAllowance"] },
+      { file: "lib/inbox.ts", names: ["takeAllowance", "INBOX_OPEN_FENCE_COMMANDS", "CONTACT_LIVE_COMMANDS", "INBOX_LIVE_BYTES", "INBOX_OPEN_WRITE", "INBOX_STORE_LIVE"] },
+      { file: "lib/store-contact.ts", names: ["MAX_PER_DAY", "contactStoreLive"] },
       { file: "lib/inbox-rules.ts", names: ["NEW_PER_DAY", "VISITOR_PER_HOUR"] },
     ],
-    basis: "Every message that arrives in the window, written with its index; the notices and replies it brings are store emails (line store-email).",
+    basis: "Every message that arrives in the window, written with its index. Each new conversation checks the same live identity and the erasing field in its write: two extra inner Redis calls and INBOX_LIVE_BYTES extra wire bytes, priced on every inbox unit. The contact form also checks before mail: its EVAL plus those two reads and bounded wire bytes, at two store-counter identities times MAX_PER_DAY times DAY_WINDOWS, even if sending or filing fails and no inbox unit was taken (CONTACT_LIVE_MONTH). A trial carries that same contact admission cost. No raw legacy store record is returned across the database wire; GETRANGE bounds its JSON read inside Lua to MAX_STORE_BYTES plus one. The notices and replies are store emails (line store-email).",
   },
   {
     id: "integrations",
@@ -3225,6 +3252,7 @@ export function nonPayingWorst(): number {
     + readingsCost(REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS)
     + TRIAL_ORDERS * ORDER_COST
     + TRIAL_MONTHLY_EMAILS * PER_EMAIL
+    + CONTACT_LIVE_MONTH
     + TRIAL_VIDEO_HOURS * hourCost()
     + TRIAL_DAILY_RUNS * 15 * WORST_COMMANDS_PER_RUN * COMMAND
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)
@@ -3594,6 +3622,7 @@ export const NOT_A_COST: Record<string, string> = {
   EMAIL_CODE_TRIES_PER_IP_HOUR: "Code tries one machine may take in the hour (Claude 3 on #2736), counted before any record is read: the bound on the reads a machine can buy with made-up request ids, two commands each past it.",
   OLD_PAYMENT_LOOKUPS_PER_READING: "Lookups of a refunded or disputed payment's own invoice (GET /invoice_payments filtered by the payment, the invoice expanded, one call each) one reading of a store's numbers may ask the creator's Stripe account (lib/stats.ts, paymentOfStoreInvoice; #4549), only for a refund or dispute in the reading's window whose payment the invoices it already read do not confirm, at most OLD_PAYMENT_LOOKUPS_PER_READING (10) a reading, so at most 10 more calls than before per reading. Past it, or when Stripe cannot be asked or answers in another shape, the payment stays unconfirmed and the kept total reads unknown. No store command; Stripe bills no API call: bounded by the readings of the store's numbers its own pages and jobs already make, whose costs are their own lines. Held by tests/stats-old-payment-confirm.test.ts (10 calls at most). Its dollar figure is not a line of lib/llc-fixed-costs.ts, not certified, never zero.",
   DISPUTE_READS_PER_READING: "Questions about a dispute (GET /disputes?charge=) one reading of a store's booked calls may ask Stripe, only for a charge Stripe marks as disputed (lib/calls.ts, callOrLost; lib/refunds.ts, keptUnlessLost); one for a booking read alone (paidCall). Past it, or when Stripe cannot be asked, the booking keeps its time. No store command and no other call; Stripe bills no API call: bounded by the readings the store's own pages and jobs already make, whose costs are their own lines.",
+  REVIEWED_VAT_FX_ALLOWANCES: "The reviewed allowances for the exchange-rate movement between a store sale with EU or UK VAT and the payment of its OSS or HMRC return (lib/eu-vat-collection-cost.ts, 789 [IV1] step 3, unit 6): not an allowance of a plan and not metered. Each, with its https source and the days it holds, sets one part of what the platform's fee carries beside the VAT, taken from the creator's charge, never from Marktmorgen's revenue or a plan. Empty on purpose: with none reviewed the cost of receiving the VAT is unknown (null), so every collection is refused, never collected at zero. The OSS, IOSS and UK VAT registrations and filings are LLC fixed costs (FX275), not this.",
   TAX_OBSERVATION_LIMITS: "Inactive diagnostic processing bounds: CURRENT_TAX_OBSERVATION_POLICY is null, so no production journal IO is enabled. Activation requires explicit scope, absolute retention, atomic data-room reservation and full-lifetime paid storage/work cost evidence; these limits are not a zero cost or a funded allowance.",
   BACKUP_FILES_PAGES_PER_STORE: "The provider pages one complete listing of one source of one store may take in the backup files route (273 [BK1] files part 1, lib/backup-files-contract.ts, lib/backup-files-source.ts): a bound that only refuses (a store past it is answered over_bound, never complete), not a figure of its own. What the route spends is a company cost (the company's backup, 100% Marktmorgen under FX275), priced by backupFilesRouteWorstMonth (lib/backup-files-source.ts, held by tests/backup-files-cost.test.ts; Claude 7's MÉDIO on #3313): each admitted page, counted by takeDayPage against the review's maxPagesPerDay a source a UTC day before any provider call, at BACKUP_FILES_PAGE_MICRO_USD (1,548, the dated review's ceiling per call of docs/backup-costs-2026-11-08.md section 5b: the function held its whole maxDuration at 2 GB on CPU in the dearest region, a full page of answer as Fast Origin Transfer and Fast Data Transfer with its CDN Request, the two Upstash commands of the count and a page of Upstash bandwidth, one listing and one Blob signing token as Advanced Operations, no free quota), for each source on, and the one call a source a day the Worker may be refused past it (BACKUP_FILES_DAY_CEILING_REFUSALS, lib/backup-files-contract.ts: the Worker stops that source for the rest of the UTC day; priced at a whole page; Codex N1's LOW 1 on #3313), 32 UTC days a month, plus R2's rounding block and 10% room; 0 while BACKUP_FILES_ROUTE_REVIEW (lib/backup-files-review.ts) is null, since the route answers 404 before any command; unknown (null), never zero, if Bunny Stream, whose listing price is not read, is turned on. At a review of 40 pages a day that is 9,418,148 micro-dollars, $9.42 a month. It joins LLC_FIXED_COST_IDS (lib/llc-fixed-costs.ts) once #3481, which changes that same line, is in (rule 3: one pull request at a time on it); until then the owner's review of the route is what admits any of it, and nothing calls the route.",
   BACKUP_FILES_OBJECTS_PER_MONTH: "The objects the backup Worker may copy for one store in a month, all sources together (273 [BK1] files part 1, item 8, lib/backup-files-contract.ts): the Worker's own ceiling before each copy, at the 10,000 its R2 operations are priced at in docs/backup-costs-2026-11-08.md, section 5b. Nothing in this code spends them: the Worker that copies is not built (only its contract is), and its per-plan line comes with it, from that section; the route that lists for it is priced by backupFilesRouteWorstMonth (BACKUP_FILES_PAGES_PER_STORE).",

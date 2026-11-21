@@ -254,6 +254,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:weekly:lock@app/api/cron/weekly/route.ts": lock("The weekly job"),
   "nl:meet:zoomseen:@app/api/integrations/zoom/deauthorize/route.ts": company("Zoom's notices already handled", "Zoom's own notices, kept a day: the company's."),
   "nl:inbound:seen:@app/api/mail/inbound/route.ts": company("Inbound mail already handled", "The email provider's notices, kept a few days: the company's."),
+  "nl:inbound:counted:@lib/inbound-mail.ts": company("Inbound mail already counted in a store's hourly allowance", "One mark a message written to a store, kept the allowance's hour: the company's."),
   "nl:inbound:support:bytes:@lib/inbound-mail.ts": company("Bytes of files sent on to our own support in a UTC day", "One counter a day, kept two days: the company's (docs/funded-exposure-review.md)."),
   "nl:inbound:support:counted:@lib/inbound-mail.ts": company("The counts one support message has taken, and its files' bytes", "One small hash a message, kept two days: the company's."),
   "nl:inbound:support:held:@lib/inbound-mail.ts": company("That the support inbox was told today that messages are held", "One key a day, kept two days: the company's."),

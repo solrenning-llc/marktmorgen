@@ -8,8 +8,17 @@ import { readVaultPath, UPLOAD_SECONDS } from "@/lib/vault-rules";
  * of the open (the cleanup's, the reservation, the upload record, the bind and a release) is made only while the store
  * is live: a provider that answers after the store's erasure began writes nothing of it back, and the session it made
  * is retired (Codex L-20261120-0141). The route always passes it (app/api/store/vault/route.ts).
+ *
+ * `admit` takes what must be paid for before an upload session is opened (the
+ * door's monthly upload budget, lib/upload-budget.ts, which is never given
+ * back). It runs only after the storage reservation is granted, so a store
+ * refused for storage (`storage_limit`, `storage_pending`, `storage_busy`)
+ * loses none of that budget. When it answers false the reservation is
+ * released and no session is opened. It has no default: a caller that
+ * forgot it would open a session with nothing paid for (review of #4019).
  */
-export async function openReservedVault(input: Parameters<typeof openVaultUpload>[0], limit: number, measure: () => Promise<StorageUse> = () => storageUsed(input.folder, limit)) {
+export async function openReservedVault(input: Parameters<typeof openVaultUpload>[0], limit: number, measure: (() => Promise<StorageUse>) | undefined, admit: () => Promise<boolean>) {
+  measure ??= () => storageUsed(input.folder, limit);
   const fence = input.fence;
   // Opportunistic cleanup is bounded to one session per admission attempt.
   await retireStorage(input.folder, Date.now() - UPLOAD_SECONDS * 1000,
@@ -21,6 +30,7 @@ export async function openReservedVault(input: Parameters<typeof openVaultUpload
   }, fence);
   let opened: Awaited<ReturnType<typeof openVaultUpload>> | undefined;
   try {
+    if (!(await admit())) { await releaseStorage(input.folder, entry.id, fence).catch(gone); return { ok: false as const, reason: "budget" as const }; }
     opened = await openVaultUpload({ ...input, multipart: true, reservation: entry.id });
     if (!opened.ok) { await releaseStorage(input.folder, entry.id, fence).catch(gone); return opened; }
     await bindStorage(input.folder, entry.id, opened.upload.pathname, opened.sessionId, fence);

@@ -123,6 +123,103 @@ redis.call('HSET', KEYS[1], 'policy', ARGV[2])
 return 1
 `;
 
+/** Answers, without writing anything, what OPEN_UPLOAD_BUDGET followed by
+ * RESERVE_UPLOAD_BUDGET would answer for one upload start right now: 1 when
+ * the start would be taken, 0 otherwise. Only reads (TYPE, TTL, EXISTS, HGET).
+ * KEYS: the month's ledger, its opened marker. ARGV 1-12: RESERVE's own
+ * arguments for an 'open'; 13: '1' under the automatic policy, which opens or
+ * carries the ledger first; 14: the review id; 15-20: each scope's funded
+ * allocations, as OPEN takes them. scripts/test_upload_budget_redis.py holds
+ * it to the answers of the real OPEN and RESERVE on real Redis.
+ */
+export const CHECK_UPLOAD_BUDGET = `
+local function amount(value)
+  if not value or not string.match(value, '^%d+$') or (#value > 1 and string.sub(value, 1, 1) == '0') then return nil end
+  local n = tonumber(value)
+  if not n or n < 0 or n > 9000000000000000 or n ~= math.floor(n) then return nil end
+  return n
+end
+local scopes = {'creator', 'pro', 'scale', 'trial', 'setup', 'ended'}
+local names = {'opens','bytes','controls'}
+local automatic = ARGV[13] == '1'
+local fundedAll = {}
+if automatic then
+  for i = 1, 6 do
+    fundedAll[i] = amount(ARGV[14 + i])
+    if not fundedAll[i] then return 0 end
+  end
+end
+local fresh, carried = false, nil
+local kind = redis.call('TYPE', KEYS[1]).ok
+if kind == 'none' then
+  if not automatic or redis.call('EXISTS', KEYS[2]) ~= 0 then return 0 end
+  fresh = true
+else
+  if kind ~= 'hash' or redis.call('TTL', KEYS[1]) ~= -1 then return 0 end
+  local policy = redis.call('HGET', KEYS[1], 'policy')
+  if automatic then
+    if redis.call('HGET', KEYS[1], 'review') ~= ARGV[14] then return 0 end
+    if policy ~= ARGV[1] then
+      for _, name in ipairs(names) do
+        if not amount(redis.call('HGET', KEYS[1], 'company:' .. name)) then return 0 end
+      end
+      for i = 1, 6 do
+        local was = amount(redis.call('HGET', KEYS[1], 'funded:' .. scopes[i]))
+        local left = amount(redis.call('HGET', KEYS[1], 'slots:' .. scopes[i]))
+        if not was or not left or left > was then return 0 end
+        if scopes[i] == ARGV[3] then
+          local claimed = was - left
+          if fundedAll[i] > claimed then carried = fundedAll[i] - claimed else carried = 0 end
+        end
+      end
+    end
+  elseif policy ~= ARGV[1] then
+    return 0
+  end
+end
+local bytes = amount(ARGV[5])
+if not bytes or ARGV[4] ~= 'open' or bytes <= 0 then return 0 end
+local storeLimit = {amount(ARGV[6]), amount(ARGV[7]), amount(ARGV[8])}
+local companyLimit = {amount(ARGV[9]), amount(ARGV[10]), amount(ARGV[11])}
+local funded = amount(ARGV[12])
+if not funded then return 0 end
+local company, used = {}, {}
+local prefix = 'store:' .. ARGV[2] .. ':'
+local scope = false
+if not fresh then scope = redis.call('HGET', KEYS[1], prefix .. 'scope') end
+for i = 1, 3 do
+  if not storeLimit[i] or not companyLimit[i] then return 0 end
+  if fresh then company[i] = 0 else company[i] = amount(redis.call('HGET', KEYS[1], 'company:' .. names[i])) end
+  if not company[i] or company[i] > companyLimit[i] then return 0 end
+  local raw = false
+  if not fresh then raw = redis.call('HGET', KEYS[1], prefix .. names[i]) end
+  if not scope then
+    if raw then return 0 end
+    used[i] = 0
+  else
+    used[i] = amount(raw)
+    if not used[i] or used[i] > storeLimit[i] or used[i] > company[i] then return 0 end
+  end
+end
+if scope and scope ~= ARGV[3] then return 0 end
+if not scope then
+  local slots
+  if fresh then
+    for i = 1, 6 do if scopes[i] == ARGV[3] then slots = fundedAll[i] end end
+  elseif carried then
+    slots = carried
+  else
+    slots = amount(redis.call('HGET', KEYS[1], 'slots:' .. ARGV[3]))
+  end
+  if not slots or slots <= 0 or slots > funded then return 0 end
+end
+local charge = {1, bytes, 1}
+for i = 1, 3 do
+  if charge[i] > storeLimit[i] - used[i] or charge[i] > companyLimit[i] - company[i] then return 0 end
+end
+return 1
+`;
+
 /**
  * `window` (17 October 2026): the store's allowance window
  * (lib/allowance-window.ts). A paying store's monthly allowance follows its
@@ -130,21 +227,27 @@ return 1
  * month began in, under the store and the month's own name, so one payment
  * buys one month of uploads however many calendar months it touches.
  */
-async function reserve(statsId: string, scope: UploadBudgetScope, action: 'open'|'control', bytes: number, given: UploadBudgetPolicy|null, window: AllowanceWindow|null): Promise<boolean> {
-  if(!window)return false;
+function prepare(statsId: string, scope: UploadBudgetScope, action: 'open'|'control', bytes: number, given: UploadBudgetPolicy|null, window: AllowanceWindow|null) {
+  if(!window)return null;
   const began=window.billing?new Date(window.start):null;
-  if(began && (Date.now()-window.start>32*86_400_000 || window.start-Date.now()>300_000))return false;
+  if(began && (Date.now()-window.start>32*86_400_000 || window.start-Date.now()>300_000))return null;
   const policy=began && given?.reviewId===AUTOMATIC_UPLOAD_REVIEW_ID?currentUploadBudgetPolicy(began):given;
   if(!isUploadBudgetConfigured(policy,began??new Date()) || !isRedisConfigured() || !/^[a-f0-9]{32}$/.test(statsId)
     || !(UPLOAD_BUDGET_SCOPES as readonly string[]).includes(scope)
     || !Number.isSafeInteger(bytes) || bytes<0 || bytes>UPLOAD_BUDGET_RULES.maxInteger
-    || (action==='open' && bytes===0) || (action==='control' && bytes!==0))return false;
+    || (action==='open' && bytes===0) || (action==='control' && bytes!==0))return null;
   const cap=policy.perStore[scope], company=policy.company;
-  if(cap.controlRequests<1 || (action==='open' && (cap.opens<1 || bytes>cap.authorizedBytes)))return false;
+  if(cap.controlRequests<1 || (action==='open' && (cap.opens<1 || bytes>cap.authorizedBytes)))return null;
   const key=uploadLedgerKey(policy.month), snapshot=uploadBudgetSnapshot(policy);
-  const take:(string|number)[]=['EVAL',RESERVE_UPLOAD_BUDGET,1,key,
-      snapshot,window.billing?statsId+'@'+window.id:statsId,scope,action,bytes,cap.opens,cap.authorizedBytes,cap.controlRequests,
+  const args:(string|number)[]=[snapshot,window.billing?statsId+'@'+window.id:statsId,scope,action,bytes,cap.opens,cap.authorizedBytes,cap.controlRequests,
       company.opens,company.authorizedBytes,company.controlRequests,policy.fundedStores[scope]];
+  return {policy,key,snapshot,args};
+}
+async function reserve(statsId: string, scope: UploadBudgetScope, action: 'open'|'control', bytes: number, given: UploadBudgetPolicy|null, window: AllowanceWindow|null): Promise<boolean> {
+  const prepared=prepare(statsId,scope,action,bytes,given,window);
+  if(!prepared)return false;
+  const {policy,key,snapshot,args}=prepared;
+  const take:(string|number)[]=['EVAL',RESERVE_UPLOAD_BUDGET,1,key,...args];
   try{
     if(policy.reviewId!==AUTOMATIC_UPLOAD_REVIEW_ID){
       const result=await redisPipeline([take]);
@@ -165,6 +268,27 @@ export async function reserveStoreUpload(store: UploadStore, bytes: number, back
   if(!uploadBackendOpen(backend)||!Number.isSafeInteger(bytes)||bytes<=0)return false;
   if(store?.period?.funded===true&&!(await reservePaidResourceWindow(store)))return false;
   return !!store?.statsId && reserve(store.statsId,uploadScopeFor(store),'open',bytes,policy,allowanceWindow(store));
+}
+/** Whether reserveStoreUpload(store, bytes, backend) could take the upload now,
+ * read with one EVAL of CHECK_UPLOAD_BUDGET that writes nothing. A door asks it
+ * before work that costs provider requests (measuring storage, cleanup), so a
+ * spent allowance is refused before any of it. It does not reserve: the take
+ * itself still decides, and a race only means the take refuses. An unknown or
+ * malformed reply answers false. A funded store's paid resource window
+ * (reservePaidResourceWindow) is not read here; the take still requires it.
+ */
+export async function uploadBudgetCouldOpen(store: UploadStore, bytes: number, backend: UploadBackend, policy: UploadBudgetPolicy|null=currentUploadBudgetPolicy()): Promise<boolean> {
+  if(!uploadBackendOpen(backend)||!Number.isSafeInteger(bytes)||bytes<=0||!store?.statsId)return false;
+  const prepared=prepare(store.statsId,uploadScopeFor(store),'open',bytes,policy,allowanceWindow(store));
+  if(!prepared)return false;
+  const {policy:used,key,args}=prepared;
+  const automatic=used.reviewId===AUTOMATIC_UPLOAD_REVIEW_ID;
+  const check:(string|number)[]=['EVAL',CHECK_UPLOAD_BUDGET,2,key,uploadOpenedKey(used.month),...args,
+    automatic?'1':'0',used.reviewId,...UPLOAD_BUDGET_SCOPES.map(name=>used.fundedStores[name])];
+  try{
+    const result=await redisPipeline([check]);
+    return Array.isArray(result) && result.length===1 && result[0]===1;
+  }catch{return false;}
 }
 /** Signing requests share the store's monthly control ceiling.
  * Completing or canceling an existing grant remains accessible; the reviewed

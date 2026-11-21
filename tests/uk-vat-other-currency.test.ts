@@ -95,15 +95,36 @@ function main(): void {
   is("yen, not written in hundredths: refused, untouched", [tryCollect(yen, { sterlingRates: [JPY] }), yen.has("line_items[1][quantity]")], ["refused", false]);
   is("a month with no row: refused", tryCollect(body("eur"), { sterlingRates: [ROW], now: new Date("2026-11-30T12:00:00Z") }), "refused");
 
+  part("The sterling month is the month the buyer pays in (Claude 1's LOW on #5032)");
+  const NOV: HmrcPeriodRate = { ...ROW, month: "2026-11", perPound: "1.1930", readOn: "2026-11-21" };
+  const lateNov = new Date("2026-11-30T23:50:00Z");
+  const crossing = body("eur");
+  is("RED: a checkout opened on 30/11 at 23:50 that stays open into December: refused, untouched", [tryCollect(crossing, { sterlingRates: [NOV, ROW], now: lateNov }), crossing.has("line_items[1][quantity]")], ["refused", false]);
+  const closesInMonth = body("eur");
+  closesInMonth.set("expires_at", String(Date.parse("2026-11-30T23:59:59Z") / 1000));
+  is("the same checkout closing before December: collected at November's rate", [tryCollect(closesInMonth, { sterlingRates: [NOV, ROW], now: lateNov }), closesInMonth.get("payment_intent_data[metadata][uk_vat_gbp]")], ["collected", `${toPence(580, "1.1930")}:1.1930:2026-11`]);
+  const unreadable = body("eur");
+  unreadable.set("expires_at", "soon");
+  is("an expiry that does not read: refused", tryCollect(unreadable, { sterlingRates: [NOV, ROW], now: lateNov }), "refused");
+  is("a sale in pounds is not held to the month", tryCollect(body("gbp"), { now: lateNov }), "collected");
+
   part("The cost of receiving reads the return's currency");
   const allowances: VatFxAllowance[] = [
     { currency: "eur", bps: 300, source: "https://example.invalid/fx-eur", checkedOn: "2026-11-20", validThrough: "2027-03-31" },
     { currency: "gbp", bps: 500, source: "https://example.invalid/fx-gbp", checkedOn: "2026-11-20", validThrough: "2027-03-31" },
   ];
-  const eurToGbp = vatCollectionCostOf(580, "eur", allowances, NOW, "gbp");
+  // Claude 1's MEDIUM on #5032: the VAT owed in pounds is fixed at HMRC's period rate, but the euros collected buy
+  // pounds at the market rate. That gap is its own exposure, priced by its own reviewed allowance (`against: "gbp"`).
+  is("RED: the pound allowance alone does not let a euro sale collect", vatCollectionCostOf(580, "eur", allowances, NOW, "gbp"), null);
+  const gap: VatFxAllowance = { currency: "eur", against: "gbp", bps: 250, source: "https://example.invalid/period-gap-eur", checkedOn: "2026-11-20", validThrough: "2027-03-31" };
+  const eurToGbp = vatCollectionCostOf(580, "eur", [...allowances, gap], NOW, "gbp");
   is("a euro sale whose return is in pounds: the pound allowance", eurToGbp?.fxCents, Math.ceil((580 * 500) / 10_000));
+  is("and its own allowance for the gap to HMRC's period rate", eurToGbp?.periodGapCents, Math.ceil((580 * 250) / 10_000));
+  is("a gap allowance for another currency does not count", vatCollectionCostOf(2000, "usd", [...allowances, gap], NOW, "gbp"), null);
+  is("a gap allowance against another return currency does not count", vatCollectionCostOf(580, "eur", [...allowances, { ...gap, against: "eur" }], NOW, "gbp"), null);
+  is("a sale in its return currency has no gap to price", vatCollectionCostOf(580, "gbp", allowances, NOW, "gbp")?.periodGapCents, 0);
   is("an EU sale in euros: its own currency's, as before", vatCollectionCostOf(580, "eur", allowances, NOW)?.fxCents, Math.ceil((580 * 300) / 10_000));
-  is("a dollar sale whose return is in pounds: priced", vatCollectionCostOf(2000, "usd", allowances, NOW, "gbp") !== null, true);
+  is("a dollar sale whose return is in pounds: priced with its own gap allowance", vatCollectionCostOf(2000, "usd", [...allowances, { ...gap, currency: "usd" }], NOW, "gbp") !== null, true);
   is("a dollar sale with no return currency named: unknown, as before", vatCollectionCostOf(2000, "usd", allowances, NOW), null);
   is("a yen sale: unknown, whatever the return", vatCollectionCostOf(2000, "jpy", allowances, NOW, "gbp"), null);
   is("a return in any other currency: unknown", vatCollectionCostOf(2000, "eur", allowances, NOW, "usd"), null);

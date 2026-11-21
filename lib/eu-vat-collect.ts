@@ -36,8 +36,10 @@
  * creator's own answer on each product, lib/catalog.ts Product.publication, read by notAPublication), and the sterling
  * rate of a sale in another currency (VAT Notice 700, 7.6). Since unit 7 that rate is HMRC's period rate for the
  * supply's month (lib/hmrc-period-rates.ts): with a row, a sale in another store currency written in hundredths is
- * collected at 20% in its own currency and its sterling VAT kept as `uk_vat_gbp`; the table is empty until HMRC's rates
- * are read, so today only a sale in pounds can collect.
+ * collected at 20% in its own currency and its sterling VAT kept as `uk_vat_gbp`, only while the checkout cannot be paid
+ * in another month, and only with a reviewed allowance for the gap between that period rate and the market rate on the
+ * sale (lib/eu-vat-collection-cost.ts, `against: "gbp"`). HMRC's rates for November and December 2026 are read; what
+ * keeps every such sale closed today is REVIEWED_VAT_FX_ALLOWANCES, empty, and the switches, off.
  */
 import { EU_UK_REFUSED, consumerGate } from "@/lib/eu-vat-gate";
 import { type EuSupplyFields, euSupplyOf } from "@/lib/eu-vat-supply";
@@ -272,7 +274,7 @@ function collectOn(
   }
   if (!Number.isSafeInteger(total)) refuse("the lines' total");
   const now = input.now ?? new Date();
-  const uk = input.country === "GB" ? ukVat(total, currency, now, input.sterlingRates ?? HMRC_PERIOD_RATES) : null;
+  const uk = input.country === "GB" ? ukVat(total, currency, now, input.sterlingRates ?? HMRC_PERIOD_RATES, body.get("expires_at")) : null;
   const vat = input.country === "GB" ? uk?.vat ?? null : vatOnTop(total, input.country, input.rates ?? EU_VAT_RATES, now);
   if (!vat || vat.country !== input.country) refuse("no sourced rate, or no sterling rate");
   // A UK sale is declared to HMRC in pounds whatever it was charged in, so its exchange-rate allowance is the pound's
@@ -294,7 +296,7 @@ function collectOn(
  * currency, and its VAT stated in sterling at HMRC's period rate for the supply's month (VAT Notice 700, 7.6;
  * lib/hmrc-period-rates.ts): no row for that month and currency, or a currency not in hundredths, is null (unit 7).
  */
-function ukVat(amountCents: number, currency: string, now: Date, table: readonly HmrcPeriodRate[]): { vat: VatOnTop; sterling: { pence: number; perPound: string; month: string } | null } | null {
+function ukVat(amountCents: number, currency: string, now: Date, table: readonly HmrcPeriodRate[], expiresAt: string | null): { vat: VatOnTop; sterling: { pence: number; perPound: string; month: string } | null } | null {
   if (!Number.isFinite(now.getTime())) return null;
   const today = now.toISOString().slice(0, 10);
   if (today > UK_VAT_RATE_VALID_UNTIL) return null;
@@ -303,6 +305,11 @@ function ukVat(amountCents: number, currency: string, now: Date, table: readonly
   const code = currency.toLowerCase();
   if (code === "gbp") return { vat: { ...vat, country: "GB" }, sterling: null };
   if (!isCurrency(code) || decimalsOf(code) !== 2) return null;
+  // The rate is the one of the month the buyer pays in (Notice 700, 7.6: "current at the time of the supply"), and
+  // the checkout is opened now: it is collected only while it cannot be paid in another month. Without its own
+  // `expires_at`, a Stripe Checkout Session stays open 24 hours (Claude 1's LOW on #5032).
+  const closes = expiresAt === null ? now.getTime() + 86_400_000 : /^[1-9]\d{0,11}$/.test(expiresAt) ? Number(expiresAt) * 1000 : Number.NaN;
+  if (!Number.isFinite(closes) || closes < now.getTime() || new Date(closes).toISOString().slice(0, 7) !== today.slice(0, 7)) return null;
   const rate = hmrcPeriodRate(code, today, table);
   const pence = rate ? toPence(vat.vatCents, rate.perPound) : null;
   if (!rate || pence === null) return null;

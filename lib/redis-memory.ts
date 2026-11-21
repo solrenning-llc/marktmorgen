@@ -1423,15 +1423,15 @@ export class MemoryRedis {
           this.run(["HSET", diary, field, value]);
           return 1;
         }
-        // The same fenced write, also fenced on the store (lib/storage-reservations.ts WRITE_LIVE): -1 when it is erased
-        // or (a store from before ids, statsId given) its owner's record is another store's; -2 for a record that does
-        // not parse.
-        if (key.startsWith("-- marktmorgen:fenced-set-live:v2\n") && args[0] === "4" && args.length === 9) {
-          const [, lock, target, live, erasing, token, value, field, statsId] = args;
+        // The same fenced write, also fenced on the store (lib/storage-reservations.ts WRITE_LIVE): -1 when it is erased,
+        // its id key holds another ref, or (a store from before ids, statsId given) its owner's record is another
+        // store's; -2 for a record that does not parse.
+        if (key.startsWith("-- marktmorgen:fenced-set-live:v3\n") && args[0] === "4" && args.length === 10) {
+          const [, lock, target, live, erasing, token, value, field, statsId, ref] = args;
           if (this.run(["GET", lock]) !== token) return 0;
           if (this.run(["HGET", erasing, field]) !== null) return -1;
           if (statsId === "") {
-            if (Number(this.run(["EXISTS", live])) !== 1) return -1;
+            if (this.run(["GET", live]) !== ref) return -1;
           } else {
             const raw = this.run(["GET", live]);
             if (raw === null) return -1;

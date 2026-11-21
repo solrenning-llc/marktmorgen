@@ -15,16 +15,17 @@ const WRITE = '-- marktmorgen:fenced-set:v1\nif redis.call("GET", KEYS[1]) == AR
 /**
  * The same write, also fenced on the store (lib/live-fence.ts): while its live key is there and its erasing mark is
  * absent, read in the same step. An open whose provider answers after the store's erasure began writes no row back
- * (Codex L-20261120-0141): -1, and nothing is written. A store from before ids (ARGV[4] its statsId, "" for a store
- * with an id) is live only while its owner's record still carries that statsId, as SET_IF_STORE_LIVE v2: its owner's
+ * (Codex L-20261120-0141): -1, and nothing is written. A store with an id (ARGV[4] "") is live only while its id key
+ * holds ARGV[5], its own ref, as SET_IF_STORE_LIVE v3: after moveAccount the key holds the new ref (Claude 2 on #4937,
+ * 7058724674). A store from before ids (ARGV[4] its statsId) is live only while its owner's record still carries that statsId, as SET_IF_STORE_LIVE v3: its owner's
  * next store under the same key never lets the erased store's row back in (Codex X8 on #4951, X5 on #4942; Claude 2 on
  * #4937). A record that does not parse is unknown: -2, and nothing is written.
  */
-const WRITE_LIVE = `-- marktmorgen:fenced-set-live:v2
+const WRITE_LIVE = `-- marktmorgen:fenced-set-live:v3
 if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
 if redis.call("HGET", KEYS[4], ARGV[3]) then return -1 end
 if ARGV[4] == "" then
-  if redis.call("EXISTS", KEYS[3]) ~= 1 then return -1 end
+  if redis.call("GET", KEYS[3]) ~= ARGV[5] then return -1 end
 else
   local raw = redis.call("GET", KEYS[3])
   if not raw then return -1 end
@@ -34,7 +35,7 @@ else
 end
 redis.call("SET", KEYS[2], ARGV[2])
 return 1`;
-/** What a fenced write adds to an unfenced one: HGET and one of EXISTS or GET (lib/spend-cost-table.ts UPLOAD_OPEN_FENCE_EXTRA_COMMANDS). */
+/** What a fenced write adds to an unfenced one: HGET and one GET (the id key or the owner's record) (lib/spend-cost-table.ts UPLOAD_OPEN_FENCE_EXTRA_COMMANDS). */
 export const STORAGE_FENCE_EXTRA_COMMANDS = 2;
 
 function decode(raw: unknown): StorageReservation[] {
@@ -68,7 +69,7 @@ async function change<T>(folder: string, work: (rows: StorageReservation[]) => P
     const result = await work(rows);
     // No GET/SET fallback: a lost lease must never overwrite another admission.
     const [written] = await redisPipeline([fence
-      ? ["EVAL", WRITE_LIVE, 4, held.key, record, fence.live, fence.erasing, held.token, JSON.stringify(rows), fence.field, fence.statsId ?? ""]
+      ? ["EVAL", WRITE_LIVE, 4, held.key, record, fence.live, fence.erasing, held.token, JSON.stringify(rows), fence.field, fence.statsId ?? "", fence.ref]
       : ["EVAL", WRITE, 2, held.key, record, held.token, JSON.stringify(rows)]]);
     if (written === -1 && fence) throw new Error("storage_store_gone");
     if (written === -2 && fence) throw new Error("storage_unknown");

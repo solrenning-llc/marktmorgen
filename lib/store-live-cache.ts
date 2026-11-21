@@ -23,7 +23,7 @@ export async function storeLiveFence(store: Pick<Store, "email" | "sid" | "extra
   const live = withId ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
   // A store from before ids is told from its owner's next store only by its statsId: without one, nothing is known.
   const statsId = withId ? "" : store.statsId || null;
-  return { live, erasing: ERASING_KEY, field: await erasingField(ref), statsId };
+  return { live, erasing: ERASING_KEY, field: await erasingField(ref), statsId, ref };
 }
 
 /**

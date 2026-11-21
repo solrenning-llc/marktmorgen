@@ -17,7 +17,7 @@ const row = async () => (await redis.pipeline([["GET", "nl:storage:pending:" + f
 test("legacy store: the owner's record holds another store; the erased store's storage write is refused", async () => {
   redis.clear();
   await redis.pipeline([["SET", OWNER, JSON.stringify({ statsId: "s_B", handle: "next-store" })]]);
-  const fence = { live: OWNER, erasing: ERASING_KEY, field: await erasingField(REF), statsId: "s_A" };
+  const fence = { live: OWNER, erasing: ERASING_KEY, field: await erasingField(REF), statsId: "s_A", ref: REF };
   assert.equal(await setIfStoreLive(fence, "nl:test:cache", "x", 60), "gone");
   await assert.rejects(reserveStorage(folder, 10, 100, async () => 0, fence), /storage_store_gone/);
   assert.equal(await row(), null);
@@ -26,7 +26,7 @@ test("legacy store: the owner's record holds another store; the erased store's s
 test("legacy store with no statsId: nothing is known, nothing is written", async () => {
   redis.clear();
   await redis.pipeline([["SET", OWNER, JSON.stringify({ statsId: "s_B" })]]);
-  const fence = { live: OWNER, erasing: ERASING_KEY, field: await erasingField(REF), statsId: null };
+  const fence = { live: OWNER, erasing: ERASING_KEY, field: await erasingField(REF), statsId: null, ref: REF };
   await assert.rejects(reserveStorage(folder, 10, 100, async () => 0, fence), /storage_unknown/);
   assert.equal(await row(), null);
 });
@@ -34,7 +34,7 @@ test("legacy store with no statsId: nothing is known, nothing is written", async
 test("legacy store whose record is its own: the row is written", async () => {
   redis.clear();
   await redis.pipeline([["SET", OWNER, JSON.stringify({ statsId: "s_A" })]]);
-  const fence = { live: OWNER, erasing: ERASING_KEY, field: await erasingField(REF), statsId: "s_A" };
+  const fence = { live: OWNER, erasing: ERASING_KEY, field: await erasingField(REF), statsId: "s_A", ref: REF };
   const made = await reserveStorage(folder, 10, 100, async () => 0, fence);
   assert.equal(made.bytes, 10);
   assert.notEqual(await row(), null);
@@ -43,7 +43,7 @@ test("legacy store whose record is its own: the row is written", async () => {
 test("a record that does not parse is never this store: refused, nothing written", async () => {
   redis.clear();
   await redis.pipeline([["SET", OWNER, "not json"]]);
-  const fence = { live: OWNER, erasing: ERASING_KEY, field: await erasingField(REF), statsId: "s_A" };
+  const fence = { live: OWNER, erasing: ERASING_KEY, field: await erasingField(REF), statsId: "s_A", ref: REF };
   await assert.rejects(reserveStorage(folder, 10, 100, async () => 0, fence));
   assert.equal(await row(), null);
 });
@@ -51,9 +51,9 @@ test("a record that does not parse is never this store: refused, nothing written
 test("a store with an id keeps the EXISTS fence on its id key", async () => {
   redis.clear();
   const live = "nl:store:id:s_idstore";
-  const fence = { live, erasing: ERASING_KEY, field: await erasingField(REF), statsId: "" };
+  const fence = { live, erasing: ERASING_KEY, field: await erasingField(REF), statsId: "", ref: REF };
   await assert.rejects(reserveStorage(folder, 10, 100, async () => 0, fence), /storage_store_gone/);
   assert.equal(await row(), null);
-  await redis.pipeline([["SET", live, "1"]]);
+  await redis.pipeline([["SET", live, REF]]);
   assert.equal((await reserveStorage(folder, 10, 100, async () => 0, fence)).bytes, 10);
 });

@@ -33,7 +33,7 @@ import { createHmac } from "node:crypto";
 import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
-import { type Affiliate, type Book, BOOK_STRIPE_PAGES, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook } from "@/lib/affiliates";
+import { type Affiliate, type Book, BOOK_STRIPE_PAGES, addPayoutOnce, bookSizes, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook } from "@/lib/affiliates";
 import { type BookSizes, bookWork } from "@/lib/api-read-rules";
 import { type BatchLine, batchTotal, owedLinesWhere, payoutNote } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
@@ -101,6 +101,22 @@ export const PAYPAL_READING_BATCH_COMMANDS = 6;
 export const PAYPAL_READING_LINE_COMMANDS = 3;
 export function paypalReadingUnits(batches: number, lines: number): number {
   return PAYPAL_READING_BASE_UNITS + Math.ceil((batches * PAYPAL_READING_BATCH_COMMANDS + lines * PAYPAL_READING_LINE_COMMANDS) / PAYPAL_READING_UNIT_COMMANDS);
+}
+/**
+ * A batch whose answer was not known is sent again by the daily job at most once a day, for up to seven days
+ * (settleUnknown), and each try first reads the store's whole affiliate book (readBook) to check every line is still
+ * owed: the store's work, as large as its programme, which neither the press's units nor the kept invoices' four count
+ * (unit #96, C5-20261121-1459-PAYPAL-READING). So, before it reads the book, a try takes UNKNOWN_RETRY_BASE_UNITS of
+ * the store's studio requests for its own commands (the lock's tries, the open batches read again, the try counted,
+ * the batch held), and one more for each UNKNOWN_RETRY_UNIT_COMMANDS of the book read at the programme's size (bookSizes,
+ * as bookWork counts it). A programme not counted, or no room: nothing is read or sent and no try is counted, so the
+ * entry waits for the next day, and after UNKNOWN_MANUAL_AFTER_MS goes to the creator's own check, as before.
+ * tests/paypal-unknown-retry-cost.test.ts holds the units above the try's cost at every size.
+ */
+export const UNKNOWN_RETRY_BASE_UNITS = 3;
+export const UNKNOWN_RETRY_UNIT_COMMANDS = 30;
+export function unknownRetryUnits(sizes: BookSizes): number {
+  return UNKNOWN_RETRY_BASE_UNITS + Math.ceil(bookWork(sizes, BOOK_STRIPE_PAGES).commands / UNKNOWN_RETRY_UNIT_COMMANDS);
 }
 /** A reading out of its time: the batch it was reading stays on its way, with nothing said in the logs. */
 class ReadingOutOfTime extends Error {}
@@ -1009,6 +1025,11 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
     // that cannot all be read: not known, wait (no try counted), never a line "no longer owed" (audit A1). A line no longer owed in full (refunded since, or the affiliate gone or no longer
     // approved), or a store whose currency changed: it cannot be told whether the first request paid it, so it is
     // left for the creator's own check and never sent.
+    // Counted first, at the programme's size (UNKNOWN_RETRY_BASE_UNITS): not counted or no room, wait, no try counted.
+    const sizes = await bookSizes(store).catch(() => null);
+    if (!sizes) return "waiting";
+    const taken = await takeAllowance(store, "studio", unknownRetryUnits(sizes)).catch(() => null);
+    if (!taken?.ok) return "waiting";
     const book = await readBook(store);
     if (unsettledBook(book)) return "waiting";
     const rows = new Map(book.rows.map((row) => [row.affiliate.id, row]));

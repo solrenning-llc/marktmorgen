@@ -30,10 +30,19 @@ process.env.PAYPAL_PARTNER_MERCHANT_ID = "PARTNERMERCH01";
 process.env.PAYPAL_BN_CODE = "NimbusLabs_SP";
 delete process.env.PAYPAL_ENV;
 
-/** The test's clock: Date.now moved forward by `shift`, which lib/redis-memory.ts reads too, so marks expire with it. */
+/**
+ * The test's clock: Date.now moved forward by `shift`, which lib/redis-memory.ts reads too, so marks expire with it.
+ * Where a part counts tries inside a window measured from the first failure, the wall part is `frozen`, so only hour()
+ * moves time there: a real second turning between two looks would otherwise put the last look one second past the
+ * window (merge_group of #4571, 21/11/2026: 6 tries instead of 7). `drift` stands in for that real second, injected on
+ * purpose inside the frozen loop, so removing the freeze fails every run, not one in many.
+ */
 let shift = 0;
-const realNow = Date.now.bind(Date);
-Date.now = () => realNow() + shift;
+let drift = 0;
+let frozen: number | null = null;
+const wallNow = Date.now.bind(Date);
+const realNow = () => wallNow() + drift;
+Date.now = () => (frozen ?? realNow()) + shift;
 const hour = () => {
   shift += 3600 * 1000;
 };
@@ -206,7 +215,10 @@ async function main(): Promise<void> {
   const looks: number[] = [];
   let lineCommands = -1;
   const keyOf = (c: (string | number)[]) => String(c[1] ?? "");
+  frozen = realNow();
   for (let look = 0; look < 48 && (await watchedAt(lost.order)) !== null; look += 1) {
+    // One real second turns mid-loop; with the wall part frozen it moves nothing.
+    if (look === 3) drift += 1000;
     const before = sent.length;
     await sweep();
     const pass = sent.slice(before);
@@ -220,6 +232,7 @@ async function main(): Promise<void> {
     if (lineAt >= 0 && lastEvt !== undefined && trim > lastEvt) lineCommands = pass.slice(lastEvt, trim + 1).filter((c) => keyOf(c).startsWith("nl:hooks:evt:") || keyOf(c).startsWith("nl:hooks:d:") || keyOf(c).startsWith("nl:hooks:log:")).length;
     hour();
   }
+  frozen = null;
   is("tried at most REFUND_TELL_TRIES_AT_MOST times, an hour apart", tries, triesAtMost);
   is("the registry's triesAtMost is that bound (PAYPAL_REFUND_TELL_RETRY)", PAYPAL_REFUND_TELL_RETRY.triesAtMost, triesAtMost);
   is("each failed try's own commands as the registry prices them, no put-back at the last", own, [...Array(tries - 1).fill(PAYPAL_REFUND_TELL_RETRY.ownCommandsPerFailedTry), PAYPAL_REFUND_TELL_RETRY.ownCommandsPerFailedTry - PAYPAL_REFUND_TELL_RETRY.putBackCommandsPerTry]);

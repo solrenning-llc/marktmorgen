@@ -192,7 +192,7 @@ async function storeAlertsAndSales(): Promise<Store> {
   await setStripeAccount(OWNER, "acct_1TestLtenA0001", true);
   await setSubscription(OWNER, { customerId: "cus_LtenA00001", subscriptionId: "sub_LtenA00001", active: true, period: paidPeriod() });
   let store = (await storeForEmail(OWNER))!;
-  await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK);
+  await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK, store);
   await setChatSales(OWNER, true);
   store = (await storeForEmail(OWNER))!;
   return store;
@@ -212,7 +212,7 @@ async function storeAlerts(): Promise<void> {
   });
   const fresh = async () => {
     const store = await storeAlertsAndSales();
-    await setSalesGoal(store.statsId!, 50_000, "usd");
+    await setSalesGoal(store, 50_000, "usd");
     sessions = [paid("cs_test_ltenalert00001")];
     emails.length = 0;
     posted.length = 0;

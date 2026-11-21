@@ -303,6 +303,28 @@ async function main(): Promise<void> {
   const reserved = await writePage(store, input, Date.now(), stepsOf("runreserved00001", []));
   is("a reserved run still marks itself live before its first step, so a stop finds it", [reserved.ok, sent.findIndex((c) => c[0] === "SET" && String(c[1]).startsWith("nl:ai:stop:")) > sent.findIndex((c) => c[0] === "INCRBY" && c[1] === monthKey)], [true, true]);
 
+  part("A stop asked while a PDF assist reads is taken, as for a page (readPdfThenWrite, #3447 over #3435)");
+  fresh();
+  const pdfRun = "runpdfassist0001";
+  let stopTaken: boolean | null = null;
+  const pdfSteps: Steps = {
+    run: pdfRun,
+    onStep: (step, state) => {
+      if (step === "read" && state === "started") {
+        void ai.markAiStop(store, pdfRun).then((taken) => {
+          stopTaken = taken;
+        });
+      }
+    },
+  };
+  const assisted = await ai.readPdfThenWrite(store, pdf, Date.now(), pdfSteps, {
+    maxTokens: 400,
+    request: () => ({ system: "Write.", prompt: "From the facts." }),
+    keep: (answer: string) => answer,
+  });
+  is("the stop asked while the reading runs is kept, over the run's own live mark", stopTaken, true);
+  is("so the writing step is never asked for, and its job is given back", [assisted.ok ? "ok" : assisted.reason, calls], ["stopped", 1]);
+
   part("Every command and byte a stepped generation adds is priced");
   const line = COST_LINES.find((l) => l.id === "ai")!;
   is("the ai line reads the step figures from lib/ai-steps.ts", line.sources.some((s) => s.file === "lib/ai-steps.ts" && s.names.includes("AI_STOP_COMMANDS") && s.names.includes("AI_STEP_EXTRA_BYTES")), true);

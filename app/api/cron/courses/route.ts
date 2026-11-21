@@ -10,6 +10,8 @@ import { SITE_URL } from "@/lib/site-url";
 import { sweepTaskUploads } from "@/lib/assignment";
 import { deleteFile } from "@/lib/file-store";
 import { sweepCommunityUploads } from "@/lib/community-files";
+import { del } from "@/lib/blob";
+import { sweepPictureDoors } from "@/lib/picture-door";
 import { noticeHeldStores } from "@/lib/community-held-notice";
 import { settleSubmissionSlots, sweepSubmissions } from "@/lib/submission-store";
 
@@ -18,7 +20,8 @@ import { settleSubmissionSlots, sweepSubmissions } from "@/lib/submission-store"
  * course opens for them. Once per student and module, one run at a time.
  * And deletes files students uploaded for an assignment and never handed
  * in (lib/assignment.ts), and community pictures never put in a post
- * (lib/community-files.ts), a day on. And deletes the files buyers sent for
+ * (lib/community-files.ts), a day on, and studio pictures let in through the
+ * picture door and never put on anything (lib/picture-door.ts), 30 days on. And deletes the files buyers sent for
  * review whose keeping time ended, and their records (lib/submission-store.ts), and sets back the room a buyer's
  * upload opened and left still held, once its day is over (settleSubmissionSlots). And tells each creator
  * whose community has posts or comments waiting for approval, once a day
@@ -53,6 +56,10 @@ export async function GET(request: NextRequest) {
       console.error("could not sweep unused community pictures", error);
       return null;
     });
+    const studioPictures = await sweepPictureDoors(del).catch((error: unknown) => {
+      console.error("could not sweep unused studio pictures", error);
+      return null;
+    });
     // Not swept (the list could not be read exactly): said, never "0 deleted"; the next run sweeps.
     const submissions = await sweepSubmissions(Math.floor(Date.now() / 1000)).catch((error: unknown) => {
       console.error("could not sweep submissions past their keeping time", error);
@@ -78,6 +85,8 @@ export async function GET(request: NextRequest) {
         ...(stale === null ? { uploadsFailed: true } : {}),
         unusedPictures: pictures,
         ...(pictures === null ? { picturesFailed: true } : {}),
+        unusedStudioPictures: studioPictures === null ? null : studioPictures.length,
+        ...(studioPictures === null ? { studioPicturesFailed: true } : {}),
         expiredSubmissions: submissions,
         ...(submissions === null ? { submissionsFailed: true } : {}),
         submissionSlots: slots,

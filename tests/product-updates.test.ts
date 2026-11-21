@@ -120,6 +120,9 @@ async function main(): Promise<void> {
   is("that there is a new version, the creator's words, and the orders page", [mail.subject, mail.text.includes("There is a new version of Weekly Meal Planner, which you bought from Jenny at Harbor."), mail.text.includes("Ten new recipes.\n\nAnd one-page shopping lists."), mail.text.includes("https://marktmorgen.com/@harbor/orders")], ["Weekly Meal Planner has been updated", true, true, true]);
   is("with why it came, a way to stop them and the postal address", [mail.text.includes("because you bought Weekly Meal Planner from Jenny at Harbor"), mail.text.includes("/unsubscribe?u="), mail.text.includes("1 Main St, Portland, OR 97201"), Boolean(mail.headers?.["List-Unsubscribe"])], [true, true, true, true]);
   is("counted in the store's month", (await usedThisMonth((await load()).listId, windowId(await load()))) - before, 1);
+  // The real update notice names the store's list, so a bounce for good or a complaint on it takes the address off the
+  // list (Claude 1 cloud's MEDIUM 2 on #4245: the bounce test sent a stand-in, never this sender).
+  is("the update notice names the store's list", ((mail as { tags?: { name: string; value: string }[] }).tags ?? []).find((t) => t.name === "nl_stop")?.value, (await load()).listId);
   is("the words of the email in every store language", new Set(Object.values(UPDATES_WORDS).map((w) => w.subject("X"))).size, 7);
   is("the subject comes from the words", text.subject, "Weekly Meal Planner has been updated");
 

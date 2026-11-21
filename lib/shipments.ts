@@ -91,7 +91,7 @@ async function markNeverActivated(store: Store, session: string, row: Record<str
   if (receipt[0] !== "OK") return { ok: false, reason: "unknown" };
   const email = (row.customer_details as { email?: unknown } | null | undefined)?.email;
   if (typeof email !== "string" || !oneAddress(email)) return { ok: true, shipped, emailed: false, mail: { state: "not_recorded", delayed: false } };
-  const emailed = await sendEmail({ meter: { by: "order" }, ...shipmentMessage(store, row, shipped.tracking, email), idempotencyKey: `nimbus-shipped:${session}` }).catch(() => false);
+  const emailed = await sendEmail({ meter: { by: "order", store }, ...shipmentMessage(store, row, shipped.tracking, email), idempotencyKey: `nimbus-shipped:${session}` }).catch(() => false);
   return { ok: true, shipped, emailed, mail: { state: emailed ? "accepted" : "not_recorded", delayed: false } };
 }
 

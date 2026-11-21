@@ -1,4 +1,4 @@
-import { consumerGate } from "@/lib/eu-vat-gate";
+import { EuVatCollectRefused, euCartGate } from "@/lib/eu-vat-collect";
 import { type DigitalConsent, DigitalConsentMissing, consentFromForm } from "@/lib/digital-consent";
 import { withinStore } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
@@ -347,10 +347,10 @@ export async function POST(request: NextRequest) {
   if (products.some((p) => !knownNotSoon(coming, p.id))) return away(`/@${store.handle}?cart=error#cart`);
   // EU VAT art. 9a (lib/eu-vat-gate.ts consumerGate), as for one product: before anything is held or charged, a cart
   // with a paid product for the EU or the UK is refused, and one without the billing country asks for it.
-  for (const product of products) {
-    const gate = consumerGate({ product, headers: request.headers, form: sent });
-    if (!gate.ok) return away(`/@${store.handle}?cart=${gate.reason === "refused" ? "abroad" : "country"}#cart`);
-  }
+  // Since 789 [IV1] step 3, unit 3 (lib/eu-vat-collect.ts euCartGate): exactly this loop over consumerGate while no
+  // record says "collect" with its switch on, as today; with one on, a cart whose products all agree has the VAT on top.
+  const gate = euCartGate({ products, headers: request.headers, form: sent });
+  if (!gate.ok) return away(`/@${store.handle}?cart=${gate.reason === "refused" ? "abroad" : "country"}#cart`);
   for (const product of products) {
     // A key count that cannot be read never sells (SG2, finding 12): back to the cart to try again, nothing charged.
     const out = await outOfKeys(store, product).catch(() => null);
@@ -399,7 +399,9 @@ export async function POST(request: NextRequest) {
       via,
       digitalConsent,
       offers: upsell && offerFrom ? { upsellKey: upsell.fingerprint, from: offerFrom.id } : null,
-    }), (error) => error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof CartShippingRefused);
+      // Only when the cart's EU gate said to collect (never while nothing collects): the VAT on top, or a refusal before Stripe.
+      ...(gate.collect ? { euVat: { country: gate.collect.country } } : {}),
+    }), (error) => error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof CartShippingRefused || error instanceof EuVatCollectRefused);
     // Sold out since the cart was opened: back to it, which says which; busy or unreadable: nothing was charged, try again.
     if (!holding.ok) {
       if (charged) await giveBackHold(store, clientAddress(request));
@@ -417,12 +419,14 @@ export async function POST(request: NextRequest) {
     return new Response(null, { status: 303, headers });
   } catch (error) {
     // Refused before Stripe was asked: no unit stays held, so the hold count is given back.
-    if (charged && (error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof CartShippingRefused)) await giveBackHold(store, clientAddress(request));
+    if (charged && (error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof CartShippingRefused || error instanceof EuVatCollectRefused)) await giveBackHold(store, clientAddress(request));
     if (error instanceof OrdersPausedError) return away(`/@${store.handle}?status=${error.reason === "paused" ? "paused" : "error"}`);
     // The box was not checked (or the page was from before its words changed): back to the cart, nothing charged.
     if (error instanceof DigitalConsentMissing) return away(`/@${store.handle}?cart=consent#cart`);
     // Its physical products cannot all be shipped to one address any more (lib/cart-shipping.ts): back to the cart, which says which.
     if (error instanceof CartShippingRefused) return away(`/@${store.handle}?cart=changed#cart`);
+    // The VAT this cart needs could not be put on it (lib/eu-vat-collect.ts): refused as an EU or UK cart is today.
+    if (error instanceof EuVatCollectRefused) return away(`/@${store.handle}?cart=abroad#cart`);
     console.error("a cart's checkout failed", error);
     after(() => noteCheckoutTrouble(store, error).catch(() => {}));
     // Stripe says the account cannot take card payments: written down, and said on the store page (lib/stripe-charges.ts).

@@ -71,7 +71,7 @@ async function main(): Promise<void> {
   };
   for (const [name, call, refused] of [
     ["withinLimit", () => read(() => withinLimit("shape-test", "who", 5, 60)), "unknown"],
-    ["withinMonth", () => read(() => withinMonth("shape-test", "who", 5, "2026-11")), false],
+    ["withinMonth", () => read(() => withinMonth("shape-test", "who", 5, "2026-11", 32 * 86_400)), false],
   ] as const) {
     part(`${name}: only the exact reply is read`);
     for (const [label, value] of MALFORMED) {

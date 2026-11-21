@@ -939,6 +939,9 @@ export async function enroll(store: Store, email: string, event: { joined: boole
     const paid = Boolean(event.productId) && idsOfKind(store, "paid").includes(event.productId as string);
     // Only as many active workflows as the plan has start anybody (lib/flow-limits.ts). Read exactly: a reply that is
     // not exactly nil or a list of sequences throws, and is logged below, never read as "no sequences" (rule 24).
+    // The second the list is read: every run this call starts is stamped from it, never from a later clock, so a save
+    // that moves the steps while the contact is read below is after the stamp and holds the run (Codex L and X6, #4539).
+    const listReadAt = Math.floor(Date.now() / 1000);
     const flows = startableFlows(await readFlowListStrict(store.listId), activeFlowLimit(store)).filter(
       (f) =>
         f.active &&
@@ -960,7 +963,7 @@ export async function enroll(store: Store, email: string, event: { joined: boole
     // Only someone who may be written to starts one; their one start is not
     // spent on a moment they could not have received it.
     if (!(await mailableExactly(store.listId, address))) return true;
-    await startFlows(store, flows, [address]);
+    await startFlows(store, flows, [address], listReadAt);
     return true;
   } catch (error) {
     console.error("starting a sequence failed", error);
@@ -987,7 +990,7 @@ async function mailableExactly(listId: string, address: string): Promise<boolean
  * Says how many starts were new; throws UnknownReplyError, after the
  * definite starts, when a claim's reply was unknown.
  */
-async function startFlows(store: Store, flows: Flow[], addresses: string[]): Promise<number> {
+async function startFlows(store: Store, flows: Flow[], addresses: string[], listReadAt: number): Promise<number> {
   if (!store.listId || !addresses.length) return 0;
   const now = Math.floor(Date.now() / 1000);
   let started = 0;
@@ -1033,8 +1036,10 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
       continue;
     }
     // The run's record first, so its first step always finds it.
-    // Stamped from the workflow as read here, which chose step 0: never below a layout mark it already holds.
-    await openRuns(flow.id, fresh, layoutStamp(flow, now));
+    // Stamped from the workflow list as read (listReadAt, the second before it was read), which chose step 0: never
+    // from this later clock, and never below a layout mark it already holds. A save that moved the steps after that
+    // read is then after the stamp, and the run is held instead of sent from the new order (Codex L and X6, #4539).
+    await openRuns(flow.id, fresh, layoutStamp(flow, Math.min(listReadAt, now)));
     // Its place in the queue and its 400-day mark in one atomic step: both or neither. A start whose claim is gone
     // (the person was erased meanwhile) is not queued. Exactly the number queued, from 0 to all, confirms it.
     const member = (address: string) => `${store.listId}|${store.handle}|${flow.id}|0|${address}`;
@@ -1098,7 +1103,7 @@ const each = (emails: string[], state: Acted["state"], note: string): Acted[] =>
  * sequence that starts with it, and nobody is started twice. A write whose
  * answer is lost is "uncertain": the run is held, never repeated by itself.
  */
-async function act(store: Store, flows: Flow[], action: FlowAction, emails: string[], at: { flow: Flow; step: FlowStep; index: number; lease?: (email: string) => { member: string; score: number } }): Promise<Acted[]> {
+async function act(store: Store, flows: Flow[], action: FlowAction, emails: string[], at: { flow: Flow; step: FlowStep; index: number; listReadAt: number; lease?: (email: string) => { member: string; score: number } }): Promise<Acted[]> {
   const listId = store.listId;
   if (!listId || !emails.length) return [];
   if (action.do === "wait") return each(emails, "confirmed", "Waited.");
@@ -1169,7 +1174,7 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
     const target = startableFlows(flows, activeFlowLimit(store)).find((f) => f.id === action.flowId && f.active && f.steps.length > 0);
     if (!target) return each(emails, "failed", "The workflow to start is paused, removed, empty or over your plan's number of active workflows.");
     try {
-      const started = await startFlows(store, [target], emails);
+      const started = await startFlows(store, [target], emails, at.listReadAt);
       // Which of them were new is not told apart; the count of new starts is kept on the first ones.
       return each(emails, "confirmed", `Started on “${target.name}”, unless they were in it already or today's runs were used up.`).map((o, i) => ({ ...o, changed: i < started }));
     } catch {
@@ -1207,7 +1212,7 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
   const labeled = [...changed, ...same];
   const starting = startableFlows(flows, activeFlowLimit(store)).filter((f) => f.active && f.steps.length > 0 && f.trigger === "tagged" && f.tag && sameLabel(f.tag, action.tag));
   // Starting what the label starts is repeat-safe (one start per person per workflow), so a failure here only means fewer starts.
-  if (labeled.length && starting.length) await startFlows(store, starting, labeled).catch((error) => console.error("starting labeled workflows failed", error));
+  if (labeled.length && starting.length) await startFlows(store, starting, labeled, at.listReadAt).catch((error) => console.error("starting labeled workflows failed", error));
   return emails.map((email) =>
     changed.includes(email) ? { email, state: "confirmed", changed: true, note: `Label “${action.tag}” given.` } : same.includes(email) ? { email, state: "confirmed", note: `They already had the label “${action.tag}”.` } : { email, state: "failed", note: "Not given: they already have ten labels, or their record changed while it was written." },
   );
@@ -1905,7 +1910,7 @@ export async function sendDueSteps(
       // A step that acts instead of writing: done for everyone it is for, then
       // on to where it leads, its wait counted from now.
       if (step.action) {
-        const acted = await act(store, listed, step.action, going, { flow, step, index, lease: (email) => ({ member: `${group}|${email}`, score }) }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
+        const acted = await act(store, listed, step.action, going, { flow, step, index, listReadAt, lease: (email) => ({ member: `${group}|${email}`, score }) }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
         // Someone a later run took over is that run's: nothing is noted, queued or settled for them here (C3-141).
         const superseded = new Set(acted.filter((o) => o.state === "superseded").map((o) => o.email));
         const outcomes = acted.filter((o) => o.state !== "superseded");

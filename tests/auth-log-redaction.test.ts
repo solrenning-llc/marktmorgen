@@ -3,10 +3,9 @@
  * storage error can carry the address, a code or a token, so no route under
  * app/api/auth hands the error object to the server log, only a fixed label.
  *
- * Scope (Claude 6's LEVE 1 on #3712, 7057898833): this guards the ROUTES only. The sign-in libraries they call
- * (lib/auth.ts, lib/signin-finish.ts, lib/two-step*.ts, lib/passkeys.ts, lib/recovery-address.ts) and the pages under
- * app/signin/** still log a fixed label with the raw error at about 25 sites; that is the named follow-up
- * (Codex adoption lane), which widens `root` below to them. Today's real Redis and provider messages carry no address.
+ * The sign-in libraries the routes call (lib/auth.ts, lib/signin-finish.ts, lib/two-step*.ts, lib/passkeys.ts,
+ * lib/recovery-address.ts) and the pages under app/signin are held to the same rule (Claude 6's LEVE 1 on #3712,
+ * 7057898833; board #5010 row 18): they logged a fixed label with the raw error at 25 sites, one level below the routes.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -33,8 +32,8 @@ walk(root);
  * token in the server log. Read from the syntax tree, not line by line, so a
  * call split over lines or with any first argument is still seen.
  */
-function consoleLeaks(source: string): number[] {
-  const file = ts.createSourceFile("route.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+function consoleLeaks(source: string, tsx = false): number[] {
+  const file = ts.createSourceFile(tsx ? "page.tsx" : "route.ts", source, ts.ScriptTarget.Latest, true, tsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const lines = new Set<number>();
   const fixedString = (node: ts.Node) => ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node);
   // The global objects the console hangs on: `globalThis.console` and `globalThis["console"]` are the console itself
@@ -104,4 +103,25 @@ test("no sign-in route logs an error object", () => {
     for (const line of consoleLeaks(readFileSync(path, "utf8"))) leaks.push(`${path.slice(process.cwd().length + 1)}:${line}`);
   }
   assert.deepEqual(leaks, [], "no route passes an error or a value to the server log");
+});
+
+/** The sign-in libraries and pages: every .ts and .tsx under app/signin, and the libraries the routes call. */
+const LIBRARIES = ["lib/auth.ts", "lib/signin-finish.ts", "lib/two-step.ts", "lib/two-step-unknown.ts", "lib/passkeys.ts", "lib/recovery-address.ts"];
+const pages: string[] = [];
+const walkPages = (dir: string) => {
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) walkPages(path);
+    else if (/\.tsx?$/.test(name)) pages.push(path);
+  }
+};
+walkPages(join(process.cwd(), "app/signin"));
+
+test("no sign-in library or page logs an error object", () => {
+  assert.ok(pages.length >= 2, "the sign-in pages were found");
+  const leaks: string[] = [];
+  for (const path of [...LIBRARIES.map((file) => join(process.cwd(), file)), ...pages]) {
+    for (const line of consoleLeaks(readFileSync(path, "utf8"), path.endsWith(".tsx"))) leaks.push(`${path.slice(process.cwd().length + 1)}:${line}`);
+  }
+  assert.deepEqual(leaks, [], "no library or page passes an error or a value to the server log");
 });

@@ -283,6 +283,28 @@ export class MemoryRedis {
           if (members.length) gone += Number(this.run(["DEL", who]));
           return [gone, members.length];
         }
+        // lib/chat-summary.ts KEEP_ADDRESS_IF_LIVE: a chat address written only while its store is live and not being
+        // erased: a store with an id while its id key holds this very ref (argv[3]); a store from before ids (argv[2] its
+        // statsId) only while its owner's record still carries that statsId.
+        if (key.startsWith("-- marktmorgen:chat-address-live:v3\n")) {
+          const n = Number(args[0]), keys = args.slice(1, 1 + n), argv = args.slice(1 + n);
+          if (this.run(["HEXISTS", keys[1], argv[0]]) !== 0) return 0;
+          if (!argv[2]) {
+            if (this.run(["GET", keys[0]]) !== argv[3]) return 0;
+          } else {
+            const raw = this.run(["GET", keys[0]]);
+            if (raw === null) return 0;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -1;
+            }
+            if (!record || typeof record !== "object") return -1;
+            if ((record as { statsId?: unknown }).statsId !== argv[2]) return 0;
+          }
+          return this.run(["SET", keys[2], argv[1]]);
+        }
         // lib/closed-store-data.ts CLOSING_UNHELD: what the walk deletes of what an id a live store may hold names,
         // only while no live store holds it, read in the same step.
         if (key.startsWith("-- marktmorgen:closing-unheld:v1\n")) {

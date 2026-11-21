@@ -178,7 +178,7 @@ async function storeAlertsAndSales(): Promise<Store> {
   await setStripeAccount(OWNER, "acct_1TestLtenA0001", true);
   await setSubscription(OWNER, { customerId: "cus_LtenA00001", subscriptionId: "sub_LtenA00001", active: true, period: paidPeriod() });
   let store = (await storeForEmail(OWNER))!;
-  await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK);
+  await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK, store);
   await setChatSales(OWNER, true);
   store = (await storeForEmail(OWNER))!;
   return store;

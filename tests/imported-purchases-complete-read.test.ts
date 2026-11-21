@@ -4,7 +4,7 @@
  * the next-offer "already owned" read must show nothing on an unknown read. Synthetic: MemoryRedis, no network.
  */
 import { COPIERS } from "@/lib/person-copy";
-import { importedKey } from "@/lib/imported-purchases";
+import { importedKey, importedRows } from "@/lib/imported-purchases";
 import { ownedHere } from "@/lib/next-offer";
 import type { Store } from "@/lib/store";
 import type { ErasureScope } from "@/lib/erasure-rules";
@@ -42,6 +42,11 @@ async function main() {
   await redis.pipeline([["HSET", importedKey(mixed, EMAIL), "course_1", grant("import_job_1"), "course_2", grant("import_job_2", { option: "not a valid option" })]]);
   is("the person's copy refuses instead of silently leaving a grant out", await outcome(async () => ((await copier(scope(mixed))) as unknown[]).length), "refused");
   is("next-offer shows nothing instead of treating course_2 as not owned", await ownedHere(shop(mixed), EMAIL), null);
+
+  part("the rows of a mixed read say what read and that the rest is not known (Claude 6's LEVE 1 on #2794)");
+  const [raw] = await redis.pipeline([["HGETALL", importedKey(mixed, EMAIL)]]);
+  const rows = importedRows(raw);
+  is("course_1 read, and the read is not complete", [rows.found.map((p) => p.productId), rows.unknown], [["course_1"], true]);
   done();
 }
 main();

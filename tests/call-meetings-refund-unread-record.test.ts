@@ -14,7 +14,7 @@ import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_unread_record";
 const OWNER = "potter@example.com";
-const ACCOUNT = "acct_1TestUnreadRec01";
+const ACCOUNT = "acct_1TestUnread01";
 const NOW = Math.floor(Date.now() / 1000);
 const sessionsByPayment: Record<string, Record<string, unknown>[]> = {};
 let refunds: Record<string, unknown>[] = [];

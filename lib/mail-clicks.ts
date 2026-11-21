@@ -47,6 +47,18 @@ export const keyIndex = (key: string) => `nl:mail:mk:${key}`;
 const person = (email: string) => createHash("sha256").update(`nimbus-clk:${normaliseEmail(email)}`).digest("hex").slice(0, 32);
 const usedKey = (listId: string, email: string) => `nl:mail:clk:${listId}:${person(email)}`;
 
+/**
+ * Keeps a click only while both the link marker and the consent row are still
+ * exactly the ones noteClick read. A revocation either runs first and this
+ * writes nothing, or runs second and deletes the click.
+ */
+const NOTE_CLICK_IF_ALLOWED = `-- marktmorgen:mail-click-if-allowed:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+if redis.call("HGET", KEYS[2], ARGV[2]) ~= ARGV[3] then return 0 end
+redis.call("SADD", KEYS[3], ARGV[4])
+redis.call("EXPIRE", KEYS[3], ARGV[5])
+return 1`;
+
 /** The key a reader's links carry, from their unsubscribe token; it cannot be turned back into it. */
 export function linkKeyOf(token: string): string {
   return createHash("sha256").update(`nimbus-mk:${token}`).digest("hex").slice(0, 24);
@@ -72,11 +84,12 @@ export async function noteClick(key: string, campaign: string): Promise<boolean>
   const found = await readUnsubToken(token);
   if (!found || !found.contact.clicks || !mailable(found.contact)) return false;
   const used = usedKey(found.listId, found.email);
-  await redisPipeline([
-    ["SADD", used, campaign],
-    ["EXPIRE", used, CLICK_DAYS * 86_400],
-  ]);
-  return true;
+  const kept = repliesFor(await redisPipeline([[
+    "EVAL", NOTE_CLICK_IF_ALLOWED, "3", keyIndex(key), leadsKey(found.listId), used,
+    token, found.email, found.raw, campaign, String(CLICK_DAYS * 86_400),
+  ]]), 1);
+  if (!kept || (kept[0] !== 0 && kept[0] !== 1)) throw new UnknownReplyError("a consented link use");
+  return kept[0] === 1;
 }
 
 /** Which of these people used a link in the email `campaign`. */

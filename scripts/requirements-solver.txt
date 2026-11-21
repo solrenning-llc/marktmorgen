@@ -1,0 +1,15 @@
+# The pricing optimization's solver (scripts/pricing-optimization-milp.py), run on demand by the tests and by
+# node scripts/pricing-optimization.mjs (owner, 20/11/2026: its input and output are not stored). Exact versions,
+# installed in the test job's own environment (.github/workflows/product-checks.yml, behavior-regressions) with
+# --only-binary :all: --require-hashes (owner's SIM on #4958, condition 3): only prebuilt wheels, so no install
+# script runs, and each one checked against its sha256 below, so a swapped package fails the install.
+# Hashes of the manylinux x86_64 wheels for CPython 3.12, 3.13 and 3.14 (the runner used 3.14 on 20/11/2026), read
+# from PyPI's JSON API and from the downloaded wheels on 20/11/2026; both agreed.
+numpy==2.5.3 \
+    --hash=sha256:b7e18c623bb5c95acb3b3328861272816ba199fb531921c5d6d0b675f1fde9e3 \
+    --hash=sha256:a5fa86b80fd24bcd1aff83ad23be44ea323de3f787be8f8b15d4a65621e25321 \
+    --hash=sha256:b0521d0f4aebb6e06189451025fa17a913287b13c03d5fe05c017333b654ea5b
+scipy==1.18.1 \
+    --hash=sha256:f55fa87b6c612ecd6b058f167c53231b1d14e412efe361d3d6e38b3631c73218 \
+    --hash=sha256:fdaf5ea890a6183d0565f51a61799d67081bd5b1cf03c5f4b3fd3732108625c9 \
+    --hash=sha256:ac0333bdf38309aa3dcbe7e3fa7ea29e7a2c37c6ea306a757b700ded8e4596ad

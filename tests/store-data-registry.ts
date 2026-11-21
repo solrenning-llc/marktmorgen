@@ -383,6 +383,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:lib:@lib/buyer-library.ts": { what: "The stores an address bought from", parts: [kept(MARK, "A store's id in its buyer's set of the quarter, kept QUARTERS_KEPT quarters at the most (lib/joined-stores.ts): counted as for good, and its whole life priced with its order besides (tests/plan-cost-registry.ts, ORDER_LIBRARY), since it outlives a store that closes.")] },
   "nl:lib:joined:@lib/joined-stores.ts": company("The stores an address joined the list of", "A person's, across stores: one member a store, in the set of the quarter it joined in, kept QUARTERS_KEPT quarters at the most."),
   "nl:lib:link:@lib/buyer-library.ts": short("A library link, a day", "access", 1, LINK_BYTES, MAIL("library")),
+  "nl:pm:r:@lib/purchase-moves.ts": short("A buyer's request to move their purchases to another address (611 [WP10]), a day, at most MAX_MOVE_RECORD_BYTES", "access", 1, LINK_BYTES, MAIL("purchase-move")),
+  "nl:pm:t:@lib/purchase-moves.ts": short("A purchase move's two links, a day", "access", 1, 2 * LINK_BYTES, MAIL("purchase-move")),
+  "nl:pm:c:@lib/purchase-moves.ts": short("A purchase move's two confirmations, a day", "access", 1, 2 * MARK, MAIL("purchase-move")),
+  "nl:pm:done:@lib/purchase-moves.ts": short("A purchase move claimed once, two days", "access", 2, MARK, MAIL("purchase-move")),
+  "nl:pm:day:@lib/purchase-moves.ts": short("An address's purchase moves of the day, under a one-way fingerprint, two days", "access", 2, MARK, MAIL("purchase-move")),
   "nl:listed:@lib/buyer-list.ts": short("An order put on the list", "order", 8, MARK),
   "nl:lostdispute:cursor:@lib/refunds.ts": short("Where a job that takes things back left off in a store's lost disputes, when there were more than one run reads", "run", 30),
   "nl:orders:link:@lib/buyer-orders.ts": short("A buyer's purchases link, a day", "access", 1, LINK_BYTES, MAIL("orders")),
@@ -520,8 +525,20 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cm:@lib/community-approval.ts": {
     what: "Posts and comments waiting for the creator's approval, the notes left to their authors, and each member's approved count (543 [CM2])",
     room: ["lib/community-approval.ts"],
-    parts: [capped(MAX_SPACES * KB, "Each space's approval rule, pruned to the community's spaces.", src("lib/community-text.ts", "MAX_SPACES"))],
+    parts: [
+      capped(MAX_SPACES * KB, "Each space's approval rule, pruned to the community's spaces.", src("lib/community-text.ts", "MAX_SPACES")),
+      // Unit 2: the day's mark of the creator's notice (lib/community-held-notice.ts), kept two days, so at most two at once.
+      capped(2 * KEY, "The daily notice's mark: one key a day, kept two days.", src("lib/community-held-notice.ts", "MARK_SECONDS")),
+    ],
   },
+  "nl:cm:ap:stores@lib/community-approval.ts": company(
+    "Stores whose community held a post or comment for approval lately, for the creator's daily notice (543 [CM2] unit 2)",
+    "One sorted set for every store, a member a store id with the time of its last hold; a store is let go a day after nothing it held can still wait (HELD_DAYS), so it is never larger than the number of stores.",
+  ),
+  "nl:cm:ap:turns@lib/community-approval.ts": company(
+    "The order the creator's daily notice reads those stores in, so every one gets its turn (543 [CM2] unit 2, review of #3033)",
+    "One sorted set for every store, a member a store id with its place in line (when it joined or had its last turn); a store leaves it when it comes up after leaving nl:cm:ap:stores, so it is never larger than the number of stores.",
+  ),
   "nl:cm:@lib/community-chat.ts": {
     what: "The live room: its messages, their counter, each speaker's cooldown",
     parts: [capped(MAX_CHAT_KEPT * (MAX_CHAT_TEXT * 3 + 512), "MAX_CHAT_KEPT messages, the oldest let go.", src("lib/community-chat-rules.ts", "MAX_CHAT_KEPT", "MAX_CHAT_TEXT")), per("buyer", 1, KEY, "A speaker's cooldown, minutes.")],
@@ -920,6 +937,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ppsell:back:@lib/paypal-sales.ts": { what: "PayPal payments refunded in full, kept for good for the affiliate book's lines (9 November 2026)", parts: [item(256, "One field per refunded PayPal order, written through lib/order-data.ts.", "paypal")] },
   "nl:ppsell:reversed:@lib/paypal-sales.ts": short("Of those, the orders PayPal took back by another way than a refund (reversed, failed, declined)", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:sales:@lib/paypal-sales.ts": short("Every paid order", "order", 400, MARK, KIND("paypal")),
+  "nl:ppsell:tell:@lib/paypal-sales.ts": short("When telling a refunded order's webhooks first failed, a month (REFUND_TELL_MARK_SECONDS)", "order", 30, MARK, KIND("paypal")),
   "nl:ppsell:watch:@lib/paypal-sales.ts": short("Paid orders inside PayPal's refund window, and past it until the paid record ends those whose capture is in a status not known here", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:handover:@lib/paypal-sales.ts": short("Paid orders still owed their hand-over, from being written down until handed over (lib/paypal-delivery.ts)", "order", 400, MARK, KIND("paypal")),
   // CANCELED_KEPT_SECONDS of lib/paypal-sales.ts: what a canceled order's notices and its page say (store, handle,
@@ -1139,6 +1157,15 @@ export const FAMILIES: Record<string, Family> = {
   "nl:stock:lock:@lib/stock.ts": short("One count at a time", "request", 1, 128, REQ("checkout")),
   // R20 finding 3: the page a supporter comes back to asks Stripe only about a checkout this mark says the store opened.
   "nl:tip:co:@lib/store-tip-checkout.ts": short("A gift's checkout opened by the store's tip checkout, a hash of the store and the session (TIP_MARK_SECONDS, two days)", "request", 2, MARK, REQ("tip")),
+  "nl:sub:setup:@lib/submission-store.ts": room("What a creator asks buyers to send for review on a lesson (750 [CD1])", "lib/submission-store.ts"),
+  "nl:sub:live:@lib/submission-store.ts": room("A buyer's files open or waiting for review on one lesson, at most MAX_WAITING_PER_BUYER: counted in the buyer's one room slot (sbl:), set to its most once a place is held and before the door is written, and set back to what is still held when an upload is refused, given up or closed", "lib/submission-store.ts"),
+  "nl:sub:door:@lib/submission-store.ts": room("A buyer's submission upload opened and not yet closed, a day: counted at its largest in the buyer's one room slot (sbl:) before it is written, and given back when it is closed or given up", "lib/submission-store.ts"),
+  "nl:sub:who:@lib/submission-store.ts": room("Everything of one buyer's sent for review in a store, each with its file's path, for the copy of their data and their erasure: at most MAX_SUBMISSIONS_PER_PERSON, each entry counted, at its longest path, in the buyer's one room slot of its lesson (sbl:), with its place, and the slot emptied with the person", "lib/submission-store.ts"),
+  "nl:sub:due@lib/submission-store.ts": company("Every kept submission file by when its keeping time ends, for the daily sweep", "One sorted set for every store, each member a buyer action's (priced in buyer-actions), taken off when its file is deleted, within the longest keeping time and a day."),
+  "nl:sub:list:@lib/submission-store.ts": room("A course's kept files for the studio's \"To review\" list, by when each record goes: each member counted with its place, in the buyer's one room slot of its lesson (sbl:)", "lib/submission-store.ts"),
+  "nl:sub:slotdue@lib/submission-store.ts": company("The stores with a buyer slot whose turn on the daily sweep has come (review of #3568, Claude 6)", "One sorted set for every store, one member a store (its data room's id and its files' folder) while its list of slots holds a turn, written again from that list or taken off by the sweep (SUBMISSION_SLOT_STORE_NEXT); each turn is an open's, which a buyer action and SUBMISSION_STEP_COMMANDS pay for."),
+  "nl:sub:slots:@lib/submission-store.ts": room("A store's list of the buyer slots an upload was opened on, each turn at its latest door's end or kept file's keeping time, for the daily sweep to set the slot back once every place on it has lapsed (review of #3568, Claude 6): each turn counted with every place in the buyer's one room slot (sbl:); no expiry of its own, so a backlog is never lost, and each turn goes with the sweep, the store's closing or the buyer's erasure", "lib/submission-store.ts"),
+  "nl:sub:rec:@lib/submission-store.ts": room("A buyer's file sent for review, its record kept to the creator's keeping time and a week, counted in the room until it expires", "lib/submission-store.ts"),
   "nl:storage:pending:@lib/storage-reservations.ts": short("Uploads reserved and not finished", "upload", 1, 512),
   "nl:alert:@lib/store-alerts.ts": { what: "Alerts sent to the creator", parts: [capped(30 * KEY + 14 * 10 * KEY, "One per kind, and the goals' a month.")] },
   "nl:alert:seen:@lib/store-alerts.ts": company("A store's alerts checked a day", "The company's daily job."),

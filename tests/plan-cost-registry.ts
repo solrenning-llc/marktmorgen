@@ -46,7 +46,7 @@ import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
  */
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
-import { MAX_IMAGE_BYTES } from "@/lib/product-image";
+import { MAX_IMAGE_BYTES, MAX_THUMB_BYTES } from "@/lib/product-image";
 import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { MAX_BENEFITS_KEPT, MAX_BENEFIT_TEXT } from "@/lib/tier-benefit-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS, publicVisitLimit } from "@/lib/traffic-rules";
@@ -1950,6 +1950,18 @@ export const COST_LINES: CostLine[] = [
     basis: "The plan's storage, all used, at the dearest store a file may be in.",
   },
   {
+    id: "picture-thumbnails",
+    feature: "The thumbnail copy of a product picture: what it adds to the request that attaches it, its head and the read of its bytes (Encanto 5b-2, 6 November 2026; its upload request is counted by picture-uploads since 9 November 2026)",
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * (BLOB_HEAD_TRIES * BLOB_SIMPLE_OP + BLOB_SIMPLE_OP + MAX_THUMB_BYTES * (BLOB_TRANSFER_PER_BYTE + ORIGIN_PER_BYTE) + CDN_PER_REQUEST),
+    sources: [
+      { file: "lib/store-request.ts", names: ["guardStoreWrite", "studioAccess"] },
+      { file: "lib/studio-route.ts", names: ["countStudio"] },
+      { file: "lib/product-image.ts", names: ["MAX_THUMB_BYTES"] },
+      { file: "app/api/store/image/route.ts", names: ["head(thumbPath)", "firstBytes(thumbPath)"] },
+    ],
+    basis: "The thumbnail copy is sent through the pictures' own upload route (app/api/store/image/upload, the editor's uploadPresigned), the same request as the picture's and its smaller copy's: its put, its signed token and the head that checks its name is free are the upload request the line picture-uploads already prices, at its dearest, for every studio request of the month, so they are not counted twice here (until 9 November 2026 they were, and the first year given back passed the owner's US$ 66). What this line counts is what the thumbnail adds to the request that attaches it (guardStoreWrite, a studio request, so at most the plan's studio figure a month, a hard ceiling): one head, with every try again the Blob SDK may send (BLOB_HEAD_TRIES), a Simple Operation; and one read, a plain fetch sent once, a Simple Operation, with its whole bytes (MAX_THUMB_BYTES; the route checks the size before it reads, so no larger file is read) at the dearer Blob transfer rate kept here, with Fast Origin Transfer on those bytes and one CDN request, as PICTURE_READ counts them (Claude 1 on #2801). A thumbnail refused by that check is deleted with the stored time its own head just read (dropTakenPictures' known), so the refused path asks that one head too, never a second (Codex N1, LOW 1 on #2801; tests/encanto-thumb-leves.test.ts counts it); its one delete, an Advanced Operation, is inside the attaching request's own envelope in picture-uploads, which prices a put and a signing request for every studio request and an attach makes neither. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026. It adds no read on a public page: it replaces a larger copy in the same picture request (lib/picture-served.ts), already counted with the page.",
+  },
+  {
     id: "picture-uploads",
     feature: "Studio picture uploads (a product's, a link's and a page's picture): each copy's Blob puts, every try counted, and the checks of its name and bytes (6 November 2026; never counted before)",
     monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * ((BLOB_PUT_TRIES + BLOB_SIGN_TRIES) * BLOB_ADVANCED_OP + (3 * BLOB_HEAD_TRIES + 2) * BLOB_SIMPLE_OP + 2 * CDN_PER_REQUEST + 2 * MAX_IMAGE_BYTES * (BLOB_TRANSFER_PER_BYTE + ORIGIN_PER_BYTE)),
@@ -1959,7 +1971,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/product-image.ts", names: ["MAX_IMAGE_BYTES"] },
       { file: "lib/uploaded-image.ts", names: ["firstBytes", "reader.cancel()"] },
     ],
-    basis: "Every copy of a picture (the picture and its smaller copy) is put through its own upload request, and attaching them is one more; each is a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling. Each request is counted at the dearest one may be: its put (an Advanced Operation) with every try again the SDK may send (BLOB_PUT_TRIES), Simple Operations: three heads (the one that checks a name is free; one for the picture and one for its smaller copy), each with its tries again (BLOB_HEAD_TRIES); its signing request (issueSignedToken, requestApi in the SDK), counted as an Advanced Operation with every try (BLOB_SIGN_TRIES), because no official page says it is free; and two reads, one plain fetch each, each a CDN request, with both copies' whole bytes (MAX_IMAGE_BYTES each) at the dearer Blob transfer rate kept here plus Fast Origin Transfer, since a private blob fetched on a miss pays both (as PICTURE_READ prices a private picture read; Claude 1 on #2803). The read is counted whole: firstBytes reads a stream it cancels after sixteen bytes, and no official page says the Blob honors a byte range with 206 or bills only the bytes sent (Claude 4, C4-20261106-1120-TODOS-63). Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026. Not in this line: a buyer's review photo (lib/review-photo.ts) and an email's picture (lib/mail-pictures.ts), each a Blob put of its own, reported apart to be bounded and counted.",
+    basis: "Every copy of a picture (the picture, its smaller copy and its thumbnail copy) is put through its own upload request, and attaching them is one more; each is a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling. Each request is counted at the dearest one may be: its put (an Advanced Operation) with every try again the SDK may send (BLOB_PUT_TRIES), Simple Operations: three heads (the one that checks a name is free; one for the picture and one for its smaller copy), each with its tries again (BLOB_HEAD_TRIES); its signing request (issueSignedToken, requestApi in the SDK), counted as an Advanced Operation with every try (BLOB_SIGN_TRIES), because no official page says it is free; and two reads, one plain fetch each, each a CDN request, with both copies' whole bytes (MAX_IMAGE_BYTES each) at the dearer Blob transfer rate kept here plus Fast Origin Transfer, since a private blob fetched on a miss pays both (as PICTURE_READ prices a private picture read; Claude 1 on #2803). The read is counted whole: firstBytes reads a stream it cancels after sixteen bytes, and no official page says the Blob honors a byte range with 206 or bills only the bytes sent (Claude 4, C4-20261106-1120-TODOS-63). Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026. Not in this line: a buyer's review photo (lib/review-photo.ts) and an email's picture (lib/mail-pictures.ts), each a Blob put of its own, reported apart to be bounded and counted.",
   },
   {
     id: "free-delivery",

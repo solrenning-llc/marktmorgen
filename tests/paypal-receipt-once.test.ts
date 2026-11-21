@@ -420,7 +420,7 @@ async function main(): Promise<void> {
   is("the order left the list", (await listed()).includes(g), false);
 
   part("H: sendEmailPinned alone: only a refusal Amazon gave moves the key to Resend, in the same call");
-  const message = (to: string, key: string) => ({ meter: { by: "order" as const }, from: "Harbor Kitchen <orders@marktmorgen.com>", to, subject: "Your order", text: "Thanks.", idempotencyKey: key });
+  const message = (to: string, key: string) => ({ meter: { by: "order" as const, store: {} }, from: "Harbor Kitchen <orders@marktmorgen.com>", to, subject: "Your order", text: "Thanks.", idempotencyKey: key });
   startOfNextDay();
   mail.configure();
   await mail.setReady(true);

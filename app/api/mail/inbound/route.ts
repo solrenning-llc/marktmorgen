@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { canHearResend, forwardInbound, inboundSigned, isInboundConfigured } from "@/lib/inbound-mail";
-import { HEALTH_ID, LIST_TAG, MOVE_TAG, STORE_TAG, heardFromSender, mailReportCampaign } from "@/lib/mail-health";
+import { HEALTH_ID, LIST_TAG, MOVE_TAG, STOP_TAG, STORE_TAG, heardFromSender, mailReportCampaign } from "@/lib/mail-health";
 import { MAIL_REPORT_TAG, type MailReportEvent, noteMailReportEvent } from "@/lib/mail-report";
 import { redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
     try {
       const store = tagOf(notice.data?.tags, STORE_TAG);
       const permanent = notice.type === "email.bounced" && notice.data?.bounce?.type === "Permanent";
-      let result: "counted" | "paused" | "ignored" = "ignored";
+      let result: "counted" | "paused" | "stopped" | "ignored" = "ignored";
       if (notice.type === "email.complained" || permanent) {
         result = await heardFromSender({
           kind: notice.type === "email.complained" ? "complained" : "bounced",
@@ -141,6 +141,7 @@ export async function POST(request: NextRequest) {
           to,
           store,
           list: tagOf(notice.data?.tags, LIST_TAG),
+          stop: tagOf(notice.data?.tags, STOP_TAG),
           move: tagOf(notice.data?.tags, MOVE_TAG),
         });
       }

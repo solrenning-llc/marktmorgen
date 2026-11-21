@@ -2,8 +2,8 @@
  * 789 [IV1] step 3, unit 7 (coordinator, 21/11/2026 12:24 UTC, option b): a UK sale in another currency than pounds.
  * Its VAT is charged on top in the sale's currency, but the invoice and the VAT Return need it in sterling at HMRC's
  * period rate for the supply's month (VAT Notice 700, 7.6), read from lib/hmrc-period-rates.ts. It holds that:
- *   - the table is empty today (HMRC's rates were not read: the download was refused in this session), so a UK sale in
- *     euros or dollars is refused exactly as before, the body untouched, never collected without a sterling figure;
+ *   - a month with no row in HMRC's table refuses a UK sale in euros or dollars exactly as before, the body untouched,
+ *     never collected without a sterling figure (the table holds only the months downloaded from HMRC);
  *   - a row is read only for the supply's month and currency, with a rate as HMRC writes it (units per £1), an https
  *     source with a host and a real read-on day no later than the supply; two rows that disagree are unknown;
  *   - with a row injected HERE ONLY, the sale is collected in its own currency at 20%, its sterling VAT kept on the
@@ -53,11 +53,11 @@ const tryCollect = (b: URLSearchParams, extra: Record<string, unknown> = {}) => 
 };
 
 function main(): void {
-  part("Today: no HMRC rate is read, so a UK sale in another currency is refused as before");
-  is("the table is empty on purpose", HMRC_PERIOD_RATES.length, 0);
+  part("A month with no HMRC row: a UK sale in another currency is refused as before");
+  is("no row for January 2027 in the real table", HMRC_PERIOD_RATES.some((r) => r.month === "2027-01"), false);
   const euros = body("eur");
   const untouched = euros.toString();
-  is("a UK sale in euros: refused, the body untouched", [tryCollect(euros), euros.toString() === untouched], ["refused", true]);
+  is("a UK sale in euros in a month with no row: refused, the body untouched", [tryCollect(euros, { sterlingRates: [] }), euros.toString() === untouched], ["refused", true]);
   is("a UK sale in pounds: collected as before", tryCollect(body("gbp")), "collected");
 
   part("A row is read only when it fits the supply");

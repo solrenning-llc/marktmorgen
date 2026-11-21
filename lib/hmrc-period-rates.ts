@@ -5,11 +5,12 @@
  * period rate of exchange published by HMRC for customs purposes". Marktmorgen adopts the period rate: one rate per
  * calendar month and currency, published by HMRC before the month starts, given as units of the currency per £1.
  *
- * Empty on purpose. HMRC publishes the monthly rates on the UK Trade Tariff service
- * (https://www.trade-tariff.service.gov.uk/exchange_rates); they were not read in the session that built this unit (the
- * download was refused there), so no row is written and every UK sale in another currency stays refused. A row is
- * added only as HMRC published it: the month, the currency, the rate exactly as written, the https page it was read
- * on and the day it was read. A month or currency with no row is unknown, never a guess and never another source's rate.
+ * HMRC publishes the monthly rates on the UK Trade Tariff service (https://www.trade-tariff.service.gov.uk/exchange_rates).
+ * The owner authorized downloading that public publication (OWNER-20261121-HHMM-HMRC-EXCHANGE-RATES, 21/11/2026): no
+ * account, no key, no terms. November and December 2026 were downloaded on 21/11/2026 and are kept byte for byte in
+ * docs/hmrc-exchange-rates/, each with its exact address and SHA-256 (HMRC_RATE_FILES); tests/hmrc-period-rates-source
+ * .test.ts checks every row against its file. A row is added only as HMRC published it; a month or currency with no
+ * row is unknown, never a guess and never another source's rate. Before opening, the rows are read again at the source.
  * Pure: no IO.
  */
 import type { UkSterlingRate } from "@/lib/uk-vat";
@@ -26,7 +27,43 @@ export type HmrcPeriodRate = Readonly<{
   readOn: string;
 }>;
 
-export const HMRC_PERIOD_RATES: readonly HmrcPeriodRate[] = Object.freeze([]);
+/** HMRC's monthly files as downloaded, kept byte for byte in docs/hmrc-exchange-rates/ (tests/hmrc-period-rates-source.test.ts). */
+export type HmrcRateFile = Readonly<{ month: string; path: string; source: string; readOn: string; sha256: string }>;
+
+export const HMRC_RATE_FILES: readonly HmrcRateFile[] = Object.freeze([
+  { month: "2026-11", path: "docs/hmrc-exchange-rates/monthly_csv_2026-11.csv", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-11.csv", readOn: "2026-11-21", sha256: "0938d0c8ecb918aa56643b1e4d0db7b117818094bddb8ea93b0703005fbe1676" },
+  { month: "2026-12", path: "docs/hmrc-exchange-rates/monthly_csv_2026-12.csv", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-12.csv", readOn: "2026-11-21", sha256: "a16e7167467059dda4e4984002824543cc8d08048e66536fd034a6c7be56e55d" },
+]);
+
+/** Every store currency written in hundredths but pounds, for each month in HMRC_RATE_FILES, as HMRC wrote the rate. */
+export const HMRC_PERIOD_RATES: readonly HmrcPeriodRate[] = Object.freeze([
+  { month: "2026-11", currency: "AUD", perPound: "1.9052", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-11.csv", readOn: "2026-11-21" },
+  { month: "2026-11", currency: "CAD", perPound: "1.8822", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-11.csv", readOn: "2026-11-21" },
+  { month: "2026-11", currency: "CHF", perPound: "1.1046", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-11.csv", readOn: "2026-11-21" },
+  { month: "2026-11", currency: "DKK", perPound: "8.9172", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-11.csv", readOn: "2026-11-21" },
+  { month: "2026-11", currency: "EUR", perPound: "1.1930", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-11.csv", readOn: "2026-11-21" },
+  { month: "2026-11", currency: "HKD", perPound: "10.5124", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-11.csv", readOn: "2026-11-21" },
+  { month: "2026-11", currency: "MXN", perPound: "24.7810", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-11.csv", readOn: "2026-11-21" },
+  { month: "2026-11", currency: "NOK", perPound: "12.5386", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-11.csv", readOn: "2026-11-21" },
+  { month: "2026-11", currency: "NZD", perPound: "2.3544", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-11.csv", readOn: "2026-11-21" },
+  { month: "2026-11", currency: "PLN", perPound: "5.2056", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-11.csv", readOn: "2026-11-21" },
+  { month: "2026-11", currency: "SEK", perPound: "13.2475", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-11.csv", readOn: "2026-11-21" },
+  { month: "2026-11", currency: "SGD", perPound: "1.7112", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-11.csv", readOn: "2026-11-21" },
+  { month: "2026-11", currency: "USD", perPound: "1.3396", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-11.csv", readOn: "2026-11-21" },
+  { month: "2026-12", currency: "AUD", perPound: "1.9556", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-12.csv", readOn: "2026-11-21" },
+  { month: "2026-12", currency: "CAD", perPound: "1.8828", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-12.csv", readOn: "2026-11-21" },
+  { month: "2026-12", currency: "CHF", perPound: "1.1090", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-12.csv", readOn: "2026-11-21" },
+  { month: "2026-12", currency: "DKK", perPound: "8.9719", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-12.csv", readOn: "2026-11-21" },
+  { month: "2026-12", currency: "EUR", perPound: "1.2003", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-12.csv", readOn: "2026-11-21" },
+  { month: "2026-12", currency: "HKD", perPound: "10.3241", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-12.csv", readOn: "2026-11-21" },
+  { month: "2026-12", currency: "MXN", perPound: "24.3911", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-12.csv", readOn: "2026-11-21" },
+  { month: "2026-12", currency: "NOK", perPound: "12.7389", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-12.csv", readOn: "2026-11-21" },
+  { month: "2026-12", currency: "NZD", perPound: "2.3947", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-12.csv", readOn: "2026-11-21" },
+  { month: "2026-12", currency: "PLN", perPound: "5.2978", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-12.csv", readOn: "2026-11-21" },
+  { month: "2026-12", currency: "SEK", perPound: "13.3671", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-12.csv", readOn: "2026-11-21" },
+  { month: "2026-12", currency: "SGD", perPound: "1.6972", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-12.csv", readOn: "2026-11-21" },
+  { month: "2026-12", currency: "USD", perPound: "1.3158", source: "https://www.trade-tariff.service.gov.uk/api/v2/exchange_rates/files/monthly_csv_2026-12.csv", readOn: "2026-11-21" },
+]);
 
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;

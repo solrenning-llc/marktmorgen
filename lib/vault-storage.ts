@@ -1,29 +1,44 @@
 import { reserveStorage, bindStorage, releaseStorage, retireStorage } from "@/lib/storage-reservations";
 import { storageUsed, type StorageUse } from "@/lib/storage-quota";
-import { openVaultUpload, closeVaultUpload, abortVaultUpload, vaultReservationId, retireVaultSession, retireExpiredVaultSession, headVault } from "@/lib/vault";
+import { openVaultUpload, closeVaultUpload, abortVaultUpload, vaultReservationId, retireVaultSession, retireExpiredVaultSession, forgetVaultUploadRecord, headVault } from "@/lib/vault";
 import { readVaultPath, UPLOAD_SECONDS } from "@/lib/vault-rules";
 
+/**
+ * Opens one upload against the folder's storage. With the store's fence (input.fence, lib/live-fence.ts), every write
+ * of the open (the cleanup's, the reservation, the upload record, the bind and a release) is made only while the store
+ * is live: a provider that answers after the store's erasure began writes nothing of it back, and the session it made
+ * is retired (Codex L-20261120-0141). The route always passes it (app/api/store/vault/route.ts).
+ */
 export async function openReservedVault(input: Parameters<typeof openVaultUpload>[0], limit: number, measure: () => Promise<StorageUse> = () => storageUsed(input.folder, limit)) {
+  const fence = input.fence;
   // Opportunistic cleanup is bounded to one session per admission attempt.
   await retireStorage(input.folder, Date.now() - UPLOAD_SECONDS * 1000,
-    async row => !!row.pathname && !!row.uploadId && retireExpiredVaultSession(row.pathname, row.uploadId));
+    async row => !!row.pathname && !!row.uploadId && retireExpiredVaultSession(row.pathname, row.uploadId), fence);
   const entry = await reserveStorage(input.folder, input.bytes, limit, async () => {
     const held = await measure();
     if (held.available !== true) throw new Error("storage_unknown");
     return held.bytes;
-  });
+  }, fence);
   let opened: Awaited<ReturnType<typeof openVaultUpload>> | undefined;
   try {
     opened = await openVaultUpload({ ...input, multipart: true, reservation: entry.id });
-    if (!opened.ok) { await releaseStorage(input.folder, entry.id); return opened; }
-    await bindStorage(input.folder, entry.id, opened.upload.pathname, opened.sessionId);
+    if (!opened.ok) { await releaseStorage(input.folder, entry.id, fence).catch(gone); return opened; }
+    await bindStorage(input.folder, entry.id, opened.upload.pathname, opened.sessionId, fence);
     return opened;
   } catch (error) {
-    // No path or signatures have reached the browser at this point.
-    if (opened?.ok) await retireVaultSession(opened.upload.pathname, opened.sessionId).catch(() => false);
-    await releaseStorage(input.folder, entry.id).catch(() => undefined);
+    // No path or signatures have reached the browser at this point. The record is forgotten only once the provider
+    // retired the session: refused, the record is what an expired-session sweep would still find it by.
+    if (opened?.ok) {
+      const retired = await retireVaultSession(opened.upload.pathname, opened.sessionId).catch(() => false);
+      if (retired) await forgetVaultUploadRecord(opened.upload.pathname).catch(() => undefined);
+    }
+    await releaseStorage(input.folder, entry.id, fence).catch(() => undefined);
     throw error;
   }
+}
+/** A release refused because the store's erasure began: nothing of it is left to give back. Anything else is thrown. */
+function gone(error: unknown): void {
+  if (!(error instanceof Error && error.message === "storage_store_gone")) throw error;
 }
 async function release(pathname: string, id: string | undefined) {
   const folder = readVaultPath(pathname)?.folder;

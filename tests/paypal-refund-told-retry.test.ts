@@ -184,10 +184,13 @@ async function main(): Promise<void> {
   part("A telling that fails is tried again an hour later, and told once it works");
   const flaky = await paidThenRefunded("pp-flaky@example.com");
   failing = true;
+  // As below: the sweep reads the clock itself, so its hour is checked between the reads just before and after it.
+  const lookFrom = Math.floor(Date.now() / 1000);
   await sweep();
-  const firstLook = Math.floor(Date.now() / 1000);
+  const lookTo = Math.floor(Date.now() / 1000);
   is("not told yet", await told(flaky.capture), 0);
-  is("the order stays watched, looked at again in an hour", await watchedAt(flaky.order), firstLook + 3600);
+  const firstWatched = await watchedAt(flaky.order);
+  is("the order stays watched, looked at again in an hour", typeof firstWatched === "number" && firstWatched >= lookFrom + 3600 && firstWatched <= lookTo + 3600, true);
   is("nothing is said not sent yet", (await notSent()).length, 0);
   is("the purchase is taken back at once, while the telling is owed (option A of #3499)", await holds(flaky.email), 0);
   hour();
@@ -242,9 +245,13 @@ async function main(): Promise<void> {
     const unsure = await paidThenRefunded(`pp-odd-${name.replace(/[^a-z]/g, "")}@example.com`);
     failing = true;
     oddMark = odd;
+    // The sweep reads the clock itself: a second can turn between its read and this test's, so the place is checked
+    // between the clock read just before the sweep and just after it (merge_group of #4975, 20/11/2026: one second late).
+    const from = Math.floor(Date.now() / 1000);
     await sweep();
-    const at = Math.floor(Date.now() / 1000);
-    is(`${name}: unknown, so the order stays watched an hour, nothing said not sent, the purchase taken back at once`, [await watchedAt(unsure.order), (await notSent()).length, await holds(unsure.email)], [at + 3600, 1, 0]);
+    const to = Math.floor(Date.now() / 1000);
+    const watched = await watchedAt(unsure.order);
+    is(`${name}: unknown, so the order stays watched an hour, nothing said not sent, the purchase taken back at once`, [typeof watched === "number" && watched >= from + 3600 && watched <= to + 3600, (await notSent()).length, await holds(unsure.email)], [true, 1, 0]);
     oddMark = undefined;
     failing = false;
     hour();

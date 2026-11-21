@@ -25,7 +25,7 @@
  * given to. What the store wrote to or about the person (a note, a reply,
  * feedback on their work) is in, because it is data about them.
  */
-import { type Store } from "@/lib/store";
+import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type ErasureScope } from "@/lib/erasure-rules";
@@ -38,6 +38,7 @@ import { VersionUnreadError, listAgreements, readVersionExact } from "@/lib/agre
 import { doneLessons, studentDates } from "@/lib/learn";
 import { attemptOf, passedQuizzes } from "@/lib/quiz";
 import { isUnreadSubmission, submissionsOf } from "@/lib/assignment";
+import { submissionsCopyOf } from "@/lib/submission-store";
 import { certificatesOf } from "@/lib/certificate";
 import { lessonComments } from "@/lib/lesson-comments";
 import { notesOf } from "@/lib/lesson-notes";
@@ -116,6 +117,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/course-finish.ts": { how: "marks", what: "Marks that you opened and finished a course; the lessons you finished are in your course progress" },
   "lib/quiz.ts": { how: "copied", what: "Your quiz tries, answers, results and passes" },
   "lib/assignment.ts": { how: "copied", what: "Work you handed in, and the store's feedback on it" },
+  "lib/submission-store.ts": { how: "copied", what: "Files you sent the store for review, your note, its reply, and any upload still open" },
   "lib/backup-deletions.ts": { how: "marks", what: "Built but off: notes that the backup must delete its copy of a file already deleted, naming only the file (a hand-in's name holds a one-way fingerprint of your address, never the address)" },
   "lib/certificate.ts": { how: "copied", what: "Your certificates" },
   "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons" },
@@ -205,6 +207,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/plan-late-notice.ts": { how: "passing", days: 400, what: "If a payment of your payment plan was taken after the plan ended and then refunded: whether you were emailed about that refund and how many times it was tried, kept under the payment's Stripe invoice only, so you are never emailed about it twice. Your address is read from the invoice at Stripe when the email is sent and is not kept here. Deleted 400 days after the last try" },
   "lib/studio-demo.ts": { how: "notThePerson", why: "Kept about a visitor trying the studio without an account, by a network address and a random code, never by a store's buyer's address" },
   "lib/plan-withdrawal.ts": { how: "notThePerson", why: "Kept about the creator's own plan with Marktmorgen, not about the store's buyers" },
+  "lib/purchase-moves.ts": { how: "passing", days: 2, what: "A request to move your purchases to another address, with both addresses and when each confirmed it, kept for its day and one more; found only by the links emailed to the two addresses" },
 };
 
 /** True only when every module is copied or holds only marks: the condition for giving the copy to anybody. */
@@ -408,6 +411,11 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       });
     }
     return out;
+  },
+  "lib/submission-store.ts": async (s) => {
+    // Named by the course's product as the other course records are; a course since deleted by its own id.
+    const productOf = new Map(s.courses.map((c) => [c.courseId, c.productId]));
+    return submissionsCopyOf(await storeFolder(storeRef(s.store)), s.learner, (courseId) => productOf.get(courseId) ?? null);
   },
   // Withdrawn ones too: the erasure deletes them, so they are kept about the person.
   "lib/certificate.ts": async (s) => certificatesOf(s.courses.map((c) => c.courseId), s.email),

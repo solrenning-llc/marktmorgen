@@ -1396,6 +1396,7 @@
     "components/answers-editor.tsx",
     "components/api-key-editor.tsx",
     "components/app-code-invite.tsx",
+    "components/apple-signin.tsx",
     "components/arrival-notice.tsx",
     "components/ask-box.tsx",
     "components/assistant-reminder-box.tsx",
@@ -1808,6 +1809,7 @@
   ],
   "apiRouteSources": [
     "app/api/affiliate/route.ts",
+    "app/api/auth/apple/route.ts",
     "app/api/auth/callback/route.ts",
     "app/api/auth/code/route.ts",
     "app/api/auth/discord/route.ts",

@@ -3621,6 +3621,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "studio-search": BURST("studio"), "studio-search-day": BURST("studio"),
   // Sign-in and account security.
   join: ACCOUNT, passkey: ACCOUNT, "google-signin": ACCOUNT, "google-signin-back": ACCOUNT, "passkey-change": ACCOUNT, "passkey-remove-locked": ACCOUNT, "move-ask": ACCOUNT, "move-done": ACCOUNT, "two-step": ACCOUNT, "two-step-backup": ACCOUNT, "two-step-change": ACCOUNT,
+  "apple-signin": guard("Apple sign-in, off: company account guard, not a funded allowance. Program/relay/global cost remains unreviewed, CURRENT_APPLE_SIGNIN_COST_REVIEW null; no work admitted."),
   "discord-signin": guard("Discord sign-in, off: company account guard, not a funded allowance. Unknown provider and global company cost keeps CURRENT_DISCORD_SIGNIN_COST_REVIEW null; approval alone never admits work."),
   "two-step-rescue": ACCOUNT, "recovery-address": ACCOUNT, "recovery-address-change": ACCOUNT, "lost-email": ACCOUNT, "lost-email-ip": ACCOUNT,
   "discord-return": ACCOUNT, "metaads-return": ACCOUNT, "meet-return": ACCOUNT, report: guard("Takedown reports, per connection: a company cost."),

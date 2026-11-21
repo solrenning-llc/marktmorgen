@@ -40,9 +40,11 @@ test("expired AI funding cannot approve commercial release",()=>{
   finally{p.month=previous;}
 });
 test("zero paid-tier spending cannot pretend that the included AI is funded",()=>{
-  const p=policy!;const previous=p.storeMicroUsd.creator;
-  try{p.storeMicroUsd.creator=0;assert.equal(commercialMarginReady(review()),false);}
-  finally{p.storeMicroUsd.creator=previous;}
+  // Held on Studio, which includes AI. Store has included none since 17/10/2026, so its ceiling of 0 is the funded one
+  // and passes (owner, 20/11/2026, decision 3 (a); tests/commercial-store-no-ai.test.ts).
+  const p=policy!;const previous=p.storeMicroUsd.pro;
+  try{p.storeMicroUsd.pro=0;assert.equal(commercialMarginReady(review()),false);}
+  finally{p.storeMicroUsd.pro=previous;}
 });
 
 test("a valid ledger with enough money for one call cannot fund all included calls",()=>{

@@ -1,3 +1,5 @@
+import { CONTACT_LIVE_COMMANDS, INBOX_LIVE_BYTES, INBOX_OPEN_FENCE_COMMANDS } from "@/lib/inbox";
+import { MAX_PER_DAY as CONTACTS_PER_DAY } from "@/lib/store-contact";
 import { HELD_RECHECKS_PER_DAY, HELD_RETRY_COUNTER_SECONDS, HELD_MONTH_COUNT_SECONDS, heldRecheckMemoryUsd } from "@/lib/held-store-rules";
 import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
 /**
@@ -1156,10 +1158,8 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   studio: request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000),
   // An API request: the key, the store and the answer.
   api: request("light", 20 + TAKE_COMMANDS, 20_000),
-  // A message written to the inbox, and its index; for a new conversation, the fence's two reads of its store's
-  // erasing field and identity (lib/inbox.ts INBOX_OPEN_IF_LIVE), and for a contact message, the same two read before
-  // its email (storeStillLive, lib/store-contact.ts) (Codex L-20261120-1945).
-  inbox: request("light", 16 + TAKE_COMMANDS, 4_000),
+  // A message written to the inbox, and its index.
+  inbox: request("light", 12 + TAKE_COMMANDS + INBOX_OPEN_FENCE_COMMANDS, 4_000 + INBOX_LIVE_BYTES),
   // An email sent from inside a request or a job already counted, and its count.
   email: PER_EMAIL + TAKE_COMMANDS * COMMAND,
   // An access email; and since 9 November 2026 (13 [D10], review 6748073377 of #3431, M2) the Path lead its link may
@@ -1728,6 +1728,12 @@ export const TEAM_COMMANDS_PER_VIEW = 2;
 
 /** Windows of a counter that a 31-day month can touch. */
 export const DAY_WINDOWS = 32;
+/** The read-only contact admission is after the existing rolling-day store cap, before mail or an inbox unit.
+ * Price every possible admission (sent, failed or gone), at 32 daily windows, including its own light compute.
+ * Two possible store-limit identities are covered: handle before statsId, then the immutable statsId.
+ * The inbox writer's two additional calls and bounded bytes are in UNIT_COST.inbox above. */
+export const CONTACT_LIVE_MONTH = 2 * CONTACTS_PER_DAY * DAY_WINDOWS * request("light", CONTACT_LIVE_COMMANDS, INBOX_LIVE_BYTES);
+
 
 /** CX-61: two bounded provider reads, independent of released-name history.
  * Vercel's official regional table read 2026-11-04 has a highest memory rate
@@ -2709,13 +2715,14 @@ export const COST_LINES: CostLine[] = [
   {
     id: "inbox",
     feature: "The inbox: visitors' chats and messages, contact forms filed (17 October 2026)",
-    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "inbox"),
+    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "inbox") + CONTACT_LIVE_MONTH,
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "inbox"] },
-      { file: "lib/inbox.ts", names: ["takeAllowance"] },
+      { file: "lib/inbox.ts", names: ["takeAllowance", "INBOX_OPEN_FENCE_COMMANDS", "CONTACT_LIVE_COMMANDS", "INBOX_LIVE_BYTES", "INBOX_OPEN_WRITE", "INBOX_STORE_LIVE"] },
+      { file: "lib/store-contact.ts", names: ["MAX_PER_DAY", "contactStoreLive"] },
       { file: "lib/inbox-rules.ts", names: ["NEW_PER_DAY", "VISITOR_PER_HOUR"] },
     ],
-    basis: "Every message that arrives in the window, written with its index; the notices and replies it brings are store emails (line store-email).",
+    basis: "Every message that arrives in the window, written with its index. Each new conversation checks the same live identity and the erasing field in its write: two extra inner Redis calls and INBOX_LIVE_BYTES extra wire bytes, priced on every inbox unit. The contact form also checks before mail: its EVAL plus those two reads and bounded wire bytes, at two store-counter identities times MAX_PER_DAY times DAY_WINDOWS, even if sending or filing fails and no inbox unit was taken (CONTACT_LIVE_MONTH). A trial carries that same contact admission cost. No raw legacy store record is returned across the database wire; GETRANGE bounds its JSON read inside Lua to MAX_STORE_BYTES plus one. The notices and replies are store emails (line store-email).",
   },
   {
     id: "integrations",
@@ -3179,6 +3186,7 @@ export function nonPayingWorst(): number {
     + readingsCost(REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS)
     + TRIAL_ORDERS * ORDER_COST
     + TRIAL_MONTHLY_EMAILS * PER_EMAIL
+    + CONTACT_LIVE_MONTH
     + TRIAL_VIDEO_HOURS * hourCost()
     + TRIAL_DAILY_RUNS * 15 * WORST_COMMANDS_PER_RUN * COMMAND
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)

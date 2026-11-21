@@ -2044,32 +2044,29 @@ export class MemoryRedis {
           }
           return n;
         }
-        // lib/inbox.ts INBOX_OPEN_IF_LIVE: a new conversation written only while its store is live, then as INBOX_WRITE.
-        if (key.startsWith("-- marktmorgen:inbox-open-if-live:v1\n") && args[0] === "7" && args.length === 1 + 7 + 11) {
-          const [record, index, list, episode, token, live, erasing] = args.slice(1, 8);
-          const [, next, keep, score, id, message, max, tokenValue, endEpisode, field, statsId] = args.slice(8);
-          const call = (command: (string | number)[]) => {
-            this.scriptCalls += 1;
-            return this.run(command);
-          };
-          if (call(["HGET", erasing, field]) !== null) return -1;
-          if (statsId === "") {
-            if (Number(call(["EXISTS", live])) !== 1) return -1;
-          } else {
-            const raw = call(["GET", live]);
-            if (typeof raw !== "string") return -1;
-            let parsed: unknown;
-            try { parsed = JSON.parse(raw); } catch { return -2; }
-            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return -2;
-            if ((parsed as { statsId?: unknown }).statsId !== statsId) return -1;
+        // New inbox conversations and the contact form's pre-mail check share the live-store fence.
+        if ((key.startsWith("-- marktmorgen:inbox-open-write:v1\n") || key.startsWith("-- marktmorgen:inbox-store-live:v1\n"))) {
+          const n = Number(args[0]);
+          const opening = key.startsWith("-- marktmorgen:inbox-open-write:v1\n");
+          if ((opening ? n !== 7 : n !== 2) || args.length !== 1 + n + (opening ? 12 : 3)) throw new Error("bad inbox live fence arguments");
+          const keys = args.slice(1, 1 + n);
+          const [field, ref, legacy] = args.slice(-3);
+          const call = (command: (string | number)[]) => { this.scriptCalls += 1; return this.run(command); };
+          const identity = legacy === "" ? call(["GET", keys[n - 2]]) : call(["GETRANGE", keys[n - 2], 0, 1_000_000]);
+          if (legacy === "") { if (identity !== ref) return -1; }
+          else {
+            if (typeof identity !== "string" || !identity || Buffer.byteLength(identity) > 1_000_000) return -1;
+            try { if ((JSON.parse(identity) as { statsId?: unknown })?.statsId !== legacy) return -1; } catch { return -1; }
           }
-          if (call(["GET", record]) !== null) return 0;
+          if (call(["HEXISTS", keys[n - 1], field]) !== 0) return -1;
+          if (!opening) return 1;
+          const [record, index, list, episode, token] = keys;
+          const [expected, next, keep, score, id, message, max, tokenValue, endEpisode] = args.slice(1 + n, -3);
+          const current = call(["GET", record]);
+          if (expected === "" ? current !== null : current !== expected) return 0;
           call(["SET", record, next, "EX", keep]);
           call(["ZADD", index, score, id]);
-          if (message !== "") {
-            call(["RPUSH", list, message]);
-            call(["LTRIM", list, -Number(max), -1]);
-          }
+          if (message !== "") { call(["RPUSH", list, message]); call(["LTRIM", list, -Number(max), -1]); }
           call(["EXPIRE", list, keep]);
           call(["SET", token, tokenValue, "EX", keep]);
           if (endEpisode === "1") call(["DEL", episode]);

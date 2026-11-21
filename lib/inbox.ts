@@ -38,11 +38,10 @@ import { alertCreator, messageEpisodeKey, messageEpisodeSeed } from "@/lib/phone
 import { SITE_URL } from "@/lib/site-url";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { chatWords } from "@/lib/buyer-words/chat";
-import type { Store } from "@/lib/store";
+import { ERASING_KEY, LIST_ID_PATTERN, MAX_STORE_BYTES, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { stringList } from "@/lib/redis-reply";
 import { type Member, readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
-import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef } from "@/lib/store";
 import {
   CHAT_TOKEN,
   CONVERSATION_ID,
@@ -140,76 +139,53 @@ if #KEYS >= 5 then redis.call('SET', KEYS[5], ARGV[8], 'EX', ARGV[3]) end
 if ARGV[9] == '1' then redis.call('DEL', KEYS[4]) end
 return 1`;
 
-/**
- * INBOX_WRITE for a new conversation (expected ""), only while the store asked is live (Codex L-20261120-1945): a
- * contact, a chat, a hand-over or a creator's first message admitted on an old Store must not take the absence an
- * erasure left for leave to write the person's name, address, text and chat token back. The store's erasing field
- * (ARGV[10]) must be absent and its identity still its own, the rule of lib/store-live-cache.ts: for a store with an id
- * (ARGV[11] is "") its id key (KEYS[6]) must exist; for one from before ids, its owner's record (KEYS[6]) must decode
- * and hold this store's statsId (ARGV[11]). Then the same writes as INBOX_WRITE. 1 written; 0 the record already
- * exists; -1 the store is erasing or gone; -2 its record could not be read. KEYS: INBOX_WRITE's five (the chat token
- * always, a new conversation has one), the store's live key, ERASING_KEY. Modelled by lib/redis-memory.ts.
- */
-export const INBOX_OPEN_IF_LIVE = `-- marktmorgen:inbox-open-if-live:v1
-if redis.call('HGET', KEYS[7], ARGV[10]) then return -1 end
-if ARGV[11] == '' then
-  if redis.call('EXISTS', KEYS[6]) ~= 1 then return -1 end
+/** New conversations must belong to the same live store, in the write itself. The final two keys are
+ * identity and erasing; final three arguments are erasing field, expected ref and legacy statsId (or "").
+ * Legacy JSON is read with a byte bound and must name this very statsId, never just exist. */
+const INBOX_STORE_LIVE_LUA = `
+local legacy = ARGV[#ARGV]
+local ref = ARGV[#ARGV - 1]
+if legacy == '' then
+  if redis.call('GET', KEYS[#KEYS - 1]) ~= ref then return -1 end
 else
-  local raw = redis.call('GET', KEYS[6])
-  if not raw then return -1 end
+  local raw = redis.call('GETRANGE', KEYS[#KEYS - 1], 0, ${MAX_STORE_BYTES})
+  if not raw or raw == '' or #raw > ${MAX_STORE_BYTES} then return -1 end
   local ok, record = pcall(cjson.decode, raw)
-  if not ok or type(record) ~= 'table' then return -2 end
-  if record['statsId'] ~= ARGV[11] then return -1 end
+  if not ok or type(record) ~= 'table' or record.statsId ~= legacy then return -1 end
 end
-if redis.call('GET', KEYS[1]) then return 0 end
-redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
-redis.call('ZADD', KEYS[2], ARGV[4], ARGV[5])
-if ARGV[6] ~= '' then
-  redis.call('RPUSH', KEYS[3], ARGV[6])
-  redis.call('LTRIM', KEYS[3], -tonumber(ARGV[7]), -1)
-end
-redis.call('EXPIRE', KEYS[3], ARGV[3])
-redis.call('SET', KEYS[5], ARGV[8], 'EX', ARGV[3])
-if ARGV[9] == '1' then redis.call('DEL', KEYS[4]) end
-return 1`;
+if redis.call('HEXISTS', KEYS[#KEYS], ARGV[#ARGV - 2]) ~= 0 then return -1 end
+`;
+export const INBOX_STORE_LIVE = `-- marktmorgen:inbox-store-live:v1
+${INBOX_STORE_LIVE_LUA}return 1`;
+export const INBOX_OPEN_WRITE = `-- marktmorgen:inbox-open-write:v1
+${INBOX_STORE_LIVE_LUA}${INBOX_WRITE.slice(INBOX_WRITE.indexOf("\n") + 1)}`;
+/** Two extra redis.call operations in the open writer; the pre-mail check is EVAL plus those same two calls. */
+export const INBOX_OPEN_FENCE_COMMANDS = 2;
+export const CONTACT_LIVE_COMMANDS = 1 + INBOX_OPEN_FENCE_COMMANDS;
+/** Extra wire bytes: the bounded script plus two keys, a 40-byte field, a ref of at most 320 code units
+ * (at most six JSON bytes per unit), a 32-byte legacy id and framing; no raw legacy JSON leaves Redis. */
+export const INBOX_LIVE_BYTES = 4_096;
 
-/** A new conversation was not written because its store's erasure has begun or its identity is gone: said as closed. */
-export class InboxStoreGoneError extends Error {
-  constructor() {
-    super("the store of a new inbox conversation is erasing or gone");
-    this.name = "InboxStoreGoneError";
-  }
-}
-
-/**
- * Whether `store` is still live, read now: its erasing field absent and its identity still its own (INBOX_OPEN_IF_LIVE's
- * rule). For the contact form's email to the creator (lib/store-contact.ts), so a message admitted on an old Store does
- * not write to the old address once the store's erasure has begun (Codex L-20261120-1945). A read, not a fence: the
- * conversation's own write is the fence. Anything not read exactly is false: no email on a guess.
- */
-export async function storeStillLive(store: Store): Promise<boolean> {
-  if (!isRedisConfigured()) return false;
+async function liveFence(store: Store): Promise<{ keys: string[]; args: string[] } | null> {
+  if (!store.email || (store.sid && !STORE_ID_PATTERN.test(store.sid)) || (store.extra && !store.sid) || (!store.sid && (!store.statsId || !LIST_ID_PATTERN.test(store.statsId)))) return null;
   const ref = storeRef(store);
-  const withId = STORE_ID_PATTERN.test(store.sid);
-  try {
-    const live = withId ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
-    const replies = repliesFor(await redisPipeline([["HEXISTS", ERASING_KEY, await erasingField(ref)], [withId ? "EXISTS" : "GET", live]]), 2);
-    if (!replies || replies[0] !== 0) return false;
-    if (withId) return replies[1] === 1;
-    if (typeof replies[1] !== "string" || !store.statsId) return false;
-    const record = JSON.parse(replies[1]) as unknown;
-    return Boolean(record) && typeof record === "object" && (record as { statsId?: unknown }).statsId === store.statsId;
-  } catch {
-    return false;
-  }
+  if (!ref || ref.length > 320) return null;
+  return {
+    keys: [store.sid ? storeIdCommand(store.sid)[1] : await ownerKey(ref), ERASING_KEY],
+    args: [await erasingField(ref), ref, store.sid ? "" : store.statsId!],
+  };
 }
 
-/** A new conversation's write, its store's erasure or absence told apart (InboxStoreGoneError) as "gone". */
-const unlessGone = (write: Promise<Kept | null>): Promise<Kept | null | "gone"> =>
-  write.catch((error) => {
-    if (error instanceof InboxStoreGoneError) return "gone" as const;
-    throw error;
-  });
+/** Read-only admission immediately before mail. Unknown is distinct from confirmed gone; no send on either. */
+export async function contactStoreLive(store: Store): Promise<boolean | null> {
+  const fence = await liveFence(store);
+  if (!fence) return false;
+  try {
+    const result = repliesFor(await redisPipeline([["EVAL", INBOX_STORE_LIVE, 2, ...fence.keys, ...fence.args]]), 1)?.[0];
+    return result === 1 ? true : result === -1 ? false : null;
+  } catch { return null; }
+}
+class InboxStoreGoneError extends Error {}
 
 /**
  * Writes a conversation, and its new message, only over `expected`: the exact record text it was read from ("" for
@@ -220,6 +196,8 @@ const unlessGone = (write: Promise<Kept | null>): Promise<Kept | null | "gone"> 
  * less than what is kept). An answer of unknown shape throws UnknownReplyError (rule 24).
  */
 async function write(store: Store, statsId: string, handle: string, conversation: Kept, add: Message | null, refusable: boolean, expected: string, now = Date.now()): Promise<Kept | null> {
+  const fence = expected === "" ? await liveFence(store) : null;
+  if (expected === "" && !fence) throw new InboxStoreGoneError();
   const [length, oldest] = add ? await redisPipeline([["LLEN", msgKey(statsId, conversation.id)], ["LINDEX", msgKey(statsId, conversation.id), 0]]) : [0, null];
   const dropped = add && Number(length) >= MAX_MESSAGES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
   const messages = Math.max(0, (conversation.b ?? 0) + (add ? dataBytes([JSON.stringify(add)], 1) : 0) - dropped);
@@ -239,21 +217,15 @@ async function write(store: Store, statsId: string, handle: string, conversation
     msgKey(statsId, conversation.id),
     messageEpisodeKey(statsId, conversation.id),
     ...(conversation.token ? [tokenKey(conversation.token)] : []),
+    ...(fence?.keys ?? []),
   ];
-  // A new conversation (expected "", always with its chat token) is written only while its store is live.
-  const fenced = expected === "" && keys.length === 5;
-  const ref = storeRef(store);
-  const withId = STORE_ID_PATTERN.test(store.sid);
-  const live = fenced ? (withId ? storeIdCommand(store.sid)[1] : await ownerKey(ref)) : "";
-  const fence: (string | number)[] = fenced ? [await erasingField(ref), withId ? "" : statsId] : [];
   const written = repliesFor(
     await redisPipeline([
       [
         "EVAL",
-        fenced ? INBOX_OPEN_IF_LIVE : INBOX_WRITE,
-        keys.length + (fenced ? 2 : 0),
+        fence ? INBOX_OPEN_WRITE : INBOX_WRITE,
+        keys.length,
         ...keys,
-        ...(fenced ? [live, ERASING_KEY] : []),
         expected,
         JSON.stringify(conversation),
         KEEP,
@@ -264,12 +236,12 @@ async function write(store: Store, statsId: string, handle: string, conversation
         conversation.token ? `${statsId}|${conversation.id}|${handle}` : "",
         // Read (or answered, or closed): the unread episode ends in this same write, so the next message tells the phones again.
         conversation.unread === 0 ? "1" : "0",
-        ...fence,
+        ...(fence?.args ?? []),
       ],
     ]),
     1,
   )?.[0];
-  if (fenced && written === -1) throw new InboxStoreGoneError();
+  if (fence && written === -1) throw new InboxStoreGoneError();
   if (written !== 0 && written !== 1) throw new UnknownReplyError("an inbox conversation's write");
   return written === 1 ? conversation : null;
 }
@@ -363,9 +335,13 @@ async function open(input: NewInput): Promise<{ ok: true; conversation: Kept; me
     token: randomBytes(24).toString("base64url"),
   };
   const message: Message = { at: now, from: "visitor", text };
-  const kept = await unlessGone(write(store, statsId, store.handle, conversation, message, true, "", now));
-  // Its store's erasure has begun, or its identity is gone (Codex L-20261120-1945): nothing was written.
-  if (kept === "gone") return { ok: false, reason: "closed" };
+  let kept: Kept | null;
+  try {
+    kept = await write(store, statsId, store.handle, conversation, message, true, "", now);
+  } catch (error) {
+    if (error instanceof InboxStoreGoneError) return { ok: false, reason: "closed" };
+    throw error;
+  }
   // A new random id that is already taken is not written over: said as an error, never as kept.
   if (!kept) throw new UnknownReplyError("a new inbox conversation whose id was already taken");
   await trim(statsId);
@@ -811,8 +787,13 @@ export async function writeToAffiliate(
     token: randomBytes(24).toString("base64url"),
   };
   const message: Message = { at: now, from: "store", text, by };
-  const kept = await unlessGone(write(store, statsId, store.handle, conversation, message, true, "", now));
-  if (kept === "gone") return { ok: false, reason: "closed" };
+  let kept: Kept | null;
+  try {
+    kept = await write(store, statsId, store.handle, conversation, message, true, "", now);
+  } catch (error) {
+    if (error instanceof InboxStoreGoneError) return { ok: false, reason: "closed" };
+    throw error;
+  }
   if (!kept) throw new UnknownReplyError("a new inbox conversation whose id was already taken");
   await trim(statsId);
   const w = chatWords(store.language);

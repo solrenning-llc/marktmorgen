@@ -12,14 +12,21 @@ import { UK_VAT_PRODUCT_RATES, UK_VAT_PRODUCT_RATES_VALID_UNTIL, UK_VAT_RATES_FI
 const root = process.cwd();
 const bytes = readFileSync(join(root, UK_VAT_RATES_FILE.path));
 
-const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
-const text = (raw: string): string =>
-  raw
-    .replace(/<[^>]+>/g, "")
-    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, name: string) =>
-      name[0] === "#" ? String.fromCodePoint(name[1].toLowerCase() === "x" ? parseInt(name.slice(2), 16) : Number(name.slice(1))) : (ENTITIES[name.toLowerCase()] ?? whole))
-    .replace(/\s+/g, " ")
-    .trim();
+/**
+ * A cell's text: its tags removed until none is left, its spaces collapsed. The kept page has no HTML entities (GOV.UK's
+ * content API gives the body already decoded), so none is decoded here: a "<", a ">" or an entity left over is not plain
+ * text and fails the read, never turned into markup (CodeQL's incomplete multi-character sanitization on #5045).
+ */
+function text(raw: string): string {
+  let out = raw;
+  for (let previous = ""; previous !== out; ) {
+    previous = out;
+    out = out.replace(/<[^<>]*>/g, "");
+  }
+  out = out.replace(/\s+/g, " ").trim();
+  if (/[<>]|&(?:#x?[0-9a-f]+|[a-z]+);/i.test(out)) throw new Error(`a cell is not plain text: ${JSON.stringify(out.slice(0, 80))}`);
+  return out;
+}
 
 /**
  * The page's own tables, body row by body row, under the section heading each sits in. A table's header is its
@@ -43,6 +50,14 @@ function rowsOfThePage(): UkProductRateRow[] {
   }
   return rows;
 }
+
+test("a cell is read as plain text: an encoded or nested tag is refused, never decoded into markup (CodeQL on #5045)", () => {
+  assert.equal(text("<a href=\"x\">VAT Notice 701/10</a>"), "VAT Notice 701/10");
+  assert.equal(text("<<b>script>alert(1)"), "alert(1)", "tags are removed until none is left");
+  for (const raw of ["&lt;script&gt;alert(1)&lt;/script&gt;", "Books &amp; magazines", "a &#60;b", "a < b"]) {
+    assert.throws(() => text(raw), /not plain text/, raw);
+  }
+});
 
 test("the kept page is the file that was read: its SHA-256, address and dates", () => {
   assert.equal(createHash("sha256").update(bytes).digest("hex"), UK_VAT_RATES_FILE.sha256);

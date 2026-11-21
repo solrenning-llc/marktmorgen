@@ -111,7 +111,7 @@ import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { MAX_BUMPS } from "@/lib/product-extras";
 import { AFFILIATE_ROW_CAP, PRODUCT_CARD_CPU_SECONDS, PRODUCT_CARD_HELD_SECONDS, PRODUCT_CARD_MAX_BYTES, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
 import { BOOK_STRIPE_READS } from "@/lib/book-page-rules";
-import { FEED_TIMEOUT_MS, MAX_FEEDS } from "@/lib/calendar-sync";
+import { FEED_READING_CONFIG_BYTES, FEED_READING_FENCE_COMMANDS, FEED_TIMEOUT_MS, MAX_FEEDS, NEW_FEED_READING_FENCE_COMMANDS } from "@/lib/calendar-sync";
 import { CALENDAR_CALLS, LISTING_READ_BYTES } from "@/lib/read-ceilings";
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { SEARCH_PAGE } from "@/lib/community-search";
@@ -699,7 +699,10 @@ export const CERTIFICATE_PDF_READ = CALL + 1 * CPU_SECOND + 4 * MEMORY_SECOND + 
  *   - the creator's own calendars (lib/calendar-sync.ts, calendarBusy): MAX_FEEDS read side by side when their
  *     reading is old, waited on FEED_TIMEOUT_MS beside Stripe (readBusy starts them first and waits on both, so only
  *     what runs past Stripe's wait is added), each of FEED_MAX_BYTES parsed at BOOK_FEED_PARSE_CPU (a review
- *     ceiling), and each reading read and written four times at BOOK_FEED_READING_BYTES (2,000 times as JSON pairs);
+ *     ceiling), each reading read twice and sent once for both writes at BOOK_FEED_READING_BYTES (2,000 times as
+ *     JSON pairs), and one config argument at FEED_READING_CONFIG_BYTES (writer format plus the script/keys, including
+ *     URL encoding). The existing four-copy transfer ceiling stays reserved; the new batch fits below it, so this
+ *     correction changes no request units. Math.max still catches a future config budget that no longer fits;
  *   - every call listing, one GET each (lib/catalog.ts, readListings) at LISTING_READ_BYTES;
  *   - the diary of holds and bookings (one HGETALL of up to twice CALENDAR_CALLS entries at BOOK_DIARY_ENTRY_BYTES)
  *     and its refunded entries let go, the bookings' moves (lib/call-records.ts, readMoves: a hundred at an MGET),
@@ -716,11 +719,12 @@ export const BOOK_TIMES_SENT_BYTES = 100_000;
 /**
  * The commands of a reading besides its listings, counted from the code: coming soon (1); a package's token and what
  * is left of it (4); a draft's owner (2); the diary (HGETALL and the holds that ran out let go: 2); the creator's
- * calendars (their settings and home zone, 2; each feed's two readings, 2; each feed read again: its mark taken and
- * let go, 3, its readings written and its error cleared, 3: MAX_FEEDS x 8); the bookings' moves (CALENDAR_CALLS / 100
+ * calendars (their settings and home zone, 2; all feeds' cached state in one MGET, 1; each admitted feed:
+ * at most SET + GET for its claim, three reading writes and GET + DEL for its own release. One EVAL + config GET
+ * wraps all commits and releases: 1 + MAX_FEEDS x 7 + FEED_READING_FENCE_COMMANDS); the bookings' moves (CALENDAR_CALLS / 100
  * MGET); the refunded entries let go (1); the catch-up (20 EXISTS and 20 listings); the team asked whether it is one (2).
  */
-export const BOOK_TIMES_COMMANDS = 1 + 4 + 2 + 2 + 2 + MAX_FEEDS * 8 + CALENDAR_CALLS / 100 + 1 + 20 + 20 + 2;
+export const BOOK_TIMES_COMMANDS = 1 + 4 + 2 + 2 + 2 + 1 + MAX_FEEDS * 7 + FEED_READING_FENCE_COMMANDS + CALENDAR_CALLS / 100 + 1 + 20 + 20 + 2;
 export function bookTimesRead(listings: number): number {
   return readShapeCost({
     // The calendars are read beside Stripe (readBusy starts them before readCallSessions and waits on both): only what
@@ -728,7 +732,7 @@ export function bookTimesRead(listings: number): number {
     seconds: Math.max(0, FEED_TIMEOUT_MS / 1000 - BOOK_STRIPE_READS * EXPORT_PAGE_SECONDS),
     cpu: 0.5 + MAX_FEEDS * BOOK_FEED_PARSE_CPU + BOOK_STRIPE_READS * 0.1,
     commands: BOOK_TIMES_COMMANDS + listings,
-    dbBytes: listings * LISTING_READ_BYTES + 2 * CALENDAR_CALLS * BOOK_DIARY_ENTRY_BYTES + MAX_FEEDS * 4 * BOOK_FEED_READING_BYTES
+    dbBytes: listings * LISTING_READ_BYTES + 2 * CALENDAR_CALLS * BOOK_DIARY_ENTRY_BYTES + Math.max(MAX_FEEDS * 4 * BOOK_FEED_READING_BYTES, MAX_FEEDS * 3 * BOOK_FEED_READING_BYTES + FEED_READING_CONFIG_BYTES)
       + CALENDAR_CALLS * 128 + 20 * LISTING_READ_BYTES,
     outBytes: BOOK_TIMES_SENT_BYTES,
     stripePages: BOOK_STRIPE_READS,
@@ -1147,6 +1151,15 @@ export const BESIDE_SWEEP_USD =
  */
 export function besideSaveUsd(tier: Tier): number {
   return STORE_ALLOWANCES[tier].studio * BESIDE_SAVE_COMMANDS * COMMAND;
+}
+
+/**
+ * A new store calendar's first reading, written only while the settings still list it (lib/calendar-sync.ts addFeed,
+ * KEEP_NEW_FEED_READING; Claude 5 on #4983): NEW_FEED_READING_FENCE_COMMANDS more than its two plain SETs. A calendar
+ * can be removed and added again, so adds are bounded only by the studio figure: priced on every studio request.
+ */
+export function newFeedFenceUsd(tier: Tier): number {
+  return STORE_ALLOWANCES[tier].studio * NEW_FEED_READING_FENCE_COMMANDS * COMMAND;
 }
 
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
@@ -2529,11 +2542,13 @@ export const COST_LINES: CostLine[] = [
     feature: "The studio's own reads and writes: every page of it drawn (STUDIO_PAGE_UNITS each), every save and read, its refreshing; and the never-paused plan, cancel, delete and data-download requests (17 October 2026)",
     // And the beside pool's read, take and give-back on a product save while the store pays, priced on every studio
     // request (besideSaveUsd; TAKE_DATA's inner commands, as Upstash bills them).
-    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8) + besideSaveUsd(tier),
+    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8) + besideSaveUsd(tier) + newFeedFenceUsd(tier),
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "studio"] },
       { file: "lib/studio-allowance-rules.ts", names: ["STUDIO_PAGE_UNITS", "ESSENTIAL_PER_DAY", "ESSENTIAL_NEEDS"] },
       { file: "lib/store-data.ts", names: ["BESIDE_SAVE_COMMANDS", "poolTakeCommands"] },
+      // A new calendar's first reading, fenced on the settings (newFeedFenceUsd).
+      { file: "lib/calendar-sync.ts", names: ["NEW_FEED_READING_FENCE_COMMANDS", "KEEP_NEW_FEED_READING"] },
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },
       // A product's removal admits its ordinary request and WAITLIST_DROP_UNITS together before anything goes, for its
       // waitlist's hold and drop (or its drop finished when asked again): at most WAITLIST_DROP_COMMANDS commands and

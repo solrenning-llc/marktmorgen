@@ -954,6 +954,18 @@ async function main(): Promise<void> {
     is("L1: twenty refused past the store's ten minutes write the mark once at most", marks <= 3, true);
     redis.run(["DEL", gapKeyOf("joy")]);
   }
+  // Claude 1's audit of #1496 (7070726978, MEDIUM (i)): a kind the page never sends spends nothing, neither an
+  // address's allowance nor the store's ten minutes, and writes no mark: it is answered before any command.
+  {
+    let commands = 0;
+    replyHook = (list) => {
+      commands += list.length;
+      return null;
+    };
+    for (const k of ["zz", "", "V", "ll"]) await signal({ h: "joy", k }, `192.0.2.${clickIp++}`);
+    replyHook = null;
+    is("an unknown kind is answered before any command: no allowance, no store minutes, no mark", [commands, (await countGap(joyNow, "clicks")) === null], [0, true]);
+  }
   // The Terms say it, from the same words, dated when they changed.
   const termsPage = read("app/terms/page.tsx");
   is("the Terms say how many are counted, one connection's share, the busiest moments and the rates not shown", [/id="counted-clicks"[\s\S]*\{signalsWords\(\)\}/.test(termsPage), /lastUpdated="November 11, 2026"/.test(termsPage), signalsWords().includes("at the busiest moments some of them may not be counted"), signalsWords().includes("say they are not complete"), signalsWords().includes("left out as a repeat, without a note")], [true, true, true, true, true]);

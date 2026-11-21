@@ -16,6 +16,8 @@ const MAX_BODY_BYTES = 1_500;
 
 const done = () => new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
 
+/** The kinds a store page sends (components/store-beacon.tsx and components/affiliate-click.tsx): a view, another page, a link, a funnel step, an affiliate visit. */
+const HIT_KINDS = new Set(["v", "p", "l", "f", "a"]);
 /** How often one server writes down, for one store and one kind, the counts a flood past HIT_STORE_LIMIT refused. */
 const FLOOD_MARK_MS = 60_000;
 /** The last time this server wrote it, by store and kind: at most FLOOD_MARKS_KEPT of them, the oldest let go first. */
@@ -81,6 +83,9 @@ export async function POST(request: NextRequest) {
   // store's counts as not whole.
   if (isBot(request.headers.get("user-agent") ?? "")) return done();
   const kind = read("k", 2);
+  // Only the kinds a page sends are counted: anything else is answered before any allowance is asked, so a made-up
+  // kind spends neither an address's allowance nor the store's ten minutes (Claude 1's audit, 7070726978, (i)).
+  if (!HIT_KINDS.has(kind)) return done();
   const allowance = kind === "f" ? (["hit-funnel", 60] as const) : (["hit", 120] as const);
   // The address as one site is handed it (lib/traffic-rules.ts, shareAddress:
   // a /48 for the new kind), so a machine with a block of its own is one.

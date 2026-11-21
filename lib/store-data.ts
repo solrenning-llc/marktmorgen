@@ -79,10 +79,16 @@ export const DATA_SLOT_COMMAND_BATCH = 250;
  */
 export const TAKE_DATA = `-- marktmorgen:store-data:v1
 local limit = tonumber(ARGV[1])
-local always = ARGV[2] == '1'
+-- '1' never refuses for room (a count of what is written, which may grow); '2' is a give-back, which only shrinks.
+local give = ARGV[2] == '2'
+local always = ARGV[2] == '1' or give
 local month = ARGV[3] or ''
 if not limit or limit < 0 or not string.match(month, '^%d%d%d%d%-%d%d$') or (#ARGV - 3) % 3 ~= 0 then return {-1, 0} end
-local total = tonumber(redis.call('HGET', KEYS[1], '#') or '0')
+local heldTotal = redis.call('HGET', KEYS[1], '#')
+-- A give-back on a room that is not there (taken away with the store's erasure) writes nothing: it must never
+-- recreate the key with its total (Codex L, 20/11). Every room that holds anything holds its total, as keep() writes it.
+if give and not heldTotal then return {1, 0} end
+local total = tonumber(heldTotal or '0')
 if not total then return {-1, 0} end
 for i = 4, #ARGV, 3 do
   local mode = ARGV[i]
@@ -238,7 +244,11 @@ export function dataTakenOf(store: DataStore, reply: unknown, nowSeconds = Date.
   return { ok: false, reason: "full", used, room, message: dataFullWords(used, room, largerPlanFor(store, nowSeconds)) };
 }
 
-async function run(store: DataStore, changes: DataChange[], always: boolean, nowSeconds: number, pool = false): Promise<DataTaken> {
+/** How TAKE_DATA counts: "take" refuses what passes the room, "count" never refuses (it may grow), "give" only shrinks. */
+type DataMode = "take" | "count" | "give";
+const MODE_ARG: Record<DataMode, string> = { take: "0", count: "1", give: "2" };
+
+async function run(store: DataStore, changes: DataChange[], mode: DataMode, nowSeconds: number, pool = false): Promise<DataTaken> {
   const room = dataRoomFor(store, nowSeconds);
   const unknown = (used = 0): DataTaken => ({ ok: false, reason: "unknown", used, room, message: "This can't be saved right now. Try again in a minute." });
   if (changes.length === 0) return { ok: true, used: 0 };
@@ -247,7 +257,7 @@ async function run(store: DataStore, changes: DataChange[], always: boolean, now
   if (!key || !args || !isRedisConfigured()) return unknown();
   try {
     const limit = pool ? besidePoolFor(store, nowSeconds) : contentRoomFor(store, nowSeconds);
-    const [reply] = await redisPipeline([["EVAL", TAKE_DATA, 1, key, limit, always ? "1" : "0", monthOf(nowSeconds * 1000), ...args]]);
+    const [reply] = await redisPipeline([["EVAL", TAKE_DATA, 1, key, limit, MODE_ARG[mode], monthOf(nowSeconds * 1000), ...args]]);
     return dataTakenOf(store, reply, nowSeconds);
   } catch (error) {
     console.error("could not count a store's data", error);
@@ -272,7 +282,7 @@ export class DataRoomError extends StoreFullError {
  * does not grow what the store keeps is always taken.
  */
 export function takeData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<DataTaken> {
-  return run(store, changes, false, now / 1000);
+  return run(store, changes, "take", now / 1000);
 }
 
 /** The same, throwing DataRoomError when it is not taken, for a write that has nothing to say but no. */
@@ -312,7 +322,7 @@ export async function keepFor(store: DataStore, bytes: number, seconds: number, 
 export async function giveData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<void> {
   // What expires by itself is never given back early: it comes off with its month.
   const shrinking = changes.flatMap((change) => ("until" in change ? [] : [change.set ? change : { ...change, bytes: -Math.abs(change.bytes) }]));
-  await run(store, shrinking, true, now / 1000).catch(() => undefined);
+  await run(store, shrinking, "give", now / 1000).catch(() => undefined);
 }
 
 /**
@@ -320,7 +330,7 @@ export async function giveData(store: DataStore, changes: DataChange[], now = Da
  * moved, or kept before the room was counted. Never refuses and never throws.
  */
 export async function noteData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<void> {
-  await run(store, changes, true, now / 1000).catch(() => undefined);
+  await run(store, changes, "count", now / 1000).catch(() => undefined);
 }
 
 /**
@@ -389,7 +399,7 @@ export async function besideHeld(store: DataStore, ids: string[]): Promise<Set<s
 export async function takeBeside(store: DataStore, ids: string[], bytes: number, now = Date.now()): Promise<boolean> {
   if (ids.length === 0) return true;
   if (besidePoolFor(store, now / 1000) <= 0) return false;
-  return (await run(store, ids.map((id) => ({ slot: `b:${id}`, bytes, set: true })), false, now / 1000, true)).ok;
+  return (await run(store, ids.map((id) => ({ slot: `b:${id}`, bytes, set: true })), "take", now / 1000, true)).ok;
 }
 
 /**
@@ -443,7 +453,7 @@ export async function markBesideSwept(store: DataStore): Promise<void> {
 /** Gives these products' shares back to the pool, after a write that took them failed. Never refuses and never throws. */
 export async function giveBeside(store: DataStore, ids: string[], now = Date.now()): Promise<void> {
   if (ids.length === 0) return;
-  await run(store, ids.map((id) => ({ slot: `b:${id}`, bytes: 0, set: true })), true, now / 1000, true).catch(() => undefined);
+  await run(store, ids.map((id) => ({ slot: `b:${id}`, bytes: 0, set: true })), "give", now / 1000, true).catch(() => undefined);
 }
 
 /**
@@ -453,7 +463,7 @@ export async function giveBeside(store: DataStore, ids: string[], now = Date.now
  * teammate's restrictions moved with their sign-in).
  */
 export async function forceData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<void> {
-  const counted = await run(store, changes, true, now / 1000);
+  const counted = await run(store, changes, "count", now / 1000);
   if (!counted.ok) throw new Error("the store's data room could not be counted");
 }
 
@@ -464,7 +474,7 @@ export async function forceData(store: DataStore, changes: DataChange[], now = D
  * Codex X6 on #2576). Never refuses for room; never throws.
  */
 export function countData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<DataTaken> {
-  return run(store, changes, true, now / 1000);
+  return run(store, changes, "count", now / 1000);
 }
 
 /** One slot shrunk by `bytes`. Never refuses and never throws. */

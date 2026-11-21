@@ -168,6 +168,7 @@ const NOT_CHARGED = new Set(["CREATED", "SAVED", "APPROVED", "PAYER_ACTION_REQUI
 export const PAID_KEPT_SECONDS = 400 * 86_400;
 
 const orderKey = (order: string) => `nl:ppsell:o:${order}`;
+/** Exported for the year reading (lib/earnings-read.ts), which reads each record in its exact shape. */
 export const paidKey = (order: string) => `nl:ppsell:paid:${order}`;
 /** How many times an order's capture was asked for (watchFirst), until thirty days from its opening. */
 const tryKey = (order: string) => `nl:ppsell:try:${order}`;

@@ -402,6 +402,55 @@ async function main(): Promise<void> {
     is("an ordinary close keeps its record", (await readSubmission(FOLDER, sent.id))?.state, "submitted");
   }
 
+  part("A close that writes between the erasure's record delete and its places' removal is undone (Codex N1 on #3570, MEDIUM)");
+  {
+    // The narrower gap of N1-20261120-0616: the close has taken its door and waits at the vault; the erasure deletes
+    // the buyer's records, and only then does the close's write run, while the buyer's place and index entry are still
+    // there. Its record must never outlive the erasure that said done.
+    const who = "6".repeat(32);
+    let openVault!: () => void;
+    const atVault = new Promise<void>((resolve) => (openVault = resolve));
+    const racing = world({
+      closeReservedVault: async (pathname) => {
+        await atVault;
+        return { ok: true, file: { pathname, bytes: 5 * MiB, contentType: "video/mp4" } };
+      },
+    });
+    const opened = await openSubmissionDoor(ask(who, lesson(32)), racing.steps);
+    if (!opened.ok) throw new Error(`open refused: ${opened.reason}`);
+    const path = opened.upload.pathname;
+    const id = path.split("/")[2].slice(4);
+    const closing = closeSubmissionDoor({ store: SHOP, folder: FOLDER, courseId: COURSE, lessonId: lesson(32), who, data: SHOP, note: "Private note." }, path, ["e"], NOW, racing.steps).catch((error: unknown) => ({ thrown: String(error) }));
+    // Let the close take its door and reach the vault.
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+    const original = redis.pipeline.bind(redis);
+    let closedInGap = false;
+    redis.pipeline = (async (list: (string | number)[][]) => {
+      const reply = await original(list);
+      // Right after the erasure deletes this buyer's record, the close at the vault goes on and writes.
+      if (!closedInGap && list.some((command) => command[0] === "DEL" && command[1] === `nl:sub:rec:${FOLDER}:${id}`)) {
+        closedInGap = true;
+        redis.pipeline = original;
+        openVault();
+        await closing;
+      }
+      return reply;
+    }) as typeof redis.pipeline;
+    const erasedFiles: string[] = [];
+    let erased: number | string;
+    try {
+      erased = await forgetSubmissionsPerson(FOLDER, who, erasedFiles, world().steps).catch((error: unknown) => String(error));
+    } finally {
+      redis.pipeline = original;
+    }
+    is("control: the close ran inside the erasure, after its record delete", closedInGap, true);
+    is("the erasure said done, naming the file", [typeof erased, erasedFiles.includes(path)], ["number", true]);
+    is("after the erasure said done, no record of the erased buyer remains", await readSubmission(FOLDER, id), null);
+    const left = await redis.pipeline([["ZCARD", `nl:sub:who:${FOLDER}:${who}`], ["ZRANGEBYSCORE", `nl:sub:list:${FOLDER}:${COURSE}`, "-inf", "+inf"], ["ZSCORE", "nl:sub:due", `${FOLDER}|${path}`]]);
+    is("nor their index, nor a line on the studio's list", [left[0], (left[1] as string[]).some((member) => member.includes(id))], [0, false]);
+    is("and the file stays due at once on the sweep's list", left[2] !== null && Number(left[2]) <= NOW, true);
+  }
+
   // Review of #3570 (Claude 1 cloud, MEDIUM; taken by Claude 3): an abort that read the door, then a close that took it
   // and wrote its record while the abort was at the vault, then the abort letting the place and the index entry go.
   part("An abort and a close of the same upload: only one of them ever owns it");
@@ -570,58 +619,6 @@ async function main(): Promise<void> {
       release();
       redis.pipeline = original;
     }
-  }
-
-  // Codex X6, focal on #3574 (MEDIUM, 7057232550): the erasure deleted each record before it removed the buyer's live
-  // places, so a close waiting at the vault could land between the two steps, find the place and the entry still there
-  // (SUBMISSION_CLOSE_WRITE) and write the record again, with its line on the course's "To review" list, after the
-  // erasure had deleted it. The close is held at the vault and let go at the exact moment the erasure removes the live
-  // places: whichever order the erasure uses, nothing of the erased buyer may be written after it says done.
-  part("A close let go between the erasure's steps never writes the erased buyer's record back (Codex X6 on #3574)");
-  for (const when of ["before", "after"] as const) {
-    // "before": the close's write runs just before the erasure's first DEL of a live place; on the old order the
-    // records were already deleted then, and the close wrote one back. "after": just after that DEL, when the close
-    // must find no place and write nothing.
-    const who = (when === "before" ? "5" : "6").repeat(32);
-    const lessonId = lesson(when === "before" ? 40 : 41);
-    let letGo = () => {};
-    const gate = new Promise<void>((resolve) => { letGo = resolve; });
-    let reached = () => {};
-    const atVault = new Promise<void>((resolve) => { reached = resolve; });
-    const held = world({
-      closeReservedVault: async (pathname) => {
-        reached();
-        await gate;
-        return { ok: true, file: { pathname, bytes: 5 * MiB, contentType: "video/mp4" } };
-      },
-    });
-    const opened = await openSubmissionDoor(ask(who, lessonId), held.steps);
-    if (!opened.ok) throw new Error(`open refused: ${opened.reason}`);
-    const path = opened.upload.pathname;
-    const id = path.split("/")[2].slice(4);
-    const closing = closeSubmissionDoor({ store: SHOP, folder: FOLDER, courseId: COURSE, lessonId, who, data: SHOP, note: "Private note." }, path, ["e"], NOW, held.steps)
-      .then((answer) => answer, (error: unknown) => ({ thrown: String(error) }));
-    await atVault;
-    const original = redis.pipeline.bind(redis);
-    let closed: unknown = "not let go";
-    redis.pipeline = (async (list: (string | number)[][]) => {
-      const live = closed === "not let go" && list.some((command) => String(command[0]).toUpperCase() === "DEL" && String(command[1]).startsWith("nl:sub:live:"));
-      if (live && when === "before") { closed = "running"; letGo(); closed = await closing; }
-      const reply = await original(list);
-      if (live && when === "after") { closed = "running"; letGo(); closed = await closing; }
-      return reply;
-    }) as typeof redis.pipeline;
-    let erased: number | string;
-    try {
-      erased = await forgetSubmissionsPerson(FOLDER, who, [], world().steps).catch((error: unknown) => String(error));
-    } finally {
-      redis.pipeline = original;
-    }
-    is(`${when}: control: the close was let go during the erasure, and the erasure said done`, [closed !== "not let go", typeof erased], [true, "number"]);
-    if (when === "after") is("after: with its place gone, the close is not said kept", (closed as { ok?: boolean }).ok === true, false);
-    is(`${when}: no record of the erased buyer is left after the erasure said done`, await readSubmission(FOLDER, id), null);
-    const left = await redis.pipeline([["ZSCORE", `nl:sub:list:${FOLDER}:${COURSE}`, `${lessonId}|${id}`], ["ZCARD", `nl:sub:who:${FOLDER}:${who}`]]);
-    is(`${when}: nor its line on the course's "To review" list, nor their index`, [left[0], left[1]], [null, 0]);
   }
 
   done();

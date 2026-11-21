@@ -1068,13 +1068,17 @@ export async function forgetSubmissionsPerson(
   const entries = await entriesOf(folder, who);
   let gone = 0;
   const lessons = new Set(entries.map((entry) => `${entry.courseId}|${entry.lessonId}`));
-  const liveKeys = [...lessons].map((at) => { const [courseId, lessonId] = at.split("|"); return liveKey(folder, courseId, lessonId, who); });
-  // The live places go before any record (Codex X6 on #3574): a close waiting at the vault writes its record only while
-  // the buyer's place is there (SUBMISSION_CLOSE_WRITE), so once they are gone no close can write a record back after
-  // the loop below deleted it. The index (whoKey) stays to the end, the retry's only record of these lessons.
-  if (liveKeys.length > 0) {
-    const replies = repliesFor(await redisPipeline(liveKeys.map((key) => ["DEL", key])), liveKeys.length);
-    if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a buyer's submission places deleted");
+  const places = [...lessons].map((at) => {
+    const [courseId, lessonId] = at.split("|");
+    return liveKey(folder, courseId, lessonId, who);
+  });
+  // The live places go first: they are the close's fence (SUBMISSION_CLOSE_WRITE writes only while the place and the
+  // index entry are there). A close that wrote before this is undone by the record deletes below; one that comes after
+  // it writes nothing. Deleted after the records instead, a close waiting at the vault could write in between and its
+  // record outlive the erasure that said done (Codex N1 on #3570, MEDIUM). The same commands, in this order.
+  if (places.length > 0) {
+    const fenced = repliesFor(await redisPipeline(places.map((key) => ["DEL", key])), places.length);
+    if (!fenced || fenced.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a buyer's submission places deleted");
   }
   for (const entry of entries) {
     const door = await readDoorById(folder, entry.id);
@@ -1099,10 +1103,10 @@ export async function forgetSubmissionsPerson(
     if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a buyer's submission deleted");
     if (replies[0] === 1) gone += 1;
   }
-  // Delete the doors again after the live places (Claude 6 on #3570). A refused close or abort that put a door back
-  // before those places were removed is undone here. Once the live place is gone, the put-back check refuses it.
+  // Delete the doors again, after the live places went above (Claude 6 on #3570). A refused close or abort that put a
+  // door back before those places were removed is undone here. Once the live place is gone, the put-back check refuses it.
   // And the buyer's count of upload starts in this store (Codex X6 on #3574): it names them.
-  const keys = [...liveKeys, ...entries.map((entry) => doorKey(folder, entry.id)), opensKey(folder, who)];
+  const keys = [...entries.map((entry) => doorKey(folder, entry.id)), opensKey(folder, who)];
   // And their slots' turns on the store's list (review of #3568, Claude 6): each names the buyer, taken off with them.
   const turns = [...lessons].flatMap((at) => {
     const [courseId, lessonId] = at.split("|");
@@ -1112,7 +1116,7 @@ export async function forgetSubmissionsPerson(
   const commands: (string | number)[][] = [...keys.map((key) => ["DEL", key]), ...(turns.length > 0 ? [["ZREM", slotsKey(folder), ...turns]] : [])];
   if (commands.length > 0) {
     const replies = repliesFor(await redisPipeline(commands), commands.length);
-    if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a buyer's submission places deleted");
+    if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a buyer's submission doors and turns deleted");
   }
   // And their room slots (buyerSlotFor), emptied in one step so the store's room keeps nothing of them; a step not
   // known to be done leaves the erasure unfinished, to be pressed again.

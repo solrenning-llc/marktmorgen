@@ -111,11 +111,11 @@ export const PAGES: TopicPage[] = [
     highlight: "Teachable",
     intro: "A Teachable alternative where courses sit beside other products in a creator's store. Compare catalog limits, student experience and payment costs before moving a school.",
     seo: { title: "Marktmorgen vs Teachable", description: "A Teachable alternative where courses and other products share a creator's store. Compare sourced prices, catalog limits and payment fees. Marktmorgen paid plans remain closed." },
-    badge: { label: "Sources read October 20, 2026", tone: "proof" },
+    badge: { label: "Sources read November 15, 2026", tone: "proof" },
     accent: "#6d4aff",
     blocks: [
       { kind: "lead", text: "A school and a multi-product store can serve different needs. Marktmorgen already supports courses, quizzes and certificates; that does not make its student experience identical to Teachable's. Inspect the actual course tools, product limits and separate payment fees." },
-      { kind: "table", title: "Courses, subscriptions and fees", head: ["Compare", "Teachable", "Marktmorgen"], note: "USD. Sources read October 20, 2026. Product counts are catalog limits, not a promise of unlimited storage or bandwidth. Taxes and payment processing are separate.", rows: [
+      { kind: "table", title: "Courses, subscriptions and fees", head: ["Compare", "Teachable", "Marktmorgen"], note: "USD. Sources read November 15, 2026. Product counts are catalog limits, not a promise of unlimited storage or bandwidth. Taxes and payment processing are separate.", rows: [
         ["Monthly subscription", COMPETITOR_PRICES.teachable.plans.map(p => p.name + ": $" + p.monthlyCents / 100).join("; "), TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "month")).join("; ")],
         ["Annual billing", COMPETITOR_PRICES.teachable.annualScope, TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "year")).join("; ")],
         ["Platform and processing fees", COMPETITOR_PRICES.teachable.feeScope, TIERS.map(t => PLAN_TITLES[t] + ": " + commissionBps(t) / 100 + "% of each sale").join("; ") + ". Your Stripe processing fees are separate."],
@@ -132,7 +132,7 @@ export const PAGES: TopicPage[] = [
         "Teachable's Custom offer includes migration assistance and school-specific onboarding. Marktmorgen does not promise that service through its self-service importer.",
         "Teachable sells paid courses today. Marktmorgen's paid plans remain closed.",
       ] },
-      { kind: "features", title: "Official sources and scope", intro: "Read October 20, 2026. No worldwide tax exemption, universal course fit or net-margin result is inferred from the fee table.", items: [
+      { kind: "features", title: "Official sources and scope", intro: "Read November 15, 2026. No worldwide tax exemption, universal course fit or net-margin result is inferred from the fee table.", items: [
         { icon: "list", title: COMPETITOR_PRICES.teachable.plans[0].source.label, body: "Monthly prices, annual-billing display, product caps, trial, student apps and Custom services.", href: COMPETITOR_PRICES.teachable.plans[0].source.url },
         { icon: "calculator", title: COMPETITOR_PRICES.teachable.plans[0].feeSource.label, body: "Plan fee versus processing and optional bundles.", href: COMPETITOR_PRICES.teachable.plans[0].feeSource.url },
         { icon: "scale", title: "All published comparisons", body: "Read other comparisons and their own dated sources.", href: "/proof/comparisons" },
@@ -147,13 +147,13 @@ export const PAGES: TopicPage[] = [
     highlight: "HighLevel",
     intro: "A HighLevel alternative where CRM records sit beside a creator's store and products. Compare the audience, channels and agency model before treating these as equivalent subscriptions.",
     seo: { title: "Marktmorgen vs HighLevel", description: "A HighLevel alternative where CRM and products share a creator's store. Compare subscription prices, usage costs, channels and agency scope. Marktmorgen paid plans remain closed." },
-    badge: { label: "Sources read October 20, 2026", tone: "proof" },
+    badge: { label: "Sources read November 15, 2026", tone: "proof" },
     accent: "#6d4aff",
     blocks: [
       { kind: "lead", text: "Marktmorgen already has custom contact fields, deals, pipelines and branching workflows. That does not make it a phone system or an agency-resale platform. Choose by the work and channels you need, including the usage bill." },
-      { kind: "table", title: "CRM, subscriptions and channel costs", head: ["Compare", "HighLevel", "Marktmorgen"], note: "USD. Sources read October 20, 2026. Subscription prices do not include every optional service, provider charge or tax. A store is not the same billing unit as an agency sub-account.", rows: [
+      { kind: "table", title: "CRM, subscriptions and channel costs", head: ["Compare", "HighLevel", "Marktmorgen"], note: "USD. Sources read November 15, 2026. Subscription prices do not include every optional service, provider charge or tax. A store is not the same billing unit as an agency sub-account.", rows: [
         ["Monthly subscription", COMPETITOR_PRICES.highlevel.plans.map(p => p.name + ": $" + p.monthlyCents / 100).join("; "), TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "month")).join("; ")],
-        ["Annual subscription", COMPETITOR_PRICES.highlevel.plans.map(p => p.name + ": $" + (p.annualCents / 100).toLocaleString("en-US") + "/year").join("; "), TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "year")).join("; ")],
+        ["Annual subscription", COMPETITOR_PRICES.highlevel.annualScope, TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "year")).join("; ")],
         ["CRM and accounts", "CRM and pipelines. Starter has 3 sub-accounts; Unlimited and Agency Pro have unlimited sub-accounts.", "Contact fields, deals and pipelines within each store. " + pipelineLimitWords()],
         ["Communication channels", "Email, SMS, calling and social-media tools; usage and add-on costs apply.", "Opt-in email with published send limits; no SMS, WhatsApp or phone-call sending. Booked video calls are a different product."],
         ["Usage charges", COMPETITOR_PRICES.highlevel.feeScope, "List emails use published plan allowances. Stripe charges separately for payments; bounded paid add-ons keep their own limits."],
@@ -170,7 +170,7 @@ export const PAGES: TopicPage[] = [
         "HighLevel offers agency-wide account management. Marktmorgen's pipelines and their limits belong to individual stores.",
         "HighLevel sells paid subscriptions today. Marktmorgen's paid plans remain closed.",
       ] },
-      { kind: "features", title: "Official sources and scope", intro: "Read October 20, 2026. No result, revenue, cost-saving or net-margin claim is made from either subscription price.", items: [
+      { kind: "features", title: "Official sources and scope", intro: "Read November 15, 2026. No result, revenue, cost-saving or net-margin claim is made from either subscription price.", items: [
         { icon: "list", title: COMPETITOR_PRICES.highlevel.plans[0].source.label, body: "Monthly and annual prices, sub-accounts, channels and SaaS Mode.", href: COMPETITOR_PRICES.highlevel.plans[0].source.url },
         { icon: "calculator", title: COMPETITOR_PRICES.highlevel.usage.source.label, body: "Usage billing, wallets, optional services and rebilling.", href: COMPETITOR_PRICES.highlevel.usage.source.url },
         { icon: "scale", title: "All published comparisons", body: "Read other comparisons and their own dated sources.", href: "/proof/comparisons" },
@@ -185,11 +185,11 @@ export const PAGES: TopicPage[] = [
     highlight: "Hotmart",
     intro: "A Hotmart alternative where a creator's store charges through their own Stripe account. Compare the distribution tools, payment model and current fee policy before moving.",
     seo: { title: "Marktmorgen vs Hotmart", description: "A Hotmart alternative where a creator's store uses their own Stripe account. Compare current USD fee bands, payment models and distribution tools. Marktmorgen paid plans remain closed." },
-    badge: { label: "Sources read October 20, 2026", tone: "proof" },
+    badge: { label: "Sources read November 15, 2026", tone: "proof" },
     accent: "#6d4aff",
     blocks: [
       { kind: "lead", text: "Hotmart combines product delivery with its own payment system and affiliate tools. Marktmorgen uses a creator's connected Stripe account. Neither arrangement removes every creator or platform tax obligation, and the payment policy matters more than an old fee headline." },
-      { kind: "table", title: "Subscriptions, USD fees and payment models", head: ["Compare", "Hotmart", "Marktmorgen"], note: "USD. Official sources read October 20, 2026. Fee bands below assume purchase and commission currencies are both USD. Taxes, card and withdrawal charges can add to the total.", rows: [
+      { kind: "table", title: "Subscriptions, USD fees and payment models", head: ["Compare", "Hotmart", "Marktmorgen"], note: "USD. Official sources read November 15, 2026. Fee bands below assume purchase and commission currencies are both USD. Taxes, card and withdrawal charges can add to the total.", rows: [
         ["Subscription", "No monthly or annual subscription fee.", TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "month") + " or " + publishedPriceWords(t, "year")).join("; ")],
         ["Platform fee", COMPETITOR_PRICES.hotmart.feeScope, TIERS.map(t => PLAN_TITLES[t] + ": " + commissionBps(t) / 100 + "% of each sale").join("; ") + ". Your Stripe processing fees are separate."],
         ["Current fee policy", COMPETITOR_PRICES.hotmart.policyScope, "The published subscription and visible limits remain the terms for a prepared store; paid selling remains closed."],
@@ -211,13 +211,13 @@ export const PAGES: TopicPage[] = [
         "Hotmart has no monthly subscription fee. Marktmorgen uses subscriptions with published limits.",
         "Hotmart sells paid products today. Marktmorgen's paid plans remain closed.",
       ] },
-      { kind: "features", title: "Official sources and scope", intro: "Read October 20, 2026. No tax exemption or net-margin certification is inferred from the payment model.", items: [
+      { kind: "features", title: "Official sources and scope", intro: "Read November 15, 2026. No tax exemption or net-margin certification is inferred from the payment model.", items: [
         { icon: "list", title: COMPETITOR_PRICES.hotmart.plans[0].source.label, body: "Subscription model, product delivery, affiliate tools and buyer app.", href: COMPETITOR_PRICES.hotmart.plans[0].source.url },
         { icon: "scale", title: COMPETITOR_PRICES.hotmart.plans[0].feeSource.label, body: "Current fixed fee, microtransaction bands and conditional tax responsibilities.", href: COMPETITOR_PRICES.hotmart.plans[0].feeSource.url },
         { icon: "calculator", title: COMPETITOR_PRICES.hotmart.feeDetails.source.label, body: "USD bands, conflicting older sentence and the Player fee change.", href: COMPETITOR_PRICES.hotmart.feeDetails.source.url },
-        { icon: "bank", title: "Hotmart withdrawal availability", body: "Non-BRL withdrawal timing, guarantee periods, BRL method differences and conditions that can prevent receipt. Read October 20, 2026.", href: "https://suportehotmart.zendesk.com/hc/en-us/articles/360028608652-When-can-I-withdraw-my-commissions-and-what-can-prevent-receipt" },
-        { icon: "list", title: "Hotmart Club customization", body: "Official Club page describes visual identity and domain customization. Read October 20, 2026; not used as a fee source.", href: "https://solutions.hotmart.com/update-your-members-area" },
-        { icon: "bank", title: "Stripe payout documentation", body: "Available balance, settlement, payout schedules, bank delays and account conditions. Read October 20, 2026; no faster-payout guarantee.", href: "https://docs.stripe.com/payouts" },
+        { icon: "bank", title: "Hotmart withdrawal availability", body: "Non-BRL withdrawal timing, guarantee periods, BRL method differences and conditions that can prevent receipt. Read November 15, 2026.", href: "https://suportehotmart.zendesk.com/hc/en-us/articles/360028608652-When-can-I-withdraw-my-commissions-and-what-can-prevent-receipt" },
+        { icon: "list", title: "Hotmart Club customization", body: "Official Club page describes visual identity and domain customization. Read November 15, 2026; not used as a fee source.", href: "https://solutions.hotmart.com/update-your-members-area" },
+        { icon: "bank", title: "Stripe payout documentation", body: "Available balance, settlement, payout schedules, bank delays and account conditions. Read November 15, 2026; no faster-payout guarantee.", href: "https://docs.stripe.com/payouts" },
         { icon: "scale", title: "All published comparisons", body: "Read other comparisons and their own dated sources.", href: "/proof/comparisons" },
       ] },
     ],
@@ -228,17 +228,17 @@ export const PAGES: TopicPage[] = [
     eyebrow: "A sourced comparison",
     title: "Marktmorgen vs",
     highlight: "Whop",
-    intro: "A Whop alternative where a creator's store uses their own Stripe account. Compare discovery, payment services and payout fees rather than treating every platform fee as the same charge.",
+    intro: "A Whop alternative where a creator's store uses their own Stripe account. Compare payment services and payout fees rather than treating every platform fee as the same charge.",
     seo: { title: "Marktmorgen vs Whop", description: "A Whop alternative where a creator's store uses their own Stripe account. Compare dated payment, payout and optional-service fees. Marktmorgen paid plans remain closed." },
-    badge: { label: "Sources read October 20, 2026", tone: "proof" },
+    badge: { label: "Sources read November 15, 2026", tone: "proof" },
     accent: "#6d4aff",
     blocks: [
       { kind: "lead", text: "Choose the distribution and payment setup you need. A direct Stripe store does not bring a marketplace audience with it, and a payment-service quote is not a promise that every extra service or tax is included." },
-      { kind: "table", title: "Payments, payouts and discovery", head: ["Compare", "Whop", "Marktmorgen"], note: "USD. Sources read October 20, 2026. Whop's Standard quote has conditional additions; a payment fee is not an independently verified platform-share breakdown. Unknown charges are not zero.", rows: [
+      { kind: "table", title: "Payments, payouts and discovery", head: ["Compare", "Whop", "Marktmorgen"], note: "USD. Sources read November 15, 2026. Whop's Standard quote has conditional additions; a payment fee is not an independently verified platform-share breakdown. Unknown charges are not zero.", rows: [
         ["Subscription", "Standard pay-as-you-go has no setup or monthly fee. Custom pricing requires a quote.", TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "month") + " or " + publishedPriceWords(t, "year")).join("; ")],
         ["Each payment", COMPETITOR_PRICES.whop.feeScope, TIERS.map(t => PLAN_TITLES[t] + ": " + commissionBps(t) / 100 + "% of each sale").join("; ") + ". Your Stripe processing fees are separate."],
         ["Getting paid", COMPETITOR_PRICES.whop.payoutScope, "Payouts follow your connected Stripe account's schedule and fees. Creator and platform tax obligations still apply."],
-        ["Discovery", "A public Discover directory with business search.", "Your store has its own address and sharing links. No comparable discovery directory or guaranteed buyers are offered here."],
+        ["Discovery", "A Whop-run discovery directory could not be confirmed on November 15, 2026: the cited address now shows one business's page named Discover, and Whop's home page links no directory.", "Your store has its own address and sharing links. No discovery directory or guaranteed buyers are offered here."],
         ["Getting started", "Standard payment services are available now, subject to the provider's onboarding and eligibility.", PLANS_ON_SALE ? "Check the current plan terms before starting." : "Store setup is available. Paid plans and paid selling are not open yet."],
       ] },
       { kind: "features", title: "Inspect the store and payment setup", items: [
@@ -246,14 +246,13 @@ export const PAGES: TopicPage[] = [
         { icon: "store", title: "Community beside products", body: "Inspect the existing community, courses and product limits before assuming they replace your current setup.", href: "/platform/community" },
       ] },
       { kind: "limits", title: "Where they are ahead", items: [
-        "Whop has a public discovery directory. Marktmorgen does not promise a comparable audience source or marketplace placement.",
         "Whop Standard has no monthly subscription fee. Marktmorgen uses subscriptions with published limits.",
         "Whop offers several payout methods. Marktmorgen relies on the creator's connected Stripe payout options.",
         "Whop accepts paid business today. Marktmorgen's paid plans remain closed.",
       ] },
-      { kind: "features", title: "Official sources and scope", intro: "Read October 20, 2026. This page does not certify a merchant-of-record arrangement, worldwide tax coverage or net margin for either platform.", items: [
+      { kind: "features", title: "Official sources and scope", intro: "Read November 15, 2026. This page does not certify a merchant-of-record arrangement, worldwide tax coverage or net margin for either platform.", items: [
         { icon: "calculator", title: COMPETITOR_PRICES.whop.plans[0].source.label, body: "Card, international, optional-service and payout charges.", href: COMPETITOR_PRICES.whop.plans[0].source.url },
-        { icon: "list", title: COMPETITOR_PRICES.whop.discovery.source.label, body: "The actual public directory; inclusion does not promise traffic or sales.", href: COMPETITOR_PRICES.whop.discovery.source.url },
+        { icon: "list", title: COMPETITOR_PRICES.whop.discovery.source.label, body: "The address cited for its directory; on November 15, 2026 it showed one business's page.", href: COMPETITOR_PRICES.whop.discovery.source.url },
         { icon: "scale", title: "All published comparisons", body: "Read other comparisons and their own dated sources.", href: "/proof/comparisons" },
       ] },
     ],
@@ -304,11 +303,11 @@ export const PAGES: TopicPage[] = [
     highlight: "Circle",
     intro: "A Circle alternative where a community sits beside a creator's store and products. Compare live events, messaging and billing before choosing.",
     seo: { title: "Marktmorgen vs Circle", description: "A Circle alternative where community and products share a creator's store. Compare native live events, messaging and sourced billing terms. Marktmorgen paid plans remain closed." },
-    badge: { label: "Sources read October 20, 2026", tone: "proof" },
+    badge: { label: "Sources read November 15, 2026", tone: "proof" },
     accent: "#6d4aff",
     blocks: [
       { kind: "lead", text: "Both products have community conversations and private messages. Marktmorgen's existing chat is not missing: its room checks for new messages while active. Compare the kind of conversation and event you need, rather than assuming these work identically." },
-      { kind: "table", title: "Community, price and payment terms", head: ["Compare", "Circle", "Marktmorgen"], note: "USD. Sources read October 20, 2026. An annual-billing monthly equivalent is not a monthly purchase option or a verified annual invoice. Taxes and processor charges are separate.", rows: [
+      { kind: "table", title: "Community, price and payment terms", head: ["Compare", "Circle", "Marktmorgen"], note: "USD. Sources read November 15, 2026. An annual-billing monthly equivalent is not a monthly purchase option or a verified annual invoice. Taxes and processor charges are separate.", rows: [
         ["Annual-billing display", COMPETITOR_PRICES.circle.plans.map(p => p.name + ": $" + p.annualEquivalentMonthlyCents / 100 + "/month equivalent").join("; ") + ". " + COMPETITOR_PRICES.circle.annualScope, TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "year")).join("; ")],
         ["Monthly subscription", "Current monthly purchase prices not verified here; check Circle's quote.", TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "month")).join("; ")],
         ["Platform share and processing", COMPETITOR_PRICES.circle.feeScope, TIERS.map(t => PLAN_TITLES[t] + ": " + commissionBps(t) / 100 + "% of each sale").join("; ") + ". Stripe processing is separate; direct payments do not remove tax obligations."],
@@ -326,7 +325,7 @@ export const PAGES: TopicPage[] = [
         "Circle Plus offers branded iOS and Android listings. Marktmorgen has no app-store listing.",
         "Circle sells paid community plans today. Marktmorgen's paid plans remain closed.",
       ] },
-      { kind: "features", title: "Official sources and scope", intro: "Read October 20, 2026. A missing billing quote remains unknown, not zero.", items: [
+      { kind: "features", title: "Official sources and scope", intro: "Read November 15, 2026. A missing billing quote remains unknown, not zero.", items: [
         { icon: "list", title: COMPETITOR_PRICES.circle.plans[0].source.label, body: "Annual-billing display, trial, Email Hub and branded-app scope.", href: COMPETITOR_PRICES.circle.plans[0].source.url },
         { icon: "calculator", title: COMPETITOR_PRICES.circle.plans[0].feeSource.label, body: "Platform shares and the separate processor and Billing charges.", href: COMPETITOR_PRICES.circle.plans[0].feeSource.url },
         { icon: "info", title: COMPETITOR_PRICES.circle.live.source.label, body: "Native broadcasting, interactive rooms and recordings.", href: COMPETITOR_PRICES.circle.live.source.url },
@@ -343,11 +342,11 @@ export const PAGES: TopicPage[] = [
     highlight: "ClickFunnels",
     intro: "A ClickFunnels alternative where a creator's store, products and funnels share a block-based studio. Compare the editor, payment terms and migration limits before moving.",
     seo: { title: "Marktmorgen vs ClickFunnels", description: "A ClickFunnels alternative where store pages and funnels share a block-based studio. Compare prices, page tests and migration limits. Marktmorgen paid plans remain closed." },
-    badge: { label: "Sources read October 20, 2026", tone: "proof" },
+    badge: { label: "Sources read November 15, 2026", tone: "proof" },
     accent: "#6d4aff",
     blocks: [
       { kind: "lead", text: "Both platforms can use your existing Stripe account, and neither adds a platform share to those payments. That alone is not a reason to move. Compare the design controls, email allowance and what your current funnel needs." },
-      { kind: "table", title: "Prices, pages and payment terms", head: ["Compare", "ClickFunnels", "Marktmorgen"], note: "USD. Official sources read October 20, 2026 are linked below. Annual charges are paid yearly; Dominate has no monthly purchase option. Processor and optional-service charges are separate.", rows: [
+      { kind: "table", title: "Prices, pages and payment terms", head: ["Compare", "ClickFunnels", "Marktmorgen"], note: "USD. Official sources read November 15, 2026 are linked below. Annual charges are paid yearly; Dominate has no monthly purchase option. Processor and optional-service charges are separate.", rows: [
         ["Monthly subscription", COMPETITOR_PRICES.clickfunnels.plans.map(p => p.name + ": " + (p.monthlyCents === null ? "annual only" : "$" + p.monthlyCents / 100)).join("; "), TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "month")).join("; ")],
         ["Annual subscription", COMPETITOR_PRICES.clickfunnels.plans.map(p => p.name + ": $" + (p.annualCents / 100).toLocaleString("en-US") + "/year").join("; "), TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "year")).join("; ")],
         ["Platform share and processing", COMPETITOR_PRICES.clickfunnels.feeScope, TIERS.map(t => PLAN_TITLES[t] + ": " + commissionBps(t) / 100 + "% of each sale").join("; ") + ". Stripe charges its own processing fees."],
@@ -365,12 +364,12 @@ export const PAGES: TopicPage[] = [
         "ClickFunnels publishes larger email-send allowances, starting on Launch. Marktmorgen's Studio and Scale list-email limits are shown in the table.",
         "ClickFunnels sells paid plans now. Marktmorgen's paid plans remain closed, so a prepared store is not an open paid checkout.",
       ] },
-      { kind: "features", title: "Official sources and scope", intro: "Read October 20, 2026. The page-test guide allows one variant per funnel step; it does not support a claim of unlimited simultaneous page variants.", items: [
+      { kind: "features", title: "Official sources and scope", intro: "Read November 15, 2026. The page-test guide allows one variant per funnel step; it does not support a claim of unlimited simultaneous page variants.", items: [
         { icon: "list", title: COMPETITOR_PRICES.clickfunnels.plans[0].source.label, body: "Monthly and exact annual charges, including annual-only Dominate, and email allowances.", href: COMPETITOR_PRICES.clickfunnels.plans[0].source.url },
         { icon: "calculator", title: COMPETITOR_PRICES.clickfunnels.plans[0].feeSource.label, body: "Existing Stripe accounts, processor fees and optional billing or invoice charges.", href: COMPETITOR_PRICES.clickfunnels.plans[0].feeSource.url },
         { icon: "info", title: COMPETITOR_PRICES.clickfunnels.trial.source.label, body: "Its standard trial and account setup.", href: COMPETITOR_PRICES.clickfunnels.trial.source.url },
         { icon: "layout", title: COMPETITOR_PRICES.clickfunnels.split.source.label, body: "Original and one variant page per funnel step.", href: COMPETITOR_PRICES.clickfunnels.split.source.url },
-        { icon: "layout", title: COMPETITOR_PRICES.clickfunnels.editor.source.label, body: "The published editor and platform capabilities.", href: COMPETITOR_PRICES.clickfunnels.editor.source.url },
+        { icon: "layout", title: COMPETITOR_PRICES.clickfunnels.editor.source.label, body: "The drag-and-drop page editor and its templates.", href: COMPETITOR_PRICES.clickfunnels.editor.source.url },
         { icon: "scale", title: "All published comparisons", body: "Read the other comparisons and their own dated sources.", href: "/proof/comparisons" },
       ] },
     ],
@@ -383,11 +382,11 @@ export const PAGES: TopicPage[] = [
     highlight: "Skool",
     intro: "A Skool alternative where a community can sit beside products, courses and paid calls in the creator's store. Compare payment fees, live events and discovery before choosing.",
     seo: { title: "Marktmorgen vs Skool", description: "A Skool alternative where community and products share the creator's store. Compare Hobby and Pro fees, native live calls and discovery. Marktmorgen paid selling remains closed." },
-    badge: { label: "Sources read October 20, 2026", tone: "proof" },
+    badge: { label: "Sources read November 15, 2026", tone: "proof" },
     accent: "#6d4aff",
     blocks: [
       { kind: "lead", text: "Marktmorgen starts at " + publishedPriceWords("creator", "month") + "; Skool Hobby is $" + COMPETITOR_PRICES.skool.plans[0].monthlyCents / 100 + " a month. Skool provides its own live-call and discovery tools. Inspect Marktmorgen if you need several product types and direct Stripe charges, rather than assuming either platform is the best fit for every community." },
-      { kind: "table", title: "Subscriptions, payment fees and scope", head: ["Compare", "Skool", "Marktmorgen"], note: "USD. Sources read October 20, 2026 are linked below. Skool's listed payment fee is not a separate quote for a Marktmorgen payment: Stripe processing still applies on your own account. Taxes and optional services may add to either side.", rows: [
+      { kind: "table", title: "Subscriptions, payment fees and scope", head: ["Compare", "Skool", "Marktmorgen"], note: "USD. Sources read November 15, 2026 are linked below. Skool's listed payment fee is not a separate quote for a Marktmorgen payment: Stripe processing still applies on your own account. Taxes and optional services may add to either side.", rows: [
         ["Monthly subscription", COMPETITOR_PRICES.skool.plans.map(p => p.name + ": $" + p.monthlyCents / 100).join("; "), TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "month")).join("; ")],
         ["Annual billing", COMPETITOR_PRICES.skool.annualScope, TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "year")).join("; ")],
         ["Each paid transaction", COMPETITOR_PRICES.skool.feeScope, TIERS.map(t => PLAN_TITLES[t] + ": " + commissionBps(t) / 100 + "% to Marktmorgen").join("; ") + ". Your Stripe processing fees are separate."],
@@ -405,7 +404,7 @@ export const PAGES: TopicPage[] = [
         "Skool has a community-discovery directory with eligibility rules. Marktmorgen does not promise a comparable discovery network or a supply of buyers.",
         "Skool offers paid community subscriptions today. Marktmorgen's paid plans are closed; setting up a store does not enable a paid checkout.",
       ] },
-      { kind: "features", title: "Official sources and scope", intro: "Read October 20, 2026. No audience size, webinar capacity or guaranteed results are claimed here.", items: [
+      { kind: "features", title: "Official sources and scope", intro: "Read November 15, 2026. No audience size, webinar capacity or guaranteed results are claimed here.", items: [
         { icon: "list", title: COMPETITOR_PRICES.skool.plans[0].source.label, body: "Hobby and Pro monthly prices; annual billing headline.", href: COMPETITOR_PRICES.skool.plans[0].source.url },
         { icon: "calculator", title: COMPETITOR_PRICES.skool.plans[0].feeSource.label, body: "Transaction bands, the bank-payout account and optional acquisition charges.", href: COMPETITOR_PRICES.skool.plans[0].feeSource.url },
         { icon: "info", title: COMPETITOR_PRICES.skool.trial.source.label, body: "Trial, renewal and cancellation rules.", href: COMPETITOR_PRICES.skool.trial.source.url },
@@ -433,7 +432,7 @@ export const PAGES: TopicPage[] = [
         { icon: "scale", title: "Marktmorgen vs ClickFunnels", body: "Editor, payment fees and the existing migration guide.", href: "/proof/clickfunnels" },
         { icon: "scale", title: "Marktmorgen vs Circle", body: "Native live events, messaging and billing terms.", href: "/proof/circle" },
         { icon: "scale", title: "Marktmorgen vs Kit", body: "Email allowances, commerce fees and newsletter tools.", href: "/proof/kit" },
-        { icon: "scale", title: "Marktmorgen vs Whop", body: "Payment fees, payouts and public discovery.", href: "/proof/whop" },
+        { icon: "scale", title: "Marktmorgen vs Whop", body: "Payment fees and payouts.", href: "/proof/whop" },
         { icon: "scale", title: "Marktmorgen vs Hotmart", body: "Current USD fee bands, payment model and distribution tools.", href: "/proof/hotmart" },
         { icon: "scale", title: "Marktmorgen vs HighLevel", body: "CRM, channel costs and agency scope.", href: "/proof/highlevel" },
         { icon: "scale", title: "Marktmorgen vs Teachable", body: "Course catalogs, student experience and processing fees.", href: "/proof/teachable" },
@@ -458,11 +457,11 @@ export const PAGES: TopicPage[] = [
     highlight: "Kajabi",
     intro: "A Kajabi alternative where your store, products and direct Stripe payments share one studio. Compare the published limits as well as the subscription price.",
     seo: { title: "Marktmorgen vs Kajabi", description: "A Kajabi alternative where store setup and direct Stripe payments share one studio. Compare prices, email limits and branded apps. Paid plans are not on sale yet." },
-    badge: { label: "Sources read October 19, 2026", tone: "proof" },
+    badge: { label: "Sources read November 15, 2026", tone: "proof" },
     accent: "#6d4aff",
     blocks: [
       { kind: "lead", text: "Choose by the features you need. Marktmorgen starts at " + publishedPriceWords("creator", "month") + "; list email starts on " + PLAN_TITLES.pro + " at " + publishedPriceWords("pro", "month") + ". Kajabi Basic includes marketing email. A lower entry price does not mean every plan is cheaper or every allowance matches." },
-      { kind: "table", title: "Prices, limits and payment fees", head: ["Compare", "Kajabi", "Marktmorgen"], note: "USD. Official Kajabi sources were read October 19, 2026 and are linked below. Annual prices require annual payment. Processing, applicable taxes and optional services can add to either side.", rows: [
+      { kind: "table", title: "Prices, limits and payment fees", head: ["Compare", "Kajabi", "Marktmorgen"], note: "USD. Official Kajabi sources were read November 15, 2026 and are linked below. Annual prices require annual payment. Processing, applicable taxes and optional services can add to either side.", rows: [
         ["Monthly subscription", COMPETITOR_PRICES.kajabi.plans.map(p => p.name + ": $" + p.monthlyCents / 100).join("; "), TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "month")).join("; ")],
         ["Annual subscription", COMPETITOR_PRICES.kajabi.plans.map(p => p.name + ": $" + (p.annualCents / 100).toLocaleString("en-US") + "/year").join("; "), TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "year")).join("; ")],
         ["Product catalog", "Basic: 5; Growth: 50; Pro: unlimited.", "Up to " + MAX_PRODUCTS.toLocaleString("en-US") + " products per store. Storage, traffic, order and other plan limits still apply."],
@@ -481,7 +480,7 @@ export const PAGES: TopicPage[] = [
         "Kajabi includes marketing email on Basic and publishes unlimited marketing emails on its plans. Marktmorgen's Store plan has no list email, and Studio and Scale have the monthly send limits above.",
         "Kajabi sells paid plans today. Marktmorgen's paid plans are still closed; a prepared store is not an open paid checkout.",
       ] },
-      { kind: "features", title: "Official sources and scope", intro: "Read October 19, 2026. These are public USD quotes, not a negotiated offer or a promise that every payment method is available in every country.", items: [
+      { kind: "features", title: "Official sources and scope", intro: "Read November 15, 2026. These are public USD quotes, not a negotiated offer or a promise that every payment method is available in every country.", items: [
         { icon: "list", title: COMPETITOR_PRICES.kajabi.plans[0].source.label, body: "Monthly and annual subscriptions, products, marketing email and regional payment-fee conditions.", href: COMPETITOR_PRICES.kajabi.plans[0].source.url },
         { icon: "info", title: COMPETITOR_PRICES.kajabi.trial.source.label, body: "The standard trial is 14 days; its exact term and locked features are described by Kajabi.", href: COMPETITOR_PRICES.kajabi.trial.source.url },
         { icon: "info", title: COMPETITOR_PRICES.kajabi.brandedApp.source.label, body: "Branded listings on Apple App Store and Google Play, plan inclusion and the Basic/Growth add-on.", href: COMPETITOR_PRICES.kajabi.brandedApp.source.url },
@@ -508,23 +507,23 @@ export const PAGES: TopicPage[] = [
         intro: "Four lines before the long table. Every one of them is backed by a row below or on the feature-by-feature page, with its source.",
         items: [
           { icon: "bank", title: "Where we are ahead: the money", body: "Sales land in a full Stripe account in your own name, with its own login and payout schedule. Stan's creators get an account Stan manages, and cash out inside Stan." },
-          { icon: "tag", title: `Where we are ahead: the ${PLAN_AT.creator} plan`, body: "Several prices on one product, discount codes in percent or dollars, sales and landing pages, offers before and after paying, payment plans, ad pixels and an affiliate program, most of which Stan keeps for its $99 plan. And pay what you want, free trials on memberships, reviews only buyers can write, 15 currencies, a team with roles, bundles that hand over each product as itself, and past buyers brought over from a file, none of which Stan's help center describes. Since September 30: one search box across the whole community, a public API, an offer made once to a member who presses Cancel, and points, levels and a leaderboard in the community, with a course handed over at a level, none of which Stan's help center describes either." },
+          { icon: "tag", title: `Where we are ahead: the ${PLAN_AT.creator} plan`, body: `Several prices on one product, discount codes in percent or dollars, sales and landing pages, offers before and after paying, payment plans, ad pixels and an affiliate program, most of which Stan keeps for its $99 plan. And pay what you want, free trials on memberships, reviews only buyers can write, 15 store currencies, a team with roles on the ${PLAN_AT.creator} plan where Stan has one only on its new $299 plan, bundles that hand over each product as itself, and past buyers brought over from a file, none of which Stan's help center describes. Since September 30: a public API, an offer made once to a member who presses Cancel, and points, levels and a leaderboard in the community, with a course handed over at a level, none of which Stan's help center describes either.` },
           { icon: "scale", ...feeWords().sameAsStan },
-          { icon: "info", title: "Where Stan is ahead", body: `${PAYPAL ? "" : "PayPal at checkout, "}${STAN_AFFILIATES_AHEAD}, automatic Instagram replies, Zoom links made for each booking and webinar, an iPhone app, and as many products as you like where we stop at 2,000. If you need those today, Stan is the better tool today.` },
+          { icon: "info", title: "Where Stan is ahead", body: `${PAYPAL ? "" : "PayPal at checkout, "}${STAN_AFFILIATES_AHEAD}, automatic Instagram replies, Zoom links made for each booking and webinar, an iPhone app, prices shown to buyers in their own currency, and as many products as you like where we stop at 2,000. If you need those today, Stan is the better tool today.` },
         ],
       },
       {
         kind: "table",
         title: "The part that decides",
-        note: "Sources: Stan's help center articles 'Creator vs. Creator Pro', 'How to Connect Stan with Stripe', 'How to Cash Out Inside Stan', 'Experiment: How to Connect an Existing Stripe Account' and 'How to Subscribe on the Stan Mobile App', read on September 18, 2026; 'Can I Create More Than One Stan Store?' and 'How to Change Your Stan Username or Email', read on September 19, 2026. The rows on products, prices, trials and the customer area re-checked on Stan's help center on September 26, 2026; 'Can I Create More Than One Stan Store?' re-read, and 'Can I Grant Administrative Access to a Team Member?' and 'How Can I Add My Customer Reviews?' read on September 27, 2026, and the rows on ways to pay and currency re-checked the same day. The rows on live events, bundles and moving from another platform from 'How to Add an Integrated Webinar to Community', 'Webinar Product', the Digital Downloads category, 'How to Import Your Existing Email List into Stan' and 'How Do I Manually Give Access or Add a Customer to a Product?', read on September 27, 2026. Stan's 14-day free trial from their article 'Stan Store Pricing 2026', read on September 28, 2026, the same day every other row was re-checked on their help center and the rows on the line about you and the customer area were corrected from 'How to Add or Update Your Profile Bio' and 'Common Feature Requests On Our Radar'. The row on inviting other creators from 'What is Stan's Referral Program?', read on September 30, 2026.",
+        note: "Sources, all read on November 15, 2026, with every row checked against them that day: Stan's help center articles 'Creator vs. Creator Pro', 'How to Connect Stan with Stripe', 'How to Cash Out Inside Stan', 'Experiment: How to Connect an Existing Stripe Account', 'How to Subscribe on the Stan Mobile App', 'Can I Create More Than One Stan Store?', 'How to Change Your Stan Username or Email', 'Can I Grant Administrative Access to a Team Member?', 'Can I Create a Custom Domain for My Stan Store?', 'How Can I Add My Customer Reviews?', 'How to Change Your Currency On Stan', 'What Is Adaptive Pricing / Local Currency at Checkout?', 'How to Add an Integrated Webinar to Community', 'Webinar Product', the Digital Downloads category, 'How to Import Your Existing Email List into Stan', 'How Do I Manually Give Access or Add a Customer to a Product?', 'How to Add or Update Your Profile Bio', 'Common Feature Requests On Our Radar' and 'What is Stan\'s Referral Program?', and their article 'Stan Store Pricing 2026' for the 14-day free trial.",
         head: ["", "Stan", "Marktmorgen"],
         rows: [
-          ["Monthly price", "$29 and $99, free for the first 14 days", monthlyRow()],
+          ["Monthly price", "$29 and $99, free for the first 14 days. A $299 Creator Max plan is not yet open to every creator", monthlyRow()],
           ["Paid yearly", "$300 and $948 a year", yearlyRow()],
           ["Cut of each sale", "0% platform fee", feeWords().short],
           ["Logging in", "An account with a password. Their own signup asks for name, email and password", "A link sent to your email, or a passkey if you add one. No password to invent, and none kept here to be stolen"],
           ["Ways to be paid", "Stripe or PayPal, for every creator", PAYPAL ? "Stripe or PayPal, both paying straight into your own account, with the ways to pay you switch on in Stripe: cards, Apple Pay, Google Pay, Link, Klarna, Afterpay, Affirm, iDEAL and more" : `Stripe, with the ways to pay you switch on in it: cards, Apple Pay, Google Pay, Link, Klarna, Afterpay, Affirm, iDEAL and more. ${PAYPAL_NOT_YET}`],
-          ["Currency", "One per store, chosen from ten", "Any one of 15 per store, from US dollars and euros to yen and Mexican pesos"],
+          ["Currency", "One per store, chosen from ten. Buyers in more than 150 countries are also shown the price in their own currency, with a conversion fee of 2% to 4% included in it", "Any one of 15 per store, from US dollars and euros to yen and Mexican pesos. Buyers pay in that currency, never converted"],
           ["Whose Stripe account", "One they manage. Their own help center: you cannot connect an existing Stripe account", "A full Stripe account in your own name, opened from your studio, with its own Stripe login. It stays yours"],
           ["Getting paid", "Cash out inside Stan, $10 minimum, whole balance only", "Your own Stripe payout schedule"],
           ["Where you see your money", "Their Income tab. A Stripe Custom account has no Stripe login", "stripe.com, like any other business of yours"],
@@ -534,12 +533,12 @@ export const PAGES: TopicPage[] = [
           ["Pay what you want", "Not in their help center", `Yes: a minimum of at least $1 and a suggested price, on the ${PLAN_AT.creator} plan`],
           ["Free trial on a membership", "Not in their help center", "1 to 90 days, with the card taken at the start and nothing charged until it ends"],
           ["A line about you on the page", "A short profile bio, and no separate About Me page", "On every store, under your name"],
-          ["Your own domain", "Not available", DOMAINS ? `Yes, on the ${PLAN_AT.pro} Studio plan, with the certificate handled for you` : "Not available"],
+          ["Your own domain", "Only on a new $299-a-month Creator Max plan that it says is not yet open to every creator", DOMAINS ? `Yes, on the ${PLAN_AT.pro} Studio plan, with the certificate handled for you` : "Not available"],
           ["Changing your store address", "Any time. Their help center says old links are forwarded on a best-effort basis, cannot be guaranteed, and advises resending them", "Any time. Old addresses stay with the store and keep working until you choose to let one go. A store holds up to 10 addresses at once, its current one included"],
           ["Customer area for all purchases", "A login for courses only. Other purchases show in a Purchases tab inside the creator's community, if there is one","A buyer's purchases from a store, up to the 40 most recent, listed on one page the buyer reaches with an emailed link: downloads, links, courses and booked calls. No account and no password"],
           ["Several stores in one account", "Not in one account. Several accounts, each with its own email and its own subscription", "Up to five in one account, each with its own address, Stripe account and plan"],
           ["Inviting other creators", "20% of each payment they make, in cash through Stripe or PayPal, for as long as they stay subscribed, 3 to 5 days after each renewal once their 14-day trial ends, and only while you pay Stan too. No bonus for the creator you invite in their help center", INVITE_PROGRAM_OPEN ? `${INVITE_SHARE_PERCENT}% of each payment they make, for as long as they pay, as credit on your own plan \u2014 not cash \u2014 added ${INVITE_HOLD_DAYS} days after each payment. The creator you invite gets ${INVITE_BONUS} of credit after their first payment` : INVITE_PAUSE_NOTICE],
-          ["A team with roles", "Not for the store: their help center says the only way to give someone admin access is to share your login. Admins and moderators exist inside the community only", "Up to five people per store, as Admin, Editor or Support, each signing in with their own email, checked on our server, with an activity log"],
+          ["A team with roles", "Admin seats, as Manager or Support, only on a new $299-a-month Creator Max plan that it says is not yet open to every creator. On the $29 and $99 plans their help center describes none for the store; admins and moderators exist inside the community", "Up to five people per store, as Admin, Editor or Support, each signing in with their own email, checked on our server, with an activity log"],
           ["Reviews", "Added by the creator. Their help center says customers cannot write one", "Written only by buyers whose payment your Stripe account confirms. You can answer or hide one, never edit or delete it; hidden reviews still count in the average, and a full refund takes the stars out"],
           ["Live events in the community", "Webinars added to the community as a product members sign up for, with Zoom or Google Meet links made automatically", "Live events members RSVP to, with a cap of 1 to 5,000, reminders, a private Jitsi Meet room shown on the page, your own link or a Google Meet made on your connected Google Calendar, and replays. No Zoom link made for you yet — they are ahead there"],
           ["Bundles", "Their Digital Downloads help section lists bundles among the files you can sell as one download. No product type that hands over other products in their help center", "2 to 20 of your one-off products at one price, each delivered as itself: its download or link, its course and its license key. Not with memberships or calls"],
@@ -549,7 +548,7 @@ export const PAGES: TopicPage[] = [
       {
         kind: "quote",
         text: "In order to use Stripe with Stan, you will be prompted to create a new Custom Stripe account that is managed by Stan. You will not be able to connect an existing Stripe account.",
-        source: "Stan help center, 'How to Connect Stan with Stripe', read September 18, 2026",
+        source: "Stan help center, 'How to Connect Stan with Stripe', read November 15, 2026",
       },
       {
         kind: "note",
@@ -591,7 +590,7 @@ export const PAGES: TopicPage[] = [
       {
         kind: "table",
         title: "The part that decides",
-        note: "Sources: Gumroad's pricing page and their help center articles 'Gumroad's fees', 'Getting paid by Gumroad', 'Connect your Stripe account to Gumroad' and 'Sales tax on Gumroad', read on September 28, 2026. Direct, Discover and high-volume fee conditions re-checked on October 16, 2026.",
+        note: "Sources: Gumroad's pricing page and their help center articles 'Gumroad's fees', 'Getting paid by Gumroad', 'Connect your Stripe account to Gumroad' and 'Sales tax on Gumroad', with the direct, Discover and high-volume fee conditions, read on November 15, 2026.",
         head: ["", "Gumroad", "Marktmorgen"],
         rows: [
           ["Cut of each sale", "10% + $0.50 direct; new direct sales become 5% + $0.50 after $20,000 in paid sales that calendar month. Discover: 30%. Custom account fees can differ", feeWords().short],
@@ -611,7 +610,7 @@ export const PAGES: TopicPage[] = [
       {
         kind: "quote",
         text: "We no longer support new user-connected Stripe accounts except for users from Brazil.",
-        source: "Gumroad help center, 'Connect your Stripe account to Gumroad', read September 18, 2026",
+        source: "Gumroad help center, 'Connect your Stripe account to Gumroad', read November 15, 2026",
       },
       {
         kind: "steps",
@@ -642,7 +641,7 @@ export const PAGES: TopicPage[] = [
     title: "Side by side",
     highlight: "with Beacons",
     intro:
-      "Every number here was read on Beacons' own pricing page and help center in September 2026, and the page says where each one came from. When they change one, this page changes.",
+      "Every number here was read in Beacons' own help center in November 2026, and the page says where each one came from. When they change one, this page changes.",
     badge: PROOF,
     accent: "from-sky-brand to-violet-brand",
     blocks: [
@@ -663,7 +662,7 @@ export const PAGES: TopicPage[] = [
       {
         kind: "table",
         title: "The part that decides",
-        note: "Sources: Beacons' pricing page and their help center articles 'Beacons Products Transaction Fees' and 'When will I receive my payout from Product/Store Sales?', read on September 18, 2026. Plan prices, the fee quoted below and the rows on order bumps, memberships and courses re-checked on their pricing page and help center on September 28, 2026.",
+        note: "Sources: Beacons' help center articles 'Beacons Pricing Plans', 'Beacons Pro Page', 'Beacons Products Transaction Fees', 'When will I receive my payout from Product/Store Sales?', 'Order Bumps: Boost Your Sales with Beacons' and 'How to Create Courses on Beacons', read on November 15, 2026. Their pricing page (beacons.ai/pricing) showed a Cloudflare block that day and was not read.",
         head: ["", "Beacons", "Marktmorgen"],
         rows: [
           ["Cut of each sale", "9% on the free and $10 plans. 0% from the $30 plan up", feeWords().short],
@@ -674,14 +673,14 @@ export const PAGES: TopicPage[] = [
           ["Card fee", "Stripe's 2.9% + $0.30, on top of their 9%", "Stripe processing fees, plus the published plan share"],
           ["What you are buying", "A whole suite: link in bio, websites, media kit, email, an affiliate network, AI tools", "One store, built to sell: files, courses, memberships, calls, a community for your buyers, and a media kit for brands"],
           ["A free plan", "Yes, and you can sell on it", "None"],
-          ["Order bumps and upsells", "Order bumps on every plan, the free one included", "Yes \u2014 up to three boxes the buyer checks at checkout, and one click after paying on the same card"],
-          ["Memberships and courses", "Memberships from the $30 plan. Courses on every plan, but only one, with no video hosting, below the $30 plan", `Yes, both, on the ${PLAN_AT.creator} plan`],
+          ["Order bumps and upsells", "Order bumps from the $30 plan, on digital products only", "Yes \u2014 up to three boxes the buyer checks at checkout, and one click after paying on the same card"],
+          ["Memberships and courses", "Memberships, and multi-module courses with video hosting, from the $30 plan. On every plan a course can be sold as files, with its videos hosted elsewhere", `Yes, both, on the ${PLAN_AT.creator} plan`],
         ],
       },
       {
         kind: "quote",
         text: "The 9% fee applies to users on the free plan or the $10/month Creator plan.",
-        source: "Beacons help center, 'Beacons Products Transaction Fees', read September 18, 2026",
+        source: "Beacons help center, 'Beacons Products Transaction Fees', read November 15, 2026",
       },
       {
         kind: "steps",
@@ -696,7 +695,7 @@ export const PAGES: TopicPage[] = [
       {
         kind: "note",
         title: "Where Beacons is ahead of us, and it is not close",
-        body: `For $30 they give you 0% and, with it, websites, a media kit that updates itself, email marketing, an affiliate network of 12,000 brands and a pile of AI tools. We give you a store page with courses, memberships, calls, a community, an affiliate program of your own, the checkout tools and a media kit whose numbers you type yourself, and on our ${PLAN_AT.pro} Studio plan email to your list, but none of the other extras. Compare the subscription and sales fee together; the cheaper option depends on your sales.`,
+        body: `For $30 they give you 0% and, with it, websites, a media kit that updates itself, email marketing, branded affiliate links and a pile of AI tools. We give you a store page with courses, memberships, calls, a community, an affiliate program of your own, the checkout tools and a media kit whose numbers you type yourself, and on our ${PLAN_AT.pro} Studio plan email to your list, but none of the other extras. Compare the subscription and sales fee together; the cheaper option depends on your sales.`,
       },
       {
         kind: "note",
@@ -802,7 +801,7 @@ export const PAGES: TopicPage[] = [
       {
         kind: "table",
         title: "Apps and devices",
-        note: "Stan's help center, article 406, read September 17, 2026: the Stan app is \u201ccurrently only available on iPhone and iPad through the iOS App Store.\u201d",
+        note: "Stan's help center, article 406, read November 15, 2026: the Stan app is \u201ccurrently only available on iPhone and iPad through the iOS App Store.\u201d",
         head: ["", "Stan", "Marktmorgen"],
         rows: [
           ["iPhone app", "Yes \u2014 a creator app, rated 4.9 stars on the App Store", "Not available \u2014 Stan is ahead here. The studio installs to the home screen instead, and sends notifications of sales and bookings on iOS 16.4 or later"],
@@ -821,16 +820,16 @@ export const PAGES: TopicPage[] = [
           ["Themes and colors", "Yes, limited", "Yes \u2014 four themes, ten colors or any color of your own, five pairings of letters, and your photo. Every color is checked for contrast before your page uses it"],
           ["A line about you on the page", "A short profile bio, and no separate About Me page", "Every store, under your name"],
           ["Products on one store", "No numeric cap stated", "Up to 2,000 products and 100 links, 24 products a page on the store and search in your studio — Stan is ahead here"],
-          ["Sections on the store", "Yes — named sections, dragged into order and hidden when empty (their help center, read October 7, 2026)", "Yes — up to 20 headings, each starting at a product you pick, and one line of your own news across the top"],
+          ["Sections on the store", "Yes — named sections, dragged into order and hidden when empty (their help center, read November 15, 2026)", "Yes — up to 20 headings, each starting at a product you pick, and one line of your own news across the top"],
           ["Product pictures", "Yes — thumbnails shown as Button, Callout or Preview", "Yes — a picture on each product, shown as Button, Callout or Preview, the same three"],
           ["Several prices for one product", "Not available", "Up to 50 on one product, each with its own file or link, compared side by side with one marked as your pick"],
           ["Sales pages for a product", "A checkout page for each product, with a description and a video, which can be made a private landing page on every plan. Funnels of several pages on the $99 plan", `Yes, on the ${PLAN_AT.creator} plan: up to 30 blocks per product \u2014 hero, video from YouTube, Vimeo or Loom, your own pictures, benefits, what is inside, who it is and is not for, how it works, a comparison table, bonuses, numbers counted by the store, about you, questions, guarantee, a countdown to a real deadline, buttons and reviews, from six templates or an AI draft (on ${AI_PLANS_WORDS}) \u2014 with its own search title and description and a share picture drawn for it`],
           ["Reviews", "Added by the creator. Their help center says customers cannot write one", "Written only by paying buyers, checked on your Stripe account. You can answer or hide one, never edit or delete it; hidden reviews still count in the average, and a full refund takes the stars out"],
-          ["Your own domain", "Not available", DOMAINS ? `Yes, on the ${PLAN_AT.pro} Studio plan, with the certificate handled for you` : "Not available"],
+          ["Your own domain", "Only on a new $299-a-month Creator Max plan that it says is not yet open to every creator", DOMAINS ? `Yes, on the ${PLAN_AT.pro} Studio plan, with the certificate handled for you` : "Not available"],
           ["Custom code on the page", "Explicitly not supported", "Not available"],
           ["Selling on your own website", "Not available: the checkout is only at stan.store/<name>", "One product at a time, as a card with its picture, price, rating and buy button that opens Stripe's checkout in a new tab, or as a plain button in your color. Pasted into any page that takes HTML. The whole store cannot be put inside another site"],
           ["Several stores in one account", "Not in one account. Several accounts, each with its own email and its own subscription", "Up to five in one account, each with its own address, Stripe account and plan, switched at the top of the studio"],
-          ["A team with roles", "Not for the store: their help center says the only way to give someone admin access is to share your login. Admins and moderators exist inside the community only", "Up to five people per store, as Admin, Editor or Support, each signing in with their own email, checked on our server, with an activity log"],
+          ["A team with roles", "Admin seats, as Manager or Support, only on a new $299-a-month Creator Max plan that it says is not yet open to every creator. On the $29 and $99 plans their help center describes none for the store; admins and moderators exist inside the community", "Up to five people per store, as Admin, Editor or Support, each signing in with their own email, checked on our server, with an activity log"],
         ],
       },
       {
@@ -843,20 +842,20 @@ export const PAGES: TopicPage[] = [
           ["How much your buyers may download", "No figure in their help center", "200 GB a month, published, and shown in your account as it is used"],
           ["Courses with drip and analytics", "Yes", "Yes \u2014 modules, videos up to 5 GB that stay upright when filmed upright, text, downloads, free preview lessons, modules that open over time with an email to the student, and each student's progress"],
           ["Memberships and subscriptions", "Yes \u2014 daily, weekly, monthly, annually, and can end after a set number of payments. No free trial in their help center", "Yes \u2014 daily, weekly, monthly, yearly, on your own Stripe, with a free trial of 1 to 90 days and an end after 2 to 36 payments if you want them. Members cancel on their own, through Stripe, without writing to you, and files, courses and the community close when a membership ends"],
-          ["Members switching plans", "Not in their help center: existing members stay at the price they bought at (article 132, read September 30, 2026)", "Yes \u2014 2 to 6 memberships as tiers; members move up or down on their own, see Stripe's exact amount first, pay the difference at once or get a credit on their next payments, and what each plan includes opens and closes with it"],
-          ["An offer when a member cancels", "Not in their help center, read September 30, 2026", `Yes, on the ${PLAN_AT.creator} plan: a discount you choose, 10% to 50% off one to three payments, offered once per membership on Stripe's own cancellation page and declined in one press. An offer of more than one payment only on memberships charged monthly`],
-          ["A come-back offer after a member leaves", "Not in their help center, read September 30, 2026", `Yes, on the ${PLAN_AT.creator} plan: one email 3 to 21 days after a membership ends, with 10% to 50% off one to three payments, only to former members who agreed to hear from you and have not come back, and a link that opens your checkout with the discount applied`],
+          ["Members switching plans", "Not in their help center: existing members stay at the price they bought at (article 132, read November 15, 2026)", "Yes \u2014 2 to 6 memberships as tiers; members move up or down on their own, see Stripe's exact amount first, pay the difference at once or get a credit on their next payments, and what each plan includes opens and closes with it"],
+          ["An offer when a member cancels", "Not in their help center, read November 15, 2026", `Yes, on the ${PLAN_AT.creator} plan: a discount you choose, 10% to 50% off one to three payments, offered once per membership on Stripe's own cancellation page and declined in one press. An offer of more than one payment only on memberships charged monthly`],
+          ["A come-back offer after a member leaves", "Not in their help center, read November 15, 2026", `Yes, on the ${PLAN_AT.creator} plan: one email 3 to 21 days after a membership ends, with 10% to 50% off one to three payments, only to former members who agreed to hear from you and have not come back, and a link that opens your checkout with the discount applied`],
           ["When a member's card fails", "Reminders for payment plans, by their help center", `One email per failed renewal, on the ${PLAN_AT.creator} plan, with a link that pays it and makes the card that worked the one used next time. It says when the card is tried again, or that it will not be`],
           ["Video link for each booking", "Yes \u2014 Zoom or Google Meet links created automatically", "Google Meet links made automatically once you connect your Google Calendar, or your own meeting link, or a private Jitsi Meet room made for each booking. The first person in a Jitsi room may be asked to sign in to Jitsi to start it. No Zoom link is made for you yet \u2014 Stan is ahead on Zoom"],
           ["Coaching calls with a calendar", "Yes \u2014 with Google Calendar and reminder emails", "Yes \u2014 your hours in your time zone, times shown to each buyer in theirs, held while they pay, an email about each booking to the buyer and to you, reminders a day and an hour before when the booking leaves time for them, and buyers who move their own booking up to twice. Busy times in up to three Google, Outlook or iCloud calendars hide call times; bookings reach your calendar as a feed you subscribe to, and only calls set to Google Meet are written into your connected Google Calendar as events"],
           ["Group calls", "Yes \u2014 a maximum number of attendees", "Yes \u2014 1 to 50 people per time slot, with the seats left shown to buyers"],
-          ["Packages of sessions", "Not in their help center: a coaching call product books one call per purchase (article 15, read September 30, 2026)", "Yes \u2014 2 to 20 sessions of a weekly call at one price, with a time limit you choose or none, paid once and booked one at a time from the buyer's own link, each with the reminders, meeting link and moves of any booking. Not for live sessions on dates"],
+          ["Packages of sessions", "Not in their help center: a coaching call product books one call per purchase (article 15, read November 15, 2026)", "Yes \u2014 2 to 20 sessions of a weekly call at one price, with a time limit you choose or none, paid once and booked one at a time from the buyer's own link, each with the reminders, meeting link and moves of any booking. Not for live sessions on dates"],
           ["Live webinars", "Yes", "Yes \u2014 live sessions on dates you set, up to 50 dates per product and 1 to 500 seats each, held in a Google Meet made on your connected Google Calendar, on the meeting service whose link you give, or in a Jitsi Meet room made for each session. And free live events for your community's members. No streaming or recording built in"],
           ["Lead magnets", "Yes", "Yes \u2014 anything priced at 0 is given for an email address, each address confirmed by its owner, and the list downloads as a CSV at any time"],
           ["Community", "Yes, one per account, with webinars inside it", `Yes, one per store, on the ${PLAN_AT.creator} plan: up to 20 spaces, each for the whole community or for the buyers of some products, posts with a picture that can be edited, polls, comments, likes, @mentions, pinned posts, a live room, private messages, notifications on a computer or phone, an opt-in member directory, reports and moderation, open only to the buyers you choose. Announcements by email on Studio`],
-          ["Questions and a welcome for new members", "Not among the community features in their help center, read September 30, 2026", `Yes, on the ${PLAN_AT.creator} plan: up to three questions every member answers once before their first post or comment, read only by you, and a welcome message sent privately from you on their first visit`],
-          ["Points, levels and a leaderboard", "Not in their help center, read September 30, 2026", `Yes, on the ${PLAN_AT.creator} plan: one point for every like a member's post or comment gets, 9 levels shown beside every name, a leaderboard for 7 days, 30 days and all time, spaces that open for posting at a level, and a course of yours handed over free at a level`],
-          ["Search in the community", "Not in their help center, read September 30, 2026", "Yes — one box across posts and comments, course lessons, events, the member directory, the room and a member's own messages, each result shown only to somebody who may open it. What is said inside a video is not searched"],
+          ["Questions and a welcome for new members", "Not among the community features in their help center, read November 15, 2026", `Yes, on the ${PLAN_AT.creator} plan: up to three questions every member answers once before their first post or comment, read only by you, and a welcome message sent privately from you on their first visit`],
+          ["Points, levels and a leaderboard", "Not in their help center, read November 15, 2026", `Yes, on the ${PLAN_AT.creator} plan: one point for every like a member's post or comment gets, 9 levels shown beside every name, a leaderboard for 7 days, 30 days and all time, spaces that open for posting at a level, and a course of yours handed over free at a level`],
+          ["Search in the community", "A search bar in the community, which their help center shows but does not describe: it does not say what it finds (articles 358 and 373, read November 15, 2026)", "Yes — one box across posts and comments, course lessons, events, the member directory, the room and a member's own messages, each result shown only to somebody who may open it. What is said inside a video is not searched"],
           ["Webinars inside the community", "Yes \u2014 a webinar product added to the community, which members sign up for on its landing page, with Zoom or Google Meet links made automatically", "Yes \u2014 live events: up to 50 coming up, RSVPs with a cap of 1 to 5,000, the way in on the event's page from 15 minutes before, in a private Jitsi Meet room shown on the page, at your own link or in a Google Meet made on your connected Google Calendar, reminders a day and an hour before, emails when one moves or is canceled, and replays from YouTube, Vimeo or Loom. Free to members, not sold on its own, and no Zoom link made for you yet \u2014 Stan is ahead there"],
           ["Bundles", "Their Digital Downloads help section lists bundles among the files you can sell as one download. No product type that hands over other products in their help center", "Yes \u2014 2 to 20 of your one-off products at one price, each delivered as itself, with \u201cwhat they cost on their own\u201d shown only when it is true. Not with memberships or calls"],
           ["External links on your page", "Yes, as one of their product types", "Yes, as their own list — no price on them and nothing to check out"],
@@ -874,9 +873,9 @@ export const PAGES: TopicPage[] = [
           ["Getting paid", "Manual cash-out, $10 minimum", "Your Stripe payout schedule"],
           ["PayPal", "Yes, for every creator", PAYPAL ? feeWords().paypal : `Not yet: ${PAYPAL_WAITS}. Until then, Stan is ahead here`],
           ["Klarna and Afterpay", "Yes, on the $99 plan", `Yes, on the ${PLAN_AT.creator} plan, with Affirm, Apple Pay, Google Pay, Link, iDEAL, Bancontact and more: the ways to pay you switch on in your own Stripe account, where Stripe offers them`],
-          ["Currency", "One per store, chosen from ten", "Any one of 15 per store: US, Canadian, Australian, New Zealand, Singapore and Hong Kong dollars, euros, pounds, Swiss francs, Swedish kronor, Norwegian and Danish kroner, Polish zloty, yen and Mexican pesos"],
-          ["Private podcast", "Not in their help center: a URL product can link to a podcast elsewhere (searched September 30, 2026)", `Yes, on the ${PLAN_AT.creator} plan: sold once or as a membership, with a private feed for each buyer in their own podcast app, emptied when a refund or the membership ends it`],
-          ["A sale across the store", "Discount codes that can expire, on the $99 plan, which buyers have to know and type (article 43, read September 30, 2026). No price crossed out on the store", `Yes, on the ${PLAN_AT.creator} plan: a percentage off from a start to an end you pick, shown with the old price crossed out and when it ends, taken off at checkout with no code, and stopped by itself at the end`],
+          ["Currency", "One per store, chosen from ten. Buyers in more than 150 countries are also shown the price in their own currency, with a conversion fee of 2% to 4% included in it", "Any one of 15 per store: US, Canadian, Australian, New Zealand, Singapore and Hong Kong dollars, euros, pounds, Swiss francs, Swedish kronor, Norwegian and Danish kroner, Polish zloty, yen and Mexican pesos"],
+          ["Private podcast", "Not in their help center: a URL product can link to a podcast elsewhere (searched November 15, 2026)", `Yes, on the ${PLAN_AT.creator} plan: sold once or as a membership, with a private feed for each buyer in their own podcast app, emptied when a refund or the membership ends it`],
+          ["A sale across the store", "Discount codes that can expire, on the $99 plan, which buyers have to know and type (article 43, read November 15, 2026). No price crossed out on the store", `Yes, on the ${PLAN_AT.creator} plan: a percentage off from a start to an end you pick, shown with the old price crossed out and when it ends, taken off at checkout with no code, and stopped by itself at the end`],
           ["Discount codes", "Yes, on the $99 plan, a percentage off only", `Yes, on the ${PLAN_AT.creator} plan, a percentage or an amount off \u2014 kept on your own Stripe account`],
           ["Pay what you want", "Not in their help center", `Yes, on the ${PLAN_AT.creator} plan: a minimum of at least $1 and a suggested price. Not with memberships, price options, payment plans, the box at checkout, calls or discount codes`],
           ["Questions at checkout", "Yes \u2014 including phone number and checkbox", checkoutQuestionWords()],
@@ -898,14 +897,14 @@ export const PAGES: TopicPage[] = [
           ["Instagram auto-DM", "Yes, on the $29 plan", "Not available"],
           ["Funnels up to 20 pages", "Yes, on the $99 plan, since June 2026 \u2014 landing pages, checkout and upsells", `Yes, on the ${PLAN_AT.creator} plan: up to 20 of your own pages and products' pages in order from one address, counted step by step, with a box at checkout and up to five one-click offers after paying, each with a path for yes and for no. The thank-you page is the store's own, with a button to the next step`],
           ["Email platforms", "Mailchimp and other email tools through Zapier", `Mailchimp, Kit, beehiiv and MailerLite built in, on the ${PLAN_AT.creator} plan, one per store, passing on only people who agreed`],
-          ["Affiliates paid automatically", "Yes, on the $99 plan, out of your sale, which Stan holds for 7 business days first (article 340, read September 30, 2026)", `Yes, on the ${PLAN_AT.creator} plan, from your own PayPal: everyone owed in one press, or by itself on your payday. Your sale lands in full in your Stripe account at once and is never held. Needs a PayPal Business account with Payouts switched on; PayPal charges you its own fee on each payment`],
-          ["A share for one affiliate", "Yes, on the $99 plan: edit an affiliate's commission (article 378, read September 30, 2026)", `Yes, on the ${PLAN_AT.creator} plan: 1% to 90% for one affiliate, on every product except those you set to 0%`],
-          ["Where affiliates are paid", "Affiliates connect their own Stripe or PayPal, and need a Stan account (article 402, read September 30, 2026)", "Affiliates need no account anywhere: each chooses on their own page the PayPal address you pay them at, and the address they joined with is told of every change. Or pay by Wise or bank transfer from the file"],
+          ["Affiliates paid automatically", "Yes, on the $99 plan, out of your sale, which Stan holds for 7 business days first (article 340, read November 15, 2026)", `Yes, on the ${PLAN_AT.creator} plan, from your own PayPal: everyone owed in one press, or by itself on your payday. Your sale lands in full in your Stripe account at once and is never held. Needs a PayPal Business account with Payouts switched on; PayPal charges you its own fee on each payment`],
+          ["A share for one affiliate", "Yes, on the $99 plan: edit an affiliate's commission (article 378, read November 15, 2026)", `Yes, on the ${PLAN_AT.creator} plan: 1% to 90% for one affiliate, on every product except those you set to 0%`],
+          ["Where affiliates are paid", "Affiliates connect their own Stripe or PayPal, and need a Stan account (article 402, read November 15, 2026)", "Affiliates need no account anywhere: each chooses on their own page the PayPal address you pay them at, and the address they joined with is told of every change. Or pay by Wise or bank transfer from the file"],
           ["Buyers become affiliates", "Yes, on the $99 plan: every customer becomes an affiliate automatically, through Affiliate Share", `Yes, on the ${PLAN_AT.creator} plan, when you switch it on: everyone who buys is offered their own link on the thanks page and in the purchase email, approved at once. Paid from your own PayPal, in one press or on your payday`],
           ["Inviting other creators", "20% of each payment they make, in cash through Stripe or PayPal, for as long as they stay subscribed, 3 to 5 days after each renewal once their 14-day trial ends, and only while you pay Stan too. No bonus for the creator you invite in their help center", INVITE_PROGRAM_OPEN ? `${INVITE_SHARE_PERCENT}% of each payment they make, for as long as they pay, as credit on your own plan \u2014 not cash \u2014 added ${INVITE_HOLD_DAYS} days after each payment. The creator you invite gets ${INVITE_BONUS} of credit after their first payment` : INVITE_PAUSE_NOTICE],
-          ["Waitlist before launch", "Not in their help center: its \u201cProduct coming soon!\u201d notice only means no way to pay is connected yet (article 367), read September 30, 2026", `Yes, on the ${PLAN_AT.creator} plan: a product marked coming soon takes addresses confirmed from the inbox, and the day you put it on sale each gets one email with its link and price`],
+          ["Waitlist before launch", "Not in their help center: its \u201cProduct coming soon!\u201d notice only means no way to pay is connected yet (article 367), read November 15, 2026", `Yes, on the ${PLAN_AT.creator} plan: a product marked coming soon takes addresses confirmed from the inbox, and the day you put it on sale each gets one email with its link and price`],
           ["Advertising pixels", "Yes, on the $99 plan", `Yes \u2014 Meta, Google, TikTok and Pinterest, on the ${PLAN_AT.creator} plan, with each purchase and its amount. Visitors are asked first where the law says so`],
-          ["Recurring revenue and churn", "Not in their help center, read September 30, 2026", `Yes, on the ${PLAN_AT.creator} plan: monthly recurring revenue, paying members and trials, churn over 30 days and the share of trials that became paying, overall and by membership, read from your own Stripe account`],
+          ["Recurring revenue and churn", "Not in their help center, read November 15, 2026", `Yes, on the ${PLAN_AT.creator} plan: monthly recurring revenue, paying members and trials, churn over 30 days and the share of trials that became paying, overall and by membership, read from your own Stripe account`],
           ["Visits, sources and conversion", "Yes", "Yes \u2014 7, 30 and 90 days and all time, with UTM tags, counted without cookies, sales read from your own Stripe account, and CSV files of sales, visits and sources"],
           ["Public API and webhooks", "None published", `Both, on the ${PLAN_AT.creator} plan. Webhooks: up to five addresses, eight events, signed, for Zapier's Catch Hook, Make or your own server. An API that reads your list, members, a course's students, your affiliates and your bookings, with up to five keys; a key made to write also adds people who agreed to your list, changes their labels, and gives or takes back products`],
           ["Importing your list", "A CSV, up to 5,000 imported contacts per store in all, each sent an email to opt in again", "A CSV, up to 50,000 rows a file on a list of up to 100,000, only people you confirm agreed, never anyone who unsubscribed here. Nobody is emailed because of it"],

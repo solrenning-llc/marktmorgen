@@ -141,7 +141,7 @@ is("in every case, the creator canceling refunds the extra too", [timely, late, 
 is("in plain words: every sentence under twenty words", [timely, late, none].every((w) => w.split(/(?<=[.!?])\s/).every((sentence) => sentence.split(/\s+/).length <= 20)), true);
 
 part("What the creator is told");
-const pauses: CallAddOnPause[] = ["notCall", "package", "deposit", "series", "move", "gone", "itself", "targetFree", "targetRecurring", "targetCall", "targetOptions", "targetPwyw", "targetLimited", "targetEmpty", "targetPick", "dearer"];
+const pauses: CallAddOnPause[] = ["notCall", "package", "deposit", "series", "move", "gone", "itself", "targetDraft", "targetFree", "targetRecurring", "targetCall", "targetOptions", "targetPwyw", "targetLimited", "targetEmpty", "targetPick", "dearer"];
 is("every reason has its own sentence, never empty, never the same as another", new Set(pauses.map((p) => callAddOnPauseWords(p, "Workbook"))).size, pauses.length);
 is(
   "the ones about another product name it, and say what to change",

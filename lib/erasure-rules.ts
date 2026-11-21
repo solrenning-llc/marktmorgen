@@ -99,14 +99,15 @@ export type ErasureSize = {
  * commands), their places' keys deleted, and each entry's door deleted again after
  * them (Claude 6 on #3570: 20 more; with the studio's list, 40 more than
  * before both), and their slots' turns taken off the store's list in one
- * ZREM (Claude 6 on #3568). Since Codex X6 on #3574 the places' keys are also
- * deleted once before any record, so a close at the vault cannot write one
- * back: one more DEL a lesson, twenty at most. Measured at its worst, one
- * submission in each of twenty lessons, every one an open upload: 324 commands
- * (304 before that DEL, already over the 301 counted until then). [commands,
- * bytes], held by tests/submission-erasure.test.ts to cover what it sends.
+ * ZREM (Claude 6 on #3568), and the buyer's count of upload starts in the
+ * store deleted (one DEL, Codex X6 on #3574). Measured at its worst, one
+ * submission in each of twenty lessons, every one an open upload: 305
+ * commands. The 301 counted until then was already under that worst spread
+ * (304 without the count's DEL), found with Codex X6's review of #3574; 310 holds it.
+ * [commands, bytes], held by tests/submission-erasure.test.ts to cover what it
+ * sends, at the worst spread too.
  */
-export const ERASE_SUBMISSIONS: readonly [number, number] = [330, 70_000];
+export const ERASE_SUBMISSIONS: readonly [number, number] = [310, 70_000];
 
 /**
  * Commands every erasure sends whatever the store: each module's own, workflows at their cap, a sync log at its length,

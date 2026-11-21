@@ -114,16 +114,16 @@ export async function GET(request: NextRequest) {
       }
       // The week is read once, so the claim and its release name the same week even across Monday's midnight.
       const at = Date.now();
-      const claim = await weekClaim(store.handle, at);
+      const claim = await weekClaim(store, at);
       if (claim !== "ours") {
         // Claimed already: decided. A claim whose answer is unknown is not (review of #4169): the next run claims
         // again and reads "taken" if this write did land, so the store is never skipped for the rest of the week.
-        if (claim === "taken") decided.push(folder);
+        if (claim === "taken" || claim === "gone") decided.push(folder);
         else out.failed += 1;
         continue;
       }
       out.looked += 1;
-      const period = weekPeriod(store.handle, at);
+      const period = weekPeriod(store, at);
       const read = await summaryInputs(store, emailOff).catch((error) => {
         console.error("weekly: a read the summary is written from failed", error);
         return null;
@@ -158,6 +158,7 @@ export async function GET(request: NextRequest) {
       let unconfirmed = false;
       if (chat) {
         const post = await sendPart(period, "posted", () => postToChat(chat, `${message.subject}\n\n${forChat(message.text)}`));
+        if (post === "gone") { decided.push(folder); continue; }
         if (post === "missed") missed = true;
         if (post === "unconfirmed") unconfirmed = true;
       }
@@ -172,10 +173,12 @@ export async function GET(request: NextRequest) {
           // again by a later try, by the same sender or by the other one, which never saw the key (#3297).
           idempotencyKey: `numbers-summary:${period.key}`,
         }), { keyHoldsMs: EMAIL_KEY_HOLDS_MS });
+        if (owner === "gone") { decided.push(folder); continue; }
         if (owner === "missed") missed = true;
         if (owner === "unconfirmed") unconfirmed = true;
         if (owner === "sent") {
           out.sent += 1;
+          // The owner and these copies are one batch admitted by the emailed part before its first send.
           // The same email to the team members the owner chose, while they are on
           // the team in a role that sees the numbers, each with their own stop link:
           // only with the owner's own, so a week tried again never sends them twice.

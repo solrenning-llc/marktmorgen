@@ -9,7 +9,7 @@ import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
 import { accessEndWhen } from "@/lib/course-access-end";
 import { useHydrated } from "@/components/use-hydrated";
 import { useRouter } from "next/navigation";
-import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
+import { uploadReason, uploadSoldFile, uploadWords } from "@/lib/sold-file-upload";
 import { toast } from "@/components/toast";
 import { QuizEditor } from "@/components/quiz-editor";
 import { CourseDayPreview } from "@/components/course-day-preview";
@@ -754,6 +754,8 @@ function VideosToLessons({
       known.add(lesson.id);
       onCourse(added.course);
       let problem: string | null = null;
+      // The route's own sentence for a refusal, shown before the editor's.
+      let words: string | undefined;
       try {
         const pathname = await putVideo(lesson.id, file, folder, (percent) => setWorking({ at: i + 1, of: take.length, name: file.name, percent }));
         const placed = await postPatiently({ id: productId, action: "media", lessonId: lesson.id, kind: "video", pathname, name: file.name });
@@ -766,13 +768,15 @@ function VideosToLessons({
         }
       } catch (thrown) {
         problem = uploadProblem(thrown);
+        words = uploadWords(thrown);
       }
       if (problem) {
         // Its lesson goes again, so no empty lesson is left behind.
         const removed = await postPatiently({ id: productId, action: "edit", op: "lesson-remove", lessonId: lesson.id });
         if (removed.ok && removed.course) onCourse(removed.course);
-        missed.push({ name: file.name, why: MESSAGES[problem] });
-        if (STOPS_THE_REST.has(problem)) {
+        missed.push({ name: file.name, why: words ?? MESSAGES[problem] });
+        // A refusal in the studio's own words holds for the next video too.
+        if (STOPS_THE_REST.has(problem) || words !== undefined) {
           take.slice(i + 1).forEach((f) => missed.push({ name: f.name, why: "Not sent, because the video before it could not go." }));
           break;
         }
@@ -922,7 +926,7 @@ function LessonEditor({
         }
       }
     } catch (thrown) {
-      onError(MESSAGES[uploadProblem(thrown)]);
+      onError(uploadWords(thrown) ?? MESSAGES[uploadProblem(thrown)]);
     } finally {
       setUploading(null);
     }

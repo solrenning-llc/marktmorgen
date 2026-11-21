@@ -4073,14 +4073,19 @@ export async function setProductSummary(email: string, id: string, rawSummary: s
 export const MOVE_BESIDE_BATCH = 250;
 /**
  * The most batches one sweep runs: enough for MAX_PRODUCTS. Each batch, under the store's lock, at the most: the lock
- * taken and let go, the store read (withStore), the pool's fields and the room's slots read (two HMGETs), the lock
- * held on (holdLock), then the pool's TAKE_DATA taking the batch's shares and the room's giving them back, each at
- * its inner commands as Upstash bills them (lib/store-data.ts, poolTakeCommands and takeDataCommands; Claude 4's
- * MEDIUM on #4847); and the sweep's mark read and written once a sweep.
+ * taken, counted at every SET NX try of its LOCK_WAIT_MS wait (STORE_LOCK_TRIES_AT_MOST, which tests check equals
+ * lib/read-ceilings.ts STORE_LOCK_TRIES, as CLOSE_RECORD_COMMANDS counts it), the store read (withStore, one GET), the
+ * pool's fields and the room's slots read (two HMGETs), the lock held on (holdLock: EVAL, GET, EXPIRE), then the pool's
+ * TAKE_DATA taking the batch's shares and the room's giving them back, each at its inner commands as Upstash bills them
+ * (lib/store-data.ts, poolTakeCommands and takeDataCommands; Claude 4's MEDIUM on #4847), and the lock let go (EVAL,
+ * GET, DEL; Claude 3's LOW on #4847). Once a sweep: the store read that opens it (storeForEmail, one GET of up to
+ * MAX_STORE_BYTES), the sweep's mark read and the mark written when it ends.
  */
 export const MOVE_BESIDE_BATCHES = Math.ceil(MAX_PRODUCTS / MOVE_BESIDE_BATCH);
-export const MOVE_BESIDE_BATCH_COMMANDS = 3 + 1 + 2 + 1 + poolTakeCommands(MOVE_BESIDE_BATCH) + takeDataCommands(MOVE_BESIDE_BATCH);
-export const MOVE_BESIDE_SWEEP_COMMANDS = 2;
+/** Every SET NX try of the store lock's LOCK_WAIT_MS wait (20, 40, 80 and 160 ms, then every 250 ms), and the last. */
+const STORE_LOCK_TRIES_AT_MOST = 4 + Math.ceil((LOCK_WAIT_MS - (20 + 40 + 80 + 160)) / 250) + 1;
+export const MOVE_BESIDE_BATCH_COMMANDS = STORE_LOCK_TRIES_AT_MOST + 1 + 2 + 3 + 3 + poolTakeCommands(MOVE_BESIDE_BATCH) + takeDataCommands(MOVE_BESIDE_BATCH);
+export const MOVE_BESIDE_SWEEP_COMMANDS = 3;
 
 /**
  * Moves the beside share of a paying store's products that were counted whole in its room (saved before it paid) to

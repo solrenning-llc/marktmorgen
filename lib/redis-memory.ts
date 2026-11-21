@@ -1023,11 +1023,45 @@ export class MemoryRedis {
           this.run(["HSET", members, field, json]);
           return 1;
         }
-        // lib/ad-events.ts KEEP_LAST_IF_LIVE: the ad platforms' last answers kept only while the store is live and not being erased.
-        if (key.startsWith("-- marktmorgen:ads-last-live:v1\n") && args[0] === "3" && args.length === 7) {
-          const [, storeId, erasing, last, field, json, seconds] = args;
-          if (Number(this.run(["EXISTS", storeId])) !== 1 || Number(this.run(["HEXISTS", erasing, field])) === 1) return 0;
+        // lib/ad-events.ts KEEP_LAST_IF_LIVE: the ad platforms' last answers kept only while the same store is live (its id
+        // key, or its record holding the same statsId for a store from before ids) and not being erased.
+        if (key.startsWith("-- marktmorgen:ads-last-live:v2\n") && args[0] === "3" && args.length === 10) {
+          const [, live, erasing, last, field, json, seconds, mode, statsId, maxBytes] = args;
+          if (mode === "id") {
+            this.scriptCalls += 1;
+            if (Number(this.run(["EXISTS", live])) !== 1) return 0;
+          } else if (mode === "legacy") {
+            if (!statsId) return -1;
+            this.scriptCalls += 1;
+            const raw = this.run(["GET", live]);
+            if (raw === null) return 0;
+            if (typeof raw !== "string" || new TextEncoder().encode(raw).length > Number(maxBytes)) return -1;
+            let record: unknown;
+            try {
+              record = JSON.parse(raw);
+            } catch {
+              return -1;
+            }
+            const held = record && typeof record === "object" && !Array.isArray(record) ? (record as { statsId?: unknown }).statsId : undefined;
+            if (typeof held !== "string" || !held) return -1;
+            if (held !== statsId) return 0;
+          } else return -1;
+          this.scriptCalls += 1;
+          if (Number(this.run(["HEXISTS", erasing, field])) === 1) return 0;
+          this.scriptCalls += 1;
           this.run(["SET", last, json, "EX", seconds]);
+          return 1;
+        }
+        // lib/search-console.ts KEEP_SEARCHES_IF_LIVE: a delayed Google answer is cached only while the store's own key
+        // (its id key, or its record for a store kept from before ids) exists and the closing walk has not marked its erasure.
+        if (key.startsWith("-- marktmorgen:gsc-keep-if-live:v2\n") && args[0] === "3" && args.length === 7) {
+          const [, live, erasing, cache, field, value, seconds] = args;
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", live]) !== 1) return 0;
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) !== 0) return 0;
+          this.scriptCalls += 1;
+          this.run(["SET", cache, value, "EX", seconds]);
           return 1;
         }
         // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
@@ -1570,6 +1604,19 @@ export class MemoryRedis {
           if (this.run(["GET", receipt]) !== from) return 0;
           this.run(["SET", receipt, to, "EX", seconds]);
           return 1;
+        }
+        // lib/team.ts KEEP_LOG_IF_LIVE: the reference and erasing fence are checked at the personal write.
+        if (key.startsWith("-- marktmorgen:team-log-live:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, identity, erasing, log, ref, field, entry, limit] = args;
+          this.scriptCalls += 1;
+          if (this.run(["GET", identity]) !== ref) return 0;
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) === 1) return 0;
+          this.scriptCalls += 1;
+          const n = this.run(["LPUSH", log, entry]);
+          this.scriptCalls += 1;
+          this.run(["LTRIM", log, "0", String(Number(limit) - 1)]);
+          return n;
         }
         if (key.startsWith("-- marktmorgen:call-hold-if-locked:v1\n") && args[0] === "2" && args.length === 6) {
           const [, lock, diary, token, field, value] = args;
@@ -2475,6 +2522,55 @@ export class MemoryRedis {
           this.data.set(target, args[3]);
           // The script's SET has no KEEPTTL: as in real Redis, the key keeps no expiry.
           this.until.delete(target);
+          return 1;
+        }
+        // lib/webhooks.ts SAVE_WEBHOOK_CONFIG: the store still live (its id key, or its record holding the same statsId for a
+        // store from before ids) and not erasing, then the settings' compare-and-set and the watch index in the same step.
+        if (key.startsWith("-- marktmorgen:webhook-config-save:v1\n") && args[0] === "7" && args.length === 16) {
+          const [, target, live, erasing, stores, anchor, back, wait, was, next, field, statsId, mode, action, reset, maxBytes] = args;
+          if (mode === "id") {
+            this.scriptCalls += 1;
+            if (Number(this.run(["EXISTS", live])) !== 1) return -2;
+          } else if (mode === "legacy") {
+            if (!statsId) return -3;
+            this.scriptCalls += 1;
+            const raw = this.run(["GET", live]);
+            if (raw === null) return -2;
+            if (typeof raw !== "string" || new TextEncoder().encode(raw).length > Number(maxBytes)) return -3;
+            let record: unknown;
+            try {
+              record = JSON.parse(raw);
+            } catch {
+              return -3;
+            }
+            const held = record && typeof record === "object" && !Array.isArray(record) ? (record as { statsId?: unknown }).statsId : undefined;
+            if (typeof held !== "string" || !held) return -3;
+            if (held !== statsId) return -2;
+          } else return -3;
+          this.scriptCalls += 1;
+          if (Number(this.run(["HEXISTS", erasing, field])) === 1) return -2;
+          this.live(target);
+          const current = this.data.get(target);
+          if (current !== undefined && typeof current !== "string") throw new Error("WRONGTYPE");
+          this.scriptCalls += 1;
+          if ((current ?? "") !== was) return [-1];
+          if (action === "add" || action === "remove") {
+            this.scriptCalls += 1;
+            const kind = this.run(["TYPE", stores]);
+            if (kind !== "none" && kind !== "set") return -3;
+          }
+          this.scriptCalls += 1;
+          this.data.set(target, next);
+          // The script's SET has no KEEPTTL: as in real Redis, the key keeps no expiry.
+          this.until.delete(target);
+          if (action === "add" || action === "remove") {
+            this.scriptCalls += 1;
+            this.run([action === "add" ? "SADD" : "SREM", stores, statsId]);
+          }
+          if (reset === "1") {
+            this.scriptCalls += 1;
+            this.run(["DEL", anchor, back, wait]);
+          }
           return 1;
         }
         // lib/webhooks.ts RESEND_MARK: the same compare and replies, but the write keeps the key's expiry (SET KEEPTTL),

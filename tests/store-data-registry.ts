@@ -287,7 +287,7 @@ export const FAMILIES: Record<string, Family> = {
   // Payout files downloaded and not yet written down as paid (C1-20261112-1000-C7-141, item 2c): one hash a store, a
   // field a file, its lines as an affiliate id and an amount (about 34 bytes each, taken at 48), no address.
   "nl:affpay:@lib/affiliate-payouts.ts": { what: "Payout files a creator downloaded, kept until written down as paid or for thirty days after the last download", parts: [capped(MAX_PAY_FILES * ((MAX_AFFILIATES + 1) * 48 + 128) + 4 * KEY, "MAX_PAY_FILES files a store, each at most a line per affiliate (MAX_AFFILIATES), the hash running out PAY_FILE_SECONDS after the last download.", src("lib/affiliate-payouts.ts", "MAX_PAY_FILES", "PAY_FILE_SECONDS"), src("lib/affiliate-setting.ts", "MAX_AFFILIATES"))] },
-  "nl:affkit:@lib/affiliate-kit.ts": short("An affiliate kit's counts, by the day and the window", "ai", 40),
+  "nl:affkit:@lib/affiliate-kit.ts": short("An affiliate kit's counts, by the day and the window, the window's kept at least as long as it (lib/allowance-window.ts windowKeySeconds)", "ai", 63),
   "nl:aff:payday:@lib/affiliate-payday.ts": short("A store's monthly payday claimed", "day", 40),
   "nl:aff:@lib/affiliates.ts": {
     what: "Affiliates: their records, addresses, codes, clicks, sales and shares (each sale and share with its refund kept when read on its own Stripe account), and what the creator says was paid",
@@ -318,7 +318,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rl:aff:ip:@lib/affiliates.ts": short("Applications per connection, an hour", "request", 1, KEY, REQ("affiliate")),
   "nl:ai-spend:v2:{@lib/ai-spend-policy.ts": company("The company's AI spending ledger, a month", "One key a month with a field a store: the company's ledger, carried by its fixed costs."),
   "nl:ai-spend:v2:{YYYY-MM}@lib/ai-spend-policy.ts": company("The ledger's name, as the policy states it", "The same ledger."),
-  "nl:ai:@lib/ai.ts": short("Writing jobs counted in the window", "day", 40, 128),
+  "nl:ai:@lib/ai.ts": short("Writing jobs counted in the window, kept at least as long as it (windowKeySeconds)", "day", 63, 128),
   // One a stop: each stop is a studio request, and the mark goes by itself after AI_STOP_KEEP_SECONDS (five minutes), held here at a day.
   "nl:ai:stop:@lib/ai.ts": short("A stop asked for one run of a page drafted step by step (lib/ai-steps.ts)", "studio", 1),
   "nl:assist:pool:@lib/store-assistant.ts": { what: "The Store assistant's pool of replies for one month of the add-on", line: "store-assistant" },
@@ -330,7 +330,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:assist:remind:@lib/assistant-reminder-rules.ts": short("A buyer's yes to one checkout reminder, three days from the checkout", "day", 3, ASSIST_REMINDERS_PER_STORE_DAY * LINK_BYTES),
   "nl:assist:remindwho:@lib/assistant-reminder.ts": short("The checkouts one address said yes on, by a one-way hash, three days", "day", 3, ASSIST_REMINDERS_PER_STORE_DAY * KEY),
   "nl:assist:remindq@lib/assistant-reminder.ts": company("Store assistant checkout reminders due", "One sorted set for every store, each member a store, its handle and a checkout, never an address, gone when sent or dropped within hours: at most ASSIST_REMINDERS_PER_STORE_DAY a store a day."),
-  "nl:ask:@lib/answers.ts": short("Visitors' answers counted in the window", "day", 40, 128),
+  "nl:ask:@lib/answers.ts": short("Visitors' answers counted in the window, kept at least as long as it (windowKeySeconds)", "day", 63, 128),
   "nl:ask:a:@lib/answers.ts": short("An answer already given to a question about a page, a day", "ai", 1, 8 * KB),
   "nl:ask:missed:@lib/answers.ts": { what: "Questions a page did not answer, for the creator", parts: [capped(100 * KB, "The newest MISSED_KEPT, trimmed on every write.", src("lib/answers.ts", "MISSED_KEPT", "LTRIM"))] },
   "nl:api:k:@lib/api-keys.ts": { what: "The lookup an API request makes", parts: [capped(20 * KEY, "A key's lookup for each of the store's keys (MAX_KEYS).", src("lib/api-key-rules.ts", "MAX_KEYS"))] },
@@ -746,7 +746,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:copy:@lib/store-copy.ts": room("A copy of a whole store's progress, seven days, counted in the receiving store's data room until it goes", "lib/store-copy.ts"),
   "nl:copy:lock:@lib/store-copy.ts": short("One step of a store copy at a time, a minute", "studio", 1, 128),
   "nl:fuse:@lib/funnel-share-store.ts": { what: "A store's imports and previews counted, by the share and the month", parts: [capped(64 * KEY, "A count a share link used and a month, two months.")] },
-  "nl:fuse:m:@lib/funnel-share-store.ts": short("A store's uses counted a month", "day", 62, 128),
+  "nl:fuse:m:@lib/funnel-share-store.ts": short("A store's uses counted a month, kept at least as long as its window (windowKeySeconds)", "day", 63, 128),
 
   // ---------------------------------------------------------------- lib/ g–l
   "nl:gift:@lib/gifts.ts": { what: "Gifts: the gift, its payment, the refunds read", parts: [per("order", 400, 2_560, "A gift and its payment: two addresses, a message of MAX_GIFT_MESSAGE and a name of MAX_GIFT_FROM in any script, GIFT_KEPT_SECONDS.", KIND("gift")), capped(4 * KEY + 64 * KB + 512 + 100 * 2 * KEY, "The store's marks, the refunds already handled (thirty days), where an unfinished pass over them stands (lib/gifts.ts passKey, a JSON of under 300 bytes, a week) the refunds to try again (lib/gifts.ts retryKey, at most REFUND_RETRY_CAP = 100 refund ids to payment ids, GIFT_KEPT_SECONDS from the last one put on it) and the last of them read again (lib/gifts.ts retryFromKey, one refund id, as long as the list).")] },
@@ -769,8 +769,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:imports:active@lib/imports.ts": company("Imports under way", "One set, members gone when done."),
   "nl:imports:busy:@lib/imports.ts": short("One import at a time", "studio", 1, 128),
   "nl:imports:list:@lib/imports.ts": { what: "A store's imports", parts: [capped((tier) => IMPORT_ALLOWANCES[tier].starts * 14 * 512, "One entry per start, 400 days.", src("lib/import-limits.ts", "IMPORT_ALLOWANCES"))] },
-  "nl:imports:moved:@lib/imports.ts": short("People brought over and emailed, a month", "day", 62, 128),
-  "nl:imports:rows:@lib/imports.ts": short("Rows counted in the window", "day", 62, 128),
+  "nl:imports:moved:@lib/imports.ts": short("People brought over and emailed, a month, kept at least as long as its window (windowKeySeconds)", "day", 63, 128),
+  "nl:imports:rows:@lib/imports.ts": short("Rows counted in the window, kept at least as long as it (windowKeySeconds)", "day", 63, 128),
   "nl:inbox:@lib/inbox.ts": { what: "The inbox: conversations and their messages", room: ["lib/inbox.ts"] },
   "nl:inbox:tok:@lib/inbox.ts": { what: "What a visitor's chat opens", room: ["lib/inbox.ts"] },
   "nl:intro:c:@lib/intro-coupon.ts": { what: "An introductory price's coupon: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
@@ -1029,7 +1029,7 @@ export const FAMILIES: Record<string, Family> = {
   // One count for every caller that asks again on a certain refusal (rule 30; #3377 bounded its own checkout reminders the same way).
   "nl:refused:@lib/refused-tries.ts": short("How many times a sender refused one of the store's emails for certain (REFUSED_TRIES at most): a day, a payment request's reminders its open time (REFUSED_MAX_SECONDS)", "store", 45, MARK),
   "nl:rl:@lib/request-guard.ts": short("Per connection, person or store counts, by their scope", "request", 1),
-  "nl:rlm:@lib/request-guard.ts": short("Monthly counts by their scope", "day", 62, 128),
+  "nl:rlm:@lib/request-guard.ts": short("Monthly counts by their scope, kept at least as long as their window (windowKeySeconds)", "day", 63, 128),
   "nl:rev:ask:due@lib/review-ask.ts": company("Review asks due", "One sorted set for every store: each an order's, gone when asked."),
   "nl:rev:link:@lib/review-proof.ts": short("A review link, sixty days", "monthly", 60, LINK_BYTES, MAIL("review ask")),
   "nl:rev:refunds:seen:@lib/review-proof.ts": { what: "Refunds already handled for reviews", parts: [capped(64 * KB, "Sixty-one days after the last one read.")] },
@@ -1171,9 +1171,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:storage:pending:@lib/storage-reservations.ts": short("Uploads reserved and not finished", "upload", 1, 512),
   "nl:alert:@lib/store-alerts.ts": { what: "Alerts sent to the creator", parts: [capped(30 * KEY + 14 * 10 * KEY, "One per kind, and the goals' a month.")] },
   "nl:alert:seen:@lib/store-alerts.ts": company("A store's alerts checked a day", "The company's daily job."),
-  "nl:allow:@lib/store-allowance.ts": { what: "Each figure taken in the window", parts: [capped((8 * 2 + 13) * KEY, "Eight figures, the window and the one before; and the studio requests held for scheduled emails in each month ahead, at most 13 (a year ahead, lib/store-allowance.ts holdAllowanceAt).")] },
+  "nl:allow:@lib/store-allowance.ts": { what: "Each figure taken in the window", parts: [capped((8 * 3 + 13) * KEY, "Eight figures, the window and the two before (a billing counter is kept BILLING_COUNTER_KEEP_DAYS from its window's start, lib/allowance-window.ts, so the last month of a period that does not renew keeps its counter to its stretched end; Claude 6 on #4561); and the studio requests held for scheduled emails in each month ahead, at most 13 (a year ahead, lib/store-allowance.ts holdAllowanceAt).")] },
   // Claude 2's MEDIUM on #3369: the drip job's start reads, taken from the store's monthly figure in its window.
-  "nl:dripstart:@lib/drip-start.ts": { what: "The drip job's start reads taken in the window", parts: [capped(2 * KEY, "One count, the window and the one before (each kept to its window's end and a day, lib/drip-start.ts keepSecondsFor).")] },
+  "nl:dripstart:@lib/drip-start.ts": { what: "The drip job's start reads taken in the window", parts: [capped(3 * KEY, "One count, the window and the two before (each kept to keepSecondsFor: a billing window's counter BILLING_COUNTER_KEEP_DAYS from its start, lib/allowance-window.ts, as nl:allow; merge of main into #4561).")] },
   "nl:blog:body:@lib/store-blog.ts": { what: "Blog posts' words", room: ["lib/store-blog.ts"] },
   "nl:blog:meta:@lib/store-blog.ts": { what: "Blog posts", room: ["lib/store-blog.ts"] },
   "nl:blog:pub:@lib/store-blog.ts": { what: "Published blog posts", room: ["lib/store-blog.ts"] },

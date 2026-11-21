@@ -39,7 +39,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const form = new URLSearchParams(String(init?.body ?? ""));
     const credit = form.get("metadata[nimbus_invite_credit]") ?? "";
     postedCredits.push(credit);
-    return answer({ id: `cbtxn_${postedCredits.length}abcdef`, object: "customer_balance_transaction" });
+    return answer({ id: `cbtxn_${postedCredits.length}abcdef`, object: "customer_balance_transaction", customer: path.split("/")[2], amount: Number(form.get("amount")), currency: form.get("currency"), metadata: { nimbus_invite_credit: form.get("metadata[nimbus_invite_credit]") } });
   }
   return answer({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
 }) as typeof fetch;

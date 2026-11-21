@@ -53,14 +53,44 @@ test("running each command prints its report, leaves the stored text unchanged, 
   }
 });
 
+test("the solver's stdout carries only its JSON, even when HiGHS writes straight to fd 1", () => {
+  // HiGHS can print a diagnostic to file descriptor 1 whatever options={"disp": False} says (seen on 21/11/2026 with
+  // #4888's cost lines: "HighsMipSolverData::transformNewIntegerFeasibleSolution tmpSolver.run();"), which made the
+  // solver's output unreadable. The real script runs here with milp wrapped to write such a line to fd 1 first.
+  const input = spawnSync(process.execPath, ["scripts/pricing-optimization.mjs", "--milp-input"], { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  assert.equal(input.status, 0, input.stderr);
+  const line = "HighsMipSolverData::transformNewIntegerFeasibleSolution tmpSolver.run();";
+  const wrapped = [
+    "import importlib.util, os",
+    "spec = importlib.util.spec_from_file_location('solver', 'scripts/pricing-optimization-milp.py')",
+    "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)",
+    "real = m.milp",
+    `def noisy(*a, **k):\n    os.write(1, b${JSON.stringify(line + "\n")})\n    return real(*a, **k)`,
+    "m.milp = noisy",
+    "m.main()",
+  ].join("\n");
+  const run = spawnSync(process.env.MILP_PYTHON || "python3", ["-c", wrapped], { cwd: root, input: input.stdout, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 120_000 });
+  assert.equal(run.status, 0, run.stderr);
+  const parsed = JSON.parse(run.stdout);
+  assert.ok(Array.isArray(parsed.solutions) && parsed.solutions.length > 0, "the JSON on stdout has the solutions");
+  assert.ok(run.stderr.includes(line), "what HiGHS writes to fd 1 goes to stderr, not lost and not into the JSON");
+});
+
 test("the test job installs the solver's pinned packages, so the solver runs on demand there", () => {
-  const pins = read("scripts/requirements-solver.txt").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+  // Each requirement is one logical line ("\" continues it): the exact version, then the sha256 of each prebuilt wheel the
+  // job may take (owner's SIM of 20/11/2026, condition 3: --only-binary :all: and --require-hashes).
+  const pins = read("scripts/requirements-solver.txt").replace(/\\\n/g, " ").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
   assert.deepEqual(pins.map((l) => l.split("==")[0]).sort(), ["numpy", "scipy"]);
-  for (const pin of pins) assert.match(pin, /^[a-z]+==\d+\.\d+\.\d+$/, `${pin} is an exact version`);
+  for (const pin of pins) {
+    assert.match(pin, /^[a-z]+==\d+\.\d+\.\d+ /, `${pin.split(" ")[0]} is an exact version`);
+    const hashes = pin.match(/--hash=sha256:[0-9a-f]{64}\b/g) ?? [];
+    assert.ok(hashes.length >= 1 && hashes.length === pin.split("--hash=").length - 1, `${pin.split(" ")[0]} is locked by the sha256 of its wheels`);
+  }
   const workflow = read(".github/workflows/product-checks.yml");
   const job = workflow.slice(workflow.indexOf("\n  behavior-regressions:"), workflow.indexOf("\n  store-copy:"));
   assert.match(job, /python3 -m venv "\$RUNNER_TEMP\/solver"/);
-  assert.match(job, /"\$RUNNER_TEMP\/solver\/bin\/pip" install -r scripts\/requirements-solver\.txt/);
+  // Only prebuilt wheels, each checked against its hash: no install script runs in CI, and a swapped package fails.
+  assert.match(job, /"\$RUNNER_TEMP\/solver\/bin\/pip" install --only-binary :all: --require-hashes -r scripts\/requirements-solver\.txt/);
   assert.match(job, /MILP_PYTHON=\$RUNNER_TEMP\/solver\/bin\/python/);
   assert.ok(job.indexOf("requirements-solver") < job.indexOf("run: npm test"), "the solver is installed before the tests run");
 });

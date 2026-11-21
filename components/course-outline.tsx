@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { findKey } from "@/lib/lesson-find-rules";
 import type { Course } from "@/lib/course";
 import { isCohort, isOpen, opensAt } from "@/lib/course";
 import { LocalDay } from "@/components/local-day";
@@ -54,7 +55,7 @@ export function CourseOutline({
       {course.modules.map((unit, mi) => {
         const open = start !== null && isOpen(course, unit, start);
         return (
-          <li key={unit.id}>
+          <li key={unit.id} data-find-module="">
             <p className="st-label">{w.module(mi + 1)}</p>
             <p className="font-semibold" style={{ color: "var(--st-text)" }}>{unit.title}</p>
             {/*
@@ -93,7 +94,8 @@ export function CourseOutline({
                   const mark = isDone ? "✓" : reachable ? "○" : "🔒";
                   const label = `${lesson.title}${lesson.video ? w.video : ""}`;
                   return (
-                    <li key={lesson.id} className="flex items-start gap-2 text-sm">
+                    // The words "Find a lesson" (components/course-find.tsx) matches: the lesson's and its module's titles.
+                    <li key={lesson.id} className="flex items-start gap-2 text-sm" data-find={findKey(`${lesson.title} ${unit.title}`)}>
                       <span aria-hidden="true" className="w-5 shrink-0 text-center">{mark}</span>
                       <span className="min-w-0 flex-1">
                         {reachable ? (

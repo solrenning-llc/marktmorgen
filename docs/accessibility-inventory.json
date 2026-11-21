@@ -1461,6 +1461,7 @@
     "components/course-comments-studio.tsx",
     "components/course-day-preview.tsx",
     "components/course-editor.tsx",
+    "components/course-find.tsx",
     "components/course-next-step-card.tsx",
     "components/course-next-step.tsx",
     "components/course-outline.tsx",

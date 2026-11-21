@@ -88,6 +88,8 @@ jobs:
       - name: Lesson focus mode hides what is around the lesson, keeps the keyboard on its button and is said (synthetic, no server)
         run: node tests/e2e/lesson-focus.mjs
       - run: node scripts/ci-build.mjs
+      - name: Find a lesson filters a course's outline, says how many match and hides empty modules (synthetic, no server)
+        run: node tests/e2e/course-find.mjs
       - name: Authenticated studio and page editor at five widths with AAA and access modes
         run: node tests/e2e/accessibility-studio-matrix.mjs
 

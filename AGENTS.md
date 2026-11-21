@@ -145,9 +145,9 @@ O vigia é religado quando expira, e religá-lo é a primeira ação depois de c
 
 (d) **Confirmação obrigatória.** Quem recebe uma ordem responde no canal "Lida <ID>" em até 15 minutos; o Codex confirma na execução seguinte. Sem confirmação, o coordenador manda uma mensagem direta apontando o comentário. Depois de 30 minutos, o painel mostra a ordem como não lida. Agir contra uma ordem não lida é erro de processo, relatado no painel.
 
-(e) **Troca de parte.** É feita pelo workflow do #4941 quando ele entrar, com o SIM do dono para o head. Até lá, o coordenador a faz à mão aos 2.250 comentários: abre a parte nova, põe a linha de apontamento na parte antiga, muda o rótulo e atualiza a primeira linha do PAINEL.
+(e) **Troca de parte.** É feita pelo workflow do #4941 (`.github/workflows/coordination-rollover.yml`, no main desde 21/11/2026, com o SIM do dono para o head `2e31152be3`), que só age quando a variável do repositório `COORDINATION_ROLLOVER` estiver ligada. Enquanto ela estiver desligada, o coordenador a faz à mão aos 2.250 comentários: abre a parte nova, põe a linha de apontamento na parte antiga, muda o rótulo e atualiza a primeira linha do PAINEL.
 
-**Estado (regra VR):** o script único do vigia, num arquivo do repositório, sai num PR próprio, por ser código. Até ele entrar, cada sessão usa o próprio vigia, com a regra de (b). O #4941 espera o SIM do dono para o head `c4425f2e14`.
+**Estado (regra VR):** o script único do vigia, num arquivo do repositório, sai num PR próprio, por ser código. Até ele entrar, cada sessão usa o próprio vigia, com a regra de (b). O #4941 entrou no main em 21/11/2026 e fica desligado até a variável `COORDINATION_ROLLOVER` ser ligada; quando a regra CO estiver em vigor, o canal passa a ser o correio e esta troca de parte fica como histórico.
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 

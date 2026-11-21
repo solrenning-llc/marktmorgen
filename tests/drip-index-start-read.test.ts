@@ -193,6 +193,61 @@ async function main() {
     console.log(`a refunded Store first year with both drip lines: US$${year.toFixed(4)}`);
     is("a refunded Store first year with both drip lines is under US$66", year < 66, true);
   }
+  part("6. A stamped student re-dated through the start read keeps an access end on their row");
+  {
+    // Bought with an end, refunded in full, bought again with an earlier end: the row held the first purchase's.
+    const endNew = second + 45 * DAY;
+    const endOld = second + 400 * DAY;
+    const ending = { ...course, accessEndsAt: endNew, accessEndsKept: [] } as Course;
+    const stamped = (id: string, created: number, refunded: boolean, end: number) => ({ ...session(id, created, refunded), metadata: { store: store.handle, product: product.id, access_end: String(end) } });
+    await fresh([stamped("cs_test_second", second, false, endNew), stamped("cs_test_first", first, true, endOld)]);
+    await registerDrip(store, product, ending);
+    await recordEnrollment(store, buyer, product.id, first);
+    await openedOn(first, { x: endOld });
+    await noteBoughtAgain(store, [courseId], buyer, second);
+    is("Month 1 goes, inside the new purchase's access", await run(second + 30 * DAY), [subject("Month 1")]);
+    is("the row takes the new day", (await studentDates(courseId, buyer))?.since, second);
+    const row = JSON.parse(String((await redis.pipeline([["HGET", `nl:course:${courseId}:students`, emailKey(buyer)]]))[0])) as { x?: number };
+    is("and keeps an end: the stamp read with the start", row.x, endNew);
+    // A later run whose start read falls back to the row (Stripe not answering, its kept answer gone): the row's end
+    // still holds.
+    await redis.pipeline([["DEL", redis.keys().find((k) => k.startsWith("nl:learn:paid:")) ?? "none"]]);
+    stripe.fail = true;
+    is("Month 2 opens after that end: not sent, even from the row", await run(second + 60 * DAY), []);
+    stripe.fail = false;
+  }
+
+  part("7. What a paid order's re-buy note costs stays inside the line that prices it");
+  {
+    const R = await import("./plan-cost-registry");
+    const { MAX_DELIVERED } = await import("@/lib/bundle-rules");
+    const { MAX_MODULES } = await import("@/lib/course");
+    is("its card and pair bytes are the drip run's own", [R.BOUGHT_AGAIN_CARD_BYTES, R.BOUGHT_AGAIN_PAIR_BYTES], [R.DRIP_CARD_MAX_BYTES, R.DRIP_PAIR_BYTES]);
+    is("its bytes cover MAX_DELIVERED courses", R.BOUGHT_AGAIN_BYTES_MOST, MAX_DELIVERED * (R.DRIP_CARD_MAX_BYTES + 2 * MAX_MODULES * R.DRIP_PAIR_BYTES));
+    is("priced in every order", Math.abs(R.ORDER_COST - (2 * R.PER_EMAIL + R.ORDER_COMPUTE + R.ORDER_LIBRARY + R.ORDER_RENEWAL_STOP + R.ORDER_BOUGHT_AGAIN)) < 1e-12 && R.ORDER_BOUGHT_AGAIN > 0, true);
+    // Measured: three courses of one order, each a re-buy with its card kept, every command of the index part counted.
+    const ids = ["7", "6", "5"].map((c) => c.repeat(32));
+    await fresh([]);
+    for (const id of ids) {
+      const other = { ...course, id } as Course;
+      await registerDrip(store, { ...product, id: `prod_${id.slice(0, 8)}`, course: { id, lessons: 3 } } as unknown as Listing, other);
+      await redis.pipeline([["HSET", `nl:course:${id}:students`, emailKey(buyer), JSON.stringify({ e: buyer, s: first, l: first })]]);
+    }
+    const sent: (string | number)[][] = [];
+    const counting = redis.pipeline;
+    redis.pipeline = async (list) => {
+      sent.push(...list);
+      return counting(list);
+    };
+    const noted = await noteBoughtAgain(store, ids, buyer, second);
+    redis.pipeline = counting;
+    is("the note is written", noted, true);
+    // The index part: what comes after the note's own HGETs, SADDs and DEL (#3369's).
+    const own = 2 * ids.length + 1;
+    const index = sent.length - own;
+    is(`the index part's commands (${index}) within the formula (${R.BOUGHT_AGAIN_INDEX_COMMANDS_MOST}), a script billed at TAKE's four`, index > 0 && index <= R.BOUGHT_AGAIN_INDEX_COMMANDS_MOST, true);
+    is("one MGET of every card, whatever the courses", sent.filter((c) => c[0] === "MGET").length, 1);
+  }
   done();
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

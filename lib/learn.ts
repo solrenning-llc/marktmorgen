@@ -2074,7 +2074,7 @@ async function sendDue(store: Store, statsId: string, storeMember: string, pendi
    * emails sent early forgotten and the row re-dated (redateStudent). Their pairs due now are looked at again in this
    * pass, inside the run's entries; the rest wait in the index under their new scores. False when nothing moved.
    */
-  const redate = async (entry: Entry, card: DripCard, email: string, last: number, open: number, n: number): Promise<boolean> => {
+  const redate = async (entry: Entry, card: DripCard, email: string, last: number, open: number, n: number, stamp: number | null | "unknown", had: unknown): Promise<boolean> => {
     const { courseId, field } = entry.pair;
     try {
       const again = duePairs(courseId, field, open, card, nowSeconds);
@@ -2088,7 +2088,14 @@ async function sendDue(store: Store, statsId: string, storeMember: string, pendi
         if (!added || countOf(added[0]) === null) throw new UnknownReplyError("a re-dated student's drip pairs written");
       }
       await redateStudent({ id: courseId, startsAt: card.s, modules: card.m.map(cardModule) }, email, open, nowSeconds);
-      moved.set(`${courseId}|${field}`, JSON.stringify({ e: email, s: open, l: last }));
+      // The access end the index's sends hold (24 [E7]): the stamp read with the start (the purchase that stands), none
+      // when it read as none, else the row's own before it moved; put back on the row (noteStudentStamp, its bytes from
+      // the room), so a later run whose start read falls back to the row ("row") never emails a module opening after
+      // it. A stamp not known and none on the row leaves the row as it is.
+      const keep: number | null | "unknown" = typeof stamp === "number" ? stamp : stamp === null ? null : stampOf(had) ?? "unknown";
+      await noteStudentStamp(courseId, email, async () => keep, store);
+      const x = typeof keep === "number" ? stampOf(keep) ?? undefined : undefined;
+      moved.set(`${courseId}|${field}`, JSON.stringify({ e: email, s: open, l: last, ...(x !== undefined ? { x } : {}) }));
       // Their scores are the ZADD's now: neither dropped nor moved again by this pass's tidy-up.
       const written = new Set(again.map(([, member]) => member));
       for (const list of [drop]) for (let i = list.length - 1; i >= 0; i -= 1) if (written.has(list[i])) list.splice(i, 1);
@@ -2142,7 +2149,7 @@ async function sendDue(store: Store, statsId: string, storeMember: string, pendi
       starts.set(who, start);
       if (start === "unknown") { unknown += 1; continue; }
       if (typeof start === "object" && start.open !== student.s) {
-        if (!(await redate(entry, card, email, student.l, start.open, n))) { starts.set(who, "unknown"); unknown += 1; continue; }
+        if (!(await redate(entry, card, email, student.l, start.open, n, start.stamp, student.x))) { starts.set(who, "unknown"); unknown += 1; continue; }
         await settle(entry);
         continue;
       }
@@ -2212,7 +2219,7 @@ async function sendDue(store: Store, statsId: string, storeMember: string, pendi
         // The row held another day than the page's: it takes the page's, forgetting what went early, and this
         // student's pairs are looked at again from it (their due ones in this pass).
         await releaseMark(mark, value);
-        if (!(await redate(entry, card, email, student.l, start.open, n))) {
+        if (!(await redate(entry, card, email, student.l, start.open, n, start.stamp, student.x))) {
           starts.set(who, "unknown");
           unknown += 1;
         }

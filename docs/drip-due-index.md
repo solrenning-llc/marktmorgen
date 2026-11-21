@@ -1,5 +1,40 @@
 # Drip emails: an index of the pairs that fall due (design, unit 0)
 
+## Current shape: merged with #3369 (21 November 2026)
+
+This section is the shape in force; the text after it is the design's history, kept as it was written. Where they differ, this section holds.
+
+**What a run reads.** Each store's run reads two ranges of its index (`sendDue`):
+
+- the pairs due today (scored from the start of today, UTC, to now), as many as the store may still send in its allowance window: its email figure (`allowanceFor(store, "email")`) less what it used, read exactly (`allowanceUsedExact`, one GET; an unreadable count reads none of today's pairs, which wait for the next run inside their window). Each email is still taken from that figure before it goes (`lib/email.ts`, meter `email`), so the figure is checked again at every send;
+- the pairs due earlier inside the seven-day window, caught up at `dripIndexEntriesPerRun(store)` a run (a seventh of the email figure, rounded up). What that leaves unused goes to today's pairs.
+
+Each course's pairs are taken with the students seen most recently first (the row's `l`), as the course-by-course job listed them, then one pair of each course in turn. The refusal ceilings (`DRIP_REFUSALS_PER_COURSE` 3, `DRIP_REFUSALS_PER_STORE` 5), the deadline and the drop/later bookkeeping are unchanged.
+
+**The start read (#3369).** A drip email goes on the day the course page opens the module, from the same start (`courseLedger(store, email, "strict")`: Stripe, the thanks-page record, imports read with `importedFromExact` and courses earned by level, each read exactly). Each pair's checks add one `SISMEMBER` of the course's bought-again set (`nl:course:<courseId>:again`, written by `noteBoughtAgain` at the purchase's confirmation). A bought-again student's start is read first, whatever is due under the row's day; any other student's start is read once a course a run, after the pair's mark is ours. Before each read, `takeDripStartUnits` takes `dripStartUnits(courses)` units from the store's monthly figure for these reads (`dripMonthUnits`, counted in its allowance window, `nl:dripstart:`); never from the store's public requests. What the read says:
+
+| State | Meaning | What the run does |
+| --- | --- | --- |
+| `{ open, stamp }`, same day as the row | the page opens the course from the row's day | the stamp read decides the access end; sent if the module opens before it |
+| `{ open, stamp }`, another day | bought again after a full refund | the student's pairs are written again from `open` (new ones take room first; a full room moves nothing), the emails sent for modules not open on `open` are forgotten (`forgetEarlyDripMails`), the row is re-dated (`redateStudent`) and given back an access end (`noteStudentStamp`: the stamp read, else the row's own `x` before it moved), so a later run that falls back to the row never emails a module opening after it, and the student's pairs due now are looked at again in the same run |
+| `"shut"` | the page does not open it (refunded in full, taken off, ended) | the mark is kept, the pair leaves, nothing is sent |
+| `"row"` | not read: the store's units for these reads spent, or Stripe not answering | sent from the row's day, as the page opens a one-off course from its record; a bought-again student's pair not due under the row's day stays for a run that reads their start |
+| `"unknown"` | a database reply of another shape, or the units not counted | nothing is sent, the mark is let go, the pair stays (CX-123 rule 24) |
+
+`noteBoughtAgain` also writes the student's pairs from the purchase day (`indexBoughtAgain`), so a course bought again and not opened since is found although nothing is due under the row's day. The course page's `touchStudent` passes `stands: true`: the row takes the page's day, the early emails are forgotten and the pairs are written again.
+
+**Cost, both lines summed in every plan's worst month** (`tests/plan-cost-registry.ts`):
+
+- `course-drip-run`: Store $0.0347, Studio $0.1128, Scale $0.2845 a month (each run at most the whole email figure of today's pairs plus the catch-up, each pair its row, blocked check, again check and mark; two ranges and the email-used GET a store a run);
+- `drip-start-read`: Store $0.0237, Studio $0.0949, Scale $0.2532 a month (the store's monthly units for these reads, each at most a later page's cost, held over `dripStartRead`, which includes a moved start's index writes);
+- a paid order's re-buy note, its index part (`ORDER_BOUGHT_AGAIN`, in `ORDER_COST`): one MGET of the cards, ZMSCORE, the room, ZADD and SADD, with `MAX_DELIVERED` courses' cards and pairs on the wire. The note's own HGET and SADD a course and its DEL (#3369's `noteBoughtAgain`) are not priced: at `MAX_DELIVERED` courses they would take a thousand orders past a plan below the 45% that `tests/plan-margin.test.ts` holds, an open point for the coordinator.
+
+A refunded Store first year with all of them: US$64.1609, under the owner's US$66 ceiling (`tests/email-logo-region.test.ts`, `tests/drip-index-start-read.test.ts`).
+
+**Tests.** `tests/drip-index-start-read.test.ts` holds the five invariants of the merge (the exact read, the units before the read, a re-date only on a start read, the early emails forgotten on a re-buy, both lines summed) and the access end kept on a re-dated row; each was shown failing by a mutation of the code. #3369's tests (`tests/course-drip-repurchase-emails.test.ts`, `tests/drip-start-month.test.ts` and the rest) run over the index with their assertions unchanged.
+
+## History
+
 Status: built on a local branch, tested in synthetic tests only (15 November 2026, Claude 4 cloud V); not merged, not published. The design below was refined as built:
 
 - The run never reads a course outline: each drip course has a small card (`nl:drip:card:<courseId>`: its product, cohort start and the modules that open over time), written by `registerDrip` and by `touchStudent`, its bytes in the room.

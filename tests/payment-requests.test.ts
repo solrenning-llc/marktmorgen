@@ -260,8 +260,10 @@ async function main(): Promise<void> {
   mailFailureStatus = 500; mailDown = true;
   const unknown = await sendRequestEmail(big, unknownRequest.request, now);
   mailDown = false;
-  const unknownAgain = await sendRequestEmail(big, (await readRequest(unknownRequest.request.id))!, now);
-  is("HTTP500 is not confirmed non-acceptance or permission to repeat", [unknown.sent, unknownAgain.sent, mailPosts - beforeUnknown], [false, false, 1]);
+  // May have gone, so it counts as sent (rule 30; webhooks/cron audit, Claude 1, 12/11/2026): pressing "send again"
+  // at once is held by the hours between sends, and the daily job waits for the next reminder's own day.
+  const unknownAgain = await remindNow(big, unknownRequest.request.id, now);
+  is("HTTP500 is not confirmed non-acceptance or permission to repeat", [unknown.sent, unknownAgain.ok, mailPosts - beforeUnknown], [true, false, 1]);
   is("the payment request source is retained for reconciliation", (await readRequest(unknownRequest.request.id))?.email, "uncertain@example.com");
 
   part("Cancel, delete, and deleting the person");

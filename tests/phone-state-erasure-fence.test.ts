@@ -74,6 +74,33 @@ async function main(): Promise<void> {
   await alertCreator(store, "report", { title: "A report", body: "Synthetic", url: "/studio" } as never, { seed: "fence-1" }).catch(() => 0);
   is("the state hash is not recreated", redis.run(["EXISTS", state]), 0);
 
+  // Claude 4's M1 on #5001: one alert's state writes are one script, its EVAL, one GET of the list and one HSET per
+  // device still listed (N + 2), not three commands per device (180 at MAX_STORE_DEVICES, more than ORDER_COMPUTE).
+  part("One alert's state writes for ten devices: one script, at most N + 2 commands");
+  redis.run(["DEL", state, `nl:phone:cfg:${statsId}`]);
+  const ten: string[] = [];
+  for (let n = 10; n < 20; n += 1) ten.push(await add(n));
+  const real = redis.pipeline.bind(redis);
+  let stateCommands = 0;
+  let stateScripts = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    for (const command of commands) {
+      if (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:phone-state-if-listed:")) {
+        stateScripts += 1;
+        // A script counts as one command plus the calls inside it: one GET, and one HSET per pair still listed.
+        stateCommands += 2 + (command.length - 5) / 2;
+      } else if (command[0] === "HSET" && String(command[1]) === state) {
+        stateCommands += 1;
+      }
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  await alertCreator(store, "report", { title: "A report", body: "Synthetic", url: "/studio" } as never, { seed: "fence-cost" }).catch(() => 0);
+  redis.pipeline = real;
+  is("one script for the alert", stateScripts, 1);
+  is("at most ten devices + 2 commands", stateCommands <= ten.length + 2, true);
+  is("every device listed has its state", fields().sort(), [...ten].sort());
+
   done();
 }
 

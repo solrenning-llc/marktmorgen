@@ -10,6 +10,7 @@ import { MAX_UNLOCK_PRODUCTS } from "@/lib/community-locked";
 import { SEARCH_CONVERSATIONS } from "@/lib/community-dm";
 import { ACCESS_CHECK_READ, searchRead, walkRead } from "./plan-cost-registry";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
+import { CRM_VALUE_SAVE, CRM_VALUE_SAVE_SECONDS, SHAPES } from "./plan-cost-registry";
 import { COMPANIES_PAGE_READ, COMPANIES_REQUEST, STUDIO_UNIT_SENT } from "./plan-cost-registry";
 import { COMPANIES_READ_UNITS, COMPANIES_REQUEST_UNITS, COMPANY_MARKUP_BYTES, COMPANY_PERSON_MARKUP_BYTES, MAX_COMPANIES, MAX_COMPANIES_BYTES, MAX_COMPANY_PEOPLE, SENT_TIMES, sentBytes } from "@/lib/crm-companies-rules";
 import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS, benefitsRead } from "./plan-cost-registry";
@@ -52,7 +53,8 @@ import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
 import { REFUND_CHECK_UNITS } from "@/lib/payment-requests";
 import { PLAN_INVOICES_READ, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD, REFUND_CHECK_READ } from "./plan-cost-registry";
-import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
+import { CRM_VALUE_MOST_BYTES, CRM_VALUE_SAVE_BYTES, CRM_VALUE_SAVE_COMMANDS, CRM_VALUE_SAVE_TRIPS, CRM_VALUE_SAVE_UNITS, TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
+import { MAX_FIELD_OPTION, MAX_FIELD_OPTIONS, MAX_FIELD_VALUE } from "@/lib/crm-rules";
 import { STUDIO_REQUEST_BYTES, flowHistoryUnits, keepVersionBytes, listVersionsBytes, restoreBytes, restoreTryBytes } from "@/lib/flow-versions-rules";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request, SHORT_LINK_OPEN_READ } from "./plan-cost-registry";
@@ -445,6 +447,22 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   }
   assert.ok(TASKS_RECOUNT_UNITS * UNIT_COST.studio >= request("studio", 4, TASKS_RECOUNT_BYTES));
   console.log(`a recount of a store's tasks: ${TASKS_RECOUNT_BYTES} bytes at most, ${TASKS_RECOUNT_UNITS} studio requests at most, once a store`);
+  // A field saved from the studio (lib/crm.ts, setValue; C3-125): the whole request, every trip at the review ceiling of
+  // a trip. Its trips (more than six) do not fit in one studio request's 1.5 s, so it is counted as two, both taken with
+  // the first, before anything is read, never three; the line is held under what the two cost, in time, commands and bytes.
+  const studioShape = request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000);
+  assert.equal(UNIT_COST.studio, studioShape);
+  assert.equal(CRM_VALUE_SAVE_UNITS, 2);
+  assert.ok(CRM_VALUE_SAVE_TRIPS * ROUND_TRIP_SECONDS > SHAPES.studio.seconds, "the save does not fit in one studio request: it is counted as two");
+  assert.equal(CRM_VALUE_SAVE_SECONDS, CRM_VALUE_SAVE_TRIPS * ROUND_TRIP_SECONDS);
+  assert.ok(CRM_VALUE_SAVE_SECONDS <= CRM_VALUE_SAVE_UNITS * SHAPES.studio.seconds, `${CRM_VALUE_SAVE_SECONDS} s > ${CRM_VALUE_SAVE_UNITS} x ${SHAPES.studio.seconds} s`);
+  assert.ok(CRM_VALUE_SAVE_COMMANDS <= CRM_VALUE_SAVE_UNITS * (20 + TAKE_COMMANDS) && CRM_VALUE_SAVE_BYTES <= CRM_VALUE_SAVE_UNITS * 50_000);
+  assert.ok(CRM_VALUE_SAVE <= CRM_VALUE_SAVE_UNITS * UNIT_COST.studio, `${CRM_VALUE_SAVE} > ${CRM_VALUE_SAVE_UNITS} x ${UNIT_COST.studio}`);
+  assert.ok(CRM_VALUE_MOST_BYTES >= 3 * MAX_FIELD_VALUE && CRM_VALUE_MOST_BYTES >= 3 * (MAX_FIELD_OPTIONS * MAX_FIELD_OPTION + MAX_FIELD_OPTIONS - 1));
+  assert.ok(CRM_VALUE_SAVE_BYTES >= 2 * CRM_VALUE_MOST_BYTES);
+  assert.ok(read("app/api/store/crm/route.ts").includes('body.action === "value" ? CRM_VALUE_SAVE_UNITS : 1'), "both are taken by the route's guard, with the first");
+  assert.ok(!/takeAllowance\(store, "studio"/.test(read("lib/flows.ts")), "a workflow's field step takes no studio request");
+  console.log(`a field saved from the studio: $${CRM_VALUE_SAVE.toFixed(6)} at most (${CRM_VALUE_SAVE_TRIPS} trips, ${CRM_VALUE_SAVE_SECONDS} s, ${CRM_VALUE_SAVE_COMMANDS} commands, ${CRM_VALUE_SAVE_BYTES} bytes), counted as ${CRM_VALUE_SAVE_UNITS} studio requests at $${UNIT_COST.studio.toFixed(6)}`);
   // A workflow's history (lib/flow-versions-rules.ts; Claude 5 on #1927, decision B): each path takes flowHistoryUnits of what it moves, measured
   // first, at UNIT_COST.studio's 50 KB, which covers its commands and those bytes at a whole studio request's shape.
   assert.equal(STUDIO_REQUEST_BYTES, 50_000);

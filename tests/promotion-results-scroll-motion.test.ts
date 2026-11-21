@@ -26,7 +26,9 @@ let reduce = false;
 const asked: unknown[] = [];
 const g = globalThis as unknown as Record<string, unknown>;
 g.window = { matchMedia: (query: string) => ({ matches: query === "(prefers-reduced-motion: reduce)" && reduce }) };
-g.document = { getElementById: (id: string) => (id === "numbers-posts" ? { scrollIntoView: (options: unknown) => asked.push(options) } : null) };
+// Changed on the merge into #4094 (rule 23): the button now also moves the focus to the section's heading (WCAG 2.4.3,
+// lib/campaign-results-jump.ts), so the stand-in heading can take focus; the motion checks are unchanged.
+g.document = { getElementById: (id: string) => (id === "numbers-posts" ? { scrollIntoView: (options: unknown) => asked.push(options), focus: () => {} } : null) };
 
 async function main() {
   const view = await mount(PromotionPlanner as (p: Parameters<typeof PromotionPlanner>[0]) => unknown, {

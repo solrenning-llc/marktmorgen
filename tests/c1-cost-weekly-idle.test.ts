@@ -1,3 +1,5 @@
+import { seedNumbersStore } from "./numbers-email-claim-world";
+import { summaryClaimKey } from "./summary-claim-command";
 import { NextRequest } from "next/server";
 import { GET as weekly } from "@/app/api/cron/weekly/route";
 import { GET as monthly } from "@/app/api/cron/monthly/route";
@@ -39,8 +41,10 @@ function claimed(prefix: string): number {
 async function main(): Promise<void> {
   globalThis.fetch = async () => { throw new Error("No real network request belongs in a numbers-email route test"); };
   redis.pipeline = async (batch) => {
-    commands += batch.length;
-    return real(batch);
+    const before = redis.scriptCalls;
+    const result = await real(batch);
+    commands += batch.length + redis.scriptCalls - before;
+    return result;
   };
   control.folders = Array.from({ length: S }, (_, i) => `store${String(i).padStart(4, "0")}`);
   control.numbers = "visitors-0";
@@ -50,14 +54,14 @@ async function main(): Promise<void> {
     ["Monthly", monthly, "/api/cron/monthly", `nl:monthly:sent:`],
   ] as const) {
     part(`${name}: ${S} stores with visitors, worked through 25 a run`);
-    redis.clear();
+    redis.clear(); seedNumbersStore();
     const { runs, perRun } = await runAll(route, path);
     const week = name === "Weekly" ? new Date(Date.now() - ((new Date().getUTCDay() + 6) % 7) * 86_400_000).toISOString().slice(0, 10) : "";
     const period = name === "Weekly" ? week : new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
     is("every store is reached and claimed once", claimed(`${prefix}${period}:`), S);
     is("in S / 25 runs, plus the one that finds nothing", runs, S / 25 + 1);
     const tenth = perRun[9] ?? 0;
-    is(`the tenth run reads only its own 25 stores, not the 225 claimed before it (it sent ${tenth} commands)`, tenth <= 25 * 10 + 10, true);
+    is(`the tenth run reads only its own 25 stores, not the 225 claimed before it (it sent ${tenth} commands)`, tenth <= 25 * 13 + 10, true);
     const idle = perRun[perRun.length - 1];
     is(`a run with every store decided sends at most 10 Redis commands (it sent ${idle})`, idle <= 10, true);
     const before = commands;
@@ -73,13 +77,13 @@ async function main(): Promise<void> {
   ] as const) {
     for (const lost of ["claim", "stop"] as const) {
       part(`${name}: a ${lost} whose answer is unknown is not kept as decided`);
-      redis.clear();
+      redis.clear(); seedNumbersStore();
       control.folders = ["store9000", "store9001"];
       let failOnce = true;
       redis.pipeline = async (batch) => {
         commands += batch.length;
-        const [verb, key] = batch[0] ?? [];
-        if (failOnce && lost === "claim" && verb === "SET" && String(key).startsWith(prefix) && String(key).endsWith(":store9000")) {
+        const [verb] = batch[0] ?? [];
+        if (failOnce && lost === "claim" && summaryClaimKey(batch[0] ?? []).startsWith(prefix) && summaryClaimKey(batch[0] ?? []).endsWith(":store9000")) {
           failOnce = false;
           throw new Error("synthetic lost SET NX");
         }
@@ -97,8 +101,10 @@ async function main(): Promise<void> {
     }
   }
   redis.pipeline = async (batch) => {
-    commands += batch.length;
-    return real(batch);
+    const before = redis.scriptCalls;
+    const result = await real(batch);
+    commands += batch.length + redis.scriptCalls - before;
+    return result;
   };
 
   done();

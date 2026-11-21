@@ -19,12 +19,12 @@ async function whenPipelineThrows<T>(error: Error, run: () => Promise<T>): Promi
 test("control: a counter that answers is within its limit", async () => {
   redis.clear();
   assert.equal(await withinLimit("unknown-batch", "who", 5, 60), true);
-  assert.equal(await withinMonth("unknown-batch", "who", 5, "2026-11"), true);
+  assert.equal(await withinMonth("unknown-batch", "who", 5, "2026-11", 32 * 86_400), true);
 });
 
 test("Redis that cannot be asked at all still opens, as before", async () => {
   assert.equal(await whenPipelineThrows(new Error("fetch failed (test)"), () => withinLimit("unknown-batch", "who", 5, 60)), true);
-  assert.equal(await whenPipelineThrows(new Error("fetch failed (test)"), () => withinMonth("unknown-batch", "who", 5, "2026-11")), true);
+  assert.equal(await whenPipelineThrows(new Error("fetch failed (test)"), () => withinMonth("unknown-batch", "who", 5, "2026-11", 32 * 86_400)), true);
 });
 
 test("a batch answered out of shape is an unknown count: withinLimit refuses", async () => {
@@ -32,5 +32,5 @@ test("a batch answered out of shape is an unknown count: withinLimit refuses", a
 });
 
 test("a batch answered out of shape is an unknown count: withinMonth refuses", async () => {
-  assert.equal(await whenPipelineThrows(new UnknownReplyError("a Redis batch (test)"), () => withinMonth("unknown-batch", "who", 5, "2026-11")), false);
+  assert.equal(await whenPipelineThrows(new UnknownReplyError("a Redis batch (test)"), () => withinMonth("unknown-batch", "who", 5, "2026-11", 32 * 86_400)), false);
 });

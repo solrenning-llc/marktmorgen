@@ -660,6 +660,12 @@ export type FormResponse = {
   answers: Answers;
   outcome: string;
   joined: boolean;
+  /**
+   * The address of whoever sent it: the form's first email question they answered (readAnswers), lower case, or ""
+   * when they answered none. It decides whose the response is (lib/form-store.ts isResponderOf). Absent on responses
+   * kept before it was.
+   */
+  by?: string;
   /** In a scored quiz: the total, and each category's part, by category id. Absent otherwise. */
   score?: number;
   scores?: Record<string, number>;

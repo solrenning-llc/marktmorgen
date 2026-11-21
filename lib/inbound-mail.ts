@@ -91,7 +91,7 @@ import { NIMBUS_FROM, RESEND_BASE, headerText, oneAddress, sendEmail } from "@/l
 import { creatorDomain } from "@/lib/mail-from";
 import { redisPipeline } from "@/lib/redis";
 import { stringList } from "@/lib/redis-reply";
-import { essentialLimitState, withinLimit } from "@/lib/request-guard";
+import { essentialLimitState } from "@/lib/request-guard";
 import { windowCountBy, windowCountOf } from "@/lib/window-count";
 import { HANDLE_PATTERN, anyStoreNamed, ownsAStore, storeForEmail, storeForHandle } from "@/lib/store";
 import { RESEND_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
@@ -656,7 +656,11 @@ export async function forwardInbound(id: string, now = Date.now(), announcedTo?:
     // Listed before the allowance is taken: a list that cannot be read now is a retry that spends nothing.
     listed = await listFiles(id);
     if (!listed) return "retry";
-    if (!(await withinLimit("creator-inbound", handle, CREATOR_HOURLY, 3_600))) return "skipped";
+    // Past the hour's limit the message is skipped; a counter that cannot be read
+    // is a retry (the route answers 500 and clears its seen mark), never a loss.
+    const allowance = await essentialLimitState("creator-inbound", handle, CREATOR_HOURLY, 3_600);
+    if (allowance === "unknown") return "retry";
+    if (allowance === "exceeded") return "skipped";
     creator = { name: headerText(found.name, 60).replace(/["\\<>]/g, "") || handle, email, address: `${handle}@${creators}` };
     store = found;
   }

@@ -42,11 +42,11 @@ export async function POST(request: NextRequest) {
       const store = handle ? await storeForHandle(handle) : null;
       if (!store) return answer({ ok: false, error: "closed" }, 404);
       const result = await startChat({ store, email: body.email, name: body.name, text: body.text, ip: clientAddress(request) });
-      return result.ok ? answer({ ok: true, thread: result.thread }) : answer({ ok: false, error: result.reason }, result.reason === "limited" ? 429 : 400);
+      return result.ok ? answer({ ok: true, thread: result.thread }) : answer({ ok: false, error: result.reason }, result.reason === "limited" ? 429 : result.reason === "error" ? 503 : 400);
     }
     if (body.action === "send") {
       const result = await visitorSend(body.token, body.text, (handle) => storeForHandle(handle));
-      return result.ok ? answer({ ok: true, thread: result.thread }) : answer({ ok: false, error: result.reason }, result.reason === "limited" ? 429 : 400);
+      return result.ok ? answer({ ok: true, thread: result.thread }) : answer({ ok: false, error: result.reason }, result.reason === "limited" ? 429 : result.reason === "error" ? 503 : 400);
     }
     return answer({ ok: false, error: "invalid" }, 400);
   } catch (error) {

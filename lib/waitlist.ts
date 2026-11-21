@@ -22,7 +22,7 @@ import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
 import { dataBytes } from "@/lib/store-data-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
-import { withinLimit } from "@/lib/request-guard";
+import { essentialLimitState } from "@/lib/request-guard";
 import { fromLine, mailDay, releaseDay, render, reserveDay } from "@/lib/mail";
 import { upsertContact } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
@@ -164,7 +164,8 @@ export async function joinWaitlist(input: {
   const email = normaliseEmail(raw);
   const sid = store.statsId;
   if (!(await withinStore("waitlist-ip", `${sid}:${ip}`, 10, 3_600, store))) return "limited";
-  if (!(await withinLimit("waitlist-address", sha(email), 5, 3_600))) return "limited";
+  const allowance = await essentialLimitState("waitlist-address", sha(email), 5, 3_600);
+  if (allowance !== "within") return allowance === "exceeded" ? "limited" : "error";
 
   const startedAt = Math.floor(Date.now() / 1000);
   const confirm = newToken();

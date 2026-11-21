@@ -1023,10 +1023,32 @@ export class MemoryRedis {
           this.run(["HSET", members, field, json]);
           return 1;
         }
-        // lib/ad-events.ts KEEP_LAST_IF_LIVE: the ad platforms' last answers kept only while the store is live and not being erased.
-        if (key.startsWith("-- marktmorgen:ads-last-live:v1\n") && args[0] === "3" && args.length === 7) {
-          const [, storeId, erasing, last, field, json, seconds] = args;
-          if (Number(this.run(["EXISTS", storeId])) !== 1 || Number(this.run(["HEXISTS", erasing, field])) === 1) return 0;
+        // lib/ad-events.ts KEEP_LAST_IF_LIVE: the ad platforms' last answers kept only while the same store is live (its id
+        // key, or its record holding the same statsId for a store from before ids) and not being erased.
+        if (key.startsWith("-- marktmorgen:ads-last-live:v2\n") && args[0] === "3" && args.length === 10) {
+          const [, live, erasing, last, field, json, seconds, mode, statsId, maxBytes] = args;
+          if (mode === "id") {
+            this.scriptCalls += 1;
+            if (Number(this.run(["EXISTS", live])) !== 1) return 0;
+          } else if (mode === "legacy") {
+            if (!statsId) return -1;
+            this.scriptCalls += 1;
+            const raw = this.run(["GET", live]);
+            if (raw === null) return 0;
+            if (typeof raw !== "string" || new TextEncoder().encode(raw).length > Number(maxBytes)) return -1;
+            let record: unknown;
+            try {
+              record = JSON.parse(raw);
+            } catch {
+              return -1;
+            }
+            const held = record && typeof record === "object" && !Array.isArray(record) ? (record as { statsId?: unknown }).statsId : undefined;
+            if (typeof held !== "string" || !held) return -1;
+            if (held !== statsId) return 0;
+          } else return -1;
+          this.scriptCalls += 1;
+          if (Number(this.run(["HEXISTS", erasing, field])) === 1) return 0;
+          this.scriptCalls += 1;
           this.run(["SET", last, json, "EX", seconds]);
           return 1;
         }

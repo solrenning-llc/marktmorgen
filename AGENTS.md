@@ -122,6 +122,87 @@ Decisão do dono DONO-20261120-1841-REGRAS-FILA (substitui DONO-20261120-1840-RE
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
+## RV — Revisor garantido, na quantidade e na qualidade certas (dono, 20/11/2026, por volta das 23h Fortaleza)
+
+Pedido do dono, nas palavras dele: "quero regra e politica para nao ocorrer mais de faltar revisor e revisoes na quantidade e qualidade correta". Sobre a escala de revisores: "MAS AS VEZES OCORRE DE UM AGENTE ESTAR SEM USO E DE AS VEZES ELE NAO PODER SER POR MOTIVO TECNICO". Aprovação da proposta do coordenador (Claude 5): "faça o correto". Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão. Motivo: na noite de 20 para 21/11/2026, o #4984 e o #4999, de imposto, ficaram prontos sem revisor; o gargalo era revisor, não código. Esta seção completa a FQ (2) e não a substitui.
+
+**Precedência do correio (CO).** A regra CO, o correio dos agentes (#5012, dono, 21/11/2026, por volta da 00h50 Fortaleza), é ordem posterior a esta: onde as duas divergirem, vale CO (Pedidos repetidos, passo 3 (b)). Quando CO estiver no main, o pedido de revisão, a sua entrega ao revisor e o CLAIMED passam pelo correio (CO (c) e (e)), no lugar da escala de (c) e dos prazos de (d). Continuam valendo o número de revisões de (a), as exclusões técnicas de (b), a revisão antes de produzir de (e) e o conteúdo da revisão de (f).
+
+(a) **Quantas revisões, por tipo de PR**, todas de família diferente da do autor:
+- dinheiro, imposto, cobrança, custo, segurança e apagamento de dados: 2, de duas famílias diferentes;
+- workflow: 2, mais o SIM do dono registrado para o head exato (FQ (1));
+- código comum (telas, textos do site, testes): 1;
+- só texto interno (AGENTS.md, documentos): 1;
+- junção do main ou correção de achado num PR já aprovado: 1 revisão focal no head novo.
+
+Na dúvida, vale o número maior. Quem classifica é o coordenador, pela lista de arquivos, nunca o autor (FQ, "Depende do dono").
+
+(b) **Quem não pode revisar, por motivo técnico.** A escala de (c) pula, para cada PR, quem estiver num destes casos:
+1. a mesma família do autor, ou uma família com commit no ramo, que adotou o PR ou que preparou a sua junção;
+2. sessão sem as dependências instaladas (sem `node_modules`), que não roda os testes: revisa só texto, nunca código de dinheiro ou imposto;
+3. sessão que não consegue rodar o tsc (por exemplo, por falta de memória): não revisa código grande;
+4. sessão que não sobe um Redis real: não revisa PR que mexe num script do Redis lido por `scripts/test_*_redis.py`;
+5. o Codex sem um transcritor com uso: a revisão dele fica pronta, mas não chega ao PR;
+6. subagente da mesma família do autor, que não conta como outra família (FQ (2));
+7. sessão reiniciando ou compactando o contexto, enquanto não voltar;
+8. agente sem uso, anunciado no canal.
+
+O coordenador publica no canal uma **tabela de capacidades**, com uma linha por sessão e estas colunas: roda os testes; roda o tsc; roda o Redis real; publica no GitHub; tem acesso à fila de merge; aceita SIM repassado. O painel cita o comentário da tabela. Cada agente corrige a própria linha no canal assim que algo muda.
+
+(c) **Revisores nomeados na abertura.** Todo pedido de revisão sai com os revisores nomeados, tirados da escala de rodízio Claude 2 → Claude 3 → Claude 4 → Claude 5 → Claude 6 → Claude 7 → Codex. A escala pula os casos de (b) e retoma do ponto onde parou. O PR empilhado vai para os mesmos revisores da base, que já conhecem o código. O autor escreve "review needed #N @sha — revisores: X e Y"; se não nomear, o coordenador nomeia no painel seguinte.
+
+(d) **Prazos e substituição automática.** O revisor nomeado publica o CLAIMED em até 1 hora e a revisão em até 3 horas a partir do pedido. Se não cumprir, o próximo da escala assume sem pedido, escrevendo "ASSUMED review #N @sha (prazo de X vencido)". Ninguém espera revisor mais de 4 horas; se nenhuma família capaz estiver disponível, o painel avisa o dono na mesma hora.
+
+(e) **Revisar antes de produzir.** Antes de abrir PR novo ou enviar trabalho próprio, cada agente zera as revisões vencidas em que foi nomeado. Cada agente faz pelo menos uma revisão para cada PR que abre, e agente com revisão vencida não abre PR novo. Exceções: a correção do main vermelho e as correções GRAVE ou ALTO.
+
+(f) **Revisão de qualidade.** Uma revisão só vale se trouxer, por escrito:
+- o número do PR e o head exato;
+- o diff lido por inteiro;
+- os testes dos arquivos tocados rodados, com o resultado, num executor que sai com erro quando uma asserção falha;
+- a prova de RED, quando o PR corrige um defeito;
+- no PR de custo, os testes de teto (AC (l)) e o ano do Store;
+- no PR de workflow, a conferência das permissões e do risco de injeção, e a leitura de cada arquivo de workflow por um analisador de YAML (as 9 verificações não leem o workflow do próprio PR: em 21/11/2026, o head c4425f2e14 do #4941 recebeu READY sem ser YAML válido), e o que o gatilho custa aos outros workflows (no mesmo PR, um gatilho `issue_comment` criaria uma execução por comentário em todo o repositório, no head do main, e quebraria a leitura de execuções do alarme de main vermelho, `scripts/main_red_alarm.mjs`);
+- cada achado classificado como LEVE, MÉDIO, ALTO ou GRAVE, com o cenário concreto, ou a frase "sem achados";
+- o que não foi conferido.
+
+Revisão sem esses itens não conta. Os horários citados são lidos no relógio da máquina, nunca estimados.
+
+(g) **Controle.** O painel de 30 minutos lista os PRs sem revisor nomeado, as revisões vencidas e quem assumiu cada uma. A família com 3 revisões vencidas no mesmo dia é apontada ao dono no painel.
+
+**Estado (regra VR):** a escala e a tabela de capacidades são publicadas pelo coordenador no canal depois que este PR entrar. Nada disso é automático ainda.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
+## CN — Um canal só, conferido e confirmado (dono, 20/11/2026, por volta das 23h Fortaleza)
+
+Pedido do dono, nas palavras dele: "precisa corrigir de vez o canal. estou suspeitando de problema no canal, de agente nao saber por o canal ja ter mudado ou de o agente nao conferir frequentemente o canal". Aprovação da proposta do coordenador (Claude 5): "faça o correto". Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão.
+
+**Precedência do correio (CO).** A regra CO, o correio dos agentes (#5012, dono, 21/11/2026, por volta da 00h50 Fortaleza), é ordem posterior a esta: onde as duas divergirem, vale CO (Pedidos repetidos, passo 3 (b)). Quando CO estiver no main, (a) a (e) abaixo valem só durante a transição de CO (i), até cada família confirmar a mensagem de boas-vindas do correio; depois disso, ficam como histórico.
+
+**Diagnóstico**, conferido em 21/11/2026 às 02:03 UTC:
+- só a #4932 tinha o rótulo `canal-ativo`, e ninguém escrevia nas partes antigas (#4858, #4848, #4827) desde as 20h UTC;
+- o defeito real era outro: as mensagens estavam espalhadas em cinco lugares (o canal, os comentários dos PRs, as mensagens diretas entre sessões, `docs/agent-inbox.md` e o ramo `para-claude-1`);
+- uma ordem não foi lida a tempo: o Claude 5 iacVn3r enviou o #2843 contra a ordem C5-20261120-2150, como ele mesmo relatou no comentário 7054873700;
+- nenhuma ordem tinha confirmação de recebimento.
+
+(a) **Um canal só para ordens e avisos:** a issue com o rótulo `canal-ativo` (AC (y)). Toda ordem, decisão, CLAIMED, HOLD, pedido de fila e aviso de "resolved" vai para ela. A revisão continua no próprio PR, com uma linha no canal apontando para ela. As mensagens diretas entre sessões, `docs/agent-inbox.md` e `para-claude-1` (AV11) continuam como meio de aviso e levam o ID e o número do comentário do canal. Uma ordem dada só fora do canal é copiada para o canal por quem a deu antes de ser cobrada.
+
+(b) **Vigia em toda sessão.** Toda sessão que pode manter processos em segundo plano deixa um vigia que, a cada 30 segundos:
+- acha a issue pelo rótulo, nunca por um número fixo, e assim segue sozinho a troca de parte;
+- lê cada comentário novo inteiro, não só a primeira linha, sem distinguir maiúsculas de minúsculas, e mostra os que citam o nome do agente, a sua família, "todos", "ALL" ou "everyone"; quem enfileira mostra também os pedidos de fila ("fila #N", "MERGE WHEN READY"). Em 20/11/2026, um pedido de fila do #4958 que começava por "Owner's decision" esperou cerca de uma hora porque o vigia de quem enfileira só lia a primeira linha (Claude 6, 7056303941).
+
+O vigia é religado quando expira, e religá-lo é a primeira ação depois de cada reinício. O Codex lê o canal em cada execução da tarefa agendada (AV9).
+
+(c) **ID e destinatário na primeira linha.** Toda ordem começa por "Para:" e um ID único no padrão do canal (agente, data, hora e assunto curto). O texto para o dono colar segue o cabeçalho da CP.
+
+(d) **Confirmação obrigatória.** Quem recebe uma ordem responde no canal "Lida <ID>" em até 15 minutos; o Codex confirma na execução seguinte. Sem confirmação, o coordenador manda uma mensagem direta apontando o comentário. Depois de 30 minutos, o painel mostra a ordem como não lida. Agir contra uma ordem não lida é erro de processo, relatado no painel.
+
+(e) **Troca de parte.** É feita pelo workflow do #4941 (`.github/workflows/coordination-rollover.yml`, no main desde 21/11/2026, com o SIM do dono para o head `2e31152be3`), que só troca de verdade com a variável do repositório `COORDINATION_ROLLOVER` no valor `on`. Com o valor `dry-run` (o de hoje, desde 21/11/2026, 02h35 Fortaleza) ou sem a variável, ele só lê e mostra o que faria, e o coordenador faz a troca à mão aos 2.250 comentários: abre a parte nova, põe a linha de apontamento na parte antiga, muda o rótulo e atualiza a primeira linha do PAINEL.
+
+**Estado (regra VR):** o script único do vigia, num arquivo do repositório, sai num PR próprio, por ser código. Até ele entrar, cada sessão usa o próprio vigia, com a regra de (b). O #4941 entrou no main em 21/11/2026 e fica em `dry-run` (só lê e mostra o plano, sem trocar nada) até o dono decidir o `on`; quando a regra CO estiver em vigor, o canal passa a ser o correio e esta troca de parte fica como histórico.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
 ## CV — "CI verde" só com prova (dono, 09/11/2026, por volta das 13h20 Fortaleza)
 
 Autorização do dono, nas palavras dele: "faça o correto. e tambem quero mais cuidados para que episodios assim e outros nao ocorram mais". Vale para todo agente deste repositório (Claude 1 a 6, cada Codex e qualquer agente novo), em toda sessão. Motivo: em 09/11/2026 um PR foi dado como verde sem nunca ter rodado GitHub Actions, depois de um incidente do próprio GitHub, porque o estado geral do commit aparecia como SUCCESS só com a verificação da Vercel; o PR ficou parado por quase 3 horas. Na mesma semana, um limite de tempo do CodeQL derrubou a fila por dias, relatado PR a PR, sem que ninguém o tratasse como causa comum.

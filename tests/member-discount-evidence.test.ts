@@ -7,7 +7,9 @@ const customer = "cus_member0001", id = "sub_live000001", promo = "promo_active0
 const price = { unit_amount: 2900, currency: "usd", recurring: { interval: "month" } };
 const subscription = (p: unknown = price) => ({ id, status: "active", discounts: [], metadata: { store: "memberstore", product: "prod000001" }, items: { data: [{ price: p }] } });
 const page = (data: unknown[]) => ({ object: "list", data, has_more: false });
-let customers: unknown, subscriptions: unknown, posts = 0, postReply: unknown = { id };
+// Stripe's answer once the code is on the membership shows it there (DISC-C-3, #4543): the id alone is not that proof.
+const applied = { id, discounts: ["di_1Applied0001"] };
+let customers: unknown, subscriptions: unknown, posts = 0, postReply: unknown = applied;
 const savedFetch = globalThis.fetch, savedKey = process.env.STRIPE_SECRET_KEY;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -16,6 +18,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.pathname === "/v1/customers") return reply(customers);
   if (url.pathname === "/v1/subscriptions") return reply(subscriptions);
   if (url.pathname === "/v1/promotion_codes") return reply(page([{ id: promo, code: "THANKS", active: true, promotion: { type: "coupon", coupon: { id: "co_1", percent_off: 20, duration: "once" } } }]));
+  // The one code applyMemberDiscount asks for by its id (lib/discount.ts findCode).
+  if (url.pathname === `/v1/promotion_codes/${promo}` && (init?.method ?? "GET") === "GET") return reply({ id: promo, object: "promotion_code", code: "THANKS", active: true, promotion: { type: "coupon", coupon: { id: "co_1", percent_off: 20, duration: "once" } } });
   if (url.pathname === `/v1/subscriptions/${id}` && init?.method === "POST") { posts += 1; return reply(postReply); }
   throw Error("Unexpected Stripe operation");
 }) as typeof fetch;
@@ -26,7 +30,7 @@ async function main(): Promise<void> {
   await claimHandle("member-discount@example.com", "memberstore", "Member Store", "");
   await setStripeAccount("member-discount@example.com", "acct_1Memberxxxxxxxx", true);
   const store = (await storeForEmail("member-discount@example.com"))!;
-  const reset = () => { customers = page([{ id: customer }]); subscriptions = page([subscription()]); posts = 0; postReply = { id }; };
+  const reset = () => { customers = page([{ id: customer }]); subscriptions = page([subscription()]); posts = 0; postReply = applied; };
   async function refuses(name: string): Promise<void> {
     is(`${name}: the list is unknown`, await memberSubs(store, "member@example.com"), null);
     is(`${name}: no discount operation`, [await applyMemberDiscount(store, "member@example.com", id, promo), posts], [{ ok: false, reason: "stripe" }, 0]);
@@ -66,7 +70,8 @@ async function main(): Promise<void> {
   is("an explicit zero amount remains zero", (await memberSubs(store, "member@example.com"))?.[0]?.amount, 0);
   reset();
   is("known membership still accepts the existing code once", [await applyMemberDiscount(store, "member@example.com", id, promo), posts], [{ ok: true }, 1]);
-  for (const value of [{}, { id: "sub_another0001" }, null]) {
+  // An answer whose discount does not read as Stripe writes one is not "applied", as hasDiscount reads the member list.
+  for (const value of [{}, { id: "sub_another0001" }, null, { id, discounts: [null] }, { id, discounts: [], discount: false }]) {
     reset(); postReply = value;
     is("an unconfirmed update is not success and is never retried", [await applyMemberDiscount(store, "member@example.com", id, promo), posts], [{ ok: false, reason: "stripe" }, 1]);
   }

@@ -1,0 +1,82 @@
+/**
+ * 220 [HL1], unit 1: the largest recurring commission Marktmorgen's own
+ * affiliate programme could pay on each plan and interval, as a PROPOSAL.
+ *
+ * Checked against the real code, with no figure typed:
+ *   - each unit is the plan at its price in force, every right used in its
+ *     worst month (tests/margin-alignment-table.ts planUnits), with the spend
+ *     floor's room kept (roomKept);
+ *   - receiving costs come from lib/receiving-costs.ts and the tax from TX's
+ *     reading (MOST_CORRECT_READING: IRPF 15% and IOF 0.38% on a positive
+ *     profit), as the owner's LC rule asks, outside the code's old 27.5% floor;
+ *   - the largest commission keeps MR's positive net cent, and one basis point
+ *     more does not;
+ *   - the cost of paying an affiliate abroad is unknown, so it is never zero:
+ *     the proposal certifies no percentage and every page says so;
+ *   - docs/marktmorgen-affiliates.md holds only its fixed text: the report is generated on demand
+ *     (node scripts/marktmorgen-affiliates.mjs; owner, DONO-20261120-2249-OPCAO-D), and nothing is in force.
+ */
+import { readFileSync, existsSync } from "node:fs";
+import { PLAN_PRICES, TIERS } from "@/lib/plan";
+import { POSITIVE_NET_CENTS } from "@/lib/receiving-costs";
+import { PLANS_ON_SALE } from "@/lib/opening";
+import * as table from "./marktmorgen-affiliates-table";
+import { onDemandReport, onDemandText } from "./generated-on-demand";
+import { affiliateRows, netWithCommissionCents, renderMarktmorgenAffiliates } from "./marktmorgen-affiliates-table";
+import { done, is, part } from "./check";
+
+const rows = affiliateRows();
+
+part("One row per plan and interval, at the prices in force");
+is("six units", rows.map((row) => row.id), TIERS.flatMap((tier) => [`${tier}-month`, `${tier}-year`]));
+is("each at its price in lib/plan.ts", rows.map((row) => row.priceCents), TIERS.flatMap((tier) => [PLAN_PRICES[tier].month, PLAN_PRICES[tier].year]));
+
+part("The largest commission is the edge of MR's positive net");
+for (const row of rows) {
+  const max = row.maxCommissionBps;
+  is(`${row.id}: at the largest commission, the net keeps a positive cent`, max === null || netWithCommissionCents(row, max) >= POSITIVE_NET_CENTS, true);
+  is(`${row.id}: one basis point more does not`, max === null || max === 10_000 || netWithCommissionCents(row, max + 1) < POSITIVE_NET_CENTS, true);
+  is(`${row.id}: with no commission, the net is the plan's own`, netWithCommissionCents(row, 0), row.netWithoutCommissionCents);
+}
+is("a plan whose net is not positive without a commission gets none", rows.every((row) => (row.netWithoutCommissionCents >= POSITIVE_NET_CENTS) === (row.maxCommissionBps !== null)), true);
+
+part("Nothing is in force");
+is("plans are not on sale", PLANS_ON_SALE, false);
+const doc = renderMarktmorgenAffiliates();
+is("a PROPOSAL, said first", doc.split("\n").slice(0, 4).join("\n").includes("PROPOSAL"), true);
+is("the payout cost abroad is unknown, never zero, and no percentage is certified", [/unknown/i.test(doc), /never zero/i.test(doc), /no percentage is certified/i.test(doc)], [true, true, true]);
+is("the commission is owed only after payment and the 30-day refund window, and taken back on refund or dispute", [/30 days/.test(doc), /refund/i.test(doc), /dispute/i.test(doc)], [true, true, true]);
+is("it has an Acessibilidade section", doc.includes("## Acessibilidade"), true);
+
+part("Claude 5's review of #3756 (6910906486): the rules match the refund policy and the table prints what is paid");
+// HIGH: a yearly plan is refunded at any time, less the months already started (app/refunds/page.tsx section 3,
+// lib/plan-refund-rules.ts unstarted_months). Paid for the whole year at 30 days, the commission is cash already gone
+// when the refund comes; owed per started month, the months refunded were never paid out.
+is("a yearly plan's commission is owed per started month (a twelfth a month), never the whole year at once", /yearly plan[^.]*per started month/i.test(doc) && /never the whole year at once/i.test(doc), true);
+// MEDIUM: the table's percentage holds for a full plan payment; a plan change's prorated charge is smaller while the
+// fixed part of the fee and of the dispute reserve is not (lib/billing.ts, proration_behavior "always_invoice").
+is("the commission is owed only on a full plan payment, never on a prorated charge", /only on a full plan payment/i.test(doc) && /prorated/i.test(doc), true);
+// LEVE 1: the commission is rounded up to the cent (ceilBps); the "Per payment" column printed it rounded down.
+const paidCents = (table as { commissionCents?: (row: { priceCents: number }, bps: number) => number }).commissionCents;
+is("a commission-in-cents helper is exported", typeof paidCents, "function");
+for (const row of rows) {
+  if (row.maxCommissionBps === null || !paidCents) continue;
+  const cents = paidCents(row, row.maxCommissionBps);
+  const printed = `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  is(`${row.id}: "Per payment" prints the commission rounded up, as the net takes it`, doc.includes(`| ${(row.maxCommissionBps / 100).toFixed(2)}% | ${printed} |`), true);
+}
+// LEVE 2: the line under the table started its minimum at 100% and skipped the plans that cannot pay.
+const lowestLine = (table as { lowestLine?: (rows: { name: string; maxCommissionBps: number | null }[]) => string }).lowestLine;
+is("a lowest-line helper is exported", typeof lowestLine, "function");
+if (lowestLine) {
+  is("no plan can pay: it says so, never 100%", lowestLine([{ name: "A", maxCommissionBps: null }, { name: "B", maxCommissionBps: null }]).includes("100.00%"), false);
+  is("one plan cannot pay: no single percentage for every plan is offered", /one percentage for every plan/i.test(lowestLine([{ name: "A", maxCommissionBps: 5000 }, { name: "B", maxCommissionBps: null }])), false);
+  is("one plan cannot pay: it is named", lowestLine([{ name: "A", maxCommissionBps: 5000 }, { name: "B", maxCommissionBps: null }]).includes("B"), true);
+  is("every plan can pay: the lowest is given", lowestLine([{ name: "A", maxCommissionBps: 5000 }, { name: "B", maxCommissionBps: 4000 }]).includes("**40.00%**"), true);
+}
+
+part("The path holds only its fixed text: the report is generated on demand");
+const path = "docs/marktmorgen-affiliates.md";
+is("docs/marktmorgen-affiliates.md holds only its fixed on-demand text", existsSync(path) ? readFileSync(path, "utf8") : "", onDemandText(onDemandReport(path)));
+
+done();

@@ -12,6 +12,8 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { essentialLimitState, withinLimit, withinMonth } from "@/lib/request-guard";
+import { takeMoveRoom } from "@/lib/auth";
+import { withinChallengeWrites } from "@/lib/community-challenges";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -48,6 +50,34 @@ async function main(): Promise<void> {
     is("after it, uses are counted again from one", [await count(), await count(), await count()], [true, true, true]);
   }
 
+  // Review of #2271 (Claude 4 cloud AI, MEDIUM): the month's room for sign-in address moves (lib/auth.ts, countMove)
+  // counted with the same SET NX EX + INCR pair, so a key that expired between them refused every move for good.
+  part("takeMoveRoom: the month's move counts expire between the two commands");
+  {
+    redis.clear();
+    const moveKeys = () => (redis.run(["SCAN", "0", "MATCH", "nl:auth:move-room:*", "COUNT", 10_000]) as [string, string[]])[1];
+    const store = { id: "synthetic-move-store", paid: true };
+    is("the first move is within", await takeMoveRoom(store), "within");
+    expireBetween = true;
+    await takeMoveRoom(store);
+    is("no move count is left without an expiry", moveKeys().filter((k) => redis.run(["TTL", k]) === -1), []);
+    is("and a move is still counted within afterward", await takeMoveRoom(store), "within");
+  }
+
+  // Review of #3452 (Claude 4 cloud Z, MEDIUM): a creator's changes to challenges in an hour (lib/community-challenges.ts,
+  // withinChallengeWrites) counted with the same SET NX EX + INCR pair, so a key that expired between them locked the
+  // creator out of making or deleting challenges for good.
+  part("withinChallengeWrites: the hour's count expires between the two commands");
+  {
+    redis.clear();
+    const keys = () => (redis.run(["SCAN", "0", "MATCH", "*:chw", "COUNT", 10_000]) as [string, string[]])[1];
+    is("the first change is within", await withinChallengeWrites("synthetic-community"), true);
+    expireBetween = true;
+    await withinChallengeWrites("synthetic-community");
+    is("no count is left without an expiry", keys().filter((k) => redis.run(["TTL", k]) === -1), []);
+    is("and a change is still counted within afterward", await withinChallengeWrites("synthetic-community"), true);
+  }
+
   part("The window starts with the first use and is not moved by the next ones (the EXPIRE's NX)");
   // Without NX every use would give the key its whole window again: a steady caller would never see the count end.
   redis.clear();
@@ -79,7 +109,7 @@ async function main(): Promise<void> {
   // Reserved by other agents (docs/reservations/): their owners move them to lib/window-count.ts in their own units.
   // lib/letter-access.ts keeps the pattern on purpose (no EXPIRE option, tests/letter-members.test.ts) and reads the
   // key's TTL in the same round, giving one back to a key left with none.
-  const reserved = ["lib/card-update.ts", "lib/community-access.ts", "lib/community-events.ts", "lib/community.ts", "lib/free.ts", "lib/membership-manage.ts", "lib/letter-access.ts"].map((f) => join(...f.split("/")));
+  const reserved = ["lib/card-update.ts", "lib/community-access.ts", "lib/community-events.ts", "lib/community.ts", "lib/free.ts", "lib/letter-access.ts"].map((f) => join(...f.split("/")));
   is("only the files reserved by other agents, and the one that repairs its key, still do; no new one", left, reserved.sort());
   done();
 }

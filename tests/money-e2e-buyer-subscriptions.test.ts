@@ -56,7 +56,7 @@ const subs = new Map<string, Record<string, unknown>>();
 /** Past-due subscriptions as GET /subscriptions?status=past_due&expand[]=data.latest_invoice&expand[]=data.customer lists them. */
 let pastDue: Record<string, unknown>[] = [];
 /** Wrong answers to inject, by path: a 500, a list of the wrong shape, a list missing has_more. */
-const faults = new Map<string, "500" | "shape" | "no-more" | "repeat">();
+const faults = new Map<string, "500" | "shape" | "no-more" | "repeat" | "more">();
 /** Subscriptions whose reply names another subscription (a reply that is not the object asked for). */
 const foreignSub = new Map<string, Record<string, unknown>>();
 const reads = new Map<string, number>();
@@ -83,6 +83,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (fault === "shape") return answer({ object: "list", data: { rows }, has_more: false });
     if (fault === "no-more") return answer({ object: "list", data: rows });
     if (fault === "repeat" && rows.length) return answer({ object: "list", data: [...rows, rows[0]], has_more: false });
+    if (fault === "more") return answer({ object: "list", data: rows, has_more: true });
     return answer({ object: "list", data: rows, has_more: false });
   };
   if (method === "GET" && path === "/checkout/sessions") return list(sessions.filter((s) => (s.created as number) >= since));
@@ -93,6 +94,16 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     // Stripe filters by status itself; the code checks it again.
     const status = url.searchParams.get("status");
     const rows = [...invoices.values()].filter((i) => (i.created as number) >= since && (!status || i.status === status)).reverse();
+    return list(rows);
+  }
+  if (method === "GET" && path === "/invoice_payments") {
+    // Each paid invoice's payment, as Stripe lists invoice payments: filtered by the payment when asked, the invoice
+    // expanded when asked (expand[]=data.invoice), else by creation date.
+    const intent = url.searchParams.get("payment[payment_intent]");
+    const expand = url.searchParams.getAll("expand[]").includes("data.invoice");
+    const rows = [...invoices.values()]
+      .filter((i) => i.status === "paid" && (intent ? intentOf(i) === intent : (i.created as number) >= since))
+      .map((i) => ({ object: "invoice_payment", id: `inpay_${String(i.id).slice(3)}`, status: "paid", created: i.created, invoice: expand ? i : i.id, payment: { type: "payment_intent", payment_intent: intentOf(i) } }));
     return list(rows);
   }
   if (method === "GET" && path === "/subscriptions") {
@@ -534,6 +545,12 @@ async function outOfOrder(store: Store, club: string): Promise<void> {
   refund(old, 300, NOW - 2 * DAY);
   const after = await numbers(store);
   is("a refund of a renewal older than the window: taken off this window's kept money once", after && before?.keptCents != null ? [after.refundCents - before.refundCents, before.keptCents - (after.keptCents ?? NaN)] : null, [300, 300]);
+  // Codex X7 on #4549 (MEDIUM): its invoice payment listed with more behind it does not say which invoices it paid.
+  faults.set("/invoice_payments", "more");
+  const more = await numbers(store);
+  faults.delete("/invoice_payments");
+  is("its invoice payment listed with more behind it: the refund unconfirmed, kept unknown", more && [more.keptCents, more.missing.includes("refunds")], [null, true]);
+  is("listed alone again: the same reading", await numbers(store), after);
 }
 
 async function main(): Promise<void> {

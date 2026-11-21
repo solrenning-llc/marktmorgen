@@ -6,6 +6,7 @@ import { countStudio } from '@/lib/studio-route';
 import { addDraftProducts, claimHandle, ensureStatsId, setProductFile, setProductHidden, setSubscription, storeForEmail } from '@/lib/store';
 import { store as redis } from './redis-stub';
 import { paidPeriod } from './billing-period-fixture';
+import { listingKeysRead, listingValues } from './listing-reads';
 import { is, done } from './check';
 
 globalThis.fetch = async () => { throw Error('No external service in G review'); };
@@ -34,12 +35,12 @@ async function main() {
       if (mode === 'extra') return [Array(commands[0].length - 2).fill('1'), 0];
       if (mode === 'unknown') return [null];
     }
-    if (commands.some(c => c[0] === 'GET' && /^nl:catalog:.*:l:/.test(String(c[1]))) && !reads) paidBeforeFirst = debits.reduce((a, b) => a + b, 0);
+    if (commands.some(c => listingKeysRead(c).length > 0) && !reads) paidBeforeFirst = debits.reduce((a, b) => a + b, 0);
     const answer = await base(commands);
-    commands.forEach((c, i) => {
-      if (c[0] === 'INCRBY' && String(c[1]).includes(':studio:')) debits.push(Number(c[2]));
-      if (c[0] === 'GET' && /^nl:catalog:.*:l:/.test(String(c[1]))) { reads++; bytes += Buffer.byteLength(String(answer[i])); }
-    }); return answer;
+    commands.forEach(c => { if (c[0] === 'INCRBY' && String(c[1]).includes(':studio:')) debits.push(Number(c[2])); });
+    // Each listing record read, alone or in an MGET (lib/catalog.ts getMany), and the bytes it answered.
+    for (const read of listingValues(commands, answer)) { reads++; bytes += Buffer.byteLength(String(read.value)); }
+    return answer;
   };
   let listed: Awaited<ReturnType<typeof cartLinkProducts>> = [];
   try { const admitted = await countStudio(shop, null, STUDIO_PAGE_UNITS); if (!admitted.ok) throw Error('fixture studio page refused'); listed = await cartLinkProducts(shop); }

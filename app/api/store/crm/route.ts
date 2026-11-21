@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { StoreFullError } from "@/lib/store-full";
+import { LockBusyError } from "@/lib/redis-lock";
 import { guardStoreWrite } from "@/lib/store-request";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
@@ -11,7 +12,7 @@ import { readPipelineAccess } from "@/lib/pipeline-access";
 import { dealEnteredStage } from "@/lib/deal-stage-trigger";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
-import { CRM_VALUE_SAVE_UNITS, CrmDealConflict, CrmFieldsKept, CrmPersonGone, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages, readPageMark } from "@/lib/crm";
+import { CRM_VALUE_SAVE_UNITS, CrmDealConflict, CrmFieldsKept, CrmLockLost, CrmPersonGone, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages, readPageMark } from "@/lib/crm";
 
 /** Ten fields of ten choices, a pipeline with its stages and moves, or a deal with its note, as JSON. */
 const MAX_BODY_BYTES = 20_000;
@@ -21,7 +22,9 @@ const MAX_BODY_BYTES = 20_000;
  * for whoever may read orders with buyers' addresses ("orders"):
  *
  *   { action: "fields", fields }               saves the fields; a field taken away takes its answers
- *                                              (not from a session let in without its second step)
+ *                                              (not from a session let in without its second step;
+ *                                              "unpipeline" and "undeal" wait in one too: 403 locked,
+ *                                              lib/two-step.ts LOCKED_ACTIONS)
  *   { action: "value", person, field, value, generation }
  *                                              one person's answer to one field; "" clears it. generation is the
  *                                              person's as the page read it: a person deleted since, or while
@@ -44,9 +47,9 @@ export async function POST(request: NextRequest) {
   if (!guarded.ok) return guarded.response;
   const { body } = guarded;
   const refuse = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
-  // What takes something away for good (a field with every person's answers, a pipeline, a deal) waits while
-  // the session was let in without its second step (lib/two-step.ts): guardStoreWrite refuses those actions
-  // (LOCKED_ACTIONS.orders) before this route runs, as for the other deleting routes.
+  // What takes something away for good waits while the session was let in without its second step
+  // (lib/two-step.ts): removing a pipeline or a deal at the door (guardStoreWrite, LOCKED_ACTIONS "orders"),
+  // a field with every person's answers when the fields are written (writeFields, keepAll).
   try {
     const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.ref);
     if (!store?.statsId) return refuse("unavailable", 503);
@@ -208,6 +211,10 @@ export async function POST(request: NextRequest) {
     if (error instanceof CrmSchemaReadUnavailable) return refuse("crm_schema_read_unavailable", 503);
     if (error instanceof CrmSchemaWriteUnconfirmed) return refuse("crm_write_unconfirmed", 502);
     if (error instanceof CrmSchemaConflict) return refuse("crm_conflict", 409);
+    // Another change of pipelines or an import of deals holds the store's CRM lock (lib/hubspot-import.ts): nothing written.
+    if (error instanceof LockBusyError) return refuse("crm_busy", 409);
+    // The lock could not be kept until the write, so it was never sent: nothing written, try again.
+    if (error instanceof CrmLockLost) return refuse("crm_not_saved", 503);
     if (error instanceof CrmDealConflict) return refuse("deal_conflict", 409);
     if (error instanceof CrmFieldsKept) return refusedJson("locked");
     if (error instanceof CrmDealReadUnavailable) return refuse("crm_deal_read_unavailable", 503);

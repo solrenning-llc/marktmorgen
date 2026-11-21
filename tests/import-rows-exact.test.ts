@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   is("the plan has a month of rows", limit > 100, true);
 
   part("Controls: exact replies");
-  is("100 rows under the limit are taken", await takeImportRows(store, 100), { ok: true });
+  is("100 rows under the limit are taken", await takeImportRows(store, 100), { ok: true, counted: 100 });
   is("a batch over what is left is refused whole", await takeImportRows(store, limit), { ok: false, reason: "rows_month", limit });
 
   part("A reply of another shape is never a count");
@@ -68,13 +68,13 @@ async function main(): Promise<void> {
   part("Controls: the forms Redis answers in");
   countAnswers(150, 0);
   try {
-    is("INCRBY 150, EXPIRE NX 0: taken", await takeImportRows(store, 50), { ok: true });
+    is("INCRBY 150, EXPIRE NX 0: taken", await takeImportRows(store, 50), { ok: true, counted: 50 });
   } finally {
     restore();
   }
   countAnswers("150", 1);
   try {
-    is("INCRBY \"150\" as a whole number in text, EXPIRE NX 1: taken", await takeImportRows(store, 50), { ok: true });
+    is("INCRBY \"150\" as a whole number in text, EXPIRE NX 1: taken", await takeImportRows(store, 50), { ok: true, counted: 50 });
   } finally {
     restore();
   }

@@ -2382,6 +2382,7 @@ export class MemoryRedis {
           this.run(["SET", target, value, "EX", seconds]);
           return 1;
         }
+        // lib/crm.ts COMPARE_AND_SET: the plain one-key compare-and-set lib/webhooks.ts and lib/phone-alerts.ts use.
         if (key.startsWith("-- marktmorgen:crm-pipelines-save:v2\n") && args[0] === "1" && args.length === 4) {
           const target = args[1];
           this.live(target);
@@ -2403,6 +2404,19 @@ export class MemoryRedis {
           if ((held ?? "") !== args[2]) return held === undefined ? [-1] : [-1, new TextEncoder().encode(held).length];
           this.data.set(target, args[3]);
           if (!this.until.has(target)) this.until.set(target, this.now() + Number(args[4]) * 1000);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:crm-pipelines-save:v3\n") && args[0] === "2" && args.length === 6) {
+          const [, target, lock, expected, record, token] = args;
+          this.live(target);
+          const held = this.data.get(target);
+          if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
+          const length = held === undefined ? [] : [new TextEncoder().encode(held).length];
+          if (this.run(["GET", lock]) !== token) return [-2, ...length];
+          if ((held ?? "") !== expected) return [-1, ...length];
+          this.data.set(target, record);
+          // The script's SET has no KEEPTTL: as in real Redis, the key keeps no expiry (as the v2 mirror above).
+          this.until.delete(target);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:crm-deal-save:v5\n") && ((args[0] === "1" && args.length === 6) || (args[0] === "2" && args.length === 9))) {

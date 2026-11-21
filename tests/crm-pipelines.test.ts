@@ -52,7 +52,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
-import { dataKey } from "@/lib/store-data";
+import { dataKey, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
 globalThis.fetch = (async () => new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 })) as typeof fetch;
@@ -158,7 +158,11 @@ async function main(): Promise<void> {
     redis.pipeline = async (commands) => {
       if (saving) for (const c of commands) afterSave.push(`${c[0]} ${String(c[1])}`);
       if (commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("crm-pipelines-save"))) {
-        await original.call(redis, [["SET", "nl:crm:pipes:" + statsId, JSON.stringify([sales, coaching])]]);
+        // The other session's write, with the room it counts for itself, as a real save does (by what it changes).
+        const was = String((await original.call(redis, [["GET", "nl:crm:pipes:" + statsId]]))[0] ?? "");
+        const other = JSON.stringify([sales, coaching]);
+        await original.call(redis, [["SET", "nl:crm:pipes:" + statsId, other]]);
+        await noteData(ROOM, [{ slot: "crm:pipes", bytes: dataBytes([other], 1) - (was ? dataBytes([was], 1) : 0) }]);
         saving = true;
       }
       return original.call(redis, commands);
@@ -167,8 +171,8 @@ async function main(): Promise<void> {
     try { await savePipelineChange(statsId, { pipeline: { ...coaching, name: "Mine" } }, {}, 2, ROOM); } catch (error) { conflict = error instanceof CrmSchemaConflict; }
     is("the change meanwhile is a conflict", conflict, true);
   } finally { redis.pipeline = original; }
-  // The script that refused the write says how long the record there now is: the room is sized from that, with no
-  // second read that could fail in between.
+  // The refused write gives back only what it took, by difference, with no second read that could fail in between:
+  // the room stays at what the other session's record weighs (Codex J on #2048: never reset to a length read before).
   const pipesNow = String((await redis.pipeline([["GET", "nl:crm:pipes:" + statsId]]))[0]);
   is(
     "its room is what the other session's record weighs, sized without reading it again",

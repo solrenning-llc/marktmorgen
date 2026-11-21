@@ -56,7 +56,7 @@
  * import will check it, against the store as it is, and nothing written.
  */
 import { DataRoomError } from "@/lib/store-data";
-import { allowanceWindow, resetWords, windowId } from "@/lib/allowance-window";
+import { allowanceWindow, resetWords, windowId, windowKeySeconds } from "@/lib/allowance-window";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { namesAddress } from "@/lib/address-match";
@@ -93,7 +93,8 @@ import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
 import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, mailDay, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { newCostCode } from "@/lib/plan-standing";
-import { healthTags, moveTags, noteSent, pausedFor, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
+import { healthTags, moveTags, noteSent, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
+import { stopTags } from "@/lib/mail-health-rules";
 import { isPaidUp } from "@/lib/billing";
 import { storeBase } from "@/lib/purchase-email";
 import { movedPurchaseWords } from "@/lib/buyer-words/moved-purchases";
@@ -176,7 +177,7 @@ async function holdMoved(store: Store, n: number, now = Date.now()): Promise<num
 /**
  * Store's own figure (IMPORT_ALLOWANCES.creator.movedEmails a month): takes up to `n`, all over it given back at once.
  * The replies are read exactly (CX-123 rule 24): the INCRBY a whole number (a give-back can take the count below zero),
- * then the EXPIRE NX's 0 or 1 (lib/window-count.ts, so the month's key never outlives its window); any other shape
+ * then the EXPIRE NX's 0 or 1 (lib/window-count.ts; windowKeySeconds, so the key outlives its window, stretched or not); any other shape
  * throws UnknownReplyError. Before, the count was read with Number(),
  * which took a list or `true` for a small number.
  */
@@ -188,7 +189,7 @@ async function takeMovedCount(store: Store, n: number, now: number): Promise<num
   const key = movedKey(store.sid, window);
   const replies = repliesFor(
     await redisPipeline([
-      ...windowCountBy(key, 32 * 86_400, n),
+      ...windowCountBy(key, windowKeySeconds(store, 32 * 86_400, now), n),
     ]),
     2,
   );
@@ -230,8 +231,8 @@ export async function takeImportRows(store: Store, n: number, now = Date.now(), 
   try {
     // Read exactly (CX-123 rule 24), as takeMovedCount reads the same pair: the INCRBY a whole number, the EXPIRE's
     // 0 or 1 (main's windowCountBy). Any other shape (true, a list, a fraction) is not a count and takes nothing; what
-    // an INCRBY may have added stays counted (more, never less).
-    const replies = repliesFor(await redisPipeline(windowCountBy(key, 32 * 86_400, n)), 2);
+    // an INCRBY may have added stays counted (more, never less). Kept as long as the window (windowKeySeconds, #4561).
+    const replies = repliesFor(await redisPipeline(windowCountBy(key, windowKeySeconds(store, 32 * 86_400, now), n)), 2);
     const total = replies?.[0];
     const counted = typeof total === "number" ? total : typeof total === "string" && /^(0|-?[1-9][0-9]{0,14})$/.test(total) ? Number(total) : NaN;
     if (!replies || (replies[1] !== 0 && replies[1] !== 1) || !Number.isSafeInteger(counted)) return { ok: false, reason: "unavailable", limit };
@@ -1684,7 +1685,11 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   // bounced, or been answered with a spam report, the rest are not written
   // to (lib/mail-health.ts): they are counted as not emailed, and the report
   // says so.
-  const paused = await pausedFor(job.sid);
+  // Read exactly (CX-123 rule 24, Claude 6's MEDIUM on #2687): a pause read in an unknown shape is not "no pause";
+  // the step is tried again later, and nobody is taken off the queue.
+  const pause = await pauseForSending(job.sid);
+  if (pause === undefined) return "retry";
+  const paused = pause !== null;
   // And until then they go out in portions that double, a hundred buyers
   // first, so that a file of dead addresses is found while few have been
   // written to. A portion not yet open is waited for; nobody is dropped.
@@ -1772,6 +1777,11 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
       const listId = await listFor(store).catch(() => {
         throw new UnknownReplyError("the store's list");
       });
+      // Every store email names its list (stopTags), so a bounce for good or a spam report on it takes the address off
+      // that list too (ALL-160 item 7; Codex L and U on #4245). The list read here, so a store given its list just now
+      // has it named as well.
+      const suppression = stopTags({ listId });
+      for (const message of messages) message.tags = { ...message.tags, ...suppression };
       const tos = messages.map((m) => m.to);
       deleted = await deletedAmong(listId, tos);
       refused = await leftListAmong(listId, tos);
@@ -2296,7 +2306,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
             html: letterHtml(store, text),
             replyTo: store.email,
             headers: { "List-Unsubscribe": `<${stop.oneClick}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
-            tags: moveTags(store),
+            tags: { ...moveTags(store), ...stopTags(store) },
           },
         ],
         `nimbus-move-remind:${store.statsId}:${field}`, { by: "monthly" },

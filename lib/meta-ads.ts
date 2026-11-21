@@ -521,7 +521,7 @@ export async function finishMeta(input: {
   const me = await call("GET", "/me", { fields: "id" }, token);
   const user = typeof me.id === "string" ? me.id : "";
   if (!perms.some((p) => p.permission === "ads_read" && p.status === "granted")) {
-    if (!(await grantStillUsed(user))) await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
+    if ((await grantStillUsed(user)) === "free") await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
     return { ok: false, error: "permission" };
   }
   const listed = await call("GET", "/me/adaccounts", { fields: "account_id,name,currency,account_status", limit: "50" }, token);
@@ -530,7 +530,7 @@ export async function finishMeta(input: {
     .filter((a) => typeof a.id === "string" && /^act_\d{1,30}$/.test(a.id) && typeof a.currency === "string")
     .map((a) => ({ id: String(a.id), name: String(a.name ?? "").replace(/\s+/g, " ").trim().slice(0, 80), currency: String(a.currency).toLowerCase(), active: Number(a.account_status) === 1 }));
   if (!user || !accounts.length) {
-    if (!(await grantStillUsed(user))) await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
+    if ((await grantStillUsed(user)) === "free") await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
     return { ok: false, error: "accounts" };
   }
   // The connection it replaces read exactly (CX-123 rule 24): an unknown reply throws before anything is written, so
@@ -551,7 +551,7 @@ export async function finishMeta(input: {
   };
   if (!flowFresh(input.startedAt)) {
     // Given back only when no other store still uses that login, as on every other way this flow ends unkept.
-    if (!(await grantStillUsed(user))) await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
+    if ((await grantStillUsed(user)) === "free") await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
     return { ok: false, error: "expired" };
   }
   const keys = [connKey(input.statsId), readKey(input.statsId), STORES_KEY, userKey(user), goneKey(user)];
@@ -572,7 +572,7 @@ export async function finishMeta(input: {
   // Another person's token in its place: theirs is given back, unless another store still uses that login.
   if (before && before.user !== user) {
     await redisPipeline([["SREM", userKey(before.user), input.statsId]]).catch(() => {});
-    if (!(await grantStillUsed(before.user))) await giveBack(input.statsId, before).catch(() => {});
+    if ((await grantStillUsed(before.user)) === "free") await giveBack(input.statsId, before).catch(() => {});
   }
   // Lines of an account no longer read go.
   if (before && before.account !== connection.account) confirmDeleted(await redisPipeline([["DEL", linesKey(input.statsId)]]), 1, "the lines of an account no longer read");
@@ -617,30 +617,42 @@ async function giveBack(statsId: string, c: Connection): Promise<void> {
  * grant is kept: one store's action never breaks another store's working connection, and a kept grant costs
  * nothing. One pipeline reads at most META_FORGET_PASS stores; with more, the rest count as still used.
  */
-async function grantStillUsed(user: string): Promise<boolean> {
-  if (!user || !isRedisConfigured()) return false;
+async function grantStillUsed(user: string): Promise<GrantUse> {
+  if (!user || !isRedisConfigured()) return "free";
   try {
     const listed = stringList(repliesFor(await redisPipeline([["SMEMBERS", userKey(user)]]), 1)?.[0]);
-    if (!listed) return true;
-    if (!listed.length) return false;
-    if (listed.length > META_FORGET_PASS) return true;
+    if (!listed) return "unknown";
+    if (!listed.length) return "free";
+    if (listed.length > META_FORGET_PASS) return "unknown";
     const read = repliesFor(await redisPipeline(listed.map((id) => ["GET", connKey(id)])), listed.length);
-    if (!read) return true;
-    return read.some((raw) => {
-      if (raw === null) return false;
+    if (!read) return "unknown";
+    let unknown = false;
+    for (const raw of read) {
+      if (raw === null) continue;
       const c = parseConnection(raw);
-      return !c || c.user === user;
-    });
+      if (!c) unknown = true;
+      else if (c.user === user) return "used";
+    }
+    return unknown ? "unknown" : "free";
   } catch {
-    return true;
+    return "unknown";
   }
 }
 
 /**
- * What disconnecting did: the account that was read, and whether Meta's permission was given back
- * ("removed") or kept because another store still uses that Meta login ("kept").
+ * Whether a Meta login's grant is still used (grantStillUsed): "used" when a store's connection is read with it,
+ * "unknown" when the index or a connection cannot be read (the grant is kept all the same), "free" when exact
+ * replies show no store using it. Only "free" gives the permission back to Meta. "unknown" is never told to the
+ * creator as another store's use (Claude 3's LOW on #4159, copy honesty, VR item 2).
  */
-export type MetaDisconnected = { account: MetaAccount | null; metaAccess: "removed" | "kept" };
+type GrantUse = "used" | "unknown" | "free";
+
+/**
+ * What disconnecting did: the account that was read, and whether Meta's permission was given back
+ * ("removed"), kept because another store still uses that Meta login ("kept"), or kept because whether one does
+ * could not be confirmed ("unconfirmed": the index or a connection did not read).
+ */
+export type MetaDisconnected = { account: MetaAccount | null; metaAccess: "removed" | "kept" | "unconfirmed" };
 
 /**
  * Disconnects: forgets the connection and every line read, then gives the permission back to Meta,
@@ -659,7 +671,9 @@ export async function disconnectMeta(statsId: string): Promise<MetaDisconnected 
   // Forgotten first, so of two stores on one login disconnecting at once, the later one sees neither and gives it back.
   confirmDeleted(await forget(statsId, c.user), 5, "a Meta connection's deletion");
   const account = c.accounts.find((a) => a.id === c.account) ?? null;
-  if (await grantStillUsed(c.user)) return { account, metaAccess: "kept" };
+  const use = await grantStillUsed(c.user);
+  if (use === "used") return { account, metaAccess: "kept" };
+  if (use === "unknown") return { account, metaAccess: "unconfirmed" };
   await giveBack(statsId, c).catch((error) => console.error("giving the Meta permission back failed", error));
   return { account, metaAccess: "removed" };
 }

@@ -94,9 +94,14 @@ export function codexAuditOpeningProblems(
 
 /**
  * The record. Every line is "pendente" today (owner, item 1 of PR 1): Codex is out of use until 25/11/2026. The merge
- * head of each merged PR is the head GitHub merged, read on 21/11/2026; #5017 is still open.
+ * head of each merged PR is the head GitHub merged, read on 21/11/2026; #5017 is still open. #3906 and #4073 have not
+ * used the exception yet: they are money PRs that will need it while Codex is away, added on the coordinator's word
+ * (Claude 5 ibqho, 20261121T225832Z-claude-5-ibqho-17b1), so they hold a "pendente" line before asking for the queue
+ * (item 2 of the decision).
  */
 export const CODEX_ABSENT_AUDIT: readonly CodexAuditLine[] = [
+  { pr: 3906, merged: null, codexReviewer: null, report: null, date: null, result: "pendente", ownerConfirmation: null },
+  { pr: 4073, merged: null, codexReviewer: null, report: null, date: null, result: "pendente", ownerConfirmation: null },
   { pr: 4991, merged: "07e2753c249a973261be258848c0ee3adfa222ad", codexReviewer: null, report: null, date: null, result: "pendente", ownerConfirmation: null },
   { pr: 5016, merged: "c6dcca69d8da5b39dbc53186e98ccd2cde696086", codexReviewer: null, report: null, date: null, result: "pendente", ownerConfirmation: null },
   { pr: 5017, merged: null, codexReviewer: null, report: null, date: null, result: "pendente", ownerConfirmation: null },

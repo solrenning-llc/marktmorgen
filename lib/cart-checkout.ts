@@ -19,7 +19,8 @@
  * was taken off, as on any other checkout here.
  */
 import { itemsHandedOver } from "@/lib/store-data-rules";
-import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
+import { askBillingAddress } from "@/lib/billing-address";
+import { ADMITTED_FIELD, OrdersPausedError, admitOrders, holdCheckout } from "@/lib/order-admission";
 import type { Product, Store } from "@/lib/store";
 import { KIND, readListings } from "@/lib/catalog";
 import { BUMP_KEYS, MIN_BUNDLE_ITEMS, bundleMeta, deliverableItems } from "@/lib/bundle-rules";
@@ -38,6 +39,9 @@ import { applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-shar
 import { codesMayTakeOff, livePromotionId } from "@/lib/discount";
 import { CONSENT_META, type DigitalConsent, consentMetaValue, deliversDigitally, keepConsentOn, requireDigitalConsent } from "@/lib/digital-consent";
 import { applyCartShipping, cartItemOf, cartShipping, shippedFirst, shipsWithOnline } from "@/lib/cart-shipping";
+import { applyEuCollectCart } from "@/lib/eu-vat-collect";
+import type { EuVatRate } from "@/lib/eu-vat-amount";
+import { BUYER_CURRENCY_LIVE } from "@/lib/buyer-currency";
 
 /**
  * A cart whose physical products cannot all be shipped to one address, one
@@ -111,6 +115,11 @@ export async function createCartCheckout(
      * set in this browser, and the cart product whose funnel they come from.
      */
     offers?: { upsellKey: string; from: string } | null;
+    /**
+     * Only when the cart route's EU gate said to collect (lib/eu-vat-collect.ts euCartGate; never while nothing
+     * collects): the VAT on top of the lines, or a refusal before Stripe. `costsCents`, `now` and `rates` are for tests.
+     */
+    euVat?: { country: string; costsCents?: (vatCents: number, currency: string) => number | null; now?: Date; rates?: readonly EuVatRate[] };
   } = {},
 ): Promise<{ url: string; id: string }> {
   if (!store.stripeAccountId) throw new Error("This store has no account");
@@ -239,8 +248,13 @@ export async function createCartCheckout(
 
   applyTax(store, body);
   applyTaxDocuments(store, body, false);
+  // A cart is paid: the buyer's full billing address (790 [IV2]).
+  askBillingAddress(body);
   onlyInstantMethods(body);
   inTheCurrencyShown(body);
+  // 789 [IV1] step 3, unit 3: the VAT on top, after the creator's own tax settings and the currency are set, so it is
+  // worked out on what the buyer pays and the creator's automatic tax is off for this sale (lib/eu-vat-collect.ts).
+  if (extras.euVat) applyEuCollectCart(body, { ...extras.euVat, buyerCurrencyLive: BUYER_CURRENCY_LIVE });
   // A store with reminders on (lib/checkout-recovery.ts): Stripe asks for
   // consent where it offers to, and the way back leads to a page that offers
   // one reminder of the whole cart, which the buyer asks for themselves.
@@ -264,6 +278,8 @@ export async function createCartCheckout(
       else if (extras.remind && !body.has("expires_at")) body.set("expires_at", String(Math.floor(Date.now() / 1000) + RECOVERY_OPEN_SECONDS));
       const session = await onAccount("POST", store.stripeAccountId, "/checkout/sessions", body);
       if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") throw new Error("Stripe did not return a checkout URL");
+      // Our record that this cart's checkout holds its place, so the sweep can give it back if it closes unpaid (#3970).
+      await holdCheckout(store, session.id, admitted);
       return { url: session.url, id: session.id };
     } catch (error) {
       if (named && error instanceof StripeError && error.status === 400) {

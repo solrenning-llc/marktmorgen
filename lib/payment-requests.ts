@@ -25,8 +25,9 @@
  * or a reminder that does not fit is not sent, and the creator is told why.
  * The receipt is the order's own email.
  */
-import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
+import { ADMITTED_FIELD, OrdersPausedError, admitOrders, holdCheckout } from "@/lib/order-admission";
 import { applyShare } from "@/lib/platform-share";
+import { askBillingAddress } from "@/lib/billing-address";
 import { applyTax, applyTaxDocuments, refusedTaxDocuments, withoutTaxDocuments } from "@/lib/tax";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods } from "@/lib/instant-pay";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -218,7 +219,8 @@ const CHECKOUT_STATES: ReadonlySet<string> = new Set(["open", "complete", "expir
 /**
  * Whether the checkout Stripe answered for a request's session is that request's own (#4447): its id must be the
  * request's session, and a paid one must name this request and this store in its metadata. Anything else is someone
- * else's answer. (A session Stripe no longer has, a 404, is read as null by the caller and never reaches here.)
+ * else's answer. (A 404 for the session never reaches here: inside the window it may come from an account other than the
+ * one the checkout was opened on, so the caller lets it throw into its error handling, X8 after #4513.)
  */
 function ownRequestCheckout(known: Record<string, unknown>, request: { id: string; session: string }, store: Store): boolean {
   if (known.id !== request.session) return false;
@@ -329,6 +331,8 @@ export async function createRequestCheckout(store: Store, request: PaymentReques
   body.set("expires_at", String(Math.max(closes, Math.floor(now / 1000) + MIN_OPEN_SECONDS)));
   onlyInstantMethods(body);
   inTheCurrencyShown(body);
+  // A request is paid: the buyer's full billing address (790 [IV2]).
+  askBillingAddress(body);
   // Sales tax and the business buyer's documents, where the creator switched them on, as on any sale (lib/tax.ts).
   applyTax(store, body);
   applyTaxDocuments(store, body, false);
@@ -361,6 +365,8 @@ export async function createRequestCheckout(store: Store, request: PaymentReques
     }
   }
   if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") throw new Error("Stripe did not return a checkout URL");
+  // Our record that this checkout holds its place, so the sweep can give it back if it closes unpaid (#3970).
+  await holdCheckout(store, session.id, admitted);
   return { url: session.url, id: session.id };
 }
 

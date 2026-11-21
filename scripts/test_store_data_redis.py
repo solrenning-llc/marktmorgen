@@ -50,9 +50,9 @@ def main():
     counter = "marktmorgen:integration:rcpt:seq:" + uuid.uuid4().hex
     redis = Redis()
 
-    def take(client, limit, *triples, always=False, month="2026-10"):
+    def take(client, limit, *triples, always=False, give=False, month="2026-10"):
         flat = [str(part) for triple in triples for part in triple]
-        return client.command("EVAL", take_data, 1, room, limit, "1" if always else "0", month, *flat)
+        return client.command("EVAL", take_data, 1, room, limit, "2" if give else "1" if always else "0", month, *flat)
 
     def total():
         return int(redis.command("HGET", room, "#") or 0)
@@ -76,6 +76,18 @@ def main():
         assert take(redis, 100, ("a", "p:x", 1)) == [0, 5_064]
         assert take(redis, 100, ("a", "o", -64)) == [1, 5_000]
         print("PASS: what is taken always passes the room, and nothing else does after it")
+
+        redis.command("DEL", room)
+        # A give-back ("2") on a room that is not there writes nothing: one that lands after the store's erasure must
+        # never recreate its key (Codex L, 20/11). On a live room it shrinks as before.
+        assert take(redis, 10, ("a", "p:gone", -500), give=True) == [1, 0]
+        assert take(redis, 10, ("s", "p:gone", 0), give=True) == [1, 0]
+        assert redis.command("EXISTS", room) == 0
+        assert take(redis, 1_000, ("s", "p:one", 400)) == [1, 464]
+        assert take(redis, 1_000, ("a", "p:one", -100), give=True) == [1, 364]
+        assert take(redis, 1_000, ("a", "p:one", -300), give=True) == [1, 0]
+        assert redis.command("EXISTS", room) == 1 and total() == 0
+        print("PASS: a give-back never recreates a room that is not there, and still shrinks a live one")
 
         redis.command("DEL", room)
         # Two changes: all or nothing.
@@ -128,6 +140,38 @@ def main():
         assert take(redis, 10**9, ("a", "p:new", 10), month="2026-11") == [1, 84]
         assert redis.command("HEXISTS", room, "~") == 0
         print("PASS: a long-idle room sheds every expired month in one call, in the same commands as one month")
+
+        # One TAKE_DATA's commands, measured (Codex L on #4847): its slots are read with one HMGET and written with at
+        # most one HSET and one HDEL for every DATA_SLOT_COMMAND_BATCH of them, never one or two a slot. Counted here
+        # with INFO commandstats, EVAL included, against the ceilings lib/store-data.ts prices: poolTakeCommands for a
+        # pool take or give-back (every slot set, or every slot to zero, no month list) and takeDataCommands for a room
+        # take at its worst (slots set and removed at once, months that are over, a month's own slot).
+        source = (root / "lib/store-data.ts").read_text(encoding="utf-8")
+        found = re.search(r"export const DATA_SLOT_COMMAND_BATCH = (\d+);", source)
+        expired = re.search(r"export const DATA_EXPIRED_COMMANDS = (\d+);", source)
+        if not found or not expired:
+            raise RuntimeError("Expected DATA_SLOT_COMMAND_BATCH and DATA_EXPIRED_COMMANDS in lib/store-data.ts")
+        batch, expired = int(found.group(1)), int(expired.group(1))
+
+        def chunks(n):
+            return -(-n // batch)
+
+        def spent(*triples, month="2026-11"):
+            before = commands()
+            reply = take(redis, 10**9, *triples, always=True, month=month)
+            assert reply[0] == 1, reply
+            return commands() - before - 1
+
+        for n in (1, batch, batch + 1, 2 * batch):
+            redis.command("DEL", room)
+            assert spent(*[("s", "b:%d" % i, 100) for i in range(n)]) == 4 + 2 * chunks(n), n
+            assert spent(*[("s", "b:%d" % i, 0) for i in range(n)]) <= 4 + 2 * chunks(n), n
+            redis.command("DEL", room)
+            redis.command("HSET", room, "#", str(n * 164 + 228), "~", "2026-09,2026-10,2027-01", "~2026-09", "50", "~2026-10", "50",
+                          *[part for i in range(n) for part in ("p:%d" % i, "100")])
+            worst = spent(*[("s", "p:%d" % i, 0 if i % 2 else 300) for i in range(n)], ("a", "~2027-02", 10))
+            assert worst <= 1 + 4 + expired + 3 * chunks(n + 1), (n, worst)
+        print("PASS: a take's slots cost one HMGET, and at most one HSET and one HDEL, a batch, as priced")
 
         redis.command("DEL", room)
         assert take(redis, 10_000, ("a", "~2026-09", 100), month="2026-10")[0] == -1

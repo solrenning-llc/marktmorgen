@@ -136,7 +136,7 @@ async function main(): Promise<void> {
 
   part("An alert switched off is not emailed; its chat post goes as before");
   let store = (await storeForEmail(OWNER))!;
-  await setChatAddress(store.statsId!, "Notify Harbor", SLACK);
+  await setChatAddress(store.statsId!, "Notify Harbor", SLACK, store);
   await setChatSales(OWNER, true);
   const now = Date.now();
   sessions = [paid("cs_test_notify00000001", 0, 60_000, now)];

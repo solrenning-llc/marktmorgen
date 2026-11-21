@@ -734,7 +734,7 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
         customerId: record.customer,
         paymentMethod: record.paymentMethod,
         tier: record.tier,
-        idempotencyKey: `restart:${record.subscription}:${record.until}`,
+        idempotencyKey: `restart:${record.subscription}:${record.until}:classic`,
         ...(record.funding ? { funding: { statsId: store.statsId ?? "", sourceSubscriptionId: record.subscription, sourceGrantId: record.funding.grantId, ref, paused: stored.raw ?? "" } } : {}),
       });
       if(started.fundedPublication===true){

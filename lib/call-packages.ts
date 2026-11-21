@@ -89,7 +89,9 @@ const USED_MEMBER = /^u[0-9a-f]{15}$/;
  * (lib/closed-store-data.ts). Kept with the store: a checkout's id a package.
  */
 export const packagesKey = (statsId: string) => `nl:pkg:s:${statsId}`;
-export const packageKeys = (checkout: string, token: string): string[] => [pkgKey(checkout), `${pkgKey(checkout)}:lock`, ...(token ? [tokenKey(token), usedKey(token)] : [])];
+/** The confirmation email's own mark, separate from the token: claimed (SET NX) right before the one send. */
+const sentKey = (checkout: string) => `${pkgKey(checkout)}:sent`;
+export const packageKeys = (checkout: string, token: string): string[] => [pkgKey(checkout), `${pkgKey(checkout)}:lock`, ...(token ? [tokenKey(token), usedKey(token)] : []), sentKey(checkout)];
 const now = () => Math.floor(Date.now() / 1000);
 /** Kept a year past its last day to book; a package with no limit is kept as long as it can be used. */
 const KEEP_AFTER_SECONDS = 365 * 86_400;
@@ -416,16 +418,23 @@ async function tokenWritten(token: string, checkout: string): Promise<boolean> {
  */
 async function finishPackage(input: { store: Store; session: Session; product: Listing; base: string; from: string }, checkout: string, bought: Bought, made: boolean): Promise<Bought> {
   const { store, session, product, base } = input;
-  if (!made) {
-    if (await tokenWritten(bought.token, checkout)) return bought;
-  }
   if (typeof session.amount_total !== "number" || !Number.isSafeInteger(session.amount_total) || session.amount_total < 0 ||
     typeof session.currency !== "string" || !/^[a-zA-Z]{3}$/.test(session.currency)) throw unconfirmedPackage();
-  // One write, so the store's list never has a package its token is missing from.
-  const [, set] = await orderWrite(store, [["SADD", packagesKey(bought.s), checkout], ["SET", tokenKey(bought.token), checkout, "NX", ...keep(bought)]]);
-  // Another call made the token first, and sends the email.
-  if (set === null) return bought;
-  if (set !== "OK") throw new Error("writing a package's token gave no clear answer; finished on a later call");
+  if (made || !(await tokenWritten(bought.token, checkout))) {
+    // One write, so the store's list never has a package its token is missing from.
+    const [, set] = await orderWrite(store, [["SADD", packagesKey(bought.s), checkout], ["SET", tokenKey(bought.token), checkout, "NX", ...keep(bought)]]);
+    // Another call made the token first, and sends the email.
+    if (set === null) return bought;
+    if (set !== "OK") throw new Error("writing a package's token gave no clear answer; finished on a later call");
+  }
+  // The token marks the link stored; the email has its own mark, claimed once (SET NX) before the one send and kept as
+  // long as the package. A token whose write landed with its reply lost is finished here on the next call, so the
+  // buyer still gets the email; no retry, sweep or reload after the provider's 24-hour idempotency window sends it,
+  // or charges the store's email allowance, a second time (Codex X6's LOWs on #2617, 7052207176). A claim that does
+  // not answer exactly is unknown: nothing is sent, and the next call reads the mark again.
+  const [claim] = await orderWrite(store, [["SET", sentKey(checkout), "1", "NX", ...keep(bought)]]);
+  if (claim === null) return bought;
+  if (claim !== "OK") throw new Error("claiming a package's confirmation email gave no clear answer; finished on a later call");
   const { e: email, total, token } = bought;
   const amount = session.amount_total;
   const currency = session.currency;

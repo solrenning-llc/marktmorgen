@@ -115,3 +115,55 @@ test("a token pointing to another checkout is unknown, never a completed purchas
   assert.equal(redis.run(["GET", key]), other, "an inconsistent token is not overwritten");
   assert.equal(mail.ses.length, 1, "no extra confirmation is sent");
 });
+
+// Codex X6's LOWs on #2617 (7052207176): the token marks the link stored, and the email has its own durable mark.
+test("the token's write lands but its reply is lost: the next call still sends the one confirmation", async () => {
+  const id = "cs_test_pkgpartial000000008";
+  let lose = true;
+  redis.pipeline = (async (c: (string | number)[][]) => {
+    const reply = await real(c);
+    if (lose && mentions(c, "nl:pkg:t:") && mentions(c, "NX")) { lose = false; throw new Error("synthetic: token acknowledgement lost"); }
+    return reply;
+  }) as typeof redis.pipeline;
+  await assert.rejects(recordPackage(input(id)), /acknowledgement lost/);
+  redis.pipeline = real;
+  assert.equal(mail.ses.length, 0, "nothing sent before the token was confirmed");
+  const again = await recordPackage(input(id));
+  assert.ok(again && await boughtByToken(again.token), "the booking link works");
+  assert.equal(mail.ses.length, 1, "the buyer gets the confirmation");
+});
+
+test("no retry, reload or sweep after the provider's idempotency window sends it or charges the allowance again", async () => {
+  const id = "cs_test_pkgpartial000000009";
+  const bought = await recordPackage(input(id));
+  assert.ok(bought);
+  assert.equal(mail.ses.length, 1);
+  // The token's record lost (as after a repair), and a day and more later: the provider no longer dedupes the key.
+  await real([["DEL", packageKeys(id, bought.token)[2]]]);
+  const reserved: (string | number)[][] = [];
+  redis.pipeline = (async (c: (string | number)[][]) => {
+    for (const command of c) if (command.some((part) => /^nl:mail:/.test(String(part)))) reserved.push(command);
+    return real(c);
+  }) as typeof redis.pipeline;
+  const realNow = Date.now;
+  Date.now = () => realNow() + 26 * 3_600_000;
+  try {
+    for (let i = 0; i < 3; i += 1) assert.ok(await recordPackage(input(id)));
+  } finally { Date.now = realNow; redis.pipeline = real; }
+  assert.equal(mail.ses.length, 1, "still exactly one email");
+  assert.deepEqual(reserved.filter((c) => /^(INCRBY|INCR|EVAL)$/.test(String(c[0]))), [], "no email allowance taken again");
+});
+
+test("a claim of the email answered in another shape sends nothing; the next call reads the mark again", async () => {
+  const id = "cs_test_pkgpartial000000010";
+  let odd = true;
+  redis.pipeline = (async (c: (string | number)[][]) => {
+    if (odd && mentions(c, `nl:pkg:${id}:sent`)) { odd = false; return [[0, "QUEUED"]] as never; }
+    return real(c);
+  }) as typeof redis.pipeline;
+  await assert.rejects(recordPackage(input(id)));
+  redis.pipeline = real;
+  assert.equal(mail.ses.length, 0, "an unknown claim sends nothing");
+  assert.ok(await recordPackage(input(id)));
+  assert.equal(mail.ses.length, 1, "the next call claims and sends once");
+});

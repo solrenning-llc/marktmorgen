@@ -841,7 +841,9 @@ export function hashProprio() {
 export function hashPublicado() {
   const ref = `refs/agent-mail/main-${process.pid}-${randomBytes(4).toString("hex")}`;
   try {
-    git(["fetch", "-q", "--no-tags", "--depth=1", REPO_PRS, `+refs/heads/main:${ref}`]);
+    // Busca normal, nunca --depth: uma busca rasa tornaria raso o repositório de quem roda a ferramenta (revisão do
+    // Claude 1 A no #5044). No clone do Marktmorgen, ela só traz o que falta.
+    git(["fetch", "-q", "--no-tags", REPO_PRS, `+refs/heads/main:${ref}`]);
     return /^[0-9a-f]{64}/.exec(conteudo(ref, ARQUIVO_HASH))?.[0] ?? null;
   } catch {
     return null;

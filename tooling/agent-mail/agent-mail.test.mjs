@@ -211,6 +211,15 @@ r = run(["list-switches"], { CORREIO_SEM_VERSAO: "" });
 is("a different hash on main: the copy is reported as not the reviewed one", /não é a versão revisada do main do Marktmorgen/.test(r.out), r.out);
 r = run(["list-switches"], { CORREIO_SEM_VERSAO: "", CORREIO_PR_REPO: join(T, "nao-existe.git") });
 is("main unreachable: the version is reported as NOT CHECKED", /NÃO FOI CONFERIDA/.test(r.out), r.out);
+// file:// behaves like a real remote (a plain path would ignore --depth), as the reviewer reproduced on GitHub.
+// The version check must never fetch with --depth: a shallow fetch makes the user's repository shallow (review of
+// Claude 1 A on #5044, reproduced on GitHub). GIT_TRACE records every git command the tool runs.
+comHash(meu);
+const trace = join(T, "git-trace.txt");
+spawnSync("node", [TOOL, "list-switches"], { cwd: join(T, "w"), env: { ...base, CORREIO_SEM_VERSAO: "", GIT_TRACE: trace }, encoding: "utf8" });
+const linhas = readFileSync(trace, "utf8").split("\n").filter((l) => /git(\.c:\d+)?\s.*trace: (built-in|exec): git fetch/.test(l) || /trace: built-in: git fetch/.test(l));
+is("the version check runs a fetch (so the next check means something)", linhas.length > 0, readFileSync(trace, "utf8").slice(0, 600));
+is("no git fetch of the tool uses --depth (review of Claude 1 A)", !linhas.some((l) => /--depth/.test(l)), linhas.filter((l) => /--depth/.test(l)).join("\n").slice(0, 600));
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);
 process.exitCode = falhas ? 1 : 0;

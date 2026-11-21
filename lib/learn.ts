@@ -812,8 +812,14 @@ async function forgetEarlyDripMails(course: Course, email: string, start: number
  * (sendDripEmails, when the row held another day): the emails sent for modules
  * not open on it are forgotten first, then the row takes the day. Throws
  * UnknownReplyError on a reply it cannot read, and nothing more is written.
+ *
+ * `stamp` (24 [E7]) is the end of the purchase that stands, as the start was read with it: the row keeps it, so a later
+ * run that falls back to the row (its start not read) stops the drip at that end, and the studio shows it. Null is a
+ * purchase with no end, so the row's old end goes; "unknown" keeps the row's. A row that held no stamp has not had its
+ * bytes taken, so a new one is left off, as touchStudent leaves it without room, and the page writes it on the next
+ * visit (Claude 6's LEVE on #3369).
  */
-async function redateStudent(course: Course, email: string, start: number, nowSeconds: number): Promise<void> {
+async function redateStudent(course: Course, email: string, start: number, nowSeconds: number, stamp: number | null | "unknown"): Promise<void> {
   const key = studentsKey(course.id);
   const field = emailKey(email);
   const raw = repliesFor(await redisPipeline([["HGET", key, field]]), 1)?.[0];
@@ -822,7 +828,9 @@ async function redateStudent(course: Course, email: string, start: number, nowSe
   if (!row) throw new UnknownReplyError("a student's row whose start moved");
   if (row.s === start) return;
   await forgetEarlyDripMails(course, email, start, nowSeconds);
-  const written = countOf(repliesFor(await redisPipeline([["HSET", key, field, JSON.stringify({ e: row.e || normaliseEmail(email), s: start, l: row.l })]]), 1)?.[0]);
+  const had = stampOf((JSON.parse(raw as string) as Partial<StudentRow>).x);
+  const next = stamp === "unknown" ? had : stamp === null || had === null ? null : stampOf(stamp);
+  const written = countOf(repliesFor(await redisPipeline([["HSET", key, field, JSON.stringify({ e: row.e || normaliseEmail(email), s: start, l: row.l, ...(next === null ? {} : { x: next }) })]]), 1)?.[0]);
   if (written === null || written > 1) throw new UnknownReplyError("a student's row whose start moved");
 }
 
@@ -1474,7 +1482,7 @@ export async function sendDripEmails(
         let settled = start === "shut";
         if (typeof start === "object" && start.open !== since) {
           const at = start.open;
-          const moved = await redateStudent(course, student.email, at, nowSeconds).then(() => true, (error: unknown) => (console.error("moving a student's course start failed", error), false));
+          const moved = await redateStudent(course, student.email, at, nowSeconds, start.stamp).then(() => true, (error: unknown) => (console.error("moving a student's course start failed", error), false));
           if (moved) since = at;
           else start = "unknown";
           settled = moved;
@@ -1520,7 +1528,7 @@ export async function sendDripEmails(
         if (stands !== since) {
           // The row held another day than the page's (a course bought again after a full refund): it takes the
           // page's, forgetting what went early, and this student's modules are looked at again from it.
-          const moved = await redateStudent(course, student.email, stands, nowSeconds).then(() => true, (error: unknown) => (console.error("moving a student's course start failed", error), false));
+          const moved = await redateStudent(course, student.email, stands, nowSeconds, typeof start === "object" ? start.stamp : "unknown").then(() => true, (error: unknown) => (console.error("moving a student's course start failed", error), false));
           await releaseMark(mark, value);
           if (!moved) {
             start = "unknown";

@@ -9,7 +9,9 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey, markLesson } from "@/lib/learn";
 import { MAX_QUESTIONS, heldBack, passedForGate, readAnswers, readQuizFor, submitQuiz } from "@/lib/quiz";
-import { limited } from "@/lib/request-guard";
+import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
+import { restingAway, takeBuyerRead } from "@/lib/buyer-actions";
+import { QUIZ_TRIES_PER_CONNECTION_MINUTE, QUIZ_TRIES_PER_STUDENT_HOUR, QUIZ_TRY_UNITS } from "@/lib/quiz-usage-rules";
 import { readCourseListing } from "@/lib/catalog";
 import { noteIfFinished } from "@/lib/course-finish";
 
@@ -21,6 +23,13 @@ import { noteIfFinished } from "@/lib/course-finish";
  * at their own course is shown the answers instead of being marked. Passing
  * marks the lesson done, which is what the course's progress and its
  * certificate count.
+ *
+ * A try is limited per connection, then takes QUIZ_TRY_UNITS of the store's
+ * public requests on the buyers' side before the listing, the student's
+ * access or the course is read, and is limited per student before the quiz is
+ * read. It never takes one of the store's buyer actions: the 1,000 monthly
+ * submissions the quiz editor promises are counted on their own, marked tries
+ * only (lib/quiz.ts, QUIZ_TRY).
  */
 export async function POST(request: NextRequest) {
   const origin = originFrom(request);
@@ -36,8 +45,14 @@ export async function POST(request: NextRequest) {
   const productId = String(form.get("product") ?? "").slice(0, 40);
   const lessonId = String(form.get("lesson") ?? "").slice(0, 20);
   const store = handle ? await storeForHandle(handle) : null;
+  if (!store) return new Response("Not found.", { status: 404 });
+  // Nothing was counted; the answer says how long to wait before sending it again.
+  const slow = (wait: string, seconds: number) => new Response(`Too many quiz answers were sent. Nothing was counted. Please wait ${wait} and send your answers again.`, { status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(seconds) } });
+  if (!(await withinLimit("quiz-connection", `${store.sid}|${clientAddress(request)}`, QUIZ_TRIES_PER_CONNECTION_MINUTE, 60))) return slow("one minute", 60);
+  // Paid for before anything of the course is read, from the store's public requests (a try sends at most two later pages' commands).
+  if (!(await takeBuyerRead(store, QUIZ_TRY_UNITS))) return restingAway(origin, store);
   const product = await readCourseListing(store, productId);
-  if (!store || !product?.course) return new Response("Not found.", { status: 404 });
+  if (!product?.course) return new Response("Not found.", { status: 404 });
   const base = `${origin}/@${store.handle}/course/${product.id}`;
   const away = (path: string) => new Response(null, { status: 303, headers: { Location: path, "Cache-Control": "no-store" } });
 
@@ -48,6 +63,7 @@ export async function POST(request: NextRequest) {
   if (access.learner.owner) return away(`${base}/${lessonId}#quiz`);
 
   const who = emailKey(access.learner.email);
+  if (!(await withinLimit("quiz-student", `${store.sid}|${who}`, QUIZ_TRIES_PER_STUDENT_HOUR, 3_600))) return slow("one hour", 3_600);
   // A lesson a required quiz still holds shut cannot be answered from here either.
   if (heldBack(course, await passedForGate(course.id, who)).has(lessonId)) return away(base);
   const quiz = await readQuizFor(course.id, lessonId);

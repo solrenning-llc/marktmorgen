@@ -6,7 +6,7 @@ import { READ_PDF_PAGES } from "@/lib/ai-rules";
 import { firstPages } from "@/lib/pdf-preview";
 import { MAX_STAMP_BYTES, readableFile } from "@/lib/product-file";
 import { withinEssentialLimit } from "@/lib/request-guard";
-import { describePicture, fillBlock, reviewPage, rewriteBlock, writeTestHeadline, replyToReview, translatePage, writeBio, writeKitPitch, writeStoreFaq, writeStoreSetup, writeBlogPost, writeEmail, writePosts, writeOutline, writePage, writeProduct, writeQuiz, writeSequence, writeFeedback } from "@/lib/ai";
+import { markAiStop, describePicture, fillBlock, reviewPage, rewriteBlock, writeTestHeadline, replyToReview, translatePage, writeBio, writeKitPitch, writeStoreFaq, writeStoreSetup, writeBlogPost, writeEmail, writePosts, writeOutline, writePage, writeProduct, writeQuiz, writeSequence, writeFeedback } from "@/lib/ai";
 import { readTaskFor, submissionOf } from "@/lib/assignment";
 import { SOCIALS, type SocialNetwork, isSocialNetwork } from "@/lib/store-socials";
 import { isRewriteStyle } from "@/lib/block-rewrite-rules";
@@ -18,7 +18,7 @@ import { readDepth, reachShares } from "@/lib/page-depth";
 import { LANGUAGES, isLanguage } from "@/lib/store-language";
 import { readStats } from "@/lib/stats";
 import { isFree } from "@/lib/store";
-import { idsOfKind, productIds, readListing, readListings } from "@/lib/catalog";
+import { type Listing, idsOfKind, productIds, readListing, readListings } from "@/lib/catalog";
 import { DEFAULT_SEQUENCE_DRAFT, MAX_SEQUENCE_PRODUCTS, SEQUENCE_DRAFT_COUNTS } from "@/lib/sequence-draft";
 import { storeBase } from "@/lib/purchase-email";
 import { productLink } from "@/lib/checkout-recovery";
@@ -33,8 +33,11 @@ import { imageFolder } from "@/lib/store";
 import { findLesson, readBody, readCourse } from "@/lib/course";
 import { DEFAULT_QUIZ_DRAFT, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 import { funnelType } from "@/lib/funnel-types";
+import { AI_RUN_ID, AI_STEP_PADDING_BYTES, type AiStepLine } from "@/lib/ai-steps";
 import { readFunnelAsk, readFunnelFacts, writeFunnelDraft, writeFunnelResearch } from "@/lib/funnel-ai";
 import { heldPictureRefusal, heldRefusal, heldRefusalAmong } from "@/lib/child-safety";
+import { heldInCatalog, touchesHeld } from "@/lib/child-safety-holds";
+import { writeProductIdeas } from "@/lib/product-ideas";
 
 const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call", "bundle"];
 
@@ -42,13 +45,38 @@ const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call"
 const HELD_KINDS = new Set(["page", "review", "block", "headline", "fill", "alt", "translate", "posts", "reply"]);
 
 /**
- * The writing help (lib/ai.ts): `{ kind: "product" | "page" | "review" | "block" | "fill" | "alt" | "translate" | "bio" | "faq" | "kit" | "setup" | "reply" | "posts" | "blog" | "outline" | "email" | "quiz" | "feedback" | "sequence" | "funnel" | "funnel-research", … }`.
+ * The writing help (lib/ai.ts): `{ kind: "product" | "page" | "review" | "block" | "fill" | "alt" | "translate" | "bio" | "faq" | "kit" | "setup" | "reply" | "posts" | "blog" | "outline" | "email" | "quiz" | "feedback" | "sequence" | "funnel" | "funnel-research" | "ideas", … }`.
  * It writes into the studio's own boxes and saves nothing: whatever comes back
  * is the creator's to read, change and keep, or not.
  *
  * Who may ask is who may write that thing: products and courses need the
  * products permission, an email the one to write drafts (lib/team-roles.ts).
  */
+/**
+ * The ids of these listings that are neither kept for a child-safety report nor a bundle holding one, for a writing
+ * help that reads the whole catalog (blog, store posts, bio, media kit, FAQ, email sequence). The keep mark is written
+ * before the product is hidden, and a hide that did not go in leaves it listed, so being listed says nothing (Codex L
+ * on #3588). One read of the marks of every listing and every product of its bundle, at most two MGETs
+ * (heldInCatalog); a read that cannot be read leaves out every listing it was read for, never "not held".
+ */
+async function notHeld(store: Parameters<typeof heldInCatalog>[0], listings: readonly Pick<Listing, "id" | "bundle">[]): Promise<Set<string>> {
+  if (listings.length === 0) return new Set();
+  try {
+    const held = await heldInCatalog(store, listings.flatMap((p) => [p.id, ...(p.bundle ?? [])]));
+    return new Set(listings.filter((p) => !touchesHeld(p, held)).map((p) => p.id));
+  } catch (error) {
+    console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
+    return new Set();
+  }
+}
+
+/** The listed products of these that a writing help may name (notHeld), in their order. */
+async function openCatalog<T extends Pick<Listing, "id" | "bundle" | "hidden">>(store: Parameters<typeof heldInCatalog>[0], products: readonly T[]): Promise<T[]> {
+  const listed = products.filter((p) => !p.hidden);
+  const open = await notHeld(store, listed);
+  return listed.filter((p) => open.has(p.id));
+}
+
 export async function POST(request: NextRequest) {
   // A review or a translation sends the page being edited, which may be long, and
   // twice as long with a second version being tested (lib/sales-page.ts, MAX_PAGE_BYTES).
@@ -56,6 +84,17 @@ export async function POST(request: NextRequest) {
   if (!guarded.ok) return guarded.response;
   const { body, store } = guarded;
   const fail = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
+  // A stop for a page being drafted step by step (lib/ai-steps.ts): it starts
+  // nothing that costs money, so the per-minute limit on writing never holds
+  // it back; it needs the same permission as the page it stops.
+  if (body.kind === "stop") {
+    const run = text(body.run, 60);
+    if (!AI_RUN_ID.test(run)) return fail("invalid");
+    return (await markAiStop(store, run)) ? Response.json({ ok: true }) : fail("unconfirmed", 503);
+  }
+  // A page asked for step by step names its run, so it can be stopped; one that does not is refused before anything is asked.
+  const stepped = body.kind === "page" && body.steps === true;
+  if (stepped && !AI_RUN_ID.test(text(body.run, 60))) return fail("invalid");
   if (!(await withinEssentialLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return fail("slow", 429);
   const notes = text(body.notes, MAX_AI_NOTES + 100);
 
@@ -76,6 +115,8 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: true, value: done.value, left: done.left, language: store.language });
   };
 
+  // Ideas for a new product (758 [STN5], unit 2): from the store's own record and the creator's words; it needs the products permission, like adding one.
+  if (body.kind === "ideas") return answer(writeProductIdeas(store, { notes }));
   if (body.kind === "product") {
     const kind = KINDS.includes(body.productKind as ProductKind) ? (body.productKind as ProductKind) : "download";
     return answer(writeProduct(store, { title: text(body.title, 200), price: text(body.price, 40), kind, notes }));
@@ -111,17 +152,54 @@ export async function POST(request: NextRequest) {
         return bytes ? firstPages(bytes, READ_PDF_PAGES) : null;
       };
     }
-    return answer(
-      writePage(store, {
-        title: product.title,
-        price: isFree(product) ? "" : formatMoney(product.priceCents, store.currency),
-        kind,
-        summary: product.summary,
-        about,
-        notes,
-        pdf,
-      }),
-    );
+    const input: Parameters<typeof writePage>[1] = {
+      title: product.title,
+      price: isFree(product) ? "" : formatMoney(product.priceCents, store.currency),
+      kind,
+      summary: product.summary,
+      about,
+      notes,
+      pdf,
+    };
+    if (!stepped) return answer(writePage(store, input));
+    // Step by step (758 [STN5]): one line as each step starts and ends, then
+    // the result, so the studio can say what is running and offer to stop.
+    const run = text(body.run, 60);
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (line: AiStepLine | { pad: string }) => {
+          try {
+            controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+          } catch {
+            // The page has gone; the job goes on to its end and keeps its count, as one without steps does.
+          }
+        };
+        send({ pad: " ".repeat(AI_STEP_PADDING_BYTES) });
+        let last: AiStepLine = { done: true, ok: false, error: "failed" };
+        try {
+          const done = await writePage(store, input, Date.now(), { run, onStep: (step, state) => send({ step, state }) });
+          last = done.ok
+            ? "returned" in done
+              ? { done: true, ok: true, value: done.value, left: done.left, returned: done.returned }
+              : { done: true, ok: true, value: done.value, left: done.left }
+            : "returned" in done
+              ? { done: true, ok: false, error: done.reason, returned: done.returned, left: done.left }
+              : { done: true, ok: false, error: done.reason };
+        } catch (error) {
+          console.error("a page drafted step by step failed", error);
+        }
+        send(last);
+        try {
+          controller.close();
+        } catch {
+          // Already closed by the page going away.
+        }
+      },
+    });
+    return new Response(stream, {
+      headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff" },
+    });
   }
   if (body.kind === "review") {
     // The page as it stands in the editor, saved or not, held to the same
@@ -227,12 +305,12 @@ export async function POST(request: NextRequest) {
   }
   if (body.kind === "blog") {
     // A blog post, from the creator's words and what the store sells (lib/ai.ts, writeBlogPost).
-    const products = store.catalog.head.filter((p) => !p.hidden).map((p) => ({ title: p.title, summary: p.summary }));
+    const products = (await openCatalog(store, store.catalog.head)).map((p) => ({ title: p.title, summary: p.summary }));
     return answer(writeBlogPost(store, { notes, products }));
   }
   if (body.kind === "posts" && !body.product) {
     // Posts about the whole store, from its line and what it sells (the record every visit already reads).
-    const listed = store.catalog.head.filter((p) => !p.hidden).slice(0, 12);
+    const listed = (await openCatalog(store, store.catalog.head)).slice(0, 12);
     if (listed.length === 0 && !store.bio) return fail("notes");
     const facts = [
       `Store: ${store.name}`,
@@ -262,7 +340,7 @@ export async function POST(request: NextRequest) {
   }
   if (body.kind === "bio") {
     // What the store sells, from the record every visit already reads (lib/catalog.ts, head).
-    const products = store.catalog.head.filter((p) => !p.hidden).map((p) => ({ title: p.title, summary: p.summary }));
+    const products = (await openCatalog(store, store.catalog.head)).map((p) => ({ title: p.title, summary: p.summary }));
     return answer(writeBio(store, { products, notes }));
   }
   if (body.kind === "setup") {
@@ -270,7 +348,7 @@ export async function POST(request: NextRequest) {
   }
   if (body.kind === "kit") {
     // From the record every visit already reads, and the kit as it is in the studio now (not yet saved, perhaps).
-    const products = store.catalog.head.filter((p) => !p.hidden).map((p) => p.title);
+    const products = (await openCatalog(store, store.catalog.head)).map((p) => p.title);
     const audience = (Array.isArray(body.audience) ? body.audience.slice(0, 8) : [])
       .map((row) => (row && typeof row === "object" ? (row as Record<string, unknown>) : {}))
       .filter((row) => isSocialNetwork(row.n) && typeof row.count === "string" && row.count.trim())
@@ -281,7 +359,7 @@ export async function POST(request: NextRequest) {
   if (body.kind === "faq") {
     // What the store says about itself: what it sells and how each is handed
     // over, from the record every visit already reads, and the creator's notes for answers.
-    const products = store.catalog.head.filter((p) => !p.hidden);
+    const products = await openCatalog(store, store.catalog.head);
     const facts = [
       `Store: ${store.name}`,
       store.bio ? `About it: ${store.bio}` : "",
@@ -328,8 +406,16 @@ export async function POST(request: NextRequest) {
     const tag = trigger === "tagged" ? cleanTag(body.tag) : "";
     const hidden = new Set(idsOfKind(store, "hidden"));
     const paid = new Set(idsOfKind(store, "paid"));
-    const ids = productIds(store).filter((id) => !hidden.has(id) && paid.has(id)).slice(0, MAX_SEQUENCE_PRODUCTS);
-    const listings = await readListings(store, ids);
+    const candidates = productIds(store).filter((id) => !hidden.has(id) && paid.has(id));
+    // A product kept for a report is left out before the slice, so it takes no place (notHeld). The record says which
+    // products are bundles only for its first page (the head), so a bundle is checked again once its listing is read:
+    // one holding a held product is left out too.
+    const open = await notHeld(store, candidates.map((id) => ({ id, bundle: null })));
+    const ids = candidates.filter((id) => open.has(id)).slice(0, MAX_SEQUENCE_PRODUCTS);
+    const read = await readListings(store, ids);
+    const bundles = read.filter((p) => (p.bundle ?? []).length > 0);
+    const openBundles = await notHeld(store, bundles);
+    const listings = read.filter((p) => (p.bundle ?? []).length === 0 || openBundles.has(p.id));
     const facts = (p: (typeof listings)[number]) => ({ title: p.title, summary: p.summary, price: priceWords(p, store.currency, store.tiers), link: productLink(store, p.id) });
     let followed: ReturnType<typeof facts> | null = null;
     if (trigger === "product" || trigger === "finished") {

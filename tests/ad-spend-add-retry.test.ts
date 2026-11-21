@@ -60,7 +60,7 @@ test("a removal while Meta cannot be read is done and told as done", async () =>
   assert.ok(id);
   const removed = await metaFailing(() => removeSpend(statsId, id));
   assert.notEqual(removed, "failed", "a removal that happened is never told as failed");
-  assert.ok(removed !== "failed" && removed.metaUnread, "Meta's lines are said to be unread");
+  assert.ok(removed !== "failed" && removed.ok && removed.metaUnread, "Meta's lines are said to be unread");
   assert.equal(kept(), 0, "the line is removed");
   assert.deepEqual((await readSpendLines(statsId)).spends.map((s) => s.cents), [50_000]);
 });

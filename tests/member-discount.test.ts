@@ -48,7 +48,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (init?.method === "POST" && path.startsWith("/subscriptions/")) {
     const headers = new Headers(init.headers);
     posted.push({ path, body: String(init.body), key: headers.get("Idempotency-Key") });
-    return refuse ? answer({ error: { message: "This promotion code cannot be applied." } }, 400) : answer({ id: path.split("/")[2] });
+    return refuse ? answer({ error: { message: "This promotion code cannot be applied." } }, 400) : answer({ id: path.split("/")[2], object: "subscription", discounts: ["di_test_member0001"] });
   }
   return answer({ object: "list", data: [] });
 }) as typeof fetch;

@@ -41,7 +41,7 @@ export const metadata: Metadata = {
 export default function TermsPage() {
   const domains = isDomainsConfigured();
   return (
-    <LegalPage title="Terms of Service" lastUpdated="November 9, 2026">
+    <LegalPage title="Terms of Service" lastUpdated="November 10, 2026">
       <p>
         These Terms of Service (“Terms”) govern your access to and use of the
         websites, products, and subscription services operated by Solrenning
@@ -168,6 +168,20 @@ export default function TermsPage() {
           is waiting for approval is seen only by its author and you, its author
           is told when you do not publish it, and it is not published if you do
           not answer within {HELD_DAYS} days.
+        </p>
+        <p id="plan-past-end" className="scroll-mt-24">
+          <strong className="text-black">Payment plans end when agreed.</strong>{" "}
+          When a buyer pays on a payment plan, we tell your Stripe account when
+          the plan ends, after its last payment. If Stripe still takes a
+          payment after that date (for example, because your account refused
+          our access for a while), we end the subscription and refund that
+          payment in full, automatically, from your own Stripe account&rsquo;s
+          balance, and email the buyer once to say so. If your balance does not
+          cover it, or Stripe refuses the refund, we try again every day; if
+          it is still owed 3 days later, we email you once with what to
+          refund. We can do this only while your Stripe account still lets us
+          act on it; if it does not, you must refund it yourself. Marktmorgen
+          never pays these refunds and never takes any part of them.
         </p>
         <p id="course-access-end" className="scroll-mt-24">
           <strong className="text-black">A course&apos;s end date.</strong>{" "}
@@ -427,7 +441,8 @@ export default function TermsPage() {
           can, usually at once (when it does not come off by itself, we act on
           it by hand), keep it as the law requires, and report it, with the account behind it, to the
           National Center for Missing &amp; Exploited Children (NCMEC), as
-          United States law requires (18 U.S.C. § 2258A). The account is closed.
+          United States law requires (18 U.S.C. § 2258A). We may also suspend the store or close the account
+          behind it.
           We remove an intimate image shared without consent within 48 hours of
           a complete request at <Link href="/report" className="text-black underline underline-offset-2 hover:no-underline">/report</Link>,
           along with any copies of it we find.
@@ -871,7 +886,9 @@ export default function TermsPage() {
           <strong className="text-black">A store closes {CLOSING_DAYS} days after its plan ends.</strong>{" "}
           Until then the store stays as it is: its page, products, prices,
           files, courses, community, contacts and orders, and buyers go on
-          reaching what they bought. We email the store&rsquo;s owner when the
+          reaching what they bought. Meanwhile, imports from other platforms,
+          a new photo on the store&rsquo;s page and buyers&rsquo; new review
+          photos wait for a plan; a review&rsquo;s words are still saved. We email the store&rsquo;s owner when the
           plan ends, {WARN_MONTH_DAYS} days before the closing day and {WARN_WEEK_DAYS} days
           before it, each time with the date, and a store never closes sooner
           than a week after the last of those emails. Starting a plan again
@@ -883,7 +900,8 @@ export default function TermsPage() {
           podcast&rsquo;s episodes, the files its students handed in and the
           pictures in its community&rsquo;s posts), and every membership and
           payment plan sold through it ends that day on the creator&rsquo;s
-          own Stripe account. Within {ERASE_WITHIN_DAYS} days, and usually the same day,
+          own Stripe account. The files its buyers sent for review go that
+          day too, with the rest of its files. Within {ERASE_WITHIN_DAYS} days, and usually the same day,
           everything else the store keeps with us is deleted: its page and
           settings, products and prices, pages, posts, courses and the
           certificates they gave, community, contacts, forms and their

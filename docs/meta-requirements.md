@@ -102,7 +102,7 @@ Consequences for Marktmorgen:
 | --- | --- | --- |
 | Off until approval | `AUTODM_LIVE = false`; `decideReply` keeps its own lock | Turn on only after App Review (owner) |
 | Test before live | Test mode with up to 3 creator test accounts; server-kept test fingerprint | — |
-| Keyword matching, repeat interval, counts without personal data | Done (`matchingKeyword`, `REPEAT_CHOICES` default 12h, `AutoDmCounts`, `dmLinkTag`) | — |
+| Keyword matching, repeat interval, counts without personal data | Done (`matchingKeyword` with `DEFAULT_MATCH` the exact word since 16 Nov 2026, 759 [STN6], plurals and typos only when the creator chooses "forgiving"; `REPEAT_CHOICES` default 12h, `AutoDmCounts`, `dmLinkTag`) | — |
 | Own comments never answered | Done (`own`) | — |
 | Reply text bounded, no hand-typed links | 500 characters, our cap | Confirm Meta's maximum; keep ours at or below it |
 | 7-day comment age; Live only during broadcast | Not checked | Add to `decideReply` from the comment's timestamp |

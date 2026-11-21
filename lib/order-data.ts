@@ -236,6 +236,61 @@ function scriptOf(room: string, commands: Command[], script: string = ORDER_WRIT
   return ["EVAL", script, keys.length, ...keys, ...argv];
 }
 
+/**
+ * One script that runs ORDER_WRITE's body inside a step of its own (as ORDER_WRITE_ONCE does): ORDER_WRITE's keys and
+ * arguments for `commands`, then `extraKeys` after its keys and `extraArgs` after its arguments, for the wrapping
+ * script to read (and take off ARGV's end) before it runs the body. Commands are checked as orderWrite checks them.
+ */
+export function orderScriptWith(owner: DataOwner, commands: Command[], script: string, extraKeys: string[], extraArgs: (string | number)[]): (string | number)[] {
+  if (!commands.length || commands.length > ORDER_WRITE_MAX) throw new Error("an order's wrapped write is one script of at least one command");
+  for (const command of commands) if (!checked(command)) throw new Error(`not a command an order's records are written with: ${String(command[0])}`);
+  const room = dataKey(owner);
+  if (!room) throw new Error("an order's wrapped write needs its store's room");
+  const [, , count, ...rest] = scriptOf(room, commands, script);
+  const keys = rest.slice(0, Number(count));
+  const argv = rest.slice(Number(count));
+  return ["EVAL", script, Number(count) + extraKeys.length, ...keys, ...extraKeys, ...argv, ...extraArgs.map(String)];
+}
+
+/** What a store-fenced order write answers when erasure has begun or the store id is already gone. */
+export const ORDER_STORE_GONE = -3;
+
+/**
+ * ORDER_WRITE behind the closing walk's store fence. The last two keys are the store-id key and the erasing hash;
+ * the last argument is this store's field in that hash. The write and its room charge run only while the id still
+ * exists and erasure has not begun, in the same Redis step, so a slow writer cannot recreate a deleted family.
+ */
+export const ORDER_WRITE_IF_STORE_LIVE = `-- marktmorgen:order-write-if-store-live:v1
+local erasing = ARGV[#ARGV]
+if redis.call('EXISTS', KEYS[#KEYS - 1]) ~= 1 or redis.call('HEXISTS', KEYS[#KEYS], erasing) == 1 then return {-3} end
+local function write(ARGV)
+${ORDER_WRITE.slice(ORDER_WRITE.indexOf("\n") + 1)}
+end
+return write({unpack(ARGV, 1, #ARGV - 1)})`;
+
+/**
+ * Writes and charges an order record only while its store is live. Null means the closing fence refused the write;
+ * every other reply is checked exactly as orderWrite checks it.
+ */
+export async function orderWriteIfStoreLive(
+  owner: DataOwner,
+  commands: Command[],
+  storeIdKey: string,
+  erasingKey: string,
+  erasingField: string,
+): Promise<unknown[] | null> {
+  if (!commands.length || commands.length > ORDER_WRITE_MAX) throw new Error("a live store's order write is one script");
+  for (const command of commands) if (!checked(command)) throw new Error(`not a command an order's records are written with: ${String(command[0])}`);
+  if (![storeIdKey, erasingKey].every((key) => key.length > 0 && key.length <= 512) || !erasingField) throw new Error("a live store's order write needs its fence");
+  const reply = repliesFor(
+    await redisPipeline([orderScriptWith(owner, commands, ORDER_WRITE_IF_STORE_LIVE, [storeIdKey, erasingKey], [erasingField])]),
+    1,
+  )?.[0];
+  const slots = listSlots(reply);
+  if (slots && slots.length === 1 && slots[0] === ORDER_STORE_GONE) return null;
+  return readScript(reply, commands).replies;
+}
+
 /** Whether a reply is a whole count from `low` to `high` (inclusive). */
 const between = (reply: unknown, low: number, high: number): boolean => typeof reply === "number" && Number.isSafeInteger(reply) && reply >= low && reply <= high;
 

@@ -1,3 +1,5 @@
+import { consumerGate } from "@/lib/eu-vat-gate";
+import { EuVatCollectRefused, euSaleGate } from "@/lib/eu-vat-collect";
 import { startGift } from "@/lib/gifts";
 import { OrdersPausedError } from "@/lib/order-admission";
 import { startGroup } from "@/lib/group-buy";
@@ -5,16 +7,16 @@ import { preorderDay, soonOne } from "@/lib/preorders";
 import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
-import { ReturningCodeRefused, canSellProduct } from "@/lib/store-checkout";
+import { BoxesRefused, ReturningCodeRefused, canSellProduct } from "@/lib/store-checkout";
 import { HeldInSaleError, createCheckoutUnlessHeld } from "@/lib/held-checkout";
 import { heldInSale } from "@/lib/child-safety";
 import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, otherDiscountWins, redeemReturningLink, releaseReturningLink, requestReturningLink, spendReturningLink } from "@/lib/returning-code";
 import type { ReturningCode } from "@/lib/returning-code-rules";
 import { countHit } from "@/lib/visit";
 import { giveBackHold, holdAdmission, refusedBeforeStripe, releaseStockHold, withStockHold } from "@/lib/stock";
-import { activePlan, limitedStock } from "@/lib/product-extras";
+import { activePlan, bumpTargets, limitedStock } from "@/lib/product-extras";
 import { activeFunnel, funnelProductIds } from "@/lib/funnel";
-import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
+import { affiliateCookieName, attributionOrPending, pendingChannel } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
 import { UPSELL_COOKIE, newUpsellKey } from "@/lib/upsell";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
@@ -31,6 +33,7 @@ import { codeCookieName, readLinkCode } from "@/lib/code-link";
 import { AB_COOKIE, abMeta, count as countTest, expectedShareB, readBucket, readCounts, versionFor, winner } from "@/lib/headline-test";
 import { readPage } from "@/lib/sales-page-store";
 import { readCountry } from "@/lib/fair-price";
+import { memberClaim, readMemberClaim } from "@/lib/member-price";
 import { pageShown, runningTest, declaredMeasure } from "@/lib/sales-page";
 import { noteCheckoutTrouble } from "@/lib/checkout-trouble";
 import { chargesOffAfterRefusal } from "@/lib/stripe-charges";
@@ -103,6 +106,9 @@ export async function POST(request: NextRequest) {
   // version of the sentence this code shows. Checked again where the charge
   // is built, so nothing digital is opened without it.
   let digitalConsent: DigitalConsent | null = null;
+  // The member price the page showed (lib/member-price.ts), as a percentage;
+  // 0 for none. Never trusted: proved again below for this browser's address.
+  let memberAsked = 0;
   // A code only for people who already bought here, and the email it is for
   // (lib/returning-code.ts): read only when a code was typed; never kept.
   let typedCode = "";
@@ -111,11 +117,14 @@ export async function POST(request: NextRequest) {
   let linkToken = "";
   // The page the form was on, when it is not the product's own (renew, course): only those two words count.
   let from: "renew" | "course" | "" = "";
+  // The form as sent, for the billing country the EU VAT gate reads (lib/eu-vat-gate.ts consumerGate).
+  let sent: FormData = new FormData();
   // The course's end the page showed beside this form (24 [E7], lib/course-access-end.ts): undefined when the form
   // drew none (the sale then carries no end), null for "none", or the end; "bad" for any other value.
   let shownEnd: number | null | undefined | "bad" = undefined;
   try {
     const form = await (await limited(request, 8_000)).formData();
+    sent = form;
     digitalConsent = consentFromForm(form);
     const sentFrom = form.get("from");
     from = sentFrom === "renew" || sentFrom === "course" ? sentFrom : "";
@@ -151,6 +160,7 @@ export async function POST(request: NextRequest) {
     remind = form.get("remind") === "yes";
     remindEmail = remind ? normaliseEmail(read("remind_email", MAX_EMAIL_LENGTH + 1)) : "";
     remindVersion = remind ? read("remind_v", 40) : "";
+    memberAsked = readMemberClaim(form.get("member"));
     shownEnd = readShownAccessEnd(form.get(ACCESS_END_FIELD));
     // Only the field's own "Email me the link" button asks for a link (rask);
     // a code left typed in the field never stops the buy button from buying.
@@ -205,6 +215,16 @@ export async function POST(request: NextRequest) {
   }
   // A call is booked for a time on its own page, never bought without one.
   if (product.call) return away(`/@${store.handle}/book/${product.id}`);
+  // EU VAT art. 9a (lib/eu-vat-gate.ts consumerGate): before anything is held, written or charged, a paid sale to
+  // the EU or the UK is refused, and a sale without the billing country asks for it. A bundle is read by its members.
+  const members = product.bundle ? new Map((await readListings(store, product.bundle)).map((listing) => [listing.id, listing])) : undefined;
+  // Since 789 [IV1] step 3 (lib/eu-vat-collect.ts euSaleGate): exactly consumerGate while the EU record is not "collect"
+  // or the switch is off, as today; with both on, an EU buyer whose evidence agrees has the VAT collected on top.
+  const gate = euSaleGate({ product, members, headers: request.headers, form: sent });
+  if (!gate.ok) {
+    const status = gate.reason === "refused" ? "abroad" : "country";
+    return away(from ? `/@${store.handle}/${from}/${product.id}?status=${status}` : `/@${store.handle}/p/${product.id}?status=${status}#buy`);
+  }
   // Every license key in the pool is given: nobody is charged for one that
   // does not exist. The creator was emailed when the pool ran low. A count
   // that could not be read is unknown, never "some left": nothing opens and
@@ -216,6 +236,11 @@ export async function POST(request: NextRequest) {
   if (noKeys === null) return away(`/@${store.handle}?status=error`);
   if (noKeys) return away(`/@${store.handle}?status=soldout`);
 
+  // A member price is for the member's own purchase of this product alone
+  // (lib/member-price.ts): a claim with a payment plan, a box ticked, a gift,
+  // places for others or a pre-order goes back to the page before anything
+  // is written down or charged.
+  if (memberAsked && (plan || bumps.length > 0 || giftTo.trim() || people.trim() || wantsPreorder)) return away(`/@${store.handle}/p/${product.id}?member=alone#buy`);
   // A code only for people who already bought here (554 [DS1], unit 2;
   // lib/returning-code.ts), handled before anything is written down or held.
   // A typed code and email only ask for a link, answered "sent" the same for
@@ -230,6 +255,11 @@ export async function POST(request: NextRequest) {
     // Another discount wins this checkout (a sale across the store, a fair price here, an introductory price or a
     // price the buyer names): the code could never go on, so nothing is read, held or emailed for it.
     if (otherDiscountWins(store, product, readCountry(request.headers.get("x-vercel-ip-country")), undefined, { plan: plan && activePlan(product) !== null })) return backToField("other");
+    // A member price claimed on the same form (lib/member-price.ts): one discount at a time, and the member's checkout
+    // opens for the proved address alone, so the pair is refused before the link is read, used or sent (Claude 1
+    // cloud, money review on #2999). otherDiscountWins does not count the member price: this check is what keeps
+    // the two apart here, and lib/store-checkout.ts refuses a code that did not go on as a second guard.
+    if (memberAsked) return backToField("other");
     // Each try may read the creator's Stripe account or use a link: a few per connection.
     if (!(await withinLimit("returning-code", `${clientAddress(request)}|${store.handle}`, RETURNING_TRIES, RETURNING_TRIES_SECONDS))) return backToField("busy");
     // For a purchase of the buyer's own, at the price set: never a gift, a group or a pre-order.
@@ -316,11 +346,14 @@ export async function POST(request: NextRequest) {
     const inPlan = !gift && !group && !preorder && plan && activePlan(product) !== null;
     const upsell = !gift && !group && !preorder && !inPlan && !store.tax.enabled && activeFunnel(await readListings(store, funnelProductIds(product.funnel)), product) ? newUpsellKey() : null;
     // Sent by an affiliate within the store's window: credited to them. A
-    // lookup that fails never stops the sale; it is only not credited.
-    const via = await attributionFor(store, product.id, {
+    // lookup that does not answer never stops the sale: the click rides on the
+    // order as pending and is credited once a later read answers (owner's
+    // decision 6, lib/affiliates.ts notePendingLinks).
+    const credit = await attributionOrPending(store, product.id, {
       via: request.cookies.get(viaCookieName(store.handle))?.value,
       session: request.cookies.get(affiliateCookieName(store.handle))?.value,
-    }).catch(() => null);
+    }, [product.id, ...bumpTargets(product)]);
+    const via = credit.known ? credit.via : null;
     // A course opens right away in the browser that paid for it.
     // So does a course in a bundle.
     const buyer = !gift && !group && !preorder && (product.course || product.bundle) ? newBuyerKey() : null;
@@ -346,6 +379,20 @@ export async function POST(request: NextRequest) {
         }
       }
     }
+    // A member price the page showed: charged only when it is exactly what
+    // this address is proved to get now, for the member's own purchase of
+    // this product alone (not a payment plan, a box ticked, a gift, places
+    // for others or a pre-order); otherwise back to the page, with nothing
+    // charged, rather than a price it did not show. The checkout opens with
+    // the proved address fixed, so it is the member's purchase.
+    let member: { percent: number; email: string } | undefined;
+    if (memberAsked) {
+      const claim = await memberClaim(store, product, memberAsked, request.cookies);
+      if (!claim.ok) return away(`/@${store.handle}/p/${product.id}?member=changed#buy`);
+      member = { percent: claim.member, email: claim.email };
+    }
+    // The buyer's request is kept for advertising only once nothing above can refuse the checkout: a member claim
+    // that no longer holds keeps nothing of it (Codex P's MEDIUM on #3021).
     const ads = await adsCheckout(request, store);
     // Only where the box was offered, for a purchase of the buyer's own, with an address that is one.
     const reminding = remind && !gift && !group && !preorder && remindEmail.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(remindEmail) && assistReminderOffered(store, product);
@@ -353,6 +400,10 @@ export async function POST(request: NextRequest) {
       createCheckoutUnlessHeld(store, product, linkOrigin(request, store), optionId, {
         bumps,
         picked,
+        // The boxes the buyer ticked go through the same EU VAT gate as the product, as one order.
+        gateBoxes: (boxes) => consumerGate({ product, members, boxes, headers: request.headers, form: sent }),
+        // Only when the EU gate said to collect (never while nothing collects): the VAT on top, or a refusal before Stripe.
+        ...(gate.collect ? { euVat: { country: gate.collect.country } } : {}),
         held: holding,
         upsellKey: upsell?.fingerprint,
         plan: inPlan,
@@ -383,7 +434,9 @@ export async function POST(request: NextRequest) {
         channel: {
           ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays),
           ...ads,
+          ...pendingChannel(credit),
           ...(accessEnd !== null ? { [ACCESS_END_FIELD]: String(accessEnd) } : {}),
+          ...pendingChannel(credit),
         },
         // A code that came in a link to this store (lib/code-link.ts), applied
         // by Stripe only if it is one of the creator's live codes.
@@ -391,6 +444,7 @@ export async function POST(request: NextRequest) {
         // Where the buyer's connection is, for a fair price for that country
         // (lib/fair-price.ts), the same header the page read to show it.
         country: readCountry(request.headers.get("x-vercel-ip-country")),
+        member,
         // A funnel of pages this product is a step of, read off the page the
         // button was pressed on like the tags above (lib/page-funnel.ts).
         funnel: funnel ?? undefined,
@@ -404,7 +458,9 @@ export async function POST(request: NextRequest) {
       // A refused returning code made no checkout: either refused before Stripe
       // was asked, or Stripe's 400 on the code's coupon. Its unit comes back at
       // once, as the hold count does below, so a refused code holds nothing.
-      (error) => refusedBeforeStripe(error) || error instanceof ReturningCodeRefused,
+      // So does a sale whose EU VAT could not be put on it (lib/eu-vat-collect.ts), refused before Stripe is asked
+      // (Claude 5's LOW on #4975).
+      (error) => refusedBeforeStripe(error) || error instanceof ReturningCodeRefused || error instanceof EuVatCollectRefused,
     );
     if (!held.ok) {
       if (charged) await giveBackHold(store, clientAddress(request));
@@ -438,7 +494,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // Refused before a checkout opened (Stripe not asked, or its 400 refusal of the code's coupon): no unit stays
     // held, so the hold count is given back.
-    if (charged && (error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof ReturningCodeRefused)) await giveBackHold(store, clientAddress(request));
+    if (charged && (error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof ReturningCodeRefused || error instanceof EuVatCollectRefused)) await giveBackHold(store, clientAddress(request));
     // No checkout opened: the link's claim is let go, so it can be used again.
     if (returning) await releaseReturningLink(linkToken);
     // The store's orders for the month are reached (lib/order-admission.ts): said plainly, nothing charged.
@@ -453,7 +509,16 @@ export async function POST(request: NextRequest) {
       if (error.why === "unavailable") return away(`/@${store.handle}?status=error`);
       return away(error.why === "box" ? `/@${store.handle}/p/${product.id}#buy` : `/@${store.handle}`);
     }
+    // The EU VAT this sale needs could not be put on it (lib/eu-vat-collect.ts): refused as an EU sale is today.
+    if (error instanceof EuVatCollectRefused) {
+      return away(from ? `/@${store.handle}/${from}/${product.id}?status=abroad` : `/@${store.handle}/p/${product.id}?status=abroad#buy`);
+    }
     // The code's coupon is used up or gone on the creator's account: said on the form, never a checkout at the full price.
+    // A ticked box the EU VAT gate refuses for this order: back to the page, as for the product itself.
+    if (error instanceof BoxesRefused) {
+      const status = error.reason === "refused" ? "abroad" : "country";
+      return away(from ? `/@${store.handle}/${from}/${product.id}?status=${status}` : `/@${store.handle}/p/${product.id}?status=${status}#buy`);
+    }
     if (error instanceof ReturningCodeRefused) return away(`/@${store.handle}/p/${product.id}?returning=${error.reason}#returning`);
     console.error("checkout failed", error);
     // A checkout Stripe would not open: counted, and the creator told (lib/checkout-trouble.ts).

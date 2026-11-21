@@ -4,8 +4,8 @@ import { allowanceWindow, windowId } from "@/lib/allowance-window";
 import { BUYER_LENSES, type BuyerLens, PREDICTS } from "@/lib/page-coach";
 import { reservePaidResourceWindow } from '@/lib/contract-resource-window';
 import { reserveFundedExposure } from '@/lib/exposure-budget';
-import { aiDispatchCount, consumeAiCallBudget, hasAiCallBudget, noteAiDispatch, withAiCallBudget, type AiCallReport } from '@/lib/ai-call-budget';
-import { AI_ENTITLEMENT_RULES } from '@/lib/ai-entitlement-rules';
+import { aiDispatchCount, consumeAiCallBudget, consumeAiDocumentRead, hasAiCallBudget, noteAiDispatch, withAiCallBudget, type AiCallReport } from '@/lib/ai-call-budget';
+import { AI_ENTITLEMENT_RULES, DOCUMENT_READS_PER_PDF_RUN } from '@/lib/ai-entitlement-rules';
 /**
  * The writing help in the studio (lib/ai-rules.ts), on the server: asking the
  * model, counting what each store uses, and reading back only what fits.
@@ -27,7 +27,7 @@ import { currentAiSpendPolicy } from "@/lib/ai-spend-policy";
 import { costPauseCode, costStandingOf, standingOf } from "@/lib/plan-standing";
 import { hasPro } from "@/lib/plan";
 import { timed } from "@/lib/fetch-timeout";
-import { boundedAiRequest, isSupportedAiModel } from "@/lib/ai-request-rules";
+import { ANSWER_MODEL, WRITING_MODEL, boundedAiRequest, isSupportedAiModel } from "@/lib/ai-request-rules";
 import { aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
 import { inTrial } from "@/lib/mail";
 import type { Store } from "@/lib/store";
@@ -74,10 +74,9 @@ export function isAiConfigured(): boolean {
   return isAiBudgetConfigured() && apiKey() !== null && isSupportedAiModel(model()) && isSupportedAiModel(answerModel());
 }
 
-/** The model asked. A deployment may name another in AI_MODEL. */
+/** The model that writes, fixed in code (WRITING_MODEL): the plans' AI ceilings are computed for it (433 [PV3] (b)). */
 function model(): string {
-  const named = process.env.AI_MODEL?.trim();
-  return named && /^claude-[a-z0-9.-]{3,60}$/.test(named) ? named : "claude-sonnet-5-5";
+  return WRITING_MODEL;
 }
 
 function jobCount(value: unknown): number | null {
@@ -196,12 +195,11 @@ export type AiResult<T> = { ok: true; value: T; left: number } | { ok: false; re
 /**
  * The model that answers visitors' questions (lib/answers.ts): the smallest
  * current one, because each answer is short, read from a page it is handed,
- * and paid for by a store's plan. A deployment may name another in
- * AI_ANSWER_MODEL.
+ * and paid for by a store's plan. Fixed in code (ANSWER_MODEL), as the plans'
+ * AI ceilings are computed for it (433 [PV3] (b)).
  */
 export function answerModel(): string {
-  const named = process.env.AI_ANSWER_MODEL?.trim();
-  return named && /^claude-[a-z0-9.-]{3,60}$/.test(named) ? named : "claude-haiku-5-5";
+  return ANSWER_MODEL;
 }
 
 /** One question to the model, counted against the store's month. The answer's text, or null. */
@@ -229,6 +227,12 @@ export async function askModel(
   // Standalone visitor calls get one slot; counted writing jobs share theirs.
   if (!hasAiCallBudget()) return withAiCallBudget(store.statsId, 1, () => askModel(store, system, prompt, maxTokens, named, timeoutMs));
   if (!consumeAiCallBudget(store.statsId)) return null;
+  // A document (a product's PDF) is held at the model's whole context: only the answer model reads one, and only in a
+  // run that took the PDF's jobs (consumeAiDocumentRead), so the plan's ceiling funds it (lib/ai-entitlement-rules.ts).
+  if (bounded.shape.media === "document" && (named !== ANSWER_MODEL || !consumeAiDocumentRead(store.statsId))) {
+    console.error("AI document request refused before provider call: not a paid PDF read");
+    return null;
+  }
   const scope=aiBudgetScopeFor(store);
   const exposure=scope==='trial'?'trial':scope==='setup'?'setup':scope==='ended'?'post_cancellation':null;
   if(exposure&&!(await reserveFundedExposure(store.statsId,exposure)))return null;
@@ -437,10 +441,14 @@ const givenReason = (unrun: Unrun): AiGivenBack => (unrun.asked ? "stopped" : un
  * what the job left undone, given back once (lib/ai-file.ts tells a file's
  * parts with it). With `unrun.partial`, what the steps that ran wrote comes
  * back with the stop, so parts already paid for are never thrown away.
+ * `documents` is how many PDFs the run may send (writePage's PDF run only);
+ * a file's parts send none.
  */
-export async function countedRun<T>(store: Store, now: number, run: () => Promise<T | null>, jobs: number, unrun?: Unrun): Promise<AiResult<T> | AiStopped | AiDraftedGiven<T>> {
+export async function countedRun<T>(store: Store, now: number, run: () => Promise<T | null>, jobs: number, unrun?: Unrun, documents = 0): Promise<AiResult<T> | AiStopped | AiDraftedGiven<T>> {
   if (!isAiConfigured() || !store.statsId || !isRedisConfigured()) return { ok: false, reason: "off" };
   if (!Number.isSafeInteger(jobs) || jobs <= 0) return { ok: false, reason: "notes" };
+  // A PDF read is paid for by its own 1 + READ_PDF_JOBS jobs (lib/ai-entitlement-rules.ts); fewer jobs read none.
+  if (!Number.isSafeInteger(documents) || documents < 0 || documents * (1 + READ_PDF_JOBS) > jobs) return { ok: false, reason: "notes" };
   const allowance = aiAllowance(store, now);
   if (!Number.isSafeInteger(allowance) || allowance < 0) return { ok: false, reason: "off" };
   if (jobs > allowance) return { ok: false, reason: "used" };
@@ -461,7 +469,8 @@ export async function countedRun<T>(store: Store, now: number, run: () => Promis
   let value: T | null = null;
   const calls: AiCallReport = { owned: false, dispatched: 0 };
   try {
-    value = await withAiCallBudget(store.statsId, jobs * AI_ENTITLEMENT_RULES.writingCallsPerJob, run, calls);
+    // Only a run that says it reads a PDF (writePage, which took 1 + READ_PDF_JOBS jobs for it) may send a document.
+    value = await withAiCallBudget(store.statsId, jobs * AI_ENTITLEMENT_RULES.writingCallsPerJob, run, calls, documents);
   } catch (error) {
     console.error("a writing job failed", error);
   }
@@ -1592,7 +1601,7 @@ export async function writePage(
       seoDescription: line(json.seoDescription, 160),
     };
     return draft.headline && draft.benefits.length ? draft : null;
-  }, pdf ? 1 + READ_PDF_JOBS : 1, unrun);
+  }, pdf ? 1 + READ_PDF_JOBS : 1, unrun, pdf ? DOCUMENT_READS_PER_PDF_RUN : 0);
   // Every job is given back by countedRun itself, once: nothing was asked of the model (the merge of main into #2975).
   if (!unread.file) return done;
   return { ok: false, reason: "file" };

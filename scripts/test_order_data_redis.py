@@ -24,6 +24,8 @@ def main():
         raise RuntimeError("Run only against dedicated CI Redis on loopback port 16379")
     root = Path(__file__).resolve().parents[1]
     write = script(root / "lib/order-data.ts", "ORDER_WRITE")
+    # ORDER_WRITE_IF_NEW is put together in lib/order-data.ts exactly this way: the guard, then ORDER_WRITE below its first line.
+    if_new = script(root / "lib/order-data.ts", "ORDER_IF_NEW_GUARD") + "\n" + write.split("\n", 1)[1]
     base = "marktmorgen:integration:order:" + uuid.uuid4().hex
     room = base + ":room"
     redis = Redis()
@@ -137,6 +139,33 @@ def main():
         assert run(("GET", k1)) == [-1]
         assert run(("HSET", k4, "f", "v"))[1].startswith("\x00order-write-error:")
         print("PASS: a command outside the list is refused, and one Redis refuses is answered as such")
+
+        def run_if_new(*commands):
+            keys = [room]
+            argv = [len(commands)]
+            for command in commands:
+                name, key, *args = command
+                if key not in keys:
+                    keys.append(key)
+                made.add(key)
+                argv += [name, keys.index(key) + 1, len(args), *args]
+            return redis.command("EVAL", if_new, len(keys), *keys, *argv)
+
+        sale, info, waiting, wrong = (base + ":keys:" + part for part in ("sale", "info", "waiting", "wrong"))
+        made.update((waiting, wrong))
+        redis.command("HSET", waiting, "cs_1", "{}")
+        first = run_if_new(("HSETNX", sale, "cs_1", "KEY-A"), ("HSET", info, "KEY-A", '{"r":"cs_1"}'), ("HDEL", waiting, "cs_1"))
+        assert first[1:] == [1, 1, 1] and first[0] >= usage(sale, info), (first, usage(sale, info))
+        before = held()
+        assert run_if_new(("HSETNX", sale, "cs_1", "KEY-B"), ("HSET", info, "KEY-B", "x"), ("HDEL", waiting, "cs_1")) == [-2]
+        assert redis.command("HGET", sale, "cs_1") == "KEY-A" and redis.command("HEXISTS", info, "KEY-B") == 0 and held() == before
+        redis.command("SET", wrong, "x")
+        assert run_if_new(("HSETNX", sale, "cs_2", "KEY-C"), ("HSET", wrong, "KEY-C", "x")) == [-1]
+        assert run_if_new(("HSET", sale, "cs_2", "KEY-C")) == [-1]
+        assert run_if_new(("HSETNX", sale, "cs_2", "KEY-C"), ("SADD", info, "m")) == [-1]
+        assert run_if_new(("HSETNX", sale, "cs_2", "KEY-C"), ("HSET", info, "a", "b", "c")) == [-1]
+        assert redis.command("HEXISTS", sale, "cs_2") == 0 and redis.command("HEXISTS", info, "KEY-C") == 0 and held() == before
+        print("PASS: written if new: every command with the first HSETNX, or, when its field is there or the call is not one it takes, nothing")
 
         o, whole = held()
         assert o > 0 and whole == o + 64

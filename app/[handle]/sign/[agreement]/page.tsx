@@ -56,6 +56,7 @@ export default async function AgreementPage({ params, searchParams }: Params) {
   const version = latest ? await readVersion(agreement, latest.n) : null;
   if (!latest || !version) notFound();
   const query = await searchParams;
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const now = new Date().getTime();
   const status = statusOf(agreement, now);
   const said = speechFor(store.language, version.currency);

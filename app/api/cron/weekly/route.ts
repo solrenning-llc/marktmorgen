@@ -2,22 +2,25 @@ import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmail, sendEmailPinned } from "@/lib/email";
 import { visitedFolders } from "@/lib/traffic";
 import { monthKey } from "@/lib/delivery";
 import { storeOf } from "@/lib/usage-billing";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
-import { claimWeek, readNumbers, releaseWeek, weeklyMessage, weeklyOff, weeklyToken } from "@/lib/stats-report";
+import { EMAIL_KEY_HOLDS_MS, firstTryOf, noteSeen, readNumbers, readSeen, releaseWeek, sendPart, tryPeriodAgain, weekClaim, weekOf, weekPeriod, weeklyMessage, weeklyOffState, weeklyToken } from "@/lib/stats-report";
 import { weeklySummary } from "@/lib/numbers-ask";
 import { aiAvailableFor } from "@/lib/ai";
-import { readSpends } from "@/lib/ad-spend";
+import { spendsForReport } from "@/lib/ad-spend";
 import { recordSample } from "@/lib/benchmarks";
 import { weeklyMemberToken, weeklyTeam } from "@/lib/stats-report";
-import { readTeam } from "@/lib/team";
+import { readTeamMembers } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 import { UNKNOWN_SALES_GOAL_CENTS, readSalesGoal, withGoalAvailability } from "@/lib/sales-goal";
 import { chatAddress, forChat, postToChat } from "@/lib/chat-summary";
+import type { Store } from "@/lib/store";
+import type { StatsData } from "@/lib/stats";
+import type { AdSpend } from "@/lib/ad-spend-rules";
 
 /**
  * The weekly email to each creator whose store had visitors (lib/stats-report.ts).
@@ -34,6 +37,16 @@ import { chatAddress, forChat, postToChat } from "@/lib/chat-summary";
  * Slack or Discord channel (lib/chat-summary.ts), the same summary is posted
  * there too — and still is after "Stop", which stops emails, not the channel
  * the creator set up apart.
+ *
+ * Everything the summary is written from (the numbers, the ad spend, who
+ * gets the team copies) is read before anything goes: a read that fails is
+ * not "none" (rule 24), so nothing is sent on it and the week is let go for a
+ * later run. The post and the owner's email are each marked once for the week
+ * (lib/stats-report.ts, sendPart); one that did not go lets the week go, so a
+ * later run sends what is missing and nothing twice, at most SUMMARY_TRIES
+ * runs for the week. One that may have gone is never sent again (rule 24): the
+ * owner's email is tried again only while its key still holds (EMAIL_KEY_HOLDS_MS).
+ * The team copies go with the owner's email, never before.
  */
 export const maxDuration = 60;
 const MAX_PER_RUN = 25;
@@ -55,21 +68,35 @@ export async function GET(request: NextRequest) {
   if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
 
   const started = Date.now();
-  const out = { looked: 0, sent: 0, quiet: 0, stopped: 0, unpaid: 0, failed: 0 };
+  const out = { looked: 0, sent: 0, quiet: 0, stopped: 0, unpaid: 0, failed: 0, unconfirmed: 0 };
+  // The folders decided this week, kept so no later run reads their stores again (lib/stats-report.ts readSeen). A
+  // folder whose summary is to be tried again (tryPeriodAgain) is not decided, so a later run reaches it.
+  const week = weekOf(started);
+  const decided: string[] = [];
   try {
     const now = new Date();
     const lastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15));
     const folders = [...new Set([...(await visitedFolders(monthKey(now))), ...(await visitedFolders(monthKey(lastMonth)))])];
+    const seen = await readSeen("weekly", week).catch(() => new Set<string>());
     for (const folder of folders) {
+      if (seen.has(folder)) continue;
       if (out.looked >= MAX_PER_RUN || Date.now() - started > TIME_BUDGET_MS) break;
-      const store = await storeOf(folder).catch(() => null);
-      if (!store) continue;
+      // A store that could not be read is not decided: the next run reads it again.
+      const store = await storeOf(folder).catch(() => undefined);
+      if (store === undefined) continue;
+      if (!store) {
+        decided.push(folder);
+        continue;
+      }
       const standing = standingOf(store);
       if (standing !== "paid" && standing !== "trial") {
         out.unpaid += 1;
+        decided.push(folder);
         continue;
       }
-      const emailOff = await weeklyOff(store.handle);
+      // Stopped, not stopped, or unknown (null): unknown sends no email, as before, but is never kept as decided.
+      const offState = await weeklyOffState(store.handle);
+      const emailOff = offState !== false;
       // An address that could not be read is not "no channel" (rule 24): nothing is claimed, so a later run sends the email and the post together.
       const chat = await chatAddress(store.statsId).catch(() => undefined);
       if (chat === undefined) {
@@ -77,63 +104,98 @@ export async function GET(request: NextRequest) {
         continue;
       }
       if (emailOff && !chat) {
+        if (offState === null) {
+          out.failed += 1;
+          continue;
+        }
         out.stopped += 1;
+        decided.push(folder);
         continue;
       }
       // The week is read once, so the claim and its release name the same week even across Monday's midnight.
       const at = Date.now();
-      if (!(await claimWeek(store.handle, at))) continue;
+      const claim = await weekClaim(store.handle, at);
+      if (claim !== "ours") {
+        // Claimed already: decided. A claim whose answer is unknown is not (review of #4169): the next run claims
+        // again and reads "taken" if this write did land, so the store is never skipped for the rest of the week.
+        if (claim === "taken") decided.push(folder);
+        else out.failed += 1;
+        continue;
+      }
       out.looked += 1;
-      const data = await readNumbers(store).catch(() => null);
-      if (!data) {
-        // Not read this time, so not a quiet week: the week is let go and counted failed, so a later run that week
-        // tries again, as the monthly email does.
+      const period = weekPeriod(store.handle, at);
+      const read = await summaryInputs(store, emailOff).catch((error) => {
+        console.error("weekly: a read the summary is written from failed", error);
+        return null;
+      });
+      if (!read) {
+        // Not read this time, so not a quiet week, and no ad spend or team read as none: the week is let go and counted
+        // failed, so a later run that week tries again, as the monthly email does.
         await releaseWeek(store.handle, at).catch((error) => console.error("weekly: letting the week go failed", error));
         out.failed += 1;
         continue;
       }
+      const { data, spends, copies } = read;
       // Its rates, for the ranges stores its size are set beside (lib/benchmarks.ts): read here anyway.
       await recordSample(store, data);
       const token = weeklyToken(store.handle);
       const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
-      const spends = await readSpends(store.statsId).catch(() => []);
       const goal = (await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: UNKNOWN_SALES_GOAL_CENTS }))).cents;
       const message = withGoalAvailability(token ? weeklyMessage(store, data, stopUrl, spends, goal) : null, goal);
       if (!message) {
         out.quiet += 1;
+        decided.push(folder);
         continue;
       }
-      // A few sentences written from the same numbers, first, where the creator turned it on (lib/numbers-ask.ts).
-      if (store.weeklyAi && aiAvailableFor(store)) {
+      // A few sentences written from the same numbers, first, where the creator turned it on (lib/numbers-ask.ts). Only on
+      // the week's first try: each lead is one of the creator's monthly AI writing jobs, and a week tried again (a post
+      // or an email that did not go) never takes another for the same summary (Claude 7's MEDIUM on #3297).
+      if (store.weeklyAi && aiAvailableFor(store) && (await firstTryOf(period))) {
         const lead = await weeklySummary(store, data).catch(() => null);
         if (lead) message.text = `In short: ${lead}\n\n${message.text}`;
       }
-      if (chat) await postToChat(chat, `${message.subject}\n\n${forChat(message.text)}`).catch(() => false);
-      if (emailOff) {
-        out.stopped += 1;
-        continue;
+      let missed = false;
+      let unconfirmed = false;
+      if (chat) {
+        const post = await sendPart(period, "posted", () => postToChat(chat, `${message.subject}\n\n${forChat(message.text)}`));
+        if (post === "missed") missed = true;
+        if (post === "unconfirmed") unconfirmed = true;
       }
-      const ok = await sendEmail({ meter: { by: "company" },
-        from: NIMBUS_FROM,
-        to: store.email,
-        subject: message.subject,
-        text: message.text,
-        headers: { "List-Unsubscribe": `<${stopUrl}>` },
-      }).catch(() => false);
-      if (ok) out.sent += 1;
-      else out.failed += 1;
-      // The same email to the team members the owner chose, while they are on
-      // the team in a role that sees the numbers, each with their own stop link.
-      const chosen = await weeklyTeam(store.handle).catch(() => []);
-      if (chosen.length && store.sid) {
-        const team = await readTeam(store.sid).catch(() => null);
-        for (const email of chosen) {
-          const member = team?.members.find((m) => m.email.toLowerCase() === email);
-          if (!member || !can(member.role, "stats")) continue;
-          const own = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&e=${encodeURIComponent(email)}&t=${encodeURIComponent(weeklyMemberToken(store.handle, email))}`;
-          const text = message.text.replace(stopUrl, own).replace("You get this every Monday while your store has visitors.", `You get this because the owner of @${store.handle} added you.`);
-          await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: email, subject: message.subject, text, headers: { "List-Unsubscribe": `<${own}>` } }).catch(() => false);
+      if (!emailOff) {
+        const owner = await sendPart(period, "emailed", () => sendEmailPinned({ meter: { by: "company" },
+          from: NIMBUS_FROM,
+          to: store.email,
+          subject: message.subject,
+          text: message.text,
+          headers: { "List-Unsubscribe": `<${stopUrl}>` },
+          // One key for the period, kept with its sender (sendEmailPinned): a try whose answer was lost is never sent
+          // again by a later try, by the same sender or by the other one, which never saw the key (#3297).
+          idempotencyKey: `numbers-summary:${period.key}`,
+        }), { keyHoldsMs: EMAIL_KEY_HOLDS_MS });
+        if (owner === "missed") missed = true;
+        if (owner === "unconfirmed") unconfirmed = true;
+        if (owner === "sent") {
+          out.sent += 1;
+          // The same email to the team members the owner chose, while they are on
+          // the team in a role that sees the numbers, each with their own stop link:
+          // only with the owner's own, so a week tried again never sends them twice.
+          for (const email of copies) {
+            const own = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&e=${encodeURIComponent(email)}&t=${encodeURIComponent(weeklyMemberToken(store.handle, email))}`;
+            const text = message.text.replace(stopUrl, own).replace("You get this every Monday while your store has visitors.", `You get this because the owner of @${store.handle} added you.`);
+            await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: email, subject: message.subject, text, headers: { "List-Unsubscribe": `<${own}>` } }).catch(() => false);
+          }
         }
+      }
+      if (missed) {
+        // What did not go is sent by a later run, a bounded number of times; what went, or may have gone, is not sent again.
+        // Only a week let go for another try is left undecided (decided.push below otherwise), so the next run reaches it.
+        out.failed += 1;
+        if (!(await tryPeriodAgain(period))) decided.push(folder);
+      } else {
+        decided.push(folder);
+        // Only what may have gone is left, and it is never sent blind: the week stays claimed, and no run reads it again.
+        if (unconfirmed) out.unconfirmed += 1;
+        else if (emailOff) out.stopped += 1;
       }
     }
     console.log(`weekly: ${JSON.stringify(out)}`);
@@ -142,6 +204,31 @@ export async function GET(request: NextRequest) {
     console.error("weekly emails failed", error);
     return Response.json({ ok: false, error: "failed", ...out }, { status: 500 });
   } finally {
+    await noteSeen("weekly", week, decided).catch((error) => console.error("weekly: keeping the stores decided failed", error));
     await releaseMark("nl:weekly:lock", lock);
   }
+}
+
+/**
+ * What the week's summary is written from, read exactly: the numbers (null when they could not be read), the ad
+ * spend (null when a part could not be read: said as not read, never as none), and the team members the owner chose
+ * who are on the team in a role that sees the numbers. Throws when the team could not be read, so it is never taken
+ * as none (rule 24).
+ */
+async function summaryInputs(store: Store, emailOff: boolean): Promise<{ data: StatsData; spends: AdSpend[] | null; copies: string[] } | null> {
+  const data = await readNumbers(store);
+  if (!data) return null;
+  // Every line, or null when a part could not be read (main's spendsForReport, review of #4027): the email then leaves
+  // the ad figures out and says the spend was not read, never $0, and the rest of the summary still goes. Chosen over
+  // this branch's earlier throw (which let the whole week go) by the coordinator on 15 Nov 2026 (option A).
+  const spends = await spendsForReport(store.statsId, null);
+  if (emailOff) return { data, spends, copies: [] };
+  const chosen = await weeklyTeam(store.handle);
+  if (!chosen.length || !store.sid) return { data, spends, copies: [] };
+  const members = await readTeamMembers(store.sid);
+  const copies = chosen.filter((email) => {
+    const member = members.find((m) => m.email.toLowerCase() === email);
+    return Boolean(member && can(member.role, "stats"));
+  });
+  return { data, spends, copies };
 }

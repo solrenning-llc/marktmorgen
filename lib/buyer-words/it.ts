@@ -149,6 +149,9 @@ export const it: BuyerWords = {
   unitSaving: (percent) => `risparmi il ${percent}%`,
   chooseOptionFor: (title) => `Scegli un'opzione per ${title}`,
   chooseOne: "Scegline una",
+  /** The checkout's billing country field (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate). */
+  billingCountry: "Paese da cui acquisti",
+  chooseCountry: "Scegli il tuo paese",
   optionFromLink: (label) => `Sei arrivato per ${label}, quindi è scelta qui sotto. Puoi sceglierne un'altra.`,
   recommended: "Consigliato",
   recommendedAfter: " (consigliato)",
@@ -189,12 +192,15 @@ export const it: BuyerWords = {
   whoAnswers: (store) =>
     `${store} è il venditore e risponde di ciò che compri, dei rimborsi e dell'eventuale diritto di recesso. Marktmorgen ospita le pagine del negozio e non è parte del contratto di vendita.`,
   noPaymentsTitle: "Questo negozio non può ancora accettare pagamenti.",
-  noPaymentsBody: (store) => `I prezzi qui sopra sono reali, ma qui nulla può addebitare una carta. Per acquistare, scrivi direttamente a ${store}.`,
-  noPaymentsBodyOne: (store) => `Il prezzo qui sopra è reale, ma qui nulla può addebitare una carta. Per acquistare, scrivi direttamente a ${store}.`,
+  noPaymentsBody: "I prezzi qui sopra sono reali, ma qui nulla può addebitare una carta.",
+  noPaymentsBodyOne: "Il prezzo qui sopra è reale, ma qui nulla può addebitare una carta.",
+  noPaymentsWrite: (store) => `Scrivi a ${store}`,
 
   notices: {
     soldout: { title: "È appena andato esaurito", body: "L'ultimo è stato venduto un attimo prima che premessi acquista. Non è stato addebitato nulla." },
     busy: { title: "Qualcun altro lo sta acquistando proprio ora", body: "Non è stato addebitato nulla. Premi di nuovo acquista tra un momento." },
+    abroad: { title: "Non ancora acquistabile dall'UE o dal Regno Unito", body: "Non possiamo ancora addebitare l'IVA che l'Unione europea e il Regno Unito richiedono per questo prodotto, quindi non è stato addebitato nulla. Se ti trovi fuori da questi paesi, scegli il tuo paese e riprova." },
+    country: { title: "Scegli il paese da cui acquisti", body: "Non è stato addebitato nulla. Scegli il tuo paese accanto al pulsante di acquisto, poi premi di nuovo acquista." },
     slow: { title: "Troppi tentativi in pochi minuti", body: "Non è stato addebitato nulla. Attendi qualche minuto, poi premi di nuovo acquista." },
     error: { title: "Non è stato possibile aprire la pagina di pagamento", body: "Non è stato addebitato nulla. Riprova tra un momento." },
     nocharges: { title: "Questo negozio non può accettare pagamenti con carta in questo momento", body: "Non è stato addebitato nulla. Riprovare non servirà finché il negozio non avrà risolto il problema." },
@@ -202,6 +208,10 @@ export const it: BuyerWords = {
     "paypal-declined": {
       title: "PayPal non ha accettato il pagamento",
       body: "Non è stato addebitato nulla. Riprova con un'altra carta o un altro conto su PayPal, oppure paga qui con la carta.",
+    },
+    "paypal-confirming": {
+      title: "Questo pagamento PayPal è in fase di conferma",
+      body: "Un'altra scheda o un secondo clic lo sta completando ora. Controlla la tua email per la ricevuta prima di pagare di nuovo. Se PayPal mostra un addebito e non arriva nessuna ricevuta, scrivi al negozio rispondendo alla ricevuta di PayPal.",
     },
     "paypal-error": {
       title: "Non è stato possibile associare quel pagamento PayPal a questo negozio",

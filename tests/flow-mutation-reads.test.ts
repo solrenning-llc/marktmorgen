@@ -1,4 +1,4 @@
-import { FlowWriteUnconfirmed, saveFlow, removeFlow, readFlows } from "@/lib/flows";
+import { FlowWriteUnconfirmed, FlowsBusy, saveFlow, removeFlow, readFlows } from "@/lib/flows";
 import { setUpStarters } from "@/lib/mail-starters";
 import { keepSending } from "@/lib/mail-reuse";
 import type { Store } from "@/lib/store";
@@ -18,13 +18,15 @@ async function main() {
   let writes = 0;
   let writeReply: unknown = normal;
   let applyWrite = false;
+  // A write of the list: a SET, or the write made only over what was read (lib/flows.ts, WRITE_FLOWS_IF; Codex G2 on #1927).
+  const writesList = (command: (string | number)[]) => (command[0] === "SET" && command[1] === key) || (command[0] === "EVAL" && command[3] === key);
   redis.pipeline = async commands => {
-    writes += commands.filter(command => command[0] === "SET" && command[1] === key).length;
+    writes += commands.filter(writesList).length;
     if (commands.some(command => command[0] === "GET" && command[1] === key) && reply !== normal) {
       if (reply instanceof Error) throw reply;
       return reply as unknown[];
     }
-    if (commands.some(command => command[0] === "SET" && command[1] === key) && writeReply !== normal) {
+    if (commands.some(writesList) && writeReply !== normal) {
       if (applyWrite) await original.call(redis, commands);
       if (writeReply instanceof Error) throw writeReply;
       return writeReply as unknown[];
@@ -82,6 +84,15 @@ async function main() {
     is("removal preserves remaining sequences", (await readFlows(listId)).length, 2);
     await original.call(redis, [["DEL", key]]);
     is("confirmed absent list permits creation", (await saveFlow(store, raw)).ok, true);
+    // Three saves in a row losing the compare-and-set wrote nothing: said as busy, never as "may already have happened"
+    // (Claude 1 cloud's LOW 2 on #1927); still a FlowWriteUnconfirmed, so every caller that handles it is unchanged.
+    const before = JSON.stringify([first, second]);
+    await original.call(redis, [["SET", key, before]]);
+    writeReply = [0];
+    let busy: unknown = null;
+    try { await saveFlow(store, raw); } catch (error) { busy = error; }
+    writeReply = normal;
+    is("three lost compare-and-sets: busy, nothing written", [typeof FlowsBusy === "function" && busy instanceof FlowsBusy, busy instanceof FlowWriteUnconfirmed, (await original.call(redis, [["GET", key]]))[0]], [true, true, before]);
   } finally { redis.pipeline = original; }
   done();
 }

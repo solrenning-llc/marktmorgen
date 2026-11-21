@@ -76,22 +76,23 @@ async function outcome<T>(run: () => Promise<T>): Promise<T | "rejected"> {
   }
 }
 
-const tests = (commands: (string | number)[][]) => commands.length === 2 && commands[1]?.[0] === "INCR" && String(commands[1]?.[1]).startsWith("nl:rl:hooks:test:");
+const tests = (commands: (string | number)[][]) => commands.length === 2 && commands[0]?.[0] === "INCR" && String(commands[0]?.[1]).startsWith("nl:rl:hooks:test:") && commands[1]?.[0] === "EXPIRE";
 const endpointsTold = (commands: (string | number)[][]) => commands[0]?.[0] === "SADD" && String(commands[0]?.[1]).includes(":eps:");
 const dayPlace = (commands: (string | number)[][]) => commands[0]?.[0] === "ZADD" && String(commands[0]?.[1]).includes(":day:");
 const skippedDay = (commands: (string | number)[][]) => commands[0]?.[0] === "INCR" && String(commands[0]?.[1]).includes(":skip:");
 const dayNumber = (commands: (string | number)[][]) => commands[0]?.[0] === "INCR" && String(commands[0]?.[1]).includes(":seq:");
 
-/** Replies the minute's [SET NX, INCR] of tests must never be read from. */
+/** Replies a window count (lib/window-count.ts: INCR, then EXPIRE NX) must never be read from. */
 const BAD_COUNTERS: [string, unknown][] = [
-  ["a count that is null", ["OK", null]],
-  ["a count written as text", ["OK", "1"]],
-  ["a fractional count", ["OK", 0.5]],
-  ["a negative count", ["OK", -1]],
-  ["a count that is an object", ["OK", { result: 1 }]],
-  ["a count that is true", ["OK", true]],
-  ["a reply missing the count", ["OK"]],
-  ["a third, unasked-for reply", ["OK", 1, 1]],
+  ["an EXPIRE answered false", [1, false]],
+  ["a count that is null", [null, 1]],
+  ["a count written as text", ["1", 1]],
+  ["a fractional count", [0.5, 1]],
+  ["a negative count", [-1, 1]],
+  ["a count that is an object", [{ result: 1 }, 1]],
+  ["a count that is true", [true, 1]],
+  ["a reply missing the EXPIRE's answer", [1]],
+  ["a third, unasked-for reply", [1, 1, 1]],
   ["a reply that is not a list", { result: 1 }],
   ["a Redis that cannot be asked", "throw"],
 ];
@@ -145,9 +146,9 @@ async function main(): Promise<void> {
     const got = await outcome(() => sendTest(shop, endpoint));
     is(`sendTest, ${label}: refused, the endpoint not called`, [got === "rejected" ? got : got.ok ? "sent" : got.reason, lookedUp.length - before], [reply === "throw" ? "rejected" : "limited", 0]);
   }
-  rule = { when: tests, reply: ["OK", 11] };
+  rule = { when: tests, reply: [11, 1] };
   is("sendTest: one past the minute's limit is limited, as before", await outcome(() => sendTest(shop, endpoint)), { ok: false, reason: "limited" });
-  for (const [label, reply] of [["the minute's last one (10)", ["OK", 10]], ["the real counter", null]] as [string, unknown][]) {
+  for (const [label, reply] of [["the minute's last one (10)", [10, 1]], ["the real counter", null]] as [string, unknown][]) {
     rule = reply ? { when: tests, reply } : null;
     const before = lookedUp.length;
     const got = await sendTest(shop, endpoint);
@@ -162,9 +163,9 @@ async function main(): Promise<void> {
     const got = await outcome(() => resendDelivery(shop, failed));
     is(`resendDelivery, ${label}: refused, the endpoint not called`, [got === "rejected" ? got : got.ok ? "sent" : got.reason, lookedUp.length - before], [reply === "throw" ? "rejected" : "limited", 0]);
   }
-  rule = { when: tests, reply: ["OK", 11] };
+  rule = { when: tests, reply: [11, 1] };
   is("resendDelivery: one past the minute's limit is limited, as before", await outcome(() => resendDelivery(shop, failed)), { ok: false, reason: "limited" });
-  rule = { when: tests, reply: ["OK", 10] };
+  rule = { when: tests, reply: [10, 1] };
   {
     const before = lookedUp.length;
     const got = await resendDelivery(shop, failed);

@@ -382,6 +382,9 @@ export async function readAccount(accountId: string): Promise<AccountState> {
 
   // Read exactly (CX-123 rule 24): an unknown shape throws, so the studio routes
   // answer "stripe=error" and write nothing, and the checkup says "not-checked".
+  // Rule 30: only the account asked about decides; another account's answer, or one
+  // naming none, would open or close this store's checkout on someone else's state.
+  if (objectOf(account)?.id !== accountId) unknownShape("for another account");
   const status = cardPaymentsStatus(account);
   const deadline = deadlineStatus(account);
 

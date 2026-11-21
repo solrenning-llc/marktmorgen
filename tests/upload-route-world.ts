@@ -11,6 +11,12 @@ export const storeFolder=async()=>FOLDER;
 export const storeRef=()=>'owner@example.test';
 export const ownsDeliveryId=()=>state.owns;
 export const readKind=async()=>[{course:{id:'course-1'}}];
+/** No product here has a file yet (lib/catalog.ts readDelivery, deliveredFile), so the door's lock check (#3936) lets every open through. */
+export const readDelivery=async()=>null;
+export const deliveredFile=()=>null;
+/** No session here is locked (lib/two-step.ts lockedFor). */
+export const lockedFor=async()=>false;
+export const refusedJson=(reason:string)=>Response.json({ok:false,error:reason},{status:403});
 export const ITEM_ID_PATTERN=/^[A-Za-z0-9_-]{1,40}$/;
 export const VIDEO_TYPES=['video/mp4'];
 export const readCourses=async()=>new Map([['course-1',{id:'course-1'}]]);

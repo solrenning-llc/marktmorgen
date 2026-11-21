@@ -10,28 +10,31 @@ import { ReportDownload } from "@/components/report-download";
 
 const count = (n: number) => n.toLocaleString("en-US");
 
-export function RevenueQuality({ data, range, spends }: { data: StatsData; range: "d7" | "d30" | "d90"; spends: AdSpend[] }) {
+/** spends undefined: the ad spend could not be read; every figure that needs it reads "—", never as no spend. */
+export function RevenueQuality({ data, range, spends }: { data: StatsData; range: "d7" | "d30" | "d90"; spends: AdSpend[] | undefined }) {
   const days = range === "d7" ? data.days.slice(-7) : range === "d30" ? data.days.slice(-30) : data.days;
   if (data.sales !== "ok" || !days.length) return null;
-  const spent = spendBy(spends, days[0].date, days[days.length - 1].date);
-  const rows = channelCashflows(data, range, data.channels?.[range] ?? [], spent.channels, days[0].date, days[days.length - 1].date)
+  const spent = spends === undefined ? null : spendBy(spends, days[0].date, days[days.length - 1].date);
+  const rows = channelCashflows(data, range, data.channels?.[range] ?? [], spent?.channels ?? new Map<string, number>(), days[0].date, days[days.length - 1].date)
+    .map((r) => (spent ? { ...r, adSpend: r.adSpend as number | null } : { ...r, adSpend: null, afterAds: null, backPerOne: null }))
     .filter((r) => r.receipts === null || r.refunds === null || r.receipts || r.refunds || r.adSpend);
   if (!rows.length) return null;
   const money = (amount: number | null) => amount === null ? "—" : formatMoney(amount, data.currency);
   const received = rows.every(r => r.receipts !== null) ? rows.reduce((sum, r) => sum + (r.receipts ?? 0), 0) : null;
   const returned = rows.every(r => r.refunds !== null) ? rows.reduce((sum, r) => sum + (r.refunds ?? 0), 0) : null;
-  const left = returned === null || received === null ? null : received - returned - spent.total;
+  const left = returned === null || received === null || spent === null ? null : received - returned - spent.total;
   const tiles = [
     { name: "Payments received", value: money(received) },
     { name: "Refunds recorded", value: money(returned) },
-    { name: "Ad spend recorded", value: money(spent.total) },
+    { name: "Ad spend recorded", value: money(spent?.total ?? null) },
     { name: "After refunds and ads", value: money(left) },
   ];
   return (
     <section className="mt-6 rounded-[12px] bg-paper px-4 py-4 ring-1 ring-line" aria-labelledby="numbers-cashflow">
       <h3 id="numbers-cashflow" className="text-sm font-bold text-ink">What remains after refunds and ads</h3>
       <p className="mt-1 text-xs text-ink-soft">Payments received in these days, including renewals and later installments. This is before payment fees, tax, affiliate commissions and your other costs; it is not profit.</p>
-      {left === null ? <p className="mt-2 text-sm text-ink-soft" role="status">Some payments or refunds could not be read in full, or a refund could not be matched to this store. The result after refunds waits for complete figures; payment totals also wait when their reading is incomplete. Recorded ad spend remains available.</p> : null}
+      {spent === null ? <p className="mt-2 text-sm text-ink-soft" role="status">Ad spend could not be read just now, so the ad spend and the result after ads show &ldquo;&mdash;&rdquo;. Payments and refunds are as read.</p> : null}
+      {left === null && spent !== null ? <p className="mt-2 text-sm text-ink-soft" role="status">Some payments or refunds could not be read in full, or a refund could not be matched to this store. The result after refunds waits for complete figures; payment totals also wait when their reading is incomplete. Recorded ad spend remains available.</p> : null}
       <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {tiles.map((t) => <div key={t.name}><dt className="text-xs text-ink-soft">{t.name}</dt><dd className="mt-1 text-lg font-bold tabular-nums text-ink">{t.value}</dd></div>)}
       </dl>

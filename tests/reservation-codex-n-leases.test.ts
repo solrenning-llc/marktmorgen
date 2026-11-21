@@ -16,8 +16,19 @@ test("Codex N's SG2(17) remaining-callers row is released and no longer reserves
   assert.equal(rows.some((r) => r.file === "lib/store-join.ts"), false, "lib/store-join.ts is still reserved in codex.md");
 });
 
-test("Codex N's #2674 extension row stays, with lib/inbound-mail.ts", () => {
-  assert.ok(held("SG2(17) #2674 extension").includes("lib/inbound-mail.ts"));
+// On 21/11/2026 the coordinator (Claude 5 ibqho, 20261121T220609Z-claude-5-ibqho-ba0a) released lib/inbound-mail.ts
+// for #3067: #2674's hunk there is superseded by main and already conflicts with it (Claude 5 iacVn3r, #2674's adopter,
+// 20261121T220553Z-claude-5-f44e); #2674 re-reserves it on return if it still needs it. The row keeps its test file.
+test("Codex N's #2674 extension row stays with its test file, and lib/inbound-mail.ts is released for #3067", () => {
+  assert.ok(held("SG2(17) #2674 extension").includes("tests/email-essential-callers.test.ts"));
+  assert.equal(rows.some((r) => r.file === "lib/inbound-mail.ts"), false, "lib/inbound-mail.ts is still reserved in codex.md");
+});
+
+test("Codex H2's SES row, whose port went to #3067 on 09/11 (C1-20261109-1603-TODOS-71), is released", () => {
+  assert.deepEqual(held("SES/CX123(24): require exact deduplication claim evidence"), []);
+  // Codex H2's other SES rows (codex/h-sns-recipient-shape) are another unit and stay.
+  assert.ok(held("SES/CX123(24): recipient list must be exact").includes("lib/sns.ts"));
+  assert.equal(rows.some((r) => r.file === "tests/ses-dedup-ack-world.ts"), false, "tests/ses-dedup-ack-world.ts is still reserved in codex.md");
 });
 
 test("Codex A3's row for the closed #2338 (codex/a3-c97a-email) is released", () => {

@@ -9,3 +9,5 @@ export * from "./community-mail-read-world";
 export const batchCalls: string[] = [];
 export const sendBatch = async (_messages: unknown[], key: string) => { batchCalls.push(key); return "retry" as const; };
 export const sendListBatch = async (_messages: unknown[], key: string) => { batchCalls.push(key); return "waiting" as const; };
+/** The same answer through sendListBatchOutcome (lib/email.ts), which community announcements call. */
+export const sendListBatchOutcome = sendListBatch;

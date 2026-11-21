@@ -27,9 +27,9 @@ Each course's pairs are taken with the students seen most recently first (the ro
 
 - `course-drip-run`: Store $0.0347, Studio $0.1128, Scale $0.2845 a month (each run at most the whole email figure of today's pairs plus the catch-up, each pair its row, blocked check, again check and mark; two ranges and the email-used GET a store a run);
 - `drip-start-read`: Store $0.0237, Studio $0.0949, Scale $0.2532 a month (the store's monthly units for these reads, each at most a later page's cost, held over `dripStartRead`, which includes a moved start's index writes);
-- a paid order's re-buy note (#3369's `noteBoughtAgain`, with this index's `indexBoughtAgain`): priced by its own line in Claude 6's PR for #3369's note, which caps or batches its reads; that line is not in main yet, so this part is not priced here and is not zero: #3344 enters after it (coordinator, 21 November 2026).
+- a paid order's re-buy note (`order-bought-again`, #5034's line, on every order of each plan's figure and the trial's): #3369's `noteBoughtAgain` (an HGET and an SADD a course, a DEL, the note mark) and, inside the same line, this index's `indexBoughtAgain` (`ORDER_BOUGHT_AGAIN_INDEX`: one MGET of the cards, ZMSCORE, the room at TAKE's four commands, ZADD and the stores' SADD, with `MAX_DELIVERED` courses' cards and pairs on the wire), each held over the real code in `tests/note-bought-again-cost.test.ts`.
 
-A refunded Store first year with all of them: US$64.1473, under the owner's US$66 ceiling (`tests/email-logo-region.test.ts`, `tests/drip-index-start-read.test.ts`).
+A refunded Store first year with all of them: US$64.2702, under the owner's US$66 ceiling (`tests/email-logo-region.test.ts`, `tests/drip-index-start-read.test.ts`).
 
 **Tests.** `tests/drip-index-start-read.test.ts` holds the five invariants of the merge (the exact read, the units before the read, a re-date only on a start read, the early emails forgotten on a re-buy, both lines summed) and the access end kept on a re-dated row; each was shown failing by a mutation of the code. #3369's tests (`tests/course-drip-repurchase-emails.test.ts`, `tests/drip-start-month.test.ts` and the rest) run over the index with their assertions unchanged.
 

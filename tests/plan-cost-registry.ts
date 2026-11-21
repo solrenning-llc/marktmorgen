@@ -342,8 +342,23 @@ export const ORDER_BOUGHT_AGAIN_BYTES = MAX_DELIVERED * STUDENT_ROW_BYTES;
  * what Redis keeps beside a key; kept as long as a sent mark (NOTE_MARK_SECONDS, held in the cost test). */
 export const ORDER_BOUGHT_AGAIN_MARK_BYTES = 256;
 export const ORDER_BOUGHT_AGAIN_MARK_SECONDS = 40 * 24 * 60 * 60;
+/**
+ * The drip index's part of the same note (lib/learn.ts indexBoughtAgain, #3344 merged with #3369): the student's pairs
+ * written into the store's drip index from the purchase day, so the drip job finds a course bought again and not opened
+ * since. At most MAX_DELIVERED courses: their cards in one MGET, which pairs are already indexed (ZMSCORE), the room
+ * taken (TAKE's four commands: the script and its calls), the ZADD and the stores' SADD. On the wire: each course's card
+ * at its largest and every module's pair twice (ZMSCORE and ZADD); the same figures as DRIP_CARD_MAX_BYTES and
+ * DRIP_PAIR_BYTES below, typed here because this line is read first (held equal in tests/drip-index-start-read.test.ts).
+ * Held over the commands the real code sends in tests/note-bought-again-cost.test.ts.
+ */
+export const ORDER_BOUGHT_AGAIN_INDEX_COMMANDS = 1 + 1 + 4 + 2;
+export const ORDER_BOUGHT_AGAIN_INDEX_CARD_BYTES = 256 + MAX_MODULES * (12 + 3 * MAX_ITEM_TITLE + 48) + ',"e":000000000000,"k":[]'.length + 12 * '{"at":000000000000,"before":000000000000},'.length;
+export const ORDER_BOUGHT_AGAIN_INDEX_PAIR_BYTES = 32 + 1 + 32 + 1 + 12 + 24;
+export const ORDER_BOUGHT_AGAIN_INDEX_BYTES = MAX_DELIVERED * (ORDER_BOUGHT_AGAIN_INDEX_CARD_BYTES + 2 * MAX_MODULES * ORDER_BOUGHT_AGAIN_INDEX_PAIR_BYTES);
+export const ORDER_BOUGHT_AGAIN_INDEX = ORDER_BOUGHT_AGAIN_INDEX_COMMANDS * COMMAND + ORDER_BOUGHT_AGAIN_INDEX_BYTES * DB_BYTE;
 export const ORDER_BOUGHT_AGAIN = ORDER_BOUGHT_AGAIN_COMMANDS * COMMAND + ORDER_BOUGHT_AGAIN_BYTES * DB_BYTE
-  + ORDER_BOUGHT_AGAIN_MARK_BYTES * DB_BYTE_MONTH * (ORDER_BOUGHT_AGAIN_MARK_SECONDS / (30 * 86_400));
+  + ORDER_BOUGHT_AGAIN_MARK_BYTES * DB_BYTE_MONTH * (ORDER_BOUGHT_AGAIN_MARK_SECONDS / (30 * 86_400))
+  + ORDER_BOUGHT_AGAIN_INDEX;
 /**
  * What an order leaves that outlives its store, for its whole life (18
  * October 2026): the buyers' library entries it writes, the buyer's and a
@@ -2223,12 +2238,12 @@ export const COST_LINES: CostLine[] = [
     feature: "A paid order's note that its buyer bought a course again, for the drip job (lib/learn.ts, noteBoughtAgain; #3369)",
     monthlyUsd: (tier) => ORDERS_INCLUDED[tier] * ORDER_BOUGHT_AGAIN,
     sources: [
-      { file: "lib/learn.ts", names: ["noteBoughtAgain", "againKey"] },
+      { file: "lib/learn.ts", names: ["noteBoughtAgain", "againKey", "indexBoughtAgain"] },
       { file: "lib/purchase-email.ts", names: ["noteBoughtAgain", "noteMarkKey", "NOTE_MARK_SECONDS"] },
       { file: "lib/bundle-rules.ts", names: ["MAX_DELIVERED"] },
       { file: "lib/api-read-rules.ts", names: ["STUDENT_ROW_BYTES"] },
     ],
-    basis: "Every order of the plan's figure at its worst: every product it hands over a course whose student row for the buyer holds an earlier day, so MAX_DELIVERED HGETs each reading a row of STUDENT_ROW_BYTES, as many SADDs and one DEL, with the GET and SET of the order's note mark and the mark kept 40 days (ORDER_BOUGHT_AGAIN_COMMANDS, held over the real code in tests/note-bought-again-cost.test.ts). Once an order: under the confirmation's claim, and a later pass reads the mark instead (tests/course-repurchase-confirm-note.test.ts). Orders past the plan are not sold, so none is paid past it; the trial's orders pay it in nonPayingWorst. The drip job's SMEMBERS and SREM of the set are its run's, and the person's erasure's SREM is the erasure's.",
+    basis: "Every order of the plan's figure at its worst: every product it hands over a course whose student row for the buyer holds an earlier day, so MAX_DELIVERED HGETs each reading a row of STUDENT_ROW_BYTES, as many SADDs and one DEL, with the GET and SET of the order's note mark and the mark kept 40 days (ORDER_BOUGHT_AGAIN_COMMANDS, held over the real code in tests/note-bought-again-cost.test.ts). Once an order: under the confirmation's claim, and a later pass reads the mark instead (tests/course-repurchase-confirm-note.test.ts). Orders past the plan are not sold, so none is paid past it; the trial's orders pay it in nonPayingWorst. The drip job's SMEMBERS and SREM of the set are its run's, and the person's erasure's SREM is the erasure's. With it, the drip index's part (lib/learn.ts indexBoughtAgain, #3344): MAX_DELIVERED courses' cards in one MGET, ZMSCORE, the room at TAKE's four commands, the ZADD and the stores' SADD, each card at its largest and every module's pair twice on the wire (ORDER_BOUGHT_AGAIN_INDEX, held over the real code in the same test).",
   },
   {
     id: "orders",

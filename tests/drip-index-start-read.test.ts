@@ -217,6 +217,40 @@ async function main() {
     stripe.fail = false;
   }
 
+  part("7. What a paid order's re-buy note costs in the drip index stays inside the line that prices it");
+  {
+    const R = await import("./plan-cost-registry");
+    const { MAX_DELIVERED } = await import("@/lib/bundle-rules");
+    const { MAX_MODULES } = await import("@/lib/course");
+    is("its card and pair bytes are the drip run's own", [R.ORDER_BOUGHT_AGAIN_INDEX_CARD_BYTES, R.ORDER_BOUGHT_AGAIN_INDEX_PAIR_BYTES], [R.DRIP_CARD_MAX_BYTES, R.DRIP_PAIR_BYTES]);
+    is("its bytes cover MAX_DELIVERED courses", R.ORDER_BOUGHT_AGAIN_INDEX_BYTES, MAX_DELIVERED * (R.DRIP_CARD_MAX_BYTES + 2 * MAX_MODULES * R.DRIP_PAIR_BYTES));
+    // Priced with the note (#5034's line order-bought-again, on every order of each plan's figure and the trial's).
+    const note = R.ORDER_BOUGHT_AGAIN_COMMANDS * R.COMMAND + R.ORDER_BOUGHT_AGAIN_BYTES * R.DB_BYTE + R.ORDER_BOUGHT_AGAIN_MARK_BYTES * R.DB_BYTE_MONTH * (R.ORDER_BOUGHT_AGAIN_MARK_SECONDS / (30 * 86_400));
+    is("priced in order-bought-again, beside the note", R.ORDER_BOUGHT_AGAIN_INDEX > 0 && Math.abs(R.ORDER_BOUGHT_AGAIN - (note + R.ORDER_BOUGHT_AGAIN_INDEX)) < 1e-15, true);
+    is("the line names indexBoughtAgain", R.COST_LINES.find((line) => line.id === "order-bought-again")?.sources.some((src) => src.file === "lib/learn.ts" && src.names.includes("indexBoughtAgain")), true);
+    // Measured: three courses of one order, each a re-buy with its card kept, every command of the index part counted.
+    const ids = ["7", "6", "5"].map((c) => c.repeat(32));
+    await fresh([]);
+    for (const id of ids) {
+      const other = { ...course, id } as Course;
+      await registerDrip(store, { ...product, id: `prod_${id.slice(0, 8)}`, course: { id, lessons: 3 } } as unknown as Listing, other);
+      await redis.pipeline([["HSET", `nl:course:${id}:students`, emailKey(buyer), JSON.stringify({ e: buyer, s: first, l: first })]]);
+    }
+    const sent: (string | number)[][] = [];
+    const counting = redis.pipeline;
+    redis.pipeline = async (list) => {
+      sent.push(...list);
+      return counting(list);
+    };
+    const noted = await noteBoughtAgain(store, ids, buyer, second);
+    redis.pipeline = counting;
+    is("the note is written", noted, true);
+    // The index part: what comes after the note's own HGETs, SADDs and DEL (#3369's).
+    const own = 2 * ids.length + 1;
+    const index = sent.length - own;
+    is(`the index part's commands (${index}) within the formula (${R.ORDER_BOUGHT_AGAIN_INDEX_COMMANDS}), a script billed at TAKE's four`, index > 0 && index <= R.ORDER_BOUGHT_AGAIN_INDEX_COMMANDS, true);
+    is("one MGET of every card, whatever the courses", sent.filter((c) => c[0] === "MGET").length, 1);
+  }
   done();
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

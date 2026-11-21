@@ -106,6 +106,13 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      # The pricing optimization's solver runs on demand in the tests (owner, 20/11/2026: its input and output are not
+      # stored), from the exact versions in scripts/requirements-solver.txt, in an environment of its own.
+      - name: Solver for the reports generated on demand
+        run: |
+          python3 -m venv "$RUNNER_TEMP/solver"
+          "$RUNNER_TEMP/solver/bin/pip" install -r scripts/requirements-solver.txt
+          echo "MILP_PYTHON=$RUNNER_TEMP/solver/bin/python" >> "$GITHUB_ENV"
       # Share i of 4 of every tests/*.test.ts (file n goes to share n mod 4 + 1 by sorted name); share 1 also checks
       # the browser bundles. The log's TEST_SHARD line says how many files this share ran out of all of them.
       - name: Behavior regressions

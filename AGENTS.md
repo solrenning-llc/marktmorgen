@@ -14,7 +14,13 @@ Pedido do dono, nas palavras dele: "HÁ UM SÉRIO PROBLEMA. VCS NAO SE COMUNICAM
 
 (d) **Confirmação de leitura.** Toda mensagem é confirmada (`confirmar`) assim que lida, e respondida quando pede resposta. Mensagem sem confirmação continua acordando o destinatário e, depois de 30 minutos, aparece como atrasada para os dois lados (`pendentes`).
 
-(e) **Revisão.** Sempre de uma família diferente da do autor (FQ (2)). Cada pedido é entregue a um revisor só, do mais antigo para o mais novo. A preferência por um revisor (`--para`) vale por 30 minutos e só enquanto ele tem cota; depois, qualquer outra família com cota o pega. O veredito chega à caixa do autor.
+(e) **Revisão.** Sempre de uma família diferente da do autor (FQ (2)) e sem nenhum commit no PR, nem de sessão antiga, nem de junção do main. Pedido do dono (21/11/2026, por volta das 03h55 Fortaleza, depois de uma família com commit no #3929 receber o pedido de revisão dele), nas palavras dele: "gera regra para erro assim nao ocorrer mais, para quem pedir revisao só pedir a quem realmente pode fazer". Por isso:
+- o pedido de revisão é feito com `pedir-revisao`, que lê os commits do PR além do main e deixa de fora, sozinho, toda família com commit nele (pelo trailer `Claude-Session`, pelo nome "Claude N" do autor e, sem trailer, pelo Codex); quem pede confere a lista "podem revisar" que ele mostra e acrescenta com `--exclui` a família de uma sessão "sem família conhecida";
+- na hora de pegar, `pegar-revisao` confere de novo, porque o head pode ter mudado, e devolve sozinho o pedido à família que tem commit nele;
+- um pedido feito fora do correio (no PR ou no canal) só nomeia revisor de família sem commit no PR, conferida nos commits do PR, e diz quais famílias têm commits;
+- quem pegar uma revisão e achar commit da própria família no PR devolve na hora (`devolver-revisao`), sem revisar.
+
+Cada pedido é entregue a um revisor só, do mais antigo para o mais novo. A preferência por um revisor (`--para`) vale por 30 minutos e só enquanto ele tem cota; depois, qualquer outra família com cota o pega. O veredito chega à caixa do autor.
 
 (f) **Fila, na ordem.** Os enfileiramentos respeitam a fila: `pegar-fila` só entrega o pedido mais antigo ainda aberto, um de cada vez, a uma família diferente da do autor, que confere as condições de FQ (1), inclusive o `estado-pr` do PR e os comentários do próprio PR, e enfileira, ou conclui como `recusado`, com o motivo. Nenhum pedido mais novo passa na frente. Enquanto o primeiro da fila tiver HOLD, ou CLAIMED de outra família, no correio, `pegar-fila` não o entrega e a fila espera. Uma tomada sem conclusão em 30 minutos, ou de quem ficou sem cota, cai, e o pedido volta a ser o primeiro da fila.
 

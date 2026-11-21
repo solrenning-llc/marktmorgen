@@ -1995,12 +1995,12 @@ export class MemoryRedis {
         // lib/paypal-payouts.ts KEEP_OPEN_IF_LIVE: an open PayPal batch written (and its store watched) only while the
         // store is live; -1, nothing written, when it is gone, being erased or (from before ids) its owner's record is
         // another store's.
-        if (key.startsWith("-- marktmorgen:paypal-open-live:v2\n") && args[0] === "4" && args.length === 10) {
-          const [, live, erasing, open, stores, field, batch, value, sid, statsId] = args;
+        if (key.startsWith("-- marktmorgen:paypal-open-live:v3\n") && args[0] === "4" && args.length === 11) {
+          const [, live, erasing, open, stores, field, batch, value, sid, statsId, ref] = args;
           this.scriptCalls += 2;
           if (this.run(["HGET", erasing, field]) !== null) return -1;
           if (statsId === "") {
-            if (Number(this.run(["EXISTS", live])) !== 1) return -1;
+            if (this.run(["GET", live]) !== ref) return -1;
           } else {
             const raw = this.run(["GET", live]);
             if (raw === null) return -1;

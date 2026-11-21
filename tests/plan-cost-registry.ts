@@ -1230,7 +1230,7 @@ export const PAYPAL_PRESS_SECONDS = 60;
  */
 export function paypalPressCost(bookCommands: number): number {
   return CALL + SHAPES.wait.cpu * CPU_SECOND + PAYPAL_PRESS_SECONDS * MEMORY_SECOND
-    + (PAYPAL_PRESS_COMMANDS + bookCommands + TAKE_COMMANDS) * COMMAND + 20_000 * DB_BYTE;
+    + (PAYPAL_PRESS_COMMANDS + bookCommands + TAKE_COMMANDS) * COMMAND + 21_024 * DB_BYTE; // +1 KiB for the exact owner ref passed/read by paypal-open-live:v3 (Codex L).
 }
 /** One press at the most: its book read at the caps. */
 export const PAYPAL_PRESS = paypalPressCost(PAYPAL_PRESS_BOOK_COMMANDS);

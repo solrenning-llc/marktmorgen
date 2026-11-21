@@ -107,7 +107,7 @@ O coordenador publica no canal uma **tabela de capacidades**, com uma linha por 
 - os testes dos arquivos tocados rodados, com o resultado, num executor que sai com erro quando uma asserção falha;
 - a prova de RED, quando o PR corrige um defeito;
 - no PR de custo, os testes de teto (AC (l)) e o ano do Store;
-- no PR de workflow, a conferência das permissões e do risco de injeção, e a leitura de cada arquivo de workflow por um analisador de YAML (as 9 verificações não leem o workflow do próprio PR: em 21/11/2026, o head c4425f2e14 do #4941 recebeu READY sem ser YAML válido);
+- no PR de workflow, a conferência das permissões e do risco de injeção, e a leitura de cada arquivo de workflow por um analisador de YAML (as 9 verificações não leem o workflow do próprio PR: em 21/11/2026, o head c4425f2e14 do #4941 recebeu READY sem ser YAML válido), e o que o gatilho custa aos outros workflows (no mesmo PR, um gatilho `issue_comment` criaria uma execução por comentário em todo o repositório, no head do main, e quebraria a leitura de execuções do alarme de main vermelho, `scripts/main_red_alarm.mjs`);
 - cada achado classificado como LEVE, MÉDIO, ALTO ou GRAVE, com o cenário concreto, ou a frase "sem achados";
 - o que não foi conferido.
 

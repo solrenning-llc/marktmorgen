@@ -10,6 +10,7 @@ import { HISTORICAL_MARGIN_NOTICE } from "./historical-margin-model";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { onDemandReport, onDemandText } from "./generated-on-demand";
 import { join } from "node:path";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { LEGACY_PLAN_PRICES, PLAN_PRICES, TIERS } from "@/lib/plan";
@@ -23,12 +24,15 @@ import {
 
 const DOC = "docs/pricing-usage-proposal-2026-10-18.md";
 const read = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
+// The report, computed on demand from today's code: DOC holds only its fixed text (owner, 20/11/2026).
+let generated: string | undefined;
+const doc = () => (generated ??= renderPricingUsageProposal());
 
 test("the document is what the numbers render today (run node scripts/pricing-usage-proposal.mjs)", () => {
-  assert.equal(read(DOC), renderPricingUsageProposal(), `${DOC} is stale: run node scripts/pricing-usage-proposal.mjs`);
-  assert.ok(read(DOC).startsWith(HISTORICAL_MARGIN_NOTICE));
-  assert.match(read(DOC).slice(HISTORICAL_MARGIN_NOTICE.length), /^# Entry prices with usage packs: a proposal, 18 October 2026/);
-  assert.match(read(DOC), /\*\*A proposal for the owner, not a change\.\*\*/);
+  assert.equal(read(DOC), onDemandText(onDemandReport(DOC)), `${DOC} holds only its fixed text: the report is generated on demand`);
+  assert.ok(doc().startsWith(HISTORICAL_MARGIN_NOTICE));
+  assert.match(doc().slice(HISTORICAL_MARGIN_NOTICE.length), /^# Entry prices with usage packs: a proposal, 18 October 2026/);
+  assert.match(doc(), /\*\*A proposal for the owner, not a change\.\*\*/);
 });
 
 test("it is a proposal: the price list in force is still #553's, and nothing is on sale", () => {
@@ -89,6 +93,6 @@ test("every competitor figure has its page and the day it was read", () => {
     assert.match(c.url, /^https:\/\//);
     assert.match(c.read, /^\d{1,2} [A-Z][a-z]+ 2026/);
     assert.ok(c.figures.length > 20);
-    assert.ok(read(DOC).includes(c.url));
+    assert.ok(doc().includes(c.url));
   }
 });

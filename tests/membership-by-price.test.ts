@@ -99,7 +99,10 @@ is("no membership with prices: nothing rendered", render({ ...base, byProduct: [
 
 part("The page and the editor say the same thing");
 const page = readFileSync("app/studio/memberships/page.tsx", "utf8");
-is("Memberships renders the table under By membership, from the listings it already reads", [/<MembershipByPrice numbers=\{numbers\} listings=\{listingsById\} \/>/.test(page), (page.match(/readListings\(/g) ?? []).length], [true, 1]);
+// The table adds no read of its own: it is fed by the one read of the counted memberships' listings. Other reads of
+// the page (main's membership products for tier benefits, #3014) are not this table's, so they are not counted here
+// (AC (n): no figure another PR can move).
+is("Memberships renders the table under By membership, from the listings it already reads", [/<MembershipByPrice numbers=\{numbers\} listings=\{listingsById\} \/>/.test(page), (page.match(/readListings\(store, numbers\.byProduct/g) ?? []).length, /const listingsById = new Map\(listings\.map/.test(page)], [true, 1, true]);
 const editor = readFileSync("components/product-editor.tsx", "utf8");
 is("the editor's link says what Memberships shows: how many, per price", /See how many members are on each price in Memberships/.test(editor), true);
 is("it never promises who, which Memberships does not list per price", /See who still pays on this price/.test(editor), false);

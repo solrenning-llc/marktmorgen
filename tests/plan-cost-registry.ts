@@ -2746,6 +2746,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "buyer"] },
       { file: "lib/buyer-actions.ts", names: ["takeBuyerAction", "restingAway"] },
       { file: "lib/course-finish.ts", names: ["FINISH_PENDING_SECONDS", "CONFIRM_FINISH", "withCutoff(cutoff", "releaseMark(key, token)"] },
+      // A share passed (287 [H4-1]) takes its own buyer action before the sequences are read; since Codex X6's LOW on #3989
+      // its mark is read with the store's deletion print (GET + HGET) and written by RAISE_REACHED (EVAL + GET + HGET + SET):
+      // four commands more than the plain SET, inside that action's hundred, at most once a step per student and course.
+      { file: "lib/course-finish.ts", names: ["RAISE_REACHED", "suppressedAtCommand(listId, email)", "takeBuyerAction(store)"] },
       { file: "app/api/store/community/route.ts", names: ["takeBuyerAction(store, owner ? \"owner\" : \"buyer\")", "UNCOUNTED"] },
       // 543 [CM2]: a post or comment held for approval is the same action, inside the community's and the member's ceilings; since unit 2 it also puts its store on
       // the daily notice's list and line (two ZADDs), and a hold with its HOLD_SWEEP sweep at its most stays inside one action's 100 commands (tests/cm2-u2-daily-notice.test.ts);

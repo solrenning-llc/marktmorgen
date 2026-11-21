@@ -1133,6 +1133,25 @@ export class MemoryRedis {
           this.run(["SET", mark, "1", "EX", seconds]);
           return 1;
         }
+        // lib/course-finish.ts RAISE_REACHED: a share mark raised only, and never written back after the student's erasure.
+        if (key.startsWith("-- marktmorgen:course-reach-raise:v1\n") && (args[0] === "1" || args[0] === "2")) {
+          const count = Number(args[0]);
+          if (args.length !== 1 + count + 5) return -1;
+          const [mark, prints] = args.slice(1, 1 + count);
+          const [step, seen, seconds, field, printSeen] = args.slice(1 + count);
+          this.scriptCalls += 1;
+          const cur = this.run(["GET", mark]);
+          if (typeof cur === "string" && /^\d+$/.test(cur) && Number(cur) >= Number(step)) return 0;
+          if (cur === null && seen !== "") return 0;
+          if (count === 2) {
+            this.scriptCalls += 1;
+            const print = this.run(["HGET", prints, field]);
+            if ((print === null ? "" : String(print)) !== printSeen) return 0;
+          }
+          this.scriptCalls += 1;
+          this.run(["SET", mark, step, "EX", seconds]);
+          return 1;
+        }
         // lib/traffic.ts FLY_SHARE_HOLD: a hold added to a connection's share of copies only under a token not yet there.
         if (key.startsWith("-- marktmorgen:fly-share-hold:v1\n") && args[0] === "1" && args.length === 6) {
           const [, hash, field, token, units, keep] = args;

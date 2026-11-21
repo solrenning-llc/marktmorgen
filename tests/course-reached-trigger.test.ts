@@ -20,6 +20,7 @@ import { flowConfigurationIssues } from "@/lib/flow-review";
 import { upsertContact } from "@/lib/contacts";
 import { emailKey, markLesson } from "@/lib/learn";
 import { noteIfFinished } from "@/lib/course-finish";
+import { erasePerson } from "@/lib/person-erasure";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductCourse, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { advance, store as redis } from "./redis-stub";
@@ -43,8 +44,14 @@ let flowsDown = false;
 let finishReleaseDown = false;
 let beforeNextFlowRead: (() => Promise<void>) | undefined;
 let finishConfirmUnknown = false;
+/** Runs once, just before the next write of a share mark (a plain SET of it, or the script that raises it). */
+let beforeReachWrite: (() => Promise<void>) | undefined;
+const reachWrite = (list: (string | number)[][]) => list.some((c) => (c[0] === "SET" && String(c[1]).includes(":reach:")) || (c[0] === "EVAL" && String(c[3] ?? "").includes(":reach:")));
 const real = redis.pipeline.bind(redis);
 (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (list: (string | number)[][]) => {
+  if (beforeReachWrite && reachWrite(list)) {
+    const work = beforeReachWrite; beforeReachWrite = undefined; await work();
+  }
   if (beforeNextFlowRead && list.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:flows:"))) {
     const work = beforeNextFlowRead; beforeNextFlowRead = undefined; await work();
   }
@@ -54,7 +61,11 @@ const real = redis.pipeline.bind(redis);
   flowReads += list.filter((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:flows:")).length;
   if (finishReleaseDown && list.some((c) => (c[0] === "DEL" && String(c[1]).includes(":fin:")) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:release:v1\n") && String(c[3]).includes(":fin:")))) return Promise.reject(new Error("synthetic release timeout")) as ReturnType<typeof redis.pipeline>;
   if (flowsDown && list.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:flows:"))) return Promise.reject(new Error("synthetic Redis timeout")) as ReturnType<typeof redis.pipeline>;
-  if (unknownMark && list.length === 1 && list[0][0] === "GET" && String(list[0][1]).includes(":reach:")) return Promise.resolve(["half"]) as ReturnType<typeof redis.pipeline>;
+  // The share mark's read (alone, or with the store's deletion print since Codex X6's LOW): its mark answers in a shape that is not a share.
+  if (unknownMark && list[0]?.[0] === "GET" && String(list[0][1]).includes(":reach:")) {
+    const replies = (await real(list)) as unknown[];
+    return ["half", ...replies.slice(1)] as never;
+  }
   return real(list);
 }) as typeof redis.pipeline;
 
@@ -240,6 +251,35 @@ async function main(): Promise<void> {
     const [waiting] = await real([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]);
     is("the confirmed finish workflow has exactly one queued first step", (waiting as string[]).filter((m) => m.endsWith("|lost-confirmation@example.test") && m.includes(`|${end.ok ? end.flows.find((f) => f.trigger === "finished")?.id : "missing"}|`)).length, 1);
   } finally { finishConfirmUnknown = false; Date.now = oldDateNow; redis.now = oldRedisNow; }
+
+  part("The share mark only rises, and an erasure is never undone by it (Codex X6's LOW on #3989)");
+  {
+    // A higher share written by another view between this one's read and its write: the lower one does not land over it.
+    const fay = "fay-reach@example.com";
+    for (const lesson of [one, two]) await markLesson(course.id, fay, lesson, true, ROOM);
+    const fayMark = `nl:course:${course.id}:reach:${emailKey(fay)}`;
+    beforeReachWrite = async () => { await real([["SET", fayMark, "75", "EX", 3_600]]); };
+    await noteIfFinished(store, courseId, course.id, fay);
+    beforeReachWrite = undefined;
+    const [kept] = (await real([["GET", fayMark]])) as unknown[];
+    is("75% written first, then 50% lands: the mark stays at 75", kept, "75");
+
+    // The person erased between their start and the write: the erasure leaves no mark behind it.
+    const gil = "gil-reach@example.com";
+    // Not on the list: nothing starts for them, so the day's start allowance this file already spent does not defer the
+    // write; the erasure lands at the same place, after the start and before the write.
+    for (const lesson of [one, two]) await markLesson(course.id, gil, lesson, true, ROOM);
+    const gilMark = `nl:course:${course.id}:reach:${emailKey(gil)}`;
+    let erasedOk = false;
+    beforeReachWrite = async () => { erasedOk = (await erasePerson(store, gil, { kind: "person" })).ok; };
+    await noteIfFinished(store, courseId, course.id, gil);
+    beforeReachWrite = undefined;
+    const [left] = (await real([["EXISTS", gilMark]])) as unknown[];
+    is("the erasure ran between the start and the write", erasedOk, true);
+    is("and no share mark is left for the erased person", left, 0);
+  }
+
+  part("Only who agreed");
 
   part("Only who agreed");
   for (const lesson of [one, two]) await markLesson(course.id, "cy@example.com", lesson, true, ROOM);

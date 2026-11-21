@@ -50,6 +50,7 @@ import { cleanText, cleanLine } from "@/lib/community-text";
 import { productSegment } from "@/lib/product-slug";
 import { noteForErasure } from "@/lib/erasure-index";
 import { blankInLists } from "@/lib/erasure-lists";
+import { personReturned } from "@/lib/crm";
 import { erasedWithinCommand } from "@/lib/suppression";
 
 const soonKey = (sid: string) => `nl:wl:${sid}:soon`;
@@ -424,6 +425,9 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
     }
   }
   if (!entry) return { ok: false };
+  // A confirmed place: they came back on their own, so the CRM may keep fields about them again (lib/crm.ts, personReturned; C3-125).
+  // When they asked for the place (seconds), not when the link was used: an old link used again is not a return (Codex D, #2287).
+  await personReturned(store.statsId, grant.e, entry.at * 1000);
   if (entry.c && store.listId) {
     const added = await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid, fence: { key: tokenKey(token), seconds: CONFIRM_SECONDS } }, store, () => takePublicRequest(store, "public")).catch((error) => {
       console.error("could not add a waitlist address to a list", error);

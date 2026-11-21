@@ -1,0 +1,202 @@
+/**
+ * A purchase for several people that was given back in full before it was first confirmed hands out no place
+ * (lib/group-buy.ts settleGroup; money, as #4408 does for gifts and pre-orders).
+ *
+ * The defect this file was written around: settleGroup marked the purchase paid, and wrote the payment's index
+ * nl:grp:pi:<pi>, without reading the payment. The five-minute sweep takes refunds back before it confirms the day's
+ * checkouts (lib/checkout-sweep.ts), and Stripe keeps a refunded checkout `paid`. So when a buyer paid for five
+ * places, never reached the thanks page, and the creator refunded them in full within the same five minutes:
+ *
+ *   1. revokeRefundedGroups read the refund, found no purchase for its payment (no index yet), and marked it read;
+ *   2. settleGroup then marked the purchase paid and emailed the link that hands out its places;
+ *   3. no later run took them back: the refund was already read.
+ *
+ * The five places were handed out on money given back. Now settleGroup reads the payment first, with its latest charge
+ * (it must be this payment's own: rule 30). Given back (refunded in full, or lost to a dispute) it is written down as
+ * revoked and nothing is sent; a read that fails throws, so nothing is written and the next run reads it again.
+ *
+ * Checked: the refund read first, then the settle: not settled, no place handed out; a payment read that
+ * fails or answers for another payment settles nothing; a payment not given back settles as before (control).
+ * Stripe and the email service are stand-ins; whether the receipt itself reaches the email service is not checked here.
+ */
+import { openGroup, revokeRefundedGroups, settleGroup, startGroup } from "@/lib/group-buy";
+import type { Listing, Store } from "@/lib/store";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+import { readFileSync } from "node:fs";
+import { CART_STOCK_SHARE_OF_ORDER_COMPUTE, GROUP_SETTLE_STRIPE_CALLS, GROUP_SETTLE_STRIPE_WAIT, ORDER_COMPUTE } from "./plan-cost-registry";
+
+process.env.STRIPE_SECRET_KEY = "sk_test_group_refunded_before_settle_only";
+process.env.RESEND_API_KEY = "re_test_group_refunded_before_settle_only";
+
+const ACCOUNT = "acct_1TestGroupRef01";
+const NOW = Math.floor(Date.now() / 1000);
+let refunds: unknown[] = [];
+/** What GET /payment_intents/<pi> answers, by payment; a missing one answers 500. */
+const payments: Record<string, unknown> = {};
+let paymentReads = 0;
+globalThis.fetch = (async (input: string | URL | Request) => {
+  const url = new URL(String(input));
+  const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+  if (url.hostname === "api.resend.com" || url.hostname.includes("amazonaws")) return answer({ id: "email_1" });
+  if (url.pathname === "/v1/refunds") return answer({ object: "list", data: refunds, has_more: false });
+  const intent = /^\/v1\/payment_intents\/(pi_[A-Za-z0-9]+)$/.exec(url.pathname);
+  if (intent) {
+    paymentReads += 1;
+    return intent[1] in payments ? answer(payments[intent[1]]) : answer({ error: { type: "api_error", message: "TEST ONLY down" } }, 500);
+  }
+  return answer({ object: "list", data: [], has_more: false });
+}) as typeof fetch;
+
+const sid = "g".repeat(32);
+const store = { statsId: sid, stripeAccountId: ACCOUNT, handle: "group-ref", previousHandles: [], language: "en", currency: "usd", name: "Group Ref", email: "creator@example.com", catalog: { items: [] } } as unknown as Store;
+const product = { id: "prod1", title: "Guide", priceCents: 1000, options: [], file: { name: "f" }, link: null, course: null, bundle: null, recurring: null, call: null, pwyw: null, keys: null, stock: null, podcast: null } as unknown as Listing;
+const charge = (refunded: boolean, pi = "") => ({ id: "ch_GroupRef000001", object: "charge", amount: 5000, amount_refunded: refunded ? 5000 : 0, refunded, disputed: false, ...(pi ? { payment_intent: pi } : {}) });
+const paymentOf = (pi: string, refunded: boolean) => ({ id: pi, object: "payment_intent", status: "succeeded", latest_charge: charge(refunded, pi) });
+const sessionFor = (group: string, pi: string) => ({ id: `cs_test_${pi.slice(3).padEnd(24, "0")}`, created: NOW - 120, amount_total: 5000, currency: "usd", payment_intent: pi, status: "complete", payment_status: "paid", metadata: { store: "group-ref", product: "prod1", group }, customer_details: { email: "buyer@example.com" } });
+
+/** A purchase for five, started; then the sweep's refund pass runs; then the same run settles the paid checkout. */
+async function run(pi: string): Promise<{ settled: string; open: boolean }> {
+  const started = await startGroup(store, product, "5");
+  if (!started.ok) throw new Error(`not started: ${JSON.stringify(started)}`);
+  const id = started.group.id;
+  const errors = console.error;
+  console.error = () => {};
+  let settled: string;
+  try {
+    await revokeRefundedGroups(store, Date.now() + 60_000, async () => {});
+    try {
+      settled = await settleGroup({ store, session: sessionFor(id, pi), product, base: "https://x.test/@group-ref", from: "store@x.test" });
+    } catch {
+      settled = "threw";
+    }
+    // Later runs, as the five-minute job makes them.
+    await revokeRefundedGroups(store, Date.now() + 60_000, async () => {});
+  } finally {
+    console.error = errors;
+  }
+  return { settled, open: Boolean(await openGroup(store, id)) };
+}
+
+async function main(): Promise<void> {
+  redis.clear();
+  // A store that sold a purchase for several before, as any store past its first does.
+  await redis.pipeline([["SET", `nl:grp:${sid}:any`, "1"]]);
+
+  part("Refunded in full before it was first confirmed: no place handed out");
+  const given = "pi_GroupRefGiven001";
+  refunds = [{ id: "re_GroupRefGiven1", object: "refund", status: "succeeded", created: NOW - 60, payment_intent: given, charge: charge(true) }];
+  payments[given] = paymentOf(given, true);
+  const back = await run(given);
+  is("not settled, and the purchase hands out no place", [back.settled === "settled", back.open], [false, false]);
+
+  part("A payment read that fails, or answers for another payment, settles nothing");
+  refunds = [];
+  const unread = "pi_GroupRefUnread01";
+  delete payments[unread];
+  const failed = await run(unread);
+  is("the read fails: not settled, nothing open", [failed.settled === "settled", failed.open], [false, false]);
+  const other = "pi_GroupRefOther001";
+  payments[other] = paymentOf("pi_SomeoneElse0001", false);
+  const foreign = await run(other);
+  is("another payment's answer: not settled, nothing open", [foreign.settled === "settled", foreign.open], [false, false]);
+
+  part("The payment and its expanded charge must belong to this paid checkout (Codex X4 and N1 on #4494)");
+  const missingStart = await startGroup(store, product, "5");
+  if (!missingStart.ok) throw new Error("missing-payment group did not start");
+  const missing = await settleGroup({
+    store,
+    session: { ...sessionFor(missingStart.group.id, "pi_GroupRefMissing01"), payment_intent: null },
+    product,
+    base: "https://x.test/@group-ref",
+    from: "store@x.test",
+  }).then(() => "settled", () => "threw");
+  is("a positive paid session with no readable payment stays pending", [missing, Boolean(await openGroup(store, missingStart.group.id))], ["threw", false]);
+  const own = "pi_GroupRefOwn0001";
+  payments[own] = { ...paymentOf(own, false), latest_charge: charge(false, "pi_GroupRefForeign1") };
+  const foreignCharge = await run(own);
+  is("another payment's expanded charge cannot decide this group", [foreignCharge.settled, foreignCharge.open], ["threw", false]);
+
+  part("An own charge also needs readable refund and dispute flags");
+  for (const field of ["refunded", "disputed"] as const) {
+    const id = `pi_GroupRefUnknown${field}`;
+    const { latest_charge } = paymentOf(id, false);
+    payments[id] = { ...paymentOf(id, false), latest_charge: { ...latest_charge, [field]: undefined } };
+    const unresolved = await run(id);
+    is(`an unreadable ${field} flag leaves the group pending`, [unresolved.settled, unresolved.open], ["threw", false]);
+  }
+
+  part("A revocation write needs an exact acknowledgement before it is final");
+  const refunded = "pi_GroupRefWriteLost";
+  payments[refunded] = paymentOf(refunded, true);
+  const unconfirmed = await startGroup(store, product, "5");
+  if (!unconfirmed.ok) throw new Error("revocation test group did not start");
+  const recordKey = `nl:grp:${unconfirmed.group.id}`;
+  const input = { store, product, session: sessionFor(unconfirmed.group.id, refunded),
+    base: "https://x.test/@group-ref", from: "store@x.test" };
+  const pipeline = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands) => {
+    if (commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === recordKey) return [null];
+    return pipeline(commands);
+  };
+  try {
+    const answer = await settleGroup(input).catch(() => "threw");
+    is("an unconfirmed revocation cannot return already", answer, "threw");
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  is("the retry keeps the revocation without handing out places", await settleGroup(input), "already");
+  const saved = JSON.parse(String(redis.run(["GET", recordKey]))) as { revoked?: unknown };
+  is("the retried revocation was stored", typeof saved.revoked, "number");
+  const noAccountStart = await startGroup(store, product, "5");
+  if (!noAccountStart.ok) throw new Error("no-account group did not start");
+  const noAccount = await settleGroup({
+    store: { ...store, stripeAccountId: null } as unknown as Store,
+    session: sessionFor(noAccountStart.group.id, "pi_GroupRefNoAcct01"),
+    product,
+    base: "https://x.test/@group-ref",
+    from: "store@x.test",
+  }).then(() => "settled", () => "threw");
+  is("a store whose account cannot be read: not settled, still pending", [noAccount, Boolean(await openGroup(store, noAccountStart.group.id))], ["threw", false]);
+
+  part("Control: a zero-total checkout needs no PaymentIntent");
+  const freeStart = await startGroup(store, product, "5");
+  if (!freeStart.ok) throw new Error("free group did not start");
+  const free = await settleGroup({
+    store,
+    session: { ...sessionFor(freeStart.group.id, "pi_unused_for_free"), amount_total: 0, payment_intent: null },
+    product,
+    base: "https://x.test/@group-ref",
+    from: "store@x.test",
+  }).then(() => "settled", () => "threw");
+  is("a free checkout settles with no payment read", free, "settled");
+  const unreadStart = await startGroup(store, product, "5");
+  if (!unreadStart.ok) throw new Error("unread-total group did not start");
+  const unreadTotal = await settleGroup({
+    store,
+    session: { ...sessionFor(unreadStart.group.id, "pi_unused_unread"), amount_total: undefined, payment_intent: null },
+    product,
+    base: "https://x.test/@group-ref",
+    from: "store@x.test",
+  }).then(() => "settled", () => "threw");
+  is("a total that does not read, with no payment, is never taken for free", [unreadTotal, Boolean(await openGroup(store, unreadStart.group.id))], ["threw", false]);
+
+  part("Its Stripe reads are priced inside the order's compute (Claude 7's cost MEDIUM on #4494)");
+  const source = readFileSync("lib/group-buy.ts", "utf8");
+  const settle = source.slice(source.indexOf("export async function settleGroup("), source.indexOf("\n}\n", source.indexOf("export async function settleGroup(")));
+  is("settleGroup asks Stripe once itself, and givenBack once more at the most", [settle.split("onAccount(").length - 1, settle.split("givenBack(").length - 1, GROUP_SETTLE_STRIPE_CALLS], [1, 1, 2]);
+  is("those waits fit in an order's compute beside the cart's stock share", CART_STOCK_SHARE_OF_ORDER_COMPUTE * ORDER_COMPUTE + GROUP_SETTLE_STRIPE_WAIT <= ORDER_COMPUTE, true);
+
+  part("Control: a payment that stands settles as before");
+  const kept = "pi_GroupRefKept0001";
+  payments[kept] = paymentOf(kept, false);
+  const settled = await run(kept);
+  is("settled, its places open", [settled.settled, settled.open], ["settled", true]);
+  is("the payment was read before it was settled", paymentReads > 0, true);
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

@@ -1,0 +1,10 @@
+import ts from 'typescript';
+const config=ts.readConfigFile('tsconfig.json',ts.sys.readFile);
+if(config.error)throw Error(ts.flattenDiagnosticMessageText(config.error.messageText,'\n'));
+const parsed=ts.parseJsonConfigFileContent(config.config,ts.sys,process.cwd());
+const roots=['app/api/store/checkout/route.ts', 'lib/data-families.ts', 'lib/discount-impact.ts', 'lib/fair-coupon.ts', 'lib/member-price-rules.ts', 'lib/member-price.ts', 'lib/store-checkout.ts', 'lib/store.ts', 'tests/member-price-proof-gaps.test.ts', 'tests/member-price.test.ts', 'tests/plan-cost-registry.ts', 'tests/store-data-registry.ts', 'proofs/v/2999/member-family.proof.ts'];
+const options={...parsed.options,incremental:false,noEmit:true};
+const program=ts.createProgram(roots,options),diagnostics=ts.getPreEmitDiagnostics(program);
+console.log(JSON.stringify({roots,sources:program.getSourceFiles().length,diagnostics:diagnostics.length,target:ts.ScriptTarget[options.target],strict:options.strict,moduleResolution:ts.ModuleResolutionKind[options.moduleResolution]}));
+for(const d of diagnostics)console.log(ts.formatDiagnosticsWithColorAndContext([d],{getCanonicalFileName:x=>x,getCurrentDirectory:ts.sys.getCurrentDirectory,getNewLine:()=> '\n'}));
+process.exitCode=diagnostics.length?1:0;

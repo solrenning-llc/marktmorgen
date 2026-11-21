@@ -1,14 +1,18 @@
-import { AI_MONTHLY } from '@/lib/ai-rules';
+import { AI_MONTHLY, READ_PDF_JOBS } from '@/lib/ai-rules';
 import { ANSWERS_MONTHLY } from '@/lib/answers-rules';
-import { AI_REQUEST_LIMITS, SUPPORTED_AI_MODELS } from '@/lib/ai-request-rules';
+import { AI_REQUEST_LIMITS, ANSWER_MODEL, SUPPORTED_AI_MODELS, WRITING_MODEL } from '@/lib/ai-request-rules';
+import { aiRequestHoldMicroUsd } from '@/lib/spend-cost-table';
 import type { AiBudgetTier, AiSpendPolicy } from '@/lib/ai-spend-policy';
 /** Current source envelope: translated help can make two calls in one job.
  * Visitor answers and the store guide share one separate monthly allowance.
  * Affiliate drafts, inbox, voice and number summaries share writing jobs.
+ * Schema 3 (433 [PV3] (b), 20 November 2026): each kind of call is priced at
+ * the worst request its own feature can send with its model fixed in code,
+ * and a PDF read only inside a run that took its jobs (lib/ai-call-budget.ts).
  * This is a request-count envelope, not proof of model prices or tax treatment.
  */
 export const AI_ENTITLEMENT_RULES = {
-  schema: 2,
+  schema: 3,
   writingCallsPerJob: 2,
   visitorCallsPerAttempt: 1,
   failedAttempts: 'retained',
@@ -18,11 +22,40 @@ export const AI_ENTITLEMENT_RULES = {
   request: AI_REQUEST_LIMITS,
   models: SUPPORTED_AI_MODELS,
 } as const;
+/** A PDF run (lib/ai.ts writePage, 1 + READ_PDF_JOBS jobs) reads one document. Kept out of the rules object on purpose:
+ * that object is bound into the commercial terms snapshot, whose every character a contract restart's encoding repeats
+ * many times under a 1 MiB bound (lib/contract-funding-rules.ts canonicalFinancialSnapshot); the prices it sets are
+ * bound there through AUTOMATIC_AI_SPEND_CEILINGS.slots. */
+export const DOCUMENT_READS_PER_PDF_RUN = 1;
 export function aiEntitlementsSnapshot(): string {
   return JSON.stringify(AI_ENTITLEMENT_RULES);
 }
-/** Any allowed model may be selected by deployment configuration, so fund the
- * most expensive reviewed request for every permitted call, never an average.
+
+/** The dearest request each kind of call can send, in micro-USD, from the cost table (lib/spend-cost-table.ts):
+ * text at every request cap (system and text bytes, blocks, one image, every output token), and a document at the
+ * model's whole context, as the cost table holds every PDF. */
+const TEXT_MAX = { inputBytes: AI_REQUEST_LIMITS.systemBytes + AI_REQUEST_LIMITS.textBytes, blocks: AI_REQUEST_LIMITS.contentBlocks, media: 'image', maxTokens: AI_REQUEST_LIMITS.outputTokens } as const;
+const DOCUMENT_MAX = { ...TEXT_MAX, media: 'document' } as const;
+function priced(model: string, shape: typeof TEXT_MAX | typeof DOCUMENT_MAX): number {
+  const value = aiRequestHoldMicroUsd(model, shape);
+  if (value === null || value <= 0) throw new Error('A fixed AI model is missing from the cost table');
+  return value;
+}
+export type AiSlotPrices = { writing: number; answer: number; document: number };
+/** The kinds of call, in the order the commercial terms bind their prices (AUTOMATIC_AI_SPEND_CEILINGS.slots). */
+export const AI_SLOT_KINDS = ['writing', 'answer', 'document'] as const satisfies readonly (keyof AiSlotPrices)[];
+/** A writing job's call may ask either fixed model (some jobs ask the answer model) with text; a visitor answer asks the
+ * answer model with text (tests/ai-funded-rights.test.ts holds lib/answers.ts and lib/store-guide.ts to it); the only
+ * document request is a PDF read on the answer model (lib/ai.ts refuses any other). */
+export const AI_SLOT_MICRO_USD: Readonly<AiSlotPrices> = Object.freeze({
+  writing: Math.max(priced(WRITING_MODEL, TEXT_MAX), priced(ANSWER_MODEL, TEXT_MAX)),
+  answer: priced(ANSWER_MODEL, TEXT_MAX),
+  document: priced(ANSWER_MODEL, DOCUMENT_MAX),
+});
+
+/** Any allowed model may be selected for any call, so fund the most expensive
+ * reviewed request for every permitted call, never an average: the reading of
+ * a policy that does not name its price per kind of call (slotMicroUsd).
  */
 export function requiredAiStoreMicroUsd(tier: AiBudgetTier, requestMicroUsd: Readonly<Record<string, number>>): bigint | null {
   // Non-paying scopes can retain any historical plan: fund the largest rights.
@@ -32,16 +65,38 @@ export function requiredAiStoreMicroUsd(tier: AiBudgetTier, requestMicroUsd: Rea
   if(charges.some(value=>!Number.isSafeInteger(value)||value<=0))return null;
   const calls = BigInt(AI_MONTHLY[rights])*BigInt(AI_ENTITLEMENT_RULES.writingCallsPerJob)
     + BigInt(ANSWERS_MONTHLY[rights])*BigInt(AI_ENTITLEMENT_RULES.visitorCallsPerAttempt);
-  return calls*BigInt(Math.max(...charges));
+  return calls*BigInt(Math.max(...charges as number[]));
+}
+
+/** Every published right of a tier used in full in one month, each call at the worst request its feature can send:
+ * all writing jobs' calls at the writing price, the most PDF reads those jobs can pay for at the document price in
+ * place of one writing call each, and every visitor answer at the answer price. */
+export function requiredAiRightsMicroUsd(tier: AiBudgetTier, slots: Readonly<AiSlotPrices> = AI_SLOT_MICRO_USD): bigint | null {
+  // Non-paying scopes can retain any historical plan: fund the largest rights.
+  const rights = tier === 'setup' || tier === 'ended' ? 'scale' : tier;
+  if (!Object.hasOwn(AI_MONTHLY,rights) || !Object.hasOwn(ANSWERS_MONTHLY,rights)) return null;
+  if (!slots || ![slots.writing, slots.answer, slots.document].every(value => Number.isSafeInteger(value) && value > 0)) return null;
+  const jobs = BigInt(AI_MONTHLY[rights]);
+  // A PDF run takes 1 + READ_PDF_JOBS jobs and may give back its writing step's one after reading (lib/ai.ts writePage),
+  // so a read can net READ_PDF_JOBS jobs: the month reads at most floor((jobs - 1) / READ_PDF_JOBS) PDFs.
+  const pdfRuns = (jobs >= BigInt(1 + READ_PDF_JOBS) ? (jobs - BigInt(1)) / BigInt(READ_PDF_JOBS) : BigInt(0)) * BigInt(DOCUMENT_READS_PER_PDF_RUN);
+  const documentExtra = slots.document > slots.writing ? BigInt(slots.document - slots.writing) : BigInt(0);
+  return jobs * BigInt(AI_ENTITLEMENT_RULES.writingCallsPerJob) * BigInt(slots.writing)
+    + pdfRuns * documentExtra
+    + BigInt(ANSWERS_MONTHLY[rights]) * BigInt(AI_ENTITLEMENT_RULES.visitorCallsPerAttempt) * BigInt(slots.answer);
 }
 
 /** A valid monetary ledger can still underfund the advertised usage. Commercial
- * release must cover all calls for every scope with at least one funded slot. */
+ * release must cover all calls for every scope with at least one funded slot.
+ * A policy that names its price per kind of call (slotMicroUsd, the automatic
+ * one) is held to those prices; any other, to its largest request for every call. */
 export function aiEntitlementsFunded(policy: AiSpendPolicy): boolean {
   return Object.entries(policy.fundedStores).every(([scope, slots]) => {
     if (slots === 0) return true;
     const tier = scope as AiBudgetTier;
-    const required = requiredAiStoreMicroUsd(tier, policy.requestMicroUsd);
+    const required = policy.slotMicroUsd === undefined
+      ? requiredAiStoreMicroUsd(tier, policy.requestMicroUsd)
+      : requiredAiRightsMicroUsd(tier, policy.slotMicroUsd);
     const cap = policy.storeMicroUsd[tier];
     return required !== null && Number.isSafeInteger(cap) && cap >= 0 && BigInt(cap) >= required;
   });

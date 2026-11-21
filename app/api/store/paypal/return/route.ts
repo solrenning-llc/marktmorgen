@@ -29,5 +29,8 @@ export async function GET(request: NextRequest) {
   // so, and the sweep hands it over if PayPal completes it.
   if (result.reason === "pending" || result.reason === "error") return away(`/@${store.handle}/thanks?paypal=${encodeURIComponent(order)}`);
   if (result.reason === "declined") return away(`/@${store.handle}?status=paypal-declined`);
+  // Another load of the same order is taking the payment right now: neither the thanks page (nothing is under watch
+  // for this one) nor "could not be matched" (it may be handed over a moment later).
+  if (result.reason === "confirming") return away(`/@${store.handle}?status=paypal-confirming`);
   return away(`/@${store.handle}?status=paypal-error`);
 }

@@ -9,6 +9,7 @@ import { HISTORICAL_MARGIN_NOTICE } from "./historical-margin-model";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { onDemandReport, onDemandText } from "./generated-on-demand";
 import { join } from "node:path";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { receivingOf } from "@/lib/receiving-costs";
@@ -20,11 +21,14 @@ import { ORDER, assistantAt, assistantInputCap, captionsMinimumFor, captionsOpti
 
 const DOC = "docs/limits-proposal-2026-10-18.md";
 const read = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
+// The report, computed on demand from today's code: DOC holds only its fixed text (owner, 20/11/2026).
+let generated: string | undefined;
+const doc = () => (generated ??= renderLimitsProposal(PLANS_ON_SALE, PLANS_ON_SALE));
 
 test("the document is what the numbers render today (run node scripts/limits-proposal.mjs)", () => {
-  assert.equal(read(DOC), renderLimitsProposal(PLANS_ON_SALE, PLANS_ON_SALE), `${DOC} is stale: run node scripts/limits-proposal.mjs`);
-  assert.ok(read(DOC).startsWith(HISTORICAL_MARGIN_NOTICE));
-  assert.match(read(DOC).slice(HISTORICAL_MARGIN_NOTICE.length), /^# Limits proposal, 18 October 2026 — a PROPOSAL, nothing here is in force/);
+  assert.equal(read(DOC), onDemandText(onDemandReport(DOC)), `${DOC} holds only its fixed text: the report is generated on demand`);
+  assert.ok(doc().startsWith(HISTORICAL_MARGIN_NOTICE));
+  assert.match(doc().slice(HISTORICAL_MARGIN_NOTICE.length), /^# Limits proposal, 18 October 2026 — a PROPOSAL, nothing here is in force/);
 });
 
 test("archived proposals never raise a figure and viable proposals meet their historical 60% target", () => {

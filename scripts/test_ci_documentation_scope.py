@@ -9,7 +9,7 @@ A = "a" * 40
 B = "b" * 40
 # The one workflow that is not CI: the MV alarm (AGENTS.md) runs only after the nine below
 # complete on main and has no documentation scope (tests/main-red-alarm.test.ts).
-NOT_CI = {"main-red-alarm.yml", "stale-pr-report.yml"}
+NOT_CI = {"coordination-rollover.yml", "main-red-alarm.yml", "stale-pr-report.yml"}
 
 # The cheap workflows that keep running every job on each pull request.
 EVERY_EVENT = {"product-checks", "codeql", "dependency-security"}
@@ -23,6 +23,10 @@ CONDITIONS = {name: FULL for name in EVERY_EVENT}
 CONDITIONS.update({"accessibility-" + key: DEFERRED for key in
                    ("buyer-actions", "product-actions", "public-matrix", "signup-actions", "studio-matrix")})
 CONDITIONS["accessibility-real-readers"] = DEFERRED[:-3] + " && " + PUBLIC_ONLY + " }}"
+# CodeQL analyzes every pull request, push, daily and manual run, never a merge group, where it uploaded
+# nothing and could not fail on a finding (.github/workflows/codeql.yml, scripts/ci_all_checks.py).
+OUTSIDE_QUEUE = FULL[:-3] + " && github.event_name != 'merge_group' }}"
+CONDITIONS["codeql"] = OUTSIDE_QUEUE
 
 def ci_workflows():
     paths = list(Path(".github/workflows").glob("*.yml"))

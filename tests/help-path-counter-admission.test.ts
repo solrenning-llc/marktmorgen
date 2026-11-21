@@ -25,7 +25,7 @@ let counterReply: unknown = null;
 let counterCalls = 0;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
-  if (commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:rl:ai:")) {
+  if (commands[0]?.[0] === "INCR" && String(commands[0][1]).startsWith("nl:rl:ai:")) {
     counterCalls++;
     if (counterReply === "throw") throw new Error("the database did not answer");
     if (counterReply !== null) return counterReply;
@@ -63,11 +63,11 @@ async function main(): Promise<void> {
     };
     for (const [label, reply] of [
       ["an empty reply", []],
-      ["a partial reply", ["OK"]],
-      ["a SET answered false", [false, 1]],
-      ["a count that is null", ["OK", null]],
-      ["a count written as text", ["OK", "1"]],
-      ["a count of zero", ["OK", 0]],
+      ["a partial reply", [1]],
+      ["an EXPIRE answered false", [1, false]],
+      ["a count that is null", [null, 1]],
+      ["a count written as text", ["1", 1]],
+      ["a count of zero", [0, 1]],
       ["a reply that is not a list", { result: 1 }],
       ["a counter that never answers", "throw"],
     ] as const) {
@@ -79,7 +79,7 @@ async function main(): Promise<void> {
     counterReply = null;
     const confirmed = await call();
     is(`${name}: a confirmed count within the limit lets the request through`, [confirmed.status !== 429, confirmed.error !== "slow"], [true, true]);
-    counterReply = [null, AI_PER_MINUTE + 1];
+    counterReply = [AI_PER_MINUTE + 1, 0];
     const past = await call();
     is(`${name}: a confirmed count past the limit is refused as before`, [past.status, past.error], [429, "slow"]);
   }

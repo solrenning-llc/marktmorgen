@@ -44,7 +44,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
+import { CUSTOMER_PATTERN, erasingSince, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
 import { FINAL_INDEX, finalScoreOf } from "@/lib/closing-holds";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { formatMoney } from "@/lib/money";
@@ -287,7 +287,17 @@ export async function shutSince(handle: string): Promise<number | null> {
  * the caller does not adopt a plan it could not check.
  */
 export async function closingSince(store: Store): Promise<ClosingTimes | null> {
-  if (!store.planEndedAt || !isRedisConfigured()) return null;
+  if (!isRedisConfigured()) return null;
+  // A store whose erasure has begun is closing whatever its record says (Codex N1's HIGH on #3156): the walk takes it
+  // out of the final line before it deletes, and its plan may read running if its closing day began under one. A plan
+  // paid for it is returned in full, as on its closing day. Read exactly (erasingSince): a reply that does not read
+  // throws, and the caller does not adopt the plan.
+  const began = await erasingSince(storeRef(store));
+  if (began !== null) {
+    const ended = Date.parse(store.planEndedAt);
+    return { since: began, ended: Number.isFinite(ended) ? ended : began };
+  }
+  if (!store.planEndedAt) return null;
   // Read exactly (finalScoreOf, rule 24): a score that is missing or not a number throws, never "not closing".
   const ended = finalScoreOf(await redisPipeline([["ZSCORE", FINAL_INDEX, storeRef(store)]]));
   if (ended === null) return null;
@@ -464,8 +474,22 @@ type ChargeOutcome = { settled: boolean; returned: number; disputed: number; cur
 async function giveBack(id: string, key: string, intent: string, least = 1): Promise<ChargeOutcome | null> {
   if (!OBJECT_ID.test(intent)) return { settled: false, returned: 0, disputed: 0, currency: "" };
   const pi = await onPlatform("GET", `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge`, undefined, { version: AT });
+  // Only this payment's own reply, and its own charge, decide what is refunded (rules 24 and 30, #4423): an answer
+  // for another payment throws before any refund is read or asked for, and settleOne keeps the plan in line, never
+  // sized, refunded or reported from someone else's charge. The charge must prove it is this payment's own: its
+  // payment_intent, as an id or as an expanded object with its own id, exactly the one asked for. Absent, null, an
+  // object without an id, another shape or another id is unknown, never taken as this payment's (Codex P on #4423).
+  if (!pi || typeof pi !== "object" || !Object.hasOwn(pi, "id") || (pi as { id?: unknown }).id !== intent) throw new Error("Stripe answered for another payment");
   const charge = pi.latest_charge as Record<string, unknown> | null | undefined;
   if (!charge || typeof charge.id !== "string" || !OBJECT_ID.test(charge.id)) return { settled: false, returned: 0, disputed: 0, currency: "" };
+  const named = Object.hasOwn(charge, "payment_intent") ? charge.payment_intent : undefined;
+  const namedId =
+    typeof named === "string"
+      ? named
+      : named !== null && typeof named === "object" && !Array.isArray(named) && Object.hasOwn(named, "id")
+        ? (named as { id?: unknown }).id
+        : undefined;
+  if (typeof namedId !== "string" || namedId !== intent) throw new Error("Stripe answered with an unproven payment's charge");
   // Each field the refund is decided by, in its exact shape (CX-123 rule 24): one that does not read throws, and
   // settleOne keeps the plan in line, never settled as refunded with nothing given back.
   const amount = ownField(charge, "amount");
@@ -498,8 +522,22 @@ async function giveBack(id: string, key: string, intent: string, least = 1): Pro
     new URLSearchParams({ payment_intent: intent, amount: String(amount - succeeded), reason: "requested_by_customer", "metadata[closing_plan]": id }),
     { version: AT, idempotencyKey: `closing-plan-refund:${key}:${failed}` },
   );
-  const now = made.status === "succeeded" ? succeeded + (Number(made.amount) || 0) : succeeded;
-  return { settled: made.status === "succeeded" && now >= amount, returned: now, disputed: 0, currency };
+  // The creation reply must prove that it is the exact refund just asked for. A successful-looking refund of another
+  // payment or charge must not settle this plan or tell its creator that this payment came back (rules 24 and 30).
+  if (
+    !plainObject(made) ||
+    typeof ownField(made, "id") !== "string" ||
+    !OBJECT_ID.test(ownField(made, "id") as string) ||
+    ownField(made, "payment_intent") !== intent ||
+    ownField(made, "charge") !== charge.id ||
+    ownField(made, "amount") !== amount - succeeded ||
+    !REFUND_STATUSES.has(ownField(made, "status"))
+  ) {
+    throw new Error(`Stripe answered the refund of ${key} in another shape`);
+  }
+  const status = ownField(made, "status");
+  const now = status === "succeeded" ? succeeded + (ownField(made, "amount") as number) : succeeded;
+  return { settled: status === "succeeded" && now >= amount, returned: now, disputed: 0, currency };
 }
 
 /**

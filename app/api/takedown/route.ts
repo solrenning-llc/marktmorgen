@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
+import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { isOperator } from "@/lib/search-console";
 import { type TakedownAction, TakedownNoticeUnsent, openReport, sendOwedNotice, takeDown } from "@/lib/takedown";
 
 /**
@@ -14,6 +16,11 @@ import { type TakedownAction, TakedownNoticeUnsent, openReport, sendOwedNotice, 
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
+  // The token travels in a support email that replies to the reporter, so holding it proves nothing (#4036): only
+  // the operator's session acts, and anybody else is answered exactly as an unknown token is. With no operator
+  // configured (DEMO_STUDIO_ADMIN), nobody acts: closed, never open.
+  const email = await emailForSession(request.cookies.get(SESSION_COOKIE)?.value ?? "").catch(() => null);
+  if (!isOperator(email)) return Response.json({ ok: false, error: "gone" }, { status: 404 });
   let body: Record<string, unknown>;
   try {
     const raw: unknown = await (await limited(request, 4_000)).json();

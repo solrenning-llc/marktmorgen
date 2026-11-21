@@ -140,7 +140,8 @@ export async function ledgerReadingUnits(store: Store): Promise<number> {
     copy = size > 0 ? ledgerUnits(size, included) : 0;
     imported = who;
   }
-  const paypal = readsSales(store) ? await paypalKept(store.statsId, Boolean(store.paypalSeller)).catch(() => null) : { sales: 0, refunds: 0 };
+  // The PayPal refunds are counted with the sales, connected or not, as buyerLedger reads them (#4398).
+  const paypal = readsSales(store) ? await paypalKept(store.statsId, true).catch(() => null) : { sales: 0, refunds: 0 };
   if (!paypal) throw new LedgerNotCounted();
   return copy + (store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(ledgerReadBytes({ imported, paypalSales: paypal.sales, paypalRefunds: paypal.refunds }), included);
 }
@@ -185,9 +186,11 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
   const imported = store.statsId && isRedisConfigured() ? countOf(repliesFor(await redisPipeline([["HLEN", importedWhoKey(store.statsId)]]), 1)?.[0]) : 0;
   if (imported === null) throw new LedgerNotCounted();
   // The PayPal sales kept are read with the store's sales whatever is connected now (a creator who sold with
-  // PayPal and disconnected it keeps them, lib/stats.ts readPaidSales); the refunds only while PayPal is (round 6, H1).
+  // PayPal and disconnected it keeps them, lib/stats.ts readPaidSales), and so are the refunds written down for them,
+  // which are kept here and read without asking PayPal: a sale refunded in full never comes back as money spent once
+  // PayPal is disconnected (#4398; until then, round 6, H1, read them only while it was). Both are counted first.
   // A store that reads no sales (no Stripe, no PayPal: imported buyers only) reads none of them (round 7, M1).
-  const paypal = readsSales(store) ? await paypalKept(store.statsId, Boolean(store.paypalSeller)) : { sales: 0, refunds: 0 };
+  const paypal = readsSales(store) ? await paypalKept(store.statsId, true) : { sales: 0, refunds: 0 };
   const moved = ledgerReadBytes({ imported, paypalSales: paypal.sales, paypalRefunds: paypal.refunds });
   // When this reading began: anything paid after it may be missing from what it found.
   const at = Date.now();
@@ -205,8 +208,8 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
     stripe ? readRenewalPayments(store, 0, ALL_TIME_PAGES, until) : Promise.resolve(none),
     stripe ? readStoreRefunds(store, 0, TAKEN_BACK_PAGES) : Promise.resolve(none),
     stripe ? readStoreDisputes(store, 0) : Promise.resolve(none),
-    // PayPal's refunds, as the numbers read them (lib/stats.ts): unread is partial, never none.
-    store.paypalSeller ? readPayPalRefundsWithCoverage(store.statsId, 0).catch(() => null) : Promise.resolve(none),
+    // PayPal's refunds, as the numbers read them (lib/stats.ts), connected or not, as its sales are (#4398): unread is partial, never none.
+    readsSales(store) ? readPayPalRefundsWithCoverage(store.statsId, 0).catch(() => null) : Promise.resolve(none),
     // Each invoice's payment (270 [GR1], unit 3a): a membership's payment, or its first through checkout, is refunded by that payment.
     stripe ? readInvoicePayments(store, 0, ALL_TIME_PAGES, until).catch(() => null) : Promise.resolve({ byInvoice: new Map<string, string[]>(), partial: false }),
   ]);
@@ -218,7 +221,9 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
   const paymentsOfInvoice = (invoice: unknown): string[] => {
     if (typeof invoice !== "string" || !invoice) return [];
     const found = invoicePayments?.byInvoice.get(invoice) ?? [];
-    if (!found.length || found.some((intent) => !intent)) missed = true;
+    // A list cut short may hold only some of an invoice's payments (one paid in parts): a part found there does not
+    // show that every part was read, so its refunds may be unmatched (#4396).
+    if (!found.length || found.some((intent) => !intent) || invoicePayments?.partial !== false) missed = true;
     return found.filter(Boolean);
   };
   // What was given back of each payment, by the payment: refunds (Stripe's and PayPal's), and disputes that took or hold the money.
@@ -251,7 +256,10 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
   }
   // A renewal is a payment: it moves the last purchase, adds what was kept in the store's currency, and counts as one more time they bought.
   for (const renewal of renewals.rows) {
-    const left = kept(renewal.paymentIntent ? [renewal.paymentIntent] : paymentsOfInvoice(renewal.invoice), renewal.cents);
+    // Every part of a renewal paid in parts (#4410): the ones the invoice names, with the account's list of invoice
+    // payments, each once. Looked up there, with its coverage, when the invoice's own are not known to be all.
+    const listed = renewal.paymentsComplete ? (invoicePayments?.byInvoice.get(renewal.invoice) ?? []).filter(Boolean) : paymentsOfInvoice(renewal.invoice);
+    const left = kept([...new Set([...renewal.paymentIntents, ...listed])], renewal.cents);
     if (left === 0) continue;
     const email = normaliseEmail(renewal.email);
     // A buyer known only by a renewal came from the channel the subscription was sold through.
@@ -414,6 +422,7 @@ export async function forgetLedgerCopy(statsId: string | null): Promise<number> 
   if (!statsId || !isRedisConfigured()) return 0;
   const gone = countOf(repliesFor(await redisPipeline([["DEL", ledgerKey(statsId)]]), 1)?.[0]);
   // Never 0 removed on a reply of another shape (CX-123 rule 24): thrown, so the erasure says this part did not finish (lib/person-erasure.ts).
-  if (gone === null) throw new UnknownReplyError("the deletion of the buyers' ten-minute copy");
+  // One key: only 0 or 1 is a possible answer.
+  if (gone === null || gone > 1) throw new UnknownReplyError("the deletion of the buyers' ten-minute copy");
   return gone;
 }

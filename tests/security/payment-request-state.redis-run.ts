@@ -114,7 +114,7 @@ async function newRequest(store: Store, email: string) {
 }
 
 /** What Stripe hands back for a settled checkout of a request. */
-const settled = (id: string) => ({ id: `cs_test_${id.slice(0, 24).padEnd(24, "p")}`, amount_total: 48_000, payment_intent: `pi_${id.slice(0, 20)}`, created: Math.floor(Date.now() / 1000) });
+const settled = (id: string) => ({ id: `cs_test_${id.slice(0, 24).padEnd(24, "p")}`, amount_total: 48_000, currency: "usd", payment_intent: `pi_${id.slice(0, 20)}`, created: Math.floor(Date.now() / 1000) });
 
 async function main(): Promise<void> {
   process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";

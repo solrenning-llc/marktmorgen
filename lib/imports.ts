@@ -93,7 +93,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
 import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, mailDay, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { newCostCode } from "@/lib/plan-standing";
-import { healthTags, moveTags, noteSent, pausedFor, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
+import { healthTags, moveTags, noteSent, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
 import { stopTags } from "@/lib/mail-health-rules";
 import { isPaidUp } from "@/lib/billing";
 import { storeBase } from "@/lib/purchase-email";
@@ -1685,7 +1685,11 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   // bounced, or been answered with a spam report, the rest are not written
   // to (lib/mail-health.ts): they are counted as not emailed, and the report
   // says so.
-  const paused = await pausedFor(job.sid);
+  // Read exactly (CX-123 rule 24, Claude 6's MEDIUM on #2687): a pause read in an unknown shape is not "no pause";
+  // the step is tried again later, and nobody is taken off the queue.
+  const pause = await pauseForSending(job.sid);
+  if (pause === undefined) return "retry";
+  const paused = pause !== null;
   // And until then they go out in portions that double, a hundred buyers
   // first, so that a file of dead addresses is found while few have been
   // written to. A portion not yet open is waited for; nobody is dropped.

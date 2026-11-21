@@ -35,6 +35,19 @@ export class UploadRefused extends Error {
 }
 
 /**
+ * A door's refusal as the studio reads it, from any of our doors (the file and picture routes here, the vault door in
+ * lib/vault-upload.ts): its reason when it is one lower-case word, else a server error; and the studio's own words
+ * only for a reason that is not a server error, when they are text, not blank, and at most MAX_WORDS long. Anything
+ * else is no words, never words from elsewhere (Claude 5 iacVn3r on #3171).
+ */
+export function readRefusal(answer: unknown): { reason: string; words: string | undefined } {
+  const body = answer && typeof answer === "object" && !Array.isArray(answer) ? (answer as Record<string, unknown>) : {};
+  const reason = typeof body.error === "string" && REASON.test(body.error) ? body.error : "server_error";
+  const words = reason !== "server_error" && typeof body.message === "string" && body.message.trim() && body.message.length <= MAX_WORDS ? body.message : undefined;
+  return { reason, words };
+}
+
+/**
  * Asks `route` for a door, once, exactly as the client would. A refusal comes
  * back as `UploadRefused` with the route's reason and words; an answer that is
  * not a refusal body is a server error, never words from elsewhere.
@@ -48,8 +61,7 @@ export async function askForDoor(route: string, pathname: string, clientPayload:
   const body: unknown = await response.json().catch(() => null);
   const answer = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
   if (!response.ok) {
-    const reason = typeof answer.error === "string" && REASON.test(answer.error) ? answer.error : "server_error";
-    const words = reason !== "server_error" && typeof answer.message === "string" && answer.message.trim() && answer.message.length <= MAX_WORDS ? answer.message : undefined;
+    const { reason, words } = readRefusal(answer);
     throw new UploadRefused(reason, words);
   }
   const door = doorFrom(answer.presignedUrlPayload);

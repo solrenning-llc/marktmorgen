@@ -54,11 +54,17 @@ A cada comando, a ferramenta compara o SHA-256 da própria cópia com o revisado
 
 ## Interruptores e registro de revisão (dono, OWNER-20261121-1749-QUEUE-IMPROVEMENTS-AUTH)
 
-Cada melhoria autorizada fica atrás de um interruptor no próprio correio (`list-switches`). Todos começam **desligados**, com a ferramenta exatamente como antes. Só o coordenador liga um interruptor: uma sessão da nuvem identificada da família Claude 5. Qualquer sessão pode desligá-lo, porque desligar só volta ao comportamento de antes.
+Cada melhoria autorizada fica atrás de um interruptor no próprio correio (`list-switches`). Todos começam **desligados**, com a ferramenta exatamente como antes. Ligar um interruptor e confirmar um registro de revisão são **ações privilegiadas** (dono, OWNER-20261121-1904, passo 2; decisão do coordenador C1-20261121-2036-C6-1, #4932, comentário 7070984974). Qualquer sessão pode desligar um interruptor, porque desligar só volta ao comportamento de antes.
+
+- **Quem:** só a sessão nomeada, Claude 5 ibqho (`session_012ST5ibqhoHCYrphJXU5az3`), conferida pelo identificador completo, nunca pela família nem pelo prefixo. A reserva, Claude 1 A (`session_01DKvYQaxPrZTrVdXNwosXYi`), só age em três casos: 60 minutos sem sinal da ibqho no correio, a família Claude 5 sem cota declarada, ou mensagem do dono (`--owner-message <identificador>`, gravado no registro). Ao entrar, a reserva também avisa na #4932.
+- **Pedido:** só com o pedido do coordenador publicado na #4932, que cita a ação (o nome do interruptor ou a id do registro): `--request <link ou número do comentário>`. A ferramenta confere o comentário no GitHub na hora; sem conseguir conferir, não faz nada.
+- **Aviso:** a ação vai a todos no correio no mesmo commit, com o pedido e, para a reserva, o caso dela.
+- **Distância:** a sessão nunca confirma um registro de um PR que ela escreveu (trailer `Claude-Session` nos commits), revisou ou enfileirou.
+- **Limite, sem esconder:** o identificador da sessão vem de uma variável de ambiente, pode ser copiado e é herdado por subagente e por roteiro; e todos gravam com a mesma conta do GitHub. Isso evita engano e ação fora da regra, mas não é autenticação. A proposta de identidade autenticada vai ao dono antes do passo 8.
 
 ```
 node ~/.agent-mail/agent-mail.mjs list-switches
-node ~/.agent-mail/agent-mail.mjs set-switch --as "Claude 5 X" --name record-review --on --reason "por quê"
+node ~/.agent-mail/agent-mail.mjs set-switch --as "Claude 5 ibqho" --name record-review --on --reason "por quê" --request https://github.com/solrenning-llc/marktmorgen/issues/4932#issuecomment-N
 node ~/.agent-mail/agent-mail.mjs set-switch --as "Claude 2 Y" --name record-review --off --reason "o que deu errado"
 ```
 
@@ -67,14 +73,15 @@ node ~/.agent-mail/agent-mail.mjs set-switch --as "Claude 2 Y" --name record-rev
 ```
 node ~/.agent-mail/agent-mail.mjs record-review --as "Claude 4 X" --pr 4941 --sha 2e31152be3 --result READY --link https://github.com/solrenning-llc/marktmorgen/pull/4941#issuecomment-123
 node ~/.agent-mail/agent-mail.mjs list-review-records --pr 4941
-node ~/.agent-mail/agent-mail.mjs confirm-review-record --as "Claude 5 X" <id> --reason "conferi no PR"   # só o coordenador
+node ~/.agent-mail/agent-mail.mjs confirm-review-record --as "Claude 5 ibqho" <id> --reason "conferi no PR" --request <comentário na #4932 que cita a id>   # só a sessão nomeada
 ```
 
 - O comentário no PR continua sendo a única prova da revisão para FQ (1), RQ e CV (CO (c)). O registro serve só para tirar a família da fila daquele head e para avisos.
 - O registro vale só para o head registrado: com um head novo, ele deixa de contar.
 - A ferramenta confere no GitHub, pela API REST, que o link é um comentário ou uma revisão daquele PR que cita o head. Se não conseguir, mostra **NÃO CONFERIDO**.
-- Um registro feito por sessão não identificada, de família desconhecida ou gravado com o nome de outra família aparece como NÃO CONFERIDO e não tira ninguém da fila até o coordenador confirmá-lo.
-- Um "ligado" ou uma confirmação só vale se o próprio registro traz a sessão identificada do coordenador; um gravado por cópia antiga ou editada da ferramenta, ou pelo git direto, é ignorado (aparece como "ON IGNORADO"). O último registro de um interruptor é o de maior instante, em milissegundos.
+- Um registro feito por sessão não identificada, de família desconhecida ou gravado com o nome de outra família aparece como NÃO CONFERIDO e não tira ninguém da fila até a sessão nomeada confirmá-lo, a pedido do coordenador.
+- Ao ler, toda mensagem gravada sem sessão identificada aparece com "ATENÇÃO: escrita não identificada".
+- Um "ligado" ou uma confirmação só vale se o próprio registro traz a sessão nomeada (ou a reserva), com o nome da família dela, e a linha do pedido da #4932; sem isso, é ignorado (aparece como "ON IGNORADO", lido como desligado). Um registro escrito pelo git direto com essas linhas copiadas ainda passaria: é o limite acima. O último registro de um interruptor é o de maior instante, em milissegundos.
 - Testes: `node agent-mail.test.mjs` (repositórios git locais e um `gh` falso; nada real).
 
 ## Recados

@@ -181,8 +181,8 @@ function opcoes(args) {
   return o;
 }
 
-/** Envia uma mensagem; devolve a id. Um arquivo por destinatário, todos com a mesma id. */
-export function enviar({ de, para, assunto, texto, responde = null, agora = new Date() }) {
+/** Monta os arquivos de uma mensagem (um por destinatário, todos com a mesma id), sem enviar. */
+export function montarMensagem({ de, para, assunto, texto, responde = null, agora = new Date() }) {
   const remetente = String(de ?? "").trim();
   if (!remetente) throw new Error("--from é obrigatório");
   // "all" (ou "todos", o nome antigo) manda a todos; a pasta continua caixas/todos.
@@ -205,6 +205,12 @@ export function enviar({ de, para, assunto, texto, responde = null, agora = new 
   ].join("\n");
   const novos = {};
   for (const d of destinos) novos[`caixas/${slug(d)}/${id}.md`] = corpo;
+  return { id, novos, destinos, remetente };
+}
+
+/** Envia uma mensagem; devolve a id. Um arquivo por destinatário, todos com a mesma id. */
+export function enviar(dados) {
+  const { id, novos, destinos, remetente } = montarMensagem(dados);
   acrescentar(novos, `Mensagem de ${remetente} para ${destinos.join(", ")}`);
   return id;
 }
@@ -369,9 +375,10 @@ export function commitsDoPr(pr, ramo = null) {
   try {
     git(["fetch", "-q", "--no-tags", REPO_PRS, `+refs/heads/main:${base}`, `+${fonteDoHead(pr, ramo)}:${cabeca}`]);
     const linhas = git(["log", "--format=%an%x1f%(trailers:key=Claude-Session,valueonly,separator=%x1e)", `${base}..${cabeca}`]).split("\n").filter(Boolean);
-    const familias = new Set(), desconhecidas = new Set();
+    const familias = new Set(), desconhecidas = new Set(), completas = new Set();
     for (const linha of linhas) {
       const [autor, sessoes = ""] = linha.split("\x1f");
+      for (const m of sessoes.matchAll(/session_([0-9A-Za-z]{20,40})/g)) completas.add(`session_${m[1]}`);
       const prefixos = [...sessoes.matchAll(/session_([0-9A-Za-z]{7})/g)].map((m) => m[1]);
       for (const pre of prefixos) (SESSOES[pre] ? familias.add(SESSOES[pre]) : desconhecidas.add(`session_${pre}`));
       const nome = /^Claude (\d+)\b/.exec(autor);
@@ -379,7 +386,7 @@ export function commitsDoPr(pr, ramo = null) {
       else if (!prefixos.length && !/^Claude\b/.test(autor)) familias.add("codex");
       else if (!prefixos.length) desconhecidas.add(`autor "${autor}" sem trailer`);
     }
-    return { familias, desconhecidas };
+    return { familias, desconhecidas, sessoes: completas };
   } catch {
     return null;
   } finally {
@@ -532,21 +539,112 @@ export function revisoresDoHead(pr, sha, commit = buscar()) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Interruptores (dono, OWNER-20261121-1749-QUEUE-IMPROVEMENTS-AUTH, R1). Cada melhoria autorizada fica atrás de uma chave
 // no próprio correio: chaves/<nome>/<carimbo>-<quem>-<hex>, com "ON" ou "OFF" na primeira linha; o último registro vale, e
-// sem nenhum a chave está DESLIGADA, com a ferramenta exatamente como antes. Só o coordenador (uma sessão da nuvem
-// identificada da família Claude 5) liga; qualquer sessão desliga, porque desligar só volta ao comportamento de antes.
+// sem nenhum a chave está DESLIGADA, com a ferramenta exatamente como antes. Só a sessão nomeada (ou a reserva) liga,
+// a pedido do coordenador (ações privilegiadas, abaixo); qualquer sessão desliga, porque desligar só volta ao
+// comportamento de antes.
 // ---------------------------------------------------------------------------------------------------------------------
 export const CHAVES = ["record-review", "ready-check", "on-call"];
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Ações privilegiadas (dono, OWNER-20261121-1904-MAIL-TOOL-FIX-ORDER, passo 2; decisão do coordenador
+// C1-20261121-2036-C6-1, publicada na #4932, comentário 7070984974): ligar um interruptor e confirmar um registro de
+// revisão. Valem estas condições, conferidas pelo identificador COMPLETO da sessão, nunca pela família nem pelo prefixo:
+//  1. só a sessão nomeada (Claude 5 ibqho) age; a reserva (Claude 1 A) só em três casos: 60 minutos sem sinal da
+//     nomeada no correio, a família Claude 5 declarada sem cota, ou mensagem do dono (--owner-message, gravada);
+//  3. nunca num PR que a sessão escreveu (trailer Claude-Session nos commits), revisou ou enfileirou (no correio);
+//  4. só com o pedido do coordenador publicado na #4932, conferido na hora pelo gh (--request), que cita a ação; a ação
+//     é avisada a todos no mesmo commit, com o pedido. Desligar continua livre para todos.
+// Limite, sem esconder (VR): o identificador vem de uma variável de ambiente, pode ser copiado e é herdado por subagente
+// e por roteiro; e todos gravam no correio com a mesma conta do GitHub, então um "ON" escrito pelo git direto, com a
+// linha da sessão e a do pedido copiadas, ainda é lido como válido. Isto evita engano e ação fora da regra; não é
+// autenticação. A proposta de identidade autenticada (assinatura ou chave por família) vai ao dono antes do passo 8.
+// ---------------------------------------------------------------------------------------------------------------------
+export const SESSAO_NOMEADA = "session_012ST5ibqhoHCYrphJXU5az3"; // Claude 5 ibqho
+export const SESSAO_RESERVA = "session_01DKvYQaxPrZTrVdXNwosXYi"; // Claude 1 A
+export const CANAL_PEDIDOS = 4932;
+export const SINAL_MIN = 60;
+const LINK_PEDIDO = /^(?:https:\/\/github\.com\/solrenning-llc\/marktmorgen\/issues\/4932#issuecomment-)?(\d+)$/;
+const LINHA_PEDIDO = /^Pedido: https:\/\/github\.com\/solrenning-llc\/marktmorgen\/issues\/4932#issuecomment-\d+$/m;
+const sessaoInteira = (s) => String(s?.texto ?? "").split(" ")[0];
+
+/** Um registro privilegiado só vale com a sessão nomeada ou a reserva, o nome da família dela e a linha do pedido. */
+export function privilegioValido(texto, por) {
+  const id = sessaoInteira(sessaoDe(texto));
+  if (id !== SESSAO_NOMEADA && id !== SESSAO_RESERVA) return false;
+  return familia(por) === SESSOES[id.slice(8, 15)] && LINHA_PEDIDO.test(texto);
+}
+
+/** Quando a sessão gravou no correio pela última vez (a linha Mail-Session de cada commit), ou null. */
+export function ultimoSinal(sessao, commit = buscar()) {
+  if (!commit) return null;
+  const t = git(["log", "-1", "--format=%ct", "-F", `--grep=Mail-Session: ${sessao}`, commit]);
+  return t ? new Date(Number(t) * 1000) : null;
+}
+
+/** Confere no GitHub, agora, que o pedido é um comentário da #4932 que cita o alvo; devolve o endereço dele. */
+export function conferirPedido(pedido, alvo) {
+  const m = LINK_PEDIDO.exec(String(pedido === true ? "" : pedido ?? "").trim());
+  if (!m) throw new Error(`--request é obrigatório: o comentário do coordenador na #${CANAL_PEDIDOS} que pede esta ação (https://github.com/solrenning-llc/marktmorgen/issues/${CANAL_PEDIDOS}#issuecomment-N), C1-20261121-2036-C6-1, condição 4`);
+  const esperado = `https://github.com/solrenning-llc/marktmorgen/issues/${CANAL_PEDIDOS}#issuecomment-${m[1]}`;
+  let url, corpo;
+  try {
+    if (process.env.CORREIO_SEM_GH === "1") throw new Error("sem gh");
+    const saida = execFileSync("gh", ["api", `repos/solrenning-llc/marktmorgen/issues/comments/${m[1]}`, "--jq", "[.html_url, (.body // \"\")] | @json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
+    [url, corpo] = JSON.parse(saida.trim()); // o gh imprime o texto do @json sem aspas: uma camada só
+  } catch {
+    throw new Error(`o pedido ${m[1]} NÃO FOI CONFERIDO no GitHub agora; nada foi feito (passo 4: nada NÃO CONFERIDO segue)`);
+  }
+  if (url !== esperado) throw new Error(`o comentário ${m[1]} não é da #${CANAL_PEDIDOS}: ${url}`);
+  if (!String(corpo).includes(alvo)) throw new Error(`o comentário ${m[1]} não cita "${alvo}"; o pedido do coordenador nomeia a ação`);
+  return esperado;
+}
+
 /**
- * Um "ON" só vale se o próprio registro traz a sessão de quem o gravou e ela é de uma sessão identificada da família
- * Claude 5, com nome da família Claude 5 (revisão do Claude 2 upbeat, repo-id-transfer-test#1): um ON gravado por cópia
- * antiga ou editada da ferramenta, ou pelo git direto, não liga nada. Um "OFF" vale sempre. O nome do arquivo começa
- * pelo instante em milissegundos, e o último é o de maior instante (sem empate pelo nome no mesmo segundo).
+ * Confere as condições 1 e 4 para a sessão atual; devolve a sessão, o pedido conferido e, para a reserva, o caso dela.
+ * `acao` descreve a ação na mensagem de erro; `alvo` é o que o pedido precisa citar.
  */
+export function conferirPrivilegio({ eu, acao, alvo, pedido, dono = "", agora = new Date(), commit = buscar() }) {
+  const s = sessaoAtual();
+  if (!s || (s.id !== SESSAO_NOMEADA && s.id !== SESSAO_RESERVA)) {
+    throw new Error(`só a sessão nomeada (Claude 5 ibqho, ${SESSAO_NOMEADA}) ${acao}, ou a reserva (Claude 1 A, ${SESSAO_RESERVA}) nos três casos dela; esta sessão é ${s ? s.id : "não identificada"} (C1-20261121-2036-C6-1, condição 1)`);
+  }
+  if (familia(eu) !== s.familia) throw new Error(`identidade: esta sessão é da família ${s.familia} e não age como "${eu}"`);
+  let reserva = "";
+  if (s.id === SESSAO_RESERVA) {
+    const sinal = ultimoSinal(SESSAO_NOMEADA, commit);
+    const ownerMsg = String(dono === true ? "" : dono ?? "").trim();
+    if (ownerMsg) reserva = `mensagem do dono: ${ownerMsg}`;
+    else if (cotas(agora, commit)["claude-5"]?.sem) reserva = "a família Claude 5 está sem cota";
+    else if (!sinal || agora - sinal >= SINAL_MIN * 60000) reserva = `${SINAL_MIN} minutos sem sinal da sessão nomeada (último: ${sinal ? sinal.toISOString() : "nenhum"})`;
+    else throw new Error(`a reserva só age em três casos: ${SINAL_MIN} minutos sem sinal da sessão nomeada (último: ${sinal.toISOString()}), a família Claude 5 sem cota, ou mensagem do dono (--owner-message <identificador>); condição 2`);
+  }
+  return { s, reserva, pedido: conferirPedido(pedido, alvo) };
+}
+
+/** Condição 3: o que a sessão fez no PR (escreveu, revisou, enfileirou); lança erro se fez algo ou se não deu para ler. */
+export function conferirDistancia(pr, sessao, commit = buscar()) {
+  const deste = (pasta) => arquivos(commit, pasta).filter((c) => c.endsWith(".md")).map((c) => conteudo(commit, c))
+    .filter((t) => campo(t, "PR") === String(pr) && sessaoInteira(sessaoDe(t)) === sessao);
+  if (deste("revisao/feitas").length || deste("revisao/registros").length) throw new Error(`esta sessão revisou o #${pr}; a ação privilegiada sobre ele é de outra (condição 3)`);
+  if (deste("fila/feitas").some((t) => campo(t, "Resultado") === "enfileirado")) throw new Error(`esta sessão enfileirou o #${pr}; a ação privilegiada sobre ele é de outra (condição 3)`);
+  const c = commitsDoPr(pr);
+  if (!c) throw new Error(`os commits do #${pr} NÃO FORAM CONFERIDOS agora; nada foi feito (condição 3)`);
+  if (c.sessoes.has(sessao)) throw new Error(`esta sessão escreveu commits no #${pr}; a ação privilegiada sobre ele é de outra (condição 3)`);
+}
+
+/** As linhas que todo registro privilegiado leva, e o aviso a todos no mesmo commit. */
+function linhasPrivilegio(p) {
+  return [`Pedido: ${p.pedido}`, ...(p.reserva ? [`Reserva: ${p.reserva}`] : [])];
+}
+function avisoPrivilegio({ eu, assunto, p, agora }) {
+  return montarMensagem({ de: eu, para: "todos", assunto, agora,
+    texto: [`${assunto}.`, ...linhasPrivilegio(p), `Sessão que agiu: ${p.s.id}`, "Desligar continua livre para todos (set-switch --off)."].join("\n") }).novos;
+}
+
+/** Um "OFF" vale sempre; um "ON" só vale como registro privilegiado (privilegioValido). */
 export function ligacaoValida(estado, por, texto) {
   if (estado !== "ON") return true;
-  const s = sessaoDe(texto);
-  return Boolean(s?.identificada && s.familia === "claude-5" && familia(por) === "claude-5");
+  return privilegioValido(texto, por);
 }
 
 export function chave(nome, commit = buscar()) {
@@ -556,22 +654,24 @@ export function chave(nome, commit = buscar()) {
   const { c: ultimo, t } = lista[lista.length - 1];
   const texto = conteudo(commit, ultimo);
   const [estado, por, ...resto] = texto.split("\n");
-  const motivo = resto.filter((l) => !/^Sessão: /.test(l)).join(" ").trim();
-  if (!ligacaoValida(estado, por, texto)) return { ligada: false, por, quando: new Date(t), motivo: `ON IGNORADO: sem sessão identificada do coordenador (${motivo})` };
+  const motivo = resto.filter((l) => !/^(Sessão|Pedido|Reserva): /.test(l)).join(" ").trim();
+  if (!ligacaoValida(estado, por, texto)) return { ligada: false, por, quando: new Date(t), motivo: `ON IGNORADO: sem a sessão nomeada e o pedido do coordenador (${motivo})` };
   return { ligada: estado === "ON", por, quando: new Date(t), motivo };
 }
 
-export function mudarChave({ nome, eu, ligar, motivo = "", agora = new Date() }) {
+export function mudarChave({ nome, eu, ligar, motivo = "", pedido = "", dono = "", agora = new Date() }) {
   if (!CHAVES.includes(nome)) throw new Error(`interruptor desconhecido: ${nome} (existem: ${CHAVES.join(", ")})`);
   if (!String(motivo).trim()) throw new Error("--reason é obrigatório: diga por que liga ou desliga");
-  if (ligar) {
-    const s = sessaoAtual();
-    if (s?.familia !== "claude-5" || familia(eu) !== "claude-5") {
-      throw new Error("só o coordenador liga um interruptor: uma sessão da nuvem identificada da família Claude 5, com o nome dela (dono, OWNER-20261121-1749, R1)");
-    }
+  const caminho = `chaves/${nome}/${agora.getTime()}-${slug(eu)}-${randomBytes(2).toString("hex")}`;
+  if (!ligar) {
+    acrescentar({ [caminho]: `OFF\n${eu}\n${String(motivo).trim()}\nSessão: ${linhaSessao()}\n` }, `${eu}: interruptor ${nome} desligado`);
+    return;
   }
-  acrescentar({ [`chaves/${nome}/${agora.getTime()}-${slug(eu)}-${randomBytes(2).toString("hex")}`]: `${ligar ? "ON" : "OFF"}\n${eu}\n${String(motivo).trim()}\nSessão: ${linhaSessao()}\n` },
-    `${eu}: interruptor ${nome} ${ligar ? "ligado" : "desligado"}`);
+  const p = conferirPrivilegio({ eu, acao: "liga um interruptor", alvo: nome, pedido, dono, agora });
+  acrescentar({
+    [caminho]: [`ON`, eu, String(motivo).trim(), ...linhasPrivilegio(p), `Sessão: ${linhaSessao()}`, ""].join("\n"),
+    ...avisoPrivilegio({ eu, assunto: `interruptor ${nome} LIGADO por ${eu}`, p, agora }),
+  }, `${eu}: interruptor ${nome} ligado`);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -619,20 +719,25 @@ export function registrarRevisao({ eu, pr, sha, resultado, link, agora = new Dat
   return id;
 }
 
-export function confirmarRegistro({ eu, id, motivo = "", agora = new Date() }) {
-  const s = sessaoAtual();
-  if (s?.familia !== "claude-5" || familia(eu) !== "claude-5") throw new Error("só o coordenador confirma um registro: uma sessão da nuvem identificada da família Claude 5 (R3)");
-  if (!arquivos(buscar(), `revisao/registros/${id}.md`).length) throw new Error(`registro não encontrado: ${id}`);
-  acrescentar({ [`revisao/confirmados/${id}`]: `${eu}\n${agora.toISOString()}\n${String(motivo).trim()}\nSessão: ${linhaSessao()}\n` }, `${eu} confirmou o registro ${id}`);
+export function confirmarRegistro({ eu, id, motivo = "", pedido = "", dono = "", agora = new Date() }) {
+  const commit = buscar();
+  const p = conferirPrivilegio({ eu, acao: "confirma um registro de revisão", alvo: String(id), pedido, dono, agora, commit });
+  if (!/^[0-9A-Za-z-]+$/.test(String(id ?? "")) || !arquivos(commit, `revisao/registros/${id}.md`).length) throw new Error(`registro não encontrado: ${id}`);
+  const pr = campo(conteudo(commit, `revisao/registros/${id}.md`), "PR");
+  conferirDistancia(pr, p.s.id, commit);
+  acrescentar({
+    [`revisao/confirmados/${id}`]: [eu, agora.toISOString(), String(motivo).trim(), ...linhasPrivilegio(p), `Sessão: ${linhaSessao()}`, ""].join("\n"),
+    ...avisoPrivilegio({ eu, assunto: `registro de revisão ${id} (#${pr}) confirmado por ${eu}`, p, agora }),
+  }, `${eu} confirmou o registro ${id}`);
 }
 
 /** Os registros de revisão de um PR, com o que não foi conferido e se tiram a família da fila daquele head. */
 export function registros(pr, commit = buscar(), atual = undefined) {
   const ligada = chave("record-review", commit).ligada;
-  // Uma confirmação só vale se gravada por sessão identificada da família Claude 5 (a mesma revisão do Claude 2 upbeat).
+  // Uma confirmação só vale como registro privilegiado: a sessão nomeada (ou a reserva) e o pedido do coordenador.
   const confirmados = new Set(arquivos(commit, "revisao/confirmados").filter((c) => {
-    const texto = conteudo(commit, c), s = sessaoDe(texto);
-    return Boolean(s?.identificada && s.familia === "claude-5" && familia(texto.split("\n")[0]) === "claude-5");
+    const texto = conteudo(commit, c);
+    return privilegioValido(texto, texto.split("\n")[0]);
   }).map((c) => c.split("/").pop()));
   const head = atual === undefined ? headAtual(pr) : atual;
   return arquivos(commit, "revisao/registros").filter((c) => c.endsWith(".md")).map((c) => {
@@ -1036,7 +1141,8 @@ function mostrar(lista, agora = new Date()) {
     const idade = quando ? Math.floor((agora - quando) / 60000) : null;
     console.log(`===== ${m.id}${idade !== null && idade >= ATRASO_MIN ? `  (ATRASADA: ${idade} min sem confirmar)` : ""}`);
     const s = sessaoDe(m.texto), de = campo(m.texto, "De");
-    if (s?.familia && de && familia(de) !== s.familia) console.log(`ATENÇÃO, IDENTIDADE: a mensagem diz ser de "${de}" (${familia(de)}), mas foi gravada por uma sessão da família ${s.familia}. Confira com o remetente antes de agir.`);
+    if (!s?.identificada) console.log("ATENÇÃO: escrita não identificada (fora da nuvem do Claude Code, ou gravada sem a ferramenta): confira com o remetente antes de uma ação que dependa de quem a escreveu.");
+    else if (s?.familia && de && familia(de) !== s.familia) console.log(`ATENÇÃO, IDENTIDADE: a mensagem diz ser de "${de}" (${familia(de)}), mas foi gravada por uma sessão da família ${s.familia}. Confira com o remetente antes de agir.`);
     console.log(m.texto);
   }
 }
@@ -1065,7 +1171,7 @@ export const NOMES_ANTIGOS = {
 export const OPCOES = {
   as: "eu", from: "de", to: "para", subject: "assunto", text: "texto", file: "arquivo", "reply-to": "responde", all: ["tudo", "todas"],
   exhausted: "sem", out: "sem", available: "com", until: "ate", by: "por", also: "tambem", seconds: "segundos", exclude: "exclui",
-  result: "resultado", reason: "motivo", name: "nome", on: "ligar", off: "desligar", link: "link",
+  result: "resultado", reason: "motivo", name: "nome", on: "ligar", off: "desligar", link: "link", request: "pedido", "owner-message": "dono",
 };
 const RESULTADOS = { enqueued: "enfileirado", declined: "recusado", READY: "READY", CHANGES: "CHANGES" };
 const TIPOS_EN = { review: "revisao", enqueue: "fila" };
@@ -1202,8 +1308,8 @@ async function main(argv) {
       console.log(r.pedido.texto);
     }
   } else if (comando === "set-switch") {
-    if (!o.eu || !o.nome || Boolean(o.ligar) === Boolean(o.desligar)) throw new Error('use: set-switch --as "Claude 5 X" --name record-review|ready-check|on-call --on|--off --reason "por quê"');
-    mudarChave({ nome: o.nome, eu: o.eu, ligar: Boolean(o.ligar), motivo: o.motivo === true ? "" : o.motivo ?? "" });
+    if (!o.eu || !o.nome || Boolean(o.ligar) === Boolean(o.desligar)) throw new Error('use: set-switch --as "Claude 5 ibqho" --name record-review|ready-check|on-call --on --reason "por quê" --request <comentário na #4932> (ou --off, por qualquer sessão)');
+    mudarChave({ nome: o.nome, eu: o.eu, ligar: Boolean(o.ligar), motivo: o.motivo === true ? "" : o.motivo ?? "", pedido: o.pedido, dono: o.dono });
     console.log(`interruptor ${o.nome}: ${o.ligar ? "LIGADO" : "DESLIGADO"} por ${o.eu}`);
   } else if (comando === "list-switches") {
     const commit = buscar();
@@ -1221,7 +1327,7 @@ async function main(argv) {
     for (const r of lista) console.log(`${r.id}  #${r.pr} @${r.sha.slice(0, 10)}  ${r.resultado}  por ${r.por}  ${r.faltas.length ? `NÃO CONFERIDO: ${r.faltas.join("; ")}` : "conferido"}${r.confirmado ? "  (confirmado pelo coordenador)" : ""}  ${r.excluiDaFila ? "tira a família da fila deste head" : "não tira ninguém da fila"}`);
   } else if (comando === "confirm-review-record") {
     if (!o.eu) throw new Error("--as é obrigatório");
-    confirmarRegistro({ eu: o.eu, id: o._[0], motivo: o.motivo === true ? "" : o.motivo ?? "" });
+    confirmarRegistro({ eu: o.eu, id: o._[0], motivo: o.motivo === true ? "" : o.motivo ?? "", pedido: o.pedido, dono: o.dono });
     console.log(`confirmado: ${o._[0]}`);
   } else if (comando === "renovar-revisao" || comando === "renovar-fila") {
     if (!o.eu) throw new Error("--as é obrigatório");

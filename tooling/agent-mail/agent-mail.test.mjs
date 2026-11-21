@@ -101,7 +101,8 @@ r = run(["set-switch", "--as", "Claude 5 ibqho", "--name", "record-review", "--o
 is("a reason is required", !r.ok && /--reason/.test(r.out), r.out);
 is("list-switches shows it on and who", /record-review: LIGADO \(por Claude 1 A/.test(run(["list-switches"]).out), run(["list-switches"]).out);
 raw(`chaves/record-review/${Date.now() + 5}-claude-5-ibqho-cd34`, "ON\nClaude 5 ibqho\nforged\nSessão: session_012ST5ibqhoHCYrphJXU5az3 (claude-5)\n");
-is("an ON with the named session's line but no request line is ignored", /record-review: LIGADO \(por Claude 1 A/.test(run(["list-switches"]).out), run(["list-switches"]).out);
+is("an ON with the named session's line but no request line is ignored (read as off, the safe side)", /record-review: DESLIGADO .*ON IGNORADO/.test(run(["list-switches"]).out), run(["list-switches"]).out);
+ligar("Claude 5 ibqho", "ibq", ["--request", REQ], pedido(77, "record-review"));
 
 console.log("record-review (item 2)");
 const rec = (who, n, sha, env, extra = []) => run(["record-review", "--as", who, "--pr", String(n), "--sha", sha.slice(0, 10), "--result", "READY", "--link", link(n), ...extra], env);

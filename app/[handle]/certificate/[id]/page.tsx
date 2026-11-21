@@ -117,6 +117,7 @@ export default async function CertificatePage({ params, searchParams }: Params) 
   const w = coursesWords(store.language);
   const withdrawn = certificate.withdrawnAt > 0;
   // A certificate past its validity (639 [GL7](32)) says so, and is still the record of what it certified.
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const expired = !sample && standingOf(certificate, Math.floor(new Date().getTime() / 1000)) === "expired";
   const url = `${SITE_URL}/@${store.handle}/certificate/${certificate.id}`;
   const shortUrl = url.replace(/^https?:\/\//, "");
@@ -198,7 +199,8 @@ export default async function CertificatePage({ params, searchParams }: Params) 
                 <span>{"✓"}</span>
               </div>
               <div className="cert-proof">
-                <p>{sample ? w.sampleId : w.certId(certificate.id)}</p>
+                {/* Until when, on the sheet that is printed too, as on the PDF (639 [GL7](32)): an expired one never prints as standing. */}
+                <p>{sample ? w.sampleId : certificate.validUntil ? `${w.certId(certificate.id)} · ${w.validUntil(said.date(certificate.validUntil * 1000))}` : w.certId(certificate.id)}</p>
                 <p>{sample ? w.sampleCheck : w.checkAt(shortUrl)}</p>
               </div>
             </div>

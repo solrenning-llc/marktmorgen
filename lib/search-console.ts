@@ -140,14 +140,16 @@ export async function finishSearchConsole(state: string, code: string, email: st
 }
 
 /**
- * Takes the connection away. Done only on DEL's count (0: it was not there);
+ * Takes the connection away. Done only on DEL's count, 0 or 1 (0: it was not there);
  * any other reply throws, so nobody is told it is disconnected while the
  * sealed token may still be kept and read (CX-123 rule 24).
  */
 export async function disconnectSearchConsole(): Promise<void> {
   if (!isRedisConfigured()) return;
   const replies = repliesFor(await redisPipeline([["DEL", CONN]]), 1);
-  if (!replies || countOf(replies[0]) === null) throw new UnknownReplyError("taking the Search Console connection away");
+  const gone = replies ? countOf(replies[0]) : null;
+  // One key: only 0 or 1 is a possible answer.
+  if (gone === null || gone > 1) throw new UnknownReplyError("taking the Search Console connection away");
 }
 
 /** The page filter for one store: its own address and everything under it, nothing else. */

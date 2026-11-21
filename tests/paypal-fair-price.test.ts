@@ -57,7 +57,7 @@ type Kept = { c: number; off?: number; sale?: number; meta?: Record<string, stri
 /** Posts the PayPal button's form; `country` is what the edge says, `formCountry` a field the page never sends. */
 async function buy(store: Store, product: string, country: string | null, formCountry = ""): Promise<{ value: string | null; kept: Kept | null }> {
   const before = sent.length;
-  const form = withConsent(new URLSearchParams({ handle: store.handle, product }));
+  const form = withConsent(new URLSearchParams({ handle: store.handle, product, billing_country: "US" }));
   if (formCountry) form.set("country", formCountry);
   const headers: Record<string, string> = { host: "marktmorgen.com", origin: "https://marktmorgen.com", "content-type": "application/x-www-form-urlencoded" };
   if (country !== null) headers["x-vercel-ip-country"] = country;

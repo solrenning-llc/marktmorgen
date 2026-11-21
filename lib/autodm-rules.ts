@@ -4,16 +4,22 @@
  * keeps anything. These are the decisions an automatic reply to a comment
  * needs before any channel is involved:
  *
- *   - which keyword a comment matches. Matching forgives case, accents, a
- *     simple English plural and a small typo ("Guides!!", "gude", "café" for
- *     "cafe"), but never matches inside a longer word ("guide" is not in
+ *   - which keyword a comment matches. By default (759 [STN6], added 16
+ *     November 2026) only the exact word does: case, accents, the styled
+ *     letters people paste and punctuation are ignored ("GUIDE!!", "café"
+ *     for "cafe"), nothing else is, so a similar word or phrase never fires
+ *     a reply by accident ("guided", "guides" and "gude" are not "guide").
+ *     The creator may choose "forgiving" instead, which also forgives a
+ *     simple English plural and a small typo ("Guides!!", "gude"). Either
+ *     way it never matches inside a longer word ("guide" is not in
  *     "guidebook", "art" is not in "party") and never forgives a digit
  *     ("code10" is not "code11"). The creator's own words are only normalized
  *     to compare them; what they typed is kept and shown as they typed it.
- *     What that forgiveness costs, said plainly: a typo allowance also lets
- *     a real neighbouring word through ("guided" for "guide", "curse" for
- *     "course"), and the plural rule makes "news" match "new"; the creator
- *     sees which comments matched in test mode before turning a rule live.
+ *     What forgiving costs, said plainly: a typo allowance also lets a real
+ *     neighbouring word through ("guided" for "guide", "curse" for
+ *     "course"), and the plural rule makes "news" match "new"; that is why it
+ *     is not the default, and the creator sees which comments matched in test
+ *     mode before turning a rule live.
  *     Words are split at spaces and punctuation, so in a language written
  *     without spaces between words (Chinese, Japanese, Thai) a keyword
  *     matches only a comment, or a part of it between spaces, that is the
@@ -153,18 +159,43 @@ export function typoDistance(a: string, b: string, bound: number): number {
   return Math.min(previous[y.length], bound + 1);
 }
 
-function wordMatches(token: string, word: string): boolean {
+/**
+ * How a post's keywords are compared with a comment, chosen by the creator:
+ * "exact" (the default) needs the same word once case, accents, styled
+ * letters and punctuation are set aside; "forgiving" also takes a simple
+ * English plural and a small typo.
+ */
+export const MATCH_CHOICES = ["exact", "forgiving"] as const;
+
+/** One of the match choices. */
+export type MatchMode = (typeof MATCH_CHOICES)[number];
+
+/** A new rule matches the exact word only (759 [STN6]), so a similar word never sends a reply by accident. */
+export const DEFAULT_MATCH: MatchMode = "exact";
+
+/** A match choice's id, or null for anything else. */
+export function readMatch(input: unknown): MatchMode | null {
+  return MATCH_CHOICES.find((choice) => choice === input) ?? null;
+}
+
+/** Only "forgiving" forgives; anything else, a value that is not a choice included, is compared exactly. */
+function forgives(match: unknown): boolean {
+  return match === "forgiving";
+}
+
+function wordMatches(token: string, word: string, forgiving: boolean): boolean {
   if (token === word) return true;
+  if (!forgiving) return false;
   const tokenForms = pluralForms(token);
   if (pluralForms(word).some((form) => tokenForms.includes(form))) return true;
   const allowance = typoAllowance(word, token);
   return allowance > 0 && typoDistance(token, word, allowance) <= allowance;
 }
 
-function tokensMatch(tokens: string[], words: string[]): boolean {
+function tokensMatch(tokens: string[], words: string[], forgiving: boolean): boolean {
   if (!words.length) return false;
   for (let start = 0; start + words.length <= tokens.length; start += 1) {
-    if (words.every((word, k) => wordMatches(tokens[start + k], word))) return true;
+    if (words.every((word, k) => wordMatches(tokens[start + k], word, forgiving))) return true;
   }
   return false;
 }
@@ -184,24 +215,27 @@ function capped(comment: string): string {
 
 /**
  * Whether a comment holds the keyword: a keyword of N words matches N words
- * in a row of the comment, each the same once compared, the same plural, or
- * within the typo allowance. Only whole words match, and only the first
- * COMMENT_MAX_CHARS characters of the comment are read.
+ * in a row of the comment, each the same once compared and, only when the
+ * creator chose "forgiving", also the same plural or within the typo
+ * allowance. Only whole words match, and only the first COMMENT_MAX_CHARS
+ * characters of the comment are read.
  */
-export function matchesKeyword(comment: string, keyword: string): boolean {
+export function matchesKeyword(comment: string, keyword: string, match: MatchMode = DEFAULT_MATCH): boolean {
   if (typeof comment !== "string" || typeof keyword !== "string") return false;
-  return tokensMatch(tokensOf(capped(comment)), tokensOf(keyword));
+  return tokensMatch(tokensOf(capped(comment)), tokensOf(keyword), forgives(match));
 }
 
 /**
  * The first of the post's keywords, in the creator's order, that the comment
- * matches, as the creator typed it; null when none does.
+ * matches under the rule's match choice, as the creator typed it; null when
+ * none does.
  */
-export function matchingKeyword(comment: string, keywords: readonly string[]): string | null {
+export function matchingKeyword(comment: string, keywords: readonly string[], match: MatchMode = DEFAULT_MATCH): string | null {
   if (typeof comment !== "string") return null;
   const tokens = tokensOf(capped(comment));
+  const forgiving = forgives(match);
   for (const keyword of keywords) {
-    if (typeof keyword === "string" && tokensMatch(tokens, tokensOf(keyword))) return keyword;
+    if (typeof keyword === "string" && tokensMatch(tokens, tokensOf(keyword), forgiving)) return keyword;
   }
   return null;
 }
@@ -219,12 +253,16 @@ export type KeywordsResult =
  * characters once the spaces around it are trimmed, at least one letter or
  * digit, and at most KEYWORD_MAX_WORDS words; a post has 1 to
  * MAX_KEYWORDS_PER_POST of them. Two keywords where one would match the other
- * ("guide" and "Guides", or "guide" and "free guide") are refused as
- * duplicates: `index` is the later one, `other` the one it collides with. A
- * list that is not a list, or holds nothing, is "empty" at index -1. The
- * keywords come back trimmed and otherwise exactly as typed.
+ * under the rule's match choice ("guide" and "Guide", or "guide" and "free
+ * guide"; with "forgiving", also "guide" and "guides") are refused as
+ * duplicates: `index` is the later one, `other` the one it collides with. So
+ * with "exact" a creator may list a plural or a typo as a keyword of its own,
+ * and a rule switched to "forgiving" has its list read again with that
+ * choice. A list that is not a list, or holds nothing, is "empty" at index
+ * -1. The keywords come back trimmed and otherwise exactly as typed.
  */
-export function readKeywords(input: unknown): KeywordsResult {
+export function readKeywords(input: unknown, match: MatchMode = DEFAULT_MATCH): KeywordsResult {
+  const forgiving = forgives(match);
   if (!Array.isArray(input) || input.length === 0) return { ok: false, problem: "empty", index: -1 };
   if (input.length > MAX_KEYWORDS_PER_POST) return { ok: false, problem: "too_many", index: MAX_KEYWORDS_PER_POST };
   const keywords: string[] = [];
@@ -238,7 +276,7 @@ export function readKeywords(input: unknown): KeywordsResult {
     if (!tokens.length) return { ok: false, problem: "no_letters", index };
     if (tokens.length > KEYWORD_MAX_WORDS) return { ok: false, problem: "too_many_words", index };
     for (let other = 0; other < words.length; other += 1) {
-      if (tokensMatch(words[other], tokens) || tokensMatch(tokens, words[other])) {
+      if (tokensMatch(words[other], tokens, forgiving) || tokensMatch(tokens, words[other], forgiving)) {
         return { ok: false, problem: "duplicate", index, other };
       }
     }

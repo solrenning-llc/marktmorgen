@@ -203,8 +203,12 @@ async function main(): Promise<void> {
   is("nor the thanks page after it", await sendServerPurchase(store, "cs_test_order000000001", { ip: "", userAgent: "", url: "", cookies: {} }, NOW), "already");
   is("the studio sees the last answers", (await serverSetup(statsId)).last, { at: NOW, kind: "purchase", meta: "Received", tiktok: "Received", google: "Received", pinterest: "Received" });
 
+  is("what the checkout kept goes with its sale", redis.run(["GET", `nl:adsrv:ctx:${meta.ads}`]), null);
+
   part("The thanks page, sooner");
-  sessions.push(paid("cs_test_order000000006", "fast@example.com", { ads: meta.ads as string }));
+  // Each checkout keeps its own request, under its own token, until its sale.
+  const fastMeta = await adsCheckout(request(yes), store, NOW);
+  sessions.push(paid("cs_test_order000000006", "fast@example.com", { ads: fastMeta.ads as string }));
   is("sent from the browser's request with what the checkout kept", await sendServerPurchase(store, "cs_test_order000000006", { ip: "198.51.100.1", userAgent: "UA", url: "u", cookies: { _fbp: "fb.1.9.9" } }, NOW), "sent");
   const fast = (out.find((o) => o.host === "graph.facebook.com")!.body.data as Ev[])[0];
   is("the checkout's address, the newer cookie", [fast.user_data.client_ip_address, fast.user_data.fbp], ["203.0.113.9", "fb.1.9.9"]);

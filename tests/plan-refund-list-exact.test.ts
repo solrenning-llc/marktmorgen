@@ -17,7 +17,7 @@
  */
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { ENDING_KEY, SETTLE_SECONDS, findPlanRefund, finishPlanRefunds, partsOutcome } from "@/lib/plan-refund-flow";
+import { ENDING_KEY, OUR_STOP_MARK, SETTLE_SECONDS, findPlanRefund, finishPlanRefunds, partsOutcome } from "@/lib/plan-refund-flow";
 import { redisPipeline } from "@/lib/redis";
 import { NOW, paidShop, world } from "./plan-refund-stripe-world";
 
@@ -53,6 +53,16 @@ async function shop() {
   return { ...s, sid, charge };
 }
 const one = (charge: string) => [{ c: charge, a: 6_900 }];
+
+/**
+ * Our stop as the flow sets it since #3740: the stop and its mark on the subscription (OUR_STOP_MARK, set by
+ * setOurStop with the note's time). A stop without the mark is the creator's own and is never taken back.
+ */
+const ourStop = (subId: string) => {
+  const row = world.subs.get(subId)!;
+  row.cancel_at_period_end = true;
+  row.metadata = { ...((row.metadata as Record<string, string> | undefined) ?? {}), [OUR_STOP_MARK]: String(NOW) };
+};
 
 async function main() {
   redis.clear();
@@ -136,7 +146,7 @@ async function main() {
   const job = await shop();
   refund(job.charge, job.sid, { status: undefined });
   await redisPipeline([["HSET", ENDING_KEY, job.sid, JSON.stringify({ s: job.subId, at: NOW, t: NOW, m: 1, p: one(job.charge) })]]);
-  world.subs.get(job.subId)!.cancel_at_period_end = true;
+  ourStop(job.subId);
   world.emails = [];
   await finishPlanRefunds(Date.now() + 10_000, NOW + SETTLE_SECONDS + 60);
   is("no letter says the refund was not made", world.emails.filter((e) => /was not made|Nothing was refunded/.test(e.text)).length, 0);
@@ -145,7 +155,7 @@ async function main() {
   part("None was made, and our stop already ended the plan: never told it goes on (Claude 1 on #3190)");
   const gone = await shop();
   await redisPipeline([["HSET", ENDING_KEY, gone.sid, JSON.stringify({ s: gone.subId, at: NOW, t: NOW, m: 1, p: one(gone.charge) })]]);
-  world.subs.get(gone.subId)!.cancel_at_period_end = true;
+  ourStop(gone.subId);
   world.subs.get(gone.subId)!.status = "canceled";
   world.emails = [];
   await finishPlanRefunds(Date.now() + 10_000, NOW + SETTLE_SECONDS + 60);
@@ -158,7 +168,7 @@ async function main() {
   part("Control: none was made and the plan is live: the stop is taken back and the plan goes on");
   const live = await shop();
   await redisPipeline([["HSET", ENDING_KEY, live.sid, JSON.stringify({ s: live.subId, at: NOW, t: NOW, m: 1, p: one(live.charge) })]]);
-  world.subs.get(live.subId)!.cancel_at_period_end = true;
+  ourStop(live.subId);
   world.emails = [];
   await finishPlanRefunds(Date.now() + 10_000, NOW + SETTLE_SECONDS + 60);
   is("the stop taken back", live.sub().cancel_at_period_end, false);
@@ -167,7 +177,7 @@ async function main() {
   part("None was made, the stop could not be taken back, the note older than the give-up: kept, never told the plan goes on (Claude 1 on #3190)");
   const stuck = await shop();
   await redisPipeline([["HSET", ENDING_KEY, stuck.sid, JSON.stringify({ s: stuck.subId, at: NOW, t: NOW, m: 1, p: one(stuck.charge) })]]);
-  world.subs.get(stuck.subId)!.cancel_at_period_end = true;
+  ourStop(stuck.subId);
   world.stopDown = true;
   world.emails = [];
   await finishPlanRefunds(Date.now() + 10_000, NOW + 8 * 86_400);

@@ -1,7 +1,7 @@
 /**
  * The daily usage watch tells each store past the delivery allowance once (Claude 7's cron hunt).
  *
- * app/api/cron/usage took no run lock and wrote its told list (nl:usage-watch:told) once, at the end, from what it
+ * app/api/cron/usage took no run lock and wrote its told list (then nl:usage-watch:told, now the month's own nl:usage-watch:told:YYYY-MM) once, at the end, from what it
  * read at the start. Two runs at once (a retried invocation, a manual run beside the scheduled one) both read nobody
  * told and both wrote to every owner; and a run stopped after writing to some owners (the function's time limit, a
  * crash) left the list as it was, so the next day wrote to them again. The run now holds a lock, as the other
@@ -11,7 +11,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DELIVERY_ALLOWANCE_BYTES, recordDelivery, rememberFolderOwner } from "@/lib/delivery";
+import { DELIVERY_ALLOWANCE_BYTES, monthKey, recordDelivery, rememberFolderOwner } from "@/lib/delivery";
 import { GET as usage } from "@/app/api/cron/usage/route";
 import { store as redis } from "./redis-stub";
 
@@ -30,7 +30,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 type Command = (string | number)[];
-const TOLD = "nl:usage-watch:told";
+// The month's own told list (#4502): one list per calendar month.
+const TOLD = `nl:usage-watch:told:${monthKey()}`;
 const A = "a1a1a1a1a1a1a1a1", B = "b1b1b1b1b1b1b1b1";
 const real = redis.pipeline.bind(redis);
 const run = () => usage({ headers: new Headers(), nextUrl: new URL("https://marktmorgen.com/api/cron/usage") } as unknown as Parameters<typeof usage>[0]);

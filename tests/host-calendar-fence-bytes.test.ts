@@ -16,7 +16,7 @@ test('the registered host read funds its added config argument and fence script,
   redis.run(['SET',cfg,raw]);const run=redis.pipeline.bind(redis);let addedBytes=0;
   redis.pipeline=async commands=>{const c=commands[0];if(c?.[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:host-reading-current:v1\n'))addedBytes=Buffer.byteLength(String(c[6]))+Buffer.byteLength(String(c[1]));return run(commands);};
   try {
-    assert.equal((await hostSync({statsId:'host-bytes'},email,'UTC',{force:true,now:state.now})).state,'ok');
+    assert.equal((await hostSync({statsId:'host-bytes',sid:'',email:''},email,'UTC',{force:true,now:state.now})).state,'ok');
     assert.ok(addedBytes>1000,'a real writer-format config and actual EVAL script were captured');
     const oldCompute=9*COMMAND+VERCEL_FUNCTION_GB*VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR/1e6/3600+0.05*VERCEL_CPU_MICRO_USD_PER_HOUR/1e6/3600;
     assert.ok(TEAM_READING>=oldCompute+addedBytes*DB_BYTE,'the exact fenced operation adds transfer that the registry must fund');
@@ -26,6 +26,6 @@ test('an oversized raw config is unknown before it can be forwarded into a refre
   redis.clear();state.fails=false;let reads=0;state.during=async()=>{reads++;};
   const raw=JSON.stringify({email,source:'ics',read:[],write:'',ics:seal('https://calendar.example.test/a.ics',`hostcal|${host}|ics`),icsAddedAt:'2026-11-20',unknownPadding:'a'.repeat(100_000)});
   redis.run(['SET',cfg,raw]);
-  const result=await hostSync({statsId:'host-bytes'},email,'UTC',{force:true,now:state.now});
+  const result=await hostSync({statsId:'host-bytes',sid:'',email:''},email,'UTC',{force:true,now:state.now});
   assert.equal(result.state,'failed');assert.equal(reads,0,'oversized source remains unknown before a provider read');
 });

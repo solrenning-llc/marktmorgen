@@ -2,42 +2,44 @@
 
 Pedido do dono, nas palavras dele: "HÁ UM SÉRIO PROBLEMA. VCS NAO SE COMUNICAM. OU HÁ GRANDE FALHA NA COMUNICACAO. EU PRECISO FICAR O TEMPO TODO MANDANDO MENSAGEM DE UM PARA O OUTRO. ISSO PRECISA SER RESOLVIDO. E NAO SERVE UM CANAL QUE DURA POUCO TEMPO E JA NAO SERVE MAIS, POR ESTAR LOTADO"; "NAO QUERO PROIBIR ME PEDIR PARA PASSAR RECADO, MAS APENAS EM CASO DE PROBLEMA"; "QUERO QUE RESOLVA INCLUSIVE PARA PEDIDO DE REVISAO, ENFILEIRAMENTO(OS ENFILEIRAMENTOS DEVEM RESPEITAR A FILA)"; "QUERO TAMBEM QUE UM AGENTE SAIBA QUANDO O OUTRO NAO TEM COTA. QUE QUANDO UM ESTIVER SEM COTA, QUE O REMETENTE SAIBA E POSSA ENVIAR O PEDIDO DE REVISAO PARA OUTRO TECNICAMENTE POSSIVEL"; "ESSE NOVO MEIO DE COMUNICACAO DEVE SERVIR PARA TUDO UTIL ENTRE OS AGENTES". Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão, antes de qualquer outra regra deste arquivo sobre canal ou caixa.
 
-(a) **O meio.** O correio é o ramo `correio` do repositório `solrenning-llc/repo-id-transfer-test` (sem CI e sem Vercel). Cada registro é um arquivo, então ele não lota, e o git guarda tudo. Nada é apagado nem reescrito; a ferramenta recusa. O `LEIA-ME.md` desse ramo tem todos os comandos; a ferramenta é o `correio.mjs` do mesmo ramo.
+(a) **O meio.** O correio é o ramo `correio` do repositório `solrenning-llc/repo-id-transfer-test` (sem CI e sem Vercel). Cada registro é um arquivo, então ele não lota, e o git guarda tudo. Nada é apagado nem reescrito; a ferramenta recusa. O `LEIA-ME.md` desse ramo tem todos os comandos; a ferramenta é o `agent-mail.mjs` do mesmo ramo.
 
-(b) **No começo de cada sessão:** instalar a ferramenta, ler e confirmar o que chegou, e deixar a vigia sempre ligada em segundo plano, com o nome da família ("Claude 1" a "Claude 7", ou "Codex"). A vigia confere a cada 30 segundos e acorda o agente quando há mensagem não lida ou pedido de revisão ou de fila que ele pode pegar; ao terminar, o agente trata o que chegou, segue trabalhando e a liga de novo, como a vigia de AV11. O Codex, que não mantém processo em segundo plano, lê o correio em cada tarefa de hora em hora.
+(b) **No começo de cada sessão:** instalar a ferramenta, ler e confirmar o que chegou, e deixar a vigia sempre ligada em segundo plano, com o nome da família ("Claude 1" a "Claude 7", ou "Codex"). A vigia confere a cada 30 segundos e acorda o agente quando há mensagem não lida ou pedido de revisão ou de fila que ele pode pegar; ao terminar, o agente trata o que chegou, segue trabalhando e a liga de novo, como a vigia de AV11. O Codex, que não mantém processo em segundo plano, lê o correio em cada tarefa de hora em hora. Os comandos e as opções da ferramenta têm nomes técnicos em inglês americano, com os verbos usuais de filas de trabalho (claim, release, cancel e renew) (dono, 21/11/2026: "os comandos devem ser escritos de maneira tecnicamente correta em ingles americano" e "os comandos devem ser escritos usando termos tecnicamente corretos em ingles americano"); os nomes anteriores e a cópia `correio.mjs` continuam aceitos por enquanto, com um aviso do nome atual, e cada comando avisa quando a cópia instalada não é a publicada.
 
-`git fetch -q https://github.com/solrenning-llc/repo-id-transfer-test +correio:refs/correio/ferramenta && git show refs/correio/ferramenta:correio.mjs > /tmp/correio.mjs`
+`git fetch -q https://github.com/solrenning-llc/repo-id-transfer-test +correio:refs/agent-mail/tool && git show refs/agent-mail/tool:agent-mail.mjs > /tmp/agent-mail.mjs`
 
-`node /tmp/correio.mjs vigiar --eu "Claude N" --tambem revisao,fila`
+`node /tmp/agent-mail.mjs watch --as "Claude N" --also review,enqueue`
 
-(c) **Tudo o que é útil entre os agentes vai pelo correio:** recados (`enviar`, para quem precisa; `todos` só para aviso geral); pedidos de revisão (`pedir-revisao`, `pegar-revisao`, `concluir-revisao`); pedidos de fila (`pedir-fila`, `pegar-fila`, `concluir-fila`); a cota (`cota`, `quem`); e quem mexe em cada PR (`reivindicar`, `segurar`, `liberar`, `estado-pr`), além do CLAIMED, do UNCLAIMED e do HOLD de AC (m) e (p): quem marca o PR no correio escreve também a mesma marca, numa linha, no próprio PR, que é onde FQ (1), AC (m) e AC (p) a leem. O detalhe de uma revisão continua no próprio PR.
+(c) **Tudo o que é útil entre os agentes vai pelo correio:** recados (`send`, para quem precisa; `--to all` só para aviso geral); pedidos de revisão (`request-review`, `claim-review`, `complete-review`); pedidos de fila (`request-enqueue`, `claim-enqueue`, `complete-enqueue`); a cota (`set-quota`, `list-quotas`); e quem mexe em cada PR (`claim-pr`, `hold-pr`, `release-pr`, `pr-status`), além do CLAIMED, do UNCLAIMED e do HOLD de AC (m) e (p): quem marca o PR no correio escreve também a mesma marca, numa linha, no próprio PR, que é onde FQ (1), AC (m) e AC (p) a leem. O detalhe de uma revisão continua no próprio PR.
 
-(d) **Confirmação de leitura.** Toda mensagem é confirmada (`confirmar`) assim que lida, e respondida quando pede resposta. Mensagem sem confirmação continua acordando o destinatário e, depois de 30 minutos, aparece como atrasada para os dois lados (`pendentes`).
+(d) **Confirmação de leitura.** Toda mensagem é confirmada (`ack`) assim que lida, e respondida quando pede resposta. Mensagem sem confirmação continua acordando o destinatário e, depois de 30 minutos, aparece como atrasada para os dois lados (`list-pending`).
 
 (e) **Revisão.** Sempre de uma família diferente da do autor (FQ (2)) e sem nenhum commit no PR, nem de sessão antiga, nem de junção do main. Pedido do dono (21/11/2026, por volta das 03h55 Fortaleza, depois de uma família com commit no #3929 receber o pedido de revisão dele), nas palavras dele: "gera regra para erro assim nao ocorrer mais, para quem pedir revisao só pedir a quem realmente pode fazer". Por isso:
-- o pedido de revisão é feito com `pedir-revisao`, que lê os commits do PR além do main e deixa de fora, sozinho, toda família com commit nele (pelo trailer `Claude-Session`, pelo nome "Claude N" do autor e, sem trailer, pelo Codex); quem pede confere a lista "podem revisar" que ele mostra e acrescenta com `--exclui` a família de uma sessão "sem família conhecida";
-- na hora de pegar, `pegar-revisao` confere de novo, porque o head pode ter mudado, e devolve sozinho o pedido à família que tem commit nele;
+- o pedido de revisão é feito com `request-review`, que lê os commits do PR além do main e deixa de fora, sozinho, toda família com commit nele (pelo trailer `Claude-Session`, pelo nome "Claude N" do autor e, sem trailer, pelo Codex); quem pede confere a lista "podem revisar" que ele mostra e acrescenta com `--exclude` a família de uma sessão "sem família conhecida";
+- na hora de pegar, `claim-review` confere de novo, porque o head pode ter mudado, e devolve sozinho o pedido à família que tem commit nele;
 - um pedido feito fora do correio (no PR ou no canal) só nomeia revisor de família sem commit no PR, conferida nos commits do PR, e diz quais famílias têm commits;
-- quem pegar uma revisão e achar commit da própria família no PR devolve na hora (`devolver-revisao`), sem revisar.
+- quem pegar uma revisão e achar commit da própria família no PR devolve na hora (`release-review`), sem revisar.
 
-Cada pedido é entregue a um revisor só, do mais antigo para o mais novo. A preferência por um revisor (`--para`) vale por 30 minutos e só enquanto ele tem cota; depois, qualquer outra família com cota o pega. O veredito chega à caixa do autor.
+Cada pedido é entregue a um revisor só, do mais antigo para o mais novo. A preferência por um revisor (`--to`) vale por 30 minutos e só enquanto ele tem cota; depois, qualquer outra família com cota o pega. O veredito chega à caixa do autor.
 
-(f) **Fila, na ordem.** Os enfileiramentos respeitam a fila: `pegar-fila` só entrega o pedido mais antigo ainda aberto, um de cada vez, a uma família diferente da do autor, que confere as condições de FQ (1), inclusive o `estado-pr` do PR e os comentários do próprio PR, e enfileira, ou conclui como `recusado`, com o motivo. Nenhum pedido mais novo passa na frente. Enquanto o primeiro da fila tiver HOLD, ou CLAIMED de outra família, no correio, `pegar-fila` não o entrega e a fila espera. Uma tomada sem conclusão em 30 minutos, ou de quem ficou sem cota, cai, e o pedido volta a ser o primeiro da fila.
+(f) **Fila, na ordem.** Os enfileiramentos respeitam a fila: `claim-enqueue` só entrega o pedido mais antigo ainda aberto, um de cada vez, a uma família diferente da do autor, que confere as condições de FQ (1), inclusive o `pr-status` do PR e os comentários do próprio PR, e enfileira, ou conclui como recusado (`--result declined`), com o motivo. Nenhum pedido mais novo passa na frente. Enquanto o primeiro da fila tiver HOLD, ou CLAIMED de outra família, no correio, `claim-enqueue` não o entrega e a fila espera. Uma tomada sem conclusão em 10 minutos, ou de quem ficou sem cota, cai, e o pedido volta a ser o primeiro da fila; quem precisa de mais tempo renova a própria tomada com `renew-enqueue`, que só a sessão que pegou pode usar (dono, 21/11/2026: menos espera quando quem pegou fica sem cota; na revisão, o prazo continua de 30 minutos, renovável com `renew-review`). Ao entregar o pedido, `claim-enqueue` confere o PR contra o main e contra cada grupo da fila de integração do GitHub, e conclui sozinho como recusado o que conflita e como enfileirado o que já está nessa fila ou no main.
 
-(g) **Cota.** Ao ficar sem cota, o agente declara até quando (`cota --sem --ate <data>`); quando ela volta, declara `cota --com`. Passada a data, o correio o conta como com cota. Quem envia para um agente sem cota é avisado na hora e vê quem tem cota para receber no lugar; um pedido que estava com ele volta para quem pode atendê-lo.
+(g) **Cota.** Ao ficar sem cota, o agente declara até quando (`set-quota --exhausted --until <data>`); quando ela volta, declara `set-quota --available`. Passada a data, o correio o conta como com cota. Quem envia para um agente sem cota é avisado na hora e vê quem tem cota para receber no lugar; um pedido que estava com ele volta para quem pode atendê-lo.
 
 (h) **Pedir ao dono para passar um recado** só em caso de problema: o correio fora do ar, ou uma mensagem importante sem confirmação depois de 2 horas sem outro agente com cota que possa atendê-la.
 
 (i) **Transição.** A issue com o rótulo `canal-ativo` (AC (p) e (y)) e a caixa do Claude 1 (AV11) continuam sendo lidas até cada família confirmar a mensagem de boas-vindas do correio; até lá, o que for urgente vai pelo correio e também por elas. Depois disso, ficam só como histórico.
 
-(j) **Depois da transição, "o canal" das outras regras é o correio** (dono, 21/11/2026, por volta das 03h40 Fortaleza: "faça o que for mais correto e seguro", sobre as regras que ainda mandavam escrever no canal antigo). A transição de (i) termina quando `pendentes` do aviso de boas-vindas do correio não mostrar mais nenhuma família; quem vir isso primeiro avisa `todos` pelo correio. Daí em diante, toda remissão das outras seções deste arquivo ao canal de coordenação (a issue com o rótulo `canal-ativo`, "no canal", "issue de coordenação") e à caixa ou ao canal `para-claude-1` quer dizer o correio, assim:
-- `fila #N @sha` (FQ (1), CV (c), (f) e (g), AC (k)): o autor pede com `pedir-fila`; quem enfileira conclui com `concluir-fila`, com `fila #N @sha` e o próprio nome no texto;
-- "re-review needed #N @sha", pedido de revisor e "pode entrar" (CV (f), AC (b) e (f)): `pedir-revisao` e `concluir-revisao`;
-- CLAIMED, UNCLAIMED e HOLD (FQ (1), AC (m) e (p)): `reivindicar`, `liberar` e `segurar`, com a mesma marca numa linha no próprio PR, como em (c);
-- recados, perguntas, bloqueios, colisões, causa comum, adoção e confirmações de leitura (AV9, AV11, MV (c), CV (d), (e) e (g), AC (a), (c) e (e)): `enviar` a quem precisa (o coordenador, o autor ou a família), e `todos` só para aviso geral;
-- falta de uso anunciada (PV (d), AC (a)): `cota --sem --ate`.
+(j) **Depois da transição, "o canal" das outras regras é o correio** (dono, 21/11/2026, por volta das 03h40 Fortaleza: "faça o que for mais correto e seguro", sobre as regras que ainda mandavam escrever no canal antigo). A transição de (i) termina quando `list-pending` do aviso de boas-vindas do correio não mostrar mais nenhuma família; quem vir isso primeiro avisa `todos` pelo correio. Daí em diante, toda remissão das outras seções deste arquivo ao canal de coordenação (a issue com o rótulo `canal-ativo`, "no canal", "issue de coordenação") e à caixa ou ao canal `para-claude-1` quer dizer o correio, assim:
+- `fila #N @sha` (FQ (1), CV (c), (f) e (g), AC (k)): o autor pede com `request-enqueue`; quem enfileira conclui com `complete-enqueue`, com `fila #N @sha` e o próprio nome no texto;
+- "re-review needed #N @sha", pedido de revisor e "pode entrar" (CV (f), AC (b) e (f)): `request-review` e `complete-review`;
+- CLAIMED, UNCLAIMED e HOLD (FQ (1), AC (m) e (p)): `claim-pr`, `release-pr` e `hold-pr`, com a mesma marca numa linha no próprio PR, como em (c);
+- recados, perguntas, bloqueios, colisões, causa comum, adoção e confirmações de leitura (AV9, AV11, MV (c), CV (d), (e) e (g), AC (a), (c) e (e)): `send` a quem precisa (o coordenador, o autor ou a família), e `todos` só para aviso geral;
+- falta de uso anunciada (PV (d), AC (a)): `set-quota --exhausted --until`.
 
 Continuam onde estão, porque não são conversa entre agentes: o que se escreve no próprio PR (a revisão e o veredito, CLAIMED, HOLD e `fila #N @sha`), a issue `main-vermelho` (MV (a)), o relatório `prs-parados` (PV (c)) e a troca automática do canal (AC (p)), que só age se a issue voltar a ser usada. Até o fim da transição, vale (i): o urgente vai pelo correio e também pelo canal antigo.
+
+(k) **Identidade.** Todos gravam no correio com a mesma conta do GitHub, então o nome de quem escreve é declarado por ele (dono, 21/11/2026: "melhora a segurança, reduz os riscos o máximo que puder reduzir"). Na nuvem do Claude Code, a ferramenta lê a sessão do próprio ambiente, grava-a em cada escrita e recusa escrever com o nome de outra família; a falta de cota de outra família se registra com `set-quota --by`. Ao ler, a mensagem cujo remetente não bate com a família da sessão que a gravou aparece com "ATENÇÃO, IDENTIDADE", e quem a recebe confere com o remetente antes de agir. Fora da nuvem (o Claude 1 no computador do dono, o Codex), a escrita fica marcada como não identificada. Isso evita engano e troca de nome; não é assinatura criptográfica.
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
@@ -321,6 +323,60 @@ Até lá, `PLANS_ON_SALE` continua false e a trava que recusa consumidores da UE
   - a política de privacidade diz para que serve e por quanto tempo fica guardado: 10 anos nas vendas da UE (art. 63c); nas demais, o prazo que a lei exigir;
   - as regras de apagar dados continuam onde a lei permite;
   - os registros fiscais ficam com a Solrenning LLC.
+
+(j) **Decisões do dono sobre as três pendências do art. 9a** (OWNER-20261121-1529-ART9A-PENDING-DECISIONS, 21/11/2026, 15h29 Fortaleza, recebidas pelo Claude 4, sessão 01S9eVA5BC; item 793 [IV3]). Texto literal do dono, sem alteração:
+
+> Título: Respostas do dono às três decisões pendentes do tratamento de imposto do art. 9a (trava 3)
+> Assunto: Download das taxas do HMRC autorizado; a taxa de processamento da Stripe sobre a parte do IVA fica com o criador e nenhuma comissão incide sobre imposto; registros fiscais guardados pelo prazo de cada lei (UE 10 anos, Reino Unido 6 anos)
+> Remetente: dono (Vinicius)
+> Destinatário: Claude 4, sessão "Claude 4 - Construir o tratamento de imposto do art. 9a (trava 3), país por país"
+> Cópia: Claude 5 (coordenador), pelo canal ativo (gh issue list --label canal-ativo)
+> Data: 21/11/2026
+> Hora: 15h29 (Fortaleza)
+> Identificador: OWNER-20261121-1529-ART9A-PENDING-DECISIONS
+> Substitui: OWNER-20261121-1459-ART9A-PENDING-DECISIONS (não enviado; não usar)
+>
+> 1. Download das taxas do HMRC: autorizado. Baixe só a publicação oficial e pública "VAT rates on different goods and services" (https://www.gov.uk/guidance/vat-rates-on-different-goods-and-services; última atualização conferida em 21/11/2026: 10 July 2026), sem criar conta, sem chave de API e sem aceitar termos; se o download exigir algum desses, pare e me avise. Guarde no repositório a tabela com o endereço exato, a data da consulta, a data de atualização da página e a impressão digital (SHA-256) do que foi baixado, com teste que confere a tabela contra esse arquivo. Taxa ausente ou desconhecida para um produto recusa a venda daquele produto ao Reino Unido, nunca vira 0%. Antes da abertura, a tabela é conferida de novo na fonte, com data.
+>
+> 2. Taxa de processamento da Stripe sobre a parte do IVA: o criador arca com ela. Ela é cobrada pela Stripe na conta do criador, como a taxa de toda venda dele, e o Marktmorgen não devolve. É o modelo da Stan, a concorrente com o mesmo desenho do Marktmorgen (só assinatura, 0% por venda, venda na conta Stripe do criador), em que o criador paga todas as taxas da Stripe; o Paddle também calcula a sua taxa sobre o total com o IVA. Skool e Hotmart absorvem esse custo só porque ficam com uma porcentagem de cada venda; o Marktmorgen não recebe o dinheiro da venda (decisão de 29/09/2026) e tem 0% de comissão nas vendas das lojas, então absorver seria pagar, a cada venda, um custo sem receita, o que a regra de margem proíbe. O Marktmorgen recolhe o IVA sem cobrar nada a mais do criador, como fazem a Skool e o Teachable. A regra:
+>    (a) fica escrita nos Termos e na página de preços e taxas, em inglês americano simples, antes de o criador assinar, com um exemplo em números;
+>    (b) aparece como linha própria no extrato de cada venda;
+>    (c) nunca é cobrada do comprador como sobretaxa de cartão, que é proibida na UE;
+>    (d) nenhuma comissão do Marktmorgen incide sobre imposto: se um dia houver comissão (hoje é 0%), ela é calculada sobre o preço sem o imposto, como fazem a Skool, a Hotmart, a Amazon, a Apple e o Patreon;
+>    (e) até isso estar construído, testado e publicado, o pior caso do Marktmorgen continua contando esse custo, como hoje.
+>    A receita, a comissão e a margem do Marktmorgen não pagam esse custo.
+>
+> 3. Registros fiscais: atualize a política de privacidade e os Termos no mesmo PR que construir o registro, nunca antes:
+>    (a) UE: a Solrenning LLC guarda, das vendas a consumidores da UE em que ela é a fornecedora presumida, só as informações que a lei exige (art. 63c do Regulamento de Execução 282/2011 e as duas provas de localização dos arts. 24b e 24f), por 10 anos a partir do fim do ano da venda, como manda o art. 369(2) da Diretiva 2006/112/CE (regime extra-UE; os arts. 369k e 369x dão o mesmo prazo para o Union OSS e o IOSS dos produtos físicos); base legal: obrigação legal (RGPD, art. 6(1)(c));
+>    (b) Reino Unido: pelo menos 6 anos (HMRC, VAT Notice 700/21, item 2.4: "at least 6 years"), porque a Solrenning LLC registra direto no HMRC; conferir de novo na fonte, com data, antes da abertura;
+>    (c) Noruega, Suíça e Canadá: o prazo que a lei de cada um exigir, conferido em fonte oficial datada; prazo não conferido reprova, nunca é inventado;
+>    (d) esses registros nunca são usados para marketing nem para outra finalidade, ficam protegidos e são apagados automaticamente no fim do prazo;
+>    (e) num pedido de exclusão do comprador, todo o resto é apagado na hora, e esses registros ficam só até o fim do prazo legal (RGPD, art. 17(3)(b): "for compliance with a legal obligation"), o que a resposta ao comprador diz; o acesso e a exportação dos dados incluem esses registros;
+>    (f) o checkout mostra ao comprador da UE e do Reino Unido, antes de pagar, um aviso curto com link para essa parte da política;
+>    (g) o espaço guardado entra no registro de custos com teto; custo desconhecido reprova.
+>    Acessibilidade e linguagem simples conferidas e registradas no PR.
+>
+> Cada PR tem teste que falha antes, revisão de duas famílias de fora do Claude 4 (imposto, dinheiro e dados pessoais), as 9 verificações verdes no head exato e git merge-tree limpo, seguindo as regras CV, MV e AC.
+>
+> Nenhum preço, limite, comissão, teto, trava ou flag muda.
+
+Complemento do dono, OWNER-20261121-HHMM-HMRC-EXCHANGE-RATES (21/11/2026, por volta das 15h35 Fortaleza; o campo de hora veio sem preencher e o identificador é citado exatamente como foi escrito), depois de o Claude 4 mostrar que a página do item 1 traz as alíquotas por produto e não as taxas de câmbio de que o #5032 precisa. Texto literal:
+
+> Título: Autorização do download das taxas de câmbio mensais do HMRC
+> Assunto: Download das taxas de câmbio mensais oficiais do HMRC para o #5032
+> Remetente: dono (Vinicius)
+> Destinatário: Claude 4, sessão "Claude 4 - Construir o tratamento de imposto do art. 9a (trava 3), país por país"
+> Cópia: Claude 5 (coordenador)
+> Data: 21/11/2026
+> Hora: (preencher)
+> Identificador: OWNER-20261121-HHMM-HMRC-EXCHANGE-RATES
+>
+> Autorizo baixar as taxas de câmbio mensais oficiais do HMRC (HMRC monthly exchange rates), só a publicação pública em https://www.trade-tariff.service.gov.uk/exchange_rates, dos meses necessários, sem criar conta, sem chave de API e sem aceitar termos; se exigir algum desses, pare e me avise. Guarde no repositório cada mês com o endereço exato, a data da consulta e a impressão digital (SHA-256) do arquivo baixado, com teste que confere a tabela contra esse arquivo. Mês ou moeda sem taxa recusa a venda, nunca é estimado. Antes da abertura, conferir de novo na fonte, com data.
+
+Como se aplica:
+- **Item 1 e o complemento:** são duas tabelas. A página "VAT rates on different goods and services" dá a alíquota de cada tipo de produto; os arquivos mensais do HMRC dão a taxa de câmbio para declarar em libras uma venda feita em outra moeda (VAT Notice 700, 7.6). As taxas de novembro e dezembro de 2026 entram no #5032, guardadas em `docs/hmrc-exchange-rates/`. A tabela de alíquotas por produto é uma unidade própria do 793 [IV3].
+- **Item 2:** substitui, nesse ponto, o "Depende do dono" do #5024. A taxa de processamento sobre a parte do IVA nunca entra em `application_fee_amount`, como o #5024 já faz, e o pior caso do Marktmorgen continua contando esse custo (`worstCaseCents`) até (a) a (d) estarem construídos, testados e publicados.
+- **Item 3:** complementa o item (i) desta seção, que já guarda o endereço de cobrança por 10 anos nas vendas da UE; o prazo do Reino Unido e o dos outros países seguem este item.
 
 Continuam TX, MR, LC, SR5, 495 [SR6] e VR. Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo além do que diz (f).
 

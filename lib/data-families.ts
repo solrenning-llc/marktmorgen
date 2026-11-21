@@ -48,12 +48,13 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:backup:del:", "nl:backup:delcount:", "nl:backup:files:day:", "nl:backup:last-fail", "nl:backup:last-ok", "nl:backup:lock", "nl:backup:ran:", "nl:bench:ranges", "nl:bench:s:", "nl:billing:period-read:", "nl:billing:sync:after", "nl:billing:sync:cursor", "nl:busy:",
   "nl:cal:builds:", "nl:cal:busy:", "nl:cal:cfg:", "nl:cal:chg:", "nl:cal:err:", "nl:cal:good:", "nl:cal:lock:", "nl:cal:out:", "nl:cal:pace:", "nl:cal:refused:", "nl:cal:tok:",
   "nl:call:creator-reminded:", "nl:call:lock:", "nl:call:moved:", "nl:call:reminded:", "nl:call:remindq",
+  "nl:certrefunds:n:", "nl:certrefunds:next:", "nl:certrefunds:seen:", "nl:certrefunds:since:",
   "nl:call:room:", "nl:card:link:", "nl:card:open:", "nl:card:opens:", "nl:catalog:move:cursor",
   "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:claims:", "nl:closed:due", "nl:closed:erasing", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:ap:stores", "nl:cm:ap:turns", "nl:cm:evmail:",
   "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:", "nl:confirm-room:",
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:coursegone:", "nl:courses:drip", "nl:courses:lock",
   "nl:creators:responses", "nl:crm:co:lock:", "nl:crm:erased:", "nl:crm:fields:", "nl:crm:gen:", "nl:crm:pacc:lock:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:", "nl:dsched:", "nl:dsched:due", "nl:dsched:lock:", "nl:dsched:tell",
-  "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dun:", "nl:dun:card:",
+  "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dripstart:", "nl:dun:", "nl:dun:card:",
   "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:files:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
   "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:fly:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
   "nl:exposure:v1:", "nl:exposure:v1:YYYY-MM", "nl:fair:c:", "nl:firstsale:", "nl:flow-rotate:", "nl:forms:", "nl:free:claim:",
@@ -110,7 +111,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:store:delivery:over:", "nl:store:folder-owner:", "nl:store:handle:", "nl:store:id:", "nl:store:lock:",
   "nl:store:owner:", "nl:store:owner:*", "nl:store:photo:", "nl:stream:auto:", "nl:stream:autoowed:", "nl:stream:autoq",
   "nl:stream:col:", "nl:stream:due", "nl:stream:gone", "nl:stream:lock", "nl:stream:peek:",
-  "nl:rsum:", "nl:rsum:last:", "nl:rsum:lock:", "nl:rsum:ver:", "nl:search:", "nl:search:build:", "nl:status:views:", "nl:stripe-check:last", "nl:stripe-check:lock", "nl:stripe-check:runs", "nl:sub:due", "nl:sub:slotdue", "nl:sweep:cursor", "nl:sweep:walk:", "nl:tasks:bytes:", "nl:tasks:doors", "nl:tasks:held", "nl:tasks:taken:",
+  "nl:rsum:", "nl:rsum:last:", "nl:rsum:lock:", "nl:rsum:ver:", "nl:search:", "nl:search:build:", "nl:status:views:", "nl:stripe-check:last", "nl:stripe-check:lock", "nl:stripe-check:runs", "nl:sub:due", "nl:sub:slotdue", "nl:sweep:aff:", "nl:sweep:cursor", "nl:sweep:walk:", "nl:tasks:bytes:", "nl:tasks:doors", "nl:tasks:held", "nl:tasks:taken:",
   "nl:teams:state:", "nl:team:", "nl:team:invite:", "nl:team:lock:", "nl:team:log:", "nl:team:of:", "nl:tben:", "nl:ticket:in:", "nl:tier:", "nl:tier:resume:",
   "nl:traffic:c:", "nl:traffic:day:", "nl:traffic:folders:", "nl:traffic:n:", "nl:traffic:r:", "nl:traffic:read:", "nl:traffic:x:", "nl:trialnudge:cursor", "nl:upd:job:",
   "nl:operator:traffic-log", "nl:operator:traffic-reset:lock", "nl:traffic:spike-day:", "nl:traffic:spike:",
@@ -237,6 +238,9 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:card:link:": X(21), "nl:card:open:": E, "nl:card:opens:": X(21),
   "nl:catalog:": E, "nl:catalog:move:cursor": C,
   "nl:cert:": T("nl:course:"),
+  // The certificates' refund pass (lib/certificate-refunds.ts): how far it read a store's refunds, and those it handled;
+  // the store's turn for its pass and the month's checks, by its stats id.
+  "nl:certrefunds:n:": E, "nl:certrefunds:next:": E, "nl:certrefunds:seen:": E, "nl:certrefunds:since:": E,
   "nl:chatsum:": E,
   // A posted picture's mark goes with its post through the follower of nl:cm: (Claude 6 on #3414); a door's own note by
   // itself within a day.
@@ -269,6 +273,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:dsched:": E, "nl:dsched:due": I, "nl:dsched:lock:": E, "nl:dsched:tell": I,
   "nl:dir:listed": I, "nl:dir:page": Cr(1),
   "nl:domain:": T("prepare"),
+  // The drip job's start reads in the store's window (lib/drip-start.ts), named by the store's own id: go with the store.
+  "nl:dripstart:": E,
   "nl:dun:": E, "nl:dun:card:": E, "nl:dun:cards:": E, "nl:dun:count:": E, "nl:dun:cursor": C, "nl:dun:report:": E,
   "nl:erase:files:": C, "nl:erase:ix:": E, "nl:erase:link:": Cr(1), "nl:transparency:": C, "nl:transparency:acted:": C, "nl:transparency:since": C, "nl:erased:": E,
   "nl:esync:bad:": E, "nl:esync:cfg:": E, "nl:esync:fly:": X(1), "nl:esync:j:": T("prepare", 7), "nl:esync:log:": E, "nl:esync:q": I,
@@ -479,6 +485,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:stream:auto:": E, "nl:stream:autoowed:": E, "nl:stream:autoq": I, "nl:stream:cap:": E, "nl:stream:col:": E, "nl:stream:due": I, "nl:stream:gone": C,
   "nl:stream:lock": C, "nl:stream:peek:": E, "nl:stream:v:": E,
   "nl:stripe-check:last": C, "nl:stripe-check:lock": C, "nl:stripe-check:runs": C,
+  "nl:sweep:aff:": C,
   "nl:sweep:cursor": C,
   // The checkout sweep's place in one store's completed or expired checkouts of the day (lib/checkout-sweep.ts, walkDay):
   // the five-minute job's own, like its cursor; two keys a store at most, each kept a day.

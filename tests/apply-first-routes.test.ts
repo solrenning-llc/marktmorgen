@@ -8,6 +8,7 @@
 import test, { beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
@@ -58,7 +59,8 @@ async function setUp() {
 }
 
 function form(fields: Record<string, string>, headers: Record<string, string> = {}) {
-  const body = new URLSearchParams({ handle: "applyshop", product: product.id, email: "ann@example.invalid", consent: "yes", version: APPLY_CONSENT_VERSION, ...fields });
+  // Each form carries its own attempt key, as the page's form makes one and resends it on every retry (Claude 4 3rC on #3567).
+  const body = new URLSearchParams({ handle: "applyshop", product: product.id, email: "ann@example.invalid", consent: "yes", version: APPLY_CONSENT_VERSION, attempt: randomBytes(16).toString("hex"), ...fields });
   return new NextRequest(`${SITE}/api/store/apply`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", host: "marktmorgen.com", origin: SITE, ...headers },
@@ -89,6 +91,20 @@ test("an application is kept from the plain form, with the sentence agreed to, a
   assert.deepEqual(listed?.map((a) => [a.email, a.offer, a.state, a.consent.text, a.consent.version]), [["ann@example.invalid", product.id, "submitted", APPLY_CONSENT_TEXT, APPLY_CONSENT_VERSION]]);
   // No email is sent and no checkout opened: nothing is written outside the store's applications, its counts and its traffic.
   assert.equal(touched("nl:mail:"), false);
+});
+
+test("a retry resends the form's attempt key and keeps one application; a form without a readable one keeps nothing", async () => {
+  // The key is made by the form, once, and sent again on every retry: never by the server for each request, which
+  // would make a retry after a lost answer a second application (#3564's per-attempt key).
+  const attempt = "0123456789abcdef0123456789abcdef";
+  assert.equal(statusOf(await apply(form({ attempt }))), "sent");
+  assert.equal(statusOf(await apply(form({ attempt }))), "sent", "the same attempt, sent again, is told it worked");
+  assert.equal((await listApplications(store))?.length, 1, "and is the same application, kept once");
+  for (const bad of ["", "short", "Z".repeat(32), "0".repeat(33), "0123456789ABCDEF0123456789ABCDEF"]) {
+    const response = await apply(form({ attempt: bad, email: "carl@example.invalid" }));
+    assert.equal(statusOf(response), "error", JSON.stringify(bad));
+  }
+  assert.equal((await listApplications(store))?.length, 1, "a form without a readable attempt key keeps nothing");
 });
 
 test("another site is refused before anything is read", async () => {

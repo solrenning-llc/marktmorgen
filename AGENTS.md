@@ -322,6 +322,60 @@ Até lá, `PLANS_ON_SALE` continua false e a trava que recusa consumidores da UE
   - as regras de apagar dados continuam onde a lei permite;
   - os registros fiscais ficam com a Solrenning LLC.
 
+(j) **Decisões do dono sobre as três pendências do art. 9a** (OWNER-20261121-1529-ART9A-PENDING-DECISIONS, 21/11/2026, 15h29 Fortaleza, recebidas pelo Claude 4, sessão 01S9eVA5BC; item 793 [IV3]). Texto literal do dono, sem alteração:
+
+> Título: Respostas do dono às três decisões pendentes do tratamento de imposto do art. 9a (trava 3)
+> Assunto: Download das taxas do HMRC autorizado; a taxa de processamento da Stripe sobre a parte do IVA fica com o criador e nenhuma comissão incide sobre imposto; registros fiscais guardados pelo prazo de cada lei (UE 10 anos, Reino Unido 6 anos)
+> Remetente: dono (Vinicius)
+> Destinatário: Claude 4, sessão "Claude 4 - Construir o tratamento de imposto do art. 9a (trava 3), país por país"
+> Cópia: Claude 5 (coordenador), pelo canal ativo (gh issue list --label canal-ativo)
+> Data: 21/11/2026
+> Hora: 15h29 (Fortaleza)
+> Identificador: OWNER-20261121-1529-ART9A-PENDING-DECISIONS
+> Substitui: OWNER-20261121-1459-ART9A-PENDING-DECISIONS (não enviado; não usar)
+>
+> 1. Download das taxas do HMRC: autorizado. Baixe só a publicação oficial e pública "VAT rates on different goods and services" (https://www.gov.uk/guidance/vat-rates-on-different-goods-and-services; última atualização conferida em 21/11/2026: 10 July 2026), sem criar conta, sem chave de API e sem aceitar termos; se o download exigir algum desses, pare e me avise. Guarde no repositório a tabela com o endereço exato, a data da consulta, a data de atualização da página e a impressão digital (SHA-256) do que foi baixado, com teste que confere a tabela contra esse arquivo. Taxa ausente ou desconhecida para um produto recusa a venda daquele produto ao Reino Unido, nunca vira 0%. Antes da abertura, a tabela é conferida de novo na fonte, com data.
+>
+> 2. Taxa de processamento da Stripe sobre a parte do IVA: o criador arca com ela. Ela é cobrada pela Stripe na conta do criador, como a taxa de toda venda dele, e o Marktmorgen não devolve. É o modelo da Stan, a concorrente com o mesmo desenho do Marktmorgen (só assinatura, 0% por venda, venda na conta Stripe do criador), em que o criador paga todas as taxas da Stripe; o Paddle também calcula a sua taxa sobre o total com o IVA. Skool e Hotmart absorvem esse custo só porque ficam com uma porcentagem de cada venda; o Marktmorgen não recebe o dinheiro da venda (decisão de 29/09/2026) e tem 0% de comissão nas vendas das lojas, então absorver seria pagar, a cada venda, um custo sem receita, o que a regra de margem proíbe. O Marktmorgen recolhe o IVA sem cobrar nada a mais do criador, como fazem a Skool e o Teachable. A regra:
+>    (a) fica escrita nos Termos e na página de preços e taxas, em inglês americano simples, antes de o criador assinar, com um exemplo em números;
+>    (b) aparece como linha própria no extrato de cada venda;
+>    (c) nunca é cobrada do comprador como sobretaxa de cartão, que é proibida na UE;
+>    (d) nenhuma comissão do Marktmorgen incide sobre imposto: se um dia houver comissão (hoje é 0%), ela é calculada sobre o preço sem o imposto, como fazem a Skool, a Hotmart, a Amazon, a Apple e o Patreon;
+>    (e) até isso estar construído, testado e publicado, o pior caso do Marktmorgen continua contando esse custo, como hoje.
+>    A receita, a comissão e a margem do Marktmorgen não pagam esse custo.
+>
+> 3. Registros fiscais: atualize a política de privacidade e os Termos no mesmo PR que construir o registro, nunca antes:
+>    (a) UE: a Solrenning LLC guarda, das vendas a consumidores da UE em que ela é a fornecedora presumida, só as informações que a lei exige (art. 63c do Regulamento de Execução 282/2011 e as duas provas de localização dos arts. 24b e 24f), por 10 anos a partir do fim do ano da venda, como manda o art. 369(2) da Diretiva 2006/112/CE (regime extra-UE; os arts. 369k e 369x dão o mesmo prazo para o Union OSS e o IOSS dos produtos físicos); base legal: obrigação legal (RGPD, art. 6(1)(c));
+>    (b) Reino Unido: pelo menos 6 anos (HMRC, VAT Notice 700/21, item 2.4: "at least 6 years"), porque a Solrenning LLC registra direto no HMRC; conferir de novo na fonte, com data, antes da abertura;
+>    (c) Noruega, Suíça e Canadá: o prazo que a lei de cada um exigir, conferido em fonte oficial datada; prazo não conferido reprova, nunca é inventado;
+>    (d) esses registros nunca são usados para marketing nem para outra finalidade, ficam protegidos e são apagados automaticamente no fim do prazo;
+>    (e) num pedido de exclusão do comprador, todo o resto é apagado na hora, e esses registros ficam só até o fim do prazo legal (RGPD, art. 17(3)(b): "for compliance with a legal obligation"), o que a resposta ao comprador diz; o acesso e a exportação dos dados incluem esses registros;
+>    (f) o checkout mostra ao comprador da UE e do Reino Unido, antes de pagar, um aviso curto com link para essa parte da política;
+>    (g) o espaço guardado entra no registro de custos com teto; custo desconhecido reprova.
+>    Acessibilidade e linguagem simples conferidas e registradas no PR.
+>
+> Cada PR tem teste que falha antes, revisão de duas famílias de fora do Claude 4 (imposto, dinheiro e dados pessoais), as 9 verificações verdes no head exato e git merge-tree limpo, seguindo as regras CV, MV e AC.
+>
+> Nenhum preço, limite, comissão, teto, trava ou flag muda.
+
+Complemento do dono, OWNER-20261121-HHMM-HMRC-EXCHANGE-RATES (21/11/2026, por volta das 15h35 Fortaleza; o campo de hora veio sem preencher e o identificador é citado exatamente como foi escrito), depois de o Claude 4 mostrar que a página do item 1 traz as alíquotas por produto e não as taxas de câmbio de que o #5032 precisa. Texto literal:
+
+> Título: Autorização do download das taxas de câmbio mensais do HMRC
+> Assunto: Download das taxas de câmbio mensais oficiais do HMRC para o #5032
+> Remetente: dono (Vinicius)
+> Destinatário: Claude 4, sessão "Claude 4 - Construir o tratamento de imposto do art. 9a (trava 3), país por país"
+> Cópia: Claude 5 (coordenador)
+> Data: 21/11/2026
+> Hora: (preencher)
+> Identificador: OWNER-20261121-HHMM-HMRC-EXCHANGE-RATES
+>
+> Autorizo baixar as taxas de câmbio mensais oficiais do HMRC (HMRC monthly exchange rates), só a publicação pública em https://www.trade-tariff.service.gov.uk/exchange_rates, dos meses necessários, sem criar conta, sem chave de API e sem aceitar termos; se exigir algum desses, pare e me avise. Guarde no repositório cada mês com o endereço exato, a data da consulta e a impressão digital (SHA-256) do arquivo baixado, com teste que confere a tabela contra esse arquivo. Mês ou moeda sem taxa recusa a venda, nunca é estimado. Antes da abertura, conferir de novo na fonte, com data.
+
+Como se aplica:
+- **Item 1 e o complemento:** são duas tabelas. A página "VAT rates on different goods and services" dá a alíquota de cada tipo de produto; os arquivos mensais do HMRC dão a taxa de câmbio para declarar em libras uma venda feita em outra moeda (VAT Notice 700, 7.6). As taxas de novembro e dezembro de 2026 entram no #5032, guardadas em `docs/hmrc-exchange-rates/`. A tabela de alíquotas por produto é uma unidade própria do 793 [IV3].
+- **Item 2:** substitui, nesse ponto, o "Depende do dono" do #5024. A taxa de processamento sobre a parte do IVA nunca entra em `application_fee_amount`, como o #5024 já faz, e o pior caso do Marktmorgen continua contando esse custo (`worstCaseCents`) até (a) a (d) estarem construídos, testados e publicados.
+- **Item 3:** complementa o item (i) desta seção, que já guarda o endereço de cobrança por 10 anos nas vendas da UE; o prazo do Reino Unido e o dos outros países seguem este item.
+
 Continuam TX, MR, LC, SR5, 495 [SR6] e VR. Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo além do que diz (f).
 
 ## TX — Política tributária vigente (dono,27/10/2026 12h34 Fortaleza)

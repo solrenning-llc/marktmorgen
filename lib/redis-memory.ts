@@ -1683,6 +1683,27 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
+        // lib/funnel-share-store.ts CREATE_STORE_SHARE: CREATE_SHARE only while the store's erasing mark is absent and its id
+        // key exists (-4 otherwise, nothing written).
+        if (key.startsWith("-- marktmorgen:funnel-share-live:v1\n") && args[0] === "4" && args.length === 13) {
+          const [, list, lookup, idKey, erasing, id, meta, rec, sum, bundle, limit, ttl, field] = args;
+          this.live(idKey);
+          if (this.run(["HGET", erasing, field]) !== null) return -4;
+          if (!this.data.has(idKey)) return -4;
+          this.live(list);
+          this.live(lookup);
+          const held = this.data.get(list);
+          if (held !== undefined && !(held instanceof Map)) return -3;
+          if (this.data.has(lookup) || (held instanceof Map && held.has(id))) return -2;
+          if (held instanceof Map && held.size >= Number(limit)) return 0;
+          this.hash(list).set(id, meta);
+          const record = this.hash(lookup);
+          record.set("rec", rec);
+          record.set("sum", sum);
+          record.set("bundle", bundle);
+          this.until.set(lookup, this.now() + Number(ttl) * 1000);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:funnel-share:v1\n") && args[0] === "2" && args.length === 10) {
           const [, list, lookup, id, meta, rec, sum, bundle, limit, ttl] = args;
           this.live(list);
@@ -1917,6 +1938,30 @@ export class MemoryRedis {
           this.scriptCalls += 1;
           this.run(["SET", link, value]);
           return 1;
+        }
+        // lib/paypal-payouts.ts KEEP_OPEN_IF_LIVE: an open PayPal batch written (and its store watched) only while the
+        // store is live; -1, nothing written, when it is gone, being erased or (from before ids) its owner's record is
+        // another store's.
+        if (key.startsWith("-- marktmorgen:paypal-open-live:v2\n") && args[0] === "4" && args.length === 10) {
+          const [, live, erasing, open, stores, field, batch, value, sid, statsId] = args;
+          this.scriptCalls += 2;
+          if (this.run(["HGET", erasing, field]) !== null) return -1;
+          if (statsId === "") {
+            if (Number(this.run(["EXISTS", live])) !== 1) return -1;
+          } else {
+            const raw = this.run(["GET", live]);
+            if (raw === null) return -1;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -1;
+            }
+            if (!record || typeof record !== "object" || Array.isArray(record) || (record as { statsId?: unknown }).statsId !== statsId) return -1;
+          }
+          this.scriptCalls += sid === "" ? 1 : 2;
+          const held = this.run(["HSET", open, batch, value]);
+          return [held, sid === "" ? 0 : this.run(["SADD", stores, sid])];
         }
         // lib/imported-purchases.ts GRANT_UNLESS_ERASED: each grant written only when its print is not among the
         // store's deleted people (-1, nothing written); its address noted once among the buyers brought, its product HSETNX.
@@ -3963,6 +4008,8 @@ export class MemoryRedis {
     if (!Number.isFinite(limit) || limit < 0 || !/^\d{4}-\d{2}$/.test(month ?? "") || rest.length % 3 !== 0) return [-1, 0];
     const held = this.data.get(target);
     if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+    // A give-back ("2") on a room that is not there writes nothing (TAKE_DATA, Codex L 20/11).
+    if (always === "2" && !(held instanceof Map && held.has("#"))) return [1, 0];
     const room = this.hash(target);
     let total = Number(room.get("#") ?? "0");
     if (!Number.isFinite(total)) return [-1, 0];
@@ -4017,7 +4064,7 @@ export class MemoryRedis {
       if (old === 0 && next > 0) delta += 64;
       else if (old > 0 && next === 0) delta -= 64;
     }
-    if (delta > 0 && always !== "1" && total + delta > limit) {
+    if (delta > 0 && always !== "1" && always !== "2" && total + delta > limit) {
       keep();
       return [0, total];
     }

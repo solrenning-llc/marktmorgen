@@ -37,9 +37,10 @@ import { MOST_TAX_READING, SIZING_READING, unitUnder as archivedUnitUnder } from
 
 /**
  * The LC tax reading (AGENTS.md, rule LC, owner, 1 November 2026, 00:05 Fortaleza; TX point 4 resolved 1 November
- * 2026, 00:10): IRPF 15% on the LLC's profit (Lei 14.754/2023, art. 5), and IOF 0.38% on the money entering Brazil
- * (Decreto 6.306/2007, arts. 14 and 15-B, XXV, conferred on planalto.gov.br on 1 November 2026), whose base is the
- * profit remitted before IRPF. No ISS, no US federal income tax; the buyer's tax is added on top of the price.
+ * 2026, 00:10): IRPF 15% on the LLC's profit (Lei 14.754/2023, art. 2, §1, and art. 5, caput and §10, III), and IOF
+ * 0.38% on the money entering Brazil (Decreto 6.306/2007, arts. 14 and 15-B, XXV, conferred on planalto.gov.br on
+ * 1 November 2026), whose base is the profit remitted before IRPF. No ISS, no US federal income tax; the buyer's tax
+ * is added on top of the price.
  */
 export const LC_IRPF_BPS = 1_500;
 export const LC_IOF_BPS = 38;
@@ -214,7 +215,7 @@ export function renderCommercialMarginDraft(options: DraftOptions = {}): string 
   push(`- **Use:** every cost line of \`tests/plan-cost-registry.ts\` at 100% of every right in the worst month. A yearly payment carries 12 worst months plus what one payment leaves after the plan ends, as \`planUnits\` in \`tests/margin-alignment-table.ts\` models it. The commission on sales counts as zero.`);
   push(`- **Receiving:** \`lib/receiving-costs.ts\`. The buyer's tax is added on top of the price at up to ${MOST_CORRECT_READING.salesTaxOnTopBps / 100}%. The dearer provider's fee is taken on the whole amount charged. Remittance ${MOST_CORRECT_READING.remittanceBps / 100}%, refund reserve 1%, dispute reserve 1% of (amount charged + both dispute fees).`);
   push(`- **Tax-collection cost:** Stripe Tax is modelled as ${PROVIDER_FEES.stripe.taxBps / 100}% of the amount charged inside the Stripe fee (\`PROVIDER_FEES.stripe.taxBps\`); the column shows that share. Stripe Tax at a fixed fee per transaction: **not modelled**. Per-sale EU VAT/OSS (IV1) or UK VAT collection costs: **not modelled** in \`lib/receiving-costs.ts\` or the registry, so unknown, never zero. VAT/OSS registration and filing are the LLC fixed-cost line \`vat-oss-and-local-compliance\`, which is null.`);
-  push(`- **LC reading (the owner's profit, rule LC):** IRPF ${LC_IRPF_BPS / 100}% of the pretax profit (Lei 14.754/2023, art. 5) and IOF ${LC_IOF_BPS / 100}% of the amount remitted, taken as the pretax profit (Decreto 6.306/2007, arts. 14 and 15-B, XXV). Each is rounded up to the cent. No ISS, no US federal income tax. This is computed outside the 27.5% floor, which now lives only in \`tests/historical-receiving-model.ts\`.${LC_IRPF_BPS === MOST_CORRECT_READING.profitTaxBps && LC_IOF_BPS === MOST_CORRECT_READING.incomingExchangeIofBps ? " The code's `MOST_CORRECT_READING` holds the same two rates." : " **The code's `MOST_CORRECT_READING` holds different rates.**"}`);
+  push(`- **LC reading (the owner's profit, rule LC):** IRPF ${LC_IRPF_BPS / 100}% of the pretax profit (Lei 14.754/2023, arts. 2, §1 (15%) and 5, caput and §10, III (31 December)) and IOF ${LC_IOF_BPS / 100}% of the amount remitted, taken as the pretax profit (Decreto 6.306/2007, arts. 14 and 15-B, XXV). Each is rounded up to the cent. No ISS, no US federal income tax. This is computed outside the 27.5% floor, which now lives only in \`tests/historical-receiving-model.ts\`.${LC_IRPF_BPS === MOST_CORRECT_READING.profitTaxBps && LC_IOF_BPS === MOST_CORRECT_READING.incomingExchangeIofBps ? " The code's `MOST_CORRECT_READING` holds the same two rates." : " **The code's `MOST_CORRECT_READING` holds different rates.**"}`);
   push(sesApplied
     ? `- **Email (LC):** Amazon SES at $${(SES_PER_EMAIL_USD * 1_000).toFixed(2)} per 1,000 ($${SES_PER_EMAIL_USD} per email), swapped for the code's \`PER_EMAIL\` ($${code.perEmailUsd} per email) everywhere the registry uses it. It holds only once the 309 [EM1] protections are merged and published. The Resend Pro subscription then becomes an LLC fixed cost (\`tools\`, null today), never zero.`
     : `- **Email:** the SES price was **not** swapped in (no SES usage was supplied), so the LC column uses the code's \`PER_EMAIL\` ($${code.perEmailUsd} per email).`);
@@ -239,7 +240,7 @@ export function renderCommercialMarginDraft(options: DraftOptions = {}): string 
 
   push("## The same units under the code's readings");
   push("");
-  push(`Net after room, with the code's email price ($${code.perEmailUsd} per email). "Code's model" is \`tests/margin-alignment-table.ts\` \`unitUnder\` (IRPF and IOF together, ${(MOST_CORRECT_READING.profitTaxBps + MOST_CORRECT_READING.incomingExchangeIofBps) / 100}% on profit, rounded once). The last two columns are **archived readings, not the owner's profit**, from \`tests/historical-receiving-model.ts\`: "${SIZING_READING.label}" and "${MOST_TAX_READING.label}". Both carry the 27.5% floor.`);
+  push(`Net after room, with the code's email price ($${code.perEmailUsd} per email). "Code's model" is \`tests/margin-alignment-table.ts\` \`unitUnder\` (IRPF ${MOST_CORRECT_READING.profitTaxBps / 100}% and IOF ${MOST_CORRECT_READING.incomingExchangeIofBps / 100}% on profit, each rounded up on its own). The last two columns are **archived readings, not the owner's profit**, from \`tests/historical-receiving-model.ts\`: "${SIZING_READING.label}" and "${MOST_TAX_READING.label}". Both carry the 27.5% floor.`);
   push("");
   push("| Unit | LC (for comparison) | Code's model, code email | Archived: sizing 27.5% | Archived: most-tax |");
   push("| --- | --- | --- | --- | --- |");

@@ -10,7 +10,7 @@ import { COMMIT_ORDER_CONFIRMATION } from "@/lib/orders";
 import { CONFIRMATION_ORIGIN_SCRIPT, CONFIRMATION_PAID_SCRIPT, CONFIRMATION_ERASURE_SCRIPT, type ConfirmationOriginRuntime } from "@/lib/order-confirmation-outbox";
 import { SHIPMENT_MAIL_SCRIPT } from "@/lib/shipment-mail-outbox";
 import { store as redis } from "./redis-stub";
-import { shipmentOutboxFixture, shipmentPolicy } from "./shipment-mail-outbox-fixture";
+import { confirmationPaymentWait, shipmentOutboxFixture, shipmentPolicy } from "./shipment-mail-outbox-fixture";
 
 process.env.NIMBUS_DATA_KEY = "SYNTHETIC_ONLY_CONFIRMATION_ORIGIN_KEY_2026";
 globalThis.fetch = async () => { throw Error("No external service is allowed in this proof"); };
@@ -43,7 +43,7 @@ export async function physicalPaidFixture() {
         if (c[0] === "EVAL" && c[1] === SHIPMENT_MAIL_SCRIPT && c[13] !== "enqueue" && c[13] !== "cancel") {
           const k = c.slice(3,13).map(String), raw = redis.run(["GET", k[0]]);
           const r = raw ? JSON.parse(String(raw)) : null;
-          if ([k[8], k[9]].some(key => redis.run(["EXISTS", key])) || c[13] === "claim" && r && (r.next > now() || r.checks >= runtime.policy!.maximumChecks)) { answers.push(["held"]); continue; }
+          if ([k[8], k[9]].some(key => redis.run(["EXISTS", key])) || c[13] === "claim" && r && (r.next > now() || r.checks >= runtime.policy!.maximumChecks && !confirmationPaymentWait(r, now()))) { answers.push(["held"]); continue; }
         }
         if (c[0] === "EVAL" && c[1] === CONFIRMATION_ERASURE_SCRIPT) {
           const count=Number(c[2]),k=c.slice(3,3+count).map(String),[op,token,person,statsId]=c.slice(3+count).map(String);

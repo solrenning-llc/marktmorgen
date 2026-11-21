@@ -32,6 +32,10 @@
  * Disconnecting gives the permission back (DELETE /me/permissions), so access
  * ends on Meta's side too, and deletes the connection and every line read
  * from it. Meta's notice that the person removed the app does the same.
+ * DELETE /me/permissions ends the person's whole grant to the app, for every
+ * store they connected, so it is sent only when no other store still uses
+ * that Meta login (issue #4011, decision ALL-160); otherwise this store only
+ * forgets it, and the last store to disconnect gives it back.
  *
  *   nl:metaads:conn:<statsId>     the connection
  *   nl:metaads:read:<statsId>     when it was last read, and what went wrong
@@ -517,7 +521,7 @@ export async function finishMeta(input: {
   const me = await call("GET", "/me", { fields: "id" }, token);
   const user = typeof me.id === "string" ? me.id : "";
   if (!perms.some((p) => p.permission === "ads_read" && p.status === "granted")) {
-    await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
+    if (!(await grantStillUsed(user))) await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
     return { ok: false, error: "permission" };
   }
   const listed = await call("GET", "/me/adaccounts", { fields: "account_id,name,currency,account_status", limit: "50" }, token);
@@ -526,7 +530,7 @@ export async function finishMeta(input: {
     .filter((a) => typeof a.id === "string" && /^act_\d{1,30}$/.test(a.id) && typeof a.currency === "string")
     .map((a) => ({ id: String(a.id), name: String(a.name ?? "").replace(/\s+/g, " ").trim().slice(0, 80), currency: String(a.currency).toLowerCase(), active: Number(a.account_status) === 1 }));
   if (!user || !accounts.length) {
-    await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
+    if (!(await grantStillUsed(user))) await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
     return { ok: false, error: "accounts" };
   }
   // The connection it replaces read exactly (CX-123 rule 24): an unknown reply throws before anything is written, so
@@ -546,7 +550,8 @@ export async function finishMeta(input: {
     broken: "",
   };
   if (!flowFresh(input.startedAt)) {
-    await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
+    // Given back only when no other store still uses that login, as on every other way this flow ends unkept.
+    if (!(await grantStillUsed(user))) await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
     return { ok: false, error: "expired" };
   }
   const keys = [connKey(input.statsId), readKey(input.statsId), STORES_KEY, userKey(user), goneKey(user)];
@@ -564,10 +569,10 @@ export async function finishMeta(input: {
   // of the old connection is given back, unlisted or deleted (merged with main of 15 November 2026, Claude 1 cloud O).
   const bumped = repliesFor(await redisPipeline([["INCR", GEN_KEY]]), 1);
   if (!bumped || countOf(bumped[0]) === null) throw new UnknownReplyError("a Meta connection written");
-  // Another person's token in its place: theirs is given back.
+  // Another person's token in its place: theirs is given back, unless another store still uses that login.
   if (before && before.user !== user) {
-    await giveBack(input.statsId, before).catch(() => {});
     await redisPipeline([["SREM", userKey(before.user), input.statsId]]).catch(() => {});
+    if (!(await grantStillUsed(before.user))) await giveBack(input.statsId, before).catch(() => {});
   }
   // Lines of an account no longer read go.
   if (before && before.account !== connection.account) confirmDeleted(await redisPipeline([["DEL", linesKey(input.statsId)]]), 1, "the lines of an account no longer read");
@@ -602,8 +607,46 @@ async function giveBack(statsId: string, c: Connection): Promise<void> {
   if (open.ok) await call("DELETE", "/me/permissions", {}, open.value);
 }
 
-/** Disconnects: gives the permission back to Meta, then forgets the connection and every line read. */
-export async function disconnectMeta(statsId: string): Promise<MetaAccount | null | false> {
+/**
+ * Whether any store is still connected with this Meta login (issue #4011, ALL-160).
+ * DELETE /me/permissions ends the login's whole grant to the app, so it would cut that store off at Meta.
+ * Every indexed store is read, the caller's own included (Codex X4 on #4159, MEDIUM): a disconnect has already
+ * forgotten its store and a replacement has already put the other login in its place, so neither is counted; but
+ * a consent that ends before anything is written leaves the store's own connection, which may use this very login.
+ * Read exactly (CX-123 rule 24): an index or connection that cannot be read counts as still used, so the
+ * grant is kept: one store's action never breaks another store's working connection, and a kept grant costs
+ * nothing. One pipeline reads at most META_FORGET_PASS stores; with more, the rest count as still used.
+ */
+async function grantStillUsed(user: string): Promise<boolean> {
+  if (!user || !isRedisConfigured()) return false;
+  try {
+    const listed = stringList(repliesFor(await redisPipeline([["SMEMBERS", userKey(user)]]), 1)?.[0]);
+    if (!listed) return true;
+    if (!listed.length) return false;
+    if (listed.length > META_FORGET_PASS) return true;
+    const read = repliesFor(await redisPipeline(listed.map((id) => ["GET", connKey(id)])), listed.length);
+    if (!read) return true;
+    return read.some((raw) => {
+      if (raw === null) return false;
+      const c = parseConnection(raw);
+      return !c || c.user === user;
+    });
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * What disconnecting did: the account that was read, and whether Meta's permission was given back
+ * ("removed") or kept because another store still uses that Meta login ("kept").
+ */
+export type MetaDisconnected = { account: MetaAccount | null; metaAccess: "removed" | "kept" };
+
+/**
+ * Disconnects: forgets the connection and every line read, then gives the permission back to Meta,
+ * unless another store is still connected with the same Meta login (issue #4011, ALL-160).
+ */
+export async function disconnectMeta(statsId: string): Promise<MetaDisconnected | false> {
   // Redis not configured is not "not connected" (Codex U on #2924): the route would say "disconnected" with the
   // sealed token, the connection and its lines still stored, so it is unknown and the studio is told it failed.
   if (!isRedisConfigured()) throw new UnknownReplyError("a Meta connection: Redis is not configured");
@@ -613,9 +656,12 @@ export async function disconnectMeta(statsId: string): Promise<MetaAccount | nul
   const c = await exactConnection(statsId);
   if (!c) return false;
   // Forgotten here whatever Meta says: a give-back that fails must not keep a connection the creator ended.
-  await giveBack(statsId, c).catch((error) => console.error("giving the Meta permission back failed", error));
+  // Forgotten first, so of two stores on one login disconnecting at once, the later one sees neither and gives it back.
   confirmDeleted(await forget(statsId, c.user), 5, "a Meta connection's deletion");
-  return c.accounts.find((a) => a.id === c.account) ?? null;
+  const account = c.accounts.find((a) => a.id === c.account) ?? null;
+  if (await grantStillUsed(c.user)) return { account, metaAccess: "kept" };
+  await giveBack(statsId, c).catch((error) => console.error("giving the Meta permission back failed", error));
+  return { account, metaAccess: "removed" };
 }
 
 /** Forgets one store's connection and what was read from it; answers the deletion's own replies. */

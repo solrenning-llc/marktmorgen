@@ -133,7 +133,9 @@ test("3. disconnecting Meta: a deletion answered in no known shape is not 'disco
 test("3. control: a healthy disconnect forgets the connection and its lines", async () => {
   const statsId = await fresh();
   const gone = await disconnectMeta(statsId);
-  assert.equal(gone && gone.id, "act_111");
+  // disconnectMeta answers the account read with whether Meta's permission was given back (#4159, issue #4011).
+  assert.equal(gone && gone.account?.id, "act_111");
+  assert.equal(gone && gone.metaAccess, "removed");
   assert.equal(redis.run(["EXISTS", connKey(statsId)]), 0);
   assert.equal((await readSpendLines(statsId)).spends.length, 0);
 });

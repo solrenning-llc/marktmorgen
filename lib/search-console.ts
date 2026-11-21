@@ -32,7 +32,7 @@ import { seal, unseal } from "@/lib/secret-box";
 import { REDIRECT_URIS, googleAccount, refreshTokens } from "@/lib/meet-providers";
 import { configuredDemoStudioAdmin } from "@/lib/house-store";
 import { SITE_URL } from "@/lib/site-url";
-import type { Store } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, type Store, storeIdCommand, storeRef } from "@/lib/store";
 
 export const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
 /** The property every store lives under: the URL-prefix property verified by public/google*.html. */
@@ -46,6 +46,16 @@ const CONTEXT = "search-console|marktmorgen";
 const STATE = /^gsc\.[A-Za-z0-9_-]{20,64}$/;
 export const SEARCH_ROWS = 25;
 const DAY_MS = 86_400_000;
+/**
+ * A delayed supplier answer is cached only while this store is still live: its own key (the id key, or for a store
+ * kept from before ids its record under its owner's address, as lib/store-live-cache.ts reads it) must exist and its
+ * erasing mark must be absent, in one step with the SET.
+ */
+const KEEP_SEARCHES_IF_LIVE = `-- marktmorgen:gsc-keep-if-live:v2
+if redis.call("EXISTS", KEYS[1]) ~= 1 then return 0 end
+if redis.call("HEXISTS", KEYS[2], ARGV[1]) ~= 0 then return 0 end
+redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
+return 1`;
 
 export const isOperator = (email: string | null | undefined) => {
   const operator = configuredDemoStudioAdmin();
@@ -215,6 +225,29 @@ function keptSearches(raw: string): StoreSearches | null | undefined {
 }
 
 /**
+ * Cache one answer only while the store is live and its erasure has not begun. A store kept from before ids (sid "")
+ * has no id key, so its record is the key fenced on (Claude 3's MEDIUM on #4934).
+ */
+async function keepSearchesIfLive(store: Store, value: StoreSearches | null, seconds: number): Promise<boolean> {
+  const ref = storeRef(store);
+  const live = STORE_ID_PATTERN.test(store.sid) ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  const replies = repliesFor(await redisPipeline([[
+    "EVAL",
+    KEEP_SEARCHES_IF_LIVE,
+    3,
+    live,
+    ERASING_KEY,
+    cacheKey(store.statsId as string),
+    await erasingField(ref),
+    JSON.stringify(value),
+    seconds,
+  ]]), 1);
+  const reply = replies?.[0];
+  if (!replies || (reply !== 0 && reply !== 1)) throw new UnknownReplyError("keeping the store's Search Console answer while it is live");
+  return reply === 1;
+}
+
+/**
  * The searches that found one store, kept a day. Null when our side is not
  * connected, the store is on a domain of its own, or Google did not answer.
  */
@@ -240,8 +273,8 @@ export async function storeSearches(store: Store, now = Date.now()): Promise<Sto
   }
   if (!refresh) return null;
   const window = searchWindow(now);
-  const keep = (value: StoreSearches | null, seconds: number) =>
-    redisPipeline([["SET", cacheKey(store.statsId as string), JSON.stringify(value), "EX", seconds]]).catch(() => undefined);
+  let value: StoreSearches | null = null;
+  let seconds = 3600;
   try {
     const { access } = await refreshTokens("google", refresh);
     const response = await fetch(`https://searchconsole.googleapis.com/webmasters/v3/sites/${encodeURIComponent(SEARCH_CONSOLE_SITE)}/searchAnalytics/query`, {
@@ -258,15 +291,17 @@ export async function storeSearches(store: Store, now = Date.now()): Promise<Sto
     });
     if (!response.ok) {
       console.error("reading Search Console failed", response.status, (await response.text().catch(() => "")).slice(0, 300));
-      await keep(null, 3600);
-      return null;
+    } else {
+      value = { ...window, rows: readRows(await response.json()) };
+      seconds = 86_400;
     }
-    const value = { ...window, rows: readRows(await response.json()) };
-    await keep(value, 86_400);
-    return value;
   } catch (error) {
     console.error("reading Search Console failed", error);
-    await keep(null, 3600);
+  }
+  try {
+    return (await keepSearchesIfLive(store, value, seconds)) ? value : null;
+  } catch (error) {
+    console.error("keeping Search Console answer failed", error);
     return null;
   }
 }

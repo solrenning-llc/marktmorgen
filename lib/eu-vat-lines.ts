@@ -34,7 +34,7 @@ function percent(basisPoints: number): string {
 
 export function applyEuVatLines(
   body: URLSearchParams,
-  input: { vat: VatOnTop; recurring: boolean; vatCostsCents: number | null; currency: string },
+  input: { vat: VatOnTop; recurring: boolean; vatCostsCents: number | null; currency: string; mark?: "eu_vat" | "uk_vat" },
 ): "ok" | "refuse" {
   const { vat } = input;
   if (input.recurring) return "refuse";
@@ -59,6 +59,7 @@ export function applyEuVatLines(
   body.set(`line_items[${next}][price_data][product_data][name]`, `VAT (${countryName(vat.country)}, ${percent(vat.basisPoints)}%)`);
   body.set(`line_items[${next}][quantity]`, "1");
   body.set(FEE, String(fee));
-  body.set("payment_intent_data[metadata][eu_vat]", `${vat.country}:${vat.basisPoints}:${vat.vatCents}`);
+  // The sale's mark, so the EU OSS return and the UK VAT Return each read only their own (UK VAT, 789 [IV1] step 3, unit 2).
+  body.set(`payment_intent_data[metadata][${input.mark === "uk_vat" ? "uk_vat" : "eu_vat"}]`, `${vat.country}:${vat.basisPoints}:${vat.vatCents}`);
   return "ok";
 }

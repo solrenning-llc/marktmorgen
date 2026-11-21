@@ -111,7 +111,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 function shop(): Store {
   return {
     sid: "sidrecon01", handle: "harbor", name: "Harbor Kitchen", previousHandles: [], releasedHandles: [],
-    statsId: STATS, stripeAccountId: "acct_1TestHarbor0001", currency: "usd",
+    statsId: STATS, stripeAccountId: "acct_1TestHarbor0001", currency: "usd", catalog: { items: [] },
     affiliates: { enabled: true, percent: 30, days: 30, rates: {}, payday: 5, hold: 0 },
   } as unknown as Store;
 }

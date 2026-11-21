@@ -9,11 +9,13 @@ import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
 import { accessEndWhen } from "@/lib/course-access-end";
 import { useHydrated } from "@/components/use-hydrated";
 import { useRouter } from "next/navigation";
-import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
+import { uploadReason, uploadSoldFile, uploadWords } from "@/lib/sold-file-upload";
 import { toast } from "@/components/toast";
 import { QuizEditor } from "@/components/quiz-editor";
 import { CourseDayPreview } from "@/components/course-day-preview";
 import { TaskEditor } from "@/components/task-editor";
+import { SubmissionSettings } from "@/components/submission-settings";
+import { SUBMISSIONS_READY } from "@/lib/submission-switch";
 import {
   type Course,
   type CourseModule,
@@ -744,6 +746,8 @@ function VideosToLessons({
       known.add(lesson.id);
       onCourse(added.course);
       let problem: string | null = null;
+      // The route's own sentence for a refusal, shown before the editor's.
+      let words: string | undefined;
       try {
         const pathname = await putVideo(lesson.id, file, folder, (percent) => setWorking({ at: i + 1, of: take.length, name: file.name, percent }));
         const placed = await postPatiently({ id: productId, action: "media", lessonId: lesson.id, kind: "video", pathname, name: file.name });
@@ -756,13 +760,15 @@ function VideosToLessons({
         }
       } catch (thrown) {
         problem = uploadProblem(thrown);
+        words = uploadWords(thrown);
       }
       if (problem) {
         // Its lesson goes again, so no empty lesson is left behind.
         const removed = await postPatiently({ id: productId, action: "edit", op: "lesson-remove", lessonId: lesson.id });
         if (removed.ok && removed.course) onCourse(removed.course);
-        missed.push({ name: file.name, why: MESSAGES[problem] });
-        if (STOPS_THE_REST.has(problem)) {
+        missed.push({ name: file.name, why: words ?? MESSAGES[problem] });
+        // A refusal in the studio's own words holds for the next video too.
+        if (STOPS_THE_REST.has(problem) || words !== undefined) {
           take.slice(i + 1).forEach((f) => missed.push({ name: f.name, why: "Not sent, because the video before it could not go." }));
           break;
         }
@@ -912,7 +918,7 @@ function LessonEditor({
         }
       }
     } catch (thrown) {
-      onError(MESSAGES[uploadProblem(thrown)]);
+      onError(uploadWords(thrown) ?? MESSAGES[uploadProblem(thrown)]);
     } finally {
       setUploading(null);
     }
@@ -1137,6 +1143,8 @@ function LessonEditor({
       {/* A lesson is finished by a quiz or by an assignment (lib/assignment-rules.ts), never by both. */}
       {lesson.task ? null : <QuizEditor productId={productId} lessonId={lesson.id} setup={lesson.quiz} onCourse={onCourse} />}
       <TaskEditor productId={productId} lessonId={lesson.id} setup={lesson.task ?? null} hasQuiz={Boolean(lesson.quiz)} onCourse={onCourse} />
+      {/* Files buyers send for review (750 [CD1]): shown only once the buyer's side works (lib/submission-switch.ts). */}
+      {SUBMISSIONS_READY ? <SubmissionSettings productId={productId} lessonId={lesson.id} /> : null}
 
       <div className="border-t border-line pt-4">
         {removing ? (

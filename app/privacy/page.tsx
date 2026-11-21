@@ -877,6 +877,20 @@ export default function PrivacyPage() {
           you are not written to by that creator again unless you check their
           box again yourself.
         </p>
+        <p id="email-polls">
+          <strong className="text-black">Polls in a creator&apos;s emails.</strong>{" "}
+          A creator&apos;s email may ask a question with a few answers to choose
+          from. When you choose one, we keep which answer you chose under your
+          place in the list that email went to, never your email address. You
+          may change your answer, or take it back, while the poll is open. The
+          creator sees only how many people chose each answer, never who chose
+          what. Your answer is kept until the poll closes and for
+          30 days after the poll closes, so at most 60 days after the email was
+          sent, and then it is deleted by itself; it is also deleted if the
+          creator closes their store. Because it is kept under your place in the list and not under
+          your address, deleting your data from that creator does not find it,
+          but it is still deleted by itself within that time.
+        </p>
         <p id="community">
           <strong className="text-black">A creator&apos;s community.</strong>{" "}
           When a creator opens a community on their store, we decide who may

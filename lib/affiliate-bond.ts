@@ -78,11 +78,22 @@ export function bondsBuyers(store: Store): boolean {
  * one case it is here to answer. Whether that affiliate is still approved is
  * checked by the caller, as it is for a code: somebody the creator removed
  * keeps their history and earns nothing more.
+ *
+ * Read exactly (rule 24; Claude 6 on #4413): no bond is an exact nil, a bond is
+ * an affiliate's 12-hex id, and any other reply throws UnknownReplyError. An
+ * unknown answer is never "no bond": the sweep would settle the checkout with
+ * no credit and never pass it on again (lib/checkout-sweep.ts), so it leaves
+ * the order for the next run instead. Its only caller is noteSession, whose
+ * every caller catches.
  */
 export async function bondFor(store: Store, email: string): Promise<string> {
   if (!bondsBuyers(store) || !email) return "";
-  const [found] = await redisPipeline([["HGET", bondKey(store.statsId as string), buyerHash(store.statsId as string, email)]]);
-  return typeof found === "string" && /^[0-9a-f]{12}$/.test(found) ? found : "";
+  const reply = repliesFor(await redisPipeline([["HGET", bondKey(store.statsId as string), buyerHash(store.statsId as string, email)]]), 1);
+  if (!reply) throw new UnknownReplyError("a buyer's affiliate bond");
+  const [found] = reply;
+  if (found === null) return "";
+  if (typeof found === "string" && /^[0-9a-f]{12}$/.test(found)) return found;
+  throw new UnknownReplyError("a buyer's affiliate bond");
 }
 
 /**

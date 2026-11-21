@@ -1,0 +1,67 @@
+# The agents' coordination channel rolls over before GitHub closes it (owner, 20/11/2026, about 03h Fortaleza).
+# GitHub refuses comments on an issue past 2,500; the channel is the one open issue labeled canal-ativo. At 2,250
+# comments on it, scripts/coordination_rollover.mjs opens the next part (or uses one already opened from inside the
+# repository), puts a pointer line on top of the previous part's body, writes the new part's first comment explaining
+# the change and the label rule (with the PAINEL's old first line, to undo), changes the PAINEL's first line (comment
+# 6929670678 on #4827, the owner's one exception to "never edits comments") and moves the label last. It never closes or
+# locks an issue and never deletes or edits any other comment. Every read and check comes before the first write; a
+# failure leaves the run red and the channel where it was, and the next scheduled run retries. A PAINEL it may not edit
+# never stops the rollover: the PAINEL is left as it is, the new part's first comment says why with the first line found,
+# and the run ends with a warning annotation, not a failure (owner, 20/11/2026 18h23).
+#
+# It runs on a schedule, every 10 minutes, and by hand; never on a comment. With 250 comments of room and about 75 to 130
+# comments an hour, ten minutes is ample. A comment trigger would create one workflow run per comment anywhere in the
+# repository (about 130 an hour, every one on main's head, even with the job skipped), which breaks the main-red-alarm's
+# run listing (scripts/main_red_alarm.mjs: one listing of every run on main's head, at most 10 pages, failing when the
+# count changes while it reads), and it would let any account start runs. The schedule adds at most 6 runs an hour.
+#
+# It is off until the repository variable COORDINATION_ROLLOVER is set (owner, 20/11/2026: tested before it is turned on):
+#   - unset (or any other value): the scheduled runs skip the job; a manual run (Actions, Coordination rollover, Run
+#     workflow) is a dry run by default, which only reads and prints what a rollover would do; a manual run in mode run
+#     refuses until the variable is on;
+#   - "dry-run": every scheduled run is that dry run;
+#   - "on": a scheduled run rolls the channel over when the active part holds 2,250 comments or more.
+# A run killed between its two label calls leaves no labeled issue (Codex N1/X6); the part it was leaving still starts
+# with the pending pointer, so the next run finds it (only an issue opened from inside the repository) and finishes it.
+# Standard runners are free in public repositories. Not a required check and not part of CI: it has no final check
+# (tests/coordination-rollover.test.ts).
+name: Coordination rollover
+on:
+  schedule:
+    - cron: '8-58/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: dry-run only reads and prints what it would do; run rolls over if the active part is at 2,250 comments
+        type: choice
+        options: [dry-run, run]
+        default: dry-run
+permissions:
+  contents: read
+  issues: write
+jobs:
+  rollover:
+    name: Coordination rollover
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.COORDINATION_ROLLOVER == 'on' || vars.COORDINATION_ROLLOVER == 'dry-run' }}
+    # One run at a time, never two parts at once. At most one more waits: a newer waiting run replaces an older one,
+    # which loses nothing, because every run reads the state afresh and does the same.
+    concurrency:
+      group: coordination-rollover
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/coordination_rollover.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - name: Open the next part and move the canal-ativo label when the active part nears the limit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || vars.COORDINATION_ROLLOVER }}
+          SWITCH: ${{ vars.COORDINATION_ROLLOVER }}
+        run: node scripts/coordination_rollover.mjs

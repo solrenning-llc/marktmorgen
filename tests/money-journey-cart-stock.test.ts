@@ -179,7 +179,8 @@ async function main(): Promise<void> {
 
   const cart = [ids["Glaze Guide"], ids["Mug Print"], ids["Bowl Print"]];
   const pay = async (products: string[]) => {
-    const form = new URLSearchParams({ handle: HANDLE, dc: "yes", dc_v: TEST_CONSENT.version });
+    // The billing country the art. 9a gate asks of every paid cart (lib/eu-vat-gate.ts consumerGate).
+    const form = new URLSearchParams({ handle: HANDLE, billing_country: "US", dc: "yes", dc_v: TEST_CONSENT.version });
     for (const id of products) form.append("id", id);
     const before = opened.length;
     const answer = await payCart(
@@ -234,11 +235,13 @@ async function main(): Promise<void> {
   if (order.product.stock !== null) await confirmStock(await store(), order.product, checkout.id);
   if (order.bumps.some((added) => added.product.stock !== null)) await confirmCartStock(await store(), order.bumps.map((added) => added.product), checkout.id);
   const statsId = (await store()).statsId as string;
-  const held = async (title: string) => (await redis.pipeline([["HGET", `nl:stock:${statsId}:${ids[title]}`, checkout.id]]))[0];
+  // Since #4472 a unit sold is counted in the record's "#sold" field (STOCK_SELL), and the checkout's own hold field is
+  // let go in the same step, so the record no longer grows with every sale.
+  const held = async (title: string) => (await redis.pipeline([["HGET", `nl:stock:${statsId}:${ids[title]}`, checkout.id], ["HGET", `nl:stock:${statsId}:${ids[title]}`, "#sold"]]));
   is(
     "each limited unit is written down as sold to this checkout at once, without waiting for its hold to run out",
     [await held("Mug Print"), await held("Bowl Print")],
-    [JSON.stringify({ until: 0, paid: true }), JSON.stringify({ until: 0, paid: true })],
+    [[null, "1"], [null, "1"]],
   );
   const later = Date.now() + 3 * 60 * 60 * 1000;
   is("sold: the units stay taken after the hold's time is over", [await stockLeft(await store(), await listing("Mug Print"), later), await stockLeft(await store(), await listing("Bowl Print"), later)], [0, 4]);

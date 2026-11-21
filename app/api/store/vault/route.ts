@@ -2,7 +2,7 @@ import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import { reserveStoreUpload, reserveUploadControl } from "@/lib/upload-budget";
 import { openReservedVault, closeReservedVault, abortReservedVault } from "@/lib/vault-storage";
 import type { NextRequest } from "next/server";
-import { readKind } from "@/lib/catalog";
+import { deliveredFile, readDelivery, readKind } from "@/lib/catalog";
 import { ITEM_ID_PATTERN, findLesson, readCourses } from "@/lib/course";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { ALLOWED_CONTENT_TYPES, MAX_FILE_BYTES, safeFileName } from "@/lib/product-file";
@@ -11,6 +11,8 @@ import { storageBrakeFor } from "@/lib/storage-quota";
 import { ownsDeliveryId, storeFolder, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { isVaultConfigured, signPieces } from "@/lib/vault";
+import { refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import { PIECES_PER_ASK, readVaultPath } from "@/lib/vault-rules";
 
 /** Uploads one store may open in an hour, and times it may ask for addresses: a full catalog, moved in one sitting. */
@@ -28,6 +30,10 @@ const ASKS_PER_HOUR = 6_000;
  *   { action: "done", pathname, etags }              joins the pieces; answers
  *       the file as the store itself measured it
  *   { action: "abort", pathname }                    gives the upload up
+ *
+ * One finish and one cancel per upload, which is what one start is priced
+ * for: a repeat gets the first one's answer, and past them the request is
+ * refused (`upload_tries`) with nothing asked of the file store.
  *
  * Asked for only what a signed-in creator may do, exactly as the door into
  * the host's own store is (app/api/store/file): the product, option or
@@ -67,6 +73,10 @@ export async function POST(request: NextRequest) {
         const courses = ITEM_ID_PATTERN.test(ownerId) ? await readCourses(courseIds) : new Map();
         if (![...courses.values()].some((course) => findLesson(course, ownerId) !== null)) return fail("unknown", 404);
       }
+      // A new file over one already delivered is refused at the attach to a session let in without its second step
+      // (app/api/store/file/attach, lib/two-step.ts): refused here too, before anything is counted, reserved or stored,
+      // or each try leaves a file nothing points at, held against the store and billed (#3936).
+      if (deliveredFile(await readDelivery(store, ownerId)) && (await lockedFor(request, "products", "replace"))) return refusedJson("locked");
       const refused = await withinServiceWhy("vault-open", folder, OPENS_PER_HOUR, 3600, store);
       if (refused) return serviceRefusedJson(refused, "slow_down");
       // What a store may keep goes by where it stands with its plan (lib/plan-standing.ts).
@@ -101,8 +111,12 @@ export async function POST(request: NextRequest) {
       const etags = Array.isArray(body.etags) ? body.etags.filter((e): e is string => typeof e === "string") : [];
       // Completion was authorized with the original upload. Do not strand it
       // because the current admission budget is paused or the month changed.
+      // One finish and one cancel per upload (lib/vault.ts): a repeat is
+      // answered as the first was, and past them nothing is asked of R2.
       const closed = await closeReservedVault(pathname, etags);
       if (!closed.ok) {
+        if (closed.reason === "tries") return fail("upload_tries", 409);
+        if (closed.reason === "busy") return fail("upload_busy", 409);
         const status = closed.reason === "unknown" ? 404 : closed.reason === "unavailable" ? 503 : closed.reason === "off" ? 404 : 400;
         return fail(closed.reason === "unavailable" ? "files_unavailable" : closed.reason, status);
       }
@@ -110,7 +124,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "abort") {
-      if (!(await abortReservedVault(pathname))) return fail("files_unavailable", 503);
+      const aborted = await abortReservedVault(pathname);
+      if (aborted === "tries") return fail("upload_tries", 409);
+      if (aborted === "busy") return fail("upload_busy", 409);
+      if (aborted !== true) return fail("files_unavailable", 503);
       return Response.json({ ok: true });
     }
 

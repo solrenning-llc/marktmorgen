@@ -169,11 +169,52 @@ export async function essentialLimitState(scope: string, who: string, limit: num
   return count <= limit ? "within" : "exceeded";
 }
 
+/**
+ * How many seconds are left before the counter of essentialLimitState for `scope` and `who` starts again, so a
+ * person turned away can be told when to come back (491 [PP2] complement, unit 2). One TTL read, nothing written.
+ * null when it cannot be known: Redis not configured or not answering, no counter, a counter without an expiry,
+ * or a reply in any other shape. A wait that cannot be read is never said as "now".
+ */
+export async function limitResetSeconds(scope: string, who: string): Promise<number | null> {
+  if (!isRedisConfigured()) return null;
+  let reply: unknown;
+  try {
+    reply = await redisPipeline([["TTL", await limitKey(scope, who)]]);
+  } catch {
+    return null;
+  }
+  try {
+    if (!Array.isArray(reply) || reply.length !== 1) return null;
+    const seconds: unknown = reply[0];
+    return typeof seconds === "number" && Number.isSafeInteger(seconds) && seconds > 0 ? seconds : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Gives back one count taken by essentialLimitState when the work it admitted did not happen (lib/stock.ts
+ * giveBackHold). Best effort: a failed give-back leaves the count as taken, the safe way to be wrong. A window that
+ * ended in between starts again at -1 with its own expiry, never a key that outlives it.
+ */
+export async function giveBackLimit(scope: string, who: string, windowSeconds: number): Promise<void> {
+  if (!isRedisConfigured() || !Number.isSafeInteger(windowSeconds) || windowSeconds <= 0) return;
+  try {
+    const key = await limitKey(scope, who);
+    await redisPipeline([
+      ["SET", key, "0", "EX", windowSeconds, "NX"],
+      ["DECR", key],
+    ]);
+  } catch {
+    // Kept as taken.
+  }
+}
+
 export async function withinLimit(scope: string, who: string, limit: number, windowSeconds: number): Promise<boolean> {
   if (!isRedisConfigured()) return true;
   let reply: unknown;
   try {
-    const key = `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
+    const key = await limitKey(scope, who);
     reply = await redisPipeline(windowCount(key, windowSeconds));
   } catch {
     // Redis could not be asked: open, so a buyer is never kept from paying by a counter out of reach.
@@ -194,9 +235,46 @@ function countWithin(reply: unknown, limit: number): boolean {
   }
 }
 
-/** The counter's key for a scope and whoever it counts, hashed: one place, so every reader of a counter reads the same one. */
+/**
+ * An IPv6 address as the connection it belongs to (#4628): its first four groups, a /64, the least one customer is
+ * handed, as visitorAddress in lib/traffic-rules.ts counts it. Not a /48: a mobile carrier hands thousands of
+ * unrelated subscribers a /64 each out of one /48, so a /48 would let one of them use up a site-wide limit (sign-in,
+ * erasure requests) for all the others (Claude 7 on #4637). An IPv4 address written the new way ("::ffff:203.0.113.9")
+ * is that IPv4 address. Anything that is not a whole IPv6 address is answered as it is.
+ */
+export function limitAddress(part: string): string {
+  // "[2001:db8::1]:443" and "fe80::1%eth0" are the address they hold: brackets, a port and a zone are not part of it.
+  const address = part.trim().toLowerCase().replace(/^\[([^\]]+)\](?::\d+)?$/, "$1").replace(/%[\w.-]+$/, "");
+  if (!address.includes(":")) return part;
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(address);
+  if (mapped) return mapped[1];
+  // The same IPv4 address in hexadecimal ("::ffff:cb00:7109" is 203.0.113.9), never one bucket for every such address.
+  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(address);
+  if (hex) {
+    const [high, low] = [parseInt(hex[1], 16), parseInt(hex[2], 16)];
+    return [high >> 8, high & 255, low >> 8, low & 255].join(".");
+  }
+  if ((address.match(/::/g) ?? []).length > 1) return part;
+  const [head, tail = ""] = address.split("::");
+  const front = head ? head.split(":") : [];
+  const back = tail ? tail.split(":") : [];
+  const missing = 8 - front.length - back.length;
+  const groups = address.includes("::") ? (missing > 0 ? [...front, ...Array<string>(missing).fill("0"), ...back] : []) : front;
+  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return part;
+  return `${groups.slice(0, 4).map((group) => group.replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
+
+/**
+ * The counter of a limit. Every part of `who` (an address and a store, usually, joined by "|") that is an IPv6
+ * address is counted as its /64 (#4628): one IPv6 customer holds at least a /64, so counting the exact address let
+ * every request of theirs come from a new address and find a new allowance. An IPv4 address counts by itself. A
+ * caller keeps the address in a part of its own ("|"): joined to something else with ":", it would be read whole
+ * (tests/limit-groups-ipv6.test.ts holds every caller to that). Hashed, and one place, so every reader of a counter
+ * (withinLimit, essentialLimitState and the rest) reads the same one.
+ */
 async function limitKey(scope: string, who: string): Promise<string> {
-  return `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
+  const counted = who.split("|").map(limitAddress).join("|");
+  return `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${counted}`)).slice(0, 32)}`;
 }
 
 /**

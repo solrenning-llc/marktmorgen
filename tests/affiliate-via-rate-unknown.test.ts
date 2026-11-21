@@ -60,7 +60,7 @@ async function main(): Promise<void> {
     amount_total: 10000,
     amount_subtotal: 10000,
     currency: "usd",
-    // Stripe sends the tax in every checkout it settles; a sale is now written only once it reads (affiliate-tax-unread).
+    // Stripe says the tax, 0 included: one it does not say is not known (tests/affiliate-sale-amount-unknown.test.ts).
     total_details: { amount_tax: 0, amount_shipping: 0 },
     payment_intent: `pi_${id.slice(3)}`,
     metadata: { store: "harbor", product: "course", title: "Course", via: affiliate, ...meta },

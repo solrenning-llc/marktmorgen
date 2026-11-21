@@ -3,6 +3,19 @@ import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
+/**
+ * Cost and margin rules a buyer's store or product page must never carry: the checkout reminder box reads one
+ * version string and the assistant's chat two lengths, each from its own small file (lib/assistant-reminder-version.ts,
+ * lib/assistant-question-length.ts), never through lib/store-assistant-rules.ts and its cost tables.
+ */
+const BUYER_KEPT_OUT=[
+ {entry:'components/assistant-reminder-box.tsx',module:'lib/store-assistant-rules.ts'},
+ {entry:'components/store-cart.tsx',module:'lib/store-assistant-rules.ts'},
+ {entry:'components/store-cart.tsx',module:'lib/receiving-costs.ts'},
+ {entry:'components/store-cart.tsx',module:'lib/spend-cost-table.ts'},
+ {entry:'components/store-assistant.tsx',module:'lib/store-assistant-rules.ts'},
+ {entry:'components/store-assistant.tsx',module:'lib/receiving-costs.ts'},
+];
 
 async function files(dir) {
  const result=[];
@@ -35,7 +48,7 @@ export async function checkClientBundles(root) {
 const KEPT_OUT=[{entry:'components/store-assistant.tsx',module:'lib/confusables-latin.ts'},{entry:'components/site-nav.tsx',module:'lib/opening.ts'}];
 export async function checkKeptOut(root) {
  const failures=[];
- for(const {entry,module} of KEPT_OUT){
+ for(const {entry,module} of [...KEPT_OUT,...BUYER_KEPT_OUT]){
   const result=await build({entryPoints:[join(root,entry)],absWorkingDir:root,bundle:true,write:false,metafile:true,platform:'browser',format:'esm',nodePaths:[join(root,'node_modules')],external:['react','react/*','next/*'],tsconfig:join(root,'tsconfig.json'),logLevel:'silent'});
   const bytes=Object.values(result.metafile.outputs).reduce((sum,output)=>sum+(output.inputs[module]?.bytesInOutput??0),0);
   if(bytes)failures.push({file:entry,errors:[`carries ${bytes} bytes of ${module}`]});

@@ -80,7 +80,7 @@ part("Exact Redis replies: a count is a safe whole number");
 part("Meta: a signed_request is believed only with its exact base64url signature");
 {
   process.env.META_APP_SECRET = "fuzz-meta-secret";
-  const payload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", user_id: "123456" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", user_id: "123456", issued_at: Math.floor(Date.now() / 1000) })).toString("base64url");
   const good = createHmac("sha256", "fuzz-meta-secret").update(payload).digest("base64url");
   is("the exact signature is believed", signedUser(`${good}.${payload}`), "123456");
   // Node's decoder skips characters outside the alphabet, takes "+" and "/" for "-" and "_", and ignores padding.

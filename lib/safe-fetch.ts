@@ -52,10 +52,13 @@ export type SafeFetchProblem =
 
 export class SafeFetchError extends Error {
   readonly problem: SafeFetchProblem;
+  /** For too_big: the status the address had already answered with, when it is known; a caller may judge by it. */
+  readonly status?: number;
 
-  constructor(problem: SafeFetchProblem, message: string) {
+  constructor(problem: SafeFetchProblem, message: string, status?: number) {
     super(message);
     this.problem = problem;
+    if (Number.isSafeInteger(status)) this.status = status;
   }
 }
 
@@ -319,7 +322,7 @@ function once(
       (response) => {
         const declared = Number(response.headers["content-length"] ?? "0");
         if (declared > options.maxBytes) {
-          request.destroy(new SafeFetchError("too_big", "The answer is larger than we read."));
+          request.destroy(new SafeFetchError("too_big", "The answer is larger than we read.", response.statusCode));
           return;
         }
         const chunks: Buffer[] = [];
@@ -327,7 +330,7 @@ function once(
         response.on("data", (chunk: Buffer) => {
           size += chunk.length;
           if (size > options.maxBytes) {
-            request.destroy(new SafeFetchError("too_big", "The answer is larger than we read."));
+            request.destroy(new SafeFetchError("too_big", "The answer is larger than we read.", response.statusCode));
             return;
           }
           chunks.push(chunk);
@@ -344,7 +347,7 @@ function once(
             if (encoding === "gzip") raw = gunzipSync(raw, { maxOutputLength: options.maxBytes });
             else if (encoding === "deflate") raw = inflateSync(raw, { maxOutputLength: options.maxBytes });
           } catch {
-            reject(new SafeFetchError("too_big", "The answer could not be unpacked within the size we read."));
+            reject(new SafeFetchError("too_big", "The answer could not be unpacked within the size we read.", response.statusCode));
             return;
           }
           resolvePromise({ status: response.statusCode ?? 0, headers, body: raw });

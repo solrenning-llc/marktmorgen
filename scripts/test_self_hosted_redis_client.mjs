@@ -16,12 +16,16 @@ assert.match(token ?? "", /^[A-Za-z0-9_-]{43}$/);
 assert.match(prefix ?? "", /^marktmorgen:integration:sv4-http:[0-9a-f]{32}:$/);
 const redisUrl = new URL("../lib/redis.ts", import.meta.url).href;
 const timeoutUrl = new URL("../lib/fetch-timeout.ts", import.meta.url).href;
+const redisReplyUrl = new URL("../lib/redis-reply.ts", import.meta.url).href;
 // Node 24 strips types from the real sources. Resolve only their existing
 // repository alias; no copied implementation or MemoryRedis replaces them.
 const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
     if (specifier === "@/lib/fetch-timeout" && context.parentURL === redisUrl) {
       return { url: timeoutUrl, shortCircuit: true };
+    }
+    if (specifier === "@/lib/redis-reply" && context.parentURL === redisUrl) {
+      return { url: redisReplyUrl, shortCircuit: true };
     }
     return nextResolve(specifier, context);
   },

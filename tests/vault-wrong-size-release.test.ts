@@ -114,7 +114,7 @@ const input = (n: number) => ({ folder: folder(n), ownerId: "product", name: "fi
 
 /** Opens an upload of 10 bytes for folder `n` and sends `size` bytes to it as its one piece. */
 async function sent(n: number, size: number): Promise<string> {
-  const opened = await openReservedVault(input(n), 10, measure(n));
+  const opened = await openReservedVault(input(n), 10, measure(n), async () => true);
   if (!opened.ok) throw new Error("open failed");
   const pieces = await signPieces(opened.upload.pathname, [1]);
   if (!pieces) throw new Error("sign failed");
@@ -127,7 +127,7 @@ async function openAgain(n: number, later = 0): Promise<string> {
   const realNow = Date.now;
   Date.now = () => realNow() + later * 1000;
   try {
-    const again = await openReservedVault(input(n), 10, measure(n)).then((r) => r, (e: unknown) => e);
+    const again = await openReservedVault(input(n), 10, measure(n), async () => true).then((r) => r, (e: unknown) => e);
     return again && typeof again === "object" && "ok" in again && again.ok === true ? "opened" : String(again);
   } finally {
     Date.now = realNow;

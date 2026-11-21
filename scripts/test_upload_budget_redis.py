@@ -128,6 +128,7 @@ def check_matches_take(redis, source, reserve_script, prefix, keys):
     scopes = ["creator", "pro", "scale", "trial", "setup", "ended"]
     review, policy = "automatic_review", "automatic-policy"
     counter = [0]
+    measured = []
 
     def state(key):
         found = {}
@@ -149,14 +150,19 @@ def check_matches_take(redis, source, reserve_script, prefix, keys):
         setup(key)
         before = state(key)
         reserve_args = [snapshot, store, scope, "open", size, *caps, *company, funded[scopes.index(scope)] if scope in scopes else 1]
+        sent = commands_sent(redis)
         checked = redis.command("EVAL", check_script, 2, key, key + ":opened", *reserve_args, "1" if automatic else "0", review_id, *funded)
+        spent = commands_sent(redis) - sent
         assert state(key) == before, label + ": the check wrote"
+        sent = commands_sent(redis)
         if automatic:
             opened = redis.command("EVAL", open_script, 2, key, key + ":opened", review_id, snapshot, *funded)
             taken = redis.command("EVAL", reserve_script, 1, key, *reserve_args)
             real = 1 if opened == 1 and taken == 1 else 0
         else:
             real = redis.command("EVAL", reserve_script, 1, key, *reserve_args)
+        spent += commands_sent(redis) - sent
+        measured.append((spent, label))
         assert checked == real, label + ": check " + str(checked) + " but the take " + str(real)
         return real
 
@@ -200,6 +206,34 @@ def check_matches_take(redis, source, reserve_script, prefix, keys):
     answers.append(compare("separately reviewed, spent", ledger({"store:s:scope": "creator", "store:s:opens": 2, "store:s:bytes": 2, "store:s:controls": 2, "company:opens": 2, "company:bytes": 2, "company:controls": 2}), automatic=False))
     assert answers == [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0], answers
     print("PASS: the read-only check writes nothing and answers as the take, in " + str(len(answers)) + " ledger states")
+    # What one vault open sends to the ledger, the EVALs and every command inside them, as Redis itself counts them:
+    # the check, then the take (OPEN and RESERVE on the automatic review). lib/spend-cost-table.ts prices each open at
+    # UPLOAD_BUDGET_COMMANDS_PER_OPEN; the most any of these states sends must stay inside it.
+    priced = static_number(source_of("lib/spend-cost-table.ts"), "UPLOAD_BUDGET_COMMANDS_PER_OPEN")
+    most, where = max(measured)
+    assert most <= priced, "a vault open sent " + str(most) + " ledger commands (" + where + "), over the " + str(priced) + " priced"
+    print("PASS: a vault open sends at most " + str(most) + " ledger commands (" + where + "), inside the " + str(priced) + " priced")
+
+
+def commands_sent(redis):
+    """Every command Redis has run, scripts' own calls included, from INFO commandstats, less the INFO calls themselves."""
+    total = 0
+    for line in redis.command("INFO", "commandstats").splitlines():
+        match = re.match(r"cmdstat_([a-z|_-]+):calls=(\d+)", line)
+        if match and match.group(1) != "info":
+            total += int(match.group(2))
+    return total
+
+
+def source_of(path):
+    return (Path(__file__).resolve().parents[1] / path).read_text(encoding="utf-8")
+
+
+def static_number(source, name):
+    match = re.search(r"export const " + name + r" = (\d+);", source)
+    if not match:
+        raise RuntimeError("Expected the static figure " + name)
+    return int(match.group(1))
 
 
 if __name__ == "__main__":

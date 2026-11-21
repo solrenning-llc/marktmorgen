@@ -130,19 +130,19 @@ test("R2 opens reserve capacity and failed provider cancellation cannot free it"
   }) as typeof fetch;
   const input = {folder: folder(8), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf"};
   try {
-    const opened = await openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true }));
+    const opened = await openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true }), async () => true);
     assert.equal(opened.ok, true);
     if (!opened.ok) throw new Error("open failed");
     assert.equal(opened.upload.multipart, true);
-    await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true })), /storage_(limit|pending)/);
+    await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true }), async () => true), /storage_(limit|pending)/);
     assert.equal(await abortReservedVault(opened.upload.pathname), false);
-    await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true })), /storage_(limit|pending)/);
+    await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true }), async () => true), /storage_(limit|pending)/);
     // An unconfirmed cancel is not written down (lib/vault.ts): a retry,
     // inside the requests one upload is priced for, asks the provider again,
     // and once it confirms, the bytes come back at once.
     cancel = true;
     assert.equal(await abortReservedVault(opened.upload.pathname), true);
-    const reopened = await openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true }));
+    const reopened = await openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true }), async () => true);
     assert.equal(reopened.ok, true);
     if (!reopened.ok) throw new Error("reopen failed");
     // A session R2 no longer has, with the object there, is a finish that won the race, never a cancel (Codex X6's
@@ -152,7 +152,7 @@ test("R2 opens reserve capacity and failed provider cancellation cannot free it"
     assert.equal(await abortReservedVault(reopened.upload.pathname), false);
     await assert.rejects(reserveStorage(input.folder, 1, 10, async () => 10), /storage_(limit|pending)/);
     const openedBefore = openedSessions;
-    await assert.rejects(openReservedVault({ ...input, folder: folder(9) }, 10, async () => ({ bytes: 0, brake: 10, left: 0, full: false, available: false })), /storage_unknown/);
+    await assert.rejects(openReservedVault({ ...input, folder: folder(9) }, 10, async () => ({ bytes: 0, brake: 10, left: 0, full: false, available: false }), async () => true), /storage_unknown/);
     assert.equal(openedSessions, openedBefore);
   } finally { globalThis.fetch = saved; }
 });
@@ -185,5 +185,10 @@ test("the upload budget is taken only after storage has room, and a refused budg
     assert.equal(openedSessions, 1);
     await assert.rejects(openReservedVault(input, 10, measure(0), admit(true)), /storage_pending/);
     assert.equal(admissions, 2, "a pending refusal never reaches the budget either");
+    // admit has no default (review of #4019): a caller that leaves it out does not compile, so no session can be
+    // opened with nothing paid for. tsc fails on an unused expectation if the default ever comes back.
+    // @ts-expect-error admit is required
+    const forgot: Parameters<typeof openReservedVault> = [input, 10, measure(0)];
+    assert.equal(forgot.length, 3);
   } finally { globalThis.fetch = saved; }
 });

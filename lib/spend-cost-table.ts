@@ -141,6 +141,14 @@ export const UPLOAD_REQUEST_INFRA_MICRO_USD = Number(
   + ceilDiv(BigInt(VERCEL_CALL_MICRO_USD_PER_MILLION), BigInt(1_000_000))
   + ceilDiv(BigInt(VERCEL_CPU_MICRO_USD_PER_HOUR), BigInt(3600))
   + ceilDiv(BigInt(UPSTASH_MICRO_USD_PER_MILLION_COMMANDS * 20), BigInt(1_000_000)));
+/** Ledger commands one vault open sends (lib/upload-budget.ts): the read-only CHECK_UPLOAD_BUDGET, then
+ * OPEN_UPLOAD_BUDGET and RESERVE_UPLOAD_BUDGET, each EVAL and every command inside it, as Redis itself counts them
+ * (INFO commandstats; every inner command is counted, so none is assumed free). The most measured across the 26 ledger
+ * states of scripts/test_upload_budget_redis.py is 74 (a changed policy that carries a scope's slots); this figure
+ * holds it with room for a state that list does not reach, and that test fails above it (review of #4019). The
+ * route's other commands stay inside the twenty a request is priced for (UPLOAD_REQUEST_INFRA_MICRO_USD), a figure
+ * not measured here. */
+export const UPLOAD_BUDGET_COMMANDS_PER_OPEN = 100;
 export const UPLOAD_OPEN_CLASS_A_OPS = VAULT_LIST_PAGES + 2;
 export const UPLOAD_OPEN_CLASS_B_OPS = 4 * VAULT_MEASURE_REQUESTS;
 export const UPLOAD_OPEN_BLOB_ADVANCED_OPS = BLOB_LIST_PAGES;
@@ -166,8 +174,25 @@ export function uploadOperationsMicroUsd(opens: number, controlRequests: number,
   const total = ceilDiv(classA * BigInt(R2_CLASS_A_MICRO_USD_PER_MILLION), million) + ceilDiv(classB * BigInt(R2_CLASS_B_MICRO_USD_PER_MILLION), million)
     + ceilDiv(blobAdvanced * BigInt(BLOB_ADVANCED_MICRO_USD_PER_MILLION), million)
     + ceilDiv(streamReads * BigInt(STREAM_API_ALLOWANCE_MICRO_USD_PER_MILLION), million)
-    + requests * BigInt(UPLOAD_REQUEST_INFRA_MICRO_USD);
+    + requests * BigInt(UPLOAD_REQUEST_INFRA_MICRO_USD)
+    + ceilDiv(BigInt(opens) * BigInt(UPLOAD_BUDGET_COMMANDS_PER_OPEN) * BigInt(UPSTASH_MICRO_USD_PER_MILLION_COMMANDS), million);
   return total > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(total);
+}
+
+/** A vault open refused after storage is measured, and so before the monthly upload budget is taken
+ * (lib/vault-storage.ts: storage_limit, storage_pending or storage_busy, or a take that lost a race): no upload is
+ * started and no budget is spent, but admission already retired one expired session (a measurement, its abort free)
+ * and measured storage (every page of the vault listing, Class A; every page of the host file store's listing, Blob
+ * Advanced Operations; the read of the Stream collection), and the ledger was read and may have been taken
+ * (UPLOAD_BUDGET_COMMANDS_PER_OPEN). Such a pass takes one integration unit ("vault-open", lib/metered-limits.ts), so
+ * every integration unit is priced as if it were one (tests/plan-cost-registry.ts, UNIT_COST.integration). */
+export function vaultRefusedPassMicroUsd(): number {
+  const million = BigInt(1_000_000);
+  return Number(ceilDiv(BigInt(VAULT_LIST_PAGES) * BigInt(R2_CLASS_A_MICRO_USD_PER_MILLION), million)
+    + ceilDiv(BigInt(VAULT_MEASURE_REQUESTS) * BigInt(R2_CLASS_B_MICRO_USD_PER_MILLION), million)
+    + ceilDiv(BigInt(BLOB_LIST_PAGES) * BigInt(BLOB_ADVANCED_MICRO_USD_PER_MILLION), million)
+    + ceilDiv(BigInt(STREAM_HELD_REQUESTS) * BigInt(STREAM_API_ALLOWANCE_MICRO_USD_PER_MILLION), million)
+    + ceilDiv(BigInt(UPLOAD_BUDGET_COMMANDS_PER_OPEN) * BigInt(UPSTASH_MICRO_USD_PER_MILLION_COMMANDS), million));
 }
 
 export type AiRequestShape = { inputBytes: number; blocks: number; media: 'image' | 'document' | null; maxTokens: number };

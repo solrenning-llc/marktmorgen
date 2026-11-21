@@ -9,9 +9,11 @@ import { readVaultPath, UPLOAD_SECONDS } from "@/lib/vault-rules";
  * back). It runs only after the storage reservation is granted, so a store
  * refused for storage (`storage_limit`, `storage_pending`, `storage_busy`)
  * loses none of that budget. When it answers false the reservation is
- * released and no session is opened.
+ * released and no session is opened. It has no default: a caller that
+ * forgot it would open a session with nothing paid for (review of #4019).
  */
-export async function openReservedVault(input: Parameters<typeof openVaultUpload>[0], limit: number, measure: () => Promise<StorageUse> = () => storageUsed(input.folder, limit), admit: () => Promise<boolean> = async () => true) {
+export async function openReservedVault(input: Parameters<typeof openVaultUpload>[0], limit: number, measure: (() => Promise<StorageUse>) | undefined, admit: () => Promise<boolean>) {
+  measure ??= () => storageUsed(input.folder, limit);
   // Opportunistic cleanup is bounded to one session per admission attempt.
   await retireStorage(input.folder, Date.now() - UPLOAD_SECONDS * 1000,
     async row => !!row.pathname && !!row.uploadId && retireExpiredVaultSession(row.pathname, row.uploadId));

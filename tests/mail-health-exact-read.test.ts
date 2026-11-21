@@ -118,6 +118,52 @@ async function main(): Promise<void> {
   is("an outer accessor with inherited descriptor value is unknown", outerResult, "unknown");
   is("a daily accessor with inherited descriptor value is unknown", innerResult, "unknown");
   is("no health accessor ran", visits, 0);
+
+  // Claude 6's review of #2687 (7057898559): the guards below fail open if removed, so each has its own case.
+  part("LEVE 1: a restart day that does not read is unknown, never a clean week");
+  const overWeek = ["1000", "30", "0"];
+  is("a restart day that is not a date is unknown (bounces 30 of 1,000 never skipped)", await outcome(["garbage", overWeek, ...Array.from({ length: 6 }, emptyDay)]), "unknown");
+  is("a restart day that is not text is unknown", await outcome([20261105, overWeek, ...Array.from({ length: 6 }, emptyDay)]), "unknown");
+  is("an impossible calendar date is unknown", await outcome(["2026-02-31", overWeek, ...Array.from({ length: 6 }, emptyDay)]), "unknown");
+  is("a real restart day still reads (control)", await outcome(["2026-11-01", overWeek, ...Array.from({ length: 6 }, emptyDay)]), "accepted");
+
+  part("LEVE 2: a begin answer other than 0, 1 or 2 is unknown, never ignored");
+  for (const [label, reply] of [["-1 (a seen mark in another shape)", [-1]], ["text", ["1"]], ["nothing", []]] as [string, unknown[]][]) {
+    redis.clear();
+    await redis.pipeline([["HSET", DAY, "s", "1000", "b", "0", "c", "0"]]);
+    redis.pipeline = async commands => commands.some(command => command[0] === "EVAL") ? reply : original.call(redis, commands);
+    let rejected = false;
+    try { await heardFromSender({ ...notice, to: `begin-${label.length}@example.test` }, NOW); } catch { rejected = true; }
+    redis.pipeline = original;
+    is(`a begin answered with ${label} is refused, so the notice is heard again`, rejected, true);
+  }
+
+  part("LEVE 3: the pause's SET NX is read exactly");
+  const overNotice = (to: string) => ({ ...notice, to });
+  const pauseKey = `nl:mail:paused:${ID}`;
+  const fromKey = `nl:mail:health:${ID}:from`;
+  for (const [label, landed, expect] of [
+    ["an answer in another shape that did not land", false, "refused"],
+    ["an answer in another shape that landed (reply lost)", true, "paused"],
+  ] as [string, boolean, string][]) {
+    redis.clear();
+    await redis.pipeline([["HSET", DAY, "s", "1000", "b", "24", "c", "0"]]);
+    redis.pipeline = async commands => {
+      if (commands.some(command => command[0] === "SET" && command[1] === pauseKey && command.includes("NX"))) {
+        if (landed) await original.call(redis, commands);
+        return [{ unexpected: true }];
+      }
+      return original.call(redis, commands);
+    };
+    let answer: string;
+    try { answer = await heardFromSender(overNotice(`pause-${landed}@example.test`), NOW); } catch { answer = "refused"; }
+    redis.pipeline = original;
+    const [from] = await redis.pipeline([["GET", fromKey]]);
+    is(`${label}: ${expect}`, [answer, from !== null], [expect, landed]);
+  }
+  redis.clear();
+  await redis.pipeline([["HSET", DAY, "s", "1000", "b", "24", "c", "0"], ["SET", pauseKey, JSON.stringify({ reason: "bounces", until: 1, sent: 1, count: 1 })]]);
+  is("a pause already running keeps its end and its restart day (null, control)", [await heardFromSender(overNotice("running@example.test"), NOW), (await redis.pipeline([["GET", fromKey]]))[0]], ["counted", null]);
   done();
 }
 

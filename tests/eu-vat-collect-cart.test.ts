@@ -62,9 +62,10 @@ const SWITCH = {
     { jurisdiction: "UK", registration: "123456789", reviewedOn: "2026-11-15", reviewer: "owner" },
   ],
 };
-const ON = { records: RECORDS, vatSwitch: SWITCH, now: NOW, rates: RATES, publication: false };
+const ON = { records: RECORDS, vatSwitch: SWITCH, now: NOW, rates: RATES };
 
-const ESS: EuSupplyFields = { priceCents: 2900, file: null, link: "https://example.com/pack", keys: null, course: null, recurring: null, call: null, bundle: null, pwyw: null };
+// The creator answered that it is not an e-publication (unit 5a): without that answer, nothing collects.
+const ESS: EuSupplyFields = { priceCents: 2900, file: null, link: "https://example.com/pack", keys: null, course: null, recurring: null, call: null, bundle: null, pwyw: null, publication: false };
 const ESS2: EuSupplyFields = { ...ESS, priceCents: 1500, link: "https://example.com/second" };
 const GOODS: EuSupplyFields = { ...ESS, link: null, shipping: { countries: ["DE"] } };
 const evidence = (ip: string | null, billing: string | null) => {
@@ -133,7 +134,7 @@ async function main(): Promise<void> {
   is("two electronic products, a German buyer: collected in Germany", euCartGate({ products: [ESS, ESS2], ...evidence("DE", "DE"), ...ON }), { ok: true, collect: { country: "DE" } });
   is("two electronic products, a UK buyer: collected in the UK", euCartGate({ products: [ESS, ESS2], ...evidence("GB", "GB"), ...ON }), { ok: true, collect: { country: "GB" } });
   is("a product that ships in the cart: refused as today", euCartGate({ products: [ESS, GOODS], ...evidence("DE", "DE"), ...ON }), consumerGate({ product: GOODS, ...evidence("DE", "DE") }));
-  is("the UK with an unclassified product: refused as today", euCartGate({ products: [ESS, ESS2], ...evidence("GB", "GB"), ...ON, publication: undefined }), consumerGate({ product: ESS, ...evidence("GB", "GB") }));
+  is("the UK with an unclassified product: refused as today", euCartGate({ products: [{ ...ESS, publication: undefined }, { ...ESS2, publication: undefined }], ...evidence("GB", "GB"), ...ON }), consumerGate({ product: ESS, ...evidence("GB", "GB") }));
   is("evidence that disagrees: refused as today", euCartGate({ products: [ESS, ESS2], ...evidence("DE", "FR"), ...ON }), consumerGate({ product: ESS, ...evidence("DE", "FR") }));
   is("a US buyer: goes on with nothing collected", euCartGate({ products: [ESS, ESS2], ...evidence("US", "US"), ...ON }), { ok: true, collect: null });
   is("no billing country: asked for it, as today", euCartGate({ products: [ESS, ESS2], ...evidence("DE", null), ...ON }), consumerGate({ product: ESS, ...evidence("DE", null) }));

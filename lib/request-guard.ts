@@ -29,6 +29,7 @@
  */
 import { windowCount, windowCountOf } from "@/lib/window-count";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 type HeaderSource = { headers: Headers };
 
@@ -216,7 +217,9 @@ export async function withinLimit(scope: string, who: string, limit: number, win
   try {
     const key = await limitKey(scope, who);
     reply = await redisPipeline(windowCount(key, windowSeconds));
-  } catch {
+  } catch (error) {
+    // Redis answered in another shape (lib/redis.ts, UnknownReplyError): an unknown count, never room (SG2 17).
+    if (error instanceof UnknownReplyError) return false;
     // Redis could not be asked: open, so a buyer is never kept from paying by a counter out of reach.
     return true;
   }
@@ -353,8 +356,9 @@ export async function withinMonth(scope: string, who: string, limit: number, win
     const month = window;
     const key = `nl:rlm:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}:${month}`;
     reply = await redisPipeline(windowCount(key, keepSeconds));
-  } catch {
-    return true;
+  } catch (error) {
+    // An answer out of shape is an unknown count, never room; only Redis out of reach opens, as withinLimit.
+    return !(error instanceof UnknownReplyError);
   }
   return countWithin(reply, limit);
 }

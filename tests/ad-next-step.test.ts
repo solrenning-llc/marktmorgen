@@ -71,10 +71,12 @@ for (const day of [5_000, 5_100, 5_499, 5_500, 5_999, 6_000, 9_000, 49_000]) {
     const s = nextStepFor(base({ limits: r }));
     if (!s.change) continue;
     const others = new Map([["c1", s.change.after.dailyBudgetCents]]);
-    if (!withinLimits(r, [camp()], others) || s.change.after.dailyBudgetCents > 6_000) past += 1;
+    // Both: production's withinLimits (the day, the week's worst and the total's worst) and the independent daily figure,
+    // so a mutation that checks only the day is still caught (Claude 1 C3 and Claude 4 D on #3699).
+    if (!withinLimits(r, [camp()], others) || s.change.after.dailyBudgetCents > day || s.change.after.dailyBudgetCents > 6_000) past += 1;
   }
 }
-is("no prepared raise ever passes a limit or the most a day allows", past, 0);
+is("no prepared raise passes a limit, the daily limit itself or the most a day allows", past, 0);
 const none = nextStepFor(base({ limits: null }));
 is("without limits chosen, no raise is prepared", [none.state, none.change, none.note], ["paid_back", null, "Choose your ad limits first, so any change stays inside them."]);
 is("limits that cannot be approved prepare nothing", nextStepFor(base({ limits: { ...limits, maxTotalCents: 0 } })).change, null);
@@ -136,7 +138,7 @@ is("paid back once more counts from the day it held", [again.state, again.days, 
 is("a refund on the same day counts that day", nextStepFor(base({ refundsByDay: { "2026-10-23": 1_001 } })).state, "not_paid_back");
 is("refunds of sales before the first day of ads are not counted", nextStepFor(base({ refundsByDay: { "2026-10-19": 50_000 } })).days, 4);
 
-part("Two cards shown together never add up past a limit (Claude 1's review on #3196, MÉDIO 1)");
+part("Two cards shown together never add up past the daily cap (Claude 1's review on #3196, MÉDIO 1)");
 // Daily limit $110, A and B at $50 a day, both paid back: each card alone offered $50 to $60, together $120.
 const pair = { ...limits, maxDailyCents: 11_000 };
 const campA = camp({ id: "a" });
@@ -146,7 +148,8 @@ const attempt = <T,>(f: () => T): T | string => { try { return f(); } catch (e) 
 const reasonOf = (r: unknown) => (typeof r === "object" && r ? [(r as { ok: boolean }).ok, (r as { reason?: string }).reason ?? null] : r);
 const together = attempt(() => next.nextStepsFor([cardFor(campA), cardFor(campB)]));
 const budgetsAfter = (cards: NextStep[], list: CampaignNow[]) => new Map(list.map((c, i) => [c.id, cards[i].change?.kind === "raise" ? cards[i].change!.after.dailyBudgetCents : c.dailyBudgetCents] as const));
-is("the cards shown together keep every limit when all their raises are confirmed", Array.isArray(together) ? withinLimits(pair, [campA, campB], budgetsAfter(together, [campA, campB])) : together, true);
+const dailyBudgetSum = (daily: ReadonlyMap<string, number>) => [...daily.values()].reduce((sum, cents) => sum + cents, 0);
+is("the cards shown together keep every limit and their combined daily budgets inside the daily limit", Array.isArray(together) ? withinLimits(pair, [campA, campB], budgetsAfter(together, [campA, campB])) && dailyBudgetSum(budgetsAfter(together, [campA, campB])) <= pair.maxDailyCents : together, true);
 is("the first card gets the room, the second says there is none", Array.isArray(together) ? together.map((s) => [s.change?.after.dailyBudgetCents ?? null, s.note]) : together, [[6_000, null], [null, "Your ad limits leave no room to raise its budget."]]);
 is("one card alone reads the same through either function", JSON.stringify(attempt(() => next.nextStepsFor([base()]))), JSON.stringify([nextStepFor(base())]));
 // The creator confirmed A ($50 to $60); B's card, prepared before that on its own, offered $50 to $60 too.
@@ -176,7 +179,7 @@ for (const day of [10_000, 10_500, 11_000, 11_999, 12_000, 13_000, 50_000]) {
   const r = { ...limits, maxDailyCents: day };
   const cards = attempt(() => next.nextStepsFor([campA, campB].map((c) => base({ campaign: c, all: [campA, campB], limits: r }))));
   if (!Array.isArray(cards)) { summed += 1; continue; }
-  if (!withinLimits(r, [campA, campB], budgetsAfter(cards, [campA, campB]))) summed += 1;
+  if (!withinLimits(r, [campA, campB], budgetsAfter(cards, [campA, campB])) || dailyBudgetSum(budgetsAfter(cards, [campA, campB])) > r.maxDailyCents) summed += 1;
   // Each card made on its own, then confirmed one after the other against the live budgets: never past the limit.
   const liveNow = [campA, campB].map((c) => ({ ...c }));
   for (const [i, c] of [campA, campB].entries()) {
@@ -185,9 +188,9 @@ for (const day of [10_000, 10_500, 11_000, 11_999, 12_000, 13_000, 50_000]) {
     const ok = attempt(() => next.confirmChange(change, { limits: r, all: liveNow, lastRaisedDay: "never" }));
     if (typeof ok === "object" && ok.ok) liveNow[i].dailyBudgetCents = change.after.dailyBudgetCents;
   }
-  if (!withinLimits(r, liveNow, new Map(liveNow.map((c) => [c.id, c.dailyBudgetCents] as const)))) summed += 1;
+  if (!withinLimits(r, liveNow, new Map(liveNow.map((c) => [c.id, c.dailyBudgetCents] as const))) || liveNow.reduce((sum, c) => sum + c.dailyBudgetCents, 0) > r.maxDailyCents) summed += 1;
 }
-is("for every daily limit, the cards together and the confirmations one by one stay inside it", summed, 0);
+is("for every daily limit, the cards together and the confirmations one by one keep every limit and stay under the daily cap", summed, 0);
 
 part("At most one raise a day, by at most 20% (Claude 1's review on #3196, BAIXO 2)");
 const at6000 = camp({ dailyBudgetCents: 6_000 });

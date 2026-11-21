@@ -142,6 +142,11 @@ test("a deadline already passed sends nothing and claims nothing", async () => {
   assert.deepEqual([next.sent, sends.length], [1, 1]);
 });
 
+// The nudge's claim: a SET NX before the store-live fence, the store-claim-live script (key at 5) since it.
+const takesNudgeMark = (cmd: (string | number)[]) =>
+  (cmd[0] === "SET" && String(cmd[1]).startsWith("nl:nudge:") && cmd.includes("NX")) ||
+  (cmd[0] === "EVAL" && String(cmd[1]).startsWith("-- marktmorgen:store-claim-live:v1\n") && String(cmd[5]).startsWith("nl:nudge:"));
+
 test("a run killed after its mark and before its send began: the next run sends it, once, under the same key", async () => {
   const [email] = await trialStores(1);
   await redis.pipeline([["DEL", CURSOR]]);
@@ -152,7 +157,7 @@ test("a run killed after its mark and before its send began: the next run sends 
   const atKill = new Promise<void>((resolve) => { reached = resolve; });
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const out = await original(commands);
-    if (commands.some((cmd) => cmd[0] === "SET" && String(cmd[1]).startsWith("nl:nudge:") && cmd.includes("NX"))) {
+    if (commands.some(takesNudgeMark)) {
       reached();
       return new Promise(() => {});
     }

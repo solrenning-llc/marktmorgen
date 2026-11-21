@@ -140,6 +140,21 @@ export type MayComeOff =
   | { kind: "unknown" };
 
 /**
+ * `percent` of `cents`, to the nearest cent with a half cent up, as Stripe takes a percentage off, worked out from
+ * the percent's own decimal digits in whole numbers (as lib/deposit-code.ts percentOf does): a code made in the
+ * Stripe dashboard can take 33.3% off, and in floating point 1500 × 33.3 / 100 is 499.49999999999994, which
+ * Math.round made 499 instead of 500. A percent with no short decimal form keeps the floating-point figure.
+ */
+function percentOff(cents: number, percent: number): number {
+  const digits = /^(\d{1,3})(?:\.(\d{1,6}))?$/.exec(String(percent));
+  if (!digits || !Number.isSafeInteger(cents) || cents < 0) return Math.round((cents * percent) / 100);
+  const fraction = digits[2] ?? "";
+  const n = BigInt(cents) * BigInt(digits[1] + fraction);
+  const d = BigInt(`100${"0".repeat(fraction.length)}`);
+  return Number((BigInt(2) * n + d) / (BigInt(2) * d));
+}
+
+/**
  * The least a buyer can pay for the goods, before tax and shipping: the
  * lines' total, less the largest of the discounts that may come off it.
  */
@@ -147,7 +162,7 @@ export function leastPaid(total: number, discounts: MayComeOff[]): number {
   let least = Math.max(0, Math.floor(total));
   for (const off of discounts) {
     if (off.kind === "unknown") return 0;
-    const after = off.kind === "percent" ? total - Math.round((total * Math.min(100, Math.max(0, off.percent))) / 100) : total - Math.max(0, off.cents);
+    const after = off.kind === "percent" ? total - percentOff(total, Math.min(100, Math.max(0, off.percent))) : total - Math.max(0, off.cents);
     least = Math.min(least, Math.max(0, Math.floor(after)));
   }
   return least;

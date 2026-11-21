@@ -1,3 +1,4 @@
+import {targetsUnder44} from "./target-size.mjs";
 import "./orders-list-actions.mjs";
 import {createRequire} from "node:module";
 import {spawn} from "node:child_process";
@@ -49,19 +50,6 @@ try{
 let app,reviewedApp,output="";
 let browser,cases=0,audits=0,failed=0,libraryLink=null;const gaps=[];
 const redact=value=>String(value).replace(/token=[^&\s"']+/g,"token=redacted");
-// 2.5.5 Target Size (Enhanced, AAA): every control a buyer presses on the checkout's own pages is at least 44 by 44 CSS px.
-// A link inside a sentence is the criterion's inline exception; a box counts with its label, which presses it too.
-const targetsUnder44=(page,scope="body")=>page.evaluate(scope=>{
- const out=[],shown=n=>{const r=n.getBoundingClientRect(),s=getComputedStyle(n);return r.width>0&&r.height>0&&s.visibility!=="hidden"&&!n.closest("[hidden],[inert],.sr-only");};
- for(const n of document.querySelector(scope)?.querySelectorAll("a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button]")??[]){
-  const label=n.matches("input")?(n.labels?.[0]??n.closest("label")):null;
-  if(!shown(n)&&!(label&&shown(label)))continue;
-  if(n.tagName==="A"&&getComputedStyle(n).display==="inline"){const p=n.parentElement;if(p&&(p.textContent||"").trim().length>(n.textContent||"").trim().length+3)continue;}
-  const r=n.getBoundingClientRect(),l=label?label.getBoundingClientRect():r,width=Math.max(r.width,l.width),height=Math.max(r.height,l.height);
-  if(width<43.5||height<43.5)out.push({tag:n.tagName,name:(n.getAttribute("aria-label")||n.textContent||"").trim().slice(0,60),width:Math.round(width),height:Math.round(height)});
- }
- return out;
-},scope);
 const localLink=value=>String(value).replace("https://marktmorgen.com",origin);
 try{
  reviewedApp=await prepareReviewedMailApp(root,env);
@@ -125,7 +113,9 @@ try{
    // present from the start), and checking the box by its label clears the mark and the reason.
    await page.goto(origin+"/@localshop/p/"+ids["Weeknight Dinners"]+"?consent=needed#buy",{waitUntil:"networkidle"});await restoreDarkAfterNavigation();
    const refusedBox=page.locator('#buy form[data-checkout] input[name="dc"]').first();
-   await page.waitForTimeout(400);
+   // Waits for what hydration does (components/digital-consent-box.tsx: the box takes the focus, then its live region is
+   // filled), not for a fixed time; a page that never gets there falls through to the check below, which names what is wrong.
+   await page.waitForFunction(n=>{const wrap=n.closest("[data-digital-consent]");const live=wrap&&wrap.querySelector('[aria-live="assertive"]');return document.activeElement===n&&Boolean(live&&live.textContent.trim());},await refusedBox.elementHandle(),{timeout:15000}).catch(()=>{});
    const refusedState=await refusedBox.evaluate(n=>{const ids=(n.getAttribute("aria-describedby")||"").split(" ");const error=document.getElementById(ids[0]);const wrap=n.closest("[data-digital-consent]");const live=wrap&&wrap.querySelector('[aria-live="assertive"]');return {invalid:n.getAttribute("aria-invalid"),error:error?error.textContent.trim():"",focused:document.activeElement===n,live:live?live.textContent.trim():"",alertAtLoad:Boolean(wrap&&wrap.querySelector('[role="alert"]'))};});
    if(refusedState.invalid!=="true"||!refusedState.error||!refusedState.focused||refusedState.live!==refusedState.error||refusedState.alertAtLoad)throw Error("Refused consent box state wrong "+JSON.stringify(refusedState));
    await page.locator('#buy form[data-checkout] label:has(> input[name="dc"])').first().click();
@@ -138,6 +128,15 @@ try{
    const extras=buyForm.locator('input[name="bump"]');
    if(await extras.evaluateAll(nodes=>nodes.some(n=>n.checked)))throw Error("An extra was selected for the buyer");
    if(mode==="baseline"){await page.keyboard.press("Tab");if(!await page.evaluate(()=>document.activeElement!==document.body))throw Error("Native keyboard focus missing");}
+   // The billing country (components/billing-country-field.tsx, EU VAT art. 9a gate): a required, labelled native select,
+   // with no country chosen for the buyer. A buyer outside the EU and the UK (the United States here) chooses it and can buy;
+   // the refusal of EU and UK places is held in tests/eu-vat-consumer-gate.test.ts and tests/eu-vat-checkout-routes.test.ts.
+   const country=buyForm.locator('select[name="billing_country"]');
+   if(await country.count()!==1)throw Error("Billing country field missing");
+   const field=await country.evaluate(n=>({value:n.value,required:n.required,labelled:Boolean(n.labels&&n.labels.length&&n.labels[0].innerText.trim()),us:[...n.options].some(o=>o.value==="US")}));
+   if(field.value!==""||!field.required||!field.labelled||!field.us)throw Error("Billing country is not an empty, required, labelled select offering the United States "+JSON.stringify(field));
+   await country.focus();await country.selectOption("US");
+   if(await country.inputValue()!=="US")throw Error("The billing country could not be chosen");
    // The box to start during the cancellation period (lib/digital-consent.ts): a real, labelled, required checkbox, never checked for the buyer.
    const consent=buyForm.locator('input[name="dc"]');
    if(await consent.count()!==1)throw Error("Immediate-access consent box missing");
@@ -228,6 +227,11 @@ try{
    for(const n of [0,1]){await adds.nth(n).focus();await page.keyboard.press("Enter");}
    const opener=page.locator("#cart .st-cart-open"),panel=page.locator("#cart .st-cart-panel"),lines=panel.locator("li");
    const openByKeyboard=async()=>{await opener.focus();await page.keyboard.press("Enter");await panel.waitFor();};
+   // At the top of the page nothing scrolls a control out from under the cart's button: no part of any control there may
+   // lie under it (2.4.12; the store's line of news did on a phone, found walking the buyer path, tests/store-fixed-focus-room.test.ts).
+   await opener.waitFor();await page.evaluate(()=>scrollTo(0,0));
+   const underCart=await page.evaluate(()=>{const c=document.querySelector("#cart .st-cart-open").getBoundingClientRect();return [...document.querySelectorAll("a[href],button,input,select,textarea,summary,[tabindex]:not([tabindex='-1'])")].filter(n=>!n.closest("#cart")&&!n.matches(".sr-only")&&[...n.getClientRects()].some(r=>r.width&&r.height&&r.left<c.right&&r.right>c.left&&r.top<c.bottom&&r.bottom>c.top)).map(n=>(n.getAttribute("aria-label")||n.textContent||n.tagName).trim().slice(0,60));});
+   if(underCart.length)throw Error("Part of a control at the top of the page lies under the cart's button at "+width+" px: "+JSON.stringify(underCart));
    const focus=()=>page.evaluate(()=>{const a=document.activeElement;return {inCart:Boolean(a?.closest("#cart")),inPanel:Boolean(a?.closest(".st-cart-panel")),opener:Boolean(a?.matches(".st-cart-open")),tag:a?.tagName??"",name:(a?.getAttribute("aria-label")||a?.textContent||"").trim().slice(0,60)};});
    await openByKeyboard();await lines.nth(1).waitFor({timeout:15_000});await panel.locator("form[data-checkout]").waitFor({timeout:15_000});
    const small=await targetsUnder44(page,"#cart .st-cart-panel");

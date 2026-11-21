@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   if (!draft.ok) throw new Error("Synthetic draft refused");
   const created = await createRequest(store, draft.draft, now);
   if (!created.ok) throw new Error(`Synthetic request refused: ${created.reason}`);
-  const paid = await markPaid(store, created.request.id, { id: "cs_test_ReceiptCopy00000001", payment_intent: "pi_ReceiptCopy0001", amount_total: 1200, created: Math.floor(now / 1000) }, now);
+  const paid = await markPaid(store, created.request.id, { id: "cs_test_ReceiptCopy00000001", payment_intent: "pi_ReceiptCopy0001", amount_total: 1200, currency: "usd", created: Math.floor(now / 1000) }, now);
   if (!paid) throw new Error("Synthetic paid evidence refused");
   is("payment is recorded before the receipt attempt", [paid.fresh, paid.request.state, paid.request.amountPaid], [true, "paid", 1200]);
 

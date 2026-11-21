@@ -24,6 +24,7 @@ const FAILED = "It could not be saved just now. Try again in a moment.";
 const NOTICES: Record<string, string> = {
   on: "The Store assistant is on. Its chat shows on your store's pages while it is switched on below.",
   pending: "Stripe has not confirmed the payment yet. This page shows it as soon as it does.",
+  failed: "A payment for the Store assistant on this store did not go through, so nothing new was started. This page shows it as on once Stripe has the payment.",
   unfinished: "Nothing was started, and nothing was charged.",
   unconfirmed: "Stripe did not answer just now. If you paid, it shows here within a day.",
   "not-open": "The Store assistant is not on sale yet: it opens with Marktmorgen's plans.",

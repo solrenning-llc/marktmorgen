@@ -103,7 +103,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const amount = world.charges.get(intent[1]);
     if (!amount) return json({ error: { message: "No such payment_intent" } }, 404);
     const refunded = world.refunds.filter((row) => row.payment_intent === intent[1] && row.status === "succeeded").reduce((sum, row) => sum + row.amount, 0);
-    return json({ id: intent[1], latest_charge: { id: `ch_${intent[1].slice(3)}`, currency: "usd", amount, amount_refunded: refunded, disputed: false } });
+    return json({ id: intent[1], latest_charge: { id: `ch_${intent[1].slice(3)}`, payment_intent: intent[1], currency: "usd", amount, amount_refunded: refunded, disputed: false } });
   }
   if (path === "/refunds" && method === "GET") return json({ object: "list", data: world.refunds.filter((row) => row.charge === url.searchParams.get("charge")), has_more: false });
   if (path === "/refunds" && method === "POST") {

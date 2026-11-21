@@ -52,6 +52,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   // The customers of one address (lib/winback-send.ts reads every one of them, audit R43): those set above.
   if (path === "/customers") return answer({ object: "list", data: [...customers].filter(([, e]) => e === url.searchParams.get("email")).map(([id, email]) => ({ id, object: "customer", email })), has_more: false });
+  if (path === "/customers/search") {
+    const address = (url.searchParams.get("query")?.match(/^email:"([^"]*)"$/)?.[1] ?? "").toLowerCase();
+    return answer({ object: "search_result", data: [...customers].filter(([, e]) => e.toLowerCase() === address).map(([id, email]) => ({ id, object: "customer", email })), has_more: false, next_page: null });
+  }
   const customer = path.match(/^\/customers\/(cus_\w+)$/);
   if (customer) {
     lookedUp += 1;
@@ -125,7 +129,7 @@ async function main(): Promise<void> {
   await setWinBack(OWNER, { percent: 25, months: 2, days: 7, coupon: "co_Back0001", address: "1 Main St, Portland, OR 97201" });
   const store = (await storeForEmail(OWNER))!;
   const meta = { store: "lsixback", product: club.product.id };
-  const people = ["ann", "bob", "cat", "dan", "eve", "fay", "gus", "fox"];
+  const people = ["ann", "bob", "cat", "dan", "eve", "fay", "gus", "fox", "hal", "ivy", "jo", "hoa", "ida"];
   for (const name of people) {
     const id = `cus_${name[0].toUpperCase()}${name.slice(1)}0000001`.slice(0, 18);
     customers.set(id, `${name}@example.com`);
@@ -173,8 +177,25 @@ async function main(): Promise<void> {
   await sendWinBacks(Date.now() + 30_000, now);
   is("and never twice", sentTo().filter((to) => to === "fay@example.com" || to === "cat@example.com").length, 2);
   ended("sub_Gus0000001", cus("gus"), 8, meta);
-  await withReply("SET", (command) => String(command[1]).includes("once") || String(command[1]).includes(":o:"), () => ["QUEUED"], () => sendWinBacks(Date.now() + 30_000, now));
+  // Since #4807 the once-a-while mark is made inside WINBACK_CLAIM with the grant and its erasure note, so the odd
+  // answer is the script's own: one that landed holds this claim's value and is read back as ours.
+  const isClaim = (command: (string | number)[]) => String(command[1]).startsWith("-- marktmorgen:winback-claim:");
+  await withReply("EVAL", isClaim, () => ["QUEUED"], () => sendWinBacks(Date.now() + 30_000, now));
   is("the once-a-while mark answered oddly but ours: Gus is written to, not held back for months", sentTo().filter((to) => to === "gus@example.com").length, 1);
+  // One that did not land (nothing written) is not ours: nothing is sent, the membership's own mark is let go, and the
+  // next run claims it whole and writes once.
+  ended("sub_Hoa0000001", cus("hoa"), 8, meta);
+  await withReplyOnly("EVAL", isClaim, [undefined], () => sendWinBacks(Date.now() + 30_000, now));
+  is("the claim answered in an unknown shape that did not land: Hoa is not written to", sentTo().includes("hoa@example.com"), false);
+  await sendWinBacks(Date.now() + 30_000, now);
+  is("the next run writes to Hoa, once", sentTo().filter((to) => to === "hoa@example.com").length, 1);
+  // The deletion print read again before the email (stillFree) answered in an unknown shape: not known to be free, so
+  // nothing is sent; the once-mark and the link stay, so the person is never written to twice.
+  ended("sub_Ida0000001", cus("ida"), 8, meta);
+  await withReplyOnly("HEXISTS", (command) => String(command[1]).startsWith("nl:erased:"), ["1?"], () => sendWinBacks(Date.now() + 30_000, now));
+  is("the print read again in an unknown shape: Ida is not written to", sentTo().includes("ida@example.com"), false);
+  await sendWinBacks(Date.now() + 30_000, now);
+  is("nor on the next run, her once-a-while mark being made", sentTo().includes("ida@example.com"), false);
 
 
   part("Every ended membership of the window, past the first page");
@@ -185,6 +206,21 @@ async function main(): Promise<void> {
   is("Dan and Eve are both read, though the window's events come one a page", [sentTo().includes("dan@example.com"), sentTo().includes("eve@example.com")], [true, true]);
   is("and nobody is written to twice", sentTo().length, new Set(sentTo()).size);
   eventsPage = 100;
+
+  part("A row whose status or metadata does not read is unknown (rule 24, the class of Codex CX1's MEDIUM on #3598)");
+  for (const [who, row] of [
+    ["hal", { id: "sub_HalLive0001", status: "a_status_stripe_never_named", metadata: { store: "lsixback", product: meta.product } }],
+    ["ivy", { id: "sub_IvyLive0001", status: "active", metadata: { store: "lsixback", product: 17 } }],
+    ["jo", { id: "sub_JoLive00001", status: "active", metadata: null }],
+  ] as const) {
+    ended(`sub_${who[0].toUpperCase()}${who.slice(1)}0000001`.slice(0, 18), cus(who), 8, meta);
+    subsBody.set(cus(who), { object: "list", data: [row], has_more: false });
+    await sendWinBacks(Date.now() + 30_000, now);
+    is(`${who}: never written to on a row that does not read`, sentTo().includes(`${who}@example.com`), false);
+    subsBody.set(cus(who), { object: "list", data: [{ ...row, status: "canceled", metadata: { store: "lsixback", product: meta.product } }], has_more: false });
+    await sendWinBacks(Date.now() + 30_000, now);
+    is(`${who}: read whole the next time (ended): written to, once`, sentTo().filter((to) => to === `${who}@example.com`).length, 1);
+  }
 
   part("No more than a hundred offers looked at per store per run, however many ended (Claude 3 on #2714)");
   // Ann's memberships read whole now (she came back), so no earlier offer is looked at again in what follows.

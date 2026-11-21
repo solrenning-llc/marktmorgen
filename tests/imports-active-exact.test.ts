@@ -15,7 +15,7 @@
  *     throws rather than tell the creator no import is running and "None yet".
  */
 import { claimHandle, ensureListId, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
-import { addRows, advanceImports, finishUpload, readJob, runImport, startImport, storeImports, type ImportJob } from "@/lib/imports";
+import { addRows, advanceImports, finishUpload, jobOf, readJob, runImport, startImport, storeImports, type ImportJob } from "@/lib/imports";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -141,6 +141,59 @@ async function main(): Promise<void> {
   const gonePast = "a".repeat(24);
   await real([["LPUSH", `nl:imports:list:${sid}`, gonePast]]);
   is("healthy control: an import that is truly gone is left out", (await storeImports(store)).map((job) => job.id).includes(gonePast), false);
+
+  // Codex V on #3661 (6788586117), the studio's sibling (rule 30): GET nl:import:A answering a well-formed import of this
+  // store that names another id is not import A, so the list is unknown, never shown with it as A nor with A left out.
+  part("A record kept under one import's id that names another is not that import");
+  const misfiled = "b".repeat(24);
+  const kept = JSON.parse(String((await real([["GET", `nl:import:${running}`]]))[0]));
+  await real([["SET", `nl:import:${misfiled}`, JSON.stringify({ ...kept, id: "c".repeat(24) })], ["LPUSH", `nl:imports:list:${sid}`, misfiled]]);
+  is("storeImports throws UnknownReplyError", await outcome(storeImports(store)), { threw: "UnknownReplyError" });
+  await real([["LREM", `nl:imports:list:${sid}`, 0, misfiled], ["DEL", `nl:import:${misfiled}`]]);
+  is("healthy control: with it gone, the list reads again", (await storeImports(store))[0]?.id, running);
+
+  // Revisor 2 on #3686 (MEDIUM): a kept text that does not read as an import, and an entry of the list that is not an
+  // import id, are unknown, not left out of the studio's list (rule 30).
+  part("A kept text that is not an import, and an entry that is not an id, make the list unknown");
+  const unreadable = "d".repeat(24);
+  await real([["SET", `nl:import:${unreadable}`, "{not json"], ["LPUSH", `nl:imports:list:${sid}`, unreadable]]);
+  is("an unreadable kept text: storeImports throws UnknownReplyError", await outcome(storeImports(store)), { threw: "UnknownReplyError" });
+  await real([["LREM", `nl:imports:list:${sid}`, 0, unreadable], ["DEL", `nl:import:${unreadable}`]]);
+  await real([["LPUSH", `nl:imports:list:${sid}`, "not-an-import-id"]]);
+  is("an entry that is not an import id: storeImports throws UnknownReplyError", await outcome(storeImports(store)), { threw: "UnknownReplyError" });
+  await real([["LREM", `nl:imports:list:${sid}`, 0, "not-an-import-id"]]);
+  is("healthy control: with both gone, the list reads again", (await storeImports(store))[0]?.id, running);
+
+  // Claude 4 (cloud A) LOW and Claude 1 (cloud reviewer C3) LEVE on #3686: an import on this store's list whose store
+  // is missing, null, empty or not text says nothing of whose it is, so the list is unknown, never shorter (rule 30),
+  // as its MCP sibling storeImportsRead already reads it (Codex G on #1933). One naming another store is still left out.
+  part("An import on the store's list kept without a store that reads is unknown, never left out");
+  for (const [label, value] of [["missing", undefined], ["null", null], ["a number", 7], ["empty", ""]] as [string, unknown][]) {
+    const nameless = "e".repeat(24);
+    const record: Record<string, unknown> = { ...JSON.parse(String((await real([["GET", `nl:import:${running}`]]))[0])), id: nameless };
+    if (value === undefined) delete record.sid;
+    else record.sid = value;
+    await real([["SET", `nl:import:${nameless}`, JSON.stringify(record)], ["LPUSH", `nl:imports:list:${sid}`, nameless]]);
+    is(`its store ${label}: storeImports throws UnknownReplyError`, await outcome(storeImports(store)), { threw: "UnknownReplyError" });
+    await real([["LREM", `nl:imports:list:${sid}`, 0, nameless], ["DEL", `nl:import:${nameless}`]]);
+  }
+  {
+    const elsewhere = "e".repeat(24);
+    const record = { ...JSON.parse(String((await real([["GET", `nl:import:${running}`]]))[0])), id: elsewhere, sid: "9".repeat(32) };
+    await real([["SET", `nl:import:${elsewhere}`, JSON.stringify(record)], ["LPUSH", `nl:imports:list:${sid}`, elsewhere]]);
+    is("healthy control: an import naming another store is left out", (await storeImports(store)).map((job) => job.id).includes(elsewhere), false);
+    await real([["LREM", `nl:imports:list:${sid}`, 0, elsewhere], ["DEL", `nl:import:${elsewhere}`]]);
+  }
+
+  // Revisor 2 on #3686 (MEDIUM): the GET of import B's key answering import A's record is not B (readJob, jobOf).
+  part("One import's key holding another import's record is not that import");
+  const mixed = "f".repeat(24);
+  const other = JSON.parse(String((await real([["GET", `nl:import:${running}`]]))[0]));
+  await real([["SET", `nl:import:${mixed}`, JSON.stringify(other)]]);
+  is("readJob throws UnknownReplyError", await outcome(readJob(mixed)), { threw: "UnknownReplyError" });
+  is("jobOf throws UnknownReplyError", await outcome(jobOf(store, mixed)), { threw: "UnknownReplyError" });
+  is("healthy control: an import under its own id reads", (await readJob(running))?.id, running);
+  await real([["DEL", `nl:import:${mixed}`]]);
 
   part("Healthy control: the emails of an import are done only when its queue is empty");
   const mailing = (id: string): ImportJob => ({

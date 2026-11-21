@@ -1,3 +1,5 @@
+import {waitForReactChangeHandler} from "./react-hydration.mjs";
+
 /** Settings replies intercepted; no member switch, Stripe, email or payment occurs. */
 export async function checkTierAcknowledgment({browser,LOCAL,fixture,is}){
  const cases=[
@@ -25,6 +27,9 @@ export async function checkTierAcknowledgment({browser,LOCAL,fixture,is}){
    const section=page.locator("[data-tier-editor]");await section.waitFor();
    const checks=section.getByRole("checkbox");
    is("two isolated tier candidates "+width,await checks.count(),2);
+   // The checkboxes are server-rendered and enabled: a click before React attaches
+   // onChange toggles nothing it keeps ("did not change its state" on slow WebKit).
+   for(const check of await checks.all())await waitForReactChangeHandler(page,check);
    await checks.nth(0).check();
    is("one tier selection refused "+width,await section.getByRole("button",{name:"Let members switch",exact:true}).isDisabled(),true);
    await checks.nth(1).check();

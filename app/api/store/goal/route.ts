@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "stats", 500);
   if (!guarded.ok) return guarded.response;
   try {
-    const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.store.email);
+    const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.ref);
     if (!store?.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     const goal = await setSalesGoal(store.statsId, guarded.body.cents, store.currency);
     if (goal === null) return Response.json({ ok: false, error: "invalid" }, { status: 400 });

@@ -116,23 +116,29 @@ export function mergeLines(kept: AdSpend[], fresh: AdSpend[], from: string, to: 
   return [...compact, ...fresh].sort((a, b) => a.from.localeCompare(b.from) || a.id.localeCompare(b.id)).slice(-MAX_META_LINES);
 }
 
-/** Lines read back from where they are kept: only whole ones. */
-export function parseLines(raw: unknown): AdSpend[] {
-  if (typeof raw !== "string" || !raw) return [];
+/**
+ * Lines read back from where they are kept, whole or not at all (CX-123 rule 24; Codex Z on #2924): the kept text,
+ * a JSON list whose every member is a line this code writes. Anything else, a single member in another shape
+ * included, is null (unknown): never the other lines as if they were all of it. Redis's nil (nothing kept) is the
+ * caller's to read as no lines.
+ */
+export function parseLines(raw: unknown): AdSpend[] | null {
+  if (typeof raw !== "string" || !raw) return null;
   let list: unknown;
   try {
     list = JSON.parse(raw);
   } catch {
-    return [];
+    return null;
   }
-  if (!Array.isArray(list)) return [];
+  if (!Array.isArray(list)) return null;
   const out: AdSpend[] = [];
   for (const item of list) {
-    if (!item || typeof item !== "object") continue;
+    if (!item || typeof item !== "object" || Array.isArray(item)) return null;
     const v = item as Record<string, unknown>;
-    if (typeof v.id !== "string" || !/^meta-[0-9a-f]{12}$/.test(v.id)) continue;
+    if (typeof v.id !== "string" || !/^meta-[0-9a-f]{12}$/.test(v.id)) return null;
     const read = readSpend({ channel: v.channel, campaign: v.campaign, cents: v.cents, from: v.from, to: v.to }, Number.MAX_SAFE_INTEGER);
-    if (read.ok) out.push({ id: v.id, ...read.spend, source: "meta" });
+    if (!read.ok) return null;
+    out.push({ id: v.id, ...read.spend, source: "meta" });
   }
   return out.slice(-MAX_META_LINES);
 }

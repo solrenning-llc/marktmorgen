@@ -166,9 +166,12 @@ async function main(): Promise<void> {
   const calls = readFileSync("lib/calls.ts", "utf8");
   is("the sale's note is read with every paid booking", calls.includes("    due: readDue(meta),\n"), true);
   is("the booking catch-up and the daily job hand it to the confirmation", [calls.includes("      due: call.due,\n      cancel: call.cancel,\n      origin,\n    }).catch((error) => console.error(\"catching up a booking failed\""), readFileSync("lib/call-reminders.ts", "utf8").includes("              due: call.due,\n")], [true, true]);
+  // Rule 23 (Claude 5, 9 November 2026): only where the once-only mark is looked for changed. It is written since then
+  // with the time kept for good, in one step (orderWriteOnce in lib/calls.ts, confirmBooking); the order asserted, the
+  // sale read before the mark, is the same.
   is(
     "only an in-person booking is read for it, before the once-only mark",
-    [calls.includes('const needDue = due === undefined && whereOf(product.call).kind === "place";'), calls.indexOf("const sale = await paidCall(store, session);") < calls.indexOf('const [fresh] = await orderWrite(store, [["SET", confirmedKey(session)')],
+    [calls.includes('const needDue = due === undefined && whereOf(product.call).kind === "place";'), calls.indexOf("const sale = await paidCall(store, session);") < calls.indexOf('const write = await orderWriteOnce(store, [\n    ["SET", confirmedKey(session), "sending", "NX"')],
     [true, true],
   );
   const thanks = readFileSync("app/[handle]/thanks/page.tsx", "utf8");

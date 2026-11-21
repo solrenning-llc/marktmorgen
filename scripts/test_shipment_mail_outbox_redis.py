@@ -808,3 +808,11 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # CX-121: same dedicated service/job; the evidence owns and cleans its
+    # exact synthetic namespace, with no provider or additional workflow.
+    from test_shipment_mail_release_evidence_redis import evidence
+    release_redis = LocalRedis()
+    try:
+        assert evidence(release_redis) is False, "Shipment release evidence failed"
+    finally:
+        release_redis.close()

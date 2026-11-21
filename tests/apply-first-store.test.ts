@@ -491,3 +491,116 @@ test("a person's deletion and copy run this file's own functions, by the store's
   assert.deepEqual(await COPIERS["lib/apply-first-store.ts"](scope), []);
   assert.deepEqual((await listApplications(shop, clock))?.map((a) => a.email), [bob]);
 });
+
+// X4: the two open MEDIUMs, on the real storage functions and their script stand-in.
+const attemptInput = (key: string, email = ann, what = offer) => ({ offer: what, email, key });
+const guardedShop = { ...shop, listId: "u".repeat(24) };
+
+test("X4 double loss: the same attempt retried later keeps exactly one record", async () => {
+  const input = attemptInput("a".repeat(32));
+  let lost = false;
+  fault = (command) => {
+    if (String(command[1]) === APPLY_NEW) { lost = true; runScript(command); throw Error("synthetic ACK lost"); }
+    if (lost && command[0] === "GET") throw Error("synthetic readback lost");
+    return undefined;
+  };
+  assert.deepEqual(await submitApplication(guardedShop, input, clock), { ok: false, reason: "unavailable" });
+  fault = null; at(clock + 1000);
+  const retry = await submitApplication(guardedShop, input, clock);
+  assert.equal(retry.ok, true);
+  assert.equal((await listApplications(shop, clock))?.length, 1);
+});
+
+test("X4 concurrent presses with the same attempt keep the same id", async () => {
+  const input = attemptInput("b".repeat(32));
+  const results = await Promise.all([submitApplication(guardedShop, input, clock), submitApplication(guardedShop, input, clock)]);
+  assert.ok(results.every(r => r.ok));
+  assert.equal((await listApplications(shop, clock))?.length, 1);
+  assert.equal(results[0].ok && results[0].application.id, results[1].ok && results[1].application.id);
+});
+
+test("X4 the same attempt cannot switch the offer or reset a decision or expiry", async () => {
+  const input = attemptInput("c".repeat(32));
+  const first = await submitApplication(guardedShop, input, clock); assert.ok(first.ok);
+  if (!first.ok) return;
+  const record = `nl:apply:r:${shop.sid}:${first.application.id}`;
+  await decideApplication(shop, first.application.id, { kind: "decline" }, clock + 1);
+  const had = base(["GET", record]); const life = ttl(record);
+  at(clock + 1000);
+  const again = await submitApplication(guardedShop, input, clock);
+  assert.ok(again.ok && again.application.state === "declined");
+  assert.equal(base(["GET", record]), had); assert.ok(ttl(record) <= life);
+  assert.deepEqual(await submitApplication(guardedShop, attemptInput(input.key, ann, "prod_other"), clock), { ok: false, reason: "bad-input" });
+  assert.equal((await listApplications(shop, clock))?.length, 1);
+});
+
+test("X4 a person already marked erased cannot leave a new application", async () => {
+  const { suppressCommand } = await import("@/lib/suppression");
+  base(suppressCommand(guardedShop.listId, ann, Math.floor(clock / 1000)));
+  const answer = await submitApplication(guardedShop, attemptInput("d".repeat(32)), clock);
+  assert.equal(answer.ok, false);
+  assert.deepEqual(await applicationsOfPerson(shop.sid, ann), []);
+});
+
+test("X4 an application submitted after the eraser read is refused", async () => {
+  const { suppressCommand } = await import("@/lib/suppression");
+  await submit();
+  base(suppressCommand(guardedShop.listId, ann, Math.floor(clock / 1000)));
+  const pipeline = memory.pipeline.bind(memory);
+  let during: Awaited<ReturnType<typeof submitApplication>> | undefined;
+  memory.pipeline = (async (commands: Cmd[]) => {
+    const answer = await pipeline(commands);
+    if (commands[0]?.[0] === "ZRANGEBYSCORE") {
+      memory.pipeline = pipeline;
+      during = await submitApplication(guardedShop, attemptInput("e".repeat(32)), clock);
+    }
+    return answer;
+  }) as typeof memory.pipeline;
+  try { await forgetApplyFirstPerson(shop.sid, ann); } finally { memory.pipeline = pipeline; }
+  assert.equal(during?.ok, false);
+  assert.deepEqual(await applicationsOfPerson(shop.sid, ann), []);
+});
+
+test("X4 a missing attempt or erasure scope sends nothing", async () => {
+  for (const [where, input] of [[guardedShop, { offer, email: ann }], [{ sid: shop.sid }, attemptInput("f".repeat(32))], [guardedShop, attemptInput("invalid")]] as const) {
+    sent = [];
+    const result = await submitApplication(where as typeof guardedShop, input as ReturnType<typeof attemptInput>, clock);
+    assert.equal(result.ok, false); assert.equal(sent.length, 0);
+  }
+});
+
+// Existing X5-20261117-2142 MEDIUM, reused here on the current head.
+test("X4/X5 a lost delete keeps the reference for a complete erasure retry", async () => {
+  const one = await submit(); const two = await submit(ann, shop, "prod_other");
+  const record = `nl:apply:r:${shop.sid}:${one.id}`;
+  fault = command => command[0] === "DEL" && command[1] === record ? null : undefined;
+  await assert.rejects(forgetApplyFirstPerson(shop.sid, ann), UnknownReplyError);
+  fault = null;
+  assert.equal(base(["EXISTS", record]), 1);
+  assert.equal(base(["EXISTS", `nl:apply:r:${shop.sid}:${two.id}`]), 0);
+  assert.equal(await forgetApplyFirstPerson(shop.sid, ann), 1);
+  assert.equal(base(["EXISTS", record]), 0);
+  assert.deepEqual(await applicationsOfPerson(shop.sid, ann), []);
+});
+
+
+test("X4 one attempt is isolated by store and person; another attempt remains independent", async () => {
+  const key = "1".repeat(32);
+  assert.ok((await submitApplication(shop, attemptInput(key), clock)).ok);
+  assert.ok((await submitApplication(shop, attemptInput(key, bob), clock)).ok);
+  assert.ok((await submitApplication(other, attemptInput(key), clock)).ok);
+  assert.ok((await submitApplication(shop, attemptInput("2".repeat(32)), clock)).ok);
+  assert.equal((await listApplications(shop, clock))?.length, 3);
+  assert.equal((await listApplications(other, clock))?.length, 1);
+});
+
+test("X4 erasure is checked before returning an existing attempt", async () => {
+  const { suppressCommand } = await import("@/lib/suppression");
+  const input = attemptInput("3".repeat(32));
+  assert.ok((await submitApplication(shop, input, clock)).ok);
+  base(suppressCommand(shop.listId, ann, Math.floor(clock / 1000)));
+  assert.equal((await submitApplication(shop, input, clock + 1)).ok, false);
+  await forgetApplyFirstPerson(shop.sid, ann);
+  assert.equal((await submitApplication(shop, input, clock + 2)).ok, false);
+  assert.deepEqual(await applicationsOfPerson(shop.sid, ann), []);
+});

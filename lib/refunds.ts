@@ -304,10 +304,11 @@ export function rowGivesBack(row: GivenBackRow): boolean {
 
 /**
  * The most pages of closing events one job's run reads for one store: each
- * a GET /events of up to 100, every five minutes, by the six jobs that
+ * a GET /events of up to 100, every five minutes, by the seven jobs that
  * take things back (lib/licence-keys.ts, lib/call-meetings.ts,
- * lib/review-proof.ts, lib/gifts.ts, lib/preorders.ts, lib/group-buy.ts). No other call: the
- * dispute in the event says all a row needs.
+ * lib/review-proof.ts, lib/gifts.ts, lib/preorders.ts, lib/group-buy.ts,
+ * lib/certificate-refunds.ts). No other call: the dispute in the event says
+ * all a row needs.
  */
 export const LOST_DISPUTE_PAGES = 3;
 

@@ -14,6 +14,8 @@ is("existing full export retained as destination",html.includes("Download everyt
 is("record is not a new sale",html.includes("1 commission record")&&!html.includes("1 sale"),true);
 is("the record's commission is shown as exactly $1",html.includes("1 commission record · $1 (USD)"),true);
 is("the row keeps the $10 base and 10% rate",html.includes("$10 before tax · 10%"),true);
+// The row's own commission, not only the summary: a row showing its base ($10) in the amount column fails here.
+is("the row's own commission is shown as exactly $1",html.includes(">$1</span>")&&!html.includes(">$10</span>"),true);
 is("legacy missing labels not invented",render([{...line,promotion:null}],1).includes("No campaign labels recorded"),true);
 is("partial tags preserve missing values",render([{...line,promotion:{source:"",campaign:"launch",content:""}}],1).includes("Source: Not recorded")&&render([{...line,promotion:{source:"",campaign:"launch",content:""}}],1).includes("Variant: Not recorded"),true);
 is("bonus and tier two are records",render([{...line,how:"bonus"},{...line,ref:"b",how:"tier2"}],2).includes("not additional purchases"),true);

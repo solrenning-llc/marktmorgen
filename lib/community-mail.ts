@@ -28,7 +28,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
-import { type BatchMessage, sendBatch } from "@/lib/email";
+import { type BatchMessage, sendListBatch } from "@/lib/email";
 import { CHECKED_BATCH_SIZE, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, canWrite, fromLine, mailDay, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { SITE_URL } from "@/lib/site-url";
 import { leadsKey } from "@/lib/contact-rules";
@@ -488,7 +488,13 @@ export async function advanceAnnouncement(
           });
           messages.push({ from: fromLine(store), to: member.e, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers });
         }
-        const outcome = await sendBatch(messages, `cm:${id}:${job.done}:${keys.length}`, { by: "monthly" });
+        const outcome = await sendListBatch(messages, `cm:${id}:${job.done}:${keys.length}`, { by: "monthly" });
+        if (outcome === "waiting") {
+          // Known not handed to any provider: it waits for the sender in the queue, never counted as a failure.
+          await release(store, recipients.length, day);
+          job = { ...job, status: "waiting", note: SENDER_WAIT_NOTE };
+          break;
+        }
         if (outcome !== "sent") {
           await release(store, recipients.length, day);
           const failures = job.failures + 1;

@@ -156,6 +156,10 @@ is("\"plan invoice\" opens the plan's own invoices", first("plan invoice"), "pla
 is("a bare \"receipt\" puts the buyers first, where a buyer's order receipt is", first("receipt"), "people");
 is("\"receipt\" still finds the plan's own invoices", ids("receipt").includes("plan-bills"), true);
 is("\"plan receipt\" opens the plan's own invoices", first("plan receipt"), "plan-bills");
+// Codex X6's LEVE (6997739189) and Claude 5's (6906524419): "plan" alone ties on the title word of three billing
+// actions; the creator's own plan comes first, never the invite to other creators.
+is("\"plan\" opens the plan's own invoices, never the invite first", ids("plan").slice(0, 3), ["plan-bills", "invite", "refund"]);
+is("\"my plan\" opens the plan's own invoices", first("my plan"), "plan-bills");
 is("\"companies\" opens the companies", first("companies"), "companies");
 is("\"company\" (singular) opens the companies", first("company"), "companies");
 is("\"b2b\" finds the companies", ids("b2b").includes("companies"), true);

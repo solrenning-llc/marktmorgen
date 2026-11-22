@@ -28,6 +28,11 @@ async function main() {
 
     redis.pipeline = async batch => batch.length === 1 && batch[0][0] === 'HGETALL' && batch[0][1] === key ? [[a.id, JSON.stringify(a), a.id, JSON.stringify(a)]] : native(batch);
     is('the form list with the same form twice is unknown, never a duplicate list', await outcome(() => readForms(stats)), 'unknown');
+
+    // Codex's LOW (review 5874638342, @9a4220f5d7): a readable record of B under A's hash field, with nothing doubled,
+    // is evidence of neither form, so the whole list is unknown, never a list that holds B in A's place.
+    redis.pipeline = async batch => batch.length === 1 && batch[0][0] === 'HGETALL' && batch[0][1] === key ? [[a.id, JSON.stringify(b)]] : native(batch);
+    is("B's record under A's field is unknown, never B listed for A", await outcome(() => readForms(stats)), 'unknown');
   } finally {
     redis.pipeline = native;
   }

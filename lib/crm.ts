@@ -1009,10 +1009,12 @@ export const CRM_LOCK_WAIT_MS = 2_000;
 /**
  * The most commands the store's CRM lock adds to the request that takes it (coordinator's LOW f on #2048, 18th
  * batch): takeLock (lib/redis-lock.ts) sends one SET NX per try, waiting 20 ms doubled up to 250 ms between tries,
- * and gives up past CRM_LOCK_WAIT_MS, so at most 11 tries; the release is one EVAL with its GET and DEL inside; and
- * the write's own script reads the lock once (GET). 11 + 3 + 1 = 15. tests/hubspot-import.test.ts counts the tries.
+ * and gives up past CRM_LOCK_WAIT_MS, so at most 11 tries; the release is one EVAL with its GET and DEL inside; the
+ * check that the lock is still ours before writing (stillHeld, holdLock in lib/redis-lock.ts) is one EVAL with its GET
+ * and EXPIRE inside (coordinator's LOW 2 on #2048, 22nd batch); and the write's own script reads the lock once (GET).
+ * 11 + 3 + 3 + 1 = 18. tests/hubspot-import.test.ts counts the tries.
  */
-export const CRM_LOCK_COMMANDS_MOST = 15;
+export const CRM_LOCK_COMMANDS_MOST = 18;
 
 /**
  * A change of pipelines or of the first pipeline's stages from the studio (savePipelineChange, writeStages) is counted

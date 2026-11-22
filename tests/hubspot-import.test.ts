@@ -21,15 +21,16 @@
  *     refused; pipelines changed meanwhile are never overwritten;
  *   - a role that may not import, and no session, are refused.
  */
+import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/import/hubspot/route";
 import { POST as CRM_POST } from "@/app/api/store/crm/route";
 import { crmAnswer } from "@/lib/crm-response";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { CRM_LOCKED_CHANGE_UNITS, CRM_LOCK_COMMANDS_MOST, CRM_LOCK_WAIT_MS, IMPORT_CRM_DEALS, dealCount, readDeal, readDeals, readOpportunityReview, readPipelines, savePipelineChange, takeCrmLock, writeDeal } from "@/lib/crm";
-import { MAX_DEALS, MAX_DEAL_CENTS, MAX_STAGES, PIPELINES_BY_TIER, allStages, parseDeal } from "@/lib/crm-rules";
+import { MAX_DEALS, MAX_DEAL_CENTS, MAX_STAGES, PIPELINES_BY_TIER, allStages, parseDeal, readFollowUp } from "@/lib/crm-rules";
 import { STAGE_PAST_REASON, pipelineRoomReason } from "@/lib/hubspot-csv";
-import { DEAL_JSON_MAX_BYTES, HUBSPOT_CHECK_BYTES, HUBSPOT_CHECK_COMMANDS, HUBSPOT_MAX_ROWS, HUBSPOT_PRINT_BYTES, HUBSPOT_SAVE_BYTES, HUBSPOT_SAVE_COMMANDS, HUBSPOT_IMPORT_WORDS, type HubSpotImportResult, hubSpotDealId, hubSpotDealNote, importHubSpotDeals } from "@/lib/hubspot-import";
+import { DEAL_JSON_MAX_BYTES, DEAL_MOVED_MAX_BYTES, HUBSPOT_CHECK_BYTES, HUBSPOT_CHECK_COMMANDS, HUBSPOT_MAX_ROWS, HUBSPOT_PRINT_BYTES, HUBSPOT_SAVE_BYTES, HUBSPOT_SAVE_COMMANDS, HUBSPOT_IMPORT_WORDS, type HubSpotImportResult, hubSpotDealId, hubSpotDealNote, importHubSpotDeals } from "@/lib/hubspot-import";
 import { takeImportRows } from "@/lib/imports";
 import { IMPORT_ALLOWANCES, IMPORT_WORST_BYTES_PER_ROW } from "@/lib/import-limits";
 import { LockBusyError, releaseLock } from "@/lib/redis-lock";
@@ -636,14 +637,21 @@ async function main(): Promise<void> {
   const heavy = await paidStore("hubsheavy");
   const heavyId = heavy.store.statsId!;
   const heavyStages = allStages(await readPipelines(heavyId));
-  const fat = (n: number) => "\u20ac".repeat(n);
-  const quoted = `${'"'.repeat(64)}@${'"'.repeat(186)}."""`;
+  // Quotes, which a stored deal keeps as two bytes and the database moves as four (DEAL_MOVED_MAX_BYTES), the most moved.
+  const fat = (n: number) => '"'.repeat(n);
+  const wideText = (n: number) => "\u20ac".repeat(n);
+  // 254 characters, the most an address keeps (parseDeal; readFollowUp refuses a longer assignee, which would drop the
+  // deal's next action with it): 64, "@", 185, "." and 3.
+  const quoted = `${'"'.repeat(64)}@${'"'.repeat(185)}."""`;
   const fatDeals = Array.from({ length: MAX_DEALS }, (_, i) => parseDeal({
     id: hubSpotDealId(String(8000 + i)), title: fat(90), email: quoted, cents: MAX_DEAL_CENTS, stage: heavyStages[0].id,
     note: `${hubSpotDealNote(String(8000 + i), "", false)}\n${fat(480)}`, nextAction: fat(200), dueDate: "2026-12-31", assignee: quoted,
     formResponseRef: "f".repeat(64), createdAt: Number.MAX_SAFE_INTEGER, updatedAt: Number.MAX_SAFE_INTEGER,
   }, heavyStages)!);
-  is("control: every deal reads at the most a stored deal weighs, its addresses kept", [fatDeals.every((d) => Buffer.byteLength(JSON.stringify(d)) <= DEAL_JSON_MAX_BYTES), fatDeals[0].email.length, Math.max(...fatDeals.map((d) => Buffer.byteLength(JSON.stringify(d))))], [true, 254, Math.max(...fatDeals.map((d) => Buffer.byteLength(JSON.stringify(d))))]);
+  is("control: every deal reads at the most a stored deal weighs, its addresses and next action kept", [fatDeals.every((d) => Buffer.byteLength(JSON.stringify(d)) <= DEAL_JSON_MAX_BYTES), fatDeals[0].email.length, fatDeals[0].assignee?.length, fatDeals[0].nextAction?.length, Math.max(...fatDeals.map((d) => Buffer.byteLength(JSON.stringify(d))))], [true, 254, 254, 200, Math.max(...fatDeals.map((d) => Buffer.byteLength(JSON.stringify(d))))]);
+  const movedEach = fatDeals.map((d) => Buffer.byteLength(JSON.stringify(JSON.stringify(d))));
+  console.log("A deal at every cap in quotes, kept and moved", JSON.stringify([Buffer.byteLength(JSON.stringify(fatDeals[0])), Math.max(...movedEach)]));
+  is("and each moves at most DEAL_MOVED_MAX_BYTES through the database, more than it weighs", [movedEach.every((m) => m <= DEAL_MOVED_MAX_BYTES), Math.max(...movedEach) > DEAL_JSON_MAX_BYTES], [true, true]);
   await redis.pipeline([["HSET", `nl:crm:deals:${heavyId}`, ...fatDeals.flatMap((d) => [d.id, JSON.stringify(d)])]]);
   const heavyReal = redis.pipeline.bind(redis);
   let heavyCommands = 0;
@@ -676,6 +684,37 @@ async function main(): Promise<void> {
     is("it is read, every text field well formed", [Boolean(loose), [loose.title, loose.note, loose.nextAction ?? ""].every((t) => t.isWellFormed())], [true, true]);
     is("and it weighs at most DEAL_JSON_MAX_BYTES", bytes <= DEAL_JSON_MAX_BYTES, true);
     is("a lone surrogate is the replacement character, a whole pair is kept", [loose.title.startsWith("\ufffd"), "a\ud83d\ude00b".length === parseDeal({ id: hubSpotDealId("8901"), title: "a\ud83d\ude00b", stage: heavyStages[0].id }, heavyStages)!.title.length, parseDeal({ id: hubSpotDealId("8902"), title: "a\ud83d\ude00b", stage: heavyStages[0].id }, heavyStages)!.title], [true, true, "a\ud83d\ude00b"]);
+  }
+
+  part("Coordinator's MEDIUM on #2048 (22nd batch): a deal whose two addresses are at 3 bytes a character still weighs at most DEAL_JSON_MAX_BYTES");
+  {
+    // The address rule takes any character but a space and "@": a Chinese one is 3 bytes in JSON, as the replacement
+    // character a lone surrogate becomes. Every text field at its cap, as in the deal above.
+    const wide = `${"\u4e2d".repeat(64)}@${"\u4e2d".repeat(185)}.\u4e2d\u4e2d\u4e2d`;
+    const looseAt = `${"\ud800".repeat(64)}@${"\ud800".repeat(185)}.\ud800\ud800\ud800`;
+    const atCaps = (email: string, assignee: string) => parseDeal({
+      id: hubSpotDealId("8950"), title: wideText(90), email, cents: MAX_DEAL_CENTS, stage: heavyStages[0].id,
+      note: `${hubSpotDealNote("8950", "", false)}\n${wideText(480)}`, nextAction: wideText(200), dueDate: "2026-12-31", assignee,
+      formResponseRef: "f".repeat(64), createdAt: Number.MAX_SAFE_INTEGER, updatedAt: Number.MAX_SAFE_INTEGER,
+    }, heavyStages);
+    const cases = [[wide, wide], [quoted, looseAt], [wide, looseAt], [looseAt, looseAt]].map(([email, assignee]) => atCaps(email, assignee));
+    is("each is read with both addresses kept", cases.map((d) => [Boolean(d), d?.email.length, d?.assignee?.length]), cases.map(() => [true, 254, 254]));
+    is("a lone surrogate in the assignee is the replacement character, as in every other text", cases.map((d) => [d!.email.isWellFormed(), d!.assignee!.isWellFormed()]), cases.map(() => [true, true]));
+    const weights = cases.map((d) => Buffer.byteLength(JSON.stringify(d)));
+    console.log("A deal at every cap, addresses at 3 bytes a character", JSON.stringify(weights));
+    is("and each weighs at most DEAL_JSON_MAX_BYTES", weights.every((w) => w <= DEAL_JSON_MAX_BYTES), true);
+    is("an assignee with a control character, which JSON writes as 6 bytes and no address has, is refused", [readFollowUp({ assignee: "a\u0001b@example.com" }).ok, readFollowUp({ assignee: "ab@example.com" }).ok], [false, true]);
+  }
+
+  part("Coordinator's LOW 4 on #2048 (22nd batch): a pipeline and a stage with a lone surrogate match the ones they made on the next import");
+  {
+    const odd = await paidStore("hubsoddname");
+    const file = { header: HEADER, rows: [row("8960", "One", "Step \ud800", "Team \udc00")] };
+    const first = await call({ action: "save", ...file }, odd.session);
+    is("control: the first import makes the pipeline and its stage", [first.status, first.body.summary?.added, first.body.summary?.pipelinesCreated?.length], [200, 1, 1]);
+    const again = await call({ action: "save", header: HEADER, rows: [row("8961", "Two", "Step \ud800", "Team \udc00")] }, odd.session);
+    is("the next import of the same names makes no stage and no pipeline", [again.status, again.body.summary?.added, again.body.summary?.pipelinesCreated, again.body.summary?.stagesCreated], [200, 1, [], []]);
+    is("and the store has one pipeline of that name", (await readPipelines(odd.store.statsId!)).filter((p) => p.name === "Team \ufffd").length, 1);
   }
 
   part("Coordinator's MEDIUM 1 on #2048 (18th batch): a file whose deals are all here takes none of the month's rows");
@@ -720,7 +759,7 @@ async function main(): Promise<void> {
     const wide = await measured(() => call({ action: "check", header: HEADER, rows: both }, heavy.session));
     console.log("HubSpot dry run, every address", JSON.stringify({ commands: wide.commands, bytes: wide.bytes }));
     is("refused for the store's deals, after reading them", wide.out.body.error, "too_many");
-    is("within HUBSPOT_CHECK_BYTES and HUBSPOT_CHECK_COMMANDS, every print counted", [wide.bytes <= HUBSPOT_CHECK_BYTES, wide.commands <= HUBSPOT_CHECK_COMMANDS, HUBSPOT_CHECK_BYTES >= MAX_DEALS * DEAL_JSON_MAX_BYTES + HUBSPOT_MAX_ROWS * HUBSPOT_PRINT_BYTES], [true, true, true]);
+    is("within HUBSPOT_CHECK_BYTES and HUBSPOT_CHECK_COMMANDS, every print counted", [wide.bytes <= HUBSPOT_CHECK_BYTES, wide.commands <= HUBSPOT_CHECK_COMMANDS, HUBSPOT_CHECK_BYTES >= MAX_DEALS * DEAL_MOVED_MAX_BYTES + HUBSPOT_MAX_ROWS * HUBSPOT_PRINT_BYTES], [true, true, true]);
   }
 
   part("Coordinator's LOWs b and c on #2048 (18th batch): a save that reads everything and writes nothing stays within HUBSPOT_SAVE_COMMANDS and HUBSPOT_SAVE_BYTES");
@@ -731,7 +770,7 @@ async function main(): Promise<void> {
     console.log("HubSpot save at its worst", JSON.stringify({ commands: fatSave.commands, bytes: fatSave.bytes }));
     is("answered: every deal already here, nothing added", [fatSave.out.status, fatSave.out.body.summary?.added, fatSave.out.body.summary?.alreadyThere], [200, 0, MAX_DEALS]);
     is("within HUBSPOT_SAVE_COMMANDS and HUBSPOT_SAVE_BYTES", [fatSave.commands <= HUBSPOT_SAVE_COMMANDS, fatSave.bytes <= HUBSPOT_SAVE_BYTES], [true, true]);
-    is("each new deal's write past its row is priced: HUBSPOT_SAVE_BYTES holds MAX_DEALS of them over HUBSPOT_CHECK_BYTES", HUBSPOT_SAVE_BYTES - HUBSPOT_CHECK_BYTES >= MAX_DEALS * Math.max(0, DEAL_JSON_MAX_BYTES - IMPORT_WORST_BYTES_PER_ROW), true);
+    is("each new deal's write past its row is priced: HUBSPOT_SAVE_BYTES holds MAX_DEALS of them over HUBSPOT_CHECK_BYTES", HUBSPOT_SAVE_BYTES - HUBSPOT_CHECK_BYTES >= MAX_DEALS * Math.max(0, DEAL_MOVED_MAX_BYTES - IMPORT_WORST_BYTES_PER_ROW), true);
   }
 
   part("Coordinator's LOW f on #2048 (18th batch): the CRM lock adds at most CRM_LOCK_COMMANDS_MOST commands, within one more studio request");
@@ -741,9 +780,16 @@ async function main(): Promise<void> {
     const holding = await takeCrmLock(lockId);
     const waited = await measured(async () => { try { await takeCrmLock(lockId); return "taken"; } catch (error) { return error instanceof LockBusyError ? "busy" : "other"; } });
     await releaseLock(holding);
-    // Every try is one SET; the release and the write's own look at the lock are four more.
+    // Every try is one SET. Then, counted from lib/redis-lock.ts's own scripts, each an EVAL and the calls inside it:
+    // the check that the lock is still ours before writing (EXTEND, from holdLock, which writeImport and writePipelines
+    // make through stillHeld: coordinator's LOW 2 on #2048, 22nd batch), the release (RELEASE), and the write's own
+    // look at the lock (one GET inside its script).
+    const lockSource = readFileSync("lib/redis-lock.ts", "utf8");
+    const scriptCalls = (name: string) => (lockSource.match(new RegExp(`const ${name} = '([^']*)'`))?.[1].match(/redis\.call\(/g) ?? []).length;
+    const around = (1 + scriptCalls("EXTEND")) + (1 + scriptCalls("RELEASE")) + 1;
     is("a lock held elsewhere is waited for, then busy", waited.out, "busy");
-    is("its tries, the release and the write's look fit CRM_LOCK_COMMANDS_MOST", waited.commands + 4 <= CRM_LOCK_COMMANDS_MOST, true);
+    is("the check before writing and the release are three commands each, with the write's look seven", [scriptCalls("EXTEND"), scriptCalls("RELEASE"), around], [2, 2, 7]);
+    is("its tries, the check, the release and the write's look fit CRM_LOCK_COMMANDS_MOST", [waited.commands + around <= CRM_LOCK_COMMANDS_MOST, CRM_LOCK_COMMANDS_MOST], [true, 18]);
     is("which fits the more studio requests a change counts (twenty commands each)", [CRM_LOCK_COMMANDS_MOST <= 20 * (CRM_LOCKED_CHANGE_UNITS - 1), CRM_LOCKED_CHANGE_UNITS], [true, 3]);
   }
 

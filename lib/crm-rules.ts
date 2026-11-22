@@ -299,8 +299,11 @@ export function readFollowUp(raw: Record<string, unknown>): { ok: true; value: F
   }
   if (raw.assignee !== undefined) {
     if (typeof raw.assignee !== "string") return { ok: false, error: "assignee" };
-    const email = raw.assignee.trim().toLowerCase();
-    if (email && (email.length > 254 || !EMAIL.test(email))) return { ok: false, error: "assignee" };
+    // Well formed, as every other text of a deal (coordinator's MEDIUM on #2048, 22nd batch): a lone surrogate, which
+    // JSON writes as 6 bytes, is the replacement character, and a control character, which JSON writes as 6 too and
+    // no address has, is refused, so a stored deal stays within DEAL_JSON_MAX_BYTES (lib/hubspot-import.ts).
+    const email = wellFormed(raw.assignee.trim().toLowerCase());
+    if (email && (email.length > 254 || /[\u0000-\u001f\u007f]/.test(email) || !EMAIL.test(email))) return { ok: false, error: "assignee" };
     out.assignee = email;
   }
   if (out.dueDate && !out.nextAction) return { ok: false, error: "followup" };

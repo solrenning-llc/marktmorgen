@@ -2531,8 +2531,10 @@ export const COST_LINES: CostLine[] = [
       // with its finish written only over the one read and, at the start, an old upload given up at an end's worst.
       // A HubSpot deals save is one of these starts too (#2048), reading what a dry run reads before its rows are taken
       // and the CRM lock (HUBSPOT_SAVE_COMMANDS, HUBSPOT_SAVE_BYTES): each start is priced at the dearer of the two
-      // (coordinator's LOWs b and c on #2048, 18th batch).
-      const starts = a.starts * Math.max(request("light", 20 + JOB_WRITE_IF_EXTRA_COMMANDS + IMPORT_END_EXTRA_COMMANDS + HELD_UPLOAD_SWEEP_COMMANDS), request("heavy", HUBSPOT_SAVE_COMMANDS, HUBSPOT_SAVE_BYTES));
+      // (coordinator's LOWs b and c on #2048, 18th batch). The save is a "write" (5 s): it may wait up to
+      // CRM_LOCK_WAIT_MS (2 s) for the lock, reads megabytes and writes up to MAX_DEALS deals, more than a "heavy" (2 s,
+      // a body of up to a megabyte) holds (coordinator's LOW 3 on #2048, 22nd batch).
+      const starts = a.starts * Math.max(request("light", 20 + JOB_WRITE_IF_EXTRA_COMMANDS + IMPORT_END_EXTRA_COMMANDS + HELD_UPLOAD_SWEEP_COMMANDS), request("write", HUBSPOT_SAVE_COMMANDS, HUBSPOT_SAVE_BYTES));
       // A step's one give-back (its end, or a send tried again) never below zero.
       // A members step's invitations are written only to memberships not marked removed: one MGET more inside its script (Claude 7 on #3473).
       const steps = a.steps * request("step", 10 + GIVE_BACK_FLOOR_EXTRA_COMMANDS + INVITE_GONE_READ_COMMANDS);
@@ -2576,7 +2578,9 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: (tier) => {
       const a = IMPORT_ALLOWANCES[tier];
       // A check is a ClickFunnels dry run or a HubSpot one (#2048, the same "import-preview-month"): each at the dearer.
-      return a.checks * Math.max(request("heavy", 8 + 6, BATCH_BYTES), request("heavy", HUBSPOT_CHECK_COMMANDS, HUBSPOT_CHECK_BYTES))
+      // A HubSpot dry run reads megabytes (every deal the file names, whole), so it is a "write" too, not a "heavy"
+      // (coordinator's LOW 3 on #2048, 22nd batch).
+      return a.checks * Math.max(request("heavy", 8 + 6, BATCH_BYTES), request("write", HUBSPOT_CHECK_COMMANDS, HUBSPOT_CHECK_BYTES))
         + a.buyerChecks * request("heavy", 506 + 6, BATCH_BYTES)
         + a.pageReads * request("heavy", 4, 2 * MAX_TRIMMED_PAGE_CHARS)
         + a.funnelChecks * request("heavy", 29, 10 * MAX_PAGE_BYTES)
@@ -2586,7 +2590,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/import-limits.ts", names: ["IMPORT_ALLOWANCES"] },
       { file: "app/api/store/import/route.ts", names: ["import-preview-month", "import-preview-buyers-month"] },
       { file: "app/api/store/import/hubspot/route.ts", names: ["import-preview-month"] },
-      { file: "lib/hubspot-import.ts", names: ["HUBSPOT_CHECK_COMMANDS", "HUBSPOT_CHECK_BYTES", "DEAL_JSON_MAX_BYTES", "HUBSPOT_PRINT_BYTES", "HUBSPOT_MAX_ROWS"] },
+      { file: "lib/hubspot-import.ts", names: ["HUBSPOT_CHECK_COMMANDS", "HUBSPOT_CHECK_BYTES", "DEAL_JSON_MAX_BYTES", "DEAL_MOVED_MAX_BYTES", "HUBSPOT_PRINT_BYTES", "HUBSPOT_MAX_ROWS"] },
       { file: "app/api/store/import/funnel/route.ts", names: ["import-cf-page-month", "import-cf-plan-month", "import-cf-save-month"] },
       { file: "docs/clickfunnels-import.md", names: ["Worst-case commands per call"] },
     ],

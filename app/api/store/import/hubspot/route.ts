@@ -22,8 +22,9 @@ import { HUBSPOT_MAX_CELL, HUBSPOT_MAX_COLUMNS, HUBSPOT_MAX_ROWS, type HubSpotFi
  * other imports' are; `currency` is the one the creator says the file's
  * amounts are in, when the file does not say: a three-letter code, or it is
  * taken as not said. A dry run counts as one of the
- * month's import checks, a save as one of its imports started and every row
- * it carries against the month's rows (lib/import-limits.ts).
+ * month's import checks, a save as one of its imports started and, against
+ * the month's rows, only the deals that come in, with the file's bytes in the
+ * same share (never fewer than IMPORT_MIN_ROWS_PER_UPLOAD; lib/import-limits.ts).
  */
 export const maxDuration = 60;
 

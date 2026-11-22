@@ -33,7 +33,7 @@
  *
  * Pure and browser-safe: the studio's screen and the server read the same.
  */
-import { MAX_DEAL_CENTS, MAX_DEAL_TITLE, MAX_DEALS, MAX_PIPELINE_NAME, MAX_PIPELINES, MAX_STAGE_NAME, MAX_STAGES, FIRST_PIPELINE_NAME, type StageKind } from "@/lib/crm-rules";
+import { MAX_DEAL_CENTS, MAX_DEAL_TITLE, MAX_DEALS, MAX_PIPELINE_NAME, MAX_PIPELINES, MAX_STAGE_NAME, MAX_STAGES, FIRST_PIPELINE_NAME, type StageKind, wellFormed } from "@/lib/crm-rules";
 import { decimalsOf } from "@/lib/money";
 
 /** The two lists HubSpot exports that this reads. */
@@ -87,12 +87,18 @@ function columnOf(header: readonly string[], label: string): number {
   return header.findIndex((h) => squash(h) === want);
 }
 
-/** One line, no control characters, spaces collapsed. Never shortened. */
+/**
+ * One line, no control characters, spaces collapsed, a lone surrogate the replacement character, as the CRM keeps it
+ * (wellFormed, lib/crm-rules.ts), so a pipeline or stage named in the file matches the one it made on the next import
+ * (coordinator's LOW 4 on #2048, 22nd batch). Never shortened.
+ */
 export const oneLine = (value: string | undefined) =>
-  (value ?? "")
-    .replace(/[\u0000-\u001f\u007f]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  wellFormed(
+    (value ?? "")
+      .replace(/[\u0000-\u001f\u007f]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
 
 /**
  * Which HubSpot list a file was exported from, by its English labels:

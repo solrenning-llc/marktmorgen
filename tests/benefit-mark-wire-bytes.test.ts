@@ -1,21 +1,27 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import type { Store } from "@/lib/store";
-import { giveBenefit } from "@/lib/tier-benefits";
+import * as benefits from "@/lib/tier-benefits";
+const { giveBenefit } = benefits;
+const fromBase64 = (benefits as { fromBase64?: (v: unknown) => string | null }).fromBase64 ?? ((): string | null => null);
 import { MARK_BY_MAX, markableBy } from "@/lib/tier-benefit-rules";
-import { store as redis } from "./redis-stub";
+import { store as redis, redisPipelineBase64 } from "./redis-stub";
 import { BENEFIT_MARK_VALUE_BYTES } from "./plan-cost-registry";
 
 /**
  * BENEFIT_MARK_VALUE_BYTES is what one mark costs on the wire when readOwedMarks reads it back with HMGET
- * (lib/tier-benefits.ts): the stored `{"at":<seconds>,"by":"<address>"}`, sent back by the database as a JSON string
- * inside its JSON reply, so every character is escaped twice (audit cd8d). Before this, the address was whatever
- * normaliseEmail kept, up to 320 characters: a control character such as U+0001 (not whitespace, so trim() keeps it)
- * is stored as `\u0001` and comes back as `\\u0001`, 7 bytes, and the worst mark measured 2274 bytes against the 672
- * declared. Now giveBenefit writes only an address that markableBy accepts, checked before anything is read or
- * counted: what sign-in accepts, less what costs more on the wire (controls, lone surrogates, quote, backslash, and
- * <, > and & that an HTML-safe encoder writes as <), so an accented address still marks (coordinator cd33). The
- * dearest character left is 3 bytes for one UTF-16 unit. The seconds are counted at 11 digits.
+ * (lib/tier-benefits.ts), audit cd8d. Before, the address on a mark was whatever normaliseEmail kept, up to 320
+ * characters, and the mark was read as text: a control character such as U+0001 (not whitespace, so trim() keeps it)
+ * is kept as `\u0001` and crossed as `\\u0001`, 7 bytes, and the worst mark measured 2274 bytes against the 672
+ * declared. Now:
+ * - giveBenefit writes only an address markableBy accepts (what sign-in accepts, less controls, lone surrogates, quote,
+ *   backslash, <, > and &), checked before anything is read or counted, so an accented address still marks
+ *   (coordinator cd33);
+ * - the marks are read in base64 (coordinator 6800, after Claude 6 UoHAG's MEDIUM: nothing dated says the database
+ *   sends non-ASCII text unescaped), so a mark crosses as 4 bytes for every 3 kept, plus its quotes and comma, whatever
+ *   the encoder does with text.
+ * The seconds are counted at 11 digits.
  */
 const at = 99_999_999_999;
 let checks = 0;
@@ -25,15 +31,22 @@ function check(name: string, run: () => void | Promise<void>) {
     (error) => { console.error(`FAIL ${name}`, error); process.exitCode = 1; },
   );
 }
+const kept = (by: string) => JSON.stringify({ at, by });
+/** One mark as readOwedMarks reads it (HMGET, in base64): its value's bytes on the wire, with its quotes and a comma. */
 async function wireBytes(key: string, by: string): Promise<number> {
-  await redis.pipeline([["HSET", key, "f", JSON.stringify({ at, by })]]);
-  const [reply] = await redis.pipeline([["HMGET", key, "f"]]);
-  return Buffer.byteLength(JSON.stringify((reply as unknown[])[0]));
+  await redis.pipeline([["HSET", key, "f", kept(by)]]);
+  const [reply] = await redisPipelineBase64([["HMGET", key, "f"]]);
+  const value = (reply as unknown[])[0];
+  assert.equal(fromBase64(value), kept(by), "the base64 reply decodes to what was kept");
+  return Buffer.byteLength(JSON.stringify(value)) + 1;
 }
-/** An HTML-safe JSON encoder (Go's encoding/json by default) also writes <, >, &, U+2028 and U+2029 as \uXXXX. */
-const htmlSafe = (s: string) => s.replace(/[<>&\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
-const wireOf = (by: string) => Buffer.byteLength(htmlSafe(JSON.stringify(JSON.stringify({ at, by }))));
-/** An address of `ch` that fills MARK_BY_MAX UTF-16 units: `ch…@ch.chch…`. */
+/** An encoder that writes <, >, & and every non-ASCII UTF-16 unit of a text as \uXXXX (HTML-safe and ASCII-only). */
+const escaping = (s: string) => s.replace(/[<>&\u0080-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+/** The same mark read as text under that encoder. */
+const asText = (by: string) => Buffer.byteLength(escaping(JSON.stringify(kept(by)))) + 1;
+/** The same mark read in base64 under that encoder: base64 is ASCII, so nothing in it is escaped. */
+const asBase64 = (by: string) => Buffer.byteLength(escaping(JSON.stringify(Buffer.from(kept(by), "utf8").toString("base64")))) + 1;
+/** An address of `ch` that fills MARK_BY_MAX UTF-16 units: `ch...@ch.chch...`. */
 function fill(ch: string): string {
   const units = Math.floor((MARK_BY_MAX - 2) / ch.length);
   const head = Math.max(1, units - 2);
@@ -45,57 +58,72 @@ async function main() {
     assert.equal(MARK_BY_MAX, MAX_EMAIL_LENGTH);
   });
 
-  // Accepted: what sign-in accepts and costs at most 3 bytes a UTF-16 unit on the wire.
-  const accepted: [string, string][] = [["plain ASCII", "a"], ["accented letter", "é"], ["ideograph", "\u4e2d"], ["astral (emoji)", "\u{1f600}"]];
+  // Accepted: what sign-in accepts and is kept in at most 3 bytes of UTF-8 a UTF-16 unit.
+  const accepted: [string, string][] = [["plain ASCII", "a"], ["accented letter", "\u00e9"], ["ideograph", "\u4e2d"], ["astral (emoji)", "\u{1f600}"]];
   for (const [name, ch] of accepted) {
     const by = fill(ch);
     await check(`an address of ${name} is markable`, () => {
       assert.ok(by.length <= MARK_BY_MAX);
       assert.equal(markableBy(normaliseEmail(by)), true, by);
     });
-    await check(`a mark of ${name} stays inside BENEFIT_MARK_VALUE_BYTES, under JSON.stringify and an HTML-safe encoder`, async () => {
+    await check(`a mark of ${name} read in base64 stays inside BENEFIT_MARK_VALUE_BYTES, under any encoder`, async () => {
       const bytes = await wireBytes(`nl:tben:given:test:${name}`, by);
-      console.log(`MEASURE ${name}: ${bytes} bytes (HTML-safe ${wireOf(by)}); declared ${BENEFIT_MARK_VALUE_BYTES}`);
+      console.log(`MEASURE ${name}: ${bytes} bytes in base64 (${asBase64(by)} under an escaping encoder; as text there ${asText(by)}); declared ${BENEFIT_MARK_VALUE_BYTES}`);
       assert.ok(bytes <= BENEFIT_MARK_VALUE_BYTES, `${bytes} > ${BENEFIT_MARK_VALUE_BYTES}`);
-      assert.ok(wireOf(by) <= BENEFIT_MARK_VALUE_BYTES, `${wireOf(by)} > ${BENEFIT_MARK_VALUE_BYTES}`);
+      assert.equal(asBase64(by), bytes, "an escaping encoder leaves base64 as it is");
     });
   }
   await check("a real accented address marks", () => {
-    assert.equal(markableBy(normaliseEmail("José@Exemplo.com.br")), true);
+    assert.equal(markableBy(normaliseEmail("Jos\u00e9@Exemplo.com.br")), true);
   });
-  await check("the declared value is the worst mark that can be written, no higher than needed", async () => {
-    const worst = fill("\u4e2d");
-    assert.equal(worst.length, MARK_BY_MAX);
-    assert.equal(await wireBytes("nl:tben:given:test:worst", worst), BENEFIT_MARK_VALUE_BYTES);
-  });
-  await check("no markable character costs more than 3 bytes a UTF-16 unit, even under an HTML-safe encoder", () => {
-    const empty = Buffer.byteLength(htmlSafe(JSON.stringify(JSON.stringify(""))));
+  await check("no markable character is kept in more than 3 bytes of UTF-8 a UTF-16 unit", () => {
     for (let code = 0x21; code <= 0xffff; code += 1) {
       if (code >= 0xd800 && code <= 0xdfff) continue;
       const ch = String.fromCharCode(code);
       if (!markableBy(`a${ch}a@b.co`)) continue;
-      const cost = Buffer.byteLength(htmlSafe(JSON.stringify(JSON.stringify(ch)))) - empty;
-      assert.ok(cost <= 3, `U+${code.toString(16)} costs ${cost} bytes`);
+      const bytes = Buffer.byteLength(JSON.stringify(ch)) - 2;
+      assert.ok(bytes <= 3, `U+${code.toString(16)} is kept in ${bytes} bytes`);
     }
   });
+  await check("the worst mark kept is the size the registry builds on, and its base64 the declared value", async () => {
+    const worst = fill("\u4e2d");
+    assert.equal(worst.length, MARK_BY_MAX);
+    assert.equal(Buffer.byteLength(kept(worst)), 26 + 3 * (MARK_BY_MAX - 2) + 2);
+    assert.equal(await wireBytes("nl:tben:given:test:worst", worst), BENEFIT_MARK_VALUE_BYTES);
+  });
+  await check("read as text under an escaping encoder, the worst mark would cost more than declared (why it is read in base64)", () => {
+    assert.ok(asText(fill("\u4e2d")) > BENEFIT_MARK_VALUE_BYTES, `${asText(fill("\u4e2d"))}`);
+  });
+  await check("both readers of a person's marks ask for base64, never text", () => {
+    const source = readFileSync("lib/tier-benefits.ts", "utf8");
+    const readers = source.match(/redisPipeline\w*\(slice\.map\(\(p\) => \["(HGETALL|HMGET)", marksKey/g) ?? [];
+    assert.equal(readers.length, 2, "two readers of a person's marks");
+    for (const reader of readers) assert.ok(reader.startsWith("redisPipelineBase64("), reader);
+  });
+  await check("a reply that is not base64 text fails closed", () => {
+    for (const bad of ["not base64!", "abc", 12, null, ["YQ=="]]) assert.equal(fromBase64(bad), null, String(bad));
+    assert.equal(fromBase64(Buffer.from("{}").toString("base64")), "{}");
+  });
 
-  // Refused: each would cost more than declared, under JSON.stringify or an HTML-safe encoder.
-  const refused: [string, string][] = [
-    ["control U+0001", "\u0001"], ["C1 control U+0085", "\u0085"], ["lone surrogate", "\ud800"], ["quote", '"'], ["backslash", "\\"],
-    ["<", "<"], [">", ">"], ["&", "&"], ["line separator U+2028", "\u2028"],
+  // Refused. A control or a lone surrogate is kept as \uXXXX, 6 bytes, and would cost more than declared even in
+  // base64; a quote, a backslash, <, > and & stay refused as decided before (coordinator cd33, Claude 2 upbeat's LOW).
+  const refused: [string, string, boolean][] = [
+    ["control U+0001", "\u0001", true], ["C1 control U+0085", "\u0085", false], ["lone surrogate", "\ud800", true],
+    ["quote", '"', false], ["backslash", "\\", false], ["<", "<", false], [">", ">", false], ["&", "&", false],
+    ["line separator U+2028", "\u2028", false],
   ];
-  for (const [name, ch] of refused) {
+  for (const [name, ch, dear] of refused) {
     await check(`an address with a ${name} is not markable`, () => {
       assert.equal(markableBy(`a${ch}a@b.co`), false);
       assert.equal(markableBy(`${ch.repeat(240)}@b.co`), false);
     });
-    // A C1 control is refused as a control (an ASCII-only encoder writes it as \u0085), not for its size here.
-    if (name.startsWith("C1")) continue;
-    await check(`a mark of ${name} would cost more than declared (why it is refused)`, () => {
-      const bytes = wireOf(`${ch.repeat(MARK_BY_MAX - 5)}@b.co`);
-      console.log(`MEASURE ${name}: ${bytes} bytes`);
-      assert.ok(bytes > BENEFIT_MARK_VALUE_BYTES);
-    });
+    if (dear) {
+      await check(`a mark of ${name} would cost more than declared, even in base64 (why it is refused)`, () => {
+        const bytes = asBase64(`${ch.repeat(MARK_BY_MAX - 5)}@b.co`);
+        console.log(`MEASURE ${name}: ${bytes} bytes in base64`);
+        assert.ok(bytes > BENEFIT_MARK_VALUE_BYTES);
+      });
+    }
   }
   await check("an address over MARK_BY_MAX units is not markable", () => {
     assert.equal(markableBy(`${"a".repeat(MARK_BY_MAX - 4)}@b.co`), false);

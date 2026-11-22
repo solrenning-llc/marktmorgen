@@ -660,7 +660,9 @@ async function uncountRefunded(statsId: string, productId: string, review: Revie
   const dist = [...kept.dist] as Summary["dist"];
   dist[star] -= 1;
   const next: Summary = { ...kept, count: kept.count - 1, stars: kept.stars - review.rating, refunded: kept.refunded + 1, dist };
-  await redisPipeline([["HSET", summaryKey(statsId), productId, JSON.stringify(next)]]);
+  // Read exactly (rule 24): HSET answers 0 (a field kept again) or 1; anything else is not a confirmed write.
+  const [set] = repliesFor(await redisPipeline([["HSET", summaryKey(statsId), productId, JSON.stringify(next)]]), 1) ?? [undefined];
+  if (countOf(set) !== 0 && countOf(set) !== 1) throw new UnknownReplyError("a product's numbers after a refund");
 }
 
 /** A kept summary in its exact shape: six whole numbers, the distribution of five; anything else is null. */
@@ -742,9 +744,27 @@ export function setReply(statsId: string, productId: string, id: string, text: s
  * Marks as refunded every review a payment paid for, once Stripe says the
  * payment was given back in full. Returns how many changed.
  */
-export async function markRefunded(statsId: string, pi: string): Promise<number> {
+/** The month's payments are spent (lib/review-proof.ts): the payment is not marked, and the pass stops until next month. */
+export class PaymentsSpentError extends Error {
+  constructor() {
+    super("The month's payments for marking reviews are spent; the rest waits for next month.");
+  }
+}
+
+export async function markRefunded(
+  statsId: string,
+  pi: string,
+  /**
+   * Takes one of the month's payments before the marks, once the payment is known to have reviews (the refund
+   * sweep, REVIEW_REFUND_PAYMENTS_PER_MONTH): "spent" throws PaymentsSpentError with nothing marked. A payment with
+   * no review of ours is a row, not a payment, and takes none.
+   */
+  take?: () => Promise<"ok" | "spent">,
+): Promise<number> {
   if (!STATS_ID_PATTERN.test(statsId) || !pi) return 0;
   const members = await payMembers(statsId, pi);
+  if (members.length === 0) return 0;
+  if (take && (await take()) === "spent") throw new PaymentsSpentError();
   let changed = 0;
   for (const member of members) {
     const [productId, id] = member.split("|");

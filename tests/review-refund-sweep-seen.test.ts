@@ -66,7 +66,7 @@ async function main(): Promise<void> {
   part("A page of refunds is asked about with one command, not one a row");
   sent.length = 0;
   const marked = await markRefundedReviews(store, Date.now() + 60_000);
-  const seenKey = `nl:rev:refunds:seen:${statsId}`;
+  const seenKey = `nl:rev:refunds:seenat:${statsId}`;
   const smismember = sent.filter((c) => c[0] === "ZMSCORE" && c[1] === seenKey);
   const sismember = sent.filter((c) => c[0] === "SISMEMBER" && c[1] === seenKey);
   is("the three refunded reviews are marked", marked, 3);

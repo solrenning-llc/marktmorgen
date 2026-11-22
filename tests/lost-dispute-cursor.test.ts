@@ -108,7 +108,9 @@ async function main(): Promise<void> {
 
   part("The review job keeps its place too (inbox C4-21)");
   const statsId = "r".repeat(32);
-  const shop = { statsId, stripeAccountId: ACCOUNT, handle: "cursor-shop" } as unknown as Store;
+  // On Scale: the window holds TOTAL lost disputes, more payments than the Store plan's month allows the pass to
+  // mark (lib/review-proof.ts REVIEW_REFUND_PAYMENTS_PER_MONTH, the plan's orders); the cursor is what is tested.
+  const shop = { statsId, stripeAccountId: ACCOUNT, handle: "cursor-shop", tier: "scale" } as unknown as Store;
   const placeKey = `nl:rev:refunds:since:${statsId}`;
   await markRefundedReviews(shop, Date.now() + 60_000);
   const started = Number((await redis.pipeline([["GET", placeKey]]))[0]);
@@ -190,7 +192,7 @@ async function main(): Promise<void> {
 
   part("The review and call jobs leave a place they cannot move, and the refunds they read outlive it (reviews of #2158)");
   for (const [label, key, seen, run] of [
-    ["review", placeKey, `nl:rev:refunds:seen:${statsId}`, () => markRefundedReviews(shop, Date.now() + 60_000)],
+    ["review", placeKey, `nl:rev:refunds:seenat:${statsId}`, () => markRefundedReviews(shop, Date.now() + 60_000)],
     ["call", callsPlace, `nl:meet:rf:${noPayCalls}:seen`, () => syncMeetings(async (handle) => (handle === "cursor-nopay" ? noPayStore : null), Date.now() + 60_000, "https://marktmorgen.com")],
   ] as const) {
     // The closing events cannot be read, so the run ends unsure.

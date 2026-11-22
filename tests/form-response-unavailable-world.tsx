@@ -66,6 +66,8 @@ export async function readFlowStatsStrict(){return new Map();}
 export async function readFlowListStrict(){return [];}
 export function inTrial(){return false;}
 export function monthlyAllowance(){return state.emailAllowance;}
+// The month's exact email usage (main's email studio page, merged into #2857): none used, so the page builds as on main.
+export async function usedThisMonthExact(){return 0;}
 export async function usedThisMonth(){return 0;}
 export function healthId(){return 'synthetic-health';}
 export async function listHealth(){return null;}

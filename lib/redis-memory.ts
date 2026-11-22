@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { ASK_ERASE_BATCH } from "@/lib/erasure-rules";
 import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/path-board-rules";
+import { TAKE_SCRIPTS } from "@/lib/redis-memory-take";
+const sha1ForContactImport = (value: string) => createHash("sha1").update(value).digest("hex");
 
 /** lib/store-data.ts NOTES_TOTAL_FIELD: the room's one slot for every student's lesson notes (lib/lesson-notes.ts). */
 const NOTES_TOTAL_FIELD = "ln#";
@@ -249,7 +251,7 @@ export class MemoryRedis {
     // Redis checks command arity before looking up or changing any key.
     const minimum = name === "HSET" || name === "ZADD" ? 4
       : name === "DEL" || name === "MGET" ? 2
-      : ["HDEL", "SADD", "SREM", "ZREM", "LPUSH", "RPUSH", "HMGET"].includes(name) ? 3 : 0;
+      : ["HDEL", "SADD", "SREM", "ZREM", "LPUSH", "RPUSH", "HMGET", "ZMSCORE"].includes(name) ? 3 : 0;
     if (command.length < minimum || (name === "HSET" && command.length % 2 !== 0)) {
       throw new Error(`ERR wrong number of arguments for '${name.toLowerCase()}' command`);
     }
@@ -272,6 +274,36 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        if (key.startsWith("-- marktmorgen:contact-import:v1\n")) {
+          if (args[0] !== "4" || args.length <= 5 || (args.length - 5) % 6 !== 0) throw new Error("invalid contact import");
+          const [, contacts, erased, agreed, unsub, ...rows] = args;
+          for (const [i, path] of [contacts, erased, agreed, unsub].entries()) {
+            const type = this.run(["TYPE", path]);
+            if (type !== "none" && type !== (i < 2 ? "hash" : "string")) throw new Error("invalid contact import type");
+          }
+          for (const path of [agreed, unsub]) {
+            const n = this.run(["GET", path]);
+            if (n !== null && (typeof n !== "string" || !/^\d+$/.test(n) || !Number.isSafeInteger(Number(n)) || Number(n) > Number.MAX_SAFE_INTEGER - rows.length / 6)) throw new Error("invalid contact import count");
+          }
+          for (let i = 0; i < rows.length; i += 6) {
+            if (!["0", "1"].includes(rows[i + 4]) || !["0", "1"].includes(rows[i + 5])) throw new Error("invalid contact import flags");
+          }
+          const out: number[] = [];
+          let joined = 0, left = 0;
+          for (let i = 0; i < rows.length; i += 6) {
+            const [email, print, was, value, add, stop] = rows.slice(i, i + 6);
+            if (this.run(["HEXISTS", erased, print]) === 1) { out.push(-1); continue; }
+            const current = this.run(["HGET", contacts, email]);
+            // The stand-in's SHA-1 is provided by Node, exactly as redis.sha1hex.
+            const seen = typeof current === "string" ? sha1ForContactImport(current) : "";
+            if (seen !== was) { out.push(0); continue; }
+            this.run(["HSET", contacts, email, value]);
+            joined += Number(add); left += Number(stop); out.push(1);
+          }
+          if (joined) this.run(["INCRBY", agreed, joined]);
+          if (left) this.run(["INCRBY", unsub, left]);
+          return out;
+        }
         // lib/email-polls.ts POLL_VOTE: a vote and the poll's end in one step, the vote undone when its end did not set.
         if (key.startsWith("-- marktmorgen:email-poll-vote:v1\n") && args[0] === "1" && args.length === 5) {
           const [, hash, field, option, until] = args;
@@ -883,6 +915,21 @@ export class MemoryRedis {
           this.run(["EXPIRE", log, keep]);
           return 1;
         }
+        // lib/checkout-recovery.ts RECOVERY_ADMIT: a reminder's note and claims, only while the address is not erased.
+        if (key.startsWith("-- marktmorgen:recovery-admit:v1\n") && args[0] === "4" && args.length === 11) {
+          const [, prints, sent, once, carts, print, member, noteSeconds, sentSeconds, onceSeconds, claim] = args;
+          if (print !== "" && this.run(["HEXISTS", prints, print]) === 1) return 2;
+          if (this.run(["EXISTS", sent]) === 1 || this.run(["EXISTS", once]) === 1) return 0;
+          if (member !== "") {
+            const type = this.run(["TYPE", carts]);
+            if (type !== "none" && type !== "set") return -1;
+            this.run(["SADD", carts, member]);
+            this.run(["EXPIRE", carts, noteSeconds]);
+          }
+          this.run(["SET", sent, claim, "EX", sentSeconds]);
+          this.run(["SET", once, "1", "EX", onceSeconds]);
+          return 1;
+        }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
         // lib/store-allowance.ts GIVE_ALLOWANCE_BACK: a missing counter left missing, one never below zero, its expiry kept.
         if (key.startsWith("-- marktmorgen:allowance-give-back:v1\n") && args[0] === "1" && args.length === 3) {
@@ -967,6 +1014,11 @@ export class MemoryRedis {
             if ((record as { h?: unknown }).h === handle) return 0;
           }
           return this.run(["HDEL", handles, handle]);
+        }
+        // lib/learn.ts TAKE_OFF_IF: a refunded course taken off a ledger only while its entry is still the value read.
+        if (key.startsWith("-- marktmorgen:learn-take-off-if:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, ledger, field, held] = args;
+          return this.run(["HGET", ledger, field]) === held ? this.run(["HDEL", ledger, field]) : 0;
         }
         // lib/group-buy.ts REFUNDS_END: a pass over a store's refunds ended, its anchor and the account it is of in one step.
         if (key.startsWith("-- marktmorgen:group-refunds-end:v1\n") && args[0] === "4" && args.length === 7) {
@@ -1596,6 +1648,22 @@ export class MemoryRedis {
           const [, lock, token, seconds] = args;
           return this.run(["GET", lock]) === token ? this.run(["EXPIRE", lock, seconds]) : 0;
         }
+        // lib/auto-captions.ts COUNT_KEPT_ONCE: a case kept for a person counted only when its own mark is new.
+        if (key.startsWith("-- marktmorgen:auto-captions-count-kept:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, counts, mark, kind, seconds] = args;
+          if (this.run(["SET", mark, "1", "NX", "EX", seconds]) === null) return 0;
+          this.run(["HINCRBY", counts, kind, 1]);
+          this.run(["EXPIRE", counts, seconds]);
+          return 1;
+        }
+        // lib/auto-captions.ts MARK_KEPT: a request marked kept only while its record is still the one read, keeping its time to live.
+        if (key.startsWith("-- marktmorgen:auto-captions-kept:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, record, expected, next] = args;
+          if (this.run(["GET", record]) !== expected) return 0;
+          // Match SET KEEPTTL: no expiry extension or removal.
+          this.data.set(record, next);
+          return 1;
+        }
         // lib/mail-drafts.ts DRAFT_SET_HELD and DRAFT_DEL_HELD: a draft set or deleted only while its lease holds the writer's value.
         if (key.startsWith("-- marktmorgen:draft-set-held:v1\n") && args[0] === "2" && args.length === 6) {
           const [, drafts, lease, value, field, json] = args;
@@ -1904,6 +1972,25 @@ export class MemoryRedis {
           this.data.set(marker, "1");
           this.until.set(marker, this.now() + 3456000 * 1000);
           return 1;
+        }
+        // lib/page-funnel-store.ts SAVE_STORE_PAGE_FUNNEL: the store-live guard (v2: a store with an id's id key must hold its ref), then funnel-save:v1's body.
+        if (key.startsWith("-- marktmorgen:funnel-save-live:v3\n") && args[0] === "3" && args.length === 11) {
+          const [, target, live, erasing, id, body, max, mode, field, statsId, ref] = args;
+          if (this.run(["HGET", erasing, field]) !== null) return -4;
+          if (statsId === "") {
+            const held = this.run(["GET", live]);
+            if (held === null) return -4;
+            if (held !== ref) return -5;
+          } else {
+            const raw = this.run(["GET", live]);
+            if (raw === null) return -4;
+            if (typeof raw !== "string") throw new Error("WRONGTYPE funnel-save-live: the store's record");
+            let record: unknown;
+            try { record = JSON.parse(raw); } catch { return -3; }
+            if (!record || typeof record !== "object" || Array.isArray(record)) return -3;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return -4;
+          }
+          return this.run(["EVAL", `-- marktmorgen:funnel-save:v1\n`, "1", target, id, body, max, mode]);
         }
         if (key.startsWith("-- marktmorgen:funnel-save:v1\n") && args[0] === "1" && args.length === 6) {
           const target = args[1];
@@ -2629,6 +2716,18 @@ export class MemoryRedis {
           if (!this.until.has(target)) this.until.set(target, this.now() + Number(args[4]) * 1000);
           return 1;
         }
+        // lib/webhooks.ts SKIP_COUNT: the day's count of messages not kept, taken once a message: a message already
+        // counted (its mark) answers its place and counts nothing.
+        if (key.startsWith("-- marktmorgen:webhook-skip-count:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, day, mark, at] = args;
+          const had = this.run(["GET", mark]);
+          if (typeof had === "string") return Number(had);
+          const n = this.run(["INCR", day]);
+          this.run(["EXPIREAT", day, at]);
+          this.run(["SET", mark, String(n)]);
+          this.run(["EXPIREAT", mark, at]);
+          return n;
+        }
         if (key.startsWith("-- marktmorgen:crm-deal-save:v5\n") && ((args[0] === "1" && args.length === 6) || (args[0] === "2" && args.length === 9))) {
           if (args[0] === "2") {
             const held = this.run(["ZSCORE", args[2], args[7]]);
@@ -3311,8 +3410,12 @@ export class MemoryRedis {
           return taken;
         }
         // lib/campaign-landing-store.ts WRITE_LANDINGS and DROP_LANDINGS: a product's landings and their slot in one step.
-        if (key.startsWith("-- marktmorgen:landings-write:v2\n") && args[0] === "3" && args.length === 10) {
-          const [, room, target, gone, limit, month, slot, size, expected, json] = args;
+        if (key.startsWith("-- marktmorgen:landings-write:v3\n") && args[0] === "5" && args.length === 13) {
+          const [, room, target, gone, live, erasing, limit, month, slot, size, expected, json, field] = args;
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", live]) !== 1) return [4, 0];
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) !== 0) return [4, 0];
           if (this.run(["EXISTS", gone]) === 1) return [4, 0];
           const held = this.run(["GET", target]);
           if ((typeof held === "string" ? held : "") !== expected) return [3, 0];
@@ -3537,6 +3640,7 @@ export class MemoryRedis {
           return 1;
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
+        if (key.startsWith("-- marktmorgen:store-for-hit:v1\n") && args[0] === "1" && args.length === 5) return this.storeForHit(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
         if (key.startsWith("-- marktmorgen:order-write-if-new:v1\n")) return this.orderWriteIfNew(args);
         // lib/order-data.ts ORDER_WRITE_IF_STORE_LIVE: the ordinary measured write, only while the store id still
@@ -3681,6 +3785,15 @@ export class MemoryRedis {
           return removed;
         }
         if (key.startsWith("-- marktmorgen:meet-keep:v1\n")) return this.meetKeep(args);
+        // The take scripts and their kin, mirrored from the tests' stand-in (lib/redis-memory-take.ts), by the name on the
+        // script's first line, so `next dev` and the demo store run them too (#4969's Mobile render). Last, before the
+        // refusal: a script the chain above already runs is never taken here.
+        const takeName = /^-- marktmorgen:([a-z-]+:v\d+)\n/.exec(key)?.[1] ?? "";
+        if (Object.hasOwn(TAKE_SCRIPTS, takeName)) {
+          const count = Number(args[0]);
+          const rest = args.slice(1);
+          return TAKE_SCRIPTS[takeName]((command) => this.run(command), rest.slice(0, count), rest.slice(count));
+        }
         if (!key.startsWith("-- marktmorgen:form-opportunity:v1\n") || args[0] !== "1" || args.length !== 5) throw new Error("MemoryRedis: unsupported EVAL");
         const target = args[1];
         this.live(target);
@@ -4435,6 +4548,90 @@ export class MemoryRedis {
     if (value === null || value === undefined) return 0;
     if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) return null;
     return Number(value);
+  }
+
+  /**
+   * lib/store.ts STORE_FOR_HIT: the record's fields a count needs, decoded where the record is and answered alone, with
+   * whether the link and the product asked about are the store's. The same rules as the script, line for line.
+   */
+  private storeForHit(args: string[]): unknown {
+    const [recordKey, link, product, capText] = args;
+    const stored = this.run(["GET", recordKey]);
+    if (typeof stored !== "string") return null;
+    // A lone surrogate's escape is read as U+FFFD first, as the script does; one left would be refused, as Redis's
+    // cjson refuses it (JSON.parse alone would take it, and a test would pass where Redis does not).
+    const raw = stored.replace(/(\\+)u([dD][89a-fA-F][0-9a-fA-F]{2})/g, (whole, slashes: string) => (slashes.length % 2 === 1 ? `${slashes.slice(0, -1)}\\ufffd` : whole));
+    if (/(^|[^\\])(\\\\)*\\u[dD][89a-fA-F][0-9a-fA-F]{2}/.test(raw)) return "";
+    let r: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== "object") return "";
+      // A list decodes to a Lua table too, with none of the record's fields: answered as an empty record, as there.
+      r = Array.isArray(parsed) ? {} : (parsed as Record<string, unknown>);
+    } catch {
+      return "";
+    }
+    const cap = Number(capText);
+    const str = (v: unknown) => (typeof v === "string" && Buffer.byteLength(v) <= cap ? v : undefined);
+    const num = (v: unknown) => (typeof v === "number" ? v : undefined);
+    const safe = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(v);
+    const table = (v: unknown) => (v && typeof v === "object" ? (v as Record<string, unknown>) : null);
+    const out: Record<string, unknown> = {};
+    for (const k of ["handle", "name", "email", "sid", "statsId", "tier", "cycle", "subscriptionId", "planEndedAt"]) out[k] = str(r[k]);
+    out.extra = r.extra === true;
+    out.subscriptionActive = r.subscriptionActive === true;
+    out.trialEnds = num(r.trialEnds);
+    const p = table(r.period);
+    if (p) {
+      const period: Record<string, unknown> = { start: num(p.start), end: num(p.end) };
+      if (p.renews !== undefined) period.renews = typeof p.renews === "boolean" ? p.renews : 0;
+      if (p.funded !== undefined) period.funded = p.funded === true;
+      out.period = period;
+    }
+    if (r.allowanceAnchor !== undefined && r.allowanceAnchor !== null) {
+      const a = table(r.allowanceAnchor);
+      out.allowanceAnchor = a ? { subscriptionId: str(a.subscriptionId), start: num(a.start), end: num(a.end) } : { subscriptionId: "", start: 0, end: 0 };
+    }
+    out.affiliatesEnabled = table(r.affiliates)?.enabled === true;
+    out.linkKnown = false;
+    if (link !== "" && Array.isArray(r.links)) {
+      let kept = 0;
+      for (const entry of r.links) {
+        const l = table(entry);
+        if (!l || typeof l.id !== "string" || l.id === "" || typeof l.title !== "string" || l.title === "" || typeof l.url !== "string" || !(l.header === true || l.url !== "")) continue;
+        if (l.id === link) { out.linkKnown = true; break; }
+        kept += 1;
+        if (kept >= 100) break;
+      }
+    }
+    out.productKnown = false;
+    if (product !== "") {
+      const c = table(r.catalog);
+      const seen = new Set<string>();
+      let count = 0;
+      if (c && typeof c.id === "string" && /^[0-9a-f]{32}$/.test(c.id)) {
+        for (const item of Array.isArray(c.items) ? c.items : []) {
+          if (!Array.isArray(item) || !safe(item[0]) || seen.has(item[0])) continue;
+          seen.add(item[0]);
+          if (item[0] === product) { out.productKnown = true; break; }
+          if (item.slice(2).some((option) => safe(option) && option === product)) break;
+          count += 1;
+          if (count >= 2_000) break;
+        }
+      } else if (Array.isArray(r.products)) {
+        for (const entry of r.products) {
+          const one = table(entry);
+          if (!one || !safe(one.id) || seen.has(one.id) || typeof one.title !== "string" || one.title === "" || typeof one.priceCents !== "number" || !Number.isInteger(one.priceCents) || one.priceCents < 0) continue;
+          seen.add(one.id);
+          if (one.id === product) { out.productKnown = true; break; }
+          const options = Array.isArray(one.options) ? one.options : [];
+          if (options.some((option) => safe(table(option)?.id) && table(option)?.id === product)) break;
+          count += 1;
+          if (count >= 2_000) break;
+        }
+      }
+    }
+    return JSON.stringify(out);
   }
 
   private storeData(args: string[]): unknown {

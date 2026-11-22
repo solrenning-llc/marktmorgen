@@ -5,7 +5,7 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { MANAGE_TOKEN_PATTERN, grantOf } from "@/lib/membership-manage";
 import { offers } from "@/lib/leave-rules";
 import { countLeave, saidField } from "@/lib/leave-flow";
-import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;
 const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
@@ -47,7 +47,8 @@ export async function POST(request: NextRequest) {
   const page = new URLSearchParams({ token, sub: subscription });
   if (offers(store.leaving, why)) {
     page.set("why", why);
-    if ((await withinStore("manage-leave", `${clientAddress(request)}|${store.handle}`, 20, 600, store, "buyer")) && (await grantOf(store, token))) {
+    // A count that could not be read (unknown, rule 24) counts nothing, as past the limit does; the page is the same.
+    if ((await withinStore("manage-leave", `${clientAddress(request)}|${store.handle}`, 20, 600, store, "buyer").catch(unknownLimit)) === true && (await grantOf(store, token))) {
       await countLeave(store.statsId, saidField(why));
     }
   }

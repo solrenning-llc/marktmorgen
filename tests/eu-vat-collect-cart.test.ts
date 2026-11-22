@@ -154,7 +154,8 @@ async function main(): Promise<void> {
   is("no reviewed cost of receiving the VAT: refused, never zero", refusedUntouched(cartBody(), { costsCents: undefined }), ["refused", true]);
   is("a negative cost: refused", refusedUntouched(cartBody(), { costsCents: () => -1 }), ["refused", true]);
   is("no sourced rate for the country: refused", refusedUntouched(cartBody(), { country: "IT" }), ["refused", true]);
-  is("a UK cart in euros (no sterling rate): refused", refusedUntouched(cartBody(), { country: "GB" }), ["refused", true]);
+  // Since unit 7 HMRC's period rates are read; a month with no rate is given here as an empty table.
+  is("a UK cart in euros (no sterling rate): refused", refusedUntouched(cartBody(), { country: "GB", sterlingRates: [] }), ["refused", true]);
   is("the buyer's currency conversion live: refused", refusedUntouched(cartBody(), { buyerCurrencyLive: true }), ["refused", true]);
   const box = cartBody();
   box.set("allow_promotion_codes", "true");

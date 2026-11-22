@@ -74,7 +74,7 @@ async function main(): Promise<void> {
   async function member(name: string, handle: string): Promise<string> {
     const email = `${handle}@huntnotify.example`;
     const key = memberKey(email);
-    const record: Member = { k: key, e: email, n: name, h: handle, dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+    const record: Member = { k: key, e: email, n: name, h: handle, dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [] };
     await redis.pipeline([["HSET", `nl:cm:${cid}:m`, key, JSON.stringify(record)], ["HSET", `nl:cm:${cid}:h`, handle, key]]);
     return key;
   }

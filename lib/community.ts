@@ -89,6 +89,8 @@ import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
 import { type DmSetting, NO_DM, parseDmSetting } from "@/lib/community-dm";
 import { type ChatSetting, NO_CHAT, parseChatSetting } from "@/lib/community-chat";
 import { claimHandle } from "@/lib/community-mentions";
+import { parseMemberLinks } from "@/lib/member-links";
+import type { Social } from "@/lib/store-socials";
 import { type AboutSetting, NO_ABOUT_PAGE, parseAboutSetting } from "@/lib/community-about-setting";
 import { WRITE_ABOUT_IF } from "@/lib/product-about";
 
@@ -182,6 +184,12 @@ export type Member = {
   /** When they answered, in seconds; 0 until they have. */
   qa: number;
   /**
+   * Links to their own profiles on social networks, which they add
+   * themselves and which the directory shows only while they are listed
+   * (lib/member-links.ts, shownLinks). Empty until they add one.
+   */
+  s: Social[];
+  /**
    * "o" on a record written since 4 November 2026: made by an order (counted
    * in the orders' part, lib/order-data.ts) and grown in the members' slot
    * at what setProfile counts (countedMember), so deleting it gives each
@@ -190,6 +198,7 @@ export type Member = {
    */
   r?: "o";
 };
+
 
 export type CommunityImage = { path: string; w: number; h: number; alt: string };
 
@@ -446,6 +455,7 @@ function parseMember(raw: unknown): Member | null {
       q: Array.isArray(v.q) ? v.q.filter((a): a is string => typeof a === "string").map((a) => a.slice(0, MAX_ANSWER)).slice(0, MAX_QUESTIONS) : [],
       qa: typeof v.qa === "number" ? v.qa : 0,
       qq: Array.isArray(v.qq) ? v.qq.filter((a): a is string => typeof a === "string").map((a) => a.slice(0, MAX_QUESTION)).slice(0, MAX_QUESTIONS) : [],
+      s: parseMemberLinks(v.s),
       ...(v.r === "o" ? { r: "o" as const } : {}),
     };
   } catch {
@@ -466,7 +476,7 @@ function countedMember(member: Member): string {
 
 /** A member's record as touchMember first writes it (an order's write, lib/order-data.ts). */
 function firstMember(key: string, email: string, at: number): Member {
-  return { k: key, e: email, n: "", h: "", dir: false, mail: false, at, seen: at, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], r: "o" };
+  return { k: key, e: email, n: "", h: "", dir: false, mail: false, at, seen: at, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [], r: "o" };
 }
 
 /** What a member's name takes in the members' slot beside the record: the words it is found by and its handle. */
@@ -583,6 +593,13 @@ export async function readMembersExact(id: string, keys: string[]): Promise<Map<
   return out;
 }
 
+/**
+ * How many times one change to a member's record may add to what it already holds in the store's data room, after
+ * its first reservation, when its set is tried again (patchMember): one. Past it the change fails as a record that
+ * kept changing, so the room calls of one profile action stay at most three whatever the retries.
+ */
+export const MEMBER_ROOM_TOP_UPS = 1;
+
 /** Writes a member's record only if it is still exactly what was read. */
 const CAS_MEMBER = [
   "-- marktmorgen:member-cas:v1",
@@ -603,27 +620,87 @@ const CAS_MEMBER = [
  * link say "Unsubscribed." with the emails still on, and a mute say done
  * with nothing written.
  */
-async function patchMember(id: string, key: string, change: (member: Member) => Partial<Member>): Promise<Member | null> {
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const read = await readMemberExact(id, key);
-    if (!read) return null;
-    const { raw, member } = read;
-    const next: Member = { ...member, ...change(member), k: member.k };
-    const listed = next.dir && next.n && !next.removed ? "1" : "0";
-    const replies = repliesFor(await redisPipeline([
-      ["EVAL", CAS_MEMBER, 2, membersKey(id), dirKey(id), key, raw, JSON.stringify(next), listed, next.at],
-    ]), 1);
-    // 1 written, 0 changed since it was read (read again); anything else is not known to be either.
-    const written = replies?.[0];
-    if (written === 0) continue;
-    if (written !== 1) throw new UnknownReplyError("a change to a community member record");
-    // The search index follows the very same switch the directory does, from
-    // the very same place, so the two can never come to disagree about who is
-    // findable. Somebody who took themselves off the list is taken out of the
-    // index in the same breath.
-    await indexMember(id, next).catch(() => {});
-    return next;
+/**
+ * What a change adds to the store's data room, worked out on each try from the record as read (`before`) and
+ * as it would be written (`next`): never from a snapshot the caller held before (rule 30 on the MEDIUM of Codex Z,
+ * Claude 1 and Claude 3 on #3024). The member's name also takes its index entry.
+ */
+function profileGrowth(before: Member, next: Member): number {
+  // Measured on the counted record (countedMember, main's measure since #2576), so what a change takes from the members'
+  // slot is what deleting the record gives back: what is written without being counted (seen, the emails switch, a
+  // token, a mute or removal) never moves it.
+  return dataBytes([countedMember(next)]) - dataBytes([countedMember(before)]) + nameBytes(next.n) - nameBytes(before.n);
+}
+
+async function patchMember(
+  id: string,
+  key: string,
+  change: (member: Member) => Partial<Member>,
+  /**
+   * When given, what a try adds is taken from the store's data room before its compare-and-set writes, and kept
+   * across the tries whose set did not go in (the record changed since it was read): a later try tops it up only
+   * when it needs more than is held, at most once (MEMBER_ROOM_TOP_UPS). What is held beyond what the written record
+   * took is given back once, after the set went in; all of it when nothing was written; none of it when the set's
+   * answer is not known. So one change runs at most three room calls (a reservation, a top-up, a give-back), never
+   * one per try (rule 30 on Claude 7's MEDIUM on #3024 at 2d7c9cd60b).
+   */
+  room?: DataStore,
+): Promise<Member | null> {
+  // The bytes this change holds in the room, and the top-ups it has run.
+  let held = 0;
+  let topUps = 0;
+  // Set once the set's answer is not known: what is held then stays taken.
+  let unknown = false;
+  const giveBack = async (bytes: number) => {
+    if (room && bytes > 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes }]);
+  };
+  try {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const read = await readMemberExact(id, key);
+      if (!read) {
+        await giveBack(held);
+        held = 0;
+        return null;
+      }
+      const { raw, member } = read;
+      const next: Member = { ...member, ...change(member), k: member.k };
+      const grown = room ? profileGrowth(member, next) : 0;
+      if (room && grown > held) {
+        // The first reservation, or one top-up when the record shrank since (only the member's own other saves
+        // shrink what this change writes over); a second would make the room calls depend on the retries.
+        if (held > 0 && topUps >= MEMBER_ROOM_TOP_UPS) break;
+        if (held > 0) topUps += 1;
+        await needData(room, [{ slot: MEMBERS_SLOT, bytes: grown - held }]);
+        held = grown;
+      }
+      const listed = next.dir && next.n && !next.removed ? "1" : "0";
+      // A rejected pipeline can lose the reply after the write. Keep the reservation until a known result arrives.
+      unknown = true;
+      const replies = repliesFor(await redisPipeline([
+        ["EVAL", CAS_MEMBER, 2, membersKey(id), dirKey(id), key, raw, JSON.stringify(next), listed, next.at],
+      ]), 1);
+      const written = replies?.[0];
+      if (written !== 0 && written !== 1) throw new UnknownReplyError("a change to a community member record");
+      unknown = false;
+      if (written === 0) continue;
+      // The record took `grown` (less than nothing when it shrank): the rest of what is held goes back, once.
+      const excess = held - grown;
+      held = 0;
+      await giveBack(excess);
+      // The search index follows the very same switch the directory does, from
+      // the very same place, so the two can never come to disagree about who is
+      // findable. Somebody who took themselves off the list is taken out of the
+      // index in the same breath.
+      await indexMember(id, next).catch(() => {});
+      return next;
+    }
+  } catch (error) {
+    // A read, a reservation or a set known not to have gone in: nothing of this change was written, so what it holds
+    // goes back. A set whose answer is not known keeps it.
+    if (!unknown) await giveBack(held).catch(() => {});
+    throw error;
   }
+  await giveBack(held);
   throw new Error("a member's record kept changing");
 }
 
@@ -655,24 +732,25 @@ export async function touchMember(id: string, email: string, existing: Member | 
 /**
  * A member's own choices: the name they are seen by, the directory, the
  * emails — and, when given, their answers to the creator's questions, which
- * count as answered once each one asked has something in it.
+ * count as answered once each one asked has something in it, and their
+ * links to their profiles elsewhere (lib/member-links.ts), kept as the form
+ * rule left them.
  */
 export async function setProfile(
   id: string,
   member: Member,
-  change: { name: string; dir: boolean; mail: boolean; answers?: string[]; questions?: string[] },
+  change: { name: string; dir: boolean; mail: boolean; answers?: string[]; questions?: string[]; links?: Social[] },
   room: DataStore,
 ): Promise<Member> {
   const name = cleanLine(change.name, MAX_DISPLAY_NAME);
-  // What the member adds to their record takes room before it is written:
-  // the name and the answers, the handle they are mentioned by and the words
-  // their name is found by. A record that shrinks gives it back.
-  const answers = change.answers && change.questions ? answersFor(change.answers, change.questions, member.qa) : {};
-  const after = JSON.stringify({ ...member, n: name, h: name.slice(0, 40), dir: change.dir && Boolean(name), mail: change.mail, ...answers });
-  const grown = dataBytes([countedMember(JSON.parse(after) as Member)]) - dataBytes([countedMember(member)]) + nameBytes(name) - nameBytes(member.n);
-  // A record that shrinks gives it back only once the shorter one is written (Claude 1 cloud's LEVE on #2576): a write
-  // whose answer is lost, or a record gone in between, gives nothing back (below).
-  if (grown > 0) await needData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);
+  // The links go through the rule a stored record is read back by, so what
+  // is written is exactly what the directory may show.
+  const links = change.links ? { s: parseMemberLinks(change.links) } : {};
+  // What the member adds to their record (the name and the answers, the
+  // handle they are mentioned by and the words their name is found by) takes
+  // room before it is written, and a record that shrinks gives it back; both
+  // are worked out by patchMember on each try, from the record it writes over
+  // (profileGrowth), never from the `member` snapshot this call was given.
   // The handle is taken before the name is written, so a member is never left
   // named but unmentionable. Claiming gives back what they ended up with,
   // which may carry a number when somebody already held the plain one. It
@@ -693,8 +771,9 @@ export async function setProfile(
         dir: change.dir && Boolean(name),
         mail: change.mail,
         ...(change.answers && change.questions ? answersFor(change.answers, change.questions, now.qa) : {}),
+        ...links,
       };
-    });
+    }, room);
   } catch (error) {
     // The read or the write after the claim answered in no known shape, so
     // whether the record took the new handle is not known: a lost answer may
@@ -721,7 +800,6 @@ export async function setProfile(
     return member;
   }
   await giveBackUnlessCarried(id, member.k, [had, replaced && replaced !== handle ? replaced : ""]);
-  if (grown < 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: -grown }]);
   return saved;
 }
 

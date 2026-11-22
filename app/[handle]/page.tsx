@@ -91,6 +91,7 @@ import { readAllTimeSales } from "@/lib/stats";
 import { isResting } from "@/lib/traffic";
 import { StoreResting } from "@/components/store-resting";
 import { NewTab } from "@/components/new-tab";
+import { unknownLimit } from "@/lib/request-guard";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -293,12 +294,12 @@ export default async function StorePage({ params, searchParams }: Params) {
   const searchable = visibleCount(store) > STORE_PAGE_SIZE;
   const searchAllowed =
     wantedSearch !== "" && searchable && searchWords(wantedSearch).length > 0
-      ? await withinStore("store-search", `${(await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"}|${store.handle}`, 30, 600, store)
+      ? await withinStore("store-search", `${(await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"}|${store.handle}`, 30, 600, store).catch(unknownLimit)
       : false;
   // A search pays for what it reads before reading it (lib/store-search-index.ts): the full read of the store's
   // listings once for everybody, as shared work kept ten minutes, then only the matches it shows and their checkout
   // boxes. Refused, it reads nothing and the page says why, as for the per-connection limit (c1-cost-store-search).
-  const answer = searchAllowed ? await searchStorePaid(store, wantedSearch) : null;
+  const answer = searchAllowed === true ? await searchStorePaid(store, wantedSearch) : null;
   // A store whose index is too large to keep offers no search for now, and says so; its products are listed as usual.
   const searchUnavailable = answer === SEARCH_UNAVAILABLE;
   const results = answer === SEARCH_UNAVAILABLE ? null : answer;
@@ -518,7 +519,7 @@ export default async function StorePage({ params, searchParams }: Params) {
                         </button>
                       </div>
                       {searchRefused ? (
-                        <p className="st-note mt-3 text-sm" role="status">{searchUnavailable ? bw.searchUnavailable : bw.searchSlow}</p>
+                        <p className="st-note mt-3 text-sm" role="status">{searchAllowed === "unknown" ? bw.searchUnread : searchUnavailable ? bw.searchUnavailable : bw.searchSlow}</p>
                       ) : null}
                       {results ? (
                         <p className="mt-3 flex flex-wrap items-baseline justify-between gap-2 text-sm" role="status">

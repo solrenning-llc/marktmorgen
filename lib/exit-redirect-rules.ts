@@ -72,15 +72,23 @@ export function exitDestination(raw: unknown): ExitDestination {
   if (bare === OWN_HOST || bare.endsWith(`.${OWN_HOST}`)) return { ok: false, reason: "own_site" };
   if (!isPublicName(bare)) return { ok: false, reason: "not_public" };
   url.hash = "";
+  // One address is one value: a trailing-dot host is kept in its bare form, as it was checked (Codex G's LEVE on #3645).
+  url.hostname = bare;
   const href = url.href;
   if (href.length > EXIT_DESTINATION_MAX) return { ok: false, reason: "too_long" };
-  return { ok: true, url: href, host };
+  return { ok: true, url: href, host: bare };
 }
+
+/** One DNS label: 1 to 63 letters, digits or hyphens, never beginning or ending with a hyphen (punycode included). */
+const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 function isPublicName(host: string): boolean {
   if (!host || host.startsWith("[")) return false;
   if (/^[0-9.]+$/.test(host)) return false;
   if (!host.includes(".")) return false;
+  // Every label a DNS label, the whole name at most 253 characters (Codex G's LEVE on #3645): an empty label, a
+  // hyphen at either end or a label over 63 characters is not a public name.
+  if (host.length > 253 || !host.split(".").every((label) => DNS_LABEL.test(label))) return false;
   return !NOT_PUBLIC_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
 }
 

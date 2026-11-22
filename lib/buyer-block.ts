@@ -1,7 +1,7 @@
 /**
  * A creator blocks a person in their own store's messages (567 [GD1] (f),
  * unit 1): the chat, the contact form and a question the store assistant
- * hands over. The reason is kept for the creator alone.
+ * hands over. The reason is the creator's note; it is in the person's copy of their data, and erased with the person.
  *
  *   nl:blk:<sid>   hash: HMAC of the person's address → {"r": reason, "at": ms}
  *
@@ -9,8 +9,11 @@
  * address itself, and no other store can read it: there is no list shared
  * between stores. At most MAX_BLOCKED a store; each entry's bytes are counted
  * in the store's data room before it is written and given back when it is
- * removed (giveData). The limit is held in one Lua step (BLOCK_LUA). Deleting a person removes their entry (lib/person-erasure.ts);
- * closing a store removes the whole list (lib/closed-store-data.ts).
+ * removed (giveData). The limit is held in one Lua step (BLOCK_LUA). Deleting a person (lib/person-erasure.ts) erases
+ * the creator's reason and keeps the one-way mark, so asking to be deleted never lifts a block; the creator still can
+ * (Codex X6 on #3839, as lib/community-dm.ts keeps a member's choice to decline messages). The person's copy of their
+ * data holds the block with the reason and when (blockForCopy). Closing a store removes the whole list
+ * (lib/closed-store-data.ts).
  *
  * What it never stops: a buyer's report of a problem with an order
  * (lib/order-problem.ts) and the EU withdrawal notice (lib/withdrawal.ts).
@@ -23,7 +26,7 @@ import { createHmac } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { deriveKey } from "@/lib/secret-box";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { dataKey, giveData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
@@ -198,10 +201,51 @@ export async function unblockPerson(store: BlockStore, email: string): Promise<b
   return count === 1;
 }
 
-/** Deleting a person (lib/person-erasure.ts): their entry in this store's list, if any. Throws on an unknown reply. */
-export async function forgetBlockedPerson(store: BlockStore, email: string): Promise<number> {
+/**
+ * Erases the reason of one block and keeps the block, in one step, only while it is there: a block lifted meanwhile is
+ * never written back. The entry is no larger than before, so the data room's charge stays as it was.
+ * KEYS[1] the list; ARGV the mark, the entry with no reason. 1 erased, 0 no block (or no reason left to erase).
+ */
+export const FORGET_REASON_LUA = `-- marktmorgen:buyer-block-forget:v1
+local old = redis.call('HGET', KEYS[1], ARGV[1])
+if not old then return 0 end
+if old == ARGV[2] then return 0 end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+return 1
+`;
+
+/**
+ * Deleting a person (lib/person-erasure.ts): the creator's reason for blocking them in this store is erased and the
+ * block itself stays, as a one-way mark of the address (Codex X6 on #3839): it is the creator's protection, and a
+ * person could otherwise lift it by asking to be deleted. 1 when a reason was erased, 0 when there was none. Throws on
+ * an unknown reply.
+ */
+export async function forgetBlockedPerson(store: BlockStore, email: string, now = Date.now()): Promise<number> {
   if (!store.sid || !isRedisConfigured()) return 0;
-  const removed = await unblockPerson(store, email);
-  if (removed === "error") throw new Error("the removal of a person from a store's block list was not confirmed");
-  return removed ? 1 : 0;
+  const mark = personMark(email);
+  if (!mark) throw new Error("the erasure of a block's reason was not confirmed: there is no key to find the person");
+  const state = await blockedState(store, email);
+  if (state === "unknown") throw new Error("the erasure of a block's reason was not confirmed");
+  if (!state.blocked) return 0;
+  // Already erased: nothing to write, and the date the reason went is kept.
+  if (state.reason === "") return 0;
+  let replies: unknown[] | null;
+  try {
+    replies = repliesFor(await redisPipeline([["EVAL", FORGET_REASON_LUA, 1, blockKey(store.sid), mark, JSON.stringify({ r: "", at: now })]]), 1);
+  } catch {
+    throw new Error("the erasure of a block's reason was not confirmed");
+  }
+  const count = replies ? countOf(replies[0]) : null;
+  if (count === null || count > 1) throw new Error("the erasure of a block's reason was not confirmed");
+  return count;
+}
+
+/**
+ * The person's copy of their data (lib/person-copy.ts): whether this store blocked them from writing, since when, and
+ * the reason the creator wrote, which is a note about them (GDPR art. 15). Throws on an unknown reply.
+ */
+export async function blockForCopy(store: Pick<Store, "sid">, email: string): Promise<{ blocked: string; reason: string }[]> {
+  const state = await blockedState(store, email);
+  if (state === "unknown") throw new UnknownReplyError("whether the store blocked this person");
+  return state.blocked ? [{ blocked: new Date(state.at).toISOString(), reason: state.reason }] : [];
 }

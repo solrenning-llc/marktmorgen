@@ -31,7 +31,7 @@ async function main(): Promise<void> {
   part("The person's copy holds the block, the creator's reason and when");
   is("blocked with a reason", await blockPerson(store, RUDE, REASON, 1_790_000_000_000), "blocked");
   is("the plan says it is copied", COPY_PLAN["lib/buyer-block.ts"]?.how, "copied");
-  is("the copy", await COPIERS["lib/buyer-block.ts"]?.(scope), [{ blocked: "2026-09-21T12:53:20.000Z", reason: REASON }]);
+  is("the copy", await COPIERS["lib/buyer-block.ts"]?.(scope), [{ blocked: new Date(1_790_000_000_000).toISOString(), reason: REASON }]);
   is("nobody else's block is in it", await COPIERS["lib/buyer-block.ts"]?.({ ...scope, email: "kind-erase@example.com" } as ErasureScope), []);
 
   part("Deleting the person erases the reason and keeps the block");

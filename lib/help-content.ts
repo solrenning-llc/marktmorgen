@@ -52,6 +52,7 @@ import { KEEP_DAYS as AGREEMENT_KEEP_DAYS, MAX_VERSIONS, SIGN_DAYS } from "@/lib
 import { KEEP_DAYS, MAX_AUTO_REMINDERS, MAX_LINES, MAX_PER_PERSON, MAX_SENDS, OPEN_DAYS, REMIND_EVERY_DAYS, REQUEST_LIMITS } from "@/lib/payment-request-rules";
 import { LEAVING_ANSWER, LEAVING_QUESTION, STAN_QUESTION, stanComparison } from "@/lib/home-faq";
 import { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_TEMPLATE } from "@/lib/sequence-template";
+import { webhookBeginnerQuestions } from "@/lib/webhook-faq";
 import { MAX_BULK_ADDRESSES } from "@/lib/bulk-label-rules";
 import { MAX_CONTACT_TAGS, MAX_TAG_LENGTH } from "@/lib/contact-rules";
 import { MAX_FUNNEL_PAGES, MAX_PAGE_FUNNELS } from "@/lib/page-funnel";
@@ -871,10 +872,14 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        // 564 [HC1] item 2: keep the established address used by the developers pages while bringing this answer in
+        // line with the studio's "Webhooks and Zapier" card and the webhook feature page (lib/webhook-faq.ts).
         q: "Can I connect Zapier, Make or my own server?",
         a: [
-          "Yes, with webhooks. Add up to five https addresses in your studio and choose the events each one hears: a sale, a membership started or canceled, a lead confirmed for a free product, a call booked or moved, a refund, and a step of a sequence that tells your webhooks. Each message is JSON, signed with an HMAC-SHA256 in its Marktmorgen-Signature header, and tried again over about forty hours if the address does not answer. Your studio keeps a log of the last deliveries for up to a week, and a button sends a test.",
-          "There is no Marktmorgen app in Zapier's directory: in Zapier, use Webhooks by Zapier with a Catch Hook. Events read from your Stripe account can take up to about five minutes to arrive.",
+          `With a webhook: ${webhookBeginnerQuestions()[0].a.replace(/^An /, "an ")}`,
+          webhookBeginnerQuestions()[1].a,
+          webhookBeginnerQuestions()[3].a.replace(/^Yes, through /, "Zapier works through "),
+          `The same card lists the last deliveries, up to 50, each kept for a week, with what the address answered. If one failed after all its tries, press \u201cSend again\u201d beside it to send the same message once more, with the same event id, while the month\u2019s deliveries last.`,
           "To read your store from your own tools instead — your list, your community's members, a course's students, your affiliates and your bookings — make an API key in your studio, on every plan. A key reads unless you make it one that can also write: then it adds people who agreed to hear from you to your list, changes their labels, and gives or takes back products, as an import does. The developers page lists every address and what it returns.",
         ],
       },

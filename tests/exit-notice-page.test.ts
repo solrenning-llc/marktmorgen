@@ -12,6 +12,7 @@
  *     was not checked; a link that opens a new window or passes on the page;
  *   - a store found differently from before (storeForHandle).
  */
+import { createHash } from "node:crypto";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { store as redis } from "./redis-stub";
@@ -38,7 +39,11 @@ const notice: ExitNotice = { to: "https://example.com/shop", host: "example.com"
   is("a live address: its store, nothing released", [live.store?.handle, live.released], ["moving-shop", null]);
   is("storeForHandle finds the same store", (await storeForHandle("moving-shop"))?.handle, "moving-shop");
   const mover = await storeForEmail("mover@example.com");
-  await closeStoreRecord({ ...mover!, exitNotice: notice });
+  // The notice is in the store's record, where closeStoreRecord reads it under its lock (Codex X6's MEDIUM on #3648).
+  const owner = `nl:store:owner:${createHash("sha256").update("nimbus-store:mover@example.com").digest("hex").slice(0, 40)}`;
+  const kept = JSON.parse(String((await redis.pipeline([["GET", owner]]))[0])) as Record<string, unknown>;
+  await redis.pipeline([["SET", owner, JSON.stringify({ ...kept, exitNotice: notice })]]);
+  await closeStoreRecord(mover!);
   const before = redis.pipeline.bind(redis);
   let reads = 0;
   redis.pipeline = (async (commands: (string | number)[][]) => { reads += commands.length; return before(commands); }) as typeof redis.pipeline;

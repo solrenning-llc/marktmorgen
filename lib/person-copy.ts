@@ -44,7 +44,7 @@ import { lessonComments } from "@/lib/lesson-comments";
 import { notesOf } from "@/lib/lesson-notes";
 import { bondRecordOf } from "@/lib/affiliate-bond";
 import { leadOf } from "@/lib/affiliate-leads";
-import { type ImportedPurchase, importedFrom, importedKey } from "@/lib/imported-purchases";
+import { type ImportedPurchase, importedPage } from "@/lib/imported-purchases";
 import { inviteField, inviteForCopy, withPendingInvites } from "@/lib/move-members";
 import { openConversation, readInbox } from "@/lib/inbox";
 import { accountOf, readMember as readDiscordMember } from "@/lib/discord-store";
@@ -265,6 +265,11 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
 /** The module whose copy goes in pages (lib/copy-pages.ts): a member's community activity. */
 const COMMUNITY_MODULE = "lib/community-erasure.ts";
 
+/** The module whose copy also goes in pages: what an import, a gift, a group place or a PayPal order gave them. */
+const IMPORTED_MODULE = "lib/imported-purchases.ts";
+/** A copy reads one gift or group record for some of their imported purchases (giftsReceived, placesTaken). */
+const IMPORTED_PER_ROW = 1;
+
 /**
  * This request's paged read: what it may still send, and the first paged module that ran out of it, with where it
  * goes on. Every paged module after that one waits whole for the later pages (pagedFirst).
@@ -341,6 +346,11 @@ export const PAGED_MODULES: Readonly<Record<string, PagedModule>> = {
       return { sections: hasWrote(page.traces, page.votes) ? [{ module: COMMUNITY_MODULE, what: COPY_PLAN[COMMUNITY_MODULE]!.what, records: [wroteOf(page)] }] : [], resume: page.resume };
     },
   },
+  [IMPORTED_MODULE]: {
+    at: (s) => (s.statsId ? `${IMPORTED_MODULE}#${s.statsId}` : null),
+    what: "what an import, a gift, a group place or a PayPal order gave you",
+    page: (s, budget, resume) => importedSections(s, budget, resume),
+  },
 };
 
 /** This person's paged parts from the one a cursor names, that one first, as `module#instance`. */
@@ -358,18 +368,46 @@ export function morePagesLine(page: number, parts: readonly string[]): string {
 }
 
 /**
- * What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts): once per copy,
- * shared by the readers that need it (their imported purchases, the gifts and the group places they received), as
- * checkoutsOf shares their paid checkouts (issue #5125, row (1) imported-purchases).
+ * What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts): its first page,
+ * once per copy, shared by the readers that need it (their imported purchases, the gifts and the group places they
+ * received), as checkoutsOf shares their paid checkouts. None yet when a paged part before it ran out, or when the
+ * store keeps no imported purchases: the rest, or all of it, comes on the later pages (issue #5125, row (1)).
  */
 const grantsRead = new WeakMap<ErasureScope, Promise<ImportedPurchase[]>>();
 function grantsOf(s: ErasureScope): Promise<ImportedPurchase[]> {
   let read = grantsRead.get(s);
   if (!read) {
-    read = redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]).then((replies) => importedFrom(replies[0], { complete: true }));
+    read = s.statsId ? pagedFirst(s, `${IMPORTED_MODULE}#${s.statsId}`, (budget) => importedPage(s.statsId, s.email, budget, "0", IMPORTED_PER_ROW)).then((page) => page?.rows ?? []) : Promise.resolve([]);
     grantsRead.set(s, read);
   }
   return read;
+}
+
+/** The gifts given to them that these purchases name, as the copy shows them: the giver's name and words, not the payment. */
+async function giftsReceived(grants: readonly ImportedPurchase[]): Promise<unknown[]> {
+  const out: unknown[] = [];
+  for (const id of new Set(grants.map((g) => g.job).filter((job) => job.startsWith("gift:")).map((job) => job.slice(5)))) {
+    const gift = await readGift(id);
+    if (gift) out.push({ youReceived: true, product: gift.p, from: gift.from, message: gift.message, at: iso(gift.at), ...(gift.given ? { given: iso(gift.given) } : {}), ...(gift.revoked ? { refunded: iso(gift.revoked) } : {}) });
+  }
+  return out;
+}
+
+/** The group places these purchases name, as the copy shows them. */
+async function placesTaken(grants: readonly ImportedPurchase[]): Promise<unknown[]> {
+  const out: unknown[] = [];
+  for (const id of new Set(grants.map((g) => g.job).filter(isGroupJob).map((job) => job.slice(6)))) {
+    const group = await readGroup(id);
+    if (group) out.push({ youTookAPlace: true, product: group.p, at: iso(group.at) });
+  }
+  return out;
+}
+
+/** One page of their imported purchases, with the gifts and group places it names, as sections of the copy. */
+async function importedSections(s: ErasureScope, budget: ReadBudget, resume?: string): Promise<{ sections: CopySection[]; resume?: string }> {
+  const page = await importedPage(s.statsId, s.email, budget, resume ?? "0", IMPORTED_PER_ROW);
+  const parts: [string, unknown[]][] = [[IMPORTED_MODULE, page.rows], ["lib/gifts.ts", await giftsReceived(page.rows)], ["lib/group-buy.ts", await placesTaken(page.rows)]];
+  return { sections: parts.flatMap(([module, records]) => (records.length ? [{ module, what: COPY_PLAN[module]!.what, records }] : [])), resume: page.resume };
 }
 
 /** One reader per copied module, each only reading. */
@@ -668,33 +706,26 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   },
   "lib/gifts.ts": async (s) => {
     const bought = (await checkoutsOf(s)).map((c) => c.meta.gift).filter((id): id is string => Boolean(id));
-    const received = (await grantsOf(s)).map((g) => g.job).filter((job) => job.startsWith("gift:")).map((job) => job.slice(5));
     const out: unknown[] = [];
     for (const id of [...new Set(bought)]) {
       const gift = await readGift(id);
       // A gift they bought: they typed who it was for.
       if (gift) out.push({ youBought: true, product: gift.p, to: gift.to, from: gift.from, message: gift.message, at: iso(gift.at), ...(gift.given ? { given: iso(gift.given) } : {}), ...(gift.revoked ? { refunded: iso(gift.revoked) } : {}) });
     }
-    for (const id of [...new Set(received)]) {
-      const gift = await readGift(id);
-      // A gift to them: the name and words the giver chose to send, not the giver's payment.
-      if (gift) out.push({ youReceived: true, product: gift.p, from: gift.from, message: gift.message, at: iso(gift.at), ...(gift.given ? { given: iso(gift.given) } : {}), ...(gift.revoked ? { refunded: iso(gift.revoked) } : {}) });
-    }
+    // A gift to them, on this page: the name and words the giver chose to send, not the giver's payment.
+    out.push(...(await giftsReceived(await grantsOf(s))));
     return out;
   },
   "lib/group-buy.ts": async (s) => {
     const bought = (await checkoutsOf(s)).map((c) => c.meta.group).filter((id): id is string => Boolean(id));
-    const taken = (await grantsOf(s)).map((g) => g.job).filter(isGroupJob).map((job) => job.slice(6));
     const out: unknown[] = [];
     // Who took the places they bought are those people's addresses, not theirs: the number is given.
     for (const id of [...new Set(bought)]) {
       const group = await readGroup(id);
       if (group) out.push({ youBought: true, product: group.p, places: group.people, at: iso(group.at), ...(group.paid ? { paid: iso(group.paid) } : {}) });
     }
-    for (const id of [...new Set(taken)]) {
-      const group = await readGroup(id);
-      if (group) out.push({ youTookAPlace: true, product: group.p, at: iso(group.at) });
-    }
+    // A place given to them, on this page.
+    out.push(...(await placesTaken(await grantsOf(s))));
     return out;
   },
   "lib/call-packages.ts": async (s) => {
@@ -796,6 +827,8 @@ export async function copyPerson(scope: ErasureScope, now = Date.now(), options:
     return await firstPage(scope, now, paging);
   } finally {
     pagesOf.delete(scope);
+    // Read again for the next copy, never kept from this one.
+    grantsRead.delete(scope);
   }
 }
 

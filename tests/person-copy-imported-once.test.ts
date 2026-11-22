@@ -34,7 +34,7 @@ async function main() {
   const pipeline = redis.pipeline.bind(redis);
   const reads: string[] = [];
   redis.pipeline = async (batch) => {
-    for (const command of batch) if (String(command[0]).toUpperCase() === "HGETALL" && command[1] === key) reads.push(String(command[0]));
+    for (const command of batch) if (command[1] === key) reads.push(String(command[0]).toUpperCase());
     return pipeline(batch);
   };
   const out: Record<string, unknown[]> = {};
@@ -49,7 +49,8 @@ async function main() {
   }
 
   await check("the person's imported hash is read once for the three readers that need it", async () => {
-    assert.equal(reads.length, 1, `reads of ${key}: ${reads.length}`);
+    // One HSCAN, which the stand-in answers whole (lib/redis-memory.ts), as Redis answers a small hash.
+    assert.deepEqual(reads, ["HSCAN"], `reads of ${key}`);
   });
   await check("and the copy still lists every purchase it holds", async () => {
     const rows = out["lib/imported-purchases.ts"] as { productId: string }[];

@@ -49,19 +49,19 @@ async function check(name: string, run: () => Promise<void>) {
 
 async function main() {
   await seed();
-  for (const module of ["lib/inbox.ts", "lib/payment-request-store.ts", "lib/agreement-store.ts"]) {
-    await check(`the copy reads ${module} without writing anything`, async () => {
+  for (const copied of ["lib/inbox.ts", "lib/payment-request-store.ts", "lib/agreement-store.ts"]) {
+    await check(`the copy reads ${copied} without writing anything`, async () => {
       const pipeline = redis.pipeline.bind(redis);
       const sent: string[] = [];
       redis.pipeline = async (batch) => { for (const command of batch) sent.push(String(command[0]).toUpperCase()); return pipeline(batch); };
       try {
-        const copier = COPIERS[module];
-        assert.ok(copier, `${module} has a copier`);
+        const copier = COPIERS[copied];
+        assert.ok(copier, `${copied} has a copier`);
         assert.deepEqual(await copier(scope), []);
       } finally {
         redis.pipeline = pipeline;
       }
-      assert.deepEqual(sent.filter((c) => WRITES.has(c)), [], `writes sent while copying ${module}`);
+      assert.deepEqual(sent.filter((c) => WRITES.has(c)), [], `writes sent while copying ${copied}`);
     });
   }
   await check("and every expired id is still in its index after the copy", async () => {

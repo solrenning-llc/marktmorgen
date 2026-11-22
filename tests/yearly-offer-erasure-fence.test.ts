@@ -70,7 +70,7 @@ async function shop() {
   made += 1;
   const n = String(made).padStart(2, "0");
   const email = `yearlyfence${n}@example.com`;
-  const account = `acct_1TestYearlyFence${n}`;
+  const account = `acct_1TestYearFnce${n}`;
   await claimHandle(email, `yearlyfence${n}`, "A store", "");
   await ensureStoreId(email);
   await ensureStatsId(email);

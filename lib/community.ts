@@ -79,13 +79,14 @@ import {
 import { MAX_ALT_LENGTH } from "@/lib/product-image";
 import { indexBytes, indexPost, partsOf, unindexPost } from "@/lib/community-search";
 import { TRACED_SINCE, TRACE_ENTRY, traceKey } from "@/lib/community-trace";
+import type { ReadBudget } from "@/lib/copy-pages";
 import { type DataStore, needData, giveData } from "@/lib/store-data";
 import { type Held, LockBusyError, withLock } from "@/lib/redis-lock";
 import { likePoint } from "@/lib/community-points";
 import { dataBytes } from "@/lib/store-data-rules";
 import { PICTURE_MARK_BYTES } from "@/lib/community-files";
 import { indexMember } from "@/lib/community-index";
-import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
+import { type Poll, parsePoll, pollKeys, votesOf } from "@/lib/community-polls";
 import { type DmSetting, NO_DM, parseDmSetting } from "@/lib/community-dm";
 import { type ChatSetting, NO_CHAT, parseChatSetting } from "@/lib/community-chat";
 import { claimHandle } from "@/lib/community-mentions";
@@ -1785,9 +1786,28 @@ export async function memberTraces(id: string, who: string): Promise<MemberTrace
 
 /** What the member's trace names (lib/community-trace.ts), each checked against what is kept now. */
 async function tracedOf(id: string, who: string): Promise<MemberTraces> {
-  const out: MemberTraces = { posts: [], comments: [], likedPosts: [], likedComments: [], reported: [], pollPosts: [] };
+  const out = noTraces();
   const [raw] = await redisPipeline([["SMEMBERS", traceKey(id, who)]]);
-  const refs = (Array.isArray(raw) ? raw : []).map(String).sort();
+  await traceRefsInto(id, who, (Array.isArray(raw) ? raw : []).map(String), out);
+  return out;
+}
+
+const noTraces = (): MemberTraces => ({ posts: [], comments: [], likedPosts: [], likedComments: [], reported: [], pollPosts: [] });
+
+/** The commands traceRefsInto sends for these references: one for each reference it reads, none for the rest. */
+function traceRefsCommands(refs: string[]): number {
+  const parts = refs.map((ref) => ref.split(":"));
+  const posts = new Set(parts.filter((p) => p[0] === "p" && p.length === 2 && ITEM_ID.test(p[1])).map((p) => p[1])).size;
+  const marks = parts.filter((p) => (p[0] === "c" && p.length === 3) || (p[0] === "l" && p.length === 2) || (p[0] === "lc" && p.length === 3) || (p[0] === "r" && p.length >= 3)).length;
+  return posts + marks;
+}
+
+/**
+ * Reads what these trace references name, each checked against what is kept now, into `out`: one command for each
+ * reference read (traceRefsCommands), in pipelines of TRACE_BATCH.
+ */
+async function traceRefsInto(id: string, who: string, unsorted: string[], out: MemberTraces): Promise<void> {
+  const refs = [...unsorted].sort();
   const parts = refs.map((ref) => ref.split(":"));
   const postIds = [...new Set(parts.filter((p) => p[0] === "p" && p.length === 2).map((p) => p[1]))];
   const posts: Post[] = [];
@@ -1819,8 +1839,7 @@ async function tracedOf(id: string, who: string): Promise<MemberTraces> {
     const [kind, post, comment] = target.split(":");
     out.reported.push(kind === "p" ? `post ${post}` : `comment ${comment} under post ${post}`);
   }
-  out.pollPosts = [...new Set(parts.filter((p) => p[0] === "v" && p.length === 2).map((p) => p[1]))];
-  return out;
+  out.pollPosts.push(...new Set(parts.filter((p) => p[0] === "v" && p.length === 2).map((p) => p[1])));
 }
 
 /** The whole community, read for one member: for a community with posts from before the trace began. */
@@ -1866,4 +1885,148 @@ async function scanTraces(id: string, who: string): Promise<MemberTraces> {
     }
   }
   return out;
+}
+
+/** A trace page's SSCAN asks for this many references a call (COUNT is a hint: Redis may answer a few more). */
+const TRACE_SCAN_COUNT = 100;
+/**
+ * The most references one SSCAN reply may hold, reserved before it is sent: a set small enough to be kept as a
+ * listpack answers whole (128 entries by default), a larger one about COUNT. A larger reply is not one this copy
+ * knows how to keep inside its page, so it throws, and the copy is made again rather than read past its bound.
+ */
+export const TRACE_SCAN_MOST = 1_000;
+/** One post of a whole-community page at the most: its record and comment count, its comments, two marks and its poll vote, two marks a comment. */
+export const SCAN_POST_MOST_COMMANDS = 2 + 3 + 1 + 2 * MAX_COMMENTS_PER_POST;
+/** What the first page spends to choose how to read the community: its oldest post's id and that post. */
+export const TRACE_PAGE_START_COMMANDS = 2;
+
+const SCAN_RESUME = /^s:(\+inf|[0-9]{1,15})$/;
+const TRACE_RESUME = /^t:[0-9]{1,20}$/;
+
+/** One page of a member's community activity for the copy: what it holds, their votes in its polls, and where the next goes on. */
+export type MemberTracesPage = { traces: MemberTraces; votes: { post: string; picked: string[] }[]; resume?: string };
+
+/**
+ * One page of memberTraces for the copy in pages (lib/copy-pages.ts, issue #5125): what it finds, with the member's
+ * votes in the polls it finds (lib/community-polls.ts votesOf), read inside `budget`, and where the next page goes on
+ * (absent once the member's whole activity was read). Pages read in turn hold together what memberTraces and votesOf
+ * find in one read: a community from before the trace newest post first, by its sequence number (post.n, the feed's
+ * score), so a post kept for the whole copy is read on exactly one page whatever is posted or deleted in between;
+ * otherwise the member's trace, by Redis's own SSCAN cursor, which returns every reference kept for the whole scan
+ * (a reference may come twice while Redis grows the set; the page holds it twice then, never not at all). Only reads.
+ */
+export async function memberTracesPage(id: string, who: string, budget: ReadBudget, resume?: string): Promise<MemberTracesPage> {
+  const out = noTraces();
+  if (!isRedisConfigured()) return { traces: out, votes: [] };
+  let at = resume;
+  if (at === undefined) {
+    if (!budget.take(TRACE_PAGE_START_COMMANDS)) throw new Error("a copy page with no room to begin");
+    const [oldestIds] = await redisPipeline([["ZRANGEBYSCORE", feedKey(id), "-inf", "+inf", "LIMIT", 0, 1]]);
+    const oldestId = Array.isArray(oldestIds) && oldestIds.length ? String(oldestIds[0]) : "";
+    const oldest = oldestId ? await readPost(id, oldestId) : null;
+    at = oldestId && (!oldest || oldest.at < TRACED_SINCE) ? "s:+inf" : "t:0";
+  }
+  if (SCAN_RESUME.test(at)) return scanPage(id, who, budget, at.slice(2));
+  if (TRACE_RESUME.test(at)) return tracedPage(id, who, budget, at.slice(2));
+  throw new UnknownReplyError("where a community copy goes on");
+}
+
+/** The member's trace, SSCAN by SSCAN, each reply's references and votes read before the next, while the page has room for both. */
+async function tracedPage(id: string, who: string, budget: ReadBudget, from: string): Promise<MemberTracesPage> {
+  const out = noTraces();
+  const votes: MemberTracesPage["votes"] = [];
+  let cursor = from;
+  for (;;) {
+    // The SSCAN and one command for each reference its reply may hold, at most.
+    if (!budget.take(1 + TRACE_SCAN_MOST)) return { traces: out, votes, resume: `t:${cursor}` };
+    const replies = repliesFor(await redisPipeline([["SSCAN", traceKey(id, who), cursor, "COUNT", TRACE_SCAN_COUNT]]), 1);
+    const reply = replies?.[0];
+    const next = Array.isArray(reply) && reply.length === 2 ? String(reply[0]) : "";
+    const refs = Array.isArray(reply) && reply.length === 2 ? stringList(reply[1]) : null;
+    if (!/^[0-9]{1,20}$/.test(next) || !refs || refs.length > TRACE_SCAN_MOST) throw new UnknownReplyError("a member's community trace");
+    const part = noTraces();
+    await traceRefsInto(id, who, refs, part);
+    const voted = await votesOf(id, who, part.pollPosts);
+    budget.give(TRACE_SCAN_MOST - traceRefsCommands(refs) - part.pollPosts.length);
+    for (const k of Object.keys(out) as (keyof MemberTraces)[]) (out[k] as unknown[]).push(...part[k]);
+    votes.push(...voted);
+    if (next === "0") return { traces: out, votes };
+    cursor = next;
+  }
+}
+
+/**
+ * The whole community, as scanTraces reads it, a part of the newest posts at a time: each part's records and comment
+ * counts first, then only the posts whose comments fit the page, whole. A post is never cut between pages.
+ */
+async function scanPage(id: string, who: string, budget: ReadBudget, from: string): Promise<MemberTracesPage> {
+  const out = noTraces();
+  const votes: MemberTracesPage["votes"] = [];
+  let after = from;
+  for (;;) {
+    const goOn = (): MemberTracesPage => ({ traces: out, votes, resume: `s:${after}` });
+    const room = Math.min(TRACE_BATCH, Math.floor((budget.left - 1) / 2));
+    if (room < 1) return goOn();
+    budget.take(1);
+    const listed = repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", feedKey(id), after === "+inf" ? "+inf" : `(${after}`, "-inf", "WITHSCORES", "LIMIT", 0, room]]), 1);
+    const flat = listed ? stringList(listed[0]) : null;
+    if (!flat || flat.length % 2 !== 0 || flat.length > 2 * room) throw new UnknownReplyError("a community's posts");
+    const ids = flat.filter((_, i) => i % 2 === 0);
+    const scores = flat.filter((_, i) => i % 2 === 1);
+    if (scores.some((score) => !/^[0-9]{1,15}$/.test(score))) throw new UnknownReplyError("a community's posts");
+    if (!ids.length) return { traces: out, votes };
+    budget.take(2 * ids.length);
+    const heads = await redisPipeline([...ids.map((post) => ["GET", postKey(id, post)]), ...ids.map((post) => ["HLEN", commentsKey(id, post)])]);
+    const posts = ids.map((_, i) => parsePost(heads[i]));
+    const counts = ids.map((_, i) => countOf(heads[ids.length + i]));
+    if (counts.some((n) => n === null)) throw new UnknownReplyError("a community post's comments");
+    // What each post still needs: its comments and two marks; then its poll vote and two marks a comment.
+    const needs = posts.map((p, i) => (p ? 3 + (p.poll ? 1 : 0) + 2 * Math.min(counts[i]!, MAX_COMMENTS_PER_POST) : 0));
+    let take = 0;
+    let planned = 0;
+    while (take < ids.length && planned + needs[take]! <= budget.left) planned += needs[take++]!;
+    if (!take) return goOn();
+    budget.take(planned);
+    const reading = ids.slice(0, take).filter((_, k) => posts[k] !== null);
+    const replies = await redisPipeline(reading.flatMap((post) => [["HGETALL", commentsKey(id, post)], ["SISMEMBER", likesKey(id, post), who], ["SISMEMBER", reportersKey(id, `p:${post}`), who]]));
+    const under = new Map<string, Comment[]>();
+    reading.forEach((post, k) => {
+      const flatComments = replies[k * 3];
+      const values = Array.isArray(flatComments) ? flatComments.filter((_, n) => n % 2 === 1) : flatComments && typeof flatComments === "object" ? Object.values(flatComments as Record<string, string>) : [];
+      under.set(post, values.map(parseComment).filter((c): c is Comment => c !== null));
+    });
+    // A comment written after its count was read is read all the same: what the posts read now need, against what
+    // was planned for them and what the page has left. Without room, the last posts wait for the next page, whole.
+    const rest = (k: number) => (posts[k] ? (posts[k]!.poll ? 1 : 0) + 2 * under.get(ids[k]!)!.length : 0);
+    const left = planned - 3 * reading.length + budget.left;
+    let kept = take;
+    let need = Array.from({ length: kept }, (_, k) => rest(k)).reduce((a, b) => a + b, 0);
+    while (kept > 0 && need > left) need -= rest(--kept);
+    budget.give(planned - 3 * reading.length);
+    if (!kept) return goOn();
+    budget.take(need);
+    const keptPosts = posts.slice(0, kept);
+    const every: { post: string; comment: Comment }[] = [];
+    keptPosts.forEach((p, k) => {
+      if (!p) return;
+      const at3 = reading.indexOf(ids[k]!) * 3;
+      if (p.a === who) out.posts.push({ post: p.id, space: p.sp, title: p.title, text: p.text, at: p.at, edited: p.ed, hidden: p.hid });
+      if (p.poll) out.pollPosts.push(p.id);
+      if (Number(replies[at3 + 1]) === 1) out.likedPosts.push(p.id);
+      if (Number(replies[at3 + 2]) === 1) out.reported.push(`post ${p.id}`);
+      for (const comment of under.get(ids[k]!)!) every.push({ post: ids[k]!, comment });
+    });
+    for (const { post, comment } of every) if (comment.a === who) out.comments.push({ post, comment: comment.id, text: comment.text, at: comment.at, edited: comment.ed, hidden: comment.hid });
+    for (let c = 0; c < every.length; c += TRACE_BATCH) {
+      const slice = every.slice(c, c + TRACE_BATCH);
+      const marks = await redisPipeline(slice.flatMap(({ post, comment }) => [["SISMEMBER", commentLikesKey(id, post, comment.id), who], ["SISMEMBER", reportersKey(id, `c:${post}:${comment.id}`), who]]));
+      slice.forEach(({ post, comment }, k) => {
+        if (Number(marks[k * 2]) === 1) out.likedComments.push({ post, comment: comment.id });
+        if (Number(marks[k * 2 + 1]) === 1) out.reported.push(`comment ${comment.id} under post ${post}`);
+      });
+    }
+    votes.push(...(await votesOf(id, who, keptPosts.flatMap((p) => (p?.poll ? [p.id] : [])))));
+    after = scores[kept - 1]!;
+    if (kept < ids.length) return goOn();
+  }
 }

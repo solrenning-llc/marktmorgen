@@ -158,6 +158,59 @@ async function main(): Promise<void> {
   is(`eight checks of a refused send: at most ${LOW_STOCK_ALERTS_A_STORE_DAY} calls to the provider`, posts - postsBefore <= LOW_STOCK_ALERTS_A_STORE_DAY, true);
   is("each one unknown or no, never told", tries.every((r) => r === "unknown" || r === "no"), true);
   is("the next day it is told", await tellLowStock(store, stuck.product, 4, now + 13 * DAY), "told");
+
+  // Codex X6 on #3725 (7059359246), MEDIUM: a crossing that cannot send (its product already told today, a record
+  // changed under it, a claim taken or unknown) never takes one of the store's places for the day.
+  part("Crossings that cannot send do not take the store's places for the day (Codex X6 on #3725)");
+  const told = await addProduct(OWNER, "Teapot", "", "30", null);
+  const next = await addProduct(OWNER, "Kettle", "", "30", null);
+  if (!told.ok || !next.ok) throw new Error("no product");
+  await setLowStock(store, told.product.id, 5, 10);
+  await setLowStock(store, next.product.id, 5, 10);
+  const day20 = now + 20 * DAY;
+  is("the teapot is told", await tellLowStock(store, told.product, 4, day20), "told");
+  for (let i = 0; i < LOW_STOCK_ALERTS_A_STORE_DAY + 1; i += 1) {
+    await tellLowStock(store, told.product, 20, day20);
+    is(`restocked and down again (${i + 1}): already told today`, await tellLowStock(store, told.product, 4, day20), "no");
+  }
+  is("another product's first crossing that day is still told", await tellLowStock(store, next.product, 4, day20), "told");
+
+  // Codex X6 on #3725 (7059359246): giving back a crossing that reached nobody is one step: the day's mark and the
+  // count seen are put back together, or neither is, whatever fails in between.
+  part("Giving back is whole or nothing (Codex X6 on #3725)");
+  const day30 = new Date(now + 30 * DAY).toISOString().slice(0, 10);
+  const markOf = (id: string) => `nl:alert:${store.statsId}:low:${id}:${day30}`;
+  const seenOf = async (id: string) => (JSON.parse(String((await redis.pipeline([["HGET", `nl:ls:${store.statsId}`, id]]))[0])) as { seen: number }).seen;
+  for (const [label, failing] of [
+    ["the count seen fails to go back", (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]).includes("contact-cas-hset") && String(c[4]) !== ""],
+    ["the day's mark fails to go back", (c: (string | number)[]) => c[0] === "EVAL" && !String(c[1]).includes("contact-cas-hset") && !String(c[1]).includes("store-data")],
+    ["the one step fails", (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]).includes("low-stock-give-back")],
+  ] as const) {
+    const item = await addProduct(OWNER, `Pitcher ${label}`, "", "30", null);
+    if (!item.ok) throw new Error("no product");
+    await setLowStock(store, item.product.id, 5, 10);
+    refuseEmails = true;
+    const healthy = redis.pipeline.bind(redis);
+    let armed = false;
+    redis.pipeline = async (commands) => {
+      if (armed && commands.some(failing)) throw new Error("Redis request failed with status 503");
+      return healthy(commands);
+    };
+    // Armed once the email was tried: only the give-back's own steps fail.
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      armed = true;
+      return realFetch(input, init);
+    }) as typeof fetch;
+    const result = await tellLowStock(store, item.product, 4, now + 30 * DAY).catch(() => "threw");
+    globalThis.fetch = realFetch;
+    redis.pipeline = healthy;
+    refuseEmails = false;
+    is(`${label}: unknown, never told`, result, "unknown");
+    const marked = (await redis.pipeline([["GET", markOf(item.product.id)]]))[0] !== null;
+    const seen = await seenOf(item.product.id);
+    is(`${label}: both put back or neither (mark held: ${marked}, seen: ${seen})`, (marked && seen === 4) || (!marked && seen === 10), true);
+  }
   done();
 }
 

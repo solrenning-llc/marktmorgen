@@ -261,20 +261,42 @@ export function readHubSpotDate(raw: string): { date: string | null; note: strin
 }
 
 /**
- * An address in a cell: its last part letters, digits or dashes, so a dot that ends a sentence is never kept, and no
- * control character, which no address has and the CRM never keeps (oneLine), so the address checked against the
- * store's deleted people is the one the save writes (coordinator's LOW 1 on #2048, 29th batch).
+ * A word of a cell that holds an "@": everything between two separators (a space, ";", ",", "<", ">", brackets or
+ * quotes), whole, so an address is read whole or not at all, never only its last characters before the "@"
+ * (coordinator's LOW 1 on #2048, 32nd batch). The cell is made one line first (oneLine: no control character, which no
+ * address has and the CRM never keeps), so the address checked against the store's deleted people is the one the save
+ * writes (coordinator's LOW 1 on #2048, 29th batch).
  */
-const ADDRESS = /[^\s@;,<>()"'\u0000-\u001f\u007f]{1,64}@[^\s@;,<>()"'\u0000-\u001f\u007f]{1,255}\.[A-Za-z0-9-]{2,}/g;
+const ADDRESS_WORD = /[^\s;,<>()"']*@[^\s;,<>()"']*/g;
+
+/** An address: one "@", something before it, and its last part letters, digits or dashes after a dot. */
+const ADDRESS_SHAPE = /^[^@]+@[^@]+\.[A-Za-z0-9-]{2,}$/;
 
 /** The longest address a deal keeps, once lowercased (parseDeal, lib/crm-rules.ts). */
 export const HUBSPOT_ADDRESS_MAX = 254;
+
+/** The longest part before "@" a deal keeps (parseDeal, lib/crm-rules.ts). */
+export const HUBSPOT_ADDRESS_LOCAL_MAX = 64;
+
+/**
+ * The addresses of a cell, in order, as the save keeps them (one line, well formed, lowercased): each word with an "@",
+ * a dot that ends a sentence left out, that has an address's shape. `local` is the part before "@" as written.
+ */
+function addressesIn(cell: string | undefined): { address: string; local: number }[] {
+  return (oneLine(cell).match(ADDRESS_WORD) ?? []).flatMap((word) => {
+    const address = word.replace(/\.+$/, "");
+    return ADDRESS_SHAPE.test(address) ? [{ address: address.toLowerCase(), local: address.indexOf("@") }] : [];
+  });
+}
 
 /**
  * Why a deal whose associated address the CRM would not keep exactly as read does not come in (an address whose
  * part before "@" is past 64 characters once lowercased, which lowercasing a few letters can do): never kept changed.
  */
 export const ADDRESS_NOT_KEPT_REASON = "This deal's associated contact has an email address a deal here cannot keep as it is written, so this row was not brought in. Fix the address in HubSpot, then export again.";
+
+/** Why a deal whose associated address has more before "@" than a deal keeps does not come in: never cut. */
+export const ADDRESS_LOCAL_TOO_LONG_REASON = `This deal's associated contact has an email address whose part before the @ is longer than ${HUBSPOT_ADDRESS_LOCAL_MAX} characters, which a deal here cannot keep, so this row was not brought in. Fix the address in HubSpot, then export again.`;
 
 /** Why a deal whose associated address is longer than a deal keeps does not come in: the address is never cut. */
 export const ADDRESS_TOO_LONG_REASON = `This deal's associated contact has an email address longer than ${HUBSPOT_ADDRESS_MAX} characters, which a deal here cannot keep, so this row was not brought in. Fix the address in HubSpot, then export again.`;
@@ -420,10 +442,11 @@ export function planHubSpotDeals(file: { header: readonly string[]; rows: readon
     const close = readHubSpotDate(cell(columns.closeDate));
     // Each address as the save keeps it (parseDeal: one line, well formed, lowercased), so the dry run, the check against
     // the store's deleted people and the save all read the same one (coordinator's LOW 1 on #2048, 29th batch).
-    const addresses = columns.contacts.flatMap((at) => (row[at] ?? "").match(ADDRESS) ?? []).map((a) => oneLine(a).toLowerCase());
-    const unique = [...new Set(addresses)];
-    // An address longer than a deal keeps is refused with its row, never cut (coordinator's LOW 2 on #2048, 29th batch).
-    // The address is not said back: it may be someone the store deleted.
+    const found = columns.contacts.flatMap((at) => addressesIn(row[at]));
+    const unique = [...new Set(found.map((a) => a.address))];
+    // An address longer than a deal keeps, or with more before "@", is refused with its row, never cut (coordinator's
+    // LOW 2 on #2048, 29th batch, and LOW 1, 32nd batch). The address is not said back: it may be someone the store deleted.
+    if (found.length && found[0].local > HUBSPOT_ADDRESS_LOCAL_MAX) return refuse(columns.contacts[0], "", ADDRESS_LOCAL_TOO_LONG_REASON);
     if ((unique[0] ?? "").length > HUBSPOT_ADDRESS_MAX) return refuse(columns.contacts[0], "", ADDRESS_TOO_LONG_REASON);
     read.push({
       key: pipeline.toLowerCase(),

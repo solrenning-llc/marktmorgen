@@ -390,8 +390,10 @@ export const HUBSPOT_BODY_BYTES = BATCH_BYTES;
  * The most the answer to one request says for one row of the file beyond what it repeats of the file itself
  * (coordinator's MEDIUM on #2048, 29th batch). Every text of the answer taken from the file (a deal's name, a stage, a
  * pipeline, a Record ID, an amount or a close date as written, a column not brought in) is said at most once, made one
- * line and well formed first, so in JSON it weighs no more than it did in the request: those are held by
- * HUBSPOT_BODY_BYTES. A refusal names its column as HubSpot labels it, never as the file spells it (lib/hubspot-csv.ts).
+ * line and well formed first. Each character of it weighs in JSON no more than it did in the request, except a byte of
+ * the request that is not UTF-8, which is read as the replacement character and so comes back as three bytes
+ * (coordinator's LOW 4 on #2048, 32nd batch): those texts are held at HUBSPOT_ECHO_FACTOR times HUBSPOT_BODY_BYTES. A
+ * refusal names its column as HubSpot labels it, never as the file spells it (lib/hubspot-csv.ts).
  * What a row adds on top: a refusal's longest reason (about 350 characters, the Record ID within it at 40) with its
  * line, column and keys; or a deal already here with the name it has here (90 characters at 3 bytes each); or a deal
  * that comes in with its three notices at the most (an amount, a close date, its addresses: the kept one at 254
@@ -399,6 +401,12 @@ export const HUBSPOT_BODY_BYTES = BATCH_BYTES;
  * tests/hubspot-import.test.ts measures each kind of row at its worst under it.
  */
 export const HUBSPOT_ROW_SENT_BYTES = 2_048;
+
+/**
+ * How many bytes of the answer one byte of the request can come back as: three, a byte that is not UTF-8 being read as
+ * the replacement character (U+FFFD, three bytes); every other character comes back at most as long as it came.
+ */
+export const HUBSPOT_ECHO_FACTOR = 3;
 
 /**
  * The most the answer says of pipelines and stages: at most MAX_PIPELINES pipelines, each made with up to MAX_STAGES
@@ -410,12 +418,12 @@ export const HUBSPOT_PIPELINES_SENT_BYTES = MAX_PIPELINES * (MAX_PIPELINE_NAME *
 /**
  * The most one answer of the route weighs (coordinator's MEDIUM on #2048, 29th batch: a file of 757,129 bytes was
  * answered with 1,436,478, and nothing priced what was sent or received): what it repeats of the file
- * (HUBSPOT_BODY_BYTES), HUBSPOT_ROW_SENT_BYTES for each of HUBSPOT_MAX_ROWS rows, the pipelines' part and the summary's
- * own keys and counts. Priced on every dry run and save with the request's own bytes (tests/plan-cost-registry.ts,
+ * (HUBSPOT_ECHO_FACTOR times HUBSPOT_BODY_BYTES), HUBSPOT_ROW_SENT_BYTES for each of HUBSPOT_MAX_ROWS rows, the
+ * pipelines' part and the summary's own keys and counts. Priced on every dry run and save with the request's own bytes (tests/plan-cost-registry.ts,
  * HUBSPOT_REQUEST_WIRE), and held by the code: an answer that would weigh more is sent with its counts only
  * (hubSpotAnswerBody), so what is sent never passes what is priced.
  */
-export const HUBSPOT_SENT_MAX_BYTES = HUBSPOT_BODY_BYTES + HUBSPOT_MAX_ROWS * HUBSPOT_ROW_SENT_BYTES + HUBSPOT_PIPELINES_SENT_BYTES + 1_024;
+export const HUBSPOT_SENT_MAX_BYTES = HUBSPOT_ECHO_FACTOR * HUBSPOT_BODY_BYTES + HUBSPOT_MAX_ROWS * HUBSPOT_ROW_SENT_BYTES + HUBSPOT_PIPELINES_SENT_BYTES + 1_024;
 
 /** Said when the lists of an answer are left out to keep it within HUBSPOT_SENT_MAX_BYTES. */
 export const HUBSPOT_LISTS_LEFT_OUT = "The list of rows is too long to show, so only the counts are shown. Bring the file in as two smaller files to see each row.";

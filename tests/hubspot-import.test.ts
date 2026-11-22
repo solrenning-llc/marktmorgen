@@ -29,8 +29,8 @@ import { crmAnswer } from "@/lib/crm-response";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { CRM_LOCKED_CHANGE_UNITS, CRM_LOCK_COMMANDS_MOST, CRM_LOCK_WAIT_MS, IMPORT_CRM_DEALS, dealCount, readDeal, readDeals, readOpportunityReview, readPipelines, savePipelineChange, takeCrmLock, writeDeal } from "@/lib/crm";
 import { MAX_DEALS, MAX_DEAL_CENTS, MAX_DEAL_NOTE, MAX_DEAL_TITLE, MAX_STAGES, PIPELINES_BY_TIER, allStages, parseDeal, readFollowUp } from "@/lib/crm-rules";
-import { STAGE_PAST_REASON, pipelineRoomReason } from "@/lib/hubspot-csv";
-import { DEAL_JSON_MAX_BYTES, DEAL_MOVED_MAX_BYTES, ERASED_NOTE, HUBSPOT_BODY_BYTES, HUBSPOT_CHECK_BYTES, HUBSPOT_CHECK_COMMANDS, HUBSPOT_LISTS_LEFT_OUT, HUBSPOT_MAX_ROWS, HUBSPOT_PIPELINES_SENT_BYTES, HUBSPOT_PRINT_BYTES, HUBSPOT_ROW_SENT_BYTES, HUBSPOT_SAVE_BYTES, HUBSPOT_SAVE_COMMANDS, HUBSPOT_SENT_MAX_BYTES, HUBSPOT_IMPORT_WORDS, type HubSpotImportResult, hubSpotAnswerBody, hubSpotDealId, hubSpotDealNote, importHubSpotDeals } from "@/lib/hubspot-import";
+import { ADDRESS_NOT_KEPT_REASON, STAGE_PAST_REASON, pipelineRoomReason } from "@/lib/hubspot-csv";
+import { DEAL_JSON_MAX_BYTES, DEAL_MOVED_MAX_BYTES, ERASED_NOTE, HUBSPOT_BODY_BYTES, HUBSPOT_ECHO_FACTOR, HUBSPOT_CHECK_BYTES, HUBSPOT_CHECK_COMMANDS, HUBSPOT_LISTS_LEFT_OUT, HUBSPOT_MAX_ROWS, HUBSPOT_PIPELINES_SENT_BYTES, HUBSPOT_PRINT_BYTES, HUBSPOT_ROW_SENT_BYTES, HUBSPOT_SAVE_BYTES, HUBSPOT_SAVE_COMMANDS, HUBSPOT_SENT_MAX_BYTES, HUBSPOT_IMPORT_WORDS, type HubSpotImportResult, hubSpotAnswerBody, hubSpotDealId, hubSpotDealNote, importHubSpotDeals } from "@/lib/hubspot-import";
 import { takeImportRows } from "@/lib/imports";
 import { IMPORT_ALLOWANCES, IMPORT_WORST_BYTES_PER_ROW } from "@/lib/import-limits";
 import { LockBusyError, releaseLock } from "@/lib/redis-lock";
@@ -748,6 +748,13 @@ async function main(): Promise<void> {
       is(`an address past 254 ${name} is refused on the board as the address`, [refused.status, refused.body.error], [400, "email"]);
     }
     is("and nothing was saved for them", await dealCount(board.store.statsId!), 1);
+
+    // Coordinator's LOW 2 on #2048 (32nd batch): an address within 64 before the "@" as written, past it once lowercased,
+    // is one the deal would not keep: its row is refused, never brought in with the address dropped.
+    const grows = `${"\u0130".repeat(40)}@example.com`;
+    const grown = await importHubSpotDeals(board.store, { header: HEADER, rows: [row("8980", "Dotted local", "New", "Sales", "", "", `Ada (${grows})`)] }, { write: false });
+    is("control: within 64 before the @ as written, past it once lowercased, within 254 either way", [grows.split("@")[0].length <= 64, grows.toLowerCase().split("@")[0].length > 64, grows.toLowerCase().length <= 254], [true, true, true]);
+    is("such a row is refused as an address a deal cannot keep as written, the address not said back", [grown.ok && grown.summary.added, grown.ok && grown.summary.refused.map((r) => [r.line, r.column, r.value, r.reason])], [0, [[2, "Associated Contact", "", ADDRESS_NOT_KEPT_REASON]]]);
   }
 
   part("Coordinator's LOW 4 on #2048 (22nd batch): a pipeline and a stage with a lone surrogate match the ones they made on the next import");
@@ -820,15 +827,19 @@ async function main(): Promise<void> {
   part("Coordinator's MEDIUM on #2048 (29th batch): what a request carries in and its answer carries out are priced, and the answer never weighs more");
   {
     // The answer as the route sends it, counted in UTF-8, beside the request as it arrived.
-    const wire = async (body: Record<string, unknown>, token: string) => {
-      const sentBody = JSON.stringify(body);
-      const response = await POST(new NextRequest("https://marktmorgen.com/api/store/import/hubspot", { method: "POST", headers: { "content-type": "application/json", cookie: SESSION_COOKIE + "=" + token }, body: sentBody }));
+    // With `invalid`, every "~" of the request is sent as the byte 0xFF, which is not UTF-8: read as the replacement
+    // character, three bytes (coordinator's LOW 4 on #2048, 32nd batch).
+    const wire = async (body: Record<string, unknown>, token: string, invalid = false) => {
+      const bytes = Buffer.from(JSON.stringify(body));
+      if (invalid) for (let i = 0; i < bytes.length; i += 1) if (bytes[i] === 0x7e) bytes[i] = 0xff;
+      const response = await POST(new NextRequest("https://marktmorgen.com/api/store/import/hubspot", { method: "POST", headers: { "content-type": "application/json", cookie: SESSION_COOKIE + "=" + token }, body: bytes }));
       const text = await response.text();
-      return { status: response.status, body: JSON.parse(text), received: Buffer.byteLength(sentBody), sent: Buffer.byteLength(text) };
+      return { status: response.status, body: JSON.parse(text), received: bytes.length, sent: Buffer.byteLength(text) };
     };
-    // What the answer may weigh for this request: what it repeats of the request, at most the request itself, and
-    // HUBSPOT_ROW_SENT_BYTES a row over it, with the pipelines' part and the summary's keys.
-    const bound = (received: number, rows: number) => received + rows * HUBSPOT_ROW_SENT_BYTES + HUBSPOT_PIPELINES_SENT_BYTES + 1_024;
+    // What the answer may weigh for this request: what it repeats of the request, at most three times the request (a
+    // byte that is not UTF-8 comes back as the replacement character), and HUBSPOT_ROW_SENT_BYTES a row over it, with
+    // the pipelines' part and the summary's keys.
+    const bound = (received: number, rows: number) => HUBSPOT_ECHO_FACTOR * received + rows * HUBSPOT_ROW_SENT_BYTES + HUBSPOT_PIPELINES_SENT_BYTES + 1_024;
     const far = (i: number) => 9_000_000_000_000_000 + i;
     const wide = (n: number) => "\u4e2d".repeat(n);
     // 254 characters at 3 bytes each, the longest address a deal keeps: 64, "@", 185, "." and 3.
@@ -855,11 +866,21 @@ async function main(): Promise<void> {
     const ignoredHeader = [...HEADER, ...Array.from({ length: 190 }, (_, i) => `Extra ${i} ${"\\".repeat(1_980)}`)];
     cases.push(["a header of long columns not brought in", await wire({ action: "check", header: ignoredHeader, rows: [row("60000", "One", "New", "Sales")] }, named.session), 1]);
 
+    // Rows refused for a name too long, each name 430 bytes that are not UTF-8, said back as 430 replacement characters.
+    const notUtf8Rows = Array.from({ length: HUBSPOT_MAX_ROWS }, (_, i) => row(String(70_000 + i), "~".repeat(430), "New", "Sales"));
+    cases.push(["every row refused with a long name of bytes that are not UTF-8", await wire({ action: "check", header: HEADER, rows: notUtf8Rows }, named.session, true), notUtf8Rows.length]);
+
+    // A header of columns not brought in, each label bytes that are not UTF-8, each said back once, three times its size.
+    const notUtf8Header = [...HEADER, ...Array.from({ length: 190 }, (_, i) => `Extra ${i} ${"~".repeat(1_980)}`)];
+    cases.push(["a header of long columns of bytes that are not UTF-8", await wire({ action: "check", header: notUtf8Header, rows: [row("71000", "One", "New", "Sales")] }, named.session, true), 1]);
+
     for (const [name, out, rows] of cases) console.log("HubSpot answer", name, JSON.stringify({ status: out.status, error: out.body.error ?? "", received: out.received, sent: out.sent, bound: bound(out.received, rows), leftOut: out.body.summary?.listsLeftOut ?? false }));
     is("control: each file was read and answered with its lists, within the most a request carries", cases.map(([, out]) => [out.status, out.received <= HUBSPOT_BODY_BYTES, out.body.summary?.listsLeftOut ?? false]), cases.map(() => [200, true, false]));
-    is("control: the files say back what they were built to", cases.map(([, out]) => [out.body.summary?.added, out.body.summary?.alreadyThere, out.body.summary?.refused?.length, out.body.summary?.notices?.length]), [[0, MAX_DEALS, MAX_DEALS, 0], [MAX_DEALS, 0, 0, 3 * MAX_DEALS], [0, 0, HUBSPOT_MAX_ROWS, 0], [1, 0, 0, 0]]);
+    is("control: the files say back what they were built to", cases.map(([, out]) => [out.body.summary?.added, out.body.summary?.alreadyThere, out.body.summary?.refused?.length, out.body.summary?.notices?.length]), [[0, MAX_DEALS, MAX_DEALS, 0], [MAX_DEALS, 0, 0, 3 * MAX_DEALS], [0, 0, HUBSPOT_MAX_ROWS, 0], [1, 0, 0, 0], [0, 0, HUBSPOT_MAX_ROWS, 0], [1, 0, 0, 0]]);
     is("each answer weighs at most what it repeats of its request and HUBSPOT_ROW_SENT_BYTES a row", cases.map(([name, out, rows]) => [name, out.sent <= bound(out.received, rows)]), cases.map(([name]) => [name, true]));
-    is("so each is within HUBSPOT_SENT_MAX_BYTES, which counts the most a request carries and HUBSPOT_MAX_ROWS rows", [cases.every(([, out]) => out.sent <= HUBSPOT_SENT_MAX_BYTES), HUBSPOT_SENT_MAX_BYTES >= HUBSPOT_BODY_BYTES + HUBSPOT_MAX_ROWS * HUBSPOT_ROW_SENT_BYTES], [true, true]);
+    is("so each is within HUBSPOT_SENT_MAX_BYTES, which counts three times the most a request carries and HUBSPOT_MAX_ROWS rows", [cases.every(([, out]) => out.sent <= HUBSPOT_SENT_MAX_BYTES), HUBSPOT_SENT_MAX_BYTES >= HUBSPOT_ECHO_FACTOR * HUBSPOT_BODY_BYTES + HUBSPOT_MAX_ROWS * HUBSPOT_ROW_SENT_BYTES], [true, true]);
+    const notUtf8 = cases[cases.length - 2][1];
+    is("bytes that are not UTF-8 come back larger than they arrived, more than twice: what the bound counts them at", [notUtf8.body.summary?.refused?.[0] && (notUtf8.body.summary.refused[0] as { value: string }).value === "\ufffd".repeat(430), notUtf8.sent > 2 * notUtf8.received, HUBSPOT_ECHO_FACTOR], [true, true, 3]);
     // A row's own part at its worst: a deal that comes in with every notice says the most for the least in the request
     // (its amount and close date as written are three bytes and one; its address is counted here, not as said back).
     const perRow = (cases[1][1].sent - 1_024) / cases[1][2];

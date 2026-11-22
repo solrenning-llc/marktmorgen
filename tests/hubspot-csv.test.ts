@@ -18,6 +18,7 @@ import { parseCsv } from "@/lib/csv";
 import { COLUMNS } from "@/lib/imports";
 import { MAX_DEAL_TITLE, MAX_DEALS, MAX_STAGES } from "@/lib/crm-rules";
 import {
+  ADDRESS_LOCAL_TOO_LONG_REASON,
   ADDRESS_TOO_LONG_REASON,
   HUBSPOT_CONTACT_FIELDS,
   HUBSPOT_DEFAULT_STAGES,
@@ -237,6 +238,12 @@ part("Coordinator's LOWs 1 and 2 on #2048 (29th batch): an address read as the s
     is(`an address past 254 ${name} refuses its row, never cut`, [refused.deals.length, refused.refused.map((r) => [r.line, r.column, r.value, r.reason])], [0, [[2, "Associated Contact", "", ADDRESS_TOO_LONG_REASON]]]);
   }
   is("and the reason says what to do, without the address", [/longer than 254 characters/.test(ADDRESS_TOO_LONG_REASON), /Fix the address in HubSpot/.test(ADDRESS_TOO_LONG_REASON)], [true, true]);
+  // Coordinator's LOW 1 on #2048 (32nd batch): the whole address is read, never only its last 64 characters before "@".
+  const longLocal = kept(`Ada (${"a".repeat(100)}@example.com)`);
+  is("an address with more than 64 characters before the @ refuses its row, never read as its last 64", [longLocal.deals.length, longLocal.refused.map((r) => [r.line, r.column, r.value, r.reason])], [0, [[2, "Associated Contact", "", ADDRESS_LOCAL_TOO_LONG_REASON]]]);
+  is("and its reason says what to do, without the address", [/longer than 64 characters/.test(ADDRESS_LOCAL_TOO_LONG_REASON), /Fix the address in HubSpot/.test(ADDRESS_LOCAL_TOO_LONG_REASON)], [true, true]);
+  is("an address of exactly 64 before the @ is kept whole", kept(`${"b".repeat(64)}@example.com`).deals[0].email, `${"b".repeat(64)}@example.com`);
+  is("an address after other words, a semicolon or in brackets is still read whole", [kept("101 Ada@Example.com; 102 grace@example.com").deals[0].email, kept("<ada@example.com>").deals[0].email, kept("Ada (ada@example.com.)").deals[0].email], ["ada@example.com", "ada@example.com", "ada@example.com"]);
 }
 
 part("Coordinator's MEDIUM on #2048 (29th batch): a refusal names its column as HubSpot labels it, never the file's long spelling");

@@ -729,15 +729,19 @@ export async function forgetPerson(store: Store, who: string): Promise<number> {
     const ids = ((await readConfig(statsId))?.devices ?? []).filter((d) => ownerOf(store, d) === person && !forgotten.has(d.id)).map((d) => d.id);
     if (ids.length > 0) await forgetStates(statsId, ids);
     for (const id of ids) forgotten.add(id);
-    let going = 0;
+    let going: string[] = [];
     let left = 0;
     await changeConfig(store, (config) => {
       const theirs = (config?.devices ?? []).filter((d) => ownerOf(store, d) === person);
-      going = theirs.filter((d) => forgotten.has(d.id)).length;
-      left = theirs.length - going;
-      return config && going > 0 ? { ...config, devices: config.devices.filter((d) => !(ownerOf(store, d) === person && forgotten.has(d.id))) } : null;
+      going = theirs.filter((d) => forgotten.has(d.id)).map((d) => d.id);
+      left = theirs.length - going.length;
+      return config && going.length > 0 ? { ...config, devices: config.devices.filter((d) => !(ownerOf(store, d) === person && forgotten.has(d.id))) } : null;
     });
-    removed += going;
+    // An alert sent just before the removal may have written a state back (keepStates, PHONE_STATE_IF_LISTED) between
+    // the HDEL above and the unlisting. Once unlisted, that fence lets nothing more in for these ids, so this second
+    // exact HDEL is final (Claude 1 bUAk on #5105 @ae721007e7: one more HDEL on a removal with devices).
+    if (going.length > 0) await forgetStates(statsId, going);
+    removed += going.length;
     if (left === 0) return removed;
   }
   throw new Error("Their phone devices kept changing while being forgotten.");

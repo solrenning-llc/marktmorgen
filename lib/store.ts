@@ -4073,14 +4073,19 @@ export async function setProductSummary(email: string, id: string, rawSummary: s
 export const MOVE_BESIDE_BATCH = 250;
 /**
  * The most batches one sweep runs: enough for MAX_PRODUCTS. Each batch, under the store's lock, at the most: the lock
- * taken and let go, the store read (withStore), the pool's fields and the room's slots read (two HMGETs), the lock
- * held on (holdLock), then the pool's TAKE_DATA taking the batch's shares and the room's giving them back, each at
- * its inner commands as Upstash bills them (lib/store-data.ts, poolTakeCommands and takeDataCommands; Claude 4's
- * MEDIUM on #4847); and the sweep's mark read and written once a sweep.
+ * taken, counted at every SET NX try of its LOCK_WAIT_MS wait (STORE_LOCK_TRIES_AT_MOST, which tests check equals
+ * lib/read-ceilings.ts STORE_LOCK_TRIES, as CLOSE_RECORD_COMMANDS counts it), the store read (withStore, one GET), the
+ * pool's fields and the room's slots read (two HMGETs), the lock held on (holdLock: EVAL, GET, EXPIRE), then the pool's
+ * TAKE_DATA taking the batch's shares and the room's giving them back, each at its inner commands as Upstash bills them
+ * (lib/store-data.ts, poolTakeCommands and takeDataCommands; Claude 4's MEDIUM on #4847), and the lock let go (EVAL,
+ * GET, DEL; Claude 3's LOW on #4847). Once a sweep: the store read that opens it (storeForEmail, one GET of up to
+ * MAX_STORE_BYTES), the sweep's mark read and the mark written when it ends.
  */
 export const MOVE_BESIDE_BATCHES = Math.ceil(MAX_PRODUCTS / MOVE_BESIDE_BATCH);
-export const MOVE_BESIDE_BATCH_COMMANDS = 3 + 1 + 2 + 1 + poolTakeCommands(MOVE_BESIDE_BATCH) + takeDataCommands(MOVE_BESIDE_BATCH);
-export const MOVE_BESIDE_SWEEP_COMMANDS = 2;
+/** Every SET NX try of the store lock's LOCK_WAIT_MS wait (20, 40, 80 and 160 ms, then every 250 ms), and the last. */
+const STORE_LOCK_TRIES_AT_MOST = 4 + Math.ceil((LOCK_WAIT_MS - (20 + 40 + 80 + 160)) / 250) + 1;
+export const MOVE_BESIDE_BATCH_COMMANDS = STORE_LOCK_TRIES_AT_MOST + 1 + 2 + 3 + 3 + poolTakeCommands(MOVE_BESIDE_BATCH) + takeDataCommands(MOVE_BESIDE_BATCH);
+export const MOVE_BESIDE_SWEEP_COMMANDS = 3;
 
 /**
  * Moves the beside share of a paying store's products that were counted whole in its room (saved before it paid) to
@@ -5614,6 +5619,78 @@ export async function setExitOffer(email: string, productId: string | null): Pro
     return { ok: true, store: await save({ ...store, exitOffer: product.id }) };
   });
   return result ?? { ok: false, reason: "none" };
+}
+
+/**
+ * Takes one price option off sale, or puts it back (642 [WG2]). Only the
+ * flag changes: the option keeps its id, price, file, link and lines, so
+ * whoever already bought it keeps what they have and a membership on it is
+ * billed exactly as before (Stripe is never called here). Off sale, it leaves
+ * every page and checkout (sellableOptions); back on sale, the flag is gone.
+ * Asking for what it already is changes nothing.
+ */
+export async function setOptionOnSale(email: string, id: string, onSale: boolean): Promise<OptionResult> {
+  return onOption(email, id, (product, at) => {
+    if ((product.options[at].offSale === true) !== onSale) return null;
+    const options = product.options.map((option, index) => {
+      if (index !== at) return option;
+      if (!onSale) return { ...option, offSale: true as const };
+      const kept = { ...option };
+      delete kept.offSale;
+      return kept;
+    });
+    return { product: { ...product, options }, removed: [] };
+  });
+}
+
+/** What putting an option back on sale, or taking it off, answers when the plan rule is decided in the write. */
+export type OptionSaleResult =
+  | { ok: true; store: Store; removed: ProductFile[]; planStopped: boolean }
+  | Extract<OptionResult, { ok: false }>
+  | { ok: false; reason: "plan_pauses"; limit?: undefined };
+
+/**
+ * setOptionOnSale, with the payment plan decided under the same store lock as
+ * the write (Claude 5 on #2690): the studio asks before a price put back on
+ * sale stops the plan, but from its own copy of the product, which another tab
+ * may have outdated. `stopsPlan` reads the product as it is stored right then
+ * (planPausedByRestore in lib/product-extras.ts, passed by the route); when
+ * putting the price back would stop the plan and `stopConfirmed` is not
+ * exactly true, nothing is written and the answer is "plan_pauses".
+ * `planStopped` says whether this write did stop it, so the studio's words are
+ * true either way. Taking a price off sale never asks.
+ */
+export async function setOptionOnSaleChecked(
+  email: string,
+  id: string,
+  onSale: boolean,
+  stopsPlan: (product: Product, optionId: string) => boolean,
+  stopConfirmed: boolean,
+): Promise<OptionSaleResult> {
+  let refused = false;
+  let planStopped = false;
+  const result = await onOption(email, id, (product, at) => {
+    refused = false;
+    planStopped = false;
+    if ((product.options[at].offSale === true) !== onSale) return null;
+    if (onSale) {
+      planStopped = stopsPlan(product, id);
+      if (planStopped && stopConfirmed !== true) {
+        refused = true;
+        return { ok: false, reason: "none" };
+      }
+    }
+    const options = product.options.map((option, index) => {
+      if (index !== at) return option;
+      if (!onSale) return { ...option, offSale: true as const };
+      const kept = { ...option };
+      delete kept.offSale;
+      return kept;
+    });
+    return { product: { ...product, options }, removed: [] };
+  });
+  if (refused) return { ok: false, reason: "plan_pauses" };
+  return result.ok ? { ...result, planStopped } : result;
 }
 
 export type LegalResult =

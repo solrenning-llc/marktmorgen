@@ -16,13 +16,14 @@ import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setRecovery, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { createCartCheckout } from "@/lib/cart-checkout";
-import { cartLink, remindAbandoned } from "@/lib/checkout-recovery";
+import { cartLink, forgetRecoveryPerson, remindAbandoned } from "@/lib/checkout-recovery";
 import { askCartReminder, sendAsked } from "@/lib/checkout-ask";
 import { allowanceUsed } from "@/lib/store-allowance";
 import { cartAskIds, cartAskKey } from "@/lib/checkout-ask-cart";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { CART_NOTE_COMMANDS, COMMAND, PER_EMAIL, RECOVERY_ADMIT_EXTRA_COMMANDS, TAKE_COMMANDS, UNIT_COST } from "./plan-cost-registry";
 
 const OWNER = "owner@example.com";
 const checkouts: URLSearchParams[] = [];
@@ -97,7 +98,20 @@ async function main(): Promise<void> {
     ...over,
   });
   is("not without the yes", await remindAbandoned(await load(), left("cs_test_noyes000000001", { consent: { promotions: "opt_out" } }) as never), "skip");
+  // Review of #3929 (MÉDIO, cost): the carts note a cart reminder writes before its mark is priced in the store email
+  // it is (tests/plan-cost-registry.ts, UNIT_COST.email), never left unpriced (MR: an unknown cost is never zero).
+  // Changed (rule 23, Codex N1 on #3929): the note is written inside the reminder's admission script (RECOVERY_ADMIT),
+  // so its commands are counted as the in-memory Redis runs them, a script's own included.
+  const counting = redis.run.bind(redis);
+  let noteCommands = 0;
+  redis.run = ((c: (string | number)[]) => {
+    if (String(c[1] ?? "").startsWith("nl:recover:carts:") && (c[0] === "SADD" || c[0] === "EXPIRE")) noteCommands += 1;
+    return counting(c);
+  }) as typeof redis.run;
   is("with it: one email", await remindAbandoned(await load(), left("cs_test_cartleft000001") as never), "sent");
+  redis.run = counting;
+  is("the carts note's commands are the ones priced", noteCommands, CART_NOTE_COMMANDS);
+  is("and the store email's unit pays them, with the admission's own (RECOVERY_ADMIT_EXTRA_COMMANDS)", UNIT_COST.email >= PER_EMAIL + (TAKE_COMMANDS + CART_NOTE_COMMANDS + RECOVERY_ADMIT_EXTRA_COMMANDS) * COMMAND, true);
   const mail = emails.at(-1)!;
   is("to the buyer, about their cart", [mail.to, mail.subject], ["ana@example.com", "Your cart at Harbor Kitchen"]);
   is("naming everything in it, at today's prices", [mail.text.includes("You put Pantry Guide and Grocery Lists in your cart at Harbor Kitchen"), mail.text.includes("- Pantry Guide: $12"), mail.text.includes("- Grocery Lists: $5")], [true, true, true]);
@@ -105,6 +119,44 @@ async function main(): Promise<void> {
   is("and why it came, the stop link and the creator's address", [mail.text.includes("you agreed, on the checkout page"), mail.text.includes("Stop these reminders"), mail.text.includes("1 Main St, Austin, TX 78701")], [true, true, true]);
   is("never twice for that checkout", await remindAbandoned(await load(), left("cs_test_cartleft000001") as never), "skip");
   is("nor for the same cart, in any order, in a week", await remindAbandoned(await load(), left("cs_test_cartleft000002", { metadata: { store: "harbor", product: b, bump: a, cart: "yes" } }) as never), "skip");
+  // Claude 7 privacy hunt: deleting the person (lib/person-erasure.ts) forgets their cart's once-a-week mark, a hash of
+  // their address with what was in the cart, as it forgets each product's; before, the cart's stayed its whole week.
+  // Codex G / Codex L, confirmed by Claude 2 (15 November 2026): the carts note is read even when the store lists no
+  // product today (every one removed after the reminder), so an erasure still finds and deletes the cart's mark.
+  is("a store with no products still erases the indexed cart mark", await forgetRecoveryPerson((await load()).statsId, [], "ana@example.com"), 1);
+  is("no marks or cart note remain for a second erasure", await forgetRecoveryPerson((await load()).statsId, [], "ana@example.com"), 0);
+  is("nor with the products named", await forgetRecoveryPerson((await load()).statsId, [a, b], "ana@example.com"), 0);
+  is("so the mark no longer holds back that cart", await remindAbandoned(await load(), left("cs_test_cartleft000005", { metadata: { store: "harbor", product: b, bump: a, cart: "yes" } }) as never), "sent");
+  // Codex X7 on #3929 (MÉDIO): a carts-note member not in the one shape a reminder writes ("cart:" and its sorted ids)
+  // is a reply that does not read: the erasure is not finished, and the note, the only way to the real mark, is kept.
+  {
+    const noteKeys = ((await redis.pipeline([["SCAN", "0", "MATCH", "nl:recover:carts:*"]]))[0] as [string, string[]])[1];
+    is("the cart reminder wrote its note", noteKeys.length, 1);
+    const marksBefore = ((await redis.pipeline([["SCAN", "0", "MATCH", "nl:recover:once:*"]]))[0] as [string, string[]])[1].length;
+    await redis.pipeline([["SADD", noteKeys[0], "garbled"]]);
+    const refused = await forgetRecoveryPerson((await load()).statsId, [], "ana@example.com").then(() => "finished", (error: Error) => error.name);
+    is("a note with a member of another shape refuses the erasure", refused, "UnknownReplyError");
+    is("and keeps the note and the mark it leads to", [(await redis.pipeline([["EXISTS", noteKeys[0]]]))[0], ((await redis.pipeline([["SCAN", "0", "MATCH", "nl:recover:once:*"]]))[0] as [string, string[]])[1].length], [1, marksBefore]);
+    await redis.pipeline([["SREM", noteKeys[0], "garbled"]]);
+    is("once the note reads, the retry erases the cart's mark", await forgetRecoveryPerson((await load()).statsId, [], "ana@example.com"), 1);
+    is("and the cart can be reminded of again", await remindAbandoned(await load(), left("cs_test_cartleft000016", { metadata: { store: "harbor", product: b, bump: a, cart: "yes" } }) as never), "sent");
+  }
+  // The note naming a cart's mark outlives the mark: its expiry is set just before the mark is taken.
+  const keysOf = async (pattern: string) => ((await redis.pipeline([["SCAN", "0", "MATCH", pattern]]))[0] as [string, string[]])[1];
+  const ttls = async (keys: string[]) => keys.length ? (await redis.pipeline(keys.map((k) => ["TTL", k]))) as number[] : [];
+  const noteTtl = Math.min(...(await ttls(await keysOf("nl:recover:carts:*"))));
+  is("the carts note outlives every once-a-week mark it may name", noteTtl > Math.max(...(await ttls(await keysOf("nl:recover:once:*")))), true);
+  // A note whose write is not answered exactly is unknown: nothing is claimed or sent, so no cart mark is ever taken
+  // without the note that lets deleting the person find it. Changed (rule 23, Codex N1 on #3929): the note and the
+  // claims are one script now (RECOVERY_ADMIT), so its reply is the one lost.
+  const pipe = redis.pipeline;
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:recovery-admit:") ? [] : pipe(commands)) as typeof redis.pipeline;
+  const mailsBefore = emails.length, marksBefore = (await keysOf("nl:recover:once:*")).length;
+  const lost = await remindAbandoned(await load(), left("cs_test_cartleft000006", { customer_details: { email: "eve@example.com" } }) as never).then(() => "resolved", (error: Error) => error.name);
+  redis.pipeline = pipe;
+  is("a lost reply to the carts note stops the reminder as unknown", lost, "UnknownReplyError");
+  is("with no mark taken and nothing sent", [(await keysOf("nl:recover:once:*")).length, emails.length], [marksBefore, mailsBefore]);
   paidSessions = [{ id: "cs_test_paid0000000001", status: "complete", payment_status: "paid", metadata: { store: "harbor", product: b } }];
   is("nor to somebody who has paid for one of them since", await remindAbandoned(await load(), left("cs_test_cartleft000003", { customer_details: { email: "ben@example.com" } }) as never), "skip");
   paidSessions = [];

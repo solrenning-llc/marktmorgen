@@ -153,7 +153,7 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
       `At a ${percent(EXAMPLE_PROCESSING_BPS)} rate, which is only an example, the part of Stripe's fee that falls on the VAT is ${m(f.stripePartCents)}.`,
     ],
     refused: VAT_REFUSED_SALES.map((r) => r.words),
-    refusedPlaces: Object.values(VAT_REFUSED_PLACE_NAMES),
+    refusedPlaces: Object.entries(VAT_REFUSED_PLACE_NAMES).filter(([code]) => places.includes(VAT_REFUSED_PLACE_SIDE[code] ?? "EU")).map(([, name]) => name),
     refusedLead: REFUSED_LEAD(where),
     figures: f,
     since: sinceOf(places, input, now, f.currency, allowances),
@@ -175,6 +175,11 @@ export const VAT_REFUSED_PLACE_NAMES: Readonly<Record<string, string>> = {
   ES: "Spain", EA: "Ceuta and Melilla", IC: "the Canary Islands", MC: "Monaco", GF: "French Guiana", GP: "Guadeloupe",
   MQ: "Martinique", RE: "Réunion", YT: "Mayotte", MF: "Saint Martin", AX: "the Åland Islands", IM: "the Isle of Man",
 };
+/** Which side's checkout refuses each place: only the side that is charging names its own (#5086, coord 9b51's LEVE 2). */
+export const VAT_REFUSED_PLACE_SIDE: Readonly<Record<string, VatFeePlace>> = {
+  ES: "EU", EA: "EU", IC: "EU", MC: "EU", GF: "EU", GP: "EU", MQ: "EU", RE: "EU", YT: "EU", MF: "EU", AX: "EU", IM: "UK",
+};
+
 /** The item that leads the places, shown with each place on its own line under it (AX274 3.1.5; Claude 1 2as's LEVE). */
 export const VAT_REFUSED_PLACES_WORDS = "Buyers in these places";
 
@@ -196,7 +201,7 @@ export const VAT_REFUSED_SALES: readonly { words: string; checks: readonly strin
   { words: "A product with nothing to deliver online and no live call, so we cannot tell what it is", checks: ["euSupplyOf"] },
   { words: VAT_REFUSED_PLACES_WORDS, checks: ["euCheckout"] },
   { words: "A bundle that combines a live call with something delivered online", checks: ["consumerGate"] },
-  { words: "A sale where the buyer's internet address shows no country, or a different country from their billing address", checks: ["checkoutEvidence"] },
+  { words: "A sale where the buyer's internet address or billing address shows no country, or the two show different countries", checks: ["checkoutEvidence"] },
   { words: "Any sale whose VAT, or the cost of receiving it, we cannot work out, such as one in a currency with no checked exchange rate", checks: ["no sourced rate, or no sterling rate", "the cost of receiving the VAT is unknown"] },
 ];
 

@@ -340,7 +340,7 @@ test("every route and gate that refuses an EU or UK consumer is named: PayPal, t
   // Evidence that disagrees (internet address in Germany, billing address in France) is refused, never charged on a guess.
   const split = euSaleGate({ product: ESS, headers, form: new URLSearchParams({ billing_country: "FR" }), records: COLLECT, vatSwitch: EU_ON, now: NOW, rates: RATES });
   assert.equal(split.ok, false);
-  assert.ok(listed.some((w) => /internet address shows no country, or a different country from their billing address/.test(w)), "and the list names it");
+  assert.ok(listed.some((w) => /internet address or billing address shows no country, or the two show different countries/.test(w)), "and the list names it");
   // A product with no answer on whether it is an e-publication is refused.
   assert.equal(euSaleGate({ product: { ...ESS, publication: null } as never, headers, form, records: COLLECT, vatSwitch: EU_ON, now: NOW, rates: RATES }).ok, false);
   assert.ok(listed.some((w) => /not yet marked, on the product, as not an e-publication/.test(w)), "and the list names it");
@@ -410,8 +410,9 @@ test("one table: each sale a gate refuses while it collects, with the item of th
   const rows: { case: string; refused: () => boolean; item: RegExp }[] = [
     { case: "a bundle of a live call and a link, to France", refused: () => !sale(mixed, "FR", "FR", mixedMembers).ok, item: /combines a live call with something delivered online/ },
     { case: "a bundle of a live call and a link, to the UK", refused: () => !sale(mixed, "GB", "GB", mixedMembers).ok, item: /combines a live call with something delivered online/ },
-    { case: "no country from the internet address, billing in Germany", refused: () => !sale(ESS, null, "DE").ok, item: /internet address shows no country/ },
-    { case: "internet address in Germany, billing in France", refused: () => !sale(ESS, "DE", "FR").ok, item: /a different country from their billing address/ },
+    { case: "no country from the internet address, billing in Germany", refused: () => !sale(ESS, null, "DE").ok, item: /billing address shows no country/ },
+    { case: "internet address in Germany, no billing country", refused: () => !sale(ESS, "DE", null).ok, item: /billing address shows no country/ },
+    { case: "internet address in Germany, billing in France", refused: () => !sale(ESS, "DE", "FR").ok, item: /the two show different countries/ },
     { case: "no answer on the e-publication question", refused: () => !sale({ ...ESS, publication: null } as never, "DE", "DE").ok, item: /not yet marked, on the product, as not an e-publication/ },
     { case: "a product that ships", refused: () => !sale({ ...ESS, link: null, shipping: { countries: ["DE"] } } as never, "DE", "DE").ok, item: /^Products that ship$/ },
     { case: "nothing to deliver online and no call", refused: () => !sale({ ...ESS, link: null }, "DE", "DE").ok, item: /nothing to deliver online and no live call/ },
@@ -426,4 +427,72 @@ test("one table: each sale a gate refuses while it collects, with the item of th
   assert.deepEqual(sale(ESS, "FR", "FR"), { ok: true, collect: { country: "FR" } });
   assert.equal(sale(call, "FR", "FR").ok, true, "a live call alone is sold as before");
   assert.deepEqual(sale({ ...ESS, bundle: ["link"] }, "FR", "FR", mixedMembers), { ok: true, collect: { country: "FR" } }, "the bundle without the call is charged");
+});
+
+test("the behaviour holds the future: every kind the words promise is charged, every item of the list is a refusal (coord 9b51's MEDIUM, LEVE 1)", () => {
+  const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!;
+  const both: SwitchInput = { ...EU_ON, uk: UK_ON.uk, reviews: [...(EU_ON.reviews ?? []), ...(UK_ON.reviews ?? [])] };
+  const at = (country: string) => ({ headers: new Headers({ "x-vercel-ip-country": country }), form: new URLSearchParams({ billing_country: country }) });
+  const gate = (product: EuSupplyFields, country: string) => euSaleGate({ product, ...at(country), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES });
+  const online = { ...ESS, link: null };
+  // What the words promise, by name: "a download, a link, license keys, a recorded course or a private podcast".
+  const promised: Record<string, EuSupplyFields> = {
+    "a download": { ...online, file: { name: "pack.zip" } },
+    "a link": ESS,
+    "license keys": { ...online, keys: { count: 10 } },
+    "a recorded course": { ...online, course: { lessons: 3 } },
+    "a private podcast": { ...online, podcast: { episodes: 2 } },
+  };
+  for (const text of [words.terms.join(" "), words.pricing.join(" ")]) for (const name of Object.keys(promised)) assert.ok(text.includes(name), `the words promise ${name}`);
+  for (const [name, product] of Object.entries(promised)) {
+    for (const country of ["DE", "GB"]) assert.deepEqual(gate(product, country), { ok: true, collect: { country } }, `${name} to ${country} is charged VAT, as promised`);
+  }
+  // Every item of the list is a refusal, each proved by what the code does.
+  const body = (extra: Record<string, string>) => new URLSearchParams({ mode: "payment", "line_items[0][quantity]": "1", "line_items[0][price_data][currency]": "eur", "line_items[0][price_data][unit_amount]": "10000", "adaptive_pricing[enabled]": "false", ...extra });
+  const input = { country: "DE", chooseYourPrice: false, buyerCurrencyLive: false, now: NOW, costsCents: () => 10 };
+  const throws = (run: () => void) => { try { run(); return false; } catch { return true; } };
+  const onlyConsumerGate = (file: string) => {
+    const source = readFileSync(join(process.cwd(), file), "utf8");
+    return source.includes("consumerGate(") && !source.includes("euSaleGate(") && !source.includes("euCartGate(") && !consumerGate({ product: ESS, ...at("DE") }).ok;
+  };
+  const call = { ...online, call: { minutes: 30 } } as never as EuSupplyFields;
+  const proofs: Record<string, () => boolean> = {
+    "Products that ship": () => !gate({ ...online, shipping: { countries: ["DE"] } } as never, "DE").ok,
+    "Subscriptions and memberships": () => throws(() => applyEuCollect(body({ "subscription_data[metadata][x]": "1" }), input)),
+    "Payment plans": () => throws(() => applyEuCollect(body({ mode: "subscription" }), input)),
+    "Pay-what-you-want prices": () => throws(() => applyEuCollect(body({}), { ...input, chooseYourPrice: true })),
+    "Discount or promotion codes": () => throws(() => applyEuCollect(body({ allow_promotion_codes: "true" }), input)) && throws(() => applyEuCollect(body({ "discounts[0][coupon]": "x" }), input)),
+    "Prices converted to the buyer's own currency": () => throws(() => applyEuCollect(body({}), { ...input, buyerCurrencyLive: true })),
+    "More than one of the same product": () => throws(() => applyEuCollect(body({ "line_items[0][quantity]": "2" }), input)),
+    "Other products added to one product's checkout": () => throws(() => applyEuCollect(body({ "line_items[1][quantity]": "1", "line_items[1][price_data][currency]": "eur", "line_items[1][price_data][unit_amount]": "500" }), input)) && readFileSync(join(process.cwd(), "app/api/store/checkout/route.ts"), "utf8").includes("gateBoxes: (boxes) => consumerGate("),
+    "A bundle in a cart": () => !euCartGate({ products: [{ ...ESS, bundle: ["link"] }], ...at("DE"), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES }).ok,
+    "Payments through PayPal": () => onlyConsumerGate("app/api/store/paypal/checkout/route.ts"),
+    "The offer shown after paying": () => onlyConsumerGate("lib/upsell.ts"),
+    "Tips and payment requests": () => onlyConsumerGate("app/api/store/tip/route.ts") && onlyConsumerGate("app/api/store/pay-request/route.ts"),
+    "E-books and other e-publications, which are books, newspapers or magazines read on a screen": () => !gate({ ...ESS, publication: true }, "DE").ok && !gate({ ...ESS, publication: true }, "GB").ok,
+    "A product you have not yet marked, on the product, as not an e-publication": () => !gate({ ...ESS, publication: null } as never, "DE").ok,
+    "A product with nothing to deliver online and no live call, so we cannot tell what it is": () => !gate(online, "DE").ok,
+    "A bundle that combines a live call with something delivered online": () => !euSaleGate({ product: { ...ESS, bundle: ["link", "call"] }, members: new Map([["link", ESS], ["call", call]]), ...at("FR"), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES }).ok,
+    "Buyers in these places": () => words.refusedPlaces.length > 0 && !gate(ESS, "ES").ok && !gate(ESS, "IM").ok,
+    "A sale where the buyer's internet address or billing address shows no country, or the two show different countries": () =>
+      !euSaleGate({ product: ESS, headers: new Headers(), form: new URLSearchParams({ billing_country: "DE" }), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES }).ok
+      && !euSaleGate({ product: ESS, headers: new Headers({ "x-vercel-ip-country": "DE" }), form: new URLSearchParams(), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES }).ok
+      && !euSaleGate({ product: ESS, headers: new Headers({ "x-vercel-ip-country": "DE" }), form: new URLSearchParams({ billing_country: "FR" }), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES }).ok,
+    "Any sale whose VAT, or the cost of receiving it, we cannot work out, such as one in a currency with no checked exchange rate": () => throws(() => applyEuCollect(body({}), { ...input, costsCents: () => null })),
+  };
+  assert.deepEqual([...words.refused].sort(), Object.keys(proofs).sort(), "every item of the list has its own proof, and no proof is of an item the list lacks");
+  for (const [item, proof] of Object.entries(proofs)) assert.ok(proof(), `refused, as the list says: ${item}`);
+});
+
+test("the places follow the side that is charging (coord 9b51's LEVE 2)", () => {
+  const euOnly = [COLLECT[0], { ...COLLECT[1], treatment: "refuse-consumers" }];
+  const ukOnly = [{ ...COLLECT[0], treatment: "refuse-consumers" }, COLLECT[1]];
+  const eu = vatFeeWords({ records: euOnly, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!;
+  const uk = vatFeeWords({ records: ukOnly, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!;
+  const all = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!;
+  assert.match(eu.refusedLead.terms, /consumer in the European Union;/);
+  assert.ok(eu.refusedPlaces.includes("Spain") && !eu.refusedPlaces.includes("the Isle of Man"), "EU only: no UK place under the European Union");
+  assert.match(uk.refusedLead.terms, /consumer in the United Kingdom;/);
+  assert.deepEqual(uk.refusedPlaces, ["the Isle of Man"], "UK only: no EU place under the United Kingdom");
+  assert.deepEqual(all.refusedPlaces, Object.values(VAT_REFUSED_PLACE_NAMES), "both: every place");
 });

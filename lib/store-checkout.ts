@@ -57,6 +57,8 @@ import { LANGUAGES } from "@/lib/store-language";
 import { type CameFrom, hasSource } from "@/lib/came-from";
 import { applyTax, applyTaxDocuments, refusedTaxDocuments, withoutTaxDocuments } from "@/lib/tax";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods, reusableMethod, saveCardForOffers } from "@/lib/instant-pay";
+import { applyEuCollect } from "@/lib/eu-vat-collect";
+import type { EuVatRate } from "@/lib/eu-vat-amount";
 import { BUYER_CURRENCY_LIVE, DEFAULT_BUYER_CURRENCY_MODE, accountSettlementCurrency, applyBuyerCurrency, buyerCurrencyPlan, hasApplicationFee, hasTaxRates, settlesIn } from "@/lib/buyer-currency";
 import { activePwyw, pwywPriceId } from "@/lib/pay-what-you-want";
 import { setWhileStoreLive } from "@/lib/store-live-cache";
@@ -208,6 +210,13 @@ export async function createCheckout(
      */
     gateBoxes?: (boxes: { product: Listing; members?: ReadonlyMap<string, Listing> }[]) => { ok: true } | { ok: false; reason: "refused" | "billing" };
     /**
+     * EU VAT to collect on top (789 [IV1] step 3, lib/eu-vat-collect.ts): given by the route only when its EU gate
+     * (euSaleGate) said to collect it, which it never does while DEEMED_SUPPLIER_RECORDS is empty and the switch is
+     * off. Put on the built body after the share, or the checkout is refused (EuVatCollectRefused) before Stripe is
+     * asked. `costsCents`, `now` and `rates` are for tests only.
+     */
+    euVat?: { country: string; costsCents?: (vatCents: number, currency: string) => number | null; now?: Date; rates?: readonly EuVatRate[] };
+    /**
      * The fingerprint of the secret the buyer's browser keeps, when an upsell
      * follows: the card is then kept for payments made while they are there.
      */
@@ -354,7 +363,8 @@ export async function createCheckout(
   // A call is booked for a time, through its own door, never bought blind.
   if (product.call) throw new Error("A call is booked, not bought directly");
   // A physical product is shipped to the buyer who pays for it: not as a gift or for a group (lib/shipping.ts).
-  // Without the EU/EEA countries while its safety fields are not filled (618 [SZ2], lib/physical-legal-ship.ts).
+  // Without the EU/EEA countries while its safety fields are not filled (618 [SZ2], lib/physical-legal-ship.ts), and
+  // without the EU and the UK until the opening, where consumerGate refuses a buyer too (789 [IV1], lib/eu-vat-goods.ts).
   const shipping = shippingNow(product);
   if (shipping && shipping.countries.length === 0) throw new Error("This is not shipped anywhere right now");
   if (shipping && (extras.gift || extras.group)) throw new Error("This is shipped to the buyer who pays for it");
@@ -813,6 +823,10 @@ export async function createCheckout(
   // The share of the sale, when the store's plan has one. A choose-your-price
   // line is still at its floor here, which is the least it can be.
   applyShare(body, store, { recurring, least: leastPaid(linesTotal(body).cents, mayComeOff) });
+  // EU VAT on top, when the route's EU gate said to collect it (lib/eu-vat-collect.ts): worked out on this line's real
+  // amount, added as its own line and through the platform's fee, after the share so the share never carries it. A
+  // sale that cannot carry it exactly is refused here, before Stripe is asked. Never set while nothing collects.
+  if (extras.euVat) applyEuCollect(body, { ...extras.euVat, chooseYourPrice: pwyw !== null, buyerCurrencyLive: BUYER_CURRENCY_LIVE });
 
   // The buyer's own currency (22 [E5] unit 3a, lib/buyer-currency.ts): off
   // while BUYER_CURRENCY_LIVE is false, so Stripe's conversion stays off as

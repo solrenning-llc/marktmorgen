@@ -419,6 +419,8 @@ export async function endPlanNow(store: Store, id: string): Promise<boolean> {
     if (!sub || !ENDED.includes(String(sub.status))) return false;
     for (const status of ["open", "draft"] as const) {
       const listed = await onPlatform("GET", `/invoices?${new URLSearchParams({ subscription: id, status, limit: "10" })}`, undefined, { version: AT });
+      // An unnamed or differently named reply cannot prove that no invoice remains payable.
+      if (ownValue(listed, "object") !== "list") return false;
       // Read exactly (rule 24): a page that is not a list, a row with no id of its own or of another status than the one
       // asked for proves nothing about what is still payable, so the plan is not taken as ended (false; the daily job
       // tries again). readStripePage throws on a page that does not read, caught below as false too.

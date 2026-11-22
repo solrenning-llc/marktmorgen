@@ -87,7 +87,7 @@ import { type Learner, TOKEN_PATTERN, emailKey, learnerFrom, storeKey } from "@/
 import type { Listing, Store } from "@/lib/store";
 import { KIND, itemFor, readListings } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
-import { importedFor } from "@/lib/imported-purchases";
+import { importedRowsFor } from "@/lib/imported-purchases";
 import {
   CREATOR,
   type CommunityConfig,
@@ -390,10 +390,14 @@ async function gotFree(store: Store, email: string, ids: ReadonlySet<string>): P
 }
 
 /** Which of these products the creator brought this address over holding, alone or in a bundle. */
-async function broughtOver(store: Store, email: string, ids: ReadonlySet<string>): Promise<string[]> {
+async function broughtOver(store: Store, email: string, ids: ReadonlySet<string>, any = false): Promise<string[]> {
   if (!store.pastBuyers || ids.size === 0) return [];
-  const given = await importedFor(store, email);
-  return given.flatMap((p) => [p.productId, ...(p.items ?? [])]).filter((id) => ids.has(id));
+  const { found, unknown } = await importedRowsFor(store, email);
+  const held = found.flatMap((p) => [p.productId, ...(p.items ?? [])]).filter((id) => ids.has(id));
+  // A row that does not read is never "not brought over" (Claude 6's LEVE 1 on #2794): what read still counts, and
+  // while an asked product is left unfound (with `any`, while none is found) the holding is unknown, asked again next time (readHoldings' catch).
+  if (unknown && (any ? held.length === 0 : new Set(held).size < ids.size)) throw new UnknownReplyError("imported purchases");
+  return held;
 }
 
 /**
@@ -573,7 +577,7 @@ async function readHoldings(store: Store, email: string, ids: readonly string[],
   try {
     // Stripe last: the other two are one read each.
     for (const id of await gotFree(store, email, new Set(products.filter((p) => p.free).map((p) => p.id)))) held.add(id);
-    const brought = enough() ? [] : (await broughtOver(store, email, new Set(products.map((p) => p.id))));
+    const brought = enough() ? [] : (await broughtOver(store, email, new Set(products.map((p) => p.id)), any));
     for (const id of brought) held.add(id);
     const left = new Set(products.filter((p) => !p.free && !held.has(p.id)).map((p) => p.id));
     if (!enough() && left.size > 0) {

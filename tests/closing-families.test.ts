@@ -36,6 +36,8 @@ const TIMED_IN_CODE: Record<string, [string, string]> = {
   "nl:pp:press:": ["lib/paypal-payouts.ts", "PRESS_PACE_SECONDS"],
   // A store's search index (a capped part): one record kept ten minutes.
   "nl:search:": ["lib/store-search-index.ts", "SEARCH_INDEX_SECONDS"],
+  // A store's Blob folder listed once a day, its total and the hourly tally (a capped part): each key kept three days.
+  "nl:storage:blob:": ["lib/blob-tally.ts", "BLOB_TALLY_KEEP_SECONDS"],
   // The mark of a passed-over Stripe event (a capped part): set with the same expiry as every event mark.
   "nl:hooks:evt:": ["lib/webhooks.ts", "EVENT_SECONDS"],
   "nl:call:confirmed:": ["lib/calls.ts", "CONFIRMED_SECONDS"],
@@ -51,6 +53,8 @@ const TIMED_IN_CODE: Record<string, [string, string]> = {
   // A PayPal payout item's mark, written with its expiry by the batches before 8 November 2026 and only read now
   // (lib/affiliates.ts, #4606): gone by that expiry (Claude 4 cloud Z on #4614).
   "nl:pp:item:": ["lib/paypal-payouts.ts", "ITEM_MARK_SECONDS"],
+  // A buyer's submission upload not yet closed (750 [CD1]): written with the vault upload's own day.
+  "nl:sub:door:": ["lib/vault-rules.ts", "UPLOAD_SECONDS"],
 };
 /** A person's records across stores that hold a store's id among others and run out by the quarter (lib/joined-stores.ts), and the file that writes them. */
 const PERSON_RECORDS: Record<string, string> = {

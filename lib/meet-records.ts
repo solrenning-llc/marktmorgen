@@ -32,7 +32,7 @@
  * never wait on Google or Zoom.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type MeetProvider, isMeetProvider } from "@/lib/call-setup";
+import { type MeetProvider, cleanRoom, isMeetProvider } from "@/lib/call-setup";
 
 /** What is still to be done on the provider's side for a record. */
 export type MeetTodo = "" | "create" | "patch" | "delete" | "guests";
@@ -148,9 +148,48 @@ export function parseRecord(raw: unknown): MeetRecord | null {
 
 /** The records for these scopes, in order; null where there is none. */
 export async function readRecords(scopes: string[]): Promise<(MeetRecord | null)[]> {
-  if (!scopes.length || !isRedisConfigured()) return scopes.map(() => null);
+  if (!scopes.length) return [];
+  const unknown = () => new Error("The meeting records could not be confirmed.");
+  if (!isRedisConfigured()) throw unknown();
   const replies = await redisPipeline(scopes.map((scope) => ["GET", recordKey(scope)]));
-  return replies.map(parseRecord);
+  if (!Array.isArray(replies) || replies.length !== scopes.length) throw unknown();
+  const found: (MeetRecord | null)[] = [];
+  for (let i = 0; i < scopes.length; i += 1) {
+    const slot = Object.getOwnPropertyDescriptor(replies, String(i));
+    if (!slot || !Object.hasOwn(slot, "value")) throw unknown();
+    if (slot.value === null) {
+      found.push(null);
+      continue;
+    }
+    if (typeof slot.value !== "string") throw unknown();
+    try {
+      const value = JSON.parse(slot.value) as Record<string, unknown>;
+      const record = parseRecord(slot.value);
+      if (!record || record.scope !== scopes[i]) throw unknown();
+      const strings = ["statsId", "handle", "callsId", "product", "session", "id", "account", "link", "tz", "title", "error"] as const;
+      if (strings.some((key) => typeof value[key] !== "string" || value[key] !== record[key])) throw unknown();
+      if (["group", "made", "gone"].some((key) => typeof value[key] !== "boolean") || !TODOS.includes(value.todo as MeetTodo)) throw unknown();
+      for (const key of ["start", "end", "tries", "next", "updates"] as const) {
+        if (typeof value[key] !== "number" || !Number.isSafeInteger(value[key]) || value[key] < 0) throw unknown();
+      }
+      for (const key of ["guests", "added"] as const) {
+        const entries = value[key];
+        if (!Array.isArray(entries) || entries.length !== record[key].length || !entries.every((entry, at) => typeof entry === "string" && entry === record[key][at])) throw unknown();
+      }
+      // These two fields were added later; absence keeps the original store-owned-calendar default.
+      for (const key of ["host", "calendar"] as const) {
+        if (Object.hasOwn(value, key) && (typeof value[key] !== "string" || value[key] !== record[key])) throw unknown();
+      }
+      if (!record.gone && record.link) {
+        const room = cleanRoom(record.link);
+        if (room === null || room === "bad") throw unknown();
+      }
+      found.push(record);
+    } catch {
+      throw unknown();
+    }
+  }
+  return found;
 }
 
 export async function readRecord(scope: string): Promise<MeetRecord | null> {

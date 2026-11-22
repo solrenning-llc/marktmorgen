@@ -1253,10 +1253,12 @@ const currencyOf = (row: { currency?: unknown }) => (typeof row.currency === "st
  * truly (lib/store-export.ts, its orders' note): the PayPal sales not all read
  * ("paypal"), more pages on the Stripe account than were read
  * ("stripe-pages"), a Stripe sale whose currency was not named, kept with
- * its currency blank ("currency"), or a paid Stripe sale whose amount was not
- * whole minor units, left out rather than written as zero ("amount").
+ * its currency blank ("currency"), a paid Stripe sale whose date did not
+ * read, left out of every amount ("unread", MM-E2E-OT-3), or a paid
+ * Stripe sale whose amount was not whole minor units, left out rather than
+ * written as zero ("amount").
  */
-export type SalesGap = "paypal" | "stripe-pages" | "currency" | "amount";
+export type SalesGap = "paypal" | "stripe-pages" | "currency" | "unread" | "amount";
 
 /**
  * Every paid sale of this store since `since` (seconds), newest first, read
@@ -1328,6 +1330,13 @@ export async function readPaidSales(store: Store, since: number, pages: number):
     const meta = row.metadata ?? {};
     if (!handles.has(meta.store ?? "")) return;
     if (row.status !== "complete" || row.payment_status !== "paid") return;
+    // A paid sale whose date does not read is never today: left out, the reading partial (MM-E2E-OT-3). Its amount is
+    // read just below (#4386, "amount").
+    if (!Number.isSafeInteger(row.created) || (row.created as number) < 0) {
+      partial = true;
+      gaps.add("unread");
+      return;
+    }
     const details = (raw.customer_details ?? {}) as { address?: { country?: unknown } | null };
     const country = typeof details.address?.country === "string" && /^[A-Z]{2}$/.test(details.address.country) ? details.address.country : "";
     // A paid checkout whose amount is not whole minor units is no sale of zero: it is left out and the reading is
@@ -1345,7 +1354,7 @@ export async function readPaidSales(store: Store, since: number, pages: number):
       gaps.add("currency");
     }
     sales.push({
-      created: typeof row.created === "number" ? row.created * 1000 : Date.now(),
+      created: (row.created as number) * 1000,
       product: meta.product ?? "",
       cents,
       currency,
@@ -1360,6 +1369,12 @@ export async function readPaidSales(store: Store, since: number, pages: number):
   const extras = walk("/payment_intents?limit=100", (pi) => {
     const meta = (pi.metadata ?? {}) as Record<string, string>;
     if (meta.kind !== "upsell" || !handles.has(meta.store ?? "") || pi.status !== "succeeded") return;
+    // A charge whose date does not read is never today (MM-E2E-OT-3); its amount is read just below (#4386, "amount").
+    if (!Number.isSafeInteger(pi.created) || (pi.created as number) < 0) {
+      partial = true;
+      gaps.add("unread");
+      return;
+    }
     // A succeeded charge always took money, so a missing, zero or unreadable amount is not a sale of zero: it is left
     // out and the reading is incomplete (issue #4386).
     const cents = minorUnits(pi.amount);
@@ -1373,7 +1388,7 @@ export async function readPaidSales(store: Store, since: number, pages: number):
       gaps.add("currency");
     }
     sales.push({
-      created: typeof pi.created === "number" ? pi.created * 1000 : Date.now(),
+      created: (pi.created as number) * 1000,
       product: meta.product ?? "",
       cents,
       currency: currencyOf(pi),
@@ -1775,15 +1790,16 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
       if (takes !== true) continue;
       const raw = row.payment_intent;
       const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
-      const cents = typeof row.amount === "number" && Number.isSafeInteger(row.amount) && row.amount > 0 ? row.amount : 0;
-      // A dispute that takes the money is never for nothing: an amount not read is a gap, not zero (CX-123 rule 24).
-      if (!cents) {
+      // A dispute that takes money but whose amount or date does not read is never dropped as
+      // nothing taken: the reading is partial (rule 24, MM-E2E-OT-2).
+      if (!Number.isSafeInteger(row.amount) || (row.amount as number) <= 0 || !Number.isSafeInteger(row.created) || (row.created as number) < 0) {
         partial = true;
         continue;
       }
+      const cents = row.amount as number;
       const currency = currencyOf(row);
       if (!currency) partial = true;
-      out.push({ created: typeof row.created === "number" ? row.created * 1000 : 0, cents, currency, paymentIntent: pi });
+      out.push({ created: (row.created as number) * 1000, cents, currency, paymentIntent: pi });
     }
     if (!list.has_more) break;
     const last = rows[rows.length - 1];
@@ -1817,6 +1833,12 @@ async function readRefunds(store: Store, since: number, pages: number): Promise<
       // requires_action give nothing back and are skipped as before.
       if (row.status === "failed" || row.status === "canceled" || row.status === "requires_action") continue;
       if (row.status !== "succeeded" && row.status !== "pending") { partial = true; continue; }
+      // A refund whose date does not read cannot be placed in any window: the reading is partial, never "no refund"
+      // (rule 24, MM-E2E-OT-1). One whose amount does not read is kept below with the reading partial (#4370).
+      if (!Number.isSafeInteger(row.created) || (row.created as number) < 0) {
+        partial = true;
+        continue;
+      }
       const currency = currencyOf(row);
       if (!currency) partial = true;
       // Money given back needs a positive whole number of cents; without one
@@ -1825,7 +1847,7 @@ async function readRefunds(store: Store, since: number, pages: number): Promise<
       const amountRead = typeof row.amount === "number" && Number.isSafeInteger(row.amount) && row.amount > 0;
       if (!amountRead) partial = true;
       out.push({
-        created: typeof row.created === "number" ? row.created * 1000 : 0,
+        created: (row.created as number) * 1000,
         cents: amountRead ? (row.amount as number) : 0,
         currency,
         paymentIntent: typeof row.payment_intent === "string" ? row.payment_intent : "",

@@ -16,10 +16,9 @@ import { BENEFIT_MARK_VALUE_BYTES } from "./plan-cost-registry";
  * - giveBenefit writes only an address markableBy accepts (what sign-in accepts, less controls, lone surrogates, quote,
  *   backslash, <, > and &), checked before anything is read or counted, so an accented address still marks
  *   (coordinator cd33);
- * - the marks of the rows owed are read in base64 (readOwedMarks; coordinator 6800, after Claude 6 UoHAG's MEDIUM:
- *   nothing dated says the database sends non-ASCII text unescaped), so a mark crosses as 4 bytes for every 3 kept,
- *   plus its quotes and comma, whatever the encoder does with text. A person's copy reads their marks as before
- *   (coordinator 1df5).
+ * - the marks are read in base64 (coordinator 6800, after Claude 6 UoHAG's MEDIUM: nothing dated says the database
+ *   sends non-ASCII text unescaped), so a mark crosses as 4 bytes for every 3 kept, plus its quotes and comma, whatever
+ *   the encoder does with text.
  * The seconds are counted at 11 digits.
  */
 const at = 99_999_999_999;
@@ -93,18 +92,16 @@ async function main() {
   await check("read as text under an escaping encoder, the worst mark would cost more than declared (why it is read in base64)", () => {
     assert.ok(asText(fill("\u4e2d")) > BENEFIT_MARK_VALUE_BYTES, `${asText(fill("\u4e2d"))}`);
   });
-  await check("the capped reader of the marks owed asks for base64; the copy's reader reads as before", () => {
+  await check("both readers of a person's marks ask for base64, never text", () => {
     const source = readFileSync("lib/tier-benefits.ts", "utf8");
-    const owed = source.match(/redisPipeline\w*\(slice\.map\(\(p\) => \["HMGET", marksKey/g) ?? [];
-    const copy = source.match(/redisPipeline\w*\(slice\.map\(\(p\) => \["HGETALL", marksKey/g) ?? [];
-    assert.deepEqual(owed, ['redisPipelineBase64(slice.map((p) => ["HMGET", marksKey'], "readOwedMarks asks for base64");
-    // A person's copy (readMarks) has no cost line yet, so this PR leaves its read as main has it (coordinator 1df5).
-    assert.deepEqual(copy, ['redisPipeline(slice.map((p) => ["HGETALL", marksKey'], "readMarks reads as before");
+    const readers = source.match(/redisPipeline\w*\(slice\.map\(\(p\) => \["(HGETALL|HMGET)", marksKey/g) ?? [];
+    assert.equal(readers.length, 2, "two readers of a person's marks");
+    for (const reader of readers) assert.ok(reader.startsWith("redisPipelineBase64("), reader);
   });
-  // The person's copy (lib/person-copy.ts, benefitMarksOf) reads a person's marks too, as main reads them. No route
-  // hands the copy to anybody yet, so no request pays for that read today, and tests/plan-cost-registry.ts has no line
-  // for it (coordinator 87e4; costing the whole copy is its own item, 1df5). The door that first serves the copy
-  // brings that line with it: until then this check fails it.
+  // The person's copy (lib/person-copy.ts, benefitMarksOf) reads a person's marks too, now in base64: at most
+  // MAX_BENEFITS_KEPT fields and values, about 4/3 of what is kept. No route hands the copy to anybody yet, so no
+  // request pays for that read today; tests/plan-cost-registry.ts has no line for it (coordinator 87e4). The door
+  // that first serves the copy brings that line with it: until then this check fails it.
   await check("no route serves the person's copy without a cost line for it", () => {
     const files = readdirSync("app", { recursive: true, encoding: "utf8" }).filter((f) => /\.(ts|tsx)$/.test(f));
     const doors = files.filter((f) => /@\/lib\/person-copy["']/.test(readFileSync(`app/${f}`, "utf8")));

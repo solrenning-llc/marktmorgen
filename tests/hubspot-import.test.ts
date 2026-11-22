@@ -26,12 +26,12 @@ import { POST } from "@/app/api/store/import/hubspot/route";
 import { POST as CRM_POST } from "@/app/api/store/crm/route";
 import { crmAnswer } from "@/lib/crm-response";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { CRM_LOCK_WAIT_MS, IMPORT_CRM_DEALS, dealCount, readDeal, readDeals, readOpportunityReview, readPipelines, savePipelineChange, takeCrmLock, writeDeal } from "@/lib/crm";
+import { CRM_LOCKED_CHANGE_UNITS, CRM_LOCK_COMMANDS_MOST, CRM_LOCK_WAIT_MS, IMPORT_CRM_DEALS, dealCount, readDeal, readDeals, readOpportunityReview, readPipelines, savePipelineChange, takeCrmLock, writeDeal } from "@/lib/crm";
 import { MAX_DEALS, MAX_DEAL_CENTS, MAX_STAGES, PIPELINES_BY_TIER, allStages, parseDeal } from "@/lib/crm-rules";
 import { STAGE_PAST_REASON, pipelineRoomReason } from "@/lib/hubspot-csv";
-import { DEAL_JSON_MAX_BYTES, HUBSPOT_CHECK_BYTES, HUBSPOT_CHECK_COMMANDS, HUBSPOT_IMPORT_WORDS, type HubSpotImportResult, hubSpotDealId, hubSpotDealNote, importHubSpotDeals } from "@/lib/hubspot-import";
+import { DEAL_JSON_MAX_BYTES, HUBSPOT_CHECK_BYTES, HUBSPOT_CHECK_COMMANDS, HUBSPOT_MAX_ROWS, HUBSPOT_PRINT_BYTES, HUBSPOT_SAVE_BYTES, HUBSPOT_SAVE_COMMANDS, HUBSPOT_IMPORT_WORDS, type HubSpotImportResult, hubSpotDealId, hubSpotDealNote, importHubSpotDeals } from "@/lib/hubspot-import";
 import { takeImportRows } from "@/lib/imports";
-import { IMPORT_ALLOWANCES } from "@/lib/import-limits";
+import { IMPORT_ALLOWANCES, IMPORT_WORST_BYTES_PER_ROW } from "@/lib/import-limits";
 import { LockBusyError, releaseLock } from "@/lib/redis-lock";
 import { windowId } from "@/lib/allowance-window";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
@@ -692,6 +692,59 @@ async function main(): Promise<void> {
     const resend = await call({ action: "save", ...file }, again.session);
     is("the same file sent again, as an unconfirmed save asks, is answered with every deal already here", [resend.status, resend.body.summary?.added, resend.body.summary?.alreadyThere], [200, 0, 3]);
     is("and takes none of the month's rows", await rowsNow(), spent);
+  }
+
+  // Counts what a request sends and reads through the Redis double.
+  const measured = async <T,>(work: () => Promise<T>): Promise<{ out: T; commands: number; bytes: number }> => {
+    const real = redis.pipeline.bind(redis);
+    let commands = 0;
+    let bytes = 0;
+    try {
+      redis.pipeline = (async (sent: (string | number)[][]) => {
+        commands += sent.length;
+        bytes += Buffer.byteLength(JSON.stringify(sent));
+        const got = await real(sent);
+        bytes += Buffer.byteLength(JSON.stringify(got));
+        return got;
+      }) as typeof redis.pipeline;
+      return { out: await work(), commands, bytes };
+    } finally { redis.pipeline = real; }
+  };
+
+  part("Coordinator's LOW a on #2048 (18th batch): a file's 2,000 addresses are read before the deals' ceiling, and priced");
+  {
+    // Every deal here named once more, and as many new ones, each with its own address: the prints of all 2,000 are read,
+    // and every deal here whole, before the file is refused for the store's deals.
+    const both = [...fatDeals.map((_, i) => row(String(8000 + i), `Deal ${i}`, "New", "Sales", "", "", `here${i}@example.com`)), ...fatDeals.map((_, i) => row(String(9000 + i), `New ${i}`, "New", "Sales", "", "", `new${i}@example.com`))];
+    is("control: the file has HUBSPOT_MAX_ROWS rows, every one with an address", [both.length, both.every((r) => r[7].includes("@"))], [HUBSPOT_MAX_ROWS, true]);
+    const wide = await measured(() => call({ action: "check", header: HEADER, rows: both }, heavy.session));
+    console.log("HubSpot dry run, every address", JSON.stringify({ commands: wide.commands, bytes: wide.bytes }));
+    is("refused for the store's deals, after reading them", wide.out.body.error, "too_many");
+    is("within HUBSPOT_CHECK_BYTES and HUBSPOT_CHECK_COMMANDS, every print counted", [wide.bytes <= HUBSPOT_CHECK_BYTES, wide.commands <= HUBSPOT_CHECK_COMMANDS, HUBSPOT_CHECK_BYTES >= MAX_DEALS * DEAL_JSON_MAX_BYTES + HUBSPOT_MAX_ROWS * HUBSPOT_PRINT_BYTES], [true, true, true]);
+  }
+
+  part("Coordinator's LOWs b and c on #2048 (18th batch): a save that reads everything and writes nothing stays within HUBSPOT_SAVE_COMMANDS and HUBSPOT_SAVE_BYTES");
+  {
+    // The same 1,000 deals, each already here at DEAL_JSON_MAX_BYTES (more than a row's IMPORT_WORST_BYTES_PER_ROW): the
+    // save takes the CRM lock, reads all of them whole, and has nothing to write.
+    const fatSave = await measured(() => call({ action: "save", header: HEADER, rows: fatDeals.map((_, i) => row(String(8000 + i), `Deal ${i}`, "New", "Sales")) }, heavy.session));
+    console.log("HubSpot save at its worst", JSON.stringify({ commands: fatSave.commands, bytes: fatSave.bytes }));
+    is("answered: every deal already here, nothing added", [fatSave.out.status, fatSave.out.body.summary?.added, fatSave.out.body.summary?.alreadyThere], [200, 0, MAX_DEALS]);
+    is("within HUBSPOT_SAVE_COMMANDS and HUBSPOT_SAVE_BYTES", [fatSave.commands <= HUBSPOT_SAVE_COMMANDS, fatSave.bytes <= HUBSPOT_SAVE_BYTES], [true, true]);
+    is("each new deal's write past its row is priced: HUBSPOT_SAVE_BYTES holds MAX_DEALS of them over HUBSPOT_CHECK_BYTES", HUBSPOT_SAVE_BYTES - HUBSPOT_CHECK_BYTES >= MAX_DEALS * Math.max(0, DEAL_JSON_MAX_BYTES - IMPORT_WORST_BYTES_PER_ROW), true);
+  }
+
+  part("Coordinator's LOW f on #2048 (18th batch): the CRM lock adds at most CRM_LOCK_COMMANDS_MOST commands, within one more studio request");
+  {
+    const lockStore = await paidStore("hubslockcount");
+    const lockId = lockStore.store.statsId!;
+    const holding = await takeCrmLock(lockId);
+    const waited = await measured(async () => { try { await takeCrmLock(lockId); return "taken"; } catch (error) { return error instanceof LockBusyError ? "busy" : "other"; } });
+    await releaseLock(holding);
+    // Every try is one SET; the release and the write's own look at the lock are four more.
+    is("a lock held elsewhere is waited for, then busy", waited.out, "busy");
+    is("its tries, the release and the write's look fit CRM_LOCK_COMMANDS_MOST", waited.commands + 4 <= CRM_LOCK_COMMANDS_MOST, true);
+    is("which fits the more studio requests a change counts (twenty commands each)", [CRM_LOCK_COMMANDS_MOST <= 20 * (CRM_LOCKED_CHANGE_UNITS - 1), CRM_LOCKED_CHANGE_UNITS], [true, 3]);
   }
 
   done();

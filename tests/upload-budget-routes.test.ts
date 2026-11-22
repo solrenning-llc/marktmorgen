@@ -40,6 +40,37 @@ test('authentication and ownership refuse requests before consuming capacity',as
  begin();state.auth=false;assert.equal((await vaultPost(open())).status,401);assert.equal(calls.length,0);state.auth=true;state.owns=false;state.lessonOwned=false;assert.equal((await vaultPost(open())).status,404);assert.equal(calls.length,0);assert.deepEqual(state.events,[]);
 });
 
+test('a storage refusal, decided before any upload session is opened, leaves the monthly upload budget untouched',async()=>{
+ const row=begin(),id='store:'+state.store.statsId+':';
+ for(const [refusal,status,error] of [['storage_limit',400,'storage_full'],['storage_limit',400,'storage_full'],['storage_pending',409,'uploads_pending'],['storage_busy',409,'uploads_pending']] as const){
+  state.storageRefusal=refusal;const response=await vaultPost(open(5));assert.equal(response.status,status);assert.equal((await response.json()).error,error);
+ }
+ assert.deepEqual(state.events,[]);
+ for(const name of ['opens','bytes','controls'])assert.equal(row.get(id+name),undefined,name+' of the store were not taken');
+ for(const name of ['opens','bytes','controls'])assert.equal(row.get('company:'+name),'0','company '+name+' were not taken');
+ assert.equal(row.get('slots:creator'),String(policy.fundedStores.creator),'no funded slot was claimed');
+ state.storageRefusal=null;assert.equal((await vaultPost(open(5))).status,200);assert.equal(row.get(id+'opens'),'1');assert.equal(row.get(id+'bytes'),'5');assert.deepEqual(state.events,['provider:open']);
+});test('a spent upload budget is refused before storage is measured or cleaned up, with nothing written',async()=>{
+ const row=begin(),id='store:'+state.store.statsId+':';
+ // Starts spent: the policy gives a store two.
+ assert.equal((await vaultPost(open(1))).status,200);assert.equal((await vaultPost(open(1))).status,200);
+ const measured=state.storageLimits.length,before=new Map(row),commands=calls.length;
+ const refused=await vaultPost(open(1));assert.equal(refused.status,503);assert.equal((await refused.json()).error,'upload_budget_unavailable');
+ assert.equal(state.storageLimits.length,measured,'no storage measurement or cleanup');assert.deepEqual(state.events,['provider:open','provider:open']);
+ assert.deepEqual(new Map(row),before,'the ledger is unchanged');assert.equal(calls.length-commands,1,'one read-only check');
+ // Bytes spent: the policy gives a store ten.
+ const bytesRow=begin();assert.equal((await vaultPost(open(9))).status,200);
+ const bytesMeasured=state.storageLimits.length,bytesBefore=new Map(bytesRow);
+ assert.equal((await vaultPost(open(2))).status,503);assert.equal(state.storageLimits.length,bytesMeasured);assert.deepEqual(new Map(bytesRow),bytesBefore);
+ assert.equal(bytesRow.get(id+'bytes'),'9');
+});
+test('an unknown or malformed reply to the budget check refuses before storage is measured',async()=>{
+ for(const reply of [[],['1'],[true],[2],[1,1],[null]]){
+  begin();settings({reply});const response=await vaultPost(open(1));settings({reply:null});
+  assert.equal(response.status,503,JSON.stringify(reply));assert.equal(state.storageLimits.length,0);assert.deepEqual(state.events,[]);assert.equal(calls.length,1);
+ }
+});
+
 test('actual R2 route passes each paid tier storage limit to admission',async()=>{
  for(const tier of ['creator','pro','scale'] as const){begin();state.store.tier=tier;assert.equal((await vaultPost(open())).status,200);assert.deepEqual(state.storageLimits,[PAID_STORAGE_BYTES[tier]]);}
 });

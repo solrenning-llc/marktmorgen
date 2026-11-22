@@ -12,9 +12,11 @@
  *   - kept full every day, at the dearest store a file may be in
  *     (STORAGE_PER_GB), it is the month's ceiling;
  *   - each plan's net with it, by TX's reading, keeps MR's positive cent;
- *   - docs/pictures-figure-proposal.md is exactly what the renderer writes.
+ *   - docs/pictures-figure-proposal.md holds only its fixed text: the record is generated on demand by
+ *     node scripts/pictures-figure.mjs (owner, 20/11/2026), and every check above reads the output computed now.
  */
 import { readFileSync, existsSync } from "node:fs";
+import { onDemandReport, onDemandText } from "./generated-on-demand";
 import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { MAX_REVIEW_PHOTO_BYTES } from "@/lib/review-summary";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
@@ -43,6 +45,6 @@ const doc = renderPicturesFigure();
 is("a PROPOSAL, said first", doc.split("\n").slice(0, 4).join("\n").includes("PROPOSAL"), true);
 is("it names the sweep of pictures attached to nothing as a later unit, never deleting one in use", [/attached to nothing/.test(doc), /never/.test(doc)], [true, true]);
 is("it has an Acessibilidade section", doc.includes("## Acessibilidade"), true);
-is("docs/pictures-figure-proposal.md is current (node scripts/pictures-figure.mjs)", existsSync("docs/pictures-figure-proposal.md") ? readFileSync("docs/pictures-figure-proposal.md", "utf8") : "", doc);
+is("docs/pictures-figure-proposal.md holds only its fixed text: the record is generated on demand (node scripts/pictures-figure.mjs)", existsSync("docs/pictures-figure-proposal.md") ? readFileSync("docs/pictures-figure-proposal.md", "utf8") : "", onDemandText(onDemandReport("docs/pictures-figure-proposal.md")));
 
 done();

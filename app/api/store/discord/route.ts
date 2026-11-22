@@ -83,7 +83,14 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, role: made });
     }
     if (body.action === "kick") {
-      await saveServer(room, { ...server, kick: body.on === true });
+      // Kept only while the store is live (lib/discord-store.ts, saveServer): erased or being erased since it was read,
+      // or an answer that does not read, is "unavailable" (503), never ok (Codex L-20261120-0732).
+      try {
+        await saveServer(store, { ...server, kick: body.on === true });
+      } catch (error) {
+        if (error instanceof UnknownReplyError) return no("unavailable", 503);
+        throw error;
+      }
       await log(body.on === true ? "set Discord to remove people whose access ended" : "set Discord to keep people whose access ended");
       return Response.json({ ok: true });
     }

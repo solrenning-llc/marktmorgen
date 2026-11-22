@@ -18,6 +18,7 @@ import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-loc
 import { OrdersPausedError } from "@/lib/order-admission";
 import { DigitalConsentMissing } from "@/lib/digital-consent";
 import type { Listing, Store } from "@/lib/store";
+import { lowStockTouched } from "@/lib/low-stock";
 import { storeLiveFence } from "@/lib/store-live-cache";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type LimitState, essentialLimitState, giveBackLimit } from "@/lib/request-guard";
@@ -171,9 +172,11 @@ export async function stockLeft(store: Store, product: Listing, now = Date.now()
  * stockLeft, but null when any lapsed hold's checkout could not be read
  * (Stripe failed, or answered something that is neither settled nor expired):
  * the count is then a guess on the safe side, never proof of "Sold out"
- * (Claude 6's LOW on #1732). Used where a refusal is decided.
+ * (Claude 6's LOW on #1732). Used where a refusal is decided, and by the
+ * low-stock job (lib/low-stock-alert.ts, lowStockJobDeps), which never tells
+ * a creator their units fell on a guess.
  */
-async function stockLeftKnown(store: Store, product: Listing, now = Date.now()): Promise<number | null> {
+export async function stockLeftKnown(store: Store, product: Listing, now = Date.now()): Promise<number | null> {
   const count = await countStock(store, product, now, true);
   return count && count.unknown === 0 ? count.left : null;
 }
@@ -609,7 +612,11 @@ export async function withCartStockHolds<T extends { id: string }>(
     if (error instanceof UnknownReplyError) return null;
     throw error;
   });
-  if (bound === 1) return { ok: true, value };
+  if (bound === 1) {
+    // The units left changed: the creator's low-stock numbers among these are checked by the mail job at once (623 [SZ7]).
+    await lowStockTouched(store, limited.map((product) => product.id));
+    return { ok: true, value };
+  }
   // Nobody is sent to a checkout whose units are not proven its own, nor to one of a store that is gone: it is closed at
   // Stripe, and only Stripe's "expired" lets its holds go (HDEL only removes: on a gone store's record it writes nothing).
   if (store.stripeAccountId) {

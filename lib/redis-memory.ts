@@ -361,6 +361,32 @@ export class MemoryRedis {
           }
           return this.run(["SET", keys[2], argv[1]]);
         }
+        // lib/discord-store.ts SAVE_SERVER_IF_LIVE: the connected server written only while its store is live and not
+        // being erased, by the rule above; each inner call counted as Upstash bills it.
+        if (key.startsWith("-- marktmorgen:discord-server-live:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, live, erasing, target, field, value, statsId, ref] = args;
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          if (call(["HGET", erasing, field]) !== null) return 0;
+          if (statsId === "") {
+            if (call(["GET", live]) !== ref) return 0;
+          } else {
+            const raw = call(["GET", live]);
+            if (raw === null) return 0;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -1;
+            }
+            if (!record || typeof record !== "object") return -1;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+          }
+          call(["SET", target, value]);
+          return 1;
+        }
         // lib/closed-store-data.ts CLOSING_UNHELD: what the walk deletes of what an id a live store may hold names,
         // only while no live store holds it, read in the same step.
         if (key.startsWith("-- marktmorgen:closing-unheld:v1\n")) {
@@ -1639,6 +1665,24 @@ export class MemoryRedis {
           this.run(["EXPIRE", ledger, seconds]); return 1;
         }
 
+        // lib/creator-research-room.ts KEEP_RESEARCH_ANSWER: the answer kept only while the list is under its ceiling, in one step.
+        if (key.startsWith("-- marktmorgen:research-answer-keep:v3\n") && args[0] === "1" && args.length === 10) {
+          const [, list, max, row, today, share, perDay, reserve, account, plain] = args;
+          const length = this.run(["LLEN", list]) as number;
+          if (length >= Number(max)) return 0;
+          let reserved = 0;
+          for (const kept of this.run(["LRANGE", list, 0, -1]) as string[]) {
+            if (!kept.includes('"reservedFor":"')) continue;
+            reserved += 1;
+            if (account !== "" && kept.includes(`"reservedFor":"${account}"`)) return "already";
+          }
+          if (account !== "" && reserved < Number(reserve)) return this.run(["LPUSH", list, row]);
+          const room = Number(max) - Number(reserve);
+          const anonymous = length - reserved;
+          if (anonymous >= room) return 0;
+          const cap = Math.max(1, Math.min(Number(perDay), Math.floor((room - anonymous) / Number(share))));
+          return Number(today) > cap ? `busy:${cap}` : this.run(["LPUSH", list, plain]);
+        }
         // lib/redis-lock.ts releaseLock and holdLock: the lock deleted, or made to last, only while it holds the token.
         if (key.startsWith("-- marktmorgen:release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, lock, token] = args;
@@ -2257,6 +2301,39 @@ export class MemoryRedis {
           else this.run(["SET", copy, value, "EX", seconds]);
           return gone;
         }
+        // lib/store-live-copy.ts, KEEP_UNLESS_ERASED_LIVE: READING_COPY behind the store's fence in the same step:
+        // the store's key gone, no longer holding its ref, or its erasing mark set, the copy goes and [0] is answered.
+        if (key.startsWith("-- marktmorgen:reading-copy-live:v3\n") && args[0] === "4" && args.length >= 11) {
+          const [, live, erasing, copy, erased, field, value, seconds, statsId, ref, ...prints] = args;
+          this.scriptCalls += 2;
+          let alive = this.run(["HGET", erasing, field]) === null;
+          if (alive && statsId === "") alive = this.run(["GET", live]) === ref;
+          else if (alive) {
+            const raw = this.run(["GET", live]);
+            if (raw !== null) {
+              let record: unknown;
+              try {
+                record = JSON.parse(String(raw));
+              } catch {
+                return -1;
+              }
+              if (!record || typeof record !== "object" || Array.isArray(record)) return -1;
+              alive = (record as { statsId?: unknown }).statsId === statsId;
+            } else alive = false;
+          }
+          if (!alive) {
+            this.scriptCalls += 1;
+            this.run(["DEL", copy]);
+            return [0];
+          }
+          this.scriptCalls += 1;
+          const found = this.run(["HMGET", erased, ...prints]) as unknown[];
+          const gone = found.flatMap((one, i) => (one !== null ? [i + 1] : []));
+          this.scriptCalls += 1;
+          if (gone.length) this.run(["DEL", copy]);
+          else this.run(["SET", copy, value, "EX", seconds]);
+          return gone;
+        }
         // lib/paypal-delivery.ts, KEEP_RECEIPT: a receipt kept and noted for the person's deletion, unless their print
         // says they were deleted at or after the payment (0, nothing written); else [1 when this SET kept it or 0, the
         // receipt kept], the second dropped when nothing is kept, as Redis ends a Lua table at its first nil.
@@ -2402,6 +2479,26 @@ export class MemoryRedis {
           const [, batch, field, expected] = args;
           if (this.run(["HGET", batch, field]) !== expected) return 0;
           return this.run(["HDEL", batch, field]);
+        }
+        // lib/stock-alerts.ts ADD_PLACE: a new place only while absent and under the ceiling; else only over the entry read.
+        if (key.startsWith("-- marktmorgen:stock-alert-add:v1\n") && args[0] === "1" && args.length === 7) {
+          const [, list, field, expected, next, max, seconds] = args;
+          const current = this.run(["HGET", list, field]);
+          if (expected === "") {
+            if (current !== null) return 0;
+            if ((this.run(["HLEN", list]) as number) >= Number(max)) return -1;
+          } else if (current !== expected) return 0;
+          this.run(["HSET", list, field, next]);
+          this.run(["EXPIRE", list, seconds]);
+          return 1;
+        }
+        // lib/stock-alerts.ts CONFIRM_PLACE: a back-in-stock place confirmed only over exactly the entry read.
+        if (key.startsWith("-- marktmorgen:stock-alert-confirm:v1\n") && args[0] === "1" && args.length === 6) {
+          const [, list, field, expected, next, seconds] = args;
+          if (this.run(["HGET", list, field]) !== expected) return 0;
+          this.run(["HSET", list, field, next]);
+          this.run(["EXPIRE", list, seconds]);
+          return 1;
         }
         // lib/closed-store-data.ts BATCH_SWAP: one batch entry rewritten, or dropped when the new text is empty, only
         // over exactly the text read.
@@ -3192,6 +3289,29 @@ export class MemoryRedis {
             });
           }
           return n;
+        }
+        // lib/low-stock-alert.ts LOW_STOCK_GIVE_BACK: a crossing that reached nobody put back in one step, the day's mark
+        // and the count seen both or neither, and the store's place when asked (Codex X6 on #3725).
+        if (key.startsWith("-- marktmorgen:low-stock-give-back:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, mark, record, dayCount, value, field, wroteSha, before, place] = args;
+          this.scriptCalls += 1;
+          if (this.run(["GET", mark]) !== value) return 0;
+          const current = this.run(["HGET", record, field]);
+          if (typeof current !== "string" || createHash("sha1").update(current).digest("hex") !== wroteSha) return 0;
+          this.run(["HSET", record, field, before]);
+          this.run(["DEL", mark]);
+          if (place === "1") this.run(["DECR", dayCount]);
+          return 1;
+        }
+        // lib/low-stock-alert.ts LOW_STOCK_RESCHEDULE: a product's next check, set only while its score is still the one
+        // the job read (Codex X6's LOW on #3814).
+        if (key.startsWith("-- marktmorgen:low-stock-reschedule:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, set, entry, readAt, next] = args;
+          this.scriptCalls += 1;
+          const score = this.run(["ZSCORE", set, entry]);
+          if (score === null || Number(score) !== Number(readAt)) return 0;
+          this.run(["ZADD", set, "XX", next, entry]);
+          return 1;
         }
         if (key.startsWith("-- marktmorgen:form-keep:v1\n") && args[0] === "1" && args.length === 4) {
           const listKey = args[1];

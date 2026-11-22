@@ -11,6 +11,7 @@ import { checkSubmissionFile, maySubmit } from "@/lib/submission-rules";
 import { abortSubmissionDoor, closeSubmissionDoor, liveCount, openSubmissionDoor, readSetupFor, signSubmissionDoor } from "@/lib/submission-store";
 import { PIECES_PER_ASK } from "@/lib/vault-rules";
 import { SUBMISSIONS_READY } from "@/lib/submission-switch";
+import { storeLiveFence } from "@/lib/store-live-cache";
 
 /** Uploads one buyer may open on a store in an hour: a few tries at the right file, never a file host. */
 const SUBMISSION_OPENS_PER_HOUR = 10;
@@ -121,7 +122,10 @@ export async function POST(request: NextRequest) {
       // cannot tell a deleted person from any other, so nothing opens (Codex L-20261120-2049).
       if (!store.listId) return no("files_unavailable", 503);
       if (!(await takeBuyerAction(store))) return no("resting", 503);
-      const opened = await openSubmissionDoor({ ...where, data: store, listId: store.listId, email: learner!.email, setup: asked, file, nowSeconds: now });
+      // The store's identity, carried to the vault so a provider reply that comes back after the store's erasure
+      // writes nothing (lib/vault-storage.ts with input.fence, as app/api/store/vault/route.ts; Codex G-20261121-0801).
+      const fence = await storeLiveFence(store);
+      const opened = await openSubmissionDoor({ ...where, data: store, listId: store.listId, email: learner!.email, setup: asked, file, nowSeconds: now, fence });
       if (!opened.ok) {
         const status = { busy: 409, full: 409, budget: 503, room: 409, pending: 409, off: 404, invalid: 400, unavailable: 503 }[opened.reason];
         return no(opened.reason === "budget" ? "upload_budget_unavailable" : opened.reason === "unavailable" ? "files_unavailable" : opened.reason, status);

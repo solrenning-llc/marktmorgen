@@ -74,10 +74,13 @@ function world(overrides: Partial<DoorSteps> = {}) {
   };
   return { steps, calls };
 }
+/** The store's identity, carried to the vault (lib/store-live-cache.ts storeLiveFence; Codex G-20261121-0801). */
+const FENCE = { live: "nl:store:id:fenced", erasing: "nl:closed:erasing", field: "store-field", statsId: "", ref: "store@example.test" };
 const ask = (who: string, lessonId: string, nowSeconds = NOW) => ({
   store: SHOP,
   data: SHOP as DataStore,
   listId: LIST,
+  fence: FENCE,
   folder: FOLDER,
   courseId: COURSE,
   lessonId,

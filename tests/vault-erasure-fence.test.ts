@@ -207,3 +207,10 @@ test("the vault route opens every upload with its store's fence", async () => {
   const route = readFileSync(join(process.cwd(), "app/api/store/vault/route.ts"), "utf8");
   assert.match(route, /const fence = await storeLiveFence\(store\);\s*\n\s*const opened = await openReservedVault\(\{[^}]*\bfence \}/);
 });
+
+test("the buyer's submission route opens every upload with its store's fence (Codex G-20261121-0801)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const route = readFileSync(join(process.cwd(), "app/api/store/course/submission/route.ts"), "utf8");
+  assert.match(route, /const fence = await storeLiveFence\(store\);\s*\n\s*const opened = await openSubmissionDoor\(\{[^}]*\bfence \}/);
+});

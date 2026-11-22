@@ -38,6 +38,7 @@ import { dataBytes } from "@/lib/store-data-rules";
 import { UPLOAD_SECONDS, readVaultPath } from "@/lib/vault-rules";
 import { reserveStoreUpload, reserveUploadControl, type UploadStore } from "@/lib/upload-budget";
 import { abortReservedVault, closeReservedVault, openReservedVault } from "@/lib/vault-storage";
+import type { StoreLiveFence } from "@/lib/live-fence";
 import { deleteVault, signPieces, type OpenedUpload } from "@/lib/vault";
 import { withLock } from "@/lib/redis-lock";
 import { isSuppressed } from "@/lib/suppression";
@@ -516,6 +517,8 @@ export type DoorAsk = {
   setup: SubmissionSetup;
   file: { bytes: number; type: string; name: string; limitBytes: number };
   nowSeconds: number;
+  /** The store's identity (lib/store-live-cache.ts storeLiveFence), which must still be live when a delayed provider reply writes its upload state. */
+  fence: StoreLiveFence;
 };
 
 export type DoorOpened =
@@ -591,7 +594,7 @@ export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_
     }
     try {
       opened = await steps.openReservedVault(
-        { folder: ask.folder, ownerId: submissionOwnerId(place.id), name: ask.file.name, bytes: ask.file.bytes, type: ask.file.type, multipart: true },
+        { folder: ask.folder, ownerId: submissionOwnerId(place.id), name: ask.file.name, bytes: ask.file.bytes, type: ask.file.type, multipart: true, fence: ask.fence },
         ask.file.limitBytes,
       );
     } catch (error) {

@@ -52,8 +52,10 @@ export const BENEFIT_STRIPE_PAGES = 10;
  * hundred members their deleted-person look-up and the marks of every row they are owed (lib/tier-benefits.ts,
  * readOwedMarks), with the reading's own share. So a store with few members pays for one page, and one with
  * BENEFIT_STRIPE_PAGES pages pays for each. Every page load that lists them and every give or undo press reads them.
+ * 8 since each mark is priced as the database answers it (BENEFIT_MARK_VALUE_BYTES, escaped twice; it was 6 at two
+ * bytes a character): tests/plan-cost-registry.test.ts holds it above the reading and no higher than needed.
  */
-export const BENEFIT_PAGE_UNITS = 6;
+export const BENEFIT_PAGE_UNITS = 8;
 
 export const CADENCES = ["once", "monthly"] as const;
 export type Cadence = (typeof CADENCES)[number];

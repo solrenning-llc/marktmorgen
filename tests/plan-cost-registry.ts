@@ -1581,8 +1581,14 @@ export const BENEFIT_PAGE_MEMBERS = 100;
 export const BENEFIT_ROW_BYTES = 13 + 6 * MAX_BENEFIT_TEXT + 200;
 /** A mark's field, `<benefit>:<sub>:<period>`: 13 + 1 + 68 + 1 + 11 bytes at the most. */
 export const BENEFIT_MARK_FIELD_BYTES = 94;
-/** A mark, `{"at":<seconds>,"by":"<address>"}`: the address at 320 characters, each escaped to two bytes at the most. */
-export const BENEFIT_MARK_VALUE_BYTES = 32 + 2 * 320;
+/**
+ * A mark, `{"at":<seconds>,"by":"<address>"}`, as the database answers it: the kept JSON escaped again by the REST
+ * reply, as CHECKOUT_TROUBLE_READ counts it. The fixed part is 34 bytes answered with eleven-digit seconds; each of
+ * the address's 320 characters (lib/tier-benefits.ts giveBenefit cuts it there) at most 7, a control character or a
+ * lone surrogate kept as `\uXXXX` and answered as `\\uXXXX` (tests/benefit-mark-bytes.test.ts measures every kind).
+ * It counted 2 bytes a character, the fixed part unescaped (Claude 1 coord's audit, 26th batch, 22 November 2026).
+ */
+export const BENEFIT_MARK_VALUE_BYTES = 34 + 7 * 320;
 /** A person's marks key, and a store's deleted-person print, at the most. */
 export const BENEFIT_PERSON_BYTES = 96;
 export const BENEFITS_LIST_COMMANDS = 4;

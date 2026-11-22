@@ -5,7 +5,7 @@ import { readAiAnswer } from "@/lib/ai-response";
 import { Icon } from "@/components/icons";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
 import { AiDraftReview } from "@/components/ai-draft-review";
-import { draftStrings, draftTopics, freshChecks, reviewDone, type DraftTopics } from "@/lib/ai-draft-review";
+import { draftStrings, draftTopics, freshChecks, givenTexts, reviewDone, unsourcedNumbers, type DraftTopics } from "@/lib/ai-draft-review";
 
 /**
  * Whether the writing help (lib/ai.ts) is there for this person on this page,
@@ -97,6 +97,8 @@ export function AiAssist<T>({
   const [checks, setChecks] = useState<boolean[]>(freshChecks);
   // What the draft is about that needs a reader who knows it (756 [STN3], unit 2), read from its own words.
   const [topics, setTopics] = useState<DraftTopics>([]);
+  // Numbers in the draft that the creator did not give (756 [STN3], unit 3).
+  const [estimates, setEstimates] = useState<string[]>([]);
   const [left, setLeft] = useState(startLeft);
   const [allowanceKnown, setAllowanceKnown] = useState(startKnown);
   const [readOnce, setReadOnce] = useState(startKnown);
@@ -115,10 +117,13 @@ export function AiAssist<T>({
     setError(null);
     setFilled(false);
     try {
+      // What the creator gave this job, kept to tell the draft's own numbers from theirs; read inside
+      // the try, so a payload that throws still resets the box (Claude 6's review of #3437, note).
+      const sent = payload();
       const response = await fetch("/api/store/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload(), notes }),
+        body: JSON.stringify({ ...sent, notes }),
       });
       const data = readAiAnswer(response.ok, await response.json().catch(() => null));
       if (data.ok) {
@@ -131,6 +136,8 @@ export function AiAssist<T>({
         setChecks(freshChecks());
         // Each string as written, never the JSON text, where "\nInvesting" reads as "nInvesting"; in the draft's language.
         setTopics(draftTopics(draftStrings(data.value), data.language));
+        // Compared with what was typed and the job's own values, never its JSON, where an id's digits read as numbers.
+        setEstimates(unsourcedNumbers(draftStrings(data.value), [notes, ...givenTexts(sent)], data.language));
         onReviewChange?.(false);
         setDrafted(true);
         setFilled(true);
@@ -188,6 +195,7 @@ export function AiAssist<T>({
           <AiDraftReview
             checks={checks}
             topics={topics}
+            estimates={estimates}
             onToggle={(index, ticked) => {
               const next = checks.map((was, at) => (at === index ? ticked : was));
               setChecks(next);

@@ -43,6 +43,10 @@ import { EmptyState } from "@/components/empty-state";
 import { LessonSubmission } from "@/components/lesson-submission";
 import { readSetupFor } from "@/lib/submission-store";
 import { SUBMISSIONS_READY } from "@/lib/submission-switch";
+import { nextStepCookie, nextStepFor } from "@/lib/course-next-step";
+import { finishedNow, nextStepPlace } from "@/lib/course-next-step-rules";
+import { CourseNextStepCard } from "@/components/course-next-step-card";
+import { pricePill, productPath } from "@/components/store-product";
 import { AccessUncheckedNote } from "@/components/access-unchecked-note";
 
 type Params = {
@@ -181,6 +185,15 @@ export default async function LessonPage({ params, searchParams }: Params) {
   const previous = order.slice(0, at).reverse().find(reachable) ?? null;
   const next = order.slice(at + 1).find(reachable) ?? null;
   const isDone = done?.has(lesson.id) ?? false;
+  // The course's "Next step" (560 [AS1]) right after the student marks its last lesson done: on a lesson with no lesson
+  // after it, once every lesson is marked done (lessons done read exactly; unknown is not finished). Read and paid for
+  // as on the course's page, never in the middle of the lessons (lib/course-next-step-rules.ts nextStepPlace).
+  const finishedHere = Boolean(student && open) && finishedNow({ lessons: order.map((entry) => entry.lesson.id), done, at: lesson.id, hasNext: next !== null });
+  const nextCookie = nextStepCookie(course.id);
+  const nextProduct =
+    student && course.nextStep && nextStepPlace({ page: "lesson", finishedNow: finishedHere })
+      ? await nextStepFor({ store, course, courseProductId: product.id, email: student.email, dismissed: jar.get(nextCookie)?.value === "1" }).catch(() => null)
+      : null;
   // Where the student stopped, kept on their device and offered back (650 [WG10], components/lesson-player.tsx),
   // under a key only the server can make (lib/lesson-position.ts); never for the creator or a visitor.
   const placeKey = student ? devicePlaceKey(course.id, student.email) : null;
@@ -439,6 +452,19 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 <Link href={`${base}/${previous.lesson.id}`} className="st-footer-link text-sm font-semibold group-data-[focus=on]/focus:hidden">{w.previousLesson}</Link>
               ) : null}
             </div>
+            {nextProduct && course.nextStep ? (
+              <CourseNextStepCard
+                handle={store.handle}
+                courseId={course.id}
+                productId={product.id}
+                lessonId={lesson.id}
+                href={productPath(store, nextProduct)}
+                title={nextProduct.title}
+                price={pricePill(store, nextProduct)}
+                line={course.nextStep.line}
+                words={{ label: w.nextStepLabel, see: w.nextStepSee(nextProduct.title), noThanks: w.nextStepNoThanks, done: w.nextStepNoThanksDone }}
+              />
+            ) : null}
           </article>
 
           <aside className="st-card h-fit p-5 sm:p-6 lg:row-span-2 group-data-[focus=on]/focus:hidden">

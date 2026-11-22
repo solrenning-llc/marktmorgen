@@ -4,7 +4,7 @@
  * removed it. The purchase list (payment, product, billing country, time) is written only while the store's own key is
  * there and no erasing mark is, in one step, as its cached feed already is (KEEP_FEED_IF_LIVE). Synthetic Redis only.
  */
-import { rememberSale } from "@/lib/recent-sales";
+import { recentSales, rememberSale } from "@/lib/recent-sales";
 import { claimHandle, ERASING_KEY, erasingField, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -55,6 +55,20 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", storeIdCommand(moved.sid)[1], newRef], ["HSET", ERASING_KEY, await erasingField(newRef), String(Date.now())]]);
   await rememberSale(moved, record);
   is("no purchase list is made for it", kept(moved), 0);
+
+  // The public feed beside it (KEEP_FEED_IF_LIVE, v2): it is cached for FEED_SECONDS on a visit, and under the same rule.
+  // An empty list is read and its empty feed cached without asking Stripe, so the fence alone decides here.
+  part("The public feed is cached for a live store, and not for one whose account moved and is being erased");
+  const feedOf = (store: Store) => redis.run(["GET", `nl:recent:feed:${store.statsId}`]);
+  const shown = await made();
+  const liveFeed = { ...shown, stripeAccountId: "acct_RecentFeed01" } as Store;
+  await recentSales(liveFeed);
+  is("a live store's empty feed is cached", feedOf(liveFeed), "[]");
+  const movedFeed = { ...(await made()), stripeAccountId: "acct_RecentFeed01" } as Store;
+  const feedRef = "recent-feed-moved@example.com";
+  await redis.pipeline([["SET", storeIdCommand(movedFeed.sid)[1], feedRef], ["HSET", ERASING_KEY, await erasingField(feedRef), String(Date.now())]]);
+  await recentSales(movedFeed);
+  is("no feed is cached under the erased store's statsId", feedOf(movedFeed), null);
 
   done();
 }

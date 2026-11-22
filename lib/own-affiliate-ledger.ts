@@ -7,7 +7,8 @@
  *   its due time (the payment's money-back days over), then payable;
  * - "lowered": that payment was partly refunded, so its commission is now the
  *   smaller amount ownCommission gives on what the customer kept; the lowest
- *   recorded stands, and one above what was earned is unknown;
+ *   recorded stands, and any one recorded above what was earned is unknown,
+ *   even beside a smaller valid one;
  * - "reversed": that payment was wholly refunded or disputed, so its
  *   commission is gone, whether it was read before or after the commission;
  * - "paid": a payout sent to the affiliate, once by its id.
@@ -39,6 +40,7 @@ export function affiliateBalance(entries: readonly LedgerEntry[] | "unknown", no
   const earned = new Map<string, { cents: number; dueAt: number }>();
   const reversed = new Set<string>();
   const lowered = new Map<string, number>();
+  const highestLowered = new Map<string, number>();
   const payouts = new Map<string, number>();
   for (const entry of entries as readonly unknown[]) {
     if (!entry || typeof entry !== "object") return "unknown";
@@ -51,6 +53,7 @@ export function affiliateBalance(entries: readonly LedgerEntry[] | "unknown", no
     } else if (e.kind === "lowered") {
       if (!paymentId(e.paymentId) || !wholeCents(e.cents)) return "unknown";
       lowered.set(e.paymentId, Math.min(e.cents, lowered.get(e.paymentId) ?? e.cents));
+      highestLowered.set(e.paymentId, Math.max(e.cents, highestLowered.get(e.paymentId) ?? e.cents));
     } else if (e.kind === "reversed") {
       if (!paymentId(e.paymentId)) return "unknown";
       reversed.add(e.paymentId);
@@ -67,9 +70,10 @@ export function affiliateBalance(entries: readonly LedgerEntry[] | "unknown", no
   let held = 0;
   let paid = 0;
   for (const cents of payouts.values()) paid += cents;
-  for (const [id, low] of lowered) {
+  // The minimum decides the balance only after every recorded reduction is possible.
+  for (const [id, high] of highestLowered) {
     const was = earned.get(id);
-    if (was && low > was.cents) return "unknown";
+    if (was && high > was.cents) return "unknown";
   }
   for (const [id, { cents: earnedCents, dueAt }] of earned) {
     if (reversed.has(id)) continue;

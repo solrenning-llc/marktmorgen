@@ -7,17 +7,22 @@
  *   - a pass that marks reviews sends, in billed commands (an EVAL counted as one plus each call it makes), at most
  *     REVIEW_REFUND_RUN_COMMANDS + REVIEW_REFUND_QUOTES_COMMANDS + a payment's REVIEW_REFUND_PAYMENT_COMMANDS +
  *     REVIEW_REFUND_MARK_COMMANDS a review;
- *   - a pass with nothing to mark stays within REVIEW_REFUND_RUN_COMMANDS.
+ *   - a pass with nothing to mark stays within REVIEW_REFUND_RUN_COMMANDS;
+ *   - the two ceilings count in the store's billing month (windowId), one key across the calendar months it touches,
+ *     so each is spent and priced once a month (11th triple audit on #5100, ALTO (a));
+ *   - a review busy at every try costs the lock's priced tries (REVIEW_REFUND_LOCK_TRIES, ALTO (b)) within
+ *     REVIEW_REFUND_BUSY_COMMANDS, and puts the pass off REVIEW_REFUND_BUSY_WAIT_SECONDS (MÉDIO 3).
  * Synthetic store, reviews and refunds; Stripe answered by a stand-in; the Redis stand-in's pipeline counted.
  */
-import { REVIEW_REFUND_PASS_EVERY_SECONDS, REVIEW_REFUND_PAYMENTS_PER_MONTH, REVIEW_REFUND_ROWS_PER_MONTH, markRefundedReviews, reviewPassesDue, takeReviewPass } from "@/lib/review-proof";
+import { REVIEW_REFUND_BUSY_WAIT_SECONDS, REVIEW_REFUND_PASS_EVERY_SECONDS, REVIEW_REFUND_PAYMENTS_PER_MONTH, REVIEW_REFUND_ROWS_PER_MONTH, markRefundedReviews, reviewPassesDue, takeReviewPass } from "@/lib/review-proof";
+import { windowId } from "@/lib/allowance-window";
 import { MAX_REPLY_TEXT, MAX_REVIEW_NAME, MAX_REVIEW_PHOTOS, MAX_REVIEW_TEXT } from "@/lib/review-summary";
 import { markRefunded, saveReview, setHidden } from "@/lib/reviews";
-import { type Store, addProduct, claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
+import { type Store, addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
-import { REVIEW_REFUND_MARK_BYTES, REVIEW_REFUND_MARK_COMMANDS, REVIEW_REFUND_PAYMENT_COMMANDS, REVIEW_REFUND_QUOTES_COMMANDS, REVIEW_REFUND_ROW_COMMANDS, REVIEW_REFUND_RUN_COMMANDS } from "./plan-cost-registry";
+import { REVIEW_REFUND_BUSY_COMMANDS, REVIEW_REFUND_LOCK_TRIES, REVIEW_REFUND_MARK_BYTES, REVIEW_REFUND_MARK_COMMANDS, REVIEW_REFUND_PAYMENT_COMMANDS, REVIEW_REFUND_QUOTES_COMMANDS, REVIEW_REFUND_ROW_COMMANDS, REVIEW_REFUND_RUN_COMMANDS, lockTriesAtMost } from "./plan-cost-registry";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_review_refund_sweep_cost";
 const NOW = Math.floor(Date.now() / 1000);
@@ -241,7 +246,8 @@ async function main(): Promise<void> {
   // rows, not payments, and take none of the month's payments.
   is("and counted as one of the month's payments, the other stores' rows taking none", Number((await healthy([["GET", marksKey]]))[0]), 1);
 
-  part("A busy review gives the month's rows and payment back, so a retry never spends them twice (10th audit, MÉDIO 3)");
+  part("A busy review gives the month's rows and payment back, costs its priced tries and puts the pass off a day (10th audit, MÉDIO 3; 11th audit, ALTO (b) and MÉDIO 3)");
+  is(`REVIEW_REFUND_MARK_COMMANDS (${REVIEW_REFUND_MARK_COMMANDS}) prices the product's lock at its tries over 1.6 s (${lockTriesAtMost(1_600)}), not one SET`, REVIEW_REFUND_MARK_COMMANDS >= lockTriesAtMost(1_600) + 1 + 5 + 2 + 4, true);
   const five = await shop("cost-five@example.com", "costfive", 1);
   const fivePi = "pi_costFivePayment001";
   const fiveSaved = await saveReview(five.statsId, { productId: five.products[0], email: "five@example.com", reference: "cs_test_costfive0000000000", pi: fivePi, rating: 5, text: "Clear and kind.", name: "Buyer", paidAt: NOW - 86_400 }, ROOM, (NOW - 86_400) * 1000);
@@ -249,24 +255,103 @@ async function main(): Promise<void> {
   refunds.push(refundOf(fivePi));
   const fiveRows = `nl:rev:refunds:rows:${five.statsId}:${month}`;
   const fiveMarks = `nl:rev:refunds:marks:${five.statsId}:${month}`;
-  await healthy([["SET", `nl:rev:lock:${five.statsId}:${five.products[0]}`, "held-by-the-test", "EX", 60]]);
+  const fiveLock = `nl:rev:lock:${five.statsId}:${five.products[0]}`;
+  const fiveNext = `nl:rev:refunds:next:${five.statsId}`;
+  await healthy([["SET", fiveLock, "held-by-the-test", "EX", 60]]);
   await takeReviewPass(five.store);
+  const fiveAnchor = (await healthy([["GET", `nl:rev:refunds:since:${five.statsId}`]]))[0];
+  const saidFive: string[] = [];
+  console.error = (...args: unknown[]) => { saidFive.push(String(args[0])); };
+  before = commands;
+  sent = [];
+  let fiveMarked = -1;
   let fiveThrew = "";
   try {
-    await markRefundedReviews(five.store, Date.now() + 60_000);
+    fiveMarked = await markRefundedReviews(five.store, Date.now() + 60_000);
   } catch (error) {
     fiveThrew = error instanceof Error ? error.message : String(error);
+  } finally {
+    console.error = quiet;
   }
-  is("the busy review throws, so the next pass tries again", fiveThrew.includes("busy"), true);
-  // The rows handled before the throw (the other stores' rows the stand-in answers) stay counted; what the page did
+  const busyCommands = commands - before;
+  is("the busy review ends the pass without a throw, nothing marked", [fiveThrew, fiveMarked], ["", 0]);
+  is("the pass said so once", saidFive.filter((line) => line.includes("a review is busy")).length, 1);
+  const lockTries = sent.filter((c) => c[0] === "SET" && c[1] === fiveLock && c.includes("NX")).length;
+  is(`the lock was tried again over its wait (${lockTries} SET NX), within REVIEW_REFUND_LOCK_TRIES (${REVIEW_REFUND_LOCK_TRIES}): the one SET the line priced before was never its most`, lockTries > 1 && lockTries <= REVIEW_REFUND_LOCK_TRIES, true);
+  is(`the busy try's billed commands (${busyCommands}) are within the run and REVIEW_REFUND_BUSY_COMMANDS (${REVIEW_REFUND_RUN_COMMANDS + REVIEW_REFUND_BUSY_COMMANDS})`, busyCommands <= REVIEW_REFUND_RUN_COMMANDS + REVIEW_REFUND_BUSY_COMMANDS, true);
+  const fiveTtl = Number((await healthy([["TTL", fiveNext]]))[0]);
+  is(`the store's turn is put off REVIEW_REFUND_BUSY_WAIT_SECONDS (${REVIEW_REFUND_BUSY_WAIT_SECONDS}), past the pass's two hours`, fiveTtl > REVIEW_REFUND_PASS_EVERY_SECONDS && fiveTtl <= REVIEW_REFUND_BUSY_WAIT_SECONDS, true);
+  is("so the store's pass is not due at the next run", (await reviewPassesDue([five.store])).has(five.statsId), false);
+  const fivePlace = Number((await healthy([["GET", `nl:rev:refunds:since:${five.statsId}`]]))[0]);
+  is("the row is not taken as seen and the place does not pass it, so the next pass tries it again", [(await healthy([["ZSCORE", `nl:rev:refunds:seenat:${five.statsId}`, fivePi]]))[0], fiveAnchor === null ? fivePlace <= NOW - 7_200 : String(fivePlace) === fiveAnchor], [null, true]);
+  // The rows handled before the busy one (the other stores' rows the stand-in answers) stay counted; what the page did
   // not handle was given back, so the count is the rows taken as seen, no more.
   const seenRows = async () => ((await healthy([["ZRANGE", `nl:rev:refunds:seenat:${five.statsId}`, 0, -1]]))[0] as string[]).filter((m) => m.startsWith("re_")).length;
   is("the month's rows stand at the rows taken as seen: what the page did not handle was given back", Number((await healthy([["GET", fiveRows]]))[0]), await seenRows());
   is("and the payment's take was given back", Number((await healthy([["GET", fiveMarks]]))[0]), 0);
-  await healthy([["DEL", `nl:rev:lock:${five.statsId}:${five.products[0]}`], ["DEL", `nl:rev:refunds:next:${five.statsId}`]]);
+  await healthy([["DEL", fiveLock], ["DEL", fiveNext]]);
   await takeReviewPass(five.store);
   is("the retry marks it", await markRefundedReviews(five.store, Date.now() + 60_000), 1);
   is("and the month counts the rows taken as seen and one payment, never the retry twice", [Number((await healthy([["GET", fiveRows]]))[0]), Number((await healthy([["GET", fiveMarks]]))[0])], [await seenRows(), 1]);
+  is("a turn taken after the mark is held the pass's two hours again", Number((await healthy([["TTL", fiveNext]]))[0]) <= REVIEW_REFUND_PASS_EVERY_SECONDS, true);
+
+  part("The ceilings count in the store's billing month, one key across the calendar months it touches (11th audit, ALTO (a))");
+  // A paying store whose billing month began ten days ago and runs twenty more: its rows of two runs, one in this
+  // calendar month and one in the next (the clock moved on twelve days), count in one key, the window's, and the
+  // ceiling trips in the second run; by the calendar month they would count in two keys and the ceiling never trip.
+  const paying = await shop("cost-paying@example.com", "costpaying", 1);
+  const periodStart = NOW - 10 * 86_400;
+  if (!(await setSubscription("cost-paying@example.com", { customerId: "cus_CostPaying0001", subscriptionId: "sub_CostPaying0001", active: true, tier: "creator", cycle: "month", period: { start: periodStart, end: periodStart + 30 * 86_400, renews: true } }))) throw new Error("no subscription");
+  paying.store = (await storeForEmail("cost-paying@example.com"))!;
+  const window = windowId(paying.store);
+  is("the paying store's window is its billing month, named by the day it began", window, new Date(periodStart * 1000).toISOString().slice(0, 10));
+  const payingRows = `nl:rev:refunds:rows:${paying.statsId}:${window}`;
+  const payingSeen = `nl:rev:refunds:seenat:${paying.statsId}`;
+  // The rows taken as seen (the payments taken with them, pi_, set aside).
+  const payingRowsSeen = async () => ((await healthy([["ZRANGE", payingSeen, 0, -1]]))[0] as string[]).filter((m) => m.startsWith("re_")).length;
+  const realNow = Date.now;
+  let skew = 0;
+  Date.now = () => realNow() + skew;
+  console.error = (...args: unknown[]) => { said.push(String(args[0])); };
+  try {
+    await takeReviewPass(paying.store);
+    const seenFirst = await payingRowsSeen();
+    await markRefundedReviews(paying.store, Date.now() + 60_000);
+    const handledFirst = (await payingRowsSeen()) - seenFirst;
+    is("the first run (this calendar month) handles every row the stand-in answers and counts them under the window's key", [handledFirst > 0, Number((await healthy([["GET", payingRows]]))[0])], [true, handledFirst]);
+    is("and nothing under the calendar month's", (await healthy([["EXISTS", `nl:rev:refunds:rows:${paying.statsId}:${month}`]]))[0], 0);
+    is("the count is kept at least forty days", Number((await healthy([["TTL", payingRows]]))[0]) >= 40 * 86_400 - 5, true);
+    // Twelve days on, in the next calendar month and still inside the billing month: the key is the same one.
+    skew = 12 * 86_400_000;
+    const monthThen = new Date(Date.now()).toISOString().slice(0, 7);
+    is("the clock moved into the next calendar month, inside the same billing month", [monthThen !== month, windowId(paying.store)], [true, window]);
+    await healthy([["DEL", `nl:rev:refunds:next:${paying.statsId}`], ["SET", payingRows, String(ceiling - 2)]]);
+    await takeReviewPass(paying.store);
+    said.length = 0;
+    refunds.push(refundOf("pi_costPayingOther01"), refundOf("pi_costPayingOther02"), refundOf("pi_costPayingOther03"), refundOf("pi_costPayingOther04"), refundOf("pi_costPayingOther05"), refundOf("pi_costPayingOther06"));
+    const seenSecond = await payingRowsSeen();
+    await markRefundedReviews(paying.store, Date.now() + 60_000);
+    const handledSecond = (await payingRowsSeen()) - seenSecond;
+    is("the second run counts in the same key and trips the ceiling: only the two rows left of the month are handled, of six", [said.filter((line) => line.includes("rows of the month are spent")).length, handledSecond, Number((await healthy([["GET", payingRows]]))[0])], [1, 2, ceiling]);
+    is("and still nothing under either calendar month's key", [(await healthy([["EXISTS", `nl:rev:refunds:rows:${paying.statsId}:${month}`]]))[0], (await healthy([["EXISTS", `nl:rev:refunds:rows:${paying.statsId}:${monthThen}`]]))[0]], [0, 0]);
+  } finally {
+    Date.now = realNow;
+    console.error = quiet;
+  }
+  const unknownPeriod = { ...paying.store, period: null } as Store;
+  is("a paying store whose period is not known gets no window", windowId(unknownPeriod), null);
+  await healthy([["DEL", `nl:rev:refunds:next:${paying.statsId}`]]);
+  await takeReviewPass(unknownPeriod);
+  before = commands;
+  const callsBefore = stripeCalls;
+  console.error = () => {};
+  let unknownMarked = -1;
+  try {
+    unknownMarked = await markRefundedReviews(unknownPeriod, Date.now() + 60_000);
+  } finally {
+    console.error = quiet;
+  }
+  is("and its pass starts nothing that costs money: no read, no command, nothing marked", [unknownMarked, commands - before, stripeCalls - callsBefore], [0, 0, 0]);
 
   part("A seen key main kept as a plain set does not stop the pass (Claude 2 lpgvy's MEDIUM on #5100)");
   const six = await shop("cost-six@example.com", "costsix", 1);

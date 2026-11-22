@@ -744,6 +744,17 @@ export function setReply(statsId: string, productId: string, id: string, text: s
  * Marks as refunded every review a payment paid for, once Stripe says the
  * payment was given back in full. Returns how many changed.
  */
+/**
+ * A review of the payment was busy (its product's lock held, lib/redis-lock.ts): what was marked before it stays
+ * marked, the refund is not taken as seen, and the pass puts off its next run a day (lib/review-proof.ts,
+ * REVIEW_REFUND_BUSY_WAIT_SECONDS), so a review busy at every try costs at most that many tries a month.
+ */
+export class ReviewBusyError extends Error {
+  constructor(what: string) {
+    super(`a review is busy; ${what} is marked on the next try`);
+  }
+}
+
 /** The month's payments are spent (lib/review-proof.ts): the payment is not marked, and the pass stops until next month. */
 export class PaymentsSpentError extends Error {
   constructor() {
@@ -778,7 +789,7 @@ export async function markRefunded(
       return { ...review, refunded: true };
     }, null, "uncount");
     // A review busy just now is not marked: thrown, so the refund is not taken as seen and the sweep tries again.
-    if (done === "busy") throw new Error("a review is busy; the refund is marked on the next try");
+    if (done === "busy") throw new ReviewBusyError("the refund");
     if (hit) changed += 1;
   }
   return changed;
@@ -787,7 +798,7 @@ export async function markRefunded(
 /** Marks a review refunded found some other way (an edit that found the order refunded). */
 export async function markOneRefunded(statsId: string, productId: string, id: string): Promise<void> {
   const done = await creatorChange(statsId, productId, id, (review) => ({ ...review, refunded: true }), null);
-  if (done === "busy") throw new Error("a review is busy; its refund is marked on the next try");
+  if (done === "busy") throw new ReviewBusyError("its refund");
 }
 
 /** Takes reviews out of the creator's queue: those named, or all of them. */

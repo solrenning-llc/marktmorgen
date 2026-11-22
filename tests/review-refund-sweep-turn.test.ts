@@ -77,7 +77,7 @@ async function main(): Promise<void> {
   const again = await sweepCheckouts(Date.now() + 20_000);
   is("the run after: the store swept, the turn held, no take and no read", [again.stores, turnTakes(statsId), refundReads.length], [1, 0, 0]);
 
-  part("The pass's turn is never taken past the run's time (9th audit, point 4; a behaviour, 10th audit LEVE 4)");
+  part("The pass's turn is never taken past the run's time (9th audit, point 4; a behavior, 10th audit LEVE 4)");
   await healthy([["DEL", turn]]);
   sent.length = 0;
   refundReads.length = 0;

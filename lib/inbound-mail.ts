@@ -89,7 +89,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { canonicalEmail } from "@/lib/affiliates";
 import { NIMBUS_FROM, RESEND_BASE, headerText, oneAddress, sendEmail } from "@/lib/email";
 import { creatorDomain } from "@/lib/mail-from";
-import { claimMark } from "@/lib/claim-mark";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor, stringList } from "@/lib/redis-reply";
 import { essentialLimitState, withinLimit } from "@/lib/request-guard";
@@ -693,10 +693,18 @@ export async function forwardInbound(id: string, now = Date.now(), announcedTo?:
     // down (a run that stopped between the two, or one still running) is not known, a retry, never sent on (Codex L
     // on #3926).
     const mark = `nl:inbound:counted:${id}`;
-    const counted = await claimMark(mark, 3_600);
+    const ours = claimValue();
+    const counted = await claimMark(mark, 3_600, ours);
     if (counted === "unknown") return "retry";
     if (counted === "ours") {
-      const admitted = await withinLimit("creator-inbound", handle, CREATOR_HOURLY, 3_600);
+      // A count that cannot be read (withinLimit throws UnknownReplyError) decides nothing: the mark, still undecided,
+      // is let go before the error goes on, so the retry counts again rather than reading an undecided mark as a
+      // retry for the mark's whole hour. At most one count more for an unreadable reply: the hour's limit can only
+      // close sooner, never later.
+      const admitted = await withinLimit("creator-inbound", handle, CREATOR_HOURLY, 3_600).catch(async (error: unknown) => {
+        await releaseMark(mark, ours).catch(() => false);
+        throw error;
+      });
       // Written for a retry. A refusal stays a refusal whether or not the write landed; an admission is forwarded only
       // once it is written down, or a retry would read the mark as undecided while this run had already sent it.
       const written = await decide(mark, admitted ? COUNT_ADMITTED : COUNT_REFUSED);

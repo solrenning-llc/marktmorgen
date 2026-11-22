@@ -561,21 +561,22 @@ async function noticeCards(store: Store, deadline: number): Promise<Swept> {
   let sent = 0;
   // Where the next run reads again from: before the first member read and not handled (time ran out, something could
   // not be read, the email did not go), or null when every one was.
-  // Every member not handled, in list order, by where a reading starts to list it again.
+  // Every member not handled, in list order, by where a reading starts to list it again, and whether it was tried
+  // (false: the run's time ran out before it), as remindFailed reads them.
   const notHandledFrom: string[] = [];
-  const notHandled = (from: string) => {
-    if (notHandledFrom[notHandledFrom.length - 1] !== from) notHandledFrom.push(from);
+  const tried: boolean[] = [];
+  const notHandled = (from: string, wasTried = true) => {
+    if (notHandledFrom[notHandledFrom.length - 1] === from) return;
+    notHandledFrom.push(from);
+    tried.push(wasTried);
   };
 
   for (let dueIndex = 0; dueIndex < due.length; dueIndex += 1) {
     const { sub, card, customer, email, payAt, from } = due[dueIndex];
     if (Date.now() >= deadline) {
-      notHandled(from);
-      // If time ran out before this member was tried, keep the cursor moving to the next due member. When this
-      // member is at the start of the walk, stepping past just it lets the other due members from the pages we
-      // already read be handled on the next run; this one is read again when the list comes round.
-      const next = due[dueIndex + 1];
-      if (next) notHandled(next.from);
+      // Time ran out before this member was tried: it failed nothing, so the next run starts at it again, even when it
+      // is where this run started, never a whole lap of the list later (the triple audit on #3215; as remindFailed).
+      notHandled(from, false);
       break;
     }
     const subId = typeof sub.id === "string" && SUB_PATTERN.test(sub.id) ? sub.id : "";
@@ -649,9 +650,11 @@ async function noticeCards(store: Store, deadline: number): Promise<Swept> {
   // that member is read again when the list comes round.
   // Only that member is stepped past: the next one not handled, when there is one, is read again on the next run
   // (Claude 1 on #3215: a sender outage would otherwise skip every member the run read).
+  // A member at the start that was tried and failed is stepped past, as before; one that was not tried is not.
   const stopAt = notHandledFrom[0] ?? null;
-  if (!ended && stopAt === start) console.error("card notices: a member at the start of this run was not handled again; the walk goes on and reads it when the list comes round", store.handle);
-  await moveCursor(ended ? "" : stopAt === null ? after : stopAt === start ? (notHandledFrom[1] ?? after) : stopAt);
+  const stuck = stopAt !== null && stopAt === start && tried[0] === true;
+  if (!ended && stuck) console.error("card notices: a member at the start of this run was not handled again; the walk goes on and reads it when the list comes round", store.handle);
+  await moveCursor(ended ? "" : stopAt === null ? after : stuck ? (notHandledFrom[1] ?? after) : stopAt);
   return { sent, complete: stopAt === null && !cutByTime };
 }
 

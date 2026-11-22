@@ -14,12 +14,12 @@ import { LandingsWriteUnconfirmed, dropLandings, readLandings, removeLanding, sa
 import { dataKey, dataUsed, needData } from "../lib/store-data";
 import { contentRoomFor, dataBytes } from "../lib/store-data-rules";
 import { store as redis } from "./redis-stub";
-import { ROOM } from "./data-room";
+import { ROOM, resetLandingRoom } from "./landing-live-room";
 
 const stats = "g".repeat(16);
 const product = "g-product";
 const key = `nl:product:landing:${stats}:${product}`;
-const room = { ...ROOM, sid: "g-landing-room" };
+const room = { ...ROOM, sid: "2".repeat(32) };
 const landing = (campaign: string, headline = "A practical cooking course", sub = "Learn knife skills", button = "See the course") => ({ campaign, headline, sub, button });
 const slot = () => Number(redis.run(["HGET", dataKey(room)!, `al:${product}`]) ?? 0);
 const stored = () => redis.run(["GET", key]);
@@ -31,7 +31,7 @@ const covered = () => {
 };
 
 test("a first save, read back", async () => {
-  redis.clear();
+  resetLandingRoom(room);
   assert.equal(await saveLanding(stats, product, landing("first"), room), "saved");
   assert.deepEqual(await readLandings(stats, product), [landing("first")]);
   assert.ok(covered());
@@ -39,7 +39,7 @@ test("a first save, read back", async () => {
 
 for (const shape of ["empty", "undefined", "malformed-json"] as const) {
   test(`a read answered ${shape} never erases a campaign already saved (Codex G and J)`, async () => {
-    redis.clear();
+    resetLandingRoom(room);
     await saveLanding(stats, product, landing("existing"), room);
     const prior = stored();
     const pipeline = redis.pipeline;
@@ -66,7 +66,7 @@ for (const shape of ["empty", "undefined", "malformed-json"] as const) {
 }
 
 test("a write whose answer is not the expected one is never said saved (Codex G)", async () => {
-  redis.clear();
+  resetLandingRoom(room);
   const pipeline = redis.pipeline;
   let intercepted = false;
   redis.pipeline = async (commands) => {
@@ -93,7 +93,7 @@ test("a write whose answer is not the expected one is never said saved (Codex G)
 // not one: never said saved, nothing written, and the full case is never told from it either.
 for (const reply of [[true, null], [1, null], [1, false], [1, -1], [1, 0.5], [1, Number.MAX_SAFE_INTEGER + 1], ["1", 5], [0, null], [3, 0, 1], [2, 5]]) {
   test(`a write answered ${JSON.stringify(reply)} is never said saved, nor full (Codex J)`, async () => {
-    redis.clear();
+    resetLandingRoom(room);
     const pipeline = redis.pipeline;
     let intercepted = false;
     redis.pipeline = async (commands) => {
@@ -118,7 +118,7 @@ for (const reply of [[true, null], [1, null], [1, false], [1, -1], [1, 0.5], [1,
 }
 
 test("a delete whose answer is not the expected one gives no room back while the record is kept (Codex G)", async () => {
-  redis.clear();
+  resetLandingRoom(room);
   await saveLanding(stats, product, landing("existing"), room);
   const prior = stored();
   const pipeline = redis.pipeline;
@@ -143,7 +143,7 @@ test("a delete whose answer is not the expected one gives no room back while the
 });
 
 test("a large save held while a small one lands never leaves the record larger than its slot (Codex G and J)", async () => {
-  redis.clear();
+  resetLandingRoom(room);
   const pipeline = redis.pipeline;
   const big = landing("large", "H".repeat(120), "S".repeat(300), "B".repeat(40));
   let enter!: () => void;
@@ -179,7 +179,7 @@ test("a large save held while a small one lands never leaves the record larger t
 });
 
 test("a removal frees only what it deleted, in the same step", async () => {
-  redis.clear();
+  resetLandingRoom(room);
   await saveLanding(stats, product, landing("one"), room);
   await saveLanding(stats, product, landing("two"), room);
   await removeLanding(stats, product, "one", room);

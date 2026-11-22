@@ -23980,4 +23980,6 @@ REGRA DE MARGEM (MR, 27/10/2026): a receita, a comissão e a margem do Marktmorg
 
 Proibido: mudar preços, limites visíveis, comissão, tetos, PLANS_ON_SALE, OPENING_REQUESTED, EU_VAT_COLLECT_REVIEWED, UK_VAT_COLLECT_REVIEWED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; usar dados reais nos testes.
 
+Decisão do dono OWNER-20261122-0022-CODEX-LIST-VAT-COSTS (22/11/2026, 00h22 Fortaleza; texto literal e aplicação em AGENTS.md, seção IV, item (k)). Pedidos repetidos, passo 3 (b): é posterior a OWNER-20261121-1529 e decide a divergência entre o item (b) da IV e a frase "sem cobrar nada a mais do criador" do item 2. Opção A: vale IV (b); o criador paga os custos reais de receber o IVA, sem lucro para o Marktmorgen, e a taxa da Stripe sobre o IVA; "sem cobrar nada a mais" quer dizer nenhuma sobretaxa, margem ou valor além desses custos reais. A unidade 2, item (a), escreve isso nos Termos e na página de preços e taxas. Na mesma decisão, o #5045 (unidade 4) e o #5048 (unidade 2, item (b)) entram na exceção OWNER-20261121-1437, com linha "pendente" em `lib/codex-absent-audit.ts`. Número, posição e estado deste item não mudam.
+
 Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.

@@ -21,8 +21,17 @@
 
 export const CODEX_ABSENT_EXCEPTION = "OWNER-20261121-1437-CODEX-ABSENT-MONEY-REVIEW";
 
-/** The PRs the owner named in item 1 of OWNER-20261121-1944-C2-PRS-AFTER-AUDIT. */
-export const OWNER_NAMED_PRS: readonly number[] = [5016, 5017, 5033, 5032, 5040, 4991];
+/**
+ * The PRs the owner named in item 1 of OWNER-20261121-1944-C2-PRS-AFTER-AUDIT, then #5045 and #5048, which the owner
+ * confirmed in item 1 of OWNER-20261122-0022-CODEX-LIST-VAT-COSTS (OWNER_CONFIRMED_LATER).
+ */
+export const OWNER_NAMED_PRS: readonly number[] = [5016, 5017, 5033, 5032, 5040, 4991, 5045, 5048];
+
+/** The owner's confirmation of each PR added to the list after OWNER-20261121-1944. */
+export const OWNER_CONFIRMED_LATER: Readonly<Record<number, string>> = {
+  5045: "OWNER-20261122-0022-CODEX-LIST-VAT-COSTS",
+  5048: "OWNER-20261122-0022-CODEX-LIST-VAT-COSTS",
+};
 
 /** The only results that make a line done (item 1 of PR 1), besides "pendente", which never does. */
 export type CodexAuditResult = "pendente" | "feita, sem achado aberto" | `achados corrigidos nos PRs ${string}`;
@@ -103,4 +112,8 @@ export const CODEX_ABSENT_AUDIT: readonly CodexAuditLine[] = [
   { pr: 5032, merged: "99c32f89199ba567b60b2e93b57f6908fbf9377e", codexReviewer: null, report: null, date: null, result: "pendente", ownerConfirmation: null },
   { pr: 5033, merged: "878ebb25a33f8cb20f895caa1a97d0e9ae5e2df4", codexReviewer: null, report: null, date: null, result: "pendente", ownerConfirmation: null },
   { pr: 5040, merged: "d75b7405f2134e78c99bbd36716c12c270f997da", codexReviewer: null, report: null, date: null, result: "pendente", ownerConfirmation: null },
+  // #5045 (the UK VAT rates per product) and #5048 (the VAT lines on the creator's statement): still open, added by
+  // OWNER-20261122-0022-CODEX-LIST-VAT-COSTS, item 1, before their queue requests (item 2 of OWNER-20261121-1944).
+  { pr: 5045, merged: null, codexReviewer: null, report: null, date: null, result: "pendente", ownerConfirmation: null },
+  { pr: 5048, merged: null, codexReviewer: null, report: null, date: null, result: "pendente", ownerConfirmation: null },
 ];

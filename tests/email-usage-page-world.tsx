@@ -13,6 +13,9 @@ export function storeBase() { return "https://example.com"; }
 export function starterFlows() { return []; }
 export function sellsSomething() { return false; }
 export function windowId() { return world.window; }
+/** The renewal words beside the month's count (357 [ES3]): the synthetic store has no renewing period, so none are drawn. */
+export function allowanceWindow() { return null; }
+export function opensAgainWords() { return ""; }
 export const WHO = [];
 export function lookColours() { return { accent: "#000000" }; }
 export function aiAvailableFor() { return false; }

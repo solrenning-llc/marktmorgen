@@ -296,6 +296,41 @@ await t.test(`a damaged note is kept, no letter lost, when the let-go cannot be 
 });
 }
 
+for (const absent of [false, true]) {
+await t.test(`a valid note with a settled refund survives only an unreadable store reply (absent=${absent})`, async () => {
+  await reset();
+  const shop = await paidShop();
+  const store = await shop.store();
+  world.endDown = true;
+  try {
+    const attempt = await refundAndEndPlan(store, NOW);
+    assert.ok(attempt.ok && !attempt.ended);
+  } finally {
+    world.endDown = false;
+  }
+  const note = await shop.note();
+  assert.equal(typeof note, "string");
+  assert.equal(shop.refunds().length, 1);
+  const storeKey = `nl:store:id:${store.sid}`;
+  redis.pipeline = async (commands) =>
+    commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === storeKey
+      ? absent ? [null] : []
+      : original(commands);
+  try {
+    const before = world.calls.length;
+    const seen = await finishPlanRefunds(Date.now() + 10_000, NOW + 60);
+    assert.deepEqual(world.calls.slice(before), [], "no outcome is decided with no store to work on");
+    assert.deepEqual([seen.left, seen.dropped, await shop.note()],
+      absent ? [0, 1, null] : [1, 0, note]);
+  } finally {
+    redis.pipeline = original;
+  }
+  const recovered = await finishPlanRefunds(Date.now() + 10_000, NOW + 120);
+  assert.deepEqual([recovered.ended, shop.sub().status, await shop.note(), shop.refunds().length],
+    absent ? [0, "active", null, 1] : [1, "canceled", null, 1]);
+});
+}
+
 // Claude 4 (cloud D) on #3740: a store that is gone (its id answers nil) is not unknown. Its damaged note goes, with no
 // letter (there is nobody to tell), so it never holds a place among the first MAX_NOTES notes for good.
 await t.test("a damaged note of a store that is gone is dropped, with no letter (cloud D on #3740)", async () => {

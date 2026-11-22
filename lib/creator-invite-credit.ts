@@ -526,7 +526,13 @@ async function putOnPlan(id: string, history: Map<string, Map<string, string>>, 
     // Done only on a receipt (issue #4422): Stripe answers a created balance transaction with its `cbtxn_` id. A reply
     // without one does not show the credit landed, so it throws: the credit stays owed and on the owed list, and the
     // next run reads the history again and, if it is still not there, sends with the same idempotency key.
-    if (typeof made.id !== "string" || !made.id.startsWith("cbtxn_") || made.id.length <= "cbtxn_".length) {
+    // An id alone is not proof of this credit: bind the receipt to the exact requested adjustment.
+    const metadata = made.metadata;
+    if (typeof made.id !== "string" || !made.id.startsWith("cbtxn_") || made.id.length <= "cbtxn_".length ||
+        made.object !== "customer_balance_transaction" || made.customer !== customer ||
+        made.amount !== -credit.cents || made.currency !== credit.cur ||
+        !metadata || typeof metadata !== "object" || Array.isArray(metadata) ||
+        (metadata as Record<string, unknown>).nimbus_invite_credit !== id) {
       throw new UnknownReplyError(`invite credits: the receipt for ${id}`);
     }
     txn = made.id;

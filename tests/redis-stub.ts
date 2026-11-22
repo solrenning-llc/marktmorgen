@@ -2,7 +2,10 @@ import { MemoryRedis } from "@/lib/redis-memory";
 import { spendCommands } from "@/lib/redis-ceiling";
 import { withTakeScripts } from "./redis-take-scripts";
 export const store = withTakeScripts(new MemoryRedis());
-export const isRedisConfigured = () => true;
+let configured = true;
+export const isRedisConfigured = () => configured;
+/** Only for a test of the "Redis not configured" branch; always put back to true in a finally. */
+export function setRedisConfigured(on: boolean): void { configured = on; }
 /**
  * Held to the command ceiling of the work it runs in (lib/redis-ceiling.ts), as lib/redis.ts is: a refusal is a
  * rejected promise, as it is there. Not an async function: one more await layer would read the reply's `then` once

@@ -7,9 +7,13 @@
  *   nl:pod:<id>:public   the show's public settings: its category, explicit flag, and for each episode the
  *                        creator's mark and the https address its audio is published at
  *
- * Nothing here writes the record: the studio unit that lets a creator mark episodes public writes it (and deletes it
- * with the podcast), so until then no show has one and every public feed answers 404. A record that is there but
- * cannot be read is unknown, never "no settings" and never "no episodes" (rule 24): the route says 503.
+ * The studio writes the record (part 3, app/api/store/podcast/public-settings/route.ts): writePublicShow when the
+ * creator turns the feed on or marks an episode, counted in the store's data room before it is written and kept only
+ * on Redis's exact "OK"; dropPublicShow when the feed is turned off, on a deletion Redis answers with exactly 0 or 1.
+ * Until a creator turns it on a show has no record and its public feed answers 404. A record that is there but
+ * cannot be read is unknown, never "no settings" and never "no episodes" (rule 24): the routes say 503. It names no
+ * person, so a person's erasure has nothing of it to take; the store's closing erases it by the podcast's id
+ * (lib/closed-store-data.ts, family nl:pod:), and removing the product must call dropPublicShow.
  *
  * The audio is never ours to send in a public feed: an episode is published at the https address kept for it (where
  * the creator's audio already lives, as the RSS import records it), never at a signed address in the private file
@@ -18,9 +22,12 @@
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
-import type { Store } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, type Store, erasingField, storeHandleKey, storeIdCommand, storeRef } from "@/lib/store";
 import { EPISODE_ID, MAX_EPISODES, MAX_EPISODE_NOTES, MAX_EPISODE_TITLE, PODCAST_ID, type Episode, type Podcast } from "@/lib/podcast-rules";
-import type { PublicEpisodeCandidate } from "@/lib/podcast-public-feed";
+import { PUBLIC_CATEGORIES, type PublicCategory, type PublicEpisodeCandidate } from "@/lib/podcast-public-feed";
+import { type DataStore, giveData, takeData } from "@/lib/store-data";
+import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
+import { SITE_URL } from "@/lib/site-url";
 
 const showKey = (id: string) => `nl:pod:${id}:public`;
 
@@ -122,15 +129,20 @@ export function parsePublicShow(raw: string): PublicShow | null {
  * several, not text, text that is not a record of them, over PUBLIC_SHOW_MAX_BYTES) throws UnknownReplyError.
  */
 export async function readPublicShow(podcastId: string): Promise<PublicShow | null> {
-  if (!PODCAST_ID.test(podcastId)) return null;
+  return (await readPublicShowSized(podcastId)).show;
+}
+
+/** readPublicShow, with the bytes the record was read as (0 when there is none), for a caller that pays for what it moves. */
+export async function readPublicShowSized(podcastId: string): Promise<{ show: PublicShow | null; bytes: number }> {
+  if (!PODCAST_ID.test(podcastId)) return { show: null, bytes: 0 };
   if (!isRedisConfigured()) throw new UnknownReplyError("a podcast's public settings (no database)");
   const replies = repliesFor(await redisPipeline([["GET", showKey(podcastId)]]), 1);
   if (!replies) throw new UnknownReplyError("a podcast's public settings");
   const raw = replies[0];
-  if (raw === null) return null;
+  if (raw === null) return { show: null, bytes: 0 };
   const show = typeof raw === "string" ? parsePublicShow(raw) : null;
   if (!show) throw new UnknownReplyError("a podcast's public settings");
-  return show;
+  return { show, bytes: Buffer.byteLength(raw as string, "utf8") };
 }
 
 /** A published audio address: https, a host, no credentials, not too long, and nothing that could name a buyer. */
@@ -176,6 +188,34 @@ export function matchesTag(header: string | null, etag: string): boolean {
   });
 }
 
+/**
+ * Whether a kept feed's store is still the live store at its address, in one step and without its record (Codex
+ * L-20261120-1144): the address still leads to the ref the store's id names (the handle's key and the id's key hold the
+ * same ref; an address let go holds "released:..." and a store erased has no id key), and its erasure has not begun.
+ * KEYS: the handle's key, the store's id key, nl:closed:erasing. ARGV: the store's erasing field.
+ * 1 live; 0 not (nothing to serve from the cache). Three small reads, no record: inside the unit a kept feed takes
+ * (tests/f2-public-feed-route.test.ts). Modelled by lib/redis-memory.ts.
+ */
+export const FEED_STORE_LIVE = `-- marktmorgen:podcast-feed-store-live:v1
+local ref = redis.call("GET", KEYS[2])
+if not ref or redis.call("GET", KEYS[1]) ~= ref then return 0 end
+if redis.call("HEXISTS", KEYS[3], ARGV[1]) == 1 then return 0 end
+return 1`;
+
+/** Billed commands of FEED_STORE_LIVE at the most: its EVAL and three reads inside. */
+export const FEED_STORE_LIVE_COMMANDS = 4;
+
+/**
+ * A kept feed's store, read live before the cache answers: true only on the script's exact 1; false when it is not
+ * live; "unknown" for any other reply, or a store kept from before ids, which has no id key to check.
+ */
+export async function keptStoreLive(store: Pick<Store, "email" | "sid" | "extra" | "handle">): Promise<boolean | "unknown"> {
+  if (!STORE_ID_PATTERN.test(store.sid)) return "unknown";
+  const replies = repliesFor(await redisPipeline([["EVAL", FEED_STORE_LIVE, 3, storeHandleKey(store.handle), storeIdCommand(store.sid)[1], ERASING_KEY, await erasingField(storeRef(store))]]), 1);
+  const answer = replies?.[0];
+  return answer === 1 ? true : answer === 0 ? false : "unknown";
+}
+
 /** A feed kept: the store it is counted against, the XML, its tag and its size in bytes. */
 export type KeptFeed = { store: Store; xml: string; etag: string; bytes: number };
 
@@ -215,8 +255,120 @@ export function keepFeed(key: string, feed: KeptFeed, now: number): void {
   keptBytes += feed.bytes;
 }
 
+/** Lets one kept feed go: its store is not live any more, or could not be read as live. */
+export function forgetFeed(key: string): void {
+  drop(key);
+}
+
 /** Forgets every kept feed (tests). */
 export function forgetPublicFeeds(): void {
   kept.clear();
   keptBytes = 0;
+}
+
+/** The slot of the store's data room a show's public settings are counted in (lib/store-data.ts). */
+export const publicShowSlot = (podcastId: string) => `pod:${podcastId}:public`;
+
+/** What the studio sets: the show's category and explicit flag, and the audio address of each episode marked public. */
+export type PublicShowSettings = { category: PublicCategory; explicit: boolean; episodes: Record<string, string> };
+
+/** Why an audio address is not one a public feed may carry. */
+export type AudioRefusal = "not_https" | "too_long" | "ours" | "buyer_data";
+
+/** Hosts that are ours: the site, and the private file stores a buyer's audio is kept in (lib/blob.ts, lib/vault.ts). */
+const OUR_HOSTS = [new URL(SITE_URL).hostname, "vercel-storage.com", "r2.cloudflarestorage.com"];
+
+function isOurs(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, "");
+  return OUR_HOSTS.some((ours) => host === ours || host.endsWith(`.${ours}`));
+}
+
+/**
+ * Why `address` may not be an episode's public audio, or null when it may: https with a host and no credentials, at
+ * most MAX_AUDIO_ADDRESS long, never on a host of ours (a buyer's audio is never published from where we keep it),
+ * and nothing in it, plain or %-escaped, that could name a buyer. At least as strict as the feed's own reading.
+ */
+export function audioRefusal(address: unknown): AudioRefusal | null {
+  if (typeof address !== "string" || !/^https:\/\//i.test(address)) return "not_https";
+  if (address.length > MAX_AUDIO_ADDRESS) return "too_long";
+  let url: URL;
+  try {
+    url = new URL(address);
+  } catch {
+    return "not_https";
+  }
+  if (url.protocol !== "https:" || url.hostname === "" || url.username !== "" || url.password !== "") return "not_https";
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(address);
+  } catch {
+    return "buyer_data";
+  }
+  if (TOKEN_SHAPE.test(address) || TOKEN_SHAPE.test(decoded) || address.includes("@") || decoded.includes("@")) return "buyer_data";
+  if (isOurs(url.hostname)) return "ours";
+  return publishedAudio(address) === address ? null : "not_https";
+}
+
+/**
+ * The settings as the studio sees them, from a record read: only the episodes marked exactly "public" with an audio
+ * address the feed would carry. Null when the record's category or flag is not one: a record the studio did not
+ * write that way is unknown, never taken for a default.
+ */
+export function settingsOf(show: PublicShow): PublicShowSettings | null {
+  if (!(PUBLIC_CATEGORIES as readonly unknown[]).includes(show.category) || typeof show.explicit !== "boolean") return null;
+  const episodes: Record<string, string> = {};
+  for (const [id, entry] of show.episodes) {
+    if (EPISODE_ID.test(id) && entry.visibility === "public" && typeof entry.audio === "string" && audioRefusal(entry.audio) === null) episodes[id] = entry.audio;
+  }
+  return { category: show.category as PublicCategory, explicit: show.explicit, episodes };
+}
+
+/** The record the feed reads (parsePublicShow), as written: each episode marked exactly "public". */
+export function showRecord(settings: PublicShowSettings): string {
+  const episodes: Record<string, { visibility: "public"; audio: string }> = {};
+  for (const [id, audio] of Object.entries(settings.episodes)) episodes[id] = { visibility: "public", audio };
+  return JSON.stringify({ category: settings.category, explicit: settings.explicit, episodes });
+}
+
+export type ShowWrite = { ok: true; bytes: number } | { ok: false; reason: "full" | "too_big"; message?: string };
+
+/**
+ * Writes a show's public settings. The store's data room is taken first at the larger of what the record was
+ * (`before`, as read) and what it becomes, so a write whose answer is not known never leaves more kept than counted;
+ * it comes down to the new size only once Redis answered exactly "OK". Any other answer throws UnknownReplyError,
+ * and so does a room that cannot be counted. A full room is said, and nothing is written.
+ */
+export async function writePublicShow(store: DataStore, podcastId: string, settings: PublicShowSettings, before: PublicShow | null): Promise<ShowWrite> {
+  if (!PODCAST_ID.test(podcastId)) throw new UnknownReplyError("a podcast's public settings (no such podcast)");
+  if (!isRedisConfigured()) throw new UnknownReplyError("a podcast's public settings (no database)");
+  const raw = showRecord(settings);
+  const bytes = Buffer.byteLength(raw, "utf8");
+  if (bytes > PUBLIC_SHOW_MAX_BYTES) return { ok: false, reason: "too_big" };
+  const key = showKey(podcastId);
+  const slot = publicShowSlot(podcastId);
+  const after = dataBytes([key, raw], 1);
+  const was = before ? dataBytesOfLength(utf8Length(key) + before.bytes, 1) : 0;
+  const taken = await takeData(store, [{ slot, bytes: Math.max(after, was), set: true }]);
+  if (!taken.ok) {
+    if (taken.reason === "full") return { ok: false, reason: "full", message: taken.message };
+    throw new UnknownReplyError("the store's data room, for a podcast's public settings");
+  }
+  const replies = repliesFor(await redisPipeline([["SET", key, raw]]), 1);
+  if (!replies || replies[0] !== "OK") throw new UnknownReplyError("the write of a podcast's public settings");
+  if (after < was) await giveData(store, [{ slot, bytes: after, set: true }]);
+  return { ok: true, bytes };
+}
+
+/**
+ * Deletes a show's public settings, so its public feed answers 404: for the feed turned off, and for its product
+ * removed. Only Redis's exact 0 or 1 is a deletion; anything else throws UnknownReplyError and gives nothing back.
+ * The room is given back for the store named once the deletion is known.
+ */
+export async function dropPublicShow(store: DataStore | null, podcastId: string): Promise<void> {
+  if (!PODCAST_ID.test(podcastId)) return;
+  if (!isRedisConfigured()) throw new UnknownReplyError("the deletion of a podcast's public settings (no database)");
+  const replies = repliesFor(await redisPipeline([["DEL", showKey(podcastId)]]), 1);
+  const gone = replies?.[0];
+  if (gone !== 0 && gone !== 1) throw new UnknownReplyError("the deletion of a podcast's public settings");
+  if (store) await giveData(store, [{ slot: publicShowSlot(podcastId), bytes: 0, set: true }]);
 }

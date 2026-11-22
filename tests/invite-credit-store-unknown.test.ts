@@ -41,7 +41,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (txns && method === "GET") return answer({ object: "list", data: [], has_more: false });
   if (txns && method === "POST") {
     const form = new URLSearchParams(String(init?.body ?? ""));
-    const row = { id: `cbtxn_${Math.random().toString(36).slice(2, 10)}`, amount: Number(form.get("amount")) };
+    const row = { id: `cbtxn_${Math.random().toString(36).slice(2, 10)}`, amount: Number(form.get("amount")), object: "customer_balance_transaction", customer: txns[1], currency: form.get("currency"), metadata: { nimbus_invite_credit: form.get("metadata[nimbus_invite_credit]") } };
     balance.set(txns[1], [...(balance.get(txns[1]) ?? []), row]);
     return answer(row);
   }

@@ -25,7 +25,7 @@
  * given to. What the store wrote to or about the person (a note, a reply,
  * feedback on their work) is in, because it is data about them.
  */
-import { type Store } from "@/lib/store";
+import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type ErasureScope } from "@/lib/erasure-rules";
@@ -38,6 +38,7 @@ import { VersionUnreadError, listAgreements, readVersionExact } from "@/lib/agre
 import { doneLessons, studentDates } from "@/lib/learn";
 import { attemptOf, passedQuizzes } from "@/lib/quiz";
 import { isUnreadSubmission, submissionsOf } from "@/lib/assignment";
+import { submissionsCopyOf } from "@/lib/submission-store";
 import { certificatesOf } from "@/lib/certificate";
 import { lessonComments } from "@/lib/lesson-comments";
 import { notesOf } from "@/lib/lesson-notes";
@@ -56,6 +57,7 @@ import { clicksOf } from "@/lib/mail-clicks";
 import { waitlistPlacesOf } from "@/lib/waitlist";
 import { feedsOf } from "@/lib/podcast-access";
 import { remindersOf } from "@/lib/assistant-reminder";
+import { asksOf } from "@/lib/checkout-ask";
 import { syncJobsOf } from "@/lib/email-sync";
 import { memberTraces, readMember as readCommunityMember } from "@/lib/community";
 import { pointsRecordOf } from "@/lib/community-points";
@@ -83,12 +85,14 @@ import { heldPaymentsOf } from "@/lib/closing-holds";
 import { shipmentMailOf } from "@/lib/shipment-mail-outbox";
 import { orderConfirmationMailOf } from "@/lib/order-confirmation-outbox";
 import { suppressedKey, suppressionPrint } from "@/lib/suppression";
+import { filesKeyOf } from "@/lib/person-erasure";
 import { updatesStopMarkKey } from "@/lib/product-updates";
 import { reviewStopMarkKey } from "@/lib/review-requests";
 import { recoveryStopMarkKey } from "@/lib/checkout-recovery";
 import { importTracesOf } from "@/lib/imports";
 import { deliveriesAbout } from "@/lib/webhooks";
 import type { PaidCheckout } from "@/lib/person-copy-stripe";
+import { BACKUP_DELETION_RECORDS_REVIEW, BACKUP_FILES_ROUTE_REVIEW } from "@/lib/backup-files-review";
 import { companiesOfPerson } from "@/lib/crm-companies";
 
 export type CopyHow = "copied" | "marks" | "elsewhere" | "pending";
@@ -98,6 +102,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/shipment-mail-outbox.ts": { how: "copied", what: "Your saved shipping-update messages and their pending state, if the queue has been activated; deletion fences are kept as one-way marks" },
   "lib/order-confirmation-outbox.ts": { how: "copied", what: "Your linked purchase confirmations, original payment reference, amount and pending state, if the queue has been activated; erasure and duplicate-prevention fences are kept as one-way marks" },
   "lib/resend-fallback-budget.ts": { how: "marks", what: "Linked financial send-intent and message fingerprints, quota holds and outcome marks, without a plain address or message; no account-wide ledger of other people's sends is included" },
+  "lib/person-erasure.ts": { how: "copied", what: "While a deletion is not finished, the names of your uploaded files still to be deleted, under a one-way fingerprint" },
   "lib/orders.ts": { how: "marks", what: "Order-reference and accounting fingerprints that prevent counting a payment twice; they contain no plain email message and do not prove delivery" },
   "lib/flows.ts": { how: "copied", what: "Which of the store's sequences and workflows you are in, and each step taken" },
   "lib/mail-clicks.ts": { how: "copied", what: "Which of the store's sequence emails you used a link in" },
@@ -112,6 +117,8 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/course-finish.ts": { how: "marks", what: "Marks that you opened and finished a course; the lessons you finished are in your course progress" },
   "lib/quiz.ts": { how: "copied", what: "Your quiz tries, answers, results and passes" },
   "lib/assignment.ts": { how: "copied", what: "Work you handed in, and the store's feedback on it" },
+  "lib/submission-store.ts": { how: "copied", what: "Files you sent the store for review, your note, its reply, and any upload still open" },
+  "lib/backup-deletions.ts": { how: "marks", what: "Built but off: notes that the backup must delete its copy of a file already deleted, naming only the file (a hand-in's name holds a one-way fingerprint of your address, never the address)" },
   "lib/certificate.ts": { how: "copied", what: "Your certificates" },
   "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons" },
   "lib/lesson-notes.ts": { how: "copied", what: "Your private notes on lessons" },
@@ -124,6 +131,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/welcome-offer-send.ts": { how: "marks", what: "When your welcome offer began, and that its reminder was set" },
   "lib/winback-send.ts": { how: "marks", what: "Marks that you heard a come-back offer about a product" },
   "lib/checkout-recovery.ts": { how: "marks", what: "Marks that you heard a checkout reminder about a product this week" },
+  "lib/checkout-ask.ts": { how: "copied", what: "Checkout reminders you asked for that are still waiting to be sent" },
   "lib/assistant-reminder.ts": { how: "copied", what: "A checkout reminder you asked for with the store's assistant box" },
   "lib/move-members.ts": { how: "copied", what: "Invitations to keep a membership you had elsewhere" },
   "lib/inbox.ts": { how: "copied", what: "Your conversations with the store's inbox" },
@@ -180,6 +188,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/review-requests.ts": { how: "within", in: "lib/suppression.ts", what: "If you pressed stop on review requests, that is in your no" },
   "lib/product-updates.ts": { how: "passing", days: 60, what: "If a product update email from the store is going out to you now, its sending list holds your address until it finishes. If you pressed stop on update emails, that is in your no" },
   "lib/broadcasts.ts": { how: "passing", days: 60, what: "If one of the store's emails to its list is going out to you now, its sending list holds your address until it finishes" },
+  "lib/email-polls.ts": { how: "passing", days: 60, what: "If you answered a poll in one of the store's emails, your answer is kept under your place in that email's list, never your address, so it cannot be found for you; it is deleted by itself 30 days after the poll closes" },
   "lib/community-event-mail.ts": { how: "passing", days: 30, what: "If an email about a community event is going out to you now, its sending list holds your address until it finishes" },
   "lib/ad-events.ts": { how: "passing", days: 4, what: "What a checkout you opened with your yes to ad measurement carries to its sale (network address, browser, page, ad cookies), kept under the checkout's own token for four days at the most and deleted as soon as its sale is known" },
   "lib/checkout-ask.ts": { how: "passing", days: 4, what: "A reminder you asked for on a product's page or at checkout waits in a queue with your address until it is sent: in an hour, a day or three days, as you chose, and a few hours more if a try fails" },
@@ -199,6 +208,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/plan-late-notice.ts": { how: "passing", days: 400, what: "If a payment of your payment plan was taken after the plan ended and then refunded: whether you were emailed about that refund and how many times it was tried, kept under the payment's Stripe invoice only, so you are never emailed about it twice. Your address is read from the invoice at Stripe when the email is sent and is not kept here. Deleted 400 days after the last try" },
   "lib/studio-demo.ts": { how: "notThePerson", why: "Kept about a visitor trying the studio without an account, by a network address and a random code, never by a store's buyer's address" },
   "lib/plan-withdrawal.ts": { how: "notThePerson", why: "Kept about the creator's own plan with Marktmorgen, not about the store's buyers" },
+  "lib/purchase-moves.ts": { how: "passing", days: 2, what: "A request to move your purchases to another address, with both addresses and when each confirmed it, kept for its day and one more; found only by the links emailed to the two addresses" },
 };
 
 /** True only when every module is copied or holds only marks: the condition for giving the copy to anybody. */
@@ -245,7 +255,7 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
 }
 
 /** What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts). */
-const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]);
+const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true });
 
 /** One reader per copied module, each only reading. */
 // A Stripe Checkout Session id, the same shape lib/call-packages.ts keeps a package under.
@@ -280,6 +290,15 @@ async function packageForCopy(checkout: string): Promise<Bought | null> {
 }
 
 export const COPIERS: Readonly<Record<string, Copier>> = {
+  // The exact paths of the person's files still to be deleted, kept while a deletion is not finished (#4808): data
+  // about the person, so read exactly (#4871, Codex L). A reply that does not read is unknown, never a copy without it.
+  "lib/person-erasure.ts": async (s) => {
+    if (!s.listId) return [];
+    const reply = repliesFor(await redisPipeline([["SMEMBERS", filesKeyOf(s.listId, s.email)]]), 1);
+    const paths = reply ? stringList(reply[0]) : null;
+    if (!paths) throw new UnknownReplyError("the names of the person's files still to be deleted");
+    return paths;
+  },
   "lib/shipment-mail-outbox.ts": s => shipmentMailOf(s.statsId, s.email),
   "lib/order-confirmation-outbox.ts": s => orderConfirmationMailOf(s.statsId, s.email),
   "lib/contacts.ts": async (s) => {
@@ -394,6 +413,11 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     }
     return out;
   },
+  "lib/submission-store.ts": async (s) => {
+    // Named by the course's product as the other course records are; a course since deleted by its own id.
+    const productOf = new Map(s.courses.map((c) => [c.courseId, c.productId]));
+    return submissionsCopyOf(await storeFolder(storeRef(s.store)), s.learner, (courseId) => productOf.get(courseId) ?? null);
+  },
   // Withdrawn ones too: the erasure deletes them, so they are kept about the person.
   "lib/certificate.ts": async (s) => certificatesOf(s.courses.map((c) => c.courseId), s.email),
   "lib/lesson-comments.ts": async (s) => {
@@ -428,7 +452,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return [copy];
   },
   // Read whether or not the store still lets imported buyers in (importedFor asks that, and notes them as it reads).
-  "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]),
+  "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true }),
   "lib/move-members.ts": async (s) => {
     const out: unknown[] = [];
     // The catalog's products and the memberships whose removal has not confirmed their invitations gone (Claude 3 on #3473).
@@ -475,10 +499,11 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   },
   "lib/buyer-library.ts": async (s) => ((await storesKnownFor(s.email)).includes(s.sid) ? [{ inYourLibrary: true }] : []),
   "lib/mail-clicks.ts": async (s) => (await clicksOf(s.listId, s.email)).map((email) => ({ email })),
-  "lib/waitlist.ts": async (s) => (await waitlistPlacesOf(s.statsId, s.productIds, s.email)).map((w) => ({ product: w.product, joined: iso(w.joined), confirmed: iso(w.confirmed), alsoAskedForNews: w.news })),
+  "lib/waitlist.ts": async (s) => (await waitlistPlacesOf(s.statsId, [...s.productIds, ...(s.waitlistIds ?? [])], s.email)).map((w) => ({ product: w.product, joined: iso(w.joined), confirmed: iso(w.confirmed), alsoAskedForNews: w.news })),
   "lib/tier-benefits.ts": async (s) => (await benefitMarksOf(s.store, s.person)).map((m) => ({ benefit: m.benefit, period: m.period, markedGiven: iso(m.at) })),
   "lib/podcast-access.ts": async (s) => (await feedsOf(s.store, s.productIds, s.email)).map((product) => ({ product, privateFeed: true })),
   "lib/assistant-reminder.ts": async (s) => (await remindersOf(s.statsId, s.email)).map((r) => ({ ...r, at: new Date(r.at).toISOString() })),
+  "lib/checkout-ask.ts": async (s) => asksOf(s.statsId, s.email),
   "lib/email-sync.ts": async (s) => syncJobsOf(s.statsId, s.email),
   "lib/community-erasure.ts": async (s) => {
     const id = s.communityId;
@@ -502,7 +527,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     void _polls;
     const record = {
       // The link in their announcement emails is a key, left out: they have it in those emails.
-      profile: member ? { email: member.e, name: member.n, handle: member.h, inDirectory: member.dir, announcementEmails: member.mail, joined: iso(member.at), lastSeen: iso(member.seen), muted: member.muted } : null,
+      profile: member ? { email: member.e, name: member.n, handle: member.h, inDirectory: member.dir, links: member.s.map((l) => l.url), announcementEmails: member.mail, joined: iso(member.at), lastSeen: iso(member.seen), muted: member.muted } : null,
       points,
       // What happened, on which post, and when; not who did it, which is theirs.
       notifications: notices.map((n) => ({ kind: n.kind, post: n.post, ...(n.comment ? { comment: n.comment } : {}), at: iso(n.at) })),
@@ -606,6 +631,13 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   },
 };
 
+/** What the copy says is kept only as marks; the backup's deletion records only once their reviews are filled (VR item 2). */
+export function copyMarks(): string[] {
+  return Object.entries(COPY_PLAN)
+    .filter(([module, p]) => p.how === "marks" && (module !== "lib/backup-deletions.ts" || (BACKUP_FILES_ROUTE_REVIEW !== null && BACKUP_DELETION_RECORDS_REVIEW !== null)))
+    .map(([, p]) => p.what);
+}
+
 /** One mark read in its exact shape: nothing (not held), or text or a number (held, with what it says). */
 function markOf(reply: unknown, what: string): string | null {
   if (reply === null) return null;
@@ -658,7 +690,7 @@ export async function copyPerson(scope: ErasureScope, now = Date.now()): Promise
     if (records.length) sections.push({ module, what: plan.what, records });
     notComplete.push(...unread);
   }
-  const marks = Object.values(COPY_PLAN).filter((p) => p.how === "marks").map((p) => p.what);
+  const marks = copyMarks();
   const elsewhere = Object.values(COPY_PLAN).filter((p) => p.how === "elsewhere").map((p) => p.what);
   const passing = Object.values(COPY_ALSO).flatMap((p) => (p.how === "passing" ? [`${p.what} (at most ${p.days} ${p.days === 1 ? "day" : "days"}).`] : []));
   return { store: { name: scope.store.name, handle: scope.store.handle }, email: scope.email, made: new Date(now).toISOString(), sections, marks, elsewhere, passing, complete: notComplete.length === 0, notComplete };

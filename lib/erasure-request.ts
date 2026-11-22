@@ -189,7 +189,15 @@ function afterAnswer(task: () => Promise<void>): void {
 async function emailLink(stores: Store[], email: string, origin: string): Promise<EraseAnswer> {
   const token = randomBytes(32).toString("hex");
   const grant: Grant = { e: email, s: stores.map((s) => s.sid) };
-  await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", ERASE_LINK_SECONDS]]);
+  const key = linkKey(token);
+  const kept = await redisPipeline([["SET", key, JSON.stringify(grant), "EX", ERASE_LINK_SECONDS]]);
+  // Never email a link unless Redis confirmed that its whole deletion scope exists (Codex L, MEDIUM). A reply that is
+  // not exactly one "OK" may still hide a write that landed, so that possible grant is deleted before answering the
+  // error, which names no address.
+  if (!exactGrantReply(kept, 1) || kept[0] !== "OK") {
+    await redisPipeline([["DEL", key]]).catch(() => {});
+    return { status: "error" };
+  }
   const names = stores.map((s) => s.name).slice(0, 10);
   const more = stores.length - names.length;
   const text = [
@@ -234,7 +242,7 @@ async function emailLink(stores: Store[], email: string, origin: string): Promis
     full = true;
     opens = sooner(opens, after.opens);
   }
-  await redisPipeline([["DEL", linkKey(token)]]).catch(() => {});
+  await redisPipeline([["DEL", key]]).catch(() => {});
   return full ? { status: "full", ...(opens ? { opens } : {}) } : { status: "error" };
 }
 

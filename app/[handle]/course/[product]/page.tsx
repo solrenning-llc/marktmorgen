@@ -42,6 +42,8 @@ import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
 import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
 import { WhoAnswers } from "@/components/who-answers";
+import { nextStepCookie, nextStepFor } from "@/lib/course-next-step";
+import { CourseNextStepCard } from "@/components/course-next-step-card";
 import { AccessUncheckedNote } from "@/components/access-unchecked-note";
 import { closedDoor, forgetsOnDevice } from "@/lib/course-door";
 
@@ -118,7 +120,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
   if (open && !access.learner.owner) {
     const { email } = access.learner;
     const stamp = access.stamp; // the purchase's end (24 [E7]), so drip emails stop with access
-    after(() => touchStudent(course.id, email, access.start, store, stamp));
+    after(() => touchStudent(course.id, email, access.start, store, stamp, course));
     // Once the whole month's visits are used, a course rests too (lib/traffic-rules.ts).
     if (await isResting(store, undefined, "buyer")) redirect(`/@${store.handle}/resting`);
     // A student's day in a course is a visit to the store (lib/day-visit.ts).
@@ -151,6 +153,14 @@ export default async function CoursePage({ params, searchParams }: Params) {
     ? all.find((entry) => !known.has(entry.lesson.id) && reachable(entry)) ?? all.find(reachable)
     : null;
   const preview = all.find(({ lesson }) => lesson.preview);
+  // The course's "Next step" (560 [AS1]) for a student: only what its creator picked, never something they have or
+  // turned down in this browser; every read it needs is paid for before it is made, and unknown shows nothing
+  // (lib/course-next-step.ts).
+  const nextCookie = nextStepCookie(course.id);
+  const nextProduct =
+    open && !access.learner.owner && course.nextStep
+      ? await nextStepFor({ store, course, courseProductId: product.id, email: access.learner.email, dismissed: jar.get(nextCookie)?.value === "1" }).catch(() => null)
+      : null;
   const base = `/@${store.handle}/course/${product.id}`;
   const selling = canSellProduct(store, product);
   // What stands in for the lessons when the course is not open: a student whose access could not be checked is told so,
@@ -401,6 +411,19 @@ export default async function CoursePage({ params, searchParams }: Params) {
             </div>
           )}
         </div>
+
+        {nextProduct && course.nextStep ? (
+          <CourseNextStepCard
+            handle={store.handle}
+            courseId={course.id}
+            productId={product.id}
+            href={productPath(store, nextProduct)}
+            title={nextProduct.title}
+            price={pricePill(store, nextProduct)}
+            line={course.nextStep.line}
+            words={{ label: w.nextStepLabel, see: w.nextStepSee(nextProduct.title), noThanks: w.nextStepNoThanks, done: w.nextStepNoThanksDone }}
+          />
+        ) : null}
 
         <div className="st-card mt-6 p-6 sm:p-8">
           <h2 className="font-display text-xl font-semibold">{w.inside}</h2>

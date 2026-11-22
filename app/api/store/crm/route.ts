@@ -12,7 +12,7 @@ import { readPipelineAccess } from "@/lib/pipeline-access";
 import { dealEnteredStage } from "@/lib/deal-stage-trigger";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
-import { CRM_VALUE_SAVE_UNITS, CrmDealConflict, CrmFieldsKept, CrmLockLost, CrmPersonGone, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages, readPageMark } from "@/lib/crm";
+import { CRM_LOCKED_CHANGE_UNITS, CRM_VALUE_SAVE_UNITS, CrmDealConflict, CrmFieldsKept, CrmLockLost, CrmPersonGone, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages, readPageMark } from "@/lib/crm";
 
 /** Ten fields of ten choices, a pipeline with its stages and moves, or a deal with its note, as JSON. */
 const MAX_BODY_BYTES = 20_000;
@@ -42,8 +42,9 @@ const MAX_BODY_BYTES = 20_000;
  */
 export async function POST(request: NextRequest) {
   // A field saved is counted as CRM_VALUE_SAVE_UNITS studio requests, all taken with the first, before anything is
-  // read or written (tests/plan-cost-registry.ts, CRM_VALUE_SAVE); every other action as one.
-  const guarded = await guardStoreWrite(request, "orders", MAX_BODY_BYTES, undefined, (body) => (body.action === "value" ? CRM_VALUE_SAVE_UNITS : 1));
+  // read or written (tests/plan-cost-registry.ts, CRM_VALUE_SAVE); a change of pipelines or stages, which takes the
+  // store's CRM lock, as CRM_LOCKED_CHANGE_UNITS (lib/crm.ts); every other action as one.
+  const guarded = await guardStoreWrite(request, "orders", MAX_BODY_BYTES, undefined, (body) => (body.action === "value" ? CRM_VALUE_SAVE_UNITS : body.action === "pipeline" || body.action === "unpipeline" || body.action === "stages" ? CRM_LOCKED_CHANGE_UNITS : 1));
   if (!guarded.ok) return guarded.response;
   const { body } = guarded;
   const refuse = (error: string, status = 400) => Response.json({ ok: false, error }, { status });

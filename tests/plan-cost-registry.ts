@@ -2,7 +2,7 @@ import { CHAT_ADDRESS_FENCE_EXTRA_COMMANDS, CHAT_ADDRESS_FENCE_EXTRA_BYTES } fro
 import { CONTACT_LIVE_COMMANDS, INBOX_LIVE_BYTES, INBOX_OPEN_FENCE_COMMANDS } from "@/lib/inbox";
 import { MAX_PER_DAY as CONTACTS_PER_DAY } from "@/lib/store-contact";
 import { HELD_RECHECKS_PER_DAY, HELD_RETRY_COUNTER_SECONDS, HELD_MONTH_COUNT_SECONDS, heldRecheckMemoryUsd } from "@/lib/held-store-rules";
-import { HUBSPOT_CHECK_BYTES, HUBSPOT_CHECK_COMMANDS } from "@/lib/hubspot-import";
+import { HUBSPOT_CHECK_BYTES, HUBSPOT_CHECK_COMMANDS, HUBSPOT_SAVE_BYTES, HUBSPOT_SAVE_COMMANDS } from "@/lib/hubspot-import";
 import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
 /**
  * Every metered feature's per-store worst month, in one registry (added 17
@@ -2529,7 +2529,10 @@ export const COST_LINES: CostLine[] = [
       const uploads = (a.rows / IMPORT_MIN_ROWS_PER_UPLOAD) * request("heavy", 4 + JOB_WRITE_IF_EXTRA_COMMANDS, 0);
       // Every start priced as a members upload that holds the month's emails and is left until the five-minute job gives it up,
       // with its finish written only over the one read and, at the start, an old upload given up at an end's worst.
-      const starts = a.starts * request("light", 20 + JOB_WRITE_IF_EXTRA_COMMANDS + IMPORT_END_EXTRA_COMMANDS + HELD_UPLOAD_SWEEP_COMMANDS);
+      // A HubSpot deals save is one of these starts too (#2048), reading what a dry run reads before its rows are taken
+      // and the CRM lock (HUBSPOT_SAVE_COMMANDS, HUBSPOT_SAVE_BYTES): each start is priced at the dearer of the two
+      // (coordinator's LOWs b and c on #2048, 18th batch).
+      const starts = a.starts * Math.max(request("light", 20 + JOB_WRITE_IF_EXTRA_COMMANDS + IMPORT_END_EXTRA_COMMANDS + HELD_UPLOAD_SWEEP_COMMANDS), request("heavy", HUBSPOT_SAVE_COMMANDS, HUBSPOT_SAVE_BYTES));
       // A step's one give-back (its end, or a send tried again) never below zero.
       // A members step's invitations are written only to memberships not marked removed: one MGET more inside its script (Claude 7 on #3473).
       const steps = a.steps * request("step", 10 + GIVE_BACK_FLOOR_EXTRA_COMMANDS + INVITE_GONE_READ_COMMANDS);
@@ -2561,8 +2564,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/imported-purchases.ts", names: ["GRANT_UNLESS_ERASED", "grantUnlessErased"] },
       { file: "lib/move-members.ts", names: ["INVITE_UNLESS_ERASED", "INVITE_GONE_READ_COMMANDS = 1;", "local gone = redis.call(\"MGET\", unpack(marks))"] },
       // A HubSpot deals file (#2048): the same check, read once before the plan and once inside the deals' write.
-      { file: "lib/hubspot-import.ts", names: ["suppressedAmong", "ERASED_NOTE"] },
-      { file: "lib/crm.ts", names: ["IMPORT_CRM_DEALS"] },
+      { file: "lib/hubspot-import.ts", names: ["suppressedAmong", "ERASED_NOTE", "HUBSPOT_SAVE_COMMANDS", "HUBSPOT_SAVE_BYTES"] },
+      { file: "lib/crm.ts", names: ["IMPORT_CRM_DEALS", "CRM_LOCK_COMMANDS_MOST"] },
+      { file: "app/api/store/import/hubspot/route.ts", names: ["import-start-month"] },
     ],
     basis: "Every row of the month at its command and transfer ceiling, every upload at the fewest rows one counts, every start, step and report download; Store's own emails to people brought over (Studio and Scale send theirs from the monthly emails). Who was deleted from the store is read once a chunk of past buyers or members (CHUNK, 250 rows) before the repeat check and once more inside the script that writes the chunk (GRANT_UNLESS_ERASED, INVITE_UNLESS_ERASED: its EVAL and one HMGET), three commands a chunk; each row's own writes are the same HSETNX as before, moved inside that script, and a row found deleted there writes nothing and lets go of its repeat-check field (one HDEL in place of those writes). A store made before every store had a list is given one once (lib/store.ts ensureListId). Before each email to somebody brought over, the store's deleted people and the creator's list's rows are read (one HMGET each a portion: suppressedAmong, leftListAmong), and before each member's email or reminder the stop mark is read and, once the day and the month have room for it, its stop link written with its three erasure notes (one link a store and address, the same on every email and every pass: lib/checkout-recovery.ts moveStopLink): MOVED_EMAIL_EXTRA_COMMANDS an email at the most, priced on every one of Store's own and, on Studio and Scale, on every monthly email (the most of those a month can be to people brought over); the mark a stop link may leave is taken in the store's data room with each invitation (RECOVER_TRACE_BYTES), and the link itself is a reminder email's key (tests/store-data-registry.ts). The same mark is written when a member's first email or reminder bounces for good or is marked as spam (lib/mail-health.ts heardFromSender, one SET in the sender's notice, a company cost, and the same room), so the reminder is not sent to them; the reminder reads it with the stop mark read already counted. Since 16 November 2026 (Claude 7, MEDIUM on #3473) the members script also reads, in one MGET, whether each row's membership was marked removed after the step read the catalog (INVITE_GONE_READ_COMMANDS, one command a step), and writes each new invitation's link and the chunk's reminders inside it, the same SETs and the one ZADD it wrote just after; the removal's mark is a studio request of its own (lib/move-members.ts dropProductInvites, the studio line). While the store's plan is not running or not paid, the five-minute job passes over an import that waits (newCostCode) until its keeping runs out (IMPORT_KEEP_SECONDS): every PAUSED_IMPORT_CHECK_SECONDS (two hours) one pass works on it (PAUSED_IMPORT_CHECKS for each start, never more than a billing month's PAUSED_IMPORT_CHECKS_MONTH), priced at PAUSED_IMPORT_PASS_COMMANDS and PAUSED_IMPORT_PASS_BYTES (the store's record at its ceiling), and every pass reads its record (PAUSED_IMPORT_PASSES for each start, never more than PAUSED_IMPORT_PASSES_MONTH), priced at PAUSED_IMPORT_SKIP_COMMANDS and PAUSED_IMPORT_SKIP_BYTES, as measured in tests/import-paused.test.ts. A HubSpot deals file reads the store's deleted people once (one HMGET over the file's addresses, at most 1,000 prints of 32 bytes) before the plan, and once more inside the script that writes the deals (IMPORT_CRM_DEALS: one HMGET within its EVAL): two commands a file, carrying at most 1,000 prints of 32 bytes each.",
   },
@@ -2582,7 +2586,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/import-limits.ts", names: ["IMPORT_ALLOWANCES"] },
       { file: "app/api/store/import/route.ts", names: ["import-preview-month", "import-preview-buyers-month"] },
       { file: "app/api/store/import/hubspot/route.ts", names: ["import-preview-month"] },
-      { file: "lib/hubspot-import.ts", names: ["HUBSPOT_CHECK_COMMANDS", "HUBSPOT_CHECK_BYTES", "DEAL_JSON_MAX_BYTES"] },
+      { file: "lib/hubspot-import.ts", names: ["HUBSPOT_CHECK_COMMANDS", "HUBSPOT_CHECK_BYTES", "DEAL_JSON_MAX_BYTES", "HUBSPOT_PRINT_BYTES", "HUBSPOT_MAX_ROWS"] },
       { file: "app/api/store/import/funnel/route.ts", names: ["import-cf-page-month", "import-cf-plan-month", "import-cf-save-month"] },
       { file: "docs/clickfunnels-import.md", names: ["Worst-case commands per call"] },
     ],
@@ -2939,7 +2943,10 @@ export const COST_LINES: CostLine[] = [
       // A field saved from the studio is counted as CRM_VALUE_SAVE_UNITS studio requests, the second taken before anything is
       // read (C3-125, 4 November 2026; tests/plan-cost-registry.ts, CRM_VALUE_SAVE).
       { file: "lib/crm.ts", names: ["CRM_VALUE_SAVE_UNITS", "CRM_VALUE_SAVE_TRIPS", "CRM_VALUE_SAVE_COMMANDS", "CRM_VALUE_SAVE_BYTES", "CRM_VALUE_SCRIPT_CALLS"] },
-      { file: "app/api/store/crm/route.ts", names: ["body.action === \"value\" ? CRM_VALUE_SAVE_UNITS : 1"] },
+      // A change of pipelines or stages takes the store's CRM lock (#2048), at most CRM_LOCK_COMMANDS_MOST commands and a
+      // wait of CRM_LOCK_WAIT_MS, so it is counted as CRM_LOCKED_CHANGE_UNITS studio requests (coordinator's LOW f, 18th batch).
+      { file: "lib/crm.ts", names: ["CRM_LOCKED_CHANGE_UNITS", "CRM_LOCK_COMMANDS_MOST", "CRM_LOCK_WAIT_MS"] },
+      { file: "app/api/store/crm/route.ts", names: ["body.action === \"value\" ? CRM_VALUE_SAVE_UNITS : body.action === \"pipeline\" || body.action === \"unpipeline\" || body.action === \"stages\" ? CRM_LOCKED_CHANGE_UNITS : 1"] },
       { file: "lib/store-request.ts", names: ["typeof units === \"function\" ? units(body) : units"] },
       // A campaign landing's save checks its words against up to AD_REVIEWS of the product's reviews: AD_CONTEXT_UNITS studio requests first, at the reviews' heaviest, refused without reading (Claude 5's review of #1950; tests/ad-context-cost.test.ts holds the bytes).
       { file: "lib/ad-context.ts", names: ["AD_REVIEWS", "AD_REVIEW_BYTES", "STUDIO_REQUEST_BYTES", "AD_CONTEXT_UNITS"] },

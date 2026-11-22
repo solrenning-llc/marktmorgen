@@ -1007,6 +1007,23 @@ export const CRM_LOCK_SECONDS = 60;
 export const CRM_LOCK_WAIT_MS = 2_000;
 
 /**
+ * The most commands the store's CRM lock adds to the request that takes it (coordinator's LOW f on #2048, 18th
+ * batch): takeLock (lib/redis-lock.ts) sends one SET NX per try, waiting 20 ms doubled up to 250 ms between tries,
+ * and gives up past CRM_LOCK_WAIT_MS, so at most 11 tries; the release is one EVAL with its GET and DEL inside; and
+ * the write's own script reads the lock once (GET). 11 + 3 + 1 = 15. tests/hubspot-import.test.ts counts the tries.
+ */
+export const CRM_LOCK_COMMANDS_MOST = 15;
+
+/**
+ * A change of pipelines or of the first pipeline's stages from the studio (savePipelineChange, writeStages) is counted
+ * as this many studio requests, all taken with the first, before anything is read: one for the change itself, and two
+ * for the CRM lock it now takes, whose wait of up to CRM_LOCK_WAIT_MS (2 s) does not fit in one studio request's 1.5 s
+ * and whose CRM_LOCK_COMMANDS_MOST fit in their twenty commands. app/api/store/crm/route.ts;
+ * tests/plan-cost-registry.test.ts holds the time and the commands.
+ */
+export const CRM_LOCKED_CHANGE_UNITS = 3;
+
+/**
  * The store's CRM lock, taken by an import of deals (lib/hubspot-import.ts)
  * and by every change of pipelines or stages on the board, so neither reads
  * the deals while the other writes: LockBusyError when another holds it.

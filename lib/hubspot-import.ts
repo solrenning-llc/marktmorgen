@@ -58,11 +58,11 @@
  * (lib/crm.ts, forgetCrmPerson).
  */
 import { createHash } from "node:crypto";
-import { CrmDealReadUnavailable, CrmDealWriteUnconfirmed, CrmDealsFull, CrmLockLost, CrmPersonErased, CrmSchemaConflict, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, importRoom, importSnapshot, readDealMarks, takeCrmLock, writeImport } from "@/lib/crm";
+import { CRM_LOCK_COMMANDS_MOST, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, CrmDealsFull, CrmLockLost, CrmPersonErased, CrmSchemaConflict, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, importRoom, importSnapshot, readDealMarks, takeCrmLock, writeImport } from "@/lib/crm";
 import { type Deal, type Pipeline, type Stage, MAX_DEALS, MAX_PIPELINES, MAX_STAGES, allStages, newCrmId, parseDeal, parsePipelines, pipelineLimit } from "@/lib/crm-rules";
 import { HUBSPOT_LABELS, type HubSpotDealDraft, type HubSpotRefusal, STAGE_PAST_REASON, hubSpotDealColumns, hubSpotFileOf, oneLine, pipelineRoomReason, planHubSpotDeals, tooManyDealsSentence } from "@/lib/hubspot-csv";
 import { giveImportRows, takeImportRows } from "@/lib/imports";
-import { rowsWords } from "@/lib/import-limits";
+import { IMPORT_WORST_BYTES_PER_ROW, rowsWords } from "@/lib/import-limits";
 import { type Held, LockBusyError, releaseLock } from "@/lib/redis-lock";
 import { DataRoomError, dataKey, monthOf, needData } from "@/lib/store-data";
 import { redisPipeline } from "@/lib/redis";
@@ -322,15 +322,40 @@ function planAgainst(
 export const DEAL_JSON_MAX_BYTES = 3_700;
 
 /**
+ * What one address's check against the store's deleted people moves at the most (suppressedAmong, one HMGET of a print
+ * a field): the 32-character print sent, the second it holds back (16 digits at the most) and the reply's framing.
+ * A file's addresses are read before the store's MAX_DEALS is checked, so all HUBSPOT_MAX_ROWS of them are priced
+ * (coordinator's LOW a on #2048, 18th batch).
+ */
+export const HUBSPOT_PRINT_BYTES = 64;
+
+/**
  * What a dry run reads at the most (Claude 5's cost MEDIUM on #2048): the store's pipelines and the ids of its deals
  * (the snapshot), its deleted people's prints for the file's addresses, and every deal the file names that is already
  * here, whole (readDealMarks), each at DEAL_JSON_MAX_BYTES. Priced as the check it is counted as (tests/plan-cost-registry.ts,
  * line clickfunnels, "import-preview-month").
  */
-export const HUBSPOT_CHECK_BYTES = MAX_DEALS * (DEAL_JSON_MAX_BYTES + 32) + 64 * 1024;
+export const HUBSPOT_CHECK_BYTES = MAX_DEALS * (DEAL_JSON_MAX_BYTES + 32) + HUBSPOT_MAX_ROWS * HUBSPOT_PRINT_BYTES + 64 * 1024;
 
-/** The commands one dry-run request sends at the most, the route's own (session, allowances) included. */
-export const HUBSPOT_CHECK_COMMANDS = 14;
+/**
+ * The commands one dry-run request sends at the most, the route's own (session, allowances) included, and the one
+ * HMGET of the file's addresses against the store's deleted people (suppressedAmong), sent only when the file names an
+ * address: 14 without it, 15 with it (coordinator's LOW a on #2048, 18th batch; tests/hubspot-import.test.ts counts both).
+ */
+export const HUBSPOT_CHECK_COMMANDS = 15;
+
+/**
+ * The most one save sends and reads beyond what its rows are priced at (coordinator's LOWs b and c on #2048, 18th
+ * batch). A save is one of the month's import starts (app/api/store/import/hubspot/route.ts, "import-start-month"),
+ * priced at the dearer of a start and this (tests/plan-cost-registry.ts, line imports). Everything a dry run reads is
+ * read before the month's rows are taken, so a save refused there, or one with nothing to write, has read it all:
+ * HUBSPOT_CHECK_BYTES, which holds every deal already here at DEAL_JSON_MAX_BYTES, more than the
+ * IMPORT_WORST_BYTES_PER_ROW a row is priced at. Then the CRM lock taken and let go (CRM_LOCK_COMMANDS_MOST), the data
+ * room read (two HMGET), the month's rows taken and maybe given back (three), and the room's take (one); and each new
+ * deal's own write past the bytes its row is priced at, at most MAX_DEALS deals in one save.
+ */
+export const HUBSPOT_SAVE_COMMANDS = HUBSPOT_CHECK_COMMANDS + CRM_LOCK_COMMANDS_MOST + 6;
+export const HUBSPOT_SAVE_BYTES = HUBSPOT_CHECK_BYTES + MAX_DEALS * Math.max(0, DEAL_JSON_MAX_BYTES + 64 - IMPORT_WORST_BYTES_PER_ROW);
 
 /** What the data room counts for a slot's own field while it is there (TAKE_DATA, lib/store-data.ts). */
 const NEW_FIELD_BYTES = 64;

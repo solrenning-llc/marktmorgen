@@ -25,8 +25,10 @@ import { PICTURE_DOOR_MAX } from "@/lib/picture-door";
 import { done, is, part } from "./check";
 
 part("The official prices, with their source and date");
-is("an upload (put) is an Advanced Operation, US$ 5 a million", BLOB_ADVANCED_OP, 5 / 1e6);
-is("a head or a read is a Simple Operation, US$ 0.40 a million", BLOB_SIMPLE_OP, 0.4 / 1e6);
+// Regional prices (vercel.com/docs/pricing/regional-pricing): the dearest region, gru1, while the store's region is
+// unreviewed (Claude 1 on #2848, comment 6708241908).
+is("an upload (put) is an Advanced Operation, US$ 7.00 a million at the dearest region", BLOB_ADVANCED_OP, 7 / 1e6);
+is("a head or a read is a Simple Operation, US$ 0.56 a million at the dearest region", BLOB_SIMPLE_OP, 0.56 / 1e6);
 
 part("A put may be sent again: every try counted (Revisor 1 on #2803)");
 // @vercel/blob tries a failed put again up to VERCEL_BLOB_RETRIES times, 10 unless set (dist getRetries), and no

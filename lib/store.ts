@@ -2832,17 +2832,17 @@ async function closingUnderway(store: Store): Promise<boolean> {
 }
 
 /**
- * A store's once-a-year break mark and the milliseconds it has left, read exactly (rule 24): null when there is none
+ * The two reads of a store's once-a-year break mark (GET, PTTL), sent in moveAccount's own read of the address moved
+ * to, so the mark costs the move no trip of its own to the database (MOVE_TAP_PIPELINES, AC (l) on #3752).
+ */
+const breakYearReads = (ref: string): (string | number)[][] => [["GET", breakYearKey(ref)], ["PTTL", breakYearKey(ref)]];
+/**
+ * The mark and the milliseconds it has left, from those two replies, read exactly (rule 24): null when there is none
  * (GET nil and PTTL -2), the time stored with its milliseconds left (null for a mark with no end), or UnknownReplyError
  * for any other answer, so a mark that does not read is never "no break taken" and the move does not go through.
+ * `readAt` is the clock before the read was sent.
  */
-async function breakYearAt(ref: string): Promise<{ value: string; leftMs: number | null; readAt: number } | null> {
-  // The clock before the read, so the time the mark had left is counted from no later than Redis measured it
-  // (breakYearLeft): the move's later reads and writes come off it, and its end is never pushed back.
-  const readAt = Date.now();
-  const replies = repliesFor(await redisPipeline([["GET", breakYearKey(ref)], ["PTTL", breakYearKey(ref)]]), 2);
-  const value = replies?.[0];
-  const ttl = replies?.[1];
+function breakYearOf(value: unknown, ttl: unknown, readAt: number): { value: string; leftMs: number | null; readAt: number } | null {
   const ms = typeof ttl === "number" && Number.isSafeInteger(ttl) ? ttl : typeof ttl === "string" && /^-?\d{1,15}$/.test(ttl) ? Number(ttl) : NaN;
   if (value === null && ms === -2) return null;
   if (typeof value === "string" && /^\d{1,12}$/.test(value) && (ms > 0 || ms === -1)) return { value, leftMs: ms === -1 ? null : ms, readAt };
@@ -2850,7 +2850,7 @@ async function breakYearAt(ref: string): Promise<{ value: string; leftMs: number
 }
 
 /**
- * The milliseconds a mark read by breakYearAt has left now: what Redis answered less the time since the read was sent,
+ * The milliseconds a mark read by breakYearOf has left now: what Redis answered less the time since the read was sent,
  * so the mark keeps its own end at the new address (Codex X6's LOW on #3752: a relative PX written after the move's
  * other reads pushed the end back by that time). 0 when it ran out meanwhile; null for a mark with no end.
  */
@@ -2973,15 +2973,20 @@ export async function moveAccount(
   const result = await withStore<MoveResult>(from, async (store, _save, held) => {
     // A store in its closing keeps its address until its records are erased, or its plan runs again and its members are let go; one with a break set, until the break is taken back or over (closingUnderway).
     if (await closingUnderway(store)) return { ok: false, reason: "closing" };
-    // Its once-a-year break mark goes with it (breakYearAt): left behind, the store had a fresh year at the new address.
+    // Its once-a-year break mark goes with it (breakYearOf): left behind, the store had a fresh year at the new address.
     // Read at the store's own ref, its address as the record keeps it, where pausePlan wrote it, not at the lowercased
     // `from`: a legacy home store whose address has capitals keeps its mark there (Codex X6's LOW on #3752).
-    const breakYear = await breakYearAt(storeRef(store));
+    // Its two reads ride in the same trip as the address moved to (breakYearReads), with the clock taken before it is
+    // sent, so the time the mark had left is counted from no later than Redis measured it (breakYearLeft).
+    const readAt = Date.now();
     // The address it is moving to must not already own a store of its own.
     const read = repliesFor(await redisPipeline([
       ["GET", await ownerKey(to)],
       ["SCARD", await accountKey(to)],
-    ]), 2);
+      ...breakYearReads(storeRef(store)),
+    ]), 4);
+    // The mark first, as when it was its own read: one that does not read stops the move before anything else.
+    const breakYear = breakYearOf(read?.[2], read?.[3], readAt);
     // A count that does not read is unknown (rule 24), never NaN passed as "it owns no store".
     const theirs = read ? countOf(read[1]) : null;
     if (!read || theirs === null) throw new UnknownReplyError("the stores of the address moved to");

@@ -1,7 +1,7 @@
 /**
  * A break taken while the store's address moves is never left at the old address (Codex X5's MEDIUM on #3752, confirmed
  * by Claude 2 cloud I). moveAccount (lib/store.ts) holds the store's lock and reads, once, whether a break is set
- * (closingUnderway) and the once-a-year mark (breakYearAt); pausePlan (lib/plan-pause.ts) took no lock, so a break
+ * (closingUnderway) and the once-a-year mark (breakYearOf); pausePlan (lib/plan-pause.ts) took no lock, so a break
  * written between those reads and the move's last write stayed at the old ref: the daily run could not find the store
  * any more (the plan, already set to stop at the period's end, was never started again), and the new address had no
  * once-a-year mark. Now a break is taken, and taken back, under the same store lock, on the store read afresh under it.

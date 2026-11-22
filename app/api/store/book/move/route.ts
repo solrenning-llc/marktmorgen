@@ -4,7 +4,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readOrder } from "@/lib/store-checkout";
 import { isCallProduct, moveBooking, packageOf } from "@/lib/calls";
-import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 import { readListing } from "@/lib/catalog";
 import { bookedHere, payBookTimes } from "@/lib/book-page-admission";
 
@@ -65,7 +65,9 @@ export async function POST(request: NextRequest) {
     });
 
   if (!Number.isFinite(start)) return back("invalid");
-  if (!(await withinStore("book-move", `${clientAddress(request)}|${store.handle}`, 10, 600, store, "buyer"))) return back("slow");
+  const room = await withinStore("book-move", `${clientAddress(request)}|${store.handle}`, 10, 600, store, "buyer").catch(unknownLimit);
+  if (room === "unknown") return back("error");
+  if (!room) return back("slow");
   // Only a booking in this store's diary is asked about at Stripe (review of #3478; one HEXISTS, lib/book-page-admission.ts).
   const inDiary = await bookedHere(store, session);
   // A diary that could not be read is "error" (try again), never "unknown" (no such booking): rule 24, Claude 3 on #3478.

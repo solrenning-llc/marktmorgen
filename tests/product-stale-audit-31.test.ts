@@ -1,6 +1,6 @@
 /**
  * The coordinator's 31st triple audit on #4238 @3507d6035a, three MEDIUMs, each held here (synthetic data, Redis
- * stand-in, no provider):
+ * stand-in, no provider), and the 36th batch's focal audit on be8e4eb462 (parts 5 and 6):
  *   1. a save refused as stale says what is saved now as read under the store's lock, never the store record the
  *      request read before it waited for the lock (VR 2: "saved now" must be true);
  *   2. a description's room is taken only once the save holds its lock, just before the fenced write, so a save that
@@ -14,6 +14,9 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, editProduct, ensureStatsId, ensureStoreId, setProductAbout, setProductSummary, setProductTitle, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { dataKey } from "@/lib/store-data";
+import { dataBytes } from "@/lib/store-data-rules";
+import { readAbout } from "@/lib/product-about";
+import { PRODUCT_DESCRIPTION } from "@/lib/agent-kinds";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -127,6 +130,51 @@ async function main() {
   is("the save is refused", refused !== "", true);
   is("the summary kept is the long one", (await readListing((await storeForEmail(owner))!, id))!.summary, longSummary);
   is("the product's own room and the description's are as they were", await plain([["HGET", room, recordSlot], ["HGET", room, slot]]), slotsBefore);
+
+  part("5. A save whose lock is lost after the room was reserved never counts less than is kept (36th batch, MEDIUM 1)");
+  const kept = "k".repeat(4_900);
+  const keptSave = await save({ ...form, rev: await revNow(), title: "Agent title", about: kept });
+  is("the long description is saved", keptSave.status, 200);
+  const keptBytes = dataBytes([kept], 1);
+  let dropLock = true;
+  redis.pipeline = async (commands) => {
+    // The store's lock, made to last before the writes (holdLock), is found lost: the save stops after its room's take.
+    const extend = commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:extend:v1") && String(c[3]).startsWith("nl:store:lock:"));
+    if (extend && dropLock) {
+      dropLock = false;
+      return commands.map(() => 0);
+    }
+    return plain(commands);
+  };
+  let lost: Answer;
+  try { lost = await save({ ...form, rev: await revNow(), title: "Agent title", about: "short" }); } finally { redis.pipeline = plain; }
+  is("the save did not go through", lost.body.ok === true, false);
+  is("the long description is still kept", await readAbout((await storeForEmail(owner))!.statsId, id), kept);
+  is("and its room still counts it", Number((await plain([["HGET", room, slot]]))[0]) >= keptBytes, true);
+
+  part("6. An agent's description goes in one step under the lock: a tab saving meanwhile cannot undo it in silence (MEDIUMs 2 and 3)");
+  const aboutKeyNow = `nl:product:about:${(await storeForEmail(owner))!.statsId}:${id}`;
+  const opened6 = await revNow();
+  let tab: Answer | null = null;
+  let tabLater = false;
+  redis.pipeline = async (commands) => {
+    const writesAbout = commands.some((c) => c[0] === "EVAL" && c.includes(aboutKeyNow));
+    if (!writesAbout || tab || tabLater) return plain(commands);
+    const reply = await plain(commands);
+    // A write of the description outside the store's lock: the tab's save lands right after it, before the rest.
+    if (String(commands[0]?.[1] ?? "").startsWith("-- marktmorgen:about-write-live")) tab = await save({ ...form, rev: opened6, title: "Agent title", about: "the tab's words" });
+    else tabLater = true;
+    return reply;
+  };
+  let agent: unknown;
+  try {
+    agent = await PRODUCT_DESCRIPTION.write!((await storeForEmail(owner))!, owner, id, "The agent's accepted words.", kept);
+  } finally { redis.pipeline = plain; }
+  tab ??= await save({ ...form, rev: opened6, title: "Agent title", about: "the tab's words" });
+  is("the agent's write is taken", agent, true);
+  is("the tab opened before it is refused", [tab.status, tab.body.error], [409, "stale"]);
+  is("the agent's words are kept", await readAbout((await storeForEmail(owner))!.statsId, id), "The agent's accepted words.");
+  is("and their room counts them", Number((await plain([["HGET", room, slot]]))[0]) >= dataBytes(["The agent's accepted words."], 1), true);
   done();
 }
 

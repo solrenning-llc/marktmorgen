@@ -8,6 +8,8 @@ import { GET, POST, DELETE } from "@/app/api/v1/codes/route";
 import { makeKey } from "@/lib/api-keys";
 import { addReturningCode, claimHandle, removeReturningCode, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { CODE_PROBLEMS } from "@/lib/discount";
+import { apiReadUnits, codeMakeWork } from "@/lib/api-read-rules";
+import { allowanceUsed, allowancesUsedStrict, forceAllowance } from "@/lib/store-allowance";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -123,6 +125,23 @@ async function main(): Promise<void> {
   const ten = (read.body.data as { id: string; code: string }[]).find((c) => c.code === "TEN-OFF")!;
   await stop(ten.id);
   is("with no live code left, the checkout's code box goes", (await storeForEmail(OWNER))!.hasDiscounts, false);
+
+
+  part("The one more call a switch-off may need is set aside first (Claude 5 icEJ on #3691)");
+  // Claude 5 icEJ's LEVE on #3691 @0983579781: the switch-off was counted only after the clash was found, so a key with
+  // no request left for it left both codes live. It is now set aside before anything is made and given back when no
+  // code for returning buyers took the word.
+  const makeUnits = apiReadUnits(codeMakeWork());
+  const usedBefore = await allowanceUsed(store, "api");
+  is("control: making a code is counted", makeUnits > 0, true);
+  const fresh = await make({ code: "SPAREBACK", percent: 10 });
+  is("no clash: the one set aside for a switch-off comes back, so the code costs what it did (the door and the making)", [fresh.status, (await allowanceUsed(store, "api")) - usedBefore], [200, 1 + makeUnits]);
+  const [api] = (await allowancesUsedStrict(store, ["api"])) ?? [];
+  const leaveFor = 1 + makeUnits;
+  if (api && api.figure - api.used > leaveFor) await forceAllowance(store, "api", api.figure - api.used - leaveFor);
+  writes.length = 0;
+  const tight = await make({ code: "NOROOMSTOP", percent: 10 });
+  is("room for making a code but not for its possible switch-off: refused, and nothing reaches Stripe", [tight.status, writes], [429, []]);
 
   done();
 }

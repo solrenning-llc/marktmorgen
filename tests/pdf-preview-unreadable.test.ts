@@ -18,7 +18,7 @@
  */
 import { NextRequest } from "next/server";
 import { PDFDocument } from "pdf-lib";
-import { addProduct, claimHandle, closeStoreRecord, ensureStatsId, ERASING_KEY, erasingField, setProductFile, setProductPreview, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { addProduct, claimHandle, closeStoreRecord, ensureStatsId, ERASING_KEY, erasingField, moveAccount, setProductFile, setProductPreview, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { dataKey, dataUsed, noteData } from "@/lib/store-data";
 import { problemKey, stampProblems } from "@/lib/pdf-stamp";
 import type { ProductFile } from "@/lib/product-file";
@@ -171,8 +171,7 @@ async function main(): Promise<void> {
   is("no preview right now", await ask(full.id), 404);
   is("and the PDF is not read", blobReads.get(full.file.pathname) ?? 0, 0);
 
-  // The account-move cases (an old owner ref writing after a move) belong to #5010 row 17 (lib/store-live-cache.ts v3).
-  for (const state of ["live", "erasing", "closed"] as const) {
+  for (const state of ["live", "erasing", "closed", "moved-live", "moved-erasing"] as const) {
     part(`A final preview record at the store boundary: ${state}`);
     redis.clear();
     files.clear();
@@ -191,11 +190,18 @@ async function main(): Promise<void> {
       const final = commands.some((c) => (c[0] === "SET" && c[1] === key) || (c[0] === "EVAL" && c[5] === key));
       if (!hits && final) {
         hits++;
-        const current = parent;
+        let current = parent;
+        if (state.startsWith("moved")) {
+          const moved = await moveAccount(OWNER, "moved-preview@example.test");
+          is("the real account move completes", moved.ok, true);
+          const found = await storeForEmail("moved-preview@example.test");
+          if (!moved.ok || !found || found.sid !== parent.sid || found.statsId !== parent.statsId) throw new Error("move fixture");
+          current = found;
+        }
         if (state === "closed") {
           is("the real store close deletes this preview and its room", await closeStoreRecord(current, [key, dataKey(current)!]), true);
           files.clear(); // The file-store double stands for the completed folder cleanup.
-        } else if (state === "erasing") {
+        } else if (state === "erasing" || state === "moved-erasing") {
           await pipeline([["HSET", ERASING_KEY, await erasingField(storeRef(current)), String(Date.now())], ["DEL", key, dataKey(current)!]]);
           files.clear(); // This record's family and its already-created copy have been visited by the walk.
         }
@@ -211,12 +217,16 @@ async function main(): Promise<void> {
       is("the live route serves and keeps its preview name", [status, typeof kept === "string" && kept.includes(privateLabel)], [200, true]);
     } else {
       is("the stale/erased request is refused, with no retained preview record", [status, kept], [404, null]);
-      if (state === "erasing") {
-        const finishing = await storeForEmail(OWNER);
+      if (state === "erasing" || state === "moved-erasing") {
+        const finishing = await storeForEmail(state === "moved-erasing" ? "moved-preview@example.test" : OWNER);
         if (!finishing) throw new Error("closing fixture missing");
         // Its record family was already visited; final close does not delete this preview a second time.
         is("the real final close completes", await closeStoreRecord(finishing), true);
         is("no personal preview name survives final closure", (await pipeline([["GET", key]]))[0], null);
+      } else if (state === "moved-live") {
+        is("a fresh lookup of the moved live store still serves the preview", await ask(f.id), 200);
+        const fresh = (await pipeline([["GET", key]]))[0];
+        is("that fresh request keeps its own preview record", typeof fresh === "string" && fresh.includes(privateLabel), true);
       }
     }
   }

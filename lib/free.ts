@@ -53,6 +53,7 @@ import {
   plainRead,
 } from "@/lib/contacts";
 import { noteForErasure } from "@/lib/erasure-index";
+import { personReturned } from "@/lib/crm";
 import { contactOpen } from "@/lib/store-contact";
 
 export { MAX_LEADS };
@@ -244,7 +245,7 @@ export async function requestCopy(input: {
   const name = store.name;
   const g = givingWords(store.language);
   const link = `${origin}/@${store.handle}/free?token=${token}`;
-  const sent = await sendEmail({ meter: { by: "order" },
+  const sent = await sendEmail({ meter: { by: "order", store },
     from: `"${displayName(name)} via Marktmorgen" <${senderAddress()}>`,
     to: email,
     subject: g.freeSubject(product.title),
@@ -366,6 +367,10 @@ export async function recordLead(
   title: string,
 ): Promise<AddResult | null> {
   if (!store.listId || !isRedisConfigured()) return null;
+  // A free product claimed through the emailed link: they came back on their own, so the CRM may keep fields about them
+  // again (lib/crm.ts, personReturned; C3-125).
+  // When they asked for the copy, not when the link was used: an old link used again is not a return (Codex D, #2287).
+  await personReturned(store.statsId, claim.e, Date.parse(claim.at));
   try {
     // A free copy is an order: its contact is counted at what it really adds (lib/order-data.ts).
     const result = await upsertContact(store.listId, claim.e, {

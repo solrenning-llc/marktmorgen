@@ -188,6 +188,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/review-requests.ts": { how: "within", in: "lib/suppression.ts", what: "If you pressed stop on review requests, that is in your no" },
   "lib/product-updates.ts": { how: "passing", days: 60, what: "If a product update email from the store is going out to you now, its sending list holds your address until it finishes. If you pressed stop on update emails, that is in your no" },
   "lib/broadcasts.ts": { how: "passing", days: 60, what: "If one of the store's emails to its list is going out to you now, its sending list holds your address until it finishes" },
+  "lib/email-polls.ts": { how: "passing", days: 60, what: "If you answered a poll in one of the store's emails, your answer is kept under your place in that email's list, never your address, so it cannot be found for you; it is deleted by itself 30 days after the poll closes" },
   "lib/community-event-mail.ts": { how: "passing", days: 30, what: "If an email about a community event is going out to you now, its sending list holds your address until it finishes" },
   "lib/ad-events.ts": { how: "passing", days: 4, what: "What a checkout you opened with your yes to ad measurement carries to its sale (network address, browser, page, ad cookies), kept under the checkout's own token for four days at the most and deleted as soon as its sale is known" },
   "lib/checkout-ask.ts": { how: "passing", days: 4, what: "A reminder you asked for on a product's page or at checkout waits in a queue with your address until it is sent: in an hour, a day or three days, as you chose, and a few hours more if a try fails" },
@@ -254,7 +255,7 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
 }
 
 /** What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts). */
-const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]);
+const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true });
 
 /** One reader per copied module, each only reading. */
 // A Stripe Checkout Session id, the same shape lib/call-packages.ts keeps a package under.
@@ -451,7 +452,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return [copy];
   },
   // Read whether or not the store still lets imported buyers in (importedFor asks that, and notes them as it reads).
-  "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]),
+  "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true }),
   "lib/move-members.ts": async (s) => {
     const out: unknown[] = [];
     // The catalog's products and the memberships whose removal has not confirmed their invitations gone (Claude 3 on #3473).

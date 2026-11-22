@@ -35,7 +35,7 @@ import { MAX_PARTS, READ_BUDGET_MS, readPlanRefund } from "@/lib/plan-refund";
 import { isRedisConfigured } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import type { Store } from "@/lib/store";
-import { StripeListUnreadable, ownField, readStripePage } from "@/lib/stripe-list";
+import { StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 const AT = "2024-06-20";
 /** The lock of one store's plan refund. */
@@ -61,6 +61,8 @@ const REFUND_STATES = ["succeeded", "failed", "canceled", "pending", "requires_a
  * whole, readable list may say.
  */
 function wholeRefunds(page: unknown, chargeId: string, paymentIntent: string): Row[] {
+  // An unnamed or differently named reply cannot prove that no refund is pending.
+  if (!plainObject(page) || ownField(page, "object") !== "list") throw new StripeListUnreadable("not a refunds list");
   // A row is a refund only with a refund's own id (Codex CX1 on #2759): another id is not readable, so nothing is made.
   // It counts only when it proves it is this charge's own (#4474): the list's filter is not proof, and a row of
   // another charge (or with no charge, or another payment intent) would block the refund or change its idempotency key.

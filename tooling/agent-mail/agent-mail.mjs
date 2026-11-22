@@ -427,13 +427,29 @@ export function pedidos(tipo, agora = new Date(), commit = buscar()) {
 // ---------------------------------------------------------------------------------------------------------------------
 
 export const REPO_PRS = process.env.CORREIO_PR_REPO || "https://github.com/solrenning-llc/marktmorgen";
+
+// Variáveis de teste (OWNER-20261121-1904, passo 4): CORREIO_SEM_COMMITS, CORREIO_SEM_GH e CORREIO_SEM_VERSAO só valem
+// com a marca AGENT_MAIL_TEST=1 e com os dois repositórios locais (nenhum endereço de rede). Fora disso a variável é
+// ignorada, com um aviso, e a ferramenta faz a conferência de verdade.
+const avisadas = new Set();
+const repoLocal = (r) => !/^(https?:|git@|ssh:|git:)/i.test(String(r));
+/** true só quando a variável de teste `nome` está em "1", com a marca de teste e os repositórios locais. */
+export function testeLigado(nome) {
+  if (process.env[nome] !== "1") return false;
+  if (process.env.AGENT_MAIL_TEST === "1" && repoLocal(REPO) && repoLocal(REPO_PRS)) return true;
+  if (!avisadas.has(nome)) {
+    avisadas.add(nome);
+    console.error(`ATENÇÃO: a variável de teste ${nome}=1 foi ignorada: ela só vale com AGENT_MAIL_TEST=1 e com os repositórios do correio e dos PRs locais; a conferência foi feita de verdade.`);
+  }
+  return false;
+}
 /** Prefixo da sessão (7 caracteres depois de "session_") -> família. Conferido nos PRs abertos em 21/11/2026. */
 export const SESSOES = { "01DKvYQ": "claude-1", "01FR6Z1": "claude-2", "014YNUx": "claude-3", "01S9eVA": "claude-4",
   "012ST5i": "claude-5", "018ZjhH": "claude-6", "01Hfzoz": "claude-7" };
 
 /** As famílias com commits no PR e as sessões que não se sabe de quem são; null quando o PR não pôde ser lido. */
 export function commitsDoPr(pr, ramo = null) {
-  if (process.env.CORREIO_SEM_COMMITS === "1") return null;
+  if (testeLigado("CORREIO_SEM_COMMITS")) return null;
   const sufixo = `${process.pid}-${randomBytes(4).toString("hex")}`;
   const base = `refs/correio/prs-main-${sufixo}`, cabeca = `refs/correio/prs-${pr}-${sufixo}`;
   try {
@@ -466,7 +482,7 @@ export function commitsDoPr(pr, ramo = null) {
  * null quando não há exatamente um ramo.
  */
 export function ramoDoHead(sha, pr) {
-  if (process.env.CORREIO_SEM_COMMITS === "1" || !/^[0-9a-f]{10,40}$/.test(String(sha ?? ""))) return null;
+  if (testeLigado("CORREIO_SEM_COMMITS") || !/^[0-9a-f]{10,40}$/.test(String(sha ?? ""))) return null;
   try {
     const ramos = git(["ls-remote", REPO_PRS, "refs/heads/*"]).split("\n").filter(Boolean).map((l) => l.split("\t"))
       .filter(([h, ref]) => h.startsWith(String(sha)) && !ref.startsWith("refs/heads/gh-readonly-queue/")).map(([, ref]) => ref.slice("refs/heads/".length))
@@ -502,7 +518,7 @@ export function ramoDoPr(pr, ramo) {
  * basta para recusar: pedido do coordenador, 20261121T220452Z-claude-5-ibqho-2bf1). { sha: null } quando não deu para ler.
  */
 export function headDoPr(pr, ramo = null) {
-  if (process.env.CORREIO_SEM_COMMITS === "1") return { sha: null, fonte: null };
+  if (testeLigado("CORREIO_SEM_COMMITS")) return { sha: null, fonte: null };
   if (ramo && ramoDoPr(pr, ramo)) {
     try {
       const linha = git(["ls-remote", REPO_PRS, `refs/heads/${ramo}`]).split("\n").find(Boolean);
@@ -532,7 +548,7 @@ function fonteDoHead(pr, ramo = null) {
  * { naFila, noMain }, ou null quando não foi possível ler.
  */
 export function situacaoNoGitHub(pr, ramo = null) {
-  if (process.env.CORREIO_SEM_COMMITS === "1") return null;
+  if (testeLigado("CORREIO_SEM_COMMITS")) return null;
   const sufixo = `${process.pid}-${randomBytes(4).toString("hex")}`;
   const base = `refs/correio/sg-main-${sufixo}`, cabeca = `refs/correio/sg-${pr}-${sufixo}`;
   try {
@@ -555,7 +571,7 @@ export function situacaoNoGitHub(pr, ramo = null) {
  * { conflitos: ["main" | "#N"], grupos }, ou null quando não foi possível ler.
  */
 export function conflitosDoPr(pr, ramo = null) {
-  if (process.env.CORREIO_SEM_COMMITS === "1") return null;
+  if (testeLigado("CORREIO_SEM_COMMITS")) return null;
   const sufixo = `${process.pid}-${randomBytes(4).toString("hex")}`;
   const criados = [];
   try {
@@ -669,7 +685,7 @@ export function conferirPedido(pedido, comando, alvo, commit = buscar(), agora =
   const esperado = `https://github.com/solrenning-llc/marktmorgen/issues/${CANAL_PEDIDOS}#issuecomment-${m[1]}`;
   let url, corpo, criado;
   try {
-    if (process.env.CORREIO_SEM_GH === "1") throw new Error("sem gh");
+    if (testeLigado("CORREIO_SEM_GH")) throw new Error("sem gh");
     const saida = execFileSync("gh", ["api", `repos/solrenning-llc/marktmorgen/issues/comments/${m[1]}`, "--jq", "[.html_url, (.body // \"\"), (.created_at // \"\")] | @json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
     [url, corpo, criado] = JSON.parse(saida.trim()); // o gh imprime o texto do @json sem aspas: uma camada só
   } catch {
@@ -797,7 +813,7 @@ const LINK_REVISAO = (pr) => new RegExp(`^https://github\\.com/solrenning-llc/ma
 
 /** Confere no GitHub (API REST, pelo gh) que o link é um comentário ou revisão deste PR que cita o head. null = não conferido. */
 export function conferirLink(link, pr, sha) {
-  if (process.env.CORREIO_SEM_GH === "1") return null;
+  if (testeLigado("CORREIO_SEM_GH")) return null;
   const m = LINK_REVISAO(pr).exec(link);
   if (!m) return { ok: false, motivo: "link fora do formato" };
   try {
@@ -886,7 +902,7 @@ export function pedir({ tipo, de, pr, sha, texto = "", para = "", exclui = "", c
   // ramo achado, nada é pedido, porque um pedido assim nunca seria entregue e seguraria o primeiro lugar da fila (MÉDIO
   // do Claude 5 ibuF no #5069).
   let shaFinal = String(sha);
-  if (process.env.CORREIO_SEM_COMMITS !== "1") {
+  if (!testeLigado("CORREIO_SEM_COMMITS")) {
     if (!ramo) { const ref = headDoPr(pr, null).sha; if (ref) ramo = ramoDoHead(ref, pr); }
     const h = headDoPr(pr, ramo);
     if (!h.sha) throw new Error(`o head atual de #${pr} NÃO FOI CONFERIDO agora; nada foi pedido (passo 4: nada NÃO CONFERIDO segue); tente de novo`);
@@ -1119,7 +1135,7 @@ export function hashPublicado() {
 }
 /** Avisa quando a cópia não é a revisada ou não foi conferida; devolve true só quando ela é a revisada, conferida agora. */
 function avisarVersao() {
-  if (process.env.CORREIO_SEM_VERSAO === "1") return true;
+  if (testeLigado("CORREIO_SEM_VERSAO")) return true;
   const publicado = hashPublicado();
   if (!publicado) {
     console.error("ATENÇÃO: não consegui ler o SHA-256 da versão revisada (main do Marktmorgen); a versão desta cópia NÃO FOI CONFERIDA.");

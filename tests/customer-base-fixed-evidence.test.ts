@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { assessMinimumCustomerBase, type CustomerBaseReview } from "@/lib/customer-base-rules";
-import { commercialMarginReady, CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, REQUIRED_MARGIN_SCENARIOS, BASE_PLAN_REVENUE_CEILINGS, type CommercialMarginReview } from "@/lib/commercial-margin";
+import { commercialMarginReady, CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, REQUIRED_MARGIN_SCENARIOS, BASE_PLAN_REVENUE_CEILINGS, type CommercialMarginReview,CURRENT_TERMS_DIGEST} from "@/lib/commercial-margin";
 import { canonicalFinancialSnapshot, contractFundingConfiguration } from "@/lib/contract-funding-rules";
 import { contractFixture } from "./contract-funding-fixture";
 import { txCustomerFixture } from "./customer-tax-review-fixture";
@@ -87,7 +87,7 @@ function commercial(): CommercialMarginReview {
   return {
     companyBase: { ...fixed(), monthlyFixedCostsCeilingCents: 0, reviewedPayingCustomers: 1 },
     planPaymentDisputes: planPaymentDisputeFixture(), fundedExposure: zeroExposureFixture(),
-    priceAndRightsSnapshot: CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,
+    priceAndRightsDigest: CURRENT_TERMS_DIGEST!,
     taxEvidence: "TEST ONLY", costAndLimitEvidence: "TEST ONLY",
     allocatedFixedCostsVerified: true, prepaidUsageEnforced: true,
     scenarios: Object.fromEntries(REQUIRED_MARGIN_SCENARIOS.map(key => {

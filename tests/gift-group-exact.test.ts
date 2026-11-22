@@ -18,9 +18,9 @@ import { deliverGift, readGift, startGift } from "@/lib/gifts";
 import { askPlace, placesTaken, readGroup, settleGroup, startGroup, takePlace } from "@/lib/group-buy";
 import { importedFor } from "@/lib/imported-purchases";
 import { paidPeriod } from "./billing-period-fixture";
+import { paidIntentReply } from "./paid-intent-standin";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { paidIntentReply } from "./paid-intent-standin";
 
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
@@ -49,6 +49,7 @@ const outcome = <T>(p: Promise<T>): Promise<T | "threw"> => p.then((v) => v, () 
 
 const emails: { to: string[] }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  // A gift reads its payment before handing anything over (lib/gifts.ts, #4408; tests/paid-intent-standin.ts).
   // The payment a purchase for several is read with before it is settled (lib/group-buy.ts settleGroup, #4494): paid, not given back.
   const paid = paidIntentReply(input, init?.method ?? "GET");
   if (paid) return paid;

@@ -41,6 +41,7 @@
  */
 import { isRedisConfigured } from "@/lib/redis";
 import { claimMark } from "@/lib/claim-mark";
+import { claimWhileStoreLive } from "@/lib/store-live-cache";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { formatMoney } from "@/lib/money";
@@ -231,7 +232,10 @@ export async function checkAlerts(store: Store, now = Date.now()): Promise<Alert
   let said = 0;
   for (const alert of alerts) {
     const key = saidKey(store.statsId, alert, today);
-    if ((await claimMark(key, alert.kind.startsWith("goal") ? 40 * 86400 : 7 * 86400)) !== "ours") continue;
+    // The numbers were read on the Store as it was when this run began: each alert's mark is taken only while that store
+    // is still its own and not erasing, in one step, so an erased store gets no mark back and no push, chat post or
+    // email (Codex L-20261120-1842). Gone or unknown says nothing.
+    if ((await claimWhileStoreLive(store, key, alert.kind.startsWith("goal") ? 40 * 86400 : 7 * 86400)) !== "ours") continue;
     said += 1;
     const studio = `/studio${store.sid ? `?store=${store.sid}` : ""}#numbers`;
     await alertCreator(store, "alert", { title: alert.title, body: alert.lines[0], url: studio }, { seed: key, at: now }).catch((error) =>

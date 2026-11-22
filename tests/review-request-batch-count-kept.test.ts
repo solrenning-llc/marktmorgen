@@ -1,8 +1,9 @@
 /**
  * A review request batch whose answer was not known keeps the store's monthly count and the company's day it
- * reserved, and marks them (lib/batch-count.ts); the same batch tried again sends under that count instead of
- * reserving again, and the mark goes once it is sent (#4073, Codex X6's LOW: the lost-ack retry held for every
- * batch-email caller, not only announcements). Drives the real sendReviewRequests with the batch answer stubbed
+ * reserved, and marks them (lib/batch-count.ts; #4073, Codex X6's LOW: the lost-ack retry held for every batch-email
+ * caller, not only announcements). Its claims stay stretched, as for any batch that may have gone (#4360; the
+ * coordinator's option (A), 20261122T025459Z-claude-1-coord-4e56): the email is never handed over again, under this
+ * key or another, and it is counted once. Drives the real sendReviewRequests with the batch answer stubbed
  * (tests/batch-answer-world.ts). Synthetic data only: Stripe and Redis are stand-ins.
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setReviewAsk, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
@@ -90,17 +91,18 @@ async function main(): Promise<void> {
     const before = await counted();
     answerBatches(unknown, "sent");
     const first = await sendReviewRequests(storeForHandle, Date.now() + 20_000, NOW);
-    is("the answer was not known: nothing counted as sent, both orders wait", [first.sent, first.waiting], [0, 2]);
+    is("the answer was not known: nothing counted as sent", first.sent, 0);
     const held = await counted();
     is("the two emails stay counted, in the store's month and the company's day", [held.month - before.month, held.day - before.day], [2, 2]);
     is("and the batch is marked as holding its count", marks(), 1);
 
-    const again = await sendReviewRequests(storeForHandle, Date.now() + 20_000, NOW + 3_600);
-    is("tried again and sent", again.sent, 2);
-    is("the same batch, under the same key, handed over twice", [batchAnswers.handed.length, batchAnswers.handed[0]?.key === batchAnswers.handed[1]?.key], [2, true]);
+    for (const at of [NOW + 3_600, NOW + 6 * 3_600]) {
+      const again = await sendReviewRequests(storeForHandle, Date.now() + 20_000, at);
+      is("a later run never sends it again", again.sent, 0);
+    }
+    is("the provider was handed the batch once", batchAnswers.handed.length, 1);
     const after = await counted();
     is("counted once, not twice", [after.month - before.month, after.day - before.day], [2, 2]);
-    is("no mark is left once the batch was sent", marks(), 0);
   }
 
   done();

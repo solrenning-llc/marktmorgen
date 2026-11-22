@@ -551,9 +551,10 @@ export async function sendReviewRequests(
       // answer stays whatever this one says. Amazon's unknown answer ("unconfirmed") is kept and marked too: the same
       // batch tried again never writes to whoever Amazon may have taken (lib/email.ts, notMaybeTaken), and the mark
       // ends before that evidence does (lib/batch-count.ts), so the retry is not counted again (Codex X6 on #4073).
+      // Its claims stay stretched, as for any batch that may have gone (#4360): the email is never handed over again,
+      // under this key or another, and its count is never taken twice.
       if (!kept) await keepBatchCount(batchKey, to);
-      await unclaim(ready, nowSeconds + RETRY_SECONDS.sender);
-      undone = true;
+      maybeSent = true;
       continue;
     }
     if (outcome !== "sent") {

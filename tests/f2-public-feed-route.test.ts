@@ -24,6 +24,7 @@ import { GET } from "@/app/api/store/podcast/public/[handle]/[product]/route";
 import {
   PODCAST_RECORD_MOST,
   PUBLIC_FEED_BUILD_UNITS,
+  FEED_STORE_LIVE_COMMANDS,
   PUBLIC_FEED_BYTES_PER_UNIT,
   PUBLIC_FEED_CACHE_BYTES,
   PUBLIC_FEED_CACHE_ENTRIES,
@@ -152,12 +153,13 @@ async function main(): Promise<void> {
   is("the hold's rest was given back", buildUnits(readBytes)! < PUBLIC_FEED_HOLD_UNITS, true);
   is("no request to any other service, and no audio read", fetched, 0);
 
-  part("Kept in a bounded cache: asked again, nothing is read from Redis, only the count written");
+  part("Kept in a bounded cache: asked again, only the store's liveness is checked (one script, no record), and the count written");
   before = await requestsIn(folder, window);
   sent.length = 0;
   const again = await get(`${pid}.xml`);
   is("the same feed", [again.status, await again.text()], [200, xml]);
   is("no read of the store, listing, podcast or settings", reads().filter((c) => !c.startsWith("GET nl:traffic:r:")), []);
+  is("one check that the store is still live at its address (Codex L-20261120-1144)", sent.filter((c) => c.startsWith("EVAL -- marktmorgen:podcast-feed-store-live:v1")).length, 1);
   is("a kept feed takes only the units of its bytes, one at least", (await requestsIn(folder, window)) - before, sendUnits(bytes));
 
   part("An app that sends the ETag back is answered 304, with no body, and counted once");
@@ -354,8 +356,11 @@ async function main(): Promise<void> {
   const worst = request("heavy", PUBLIC_FEED_READ_COMMANDS, largest) + largest * heavyPerByte;
   is(`the hold: ${PUBLIC_FEED_HOLD_UNITS} units cover a feed built at its worst, $${worst.toFixed(6)}`, PUBLIC_FEED_HOLD_UNITS * later >= worst, true);
   is("the hold is the base and the largest records' units", PUBLIC_FEED_HOLD_UNITS, buildUnits(PODCAST_RECORD_MOST + PUBLIC_SHOW_MAX_BYTES));
-  const firstSent = request("light", 4) + 4 * COMMAND + PUBLIC_FEED_BYTES_PER_UNIT * (ORIGIN_PER_BYTE + heavyPerByte);
-  is(`the first unit sent covers a kept feed's request and its first bytes, written and sent: $${firstSent.toFixed(6)}`, later >= firstSent, true);
+  // With the kept feed's liveness check (FEED_STORE_LIVE): its commands, and the two refs it reads, each at most a key's
+  // ref (an owner's address of 320 characters, or "#" and a store id), with the erasing hash's answer.
+  const liveCheck = FEED_STORE_LIVE_COMMANDS * COMMAND + 2 * 1_024 * DB_BYTE;
+  const firstSent = request("light", 4) + 4 * COMMAND + liveCheck + PUBLIC_FEED_BYTES_PER_UNIT * (ORIGIN_PER_BYTE + heavyPerByte);
+  is(`the first unit sent covers a kept feed's request, its liveness check and its first bytes, written and sent: $${firstSent.toFixed(6)}`, later >= firstSent, true);
   const perSent = PUBLIC_FEED_BYTES_PER_UNIT * (ORIGIN_PER_BYTE + heavyPerByte);
   is(`each further unit sent: $${later.toFixed(6)} covers $${perSent.toFixed(6)}`, later >= perSent, true);
   is("sendUnits: one at least, then one per PUBLIC_FEED_BYTES_PER_UNIT", [sendUnits(0), sendUnits(1), sendUnits(PUBLIC_FEED_BYTES_PER_UNIT), sendUnits(PUBLIC_FEED_BYTES_PER_UNIT + 1)], [1, 1, 1, 2]);

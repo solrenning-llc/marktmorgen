@@ -77,7 +77,8 @@ import { paypalOrdersOf } from "@/lib/paypal-sales";
 import { preordersOf } from "@/lib/preorders";
 import { toldOf } from "@/lib/closing-buyers";
 import { MAX_PAID_CHECKOUTS, paidCheckoutsOf } from "@/lib/person-copy-stripe";
-import { readGift } from "@/lib/gifts";
+import { type Gift, giftKeys } from "@/lib/gifts";
+import { GIFT_ID } from "@/lib/gift-rules";
 import { isGroupJob, readGroup } from "@/lib/group-buy";
 import { type Bought, packageKeys } from "@/lib/call-packages";
 import { readShipped } from "@/lib/shipments";
@@ -260,6 +261,28 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
 
 /** What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts). */
 const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true });
+
+/**
+ * A gift for the person's copy (Codex P-20261119-0651): an index names a gift, but is not proof of its store or, for a
+ * gift received, its recipient. Read exactly; the record must carry this id and this store, and a received one this
+ * person's address, or the copy is unknown (UnknownReplyError). Only a confirmed missing record is absent.
+ */
+async function giftForCopy(statsId: string, id: string, recipient?: string): Promise<Gift | null> {
+  if (!GIFT_ID.test(id)) throw new UnknownReplyError("a gift's identity for the copy");
+  const replies = repliesFor(await redisPipeline([["GET", giftKeys(id, "")[0]]]), 1);
+  if (!replies || (replies[0] !== null && typeof replies[0] !== "string")) throw new UnknownReplyError("a gift for the copy");
+  if (replies[0] === null) return null;
+  let value: unknown;
+  try { value = JSON.parse(replies[0]); } catch { throw new UnknownReplyError("a gift's contents for the copy"); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new UnknownReplyError("a gift's contents for the copy");
+  const gift = value as Record<string, unknown>;
+  const seconds = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  if (gift.id !== id || gift.s !== statsId || typeof gift.p !== "string" || !gift.p ||
+      typeof gift.to !== "string" || !gift.to.trim() || typeof gift.from !== "string" || typeof gift.message !== "string" ||
+      !seconds(gift.at) || (gift.given !== undefined && !seconds(gift.given)) || (gift.revoked !== undefined && !seconds(gift.revoked)) ||
+      (recipient !== undefined && !same(gift.to, recipient))) throw new UnknownReplyError("a gift's ownership or contents for the copy");
+  return gift as Gift;
+}
 
 /**
  * The most Redis commands the call-packages copier sends for one copy (#5125 (1)): one GET a package checkout of the
@@ -572,12 +595,12 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     const received = (await grantsOf(s)).map((g) => g.job).filter((job) => job.startsWith("gift:")).map((job) => job.slice(5));
     const out: unknown[] = [];
     for (const id of [...new Set(bought)]) {
-      const gift = await readGift(id);
+      const gift = await giftForCopy(s.statsId, id);
       // A gift they bought: they typed who it was for.
       if (gift) out.push({ youBought: true, product: gift.p, to: gift.to, from: gift.from, message: gift.message, at: iso(gift.at), ...(gift.given ? { given: iso(gift.given) } : {}), ...(gift.revoked ? { refunded: iso(gift.revoked) } : {}) });
     }
     for (const id of [...new Set(received)]) {
-      const gift = await readGift(id);
+      const gift = await giftForCopy(s.statsId, id, s.email);
       // A gift to them: the name and words the giver chose to send, not the giver's payment.
       if (gift) out.push({ youReceived: true, product: gift.p, from: gift.from, message: gift.message, at: iso(gift.at), ...(gift.given ? { given: iso(gift.given) } : {}), ...(gift.revoked ? { refunded: iso(gift.revoked) } : {}) });
     }

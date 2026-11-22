@@ -14,10 +14,11 @@
  *   3. the owner's commercial review names that very registration, dated, not after today.
  * The switches are separate: neither reads the other's registration or review. Nothing here opens sales:
  * PLANS_ON_SALE, OPENING_REQUESTED, DEEMED_SUPPLIER_RECORDS, the tax gate, art. 9a's records, the commercial review in
- * lib/commercial-margin.ts and stripePlatformEligibilityReady keep every store closed by themselves. Imports nothing,
- * so the checkouts import it without a cycle.
+ * lib/commercial-margin.ts and stripePlatformEligibilityReady keep every store closed by themselves. Imports only
+ * lib/deemed-supplier.ts, which imports nothing, so the checkouts import it without a cycle; by a relative path, since
+ * next.config.ts reaches it through lib/csp.ts and does not resolve "@/".
  */
-import { recordedTreatment } from "@/lib/deemed-supplier";
+import { recordedTreatment } from "./deemed-supplier";
 
 /** Collecting EU VAT (and the art. 196 reverse charge): false until a reviewer checks the whole EU treatment. */
 export const EU_VAT_COLLECT_REVIEWED = false;

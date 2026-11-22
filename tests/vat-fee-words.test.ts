@@ -22,7 +22,7 @@ import { ukVatOnTop } from "@/lib/uk-vat";
 import { vatCollectionCostOf, type VatFxAllowance } from "@/lib/eu-vat-collection-cost";
 import type { SwitchInput } from "@/lib/vat-registrations";
 import { dynamicPolicy, isDynamicPage, staticPolicy } from "@/lib/csp";
-import { VAT_REFUSED_SALES } from "@/lib/vat-fee-words";
+import { VAT_BODY_REFUSALS, VAT_REFUSED_SALES } from "@/lib/vat-fee-words";
 import { applyEuCollect, euSaleGate } from "@/lib/eu-vat-collect";
 
 const NOW = new Date("2026-11-22T12:00:00Z");
@@ -244,7 +244,14 @@ test("the words show on the checkout's own condition: a switch on with a record 
 
 test("the words name every sale the checkout refuses, each beside the check that refuses it (MEDIUM 2)", () => {
   const code = readFileSync(join(process.cwd(), "lib/eu-vat-collect.ts"), "utf8");
-  for (const r of VAT_REFUSED_SALES) assert.ok(code.includes(`"${r.check}"`) || code.includes(r.check), `lib/eu-vat-collect.ts still refuses: ${r.check}`);
+  for (const r of VAT_REFUSED_SALES) for (const check of r.checks) assert.ok(code.includes(check), `lib/eu-vat-collect.ts still refuses: ${check}`);
+  // And the other way: every refusal the checkout's body check makes is named in the words, or is one our own code
+  // builds and no creator's choice can cause (VAT_BODY_REFUSALS), so no sale is refused that the Terms do not name (LEVE 1).
+  const refusals = new Set([...code.matchAll(/refuse\("([^"]+)"\)/g)].map((m) => m[1]));
+  const named = new Set([...VAT_REFUSED_SALES.flatMap((r) => r.checks), ...VAT_BODY_REFUSALS.map((r) => r.check)]);
+  for (const refusal of refusals) assert.ok(named.has(refusal), `named in VAT_REFUSED_SALES or VAT_BODY_REFUSALS: ${refusal}`);
+  assert.ok(refusals.has("not a one-off payment"));
+  assert.ok(VAT_REFUSED_SALES.some((r) => r.words.includes("payment plans") && r.checks.includes("not a one-off payment")), "payment plans are named");
   const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!;
   for (const part of [words.terms, words.pricing]) {
     const text = part.join(" ");
@@ -265,7 +272,8 @@ test("the words name every sale the checkout refuses, each beside the check that
 test("US English: the tax authority, no 'pay it over', no 'tax office', no 'the payment itself' (LEVEs)", () => {
   const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!;
   const text = [words.title, ...words.terms, ...words.pricing, ...words.example].join(" ");
-  assert.doesNotMatch(text, /pay it over|tax office|payment itself/);
+  assert.doesNotMatch(text, /pay it over|tax office|payment itself|nothing is charged and/);
+  assert.match(words.terms.join(" "), /does not accept these sales from a consumer in .*; nothing is charged for them\./);
   assert.match(text, /tax authority/);
 });
 
@@ -277,4 +285,14 @@ test("per request, /terms and /pricing reach only the site itself, as their page
   assert.equal(directive(staticPolicy(), "connect-src"), "connect-src 'self'");
   const proxy = readFileSync(join(process.cwd(), "proxy.ts"), "utf8");
   assert.match(proxy, /selfOnly: isVatWordsPage\(path\)/, "the proxy gives the two pages that policy");
+});
+
+test("lib/vat-registrations.ts says what it imports (NIT)", () => {
+  const head = readFileSync(join(process.cwd(), "lib/vat-registrations.ts"), "utf8").split("*/")[0];
+  assert.doesNotMatch(head, /Imports nothing/);
+  assert.match(head, /lib\/deemed-supplier\.ts/);
+  // next.config.ts reaches it through lib/csp.ts and resolves no "@/" (the build of bd88c46869 failed on it).
+  for (const file of ["lib/vat-registrations.ts", "lib/deemed-supplier.ts", "lib/csp.ts"]) {
+    assert.doesNotMatch(readFileSync(join(process.cwd(), file), "utf8"), /^import [^;]*from "@\//m, `${file} imports by a relative path`);
+  }
 });

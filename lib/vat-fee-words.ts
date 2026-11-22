@@ -159,20 +159,40 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
  * names each refusal beside the check that makes it; tests/vat-fee-words.test.ts holds the two together.
  */
 export const VAT_REFUSED_SALES = [
-  { words: "subscriptions and memberships", check: "shipping or a subscription" },
-  { words: "pay-what-you-want prices", check: "a price the buyer chooses" },
-  { words: "discount or promotion codes", check: "a discount or a promotion box" },
-  { words: "prices converted to the buyer's own currency", check: "a conversion to the buyer's currency" },
-  { words: "more than one of the same product", check: "a quantity other than one" },
-  { words: "e-books and other e-publications", check: "notAPublication" },
-  { words: "any sale whose VAT, or the cost of receiving it, we cannot work out, such as one in a currency with no checked exchange rate", check: "the cost of receiving the VAT is unknown" },
+  { words: "subscriptions and memberships", checks: ["shipping or a subscription"] },
+  { words: "payment plans", checks: ["not a one-off payment"] },
+  { words: "pay-what-you-want prices", checks: ["a price the buyer chooses"] },
+  { words: "discount or promotion codes", checks: ["a discount or a promotion box"] },
+  { words: "prices converted to the buyer's own currency", checks: ["a conversion to the buyer's currency"] },
+  { words: "more than one of the same product", checks: ["a quantity other than one"] },
+  { words: "other products added to one product's checkout", checks: ["more than one line"] },
+  { words: "a cart with more than four products", checks: ["more lines than a cart holds"] },
+  { words: "e-books and other e-publications", checks: ["notAPublication"] },
+  { words: "any sale whose VAT, or the cost of receiving it, we cannot work out, such as one in a currency with no checked exchange rate", checks: ["no sourced rate, or no sterling rate", "the cost of receiving the VAT is unknown"] },
+] as const;
+
+/**
+ * The checkout's other refusals (lib/eu-vat-collect.ts), each a body our own code builds wrong, never a creator's
+ * choice, so the words do not name them: tests/vat-fee-words.test.ts fails on a refusal in neither list.
+ */
+export const VAT_BODY_REFUSALS = [
+  { check: "country", why: "the gate passes only a two-letter country" },
+  { check: "the lines", why: "our checkout numbers its lines from zero" },
+  { check: "a Stripe Price instead of an amount", why: "our one-off lines carry an amount; a Price comes only with pay-what-you-want or a subscription, named above" },
+  { check: "the line's amount or currency", why: "our lines carry a whole amount and a currency code" },
+  { check: "lines in different currencies", why: "a store's checkout is in one currency" },
+  { check: "the lines' total", why: "a total past a safe integer is no price we take" },
+  { check: "the VAT line", why: "the VAT line is written by applyEuVatLines from figures checked just before" },
 ] as const;
 
 const refused = (where: string, intro: string): string[] => [
   `${intro} ${where}.`,
   ...VAT_REFUSED_SALES.map((r) => `It refuses ${r.words}.`),
 ];
-const REFUSED_TERMS = (where: string): string[] => refused(where, "For now, nothing is charged and the checkout refuses these sales to a consumer in");
+const REFUSED_TERMS = (where: string): string[] => [
+  `For now, the checkout does not accept these sales from a consumer in ${where}; nothing is charged for them.`,
+  ...VAT_REFUSED_SALES.map((r) => `It refuses ${r.words}.`),
+];
 const REFUSED_PRICING = (where: string): string[] => refused(where, "For now, the checkout refuses these sales to a consumer in");
 
 function sinceOf(places: VatFeePlace[], input: VatFeeInput, now: Date, currency: string, allowances: readonly VatFxAllowance[]): string {

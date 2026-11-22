@@ -126,3 +126,29 @@ export function sensitiveWarning(topics: DraftTopics): string | null {
   const subject = topics.length === 1 ? "the subject" : "each subject";
   return `This draft is about ${subjects}. Before you publish, have someone who knows ${subject} read it, such as ${readers}, and do not promise a result.`;
 }
+
+/** The badge drawn by the page beside each number in an AI draft that the creator did not give (756 [STN3], unit 3). */
+export const ESTIMATE_BADGE = "Estimate";
+
+/** A number as written: a currency sign, digits with commas or a decimal point, a percent sign. */
+const NUMBER = /[$€£]?\d[\d,]*(?:\.\d+)?%?/g;
+
+/** The same number however its thousands are written: "1,200" and "1200" are one. */
+const plainNumber = (written: string) => written.replace(/,(?=\d{3}\b)/g, "");
+
+/**
+ * The numbers in the draft's text that are not in what the creator gave
+ * (typed in the box and sent with it), each once, in the order they appear.
+ * Whole numbers only: "140" is never found in "40".
+ */
+export function unsourcedNumbers(texts: readonly string[], given: string): string[] {
+  const known = new Set((given.match(NUMBER) ?? []).map(plainNumber));
+  const found: string[] = [];
+  for (const text of texts) {
+    for (const written of text.match(NUMBER) ?? []) {
+      const plain = plainNumber(written.replace(/[.,]+$/, ""));
+      if (!known.has(plain) && !found.includes(plain)) found.push(plain);
+    }
+  }
+  return found;
+}

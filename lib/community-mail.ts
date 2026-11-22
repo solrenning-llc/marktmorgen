@@ -19,8 +19,10 @@
  * send that outlives one run is picked up by the mail job every five minutes.
  *
  *   nl:cm:mail:<job>        the send (JSON)
- *   nl:cm:mail:<job>:to     member keys, in order (a list)
+ *   nl:cm:mail:<job>:to     member keys, in order (a list); a deleted person's is written over with ERASED_MARK
  *   nl:cm:mailq             sends waiting or under way
+ *   nl:cm:<community>:sends that community's sends waiting or under way, at most MAX_SENDS_UNDER_WAY: what a
+ *                           person's erasure walks to take their key out of each list (Codex L-20261121-0758)
  *   nl:cm:unsub:<token>     community|member|handle, for the link in an email
  */
 import { randomBytes } from "node:crypto";
@@ -48,12 +50,17 @@ import {
 } from "@/lib/community";
 import { askingAgainWontTell, holdsTicket, maySeeSpace } from "@/lib/community-access";
 import { communityWords } from "@/lib/buyer-words/community";
+import { MAX_SENDS_UNDER_WAY } from "@/lib/community-text";
+import { ERASED_MARK, blankInLists } from "@/lib/erasure-lists";
 
 export const COMMUNITY_UNSUB = /^[0-9a-f]{40}$/;
 const QUEUE = "nl:cm:mailq";
 const jobKey = (id: string) => `nl:cm:mail:${id}`;
 const toKey = (id: string) => `nl:cm:mail:${id}:to`;
 const lockKey = (id: string) => `nl:cm:mail:${id}:lock`;
+/** A community's sends waiting or under way, kept as long as a send's record (SENDS_SECONDS). */
+const sendsKey = (community: string) => `nl:cm:${community}:sends`;
+const SENDS_SECONDS = 60 * 86_400;
 export const unsubKey = (token: string) => `nl:cm:unsub:${token}`;
 const JOB_ID = /^[0-9a-f]{24}$/;
 
@@ -123,7 +130,57 @@ export function postAddress(store: Store, post: string): string {
   return `${SITE_URL}/@${store.handle}/community/post/${post}`;
 }
 
-export type QueueResult = { ok: true; job: AnnouncementJob } | { ok: false; reason: "plan" | "empty" };
+export type QueueResult = { ok: true; job: AnnouncementJob } | { ok: false; reason: "plan" | "empty" | "busy" };
+
+/**
+ * Takes one of the community's MAX_SENDS_UNDER_WAY places for a send, before anything of it is written: true when it
+ * holds one. Past the cap, the places whose send record is gone (let go after sixty days, or never saved) are let go
+ * first, and only then is the send refused. Concurrent sends that each see the cap passed each let theirs go, so the
+ * set holds more than the cap only for that instant, and an erasure that reads it then refuses and is tried again.
+ * A count in an unknown shape throws (CX-123 rule 24) and nothing more of the send is written.
+ */
+async function holdSendPlace(community: string, id: string): Promise<boolean> {
+  const key = sendsKey(community);
+  const count = async () => {
+    const n = countOf(repliesFor(await redisPipeline([["SCARD", key]]), 1)?.[0]);
+    if (n === null) throw new UnknownReplyError("a community's announcements under way");
+    return n;
+  };
+  const added = repliesFor(await redisPipeline([["SADD", key, id], ["EXPIRE", key, SENDS_SECONDS]]), 2);
+  if (!added || countOf(added[0]) === null) throw new UnknownReplyError("a community's announcements under way");
+  if ((await count()) <= MAX_SENDS_UNDER_WAY) return true;
+  const listed = repliesFor(await redisPipeline([["SMEMBERS", key]]), 1)?.[0];
+  if (!Array.isArray(listed) || listed.some((other) => typeof other !== "string")) throw new UnknownReplyError("a community's announcements under way");
+  const others = (listed as string[]).filter((other) => other !== id && JOB_ID.test(other));
+  const there = others.length ? repliesFor(await redisPipeline(others.map((other) => ["EXISTS", jobKey(other)])), others.length) : [];
+  if (!there) throw new UnknownReplyError("a community's announcements under way");
+  const stale = others.filter((_, i) => there[i] === 0);
+  if (stale.length) await redisPipeline([["SREM", key, ...stale]]);
+  if ((await count()) <= MAX_SENDS_UNDER_WAY) return true;
+  await redisPipeline([["SREM", key, id]]);
+  return false;
+}
+
+/** The commands that take a finished send out of line and out of its community's sends. */
+const outOfLine = (id: string, community?: string): (string | number)[][] =>
+  community ? [["SREM", QUEUE, id], ["SREM", sendsKey(community), id]] : [["SREM", QUEUE, id]];
+
+/**
+ * Writes the erased mark over a deleted member's key in every send of the community still under way (Codex
+ * L-20261121-0758), in its place, so nobody after them moves and the send passes over it (recipientBatch): their key,
+ * which is derived from their address, is not kept for the sixty days a send's list may last. Reads only that
+ * community's sends, at most MAX_SENDS_UNDER_WAY, in one script on the Redis side (lib/erasure-lists.ts). More than
+ * that, or a reply in an unknown shape, throws, so the erasure is said as not finished and its retry comes back here.
+ */
+export async function forgetAnnouncementRecipient(community: string, who: string): Promise<number> {
+  if (!who || !isRedisConfigured()) return 0;
+  const listed = repliesFor(await redisPipeline([["SMEMBERS", sendsKey(community)]]), 1)?.[0];
+  if (!Array.isArray(listed) || listed.length > MAX_SENDS_UNDER_WAY || listed.some((id) => typeof id !== "string" || !JOB_ID.test(id))) {
+    throw new UnknownReplyError("a community's announcements under way");
+  }
+  if (!listed.length) return 0;
+  return (await blankInLists((listed as string[]).map(toKey), who)) > 0 ? 1 : 0;
+}
 
 /** Writes down an announcement's email to go now, to everyone who asked. */
 /**
@@ -152,11 +209,14 @@ export async function queueAnnouncement(store: Store, config: CommunityConfig, p
     throw new RecipientsUnreadError(error);
   }
   if (members.length === 0) return { ok: false, reason: "empty" };
+  const id = randomBytes(12).toString("hex");
+  // Its place among the community's sends first, so a person's erasure that starts from here on finds it.
+  if (!(await holdSendPlace(communityId, id))) return { ok: false, reason: "busy" };
   const w = communityWords(store.language);
   const subject = (post.title || w.announceSubject(config.name)).slice(0, 150);
   const body = [post.text, "", w.announceReadIt(config.name), postAddress(store, post.id)].join("\n").trim();
   const job: AnnouncementJob = {
-    id: randomBytes(12).toString("hex"),
+    id,
     community: communityId,
     handle: store.handle,
     post: post.id,
@@ -339,10 +399,12 @@ async function recipientBatch(id: string, start: number, count: number): Promise
     const keys: string[] = [];
     for (let index = 0; index < count; index++) {
       const slot = Object.getOwnPropertyDescriptor(rows, String(index));
-      if (!slot || !Object.hasOwn(slot, "value") || typeof slot.value !== "string" || !/^[0-9a-f]{32}$/.test(slot.value)) return null;
+      // A deleted person's place holds the erased mark (forgetAnnouncementRecipient): passed over, never a member.
+      if (!slot || !Object.hasOwn(slot, "value") || typeof slot.value !== "string" || !(slot.value === ERASED_MARK || /^[0-9a-f]{32}$/.test(slot.value))) return null;
       keys.push(slot.value);
     }
-    return new Set(keys).size === count ? keys : null;
+    const live = keys.filter((key) => key !== ERASED_MARK);
+    return new Set(live).size === live.length ? keys : null;
   } catch { return null; }
 }
 
@@ -399,7 +461,7 @@ export async function advanceAnnouncement(
       throw error;
     }
     if (!job || job.status === "sent" || job.status === "failed") {
-      await redisPipeline([["SREM", QUEUE, id]]);
+      await redisPipeline(outOfLine(id, job?.community));
       return job;
     }
     const store = await load(job.handle);
@@ -407,7 +469,7 @@ export async function advanceAnnouncement(
     if (!store || !config) {
       job = { ...job, status: "failed", note: "The community is not here anymore." };
       await save(job);
-      await redisPipeline([["SREM", QUEUE, id]]);
+      await redisPipeline(outOfLine(id, job.community));
       return job;
     }
     // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule 24):
@@ -439,8 +501,10 @@ export async function advanceAnnouncement(
       // Stripe could not be asked about, or a stop link not kept, does the same for a bounded number of runs, and a
       // member whose ticket can never be asked about is passed over, counted, never sent to (sortBatch).
       const read: SortedBatch | null = await (async (): Promise<SortedBatch> => {
-        const found = await readMembersExact(community, keys);
-        const asking = keys.map((k) => found.get(k)).filter((m): m is Member => Boolean(m && m.mail && !m.removed));
+        // The places a deleted person stood in are no one's: never read, never sent to, counted as done below.
+        const live = keys.filter((k) => k !== ERASED_MARK);
+        const found = await readMembersExact(community, live);
+        const asking = live.map((k) => found.get(k)).filter((m): m is Member => Boolean(m && m.mail && !m.removed));
         // Never an address the store's list took off for a hard bounce, a spam complaint or a refusal (keptOnList).
         const candidates = store.listId ? await keptOnList(store.listId, asking) : asking;
         // The post's space, as it is now: a space taken away leaves its posts in the whole community's feed.
@@ -515,7 +579,7 @@ export async function advanceAnnouncement(
       await redisPipeline([["DEL", toKey(id)]]);
     }
     await save(job);
-    if (job.status === "sent" || job.status === "failed") await redisPipeline([["SREM", QUEUE, id]]);
+    if (job.status === "sent" || job.status === "failed") await redisPipeline(outOfLine(id, job.community));
     return job;
   } finally {
     await releaseMark(lockKey(id), lock);
@@ -548,7 +612,7 @@ async function countError(id: string, error: unknown): Promise<void> {
         ? `This send stopped after the same error ${ANNOUNCEMENT_ERRORS_MOST} times in a row. Nothing more was sent.`
         : "Paused for a moment: something went wrong on our side. It is tried again by itself.",
     });
-    if (stopped) await redisPipeline([["SREM", QUEUE, id]]);
+    if (stopped) await redisPipeline(outOfLine(id, job.community));
   } finally {
     await releaseMark(lockKey(id), lock);
   }

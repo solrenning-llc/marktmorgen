@@ -13,7 +13,9 @@
  *   - their answers to whether they are coming to each live event, their
  *     places and check-ins in challenges, and the answers kept about whether
  *     they may come in;
- *   - the record behind the unsubscribe link in the announcements they got;
+ *   - the record behind the unsubscribe link in the announcements they got,
+ *     and their key in the recipient list of each announcement still being
+ *     sent, written over in its place (Codex L-20261121-0758);
  *   - what they sent that waits for the creator's approval, the notes about
  *     what was not published, and how many of theirs were approved
  *     (lib/community-approval.ts, 543 [CM2]).
@@ -31,7 +33,7 @@ import { UnknownReplyError } from "@/lib/redis-reply";
 import { giveData } from "@/lib/store-data";
 import { DamagedConfigError, forgetMemberRecord, readConfigExact, readMemberRecord } from "@/lib/community";
 import { forgetHandle } from "@/lib/community-mentions";
-import { forgetCommunityUnsub } from "@/lib/community-mail";
+import { forgetAnnouncementRecipient, forgetCommunityUnsub } from "@/lib/community-mail";
 import { forgetPointsPerson } from "@/lib/community-points";
 import { forgetNoticesPerson } from "@/lib/community-notify";
 import { forgetPushPerson } from "@/lib/community-push";
@@ -92,6 +94,9 @@ export async function forgetCommunityPerson(id: string, who: string, email: stri
   const unsub = named?.read?.member?.t;
   if (handle) await step(() => forgetHandle(id, handle, who));
   if (unsub) await step(() => forgetCommunityUnsub(unsub));
+  // Their key, derived from their address, in the sends still going out: written over where it stands, so nobody after
+  // it moves (Codex L-20261121-0758). Read whole or not at all; unknown refuses and the retry comes back here.
+  await step(() => forgetAnnouncementRecipient(id, who));
   const namedGone = named !== null && failures.length === beforeNamed;
   await step(() => unindexMember(id, who));
   // Their trace (lib/community-trace.ts): what they wrote and did, by

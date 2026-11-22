@@ -323,6 +323,8 @@ export async function POST(request: NextRequest) {
           after(() => advanceAnnouncement(jobId, storeForHandle, Date.now() + 25_000).then(() => undefined, (error) => console.error("sending an announcement failed", error)));
           return back(`${home}/post/${made.post.id}`, "announced");
         }
+        // Too many sends still going out (MAX_SENDS_UNDER_WAY): the post is up, without its email, and says so.
+        if (queued.reason === "busy") return back(`${home}/post/${made.post.id}`, "notemailedbusy");
         return back(`${home}/post/${made.post.id}`, queued.reason === "plan" ? "noemail" : "noreaders");
       }
       return back(`${home}/post/${made.post.id}`, "posted");

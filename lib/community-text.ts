@@ -59,6 +59,11 @@ export const MAX_COMMENTS_PER_POST = 300;
 export const MAX_MEMBERS = 50_000;
 /** Reported posts and comments waiting for the creator. */
 export const MAX_REPORT_QUEUE = 500;
+/**
+ * Announcement emails a community may have going out at once (lib/community-mail.ts): a person's erasure walks each
+ * of them to take that person out (Codex L-20261121-0758), so its work is bounded by this, not by the posts.
+ */
+export const MAX_SENDS_UNDER_WAY = 20;
 
 /** Posts on one page of a feed, and members on one page of the directory. */
 export const FEED_PAGE = 20;

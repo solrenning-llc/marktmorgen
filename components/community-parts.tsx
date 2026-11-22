@@ -35,7 +35,7 @@ const WARN = new Set([
   "noemail", "dmoff", "dmbetween", "dmfull", "chatoff", "pollclosed", "polloptions", "polltitle", "notyours", "empty", "links", "slow",
   "name", "questions", "image", "creatoronly", "level", "muted", "full", "fullposts", "fullcomments", "pinfull", "gone", "forbidden",
   "eventfull", "eventcancelled", "eventover", "eventlocked", "eventunknown", "eventunknownlasting", "host", "nospace", "spacelocked", "spaceunknown", "spaceunknownlasting", "out", "off", "error", "locked",
-  "notemailed",
+  "notemailed", "notemailedbusy",
   // Saved, with a profile link turned away (lib/member-links.ts).
   "savedlinkoff",
 ]);
@@ -45,7 +45,7 @@ export function communityNotices(language: unknown): Record<string, { text: stri
   const w = communityWords(language);
   // With what waits for the creator's approval (543 [CM2], lib/buyer-words/community-approval.ts), and a post that went
   // up while who asked for its email could not be read (lib/buyer-words/community-unread.ts).
-  const all: Record<string, string> = { ...w.notices, ...approvalWords(language).notices, notemailed: communityUnreadWords(language).notEmailed };
+  const all: Record<string, string> = { ...w.notices, ...approvalWords(language).notices, notemailed: communityUnreadWords(language).notEmailed, notemailedbusy: communityUnreadWords(language).notEmailedBusy };
   return Object.fromEntries(Object.entries(all).map(([key, text]) => [key, WARN.has(key) || APPROVAL_WARN.has(key) ? { text, tone: "warn" as const } : { text }]));
 }
 

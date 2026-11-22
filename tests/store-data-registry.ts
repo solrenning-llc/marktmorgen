@@ -79,7 +79,7 @@ import { MAX_SEGMENTS } from "@/lib/segments-rules";
 import { MAX_SAVED_FILTERS, SAVED_FILTER_BYTES } from "@/lib/sales-filter-rules";
 import { HOLDINGS_RECORD_BYTES } from "@/lib/community-access";
 import { MAX_CHAT_KEPT, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
-import { MAX_REPORT_QUEUE, MAX_SPACES, MAX_QUESTIONS, MAX_WELCOME } from "@/lib/community-text";
+import { MAX_REPORT_QUEUE, MAX_SENDS_UNDER_WAY, MAX_SPACES, MAX_QUESTIONS, MAX_WELCOME } from "@/lib/community-text";
 import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
 import { MAX_TEAM, LOG_LINES, LOG_LINE_BYTES } from "@/lib/team";
 import { MAX_BENEFITS_KEPT, MAX_BENEFIT_TEXT } from "@/lib/tier-benefit-rules";
@@ -576,6 +576,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cm:mail:@lib/community-mail.ts": { what: "An announcement's emails, and who they go to", parts: [per("monthly", 30, 512, "Each reader's place in a send, thirty days.", MAIL("announcement"))] },
   "nl:cm:mailq@lib/community-mail.ts": company("Announcements under way", "One set, members gone when sent."),
   "nl:cm:unsub:@lib/community-mail.ts": { what: "A member's stop link, made once and kept", parts: [item(KEY, "One a member.", "membership")] },
+  "nl:cm:@lib/community-mail.ts": { what: "A community's announcement sends waiting or under way, for a person's erasure to find (Codex L-20261121-0758)", parts: [capped(KEY + MAX_SENDS_UNDER_WAY * 128, "One set a community, at most MAX_SENDS_UNDER_WAY ids, kept sixty days.", src("lib/community-text.ts", "MAX_SENDS_UNDER_WAY"))] },
   "nl:cm:@lib/community-mentions.ts": { what: "Members' handles", room: ["lib/community.ts"] },
   "nl:cm:@lib/community-notify.ts": { what: "What happened to each member, and when they last looked", room: ["lib/community-notify.ts"], parts: [item(MARK, "A member's last look.", "membership")] },
   "nl:cm:@lib/community-points.ts": { what: "Points: all-time, by day, by period; rewards; what each member reached", parts: [item(512, "A member's points, their board places and what reached them.", "membership"), per("buyer", 32, 128, "A day's points."), capped(4 * KB, "The rewards a community sets.")] },

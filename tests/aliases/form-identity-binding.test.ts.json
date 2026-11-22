@@ -1,0 +1,4 @@
+{
+  "@/lib/store-request": "form-identity-binding-world.ts",
+  "@/lib/store": "form-identity-binding-world.ts"
+}

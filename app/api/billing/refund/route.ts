@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { away, creatorFrom, studioPath } from "@/lib/studio-route";
-import { limited, withinLimit } from "@/lib/request-guard";
+import { limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { refundAndEndPlan, takeReview } from "@/lib/plan-refund-flow";
 import { refundUnderway } from "@/lib/plan-refund-underway";
 
@@ -42,10 +42,14 @@ export async function POST(request: NextRequest) {
   } catch {
     token = "";
   }
-  if (!(await withinLimit("plan-refund", store.sid || store.handle, PER_DAY, 86_400))) return told("later");
-  // The pass is taken before anything else: a second click or an old tab has none.
-  // A refund still being settled (a second press, a request that has not finished) is never told "nothing".
+  // A refund still being settled (a second press, a request that has not finished) is never told "nothing":
+  // not by the day's counter either, whose "unread" and "later" both say nothing was refunded.
   const underway = () => refundUnderway(store.sid).catch(() => true);
+  const room = await withinLimit("plan-refund", store.sid || store.handle, PER_DAY, 86_400).catch(unknownLimit);
+  if (room !== true && (await underway())) return told("busy");
+  if (room === "unknown") return told("unread");
+  if (!room) return told("later");
+  // The pass is taken before anything else: a second click or an old tab has none.
   const shown = await takeReview(store.sid, token);
   if (shown === null) return told((await underway()) ? "busy" : "review");
 

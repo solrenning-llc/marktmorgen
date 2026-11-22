@@ -37,7 +37,7 @@ case "$FAKE_GH" in
 esac
 `); chmodSync(join(BIN, "gh"), 0o755);
 
-const base = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t", CORREIO_REPO: join(T, "mail.git"), CORREIO_PR_REPO: join(T, "prs.git"), CORREIO_SEM_VERSAO: "1", PATH: `${BIN}:${process.env.PATH}` };
+const base = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t", CORREIO_REPO: join(T, "mail.git"), CORREIO_PR_REPO: join(T, "prs.git"), CORREIO_SEM_VERSAO: "1", AGENT_MAIL_TEST: "1", PATH: `${BIN}:${process.env.PATH}` };
 delete base.CLAUDE_CODE_REMOTE_SESSION_ID;
 // Both outputs are read: warnings go to stderr even when the command succeeds.
 const run = (args, env = {}, cwd = join(T, "w")) => {
@@ -239,11 +239,11 @@ r = run(["claim-enqueue", "--as", "Claude 6 X"], as("c6"));
 is("a request at the branch head is not declined while refs/pull/N/head lags", /pegou/.test(r.out) && /igual ao do pedido \(pelo ramo feature-4\)/.test(r.out), r.out);
 run(["complete-enqueue", "--as", "Claude 6 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], as("c6"));
 g(["checkout", "-q", "pr4"], P); const H4c = commit("f4.txt", "4c\n", "pr4 c");
-run(["request-enqueue", "--from", "Claude 2", "--pr", "4", "--sha", H4c.slice(0, 10), "--text", "fila #4 c"], { ...as("c2"), CORREIO_SEM_COMMITS: "" });
+// H4c is not pushed yet, so the request finds no branch, and the local refs/pull/4/head (still H4a) is authoritative:
+// since step 4 the request itself is refused, instead of being recorded and declined at the take.
+r = run(["request-enqueue", "--from", "Claude 2", "--pr", "4", "--sha", H4c.slice(0, 10), "--text", "fila #4 c"], { ...as("c2"), CORREIO_SEM_COMMITS: "" });
+is("without a recorded branch, a local repository's refs/pull is authoritative and a request for another head is refused", !r.ok && /não é o head atual/.test(r.out), r.out);
 g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-4"], P);
-// the request recorded no branch (H4c was not pushed yet), so only the local refs/pull/4/head (still H4a) is read: declined, authoritative locally
-r = run(["claim-enqueue", "--as", "Claude 6 X"], as("c6"));
-is("without a recorded branch, a local repository's refs/pull is authoritative and a different head is declined", /mudou de/.test(r.out), r.out);
 g(["checkout", "-q", "pr4"], P); const H4d = commit("f4.txt", "4d\n", "pr4 d"); g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-4"], P);
 run(["request-enqueue", "--from", "Claude 2", "--pr", "4", "--sha", H4d.slice(0, 10), "--text", "fila #4 d"], { ...as("c2"), CORREIO_SEM_COMMITS: "" });
 const H4e = commit("f4.txt", "4e\n", "pr4 e"); g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-4"], P);
@@ -255,10 +255,8 @@ g(["checkout", "-q", "-B", "pr7", M], P); const H7a = commit("f7.txt", "7\n", "p
 g(["push", "-q", "../prs.git", "HEAD:refs/heads/backup-7"], P);
 const H7b = commit("f7.txt", "7b\n", "pr7 b"); g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-7"], P); g(["push", "-q", "../prs.git", "HEAD:refs/pull/7/head"], P);
 r = run(["request-enqueue", "--from", "Claude 2", "--pr", "7", "--sha", H7a.slice(0, 10), "--text", "fila #7 (old head)\nRamo: backup-7"], { ...as("c2"), CORREIO_SEM_COMMITS: "" });
-const id7a = /registrado: (\S+)/.exec(r.out)?.[1];
-is("no branch is recorded for an old head held only by a backup branch", r.ok && !/^Ramo:/m.test(g(["show", `refs/heads/correio:fila/pedidos/${id7a}.md`], join(T, "mail.git")).split(/\n\s*\n/)[0]), r.out);
-r = run(["claim-enqueue", "--as", "Claude 6 X"], as("c6"));
-is("a 'Ramo:' line in the free text is ignored, and the old head is declined", /mudou de/.test(r.out) && new RegExp(H7b.slice(0, 10)).test(r.out), r.out);
+is("a request for an old head held only by a backup branch is refused (step 4), naming the PR's head", !r.ok && /não é o head atual/.test(r.out) && new RegExp(H7b.slice(0, 10)).test(r.out), r.out);
+is("a 'Ramo:' line in the free text does not make it pass: nothing is recorded for #7", !/#7 @/.test(run(["list-queue"]).out), run(["list-queue"]).out);
 
 console.log("switch off returns to the old behaviour (R1)");
 r = run(["set-switch", "--as", "Claude 2 X", "--name", "record-review", "--off", "--reason", "parar"], as("c2"));
@@ -286,18 +284,187 @@ g(["checkout", "-q", "-B", "pr6", M], P); const H6a = commit("f6.txt", "6\n", "p
 const H6b = commit("f6.txt", "6b\n", "pr6 b");
 const ghEnv = (k) => ({ ...as(k), CORREIO_PR_REPO: GH, CORREIO_SEM_COMMITS: "" });
 
-run(["request-enqueue", "--from", "Claude 2", "--pr", "6", "--sha", H6b.slice(0, 10), "--text", "fila #6"], ghEnv("c2"));
+// Since step 4 (Claude 5 ibuF's MEDIUM on #5069): on GitHub, a request needs the PR's branch, found from the head or,
+// for a stale head, from the PR's current reference; without it nothing is requested, so no request can hold the queue.
+r = run(["request-enqueue", "--from", "Claude 2", "--pr", "6", "--sha", H6b.slice(0, 10), "--text", "fila #6"], ghEnv("c2"));
+is("on GitHub, with no branch of the PR found, the request is refused (it could never be delivered)", !r.ok && /ramo de #6 não foi achado/.test(r.out), r.out);
+is("so nothing holds the first place of the queue", !/#6 @/.test(run(["list-queue"]).out), run(["list-queue"]).out);
+g(["push", "-q", GH, `${H6b}:refs/heads/feature-6`], P);
+r = run(["request-enqueue", "--from", "Claude 2", "--pr", "6", "--sha", H6b.slice(0, 10), "--text", "fila #6"], ghEnv("c2"));
+const id6 = /registrado: (\S+)/.exec(r.out)?.[1];
+is("with the branch at the new head while refs/pull/6/head lags, the request records the branch and the full head", r.ok && /^Ramo: feature-6$/m.test(g(["show", `refs/heads/correio:fila/pedidos/${id6}.md`], join(T, "mail.git"))) && new RegExp(`^Head: ${H6b}$`, "m").test(g(["show", `refs/heads/correio:fila/pedidos/${id6}.md`], join(T, "mail.git"))), r.out);
 r = run(["claim-enqueue", "--as", "Claude 6 X"], ghEnv("c6"));
-is("not delivered and not declined: 'não conferível agora'", /não conferível agora/.test(r.out) && !/pegou|recusado/.test(r.out), r.out);
-is("the request stays first and open, with no take", /#6 @\S+ +autor Claude 2 +aberto/.test(run(["list-queue"]).out), run(["list-queue"]).out);
-g(["push", "-q", GH, `${H6b}:refs/pull/6/head`], P);
-r = run(["claim-enqueue", "--as", "Claude 6 X"], ghEnv("c6"));
-is("once refs/pull/N/head catches up, it is delivered, the head still NOT CHECKED by branch", /pegou/.test(r.out) && /NÃO CONFERIDO/.test(r.out), r.out);
+is("the take checks the head by the branch, not by the lagging reference, and delivers it", /pegou/.test(r.out) && /pelo ramo feature-6/.test(r.out), r.out);
+run(["complete-enqueue", "--as", "Claude 6 X", id6, "--result", "declined", "--text", "fim do teste"], ghEnv("c6"));
+g(["checkout", "-q", "pr6"], P); const H6c = commit("f6.txt", "6c\n", "pr6 c"); g(["push", "-q", GH, `${H6c}:refs/heads/feature-6`], P); g(["push", "-q", GH, `${H6c}:refs/pull/6/head`], P);
+r = run(["request-enqueue", "--from", "Claude 2", "--pr", "6", "--sha", H6b.slice(0, 10), "--text", "fila #6 stale"], ghEnv("c2"));
+is("on GitHub, a request for a stale head is refused: the branch is found from the PR's reference", !r.ok && /não é o head atual/.test(r.out) && new RegExp(H6c.slice(0, 10)).test(r.out), r.out);
+// A request recorded before step 4, with no Ramo:, is held at the take; the hint must be one that works: pedir refuses a
+// second request for the same PR and head, so the author cancels first (Claude 7 3uv's LEVE on #5069).
+{
+  g(["init", "-q", "--bare", "mail5.git"]); g(["push", "-q", "../mail5.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m5 = { CORREIO_REPO: join(T, "mail5.git") };
+  run(["request-enqueue", "--from", "Claude 2", "--pr", "6", "--sha", H6c.slice(0, 10), "--text", "old-style, no branch"], { ...ghEnv("c2"), ...m5, CORREIO_SEM_COMMITS: "1" });
+  r = run(["claim-enqueue", "--as", "Claude 6 X"], { ...ghEnv("c6"), ...m5 });
+  is("an old request without a branch is held, and the hint says to cancel it first and request again", /NÃO CONFERIDO agora/.test(r.out) && /cancel-enqueue/.test(r.out), r.out);
+}
 
 console.log("unidentified writes are marked when read (OWNER-20261121-1904 step 2)");
 run(["send", "--from", "Codex X", "--to", "Claude 3 Z", "--subject", "s", "--text", "sem sessão"]);
 r = run(["read", "--as", "Claude 3 Z"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
 is("a message written outside the Claude Code cloud is shown as unidentified", /ATENÇÃO: escrita não identificada/.test(r.out), r.out);
+
+console.log("order by the commit sequence; instants in the future refused; off prevails (OWNER-20261121-1904 step 3)");
+{
+  const H10 = pr(10, "f10.txt", "10\n");
+  run(["request-enqueue", "--from", "Claude 2", "--pr", "10", "--sha", H10.slice(0, 10), "--text", "fila #10"], { ...as("c2"), CORREIO_SEM_COMMITS: "1" });
+  // A request written later with an old-looking id must not jump the queue.
+  raw("fila/pedidos/20200101T000000Z-claude-3-x-aaaa.md", `Tipo: fila\nPR: 11\nHead: ${"b".repeat(10)}\nAutor: Claude 3 X\nId: 20200101T000000Z-claude-3-x-aaaa\n`);
+  const linhasFila = run(["list-queue"]).out.split("\n");
+  const i10 = linhasFila.findIndex((l) => /#10 @/.test(l)), i11 = linhasFila.findIndex((l) => /#11 @/.test(l));
+  is("a request is placed by the commit that wrote it, not by its self-declared id", i10 >= 0 && i11 > i10, linhasFila.join("\n"));
+  const id10 = /^(\S+) +#10 @/m.exec(run(["list-queue"]).out)?.[1];
+  raw(`fila/tomadas/${id10}/0`, "20991231T000000Z-claude-7-x-ffff\nClaude 7 X\n");
+  is("a take dated in the future does not hold the request", /#10 @\S+ +autor Claude 2 +aberto/.test(run(["list-queue"]).out), run(["list-queue"]).out);
+  // A valid ON, copied with a filename far in the future, is ignored.
+  const mail = join(T, "mail.git");
+  const ons = g(["ls-tree", "-r", "--name-only", "refs/heads/correio", "chaves/record-review"], mail).split("\n")
+    .map((c) => ({ c, t: g(["show", `refs/heads/correio:${c}`], mail) })).filter((x) => /^ON\nClaude 5 ibqho\n/.test(x.t) && /^Pedido: /m.test(x.t));
+  const valido = ons[ons.length - 1].t;
+  raw("chaves/on-call/4102444800000-claude-5-ibqho-ab12", valido);
+  is("an ON whose instant is in the future is ignored", /on-call: DESLIGADO/.test(run(["list-switches"]).out), run(["list-switches"]).out);
+  // A valid ON stamped 3 minutes ahead and written first, then an OFF written after it: the OFF, written last, holds.
+  raw(`chaves/ready-check/${Date.now() + 180000}-claude-5-ibqho-cd56`, valido);
+  run(["set-switch", "--as", "Claude 2 X", "--name", "ready-check", "--off", "--reason", "depois"], as("c2"));
+  is("the switch follows the commit order: an OFF written after an ON stamped later still holds", /ready-check: DESLIGADO/.test(run(["list-switches"]).out), run(["list-switches"]).out);
+  // An OFF stamped 3 minutes ahead and written first, then a valid ON written after it: off prevails.
+  raw(`chaves/record-review/${Date.now() + 180000}-claude-2-x-ef78`, "OFF\nClaude 2 X\nparar\n");
+  ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "record-review")));
+  is("off prevails: an ON is not on while an OFF carries a later instant", /record-review: DESLIGADO/.test(run(["list-switches"]).out), run(["list-switches"]).out);
+  raw("prs/12/0", "Ação: CLAIMED\nPR: 12\nPor: Claude 7 X\nData: 2099-01-01T00:00:00.000Z\n");
+  is("a CLAIMED dated in the future is not active", !/\(ativo\)/.test(run(["pr-status", "--pr", "12"]).out), run(["pr-status", "--pr", "12"]).out);
+  run(["set-quota", "--as", "Claude 3 X", "--available"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+  raw("estado/claude-3/20200101T000000Z-claude-3-x-aaaa", "Cota: sem\nVolta: 2099-01-01T00:00:00.000Z\nPor: Claude 3 X\n");
+  is("the quota written last holds, whatever its mark says", /claude-3: SEM COTA/.test(run(["list-quotas"]).out), run(["list-quotas"]).out);
+}
+
+console.log("takes by commit, a capped future OFF, the maximum take, the coordinator's release (OWNER-20261121-1904 step 3, part 2)");
+{
+  const carimbo = (ms) => new Date(Date.now() + ms).toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  const H13 = pr(13, "f13.txt", "13\n");
+  run(["request-enqueue", "--from", "Claude 2", "--pr", "13", "--sha", H13.slice(0, 10), "--text", "fila #13"], { ...as("c2"), CORREIO_SEM_COMMITS: "1" });
+  const id13 = /^(\S+) +#13 @/m.exec(run(["list-queue"]).out)?.[1];
+  // Takes by commit, not by their number (note 2 of Claude 5 ibqho on #5055).
+  raw(`fila/tomadas/${id13}/7`, `${carimbo(-60000)}-claude-7-x-aa01\nClaude 7 X\n`);
+  raw(`fila/tomadas/${id13}/3`, `${carimbo(-30000)}-claude-1-x-aa02\nClaude 1 X\n`);
+  is("the latest take is the one written last, whatever its number", /#13 @\S+ +autor Claude 2 +tomado por Claude 1 X/.test(run(["list-queue"]).out), run(["list-queue"]).out);
+  // The maximum take: renewals by the same holder stop counting 30 minutes after the first take of the run.
+  const H14 = pr(14, "f14.txt", "14\n");
+  run(["request-enqueue", "--from", "Claude 2", "--pr", "14", "--sha", H14.slice(0, 10), "--text", "fila #14"], { ...as("c2"), CORREIO_SEM_COMMITS: "1" });
+  const id14 = /^(\S+) +#14 @/m.exec(run(["list-queue"]).out)?.[1];
+  [-40, -31, -22, -13, -4].forEach((m, n) => raw(`fila/tomadas/${id14}/${n}`, `${carimbo(m * 60000)}-claude-7-x-bb0${n}\nClaude 7 X\n`));
+  is("a take renewed for more than 30 minutes no longer holds the request", /#14 @\S+ +autor Claude 2 +aberto/.test(run(["list-queue"]).out), run(["list-queue"]).out);
+  // A fresh take by the same session after its old take lapsed starts a new run (review of Claude 4 AC on #5057).
+  const H16 = pr(16, "f16.txt", "16\n");
+  run(["request-enqueue", "--from", "Claude 2", "--pr", "16", "--sha", H16.slice(0, 10), "--text", "fila #16"], { ...as("c2"), CORREIO_SEM_COMMITS: "1" });
+  const id16 = /^(\S+) +#16 @/m.exec(run(["list-queue"]).out)?.[1];
+  raw(`fila/tomadas/${id16}/0`, `${carimbo(-50 * 60000)}-claude-7-x-ee01\nClaude 7 X\n`);
+  raw(`fila/tomadas/${id16}/1`, `${carimbo(-60000)}-claude-7-x-ee02\nClaude 7 X\n`);
+  is("a fresh take by the same session after its old take lapsed holds the request", /#16 @\S+ +autor Claude 2 +tomado por Claude 7 X/.test(run(["list-queue"]).out), run(["list-queue"]).out);
+  // A future-dated OFF is capped at its commit time (note 1 of Claude 5 ibqho and of Claude 4 Z on #5055).
+  raw("chaves/on-call/4102444800001-claude-2-x-cc01", "OFF\nClaude 2 X\nrelógio errado\n");
+  ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "on-call")), [], "on-call");
+  is("an OFF stamped far in the future no longer blocks a later ON", /on-call: LIGADO/.test(run(["list-switches"]).out), run(["list-switches"]).out);
+  run(["set-switch", "--as", "Claude 2 X", "--name", "on-call", "--off", "--reason", "fim do teste"], as("c2"));
+  // The coordinator's release of a stuck take: privileged, on a #4932 request that names the request id.
+  const H15 = pr(15, "f15.txt", "15\n");
+  run(["request-enqueue", "--from", "Claude 2", "--pr", "15", "--sha", H15.slice(0, 10), "--text", "fila #15"], { ...as("c2"), CORREIO_SEM_COMMITS: "1" });
+  const id15 = /^(\S+) +#15 @/m.exec(run(["list-queue"]).out)?.[1];
+  raw(`fila/tomadas/${id15}/0`, `${carimbo(-60000)}-claude-7-x-dd01\nClaude 7 X\n`);
+  let q = pedidoDe(marca("release-take", id15));
+  r = run(["release-take", "--as", "Claude 6 X", id15, "--reason", "travada", ...q.args], { ...as("c6"), ...q.env });
+  is("only the named session releases a take", !r.ok && /sessão nomeada/.test(r.out), r.out);
+  q = pedidoDe(marca("release-take", "outro"));
+  r = run(["release-take", "--as", "Claude 5 ibqho", id15, "--reason", "travada", ...q.args], { ...as("ibq"), ...q.env });
+  is("a request that does not name the request id is refused", !r.ok && /não traz a linha/.test(r.out), r.out);
+  q = pedidoDe(marca("release-take", id15));
+  r = run(["release-take", "--as", "Claude 5 ibqho", id15, "--reason", "travada", ...q.args], { ...as("ibq"), ...q.env, CORREIO_SEM_COMMITS: "1" });
+  is("the commits of the PR cannot be checked: nothing is released", !r.ok && /NÃO FORAM CONFERIDOS/.test(r.out), r.out);
+  q = pedidoDe(marca("release-take", id15));
+  r = run(["release-take", "--as", "Claude 5 ibqho", id15, "--reason", "travada", ...q.args], { ...as("ibq"), ...q.env });
+  is("the named session releases a stuck take, and the request is open again", r.ok && /#15 @\S+ +autor Claude 2 +aberto/.test(run(["list-queue"]).out), r.out + run(["list-queue"]).out);
+  is("the release is announced to all, with the request", /tomada .*#15.* liberada/.test(run(["read", "--as", "Claude 2 Z"], as("c2")).out), run(["read", "--as", "Claude 2 Z"], as("c2")).out);
+  raw(`fila/tomadas/${id15}/9`, `${carimbo(-1000)}-claude-7-x-dd02\nClaude 7 X\n`);
+  raw(`fila/tomadas/${id15}/10`, `${carimbo(0)}-claude-7-x-dd03\nClaude 7 X\nLIBERADO\nforged\n`);
+  is("a release written without the named session and the request does not count", /#15 @\S+ +autor Claude 2 +tomado por Claude 7 X/.test(run(["list-queue"]).out), run(["list-queue"]).out);
+}
+
+console.log("step 4: a full head, nothing NOT CHECKED goes on, the take checked right before enqueueing (OWNER-20261121-1904)");
+{
+  // A mailbox of its own, so the queue here starts empty.
+  g(["init", "-q", "--bare", "mail4.git"]); g(["push", "-q", "../mail4.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m4 = { CORREIO_REPO: join(T, "mail4.git") };
+  const H17 = pr(17, "f17.txt", "17\n");
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "17", "--sha", H17.slice(0, 10), "--text", "fila #17"], { ...as("c2"), ...m4 });
+  const id17 = /registrado: (\S+)/.exec(r.out)?.[1];
+  is("a request is recorded with the full 40-character head", r.ok && new RegExp(`^Head: ${H17}$`, "m").test(g(["show", `refs/heads/correio:fila/pedidos/${id17}.md`], join(T, "mail4.git"))), r.out);
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "17", "--sha", H1.slice(0, 10), "--text", "wrong head"], { ...as("c2"), ...m4 });
+  is("a request for a head that is not the PR's current one is refused", !r.ok && /não é o head atual/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 6 X"], { ...as("c6"), ...m4 });
+  is("the request is delivered", /pegou/.test(r.out), r.out);
+  r = run(["verify-enqueue", "--as", "Claude 6 X", id17], { ...as("c6"), ...m4 });
+  is("verify-enqueue right before enqueueing: the take is this session's and the head is unchanged", r.ok && new RegExp(`enfileire ${H17}`).test(r.out), r.out);
+  r = run(["verify-enqueue", "--as", "Claude 6 Y", id17], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_018ZjhHYYYYYYYYYYYYYYYYYY", ...m4 });
+  is("another session of the same family does not hold that take", !r.ok && /não é desta sessão/.test(r.out), r.out);
+  g(["checkout", "-q", "pr17"], P); const H17b = commit("f17.txt", "17b\n", "pr17 b"); g(["push", "-q", "../prs.git", "HEAD:refs/pull/17/head"], P);
+  r = run(["verify-enqueue", "--as", "Claude 6 X", id17], { ...as("c6"), ...m4 });
+  is("after a new push, verify-enqueue refuses: the head changed", !r.ok && /mudou/.test(r.out), r.out);
+  r = run(["complete-enqueue", "--as", "Claude 6 X", id17, "--result", "enqueued", "--text", "t"], { ...as("c6"), ...m4 });
+  is("complete-enqueue as enqueued is refused when the head changed", !r.ok && /mudou/.test(r.out), r.out);
+  run(["complete-enqueue", "--as", "Claude 6 X", id17, "--result", "declined", "--text", "head changed"], { ...as("c6"), ...m4 });
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "17", "--sha", H17b.slice(0, 10), "--text", "fila #17 b"], { ...as("c2"), ...m4 });
+  const id17b = /registrado: (\S+)/.exec(r.out)?.[1];
+  run(["claim-enqueue", "--as", "Claude 6 X"], { ...as("c6"), ...m4 });
+  r = run(["complete-enqueue", "--as", "Claude 6 X", id17b, "--result", "enqueued", "--text", "fila #17 b"], { ...as("c6"), ...m4 });
+  is("the completion records the head that was enqueued", r.ok && new RegExp(`^Head enfileirado: ${H17b}$`, "m").test(g(["show", `refs/heads/correio:fila/feitas/${id17b}.md`], join(T, "mail4.git"))), r.out);
+  // A git command that hangs is stopped by the time limit.
+  const mod = await import(TOOL);
+  let erro = "";
+  try { mod.git(["-c", "alias.dorme=!sleep 5", "dorme"], undefined, 500); } catch (e) { erro = String(e.message ?? e); }
+  is("a git command past its time limit is stopped, with a clear error", /limite de tempo|ETIMEDOUT/.test(erro), erro);
+}
+
+console.log("test variables only with the marker and local repositories (OWNER-20261121-1904 step 4, part 2)");
+{
+  const mod = await import(TOOL);
+  const antes = { m: process.env.AGENT_MAIL_TEST, c: process.env.CORREIO_SEM_COMMITS };
+  process.env.AGENT_MAIL_TEST = "1"; process.env.CORREIO_SEM_COMMITS = "1";
+  // Imported here without CORREIO_REPO, the tool points at the real GitHub mailbox: a test variable must not count.
+  is("with the marker but the real GitHub repositories, a test variable does not count", typeof mod.testeLigado === "function" && mod.testeLigado("CORREIO_SEM_COMMITS") === false, String(mod.REPO));
+  for (const [k, v] of [["AGENT_MAIL_TEST", antes.m], ["CORREIO_SEM_COMMITS", antes.c]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+}
+// "Local" means a local path: an absolute path or file://, never another remote form (LOW of Claude 1 2as and Claude 4 Z on #5088).
+const ligadoCom = (repo) => spawnSync("node", ["--input-type=module", "-e", `const m = await import(${JSON.stringify(TOOL)}); console.log(String(m.testeLigado("CORREIO_SEM_COMMITS")));`],
+  { env: { ...base, CORREIO_REPO: repo, CORREIO_SEM_COMMITS: "1" }, encoding: "utf8" }).stdout.trim().split("\n").pop();
+for (const remoto of ["deploy@github.com:solrenning-llc/repo-id-transfer-test", "github.com:solrenning-llc/repo-id-transfer-test", "ftp://h/x", "ext::sh -c true", "relative/mail.git"]) {
+  is(`a test variable does not count with the mailbox at ${remoto}`, ligadoCom(remoto) === "false", ligadoCom(remoto));
+}
+is("it counts with an absolute local path", ligadoCom(join(T, "mail.git")) === "true", ligadoCom(join(T, "mail.git")));
+is("and with a file:// address", ligadoCom(`file://${join(T, "mail.git")}`) === "true", ligadoCom(`file://${join(T, "mail.git")}`));
+
+console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");
+{
+  r = run(["check-append-only"]);
+  is("a history that only adds files passes the append-only check", r.ok && /só acrescentou/.test(r.out), r.out);
+  const alvo = g(["ls-tree", "-r", "--name-only", "refs/heads/correio", "caixas"], join(T, "mail.git")).split("\n")[0];
+  raw(alvo, "rewritten by raw git\n");
+  r = run(["check-append-only"]);
+  is("a commit that changes a data file is reported, with the file", !r.ok && new RegExp(`ALTEROU ${alvo.replace(/[.]/g, "[.]")}`).test(r.out), r.out);
+  r = run(["watch", "--as", "Claude 3 Z", "--seconds", "1"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+  is("the watch raises the alarm once, and says to tell the coordinator and the owner", /ALERTA: o ramo correio não só acrescentou/.test(r.out) && /coordenador e o dono/.test(r.out), r.out);
+  r = run(["watch", "--as", "Claude 3 Z", "--seconds", "1"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+  is("the same change is not raised again on the next watch", !/ALERTA: o ramo correio/.test(r.out), r.out);
+}
 
 console.log("version: the copy's SHA-256 against the reviewed one on main (owner, OWNER-20261121-1904, step 1)");
 const meu = createHash("sha256").update(readFileSync(TOOL)).digest("hex");
@@ -310,12 +477,24 @@ is("the reviewed hash on main: no version warning", r.ok && !/ATENÇÃO/.test(r.
 comHash("0".repeat(64));
 r = run(["list-switches"], { CORREIO_SEM_VERSAO: "" });
 is("a different hash on main: the copy is reported as not the reviewed one", /não é a versão revisada do main do Marktmorgen/.test(r.out), r.out);
+r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "x"], { ...as("c2"), CORREIO_SEM_VERSAO: "" });
+is("an old copy cannot write: the send is refused, with the install command to run", !r.ok && /escrita recusada/.test(r.out) && /CO \(b\)/.test(r.out), r.out);
+// Step 4, part 2: a test variable counts only with the marker AGENT_MAIL_TEST=1 and local repositories.
+r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "x"], { ...as("c2"), CORREIO_SEM_VERSAO: "1", AGENT_MAIL_TEST: "" });
+is("without the marker, CORREIO_SEM_VERSAO=1 is ignored: the old copy is still refused, and the tool says the variable was ignored", !r.ok && /escrita recusada/.test(r.out) && /CORREIO_SEM_VERSAO.*ignorada/.test(r.out), r.out);
+r = run(["list-queue"], { CORREIO_SEM_VERSAO: "" });
+is("an old copy can still read, with the warning", r.ok && /não é a versão revisada/.test(r.out), r.out);
 r = run(["list-switches"], { CORREIO_SEM_VERSAO: "", CORREIO_PR_REPO: join(T, "nao-existe.git") });
 is("main unreachable: the version is reported as NOT CHECKED", /NÃO FOI CONFERIDA/.test(r.out), r.out);
+// Old copies are refused (step 3): a write needs the reviewed copy, checked now; reading still works, with the warning.
+r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "x"], { ...as("c2"), CORREIO_SEM_VERSAO: "", CORREIO_PR_REPO: join(T, "nao-existe.git") });
+is("main unreachable: a write is refused, the version NOT CHECKED", !r.ok && /escrita recusada/.test(r.out), r.out);
 // file:// behaves like a real remote (a plain path would ignore --depth), as the reviewer reproduced on GitHub.
 // The version check must never fetch with --depth: a shallow fetch makes the user's repository shallow (review of
 // Claude 1 A on #5044, reproduced on GitHub). GIT_TRACE records every git command the tool runs.
 comHash(meu);
+r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "x"], { ...as("c2"), CORREIO_SEM_VERSAO: "" });
+is("the reviewed copy writes", r.ok && /enviada/.test(r.out), r.out);
 const trace = join(T, "git-trace.txt");
 spawnSync("node", [TOOL, "list-switches"], { cwd: join(T, "w"), env: { ...base, CORREIO_SEM_VERSAO: "", GIT_TRACE: trace }, encoding: "utf8" });
 const linhas = readFileSync(trace, "utf8").split("\n").filter((l) => /git(\.c:\d+)?\s.*trace: (built-in|exec): git fetch/.test(l) || /trace: built-in: git fetch/.test(l));

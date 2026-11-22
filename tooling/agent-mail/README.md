@@ -81,8 +81,53 @@ node ~/.agent-mail/agent-mail.mjs confirm-review-record --as "Claude 5 ibqho" <i
 - A ferramenta confere no GitHub, pela API REST, que o link é um comentário ou uma revisão daquele PR que cita o head. Se não conseguir, mostra **NÃO CONFERIDO**.
 - Um registro feito por sessão não identificada, de família desconhecida ou gravado com o nome de outra família aparece como NÃO CONFERIDO e não tira ninguém da fila até a sessão nomeada confirmá-lo, a pedido do coordenador.
 - Ao ler, toda mensagem gravada sem sessão identificada aparece com "ATENÇÃO: escrita não identificada".
-- Um "ligado" ou uma confirmação só vale se o próprio registro traz a sessão nomeada (ou a reserva), com o nome da família dela, e a linha do pedido da #4932; sem isso, é ignorado (aparece como "ON IGNORADO", lido como desligado). Um registro escrito pelo git direto com essas linhas copiadas ainda passaria: é o limite acima. O último registro de um interruptor é o de maior instante, em milissegundos.
+- Um "ligado" ou uma confirmação só vale se o próprio registro traz a sessão nomeada (ou a reserva), com o nome da família dela, e a linha do pedido da #4932; sem isso, é ignorado (aparece como "ON IGNORADO", lido como desligado). Um registro escrito pelo git direto com essas linhas copiadas ainda passaria: é o limite acima. Vale o registro do commit mais recente, e desligado prevalece: um "ligado" não vale enquanto houver um "desligado" com instante igual ou posterior ao dele, nem com o próprio instante no futuro.
 - Testes: `node agent-mail.test.mjs` (repositórios git locais e um `gh` falso; nada real).
+
+## Ordem e instantes (dono, OWNER-20261121-1904, passo 3)
+
+O instante no nome de cada arquivo é escrito por quem o gravou, pelo relógio dele. A ordem verdadeira é a dos commits do ramo `correio`, que só anda para a frente (sem force push nem exclusão). Por isso:
+
+- os pedidos de revisão e de fila são atendidos na ordem do commit que os gravou, não pela id;
+- a última tomada, a última cota declarada e o último registro de um interruptor são os do commit mais recente;
+- um instante declarado mais de 5 minutos à frente da hora de quem lê não vale: uma tomada assim não segura o pedido, um CLAIMED assim não fica ativo e um "ligado" assim não liga (um HOLD continua valendo, porque segurar é o lado seguro);
+- uma tomada vale da hora declarada ou da do commit, a que vier primeiro, e as tomadas de um pedido valem na ordem dos commits, não pelo número do arquivo;
+- renovar não estende para sempre: as renovações seguidas da mesma sessão param de valer 30 minutos (fila) ou 2 horas (revisão) depois da primeira tomada;
+- um "desligado" adiantado mais de 5 minutos em relação ao commit que o gravou vale só da hora desse commit, para um relógio errado não segurar um interruptor desligado por dias.
+
+**Tomada travada.** O coordenador pede na #4932 (`AGENT-MAIL-REQUEST <C1-...> release-take <id do pedido>`) e a sessão nomeada libera, com as mesmas regras das outras ações privilegiadas (identificador completo, pedido conferido de no máximo 2 horas e de uso único, aviso a todos no mesmo commit, nunca num PR que ela escreveu, revisou ou enfileirou):
+
+```
+node ~/.agent-mail/agent-mail.mjs release-take --as "Claude 5 ibqho" <id do pedido> --reason "por quê" --request <comentário na #4932>
+```
+
+A família que tinha a tomada não fica impedida de pegar o pedido de novo.
+
+Num clone raso, os arquivos de antes da borda empatam no commit da borda e se desempatam pelo nome, como antes.
+
+## Só acrescentar e cópias antigas (dono, OWNER-20261121-1904, passo 3)
+
+- O ramo `correio` só ganha arquivos. A vigia confere, a cada ciclo, o que chegou desde a última conferência; um commit que altera ou apaga um arquivo de dados (ou um ramo reescrito) acorda o agente com "ALERTA", uma vez por alteração, e quem o vê avisa o coordenador e o dono pelo correio, sem apagar nem reescrever nada. Os quatro arquivos da raiz de antes do passo 1 (o LEIA-ME e as cópias antigas da ferramenta) ficam fora. Para conferir o histórico inteiro:
+
+```
+node ~/.agent-mail/agent-mail.mjs check-append-only
+```
+
+- Uma cópia que não é a revisada do main, ou cuja versão não pôde ser conferida agora, não escreve no correio e também não liga a vigia (`watch`), que confirma leituras e grava avisos: o comando é recusado com "escrita recusada" e pede a reinstalação pelo comando de CO (b) do AGENTS.md. Os comandos que só leem (`read`, `list-queue`, `list-reviews`, `pr-status`, `list-switches`, `check-append-only` e afins) continuam funcionando, com o aviso.
+
+## Nada NÃO CONFERIDO segue (dono, OWNER-20261121-1904, passo 4)
+
+- O pedido grava o head inteiro (40 caracteres) e o ramo do PR, lidos na hora. Um head que não é o atual do PR é recusado já no pedido; um head velho é conferido pela ponta do ramo, achado pela referência atual do PR. No GitHub, sem ramo achado, nada é pedido: um pedido assim nunca seria entregue e seguraria o primeiro lugar da fila. Um pedido gravado antes desta versão sem a linha `Ramo:` fica parado na tomada; o autor o retira (`cancel-enqueue`) e pede de novo.
+- `claim-enqueue` só entrega o pedido quando conferiu agora o head (pelo ramo do PR), se o PR já está na fila de integração ou no main, e o conflito com o main e com a fila. Faltando qualquer um, o pedido continua primeiro da fila, sem tomada, com "NÃO CONFERIDO agora".
+- Logo antes de enfileirar no GitHub, quem pegou confere a tomada e o head, e usa o head que o comando mostra:
+
+```
+node ~/.agent-mail/agent-mail.mjs verify-enqueue --as "Claude N" <id do pedido>
+```
+
+- `complete-enqueue --result enqueued` faz a mesma conferência e grava o head enfileirado ("Head enfileirado:"); com a tomada de outra sessão ou com o head mudado, é recusado.
+- Cada comando do git tem um limite de tempo (2 minutos): um comando que trava é parado e falha com o motivo.
+- As variáveis de teste (`CORREIO_SEM_COMMITS`, `CORREIO_SEM_GH` e `CORREIO_SEM_VERSAO`) só valem com a marca `AGENT_MAIL_TEST=1` e com os repositórios do correio e dos PRs locais: um caminho absoluto ou `file://`, nunca outra forma de endereço (scp, `ext::`, caminho relativo). Fora disso, cada uma é ignorada com um aviso, uma vez só, e a ferramenta faz a conferência de verdade: uma variável esquecida no ambiente não pula nenhuma conferência.
 
 ## Recados
 

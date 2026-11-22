@@ -1,4 +1,4 @@
-import { windowId } from "@/lib/allowance-window";
+import { windowId, windowKeySeconds } from "@/lib/allowance-window";
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { ensureStatsId } from "@/lib/store";
@@ -82,10 +82,10 @@ export async function POST(request: NextRequest) {
     // checks, a save one of its imports started (lib/import-limits.ts).
     if (action === "check") {
       if (!(await withinLimit("import-preview", who, 400, 600))) return refuse("slow", WORDS.slow, 429);
-      if (!(await withinMonth("import-preview-month", who, allowance.checks, windowId(store)))) return refuse("checks_month", WORDS.month, 429, { limit: allowance.checks });
+      if (!(await withinMonth("import-preview-month", who, allowance.checks, windowId(store), windowKeySeconds(store, 32 * 86_400)))) return refuse("checks_month", WORDS.month, 429, { limit: allowance.checks });
     } else {
       if (!(await withinLimit("import-start", who, 20, 86_400))) return refuse("slow", WORDS.slow, 429);
-      if (!(await withinMonth("import-start-month", who, allowance.starts, windowId(store)))) return refuse("starts_month", WORDS.month, 429, { limit: allowance.starts });
+      if (!(await withinMonth("import-start-month", who, allowance.starts, windowId(store), windowKeySeconds(store, 32 * 86_400)))) return refuse("starts_month", WORDS.month, 429, { limit: allowance.starts });
     }
     const bytes = Buffer.byteLength(JSON.stringify({ header: file.header, rows: file.rows }));
     const result = await importHubSpotDeals(store, file, { write: action === "save", statedCurrency: typeof body.currency === "string" && /^[A-Za-z]{3}$/.test(body.currency) ? body.currency : "", bytes });

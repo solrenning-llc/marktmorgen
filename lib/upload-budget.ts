@@ -1,7 +1,7 @@
 import {reservePaidResourceWindow} from '@/lib/contract-resource-window';
 import { isRedisConfigured, redisPipeline } from '@/lib/redis';
 import { costStandingOf } from '@/lib/plan-standing';
-import { type AllowanceWindow, type WindowFields, allowanceWindow } from '@/lib/allowance-window';
+import { type AllowanceWindow, type WindowFields, BILLING_COUNTER_KEEP_DAYS, allowanceWindow } from '@/lib/allowance-window';
 import type { Tier } from '@/lib/plan';
 import { AUTOMATIC_UPLOAD_REVIEW_ID, UPLOAD_BUDGET_RULES, UPLOAD_BUDGET_SCOPES, currentUploadBudgetPolicy, isUploadBudgetConfigured, uploadBackendOpen, uploadBudgetSnapshot, uploadLedgerKey, uploadOpenedKey, type UploadBackend, type UploadBudgetPolicy, type UploadBudgetScope } from '@/lib/upload-budget-policy';
 
@@ -133,7 +133,9 @@ return 1
 async function reserve(statsId: string, scope: UploadBudgetScope, action: 'open'|'control', bytes: number, given: UploadBudgetPolicy|null, window: AllowanceWindow|null): Promise<boolean> {
   if(!window)return false;
   const began=window.billing?new Date(window.start):null;
-  if(began && (Date.now()-window.start>32*86_400_000 || window.start-Date.now()>300_000))return false;
+  // A billing window may run on to its period's end, up to BILLING_COUNTER_KEEP_DAYS from its start (Claude 6 on #4561, LOW):
+  // its uploads are still reserved in the ledger of the month it began in, under the same per-store caps.
+  if(began && (Date.now()-window.start>BILLING_COUNTER_KEEP_DAYS*86_400_000 || window.start-Date.now()>300_000))return false;
   const policy=began && given?.reviewId===AUTOMATIC_UPLOAD_REVIEW_ID?currentUploadBudgetPolicy(began):given;
   if(!isUploadBudgetConfigured(policy,began??new Date()) || !isRedisConfigured() || !/^[a-f0-9]{32}$/.test(statsId)
     || !(UPLOAD_BUDGET_SCOPES as readonly string[]).includes(scope)

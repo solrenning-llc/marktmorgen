@@ -894,7 +894,7 @@ console.log("a family with a verdict on the head written only on the PR does not
   g(["init", "-q", "--bare", "mail60.git"]); g(["push", "-q", "../mail60.git", "HEAD:refs/heads/correio"], join(T, "w"));
   const m60 = { CORREIO_REPO: join(T, "mail60.git"), CORREIO_GIT_DIR: join(T, "dir60.git") };
   const veredito = (familiaTxt, v) => JSON.stringify([`${familiaTxt} review #60 @${H60.slice(0, 10)}: ${v}\n\nbody`, "COLLABORATOR"]);
-  const fora = JSON.stringify([`fila #60 @${H60.slice(0, 10)}: 2 READY (Claude 2 X, Claude 7 X)`, "COLLABORATOR"]);
+  const fora = JSON.stringify([`re-review needed #60 @${H60.slice(0, 10)} — revisores: Claude 7 X e Claude 3 X`, "COLLABORATOR"]);
   const comentarios = [veredito("Claude 2 X", "READY"), fora, JSON.stringify([`Claude 3 X review #60 @0000000000: READY`, "COLLABORATOR"]), JSON.stringify([`Claude 7 X review #60 @${H60.slice(0, 10)}: CHANGES`, "NONE"])].join("\n") + "\n";
   r = run(["request-review", "--from", "Claude 4 X", "--pr", "60", "--sha", H60, "--text", "t"], { ...m60, ...as("c4"), FAKE_COMMENTS: comentarios });
   is("ce2d: the review request is written", r.ok, r.out);
@@ -915,6 +915,37 @@ console.log("a family with a verdict on the head written only on the PR does not
   is("ce2d: with the PR's comments unreadable, the queue waits (NOT CHECKED)", !/pegou:/.test(r.out) && /NÃO CONFERIDO/.test(r.out), r.out);
   r = run(["claim-review", "--as", "Claude 2 X"], { ...m60, ...as("c2"), FAKE_COMMENTS_DOWN: "1" });
   is("ce2d: when the PR's comments cannot be read, nothing is taken (NOT CHECKED)", !/pegou:/.test(r.out), r.out);
+}
+
+console.log("ce2d: the real formats of today's reviews, with the family after the word review (Claude 5 ibuF on #5141)");
+{
+  const g6 = (args) => g(args, join(T, "p"));
+  g6(["checkout", "-q", "-B", "ce2d61", M]); writeFileSync(join(T, "p", "ce2d61.txt"), "y\n"); g6(["add", "."]); g6(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "ce2d61\n\nClaude-Session: https://claude.ai/code/session_01S9eVA3KcXUkc6qPJmpNg4a"]);
+  g6(["push", "-q", "-f", "../prs.git", "HEAD:refs/heads/ce2d61", "HEAD:refs/pull/61/head"]);
+  const H61 = g6(["rev-parse", "HEAD"]), c61 = H61.slice(0, 10);
+  g(["init", "-q", "--bare", "mail61.git"]); g(["push", "-q", "../mail61.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m61 = { CORREIO_REPO: join(T, "mail61.git"), CORREIO_GIT_DIR: join(T, "dir61.git") };
+  const comentarios = [
+    JSON.stringify([`Focal review #61 @${c61} — READY (tests pass, audit 18/18) — Claude 5 ibuF\n\nbody`, "COLLABORATOR"]),
+    JSON.stringify([`Focal cost review (Claude 1 cloud, money-reviewer lane)\n#61 @${c61}: CHANGES, 1 MEDIUM\n\nbody`, "COLLABORATOR"]),
+    JSON.stringify([`re-review needed #61 @${c61} — revisores: Claude 3 X`, "COLLABORATOR"]),
+    JSON.stringify([`Claude 2 X review #61\nnotes on the diff\nREADY on @${c61}, in the third line`, "COLLABORATOR"]),
+  ].join("\n") + "\n";
+  const env = (k) => ({ ...m61, ...as(k), FAKE_COMMENTS: comentarios });
+  r = run(["request-review", "--from", "Claude 4 X", "--pr", "61", "--sha", H61, "--text", "t"], env("c4"));
+  is("ce2d61: the review request is written", r.ok, r.out);
+  r = run(["claim-review", "--as", "Claude 5 X"], env("c5"));
+  is("ce2d61: 'Focal review #N @head — READY — Claude 5 ibuF' (family after the word review) keeps Claude 5 out", !/pegou:/.test(r.out) && /nenhum pedido/.test(r.out), r.out);
+  r = run(["claim-review", "--as", "Claude 1 A"], env("c1a"));
+  is("ce2d61: 'Focal cost review (Claude 1 cloud, ...)' with the head and the verdict on the second line keeps Claude 1 out", !/pegou:/.test(r.out) && /nenhum pedido/.test(r.out), r.out);
+  r = run(["claim-review", "--as", "Claude 2 X"], env("c2"));
+  is("ce2d61: a family named with the head and the verdict only from the third line on is not taken as a reviewer (it takes the request)", /pegou:/.test(r.out), r.out);
+  r = run(["request-enqueue", "--from", "Claude 4 X", "--pr", "61", "--sha", H61, "--text", "t"], env("c4"));
+  const fila61 = r;
+  r = run(["claim-enqueue", "--as", "Claude 5 X"], env("c5"));
+  is("ce2d61: the queue is not delivered to Claude 5, whose verdict is in the real format", !/pegou:/.test(r.out) && /veredito da sua família neste head no PR/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 3 X"], { ...m61, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA", FAKE_COMMENTS: comentarios });
+  is("ce2d61: a family only named in a line without a verdict ('re-review needed ... revisores: Claude 3') is not excluded from the queue", fila61.ok && !/veredito da sua família neste head no PR/.test(r.out), fila61.out + r.out);
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

@@ -1015,8 +1015,8 @@ export function conferirLink(link, pr, sha, resultado = null) {
 /**
  * As famílias que deram veredito (READY ou CHANGES) neste head só nos comentários e revisões do PR, fora do correio
  * (coordenador, ce2d: no #5118, claim-enqueue entregou duas vezes o pedido a quem tinha revisado o head no PR). Vale o
- * comentário de quem trabalha no repositório cuja primeira linha é uma revisão deste head: "<família> ... review ... @<head>"
- * com o veredito. null = NÃO CONFERIDO (o GitHub não respondeu); quem chama não entrega nada nesse caso (passo 4).
+ * comentário de quem trabalha no repositório que traz, nas duas primeiras linhas com texto, este head e o veredito: conta
+ * toda família nomeada nessas duas linhas, antes ou depois de "review" (revisão do Claude 5 ibuF no #5141). null = NÃO CONFERIDO (o GitHub não respondeu); quem chama não entrega nada nesse caso (passo 4).
  */
 const vereditosNoPr = new Map();
 export function revisoresNoPr(pr, sha) {
@@ -1032,10 +1032,11 @@ export function revisoresNoPr(pr, sha) {
       for (const linha of saida.split("\n").filter((l) => l.trim())) {
         const [corpo, associacao] = JSON.parse(linha);
         if (!QUEM_TRABALHA.has(String(associacao))) continue;
-        const primeira = String(corpo).split(/\r?\n/).find((l) => l.trim()) ?? "";
-        if (!primeira.includes(curto) || !/\b(READY|CHANGES)\b/.test(primeira)) continue;
-        const m = /\b(Claude \d+|Codex)\b[^\n]{0,40}?\breview\b/i.exec(primeira);
-        if (m) f.add(familia(m[1]));
+        // As duas primeiras linhas com texto: o head e o veredito nelas, e toda família nomeada nelas, antes ou depois da
+        // palavra "review" ("Focal review #N @head — READY — Claude 5 ibuF", revisão do Claude 5 ibuF no #5141).
+        const topo = String(corpo).split(/\r?\n/).filter((l) => l.trim()).slice(0, 2).join("\n");
+        if (!topo.includes(curto) || !/\b(READY|CHANGES)\b/.test(topo)) continue;
+        for (const m of topo.matchAll(/\b(Claude \d+|Codex)\b/gi)) if (familia(m[1])) f.add(familia(m[1]));
       }
     }
   } catch {

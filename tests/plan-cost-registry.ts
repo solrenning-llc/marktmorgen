@@ -2032,16 +2032,19 @@ export const REVIEW_REFUND_TURN_BYTES = 128;
  * Commands one run of the pass sends outside its refunds, at the most: the turn's SET NX EX, the store's SISMEMBER
  * (whether it has a review), the anchor's GET, the lost disputes' place (GET, and its SET or DEL), one SMISMEMBER a
  * page of refunds (the rows already read, one command a page whatever the page holds), one SMISMEMBER of the lost
- * disputes handled, and the anchor's SET with the read refunds' EXPIRE (tests/review-refund-sweep-cost.test.ts
- * measures a pass under it).
+ * disputes handled, and the anchor's SET with the read refunds' EXPIRE as one EVAL with the store's fence, its two
+ * reads first (tests/review-refund-sweep-cost.test.ts measures a pass under it).
  */
-export const REVIEW_REFUND_RUN_COMMANDS = 1 + 1 + 1 + 2 + REVIEW_REFUND_PAGES + 1 + 2;
+export const REVIEW_REFUND_RUN_COMMANDS = 1 + 1 + 1 + 2 + REVIEW_REFUND_PAGES + 1 + 5;
 /** Stripe pages one run waits on, at the most: the refunds' and the lost disputes', each EXPORT_PAGE_SECONDS at 2 GB. */
 export const REVIEW_REFUND_RUN_PAGES = REVIEW_REFUND_PAGES + LOST_DISPUTE_PAGES;
 /** The ids asked and the flags answered for every row of those pages, at most 64 bytes each way. */
 export const REVIEW_REFUND_RUN_BYTES = 2 * 100 * REVIEW_REFUND_RUN_PAGES * 64;
-/** Commands one refunded payment costs outside its reviews: its reviews' list (HGET) and the refund taken as seen (SADD, EXPIRE). */
-export const REVIEW_REFUND_PAYMENT_COMMANDS = 1 + 2;
+/**
+ * Billed commands one refunded payment costs outside its reviews: its reviews' list (HGET) and the refund taken as
+ * seen (SADD and EXPIRE as one EVAL with the store's fence, its two reads first: lib/live-fence.ts, Codex L-20261120-0838).
+ */
+export const REVIEW_REFUND_PAYMENT_COMMANDS = 1 + 5;
 /**
  * Billed commands one review's mark costs, at the most (lib/reviews.ts markRefunded, creatorChange): the product's lock
  * (SET NX), the review's HGET, its write (HSET, ZREM, ZADD) with the AI summary's going (SET, ZREMRANGEBYSCORE) when

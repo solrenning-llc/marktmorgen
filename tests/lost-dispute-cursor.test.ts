@@ -13,7 +13,7 @@ import { syncMeetings } from "@/lib/call-meetings";
 import { MEET_STORES } from "@/lib/meet-links";
 import { revokeRefunded } from "@/lib/licence-keys";
 import { KIND } from "@/lib/catalog";
-import type { Store } from "@/lib/store";
+import { type Store, ownerKey, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -34,6 +34,8 @@ const events = Array.from({ length: TOTAL }, (_, i) => ({
   data: { object: { id: `du_${i}`, object: "dispute", status: "lost", charge: `ch_Cursor${String(i).padStart(6, "0")}`, payment_intent: `pi_Cursor${String(i).padStart(6, "0")}` } },
 }));
 let reads = 0;
+/** A synthetic store from before ids kept live for the review sweep's fence: its owner's record, with its statsId, under its key. */
+const live = async (shop: Store) => { await redis.pipeline([["SET", await ownerKey(storeRef(shop)), JSON.stringify({ statsId: shop.statsId, sid: "", handle: shop.handle })]]); };
 const lookedUp = new Set<string>();
 let refundsList: Record<string, unknown>[] = [];
 let eventsOn = true;
@@ -94,9 +96,11 @@ async function main(): Promise<void> {
     const forward = await lostDisputesSince(ACCOUNT, since);
     is("an out-of-window page is incomplete and contains no trusted closing", [forward.complete, forward.rows.length], [false, 0]);
     const futureStats = "f".repeat(32);
-    // The review sweep fences its writes on the store (lib/store-live-cache.ts storeLiveFence), so a synthetic store
-  // carries the address and sid the fence is built from; nothing is marked here (no review is saved).
-  const futureShop = { email: "cursor-future@example.com", sid: "", statsId: futureStats, stripeAccountId: ACCOUNT, handle: "future-reviews" } as unknown as Store;
+    // The review sweep writes its place only while the store is live (lib/store-live-cache.ts storeLiveFence; #5092):
+    // a synthetic store from before ids carries the address and sid the fence is built from, and its owner's record,
+    // holding its statsId, is kept under its key (live). Nothing is marked here (no review is saved).
+    const futureShop = { email: "cursor-future@example.com", sid: "", statsId: futureStats, stripeAccountId: ACCOUNT, handle: "future-reviews" } as unknown as Store;
+    await live(futureShop);
     const futurePlace = `nl:rev:refunds:since:${futureStats}`;
     await redis.pipeline([["SET", futurePlace, String(NOW - 200)]]);
     await markRefundedReviews(futureShop, Date.now() + 60_000);
@@ -111,6 +115,7 @@ async function main(): Promise<void> {
   part("The review job keeps its place too (inbox C4-21)");
   const statsId = "r".repeat(32);
   const shop = { email: "cursor-shop@example.com", sid: "", statsId, stripeAccountId: ACCOUNT, handle: "cursor-shop" } as unknown as Store;
+  await live(shop);
   const placeKey = `nl:rev:refunds:since:${statsId}`;
   await markRefundedReviews(shop, Date.now() + 60_000);
   const started = Number((await redis.pipeline([["GET", placeKey]]))[0]);
@@ -124,6 +129,7 @@ async function main(): Promise<void> {
   // sweep read, or a dispute closed meanwhile, older than a refund read in that run, would never be read.
   const late = "q".repeat(32);
   const lateShop = { email: "cursor-late@example.com", sid: "", statsId: late, stripeAccountId: ACCOUNT, handle: "cursor-late" } as unknown as Store;
+  await live(lateShop);
   const latePlace = `nl:rev:refunds:since:${late}`;
   await markRefundedReviews(lateShop, Date.now() + 60_000);
   const newer = { ...events[0], id: "evt_CursorNewer01", created: NOW + 120, data: { object: { ...events[0].data.object, id: "du_newer", charge: "ch_CursorNewer01", payment_intent: "pi_CursorNewer01" } } };

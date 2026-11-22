@@ -126,11 +126,18 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   if (url.hostname !== "api.stripe.com") return new Response(JSON.stringify({ error: "nothing leaves this test" }), { status: 500 });
   const path = url.pathname.replace(/^\/v1/, "");
   if (path === "/refunds") {
+    if (duringRefunds) {
+      const run = duringRefunds;
+      duringRefunds = null;
+      await run();
+    }
     const since = Number(url.searchParams.get("created[gte]") ?? 0);
     return listOf(refundsAt.filter((r) => r.created >= since));
   }
   return listOf([]);
 }) as typeof fetch;
+/** Run once, while Stripe's refunds are being read, before the pass has read any review. */
+let duringRefunds: (() => Promise<void>) | null = null;
 const refundOf = (pi: string, n: number) => ({ id: `re_rowsweep${String(n).padStart(6, "0")}`, object: "refund" as const, created: Math.floor(Date.now() / 1000) - 7_200, status: "succeeded", amount: 4900, payment_intent: pi, charge: { object: "charge", id: `ch_rowsweep${n}`, amount: 4900, amount_refunded: 4900, refunded: true, disputed: false } });
 
 test("the whole pass, with the store closed after its read: the read refunds and the anchor stay gone too (Claude 1 on #5092)", async () => {
@@ -159,6 +166,25 @@ test("control: a live store's pass takes the refund as seen and keeps its anchor
   refundsAt.length = 0;
   refundsAt.push(refundOf(pi, 2));
   const live = await racing(async () => undefined, () => markRefundedReviews(swept, Date.now() + 60_000));
-  assert.deepEqual([live.marked, live.plainWrites, live.answers], [1, 0, [1, 1]]);
+  assert.deepEqual([live.marked, live.plainWrites, live.answers], [1, 0, [1, 1, 1, 1]], "the review, the product's numbers, the read refund and the anchor, each through the fence");
   assert.deepEqual(await exists([`nl:rev:refunds:seen:${statsId}`, `nl:rev:refunds:since:${statsId}`]), [1, 1], "the read refund and the anchor are kept");
+});
+
+test("the store closed during the Stripe read, before any review was read: the read refunds and the anchor stay gone (Claude 1 E on #5092)", async () => {
+  const { store, statsId, pi, keys } = await shop();
+  await setStripeAccount(store.email, "acct_1RowSweep0000003", true);
+  const swept = (await storeForEmail(store.email))!;
+  refundsAt.length = 0;
+  refundsAt.push(refundOf(pi, 3));
+  const seen = `nl:rev:refunds:seen:${statsId}`;
+  const since = `nl:rev:refunds:since:${statsId}`;
+  duringRefunds = async () => {
+    const done = await closeStoreRecord(swept, [...keys, seen, since]);
+    if (!done) throw new Error("synthetic close did not complete");
+  };
+  const closed = await racing(async () => undefined, () => markRefundedReviews(swept, Date.now() + 60_000));
+  assert.equal(duringRefunds, null, "control: the store was closed while Stripe was read");
+  assert.equal((await original([storeIdCommand(swept.sid)]))[0], null, "control: the store's id key is gone");
+  assert.deepEqual([closed.error, closed.marked, closed.plainWrites], [undefined, 0, 0], "the pass ends with nothing marked and no plain write");
+  assert.deepEqual(await exists([...keys, seen, since]), [...keys, seen, since].map(() => 0), "no read refund, anchor, review or index came back");
 });

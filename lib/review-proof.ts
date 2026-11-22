@@ -42,6 +42,7 @@ import { ordersGrant } from "@/lib/buyer-orders";
 import { DOWNLOAD_WINDOW_SECONDS } from "@/lib/store-checkout";
 import { REVIEW_STORES_KEY, ReviewStoreGoneError, markRefunded } from "@/lib/reviews";
 import { storeLiveFence } from "@/lib/store-live-cache";
+import { type FencedCommand, writeIfStoreLive } from "@/lib/live-fence";
 import { refreshStoreQuotes } from "@/lib/store-quotes";
 import type { Listing, Store } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
@@ -405,6 +406,16 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   if (!store.stripeAccountId || !store.statsId || !isRedisConfigured()) return 0;
   const statsId = store.statsId;
   const fence = await storeLiveFence(store);
+  // The pass's own keys (the read refunds, the anchor) are written only while the store is live, in one step with the
+  // fence's reads (lib/live-fence.ts): false when the store is erasing or gone, and then nothing was written; an answer
+  // of another shape throws (rule 24). So a store closed during the Stripe read, before any review is marked, never
+  // gets them back after the closing walk passed them (Claude 1 E on #5092).
+  const keyed = (command: (string | number)[]): FencedCommand => [command[0], { key: String(command[1]) }, ...command.slice(2)];
+  const writeWhileLive = async (commands: (string | number)[][]): Promise<boolean> => {
+    const written = await writeIfStoreLive(fence, commands.map(keyed));
+    if (written === "unknown") throw new UnknownReplyError("the refund pass's keys, written while the store is live");
+    return written === "kept";
+  };
   const now = Math.floor(Date.now() / 1000);
   const [anchorRaw] = await redisPipeline([["GET", anchorKey(statsId)]]);
   const anchor = Number(anchorRaw) > 0 ? Number(anchorRaw) : now - REFUND_LOOKBACK_SECONDS;
@@ -472,10 +483,14 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
             }
           }
           // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
-          await redisPipeline([
+          // Written only while the store is live: gone meanwhile, the pass stops here.
+          if (!(await writeWhileLive([
             ["SADD", seenKey(statsId), refund.id],
             ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
-          ]);
+          ]))) {
+            gone = true;
+            break;
+          }
         }
         newest = Math.max(newest, refund.created);
       }
@@ -506,9 +521,9 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
   // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
   const done = complete && !unsure && Date.now() < deadline;
-  if (done) await redisPipeline([["SET", anchorKey(statsId), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
+  if (done) await writeWhileLive([["SET", anchorKey(statsId), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
   else if (!(Number(anchorRaw) > 0)) {
-    await redisPipeline([
+    await writeWhileLive([
       ["SET", anchorKey(statsId), String(anchor), "EX", REFUND_LOOKBACK_SECONDS * 2],
       ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
     ]);

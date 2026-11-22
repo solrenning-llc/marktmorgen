@@ -488,8 +488,18 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  * partial Lua failure; the whole tail is unknown, not bounded by the receipt.
  * No PER_EMAIL coefficient, real review, quota protection or protected-origin
  * financial envelope/retention approval is changed/certified here.
+ * A paid checkout whose ordinary count stays unknown for a reason that never
+ * clears is counted once more an hour after its creation, at its worst case
+ * (lib/orders.ts COUNT_STUCK_LEGACY_CHECKOUT; Codex's MEDIUM on #3667, the
+ * coordinator's decision 4c5c): that path's first application is the ordinary
+ * script's worst refusal (14 billed commands) plus the stuck count's worst
+ * (13), measured on real Redis in scripts/test_legacy_order_accounting_redis.py,
+ * so the line prices 27 commands, and the two EVALs' serialized requests with
+ * the owner fully escaped plus their scalar replies inside 10,240 bytes
+ * (tests/legacy-order-accounting-cost.test.ts). Its mark is the same per-order
+ * seen key with the same checkout-created +45-day horizon: no new storage.
  */
-export const LEGACY_ORDER_ACCOUNTING = 23 * COMMAND + 8_192 * DB_BYTE;
+export const LEGACY_ORDER_ACCOUNTING = 27 * COMMAND + 10_240 * DB_BYTE;
 export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP + LEGACY_ORDER_ACCOUNTING;
 
 /** The shapes requests are costed at: wall seconds held at 2 GB, and CPU seconds. Review ceilings, not measurements. */
@@ -2419,8 +2429,8 @@ export const COST_LINES: CostLine[] = [
       // place given back at expiry is never given back twice (review of #4232, Claude 4 cloud X): inside that order's work.
       { file: "lib/order-admission.ts", names: ["settlePaidCheckout", "recovered_from"] },
       { file: "lib/purchase-email.ts", names: ["settlePaidCheckout(store, read.session, read.items ?? 1)"] },
-      { file: "lib/purchase-email.ts", names: ["confirmRequest", "countLegacyCheckoutForConfirmation"] },
-      { file: "lib/orders.ts", names: ["countLegacyCheckout", "COMMIT_ORDER_CONFIRMATION", "SEEN_SECONDS"] },
+      { file: "lib/purchase-email.ts", names: ["confirmRequest", "countLegacyCheckoutForConfirmation", "countStuckLegacyCheckout"] },
+      { file: "lib/orders.ts", names: ["countLegacyCheckout", "COMMIT_ORDER_CONFIRMATION", "COUNT_STUCK_LEGACY_CHECKOUT", "LEGACY_STUCK_AFTER_MS", "SEEN_SECONDS"] },
       // An affiliate's lead for a free product or a booked call is written inside that order (18 October 2026).
       { file: "lib/calls.ts", names: ["recordLead"] },
       // A booked call's once-only mark and its time kept for good, in one step, and the mark moved on as the rest is

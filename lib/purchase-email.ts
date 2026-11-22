@@ -38,7 +38,7 @@ import { CLOSING_ACCESS_SENTENCE, CLOSING_TERMS_PATH, CLOSING_TERMS_WORDS } from
 import { deliversDigitally } from "@/lib/digital-consent";
 import { consentEmailLines } from "@/lib/digital-consent-email";
 import { ADMITTED_FIELD, OPEN_HOURS, settlePaidCheckout } from "@/lib/order-admission";
-import { countLegacyCheckoutForConfirmation } from "@/lib/orders";
+import { countLegacyCheckoutForConfirmation, countStuckLegacyCheckout } from "@/lib/orders";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
 import { recordPackage } from "@/lib/call-packages";
@@ -746,13 +746,22 @@ async function confirmOnce(
 /** Exact paid evidence before committing a legacy receipt. A later healthy read
  * must not conflict with a receipt that guessed an unreadable amount. */
 async function accountPaidCheckout(store: Store, session: SessionRecord, items: number): Promise<"committed" | "already" | "unknown"> {
-  if (typeof session.amount_total !== "number" || !Number.isSafeInteger(session.amount_total) || session.amount_total < 0 ||
-      typeof session.currency !== "string" || !/^[a-zA-Z]{3}$/.test(session.currency)) return "unknown";
+  const now = Date.now();
   const createdAtMs = typeof session.created === "number" && Number.isSafeInteger(session.created) ? session.created * 1000 : NaN;
+  const readable = typeof session.amount_total === "number" && Number.isSafeInteger(session.amount_total) && session.amount_total >= 0 &&
+    typeof session.currency === "string" && /^[a-zA-Z]{3}$/.test(session.currency);
   // A Stripe recovery copy must not release an aggregate-hour place itself.
   // settlePaidCheckout claims the original hold record, just as on main.
   const hour = session.recovered_from === undefined || session.recovered_from === null ? session.metadata?.[ADMITTED_FIELD] : undefined;
-  return countLegacyCheckoutForConfirmation(store, `checkout:${session.id}`, session.amount_total, Date.now(), { hour, items, createdAtMs });
+  const ordinary = readable
+    ? await countLegacyCheckoutForConfirmation(store, `checkout:${session.id}`, session.amount_total as number, now, { hour, items, createdAtMs })
+    : "unknown";
+  if (ordinary !== "unknown") return ordinary;
+  // Still unknown: counted once at its worst case after LEGACY_STUCK_AFTER_MS, only while Stripe's read shows it paid
+  // (Codex's MEDIUM on #3667; coordinator's decision 4c5c, option (a)). Rule 24 still holds an unreadable charge's
+  // email (renderConfirmation's UNREAD_CHARGE) until a read shows the amount; the accounting no longer holds it.
+  if (!isSettled(session)) return "unknown";
+  return countStuckLegacyCheckout(store, `checkout:${session.id}`, now, createdAtMs);
 }
 
 /**

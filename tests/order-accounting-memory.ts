@@ -60,3 +60,36 @@ export function orderAccounting(store: MemoryRedis, command: Command): number {
   mark(receipt);
   return 1;
 }
+
+/** The stuck legacy checkout's count (lib/orders.ts COUNT_STUCK_LEGACY_CHECKOUT), for the same journeys. Real Redis
+ * runs the production script in scripts/test_legacy_order_accounting_redis.py. */
+export function isStuckAccounting(command: Command): boolean {
+  return command[0] === "EVAL" && typeof command[1] === "string" &&
+    command[1].startsWith("-- marktmorgen:legacy-checkout-stuck:v1\n");
+}
+
+export function stuckAccounting(store: MemoryRedis, command: Command): number {
+  if (command[2] !== 4 || command.length !== 13) return -1;
+  const keys = command.slice(3, 7).map(String), [mark, folder, owner, rawUntil, rawNow, rawKeep] = command.slice(7).map(String);
+  if (new Set(keys).size !== 4) return -1;
+  const until = Number(rawUntil), now = Number(rawNow), keep = Number(rawKeep);
+  if (mark.length !== 68 || !mark.startsWith("ocf:") || folder.length !== 32 || owner.length < 1 || owner.length > 320 ||
+      !Number.isFinite(until) || !Number.isFinite(now) || until <= now || keep !== 34_560_000) return -1;
+  const [seenKind, counterKind, foldersKind, ownerKind] = keys.map(k => store.run(["TYPE", k]));
+  if (until <= store.now()) return -1;
+  if (seenKind === "string") {
+    const prior = String(store.run(["GETRANGE", keys[0], 0, 3]));
+    if (prior === "oc1:" || prior === "ocf:") return 2;
+  }
+  if (counterKind !== "none" && counterKind !== "string") return -1;
+  if (counterKind === "string") {
+    const raw = store.run(["GETRANGE", keys[1], 0, 16]);
+    if (typeof raw !== "string" || !/^\d+$/.test(raw) || raw.length > 13 || String(Number(raw)) !== raw || Number(raw) + 1 > 1e12) return -1;
+  }
+  store.run(["INCR", keys[1]]);store.run(["EXPIRE", keys[1], keep]);
+  if (foldersKind === "none" || foldersKind === "set") { store.run(["SADD", keys[2], folder]);store.run(["EXPIRE", keys[2], keep]); }
+  if (ownerKind === "none") store.run(["SET", keys[3], owner]);
+  // MemoryRedis lacks SET PXAT; SET replaces a key of any type, as native SET does, and PEXPIRE keeps its clock.
+  store.run(["DEL", keys[0]]);store.run(["SET", keys[0], mark]);store.run(["PEXPIRE", keys[0], until - store.now()]);
+  return 1;
+}

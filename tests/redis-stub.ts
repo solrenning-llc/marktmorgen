@@ -1,9 +1,9 @@
 import { MemoryRedis } from "@/lib/redis-memory";
 import { withTakeScripts } from "./redis-take-scripts";
-import { isOrderAccounting, orderAccounting } from "./order-accounting-memory";
+import { isOrderAccounting, isStuckAccounting, orderAccounting, stuckAccounting } from "./order-accounting-memory";
 export const store = withTakeScripts(new MemoryRedis());
 store.pipeline = async commands => commands.map(command =>
-  isOrderAccounting(command) ? orderAccounting(store, command) : store.run(command));
+  isOrderAccounting(command) ? orderAccounting(store, command) : isStuckAccounting(command) ? stuckAccounting(store, command) : store.run(command));
 let configured = true;
 export const isRedisConfigured = () => configured;
 /** Only for a test of the "Redis not configured" branch; always put back to true in a finally. */

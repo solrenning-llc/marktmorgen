@@ -497,6 +497,82 @@ export async function countLegacyCheckoutForConfirmation(store: Store, reference
   }
 }
 
+/**
+ * A paid legacy checkout whose accounting stays unknown for a reason that never clears: Codex's MEDIUM on #3667, the
+ * coordinator's decision 20261122T200113Z-claude-1-coord-4c5c, option (a): count more, never less, and a buyer who
+ * paid gets the email. Reached only after the ordinary count answered unknown, only for a checkout Stripe shows paid
+ * in the read just made (isSettled, checked by the caller and again here), and only once LEGACY_STUCK_AFTER_MS have
+ * passed since the checkout was created, so a transient failure first has its ordinary retries. The order is counted
+ * at its own worst case, one order of the store's figure (never 0 by the platform share), in the same window counter
+ * the studio reads, so it shows as counted with no figure made up. Its mark is the order's own counted-order key,
+ * written last with a distinct prefix (ocf:) and the same absolute checkout-created +45-day horizon: one count per
+ * checkout, also for runs at the same time (one Lua), and an ordinary commit afterwards answers unknown and lands
+ * here as "already". What it cannot know and so counts again, by design (more, never less): a seen key left as the
+ * ordinary script's partial intent (oci:), a seen key of another type, and an owner record of another owner (kept as
+ * it is). The admission hold is not released (a place stays taken until its own expiry, never one too few).
+ * Unknown stays unknown, and retried, when Redis does not answer, when the window's counter does not read, when the
+ * checkout's creation does not read, before the first hour, and at or after the 45-day horizon, where an earlier
+ * count can no longer be seen and counting again could count one order twice.
+ */
+export const LEGACY_STUCK_AFTER_MS = 60 * 60 * 1000;
+
+export const COUNT_STUCK_LEGACY_CHECKOUT = `-- marktmorgen:legacy-checkout-stuck:v1
+for i=1,4 do if not KEYS[i] then return -1 end end
+if KEYS[1]==KEYS[2] or KEYS[1]==KEYS[3] or KEYS[1]==KEYS[4] or KEYS[2]==KEYS[3] or KEYS[2]==KEYS[4] or KEYS[3]==KEYS[4] then return -1 end
+local mark,folder,owner = ARGV[1],ARGV[2],ARGV[3]
+local untilAt,now,keep = tonumber(ARGV[4]),tonumber(ARGV[5]),tonumber(ARGV[6])
+if not mark or #mark~=68 or string.sub(mark,1,4)~='ocf:' or not folder or #folder~=32 or not owner or #owner<1 or #owner>320 or
+ not untilAt or not now or untilAt<=now or not keep or keep~=34560000 then return -1 end
+local seenKind=redis.call('TYPE',KEYS[1]).ok
+local counterKind=redis.call('TYPE',KEYS[2]).ok
+local foldersKind=redis.call('TYPE',KEYS[3]).ok
+local ownerKind=redis.call('TYPE',KEYS[4]).ok
+local serverTime=redis.call('TIME')
+local serverNow=tonumber(serverTime[1])*1000+math.floor(tonumber(serverTime[2])/1000)
+if untilAt<=serverNow then return -1 end
+if seenKind=='string' then
+ local prior=redis.call('GETRANGE',KEYS[1],0,3)
+ if prior=='oc1:' or prior=='ocf:' then return 2 end
+end
+if counterKind~='none' and counterKind~='string' then return -1 end
+if counterKind=='string' then
+ local raw=redis.call('GETRANGE',KEYS[2],0,16)
+ if not string.match(raw,'^%d+$') or #raw>13 then return -1 end
+ local count=tonumber(raw)
+ if not count or count%1~=0 or count+1>1000000000000 or tostring(count)~=raw then return -1 end
+end
+redis.call('INCR',KEYS[2]); redis.call('EXPIRE',KEYS[2],keep)
+if foldersKind=='none' or foldersKind=='set' then redis.call('SADD',KEYS[3],folder); redis.call('EXPIRE',KEYS[3],keep) end
+if ownerKind=='none' then redis.call('SET',KEYS[4],owner) end
+redis.call('SET',KEYS[1],mark,'PXAT',untilAt)
+return 1`;
+
+/** Count a stuck paid legacy checkout once, at its worst case (COUNT_STUCK_LEGACY_CHECKOUT). */
+export async function countStuckLegacyCheckout(store: Store, reference: string, now: number, createdAtMs: number): Promise<LegacyCheckoutCountOutcome> {
+  try {
+    if (!CHECKOUT_REFERENCE.test(reference) || !Number.isSafeInteger(now) || !Number.isSafeInteger(createdAtMs) || createdAtMs <= 0 ||
+        now < createdAtMs + LEGACY_STUCK_AFTER_MS || now >= createdAtMs + SEEN_SECONDS * 1000) return "unknown";
+    const owner = storeRef(store), folder = await storeFolder(owner);
+    if (!FOLDER_PATTERN.test(folder)) return "unknown";
+    const known = allowanceWindow(store, now), month = calendarWindow(now).id;
+    const counter = known ? countKey(folder, known.id) : heldOrdersKey(folder);
+    const mark = `ocf:${fingerprint(JSON.stringify(["legacy-checkout-stuck-v1", reference, folder]))}`;
+    const reply: unknown = await redisPipeline([["EVAL", COUNT_STUCK_LEGACY_CHECKOUT, 4, seenKey(reference), counter, foldersKey(month),
+      `nl:store:folder-owner:${folder}`, mark, folder, owner, createdAtMs + SEEN_SECONDS * 1000, now, KEEP_SECONDS]]);
+    if (!Array.isArray(reply)) return "unknown";
+    const length = Object.getOwnPropertyDescriptor(reply, "length"), value = Object.getOwnPropertyDescriptor(reply, "0");
+    if (!length || !("value" in length) || length.value !== 1 || !value || !("value" in value)) return "unknown";
+    if (value.value === 1 && known) await countHeldOrders(folder, known.id).catch((error) => {
+      console.error("previously held orders remain for the next pass", error);
+      return 0;
+    });
+    return value.value === 1 ? "committed" : value.value === 2 ? "already" : "unknown";
+  } catch (error) {
+    console.error("could not count a stuck legacy checkout", error);
+    return "unknown";
+  }
+}
+
 /** The orders a store had in a window: a calendar month ("2026-10"), this one by default, or a billing month ("2026-10-19"). Zero when it cannot be read. */
 export async function ordersIn(folder: string, month = calendarWindow().id): Promise<number> {
   if (!isRedisConfigured() || !folder) return 0;

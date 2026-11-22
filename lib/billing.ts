@@ -953,6 +953,14 @@ export function fundedRestartSourceMatches(intent: OwnedRestartIntent, current: 
   } catch { return false; }
 }
 
+/** A break's restart refused before its POST: the store was not read live (erasing, gone, or not confirmed). */
+export class RestartStoreNotLive extends Error {
+  constructor() {
+    super("The store was not read live right before its plan's restart; nothing was sent");
+    this.name = "RestartStoreNotLive";
+  }
+}
+
 export async function restartPlan(input: {
   store: Pick<Store, "handle">;
   customerId: string;
@@ -960,8 +968,17 @@ export async function restartPlan(input: {
   tier: Tier;
   idempotencyKey: string;
   funding?: { statsId: string; sourceSubscriptionId: string; sourceGrantId: string | null; ref: string; paused: string };
+  /**
+   * Asked right before each POST /subscriptions (Codex L-20261120-1741): true only when the store is still live (its
+   * erasing mark absent, its id key its own, read in one step). Anything else sends nothing: RestartStoreNotLive.
+   */
+  beforePost?: () => Promise<boolean>;
 }): Promise<StartedSubscription> {
   if (!CUSTOMER_PATTERN.test(input.customerId)) throw new Error("not a customer of ours");
+  // Fail closed: a store not read live right before the charge gets no new plan and no charge.
+  const admit = async () => {
+    if (input.beforePost && !(await input.beforePost().catch(() => false))) throw new RestartStoreNotLive();
+  };
   if (!/^(pm|card|src)_[A-Za-z0-9]{6,64}$/.test(input.paymentMethod)) throw new Error("no card to charge");
   if (input.funding) {
     const source = input.funding;
@@ -1045,6 +1062,7 @@ export async function restartPlan(input: {
     if (!fundedRestartSourceMatches(intent, currentSource) || !restartSubmissionOpenNow(armed)) {
       throw new Error("The current Store no longer matches the funded restart source");
     }
+    await admit();
     const subscription = await onPlatform("POST", "/subscriptions", body, {idempotencyKey:armed.idempotencyKey, version: "2025-09-30.clover"});
     // Persist an identified outcome BEFORE validating it for adoption. Even a
     // mismatched customer/price is evidence for read-only reconciliation.
@@ -1074,6 +1092,7 @@ export async function restartPlan(input: {
     "metadata[tier]": input.tier,
     "metadata[restarted]": "break",
   });
+  await admit();
   const subscription = await onPlatform("POST", "/subscriptions", body, { idempotencyKey: input.idempotencyKey, version: "2025-09-30.clover" });
   return observeRestartedPlan({ customerId: input.customerId, tier: input.tier, priceId }, subscription);
 }

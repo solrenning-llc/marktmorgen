@@ -49,3 +49,27 @@ export async function setIfStoreLive(fence: StoreLiveFence, key: string, value: 
   const answer = replies?.[0];
   return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
 }
+
+// The same identity rule as SET_IF_STORE_LIVE, read only: 1 live, 0 gone or erasing, -1 an owner's record that does not
+// parse. For a step that is not a Redis write (a provider call such as a plan's restart charge), read right before it
+// (Codex L-20261120-1741).
+export const STORE_LIVE_READ = `-- marktmorgen:store-live-read:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[2] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[3] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[2] then return 0 end
+end
+return 1`;
+
+/** Whether the fenced store is live now: true; false when its erasure has begun or its key is no longer its own; "unknown" otherwise. */
+export async function isStoreLive(fence: StoreLiveFence): Promise<boolean | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  if (fence.statsId === null) return "unknown";
+  const answer = repliesFor(await redisPipeline([["EVAL", STORE_LIVE_READ, 2, fence.live, fence.erasing, fence.field, fence.statsId, fence.ref]]), 1)?.[0];
+  return answer === 1 ? true : answer === 0 ? false : "unknown";
+}

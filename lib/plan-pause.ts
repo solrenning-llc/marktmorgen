@@ -48,12 +48,14 @@ import {
   isBillingConfigured,
   periodEnd,
   planOf,
+  RestartStoreNotLive,
   restartPlan,
   setCancelAtPeriodEnd,
   stateOf,
   subscriptionRecord,
 } from "@/lib/billing";
 import { addPeriods } from "@/lib/plan-periods";
+import { storeIsLive } from "@/lib/store-live-cache";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -735,6 +737,9 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
         paymentMethod: record.paymentMethod,
         tier: record.tier,
         idempotencyKey: `restart:${record.subscription}:${record.until}`,
+        // Read live right before each charge (Codex L-20261120-1741): a store whose erasure began after it was read
+        // above gets no new plan; its break and due entry stay for the erasure to delete with it.
+        beforePost: async () => (await storeIsLive(store)) === true,
         ...(record.funding ? { funding: { statsId: store.statsId ?? "", sourceSubscriptionId: record.subscription, sourceGrantId: record.funding.grantId, ref, paused: stored.raw ?? "" } } : {}),
       });
       if(started.fundedPublication===true){
@@ -758,6 +763,9 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
       await tell(store, "restarted", record).catch(() => false);
       counts.restarted += 1;
     } catch (error) {
+      // Not read live right before the charge: nothing was sent. Kept as it is, untold: a store being erased is
+      // deleted with its break; one whose read was only unknown is tried again on the next run.
+      if (error instanceof RestartStoreNotLive) { counts.failed += 1; continue; }
       console.error("starting a plan again after a break failed", store.handle, error);
       // The funded protocol retains every uncertain source/intent. It must not
       // enter the legacy retry window, forget its evidence, or announce success.

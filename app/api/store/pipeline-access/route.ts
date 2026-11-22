@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
   try {
     // Read the teammate and write their access with the team's lock held, so a sign-in moving at the same
     // moment (moveMemberships, under the same lock) never leaves the new address without the change.
-    const done = await withTeamLocked(store.sid, async () => {
+    const done = await withTeamLocked(store.sid, async (teamLease) => {
       // The pipelines exactly as saved: a record that cannot be read refuses (503), never the default pipeline in
       // its place, which would drop the restrictions on every other one.
       const [team, pipelines] = await Promise.all([readTeam(store.sid), readPipelinesExact(statsId)]);
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
       const named = [...asked.keys()].map((id) => pipelines.find((p) => p.id === id));
       if (named.some((p) => !p)) return { ok: false as const, refused: refusal("unknown", "That pipeline is no longer there. Reload the page.", 404) };
       const choices: Record<string, PipelineAccess> = Object.fromEntries(asked);
-      return { ok: true as const, named: named as { id: string; name: string }[], ...(await setPipelineChoices(statsId, email, pipelines.map((p) => p.id), choices, store, was)) };
+      return { ok: true as const, named: named as { id: string; name: string }[], ...(await setPipelineChoices(statsId, email, pipelines.map((p) => p.id), choices, store, was, teamLease)) };
     });
     if (!done.ok) return done.refused;
     const { named, before, saved } = done;

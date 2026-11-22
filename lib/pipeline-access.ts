@@ -21,6 +21,7 @@ import { randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { type AccessMap, type PipelineAccess, parseAccessMap } from "@/lib/pipeline-access-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { type Held, applyIfHeld } from "@/lib/redis-lock";
 import { DataRoomError, type DataStore, forceData, giveData, needData } from "@/lib/store-data";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -101,10 +102,17 @@ export async function readAllPipelineAccess(statsId: string | null): Promise<Rec
 }
 
 /**
+ * What the team lease's fence adds to a route's access write, as Upstash bills a script's inner commands: the fenced
+ * write is EVAL, the lock's GET and the HSET or HDEL, in place of the plain HSET or HDEL (Codex L-20261120-0128).
+ * Priced on every studio request (tests/plan-cost-registry.ts, line pipeline-access-team-fence).
+ */
+export const PIPELINE_ACCESS_FENCE_COMMANDS = 2;
+
+/**
  * Sets a teammate's restrictions; none deletes their field. Room is taken (or given back) first. What was there is
  * read exactly; an unknown reply throws before any room is taken or anything is written.
  */
-export async function writePipelineAccess(statsId: string, email: string, map: AccessMap, room: DataStore): Promise<AccessMap> {
+export async function writePipelineAccess(statsId: string, email: string, map: AccessMap, room: DataStore, teamLease?: Held): Promise<AccessMap> {
   const who = normaliseEmail(email);
   const clean = parseAccessMap(map);
   const before = await fieldOf(statsId, who);
@@ -112,9 +120,24 @@ export async function writePipelineAccess(statsId: string, email: string, map: A
   const weight = (v: unknown) => (typeof v === "string" && v ? dataBytes([who, v], 1) : 0);
   const grown = weight(value) - weight(before);
   if (grown > 0) await needData(room, [{ slot: ACCESS_SLOT, bytes: grown }]);
-  const written = oneAnswer(await redisPipeline([value ? ["HSET", accessKey(statsId), who, value] : ["HDEL", accessKey(statsId), who]]));
-  // Saved only on the exact answer of that one command (0 or 1); anything else is not a saved restriction, and the
-  // owner is told it was not saved, never shown the new access as applied (Codex D, #2036). The room taken stays.
+  let written: 0 | 1 | null;
+  if (teamLease) {
+    // A route read this teammate under the team's lease. Its old read authorizes
+    // no write once that lease is gone: removal may already have erased the field.
+    // Reuse the shared atomic lock-and-change script; no separate GET can fence HSET.
+    try {
+      written = (await applyIfHeld(teamLease, [{
+        op: value ? "HSET" : "HDEL", key: accessKey(statsId), words: value ? [who, value] : [who],
+      }])) ? 1 : null;
+    } catch {
+      written = null;
+    }
+  } else {
+    written = oneAnswer(await redisPipeline([value ? ["HSET", accessKey(statsId), who, value] : ["HDEL", accessKey(statsId), who]]));
+  }
+  // Saved only on an exact HSET/HDEL reply, or the shared script's confirmed fenced write.
+  // A lost lease or an unknown answer never reports the restriction saved (Codex D, #2036).
+  // Keep any room already reserved, as for every unconfirmed write.
   if (written === null) throw new PipelineAccessWriteUnconfirmed();
   if (grown < 0) await giveData(room, [{ slot: ACCESS_SLOT, bytes: -grown }]);
   return clean;
@@ -324,19 +347,19 @@ export async function setPipelineAccess(statsId: string, email: string, pipeline
  * then is never written over: PipelineAccessChangedError, nothing written.
  * Answers the record before the change and the one kept.
  */
-export async function setPipelineChoices(statsId: string, email: string, pipelineIds: readonly string[], choices: Readonly<Record<string, PipelineAccess>>, room: DataStore, was?: AccessMap | null): Promise<{ before: AccessMap | null; saved: AccessMap }> {
+export async function setPipelineChoices(statsId: string, email: string, pipelineIds: readonly string[], choices: Readonly<Record<string, PipelineAccess>>, room: DataStore, was?: AccessMap | null, teamLease?: Held): Promise<{ before: AccessMap | null; saved: AccessMap }> {
   const who = normaliseEmail(email);
   const token = randomBytes(12).toString("hex");
   await claimLock(statsId, who, token);
   try {
-    return await writeChoices(statsId, who, pipelineIds, choices, room, was);
+    return await writeChoices(statsId, who, pipelineIds, choices, room, was, teamLease);
   } finally {
     await releaseLock(statsId, who, token);
   }
 }
 
 /** The new record from what was kept and what was chosen, for the store's pipelines only; held lock assumed. */
-async function writeChoices(statsId: string, who: string, pipelineIds: readonly string[], choices: Readonly<Record<string, PipelineAccess>>, room: DataStore, was?: AccessMap | null): Promise<{ before: AccessMap | null; saved: AccessMap }> {
+async function writeChoices(statsId: string, who: string, pipelineIds: readonly string[], choices: Readonly<Record<string, PipelineAccess>>, room: DataStore, was?: AccessMap | null, teamLease?: Held): Promise<{ before: AccessMap | null; saved: AccessMap }> {
   const before = await readPipelineAccess(statsId, who);
   if (was !== undefined && !sameAccess(before, was)) throw new PipelineAccessChangedError();
   const next: AccessMap = Object.create(null) as AccessMap;
@@ -346,5 +369,5 @@ async function writeChoices(statsId: string, who: string, pipelineIds: readonly 
     const value = (Object.hasOwn(choices, id) ? choices[id] : undefined) ?? kept;
     if (value !== "edit") next[id] = value;
   }
-  return { before, saved: await writePipelineAccess(statsId, who, next, room) };
+  return { before, saved: await writePipelineAccess(statsId, who, next, room, teamLease) };
 }

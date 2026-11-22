@@ -1477,6 +1477,7 @@
     "components/custom-range.tsx",
     "components/customer-voice.tsx",
     "components/daily-cashflow.tsx",
+    "components/dark-theme-color.tsx",
     "components/deal-agenda.tsx",
     "components/deal-channels-table.tsx",
     "components/deals-board.tsx",

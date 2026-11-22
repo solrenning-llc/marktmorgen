@@ -186,6 +186,15 @@ export const DARK_OVERRIDES: readonly { selector: string; set: Record<string, st
   { selector: ".on-dark ::selection", set: { color: "var(--on-dark)", background: "rgba(255, 255, 255, 0.2)" } },
 ];
 
+/** The attribute that carries the reader's scheme on <html> (set only by lib/color-scheme.ts and the switch). */
+export const SCHEME_ATTRIBUTE = "data-color-scheme";
+/** The browser's theme color the studio layout gives (app/studio/layout.tsx). */
+export const LIGHT_THEME_COLOR = "#ffffff";
+/** The theme color for a reader's scheme on a dark-ready screen (components/dark-theme-color.tsx). */
+export function themeColorFor(scheme: string | undefined): string {
+  return scheme === "dark" ? DARK_TOKENS.paper : LIGHT_THEME_COLOR;
+}
+
 export const DARK_BLOCK_START = "/* 274 [AX1] dark mode: dark tokens (lib/dark-tokens.ts). */";
 export const DARK_BLOCK_END = "/* end dark tokens */";
 

@@ -599,10 +599,36 @@ export function studioPictureWork(tier: Tier): number {
 }
 
 export function studioBlobMonthly(studio: number): number {
-  const check = pictureCheckBlob(MAX_IMAGE_BYTES);
-  const page = (MAX_PAGE_PICTURES * (STUDIO_DOOR_BLOB + check)) / (MAX_PAGE_PICTURES + 1);
-  return studio * Math.max(STUDIO_DOOR_BLOB, page) + Math.min(studio, PICTURE_DOOR_MAX) * check;
+  return studio * studioBlobPerRequest() + Math.min(studio, PICTURE_DOOR_MAX) * pictureCheckBlob(MAX_IMAGE_BYTES);
 }
+/** The dearest Blob work one studio request can make (studioBlobMonthly): a door, or its share of a page save of MAX_PAGE_PICTURES. */
+export function studioBlobPerRequest(): number {
+  const page = (MAX_PAGE_PICTURES * (STUDIO_DOOR_BLOB + pictureCheckBlob(MAX_IMAGE_BYTES))) / (MAX_PAGE_PICTURES + 1);
+  return Math.max(STUDIO_DOOR_BLOB, page);
+}
+/**
+ * The dearest Vercel Blob work one of the store's buyer actions can make (MR audit unit (b), Claude 4
+ * C4-20261106-2790-C56-167). A buyer action that touches the Blob is one of:
+ *   - a door, for a community picture (app/api/store/community/upload) or a student's file
+ *     (app/api/store/course/task/upload): its signed token and the browser's put, every try, and one head of its name,
+ *     every try (the student's since main 293456c92, the community's since #3414 ef1eaea581, to refuse a name that is
+ *     already a file); still below a post's check;
+ *   - a community post that uses a picture (app/api/store/community/route.ts): one picture checked at most
+ *     (lib/community-image.ts, checkCommunityImage: a head with every try, one read of its first bytes, counted whole
+ *     at MAX_IMAGE_BYTES, the most its door lets in, at Blob transfer and Fast Origin Transfer with one CDN request);
+ *   - a hand-in (app/api/store/course/task/route.ts): one head with every try, no read.
+ * A door's note lives a day, but each check is taken by its own post, so no month checks more than its own actions.
+ */
+export function buyerBlobPerAction(): number {
+  const door = (BLOB_PUT_TRIES + BLOB_TOKEN_TRIES) * BLOB_ADVANCED_OP + BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
+  // The same private read as the studio's picture check (pictureCheckBlob), crossing at Fast Origin Transfer with one
+  // CDN request, less the clean-up head the community path does not send (Claude 2 on #2852, 6751277724).
+  const check = pictureCheckBlob(MAX_IMAGE_BYTES) - BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
+  const handInHead = BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
+  return Math.max(door, check, handInHead);
+}
+/** An email's picture (lib/mail-pictures.ts, keepMailPicture): one put from the server, every try; no token, head or read. */
+export const MAIL_PICTURE_BLOB = BLOB_PUT_TRIES * BLOB_ADVANCED_OP;
 /**
  * One "Simple Operation" of Vercel Blob (a head: a file's details read without its bytes): US$ 0.400 per million on
  * demand in iad1, from the official page "Vercel Blob usage and pricing" (vercel.com/docs/vercel-blob/usage-and-pricing,
@@ -2266,7 +2292,7 @@ export const COST_LINES: CostLine[] = [
       // A refused page save puts what it took back on the door, a checked one as put back once (Codex N1 on #2843).
       { file: "lib/sales-page-store.ts", names: ["await returnToDoor(tookNow.map((path) => [path, taken.get(path) as number]));", "Math.floor(taken.get(path) as number) + 0.5", "await backChecked(fresh);", "[\"EVAL\", HDEL_IF_EQUAL, 1, picsKey(statsId), path, pageId]"] },
     ],
-    basis: "Every studio picture operation goes through a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling; the doors, attaches and page saves share it, so they are one line (studioBlobMonthly). A door is its put, its signed token counted as an Advanced Operation since no official page prices it, and the head that checks the name is free, every try. A request reads only a file it took from the picture door, each once: a name a product's or a link's record already shows, sent again and not fresh, is answered from the record, written only after that file passed the checks (checkedSizes; a size the record cannot vouch for is read again), and any other name is refused before a read (C1-20261107-1550-TODOS-10). So every check spends a note a door wrote: the dearest kind a request is a page save of MAX_PAGE_PICTURES pictures with their 24 doors, 25 requests for 24 doors and 24 checks; and a month may also read the notes alive when it began, at most PICTURE_DOOR_MAX a store, counted on top. A check is a head with every try and a plain read at the most the door lets a file be (MAX_IMAGE_BYTES), its bytes counted whole (firstBytes cancels a stream after sixteen bytes and no official page says the Blob honors a byte range with 206), crossing at Blob transfer and Fast Origin Transfer, with one CDN request, as PICTURE_READ counts a private picture read (Claude 4 on #2848, 6711058709), and the clean-up head a failed request sends (dropTakenPictures). A check that did not finish (a passing Blob error, never read as not a picture) puts its note back on the door once (returnToDoor, putBackOnce), and the check made again is paid for first as one more studio request each (pictureChecker), so it sits inside the same studio figure and costs less than a request at its dearest (Claude 2 on #2843, 6750890970). Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026 (delete operations free), at the dearest regional rate, gru1, US$ 7.00 and US$ 0.56 a million (vercel.com/docs/pricing/regional-pricing, read on 7 November 2026), because the store's Blob region is not reviewed. No new store call: the record read is the one the route already makes. Not in this line: a buyer's review photo (lib/review-photo.ts), an email's picture (lib/mail-pictures.ts), community pictures and students' files, the public picture route and the link preview (MR audit items 2, 4, 7, 8), the storage of images/ (item 3), and the pictures' own bucket copy (lib/picture-r2-copy.ts, off). A page save that is refused writes none of its pictures down as the page's (Codex N1 on #2843): those it took from the door go back on it, unchecked as they were noted when a name the door did not give it refuses it before any read, and checked as put back once otherwise (returnToDoor, putBackOnce), so a later save checks one again only paid for as a studio request, the same bound as a check that did not finish; a claim not written whole lets go of only its own fields (HDEL_IF_EQUAL) before they go back; the door's ZADD and EXPIRE and those EVALs are commands inside the refused save's own studio request.",
+    basis: "Every studio picture operation goes through a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling; the doors, attaches and page saves share it, so they are one line (studioBlobMonthly). A door is its put, its signed token counted as an Advanced Operation since no official page prices it, and the head that checks the name is free, every try. A request reads only a file it took from the picture door, each once: a name a product's or a link's record already shows, sent again and not fresh, is answered from the record, written only after that file passed the checks (checkedSizes; a size the record cannot vouch for is read again), and any other name is refused before a read (C1-20261107-1550-TODOS-10). So every check spends a note a door wrote: the dearest kind a request is a page save of MAX_PAGE_PICTURES pictures with their 24 doors, 25 requests for 24 doors and 24 checks; and a month may also read the notes alive when it began, at most PICTURE_DOOR_MAX a store, counted on top. A check is a head with every try and a plain read at the most the door lets a file be (MAX_IMAGE_BYTES), its bytes counted whole (firstBytes cancels a stream after sixteen bytes and no official page says the Blob honors a byte range with 206), crossing at Blob transfer and Fast Origin Transfer, with one CDN request, as PICTURE_READ counts a private picture read (Claude 4 on #2848, 6711058709), and the clean-up head a failed request sends (dropTakenPictures). A check that did not finish (a passing Blob error, never read as not a picture) puts its note back on the door once (returnToDoor, putBackOnce), and the check made again is paid for first as one more studio request each (pictureChecker), so it sits inside the same studio figure and costs less than a request at its dearest (Claude 2 on #2843, 6750890970). Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026 (delete operations free), at the dearest regional rate, gru1, US$ 7.00 and US$ 0.56 a million (vercel.com/docs/pricing/regional-pricing, read on 7 November 2026), because the store's Blob region is not reviewed. No new store call: the record read is the one the route already makes. The creator's own community doors and the checks of their posts are studio requests too (takeBuyerAction with \"owner\"), each cheaper than a door here (a token and a put, no head) or a check here: inside this line's per-request worst. Not in this line: a buyer's review photo (lib/review-photo.ts), an email's picture (line mail-picture-blob), buyers' community pictures and students' files (line buyer-blob), the public picture route and the link preview (MR audit items 2, 4, 7, 8), the storage of images/ (item 3), and the pictures' own bucket copy (lib/picture-r2-copy.ts, off). The 11 SDK tries are only a retry model: refused puts made with a still-valid door token beyond those tries are not bounded. Whether those refused puts are billed is unknown, so their additional cost is unknown, never zero; this line does not certify their total cost. The same holds for a multipart upload's create, parts and complete sent under that token (Claude 4 on #2852, 6711212896): requests accepted beyond one put, not bounded, their cost unknown, never zero. A page save that is refused writes none of its pictures down as the page's (Codex N1 on #2843): those it took from the door go back on it, unchecked as they were noted when a name the door did not give it refuses it before any read, and checked as put back once otherwise (returnToDoor, putBackOnce), so a later save checks one again only paid for as a studio request, the same bound as a check that did not finish; a claim not written whole lets go of only its own fields (HDEL_IF_EQUAL) before they go back; the door's ZADD and EXPIRE and those EVALs are commands inside the refused save's own studio request.",
   },
   {
     id: "blob-list",
@@ -3138,6 +3164,19 @@ export const COST_LINES: CostLine[] = [
     basis: "Every call of the window, held at 2 GB for ten seconds while the other service answers; what the service charges is nothing to us, and AI captions are bought apart. A press of \"Pay with PayPal\" costs more than a call (its own commands with both lock EVALs, its whole book read with no product read for its title, up to sixty seconds), so it takes PAYPAL_PRESS_BASE_UNITS and one more for each PAYPAL_PRESS_UNIT_COMMANDS of its book read at the program's size, counted first, which cover it at every size; payday's auto-pay, one a month, takes no unit and is added once at its most (PAYPAL_PRESS). The bytes the press's book read moves are the open question every reader of the whole book shares, not priced here and never zero.",
   },
   {
+    id: "mail-picture-blob",
+    feature: "Vercel Blob for an email's picture: its put, every try (6 November 2026)",
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].integration * MAIL_PICTURE_BLOB,
+    sources: [
+      { file: "app/api/store/mail/picture/route.ts", names: ["withinServiceWhy(\"mail-picture\"", "keepMailPicture(ref, checked)"] },
+      { file: "lib/mail-pictures.ts", names: ["keepMailPicture", "await put(path"] },
+      { file: "lib/mail-picture-rules.ts", names: ["MAX_MAIL_PICTURE_BYTES"] },
+      { file: "lib/metered-limits.ts", names: ["withinServiceWhy", "takeAllowance(store, \"integration\", units)"] },
+      { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "integration"] },
+    ],
+    basis: "An email's picture is one of the store's calls to connected services (withinServiceWhy \"mail-picture\" takes one of the integration figure before anything is kept, beside its 60 an hour), at most the plan's integration figure a month, a hard ceiling; each is one put from the server (keepMailPicture), counted as an Advanced Operation with every try the SDK may send (MAIL_PICTURE_BLOB), and nothing else: no signed token, no head, no read. Counted on top of the call's own line (integrations), every call of the figure as if it were a picture. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026; the bytes sent in are not priced there. Not in this line: the reads of the picture when an email is opened (the public picture route, MR audit item 2) and its storage.",
+  },
+  {
     id: "free-share",
     feature: "This store's share of the stores that pay nothing: free trials, stores with no plan, ended plans (17 October 2026, the owner's \"Teto mínimo pago pela empresa\")",
     monthlyUsd: () => nonPayingWorst() / PAID_STORES_PER_FREE_STORE,
@@ -3194,6 +3233,26 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/community-text.ts", names: ["RATE_LIMITS", "EVENT_WRITES_PER_HOUR", "CHALLENGE_WRITES_PER_HOUR"] },
     ],
     basis: "Every action of the window at the heaviest one's cost; the creator's own acts there are studio requests (line studio), a deletion follows an action already counted, and the per-person limits only spread them. The reads beside them (pictures, calendar files, lesson downloads, sign-in links, podcast episodes) are public requests on the buyers' side (line public-requests), a picture as PICTURE_REQUEST_UNITS of them.",
+  },
+  {
+    id: "buyer-blob",
+    feature: "Vercel Blob for what buyers send: community picture doors and the check when a post uses one, students' file doors and the head when work is handed in, every try counted (6 November 2026)",
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].buyer * buyerBlobPerAction(),
+    sources: [
+      { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "buyer"] },
+      { file: "lib/buyer-actions.ts", names: ["takeBuyerAction", "takeAllowance(store, \"buyer\")", "takeAllowance(store, \"studio\")"] },
+      { file: "app/api/store/community/upload/route.ts", names: ["takeBuyerAction(store, viewer.owner ? \"owner\" : \"buyer\")", "takePicturePlace", "issueSignedToken", "maximumSizeInBytes: MAX_IMAGE_BYTES"] },
+      { file: "components/community-composer.tsx", names: ["uploadPresigned"] },
+      { file: "app/api/store/community/route.ts", names: ["takeBuyerAction(store, owner ? \"owner\" : \"buyer\")", "checkCommunityImage(path, id, blobImages)"] },
+      { file: "lib/community-image.ts", names: ["checkCommunityImage", "files.head(path)", "files.firstBytes(path)"] },
+      { file: "lib/community-files.ts", names: ["firstBytes", "reader.cancel()", "blobImages"] },
+      { file: "lib/product-image.ts", names: ["MAX_IMAGE_BYTES"] },
+      { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)", "issueSignedToken", "maximumSizeInBytes: MAX_TASK_FILE_BYTES"] },
+      { file: "components/lesson-task.tsx", names: ["uploadPresigned"] },
+      { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)", "headFile(path)"] },
+      { file: "lib/file-store.ts", names: ["headFile", "blob.head(pathname)"] },
+    ],
+    basis: "Every buyer action that touches the Blob takes one of the store's buyer figure first (takeBuyerAction), at most the plan's buyer figure a month, a hard ceiling; so each action of the figure is counted at the dearest Blob work one may be (buyerBlobPerAction), on top of its request (line buyer-actions): a door for a community picture or a student's file (its signed token, counted as an Advanced Operation since no official page prices it, and the browser's put, every try; each door also heads its name once, every try, to refuse a name that is already a file, still below a post's check); a post that uses a picture, which checks one picture at most (a head with every try, a plain read, the bytes read counted whole at MAX_IMAGE_BYTES, the most its door lets in: firstBytes cancels a stream after sixteen bytes and no official page says the Blob honors a byte range with 206), its read crossing at Blob transfer and Fast Origin Transfer with one CDN request, as the studio's picture check counts it (pictureCheckBlob less its clean-up head; Claude 2 on #2852, 6751277724), the dearest of the three; or a hand-in, which heads one file. Each check is taken by its own post, so a door let in the day before adds nothing. The creator's own community doors and posts are studio requests, priced at the dearest studio request in studio-blob. Deletes and the sweep of unused doors are free. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026. Not in this line: the reads of community pictures and of handed-in files (public requests, MR audit item 2) and their storage (community-pictures, task-files). The 11 SDK tries are only a retry model: refused puts made with a still-valid door token beyond those tries are not bounded. Whether those refused puts are billed is unknown, so their additional cost is unknown, never zero; this line does not certify their total cost. The same holds for a multipart upload's create, parts and complete sent under that token (Claude 4 on #2852, 6711212896): requests accepted beyond one put, not bounded, their cost unknown, never zero.",
   },
   {
     id: "webhooks",
@@ -3606,6 +3665,8 @@ export function nonPayingWorst(): number {
     + TRIAL_DAILY_RUNS * 15 * WORST_COMMANDS_PER_RUN * COMMAND
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)
     + campaignLandingFenceCost(allowances)
+    // Its buyers' doors, checks and hand-ins, and its email pictures, at its own figures (lines buyer-blob, mail-picture-blob).
+    + allowances.buyer * buyerBlobPerAction() + allowances.integration * MAIL_PICTURE_BLOB
     // Its payday's auto-pay takes no integration unit (a press from the studio takes its own, paypalPressUnits).
     + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS
     // Its studio picture doors, checks and page saves, at its own studio figure (line studio-blob; Claude 7 on #2852).

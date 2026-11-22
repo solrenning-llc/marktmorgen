@@ -385,6 +385,14 @@ export async function studioView(
   const session = cookies.get(SESSION_COOKIE)?.value;
   const email = await emailForSession(session);
   if (!email) return { ok: false, reason: "signed_out", email: null };
+  // The same question studioAccess asks, before anything of the store is read (#3973): a page behind a permission a
+  // session let in without the second step may not use shows nothing to it. Locked, it goes where creatorFrom sends
+  // it; a lock that could not be read is never read as free (rule 24), and the studio's top says it was not checked.
+  if (need && lockedOut(need)) {
+    const until = await lockOrUnread(lockedUntil(session));
+    if (until === LOCK_UNREAD) redirect("/studio");
+    if (until > 0) redirect("/studio?two-step=locked");
+  }
 
   const pinned = typeof asked === "string" && STORE_ID_PATTERN.test(asked) ? asked : null;
   let result = await resolveAccess(email, { pinned, remembered: cookies.get(STORE_COOKIE)?.value ?? null, session }, need);

@@ -63,10 +63,40 @@ async function main(): Promise<void> {
   is("and the device left the list", String((await real([["GET", cfg]]))[0]).includes(id), false);
   is("a further repeat, with nothing left, forgets nothing and resolves", await outcome(() => forgetPerson(store, mate)), "resolved");
 
+  part("A device added during the removal leaves the list only once its state is gone (Claude 1's LOW 2 on #5105)");
+  const again = await addDevice(store, mate, "admin", sub(2), ["sale"], "Mate phone again");
+  if (!again.ok) throw new Error(`synthetic device: ${JSON.stringify(again)}`);
+  const firstId = (JSON.parse(String((await real([["GET", cfg]]))[0])) as { devices: { id: string; who?: string }[] }).devices.find((d) => d.who === mate)!.id;
+  await real([["HSET", st, firstId, JSON.stringify({ at: 1, status: 201 })]]);
+  const lateId = "pd_0123456789abcdef";
+  let hdels = 0;
+  redis.pipeline = (async (c: Commands) => {
+    if (c[0]?.[0] === "HDEL" && c[0]?.[1] === st) {
+      hdels += 1;
+      if (hdels === 1) {
+        // The first state goes, and the mate adds a device before the list changes.
+        const reply = await real(c);
+        const config = JSON.parse(String((await real([["GET", cfg]]))[0])) as { devices: { id: string }[] };
+        const copy = { ...config.devices.find((d) => d.id === firstId)!, id: lateId };
+        await real([["SET", cfg, JSON.stringify({ ...config, devices: [...config.devices, copy] })], ["HSET", st, lateId, JSON.stringify({ at: 2, status: 201 })]]);
+        return reply;
+      }
+      return [];
+    }
+    return real(c);
+  }) as typeof redis.pipeline;
+  is("a late device whose state HDEL proves nothing: the removal is not reported done", await outcome(() => forgetPerson(store, mate)), "threw");
+  is("the late device is still in the list, so a repeat can find its id", String((await real([["GET", cfg]]))[0]).includes(lateId), true);
+  is("a repeat forgets the late device", await outcome(() => forgetPerson(store, mate)), "resolved");
+  is("its state is gone", Number((await real([["HEXISTS", st, lateId]]))[0]), 0);
+  is("and it left the list", String((await real([["GET", cfg]]))[0]).includes(lateId), false);
+
   part("The team route never swallows a device erasure that failed");
   const route = readFileSync("app/api/store/team/route.ts", "utf8");
   is("no catch around forgetPerson that drops the failure", /forgetPerson\([^)]*\)\s*\.catch/.test(route), false);
   is("a failure answers 503 'devices' so Remove can be pressed again", /devices: 503/.test(route), true);
+  is("every call to forgetDevices reads its answer, the repeat of a removal included (Claude 1's LOW 1 on #5105)", /^\s*await forgetDevices\(/m.test(route), false);
+  is("a repeat whose devices are still to remove says so", /repeat_devices/.test(route) && /repeat_devices:/.test(readFileSync("components/team-manager.tsx", "utf8")), true);
   console.error = quiet;
   done();
 }

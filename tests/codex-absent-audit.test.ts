@@ -31,6 +31,7 @@ import {
   codexAuditOpeningProblems,
   type CodexAuditLine,
 } from "@/lib/codex-absent-audit";
+import * as record from "@/lib/codex-absent-audit";
 import { done, is, part } from "./check";
 
 const source = readFileSync(join(process.cwd(), "lib/opening.ts"), "utf8");
@@ -38,7 +39,12 @@ const declared = source.match(/const OPENING_REQUESTED: boolean = (true|false);/
 
 part("The record names the exception and every PR the owner named");
 is("the exception is OWNER-20261121-1437", CODEX_ABSENT_EXCEPTION, "OWNER-20261121-1437-CODEX-ABSENT-MONEY-REVIEW");
-is("the owner's list in item 1 of OWNER-20261121-1944", [...OWNER_NAMED_PRS].sort((a, b) => a - b), [4991, 5016, 5017, 5032, 5033, 5040]);
+is("the owner's list: item 1 of OWNER-20261121-1944, then #5045 and #5048", [...OWNER_NAMED_PRS].sort((a, b) => a - b), [4991, 5016, 5017, 5032, 5033, 5040, 5045, 5048]);
+// Read through the module, so a record without it fails here, not at build time.
+const OWNER_CONFIRMED_LATER = (record as { OWNER_CONFIRMED_LATER?: Readonly<Record<number, string>> }).OWNER_CONFIRMED_LATER;
+is("#5045 and #5048 carry the owner's confirmation (OWNER-20261122-0022, item 1)", [5045, 5048].map((pr) => OWNER_CONFIRMED_LATER?.[pr] ?? ""), ["OWNER-20261122-0022-CODEX-LIST-VAT-COSTS", "OWNER-20261122-0022-CODEX-LIST-VAT-COSTS"]);
+is("every PR added later is on the owner's list", Object.keys(OWNER_CONFIRMED_LATER ?? {}).map(Number).filter((pr) => !OWNER_NAMED_PRS.includes(pr)), []);
+is("#5045 and #5048 are pending and not yet merged", CODEX_ABSENT_AUDIT.filter((line) => line.pr === 5045 || line.pr === 5048).map((line) => [line.pr, line.result, line.merged]), [[5045, "pendente", null], [5048, "pendente", null]]);
 is("every PR the owner named has a line", OWNER_NAMED_PRS.filter((pr) => !CODEX_ABSENT_AUDIT.some((line) => line.pr === pr)), []);
 is("no PR has two lines", CODEX_ABSENT_AUDIT.length, new Set(CODEX_ABSENT_AUDIT.map((line) => line.pr)).size);
 is("every line is well formed", CODEX_ABSENT_AUDIT.flatMap((line) => auditLineProblems(line).map((p) => `#${line.pr}: ${p}`)), []);

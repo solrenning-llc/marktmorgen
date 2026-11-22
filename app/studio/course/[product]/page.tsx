@@ -118,9 +118,10 @@ export default async function StudioCoursePage({
   const passed = quizLessons.length ? await passedFor(course.id, students.map((s) => emailKey(s.email))) : [];
   const certificates = await certificatesFor(course.id).catch(() => null);
   const standing = certificates ? certificates.list.filter((c) => !c.withdrawnAt).length : null;
-  // The newest comments under the lessons, marked new since this page last showed them.
-  const [talking, recent] = await Promise.all([commentsOn(course.id), recentComments(course.id, 50)]);
-  await markSeen(course.id);
+  // The newest comments under the lessons, marked new since this page last showed them. Null when they could not be
+  // read (rule 24): the page says so instead of "No comments yet", and what it did not show is not marked seen.
+  const [talking, recent] = await Promise.all([commentsOn(course.id).catch(() => null), recentComments(course.id, 50).catch(() => null)]);
+  if (recent) await markSeen(course.id);
   const titles = new Map(lessonsInOrder(course).map(({ lesson }) => [lesson.id, lesson.title]));
   // The store's products by title, read once for both pickers below, the "Next step" (560 [AS1]) and the "More from"
   // shelf (628 [HN4](b)) (lib/catalog.ts readTitles). Null when they could not be read: each section says so, never
@@ -151,8 +152,8 @@ export default async function StudioCoursePage({
   const shelfTitles = storeTitles;
   const shelfOptions = shelfTitles ? visibleIds(store).filter((pid) => pid !== product.id && shelfTitles.has(pid)).map((pid) => ({ id: pid, title: shelfTitles.get(pid)! })) : [];
   const shelfSaved = shelfTitles ? (course.shelf ?? []).filter((pid) => shelfTitles.has(pid)).map((pid) => ({ id: pid, title: shelfTitles.get(pid)! })) : [];
-  const byId = new Map(recent.comments.map((c) => [c.id, c]));
-  const shownComments: StudioComment[] = recent.comments
+  const byId = new Map((recent?.comments ?? []).map((c) => [c.id, c]));
+  const shownComments: StudioComment[] = (recent?.comments ?? [])
     .filter((c) => titles.has(c.lesson))
     .map((c) => {
       const parent = c.parent ? byId.get(c.parent) : undefined;
@@ -167,7 +168,7 @@ export default async function StudioCoursePage({
         hidden: c.hidden,
         answerTo: c.parent ? (parent ? (parent.by === CREATOR_AUTHOR ? store.name : parent.name) : "") : null,
         parentId: c.parent,
-        fresh: c.at > recent.seen && c.by !== CREATOR_AUTHOR,
+        fresh: c.at > (recent?.seen ?? 0) && c.by !== CREATOR_AUTHOR,
       };
     });
 
@@ -280,6 +281,7 @@ export default async function StudioCoursePage({
           storeName={store.name}
           initialOn={talking}
           initial={shownComments}
+          unread={recent === null}
           lessonHref={view.role === "owner" ? `/@${store.handle}/course/${product.id}` : null}
           now={commentClock()}
         />

@@ -21,14 +21,20 @@
 import { readingSince } from "@/lib/earnings-by-month";
 import { saleFees } from "@/lib/sale-fees-rules";
 import {
+  SALE_FEES_COPY_MAX_BYTES,
   SALE_FEES_FRESH_SECONDS,
+  SALE_FEES_KEPT_SHAPE,
   SALE_FEES_PAGE_MAX_BYTES,
+  SALE_FEES_READ_MS,
   SALE_FEES_READ_SHAPE,
   SALE_FEES_PAGES,
+  SALE_FEES_PAGE_SIZE,
   SALE_FEES_READINGS_PER_DAY,
   keptSaleFees,
 } from "@/lib/sale-fees-reading";
 import { STRIPE_LIST_VERSION } from "@/lib/stripe-list";
+import { COST_LINES, DAY_WINDOWS, nonPayingWorst, readShapeCost } from "./plan-cost-registry";
+import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { exportReachRefusal } from "@/lib/sale-fees-view";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
@@ -227,22 +233,31 @@ async function main(): Promise<void> {
     setRedisConfigured(true);
   }
 
-  part("A reading lasts no longer than it is priced at (SALE_FEES_READ_SHAPE.seconds; audit 9c68)");
+  part("A reading lasts no longer than it is priced at (SALE_FEES_READ_MS; audits 9c68, f89b)");
+  is("the time is the shape's priced time: its seconds and 2 s a Stripe page", SALE_FEES_READ_MS, (SALE_FEES_READ_SHAPE.seconds + SALE_FEES_READ_SHAPE.stripePages * 2) * 1000);
   reset();
-  slowMs = SALE_FEES_READ_SHAPE.seconds * 1000 + 300;
+  slowMs = SALE_FEES_READ_MS + 300;
   pages = [page([sale], false)];
   const slowStarted = Date.now();
   const slow = await keptSaleFees(STORE, NOW);
   slowMs = 0;
   is("a page past the reading's time fails it, counted", [slow.kind, (await redis.pipeline([["GET", "nl:salefees:day:stats1:2026-11-11"]]))[0]], ["failed", "1"]);
-  is("and the wait stops at the reading's time", Date.now() - slowStarted < SALE_FEES_READ_SHAPE.seconds * 1000 + 250, true);
+  is("and the wait stops at the reading's time", Date.now() - slowStarted < SALE_FEES_READ_MS + 250, true);
+
+  reset();
+  // A Stripe page slower than the old 2 s but within the priced time is read whole, never cut short (audit f89b).
+  slowMs = 2_500;
+  pages = [page([sale], false)];
+  const slowButPriced = await keptSaleFees(STORE, NOW);
+  slowMs = 0;
+  is("a page within the priced time is read whole", slowButPriced.kind === "read" ? [slowButPriced.kept.since, slowButPriced.kept.lines.length] : slowButPriced.kind, [readingSince(NOW, "UTC"), 1]);
 
   part("A reading whose time runs out keeps the pages already read, as when the pages run out (audit iacVn3r)");
   reset();
   const partOldest = created - 2000;
   pages = [page([line("charge", 100, created, charge("ch_t1"), 3), line("charge", 100, partOldest + 1, charge("ch_t2"), 3), line("charge", 100, partOldest, charge("ch_t3"), 3)], true), page([sale], false)];
   slowFrom = 1;
-  slowMs = SALE_FEES_READ_SHAPE.seconds * 1000 + 300;
+  slowMs = SALE_FEES_READ_MS + 300;
   const partStarted = Date.now();
   const partial = await keptSaleFees(STORE, NOW);
   slowMs = 0;
@@ -252,9 +267,63 @@ async function main(): Promise<void> {
     is("it says it reached only to the second after its oldest line", partial.kept.since, (partOldest + 1) * 1000);
     is("and keeps no line of that oldest second", partial.kept.lines.map((l) => (l as { created: number }).created), [created, partOldest + 1]);
   }
-  is("the wait still stops at the reading's time", Date.now() - partStarted < SALE_FEES_READ_SHAPE.seconds * 1000 + 250, true);
+  is("the wait still stops at the reading's time", Date.now() - partStarted < SALE_FEES_READ_MS + 250, true);
   const keptPartial = await keptSaleFees(STORE, NOW + 60_000);
   is("the part is kept as the copy, with how far it reached", keptPartial.kind === "read" ? keptPartial.kept.since : null, (partOldest + 1) * 1000);
+
+  part("No time left before the next page: what was read is kept, and the next page is never asked (audit f89b)");
+  reset();
+  const edgeOldest = created - 3000;
+  // The first page answers just inside the reading's time, so less than a page's least wait is left before the second.
+  pages = [page([line("charge", 100, created, charge("ch_e1"), 3), line("charge", 100, edgeOldest, charge("ch_e2"), 3)], true), page([sale], false)];
+  slowMs = SALE_FEES_READ_MS - 30;
+  const edge = await keptSaleFees(STORE, NOW);
+  slowMs = 0;
+  is("one page asked, the reading kept to the second after its oldest line", [edge.kind, asked.length, edge.kind === "read" ? edge.kept.since : null], ["read", 1, (edgeOldest + 1) * 1000]);
+
+  part("A visit that takes no reading reads only what SALE_FEES_KEPT_SHAPE prices (audit f89b)");
+  reset();
+  pages = [page([sale], false), page([sale], false), page([sale], false)];
+  for (let i = 0; i < SALE_FEES_READINGS_PER_DAY; i += 1) await keptSaleFees(STORE, NOW + i, true);
+  const visitPipeline = redis.pipeline.bind(redis);
+  let visitCommands = 0;
+  let visitBytes = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    visitCommands += commands.length;
+    const replies = await visitPipeline(commands);
+    for (const r of replies) visitBytes += typeof r === "string" ? Buffer.byteLength(r, "utf8") : 8;
+    return replies;
+  }) as typeof redis.pipeline;
+  const visit = await keptSaleFees(STORE, NOW + 2 * HOUR);
+  redis.pipeline = visitPipeline;
+  is("past the day's readings: the copy, as stale, Stripe not asked", [visit.kind === "read" && visit.kept.stale, asked.length], [true, SALE_FEES_READINGS_PER_DAY]);
+  is("its commands within the priced shape", visitCommands <= SALE_FEES_KEPT_SHAPE.commands && visitCommands === 4, true);
+  is("its bytes within the priced shape", visitBytes <= SALE_FEES_KEPT_SHAPE.dbBytes && SALE_FEES_KEPT_SHAPE.dbBytes >= SALE_FEES_COPY_MAX_BYTES, true);
+
+  part("The cost line prices those visits, and a store that pays nothing carries the line (audit f89b, M2 and M3)");
+  const feesLine = COST_LINES.find((l) => l.id === "sale-fees-reading");
+  for (const tier of ["creator", "pro", "scale"] as const) {
+    is(`${tier}: the line holds every studio request reading the copy`, (feesLine?.monthlyUsd(tier) ?? 0) >= STORE_ALLOWANCES[tier].studio * readShapeCost(SALE_FEES_KEPT_SHAPE) + DAY_WINDOWS * SALE_FEES_READINGS_PER_DAY * readShapeCost(SALE_FEES_READ_SHAPE) - 1e-12, true);
+  }
+  const withoutFees = (() => {
+    const line = feesLine!;
+    const real = line.monthlyUsd;
+    line.monthlyUsd = () => 0;
+    try { return nonPayingWorst(); } finally { line.monthlyUsd = real; }
+  })();
+  is("the worst of a store that pays nothing includes the line at Store's figure", nonPayingWorst() - withoutFees >= feesLine!.monthlyUsd("creator") - 1e-12, true);
+
+  part("A reading too large to keep says so, so the page offers no download (audit f89b)");
+  reset();
+  // Lines whose ids are long enough that 401 of them weigh more than SALE_FEES_COPY_MAX_BYTES as kept.
+  const bigPage = (p: number, more: boolean, count = SALE_FEES_PAGE_SIZE) => page(Array.from({ length: count }, (_, i) => ({ ...line("charge", 100, created - p * 1000 - i, charge("ch_big"), 3), id: `txn_${p}_${i}_${"x".repeat(800)}` })), more);
+  pages = [bigPage(0, true), bigPage(1, true), bigPage(2, true), bigPage(3, true), bigPage(4, false, 1)];
+  const tooBig = await keptSaleFees(STORE, NOW);
+  is("read, but not kept", tooBig.kind === "read" ? [tooBig.kept.stored, redis.keys().some((k) => k.startsWith("nl:salefees:copy:"))] : null, [false, false]);
+  reset();
+  pages = [page([sale], false)];
+  const small = await keptSaleFees(STORE, NOW);
+  is("a reading kept says so", small.kind === "read" ? small.kept.stored : null, true);
 
   part("The day's count always carries its expiry (lib/window-count.ts; tests/window-count-expiry.test.ts)");
   // The worst moment: the key expires right after the pipeline's first command. With SET NX then INCRBY the INCRBY made

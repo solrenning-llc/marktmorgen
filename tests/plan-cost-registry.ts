@@ -67,7 +67,7 @@ import { monthlyEmails, type Tier } from "@/lib/plan";
 import { MAIL_GAP_COMMANDS_PER_CHECK, MAIL_GAP_TRIAL_CHECKS, mailGapCheckLimit } from "@/lib/mail-frequency";
 /** A gap mark moved: its key (the gate's, the longest, is 92 characters with a 32-character store id: nl:mgap:gate:{32}:{32}:{13}) with a time or a claim value (23), rounded up (tests/store-data-registry.ts, MARK). */
 const MAIL_GAP_MARK_BYTES = 160;
-import { SALE_FEES_READINGS_PER_DAY, SALE_FEES_READ_SHAPE } from "@/lib/sale-fees-reading";
+import { SALE_FEES_KEPT_SHAPE, SALE_FEES_READINGS_PER_DAY, SALE_FEES_READ_SHAPE } from "@/lib/sale-fees-reading";
 import { BESIDE_SAVE_COMMANDS } from "@/lib/store-data";
 import { WINBACK_OFFER_COMMANDS } from "@/lib/winback";
 import { MAX_DOOR_BYTES } from "@/lib/upload-door";
@@ -3102,11 +3102,15 @@ export const COST_LINES: CostLine[] = [
   {
     id: "sale-fees-reading",
     feature: "Fees and what you keep (282 [HG1], 11 November 2026): the store's readings of its own Stripe balance transactions, kept for the studio page and its download",
-    monthlyUsd: () => DAY_WINDOWS * SALE_FEES_READINGS_PER_DAY * readShapeCost(SALE_FEES_READ_SHAPE),
+    monthlyUsd: (tier) => DAY_WINDOWS * SALE_FEES_READINGS_PER_DAY * readShapeCost(SALE_FEES_READ_SHAPE)
+      // Every visit and download that takes no reading still reads the copy at its largest and tries the day's count
+      // (SALE_FEES_KEPT_SHAPE): at its worst every studio request of the window is a download, one unit each (audit f89b).
+      + STORE_ALLOWANCES[tier].studio * readShapeCost(SALE_FEES_KEPT_SHAPE),
     sources: [
-      { file: "lib/sale-fees-reading.ts", names: ["SALE_FEES_READINGS_PER_DAY", "SALE_FEES_PAGES", "SALE_FEES_COPY_MAX_BYTES", "SALE_FEES_READ_SHAPE", "takeReading", "const taken = await takeReading(statsId, now)", "SALE_FEES_READ_SHAPE.seconds * 1000", "SALE_FEES_PAGE_MAX_BYTES"] },
+      { file: "lib/sale-fees-reading.ts", names: ["SALE_FEES_READINGS_PER_DAY", "SALE_FEES_PAGES", "SALE_FEES_COPY_MAX_BYTES", "SALE_FEES_READ_SHAPE", "SALE_FEES_KEPT_SHAPE", "SALE_FEES_READ_MS", "takeReading", "const taken = await takeReading(statsId, now)", "const deadline = Date.now() + SALE_FEES_READ_MS", "SALE_FEES_PAGE_MAX_BYTES"] },
+      { file: "app/api/store/fees/export/route.ts", names: ['creatorFrom(request, "payments")', "keptSaleFees(store)"] },
     ],
-    basis: "At most SALE_FEES_READINGS_PER_DAY readings a UTC day, each taken before Stripe is called and kept counted once it was; each at its worst shape: SALE_FEES_PAGES pages of the creator's account waited on one after another, the copy read and written at its largest and the day's count. The page and the download are counted in the studio's requests as every page and route; the copy's day is in the data room (nl:salefees:copy:).",
+    basis: "At most SALE_FEES_READINGS_PER_DAY readings a UTC day, each taken before Stripe is called and kept counted once it was; each at its worst shape: SALE_FEES_PAGES pages of the creator's account waited on one after another within the time that shape is priced at (SALE_FEES_READ_MS), the copy read and written at its largest and the day's count. Every page visit and download that takes no reading reads the copy at its largest and tries the day's count (SALE_FEES_KEPT_SHAPE), priced for every studio request of the window as a download of one unit, more than a page of STUDIO_PAGE_UNITS. The requests themselves are the studio's; the copy's day is in the data room (nl:salefees:copy:). A store that pays nothing keeps the page, so the line is in its worst too (audit f89b).",
   },
   {
     id: "store-readings",
@@ -3727,9 +3731,9 @@ export function nonPayingWorst(): number {
     // Its studio picture doors, checks and page saves, at its own studio figure (line studio-blob; Claude 7 on #2852).
     + studioBlobMonthly(allowances.studio)
     + ["imports", "clickfunnels", "funnel-share", "team-scheduling", "quizzes"].reduce((sum, id) => sum + creator(id), 0)
-    // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
-    // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.
-    + ["calendar-feed", "store-readings"].reduce((sum, id) => sum + creator(id), 0)
+    // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed, its readings of its
+    // numbers (C4-4, review of #2111) and of its fees (audit f89b on #3651): their own lines, at Store's figures, which are more than a trial's.
+    + ["calendar-feed", "sale-fees-reading", "store-readings"].reduce((sum, id) => sum + creator(id), 0)
     // The drip job's reads of its students' starts, at Store's figure, which is more than a trial's (lib/drip-start.ts:
     // a store that pays nothing reads only with one of the month's places).
     + creator("drip-start-read")

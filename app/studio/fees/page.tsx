@@ -10,7 +10,7 @@ import { readingSince } from "@/lib/earnings-by-month";
 import { keptSaleFees } from "@/lib/sale-fees-reading";
 import { saleFeeMonths } from "@/lib/sale-fees-months";
 import { saleFees } from "@/lib/sale-fees-rules";
-import { FEES_PAGE_SALES, dayWords, feesOf, keptWords, monthWords, outWords, reachWords, readWords, stateWords, unavailableWords } from "@/lib/sale-fees-view";
+import { FEES_PAGE_SALES, dayWords, downloadRefusal, feesOf, keptWords, monthWords, outWords, reachWords, readWords, stateWords, unavailableWords } from "@/lib/sale-fees-view";
 
 export const metadata: Metadata = { title: "Fees and what you keep — Marktmorgen", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic";
@@ -46,6 +46,8 @@ export default async function StudioFeesPage({ searchParams }: Params) {
   // From the reading itself, not from the months: a table that could not be shown still says how far the reading went.
   const reach = kept ? reachWords(kept.since, readingSince(kept.at, "UTC")) : null;
   const download = `/api/store/fees/export?store=${encodeURIComponent(store.sid)}`;
+  // No link that would fail: a reading short of the year, or one not kept, gives no file, and the page says why (audit f89b).
+  const noFile = kept ? downloadRefusal(kept, readingSince(kept.at, "UTC")) : null;
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -129,7 +131,7 @@ export default async function StudioFeesPage({ searchParams }: Params) {
                 ) : (
                   <>
                     <p className="mt-3 max-w-2xl text-sm text-ink-soft">
-                      {sales.rows.length > FEES_PAGE_SALES ? `The newest ${FEES_PAGE_SALES} of ${sales.rows.length.toLocaleString("en-US")} sales. The download has every one.` : "Every sale in what was read, newest first."}
+                      {sales.rows.length > FEES_PAGE_SALES ? `The newest ${FEES_PAGE_SALES} of ${sales.rows.length.toLocaleString("en-US")} sales.${noFile === null ? " The download has every one." : ""}` : "Every sale in what was read, newest first."}
                     </p>
                     <div className="mt-3 overflow-x-auto" tabIndex={0} role="region" aria-label="Fees and what you kept, sale by sale">
                       <table className="w-full text-left text-sm">
@@ -158,9 +160,13 @@ export default async function StudioFeesPage({ searchParams }: Params) {
                         </tbody>
                       </table>
                     </div>
-                    <p className="mt-4">
-                      <a className="btn btn-secondary btn-sm" href={download} download>Download every sale as a spreadsheet (CSV)</a>
-                    </p>
+                    {noFile === null ? (
+                      <p className="mt-4">
+                        <a className="btn btn-secondary btn-sm" href={download} download>Download every sale as a spreadsheet (CSV)</a>
+                      </p>
+                    ) : (
+                      <p className="mt-4 max-w-2xl text-sm text-ink-soft" role="status">{noFile}</p>
+                    )}
                   </>
                 )}
               </section>

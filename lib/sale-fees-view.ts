@@ -49,7 +49,7 @@ export function readWords(kept: { at: number; stale: boolean; failed?: boolean }
 /** Said when one reading did not reach back to the year's first month. */
 export function reachWords(since: number, firstMonthFloor: number): string | null {
   if (since <= firstMonthFloor) return null;
-  return `Your Stripe account has more lines than one reading takes, so only what happened since ${dayWords(since)} is shown. Months before it say "Not read", never zero.`;
+  return `One reading could not go back to the start of the year in your Stripe account (it has too many sales, or Stripe answered slowly), so only what happened since ${dayWords(since)} is shown. Months before it say "Not read", never zero.`;
 }
 
 /**
@@ -58,7 +58,18 @@ export function reachWords(since: number, firstMonthFloor: number): string | nul
  */
 export function exportReachRefusal(since: number, firstMonthFloor: number): string | null {
   if (since <= firstMonthFloor) return null;
-  return `Your Stripe account has more lines than one reading takes, so the file would start on ${dayWords(since)}, not at the start of the year. No file is made from a part: it would look like the whole year.`;
+  return `One reading could not go back to the start of the year in your Stripe account (it has too many sales, or Stripe answered slowly), so the file would start on ${dayWords(since)}, not at the start of the year. No file is made from a part: it would look like the whole year.`;
+}
+
+/**
+ * Why the page offers no download for this reading, or null when it does (audit f89b): a reading short of the year
+ * (exportReachRefusal), or one read now that was too large to keep, which the download would have to read again.
+ */
+export function downloadRefusal(kept: { since: number; stored?: boolean }, firstMonthFloor: number): string | null {
+  const short = exportReachRefusal(kept.since, firstMonthFloor);
+  if (short !== null) return short;
+  if (kept.stored === false) return "This reading was too large to keep, so no file is made from it. The figures on this page are the whole reading.";
+  return null;
 }
 
 /** Why a report is not shown. */

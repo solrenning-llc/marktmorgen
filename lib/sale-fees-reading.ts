@@ -4,7 +4,7 @@
  * their sources (so a refund or dispute names its charge), from the first
  * day of the year's oldest month shown (readingSince, in UTC), newest
  * first, SALE_FEES_PAGE_SIZE a page, at most SALE_FEES_PAGES pages one after
- * another, within the reading's priced time (SALE_FEES_READ_SHAPE.seconds).
+ * another, within the reading's priced time (SALE_FEES_READ_MS).
  * When the pages or that time run out before the year does, the reading keeps
  * the pages already read and says how far back it reached: the second after its oldest line, whose second may
  * go on beyond the last page, so its lines are left out; older months are
@@ -41,6 +41,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { keyFor, onAccount } from "@/lib/stripe-account";
 import { STRIPE_LIST_VERSION } from "@/lib/stripe-list";
+import { EXPORT_PAGE_SECONDS } from "@/lib/store-export";
 import { windowCountBy, windowCountOf } from "@/lib/window-count";
 
 /** Readings of a store's fees a UTC day, each taken before Stripe is called. */
@@ -65,6 +66,12 @@ export const SALE_FEES_PAGE_MAX_BYTES = SALE_FEES_PAGE_SIZE * 16 * 1024;
 const SALE_FEES_PAGE_MIN_WAIT_MS = 50;
 /** Database commands of one reading at the most: the copy read, the day's count (INCRBY and EXPIRE NX, lib/window-count.ts; a DECRBY when over) and the copy written. */
 export const SALE_FEES_READ_COMMANDS = 1 + 3 + 1;
+/**
+ * What a page visit or a download reads when it does not take a reading (a fresh copy, or the day's readings used): the
+ * copy at its largest and the day's count tried (INCRBY and EXPIRE NX, then a DECRBY when over). Priced per studio
+ * request in the sale-fees-reading line (tests/plan-cost-registry.ts), as the store's kept readings are (audit f89b).
+ */
+export const SALE_FEES_KEPT_SHAPE: ReadShape = { seconds: 0, cpu: 0.05, commands: 1 + 3, dbBytes: SALE_FEES_COPY_MAX_BYTES + 64, outBytes: 0, stripePages: 0 };
 /** One reading at its worst, in the shape lib/read-ceilings.ts prices: every page waited on one after another. */
 export const SALE_FEES_READ_SHAPE: ReadShape = {
   seconds: 2,
@@ -74,12 +81,18 @@ export const SALE_FEES_READ_SHAPE: ReadShape = {
   outBytes: 0,
   stripePages: SALE_FEES_PAGES,
 };
+/**
+ * The wall time one reading may take: exactly what its shape is priced at (lib/read-ceilings.ts, tests/plan-cost-registry.ts
+ * readShapeCost: its seconds and EXPORT_PAGE_SECONDS for each Stripe page), never more (audit f89b).
+ */
+export const SALE_FEES_READ_MS = (SALE_FEES_READ_SHAPE.seconds + SALE_FEES_READ_SHAPE.stripePages * EXPORT_PAGE_SECONDS) * 1000;
 
 const copyKey = (statsId: string) => `nl:salefees:copy:${statsId}`;
 const dayKey = (statsId: string, now: number) => `nl:salefees:day:${statsId}:${new Date(now).toISOString().slice(0, 10)}`;
 const DAY_KEY_SECONDS = 2 * 86_400;
 
-export type SaleFeesKept = { lines: unknown[]; since: number; at: number; stale: boolean; failed?: boolean };
+/** `stored` false: read now but too large to keep, so a download would read again (the page offers none; audit f89b). */
+export type SaleFeesKept = { lines: unknown[]; since: number; at: number; stale: boolean; failed?: boolean; stored?: boolean };
 export type SaleFeesState =
   | { kind: "read"; kept: SaleFeesKept }
   | { kind: "none" }
@@ -122,9 +135,9 @@ async function readPages(account: string, now: number): Promise<{ lines: Record<
   const sinceSeconds = Math.floor(sinceMs / 1000);
   const lines: Record<string, unknown>[] = [];
   let after = "";
-  // The wall time the reading is priced at (SALE_FEES_READ_SHAPE.seconds, every page one after another): each page waits
-  // only what is left of it, and a reading with none left fails, never runs longer than it is billed (audit 9c68).
-  const deadline = Date.now() + SALE_FEES_READ_SHAPE.seconds * 1000;
+  // The wall time the reading is priced at (SALE_FEES_READ_MS, every page one after another): each page waits only what
+  // is left of it, and a reading with none left keeps what it read, never runs longer than it is billed (audits 9c68, f89b).
+  const deadline = Date.now() + SALE_FEES_READ_MS;
   for (let page = 0; page < SALE_FEES_PAGES; page += 1) {
     // Up to the reading's own second: a line made while the pages are read is left for the next reading, never one the
     // months would take for "late" (lib/sale-fees-months.ts) and refuse the whole reading for.
@@ -228,8 +241,9 @@ export async function keptSaleFees(store: Account, now = Date.now(), fresh = fal
     return copy ? { kind: "read", kept: { ...copy, stale: true, failed: true } } : { kind: "failed" };
   }
   const text = JSON.stringify({ account, at: now, since: read.since, lines: read.lines });
+  let stored = false;
   if (Buffer.byteLength(text, "utf8") <= SALE_FEES_COPY_MAX_BYTES) {
-    await redisPipeline([["SET", copyKey(statsId), text, "EX", SALE_FEES_KEEP_SECONDS]]).catch(() => {});
+    stored = await redisPipeline([["SET", copyKey(statsId), text, "EX", SALE_FEES_KEEP_SECONDS]]).then(() => true, () => false);
   }
-  return { kind: "read", kept: { lines: read.lines, since: read.since, at: now, stale: false } };
+  return { kind: "read", kept: { lines: read.lines, since: read.since, at: now, stale: false, stored } };
 }

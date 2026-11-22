@@ -15,7 +15,7 @@
  *     own under the keyboard on a narrow screen.
  */
 import { readFileSync } from "node:fs";
-import { FEES_PAGE_SALES, exportReachRefusal, feesOf, keptWords, monthWords, outWords, reachWords, readWords, stateWords, unavailableWords } from "@/lib/sale-fees-view";
+import { FEES_PAGE_SALES, downloadRefusal, exportReachRefusal, feesOf, keptWords, monthWords, outWords, reachWords, readWords, stateWords, unavailableWords } from "@/lib/sale-fees-view";
 import { saleFeeMonths } from "@/lib/sale-fees-months";
 import { STUDIO_ACTIONS } from "@/lib/studio-actions";
 import { can } from "@/lib/team-roles";
@@ -42,12 +42,20 @@ function main(): void {
   is("stale", readWords({ at: AT, stale: true }), "Read from your Stripe account on November 11, 2026 at 15:04 UTC. Today's readings are used, so this is the last one kept. They come back at 00:00 UTC.");
   is("failed", readWords({ at: AT, stale: true, failed: true }), "Read from your Stripe account on November 11, 2026 at 15:04 UTC. The last try to read it again did not work, so this is the reading before it.");
   is("reached the year: nothing said", reachWords(1000, 1000), null);
-  is("did not: says from when, and that older months say Not read", reachWords(Date.UTC(2026, 6, 2, 0, 0, 1), 1000), 'Your Stripe account has more lines than one reading takes, so only what happened since July 2, 2026 is shown. Months before it say "Not read", never zero.');
+  is("did not: says from when, and that older months say Not read", reachWords(Date.UTC(2026, 6, 2, 0, 0, 1), 1000), 'One reading could not go back to the start of the year in your Stripe account (it has too many sales, or Stripe answered slowly), so only what happened since July 2, 2026 is shown. Months before it say "Not read", never zero.');
 
   part("A download that would not start at the year's start is refused (audit 1285)");
   is("reached the year: a file", exportReachRefusal(1000, 1000), null);
-  is("did not: no file, and why", exportReachRefusal(Date.UTC(2026, 6, 2, 0, 0, 1), 1000), "Your Stripe account has more lines than one reading takes, so the file would start on July 2, 2026, not at the start of the year. No file is made from a part: it would look like the whole year.");
+  is("did not: no file, and why", exportReachRefusal(Date.UTC(2026, 6, 2, 0, 0, 1), 1000), "One reading could not go back to the start of the year in your Stripe account (it has too many sales, or Stripe answered slowly), so the file would start on July 2, 2026, not at the start of the year. No file is made from a part: it would look like the whole year.");
   is("the route refuses before it writes the file", route.indexOf("exportReachRefusal(state.kept.since, readingSince(state.kept.at") > 0 && route.indexOf("exportReachRefusal(") < route.indexOf("saleFeesCsv(report"), true);
+  part("The page offers no download that would fail (audit f89b)");
+  is("a whole reading kept: the download", downloadRefusal({ since: 1000, stored: true }, 1000), null);
+  is("a copy read back (kept): the download", downloadRefusal({ since: 1000 }, 1000), null);
+  is("a reading short of the year: the reason, never a link", downloadRefusal({ since: Date.UTC(2026, 6, 2, 0, 0, 1), stored: true }, 1000), exportReachRefusal(Date.UTC(2026, 6, 2, 0, 0, 1), 1000));
+  is("a reading too large to keep: the reason, never a link", downloadRefusal({ since: 1000, stored: false }, 1000), "This reading was too large to keep, so no file is made from it. The figures on this page are the whole reading.");
+  is("the page asks it of the reading it shows", page.includes('const noFile = kept ? downloadRefusal(kept, readingSince(kept.at, "UTC")) : null;'), true);
+  is("the link and 'The download has every one.' only when there is a file", [/noFile === null \? \(\s*<p className="mt-4">\s*<a className="btn btn-secondary btn-sm" href=\{download\} download>/.test(page), page.includes('${noFile === null ? " The download has every one." : ""}')], [true, true]);
+  is("and the reason in its place", page.includes('role="status">{noFile}</p>'), true);
   is("the page says how far the reading went even when no month can be shown", /const reach = kept \? reachWords\(kept\.since, readingSince\(kept\.at, "UTC"\)\) : null;/.test(page), true);
 
   part("The owner's only, as the tax page: an editor has 'stats' but not 'payments' (audit 9c68)");
@@ -70,7 +78,7 @@ function main(): void {
   is("the download too", /creatorFrom\(request, "payments"\)/.test(route), true);
   is("both read the same reading", [page.includes("keptSaleFees(store)"), route.includes("keptSaleFees(store)")], [true, true]);
   is("the download link says what it gives", page.includes(">Download every sale as a spreadsheet (CSV)</a>"), true);
-  is("the page lists at most FEES_PAGE_SALES and says the download has every one", [FEES_PAGE_SALES, page.includes("sales.rows.slice(0, FEES_PAGE_SALES)"), page.includes("The download has every one.")], [50, true, true]);
+  is("the page lists at most FEES_PAGE_SALES and says the download has every one", [FEES_PAGE_SALES, page.includes("sales.rows.slice(0, FEES_PAGE_SALES)"), page.includes(" The download has every one.")], [50, true, true]);
   is("a download that is not whole gives no file", route.includes("if (csv === null) return plain(503"), true);
   is("the file is never cached or indexed", [route.includes('"private, no-store"'), route.includes('"X-Robots-Tag": "noindex"')], [true, true]);
 

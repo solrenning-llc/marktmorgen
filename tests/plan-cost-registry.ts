@@ -1167,14 +1167,15 @@ export const MEASURE_DB_BYTES = 4 * 64 * 256;
  * commands and bytes, and the copy's own path asked about once (lib/file-store.ts headFile: the dearer of an R2
  * Class B read and twice Blob's $0.40-per-million Simple Operation), so a copy already in place is written over
  * without being charged again as new storage. Counted as STORAGE_MEASURE_UNITS public requests before it lists (lib/stamp-cost-rules.ts;
- * tests/plan-cost-registry.test.ts holds them above it).
+ * tests/plan-cost-registry.test.ts holds them above it). A preview's final record additionally uses a live-store
+ * EVAL in place of SET: three more billed commands and at most 2 KiB more framing, included conservatively here.
  */
 export const STORAGE_MEASURE_READ =
   MEASURE_LIST_PAGES * (BLOB_LIST_PAGE + R2_LIST_PAGE)
   + FLY_HOLD_SECONDS * MEMORY_SECOND
   + FLY_HOLD_SECONDS * (SHAPES.wait.cpu / SHAPES.wait.seconds) * CPU_SECOND
-  + MEASURE_COMMANDS * COMMAND
-  + MEASURE_DB_BYTES * DB_BYTE
+  + (MEASURE_COMMANDS + 3) * COMMAND
+  + (MEASURE_DB_BYTES + 2_048) * DB_BYTE
   + Math.max(micro(R2_CLASS_B_MICRO_USD_PER_MILLION) / 1e6, 0.8 / 1e6);
 /**
  * A copy stamped on the fly and sent without being kept (lib/pdf-stamp.ts stampedDelivery, "fly";

@@ -91,12 +91,15 @@ export class StripeConnectError extends Error {
   readonly status: number;
   readonly code: string;
   readonly stripeMessage: string;
+  /** Stripe's error type, kept beside the code (which falls back to it): an idempotency_error is read from either. */
+  readonly type: string;
 
-  constructor(status: number, code: string, stripeMessage: string) {
+  constructor(status: number, code: string, stripeMessage: string, type = "") {
     super(`Stripe request failed (${status} ${code}): ${stripeMessage}`);
     this.status = status;
     this.code = code;
     this.stripeMessage = stripeMessage;
+    this.type = type;
   }
 
   /**
@@ -105,7 +108,7 @@ export class StripeConnectError extends Error {
    * else (a 5xx, no answer, a body that is not one) may have made one (Codex L-20261120-0258).
    */
   get madeNothing(): boolean {
-    return this.status >= 400 && this.status < 500 && ![408, 409, 429].includes(this.status) && this.code !== "idempotency_error";
+    return this.status >= 400 && this.status < 500 && ![408, 409, 429].includes(this.status) && this.code !== "idempotency_error" && this.type !== "idempotency_error";
   }
 
   /** The creator's country is one this platform may not open an account in. */
@@ -133,7 +136,8 @@ async function stripeRequest(
         // API v2 speaks JSON, unlike the form-encoded v1 endpoints.
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         // The same key asks for the same object: a request made again after a lost answer gets back what the first
-        // made, never a second one (Stripe keeps a key 24 hours).
+        // made, never a second one (Stripe keeps an API v2 key 30 days: https://docs.stripe.com/api-v2-overview, read
+        // 22 November 2026; lib/store.ts STRIPE_CONNECT_REUSE_SECONDS reuses an attempt's key inside that).
         ...(options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -151,6 +155,7 @@ async function stripeRequest(
       response.status,
       error?.code ?? error?.type ?? "unknown",
       error?.message ?? "Stripe gave no reason.",
+      error?.type ?? "",
     );
   }
   return data;

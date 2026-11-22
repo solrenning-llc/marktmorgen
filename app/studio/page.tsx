@@ -47,7 +47,8 @@ import { redirect } from "next/navigation";
 import { after } from "next/server";
 import {
   pricedProducts,
-  connectingHolds,
+  connectingDaysLeft,
+  connectingReusable,
   ensureStatsId,
   imageFolder,
   isFree,
@@ -459,7 +460,7 @@ const STRIPE_NOTICES: Record<string, { title: string; body: string }> = {
   // An open attempt in another country (lib/store.ts beginStripeConnect); attemptCountryNotice names it when it still holds.
   "attempt-country": {
     title: "An account is still being opened in another country",
-    body: "Your last try asked Stripe for an account in the country you chose then, and Stripe may have opened it. A Stripe account's country can't be changed. To finish that account, choose that country again and press \u201cConnect your Stripe account\u201d. To choose another country, try again after one day. Nothing was changed.",
+    body: "Your last try asked Stripe for an account in the country you chose then, and Stripe may have opened it. A Stripe account's country can't be changed. To finish that account, choose that country again and press \u201cConnect your Stripe account\u201d. To choose another country, try again 29 days after that try, when Stripe no longer holds it for you. Nothing was changed.",
   },
   "country-unsupported": {
     title: "Stripe will not open an account in that country from here",
@@ -474,14 +475,16 @@ const STRIPE_NOTICES: Record<string, { title: string; body: string }> = {
 
 /**
  * The notice for an open Stripe attempt in another country, naming that country (Claude 7 xAF on #5095): undefined when
- * the store has no attempt that still holds, and the fixed words of STRIPE_NOTICES["attempt-country"] are said then.
+ * the store has no attempt that is still reused, and the fixed words of STRIPE_NOTICES["attempt-country"] are said then.
  */
 function attemptCountryNotice(store: Pick<Store, "stripeConnecting">): { title: string; body: string } | undefined {
-  if (!store.stripeConnecting || !connectingHolds(store)) return undefined;
+  if (!store.stripeConnecting || !connectingReusable(store)) return undefined;
+  const days = connectingDaysLeft(store);
+  const wait = days === 1 ? "in 1 day" : `in ${days} days`;
   const name = COUNTRIES.find((country) => country.code === store.stripeConnecting?.country)?.name ?? store.stripeConnecting.country.toUpperCase();
   return {
     title: `An account in ${name} is still being opened`,
-    body: `Your last try asked Stripe for an account in ${name}, and Stripe may have opened it. A Stripe account's country can't be changed. To finish that account, choose ${name} and press \u201cConnect your Stripe account\u201d again. To choose another country, try again after one day. Nothing was changed.`,
+    body: `Your last try asked Stripe for an account in ${name}, and Stripe may have opened it. A Stripe account's country can't be changed. To finish that account, choose ${name} and press \u201cConnect your Stripe account\u201d again. To choose another country, try again ${wait}, when Stripe no longer holds it for you. Nothing was changed.`,
   };
 }
 

@@ -990,7 +990,7 @@ export function pegar({ tipo, eu, agora = new Date() }) {
   if (tipo === "fila") {
     const faltas = [];
     if (!atual) faltas.push("o head atual do PR");
-    else if (fonte === "ref") faltas.push(`o head pelo ramo do PR (o pedido não traz o ramo; só a referência refs/pull/${alvo.pr}/head, que pode atrasar, foi lida; o autor pode pedir de novo, para gravar o ramo)`);
+    else if (fonte === "ref") faltas.push(`o head pelo ramo do PR (o pedido não traz o ramo; só a referência refs/pull/${alvo.pr}/head, que pode atrasar, foi lida; o autor retira este pedido com cancel-enqueue e pede de novo, para gravar o ramo; sem retirar, o pedido novo é recusado como repetido)`);
     if (!sgFila) faltas.push("se o PR já está na fila de integração ou no main");
     else if (!(sgFila.naFila || sgFila.noMain) && !cfFila) faltas.push("o conflito com o main e com a fila de integração");
     if (faltas.length) return { espera: `NÃO CONFERIDO agora: ${faltas.join("; ")}. O pedido continua primeiro da fila, sem tomada (passo 4: nada NÃO CONFERIDO segue); tente de novo em alguns minutos` };

@@ -23,13 +23,20 @@ export class BackupKeyUnknownError extends Error {
 export type BackupRow = { key: string; dump: string; expiresAt: number | null };
 export type BackupSnapshot = { version: 1; capturedAt: number; rows: BackupRow[] };
 /**
+ * The most one request to Upstash may carry, in bytes: 10 MB, its request-size limit (Codex X6 on #3277). A key is
+ * restored by one RESTORE request whose body is its whole DUMP (lib/backup-restore-target.ts), so no key the backup
+ * keeps may be larger than this, less room for the request's own line and headers.
+ */
+export const UPSTASH_REQUEST_MAX_BYTES = 10_000_000;
+/**
  * The most one key's DUMP may weigh in a backup, in bytes (key-size inventory of 9 November 2026): the largest proven
  * writer is the affiliate book's snapshot under nl:aff:, 8,000,000 bytes (lib/affiliate-book-snapshot.ts,
- * BOOK_SNAPSHOT_MAX_BYTES), and 12 MiB leaves it more than half again for DUMP's framing and a hash's per-field
- * encoding. Upstash's own record cap (100 MiB) is far above it. A key larger than a part is copied in chunks up to
- * this ceiling (lib/backup-parts.ts); one past it is left out under its own state, never cut short.
+ * BOOK_SNAPSHOT_MAX_BYTES). It was 12 MiB, which a restore could not send in one request (Codex X6 on #3277); it is
+ * now UPSTASH_REQUEST_MAX_BYTES less 100,000 bytes for the request's line and headers, still above the book with room
+ * for DUMP's framing. Upstash's own record cap (100 MiB) is far above it. A key larger than a part is copied in
+ * chunks up to this ceiling (lib/backup-parts.ts); one past it is left out under its own state, never cut short.
  */
-export const BACKUP_KEY_MAX_BYTES = 12 * 1024 * 1024;
+export const BACKUP_KEY_MAX_BYTES = UPSTASH_REQUEST_MAX_BYTES - 100_000;
 /**
  * One piece of a key larger than a part (lib/backup-parts.ts): its place `at` of `of` pieces, the key's whole DUMP
  * length in bytes and SHA-256, and this piece of its base64. A chunk row has no `dump`, so a reader that knows only

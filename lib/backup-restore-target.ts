@@ -30,6 +30,7 @@
 import { randomBytes } from "node:crypto";
 import { timed } from "@/lib/fetch-timeout";
 import type { RestoreTarget } from "@/lib/backup-export";
+import { BACKUP_KEY_MAX_BYTES } from "@/lib/backup-codec";
 
 export type RestoreTargetConfig = { url: string; token: string };
 
@@ -103,6 +104,9 @@ export function backupRestoreTarget(config: RestoreTargetConfig, now: () => numb
     restore: async (key, expiresAt, dump) => {
       if (!dump || !BASE64.test(dump)) return false;
       const bytes = new Uint8Array(Buffer.from(dump, "base64"));
+      // One request carries the whole DUMP: past Upstash's request limit nothing is sent, and the key is not said
+      // restored (Codex X6 on #3277). The backup never keeps a key that large (BACKUP_KEY_MAX_BYTES).
+      if (bytes.byteLength > BACKUP_KEY_MAX_BYTES) return false;
       let ttl = 0;
       if (expiresAt !== null) {
         ttl = expiresAt - now();

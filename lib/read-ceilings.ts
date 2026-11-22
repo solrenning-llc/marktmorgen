@@ -165,7 +165,7 @@ const TOTALS_PAYPAL_SALES = 20 * 100;
 const TOTALS_PAYPAL_REFUNDS = PAYPAL_REFUNDS_READ;
 /**
  * Every reading is kept only while its store is live, looked at where it is written (lib/store-readings.ts,
- * keepCopy and READING_COPY_LIVE; Codex L-20261119-2235): the store's key (EXISTS) and its erasing mark (HGET),
+ * keepCopy and READING_COPY_LIVE; Codex L-20261119-2235): the store's id key (GET, v3) and its erasing mark (HGET),
  * billed one by one beside the write. A reading kept by a plain SET also takes the EVAL that runs them (+1, the
  * visits'); one kept by a script already counts its EVAL (READING_COPY_EXTRA_COMMANDS, MEMBER_WORDS_COMMANDS),
  * and when it names nobody its HMGET is not run, which covers that EVAL. The memberships' cache is kept the same way

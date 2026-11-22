@@ -197,7 +197,7 @@ export const READING_COPY = KEEP_UNLESS_ERASED;
 /**
  * READING_COPY for a whole store, fenced on its erasure in the same step (Codex L-20261119-2235): the shared
  * KEEP_UNLESS_ERASED_LIVE (lib/store-live-copy.ts), run by keepUnlessErasedWhileLive. Billed 2 more than
- * READING_COPY (EXISTS, HGET; lib/read-ceilings.ts, READING_LIVE_FENCE_COMMANDS).
+ * READING_COPY (GET, HGET; lib/read-ceilings.ts, READING_LIVE_FENCE_COMMANDS).
  */
 export const READING_COPY_LIVE = KEEP_UNLESS_ERASED_LIVE;
 

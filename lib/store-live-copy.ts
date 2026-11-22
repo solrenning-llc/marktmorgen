@@ -22,8 +22,8 @@ import { suppressedKey, suppressionPrint } from "@/lib/suppression";
  * prints of who it names (at least one). The store gone, erasing, moved or no longer its owner's: the copy goes and
  * {0} is answered, never a place; an owner record that does not parse answers -1, nothing written. Otherwise as
  * KEEP_UNLESS_ERASED. Billed 2 more than it (GET, HGET). lib/redis-memory.ts runs it the same way. Used for the kept readings (lib/store-readings.ts,
- * READING_COPY_LIVE), the memberships' cache (lib/membership-numbers.ts) and the members' health copy
- * (lib/member-health.ts).
+ * READING_COPY_LIVE) and the memberships' cache (lib/membership-numbers.ts). The members' health copy
+ * (lib/member-health.ts) still uses the plain KEEP_UNLESS_ERASED, on purpose (commercial review C5-20261119-1330).
  */
 export const KEEP_UNLESS_ERASED_LIVE = `-- marktmorgen:reading-copy-live:v3
 local live = redis.call("HGET", KEYS[2], ARGV[1]) == false

@@ -7,7 +7,7 @@ import { done, is, part } from "./check";
 const now = Date.UTC(2026, 10, 5, 1);
 const store = { sid: "c0dec0dec0dec0dec0dec0dec0dec0e1", email: "owner-recovery-evidence@example.com", handle: "recovery-evidence", previousHandles: [], releasedHandles: [], stripeAccountId: "acct_test_recovery_evidence", statsId: "f".repeat(32), currency: "usd" } as unknown as Store;
 const cache = `nl:dun:report:${store.statsId}:v2`;
-const invoice = (id = "in_confirmed", extra: Record<string, unknown> = {}) => ({ id, currency: "usd", amount_paid: 1234, attempt_count: 2, paid_out_of_band: false, billing_reason: "subscription_cycle", status_transitions: { paid_at: now / 1000 - 60 }, parent: { subscription_details: { metadata: { store: store.handle } } }, ...extra });
+const invoice = (id = "in_confirmed", extra: Record<string, unknown> = {}) => ({ id, object: "invoice", status: "paid", currency: "usd", amount_paid: 1234, attempt_count: 2, paid_out_of_band: false, billing_reason: "subscription_cycle", status_transitions: { paid_at: now / 1000 - 60 }, parent: { subscription_details: { metadata: { store: store.handle } } }, ...extra });
 const page = (data: unknown, has_more: unknown = false) => ({ object: "list", data, has_more });
 const original = redis.pipeline;
 let replies: unknown[] = [];

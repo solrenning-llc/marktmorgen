@@ -35,6 +35,8 @@ const BILLING_REASONS = new Set([
 const cacheKey = (store: Store) => `nl:dun:report:${store.statsId}:v2`;
 
 export type RecoveryReport = {
+  /** 3: every source row proved its invoice kind and paid status before counting. Older aggregates must be read again. */
+  v?: 3;
   /** When Stripe was read, in seconds. */
   at: number;
   currency: string;
@@ -57,6 +59,8 @@ export type RecoveryReport = {
 };
 
 type Invoice = {
+  object?: unknown;
+  status?: unknown;
   id?: unknown;
   currency?: unknown;
   amount_paid?: unknown;
@@ -78,6 +82,8 @@ const unknownReport = () => new Error("Recovered payment figures could not be co
 function invoiceEvidence(raw: unknown, now: number): raw is Invoice {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
   const invoice = raw as Invoice;
+  if (!Object.hasOwn(invoice, "object") || invoice.object !== "invoice" ||
+      !Object.hasOwn(invoice, "status") || invoice.status !== "paid") return false;
   if (typeof invoice.id !== "string" || !/^in_[A-Za-z0-9]+$/.test(invoice.id) ||
       typeof invoice.currency !== "string" || !/^[a-z]{3}$/.test(invoice.currency) ||
       !natural(invoice.amount_paid) || !natural(invoice.attempt_count) ||
@@ -94,7 +100,7 @@ function invoiceEvidence(raw: unknown, now: number): raw is Invoice {
 function reportEvidence(raw: unknown, store: Store, now: number): raw is RecoveryReport {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
   const report = raw as RecoveryReport;
-  return natural(report.at) && report.at <= Math.floor(now / 1000) && report.currency === store.currency &&
+  return (report.v === undefined || report.v === 3) && natural(report.at) && report.at <= Math.floor(now / 1000) && report.currency === store.currency &&
     [report.recovered, report.cents, report.afterEmail, report.afterEmailCents, report.elsewhere].every(natural) &&
     report.afterEmail <= report.recovered && report.afterEmailCents <= report.cents && typeof report.complete === "boolean" &&
     !!report.month && natural(report.month.failed) && natural(report.month.cards) && natural(report.month.failed + report.month.cards);
@@ -152,7 +158,8 @@ export async function recoveryReport(store: Store, fresh = false, now = Date.now
     if (typeof cached === "string") {
       const report: unknown = JSON.parse(cached);
       if (!reportEvidence(report, store, now)) throw unknownReport();
-      return report;
+      // An older aggregate cannot prove what its source rows were. Refresh it in the same key and normal TTL.
+      if (report.v === 3) return report;
     }
   }
   const invoices: Invoice[] = [];
@@ -200,6 +207,7 @@ export async function recoveryReport(store: Store, fresh = false, now = Date.now
     if (!natural(month.failed + month.cards)) throw unknownReport();
   }
   const report: RecoveryReport = {
+    v: 3,
     at: Math.floor(now / 1000),
     currency: store.currency,
     ...recoveredFrom(ours, handles, store.currency, emailed, now),

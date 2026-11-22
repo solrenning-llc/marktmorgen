@@ -2395,6 +2395,15 @@ export const ALL_TIME_PAGES = 30;
 const allSalesKey = (statsId: string) => `nl:stats:${statsId}:allsales`;
 /** How long an all-time reading is reused, so the button can be pressed freely. */
 const ALL_SALES_SECONDS = 600;
+/**
+ * The billed database commands of one all-time reading at its worst, a cache miss: the cached copy's GET, the
+ * paid-sales read's one command, and its two cache writes, each fenced on the store's life (lib/live-fence.ts
+ * SET_IF_STORE_LIVE: the EVAL and the HGET, GET and SET it runs, four billed commands where a plain SET was one).
+ * The studio's GET /api/store/stats that asks for it is priced as one studio request (UNIT_COST.studio in
+ * tests/plan-cost-registry.ts), which tests/all-sales-read-cost.test.ts holds the whole route inside (Codex P's
+ * LOW on #4970).
+ */
+export const ALL_TIME_READ_COMMANDS = 10;
 
 /**
  * Every sale the store has made, as far back as ALL_TIME_PAGES pages of

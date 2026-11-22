@@ -24,6 +24,21 @@ import { installSesMailFixture } from "./ses-mail-fixture";
 process.env.NIMBUS_DATA_KEY = "SYNTHETIC_ONLY_CONFIRMATION_ORIGIN_KEY_2026";
 process.env.RESEND_API_KEY = "re_SYNTHETIC_C4_REVIEW_ONLY";
 globalThis.fetch = async () => { throw Error("No external service is allowed in this proof"); };
+/**
+ * Stripe's answer for a paid pre-order's payment, not given back: since main's confirmPreorder reads the payment
+ * before handing over a pre-order whose product is already on sale (MM-E2E-RG-2, Codex X6's LOW on #4408). Every
+ * other request still finds no external service.
+ */
+const paidPreorderStripe = async (input: string | URL | Request): Promise<Response> => {
+  const url = new URL(String(input instanceof Request ? input.url : input));
+  const path = url.pathname.replace(/^\/v1/, "");
+  if (url.hostname === "api.stripe.com" && path.startsWith("/payment_intents/")) {
+    return new Response(JSON.stringify({ id: path.split("/")[2], object: "payment_intent",
+      latest_charge: { object: "charge", id: "ch_PaidPreorderNotGiven01", refunded: false, disputed: false, amount: 2500, amount_refunded: 0 } }), { status: 200 });
+  }
+  throw Error("No external service is allowed in this proof");
+};
+const STRIPE_STAND_IN = "sk_test_paid_preorder_stand_in";
 
 async function shop() {
   redis.clear();
@@ -74,14 +89,19 @@ test("MEDIUM 2: a paid pre-order checkout is counted once", async () => {
     created: Math.floor(Date.now() / 1000) - 60, amount_total: 2500, currency: "usd", payment_intent: "pi_C4Preorder000001",
     metadata: { store: store.handle, product: p.product.id, preorder: "yes", [ADMITTED_FIELD]: String(held.hour) },
     customer_details: { email: "c4-preorder-buyer@example.test" } };
-  const mail = installSesMailFixture();
+  const mail = installSesMailFixture({ fallback: paidPreorderStripe });
+  const stripeKey = process.env.STRIPE_SECRET_KEY;
   try {
     mail.configure(); await mail.setReady(true);
+    process.env.STRIPE_SECRET_KEY = STRIPE_STAND_IN;
     const outcome = await confirmPurchase(store, session.id, session as never);
     const seen = { outcome, orders: await storeOrdersThisMonth(store) };
     console.log(`MEDIUM2 ${JSON.stringify(seen)}`);
     assert.equal(seen.orders, 1, "the paid pre-order is counted");
-  } finally { mail.restore(); }
+  } finally {
+    mail.restore();
+    if (stripeKey === undefined) delete process.env.STRIPE_SECRET_KEY; else process.env.STRIPE_SECRET_KEY = stripeKey;
+  }
 });
 
 test("MEDIUM 3: an SES batch whose store figure is already used is refused, never \"sent\"", async () => {

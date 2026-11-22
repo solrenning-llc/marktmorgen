@@ -54,7 +54,9 @@ export async function readPodcast(id: string): Promise<Podcast | null> {
 
 /** readPodcast, with the bytes the record was read as (0 when there is none), for a caller that pays for what it moves. */
 export async function readPodcastSized(id: string): Promise<{ podcast: Podcast | null; bytes: number }> {
-  if (!PODCAST_ID.test(id) || !isRedisConfigured()) return { podcast: null, bytes: 0 };
+  if (!PODCAST_ID.test(id)) return { podcast: null, bytes: 0 };
+  // Not configured is not "no record": the studio writes back what it read (#3721).
+  if (!isRedisConfigured()) throw new UnknownReplyError("a podcast's record");
   const reply = repliesFor(await redisPipeline([["GET", podKey(id)]]), 1);
   const raw = reply?.[0];
   if (raw === null) return { podcast: null, bytes: 0 };

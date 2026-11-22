@@ -52,6 +52,7 @@ import { ordersLinkFor } from "@/lib/buyer-orders";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { stopTags } from "@/lib/mail-health-rules";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { canUseDomain } from "@/lib/domains";
@@ -61,7 +62,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { creatorAddress } from "@/lib/mail-from";
 import type { Listing, Store } from "@/lib/store";
 import { listingsNamed, readListing, recordListings } from "@/lib/catalog";
-import { recordEnrollment } from "@/lib/learn";
+import { dropEnrollment, noteBoughtAgain, recordEnrollment } from "@/lib/learn";
 import { type HandOverDeps, confirmPreorder, resendPreorder } from "@/lib/preorders";
 import { everyPhrase, speechFor } from "@/lib/buyer-words";
 import { paidEveryOf } from "@/lib/recurring-every-rules";
@@ -99,6 +100,10 @@ const SENT_MARK_SECONDS = 40 * 24 * 60 * 60;
 const SENDING_MARK_SECONDS = 15 * 60;
 
 export const confirmationKey = (session: string) => `nl:confirm:${session}`;
+/** A paid checkout whose course note (noteBoughtAgain) has landed, so a later pass does not note it again; kept as long
+ * as a sent mark (ORDER_BOUGHT_AGAIN in tests/plan-cost-registry.ts prices it). */
+const noteMarkKey = (session: string) => `nl:confirm:${session}:noted`;
+export const NOTE_MARK_SECONDS = SENT_MARK_SECONDS;
 /**
  * A checkout whose admitted room was given back (confirmPurchase), kept an hour past the hours that room is held
  * (lib/order-admission.ts OPEN_HOURS), so a second give-back for it can never reach a room still held.
@@ -687,13 +692,34 @@ async function confirmOnce(
   const next = await nextOfferForEmail(store, sessionId, session.metadata ?? {}).catch(() => null);
   const letter = confirmationFor(store, session, Date.now() / 1000, await keysFor(store, session, listings), listings, await noteFor(store, session, listings), next, await communityFor(store, session));
   if (!letter) return "skip";
+  const typed = session.customer_details?.email;
+  const buyer = typeof typed === "string" && typed ? typed : typeof session.customer_email === "string" ? session.customer_email : "";
+  const courseIds = listings.flatMap((p) => (p.course ? [p.course.id] : []));
 
   const [claimed] = await redisPipeline([["SET", key, "sending", "NX", "EX", SENDING_MARK_SECONDS]]);
   if (claimed === null) return "already";
+  // A course in it bought again by a student whose row holds an earlier day: the drip job reads their start once, so
+  // the modules open again from this purchase are announced even if the course is not opened (Codex G on #3369).
+  // Noted before the email, whatever the email does; a note not known to have landed takes no mark, so this checkout
+  // is never kept as sent without it and the next pass notes it again (Codex G and Codex L on #3369). Noted under the
+  // claim, so two passes at once never both note it, and kept as noted (noteMarkKey), so a pass after a refused email
+  // reads one mark instead of noting again (Claude 1's MEDIUM on #5034): once an order, as ORDER_BOUGHT_AGAIN prices it.
+  if (buyer && courseIds.length && typeof session.created === "number") {
+    const noteMark = noteMarkKey(sessionId);
+    const [kept] = await redisPipeline([["GET", noteMark]]);
+    if (kept !== "noted") {
+      const noted = kept === null && (await noteBoughtAgain(store, courseIds, buyer, session.created));
+      const [marked] = noted ? await redisPipeline([["SET", noteMark, "noted", "EX", NOTE_MARK_SECONDS]]) : [null];
+      if (marked !== "OK") {
+        await redisPipeline([["DEL", key]]);
+        return "failed";
+      }
+    }
+  }
 
   let sent = false;
   try {
-    sent = await sendEmail({ meter: { by: "order" },
+    sent = await sendEmail({ meter: { by: "order", store }, tags: stopTags(store),
       from: fromStore(store),
       to: letter.to,
       subject: letter.subject,
@@ -778,6 +804,8 @@ async function confirmGift(store: Store, session: SessionRecord, key: string): P
       const course = productId === product.id ? product : await readListing(store, productId);
       if (course?.course) await recordEnrollment(store, email, productId, start);
     },
+    // A gift given back before it was confirmed takes back what an earlier run granted (lib/gifts.ts takeBackOwnGrant).
+    dropStart: (email, productId) => dropEnrollment(store, email, productId),
     ordersLink: (email) => ordersLinkFor(store, email, base),
   });
   if (outcome !== "skip") await redisPipeline([["SET", key, "sent", "EX", SENT_MARK_SECONDS]]);
@@ -918,7 +946,7 @@ export async function confirmOffer(store: Store, offer: TakenOffer): Promise<Con
   if (claimed === null) return "already";
   let sent = false;
   try {
-    sent = await sendEmail({ meter: { by: "order" },
+    sent = await sendEmail({ meter: { by: "order", store }, tags: stopTags(store),
       from: fromStore(store),
       to: letter.to,
       subject: letter.subject,

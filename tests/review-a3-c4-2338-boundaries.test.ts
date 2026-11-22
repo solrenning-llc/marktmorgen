@@ -19,6 +19,21 @@ import { installSesMailFixture } from "./ses-mail-fixture";
 process.env.NIMBUS_DATA_KEY = "SYNTHETIC_ONLY_CONFIRMATION_ORIGIN_KEY_2026";
 process.env.RESEND_API_KEY = "re_SYNTHETIC_A3_C4_CONTROLS";
 globalThis.fetch = async () => { throw Error("No external service is allowed in this proof"); };
+/**
+ * Stripe's answer for a paid pre-order's payment, not given back: since main's confirmPreorder reads the payment
+ * before handing over a pre-order whose product is already on sale (MM-E2E-RG-2, Codex X6's LOW on #4408). Every
+ * other request still finds no external service.
+ */
+const paidPreorderStripe = async (input: string | URL | Request): Promise<Response> => {
+  const url = new URL(String(input instanceof Request ? input.url : input));
+  const path = url.pathname.replace(/^\/v1/, "");
+  if (url.hostname === "api.stripe.com" && path.startsWith("/payment_intents/")) {
+    return new Response(JSON.stringify({ id: path.split("/")[2], object: "payment_intent",
+      latest_charge: { object: "charge", id: "ch_PaidPreorderNotGiven01", refunded: false, disputed: false, amount: 2500, amount_refunded: 0 } }), { status: 200 });
+  }
+  throw Error("No external service is allowed in this proof");
+};
+const STRIPE_STAND_IN = "sk_test_paid_preorder_stand_in";
 
 async function shop() {
   redis.clear();
@@ -96,10 +111,13 @@ test("a later catalog bundle edit cannot change an already paid checkout's accou
 test("a paid preorder is counted once despite a lost email reply and preserves another held checkout", async () => {
   const f = await shop(), product = await f.product("Preorder");
   const hold = await f.holdWithSibling(1);
-  const original = f.session("cs_test_A3PreorderLost00001", { product: product.id, preorder: "yes", [ADMITTED_FIELD]: String(hold.hour) });
-  const mail = installSesMailFixture();
+  // Main reads a paid checkout's payment reference exactly (paymentIntentForDelivery): a paid pre-order carries one.
+  const original = { ...f.session("cs_test_A3PreorderLost00001", { product: product.id, preorder: "yes", [ADMITTED_FIELD]: String(hold.hour) }), payment_intent: "pi_A3PreorderLost0001" };
+  const mail = installSesMailFixture({ fallback: paidPreorderStripe });
+  const stripeKey = process.env.STRIPE_SECRET_KEY;
   try {
     mail.configure(); await mail.setReady(true); mail.setSesOutcome("lost");
+    process.env.STRIPE_SECRET_KEY = STRIPE_STAND_IN;
     await confirmPurchase(f.store, original.id as string, original);
     assert.equal(mail.calls.ses, 1, "the provider POST really preceded the synthetic lost reply");
     assert.equal(mail.calls.resend, 0, "unknown SES acceptance never permits fallback");
@@ -108,7 +126,10 @@ test("a paid preorder is counted once despite a lost email reply and preserves a
     await confirmPurchase(f.store, original.id as string, original);
     assert.equal(await storeOrdersThisMonth(f.store), 1);
     assert.deepEqual(hold.remaining(), ["1", String(orderDataBytes(1))]);
-  } finally { mail.restore(); }
+  } finally {
+    mail.restore();
+    if (stripeKey === undefined) delete process.env.STRIPE_SECRET_KEY; else process.env.STRIPE_SECRET_KEY = stripeKey;
+  }
 });
 
 const messages = ["one", "two", "three"].map(name => ({ from: "Store <mail@example.test>", to: `${name}@example.test`, subject: "Original", text: "Original message" }));

@@ -326,7 +326,9 @@ async function main(): Promise<void> {
       return [response.status, ((await response.json()) as { error?: string }).error ?? "ok"];
     };
     const isRate = windowIncr("nl:rl:creators:");
-    const kept = (from: number) => wroteSince(from, (c) => c[0] === "LPUSH" && key(c) === RESPONSES_KEY);
+    // The answer is kept by LPUSH inside KEEP_RESEARCH_ANSWER (lib/creator-research-room.ts), whose list is its first key.
+    const kept = (from: number) =>
+      wroteSince(from, (c) => (c[0] === "LPUSH" && key(c) === RESPONSES_KEY) || (c[0] === "EVAL" && key(c).startsWith("-- marktmorgen:research-answer-keep:") && String(c[3]) === RESPONSES_KEY));
     const quiet = console.error;
     console.error = () => {};
     for (const [label, reply] of WINDOW_UNKNOWN) {

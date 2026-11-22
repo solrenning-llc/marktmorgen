@@ -52,8 +52,10 @@ test("only an upload is ever refused by it, never a download", () => {
     // And the one place a copy is made for a buyer (a stamped copy, a PDF's
     // preview, lib/pdf-stamp.ts writeWithinStorage): a store without room gets
     // no new copy, and its buyer is handed the file as uploaded, never refused
-    // (tests/stamped-copy-storage.test.ts).
-    ["app/api/store/file/route.ts", "app/api/store/stream/route.ts", "app/studio/page.tsx", "lib/pdf-stamp.ts", "lib/plan-closing.ts", "lib/vault-storage.ts"],
+    // (tests/stamped-copy-storage.test.ts). And the save of a product's file
+    // written with AI (758 [STN5] unit 3), which keeps a new PDF in the
+    // creator's storage: an upload of its own.
+    ["app/api/store/ai-file/route.ts", "app/api/store/file/route.ts", "app/api/store/stream/route.ts", "app/studio/page.tsx", "lib/pdf-stamp.ts", "lib/plan-closing.ts", "lib/vault-storage.ts"],
     "what a store keeps is measured where an upload is let in, and for a store whose plan has ended. No download is ever refused by it.",
   );
 });

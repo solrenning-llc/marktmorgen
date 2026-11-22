@@ -17,12 +17,14 @@ import { confirmPurchase } from "@/lib/purchase-email";
 import { ADMITTED_FIELD, admitOrders } from "@/lib/order-admission";
 import { storeOrdersThisMonth } from "@/lib/orders";
 import { paidPeriod } from "./billing-period-fixture";
+import { paidIntentReply } from "./paid-intent-standin";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { paidIntentReply } from "./paid-intent-standin";
 
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
+// A gift reads its payment before handing anything over (lib/gifts.ts, #4408): a plain paid one here, as every
+// fixture of paid payments answers it (tests/paid-intent-standin.ts; merge of main into #4408).
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   // The payment a purchase for several is read with before it is settled (lib/group-buy.ts settleGroup, #4494): paid, not given back.
   paidIntentReply(input, init?.method ?? "GET") ??

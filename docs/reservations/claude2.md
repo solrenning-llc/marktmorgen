@@ -6,3 +6,4 @@ Only Claude 2 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 2 (nuvem upbeat 01FR6Z1Q87) | OWNER-20261121-1944-C2-PRS-AFTER-AUDIT, PR 1: the Codex audit of the money PRs merged under OWNER-20261121-1437, held in code before any sale | claude2/codex-absent-audit | `lib/codex-absent-audit.ts`, `tests/codex-absent-audit.test.ts` | 21/11/2026 |

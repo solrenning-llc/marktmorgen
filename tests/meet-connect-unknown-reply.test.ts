@@ -33,7 +33,7 @@ import { MESSAGES as CALL_MESSAGES } from "@/components/call-editor";
 import { redisPipeline } from "@/lib/redis";
 import { seal } from "@/lib/secret-box";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { type Store, addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import type { MeetProvider } from "@/lib/call-setup";
 import { store as redis } from "./redis-stub";
@@ -134,7 +134,7 @@ const outcome = async <T,>(run: () => Promise<T>): Promise<string> => {
 };
 const kept = async (key: string) => (await redisPipeline([["GET", key]]))[0];
 
-type World = { sid: string; statsId: string; session: string; productId: string };
+type World = { sid: string; statsId: string; session: string; productId: string; store: Store };
 
 /** A fresh synthetic store, on a paid plan with Stripe, one product and a signed-in session. */
 async function setUp(): Promise<World> {
@@ -147,7 +147,7 @@ async function setUp(): Promise<World> {
   const made = await addProduct(OWNER, "Coaching", "", "45", null);
   if (!made.ok) throw new Error("no product");
   const store = (await storeForEmail(OWNER))!;
-  return { sid: store.sid, statsId: store.statsId as string, session: await openSession(OWNER), productId: made.product.id };
+  return { sid: store.sid, statsId: store.statsId as string, session: await openSession(OWNER), productId: made.product.id, store };
 }
 
 async function keepBoth(statsId: string): Promise<void> {
@@ -181,7 +181,7 @@ async function main(): Promise<void> {
   is("healthy: both can be used for bookings", await usableProviders(SID), ["google", "zoom"]);
   is(
     "healthy: Google's and Zoom's tokens are opened, no request out",
-    [await outcome(() => accessFor(SID, "google")), await outcome(() => accessFor(SID, "zoom")), outbound.length],
+    [await outcome(() => accessFor(SID, "google", undefined, "", world.store)), await outcome(() => accessFor(SID, "zoom", undefined, "", world.store)), outbound.length],
     [JSON.stringify({ token: "tok-google", account: "acct-google" }), JSON.stringify({ token: "tok-zoom", account: "acct-zoom" }), 0],
   );
   is("healthy: a team host's own Google is read", (await hostConnectionView(SID, HOST))?.account, "google@example.test");
@@ -191,7 +191,7 @@ async function main(): Promise<void> {
   is("confirmed none: none for bookings", await usableProviders(SID), []);
   is(
     "confirmed none: Google and Zoom say not connected",
-    [await outcome(() => accessFor(SID, "google")), await outcome(() => accessFor(SID, "zoom"))],
+    [await outcome(() => accessFor(SID, "google", undefined, "", world.store)), await outcome(() => accessFor(SID, "zoom", undefined, "", world.store))],
     ["not connected: Google Calendar is not connected", "not connected: Zoom is not connected"],
   );
   is("confirmed none: a host has none", await outcome(() => hostConnectionView(SID, HOST)), "null");
@@ -217,8 +217,8 @@ async function main(): Promise<void> {
     is(`${label}: the view throws unknown`, await outcome(() => meetView(SID)), "unknown");
     is(`${label}: the settings view throws unknown`, await outcome(() => meetSettingsView(SID, { sid: world.sid, email: OWNER })), "unknown");
     is(`${label}: the providers for bookings throw unknown`, await outcome(() => usableProviders(SID)), "unknown");
-    is(`${label}: Google's access is unknown, not "not connected"`, await outcome(() => accessFor(SID, "google")), "unknown");
-    is(`${label}: Zoom's access is unknown, not "not connected"`, await outcome(() => accessFor(SID, "zoom")), "unknown");
+    is(`${label}: Google's access is unknown, not "not connected"`, await outcome(() => accessFor(SID, "google", undefined, "", world.store)), "unknown");
+    is(`${label}: Zoom's access is unknown, not "not connected"`, await outcome(() => accessFor(SID, "zoom", undefined, "", world.store)), "unknown");
     is(`${label}: a host's own Google is unknown, not none`, await outcome(() => hostConnectionView(SID, HOST)), "unknown");
     is(`${label}: disconnecting is unknown, not "there was none"`, await outcome(() => disconnect(SID, "zoom")), "unknown");
     is(`${label}: Zoom's uninstall notice is unknown, not "nothing to forget"`, await outcome(() => forgetUser("zoom", "acct-zoom")), "unknown");
@@ -313,7 +313,7 @@ async function main(): Promise<void> {
     part(`A whole answer that is ${label}: unknown`);
     answeringAll(replies);
     is(`${label}: the view throws unknown`, await outcome(() => meetView(SID)), "unknown");
-    is(`${label}: Google's access throws unknown`, await outcome(() => accessFor(SID, "google")), "unknown");
+    is(`${label}: Google's access throws unknown`, await outcome(() => accessFor(SID, "google", undefined, "", world.store)), "unknown");
     is(`${label}: a host's own Google throws unknown`, await outcome(() => hostConnectionView(SID, HOST)), "unknown");
     restore();
   }

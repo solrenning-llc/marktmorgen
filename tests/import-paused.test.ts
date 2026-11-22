@@ -288,6 +288,15 @@ async function main() {
     is("its report CSV cannot return the old address either", (await imports.reportCsv(specimen)).includes(person), false);
     const endedCsv = endedReport ? await imports.reportCsv(endedReport) : "";
     is("the ended job's report says why it stopped and that its rows were deleted", [endedCsv.includes(person), endedCsv.includes(imports.PAUSED_STOP_WORDS), endedCsv.includes(imports.REPORT_GONE_WORDS)], [false, true, true]);
+    // Claude 2 upbeat (LEVE on #5063): the reason comes from the job, never from its dates. Another failure just after
+    // day 14, such as rows that waited too long once the plan came back, is said as itself, not as the paused one.
+    const lateWords = "The rows waited more than 3 days to be brought in, so the rest were let go.";
+    const late = { ...specimen, state: "failed" as const, finishedAt: Date.now(), reason: lateWords };
+    const lateCsv = await imports.reportCsv(late);
+    is("a later failure's own reason is said, never the paused one", [lateCsv.includes(lateWords), lateCsv.includes(imports.PAUSED_STOP_WORDS), lateCsv.includes(imports.REPORT_GONE_WORDS)], [true, false, true]);
+    const unsaid = await imports.reportCsv({ ...specimen, state: "failed" as const, finishedAt: Date.now() });
+    is("a failure with no kept reason gives none, even past day 14", [unsaid.includes(imports.PAUSED_STOP_WORDS), unsaid.includes(imports.REPORT_GONE_WORDS)], [false, true]);
+    is("the paused pass keeps its reason on the job", endedReport?.reason, imports.PAUSED_STOP_WORDS);
     is("cleanup keeps another import's report", await realPipeline([["LRANGE", otherReport, 0, -1]]), [["unrelated synthetic report"]]);
     is("the expired job leaves the active set", await realPipeline([["SISMEMBER", "nl:imports:active", reportId]]), [0]);
   } finally {

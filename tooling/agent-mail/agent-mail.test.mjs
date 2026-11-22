@@ -917,7 +917,34 @@ console.log("a family with a verdict on the head written only on the PR does not
   is("ce2d: when the PR's comments cannot be read, nothing is taken (NOT CHECKED)", !/pegou:/.test(r.out), r.out);
 }
 
-console.log("ce2d: the real formats of today's reviews, with the family after the word review (Claude 5 ibuF on #5141)");
+console.log("ce2d: the reviewer of a comment, on the real formats of today (Claude 5 ibuF and Claude 1 E on #5141)");
+{
+  const mod = await import(TOOL);
+  const h = "065afee703";
+  const casos = [
+    // [comment, expected family or null, why]
+    [`Claude 1 review #5135 ＠${h}a87a81f9bc0b94d60a60900c5098: **CHANGES (1 MEDIUM, privacy/erasure; 1 LOW)**\nReviewer: Claude 1 DKvY (cloud)`, "claude-1", "family before 'review', fullwidth at sign"],
+    [`**Cost review #5135 @${h}788aae9928a25a7a9d55a3d3f4b4a5 — READY, 0 new findings** — Claude 2 lpgvy (cloud, session 01FR6Z1LpGvy).`, "claude-2", "family after 'review', in the signature"],
+    [`Focal cost review (Claude 1 cloud, money-reviewer lane, session f9afa7) ＠${h}: **READY** on \`5f33642e2e..${h}\``, "claude-1", "family in parentheses after 'review'"],
+    [`Independent review (Codex G) of head ${h}b0bf0b8bb6600b1da30117701de865b03.\nVerdict: CHANGES.`, "codex", "Codex, with the verdict on the second line"],
+    [`Codex N1 CHANGES (transcrito por Claude 5, cloud iacVn3r) @${h}: **MEDIUM, scope (commission).**`, "codex", "the transcriber does not count"],
+    [`**Focal MONEY review #3651 @${h} — CHANGES (2 LEVE)** (Claude 5 iacVn3r, session_012ST5iacVn3rzNGmvRWy4Up). Families with commits on the branch: Claude 4 and Claude 1.`, "claude-5", "the families with commits do not count"],
+    [`**READY #3651 @${h}** (focal on the main merge only). This is a focal review from the Claude 2 family (cloud C).`, "claude-2", "verdict first, family later on the line"],
+    [`Focal review #5141 @${h} — READY (tests pass, audit 18/18) — Claude 5 ibuF`, "claude-5", "the format of Claude 5 ibuF's finding"],
+    [`re-review needed #5135 @${h}, pushed by Claude 4 AC at 19:49 UTC.\nThis answers Claude 1 DKvY's CHANGES (7084720841).`, null, "a re-review request is not a review (Claude 1 E's finding)"],
+    [`CLAIMED — Claude 1 E (nuvem c1-revisoes-e), revisão focal de #5135 @${h}. Confiro a correção do CHANGES 4534 do Claude 1 DKvY.`, null, "a CLAIMED is not a verdict"],
+    [`fila #5135 @${h}: 2 READY (Claude 2 lpgvy, Claude 1 E) — Claude 5 ibuF`, null, "a queue record is not a review"],
+    [`Claude 2 X review #61\nnotes on the diff\nREADY on @${h}, in the third line`, null, "head and verdict only from the third line on"],
+    [`Claude 6 review #2048 @0123456789: CHANGES`, null, "a verdict on another head"],
+    [`Claude 3 X review #61 @${h}: looks fine`, null, "no verdict word"],
+  ];
+  for (const [corpo, esperado, porque] of casos) {
+    const achou = typeof mod.revisoraDoComentario === "function" ? mod.revisoraDoComentario(corpo, h) : "(missing)";
+    is(`ce2d reviewer: ${porque} -> ${esperado ?? "nobody"}`, achou === esperado, `got ${achou}: ${corpo.slice(0, 120)}`);
+  }
+}
+
+console.log("ce2d: claim-review and claim-enqueue on those formats");
 {
   const g6 = (args) => g(args, join(T, "p"));
   g6(["checkout", "-q", "-B", "ce2d61", M]); writeFileSync(join(T, "p", "ce2d61.txt"), "y\n"); g6(["add", "."]); g6(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "ce2d61\n\nClaude-Session: https://claude.ai/code/session_01S9eVA3KcXUkc6qPJmpNg4a"]);
@@ -926,26 +953,23 @@ console.log("ce2d: the real formats of today's reviews, with the family after th
   g(["init", "-q", "--bare", "mail61.git"]); g(["push", "-q", "../mail61.git", "HEAD:refs/heads/correio"], join(T, "w"));
   const m61 = { CORREIO_REPO: join(T, "mail61.git"), CORREIO_GIT_DIR: join(T, "dir61.git") };
   const comentarios = [
-    JSON.stringify([`Focal review #61 @${c61} — READY (tests pass, audit 18/18) — Claude 5 ibuF\n\nbody`, "COLLABORATOR"]),
     JSON.stringify([`Focal cost review (Claude 1 cloud, money-reviewer lane)\n#61 @${c61}: CHANGES, 1 MEDIUM\n\nbody`, "COLLABORATOR"]),
-    JSON.stringify([`re-review needed #61 @${c61} — revisores: Claude 3 X`, "COLLABORATOR"]),
-    JSON.stringify([`Claude 2 X review #61\nnotes on the diff\nREADY on @${c61}, in the third line`, "COLLABORATOR"]),
+    JSON.stringify([`re-review needed #61 @${c61}, pushed by Claude 4 X\nThis answers Claude 2 X's CHANGES`, "COLLABORATOR"]),
+    JSON.stringify([`Codex N1 CHANGES (transcrito por Claude 5, cloud X) @${c61}: MEDIUM`, "COLLABORATOR"]),
   ].join("\n") + "\n";
   const env = (k) => ({ ...m61, ...as(k), FAKE_COMMENTS: comentarios });
   r = run(["request-review", "--from", "Claude 4 X", "--pr", "61", "--sha", H61, "--text", "t"], env("c4"));
   is("ce2d61: the review request is written", r.ok, r.out);
-  r = run(["claim-review", "--as", "Claude 5 X"], env("c5"));
-  is("ce2d61: 'Focal review #N @head — READY — Claude 5 ibuF' (family after the word review) keeps Claude 5 out", !/pegou:/.test(r.out) && /nenhum pedido/.test(r.out), r.out);
   r = run(["claim-review", "--as", "Claude 1 A"], env("c1a"));
   is("ce2d61: 'Focal cost review (Claude 1 cloud, ...)' with the head and the verdict on the second line keeps Claude 1 out", !/pegou:/.test(r.out) && /nenhum pedido/.test(r.out), r.out);
-  r = run(["claim-review", "--as", "Claude 2 X"], env("c2"));
-  is("ce2d61: a family named with the head and the verdict only from the third line on is not taken as a reviewer (it takes the request)", /pegou:/.test(r.out), r.out);
+  r = run(["claim-review", "--as", "Claude 5 X"], env("c5"));
+  is("ce2d61: the family that only transcribed a verdict (Claude 5) takes the review", /pegou:/.test(r.out), r.out);
   r = run(["request-enqueue", "--from", "Claude 4 X", "--pr", "61", "--sha", H61, "--text", "t"], env("c4"));
   const fila61 = r;
-  r = run(["claim-enqueue", "--as", "Claude 5 X"], env("c5"));
-  is("ce2d61: the queue is not delivered to Claude 5, whose verdict is in the real format", !/pegou:/.test(r.out) && /veredito da sua família neste head no PR/.test(r.out), r.out);
-  r = run(["claim-enqueue", "--as", "Claude 3 X"], { ...m61, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA", FAKE_COMMENTS: comentarios });
-  is("ce2d61: a family only named in a line without a verdict ('re-review needed ... revisores: Claude 3') is not excluded from the queue", fila61.ok && !/veredito da sua família neste head no PR/.test(r.out), fila61.out + r.out);
+  r = run(["claim-enqueue", "--as", "Claude 1 A"], env("c1a"));
+  is("ce2d61: the queue is not delivered to Claude 1, whose verdict is on the second line", fila61.ok && !/pegou:/.test(r.out) && /veredito da sua família neste head no PR/.test(r.out), fila61.out + r.out);
+  r = run(["claim-enqueue", "--as", "Claude 2 X"], env("c2"));
+  is("ce2d61: a family named only in a re-review request ('This answers Claude 2's CHANGES') is not kept out of the queue", !/veredito da sua família neste head no PR/.test(r.out), r.out);
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

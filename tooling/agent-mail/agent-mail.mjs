@@ -1013,10 +1013,31 @@ export function conferirLink(link, pr, sha, resultado = null) {
 }
 
 /**
+ * A família revisora de um comentário com veredito neste head, ou null. O head (os 10 primeiros caracteres) e o veredito
+ * (READY ou CHANGES) ficam nas duas primeiras linhas com texto; a revisora é a primeira família citada na primeira linha,
+ * ou, se ela não cita nenhuma, na segunda, antes ou depois da palavra "review" ("Focal review #N @head — READY — Claude 5
+ * ibuF", "Codex N1 CHANGES (transcrito por Claude 5)"; revisão do Claude 5 ibuF no #5141). As famílias citadas depois dela
+ * (quem transcreveu, quem tem commits, a quem se responde) não contam, e um pedido ou uma marca ("re-review needed",
+ * "review needed", CLAIMED, UNCLAIMED, HOLD, "fila #N") não é revisão: o "This answers Claude 1 DKvY's CHANGES" do #5135
+ * não tira o Claude 1 da fila que a nova revisão pede (revisão do Claude 1 E no #5141).
+ */
+export function revisoraDoComentario(corpo, curto) {
+  const linhas = String(corpo ?? "").split(/\r?\n/).filter((l) => l.trim()).slice(0, 2);
+  const topo = linhas.join("\n");
+  if (!curto || !topo.includes(curto) || !/\b(READY|CHANGES)\b/.test(topo)) return null;
+  const inicio = (linhas[0] ?? "").replace(/^[\s*>_#`-]+/, "");
+  if (/^(re-?review needed|review needed|claimed\b|unclaimed\b|hold\b|fila #)/i.test(inicio)) return null;
+  for (const l of linhas) {
+    const m = /\b(Claude \d+|Codex)\b/i.exec(l);
+    if (m) return familia(m[1]);
+  }
+  return null;
+}
+
+/**
  * As famílias que deram veredito (READY ou CHANGES) neste head só nos comentários e revisões do PR, fora do correio
  * (coordenador, ce2d: no #5118, claim-enqueue entregou duas vezes o pedido a quem tinha revisado o head no PR). Vale o
- * comentário de quem trabalha no repositório que traz, nas duas primeiras linhas com texto, este head e o veredito: conta
- * toda família nomeada nessas duas linhas, antes ou depois de "review" (revisão do Claude 5 ibuF no #5141). null = NÃO CONFERIDO (o GitHub não respondeu); quem chama não entrega nada nesse caso (passo 4).
+ * comentário de quem trabalha no repositório, com a revisora lida por revisoraDoComentario. null = NÃO CONFERIDO (o GitHub não respondeu); quem chama não entrega nada nesse caso (passo 4).
  */
 const vereditosNoPr = new Map();
 export function revisoresNoPr(pr, sha) {
@@ -1032,11 +1053,8 @@ export function revisoresNoPr(pr, sha) {
       for (const linha of saida.split("\n").filter((l) => l.trim())) {
         const [corpo, associacao] = JSON.parse(linha);
         if (!QUEM_TRABALHA.has(String(associacao))) continue;
-        // As duas primeiras linhas com texto: o head e o veredito nelas, e toda família nomeada nelas, antes ou depois da
-        // palavra "review" ("Focal review #N @head — READY — Claude 5 ibuF", revisão do Claude 5 ibuF no #5141).
-        const topo = String(corpo).split(/\r?\n/).filter((l) => l.trim()).slice(0, 2).join("\n");
-        if (!topo.includes(curto) || !/\b(READY|CHANGES)\b/.test(topo)) continue;
-        for (const m of topo.matchAll(/\b(Claude \d+|Codex)\b/gi)) if (familia(m[1])) f.add(familia(m[1]));
+        const quem = revisoraDoComentario(corpo, curto);
+        if (quem) f.add(quem);
       }
     }
   } catch {

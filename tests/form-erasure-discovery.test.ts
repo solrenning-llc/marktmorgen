@@ -27,7 +27,7 @@ async function main(): Promise<void> {
     await writeForm(stats, form);
     await addResponse(stats, form.id, answer, ROOM);
     let refused = false;
-    redis.pipeline = (async (commands: (string | number)[][]) => (commands.some((c) => c[0] === "HVALS" && c[1] === `nl:forms:${stats}`) ? bad : real(commands))) as typeof redis.pipeline;
+    redis.pipeline = (async (commands: (string | number)[][]) => (commands.some((c) => c[0] === "HGETALL" && c[1] === `nl:forms:${stats}`) ? bad : real(commands))) as typeof redis.pipeline;
     try {
       await forgetFormsPerson(stats, email, ROOM);
     } catch {

@@ -79,7 +79,18 @@ export async function POST(request: NextRequest) {
       let bytes = fresh.has(path) ? undefined : checkedSizes(link.image).get(path);
       if (bytes === undefined && !fresh.has(path)) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       if (bytes === undefined) {
-        const checked = await checkUploadedImage(path);
+        // An outage of the file store is unknown, not "not a picture": the creator is told it could not be checked just
+        // now, never a bare server error (Claude 3's LOW on #2801). The door's note is taken, so they choose the picture
+        // again, a new upload under a new name; this one would be an orphan nothing sweeps, so it is let go as any refused
+        // fresh upload is (dropFresh: only while its own head answers, never a picture of anything else; Claude 4's LOW).
+        const checked = await checkUploadedImage(path).catch((error: unknown) => {
+          console.error("checking a link picture failed; nothing saved", error);
+          return null;
+        });
+        if (!checked) {
+          await dropFresh(path);
+          return Response.json({ ok: false, error: "check_unavailable" }, { status: 503 });
+        }
         if (!checked.ok) {
           await dropFresh(path);
           return Response.json({ ok: false, error: checked.error }, { status: checked.error === "too_big" ? 413 : 400 });

@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { openWelcome } from "@/lib/welcome-offer-send";
-import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;
 
@@ -35,7 +35,9 @@ export async function POST(request: NextRequest) {
 
   const back = (status: string) =>
     new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}/free?token=${encodeURIComponent(token)}&welcome=${status}`, "Cache-Control": "no-store" } });
-  if (!(await withinStore("welcome-open", `${clientAddress(request)}|${store.handle}`, 20, 600, store))) return back("limited");
+  const room = await withinStore("welcome-open", `${clientAddress(request)}|${store.handle}`, 20, 600, store).catch(unknownLimit);
+  if (room === "unknown") return back("refused");
+  if (!room) return back("limited");
   const opened = await openWelcome(store, token, linkOrigin(request, store), Math.floor(Date.now() / 1000), consent);
   if (!opened.ok) return back(opened.reason);
   return new Response(null, { status: 303, headers: { Location: opened.url, "Cache-Control": "no-store" } });

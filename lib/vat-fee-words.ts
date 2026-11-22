@@ -134,6 +134,7 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
       "We add no profit to those costs, and we never take a share of tax.",
       "Stripe takes its processing fee from your Stripe account on the whole amount the buyer pays, VAT included, at your own Stripe rates.",
       "The part of that fee that falls on the VAT is a cost you pay, as on every sale.",
+      "Marktmorgen does not refund it.",
       "The buyer never pays a card surcharge for it.",
     ],
     pricing: [
@@ -143,6 +144,7 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
       "Our fee on that sale carries the VAT, which we pay to the tax authority.",
       "It also carries what it costs us to receive that VAT, with no profit.",
       "Stripe's processing fee on the VAT part is a cost you pay, at your own Stripe rates.",
+      "Marktmorgen does not refund it.",
       "The buyer never pays a card surcharge, and we never take a share of tax.",
     ],
     example: [
@@ -152,7 +154,7 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
       `So you keep your ${m(f.priceCents)} price, less ${m(f.costCents)} and Stripe's fee.`,
       `At a ${percent(EXAMPLE_PROCESSING_BPS)} rate, which is only an example, the part of Stripe's fee that falls on the VAT is ${m(f.stripePartCents)}.`,
     ],
-    refused: VAT_REFUSED_SALES.map((r) => r.words),
+    refused: VAT_REFUSED_SALES.filter((r) => !r.side || places.includes(r.side)).map((r) => r.words),
     refusedPlaces: Object.entries(VAT_REFUSED_PLACE_NAMES).filter(([code]) => places.includes(VAT_REFUSED_PLACE_SIDE[code] ?? "EU")).map(([, name]) => name),
     refusedLead: REFUSED_LEAD(where),
     figures: f,
@@ -173,7 +175,7 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
  */
 export const VAT_REFUSED_PLACE_NAMES: Readonly<Record<string, string>> = {
   ES: "Spain", EA: "Ceuta and Melilla", IC: "the Canary Islands", MC: "Monaco", GF: "French Guiana", GP: "Guadeloupe",
-  MQ: "Martinique", RE: "Réunion", YT: "Mayotte", MF: "Saint Martin", AX: "the Åland Islands", IM: "the Isle of Man",
+  MQ: "Martinique", RE: "Réunion", YT: "Mayotte", MF: "the French part of Saint Martin", AX: "the Åland Islands", IM: "the Isle of Man",
 };
 /** Which side's checkout refuses each place: only the side that is charging names its own (#5086, coord 9b51's LEVE 2). */
 export const VAT_REFUSED_PLACE_SIDE: Readonly<Record<string, VatFeePlace>> = {
@@ -183,12 +185,13 @@ export const VAT_REFUSED_PLACE_SIDE: Readonly<Record<string, VatFeePlace>> = {
 /** The item that leads the places, shown with each place on its own line under it (AX274 3.1.5; Claude 1 2as's LEVE). */
 export const VAT_REFUSED_PLACES_WORDS = "Buyers in these places";
 
-export const VAT_REFUSED_SALES: readonly { words: string; checks: readonly string[]; files?: readonly string[] }[] = [
+export const VAT_REFUSED_SALES: readonly { words: string; checks: readonly string[]; files?: readonly string[]; side?: VatFeePlace }[] = [
   { words: "Products that ship", checks: ["shipping or a subscription"] },
   { words: "Subscriptions and memberships", checks: ["shipping or a subscription"] },
   { words: "Payment plans", checks: ["not a one-off payment"] },
   { words: "Pay-what-you-want prices", checks: ["a price the buyer chooses"] },
-  { words: "Discount or promotion codes", checks: ["a discount or a promotion box"] },
+  { words: "Any sale in a store that offers discount codes, even when no code is typed", checks: ["a discount or a promotion box"] },
+  { words: "A product at a reduced price: on sale, or at an introductory, member, fair, welcome or win-back price, or with a returning-buyer code", checks: ["a discount or a promotion box"] },
   { words: "Prices converted to the buyer's own currency", checks: ["a conversion to the buyer's currency"] },
   { words: "More than one of the same product", checks: ["a quantity other than one"] },
   { words: "Other products added to one product's checkout", checks: ["more than one line"], files: ["app/api/store/checkout/route.ts"] },
@@ -202,7 +205,8 @@ export const VAT_REFUSED_SALES: readonly { words: string; checks: readonly strin
   { words: VAT_REFUSED_PLACES_WORDS, checks: ["euCheckout"] },
   { words: "A bundle that combines a live call with something delivered online", checks: ["consumerGate"] },
   { words: "A sale where the buyer's internet address or billing address shows no country, or the two show different countries", checks: ["checkoutEvidence"] },
-  { words: "Any sale whose VAT, or the cost of receiving it, we cannot work out, such as one in a currency with no checked exchange rate", checks: ["no sourced rate, or no sterling rate", "the cost of receiving the VAT is unknown"] },
+  { words: "Sales to buyers in the European Union in a currency other than the euro or the pound", checks: ["the cost of receiving the VAT is unknown"], side: "EU" },
+  { words: "Any other sale whose VAT, or the cost of receiving it, we cannot work out", checks: ["no sourced rate, or no sterling rate", "the cost of receiving the VAT is unknown"] },
 ];
 
 /**

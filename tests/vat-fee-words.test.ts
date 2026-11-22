@@ -456,12 +456,20 @@ test("the behaviour holds the future: every kind the words promise is charged, e
     return source.includes("consumerGate(") && !source.includes("euSaleGate(") && !source.includes("euCartGate(") && !consumerGate({ product: ESS, ...at("DE") }).ok;
   };
   const call = { ...online, call: { minutes: 30 } } as never as EuSupplyFields;
+  const checkoutSource = readFileSync(join(process.cwd(), "lib/store-checkout.ts"), "utf8");
+  const cartSource = readFileSync(join(process.cwd(), "lib/cart-checkout.ts"), "utf8");
   const proofs: Record<string, () => boolean> = {
     "Products that ship": () => !gate({ ...online, shipping: { countries: ["DE"] } } as never, "DE").ok,
     "Subscriptions and memberships": () => throws(() => applyEuCollect(body({ "subscription_data[metadata][x]": "1" }), input)),
     "Payment plans": () => throws(() => applyEuCollect(body({ mode: "subscription" }), input)),
     "Pay-what-you-want prices": () => throws(() => applyEuCollect(body({}), { ...input, chooseYourPrice: true })),
-    "Discount or promotion codes": () => throws(() => applyEuCollect(body({ allow_promotion_codes: "true" }), input)) && throws(() => applyEuCollect(body({ "discounts[0][coupon]": "x" }), input)),
+    // Every checkout of a store that has discounts opens Stripe's code box, typed into or not (coord 85bd's MEDIUM A).
+    "Any sale in a store that offers discount codes, even when no code is typed": () => throws(() => applyEuCollect(body({ allow_promotion_codes: "true" }), input))
+      && /\} else if \(store\.hasDiscounts && !pwyw\) \{[\s\S]*?body\.set\("allow_promotion_codes", "true"\)/.test(checkoutSource)
+      && /const box = !discounted && store\.hasDiscounts;[\s\S]*?else if \(box\) body\.set\("allow_promotion_codes", "true"\)/.test(cartSource),
+    // Each reduced price goes on the checkout as a Stripe discount, which applyEuCollect refuses.
+    "A product at a reduced price: on sale, or at an introductory, member, fair, welcome or win-back price, or with a returning-buyer code": () => throws(() => applyEuCollect(body({ "discounts[0][coupon]": "x" }), input))
+      && ["sale", "intro", "member", "fair", "welcome", "winback", "returning"].every((mark) => new RegExp(`body\\.set\\("discounts\\[0\\]\\[coupon\\]"[^\\n]*\\n\\s*body\\.set\\("metadata\\[${mark}\\]"`).test(checkoutSource) || new RegExp(`body\\.set\\("discounts\\[0\\]\\[coupon\\]"[\\s\\S]{0,400}?metadata\\[${mark}\\]`).test(checkoutSource)),
     "Prices converted to the buyer's own currency": () => throws(() => applyEuCollect(body({}), { ...input, buyerCurrencyLive: true })),
     "More than one of the same product": () => throws(() => applyEuCollect(body({ "line_items[0][quantity]": "2" }), input)),
     "Other products added to one product's checkout": () => throws(() => applyEuCollect(body({ "line_items[1][quantity]": "1", "line_items[1][price_data][currency]": "eur", "line_items[1][price_data][unit_amount]": "500" }), input)) && readFileSync(join(process.cwd(), "app/api/store/checkout/route.ts"), "utf8").includes("gateBoxes: (boxes) => consumerGate("),
@@ -478,7 +486,13 @@ test("the behaviour holds the future: every kind the words promise is charged, e
       !euSaleGate({ product: ESS, headers: new Headers(), form: new URLSearchParams({ billing_country: "DE" }), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES }).ok
       && !euSaleGate({ product: ESS, headers: new Headers({ "x-vercel-ip-country": "DE" }), form: new URLSearchParams(), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES }).ok
       && !euSaleGate({ product: ESS, headers: new Headers({ "x-vercel-ip-country": "DE" }), form: new URLSearchParams({ billing_country: "FR" }), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES }).ok,
-    "Any sale whose VAT, or the cost of receiving it, we cannot work out, such as one in a currency with no checked exchange rate": () => throws(() => applyEuCollect(body({}), { ...input, costsCents: () => null })),
+    // The EU side reads only euros and pounds, whatever allowance exists; the UK side declares any currency in pounds (coord 85bd's MEDIUM B).
+    "Sales to buyers in the European Union in a currency other than the euro or the pound": () => {
+      const allowance = (currency: string) => ({ currency, bps: 200, source: "https://example.invalid/fx", checkedOn: "2026-11-01", validThrough: "2026-12-31" });
+      return vatCollectionCostOf(190, "usd", [allowance("usd")], NOW) === null && vatCollectionCostOf(190, "eur", [allowance("eur")], NOW) !== null
+        && vatCollectionCostOf(190, "gbp", [allowance("gbp")], NOW) !== null && vatCollectionCostOf(190, "usd", [allowance("gbp"), { ...allowance("usd"), against: "gbp" as const }], NOW, "gbp") !== null;
+    },
+    "Any other sale whose VAT, or the cost of receiving it, we cannot work out": () => throws(() => applyEuCollect(body({}), { ...input, costsCents: () => null })),
   };
   assert.deepEqual([...words.refused].sort(), Object.keys(proofs).sort(), "every item of the list has its own proof, and no proof is of an item the list lacks");
   for (const [item, proof] of Object.entries(proofs)) assert.ok(proof(), `refused, as the list says: ${item}`);
@@ -494,5 +508,9 @@ test("the places follow the side that is charging (coord 9b51's LEVE 2)", () => 
   assert.ok(eu.refusedPlaces.includes("Spain") && !eu.refusedPlaces.includes("the Isle of Man"), "EU only: no UK place under the European Union");
   assert.match(uk.refusedLead.terms, /consumer in the United Kingdom;/);
   assert.deepEqual(uk.refusedPlaces, ["the Isle of Man"], "UK only: no EU place under the United Kingdom");
+  assert.ok(eu.refused.some((w) => /European Union in a currency other than the euro or the pound/.test(w)), "EU: the currency item");
+  assert.ok(!uk.refused.some((w) => /European Union/.test(w)), "UK only: no item about the European Union");
+  assert.ok(all.refusedPlaces.includes("the French part of Saint Martin") && !all.refusedPlaces.includes("Saint Martin"), "never read as Sint Maarten, which is sold");
+  for (const words of [eu, uk, all]) assert.ok(words.terms.includes("Marktmorgen does not refund it.") && words.pricing.includes("Marktmorgen does not refund it."), "the Stripe fee on the VAT is not refunded (IV (j) 2)");
   assert.deepEqual(all.refusedPlaces, Object.values(VAT_REFUSED_PLACE_NAMES), "both: every place");
 });

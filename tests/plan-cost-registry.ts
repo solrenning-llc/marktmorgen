@@ -59,6 +59,7 @@ import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
 import { TRIAL_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
+import { PACKAGE_INDEX_COMMANDS } from "@/lib/call-packages";
 import { GIFT_INDEX_COMMANDS } from "@/lib/gifts";
 import { GROUP_INDEX_COMMANDS } from "@/lib/group-buy";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
@@ -503,12 +504,12 @@ export const ORDER_CONTACT_WRITE_COMMANDS = Math.max(
 );
 export const ORDER_CONTACT_WRITE = ORDER_CONTACT_WRITE_COMMANDS * (COMMAND + CONTACT_READ_BYTES * DB_BYTE);
 /**
- * A gift's or a purchase for several's line in its buyer's index (lib/gifts.ts, lib/group-buy.ts; #5125, 22 November
- * 2026): the commands that ride on its writes over its life, the dearer of the two, on every order of the plan's
- * figure as if each were one. The bytes it keeps are priced with the gift's and the purchase's own
- * (tests/store-data-registry.ts, nl:gift: and nl:grp:).
+ * A gift's, a purchase for several's or a call package's line in its buyer's index (lib/gifts.ts, lib/group-buy.ts,
+ * lib/call-packages.ts; #5125, 22 November 2026): the commands that ride on its writes over its life, the dearest of
+ * the three, on every order of the plan's figure as if each were one. The bytes it keeps are priced with the gift's,
+ * the purchase's and the package's own (tests/store-data-registry.ts, nl:gift:, nl:grp: and nl:pkg:s:).
  */
-export const ORDER_BUYER_INDEX = Math.max(GIFT_INDEX_COMMANDS, GROUP_INDEX_COMMANDS) * COMMAND;
+export const ORDER_BUYER_INDEX = Math.max(GIFT_INDEX_COMMANDS, GROUP_INDEX_COMMANDS, PACKAGE_INDEX_COMMANDS) * COMMAND;
 
 /** The shapes requests are costed at: wall seconds held at 2 GB, and CPU seconds. Review ceilings, not measurements. */
 export const SHAPES = {
@@ -2424,14 +2425,15 @@ export const COST_LINES: CostLine[] = [
   },
   {
     id: "order-buyer-index",
-    feature: "A gift's or a purchase for several's line in its buyer's index, so the copy of their data finds it without Stripe (#5125)",
+    feature: "A gift's, a purchase for several's or a call package's line in its buyer's index, so the copy of their data finds it without Stripe (#5125)",
     monthlyUsd: (tier) => ORDERS_INCLUDED[tier] * ORDER_BUYER_INDEX,
     sources: [
       { file: "lib/gifts.ts", names: ["GIFT_INDEX_COMMANDS", "async function saveGift", "buyerGiftsKey", "giftsBoughtBy"] },
       { file: "lib/group-buy.ts", names: ["GROUP_INDEX_COMMANDS", "async function saveGroup", "buyerGroupsKey", "groupsBoughtBy"] },
+      { file: "lib/call-packages.ts", names: ["PACKAGE_INDEX_COMMANDS", "function indexCommands", "buyerPackagesKey", "packagesBoughtBy"] },
       { file: "lib/order-rules.ts", names: ["ORDERS_INCLUDED"] },
     ],
-    basis: "Every order of the plan's figure taken as a gift or a purchase for several, the dearer: an SADD and an EXPIRE on each of at most two writes of it that name its buyer (GIFT_INDEX_COMMANDS, GROUP_INDEX_COMMANDS), held in tests/gift-person-index.test.ts and tests/group-person-index.test.ts. The copy's own reads are the copy's (#5125 row 3).",
+    basis: "Every order of the plan's figure taken as a gift, a purchase for several or a call package, the dearest: an SADD and an EXPIRE on each of at most two writes of a gift or a purchase that name its buyer (GIFT_INDEX_COMMANDS, GROUP_INDEX_COMMANDS), or an SADD, an EXPIRE NX and an EXPIRE GT in the write that keeps a package's token (PACKAGE_INDEX_COMMANDS), held in tests/gift-person-index.test.ts, tests/group-person-index.test.ts and tests/package-person-index.test.ts. The copy's own reads are the copy's (#5125 row 3).",
   },
   {
     id: "order-contact-write",

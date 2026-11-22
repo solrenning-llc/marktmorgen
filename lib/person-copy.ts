@@ -79,7 +79,7 @@ import { toldOf } from "@/lib/closing-buyers";
 import { MAX_PAID_CHECKOUTS, paidCheckoutsOf } from "@/lib/person-copy-stripe";
 import { buyerField, giftsBoughtBy, readGift } from "@/lib/gifts";
 import { isGroupJob, readGroup, buyerField as groupBuyerField, groupsBoughtBy } from "@/lib/group-buy";
-import { type Bought, packageKeys } from "@/lib/call-packages";
+import { type Bought, packageKeys, packagesBoughtBy } from "@/lib/call-packages";
 import { readShipped } from "@/lib/shipments";
 import { callScope, readRecords } from "@/lib/meet-records";
 import { heldPaymentsOf } from "@/lib/closing-holds";
@@ -262,9 +262,10 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
 const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true });
 
 /**
- * The most Redis commands the call-packages copier sends for one copy (#5125 (1)): one GET a package checkout of the
- * person's, and a copy lists at most MAX_PAID_CHECKOUTS of their checkouts (lib/person-copy-stripe.ts). Before, it read
- * the store's whole set of packages, which never shrinks, and one GET a package anyone bought there.
+ * The bound the call-packages copier was held to while it read the person's checkouts from Stripe (#5125 (1)): one GET
+ * a package checkout of theirs, and a copy listed at most MAX_PAID_CHECKOUTS of them. It now reads the person's own
+ * index (#5125, the Stripe-read copiers row): two SMEMBERS, then one GET a package they bought, so its reads follow
+ * their own purchases, never the store's other buyers.
  */
 export const CALL_PACKAGE_COPY_READS_MAX = MAX_PAID_CHECKOUTS;
 
@@ -602,12 +603,11 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return out;
   },
   "lib/call-packages.ts": async (s) => {
-    // Only the person's own packages (#5125 (1)): a package is kept under the checkout that paid for it, and is written
-    // down only for a checkout marked kind "package" (lib/call-packages.ts, recordPackage), so the person's paid
-    // checkouts, already read whole for this copy (checkoutsOf), name every package of theirs. The store's whole set of
-    // packages (packagesKey), which never shrinks, is no longer read: one GET a package checkout of theirs, at most
-    // CALL_PACKAGE_COPY_READS_MAX.
-    const checkouts = (await checkoutsOf(s)).filter((c) => c.meta.kind === "package").map((c) => c.id);
+    // Only the person's own packages, from their own index (#5125, the Stripe-read copiers row: never through the
+    // store's current Stripe account, which the creator may disconnect or replace): a package's checkout is put in its
+    // buyer's index in the same write as its booking link's token (lib/call-packages.ts, finishPackage). The store's
+    // whole set of packages (packagesKey), which never shrinks, is not read: two SMEMBERS, then one GET a package of theirs.
+    const checkouts = await packagesBoughtBy(s.statsId, s.email);
     const out: unknown[] = [];
     // Each package read exactly: one that cannot be read fails the copy, never taken as somebody else's
     // (packageForCopy). A record that ran out is none; the record's own buyer still decides whose it is.

@@ -79,7 +79,7 @@ import { domainKey } from "@/lib/domains";
 import { dropTeam, memberStoresExact, readTeam } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
 import { revokeAllKeys } from "@/lib/api-keys";
-import { forgetBoth, queueStoreForget } from "@/lib/store-forget-retry";
+import { forgetBoth, queueStoreForget, queueUnseenFiles } from "@/lib/store-forget-retry";
 import { forgetStoreWebhooks } from "@/lib/webhooks";
 import { forgetStoreSync } from "@/lib/email-sync";
 import { forgetShipmentMail } from "@/lib/shipment-mail-outbox";
@@ -866,6 +866,15 @@ async function admitDeleted(entries: Map<string, Batched>, raws: Map<string, str
         } catch (queued) {
           console.error("putting a deleted store's webhooks, keys and assistant notes in line failed", queued);
         }
+        continue;
+      }
+      // Its files, when the delete's own try neither noted them as seen to nor put them in line (a request cut off part
+      // way): put in line now, before its entry joins the walk; not confirmed, the entry waits (Codex X6's LOW on #4348).
+      try {
+        await queueUnseenFiles(entry.statsId ?? null, entry.sid, Date.now(), typeof entry.community === "string" ? entry.community : null);
+      } catch (error) {
+        console.error("whether a deleted store's files were seen to could not be confirmed; its walk waits", error);
+        sure = false;
         continue;
       }
       const walkable: Batched = { ...entry };

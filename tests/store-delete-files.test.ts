@@ -13,6 +13,8 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { sweepTaskUploads } from "@/lib/assignment";
 import { deleteFile } from "@/lib/file-store";
 import { FORGET_TRIES, queueStoreForget, retryStoreForgets } from "@/lib/store-forget-retry";
+import { eraseClosed } from "@/lib/closed-store-data";
+import { finishClosed } from "@/lib/plan-closing";
 import { claimHandle, createStore, ensureStatsId, imageFolder, storeFolder, storeRef } from "@/lib/store";
 import { files, state } from "./store-delete-files-world";
 import { done, is, part } from "./check";
@@ -158,6 +160,50 @@ async function main(): Promise<void> {
   } finally { redis.pipeline = pipeline; Date.now = realNow; }
   const lateRecovered = await retryStoreForgets(Date.now() + 30_000);
   is("the next bounded run deletes its picture and finishes", [lateRecovered.done, files.has(latePicture)], [1, false]);
+
+  // Codex X6's LOW on #4348 @0b21818b90: a request cut off while it deleted the files (its function's time out) neither
+  // noted them nor put the store in line, so the folders it had not reached yet were kept for good. The walk's entry is
+  // written before the record goes (queueDeleted), and its admission now puts such a store in line for its files.
+  part("A delete cut off part way through its files");
+  globalThis.fetch = (async () => new Response("{}", { status: 404 })) as typeof fetch;
+  // A walk begins a day after the last one began (WALK_GAP_MS): each walk below is a day after the one before.
+  const DAY = 86_400_000;
+  const walkAt = Date.now();
+  await eraseClosed(Date.now() + 20_000, finishClosed, walkAt);
+  for (const field of (redis.run(["HKEYS", "nl:forget:q"]) as string[])) redis.run(["HDEL", "nl:forget:q", field]);
+  const cut = await createStore(owner, "filescut", "Files cut", "");
+  if (!cut.ok) throw new Error("no extra store to cut off");
+  const cutRef = storeRef(cut.store);
+  const cutPicture = `images/${await imageFolder(cutRef)}/cut-picture.webp`;
+  const cutLeftover = `stores/${await storeFolder(cutRef)}/cut-upload.zip`;
+  files.set(cutPicture, 40_000);
+  files.set(cutLeftover, 900_000);
+  state.cutOff = true;
+  void deleteFromStudio(owner, "filescut", cut.store.sid);
+  for (let i = 0; i < 200 && files.has(cutPicture); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  state.cutOff = false;
+  const cutField = (redis.run(["HKEYS", "nl:forget:q"]) as string[]).find((field) => field.endsWith(`|${cut.store.sid}`));
+  is(
+    "cut off after its first folder: one file gone, one kept, nothing noted and nothing in line",
+    [files.has(cutPicture), files.has(cutLeftover), redis.run(["HEXISTS", "nl:forget:files", cut.store.sid]), cutField],
+    [false, true, 0, undefined],
+  );
+  await eraseClosed(Date.now() + 20_000, finishClosed, walkAt + DAY);
+  const admitted = (redis.run(["HKEYS", "nl:forget:q"]) as string[]).filter((field) => field.endsWith(`|${cut.store.sid}`));
+  is("the walk's admission puts it in line for its files", admitted.length, 1);
+  const cutRound = await retryStoreForgets(Date.now() + 30_000);
+  is("the line's round deletes the file the cut-off request never reached, and notes it", [cutRound.done, files.has(cutLeftover), redis.run(["HEXISTS", "nl:forget:files", cut.store.sid])], [1, false, 1]);
+
+  part("A delete that saw to every file is not put in line again by the walk");
+  const whole = await createStore(owner, "fileswhole", "Files whole", "");
+  if (!whole.ok) throw new Error("no extra store seen to whole");
+  const wholePicture = `images/${await imageFolder(storeRef(whole.store))}/whole-picture.webp`;
+  files.set(wholePicture, 40_000);
+  const wholeResponse = await deleteFromStudio(owner, "fileswhole", whole.store.sid);
+  is("deleted, its picture with it, and its files noted as seen to", [wholeResponse.status, files.has(wholePicture), redis.run(["HEXISTS", "nl:forget:files", whole.store.sid])], [303, false, 1]);
+  await eraseClosed(Date.now() + 20_000, finishClosed, walkAt + 2 * DAY);
+  is("the walk's admission puts nothing in line for it", (redis.run(["HKEYS", "nl:forget:q"]) as string[]).some((field) => field.endsWith(`|${whole.store.sid}`)), false);
 
   done();
 }

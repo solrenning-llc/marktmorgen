@@ -40,7 +40,8 @@
  * a deleted store in each round, at most FORGET_PER_RUN stores a day, and only for a store
  * whose try at the delete (held in tests/sg2-unknown-replies.test.ts) or at the walk's
  * admission failed; another round starts only when a try at the walk's admission fails
- * while the line no longer holds the store (each such try is the walk's: one a run).
+ * while the line no longer holds the store (each such try is the walk's: one a run), or when its admission finds the
+ * store's files neither noted as seen to, given up nor in line (queueUnseenFiles: a delete cut off part way).
  *
  * Since #4348 a try also deletes the store's files (lib/deleted-store-files.ts), whose Blob listings, deletes and
  * Redis DEL are priced in the line deleted-store-files of tests/plan-cost-registry.ts: a pass the deadline cuts off
@@ -170,6 +171,31 @@ export async function queueStoreForget(statsId: string | null, sid: string, now 
   const row = parseEntry(raw);
   if (!row || row.community) return;
   await redisPipeline([["HSET", QUEUE, field, JSON.stringify({ ...row, community: entry.community })]]);
+}
+
+/**
+ * At the walk's admission of a deleted store whose forgets were just confirmed (lib/closed-store-data.ts admitDeleted):
+ * a store whose files are not noted as seen to, not given up and not in line is put in line for them. The delete's own
+ * try (app/api/store/stores, forgetStoreFiles) notes its files only once every folder was listed and emptied, and puts
+ * the store in line only once its listing or a delete failed, both after it returned; a request cut off part way (its
+ * function's time out, its instance gone) did neither, and left folders emptied in part that nothing found again
+ * (Codex X6's LOW on #4348). The walk's entry for it is written before its record goes (queueDeleted), so the
+ * admission always comes, and is its one round of the line: a store noted, given up or still in line is left as it
+ * is, so its files still take the delete's own try and one round at most (line deleted-store-files). Each read
+ * exactly: one in another shape throws, and the admission waits for the next run (rule 24). At most three reads and
+ * queueStoreForget's three writes.
+ */
+export async function queueUnseenFiles(statsId: string | null, sid: string, now = Date.now(), community: string | null = null): Promise<void> {
+  const field = fieldOf(statsId, sid);
+  if (!field || !isRedisConfigured()) throw new Error("whether a deleted store's files were seen to could not be read");
+  const replies = repliesFor(await redisPipeline([["HEXISTS", FILES, sid], ["HEXISTS", KEPT, field], ["HEXISTS", QUEUE, field]]), 3);
+  const seen = replies?.map(presence) ?? null;
+  if (!seen || seen.some((one) => one === null)) throw new Error("reading whether a deleted store's files were seen to answered in an unknown shape");
+  if (seen.includes(1)) return;
+  const entry: Entry = { tries: 1, first: now, last: now, ...(community && COMMUNITY_ID.test(community) ? { community } : {}) };
+  const n = countOf((await redisPipeline([["HSETNX", QUEUE, field, JSON.stringify(entry)]]))[0]);
+  if (n === null) throw new Error("putting a deleted store's files in line answered in an unknown shape");
+  if (n === 1) await redisPipeline([["HINCRBY", monthKey(monthOf(now)), "queued", 1], ["EXPIRE", monthKey(monthOf(now)), MONTH_SECONDS]]);
 }
 
 /**

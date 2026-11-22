@@ -22,10 +22,11 @@
  * Pure and browser-safe: no IO, no secret.
  */
 import { vatOnTop } from "@/lib/eu-vat-amount";
-import { REVIEWED_VAT_FX_ALLOWANCES, vatCollectionCostOf, type VatFxAllowance } from "@/lib/eu-vat-collection-cost";
+import { REVIEWED_VAT_FX_ALLOWANCES, allowanceInForce, vatCollectionCostOf, type VatFxAllowance } from "@/lib/eu-vat-collection-cost";
 import { UK_VAT_RATE_VALID_UNTIL, ukVatOnTop } from "@/lib/uk-vat";
 import {
-  EU_OSS_REGISTRATION, UK_VAT_REGISTRATION, VAT_COMMERCIAL_REVIEWS, euVatCollectOn, type SwitchInput, ukVatCollectOn,
+  EU_OSS_REGISTRATION, EU_VAT_COLLECT_REVIEWED, UK_VAT_COLLECT_REVIEWED, UK_VAT_REGISTRATION, VAT_COMMERCIAL_REVIEWS, euVatCollectOn,
+  type SwitchInput, ukVatCollectOn,
 } from "@/lib/vat-registrations";
 
 /** The Stripe rate the example uses, in basis points: an illustration, never a creator's real rate. */
@@ -158,11 +159,23 @@ function sinceOf(places: VatFeePlace[], input: VatFeeInput, now: Date, currency:
     }
   }
   const day = now.toISOString().slice(0, 10);
-  for (const a of allowances) {
-    if (a.currency === currency && a.against === undefined && a.checkedOn <= day && day <= a.validThrough) dates.push(a.checkedOn);
-  }
-  return dates.reduce((latest, date) => (date > latest ? date : latest), "");
+  // Only the allowances the cost code itself accepts (allowanceInForce), so a malformed or refused one never dates the words.
+  for (const a of allowances) if (allowanceInForce(a, currency, day)) dates.push(a.checkedOn);
+  return dates.filter(realDay).reduce((latest, date) => (date > latest ? date : latest), "");
 }
+
+/**
+ * Whether the words can ever show in this build: only while EU_VAT_COLLECT_REVIEWED or UK_VAT_COLLECT_REVIEWED is true.
+ * Both are constants, so while both are false no clock turns a switch on and a page built ahead of time says what the
+ * checkout does. Once one is true, the switch also turns on with dates (a registration, a review, an allowance), so the
+ * Terms and the pricing page render per request and read the same decision as the checkout (Claude 1 f9afa7's MEDIUM).
+ */
+export const vatCanTurnOn = (): boolean => EU_VAT_COLLECT_REVIEWED || UK_VAT_COLLECT_REVIEWED;
+
+const realDay = (day: string): boolean => {
+  const at = new Date(`${day}T00:00:00Z`);
+  return REAL_DAY.test(day) && Number.isFinite(at.getTime()) && at.toISOString().slice(0, 10) === day;
+};
 
 const REAL_DAY = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
@@ -172,8 +185,8 @@ const REAL_DAY = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
  * so no page prints a date that is not one.
  */
 export function termsLastUpdated(base: string, words: VatFeeWords | null): string {
-  const day = words && words.since > base ? words.since : base;
+  if (!realDay(base)) throw new Error(`Not a calendar day: ${base}`);
+  const day = words && realDay(words.since) && words.since > base ? words.since : base;
   const at = new Date(`${day}T00:00:00Z`);
-  if (!REAL_DAY.test(day) || !Number.isFinite(at.getTime()) || at.toISOString().slice(0, 10) !== day) throw new Error(`Not a calendar day: ${day}`);
   return new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }).format(at);
 }

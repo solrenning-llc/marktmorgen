@@ -27,7 +27,8 @@ import { STORAGE_BRAKE_BYTES, storageWords } from "@/lib/storage-quota";
 import { NON_PAYING_DATA_ROOM_BYTES, dataRoomListWords, dataWords } from "@/lib/store-data-rules";
 import { INVITE_PROGRAM_OPEN, INVITE_PAUSE_NOTICE, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS, INVITE_SHARE_PERCENT } from "@/lib/creator-invite-rules";
 import { feeWords, planPriceWords } from "@/lib/fee-words";
-import { termsLastUpdated, vatFeeWords } from "@/lib/vat-fee-words";
+import { termsLastUpdated, vatCanTurnOn, vatFeeWords } from "@/lib/vat-fee-words";
+import { PerRequest } from "@/components/per-request";
 import { TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { HELD_DAYS } from "@/lib/community-approval-rules";
 import { COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
@@ -47,6 +48,8 @@ export default function TermsPage() {
   const vat = vatFeeWords();
   return (
     <LegalPage title="Terms of Service" lastUpdated={termsLastUpdated(TERMS_UPDATED_ON, vat)}>
+      {/* Built ahead of time while no VAT switch can turn on; per request once one can (lib/vat-fee-words.ts). */}
+      {vatCanTurnOn() ? <PerRequest /> : null}
       <p>
         These Terms of Service (“Terms”) govern your access to and use of the
         websites, products, and subscription services operated by Solrenning

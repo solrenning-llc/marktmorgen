@@ -15,7 +15,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { EXAMPLE_PROCESSING_BPS, termsLastUpdated, vatFeeWords } from "@/lib/vat-fee-words";
+import { EXAMPLE_PROCESSING_BPS, termsLastUpdated, vatCanTurnOn, vatFeeWords } from "@/lib/vat-fee-words";
 import { vatOnTop } from "@/lib/eu-vat-amount";
 import { ukVatOnTop } from "@/lib/uk-vat";
 import { vatCollectionCostOf, type VatFxAllowance } from "@/lib/eu-vat-collection-cost";
@@ -124,6 +124,34 @@ test("the scope is what the code collects for: products delivered automatically 
     assert.match(text, /delivered automatically online/, "the scope of lib/eu-vat-supply.ts \"ess\"");
     assert.match(text, /Live calls and anything that ships are not covered/, "the \"human\" and \"goods\" supplies are named as outside it");
   }
+});
+
+test("pages and checkout read the same decision: with both reviewed constants off no clock turns the words on, otherwise the pages render per request (Claude 1 f9afa7's MEDIUM)", () => {
+  assert.equal(vatCanTurnOn(), false, "today both EU_VAT_COLLECT_REVIEWED and UK_VAT_COLLECT_REVIEWED are false");
+  // With the constants off, every date and every clock leaves the words off, so a page built ahead of time is right.
+  for (const day of ["2026-11-01", "2026-12-31", "2027-06-30", "2030-01-01"]) {
+    const now = new Date(`${day}T12:00:00Z`);
+    const off = { ...EU_ON, reviewed: false, now };
+    assert.equal(vatFeeWords({ eu: off, uk: { ...UK_ON, reviewed: false, now }, now, allowances: ALLOWANCES }), null, `off on ${day}`);
+  }
+  for (const page of ["app/terms/page.tsx", "app/pricing/page.tsx"]) {
+    const source = readFileSync(join(process.cwd(), page), "utf8");
+    assert.match(source, /\{vatCanTurnOn\(\) \? <PerRequest \/> : null\}/, `${page} renders per request once a switch can turn on`);
+    assert.match(source, /from "@\/components\/per-request"/, `${page} uses the one per-request marker`);
+  }
+  const marker = readFileSync(join(process.cwd(), "components/per-request.tsx"), "utf8");
+  assert.match(marker, /await connection\(\);/, "the marker waits for the request (next/server connection)");
+});
+
+test("only allowances the cost code accepts date the words; a malformed one never throws (Claude 1 f9afa7's LEVE)", () => {
+  const later: SwitchInput = { ...EU_ON, reviews: [{ jurisdiction: "EU", registration: "EU372000000", reviewedOn: "2026-11-02", reviewer: "owner" }] };
+  const malformed = [...ALLOWANCES, { currency: "eur", bps: 300, source: "https://www.ecb.europa.eu/", checkedOn: "2026-11-1a", validThrough: "2026-12-31" }];
+  const a = vatFeeWords({ eu: later, uk: OFF, now: NOW, allowances: malformed });
+  assert.ok(a);
+  assert.equal(a.since, "2026-11-02", "the malformed day is not read");
+  assert.doesNotThrow(() => termsLastUpdated("2026-11-10", a));
+  const plainHttp = [...ALLOWANCES, { currency: "eur", bps: 300, source: "http://www.ecb.europa.eu/", checkedOn: "2026-11-20", validThrough: "2026-12-31" }];
+  assert.equal(vatFeeWords({ eu: later, uk: OFF, now: NOW, allowances: plainHttp })?.since, "2026-11-02", "an allowance the cost code refuses does not move the date");
 });
 
 test("short sentences in plain US English", () => {

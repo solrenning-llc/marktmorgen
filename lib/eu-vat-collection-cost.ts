@@ -81,10 +81,18 @@ function httpsSource(source: string): boolean {
   }
 }
 
+/**
+ * Whether one allowance is reviewed and in force on `day` for the currency (and, for a period-rate gap, against the
+ * return's). The one rule: the cost below and the words that describe it (lib/vat-fee-words.ts) both read it.
+ */
+export function allowanceInForce(a: VatFxAllowance, currency: string, day: string, against?: string): boolean {
+  return a.currency === currency && a.against === against && Number.isSafeInteger(a.bps) && a.bps > 0 && a.bps <= 10_000
+    && httpsSource(a.source) && reviewedDay(a.checkedOn) && reviewedDay(a.validThrough) && a.checkedOn <= day && day <= a.validThrough;
+}
+
 /** The dearer allowance in force today for the currency (and, for a period-rate gap, against the return's), or null. */
 function allowanceOf(currency: string, allowances: readonly VatFxAllowance[], day: string, against?: string): number | null {
-  const valid = allowances.filter((a) => a.currency === currency && a.against === against && Number.isSafeInteger(a.bps) && a.bps > 0 && a.bps <= 10_000
-    && httpsSource(a.source) && reviewedDay(a.checkedOn) && reviewedDay(a.validThrough) && a.checkedOn <= day && day <= a.validThrough);
+  const valid = allowances.filter((a) => allowanceInForce(a, currency, day, against));
   return valid.length ? Math.max(...valid.map((a) => a.bps)) : null;
 }
 

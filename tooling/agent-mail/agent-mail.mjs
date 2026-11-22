@@ -415,12 +415,14 @@ export function confirmadasSemIdentidade(eu, agora = new Date(), commit = buscar
     let sessao = "", quando = 0;
     for (const linha of gitC(["log", "--format=%x01%ct%x02%(trailers:key=Mail-Session,valueonly,separator=%x20)", "--name-only", "--diff-filter=A", "--no-renames", ...args]).split("\n")) {
       if (linha.startsWith("\x01")) { const [t, ses] = linha.slice(1).split("\x02"); quando = Number(t) * 1000; sessao = ses.trim(); continue; }
-      if (linha.startsWith("lidas/") && familia(linha.split("/")[1]) === fam) saida.push({ id: idDe(linha), quando, identificada: /^session_[0-9A-Za-z]{20,40} \(/.test(sessao) });
+      // LEVE do Claude 2 lpgvy (2659): um commit sem o trailer é de uma versão anterior ao A13, não uma escrita não
+      // identificada; só o "não identificada (...)" que a ferramenta grava conta como tal.
+      if (linha.startsWith("lidas/") && familia(linha.split("/")[1]) === fam) saida.push({ id: idDe(linha), quando, identificada: /^session_[0-9A-Za-z]{20,40} \(/.test(sessao), naoIdentificada: /^não identificada/.test(sessao) });
     }
     return saida;
   };
   const semId = new Map();
-  for (const a of lerLog(["--since=24.hours", commit, "--", "lidas"])) if (!a.identificada && agora - a.quando < 24 * 3600000) semId.set(a.id, a.quando);
+  for (const a of lerLog(["--since=24.hours", commit, "--", "lidas"])) if (a.naoIdentificada && agora - a.quando < 24 * 3600000) semId.set(a.id, a.quando);
   if (!semId.size) return [];
   const caminhos = arquivos(commit, "lidas").filter((c) => semId.has(idDe(c)) && familia(c.split("/")[1]) === fam);
   const comId = new Set(lerLog([commit, "--", ...caminhos]).filter((a) => a.identificada).map((a) => a.id));
@@ -1763,6 +1765,14 @@ export function estadoPr(pr, agora = new Date(), commit = buscar()) {
     const acao = campo(texto, "Ação"), por = campo(texto, "Por"), quando = new Date(campo(texto, "Data"));
     const s = sessaoDe(texto), sessao = sessaoDaMarca(texto), fam = s?.familia ?? familia(por);
     const momento = Number.isNaN(quando.getTime()) ? agora : quando;
+    // HOLD do dono (coordenador, 3c47): nada o tira, nem escrita não identificada, salvo a liberação da sessão nomeada
+    // com o pedido do coordenador na #4932 e a referência da decisão do dono que manda liberar. Um HOLD por cima o mantém.
+    if (e && e.acao === "HOLD" && e.dono && ativoEm(e, momento) && acao !== "HOLD") {
+      if (!(acao === "LIBERADO" && s?.identificada && privilegioValido(texto, por) && ID_DONO.test(campo(texto, "Liberação do dono")))) {
+        ignoradas.push({ caminho: c, por, motivo: `${acao} sobre um HOLD do dono, sem a sessão nomeada, o pedido na #4932 e a decisão do dono` });
+        continue;
+      }
+    }
     if (s && e && ativoEm(e, momento)) {
       const priv = privilegioValido(texto, por);
       let motivo = "";
@@ -1776,7 +1786,8 @@ export function estadoPr(pr, agora = new Date(), commit = buscar()) {
       if (motivo) { ignoradas.push({ caminho: c, por, motivo }); continue; }
     }
     const segurando = acao === "HOLD" ? new Set([...(e && ativoEm(e, momento) && e.acao === "HOLD" ? e.segurando : []), fam]) : new Set();
-    e = { acao, por, sessao, motivo: campo(texto, "Motivo"), quando, segurando, k };
+    const dono = acao === "HOLD" ? (campo(texto, "HOLD do dono") || (e && ativoEm(e, momento) && e.acao === "HOLD" ? e.dono : "")) : "";
+    e = { acao, por, sessao, motivo: campo(texto, "Motivo"), quando, segurando, k, dono };
   }
   const proximo = marcas[marcas.length - 1].k + 1;
   if (!e) return { acao: null, ativo: false, proximo, segurando: new Set(), ignoradas };
@@ -1784,10 +1795,14 @@ export function estadoPr(pr, agora = new Date(), commit = buscar()) {
   return { ...e, ativo: ativoEm(e, agora), proximo, ignoradas };
 }
 
+/** O identificador de uma decisão do dono (CP: PREFIXO-AAAAMMDD-HHMM-ASSUNTO; a hora pode vir sem preencher, "HHMM"). */
+export const ID_DONO = /^OWNER-\d{8}-(?:\d{4}|HHMM)-[A-Z0-9][A-Z0-9-]*$/;
+
 /** Marca o PR: CLAIMED, HOLD ou LIBERADO, com as regras de quem pode (passo 5). */
-export function marcarPr({ pr, eu, acao, motivo = "", pedido = "", dono = "", agora = new Date() }) {
+export function marcarPr({ pr, eu, acao, motivo = "", pedido = "", dono = "", holdDono = "", liberacaoDono = "", agora = new Date() }) {
   if (!/^\d+$/.test(String(pr ?? ""))) throw new Error("--pr é obrigatório (o número do PR)");
   if (!["CLAIMED", "HOLD", "LIBERADO"].includes(acao)) throw new Error(`ação desconhecida: ${acao}`);
+  if (holdDono && (acao !== "HOLD" || !ID_DONO.test(String(holdDono)))) throw new Error("--owner-hold vai só com hold-pr e precisa do identificador da decisão do dono, no formato OWNER-AAAAMMDD-HHMM-ASSUNTO");
   const commit = buscar();
   const atual = estadoPr(pr, agora, commit);
   const minha = sessaoAtual()?.id ?? null;
@@ -1801,7 +1816,14 @@ export function marcarPr({ pr, eu, acao, motivo = "", pedido = "", dono = "", ag
   if (acao === "CLAIMED" && outraSessao) {
     return { recusado: `#${pr} está com CLAIMED de ${atual.por} (outra sessão) desde ${atual.quando.toISOString()}; um CLAIMED é da sessão que o gravou` };
   }
-  if (acao === "LIBERADO" && atual.ativo && (atual.acao === "HOLD" || outraSessao)) {
+  if (acao === "LIBERADO" && atual.ativo && atual.acao === "HOLD" && atual.dono) {
+    if (!pedido || pedido === true || !ID_DONO.test(String(liberacaoDono))) {
+      return { recusado: `#${pr} está com HOLD do dono (${atual.dono}); só a sessão nomeada o libera, com o pedido do coordenador na #4932 (--request) e a decisão do dono que manda liberar (--owner-decision OWNER-...); nem quem o pôs nem o autor` };
+    }
+    priv = conferirPrivilegio({ eu, acao: "libera um HOLD do dono", comando: "release-pr", alvo: String(pr), pedido, dono, agora, commit });
+    conferirDistancia(pr, priv.s.id, commit);
+    extras.push(...linhasPrivilegio(priv), `Liberação do dono: ${liberacaoDono}`);
+  } else if (acao === "LIBERADO" && atual.ativo && (atual.acao === "HOLD" || outraSessao)) {
     const segurou = atual.acao === "HOLD" && [...atual.segurando].every((f) => f === familia(eu));
     if (!segurou) {
       if (pedido && pedido !== true) {
@@ -1818,6 +1840,7 @@ export function marcarPr({ pr, eu, acao, motivo = "", pedido = "", dono = "", ag
       }
     }
   }
+  if (holdDono) extras.push(`HOLD do dono: ${holdDono}`);
   const corpo = [`Ação: ${acao}`, `PR: ${pr}`, `Por: ${eu}`, `Data: ${agora.toISOString()}`, ...(motivo ? [`Motivo: ${motivo}`] : []), ...extras, `Sessão: ${linhaSessao()}`, ""].join("\n");
   try {
     acrescentar({ [`prs/${pr}/${atual.proximo}`]: corpo, ...(priv ? avisoPrivilegio({ eu, assunto: `#${pr}: ${atual.acao} de ${atual.por} liberado por ${eu}`, p: priv, agora }) : {}) }, `#${pr}: ${acao} (${eu})`);
@@ -1867,6 +1890,7 @@ export const OPCOES = {
   as: "eu", from: "de", to: "para", subject: "assunto", text: "texto", file: "arquivo", "reply-to": "responde", all: ["tudo", "todas"],
   exhausted: "sem", out: "sem", available: "com", until: "ate", by: "por", remaining: "resta", renews: "renova", also: "tambem", seconds: "segundos", exclude: "exclui",
   result: "resultado", reason: "motivo", name: "nome", on: "ligar", off: "desligar", link: "link", request: "pedido", "owner-message": "dono",
+  "owner-hold": "holdDono", "owner-decision": "liberacaoDono",
 };
 const RESULTADOS = { enqueued: "enfileirado", declined: "recusado", READY: "READY", CHANGES: "CHANGES" };
 const TIPOS_EN = { review: "revisao", enqueue: "fila" };
@@ -2015,12 +2039,13 @@ async function main(argv) {
   } else if (comando === "reivindicar" || comando === "segurar" || comando === "liberar") {
     if (!o.eu) throw new Error("--as é obrigatório");
     const acao = { reivindicar: "CLAIMED", segurar: "HOLD", liberar: "LIBERADO" }[comando];
-    const r = marcarPr({ pr: o.pr, eu: o.eu, acao, motivo: o.motivo === true ? "" : o.motivo ?? "", pedido: o.pedido ?? "", dono: o.dono ?? "" });
+    const r = marcarPr({ pr: o.pr, eu: o.eu, acao, motivo: o.motivo === true ? "" : o.motivo ?? "", pedido: o.pedido ?? "", dono: o.dono ?? "",
+      holdDono: o.holdDono === true ? "x" : o.holdDono ?? "", liberacaoDono: o.liberacaoDono === true ? "" : o.liberacaoDono ?? "" });
     console.log(r.recusado ? `RECUSADO: ${r.recusado}` : `#${o.pr}: ${acao} registrado por ${o.eu}`);
     if (r.recusado) process.exitCode = 3;
   } else if (comando === "estado-pr") {
     const e = estadoPr(o.pr);
-    console.log(e.acao ? `#${o.pr}: ${e.acao} por ${e.por} em ${e.quando.toISOString()}${e.motivo ? ` (${e.motivo})` : ""}${e.ativo ? " (ativo)" : " (expirado ou liberado)"}` : `#${o.pr}: livre`);
+    console.log(e.acao ? `#${o.pr}: ${e.acao === "HOLD" && e.dono && e.ativo ? `HOLD do dono (${e.dono})` : e.acao} por ${e.por} em ${e.quando.toISOString()}${e.motivo ? ` (${e.motivo})` : ""}${e.ativo ? " (ativo)" : " (expirado ou liberado)"}` : `#${o.pr}: livre`);
   } else if (comando === "quem") {
     const agora = new Date(), c = cotas(agora);
     const ha = (d) => { const m = Math.max(0, Math.floor((agora - d) / 60000)); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };

@@ -553,6 +553,15 @@ console.log("step 6: free text never becomes a field (A12), unidentified acks ar
   is("an unidentified ack is written with a warning (A13)", r.ok && /ATENÇÃO.*não identificada/.test(r.out), r.out);
   r = run(["read", "--as", "Claude 3 Z"], { ...m7, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
   is("the family, reading identified, is told a message of its own was acknowledged by an unidentified write (A13)", new RegExp(`${idA13}.*não identificada|não identificada.*${idA13}`, "s").test(r.out), r.out);
+  // LOW of Claude 2 lpgvy (2659): an ack from a version before A13 has no Mail-Session trailer at all; it is not an
+  // unidentified write, and read does not warn about it. Only the explicit "não identificada (...)" counts.
+  {
+    const msgV = run(["send", "--from", "Claude 4 X", "--to", "Claude 3 Z", "--subject", "old ack", "--text", "x"], { ...m7, ...as("c4") });
+    const idV = /enviada: (\S+)/.exec(msgV.out)?.[1];
+    raw(`lidas/claude-3-z/${idV}`, `${new Date().toISOString()}\n`, join(T, "mail7.git"));
+    const lido = run(["read", "--as", "Claude 3 Z"], { ...m7, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+    is("an ack written before A13 (no Mail-Session trailer) is not reported as an unidentified write (2659)", Boolean(idV) && !lido.out.includes(idV), lido.out);
+  }
   // LOW 2 of Claude 2 lpgvy on #5113: read looks only at acks written in the last 24 hours, not at every ack of the family.
   {
     const c = join(T, `velhas-${Math.random().toString(16).slice(2)}`);
@@ -974,6 +983,31 @@ console.log("ce2d: claim-review and claim-enqueue on those formats");
   is("ce2d61: the queue is not delivered to Claude 1, whose verdict is on the second line", fila61.ok && !/pegou:/.test(r.out) && /veredito da sua família neste head no PR/.test(r.out), fila61.out + r.out);
   r = run(["claim-enqueue", "--as", "Claude 2 X"], env("c2"));
   is("ce2d61: a family named only in a re-review request ('This answers Claude 2's CHANGES') is not kept out of the queue", !/veredito da sua família neste head no PR/.test(r.out), r.out);
+}
+
+console.log("the owner's HOLD: only the named session releases it, on a coordinator request and the owner's decision (coordinator 3c47)");
+{
+  g(["init", "-q", "--bare", "mail62.git"]); g(["push", "-q", "../mail62.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m62 = { CORREIO_REPO: join(T, "mail62.git"), CORREIO_GIT_DIR: join(T, "dir62.git") };
+  const st61 = () => run(["pr-status", "--pr", "20"], m62).out;
+  r = run(["hold-pr", "--as", "Claude 4 X", "--pr", "20", "--reason", "owner", "--owner-hold", "bad id"], { ...m62, ...as("c4") });
+  is("an owner's HOLD needs the owner's decision id in its format", !r.ok && /OWNER-AAAAMMDD-HHMM-ASSUNTO/.test(r.out), r.out);
+  r = run(["hold-pr", "--as", "Claude 4 X", "--pr", "20", "--reason", "child-safety set", "--owner-hold", "OWNER-20261122-0700-HOLD-TEST"], { ...m62, ...as("c4") });
+  is("an owner's HOLD is written with the decision id and shown as such", r.ok && /HOLD do dono \(OWNER-20261122-0700-HOLD-TEST\)/.test(st61()), r.out + st61());
+  r = run(["release-pr", "--as", "Claude 4 X", "--pr", "20"], { ...m62, ...as("c4") });
+  is("whoever placed it cannot release an owner's HOLD", !r.ok && /HOLD do dono/.test(st61()), r.out + st61());
+  r = run(["release-pr", "--as", "Claude 3 Z", "--pr", "20"], { ...m62, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+  is("the PR's author cannot release it either", !r.ok && /HOLD do dono/.test(st61()), r.out + st61());
+  raw("prs/20/1", `Ação: LIBERADO\nPR: 20\nPor: Claude 3 Z\nData: ${new Date().toISOString()}\n`, join(T, "mail62.git"));
+  is("a release written by raw git, unidentified, does not count against an owner's HOLD", /HOLD do dono/.test(st61()), st61());
+  r = run(["hold-pr", "--as", "Claude 2 X", "--pr", "20", "--reason", "another hold"], { ...m62, ...as("c2") });
+  is("another HOLD on top keeps the owner's HOLD", /HOLD do dono \(OWNER-20261122-0700-HOLD-TEST\)/.test(st61()), r.out + st61());
+  let q = pedidoDe(marca("release-pr", "20"));
+  r = run(["release-pr", "--as", "Claude 5 ibqho", "--pr", "20", ...q.args], { ...m62, ...as("ibq"), ...q.env });
+  is("the named session, with a request but without the owner's decision, cannot release it", !r.ok && /HOLD do dono/.test(st61()), r.out + st61());
+  q = pedidoDe(marca("release-pr", "20"));
+  r = run(["release-pr", "--as", "Claude 5 ibqho", "--pr", "20", ...q.args, "--owner-decision", "OWNER-20261122-0800-RELEASE-TEST"], { ...m62, ...as("ibq"), ...q.env });
+  is("the named session releases it with the coordinator's request and the owner's decision", r.ok && /LIBERADO/.test(st61()), r.out + st61());
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

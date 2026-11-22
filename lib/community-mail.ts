@@ -51,11 +51,35 @@ import { communityWords } from "@/lib/buyer-words/community";
 
 export const COMMUNITY_UNSUB = /^[0-9a-f]{40}$/;
 const QUEUE = "nl:cm:mailq";
+/** The community's own announcements under way (Codex L-20261121-0758): what a member's erasure walks, never the whole queue. */
+const communityQueueKey = (communityId: string) => `nl:cm:${communityId}:mailq`;
 const jobKey = (id: string) => `nl:cm:mail:${id}`;
 const toKey = (id: string) => `nl:cm:mail:${id}:to`;
 const lockKey = (id: string) => `nl:cm:mail:${id}:lock`;
 export const unsubKey = (token: string) => `nl:cm:unsub:${token}`;
 const JOB_ID = /^[0-9a-f]{24}$/;
+/**
+ * Announcements under way in one community that a member's erasure walks at the most: more than this is unknown, and
+ * the erasure is not said done (it is pressed again once they are sent; a send finishes within minutes). Bounds what
+ * the erasure costs (lib/erasure-rules.ts ERASE_FIXED_COMMANDS: one SMEMBERS and one EVAL a job).
+ */
+export const ERASURE_ANNOUNCEMENTS_MOST = 20;
+/**
+ * Takes one member out of an announcement's recipients (Codex L-20261121-0758, MEDIUM): their key is replaced in place
+ * by a random one, never removed, so job.done still addresses the same later members and the worker skips nobody. 0:
+ * not in this list; 1: replaced; -1: the key is in it more than once, which a recipient list never has (queueAnnouncement
+ * writes each member once), so nothing is written and the caller does not know.
+ */
+const FORGET_RECIPIENT = [
+  "-- marktmorgen:community-mail-forget-recipient:v1",
+  'local positions = redis.call("LPOS", KEYS[1], ARGV[1], "COUNT", 2)',
+  "if #positions > 1 then return -1 end",
+  "if #positions == 0 then return 0 end",
+  'redis.call("LSET", KEYS[1], positions[1], ARGV[2])',
+  "return 1",
+].join("\n");
+/** The commands SREM an announcement from the line, the company's and its community's. */
+const leaveLine = (job: Pick<AnnouncementJob, "id" | "community">): (string | number)[][] => [["SREM", QUEUE, job.id], ["SREM", communityQueueKey(job.community), job.id]];
 
 export type AnnouncementJob = {
   id: string;
@@ -176,8 +200,33 @@ export async function queueAnnouncement(store: Store, config: CommunityConfig, p
   commands.push(["EXPIRE", toKey(job.id), 60 * 86_400]);
   await redisPipeline(commands);
   await save(job);
-  await redisPipeline([["SADD", QUEUE, job.id]]);
+  // In line for the company's worker, and in the community's own line, which a member's erasure walks; the latter
+  // outlives nothing: it goes with the job's record (60 days) when a send is never finished.
+  await redisPipeline([["SADD", QUEUE, job.id], ["SADD", communityQueueKey(communityId), job.id], ["EXPIRE", communityQueueKey(communityId), 60 * 86_400]]);
   return { ok: true, job };
+}
+
+/**
+ * A member's erasure (lib/community-erasure.ts): their key replaced, in place, in every announcement of the community
+ * still under way (FORGET_RECIPIENT), so no list keeps an identifier derived from their address once the erasure said
+ * done. Answers how many lists named them. The community's line read exactly: not a list of job ids, or more of them
+ * than ERASURE_ANNOUNCEMENTS_MOST, is unknown, as is a list that named them more than once; the erasure then says it is
+ * not finished and is pressed again. Announcements queued before the community's line existed are not walked: the
+ * worker never emails an erased member (it reads each member again before a batch), and their lists go with the send.
+ */
+export async function forgetAnnouncementRecipient(communityId: string, who: string): Promise<number> {
+  if (!who) throw new UnknownReplyError("a member's key in the community's announcements");
+  if (!isRedisConfigured()) return 0;
+  const [raw] = repliesFor(await redisPipeline([["SMEMBERS", communityQueueKey(communityId)]]), 1) ?? [undefined];
+  if (!Array.isArray(raw) || raw.length > ERASURE_ANNOUNCEMENTS_MOST || raw.some((id) => typeof id !== "string" || !JOB_ID.test(id))) {
+    throw new UnknownReplyError("the community's announcements under way");
+  }
+  const ids = [...new Set(raw as string[])];
+  if (ids.length === 0) return 0;
+  const tombstone = randomBytes(16).toString("hex");
+  const replies = repliesFor(await redisPipeline(ids.map((id) => ["EVAL", FORGET_RECIPIENT, 1, toKey(id), who, tombstone])), ids.length);
+  if (!replies || replies.some((reply) => reply !== 0 && reply !== 1)) throw new UnknownReplyError("a member in the community's announcements");
+  return replies.filter((reply) => reply === 1).length;
 }
 
 /**
@@ -399,7 +448,7 @@ export async function advanceAnnouncement(
       throw error;
     }
     if (!job || job.status === "sent" || job.status === "failed") {
-      await redisPipeline([["SREM", QUEUE, id]]);
+      await redisPipeline(job ? leaveLine(job) : [["SREM", QUEUE, id]]);
       return job;
     }
     const store = await load(job.handle);
@@ -407,7 +456,7 @@ export async function advanceAnnouncement(
     if (!store || !config) {
       job = { ...job, status: "failed", note: "The community is not here anymore." };
       await save(job);
-      await redisPipeline([["SREM", QUEUE, id]]);
+      await redisPipeline(leaveLine(job));
       return job;
     }
     // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule 24):
@@ -515,7 +564,7 @@ export async function advanceAnnouncement(
       await redisPipeline([["DEL", toKey(id)]]);
     }
     await save(job);
-    if (job.status === "sent" || job.status === "failed") await redisPipeline([["SREM", QUEUE, id]]);
+    if (job.status === "sent" || job.status === "failed") await redisPipeline(leaveLine(job));
     return job;
   } finally {
     await releaseMark(lockKey(id), lock);
@@ -548,7 +597,7 @@ async function countError(id: string, error: unknown): Promise<void> {
         ? `This send stopped after the same error ${ANNOUNCEMENT_ERRORS_MOST} times in a row. Nothing more was sent.`
         : "Paused for a moment: something went wrong on our side. It is tried again by itself.",
     });
-    if (stopped) await redisPipeline([["SREM", QUEUE, id]]);
+    if (stopped) await redisPipeline(leaveLine(job));
   } finally {
     await releaseMark(lockKey(id), lock);
   }

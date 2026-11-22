@@ -575,6 +575,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cimg:n:@lib/community-files.ts": { what: "A community's pictures counted", parts: [capped(KEY, "One count a store.")] },
   "nl:cm:mail:@lib/community-mail.ts": { what: "An announcement's emails, and who they go to", parts: [per("monthly", 30, 512, "Each reader's place in a send, thirty days.", MAIL("announcement"))] },
   "nl:cm:mailq@lib/community-mail.ts": company("Announcements under way", "One set, members gone when sent."),
+  // The community's own line of announcements under way (nl:cm:<id>:mailq), which a member's erasure walks (Codex
+  // L-20261121-0758): one job id a send, gone when sent, the set itself sixty days at the most, as the job's record.
+  "nl:cm:@lib/community-mail.ts": { what: "A community's announcements under way", parts: [per("monthly", 60, 24, "Each send's id in its community's line, gone when sent.", MAIL("announcement"))] },
   "nl:cm:unsub:@lib/community-mail.ts": { what: "A member's stop link, made once and kept", parts: [item(KEY, "One a member.", "membership")] },
   "nl:cm:@lib/community-mentions.ts": { what: "Members' handles", room: ["lib/community.ts"] },
   "nl:cm:@lib/community-notify.ts": { what: "What happened to each member, and when they last looked", room: ["lib/community-notify.ts"], parts: [item(MARK, "A member's last look.", "membership")] },

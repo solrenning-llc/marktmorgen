@@ -130,7 +130,10 @@ export const ERASE_SUBMISSIONS: readonly [number, number] = [301, 70_000];
 // ERASE_SUBMISSIONS: 575 before them.
 // And (review of #3929) the read of the note of the carts the person was reminded of (lib/checkout-recovery.ts,
 // forgetRecoveryPerson), one SMEMBERS, the note deleted inside the marks' one DEL: 576 before ERASE_SUBMISSIONS.
-export const ERASE_FIXED_COMMANDS = 576 + ERASE_SUBMISSIONS[0];
+// And (Codex L-20261121-0758) the member's key replaced in the community's announcements under way
+// (lib/community-mail.ts forgetAnnouncementRecipient): one SMEMBERS of the community's line and one EVAL for each of
+// at most ERASURE_ANNOUNCEMENTS_MOST (20) announcements, 21 more: 597 before ERASE_SUBMISSIONS.
+export const ERASE_FIXED_COMMANDS = 597 + ERASE_SUBMISSIONS[0];
 /**
  * Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read
  * again, and those commands; 310,000 before (Claude 3 on #3473) the memberships whose invitations wait to be deleted

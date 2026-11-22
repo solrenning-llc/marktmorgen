@@ -31,7 +31,7 @@ import { UnknownReplyError } from "@/lib/redis-reply";
 import { giveData } from "@/lib/store-data";
 import { DamagedConfigError, forgetMemberRecord, readConfigExact, readMemberRecord } from "@/lib/community";
 import { forgetHandle } from "@/lib/community-mentions";
-import { forgetCommunityUnsub } from "@/lib/community-mail";
+import { forgetAnnouncementRecipient, forgetCommunityUnsub } from "@/lib/community-mail";
 import { forgetPointsPerson } from "@/lib/community-points";
 import { forgetNoticesPerson } from "@/lib/community-notify";
 import { forgetPushPerson } from "@/lib/community-push";
@@ -92,6 +92,9 @@ export async function forgetCommunityPerson(id: string, who: string, email: stri
   const unsub = named?.read?.member?.t;
   if (handle) await step(() => forgetHandle(id, handle, who));
   if (unsub) await step(() => forgetCommunityUnsub(unsub));
+  // Their key in every announcement still under way, replaced in place (Codex L-20261121-0758): a list is never
+  // shortened, so the send's cursor keeps addressing the same later members.
+  await step(() => forgetAnnouncementRecipient(id, who));
   const namedGone = named !== null && failures.length === beforeNamed;
   await step(() => unindexMember(id, who));
   // Their trace (lib/community-trace.ts): what they wrote and did, by

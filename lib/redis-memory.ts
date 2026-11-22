@@ -1330,6 +1330,16 @@ export class MemoryRedis {
           return 1;
         }
         // lib/community-polls.ts POLL_VOTE_SWAP: a member's vote swapped, and the tally and trace moved with it, only while it holds what was read.
+        // A member's key replaced in place in an announcement's recipients (lib/community-mail.ts FORGET_RECIPIENT, Codex
+        // L-20261121-0758): -1 when the key is there more than once, 0 when absent, 1 when replaced.
+        if (key.startsWith("-- marktmorgen:community-mail-forget-recipient:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, list, who, tombstone] = args;
+          const positions = this.run(["LPOS", list, who, "COUNT", "2"]) as number[];
+          if (positions.length > 1) return -1;
+          if (positions.length === 0) return 0;
+          this.run(["LSET", list, String(positions[0]), tombstone]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:community-poll-vote:v1\n") && args[0] === "3" && args.length >= 9 && (args.length - 9) % 2 === 0) {
           const [, votes, tally, trace, who, expected, next, entry, traceMove, ...deltas] = args;
           const now = this.run(["HGET", votes, who]);
@@ -4013,6 +4023,31 @@ export class MemoryRedis {
         const list = this.list(key);
         const at = Number(args[0]);
         return list[at < 0 ? list.length + at : at] ?? null;
+      }
+      case "LPOS": {
+        // LPOS key element [COUNT n]: the first index of the element, or nil; with COUNT, the first n indexes (every
+        // one when n is 0), as lib/community-mail.ts FORGET_RECIPIENT looks a member up (Codex L-20261121-0758).
+        const list = this.data.has(key) ? this.list(key) : [];
+        const count = args[1] === "COUNT" ? Number(args[2]) : null;
+        if (args.length !== 1 && count === null) throw new Error("LPOS: only COUNT is modeled");
+        const found: number[] = [];
+        for (let i = 0; i < list.length; i += 1) {
+          if (list[i] !== args[0]) continue;
+          found.push(i);
+          if (count !== null && count > 0 && found.length === count) break;
+          if (count === null) break;
+        }
+        return count === null ? (found[0] ?? null) : found;
+      }
+      case "LSET": {
+        // LSET key index element: the element at that index replaced; an index outside the list is an error, as Redis's.
+        if (!this.data.has(key)) throw new Error("ERR no such key");
+        const list = this.list(key);
+        const at = Number(args[0]);
+        const index = at < 0 ? list.length + at : at;
+        if (!Number.isInteger(index) || index < 0 || index >= list.length) throw new Error("ERR index out of range");
+        list[index] = args[1];
+        return "OK";
       }
 
       case "HSET": {

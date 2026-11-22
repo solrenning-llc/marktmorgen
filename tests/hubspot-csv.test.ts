@@ -246,6 +246,24 @@ part("Coordinator's LOWs 1 and 2 on #2048 (29th batch): an address read as the s
   is("an address after other words, a semicolon or in brackets is still read whole", [kept("101 Ada@Example.com; 102 grace@example.com").deals[0].email, kept("<ada@example.com>").deals[0].email, kept("Ada (ada@example.com.)").deals[0].email], ["ada@example.com", "ada@example.com", "ada@example.com"]);
 }
 
+part("Coordinator's triple audit of #2048 @bbd4481d5d: an apostrophe is part of an address, and a malformed one refuses its row");
+{
+  const kept = (contact: string) => ok(plan([row("1", "Ada deal", "Contract sent", "P", "", "", contact)]));
+  // MEDIUM 1: "'" was a separator, so conan.o'brien@ became brien@, another person, and the erasure check read the wrong one.
+  is("an apostrophe inside the part before the @ is kept, never read as a separator", kept("Conan (conan.o'brien@example.com)").deals[0]?.email, "conan.o'brien@example.com");
+  is("and in a bare cell too", kept("conan.o'brien@example.com").deals[0]?.email, "conan.o'brien@example.com");
+  is("quotes around an address are only its edges", [kept("'ada@example.com'").deals[0]?.email, kept("\"ada@example.com\"").deals[0]?.email], ["ada@example.com", "ada@example.com"]);
+  // LOW 3: an address that is not one a deal keeps was emptied without a word; it refuses its row, as a long one does.
+  for (const [name, contact] of [["no dot after the @", "jane@x"], ["two @", "a@b@c.com"], ["a domain ending in letters that are not A to Z", "jane@example.рф"]] as const) {
+    const refused = kept(contact);
+    is(`an address with ${name} refuses its row, never kept empty`, [refused.deals.length, refused.refused.map((r) => [r.line, r.column, r.value])], [0, [[2, "Associated Contact", ""]]]);
+    is(`and says what to do, without the address (${name})`, [/is not a full email address/.test(refused.refused[0]?.reason ?? ""), /Fix the address in HubSpot/.test(refused.refused[0]?.reason ?? ""), (refused.refused[0]?.reason ?? "").includes(contact)], [true, true, false]);
+  }
+  is("control: a cell with no @ at all still comes in with no address", kept("Ada Lovelace").deals[0]?.email, "");
+  is("control: a lone @ between words is not an address", kept("Ada @ Example").deals[0]?.email, "");
+  is("control: a domain with other letters before its last part is an address a deal keeps", kept("jane@exämple.com").deals[0]?.email, "jane@exämple.com");
+}
+
 part("Coordinator's MEDIUM on #2048 (29th batch): a refusal names its column as HubSpot labels it, never the file's long spelling");
 {
   const spelled = ["Record ID", `Deal${"-".repeat(1_900)} name`, "Deal stage", "Pipeline"];

@@ -325,13 +325,16 @@ export const DEAL_JSON_MAX_BYTES = 4_200;
 
 /**
  * The most one stored deal moves through the database, read or written: lib/redis.ts sends and reads it over HTTP in
- * JSON, where the deal's own JSON is a string, so every quote and backslash in it is escaped once more (a quote in a
- * title, stored as two bytes, moves as four). With every text field and both addresses at their caps in quotes (four
- * bytes a character moved, more than the three of any other character): 5,420 bytes, rounded up (coordinator's MEDIUM
- * on #2048, 22nd batch: the reads below were priced at DEAL_JSON_MAX_BYTES, the weight kept, not the weight moved).
- * tests/hubspot-import.test.ts holds a deal at every cap in quotes under it.
+ * JSON, where the deal's own JSON is a string, so it is escaped once more (coordinator's MEDIUM on #2048, 22nd batch:
+ * the reads below were priced at DEAL_JSON_MAX_BYTES, the weight kept, not the weight moved). JSON.stringify moves a
+ * stored quote as four bytes (5,420 at every cap in quotes), but how Upstash encodes its answer is not documented
+ * here, and an encoder that escapes "<", ">" or "&" as \u003c moves each as six (Claude 5 ibqho's LOW on #2048,
+ * 7081226904), so every character of the text fields and both addresses at their caps is counted at six bytes, as
+ * lib/api-read-rules.ts prices an answer: 1,298 characters and the due date's 10, over the 319 bytes the rest of a
+ * deal moves (ids, keys, numbers, all plain ASCII letters and digits no encoder escapes): 8,167 bytes, rounded up.
+ * tests/hubspot-import.test.ts computes the bound and holds a deal at every cap in quotes under it.
  */
-export const DEAL_MOVED_MAX_BYTES = 5_500;
+export const DEAL_MOVED_MAX_BYTES = 8_200;
 
 /**
  * What one address's check against the store's deleted people moves at the most (suppressedAmong, one HMGET of a print

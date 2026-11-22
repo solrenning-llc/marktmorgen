@@ -28,7 +28,7 @@ import { POST as CRM_POST } from "@/app/api/store/crm/route";
 import { crmAnswer } from "@/lib/crm-response";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { CRM_LOCKED_CHANGE_UNITS, CRM_LOCK_COMMANDS_MOST, CRM_LOCK_WAIT_MS, IMPORT_CRM_DEALS, dealCount, readDeal, readDeals, readOpportunityReview, readPipelines, savePipelineChange, takeCrmLock, writeDeal } from "@/lib/crm";
-import { MAX_DEALS, MAX_DEAL_CENTS, MAX_STAGES, PIPELINES_BY_TIER, allStages, parseDeal, readFollowUp } from "@/lib/crm-rules";
+import { MAX_DEALS, MAX_DEAL_CENTS, MAX_DEAL_NOTE, MAX_DEAL_TITLE, MAX_STAGES, PIPELINES_BY_TIER, allStages, parseDeal, readFollowUp } from "@/lib/crm-rules";
 import { STAGE_PAST_REASON, pipelineRoomReason } from "@/lib/hubspot-csv";
 import { DEAL_JSON_MAX_BYTES, DEAL_MOVED_MAX_BYTES, HUBSPOT_CHECK_BYTES, HUBSPOT_CHECK_COMMANDS, HUBSPOT_MAX_ROWS, HUBSPOT_PRINT_BYTES, HUBSPOT_SAVE_BYTES, HUBSPOT_SAVE_COMMANDS, HUBSPOT_IMPORT_WORDS, type HubSpotImportResult, hubSpotDealId, hubSpotDealNote, importHubSpotDeals } from "@/lib/hubspot-import";
 import { takeImportRows } from "@/lib/imports";
@@ -652,6 +652,16 @@ async function main(): Promise<void> {
   const movedEach = fatDeals.map((d) => Buffer.byteLength(JSON.stringify(JSON.stringify(d))));
   console.log("A deal at every cap in quotes, kept and moved", JSON.stringify([Buffer.byteLength(JSON.stringify(fatDeals[0])), Math.max(...movedEach)]));
   is("and each moves at most DEAL_MOVED_MAX_BYTES through the database, more than it weighs", [movedEach.every((m) => m <= DEAL_MOVED_MAX_BYTES), Math.max(...movedEach) > DEAL_JSON_MAX_BYTES], [true, true]);
+  {
+    // Claude 5 ibqho's LOW on #2048 (7081226904): the answer's encoding is not documented here, so the bound counts every
+    // character of the text fields, the due date and both addresses at six bytes (an escape as \u003c), over what the
+    // rest of a deal moves (a deal with a one-letter title and nothing else, its ids and numbers at their largest).
+    const bare = parseDeal({ id: hubSpotDealId("8000"), title: "a", cents: MAX_DEAL_CENTS, stage: heavyStages[0].id, note: "", formResponseRef: "f".repeat(64), createdAt: Number.MAX_SAFE_INTEGER, updatedAt: Number.MAX_SAFE_INTEGER }, heavyStages)!;
+    const rest = Buffer.byteLength(JSON.stringify(JSON.stringify({ ...bare, nextAction: "", dueDate: "", assignee: "" })));
+    const sixEach = rest + 6 * (MAX_DEAL_TITLE + MAX_DEAL_NOTE + 200 + "2026-12-31".length + 254 + 254);
+    console.log("A deal moved with every character escaped at six bytes", sixEach);
+    is("every character escaped at six bytes still moves within DEAL_MOVED_MAX_BYTES", sixEach <= DEAL_MOVED_MAX_BYTES, true);
+  }
   await redis.pipeline([["HSET", `nl:crm:deals:${heavyId}`, ...fatDeals.flatMap((d) => [d.id, JSON.stringify(d)])]]);
   const heavyReal = redis.pipeline.bind(redis);
   let heavyCommands = 0;

@@ -798,8 +798,11 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
         if (outcome === "retry" && !kept) await releaseDay(chunk.length, day);
         break;
       }
-      if (outcome === "refused" && !kept) await releaseDay(chunk.length, day);
-      else {
+      // Refused for good is never counted as sent; its day count is given back only when no earlier unknown answer
+      // kept it (they may have gone then). Claude 4's LEVE on #4073.
+      if (outcome === "refused") {
+        if (!kept) await releaseDay(chunk.length, day);
+      } else {
         job.sent += chunk.length;
         sent += chunk.length;
       }

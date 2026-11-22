@@ -63,6 +63,29 @@ async function main(): Promise<void> {
     is("no mark is left once the batch was sent", marks(), 0);
   }
 
+  // Claude 4's LEVE on #4073 @aae5ef59e9 (comment 7074407785): a batch kept after an unknown answer and then refused
+  // for good fell into the "sent" branch, so the run said the two emails went.
+  for (const unknown of ["unconfirmed", "uncertain"] as BatchAnswer[]) {
+    part(`A waitlist launch batch answered "${unknown}", then refused for good`);
+    const made = await addProduct("owner@example.com", `The refused ${unknown} Book`, "", "39", null);
+    if (!made.ok) throw new Error("no product");
+    let store = (await storeForEmail("owner@example.com"))!;
+    await setSoon(store, made.product.id, true);
+    const product = (await readListing(store, made.product.id))!;
+    store = (await storeForEmail("owner@example.com"))!;
+    for (const who of ["cy", "di"]) {
+      is(`(${who} joins)`, await joinWaitlist({ store, product, email: `${who}-refused-${unknown}@example.com`, consent: false, ip: `10.0.0.${ip++}`, origin: "https://marktmorgen.com" }), "sent");
+      is(`(and confirms)`, (await confirmSpot(lastToken(), store)).ok, true);
+    }
+    is("(launched to two)", await launch(store, product, { note: "Out now.", address: "1 Main St, Springfield" }), { ok: true, total: 2 });
+
+    const before = await dayCount();
+    answerBatches(unknown, "refused");
+    is("the answer was not known: nothing counted as sent", await run(), 0);
+    is("refused for good is never counted as sent", await run(), 0);
+    is("the day's two emails stay counted: they may have gone the first time", (await dayCount()) - before, 2);
+  }
+
   done();
 }
 

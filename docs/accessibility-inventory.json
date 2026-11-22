@@ -1063,6 +1063,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/check-in/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/check-in",
+      "parameters": []
+    },
+    {
       "source": "app/studio/checkup/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/checkup",
@@ -1589,6 +1595,7 @@
     "components/mark-shipped.tsx",
     "components/meeting-connections.tsx",
     "components/member-discount.tsx",
+    "components/member-link-boxes.tsx",
     "components/member-price.tsx",
     "components/membership-by-price.tsx",
     "components/more-from.tsx",
@@ -1770,6 +1777,7 @@
     "components/students-bulk.tsx",
     "components/studio-app.tsx",
     "components/studio-bell.tsx",
+    "components/studio-focus-clear.tsx",
     "components/studio-header.tsx",
     "components/studio-help.tsx",
     "components/studio-screens.tsx",
@@ -1792,6 +1800,7 @@
     "components/test-counts-notice.tsx",
     "components/thanks-note-editor.tsx",
     "components/thanks-note-view.tsx",
+    "components/ticket-check-in.tsx",
     "components/tier-benefits.tsx",
     "components/tier-editor.tsx",
     "components/tips-editor.tsx",
@@ -1855,6 +1864,7 @@
     "app/api/billing/withdraw/route.ts",
     "app/api/creators/route.ts",
     "app/api/cron/affiliates/route.ts",
+    "app/api/cron/backup/route.ts",
     "app/api/cron/closed-data/route.ts",
     "app/api/cron/closing/route.ts",
     "app/api/cron/courses/route.ts",
@@ -1890,6 +1900,7 @@
     "app/api/library/route.ts",
     "app/api/mail/clicked/route.ts",
     "app/api/mail/inbound/route.ts",
+    "app/api/mail/poll/route.ts",
     "app/api/mail/ses/route.ts",
     "app/api/mail/unsubscribe/route.ts",
     "app/api/mcp/route.ts",
@@ -1945,6 +1956,7 @@
     "app/api/store/cart/route.ts",
     "app/api/store/chat-summary/route.ts",
     "app/api/store/chat/route.ts",
+    "app/api/store/check-in/route.ts",
     "app/api/store/checkout/route.ts",
     "app/api/store/claim/route.ts",
     "app/api/store/closing-refunds/route.ts",
@@ -2285,6 +2297,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 156
+    "pageTemplates": 157
   }
 }

@@ -23,8 +23,9 @@ export async function POST(request: NextRequest) {
   let email: string | null;
   try {
     email = await sessionEmail(id);
-  } catch (error) {
-    console.error("reading the session to log out the other devices failed", error);
+  } catch {
+    // A fixed label only: an error or a value from the provider is never written to the server log (#3712, rule 30).
+    console.error("reading the session to log out the other devices failed");
     return away("/studio/devices?status=out-others-unknown");
   }
   // No session (confirmed absent): there is nothing of this person's to close.
@@ -43,8 +44,8 @@ export async function POST(request: NextRequest) {
   let fresh: boolean;
   try {
     fresh = await isFreshSession(id);
-  } catch (error) {
-    console.error("reading the session's freshness to log out the other devices failed", error);
+  } catch {
+    console.error("reading the session's freshness to log out the other devices failed");
     return lockUnreadPage(back.back, back.to);
   }
   if (!fresh) return away("/studio/devices?status=out-others-reauth");

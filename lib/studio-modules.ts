@@ -114,6 +114,7 @@ export const NOT_MODULES: Readonly<Record<string, string>> = {
   invoices: "The invoices of the store's own Marktmorgen plan, opened from the plan card on the studio home.",
   tax: "The tax registrations active on the store's Stripe account, read from Stripe: a report for the owner, not a part of the store.",
   "learning-paths": "Several of the store's courses in an order the creator sets; no card yet, because students cannot open a path until 249 [ST2] unit 4 shows it to them.",
+  "check-in": "The door of one in-person event, where tickets are checked as people arrive; opened from that event, never on its own.",
   devices: "Logs out the person's other devices after asking first, an account action rather than a part of the store.",
   notifications: "Which optional alert emails the owner gets, the owner's own setting, opened from the studio home.",
   companies: "The companies your buyers work at, a part of Buyers opened from its page rather than a part of the store on its own.",

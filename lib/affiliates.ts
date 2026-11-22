@@ -3061,16 +3061,21 @@ export async function attributedAffiliate(
   if (!affiliatesOn(store)) return null;
   const via = readViaCookie(cookies.via);
   if (!via) return null;
-  const click = store.affiliates.rule === "first" ? via.first : via.last;
   const now = Math.floor(Date.now() / 1000);
-  if (click.at > now + 60 || now - click.at > store.affiliates.days * 86_400) return null;
+  const inWindow = (c: { at: number }) => c.at <= now + 60 && now - c.at <= store.affiliates.days * 86_400;
+  const first = store.affiliates.rule === "first";
+  const click = first ? via.first : via.last;
+  // A click past its window credits nobody, on either rule. On first click the sale is not moved to a later affiliate:
+  // that changes who is paid a commission and needs the owner's decision (Codex X3 7004858529 and Codex L 7029564415
+  // on #4413), so the rule before stays until then.
+  if (!inWindow(click)) return null;
   let affiliate = await approvedByCode(store, click.code);
   // On first click, somebody the creator has since declined or removed leaves
   // the sale to the affiliate who actually brought the buyer back, rather than
   // taking it away from everyone.
-  if (!affiliate && store.affiliates.rule === "first" && via.last.code !== click.code) {
+  if (!affiliate && first && (via.last.code !== click.code || via.last.at !== click.at)) {
     const back = via.last;
-    if (back.at <= now + 60 && now - back.at <= store.affiliates.days * 86_400) {
+    if (inWindow(back)) {
       affiliate = await approvedByCode(store, back.code);
     }
   }
@@ -4262,8 +4267,20 @@ export async function creditPayPalSale(store: Store, paid: Paid, title: string, 
 async function isSelf(store: Store, aff: string, buyer: string): Promise<boolean> {
   if (!buyer) return false;
   const affiliate = await readAffiliate(store, aff);
-  // Their inbox or their payout address, as isOwn reads it: "your own purchases never earn" (lib/buyer-words/affiliates.ts).
-  return Boolean(affiliate) && ownAddress(affiliate!, buyer);
+  // Their inbox or their payout address, as isOwn reads it: "your own purchases never earn" (lib/buyer-words/affiliates.ts),
+  // and the creator buying from their own store (ownPurchase).
+  return Boolean(affiliate) && ownPurchase(store, affiliate!, buyer);
+}
+
+/**
+ * Whether `buyer` is the affiliate themselves, or the creator, buying: the affiliate's inbox or payout address as main's
+ * ownAddress reads them, or the store's own address (as the lead rule's isOwn, lib/affiliate-leads.ts, and
+ * sameInboxAsAnother take them). Neither earns a commission on their own purchase.
+ */
+export function ownPurchase(store: Pick<Store, "email">, affiliate: Pick<Affiliate, "email" | "paypal">, buyer: string): boolean {
+  const person = canonicalEmail(buyer);
+  if (!person) return false;
+  return ownAddress(affiliate, buyer) || (Boolean(store.email) && canonicalEmail(store.email ?? "") === person);
 }
 
 /**
@@ -4468,6 +4485,18 @@ function shippingOf(details: SessionLike["total_details"], base: number, shipped
 }
 
 /**
+ * The record of `id` for noteSession's code, bond and contact steps, or null for no id. One whose status is not
+ * approved leaves the sale to the next step, as a removed first click does (attributedAffiliate). Read exactly
+ * (rule 24; Claude 6 on #4413): null only when Redis confirms there is no record. An unreadable one throws, so the
+ * sweep keeps the order and reads it again, and the sale never passes to the next step on an unknown answer, which
+ * would credit the wrong affiliate for good (the credit is written once).
+ */
+async function approvedOf(store: Store, id: string): Promise<Affiliate | null> {
+  if (!id || !store.statsId || !isRedisConfigured() || !AFFILIATE_ID_PATTERN.test(id)) return null;
+  return readAffiliateExact(store, id);
+}
+
+/**
  * A paid order whose payment does not read is never written for good (HSETNX) with no payment: no refund or dispute
  * could ever meet it, so its commission would stand on money given back (AFF-E2E-3). Only a checkout Stripe says
  * took no payment (payment_intent null, nothing charged) has none. Throws UnknownReplyError, and the sweep keeps the
@@ -4552,35 +4581,38 @@ export async function noteSession(
   let how: Credit = "click";
   if (!AFFILIATE_ID_PATTERN.test(aff)) {
     if (meta[VIA_PENDING_META] !== undefined) return; // a pending click: notePendingLinks decides
+    if (!affiliatesOn(store)) return settle(); // off, as in the sweep
     // Then the code the buyer typed, which is the only trace a sale made on a
     // podcast or from a stage leaves at all (lib/affiliate-codes.ts). Read only
     // for a sale that carries a code: a sale with none never waits on that read.
     const given = promoCodesOn(session).length ? (owners ?? (await codeOwners(store))) : new Map<string, string>();
     let found = affiliateForCodes(session, given);
+    let who = await approvedOf(store, found);
     how = "code";
     // And last, the buyer themselves: somebody who was credited to an
     // affiliate once and whose creator asked for them to stay credited
     // (lib/affiliate-bond.ts). No cookie, no window, any device.
-    if (!found && buyer) {
+    if (who?.status !== "approved" && buyer) {
       found = await bondFor(store, buyer);
+      who = await approvedOf(store, found);
       how = "buyer";
     }
     // Then the affiliate who brought this buyer as a confirmed lead, where the
     // creator asked for that (lib/affiliate-leads.ts contactFor). Read lazily:
     // that file reads this one.
-    if (!found && buyer && creditsContacts(store.affiliates)) {
+    if (who?.status !== "approved" && buyer && creditsContacts(store.affiliates)) {
       const { contactFor } = await import("@/lib/affiliate-leads");
       // Only a lead confirmed before this checkout was opened, and never the
       // lead this very checkout made (a paid booking is one): a sale written
       // down again later must not reach back to a lead that came after it.
       found = await contactFor(store, buyer, at, session.id);
+      who = await approvedOf(store, found);
       how = "contact";
     }
-    if (!found) return settle();
     // A code, a bond or a contact only ever credits somebody the creator approves today.
     // An affiliate they declined or removed keeps their record — it is
     // history — and earns nothing more through either.
-    const who = await readAffiliate(store, found);
+    if (!found) return settle();
     if (who?.status !== "approved") return settle();
     aff = found;
     own = who.rate;
@@ -5440,8 +5472,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   // and one sale can produce several of these alongside a commission.
   // A share of some lines of an order is settled against the whole order's base (settleLine), kept beside the line.
   const partOf = new Map<string, number>();
-  const partnerLines: Referral[] = bookRecords(shares, parsePartnerEarning, "the partner shares in the book", from(sharesKey(statsId)))
-    .filter((e) => !only || e.aff === only)
+  const shareLines: Referral[] = bookRecords(shares, parsePartnerEarning, "the partner shares in the book", from(sharesKey(statsId)))
     .map((e) => {
       if (e.whole !== undefined) partOf.set(`${e.ref}:${e.aff}`, e.whole);
       const line: Referral = {
@@ -5463,6 +5494,11 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       if (origin) origins.set(line, origin);
       return line;
     });
+  const partnerLines = shareLines.filter((e) => !only || e.aff === only);
+  // The other partners' shares are not shown on one affiliate's page, but they still count toward the cap their
+  // second tier is held under (tierLines), so the page owes what the creator's book does. Settled without the account
+  // they were paid into, as every line is (withoutAccount).
+  const otherShares = only ? shareLines.filter((e) => e.aff !== only).map((r) => settleLine(withoutAccount(r), 0)) : [];
   // Each payout row read exactly as addPayout writes it (exactPayout): a row that does not read makes the book unknown,
   // never "not paid", so a payout already made is never shown as owed again (Revisor 1 on #3719).
   // A payout that does not read could be the one that paid this affiliate: never dropped, so never paid again.
@@ -5690,7 +5726,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   // as they stand after refunds. Then only the one affiliate's, when it is one.
   // A second tier on a held sale is held with it, and so is a bonus of a month with a held sale among its sales.
   const heldMonths = new Set(settled.filter((l) => l.unchecked).map((l) => `${l.aff}:${new Date(l.at * 1000).toISOString().slice(0, 7)}:`));
-  const derived = [...bonusLines(store, settled), ...tierLines(everyone, settled, flagsOf)].map((l) =>
+  const derived = [...bonusLines(store, settled), ...tierLines(everyone, [...settled, ...otherShares], flagsOf)].map((l) =>
     (l.how === "tier2" && unchecked.has(l.ref.slice("tier2:".length))) || (l.how === "bonus" && [...heldMonths].some((m) => l.ref.startsWith(`bonus:${m}`)))
       ? { ...l, unchecked: true as const }
       : l,
@@ -6171,9 +6207,12 @@ async function takeInvoice(store: Store, invoice: InvoiceLike, handles: Set<stri
   if (pi === UNLINKED) return { kind: "unlinked", unlinked: [invoice.id, meta.via, created] };
   if (pi.length > KEPT_TEXT_MAX) return { kind: "unknown" };
   const affiliate = byId.get(meta.via);
+  // A removed affiliate's link no longer earns: a renewal or an instalment paid after the removal is not theirs, as
+  // tierLines holds a removed recruiter to the payments made before it. Declined or pending never earn (#4413).
+  if (affiliate && affiliate.status !== "approved" && (affiliate.status !== "removed" || paidAt * 1000 > affiliate.decidedAt)) return { kind: "skip" };
   const buyer = typeof invoice.customer_email === "string" ? invoice.customer_email : "";
-  // The affiliate's own address or PayPal address (ownAddress), as a sale is judged when written down.
-  const self = Boolean(affiliate && buyer) && ownAddress(affiliate!, buyer);
+  // The affiliate's own address or PayPal address, or the creator's (ownPurchase), as a sale is judged when written down.
+  const self = Boolean(affiliate && buyer) && ownPurchase(store, affiliate!, buyer);
   return {
     kind: "line",
     // Decided with the invoice, as a sale is when written down (tierOff); with no address on an invoice paid since
@@ -6288,8 +6327,10 @@ async function tierFor(store: Store, aff: string, buyer: string): Promise<{ tier
   const decided = await decideBuyer(store, aff, buyer);
   // Not known: both tiers wait (rule 30 on #3485), and the five-minute job reads the buyer again (settleUnconfirmed).
   if (decided === "unknown") return { buyerUnknown: 1, selfUnknown: 1 };
-  // The affiliate's own purchase, as this exact read finds it (the writers' isSelf throws on a record that does not
-  // read, rule 24, so both readings agree; the job's re-read of a waiting sale sets it the same way).
+  // The affiliate's own purchase, as this exact read finds it. The writers' isSelf reads a stored record that does not
+  // parse as no affiliate (self false), but this read finds it unknown (selfUnknown), so the sale waits out of what is
+  // paid (settleLine, unconfirmed) until the job's re-read of the waiting sale or the creator decides it (Codex X6 on
+  // #4413; tests/affiliate-tier-review.test.ts, M2).
   return { ...(decided.tierOff ? { tierOff: 1 as const } : {}), ...(decided.self ? { self: true as const } : {}) };
 }
 

@@ -19,6 +19,8 @@ import { OrdersPausedError } from "@/lib/order-admission";
 import { DigitalConsentMissing } from "@/lib/digital-consent";
 import type { Listing, Store } from "@/lib/store";
 import { lowStockTouched } from "@/lib/low-stock";
+import { storeLiveFence } from "@/lib/store-live-cache";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type LimitState, essentialLimitState, giveBackLimit } from "@/lib/request-guard";
 
 const HOLD_MS = HOLD_SECONDS * 1000;
@@ -404,24 +406,72 @@ for i = 1, n do redis.call("HDEL", KEYS[n + i], pending) end
 return 0`;
 
 /**
- * The hand-over from the provisional holds to the checkout's own, after the
- * checkout's hold is written and acknowledged: in one step, only when every
- * product has both the checkout's hold and the provisional one, the
- * provisional ones are let go, so 1; otherwise nothing changes, so 0. Both
- * there proves the unit was held without a gap from the count to the
- * checkout (the provisional one, once let go, never comes back): a
- * provisional hold that lapsed and was let go while the checkout was being
- * opened could have let the unit be sold to someone else.
- * KEYS: the n products' holds; ARGV: n, the provisional hold's name, the checkout's id.
+ * The hand-over from the provisional holds to the checkout's own, in one step
+ * on the Redis side, fenced on the store being live (Codex L-20261120-0655):
+ * the checkout is opened at Stripe while nothing is locked, and the store's
+ * erasure can begin or end in that wait, the closing walk removing the stock
+ * records (family E). So the checkout's hold is written only while the store
+ * is still live, by the rule of lib/live-fence.ts (SET_IF_STORE_LIVE): its
+ * erasing mark absent, and its id key still holding this store's ref, or, for
+ * a store from before ids, its owner's record still this store's own (its
+ * statsId). Gone, moved or erasing: nothing is written, so -2; a record that
+ * does not parse: -1, unknown. Live: the checkout's hold is written on every
+ * product and the provisional one let go, so 1 when every provisional hold was
+ * there to be let go; 0 when one was not (it lapsed and was let go while the
+ * checkout was being opened, so its unit may have been sold to someone else),
+ * and then the checkout's holds stay, so a checkout Stripe will not close is
+ * still counted. Both written in the same step prove the unit was held without
+ * a gap from the count to the checkout (the provisional one, once let go,
+ * never comes back).
+ * Billed as the EVAL, the fence's HGET and GET, and one HSET and one HDEL a
+ * product (1 + 2 + 2n), never more than the two steps it replaced (n HSETs,
+ * then a script of 1 + 3n).
+ * KEYS: the n products' holds, the store's live key (its id key, or its record
+ * for a store from before ids), the erasing hash; ARGV: n, the provisional
+ * hold's name, the checkout's id, its hold, the store's erasing field, ""
+ * for a store with an id or the statsId of one from before ids, the store's ref.
  */
-export const STOCK_BIND = `-- marktmorgen:stock-bind:v1
+export const STOCK_BIND = `-- marktmorgen:stock-bind:v2
 local n = tonumber(ARGV[1])
-if not n or n ~= math.floor(n) or n < 1 or n > 8 or #KEYS ~= n or #ARGV ~= 3 then return -1 end
-for i = 1, n do
-  if redis.call("HEXISTS", KEYS[i], ARGV[2]) ~= 1 or redis.call("HEXISTS", KEYS[i], ARGV[3]) ~= 1 then return 0 end
+if not n or n ~= math.floor(n) or n < 1 or n > 8 or #KEYS ~= n + 2 or #ARGV ~= 7 then return -1 end
+if redis.call("HGET", KEYS[n + 2], ARGV[5]) then return -2 end
+if ARGV[6] == "" then
+  if redis.call("GET", KEYS[n + 1]) ~= ARGV[7] then return -2 end
+else
+  local raw = redis.call("GET", KEYS[n + 1])
+  if not raw then return -2 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[6] then return -2 end
 end
-for i = 1, n do redis.call("HDEL", KEYS[i], ARGV[2]) end
-return 1`;
+local all = 1
+for i = 1, n do
+  redis.call("HSET", KEYS[i], ARGV[3], ARGV[4])
+  if redis.call("HDEL", KEYS[i], ARGV[2]) ~= 1 then all = 0 end
+end
+return all`;
+
+/**
+ * STOCK_BIND's one reply, read exactly (rule 24): 1 bound, 0 written without proof of no gap, "gone" when the store
+ * is gone, moved or erasing (nothing written); anything else (a hole, an error, another number) unknown.
+ */
+function bindAnswer(receipt: unknown): 1 | 0 | "gone" | null {
+  const replies = repliesFor(receipt, 1);
+  const answer = replies?.[0];
+  return answer === 1 ? 1 : answer === 0 ? 0 : answer === -2 ? "gone" : null;
+}
+
+/** The hand-over, fenced on `store` being live (STOCK_BIND); a fence that cannot be built is unknown (UnknownReplyError). */
+async function bindHolds(store: Store, keys: string[], pending: string, checkout: string, hold: string): Promise<1 | 0 | "gone"> {
+  const fence = await storeLiveFence(store).catch(() => null);
+  // A store from before ids without a statsId cannot be told from its owner's next one (lib/live-fence.ts): unknown.
+  if (!fence || fence.statsId === null) throw new UnknownReplyError("a stock hold's store");
+  const answer = bindAnswer(
+    await redisPipeline([["EVAL", STOCK_BIND, keys.length + 2, ...keys, fence.live, fence.erasing, keys.length, pending, checkout, hold, fence.field, fence.statsId, fence.ref]]).catch(() => null),
+  );
+  if (answer === null) throw new UnknownReplyError("a stock hold's hand-over");
+  return answer;
+}
 
 /**
  * Stripe's answer that it did not make the checkout: a 4xx it answers
@@ -555,16 +605,20 @@ export async function withCartStockHolds<T extends { id: string }>(
   }
   // Counted from after the checkout exists, so its hold outlasts it; the provisional one goes only once this one is written (STOCK_BIND).
   const hold = JSON.stringify({ until: Date.now() + HOLD_MS });
-  const receipt = await redisPipeline(keys.map((key) => ["HSET", key, value.id, hold])).catch(() => null);
-  const bound = acknowledged(receipt, keys.length)
-    ? scriptAnswer(await redisPipeline([["EVAL", STOCK_BIND, keys.length, ...keys, keys.length, pending, value.id]]).catch(() => null))
-    : null;
+  // Written only while the store is live, in the same step (STOCK_BIND): an erasure begun or ended while Stripe opened the
+  // checkout ("gone") keeps nothing, and its stock records are never written back (Codex L-20261120-0655). An answer of
+  // unknown shape (UnknownReplyError) takes the same failure path as one that does not prove the units its own.
+  const bound = await bindHolds(store, keys, pending, value.id, hold).catch((error) => {
+    if (error instanceof UnknownReplyError) return null;
+    throw error;
+  });
   if (bound === 1) {
     // The units left changed: the creator's low-stock numbers among these are checked by the mail job at once (623 [SZ7]).
     await lowStockTouched(store, limited.map((product) => product.id));
     return { ok: true, value };
   }
-  // Nobody is sent to a checkout whose units are not proven its own: it is closed at Stripe, and only Stripe's "expired" lets its holds go.
+  // Nobody is sent to a checkout whose units are not proven its own, nor to one of a store that is gone: it is closed at
+  // Stripe, and only Stripe's "expired" lets its holds go (HDEL only removes: on a gone store's record it writes nothing).
   if (store.stripeAccountId) {
     const closed = await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(value.id)}/expire`, new URLSearchParams()).catch(() => null);
     // One command a product, both fields at once, so the failure path stays inside CART_STOCK_COMMANDS_MOST (tests/cart-stock.test.ts).

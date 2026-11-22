@@ -27,7 +27,7 @@ export async function lockOrUnread<T>(read: Promise<T>): Promise<T | typeof LOCK
   try {
     return await read;
   } catch (error) {
-    console.error("reading a session's two-step lock failed", error);
+    console.error("reading a session's two-step lock failed");
     return LOCK_UNREAD;
   }
 }

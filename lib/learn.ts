@@ -71,8 +71,8 @@ export const PASS_SECONDS = 90 * 24 * 60 * 60;
 /** How long an emailed link works, and how many times it opens. */
 export const LINK_SECONDS = 60 * 60;
 const MAX_LINK_OPENS = 10;
-/** How long an answer from Stripe about who bought what is reused. */
-const PAID_SECONDS = 10 * 60;
+/** How long an answer from Stripe about who bought what is reused (lib/certificate-refunds.ts waits past it). */
+export const PAID_SECONDS = 10 * 60;
 const IP_LIMIT = 10;
 const ADDRESS_LIMIT = 5;
 const RATE_WINDOW_SECONDS = 60 * 60;
@@ -681,6 +681,28 @@ export async function courseAccess(store: Store, product: Listing, cookies: Cook
   return { state: "open", learner, start, endsAt, stamp };
 }
 
+/**
+ * Whether an address can still open a course here, as every door decides it, asked of Stripe afresh: its kept answer
+ * is forgotten first, so an answer kept from before a refund never decides. "shut" only on a whole reading; "unknown"
+ * when Stripe could not be read whole (`undecided`, CX-123 rule 24), never "shut". A course handed over at a community
+ * level is read again here, and a read of it that throws throws here too, never "not earned" (the ledger's own read of
+ * it only logs a failure). The certificate of a course whose payment was given back is withdrawn only on "shut"
+ * (lib/certificate-refunds.ts).
+ */
+export async function courseStandingFor(store: Store, email: string, productId: string): Promise<"open" | "shut" | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  const forgot = countOf(repliesFor(await redisPipeline([["DEL", paidCacheKey(store, email)]]), 1)?.[0]);
+  if (forgot !== 0 && forgot !== 1) throw new UnknownReplyError("forgetting the kept answer about an address's courses");
+  const { paid, undecided } = await courseLedger(store, email);
+  if (paid.has(productId)) return "open";
+  if (undecided.has(productId)) return "unknown";
+  if (store.community?.id) {
+    const earned = await earnedCourses(store.community.id, emailKey(email), Date.now(), store.community.on, store);
+    if (earned.has(productId)) return "open";
+  }
+  return "shut";
+}
+
 // ------------------------------------------------------------ progress
 
 const studentsKey = (courseId: string) => `nl:course:${courseId}:students`;
@@ -812,8 +834,14 @@ async function forgetEarlyDripMails(course: Course, email: string, start: number
  * (sendDripEmails, when the row held another day): the emails sent for modules
  * not open on it are forgotten first, then the row takes the day. Throws
  * UnknownReplyError on a reply it cannot read, and nothing more is written.
+ *
+ * `stamp` (24 [E7]) is the end of the purchase that stands, as the start was read with it: the row keeps it, so a later
+ * run that falls back to the row (its start not read) stops the drip at that end, and the studio shows it. Null is a
+ * purchase with no end, so the row's old end goes; "unknown" keeps the row's. A row that held no stamp has not had its
+ * bytes taken, so a new one is left off, as touchStudent leaves it without room, and the page writes it on the next
+ * visit (Claude 6's LEVE on #3369).
  */
-async function redateStudent(course: Course, email: string, start: number, nowSeconds: number): Promise<void> {
+async function redateStudent(course: Course, email: string, start: number, nowSeconds: number, stamp: number | null | "unknown"): Promise<void> {
   const key = studentsKey(course.id);
   const field = emailKey(email);
   const raw = repliesFor(await redisPipeline([["HGET", key, field]]), 1)?.[0];
@@ -822,7 +850,9 @@ async function redateStudent(course: Course, email: string, start: number, nowSe
   if (!row) throw new UnknownReplyError("a student's row whose start moved");
   if (row.s === start) return;
   await forgetEarlyDripMails(course, email, start, nowSeconds);
-  const written = countOf(repliesFor(await redisPipeline([["HSET", key, field, JSON.stringify({ e: row.e || normaliseEmail(email), s: start, l: row.l })]]), 1)?.[0]);
+  const had = stampOf((JSON.parse(raw as string) as Partial<StudentRow>).x);
+  const next = stamp === "unknown" ? had : stamp === null || had === null ? null : stampOf(stamp);
+  const written = countOf(repliesFor(await redisPipeline([["HSET", key, field, JSON.stringify({ e: row.e || normaliseEmail(email), s: start, l: row.l, ...(next === null ? {} : { x: next }) })]]), 1)?.[0]);
   if (written === null || written > 1) throw new UnknownReplyError("a student's row whose start moved");
 }
 
@@ -1474,7 +1504,7 @@ export async function sendDripEmails(
         let settled = start === "shut";
         if (typeof start === "object" && start.open !== since) {
           const at = start.open;
-          const moved = await redateStudent(course, student.email, at, nowSeconds).then(() => true, (error: unknown) => (console.error("moving a student's course start failed", error), false));
+          const moved = await redateStudent(course, student.email, at, nowSeconds, start.stamp).then(() => true, (error: unknown) => (console.error("moving a student's course start failed", error), false));
           if (moved) since = at;
           else start = "unknown";
           settled = moved;
@@ -1520,7 +1550,7 @@ export async function sendDripEmails(
         if (stands !== since) {
           // The row held another day than the page's (a course bought again after a full refund): it takes the
           // page's, forgetting what went early, and this student's modules are looked at again from it.
-          const moved = await redateStudent(course, student.email, stands, nowSeconds).then(() => true, (error: unknown) => (console.error("moving a student's course start failed", error), false));
+          const moved = await redateStudent(course, student.email, stands, nowSeconds, typeof start === "object" ? start.stamp : "unknown").then(() => true, (error: unknown) => (console.error("moving a student's course start failed", error), false));
           await releaseMark(mark, value);
           if (!moved) {
             start = "unknown";

@@ -10,7 +10,7 @@ import { readListing } from "@/lib/catalog";
 import { recordPackage } from "@/lib/call-packages";
 import { admitOrders } from "@/lib/order-admission";
 import { COPIERS } from "@/lib/person-copy";
-import type { ErasureScope } from "@/lib/person-erasure";
+import type { ErasureScope } from "@/lib/erasure-rules";
 import type { CallSetup } from "@/lib/call-setup";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";

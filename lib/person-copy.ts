@@ -79,7 +79,7 @@ import { toldOf } from "@/lib/closing-buyers";
 import { paidCheckoutsOf } from "@/lib/person-copy-stripe";
 import { readGift } from "@/lib/gifts";
 import { isGroupJob, readGroup } from "@/lib/group-buy";
-import { type Bought, packageKeys, packagesKey } from "@/lib/call-packages";
+import { type Bought, packageKeys } from "@/lib/call-packages";
 import { readShipped } from "@/lib/shipments";
 import { callScope, readRecords } from "@/lib/meet-records";
 import { heldPaymentsOf } from "@/lib/closing-holds";
@@ -592,12 +592,15 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return out;
   },
   "lib/call-packages.ts": async (s) => {
-    // The store's packages, exactly: a set that cannot be read is never "none sold", which would leave theirs out.
-    const checkouts = stringList(repliesFor(await redisPipeline([["SMEMBERS", packagesKey(s.statsId)]]), 1)?.[0]);
-    if (!checkouts) throw new UnknownReplyError("the store's call packages");
+    // Only the person's own packages (#5125, row (1) call-packages): a package is kept under the checkout that paid
+    // for it, so the record of each of their paid package checkouts in this store (the Stripe read the copy already
+    // makes, which fails the copy when it cannot read them whole) is all there is to read. Never the store's whole
+    // set of packages sold (nl:pkg:s:), which never expires and grows with every sale, so one person's copy costs at
+    // most one GET a package they bought.
+    const checkouts = (await checkoutsOf(s)).filter((c) => c.meta.kind === "package").map((c) => c.id);
     const out: unknown[] = [];
-    // Each listed package read exactly too: one that cannot be read, or a member that is not a checkout id, fails
-    // the copy, never taken as somebody else's (packageForCopy). A record that ran out is none.
+    // Each package read exactly: one that cannot be read fails the copy, never taken as somebody else's
+    // (packageForCopy). A record that ran out is none.
     for (const checkout of checkouts) {
       const bought = await packageForCopy(checkout);
       // The booking link's token is a key, left out: they have it in the email that sent it.

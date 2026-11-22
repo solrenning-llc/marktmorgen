@@ -50,14 +50,14 @@ export async function finishProvenSignIn(
     }
     sessionId = owner ? await openSession(owner) : null;
     // A passkey removal whose days are over is applied at every login (lib/passkeys.ts).
-    if (owner) await pendingRemoval(owner).catch((error) => console.error("applying a passkey removal failed", error));
-    if (owner) await endRecoveryAccess(owner).catch((error) => console.error("closing a recovery login failed", error));
+    if (owner) await pendingRemoval(owner).catch(() => console.error("applying a passkey removal failed"));
+    if (owner) await endRecoveryAccess(owner).catch(() => console.error("closing a recovery login failed"));
   } catch (error) {
-    console.error("finishing a login failed", error);
+    console.error("finishing a login failed");
     // Whether the account asks for a second step could not be read (CX-123 rule 24): no session is opened on the
     // link alone, and the person is told that, not that their link expired. One opened before the read failed goes.
     if (error instanceof UnknownReplyError) {
-      if (sessionId) await endSession(sessionId).catch((end: unknown) => console.error("closing a login that could not be finished failed", end));
+      if (sessionId) await endSession(sessionId).catch(() => console.error("closing a login that could not be finished failed"));
       return redirect("/signin?status=login-unknown");
     }
   }

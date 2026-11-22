@@ -7,14 +7,17 @@ import { NO_DEAL } from "@/lib/cart-rules";
 import { NO_RECOVERY } from "@/lib/recovery-setting";
 import { NO_SALE } from "@/lib/store-sale";
 import { store as redis } from "./redis-stub";
+import { keepLive, liveStockStore } from "./stock-live-store";
 
 // Since 2 November 2026 (513 [PF1], unit 3 review) a unit is held in two writes: a provisional hold
 // under the lock, before any checkout is opened, and the checkout's own after it exists. Each needs an
 // explicit acknowledgment; without the first nothing is opened, without the second the checkout is never returned.
+// Since Codex L-20261120-0655 the second is written by the hand-over itself (STOCK_BIND), fenced on the store being
+// live, so the stores below have an id and an address (tests/stock-live-store.ts).
 test("checkout is not returned without a confirmed stock hold write", async () => {
   const product = parseProduct({ id: "limited123", title: "Limited", summary: "", priceCents: 100, stock: 1 });
   assert.ok(product);
-  const creator = { statsId: "a".repeat(32) } as Store;
+  const creator = liveStockStore({ statsId: "a".repeat(32) } as Store, "a1".repeat(16), "holdwrite@example.invalid");
   const original: typeof redis.pipeline = redis.pipeline.bind(redis);
   let acknowledgment: unknown;
   let opened = 0, writes = 0;
@@ -46,14 +49,15 @@ test("checkout is not returned without a confirmed stock hold write", async () =
       assert.deepEqual(result, { ok: true, value: { id: "cs_test_synthetic" } });
     }
     assert.equal(opened, 2);
-    assert.equal(writes, 10 + 2 * 2);
+    // The checkout's own hold is written inside the hand-over's script (STOCK_BIND), not by an HSET of its own.
+    assert.equal(writes, 10 + 2);
   } finally { redis.pipeline = original; }
 });
 
 test("inconsistent hold-write envelopes never return the opened checkout as confirmed", async () => {
   const product = parseProduct({ id: "limited123", title: "Limited", summary: "", priceCents: 100, stock: 1 });
   assert.ok(product);
-  const creator = { statsId: "a".repeat(32) } as Store;
+  const creator = liveStockStore({ statsId: "a".repeat(32) } as Store, "a1".repeat(16), "holdwrite@example.invalid");
   const original: typeof redis.pipeline = redis.pipeline.bind(redis);
   let opened = 0;
   const replies: unknown[] = [null, undefined, false, 0, 1, "OK", {}, [], Array(1), [1, null], [0, 1], { 0: 1, length: 1 }];
@@ -76,36 +80,26 @@ test("inconsistent hold-write envelopes never return the opened checkout as conf
       assert.deepEqual(commands.map(command => command[0]), ["SET", "HGETALL", "HSET", "HDEL", "EVAL"]);
     }
     assert.equal(opened, 0);
-    // The checkout's own hold: opened, never returned while its write is unconfirmed, and the provisional one never let go
-    // before it is (STOCK_BIND is not even asked). A reply for its one command that is not one known acknowledgment.
-    const second: unknown[] = [null, undefined, false, 0, 1, "OK", {}, [], Array(1), [null], ["OK"], [2], [1, 1], { 0: 1, length: 1 }];
+    // The hand-over itself (STOCK_BIND), which writes the checkout's own hold since Codex L-20261120-0655, answered in
+    // any shape but 1 (0, the store gone (-2), unknown): never returned, and the provisional hold never let go outside it.
+    const second: unknown[] = [null, undefined, false, 0, 1, "OK", {}, [], Array(1), [null], ["OK"], [2], [1, 1], { 0: 1, length: 1 }, [0], [-1], [-2], ["1"], [true]];
     for (const reply of second) {
       const commands: unknown[][] = [];
       redis.pipeline = async batch => {
         commands.push(...batch);
-        if (batch.length === 1 && batch[0][0] === "HSET" && batch[0][2] === "cs_test_synthetic") return reply as unknown[];
-        return answer(batch);
+        return batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:stock-bind:v2\n") ? reply as unknown[] : answer(batch);
       };
-      const result: { ok: boolean; reason?: string } = await withStockHold(creator, product, async held => {
-        assert.equal(held, true);
-        opened += 1;
-        return { id: "cs_test_synthetic" };
-      });
-      assert.deepEqual(result, { ok: false, reason: "busy" });
-      // The admission lets the lock go in its own step (STOCK_ADMIT), so no separate release follows it.
-      assert.deepEqual(commands.map(command => command[0]), ["SET", "HGETALL", "HSET", "EVAL", "HSET"]);
-    }
-    // The hand-over itself (STOCK_BIND) answered in any shape but 1: never returned.
-    for (const reply of [[0], [-1], [null], [], Array(1), ["1"], [true], null, { 0: 1, length: 1 }]) {
-      redis.pipeline = async batch => (batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:stock-bind:v1\n") ? reply as unknown[] : answer(batch));
       const result: { ok: boolean; reason?: string } = await withStockHold(creator, product, async () => {
         opened += 1;
         return { id: "cs_test_synthetic" };
       });
       assert.deepEqual(result, { ok: false, reason: "busy" });
+      // The admission lets the lock go in its own step (STOCK_ADMIT), so no separate release follows it; no Stripe account, so nothing to close.
+      assert.deepEqual(commands.map(command => command[0]), ["SET", "HGETALL", "HSET", "EVAL", "EVAL"]);
+      assert.ok(String(commands[4][1]).startsWith("-- marktmorgen:stock-bind:v2\n"), "the checkout's hold goes in the hand-over's own step");
     }
   } finally { redis.pipeline = original; }
-  assert.equal(opened, 14 + 9);
+  assert.equal(opened, 19);
 });
 
 // Codex G2's three races (review of #1730, 5 November 2026; tests/review-g2-cart-stock-races.test.ts) for a product bought on
@@ -117,7 +111,7 @@ test("a product bought on its own never gets two checkouts for its last unit", a
   process.env.STRIPE_SECRET_KEY = "sk_test_only";
   const product = parseProduct({ id: "lastone001", title: "Last one", summary: "", priceCents: 100, stock: 1 });
   assert.ok(product);
-  const creator = { statsId: "d".repeat(32), stripeAccountId: "acct_test_lastone01" } as Store;
+  const creator = liveStockStore({ statsId: "d".repeat(32), stripeAccountId: "acct_test_lastone01" } as Store, "d2".repeat(16), "lastone@example.invalid");
   const active = new Set<string>();
   let loseReply = false, refuseExpire = false, sequence = 0;
   const realFetch = globalThis.fetch;
@@ -142,7 +136,7 @@ test("a product bought on its own never gets two checkouts for its last unit", a
     return { id: String(made.id) };
   };
   const reserve = () => withStockHold(creator, product, open);
-  const reset = () => { redis.clear(); active.clear(); loseReply = false; refuseExpire = false; };
+  const reset = () => { redis.clear(); keepLive(creator); active.clear(); loseReply = false; refuseExpire = false; };
   const original: typeof redis.pipeline = redis.pipeline.bind(redis);
   try {
     reset();
@@ -178,13 +172,14 @@ test("a product bought on its own never gets two checkouts for its last unit", a
     assert.equal((await reserve()).ok, false);
     assert.equal(active.size, 1);
 
-    // 3. The checkout's own hold answered in part, and Stripe cannot close it: the unit stays held.
+    // 3. The checkout's own hold written (in the hand-over's step, STOCK_BIND) but its answer lost, and Stripe cannot close
+    // it: the unit stays held.
     reset();
     refuseExpire = true;
     redis.pipeline = async commands => {
-      if (commands.some(c => c[0] === "HSET" && String(c[2]).startsWith("cs_test_"))) {
-        for (const command of commands) if (command[0] === "HDEL") await original([command]);
-        return commands.map(c => c[0] === "HSET" ? { error: "write refused" } : 1) as never;
+      if (commands.some(c => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:stock-bind:"))) {
+        await original(commands);
+        return [{ error: "answer lost" }] as never;
       }
       return original(commands);
     };
@@ -204,9 +199,9 @@ test("a product bought on its own never gets two checkouts for its last unit", a
 // open the checkout (a false option id, read at lib/store-checkout.ts) held the last unit for the provisional hold's whole term,
 // about 37 minutes, so one address could pin units it never paid for. (2) A hold that ran out and was not settled yet made the
 // first click "Sold out" (it is counted as used under the lock, where Stripe is never asked) though Stripe says it expired.
-const pinnedStore = { statsId: "f".repeat(32), stripeAccountId: "acct_test_pinned01", handle: "pinned", name: "Pinned", email: "pinned@example.com", language: "en", currency: "usd",
+const pinnedStore = liveStockStore({ statsId: "f".repeat(32), stripeAccountId: "acct_test_pinned01", handle: "pinned", name: "Pinned", email: "pinned@example.com", language: "en", currency: "usd",
   sale: { ...NO_SALE }, cartDeal: { ...NO_DEAL }, recovery: { ...NO_RECOVERY }, hasDiscounts: false, tax: { enabled: false, included: false, ids: false, invoices: false },
-  affiliates: { enabled: false, percent: 0, days: 30, rates: {}, payday: 0, hold: 0 }, catalog: { id: null, items: [], head: [], inline: null } } as unknown as Store;
+  affiliates: { enabled: false, percent: 0, days: 30, rates: {}, payday: 0, hold: 0 }, catalog: { id: null, items: [], head: [], inline: null } } as unknown as Store, "f1".repeat(16), "pinned@example.com");
 /** Stripe, counted: every request, the checkouts it opens, and the ones it says expired. */
 function countingStripe(expiredAt: Set<string>) {
   const counts = { asked: 0, opened: 0 };
@@ -237,6 +232,7 @@ test("an error raised before Stripe is asked to open the checkout gives the unit
   const stripe = countingStripe(new Set());
   try {
     redis.clear();
+    keepLive(pinnedStore);
     // A false option id, refused by the real checkout before it asks Stripe anything, tried again and again from one address.
     for (let i = 0; i < 3; i += 1) {
       const pinned = await withStockHold(pinnedStore, sized, held => createCheckout(pinnedStore, sized, "https://marktmorgen.com", "opt_false01", { held, digitalConsent: TEST_CONSENT }))
@@ -266,6 +262,7 @@ test("a hold that ran out and is not settled yet never makes the first click sol
   const holds = `nl:stock:${pinnedStore.statsId}:${last.id}`;
   try {
     redis.clear();
+    keepLive(pinnedStore);
     // The last unit's hold ran out; Stripe says its checkout expired.
     await redis.pipeline([["HSET", holds, "cs_test_ranout000001", JSON.stringify({ until: Date.now() - 1000 })]]);
     const first = await withStockHold(pinnedStore, last, async () => ({ id: "cs_test_firstclick01" }));
@@ -273,6 +270,7 @@ test("a hold that ran out and is not settled yet never makes the first click sol
     assert.equal(await stockLeft(pinnedStore, last), 0);
     // A hold that ran out but whose checkout Stripe still has open stays counted: sold out, and nothing opened.
     redis.clear();
+    keepLive(pinnedStore);
     await redis.pipeline([["HSET", holds, "cs_test_stillopen001", JSON.stringify({ until: Date.now() - 1000 })]]);
     let opened = 0;
     assert.deepEqual(await withStockHold(pinnedStore, last, async () => { opened += 1; return { id: "cs_test_never0000001" }; }), { ok: false, reason: "soldout" });

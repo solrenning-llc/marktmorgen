@@ -21,6 +21,7 @@ import { orderWrite } from "@/lib/order-data";
 import { emailKey, storeKey } from "@/lib/learn";
 import { normaliseEmail } from "@/lib/auth";
 import type { Store } from "@/lib/store";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { CHECK_HOURS, type DiscordServer, MAX_DISCORD_PRODUCTS, SNOWFLAKE, cleanRoles, parseServer } from "@/lib/discord-rules";
 
 const serverKey = (room: string) => `nl:dc:srv:${room}`;
@@ -80,8 +81,46 @@ export async function readServerOrThrow(room: string): Promise<DiscordServer | n
   return server;
 }
 
-export async function saveServer(room: string, server: DiscordServer): Promise<void> {
-  await redisPipeline([["SET", serverKey(room), JSON.stringify(server)]]);
+/**
+ * The server's write, only while its store is live (Codex L-20261120-0732), by the rule of lib/live-fence.ts: the
+ * store's erasing mark absent, and its id key still holding this very store's ref (ARGV[3] ""), or, for a store from
+ * before ids, its owner's record still carrying its statsId (ARGV[3]). KEYS: the live key, the erasing hash, the
+ * server. 1: written; 0: the store is gone, moved or being erased, and nothing was written; -1: the owner's record does
+ * not parse (unknown). No expiry, as before.
+ */
+const SAVE_SERVER_IF_LIVE = `-- marktmorgen:discord-server-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[3] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[4] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[3] then return 0 end
+end
+redis.call("SET", KEYS[3], ARGV[2])
+return 1`;
+
+/** Billed for one server write on a live store: the EVAL and its HGET, GET and SET (lib/capped-count.ts's count). */
+export const DISCORD_SERVER_WRITE_COMMANDS = 4;
+
+/**
+ * Keeps the store's connected server, in one step fenced on the store being live (SAVE_SERVER_IF_LIVE): the callback
+ * waits on Discord's code exchange and the studio's kick option on its read, and the store's erasure may begin or end
+ * meanwhile; a plain SET then wrote the erased store's server back after its walk. Returns only when the write is
+ * confirmed (the exact 1); a store gone, moved or being erased, a store from before ids with no statsId, or any other
+ * answer throws UnknownReplyError, and nothing falls back to an unfenced write.
+ */
+export async function saveServer(store: Store, server: DiscordServer): Promise<void> {
+  const what = "the connected Discord server, kept while its store is live";
+  const fence = await storeLiveFence(store);
+  if (fence.statsId === null) throw new UnknownReplyError(what);
+  const reply = oneReply(await redisPipeline([[
+    "EVAL", SAVE_SERVER_IF_LIVE, 3, fence.live, fence.erasing, serverKey(storeKey(store)),
+    fence.field, JSON.stringify(server), fence.statsId, fence.ref,
+  ]]), what);
+  if (reply !== 1) throw new UnknownReplyError(what);
 }
 
 /**

@@ -66,6 +66,7 @@ import { RECEIPT_BATCH_SHAPE } from "@/lib/receipt-batch";
 import { monthlyEmails, type Tier } from "@/lib/plan";
 import { BESIDE_SAVE_COMMANDS } from "@/lib/store-data";
 import { WINBACK_OFFER_COMMANDS } from "@/lib/winback";
+import { MAX_DOOR_BYTES } from "@/lib/upload-door";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TOP_HEIGHT, viewingBytes } from "@/lib/stream-rules";
@@ -148,7 +149,7 @@ import { EMAIL_KEY_HOLDS_MS, SUMMARY_TRIES, SUMMARY_TRY_COMMANDS_MOST, SUMMARY_T
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
 import {
   PROVIDER_CHARGES_BPS, R2_CLASS_A_MICRO_USD_PER_MILLION, R2_CLASS_B_MICRO_USD_PER_MILLION, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
-  VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
+  VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR, vaultRefusedPassMicroUsd,
 } from "@/lib/spend-cost-table";
 import { CDN_PER_REQUEST, PAGES_PER_VISIT, laterPageCost, readBeaconCost, readCeilingMarksCost, visitCost } from "./traffic-cost";
 import { SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_MISSES_PER_ADDRESS, SHORT_LINK_MISS_WINDOW_MS, SHORT_LINK_OFF_AFTER_MS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_REST_COMMANDS, SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_RESTING_OWNER_MS, SHORT_LINK_PAID_BURST_COMMANDS, SHORT_LINK_PAID_FLIGHT_PER_STORE, SHORT_LINK_PAID_REFUSALS_PER_HOUR, SHORT_LINK_STORE_COUNT_COMMANDS, SHORT_LINK_STORE_READS_PER_HOUR, SHORT_LINK_STORE_REFUND_COMMANDS, SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_PER_HOUR, SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_USED_UP_PAUSE_MS } from "@/lib/short-link-open-rules";
@@ -651,6 +652,16 @@ export const COMMUNITY_DOOR_COST =
   request("wait", 40 + TAKE_COMMANDS, 20_000) + BLOB_SIMPLE_OPERATION + 2 * BLOB_ADVANCED_OPERATION + COMMUNITY_SWEEP_COMMANDS * COMMAND;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
+/**
+ * The picture door's second call (app/api/store/image/upload, #3171): every studio picture upload asks the door itself
+ * (lib/upload-through-door.ts askForDoor, the studio request the window counts), then the file store's client asks the
+ * route again with that door in x-upload-door, and the route hands it back before anything is read, counted or signed.
+ * That call runs no command and asks the file store nothing, but it is a call: priced at the lightest request's shape,
+ * receiving the door's header at its most (MAX_DOOR_BYTES) and a first ask's body at its most (16_000, the limit the
+ * route reads a first ask with), and sending the door back with its envelope, every byte through Fast Origin Transfer.
+ * Taken once for every studio request, as if each were a picture upload (line picture-door-echo).
+ */
+export const PICTURE_DOOR_ECHO = request("light", 0, 0) + (MAX_DOOR_BYTES + 16_000 + MAX_DOOR_BYTES + 64) * ORIGIN_PER_BYTE;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
 export const PICTURE_READ = request("light", 16) + PICTURE_BYTES * (ORIGIN_PER_BYTE + BLOB_TRANSFER_PER_BYTE);
 /**
@@ -1420,6 +1431,15 @@ export function paypalReadingCost(commands: number, bytes: number): number {
  * the integrations line at PAYPAL_PRESS.
  */
 export const PAYPAL_PRESSES_UNTAKEN = 1;
+/**
+ * A vault open refused for storage spends no monthly upload budget since #4019 (lib/vault-storage.ts, admit), so its
+ * listings, the expired session it retired and its ledger commands are paid by the integration unit it took
+ * ("vault-open"): every unit of the figure is priced as if it were one, on top of its call (lib/spend-cost-table.ts,
+ * vaultRefusedPassMicroUsd; tests/vault-refused-pass-cost.test.ts). Its measure also sends the daily total's store
+ * commands (BLOB_TALLY_OPEN_COMMANDS, lib/blob-tally.ts, since #2848), which the blob-list line prices per paid open
+ * only, so the pass carries them too.
+ */
+export const VAULT_REFUSED_PASS = micro(vaultRefusedPassMicroUsd()) + BLOB_TALLY_OPEN_COMMANDS * COMMAND;
 
 /** Checkout-refusal panel, inside the existing studio unit (not added again):
  * one HMGET for seven UTC days plus last, with the writer's 60/300-character
@@ -2538,6 +2558,17 @@ export const COST_LINES: CostLine[] = [
     basis: "Every upload operation the automatic upload allowance can start, each start priced at the most operations its own path makes: on R2, every page of the vault listing admission reads, the multipart create and complete, and three file measurements; on Vercel Blob, every page of the host file store's listing admission reads, as Advanced Operations at the top regional rate; on Bunny Stream, the read of the store's collection admission makes, at a stated allowance, since no rate for it is cited (tests/vault-open-class-a.test.ts). Two finish or cancel requests per upload: a finish and a confirmed cancel are written down and a repeat answered from that record, an unconfirmed cancel may be asked again inside the two, a finish refused for its piece list asks R2 nothing, and a request past them is refused before R2 is asked (tests/vault-control-once.test.ts). Since 20 November 2026 (Codex L-20261120-0141) every write of an upload's open is fenced on the store, so a provider answering after the store's erasure writes nothing back: each start is priced with UPLOAD_OPEN_FENCE_EXTRA_COMMANDS (12) more database commands at its worst path, held by tests/vault-erasure-fence.test.ts.",
   },
   {
+    id: "picture-door-echo",
+    feature: "The picture door's second call: the file store's client asking the picture route again with the door it was given, handed back with nothing read, counted or signed (#3171)",
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * PICTURE_DOOR_ECHO,
+    sources: [
+      { file: "app/api/store/image/upload/route.ts", names: ["DOOR_ECHO_HEADER", "doorFromHeader(echoed)", "limited(request, 16_000)"] },
+      { file: "lib/upload-through-door.ts", names: ["askForDoor", "uploadThroughDoor"] },
+      { file: "lib/upload-door.ts", names: ["MAX_DOOR_BYTES"] },
+    ],
+    basis: "Every studio picture upload asks the picture door itself (askForDoor), the studio request the window counts and the line picture-uploads prices; the file store's client then asks the route again with that door in x-upload-door, and the route hands it back before anything is read, counted or signed. That second call is one more per picture upload request, at most the plan's studio figure a month: a call at the lightest request's shape, with no command and no file store operation, receiving the door's header at its most (MAX_DOOR_BYTES) and a first ask's body at its most (16_000, the limit the route reads a first ask with), and sending the door back with its envelope, every byte at Fast Origin Transfer (PICTURE_DOOR_ECHO). The file route's echo is already bounded by UPLOAD_REQUESTS_PER_OPEN in the line uploads (docs/file-upload-admission-refusals.md).",
+  },
+  {
     id: "workflows",
     feature: "Workflow runs (#507)",
     // The five-minute job's look for steps parked for room at Amazon SES (SES_WAKE_JOB_COMMANDS, every run of every day a
@@ -3153,7 +3184,7 @@ export const COST_LINES: CostLine[] = [
     id: "integrations",
     feature: "Calls to other services: meetings and Zoom, a host's calendar checked by hand, Discord, email platforms, Meta ads, PayPal, affiliate kits and pay-to, outreach reads of a business's site, person lookups, the vault, video upload doors and captions, email pictures (17 October 2026)",
     // A press of "Pay with PayPal" takes its units at its size (paypalPressUnits); payday's auto-pay takes none, so it is added at its most (Claude 7 on #4488).
-    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "integration") + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS,
+    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "integration") + STORE_ALLOWANCES[tier].integration * VAULT_REFUSED_PASS + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS,
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "integration"] },
       { file: "lib/metered-limits.ts", names: ["withinService", "withinServiceWhy"] },
@@ -3631,6 +3662,8 @@ export function nonPayingWorst(): number {
     + TRIAL_VIDEO_HOURS * hourCost()
     + TRIAL_DAILY_RUNS * 15 * WORST_COMMANDS_PER_RUN * COMMAND
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)
+    // Each integration unit may be a vault open refused for storage, priced on top of its call (VAULT_REFUSED_PASS).
+    + allowances.integration * VAULT_REFUSED_PASS
     + campaignLandingFenceCost(allowances)
     // Its payday's auto-pay takes no integration unit (a press from the studio takes its own, paypalPressUnits).
     + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS
@@ -4026,6 +4059,8 @@ export const NOT_A_COST: Record<string, string> = {
   PITCHES_PER_DAY: "Outreach pitches are drafts the creator sends from their own mailbox: nothing is sent from here, and reading a business's site is a call out (line integrations).",
   OPENS_PER_DAY: "A daily burst limit on one numbers link: each opening is one of the store's public requests (line public-requests).",
   MAX_RANGES_PER_DAY: "How many time ranges a host may set on one day of the week: a setting, not a use.",
+  MAX_DAILY_POINTS: "The highest daily cap a creator may choose for the points posts, comments and finished lessons make a member (lib/community-point-rules.ts, 112 [E2-POINTS] unit 1): a bound on a number shown on the leaderboard, a setting, not a use. The rules are pure and nothing calls them yet; keeping the points (one Redis write per awarded fact) is unit 2, which must add its own cost line and ceiling before any command.",
+  DEFAULT_DAILY_CAP: "The daily cap on points from posts, comments and finished lessons until the creator picks one (lib/community-point-rules.ts, 112 [E2-POINTS] unit 1): a setting, not a use. No command, call or byte; unit 2 adds the cost line of keeping points.",
   REQUEST_LIMITS: "How many payment requests a store keeps open and in all: each costs only the store emails it sends (line store-email), the order its payment becomes (line orders) and its record in the data room (line database-storage).",
   NON_PAYING_REQUEST_LIMITS: "The same for a store that pays nothing: its emails and orders are in its own figures (nonPayingWorst), its records in its data room.",
   NON_PAYING_ALLOWANCES: "The figures of a store that pays nothing: in nonPayingWorst (line free-share).",

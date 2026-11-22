@@ -42,8 +42,8 @@ export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
     run(listed === "1" ? ["ZADD", dir, at, member] : ["ZREM", dir, member]);
     return 1;
   },
-  "recent-feed-live:v1": (run, [live, erasing, feed], [field, json, seconds]) => {
-    if (Number(run(["EXISTS", live])) !== 1 || Number(run(["HEXISTS", erasing, field])) === 1) return "gone";
+  "recent-feed-live:v2": (run, [live, erasing, feed], [field, json, seconds, ref]) => {
+    if (run(["GET", live]) !== ref || Number(run(["HEXISTS", erasing, field])) === 1) return "gone";
     run(["SET", feed, json, "EX", seconds]);
     return 1;
   },

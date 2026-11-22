@@ -48,9 +48,9 @@ const as = (k) => ({ CLAUDE_CODE_REMOTE_SESSION_ID: SES[k] });
 let falhas = 0, total = 0;
 const is = (nome, cond, extra = "") => { total++; if (!cond) falhas++; console.log(`${cond ? "  ok  " : "  FAIL"}  ${nome}${!cond && extra ? `\n        ${String(extra).slice(0, 400).replace(/\n/g, "\n        ")}` : ""}`); };
 // Writes a file straight into the mailbox with git, as an old or edited copy of the tool could (review of Claude 2 upbeat).
-const raw = (path, text) => {
+const raw = (path, text, repo = join(T, "mail.git")) => {
   const c = join(T, `raw-${Math.random().toString(16).slice(2)}`);
-  g(["clone", "-q", "-b", "correio", join(T, "mail.git"), c]);
+  g(["clone", "-q", "-b", "correio", repo, c]);
   mkdirSync(join(c, path, ".."), { recursive: true }); writeFileSync(join(c, path), text);
   g(["add", "."], c); g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "raw"], c); g(["push", "-q", "origin", "HEAD:correio"], c);
 };
@@ -451,6 +451,72 @@ for (const remoto of ["deploy@github.com:solrenning-llc/repo-id-transfer-test", 
 }
 is("it counts with an absolute local path", ligadoCom(join(T, "mail.git")) === "true", ligadoCom(join(T, "mail.git")));
 is("and with a file:// address", ligadoCom(`file://${join(T, "mail.git")}`) === "true", ligadoCom(`file://${join(T, "mail.git")}`));
+
+console.log("whose mark it is: another family's quota, the HOLD and the CLAIMED per session (OWNER-20261121-1904 step 5)");
+{
+  g(["init", "-q", "--bare", "mail6.git"]); g(["push", "-q", "../mail6.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m6 = { CORREIO_REPO: join(T, "mail6.git") };
+  const C3 = "cse_014YNUxAAAAAAAAAAAAAAAAA", C3B = "cse_014YNUxBBBBBBBBBBBBBBBBB", C4B = "cse_01S9eVAzzzzzzzzzzzzzzzzz";
+  const em = (k) => (k.startsWith("cse_") ? { CLAUDE_CODE_REMOTE_SESSION_ID: k } : as(k));
+  const q6 = (who, k, args, extra = {}) => run([...args, ...(who ? ["--as", who] : [])], { ...m6, ...em(k), ...extra });
+  const quotas = () => run(["list-quotas"], m6).out;
+  // PR 20 is Claude 3's: its commit carries a Claude 3 session trailer.
+  g(["checkout", "-q", "-B", "pr20", M], P); commit("f20.txt", "20\n", "pr20\n\nClaude-Session: https://claude.ai/code/session_014YNUxAAAAAAAAAAAAAAAAA"); g(["push", "-q", "../prs.git", "HEAD:refs/pull/20/head"], P);
+  g(["checkout", "-q", "-B", "pr21", M], P); commit("f21.txt", "21\n", "pr21\n\nClaude-Session: https://claude.ai/code/session_014YNUxAAAAAAAAAAAAAAAAA"); g(["push", "-q", "../prs.git", "HEAD:refs/pull/21/head"], P);
+
+  // A6: another family's quota only by that family or the coordinator.
+  r = q6("Claude 3 Z", "c6", ["set-quota", "--exhausted", "--until", "2099-01-01T00:00Z", "--by", "Claude 6 Z"]);
+  is("Claude 6 cannot declare Claude 3 out of quota", !r.ok && /própria família ou (pelo )?coordenador/.test(r.out), r.out);
+  is("so Claude 3 still counts as with quota", /claude-3: com cota/.test(quotas()), quotas());
+  r = q6("Claude 3 Z", C3B, ["set-quota", "--exhausted", "--until", "2099-01-01T00:00Z", "--by", "Claude 3 B"]);
+  is("another Claude 3 session declares its own family", r.ok && /SEM COTA/.test(quotas()), r.out + quotas());
+  r = q6("Claude 3 Z", C3, ["set-quota", "--available"]);
+  is("and Claude 3 declares the quota back", r.ok && /claude-3: com cota/.test(quotas()), r.out + quotas());
+  let q = pedidoDe(marca("set-quota", "claude-3"));
+  r = q6("Claude 3 Z", "ibq", ["set-quota", "--exhausted", "--until", "2099-01-01T00:00Z", "--by", "Claude 5 ibqho", ...q.args], q.env);
+  is("the named session declares another family's quota on a coordinator request", r.ok && /claude-3: SEM COTA/.test(quotas()), r.out + quotas());
+  r = q6("Claude 3 Z", "ibq", ["set-quota", "--available", "--by", "Claude 5 ibqho", ...q.args], q.env);
+  is("the same request is not used twice", !r.ok && /já foi usado/.test(r.out), r.out);
+  q6("Claude 3 Z", C3, ["set-quota", "--available"]);
+  // A record of another family's quota written by raw git from a Claude 6 session does not count.
+  raw(`estado/claude-3/29990101T000000Z-claude-6-z-ab12`, "Cota: sem\nVolta: 2099-01-01T00:00:00.000Z\nPor: Claude 6 Z\nData (UTC): 2026-11-22 05:00\nSessão: session_018ZjhHhUoHAGLUkhRVBUuAW (claude-6)\n", m6.CORREIO_REPO);
+  is("a raw record of Claude 3's quota written by a Claude 6 session is ignored", /claude-3: com cota/.test(quotas()), quotas());
+  raw(`estado/claude-7/20261121T050751Z-claude-7-b445`, "Cota: sem\nVolta: 2099-01-01T00:00:00.000Z\nPor: Claude 6 (informado pelo dono)\nData (UTC): 2026-11-21 05:07\n", m6.CORREIO_REPO);
+  is("an old record, written before this version without a session line, still counts as before", /claude-7: SEM COTA/.test(quotas()), quotas());
+
+  // A7: a HOLD is released only by whoever placed it, the PR's author or the coordinator.
+  const st = (n) => run(["pr-status", "--pr", String(n)], m6).out;
+  r = q6("Claude 4 X", "c4", ["hold-pr", "--pr", "20", "--reason", "cost ceiling"]);
+  is("Claude 4 holds #20", r.ok && /HOLD por Claude 4 X/.test(st(20)), r.out + st(20));
+  r = q6("Claude 2 X", "c2", ["release-pr", "--pr", "20"]);
+  is("Claude 2 (not the one who held it, not the author) cannot release the HOLD", !r.ok && /HOLD/.test(r.out) && /HOLD por Claude 4 X/.test(st(20)), r.out + st(20));
+  r = q6("Claude 4 X", C4B, ["claim-pr", "--pr", "20"]);
+  is("a CLAIMED does not replace an active HOLD, even from the family that held it", !r.ok && /HOLD por Claude 4 X/.test(st(20)), r.out + st(20));
+  r = q6("Claude 3 Z", C3, ["release-pr", "--pr", "20"]);
+  is("the PR's author (a family with commits on it) releases the HOLD", r.ok && /LIBERADO/.test(st(20)), r.out + st(20));
+  q6("Claude 4 X", "c4", ["hold-pr", "--pr", "20", "--reason", "cost ceiling"]);
+  q6("Claude 2 X", "c2", ["hold-pr", "--pr", "20", "--reason", "money review"]);
+  r = q6("Claude 4 X", "c4", ["release-pr", "--pr", "20"]);
+  is("with two HOLDs on top of each other, the first holder cannot release the second one's", !r.ok && /HOLD por Claude 2 X/.test(st(20)), r.out + st(20));
+  q = pedidoDe(marca("release-pr", "20"));
+  r = q6("Claude 5 ibqho", "ibq", ["release-pr", "--pr", "20", ...q.args], q.env);
+  is("the coordinator's named session releases it on a request on #4932", r.ok && /LIBERADO/.test(st(20)), r.out + st(20));
+  q6("Claude 4 X", "c4", ["hold-pr", "--pr", "20", "--reason", "cost ceiling"]);
+  r = q6("Claude 5 ibqho", "ibq", ["release-pr", "--pr", "20", ...q.args], q.env);
+  is("a release request is used once", !r.ok && /já foi usado/.test(r.out) && /HOLD por Claude 4 X/.test(st(20)), r.out + st(20));
+  raw("prs/20/99", `Ação: LIBERADO\nPR: 20\nPor: Claude 2 X\nData: ${new Date().toISOString()}\nSessão: session_01FR6Z1Q87JZvTFBRpZ8SNo8 (claude-2)\n`, m6.CORREIO_REPO);
+  is("a raw release written by a session that may not release it is ignored", /HOLD por Claude 4 X/.test(st(20)) && /ativo/.test(st(20)), st(20));
+
+  // A8: a CLAIMED belongs to the session that claimed it.
+  r = q6("Claude 4 X", "c4", ["claim-pr", "--pr", "21"]);
+  is("Claude 4 (session A) claims #21", r.ok && /CLAIMED por Claude 4 X/.test(st(21)), r.out + st(21));
+  r = q6("Claude 4 Y", C4B, ["claim-pr", "--pr", "21"]);
+  is("another session of the same family cannot take the CLAIMED over", !r.ok && /CLAIMED por Claude 4 X/.test(st(21)), r.out + st(21));
+  r = q6("Claude 4 Y", C4B, ["release-pr", "--pr", "21"]);
+  is("nor release it", !r.ok && /CLAIMED por Claude 4 X/.test(st(21)), r.out + st(21));
+  r = q6("Claude 4 X", "c4", ["release-pr", "--pr", "21"]);
+  is("the session that claimed it releases it", r.ok && /LIBERADO/.test(st(21)), r.out + st(21));
+}
 
 console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");
 {

@@ -44,7 +44,7 @@ import { lessonComments } from "@/lib/lesson-comments";
 import { notesOf } from "@/lib/lesson-notes";
 import { bondRecordOf } from "@/lib/affiliate-bond";
 import { leadOf } from "@/lib/affiliate-leads";
-import { importedFrom, importedKey } from "@/lib/imported-purchases";
+import { type ImportedPurchase, importedFrom, importedKey } from "@/lib/imported-purchases";
 import { inviteField, inviteForCopy, withPendingInvites } from "@/lib/move-members";
 import { openConversation, readInbox } from "@/lib/inbox";
 import { accountOf, readMember as readDiscordMember } from "@/lib/discord-store";
@@ -357,8 +357,20 @@ export function morePagesLine(page: number, parts: readonly string[]): string {
   return `This copy continues on page ${page}. Ask for it with the cursor in "next" to read the rest: ${what.join("; ")} (${count}).`;
 }
 
-/** What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts). */
-const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true });
+/**
+ * What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts): once per copy,
+ * shared by the readers that need it (their imported purchases, the gifts and the group places they received), as
+ * checkoutsOf shares their paid checkouts (issue #5125, row (1) imported-purchases).
+ */
+const grantsRead = new WeakMap<ErasureScope, Promise<ImportedPurchase[]>>();
+function grantsOf(s: ErasureScope): Promise<ImportedPurchase[]> {
+  let read = grantsRead.get(s);
+  if (!read) {
+    read = redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]).then((replies) => importedFrom(replies[0], { complete: true }));
+    grantsRead.set(s, read);
+  }
+  return read;
+}
 
 /** One reader per copied module, each only reading. */
 // A Stripe Checkout Session id, the same shape lib/call-packages.ts keeps a package under.
@@ -555,7 +567,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return [copy];
   },
   // Read whether or not the store still lets imported buyers in (importedFor asks that, and notes them as it reads).
-  "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true }),
+  "lib/imported-purchases.ts": async (s) => grantsOf(s),
   "lib/move-members.ts": async (s) => {
     const out: unknown[] = [];
     // The catalog's products and the memberships whose removal has not confirmed their invitations gone (Claude 3 on #3473).

@@ -538,6 +538,23 @@ console.log("step 6: free text never becomes a field (A12), unidentified acks ar
   is("an unidentified ack is written with a warning (A13)", r.ok && /ATENÇÃO.*não identificada/.test(r.out), r.out);
   r = run(["read", "--as", "Claude 3 Z"], { ...m7, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
   is("the family, reading identified, is told a message of its own was acknowledged by an unidentified write (A13)", new RegExp(`${idA13}.*não identificada|não identificada.*${idA13}`, "s").test(r.out), r.out);
+  // A11: one decision reads one snapshot of the mailbox. GIT_TRACE records every git command; only fetches of the mailbox count.
+  const buscas = (args, env) => {
+    const tr = join(T, `trace-${Math.random().toString(16).slice(2)}.txt`);
+    const x = spawnSync("node", [TOOL, ...args], { cwd: join(T, "w"), env: { ...base, ...m7, ...env, GIT_TRACE: tr }, encoding: "utf8" });
+    const n = readFileSync(tr, "utf8").split("\n").filter((l) => /trace: built-in: git fetch/.test(l) && l.includes("mail7.git")).length;
+    return { n, out: `${x.stdout}${x.stderr}` };
+  };
+  let b = buscas(["claim-review", "--as", "Claude 4 X"], as("c4"));
+  is("a claim with nothing to take reads the mailbox once (A11)", b.n === 1, `${b.n} fetches\n${b.out}`);
+  g(["checkout", "-q", "-B", "pr22", M], P); const H22 = commit("f22.txt", "22\n", "pr22"); g(["push", "-q", "../prs.git", "HEAD:refs/pull/22/head"], P);
+  run(["request-review", "--from", "Claude 2 X", "--pr", "22", "--sha", H22.slice(0, 10), "--text", "second"], { ...m7, ...as("c2") });
+  b = buscas(["claim-review", "--as", "Claude 4 X"], as("c4"));
+  is("a claim that takes reads one snapshot to decide and one more to write (A11)", /pegou/.test(b.out) && b.n === 2, `${b.n} fetches\n${b.out}`);
+  b = buscas(["pr-status", "--pr", "2"], {});
+  is("pr-status reads the mailbox once (A11)", b.n === 1, `${b.n} fetches`);
+  b = buscas(["hold-pr", "--as", "Claude 4 X", "--pr", "2", "--reason", "t"], as("c4"));
+  is("hold-pr reads one snapshot to decide and one more to write (A11)", b.n === 2, `${b.n} fetches\n${b.out}`);
 }
 
 console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");

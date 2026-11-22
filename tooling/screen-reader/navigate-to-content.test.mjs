@@ -215,3 +215,57 @@ for(const failAt of ["next","reset"]){
   assert.equal(state.resets,failAt==="next"?0:1);
  });
 }
+
+// Guidepup's VoiceOverClient (lib/macOS/VoiceOver/VoiceOverClient.js, #pollForSpokenPhrases) under entry-pilot's
+// reader.start({capture:"initial"}): a captured command logs the first phrase VoiceOver reports that differs from the
+// last logged one, and stops there; a command with capture false logs nothing, though VoiceOver still spoke. Merge-queue
+// jobs 136292943040 (20/11) and 137043814056 (22/11) logged "Guidepup Marker", then "link Skip to the page content" as
+// the first heading, then "Monthly plan prices": the area-top phrase, never logged, was read as the heading's, and the
+// H1's own phrase was never read.
+function speechFixture({nextSays}){
+ const state={log:[],pending:null,position:"marker",marker:false};
+ const say=(phrase,capture)=>{
+  if(capture===false){state.pending=phrase;return;}
+  const unread=state.pending&&state.pending!==state.log.at(-1)?state.pending:null;state.pending=null;
+  if(capture==="initial"&&unread){state.log.push(unread);return;}
+  state.log.push(unread?unread+". "+phrase:phrase);
+ };
+ const headings=["heading level 1 Start your store","heading level 2 Monthly plan prices","heading level 2 WHAT HAPPENS NEXT"];
+ const reader={
+  async perform(command,options){
+   if(command===voiceOverKeyCodeCommands.openItemChooser)say("Item Chooser menu 77 items",options?.capture??"initial");
+   if(command===voiceOverKeyCodeCommands.moveToAreaTop){state.position=-1;say("link Skip to the page content",options?.capture??"initial");}
+  },
+  async type(character,options){if(character==="w")say("5 items Start your store — Marktmorgen web content",options?.capture??"initial");},
+  async lastSpokenPhrase(){return state.log.at(-1)??"";},
+  async interact(){},
+  async next(){say(nextSays,"initial");},
+  async nextHeading(){state.position=Math.min(state.position+1,headings.length-1);say(headings[state.position],"initial");},
+ };
+ const page={async bringToFront(){},async evaluate(fn){
+  const previous=globalThis.document;
+  globalThis.document={
+   createElement(){return {style:{},setAttribute(){}};},
+   body:{prepend(){state.marker=true;}},
+   getElementById(){return state.marker?{remove(){state.marker=false;}}:null;},
+  };
+  try{return fn();}finally{globalThis.document=previous;}
+ }};
+ return {state,reader,page};
+}
+
+for(const [case_,nextSays] of [["the marker","In Start your store — Marktmorgen web content Guidepup Marker Guidepup Marker clickable text"],["the skip link","link Skip to the page content"]]){
+ test(`VoiceOver's own area-top phrase is never taken for the entry heading's, when the first item read is ${case_}`,async()=>{
+  const {state,reader,page}=speechFixture({nextSays});
+  await navigateToContent(reader,page,"voiceover");
+  // entry-pilot.mjs: one heading command per step, each phrase checked once, at most 8 steps.
+  const spoken=[];
+  for(let step=0;step<8;step++){
+   await reader.nextHeading();spoken.push(await reader.lastSpokenPhrase());
+   if(spoken.at(-1).toLowerCase().includes("start your store"))break;
+  }
+  assert.equal(spoken[0],"heading level 1 Start your store","the first heading command reads the H1, as in a passing run");
+  assert.ok(state.log.includes("link Skip to the page content"),"the area-top phrase is in the transcript as the reset's own");
+  assert.equal(state.marker,false);
+ });
+}

@@ -47,6 +47,9 @@
  *   nl:keys:<store>:<product>:info     hash key -> who, when, which sale, revoked
  *   nl:keys:<store>:<product>:waiting  hash sale reference -> buyer waiting for a key
  *   nl:keys:<store>:<product>:warned   set once the low-pool email has gone
+ *   nl:keys:<store>:who:<address>      hash "<product>\t<key>" -> "1": the keys one person was given, written in
+ *                                      the same step as the key (settle), so their copy reads only their own keys
+ *                                      (issue #5125); <address> is a one-way digest of the normalised address
  *
  * <store> is the store's statsId, which follows it through a new address and
  * a new sign-in email.
@@ -54,6 +57,8 @@
 import { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
 export { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
 import { saleHandles } from "@/lib/store";
+import { createHash } from "node:crypto";
+import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { StripeListUnreadable, type StripeRow, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
@@ -191,6 +196,13 @@ const saleKey = (store: Store, product: Pick<Listing, "id">) => `${base(store, p
 const infoKey = (store: Store, product: Pick<Listing, "id">) => `${base(store, product)}:info`;
 const waitingKey = (store: Store, product: Pick<Listing, "id">) => `${base(store, product)}:waiting`;
 const warnedKey = (store: Store, product: Pick<Listing, "id">) => `${base(store, product)}:warned`;
+
+/** A one-way digest of the address, normalised as the copy reads it (lib/auth.ts normaliseEmail): never the address in a key's name. */
+export const keyHolderDigest = (email: string): string => createHash("sha256").update(`marktmorgen-licence-holder:${normaliseEmail(email)}`).digest("hex").slice(0, 32);
+/** The keys one person was given in a store (issue #5125): a hash so it is written inside settle's ORDER_WRITE_IF_NEW, which takes hash writes only. */
+export const holderKey = (store: Pick<Store, "statsId">, email: string) => `nl:keys:${store.statsId}:who:${keyHolderDigest(email)}`;
+/** The field of one key in a holder's hash: the product and the key, which has no space in it (lib/licence-key-rules.ts). */
+export const holderField = (product: Pick<Listing, "id">, key: string) => `${product.id}\t${key}`;
 
 /**
  * What the refund job writes in a sale's place among the keys given (`:sale`) when the sale was refunded in full or
@@ -403,11 +415,15 @@ export async function keyForSale(store: Store, product: Listing, reference: stri
  */
 async function settle(store: Store, product: Listing, reference: string, email: string, key: string, fromPool: boolean): Promise<SaleKey | null> {
   const info: Info = { r: reference, e: email, at: Math.floor(Date.now() / 1000) };
-  // A key given to a sale is kept for good: counted in the store's room at what it adds (lib/order-data.ts).
+  // A key given to a sale is kept for good: counted in the store's room at what it adds (lib/order-data.ts). The
+  // buyer's own list of keys is written in the same step, so a key is never given without it (issue #5125); a sale
+  // with no address has nobody to list it under.
+  const holder: [string, string, string, string][] = normaliseEmail(email) ? [["HSET", holderKey(store, email), holderField(product, key), "1"]] : [];
   const won = await orderWriteIfNew(store, [
     ["HSETNX", saleKey(store, product), reference, key],
     ["HSET", infoKey(store, product), key, JSON.stringify(info)],
     ["HDEL", waitingKey(store, product), reference],
+    ...holder,
   ]);
   if (!won) {
     await redisPipeline(fromPool ? [["LPUSH", poolKey(store, product), key]] : [["SREM", allKey(store, product), key]]);
@@ -1134,21 +1150,41 @@ export async function checkKey(store: Store, product: Listing, key: string): Pro
  * purpose (lib/person-data.ts): the key is what was bought. Only reads.
  */
 export async function keysOf(store: Store, productIds: string[], email: string): Promise<(IssuedKey & { product: string })[]> {
-  if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
-  const address = email.trim().toLowerCase();
-  // An unknown answer is not "no keys": the copy says it could not read them rather than leave them out (CX-123 rule 24).
-  const replies = repliesFor(await redisPipeline(productIds.map((id) => ["HGETALL", infoKey(store, { id })])), productIds.length);
+  if (!store.statsId || !isRedisConfigured() || !normaliseEmail(email)) return [];
+  const address = normaliseEmail(email);
+  // Only this person's keys, from their own list written with each key (settle; issue #5125), never every key the
+  // store gave. An unknown answer is not "no keys": the copy says it could not read them rather than leave them out
+  // (CX-123 rule 24).
+  const listed = repliesFor(await redisPipeline([["HGETALL", holderKey(store, email)]]), 1)?.[0];
+  const flat = listed === undefined ? null : stringList(listed);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("the person's list of license keys");
+  const byProduct = new Map<string, string[]>();
+  for (let i = 0; i < flat.length; i += 2) {
+    const cut = flat[i].indexOf("\t");
+    const product = cut > 0 ? flat[i].slice(0, cut) : "";
+    const key = cut > 0 ? flat[i].slice(cut + 1) : "";
+    if (!product || !key || flat[i + 1] !== "1") throw new UnknownReplyError("an entry of the person's list of license keys");
+    byProduct.set(product, [...(byProduct.get(product) ?? []), key]);
+  }
+  // The products the store still lists first, as the copy has always shown them; then any other product they hold a key of.
+  const order = [...productIds.filter((id) => byProduct.has(id)), ...[...byProduct.keys()].filter((id) => !productIds.includes(id))];
+  if (!order.length) return [];
+  const replies = repliesFor(await redisPipeline(order.map((id) => ["HMGET", infoKey(store, { id }), ...byProduct.get(id)!])), order.length);
   if (!replies) throw new UnknownReplyError("the license keys' records");
-  return productIds.flatMap((product, i) => {
-    const flat = stringList(replies[i]);
-    if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("HGETALL of a product's license keys");
+  return order.flatMap((product, i) => {
+    const keys = byProduct.get(product)!;
+    const values = replies[i];
+    if (!Array.isArray(values) || values.length !== keys.length) throw new UnknownReplyError("HMGET of a person's license keys");
     const out: (IssuedKey & { product: string })[] = [];
-    for (let k = 0; k + 1 < flat.length; k += 2) {
+    values.forEach((raw, k) => {
+      // A key whose product's records are gone (the product deleted with its keys) is kept nowhere: nothing to copy.
+      if (raw === null) return;
+      if (typeof raw !== "string") throw new UnknownReplyError("a license key's record");
       // An unreadable record is unknown, never a key left out of the copy.
-      readInfo(flat[k + 1]);
-      const entry = parseInfo(String(flat[k]), flat[k + 1]);
-      if (entry && entry.email.trim().toLowerCase() === address) out.push({ ...entry, product });
-    }
+      readInfo(raw);
+      const entry = parseInfo(keys[k], raw);
+      if (entry && normaliseEmail(entry.email) === address) out.push({ ...entry, product });
+    });
     return out;
   });
 }

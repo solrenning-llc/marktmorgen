@@ -258,6 +258,17 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
   return read;
 }
 
+/** The person's license keys, read once per copy from their own list (issue #5125): the keys part and the devices part share it. */
+const keysRead = new WeakMap<ErasureScope, ReturnType<typeof keysOf>>();
+function personKeysOf(s: ErasureScope): ReturnType<typeof keysOf> {
+  let read = keysRead.get(s);
+  if (!read) {
+    read = keysOf(s.store, s.productIds, s.email);
+    keysRead.set(s, read);
+  }
+  return read;
+}
+
 /** What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts). */
 const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true });
 
@@ -552,8 +563,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     const empty = !member && points.total === 0 && !notices.length && !devices && !conversations.length && !room.length && !events.length && !challenges.length && !votes.length && !held.length && Object.values(wrote).every((list) => !list.length);
     return empty ? [] : [record];
   },
-  "lib/licence-keys.ts": async (s) => (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key, sale: k.reference, given: iso(k.at), revoked: iso(k.revokedAt), revokedBy: k.revokedBy })),
-  "lib/licence-activations.ts": async (s) => activationsOf(s.store, (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key }))),
+  "lib/licence-keys.ts": async (s) => (await personKeysOf(s)).map((k) => ({ product: k.product, key: k.key, sale: k.reference, given: iso(k.at), revoked: iso(k.revokedAt), revokedBy: k.revokedBy })),
+  "lib/licence-activations.ts": async (s) => activationsOf(s.store, (await personKeysOf(s)).map((k) => ({ product: k.product, key: k.key }))),
   "lib/paypal-sales.ts": async (s) => paypalOrdersOf(s.statsId, s.productIds, s.email),
   "lib/preorders.ts": async (s) => (await preordersOf(s.store, s.productIds, s.email)).map((p) => ({ ...p, at: iso(p.at), ...(p.given ? { given: iso(p.given) } : {}), ...(p.revoked ? { revoked: iso(p.revoked) } : {}) })),
   "lib/closing-buyers.ts": async (s) => {

@@ -8,7 +8,10 @@
  */
 import { addProduct, claimHandle, ensureStatsId, setProductKeys, setProductLink, setSubscription, storeForEmail, type Listing } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { keyForSale } from "@/lib/licence-keys";
+import { holderKey, keyForSale } from "@/lib/licence-keys";
+import { CLOSING, closingFamilyOf, countedInRoom } from "@/lib/data-families";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { COPIERS } from "@/lib/person-copy";
 import type { ErasureScope } from "@/lib/erasure-rules";
 import { store as redis } from "./redis-stub";
@@ -76,6 +79,7 @@ async function main(): Promise<void> {
   const keys = await readsOf(() => COPIERS["lib/licence-keys.ts"](scope));
   const copied = (keys.value as { key: string }[]).map((k) => k.key).sort();
   is("her three keys, from a checkout, a bundle's product and an offer after paying", copied, [...danas].sort());
+  is("in one read of her list and one of each product's records", keys.reads.length, 1 + products.length);
   is("no other buyer's key is in her copy", others.some((k) => copied.includes(k)), false);
 
   part("Reading them never reads the store's whole set of keys");
@@ -86,6 +90,45 @@ async function main(): Promise<void> {
   const devices = await readsOf(() => COPIERS["lib/licence-activations.ts"](scope));
   is("no product's whole hash of keys given is read for the devices", devices.reads.filter((r) => /^(HGETALL|HVALS|HKEYS|HSCAN) nl:keys:.*:info/.test(r)).length, 0);
   is("no other buyer's key or devices are read", devices.reads.some((r) => others.some((k) => r.includes(k))), false);
+
+  part("The same address however it was typed at checkout");
+  const typed = await keyForSale(store, products[1], `cs_test_dana2${"e".repeat(19)}`, "  Dana@Example.COM ");
+  if (typed?.state !== "issued") throw new Error("no key for the address typed another way");
+  const again = (await COPIERS["lib/licence-keys.ts"]({ ...scope } as ErasureScope)) as { key: string }[];
+  is("a key given to ' Dana@Example.COM ' is in the copy of dana@example.com", again.some((k) => k.key === typed.key), true);
+  is("both spellings are one list", holderKey(store, "  Dana@Example.COM "), holderKey(store, DANA));
+
+  part("The list lives as the keys do");
+  const list = holderKey(store, DANA);
+  is("its family is the license keys': counted in the store's room, erased with the store when it closes", [closingFamilyOf(list), countedInRoom(list), CLOSING[closingFamilyOf(list)]?.how], ["nl:keys:", true, "erase"]);
+  is("the address itself is never in the key's name", list.toLowerCase().includes("dana"), false);
+
+  part("Every path that gives a key writes the list in the same step");
+  // A key is given only where a sale's key line is written with HSETNX and its record with HSET in one step (settle).
+  // Any new place in lib/ or app/ that writes a key's record or a sale's key line must write the list in that same
+  // step: this fails until it is checked and added here.
+  const sources: string[] = [];
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else if (/\.(ts|tsx)$/.test(name)) sources.push(path);
+    }
+  };
+  walk("lib");
+  walk("app");
+  const writes = sources.flatMap((path) => {
+    const text = readFileSync(path, "utf8");
+    return [...text.matchAll(/\["(HSET|HSETNX)", (infoKey|saleKey)\(/g)].map((m) => `${path} ${m[1]} ${m[2]}`);
+  });
+  is("the writes of a key's record or a sale's key line, and where they are", writes.sort(), [
+    "lib/licence-keys.ts HSET infoKey", // settle: the key's record, with the list (holderKey) in the same orderWriteIfNew
+    "lib/licence-keys.ts HSET infoKey", // setRevoked: a key already given, revoked or good again; no key is given
+    "lib/licence-keys.ts HSETNX saleKey", // settle: the sale's key line
+    "lib/licence-keys.ts HSETNX saleKey", // the refund job: the sale's mark, never a key (REFUNDED_SALE)
+  ]);
+  const settle = readFileSync("lib/licence-keys.ts", "utf8").split("async function settle(")[1].split("\n}\n")[0];
+  is("settle writes the list in the same orderWriteIfNew as the key", /orderWriteIfNew\(store, \[[^]*"HSETNX", saleKey[^]*"HSET", infoKey[^]*\.\.\.holder/.test(settle) && settle.includes('["HSET", holderKey(store, email)'), true);
 
   part("A person with no key reads no key record");
   const none = await readsOf(() => COPIERS["lib/licence-keys.ts"]({ ...scope, email: "nobody@example.com" } as ErasureScope));

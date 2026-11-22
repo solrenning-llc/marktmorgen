@@ -18,7 +18,7 @@ const live = (): MemoryRedis => {
   return store;
 };
 const write = (store: MemoryRedis, compare: "0" | "1", expected: string, text: string): unknown =>
-  store.run(["EVAL", ABOUT_WRITE_IF_STORE_LIVE, 3, "id", "erasing", "about", "field", compare, expected, text] as Arg[]);
+  store.run(["EVAL", ABOUT_WRITE_IF_STORE_LIVE, 3, "id", "erasing", "about", "field", compare, expected, text, "ref"] as Arg[]);
 
 test("a live store's description is written, compared or not", () => {
   const plain = live();
@@ -50,4 +50,11 @@ test("a store being erased, or with no id key, gets nothing written", () => {
   gone.run(["DEL", "id"]);
   assert.deepEqual(write(gone, "0", "", "new text"), [-1]);
   assert.equal(gone.run(["GET", "about"]), "old text");
+});
+
+test("a store whose id key was repointed to another ref (an account move) gets nothing written", () => {
+  const moved = live();
+  moved.run(["SET", "id", "new-owner-ref"]);
+  assert.deepEqual(write(moved, "0", "", "new text"), [-1]);
+  assert.equal(moved.run(["GET", "about"]), "old text");
 });

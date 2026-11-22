@@ -16,17 +16,23 @@ import { dataBytes } from "@/lib/store-data-rules";
  * setter that asked for it returned and let go of the store's lock, or after an import or a copy read the store; a
  * plain SET then would put a deleted store's private text back after the closing walk passed its key. The fence is
  * lib/store-live-cache.ts's: the erasing mark (lib/store.ts ERASING_KEY) must be absent and the store's id key must
- * exist (closeStoreRecord deletes the id key and the record in the same fenced step as the mark). A store from before
+ * still hold its ref (closeStoreRecord deletes the id key and the record in the same fenced step as the mark). A store from before
  * ids is given its id first, once and for good (storeNamedForAbout), so the fence never has to read a whole record.
  *
+ * The store is live only while its id key still holds this store's own ref, never only while it exists (v2; Claude 5
+ * ibqho on #4969, the rule of lib/live-fence.ts store-cache-live:v3): moveAccount repoints the id key to the new
+ * owner's ref, and an erasure begun after a move marks the new ref's field, so a write read under the old ref would
+ * pass an EXISTS and an HGET of the old field while the new owner's erasure is under way.
+ *
  * KEYS: the store's id key, ERASING_KEY, the description. ARGV: the store's erasing field, "1" to write only over
- * `expected`, `expected`, the text ("" deletes). Answers {1} written; {0, length now} when `expected` no longer holds
- * (nothing written); {-1} the store is gone or erasing (nothing written). Inner commands: HGET and EXISTS, the GET of a
- * compare, then SET or DEL: at most ABOUT_FENCE_EXTRA_COMMANDS more than the unfenced write billed.
+ * `expected`, `expected`, the text ("" deletes), the store's ref. Answers {1} written; {0, length now} when `expected`
+ * no longer holds (nothing written); {-1} the store is gone, moved or erasing (nothing written). Inner commands: HGET
+ * and the id key's GET, the GET of a compare, then SET or DEL: at most ABOUT_FENCE_EXTRA_COMMANDS more than the
+ * unfenced write billed.
  */
-export const ABOUT_WRITE_IF_STORE_LIVE = `-- marktmorgen:about-write-live:v1
+export const ABOUT_WRITE_IF_STORE_LIVE = `-- marktmorgen:about-write-live:v2
 if redis.call('HGET', KEYS[2], ARGV[1]) then return {-1} end
-if redis.call('EXISTS', KEYS[1]) ~= 1 then return {-1} end
+if redis.call('GET', KEYS[1]) ~= ARGV[5] then return {-1} end
 if ARGV[2] == '1' then
   local now = redis.call('GET', KEYS[3]) or ''
   if now ~= ARGV[3] then return {0, string.len(now)} end
@@ -36,7 +42,7 @@ return {1}`;
 
 /**
  * What the fence adds to one description write, as Upstash bills a script (the EVAL and its inner commands): a plain
- * SET was 1, fenced it is 4 (EVAL, HGET, EXISTS, SET); a compared write was 3 (EVAL, GET, SET), fenced 5. Priced on
+ * SET was 1, fenced it is 4 (EVAL, HGET, GET, SET); a compared write was 3 (EVAL, GET, SET), fenced 5. Priced on
  * every request that may write one (tests/plan-cost-registry.ts, aboutFenceUsd).
  */
 export const ABOUT_FENCE_EXTRA_COMMANDS = 3;
@@ -67,7 +73,7 @@ async function writeWhileStoreLive(store: Store, productId: string, text: string
   if (!statsId) throw new Error("a product description needs the store's statsId");
   const named = await storeNamedForAbout(store);
   const reply: unknown = await redisPipeline([
-    ["EVAL", ABOUT_WRITE_IF_STORE_LIVE, 3, storeIdCommand(named.sid)[1], ERASING_KEY, aboutKey(statsId, productId), await erasingField(storeRef(named)), expected === null ? "0" : "1", expected ?? "", text],
+    ["EVAL", ABOUT_WRITE_IF_STORE_LIVE, 3, storeIdCommand(named.sid)[1], ERASING_KEY, aboutKey(statsId, productId), await erasingField(storeRef(named)), expected === null ? "0" : "1", expected ?? "", text, storeRef(named)],
   ]);
   const answer = Array.isArray(reply) && reply.length === 1 && Array.isArray(reply[0]) ? (reply[0] as unknown[]) : null;
   if (answer && answer.length === 1 && answer[0] === 1) return true;

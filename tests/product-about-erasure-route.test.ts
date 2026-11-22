@@ -5,7 +5,7 @@
  */
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, closeStoreRecord, ensureStatsId, ERASING_KEY, erasingField, storeForEmail, storeRef } from "@/lib/store";
+import { addProduct, claimHandle, closeStoreRecord, ensureStatsId, ERASING_KEY, erasingField, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
 import { dataKey } from "@/lib/store-data";
 import { POST } from "@/app/api/store/product/route";
 import { store as redis } from "./redis-stub";
@@ -30,7 +30,7 @@ async function fixture() {
   return { parent, key, request };
 }
 async function main(): Promise<void> {
-  for (const state of ["closed", "erasing"] as const) {
+  for (const state of ["closed", "erasing", "moved"] as const) {
     part(state);
     const f = await fixture();
     const original = redis.pipeline;
@@ -47,8 +47,14 @@ async function main(): Promise<void> {
       if (state === "closed") {
         const quota = dataKey(f.parent);
         is("real parent close completed", await closeStoreRecord(f.parent, [f.key, ...(quota ? [quota] : [])]), true);
-      } else {
+      } else if (state === "erasing") {
         await original.call(redis, [["DEL", f.key], ["HSET", ERASING_KEY, await erasingField(storeRef(f.parent)), "synthetic-walk"]]);
+      } else {
+        // Claude 5 ibqho's MEDIUM on #4969 @f0c307f404: the account moved (moveAccount repoints the id key to the new
+        // owner's ref) and the new owner's erasure began, which marks the NEW ref's field. The write read under the old
+        // ref still finds the id key and no mark under its own field: only the ref it holds tells.
+        const moved = "about-erasure-moved@example.com";
+        await original.call(redis, [["DEL", f.key], ["SET", storeIdCommand(f.parent.sid)[1], moved], ["HSET", ERASING_KEY, await erasingField(moved), "synthetic-walk"]]);
       }
       return original.call(redis, commands);
     };

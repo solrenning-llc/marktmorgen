@@ -12,10 +12,10 @@ type Script = (run: (command: Command) => unknown, keys: string[], argv: string[
 
 const SCRIPTS: Record<string, Script> = {
   // lib/product-about-live.ts ABOUT_WRITE_IF_STORE_LIVE: a store's product description written (or compared and written) only
-  // while it is not erasing and its id key exists. {1} written, {0, length} changed, {-1} gone or erasing.
-  "about-write-live:v1": (run, [storeId, erasing, about], [field, compare, expected, text]) => {
+  // while it is not erasing and its id key still holds its ref. {1} written, {0, length} changed, {-1} gone, moved or erasing.
+  "about-write-live:v2": (run, [storeId, erasing, about], [field, compare, expected, text, ref]) => {
     if (run(["HGET", erasing, field]) !== null) return [-1];
-    if (Number(run(["EXISTS", storeId])) !== 1) return [-1];
+    if (run(["GET", storeId]) !== ref) return [-1];
     if (compare === "1") {
       const now = run(["GET", about]);
       const held = typeof now === "string" ? now : "";

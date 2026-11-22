@@ -384,6 +384,20 @@ console.log("takes by commit, a capped future OFF, the maximum take, the coordin
   is("a release written without the named session and the request does not count", /#15 @\S+ +autor Claude 2 +tomado por Claude 7 X/.test(run(["list-queue"]).out), run(["list-queue"]).out);
 }
 
+console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");
+{
+  r = run(["check-append-only"]);
+  is("a history that only adds files passes the append-only check", r.ok && /só acrescentou/.test(r.out), r.out);
+  const alvo = g(["ls-tree", "-r", "--name-only", "refs/heads/correio", "caixas"], join(T, "mail.git")).split("\n")[0];
+  raw(alvo, "rewritten by raw git\n");
+  r = run(["check-append-only"]);
+  is("a commit that changes a data file is reported, with the file", !r.ok && new RegExp(`ALTEROU ${alvo.replace(/[.]/g, "[.]")}`).test(r.out), r.out);
+  r = run(["watch", "--as", "Claude 3 Z", "--seconds", "1"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+  is("the watch raises the alarm once, and says to tell the coordinator and the owner", /ALERTA: o ramo correio não só acrescentou/.test(r.out) && /coordenador e o dono/.test(r.out), r.out);
+  r = run(["watch", "--as", "Claude 3 Z", "--seconds", "1"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+  is("the same change is not raised again on the next watch", !/ALERTA: o ramo correio/.test(r.out), r.out);
+}
+
 console.log("version: the copy's SHA-256 against the reviewed one on main (owner, OWNER-20261121-1904, step 1)");
 const meu = createHash("sha256").update(readFileSync(TOOL)).digest("hex");
 const comHash = (h) => { g(["checkout", "-q", "-B", "mainh", M], P); mkdirSync(join(P, "tooling", "agent-mail"), { recursive: true });
@@ -395,12 +409,21 @@ is("the reviewed hash on main: no version warning", r.ok && !/ATENÇÃO/.test(r.
 comHash("0".repeat(64));
 r = run(["list-switches"], { CORREIO_SEM_VERSAO: "" });
 is("a different hash on main: the copy is reported as not the reviewed one", /não é a versão revisada do main do Marktmorgen/.test(r.out), r.out);
+r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "x"], { ...as("c2"), CORREIO_SEM_VERSAO: "" });
+is("an old copy cannot write: the send is refused, with the install command to run", !r.ok && /escrita recusada/.test(r.out) && /CO \(b\)/.test(r.out), r.out);
+r = run(["list-queue"], { CORREIO_SEM_VERSAO: "" });
+is("an old copy can still read, with the warning", r.ok && /não é a versão revisada/.test(r.out), r.out);
 r = run(["list-switches"], { CORREIO_SEM_VERSAO: "", CORREIO_PR_REPO: join(T, "nao-existe.git") });
 is("main unreachable: the version is reported as NOT CHECKED", /NÃO FOI CONFERIDA/.test(r.out), r.out);
+// Old copies are refused (step 3): a write needs the reviewed copy, checked now; reading still works, with the warning.
+r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "x"], { ...as("c2"), CORREIO_SEM_VERSAO: "", CORREIO_PR_REPO: join(T, "nao-existe.git") });
+is("main unreachable: a write is refused, the version NOT CHECKED", !r.ok && /escrita recusada/.test(r.out), r.out);
 // file:// behaves like a real remote (a plain path would ignore --depth), as the reviewer reproduced on GitHub.
 // The version check must never fetch with --depth: a shallow fetch makes the user's repository shallow (review of
 // Claude 1 A on #5044, reproduced on GitHub). GIT_TRACE records every git command the tool runs.
 comHash(meu);
+r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "x"], { ...as("c2"), CORREIO_SEM_VERSAO: "" });
+is("the reviewed copy writes", r.ok && /enviada/.test(r.out), r.out);
 const trace = join(T, "git-trace.txt");
 spawnSync("node", [TOOL, "list-switches"], { cwd: join(T, "w"), env: { ...base, CORREIO_SEM_VERSAO: "", GIT_TRACE: trace }, encoding: "utf8" });
 const linhas = readFileSync(trace, "utf8").split("\n").filter((l) => /git(\.c:\d+)?\s.*trace: (built-in|exec): git fetch/.test(l) || /trace: built-in: git fetch/.test(l));

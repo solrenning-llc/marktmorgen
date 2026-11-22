@@ -19,13 +19,15 @@ import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/creators/route";
 import { RESPONSES_KEY } from "@/lib/creator-research-store";
-import { RESEARCH_ANSWERS_PER_DAY, RESEARCH_ANSWER_MAX_BYTES, RESEARCH_MAX_ANSWERS, RESEARCH_MAX_BYTES, researchDayCap } from "@/lib/creator-research-room";
+import { RESEARCH_ANSWERS_PER_DAY, RESEARCH_ANSWER_MAX_BYTES, RESEARCH_MAX_ANSWERS, RESEARCH_MAX_BYTES, RESEARCH_RESERVED, researchDayCap } from "@/lib/creator-research-room";
 import { LIMITS } from "@/lib/creator-research";
 import { BACKUP_MAX_BYTES } from "@/lib/backup-export";
 import { store } from "./redis-stub";
 import { done, is, part } from "./check";
 
 const MAX_ANSWERS = 320;
+/** Answers with no account stop here: the last RESEARCH_RESERVED places are kept for signed-in accounts (tests/creator-research-fill-guard.test.ts). */
+const OPEN = 256;
 const ANSWER_MAX_BYTES = 12_288;
 
 const payload = {
@@ -77,17 +79,17 @@ async function main() {
     await fill(MAX_ANSWERS);
     is("the 321st answer is refused as full", await ask(payload), [503, "full"]);
     is("and the list still holds 320", (await rows()).length, MAX_ANSWERS);
-    await fill(MAX_ANSWERS - 1);
-    is("the 320th answer is kept", await ask(payload), [201, "saved"]);
-    is("and the list holds 320", (await rows()).length, MAX_ANSWERS);
+    await fill(OPEN - 1);
+    is("the last answer with no account (the 256th) is kept", await ask(payload), [201, "saved"]);
+    is("and the list holds 256", (await rows()).length, OPEN);
   }
 
   part("Two answers at once for the last place: one kept, one refused as full");
   {
-    await fill(MAX_ANSWERS - 1);
+    await fill(OPEN - 1);
     const both = await Promise.all([ask({ ...payload, name: "First Creator" }), ask({ ...payload, name: "Second Creator" })]);
     is("one saved, one full", both.map(([status]) => status).sort(), [201, 503]);
-    is("the list holds 320", (await rows()).length, MAX_ANSWERS);
+    is("the list holds 256", (await rows()).length, OPEN);
   }
 
   part("A reply to the keeping step that is not exact is never a saved answer (rule 24)");
@@ -135,21 +137,21 @@ async function main() {
     };
     const statuses = (got: [number, string][]) => got.map(([status]) => status).sort().join(",");
 
-    await fill(MAX_ANSWERS - 1);
+    await fill(OPEN - 1);
     const healthy = await eight((_, replies) => replies);
-    is("control: all healthy, exactly one kept", [statuses(healthy), (await rows()).length], ["201,503,503,503,503,503,503,503", MAX_ANSWERS]);
+    is("control: all healthy, exactly one kept", [statuses(healthy), (await rows()).length], ["201,503,503,503,503,503,503,503", OPEN]);
 
-    await fill(MAX_ANSWERS - 1);
+    await fill(OPEN - 1);
     const unapplied = await eight((_, replies) => replies, true);
-    is("a take-back that did not apply leaves the list at 320, never past it", (await rows()).length, MAX_ANSWERS);
+    is("a take-back that did not apply leaves the list at its ceiling, never past it", (await rows()).length, OPEN);
     is("and only one is said saved", unapplied.filter(([status]) => status === 201).length <= 1, true);
 
-    await fill(MAX_ANSWERS - 1);
+    await fill(OPEN - 1);
     // Each write applied, its reply lost on the way back.
     const lost = await eight((commands, replies) => (writes(commands) ? replies.map(() => undefined) : replies));
-    is("writes applied with their replies lost leave the list at 320, never past it", (await rows()).length, MAX_ANSWERS);
+    is("writes applied with their replies lost leave the list at its ceiling, never past it", (await rows()).length, OPEN);
     is("and none is said saved: a lost reply is not a confirmation", lost.some(([status]) => status === 201), false);
-    is("a later healthy answer is refused as full and the list stays at 320", [await ask(payload), (await rows()).length], [[503, "full"], MAX_ANSWERS]);
+    is("a later healthy answer is refused as full and the list stays at its ceiling", [await ask(payload), (await rows()).length], [[503, "full"], OPEN]);
   }
 
   part("One IPv6 /64 rotating its addresses cannot fill the list, and a real creator still saves (Claude 7 on #3584)");
@@ -223,6 +225,7 @@ async function main() {
 
   part("The ceiling in the code is the one held here, and it never stops the backup");
   {
+    is("64 of the 320 places are kept for signed-in accounts", [RESEARCH_RESERVED, RESEARCH_MAX_ANSWERS - RESEARCH_RESERVED], [MAX_ANSWERS - OPEN, OPEN]);
     is("320 answers of 12,288 bytes", [RESEARCH_MAX_ANSWERS, RESEARCH_ANSWER_MAX_BYTES, RESEARCH_MAX_BYTES], [MAX_ANSWERS, ANSWER_MAX_BYTES, MAX_ANSWERS * ANSWER_MAX_BYTES]);
     is("the whole list fits in one backup part less its 1 KiB of room", RESEARCH_MAX_BYTES <= BACKUP_MAX_BYTES - 1_024, true);
     const characters = Object.values(LIMITS).reduce((sum, limit) => sum + limit, 0);

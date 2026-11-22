@@ -39,12 +39,27 @@ export const RESEARCH_MAX_ANSWERS = 320;
  * ceiling, checked before the write.
  */
 export const RESEARCH_DAY_SHARE = 16;
+/**
+ * Places of the list kept for answers from signed-in Marktmorgen accounts, one an account (the row's reservedFor,
+ * researchAccountMark): a flood from rotating connections never reaches them, so a creator with an account can always
+ * answer (Claude 3's LOW 1 on #3584). Anonymous answers share the other RESEARCH_MAX_ANSWERS - RESEARCH_RESERVED under
+ * the day's share. A place frees itself when its answer goes (the 24-month pruning, an erasure), as the count is the
+ * rows themselves. A prospect with no account can still be crowded out by a flood; an email confirmation before keeping
+ * (a named follow-up) is what would reach them.
+ */
+export const RESEARCH_RESERVED = 64;
 /** The kept length past which every answer kept tells the owner, in the log, how full the list is (80%). */
 export const RESEARCH_WARN_AT = Math.floor(RESEARCH_MAX_ANSWERS * 0.8);
 
-/** The day's cap with `length` answers kept: a share of the room still free, between one and the fixed day's cap. */
-export function researchDayCap(length: number): number {
-  return Math.max(1, Math.min(RESEARCH_ANSWERS_PER_DAY, Math.floor((RESEARCH_MAX_ANSWERS - length) / RESEARCH_DAY_SHARE)));
+/** The day's cap with `anonymous` anonymous answers kept: a share of their room still free, between one and the fixed day's cap. */
+export function researchDayCap(anonymous: number): number {
+  return Math.max(1, Math.min(RESEARCH_ANSWERS_PER_DAY, Math.floor((RESEARCH_MAX_ANSWERS - RESEARCH_RESERVED - anonymous) / RESEARCH_DAY_SHARE)));
+}
+
+/** The one-way mark of a signed-in account in its answer (reservedFor): 32 hex characters, never the address. */
+export async function researchAccountMark(email: string): Promise<string> {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`creator-research-reserve:${email.trim().toLowerCase()}`));
+  return Array.from(new Uint8Array(bytes).slice(0, 16), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 export const RESEARCH_MAX_BYTES = RESEARCH_ANSWER_MAX_BYTES * RESEARCH_MAX_ANSWERS;
 
@@ -54,17 +69,38 @@ export function answerBytes(row: string): number {
 }
 
 /**
- * The answer kept only while the list holds fewer than the ceiling and the
- * day's count is within the day's cap for the room still free
- * (researchDayCap), the count and the write in one step: 0 when full, "busy:<cap>" when
- * the day's share is taken, else the list's new length. KEYS[1] the list;
- * ARGV[1] the ceiling; ARGV[2] the answer as stored; ARGV[3] the day's count
- * with this answer; ARGV[4] RESEARCH_DAY_SHARE; ARGV[5] RESEARCH_ANSWERS_PER_DAY.
+ * The answer kept, the count and the write in one step: 0 when full,
+ * "busy:<cap>" when the day's share is taken, "already" when the account's
+ * reserved place is taken, else the list's new length. The rows are read once
+ * (LRANGE, at most RESEARCH_MAX_ANSWERS) to count the reserved ones, marked
+ * `"reservedFor":"<mark>"`. A signed-in answer takes a reserved place while
+ * fewer than the reserve are taken and none is its account's; past the
+ * reserve it goes in as anonymous (ARGV[7], the row without the mark).
+ * Anonymous answers keep their room (the ceiling less the reserve) and the
+ * day's share of it (researchDayCap). KEYS[1] the list; ARGV[1] the ceiling;
+ * ARGV[2] the answer as stored (with the mark when signed in); ARGV[3] the
+ * day's count with this answer; ARGV[4] RESEARCH_DAY_SHARE; ARGV[5]
+ * RESEARCH_ANSWERS_PER_DAY; ARGV[6] RESEARCH_RESERVED; ARGV[7] the account's
+ * mark, or "" when anonymous; ARGV[8] the answer without the mark.
  */
-export const KEEP_RESEARCH_ANSWER = `-- marktmorgen:research-answer-keep:v2
+export const KEEP_RESEARCH_ANSWER = `-- marktmorgen:research-answer-keep:v3
 local length = redis.call("LLEN", KEYS[1])
 local max = tonumber(ARGV[1])
 if length >= max then return 0 end
-local cap = math.max(1, math.min(tonumber(ARGV[5]), math.floor((max - length) / tonumber(ARGV[4]))))
+local reserve = tonumber(ARGV[6])
+local account = ARGV[7]
+local reserved = 0
+local rows = redis.call("LRANGE", KEYS[1], 0, -1)
+for _, row in ipairs(rows) do
+  if string.find(row, '"reservedFor":"', 1, true) then
+    reserved = reserved + 1
+    if account ~= "" and string.find(row, '"reservedFor":"' .. account .. '"', 1, true) then return "already" end
+  end
+end
+if account ~= "" and reserved < reserve then return redis.call("LPUSH", KEYS[1], ARGV[2]) end
+local room = max - reserve
+local anonymous = length - reserved
+if anonymous >= room then return 0 end
+local cap = math.max(1, math.min(tonumber(ARGV[5]), math.floor((room - anonymous) / tonumber(ARGV[4]))))
 if tonumber(ARGV[3]) > cap then return "busy:" .. cap end
-return redis.call("LPUSH", KEYS[1], ARGV[2])`;
+return redis.call("LPUSH", KEYS[1], ARGV[8])`;

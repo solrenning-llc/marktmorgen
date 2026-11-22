@@ -13,7 +13,7 @@ import { ROOM } from "./data-room";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_review_refund_sweep_seen";
 const OWNER = "sweep-seen@example.com";
-const ACCOUNT = "acct_1SweepSeen000001";
+const ACCOUNT = "acct_1SweepSeen01";
 const NOW = Math.floor(Date.now() / 1000);
 type Refund = { id: string; object: "refund"; created: number; status: string; amount: number; payment_intent: string; charge: Record<string, unknown> };
 const refunds: Refund[] = [];

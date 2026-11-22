@@ -448,6 +448,43 @@ async function main(): Promise<void> {
   is("the payment's take is given back: no payment counted for a mark never tried", Number((await healthy([["GET", nineMarks]]))[0] ?? 0), 0);
   is("and the review is not marked", (await healthy([["HGET", `nl:rev:${nine.statsId}:${nine.products[0]}`, nineSaved.review.id]]))[0] !== null && !(JSON.parse(String((await healthy([["HGET", `nl:rev:${nine.statsId}:${nine.products[0]}`, nineSaved.review.id]]))[0])) as { refunded?: boolean }).refunded, true);
 
+  part("A mark is one step: a reply lost after it ran leaves no review counted on the product's numbers (auditor 2's MEDIUM, a42f)");
+  // Before, the review was written refunded in one request and the product's numbers lowered in another: a reply lost
+  // between them left refunded=true with the numbers still counting it, and the next pass, finding the review already
+  // refunded, never lowered them. Now both go in one fenced step, so the next pass finds them as one.
+  const ten = await shop("cost-ten@example.com", "costten", 1);
+  const tenPi = "pi_costTenPayment0001";
+  const tenSaved = await saveReview(ten.statsId, { productId: ten.products[0], email: "ten@example.com", reference: "cs_test_costten00000000000", pi: tenPi, rating: 5, text: "Clear and kind.", name: "Buyer", paidAt: NOW - 86_400 }, ROOM, (NOW - 86_400) * 1000);
+  if (tenSaved.state !== "created") throw new Error(`ten's review not saved: ${tenSaved.state}`);
+  refunds.push(refundOf(tenPi));
+  const tenNumbers = async () => JSON.parse(String((await healthy([["HGET", `nl:rev:sum:${ten.statsId}`, ten.products[0]]]))[0])) as { count: number; refunded: number };
+  is("control: the product's numbers count the review before the refund", [(await tenNumbers()).count, (await tenNumbers()).refunded], [1, 0]);
+  // The first fenced write that touches the review runs, and its reply is lost on the way back.
+  let lost = false;
+  tamper = (command, reply) => {
+    if (!lost && command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:store-write-live:v1") && keysOf(command).includes(`nl:rev:${ten.statsId}:${ten.products[0]}`)) {
+      lost = true;
+      return "QUEUED";
+    }
+    return reply;
+  };
+  console.error = () => {};
+  try {
+    await takeReviewPass(ten.store);
+    await markRefundedReviews(ten.store, Date.now() + 60_000).catch(() => 0);
+  } finally {
+    tamper = null;
+  }
+  is("control: the mark's reply was lost after it ran", lost, true);
+  try {
+    await healthy([["DEL", `nl:rev:refunds:next:${ten.statsId}`]]);
+    await markRefundedReviews(ten.store, Date.now() + 60_000);
+  } finally {
+    console.error = quiet;
+  }
+  const tenAfter = await tenNumbers();
+  is("the next pass finds the review refunded and the product's numbers without it: never refunded with the numbers still counting it", [JSON.parse(String((await healthy([["HGET", `nl:rev:${ten.statsId}:${ten.products[0]}`, tenSaved.review.id]]))[0])).refunded, tenAfter.count, tenAfter.refunded], [true, 0, 1]);
+
   part("The ceilings count in the store's billing month, one key across the calendar months it touches (11th audit, ALTO (a))");
   // A paying store whose billing month began ten days ago and runs twenty more: its rows of two runs, one in this
   // calendar month and one in the next (the clock moved on twelve days), count in one key, the window's, and the

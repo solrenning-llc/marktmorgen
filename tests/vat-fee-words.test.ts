@@ -248,10 +248,10 @@ test("the words name every sale the checkout refuses, each beside the check that
   // And the other way: every refusal the checkout's body check makes is named in the words, or is one our own code
   // builds and no creator's choice can cause (VAT_BODY_REFUSALS), so no sale is refused that the Terms do not name (LEVE 1).
   const refusals = new Set([...code.matchAll(/refuse\("([^"]+)"\)/g)].map((m) => m[1]));
-  const named = new Set([...VAT_REFUSED_SALES.flatMap((r) => r.checks), ...VAT_BODY_REFUSALS.map((r) => r.check)]);
+  const named = new Set<string>([...VAT_REFUSED_SALES.flatMap((r): readonly string[] => r.checks), ...VAT_BODY_REFUSALS.map((r) => r.check)]);
   for (const refusal of refusals) assert.ok(named.has(refusal), `named in VAT_REFUSED_SALES or VAT_BODY_REFUSALS: ${refusal}`);
   assert.ok(refusals.has("not a one-off payment"));
-  assert.ok(VAT_REFUSED_SALES.some((r) => r.words.includes("payment plans") && r.checks.includes("not a one-off payment")), "payment plans are named");
+  assert.ok(VAT_REFUSED_SALES.some((r) => r.words.includes("payment plans") && (r.checks as readonly string[]).includes("not a one-off payment")), "payment plans are named");
   const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!;
   for (const part of [words.terms, words.pricing]) {
     const text = part.join(" ");

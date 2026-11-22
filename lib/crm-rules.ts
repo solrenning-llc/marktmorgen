@@ -252,7 +252,10 @@ export function parseDeal(raw: unknown, stages: readonly Stage[]): Deal | null {
   const title = oneLine(value.title, MAX_DEAL_TITLE);
   const stage = typeof value.stage === "string" && stages.some((s) => s.id === value.stage) ? value.stage : "";
   if (!id || !title || !stage) return null;
-  const email = oneLine(value.email, 254).toLowerCase();
+  // Lowercased first, then held at 254 (coordinator's LOW L1 on #2048, 26th batch): "\u0130" lowercases to two units,
+  // so an address cut at 254 before toLowerCase could come back longer, past what DEAL_JSON_MAX_BYTES counts.
+  const lowered = oneLine(value.email, 254).toLowerCase();
+  const email = lowered.length <= 254 ? lowered : "";
   const cents = typeof value.cents === "number" && Number.isFinite(value.cents) ? Math.max(0, Math.min(MAX_DEAL_CENTS, Math.round(value.cents))) : 0;
   const note =
     typeof value.note === "string"

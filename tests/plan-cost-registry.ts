@@ -2594,7 +2594,7 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/import/funnel/route.ts", names: ["import-cf-page-month", "import-cf-plan-month", "import-cf-save-month"] },
       { file: "docs/clickfunnels-import.md", names: ["Worst-case commands per call"] },
     ],
-    basis: "Each path's monthly figure at docs/clickfunnels-import.md's command ceilings, each request at its shape and the bytes it moves. A check is counted for a ClickFunnels dry run and for a HubSpot one alike, so each is priced at the dearer of the two: a HubSpot dry run reads every deal its file names that is already here, whole (lib/hubspot-import.ts HUBSPOT_CHECK_BYTES, 1,000 deals at DEAL_JSON_MAX_BYTES), in HUBSPOT_CHECK_COMMANDS.",
+    basis: "Each path's monthly figure at docs/clickfunnels-import.md's command ceilings, each request at its shape and the bytes it moves. A check is counted for a ClickFunnels dry run and for a HubSpot one alike, so each is priced at the dearer of the two: a HubSpot dry run reads every deal its file names that is already here, whole (lib/hubspot-import.ts HUBSPOT_CHECK_BYTES, 1,000 deals at DEAL_MOVED_MAX_BYTES, the bytes the database moves, priced as a write request), in HUBSPOT_CHECK_COMMANDS.",
   },
   {
     id: "funnel-share",

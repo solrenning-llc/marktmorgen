@@ -716,6 +716,17 @@ async function main(): Promise<void> {
     is("an assignee with a control character, which JSON writes as 6 bytes and no address has, is refused", [readFollowUp({ assignee: "a\u0001b@example.com" }).ok, readFollowUp({ assignee: "ab@example.com" }).ok], [false, true]);
   }
 
+  part("Coordinator's LOW L1 on #2048 (26th batch): an address that lowercases longer is held at 254 after toLowerCase");
+  {
+    // "\u0130" (capital I with a dot) lowercases to "i" and a combining dot: two units for one.
+    // In the domain, which the address rule takes at up to 255: 189 characters as sent, 309 once lowercased.
+    const dotted = `${"a".repeat(64)}@${"\u0130".repeat(120)}.com`;
+    const deal = parseDeal({ id: hubSpotDealId("8970"), title: "Dotted", email: dotted, stage: heavyStages[0].id }, heavyStages)!;
+    is("control: the address is within 254 as sent, past it once lowercased", [dotted.length <= 254, dotted.toLowerCase().length > 254], [true, true]);
+    is("the deal is read, its address never past 254", [Boolean(deal), deal.email.length <= 254], [true, true]);
+    is("and an assignee that lowercases longer is refused, as before", readFollowUp({ assignee: dotted }).ok, false);
+  }
+
   part("Coordinator's LOW 4 on #2048 (22nd batch): a pipeline and a stage with a lone surrogate match the ones they made on the next import");
   {
     const odd = await paidStore("hubsoddname");

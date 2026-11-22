@@ -481,6 +481,13 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // one studio request, as before, and the lock's wait and commands in the others.
   assert.ok(CRM_LOCK_WAIT_MS / 1000 <= (CRM_LOCKED_CHANGE_UNITS - 1) * SHAPES.studio.seconds, `the lock's wait of ${CRM_LOCK_WAIT_MS} ms does not fit in ${CRM_LOCKED_CHANGE_UNITS - 1} more studio requests`);
   assert.ok(CRM_LOCK_COMMANDS_MOST <= (CRM_LOCKED_CHANGE_UNITS - 1) * 20, "the lock's commands fit in the studio requests it is counted as");
+  // A HubSpot save and dry run are priced as a "write" (coordinator's LOW 3 on #2048, 22nd batch, and its test, LOW of
+  // the 26th batch): the save may wait CRM_LOCK_WAIT_MS for the lock before a "heavy" request's work, and both read
+  // megabytes. Going back to "heavy" fails here.
+  const registry = read("tests/plan-cost-registry.ts");
+  assert.ok(registry.includes('request("write", HUBSPOT_SAVE_COMMANDS, HUBSPOT_SAVE_BYTES)') && registry.includes('request("write", HUBSPOT_CHECK_COMMANDS, HUBSPOT_CHECK_BYTES)'), "the HubSpot save and dry run are priced as write requests");
+  assert.ok(!/request\("(heavy|light|studio)", HUBSPOT_(SAVE|CHECK)_/.test(registry), "no HubSpot save or dry run is priced at a shorter shape");
+  assert.ok(SHAPES.write.seconds >= SHAPES.heavy.seconds + CRM_LOCK_WAIT_MS / 1000, "a write holds a heavy request's work after the lock's longest wait");
   assert.ok(!/takeAllowance\(store, "studio"/.test(read("lib/flows.ts")), "a workflow's field step takes no studio request");
   console.log(`a field saved from the studio: $${CRM_VALUE_SAVE.toFixed(6)} at most (${CRM_VALUE_SAVE_TRIPS} trips, ${CRM_VALUE_SAVE_SECONDS} s, ${CRM_VALUE_SAVE_COMMANDS} commands, ${CRM_VALUE_SAVE_BYTES} bytes), counted as ${CRM_VALUE_SAVE_UNITS} studio requests at $${UNIT_COST.studio.toFixed(6)}`);
   // A workflow's history (lib/flow-versions-rules.ts; Claude 5 on #1927, decision B): each path takes flowHistoryUnits of what it moves, measured

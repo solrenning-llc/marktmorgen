@@ -28,6 +28,14 @@
  */
 import type { LanguageCode } from "@/lib/store-language";
 
+/**
+ * One kit's own database work at its worst (Codex P-20261120-1412): the fenced take of its three counters (KIT_COUNTS
+ * "take": EVAL, HGET, GET and three INCR with their EXPIRE, 9), their fenced return (KIT_COUNTS "back": EVAL, MGET and
+ * three DECR, 5) and the three content reads (the listing, the about text, the page). Priced as each integration's
+ * commands (tests/plan-cost-registry.ts, figure "integration").
+ */
+export const KIT_COMMANDS_MOST = 17;
+
 /** Drafts one affiliate may ask for in a day. */
 export const KIT_PER_DAY = 3;
 /** The share of a store's month of writing jobs its affiliates may use together. */

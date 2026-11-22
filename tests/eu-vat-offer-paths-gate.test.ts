@@ -16,6 +16,11 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { NextRequest } from "next/server";
+import { renderToReadableStream } from "react-dom/server";
+import FreePage from "@/app/[handle]/free/page";
+import RenewPage from "@/app/[handle]/renew/[product]/page";
+import MovePage from "@/app/[handle]/move/[product]/page";
+import { answering } from "./security/next-headers";
 import { addOption, addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, setWelcomeOffer, setWinBack, storeForEmail } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { requestCopy } from "@/lib/free";
@@ -25,6 +30,7 @@ import { POST as welcomeRoute } from "@/app/api/store/welcome/open/route";
 import { POST as comeBackRoute } from "@/app/api/store/come-back/open/route";
 import { POST as moveRoute } from "@/app/api/store/move/open/route";
 import { withConsent } from "./digital-consent-fixture";
+import { walkCheckoutCallers } from "./checkout-gate-walk";
 import { redisPipeline, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -58,8 +64,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 /** A press of a button on one of the pages, as the browser sends it: the form, the IP country Vercel adds. */
-const press = (path: string, ip: string | null, fields: Record<string, string>) => {
-  const form = withConsent(new FormData());
+const press = (path: string, ip: string | null, fields: Record<string, string>, consent = true) => {
+  const form = consent ? withConsent(new FormData()) : new FormData();
   for (const [name, value] of Object.entries(fields)) form.set(name, value);
   const headers: Record<string, string> = { host: "marktmorgen.com" };
   if (ip) headers["x-vercel-ip-country"] = ip;
@@ -72,6 +78,25 @@ async function outcome(response: Promise<Response>): Promise<{ status: number; l
   const made = checkouts.length;
   const answer = await response;
   return { status: answer.status, location: answer.headers.get("location") ?? "", stripe: stripeCalls - calls, checkouts: checkouts.length - made };
+}
+
+/** A page as the server draws it, for the address it was asked at. */
+async function drawn(url: string, page: () => Promise<React.ReactElement>): Promise<string> {
+  answering(new NextRequest(url));
+  const stream = await renderToReadableStream(await page(), { onError: () => {} });
+  await stream.allReady;
+  return new Response(stream).text();
+}
+
+/** What the billing-country field shows: the country put back, and whether it is tied to the notice that says why. */
+function field(markup: string, id: string, notice: string): { chosen: string | null; invalid: boolean; noticeThere: boolean } {
+  const select = new RegExp(`<select[^>]*id="${id}"[^>]*>([\\s\\S]*?)</select>`).exec(markup);
+  const tag = select ? select[0].slice(0, select[0].indexOf(">") + 1) : "";
+  return {
+    chosen: /<option[^>]*value="([A-Z]{2})"[^>]*selected=""/.exec(select?.[1] ?? "")?.[1] ?? null,
+    invalid: /aria-invalid="true"/.test(tag) && tag.includes(`aria-describedby="${notice}"`),
+    noticeThere: markup.includes(`id="${notice}"`),
+  };
 }
 
 /** Every .ts and .tsx file under a folder. */
@@ -113,6 +138,11 @@ async function main(): Promise<void> {
     is("no billing country: asked for it, nothing asked of Stripe", await welcome("US"), { status: 303, location: page("country"), stripe: 0, checkouts: 0 });
     const opened = await welcome("US", { billing_country: "US" });
     is("outside both: Stripe's page opens, as before", [opened.status, opened.location.startsWith("https://checkout.stripe.com/"), opened.checkouts], [303, true, 1]);
+    // A press refused for another reason keeps the country it named (WCAG 3.3.7); one refused for where the buyer is never does.
+    is("refused for the box to start at once: back with the country named, to put back in the field", await outcome(welcomeRoute(press("/api/store/welcome/open", "US", { handle: shop, token, billing_country: "US" }, false))), { status: 303, location: `${page("consent")}&from=US`, stripe: 0, checkouts: 0 });
+    const freePage = (query: Record<string, string>) => drawn(`https://marktmorgen.com/@${shop}/free`, () => FreePage({ params: Promise.resolve({ handle: `@${shop}` }), searchParams: Promise.resolve({ token, ...query }) }));
+    is("the page puts the country back after that refusal (WCAG 3.3.7)", field(await freePage({ welcome: "consent", from: "US" }), "bc-welcome", "welcome-country-problem"), { chosen: "US", invalid: false, noticeThere: false });
+    is("after abroad: no country put back, the field tied to the notice (WCAG 3.3.1)", field(await freePage({ welcome: "abroad" }), "bc-welcome", "welcome-country-problem"), { chosen: null, invalid: true, noticeThere: true });
   }
 
   part("The come-back offer's button (app/api/store/come-back/open)");
@@ -149,6 +179,14 @@ async function main(): Promise<void> {
     is("no billing country (the button's form had no field for it): asked for it, nothing asked of Stripe", asked.result, { status: 303, location: asked.page("country"), stripe: 0, checkouts: 0 });
     asked = await comeBack("US", { billing_country: "US" });
     is("outside both: Stripe's page opens, as before", [asked.result.status, asked.result.location.startsWith("https://checkout.stripe.com/"), asked.result.checkouts], [303, true, 1]);
+    const unconsented = await (async () => {
+      const token = await link();
+      return { page: `https://marktmorgen.com/@${shop}/renew/${product}?back=${token}&status=consent&from=US`, result: await outcome(comeBackRoute(press("/api/store/come-back/open", "US", { handle: shop, product, back: token, billing_country: "US" }, false))) };
+    })();
+    is("refused for the box to start at once: back with the country named, to put back in the field", [unconsented.result.status, unconsented.result.location], [303, unconsented.page]);
+    const renewPage = async (query: Record<string, string>) => drawn(`https://marktmorgen.com/@${shop}/renew/${product}`, async () => RenewPage({ params: Promise.resolve({ handle: `@${shop}`, product }), searchParams: Promise.resolve({ back: await link(), ...query }) }));
+    is("the page puts the country back after that refusal (WCAG 3.3.7)", field(await renewPage({ status: "consent", from: "US" }), `bc-back-${product}`, `back-country-problem-${product}`), { chosen: "US", invalid: false, noticeThere: false });
+    is("after abroad: no country put back, the field tied to the notice (WCAG 3.3.1)", field(await renewPage({ status: "abroad" }), `bc-back-${product}`, `back-country-problem-${product}`), { chosen: null, invalid: true, noticeThere: true });
   }
 
   part("A moved member's button (app/api/store/move/open)");
@@ -186,30 +224,37 @@ async function main(): Promise<void> {
     is("no billing country: asked for it, nothing asked of Stripe", asked.result, { status: 303, location: asked.page("country"), stripe: 0, checkouts: 0 });
     asked = await move("dee", "US", { billing_country: "US" });
     is("outside both: Stripe's page opens, as before", [asked.result.status, asked.result.location.startsWith("https://checkout.stripe.com/"), asked.result.checkouts], [303, true, 1]);
+    const ada = tokens[people.indexOf("ada")];
+    is("refused for the box to start at once: back with the country named, to put back in the field", (await outcome(moveRoute(press("/api/store/move/open", "US", { handle: shop, product, k: ada, billing_country: "US" }, false)))).location, `https://marktmorgen.com/@${shop}/move/${product}?k=${encodeURIComponent(ada)}&status=consent&from=US`);
+    const movePage = (query: Record<string, string>) => drawn(`https://marktmorgen.com/@${shop}/move/${product}`, () => MovePage({ params: Promise.resolve({ handle: `@${shop}`, product }), searchParams: Promise.resolve({ k: tokens[people.indexOf("ben")], ...query }) }));
+    is("the page puts the country back after that refusal (WCAG 3.3.7)", field(await movePage({ status: "consent", from: "US" }), `bc-move-${product}`, "move-country-problem"), { chosen: "US", invalid: false, noticeThere: false });
+    const abroadMove = await movePage({ status: "abroad" });
+    is("after abroad: no country put back, the field tied to the notice, said as an alert (WCAG 3.3.1, 4.1.3)", [field(abroadMove, `bc-move-${product}`, "move-country-problem"), /<div id="move-country-problem"[^>]*role="alert"/.test(abroadMove)], [{ chosen: null, invalid: true, noticeThere: true }, true]);
   }
 
-  part("Every caller of createCheckout asks the EU VAT gate before it");
+  part("Every caller of createCheckout asks the EU VAT gate first, in the same function (tests/checkout-gate-walk.ts)");
   {
     const sources = [...files("lib"), ...files("app")].filter((file) => file !== join("lib", "store-checkout.ts")).map((file) => ({ file, source: readFileSync(file, "utf8") }));
-    // A function that only hands its arguments on to createCheckout (`...args: Parameters<typeof createCheckout>`) is
-    // createCheckout under another name: its own call is not a sale, and the gate is asked where it is called.
-    const wrappers = sources.flatMap(({ source }) => [...source.matchAll(/function (\w+)\(\.\.\.args: Parameters<typeof createCheckout>\)/g)].map((m) => m[1]));
-    const opener = new RegExp(`\\b(?:${["createCheckout", ...wrappers].join("|")})\\(`, "g");
-    const callers = sources.flatMap(({ file, source }) => {
-      const passOn = /\(\.\.\.args: Parameters<typeof createCheckout>\)/.test(source);
-      // Not a call: a function's own definition, or the wrapper's one hand-on of its arguments.
-      const calls = [...source.matchAll(opener)]
-        .filter((m) => !/function\s+$/.test(source.slice(Math.max(0, (m.index ?? 0) - 12), m.index ?? 0)))
-        .filter((m) => !(passOn && /^createCheckout\(\.\.\.args\)/.test(source.slice(m.index ?? 0))))
-        .map((m) => m.index ?? 0);
-      return calls.length ? [{ file, source, calls }] : [];
-    });
-    is("the callers are found (the card checkout among them)", callers.some((c) => c.file === join("app", "api", "store", "checkout", "route.ts")), true);
-    const loose = callers.filter(({ source, calls }) => {
-      const gates = [...source.matchAll(/\b(consumerGate|euSaleGate|pressGate)\(/g)].map((m) => m.index ?? 0);
-      return calls.some((at) => !gates.some((gate) => gate < at));
-    }).map((c) => c.file);
-    is("none calls createCheckout without a gate asked before it in the same file", loose, []);
+    const walked = walkCheckoutCallers(sources);
+    is("the callers are found: the card checkout and the three buttons", ["app/api/store/checkout/route.ts", "lib/move-members.ts", "lib/welcome-offer-send.ts", "lib/winback-send.ts"].map((file) => walked.callers.includes(join(...file.split("/")))), [true, true, true, true]);
+    is("none calls createCheckout without a gate asked first, its answer used, in the same function", walked.findings, []);
+
+    // The walk itself, on synthetic files: each way past it is named.
+    const imports = `import { createCheckout } from "@/lib/store-checkout";\nimport { pressGate } from "@/lib/eu-vat-gate";\n`;
+    const named = (source: string) => walkCheckoutCallers([{ file: "lib/synthetic.ts", source: imports + source }]).findings.map((f) => f.why);
+    is("control: the gate asked first, its answer used", named(`export async function open(p, e) {\n  const refused = pressGate(p, e);\n  if (refused) return refused;\n  return withHold(() => createCheckout(p));\n}`), []);
+    is("the gate in another function does not count", named(`function check(p, e) { return pressGate(p, e); }\nexport async function open(p) { return createCheckout(p); }`).length, 1);
+    is("a gate whose answer is thrown away does not count", named(`export async function open(p, e) {\n  pressGate(p, e);\n  return createCheckout(p);\n}`).length, 1);
+    is("a gate after the call does not count", named(`export async function open(p, e) {\n  const made = await createCheckout(p);\n  const refused = pressGate(p, e);\n  return refused ? null : made;\n}`).length, 1);
+    is("a gate only named in a comment does not count", named(`export async function open(p) {\n  // const refused = pressGate(p, e);\n  return createCheckout(p);\n}`).length, 1);
+    is("a call only named in a comment or a string is not a call", named(`export function words() {\n  // createCheckout(p)\n  return "createCheckout(p)";\n}`), []);
+    is("an import under another name is named", walkCheckoutCallers([{ file: "lib/synthetic.ts", source: `import { createCheckout as open } from "@/lib/store-checkout";\nexport const x = 1;` }]).findings.map((f) => f.why), ["createCheckout imported as open"]);
+    is("createCheckout passed as a value is named", named(`export async function open(p, e) {\n  const refused = pressGate(p, e);\n  return refused ? null : withHold(createCheckout, p);\n}`).length, 1);
+    is("a call outside any function is named", named(`export const opened = createCheckout(p);`).length, 1);
+    const wrapper = `import { createCheckout } from "@/lib/store-checkout";\nexport async function openUnlessHeld(...args: Parameters<typeof createCheckout>): ReturnType<typeof createCheckout> {\n  return createCheckout(...args);\n}`;
+    const user = (gate: string) => `import { openUnlessHeld } from "@/lib/held";\nimport { pressGate } from "@/lib/eu-vat-gate";\nexport async function open(p, e) {\n${gate}  return openUnlessHeld(p);\n}`;
+    is("a function that only hands its arguments on is createCheckout under another name: its callers need the gate", walkCheckoutCallers([{ file: "lib/held.ts", source: wrapper }, { file: "lib/user.ts", source: user("") }]).findings.map((f) => f.file), ["lib/user.ts"]);
+    is("and with the gate in its caller, nothing is named", walkCheckoutCallers([{ file: "lib/held.ts", source: wrapper }, { file: "lib/user.ts", source: user("  const refused = pressGate(p, e);\n  if (refused) return refused;\n") }]).findings, []);
     for (const draft of REFUSE_CONSUMERS_DRAFTS) {
       is(`${draft.jurisdiction}: the drafts name the buttons' gate and this test`, [draft.implementedIn.includes("lib/eu-vat-gate.ts (pressGate"), draft.evidence.includes("tests/eu-vat-offer-paths-gate.test.ts")], [true, true]);
     }

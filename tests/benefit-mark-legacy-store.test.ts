@@ -21,7 +21,7 @@ const owner = "benefits@example.com";
 const ANN = "ann@example.com";
 let product = "";
 let duringRead: (() => Promise<void>) | null = null;
-let samePerson = false;
+const samePerson = false;
 
 const sub = (id: string, email: string) => ({
   id,

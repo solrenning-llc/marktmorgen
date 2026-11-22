@@ -136,6 +136,68 @@ async function main(): Promise<void> {
   is("and none twice", new Set(seen).size, seen.length);
   is("the deleted one's comments are not counted twice either", new Set((changed.got.comments as { comment: string }[]).map((c) => c.comment)).size, changed.got.comments.length);
 
+  part("Comments written between a part's counts and its comments: the page plans again and stays under the bound");
+  redis.clear();
+  await claimHandle(OWNER, "pagesshop", "Pages Shop", "");
+  await ensureStatsId(OWNER);
+  await ensureListId(OWNER);
+  await setSubscription(OWNER, { customerId: "cus_Page00001", subscriptionId: "sub_Page00001", active: true, period: paidPeriod() });
+  await setCommunity(OWNER, true);
+  const racing = (await storeForEmail(OWNER))!;
+  const rid = racing.community!.id;
+  Date.now = () => (TRACED_SINCE - 30 * 86_400) * 1000;
+  const raced: string[] = [];
+  for (let n = 0; n < 500; n++) {
+    const made = await createPost(rid, { space: "", author: n % 2 ? ada : key(2 + n), title: `Race ${n}`, text: `Text ${n}`, img: null, kind: "post", poll: null }, racing);
+    if (!made.ok) throw new Error(`post ${n} not made`);
+    raced.push(made.post.id);
+    const c = await addComment(rid, made.post.id, { parent: "", author: ada, text: `First ${n}` }, racing);
+    if (!c.ok) throw new Error(`comment ${n} not made`);
+  }
+  // The first time the page reads the comments it counted, 40 more are written under every post of that part:
+  // far more marks than the counts planned for, and more than the page has left.
+  let injecting = false;
+  let injected = false;
+  let raceCommands = 0;
+  const racePages: number[] = [];
+  redis.pipeline = (async (batch: (string | number)[][]) => {
+    if (injecting) return realPipeline(batch);
+    if (!injected && batch.some((c) => c[0] === "HGETALL" && String(c[1]).includes(":c:"))) {
+      injected = true;
+      injecting = true;
+      try {
+        for (const c of batch.filter((c) => c[0] === "HGETALL")) {
+          const post = String(c[1]).split(":c:")[1]!;
+          for (let k = 0; k < 40; k++) await addComment(rid, post, { parent: "", author: k % 2 ? ada : key(900 + k), text: `Late ${k}` }, racing);
+        }
+      } finally {
+        injecting = false;
+      }
+    }
+    raceCommands += batch.length;
+    return realPipeline(batch);
+  }) as typeof redis.pipeline;
+  const raceGot = { posts: [] as unknown[], comments: [] as unknown[], likedPosts: [] as unknown[], likedComments: [] as unknown[], reported: [] as unknown[], pollPosts: [] as unknown[] };
+  let raceResume: string | undefined;
+  try {
+    do {
+      raceCommands = 0;
+      const page = await memberTracesPage(rid, ada, new ReadBudget(COPY_PAGE_MAX_COMMANDS), raceResume);
+      racePages.push(raceCommands);
+      for (const k of Object.keys(raceGot) as (keyof typeof raceGot)[]) raceGot[k].push(...page.traces[k]);
+      raceResume = page.resume;
+    } while (raceResume !== undefined && racePages.length < 100);
+  } finally {
+    stopCounting();
+  }
+  is("the comments were written mid-page", injected, true);
+  is(`no page spent more than ${COPY_PAGE_MAX_COMMANDS} commands (${racePages.join(", ")})`, racePages.every((n) => n <= COPY_PAGE_MAX_COMMANDS), true);
+  is("it took more than one page", racePages.length > 1, true);
+  const raceWhole = await memberTraces(rid, ada);
+  is("her comments, the late ones too, every one once", sorted(raceGot.comments), sorted(raceWhole.comments));
+  is("her posts, every one once", sorted(raceGot.posts), sorted(raceWhole.posts));
+  Date.now = realNow;
+
   part("A community begun after the trace: her trace, SSCAN by SSCAN, in pages");
   redis.clear();
   await claimHandle(OWNER, "pagesshop", "Pages Shop", "");

@@ -169,7 +169,7 @@ function voiceOverFixture({failAt}={}){
    if(command===voiceOverKeyCodeCommands.openItemChooser)state.last="Item chooser";
    if(command===voiceOverKeyCodeCommands.moveToAreaTop){
     assert.equal(state.marker,false,"Remove temporary marker before resetting the cursor");
-    assert.equal(options?.capture,false);
+    assert.equal(options?.capture,true,"The reset's own phrase is captured, never left for the first heading command");
     state.events.push("reset");state.resets++;
     if(failAt==="reset")throw failure;
     state.position=-1;

@@ -42,9 +42,15 @@ const FEED_SECONDS = 300;
 const listKey = (statsId: string) => `nl:recent:${statsId}`;
 const feedKey = (statsId: string) => `nl:recent:feed:${statsId}`;
 
-/** Keeps a public feed only while the store is still live and its erasure has not begun. */
-const KEEP_FEED_IF_LIVE = `-- marktmorgen:recent-feed-live:v1
-if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return "gone" end
+/**
+ * Keeps a public feed only while the store is still live and its erasure has not begun. ARGV[4] is the store's ref:
+ * the store is live only while its id key still holds it, never only while the key exists (v2, the rule of
+ * KEEP_SALE_IF_LIVE below and of lib/live-fence.ts store-cache-live:v3): moveAccount repoints the id key to the new
+ * owner's ref, and an erasure begun after a move marks the new ref's field, so a feed built under the old ref would
+ * pass an EXISTS and an HEXISTS of the old field, and stay FEED_SECONDS under the erased statsId.
+ */
+const KEEP_FEED_IF_LIVE = `-- marktmorgen:recent-feed-live:v2
+if redis.call("GET", KEYS[1]) ~= ARGV[4] or redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return "gone" end
 redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
 return 1`;
 
@@ -200,7 +206,7 @@ export async function recentSales(store: Store, now = Date.now()): Promise<Recen
         })
         .slice(0, SHOWN);
     }
-    const [saved] = await redisPipeline([["EVAL", KEEP_FEED_IF_LIVE, 3, storeIdCommand(store.sid)[1], ERASING_KEY, feedKey(statsId), await erasingField(storeRef(store)), JSON.stringify(shown), FEED_SECONDS]]);
+    const [saved] = await redisPipeline([["EVAL", KEEP_FEED_IF_LIVE, 3, storeIdCommand(store.sid)[1], ERASING_KEY, feedKey(statsId), await erasingField(storeRef(store)), JSON.stringify(shown), FEED_SECONDS, storeRef(store)]]);
     return saved === 1 ? shown : [];
   } catch (error) {
     console.error("reading recent purchases failed", error);

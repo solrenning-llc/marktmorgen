@@ -1665,6 +1665,24 @@ export class MemoryRedis {
           this.run(["EXPIRE", ledger, seconds]); return 1;
         }
 
+        // lib/creator-research-room.ts KEEP_RESEARCH_ANSWER: the answer kept only while the list is under its ceiling, in one step.
+        if (key.startsWith("-- marktmorgen:research-answer-keep:v3\n") && args[0] === "1" && args.length === 10) {
+          const [, list, max, row, today, share, perDay, reserve, account, plain] = args;
+          const length = this.run(["LLEN", list]) as number;
+          if (length >= Number(max)) return 0;
+          let reserved = 0;
+          for (const kept of this.run(["LRANGE", list, 0, -1]) as string[]) {
+            if (!kept.includes('"reservedFor":"')) continue;
+            reserved += 1;
+            if (account !== "" && kept.includes(`"reservedFor":"${account}"`)) return "already";
+          }
+          if (account !== "" && reserved < Number(reserve)) return this.run(["LPUSH", list, row]);
+          const room = Number(max) - Number(reserve);
+          const anonymous = length - reserved;
+          if (anonymous >= room) return 0;
+          const cap = Math.max(1, Math.min(Number(perDay), Math.floor((room - anonymous) / Number(share))));
+          return Number(today) > cap ? `busy:${cap}` : this.run(["LPUSH", list, plain]);
+        }
         // lib/redis-lock.ts releaseLock and holdLock: the lock deleted, or made to last, only while it holds the token.
         if (key.startsWith("-- marktmorgen:release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, lock, token] = args;

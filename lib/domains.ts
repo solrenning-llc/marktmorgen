@@ -367,7 +367,9 @@ export async function connectDomain(store: Store, raw: string, pending: PendingD
   // it holds a domain (lib/store.ts deleteStore), so it can no longer win while this request waits and leave the domain
   // on the provider with no record to take it off. Not confirmed written: the provider is asked nothing.
   if (!(await pending.keep(name).catch(() => false))) {
-    await releaseMark(domainKey(name), claim);
+    // Only a claim this very call took is let go: a claim that was already this store's (claimed "taken" above) may
+    // be a first press's, whose pending domain is what refused this one, and it stays with it (Claude 1 on #5108).
+    if (claimed === "ours") await releaseMark(domainKey(name), claim);
     cache.delete(name);
     return { ok: false, reason: "unavailable" };
   }

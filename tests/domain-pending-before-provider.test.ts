@@ -127,6 +127,24 @@ async function main(): Promise<void> {
     is("and the claim is let go", redis.run(["GET", KEY]), null);
   }
 
+  // Claude 1 f9afa7's LEVE on #5108: a second press that read the store before the first one wrote its pending domain
+  // is refused by that write, and must not let go of the first press's claim (the same value, this store's).
+  part("A second press, read before the first wrote, leaves the first press's claim");
+  {
+    redis.run(["DEL", KEY]);
+    const { ref, store } = await extraStore();
+    let second: unknown = "not tried";
+    duringPost = async () => {
+      duringPost = null;
+      second = await connectDomain(onPlan(store), NAME, pendingFor(ref, store.sid)).catch(() => "threw" as const);
+    };
+    const first = await connectDomain(onPlan(store), NAME, pendingFor(ref, store.sid)).catch(() => "threw" as const);
+    is("the second press, read before the first wrote, is refused", second, { ok: false, reason: "unavailable" });
+    is("the first press connects", first, { ok: true, name: NAME });
+    is("and keeps its claim", redis.run(["GET", KEY]) !== null, true);
+    is("and its domain", await domainOf(ref), NAME);
+  }
+
   part("A refusal whose clear cannot be confirmed keeps the claim, so Remove can finish it");
   {
     redis.run(["DEL", KEY]);

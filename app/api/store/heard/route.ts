@@ -1,7 +1,7 @@
 import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 import { recordHeard } from "@/lib/heard";
 
 const MAX_BODY_BYTES = 600;
@@ -28,7 +28,9 @@ export async function POST(request: NextRequest) {
   const store = await storeForHandle(handle).catch(() => null);
   if (!store) return answer(false, 404);
   // Each answer asks the creator's Stripe account about the order, so a few a connection.
-  if (!(await withinStore("heard", `${clientAddress(request)}|${store.handle}`, 20, 600, store))) return answer(false, 429);
+  const room = await withinStore("heard", `${clientAddress(request)}|${store.handle}`, 20, 600, store).catch(unknownLimit);
+  if (room === "unknown") return answer(false, 503);
+  if (!room) return answer(false, 429);
   const result = await recordHeard(store, body.s, body.a).catch(() => "unavailable" as const);
   return answer(result === "counted" || result === "already", result === "invalid" ? 400 : result === "unavailable" ? 503 : 200);
 }

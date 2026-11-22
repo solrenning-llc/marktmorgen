@@ -28,7 +28,9 @@
  * permission its own screen asks studioView for
  * (tests/it3-studio-actions.test.ts reads both). An action on the studio
  * home names the section it scrolls to, and that section is drawn for every
- * role with the action's permission, under that permission alone.
+ * role with the action's permission, under that permission alone; the plan's
+ * section (onPlanPage) also needs billing to be set up, as the context's
+ * planHref says.
  */
 import type { Permission } from "@/lib/team-roles";
 
@@ -49,6 +51,11 @@ export type StudioAction = {
   segment: string;
   /** On the studio home: the id of the section it scrolls to. */
   anchor?: string;
+  /**
+   * Drawn only where the plan page is (the studio home's #billing: billingReady && may("billing"), the context's
+   * planHref), so the action is offered only to someone who can use it (Codex T on #3525).
+   */
+  onPlanPage?: true;
   /** What the role needs: the screen's own studioView(...) permission; "member" is anyone on the store. */
   permission: Permission | "member";
   /** Other words people type for it. */
@@ -63,6 +70,7 @@ export const STUDIO_ACTIONS: readonly StudioAction[] = [
   { id: "stripe", title: "Connect or check your Stripe account", segment: "", anchor: "stripe", permission: "payments", words: ["stripe", "payout", "bank", "get paid", "money", "balance", "connect payments"] },
   { id: "ways-to-pay", title: "Choose the ways buyers can pay", segment: "", anchor: "ways-to-pay", permission: "settings", words: ["payment methods", "apple pay", "google pay", "card", "wallet", "ways to pay", "checkout"] },
   { id: "sale", title: "Put the whole store on sale", segment: "", anchor: "sale-title", permission: "settings", words: ["sale", "discount", "promotion", "promo", "percent off", "markdown", "black friday"] },
+  { id: "plan", title: "Change or cancel your Marktmorgen plan", segment: "", anchor: "billing", onPlanPage: true, permission: "billing", words: ["plan", "change plan", "cancel plan", "cancel subscription", "subscription", "upgrade", "downgrade", "switch plan", "billing"] },
   { id: "account", title: "Change how you sign in", segment: "", anchor: "account", permission: "member", words: ["sign in", "login", "log in", "passkey", "two step", "security", "password", "email address", "account"] },
   // Screens of their own.
   { id: "add", title: "Add a tool to your store", segment: "add", permission: "member", words: ["add", "modules", "features", "apps", "tools", "gallery"] },
@@ -73,8 +81,7 @@ export const STUDIO_ACTIONS: readonly StudioAction[] = [
   { id: "requests", title: "Ask someone to pay a custom amount", segment: "requests", permission: "orders", words: ["invoice", "payment request", "bill", "charge", "custom amount", "payment link", "request money"] },
   { id: "agreements", title: "Send an agreement to sign", segment: "agreements", permission: "orders", words: ["contract", "proposal", "sign", "signature", "agreement", "terms"] },
   { id: "deals", title: "Follow the sales you are talking through", segment: "deals", permission: "orders", words: ["deal", "pipeline", "crm", "lead", "stage", "custom field", "prospect"] },
-  { id: "companies", title: "See the companies you sell to", segment: "companies", permission: "orders", words: ["company", "companies", "business", "school", "team", "organization", "b2b", "client"] },
-  { id: "plan-bills", title: "See what you paid for your Marktmorgen plan", segment: "invoices", permission: "billing", words: ["billing history", "plan receipt", "subscription billing", "what i paid", "plan payments"] },
+  { id: "companies", title: "See the companies you sell to", segment: "companies", permission: "orders", words: ["company", "companies", "business", "school", "team", "organization", "b2b", "client", "employer"] },
   { id: "blog", title: "Write a blog post", segment: "blog", permission: "page", words: ["blog", "post", "article", "seo", "write", "search engine"] },
   { id: "first-product", title: "Make your first product", segment: "first-product", permission: "products", words: ["first product", "create", "guide", "pdf", "draft"] },
   { id: "forms", title: "Make a form, a survey or a quiz", segment: "forms", permission: "page", words: ["form", "survey", "quiz", "application", "questionnaire", "questions"] },
@@ -83,7 +90,7 @@ export const STUDIO_ACTIONS: readonly StudioAction[] = [
   { id: "discord", title: "Let buyers into your Discord server", segment: "discord", permission: "settings", words: ["discord", "server", "roles"] },
   { id: "reviews", title: "Collect and answer reviews", segment: "reviews", permission: "reviews", words: ["review", "rating", "testimonial", "stars", "feedback"] },
   { id: "inbox", title: "Answer messages from buyers", segment: "inbox", permission: "orders", words: ["inbox", "message", "chat", "contact form", "support", "reply", "question", "saved replies"] },
-  { id: "people", title: "Look up a buyer and what they paid", segment: "people", permission: "orders", words: ["buyer", "customer", "people", "contact", "order", "purchase", "refund", "refunded", "notes"] },
+  { id: "people", title: "See buyers, what they paid, orders and refunds", segment: "people", permission: "orders", words: ["buyer", "customer", "people", "contact", "order", "purchase", "paid", "refund", "refunded", "notes", "receipt", "order receipt"] },
   { id: "growth", title: "Choose a goal to grow your store", segment: "growth", permission: "member", words: ["grow", "growth", "goal", "more sales", "marketing", "traffic"] },
   { id: "email", title: "Send an email to your list", segment: "email", permission: "draft", words: ["email", "send email", "newsletter", "broadcast", "sequence", "mail", "campaign", "automation", "list"] },
   { id: "outreach", title: "Write a pitch to a sponsor or a partner", segment: "outreach", permission: "draft", words: ["sponsor", "pitch", "partnership", "brand deal", "outreach", "collaboration"] },
@@ -100,6 +107,9 @@ export const STUDIO_ACTIONS: readonly StudioAction[] = [
   { id: "tax", title: "See where you collect tax", segment: "tax", permission: "payments", words: ["tax", "vat", "sales tax", "gst", "registration"] },
   { id: "declines", title: "See payments that did not go through", segment: "declines", permission: "payments", words: ["declined", "declined payment", "failed payment", "card declined", "payment failed"] },
   { id: "team", title: "Invite someone to help run your store", segment: "team", permission: "team", words: ["team", "staff", "helper", "role", "permission", "admin", "assistant", "activity log"] },
+  // Before invite and refund: "plan" alone ties on their title words, and the creator's own plan comes first (Codex X6
+  // 6997739189, Claude 5 6906524419 on #3525). Still after people, so "paid" and "receipt" keep the buyers first.
+  { id: "plan-bills", title: "See what you paid for your Marktmorgen plan", segment: "invoices", permission: "billing", words: ["billing history", "plan receipt", "subscription billing", "what i paid", "plan payments", "invoice", "plan invoice", "past payments"] },
   { id: "invite", title: "Invite other creators for plan credit", segment: "invite", permission: "billing", words: ["invite", "refer", "referral", "credit", "invite creator"] },
   { id: "refund", title: "Ask for a refund of your Marktmorgen plan", segment: "refund", permission: "billing", words: ["refund", "money back", "plan refund", "refund plan"] },
   { id: "copy", title: "Copy this store into another of your stores", segment: "copy", permission: "page", words: ["copy", "duplicate", "clone"] },
@@ -119,6 +129,7 @@ export const NOT_ACTIONS: Readonly<Record<string, string>> = {
   "closing-refunds": "The review before members get unused time back, which opens only while the store is closing.",
   notifications: "The owner's own alert emails: its screen asks for Settings, which an Admin also has, but sends everyone but the owner away, so an Admin would be shown an action the screen refuses. Opened from the owner's card on the studio home.",
   students: "Needs both Products and Orders, and an action asks for one permission: an Editor would be shown an action the screen refuses.",
+  "check-in": "The door of one in-person event, where tickets are checked as people arrive; opened from that event, never on its own.",
   devices: "Logs out the person's other devices after asking first, an account action rather than a part of the store.",
 };
 

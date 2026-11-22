@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 /**
  * "Focus mode" on a lesson's page (295 [SQ6]; added 12 November 2026). One
@@ -91,7 +91,11 @@ export function LessonFocus({ words, children }: { words: FocusWords; children?:
   const [said, setSaid] = useState("");
   const area = useRef<HTMLDivElement>(null);
   const goTo = useRef<Element | null>(null);
-  useEffect(() => {
+  // A layout effect, not a passive one: the address is read before the browser paints the first draw that
+  // offers the button, so a link to a hidden reply never shows a draw with the reply hidden, undone a moment
+  // later. With a passive effect that flash was real, and what a reader saw between the two draws was chance
+  // (webkit, 21 November 2026, tests/e2e/lesson-focus.mjs).
+  useLayoutEffect(() => {
     const check = () => {
       const target = hashHiddenInFocus(area.current, window.location.hash, (id) => document.getElementById(id));
       if (!target) return;

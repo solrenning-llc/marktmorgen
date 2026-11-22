@@ -11,12 +11,12 @@ import { readingSince } from "@/lib/earnings-by-month";
  * unit 3; lib/sale-fees-months.ts, saleFeesCsv), from the same reading of the
  * creator's own Stripe account as the page (lib/sale-fees-reading.ts): the
  * kept copy while it is fresh, otherwise one of the day's readings, taken
- * before Stripe is called. It names no buyer, so whoever may see the store's
- * numbers ("stats") may download it. Dates in UTC. A reading that is not
+ * before Stripe is called. It names no buyer; it is the owner's only
+ * ("payments"), as the page: each sale's net and charge id (audit 9c68). Dates in UTC. A reading that is not
  * whole gives no file: a part would look like the whole.
  */
 export async function GET(request: NextRequest) {
-  const creator = await creatorFrom(request, "stats");
+  const creator = await creatorFrom(request, "payments");
   if (creator instanceof Response) return creator;
   const { store } = creator;
   const plain = (status: number, body: string) => new Response(body, { status, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });

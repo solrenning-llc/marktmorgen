@@ -59,6 +59,8 @@ export const SALE_FEES_COPY_MAX_BYTES = 262_144;
  * another shape does, and stays counted; never read without a ceiling.
  */
 export const SALE_FEES_PAGE_MAX_BYTES = SALE_FEES_PAGE_SIZE * 16 * 1024;
+/** The least wait one page is given (lib/stripe-account.ts refuses a ceiling under 50 ms). */
+const SALE_FEES_PAGE_MIN_WAIT_MS = 50;
 /** Database commands of one reading at the most: the copy read, the day's count (INCRBY and EXPIRE NX, lib/window-count.ts; a DECRBY when over) and the copy written. */
 export const SALE_FEES_READ_COMMANDS = 1 + 3 + 1;
 /** One reading at its worst, in the shape lib/read-ceilings.ts prices: every page waited on one after another. */
@@ -118,13 +120,18 @@ async function readPages(account: string, now: number): Promise<{ lines: Record<
   const sinceSeconds = Math.floor(sinceMs / 1000);
   const lines: Record<string, unknown>[] = [];
   let after = "";
+  // The wall time the reading is priced at (SALE_FEES_READ_SHAPE.seconds, every page one after another): each page waits
+  // only what is left of it, and a reading with none left fails, never runs longer than it is billed (audit 9c68).
+  const deadline = Date.now() + SALE_FEES_READ_SHAPE.seconds * 1000;
   for (let page = 0; page < SALE_FEES_PAGES; page += 1) {
     // Up to the reading's own second: a line made while the pages are read is left for the next reading, never one the
     // months would take for "late" (lib/sale-fees-months.ts) and refuse the whole reading for.
     const query = new URLSearchParams({ limit: String(SALE_FEES_PAGE_SIZE), "created[gte]": String(sinceSeconds), "created[lte]": String(Math.floor(now / 1000)), "expand[]": "data.source" });
     if (after) query.set("starting_after", after);
     // The pinned version of every list read here (lib/stripe-list.ts), and a ceiling on the bytes read.
-    const reply = await onAccount("GET", account, `/balance_transactions?${query}`, undefined, STRIPE_LIST_VERSION, undefined, undefined, SALE_FEES_PAGE_MAX_BYTES);
+    const left = deadline - Date.now();
+    if (left < SALE_FEES_PAGE_MIN_WAIT_MS) throw new PageRefused();
+    const reply = await onAccount("GET", account, `/balance_transactions?${query}`, undefined, STRIPE_LIST_VERSION, undefined, Math.floor(left), SALE_FEES_PAGE_MAX_BYTES);
     const data = reply.data;
     if (reply.object !== "list" || !Array.isArray(data) || typeof reply.has_more !== "boolean" || data.length > SALE_FEES_PAGE_SIZE) throw new PageRefused();
     for (const item of data) {
@@ -142,19 +149,19 @@ async function readPages(account: string, now: number): Promise<{ lines: Record<
   return { lines: lines.filter((l) => (l.created as number) > oldest), since: (oldest + 1) * 1000 };
 }
 
-/** One of the day's readings, taken whole or not at all; an unreadable count is a refusal. */
-async function takeReading(statsId: string, now: number): Promise<boolean> {
+/** One of the day's readings, taken whole or not at all: "used" past the day's figure, "unknown" when the count cannot be read. */
+async function takeReading(statsId: string, now: number): Promise<"taken" | "used" | "unknown"> {
   const key = dayKey(statsId, now);
   try {
     // The INCRBY first and the day's expiry set only when the key has none (lib/window-count.ts): a SET NX then INCRBY
     // could leave a key with no expiry when it expired between the two (tests/window-count-expiry.test.ts).
     const count = windowCountOf(await redisPipeline(windowCountBy(key, DAY_KEY_SECONDS, 1)));
-    if (count === null) return false;
-    if (count <= SALE_FEES_READINGS_PER_DAY) return true;
+    if (count === null) return "unknown";
+    if (count <= SALE_FEES_READINGS_PER_DAY) return "taken";
     await redisPipeline([["DECRBY", key, 1]]).catch(() => {});
-    return false;
+    return "used";
   } catch {
-    return false;
+    return "unknown";
   }
 }
 
@@ -178,11 +185,16 @@ async function readCopy(statsId: string, account: string): Promise<SaleFeesKept 
  */
 export async function keptSaleFees(store: Account, now = Date.now(), fresh = false): Promise<SaleFeesState> {
   const { statsId, stripeAccountId: account } = store;
-  if (!statsId || !account || !isRedisConfigured()) return { kind: "none" };
+  if (!statsId || !account) return { kind: "none" };
+  // No database: nothing can be counted or kept, so nothing is read; said as unavailable, never as "connect" (audit 9c68).
+  if (!isRedisConfigured()) return { kind: "failed" };
   if (!keyFor(account)) return { kind: "not_configured" };
   const copy = await readCopy(statsId, account);
   if (copy && !fresh && now - copy.at >= 0 && now - copy.at < SALE_FEES_FRESH_SECONDS * 1000) return { kind: "read", kept: copy };
-  if (!(await takeReading(statsId, now))) return copy ? { kind: "read", kept: { ...copy, stale: true } } : { kind: "used", backAt: nextUtcMidnight(now) };
+  const taken = await takeReading(statsId, now);
+  // An unreadable count is no reading, and is said as unavailable, never as "today's readings are used" (audit 9c68).
+  if (taken === "unknown") return copy ? { kind: "read", kept: { ...copy, stale: true, failed: true } } : { kind: "failed" };
+  if (taken === "used") return copy ? { kind: "read", kept: { ...copy, stale: true } } : { kind: "used", backAt: nextUtcMidnight(now) };
   let read: { lines: Record<string, unknown>[]; since: number };
   try {
     read = await readPages(account, now);

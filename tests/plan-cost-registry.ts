@@ -3102,7 +3102,7 @@ export const COST_LINES: CostLine[] = [
     feature: "Fees and what you keep (282 [HG1], 11 November 2026): the store's readings of its own Stripe balance transactions, kept for the studio page and its download",
     monthlyUsd: () => DAY_WINDOWS * SALE_FEES_READINGS_PER_DAY * readShapeCost(SALE_FEES_READ_SHAPE),
     sources: [
-      { file: "lib/sale-fees-reading.ts", names: ["SALE_FEES_READINGS_PER_DAY", "SALE_FEES_PAGES", "SALE_FEES_COPY_MAX_BYTES", "SALE_FEES_READ_SHAPE", "takeReading", "if (!(await takeReading(statsId, now)))"] },
+      { file: "lib/sale-fees-reading.ts", names: ["SALE_FEES_READINGS_PER_DAY", "SALE_FEES_PAGES", "SALE_FEES_COPY_MAX_BYTES", "SALE_FEES_READ_SHAPE", "takeReading", "const taken = await takeReading(statsId, now)", "SALE_FEES_READ_SHAPE.seconds * 1000", "SALE_FEES_PAGE_MAX_BYTES"] },
     ],
     basis: "At most SALE_FEES_READINGS_PER_DAY readings a UTC day, each taken before Stripe is called and kept counted once it was; each at its worst shape: SALE_FEES_PAGES pages of the creator's account waited on one after another, the copy read and written at its largest and the day's count. The page and the download are counted in the studio's requests as every page and route; the copy's day is in the data room (nl:salefees:copy:).",
   },

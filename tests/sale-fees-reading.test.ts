@@ -21,12 +21,13 @@ import { saleFees } from "@/lib/sale-fees-rules";
 import {
   SALE_FEES_FRESH_SECONDS,
   SALE_FEES_PAGE_MAX_BYTES,
+  SALE_FEES_READ_SHAPE,
   SALE_FEES_PAGES,
   SALE_FEES_READINGS_PER_DAY,
   keptSaleFees,
 } from "@/lib/sale-fees-reading";
 import { STRIPE_LIST_VERSION } from "@/lib/stripe-list";
-import { store as redis } from "./redis-stub";
+import { setRedisConfigured, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_fixture";
@@ -37,12 +38,20 @@ const HOUR = 3_600_000;
 type Asked = { url: string; account: string | null; method: string; version: string | null };
 let asked: Asked[] = [];
 let pages: Array<() => { status: number; body: unknown }> = [];
+let slowMs = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const headers = new Headers(init?.headers);
   asked.push({ url: String(input), account: headers.get("Stripe-Account"), method: init?.method ?? "GET", version: headers.get("Stripe-Version") });
   const next = pages.shift();
   if (!next) throw new Error("no page left in the synthetic Stripe");
+  if (slowMs > 0) {
+    // A page that answers late, as a slow Stripe would: the request is given up when its signal aborts.
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, slowMs);
+      init?.signal?.addEventListener("abort", () => { clearTimeout(timer); reject(new DOMException("aborted", "AbortError")); });
+    });
+  }
   const { status, body } = next();
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }) as typeof fetch;
@@ -123,7 +132,8 @@ async function main(): Promise<void> {
   reset();
   const realPipeline = redis.pipeline.bind(redis);
   (redis as unknown as { pipeline: typeof realPipeline }).pipeline = async (commands) => (commands.some((c) => c[0] === "INCRBY") ? commands.map(() => "?") : realPipeline(commands));
-  is("an unreadable count is a refusal: Stripe not called", [(await keptSaleFees(STORE, NOW)).kind, asked.length], ["used", 0]);
+  // Still a refusal with Stripe not called, now said as unavailable, never as "today's readings are used" (audit 9c68).
+  is("an unreadable count is a refusal: Stripe not called, and said as unavailable", [(await keptSaleFees(STORE, NOW)).kind, asked.length], ["failed", 0]);
   (redis as unknown as { pipeline: typeof realPipeline }).pipeline = realPipeline;
 
   part("When the pages run out");
@@ -191,6 +201,32 @@ async function main(): Promise<void> {
   pages = [page([sale], false)];
   const switched = await keptSaleFees({ ...STORE, stripeAccountId: "acct_fixture2" }, NOW + 60_000);
   is("the switched account is read again, not shown the other account's fees", [switched.kind, asked.length, asked[asked.length - 1].account], ["read", 2, "acct_fixture2"]);
+
+  part("Unknown is said as unavailable, never as used or as connect (audit 9c68)");
+  reset();
+  const countPipeline = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (String(commands[0]?.[1] ?? "").startsWith("nl:salefees:day:")) throw new Error("synthetic: Redis did not answer");
+    return countPipeline(commands);
+  }) as typeof redis.pipeline;
+  is("an unreadable count, no copy: unavailable, not 'used', and Stripe not asked", [(await keptSaleFees(STORE, NOW)).kind, asked.length], ["failed", 0]);
+  redis.pipeline = countPipeline;
+  setRedisConfigured(false);
+  try {
+    is("no database: unavailable, not 'connect your Stripe account'", (await keptSaleFees(STORE, NOW)).kind, "failed");
+  } finally {
+    setRedisConfigured(true);
+  }
+
+  part("A reading lasts no longer than it is priced at (SALE_FEES_READ_SHAPE.seconds; audit 9c68)");
+  reset();
+  slowMs = SALE_FEES_READ_SHAPE.seconds * 1000 + 300;
+  pages = [page([sale], false)];
+  const slowStarted = Date.now();
+  const slow = await keptSaleFees(STORE, NOW);
+  slowMs = 0;
+  is("a page past the reading's time fails it, counted", [slow.kind, (await redis.pipeline([["GET", "nl:salefees:day:stats1:2026-11-11"]]))[0]], ["failed", "1"]);
+  is("and the wait stops at the reading's time", Date.now() - slowStarted < SALE_FEES_READ_SHAPE.seconds * 1000 + 250, true);
 
   part("The day's count always carries its expiry (lib/window-count.ts; tests/window-count-expiry.test.ts)");
   // The worst moment: the key expires right after the pipeline's first command. With SET NX then INCRBY the INCRBY made

@@ -17,6 +17,8 @@
 import { readFileSync } from "node:fs";
 import { FEES_PAGE_SALES, exportReachRefusal, feesOf, keptWords, monthWords, outWords, reachWords, readWords, stateWords, unavailableWords } from "@/lib/sale-fees-view";
 import { saleFeeMonths } from "@/lib/sale-fees-months";
+import { STUDIO_ACTIONS } from "@/lib/studio-actions";
+import { can } from "@/lib/team-roles";
 import { done, is, part } from "./check";
 
 const page = readFileSync("app/studio/fees/page.tsx", "utf8");
@@ -48,6 +50,12 @@ function main(): void {
   is("the route refuses before it writes the file", route.indexOf("exportReachRefusal(state.kept.since, readingSince(state.kept.at") > 0 && route.indexOf("exportReachRefusal(") < route.indexOf("saleFeesCsv(report"), true);
   is("the page says how far the reading went even when no month can be shown", /const reach = kept \? reachWords\(kept\.since, readingSince\(kept\.at, "UTC"\)\) : null;/.test(page), true);
 
+  part("The owner's only, as the tax page: an editor has 'stats' but not 'payments' (audit 9c68)");
+  is("the page asks 'payments', never 'stats'", page.includes(': undefined, "payments")') && !page.includes(': undefined, "stats")'), true);
+  is("the download asks 'payments'", route.includes('creatorFrom(request, "payments")') && !route.includes('creatorFrom(request, "stats")'), true);
+  is("the studio action asks 'payments'", STUDIO_ACTIONS.find((a) => a.id === "fees")?.permission, "payments");
+  is("an editor is refused, the owner is not", [can("editor", "payments"), can("editor", "stats"), can("owner", "payments")], [false, true, true]);
+
   part("Nothing to show, said");
   for (const kind of ["none", "not_configured", "used", "failed"] as const) {
     const words = stateWords({ kind });
@@ -58,8 +66,8 @@ function main(): void {
   }
 
   part("The page and the download");
-  is("the page is for whoever may see the store's numbers", /studioView\(await cookies\(\), [^\n]*: undefined, "stats"\)/.test(page), true);
-  is("the download too", /creatorFrom\(request, "stats"\)/.test(route), true);
+  is("the page is the owner's only ('payments', audit 9c68)", /studioView\(await cookies\(\), [^\n]*: undefined, "payments"\)/.test(page), true);
+  is("the download too", /creatorFrom\(request, "payments"\)/.test(route), true);
   is("both read the same reading", [page.includes("keptSaleFees(store)"), route.includes("keptSaleFees(store)")], [true, true]);
   is("the download link says what it gives", page.includes(">Download every sale as a spreadsheet (CSV)</a>"), true);
   is("the page lists at most FEES_PAGE_SALES and says the download has every one", [FEES_PAGE_SALES, page.includes("sales.rows.slice(0, FEES_PAGE_SALES)"), page.includes("The download has every one.")], [50, true, true]);

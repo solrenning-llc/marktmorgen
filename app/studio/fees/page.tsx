@@ -22,14 +22,16 @@ const head = "py-2 pl-3 text-right font-semibold";
 /**
  * Fees and what the creator keeps, by month and sale by sale (282 [HG1],
  * unit 3), read only from the creator's own Stripe account
- * (lib/sale-fees-reading.ts) for whoever may see the store's numbers
- * ("stats": no buyer's address is read or shown). Months and dates in UTC,
+ * (lib/sale-fees-reading.ts), for the owner only ("payments", as the tax page,
+ * which also reads the Stripe account: each sale's net and charge id, and a
+ * reading spends one of the day's three; audit 9c68). No buyer's address is
+ * read or shown. Months and dates in UTC,
  * as the studio's other pages. The download has every sale.
  */
 export default async function StudioFeesPage({ searchParams }: Params) {
   const query = await searchParams;
   if (query.store !== undefined && (typeof query.store !== "string" || !STORE_ID_PATTERN.test(query.store))) redirect("/studio");
-  const found = await studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, "stats");
+  const found = await studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, "payments");
   if (!found.ok) {
     if (found.reason === "signed_out") redirect("/signin");
     redirect(found.store ? studioPath(found.store, "team=forbidden") : "/studio");

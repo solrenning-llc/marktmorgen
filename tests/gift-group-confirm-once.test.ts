@@ -34,7 +34,8 @@ const outcome = <T>(p: Promise<T>): Promise<T | "threw"> => p.then((v) => v, () 
 /** Every pipeline runs as usual, except that a lone command `match` picks is answered in an unknown shape, landed or not. */
 function unknownFor(match: (c: Command) => boolean, lands: boolean): void {
   redis.pipeline = (async (commands: Command[]) => {
-    if (commands.length !== 1 || !match(commands[0])) return real(commands);
+    // The record's write leads its pipeline (#5125: a gift's carries its buyer's index after it), answered as a whole.
+    if (!commands.length || !match(commands[0])) return real(commands);
     if (lands) await real(commands);
     return [{ unexpected: true }];
   }) as typeof redis.pipeline;

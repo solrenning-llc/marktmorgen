@@ -14,7 +14,7 @@
  * the buyer's own checkout opens nothing (lib/bundle-rules.ts deliveredIds).
  */
 import { consentEmailLines } from "@/lib/digital-consent-email";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
@@ -55,6 +55,11 @@ export type Gift = {
   given?: number;
   /** Once taken back by a refund, in seconds. */
   revoked?: number;
+  /**
+   * Once handed over: who bought it, as the SHA-256 of their address in lower case (buyerField), so the copy of their
+   * data finds it in their index (buyerGiftsKey) without Stripe (#5125, the Stripe-read copiers row).
+   */
+  b?: string;
 };
 
 const giftKey = (id: string) => `nl:gift:${id}`;
@@ -62,6 +67,29 @@ const piKey = (pi: string) => `nl:gift:pi:${pi}`;
 /** What one gift keeps, by its id and its payment: for a closed store (lib/closed-store-data.ts). */
 export const giftKeys = (id: string, pi: string): string[] => [...(id ? [giftKey(id), `${giftKey(id)}:giving`] : []), ...(pi ? [piKey(pi)] : [])];
 const anyKey = (sid: string) => `nl:gift:${sid}:any`;
+/**
+ * The gifts a buyer bought in a store, by the SHA-256 of their address in lower case: a set of gift ids, written and
+ * given its expiry in the same pipeline as every write of a handed-over gift (saveGift), so it never runs out before
+ * a gift it leads to. Gift ids are gft_ and hex, never "<store>:by:", so it can never be a gift's own key.
+ */
+export const buyerGiftsKey = (sid: string, field: string) => `nl:gift:${sid}:by:${field}`;
+export const buyerField = (email: string) => createHash("sha256").update(email.trim().toLowerCase()).digest("hex");
+/**
+ * The gifts a person bought in a store, for the copy of their data (#5125): their index, read exactly. A reply that is
+ * not a set of gift ids throws UnknownReplyError, so the copy is not made without them; no index is none.
+ */
+export async function giftsBoughtBy(sid: string, email: string): Promise<string[]> {
+  if (!isRedisConfigured()) return [];
+  const read = repliesFor(await redisPipeline([["SMEMBERS", buyerGiftsKey(sid, buyerField(email))]]), 1);
+  const ids = read && Array.isArray(read[0]) ? (read[0] as unknown[]) : null;
+  if (!ids || ids.some((id) => typeof id !== "string" || !GIFT_ID.test(id))) throw new UnknownReplyError("a person's gifts bought");
+  return ids as string[];
+}
+/** A paid gift's buyer, as kept on it (b): from the checkout that paid for it; none when it names no address. */
+function buyerOf(session: { customer_details?: { email?: unknown } | null }): { b?: string } {
+  const typed = typeof session.customer_details?.email === "string" ? session.customer_details.email.trim() : "";
+  return typed ? { b: buyerField(typed) } : {};
+}
 const anchorKey = (sid: string) => `nl:gift:${sid}:refunds`;
 
 /**
@@ -216,9 +244,19 @@ function parseKeptGift(raw: string, id: string): Gift | null {
   }
 }
 
-/** Writes a gift down; true only when Redis answered the write in its exact shape ("OK"). */
+/**
+ * Writes a gift down; true only when Redis answered every write in its exact shape. A gift that names its buyer (b)
+ * is put in their index and the index given the same expiry in the same pipeline: "OK", then 0 or 1, then 1.
+ */
 async function saveGift(gift: Gift, seconds: number): Promise<boolean> {
-  return repliesFor(await redisPipeline([["SET", giftKey(gift.id), JSON.stringify(gift), "EX", seconds]]), 1)?.[0] === "OK";
+  const index = gift.b ? buyerGiftsKey(gift.s, gift.b) : "";
+  const commands: (string | number)[][] = [
+    ["SET", giftKey(gift.id), JSON.stringify(gift), "EX", seconds],
+    ...(index ? [["SADD", index, gift.id], ["EXPIRE", index, seconds]] : []),
+  ];
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  if (!replies || replies[0] !== "OK") return false;
+  return !index || ((replies[1] === 0 || replies[1] === 1) && replies[2] === 1);
 }
 
 export type GiftInput = { to: unknown; from: unknown; message: unknown };
@@ -405,7 +443,7 @@ export async function deliverGift(input: {
       if (!payment || typeof payment !== "object" || (payment as { id?: unknown }).id !== pi) throw new UnknownReplyError("a gift's payment");
       if (await givenBack(store.stripeAccountId, payment)) {
         await takeBackOwnGrant(gift, grant.items, input.dropStart);
-        if (!(await saveGift({ ...gift, session: sessionId, pi, revoked: now() }, GIFT_KEPT_SECONDS))) throw new UnknownReplyError("a gift given back");
+        if (!(await saveGift({ ...gift, session: sessionId, pi, revoked: now(), ...buyerOf(session) }, GIFT_KEPT_SECONDS))) throw new UnknownReplyError("a gift given back");
         await releaseMark(mark, value);
         return "already";
       }
@@ -450,7 +488,7 @@ export async function deliverGift(input: {
     await releaseMark(mark, value);
     throw new UnknownReplyError("a given gift's payment record");
   }
-  const given: Gift = { ...latest, session: sessionId, pi, given: now() };
+  const given: Gift = { ...latest, session: sessionId, pi, given: now(), ...buyerOf(session) };
   if (!(await saveGift(given, GIFT_KEPT_SECONDS))) {
     await releaseMark(mark, value);
     throw new UnknownReplyError("a given gift's record");

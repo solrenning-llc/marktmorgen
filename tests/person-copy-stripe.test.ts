@@ -7,6 +7,7 @@
  * fails rather than leave a part out.
  */
 import { importedKey } from "@/lib/imported-purchases";
+import { buyerField, buyerGiftsKey } from "@/lib/gifts";
 import { claimHandle, ensureListId, ensureStatsId, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { packagesKey } from "@/lib/call-packages";
 import { paidKey } from "@/lib/closing-holds";
@@ -50,7 +51,9 @@ async function main(): Promise<void> {
   // Their call package is found through its own checkout (#5125 (1)), never through the store's set of packages.
   sessions.push({ id: "cs_test_" + "p".repeat(24), status: "complete", payment_status: "paid", payment_intent: "pi_2", metadata: { store: store.handle, product: "call000001", kind: "package" } });
   sessions.push({ id: "cs_test_" + "o".repeat(24), status: "complete", payment_status: "paid", metadata: { store: "another-store", gift: "gft_" + "f".repeat(24) } });
-  redis.run(["SET", `nl:gift:${GIFT_BOUGHT}`, JSON.stringify({ id: GIFT_BOUGHT, s: statsId, p: "prod000001", to: "friend@example.com", from: "Mia", message: "Enjoy", at: 1_790_000_000 })]);
+  // A gift handed over names its buyer and is in their index (#5125), as lib/gifts.ts saveGift writes it.
+  redis.run(["SET", `nl:gift:${GIFT_BOUGHT}`, JSON.stringify({ id: GIFT_BOUGHT, s: statsId, p: "prod000001", to: "friend@example.com", from: "Mia", message: "Enjoy", at: 1_790_000_000, b: buyerField(PERSON) })]);
+  redis.run(["SADD", buyerGiftsKey(statsId, buyerField(PERSON)), GIFT_BOUGHT]);
   redis.run(["SET", `nl:gift:${GIFT_GOT}`, JSON.stringify({ id: GIFT_GOT, s: statsId, p: "prod000002", to: PERSON, from: "Sam", message: "For you", at: 1_790_000_000 })]);
   redis.run(["HSET", importedKey(statsId, PERSON), "prod000002", JSON.stringify({ at: 1_790_000_000, job: `gift:${GIFT_GOT}`, items: null })]);
   redis.run(["SET", `nl:grp:${GROUP}`, JSON.stringify({ id: GROUP, s: statsId, p: "prod000001", people: 5, at: 1_790_000_000 })]);

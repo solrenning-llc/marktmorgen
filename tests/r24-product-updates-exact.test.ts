@@ -281,11 +281,23 @@ test("2.4 a send whose give-back is unknown still throws, and the other send in 
   const r = await setup();
   const copy = copyJob(r);
   const sent = globalThis.fetch;
+  // The first send is refused outright: its batch, which carries the store's stop tags (ALL-160, #4245), and the one
+  // retry without them that lib/email.ts makes on a 422 (#74). Only then is its figure given back.
+  let firstTagged: boolean | null = null;
+  let retryRefused = false;
   let refusedOnce = false;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-    if (!refusedOnce && new URL(String(input)).pathname === "/emails/batch") {
-      refusedOnce = true;
-      return Response.json({ message: "synthetic refusal" }, { status: 422 });
+    if (new URL(String(input)).pathname === "/emails/batch") {
+      const tagged = String(init?.body ?? "").includes('"tags"');
+      if (!refusedOnce) {
+        refusedOnce = true;
+        firstTagged = tagged;
+        return Response.json({ message: "synthetic refusal" }, { status: 422 });
+      }
+      if (firstTagged && !tagged && !retryRefused) {
+        retryRefused = true;
+        return Response.json({ message: "synthetic refusal" }, { status: 422 });
+      }
     }
     return sent(input, init);
   }) as typeof fetch;

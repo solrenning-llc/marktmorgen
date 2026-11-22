@@ -25,7 +25,7 @@ import { BillingError, onPlatform } from "@/lib/billing";
 import { COMMISSION_LIVE } from "@/lib/plan";
 import { onAccount } from "@/lib/stripe-account";
 import { redisPipeline } from "@/lib/redis";
-import { storeForHandle, type Store } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeForHandle, storeIdCommand, type Store } from "@/lib/store";
 import { storeForRefExactly } from "@/lib/store-exact";
 import { SHARING_INDEX, owedOn, percentOf, planShareBps, shareBps, toGiveBack } from "@/lib/platform-share";
 import { disputeMoneyGone } from "@/lib/retained-revenue";
@@ -139,6 +139,23 @@ function confirmedMarkerWrite(reply: unknown): void {
   if (!slot || !("value" in slot) || (slot.value !== 0 && slot.value !== 1)) throw new UnknownFeeList("Settlement progress write was not confirmed");
 }
 
+/** A late provider answer must not restore a store's ref (the first store's owner's address) after erasure.
+ * Four billed commands on a live write: EVAL, EXISTS, HEXISTS and HSET, replacing one HSET. Company work, not free. */
+const KEEP_MARKER_IF_LIVE = `-- marktmorgen:share-marker-live:v1
+if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+if redis.call('HEXISTS', KEYS[2], ARGV[1]) == 1 then return -1 end
+return redis.call('HSET', KEYS[3], ARGV[2], ARGV[3])`;
+
+async function keepMarker(store: Store, ref: string, key: string, value: string): Promise<boolean> {
+  // A store from before ids has no identity key: its own record, under its owner's address, is what erasure removes
+  // (Claude 3's LOW on #4928), so it is the fence, and such a store still records its progress while it lives.
+  const identity = STORE_ID_PATTERN.test(store.sid) ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  const reply = await redisPipeline([["EVAL", KEEP_MARKER_IF_LIVE, 3, identity, ERASING_KEY, key, await erasingField(ref), ref, value]]);
+  if (Array.isArray(reply) && reply.length === 1 && Object.getOwnPropertyDescriptor(reply, "0")?.value === -1) return false;
+  confirmedMarkerWrite(reply);
+  return true;
+}
+
 function historicalEvent(raw: unknown): { id: string; fee: string | null; charge: string | null } {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new UnknownFeeList("Historical settlement event was not confirmed");
   const row = raw as Record<string, unknown>, id = str(row.id);
@@ -150,6 +167,20 @@ function historicalEvent(raw: unknown): { id: string; fee: string | null; charge
   const charge = providerReference(evidence.charge, /^(ch|py)_[A-Za-z0-9]+$/);
   if (!charge) throw new UnknownFeeList("Historical settlement charge reference was not confirmed");
   return { id, fee: null, charge };
+}
+
+/**
+ * The marks a sale carries when its platform fee also holds VAT collected for the tax office (lib/eu-vat-lines.ts,
+ * lib/eu-vat-collect.ts): fee = share + VAT + the costs of receiving it. Settling compares the fee with the share only,
+ * so it would give the VAT back to the creator. Until the VAT refund design is built (AGENTS.md IV (b): the VAT goes
+ * back with the buyer's money and the return is corrected), such a fee is unknown here: refused, never refunded.
+ */
+const VAT_HELD_MARKS = ["eu_vat", "uk_vat", "uk_vat_gbp"] as const;
+
+function holdsVat(fee: Fee, meta: unknown): void {
+  if (meta && typeof meta === "object" && VAT_HELD_MARKS.some((mark) => Object.hasOwn(meta, mark))) {
+    throw new UnknownAmount(fee.id, "Fee holds VAT collected for the tax office");
+  }
 }
 
 /** What was paid for the goods on a payment made through a checkout: after discounts, without tax or shipping. */
@@ -231,6 +262,8 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
     // what the store owes on the day the invoice was made, which is none
     // inside the trial or once its plan has ended.
     const meta = ((invoice.subscription_details as { metadata?: unknown } | null)?.metadata ?? {}) as Record<string, string>;
+    holdsVat(fee, meta);
+    holdsVat(fee, invoice.metadata);
     const handle = str(meta.store);
     const store = handle ? await storeForHandle(handle) : null;
     const written = metadataInteger(meta.share_bps), created = num(invoice.created);
@@ -246,6 +279,8 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
   if (intent && (paymentReference(intent.latest_charge, "charge", /^(ch|py)_[A-Za-z0-9]+$/, fee.id) !== fee.charge
     || currency(intent.currency) !== fee.currency || num(intent.amount) !== amount)) throw new UnknownAmount(fee.id, "Payment intent does not match this charge");
   const meta = (intent ? intent.metadata : charge.metadata) as Record<string, string> | null;
+  holdsVat(fee, meta);
+  holdsVat(fee, charge.metadata);
   // The rate the sale was made at, written on it when the checkout opened.
   const bps = metadataInteger(meta?.share_bps);
   if (bps === null || bps > 10_000) throw new UnknownAmount(fee.id);
@@ -404,8 +439,7 @@ async function settleGivenBack(store: Store, ref: string, nowSeconds: number, de
   }
   // Progress is committed only after the full reading and all its fees settle.
   if (!completeRead || !allSettled) return false;
-  confirmedMarkerWrite(await redisPipeline([["HSET", READ_UNTIL, ref, String(Math.floor(nowSeconds))]]));
-  return true;
+  return keepMarker(store, ref, READ_UNTIL, String(Math.floor(nowSeconds)));
 }
 
 /** Step 3, for one store: its memberships' percentage, kept to its plan. */
@@ -460,7 +494,8 @@ async function keepMemberships(store: Store, ref: string, deadline: number, coun
     cursors.add(page);
   }
   if (!completeRead || !allApplied) return false;
-  confirmedMarkerWrite(await redisPipeline([target > 0 ? ["HSET", APPLIED, ref, String(target)] : ["HDEL", APPLIED, ref]]));
+  if (target > 0) return keepMarker(store, ref, APPLIED, String(target));
+  confirmedMarkerWrite(await redisPipeline([["HDEL", APPLIED, ref]]));
   return true;
 }
 

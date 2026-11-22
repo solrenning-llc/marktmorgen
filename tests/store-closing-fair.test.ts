@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { claimHandle, setStripeAccount, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
-import { type Hands, closeEnded, closeOne, closingOf, closingLetter } from "@/lib/plan-closing";
+import { type Hands, CLOSING_STATE_SAVE, closeEnded, closeOne, closingOf, closingLetter } from "@/lib/plan-closing";
 import { CLOSING_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import {
   BUYER_NOTICE_DAYS,
@@ -462,7 +462,9 @@ async function main() {
     const healthy = redis.pipeline;
     let dropped = 0;
     redis.pipeline = (async (commands: (string | number)[][]) => {
-      if (!dropped && commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:plan:closing:") && /"day":/.test(String(commands[0][2])) && !/"renewals":/.test(String(commands[0][2]))) {
+      // closeOne writes its state as ["EVAL", CLOSING_STATE_SAVE, 1, key, mode, seen, text]; the body is c[6].
+      const c = commands[0];
+      if (!dropped && commands.length === 1 && c[0] === "EVAL" && c[1] === CLOSING_STATE_SAVE && String(c[3]).startsWith("nl:plan:closing:") && /"day":/.test(String(c[6])) && !/"renewals":/.test(String(c[6]))) {
         dropped += 1;
         throw new Error("stand-in Redis down for the closing day's own record");
       }

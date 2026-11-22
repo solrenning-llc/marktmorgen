@@ -1,10 +1,10 @@
 import type { NextRequest } from "next/server";
 import { canHearResend, forwardInbound, inboundSigned, isInboundConfigured } from "@/lib/inbound-mail";
-import { HEALTH_ID, LIST_TAG, MOVE_TAG, STORE_TAG, heardFromSender, mailReportCampaign } from "@/lib/mail-health";
+import { HEALTH_ID, LIST_TAG, MOVE_TAG, STOP_TAG, STORE_TAG, heardFromSender, mailReportCampaign } from "@/lib/mail-health";
 import { MAIL_REPORT_TAG, type MailReportEvent, noteMailReportEvent } from "@/lib/mail-report";
 import { redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
-import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 
 /** An announcement names a message; it does not carry it. Anything bigger is not one. */
 const MAX_BODY_BYTES = 256_000;
@@ -80,7 +80,10 @@ function tagOf(tags: unknown, name: string): string {
  */
 export async function POST(request: NextRequest) {
   if (!canHearResend()) return new Response("Not found.", { status: 404 });
-  if (!(await withinLimit("mail-inbound", clientAddress(request), PER_MINUTE, 60))) {
+  const room = await withinLimit("mail-inbound", clientAddress(request), PER_MINUTE, 60).catch(unknownLimit);
+  // A count that could not be read is unknown (rule 24): 503, so the notice is sent again, never "too many".
+  if (room === "unknown") return Response.json({ ok: false }, { status: 503 });
+  if (!room) {
     return Response.json({ ok: false }, { status: 429 });
   }
   let body: string;
@@ -94,7 +97,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false }, { status: 401 });
   }
 
-  let notice: { type?: unknown; created_at?: unknown; data?: { email_id?: unknown; to?: unknown; tags?: unknown; bounce?: { type?: unknown } } };
+  let notice: { type?: unknown; created_at?: unknown; data?: { email_id?: unknown; from?: unknown; to?: unknown; tags?: unknown; bounce?: { type?: unknown } } };
   try {
     notice = JSON.parse(body) as typeof notice;
   } catch {
@@ -133,7 +136,7 @@ export async function POST(request: NextRequest) {
     try {
       const store = tagOf(notice.data?.tags, STORE_TAG);
       const permanent = notice.type === "email.bounced" && notice.data?.bounce?.type === "Permanent";
-      let result: "counted" | "paused" | "ignored" = "ignored";
+      let result: "counted" | "paused" | "stopped" | "ignored" = "ignored";
       if (notice.type === "email.complained" || permanent) {
         result = await heardFromSender({
           kind: notice.type === "email.complained" ? "complained" : "bounced",
@@ -141,6 +144,7 @@ export async function POST(request: NextRequest) {
           to,
           store,
           list: tagOf(notice.data?.tags, LIST_TAG),
+          stop: tagOf(notice.data?.tags, STOP_TAG),
           move: tagOf(notice.data?.tags, MOVE_TAG),
         });
       }
@@ -166,7 +170,12 @@ export async function POST(request: NextRequest) {
 
   const emailId = typeof notice.data?.email_id === "string" ? notice.data.email_id : "";
 
-  const result = await forwardInbound(emailId);
+  // The addresses the announcement names, so support's daily count is taken before the message is read.
+  // A throw (a count that could not be read, rule 24) is a retry too: the mark is let go of, so Resend's retry is heard.
+  const result = await forwardInbound(emailId, Date.now(), notice.data?.to, notice.data?.from).catch((error: unknown) => {
+    console.error("an inbound message could not be sent on", error);
+    return "retry" as const;
+  });
   if (result === "retry") {
     await letGo(seenKey);
     return Response.json({ ok: false }, { status: 500 });

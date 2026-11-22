@@ -10,9 +10,10 @@
  * gave it on 13/11/2026 (docs/eu-vat-official-sources-2026-11-13.md, branch claude2/eu-vat-official-sources @1251b48e68,
  * C2-20261113-1445-IVA-3), with the TEDB's own situation date per line. It is used only until EU_VAT_RATES_VALID_UNTIL:
  * past it no rate is given, so no EU sale is collected on a table nobody read again. A country with no valid record
- * is no sale (vatOnTop answers null), never a default rate. Only the standard rate is modelled: recorded courses and
- * audiobooks take it everywhere, and so do e-books until a classification says a product qualifies for a reduced rate
- * (Directive annex III, point 6) that its own sourced record confirms; the standard rate never understates the tax.
+ * is no sale (vatOnTop answers null), never a default rate. Only the standard rate is modelled. Since 789 [IV1] step 3,
+ * unit 4, an e-publication (Directive annex III, point 6, which a Member State may tax at a reduced rate) or a product
+ * not classified either way is not collected at it: lib/eu-vat-collect.ts refuses the sale until a sourced reduced-rate
+ * record exists, because the TX policy forbids picking the reading with more tax by default.
  *
  * Amount. Directive 2006/112/EC art. 73: the taxable amount is everything the consumer pays for the supply, here the
  * price before VAT. The VAT is price × rate, rounded half up to the currency's smallest unit (one rounding per sale, on
@@ -75,8 +76,11 @@ export const EU_VAT_RATES: readonly EuVatRate[] = [
 export const EU_VAT_RATES_VALID_UNTIL = "2026-12-31";
 const expired = (table: readonly EuVatRate[], today: Date) => table === EU_VAT_RATES && today.toISOString().slice(0, 10) > EU_VAT_RATES_VALID_UNTIL;
 
+/** Whether the official table is past its review date on `today`: then no EU sale is collected until it is read again. */
+export const euVatRatesExpired = (table: readonly EuVatRate[] = EU_VAT_RATES, today = new Date()): boolean => expired(table, today);
+
 /** The highest standard rate any Member State may set is far below this; anything above is a typing error. */
-const MAX_BASIS_POINTS = 3500;
+export const MAX_BASIS_POINTS = 3500;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const realDay = (value: string) => {
   if (!DAY.test(value)) return false;

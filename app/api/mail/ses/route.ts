@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { recordSesEvent } from "@/lib/mail-report";
-import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { isSesConfigured, sesConfig } from "@/lib/ses";
 import { readSesEvent, readSns, snsUrl, verifySns, type SnsMessage } from "@/lib/sns";
 import { finishSnsReceipt, letGoSnsReceipt, takeSnsReceipt } from "@/lib/sns-receipt";
@@ -35,7 +35,10 @@ export const maxDuration = 30;
 export async function POST(request: NextRequest) {
   const config = sesConfig();
   if (!config || !isSesConfigured()) return new Response("Not found.", { status: 404 });
-  if (!(await withinLimit("mail-ses", clientAddress(request), PER_MINUTE, 60))) {
+  const room = await withinLimit("mail-ses", clientAddress(request), PER_MINUTE, 60).catch(unknownLimit);
+  // A count that could not be read is unknown (rule 24): 503, so the notice is sent again, never "too many".
+  if (room === "unknown") return Response.json({ ok: false }, { status: 503 });
+  if (!room) {
     return Response.json({ ok: false }, { status: 429 });
   }
   let body: string;

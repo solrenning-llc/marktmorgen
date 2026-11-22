@@ -16,7 +16,8 @@ import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount
 import { emailKey, storeKey } from "@/lib/learn";
 import { giveRole, leaveServer, removeMember, takeRole } from "@/lib/discord";
 import { checkMember, joinServer } from "@/lib/discord-access";
-import { readMember, saveServer, setProductRoles } from "@/lib/discord-store";
+import { readMember, setProductRoles } from "@/lib/discord-store";
+import { seedDiscordServer as saveServer } from "./discord-server-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";

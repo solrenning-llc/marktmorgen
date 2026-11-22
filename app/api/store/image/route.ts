@@ -70,7 +70,13 @@ export async function POST(request: NextRequest) {
   // Pictures this request took from the door (lib/picture-door.ts): the only ones a failure here may delete.
   // A path the browser names may be another product's, link's or page's picture in the same folder.
   let fresh = new Map<string, number>();
-  const dropFresh = (paths: string[]) => dropTakenPictures(fresh, paths);
+  // The stored time of each name this request has already asked about with head: its cleanup uses it, not a second head.
+  const storedAt = new Map<string, number>();
+  const dropFresh = (paths: string[]) => dropTakenPictures(fresh, paths, storedAt);
+  const noted = (name: string) => (found: Awaited<ReturnType<typeof head>>) => {
+    storedAt.set(name, new Date(found.uploadedAt).getTime());
+    return found;
+  };
   try {
     if (action === "alt") {
       const done = await setImageAlt(ref, id, alt);
@@ -133,7 +139,7 @@ export async function POST(request: NextRequest) {
       }
       let size = keptSize(path);
       if (size === undefined) {
-        const found = await head(path);
+        const found = await head(path).then(noted(path));
         if (found.size > MAX_IMAGE_BYTES) {
           await dropFresh([path, smallPath, thumbPath]);
           return Response.json({ ok: false, error: "too_big" }, { status: 413 });
@@ -170,7 +176,7 @@ export async function POST(request: NextRequest) {
         if (kept !== undefined) {
           if (smallWidth > 0 && smallWidth < width) small = { path: smallPath, width: smallWidth, bytes: kept };
         } else try {
-          const copy = await head(smallPath);
+          const copy = await head(smallPath).then(noted(smallPath));
           // Its size and width first: a copy that fails them is never read (Claude 1 on #2801, rule 30).
           const fits = smallWidth > 0 && smallWidth < width && copy.size <= MAX_IMAGE_BYTES;
           const first = fits ? await firstBytes(smallPath) : null;
@@ -197,7 +203,7 @@ export async function POST(request: NextRequest) {
         if (kept !== undefined) {
           if (thumbWidth > 0 && thumbWidth < (small ? small.width : width) && kept <= MAX_THUMB_BYTES) thumb = { path: thumbPath, width: thumbWidth, bytes: kept };
         } else try {
-          const copy = await head(thumbPath);
+          const copy = await head(thumbPath).then(noted(thumbPath));
           // Its size and width first: the upload token allows MAX_IMAGE_BYTES under any picture name, so a file over
           // MAX_THUMB_BYTES is dropped unread, and the read its cost line counts is never more than that (Claude 1 on #2801).
           const fits = thumbWidth > 0 && thumbWidth < (small ? small.width : width) && copy.size > 0 && copy.size <= MAX_THUMB_BYTES;

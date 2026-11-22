@@ -1225,6 +1225,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:stream:v:@lib/stream.ts": { what: "What is known about a video", room: ["app/api/store/stream/route.ts", "lib/stream.ts"] },
 
   // ---------------------------------------------------------------- lib/ t–z
+  "nl:csa:held:@lib/child-safety.ts": short("Which products child-safety reports took off a store that day (a set of at most the cap's product ids), two days: the cap on the automatic step", "studio", 2, 128),
   "nl:report:@lib/takedown.ts": company("A takedown report; each takedown's steps and the time its notice went out to the creator (noticeSentAt), and the daily job's run mark and one-store locks, all 400 days at most", "Reports to the company."),
   "nl:report:held@lib/takedown-hold.ts": company("The daily job's list of stores holding links after a copyright notice (store ref -> when to look next): a store's entry is kept only while it holds a link, and dropped when nothing is held, when the store is deleted or closed (lib/store.ts), or when the job finds its record gone", "Reports to the company."),
   "nl:report:t:@lib/takedown.ts": company("A takedown report's token", "Reports to the company."),

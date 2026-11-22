@@ -18,6 +18,7 @@ import { parseProduct } from "@/lib/catalog";
 import { withStockHold } from "@/lib/stock";
 import type { Listing, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { keepLive, liveStockStore } from "./stock-live-store";
 import { done, is, part } from "./check";
 
 /** MAX_CHECKS in lib/stock.ts: the holds that ran out one count asks Stripe about. */
@@ -34,7 +35,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return new Response("{}", { status: 404 });
 }) as typeof fetch;
 
-const creator = { statsId: "r".repeat(32), stripeAccountId: "acct_1TestRecount1" } as Store;
+// Live, so its checkouts' holds are written (STOCK_BIND is fenced on the store being live since Codex L-20261120-0655).
+const creator = liveStockStore({ statsId: "r".repeat(32), stripeAccountId: "acct_1TestRecount1" } as Store, "a1".repeat(16), "recount@example.invalid");
 const limited = (id: string, stock: number) => parseProduct({ id, title: `Print ${id}`, summary: "", priceCents: 2000, stock, link: `https://example.com/${id}` }) as Listing;
 const key = (id: string) => `nl:stock:${creator.statsId}:${id}`;
 const lapsed = (id: string, i: number) => `cs_test_lapsed${id}${String(i).padStart(6, "0")}`;
@@ -46,6 +48,7 @@ async function fillWithLapsed(id: string, count: number): Promise<void> {
 
 async function main(): Promise<void> {
   redis.clear();
+  keepLive(creator);
   process.env.STRIPE_SECRET_KEY = "sk_test_only";
   const original: typeof redis.pipeline = redis.pipeline.bind(redis);
 

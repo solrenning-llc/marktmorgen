@@ -4,6 +4,7 @@ import {CONTRACT_FUNDING_RULES,contractLifecycleReady,CURRENT_CONTRACT_FUNDING_P
 import { CURRENT_EXPOSURE_BUDGET_POLICY, exposureBudgetConfiguration, EXPOSURE_ADMISSION_RULES } from '@/lib/exposure-budget-policy';
 import { assessFundedExposure, FUNDED_EXPOSURE_RULES, type FundedExposureReview } from '@/lib/funded-exposure-rules';
 import { AI_ENTITLEMENT_RULES, aiEntitlementsFunded, requiredAiStoreMicroUsd } from '@/lib/ai-entitlement-rules';
+import { commercialTermsDigest } from '@/lib/commercial-terms-digest';
 import { AUTOMATIC_UPLOAD_BUDGET_CEILINGS, UPLOAD_BUDGET_RULES, currentUploadBudgetPolicy, isUploadBudgetConfigured } from "@/lib/upload-budget-policy";
 /** Client-safe release policy. No secrets, tax rates inferred from residence, or optimistic defaults.
  * Paid plans remain closed until every individual worst case is reviewed and passes the owner's floor.
@@ -119,9 +120,14 @@ export const CURRENT_COMMERCIAL_TERMS = {
  pause: { months: PAUSE_MONTHS, paidMonthsRequired: PAID_MONTHS_BEFORE_PAUSE, everyDays: PAUSE_EVERY_DAYS },
 } as const;
 export const CURRENT_PRICE_AND_RIGHTS_SNAPSHOT = JSON.stringify(CURRENT_COMMERCIAL_TERMS);
+/** The SHA-256 of the terms in force, with their version: what a review and each contract scenario cite in place of
+ * the text (lib/commercial-terms-digest.ts). Null where no hash is available (a page drawn in the browser), and then
+ * no review is ready. */
+export const CURRENT_TERMS_DIGEST = commercialTermsDigest(CURRENT_PRICE_AND_RIGHTS_SNAPSHOT);
 export type CommercialMarginReview={
  planPaymentDisputes?:PlanPaymentDisputeReview|null;
- priceAndRightsSnapshot:string;
+ /** The digest of the terms this review was made under (CURRENT_TERMS_DIGEST), not their text. */
+ priceAndRightsDigest:string;
  companyBase:CustomerBaseReview|null;
  fundedExposure:FundedExposureReview|null;
  taxEvidence:string;
@@ -209,7 +215,7 @@ export function commercialMarginDataReady(review:CommercialMarginReview):boolean
  if(!isUploadBudgetConfigured(uploadPolicy))return false;
  const aiPolicy=currentAiSpendPolicy();
  if(!isAiSpendPolicyValid(aiPolicy)||!aiEntitlementsFunded(aiPolicy))return false;
- if(!review||review.priceAndRightsSnapshot!==CURRENT_PRICE_AND_RIGHTS_SNAPSHOT)return false;
+ if(!review||CURRENT_TERMS_DIGEST===null||review.priceAndRightsDigest!==CURRENT_TERMS_DIGEST)return false;
  if(typeof review.taxEvidence!=="string"||!review.taxEvidence.trim()||typeof review.costAndLimitEvidence!=="string"||!review.costAndLimitEvidence.trim())return false;
  if(review.allocatedFixedCostsVerified!==true||review.prepaidUsageEnforced!==true||!review.scenarios)return false;
  // Every scoped TX record belongs to this exact scenario, not another plan or interval.

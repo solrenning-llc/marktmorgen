@@ -11,6 +11,8 @@ import * as data from "@/lib/store-data";
 import * as registry from "./plan-cost-registry";
 import * as storeModule from "@/lib/store";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { STORE_LOCK_TRIES } from "@/lib/read-ceilings";
+import { MAX_STORE_BYTES } from "@/lib/store";
 import { done, is } from "./check";
 
 const d = data as unknown as { poolTakeCommands?: (slots: number) => number; BESIDE_SAVE_COMMANDS?: number; TAKE_DATA: string };
@@ -36,9 +38,22 @@ is("the studio line names the pool's commands", Boolean(studio?.sources.some((s)
 const st = storeModule as unknown as { MOVE_BESIDE_BATCH: number; MOVE_BESIDE_BATCH_COMMANDS: number };
 const dd = data as unknown as { takeDataCommands?: (slots: number) => number; DATA_EXPIRED_COMMANDS: number };
 is("a room take batches its slots after the fixed and expired-month commands", [dd.takeDataCommands?.(1), dd.takeDataCommands?.(250), dd.takeDataCommands?.(251)], [1 + 4 + dd.DATA_EXPIRED_COMMANDS + 3, 1 + 4 + dd.DATA_EXPIRED_COMMANDS + 3, 1 + 4 + dd.DATA_EXPIRED_COMMANDS + 6]);
+// The store's lock is counted as every other line of the registry counts it (CLOSE_RECORD_COMMANDS; Claude 3's LOW on
+// #4847): every SET NX try of its eight-second wait (STORE_LOCK_TRIES), the hold (EVAL, GET, EXPIRE) and the let-go
+// (EVAL, GET, DEL), besides the store read (GET) and the two HMGETs.
 is(
-  "a sweep batch is priced at both scripts' inner commands",
+  "a sweep batch is priced at the lock's every try, its hold and let-go, and both scripts' inner commands",
   st.MOVE_BESIDE_BATCH_COMMANDS,
-  3 + 1 + 2 + 1 + (d.poolTakeCommands?.(st.MOVE_BESIDE_BATCH) ?? 0) + (dd.takeDataCommands?.(st.MOVE_BESIDE_BATCH) ?? 0),
+  STORE_LOCK_TRIES + 1 + 2 + 3 + 3 + (d.poolTakeCommands?.(st.MOVE_BESIDE_BATCH) ?? 0) + (dd.takeDataCommands?.(st.MOVE_BESIDE_BATCH) ?? 0),
+);
+// Once a sweep, outside the batches: the store read that opens it (storeForEmail, a GET of up to MAX_STORE_BYTES), the
+// sweep's mark read and the mark written when it ends.
+const sw = storeModule as unknown as { MOVE_BESIDE_SWEEP_COMMANDS: number; MOVE_BESIDE_BATCHES: number };
+is("a sweep's own commands: the opening store read, the mark read and the mark written", sw.MOVE_BESIDE_SWEEP_COMMANDS, 3);
+const rr = registry as unknown as { BESIDE_SWEEP_USD: number; DB_BYTE: number; request: (shape: "heavy", commands: number, bytes: number) => number };
+is(
+  "the sweep is priced with its opening store read's bytes",
+  rr.BESIDE_SWEEP_USD,
+  sw.MOVE_BESIDE_BATCHES * rr.request("heavy", st.MOVE_BESIDE_BATCH_COMMANDS, MAX_STORE_BYTES + st.MOVE_BESIDE_BATCH * 256) + 3 * r.COMMAND + MAX_STORE_BYTES * rr.DB_BYTE,
 );
 done();

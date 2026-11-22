@@ -23,7 +23,7 @@ import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 import {
   COST_LINES, PAYPAL_PRESS, PAYPAL_PRESS_BOOK_COMMANDS, PAYPAL_PRESS_COMMANDS, PAYPAL_PRESS_LOCK_TRIES, PAYPAL_PRESS_SECONDS,
-  PAYPAL_PRESSES_UNTAKEN, COMMAND, TAKE_COMMANDS, UNIT_COST, INTEGRATION_WORST_USD, paypalPressCost, request, lockTriesAtMost,
+  PAYPAL_PRESSES_UNTAKEN, VAULT_REFUSED_PASS, COMMAND, TAKE_COMMANDS, UNIT_COST, INTEGRATION_WORST_USD, figureCost, paypalPressCost, request, lockTriesAtMost,
 } from "./plan-cost-registry";
 
 const STATS = "statspress1";
@@ -186,9 +186,10 @@ async function main(): Promise<void> {
   is("a book not kept costs the base", paypalPressUnits({ kept: false, entries: 0, people: 0, leads: 0, paypalRefunds: 0, stripe: true, products: 9 }), PAYPAL_PRESS_BASE_UNITS);
   const line = COST_LINES.find((l) => l.id === "integrations")!;
   for (const tier of ["creator", "pro", "scale"] as const) {
-    // Each unit of the figure is priced at its dearest (a call out or a studio captions request, INTEGRATION_WORST_USD; #3427).
-    is(`${tier}: the integrations line pays the figure and payday's auto-pay at its most`, Math.abs(line.monthlyUsd(tier) - (STORE_ALLOWANCES[tier].integration * INTEGRATION_WORST_USD + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS)) < 1e-12, true);
-    is(`${tier}: and never under the figure at a call out's price`, line.monthlyUsd(tier) >= STORE_ALLOWANCES[tier].integration * UNIT_COST.integration + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS, true);
+    // Each unit of the figure is priced at its dearest (a call out or a studio captions request, INTEGRATION_WORST_USD; #3427),
+    // with a vault open refused for storage on top (VAULT_REFUSED_PASS, main since #4019); both kept in the merge of main.
+    is(`${tier}: the integrations line pays the figure and payday's auto-pay at its most`, Math.abs(line.monthlyUsd(tier) - (STORE_ALLOWANCES[tier].integration * (INTEGRATION_WORST_USD + VAULT_REFUSED_PASS) + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS)) < 1e-12, true);
+    is(`${tier}: and never under the figure at a call out's price with the refused vault pass`, line.monthlyUsd(tier) >= figureCost(STORE_ALLOWANCES[tier], "integration") + STORE_ALLOWANCES[tier].integration * VAULT_REFUSED_PASS + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS, true);
   }
   is("payday's auto-pay: one a store a month (claimMonth)", PAYPAL_PRESSES_UNTAKEN, 1);
   const payday = readFileSync(join(process.cwd(), "lib/affiliate-payday.ts"), "utf8");

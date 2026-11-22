@@ -50,6 +50,7 @@ import {
   PAYPAL_PRESSES_UNTAKEN,
   STREAM_CAPTIONS_REQUEST_USD,
   STREAM_CAPTIONS_WORST,
+  VAULT_REFUSED_PASS,
   UNIT_COST,
   streamCaptionsCost,
 } from "./plan-cost-registry";
@@ -281,7 +282,8 @@ async function main(): Promise<void> {
   is("a unit of the figure is priced at the dearest captions request", [INTEGRATION_WORST_USD, STREAM_CAPTIONS_REQUEST_USD >= Math.max(streamCaptionsCost("add"), streamCaptionsCost("remove"), streamCaptionsCost("auto"))], [STREAM_CAPTIONS_REQUEST_USD, true]);
   const line = COST_LINES.find((one) => one.id === "integrations")!;
   // Payday's PayPal auto-pay takes no unit and is added once at its most (tests/paypal-press-cost.test.ts).
-  is("the line integrations: every unit of every plan's figure at that price, and payday's auto-pay", (["creator", "pro", "scale"] as const).map((tier) => Math.abs(line.monthlyUsd(tier) - (STORE_ALLOWANCES[tier].integration * STREAM_CAPTIONS_REQUEST_USD + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS)) < 1e-12), [true, true, true]);
+  // And a vault open refused for storage on top of every unit (VAULT_REFUSED_PASS, main since #4019; kept in the merge of main).
+  is("the line integrations: every unit of every plan's figure at that price, the refused vault pass, and payday's auto-pay", (["creator", "pro", "scale"] as const).map((tier) => Math.abs(line.monthlyUsd(tier) - (STORE_ALLOWANCES[tier].integration * (STREAM_CAPTIONS_REQUEST_USD + VAULT_REFUSED_PASS) + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS)) < 1e-12), [true, true, true]);
   console.log(`    a captions request at its worst: $${STREAM_CAPTIONS_REQUEST_USD.toFixed(6)} (a call out's unit: $${UNIT_COST.integration.toFixed(6)})`);
 
   part("The service's announcements look at a request being written at most HOOK_LOOKS_MAX times");

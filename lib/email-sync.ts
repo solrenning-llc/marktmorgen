@@ -74,6 +74,9 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 
 /** Jobs a store's studio keeps. */
 export const LOG_SIZE = 50;
+/** The store's queued index is read a page of QUEUED_PAGE ids at a time, at most QUEUED_ROUNDS pages (#5125). */
+export const QUEUED_PAGE = 500;
+export const QUEUED_ROUNDS = 20;
 /** Minutes to wait before each try after the first. */
 export const RETRY_MINUTES = [5, 15, 60, 180, 720, 1440];
 export const MAX_ATTEMPTS = RETRY_MINUTES.length + 1;
@@ -134,6 +137,14 @@ const tagsKey = (statsId: string) => `nl:esync:tags:${statsId}`;
 const badKey = (statsId: string) => `nl:esync:bad:${statsId}`;
 const jobKey = (id: string) => `nl:esync:j:${id}`;
 const logKey = (statsId: string) => `nl:esync:log:${statsId}`;
+/**
+ * The store's own index of its jobs put on the queue, so a person's copy and erasure and the deleted store's forgetting
+ * find every waiting job of the store by reading this store's keys, never the queue every store shares (#5125,
+ * email-sync row). An id is added in the same request that puts the job on the queue and removed where the job leaves
+ * it for good (retire, the erasures); one left behind by a cut-off run names a record that is gone or still alive, and
+ * either is read exactly. Kept as long as a job's record.
+ */
+const queuedKey = (statsId: string) => `nl:esync:qd:${statsId}`;
 export const QUEUE_KEY = "nl:esync:q";
 const seenKey = (statsId: string, seed: string) =>
   `nl:esync:seen:${createHash("sha256").update(`${statsId}|${seed}`).digest("hex").slice(0, 40)}`;
@@ -387,7 +398,8 @@ export async function queuePerson(store: Store, person: Person, now = Date.now()
   };
   const written: (string | number)[][] = [
     ["SET", jobKey(job.id), JSON.stringify(job), "EX", JOB_SECONDS],
-    ...(agreed ? [["ZADD", QUEUE_KEY, now, `${statsId}|${job.id}`]] : []),
+    // Noted in the store's own index in the same request that queues it (#5125), so it is found without the shared queue.
+    ...(agreed ? [["SADD", queuedKey(statsId), job.id], ["EXPIRE", queuedKey(statsId), JOB_SECONDS], ["ZADD", QUEUE_KEY, now, `${statsId}|${job.id}`]] : []),
     ["LPUSH", logKey(statsId), job.id],
     // What this push moved past the studio's LOG_SIZE, read rather than trimmed blind (dropOverflow).
     ["LRANGE", logKey(statsId), LOG_SIZE, -1],
@@ -628,20 +640,22 @@ async function retire(statsId: string, id: string, now: number): Promise<void> {
   if (!logged.includes(id)) {
     const drop: (string | number)[][] = [["DEL", jobKey(id)]];
     if (!countsFor(await redisPipeline(drop), drop)) throw new UnknownReplyError("the record of an email platform job, retiring it");
-    await redisPipeline([["ZREM", QUEUE_KEY, member]]);
+    // Off the queue, and out of the store's own index with it (#5125): its record is already gone.
+    await redisPipeline([["ZREM", QUEUE_KEY, member], ["SREM", queuedKey(statsId), id]]);
     return;
   }
   try {
-    const again = repliesFor(await redisPipeline([["ZREM", QUEUE_KEY, member], ["LRANGE", log, 0, -1]]), 2);
-    const still = stringList(again?.[1]);
+    // Off the queue for good, and out of the store's own index in the same request (#5125).
+    const again = repliesFor(await redisPipeline([["ZREM", QUEUE_KEY, member], ["SREM", queuedKey(statsId), id], ["LRANGE", log, 0, -1]]), 3);
+    const still = stringList(again?.[2]);
     if (still?.includes(id)) return;
     const drop: (string | number)[][] = [["DEL", jobKey(id)]];
     if (still && countsFor(await redisPipeline(drop), drop)) return;
   } catch (error) {
-    await redisPipeline([["ZADD", QUEUE_KEY, now + LEASE_MS, member]]);
+    await redisPipeline([["SADD", queuedKey(statsId), id], ["ZADD", QUEUE_KEY, now + LEASE_MS, member]]);
     throw error;
   }
-  await redisPipeline([["ZADD", QUEUE_KEY, now + LEASE_MS, member]]);
+  await redisPipeline([["SADD", queuedKey(statsId), id], ["ZADD", QUEUE_KEY, now + LEASE_MS, member]]);
   throw new UnknownReplyError("a store's email platform job log, retiring a job");
 }
 
@@ -967,19 +981,19 @@ export async function forgetStoreSync(statsId: string | null, apply: (commands: 
   const logged = stringList(repliesFor(await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]), 1)?.[0]);
   let unread = !logged;
   const ids = new Set((logged ?? []).filter((id) => JOB_ID.test(id)));
-  const { members: queued, whole } = await queuedOf(statsId);
+  // The store's waiting jobs are in its own queued index (#5125), never read from the queue every store shares; every
+  // job of the store, logged or not, is taken off the queue by its own member.
+  const { ids: waiting, whole } = await queuedIdsOf(statsId);
   if (!whole) unread = true;
-  for (const member of queued) {
-    const id = member.slice(statsId.length + 1);
-    if (JOB_ID.test(id)) ids.add(id);
-  }
+  for (const id of waiting) ids.add(id);
+  const queued = [...ids].map((id) => `${statsId}|${id}`);
   // The records go before the queue lets go of them (Claude 4 on #2860), so a batch cut short never leaves one
   // holding an address off the queue; the log is deleted last. `apply` sends the deletes: the closing walk's makes
   // them only while it still holds the store's lock (lib/closed-store-data.ts, fencedBy).
   const commands: (string | number)[][] = [
     ...[...ids].map((id) => ["DEL", jobKey(id)]),
     ...(queued.length ? [["ZREM", QUEUE_KEY, ...queued]] : []),
-    ["DEL", cfgKey(statsId), tagsKey(statsId), badKey(statsId), ...(logged ? [logKey(statsId)] : [])],
+    ["DEL", cfgKey(statsId), tagsKey(statsId), badKey(statsId), ...(logged ? [logKey(statsId)] : []), ...(whole ? [queuedKey(statsId)] : [])],
   ];
   const replies = await apply(commands);
   // A plain pipeline's replies are read exactly, one count per command, each within what it names (Claude 6's MEDIUM
@@ -1008,28 +1022,26 @@ function countsFor(replies: unknown, commands: readonly (readonly (string | numb
 }
 
 /**
- * The queue holds the jobs of every store waiting for a try, each as
- * "<statsId>|<job>"; this store's are found by that prefix, read with ZSCAN,
- * which returns every member present for the whole read (an offset page skips
- * one when a member before it leaves meanwhile). `whole` is false when a reply
- * does not read exactly or the read runs past its rounds: what was read is
- * kept, never taken as all of them (CX-123 rule 24).
+ * The store's jobs put on the queue, read from the store's own index (queuedKey), never from the queue every store
+ * shares (#5125, email-sync row: a ZSCAN of the global queue cost one
+ * store's copy as much as every store's waiting jobs). Read with SSCAN, which returns every member present for the
+ * whole read; `whole` is false when a reply does not read exactly or the read runs past QUEUED_ROUNDS: what was read
+ * is kept, never taken as all of them (CX-123 rule 24).
  */
-async function queuedOf(statsId: string): Promise<{ members: string[]; whole: boolean }> {
-  const prefix = `${statsId}|`;
-  const members = new Set<string>();
+async function queuedIdsOf(statsId: string): Promise<{ ids: string[]; whole: boolean }> {
+  const ids = new Set<string>();
   let cursor = "0";
-  for (let round = 0; round < 10_000; round += 1) {
-    const reply = repliesFor(await redisPipeline([["ZSCAN", QUEUE_KEY, cursor, "COUNT", 500]]), 1)?.[0];
+  for (let round = 0; round < QUEUED_ROUNDS; round += 1) {
+    const reply = repliesFor(await redisPipeline([["SSCAN", queuedKey(statsId), cursor, "COUNT", QUEUED_PAGE]]), 1)?.[0];
     const pair = Array.isArray(reply) && reply.length === 2 ? (reply as unknown[]) : null;
     const next = typeof pair?.[0] === "number" ? String(pair[0]) : pair?.[0];
-    const flat = pair ? stringList(pair[1]) : null;
-    if (typeof next !== "string" || !/^\d+$/.test(next) || !flat || flat.length % 2 !== 0) return { members: [...members], whole: false };
-    for (let i = 0; i < flat.length; i += 2) if (flat[i].startsWith(prefix)) members.add(flat[i]);
+    const page = pair ? stringList(pair[1]) : null;
+    if (typeof next !== "string" || !/^\d+$/.test(next) || !page) return { ids: [...ids], whole: false };
+    for (const id of page) if (JOB_ID.test(id)) ids.add(id);
     cursor = next;
-    if (cursor === "0") return { members: [...members], whole: true };
+    if (cursor === "0") return { ids: [...ids], whole: true };
   }
-  return { members: [...members], whole: false };
+  return { ids: [...ids], whole: false };
 }
 
 /**
@@ -1049,9 +1061,9 @@ async function loggedJobs(statsId: string): Promise<{ id: string; job: Job | nul
 async function loggedJobsWithLog(statsId: string): Promise<{ jobs: { id: string; job: Job | null }[]; logLength: number }> {
   const ids = stringList(repliesFor(await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]), 1)?.[0]);
   if (!ids) throw new UnknownReplyError("a store's email platform job log");
-  const { members, whole } = await queuedOf(statsId);
+  const { ids: queued, whole } = await queuedIdsOf(statsId);
   if (!whole) throw new UnknownReplyError("a store's email platform jobs waiting on the queue");
-  const logged = [...new Set([...ids, ...members.map((member) => member.slice(statsId.length + 1))])];
+  const logged = [...new Set([...ids, ...queued])];
   if (!logged.length) return { jobs: [], logLength: ids.length };
   const raws = repliesFor(await redisPipeline(logged.map((id) => ["GET", jobKey(id)])), logged.length);
   if (!raws) throw new UnknownReplyError("a store's email platform jobs");
@@ -1101,7 +1113,7 @@ export async function forgetSyncPerson(statsId: string | null, email: string): P
   }
   // Each delete answers a count (CX-123 rule 24): DEL and ZREM at most the jobs named, LREM at most the log's length.
   // Another shape throws, so the erasure is said as not finished and a retry finds what is left.
-  const commands: (string | number)[][] = [["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)], fly];
+  const commands: (string | number)[][] = [["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)], ["SREM", queuedKey(statsId), ...theirs], fly];
   const all = repliesFor(await redisPipeline(commands), commands.length);
   const flying = all ? countOf(all[all.length - 1]) : null;
   if (flying === null) throw new UnknownReplyError("an email platform try in flight, erasing a person");
@@ -1111,7 +1123,8 @@ export async function forgetSyncPerson(statsId: string | null, email: string): P
     const n = countOf(reply);
     return n !== null && n <= most;
   };
-  if (!replies || !within(replies[0], theirs.length) || !within(replies[replies.length - 1], theirs.length) || !replies.slice(1, -1).every((reply) => within(reply, logLength))) {
+  // The last two are the queue's ZREM and the store's queued index's SREM, each at most the jobs named.
+  if (!replies || !within(replies[0], theirs.length) || !within(replies[replies.length - 2], theirs.length) || !within(replies[replies.length - 1], theirs.length) || !replies.slice(1, -2).every((reply) => within(reply, logLength))) {
     throw new UnknownReplyError("deleting a person's email-platform jobs");
   }
   return theirs.length;

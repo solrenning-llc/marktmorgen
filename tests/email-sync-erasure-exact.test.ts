@@ -29,6 +29,8 @@ async function seed(state = "added") {
     ["SET", jobKey(ID), JSON.stringify(job(ID, EMAIL, state))],
     ["SET", jobKey(OTHER), JSON.stringify(job(OTHER, "other@example.com", state))],
     ["ZADD", QUEUE_KEY, 1, `${STATS}|${ID}`],
+    // Queued as queuePerson queues it: noted in the store's own queued index in the same request (#5125).
+    ["SADD", `nl:esync:qd:${STATS}`, ID],
     ["SET", cfgKey, "{}"],
   ]);
 }
@@ -69,8 +71,9 @@ const unknown = (result: { value: unknown } | { error: unknown }) => "error" in 
 
 const isLog = (batch: Batch) => batch[0]?.[0] === "LRANGE" && batch[0]?.[1] === logKey;
 const isJobs = (batch: Batch) => batch[0]?.[0] === "GET" && String(batch[0]?.[1]).startsWith("nl:esync:j:");
-// The store's queued jobs are read with ZSCAN since the fix of Codex Q's finding on #2860 (an offset page skips members).
-const isQueuePage = (batch: Batch) => batch[0]?.[0] === "ZSCAN" && batch[0]?.[1] === QUEUE_KEY;
+// The store's queued jobs are read with a scan since the fix of Codex Q's finding on #2860 (an offset page skips
+// members), and from the store's own queued index, never the shared queue, since #5125.
+const isQueuePage = (batch: Batch) => batch[0]?.[0] === "SSCAN" && String(batch[0]?.[1]).startsWith("nl:esync:qd:");
 const isErase = (batch: Batch) => batch[0]?.[0] === "DEL" && String(batch[0]?.[1]).startsWith("nl:esync:j:");
 
 const LOG_SHAPES: [string, (batch: Batch, answers: unknown[]) => unknown[]][] = [

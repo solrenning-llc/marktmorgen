@@ -679,6 +679,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:esync:fly:@lib/email-sync.ts": short("A person's tries at the email platform in flight, ten minutes after the last at the most", "order", 1, 256),
   "nl:esync:j:@lib/email-sync.ts": { what: "One sync job and how it went, a week", parts: [per("order", 7, KB, "A buyer's job."), per("access", 7, KB, "A sign-up confirmed by email.", MAIL("join"))] },
   "nl:esync:log:@lib/email-sync.ts": { what: "The store's last jobs", parts: [capped(SYNC_LOG * 64, "The newest LOG_SIZE.", src("lib/email-sync.ts", "LOG_SIZE"))] },
+  "nl:esync:qd:@lib/email-sync.ts": { what: "The store's own index of its sync jobs on the queue, a week (#5125)", parts: [per("order", 7, 64, "A buyer's queued job id."), per("access", 7, 64, "A sign-up confirmed by email.", MAIL("join"))] },
   "nl:esync:q@lib/email-sync.ts": company("Sync jobs waiting", "One sorted set, members gone within a week."),
   "nl:esync:seen:@lib/email-sync.ts": { what: "A person and event already sent", parts: [per("order", 30, MARK, "A buyer."), per("access", 30, MARK, "A sign-up confirmed by email.", MAIL("join"))] },
   "nl:esync:tags:@lib/email-sync.ts": { what: "Tag ids learned from the email platform, per product: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },

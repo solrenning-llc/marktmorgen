@@ -3549,7 +3549,8 @@ export class MemoryRedis {
             if (typeof held !== "string") throw new Error("WRONGTYPE stock-bind: the store's record");
             let record: unknown;
             try { record = JSON.parse(held); } catch { return -1; }
-            if (!record || typeof record !== "object" || Array.isArray(record)) return -1;
+            // As the Lua: cjson decodes an array to a table too, whose statsId is nil, so it answers -2, not -1 (#5093 review).
+            if (!record || typeof record !== "object") return -1;
             if ((record as { statsId?: unknown }).statsId !== statsId) return -2;
           }
           let all = 1;

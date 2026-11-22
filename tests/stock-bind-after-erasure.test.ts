@@ -11,7 +11,7 @@
  * Synthetic: the Redis stand-in and a mocked Stripe only.
  */
 import { parseProduct } from "@/lib/catalog";
-import { stockLeft, withCartStockHolds, withStockHold } from "@/lib/stock";
+import { STOCK_BIND, stockLeft, withCartStockHolds, withStockHold } from "@/lib/stock";
 import { ERASING_KEY, type Listing, type Store, claimHandle, ensureStatsId, ensureStoreId, erasingField, ownerKey, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -130,6 +130,18 @@ async function main(): Promise<void> {
     is(label + " the erased store's stock record is not written back", keys.map((key) => redis.run(["EXISTS", key])), keys.map(() => 0));
     is(label + " the checkout is closed at Stripe, through the failed hand-over's path", closed, [id]);
   }
+  part("The twin answers as the Lua for a store from before ids whose record is not an object (#5093 review)");
+  {
+    const bind = (record: string) => {
+      redis.run(["SET", "nl:test:pre-id-owner", record]);
+      return redis.run(["EVAL", STOCK_BIND, 3, "nl:test:pre-id-stock", "nl:test:pre-id-owner", ERASING_KEY, 1, "pending", "cs_test_x", "{}", "field", "stats_pre_id", "ref"]);
+    };
+    is("an array decodes to a table with no statsId: gone (-2), as cjson does", bind("[]"), -2);
+    is("a string record does not read: unknown (-1)", bind('"text"'), -1);
+    is("a record of another store: gone (-2)", bind('{"statsId":"another"}'), -2);
+    is("nothing was written for any of them", redis.run(["HGETALL", "nl:test:pre-id-stock"]), []);
+  }
+
   done();
 }
 

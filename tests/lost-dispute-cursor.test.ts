@@ -203,7 +203,8 @@ async function main(): Promise<void> {
   ] as const) {
     // The closing events cannot be read, so the run ends unsure.
     const [before] = await redis.pipeline([["GET", key]]);
-    await redis.pipeline([["SADD", seen, "re_KeptForTheTest"], ["EXPIRE", key, 1_000], ["EXPIRE", seen, 1_000]]);
+    // The review job keeps its handled rows in a sorted set scored by the row's time; the call job in a set.
+    await redis.pipeline([label === "review" ? ["ZADD", seen, NOW, "re_KeptForTheTest"] : ["SADD", seen, "re_KeptForTheTest"], ["EXPIRE", key, 1_000], ["EXPIRE", seen, 1_000]]);
     eventsDown = true;
     await run();
     eventsDown = false;

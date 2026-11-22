@@ -2034,12 +2034,13 @@ export const REVIEW_REFUND_TURN_READS = DAY_WINDOWS * 288;
 export const REVIEW_REFUND_TURN_BYTES = 128;
 /**
  * Commands one run of the pass sends outside its refunds, at the most: the turn's SET NX EX, the store's SISMEMBER
- * (whether it has a review), the anchor's GET, the lost disputes' place (GET, and its SET or DEL), one SMISMEMBER a
- * page of refunds (the rows already read, one command a page whatever the page holds), one SMISMEMBER of the lost
- * disputes handled, and the anchor's SET with the read refunds' EXPIRE as one EVAL with the store's fence, its two
- * reads first (tests/review-refund-sweep-cost.test.ts measures a pass under it).
+ * (whether it has a review), the anchor's GET, the seen rows' trim below the window (ZREMRANGEBYSCORE), the lost
+ * disputes' place (GET, and its SET or DEL), one ZMSCORE a page of refunds (the rows already read and the payments
+ * marked, one command a page whatever the page holds) and the month's count a page (INCRBY, EXPIRE), one ZMSCORE of
+ * the lost disputes handled, and the anchor's SET with the read refunds' EXPIRE as one EVAL with the store's fence,
+ * its two reads first (tests/review-refund-sweep-cost.test.ts measures a pass under it).
  */
-export const REVIEW_REFUND_RUN_COMMANDS = 1 + 1 + 1 + 2 + REVIEW_REFUND_PAGES + 2 * REVIEW_REFUND_PAGES + 1 + 5;
+export const REVIEW_REFUND_RUN_COMMANDS = 1 + 1 + 1 + 1 + 2 + REVIEW_REFUND_PAGES + 2 * REVIEW_REFUND_PAGES + 1 + 5;
 /** Stripe pages one run waits on, at the most: the refunds' and the lost disputes', each EXPORT_PAGE_SECONDS at 2 GB. */
 export const REVIEW_REFUND_RUN_PAGES = REVIEW_REFUND_PAGES + LOST_DISPUTE_PAGES;
 /** The ids asked and the flags answered for every row of those pages, at most 64 bytes each way. */
@@ -2320,10 +2321,10 @@ export const COST_LINES: CostLine[] = [
     feature: "Reviews marked as refunded when their payment is given back: the checkout sweep's pass on the creator's refunds and lost disputes (Claude 1 c1-revcusto on #5092, 22/11/2026)",
     monthlyUsd: (tier) => reviewRefundSweepMonthUsd(tier),
     sources: [
-      { file: "lib/review-proof.ts", names: ["REVIEW_REFUND_PASS_EVERY_SECONDS", "REVIEW_REFUND_PAGES", "REVIEW_REFUND_ROWS_PER_MONTH", "reviewPassesDue", "takeReviewPass", "markRefundedReviews", "SMISMEMBER", "countRows", "refreshStoreQuotes(store)"] },
+      { file: "lib/review-proof.ts", names: ["REVIEW_REFUND_PASS_EVERY_SECONDS", "REVIEW_REFUND_PAGES", "REVIEW_REFUND_ROWS_PER_MONTH", "reviewPassesDue", "takeReviewPass", "markRefundedReviews", "ZMSCORE", "ZREMRANGEBYSCORE", "countRows", "refreshStoreQuotes(store)"] },
       { file: "lib/reviews.ts", names: ["markRefunded", "creatorChange", "uncountRefunded", "payMembers"] },
       { file: "lib/checkout-sweep.ts", names: ["reviewPassesDue(stores.slice(skip))", "takeReviewPass(store)", "markRefundedReviews(store, deadline)"] },
-      { file: "lib/refunds.ts", names: ["LOST_DISPUTE_PAGES", "confirmLostRead"] },
+      { file: "lib/refunds.ts", names: ["LOST_DISPUTE_PAGES", "confirmLostRead", "ZMSCORE"] },
       { file: "lib/bundle-rules.ts", names: ["MAX_DELIVERED"] },
       { file: "lib/order-rules.ts", names: ["ORDERS_INCLUDED"] },
       { file: "app/api/cron/mail/route.ts", names: ["sweepCheckouts"] },

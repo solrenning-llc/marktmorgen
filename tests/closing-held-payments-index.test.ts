@@ -191,8 +191,9 @@ async function main() {
 
   part("The index's commands and bytes are in the closing's cost");
   {
+    // A script is billed 1 for the EVAL and 1 for each call inside it; it replaced one HSETNX (the rule of PAYPAL_PRESS_COMMANDS).
     const calls = PAID_HOLD.split("redis.call(").length - 1;
-    is("the script's calls beyond the row's own HSETNX are priced", calls - 1 <= CLOSING_PAID_INDEX_COMMANDS, true);
+    is("the script's calls are three, all priced beyond the HSETNX it replaced", [calls, 1 + calls - 1], [3, CLOSING_PAID_INDEX_COMMANDS]);
     // The address's hash, a comma and the longest subscription id the code accepts (sub_ and 64 characters).
     is("one member's entry fits its priced bytes", 64 + 1 + 4 + 64 <= CLOSING_PAID_INDEX_BYTES, true);
     const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");

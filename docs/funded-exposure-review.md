@@ -147,9 +147,9 @@ What Marktmorgen pays for it is bounded per closing, before any of it is spent: 
 
 | Plan that ended | Buyers at the cap | Ceiling of one closing |
 |---|---|---|
-| Store | 4,800 | $9.22 |
-| Studio | 10,800 | $20.75 |
-| Scale | 36,000 | $69.16 |
+| Store | 4,800 | $9.23 |
+| Studio | 10,800 | $20.77 |
+| Scale | 36,000 | $69.23 |
 | A store that never paid | 100 | $0.19 |
 
 The ceilings above count, since 22 November 2026 (#5125), each held member's entry in the closing's index of its kept payments by address (`CLOSING_PAID_INDEX_BYTES` and `CLOSING_PAID_INDEX_COMMANDS`, tests/plan-cost-registry.ts), so a person's copy of their data reads only their own rows; before it they were $9.20, $20.71, $69.02 and $0.19. tests/closing-held-payments-index.test.ts holds this table to `closingBuyersCost`.

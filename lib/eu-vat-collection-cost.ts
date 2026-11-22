@@ -20,11 +20,18 @@
  * belong to the LLC's fixed costs (FX275). Unknown is never zero: an unread currency, an amount that is not a whole cent
  * count, an unreadable clock or no allowance in force each answer null. Pure: no IO.
  */
+import { decimalsOf, isCurrency } from "@/lib/money";
 import { DISPUTE_RESERVE_BPS, PROVIDER_FEES, REFUND_RESERVE_BPS, REMITTANCE_BPS } from "@/lib/receiving-costs";
 
-/** One reviewed allowance for the exchange-rate movement between a sale and the payment of its return, in basis points. */
+/**
+ * One reviewed allowance, in basis points. Without `against`: the exchange-rate movement between a sale and the payment
+ * of its return, read in the return's currency (`currency`: eur or gbp). With `against` (unit 7, Claude 1's MEDIUM on
+ * #5032): the gap between the VAT owed in the return's currency at the tax authority's period rate (HMRC's, fixed for
+ * the month) and what the VAT collected in the charge's currency (`currency`) buys at the market rate on the sale.
+ */
 export type VatFxAllowance = Readonly<{
-  currency: "eur" | "gbp";
+  currency: string;
+  against?: "eur" | "gbp";
   bps: number;
   /** The official page the allowance was set from, and the UTC days it holds. */
   source: string;
@@ -38,10 +45,12 @@ export const REVIEWED_VAT_FX_ALLOWANCES: readonly VatFxAllowance[] = Object.free
 export type VatCollectionCost = Readonly<{
   conversionCents: number;
   fxCents: number;
+  /** The gap to the return currency's period rate; zero for a sale in the return's own currency. */
+  periodGapCents: number;
   returnPaymentCents: number;
   refundReserveCents: number;
   disputeReserveCents: number;
-  /** What the platform's fee carries beside the VAT: the five parts above. */
+  /** What the platform's fee carries beside the VAT: the six parts above. */
   feeCents: number;
   /** The processing fee on the VAT part, never in the fee. */
   processingCents: number;
@@ -72,24 +81,37 @@ function httpsSource(source: string): boolean {
   }
 }
 
-/** The dearer allowance in force today for the currency, or null. */
-function allowanceOf(currency: string, allowances: readonly VatFxAllowance[], day: string): number | null {
-  const valid = allowances.filter((a) => a.currency === currency && Number.isSafeInteger(a.bps) && a.bps > 0 && a.bps <= 10_000
+/** The dearer allowance in force today for the currency (and, for a period-rate gap, against the return's), or null. */
+function allowanceOf(currency: string, allowances: readonly VatFxAllowance[], day: string, against?: string): number | null {
+  const valid = allowances.filter((a) => a.currency === currency && a.against === against && Number.isSafeInteger(a.bps) && a.bps > 0 && a.bps <= 10_000
     && httpsSource(a.source) && reviewedDay(a.checkedOn) && reviewedDay(a.validThrough) && a.checkedOn <= day && day <= a.validThrough);
   return valid.length ? Math.max(...valid.map((a) => a.bps)) : null;
 }
 
-/** The cost of receiving `vatCents` of VAT in `currency`, part by part, or null when any part is unknown. */
-export function vatCollectionCostOf(vatCents: number, currency: string, allowances: readonly VatFxAllowance[], now: Date): VatCollectionCost | null {
+/**
+ * The cost of receiving `vatCents` of VAT charged in `currency`, part by part, or null when any part is unknown. The
+ * exchange-rate allowance is the one of the currency the return is paid in (`returnCurrency`: euros for the OSS,
+ * pounds for HMRC), which is the charge's own currency unless named (unit 7: a UK sale in euros or dollars is declared
+ * in pounds). A named return currency lets the charge be in any store currency written in hundredths; without one,
+ * only euros and pounds are read, as before.
+ */
+export function vatCollectionCostOf(vatCents: number, currency: string, allowances: readonly VatFxAllowance[], now: Date, returnCurrency?: string): VatCollectionCost | null {
   if (!Number.isSafeInteger(vatCents) || vatCents < 0) return null;
   const code = typeof currency === "string" ? currency.toLowerCase() : "";
-  if (!CURRENCIES.has(code) || !Number.isFinite(now.getTime())) return null;
-  const fxBps = allowanceOf(code, allowances, now.toISOString().slice(0, 10));
+  const back = returnCurrency === undefined ? code : typeof returnCurrency === "string" ? returnCurrency.toLowerCase() : "";
+  if (!CURRENCIES.has(back) || !Number.isFinite(now.getTime())) return null;
+  if (returnCurrency === undefined ? !CURRENCIES.has(code) : !(isCurrency(code) && decimalsOf(code) === 2)) return null;
+  const day = now.toISOString().slice(0, 10);
+  const fxBps = allowanceOf(back, allowances, day);
   if (fxBps === null) return null;
+  // A sale charged in another currency than its return's: the gap to the period rate needs its own reviewed allowance.
+  const gapBps = code === back ? 0 : allowanceOf(code, allowances, day, back);
+  if (gapBps === null) return null;
   const s = PROVIDER_FEES.stripe;
   const stripe = up(vatCents, s.cardBps) + up(vatCents, s.internationalBps) + up(vatCents, s.conversionBps) + up(vatCents, s.billingBps) + up(vatCents, s.taxBps);
   const otherParts = {
     fxCents: up(vatCents, fxBps),
+    periodGapCents: up(vatCents, gapBps),
     returnPaymentCents: up(vatCents, REMITTANCE_BPS),
     refundReserveCents: up(vatCents, REFUND_RESERVE_BPS),
     disputeReserveCents: up(vatCents, DISPUTE_RESERVE_BPS),
@@ -109,5 +131,5 @@ export function vatCollectionCostOf(vatCents: number, currency: string, allowanc
 }
 
 /** The checkout's figure: the fee's part under the reviewed allowances, today; null (refused) while none is reviewed. */
-export const euVatCollectionCostCents = (vatCents: number, currency: string): number | null =>
-  vatCollectionCostOf(vatCents, currency, REVIEWED_VAT_FX_ALLOWANCES, new Date())?.feeCents ?? null;
+export const euVatCollectionCostCents = (vatCents: number, currency: string, returnCurrency?: string): number | null =>
+  vatCollectionCostOf(vatCents, currency, REVIEWED_VAT_FX_ALLOWANCES, new Date(), returnCurrency)?.feeCents ?? null;

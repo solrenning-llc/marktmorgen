@@ -69,6 +69,8 @@ export async function POST(request: NextRequest) {
           // (clearStripeConnect checks the count again under the lock); anything else keeps it for the next press: a
           // refusal of a press again says nothing of what an earlier one may have made (20261122T200746Z-claude-1-coord-305c).
           if (error instanceof StripeConnectError && error.madeNothing && attempt.sends === 1) await clearStripeConnect(ref, store.sid, attempt.id).catch(() => false);
+          // A cross-border refusal says no press could ever open an account in that country: closed whatever its sends.
+          else if (error instanceof StripeConnectError && error.isCrossBorderRefusal) await clearStripeConnect(ref, store.sid, attempt.id, { whateverSends: true }).catch(() => false);
           // A refusal of a press again keeps the attempt, so the creator is asked the same until its key's window ends;
           // they are told so, with a way out, never left pressing a button that is refused every time (Claude 7 xAF's
           // LEVE on #5095 @f858eeffe9).

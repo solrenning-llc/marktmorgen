@@ -921,7 +921,13 @@ export const STRIPE_CONNECT_HOLD_SECONDS = 24 * 60 * 60;
  */
 export const STRIPE_CONNECT_REUSE_SECONDS = 29 * 24 * 60 * 60;
 const CONNECT_ATTEMPT_ID = /^[0-9a-f]{32}$/;
-function readConnecting(raw: unknown): StripeConnecting | undefined {
+/**
+ * An attempt as kept on the record, or undefined. One past STRIPE_CONNECT_REUSE_SECONDS from its first write is read as
+ * none (the coordinator's df44 on #5095): it no longer holds the store (its hold counts from its last press, a day) and
+ * is never reused, so the creator's address and name it was asked with go at the record's next save instead of staying
+ * for good.
+ */
+function readConnecting(raw: unknown, now = Date.now()): StripeConnecting | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const v = raw as Record<string, unknown>;
   if (typeof v.id !== "string" || !CONNECT_ATTEMPT_ID.test(v.id) || typeof v.country !== "string" || !/^[a-z]{2}$/.test(v.country) ||
@@ -931,6 +937,7 @@ function readConnecting(raw: unknown): StripeConnecting | undefined {
   // that never left, which would let a refusal close an attempt Stripe may hold an account for.
   const pressedAt = typeof v.pressedAt === "string" && Number.isFinite(Date.parse(v.pressedAt)) ? v.pressedAt : v.at;
   const sends = typeof v.sends === "number" && Number.isSafeInteger(v.sends) && v.sends >= 1 ? v.sends : 1;
+  if (now - Date.parse(v.at) >= STRIPE_CONNECT_REUSE_SECONDS * 1000) return undefined;
   return { id: v.id, country: v.country, email: v.email, name: v.name, at: v.at, pressedAt, sends };
 }
 function sinceOf(when: string | undefined, now: number): number {
@@ -2814,13 +2821,17 @@ export async function finishStripeConnect(email: string, sid: string, attemptId:
 
 /**
  * Closes an attempt Stripe refused outright (no account made): only the same store's same attempt, and only while its
- * key has been sent once, by the press that was refused. A key sent before (a lost answer, then a refusal of the press
+ * key has been sent once, by the press that was refused (or, with whateverSends, for a cross-border refusal). A key sent before (a lost answer, then a refusal of the press
  * again: a key rotated, a replay Stripe no longer makes) may hold an account at Stripe, so the attempt stays for a press
  * again with the same key (MEDIUM 1, 20261122T200746Z-claude-1-coord-305c).
  */
-export async function clearStripeConnect(email: string, sid: string, attemptId: string): Promise<boolean> {
+export async function clearStripeConnect(email: string, sid: string, attemptId: string, options: { whateverSends?: boolean } = {}): Promise<boolean> {
   const done = await withStore(email, async (store, save) => {
-    if (store.sid !== sid || store.stripeConnecting?.id !== attemptId || store.stripeConnecting.sends !== 1) return false;
+    if (store.sid !== sid || store.stripeConnecting?.id !== attemptId) return false;
+    // A refusal that says no account can be made in that country (cross-border) proves no press ever made one, so it
+    // closes the attempt whatever its sends (the coordinator's df44 on #5095, optional point: a creator never holds the
+    // store from its closing by pressing once a day for a country Stripe refuses).
+    if (store.stripeConnecting.sends !== 1 && !options.whateverSends) return false;
     const { stripeConnecting: _gone, ...rest } = store;
     void _gone;
     await save(rest as Store);

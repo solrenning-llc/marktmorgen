@@ -20,6 +20,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { ERASING_KEY, STRIPE_CONNECT_HOLD_SECONDS, STRIPE_CONNECT_REUSE_SECONDS, beginStripeConnect, claimHandle, clearStripeConnect, createStore, deleteStore as deleteWith, erasingField, storeForId, storeRef } from "@/lib/store";
 import { BATCH_KEY, StripeConnectingError, prepareStore, queueDeleted } from "@/lib/closed-store-data";
 import { FINAL_INDEX } from "@/lib/closing-holds";
+import { LOCKED_UNTIL_STAR_COMMANDS, STRIPE_CONNECT_PRESS_EXTRA_COMMANDS, TAKE_COMMANDS } from "./plan-cost-registry";
 import { StripeConnectError } from "@/lib/stripe-connect";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -315,6 +316,50 @@ async function main(): Promise<void> {
     is("its closing day stays in the final line", (await redis.pipeline([["ZSCORE", FINAL_INDEX, ref]]))[0] !== null, true);
     is("no walk entry is written for it", (await redis.pipeline([["HGET", BATCH_KEY, ref]]))[0], null);
     is("and its record, with the attempt, is intact", Boolean((await storeForId(store.sid))?.stripeConnecting), true);
+  }
+
+  part("A press costs what the registry prices: the studio unit plus STRIPE_CONNECT_PRESS_EXTRA_COMMANDS (coordinator's df44 on #5095)");
+  {
+    reset();
+    const owner = "connect-cost@example.com";
+    const store = await extraStore(owner, "connectcostfirst", "connectcostextra");
+    const real = redis.pipeline.bind(redis);
+    const sent: (string | number)[][] = [];
+    redis.pipeline = (async (commands: (string | number)[][]) => { sent.push(...commands); return real(commands); }) as typeof redis.pipeline;
+    let said: string | null;
+    try { said = await connect(owner, store.sid); } finally { redis.pipeline = real; }
+    // Billed as Upstash bills a script: one, plus every call inside it; from the press's first read of the session on
+    // (the helper opens the session first, which is the sign-in's, not the press's).
+    const press = sent.slice(Math.max(0, sent.findIndex((c) => c[0] === "GET" && String(c[1]).startsWith("nl:auth:session:"))));
+    const billed = press.reduce((sum, c) => sum + (c[0] === "EVAL" ? 1 + (String(c[1]).match(/redis\.call\(/g) ?? []).length : 1), 0);
+    is("the press goes on to onboarding", said, "onboarding");
+    is(`its billed commands (${billed}) are within the studio unit and the press's own line`, billed <= 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS + STRIPE_CONNECT_PRESS_EXTRA_COMMANDS, true);
+    is("and the line is not idle: the second turn of the lock is really there", billed > 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, true);
+  }
+
+  part("An attempt past its 29 days is dropped, the creator's address with it (coordinator's df44 on #5095)");
+  {
+    reset();
+    const owner = "connect-expired@example.com";
+    const store = await extraStore(owner, "connectexpiredfirst", "connectexpiredextra");
+    await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: owner, name: "Expired" }, Date.now() - (STRIPE_CONNECT_REUSE_SECONDS + 60) * 1000);
+    is("read back, the store holds no attempt any more", (await storeForId(store.sid))?.stripeConnecting ?? null, null);
+    const younger = await extraStore("connect-younger@example.com", "connectyoungerfirst", "connectyoungerextra");
+    await beginStripeConnect(storeRef(younger), younger.sid, { country: "us", email: "connect-younger@example.com", name: "Younger" }, Date.now() - 28 * 24 * 60 * 60 * 1000);
+    is("one younger than 29 days is still kept, for a press again", Boolean((await storeForId(younger.sid))?.stripeConnecting), true);
+  }
+
+  part("A cross-border refusal closes the attempt even after an earlier send (coordinator's df44 on #5095, optional)");
+  {
+    reset();
+    const owner = "connect-border@example.com";
+    const store = await extraStore(owner, "connectborderfirst", "connectborderextra");
+    answer = "down";
+    is("a first press with no answer keeps the attempt", await connect(owner, store.sid), "error");
+    answer = "refused";
+    is("a press again refused across the border is told so", await connect(owner, store.sid), "country-unsupported");
+    is("and the attempt is gone: no account can exist in that country", (await storeForId(store.sid))?.stripeConnecting ?? null, null);
+    is("so the store is not held from its deletion", (await deleteStore(storeRef(store))).ok, true);
   }
 
   part("An attempt older than the day it holds the store no longer keeps it from deletion");

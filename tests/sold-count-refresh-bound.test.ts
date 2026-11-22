@@ -10,7 +10,9 @@
 import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail, updateLook } from "@/lib/store";
 import { DEFAULT_LOOK } from "@/lib/store-look";
 import { SOLD_FRESH_MS, SOLD_REFRESH_ATTEMPTS_PER_DAY, SOLD_REFRESH_COMMANDS, refreshSoldCounts } from "@/lib/sold-count";
-import { readAllTimeSales } from "@/lib/stats";
+import { ALL_TIME_PAGES, readAllTimeSales } from "@/lib/stats";
+import { MAX_PAID_BYTES, paidKey, salesKey } from "@/lib/paypal-sales";
+import { request, soldRefreshCost } from "./plan-cost-registry";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -95,15 +97,24 @@ async function main(): Promise<void> {
     is("one read in five minutes", reads, 1);
   }
 
-  part("One attempt at its worst, a cache miss with the real all-time reading, bills at most SOLD_REFRESH_COMMANDS");
+  part("One attempt at its worst, a cache miss with a PayPal sale and the real all-time reading, bills at most SOLD_REFRESH_COMMANDS");
   {
     const store = await freshStore();
+    // One PayPal sale, so the PayPal read takes its MGET too (Claude 1 on #4966).
+    const order = "PPSYNTHSOLDBOUND01";
+    await redis.pipeline([
+      ["ZADD", salesKey(store.statsId!), "1790000000", order],
+      ["SET", paidKey(order), JSON.stringify({ store: store.statsId, order, capture: "CAPSYNTH002", email: "c@example.com", product: "p1", cents: 2000, currency: "usd", at: 1_790_000_000 })],
+    ]);
     const commands = counting();
     const kept = await refreshSoldCounts(store, readAllTimeSales);
     hook = null;
-    is("it read and kept the count", kept?.byProduct, { p1: 1 });
+    is("it read and kept the count, the PayPal sale with the Stripe one", kept?.byProduct, { p1: 2 });
     is(`its billed commands (${commands()}) fit SOLD_REFRESH_COMMANDS`, commands() <= SOLD_REFRESH_COMMANDS, true);
   }
+
+  part("The line prices the PayPal records an attempt reads");
+  is("an attempt's price holds ALL_TIME_PAGES × 100 PayPal records at MAX_PAID_BYTES", soldRefreshCost() >= request("heavy", SOLD_REFRESH_COMMANDS, ALL_TIME_PAGES * 100 * MAX_PAID_BYTES), true);
 
   part("The priced number of attempts a day follows SOLD_FRESH_MS");
   is("SOLD_REFRESH_ATTEMPTS_PER_DAY", SOLD_REFRESH_ATTEMPTS_PER_DAY, Math.ceil(86_400_000 / SOLD_FRESH_MS));

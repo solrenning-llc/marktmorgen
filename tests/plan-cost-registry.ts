@@ -1821,11 +1821,13 @@ export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER
 
 /**
  * One public sold-count refresh at its worst (lib/sold-count.ts refreshSoldCounts; line sold-count-refresh): its
- * SOLD_REFRESH_COMMANDS billed commands, up to two rows of 320 bytes for each sale ALL_TIME_PAGES pages hold through
- * the database, and those pages read from Stripe one after another.
+ * SOLD_REFRESH_COMMANDS billed commands; up to two rows of 320 bytes for each sale ALL_TIME_PAGES pages hold, and the
+ * PayPal records the same reading takes (lib/paypal-sales.ts readPayPalSales: up to ALL_TIME_PAGES × 100, each at
+ * MAX_PAID_BYTES with its 64-byte member, as lib/read-ceilings.ts counts them; Claude 1 on #4966), through the
+ * database; and those Stripe pages read one after another.
  */
 export function soldRefreshCost(): number {
-  return request("heavy", SOLD_REFRESH_COMMANDS, 2 * ALL_TIME_PAGES * 100 * 320) + ALL_TIME_PAGES * STRIPE_LIST_PAGE;
+  return request("heavy", SOLD_REFRESH_COMMANDS, 2 * ALL_TIME_PAGES * 100 * 320 + ALL_TIME_PAGES * 100 * (MAX_PAID_BYTES + 64)) + ALL_TIME_PAGES * STRIPE_LIST_PAGE;
 }
 /**
  * A narrowed email's reading of the store's buyers made by the scheduled job
@@ -3082,7 +3084,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/sold-count.ts", names: ["SOLD_REFRESH_ATTEMPTS_PER_DAY", "SOLD_REFRESH_COMMANDS", "SOLD_FRESH_MS / 1000", "setWhileStoreLive"] },
       { file: "lib/stats.ts", names: ["ALL_TIME_PAGES", "readAllTimeSales"] },
     ],
-    basis: "One attempt per store per SOLD_FRESH_MS, whatever its outcome: the attempt's lock is held that long, so a read that fails or keeps nothing is not tried again by the next visit (tests/sold-count-refresh-bound.test.ts). Each attempt at its worst: SOLD_REFRESH_COMMANDS billed commands (the lock, the all-time reading on a cache miss with its fenced writes, the count's fenced write), up to two rows of 320 bytes for each sale ALL_TIME_PAGES pages hold, through the database, and ALL_TIME_PAGES Stripe list pages waited on one after another. A store in its trial shows the count too, so it is priced there at Store's figures.",
+    basis: "One attempt per store per SOLD_FRESH_MS, whatever its outcome: the attempt's lock is held that long, so a read that fails or keeps nothing is not tried again by the next visit (tests/sold-count-refresh-bound.test.ts). Each attempt at its worst: SOLD_REFRESH_COMMANDS billed commands (the lock, the all-time reading on a cache miss with PayPal sales and its fenced writes, the count's fenced write), up to two rows of 320 bytes for each sale ALL_TIME_PAGES pages hold and the PayPal records that reading takes at MAX_PAID_BYTES each, through the database, and ALL_TIME_PAGES Stripe list pages waited on one after another. A store in its trial shows the count too, so it is priced there at Store's figures.",
   },
   {
     id: "calendar-feed",

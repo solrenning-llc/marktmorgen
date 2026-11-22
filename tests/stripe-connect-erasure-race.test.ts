@@ -30,13 +30,17 @@ let keys: (string | null)[] = [];
 /** What happens while Stripe is creating the account, once. */
 let meanwhile: (() => Promise<void>) | null = null;
 /** How Stripe answers the next account creation. */
-let answer: "ok" | "lost" | "refused" = "ok";
+let answer: "ok" | "lost" | "refused" | "down" = "ok";
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.origin !== "https://api.stripe.com") throw new Error(`Unexpected synthetic provider request: ${url}`);
   if (url.pathname === "/v2/core/accounts" && init?.method === "POST") {
     const key = new Headers(init.headers).get("idempotency-key");
     keys.push(key);
+    if (answer === "down") {
+      answer = "ok";
+      return Response.json({ error: { type: "api_error", message: "Synthetic outage." } }, { status: 503 });
+    }
     if (answer === "refused") {
       answer = "ok";
       return Response.json({ error: { code: "cross_border_connected_account_creation_not_allowed", message: "Not here." } }, { status: 400 });
@@ -67,10 +71,10 @@ async function extraStore(owner: string, first: string, extra: string) {
   return made.store;
 }
 
-async function connect(owner: string, sid: string) {
+async function connect(owner: string, sid: string, country = "US") {
   const cookie = `${SESSION_COOKIE}=${await openSession(owner)}`;
   const form = new FormData();
-  form.set("country", "US");
+  form.set("country", country);
   const response = await connectPOST(new NextRequest("https://marktmorgen.com/api/stripe/connect", {
     method: "POST", headers: { origin: "https://marktmorgen.com", host: "marktmorgen.com", cookie, "x-nimbus-store": sid }, body: form,
   }));
@@ -140,6 +144,20 @@ async function main(): Promise<void> {
     is("both tabs go on to onboarding", [first, second], ["onboarding", "onboarding"]);
     is("one account at Stripe, with one key", [opened, new Set(keys).size], [1, 1]);
     is("the store points at it", (await storeForId(store.sid))?.stripeAccountId ?? null, "acct_1Synthetic1");
+  }
+
+  part("A press again with another country is never asked for in the first one (Claude 7 xAF on #5095, MEDIUM)");
+  {
+    reset();
+    const owner = "connect-country@example.com";
+    const store = await extraStore(owner, "connectcountryfirst", "connectcountryextra");
+    answer = "down";
+    is("a German account is asked for and Stripe answers 503", await connect(owner, store.sid, "DE"), "error");
+    const asked = keys.length;
+    is("a press again choosing France is told an account is still being opened elsewhere", await connect(owner, store.sid, "FR"), "attempt-country");
+    is("and nothing is asked of Stripe for it", keys.length, asked);
+    is("the German attempt stays open", (await storeForId(store.sid))?.stripeConnecting?.country ?? null, "de");
+    is("choosing Germany again finishes it, with the same key", [await connect(owner, store.sid, "DE"), keys.length === asked + 1 && keys[asked] === keys[0]], ["onboarding", true]);
   }
 
   part("An attempt older than Stripe's idempotency window holds nothing");

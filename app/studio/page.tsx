@@ -47,6 +47,7 @@ import { redirect } from "next/navigation";
 import { after } from "next/server";
 import {
   pricedProducts,
+  connectingHolds,
   ensureStatsId,
   imageFolder,
   isFree,
@@ -455,6 +456,11 @@ const STRIPE_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Stripe needs to know where you are",
     body: "Pick the country your bank account is in before connecting. It is fixed once the account is open, so it is worth a second's thought.",
   },
+  // An open attempt in another country (lib/store.ts beginStripeConnect); attemptCountryNotice names it when it still holds.
+  "attempt-country": {
+    title: "An account is still being opened in another country",
+    body: "Your last try asked Stripe for an account in the country you chose then, and Stripe may have opened it. A Stripe account's country can't be changed. To finish that account, choose that country again and press \u201cConnect your Stripe account\u201d. To choose another country, try again after one day. Nothing was changed.",
+  },
   "country-unsupported": {
     title: "Stripe will not open an account in that country from here",
     body: "Nothing was charged and nothing was created. This is a limit on our side, not a judgment on you: Stripe does not yet let a platform registered in our country open accounts in yours. Write to us and we will tell you honestly whether that is changing.",
@@ -465,6 +471,19 @@ const STRIPE_NOTICES: Record<string, { title: string; body: string }> = {
   },
 };
 
+
+/**
+ * The notice for an open Stripe attempt in another country, naming that country (Claude 7 xAF on #5095): undefined when
+ * the store has no attempt that still holds, and the fixed words of STRIPE_NOTICES["attempt-country"] are said then.
+ */
+function attemptCountryNotice(store: Pick<Store, "stripeConnecting">): { title: string; body: string } | undefined {
+  if (!store.stripeConnecting || !connectingHolds(store)) return undefined;
+  const name = COUNTRIES.find((country) => country.code === store.stripeConnecting?.country)?.name ?? store.stripeConnecting.country.toUpperCase();
+  return {
+    title: `An account in ${name} is still being opened`,
+    body: `Your last try asked Stripe for an account in ${name}, and Stripe may have opened it. A Stripe account's country can't be changed. To finish that account, choose ${name} and press \u201cConnect your Stripe account\u201d again. To choose another country, try again after one day. Nothing was changed.`,
+  };
+}
 
 /** Addresses made before the notices were spelled the American way, still understood. */
 const BILLING_ALIASES: Record<string, string> = {
@@ -993,6 +1012,7 @@ export default async function StudioPage({
   const notice =
     actionNotice ??
     ADDRESS_NOTICES[typeof params.address === "string" ? params.address : ""] ??
+    (params.stripe === "attempt-country" && store ? attemptCountryNotice(store) : undefined) ??
     STRIPE_NOTICES[typeof params.stripe === "string" ? params.stripe : ""] ??
     // A call to PayPal or Meta refused for the store's calls to connected services (lib/metered-limits.ts).
     (store && typeof params.paypal === "string" && serviceAllowanceWords(store, params.paypal) ? { title: "PayPal can't be connected just now", body: serviceAllowanceWords(store, params.paypal) ?? "" } : undefined) ??

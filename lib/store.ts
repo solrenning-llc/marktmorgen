@@ -2724,19 +2724,24 @@ export type StripeAccountResult =
  */
 /**
  * Writes down an attempt to open the creator's Stripe account before Stripe is asked (Codex L-20261120-0258), under the
- * store's lock: the store's own attempt if one is open and still holds (so a press again, or a second tab, asks with
- * the same idempotency key and gets the same account), a new one otherwise. Null when the store is gone, is another
- * store, or already has an account.
+ * store's lock: the store's own attempt if one is open, still holds and is for the same country (so a press again, or
+ * a second tab, asks with the same idempotency key and gets the same account), a new one otherwise. `{ other }` when an
+ * open attempt is for another country (Claude 7 xAF on #5095, MEDIUM): an account's country is fixed for good, so it is
+ * never asked for in a country the creator did not choose this time; nothing is asked of Stripe, and they are told.
+ * The address and name sent are the attempt's own, as its key must be sent with the same request. Null when the store
+ * is gone, is another store, or already has an account.
  */
 export async function beginStripeConnect(
   email: string,
   sid: string,
   ask: { country: string; email: string; name: string },
   now = Date.now(),
-): Promise<StripeConnecting | null> {
+): Promise<StripeConnecting | { other: StripeConnecting } | null> {
   return withStore(email, async (store, save) => {
     if (store.sid !== sid || store.stripeAccountId) return null;
-    if (store.stripeConnecting && connectingHolds(store, now)) return store.stripeConnecting;
+    if (store.stripeConnecting && connectingHolds(store, now)) {
+      return store.stripeConnecting.country === ask.country ? store.stripeConnecting : { other: store.stripeConnecting };
+    }
     if (store.stripeConnecting) console.error("a Stripe account attempt past Stripe's idempotency window is replaced", store.sid);
     const attempt: StripeConnecting = {
       id: crypto.randomUUID().replace(/-/g, ""),

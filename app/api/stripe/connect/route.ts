@@ -48,6 +48,8 @@ export async function POST(request: NextRequest) {
     if (!accountId) {
       // The store's open attempt, or a new one written down first, with what Stripe is asked with.
       const attempt = await beginStripeConnect(ref, store.sid, { country, email: store.email, name: store.name || store.handle });
+      // An account is still being opened in another country: never asked for in a country not chosen now.
+      if (attempt && "other" in attempt) return away(origin, studio("stripe=attempt-country"));
       if (!attempt) {
         // Another tab finished first: the account it wrote is the store's; otherwise nothing is known.
         const now = await storeForEmail(ref);

@@ -115,6 +115,19 @@ node ~/.agent-mail/agent-mail.mjs check-append-only
 
 - Uma cópia que não é a revisada do main, ou cuja versão não pôde ser conferida agora, não escreve no correio e também não liga a vigia (`watch`), que confirma leituras e grava avisos: o comando é recusado com "escrita recusada" e pede a reinstalação pelo comando de CO (b) do AGENTS.md. Os comandos que só leem (`read`, `list-queue`, `list-reviews`, `pr-status`, `list-switches`, `check-append-only` e afins) continuam funcionando, com o aviso.
 
+## Nada NÃO CONFERIDO segue (dono, OWNER-20261121-1904, passo 4)
+
+- O pedido grava o head inteiro (40 caracteres), lido na hora. Um head que não é o atual do PR é recusado já no pedido; só quando o head vem da referência do GitHub, que pode atrasar, fica o que foi dado.
+- `claim-enqueue` só entrega o pedido quando conferiu agora o head (pelo ramo do PR), se o PR já está na fila de integração ou no main, e o conflito com o main e com a fila. Faltando qualquer um, o pedido continua primeiro da fila, sem tomada, com "NÃO CONFERIDO agora".
+- Logo antes de enfileirar no GitHub, quem pegou confere a tomada e o head, e usa o head que o comando mostra:
+
+```
+node ~/.agent-mail/agent-mail.mjs verify-enqueue --as "Claude N" <id do pedido>
+```
+
+- `complete-enqueue --result enqueued` faz a mesma conferência e grava o head enfileirado ("Head enfileirado:"); com a tomada de outra sessão ou com o head mudado, é recusado.
+- Cada comando do git tem um limite de tempo (2 minutos): um comando que trava é parado e falha com o motivo.
+
 ## Recados
 
 ```bash

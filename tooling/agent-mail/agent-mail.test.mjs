@@ -239,11 +239,11 @@ r = run(["claim-enqueue", "--as", "Claude 6 X"], as("c6"));
 is("a request at the branch head is not declined while refs/pull/N/head lags", /pegou/.test(r.out) && /igual ao do pedido \(pelo ramo feature-4\)/.test(r.out), r.out);
 run(["complete-enqueue", "--as", "Claude 6 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], as("c6"));
 g(["checkout", "-q", "pr4"], P); const H4c = commit("f4.txt", "4c\n", "pr4 c");
-run(["request-enqueue", "--from", "Claude 2", "--pr", "4", "--sha", H4c.slice(0, 10), "--text", "fila #4 c"], { ...as("c2"), CORREIO_SEM_COMMITS: "" });
+// H4c is not pushed yet, so the request finds no branch, and the local refs/pull/4/head (still H4a) is authoritative:
+// since step 4 the request itself is refused, instead of being recorded and declined at the take.
+r = run(["request-enqueue", "--from", "Claude 2", "--pr", "4", "--sha", H4c.slice(0, 10), "--text", "fila #4 c"], { ...as("c2"), CORREIO_SEM_COMMITS: "" });
+is("without a recorded branch, a local repository's refs/pull is authoritative and a request for another head is refused", !r.ok && /não é o head atual/.test(r.out), r.out);
 g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-4"], P);
-// the request recorded no branch (H4c was not pushed yet), so only the local refs/pull/4/head (still H4a) is read: declined, authoritative locally
-r = run(["claim-enqueue", "--as", "Claude 6 X"], as("c6"));
-is("without a recorded branch, a local repository's refs/pull is authoritative and a different head is declined", /mudou de/.test(r.out), r.out);
 g(["checkout", "-q", "pr4"], P); const H4d = commit("f4.txt", "4d\n", "pr4 d"); g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-4"], P);
 run(["request-enqueue", "--from", "Claude 2", "--pr", "4", "--sha", H4d.slice(0, 10), "--text", "fila #4 d"], { ...as("c2"), CORREIO_SEM_COMMITS: "" });
 const H4e = commit("f4.txt", "4e\n", "pr4 e"); g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-4"], P);
@@ -255,10 +255,8 @@ g(["checkout", "-q", "-B", "pr7", M], P); const H7a = commit("f7.txt", "7\n", "p
 g(["push", "-q", "../prs.git", "HEAD:refs/heads/backup-7"], P);
 const H7b = commit("f7.txt", "7b\n", "pr7 b"); g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-7"], P); g(["push", "-q", "../prs.git", "HEAD:refs/pull/7/head"], P);
 r = run(["request-enqueue", "--from", "Claude 2", "--pr", "7", "--sha", H7a.slice(0, 10), "--text", "fila #7 (old head)\nRamo: backup-7"], { ...as("c2"), CORREIO_SEM_COMMITS: "" });
-const id7a = /registrado: (\S+)/.exec(r.out)?.[1];
-is("no branch is recorded for an old head held only by a backup branch", r.ok && !/^Ramo:/m.test(g(["show", `refs/heads/correio:fila/pedidos/${id7a}.md`], join(T, "mail.git")).split(/\n\s*\n/)[0]), r.out);
-r = run(["claim-enqueue", "--as", "Claude 6 X"], as("c6"));
-is("a 'Ramo:' line in the free text is ignored, and the old head is declined", /mudou de/.test(r.out) && new RegExp(H7b.slice(0, 10)).test(r.out), r.out);
+is("a request for an old head held only by a backup branch is refused (step 4), naming the PR's head", !r.ok && /não é o head atual/.test(r.out) && new RegExp(H7b.slice(0, 10)).test(r.out), r.out);
+is("a 'Ramo:' line in the free text does not make it pass: nothing is recorded for #7", !/#7 @/.test(run(["list-queue"]).out), run(["list-queue"]).out);
 
 console.log("switch off returns to the old behaviour (R1)");
 r = run(["set-switch", "--as", "Claude 2 X", "--name", "record-review", "--off", "--reason", "parar"], as("c2"));
@@ -292,7 +290,7 @@ is("not delivered and not declined: 'não conferível agora'", /não conferível
 is("the request stays first and open, with no take", /#6 @\S+ +autor Claude 2 +aberto/.test(run(["list-queue"]).out), run(["list-queue"]).out);
 g(["push", "-q", GH, `${H6b}:refs/pull/6/head`], P);
 r = run(["claim-enqueue", "--as", "Claude 6 X"], ghEnv("c6"));
-is("once refs/pull/N/head catches up, it is delivered, the head still NOT CHECKED by branch", /pegou/.test(r.out) && /NÃO CONFERIDO/.test(r.out), r.out);
+is("once refs/pull/N/head catches up, a head known only by that reference is still NOT CHECKED: not delivered (step 4)", !/pegou/.test(r.out) && /NÃO CONFERIDO agora/.test(r.out), r.out);
 
 console.log("unidentified writes are marked when read (OWNER-20261121-1904 step 2)");
 run(["send", "--from", "Codex X", "--to", "Claude 3 Z", "--subject", "s", "--text", "sem sessão"]);

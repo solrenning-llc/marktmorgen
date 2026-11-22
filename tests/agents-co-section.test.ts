@@ -26,9 +26,12 @@ for (const words of [
 ]) is(`quotes: ${words.slice(0, 40)}...`, co.includes(words), true);
 
 part("how to install it and keep the watcher on");
-is("the install command",
-  co.includes("git fetch -q https://github.com/solrenning-llc/repo-id-transfer-test +correio:refs/agent-mail/tool && git show refs/agent-mail/tool:agent-mail.mjs > /tmp/agent-mail.mjs"), true);
-is("the watcher, waking on mail and on review or queue requests", co.includes('node /tmp/agent-mail.mjs watch --as "Claude N" --also review,enqueue'), true);
+is("the install command takes the tool from main and installs it only with the reviewed SHA-256 (owner, OWNER-20261121-1904, step 1)",
+  [co.includes("git fetch -q https://github.com/solrenning-llc/marktmorgen main && git show FETCH_HEAD:tooling/agent-mail/agent-mail.mjs > ~/.agent-mail/new.mjs"),
+   co.includes(`~/.agent-mail/new.mjs ${readFileSync("tooling/agent-mail/agent-mail.sha256", "utf8").slice(0, 64)}\``),
+   co.includes("repo-id-transfer-test +correio:refs/agent-mail/tool"), co.includes("/tmp/agent-mail.mjs")], [true, true, false, false]);
+is("the watcher, waking on mail and on review or queue requests", co.includes('node ~/.agent-mail/agent-mail.mjs watch --as "Claude N" --also review,enqueue'), true);
+is("the correio branch holds only data; the code is reviewed in tooling/agent-mail/", [/O ramo `correio` guarda só dados/.test(co), /`tooling\/agent-mail\/` do main deste repositório, revisado por PR/.test(co)], [true, true]);
 is("the Codex reads it at each hourly task", /Codex[^.]*hora em hora/.test(co), true);
 
 part("everything the owner asked it to cover");

@@ -69,6 +69,44 @@ for (const [name, task] of [["reviewed", REVIEWED], ["done at once", AT_ONCE]] a
   });
 }
 
+for (const [name, task] of [["reviewed", REVIEWED], ["done at once", AT_ONCE]] as const) {
+  test(`a hand-in read after the erasure's first count and written after the erasure finished is refused (${name})`, async () => {
+    // Claude 7 on #5073: the hand-in reads the lesson's count after the erasure counted it once, and its own write
+    // waits until the erasure has finished. The erasure counts again at its end, so the count read is stale.
+    redis.clear();
+    const original = redis.pipeline.bind(redis);
+    let handing: Promise<unknown> | null = null;
+    let atWrite: () => void = () => undefined;
+    const reachedWrite = new Promise<void>((resolve) => { atWrite = resolve; });
+    let letWrite: () => void = () => undefined;
+    const writeHeld = new Promise<void>((resolve) => { letWrite = resolve; });
+    redis.pipeline = (async (batch: Batch) => {
+      if (!handing && batch.length > 0 && batch.every(([op, key]) => op === "GET" && String(key).includes(":sub:"))) {
+        handing = firstHandIn(task).then(() => "written", (error: unknown) => error);
+        await reachedWrite;
+      } else if (handInWrite(batch)) {
+        atWrite();
+        await writeHeld;
+      }
+      return original(batch);
+    }) as typeof redis.pipeline;
+    let erased: Awaited<ReturnType<typeof forgetTasksPerson>> | null = null;
+    try {
+      erased = await forgetTasksPerson(COURSE, [LESSON], WHO, null);
+      letWrite();
+      assert.ok((await handing) instanceof HandInChangedError, "the hand-in is refused, so the student is told to hand in again");
+    } finally {
+      redis.pipeline = original;
+      letWrite();
+    }
+    assert.deepEqual(erased, { records: 0, files: [] }, "control: the erasure read before the hand-in wrote");
+    assert.equal(await submissionOf(COURSE, LESSON, WHO), null, "the erased student's work does not come back");
+    assert.equal(redis.run(["ZCARD", allKey]), 0);
+    assert.equal(redis.run(["HEXISTS", filesKey, "one.pdf"]), 0);
+    assert.equal((await passedQuizzes(COURSE, WHO)).has(LESSON), false);
+  });
+}
+
 test("a hand-in made after the erasure finished is written as usual", async () => {
   redis.clear();
   assert.deepEqual(await forgetTasksPerson(COURSE, [LESSON, OTHER], WHO, null), { records: 0, files: [] });

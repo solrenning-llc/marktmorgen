@@ -947,18 +947,17 @@ export async function forgetTasksPerson(
 ): Promise<{ records: number; files: string[] }> {
   if (!lessonIds.length || !WHO.test(who) || !isRedisConfigured()) return { records: 0, files: [] };
   // Counted first, on every lesson, even where nothing is handed in yet: a hand-in that read before this finds the count
-  // changed at its write and writes nothing (HAND_IN_WRITE_IF, #4271). A count not confirmed is an erasure not finished.
-  const marks = repliesFor(
-    await redisPipeline(lessonIds.flatMap((l) => [["INCR", erasedKey(courseId, l)], ["EXPIRE", erasedKey(courseId, l), ERASED_MARK_SECONDS]])),
-    lessonIds.length * 2,
-  );
-  if (!marks || !marks.every((reply, i) => (i % 2 === 0 ? (countOf(reply) ?? 0) > 0 : reply === 1))) {
-    throw new UnknownReplyError("the counts of erasures on a course's assignments");
-  }
+  // changed at its write and writes nothing (HAND_IN_WRITE_IF, #4271). Counted again once the records are gone, so a
+  // hand-in that read between the two counts, after the first and before the deletion, is refused too (Claude 7 on
+  // #5073). A count not confirmed is an erasure not finished.
+  await countErasure(courseId, lessonIds);
   const raws = repliesFor(await redisPipeline(lessonIds.map((l) => ["GET", subKey(courseId, l, who)])), lessonIds.length);
   if (!raws || !raws.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("a student's work on a course's assignments");
   const handed = lessonIds.flatMap((lessonId, i) => (typeof raws[i] === "string" ? [{ lessonId, file: fileOfRecord(raws[i] as string) }] : []));
-  if (!handed.length) return { records: 0, files: [] };
+  if (!handed.length) {
+    await countErasure(courseId, lessonIds);
+    return { records: 0, files: [] };
+  }
   const unreadLessons = handed.filter((h) => h.file === undefined).map((h) => h.lessonId);
   const unread = unreadLessons.length;
   const files = handed.flatMap((h) => (h.file ? [{ lessonId: h.lessonId, ...h.file }] : []));
@@ -998,6 +997,22 @@ export async function forgetTasksPerson(
   // Each file's bytes come back only when its own HDEL removed it here (removedBytes).
   const bytes = files.length ? removedBytes(receipt.slice(3, 3 + files.length), files.map((f) => f.bytes)) : 0;
   if (room && bytes) await releaseBytes(room, bytes);
+  await countErasure(courseId, lessonIds);
   if (unread) throw new TaskRecordUnreadError(unread, handed.length);
   return { records: handed.length, files: files.map((f) => f.path) };
+}
+
+/**
+ * One more erasure counted on each lesson (INCR, and the count kept ERASED_MARK_SECONDS), read exactly: an INCR that
+ * does not answer a count above zero, or an EXPIRE that does not answer 1, throws UnknownReplyError, so the erasure is
+ * not finished. Four commands a lesson for an erasure, its two counts (lib/erasure-rules.ts, ERASE_PER.lessons).
+ */
+async function countErasure(courseId: string, lessonIds: string[]): Promise<void> {
+  const marks = repliesFor(
+    await redisPipeline(lessonIds.flatMap((l) => [["INCR", erasedKey(courseId, l)], ["EXPIRE", erasedKey(courseId, l), ERASED_MARK_SECONDS]])),
+    lessonIds.length * 2,
+  );
+  if (!marks || !marks.every((reply, i) => (i % 2 === 0 ? (countOf(reply) ?? 0) > 0 : reply === 1))) {
+    throw new UnknownReplyError("the counts of erasures on a course's assignments");
+  }
 }

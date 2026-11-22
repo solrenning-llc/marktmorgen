@@ -83,9 +83,9 @@ test("erasure: a person who handed nothing in is confirmed absent, nothing delet
   redis.clear();
   const result = await withReplies((_b, a) => a, () => forgetTasksPerson(COURSE, [LESSON, OTHER_LESSON], WHO, ROOM_KEY));
   assert.deepEqual(result.value, { records: 0, files: [] });
-  // The lessons' counts of erasures go first, even with nothing handed in (#4271), then only the reading.
-  assert.equal(result.sent.length, 2, "only the counts of erasures and the reading");
-  assert.equal(result.sent[0].every((c) => c[0] === "INCR" || c[0] === "EXPIRE"), true, "the counts first");
+  // The lessons' counts of erasures go first and last, even with nothing handed in (#4271), with only the reading between.
+  assert.equal(result.sent.length, 3, "only the counts of erasures around the reading");
+  assert.equal([result.sent[0], result.sent[2]].every((b) => b.every((c) => c[0] === "INCR" || c[0] === "EXPIRE")), true, "the counts first and last");
 });
 
 for (const [label, alter] of [

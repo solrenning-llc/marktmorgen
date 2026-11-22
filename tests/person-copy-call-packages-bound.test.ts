@@ -7,6 +7,8 @@
  *
  * Synthetic only: the in-memory Redis stub and a stand-in for Stripe; nothing real is reached.
  */
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { claimHandle, ensureListId, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { packagesKey } from "@/lib/call-packages";
 import { erasureScope } from "@/lib/person-erasure";
@@ -110,6 +112,25 @@ async function main(): Promise<void> {
   const full = await watched(() => copier(fresh));
   is("a hundred packages of theirs, all copied", full.records?.length, 100);
   is("one GET each, within CALL_PACKAGE_COPY_READS_MAX", [full.commands.length, full.commands.length <= Number((personCopy as Record<string, unknown>).CALL_PACKAGE_COPY_READS_MAX)], [100, true]);
+
+  part("A call package is bought only through a Stripe checkout on the creator's account (coord 2e8a)");
+  // Reading the person's checkouts finds every package only if no other path writes one. Each fact below is read from
+  // the code, so a new path (PayPal, an import, a gift) makes this fail rather than leave the copy incomplete.
+  const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(dir, e.name)) : /\.(ts|tsx|mjs|js|py)$/.test(e.name) ? [join(dir, e.name)] : []));
+  const sources = ["lib", "app", "scripts"].flatMap(files).map((f) => [f, readFileSync(f, "utf8")] as const);
+  const tracked = (pattern: string) => sources.filter(([, text]) => text.includes(pattern)).map(([f]) => f).sort();
+  const packages = readFileSync("lib/call-packages.ts", "utf8");
+  is("a package record is keyed by its checkout id (nl:pkg:<checkout>)", packages.includes("const pkgKey = (checkout: string) => `nl:pkg:${checkout}`;"), true);
+  const recordWrites = [...packages.matchAll(/\["SET", pkgKey\(checkout\)[^\]]*\]/g)].map((m) => m[0]);
+  is("two writes of a record: the first, SET NX, and the sessions held on an existing one", recordWrites.length, 2);
+  is("the first is SET NX in recordPackage", /export async function recordPackage[\s\S]*?\["SET", pkgKey\(checkout\), JSON\.stringify\(bought\), "NX"/.test(packages), true);
+  is("the other only rewrites a record read back first (holdSession)", /export async function holdSession[\s\S]*?const bought = await readBought\(checkout\);\s*if \(!bought\) return false;[\s\S]*?\["SET", pkgKey\(checkout\), JSON\.stringify\(bought\)/.test(packages), true);
+  is("recordPackage writes only for a settled Stripe checkout marked kind \"package\"", packages.includes('if (meta.kind !== "package" || !SESSION_ID.test(checkout) || !isSettled(session) || !store.statsId) return null;'), true);
+  is("the only other files naming nl:pkg: are the store's closing (it deletes) and the list of data families", tracked("nl:pkg:").filter((f) => f !== "lib/call-packages.ts"), ["lib/closed-store-data.ts", "lib/data-families.ts"]);
+  is("recordPackage is called only for a Stripe checkout: the thanks page and the purchase email", tracked("recordPackage(").filter((f) => f !== "lib/call-packages.ts"), ["app/[handle]/thanks/page.tsx", "lib/purchase-email.ts"]);
+  is("only the package checkout marks kind \"package\"", tracked('"metadata[kind]": "package"'), ["lib/call-packages.ts"]);
+  is("PayPal never sells a call, so never a package of calls", readFileSync("lib/paypal-sales.ts", "utf8").includes("if (product.recurring || product.call || product.pwyw || product.keys || product.options.length > 0) return false;"), true);
+  is("the person's checkouts are read for every handle the store sold under", readFileSync("lib/person-copy-stripe.ts", "utf8").includes("const handles = saleHandles(store);"), true);
   done();
 }
 

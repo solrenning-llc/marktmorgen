@@ -27,6 +27,7 @@ import { STORAGE_BRAKE_BYTES, storageWords } from "@/lib/storage-quota";
 import { NON_PAYING_DATA_ROOM_BYTES, dataRoomListWords, dataWords } from "@/lib/store-data-rules";
 import { INVITE_PROGRAM_OPEN, INVITE_PAUSE_NOTICE, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS, INVITE_SHARE_PERCENT } from "@/lib/creator-invite-rules";
 import { feeWords, planPriceWords } from "@/lib/fee-words";
+import { vatFeeWords } from "@/lib/vat-fee-words";
 import { TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { HELD_DAYS } from "@/lib/community-approval-rules";
 import { COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
@@ -40,6 +41,7 @@ export const metadata: Metadata = {
 
 export default function TermsPage() {
   const domains = isDomainsConfigured();
+  const vat = vatFeeWords();
   return (
     <LegalPage title="Terms of Service" lastUpdated="November 10, 2026">
       <p>
@@ -169,6 +171,15 @@ export default function TermsPage() {
           is told when you do not publish it, and it is not published if you do
           not answer within {HELD_DAYS} days.
         </p>
+        {vat ? (
+          <>
+            <p id="vat-collected" className="scroll-mt-24">
+              <strong className="text-black">{vat.title}.</strong>{" "}
+              {vat.terms.join(" ")}
+            </p>
+            <p>{vat.example.join(" ")}</p>
+          </>
+        ) : null}
         <p id="plan-past-end" className="scroll-mt-24">
           <strong className="text-black">Payment plans end when agreed.</strong>{" "}
           When a buyer pays on a payment plan, we tell your Stripe account when

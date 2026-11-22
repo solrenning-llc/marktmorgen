@@ -16,8 +16,6 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
 let modelCalls = 0;
-/** Run once, when the kit's page is read (after the take): the store's erasure walks its counters away. */
-let duringPageRead: (() => Promise<void>) | null = null;
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   if (url.hostname === "api.anthropic.com") {

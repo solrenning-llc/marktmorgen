@@ -335,3 +335,9 @@ export function cleanTag(raw: unknown): string {
 
 /** Whether two labels are the same label: as a person reads them, not by case or spaces. */
 export const sameLabel = (a: string, b: string) => sameTag(a, b);
+
+/**
+ * How the note of a run held because its workflow's steps changed places starts (lib/flows.ts, LAYOUT_HOLD_NOTE):
+ * what the held runs screen (components/workflow-tools.tsx) knows such a hold by, to say why and name the choices.
+ */
+export const LAYOUT_HOLD_START = "Not sent: this workflow's steps were changed (added, removed or moved)";

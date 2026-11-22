@@ -1,6 +1,7 @@
 import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
-import { reserveStoreUpload, reserveUploadControl } from "@/lib/upload-budget";
+import { reserveStoreUpload, reserveUploadControl, uploadBudgetCouldOpen } from "@/lib/upload-budget";
 import { openReservedVault, closeReservedVault, abortReservedVault } from "@/lib/vault-storage";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import type { NextRequest } from "next/server";
 import { deliveredFile, readDelivery, readKind } from "@/lib/catalog";
 import { ITEM_ID_PATTERN, findLesson, readCourses } from "@/lib/course";
@@ -85,10 +86,22 @@ export async function POST(request: NextRequest) {
       if (body.multipart !== true) return fail("upload_refresh", 409);
       // Nothing new is stored while a renewal is unpaid (232 [CA1] unit 4).
       { const paused = costPauseCode(store); if (paused) return fail(paused, 409); }
-      if (!(await reserveStoreUpload(store, bytes, "r2"))) return fail("upload_budget_unavailable", 503);
-      await rememberFolderOwner(folder, ref);
+      // The monthly upload budget is never given back (lib/upload-budget.ts),
+      // so it is taken only once storage has room for the file: a refusal for
+      // storage costs the store none of it. No upload session is opened at the
+      // provider before the budget is taken. A spent budget is read first, with
+      // no write, so it is refused before storage is measured or cleaned up.
+      if (!(await uploadBudgetCouldOpen(store, bytes, "r2"))) return fail("upload_budget_unavailable", 503);
+      const admit = async () => {
+        if (!(await reserveStoreUpload(store, bytes, "r2"))) return false;
+        await rememberFolderOwner(folder, ref);
+        return true;
+      };
 
-      const opened = await openReservedVault({ folder, ownerId, name: safeFileName(text(body.name, 200)), bytes, type, multipart: true }, storageBrakeFor(standing, store.tier));
+      // Fenced on the store (Codex L-20261120-0141): a provider that answers after its erasure began writes nothing back.
+      const fence = await storeLiveFence(store);
+      const opened = await openReservedVault({ folder, ownerId, name: safeFileName(text(body.name, 200)), bytes, type, multipart: true, fence }, storageBrakeFor(standing, store.tier), undefined, admit);
+      if (!opened.ok && opened.reason === "budget") return fail("upload_budget_unavailable", 503);
       if (!opened.ok) return fail(opened.reason === "off" ? "off" : opened.reason === "invalid" ? "invalid" : "files_unavailable", opened.reason === "off" ? 404 : opened.reason === "invalid" ? 400 : 503);
       return Response.json({ ok: true, upload: opened.upload }, { headers: { "Cache-Control": "no-store" } });
     }
@@ -136,6 +149,9 @@ export async function POST(request: NextRequest) {
     if (error instanceof Error && error.message === "storage_limit") return fail(quotaRefusal);
     if (error instanceof Error && (error.message === "storage_pending" || error.message === "storage_busy")) return fail("uploads_pending", 409);
     if (error instanceof Error && error.message === "busy") return fail("slow_down", 429);
+    // The store's Blob folder is listed once a UTC day (lib/blob-tally.ts) and today's listing left no total: said as
+    // such, never as "try again in a few minutes".
+    if (error instanceof Error && error.message === "storage_daily") return fail("storage_daily", 503);
     if (error instanceof Error && error.message.startsWith("storage_")) return fail("files_unavailable", 503);
     console.error("a file upload's door failed", error);
     return fail("server_error", 500);

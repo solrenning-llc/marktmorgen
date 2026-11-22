@@ -12,7 +12,7 @@ export const LESSON = "lesson0001ab";
 type Learner = { email: string; scope: "all"; owner: boolean };
 export const state = {
   crossSite: false,
-  store: { handle: "shop", sid: "submission-route-0", statsId: "c".repeat(32), email: "owner@example.test", tier: "creator" as const, subscriptionActive: true, subscriptionId: "sub_x", trialEnds: 0, planEndedAt: "" } as Record<string, unknown>,
+  store: { handle: "shop", sid: "submission-route-0", statsId: "c".repeat(32), listId: "list_submission_route", email: "owner@example.test", tier: "creator" as const, subscriptionActive: true, subscriptionId: "sub_x", trialEnds: 0, planEndedAt: "" } as Record<string, unknown>,
   found: "store" as "store" | "none" | "unknown",
   hold: true,
   action: true,
@@ -41,6 +41,8 @@ export const withinLimit = async (scope: string) => (state.events.push(`limit:${
 export const normaliseHandle = (raw: string) => raw.trim().toLowerCase();
 export const storeRef = () => "owner@example.test";
 export const storeFolder = async () => FOLDER;
+/** lib/auth.ts normaliseEmail, which lib/suppression.ts (the open's ask whether the buyer was deleted) reads. */
+export const normaliseEmail = (email: string) => email.trim().toLowerCase();
 // lib/store-exact.ts
 export const storeForHandleExactly = async () => (state.events.push("read:store"), state.found === "store" ? state.store : state.found);
 // lib/buyer-actions.ts

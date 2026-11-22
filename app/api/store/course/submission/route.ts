@@ -117,8 +117,11 @@ export async function POST(request: NextRequest) {
       const paused = costPauseCode(store);
       if (paused) return no(paused, 409);
       if (!(await withinLimit("submission-open", who, SUBMISSION_OPENS_PER_HOUR, 3_600))) return no("slow", 429);
+      // The store's list of its deleted people is kept under its list id (lib/suppression.ts); without one, the open
+      // cannot tell a deleted person from any other, so nothing opens (Codex L-20261120-2049).
+      if (!store.listId) return no("files_unavailable", 503);
       if (!(await takeBuyerAction(store))) return no("resting", 503);
-      const opened = await openSubmissionDoor({ ...where, data: store, email: learner!.email, setup: asked, file, nowSeconds: now });
+      const opened = await openSubmissionDoor({ ...where, data: store, listId: store.listId, email: learner!.email, setup: asked, file, nowSeconds: now });
       if (!opened.ok) {
         const status = { busy: 409, full: 409, budget: 503, room: 409, pending: 409, off: 404, invalid: 400, unavailable: 503 }[opened.reason];
         return no(opened.reason === "budget" ? "upload_budget_unavailable" : opened.reason === "unavailable" ? "files_unavailable" : opened.reason, status);

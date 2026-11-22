@@ -76,6 +76,7 @@ function world(overrides: Partial<DoorSteps> = {}) {
 const ask = (who = ANA, bytes = 50 * MiB, nowSeconds = NOW) => ({
   store: SHOP,
   data: SHOP as DataStore,
+  listId: "list_submission_store",
   folder: FOLDER,
   courseId: COURSE,
   lessonId: LESSON,
@@ -101,9 +102,13 @@ async function commandsOf<T>(work: () => Promise<T>): Promise<{ value: T; comman
 /** Answers one pipeline whose first command is `name` with nothing, as a reply out of shape. */
 /** A pipeline whose first command is `name`, or the close's one-step record write (lib/submission-store.ts, SUBMISSION_CLOSE_WRITE). */
 const CLOSE_WRITE = "close-write";
+/** The door's first write (SUBMISSION_DOOR_OPEN_WRITE), one EVAL where it was three commands (Codex L-20261120-2049). */
+const OPEN_WRITE = "open-write";
 const firstIs = (list: (string | number)[][], name: string) =>
   name === CLOSE_WRITE
     ? String(list[0]?.[0]) === "EVAL" && String(list[0]?.[1]).startsWith("-- marktmorgen:submission-close-write:v1")
+    : name === OPEN_WRITE
+    ? String(list[0]?.[0]) === "EVAL" && String(list[0]?.[1]).startsWith("-- marktmorgen:submission-door-open-write:v1")
     : String(list[0]?.[0]) === name.split(" ")[0] && (!name.split(" ")[1] || String(list[0]?.[2]) === name.split(" ")[1]);
 function breakNext(name: string) {
   const original = redis.pipeline.bind(redis);
@@ -209,7 +214,7 @@ async function main(): Promise<void> {
     is("storage that could not be measured is unknown, never room", await threw(() => openSubmissionDoor(ask(BOB), unknown.steps)), "Error: storage_unknown");
     is("and gives its place back", await liveCount(FOLDER, COURSE, LESSON, BOB, NOW), 0);
     const lost = world();
-    breakNext("SET");
+    breakNext(OPEN_WRITE);
     is("a door that could not be written is unknown", await threw(() => openSubmissionDoor(ask(BOB), lost.steps)), "unknown");
     is("its upload is given up before the browser hears of it", lost.calls, ["budget", "vault:open", "vault:abort"]);
     is("and its place comes back", await liveCount(FOLDER, COURSE, LESSON, BOB, NOW), 0);

@@ -40,6 +40,7 @@ import { reserveStoreUpload, reserveUploadControl, type UploadStore } from "@/li
 import { abortReservedVault, closeReservedVault, openReservedVault } from "@/lib/vault-storage";
 import { deleteVault, signPieces, type OpenedUpload } from "@/lib/vault";
 import { withLock } from "@/lib/redis-lock";
+import { isSuppressed } from "@/lib/suppression";
 import { STUDIO_UNIT_SENT_BYTES } from "@/lib/sent-bytes";
 import {
   MAX_SUBMISSION_KEEP_DAYS,
@@ -75,7 +76,10 @@ const LIVE_SECONDS = MAX_SUBMISSION_KEEP_DAYS * DAY + SUBMISSION_SWEEP_GRACE_SEC
 // Opening also writes the slot's turn on the store's list (two commands) and pays for the sweep's turn on it
 // (SUBMISSION_SLOT_SWEEP_COMMANDS; review of #3568, Claude 6); closing moves that turn to the kept file's keeping time
 // (two commands, the same one sweep).
-export const SUBMISSION_STEP_COMMANDS = { open: 14 + 2 + 10, sign: 1, done: 20 + 2, abort: 11 } as const;
+// Opening also asks twice whether the buyer was deleted from the store (lib/suppression.ts isSuppressed): before their
+// place is taken and again right after it; and its door's write is one step where it was three (SUBMISSION_DOOR_OPEN_WRITE)
+// (Codex L-20261120-2049, MEDIUM).
+export const SUBMISSION_STEP_COMMANDS = { open: 12 + 2 + 10 + 2, sign: 1, done: 20 + 2, abort: 11 } as const;
 /** Kept files the daily sweep deletes at most in one run; the rest wait for the next. */
 export const SUBMISSION_SWEEP_PER_RUN = 200;
 /** A file the sweep could not delete is tried again this much later, so it never holds back the files behind it. */
@@ -502,6 +506,8 @@ export type DoorAsk = {
   store: UploadStore;
   /** The store's data room (lib/store-data.ts), where the buyer's place is counted. */
   data: DataStore;
+  /** The store's list id, under which its deleted people are kept (lib/suppression.ts). */
+  listId: string;
   folder: string;
   courseId: string;
   lessonId: string;
@@ -531,8 +537,26 @@ export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_
   const until = ask.nowSeconds + UPLOAD_SECONDS;
   const slot = buyerSlotFor(place.folder, place.courseId, place.lessonId, place.who);
   if (!slot) throw new UnknownReplyError("the store's data room (no key to name a buyer's slot)");
+  // A person deleted from the store opens nothing (Codex L-20261120-2049, MEDIUM): their erasure writes their print on
+  // the store's list of the deleted before it reads what is theirs (lib/person-erasure.ts), so an open that starts after
+  // the print is refused here, and one that read "not deleted" before the print is caught by the second ask below, once
+  // its place is taken: a print written after that second ask finds the place and the entry already there, where the
+  // erasure's read of the buyer's index sees them. An answer that is not known is never "not deleted" (isSuppressed
+  // throws), and the place taken meanwhile is given back.
+  if (await isSuppressed(ask.listId, ask.email)) return { ok: false, reason: "unavailable" };
   // A place first: a buyer whose places are all held is refused before the room is touched (review of #3568).
   if (!(await takePlace(place, until, ask.nowSeconds))) return { ok: false, reason: "busy" };
+  let deleted: boolean;
+  try {
+    deleted = await isSuppressed(ask.listId, ask.email);
+  } catch (error) {
+    await givePlace(place).catch(() => undefined);
+    throw error;
+  }
+  if (deleted) {
+    await givePlace(place);
+    return { ok: false, reason: "unavailable" };
+  }
   // The slot's turn on the store's list before the room is set to its most, so a slot at its most always has a sweep
   // to set it back once this door's day is over (review of #3568, Claude 6). Not known to be written: nothing opens.
   try {
@@ -602,17 +626,24 @@ export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_
     };
     const doorJson = JSON.stringify(door);
     if (new TextEncoder().encode(doorJson).length > MAX_DOOR_BYTES) throw new Error("submission_door_bytes");
-    // The buyer's entry now names the file, so their erasure finds it from here on.
-    const who = whoKey(ask.folder, ask.who);
+    // The buyer's entry now names the file, so their erasure finds it from here on: written only while their place and
+    // entry are still there (SUBMISSION_DOOR_OPEN_WRITE). An erasure that ran meanwhile (its print written after the
+    // second ask above, its read of the buyer's index finding this place's entry) removed both, so the door, which
+    // names the buyer, is never written after it said done; the provider's session is cancelled and nothing is kept.
     const written = repliesFor(
-      await redisPipeline([
-        ["SET", doorKey(ask.folder, place.id), doorJson, "EX", UPLOAD_SECONDS, "NX"],
-        ["ZADD", who, until, entryOf(ask.courseId, ask.lessonId, place.id, pathname)],
-        ["ZREM", who, entryOf(ask.courseId, ask.lessonId, place.id)],
-      ]),
-      3,
+      await redisPipeline([[
+        "EVAL", SUBMISSION_DOOR_OPEN_WRITE, 3,
+        doorKey(ask.folder, place.id), whoKey(ask.folder, ask.who), liveKey(ask.folder, ask.courseId, ask.lessonId, ask.who),
+        place.id, entryOf(ask.courseId, ask.lessonId, place.id), entryOf(ask.courseId, ask.lessonId, place.id, pathname), doorJson, UPLOAD_SECONDS, until,
+      ]]),
+      1,
     );
-    if (written?.[0] !== "OK" || countOf(written[1]) !== 1 || countOf(written[2]) !== 1) throw new UnknownReplyError("a submission upload's write");
+    if (!written || (written[0] !== 0 && written[0] !== 1)) throw new UnknownReplyError("a submission upload's write");
+    if (written[0] === 0) {
+      await steps.abortReservedVault(pathname).catch(() => false);
+      await givePlace(place).then(giveBack, () => undefined);
+      return { ok: false, reason: "unavailable" };
+    }
     return { ok: true, upload: opened.upload };
   } catch (error) {
     // Nothing has reached the browser: the provider's session is cancelled, the door taken back (it carries the buyer's
@@ -643,6 +674,23 @@ export type DoorWhere = { store: UploadStore; folder: string; courseId: string; 
  * so nothing that names the buyer comes back. 0: not put back (erased, or the place is gone); 1: put back; 2: a door
  * was already there. Anything else is not known and throws (rule 24).
  */
+/**
+ * A door's first write, in the same step as the buyer's entry taking the file's path: only while the lesson's live
+ * entry and the buyer's bare entry (both taken in takePlace) are still there (Codex L-20261120-2049). An erasure that
+ * ran in between removed them, and a door that names the buyer must never be written after it said done. 0: not
+ * written (the place is gone); 1: written. A door already under this id, which is random, is not expected: the SET NX
+ * that fails then answers 0 too, and the open is refused. Anything else is not known and throws (rule 24).
+ */
+const SUBMISSION_DOOR_OPEN_WRITE = [
+  "-- marktmorgen:submission-door-open-write:v1",
+  'if not redis.call("ZSCORE", KEYS[3], ARGV[1]) then return 0 end',
+  'if not redis.call("ZSCORE", KEYS[2], ARGV[2]) then return 0 end',
+  'if not redis.call("SET", KEYS[1], ARGV[4], "EX", ARGV[5], "NX") then return 0 end',
+  'redis.call("ZADD", KEYS[2], ARGV[6], ARGV[3])',
+  'redis.call("ZREM", KEYS[2], ARGV[2])',
+  "return 1",
+].join("\n");
+
 const SUBMISSION_DOOR_PUT_BACK = [
   "-- marktmorgen:submission-door-put-back:v1",
   'if not redis.call("ZSCORE", KEYS[2], ARGV[1]) then return 0 end',

@@ -22,6 +22,7 @@ import { saveSetupFor } from "@/lib/submission-store";
 import type { SubmissionSetup } from "@/lib/submission-rules";
 import type { DataStore } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
+import { suppressCommand, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { COURSE, LESSON, resetWorld, state } from "./submission-upload-world";
 import { done, is, part } from "./check";
 
@@ -111,6 +112,19 @@ async function main(): Promise<void> {
   state.action = false;
   is("the store's buyer actions are used up", await open(), { status: 503, body: { ok: false, error: "resting" } });
   is("so no allowance is spent", state.events.includes("budget"), false);
+  // Codex L-20261120-2049 (MEDIUM): a person deleted from the store opens nothing, and a store whose list of the
+  // deleted cannot be named (no list id) opens nothing either, before any buyer action or allowance is taken.
+  resetWorld();
+  await redis.pipeline([suppressCommand("list_submission_route", "ana@example.com", 1_800_000_000)]);
+  is("a buyer deleted from the store cannot open", await open(), { status: 503, body: { ok: false, error: "files_unavailable" } });
+  is("the buyer action is taken, the allowance and the vault are not", [state.events.includes("action"), state.events.includes("budget"), state.events.includes("vault:open")], [true, false, false]);
+  await redis.pipeline([["HDEL", suppressedKey("list_submission_route"), suppressionPrint("list_submission_route", "ana@example.com")]]);
+  resetWorld();
+  const { listId } = state.store;
+  delete state.store.listId;
+  is("a store with no list id opens nothing", await open(), { status: 503, body: { ok: false, error: "files_unavailable" } });
+  is("before its buyer action", state.events.includes("action"), false);
+  state.store.listId = listId;
 
   part("Signing, closing and giving up");
   const path = upload?.pathname ?? "";

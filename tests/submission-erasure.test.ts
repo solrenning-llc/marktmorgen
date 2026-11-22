@@ -39,6 +39,7 @@ import {
 import { ERASE_SUBMISSIONS } from "@/lib/erasure-rules";
 import { type DataStore, dataKey } from "@/lib/store-data";
 import { UnknownReplyError } from "@/lib/redis-reply";
+import { suppressCommand } from "@/lib/suppression";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -48,6 +49,8 @@ const FOLDER = "0123456789abcdef0123456789abcdef";
 const COURSE = "course0001ab";
 const ANA = "a".repeat(32);
 const BOB = "b".repeat(32);
+/** The store's list id, under which its deleted people are kept (lib/suppression.ts). */
+const LIST = "list_submission_erasure";
 const SHOP: DataStore & { statsId: string; tier: "creator" } = { sid: "submission-erasure-0", statsId: "c".repeat(32), tier: "creator", subscriptionActive: true, subscriptionId: "sub_x", trialEnds: 0, planEndedAt: "" };
 const SETUP: SubmissionSetup = { instruction: "Send your form check.", kinds: ["video", "pdf"], maxBytes: 200 * MiB, keepDays: 30 };
 const NOW = 1_800_000_000;
@@ -74,6 +77,7 @@ function world(overrides: Partial<DoorSteps> = {}) {
 const ask = (who: string, lessonId: string, nowSeconds = NOW) => ({
   store: SHOP,
   data: SHOP as DataStore,
+  listId: LIST,
   folder: FOLDER,
   courseId: COURSE,
   lessonId,
@@ -492,8 +496,9 @@ async function main(): Promise<void> {
   }
 
   // Review of #3570 (Claude 1 cloud, LOW): an erasure between the place and the door's write made the open fail, and its
-  // catch kept the door it had just written, with the buyer's address, for up to a day.
-  part("An open that fails after writing its door takes the door back");
+  // catch kept the door it had just written, with the buyer's address, for up to a day. Since Codex L-20261120-2049 the
+  // door's write is fenced on the place (SUBMISSION_DOOR_OPEN_WRITE): the open is refused, and no door is written at all.
+  part("An open whose place an erasure took before its door's write is refused and writes no door");
   {
     const who = "4".repeat(32);
     let id = "";
@@ -504,8 +509,9 @@ async function main(): Promise<void> {
         return { ok: true, sessionId: "s", upload: { pathname: `vault/${input.folder}/${input.ownerId}/0000000000000001-${input.name}`, pieces: 1, pieceBytes: 16 * MiB, multipart: true } };
       },
     });
-    is("control: the open is refused as unknown", await threw(() => openSubmissionDoor(ask(who, lesson(42)), racing.steps)), "unknown");
-    is("and leaves no door behind", (await redis.pipeline([["EXISTS", `nl:sub:door:${FOLDER}:${id}`]]))[0], 0);
+    is("the open is refused", await openSubmissionDoor(ask(who, lesson(42)), racing.steps), { ok: false, reason: "unavailable" });
+    is("its provider session is cancelled", racing.calls.some((call) => call.startsWith("abort ")), true);
+    is("and no door was written", (await redis.pipeline([["EXISTS", `nl:sub:door:${FOLDER}:${id}`]]))[0], 0);
   }
 
   // Codex N1's MÉDIO on #3570 (RED from Codex U and X4): a close or abort takes the door with GETDEL and waits on the
@@ -611,6 +617,139 @@ async function main(): Promise<void> {
       release();
       redis.pipeline = original;
     }
+  }
+
+  // Codex L-20261120-2049 (MEDIUM): an erasure writes the person's print on the store's list of the deleted first, then
+  // reads what is theirs once; an open of theirs that ran in between left a live place, an entry, a door and a vault
+  // session after the erasure said done. Now the open asks that list before and after taking its place.
+  part("A person deleted from the store opens nothing, and an open racing their erasure leaves nothing (Codex L-20261120-2049)");
+  {
+    const left = async (who: string, lessonId: string) =>
+      (await redis.pipeline([["ZCARD", `nl:sub:live:${FOLDER}:${COURSE}:${lessonId}:${who}`], ["ZCARD", `nl:sub:who:${FOLDER}:${who}`]])) as [number, number];
+    // A world that counts the vault sessions it opened: a refused open never asks the vault, so never writes a door.
+    const counting = () => {
+      const w = world({ openReservedVault: async (input) => (w.calls.push("vault:open"), { ok: true, sessionId: "s", upload: { pathname: `vault/${input.folder}/${input.ownerId}/0-${input.name}`, pieces: 1, pieceBytes: 16 * MiB, multipart: true } }) });
+      return w;
+    };
+    const nothing = async (who: string, lessonId: string) => [...(await left(who, lessonId))];
+
+    // Already deleted: refused before a place is taken, the vault never asked.
+    const gone = "d0".repeat(16);
+    await redis.pipeline([suppressCommand("list_erased_before", "bob@example.com", NOW)]);
+    const before = counting();
+    is("a deleted person's open is refused", await openSubmissionDoor({ ...ask(gone, lesson(50)), listId: "list_erased_before" }, before.steps), { ok: false, reason: "unavailable" });
+    is("with no place, no entry and no vault session (so no door)", [...(await nothing(gone, lesson(50))), before.calls], [0, 0, []]);
+    is("control: the same person in another store, not deleted there, opens", (await openSubmissionDoor({ ...ask(gone, lesson(50)), listId: "list_other_store" }, world().steps)).ok, true);
+
+    // Deleted between the open's first ask and its place: the second ask catches it and the place is given back.
+    const racing = "d1".repeat(16);
+    const original = redis.pipeline.bind(redis);
+    let printed = false;
+    redis.pipeline = (async (list: (string | number)[][]) => {
+      const reply = await original(list);
+      if (!printed && list[0]?.[0] === "ZADD" && String(list[0][1]).startsWith(`nl:sub:live:${FOLDER}:${COURSE}:${lesson(51)}:${racing}`)) {
+        printed = true;
+        await original([suppressCommand("list_erased_between", "bob@example.com", NOW)]);
+      }
+      return reply;
+    }) as typeof redis.pipeline;
+    const between = counting();
+    let opened: unknown;
+    try {
+      opened = await openSubmissionDoor({ ...ask(racing, lesson(51)), listId: "list_erased_between" }, between.steps);
+    } finally {
+      redis.pipeline = original;
+    }
+    is("control: the print was written once the place was taken", printed, true);
+    is("the open is refused", opened, { ok: false, reason: "unavailable" });
+    is("and the place taken meanwhile is given back, nothing else written", [...(await nothing(racing, lesson(51))), between.calls], [0, 0, []]);
+
+    // The second ask not answered: unknown, never "not deleted"; the place is given back.
+    const unsure = "d2".repeat(16);
+    let broken = false;
+    redis.pipeline = (async (list: (string | number)[][]) => {
+      if (!broken && list[0]?.[0] === "HEXISTS" && list[0][1] === "nl:erased:list_erased_unknown") {
+        broken = true;
+        return ["maybe"];
+      }
+      return original(list);
+    }) as typeof redis.pipeline;
+    // The first ask is let through: HEXISTS of a print never written answers 0 on the stand-in; break the second only.
+    let asked = 0;
+    const breaking = redis.pipeline;
+    redis.pipeline = (async (list: (string | number)[][]) => {
+      if (list[0]?.[0] === "HEXISTS" && list[0][1] === "nl:erased:list_erased_unknown" && (asked += 1) === 1) return original(list);
+      return breaking(list);
+    }) as typeof redis.pipeline;
+    const unsureWorld = counting();
+    let thrown: string;
+    try {
+      thrown = await threw(() => openSubmissionDoor({ ...ask(unsure, lesson(52)), listId: "list_erased_unknown" }, unsureWorld.steps));
+    } finally {
+      redis.pipeline = original;
+    }
+    is("control: the second ask was the broken one", [asked, broken], [2, true]);
+    is("an answer not known refuses the open as unknown", thrown, "unknown");
+    is("and gives the place back, nothing else written", [...(await nothing(unsure, lesson(52))), unsureWorld.calls], [0, 0, []]);
+
+    // The report's interleaving: the erasure has written the print and taken its one read of the person's entries;
+    // an open of theirs runs whole; the erasure goes on and says done. The open must be refused, with nothing left.
+    const during = "d3".repeat(16);
+    await redis.pipeline([suppressCommand("list_erased_during", "bob@example.com", NOW)]);
+    let openedDuring: unknown = "not run";
+    const duringWorld = counting();
+    let snapshotTaken = false;
+    redis.pipeline = (async (list: (string | number)[][]) => {
+      const reply = await original(list);
+      if (!snapshotTaken && list[0]?.[0] === "ZRANGEBYSCORE" && list[0][1] === `nl:sub:who:${FOLDER}:${during}`) {
+        snapshotTaken = true;
+        redis.pipeline = original;
+        openedDuring = await openSubmissionDoor({ ...ask(during, lesson(53)), listId: "list_erased_during" }, duringWorld.steps).catch((error: unknown) => String(error));
+      }
+      return reply;
+    }) as typeof redis.pipeline;
+    const files: string[] = [];
+    let erased: number | string;
+    try {
+      erased = await forgetSubmissionsPerson(FOLDER, during, files, world().steps).catch((error: unknown) => String(error));
+    } finally {
+      redis.pipeline = original;
+    }
+    is("control: the open ran after the erasure's read of the person's entries", snapshotTaken, true);
+    is("the erasure said done", erased, 0);
+    is("the open that ran in between was refused", openedDuring, { ok: false, reason: "unavailable" });
+    is("and nothing of the person is left: no place, no entry, no vault session (so no door)", [...(await nothing(during, lesson(53))), duringWorld.calls], [0, 0, []]);
+
+    // The erasure whole between the open's second ask and its door's write: the print came after both asks, its read
+    // of the buyer's index found the place's entry, and it said done. The door is never written after that
+    // (SUBMISSION_DOOR_OPEN_WRITE): the provider's session is cancelled and the open is refused.
+    const late = "d4".repeat(16);
+    let asks = 0;
+    let erasedLate: number | string = "not run";
+    const lateFiles: string[] = [];
+    const lateWorld = counting();
+    redis.pipeline = (async (list: (string | number)[][]) => {
+      const reply = await original(list);
+      if (list[0]?.[0] === "HEXISTS" && list[0][1] === "nl:erased:list_erased_late" && (asks += 1) === 2) {
+        redis.pipeline = original;
+        await original([suppressCommand("list_erased_late", "bob@example.com", NOW)]);
+        erasedLate = await forgetSubmissionsPerson(FOLDER, late, lateFiles, world().steps).catch((error: unknown) => String(error));
+      }
+      return reply;
+    }) as typeof redis.pipeline;
+    let openedLate: unknown;
+    try {
+      openedLate = await openSubmissionDoor({ ...ask(late, lesson(54)), listId: "list_erased_late" }, lateWorld.steps);
+    } finally {
+      redis.pipeline = original;
+    }
+    is("control: the erasure ran whole after the second ask and said done", [asks, erasedLate], [2, 0]);
+    is("the open is refused", openedLate, { ok: false, reason: "unavailable" });
+    const aborted = lateWorld.calls.find((call) => call.startsWith("abort "));
+    const lateId = aborted?.split("/")[2]?.slice(4) ?? "no abort";
+    is("the provider's session was opened and then cancelled", [lateWorld.calls.filter((call) => !call.startsWith("abort ")), typeof aborted], [["vault:open"], "string"]);
+    const lateDoor = (await redis.pipeline([["EXISTS", `nl:sub:door:${FOLDER}:${lateId}`]]))[0];
+    is("no door that names the buyer was written, no place and no entry remain", [lateDoor, ...(await nothing(late, lesson(54)))], [0, 0, 0]);
   }
 
   done();

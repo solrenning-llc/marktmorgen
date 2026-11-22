@@ -3,7 +3,7 @@ import { channelOfRequest } from "@/lib/visit-channel";
 import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 import { createTipCheckout, tipsOpen } from "@/lib/store-tip-checkout";
 import { readTipAmount, tipAmounts, tipKept } from "@/lib/store-tips";
 import { consumerGate } from "@/lib/eu-vat-gate";
@@ -79,7 +79,9 @@ export async function POST(request: NextRequest) {
   if (!gate.ok) return away(gate.reason === "refused" ? "abroad" : "country");
 
   // Twenty a connection in ten minutes per store: far past any fan, short of a script trying cards.
-  if (!(await withinStore("tip", `${clientAddress(request)}|${store.handle}`, 20, 600, store))) return away("limited");
+  const room = await withinStore("tip", `${clientAddress(request)}|${store.handle}`, 20, 600, store).catch(unknownLimit);
+  if (room === "unknown") return away("error");
+  if (!room) return away("limited");
   try {
     const opened = await createTipCheckout(
       store,

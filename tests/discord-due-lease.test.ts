@@ -12,7 +12,8 @@ import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount
 import { emailKey, storeKey } from "@/lib/learn";
 import { CHECK_HOURS } from "@/lib/discord-rules";
 import { joinServer, sweepDiscord } from "@/lib/discord-access";
-import { DISCORD_DUE_PER_RUN, DUE_LEASE_SECONDS, checkSoon, dueMembers, forgetMember, readMember, saveServer, setProductRoles } from "@/lib/discord-store";
+import { DISCORD_DUE_PER_RUN, DUE_LEASE_SECONDS, checkSoon, dueMembers, forgetMember, readMember, setProductRoles } from "@/lib/discord-store";
+import { seedDiscordServer as saveServer } from "./discord-server-fixture";
 import { store as redis } from "./redis-stub";
 import { NOT_A_COST } from "./plan-cost-registry";
 import { done, is, part } from "./check";

@@ -5,7 +5,7 @@ import { countAffiliateClick, countHit, countVisit, isStorePeople } from "@/lib/
 import { isBot } from "@/lib/source-rules";
 import { funnelMark, stepIndex } from "@/lib/page-funnel";
 import { countFunnelStep, funnelVisitor, readPageFunnel } from "@/lib/page-funnel-store";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { markCountGap, takeSignal } from "@/lib/traffic";
 import { type CountKind, HIT_STORE_LIMIT, shareAddress } from "@/lib/traffic-rules";
 import { affiliatesOn } from "@/lib/affiliates";
@@ -93,11 +93,14 @@ export async function POST(request: NextRequest) {
   // One address's allowance is one address's alone: what it sends past it is
   // left out as a repeat and never written down, or one machine could hide any
   // store's rates (Claude 5 on b2acc71c18, 7 November 2026, M1).
-  if (!(await withinLimit(allowance[0], `${from}|${handle}`, allowance[1], 600))) return done();
+  // Past the limit, or a count that could not be read (unknown, rule 24): not counted, and the answer is the same.
+  if ((await withinLimit(allowance[0], `${from}|${handle}`, allowance[1], 600).catch(unknownLimit)) !== true) return done();
   // The store's own ten minutes for what is not a page (lib/traffic-rules.ts, HIT_STORE_LIMIT): views and pages are
   // never under it. Past it many machines at once were sending, and counts may have been lost: written down, under the
   // kind of count refused, for a store that exists, so no rate is shown from counts that were not whole.
-  if (kind !== "v" && kind !== "p" && !(await withinLimit("hit-store", handle, HIT_STORE_LIMIT, 600))) {
+  // A store count that could not be read (unknown, rule 24) is treated as past it: nothing is counted, and the gap is
+  // written down, so no rate is shown from counts that may not be whole.
+  if (kind !== "v" && kind !== "p" && (await withinLimit("hit-store", handle, HIT_STORE_LIMIT, 600).catch(unknownLimit)) !== true) {
     await floodMark(handle, kind === "f" ? "steps" : "clicks");
     return done();
   }

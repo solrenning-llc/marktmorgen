@@ -11,6 +11,7 @@ import { Carry, CommunityBar, communityNotices } from "@/components/community-pa
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { levelOf, pointsOf, toNextLevel } from "@/lib/community-points";
+import { ForgetQuizDraftsOnSubmit } from "@/components/quiz-sweep";
 
 type Params = { params: Promise<{ handle: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
@@ -135,6 +136,7 @@ export default async function CommunityYouPage({ params, searchParams }: Params)
           </p>
           {!viewer.owner ? (
             <form action="/api/store/community" method="post" className="mt-4">
+              <ForgetQuizDraftsOnSubmit />
               <Carry store={store} action="signout" from="you" />
               <button type="submit" className="cm-pill">{w.signOutDevice}</button>
             </form>

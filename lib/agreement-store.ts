@@ -496,8 +496,11 @@ export async function signAgreement(store: Store, id: string, input: SignInput, 
   }
 }
 
-/** The store's agreements, newest first; null when they cannot be read. */
-export async function listAgreements(store: Store): Promise<Agreement[] | null> {
+/**
+ * The store's agreements, newest first; null when they cannot be read. Expired ids are dropped from the index, unless
+ * `prune` is false: a person's data copy only reads (lib/person-copy.ts; issue #5125).
+ */
+export async function listAgreements(store: Store, { prune = true }: { prune?: boolean } = {}): Promise<Agreement[] | null> {
   if (!isRedisConfigured() || !store.sid) return null;
   try {
     // Each reply read from its own slots (lib/redis-reply.ts, rule 30): the person's data copy reads through here.
@@ -519,7 +522,7 @@ export async function listAgreements(store: Store): Promise<Agreement[] | null> 
       if (!agreement || agreement.sid !== store.sid || agreement.id !== id) throw new Error("Agreement record could not be verified");
       out.push(agreement);
     });
-    if (gone.length) await redisPipeline([["ZREM", storeKey(store.sid), ...gone]]);
+    if (prune && gone.length) await redisPipeline([["ZREM", storeKey(store.sid), ...gone]]);
     return out;
   } catch (error) {
     console.error("reading agreements failed", error);

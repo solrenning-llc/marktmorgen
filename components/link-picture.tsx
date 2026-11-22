@@ -21,6 +21,8 @@ const MESSAGES: Record<string, string> = {
   // A name that is neither a new upload nor this one's own picture (app/api/store/image, app/api/store/link-image): used
   // elsewhere, or an upload a failed try already took. Said neutrally, so it is true either way.
   in_use: "That picture could not be used here. Choose it from your device again.",
+  // The file store did not answer while the picture was checked (app/api/store/link-image): nothing saved, the file kept.
+  check_unavailable: "That picture could not be checked just now, so nothing was saved. Choose it from your device again in a moment.",
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
   store_full: "Your store is full. Remove something before adding more.",

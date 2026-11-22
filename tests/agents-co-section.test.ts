@@ -26,9 +26,12 @@ for (const words of [
 ]) is(`quotes: ${words.slice(0, 40)}...`, co.includes(words), true);
 
 part("how to install it and keep the watcher on");
-is("the install command",
-  co.includes("git fetch -q https://github.com/solrenning-llc/repo-id-transfer-test +correio:refs/agent-mail/tool && git show refs/agent-mail/tool:agent-mail.mjs > /tmp/agent-mail.mjs"), true);
-is("the watcher, waking on mail and on review or queue requests", co.includes('node /tmp/agent-mail.mjs watch --as "Claude N" --also review,enqueue'), true);
+is("the install command takes the tool from main and installs it only with the reviewed SHA-256 (owner, OWNER-20261121-1904, step 1)",
+  [co.includes("git fetch -q https://github.com/solrenning-llc/marktmorgen main && git show FETCH_HEAD:tooling/agent-mail/agent-mail.mjs > ~/.agent-mail/new.mjs"),
+   co.includes(`~/.agent-mail/new.mjs ${readFileSync("tooling/agent-mail/agent-mail.sha256", "utf8").slice(0, 64)}\``),
+   co.includes("repo-id-transfer-test +correio:refs/agent-mail/tool"), co.includes("/tmp/agent-mail.mjs")], [true, true, false, false]);
+is("the watcher, waking on mail and on review or queue requests", co.includes('node ~/.agent-mail/agent-mail.mjs watch --as "Claude N" --also review,enqueue'), true);
+is("the correio branch holds only data; the code is reviewed in tooling/agent-mail/", [/O ramo `correio` guarda só dados/.test(co), /`tooling\/agent-mail\/` do main deste repositório, revisado por PR/.test(co)], [true, true]);
 is("the Codex reads it at each hourly task", /Codex[^.]*hora em hora/.test(co), true);
 
 part("everything the owner asked it to cover");
@@ -59,6 +62,14 @@ is("no earlier command name (Portuguese or the first English draft) is taught in
 is("a queue take lapses in 10 minutes and only the taker renews it; review keeps 30", [/Uma tomada sem conclusão em 10 minutos/.test(co), /`renew-enqueue`, que só a sessão que pegou pode usar/.test(co), /na revisão, o prazo continua de 30 minutos/.test(co)], [true, true, true]);
 is("claim-enqueue checks the merge queue and concludes what is already queued", /contra cada grupo da fila de integração do GitHub, e conclui sozinho como recusado o que conflita e como enfileirado o que já está nessa fila ou no main/.test(co), true);
 is("(k) identity: the session from the environment, refusal of another family's name, and the limit said plainly", [/\(k\) \*\*Identidade\.\*\*/.test(co), /recusa escrever com o nome de outra família/.test(co), /não é assinatura criptográfica/.test(co)], [true, true, true]);
+part("(l) switches and review records (owner, OWNER-20261121-1749)");
+is("(l) cites the owner's authorization", co.includes("OWNER-20261121-1749-QUEUE-IMPROVEMENTS-AUTH"), true);
+is("switches start off, only the named session turns one on (full session id, owner's order step 2), anyone turns one off", [/começa desligado/.test(co), /só a sessão nomeada, Claude 5 ibqho \(`session_012ST5ibqhoHCYrphJXU5az3`\), conferida pelo identificador completo/.test(co), /qualquer sessão o desliga/.test(co)], [true, true, true]);
+is("privileged actions: the backup's three cases, distance, the #4932 request and the stated limit (C1-20261121-2036-C6-1)", [/a reserva, Claude 1 A \(`session_01DKvYQaxPrZTrVdXNwosXYi`\), só em três casos/.test(co), /nunca age num PR que escreveu, revisou ou enfileirou/.test(co), /pedido do coordenador publicado na #4932 \(`--request`\)/.test(co), /isso não é autenticação/.test(co)], [true, true, true, true]);
+is("record-review needs the exact head and the PR comment link", /`record-review`, com o head exato e o link do comentário da revisão no PR, ambos obrigatórios/.test(co), true);
+is("the PR comment stays the only proof of a review (2.1)", /o comentário no PR continua sendo a única prova da revisão para FQ \(1\), RQ e CV/.test(co), true);
+is("a record counts only for its head (2.3)", /o registro vale só para o head registrado; um head novo o anula/.test(co), true);
+is("unchecked records are shown as such, and unidentified ones take no one out until confirmed (2.4, R3)", [/aparece como NÃO CONFERIDO/.test(co), /não tira ninguém da fila até o coordenador confirmá-lo \(`confirm-review-record`\)/.test(co)], [true, true]);
 is("it ends with the standard sentence", co.trim().endsWith("Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo."), true);
 
 done();

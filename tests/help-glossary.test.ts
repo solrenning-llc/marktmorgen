@@ -70,6 +70,15 @@ async function main(): Promise<void> {
     is("it is in the page as the server draws it, before any script runs", html.includes("data-help-terms"), true);
   }
 
+  // Codex X6 LOW @d246230fa9: a dispute does not leave the money with the bank. Stripe takes the disputed amount from
+  // the creator's balance at once, and gives it back only if the creator wins.
+  part("What a dispute does to the money");
+  {
+    const dispute = HELP_TERMS.find((t) => t.term === "Dispute")?.meaning ?? "";
+    is("it never says the bank holds the money", /\bholds?\b/i.test(dispute), false);
+    is("it says the amount is taken from the creator's balance while the bank decides", /taken from your balance while the bank decides/.test(dispute), true);
+    is("and that it comes back only if the creator wins", /comes back only if you win/.test(dispute), true);
+  }
   done();
 }
 

@@ -129,6 +129,7 @@ import { RESEND_TIMEOUT_MS, STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { MAX_BUMPS } from "@/lib/product-extras";
+import { ABOUT_FENCE_EXTRA_COMMANDS } from "@/lib/product-about-live";
 import { AFFILIATE_ROW_CAP, PRODUCT_CARD_CPU_SECONDS, PRODUCT_CARD_HELD_SECONDS, PRODUCT_CARD_MAX_BYTES, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
 import { BOOK_STRIPE_READS } from "@/lib/book-page-rules";
 import { FEED_TIMEOUT_MS, MAX_FEEDS } from "@/lib/calendar-sync";
@@ -1309,6 +1310,17 @@ export const BESIDE_SWEEP_USD =
  */
 export function besideSaveUsd(tier: Tier): number {
   return STORE_ALLOWANCES[tier].studio * BESIDE_SAVE_COMMANDS * COMMAND;
+}
+
+/**
+ * A product's long description written fenced by the store's erasure (lib/product-about-live.ts writeStoreAbout and
+ * writeStoreAboutIf, Codex L-20261120-1755): ABOUT_FENCE_EXTRA_COMMANDS more than the unfenced write, as Upstash bills a
+ * script's inner commands. Priced on every studio and API request of the month as if each wrote two (an agent's
+ * proposal confirmed, then put back), the most one request writes. An import's rows carry theirs in
+ * IMPORT_WORST_COMMANDS_PER_ROW and a store copy's products in COPY_COMMANDS.product.
+ */
+export function aboutFenceUsd(tier: Tier): number {
+  return (STORE_ALLOWANCES[tier].studio + STORE_ALLOWANCES[tier].api) * 2 * ABOUT_FENCE_EXTRA_COMMANDS * COMMAND;
 }
 
 /**
@@ -2968,8 +2980,10 @@ export const COST_LINES: CostLine[] = [
     feature: "The studio's own reads and writes: every page of it drawn (STUDIO_PAGE_UNITS each), every save and read, its refreshing; and the never-paused plan, cancel, delete and data-download requests (17 October 2026)",
     // And the beside pool's read, take and give-back on a product save while the store pays, priced on every studio
     // request (besideSaveUsd; TAKE_DATA's inner commands, as Upstash bills them).
-    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8) + besideSaveUsd(tier) + teamLogFenceUsd(tier),
+    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8) + besideSaveUsd(tier) + aboutFenceUsd(tier) + teamLogFenceUsd(tier),
     sources: [
+      // A product's long description written fenced by the store's erasure (aboutFenceUsd).
+      { file: "lib/product-about-live.ts", names: ["ABOUT_FENCE_EXTRA_COMMANDS", "ABOUT_WRITE_IF_STORE_LIVE"] },
       // Goal save/removal: EVAL plus EXISTS, HEXISTS and one SET or DEL; four billed commands inside the studio request.
       { file: "lib/sales-goal.ts", names: ["SALES_GOAL_WRITE_COMMANDS"] },
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "studio"] },

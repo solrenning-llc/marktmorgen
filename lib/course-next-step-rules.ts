@@ -185,3 +185,17 @@ export function nextStepShown(input: {
 export function nextStepPlace(where: { page: "course" | "lesson"; finishedNow: boolean }): boolean {
   return where.page === "course" || where.finishedNow;
 }
+
+/**
+ * Whether the lesson a student is on is the moment they finish the course: it
+ * is the course's last lesson in order, with no lesson after it, it is marked
+ * done, and so is every lesson the course has now. Lessons done that could not be read (null) are not finished.
+ */
+export function finishedNow(input: { lessons: readonly string[]; done: ReadonlySet<string> | null; at: string; hasNext: boolean }): boolean {
+  const { lessons, done } = input;
+  if (!done || input.hasNext || !lessons.length || !done.has(input.at)) return false;
+  // The last lesson in the course's order, not just one with no reachable lesson after it: a later lesson behind a
+  // drip date leaves an earlier one with no next, and revisiting it is not finishing (Codex X6 on #3534).
+  if (lessons[lessons.length - 1] !== input.at) return false;
+  return lessons.every((id) => done.has(id));
+}

@@ -68,8 +68,8 @@ export const HELP_AREAS: readonly HelpArea[] = [
 
 /** Studio areas the help center has no answer for yet, by folder, each with what that answer is to explain. */
 export const AREAS_WITHOUT_HELP: Readonly<Record<string, string>> = {
-  fees: "The fees on the store's sales and what the creator keeps (282 [HG1]), read from the creator's own Stripe account: the help center has no answer about Stripe's fees yet. Its screen help lists \"Whose account is the buyer charged on?\" as the closest answer, not as an answer about fees.",
   declines: "The Declined payments report, opened from the disputes review: the help center has no answer about card declines yet. Its screen help lists \"Who handles refunds and disputes?\" as the closest answer, the one for the screen it opens from, not as an answer about declines.",
+  fees: "The fees on the store's sales and what the creator keeps (282 [HG1]), read from the creator's own Stripe account: the help center has no answer about Stripe's fees yet. Its screen help lists \"Whose account is the buyer charged on?\" as the closest answer, not as an answer about fees.",
   students: "Filtering a course's students and changing many at once (the Students screen): the course answer says who opened it and how to take a student off, not this screen.",
 };
 

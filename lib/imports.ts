@@ -87,11 +87,11 @@ import { ContactImportUnknownError, type ContactOutcome, type ImportedContact, M
 import { moveStopLink, remindersStoppedAmong } from "@/lib/checkout-recovery";
 import { csvLine, readConsent } from "@/lib/csv";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
-import { grantUnlessErased, importedFor } from "@/lib/imported-purchases";
+import { grantUnlessErased, importedFor, importedFrom, importedKey } from "@/lib/imported-purchases";
 import { deliverableItems } from "@/lib/bundle-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
 import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, mailDay, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
-import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
+import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, IMPORT_WORST_BYTES_PER_ROW, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { newCostCode } from "@/lib/plan-standing";
 import { healthTags, moveTags, noteSent, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
 import { stopTags } from "@/lib/mail-health-rules";
@@ -100,7 +100,7 @@ import { storeBase } from "@/lib/purchase-email";
 import { movedPurchaseWords } from "@/lib/buyer-words/moved-purchases";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
-import { inviteEmail, inviteMembers, keptAlready, moveFoot, movePostal, noteKept, dropReminder, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
+import { INVITE_OWN_READ_COMMANDS, inviteEmail, inviteMembers, keptAlready, moveFoot, movePostal, noteKept, dropReminder, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
 import { type DateOrder, MAX_AHEAD_DAYS, MAX_MOVED_MEMBERS, REMIND_DAYS_BEFORE, readRenewal } from "@/lib/move-rules";
 import { type ContactConsent, consentFrom, readClickFunnelsStatus, readOrderStatus } from "@/lib/clickfunnels-csv";
 
@@ -133,6 +133,17 @@ const CELL_CAPS: Record<ImportKind, number[]> = {
 
 /** Rows applied in one step, by kind: small enough that a step is a few seconds at most. */
 const CHUNK: Record<ImportKind, number> = { contacts: 1_000, products: 50, purchases: 250, members: 250 };
+/** The same figures, for the cost line and the tests that hold a step's reads to them. */
+export const IMPORT_STEP_ROWS: Readonly<Record<ImportKind, number>> = CHUNK;
+/**
+ * What a step done again reads of what it may have written on the try that failed (issue #3957), priced on every
+ * step, since any step can be one: a purchases step one HGET for each row it saw before that answered "already"
+ * (grantedByThisImport, at most a step's rows), a members step one HMGET of the invitations found already written
+ * (lib/move-members.ts ownInvites). Each record read is one this import wrote for one row, at most a row's
+ * IMPORT_WORST_BYTES_PER_ROW (tests/import-mail-retry.test.ts measures both).
+ */
+export const RETRY_OWN_READ_COMMANDS = Math.max(CHUNK.purchases, INVITE_OWN_READ_COMMANDS);
+export const RETRY_OWN_READ_BYTES = Math.max(CHUNK.purchases, CHUNK.members) * IMPORT_WORST_BYTES_PER_ROW;
 /** Buyers emailed in one step. */
 const MAIL_CHUNK = 100;
 /**
@@ -992,22 +1003,32 @@ async function note(job: ImportJob, problems: Problem[], kind: "errors" | "skipp
 /**
  * Notes each key as seen on its row; answers, for each, the earlier row it
  * was seen on, or null when this is the first. Seeing the same row again
- * (a step repeated after a failure) is not a repeat.
+ * (a step repeated after a failure) is not a repeat: its index is put in
+ * `tried`, when given, for a step that must tell its own earlier writes.
  */
-async function firstSeen(job: ImportJob, keys: { key: string; line: number }[]): Promise<(number | null)[]> {
+async function firstSeen(job: ImportJob, keys: { key: string; line: number }[], tried?: Set<number>): Promise<(number | null)[]> {
   if (!keys.length) return [];
-  const answers = await redisPipeline([
+  const answers = repliesFor(await redisPipeline([
     ...keys.map(({ key, line }) => ["HSETNX", seenKey(job.id), key, String(line)]),
     ["EXPIRE", seenKey(job.id), KEEP_SECONDS],
-  ]);
-  const again = keys.map((_, i) => Number(answers[i]) !== 1);
-  const lines = again.some(Boolean)
-    ? ((await redisPipeline([["HMGET", seenKey(job.id), ...keys.map((k) => k.key)]]))[0] as unknown[])
-    : [];
+  ]), keys.length + 1);
+  const marks = answers?.slice(0, keys.length);
+  if (!marks || answers?.[keys.length] !== 1 || marks.some((mark) => mark !== 0 && mark !== 1)) {
+    throw new UnknownReplyError("which import rows were already seen");
+  }
+  if (!marks.includes(0)) return keys.map(() => null);
+
+  const read = repliesFor(await redisPipeline([["HMGET", seenKey(job.id), ...keys.map(({ key }) => key)]]), 1);
+  const lines = repliesFor(read?.[0], keys.length);
+  if (!lines || !lines.every((row) => typeof row === "string" && /^[1-9]\d*$/.test(row) && Number.isSafeInteger(Number(row)))) {
+    throw new UnknownReplyError("where the import rows were first seen");
+  }
   return keys.map(({ line }, i) => {
-    if (!again[i]) return null;
-    const earlier = Number(Array.isArray(lines) ? lines[i] : NaN);
-    return Number.isFinite(earlier) && earlier !== line ? earlier : null;
+    if (marks[i] === 1) return null;
+    const earlier = Number(lines[i]);
+    if (earlier !== line) return earlier;
+    tried?.add(i);
+    return null;
   });
 }
 
@@ -1372,6 +1393,18 @@ function classifyPurchases(listings: Awaited<ReturnType<typeof readListings>>, r
   return { valid, problems, skipped };
 }
 
+/**
+ * Of these rows, whose grant answered "already", the ones this import itself gave: their record names this import's
+ * job (lib/imported-purchases.ts). One HGET a row, read exactly (CX-123 rule 24): any reply but text or nothing
+ * throws, the step left as it was, never taken as somebody else's grant. Nothing is read when there are no rows.
+ */
+async function grantedByThisImport<T extends { email: string; productId: string }>(statsId: string, job: ImportJob, rows: T[]): Promise<Set<T>> {
+  if (!rows.length) return new Set();
+  const replies = repliesFor(await redisPipeline(rows.map((v) => ["HGET", importedKey(statsId, v.email), v.productId])), rows.length);
+  if (!replies || replies.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("the purchases an import gave before");
+  return new Set(rows.filter((v, i) => importedFrom([v.productId, replies[i]])[0]?.job === job.id));
+}
+
 async function purchasesStep(job: ImportJob, store: Store, rows: string[][]): Promise<void> {
   const statsId = store.statsId;
   if (!statsId) throw new Error("the store has no statsId");
@@ -1389,7 +1422,9 @@ async function purchasesStep(job: ImportJob, store: Store, rows: string[][]): Pr
     skipped.push({ line: v.line, column: "email", problem: DELETED, value: "" });
     return false;
   });
-  const seen = await firstSeen(job, kept.map((v) => ({ key: `p:${v.email}|${v.productId}`, line: v.line })));
+  const tried = new Set<number>();
+  const seen = await firstSeen(job, kept.map((v) => ({ key: `p:${v.email}|${v.productId}`, line: v.line })), tried);
+  const retried = new Set(kept.filter((_, i) => tried.has(i)));
   const repeats: { v: (typeof kept)[number]; earlier: number }[] = [];
   const fresh = kept.filter((v, i) => {
     if (seen[i] === null) return true;
@@ -1399,6 +1434,9 @@ async function purchasesStep(job: ImportJob, store: Store, rows: string[][]): Pr
   // Checked again where each is written, in the same step (GRANT_UNLESS_ERASED): somebody deleted since is left out
   // the same way, nothing written for them, and let go from the rows the import saw.
   const given = await grantUnlessErased(statsId, job.id, fresh.map((v) => ({ email: v.email, productId: v.productId, items: v.bundle })), erasedCheck(listId), store).catch(writeUnknown);
+  // A row this step saw before, in an earlier try that failed after the grant (issue #3957), answers "already": when
+  // its grant is this import's own, it is still added and still emailed, never lost between the grant and the queue.
+  const mine = await grantedByThisImport(statsId, job, fresh.filter((v, i) => given[i] === "already" && retried.has(v)));
   // A repeated row is said once that step has answered: of an address it found deleted, as deleted, by its row only.
   const goneNow = new Set(fresh.filter((_, i) => given[i] === "erased").map((v) => v.email));
   for (const { v, earlier } of repeats) {
@@ -1410,7 +1448,7 @@ async function purchasesStep(job: ImportJob, store: Store, rows: string[][]): Pr
     if (answer === "erased") {
       skipped.push({ line: fresh[i].line, column: "email", problem: DELETED, value: "" });
       unseen.push(`p:${fresh[i].email}|${fresh[i].productId}`);
-    } else if (answer === "new") {
+    } else if (answer === "new" || mine.has(fresh[i])) {
       job.counts.added += 1;
       toMail.push(fresh[i].email);
     } else job.counts.already += 1;

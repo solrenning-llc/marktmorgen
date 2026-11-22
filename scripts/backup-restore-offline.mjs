@@ -36,8 +36,8 @@ const MANIFEST = { magicV1: "MMBM1", aadV1: "marktmorgen/backup-manifest/v1", ma
 const PART_JSON_MAX = 4 * 1024 * 1024;
 const PART_MAX = PART_JSON_MAX + 65_536;
 const MANIFEST_MAX = 10_000 * 160 + 65_536;
-/** lib/backup-codec.ts, BACKUP_KEY_MAX_BYTES: the most one key's DUMP may weigh. */
-const KEY_MAX = 12 * 1024 * 1024;
+/** lib/backup-codec.ts, BACKUP_KEY_MAX_BYTES: the most one key's DUMP may weigh (Upstash's 10 MB request less 100,000). */
+const KEY_MAX = 10_000_000 - 100_000;
 
 class Stop extends Error {}
 const stop = (message) => {

@@ -122,7 +122,7 @@ export type BackupManifest = { version: 1; capturedAt: number; parts: PartEntry[
 
 type PartsFailure = "limits" | "budget" | "cutoff" | "scan_pages" | "too_many" | "too_big" | "too_many_parts" | "unreadable" | "error" | "verify";
 export type PartsResult =
-  | { ok: true; id: string; keys: number; bytes: number; parts: number; commands: number }
+  | { ok: true; id: string; keys: number; rows: number; bytes: number; parts: number; commands: number }
   /** Every other key copied and the set verified, with `missing` keys over BACKUP_KEY_MAX_BYTES left out: never whole. */
   | { ok: false; reason: "key_over_ceiling"; id: string; missing: number; keys: number; bytes: number; parts: number; commands: number }
   | { ok: false; reason: PartsFailure; commands: number; parts: number };
@@ -336,7 +336,8 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
     const bytes = entries.reduce((n, part) => n + part.bytes, 0) + read.byteLength;
     // A key left out: the rest is a verified set, but never a whole one (rule 24).
     if (missing > 0) return { ok: false, reason: "key_over_ceiling", id, missing, keys: keysCopied, bytes, parts: entries.length, commands };
-    return { ok: true, id, keys: keysCopied, bytes, parts: entries.length, commands };
+    // `rows` as the manifest counts them (a chunked key's chunks each), for the shrink guard (Codex X6 on #3277).
+    return { ok: true, id, keys: keysCopied, rows: copied, bytes, parts: entries.length, commands };
   } catch (error) {
     if (error instanceof RangeError && error.message === "too_many_parts") return fail("too_many_parts");
     // The run's cutoff passed, here or inside a request given up at it: said as such.

@@ -341,6 +341,7 @@ function defaultStore(): BackupBucket | null {
 }
 
 /** The keys and bytes of the last good set a new copy is compared with before the prune (inbox C4-36 item 1). */
+/** A verified set's size for the shrink guard: `keys` counts its rows as its manifest does (a chunked key's chunks each). */
 type BackupBase = { keys: number; bytes: number };
 const isCount = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
 
@@ -433,9 +434,12 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
     if (!copied.ok) return copied;
     // After a verified write, as best it can: a failure is reported and never costs the copy just made. The copy just
     // made is the last verified one now, and it is younger than the retention.
-    const pruned = await prune(review, store, readers, now, copied, readMark);
+    // The shrink guard compares rows with rows: a set's manifest counts a chunked key's chunks each, so the copy is
+    // measured the same way, never by keys (Codex X6 on #3277). The report still says how many keys were copied.
+    const { rows, ...made } = copied;
+    const pruned = await prune(review, store, readers, now, { ...made, keys: rows }, readMark);
     mark = pruned.mark;
-    return { ...copied, pruned: room.deleted + pruned.deleted, prune: pruned.state, ...(lost ? { note: "last_good_copy_lost" as const } : {}) };
+    return { ...made, pruned: room.deleted + pruned.deleted, prune: pruned.state, ...(lost ? { note: "last_good_copy_lost" as const } : {}) };
   });
   try {
     await redisPipeline(
@@ -742,7 +746,7 @@ async function prune(
   }
 }
 
-async function copy(review: BackupCostReview, store: BackupObjectStore, key: Uint8Array, now: number): Promise<Exclude<BackupRunResult, { ok: true }> | { ok: true; id: string; keys: number; bytes: number; parts: number }> {
+async function copy(review: BackupCostReview, store: BackupObjectStore, key: Uint8Array, now: number): Promise<Exclude<BackupRunResult, { ok: true }> | { ok: true; id: string; keys: number; rows: number; bytes: number; parts: number }> {
   // The copy in parts (lib/backup-parts.ts): every part verified as written, the set verified by its manifest last.
   let done: Awaited<ReturnType<typeof copyInParts>>;
   try {
@@ -750,7 +754,7 @@ async function copy(review: BackupCostReview, store: BackupObjectStore, key: Uin
   } catch {
     return { ok: false, reason: "export_error" };
   }
-  if (done.ok) return { ok: true, id: done.id, keys: done.keys, bytes: done.bytes, parts: done.parts };
+  if (done.ok) return { ok: true, id: done.id, keys: done.keys, rows: done.rows, bytes: done.bytes, parts: done.parts };
   // Sealing, a write or a read-back failed: every earlier set is left as it was.
   if (done.reason === "verify") return { ok: false, reason: "verify" };
   if (done.reason === "key_over_ceiling") return { ok: false, reason: "export_key_over_ceiling", id: done.id, missing: done.missing, keys: done.keys, bytes: done.bytes, parts: done.parts };

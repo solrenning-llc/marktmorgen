@@ -22,7 +22,8 @@ import { ukVatOnTop } from "@/lib/uk-vat";
 import { vatCollectionCostOf, type VatFxAllowance } from "@/lib/eu-vat-collection-cost";
 import type { SwitchInput } from "@/lib/vat-registrations";
 import { dynamicPolicy, isDynamicPage, staticPolicy } from "@/lib/csp";
-import { VAT_BODY_REFUSALS, VAT_REFUSED_SALES, VAT_SUPPLY_WORDS } from "@/lib/vat-fee-words";
+import { VAT_BODY_REFUSALS, VAT_REFUSED_PLACE_NAMES, VAT_REFUSED_SALES, VAT_SUPPLY_WORDS } from "@/lib/vat-fee-words";
+import { EU_VAT_COUNTRIES, REFUSED_PLACES, TERRITORY_UNSETTLED } from "@/lib/eu-vat-supply";
 import { consumerGate } from "@/lib/eu-vat-gate";
 import { euSupplyOf } from "@/lib/eu-vat-supply";
 import { applyEuCollect, euCartGate, euSaleGate } from "@/lib/eu-vat-collect";
@@ -332,11 +333,15 @@ test("every route and gate that refuses an EU or UK consumer is named: PayPal, t
   const members = new Map([["member", ESS]]);
   assert.deepEqual(euSaleGate({ product: bundle, members, headers, form, records: COLLECT, vatSwitch: EU_ON, now: NOW, rates: RATES }), { ok: true, collect: { country: "DE" } }, "alone, the bundle is charged");
   assert.equal(euCartGate({ products: [bundle], headers, form, records: COLLECT, vatSwitch: EU_ON, now: NOW, rates: RATES }).ok, false, "in a cart, it is refused");
+  const listed = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!.refused;
+  assert.ok(listed.includes("A bundle in a cart"), "and the list names it (coord 0cb1's LEVE 1)");
   // Evidence that disagrees (internet address in Germany, billing address in France) is refused, never charged on a guess.
   const split = euSaleGate({ product: ESS, headers, form: new URLSearchParams({ billing_country: "FR" }), records: COLLECT, vatSwitch: EU_ON, now: NOW, rates: RATES });
   assert.equal(split.ok, false);
+  assert.ok(listed.some((w) => /internet address and billing address are in different countries/.test(w)), "and the list names it");
   // A product with no answer on whether it is an e-publication is refused.
   assert.equal(euSaleGate({ product: { ...ESS, publication: null } as never, headers, form, records: COLLECT, vatSwitch: EU_ON, now: NOW, rates: RATES }).ok, false);
+  assert.ok(listed.some((w) => /not yet marked, on the product, as not an e-publication/.test(w)), "and the list names it");
 });
 
 
@@ -361,4 +366,27 @@ test("every kind of supply the gate refuses to an EU or UK consumer is named; pr
   }
   const text = [...words.terms, ...words.pricing].join(" ");
   assert.doesNotMatch(text, /anything that ships are not covered/, "goods are never said to be merely outside the section");
+});
+
+test("every place the checkout refuses while it collects is named, and no place it charges is (coord 0cb1's MEDIUM)", () => {
+  const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!;
+  const placesItem = words.refused.find((w) => w.startsWith("Buyers in ")) ?? "";
+  const both: SwitchInput = { ...EU_ON, uk: UK_ON.uk, reviews: [...(EU_ON.reviews ?? []), ...(UK_ON.reviews ?? [])] };
+  const allRates = [...EU_VAT_COUNTRIES].map((country) => ({ country, basisPoints: 2000, source: `https://example.invalid/${country.toLowerCase()}`, readOn: "2026-11-02" }));
+  const places = [...new Set([...REFUSED_PLACES, ...TERRITORY_UNSETTLED])].sort();
+  const charged: string[] = [];
+  for (const place of places) {
+    const gate = euSaleGate({ product: ESS, headers: new Headers({ "x-vercel-ip-country": place }), form: new URLSearchParams({ billing_country: place }), records: COLLECT, vatSwitch: both, now: NOW, rates: allRates });
+    const name = VAT_REFUSED_PLACE_NAMES[place];
+    if (gate.ok && gate.collect?.country === place) {
+      charged.push(place);
+      assert.equal(name, undefined, `${place} is charged VAT, so it is never named as refused`);
+    } else {
+      assert.equal(gate.ok, false, `${place}: refused, not sold without VAT`);
+      assert.ok(name, `${place} is refused, so VAT_REFUSED_PLACE_NAMES names it`);
+      assert.ok(placesItem.includes(name), `the list names ${name}`);
+    }
+  }
+  for (const [code, name] of Object.entries(VAT_REFUSED_PLACE_NAMES)) assert.ok(places.includes(code) && !charged.includes(code), `${name} (${code}) is named only while it is refused`);
+  for (const place of ["DE", "FR", "IT", "PT", "GB"]) assert.ok(charged.includes(place), `${place} is charged`);
 });

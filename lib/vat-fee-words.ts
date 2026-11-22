@@ -162,6 +162,19 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
  * #5086, Claude 1 coord's MEDIUM 2), said plainly so no page promises a sale the checkout turns down. VAT_REFUSED_SALES
  * names each refusal beside the check that makes it; tests/vat-fee-words.test.ts holds the two together.
  */
+/**
+ * The places in, or tied to, the EU or the UK whose consumers the checkout refuses even while it collects
+ * (lib/eu-vat-supply.ts: TERRITORY_UNSETTLED is read as a place not settled, and the rest of REFUSED_PLACES falls outside
+ * EU_VAT_COUNTRIES), by the name a buyer knows (#5086, coord 0cb1's MEDIUM). tests/vat-fee-words.test.ts walks both lists
+ * through euSaleGate, so a place charged is never named and a place refused always is.
+ */
+export const VAT_REFUSED_PLACE_NAMES: Readonly<Record<string, string>> = {
+  ES: "Spain", EA: "Ceuta and Melilla", IC: "the Canary Islands", MC: "Monaco", GF: "French Guiana", GP: "Guadeloupe",
+  MQ: "Martinique", RE: "Réunion", YT: "Mayotte", MF: "Saint Martin", AX: "the Åland Islands", IM: "the Isle of Man",
+};
+const placeNames = Object.values(VAT_REFUSED_PLACE_NAMES);
+const VAT_REFUSED_PLACES_WORDS = `Buyers in ${placeNames.slice(0, -1).join(", ")} or ${placeNames[placeNames.length - 1]}`;
+
 export const VAT_REFUSED_SALES: readonly { words: string; checks: readonly string[]; files?: readonly string[] }[] = [
   { words: "Products that ship", checks: ["shipping or a subscription"] },
   { words: "Subscriptions and memberships", checks: ["shipping or a subscription"] },
@@ -171,7 +184,6 @@ export const VAT_REFUSED_SALES: readonly { words: string; checks: readonly strin
   { words: "Prices converted to the buyer's own currency", checks: ["a conversion to the buyer's currency"] },
   { words: "More than one of the same product", checks: ["a quantity other than one"] },
   { words: "Other products added to one product's checkout", checks: ["more than one line"], files: ["app/api/store/checkout/route.ts"] },
-  { words: "A cart with more than four products", checks: ["more lines than a cart holds"] },
   { words: "A bundle in a cart", checks: ["euCartGate"] },
   { words: "Payments through PayPal", checks: [], files: ["app/api/store/paypal/checkout/route.ts"] },
   { words: "The offer shown after paying", checks: [], files: ["lib/upsell.ts"] },
@@ -179,6 +191,7 @@ export const VAT_REFUSED_SALES: readonly { words: string; checks: readonly strin
   { words: "E-books and other e-publications, which are books, newspapers or magazines read on a screen", checks: ["notAPublication"] },
   { words: "A product you have not yet marked, on the product, as not an e-publication", checks: ["notAPublication"] },
   { words: "A product with nothing to deliver online and no live call, so we cannot tell what it is", checks: ["euSupplyOf"] },
+  { words: VAT_REFUSED_PLACES_WORDS, checks: ["euCheckout"] },
   { words: "A sale where the buyer's internet address and billing address are in different countries", checks: ["checkoutEvidence"] },
   { words: "Any sale whose VAT, or the cost of receiving it, we cannot work out, such as one in a currency with no checked exchange rate", checks: ["no sourced rate, or no sterling rate", "the cost of receiving the VAT is unknown"] },
 ];
@@ -202,6 +215,7 @@ export const VAT_SUPPLY_WORDS: Readonly<Record<EuSupply, "covered" | "outside" |
  */
 export const VAT_BODY_REFUSALS = [
   { check: "country", why: "the gate passes only a two-letter country" },
+  { check: "more lines than a cart holds", why: "a cart holds at most four products for every buyer, anywhere (lib/cart-rules.ts MAX_CART)" },
   { check: "the lines", why: "our checkout numbers its lines from zero" },
   { check: "a Stripe Price instead of an amount", why: "our one-off lines carry an amount; a Price comes only with pay-what-you-want or a subscription, named above" },
   { check: "the line's amount or currency", why: "our lines carry a whole amount and a currency code" },

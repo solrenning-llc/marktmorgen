@@ -810,7 +810,7 @@ export const CHAVES = ["record-review", "ready-check", "on-call"];
 //     nomeada no correio, a família Claude 5 declarada sem cota, ou mensagem do dono (--owner-message, gravada);
 //  3. nunca num PR que a sessão escreveu (trailer Claude-Session nos commits), revisou ou enfileirou (no correio);
 //  4. só com o pedido do coordenador publicado no canal de coordenação em vigor (a issue aberta com o rótulo canal-ativo,
-//     AC (y); hoje a #5104, que continua a #4932) ou na parte que ele continua, conferido na hora pelo gh (--request):
+//     AC (y); em 22/11/2026, a #5104 assumiu da #4932) ou na parte que ele continua, conferido na hora pelo gh (--request):
 //     um comentário com a linha
 //     "AGENT-MAIL-REQUEST <identificador C1-...> <comando> <alvo>", de no máximo PEDIDO_MAX_H horas, usado uma vez só
 //     (revisão do Claude 4 3Kc no #5052); a ação é avisada a todos no mesmo commit, com o pedido. Desligar continua livre.

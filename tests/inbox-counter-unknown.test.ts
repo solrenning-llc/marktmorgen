@@ -3,6 +3,11 @@
  * visitor's first message, inbox-reply for the team's answers) said "limited", too
  * many, when the count could not be read. A real excess stays "limited"; an
  * unreadable count is "error", said as one (rule 24). Nothing is kept or sent.
+ *
+ * Claude 6's MEDIUM on #2674 (7057694750): the sending key is one the synthetic Resend fixture knows
+ * (tests/resend-fixture-credentials.ts), so "nothing sent" is the guard's work, and the team's notice of a new
+ * message (inbox-tell, withinEssentialLimit) has its own cases: sent with room, not sent on an unreadable count,
+ * while the visitor's message is still kept.
  */
 import { readInbox, replyTo, startChat } from "@/lib/inbox";
 import { claimHandle, ensureStatsId, setInboxSetting, setSubscription, storeForEmail } from "@/lib/store";
@@ -10,7 +15,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
-process.env.RESEND_API_KEY = "re_test_inbox_counter_only";
+process.env.RESEND_API_KEY = "re_test_sending_only";
 let sent = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
@@ -47,6 +52,18 @@ async function main(): Promise<void> {
   mode = null;
   await real([["DEL", ...filled]]);
   filled.clear();
+
+  part("Telling the team of a new message (inbox-tell)");
+  const beforeRoom = sent;
+  const told = await chat("10.0.0.5");
+  is("control: with room, the visitor's message is kept", told.ok, true);
+  is("control: and the team is told by one email", sent - beforeRoom, 1);
+  mode = { scope: "inbox-tell", how: "unknown" };
+  const beforeUnknown = sent;
+  const untold = await chat("10.0.0.6");
+  is("the notice's count unreadable: the visitor's message is still kept", untold.ok, true);
+  is("and no notice is sent on a count that cannot be read", sent - beforeUnknown, 0);
+  mode = null;
 
   part("The team's answer (inbox-reply)");
   const started = await chat("10.0.0.4");

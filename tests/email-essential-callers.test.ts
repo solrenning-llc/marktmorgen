@@ -7,6 +7,12 @@
  * run on the in-memory Redis twice per scope, once with its counter full (a real
  * excess) and once with Redis throwing on that counter only (unknown). Nothing
  * is sent in either case. The three MEDIUMs of #2674 are the first three parts.
+ *
+ * Positive controls (Claude 6's MEDIUM on #2674, 7057694750): the inbound relay, the notice, the waitlist and the
+ * list sign-up each first really send with their counter below its limit, so an "unknown" case answering 0 sent is
+ * the guard's work and not a fixture that could never send. The sending key is one the synthetic Resend fixture
+ * knows (tests/resend-fixture-credentials.ts); with an unknown key every send was refused before the provider and
+ * the unknown cases held with the guard removed.
  */
 import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setJoin, setProductLink, setSubscription, storeForEmail } from "@/lib/store";
@@ -28,12 +34,17 @@ import { done, is, part } from "./check";
 
 const ORIGIN = "https://marktmorgen.com";
 const INBOUND_ID = "9ef9a417-02e9-4d39-ad75-9611e0fcc33c";
+// A second message for the positive control: the first one's count-once mark (nl:inbound:counted:<id>) holds what
+// its own cases decided, so a send with room is made on a message of its own.
+const INBOUND_ROOM_ID = "9ef9a417-02e9-4d39-ad75-9611e0fcc34d";
+const RECEIVED = /^\/emails\/receiving\/([0-9a-f-]{36})$/;
 let sent = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
   if (url.hostname === "api.resend.com" && (init?.method ?? "GET") === "POST") { sent += 1; return new Response(JSON.stringify({ id: `email_${sent}` })); }
-  if (url.pathname === `/emails/receiving/${INBOUND_ID}`) {
-    return new Response(JSON.stringify({ object: "email", id: INBOUND_ID, from: "Lee <lee@example.org>", to: ["harborkitchen@mail.marktmorgen.com"], received_for: ["harborkitchen@mail.marktmorgen.com"], reply_to: [], subject: "Re: menu", text: "Is the pie still on?", headers: {} }));
+  const received = RECEIVED.exec(url.pathname);
+  if (received) {
+    return new Response(JSON.stringify({ object: "email", id: received[1], from: "Lee <lee@example.org>", to: ["harborkitchen@mail.marktmorgen.com"], received_for: ["harborkitchen@mail.marktmorgen.com"], reply_to: [], subject: "Re: menu", text: "Is the pie still on?", headers: {} }));
   }
   if (url.pathname.endsWith("/attachments")) return new Response(JSON.stringify({ object: "list", has_more: false, data: [] }));
   if (url.hostname === "api.stripe.com") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
@@ -42,7 +53,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 // One counter scope at a time: "full" puts it far past any limit before the
 // caller's own SET NX + INCR; "unknown" makes Redis throw on that counter only.
-type Mode = "full" | "unknown";
+// "room" sets nothing: the caller's counters are below their limits, the positive control.
+type Mode = "full" | "unknown" | "room";
 const modes = new Map<string, Mode>();
 const filled = new Set<string>();
 const real = redis.pipeline.bind(redis);
@@ -59,7 +71,7 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
 
 async function under<T>(scope: string, mode: Mode, run: () => Promise<T>): Promise<{ value: T; sent: number }> {
   modes.clear();
-  modes.set(scope, mode);
+  if (mode !== "room") modes.set(scope, mode);
   const before = sent;
   try {
     return { value: await run(), sent: sent - before };
@@ -73,7 +85,7 @@ async function under<T>(scope: string, mode: Mode, run: () => Promise<T>): Promi
 
 async function main(): Promise<void> {
   redis.clear();
-  process.env.RESEND_API_KEY = "re_test_essential_callers_only";
+  process.env.RESEND_API_KEY = "re_test_sending_only";
   process.env.RESEND_INBOUND_API_KEY = "re_test_reading_only";
   process.env.SUPPORT_FORWARD_TO = "inbox@example.net";
   process.env.MARKETING_FROM_DOMAIN = "mail.marktmorgen.com";
@@ -91,6 +103,9 @@ async function main(): Promise<void> {
   const store = async () => (await storeForEmail(OWNER))!;
 
   part("MEDIUM 1, inbound mail to a creator (lib/inbound-mail.ts)");
+  const inboundRoom = await under("creator-inbound", "room", () => forwardInbound(INBOUND_ROOM_ID));
+  is("control: with room, a message to the store is forwarded", inboundRoom.value, "sent");
+  is("control: and one email went out", inboundRoom.sent, 1);
   const inboundUnknown = await under("creator-inbound", "unknown", () => forwardInbound(INBOUND_ID));
   is("an unreadable counter is a retry (500, seen mark cleared), never skipped and lost", inboundUnknown.value, "retry");
   is("and nothing is forwarded on that try", inboundUnknown.sent, 0);
@@ -99,8 +114,11 @@ async function main(): Promise<void> {
 
   part("MEDIUM 2, notices and deletion links say limited only when limited");
   const report = {} as ReportInput; // the limit is read before the notice is
+  const reportRoom = await under("report", "room", () => fileReport(report, "9.9.9.8", ORIGIN));
+  is("control: with room, a notice is sent on", [reportRoom.value, reportRoom.sent > 0], ["sent", true]);
   is("a sixth notice from one connection: limited", (await under("report", "full", () => fileReport(report, "9.9.9.9", ORIGIN))).value, "limited");
-  is("a notice whose count cannot be read: error, never limited", (await under("report", "unknown", () => fileReport(report, "9.9.9.9", ORIGIN))).value, "error");
+  const reportUnknown = await under("report", "unknown", () => fileReport(report, "9.9.9.9", ORIGIN));
+  is("a notice whose count cannot be read: error, never limited, nothing sent", [reportUnknown.value, reportUnknown.sent], ["error", 0]);
   const erase = () => requestErasureLink({ email: "lee@example.org", ip: "7.7.7.7", origin: ORIGIN });
   is("deletion links past the connection's hour: limited", (await under("erase-ip", "full", erase)).value, "limited");
   is("past the address's hour: limited", (await under("erase-address", "full", erase)).value, "limited");
@@ -121,11 +139,17 @@ async function main(): Promise<void> {
   const product = (await readListing(await store(), made.product.id))!;
   await setSoon(await store(), product.id, true);
   const wait = async () => joinWaitlist({ store: await store(), product, email: "dana@example.com", consent: true, ip: "1.1.1.1", origin: ORIGIN });
+  const waitRoom = await under("waitlist-address", "room", async () => joinWaitlist({ store: await store(), product, email: "dana.room@example.com", consent: true, ip: "1.1.1.3", origin: ORIGIN }));
+  is("control: waitlist with room sends its confirmation", [waitRoom.value, waitRoom.sent], ["sent", 1]);
   is("waitlist, the address past its hour: limited", (await under("waitlist-address", "full", wait)).value, "limited");
-  is("waitlist, the address's count unreadable: error", (await under("waitlist-address", "unknown", wait)).value, "error");
+  const waitUnknown = await under("waitlist-address", "unknown", wait);
+  is("waitlist, the address's count unreadable: error, nothing sent", [waitUnknown.value, waitUnknown.sent], ["error", 0]);
   const join = async () => askToJoin({ store: await store(), email: "erin@example.com", ip: "1.1.1.2", origin: ORIGIN });
+  const joinRoom = await under("join-address", "room", async () => askToJoin({ store: await store(), email: "erin.room@example.com", ip: "1.1.1.4", origin: ORIGIN }));
+  is("control: list sign-up with room sends its confirmation", [joinRoom.value, joinRoom.sent], ["sent", 1]);
   is("list sign-up, the address past its hour: limited", (await under("join-address", "full", join)).value, "limited");
-  is("list sign-up, the address's count unreadable: error", (await under("join-address", "unknown", join)).value, "error");
+  const joinUnknown = await under("join-address", "unknown", join);
+  is("list sign-up, the address's count unreadable: error, nothing sent", [joinUnknown.value, joinUnknown.sent], ["error", 0]);
 
   part("LOW, sending a purchase email again (app/api/store/resend)");
   const session = await openSession(OWNER);

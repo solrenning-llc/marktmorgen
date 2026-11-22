@@ -254,7 +254,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // A plan paid for a store already closing, until it is ended and returned (company); a closed store's address, hashed, until it expires.
   "nl:closing:undo": C, "nl:closing:shut:": Cr(30),
   "nl:cm:": E, "nl:cm:ap:stores": I, "nl:cm:ap:turns": I, "nl:cm:evmail:": X(30), "nl:cm:evmailq": I, "nl:cm:evq": I, "nl:cm:link:": X(1),
-  "nl:cm:mail:": X(30), "nl:cm:mailq": I, "nl:cm:rl:": E, "nl:cm:unsub:": T("nl:cm:"),
+  "nl:cm:mail:": X(60), "nl:cm:mailq": I, "nl:cm:rl:": E, "nl:cm:unsub:": T("nl:cm:"),
   "nl:confirm:": X(40),
   // A checkout whose admitted room was given back, once (lib/purchase-email.ts), an hour past its held hours.
   "nl:confirm-room:": X(2),

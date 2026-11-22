@@ -16,7 +16,7 @@
 import { createECDH } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { claimHandle, ensureStatsId } from "@/lib/store";
-import { addDevice, forgetPerson } from "@/lib/phone-alerts";
+import { PHONE_STATE_IF_LISTED, addDevice, forgetPerson } from "@/lib/phone-alerts";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -90,6 +90,25 @@ async function main(): Promise<void> {
   is("a repeat forgets the late device", await outcome(() => forgetPerson(store, mate)), "resolved");
   is("its state is gone", Number((await real([["HEXISTS", st, lateId]]))[0]), 0);
   is("and it left the list", String((await real([["GET", cfg]]))[0]).includes(lateId), false);
+
+  part("An alert's state written between the state HDEL and the unlisting is gone too (Claude 1 bUAk on #5105)");
+  const third = await addDevice(store, mate, "admin", sub(3), ["sale"], "Mate phone in flight");
+  if (!third.ok) throw new Error(`synthetic device: ${JSON.stringify(third)}`);
+  const inFlight = (JSON.parse(String((await real([["GET", cfg]]))[0])) as { devices: { id: string; who?: string }[] }).devices.find((d) => d.who === mate)!.id;
+  let fired = false;
+  redis.pipeline = (async (c: Commands) => {
+    const replies = await real(c);
+    if (!fired && c[0]?.[0] === "HDEL" && c[0]?.[1] === st) {
+      fired = true;
+      // keepStates of an alert sent just before the removal: the device is still listed, so the fence lets it in.
+      await real([["EVAL", PHONE_STATE_IF_LISTED, 2, cfg, st, inFlight, JSON.stringify({ at: 3, ok: true, status: 201, error: "" })]]);
+    }
+    return replies;
+  }) as typeof redis.pipeline;
+  is("the removal resolves", await outcome(() => forgetPerson(store, mate)), "resolved");
+  is("the in-flight write happened", fired, true);
+  is("the device left the list", String((await real([["GET", cfg]]))[0]).includes(inFlight), false);
+  is("and its state is gone too", Number((await real([["HEXISTS", st, inFlight]]))[0]), 0);
 
   part("The team route never swallows a device erasure that failed");
   const route = readFileSync("app/api/store/team/route.ts", "utf8");

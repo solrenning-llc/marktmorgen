@@ -38,7 +38,10 @@ export const REFUSE_CONSUMERS_DRAFTS: readonly DeemedSupplierRecord[] = [
  * vatShipCloses, read by lib/physical-legal-ship.ts shippingNow for both checkouts; PayPal sells nothing shipped,
  * lib/paypal-sales.ts sellsWithPayPal). A path found later is added here at once. Three were found later and closed in
  * the change that found them (Claude 1 coord's MEDIUM, 6809): the welcome offer's, the come-back offer's and a moved
- * member's buttons, which called createCheckout with no gate, now ask lib/eu-vat-gate.ts pressGate first; and
- * tests/eu-vat-offer-paths-gate.test.ts walks every caller of createCheckout, so a new one without a gate fails there.
+ * member's buttons, which called createCheckout with no gate, now ask lib/eu-vat-gate.ts pressGate first. The walk in
+ * tests/checkout-gate-walk.ts, run by tests/eu-vat-offer-paths-gate.test.ts over app/ and lib/, fails when a call of
+ * createCheckout (or of a function that only hands its arguments on to it) has no gate asked before it, with its answer
+ * used, in the same outermost function, or when createCheckout is renamed on import or passed as a value. It does not
+ * prove the answer is acted on: each path's journey test does.
  */
 export const REFUSE_CONSUMERS_OPEN: readonly string[] = [];

@@ -180,7 +180,7 @@ export default async function RenewPage({ params, searchParams }: Params) {
                 </div>
               ) : null}
               <div className="mt-5">
-                <BillingCountryField id={`bc-back-${product.id}`} locale={say.lang.locale} label={say.w.billingCountry} choose={say.w.chooseCountry} problem={status === "abroad" || status === "country" ? `back-country-problem-${product.id}` : undefined} />
+                <BillingCountryField id={`bc-back-${product.id}`} locale={say.lang.locale} label={say.w.billingCountry} choose={say.w.chooseCountry} problem={status === "abroad" || status === "country" ? `back-country-problem-${product.id}` : undefined} chosen={typeof query.from === "string" ? query.from : undefined} />
               </div>
               {/* A membership hands over its content digitally: the box to start access at once (lib/digital-consent.ts). */}
               {deliversDigitally(product) ? <DigitalConsentBox id={`dc-back-${product.id}`} kind={consentKind(product)} lang={store.language} refused={status === "consent"} className="mt-5" /> : null}

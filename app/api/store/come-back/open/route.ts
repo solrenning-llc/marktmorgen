@@ -1,5 +1,6 @@
 import { withinStore } from "@/lib/metered-limits";
 import { type DigitalConsent, consentFromForm } from "@/lib/digital-consent";
+import { pressCountryKept } from "@/lib/eu-vat-gate";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
@@ -47,8 +48,13 @@ export async function POST(request: NextRequest) {
   if (!store || !/^[a-z0-9]{6,40}$/.test(product)) return new Response("Not found.", { status: 404 });
 
   const page = `${origin}/@${store.handle}/renew/${product}`;
+  // The country a press named, put back beside the button after a refusal that was not about it (WCAG 3.3.7).
+  const kept = (status: string) => {
+    const country = pressCountryKept(sent, status);
+    return country ? `&from=${country}` : "";
+  };
   const back = (status: string) =>
-    new Response(null, { status: 303, headers: { Location: `${page}?back=${encodeURIComponent(token)}&status=${status}`, "Cache-Control": "no-store" } });
+    new Response(null, { status: 303, headers: { Location: `${page}?back=${encodeURIComponent(token)}&status=${status}${kept(status)}`, "Cache-Control": "no-store" } });
   const room = await withinStore("come-back", `${clientAddress(request)}|${store.handle}`, 20, 600, store).catch(unknownLimit);
   if (room === "unknown") return back("refused");
   if (!room) return back("limited");

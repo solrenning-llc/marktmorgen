@@ -254,7 +254,7 @@ export default async function FreePage({ params, searchParams }: Params) {
                   {/* Where the buyer is buying from (EU VAT art. 9a, lib/eu-vat-gate.ts pressGate), as beside every paid checkout. */}
                   {welcome.product.priceCents > 0 || welcome.product.pwyw ? (
                     <div className="mb-4">
-                      <BillingCountryField id="bc-welcome" locale={said.lang.locale} label={said.w.billingCountry} choose={said.w.chooseCountry} problem={welcomeAbroad ? "welcome-country-problem" : undefined} />
+                      <BillingCountryField id="bc-welcome" locale={said.lang.locale} label={said.w.billingCountry} choose={said.w.chooseCountry} problem={welcomeAbroad ? "welcome-country-problem" : undefined} chosen={typeof query.from === "string" ? query.from : undefined} />
                     </div>
                   ) : null}
                   {/* The box to start access at once (lib/digital-consent.ts), before the offer's checkout opens. */}

@@ -459,6 +459,13 @@ export class MemoryRedis {
           this.run(["DEL", mark]);
           return 1;
         }
+        if (key.startsWith("-- marktmorgen:directory-unlist:v1\n") && args[0] === "3" && args.length === 5) {
+          const [, listed, numbers, page, member] = args;
+          const removed = this.run(["SREM", listed, member]);
+          this.run(["SREM", numbers, member]);
+          if (removed !== 0) this.run(["DEL", page]);
+          return removed;
+        }
         if (key.startsWith("-- marktmorgen:event-rsvp-release:v1\n") && args[0] === "1" && args.length === 4) {
           const [, list, member, mark] = args;
           return this.run(["HGET", list, member]) === mark ? this.run(["HDEL", list, member]) : 0;

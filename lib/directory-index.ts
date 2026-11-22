@@ -122,7 +122,8 @@ export function wouldList(store: Store): boolean {
  * (UnknownReplyError), as is an SREM that failed. A store that is not listed
  * and stays so changes nothing the directory shows, so its saves never drop
  * the page (Claude 6 on #3062: any account could otherwise drop it in a loop).
- * The commands: SADD, the numbers' SADD or SREM and DEL; or SREM of both sets, alone or with DEL.
+ * The commands: SADD, the numbers' SADD or SREM and DEL; or one script (UNLIST: EVAL, SREM of both sets, and DEL
+ * when the store was listed).
  */
 export async function rememberListing(store: Store): Promise<void> {
   if (!store.sid || !isRedisConfigured()) return;
@@ -137,17 +138,30 @@ export async function rememberListing(store: Store): Promise<void> {
   }
   let removed: unknown = null;
   try {
-    // A store not listed shows no numbers either: taken out of both sets in one request.
-    const replies = repliesFor(await redisPipeline([["SREM", LISTED, store.sid], ["SREM", DIRECTORY_NUMBERS, store.sid]]), 2);
+    // A store not listed shows no numbers either: taken out of both sets, and the kept page dropped when it was listed,
+    // in one script (Claude 6's MÉDIO 1 on #3118): the store never leaves the set while a DEL sent on its own fails and
+    // leaves it on the kept page for its hour.
+    const replies = repliesFor(await redisPipeline([["EVAL", UNLIST, 3, LISTED, DIRECTORY_NUMBERS, DIRECTORY_CACHE, store.sid]]), 1);
     removed = replies ? replies[0] : null;
   } catch (error) {
     await redisPipeline([["DEL", DIRECTORY_CACHE]]);
     throw error;
   }
-  if (removed === 0) return;
+  if (removed === 0 || removed === 1) return;
+  // Any other reply: whether the store left the set, and whether the page was dropped, is unknown; the page is dropped.
   await redisPipeline([["DEL", DIRECTORY_CACHE]]);
-  if (removed !== 1) throw new UnknownReplyError("the directory's SREM");
+  throw new UnknownReplyError("the directory's SREM");
 }
+
+/**
+ * Takes a store out of the listed set and the numbers' set and, only when it was listed, drops the kept page, all in
+ * one request (Claude 6's MÉDIO 1 on #3118). The reply is the listed set's SREM: 1 it was there, 0 it was not.
+ */
+const UNLIST = `-- marktmorgen:directory-unlist:v1
+local removed = redis.call("SREM", KEYS[1], ARGV[1])
+redis.call("SREM", KEYS[2], ARGV[1])
+if removed ~= 0 then redis.call("DEL", KEYS[3]) end
+return removed`;
 
 /** Takes a store out, whatever it had said. For a store being deleted. */
 export async function forgetListing(sid: string): Promise<void> {

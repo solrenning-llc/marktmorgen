@@ -496,7 +496,13 @@ async function listedAfterBuild(built: Awaited<ReturnType<typeof buildDirectory>
   const checked = still ? await numbersChecked({ rows: kept.map((k) => k.row), omitted: built.omitted }, kept.map((k) => k.sid)) : null;
   if (still && still.every(Boolean) && checked && !checked.hidden) return checked.page;
   // Only a page that was kept is dropped: a build whose numbers read did not arrive kept none.
-  if (built.partial !== "failed") await redisPipeline([["DEL", DIRECTORY_CACHE]]);
+  if (built.partial !== "failed") {
+    // Read exactly (Codex X6 on #3118): a DEL that does not answer a whole number did not drop the page as far as this
+    // build knows, so the build is unknown and says so, never the filtered rows as if the page were gone.
+    const dropped = repliesFor(await redisPipeline([["DEL", DIRECTORY_CACHE]]), 1);
+    const count = dropped ? dropped[0] : null;
+    if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) throw new UnknownReplyError("the directory's kept page after a build (DEL)");
+  }
   if (!checked) throw new UnknownReplyError("the directory's listed set after a build (SMISMEMBER)");
   return checked.page;
 }

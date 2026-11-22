@@ -127,8 +127,9 @@ test("an SREM reply in an unknown shape counts as listed: the kept rows are drop
   await redisPipeline([["SET", DIRECTORY_CACHE, "[]"]]);
   for (const reply of ["1", 2, -1, null, [1]]) {
     await redisPipeline([["SET", DIRECTORY_CACHE, "[]"]]);
+    // The SREMs and the DEL go in one script (UNLIST, Claude 6's MÉDIO 1 on #3118); its reply is the listed set's SREM.
     redis.pipeline = (async (commands: (string | number)[][]) =>
-      commands[0]?.[0] === "SREM" ? [reply] : original(commands)) as typeof redis.pipeline;
+      commands[0]?.[0] === "SREM" || (commands[0]?.[0] === "EVAL" && String(commands[0]?.[1]).includes("marktmorgen:directory-unlist:")) ? [reply] : original(commands)) as typeof redis.pipeline;
     try {
       await assert.rejects(rememberListing(store("s8", { directory: false })), UnknownReplyError, `SREM answered ${JSON.stringify(reply)}`);
     } finally {

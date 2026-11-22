@@ -1028,19 +1028,26 @@ export function conferirLink(link, pr, sha, resultado = null) {
  */
 export function revisoraDoComentario(corpo, curto) {
   const linhas = String(corpo ?? "").split(/\r?\n/).filter((l) => l.trim()).slice(0, 2);
-  const [l1 = "", l2 = ""] = linhas, veredito = /\b(READY|CHANGES)\b/;
+  // Uma contagem de vereditos ("1 of 2 READY", "2 de 2 READY") não é veredito: sai do texto antes da leitura, e o
+  // comentário vale pelo que sobra (revisões do Claude 5 ibqho e do Claude 4 AC no #5145).
+  const semContagem = (t) => t.replace(/\b\d+\s+(?:of|de)\s+\d+\s+(?:READY|CHANGES)\b/gi, "");
+  const [l1 = "", l2 = ""] = linhas.map(semContagem), veredito = /\b(READY|CHANGES)\b/;
   if (!curto || !linhas.join("\n").includes(curto)) return null;
   // O veredito na primeira linha, ou na segunda quando a primeira é o cabeçalho de uma revisão ("Independent review
   // (Codex G) of head X" e "Verdict: CHANGES"); a nota do autor que cita "READY or CHANGES" mais abaixo não é revisão.
   const inicio = l1.replace(/^[\s*>_#`-]+/, "");
   // A segunda linha também vale quando a primeira começa pelo nome da família ("Claude 4 2Wb — #5143 @head" e "READY:
   // tests pass"; LEVE do Claude 5 ibqho no #5141).
-  const cabecalho = /\breview\b/i.test(l1) || /^(Claude \d+|Codex)\b/i.test(inicio);
-  if (!veredito.test(l1) && !(cabecalho && veredito.test(l2))) return null;
+  // Com o cabeçalho de uma revisão (a palavra "review"), o veredito pode estar em qualquer parte da segunda linha; com
+  // só o nome da família no começo da primeira, a segunda precisa começar pelo veredito sozinho, seguido de pontuação ou
+  // do fim da linha ("READY: tests pass", "READY (0 findings)", "Verdict: CHANGES"), para que uma linha de situação
+  // seguida de um "CHANGES requested by ..." não conte (LEVE do Claude 5 ibqho no #5145).
+  const linha2Veredito = /^[\s*>_`-]*(?:verdict\s*:?\s*\**\s*)?(READY|CHANGES)\b\**\s*(?:$|[:(—–,.;-])/i.test(l2);
+  const cabecalho = (/\breview\b/i.test(l1) && veredito.test(l2)) || (/^(Claude \d+|Codex)\b/i.test(inicio) && linha2Veredito);
+  if (!veredito.test(l1) && !cabecalho) return null;
   if (/^(re-?review needed|review needed|claimed\b|unclaimed\b|hold\b|fila #|fix(?:ed|es)?\b|corrigid|resolved\b|this answers|answer\b|note on\b)/i.test(inicio)) return null;
-  // Uma linha de situação que conta vereditos ("Claude 1 coord: #N @head, 1 of 2 READY") não é revisão (LEVE do Claude 4
-  // Z no #5141).
-  if (/\b\d+\s+(?:of|de)\s+\d+\s+READY\b/i.test(linhas.join("\n"))) return null;
+  // Uma linha de situação que só conta vereditos ("Claude 1 coord: #N @head, 1 of 2 READY") fica sem veredito depois de
+  // semContagem e não é revisão (LEVE do Claude 4 Z no #5141).
   for (const l of linhas) {
     const m = /\b(Claude \d+|Codex)\b/i.exec(l);
     if (m) return familia(m[1]);

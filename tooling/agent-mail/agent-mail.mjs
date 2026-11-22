@@ -1792,7 +1792,13 @@ export function estadoPr(pr, agora = new Date(), commit = buscar()) {
       if (motivo) { ignoradas.push({ caminho: c, por, motivo }); continue; }
     }
     const segurando = acao === "HOLD" ? new Set([...(e && ativoEm(e, momento) && e.acao === "HOLD" ? e.segurando : []), fam]) : new Set();
-    const dono = acao === "HOLD" ? (campo(texto, "HOLD do dono") || (e && ativoEm(e, momento) && e.acao === "HOLD" ? e.dono : "")) : "";
+    // A linha "HOLD do dono" só vale numa marca gravada por sessão identificada da família que assina: uma escrita direta
+    // pelo git, sem sessão ou com a sessão de outra família, vale como HOLD comum, que a família, o autor ou o coordenador
+    // liberam (revisão do Claude 4 2Wb no #5145).
+    const donoProprio = campo(texto, "HOLD do dono");
+    const donoValido = donoProprio && s?.identificada && s.familia && s.familia === familia(por) && ID_DONO.test(donoProprio) ? donoProprio : "";
+    if (donoProprio && !donoValido) ignoradas.push({ caminho: c, por, motivo: "linha \"HOLD do dono\" sem sessão identificada da família que assina: vale como HOLD comum" });
+    const dono = acao === "HOLD" ? (donoValido || (e && ativoEm(e, momento) && e.acao === "HOLD" ? e.dono : "")) : "";
     e = { acao, por, sessao, motivo: campo(texto, "Motivo"), quando, segurando, k, dono };
   }
   const proximo = marcas[marcas.length - 1].k + 1;

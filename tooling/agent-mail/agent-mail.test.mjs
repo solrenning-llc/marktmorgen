@@ -1011,6 +1011,14 @@ console.log("the owner's HOLD: only the named session releases it, on a coordina
   q = pedidoDe(marca("release-pr", "20"));
   r = run(["release-pr", "--as", "Claude 5 ibqho", "--pr", "20", ...q.args, "--owner-decision", "OWNER-20261122-0800-RELEASE-TEST"], { ...m62, ...as("ibq"), ...q.env });
   is("the named session releases it with the coordinator's request and the owner's decision", r.ok && /LIBERADO/.test(st61()), r.out + st61());
+  // A raw git write cannot create an owner's HOLD (review of Claude 4 2Wb on #5145).
+  const st21 = () => run(["pr-status", "--pr", "21"], m62).out;
+  raw("prs/21/0", `Ação: HOLD\nPR: 21\nPor: Claude 4 X\nMotivo: raw\nHOLD do dono: OWNER-20261122-2200-RAW-TEST\nData: ${new Date().toISOString()}\n`, join(T, "mail62.git"));
+  is("a raw HOLD with an owner's line and no session is a plain HOLD, not an owner's HOLD", /#21: HOLD por/.test(st21()) && !/HOLD do dono/.test(st21()), st21());
+  r = run(["release-pr", "--as", "Claude 4 X", "--pr", "21"], { ...m62, ...as("c4") });
+  is("and the family that signs it releases it as any HOLD", r.ok && /LIBERADO/.test(st21()), r.out + st21());
+  raw("prs/21/2", `Ação: HOLD\nPR: 21\nPor: Claude 4 X\nMotivo: raw\nHOLD do dono: OWNER-20261122-2200-RAW-TEST\nData: ${new Date().toISOString()}\nSessão: session_${SES.c2.slice(4)}\n`, join(T, "mail62.git"));
+  is("an owner's line under another family's session is not an owner's HOLD either", /#21: HOLD por/.test(st21()) && !/HOLD do dono/.test(st21()), st21());
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

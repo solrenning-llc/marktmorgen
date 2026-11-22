@@ -1063,6 +1063,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/check-in/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/check-in",
+      "parameters": []
+    },
+    {
       "source": "app/studio/checkup/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/checkup",
@@ -1786,6 +1792,7 @@
     "components/test-counts-notice.tsx",
     "components/thanks-note-editor.tsx",
     "components/thanks-note-view.tsx",
+    "components/ticket-check-in.tsx",
     "components/tier-benefits.tsx",
     "components/tier-editor.tsx",
     "components/tips-editor.tsx",
@@ -1941,6 +1948,7 @@
     "app/api/store/cart/route.ts",
     "app/api/store/chat-summary/route.ts",
     "app/api/store/chat/route.ts",
+    "app/api/store/check-in/route.ts",
     "app/api/store/checkout/route.ts",
     "app/api/store/claim/route.ts",
     "app/api/store/closing-refunds/route.ts",
@@ -2280,6 +2288,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 155
+    "pageTemplates": 156
   }
 }

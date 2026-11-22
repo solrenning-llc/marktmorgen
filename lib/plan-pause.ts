@@ -814,15 +814,17 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
       }
       let saved: Store | null;
       try { saved = await setSubscription(ref, started, store); }
-      catch {
-        // Saving failed after the provider answered. This is not a card
-        // refusal and must not enter the legacy charge-failure cleanup.
+      catch { saved = null; }
+      // A provider response is not an acknowledged store write. Saving failed or could not be confirmed after Stripe
+      // answered: not a card refusal, never the legacy charge-failure cleanup. The pause stays held with its attempt
+      // (never posted again), and, since Stripe may have started and charged the plan while the studio does not show
+      // it, a legacy creator is told once to check before starting again (triple audit of #3671). A funded pause's
+      // notices stay with its own protocol.
+      if (!saved) {
+        if (!record.funding) await tell(store, "unconfirmed", record).catch(() => false);
         counts.failed += 1;
         continue;
       }
-      // A provider response is not an acknowledged store write. Retain the
-      // exact pause and due evidence when the nullable writer cannot confirm.
-      if (!saved) { counts.failed += 1; continue; }
       if (!(await forgetObserved(ref, current))) { counts.failed += 1; continue; }
       await tell(store, "restarted", record).catch(() => false);
       counts.restarted += 1;

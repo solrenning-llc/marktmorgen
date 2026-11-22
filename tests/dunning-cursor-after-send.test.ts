@@ -413,6 +413,24 @@ async function main(): Promise<void> {
     is("the next run sweeps the held store first", told(`${first.handle}-due-0000@example.com`), 1);
   }
 
+  part("LEVE (triple audit, Claude 1 8627): a card notice at the start of the run that time left untried is told next run");
+  reset();
+  {
+    const account = "acct_1CardFirstDue01";
+    const product = await makeStore("cards-first@example.com", "cardfirst", account, true);
+    // The first member listed, at the very start of the walk, has a card that stops, and so has a later one. The
+    // fifth page's read takes the rest of the run, so nobody is tried. The next run must tell the first member, not
+    // step past it for a whole lap of the list (as remindFailed does since e1c2690b48).
+    active.set(account, running("cardfirst", product, 600, [0, 10]));
+    slowActive.set(account, "sub_cardfirstRun0399");
+    await run();
+    is("this run: nobody told", [told("cardfirst-0000@example.com"), told("cardfirst-0010@example.com")], [0, 0]);
+    await run();
+    is("the next run tells the first member and the later one", [told("cardfirst-0000@example.com"), told("cardfirst-0010@example.com")], [1, 1]);
+    await run();
+    is("and never twice", [told("cardfirst-0000@example.com"), told("cardfirst-0010@example.com")], [1, 1]);
+  }
+
   part("LEVE (Claude 1, 6834038662): card pages cut by the deadline are not a store done");
   reset();
   {

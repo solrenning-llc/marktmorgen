@@ -14,6 +14,7 @@ import { originFrom } from "@/lib/request-origin";
 import type { ProductFile } from "@/lib/product-file";
 import { BUMP_KEYS } from "@/lib/bundle-rules";
 import { ordersWords } from "@/lib/buyer-words/orders";
+import { unknownLimit } from "@/lib/request-guard";
 
 /**
  * Hands the buyer the file they paid for.
@@ -125,7 +126,8 @@ export async function GET(request: NextRequest) {
       status: 429,
       headers: { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "600", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" },
     });
-  const counted = await withinStoreWhy("download", `${store.handle}:${link}`, OPENS_PER_HOUR, 3600, store, "buyer");
+  // The short window's count unknown throws (withinLimit, #3067) and reads as "unknown" too (unknownLimit).
+  const counted = await withinStoreWhy("download", `${store.handle}:${link}`, OPENS_PER_HOUR, 3600, store, "buyer").catch(unknownLimit);
   // A count that could not be made refuses as well, but says so, with a short wait: never "opened very many times".
   if (counted === "unknown") {
     return new Response(say.purchaseCheckFailed, {

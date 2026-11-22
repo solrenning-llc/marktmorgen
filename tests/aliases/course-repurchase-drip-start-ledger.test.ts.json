@@ -1,0 +1,4 @@
+{
+  "@/lib/catalog": "course-repurchase-catalog-world.ts",
+  "@/lib/stripe-account": "course-repurchase-stripe-world.ts"
+}

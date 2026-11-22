@@ -4,7 +4,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { canSell } from "@/lib/store-checkout";
 import { UPSELL_COOKIE, takeUpsell } from "@/lib/upsell";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit, limitUnknownResponse } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;
 
@@ -63,7 +63,10 @@ export async function POST(request: NextRequest) {
   // whose Stripe account is not cleared — before Stripe is asked anything
   // and before anything is written. A no is refused the same: nothing to answer.
   if (!canSell(store)) return back("unavailable");
-  if (!(await withinLimit("upsell", `${clientAddress(request)}|${store.handle}`, 30, 600))) {
+  const room = await withinLimit("upsell", `${clientAddress(request)}|${store.handle}`, 30, 600).catch(unknownLimit);
+  // A count that could not be read is never "too many tries" (rule 24): nothing was charged.
+  if (room === "unknown") return limitUnknownResponse();
+  if (!room) {
     return new Response("Too many tries. Wait a few minutes.", { status: 429, headers: { "Cache-Control": "no-store" } });
   }
 
@@ -75,6 +78,8 @@ export async function POST(request: NextRequest) {
     step,
     answer,
     consent: answer === "yes" ? consent : null,
+    // The IP country the EU VAT gate reads: an EU or UK one refuses the offer (lib/upsell.ts, offerGate).
+    headers: request.headers,
   });
   if (result.kind === "confirm") {
     return new Response(null, { status: 303, headers: { Location: result.url, "Cache-Control": "no-store" } });

@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { Logo } from "@/components/logo";
 import { studioPath, studioView } from "@/lib/studio-route";
-import { withinLimit } from "@/lib/request-guard";
+import { withinLimit, unknownLimit } from "@/lib/request-guard";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { allowanceWindow, resetWords } from "@/lib/allowance-window";
 import { poolFullWords } from "@/lib/free-pool-rules";
@@ -41,7 +41,9 @@ export default async function StudioPausedPage({ searchParams }: Params) {
   }
   const { view } = found;
   const { store } = view;
-  const shown = await withinLimit("studio-paused", store.sid || store.handle, SHOWN_PER_DAY, 86_400);
+  // How many times it was shown today could not be read (rule 24): said so, never as shown too often.
+  const room = await withinLimit("studio-paused", store.sid || store.handle, SHOWN_PER_DAY, 86_400).catch(unknownLimit);
+  const shown = room === true;
   const pin = store.sid ? `?store=${store.sid}` : "";
   const standing = standingOf(store);
   const paying = standing === "paid";
@@ -136,6 +138,8 @@ export default async function StudioPausedPage({ searchParams }: Params) {
               </div>
               )}
             </>
+          ) : room === "unknown" ? (
+            <p className="mt-4 text-ink-soft" role="status">Your studio is paused for now. More about it could not be loaded just now: reload this page in a minute.</p>
           ) : (
             <p className="mt-4 text-ink-soft">Your studio is paused for now. Please come back tomorrow.</p>
           )}

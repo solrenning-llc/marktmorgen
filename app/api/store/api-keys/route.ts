@@ -2,9 +2,10 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_KEY_NAME, makeKey } from "@/lib/api-keys";
 import { afterMake, makerFor, revokeChecked, shownKeys, turnKeyOn } from "@/lib/api-key-pause";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { SESSION_COOKIE, isFreshSession } from "@/lib/auth";
 import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
 import { can } from "@/lib/team-roles";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * Making and revoking the keys a creator's own tools read the store with.
@@ -25,6 +26,12 @@ import { can } from "@/lib/team-roles";
  * inbox, and a key made from it would outlive the session it came from. An
  * account with neither makes keys as before. The key's record says who made
  * it and whether the session had a second step (lib/api-key-pause.ts).
+ *
+ * And from a login of the last 15 minutes, on every account (lib/auth.ts
+ * isFreshSession), as adding a passkey or changing the address asks: "Log out
+ * of all devices" ends sessions, never keys, so a key made from a session
+ * cookie someone took would keep reading the store after the owner logged
+ * every device out. An older session is answered "reauth" and nothing is made.
  *
  * `{ action: "turn_on", id }` turns back on a key the team's two-step rule
  * paused (owner C3-100): by whoever made it, from a session with a second
@@ -48,11 +55,12 @@ export async function POST(request: NextRequest) {
     if (action === "make") {
       const write = body.write === true;
       if (write && !can(role, "import")) return Response.json({ ok: false, error: "role" }, { status: 403 });
+      if (!(await isFreshSession(session))) return Response.json({ ok: false, error: "reauth" }, { status: 403 });
       const step = (await liveSecondStep(email, session)) !== null;
       if (!step && (await hasSecondStep(email))) return Response.json({ ok: false, error: "second_step" }, { status: 403 });
       const maker = makerFor(store.sid, role, email, step);
       const made = await makeKey(store.sid, text(body.name, MAX_KEY_NAME * 2), Date.now(), write, "none", maker);
-      if (!made.ok) return Response.json({ ok: false, error: made.reason }, { status: made.reason === "unavailable" ? 503 : 400 });
+      if (!made.ok) return Response.json({ ok: false, error: made.reason }, { status: made.reason === "unavailable" || made.reason === "make_unconfirmed" ? 503 : 400 });
       // Checked again once written: the door let them in a moment before (owner C3-100).
       const paused = await afterMake(store, made.made.id, maker, email, write);
       return Response.json(
@@ -64,7 +72,7 @@ export async function POST(request: NextRequest) {
     if (action === "revoke") {
       // The webhook endpoints the key added stop with it (owner C3-100); a key whose maker left the team is the owner's to revoke.
       const gone = await revokeChecked(store, role, text(body.id, 20));
-      if (gone !== "ok") return Response.json({ ok: false, error: gone }, { status: gone === "unknown" ? 404 : 403 });
+      if (gone !== "ok") return Response.json({ ok: false, error: gone }, { status: gone === "revoke_unconfirmed" ? 503 : gone === "unknown" ? 404 : 403 });
       return Response.json({ ok: true, keys: await keys() }, { headers: { "Cache-Control": "no-store" } });
     }
     if (action === "turn_on") {
@@ -76,6 +84,7 @@ export async function POST(request: NextRequest) {
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {
+    if (action === "revoke" && error instanceof UnknownReplyError) return Response.json({ ok: false, error: "revoke_unconfirmed" }, { status: 503 });
     console.error("changing an API key failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

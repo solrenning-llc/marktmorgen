@@ -15,7 +15,7 @@
  */
 import { NextRequest } from "next/server";
 import { POST as messagesPost } from "@/app/api/store/community/messages/route";
-import { freshConfig, memberKey, saveConfig, type Member } from "@/lib/community";
+import { freshConfig, memberKey, readConfig, saveConfig, type Member } from "@/lib/community";
 import { pairOf, parseDmSetting } from "@/lib/community-dm";
 import { emailKey, mintPass, passCookieName } from "@/lib/learn";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setCommunity, setSubscription, storeForEmail, type Store } from "@/lib/store";
@@ -61,7 +61,9 @@ async function main(): Promise<void> {
   const senderKey = memberKey(SENDER);
   await redis.pipeline([
     ["SET", `nl:cm:${cid}:ok:${emailKey(SENDER)}`, JSON.stringify({ v: 1, ok: true })],
-    ["HSET", members, senderKey, JSON.stringify({ k: senderKey, e: SENDER, n: "Sender", h: "sender", dir: true, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] } satisfies Member)],
+    // Since #3395 the doors read what a member holds once (lib/community-access.ts holdingsOf, `:h:`): the same answer, kept.
+    ["SET", `nl:cm:${cid}:h:${emailKey(SENDER)}`, JSON.stringify({ v: (await readConfig(cid))!.v, ids: [ticket.product.id], held: [ticket.product.id] })],
+    ["HSET", members, senderKey, JSON.stringify({ k: senderKey, e: SENDER, n: "Sender", h: "sender", dir: true, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [] } satisfies Member)],
   ]);
   const pass = await mintPass(club, SENDER, "all");
   const cookie = `${passCookieName(club)}=${pass}`;
@@ -83,7 +85,7 @@ async function main(): Promise<void> {
   part("Control: a member who is in");
   const OTHER = "other@huntdm.example";
   const otherKey = memberKey(OTHER);
-  await redis.pipeline([["HSET", members, otherKey, JSON.stringify({ k: otherKey, e: OTHER, n: "Other", h: "other", dir: true, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] } satisfies Member)]]);
+  await redis.pipeline([["HSET", members, otherKey, JSON.stringify({ k: otherKey, e: OTHER, n: "Other", h: "other", dir: true, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [] } satisfies Member)]]);
   is("a request goes to a member who is in", (await sendTo(otherKey)).includes("n=dmasked"), true);
 
   part("Somebody who was never a member");
@@ -96,7 +98,7 @@ async function main(): Promise<void> {
   part("A member the creator removed");
   const GONE = "removed@huntdm.example";
   const goneKey = memberKey(GONE);
-  await redis.pipeline([["HSET", members, goneKey, JSON.stringify({ k: goneKey, e: GONE, n: "Removed", h: "removed", dir: false, mail: false, at: 1, seen: 1, muted: true, removed: true, t: "", q: [], qa: 0, qq: [] } satisfies Member)]]);
+  await redis.pipeline([["HSET", members, goneKey, JSON.stringify({ k: goneKey, e: GONE, n: "Removed", h: "removed", dir: false, mail: false, at: 1, seen: 1, muted: true, removed: true, t: "", q: [], qa: 0, qq: [], s: [] } satisfies Member)]]);
   const toGone = await sendTo(goneKey);
   is("a message to a removed member is answered the same", toGone.includes("n=dmasked"), true);
   is("and nothing waits in their requests", await requestsOf(goneKey), 0);
@@ -106,7 +108,7 @@ async function main(): Promise<void> {
   // whether that address bought the ticket.
   const addMember = async (email: string) => {
     const k = memberKey(email);
-    await redis.pipeline([["HSET", members, k, JSON.stringify({ k, e: email, n: "Quiet", h: "quiet", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] } satisfies Member)]]);
+    await redis.pipeline([["HSET", members, k, JSON.stringify({ k, e: email, n: "Quiet", h: "quiet", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [] } satisfies Member)]]);
     return k;
   };
   const sameShape = (location: string, a: string, b: string) => location.split(pairOf(senderKey, a)).join("<pair>").split(pairOf(senderKey, b)).join("<pair>");
@@ -127,6 +129,7 @@ async function main(): Promise<void> {
   part("Requests off: a member and a key nobody holds get the same answer");
   {
     await saveConfig(cid, { ...freshConfig(club.name), access: [ticket.product.id], dm: parseDmSetting({ on: true, between: true, ask: false }) });
+    await redis.pipeline([["SET", `nl:cm:${cid}:h:${emailKey(SENDER)}`, JSON.stringify({ v: (await readConfig(cid))!.v, ids: [ticket.product.id], held: [ticket.product.id] })]]);
     const quiet = await addMember("quiet.two@huntdm.example");
     const nobody = memberKey("nobody.two@huntdm.example");
     const toMember = await sendTo(quiet);

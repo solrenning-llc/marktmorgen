@@ -173,10 +173,12 @@ export async function unlocksOf(
  * The locked spaces one member sees, or null when the store's requests did
  * not cover reading their products (the caller shows the resting page).
  * `opened` is the ids of the spaces the member was let into, and `unchecked`
- * those whose answer could not be read just now (answeredSpaces,
+ * those whose answer could not be read just now (spaceChecks,
  * lib/community-access.ts): each of those shown locked is listed as
  * "unchecked", with no way in offered and nothing read for it, since the
- * member may already hold its product (review of #3007, M1).
+ * member may already hold its product (review of #3007, M1). `lasting`: the
+ * unchecked ones stay so however often they are asked, and are listed as
+ * "uncheckedLasting", with a way to the creator (pre-review of #3395, round 2).
  */
 export async function lockedSpaces(
   store: Store,
@@ -184,10 +186,11 @@ export async function lockedSpaces(
   opened: ReadonlySet<string>,
   take: (units: number) => Promise<boolean>,
   unchecked: ReadonlySet<string> = new Set(),
+  lasting = false,
 ): Promise<LockedSpace[] | null> {
   const notChecked: LockedSpace[] = lockedOf(config, opened)
     .filter(({ space }) => unchecked.has(space.id))
-    .map(({ space }) => ({ name: space.name, about: space.about, unlock: "unchecked" }));
+    .map(({ space }) => ({ name: space.name, about: space.about, unlock: lasting ? "uncheckedLasting" : "unchecked" }));
   const excluded = new Set([...opened, ...unchecked]);
   const locked = lockedOf(config, excluded);
   if (locked.length === 0) return notChecked;

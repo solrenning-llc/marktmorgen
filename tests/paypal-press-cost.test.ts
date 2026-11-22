@@ -19,6 +19,7 @@ import { bookWork } from "@/lib/api-read-rules";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 import {
   COST_LINES, PAYPAL_PRESS, PAYPAL_PRESS_BOOK_COMMANDS, PAYPAL_PRESS_COMMANDS, PAYPAL_PRESS_LOCK_TRIES, PAYPAL_PRESS_SECONDS,
@@ -88,6 +89,7 @@ async function seed(store: Store, people: number, open: number): Promise<void> {
     commands.push(["HSET", `nl:pp:open:${STATS}`, `OPEN${b}BATCHX`, JSON.stringify({ at: Date.now(), currency: "usd", lines: [{ a: `z${String(b).padStart(11, "0")}`, c: 100 }] })]);
   }
   await pipeline(commands);
+  await markLive(store);
   if (!(await connectPayPal(store, CLIENT, SECRET)).ok) throw new Error("synthetic PayPal app not kept");
 }
 
@@ -122,8 +124,9 @@ async function main(): Promise<void> {
     is(`${people} affiliates: the units it takes (${paypalPressUnits(sizes!)}) cover what it sent`, paypalPressUnits(sizes!) * UNIT_COST.integration >= paypalPressCost(book.length + 8) && own + book.length + 8 <= PAYPAL_PRESS_COMMANDS + bookWork({ ...sizes!, products: 0 }, BOOK_STRIPE_PAGES).commands, true);
     is(`${people} affiliates: and within PAYPAL_PRESS_BOOK_COMMANDS (${PAYPAL_PRESS_BOOK_COMMANDS})`, book.length <= PAYPAL_PRESS_BOOK_COMMANDS, true);
     // The lock: taken, held again once before the batch is written down, let go. One hold: a second one in a row
-    // with nothing awaited between them would be a command that buys nothing.
-    is(`${people} affiliates: one EVAL to hold the lock again and one to let it go`, all.filter((c) => c === "EVAL").length - book.filter((c) => c === "EVAL").length, 2);
+    // with nothing awaited between them would be a command that buys nothing. And the batch itself is written down by
+    // one EVAL, only while the store is live (KEEP_OPEN_IF_LIVE, Codex L-20261120-0448), in place of HSET and SADD.
+    is(`${people} affiliates: one EVAL to hold the lock again, one to write the batch down while the store is live and one to let the lock go`, all.filter((c) => c === "EVAL").length - book.filter((c) => c === "EVAL").length, 3);
   }
 
   part("The path whose answer is not known writes its counts: inside the same constant");

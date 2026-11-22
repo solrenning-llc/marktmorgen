@@ -11,7 +11,7 @@
  * answer alone: a buyer or member another import brought is still "already", and is not emailed.
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { RETRY_OWN_READ_BYTES, RETRY_OWN_READ_COMMANDS, addRows, finishUpload, runImport, startImport } from "@/lib/imports";
+import { IMPORT_STEP_ROWS, RETRY_OWN_READ_BYTES, RETRY_OWN_READ_COMMANDS, addRows, finishUpload, runImport, startImport } from "@/lib/imports";
 import { IMPORT_WORST_BYTES_PER_ROW } from "@/lib/import-limits";
 import { importedFor } from "@/lib/imported-purchases";
 import { INVITE_OWN_READ_COMMANDS, inviteMembers, linkKey, readInvite, inviteField } from "@/lib/move-members";
@@ -346,17 +346,25 @@ async function main(): Promise<void> {
   // reach them: a purchases step failing between the grant and the queue, and a members step whose reply is lost.
   part("Cost: a step done again reads within its priced commands and bytes");
   {
-    const buy = await measured(await purchases(store, OWNER, "cost-buyer@example.com"), (c) => c[0] === "SADD" && String(c[1]).startsWith("nl:import:") && String(c[1]).endsWith(":mail"));
+    // Three buyers in one step: the retry reads one stored purchase for each row, so a full step reads a step's rows.
+    const three = ["cost-a@example.com", "cost-b@example.com", "cost-c@example.com"];
+    const started = await startImport(store, OWNER, "purchases", { expected: three.length, file: "orders.csv", email: true });
+    if (!started.ok) throw new Error(`purchases not started: ${started.reason}`);
+    await addRows(store, started.job.id, three.map((buyer, i) => [String(i + 2), buyer, "The Guide", "Paid"]));
+    await finishUpload(store, started.job.id);
+    const buy = await measured(started.job.id, (c) => c[0] === "SADD" && String(c[1]).startsWith("nl:import:") && String(c[1]).endsWith(":mail"));
     const most = Math.max(...buy.passes.map((p) => p.commands));
-    is("purchases: the retry was reached, and read its own row", [buy.fired, buy.job?.state, buy.job?.counts.added, most > 0], [true, "done", 1, true]);
-    is("purchases: no pass reads more than priced", buy.passes.every((p) => p.commands <= RETRY_OWN_READ_COMMANDS && p.bytes <= RETRY_OWN_READ_BYTES), true);
+    is("purchases: the retry was reached, and read one stored purchase a row", [buy.fired, buy.job?.state, buy.job?.counts.added, most], [true, "done", three.length, three.length]);
+    is("purchases: so a step is priced at its full rows, and no pass reads more", [RETRY_OWN_READ_COMMANDS >= IMPORT_STEP_ROWS.purchases, buy.passes.every((p) => p.commands <= RETRY_OWN_READ_COMMANDS && p.bytes <= RETRY_OWN_READ_BYTES)], [true, true]);
     store = await fresh();
     monthUnused(store.sid!);
     const join = await measured(await members(store, OWNER, "cost-member@example.com", renews), (c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:invite-unless-erased:"), true);
     const most2 = Math.max(...join.passes.map((p) => p.commands));
     is("members: the retry was reached, and read its own invitation", [join.fired, join.job?.state, join.job?.counts.added, most2], [true, "done", 1, INVITE_OWN_READ_COMMANDS]);
     is("members: no pass reads more than priced", join.passes.every((p) => p.commands <= INVITE_OWN_READ_COMMANDS && p.bytes <= RETRY_OWN_READ_BYTES), true);
-    is("every record read is within a row's bytes", [buy.worstRecord > 0, join.worstRecord > 0, Math.max(buy.worstRecord, join.worstRecord) <= IMPORT_WORST_BYTES_PER_ROW], [true, true, true]);
+    is("every record read is within a row's bytes, and a full step's records within the priced bytes",
+      [buy.worstRecord > 0, join.worstRecord > 0, Math.max(buy.worstRecord, join.worstRecord) <= IMPORT_WORST_BYTES_PER_ROW, RETRY_OWN_READ_BYTES >= Math.max(IMPORT_STEP_ROWS.purchases, IMPORT_STEP_ROWS.members) * IMPORT_WORST_BYTES_PER_ROW],
+      [true, true, true, true]);
   }
 
   done();

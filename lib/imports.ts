@@ -133,6 +133,8 @@ const CELL_CAPS: Record<ImportKind, number[]> = {
 
 /** Rows applied in one step, by kind: small enough that a step is a few seconds at most. */
 const CHUNK: Record<ImportKind, number> = { contacts: 1_000, products: 50, purchases: 250, members: 250 };
+/** The same figures, for the cost line and the tests that hold a step's reads to them. */
+export const IMPORT_STEP_ROWS: Readonly<Record<ImportKind, number>> = CHUNK;
 /**
  * What a step done again reads of what it may have written on the try that failed (issue #3957), priced on every
  * step, since any step can be one: a purchases step one HGET for each row it saw before that answered "already"

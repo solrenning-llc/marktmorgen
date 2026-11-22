@@ -13,7 +13,7 @@
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { addRows, finishUpload, runImport, startImport } from "@/lib/imports";
 import { importedFor } from "@/lib/imported-purchases";
-import { linkKey, readInvite, inviteField } from "@/lib/move-members";
+import { inviteMembers, linkKey, readInvite, inviteField } from "@/lib/move-members";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -258,6 +258,30 @@ async function main(): Promise<void> {
     is("an exact retry counts and emails the row once",
       [finished?.state, finished?.counts.added, finished?.counts.already, sentTo(address, before)],
       ["done", 1, 0, 1]);
+  }
+
+  // The other branch of inviteMembers, without the erasure step (erased null): its record is an HSETNX, and its link
+  // and reminder are a separate pipeline after it. Imports always pass the erasure step (lib/imports.ts), so no import
+  // above reaches it; it is called here directly (Codex X6's LOW on #4008). The record is written, the link's SET fails,
+  // and the same job tries again: the invitation answers as new, with its link under the record's own token.
+  part("Members, the branch without the erasure step: the record is written, its link's SET fails, and the same job tries again");
+  {
+    const rows = [{ email: "direct@example.com", productId: club.product.id, option: "", renews: in20 }];
+    const field = inviteField("direct@example.com", club.product.id);
+    const failure = failOnce((c) => c[0] === "SET" && String(c[1]).startsWith("nl:mv:link:"));
+    let first: unknown;
+    try {
+      first = await inviteMembers(store, "job-direct", rows).catch((error: unknown) => error);
+    } finally {
+      restore();
+    }
+    const written = await readInvite(store.statsId!, field);
+    is("the failure came after the record, before its link", [failure.fired(), first instanceof Error, written?.job, written ? redis.run(["EXISTS", linkKey(written.t)]) : "no invitation"], [true, true, "job-direct", 0]);
+    const again = await inviteMembers(store, "job-direct", rows);
+    is("the same job's retry answers it as new", again, [field]);
+    is("and sets its link under the record's own token", written ? redis.run(["EXISTS", linkKey(written.t)]) : "no invitation", 1);
+    const other = await inviteMembers(store, "job-other", rows);
+    is("control: another job finds it already invited", other, [null]);
   }
 
   part("Control: a member another import invited is still already, and not emailed again");

@@ -38,7 +38,7 @@ case "$FAKE_GH" in
 esac
 `); chmodSync(join(BIN, "gh"), 0o755);
 
-const base = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t", CORREIO_REPO: join(T, "mail.git"), CORREIO_PR_REPO: join(T, "prs.git"), CORREIO_SEM_VERSAO: "1", AGENT_MAIL_TEST: "1", PATH: `${BIN}:${process.env.PATH}` };
+const base = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t", CORREIO_REPO: join(T, "mail.git"), CORREIO_PR_REPO: join(T, "prs.git"), CORREIO_SEM_VERSAO: "1", AGENT_MAIL_TEST: "1", CORREIO_GIT_DIR: join(T, "correio-local.git"), PATH: `${BIN}:${process.env.PATH}` };
 delete base.CLAUDE_CODE_REMOTE_SESSION_ID;
 // Both outputs are read: warnings go to stderr even when the command succeeds.
 const run = (args, env = {}, cwd = join(T, "w")) => {
@@ -556,6 +556,22 @@ console.log("step 6: free text never becomes a field (A12), unidentified acks ar
   is("pr-status reads the mailbox once (A11)", b.n === 1, `${b.n} fetches`);
   b = buscas(["hold-pr", "--as", "Claude 4 X", "--pr", "2", "--reason", "t"], as("c4"));
   is("hold-pr reads one snapshot to decide and one more to write (A11)", b.n === 2, `${b.n} fetches\n${b.out}`);
+}
+
+console.log("step 6: the private mailbox never lands in the public clone (A14)");
+{
+  const W = join(T, "w");
+  for (const ref of g(["for-each-ref", "--format=%(refname)", "refs/correio", "refs/agent-mail"], W).split("\n").filter(Boolean)) g(["update-ref", "-d", ref], W);
+  r = run(["send", "--from", "Claude 2 X", "--to", "Claude 3 Z", "--subject", "s", "--text", "private words"], { ...as("c2"), CORREIO_REPO: join(T, "mail7.git") });
+  const ponta = g(["rev-parse", "refs/heads/correio"], join(T, "mail7.git"));
+  run(["watch", "--as", "Claude 3 Z", "--seconds", "1"], { CORREIO_REPO: join(T, "mail7.git"), CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+  is("after a send and a watch, the clone the tool runs in has no mailbox ref (A14)", r.ok && g(["for-each-ref", "--format=%(refname)", "refs/correio", "refs/agent-mail"], W) === "", g(["for-each-ref", "refs/correio", "refs/agent-mail"], W));
+  let tem = true; try { g(["cat-file", "-e", ponta], W); } catch { tem = false; }
+  is("and no mailbox commit in its objects (A14)", tem === false, ponta);
+  g(["update-ref", "refs/agent-mail/append-only-checked", g(["rev-parse", "HEAD"], W)], W);
+  r = run(["list-queue"], { CORREIO_REPO: join(T, "mail7.git") });
+  is("a mailbox ref left by an older version in the clone is reported, with the command to delete it (A14)", /ATENÇÃO.*refs\/agent-mail\/append-only-checked/.test(r.out) && /update-ref -d/.test(r.out), r.out);
+  g(["update-ref", "-d", "refs/agent-mail/append-only-checked"], W);
 }
 
 console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");

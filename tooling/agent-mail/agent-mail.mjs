@@ -96,6 +96,8 @@ export function dataDe(id) {
 // borda empatam no commit da borda e se desempatam como antes, pelo nome.
 // ---------------------------------------------------------------------------------------------------------------------
 export const FUTURO_MIN = 5;
+/** Prazo máximo de uma tomada, somando as renovações da mesma sessão em seguida (passo 3): fila 30 min, revisão 2 h. */
+export const TOMADA_MAX_MIN = { fila: 30, revisao: 120 };
 const ordens = new Map();
 
 /** A posição de cada arquivo na sequência dos commits (a do commit que o criou) e a hora desse commit. */
@@ -364,26 +366,43 @@ export function pedidos(tipo, agora = new Date(), commit = buscar()) {
   const tomadas = new Map();
   const devolvidas = new Map(); // id -> famílias que devolveram (por exemplo, por terem commits no PR); não pegam de novo
   const ord = ordem(commit);
-  for (const c of arquivos(commit, `${tipo}/tomadas`)) {
-    const [, , id, n] = c.split("/");
-    const [marca, por, acao] = conteudo(commit, c).split("\n");
-    if (acao === "DEVOLVIDO") devolvidas.set(id, new Set([...(devolvidas.get(id) ?? []), familia(por || remetenteDe(marca))]));
-    const atual = tomadas.get(id);
-    if (atual && Number(n) <= atual.n) continue;
-    // Passo 3: a tomada vale da hora declarada ou da do commit, a que vier primeiro; uma declarada no futuro não vale.
+  const maiorN = new Map();
+  // Passo 3: as tomadas de cada pedido valem na ordem dos commits (o número n só dá nome ao arquivo); uma liberação do
+  // coordenador só vale como registro privilegiado; e as renovações seguidas da mesma sessão param de valer depois de
+  // TOMADA_MAX_MIN contados da primeira delas.
+  const lidas = arquivos(commit, `${tipo}/tomadas`).map((c) => ({ c, i: ord.get(c)?.i ?? -1, n: Number(c.split("/")[3]) }))
+    .sort((a, b) => a.i - b.i || a.n - b.n);
+  for (const { c, n } of lidas) {
+    const id = c.split("/")[2];
+    maiorN.set(id, Math.max(maiorN.get(id) ?? -1, n));
+    const texto = conteudo(commit, c);
+    const [marca, por, acao] = texto.split("\n");
+    const quem = por || remetenteDe(marca);
+    if (acao === "LIBERADO" && !privilegioValido(texto, quem)) continue;
+    if (acao === "DEVOLVIDO") devolvidas.set(id, new Set([...(devolvidas.get(id) ?? []), familia(quem)]));
+    // A tomada vale da hora declarada ou da do commit, a que vier primeiro; uma declarada no futuro não vale.
     const declarada = dataDe(marca), feita = ord.get(c)?.t;
     const quando = noFuturo(declarada, agora) ? null : declarada && feita ? new Date(Math.min(declarada.getTime(), feita)) : declarada;
-    tomadas.set(id, { n: Number(n), por: por || remetenteDe(marca), quando, devolvida: acao === "DEVOLVIDO" });
+    const antes = tomadas.get(id);
+    const solta = acao === "DEVOLVIDO" || acao === "LIBERADO";
+    // A sequência só continua se a tomada anterior da mesma sessão ainda valia quando esta foi gravada (renovação); depois
+    // de vencida, uma tomada nova começa outra sequência (revisão do Claude 4 AC no #5057, MÉDIO).
+    const prazo = tipo === "fila" ? TOMADA_FILA_MIN : TOMADA_MIN;
+    const renovacao = !solta && antes && !antes.devolvida && slug(antes.por) === slug(quem) && antes.inicio && antes.quando && quando &&
+      (quando - antes.quando) / 60000 < prazo;
+    const inicio = renovacao ? antes.inicio : quando;
+    tomadas.set(id, { n, por: quem, quando, inicio, devolvida: solta });
   }
   const pos = (id) => ord.get(`${tipo}/pedidos/${id}.md`)?.i ?? Infinity;
   return arquivos(commit, `${tipo}/pedidos`).map(idDe).sort((a, b) => pos(a) - pos(b) || a.localeCompare(b)).map((id) => {
     const texto = conteudo(commit, `${tipo}/pedidos/${id}.md`);
     const tomada = tomadas.get(id);
-    const viva = tomada && !tomada.devolvida && tomada.quando && (agora - tomada.quando) / 60000 < (tipo === "fila" ? TOMADA_FILA_MIN : TOMADA_MIN) && !semCota.has(familia(tomada.por));
+    const viva = tomada && !tomada.devolvida && tomada.quando && (agora - tomada.quando) / 60000 < (tipo === "fila" ? TOMADA_FILA_MIN : TOMADA_MIN) &&
+      (!tomada.inicio || (agora - tomada.inicio) / 60000 < TOMADA_MAX_MIN[tipo]) && !semCota.has(familia(tomada.por));
     const estado = feitas.has(id) ? "feito" : viva ? "tomado" : "aberto";
     return { id, tipo, pr: campo(texto, "PR"), sha: campo(texto, "Head"), autor: campo(texto, "Autor"), familia: familia(campo(texto, "Autor")),
       texto, estado, tomadoPor: viva ? tomada.por : null, ultimaTomadaPor: tomada && !tomada.devolvida ? tomada.por : null,
-      proximaTomada: tomada ? tomada.n + 1 : 0, devolveram: devolvidas.get(id) ?? new Set() };
+      proximaTomada: maiorN.has(id) ? maiorN.get(id) + 1 : 0, devolveram: devolvidas.get(id) ?? new Set() };
   });
 }
 
@@ -729,7 +748,11 @@ export function chave(nome, commit = buscar(), agora = new Date()) {
   const motivo = resto.filter((l) => !/^(Sessão|Pedido|Identificador do pedido|Reserva): /.test(l)).join(" ").trim();
   if (!ligacaoValida(estado, por, texto)) return { ligada: false, por, quando: new Date(t), motivo: `ON IGNORADO: sem a sessão nomeada e o pedido do coordenador (${motivo})` };
   if (estado === "ON" && noFuturo(new Date(t), agora)) return { ligada: false, por, quando: new Date(t), motivo: `ON IGNORADO: instante no futuro (${motivo})` };
-  if (estado === "ON" && lista.some((x) => x.c !== ultimo && x.t >= t && conteudo(commit, x.c).split("\n")[0] === "OFF")) {
+  // Um OFF adiantado mais de FUTURO_MIN em relação ao commit que o gravou vale só da hora desse commit: um relógio errado
+  // não segura o interruptor desligado por dias (notas do Claude 5 ibqho e do Claude 4 Z no #5055). Dentro da folga, o
+  // instante declarado vale, e desligado prevalece.
+  const instanteOff = (x) => { const feito = ord.get(x.c)?.t; return feito !== undefined && x.t - feito > FUTURO_MIN * 60000 ? feito : x.t; };
+  if (estado === "ON" && lista.some((x) => x.c !== ultimo && instanteOff(x) >= t && conteudo(commit, x.c).split("\n")[0] === "OFF")) {
     return { ligada: false, por, quando: new Date(t), motivo: `ON IGNORADO: há um OFF com instante igual ou posterior; desligado prevalece (${motivo})` };
   }
   return { ligada: estado === "ON", por, quando: new Date(t), motivo };
@@ -1010,6 +1033,29 @@ export function renovar({ tipo, eu, id, agora = new Date() }) {
 }
 
 /**
+ * Liberação de uma tomada travada pelo coordenador (passo 3): ação privilegiada, como ligar um interruptor. A sessão
+ * nomeada (ou a reserva, nos três casos) a faz, com o pedido do coordenador da #4932 que cita a id do pedido, nunca num
+ * PR que ela escreveu, revisou ou enfileirou; a liberação é avisada a todos no mesmo commit, e a família que tinha a
+ * tomada não fica impedida de pegar de novo.
+ */
+export function liberarTomada({ tipo, eu, id, motivo = "", pedido = "", dono = "", agora = new Date() }) {
+  if (!String(motivo).trim()) throw new Error("--reason é obrigatório: diga por que a tomada está travada");
+  const commit = buscar();
+  const p = pedidos(tipo, agora, commit).find((x) => x.id === id);
+  if (!p) throw new Error(`pedido não encontrado: ${id}`);
+  const priv = conferirPrivilegio({ eu, acao: "libera uma tomada", comando: "release-take", alvo: String(id), pedido, dono, agora, commit });
+  if (p.estado !== "tomado") throw new Error(`o pedido ${id} não está tomado agora (${p.estado}); não há o que liberar`);
+  conferirDistancia(p.pr, priv.s.id, commit);
+  const carimbo = agora.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  const marca = `${carimbo}-${slug(eu)}-${randomBytes(2).toString("hex")}`;
+  acrescentar({
+    [`${tipo}/tomadas/${id}/${p.proximaTomada}`]: [marca, eu, "LIBERADO", String(motivo).trim(), `Tomada de: ${p.tomadoPor}`, ...linhasPrivilegio(priv), `Sessão: ${linhaSessao()}`, ""].join("\n"),
+    ...avisoPrivilegio({ eu, assunto: `tomada do ${tipo === "fila" ? "pedido de fila" : "pedido de revisão"} #${p.pr} (${id}) liberada por ${eu}; estava com ${p.tomadoPor}`, p: priv, agora }),
+  }, `${eu} liberou a tomada de ${tipo} #${p.pr}`);
+  return p;
+}
+
+/**
  * O código da ferramenta fica em tooling/agent-mail/ do main do Marktmorgen, revisado por PR, e o SHA-256 revisado fica
  * em tooling/agent-mail/agent-mail.sha256 (dono, OWNER-20261121-1904-MAIL-TOOL-FIX-ORDER, passo 1); o ramo correio
  * guarda só dados. A cada comando, a ferramenta compara o próprio SHA-256 com o do main, só pelo git, e avisa quando não
@@ -1238,7 +1284,7 @@ export const COMANDOS = {
   "release-enqueue": "devolver-fila", "cancel-enqueue": "retirar-fila", "renew-enqueue": "renovar-fila",
   "claim-pr": "reivindicar", "hold-pr": "segurar", "release-pr": "liberar", "pr-status": "estado-pr", help: "ajuda",
   "set-switch": "set-switch", "list-switches": "list-switches", "record-review": "record-review",
-  "list-review-records": "list-review-records", "confirm-review-record": "confirm-review-record",
+  "list-review-records": "list-review-records", "confirm-review-record": "confirm-review-record", "release-take": "release-take",
 };
 /** Nomes publicados antes (em português, e a primeira versão em inglês, de 21/11/2026): aceitos com um aviso do nome atual. */
 export const NOMES_ANTIGOS = {
@@ -1285,7 +1331,7 @@ async function main(argv) {
   const { comando, o } = traduzir(comandoDado, opcoes(resto));
   const ESCREVEM = new Set(["enviar", "confirmar", "vigiar", "cota", "reivindicar", "segurar", "liberar", "pedir-revisao", "pedir-fila",
     "pegar-revisao", "pegar-fila", "concluir-revisao", "concluir-fila", "devolver-revisao", "devolver-fila", "retirar-revisao", "retirar-fila",
-    "renovar-revisao", "renovar-fila", "set-switch", "record-review", "confirm-review-record"]);
+    "renovar-revisao", "renovar-fila", "set-switch", "record-review", "confirm-review-record", "release-take"]);
   if (ESCREVEM.has(comando)) conferirIdentidade(comando === "cota" && o.por && o.por !== true ? o.por : o.de ?? o.eu);
   if (comando && comando !== "ajuda") avisarVersao();
   if (comando === "enviar") {
@@ -1409,6 +1455,11 @@ async function main(argv) {
     if (!o.eu) throw new Error("--as é obrigatório");
     confirmarRegistro({ eu: o.eu, id: o._[0], motivo: o.motivo === true ? "" : o.motivo ?? "", pedido: o.pedido, dono: o.dono });
     console.log(`confirmado: ${o._[0]}`);
+  } else if (comando === "release-take") {
+    if (!o.eu) throw new Error("--as é obrigatório");
+    const tipo = String(o._[0] ?? "").includes("-") && pedidos("revisao").some((x) => x.id === o._[0]) ? "revisao" : "fila";
+    const p = liberarTomada({ tipo, eu: o.eu, id: o._[0], motivo: o.motivo === true ? "" : o.motivo ?? "", pedido: o.pedido, dono: o.dono });
+    console.log(`liberada: a tomada de ${o._[0]} (#${p.pr}), que estava com ${p.tomadoPor}; o pedido volta à ordem`);
   } else if (comando === "renovar-revisao" || comando === "renovar-fila") {
     if (!o.eu) throw new Error("--as é obrigatório");
     const tipo = comando === "renovar-fila" ? "fila" : "revisao";

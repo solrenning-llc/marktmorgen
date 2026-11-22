@@ -284,13 +284,21 @@ g(["checkout", "-q", "-B", "pr6", M], P); const H6a = commit("f6.txt", "6\n", "p
 const H6b = commit("f6.txt", "6b\n", "pr6 b");
 const ghEnv = (k) => ({ ...as(k), CORREIO_PR_REPO: GH, CORREIO_SEM_COMMITS: "" });
 
-run(["request-enqueue", "--from", "Claude 2", "--pr", "6", "--sha", H6b.slice(0, 10), "--text", "fila #6"], ghEnv("c2"));
+// Since step 4 (Claude 5 ibuF's MEDIUM on #5069): on GitHub, a request needs the PR's branch, found from the head or,
+// for a stale head, from the PR's current reference; without it nothing is requested, so no request can hold the queue.
+r = run(["request-enqueue", "--from", "Claude 2", "--pr", "6", "--sha", H6b.slice(0, 10), "--text", "fila #6"], ghEnv("c2"));
+is("on GitHub, with no branch of the PR found, the request is refused (it could never be delivered)", !r.ok && /ramo de #6 não foi achado/.test(r.out), r.out);
+is("so nothing holds the first place of the queue", !/#6 @/.test(run(["list-queue"]).out), run(["list-queue"]).out);
+g(["push", "-q", GH, `${H6b}:refs/heads/feature-6`], P);
+r = run(["request-enqueue", "--from", "Claude 2", "--pr", "6", "--sha", H6b.slice(0, 10), "--text", "fila #6"], ghEnv("c2"));
+const id6 = /registrado: (\S+)/.exec(r.out)?.[1];
+is("with the branch at the new head while refs/pull/6/head lags, the request records the branch and the full head", r.ok && /^Ramo: feature-6$/m.test(g(["show", `refs/heads/correio:fila/pedidos/${id6}.md`], join(T, "mail.git"))) && new RegExp(`^Head: ${H6b}$`, "m").test(g(["show", `refs/heads/correio:fila/pedidos/${id6}.md`], join(T, "mail.git"))), r.out);
 r = run(["claim-enqueue", "--as", "Claude 6 X"], ghEnv("c6"));
-is("not delivered and not declined: 'não conferível agora'", /não conferível agora/.test(r.out) && !/pegou|recusado/.test(r.out), r.out);
-is("the request stays first and open, with no take", /#6 @\S+ +autor Claude 2 +aberto/.test(run(["list-queue"]).out), run(["list-queue"]).out);
-g(["push", "-q", GH, `${H6b}:refs/pull/6/head`], P);
-r = run(["claim-enqueue", "--as", "Claude 6 X"], ghEnv("c6"));
-is("once refs/pull/N/head catches up, a head known only by that reference is still NOT CHECKED: not delivered (step 4)", !/pegou/.test(r.out) && /NÃO CONFERIDO agora/.test(r.out), r.out);
+is("the take checks the head by the branch, not by the lagging reference, and delivers it", /pegou/.test(r.out) && /pelo ramo feature-6/.test(r.out), r.out);
+run(["complete-enqueue", "--as", "Claude 6 X", id6, "--result", "declined", "--text", "fim do teste"], ghEnv("c6"));
+g(["checkout", "-q", "pr6"], P); const H6c = commit("f6.txt", "6c\n", "pr6 c"); g(["push", "-q", GH, `${H6c}:refs/heads/feature-6`], P); g(["push", "-q", GH, `${H6c}:refs/pull/6/head`], P);
+r = run(["request-enqueue", "--from", "Claude 2", "--pr", "6", "--sha", H6b.slice(0, 10), "--text", "fila #6 stale"], ghEnv("c2"));
+is("on GitHub, a request for a stale head is refused: the branch is found from the PR's reference", !r.ok && /não é o head atual/.test(r.out) && new RegExp(H6c.slice(0, 10)).test(r.out), r.out);
 
 console.log("unidentified writes are marked when read (OWNER-20261121-1904 step 2)");
 run(["send", "--from", "Codex X", "--to", "Claude 3 Z", "--subject", "s", "--text", "sem sessão"]);

@@ -1260,7 +1260,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:wl:@lib/waitlist.ts": { what: "Waitlists: who is waiting, launches", room: ["lib/waitlist.ts", "lib/store.ts"], parts: [per("store", 120, KEY, "A launch's record and each address's place in it.", MAIL("launch"))] },
   "nl:wl:jobs@lib/waitlist.ts": company("Launches still sending", "One set, members gone when done."),
   "nl:wl:t:@lib/waitlist-tokens.ts": { what: "A waitlist's confirm and leave links", room: ["lib/waitlist.ts"], parts: [per("store", 7, LINK_BYTES, "A confirm link, seven days.", MAIL("waitlist"))] },
-  "nl:sa:@lib/stock-alerts.ts": room("Back-in-stock lists (623 [SZ7]): each address's place, at most MAX_STOCK_ALERTS a product, ending a year after its latest write, taken from the room before it is written", "lib/stock-alerts.ts"),
+  "nl:sa:@lib/stock-alerts.ts": room("Back-in-stock lists (623 [SZ7]) and their index of ends: each address's place, at most MAX_STOCK_ALERTS a product, ending on its own (a week unconfirmed, a year after confirming; an ended place is dropped by the next ask, its room given back), taken from the room before it is written", "lib/stock-alerts.ts"),
   "nl:sa:t:@lib/stock-alerts.ts": room("A back-in-stock list's confirm link (a week) and leave link (as long as the list), taken from the room before they are written", "lib/stock-alerts.ts"),
   "nl:watch:due@lib/watch.ts": company("Stores whose video watching to read", "One sorted set for every store."),
   "nl:watch:folders:@lib/watch.ts": company("Stores that had any watching, a month", "One set a month for every store."),

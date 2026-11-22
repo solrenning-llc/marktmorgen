@@ -2272,24 +2272,57 @@ export class MemoryRedis {
           if (this.run(["HGET", batch, field]) !== expected) return 0;
           return this.run(["HDEL", batch, field]);
         }
-        // lib/stock-alerts.ts ADD_PLACE: a new place only while absent and under the ceiling; else only over the entry read.
-        if (key.startsWith("-- marktmorgen:stock-alert-add:v1\n") && args[0] === "1" && args.length === 7) {
-          const [, list, field, expected, next, max, seconds] = args;
+        // lib/stock-alerts.ts ADD_PLACE: up to `drop` other places whose end passed are dropped first (returned after the
+        // outcome); then a new place only while absent and under the ceiling, else only over the entry read; the list
+        // and its index of ends last until the new place's end only when they would end sooner.
+        if (key.startsWith("-- marktmorgen:stock-alert-add:v2\n") && args[0] === "2" && args.length === 10) {
+          const [, list, index, field, expected, next, max, nowText, endsText, drop] = args;
+          const now = Number(nowText);
+          const out: (number | string)[] = [0];
+          const due = this.run(["ZRANGEBYSCORE", index, "-inf", now, "LIMIT", 0, Number(drop)]) as string[];
+          for (const who of due) {
+            if (who === field) continue;
+            const raw = this.run(["HGET", list, who]) as string | null;
+            let ends: number | null = null;
+            if (raw !== null) {
+              try {
+                const entry = JSON.parse(raw) as { x?: unknown };
+                if (entry && typeof entry === "object" && typeof entry.x === "number") ends = entry.x;
+              } catch {
+                ends = null;
+              }
+            }
+            if (raw !== null && ends !== null && ends <= now) {
+              this.run(["HDEL", list, who]);
+              out.push(who, raw);
+            }
+            if (ends === null || ends <= now) this.run(["ZREM", index, who]);
+            else this.run(["ZADD", index, ends, who]);
+          }
           const current = this.run(["HGET", list, field]);
           if (expected === "") {
-            if (current !== null) return 0;
-            if ((this.run(["HLEN", list]) as number) >= Number(max)) return -1;
-          } else if (current !== expected) return 0;
+            if (current !== null) return out;
+            if ((this.run(["HLEN", list]) as number) >= Number(max)) {
+              out[0] = -1;
+              return out;
+            }
+          } else if (current !== expected) return out;
           this.run(["HSET", list, field, next]);
-          this.run(["EXPIRE", list, seconds]);
-          return 1;
+          this.run(["ZADD", index, Number(endsText), field]);
+          const life = Number(endsText) - now;
+          for (const k of [list, index]) if ((this.run(["TTL", k]) as number) < life) this.run(["EXPIRE", k, life]);
+          out[0] = 1;
+          return out;
         }
-        // lib/stock-alerts.ts CONFIRM_PLACE: a back-in-stock place confirmed only over exactly the entry read.
-        if (key.startsWith("-- marktmorgen:stock-alert-confirm:v1\n") && args[0] === "1" && args.length === 6) {
-          const [, list, field, expected, next, seconds] = args;
+        // lib/stock-alerts.ts CONFIRM_PLACE: a back-in-stock place confirmed only over exactly the entry read; the list and
+        // its index of ends last until the confirmed place's end only when they would end sooner.
+        if (key.startsWith("-- marktmorgen:stock-alert-confirm:v2\n") && args[0] === "2" && args.length === 8) {
+          const [, list, index, field, expected, next, nowText, endsText] = args;
           if (this.run(["HGET", list, field]) !== expected) return 0;
           this.run(["HSET", list, field, next]);
-          this.run(["EXPIRE", list, seconds]);
+          this.run(["ZADD", index, Number(endsText), field]);
+          const life = Number(endsText) - Number(nowText);
+          for (const k of [list, index]) if ((this.run(["TTL", k]) as number) < life) this.run(["EXPIRE", k, life]);
           return 1;
         }
         // lib/closed-store-data.ts BATCH_SWAP: one batch entry rewritten, or dropped when the new text is empty, only

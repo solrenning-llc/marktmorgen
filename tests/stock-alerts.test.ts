@@ -74,7 +74,9 @@ async function main(): Promise<void> {
   is("two different links, each 48 hex characters", [ALERT_TOKEN.test(dana.confirm), ALERT_TOKEN.test(dana.leave), dana.confirm !== dana.leave, dana.again], [true, true, true, false]);
   is("nobody to email before the confirmation", await confirmedForRestock(store, pid), []);
   const listKey = `nl:sa:${sid}:${pid}`;
-  is("the list ends by itself", redis.run(["TTL", listKey]) as number > WAIT_SECONDS - 5, true);
+  // Each place ends on its own (Codex X6 on #3616): an unconfirmed one with its confirm link, so the list too.
+  const firstTtl = redis.run(["TTL", listKey]) as number;
+  is("the list ends by itself, with its only place's confirm link", firstTtl > CONFIRM_SECONDS - 5 && firstTtl <= CONFIRM_SECONDS, true);
   const tokenKeys = redis.keys().filter((k) => k.startsWith("nl:sa:t:"));
   is("both links are kept, each ending by itself", [tokenKeys.length, ...tokenKeys.map((k) => (redis.run(["TTL", k]) as number) > 0)], [2, true, true]);
   const ttls = tokenKeys.map((k) => redis.run(["TTL", k]) as number).sort((a, b) => a - b);
@@ -85,6 +87,7 @@ async function main(): Promise<void> {
   is("another store's page confirms nothing", await confirmStockAlert(dana.confirm, elsewhere), { ok: false });
   is("confirmed", await confirmStockAlert(dana.confirm, store), { ok: true, productId: pid });
   is("now on the restock list, normalised", await confirmedForRestock(store, pid), ["dana@example.com"]);
+  is("a confirmed place lasts a year, and the list with it", (redis.run(["TTL", listKey]) as number) > WAIT_SECONDS - 5, true);
   is("pressing again changes nothing", await confirmStockAlert(dana.confirm, store), { ok: true, productId: pid });
 
   part("Asking again keeps one place");
@@ -251,11 +254,15 @@ async function main(): Promise<void> {
     const deadKey = `nl:sa:${sid}:${pid2}`;
     redis.run(["DEL", deadKey]);
     const DAY = 86_400_000;
-    const start = Date.now() - 300 * DAY;
-    // One address asked and confirmed 300 days ago: its place has 65 days left.
-    const old = await askStockAlert({ store, productId: pid2, email: "old@example.com", left: 0, now: start });
+    // One address asked and confirmed 300 days ago: its place, and so the list, have 65 days left.
+    const old = await askStockAlert({ store, productId: pid2, email: "old@example.com", left: 0 });
     if (!old.ok) throw new Error("not asked");
-    is("the old place confirmed", await confirmStockAlert(old.confirm, store, start), { ok: true, productId: pid2 });
+    is("the old place confirmed", await confirmStockAlert(old.confirm, store), { ok: true, productId: pid2 });
+    const kept = JSON.parse(redis.run(["HGET", deadKey, "old@example.com"]) as string) as Record<string, number>;
+    const oldEnds = Math.floor(Date.now() / 1000) + 65 * 86_400;
+    redis.run(["HSET", deadKey, "old@example.com", JSON.stringify({ ...kept, at: kept.at - 300 * 86_400, ok: kept.ok - 300 * 86_400, ...("x" in kept ? { x: oldEnds } : {}) })]);
+    if (redis.run(["TYPE", `${deadKey}:x`]) === "zset") redis.run(["ZADD", `${deadKey}:x`, oldEnds, "old@example.com"]);
+    for (const k of [deadKey, `${deadKey}:x`]) if (redis.run(["EXISTS", k]) === 1) redis.run(["EXPIRE", k, 65 * 86_400]);
     // One address asked 8 days ago and never confirmed: its confirm link is spent, so its place no longer counts.
     const stale = await askStockAlert({ store, productId: pid2, email: "stale@example.com", left: 0, now: Date.now() - 8 * DAY });
     if (!stale.ok) throw new Error("not asked");

@@ -12,8 +12,10 @@ import { BENEFIT_MARK_VALUE_BYTES } from "./plan-cost-registry";
  * inside its JSON reply, so every character is escaped twice (audit cd8d). Before this, the address was whatever
  * normaliseEmail kept, up to 320 characters: a control character such as U+0001 (not whitespace, so trim() keeps it)
  * is stored as `\u0001` and comes back as `\\u0001`, 7 bytes, and the worst mark measured 2274 bytes against the 672
- * declared. Now giveBenefit writes only an address that markableBy accepts (printable ASCII, no quote or backslash, at
- * most MARK_BY_MAX characters), checked before anything is read or counted. The seconds are counted at 11 digits.
+ * declared. Now giveBenefit writes only an address that markableBy accepts, checked before anything is read or
+ * counted: what sign-in accepts, less what costs more on the wire (controls, lone surrogates, quote, backslash, and
+ * <, > and & that an HTML-safe encoder writes as <), so an accented address still marks (coordinator cd33). The
+ * dearest character left is 3 bytes for one UTF-16 unit. The seconds are counted at 11 digits.
  */
 const at = 99_999_999_999;
 let checks = 0;
@@ -28,68 +30,78 @@ async function wireBytes(key: string, by: string): Promise<number> {
   const [reply] = await redis.pipeline([["HMGET", key, "f"]]);
   return Buffer.byteLength(JSON.stringify((reply as unknown[])[0]));
 }
+/** An HTML-safe JSON encoder (Go's encoding/json by default) also writes <, >, &, U+2028 and U+2029 as \uXXXX. */
+const htmlSafe = (s: string) => s.replace(/[<>&\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+const wireOf = (by: string) => Buffer.byteLength(htmlSafe(JSON.stringify(JSON.stringify({ at, by }))));
+/** An address of `ch` that fills MARK_BY_MAX UTF-16 units: `ch…@ch.chch…`. */
+function fill(ch: string): string {
+  const units = Math.floor((MARK_BY_MAX - 2) / ch.length);
+  const head = Math.max(1, units - 2);
+  return `${ch.repeat(head)}@${ch}.${ch.repeat(Math.max(1, units - head - 1))}`;
+}
 
 async function main() {
   await check("a mark's address is capped at the sign-in address's own length", () => {
     assert.equal(MARK_BY_MAX, MAX_EMAIL_LENGTH);
   });
 
-  // The worst address a mark can now hold: MARK_BY_MAX printable characters, in the shape of an address.
-  const worst = `${"a".repeat(MARK_BY_MAX - 5)}@b.co`;
-  await check("the worst address a mark can hold is accepted", () => {
+  // Accepted: what sign-in accepts and costs at most 3 bytes a UTF-16 unit on the wire.
+  const accepted: [string, string][] = [["plain ASCII", "a"], ["accented letter", "é"], ["ideograph", "\u4e2d"], ["astral (emoji)", "\u{1f600}"]];
+  for (const [name, ch] of accepted) {
+    const by = fill(ch);
+    await check(`an address of ${name} is markable`, () => {
+      assert.ok(by.length <= MARK_BY_MAX);
+      assert.equal(markableBy(normaliseEmail(by)), true, by);
+    });
+    await check(`a mark of ${name} stays inside BENEFIT_MARK_VALUE_BYTES, under JSON.stringify and an HTML-safe encoder`, async () => {
+      const bytes = await wireBytes(`nl:tben:given:test:${name}`, by);
+      console.log(`MEASURE ${name}: ${bytes} bytes (HTML-safe ${wireOf(by)}); declared ${BENEFIT_MARK_VALUE_BYTES}`);
+      assert.ok(bytes <= BENEFIT_MARK_VALUE_BYTES, `${bytes} > ${BENEFIT_MARK_VALUE_BYTES}`);
+      assert.ok(wireOf(by) <= BENEFIT_MARK_VALUE_BYTES, `${wireOf(by)} > ${BENEFIT_MARK_VALUE_BYTES}`);
+    });
+  }
+  await check("a real accented address marks", () => {
+    assert.equal(markableBy(normaliseEmail("José@Exemplo.com.br")), true);
+  });
+  await check("the declared value is the worst mark that can be written, no higher than needed", async () => {
+    const worst = fill("\u4e2d");
     assert.equal(worst.length, MARK_BY_MAX);
-    assert.equal(markableBy(normaliseEmail(worst)), true);
+    assert.equal(await wireBytes("nl:tben:given:test:worst", worst), BENEFIT_MARK_VALUE_BYTES);
   });
-  await check("the worst mark that can be written stays inside BENEFIT_MARK_VALUE_BYTES on the wire", async () => {
-    const bytes = await wireBytes("nl:tben:given:test:worst", worst);
-    console.log(`MEASURE worst markable mark: ${bytes} bytes; declared ${BENEFIT_MARK_VALUE_BYTES}`);
-    assert.ok(bytes <= BENEFIT_MARK_VALUE_BYTES, `${bytes} > ${BENEFIT_MARK_VALUE_BYTES}`);
-    assert.equal(bytes, BENEFIT_MARK_VALUE_BYTES, "the declared value is the measured worst, no higher than needed");
-  });
-
-  // The database's own encoder is not documented here; an HTML-safe one (Go's encoding/json by default) also writes
-  // <, > and & as <, > and & (Claude 2 upbeat's LOW on #5123, as Claude 5 ibqho's on #2048). Every
-  // printable ASCII character a mark may hold must cost one byte under such an encoder too.
-  const htmlSafe = (s: string) => s.replace(/[<>&]/g, (c) => `\\u00${c.charCodeAt(0).toString(16)}`);
-  await check("every character a mark may hold costs one byte even under an HTML-safe encoder", () => {
-    for (let code = 0x21; code <= 0x7e; code += 1) {
+  await check("no markable character costs more than 3 bytes a UTF-16 unit, even under an HTML-safe encoder", () => {
+    const empty = Buffer.byteLength(htmlSafe(JSON.stringify(JSON.stringify(""))));
+    for (let code = 0x21; code <= 0xffff; code += 1) {
+      if (code >= 0xd800 && code <= 0xdfff) continue;
       const ch = String.fromCharCode(code);
-      if (!markableBy(`${ch}@b.co`) && !markableBy(`a${ch}a@b.co`)) continue;
-      assert.equal(Buffer.byteLength(htmlSafe(JSON.stringify(JSON.stringify(ch)))), Buffer.byteLength(JSON.stringify(JSON.stringify("a"))), `${ch} costs more than one byte`);
+      if (!markableBy(`a${ch}a@b.co`)) continue;
+      const cost = Buffer.byteLength(htmlSafe(JSON.stringify(JSON.stringify(ch)))) - empty;
+      assert.ok(cost <= 3, `U+${code.toString(16)} costs ${cost} bytes`);
     }
   });
-  for (const ch of ["<", ">", "&"]) {
-    const by = `${ch.repeat(MARK_BY_MAX - 5)}@b.co`;
-    await check(`an address of ${ch} is not markable`, () => {
-      assert.equal(markableBy(by), false);
+
+  // Refused: each would cost more than declared, under JSON.stringify or an HTML-safe encoder.
+  const refused: [string, string][] = [
+    ["control U+0001", "\u0001"], ["C1 control U+0085", "\u0085"], ["lone surrogate", "\ud800"], ["quote", '"'], ["backslash", "\\"],
+    ["<", "<"], [">", ">"], ["&", "&"], ["line separator U+2028", "\u2028"],
+  ];
+  for (const [name, ch] of refused) {
+    await check(`an address with a ${name} is not markable`, () => {
+      assert.equal(markableBy(`a${ch}a@b.co`), false);
+      assert.equal(markableBy(`${ch.repeat(240)}@b.co`), false);
     });
-    await check(`a mark of ${ch} would cost more than declared under an HTML-safe encoder (why it is refused)`, () => {
-      const bytes = Buffer.byteLength(htmlSafe(JSON.stringify(JSON.stringify({ at, by }))));
-      console.log(`MEASURE ${ch} under an HTML-safe encoder: ${bytes} bytes`);
+    // A C1 control is refused as a control (an ASCII-only encoder writes it as \u0085), not for its size here.
+    if (name.startsWith("C1")) continue;
+    await check(`a mark of ${name} would cost more than declared (why it is refused)`, () => {
+      const bytes = wireOf(`${ch.repeat(MARK_BY_MAX - 5)}@b.co`);
+      console.log(`MEASURE ${name}: ${bytes} bytes`);
       assert.ok(bytes > BENEFIT_MARK_VALUE_BYTES);
     });
   }
-
-  // What the old rule let through, each 320 characters: each is refused now, and each would cost more than declared.
-  const refused: [string, string][] = [["control U+0001", "\u0001"], ["lone surrogate", "\ud800"], ["quote", '"'], ["backslash", "\\"], ["ideograph", "中"], ["space inside", "a b"]];
-  for (const [name, ch] of refused) {
-    const by = `${ch.repeat(310)}@b.co`;
-    await check(`an address with a ${name} is not markable`, () => {
-      assert.equal(markableBy(normaliseEmail(by)), false);
-    });
-    if (name !== "space inside") {
-      await check(`a mark with a ${name} address would cost more than declared (why it is refused)`, async () => {
-        const bytes = await wireBytes(`nl:tben:given:test:${name}`, normaliseEmail(by).slice(0, 320));
-        console.log(`MEASURE ${name}: ${bytes} bytes`);
-        assert.ok(bytes > BENEFIT_MARK_VALUE_BYTES);
-      });
-    }
-  }
-  await check("an address over MARK_BY_MAX characters is not markable", () => {
+  await check("an address over MARK_BY_MAX units is not markable", () => {
     assert.equal(markableBy(`${"a".repeat(MARK_BY_MAX - 4)}@b.co`), false);
   });
   await check("an address without the shape of one is not markable", () => {
-    for (const by of ["", "plain", "@b.co", "a@b", "a@@b.co"]) assert.equal(markableBy(by), false, by);
+    for (const by of ["", "plain", "@b.co", "a@b", "a@@b.co", "a b@c.co"]) assert.equal(markableBy(by), false, by);
   });
 
   await check("giveBenefit refuses such an address before reading or counting anything", async () => {

@@ -162,6 +162,24 @@ async function main(): Promise<void> {
   redis.pipeline = before3;
   is("the slot still counts B's stored list", (await slotNow()) >= (await storedSize()), true);
 
+  part("Codex X6 on #3722 (MEDIUM): a save that lost its lock before its room was taken never sets back another save's count");
+  // The reversed interleaving: A reads, then stalls before its room is taken; its lock runs out, B takes it and saves a
+  // larger list; then A's take runs from A's older, smaller sizes, and A's fenced write finds the lock gone.
+  let beforeTake = true;
+  const before4 = redis.pipeline;
+  redis.pipeline = (async (batch: Command[]) => {
+    if (beforeTake && batch.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-data:v1"))) {
+      beforeTake = false;
+      await real([["DEL", `nl:paths:lock:${statsId}`]]);
+      const b = await savePaths(STORE, Array.from({ length: 12 }, (_, i) => two(`B's longer path number ${i}, saved while A waited for its room`)), COURSES, NOW + 18);
+      if (b.state !== "saved") throw new Error(`fixture: B ${b.state}`);
+    }
+    return before4(batch);
+  }) as typeof redis.pipeline;
+  is("A is not said as saved", (await savePaths(STORE, [two("A2")], COURSES, NOW + 17)).state, "unknown");
+  redis.pipeline = before4;
+  is("the slot still counts B's stored list, never A's smaller one", (await slotNow()) >= (await storedSize()), true);
+
   part("Review (LEVE 2): an id that would not read back is never given");
   const odd = readPathsInput([two("X")], [], COURSES, () => Number.NaN);
   is("a random that gives no letter refuses rather than writing a bad id", odd.ok ? /^[a-z0-9]{8}$/.test(odd.paths[0].id) : odd.problem, "list");

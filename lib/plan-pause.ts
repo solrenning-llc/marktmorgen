@@ -385,7 +385,9 @@ end
 if ARGV[2]~='known' or current~=ARGV[3] then return 0 end
 local ok,p=pcall(cjson.decode,current)
 if not ok or type(p)~='table' or p.funding~=nil or type(p['until'])~='number' then return 0 end
-if redis.call('ZSCORE',KEYS[2],ARGV[1])~=tostring(p['until']) then return 0 end
+local listed=p['until']
+if p.attempt~=nil then listed=listed+1000000000000 end
+if redis.call('ZSCORE',KEYS[2],ARGV[1])~=tostring(listed) then return 0 end
 redis.call('DEL',KEYS[1])
 redis.call('ZREM',KEYS[2],ARGV[1])
 return 1
@@ -425,8 +427,9 @@ return 1
 /** Writes the one legacy restart attempt into the exact due pause before its only POST
  * (KEYS: pause, due; ARGV: ref, observed raw, next raw, now). Same exact-generation checks as
  * the notice: the next record is the observed one plus `attempt`=now, nothing else; the break
- * has ended; the due member still has its score. The due member is kept: a held attempt stays
- * enumerable for undo, a hand restart and reconciliation, and an `attempt` is never replaced. */
+ * has ended; the due member still has its score. The due member is kept, moved past every
+ * batch's deadline (PAUSE_HELD_OFFSET): a held attempt stays enumerable for undo and a hand
+ * restart, never fills the run's bounded batch, and an `attempt` is never replaced. */
 export const PAUSE_WORKER_ATTEMPT = `-- marktmorgen:pause-worker-attempt:v1
 if #KEYS~=2 or #ARGV~=4 or KEYS[1]==KEYS[2] then return 0 end
 local now=tonumber(ARGV[4])
@@ -446,8 +449,17 @@ if count~=pcount+1 or q.attempt~=now or type(p['until'])~='number' or p['until']
 for k,_ in pairs(fields) do if p[k]~=q[k] then return 0 end end
 if redis.call('ZSCORE',KEYS[2],ARGV[1])~=tostring(p['until']) then return 0 end
 redis.call('SET',KEYS[1],ARGV[3],'KEEPTTL')
+redis.call('ZADD',KEYS[2],'XX',tostring(p['until']+1000000000000),ARGV[1])
 return 1
 `;
+
+/**
+ * Where a held attempt's due member is listed: its break's end plus this, past the latest deadline
+ * PAUSE_DUE_OBSERVATION reads (1e12), so a held attempt never takes a place in the bounded batch (Claude 4 2Wb,
+ * #3671), while the member stays for undo, a hand restart (dropPause) and a closing or a move that asks if a
+ * break is kept. PAUSE_WORKER_ATTEMPT writes it and PAUSE_WORKER_FORGET expects it for a record with an attempt.
+ */
+export const PAUSE_HELD_OFFSET = 1_000_000_000_000;
 
 /** The exact record now stored, with its attempt written; null when it could not be acknowledged. */
 async function markObservedAttempt(ref: string, raw: string | null, nowSeconds: number): Promise<string | null> {
@@ -776,8 +788,9 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
     }
     // A legacy restart is requested once. Its attempt is written into the exact due pause before
     // the only POST; Stripe keeps an idempotency key for about 24 hours and this runs once a day,
-    // so an unknown result is never posted again. The held pause keeps its due member: a hand
-    // restart (above), the creator's undo and reconciliation still reach it.
+    // so an unknown result is never posted again. The held pause keeps its due member, listed past
+    // every batch's deadline (PAUSE_HELD_OFFSET), so it never fills this bounded batch; the
+    // creator's undo and a hand restart (dropPause) still reach it.
     let current = stored.raw;
     if (!record.funding) {
       if (record.attempt !== undefined) { counts.failed += 1; continue; }

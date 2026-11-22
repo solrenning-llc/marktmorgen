@@ -17,7 +17,7 @@
  *   - a store that started again by hand is left alone.
  */
 import { MAX_STORE_BYTES, claimHandle, setSubscription, storeForEmail, storeForRestartSource, storeRef } from "@/lib/store";
-import { PAUSE_DUE_OBSERVATION, PAUSE_OBSERVATION, pauseView, confirmPause, onBreak, pauseEmail, pauseOf, pausePlan, pauseRefusal, runBreaks, undoPause } from "@/lib/plan-pause";
+import { PAUSE_DUE_OBSERVATION, PAUSE_HELD_OFFSET, PAUSE_OBSERVATION, pauseView, confirmPause, onBreak, pauseEmail, pauseOf, pausePlan, pauseRefusal, runBreaks, undoPause } from "@/lib/plan-pause";
 import { addPeriods } from "@/lib/plans";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -543,7 +543,7 @@ async function main() {
     for (const later of [until + DAY, until + 2 * DAY, until + 4 * DAY]) await runBreaks(later);
     is("the held attempt is never posted again", created.length - before, 1);
     is("and never emailed again", emails.length, 1);
-    is("the held break is still listed for undo and reconciliation", await pauseRedis.pipeline([["ZSCORE", "nl:pause:due", storeRef(store)]]), [String(until)]);
+    is("the held break is still listed for undo, past every batch's deadline", await pauseRedis.pipeline([["ZSCORE", "nl:pause:due", storeRef(store)]]), [String(until + PAUSE_HELD_OFFSET)]);
     is("the creator can still take the stopped break back", await undoPause(store, until + 4 * DAY), "stopped");
     is("and then nothing is left", await pauseOf(store), null);
     createAnswer = "ok";
@@ -883,11 +883,12 @@ async function main() {
         [created.length - before, refusedReads > 0], [1, true]);
       is("no success or refusal email follows an unacknowledged write", emails.length, 0);
       const [record, last, due] = await pipeline([
-        ["GET", key], ["GET", year], ["ZRANGEBYSCORE", "nl:pause:due", "-inf", String(paused.record.until + 4 * DAY)],
+        ["GET", key], ["GET", year], ["ZSCORE", "nl:pause:due", ref],
       ]);
       is("exact pause and annual evidence survive missing store acknowledgement, with only its attempt written",
         [record, last], [withAttempt(evidence[0], paused.record.until + (answer === "unavailable" ? 4 * DAY : 60)), evidence[1]]);
-      is("due membership survives missing store acknowledgement", Array.isArray(due) && due.includes(ref), true);
+      // Held with its attempt: still listed, past every batch's deadline (PAUSE_HELD_OFFSET, Claude 4 2Wb on #3671).
+      is("due membership survives missing store acknowledgement", due, String(paused.record.until + PAUSE_HELD_OFFSET));
     } finally { pauseRedis.pipeline = pipeline; }
     is("unacknowledged restart never activates the store", (await storeForEmail(email))?.subscriptionActive, false);
     await undoPause(store, paused.record.until + 60);
@@ -923,15 +924,15 @@ async function main() {
       is("the intervening active state is preserved", current?.subscriptionActive, changed === "subscription");
       is("no restart success or refusal notice is sent", emails.length, 0);
       const [record, last, due] = await pauseRedis.pipeline([
-        ["GET", key], ["GET", year], ["ZRANGEBYSCORE", "nl:pause:due", "-inf", String(paused.record.until + 60)],
+        ["GET", key], ["GET", year], ["ZSCORE", "nl:pause:due", ref],
       ]);
       is("source mismatch retains exact pause and annual evidence, with only its attempt written", [record, last], [withAttempt(evidence[0], paused.record.until + 60), evidence[1]]);
-      is("source mismatch retains its due member", Array.isArray(due) && due.includes(ref), true);
+      is("source mismatch retains its due member, past every batch's deadline", due, String(paused.record.until + PAUSE_HELD_OFFSET));
     } finally { beforeRestartAnswer = null; }
     if (changed !== "subscription") {
       const calls = providerCalls, beforeRetry = created.length;
-      is("a changed inactive source remains held on the next due pass", await runBreaks(paused.record.until + 120),
-        { told: 0, restarted: 0, failed: 1, dropped: 0 });
+      is("a changed inactive source remains held, out of the next due pass", await runBreaks(paused.record.until + 120),
+        { told: 0, restarted: 0, failed: 0, dropped: 0 });
       is("a source mismatch performs no provider read or new charge", [providerCalls, created.length], [calls, beforeRetry]);
       is("a source mismatch sends no later notice", emails.length, 0);
     }
@@ -966,12 +967,12 @@ async function main() {
       is("newer tier and interval are preserved", [current?.tier, current?.cycle, current?.subscriptionActive],
         [changed === "tier" ? "pro" : "creator", changed === "cycle" ? "year" : "month", false]);
       is("plan mismatch retains exact pause and annual evidence, with only its attempt written", await pauseRedis.pipeline([["GET", key], ["GET", year]]), [withAttempt(evidence[0], paused.record.until + 60), evidence[1]]);
-      const [due] = await pauseRedis.pipeline([["ZRANGEBYSCORE", "nl:pause:due", "-inf", String(paused.record.until + 60)]]);
-      is("plan mismatch retains due membership", Array.isArray(due) && due.includes(ref), true);
+      const [due] = await pauseRedis.pipeline([["ZSCORE", "nl:pause:due", ref]]);
+      is("plan mismatch retains due membership, past every batch's deadline", due, String(paused.record.until + PAUSE_HELD_OFFSET));
       is("no false plan restart notice", emails.length, 0);
       const calls = providerCalls, charges = created.length;
-      is("next due pass keeps the changed plan held", await runBreaks(paused.record.until + 120),
-        { told: 0, restarted: 0, failed: 1, dropped: 0 });
+      is("the changed plan stays held, out of the next due pass", await runBreaks(paused.record.until + 120),
+        { told: 0, restarted: 0, failed: 0, dropped: 0 });
       is("changed plan causes no later provider read or new charge", [providerCalls, created.length, emails.length], [calls, charges, 0]);
     } finally { beforeRestartAnswer = null; }
     await undoPause(store, paused.record.until + 60);

@@ -2455,12 +2455,12 @@ export const COST_LINES: CostLine[] = [
   {
     id: "pause-restart-claim",
     feature: "A legacy pause records its one restart attempt before the only subscription request",
-    monthlyUsd: () => request("light", 1, 2 * 4_096 + 2_048),
+    monthlyUsd: () => request("light", 5, 2 * 4_096 + 2_048),
     sources: [
       { file: "lib/plan-pause-rules.ts", names: ["PAUSE_EVERY_DAYS"] },
       { file: "lib/plan-pause.ts", names: ["markObservedAttempt", "PAUSE_WORKER_ATTEMPT"] },
     ],
-    basis: "A pause can be taken at most once per PAUSE_EVERY_DAYS, and its restart is requested once. Before that request one additional atomic Redis request rewrites the exact due record with its attempt time (KEEPTTL, the due member kept): it sends the observed record and the next one, each at most 4 KB, plus the script and its arguments (under 2 KB); charge the full request in any billing month it occurs, with no annual discount. A held attempt is never posted again; its later daily visits are the company-wide due batch (lib/plan-pause.ts, COMPANY), at most 200 refs a run.",
+    basis: "A pause can be taken at most once per PAUSE_EVERY_DAYS, and its restart is requested once. Before that request one additional atomic Redis request rewrites the exact due record with its attempt time (KEEPTTL) and moves its due member past every batch's deadline (PAUSE_HELD_OFFSET): five billed commands (the EVAL and its GET, ZSCORE, SET and ZADD, measured on a real Redis in scripts/test_contract_funding_redis.py); it sends the observed record and the next one, each at most 4 KB, plus the script and its arguments (under 2 KB); charge the full request in any billing month it occurs, with no annual discount. A held attempt is never posted again and, listed past every deadline, never read again by the daily run.",
   },
   {
     id: "store-email",

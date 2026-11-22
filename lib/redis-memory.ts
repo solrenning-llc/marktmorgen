@@ -1924,6 +1924,8 @@ export class MemoryRedis {
           if (this.run(["ZSCORE", due, ref]) !== String(p.until)) return 0;
           // Match SET KEEPTTL: no expiry extension or removal.
           this.data.set(target, next);
+          // The held member moves past every batch's deadline (PAUSE_HELD_OFFSET in lib/plan-pause.ts).
+          this.run(["ZADD", due, "XX", String((p.until as number) + 1_000_000_000_000), ref]);
           return 1;
         }
 
@@ -1943,11 +1945,13 @@ export class MemoryRedis {
           }
           if (mode !== "known" || current !== expected || typeof current !== "string" ||
               current.length === 0 || new TextEncoder().encode(current).length > 4096) return 0;
-          let p: { funding?: unknown; until?: unknown };
+          let p: { funding?: unknown; until?: unknown; attempt?: unknown };
           try { p = JSON.parse(current as string); } catch { return 0; }
           if (!p || typeof p !== "object" || Object.hasOwn(p, "funding") || typeof p.until !== "number") return 0;
           if (index !== undefined && (!Array.isArray(index) || (index.length > 0 && typeof index[0] !== "object"))) throw new Error("WRONGTYPE");
-          if (this.run(["ZSCORE", due, ref]) !== String(p.until)) return 0;
+          // A held attempt is listed past every batch's deadline (PAUSE_HELD_OFFSET in lib/plan-pause.ts).
+          const listed = p.attempt !== undefined ? p.until + 1_000_000_000_000 : p.until;
+          if (this.run(["ZSCORE", due, ref]) !== String(listed)) return 0;
           this.run(["DEL", target]); removeDue(); return 1;
         }
 

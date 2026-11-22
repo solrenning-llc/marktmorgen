@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runBreaks, pauseOf, undoPause } from "@/lib/plan-pause";
+import { PAUSE_HELD_OFFSET, dropPause, runBreaks, pauseOf, undoPause } from "@/lib/plan-pause";
 import { claimHandle, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { PLAN_PRICES } from "@/lib/plan";
 import { store as redis } from "./redis-stub";
@@ -65,7 +65,7 @@ test("a prior legacy key binding prevents a second subscription and leaves the p
     assert.notEqual(new URLSearchParams(p.requests[0].body).get("billing_mode[type]"), null);
     assert.equal(p.creations(), 0, "the changed body cannot create a second subscription under a fresh key");
     assert.ok(await pauseOf(f.store), "the exact pause evidence remains for reconciliation");
-    assert.equal(redis.run(["ZSCORE", "nl:pause:due", f.ref]), String(f.record.until), "a held attempt stays enumerable; its attempt marker, not its due member, stops another POST");
+    assert.equal(redis.run(["ZSCORE", "nl:pause:due", f.ref]), String(f.record.until + PAUSE_HELD_OFFSET), "a held attempt stays listed, past every batch's deadline; its attempt marker stops another POST");
     const later = await runBreaks(f.now + 2 * DAY);
     assert.equal(later.restarted, 0);
     assert.equal(p.requests.length, 1, "a held legacy key is never retried");
@@ -83,7 +83,7 @@ test("a lost response is never retried after the provider idempotency window", a
     assert.equal(p.requests.length, 1);
     assert.equal(p.creations(), 1, "the synthetic provider accepted before losing its response");
     assert.ok(await pauseOf(f.store), "unknown acceptance retains the exact pause");
-    assert.equal(redis.run(["ZSCORE", "nl:pause:due", f.ref]), String(f.record.until), "the held attempt keeps its due member for undo and reconciliation");
+    assert.equal(redis.run(["ZSCORE", "nl:pause:due", f.ref]), String(f.record.until + PAUSE_HELD_OFFSET), "the held attempt keeps its due member for undo and a hand restart");
     p.expireKey(p.requests[0].key);
     const later = await runBreaks(f.now + 2 * DAY);
     assert.equal(later.restarted, 0);
@@ -103,15 +103,16 @@ test("an unknown restart keeps the pause enumerable, undoable and never posted a
   try {
     assert.equal((await runBreaks(f.now)).failed, 1);
     assert.equal(p.requests.length, 1);
-    assert.equal(redis.run(["ZSCORE", "nl:pause:due", f.ref]), String(f.record.until),
-      "the held attempt keeps its due member, so every later run and the studio can still find it");
+    assert.equal(redis.run(["ZSCORE", "nl:pause:due", f.ref]), String(f.record.until + PAUSE_HELD_OFFSET),
+      "the held attempt keeps its due member, past every batch's deadline, so the studio can still find it");
     const held = await pauseOf(f.store);
     assert.ok(held, "the exact pause evidence remains");
     assert.equal(held?.attempt, f.now, "the attempt is written into the pause before the only POST");
     p.expireKey(p.requests[0].key);
     for (const later of [f.now + DAY, f.now + 2 * DAY, f.now + 40 * DAY]) {
       const counts = await runBreaks(later);
-      assert.deepEqual([counts.restarted, counts.failed, counts.dropped], [0, 1, 0]);
+      // Held, listed past every batch's deadline: the run neither posts it nor even reads it again.
+      assert.deepEqual([counts.restarted, counts.failed, counts.dropped], [0, 0, 0]);
     }
     assert.equal(p.requests.length, 1, "a held attempt is never posted again, inside or after the key window");
     assert.equal(p.creations(), 1);
@@ -130,8 +131,11 @@ test("a plan started again by hand after an unknown attempt clears the held paus
     assert.equal((await runBreaks(f.now)).failed, 1);
     await setSubscription(f.store.email, { customerId: f.record.customer, subscriptionId: "sub_RestartByHand0001",
       active: true, tier: "creator", cycle: "month" });
+    // The held pause is not in the run's batch any more (PAUSE_HELD_OFFSET): the hand restart's own
+    // path, dropPause (lib/plan-pause.ts), reaches it.
     const counts = await runBreaks(f.now + DAY);
-    assert.deepEqual([counts.restarted, counts.dropped], [0, 1], "the reconciliation path reaches the held record");
+    assert.deepEqual([counts.restarted, counts.failed, counts.dropped], [0, 0, 0], "the run no longer visits a held attempt");
+    await dropPause(f.store);
     assert.equal(await pauseOf(f.store), null);
     assert.equal(redis.run(["ZSCORE", "nl:pause:due", f.ref]), null);
     assert.equal(p.requests.length, 1, "no second POST");

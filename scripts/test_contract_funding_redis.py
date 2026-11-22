@@ -1568,17 +1568,23 @@ def main():
         ttl_before = redis.command('PTTL', pause_key)
         measured_ack, attempt_counts = measured_command(redis, lambda: attempt())
         assert measured_ack == 1
-        assert sum(attempt_counts.values()) <= 4, attempt_counts
+        assert sum(attempt_counts.values()) <= 5, attempt_counts  # EVAL, GET, ZSCORE, SET, ZADD
         ttl_after = redis.command('PTTL', pause_key)
         assert 0 < ttl_after <= ttl_before
         assert redis.command('GET', pause_key) == attempt_next
-        # The due member is kept: the held attempt stays enumerable for undo and reconciliation.
-        assert redis.command('ZSCORE', due_key, 'synthetic-member') == '1800000000'
+        # The due member is kept, listed past every batch's deadline (PAUSE_HELD_OFFSET, 1e12): the held attempt stays
+        # enumerable for undo and a hand restart, and never fills the run's bounded batch (Claude 4 2Wb on #3671).
+        assert redis.command('ZSCORE', due_key, 'synthetic-member') == '1001800000000'
+        assert redis.command('ZRANGEBYSCORE', due_key, '-inf', '1000000000000') == []
         assert attempt() == 0  # Lost ACK cannot replay or move the attempt.
+        # An attempted record whose member was not moved (old score) is never forgotten by a stale observation.
+        redis.command('ZADD', due_key, 1800000000, 'synthetic-member')
+        assert worker_forget('known', attempt_next) == 0
+        redis.command('ZADD', due_key, 1001800000000, 'synthetic-member')
         assert worker_forget('known', attempt_next) == 1  # The exact attempted record is still forgettable (undo, refusal, success).
         assert redis.command('GET', pause_key) is None
         assert redis.command('ZSCORE', due_key, 'synthetic-member') is None
-        print('PASS:pause attempt10negative cases, exact generation/due kept, lostACK, KEEPTTL and forget of the attempted record;commands=' + json.dumps(attempt_counts, sort_keys=True))
+        print('PASS:pause attempt10negative cases, exact generation, held member past every deadline, lostACK, KEEPTTL and forget of the attempted record;commands=' + json.dumps(attempt_counts, sort_keys=True))
 
 
 

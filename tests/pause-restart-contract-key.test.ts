@@ -140,3 +140,44 @@ test("a plan started again by hand after an unknown attempt clears the held paus
     await redis.pipeline([["DEL", `nl:pause:${f.ref}`], ["ZREM", "nl:pause:due", f.ref]]);
   }
 });
+
+// Claude 4 2Wb (7074552994), MEDIUM: held attempts must never fill the bounded due batch (LIMIT 200), or every other
+// store's restart and notice would wait behind them forever.
+test("held attempts never starve another store's restart", async () => {
+  const held: Awaited<ReturnType<typeof fixture>>[] = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    assert.equal(url.hostname, "api.stripe.com");
+    if (url.pathname === "/v1/prices") return Response.json({ object: "list", data: [{ id: "price_RestartContract01", active: true, currency: "usd",
+      unit_amount: PLAN_PRICES.creator.month, lookup_key: "nimbus_labs_creator_month", recurring: { interval: "month", interval_count: 1 } }], has_more: false });
+    throw Error("Synthetic lost restart response");
+  };
+  try {
+    for (let i = 0; i < 201; i++) {
+      held.push(await fixture(`restart-held-${String(i).padStart(3, "0")}`));
+    }
+    // Two runs: the first reaches 200 of them (the batch's LIMIT); the second must reach the 201st.
+    // After every fixture's own clock: each one's break has ended by then.
+    const at = Math.max(...held.map((f) => f.now)) + 60;
+    await runBreaks(at);
+    await runBreaks(at + 60);
+    const notHeld: string[] = [];
+    for (const f of held) if ((await pauseOf(f.store))?.attempt === undefined) notHeld.push(`${f.ref.slice(0, 20)} ${JSON.stringify(await pauseOf(f.store))} score=${redis.run(["ZSCORE", "nl:pause:due", f.ref])}`);
+    assert.deepEqual(notHeld, [], "each one is held with its attempt, the 201st too");
+  } finally { globalThis.fetch = original; }
+  // Named to sort after the held ones at an equal score, so it is never ahead of them by its name.
+  const ordinary = await fixture("restart-zz-after-held"), p = provider(ordinary, false, false);
+  try {
+    await runBreaks(ordinary.now);
+    // Reached and posted once, although 201 held ones are older (this file's synthetic answer is not a full
+    // subscription, so it is held as unknown after its one POST; the point here is that it is reached at all).
+    assert.equal(p.requests.length, 1, "the ordinary due pause is reached past 201 held ones");
+    assert.equal(p.requests[0].key, ordinary.oldKey);
+    for (const f of held.slice(0, 3)) assert.ok(await pauseOf(f.store), "the held ones stay, never posted again");
+  } finally {
+    p.restore();
+    await redis.pipeline([["DEL", `nl:pause:${ordinary.ref}`], ["ZREM", "nl:pause:due", ordinary.ref],
+      ...held.flatMap((f) => [["DEL", `nl:pause:${f.ref}`], ["ZREM", "nl:pause:due", f.ref]])]);
+  }
+});

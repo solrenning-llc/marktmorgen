@@ -19,7 +19,7 @@ export const HELP_TERMS: readonly HelpTerm[] = [
   { term: "Chargeback", meaning: "Money a bank takes back from you after a buyer disputes a payment with it.", words: /\bchargebacks?\b/i },
   { term: "Cookie", meaning: "A small note a website asks your browser to keep, and that the browser sends back on the next visit.", words: /\bcookies?\b/i },
   { term: "CSV file", meaning: "A spreadsheet saved as plain text, with one row on each line.", words: /\bCSV\b/ },
-  { term: "Dispute", meaning: "When a buyer asks their bank to take back a payment. The bank holds the money until it decides.", words: /\bdisput(?:e|es|ed|ing)\b/i },
+  { term: "Dispute", meaning: "When a buyer asks their bank to take back a payment. The amount is taken from your balance while the bank decides, and comes back only if you win.", words: /\bdisput(?:e|es|ed|ing)\b/i },
   { term: "Endpoint", meaning: "The web address that receives your store's webhook messages.", words: /\bendpoints?\b/i },
   { term: "EPUB", meaning: "The file format most e-book readers open, such as Apple Books.", words: /\bEPUB\b/ },
   { term: "Funnel", meaning: "Pages in a set order that lead a visitor from a first offer to a purchase.", words: /\bfunnels?\b/i },

@@ -28,12 +28,15 @@ import { ShippingEditor } from "@/components/shipping-editor";
 import { PhysicalLegalEditor } from "@/components/physical-legal-editor";
 import { MAX_SHIPPING_SKU } from "@/lib/shipping";
 import { confirmsOptionWrite, OPTION_NOT_CONFIRMED, optionRefusalWords } from "@/lib/option-confirmation";
+import { membersOn, readOptionInvited, readOptionMembers, type OptionMembers } from "@/lib/option-members";
+import Link from "next/link";
 import { CheckoutFieldsEditor } from "@/components/checkout-fields-editor";
 import { ProductImageEditor } from "@/components/product-image-editor";
 import type { CoverLook } from "@/components/cover-maker";
 import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
 import { LicenceKeyEditor } from "@/components/licence-key-editor";
 import { PdfStampToggle } from "@/components/pdf-stamp-toggle";
+import { PublicationChoice } from "@/components/publication-choice";
 import { PdfPreviewToggle } from "@/components/pdf-preview-toggle";
 import { toast } from "@/components/toast";
 import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
@@ -47,10 +50,14 @@ import {
 import { type Currency, fieldPrefix, formatMoney, moneyField, priceExample, priceBounds, priceInRange, rangeWords, readMoney } from "@/lib/money";
 import { StoreCurrency, useStoreCurrency } from "@/components/store-currency";
 import { AiAssist, AiOn } from "@/components/ai-assist";
+import { ProductIdeas } from "@/components/product-ideas";
+import { AiFileAssist } from "@/components/ai-file-assist";
+import { ProductPdfAssist } from "@/components/product-pdf-assist";
 import {
   ACCEPT_ATTRIBUTE,
   MAX_FILE_BYTES,
   maxFileLabel,
+  readableFile,
   readableSize,
   type ProductFile,
 } from "@/lib/product-file";
@@ -64,7 +71,7 @@ import {
   handsOver,
   optionDelivers,
 } from "@/lib/product-option";
-import { activePlan } from "@/lib/product-extras";
+import { activePlan, planPausedByRestore } from "@/lib/product-extras";
 import { activeShipping } from "@/lib/shipping";
 import type { Listing } from "@/lib/store";
 import { LINK_PROBLEMS, type LinkProblem, linkHost } from "@/lib/product-link";
@@ -122,6 +129,7 @@ const OPTION_MESSAGES: Record<string, string> = {
   store_too_many: `Your store holds ${MAX_STORE_OPTIONS.toLocaleString("en-US")} prices across all its products, which is the most it can. Remove a price you no longer use to add this one.`,
   bundle: "A bundle has one price for everything in it, so it cannot have several.",
   store_full: "Your store has reached the most it can hold. Remove something, or shorten a long list of choices, to make room.",
+  plan_pauses: "Putting this price back on sale would stop the payment plan for every price. Nothing was changed.",
 };
 
 export { fastMoneyMessage } from "@/lib/terms-check-rules";
@@ -229,7 +237,7 @@ type Draft = {
   about: string;
 };
 
-const EMPTY: Draft = {
+export const EMPTY: Draft = {
   title: "",
   summary: "",
   price: "",
@@ -337,8 +345,8 @@ async function send(
   }
 }
 
-/** The form used both for adding something and for changing it. */
-function ProductForm({
+/** The form used both for adding something and for changing it (exported for tests/product-form-ai-holds.test.ts). */
+export function ProductForm({
   draft,
   setDraft,
   busy,
@@ -348,6 +356,7 @@ function ProductForm({
   onCancel,
   product,
   loadingAbout = false,
+  aboutUnread = false,
   ownHosts = [],
   preview = null,
 }: {
@@ -362,6 +371,8 @@ function ProductForm({
   product?: Product;
   /** Whether the long description is still being read. */
   loadingAbout?: boolean;
+  /** Whether the long description could not be read, so the form does not hold it. */
+  aboutUnread?: boolean;
   /** The store's own hosts besides its marktmorgen.com address (its own domain), not warned as "another site". */
   ownHosts?: string[];
   /** The store's look and language, so the product's own words are previewed as buyers see them (487 [IT4], pattern 7). */
@@ -370,8 +381,16 @@ function ProductForm({
   const id = product?.id ?? "new";
   // A ready outline for the description of a new product (487 [IT4], item 5), decided when the form opens: it never comes and goes while typing.
   const [offerOutline, setOfferOutline] = useState(() => !product && !draft.about.trim());
-  // The checks under an AI draft of the descriptions (756 [STN3]): null while no draft is waiting.
-  const [aiChecks, setAiChecks] = useState<boolean[] | null>(null);
+  // The checks under each AI draft (756 [STN3]), one set per source, null while that source has no draft waiting: the
+  // description assist's (short and long description) and the ideas box's (name and short description). Kept apart, so
+  // neither source's checks release the other's draft, and putting an idea back clears only the idea's own (Claude 1's
+  // MEDIUM on #3441).
+  const [describeChecks, setDescribeChecks] = useState<boolean[] | null>(null);
+  const [ideaChecks, setIdeaChecks] = useState<boolean[] | null>(null);
+  // The PDF box's own (name, short description and benefits from the product's PDF; Codex G's MEDIUM on #3447).
+  const [pdfChecks, setPdfChecks] = useState<boolean[] | null>(null);
+  // The save waits while any drawn review is incomplete.
+  const aiHold = aiDraftHold(ideaChecks) ?? aiDraftHold(describeChecks) ?? aiDraftHold(pdfChecks);
   const [aiHeld, setAiHeld] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const aboutField = useRef<HTMLTextAreaElement>(null);
@@ -437,7 +456,7 @@ function ProductForm({
         event.preventDefault();
         if (busy) return;
         // An AI draft is saved only once the creator has checked it; the focus goes to the first check left.
-        const held = aiDraftHold(aiChecks);
+        const held = aiHold;
         setAiHeld(held);
         if (held) {
           const first = formRef.current?.querySelector<HTMLInputElement>("[data-ai-review] input:not(:checked)");
@@ -473,6 +492,27 @@ function ProductForm({
         />
       </div>
 
+      {!product ? (
+        <ProductIdeas
+          title={draft.title}
+          summary={draft.summary}
+          titleFieldId={`product-title-${id}`}
+          onUse={(next) => setDraft({ ...draft, title: next.title, summary: next.summary })}
+          onReviewChange={setIdeaChecks}
+        />
+      ) : null}
+
+      {/* A name, a short description and benefits from the product's own PDF (758 [STN5], unit 4): only once it has one to read. */}
+      {product && readableFile(product) ? (
+        <ProductPdfAssist
+          productId={product.id}
+          fields={{ title: draft.title, summary: draft.summary, about: draft.about }}
+          aboutState={loadingAbout ? "loading" : aboutUnread ? "unread" : "ready"}
+          onChange={(next) => setDraft({ ...draft, ...next })}
+          onReviewChange={setPdfChecks}
+        />
+      ) : null}
+
       <AiAssist<{ summary: string; about: string }>
         title="Write the description with AI"
         hint="A few words in your own voice: what it is, who it is for, what is inside. A draft of both descriptions below is written from them."
@@ -494,7 +534,7 @@ function ProductForm({
                     : "download",
         })}
         onResult={(value) => setDraft({ ...draft, summary: value.summary, about: value.about })}
-        onReviewChange={(checked) => setAiChecks(checked ? [true, true, true] : freshChecks())}
+        onReviewChange={(checked) => setDescribeChecks(checked ? [true, true, true] : freshChecks())}
         done="Both descriptions below are filled in. Read them, change anything, then save."
       />
 
@@ -915,7 +955,7 @@ function ProductForm({
           {error}
         </p>
       ) : null}
-      {aiHeld && aiDraftHold(aiChecks) ? (
+      {aiHeld && aiHold ? (
         <p className="notice notice-error" role="alert">
           {aiHeld}
         </p>
@@ -997,6 +1037,21 @@ function OptionsBlock({
     refocusRemove.current = null;
     if (back) removeButtons.current.get(back)?.focus();
   }, [removingId]);
+  // The same for "Put back on sale" when it would stop the payment plan
+  // (planPausedByRestore): it asks first, and focus follows as for "Remove".
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const restoreSaid = useRef<HTMLParagraphElement>(null);
+  const saleButtons = useRef(new Map<string, HTMLButtonElement>());
+  const refocusSale = useRef<string | null>(null);
+  useEffect(() => {
+    if (restoringId) {
+      restoreSaid.current?.focus();
+      return;
+    }
+    const back = refocusSale.current;
+    refocusSale.current = null;
+    if (back) saleButtons.current.get(back)?.focus();
+  }, [restoringId]);
   const [label, setLabel] = useState("");
   const [price, setPrice] = useState("");
   const [details, setDetails] = useState("");
@@ -1012,8 +1067,58 @@ function OptionsBlock({
   // Shipped by the creator (lib/shipping.ts): each price is a size or a version of the same thing, with nothing to attach.
   const shipped = Boolean(product.shipping);
   const [error, setError] = useState<string | null>(null);
+  // A membership on a price taken off sale goes on being billed (642 [WG2]); the
+  // studio says how many still pay on each, from the kept reading only (never
+  // Stripe). Asked only when one is off sale; unknown is never shown as 0.
+  const recurring = Boolean(product.recurring);
+  const offSaleIds = product.options.filter((option) => option.offSale).map((option) => option.id).join(",");
+  const [members, setMembers] = useState<OptionMembers | null>(null);
+  useEffect(() => {
+    if (!recurring || !offSaleIds) return;
+    let live = true;
+    fetch("/api/store/option", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "count", id: product.id }),
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: unknown) => {
+        if (live) setMembers(readOptionMembers(data));
+      })
+      .catch(() => {
+        if (live) setMembers(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [recurring, offSaleIds, product.id]);
+  // Members invited to move here from another platform on a price keep it even off sale (lib/move-members.ts,
+  // openMove), so the studio says how many invitations not yet kept name each price, before and after taking it
+  // off sale (Revisor 1, C4-20261105-1945-C2-2). Unknown is said as unknown, never as 0.
+  const optionIds = product.options.map((option) => option.id).join(",");
+  const [invited, setInvited] = useState<OptionMembers | null>(null);
+  useEffect(() => {
+    if (!recurring || !optionIds) return;
+    let live = true;
+    fetch("/api/store/option", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "invited", id: product.id }),
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: unknown) => {
+        if (live) setInvited(readOptionInvited(data));
+      })
+      .catch(() => {
+        if (live) setInvited(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [recurring, optionIds, offSaleIds, product.id]);
+  const allOffSale = product.options.length > 0 && product.options.every((option) => option.offSale);
 
-  async function run(payload: Record<string, unknown>, done: () => void, confirmation?: string) {
+  async function run(payload: Record<string, unknown>, done: () => void, confirmation?: string | ((data: unknown) => string)) {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
@@ -1031,6 +1136,13 @@ function OptionsBlock({
         const reason = refusal && typeof data === "object" && data !== null
           && Object.hasOwn(data, "error") && typeof (data as { error?: unknown }).error === "string"
           ? (data as { error: string }).error : null;
+        // The server read the product as stored and putting this price back would stop the plan (Claude 5 on
+        // #2690): this copy was stale, so ask the same question as when the studio knows it, and refresh.
+        if (reason === "plan_pauses" && typeof payload.id === "string") {
+          setRestoringId(payload.id);
+          router.refresh();
+          return;
+        }
         setError(
           reason === "fast_money"
             ? fastMoneyMessage((data as { passage?: unknown }).passage, "save")
@@ -1045,7 +1157,7 @@ function OptionsBlock({
         return;
       }
       done();
-      if (confirmation) toast(confirmation);
+      if (confirmation) toast(typeof confirmation === "function" ? confirmation(data) : confirmation);
       router.refresh();
     } catch {
       setError(OPTION_NOT_CONFIRMED);
@@ -1205,6 +1317,12 @@ function OptionsBlock({
         </p>
       )}
 
+      {allOffSale ? (
+        <p className="mt-2 text-sm font-semibold text-danger">
+          Every price is off sale, so nobody can buy this now. Put one back on sale to sell it again.
+        </p>
+      ) : null}
+
       <ul className="mt-3 space-y-2">
         {/* oxlint-disable-next-line react/refs -- the ref is read only inside ref callbacks and event handlers, not during render; oxlint's port flags the enclosing callback */}
         {product.options.map((option, index) => (
@@ -1287,6 +1405,9 @@ function OptionsBlock({
                     {option.best ? (
                       <span className="ml-2 rounded-full bg-lilac px-2 py-0.5 text-xs font-bold text-violet-deep">Recommended</span>
                     ) : null}
+                    {option.offSale ? (
+                      <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs font-bold text-ink">Off sale</span>
+                    ) : null}
                   </p>
                   <p className="font-semibold tabular-nums text-ink">
                     {formatMoney(option.priceCents, currency)}
@@ -1301,6 +1422,43 @@ function OptionsBlock({
                       <li key={at}>{line}</li>
                     ))}
                   </ul>
+                ) : null}
+
+                {option.offSale ? (() => {
+                  const count = membersOn(members, option.id);
+                  return (
+                    <div className="mt-1 text-sm text-ink">
+                      <p>
+                        {recurring
+                          ? "New buyers can’t pick this price. Members who already pay on it keep it and are billed as before, and anyone you invited to move here on it still gets it."
+                          : "New buyers can’t pick this price. People who already bought it keep what they bought."}
+                      </p>
+                      {recurring ? (
+                        count === null ? (
+                          <p className="mt-1">
+                            <Link href="/studio/memberships" className="font-bold underline underline-offset-4">
+                              See how many members are on each price in Memberships
+                            </Link>
+                          </p>
+                        ) : (
+                          <p className="mt-1 font-semibold">
+                            {count === 1 ? "1 membership is still on it here (paying, in a free trial or with a late payment), as of your last membership reading." : `${count} memberships are still on it here (paying, in a free trial or with a late payment), as of your last membership reading.`}
+                          </p>
+                        )
+                      ) : null}
+                      {recurring && membersOn(invited, option.id) === null ? (
+                        <p className="mt-1">We couldn’t count the invitations to move here that name this price. Anyone you invited on it still gets it.</p>
+                      ) : null}
+                    </div>
+                  );
+                })() : null}
+
+                {recurring && (membersOn(invited, option.id) ?? 0) > 0 ? (
+                  <p className="mt-1 text-sm font-semibold text-ink">
+                    {membersOn(invited, option.id) === 1
+                      ? "1 person invited to move here on this price hasn’t moved yet. They keep this price even if you take it off sale."
+                      : `${membersOn(invited, option.id)} people invited to move here on this price haven’t moved yet. They keep this price even if you take it off sale.`}
+                  </p>
                 ) : null}
 
                 {/* A link that opens the product page with this option chosen, for a sales page or an email (630 [HN6](27)). */}
@@ -1360,6 +1518,31 @@ function OptionsBlock({
                   >
                     Move down
                   </button>
+                  <button
+                    type="button"
+                    disabled={busy || restoringId === option.id}
+                    ref={(button) => {
+                      if (button) saleButtons.current.set(option.id, button);
+                      else saleButtons.current.delete(option.id);
+                    }}
+                    onClick={() => {
+                      // Back on sale with no payment for it in the plan would stop the plan for every price: ask first.
+                      if (option.offSale && planPausedByRestore(product as Listing, option.id)) {
+                        setRestoringId(option.id);
+                        setError(null);
+                        return;
+                      }
+                      run(
+                        { action: "sale", id: option.id, onSale: option.offSale === true },
+                        () => {},
+                        option.offSale ? `${option.label} is back on sale.` : `${option.label} is off sale. Anyone who already has it keeps it.`,
+                      );
+                    }}
+                    className="inline-flex min-h-12 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
+                  >
+                    {option.offSale ? "Put back on sale" : "Take off sale"}
+                    <span className="sr-only">{`: ${option.label}`}</span>
+                  </button>
                   {removingId === option.id ? null : (
                     <button
                       type="button"
@@ -1395,6 +1578,49 @@ function OptionsBlock({
                   membership={product.recurring !== null}
                 />
                 )}
+
+                {restoringId === option.id ? (
+                  <div className="mt-2 rounded-2xl border-2 border-pink-brand/30 bg-white p-3">
+                    <p ref={restoreSaid} tabIndex={-1} className="text-sm text-ink-soft">
+                      Put <strong className="text-ink">{option.label}</strong> back on sale? The payment plan has no
+                      payment for this price that adds up to it, so the payment plan will stop for every price. To keep
+                      it, first set a payment for this price in the payment plan.
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        aria-busy={busy} disabled={busy}
+                        onClick={() =>
+                          run(
+                            { action: "sale", id: option.id, onSale: true, planPauseConfirmed: true },
+                            () => {
+                              refocusSale.current = option.id;
+                              setRestoringId(null);
+                            },
+                            // The server says whether the plan did stop: another tab may have covered this price since.
+                            (data) =>
+                              (data as { planStopped?: unknown }).planStopped === false
+                                ? `${option.label} is back on sale. The payment plan goes on.`
+                                : `${option.label} is back on sale. The payment plan has stopped.`,
+                          )
+                        }
+                        className="btn btn-primary btn-sm"
+                      >
+                        {busy ? "Saving…" : "Put back on sale"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          refocusSale.current = option.id;
+                          setRestoringId(null);
+                        }}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        Keep it off sale
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
 
                 {removingId === option.id ? (
                   <div className="mt-2 rounded-2xl border-2 border-pink-brand/30 bg-white p-3">
@@ -1933,10 +2159,10 @@ export function ProductEditor({
   ai?: { on: boolean; left: number };
   /** Per course product, the comments under its lessons since its studio page was last opened. */
   newComments?: Record<string, number>;
-  /** Per product with a waitlist, where it stands (lib/waitlist.ts). */
-  waitlists?: Record<string, WaitlistView>;
-  /** Each product's pre-orders, when it takes or took any (lib/preorders.ts). */
-  preorders?: Record<string, PreorderView>;
+  /** Per product with a waitlist, where it stands (lib/waitlist.ts); null when they could not be read. */
+  waitlists?: Record<string, WaitlistView> | null;
+  /** Each product's pre-orders, when it takes or took any (lib/preorders.ts); null when they could not be read. */
+  preorders?: Record<string, PreorderView | "unread"> | null;
   /** The store's postal address for email, offered for a launch email's foot. */
   mailAddress?: string;
   /** The store's color, letters, name and language, for the cover maker (components/cover-maker.tsx). */
@@ -1970,6 +2196,32 @@ export function ProductEditor({
     else if (was !== null && !adding) requestAnimationFrame(() => document.getElementById(`product-edit-${was}`)?.focus());
   }, [editingId, adding]);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  // A card's Remove gives way to its question (WCAG 2.4.3, 4.1.3), as the options editor's does: the focus goes onto
+  // the question, read at once; back to that product's Remove on Keep it; once the product is removed, to Add
+  // something to sell when it can take it, else to the next product's Edit.
+  const productRemoveAsked = useRef<HTMLParagraphElement>(null);
+  const productRemovedLast = useRef<string | null>(null);
+  const productRemoveKept = useRef(false);
+  useEffect(() => {
+    const was = productRemovedLast.current;
+    productRemovedLast.current = removingId;
+    if (was === removingId) return;
+    if (removingId !== null) {
+      productRemoveAsked.current?.focus();
+      return;
+    }
+    if (was === null) return;
+    if (productRemoveKept.current) {
+      productRemoveKept.current = false;
+      requestAnimationFrame(() => document.getElementById(`product-remove-${was}`)?.focus());
+      return;
+    }
+    requestAnimationFrame(() => {
+      const add = document.getElementById("product-add") as HTMLButtonElement | null;
+      if (add && !add.disabled) add.focus();
+      else document.querySelector<HTMLElement>(`[id^="product-edit-"]:not(#product-edit-${was})`)?.focus();
+    });
+  }, [removingId]);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   // The form as it was opened: leaving with changes to it asks first (487 [IT4], item 6), an untouched one never.
   const [opened, setOpened] = useState<Draft>(EMPTY);
@@ -2247,6 +2499,7 @@ export function ProductEditor({
         </div>
       ) : (
         <button
+          id="product-add"
           type="button"
           disabled={full || !editorReady}
           onClick={startAdding}
@@ -2372,6 +2625,7 @@ export function ProductEditor({
                 submitLabel="Save"
                 product={product}
                 loadingAbout={loadingAbout}
+                aboutUnread={aboutUnread}
                 onSubmit={() => {
                   if (loadingAbout) return;
                   if (priceChanged && priceReview !== product.id) {
@@ -2552,6 +2806,7 @@ export function ProductEditor({
                   ) : null}
                   {removingId === product.id ? null : (
                     <button
+                      id={`product-remove-${product.id}`}
                       type="button"
                       onClick={() => {
                         setRemovingId(product.id);
@@ -2566,7 +2821,7 @@ export function ProductEditor({
 
                 {removingId === product.id ? (
                   <div className="mt-3 rounded-2xl border-2 border-pink-brand/30 bg-white p-4">
-                    <p className="text-sm text-ink-soft">
+                    <p ref={productRemoveAsked} tabIndex={-1} className="text-sm text-ink-soft">
                       Remove{" "}
                       <strong className="text-ink">{product.title}</strong> from
                       your store. Its files, picture, description, page, reviews
@@ -2574,24 +2829,37 @@ export function ProductEditor({
                       brought back; sales already made stay in your Stripe account.
                       {product.hidden ? null : " To take it off your store but keep it, unpublish it instead."}
                     </p>
+                    {/* A removal the server refused is said here, where the question stays open: the page's own error line
+                        is drawn only while no question is open (WCAG 3.3.1, 4.1.3). */}
+                    {error ? (
+                      <p className="notice notice-error mt-3" role="alert">
+                        {error}
+                      </p>
+                    ) : null}
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
-                        aria-busy={busy} disabled={busy}
-                        onClick={() =>
+                        aria-busy={busy}
+                        // Never turned off under the focus while it sends (WCAG 2.4.3): a press then does nothing.
+                        aria-disabled={busy || undefined}
+                        onClick={() => {
+                          if (busy) return;
                           run(
                             { action: "remove", id: product.id },
                             () => setRemovingId(null),
                             "Product removed.",
-                          )
-                        }
+                          );
+                        }}
                         className="btn btn-danger-solid btn-sm"
                       >
                         {busy ? "Removing…" : "Yes, remove it"}
                       </button>
                       <button
                         type="button"
-                        onClick={() => setRemovingId(null)}
+                        onClick={() => {
+                          productRemoveKept.current = true;
+                          setRemovingId(null);
+                        }}
                         className="btn btn-ghost btn-sm"
                       >
                         Keep it
@@ -2620,9 +2888,11 @@ export function ProductEditor({
                 {product.priceCents > 0 && !product.hidden ? (
                   <WaitlistPanel
                     productId={product.id}
-                    initial={waitlists[product.id] ?? null}
+                    initial={waitlists?.[product.id] ?? null}
+                    waitlistUnread={waitlists === null}
                     suggestedAddress={mailAddress}
-                    preorders={preorders[product.id] ?? null}
+                    preorders={((view) => (view === "unread" ? null : view ?? null))(preorders?.[product.id])}
+                    preordersUnread={preorders === null || preorders?.[product.id] === "unread"}
                     preorderBlocked={preorderProblem(product)}
                     hasContent={hasContent(product)}
                     price={formatMoney(product.priceCents, currency)}
@@ -2633,6 +2903,8 @@ export function ProductEditor({
                 {/* A physical product the creator ships (lib/shipping.ts), on one that hands over nothing else. */}
                 <ShippingEditor product={product} />
                 {product.shipping ? <PhysicalLegalEditor product={product} /> : null}
+                {/* Whether it is an e-publication, for EU and UK VAT (789 [IV1] step 3, unit 5b): only while VAT there can be collected. */}
+                {product.shipping || product.call || product.callPackage ? null : <PublicationChoice product={product} />}
                 {/* Shipped at several prices: sizes or versions, each shipped the same way. */}
                 {product.shipping ? (
                   <OptionsBlock
@@ -2668,6 +2940,10 @@ export function ProductEditor({
                     onUnlink={() => unlink(product.id)}
                     membership={product.recurring !== null}
                   />
+                ) : null}
+                {/* A draft that hands over nothing yet may have its file written with AI (758 [STN5] unit 3); the server checks the same. */}
+                {product.hidden && !product.file && !product.link && product.options.length === 0 ? (
+                  <AiFileAssist productId={product.id} onSaved={() => router.refresh()} />
                 ) : null}
 
                 {/* Several prices would put a price on something free, and a chosen price is chosen once. */}

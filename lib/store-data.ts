@@ -58,6 +58,9 @@ export const DATA_MONTHS_CLEARED_MOST = 512;
 /** The commands a TAKE_DATA call bills for the months that are over, at the most: their read and their removal. */
 export const DATA_EXPIRED_COMMANDS = 2;
 
+/** Fields one HMGET/HSET/HDEL in TAKE_DATA carries; keeps Lua's unpack bounded. */
+export const DATA_SLOT_COMMAND_BATCH = 250;
+
 /**
  * KEYS[1] the store's room. ARGV[1] how far a change may grow it, ARGV[2]
  * "1" to take the change whatever it comes to, ARGV[3] this month
@@ -76,10 +79,16 @@ export const DATA_EXPIRED_COMMANDS = 2;
  */
 export const TAKE_DATA = `-- marktmorgen:store-data:v1
 local limit = tonumber(ARGV[1])
-local always = ARGV[2] == '1'
+-- '1' never refuses for room (a count of what is written, which may grow); '2' is a give-back, which only shrinks.
+local give = ARGV[2] == '2'
+local always = ARGV[2] == '1' or give
 local month = ARGV[3] or ''
 if not limit or limit < 0 or not string.match(month, '^%d%d%d%d%-%d%d$') or (#ARGV - 3) % 3 ~= 0 then return {-1, 0} end
-local total = tonumber(redis.call('HGET', KEYS[1], '#') or '0')
+local heldTotal = redis.call('HGET', KEYS[1], '#')
+-- A give-back on a room that is not there (taken away with the store's erasure) writes nothing: it must never
+-- recreate the key with its total (Codex L, 20/11). Every room that holds anything holds its total, as keep() writes it.
+if give and not heldTotal then return {1, 0} end
+local total = tonumber(heldTotal or '0')
 if not total then return {-1, 0} end
 for i = 4, #ARGV, 3 do
   local mode = ARGV[i]
@@ -126,8 +135,26 @@ local function keep()
   end
   redis.call('HSET', KEYS[1], '#', total)
 end
-local now = {}
+-- Read and write every ordinary slot in one hash command. Upstash bills a
+-- multi-field HMGET/HSET as one command; doing one HGET and one HSET for each
+-- slot made large, already-bounded batches needlessly expensive.
 local order = {}
+local seen = {}
+for i = 4, #ARGV, 3 do
+  local slot = ARGV[i + 1]
+  if not seen[slot] then
+    seen[slot] = true
+    order[#order + 1] = slot
+  end
+end
+local held = {}
+for first = 1, #order, 250 do
+  local last = math.min(first + 249, #order)
+  local part = redis.call('HMGET', KEYS[1], unpack(order, first, last))
+  for i = 1, #part do held[#held + 1] = part[i] end
+end
+local now = {}
+for i, slot in ipairs(order) do now[slot] = tonumber(held[i] or '0') or 0 end
 local delta = 0
 for i = 4, #ARGV, 3 do
   local mode = ARGV[i]
@@ -141,10 +168,6 @@ for i = 4, #ARGV, 3 do
     end
   end
   local old = now[slot]
-  if old == nil then
-    old = tonumber(redis.call('HGET', KEYS[1], slot) or '0') or 0
-    order[#order + 1] = slot
-  end
   local new = old + n
   if mode == 's' then new = n end
   if new < 0 then new = 0 end
@@ -158,13 +181,17 @@ if delta > 0 and not always and total + delta > limit then
   keep()
   return {0, total}
 end
+local sets, dels = {}, {}
 for _, slot in ipairs(order) do
   if now[slot] > 0 then
-    redis.call('HSET', KEYS[1], slot, now[slot])
+    sets[#sets + 1] = slot
+    sets[#sets + 1] = now[slot]
   else
-    redis.call('HDEL', KEYS[1], slot)
+    dels[#dels + 1] = slot
   end
 end
+for first = 1, #sets, 500 do redis.call('HSET', KEYS[1], unpack(sets, first, math.min(first + 499, #sets))) end
+for first = 1, #dels, 250 do redis.call('HDEL', KEYS[1], unpack(dels, first, math.min(first + 249, #dels))) end
 total = total + delta
 if total < 0 then total = 0 end
 keep()
@@ -217,7 +244,11 @@ export function dataTakenOf(store: DataStore, reply: unknown, nowSeconds = Date.
   return { ok: false, reason: "full", used, room, message: dataFullWords(used, room, largerPlanFor(store, nowSeconds)) };
 }
 
-async function run(store: DataStore, changes: DataChange[], always: boolean, nowSeconds: number, pool = false): Promise<DataTaken> {
+/** How TAKE_DATA counts: "take" refuses what passes the room, "count" never refuses (it may grow), "give" only shrinks. */
+type DataMode = "take" | "count" | "give";
+const MODE_ARG: Record<DataMode, string> = { take: "0", count: "1", give: "2" };
+
+async function run(store: DataStore, changes: DataChange[], mode: DataMode, nowSeconds: number, pool = false): Promise<DataTaken> {
   const room = dataRoomFor(store, nowSeconds);
   const unknown = (used = 0): DataTaken => ({ ok: false, reason: "unknown", used, room, message: "This can't be saved right now. Try again in a minute." });
   if (changes.length === 0) return { ok: true, used: 0 };
@@ -226,7 +257,7 @@ async function run(store: DataStore, changes: DataChange[], always: boolean, now
   if (!key || !args || !isRedisConfigured()) return unknown();
   try {
     const limit = pool ? besidePoolFor(store, nowSeconds) : contentRoomFor(store, nowSeconds);
-    const [reply] = await redisPipeline([["EVAL", TAKE_DATA, 1, key, limit, always ? "1" : "0", monthOf(nowSeconds * 1000), ...args]]);
+    const [reply] = await redisPipeline([["EVAL", TAKE_DATA, 1, key, limit, MODE_ARG[mode], monthOf(nowSeconds * 1000), ...args]]);
     return dataTakenOf(store, reply, nowSeconds);
   } catch (error) {
     console.error("could not count a store's data", error);
@@ -251,7 +282,7 @@ export class DataRoomError extends StoreFullError {
  * does not grow what the store keeps is always taken.
  */
 export function takeData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<DataTaken> {
-  return run(store, changes, false, now / 1000);
+  return run(store, changes, "take", now / 1000);
 }
 
 /** The same, throwing DataRoomError when it is not taken, for a write that has nothing to say but no. */
@@ -291,7 +322,7 @@ export async function keepFor(store: DataStore, bytes: number, seconds: number, 
 export async function giveData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<void> {
   // What expires by itself is never given back early: it comes off with its month.
   const shrinking = changes.flatMap((change) => ("until" in change ? [] : [change.set ? change : { ...change, bytes: -Math.abs(change.bytes) }]));
-  await run(store, shrinking, true, now / 1000).catch(() => undefined);
+  await run(store, shrinking, "give", now / 1000).catch(() => undefined);
 }
 
 /**
@@ -299,7 +330,17 @@ export async function giveData(store: DataStore, changes: DataChange[], now = Da
  * moved, or kept before the room was counted. Never refuses and never throws.
  */
 export async function noteData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<void> {
-  await run(store, changes, true, now / 1000).catch(() => undefined);
+  await run(store, changes, "count", now / 1000).catch(() => undefined);
+}
+
+/**
+ * noteData that says whether the count was confirmed: true only when TAKE_DATA answered an exact receipt that it took
+ * the change (dataTakenOf). A lost, malformed or refused receipt is false, never "counted", so a caller that removes its
+ * own record of a size (lib/data-recount.ts, applySums) keeps it until the room confirms it (CX-123 rule 24; the HOLD of
+ * Codex Y on #2501, proof 102a47d531). Same one EVAL as noteData.
+ */
+export async function noteDataConfirmed(store: DataStore, changes: DataChange[], now = Date.now()): Promise<boolean> {
+  return (await run(store, changes, "count", now / 1000)).ok;
 }
 
 /**
@@ -314,10 +355,14 @@ export function besideKey(store: Pick<DataStore, "sid" | "statsId" | "handle">):
 /**
  * What one TAKE_DATA on the beside pool bills at the most: Upstash bills a script's inner commands beside its EVAL
  * (lib/receipt-number.ts). The pool key never lists expiring months, so the script reaches its EVAL, HGET "#",
- * HGET "~", an HGET and a write a slot, and HSET "#" (held in tests/beside-pool-commands.test.ts).
+ * HGET "~", one HMGET and one HSET per bounded batch, and HSET "#" (held in
+ * tests/beside-pool-commands.test.ts).
  */
 export function poolTakeCommands(slots: number): number {
-  return 4 + 2 * slots;
+  // EVAL, HGET total/list, HSET total, then one HMGET and HSET per bounded field batch. A pool call sets every slot
+  // (takeBeside) or empties every slot (giveBeside), never both: a call that did both would bill one HDEL more a batch,
+  // measured in scripts/test_store_data_redis.py, so such a caller must be priced with takeDataCommands instead.
+  return 4 + 2 * Math.ceil(Math.max(0, slots) / DATA_SLOT_COMMAND_BATCH);
 }
 
 /**
@@ -327,6 +372,18 @@ export function poolTakeCommands(slots: number): number {
  * over, adds 1 + 2 * poolTakeCommands(COPY_STEP_PRODUCTS) for its units, under this a unit.
  */
 export const BESIDE_SAVE_COMMANDS = 1 + 2 * poolTakeCommands(1);
+
+/**
+ * What one TAKE_DATA on a store's room bills at the most: its EVAL, HGET "#" and HGET "~", the months that are over
+ * read and removed (DATA_EXPIRED_COMMANDS), one HMGET and at most one HSET plus HDEL per bounded slot batch, and
+ * HSET "~" and HSET "#" (the beside pool's sweep, lib/store.ts MOVE_BESIDE_BATCH_COMMANDS; held in
+ * tests/beside-pool-commands.test.ts).
+ */
+export function takeDataCommands(slots: number): number {
+  // Worst case: EVAL, HGET total/list, expired-month HMGET/HDEL, one slot
+  // HMGET, HSET and HDEL per bounded field batch, and the list/total writes.
+  return 1 + 4 + DATA_EXPIRED_COMMANDS + 3 * Math.ceil(Math.max(0, slots) / DATA_SLOT_COMMAND_BATCH);
+}
 
 /** Which of these products have their share in the pool; null when it cannot be read. */
 export async function besideHeld(store: DataStore, ids: string[]): Promise<Set<string> | null> {
@@ -352,13 +409,61 @@ export async function besideHeld(store: DataStore, ids: string[]): Promise<Set<s
 export async function takeBeside(store: DataStore, ids: string[], bytes: number, now = Date.now()): Promise<boolean> {
   if (ids.length === 0) return true;
   if (besidePoolFor(store, now / 1000) <= 0) return false;
-  return (await run(store, ids.map((id) => ({ slot: `b:${id}`, bytes, set: true })), false, now / 1000, true)).ok;
+  return (await run(store, ids.map((id) => ({ slot: `b:${id}`, bytes, set: true })), "take", now / 1000, true)).ok;
+}
+
+/**
+ * The room's slots, in bytes (0 for a slot not there), read exactly; null when they cannot be read. The beside pool's
+ * sweep (lib/store.ts, moveBesideToPool) reads them so it moves only a share a slot really holds.
+ */
+export async function roomSlots(store: DataStore, slots: string[]): Promise<number[] | null> {
+  if (slots.length === 0) return [];
+  const key = dataKey(store);
+  if (!key || !isRedisConfigured()) return null;
+  try {
+    // Read exactly, slot by slot (rule 24; Codex P's MEDIUM 1 on #4846, the same read here): a slot the room's script
+    // wrote is a decimal whole number above zero, or nothing. Anything else, or a hole, is an unreadable room.
+    const reply = replyList(repliesFor(await redisPipeline([["HMGET", key, ...slots]]), 1)?.[0]);
+    if (!reply || reply.length !== slots.length) return null;
+    const out: number[] = [];
+    for (const value of reply) {
+      if (value === null) out.push(0);
+      else if (typeof value === "string" && /^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(Number(value))) out.push(Number(value));
+      else return null;
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/** The beside pool's field that says its sweep is done (not a slot: TAKE_DATA never counts it). */
+export const BESIDE_SWEPT_FIELD = "!swept";
+
+/** Whether the store's beside pool was swept to the end; null when it cannot be read. */
+export async function besideSwept(store: DataStore): Promise<boolean | null> {
+  const key = besideKey(store);
+  if (!key || !isRedisConfigured()) return null;
+  try {
+    const [reply] = await redisPipeline([["HGET", key, BESIDE_SWEPT_FIELD]]);
+    if (reply === null) return false;
+    return reply === "1" ? true : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Marks the store's beside pool as swept to the end. A mark that is lost only means the next sweep reads it again. */
+export async function markBesideSwept(store: DataStore): Promise<void> {
+  const key = besideKey(store);
+  if (!key || !isRedisConfigured()) return;
+  await redisPipeline([["HSET", key, BESIDE_SWEPT_FIELD, "1"]]).catch(() => undefined);
 }
 
 /** Gives these products' shares back to the pool, after a write that took them failed. Never refuses and never throws. */
 export async function giveBeside(store: DataStore, ids: string[], now = Date.now()): Promise<void> {
   if (ids.length === 0) return;
-  await run(store, ids.map((id) => ({ slot: `b:${id}`, bytes: 0, set: true })), true, now / 1000, true).catch(() => undefined);
+  await run(store, ids.map((id) => ({ slot: `b:${id}`, bytes: 0, set: true })), "give", now / 1000, true).catch(() => undefined);
 }
 
 /**
@@ -368,7 +473,7 @@ export async function giveBeside(store: DataStore, ids: string[], now = Date.now
  * teammate's restrictions moved with their sign-in).
  */
 export async function forceData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<void> {
-  const counted = await run(store, changes, true, now / 1000);
+  const counted = await run(store, changes, "count", now / 1000);
   if (!counted.ok) throw new Error("the store's data room could not be counted");
 }
 
@@ -379,7 +484,7 @@ export async function forceData(store: DataStore, changes: DataChange[], now = D
  * Codex X6 on #2576). Never refuses for room; never throws.
  */
 export function countData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<DataTaken> {
-  return run(store, changes, true, now / 1000);
+  return run(store, changes, "count", now / 1000);
 }
 
 /** One slot shrunk by `bytes`. Never refuses and never throws. */

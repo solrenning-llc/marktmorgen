@@ -23,6 +23,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { standingOf } from "@/lib/plan-standing";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { summaryAdmission, type SummaryClaim } from "@/lib/summary-live";
 import { type Claimed, claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { deriveKey } from "@/lib/secret-box";
 import { formatMoney } from "@/lib/money";
@@ -387,9 +388,10 @@ export async function claimWeek(handle: string, now = Date.now()): Promise<boole
 }
 
 /** The week's claim as it answered: "ours", "taken", or "unknown" (never kept as decided; review of #4169). */
-export async function weekClaim(handle: string, now = Date.now()): Promise<Claimed> {
+export async function weekClaim(subject: string | Store, now = Date.now()): Promise<SummaryClaim> {
   if (!isRedisConfigured()) return "unknown";
-  return claimState(sentKey(weekOf(now), handle), 9 * 86400);
+  return typeof subject === "string" ? claimState(sentKey(weekOf(now), subject), 9 * 86400)
+    : (await summaryAdmission(subject, sentKey(weekOf(now), subject.handle), 9 * 86400, "claim")).claimed;
 }
 
 /**
@@ -425,9 +427,9 @@ export async function noteSeen(kind: "weekly" | "monthly", period: string, folde
  * The marks sit under the claim's own key (`<claim>:emailed`, `<claim>:posted`, `<claim>:tries`), so they are
  * the same family, kept as long, and gone with it.
  */
-export type SummaryPeriod = { key: string; seconds: number };
-export const weekPeriod = (handle: string, now = Date.now()): SummaryPeriod => ({ key: sentKey(weekOf(now), handle), seconds: 9 * 86400 });
-export const monthPeriod = (handle: string, month: string): SummaryPeriod => ({ key: monthSentKey(month, handle), seconds: 40 * 86400 });
+export type SummaryPeriod = { key: string; seconds: number; store?: Store };
+export const weekPeriod = (subject: string | Store, now = Date.now()): SummaryPeriod => ({ key: sentKey(weekOf(now), typeof subject === "string" ? subject : subject.handle), seconds: 9 * 86400, ...(typeof subject === "string" ? {} : { store: subject }) });
+export const monthPeriod = (subject: string | Store, month: string): SummaryPeriod => ({ key: monthSentKey(month, typeof subject === "string" ? subject : subject.handle), seconds: 40 * 86400, ...(typeof subject === "string" ? {} : { store: subject }) });
 
 /**
  * The runs that may try one period's summary for a store, at most: the first and two more. The crons run every
@@ -442,7 +444,9 @@ export const SUMMARY_TRIES = 3;
  * counted and the period given back (tests/numbers-summary-retry-cost.test.ts). Priced in tests/plan-cost-registry.ts
  * (NUMBERS_SUMMARY_RETRY).
  */
-export const SUMMARY_TRY_COMMANDS_MOST = 20;
+export const SUMMARY_TRY_COMMANDS_MOST = 64;
+/** Extra wire room for the five fenced summary operations and uncertain-claim readbacks; no legacy JSON leaves Redis. */
+export const SUMMARY_TRY_EXTRA_BYTES = 24_576;
 
 /** A part of the summary (the owner's email, the channel's post), marked once for the period before it goes. */
 export type SummaryPart = "emailed" | "posted";
@@ -497,15 +501,19 @@ export async function sendPart(
   part: SummaryPart,
   send: () => Promise<PartSend>,
   options: { keyHoldsMs?: number } = {},
-): Promise<"sent" | "earlier" | "missed" | "unconfirmed"> {
+): Promise<"sent" | "earlier" | "missed" | "unconfirmed" | "gone"> {
   const key = `${period.key}:${part}`;
   const value = claimValue();
-  const got: Claimed = await claimMark(key, period.seconds, value);
+  const admitted = period.store ? await summaryAdmission(period.store, key, period.seconds, "part", {
+    value, related: `${period.key}:${part}:first`, window: options.keyHoldsMs,
+  }) : null;
+  const got: SummaryClaim = admitted?.claimed ?? await claimMark(key, period.seconds, value);
+  if (got === "gone") return "gone";
   if (got === "taken") return "earlier";
   if (got === "ours") {
     const window = options.keyHoldsMs;
     const now = Date.now();
-    const first = window === undefined ? now : await firstTried(period, part, now);
+    const first = admitted ? admitted.first : window === undefined ? now : await firstTried(period, part, now);
     if (first === null) {
       console.error(`stats-report: when a ${part} part was first tried could not be read; that part is not sent this run`);
     } else if (now - first >= (window ?? Infinity)) {
@@ -532,6 +540,7 @@ export async function sendPart(
  * spent again on it. Never throws.
  */
 export async function firstTryOf(period: SummaryPeriod): Promise<boolean> {
+  if (period.store) return (await summaryAdmission(period.store, `${period.key}:tries`, period.seconds, "peek")).claimed === "ours";
   try {
     const replies = repliesFor(await redisPipeline([["GET", `${period.key}:tries`]]), 1);
     return !!replies && replies[0] === null;
@@ -547,6 +556,7 @@ export async function firstTryOf(period: SummaryPeriod): Promise<boolean> {
  * Never throws.
  */
 export async function tryPeriodAgain(period: SummaryPeriod): Promise<boolean> {
+  if (period.store) return (await summaryAdmission(period.store, `${period.key}:tries`, period.seconds, "retry", { related: period.key, tries: SUMMARY_TRIES })).claimed === "ours";
   const tries = `${period.key}:tries`;
   let count: number | null = null;
   try {
@@ -705,9 +715,10 @@ export async function claimMonth(handle: string, month: string): Promise<boolean
 }
 
 /** The month's claim as it answered: "ours", "taken", or "unknown" (never kept as decided; review of #4169). */
-export async function monthClaim(handle: string, month: string): Promise<Claimed> {
+export async function monthClaim(subject: string | Store, month: string): Promise<SummaryClaim> {
   if (!isRedisConfigured()) return "unknown";
-  return claimState(monthSentKey(month, handle), 40 * 86400);
+  return typeof subject === "string" ? claimState(monthSentKey(month, subject), 40 * 86400)
+    : (await summaryAdmission(subject, monthSentKey(month, subject.handle), 40 * 86400, "claim")).claimed;
 }
 
 /** Lets a month's claim go, when the numbers could not be read, so a later run tries again. */

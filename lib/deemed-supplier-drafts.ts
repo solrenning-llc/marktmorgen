@@ -5,8 +5,8 @@
  * code change made to pass a test. tests/deemed-supplier-drafts.test.ts holds that each draft reads as a complete
  * record under the same checks, that its files and tests exist, and that nothing here reaches the real list.
  *
- * Still open before either draft can be recorded (`open` below): paths that take a paid order from a buyer and do not
- * yet ask consumerGate. Each is a sale the "refuse-consumers" treatment must cover or show it does not need to.
+ * Paths that take a paid order from a buyer and do not yet ask consumerGate are listed in REFUSE_CONSUMERS_OPEN below:
+ * each is a sale the "refuse-consumers" treatment must cover or show it does not need to. None since 789 [IV1] unit 1.
  */
 import type { DeemedSupplierRecord } from "@/lib/deemed-supplier";
 
@@ -20,16 +20,21 @@ const IMPLEMENTED_IN = [
   "app/api/store/tip/route.ts",
   "components/billing-country-field.tsx",
   "lib/upsell.ts (offerGate)",
+  "lib/eu-vat-goods.ts (vatShipCloses)",
+  "lib/physical-legal-ship.ts (shippingNow)",
 ].join("; ");
 
-const EVIDENCE = ["tests/eu-vat-consumer-gate.test.ts", "tests/eu-vat-checkout-routes.test.ts", "tests/eu-vat-pay-request-gate.test.ts", "tests/eu-vat-tip-gate.test.ts", "tests/eu-vat-open-paths.test.ts", "tests/eu-vat-upsell-gate.test.ts"].join("; ");
+const EVIDENCE = ["tests/eu-vat-consumer-gate.test.ts", "tests/eu-vat-checkout-routes.test.ts", "tests/eu-vat-pay-request-gate.test.ts", "tests/eu-vat-tip-gate.test.ts", "tests/eu-vat-open-paths.test.ts", "tests/eu-vat-upsell-gate.test.ts", "tests/eu-vat-goods.test.ts"].join("; ");
 
 export const REFUSE_CONSUMERS_DRAFTS: readonly DeemedSupplierRecord[] = [
   { jurisdiction: "EU", treatment: "refuse-consumers", implementedIn: IMPLEMENTED_IN, recordedOn: "2026-11-13", registration: "", evidence: EVIDENCE },
   { jurisdiction: "UK", treatment: "refuse-consumers", implementedIn: IMPLEMENTED_IN, recordedOn: "2026-11-13", registration: "", evidence: EVIDENCE },
 ];
 
-/** The paid paths a buyer can still reach without consumerGate: each must be gated, or shown not to need it. */
-export const REFUSE_CONSUMERS_OPEN: readonly string[] = [
-  "physical goods shipped to an EU or UK address by a buyer whose billing country is outside them (lib/store-checkout.ts and lib/cart-shipping.ts, shipping_address_collection; PayPal's shipping): consumerGate reads the billing country only, and lib/eu-vat-goods.ts (shipCountriesUnderEuVat) is not wired yet (789 [IV1] unit 1)",
-];
+/**
+ * The paid paths a buyer can still reach without consumerGate: each must be gated, or shown not to need it. Empty since
+ * 789 [IV1] unit 1 closed its last one, physical goods shipped to an EU or UK address (lib/eu-vat-goods.ts,
+ * vatShipCloses, read by lib/physical-legal-ship.ts shippingNow for both checkouts; PayPal sells nothing shipped,
+ * lib/paypal-sales.ts sellsWithPayPal). A path found later is added here at once.
+ */
+export const REFUSE_CONSUMERS_OPEN: readonly string[] = [];

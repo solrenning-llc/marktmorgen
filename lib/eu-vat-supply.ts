@@ -39,6 +39,15 @@ export const EU_VAT_COUNTRIES: ReadonlySet<string> = new Set([
  */
 export const TERRITORY_UNSETTLED: ReadonlySet<string> = new Set(["ES", "EA", "IC", "MC"]);
 
+/**
+ * The places whose consumers are refused at checkout while neither the EU nor the UK has a "collect" record (the
+ * coordinator's opening path, C2-20261113-1320-ABRIR-1, 2b): the 27 Member States, the EU's outermost regions and
+ * Åland, which a country code names apart (GF, GP, MQ, RE, YT, MF, AX), Monaco, which is inside France's VAT territory,
+ * and the United Kingdom with the Isle of Man, which is inside the UK's. Wider than the VAT territories on purpose:
+ * refusing a buyer there costs a sale, while selling there unrecorded would owe VAT nobody collected.
+ */
+export const REFUSED_PLACES: ReadonlySet<string> = new Set([...EU_VAT_COUNTRIES, "GF", "GP", "MQ", "RE", "YT", "MF", "AX", "MC", "GB", "IM"]);
+
 /** Codes that are never a country: user-assigned ranges and the unknown markers proxies send (ISO 3166-1, 5.1). */
 const NOT_A_COUNTRY = /^(AA|Q[M-Z]|X[A-Z]|ZZ|T1)$/;
 const TWO_LETTERS = /^[A-Z]{2}$/;
@@ -59,6 +68,8 @@ export type EuSupplyFields = {
   bundle: readonly string[] | null;
   shipping?: unknown;
   pwyw: unknown;
+  /** The creator's answer to whether it is an electronically supplied publication (lib/catalog.ts, Product.publication). */
+  publication?: unknown;
 };
 
 const present = (value: unknown) => value !== null && value !== undefined && value !== false && value !== "";

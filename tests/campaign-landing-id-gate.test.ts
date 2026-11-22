@@ -6,14 +6,14 @@
  */
 import { LandingIdInvalid, dropLandings, finishLandingsDrop, readLandings, saveLanding } from "@/lib/campaign-landing-store";
 import { store as redis } from "./redis-stub";
-import { ROOM } from "./data-room";
+import { ROOM, resetLandingRoom } from "./landing-live-room";
 import { done, is } from "./check";
 
 const STATS = "s".repeat(12);
 const landing = { campaign: "spring-sale", headline: "Fresh bread", sub: "Baked this morning", button: "Read more" };
 
 async function main(): Promise<void> {
-  redis.clear();
+  resetLandingRoom();
   for (const bad of ["p1:gone", "p1:x", "P1", "p 1", "x".repeat(49)]) {
     const refused = await saveLanding(STATS, bad, landing, ROOM).then(() => null, (error: unknown) => error);
     is(`${JSON.stringify(bad)}: a save is refused as no id`, refused instanceof LandingIdInvalid, true);

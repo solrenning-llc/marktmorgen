@@ -1,5 +1,6 @@
 /**
- * EU VAT art. 9a, 789 [IV1] unit 1 (D, E): two paths of REFUSE_CONSUMERS_OPEN shown not to need a gate of their own.
+ * EU VAT art. 9a, 789 [IV1] unit 1 (D, E): two paths of REFUSE_CONSUMERS_OPEN shown not to need a gate of their own;
+ * and the last one, physical goods shipped to the EU or the UK, closed by the shipping lock.
  *
  * (D) The sales blocks of a page and the card a creator embeds on their own site take no payment themselves: every form
  *     they draw that can charge posts to /api/store/checkout, which asks consumerGate before Stripe (held by
@@ -39,6 +40,10 @@ function main(): void {
     const loose = found.filter((action) => !GATED.has(action) && !NO_CHARGE.has(action));
     is(`${file}: every form posts to a gated route or charges nothing`, loose, []);
     is(`${file}: its buy form posts to the card checkout`, found.includes("/api/store/checkout"), true);
+    // Only a written action is read above: a form whose action is computed, a button with its own formAction, or a
+    // request sent from code would escape it, so none may be there (Claude 3's LOW on #4948).
+    const source = readFileSync(file, "utf8");
+    is(`${file}: no computed action, no formAction and no fetch`, [/action=\{/.test(source), /formAction/.test(source), /\bfetch\(/.test(source)], [false, false, false]);
   }
 
   part("(E) A live call and a package of calls go on; a download beside a call does not");
@@ -65,9 +70,13 @@ function main(): void {
   for (const draft of REFUSE_CONSUMERS_DRAFTS) {
     is(`RED: ${draft.jurisdiction}: the drafts name the offer's gate and its test`, [draft.implementedIn.includes("lib/upsell.ts (offerGate)"), draft.evidence.includes("tests/eu-vat-upsell-gate.test.ts")], [true, true]);
   }
-  // Still open, and said (789 [IV1] unit 1): a physical product shipped to an EU or UK address by a buyer whose billing
-  // country is outside them. consumerGate reads the billing country only; lib/eu-vat-goods.ts is not wired yet.
-  is("RED: physical goods shipped to the EU or the UK are listed as open", REFUSE_CONSUMERS_OPEN.some((line) => line.startsWith("physical goods shipped to an EU or UK address")), true);
+  // The last one (789 [IV1] unit 1): a physical product shipped to an EU or UK address by a buyer whose billing country
+  // is outside them. shippingNow leaves those countries out (lib/eu-vat-goods.ts, tests/eu-vat-goods.test.ts).
+  is("RED: physical goods shipped to the EU or the UK are no longer listed as open", REFUSE_CONSUMERS_OPEN.some((line) => line.startsWith("physical goods shipped to an EU or UK address")), false);
+  is("no path is left open", REFUSE_CONSUMERS_OPEN, []);
+  for (const draft of REFUSE_CONSUMERS_DRAFTS) {
+    is(`RED: ${draft.jurisdiction}: the drafts name the shipping lock and its test`, [draft.implementedIn.includes("lib/eu-vat-goods.ts (vatShipCloses)"), draft.implementedIn.includes("lib/physical-legal-ship.ts (shippingNow)"), draft.evidence.includes("tests/eu-vat-goods.test.ts")], [true, true, true]);
+  }
   for (const draft of REFUSE_CONSUMERS_DRAFTS) is(`${draft.jurisdiction}: this test is named`, draft.evidence.includes("tests/eu-vat-open-paths.test.ts"), true);
 
   done();

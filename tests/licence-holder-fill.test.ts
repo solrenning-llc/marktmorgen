@@ -8,7 +8,7 @@
  */
 import { addProduct, claimHandle, ensureStatsId, removeProduct, setProductKeys, setProductLink, setSubscription, storeForEmail, type Listing } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { FILL_RUN_COMMANDS, HOLDER_FILL_WHOLE, endHolderFillRound, fillHolderLines, holderFillDone, holderFillLeft, holderFillOn, keyForSale, keysOf, keysWithoutHolderLine, startHolderFillRound } from "@/lib/licence-keys";
+import { FILL_MAX_TRIES, FILL_RUN_COMMANDS, HOLDER_FILL_WHOLE, endHolderFillRound, fillHolderLines, holderFillDone, holderFillLeft, holderFillOn, keyForSale, keyHolderDigest, keysOf, keysWithoutHolderLine, startHolderFillRound } from "@/lib/licence-keys";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -197,6 +197,41 @@ async function main(): Promise<void> {
   is("the store ends done", await holderFillDone(shrunk), true);
   is("and no key of a product still listed is left without its line", (await keysWithoutHolderLine(shrunk, left)).length, 0);
   is("so a buyer of the big product has their old key in their copy", (await keysOf(shrunk, left, "moved1b42@example.com")).map((k) => k.key), ["MOVK-1-0042-ZZZZ"]);
+
+  part("A reply no writer writes cannot hold the fill open for good (Claude 6 i51q's MEDIUM on cdafb13ff9)");
+  // i51q's scenario: 60 old keys, and one buyer's list holding "2" for one of them. Every run met it and threw, the place
+  // never moved, so the store was asked every run for good and the company's mark could never be set.
+  const odd = await oldKeysStore("fill-odd@example.com", "fillodd", [60]);
+  redis.run(["HSET", `nl:keys:${odd.store.statsId}:who:${keyHolderDigest("fillodd0b5@example.com")}`, `${odd.ids[0]}\tOLDK-0-0005-ZZZZ`, "2"]);
+  const outcomes: string[] = [];
+  let most2 = 0;
+  for (let run = 0; run < FILL_MAX_TRIES + 2; run += 1) {
+    const r = await metered(() => fillHolderLines(odd.store, Date.now() + 60_000).then((v) => String(v), () => "threw"));
+    most2 = Math.max(most2, r.commands);
+    outcomes.push(r.value);
+  }
+  is(`it throws ${FILL_MAX_TRIES - 1} times, then the store needs no more runs`, outcomes, [...Array(FILL_MAX_TRIES - 1).fill("threw"), "true", "true", "true"]);
+  is("every one of those runs stays within the cap", most2 <= FILL_RUN_COMMANDS, true);
+  is("the store is marked whole", redis.run(["HGET", `nl:keys:${odd.store.statsId}:whofill`, "done"]), HOLDER_FILL_WHOLE);
+  is("which is not done: the copy keeps main's read", await holderFillDone(odd.store), false);
+  is("so a buyer's old key is still in their copy", (await keysOf(odd.store, odd.ids, "fillodd0b7@example.com")).map((k) => k.key), ["OLDK-0-0007-ZZZZ"]);
+
+  part("A catalog that changes on every run cannot hold the fill open for good either");
+  const busy = await oldKeysStore("fill-busy@example.com", "fillbusy", [0, 0]);
+  const busyOrder = [...busy.ids].sort();
+  [3, 60].forEach((n, p) => {
+    for (let i = 0; i < n; i += 1) redis.run(["HSET", `nl:keys:${busy.store.statsId}:${busyOrder[p]}:info`, `BUSY-${p}-${String(i).padStart(4, "0")}-ZZZZ`, JSON.stringify({ r: `cs_test_${`b${p}x${i}`.padStart(24, "y")}`, e: `busy${p}b${i}@example.com`, at: 1_790_000_000 })]);
+  });
+  let busyEnded = false;
+  let busyRuns = 0;
+  while (!busyEnded && busyRuns < 20) {
+    // Each run stops at the start of the big product, then a product is added before the next one.
+    busyEnded = await fillHolderLines((await storeForEmail("fill-busy@example.com"))!, Date.now() + 60_000, 25);
+    await addProduct("fill-busy@example.com", `Busy extra ${busyRuns}`, "", "9", null);
+    busyRuns += 1;
+  }
+  is(`the store ends after ${FILL_MAX_TRIES} restarts at the most`, busyEnded && busyRuns <= FILL_MAX_TRIES + 1, true);
+  is("marked whole, so its copy keeps main's read", [redis.run(["HGET", `nl:keys:${busy.store.statsId}:whofill`, "done"]), await holderFillDone(busy.store)], [HOLDER_FILL_WHOLE, false]);
   done();
 }
 

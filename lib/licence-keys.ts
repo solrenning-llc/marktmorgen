@@ -230,6 +230,13 @@ const FILL_PAGE = 100;
 export const FILL_RUN_COMMANDS = 400;
 /** The `done` value of a store whose fill could not fit one page in a run: its copy keeps main's whole read for good. */
 export const HOLDER_FILL_WHOLE = "whole";
+/**
+ * How many times one store's fill may stop short before it is marked `whole` (Claude 6 i51q's MEDIUM on cdafb13ff9): a
+ * run that met a reply in a shape no writer writes (rule 24, persistent, so the next run would meet it again) or a walk
+ * that had to start again from the top because the catalog changed. Each other run advances at least one step, so a
+ * store's fill ends after at most its steps plus these tries, and the sweep's asking ends with it.
+ */
+export const FILL_MAX_TRIES = 5;
 /** One orderWrite of one HSET (the place, or the `done` mark): the script and its command. */
 const FILL_MARK_COMMANDS = 2;
 /** What orderWrite of `n` commands costs: one script per ORDER_WRITE_MAX commands, each 1 plus its commands. */
@@ -1276,9 +1283,10 @@ export function keysForCopy(scope: { store: Store; productIds: string[]; email: 
  * The opening check of issue #5125 (coordinator f416), read only and never called by a route: every key a product
  * gave whose line is missing from its buyer's own list (holderKey), so the person's copy would leave it out. Keys are
  * given only by settle, which writes the line in the same step; keys given before this list existed (stores sold on a
- * trial until 5 October 2026) get theirs from the sweep's fill (fillHolderLines). Once the company's fill mark is set,
- * this proves it on the real data before sales open, except in a store marked `whole`, whose copy reads every product's
- * records as main did. Reads each product's whole record hash and, per buyer, one
+ * trial until 5 October 2026) get theirs from the sweep's fill (fillHolderLines). Before sales open, it proves it on
+ * the real data for every store whose fill is done (holderFillDone); a store not done (marked `whole`, or never asked
+ * because it sells no keys now, Claude 6 i51q's LOW on cdafb13ff9) may still list keys here, and its copy reads every
+ * product's records as main did, complete. Reads each product's whole record hash and, per buyer, one
  * HMGET of their list: an audit's cost, not a request's. An unknown reply throws (rule 24), never "none missing".
  */
 export async function keysWithoutHolderLine(store: Store, productIds: string[]): Promise<{ product: string; key: string }[]> {
@@ -1329,72 +1337,89 @@ export async function keysWithoutHolderLine(store: Store, productIds: string[]):
  */
 export async function fillHolderLines(store: Store, deadline: number, budget = FILL_RUN_COMMANDS): Promise<boolean> {
   if (!store.statsId || !isRedisConfigured()) return false;
-  const state = repliesFor(await redisPipeline([["HMGET", fillKey(store), "done", "at"]]), 1)?.[0];
-  if (!Array.isArray(state) || state.length !== 2) throw new UnknownReplyError("the license keys' fill state");
-  const [mark, at] = state;
+  const state = repliesFor(await redisPipeline([["HMGET", fillKey(store), "done", "at", "tries"]]), 1)?.[0];
+  if (!Array.isArray(state) || state.length !== 3) throw new UnknownReplyError("the license keys' fill state");
+  const [mark, at, triedRaw] = state;
   if ((mark !== null && mark !== "1" && mark !== HOLDER_FILL_WHOLE) || (at !== null && typeof at !== "string")) throw new UnknownReplyError("the license keys' fill state");
+  if (triedRaw !== null && (typeof triedRaw !== "string" || !/^\d{1,3}$/.test(triedRaw))) throw new UnknownReplyError("the license keys' fill tries");
   if (mark !== null) return true;
+  const tried = triedRaw === null ? 0 : Number(triedRaw);
+  // One more try, kept; the last one leaves the store on main's whole read for good, complete, and asked no more.
+  const tryAgain = async (): Promise<boolean> => {
+    const n = tried + 1;
+    await orderWrite(store, [n >= FILL_MAX_TRIES ? ["HSET", fillKey(store), "done", HOLDER_FILL_WHOLE, "tries", String(n)] : ["HSET", fillKey(store), "tries", String(n)]]);
+    return n >= FILL_MAX_TRIES;
+  };
   const place = typeof at === "string" ? /^([0-9a-f]{16}):(\d{1,6}):(\d{1,20})$/.exec(at) : null;
   if (at !== null && !place) throw new UnknownReplyError("the license keys' fill place");
   const ids = [...new Set(store.catalog.items.map((item) => item.id))].sort();
   const digest = catalogDigest(ids);
   // A place kept in another catalog would name another product (a product added or removed since): walk from the top.
   const same = place !== null && place[1] === digest;
+  if (place !== null && !same && (await tryAgain())) return true;
   let index = same ? Number(place[2]) : 0;
   let cursor = same ? place[3] : "0";
-  let used = 1;
+  let used = place !== null && !same ? 1 + FILL_MARK_COMMANDS : 1;
   let steps = 0;
-  while (index < ids.length && Date.now() < deadline && used + 1 + FILL_MARK_COMMANDS <= budget) {
-    const product = { id: ids[index] };
-    const page = repliesFor(await redisPipeline([["HSCAN", infoKey(store, product), cursor, "COUNT", FILL_PAGE]]), 1)?.[0];
-    used += 1;
-    if (!Array.isArray(page) || page.length !== 2 || typeof page[0] !== "string" || !/^\d{1,20}$/.test(page[0])) throw new UnknownReplyError("HSCAN of a product's license keys");
-    const flat = stringList(page[1]);
-    if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("HSCAN of a product's license keys");
-    const byHolder = new Map<string, string[]>();
-    for (let k = 0; k + 1 < flat.length; k += 2) {
-      const info = readInfo(flat[k + 1]);
-      // A sale with no address has nobody to list it under (settle writes no line for it either).
-      if (!normaliseEmail(info.e)) continue;
-      const holder = holderKey(store, info.e);
-      byHolder.set(holder, [...(byHolder.get(holder) ?? []), holderField(product, flat[k])]);
-    }
-    const holders = [...byHolder.entries()];
-    const fields = holders.reduce((n, [, f]) => n + f.length, 0);
-    // The step's worst case: one HMGET a buyer, every line missing, and the place.
-    const worst = holders.length + writeCommands(fields) + FILL_MARK_COMMANDS;
-    if (used + worst + FILL_MARK_COMMANDS > budget) {
-      if (steps > 0) return false;
-      // Not even one page fits in a whole run: this store keeps main's read for good (complete), and is not asked again.
-      if (2 + worst + FILL_MARK_COMMANDS > budget) {
-        await orderWrite(store, [["HSET", fillKey(store), "done", HOLDER_FILL_WHOLE]]);
-        return true;
+  try {
+    while (index < ids.length && Date.now() < deadline && used + 1 + FILL_MARK_COMMANDS <= budget) {
+      const product = { id: ids[index] };
+      const page = repliesFor(await redisPipeline([["HSCAN", infoKey(store, product), cursor, "COUNT", FILL_PAGE]]), 1)?.[0];
+      used += 1;
+      if (!Array.isArray(page) || page.length !== 2 || typeof page[0] !== "string" || !/^\d{1,20}$/.test(page[0])) throw new UnknownReplyError("HSCAN of a product's license keys");
+      const flat = stringList(page[1]);
+      if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("HSCAN of a product's license keys");
+      const byHolder = new Map<string, string[]>();
+      for (let k = 0; k + 1 < flat.length; k += 2) {
+        const info = readInfo(flat[k + 1]);
+        // A sale with no address has nobody to list it under (settle writes no line for it either).
+        if (!normaliseEmail(info.e)) continue;
+        const holder = holderKey(store, info.e);
+        byHolder.set(holder, [...(byHolder.get(holder) ?? []), holderField(product, flat[k])]);
       }
-      return false;
-    }
-    if (holders.length) {
-      const lines = repliesFor(await redisPipeline(holders.map(([holder, f]) => ["HMGET", holder, ...f])), holders.length);
-      used += holders.length;
-      if (!lines) throw new UnknownReplyError("the buyers' lists of license keys");
-      const missing: [string, string, string, string][] = [];
-      holders.forEach(([holder, f], i) => {
-        const values = lines[i];
-        if (!Array.isArray(values) || values.length !== f.length) throw new UnknownReplyError("HMGET of a buyer's list of license keys");
-        f.forEach((field, k) => {
-          if (values[k] === null) missing.push(["HSET", holder, field, "1"]);
-          else if (values[k] !== "1") throw new UnknownReplyError("an entry of a buyer's list of license keys");
+      const holders = [...byHolder.entries()];
+      const fields = holders.reduce((n, [, f]) => n + f.length, 0);
+      // The step's worst case: one HMGET a buyer, every line missing, and the place.
+      const worst = holders.length + writeCommands(fields) + FILL_MARK_COMMANDS;
+      if (used + worst + FILL_MARK_COMMANDS > budget) {
+        if (steps > 0) return false;
+        // Not even one page fits in a whole run: this store keeps main's read for good (complete), and is not asked again.
+        if (2 + worst + FILL_MARK_COMMANDS > budget) {
+          await orderWrite(store, [["HSET", fillKey(store), "done", HOLDER_FILL_WHOLE]]);
+          return true;
+        }
+        return false;
+      }
+      if (holders.length) {
+        const lines = repliesFor(await redisPipeline(holders.map(([holder, f]) => ["HMGET", holder, ...f])), holders.length);
+        used += holders.length;
+        if (!lines) throw new UnknownReplyError("the buyers' lists of license keys");
+        const missing: [string, string, string, string][] = [];
+        holders.forEach(([holder, f], i) => {
+          const values = lines[i];
+          if (!Array.isArray(values) || values.length !== f.length) throw new UnknownReplyError("HMGET of a buyer's list of license keys");
+          f.forEach((field, k) => {
+            if (values[k] === null) missing.push(["HSET", holder, field, "1"]);
+            else if (values[k] !== "1") throw new UnknownReplyError("an entry of a buyer's list of license keys");
+          });
         });
-      });
-      if (missing.length) {
-        await orderWrite(store, missing);
-        used += writeCommands(missing.length);
+        if (missing.length) {
+          await orderWrite(store, missing);
+          used += writeCommands(missing.length);
+        }
       }
+      cursor = page[0];
+      if (cursor === "0") index += 1;
+      await orderWrite(store, [["HSET", fillKey(store), "at", `${digest}:${index}:${cursor}`]]);
+      used += FILL_MARK_COMMANDS;
+      steps += 1;
     }
-    cursor = page[0];
-    if (cursor === "0") index += 1;
-    await orderWrite(store, [["HSET", fillKey(store), "at", `${digest}:${index}:${cursor}`]]);
-    used += FILL_MARK_COMMANDS;
-    steps += 1;
+  } catch (error) {
+    // A reply in a shape no writer writes is persistent: counted, so it cannot hold the fill open for good. Anything
+    // else (Redis not answering) is not counted and is tried again on the next run.
+    if (!(error instanceof UnknownReplyError)) throw error;
+    if (await tryAgain()) return true;
+    throw error;
   }
   if (index < ids.length) return false;
   await orderWrite(store, [["HSET", fillKey(store), "done", "1"]]);

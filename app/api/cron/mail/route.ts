@@ -1,5 +1,7 @@
 import { runLaunches } from "@/lib/waitlist";
 import { runPreorderReleases } from "@/lib/preorders";
+import { runRestocks } from "@/lib/stock-alert-send";
+import { lowStockJobDeps, runLowStockChecks } from "@/lib/low-stock-alert";
 import { preorderDeps } from "@/lib/purchase-email";
 import { readListing } from "@/lib/catalog";
 import type { NextRequest } from "next/server";
@@ -209,6 +211,20 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     } catch (error) {
       console.error("handing over pre-orders failed", error);
     }
+    // The one email to a back-in-stock list when its product is back (lib/stock-alert-send.ts, 623 [SZ7]).
+    let restocks = 0;
+    try {
+      restocks = await runRestocks(deadline);
+    } catch (error) {
+      console.error("sending back-in-stock emails failed", error);
+    }
+    // The creators' low-stock numbers (623 [SZ7]): checked here, one run at a time, never in the checkout.
+    try {
+      // The units left as read where something is decided: never a guess (lowStockJobDeps).
+      await runLowStockChecks(deadline, lowStockJobDeps);
+    } catch (error) {
+      console.error("checking low-stock numbers failed", error);
+    }
     // Reminders are kept apart from the creators' own emails: one failing
     // never stops the other, and the next run picks up whatever was left.
     // They get ten seconds even after a long send, so a busy newsletter day
@@ -238,7 +254,7 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     // Nothing started after fifty: a webhook try can take eight more, and the
     // whole run has sixty.
     const webhooks = await runWebhooks(webhooksBy, meetingsCutoff);
-    return Response.json({ ok: true, checkouts, offers, broadcasts, announcements, updates, launches, preorders, ...steps, calls, events, reviews, webhooks }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ ok: true, checkouts, offers, broadcasts, announcements, updates, launches, preorders, restocks, ...steps, calls, events, reviews, webhooks }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("the email job failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

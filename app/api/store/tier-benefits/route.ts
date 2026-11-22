@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     const words: Record<typeof done.reason, [string, number]> = {
       too_many: [`Mark at most ${MAX_GIVE_AT_ONCE} at a time.`, 400],
       missing: ["That benefit is not one of yours. Reload the page.", 409],
-      who: ["Your sign-in address has characters a mark cannot keep, so nothing was marked. Ask the store owner to mark it, or sign in with a plain address.", 400],
+      who: ["Your sign-in address has characters a mark cannot keep, so nothing was marked. Ask a teammate with a plain sign-in address to mark it, or sign in with a plain address.", 400],
       benefits: [benefitsUnread, 502],
       stripe: [unread, 502],
       erased: [erasedUnread, 502],

@@ -59,13 +59,14 @@ export const BENEFIT_PAGE_UNITS = 5;
 export const MARK_BY_MAX = 254;
 /**
  * Whether an address may be written on a mark as who gave it (audit cd8d, Claude 1 coord 0b58): one to MARK_BY_MAX
- * characters of printable ASCII with no space, quote or backslash, in the shape of an address. A mark is read back as
- * a JSON string inside the database's JSON reply, so a control character, a lone surrogate, a quote or a backslash
- * would cost up to 7 bytes on the wire; with this rule each character of the address costs 1, and
+ * characters of printable ASCII with no space, quote, backslash, <, > or &, in the shape of an address. A mark is read
+ * back as a JSON string inside the database's JSON reply, so a control character, a lone surrogate, a quote or a
+ * backslash would cost up to 7 bytes on the wire, and <, > and & 6 under an HTML-safe encoder (Claude 2 upbeat on
+ * #5123); with this rule each character of the address costs 1 under any JSON encoder, and
  * BENEFIT_MARK_VALUE_BYTES (tests/plan-cost-registry.ts) holds the worst mark that can be written.
  */
 export function markableBy(by: string): boolean {
-  return by.length >= 1 && by.length <= MARK_BY_MAX && /^[\x21\x23-\x5B\x5D-\x7E]+$/.test(by) && /^[^@]+@[^@]+\.[^@]+$/.test(by);
+  return by.length >= 1 && by.length <= MARK_BY_MAX && /^[\x21\x23-\x25\x27-\x3B\x3D\x3F-\x5B\x5D-\x7E]+$/.test(by) && /^[^@]+@[^@]+\.[^@]+$/.test(by);
 }
 
 export const CADENCES = ["once", "monthly"] as const;

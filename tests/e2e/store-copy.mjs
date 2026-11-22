@@ -256,13 +256,17 @@ try {
       // "no page threw" although nothing in the page failed (CV (e), 17 November 2026, #4843 and others). Only such a
       // same-origin _rsc fetch, and only once the document is leaving, is dropped; every other failure still throws.
       // beforeunload can be canceled (the page's own unload protection, which Playwright's dialog handling answers
-      // by staying): a failure in its grace second waits for the decision. pagehide is the real unload, and drops it;
-      // if the document stays, the failure is thrown once the second ends (Codex V's MEDIUM on #4844). pageshow (a
-      // page restored from the back/forward cache) reports failures again.
+      // by staying): a failure after it waits for the decision. pagehide is the real unload, and drops it. The document
+      // stays when the harness says so (window.__mmStayed: a goto or reload that failed, a navigation request that
+      // failed, and the sweep over every open page before "no page threw"; a leave a dialog canceled reaches that
+      // sweep) or when pageshow restores it from the back/forward cache; then the failure is thrown (Codex V's MEDIUM
+      // on #4844). The decision
+      // is never a clock: until 21 November 2026 a fixed second decided it, and a navigation whose new document took
+      // longer than that to arrive (1.1 s in the merge-queue run of #3774) threw the cut-off with the old document
+      // still alive, although it left a moment later.
       let leaving = false;
-      let leaveTimer, pendingLeave, resolveLeave;
+      let pendingLeave, resolveLeave;
       const finishLeave = (didLeave) => {
-        clearTimeout(leaveTimer);
         leaving = didLeave;
         resolveLeave?.(didLeave);
         pendingLeave = undefined;
@@ -271,10 +275,10 @@ try {
       addEventListener("beforeunload", () => {
         if (leaving || pendingLeave) return;
         pendingLeave = new Promise((resolve) => { resolveLeave = resolve; });
-        leaveTimer = setTimeout(() => finishLeave(false), 1000);
       });
       addEventListener("pagehide", () => finishLeave(true));
       addEventListener("pageshow", () => finishLeave(false));
+      window.__mmStayed = () => { if (pendingLeave) finishLeave(false); };
       const original = window.fetch;
       window.fetch = async function (...args) {
         const input = args[0], url = new URL(typeof input === "string" || input instanceof URL ? input : input.url, location.href);
@@ -308,9 +312,18 @@ try {
         },undefined,{timeout:60000});
         await page.evaluate(()=>{delete window.__mmRscIdleSince;});
       };
+      // The document stayed: a failure that waited for the leave is thrown now (window.__mmStayed above).
+      const stayed = () => page.isClosed() ? Promise.resolve() : page.evaluate(() => window.__mmStayed?.()).catch(() => undefined);
+      const navigated = async (navigate) => {
+        let response;
+        try { response = await navigate(); } catch (error) { await stayed(); throw error; }
+        if (response === null) await stayed();
+        return response;
+      };
+      page.on("requestfailed", (request) => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) void stayed(); });
       const goto=page.goto.bind(page),reload=page.reload.bind(page),resize=page.setViewportSize.bind(page),close=page.close.bind(page);
-      page.goto=async (...args)=>{await settle();return goto(...args);};
-      page.reload=async (...args)=>{await settle();return reload(...args);};
+      page.goto=async (...args)=>{await settle();return navigated(()=>goto(...args));};
+      page.reload=async (...args)=>{await settle();return navigated(()=>reload(...args));};
       page.setViewportSize=async (...args)=>{await settle();const result=await resize(...args);await settle();return result;};
       page.close=async (...args)=>{await settle();return close(...args);};
       return page;
@@ -967,6 +980,11 @@ try {
   }
   const running = new Set(chosen.steps);
   for (const [name, step] of steps) if (running.has(name)) await step();
+  // Every page still open stayed where it is: a failure that waited for a leave that never came is thrown now.
+  for (const context of browser.contexts()) for (const page of context.pages()) {
+    if (page.isClosed() || page.url() === "about:blank") continue;
+    await page.evaluate(() => { window.__mmStayed?.(); return new Promise((resolve) => setTimeout(resolve, 0)); }).catch(() => undefined);
+  }
   is("no page threw", errors, []);
 } catch (error) {
   failed += 1;

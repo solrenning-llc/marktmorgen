@@ -15,16 +15,18 @@ import { BOTH_NEEDED, SOFT_BOUNCE_NOTE, TERMS, UNREAD, healthRows, levelWords, p
  * disagree. Each row says the level that pauses (count and share, both
  * needed). At the level, both room cells say the next notice of either kind
  * pauses (pauseIfOver runs after every one counted), and the distance
- * sentence is left out: KB20's advice already says so.
+ * sentence is left out: KB20's advice already says so. With nothing sent it
+ * adds nothing: the health line above already says none were sent.
  *
  * Nothing here says an email was delivered, opened, put in the inbox or sent
  * to spam: no sender can know that, and the one sentence that names those
  * words says so (TERMS.spamUnknown).
  */
 export function ListHealthTable({ health }: { health: HealthCounts }) {
-  if (health.sent === 0) {
-    return <p className="mt-3 text-sm text-ink-soft">{`Nothing was sent in these ${HEALTH_WINDOW_DAYS} days, so there is nothing yet to compare with the level that pauses email to your list.`}</p>;
-  }
+  // Nothing sent: the health line above already says "none sent" (healthLine), so nothing of its own is added and the
+  // section keeps its height. 32 px more left the studio's "Studio" breadcrumb half under the sticky header in WebKit
+  // after the accessibility matrix's ten Tabs (axe target-size, #2314).
+  if (health.sent === 0) return null;
   const rows = healthRows(health);
   if (!rows) return null;
   const room = roomBeforePause(health);

@@ -1,14 +1,15 @@
 import type { NextRequest } from "next/server";
 import { setHasDiscounts, storeForEmail } from "@/lib/store";
 import { canSell } from "@/lib/store-checkout";
-import { createCode, listCodes, stopCode } from "@/lib/discount";
+import { createCode, listCodes, readCode, stopCode } from "@/lib/discount";
+import { makeReturningCode, returningWordIn, stopReturningCode } from "@/lib/returning-code-make";
 import { readCodeAsked } from "@/lib/discount-input";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { countStudio } from "@/lib/studio-route";
 import { SCHEDULE_UNITS, readWindow } from "@/lib/discount-schedule-rules";
 import { cancelSchedule, dropSchedule, readSchedules, scheduleCode } from "@/lib/discount-schedule";
 
-const ACTIONS = new Set(["list", "add", "stop", "schedule", "unschedule"]);
+const ACTIONS = new Set(["list", "add", "stop", "schedule", "unschedule", "addreturn", "stopreturn"]);
 
 /**
  * The creator's discount codes, which live on their own Stripe account.
@@ -52,6 +53,10 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
+      // One word, one code: never a word a code for returning buyers already has.
+      if (store.returningCodes.some((entry) => entry.code === read.asked.code)) {
+        return Response.json({ ok: false, error: "taken" }, { status: 409 });
+      }
       const { code, off, maxRedemptions, minimum } = read.asked;
 
       const made = await createCode(account, code, off, maxRedemptions, minimum);
@@ -61,12 +66,21 @@ export async function POST(request: NextRequest) {
           { status: made.reason === "taken" ? 409 : 502 },
         );
       }
-      await setHasDiscounts(ref, true);
+      // Made first, then checked against the store read after it (Codex N1 LOW on #3691): a code for returning buyers
+      // kept with this word meanwhile wins, and this one is switched off on Stripe. Unknown is never "free".
+      const clash = returningWordIn(await setHasDiscounts(ref, true), code);
+      if (clash !== false) {
+        if (!(await stopCode(account, made.code.id))) console.error("a code made beside a returning-buyer code with the same word could not be switched off", made.code.id);
+        return Response.json({ ok: false, error: clash ? "taken" : "server_error" }, { status: clash ? 409 : 503 });
+      }
     } else if (action === "schedule") {
       // A code with a start and an end set ahead (511 [CK3], lib/discount-schedule.ts).
       const read = readCodeAsked(body, store.currency);
       if (!read.ok) {
         return Response.json({ ok: false, error: "code", reason: read.reason }, { status: 400 });
+      }
+      if (store.returningCodes.some((entry) => entry.code === read.asked.code)) {
+        return Response.json({ ok: false, error: "taken" }, { status: 409 });
       }
       const now = Math.floor(Date.now() / 1000);
       const window = readWindow(body, now);
@@ -88,6 +102,26 @@ export async function POST(request: NextRequest) {
         }
         // "live": Stripe made it live at once and did not confirm it off; it is kept for the studio to list.
         return Response.json({ ok: false, error: made.reason }, { status: made.reason === "taken" ? 409 : 502 });
+      }
+    } else if (action === "addreturn") {
+      // A code only for people who already bought here (554 [DS1], unit 2;
+      // lib/returning-code-make.ts): the creator's coupon, never a promotion code.
+      const read = readCodeAsked(body, store.currency);
+      if (!read.ok) {
+        return Response.json({ ok: false, error: "code", reason: read.reason }, { status: 400 });
+      }
+      const made = await makeReturningCode(ref, store, read.asked);
+      if (!made.ok) {
+        return Response.json({ ok: false, error: made.reason }, { status: made.reason === "taken" ? 409 : made.reason === "stripe" ? 502 : 400 });
+      }
+    } else if (action === "stopreturn") {
+      const word = readCode(text(body.code, 40));
+      // Already gone is already stopped (a second click, another tab): the list below says so.
+      if (store.returningCodes.some((entry) => entry.code === word) && !(await stopReturningCode(ref, store, word))) {
+        const now = await storeForEmail(ref);
+        if (!now || now.returningCodes.some((entry) => entry.code === word)) {
+          return Response.json({ ok: false, error: "server_error" }, { status: 500 });
+        }
       }
     } else if (action === "unschedule") {
       const id = text(body.id, 80);
@@ -141,7 +175,15 @@ export async function POST(request: NextRequest) {
     const live = list.codes.some((entry) => entry.active);
     if (live || list.complete) await setHasDiscounts(ref, live);
 
-    return Response.json({ ok: true, codes: list.codes, complete: list.complete, schedules: kept.schedules, ...(cancelState ? { canceled: cancelState } : {}) });
+    return Response.json({
+      ok: true,
+      codes: list.codes,
+      complete: list.complete,
+      schedules: kept.schedules,
+      // The codes for returning buyers, read again after any change; never their coupon ids.
+      returning: (await storeForEmail(ref))?.returningCodes.map(({ code, off, createdAt }) => ({ code, off, createdAt })),
+      ...(cancelState ? { canceled: cancelState } : {}),
+    });
   } catch (error) {
     console.error("changing a discount code failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

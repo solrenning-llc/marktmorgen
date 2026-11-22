@@ -6,8 +6,10 @@
  */
 import { GET, POST, DELETE } from "@/app/api/v1/codes/route";
 import { makeKey } from "@/lib/api-keys";
-import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addReturningCode, claimHandle, removeReturningCode, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { CODE_PROBLEMS } from "@/lib/discount";
+import { apiReadUnits, codeMakeWork } from "@/lib/api-read-rules";
+import { allowanceUsed, allowancesUsedStrict, forceAllowance } from "@/lib/store-allowance";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -20,6 +22,8 @@ type Promo = Record<string, unknown>;
 const coupons = new Map<string, Record<string, unknown>>();
 const promos = new Map<string, Promo>();
 const writes: string[] = [];
+// A code for returning buyers kept with this word while the API makes its code (Codex N1 LOW on #3691).
+let racingReturning: string | null = null;
 let n = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -38,6 +42,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (init?.method === "POST" && url.pathname === "/v1/promotion_codes") {
     writes.push("promotion");
     const code = form.get("code") ?? "";
+    if (racingReturning === code) await addReturningCode(OWNER, { code, coupon: "co_RacingReturn1", off: { kind: "percent", percent: 10 }, endsAt: null, createdAt: 1 });
     if ([...promos.values()].some((p) => p.code === code && p.active)) return Response.json({ error: { type: "invalid_request_error", message: "A promotion code with this code already exists." } }, { status: 400 });
     const id = `promo_${++n}`;
     const row: Promo = { id, object: "promotion_code", code, active: true, times_redeemed: 0, max_redemptions: form.get("max_redemptions") ? Number(form.get("max_redemptions")) : null, expires_at: null, restrictions: { minimum_amount: form.get("restrictions[minimum_amount]") ? Number(form.get("restrictions[minimum_amount]")) : null, minimum_amount_currency: form.get("restrictions[minimum_amount_currency]"), first_time_transaction: false }, promotion: { type: "coupon", coupon: form.get("promotion[coupon]") } };
@@ -90,6 +95,20 @@ async function main(): Promise<void> {
   is("the checkout's code box is switched on", (await storeForEmail(OWNER))!.hasDiscounts, true);
   is("numbers sent as numbers are read the same as text", (await make({ code: "TEN-OFF", kind: "amount", amount: 10 })).body.data && true, true);
   is("the same letters twice: refused as taken", [(await make({ code: "LAUNCH20", percent: 10 })).status], [409]);
+  // Codex N1 LOW on #3691: a code for returning buyers kept with the same word while this one is made wins, and the
+  // code made here is switched off, its one more call to Stripe taken first.
+  racingReturning = "RACEAPI";
+  writes.length = 0;
+  let raced: Awaited<ReturnType<typeof make>>;
+  try {
+    raced = await make({ code: "RACEAPI", percent: 10 });
+  } finally {
+    racingReturning = null;
+  }
+  const racedPromo = [...promos.values()].find((p) => p.code === "RACEAPI");
+  is("made at the same time as a code for returning buyers: refused as taken, and switched off on Stripe", [raced.status, raced.body.error, racedPromo?.active, writes.includes(`stop ${String(racedPromo?.id)}`)], [409, "taken", false, true]);
+  if (racedPromo) promos.delete(String(racedPromo.id));
+  await removeReturningCode(OWNER, "RACEAPI");
 
   part("Reading them");
   const read = await list();
@@ -106,6 +125,25 @@ async function main(): Promise<void> {
   const ten = (read.body.data as { id: string; code: string }[]).find((c) => c.code === "TEN-OFF")!;
   await stop(ten.id);
   is("with no live code left, the checkout's code box goes", (await storeForEmail(OWNER))!.hasDiscounts, false);
+
+
+  part("The one more call a switch-off may need is set aside first (Claude 5 icEJ on #3691)");
+  // Claude 5 icEJ's LEVE on #3691 @0983579781: the switch-off was counted only after the clash was found, so a key with
+  // no request left for it left both codes live. It is now set aside before anything is made and given back when no
+  // code for returning buyers took the word.
+  const makeUnits = apiReadUnits(codeMakeWork());
+  const usedBefore = await allowanceUsed(store, "api");
+  is("control: making a code is counted", makeUnits > 0, true);
+  const fresh = await make({ code: "SPAREBACK", percent: 10 });
+  is("no clash: the one set aside for a switch-off comes back, so the code costs what it did (the door and the making)", [fresh.status, (await allowanceUsed(store, "api")) - usedBefore], [200, 1 + makeUnits]);
+  const [api] = (await allowancesUsedStrict(store, ["api"])) ?? [];
+  const leaveFor = 1 + makeUnits;
+  if (api && api.figure - api.used > leaveFor) await forceAllowance(store, "api", api.figure - api.used - leaveFor);
+  writes.length = 0;
+  const usedTight = await allowanceUsed(store, "api");
+  const tight = await make({ code: "NOROOMSTOP", percent: 10 });
+  is("room for making a code but not for its possible switch-off: refused, and nothing reaches Stripe", [tight.status, writes], [429, []]);
+  is("and the making's own requests come back: only the door is counted", (await allowanceUsed(store, "api")) - usedTight, 1);
 
   done();
 }

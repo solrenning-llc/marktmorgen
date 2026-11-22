@@ -1020,13 +1020,19 @@ export function conferirLink(link, pr, sha, resultado = null) {
  * (quem transcreveu, quem tem commits, a quem se responde) não contam, e um pedido ou uma marca ("re-review needed",
  * "review needed", CLAIMED, UNCLAIMED, HOLD, "fila #N") não é revisão: o "This answers Claude 1 DKvY's CHANGES" do #5135
  * não tira o Claude 1 da fila que a nova revisão pede (revisão do Claude 1 E no #5141).
+ * O veredito fica na primeira linha, ou na segunda quando a primeira é o cabeçalho de uma revisão; a nota do autor
+ * ("Fixed/Fixes/Corrigido/Resolved/This answers/Note on ...") também não é revisão (revisão do Claude 5 ibqho no #5141,
+ * comentário 7085420176).
  */
 export function revisoraDoComentario(corpo, curto) {
   const linhas = String(corpo ?? "").split(/\r?\n/).filter((l) => l.trim()).slice(0, 2);
-  const topo = linhas.join("\n");
-  if (!curto || !topo.includes(curto) || !/\b(READY|CHANGES)\b/.test(topo)) return null;
-  const inicio = (linhas[0] ?? "").replace(/^[\s*>_#`-]+/, "");
-  if (/^(re-?review needed|review needed|claimed\b|unclaimed\b|hold\b|fila #)/i.test(inicio)) return null;
+  const [l1 = "", l2 = ""] = linhas, veredito = /\b(READY|CHANGES)\b/;
+  if (!curto || !linhas.join("\n").includes(curto)) return null;
+  // O veredito na primeira linha, ou na segunda quando a primeira é o cabeçalho de uma revisão ("Independent review
+  // (Codex G) of head X" e "Verdict: CHANGES"); a nota do autor que cita "READY or CHANGES" mais abaixo não é revisão.
+  if (!veredito.test(l1) && !(/\breview\b/i.test(l1) && veredito.test(l2))) return null;
+  const inicio = l1.replace(/^[\s*>_#`-]+/, "");
+  if (/^(re-?review needed|review needed|claimed\b|unclaimed\b|hold\b|fila #|fix(?:ed|es)?\b|corrigid|resolved\b|this answers|answer\b|note on\b)/i.test(inicio)) return null;
   for (const l of linhas) {
     const m = /\b(Claude \d+|Codex)\b/i.exec(l);
     if (m) return familia(m[1]);

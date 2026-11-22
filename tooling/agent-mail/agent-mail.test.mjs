@@ -937,6 +937,10 @@ console.log("ce2d: the reviewer of a comment, on the real formats of today (Clau
     [`Claude 2 X review #61\nnotes on the diff\nREADY on @${h}, in the third line`, null, "head and verdict only from the third line on"],
     [`Claude 6 review #2048 @0123456789: CHANGES`, null, "a verdict on another head"],
     [`Claude 3 X review #61 @${h}: looks fine`, null, "no verdict word"],
+    [`Fixed the MEDIUM from Claude 5 ibuF (https://github.com/solrenning-llc/marktmorgen/pull/5141#issuecomment-7085207019) in ${h}.\n- \`revisoresNoPr\` now reads the first two lines. When they hold this head and a verdict (READY or CHANGES), every family named on them is excluded.`, null, "the author's fix note of #5141 (7085420176) is not Claude 5's review (Claude 5 ibqho's finding)"],
+    [`**Fixed at ${h}** (Claude 7 xAF, author), answering Claude 6 i51q's CHANGES at 899e35bbdc.`, null, "a 'Fixed at' note with CHANGES on its line is not a review"],
+    [`Note on my review above (7081962031): Claude 1 E had already given a focal money READY on ${h} (7081897226)`, null, "a note on another review is not a review"],
+    [`This answers Claude 2 X's CHANGES on ${h}: the merge is redone.`, null, "an answer to a review is not a review"],
   ];
   for (const [corpo, esperado, porque] of casos) {
     const achou = typeof mod.revisoraDoComentario === "function" ? mod.revisoraDoComentario(corpo, h) : "(missing)";

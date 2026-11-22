@@ -47,7 +47,7 @@ redis.pipeline = (async (commands: Command[]) => {
       failPostReads -= 1;
       throw new Error("the posts could not be read (synthetic)");
     }
-    if (command[0] === "HVALS" && key.startsWith("nl:forms:") && failFormReads > 0) {
+    if (command[0] === "HGETALL" && key.startsWith("nl:forms:") && failFormReads > 0) {
       failFormReads -= 1;
       throw new Error("the forms could not be read (synthetic)");
     }

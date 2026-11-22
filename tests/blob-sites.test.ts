@@ -28,19 +28,24 @@ type Paid = { line: string } | { free: string } | { notInProduction: string } | 
 const DELETE_IS_FREE = { free: "vercel.com/docs/vercel-blob/usage-and-pricing, 'Delete operations are free', read 6 November 2026" };
 /** handleUploadPresigned signs the door's URL in our own function; it sends nothing to Blob by itself. */
 const SIGNS_LOCALLY = { free: "@vercel/blob/client handleUploadPresigned signs locally; the token it needs is the issueSignedToken entry" };
-/** The browser's PUT through a door to a studio picture: priced as a put with every try by picture-uploads / picture-thumbnails. */
-const STUDIO_PICTURE_PUT = { line: "picture-uploads" };
+/**
+ * The browser's PUT through a door to a studio picture: priced as a put with every try by studio-blob, the one line main
+ * now keeps for every studio picture's Blob work (a838147abf: "one studio-blob line for every studio picture's Blob
+ * operations, the door's token counted"), where picture-uploads and picture-thumbnails were.
+ */
+const STUDIO_PICTURE_PUT = { line: "studio-blob" };
 
 /** issueSignedToken is a request to Blob with the SDK's tries, its price not on the pricing page (audit item 9): never zero. */
 const TOKEN_OPEN = { open: "audit 9: issueSignedToken (/signed-token) priced nowhere; counted as an Advanced Operation with every try until a source says otherwise" };
 
 export const BLOB_SITES: Record<string, Record<string, Paid>> = {
   // Studio pictures: the door, its checks and its attach (#2803 picture-uploads, #2801 picture-thumbnails).
-  "app/api/store/image/upload/route.ts": { head: { line: "picture-uploads" }, issueSignedToken: TOKEN_OPEN, handleUploadPresigned: SIGNS_LOCALLY },
+  // studio-blob prices the door's signed token too (its sources name issueSignedToken in this route), so it is no longer open.
+  "app/api/store/image/upload/route.ts": { head: STUDIO_PICTURE_PUT, issueSignedToken: STUDIO_PICTURE_PUT, handleUploadPresigned: SIGNS_LOCALLY },
   // Main (#4291 era) hands a replaced picture to deleteOrSweep (lib/file-drop.ts); the route itself calls no del since.
-  "app/api/store/image/route.ts": { head: { line: "picture-uploads" } },
-  "lib/uploaded-image.ts": { head: { line: "picture-uploads" }, get: { line: "picture-uploads" } },
-  "lib/picture-door.ts": { head: { line: "picture-uploads" }, del: DELETE_IS_FREE },
+  "app/api/store/image/route.ts": { head: STUDIO_PICTURE_PUT },
+  "lib/uploaded-image.ts": { head: STUDIO_PICTURE_PUT, get: STUDIO_PICTURE_PUT },
+  "lib/picture-door.ts": { head: STUDIO_PICTURE_PUT, del: DELETE_IS_FREE },
   "components/product-image-editor.tsx": { uploadPresigned: STUDIO_PICTURE_PUT },
   "components/link-picture.tsx": { uploadPresigned: STUDIO_PICTURE_PUT },
   "components/page-editor.tsx": { uploadPresigned: STUDIO_PICTURE_PUT },
@@ -94,9 +99,17 @@ export const BLOB_SITES: Record<string, Record<string, Paid>> = {
     issueSignedToken: { notInProduction: 'process.env.VERCEL_ENV === "production") throw new Error("files_unavailable")' },
     handleUploadPresigned: SIGNS_LOCALLY,
   },
-  // Its fallback to Blob goes through the door above, which production closes.
-  "lib/sold-file-upload.ts": { uploadPresigned: { notInProduction: 'handleUploadUrl: "/api/store/file"' } },
-  "lib/takedown.ts": { del: DELETE_IS_FREE },
+  // Its fallback to Blob goes through the door above, which production closes. Main names that door UPLOAD_ROUTE
+  // (const UPLOAD_ROUTE = "/api/store/file", ff29bd12cf), and the test below checks the constant is still that door.
+  "lib/sold-file-upload.ts": { uploadPresigned: { notInProduction: "handleUploadUrl: UPLOAD_ROUTE" } },
+  // A held link (#3539, takedown-restore): its picture is copied aside and checked (copyFile, fileThere). The line
+  // takedown-held-links prices the held picture's storage and says these copies and checks are "a company cost, outside
+  // this line", a takedown the company presses on a notice: no line prices them yet, as with picture-withdraw (audit 11).
+  "lib/takedown.ts": {
+    copy: { open: "audit 11: a held link's picture copied aside (copyFile), a company cost priced in no line" },
+    head: { open: "audit 11: a held link's copy and original checked (fileThere), a company cost priced in no line" },
+    del: DELETE_IS_FREE,
+  },
   // A delivery check (479 [SB2], unit 2) heads each file at most twice, priced inside its DELIVERY_CHECK_UNITS studio
   // requests (lib/delivery-check-rules.ts, held by tests/delivery-check.test.ts).
   "lib/delivery-check.ts": { head: { line: "studio" } },
@@ -210,11 +223,16 @@ test("each priced operation names a line that exists, and each closed one shows 
   }
 });
 
+test("the legacy upload's door is still /api/store/file, which production closes", () => {
+  assert.ok(readFileSync(join(root, "lib/sold-file-upload.ts"), "utf8").includes('const UPLOAD_ROUTE = "/api/store/file";'));
+});
+
 test("the open Blob costs are exactly the ones the audit names, so none is added or forgotten in silence", () => {
   const open = Object.entries(BLOB_SITES).flatMap(([file, ops]) => Object.entries(ops).filter(([, paid]) => "open" in paid).map(([op, paid]) => `${(paid as { open: string }).open.split(":")[0]} ${file} ${op}`));
   console.log(`open Blob costs (${open.length}):\n  ${open.sort().join("\n  ")}`);
   // Rule 23: this list only shrinks, as each audit unit prices its operations; a new entry needs Claude 4's decision.
   // 27 since the merge of main after #3313: the backup files route's Blob listing and signing token (BK1), a company cost not yet
-  // in a cost line.
-  assert.equal(open.length, 27);
+  // in a cost line. 28 since the merge of main 881c65140d: the studio door's token is now priced by studio-blob (one fewer),
+  // and a held link's copy and check in lib/takedown.ts (#3539) are company costs no line prices yet (two more, audit 11).
+  assert.equal(open.length, 28);
 });

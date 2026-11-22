@@ -33,7 +33,7 @@ import { AI_PER_MINUTE, EMAIL_GOALS, type EmailGoal, MAX_AI_NOTES, type ProductK
 import { get } from "@/lib/blob";
 import { imageType, ownsImagePath } from "@/lib/product-image";
 import { imageFolder } from "@/lib/store";
-import { findLesson, readBody, readCourse } from "@/lib/course";
+import { findLesson, readBodyExact, readCourse } from "@/lib/course";
 import { DEFAULT_QUIZ_DRAFT, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 import { funnelType } from "@/lib/funnel-types";
 import { AI_RUN_ID, AI_STEP_PADDING_BYTES, type AiStepId, type AiStepLine, type AiStepState } from "@/lib/ai-steps";
@@ -338,7 +338,10 @@ export async function POST(request: NextRequest) {
     if (!product || !course || !found) return fail("unknown", 404);
     const asked = Number(body.count);
     const count = (QUIZ_DRAFT_COUNTS as readonly number[]).includes(asked) ? asked : DEFAULT_QUIZ_DRAFT;
-    const lessonText = await readBody(course.id, found.lesson.id);
+    // Read exactly (rule 24; Codex P, #4287 item 10): an unknown reply is never a lesson with no text, drafted from the
+    // notes alone on one of the month's AI jobs. 503 before anything is taken or the model is asked.
+    const lessonText = await readBodyExact(course.id, found.lesson.id);
+    if (lessonText === null) return fail("unavailable", 503);
     return answer(writeQuiz(store, { course: product.title, lesson: found.lesson.title, text: lessonText, notes, count }));
   }
   if (body.kind === "feedback") {

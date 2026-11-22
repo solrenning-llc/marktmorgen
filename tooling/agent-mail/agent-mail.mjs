@@ -49,7 +49,20 @@ export const RAMO = process.env.CORREIO_RAMO || "correio";
 /** Depois deste tempo sem leitura, a mensagem aparece como atrasada em `pendentes` e em `ler`. */
 export const ATRASO_MIN = 30;
 
-const git = (args, input) => execFileSync("git", args, { input, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], maxBuffer: 64 << 20 }).trim();
+/** Prazo de cada comando do git (passo 4): um comando que trava não segura a ferramenta; vence e falha com o motivo. */
+export const GIT_PRAZO_MS = 120000;
+export function git(args, input, prazoMs = GIT_PRAZO_MS) {
+  try {
+    return execFileSync("git", args, { input, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], maxBuffer: 64 << 20, timeout: prazoMs, killSignal: "SIGKILL" }).trim();
+  } catch (erro) {
+    if (erro?.code === "ETIMEDOUT" || (erro?.signal === "SIGKILL" && !erro?.status)) {
+      const e = new Error(`git ${args.filter((a) => !String(a).startsWith("-c")).slice(0, 2).join(" ")} passou do limite de tempo (${prazoMs / 1000} s) e foi parado; nada foi feito com o resultado`);
+      e.status = null; e.stderr = e.message;
+      throw e;
+    }
+    throw erro;
+  }
+}
 
 /** O nome de um agente como pasta: "Claude 5 ibqho" -> "claude-5-ibqho"; "todos" é reservado. */
 export function slug(nome) {
@@ -867,7 +880,21 @@ export function pedir({ tipo, de, pr, sha, texto = "", para = "", exclui = "", c
   if (repetido) throw new Error(`já existe pedido de ${tipo} aberto para #${pr} @${repetido.sha}: ${repetido.id}`);
   const carimbo = agora.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
   const id = `${carimbo}-${slug(de)}-${randomBytes(2).toString("hex")}`;
-  const ramo = ramoDoHead(sha, pr);
+  let ramo = ramoDoHead(sha, pr);
+  // Passo 4: o pedido grava o head inteiro (40 caracteres), lido agora de fonte que vale: o ramo do PR, ou um repositório
+  // local. Um head velho não é ponta de ramo nenhum, então o ramo é achado pela referência atual do PR; e, no GitHub, sem
+  // ramo achado, nada é pedido, porque um pedido assim nunca seria entregue e seguraria o primeiro lugar da fila (MÉDIO
+  // do Claude 5 ibuF no #5069).
+  let shaFinal = String(sha);
+  if (process.env.CORREIO_SEM_COMMITS !== "1") {
+    if (!ramo) { const ref = headDoPr(pr, null).sha; if (ref) ramo = ramoDoHead(ref, pr); }
+    const h = headDoPr(pr, ramo);
+    if (!h.sha) throw new Error(`o head atual de #${pr} NÃO FOI CONFERIDO agora; nada foi pedido (passo 4: nada NÃO CONFERIDO segue); tente de novo`);
+    if (h.fonte === "ref") throw new Error(`o ramo de #${pr} não foi achado (só a referência refs/pull/${pr}/head, que pode atrasar, foi lida, e nenhum ramo tem a ponta nela); nada foi pedido; tente de novo em alguns minutos e confira se o ramo do PR existe e é um só`);
+    if (!(h.sha.startsWith(shaFinal) || shaFinal.startsWith(h.sha))) throw new Error(`${shaFinal.slice(0, 10)} não é o head atual de #${pr} (${h.sha.slice(0, 10)}); peça com o head que foi revisado e está no PR`);
+    shaFinal = h.sha;
+  }
+  sha = shaFinal;
   const corpo = [`Tipo: ${tipo === "fila" ? "fila" : "revisão"}`, `PR: ${pr}`, `Head: ${sha}`, `Autor: ${de}`, ...(ramo ? [`Ramo: ${ramo}`] : []), ...(para ? [`Preferência: ${para}`] : []),
     ...(() => {
       // Revisão: as famílias com commits no PR ficam de fora sozinhas, além das que o autor excluiu.
@@ -955,6 +982,19 @@ export function pegar({ tipo, eu, agora = new Date() }) {
   if (tipo === "fila" && diferente && fonte === "ref") {
     return { espera: `head de #${alvo.pr} não conferível agora: o pedido não traz o ramo, e a referência refs/pull/${alvo.pr}/head, que pode atrasar, mostra ${atual.slice(0, 10)} em vez de ${pedidoSha.slice(0, 10)}; o pedido continua primeiro da fila, sem tomada; tente de novo em alguns minutos` };
   }
+  // Passo 4: o que a ferramenta não consegue conferir agora não segue. Sem o head lido de fonte que vale, sem saber se o
+  // PR já está na fila de integração ou no main, ou sem o conflito conferido, o pedido não é entregue: continua primeiro
+  // da fila, sem tomada.
+  const sgFila = tipo === "fila" ? situacaoNoGitHub(alvo.pr, ramoPedido) : null;
+  const cfFila = tipo === "fila" && !(sgFila?.naFila || sgFila?.noMain) ? conflitosDoPr(alvo.pr, ramoPedido) : null;
+  if (tipo === "fila") {
+    const faltas = [];
+    if (!atual) faltas.push("o head atual do PR");
+    else if (fonte === "ref") faltas.push(`o head pelo ramo do PR (o pedido não traz o ramo; só a referência refs/pull/${alvo.pr}/head, que pode atrasar, foi lida; o autor retira este pedido com cancel-enqueue e pede de novo, para gravar o ramo; sem retirar, o pedido novo é recusado como repetido)`);
+    if (!sgFila) faltas.push("se o PR já está na fila de integração ou no main");
+    else if (!(sgFila.naFila || sgFila.noMain) && !cfFila) faltas.push("o conflito com o main e com a fila de integração");
+    if (faltas.length) return { espera: `NÃO CONFERIDO agora: ${faltas.join("; ")}. O pedido continua primeiro da fila, sem tomada (passo 4: nada NÃO CONFERIDO segue); tente de novo em alguns minutos` };
+  }
   const carimbo = agora.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
   const marca = `${carimbo}-${slug(eu)}-${randomBytes(2).toString("hex")}`;
   // O mesmo caminho para quem chega junto: só o primeiro grava; o envio recusa o segundo, que recebe "já tomado".
@@ -977,15 +1017,14 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     const naoConferido = [];
     if (!atual) naoConferido.push("o head atual do PR");
     else if (fonte === "ref") naoConferido.push(`o head atual do PR pelo ramo (o pedido não traz o ramo; só a referência refs/pull/${alvo.pr}/head, que pode atrasar, foi lida)`);
-    const sg = situacaoNoGitHub(alvo.pr, ramoPedido);
-    if (!sg) naoConferido.push("se o PR já está na fila de integração ou no main");
+    const sg = sgFila;
     if (sg?.naFila || sg?.noMain) {
       const onde = sg.noMain ? "já entrou no main" : "já está na fila de integração do GitHub";
-      concluir({ tipo, eu, id: alvo.id, resultado: "enfileirado", agora,
+      concluir({ tipo, eu, id: alvo.id, resultado: "enfileirado", agora, conferir: false,
         texto: `Concluído pela ferramenta ao pegar: #${alvo.pr} ${onde}${alvo.ultimaTomadaPor ? ` (a tomada anterior era de ${alvo.ultimaTomadaPor})` : ""}. Nada foi enfileirado de novo.` });
       return { espera: `#${alvo.pr} ${onde}; concluído como enfileirado, sem enfileirar de novo; rode de novo para o próximo` };
     }
-    const cf = conflitosDoPr(alvo.pr, ramoPedido);
+    const cf = cfFila;
     if (cf?.conflitos.length) {
       const motivo = `Recusado pela ferramenta ao pegar: #${alvo.pr} @${alvo.sha} conflita com ${cf.conflitos.join(", ")} ` +
         `(git merge-tree contra o main e os ${cf.grupos} grupo(s) da fila de integração). Junte o main depois que ` +
@@ -1078,18 +1117,64 @@ export function hashPublicado() {
     try { git(["update-ref", "-d", ref]); } catch { /* não foi criada */ }
   }
 }
+/** Avisa quando a cópia não é a revisada ou não foi conferida; devolve true só quando ela é a revisada, conferida agora. */
 function avisarVersao() {
-  if (process.env.CORREIO_SEM_VERSAO === "1") return;
+  if (process.env.CORREIO_SEM_VERSAO === "1") return true;
   const publicado = hashPublicado();
   if (!publicado) {
     console.error("ATENÇÃO: não consegui ler o SHA-256 da versão revisada (main do Marktmorgen); a versão desta cópia NÃO FOI CONFERIDA.");
-  } else if (publicado !== hashProprio()) {
-    console.error("ATENÇÃO: esta cópia da ferramenta não é a versão revisada do main do Marktmorgen (SHA-256 diferente); reinstale com o comando de CO (b) do AGENTS.md antes de continuar.");
+    return false;
   }
+  if (publicado !== hashProprio()) {
+    console.error("ATENÇÃO: esta cópia da ferramenta não é a versão revisada do main do Marktmorgen (SHA-256 diferente); reinstale com o comando de CO (b) do AGENTS.md antes de continuar.");
+    return false;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Só acrescentar (dono, OWNER-20261121-1904, passo 3). O ramo correio só ganha arquivos: um commit que altera ou apaga um
+// arquivo de dados (ou um ramo reescrito, que o conjunto de regras 27091177 já recusa) é um alarme. Os quatro arquivos da
+// raiz de antes do passo 1 (o LEIA-ME e as cópias antigas da ferramenta) mudavam com cada versão e ficam fora. A vigia
+// confere o que chegou desde a última conferência local, a cada ciclo, e avisa uma vez por alteração; check-append-only
+// confere o histórico inteiro.
+// ---------------------------------------------------------------------------------------------------------------------
+export const RAIZ_HISTORICA = new Set(["LEIA-ME.md", "agent-mail.mjs", "agent-mail.test.mjs", "correio.mjs"]);
+export const REF_VERIFICADO = "refs/agent-mail/append-only-checked";
+
+/** { reescrito, problemas }: o que, desde `desde` (ou desde o começo), alterou ou apagou um arquivo de dados. */
+export function conferirSoAcrescentar(commit, desde = null) {
+  if (!commit) return { reescrito: false, problemas: [] };
+  let reescrito = false;
+  if (desde) { try { git(["merge-base", "--is-ancestor", desde, commit]); } catch { reescrito = true; } }
+  const faixa = desde && !reescrito ? `${desde}..${commit}` : commit;
+  const problemas = [];
+  let atual = "";
+  for (const linha of git(["log", "--format=%x01%H", "--name-status", "--diff-filter=MDT", "--no-renames", "--diff-merges=first-parent", faixa]).split("\n")) {
+    if (linha.startsWith("\x01")) { atual = linha.slice(1); continue; }
+    const m = /^([MDT])\t(.+)$/.exec(linha);
+    if (m && !RAIZ_HISTORICA.has(m[2])) problemas.push(`${atual.slice(0, 10)} ${m[1] === "D" ? "APAGOU" : "ALTEROU"} ${m[2]}`);
+  }
+  return { reescrito, problemas };
+}
+
+/**
+ * Passo 4: a tomada conferida logo antes de enfileirar, presa ao head. Só a sessão que pegou o pedido, com a tomada
+ * ainda valendo, e com o head atual do PR lido agora de fonte que vale e igual ao do pedido. Devolve o head inteiro a
+ * enfileirar; lança erro em qualquer outro caso.
+ */
+export function conferirTomada({ eu, id, agora = new Date() }) {
+  const p = pedidos("fila", agora).find((x) => x.id === id);
+  if (!p) throw new Error(`pedido não encontrado: ${id}`);
+  if (p.estado !== "tomado" || slug(p.tomadoPor) !== slug(eu)) throw new Error(`a tomada de ${id} não é desta sessão agora (${p.estado === "tomado" ? `está com ${p.tomadoPor}` : "ninguém a tem"}); não enfileire; pegue de novo com claim-enqueue`);
+  const { sha, fonte } = headDoPr(p.pr, campoCabecalho(p.texto, "Ramo") || null);
+  if (!sha || fonte === "ref") throw new Error(`o head atual de #${p.pr} NÃO FOI CONFERIDO agora; não enfileire (passo 4: nada NÃO CONFERIDO segue)`);
+  if (!(sha.startsWith(p.sha) || p.sha.startsWith(sha))) throw new Error(`o head de #${p.pr} mudou de ${p.sha.slice(0, 10)} (o do pedido) para ${sha.slice(0, 10)}; não enfileire; conclua como recusado (--result declined) para o autor pedir de novo`);
+  return { p, head: sha };
 }
 
 /** Conclui um pedido tomado: grava o resultado e manda ao autor. */
-export function concluir({ tipo, eu, id, resultado, texto = "", agora = new Date() }) {
+export function concluir({ tipo, eu, id, resultado, texto = "", agora = new Date(), conferir = true }) {
   const p = pedidos(tipo, agora).find((x) => x.id === id);
   if (!p) throw new Error(`pedido não encontrado: ${id}`);
   if (p.estado === "feito") throw new Error(`pedido já concluído: ${id}`);
@@ -1099,7 +1184,9 @@ export function concluir({ tipo, eu, id, resultado, texto = "", agora = new Date
   if (familia(p.ultimaTomadaPor) !== familia(eu)) throw new Error(`o pedido ${id} foi pegado por ${p.ultimaTomadaPor}; só quem pegou conclui`);
   const permitidos = tipo === "fila" ? ["enfileirado", "recusado"] : ["READY", "CHANGES"];
   if (!permitidos.includes(resultado)) throw new Error(`--result deve ser ${permitidos.join(" ou ")}`);
-  const corpo = [`Resultado: ${resultado}`, `PR: ${p.pr}`, `Head: ${p.sha}`, `Por: ${eu}`, `Data (UTC): ${agora.toISOString().slice(0, 16).replace("T", " ")}`, "",
+  // Passo 4: "enfileirado" só com a tomada desta sessão e o head conferido agora; o registro grava o head enfileirado.
+  const enfileirado = tipo === "fila" && resultado === "enfileirado" && conferir ? conferirTomada({ eu, id, agora }).head : null;
+  const corpo = [`Resultado: ${resultado}`, `PR: ${p.pr}`, `Head: ${p.sha}`, ...(enfileirado ? [`Head enfileirado: ${enfileirado}`] : []), `Por: ${eu}`, `Data (UTC): ${agora.toISOString().slice(0, 16).replace("T", " ")}`, "",
     String(texto).trim(), ""].join("\n");
   acrescentar({ [`${tipo}/feitas/${id}.md`]: corpo }, `${tipo} #${p.pr}: ${resultado} (${eu})`);
   enviar({ de: eu, para: p.autor, assunto: `${tipo === "fila" ? "Fila" : "Revisão"} #${p.pr} @${p.sha}: ${resultado}`, texto: corpo, responde: id, agora });
@@ -1285,6 +1372,7 @@ export const COMANDOS = {
   "claim-pr": "reivindicar", "hold-pr": "segurar", "release-pr": "liberar", "pr-status": "estado-pr", help: "ajuda",
   "set-switch": "set-switch", "list-switches": "list-switches", "record-review": "record-review",
   "list-review-records": "list-review-records", "confirm-review-record": "confirm-review-record", "release-take": "release-take",
+  "check-append-only": "check-append-only", "verify-enqueue": "verify-enqueue",
 };
 /** Nomes publicados antes (em português, e a primeira versão em inglês, de 21/11/2026): aceitos com um aviso do nome atual. */
 export const NOMES_ANTIGOS = {
@@ -1333,7 +1421,11 @@ async function main(argv) {
     "pegar-revisao", "pegar-fila", "concluir-revisao", "concluir-fila", "devolver-revisao", "devolver-fila", "retirar-revisao", "retirar-fila",
     "renovar-revisao", "renovar-fila", "set-switch", "record-review", "confirm-review-record", "release-take"]);
   if (ESCREVEM.has(comando)) conferirIdentidade(comando === "cota" && o.por && o.por !== true ? o.por : o.de ?? o.eu);
-  if (comando && comando !== "ajuda") avisarVersao();
+  const versaoOk = comando && comando !== "ajuda" ? avisarVersao() : true;
+  // Passo 3: uma cópia que não é a revisada, ou cuja versão não foi conferida agora, não escreve no correio; ler continua.
+  if (ESCREVEM.has(comando) && !versaoOk) {
+    throw new Error("escrita recusada: esta cópia não é a versão revisada do main do Marktmorgen, conferida agora; reinstale com o comando de CO (b) do AGENTS.md e repita");
+  }
   if (comando === "enviar") {
     const texto = o.arquivo ? readFileSync(o.arquivo === "-" ? 0 : o.arquivo, "utf8") : o.texto;
     const id = enviar({ de: o.de, para: o.para, assunto: o.assunto, texto, responde: o.responde || null });
@@ -1368,11 +1460,30 @@ async function main(argv) {
         }
       } catch (erro) { console.log(`vigia: falha ao ler o correio (${String(erro).slice(0, 200)}); tento de novo`); }
       try { avisarFilaParada(o.eu); } catch {}
+      // Passo 3: o que chegou ao correio desde a última conferência só acrescentou arquivos? Avisa uma vez por alteração.
+      let alarme = "";
+      try {
+        const c = buscar();
+        let antes = null;
+        try { antes = git(["rev-parse", "--verify", "-q", REF_VERIFICADO]); } catch { /* primeira conferência */ }
+        const r = conferirSoAcrescentar(c, antes || null);
+        if (c) git(["update-ref", REF_VERIFICADO, c]);
+        if (r.reescrito || r.problemas.length) alarme = [r.reescrito ? "o ramo foi reescrito (a última conferência não está mais no histórico)" : "", ...r.problemas].filter(Boolean).join("; ");
+      } catch {}
+      if (alarme) { console.log(`ALERTA: o ramo correio não só acrescentou: ${alarme}. Avise o coordenador e o dono pelo correio agora; não apague nem reescreva nada.`); return; }
       if (lista.length) { console.log(`Correio: ${lista.length} mensagem(ns) não lida(s) para ${o.eu}. Leia com: node agent-mail.mjs read --as "${o.eu}"`); return; }
       if (abertos.length) { console.log(`Correio: pedido(s) para você pegar: ${abertos.join(", ")}. Use claim-review ou claim-enqueue.`); return; }
       if (Date.now() + 30000 > fim) { console.log("Correio: nada novo neste ciclo; ligue a vigia de novo."); return; }
       await new Promise((ok) => setTimeout(ok, 30000));
     }
+  } else if (comando === "verify-enqueue") {
+    if (!o.eu) throw new Error("--as é obrigatório");
+    const { p, head } = conferirTomada({ eu: o.eu, id: o._[0] });
+    console.log(`conferido agora: a tomada de ${o._[0]} é sua e o head de #${p.pr} não mudou; enfileire ${head} e conclua com complete-enqueue`);
+  } else if (comando === "check-append-only") {
+    const r = conferirSoAcrescentar(buscar());
+    if (!r.problemas.length) console.log("o ramo correio só acrescentou arquivos de dados em todo o histórico");
+    else { for (const p of r.problemas) console.log(p); process.exitCode = 1; }
   } else if (comando === "cota") {
     if (!o.eu || (!o.sem && !o.com)) throw new Error('use: set-quota --as "Claude N" --exhausted --until 2026-11-22T01:00-03:00   ou   set-quota --as "Claude N" --available');
     declararCota({ eu: o.eu, sem: Boolean(o.sem), ate: o.ate === true ? null : o.ate ?? null, por: o.por === true ? null : o.por ?? null });

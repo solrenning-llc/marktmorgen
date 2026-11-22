@@ -413,7 +413,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // A PayPal receipt tried again (lib/paypal-delivery.ts, lib/email.ts sendEmailPinned): the time of its first try,
   // named by the order and holding only that time, gone within RECEIPT_MARK_SECONDS; the sender kept for its key, the company's, a day.
   "nl:ppsell:receipt:": X(7), "nl:mail:pin:": Cr(1),
-  // A PayPal connect started from the studio (lib/paypal-sales.ts, markOnboarding): one a store, holding "1", gone within a day.
+  // A PayPal connect started from the studio (lib/paypal-sales.ts, markOnboarding, written only while the store is live): one a store, holding "1", gone within a day.
   "nl:ppsell:start:": X(1),
   // A PayPal order's count of capture tries (lib/paypal-sales.ts, watchFirst): a number named by the order, gone
   // within the thirty days from its opening that its record keeps at most.

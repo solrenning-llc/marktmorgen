@@ -60,6 +60,7 @@ import { saleOff, salePrice } from "@/lib/store-sale";
 import { sendEmailPinned } from "@/lib/email";
 import { isPaidUp } from "@/lib/billing";
 import { ERASING_KEY, type Listing, type Store, erasingField, setPastBuyers, storeIdCommand, storeRef } from "@/lib/store";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 
@@ -407,11 +408,18 @@ export function attemptStartedAt(attempt: string): number {
   return m ? Number(m[1]) : 0;
 }
 
-/** Writes a new attempt's mark before the creator is sent to PayPal; throws when the write is not confirmed (rule 24). */
-export async function markOnboarding(statsId: string): Promise<string> {
+/**
+ * Writes a new attempt's mark before PayPal is asked for anything, and only while the store is live (lib/live-fence.ts:
+ * its erasing mark absent, its id key still its own), so a store being erased asks PayPal nothing and never gets its
+ * mark back (Codex L-20261120-0310). The attempt's token, or null when the store is gone or being erased; throws when
+ * the write is not confirmed (rule 24).
+ */
+export async function markOnboarding(store: Pick<Store, "email" | "sid" | "extra" | "statsId">): Promise<string | null> {
+  if (!store.statsId) return null;
   const attempt = `${String(Date.now()).padStart(13, "0")}-${randomBytes(16).toString("hex")}`;
-  const set = repliesFor(await redisPipeline([["SET", onboardingKey(statsId), attempt, "EX", ONBOARDING_SECONDS]]), 1);
-  if (!set || set[0] !== "OK") throw new UnknownReplyError("a PayPal connect's start");
+  const kept = await setWhileStoreLive(store, onboardingKey(store.statsId), attempt, ONBOARDING_SECONDS);
+  if (kept === "gone") return null;
+  if (kept !== "kept") throw new UnknownReplyError("a PayPal connect's start");
   return attempt;
 }
 

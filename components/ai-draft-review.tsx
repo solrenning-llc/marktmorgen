@@ -1,7 +1,7 @@
 "use client";
 
 import { useId } from "react";
-import { AI_DRAFT_BADGE, AI_DRAFT_CHECKS, reviewDone, sensitiveLabel, sensitiveWarning, type DraftTopics } from "@/lib/ai-draft-review";
+import { AI_DRAFT_BADGE, AI_DRAFT_CHECKS, ESTIMATE_BADGE, reviewDone, sensitiveLabel, sensitiveWarning, type DraftTopics } from "@/lib/ai-draft-review";
 
 /**
  * The "AI draft" badge and the three checks drawn under every draft the
@@ -17,6 +17,7 @@ export function AiDraftReview({
   onToggle,
   act = "save",
   topics = [],
+  estimates = [],
 }: {
   checks: readonly boolean[];
   onToggle: (index: number, ticked: boolean) => void;
@@ -26,6 +27,8 @@ export function AiDraftReview({
    * or "unread" for a draft in a language the lists do not read (756 [STN3], unit 2).
    */
   topics?: DraftTopics;
+  /** Numbers in the draft that the creator did not give, each shown as an estimate (756 [STN3], unit 3). */
+  estimates?: readonly string[];
 }) {
   const base = useId();
   const done = reviewDone(checks);
@@ -42,6 +45,19 @@ export function AiDraftReview({
         <p id={warningId} className="mt-1 text-sm text-ink">
           <strong>{sensitiveLabel(topics)}</strong> {warning}
         </p>
+      ) : null}
+      {estimates.length ? (
+        <div className="mt-2 text-sm text-ink">
+          <p>These numbers are not in what you gave. Check each one, or change it to a figure you know.</p>
+          <ul className="mt-1 flex flex-wrap gap-2" aria-label="Numbers to check">
+            {estimates.map((figure) => (
+              <li key={figure} className="inline-flex items-center gap-1">
+                <span className="rounded-full border border-ink px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-ink">{ESTIMATE_BADGE}</span>
+                <span className="font-semibold">{figure}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
       <ul className="mt-1 space-y-1">
         {AI_DRAFT_CHECKS.map((check, index) => (

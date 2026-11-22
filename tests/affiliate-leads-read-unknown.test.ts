@@ -265,7 +265,9 @@ async function main(): Promise<void> {
   await put([[contact, JSON.stringify({ ...lead(5), id: contact, email: buyer })]]);
   is("control: a healthy lead before the checkout credits its affiliate", await contactFor(credited, buyer, NOW), ANA);
   await put([[contact, JSON.stringify({ ...lead(5, { state: "REVERSED" as LeadRecord["state"], d: OLD + DAY, why: "duplicate" }), id: contact, email: buyer })]]);
-  is("a reversal whose state no longer reads never credits the affiliate", await contactFor(credited, buyer, NOW), "");
+  // It never credits the affiliate, and it is not read as "no lead" either (Claude 6 on #4413): it throws, so the sweep
+  // leaves the checkout for the next run instead of settling it with no credit (tests/affiliate-sweep-unknown-read.test.ts).
+  is("a reversal whose state no longer reads never credits the affiliate: it throws, never read as no lead", await thrown(() => contactFor(credited, buyer, NOW)), "UnknownReplyError");
 
   done();
 }

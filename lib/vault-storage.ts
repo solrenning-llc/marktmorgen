@@ -1,5 +1,5 @@
 import { reserveStorage, bindStorage, releaseStorage, retireStorage } from "@/lib/storage-reservations";
-import { storageUsed, type StorageUse } from "@/lib/storage-quota";
+import { storageUsedToday, type StorageUse } from "@/lib/storage-quota";
 import { openVaultUpload, closeVaultUpload, abortVaultUpload, vaultReservationId, retireVaultSession, retireExpiredVaultSession, forgetVaultUploadRecord, headVault } from "@/lib/vault";
 import { readVaultPath, UPLOAD_SECONDS } from "@/lib/vault-rules";
 
@@ -9,7 +9,7 @@ import { readVaultPath, UPLOAD_SECONDS } from "@/lib/vault-rules";
  * is live: a provider that answers after the store's erasure began writes nothing of it back, and the session it made
  * is retired (Codex L-20261120-0141). The route always passes it (app/api/store/vault/route.ts).
  */
-export async function openReservedVault(input: Parameters<typeof openVaultUpload>[0], limit: number, measure: () => Promise<StorageUse> = () => storageUsed(input.folder, limit)) {
+export async function openReservedVault(input: Parameters<typeof openVaultUpload>[0], limit: number, measure: () => Promise<StorageUse> = () => storageUsedToday(input.folder, limit)) {
   const fence = input.fence;
   // Opportunistic cleanup is bounded to one session per admission attempt.
   await retireStorage(input.folder, Date.now() - UPLOAD_SECONDS * 1000,

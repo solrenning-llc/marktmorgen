@@ -3402,6 +3402,19 @@ export async function setDomain(email: string, domain: StoreDomain | null): Prom
   return patchStore(email, () => ({ domain }));
 }
 
+/**
+ * Sets or clears a store's domain only on the same store (its id) and only while the domain it holds now is `before`
+ * (null for none), under the store's lock; null when that is not so, or the store is gone. connectDomain writes a
+ * domain this way as pending before it asks the provider, so a delete of the store is refused for it during the whole
+ * request, and clears it only while it is still that pending domain (Codex L-20261120-0152).
+ */
+export async function replaceDomainIf(email: string, sid: string, before: string | null, domain: StoreDomain | null): Promise<Store | null> {
+  return withStore(email, async (store, save) => {
+    if (store.sid !== sid || (store.domain?.name ?? null) !== before) return null;
+    return save({ ...store, domain });
+  });
+}
+
 /** Gives a store its list, the first time something needs one. */
 export async function ensureListId(email: string): Promise<Store | null> {
   const store = await storeForEmail(email);

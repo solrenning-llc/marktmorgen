@@ -318,12 +318,23 @@ export type ConnectResult =
   | { ok: false; reason: "shape" | "taken" | "elsewhere" | "has_one" | "unavailable" | "plan" };
 
 /**
- * Adds a domain to a store: claims it here first, so two stores cannot both
- * have it, then asks Vercel to serve it. A claim Vercel refuses is let go.
- * Another store's claim not proved yet does not keep this store out: the
- * store that adds its TXT record proves it (#4108).
+ * How connectDomain writes the domain into the store before the provider is asked, and takes it off again if the
+ * provider refuses (app/api/store/domain/route.ts passes lib/store.ts replaceDomainIf): each answers true only once
+ * the store's write is confirmed (Codex L-20261120-0152).
  */
-export async function connectDomain(store: Store, raw: string): Promise<ConnectResult> {
+export type PendingDomain = {
+  keep(name: string): Promise<boolean>;
+  clear(name: string): Promise<boolean>;
+};
+
+/**
+ * Adds a domain to a store: claims it here first, so two stores cannot both
+ * have it, writes it into the store as pending (`pending.keep`), then asks
+ * Vercel to serve it. A claim Vercel refuses is let go once the store no
+ * longer holds it. Another store's claim not proved yet does not keep this
+ * store out: the store that adds its TXT record proves it (#4108).
+ */
+export async function connectDomain(store: Store, raw: string, pending: PendingDomain): Promise<ConnectResult> {
   if (!canUseDomain(store)) return { ok: false, reason: "plan" };
   if (!isDomainsConfigured()) return { ok: false, reason: "unavailable" };
   if (store.domain) return { ok: false, reason: "has_one" };
@@ -352,6 +363,15 @@ export async function connectDomain(store: Store, raw: string): Promise<ConnectR
     if (!ownValue && !othersUnproved) return { ok: false, reason: "taken" };
   }
 
+  // Written into the store before the provider is asked (Codex L-20261120-0152): a delete of the store is refused while
+  // it holds a domain (lib/store.ts deleteStore), so it can no longer win while this request waits and leave the domain
+  // on the provider with no record to take it off. Not confirmed written: the provider is asked nothing.
+  if (!(await pending.keep(name).catch(() => false))) {
+    await releaseMark(domainKey(name), claim);
+    cache.delete(name);
+    return { ok: false, reason: "unavailable" };
+  }
+
   const added = await vercel("POST", `/v10/projects/${vercelProject()}/domains`, { name });
   // Already on this project (a second press, or added by hand) is fine;
   // on somebody else's is not.
@@ -359,8 +379,9 @@ export async function connectDomain(store: Store, raw: string): Promise<ConnectR
     added.status === 409 && (await vercel("GET", `/v9/projects/${vercelProject()}/domains/${name}`)).status === 200;
   if (added.status !== 200 && !alreadyHere) {
     // Only this store's own claim is let go of, never a key another store holds by now (an unproved claim this
-    // store connected beside included); one that cannot be let go lapses on its own.
-    await releaseMark(domainKey(name), claim);
+    // store connected beside included); one that cannot be let go lapses on its own. It is let go only once the
+    // pending domain is confirmed off the store; otherwise both stay, and the studio's Remove finishes it.
+    if (await pending.clear(name).catch(() => false)) await releaseMark(domainKey(name), claim);
     cache.delete(name);
     if (added.status === 409) return { ok: false, reason: "elsewhere" };
     if (added.status === 400) return { ok: false, reason: "shape" };

@@ -24,6 +24,8 @@ import { NextRequest } from "next/server";
 import { claimHandle, ensureStoreId, releaseHandle, renameHandle, setDomain, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { connectDomain, domainKey, pointDomain } from "@/lib/domains";
+/** These checks are about the claim: the store's pending-domain write (Codex L-20261120-0152) always confirms here. */
+const PENDING_OK = { keep: async () => true, clear: async () => true };
 import { POST as renameRoute } from "@/app/api/store/rename/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -67,7 +69,7 @@ async function setUp(): Promise<string> {
 }
 const mine = async (): Promise<Store> => (await storeForEmail(owner))!;
 /** What a connection came to: its answer, or "try again" when it said it could not tell (it threw). */
-const connect = async () => connectDomain(await mine(), NAME).catch(() => "try again" as const);
+const connect = async () => connectDomain(await mine(), NAME, PENDING_OK).catch(() => "try again" as const);
 const posts = () => vercelCalls.filter((c) => c.startsWith("POST")).length;
 /** What pointing the domain at the new address came to, or "threw". */
 const point = async () => pointDomain(NAME, ["mystore"], "newstore").catch(() => "threw" as const);

@@ -1,6 +1,6 @@
 import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
-import { setDomain, storeForEmail } from "@/lib/store";
+import { replaceDomainIf, setDomain, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import {
   canUseDomain,
@@ -54,10 +54,14 @@ export async function POST(request: NextRequest) {
     if (!isDomainsConfigured()) return fail("unavailable", 503);
 
     if (action === "connect") {
-      const result = await connectDomain(store, text(body.name, 300));
+      // The domain is written into this very store (its id, no domain before) before Vercel is asked, so a delete of
+      // the store cannot win during the request (Codex L-20261120-0152); it is already saved once this answers ok.
+      const addedAt = new Date().toISOString();
+      const result = await connectDomain(store, text(body.name, 300), {
+        keep: async (name) => (await replaceDomainIf(ref, store.sid, null, { name, addedAt, liveAt: "" })) !== null,
+        clear: async (name) => (await replaceDomainIf(ref, store.sid, name, null)) !== null,
+      });
       if (!result.ok) return fail(result.reason);
-      const now = new Date().toISOString();
-      await setDomain(ref, { name: result.name, addedAt: now, liveAt: "" });
       // A domain decides where buyers land; the creator hears of every one.
       after(() => noticeCreator(store, { kind: "domain-added", name: result.name }));
       const status = await domainStatus(result.name, store);

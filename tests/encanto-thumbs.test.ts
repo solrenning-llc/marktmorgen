@@ -19,7 +19,6 @@ import { readFileSync } from "node:fs";
 import { MAX_THUMB_BYTES, THUMB_LONG_SIDE, SMALL_LONG_SIDE, imagePaths, imageSrcSet, parseProductImage } from "@/lib/product-image";
 import { servedSrcSet } from "@/lib/picture-served";
 import { COST_LINES } from "./plan-cost-registry";
-import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { done, is, part } from "./check";
 
 const folder = "images/aaaaaaaaaaaaaaaaaaaaaaaa";
@@ -56,41 +55,22 @@ const route = readFileSync("app/api/store/image/route.ts", "utf8");
 is("the route takes it from the picture door with the others", /takePictureDoor\(\[path, \.\.\.\(smallOwned \? \[smallPath\] : \[\]\), \.\.\.\(thumbOwned \? \[thumbPath\] : \[\]\)\]\)/.test(route), true);
 is("and checks its size, type and width as the smaller copy's", /copy\.size <= MAX_THUMB_BYTES/.test(route) && /thumbWidth < \(small \? small\.width : width\)/.test(route), true);
 
-part("Its cost, at the plan's studio ceiling, from the official price");
-const line = COST_LINES.find((each) => each.id === "picture-thumbnails");
-const uploads = COST_LINES.find((each) => each.id === "picture-uploads");
-is("a line for the thumbnail copy's Blob operations", Boolean(line), true);
-// Its own upload request is the pictures' upload route, the same request as the picture's and the smaller copy's, so
-// the line picture-uploads, which prices every studio request at the dearest upload request plus the attaching one,
-// already counts it (Claude 5, #2801 over #2803's eacb4edaa: the first year given back passed the owner's US$ 66).
-is("the thumbnail is sent through the pictures' own upload route, as the other copies are", (editor.match(/handleUploadUrl: "\/api\/store\/image\/upload"/g) ?? []).length >= 3 && /shrink\(file, THUMB_LONG_SIDE, MAX_THUMB_BYTES\);\s*const thumbPath = [^;]+;\s*await uploadPresigned\(thumbPath, copy\.blob, \{\s*access: "private",\s*handleUploadUrl: "\/api\/store\/image\/upload"/.test(editor), true);
-for (const tier of ["creator", "pro", "scale"] as const) {
-  // An upload request at its dearest: its put and its signed token, each with every try again the SDK may send
-  // (1 + 10), at the dearer Advanced Operation, and the head that checks its name is free, tried as often.
-  const uploadRequest = 11 * (5 / 1e6) + 11 * (5 / 1e6) + 11 * (0.4 / 1e6);
-  is(`${tier}: picture-uploads prices every studio request at no less than the dearest upload request, the thumbnail's included`, (uploads?.monthlyUsd(tier) ?? 0) >= STORE_ALLOWANCES[tier].studio * uploadRequest, true);
-  // Rule 23 (#2801 over #2803's eacb4edaa, the first year given back at US$ 66.12 over the owner's US$ 66): the line was
-  // the thumbnail's whole upload request (put, signed token and the head of its name, 11 tries each, already priced by
-  // picture-uploads) plus what it adds when attached; it is now only what it adds to the attaching request: its head,
-  // tried as often (Revisor 1 on #2803, rule 30), its one read, a plain fetch, once (Codex S on #2801), Fast Origin
-  // Transfer on its bytes and one CDN request, as PICTURE_READ does (Claude 1 on #2801, 6708233552, finding 1).
-  const perRequest = 11 * (0.4 / 1e6) + 0.4 / 1e6 + 40_000 * (0.1 / 1e9 + 0.06 / 1e9) + 2 / 1e6;
-  is(`${tier}: the plan's studio figure, each attaching request with the thumbnail's head and read at its dearest`, Math.abs((line?.monthlyUsd(tier) ?? 0) - STORE_ALLOWANCES[tier].studio * perRequest) < 1e-9, true);
-}
+part("Its cost, in the studio's one Blob line, from the official price");
+// Rule 23 (MR audit gap 1, C4-20261106-2790-C56-167): the thumbnail's own line multiplied the whole studio figure
+// again; its door and its check are now kinds of studio request in the single studio-blob line
+// (tests/picture-upload-costs.test.ts checks its formula), which counts every check, the thumbnail's too, at the dearer
+// MAX_IMAGE_BYTES.
+const line = COST_LINES.find((each) => each.id === "studio-blob");
+is("the studio's Blob line counts the thumbnail copy", Boolean(line) && (line?.sources ?? []).some((source) => source.names.includes("MAX_THUMB_BYTES")), true);
+is("and the thumbnail's own line is gone", COST_LINES.some((each) => each.id === "picture-thumbnails"), false);
 // Rule 23 (#2801, CodeQL "Missing regular expression anchor"): the source was an unanchored pattern, which a longer
 // address holding it would also pass; it is now a whole word of the basis, the page's exact address, and the date as text.
 is("its source and date are said", (line?.basis ?? "").split(/[\s,]+/).includes("vercel.com/docs/vercel-blob/usage-and-pricing") && (line?.basis ?? "").includes("read on 6 November 2026"), true);
-// Rule 23 (#2801 over #2803's eacb4edaa): the signing request is now counted once, by picture-uploads, which prices the
-// thumbnail's upload request with the others; the thumbnail's line names that line's route and the attaching request's.
-is("the signing request is named among the sources of the line that counts it", uploads?.sources.some((each) => each.file === "app/api/store/image/upload/route.ts" && each.names.includes("issueSignedToken")) ?? false, true);
-is("the thumbnail's line names the attaching request it adds to", line?.sources.some((each) => each.file === "app/api/store/image/route.ts" && each.names.includes("head(thumbPath)") && each.names.includes("firstBytes(thumbPath)")) ?? false, true);
-// One typed CDN price only: the line reads the visit model's CDN_PER_REQUEST (tests/traffic-cost.ts), so a later move
-// of that price to the dearest region moves this line with it (Claude 4 on #2801, 6711058322, finding 2).
+is("the signing request is named among its sources", line?.sources.some((each) => each.file === "app/api/store/image/upload/route.ts" && each.names.includes("issueSignedToken")) ?? false, true);
+// One typed CDN price only (Claude 4 on #2801, 6711058322, finding 2): the registry types no CDN request price of its
+// own; the studio-blob line's reads take traffic-cost's CDN_PER_REQUEST (tests/picture-upload-costs.test.ts).
 const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
-const thumbStart = registry.indexOf('id: "picture-thumbnails"');
-const thumbLine = registry.slice(thumbStart, registry.indexOf("\n  },", thumbStart));
 is("the registry types no second CDN request price", /export const CDN_REQUEST\b/.test(registry), false);
-is("the thumbnail line costs its CDN request at traffic-cost's CDN_PER_REQUEST", thumbStart > 0 && /import \{[^}]*\bCDN_PER_REQUEST\b[^}]*\} from "\.\/traffic-cost"/.test(registry) && /\bCDN_PER_REQUEST\b/.test(thumbLine), true);
 
 part("Its size is checked before its bytes are read, so the read is at most MAX_THUMB_BYTES (Claude 1 on #2801, finding 2)");
 // The upload token for any picture name allows MAX_IMAGE_BYTES, so a file sent under the thumbnail's name may be far

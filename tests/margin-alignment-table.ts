@@ -19,11 +19,12 @@ import { MAX_AUTO_LANGUAGES, MAX_AUTO_MINUTES, autoCaptionCents } from "@/lib/au
 /**
  * The tax on a unit's profit under TX (AGENTS.md, rule LC; owner, 19 November 2026: "a interpretação e aplicação de
  * impostos será de agora em diante sempre a que voce(claude) considerar o que for o mais correto juridicamente"):
- * IRPF 15% on the LLC's yearly profit, due at 31 December even when nothing is distributed (Lei 14.754/2023, art. 5;
- * IN RFB 1.037/2010, art. 2, VII), plus IOF 0.38% on the whole profit entering Brazil (Decreto 6.306/2007, arts. 14
- * and 15-B, XXV), the worst case being every dollar of profit sent home before the IRPF is paid. No ISS (LC 116/2003,
- * arts. 2, I, 3 and 4), no PIS/Cofins/IRPJ/CSLL (no Brazilian legal person) and no US federal income tax (no US trade
- * or business, 26 U.S.C. 864). The buyer's tax is added on top of the price and only raises the fees charged on it.
+ * IRPF 15% on the LLC's yearly profit, due at 31 December even when nothing is distributed (Lei 14.754/2023, art. 2,
+ * §1, the 15%, and art. 5, caput and §10, III, the 31 December; IN RFB 1.037/2010, art. 2, VII), plus IOF 0.38% on
+ * the whole profit entering Brazil (Decreto 6.306/2007, arts. 14 and 15-B, XXV), the worst case being every dollar of
+ * profit sent home before the IRPF is paid. No ISS (LC 116/2003, arts. 2, I, 3 and 4), no PIS/Cofins/IRPJ/CSLL (no
+ * Brazilian legal person) and no US federal income tax (no US trade or business, 26 U.S.C. 864). The buyer's tax is
+ * added on top of the price and only raises the fees charged on it.
  * The same 15.38% as tests/worst-month-kept.ts.
  */
 export const CURRENT_PROFIT_TAX_BPS = MOST_CORRECT_READING.profitTaxBps + MOST_CORRECT_READING.incomingExchangeIofBps;
@@ -177,7 +178,7 @@ export function renderMarginAlignment(plansOnSale: boolean, assistantOnSale: boo
   out.push("");
   out.push("These are registered-model calculations, not certified actual costs or an approved commercial review. Unknown supplier coverage, retention, tax treatment, fixed cost or exposure fails approval; it is never entered as zero. Current prices and visible allowances are unchanged. No new price is proposed.");
   out.push("");
-  out.push(`Tax reading: ${reading.id} (TX, the legally correct reading; rule LC). On the profit: IRPF ${reading.profitTaxBps / 100}% (Lei 14.754/2023, art. 5; IN RFB 1.037/2010, art. 2, VII) and IOF ${reading.incomingExchangeIofBps / 100}% on the whole profit sent home (Decreto 6.306/2007, arts. 14 and 15-B, XXV), ${CURRENT_PROFIT_TAX_BPS / 100}% together. Revenue tax ${reading.revenueTaxBps / 100}% (no ISS: LC 116/2003, arts. 2, I, 3 and 4); no US federal income tax; no 27.5% floor and no most-tax reading. The buyer's tax is added on top of the price, up to ${reading.salesTaxOnTopBps / 100}%, and is counted only where it raises the fees and the dispute reserve charged on the whole amount.`);
+  out.push(`Tax reading: ${reading.id} (TX, the legally correct reading; rule LC). On the profit: IRPF ${reading.profitTaxBps / 100}% (Lei 14.754/2023, arts. 2, §1 (15%) and 5, caput and §10, III (31 December); IN RFB 1.037/2010, art. 2, VII) and IOF ${reading.incomingExchangeIofBps / 100}% on the whole profit sent home (Decreto 6.306/2007, arts. 14 and 15-B, XXV), ${CURRENT_PROFIT_TAX_BPS / 100}% together. Revenue tax ${reading.revenueTaxBps / 100}% (no ISS: LC 116/2003, arts. 2, I, 3 and 4); no US federal income tax; no 27.5% floor and no most-tax reading. The buyer's tax is added on top of the price, up to ${reading.salesTaxOnTopBps / 100}%, and is counted only where it raises the fees and the dispute reserve charged on the whole amount.`);
   out.push("The receiving model remains lib/receiving-costs.ts: dearer provider per charge, remittance allowance, full refund/dispute reserves. No free supplier quota is treated as free usage. Annual usage includes12full monthly windows and retained post-plan records.");
   out.push("");
   out.push("## Each current unit at full registered use");

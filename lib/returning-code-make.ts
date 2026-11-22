@@ -77,7 +77,7 @@ export async function makeReturningCode(email: string, store: Store, asked: Code
   if (!id) return { ok: false, reason: "stripe" };
   const entry: ReturningCode = { code: asked.code, coupon: id, off: asked.off, endsAt: null, createdAt: Math.floor(now / 1000) };
   const kept = await addReturningCode(email, entry);
-  if (kept === "ok") return { ok: true, code: entry };
+  if (kept === "ok") return keptAlone(email, account, entry);
   // The answer is not "kept", but a write whose answer was lost may have landed (rule 24): the store is read again,
   // and the coupon is deleted only when the store surely does not point at it.
   let again: Store | null = null;
@@ -87,7 +87,7 @@ export async function makeReturningCode(email: string, store: Store, asked: Code
     again = null;
   }
   const saved = again?.returningCodes.find((c) => c.code === entry.code && c.coupon === id);
-  if (saved) return { ok: true, code: saved };
+  if (saved) return keptAlone(email, account, saved);
   if (!again || kept === "unknown") {
     // Unknown either way: the coupon stays. A write that failed without an answer may still land later (its reply and
     // its lock's release both lost), so finding nothing on the read again does not prove it never will (Codex N1 LOW on
@@ -99,6 +99,32 @@ export async function makeReturningCode(email: string, store: Store, asked: Code
   // nothing points at it. Deleted so it does not linger.
   await onAccount("DELETE", account, `/coupons/${encodeURIComponent(id)}`, undefined, CODES_API_VERSION).catch(() => null);
   return { ok: false, reason: kept };
+}
+
+/**
+ * Kept first, then Stripe asked again (Codex N1 LOW on #3691): a normal code made with the same word at the same time
+ * checks the store only after it is made (returningWordIn), so one side or the other always sees the other, never
+ * neither, and the code that sees the other gives way. Here that is this code: taken off the store, its coupon
+ * deleted. A list that cannot be read is not "no such code", so it gives way then too.
+ */
+async function keptAlone(email: string, account: string, entry: ReturningCode): Promise<MadeReturning> {
+  const live = await livePromotionWord(account, entry.code);
+  if (live === false) return { ok: true, code: entry };
+  if (await removeReturningCode(email, entry.code)) {
+    await onAccount("DELETE", account, `/coupons/${encodeURIComponent(entry.coupon)}`, undefined, CODES_API_VERSION).catch(() => null);
+  } else {
+    console.error("a returning-buyer code made beside a normal code with the same word could not be taken off", entry.code);
+  }
+  return { ok: false, reason: live ? "taken" : "stripe" };
+}
+
+/**
+ * The other half (Codex N1 LOW on #3691): whether the store, read after a normal code was made, has a code for
+ * returning buyers with that word. `after` is the read setHasDiscounts makes anyway, so this asks nothing more.
+ * Null when the store could not be read: unknown is never "free".
+ */
+export function returningWordIn(after: Store | null, word: string): boolean | null {
+  return after ? after.returningCodes.some((entry) => entry.code === word) : null;
 }
 
 /** Takes the code off the store (which stops it), then deletes its coupon. True once the store no longer has it. */

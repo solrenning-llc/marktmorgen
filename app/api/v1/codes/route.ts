@@ -5,6 +5,7 @@ import { CODE_FIELDS, codeOut, refusalWords } from "@/lib/api-codes";
 import { createCode, findCode, listCodes, stopCode } from "@/lib/discount";
 import { readCodeAsked } from "@/lib/discount-input";
 import { dropSchedule } from "@/lib/discount-schedule";
+import { returningWordIn } from "@/lib/returning-code-make";
 import { setHasDiscounts, storeRef, type Store } from "@/lib/store";
 import { canSell } from "@/lib/store-checkout";
 
@@ -60,7 +61,17 @@ export async function POST(request: Request) {
         ? apiError(409, "taken", "Your Stripe account already has a code with these letters. Choose another.")
         : apiError(502, "unavailable", "The code could not be made on Stripe just now. Try again in a moment.");
     }
-    await setHasDiscounts(storeRef(store), true);
+    // Made first, then checked against the store read after it (Codex N1 LOW on #3691): a code for returning buyers
+    // kept with this word meanwhile wins, and this one is switched off. That one more call to Stripe is taken first;
+    // unknown is never "free".
+    const clash = returningWordIn(await setHasDiscounts(storeRef(store), true), code);
+    if (clash !== false) {
+      const noRoom = await takeMoreApi(store, apiReadUnits({ commands: 0, bytes: 0, sent: 0, stripePages: 1, roundTrips: 0 }));
+      if (noRoom || !(await stopCode(store.stripeAccountId as string, made.code.id))) console.error("api: a code made beside a returning-buyer code with the same word could not be switched off", made.code.id);
+      return clash
+        ? apiError(409, "taken", "Your store already has a code for returning buyers with these letters. Choose another.")
+        : apiError(502, "unavailable", "The code could not be made on Stripe just now. Try again in a moment.");
+    }
     return apiOk({ data: codeOut(made.code) });
   } catch (error) {
     console.error("api: making a code failed", error);

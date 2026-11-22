@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { setHasDiscounts, storeForEmail } from "@/lib/store";
 import { canSell } from "@/lib/store-checkout";
 import { createCode, listCodes, readCode, stopCode } from "@/lib/discount";
-import { makeReturningCode, stopReturningCode } from "@/lib/returning-code-make";
+import { makeReturningCode, returningWordIn, stopReturningCode } from "@/lib/returning-code-make";
 import { readCodeAsked } from "@/lib/discount-input";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { countStudio } from "@/lib/studio-route";
@@ -66,7 +66,13 @@ export async function POST(request: NextRequest) {
           { status: made.reason === "taken" ? 409 : 502 },
         );
       }
-      await setHasDiscounts(ref, true);
+      // Made first, then checked against the store read after it (Codex N1 LOW on #3691): a code for returning buyers
+      // kept with this word meanwhile wins, and this one is switched off on Stripe. Unknown is never "free".
+      const clash = returningWordIn(await setHasDiscounts(ref, true), code);
+      if (clash !== false) {
+        if (!(await stopCode(account, made.code.id))) console.error("a code made beside a returning-buyer code with the same word could not be switched off", made.code.id);
+        return Response.json({ ok: false, error: clash ? "taken" : "server_error" }, { status: clash ? 409 : 503 });
+      }
     } else if (action === "schedule") {
       // A code with a start and an end set ahead (511 [CK3], lib/discount-schedule.ts).
       const read = readCodeAsked(body, store.currency);

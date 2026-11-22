@@ -602,9 +602,16 @@ export async function chooseAccount(statsId: string, id: unknown): Promise<boole
   return true;
 }
 
-async function giveBack(statsId: string, c: Connection): Promise<void> {
+/**
+ * Gives Meta's permission back (DELETE /me/permissions). True only when Meta answered with its own success; a token
+ * that cannot be opened, a call that fails or an answer without `success: true` is false, so the caller never says
+ * the permission went back when it did not (Claude 4 2Wb's note on #4159, VR item 2).
+ */
+async function giveBack(statsId: string, c: Connection): Promise<boolean> {
   const open = unseal(c.token, context(statsId));
-  if (open.ok) await call("DELETE", "/me/permissions", {}, open.value);
+  if (!open.ok) return false;
+  const answer = await call("DELETE", "/me/permissions", {}, open.value);
+  return answer.success === true;
 }
 
 /**
@@ -649,10 +656,11 @@ type GrantUse = "used" | "unknown" | "free";
 
 /**
  * What disconnecting did: the account that was read, and whether Meta's permission was given back
- * ("removed"), kept because another store still uses that Meta login ("kept"), or kept because whether one does
- * could not be confirmed ("unconfirmed": the index or a connection did not read).
+ * ("removed"), kept because another store still uses that Meta login ("kept"), kept because whether one does
+ * could not be confirmed ("unconfirmed": the index or a connection did not read), or not given back because Meta did
+ * not confirm it ("failed": the call failed, Meta answered without its success, or the token could not be opened).
  */
-export type MetaDisconnected = { account: MetaAccount | null; metaAccess: "removed" | "kept" | "unconfirmed" };
+export type MetaDisconnected = { account: MetaAccount | null; metaAccess: "removed" | "kept" | "unconfirmed" | "failed" };
 
 /**
  * Disconnects: forgets the connection and every line read, then gives the permission back to Meta,
@@ -674,8 +682,11 @@ export async function disconnectMeta(statsId: string): Promise<MetaDisconnected 
   const use = await grantStillUsed(c.user);
   if (use === "used") return { account, metaAccess: "kept" };
   if (use === "unknown") return { account, metaAccess: "unconfirmed" };
-  await giveBack(statsId, c).catch((error) => console.error("giving the Meta permission back failed", error));
-  return { account, metaAccess: "removed" };
+  const given = await giveBack(statsId, c).catch((error) => {
+    console.error("giving the Meta permission back failed", error);
+    return false;
+  });
+  return { account, metaAccess: given ? "removed" : "failed" };
 }
 
 /** Forgets one store's connection and what was read from it; answers the deletion's own replies. */

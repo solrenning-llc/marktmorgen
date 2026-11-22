@@ -14,12 +14,17 @@ import { join } from "node:path";
 import { test } from "node:test";
 import * as adSpend from "@/lib/ad-spend";
 import { disconnectMeta } from "@/lib/meta-ads";
+import { seal } from "@/lib/secret-box";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 
 process.env.META_APP_ID = "123456789012345";
 process.env.META_APP_SECRET = "meta-app-secret-for-tests-0123456789";
-globalThis.fetch = (async () => new Response("{}", { status: 200 })) as typeof fetch;
+process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
+// Meta answers a healthy give-back (DELETE /me/permissions) with its own success; since the note of Claude 4 2Wb on
+// #4159, anything else is "failed", never "removed" (tests/meta-ads-giveback-failed.test.ts).
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+  new Response(init?.method === "DELETE" && new URL(String(input)).pathname.endsWith("/me/permissions") ? '{"success":true}' : "{}", { status: 200 })) as typeof fetch;
 
 const { addSpend, readSpendLines } = adSpend;
 const spendsForReport = (adSpend as Record<string, unknown>).spendsForReport as ((statsId: string | null) => Promise<{ cents: number }[]>) | undefined;
@@ -40,7 +45,7 @@ async function fresh(): Promise<string> {
   await ensureStatsId(OWNER);
   const store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
-  redis.run(["SET", connKey(statsId), JSON.stringify({ user: "10150000000000077", token: "sealed", accounts: [{ id: "act_111", name: "Harbor Ads", currency: "usd" }], account: "act_111", sid: store.sid, owner: { email: OWNER, handle: store.handle } })]);
+  redis.run(["SET", connKey(statsId), JSON.stringify({ user: "10150000000000077", token: seal("EAAlong-10150000000000077", `metaads|${statsId}|token`), accounts: [{ id: "act_111", name: "Harbor Ads", currency: "usd" }], account: "act_111", sid: store.sid, owner: { email: OWNER, handle: store.handle } })]);
   redis.run(["SET", linesKey(statsId), JSON.stringify([META_LINE])]);
   return statsId;
 }

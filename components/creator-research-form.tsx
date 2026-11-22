@@ -33,6 +33,7 @@ const FIELD_MESSAGES: Record<string, string> = {
 /** Answers the server gives without a field: the list is full, today's answers are all in, the account has answered, or the answer is too long. */
 const ERROR_MESSAGES: Record<string, string> = {
   busy: `This survey has taken all the answers it can take today, so yours was not saved. Please send it again tomorrow, or email your answers to ${SUPPORT_EMAIL}.`,
+  forgetting: "You asked us to delete your earlier answers, and that is still being done. Please wait an hour before answering again.",
   full: `This survey has no room for more answers right now, so yours was not saved. You can email your answers to ${SUPPORT_EMAIL}.`,
   already: `You have already answered this survey from your account, so this answer was not saved. To change it, email ${SUPPORT_EMAIL}.`,
   too_large: "Your answers are too long to save. Please shorten them and send them again.",

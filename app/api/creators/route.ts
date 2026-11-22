@@ -12,7 +12,7 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { visitorAddress } from "@/lib/traffic-rules";
 
-import { RESPONSES_KEY } from "@/lib/creator-research-store";
+import { RESPONSES_KEY, forgetMarkKey } from "@/lib/creator-research-store";
 import { KEEP_RESEARCH_ANSWER, RESEARCH_ANSWERS_PER_DAY, RESEARCH_ANSWER_MAX_BYTES, RESEARCH_DAY_SHARE, RESEARCH_MAX_ANSWERS, RESEARCH_RESERVED, RESEARCH_WARN_AT, answerBytes, researchAccountMark } from "@/lib/creator-research-room";
 import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 const RATE_LIMIT = 5;
@@ -171,7 +171,12 @@ export async function POST(request: NextRequest) {
     // taken, told to the owner once, on the first answer past it.
     // The day's cap (at most RESEARCH_ANSWERS_PER_DAY) is the script's, for anonymous answers only: a reserved place is
     // never refused because a flood took the day.
-    const kept = repliesFor(await redisPipeline([["EVAL", KEEP_RESEARCH_ANSWER, 1, RESPONSES_KEY, RESEARCH_MAX_ANSWERS, row, today, RESEARCH_DAY_SHARE, RESEARCH_ANSWERS_PER_DAY, RESEARCH_RESERVED, mark, plain]]), 1);
+    // The person's deletion marks are read in the same step (lib/creator-research-store.ts forgetMarkKey): the typed
+    // address's, and the signed-in account's, whose reserved answers are theirs too (Codex L-20261120-0837).
+    const kept = repliesFor(await redisPipeline([["EVAL", KEEP_RESEARCH_ANSWER, 3, RESPONSES_KEY, forgetMarkKey(email), forgetMarkKey(account ?? email), RESEARCH_MAX_ANSWERS, row, today, RESEARCH_DAY_SHARE, RESEARCH_ANSWERS_PER_DAY, RESEARCH_RESERVED, mark, plain]]), 1);
+    // The address or the account asked for its answers to be deleted, and that deletion is still under way (or lapsed
+    // within the hour): nothing kept, and the page says so (Codex L-20261120-0837).
+    if (kept && (kept[0] === -1 || kept[0] === "-1")) return fail(409, "forgetting");
     if (kept && kept[0] === "already") return fail(409, "already");
     const share = kept && typeof kept[0] === "string" ? /^busy:(\d+)$/.exec(kept[0]) : null;
     if (share) {

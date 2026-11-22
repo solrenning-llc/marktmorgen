@@ -95,7 +95,7 @@ async function main() {
   part("A reply to the keeping step that is not exact is never a saved answer (rule 24)");
   {
     const keeping = (commands: (string | number)[][]) => commands.length === 1 && commands[0][0] === "EVAL";
-    for (const [label, reply] of [["a length as text", "3"], ["no reply", undefined], ["a length past the ceiling", MAX_ANSWERS + 1], ["a negative length", -1]] as const) {
+    for (const [label, reply] of [["a length as text", "3"], ["no reply", undefined], ["a length past the ceiling", MAX_ANSWERS + 1], ["a negative length", -2]] as const) {
       await fill(3);
       store.pipeline = async (commands) => (keeping(commands) ? [reply] : pipeline(commands));
       quiet(true);

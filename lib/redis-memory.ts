@@ -1702,9 +1702,11 @@ export class MemoryRedis {
           this.run(["EXPIRE", ledger, seconds]); return 1;
         }
 
-        // lib/creator-research-room.ts KEEP_RESEARCH_ANSWER: the answer kept only while the list is under its ceiling, in one step.
-        if (key.startsWith("-- marktmorgen:research-answer-keep:v3\n") && args[0] === "1" && args.length === 10) {
-          const [, list, max, row, today, share, perDay, reserve, account, plain] = args;
+        // lib/creator-research-room.ts KEEP_RESEARCH_ANSWER: the answer kept only while neither deletion mark stands (-1)
+        // and the list is under its ceiling, in one step.
+        if (key.startsWith("-- marktmorgen:research-answer-keep:v4\n") && args[0] === "3" && args.length === 12) {
+          const [, list, addressMark, accountMark, max, row, today, share, perDay, reserve, account, plain] = args;
+          if (this.run(["EXISTS", addressMark]) === 1 || this.run(["EXISTS", accountMark]) === 1) return -1;
           const length = this.run(["LLEN", list]) as number;
           if (length >= Number(max)) return 0;
           let reserved = 0;

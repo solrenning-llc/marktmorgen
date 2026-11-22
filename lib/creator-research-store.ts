@@ -7,11 +7,22 @@
  * your data are kept by forgetResearchPerson and researchCopyPerson, which
  * find a person's answers by the address they typed (r24 unit 1).
  */
+import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { researchAccountMark } from "@/lib/creator-research-room";
 
 export const RESPONSES_KEY = "nl:creators:responses";
+/**
+ * The mark that a person asked for their answers to be deleted, set before the walk that deletes them and lifted
+ * only once that walk ends confirmed: while it stands, the form keeps no new answer from the address
+ * (lib/creator-research-room.ts KEEP_RESEARCH_ANSWER reads it in the same step as the write), so an answer sent while
+ * the deletion runs, or after its last walk found none, can never outlive it (Codex L-20261120-0837). Under a hash of
+ * the address, never the address itself; kept FORGET_MARK_SECONDS, so a walk that did not finish leaves the form
+ * closed to the address for that long at the most, and the next walk sets it again.
+ */
+export const FORGET_MARK_SECONDS = 60 * 60;
+export const forgetMarkKey = (email: string): string => `nl:creators:forget:${createHash("sha256").update(`nimbus-creators-forget:${addressOf(email)}`).digest("hex").slice(0, 32)}`;
 
 /** How long an answer is kept: 24 months. */
 const KEEP_MS = 730 * 24 * 60 * 60 * 1000;
@@ -199,6 +210,10 @@ export async function researchCopyPerson(email: string): Promise<ResearchAnswerC
  */
 export async function forgetResearchPerson(email: string): Promise<number> {
   const person = await personOf(email);
+  // The mark first, read exactly (rule 24): without it confirmed, nothing is deleted, since an answer sent meanwhile
+  // could outlive the deletion.
+  const mark = repliesFor(await redisPipeline([["SET", forgetMarkKey(person.address), "1", "EX", FORGET_MARK_SECONDS]]), 1);
+  if (!mark || mark[0] !== "OK") throw new UnknownReplyError("the research deletion's mark");
   let removed = 0;
   for (let walk = 0; walk < FORGET_WALKS; walk += 1) {
     let found: string[];
@@ -208,7 +223,12 @@ export async function forgetResearchPerson(email: string): Promise<number> {
       if (removed === 0) throw error;
       throw new ResearchForgetIncomplete(removed, "the list could not be read again", error);
     }
-    if (found.length === 0) return removed;
+    if (found.length === 0) {
+      // Done: the mark lifts, and the address may answer again. A lift not confirmed only keeps the form closed to
+      // the address until the mark expires.
+      await redisPipeline([["DEL", forgetMarkKey(person.address)]]).catch((error) => console.error("lifting a research deletion's mark failed", error));
+      return removed;
+    }
     for (const entry of found) {
       let count: number | null = null;
       let cause: unknown;

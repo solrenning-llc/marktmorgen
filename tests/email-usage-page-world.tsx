@@ -13,6 +13,9 @@ export function storeBase() { return "https://example.com"; }
 export function starterFlows() { return []; }
 export function sellsSomething() { return false; }
 export function windowId() { return world.window; }
+/** The renewal words beside the month's count (357 [ES3]): the synthetic store has no renewing period, so none are drawn. */
+export function allowanceWindow() { return null; }
+export function opensAgainWords() { return ""; }
 export const WHO = [];
 export function lookColours() { return { accent: "#000000" }; }
 export function aiAvailableFor() { return false; }
@@ -56,6 +59,10 @@ export function isRedisConfigured() { return world.redis; }
 export async function usedThisMonthExact(...args: unknown[]) { world.reads++; world.args = args; if (world.throws) throw Error("synthetic unread counter"); return world.used; }
 export function healthId() { return "synthetic-health"; }
 export async function listHealth() { return null; }
+// #2314's exact read and its table (lib/list-health-read.ts, components/list-health-table.tsx): nothing is read here.
+export async function listHealthExact() { return null; }
+export function ListHealthTable() { return null; }
+export function ListHealthUnread() { return null; }
 export async function pauseForSending() { return null; }
 export function pauseWords() { return ""; }
 export async function pausedFor() { return null; }

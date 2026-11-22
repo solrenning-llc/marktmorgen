@@ -59,7 +59,7 @@ function main(): void {
 
   part("On the studio's email page");
   const page = readFileSync("app/studio/email/page.tsx", "utf8");
-  is("read from the same seven days as the pause", page.includes("listHealth(healthId(store)).catch(() => null)"), true);
+  is("read from the same seven days as the pause", page.includes("listHealthExact(healthId(store)).catch(() => null)"), true);
   is("shown only when no pause is confirmed (a failed read shows nothing, never \"no pause coming\")", page.includes("pauseForSending(healthId(store)).catch(() => undefined)") && page.includes("{confirmedPause === null && health && levels && advice ? (") && page.includes('aria-labelledby="mail-health-title"'), true);
 }
 

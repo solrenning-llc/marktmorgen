@@ -148,7 +148,8 @@ export function sitemapUnits(size: SitemapSize): number {
  * and their records (four commands, at most MAX_PER_PERSON records of each
  * kind) and the text of each agreement listed (WAITING_SHOWN). Held against
  * that read at its largest in tests/plan-cost-registry.test.ts (libraryWaitingRead),
- * and no more than it needs: 2 since a later page's request was priced with
- * the store's record it reads (313 [CV1] unit 3, #1496; 4 until then).
+ * and no more than it needs: 3 since a later page's request was priced with
+ * the store's record it reads (313 [CV1] unit 3, #1496; 4 until then), with
+ * each card's waiting read first and past ten counted (main, 62c59685c0).
  */
-export const LIBRARY_WAITING_UNITS = 2;
+export const LIBRARY_WAITING_UNITS = 3;

@@ -22,8 +22,12 @@ import { MAX_STAMP_BYTES } from "@/lib/product-file";
 
 /** Pages each file store's listing reads at the most when a store's storage is measured. */
 export const MEASURE_LIST_PAGES = 20;
-/** Public requests one measurement of a store's storage is counted as, taken before it lists. */
-export const STORAGE_MEASURE_UNITS = 14;
+/**
+ * Public requests one measurement of a store's storage is counted as, taken before it lists: 9 since a request
+ * is priced with the store's record it reads (313 [CV1] unit 3, #1496; 14 until then), the fewest that cover
+ * the measurement with a tenth to spare (tests/plan-cost-registry.test.ts).
+ */
+export const STORAGE_MEASURE_UNITS = 9;
 /** How long a store found without room for a new copy is taken to be still without it, in seconds. */
 export const NO_ROOM_NOTE_SECONDS = 60 * 60;
 

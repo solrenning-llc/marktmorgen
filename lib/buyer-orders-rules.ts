@@ -26,9 +26,10 @@
  * podcast at a price option with its key taken back, in French, 6,076,927
  * bytes as sent, with the shell measured on a local production build (at
  * most 401,498, taken as 410,000), held under ORDERS_PAGE_BYTES (6,100,000).
- * An opening then costs $0.000964 at most before its metered reads; 9 units
- * at $0.000129 a request are $0.001164, 20.8% over it and 9.8% over it with
- * its tenth to spare (8 would be under). 17 at $0.0000633 a request until a
+ * An opening then costs $0.000964 at most before its metered reads; 11 units
+ * at $0.000102 a request are $0.001123, 16.5% over it and 5.9% over it with
+ * its tenth to spare (10 would be under). 9 at $0.000129 a request before the
+ * merge of main 9bd7355064 into #1496; 17 at $0.0000633 a request until a
  * request was priced with the store's record it reads (313 [CV1] unit 3,
  * #1496); 12 until the page was measured as it is sent: #2060 measured its
  * HTML alone, 2.5 MB, and so did not cover the payload or the shell.
@@ -41,7 +42,7 @@
  */
 import { moveReads } from "@/lib/call-moves-read";
 
-export const ORDERS_OPEN_UNITS = 9;
+export const ORDERS_OPEN_UNITS = 11;
 /** How long one opening may run at the most: the page's maxDuration (app/[handle]/orders/page.tsx). */
 export const ORDERS_OPEN_SECONDS = 30;
 /** Commands every opening may make besides its metered reads: the grant, what waits (four, and one for each of WAITING_SHOWN agreements, lib/buyer-waiting.ts), the Discord server and its roles (tests/orders-open.test.ts holds it). */
@@ -255,12 +256,13 @@ export const ORDERS_BUNDLE_PER_HOUR = 240;
  * above it, with a tenth to spare (8 until C3-83, when the page without
  * JavaScript had to fit too): $0.000534 at most (measured 4 November 2026;
  * the page without JavaScript at most 1,467,384 bytes: private podcasts at a
- * price option, their keys taken back, in French). 5 units at $0.000129 a
- * request are $0.000647, 21.1% to spare, 4 under it; 10 at $0.0000633 until a
- * request was priced with the store's record it reads (313 [CV1] unit 3,
- * #1496).
+ * price option, their keys taken back, in French). 6 units at $0.000102 a
+ * request are $0.000612, 14.7% to spare, 5 under it with its tenth; 5 at
+ * $0.000129 before the merge of main 9bd7355064 into #1496; 10 at $0.0000633
+ * until a request was priced with the store's record it reads (313 [CV1]
+ * unit 3, #1496).
  */
-export const ORDERS_OLDER_UNITS = 5;
+export const ORDERS_OLDER_UNITS = 6;
 /** Commands a batch makes besides its metered reads: the link's grant. */
 export const ORDERS_OLDER_COMMANDS = 1;
 /**

@@ -20,7 +20,7 @@ import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { ERASING_KEY, claimHandle, closeStoreRecord, ensureStatsId, ensureStoreId, erasingField, setSubscription, storeForEmail, storeRef, type Store } from "@/lib/store";
 import { storeKey } from "@/lib/learn";
-import { startTrip } from "@/lib/discord-store";
+import { DISCORD_SERVER_WRITE_COMMANDS, startTrip } from "@/lib/discord-store";
 import { GET as returnDiscord } from "@/app/api/discord/callback/route";
 import { POST as manageDiscord } from "@/app/api/store/discord/route";
 import { store as redis } from "./redis-stub";
@@ -128,7 +128,7 @@ async function main(): Promise<void> {
     const back = await callback(w.session, w.store);
     is("connected, with its notice", back, { status: "connected", noticed: true });
     is("the server is kept", JSON.parse(String(await kept(w.target))).id, SERVER);
-    is("the write is billed as the EVAL and its three calls (HGET, GET, SET)", charge, 4);
+    is("the write is billed as the EVAL and its three calls (HGET, GET, SET), the figure lib/discord-store.ts names", [charge, DISCORD_SERVER_WRITE_COMMANDS], [4, 4]);
     const turned = await kick(w.session, true);
     is("kick: ok", [turned.status, turned.body], [200, { ok: true }]);
     is("kick: the option is kept on the same server", [JSON.parse(String(await kept(w.target))).kick, JSON.parse(String(await kept(w.target))).id], [true, SERVER]);

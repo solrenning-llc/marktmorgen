@@ -10,7 +10,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { saveServer } from "@/lib/discord-store";
+import { seedDiscordServer as saveServer } from "./discord-server-fixture";
 import { storeKey } from "@/lib/learn";
 import { POST as join } from "@/app/api/store/discord/join/route";
 import { store as redis } from "./redis-stub";

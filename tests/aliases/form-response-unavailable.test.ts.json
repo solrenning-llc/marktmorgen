@@ -1,0 +1,21 @@
+{
+  "@/lib/store": "form-response-unavailable-world.tsx",
+  "@/lib/payment-requests": "form-response-unavailable-world.tsx",
+  "@/lib/purchase-email": "form-response-unavailable-world.tsx",
+  "@/lib/checkout-recovery": "form-response-unavailable-world.tsx",
+  "@/lib/mail-starters": "form-response-unavailable-world.tsx",
+  "@/lib/contacts": "form-response-unavailable-world.tsx",
+  "@/lib/broadcasts": "form-response-unavailable-world.tsx",
+  "@/lib/letters": "form-response-unavailable-world.tsx",
+  "@/lib/mail-revenue": "form-response-unavailable-world.tsx",
+  "@/lib/flow-stats": "form-response-unavailable-world.tsx",
+  "@/lib/flow-list": "form-response-unavailable-world.tsx",
+  "@/lib/mail": "form-response-unavailable-world.tsx",
+  "@/lib/mail-health": "form-response-unavailable-world.tsx",
+  "@/lib/mail-drafts": "form-response-unavailable-world.tsx",
+  "@/lib/ai": "form-response-unavailable-world.tsx",
+  "@/lib/segments": "form-response-unavailable-world.tsx",
+  "@/lib/flow-runs": "form-response-unavailable-world.tsx",
+  "@/lib/billing": "form-response-unavailable-world.tsx",
+  "@/components/email-studio": "form-response-unavailable-world.tsx"
+}

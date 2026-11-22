@@ -79,6 +79,7 @@ import { forgetLessonCommentsPerson } from "@/lib/lesson-comments";
 import { forgetLessonNotesPerson } from "@/lib/lesson-notes";
 import { forgetCommunityPerson } from "@/lib/community-erasure";
 import { forgetWaitlistPerson, waitlistMarks } from "@/lib/waitlist";
+import { forgetStockAlertPerson } from "@/lib/stock-alerts";
 import { DROPPED_PROBES, type RemovedCourse, droppedCourseIds, droppedCourseRecords } from "@/lib/removed-courses";
 import { forgetBondPerson } from "@/lib/affiliate-bond";
 import { forgetLeadPerson } from "@/lib/affiliate-leads";
@@ -176,6 +177,7 @@ export const ERASERS: Eraser[] = [
   { module: "lib/lesson-notes.ts", run: (s) => forgetLessonNotesPerson(s.statsId, s.learner, s.store) },
   { module: "lib/community-erasure.ts", run: (s) => (s.communityId ? forgetCommunityPerson(s.communityId, s.learner, s.email, s.productIds, s.store) : Promise.resolve(0)) },
   { module: "lib/waitlist.ts", run: (s) => forgetWaitlistPerson(s.statsId, [...s.productIds, ...(s.waitlistIds ?? [])], s.email, s.store) },
+  { module: "lib/stock-alerts.ts", run: (s) => forgetStockAlertPerson(s.statsId, s.productIds, s.email) },
   { module: "lib/affiliate-bond.ts", run: (s) => forgetBondPerson(s.statsId, s.email) },
   { module: "lib/affiliate-leads.ts", run: (s) => forgetLeadPerson(s.store, s.email) },
   { module: "lib/imported-purchases.ts", only: "person", run: (s) => forgetImportedPerson(s.statsId, s.email, s.store) },

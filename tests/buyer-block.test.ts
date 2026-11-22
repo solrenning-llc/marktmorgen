@@ -141,9 +141,9 @@ async function main(): Promise<void> {
 
   part("Deleting the person");
   await redis.pipeline([["DEL", blockKey(store.sid!)]]);
-  await blockPerson(store, RUDE, "spam");
-  // The reason goes; the block stays (Codex X6 on #3839, tests/buyer-block-erasure-copy.test.ts).
-  is("their reason is erased, the block kept", [await forgetBlockedPerson(store, RUDE, 1_800_000_000_000), await blockedState(store, RUDE)], [1, { blocked: true, reason: "", at: 1_800_000_000_000 }]);
+  await blockPerson(store, RUDE, "spam", 1_799_000_000_000);
+  // The reason goes; the block and its date stay (Codex X6 and Claude 6 on #3839, tests/buyer-block-erasure-copy.test.ts).
+  is("their reason is erased, the block kept", [await forgetBlockedPerson(store, RUDE), await blockedState(store, RUDE)], [1, { blocked: true, reason: "", at: 1_799_000_000_000 }]);
   is("nothing left to erase", await forgetBlockedPerson(store, RUDE), 0);
 
   done();

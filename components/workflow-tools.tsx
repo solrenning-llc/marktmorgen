@@ -7,7 +7,7 @@
  * Nothing here sends or changes anything except the explicit buttons, which
  * go through the studio's own request (`request`).
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LAYOUT_HOLD_START, type FlowAction, type FlowGoal, type StepCondition, isCourseIf } from "@/lib/flow-rules";
 import { END, type RoutedStep, type SampleContact, previewRun } from "@/lib/flow-paths";
 import { flowMapLayout } from "@/lib/flow-map";
@@ -424,6 +424,18 @@ export function WorkflowRuns({ flowId, steps, request }: { flowId: string; steps
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<{ run: RunRecord; events: RunEvent[] } | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Whether "Erase ... from every workflow" is waiting on its question (WCAG 3.3.6: a deletion is confirmed first). */
+  const [erasing, setErasing] = useState(false);
+  const eraseButton = useRef<HTMLButtonElement>(null);
+  const keepButton = useRef<HTMLButtonElement>(null);
+  const yesButton = useRef<HTMLButtonElement>(null);
+  /** Set while the erasure is on its way, so a second press of either answer does nothing (Codex N1). */
+  const forgetting = useRef(false);
+
+  // The question takes the focus when it opens, on the answer that keeps everything.
+  useEffect(() => {
+    if (erasing) keepButton.current?.focus();
+  }, [erasing]);
 
   useEffect(() => {
     let live = true;
@@ -440,6 +452,7 @@ export function WorkflowRuns({ flowId, steps, request }: { flowId: string; steps
   async function show(person: string) {
     setBusy(true);
     setError(null);
+    setErasing(false);
     const a = await request({ action: "flow-run", id: flowId, run: person });
     setBusy(false);
     if (a.ok && a.run && Array.isArray(a.events)) setOpen({ run: a.run as RunRecord, events: a.events as RunEvent[] });
@@ -447,13 +460,20 @@ export function WorkflowRuns({ flowId, steps, request }: { flowId: string; steps
   }
 
   async function erasePerson() {
-    if (!open) return;
+    if (!open || forgetting.current) return;
+    forgetting.current = true;
     setBusy(true);
     setError(null);
     const a = await request({ action: "flow-forget", email: open.run.email });
+    forgetting.current = false;
     setBusy(false);
-    if (!a.ok) return setError(RUN_ERRORS[a.error ?? ""] ?? "The erasure could not be confirmed. Try again in a moment.");
+    if (!a.ok) {
+      // The question stays open and the focus stays on "Yes", which never left the focus order (Codex X6).
+      yesButton.current?.focus();
+      return setError(RUN_ERRORS[a.error ?? ""] ?? "The erasure could not be confirmed. Try again in a moment.");
+    }
     const gone = open.run.person;
+    setErasing(false);
     setOpen(null);
     setRuns((list) => list?.filter((r) => r.person !== gone) ?? list);
   }
@@ -521,11 +541,53 @@ export function WorkflowRuns({ flowId, steps, request }: { flowId: string; steps
           {open.run.email ? (
             <p className="mt-3 text-sm text-ink-soft">
               Asked to be deleted?{" "}
-              <button type="button" className="font-bold underline underline-offset-4 hover:text-danger" disabled={busy} onClick={erasePerson}>
+              <button
+                ref={eraseButton}
+                type="button"
+                className="font-bold underline underline-offset-4 hover:text-danger"
+                disabled={busy}
+                aria-expanded={erasing}
+                onClick={() => setErasing(true)}
+              >
                 Erase {open.run.email} from every workflow
               </button>
               : their runs, history and waiting steps in all your workflows. This does not remove their address from your list itself.
             </p>
+          ) : null}
+          {open.run.email && erasing ? (
+            <div className="notice notice-warn mt-3 text-sm" role="group" aria-labelledby="erase-person-question">
+              <p id="erase-person-question" className="font-semibold">
+                Erase {open.run.email} from every workflow?
+              </p>
+              <p className="mt-1">Their runs, history and waiting steps go from all your workflows. This cannot be undone.</p>
+              <div className="mt-3 flex flex-wrap gap-3">
+                {/* aria-disabled, not disabled: the focused answer stays in the focus order while the erasure runs (Codex X6). */}
+                <button
+                  ref={yesButton}
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  aria-disabled={busy}
+                  aria-busy={busy}
+                  onClick={() => void erasePerson()}
+                >
+                  Yes, erase them
+                </button>
+                <button
+                  ref={keepButton}
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  aria-disabled={busy}
+                  onClick={() => {
+                    // Closing the question while an erasure that cannot be taken back is on its way would hide its outcome (Codex N1).
+                    if (forgetting.current) return;
+                    setErasing(false);
+                    eraseButton.current?.focus();
+                  }}
+                >
+                  Keep them
+                </button>
+              </div>
+            </div>
           ) : null}
           {open.run.status === "held" ? (
             <div className="notice notice-warn mt-3 text-sm">

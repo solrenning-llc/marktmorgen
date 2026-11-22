@@ -84,8 +84,9 @@ async function connect(owner: string, sid: string, country = "US") {
   const response = await connectPOST(new NextRequest("https://marktmorgen.com/api/stripe/connect", {
     method: "POST", headers: { origin: "https://marktmorgen.com", host: "marktmorgen.com", cookie, "x-nimbus-store": sid }, body: form,
   }));
-  const location = response.headers.get("location") ?? "";
-  return location.startsWith("https://connect.stripe.com") ? "onboarding" : new URL(location, "https://marktmorgen.com").searchParams.get("stripe");
+  const location = new URL(response.headers.get("location") ?? "", "https://marktmorgen.com");
+  // The host compared whole, never a prefix of the address (CodeQL js/incomplete-url-substring-sanitization).
+  return location.protocol === "https:" && location.host === "connect.stripe.com" ? "onboarding" : location.searchParams.get("stripe");
 }
 
 const reset = () => { byKey.clear(); opened = 0; keys = []; meanwhile = null; answer = "ok"; };

@@ -11,3 +11,11 @@ export async function creatorFrom(_request: unknown, permission: string) {
   boundary.permission = permission;
   return { store: boundary.store };
 }
+
+/**
+ * lib/flow-versions.ts (main, merged into #2857) imports countStudio from this module; the record parser's test never
+ * reaches a studio request, so any call here is a test bug and throws instead of answering on a guess.
+ */
+export async function countStudio(): Promise<never> {
+  throw new Error('Synthetic export owner boundary: countStudio is not expected in this test');
+}

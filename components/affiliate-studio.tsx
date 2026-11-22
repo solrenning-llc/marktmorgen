@@ -907,8 +907,9 @@ function Terms({
                 marktmorgen.com/affiliate-programs
               </Link>
               : your store&apos;s name and address, your share, your window, your payment day and up to four products that earn,
-              each with what one sale earns, and a link to apply. It shows while your store can take payments. Uncheck this and save,
-              and it leaves the page at once.
+              each with what one sale earns, and a link to apply. It shows while your store can take payments. A new listing, a
+              change to your program or products, or a store that stops taking payments can take up to an hour to show there,
+              or up to two hours if the page could not be refreshed. Uncheck this and save, and it leaves the page at once.
             </span>
           </span>
         </label>
@@ -925,7 +926,8 @@ function Terms({
               <span className="block text-ink-soft">
                 How many affiliates you have and since when, the clicks they brought, the sales those clicks made, what they
                 earned before refunds and what you have recorded as paid to them. Rates per click show once there are 100
-                clicks. Affiliates choose programs by these; no figure about a buyer is ever shown.
+                clicks. Affiliates choose programs by these; no figure about a buyer is ever shown. Your numbers show there from
+                the next refresh of the page; uncheck this and save, and they leave the page at once.
               </span>
             </span>
           </label>

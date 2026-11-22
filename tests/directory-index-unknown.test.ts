@@ -26,7 +26,7 @@
  * for ten minutes, in which a read builds nothing and the page says the list could not be checked. Each part below
  * that checks a failure path starts with the mark dropped, so the failure it sees is its own.
  */
-import { DIRECTORY_BUILD, DIRECTORY_CACHE, listedCount, listedStores, rememberListing } from "@/lib/directory-index";
+import { DIRECTORY_BUILD, DIRECTORY_BUILDS, DIRECTORY_CACHE, listedCount, listedStores, rememberListing } from "@/lib/directory-index";
 import * as directory from "@/lib/affiliate-directory";
 import { readDirectory, readDirectoryPage } from "@/lib/affiliate-directory";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -71,9 +71,12 @@ async function mark(): Promise<[unknown, unknown]> {
   return [value, ttl];
 }
 
-/** Drops the build mark, so the part that follows sees its own failure, not the last part's window. */
+/**
+ * Drops the build mark and the window's count, so the part that follows sees its own failure, not the last part's
+ * window (one build an hour since C1-20261109-1603-TODOS-71: without it, the last part's build spent the hour).
+ */
 async function unmarked(): Promise<void> {
-  await original([["DEL", DIRECTORY_BUILD]]);
+  await original([["DEL", DIRECTORY_BUILD], ["DEL", DIRECTORY_BUILDS]]);
 }
 
 /** Every command whose first word is `word` answers `reply` instead of the stub's own answer. */
@@ -157,7 +160,7 @@ async function main(): Promise<void> {
   await selling("baker@example.com", "breadhouse", "Bread House");
   await selling("yoga@example.com", "yogaroom", "Yoga Room");
   is("healthy, both programs are listed", (await readDirectory()).map((row) => row.handle).sort(), ["breadhouse", "yogaroom"]);
-  await original([["DEL", DIRECTORY_CACHE]]);
+  await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
   let storeReads = 0;
   redis.pipeline = (async (commands: Commands) => {
     const [word, key] = commands[0] ?? [];
@@ -168,15 +171,16 @@ async function main(): Promise<void> {
   redis.pipeline = original;
   is("the read shows the program it could read and counts the one it could not, never as a program not there", [storeFailure.rows.length, storeFailure.omitted], [1, 1]);
   is("the page kept says one program is missing, it is not the whole list", keptPage(await kept()), { rows: 1, omitted: 1 });
-  is("inside ten minutes the kept page still says so", (await readDirectoryPage()).omitted, 1);
-  advance(600_001);
-  is("healthy again ten minutes later, both are listed, none left out", await readDirectoryPage().then((p) => [p.rows.map((row) => row.handle).sort(), p.omitted]), [["breadhouse", "yogaroom"], 0]);
+  is("inside the hour the kept page still says so", (await readDirectoryPage()).omitted, 1);
+  // One build an hour (#3118): the next build comes once the hour's kept page and count have run out.
+  advance(3_600_001);
+  is("healthy again an hour later, both are listed, none left out", await readDirectoryPage().then((p) => [p.rows.map((row) => row.handle).sort(), p.omitted]), [["breadhouse", "yogaroom"], 0]);
 
   part("Sibling: a numbers read that failed is not kept for ten minutes");
   redis.clear();
   await selling("baker@example.com", "breadhouse", "Bread House", true);
   is("healthy, the row has its numbers", (await readDirectory())[0]?.numbers !== null, true);
-  await original([["DEL", DIRECTORY_CACHE]]);
+  await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
   redis.pipeline = (async (commands: Commands) => {
     if (commands[0]?.[0] === "HGETALL") throw new Error("synthetic network failure");
     return original(commands);
@@ -197,7 +201,7 @@ async function main(): Promise<void> {
   await selling("yoga@example.com", "yogaroom", "Yoga Room");
   const [listed] = (await original([["SMEMBERS", "nl:dir:listed"]])) as [string[]];
   const [first, second] = [...listed].sort();
-  await original([["DEL", DIRECTORY_CACHE]]);
+  await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
   let walk = 0;
   redis.pipeline = (async (commands: Commands) => {
     if (commands[0]?.[0] === "SSCAN") return ++walk === 1 ? [["5", [first, first, second]]] : [["0", [second, first]]];
@@ -214,7 +218,7 @@ async function main(): Promise<void> {
   for (const [label, cursor] of [["empty", ""], ["letters", "abc"], ["negative", "-1"], ["a fraction", "1.5"], ["a space before", " 0"], ["a newline after", "0\n"]] as const) {
     answering("SSCAN", [cursor, []]);
     is(`SSCAN with a cursor ${label} throws`, await failure(() => listedStores()), "UnknownReplyError");
-    await original([["DEL", DIRECTORY_CACHE]]);
+    await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
     await unmarked();
     // The bad cursor once, then an exact last page, so a walk that took it as a cursor ends instead of looping here.
     let scan = 0;
@@ -238,7 +242,7 @@ async function main(): Promise<void> {
   const HARNESS_STOP = 200;
   /** SSCAN answers `page(n)` for its n-th call; past HARNESS_STOP the harness stops a walk that would not end. */
   async function walking(page: (n: number) => unknown): Promise<{ outcome: string; scans: number; kept: unknown }> {
-    await original([["DEL", DIRECTORY_CACHE]]);
+    await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
     await unmarked();
     let n = 0;
     redis.pipeline = (async (commands: Commands) => {
@@ -292,7 +296,7 @@ async function main(): Promise<void> {
   redis.clear();
   for (const name of SHOPS) await selling(`${name}@example.com`, name, name, true);
   is("control: three programs are listed, each with its numbers", (await readDirectory()).map((row) => [row.handle, row.numbers !== null]), SHOPS.map((name) => [name, true]));
-  await original([["DEL", DIRECTORY_CACHE]]);
+  await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
   const victimStore = await storeForEmail("alphashop@example.com");
   const victim = `nl:store:id:${victimStore?.sid}`;
   const storeFails = (commands: Commands) => {
@@ -313,16 +317,22 @@ async function main(): Promise<void> {
   seen = await counted(async () => void (outcomes = await visits(3)), storeFails);
   is("five minutes later still no build, and every read answers", [seen.SSCAN ?? 0, outcomes.every((o) => o === "answered")], [0, true]);
   advance(300_001);
+  // One build an hour (C1-20261109-1603-TODOS-71, #3118): the kept page lasts the hour, so ten minutes later
+  // nothing is built and the kept page answers.
+  seen = await counted(async () => void (outcomes = await visits(3)), storeFails);
+  is("ten minutes later, inside the hour, still no build: the kept page answers", [seen.SSCAN ?? 0, outcomes.every((o) => o === "answered")], [0, true]);
+  advance(3_000_000);
   let again: Awaited<ReturnType<typeof readDirectoryPage>> = { rows: [], omitted: 0 };
   seen = await counted(async () => void (again = await readDirectoryPage()), storeFails);
-  is("ten minutes later, one build reads the store again, and still leaves it out", [seen.SSCAN, again.rows.length, again.omitted], [1, 2, 1]);
-  is("a save of a program drops the kept page, and the next read builds at once", await (async () => {
+  is("an hour later, one build reads the store again, and still leaves it out", [seen.SSCAN, again.rows.length, again.omitted], [1, 2, 1]);
+  // Checked twice: the listed set, and the numbers' consent of the rows that carry them (Claude 5's MEDIUM on #3062).
+  is("a save of a program in the window drops the kept page; the hour's build is spent, so the last good build is shown, checked, with its count", await (async () => {
     const store = await storeForEmail("bravoshop@example.com");
     if (store) await rememberListing(store);
     let page: Awaited<ReturnType<typeof readDirectoryPage>> = { rows: [], omitted: 0 };
     const built = await counted(async () => void (page = await readDirectoryPage()), storeFails);
-    return [built.SSCAN, page.rows.length, page.omitted];
-  })(), [1, 2, 1]);
+    return [built.SSCAN ?? 0, built.SMISMEMBER ?? 0, page.rows.length, page.omitted];
+  })(), [0, 2, 2, 1]);
 
   redis.clear();
   for (const name of SHOPS) await selling(`${name}@example.com`, name, name, true);
@@ -363,8 +373,9 @@ async function main(): Promise<void> {
   const baker = await storeForEmail("baker@example.com");
   if (baker) await rememberListing(baker);
   seen = await counted(async () => void (await readDirectory()));
-  is("after a save drops the kept page, the next read builds at once (no mark held)", [seen.SSCAN, typeof (await kept()), (await mark())[0]], [1, "string", null]);
-  await original([["DEL", DIRECTORY_CACHE]]);
+  // One build an hour (C1-20261109-1603-TODOS-71): inside it, the next read is the last good build, checked.
+  is("after a save drops the kept page, the next read inside the hour builds nothing and holds no mark", [seen.SSCAN ?? 0, seen.SMISMEMBER, await kept(), (await mark())[0]], [0, 1, null, null]);
+  await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
   // Another build's own mark, "building:" and its token (Codex N1 on #2921).
   await original([["SET", DIRECTORY_BUILD, "building:00112233445566778899aabb", "EX", 60]]);
   seen = await counted(async () => void (outcomes = await visits(1)));
@@ -378,7 +389,7 @@ async function main(): Promise<void> {
   advance(60_001);
   is("a build cut short holds the page at most 60 seconds", (await readDirectory()).length, 2);
   for (const [label, reply] of [["QUEUED", "QUEUED"], ["a number", 1], ["missing", undefined]] as const) {
-    await original([["DEL", DIRECTORY_CACHE]]);
+    await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
     await unmarked();
     let sscans = 0;
     redis.pipeline = (async (commands: Commands) => {
@@ -396,7 +407,8 @@ async function main(): Promise<void> {
   const TWENTY = Array.from({ length: 20 }, (_, i) => `shop${String.fromCharCode(97 + i)}${String.fromCharCode(97 + i)}`);
   for (const name of TWENTY) await selling(`${name}@example.com`, name, name);
   is("control: twenty programs are listed", await readDirectoryPage().then((p) => [p.rows.length, p.omitted]), [20, 0]);
-  await original([["DEL", DIRECTORY_CACHE]]);
+  // The control's build spent the hour's place (#3118): it is given back, as a fresh hour.
+  await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
   const brokenStore = await storeForEmail("shopcc@example.com");
   const broken = `nl:store:id:${brokenStore?.sid}`;
   const brokenFails = (commands: Commands) => {
@@ -411,9 +423,9 @@ async function main(): Promise<void> {
   is("the first read lists the 19 it could read and counts the one it could not", [firstRead.rows.length, firstRead.omitted, firstRead.rows.some((row) => row.handle === "shopcc")], [19, 1, false]);
   is("the second read, the build mark untouched, is not \"unavailable\": the same 19 and the one", [secondRead.rows.length, secondRead.omitted], [19, 1]);
   is("one build for both reads", seen.SSCAN, 1);
-  is("no \"failed\" hold, and the page is kept ten minutes, as a healthy one", [(await mark())[0], keptPage(await kept()), Number((await original([["TTL", DIRECTORY_CACHE]]))[0]) <= 600], [null, { rows: 19, omitted: 1 }, true]);
+  is("no \"failed\" hold, and the page is kept the hour, as a healthy one", [(await mark())[0], keptPage(await kept()), Number((await original([["TTL", DIRECTORY_CACHE]]))[0]) <= 3_600], [null, { rows: 19, omitted: 1 }, true]);
   is("readDirectory, for any other caller, gives the same 19 rows", (await readDirectory()).length, 19);
-  advance(600_001);
+  advance(3_600_001);
   is("the store readable again, the next build lists all twenty", await readDirectoryPage().then((p) => [p.rows.length, p.omitted, p.rows.some((row) => row.handle === "shopcc")]), [20, 0, true]);
 
   // rvB4 on #2921 (MEDIUM, rule 24): a store's id read answering in another shape is not "no such store" either. It is

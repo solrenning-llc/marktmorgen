@@ -21,7 +21,10 @@ globalThis.fetch = (async () => new Response(JSON.stringify({ object: "list", da
 
 const original = redis.pipeline.bind(redis);
 type Commands = (string | number)[][];
-const CEILING = ((directory as unknown as Record<string, unknown>).DIRECTORY_BUILDS_PER_TEN_MINUTES as number | undefined) ?? 10;
+const exported = directory as unknown as Record<string, unknown>;
+/** The window's ceiling and length, as this branch has them: ten builds in ten minutes (#3062), or one an hour (#3118). */
+const CEILING = ((exported.DIRECTORY_BUILDS_PER_HOUR ?? exported.DIRECTORY_BUILDS_PER_TEN_MINUTES) as number | undefined) ?? 10;
+const WINDOW_MS = ((exported.DIRECTORY_BUILD_SECONDS as number | undefined) ?? 600) * 1000;
 
 async function program(email: string, numbers: boolean, percent = 30): Promise<void> {
   await setAffiliateSetting(email, parseAffiliateSetting({ enabled: true, percent, days: 30, directory: true, numbers }));
@@ -62,7 +65,7 @@ async function main(): Promise<void> {
   is("five minutes on, still without them", await withNumbers(), ["cakeshop"]);
 
   part("A build that read the numbers before the save keeps no page with them");
-  advance(20 * 60_000);
+  advance(2 * WINDOW_MS);
   await program("baker@example.com", true);
   await original([["DEL", DIRECTORY_CACHE]]);
   let withdrawn = false;
@@ -87,7 +90,7 @@ async function main(): Promise<void> {
   is("and the next visit too: no page kept with them", await withNumbers(), ["cakeshop"]);
 
   part("Taken back and given again: shown again at the next build");
-  advance(20 * 60_000);
+  advance(2 * WINDOW_MS);
   await program("baker@example.com", true);
   is("both with their numbers", await withNumbers(), ["breadhouse", "cakeshop"]);
 }

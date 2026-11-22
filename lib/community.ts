@@ -47,7 +47,9 @@
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { type DataOwner, ORDER_WRITE, orderScriptWith, orderWrite } from "@/lib/order-data";
+import { type DataOwner, ORDER_WRITE, fieldReleaseBytes, orderScriptWith, orderWrite, releaseOrderData } from "@/lib/order-data";
+import { HASH_DEL_IF } from "@/lib/redis-take";
+import { UnknownReply, exactReplies, replyCount } from "@/lib/redis-exact";
 import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
 import {
@@ -87,6 +89,9 @@ import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
 import { type DmSetting, NO_DM, parseDmSetting } from "@/lib/community-dm";
 import { type ChatSetting, NO_CHAT, parseChatSetting } from "@/lib/community-chat";
 import { claimHandle } from "@/lib/community-mentions";
+import { parseMemberLinks } from "@/lib/member-links";
+import type { Social } from "@/lib/store-socials";
+import { type AboutSetting, NO_ABOUT_PAGE, parseAboutSetting } from "@/lib/community-about-setting";
 import { WRITE_ABOUT_IF } from "@/lib/product-about";
 
 /** The author of what the creator writes. Never a member key, which is hex. */
@@ -143,6 +148,8 @@ export type CommunityConfig = {
   questions: string[];
   /** Sent privately to a member the first time they come in, from the creator, when messages are on. */
   welcome: string;
+  /** The public About page, and whether it shows its counts (lib/community-about-setting.ts). Off until the creator turns it on. */
+  page: AboutSetting;
 };
 
 export type Member = {
@@ -176,7 +183,22 @@ export type Member = {
   qq: string[];
   /** When they answered, in seconds; 0 until they have. */
   qa: number;
+  /**
+   * Links to their own profiles on social networks, which they add
+   * themselves and which the directory shows only while they are listed
+   * (lib/member-links.ts, shownLinks). Empty until they add one.
+   */
+  s: Social[];
+  /**
+   * "o" on a record written since 4 November 2026: made by an order (counted
+   * in the orders' part, lib/order-data.ts) and grown in the members' slot
+   * at what setProfile counts (countedMember), so deleting it gives each
+   * part back where it was taken. Absent on records written before, whose
+   * room is left counted.
+   */
+  r?: "o";
 };
+
 
 export type CommunityImage = { path: string; w: number; h: number; alt: string };
 
@@ -283,6 +305,8 @@ export function freshConfig(storeName: string): CommunityConfig {
     chat: { ...NO_CHAT },
     questions: [],
     welcome: "",
+    // Nothing of the community is shown to people who are not in it until the creator says so.
+    page: { ...NO_ABOUT_PAGE },
   };
 }
 
@@ -330,6 +354,8 @@ function parseConfig(raw: unknown): CommunityConfig | null {
         .filter(Boolean)
         .slice(0, MAX_QUESTIONS),
       welcome: typeof value.welcome === "string" ? value.welcome.slice(0, MAX_WELCOME) : "",
+      // And before there was an About page: off.
+      page: parseAboutSetting(value.page),
     };
   } catch {
     return null;
@@ -429,11 +455,32 @@ function parseMember(raw: unknown): Member | null {
       q: Array.isArray(v.q) ? v.q.filter((a): a is string => typeof a === "string").map((a) => a.slice(0, MAX_ANSWER)).slice(0, MAX_QUESTIONS) : [],
       qa: typeof v.qa === "number" ? v.qa : 0,
       qq: Array.isArray(v.qq) ? v.qq.filter((a): a is string => typeof a === "string").map((a) => a.slice(0, MAX_QUESTION)).slice(0, MAX_QUESTIONS) : [],
+      s: parseMemberLinks(v.s),
+      ...(v.r === "o" ? { r: "o" as const } : {}),
     };
   } catch {
     return null;
   }
 }
+
+/**
+ * A member's record as the members' slot counts it: without what is written
+ * without being counted (when they were last seen, the emails switch, their
+ * unsubscribe token, a mute or removal) and with the handle the name gives,
+ * the one setProfile counts. Only setProfile changes it, and counts each
+ * change, so the slot holds exactly what it grew by since the record was made.
+ */
+function countedMember(member: Member): string {
+  return JSON.stringify({ ...member, h: member.n.slice(0, 40), mail: false, seen: member.at, muted: false, removed: false, t: "" });
+}
+
+/** A member's record as touchMember first writes it (an order's write, lib/order-data.ts). */
+function firstMember(key: string, email: string, at: number): Member {
+  return { k: key, e: email, n: "", h: "", dir: false, mail: false, at, seen: at, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [], r: "o" };
+}
+
+/** What a member's name takes in the members' slot beside the record: the words it is found by and its handle. */
+const nameBytes = (name: string) => (name ? indexBytes([name]) + SET_ENTRY_BYTES : 0);
 
 export function memberKey(email: string): string {
   return emailKey(email);
@@ -546,8 +593,16 @@ export async function readMembersExact(id: string, keys: string[]): Promise<Map<
   return out;
 }
 
+/**
+ * How many times one change to a member's record may add to what it already holds in the store's data room, after
+ * its first reservation, when its set is tried again (patchMember): one. Past it the change fails as a record that
+ * kept changing, so the room calls of one profile action stay at most three whatever the retries.
+ */
+export const MEMBER_ROOM_TOP_UPS = 1;
+
 /** Writes a member's record only if it is still exactly what was read. */
 const CAS_MEMBER = [
+  "-- marktmorgen:member-cas:v1",
   'local cur = redis.call("HGET", KEYS[1], ARGV[1])',
   "if cur ~= ARGV[2] then return 0 end",
   'redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])',
@@ -565,27 +620,87 @@ const CAS_MEMBER = [
  * link say "Unsubscribed." with the emails still on, and a mute say done
  * with nothing written.
  */
-async function patchMember(id: string, key: string, change: (member: Member) => Partial<Member>): Promise<Member | null> {
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const read = await readMemberExact(id, key);
-    if (!read) return null;
-    const { raw, member } = read;
-    const next: Member = { ...member, ...change(member), k: member.k };
-    const listed = next.dir && next.n && !next.removed ? "1" : "0";
-    const replies = repliesFor(await redisPipeline([
-      ["EVAL", CAS_MEMBER, 2, membersKey(id), dirKey(id), key, raw, JSON.stringify(next), listed, next.at],
-    ]), 1);
-    // 1 written, 0 changed since it was read (read again); anything else is not known to be either.
-    const written = replies?.[0];
-    if (written === 0) continue;
-    if (written !== 1) throw new UnknownReplyError("a change to a community member record");
-    // The search index follows the very same switch the directory does, from
-    // the very same place, so the two can never come to disagree about who is
-    // findable. Somebody who took themselves off the list is taken out of the
-    // index in the same breath.
-    await indexMember(id, next).catch(() => {});
-    return next;
+/**
+ * What a change adds to the store's data room, worked out on each try from the record as read (`before`) and
+ * as it would be written (`next`): never from a snapshot the caller held before (rule 30 on the MEDIUM of Codex Z,
+ * Claude 1 and Claude 3 on #3024). The member's name also takes its index entry.
+ */
+function profileGrowth(before: Member, next: Member): number {
+  // Measured on the counted record (countedMember, main's measure since #2576), so what a change takes from the members'
+  // slot is what deleting the record gives back: what is written without being counted (seen, the emails switch, a
+  // token, a mute or removal) never moves it.
+  return dataBytes([countedMember(next)]) - dataBytes([countedMember(before)]) + nameBytes(next.n) - nameBytes(before.n);
+}
+
+async function patchMember(
+  id: string,
+  key: string,
+  change: (member: Member) => Partial<Member>,
+  /**
+   * When given, what a try adds is taken from the store's data room before its compare-and-set writes, and kept
+   * across the tries whose set did not go in (the record changed since it was read): a later try tops it up only
+   * when it needs more than is held, at most once (MEMBER_ROOM_TOP_UPS). What is held beyond what the written record
+   * took is given back once, after the set went in; all of it when nothing was written; none of it when the set's
+   * answer is not known. So one change runs at most three room calls (a reservation, a top-up, a give-back), never
+   * one per try (rule 30 on Claude 7's MEDIUM on #3024 at 2d7c9cd60b).
+   */
+  room?: DataStore,
+): Promise<Member | null> {
+  // The bytes this change holds in the room, and the top-ups it has run.
+  let held = 0;
+  let topUps = 0;
+  // Set once the set's answer is not known: what is held then stays taken.
+  let unknown = false;
+  const giveBack = async (bytes: number) => {
+    if (room && bytes > 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes }]);
+  };
+  try {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const read = await readMemberExact(id, key);
+      if (!read) {
+        await giveBack(held);
+        held = 0;
+        return null;
+      }
+      const { raw, member } = read;
+      const next: Member = { ...member, ...change(member), k: member.k };
+      const grown = room ? profileGrowth(member, next) : 0;
+      if (room && grown > held) {
+        // The first reservation, or one top-up when the record shrank since (only the member's own other saves
+        // shrink what this change writes over); a second would make the room calls depend on the retries.
+        if (held > 0 && topUps >= MEMBER_ROOM_TOP_UPS) break;
+        if (held > 0) topUps += 1;
+        await needData(room, [{ slot: MEMBERS_SLOT, bytes: grown - held }]);
+        held = grown;
+      }
+      const listed = next.dir && next.n && !next.removed ? "1" : "0";
+      // A rejected pipeline can lose the reply after the write. Keep the reservation until a known result arrives.
+      unknown = true;
+      const replies = repliesFor(await redisPipeline([
+        ["EVAL", CAS_MEMBER, 2, membersKey(id), dirKey(id), key, raw, JSON.stringify(next), listed, next.at],
+      ]), 1);
+      const written = replies?.[0];
+      if (written !== 0 && written !== 1) throw new UnknownReplyError("a change to a community member record");
+      unknown = false;
+      if (written === 0) continue;
+      // The record took `grown` (less than nothing when it shrank): the rest of what is held goes back, once.
+      const excess = held - grown;
+      held = 0;
+      await giveBack(excess);
+      // The search index follows the very same switch the directory does, from
+      // the very same place, so the two can never come to disagree about who is
+      // findable. Somebody who took themselves off the list is taken out of the
+      // index in the same breath.
+      await indexMember(id, next).catch(() => {});
+      return next;
+    }
+  } catch (error) {
+    // A read, a reservation or a set known not to have gone in: nothing of this change was written, so what it holds
+    // goes back. A set whose answer is not known keeps it.
+    if (!unknown) await giveBack(held).catch(() => {});
+    throw error;
   }
+  await giveBack(held);
   throw new Error("a member's record kept changing");
 }
 
@@ -606,7 +721,7 @@ export async function touchMember(id: string, email: string, existing: Member | 
   const size = countOf(repliesFor(await redisPipeline([["HLEN", membersKey(id)]]), 1)?.[0]);
   if (size === null) throw new UnknownReplyError("a community's head count");
   if (Number(size) >= MAX_MEMBERS) return null;
-  const member: Member = { k: key, e: normaliseEmail(email), n: "", h: "", dir: false, mail: false, at, seen: at, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+  const member = firstMember(key, normaliseEmail(email), at);
   // HSETNX: two first visits at once make one record, not two. Counted in
   // the store's room at what it adds (lib/order-data.ts); what a member adds
   // to it later is taken from the room (MEMBERS_SLOT).
@@ -617,23 +732,25 @@ export async function touchMember(id: string, email: string, existing: Member | 
 /**
  * A member's own choices: the name they are seen by, the directory, the
  * emails — and, when given, their answers to the creator's questions, which
- * count as answered once each one asked has something in it.
+ * count as answered once each one asked has something in it, and their
+ * links to their profiles elsewhere (lib/member-links.ts), kept as the form
+ * rule left them.
  */
 export async function setProfile(
   id: string,
   member: Member,
-  change: { name: string; dir: boolean; mail: boolean; answers?: string[]; questions?: string[] },
+  change: { name: string; dir: boolean; mail: boolean; answers?: string[]; questions?: string[]; links?: Social[] },
   room: DataStore,
 ): Promise<Member> {
   const name = cleanLine(change.name, MAX_DISPLAY_NAME);
-  // What the member adds to their record takes room before it is written:
-  // the name and the answers, the handle they are mentioned by and the words
-  // their name is found by. A record that shrinks gives it back.
-  const answers = change.answers && change.questions ? answersFor(change.answers, change.questions, member.qa) : {};
-  const after = JSON.stringify({ ...member, n: name, h: name.slice(0, 40), dir: change.dir && Boolean(name), mail: change.mail, ...answers });
-  const grown = dataBytes([after]) - dataBytes([JSON.stringify(member)]) + (name ? indexBytes([name]) + SET_ENTRY_BYTES : 0) - (member.n ? indexBytes([member.n]) + SET_ENTRY_BYTES : 0);
-  if (grown > 0) await needData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);
-  else if (grown < 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: -grown }]);
+  // The links go through the rule a stored record is read back by, so what
+  // is written is exactly what the directory may show.
+  const links = change.links ? { s: parseMemberLinks(change.links) } : {};
+  // What the member adds to their record (the name and the answers, the
+  // handle they are mentioned by and the words their name is found by) takes
+  // room before it is written, and a record that shrinks gives it back; both
+  // are worked out by patchMember on each try, from the record it writes over
+  // (profileGrowth), never from the `member` snapshot this call was given.
   // The handle is taken before the name is written, so a member is never left
   // named but unmentionable. Claiming gives back what they ended up with,
   // which may carry a number when somebody already held the plain one. It
@@ -654,8 +771,9 @@ export async function setProfile(
         dir: change.dir && Boolean(name),
         mail: change.mail,
         ...(change.answers && change.questions ? answersFor(change.answers, change.questions, now.qa) : {}),
+        ...links,
       };
-    });
+    }, room);
   } catch (error) {
     // The read or the write after the claim answered in no known shape, so
     // whether the record took the new handle is not known: a lost answer may
@@ -1036,14 +1154,15 @@ export async function editPost(id: string, post: Post, input: { title: string; t
 export async function deletePost(id: string, post: Post, room: DataStore): Promise<void> {
   const [raw] = await redisPipeline([["HKEYS", commentsKey(id, post.id)]]);
   const commentIds = Array.isArray(raw) ? (raw as string[]) : [];
-  await redisPipeline([
+  const gone = await redisPipeline([
     ["DEL", postKey(id, post.id), commentsKey(id, post.id), likesKey(id, post.id), reportersKey(id, `p:${post.id}`), ...pollKeys(id, post.id), ...commentIds.map((c) => commentLikesKey(id, post.id, c))],
     ["ZREM", feedKey(id), post.id],
     ["ZREM", spaceKey(id, post.sp), post.id],
     ["ZREM", reportsKey(id), `p:${post.id}`, ...commentIds.map((c) => `c:${post.id}:${c}`)],
     ...(post.a !== CREATOR ? [["SREM", traceKey(id, post.a), `p:${post.id}`]] : []),
   ]);
-  if (post.a !== CREATOR) await giveData(room, [TRACE_ENTRY]);
+  // Its entry in the author's trace comes back only when this took it out: a deletion of the author takes the whole trace.
+  if (post.a !== CREATOR && Number(gone[4]) === 1) await giveData(room, [TRACE_ENTRY]);
   await unindexPost(id, post.id).catch((error) => {
     console.error("taking a deleted post out of the search index failed", error);
   });
@@ -1147,7 +1266,10 @@ async function toggleIn(id: string, key: string, ref: string, post: string, who:
   // gave it back), plus the room this press took itself when it found no like (Claude 1 on #3819).
   const own = held === 1 ? 0 : 1;
   const likeTimes = like + own;
-  const traceTimes = traced + own;
+  // The trace entry's room comes back for what this press took, plus the entry it removed only when that entry was
+  // there before this press (its SADD answered 0); an entry this press added itself is in its own room already
+  // (#2576).
+  const traceTimes = own + (traced === 1 && traceAdded === 0 ? 1 : 0);
   if (likeTimes || traceTimes) {
     await giveData(room, [
       ...(likeTimes ? [{ slot: POST_SLOT(post), bytes: likeTimes * SET_ENTRY_BYTES }] : []),
@@ -1435,14 +1557,16 @@ export async function deleteComment(id: string, post: string, comment: Comment, 
   const all = comment.parent ? [] : (await readComments(id, post)).filter((c) => c.parent === comment.id);
   const gone = [comment.id, ...all.map((c) => c.id)];
   const freed = [comment, ...all].reduce((sum, c) => sum + commentBytes(c), 0);
-  await redisPipeline([
+  const authored = [comment, ...all].filter((c) => c.a !== CREATOR);
+  const replies = await redisPipeline([
     ["HDEL", commentsKey(id, post), ...gone],
     ["DEL", ...gone.map((c) => commentLikesKey(id, post, c))],
     ["ZREM", reportsKey(id), ...gone.map((c) => `c:${post}:${c}`)],
     ...gone.map((c) => ["DEL", reportersKey(id, `c:${post}:${c}`)]),
-    ...[comment, ...all].filter((c) => c.a !== CREATOR).map((c) => ["SREM", traceKey(id, c.a), `c:${post}:${c.id}`]),
+    ...authored.map((c) => ["SREM", traceKey(id, c.a), `c:${post}:${c.id}`]),
   ]);
-  const traced = [comment, ...all].filter((c) => c.a !== CREATOR).length;
+  // Each entry in an author's trace comes back only when this took it out.
+  const traced = replies.slice(replies.length - authored.length).filter((n) => Number(n) === 1).length;
   await giveData(room, [{ slot: POST_SLOT(post), bytes: freed }, ...(traced ? [{ ...TRACE_ENTRY, bytes: traced * TRACE_ENTRY.bytes }] : [])]);
   await reindexComments(id, post);
 }
@@ -1572,28 +1696,58 @@ export async function dropSpace(id: string, space: string): Promise<void> {
 }
 
 /**
+ * One member's own record as it is now, read exactly, for deleting them (lib/community-erasure.ts): its value, or null
+ * when there is none. Anything Redis did not answer whole is UnknownReply, never "no member", so the person is not
+ * reported deleted with the record kept (Claude 5 on #2576).
+ */
+export async function readMemberRecord(id: string, who: string): Promise<{ raw: string; member: Member | null } | null> {
+  if (!isRedisConfigured()) return null;
+  const [raw] = exactReplies(await redisPipeline([["HGET", membersKey(id), who]]), 1, "a member's record read");
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReply("a member's record read");
+  return { raw, member: parseMember(raw) };
+}
+
+/**
  * Deletes one member's own record (lib/community-erasure.ts): who they are,
  * their name and answers, their place in the directory, and the counts kept
- * for their limits. Answers how many records its HDEL deleted (0 or 1);
- * the keys the record names elsewhere (their handle, their unsubscribe token)
- * are read and deleted before it, by the erasure (readMember).
+ * for their limits. Taken LAST, after what it names elsewhere (their handle,
+ * their unsubscribe token) is gone, and only while it still holds the value
+ * read (`raw`, from readMemberRecord): a step that fails before it leaves the
+ * record for the next try to find those keys by (Claude 5 on #2576). Answers
+ * true when this call deleted it (or there was none), false when it changed in
+ * between; each delete's answer is read exactly (CX-123 rule 24; Claude 7 on
+ * #3095), and any other is UnknownReplyError, with no room given back.
  */
-export async function forgetMemberRecord(id: string, who: string): Promise<number> {
-  if (!isRedisConfigured()) return 0;
+export async function forgetMemberRecord(id: string, who: string, raw: string | null, room?: DataStore): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
   const rates = (Object.keys(RATE_LIMITS) as RateKind[]).map((kind) => rateKey(id, who, kind));
-  // Each delete's own answer, read exactly (CX-123 rule 24; Claude 7 on #3095): HDEL and ZREM of one field 0 or 1, the
-  // rate keys' DEL from 0 up to their number. Any other answer, or a pipeline that does not answer one for each, may
-  // have left the record there: it throws, and the erasure is retried, never reported done. The count is the HDEL's.
-  const replies = repliesFor(await redisPipeline([
-    ["HDEL", membersKey(id), who],
+  const commands: (string | number)[][] = [
     ["ZREM", dirKey(id), who],
     ["DEL", ...rates],
-  ]), 3);
-  const [record, listed, limits] = (replies ?? []).map(countOf);
-  if (!replies || (record !== 0 && record !== 1) || (listed !== 0 && listed !== 1) || limits === null || limits === undefined || limits > rates.length) {
+  ];
+  if (raw !== null) commands.push(["EVAL", HASH_DEL_IF, 1, membersKey(id), who, raw]);
+  // Each delete's own answer, read exactly: ZREM of one field 0 or 1, the rate keys' DEL from 0 up to their number, the
+  // record's compare-and-delete 0 or 1. Any other answer, or a pipeline that does not answer one for each, may have
+  // left the record there: it throws, and the erasure is retried, never reported done.
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const [listed, limits, taken] = (replies ?? []).map(countOf);
+  if (!replies || (listed !== 0 && listed !== 1) || limits === null || limits === undefined || limits > rates.length || (raw !== null && taken !== 0 && taken !== 1)) {
     throw new UnknownReplyError("a community member's record deleted");
   }
-  return record;
+  if (raw === null) return true;
+  if (taken === 0) return false;
+  const member = parseMember(raw);
+  // A record made by an order gives back its first write to the orders' part
+  // and what it grew by, its name's words and handle with it, to the members'
+  // slot. One written before this was recorded (no `r`) stays counted.
+  if (room && member?.r === "o") {
+    const first = firstMember(member.k, member.e, member.at);
+    const grown = dataBytes([countedMember(member)]) - dataBytes([countedMember(first)]) + nameBytes(member.n);
+    await releaseOrderData(room, fieldReleaseBytes(who, JSON.stringify(first)));
+    if (grown > 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);
+  }
+  return true;
 }
 
 /** Commands sent at once while reading a whole community for one member's copy. */

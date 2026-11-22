@@ -19,10 +19,11 @@ import { bookWork } from "@/lib/api-read-rules";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 import {
   COST_LINES, PAYPAL_PRESS, PAYPAL_PRESS_BOOK_COMMANDS, PAYPAL_PRESS_COMMANDS, PAYPAL_PRESS_LOCK_TRIES, PAYPAL_PRESS_SECONDS,
-  PAYPAL_PRESSES_UNTAKEN, COMMAND, TAKE_COMMANDS, UNIT_COST, figureCost, paypalPressCost, request, lockTriesAtMost,
+  PAYPAL_PRESSES_UNTAKEN, VAULT_REFUSED_PASS, COMMAND, TAKE_COMMANDS, UNIT_COST, figureCost, paypalPressCost, request, lockTriesAtMost,
 } from "./plan-cost-registry";
 
 const STATS = "statspress1";
@@ -88,6 +89,7 @@ async function seed(store: Store, people: number, open: number): Promise<void> {
     commands.push(["HSET", `nl:pp:open:${STATS}`, `OPEN${b}BATCHX`, JSON.stringify({ at: Date.now(), currency: "usd", lines: [{ a: `z${String(b).padStart(11, "0")}`, c: 100 }] })]);
   }
   await pipeline(commands);
+  await markLive(store);
   if (!(await connectPayPal(store, CLIENT, SECRET)).ok) throw new Error("synthetic PayPal app not kept");
 }
 
@@ -122,8 +124,9 @@ async function main(): Promise<void> {
     is(`${people} affiliates: the units it takes (${paypalPressUnits(sizes!)}) cover what it sent`, paypalPressUnits(sizes!) * UNIT_COST.integration >= paypalPressCost(book.length + 8) && own + book.length + 8 <= PAYPAL_PRESS_COMMANDS + bookWork({ ...sizes!, products: 0 }, BOOK_STRIPE_PAGES).commands, true);
     is(`${people} affiliates: and within PAYPAL_PRESS_BOOK_COMMANDS (${PAYPAL_PRESS_BOOK_COMMANDS})`, book.length <= PAYPAL_PRESS_BOOK_COMMANDS, true);
     // The lock: taken, held again once before the batch is written down, let go. One hold: a second one in a row
-    // with nothing awaited between them would be a command that buys nothing.
-    is(`${people} affiliates: one EVAL to hold the lock again and one to let it go`, all.filter((c) => c === "EVAL").length - book.filter((c) => c === "EVAL").length, 2);
+    // with nothing awaited between them would be a command that buys nothing. And the batch itself is written down by
+    // one EVAL, only while the store is live (KEEP_OPEN_IF_LIVE, Codex L-20261120-0448), in place of HSET and SADD.
+    is(`${people} affiliates: one EVAL to hold the lock again, one to write the batch down while the store is live and one to let the lock go`, all.filter((c) => c === "EVAL").length - book.filter((c) => c === "EVAL").length, 3);
   }
 
   part("The path whose answer is not known writes its counts: inside the same constant");
@@ -183,7 +186,7 @@ async function main(): Promise<void> {
   is("a book not kept costs the base", paypalPressUnits({ kept: false, entries: 0, people: 0, leads: 0, paypalRefunds: 0, stripe: true, products: 9 }), PAYPAL_PRESS_BASE_UNITS);
   const line = COST_LINES.find((l) => l.id === "integrations")!;
   for (const tier of ["creator", "pro", "scale"] as const) {
-    is(`${tier}: the integrations line pays the figure and payday's auto-pay at its most`, Math.abs(line.monthlyUsd(tier) - (figureCost(STORE_ALLOWANCES[tier], "integration") + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS)) < 1e-12, true);
+    is(`${tier}: the integrations line pays the figure and payday's auto-pay at its most`, Math.abs(line.monthlyUsd(tier) - (figureCost(STORE_ALLOWANCES[tier], "integration") + STORE_ALLOWANCES[tier].integration * VAULT_REFUSED_PASS + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS)) < 1e-12, true);
   }
   is("payday's auto-pay: one a store a month (claimMonth)", PAYPAL_PRESSES_UNTAKEN, 1);
   const payday = readFileSync(join(process.cwd(), "lib/affiliate-payday.ts"), "utf8");

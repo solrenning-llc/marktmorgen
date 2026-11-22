@@ -194,6 +194,25 @@ async function main(): Promise<void> {
   files.get = original;
   is("and the name is not left on the sweep's list", await listed(unknown), false);
 
+  part("A door count that cannot be read opens no door and says so, never \"slow\" (Codex X6's LOW on #3067)");
+  {
+    // The door's own count (withinLimit "task-upload") answered in a shape that cannot be read, or past its limit.
+    const pipe = redis.pipeline.bind(redis);
+    const counted = (reply: unknown[]) =>
+      (async (commands: (string | number)[][]) =>
+        String(commands[0]?.[0]).toUpperCase() === "INCR" && String(commands[0]?.[1]).startsWith("nl:rl:task-upload:") ? reply : pipe(commands)) as typeof redis.pipeline;
+    const unread = browserName(folder, "pdf");
+    redis.pipeline = counted(["1", 1]);
+    let answer: { status: number; error?: string };
+    try { answer = await ask(unread); } finally { redis.pipeline = pipe; }
+    is("an unreadable count: the door is not opened now (503 unavailable), never too many (429) nor a bare server error", answer, { status: 503, error: "unavailable" });
+    is("and the name is not left on the sweep's list", await listed(unread), false);
+    const over = browserName(folder, "pdf");
+    redis.pipeline = counted([9_999, 0]);
+    try { answer = await ask(over); } finally { redis.pipeline = pipe; }
+    is("control: a count read past the limit is still \"slow\"", answer, { status: 429, error: "slow" });
+  }
+
   part("A hand-in that finds no file yet puts the name back, so a PUT landing later is swept (pre-review, ALTO)");
   const early = browserName(folder, "pdf");
   is("the door opens", (await ask(early)).status, 200);
@@ -280,7 +299,7 @@ async function main(): Promise<void> {
   // The browser's PUT, the hand-in's delete and the sweep's: each an Advanced Operation of the file store.
   is("its upload and every delete of it are priced", typeof advancedPriced === "number" && 1 + deletes <= advancedPriced, true);
   const handInLine = registry.COST_LINES.flatMap((line) => line.sources).find((source) => source.file === "app/api/store/course/task/route.ts");
-  is("the hand-in's own head and deletes are named in a cost line", ["headFile(path)", "deleteFile(path)"].every((name) => handInLine?.names.includes(name)), true);
+  is("the hand-in's own head and deletes are named in a cost line", ["headFile(path)", "deleteFile(path, \"site_cleanup\")"].every((name) => handInLine?.names.includes(name)), true);
   const workBytes = (registry as Record<string, unknown>).TASK_WORK_BYTES;
   is("the sweep's read of the work is counted in bytes", typeof workBytes === "number" && workBytes >= rules.MAX_ANSWER_TEXT + rules.MAX_FEEDBACK, true);
 

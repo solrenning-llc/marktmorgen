@@ -9,7 +9,8 @@
  * forgets them. Synthetic data, the memory Redis, no Discord call.
  */
 import { emailKey } from "@/lib/learn";
-import { accountOf, forgetServer, keepMember, membersOf, readServer, saveServer } from "@/lib/discord-store";
+import { accountOf, forgetServer, keepMember, membersOf, readServer } from "@/lib/discord-store";
+import { seedDiscordServer as saveServer } from "./discord-server-fixture";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";

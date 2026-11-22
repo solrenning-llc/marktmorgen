@@ -37,12 +37,14 @@ import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { cache } from "react";
 import { type Listing, type Store, isFree, normaliseHandle, storeForPage } from "@/lib/store";
 import { moneyField } from "@/lib/money";
-import { productIdFromAddress, readAsking, readListing, readListings } from "@/lib/catalog";
+import { productIdFromAddress, readAsking, readListing, readListings, readProductLegal } from "@/lib/catalog";
+import { activeShipping } from "@/lib/shipping";
+import { ProductSafetyFacts } from "@/components/product-safety-facts";
 import { canSell, canSellProduct, sellableOptions } from "@/lib/store-checkout";
 import { canGiveProduct } from "@/lib/free";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
-import { IMAGE_SIZES } from "@/lib/product-image";
+import { IMAGE_SIZES, smallerCopies } from "@/lib/product-image";
 import { aboutBlocks, aboutExcerpt, readAbout } from "@/lib/product-about";
 import { activePlan, bumpTargets } from "@/lib/product-extras";
 import { activePwyw } from "@/lib/pay-what-you-want";
@@ -60,7 +62,9 @@ import { readPage } from "@/lib/sales-page-store";
 import { type Summary, REVIEWS_ON_PAGE, average, showsRating, summaryOf, visibleReviews } from "@/lib/reviews";
 import { BuyBox, GiftBox, GroupBox, PriceTag, ProductFacts, RemindBox, pageAction, productPath, saleNow } from "@/components/store-product";
 import { askable } from "@/lib/checkout-ask";
-import { type BlockContext, HeroView, PageSections } from "@/components/sales-blocks";
+import { type BlockContext, HeroView, type PageAction, PageSections } from "@/components/sales-blocks";
+import { MemberPriceBack, MemberPriceNote, MemberPriceTag, memberPriceCanShow, memberShown, readMemberBack } from "@/components/member-price";
+import { type MemberCheck, memberPriceFor } from "@/lib/member-price";
 import { pageFacts } from "@/lib/page-facts";
 import { LANGUAGES } from "@/lib/store-language";
 import { RatingLine, ReviewsSection } from "@/components/review-list";
@@ -108,25 +112,33 @@ type Params = {
  * the same prices, options, plan, box for the product offered alongside,
  * limited quantity and checkout. A page that sold the same thing on
  * different terms would be a page nobody could trust.
+ *
+ * As the store page does, a store with no plan a visit can be charged to rests once it has had its month's visits
+ * (lib/traffic.ts). The page is counted as one of the store's public requests here, before anything of the product
+ * is read (traffic audit, 9 November 2026): past the window, neither the title nor the page reads the listing, the
+ * description or the sales page. The page and its title share this one count within a request (React cache).
  */
-const load = cache(async (raw: string, id: string): Promise<{ store: Store; product: Listing; asked: string } | null> => {
+const load = cache(async (raw: string, id: string): Promise<{ store: Store; product: Listing; asked: string; resting: false } | { store: Store; asked: string; resting: true } | null> => {
   const decoded = decodeURIComponent(raw);
   if (!decoded.startsWith("@")) return null;
   const asked = normaliseHandle(decoded);
   const store = await storeForPage(asked);
   if (!store) return null;
+  if (await isResting(store)) return { store, asked, resting: true };
   // The id alone, or the title's words with the id at the end (lib/product-slug.ts).
   const product = await readListing(store, productIdFromAddress(store, id) ?? id);
   // A draft has no page until the creator publishes it.
-  return product && !product.hidden ? { store, product, asked } : null;
+  return product && !product.hidden ? { store, product, asked, resting: false } : null;
 });
 
-async function pageOf(store: Store, product: Listing): Promise<SalesPage | "unread"> {
+/** The product's description and its sales page, each read once a request, by the title and by the page (React cache). */
+const aboutOf = cache((statsId: Store["statsId"], productId: string): Promise<string> => readAbout(statsId, productId));
+const pageOf = cache(async (statsId: Store["statsId"], productId: string, has: boolean): Promise<SalesPage | "unread"> => {
   // A page kept from visitors while the creator works on it shows as none (lib/sales-page.ts, livePage). One whose
   // read is not known is "unread": said so, out of search, never shown as the product with no page
   // (C4-20261106-2610-C6-153, unit B).
-  return product.page ? readPage(store.statsId, product.id).then((page) => livePage(page, saleClock())).catch(() => "unread" as const) : { ...EMPTY_PAGE, blocks: [] };
-}
+  return has ? readPage(statsId, productId).then((page) => livePage(page, saleClock())).catch(() => "unread" as const) : { ...EMPTY_PAGE, blocks: [] };
+});
 
 /**
  * The page as this visitor is shown it, while it runs a test of a second
@@ -152,8 +164,10 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, product: id } = await params;
   const found = await load(handle, id);
   if (!found) return { title: "Not found — Marktmorgen" };
+  // Resting: the title says so, and names nothing of the product, which was not read.
+  if (found.resting) return { title: `${speech(found.store).w.restingTitle} — ${found.store.name}`, robots: { index: false, follow: true } };
   const { store, product } = found;
-  const [about, page] = await Promise.all([product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""), pageOf(store, product)]);
+  const [about, page] = await Promise.all([product.about ? aboutOf(store.statsId, product.id) : Promise.resolve(""), pageOf(store.statsId, product.id, product.page)]);
   if (page === "unread") return { title: `${speech(store).w.notAvailable} — ${store.name}`, robots: { index: false, follow: true } };
   const description =
     page.seoDescription || product.summary || aboutExcerpt(about) || speech(store).w.productDescription(product.title, store.name);
@@ -260,6 +274,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
     if (store) redirect(`/@${store.handle}`);
     notFound();
   }
+  if (found.resting) return <StoreResting store={found.store} />;
   const { product, asked } = found;
   // With the visitor's country, for a fair price for it (lib/fair-price.ts).
   const store = await forVisitor(found.store);
@@ -273,9 +288,6 @@ export default async function ProductPage({ params, searchParams }: Params) {
   }
   if (asked !== store.handle && !reachedOn) permanentRedirect(productPath(store, product));
 
-  // As the store page does: a store with no plan a visit can be charged to
-  // rests once it has had its month's visits (lib/traffic.ts).
-  if (await isResting(store)) return <StoreResting store={store} />;
   // Switched off after notices about its content (lib/takedown.ts).
   if (store.suspended) return <StoreResting store={store} suspended />;
 
@@ -289,10 +301,13 @@ export default async function ProductPage({ params, searchParams }: Params) {
   const giftProblem = typeof query.gift === "string" ? query.gift : "";
   // A cart, where two or more products could go in one (lib/cart-rules.ts).
   const cartOn = selling && offersCart(store);
-  const cartNotice = query.cart === "changed" || query.cart === "error" || query.cart === "consent" ? query.cart : null;
+  const cartNotice = query.cart === "changed" || query.cart === "error" || query.cart === "consent" || query.cart === "abroad" || query.cart === "country" ? query.cart : null;
   const groupProblem = typeof query.group === "string" ? query.group : "";
   // Sent back because the box to start access at once was not checked (lib/digital-consent.ts): said beside it.
   const consentAgain = query.consent === "needed";
+  // Sent back by the checkout (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate): refused from the EU or the UK, or
+  // the billing country was left out. Only those two words; anything else shows nothing.
+  const countryStatus = query.status === "abroad" || query.status === "country" ? query.status : null;
   // Sent from a card on one of the creator's listed sites (app/embed): the site and the way back, carried to the
   // checkout, which checks both against the store's list again; anything else is ignored there.
   const embedSite = typeof query.site === "string" ? query.site.slice(0, 300) : "";
@@ -316,12 +331,12 @@ export default async function ProductPage({ params, searchParams }: Params) {
         </Link>
       </p>
     ) : null;
-  const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts, asksAtCheckout] = await Promise.all([
-    product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""),
+  const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts, legal, asksAtCheckout] = await Promise.all([
+    product.about ? aboutOf(store.statsId, product.id) : Promise.resolve(""),
     // A count that cannot be read is unknown, never "no limit" nor "keys left" (CX-123 rule 24), as on the store page.
     stockLeft(store, product).catch(() => undefined),
     outOfKeys(store, product).catch(() => null),
-    pageOf(store, product),
+    pageOf(store.statsId, product.id, product.page),
     summaryOf(store.statsId, product.id).catch(() => null),
     // What its order bump offers, drawn in the same box as on the store page.
     product.bumps.length ? readListings(store, bumpTargets(product)) : Promise.resolve([]),
@@ -340,6 +355,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
           shownEnd: course && !product.recurring ? shownAccessEnd(course) : product.recurring ? null : "none",
           unread,
         })) : Promise.resolve(null),
+    // The legal information of a product the creator ships (618 [SZ2]): one read of its own record, only then.
+    activeShipping(product) ? readProductLegal(store, product.id).catch(() => null) : Promise.resolve(null),
     // Whether it asks questions at checkout: then it is bought here, from the buy box that asks them, and is not
     // offered for a cart, whose checkout refuses it (#4350). Read only where the cart would be offered; unknown is
     // not "asks nothing" (rule 24), so the cart is not offered then either.
@@ -362,6 +379,9 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // recordOpenEnrollment), so a course sold here through PayPal alone never shows a date (Claude 5's M1 on #3445).
   const accessEndLine = canSellProduct(store, product) ? courseFacts?.accessEndLine ?? null : null;
   const courseUnread = courseFacts?.unread === true;
+  // What was read goes with the product to its buy box, so the countries it says it ships to are the ones
+  // its checkout offers (lib/physical-legal-ship.ts); a record not read is not filled.
+  const shippedNow = activeShipping(product) ? { ...product, legal } : product;
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.
   const page = await shownVersion(store, product.id, savedPage, product.priceCents > 0);
@@ -415,6 +435,17 @@ export default async function ProductPage({ params, searchParams }: Params) {
   const groupable = selling && !soon && !unread && bundleReady && canSellProduct(store, product) && canGroup(product);
   const plan = activePlan(product);
   const pwyw = activePwyw(product);
+  // A member price (620 [SZ4], components/member-price.tsx): the server is asked only where the checkout would take
+  // it, and it is shown only to a visitor whose address it proves now (lib/member-price.ts). Unknown, or a check that
+  // fails, is the normal price. This page reads the visitor's cookies, so it is drawn for each request, never cached
+  // for everybody.
+  const memberCheck: MemberCheck = memberPriceCanShow(store, product, { selling, soon, unread, remaining, ready: bundleReady, related })
+    ? await memberPriceFor(store, product, await cookies()).catch((): MemberCheck => ({ state: "unknown" }))
+    : { state: "none" };
+  const member = memberShown(store, product, memberCheck);
+  // What the checkout sent back about a member price (app/api/store/checkout/route.ts): said beside the buy box.
+  const memberBack = readMemberBack(query.member);
+  const priceTag = member ? <MemberPriceTag store={store} product={product} percent={member} /> : <PriceTag store={store} product={product} />;
   const description = page.seoDescription || product.summary || aboutExcerpt(about) || product.title;
   const free = isFree(product);
   const built = page.blocks.length > 0;
@@ -460,6 +491,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
 
   const buyTerms = (
     <>
+      {memberBack ? <MemberPriceBack store={store} back={memberBack} /> : null}
+      {member ? <MemberPriceNote store={store} product={product} percent={member} paypal={byPayPal} /> : null}
       {plan && canSellProduct(store, product) ? (
         <p className="st-muted text-sm font-semibold">{w.payInFullOr(planLine(store, plan))}</p>
       ) : null}
@@ -479,14 +512,28 @@ export default async function ProductPage({ params, searchParams }: Params) {
           </a>
         </p>
       ) : null}
+      {/* 618 [SZ2]: what the creator filled on a physical product, before the buy button (components/product-safety-facts.tsx). */}
+      <ProductSafetyFacts store={store} product={product} legal={legal} />
       {query.terms === "changed" && product.course ? <p className="st-note mt-4 text-sm" role="alert">{coursesWords(store.language).accessEndChanged}</p> : null}
       {unread && selling && !soon ? (
         <p role="status" className="st-muted mt-4 text-sm">{w.cardBuyUnread}</p>
       ) : (
-        <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} unread={courseUnread} accessEnd={courseFacts?.shownEnd ?? null} chosenOption={linkedChoice} />
+        <>
+          {/* Drawn with the buy box only: its link and the field's aria-describedby point at the country field inside it. */}
+          {countryStatus ? (
+            <div className="st-note mb-4" role="alert" id="country-notice">
+              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.notices[countryStatus].title}</p>
+              <p className="mt-1 text-sm">{w.notices[countryStatus].body}</p>
+              <p className="mt-2 text-sm">
+                <a href={`#bc-${product.id}`} className="underline">{w.chooseCountry}</a>
+              </p>
+            </div>
+          ) : null}
+          <BuyBox store={store} product={shippedNow} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} member={member} unread={courseUnread} accessEnd={courseFacts?.shownEnd ?? null} chosenOption={linkedChoice} countryProblem={!!countryStatus} />
+        </>
       )}
       {/* A course whose exact read failed offers no way to buy here, the cart included (Codex L on #3445): the BuyBox is closed on the same reading. */}
-      {!courseUnread && cartOn && !soon && !unread && !asksAtCheckout && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
+      {!courseUnread && cartOn && !soon && !member && !unread && !asksAtCheckout && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {/* A question before buying, answered from this page (lib/answers.ts): only where the creator switched it on. */}
       {selling && answersOn(store) ? (
         <AskBox
@@ -584,11 +631,17 @@ export default async function ProductPage({ params, searchParams }: Params) {
 
   // Where the buy box is and what its button says, for the page's own blocks
   // and for the bar held at the bottom of a phone's screen (components/sticky-buy.tsx).
+  // A member's buttons lead to the buy box, the one form that carries the member price, and say its amount; a
+  // count that could not be read says so instead, as the buy box does (the base's cardBuyUnread).
   const { action, label } =
-    unread && selling && !soon ? { action: { kind: "none" as const, text: w.cardBuyUnread }, label: "" } : pageAction(store, product, remaining, selling, related, soon, preorder);
+    unread && selling && !soon
+      ? { action: { kind: "none" as const, text: w.cardBuyUnread }, label: "" }
+      : member
+        ? { action: { kind: "link", href: "#buy" } satisfies PageAction, label: w.buyFor(money(salePrice(product.priceCents, member))) }
+        : pageAction(store, product, remaining, selling, related, soon, preorder);
   const sticky =
     action.kind === "none" ? null : (
-      <StickyBuy target={free ? "get" : "buy"} label={label} price={<PriceTag store={store} product={product} />} />
+      <StickyBuy target={free ? "get" : "buy"} label={label} price={priceTag} />
     );
 
   // The store's latest real purchases, where the creator shows them (lib/recent-sales.ts).
@@ -628,7 +681,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
               <img
                 src={servedImageUrl(product.image)}
                 srcSet={servedSrcSet(product.image)}
-                sizes={product.image.small ? IMAGE_SIZES.hero : undefined}
+                sizes={smallerCopies(product.image).length ? IMAGE_SIZES.hero : undefined}
                 alt={product.image.alt}
                 width={product.image.width}
                 height={product.image.height}
@@ -644,7 +697,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
               <h1 className="font-display min-w-0 text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-3xl">
                 {product.title}
               </h1>
-              <p className="st-price text-base"><PriceTag store={store} product={product} /></p>
+              <p className="st-price text-base">{priceTag}</p>
             </div>
             {summary ? <RatingLine summary={summary} href="#reviews" className="mt-2" lang={store.language} /> : null}
             {soldLine}
@@ -704,7 +757,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
   const hero = first?.kind === "hero" ? first : null;
   const rest = hero ? others : page.blocks;
   const placed = page.blocks.find((block) => block.kind === "reviews");
-  const pill = <p className="st-price text-sm"><PriceTag store={store} product={product} /></p>;
+  const pill = <p className="st-price text-sm">{priceTag}</p>;
   const rating = summary ? <RatingLine summary={summary} href="#reviews" lang={store.language} /> : null;
 
   const buySection = (
@@ -713,7 +766,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
         <h2 id="buy-title" className="font-display min-w-0 text-xl font-semibold leading-snug tracking-[-0.01em] sm:text-2xl">
           {free ? w.getTitle(product.title) : product.title}
         </h2>
-        <p className="st-price text-base"><PriceTag store={store} product={product} /></p>
+        <p className="st-price text-base">{priceTag}</p>
       </div>
       {soldLine}
       <ProductFacts store={store} product={product} linkCourse={false} bundleItems={inside} videoLine={videoLine} accessEndLine={accessEndLine} />

@@ -70,3 +70,16 @@ out of every production trace (Next's own compiled copy, used only by the image 
 different path). scripts/test_dependency_audit_picomatch.py holds each condition; it runs with
 scripts/test_dependency_audit.py, so no workflow changed. This is an exception for an unpatched upstream package,
 not a fix, and no claim of the absence of security defects.
+
+## GHSA-fc5q-39xc-vjpf exception removed — 18 November 2026
+
+On the owner's order of 18 November 2026 ("resolva vc"), the lint toolchain that brought picomatch into the tree
+(`eslint` 9 with `eslint-config-next` 16.4.5 and the `typescript-eslint` chain) was replaced by `oxlint` 1.90.0,
+pinned exactly (MIT, no JavaScript dependencies; one prebuilt binary per platform under `optionalDependencies`).
+`.oxlintrc.json` keeps every rule the former `core-web-vitals` and `typescript` presets turned on that oxlint
+implements, at the same severity; the rules without an oxlint equivalent are listed in the pull request.
+
+With it, `package-lock.json` holds no copy of picomatch, `npm audit` reports no finding, and the dated exception
+above is gone: scripts/check_dependency_audit.py is again the strict gate with no exception list, and
+scripts/test_dependency_audit.py fails if any exception constant or advisory text comes back. The runtime trace
+check keeps its list unchanged. No claim of the absence of security defects.

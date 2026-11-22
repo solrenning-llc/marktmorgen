@@ -7,6 +7,8 @@ import { INTEGRATION_PAUSED_WORDS, META_READ_PAUSED } from "@/lib/integration-pa
 import { PlanDisputeNotice } from "@/components/plan-dispute-notice";
 import { planDisputed } from "@/lib/plan-dispute-rules";
 import { RenewalUnpaidNotice } from "@/components/renewal-unpaid-notice";
+import { ShortLinksOffNotice } from "@/components/short-links-off-notice";
+import { shortLinksOffNotice } from "@/lib/short-link-rest";
 import { funnelLaunchChecklist } from "@/lib/funnel-launch-checklist";
 import { activationTiming } from "@/lib/store-activation";
 import { PathStudioReminder } from "@/components/path-studio-reminder";
@@ -151,6 +153,7 @@ import { TodayPanel } from "@/components/today-panel";
 import { NextActionsPanel } from "@/components/next-actions-panel";
 import { nextActions } from "@/lib/next-actions-rules";
 import { nextFactsOf } from "@/lib/next-actions-read";
+import { DRAFTABLE, NEXT_DRAFT_JOBS } from "@/lib/next-action-draft-rules";
 import { bookingCounts, salesCounts, todayView, type TodayCounts, type TodayId } from "@/lib/today-rules";
 import { LinkEditor } from "@/components/link-editor";
 import { JoinBoxEditor } from "@/components/join-box-editor";
@@ -190,6 +193,7 @@ import {
   isConnectInTestMode,
 } from "@/lib/stripe-connect";
 import { ORDERS_PAGE_SIZE, canSell, listSales } from "@/lib/store-checkout";
+import { RISK_WORDS } from "@/lib/payment-risk";
 import { RECEIPT_BATCH_MAX, lastMonthDays } from "@/lib/receipt-batch-rules";
 import { DELIVERY_ALLOWANCE_BYTES, FREE_PAUSE_ABOVE_BYTES, bytesWords, deliveredThisMonth } from "@/lib/delivery";
 import { watchedForAdmission } from "@/lib/watch";
@@ -233,7 +237,10 @@ import { PasskeySignIn } from "@/components/passkey-signin";
 import { TwoStepManager } from "@/components/two-step-manager";
 import { AppCodeInvite } from "@/components/app-code-invite";
 import { showAppCodeInvite } from "@/lib/app-code-invite-words";
-import { lockedUntil, twoStepStatus } from "@/lib/two-step";
+import { TwoStepAsk } from "@/components/two-step-ask";
+import { noSecondStep, showTwoStepAsk } from "@/lib/two-step-ask-rules";
+import { firstSaleKnown, lockKnown } from "@/lib/two-step-ask";
+import { twoStepStatus } from "@/lib/two-step";
 import { LOCKED_LIST } from "@/lib/locked-words";
 import { RecoveryAddressManager, RecoveryAddressUnread } from "@/components/recovery-address-manager";
 import { hideAddress, recoveryAddress } from "@/lib/recovery-address";
@@ -645,6 +652,48 @@ const BILLING_NOTICES: Record<string, { title: string; body: string }> = {
   },
 };
 
+/** A notice that asks for something to be done: said as a status, under its own heading, with a link to each place. */
+type ActionNotice = { title: string; body: string; actions: { href: string; label: string }[] };
+
+/**
+ * Where a move lands when something did not come along (app/api/auth/move): "moved", then "-sessions-open",
+ * "-no-recovery", "-no-teams" and "-keys-open" (an API key made from a place taken off may still work), each only
+ * when it applies; "moved" and "moved-sessions-open" alone are
+ * ADDRESS_NOTICES below.
+ * Both sign-in addresses are emailed too, but this is the notice that cannot be lost, so it says what to do and links
+ * straight to where it is done (WCAG 2.4.9, 3.3.5: each link says its purpose by its own words).
+ */
+function movedNotice(key: string): ActionNotice | undefined {
+  const flags = /^moved(-sessions-open)?(-no-recovery)?(-no-teams)?(-keys-open)?$/.exec(key);
+  if (!flags || !(flags[2] || flags[3] || flags[4])) return undefined;
+  const [sessionsOpen, recovery, teams, keys] = [Boolean(flags[1]), Boolean(flags[2]), Boolean(flags[3]), Boolean(flags[4])];
+  const actions: ActionNotice["actions"] = [];
+  if (recovery) actions.push({ href: "#account-recovery", label: "Check your recovery address" });
+  if (sessionsOpen) actions.push({ href: "#log-out-everywhere", label: "Go to “Log out of all devices”" });
+  const needs = [sessionsOpen, recovery, teams, keys].filter(Boolean).length;
+  return {
+    title:
+      needs >= 2
+        ? `Your account moved, but ${["two", "three", "four"][needs - 2]} things need you`
+        : recovery
+          ? "Your account moved: check its recovery address"
+          : teams
+            ? "Your account moved: ask to join your teams again"
+            : "Your account moved: some API keys may still work",
+    body: [
+      "This address logs you in from now on.",
+      sessionsOpen ? "We could not close every session that was open before the move, so log out of all devices." : "Every session the old one had open is closed.",
+      // Not "may have none": a carry whose answer was lost may still have written it, and the section below shows it.
+      ...(recovery ? ["We could not confirm that your recovery address came along. Check it, and add one again if none is shown."] : []),
+      // Nothing to press here: only each store's owner can invite this address (lib/team.ts dropMemberships).
+      ...(teams ? ["We could not carry your places on other stores' teams. Ask each store's owner to invite this address again."] : []),
+      // The move is not complete on that team (lib/team.ts dropMemberships): only its owner can revoke them, and was emailed.
+      ...(keys ? ["Some API keys made with your old address on another store's team may still work. Ask that store's owner to revoke the ones you no longer use."] : []),
+    ].join(" "),
+    actions,
+  };
+}
+
 const ADDRESS_NOTICES: Record<string, { title: string; body: string }> = {
   sent: {
     title: "Check the new address",
@@ -749,6 +798,14 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
     title: "This store is closing",
     body: `Its plan has ended, so it closes on its own and you do not need to delete it. Everyone who bought from it is emailed at least ${BUYER_NOTICE_DAYS} days before its closing day, which is at least ${CLOSING_DAYS} days after the plan ended. On that day, each member's renewal ends and they get back the part of their last payment they did not use. The store and its records are then removed within ${ERASE_WITHIN_DAYS} days. Your studio shows its closing day. Nothing was deleted.`,
   },
+  assistant: {
+    title: "This store still has the Store assistant running",
+    body: "The assistant would keep billing you after the store is gone. Under Store assistant, press \u201cStop at the end of this month\u201d. Then you can delete the store. Nothing was deleted.",
+  },
+  assistant_due: {
+    title: "The Store assistant on this store may still be charged",
+    body: "A payment for the Store assistant did not go through, and Stripe may still try it again. You can delete this store once Stripe has ended the assistant, or write to support to end it now. Nothing was deleted.",
+  },
   domain: {
     title: "This store still has its own domain",
     body: "Remove the domain first. Nothing was deleted.",
@@ -763,12 +820,15 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
   },
 };
 
-/** Comments under each course's lessons since the creator last opened that course's studio page. */
-async function newCommentsFor(products: { id: string; course?: { id: string } | null }[]): Promise<Record<string, number>> {
+/**
+ * Comments under each course's lessons since the creator last opened that course's studio page; null for every
+ * course when they could not be counted (rule 24), so the list says so instead of showing none.
+ */
+async function newCommentsFor(products: { id: string; course?: { id: string } | null }[]): Promise<Record<string, number | null>> {
   const courses = products.filter((p) => p.course).map((p) => [p.id, p.course!.id] as const);
   if (!courses.length) return {};
-  const counts = await freshCounts(courses.map(([, c]) => c)).catch(() => new Map<string, number>());
-  return Object.fromEntries(courses.map(([product, c]) => [product, counts.get(c) ?? 0]));
+  const counts = await freshCounts(courses.map(([, c]) => c)).catch(() => null);
+  return Object.fromEntries(courses.map(([product, c]) => [product, counts ? (counts.get(c) ?? null) : null]));
 }
 
 /** The products a store-wide sale can cover (lib/store-sale.ts), by title, for the sale's picker. */
@@ -907,8 +967,9 @@ export default async function StudioPage({
         store?.sid && may("team") ? readTeam(store.sid).catch(() => null) : Promise.resolve(null),
         isFreshSession(cookieStore.get(SESSION_COOKIE)?.value).catch(() => false),
         // Whether this browser got in without its second step, and until when what matters is locked (lib/two-step.ts).
-        // null when it could not be read: never taken for "not locked" (LOW 1 of Claude 1's review of #2945).
-        lockedUntil(cookieStore.get(SESSION_COOKIE)?.value).catch(() => null),
+        // null when it could not be read (lockKnown): never taken for "not locked" (LOW 1 of Claude 1's review of #2945),
+        // nor for "unlocked" by the first-sale ask (Codex H2 on #3511).
+        lockKnown(cookieStore.get(SESSION_COOKIE)?.value),
         // The person's two-step login (lib/two-step.ts), beside their passkeys.
         // null when it could not be read: never taken for "no request to turn it off" (Claude 4, C4-2980 on #2900).
         email ? twoStepStatus(email).catch(() => null) : Promise.resolve({ on: false, since: 0, codesLeft: 0, reset: 0, backup: "" }),
@@ -923,7 +984,10 @@ export default async function StudioPage({
   const pin = store?.sid ? `?store=${store.sid}` : "";
   // The writing help, and what is left of it this month: read once for the whole studio page.
   const ai = store && aiAvailableFor(store) ? aiOnValue(true, firstReads.aiLeft ? await firstReads.aiLeft : null) : aiOnValue(false, null);
+  // A notice that asks for something to be done is drawn on its own (movedNotice); it stands in for any other.
+  const actionNotice = movedNotice(typeof params.address === "string" ? params.address : "");
   const notice =
+    actionNotice ??
     ADDRESS_NOTICES[typeof params.address === "string" ? params.address : ""] ??
     STRIPE_NOTICES[typeof params.stripe === "string" ? params.stripe : ""] ??
     // A call to PayPal or Meta refused for the store's calls to connected services (lib/metered-limits.ts).
@@ -993,6 +1057,8 @@ export default async function StudioPage({
   const planReads = {
     // Stripe's own page that pays an unpaid renewal, read fresh on each load (232 [CA1] unit 4).
     renewalPage: current && unpaidSince > 0 && store?.subscriptionId && isBillingConfigured() ? early(renewalInvoicePage(store.subscriptionId)) : null,
+    // The notice that the store's short links were turned off and work again (the owner's decision 14 on #3330): one GET.
+    linksOff: current && paid && store?.sid ? early(shortLinksOffNotice(store.sid).catch(() => null)) : null,
     firstSale: PLANS_ON_SALE && store && paid && !billedYearly ? early(firstSaleAt(store)) : null,
     domainNow: domainsOn && store?.domain && !store.domain.liveAt && paid && hasPro(tier) ? early(domainStatus(store.domain.name, store).catch(() => null)) : null,
     sold: current && current.stripeAccountId && may("orders") ? early(listSales(current)) : null,
@@ -1054,6 +1120,7 @@ export default async function StudioPage({
       ]))
     : null;
   const renewalPage = planReads.renewalPage ? await planReads.renewalPage : null;
+  const linksOff = planReads.linksOff ? await planReads.linksOff : null;
   const trialing = live?.state === "active" && live.trialing;
   // The trial is once per store. A store starting again is told, on every
   // button, that it pays from today — the same rule the checkout opens with.
@@ -1285,13 +1352,18 @@ export default async function StudioPage({
   const passkeyRemovals: Record<string, number> = removed ? removed.atOf : {};
   const needsStep = firstReads.mayAdd ? !(await firstReads.mayAdd) : false;
   const canKeep = firstReads.liveStep ? mayKeepPasskey(await firstReads.liveStep) : false;
-  const [passkeysRead, team, freshLogin, lockedTill, twoStepRead, recoveryRead] = await firstReads.person;
+  const [passkeysRead, team, freshLogin, lockedRead, twoStepRead, recoveryRead] = await firstReads.person;
+  // An unread lock is null here and everywhere below: never "not locked" (rule 24), and the first-sale ask needs it for sure.
+  const lockedTill = lockedRead;
   // Not read just now (null) is not "no passkeys": each Passkeys section says so in place of its manager (rule 24).
   const passkeys = passkeysRead ?? [];
   // Not read just now (null) is not "none": the recovery section says so in place of its manager (rule 24).
   const recoveryShown = recoveryRead ?? "";
   // When it could not be read, the banner over Today and Two-step login below say so (unread); neither takes it for "off".
   const twoStep = twoStepRead ?? { on: false, since: 0, codesLeft: 0, reset: 0, backup: "" };
+  // 757 [STN4] unit 3: the store's first sale, read exactly and only for an account with no second step at all, so a
+  // protected one costs nothing; null (unknown) never asks (lib/two-step-ask.ts).
+  const soldFirstAt = store && noSecondStep({ appOn: twoStepRead === null ? null : twoStep.on, passkeys: passkeysRead === null ? null : passkeysRead.length, locked: lockedRead === null ? null : lockedRead > 0 }) ? await firstSaleKnown(store) : null;
   // This browser's lock: known and running (lockedNow), or not read just now (lockUnread). An unread lock is never
   // "not locked": the top of the page says so, the app's code is not offered and Two-step login offers nothing a lock
   // would refuse (tests/studio-lock-unread.test.ts).
@@ -1437,10 +1509,31 @@ export default async function StudioPage({
         {/* Passkeys but no app's code: a quiet invitation, once a browser session, from what was read above (owner C3-96). */}
         {store && twoStepRead !== null && !lockUnread && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedNow }) ? <AppCodeInvite /> : null}
 
+        {/* After the store's first sale, an account with no second step is asked to turn one on; dismissible, never blocking a sale (757 [STN4] unit 3). */}
+        {store && showTwoStepAsk({ firstSale: soldFirstAt, appOn: twoStepRead === null ? null : twoStep.on, passkeys: passkeysRead === null ? null : passkeysRead.length, locked: lockedRead === null ? null : lockedRead > 0 }) ? <TwoStepAsk sid={store.sid} seesSales={may("orders") || may("stats")} /> : null}
+
         {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
+        {linksOff ? <ShortLinksOffNotice offAt={linksOff.offAt} backAt={linksOff.backAt} /> : null}
         {current && current.subscriptionActive && planDisputed(current) ? <PlanDisputeNotice /> : null}
 
-        {notice ? (
+        {actionNotice ? (
+          // Asks for something to be done: announced, named by its own heading, a link to each place (movedNotice).
+          <div className="notice notice-warn mt-6" role="status" aria-labelledby="action-notice-title">
+            <h2 id="action-notice-title" className="font-bold text-ink">{actionNotice.title}</h2>
+            <p className="mt-1 max-w-[80ch] text-sm text-ink-soft">{actionNotice.body}</p>
+            {actionNotice.actions.length ? (
+              <ul className="mt-2 flex flex-wrap gap-x-6">
+                {actionNotice.actions.map((action) => (
+                  <li key={action.href}>
+                    <a href={action.href} className="inline-flex min-h-11 items-center text-sm font-bold text-ink underline underline-offset-4">
+                      {action.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : notice ? (
           <div className="notice notice-warn mt-6">
             <p className="font-bold text-ink">{notice.title}</p>
             <p className="mt-1 text-sm text-ink-soft">{notice.body}</p>
@@ -1496,7 +1589,8 @@ export default async function StudioPage({
             ) : null}
             {role === "owner" ? <StudioStart steps={startSteps} activation={activationTiming(store)} launchChecklist={funnelLaunchChecklist(store.name, visibleCount(store) > 0, startSteps.map(step => ({title: step.title, open: step.done, product: step.key === "product" || step.key === "publish", free: false})), startSteps.filter(step => !step.done).map(step => ({title: step.title, detail: step.unknown ? START_STEP_UNKNOWN : step.hint})), "store")} /> : null}
             {todayScreen ? <TodayPanel view={todayScreen} hrefs={todayHrefs} at={today} /> : null}
-            {nextScreen ? <NextActionsPanel view={nextScreen} /> : null}
+            {/* A draft written with AI only when asked (unit 3): for a role that writes drafts, on a store with the writing help. */}
+            {nextScreen ? <NextActionsPanel view={nextScreen} draftable={ai.on && may("draft") ? DRAFTABLE : []} jobs={NEXT_DRAFT_JOBS} /> : null}
             {role === "owner" && !store.suspended ? <PathStudioReminder store={store} role={role} /> : null}
             {/* "How do I…?": answered from the help center's own answers (lib/help-ask.ts). */}
             {ai.on ? <StudioHelp left={ai.known === false ? null : ai.left} /> : null}
@@ -1649,7 +1743,7 @@ export default async function StudioPage({
               </div>
 
               <details className="mt-5 rounded-2xl bg-paper p-4 ring-1 ring-line">
-                <summary className="cursor-pointer text-sm font-semibold text-ink">Share the store: link, QR code, posts</summary>
+                <summary className="cursor-pointer py-3 text-sm font-semibold text-ink">Share the store: link, QR code, posts</summary>
                 <div className="mt-4">
                   <SharePanel url={storeBase(store)} title={store.name} what="store" />
                   {may("page") && store.statsId ? (async () => {
@@ -1829,8 +1923,8 @@ export default async function StudioPage({
               <div id="products" className="scroll-mt-32">
                 {(async () => {
                   const newComments = early(newCommentsFor(shelf?.products ?? []));
-                  const waitlists = waitlistViews(store, (shelf?.products ?? []).map((p) => p.id)).catch(() => ({}));
-                  const preorders = preorderViews(store, (shelf?.products ?? []).map((p) => p.id)).catch(() => ({}));
+                  const waitlists = waitlistViews(store, (shelf?.products ?? []).map((p) => p.id)).catch((error) => { console.error("the studio could not read its waitlists", error); return null; });
+                  const preorders = preorderViews(store, (shelf?.products ?? []).map((p) => p.id)).catch((error) => { console.error("the studio could not read its pre-orders", error); return null; });
                   const pairChoices = early(publishedChoices(store, storeCards(store)));
                   return (
                     <ProductEditor
@@ -1860,6 +1954,7 @@ export default async function StudioPage({
                       pairChoices={await pairChoices}
                       tiers={store.tiers}
                       taxOnTop={store.tax.enabled && !store.tax.included}
+                      canSend={may("send")}
                     />
                   );
                 })()}
@@ -3482,6 +3577,7 @@ export default async function StudioPage({
                               { day: "numeric", month: "long", year: "numeric" },
                             )}
                           </p>
+                          {sale.risk ? <p className="mt-1 text-sm text-ink-soft">{RISK_WORDS[sale.risk]}</p> : null}
                           {sale.shipTo !== undefined && sale.shipTo !== null ? (
                             <MarkShipped session={sale.reference} to={sale.shipTo} shipped={sale.shipped ?? null} />
                           ) : null}
@@ -3799,7 +3895,7 @@ export default async function StudioPage({
               Log out
             </button>
           </form>
-          <form action="/api/auth/signout-all" method="post">
+          <form id="log-out-everywhere" action="/api/auth/signout-all" method="post" className="scroll-mt-32">
             <button
               type="submit"
               className="btn btn-ghost"
@@ -3807,6 +3903,11 @@ export default async function StudioPage({
               Log out of all devices
             </button>
           </form>
+          {store ? (
+            <Link href={studioPath(store, "", "devices")} className="btn btn-ghost">
+              Log out of other devices
+            </Link>
+          ) : null}
         </div>
       </main>
       </StudioStorePin>

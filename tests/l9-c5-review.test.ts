@@ -63,7 +63,7 @@ const nowS = Math.floor(NOW / 1000);
 const PAST = INVITE_HOLD_DAYS + 4;
 const INVITED = PAST + 20;
 
-type Txn = { id: string; amount: number; metadata: Record<string, string> };
+type Txn = { object?: string; customer?: string; currency?: string; id: string; amount: number; metadata: Record<string, string> };
 
 async function inviteWorld(history: (customer: string, rows: Txn[]) => unknown) {
   redis.clear();
@@ -85,6 +85,7 @@ async function inviteWorld(history: (customer: string, rows: Txn[]) => unknown) 
       const form = new URLSearchParams(String(init?.body ?? ""));
       const row: Txn = {
         id: `cbtxn_${Math.random().toString(36).slice(2, 10)}`,
+        object: "customer_balance_transaction", customer: txns[1], currency: form.get("currency") ?? "",
         amount: Number(form.get("amount")),
         metadata: { nimbus_invite_credit: form.get("metadata[nimbus_invite_credit]") ?? "" },
       };

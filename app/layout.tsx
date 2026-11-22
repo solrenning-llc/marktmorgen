@@ -5,6 +5,7 @@ import { SiteData } from "@/components/structured-data";
 import { Toaster } from "@/components/toast";
 import { SITE_URL } from "@/lib/site-url";
 import { SITE_OG_IMAGE } from "@/lib/site-og";
+import { COLOR_SCHEME_SCRIPT } from "@/lib/color-scheme";
 import { REVEAL_ON, REVEAL_WATCH } from "@/lib/reveal-scripts";
 import { feeWords } from "@/lib/fee-words";
 import { PLANS_ON_SALE, PREVIEW_LINE } from "@/lib/opening";
@@ -106,11 +107,30 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     // data-reveal is set on <html> by the first script in the body, before
     // React loads (lib/reveal-scripts.ts); React is told that attribute is
     // expected, so it does not report the page as mismatched.
+    // data-scroll-behavior="smooth" tells the Next.js router that globals.css
+    // makes document scrolling smooth, so a route change jumps to the new page's
+    // top at once instead of animating from where the old page was left; the
+    // page and its links are still while the reader (or a test) acts on them.
+    // In-page anchor scrolling keeps its smooth behavior.
     <html
       lang="en-US"
+      data-scroll-behavior="smooth"
       className={`${geist.variable} ${accent.variable} ${STORE_FONTS} h-full antialiased`}
       suppressHydrationWarning
     >
+      {/*
+        The reader's light or dark choice, applied before the first paint
+        (lib/color-scheme.ts). With nothing chosen it reads one key and does
+        nothing, so the page is drawn exactly as before; data-color-scheme is
+        the other attribute React is told to expect on <html>.
+      */}
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: COLOR_SCHEME_SCRIPT,
+          }}
+        />
+      </head>
       {/*
         The photographs come from one other host, and a browser cannot start
         fetching from it until it has looked the name up, opened a connection

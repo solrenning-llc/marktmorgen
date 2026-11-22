@@ -89,8 +89,9 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { canonicalEmail } from "@/lib/affiliates";
 import { NIMBUS_FROM, RESEND_BASE, headerText, oneAddress, sendEmail } from "@/lib/email";
 import { creatorDomain } from "@/lib/mail-from";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { redisPipeline } from "@/lib/redis";
-import { stringList } from "@/lib/redis-reply";
+import { repliesFor, stringList } from "@/lib/redis-reply";
 import { essentialLimitState } from "@/lib/request-guard";
 import { windowCountBy, windowCountOf } from "@/lib/window-count";
 import { HANDLE_PATTERN, anyStoreNamed, ownsAStore, storeForEmail, storeForHandle } from "@/lib/store";
@@ -395,6 +396,34 @@ async function files(listed: FileList, charge?: Charge): Promise<{ sent: { filen
   return { sent, left, rest };
 }
 
+/** What a message's count decided, written on its counted mark for a retry (forwardInbound). */
+const COUNT_ADMITTED = "admitted";
+const COUNT_REFUSED = "refused";
+
+/**
+ * Writes the count's decision on the mark this run took, for the rest of its hour: true only when Redis answered "OK".
+ * Never throws. A write not confirmed leaves retries reading an undecided mark, so the caller does not forward on it
+ * (Codex N1's and X6's LOW on #3926): the message waits for a later try instead.
+ */
+async function decide(mark: string, decision: string): Promise<boolean> {
+  try {
+    return repliesFor(await redisPipeline([["SET", mark, decision, "XX", "EX", 3_600]]), 1)?.[0] === "OK";
+  } catch (error) {
+    console.error("an inbound message's count could not be written down", error);
+    return false;
+  }
+}
+
+/** The decision written on a mark another run took: COUNT_ADMITTED, COUNT_REFUSED, or null when none is written or it cannot be read. */
+async function decisionOf(mark: string): Promise<string | null> {
+  try {
+    const held = repliesFor(await redisPipeline([["GET", mark]]), 1)?.[0];
+    return held === COUNT_ADMITTED || held === COUNT_REFUSED ? held : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Whether the address has a store on a paid plan (its subscriptionActive), by one read of the store's record: a
  * free store is not a creator here, since anyone can make one. null when the record could not be read.
@@ -656,11 +685,39 @@ export async function forwardInbound(id: string, now = Date.now(), announcedTo?:
     // Listed before the allowance is taken: a list that cannot be read now is a retry that spends nothing.
     listed = await listFiles(id);
     if (!listed) return "retry";
-    // Past the hour's limit the message is skipped; a counter that cannot be read
-    // is a retry (the route answers 500 and clears its seen mark), never a loss.
-    const allowance = await essentialLimitState("creator-inbound", handle, CREATOR_HOURLY, 3_600);
-    if (allowance === "unknown") return "retry";
-    if (allowance === "exceeded") return "skipped";
+    // Counted once a message (mail-queue hunt): a send Resend refused is a retry, and Resend makes the announcement
+    // again; counted on each try, one message refused a few times spent the hour's allowance and the store's next
+    // messages that hour were skipped for good. The message's mark is kept the allowance's hour; a mark that cannot
+    // be read is a retry that spends nothing. What the count decided is written on the mark (COUNT_ADMITTED or
+    // COUNT_REFUSED), and a retry acts only on that: a refusal stays a refusal, and a mark with no decision written
+    // down (a run that stopped between the two, or one still running) is not known, a retry, never sent on (Codex L
+    // on #3926).
+    const mark = `nl:inbound:counted:${id}`;
+    const ours = claimValue();
+    const counted = await claimMark(mark, 3_600, ours);
+    if (counted === "unknown") return "retry";
+    if (counted === "ours") {
+      // Past the hour's limit the message is skipped. A count that cannot be read (essentialLimitState "unknown")
+      // decides nothing and sends nothing: the mark, still undecided, is let go and the message is a retry (the route
+      // answers 500 and clears its seen mark), so the retry counts again rather than reading an undecided mark as a
+      // retry for the mark's whole hour, and nothing is written as COUNT_REFUSED. At most one count more for an
+      // unreadable reply: the hour's limit can only close sooner, never later.
+      const allowance = await essentialLimitState("creator-inbound", handle, CREATOR_HOURLY, 3_600);
+      if (allowance === "unknown") {
+        await releaseMark(mark, ours).catch(() => false);
+        return "retry";
+      }
+      const admitted = allowance === "within";
+      // Written for a retry. A refusal stays a refusal whether or not the write landed; an admission is forwarded only
+      // once it is written down, or a retry would read the mark as undecided while this run had already sent it.
+      const written = await decide(mark, admitted ? COUNT_ADMITTED : COUNT_REFUSED);
+      if (!admitted) return "skipped";
+      if (!written) return "retry";
+    } else {
+      const decided = await decisionOf(mark);
+      if (decided === COUNT_REFUSED) return "skipped";
+      if (decided !== COUNT_ADMITTED) return "retry";
+    }
     creator = { name: headerText(found.name, 60).replace(/["\\<>]/g, "") || handle, email, address: `${handle}@${creators}` };
     store = found;
   }

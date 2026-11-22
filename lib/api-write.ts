@@ -32,7 +32,7 @@ import { grantUnlessErased, importedFor, takeGiven } from "@/lib/imported-purcha
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { mailDay, releaseDay, reserveDay } from "@/lib/mail";
-import { pausedFor } from "@/lib/mail-health";
+import { pauseForSending } from "@/lib/mail-health";
 import { isPaidUp } from "@/lib/billing";
 import { reserveMoved } from "@/lib/imports";
 import { storeBase } from "@/lib/purchase-email";
@@ -242,7 +242,8 @@ export async function giveAccess(
   let emailed = false;
   // And just before the email, as an import's emails are: deleted since, or unknown, nothing is sent.
   const day = mailDay();
-  if (notify && !(await pausedFor(store.sid)) && (await notDeleted()) === true && (await reserveDay(1, day))) {
+  // A pause read in an unknown shape is not "no pause" (CX-123 rule 24, Claude 6's MEDIUM on #2687): no email.
+  if (notify && (await pauseForSending(store.sid)) === null && (await notDeleted()) === true && (await reserveDay(1, day))) {
     if ((await reserveMoved(store, 1)) < 1) await releaseDay(1, day);
     else {
       const a = accessWords(store.language);

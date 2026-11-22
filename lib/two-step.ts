@@ -678,7 +678,14 @@ async function endLocked(email: string, now = Date.now()): Promise<"ended" | "ke
     }
     return kept ? "kept" : "unkept";
   }
-  await redisPipeline([["DEL", lockedSetKey(email), ...sessions.map((session) => lockedKey(session))]]);
+  // Only the sessions read leave the set, with their locks (Codex X6's LOW on #4491): one let in after the read keeps its
+  // place, the only way to it. A clean-up that fails is said and passed over, as the other path's: every session read
+  // was logged out, so the call-off says so (a lock left on a session that is gone opens nothing).
+  if (sessions.length) {
+    await redisPipeline([["DEL", ...sessions.map((session) => lockedKey(session))], ["SREM", lockedSetKey(email), ...sessions]]).catch(() =>
+      console.error("clearing the locks of the sessions logged out failed"),
+    );
+  }
   // A passkey removal one of them asked for stays: only "Keep it" calls one off (lib/passkeys.ts).
   return "ended";
 }
@@ -718,8 +725,9 @@ async function keepLocked(email: string, now: number): Promise<boolean> {
   // The list past its ceiling ("*", or an answer of another shape): every session with no lock of its own now
   // pays LOCKED_UNTIL_STAR_EXTRA (tests/plan-cost-registry.ts) on each lockedUntil. Said, and counted for the
   // owner's report (keptStarMonth, keptStarLine; review of #2556 at 4d8ac350e), never only kept. Not counted when
-  // nothing answered: the list was not written then.
-  if (replies && countOf(replies[1]) !== 1) {
+  // nothing answered, nor when the replies as a whole are in another shape (Codex X6's LOW on #4491): nothing says the
+  // list was written then.
+  if (replies && replies.length === 3 && countOf(replies[1]) !== 1) {
     console.error("too many accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until the sessions' last day");
     const month = new Date(now).toISOString().slice(0, 7);
     await redisPipeline([["INCR", keptStarKey(month)], ["EXPIRE", keptStarKey(month), 400 * 86_400]]).catch(() =>

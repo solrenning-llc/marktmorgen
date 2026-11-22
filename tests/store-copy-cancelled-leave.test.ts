@@ -85,14 +85,14 @@ test("a leave whose new document takes longer than any clock still drops the cut
   assert.equal(page.window.__mmNavigationRsc?.[0]?.done, true);
 });
 
-test("the harness says \"stayed\" where it knows it: a failed goto or reload, a failed navigation request, and the sweep before \"no page threw\"", () => {
+test("the harness says \"stayed\" where it knows it: a failed goto or reload and the sweep before \"no page threw\", never a failed navigation request", () => {
   const harness = source.slice(last);
   assert.match(harness, /const stayed = \(\) => page\.isClosed\(\) \? Promise\.resolve\(\) : page\.evaluate\(\(\) => window\.__mmStayed\?\.\(\)\)/);
   assert.match(harness, /catch \(error\) \{ await stayed\(\); throw error; \}/);
   assert.match(harness, /if \(response === null\) await stayed\(\);/);
   assert.match(harness, /page\.goto=async \(\.\.\.args\)=>\{await settle\(\);return navigated\(\(\)=>goto\(\.\.\.args\)\);\};/);
   assert.match(harness, /page\.reload=async \(\.\.\.args\)=>\{await settle\(\);return navigated\(\(\)=>reload\(\.\.\.args\)\);\};/);
-  assert.match(harness, /page\.on\("requestfailed", \(request\) => \{ if \(request\.isNavigationRequest\(\) && request\.frame\(\) === page\.mainFrame\(\)\) void stayed\(\); \}\);/);
+  assert.doesNotMatch(harness, /requestfailed/, "a navigation a newer one replaced also fails its request while the page leaves");
   const sweep = harness.indexOf("window.__mmStayed?.(); return new Promise((resolve) => setTimeout(resolve, 0));");
   const verdict = harness.indexOf('is("no page threw", errors, []);');
   assert.ok(sweep >= 0 && verdict > sweep, "every open page is told it stayed right before the verdict");

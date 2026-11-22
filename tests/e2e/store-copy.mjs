@@ -257,10 +257,10 @@ try {
       // same-origin _rsc fetch, and only once the document is leaving, is dropped; every other failure still throws.
       // beforeunload can be canceled (the page's own unload protection, which Playwright's dialog handling answers
       // by staying): a failure after it waits for the decision. pagehide is the real unload, and drops it. The document
-      // stays when the harness says so (window.__mmStayed: a goto or reload that failed, a navigation request that
-      // failed, and the sweep over every open page before "no page threw"; a leave a dialog canceled reaches that
-      // sweep) or when pageshow restores it from the back/forward cache; then the failure is thrown (Codex V's MEDIUM
-      // on #4844). The decision
+      // stays when the harness says so (window.__mmStayed: a goto or reload that failed, and the sweep over every
+      // open page before "no page threw"; a leave a dialog or a newer navigation canceled reaches that sweep, since a
+      // failed navigation request alone cannot tell a stay from a leave replaced by a newer one) or when pageshow
+      // restores it from the back/forward cache; then the failure is thrown (Codex V's MEDIUM on #4844). The decision
       // is never a clock: until 21 November 2026 a fixed second decided it, and a navigation whose new document took
       // longer than that to arrive (1.1 s in the merge-queue run of #3774) threw the cut-off with the old document
       // still alive, although it left a moment later.
@@ -312,7 +312,9 @@ try {
         },undefined,{timeout:60000});
         await page.evaluate(()=>{delete window.__mmRscIdleSince;});
       };
-      // The document stayed: a failure that waited for the leave is thrown now (window.__mmStayed above).
+      // The document stayed: a failure that waited for the leave is thrown now (window.__mmStayed above). Only a
+      // goto or reload the harness itself saw fail says so here; a requestfailed of the main frame would also fire
+      // for a navigation a newer one replaced (net::ERR_ABORTED), where the page is in fact leaving.
       const stayed = () => page.isClosed() ? Promise.resolve() : page.evaluate(() => window.__mmStayed?.()).catch(() => undefined);
       const navigated = async (navigate) => {
         let response;
@@ -320,7 +322,6 @@ try {
         if (response === null) await stayed();
         return response;
       };
-      page.on("requestfailed", (request) => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) void stayed(); });
       const goto=page.goto.bind(page),reload=page.reload.bind(page),resize=page.setViewportSize.bind(page),close=page.close.bind(page);
       page.goto=async (...args)=>{await settle();return navigated(()=>goto(...args));};
       page.reload=async (...args)=>{await settle();return navigated(()=>reload(...args));};

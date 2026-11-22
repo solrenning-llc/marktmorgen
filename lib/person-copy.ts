@@ -819,8 +819,8 @@ export async function copyPerson(scope: ErasureScope, now = Date.now(), options:
   // A cursor sealed for this store and address, for one of this person's paged parts: the next page only. Any other
   // cursor, or none, is the copy from its first page.
   const at = options.cursor === undefined ? null : openCursor(whose, options.cursor);
-  const module = at ? PAGED_MODULES[at.module.split("#")[0]!] : undefined;
-  if (at && module && module.at(scope) === at.module) return laterPage(scope, now, at);
+  const part = at ? PAGED_MODULES[at.module.split("#")[0]!] : undefined;
+  if (at && part && part.at(scope) === at.module) return laterPage(scope, now, at);
   const paging: Paging = { budget: new ReadBudget(COPY_PAGE_MAX_COMMANDS) };
   pagesOf.set(scope, paging);
   try {

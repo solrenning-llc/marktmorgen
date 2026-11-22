@@ -639,7 +639,16 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
                 await giveBackWhileLive(marksKey(statsId, month), 1);
                 return "spent";
               }
-              const fails = await countWhileLive(failsKey(statsId, month), 1);
+              // The payment is taken by now: a failure's take that throws (an answer in another shape) gives it back
+              // before the error goes on, so a payment no mark was tried for never stays counted (Claude 1 coord's
+              // LEVE, 20261122T203258Z-claude-1-coord-33b7). A give-back that fails too is said, and the first error kept.
+              let fails: number | "gone";
+              try {
+                fails = await countWhileLive(failsKey(statsId, month), 1);
+              } catch (error) {
+                await giveBackWhileLive(marksKey(statsId, month), 1).catch((back: unknown) => console.error("reviews' refund pass: a payment taken before a failed take was not given back; the month's count stays one high", store.handle, back));
+                throw error;
+              }
               if (fails === "gone") throw new ReviewStoreGoneError();
               if (fails > REVIEW_REFUND_FAILED_MARKS_PER_MONTH) {
                 await giveBackWhileLive(failsKey(statsId, month), 1);
@@ -725,7 +734,9 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   // that went on from a kept place moves the job no further than the newest closing it read, so a dispute closed
   // meanwhile is read from the top next run (review of #2158, inbox C4-24).
   if (lostRead) {
-    if (!(await confirmLostRead(lostRead, seenKey(statsId), "sorted"))) unsure = true;
+    // The place is written through the store's fence, as the anchor: a store erased meanwhile gets no cursor back for
+    // the thirty days it is kept (Claude 1 coord's LEVE, 20261122T203258Z-claude-1-coord-33b7).
+    if (!(await confirmLostRead(lostRead, seenKey(statsId), "sorted", writeWhileLive))) unsure = true;
     else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
   }
   // The place moves only past what was read to the end, sure and inside its time. A store with no place yet keeps

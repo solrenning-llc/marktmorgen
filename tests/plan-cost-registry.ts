@@ -63,6 +63,7 @@ import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
 import { CERTIFICATE_PASS_EVERY_SECONDS, CERTIFICATE_REFUND_CHECKS_PER_MONTH, CERTIFICATE_REFUND_PAGES_PER_STORE, CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH } from "@/lib/certificate-refunds";
 import { LOST_DISPUTE_PAGES } from "@/lib/refunds";
 import { REVIEW_REFUND_BUSY_WAIT_SECONDS, REVIEW_REFUND_FAILED_MARKS_PER_MONTH, REVIEW_REFUND_PAGES, REVIEW_REFUND_PASS_EVERY_SECONDS, REVIEW_REFUND_PAYMENTS_PER_MONTH, REVIEW_REFUND_ROWS_PER_MONTH } from "@/lib/review-proof";
+import { REVIEW_REFUND_LOCK_WAIT_MS } from "@/lib/reviews";
 import { RECEIPT_BATCH_SHAPE } from "@/lib/receipt-batch";
 import { monthlyEmails, type Tier } from "@/lib/plan";
 import { MAIL_GAP_COMMANDS_PER_CHECK, MAIL_GAP_TRIAL_CHECKS, mailGapCheckLimit } from "@/lib/mail-frequency";
@@ -2001,7 +2002,7 @@ export const CERTIFICATE_TURN_READS = DAY_WINDOWS * 288;
 export const CERTIFICATE_TURN_BYTES = 128;
 /**
  * Commands of one pass, no row looked up, at the most: the store's turn (SET NX EX), the place's GET, the lost
- * disputes' place (GET, and its SET or DEL), one ZMSCORE of the rows handled for the lost disputes, one a page of
+ * disputes' place (GET, and its SET or DEL as one EVAL with the store's fence, its two reads first: Claude 1 coord's LEVE 33b7), one ZMSCORE of the rows handled for the lost disputes, one a page of
  * refunds and one to keep the disputes' place, the place's SET and ZREMRANGEBYSCORE, and the INCRBY and EXPIRE of
  * the month's checks a pass sends once when they are spent (focal review, L2)
  * (tests/certificate-refund-pass-cost.test.ts measures a pass under it).
@@ -2087,7 +2088,7 @@ export const REVIEW_REFUND_TURN_BYTES = 128;
  * tests/review-refund-sweep-cost.test.ts (13th triple audit on #5100, LEVE 3).
  */
 export const REVIEW_REFUND_CAPPED_TRY_COMMANDS = 1 + 5 + 5 + 4 + 4;
-export const REVIEW_REFUND_RUN_COMMANDS = 1 + 1 + 1 + 1 + 2 + REVIEW_REFUND_PAGES + 10 * REVIEW_REFUND_PAGES + 1 + REVIEW_REFUND_CAPPED_TRY_COMMANDS + 5;
+export const REVIEW_REFUND_RUN_COMMANDS = 1 + 1 + 1 + 1 + (1 + 4) + REVIEW_REFUND_PAGES + 10 * REVIEW_REFUND_PAGES + 1 + REVIEW_REFUND_CAPPED_TRY_COMMANDS + 5;
 /** Stripe pages one run waits on, at the most: the refunds' and the lost disputes', each EXPORT_PAGE_SECONDS at 2 GB. */
 export const REVIEW_REFUND_RUN_PAGES = REVIEW_REFUND_PAGES + LOST_DISPUTE_PAGES;
 /** The ids asked and the flags answered for every row of those pages, at most 64 bytes each way. */
@@ -2115,7 +2116,7 @@ export const REVIEW_REFUND_ROW_BYTES = 256;
  * try; 11th triple audit on #5100, ALTO (b): the lock was priced as one SET), as the other lines price theirs
  * (PAYPAL_PRESS_LOCK_TRIES, STORE_LOCK_TRIES).
  */
-export const REVIEW_REFUND_LOCK_TRIES = lockTriesAtMost(1_600);
+export const REVIEW_REFUND_LOCK_TRIES = lockTriesAtMost(REVIEW_REFUND_LOCK_WAIT_MS);
 /**
  * Billed commands one review's mark costs, at the most (lib/reviews.ts markRefunded, creatorChange with "uncount"):
  * the product's lock (SET NX, REVIEW_REFUND_LOCK_TRIES times when it is busy), the review's HGET, its write (HSET,
@@ -2123,11 +2124,12 @@ export const REVIEW_REFUND_LOCK_TRIES = lockTriesAtMost(1_600);
  * (HGET) and kept (HSET) with the review taken off them (uncountRefunded: never the product's whole reviews, 9th
  * triple audit on #5100, point 5), and the lock's release (an EVAL of three calls, billed four). Since the sweep's
  * marks go through the store's fence (lib/live-fence.ts WRITE_IF_STORE_LIVE, Codex L-20261120-0838): the write and
- * the numbers' HSET each as one EVAL with the fence's two reads (HGET, GET), three more each; the test counts the
- * script's calls one by one (9th audit, point 3). The same test measures one mark under it, and counts the tries of
+ * the numbers' HSET together as one EVAL with the fence's two reads (HGET, GET), three more (Claude 1 coord's cut B,
+ * 5636); the test counts the script's calls one by one (9th audit, point 3). The lock's tries are those of the sweep's
+ * shorter wait, REVIEW_REFUND_LOCK_WAIT_MS (cut A). The same test measures one mark under it, and counts the tries of
  * a busy lock.
  */
-export const REVIEW_REFUND_MARK_COMMANDS = REVIEW_REFUND_LOCK_TRIES + 1 + 5 + 2 + 4 + 6;
+export const REVIEW_REFUND_MARK_COMMANDS = REVIEW_REFUND_LOCK_TRIES + 1 + 5 + 2 + 4 + 3;
 /**
  * Bytes one mark moves through the database, at the most: the review read and written again (a review at its largest,
  * MAX_REVIEW_TEXT and a reply of MAX_REPLY_TEXT in four-byte characters, its name, MAX_REVIEW_PHOTOS paths and its

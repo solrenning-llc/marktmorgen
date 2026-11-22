@@ -13,6 +13,7 @@ import { ReviewStoreGoneError, markRefunded, saveReview } from "@/lib/reviews";
 import { markRefundedReviews } from "@/lib/review-proof";
 import { setStripeAccount } from "@/lib/store";
 import { storeLiveFence } from "@/lib/store-live-cache";
+import { lostCursorKey } from "@/lib/refunds";
 import { ERASING_KEY, claimHandle, closeStoreRecord, ensureStatsId, ensureStoreId, erasingField, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
@@ -75,7 +76,7 @@ const row = async (statsId: string) => {
 test("control: a live store's refunded review is marked through the fence, never by a plain write", async () => {
   const { statsId, pi, fence } = await shop();
   const live = await racing(async () => undefined, () => markRefunded(statsId, pi, fence));
-  assert.deepEqual([live.marked, live.plainWrites, live.answers], [1, 0, [1, 1]], "the review and the product's numbers, each written once the fence answered 1");
+  assert.deepEqual([live.marked, live.plainWrites, live.answers], [1, 0, [1]], "the review and the product's numbers, written together once the fence answered 1 (Claude 1 coord's cut B, 5636)");
   assert.equal((await row(statsId))?.refunded, true);
 });
 
@@ -125,6 +126,12 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   if (url.hostname !== "api.stripe.com") return new Response(JSON.stringify({ error: "nothing leaves this test" }), { status: 500 });
   const path = url.pathname.replace(/^\/v1/, "");
+  if (path === "/events" && wonPages) {
+    // A won dispute a page (not a row for the reviews), always one more page: the read stops at LOST_DISPUTE_PAGES
+    // with its place kept (a SET of the cursor).
+    wonPages += 1;
+    return new Response(JSON.stringify({ object: "list", has_more: true, data: [{ id: `evt_rowsweepwon${wonPages}`, created: Math.floor(Date.now() / 1000) - 3_600, data: { object: { status: "won", payment_intent: null, charge: `ch_rowsweepwon${wonPages}` } } }] }), { status: 200 });
+  }
   if (path === "/refunds") {
     if (duringRefunds) {
       const run = duringRefunds;
@@ -136,6 +143,8 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   }
   return listOf([]);
 }) as typeof fetch;
+/** Nonzero while the lost disputes' pages answer won disputes with more to come (counts the pages served). */
+let wonPages = 0;
 /** Run once, while Stripe's refunds are being read, before the pass has read any review. */
 let duringRefunds: (() => Promise<void>) | null = null;
 const refundOf = (pi: string, n: number) => ({ id: `re_rowsweep${String(n).padStart(6, "0")}`, object: "refund" as const, created: Math.floor(Date.now() / 1000) - 7_200, status: "succeeded", amount: 4900, payment_intent: pi, charge: { object: "charge", id: `ch_rowsweep${n}`, amount: 4900, amount_refunded: 4900, refunded: true, disputed: false } });
@@ -166,7 +175,7 @@ test("control: a live store's pass takes the refund as seen and keeps its anchor
   refundsAt.length = 0;
   refundsAt.push(refundOf(pi, 2));
   const live = await racing(async () => undefined, () => markRefundedReviews(swept, Date.now() + 60_000));
-  assert.deepEqual([live.marked, live.plainWrites, live.answers], [1, 0, [1, 1, 1, 1, 1]], "the review, the product's numbers, the failed mark's slot given back once the mark succeeded (13th triple audit on #5100), the read refund and the anchor, each through the fence");
+  assert.deepEqual([live.marked, live.plainWrites, live.answers], [1, 0, [1, 1, 1, 1, 1]], "the review with the product's numbers (one step, cut B), the failed mark's slot given back once the mark succeeded (13th triple audit on #5100), the read refund, the lost disputes' place (Claude 1 coord's LEVE, 33b7) and the anchor, each through the fence");
   assert.deepEqual(await exists([`nl:rev:refunds:seenat:${statsId}`, `nl:rev:refunds:since:${statsId}`]), [1, 1], "the read refund and the anchor are kept");
 });
 
@@ -201,4 +210,23 @@ test("the store closed during the Stripe read, before any review was read: the r
   assert.equal((await original([storeIdCommand(swept.sid)]))[0], null, "control: the store's id key is gone");
   assert.deepEqual([closed.error, closed.marked, closed.plainWrites], [undefined, 0, 0], "the pass ends with nothing marked and no plain write");
   assert.deepEqual(await exists([...keys, seen, since]), [...keys, seen, since].map(() => 0), "no read refund, anchor, review or index came back");
+});
+
+// Claude 1 coord's LEVE (20261122T203258Z-claude-1-coord-33b7): the lost disputes' place was kept with a plain SET, so
+// a store erasing with no refund to mark (no fenced write to answer gone) got its cursor written back for thirty days.
+// It goes through the store's fence now, as the anchor.
+test("a store erasing gets no lost disputes' place written back; a live one keeps it", async () => {
+  for (const erasing of [true, false]) {
+    const { store, statsId, field } = await shop();
+    await setStripeAccount(store.email, `acct_1RowSweepC${erasing ? 1 : 2}`, true);
+    const swept = (await storeForEmail(store.email))!;
+    refundsAt.length = 0;
+    if (erasing) await original([["HSET", ERASING_KEY, field, String(NOW)]]);
+    wonPages = 1;
+    const run = await racing(async () => undefined, () => markRefundedReviews(swept, Date.now() + 60_000));
+    wonPages = 0;
+    if (erasing) await original([["HDEL", ERASING_KEY, field]]);
+    assert.equal(run.plainWrites, 0, "no plain write");
+    assert.deepEqual(await exists([lostCursorKey("rev", statsId)]), [erasing ? 0 : 1], erasing ? "the erasing store's cursor is not written" : "control: the live store's cursor is kept for the next run");
+  }
 });

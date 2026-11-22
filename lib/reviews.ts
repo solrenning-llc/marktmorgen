@@ -293,15 +293,23 @@ export async function readReview(statsId: string, productId: string, id: string)
 }
 
 /**
+ * How long the refund sweep's mark waits for a product's lock held by another change, in milliseconds (the creator's
+ * and the buyer's own changes wait 1.6 s): a lock still busy fails the mark as one of the month's failed marks, and the
+ * store's pass waits a day (lib/review-proof.ts REVIEW_REFUND_BUSY_WAIT_SECONDS), so a contested mark lands a day later,
+ * never lost. Shorter, so each mark is priced at fewer tries (Claude 1 coord's decision, 20261122T203453Z-claude-1-coord-5636).
+ */
+export const REVIEW_REFUND_LOCK_WAIT_MS = 300;
+
+/**
  * Runs `work` holding the product's lock, so two changes at once cannot count
  * the numbers from two different moments. "busy" when it could not be had.
  */
-async function locked<T>(statsId: string, productId: string, work: () => Promise<T>): Promise<T | "busy"> {
+async function locked<T>(statsId: string, productId: string, work: () => Promise<T>, waitMs = 1_600): Promise<T | "busy"> {
   // Under a token of this call's own, let go of in one step (lib/redis-lock.ts): a lock that ran out and was taken
   // by another call is never let go of by this one.
   let held;
   try {
-    held = await takeLock(lockKey(statsId, productId), 10, 1_600);
+    held = await takeLock(lockKey(statsId, productId), 10, waitMs);
   } catch (error) {
     if (error instanceof LockBusyError) return "busy";
     throw error;
@@ -645,12 +653,14 @@ async function creatorChange(
   fence: StoreLiveFence | null = null,
   /**
    * How the product's numbers follow the change: counted again from every review ("recount", the HGETALL of the
-   * product), or, for a refund's mark, taken off the kept numbers in two commands ("uncount", uncountRefunded), so a
+   * product), or, for a refund's mark, taken off the kept numbers ("uncount": one HGET, and the HSET in the review's own
+   * fenced step under a fence, uncountedNumbers), so a
    * pass over a store's refunds never reads a product's whole reviews (9th triple audit on #5100, point 5).
    */
   summary: "recount" | "uncount" = "recount",
 ): Promise<Review | "missing" | "busy" | "gone"> {
   if (!REVIEW_ID_PATTERN.test(id) || !PRODUCT_ID_PATTERN.test(productId)) return "missing";
+  // Only the refund sweep holds a fence (lib/review-proof.ts): it waits REVIEW_REFUND_LOCK_WAIT_MS for a busy lock.
   return locked(statsId, productId, async () => {
     // Missing only on HGET's exact null; a reply cut short, of another shape or a review that does not read throws
     // (rule 24), so a refund sweep never takes a refund as seen with the review left unmarked.
@@ -671,16 +681,22 @@ async function creatorChange(
     // it goes in the same request as the change, so a failure fails the change too.
     // One already hidden or refunded was never counted, so hiding or refunding it takes none away.
     const gone = counted(before) && ((after.hidden && !before.hidden) || (after.refunded && !before.refunded));
-    if ((await write(statsId, after, gone ? summaryGone(statsId, productId, before.createdAt) : [], fence)) === "gone") return "gone" as const;
+    // A refund's mark under a fence takes the review off the product's numbers in the same fenced step as the review's
+    // write (one EVAL and one pair of fence reads, not two: Claude 1 coord's decision 5636, cut B); the numbers are read
+    // first, under the same product lock, so nothing changes them in between.
+    const refunding = summary === "uncount" && after.refunded && !before.refunded;
+    const numbers = refunding && fence ? await uncountedNumbers(statsId, productId, before) : null;
+    if ((await write(statsId, after, [...(gone ? summaryGone(statsId, productId, before.createdAt) : []), ...(numbers ? [numbers] : [])], fence)) === "gone") return "gone" as const;
     // What a shorter answer frees is given back only once it is written.
     if (room && grown < 0) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: -grown }]);
     if (summary === "uncount") {
       // Whatever `hidden` is: the kept numbers count a hidden review's stars (lib/review-summary.ts summarise), so a
       // hidden review refunded leaves them too (Claude 2 lpgvy's MEDIUM 1 on #5100); `gone` above is the AI summary's.
-      if (after.refunded && !before.refunded && (await uncountRefunded(statsId, productId, before, fence)) === "gone") return "gone" as const;
+      // Under a fence the numbers went with the review's write above; without one, as before, in their own step.
+      if (refunding && !fence) await uncountRefunded(statsId, productId, before);
     } else if ((await recount(statsId, productId, fence)) === "gone") return "gone" as const;
     return after;
-  });
+  }, fence ? REVIEW_REFUND_LOCK_WAIT_MS : 1_600);
 }
 
 /** creatorChange with no fence, for the creator's own actions: "gone" is never answered without one, so the type says so. */
@@ -702,29 +718,30 @@ async function creatorChangeUnfenced(
  * least the review's); anything else is left as it is and said in the log, for the next change that counts the
  * product again (saveReview, a hide, a delete), never a summary made up from a reply that proved nothing (rule 24).
  */
-async function uncountRefunded(statsId: string, productId: string, review: Review, fence: StoreLiveFence | null = null): Promise<"kept" | "gone"> {
+async function uncountedNumbers(statsId: string, productId: string, review: Review): Promise<(string | number)[] | null> {
   const [raw] = repliesFor(await redisPipeline([["HGET", summaryKey(statsId), productId]]), 1) ?? [undefined];
   const kept = exactSummary(raw);
   const star = review.rating - 1;
   if (!kept || kept.count < 1 || kept.stars < review.rating || kept.dist[star] < 1) {
     console.error("a refunded review's product keeps its numbers until the next recount", productId, raw === null ? "no summary" : "the summary does not count it");
-    return "kept";
+    return null;
   }
   const dist = [...kept.dist] as Summary["dist"];
   dist[star] -= 1;
   const next: Summary = { ...kept, count: kept.count - 1, stars: kept.stars - review.rating, refunded: kept.refunded + 1, dist };
-  const command: (string | number)[] = ["HSET", summaryKey(statsId), productId, JSON.stringify(next)];
-  // Through the store's fence when the caller holds one (the refund sweep, lib/review-proof.ts): a store erasing or
-  // gone gets no numbers written back (Codex L-20261120-0838); an answer in another shape throws (rule 24). Without
-  // one, the HSET's reply read exactly: 0 (a field kept again) or 1, else not a confirmed write.
-  if (!fence) {
-    const [set] = repliesFor(await redisPipeline([command]), 1) ?? [undefined];
-    if (countOf(set) !== 0 && countOf(set) !== 1) throw new UnknownReplyError("a product's numbers after a refund");
-    return "kept";
-  }
-  const answer = await writeIfStoreLive(fence, [command as FencedCommand]);
-  if (answer === "unknown") throw new UnknownReplyError("a product's numbers after a refund");
-  return answer;
+  return ["HSET", summaryKey(statsId), productId, JSON.stringify(next)];
+}
+
+/**
+ * uncountedNumbers written in a step of its own, for a mark with no fence (the creator's own actions): the HSET's
+ * reply read exactly, 0 (a field kept again) or 1, else not a confirmed write (rule 24). With a fence (the refund
+ * sweep) the same HSET goes with the review's write, in one fenced step (creatorChange).
+ */
+async function uncountRefunded(statsId: string, productId: string, review: Review): Promise<void> {
+  const command = await uncountedNumbers(statsId, productId, review);
+  if (!command) return;
+  const [set] = repliesFor(await redisPipeline([command]), 1) ?? [undefined];
+  if (countOf(set) !== 0 && countOf(set) !== 1) throw new UnknownReplyError("a product's numbers after a refund");
 }
 
 /** A kept summary in its exact shape: six whole numbers, the distribution of five; anything else is null. */

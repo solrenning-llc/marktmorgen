@@ -305,7 +305,7 @@ async function main(): Promise<void> {
   redis.pipeline = realPipe;
   is("and leaves the lock another call took to it", (await redis.pipeline([["GET", lockOf]]))[0], "another-call");
   await redis.pipeline([["DEL", lockOf]]);
-  is("the reviews' lock is lib/redis-lock.ts's, let go of in one step", [readFileSync("lib/reviews.ts", "utf8").includes("held = await takeLock(lockKey(statsId, productId), 10, 1_600);"), readFileSync("lib/reviews.ts", "utf8").includes("await releaseLock(held);")], [true, true]);
+  is("the reviews' lock is lib/redis-lock.ts's, let go of in one step", [readFileSync("lib/reviews.ts", "utf8").includes("held = await takeLock(lockKey(statsId, productId), 10, waitMs);"), readFileSync("lib/reviews.ts", "utf8").includes("await releaseLock(held);")], [true, true]);
 
   // A refund that finds its review busy is not taken as seen: thrown, so the sweep tries it again.
   await redis.pipeline([["SET", lockOf, "held-by-a-test", "EX", 10]]);

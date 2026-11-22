@@ -161,7 +161,7 @@ async function main() {
     // Every EXPIRE of a product's hash is keep's, and keep gives the index and the list theirs in the same breath.
     const expires = [...source.matchAll(/\["EXPIRE", entriesKey\(/g)].length;
     is("one EXPIRE of a product's hash in the code, keep's", expires, 1);
-    is("keep gives the hash, the index and the list their expiry together", /const keep = [^;]*\["EXPIRE", entriesKey\(sid, product\), KEPT_SECONDS\],\s*\["EXPIRE", whoKey\(sid, product\), KEPT_SECONDS\],\s*\["EXPIRE", productsKey\(sid\), KEPT_SECONDS\],/s.test(source), true);
+    is("keep gives the hash, the index and the list their expiry together", /const keep = [^;]*\["EXPIRE", entriesKey\(sid, product\), KEPT_SECONDS\],\s*\["EXPIRE", whoKey\(sid, product\), KEPT_SECONDS\],\s*\["EXPIRE", productsKey\(sid\), KEPT_SECONDS\],/.test(source), true);
     const writes = [...source.matchAll(/\["HSET", entriesKey\(([^,]+), ([^,)]+)\), [^\]]*\], \.\.\.keep\(\1, \2\)/g)].length;
     const allWrites = [...source.matchAll(/\["HSET", entriesKey\(/g)].length;
     is("every HSET of an entry is sent with keep for the same product", writes > 0 && writes === allWrites, true);

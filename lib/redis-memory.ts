@@ -361,6 +361,32 @@ export class MemoryRedis {
           }
           return this.run(["SET", keys[2], argv[1]]);
         }
+        // lib/discord-store.ts SAVE_SERVER_IF_LIVE: the connected server written only while its store is live and not
+        // being erased, by the rule above; each inner call counted as Upstash bills it.
+        if (key.startsWith("-- marktmorgen:discord-server-live:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, live, erasing, target, field, value, statsId, ref] = args;
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          if (call(["HGET", erasing, field]) !== null) return 0;
+          if (statsId === "") {
+            if (call(["GET", live]) !== ref) return 0;
+          } else {
+            const raw = call(["GET", live]);
+            if (raw === null) return 0;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -1;
+            }
+            if (!record || typeof record !== "object") return -1;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+          }
+          call(["SET", target, value]);
+          return 1;
+        }
         // lib/closed-store-data.ts CLOSING_UNHELD: what the walk deletes of what an id a live store may hold names,
         // only while no live store holds it, read in the same step.
         if (key.startsWith("-- marktmorgen:closing-unheld:v1\n")) {
@@ -1639,6 +1665,24 @@ export class MemoryRedis {
           this.run(["EXPIRE", ledger, seconds]); return 1;
         }
 
+        // lib/creator-research-room.ts KEEP_RESEARCH_ANSWER: the answer kept only while the list is under its ceiling, in one step.
+        if (key.startsWith("-- marktmorgen:research-answer-keep:v3\n") && args[0] === "1" && args.length === 10) {
+          const [, list, max, row, today, share, perDay, reserve, account, plain] = args;
+          const length = this.run(["LLEN", list]) as number;
+          if (length >= Number(max)) return 0;
+          let reserved = 0;
+          for (const kept of this.run(["LRANGE", list, 0, -1]) as string[]) {
+            if (!kept.includes('"reservedFor":"')) continue;
+            reserved += 1;
+            if (account !== "" && kept.includes(`"reservedFor":"${account}"`)) return "already";
+          }
+          if (account !== "" && reserved < Number(reserve)) return this.run(["LPUSH", list, row]);
+          const room = Number(max) - Number(reserve);
+          const anonymous = length - reserved;
+          if (anonymous >= room) return 0;
+          const cap = Math.max(1, Math.min(Number(perDay), Math.floor((room - anonymous) / Number(share))));
+          return Number(today) > cap ? `busy:${cap}` : this.run(["LPUSH", list, plain]);
+        }
         // lib/redis-lock.ts releaseLock and holdLock: the lock deleted, or made to last, only while it holds the token.
         if (key.startsWith("-- marktmorgen:release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, lock, token] = args;
@@ -2257,6 +2301,39 @@ export class MemoryRedis {
           else this.run(["SET", copy, value, "EX", seconds]);
           return gone;
         }
+        // lib/store-live-copy.ts, KEEP_UNLESS_ERASED_LIVE: READING_COPY behind the store's fence in the same step:
+        // the store's key gone, no longer holding its ref, or its erasing mark set, the copy goes and [0] is answered.
+        if (key.startsWith("-- marktmorgen:reading-copy-live:v3\n") && args[0] === "4" && args.length >= 11) {
+          const [, live, erasing, copy, erased, field, value, seconds, statsId, ref, ...prints] = args;
+          this.scriptCalls += 2;
+          let alive = this.run(["HGET", erasing, field]) === null;
+          if (alive && statsId === "") alive = this.run(["GET", live]) === ref;
+          else if (alive) {
+            const raw = this.run(["GET", live]);
+            if (raw !== null) {
+              let record: unknown;
+              try {
+                record = JSON.parse(String(raw));
+              } catch {
+                return -1;
+              }
+              if (!record || typeof record !== "object" || Array.isArray(record)) return -1;
+              alive = (record as { statsId?: unknown }).statsId === statsId;
+            } else alive = false;
+          }
+          if (!alive) {
+            this.scriptCalls += 1;
+            this.run(["DEL", copy]);
+            return [0];
+          }
+          this.scriptCalls += 1;
+          const found = this.run(["HMGET", erased, ...prints]) as unknown[];
+          const gone = found.flatMap((one, i) => (one !== null ? [i + 1] : []));
+          this.scriptCalls += 1;
+          if (gone.length) this.run(["DEL", copy]);
+          else this.run(["SET", copy, value, "EX", seconds]);
+          return gone;
+        }
         // lib/paypal-delivery.ts, KEEP_RECEIPT: a receipt kept and noted for the person's deletion, unless their print
         // says they were deleted at or after the payment (0, nothing written); else [1 when this SET kept it or 0, the
         // receipt kept], the second dropped when nothing is kept, as Redis ends a Lua table at its first nil.
@@ -2402,6 +2479,26 @@ export class MemoryRedis {
           const [, batch, field, expected] = args;
           if (this.run(["HGET", batch, field]) !== expected) return 0;
           return this.run(["HDEL", batch, field]);
+        }
+        // lib/stock-alerts.ts ADD_PLACE: a new place only while absent and under the ceiling; else only over the entry read.
+        if (key.startsWith("-- marktmorgen:stock-alert-add:v1\n") && args[0] === "1" && args.length === 7) {
+          const [, list, field, expected, next, max, seconds] = args;
+          const current = this.run(["HGET", list, field]);
+          if (expected === "") {
+            if (current !== null) return 0;
+            if ((this.run(["HLEN", list]) as number) >= Number(max)) return -1;
+          } else if (current !== expected) return 0;
+          this.run(["HSET", list, field, next]);
+          this.run(["EXPIRE", list, seconds]);
+          return 1;
+        }
+        // lib/stock-alerts.ts CONFIRM_PLACE: a back-in-stock place confirmed only over exactly the entry read.
+        if (key.startsWith("-- marktmorgen:stock-alert-confirm:v1\n") && args[0] === "1" && args.length === 6) {
+          const [, list, field, expected, next, seconds] = args;
+          if (this.run(["HGET", list, field]) !== expected) return 0;
+          this.run(["HSET", list, field, next]);
+          this.run(["EXPIRE", list, seconds]);
+          return 1;
         }
         // lib/closed-store-data.ts BATCH_SWAP: one batch entry rewritten, or dropped when the new text is empty, only
         // over exactly the text read.
@@ -3529,19 +3626,37 @@ export class MemoryRedis {
           this.run(["HINCRBY", keys[0], "#sold", sold]);
           return sold;
         }
-        if (key.startsWith("-- marktmorgen:stock-bind:v1\n")) {
+        // v2 (Codex L-20261120-0655): fenced on the store being live as lib/live-fence.ts's SET_IF_STORE_LIVE is, the
+        // checkout's hold written and the provisional one let go in the same step. Its calls are billed beside the EVAL.
+        if (key.startsWith("-- marktmorgen:stock-bind:v2\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count), argv = args.slice(1 + count);
           const n = Number(argv[0]);
-          if (!Number.isInteger(n) || n < 1 || n > 8 || count !== n || argv.length !== 3) return -1;
-          for (const k of keys) this.live(k);
-          for (const k of keys) {
-            const hold = this.data.get(k);
-            if (hold !== undefined && !(hold instanceof Map)) throw new Error("WRONGTYPE");
-            if (!(hold instanceof Map) || !hold.has(argv[1]) || !hold.has(argv[2])) return 0;
+          if (!Number.isInteger(n) || n < 1 || n > 8 || count !== n + 2 || argv.length !== 7) return -1;
+          const [, pending, checkout, hold, field, statsId, ref] = argv;
+          const live = keys[n], erasing = keys[n + 1];
+          this.scriptCalls += 1;
+          if (this.run(["HGET", erasing, field]) !== null) return -2;
+          this.scriptCalls += 1;
+          const held = this.run(["GET", live]);
+          if (statsId === "") {
+            if (held !== ref) return -2;
+          } else {
+            if (held === null) return -2;
+            if (typeof held !== "string") throw new Error("WRONGTYPE stock-bind: the store's record");
+            let record: unknown;
+            try { record = JSON.parse(held); } catch { return -1; }
+            // As the Lua: cjson decodes an array to a table too, whose statsId is nil, so it answers -2, not -1 (#5093 review).
+            if (!record || typeof record !== "object") return -1;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return -2;
           }
-          for (const k of keys) this.run(["HDEL", k, argv[1]]);
-          return 1;
+          let all = 1;
+          for (const k of keys.slice(0, n)) {
+            this.scriptCalls += 2;
+            this.run(["HSET", k, checkout, hold]);
+            if (this.run(["HDEL", k, pending]) !== 1) all = 0;
+          }
+          return all;
         }
         // lib/discount-schedule.ts: keep the decision and queue the warning before removing the due entry.
         if (key.startsWith("-- marktmorgen:dsched-fail-and-tell:v2\n") && args[0] === "3" && args.length === 10) {

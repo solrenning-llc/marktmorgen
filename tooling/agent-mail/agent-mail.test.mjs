@@ -341,8 +341,8 @@ console.log("takes by commit, a capped future OFF, the maximum take, the coordin
   const id13 = /^(\S+) +#13 @/m.exec(run(["list-queue"]).out)?.[1];
   // Takes by commit, not by their number (note 2 of Claude 5 ibqho on #5055).
   raw(`fila/tomadas/${id13}/7`, `${carimbo(-60000)}-claude-7-x-aa01\nClaude 7 X\n`);
-  raw(`fila/tomadas/${id13}/3`, `${carimbo(-30000)}-claude-3-x-aa02\nClaude 3 X\n`);
-  is("the latest take is the one written last, whatever its number", /#13 @\S+ +autor Claude 2 +tomado por Claude 3 X/.test(run(["list-queue"]).out), run(["list-queue"]).out);
+  raw(`fila/tomadas/${id13}/3`, `${carimbo(-30000)}-claude-1-x-aa02\nClaude 1 X\n`);
+  is("the latest take is the one written last, whatever its number", /#13 @\S+ +autor Claude 2 +tomado por Claude 1 X/.test(run(["list-queue"]).out), run(["list-queue"]).out);
   // The maximum take: renewals by the same holder stop counting 30 minutes after the first take of the run.
   const H14 = pr(14, "f14.txt", "14\n");
   run(["request-enqueue", "--from", "Claude 2", "--pr", "14", "--sha", H14.slice(0, 10), "--text", "fila #14"], { ...as("c2"), CORREIO_SEM_COMMITS: "1" });

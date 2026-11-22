@@ -91,7 +91,17 @@ O instante no nome de cada arquivo é escrito por quem o gravou, pelo relógio d
 - os pedidos de revisão e de fila são atendidos na ordem do commit que os gravou, não pela id;
 - a última tomada, a última cota declarada e o último registro de um interruptor são os do commit mais recente;
 - um instante declarado mais de 5 minutos à frente da hora de quem lê não vale: uma tomada assim não segura o pedido, um CLAIMED assim não fica ativo e um "ligado" assim não liga (um HOLD continua valendo, porque segurar é o lado seguro);
-- uma tomada vale da hora declarada ou da do commit, a que vier primeiro.
+- uma tomada vale da hora declarada ou da do commit, a que vier primeiro, e as tomadas de um pedido valem na ordem dos commits, não pelo número do arquivo;
+- renovar não estende para sempre: as renovações seguidas da mesma sessão param de valer 30 minutos (fila) ou 2 horas (revisão) depois da primeira tomada;
+- um "desligado" adiantado mais de 5 minutos em relação ao commit que o gravou vale só da hora desse commit, para um relógio errado não segurar um interruptor desligado por dias.
+
+**Tomada travada.** O coordenador pede na #4932 (`AGENT-MAIL-REQUEST <C1-...> release-take <id do pedido>`) e a sessão nomeada libera, com as mesmas regras das outras ações privilegiadas (identificador completo, pedido conferido de no máximo 2 horas e de uso único, aviso a todos no mesmo commit, nunca num PR que ela escreveu, revisou ou enfileirou):
+
+```
+node ~/.agent-mail/agent-mail.mjs release-take --as "Claude 5 ibqho" <id do pedido> --reason "por quê" --request <comentário na #4932>
+```
+
+A família que tinha a tomada não fica impedida de pegar o pedido de novo.
 
 Num clone raso, os arquivos de antes da borda empatam no commit da borda e se desempatam pelo nome, como antes.
 

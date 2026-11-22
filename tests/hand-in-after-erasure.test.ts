@@ -75,14 +75,15 @@ for (const [name, task] of [["reviewed", REVIEWED], ["done at once", AT_ONCE]] a
     // waits until the erasure has finished. The erasure counts again at its end, so the count read is stale.
     redis.clear();
     const original = redis.pipeline.bind(redis);
-    let handing: Promise<unknown> | null = null;
+    // Held in an object: TypeScript would narrow a plain variable assigned only inside the stand-in to null.
+    const hand: { done: Promise<unknown> | null } = { done: null };
     let atWrite: () => void = () => undefined;
     const reachedWrite = new Promise<void>((resolve) => { atWrite = resolve; });
     let letWrite: () => void = () => undefined;
     const writeHeld = new Promise<void>((resolve) => { letWrite = resolve; });
     redis.pipeline = (async (batch: Batch) => {
-      if (!handing && batch.length > 0 && batch.every(([op, key]) => op === "GET" && String(key).includes(":sub:"))) {
-        handing = firstHandIn(task).then(() => "written", (error: unknown) => error);
+      if (!hand.done && batch.length > 0 && batch.every(([op, key]) => op === "GET" && String(key).includes(":sub:"))) {
+        hand.done = firstHandIn(task).then(() => "written", (error: unknown) => error);
         await reachedWrite;
       } else if (handInWrite(batch)) {
         atWrite();
@@ -94,7 +95,7 @@ for (const [name, task] of [["reviewed", REVIEWED], ["done at once", AT_ONCE]] a
     try {
       erased = await forgetTasksPerson(COURSE, [LESSON], WHO, null);
       letWrite();
-      assert.ok((await handing) instanceof HandInChangedError, "the hand-in is refused, so the student is told to hand in again");
+      assert.ok((await hand.done) instanceof HandInChangedError, "the hand-in is refused, so the student is told to hand in again");
     } finally {
       redis.pipeline = original;
       letWrite();

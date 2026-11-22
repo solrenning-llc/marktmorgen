@@ -53,13 +53,15 @@ async function main(): Promise<void> {
   const pass = await addProduct(CLUB, "Club pass", "", "0", null);
   const workshop = await addProduct(CLUB, "Workshop", "", "0", null);
   if (!pass.ok || !workshop.ok) throw new Error("no product");
+  const passId = pass.product.id;
+  const workshopId = workshop.product.id;
   await setCommunity(CLUB, true);
   let club: Store = (await storeForEmail(CLUB))!;
   const cid = club.community!.id;
-  await saveConfig(cid, { ...freshConfig(club.name), access: [pass.product.id, workshop.product.id] });
+  await saveConfig(cid, { ...freshConfig(club.name), access: [passId, workshopId] });
   const config = (await readConfig(cid))!;
   club = (await storeForEmail(CLUB))!;
-  const created = await createEvent(club, { title: "Workshop call", about: "A synthetic call.", minutes: 60, tz: "UTC", where: "room", link: "", meet: null, only: [workshop.product.id], start: Date.now() + 3 * 86_400_000, cap: 1 });
+  const created = await createEvent(club, { title: "Workshop call", about: "A synthetic call.", minutes: 60, tz: "UTC", where: "room", link: "", meet: null, only: [workshopId], start: Date.now() + 3 * 86_400_000, cap: 1 });
   if (!created.ok) throw new Error("no event");
   const event = created.event;
 
@@ -67,17 +69,17 @@ async function main(): Promise<void> {
     const key = memberKey(email);
     await redis.pipeline([
       ["SET", `nl:cm:${cid}:ok:${emailKey(email)}`, JSON.stringify({ v: config.v, ok: true })],
-      ["HSET", `nl:cm:${cid}:m`, key, JSON.stringify({ k: key, e: email, n: name, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] } satisfies Member)],
+      ["HSET", `nl:cm:${cid}:m`, key, JSON.stringify({ k: key, e: email, n: name, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [] } satisfies Member)],
     ]);
     await holdsWorkshop(email, true);
     return `${passCookieName(club)}=${await mintPass(club, email, "all")}`;
   }
   async function holdsWorkshop(email: string, ok: boolean): Promise<void> {
-    const ids = [pass.product.id, workshop.product.id];
+    const ids = [passId, workshopId];
     await redis.pipeline([
       ["SET", `nl:cm:${cid}:ev:${event.id}:ok:${emailKey(email)}`, JSON.stringify({ v: `${config.v}.${event.v}`, ok })],
       // The shared reading of what they hold (lib/community-access.ts holdingsOf), which the doors read first.
-      ["SET", `nl:cm:${cid}:h:${emailKey(email)}`, JSON.stringify({ v: config.v, ids, held: ok ? ids : [pass.product.id] })],
+      ["SET", `nl:cm:${cid}:h:${emailKey(email)}`, JSON.stringify({ v: config.v, ids, held: ok ? ids : [passId] })],
     ]);
   }
   const act = async (cookie: string, action: string): Promise<string> => {

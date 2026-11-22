@@ -43,6 +43,7 @@
  * second email.
  */
 import { noteFirstSale } from "@/lib/yearly-offer";
+import { PLANS_ON_SALE } from "@/lib/opening";
 import { noteTestSales } from "@/lib/headline-test";
 import { revokeRefundedGifts } from "@/lib/gifts";
 import { revokeRefundedPreorders } from "@/lib/preorders";
@@ -58,9 +59,12 @@ import { REMIND_WITHIN_SECONDS, remindAbandoned } from "@/lib/checkout-recovery"
 import { enroll, readFlows } from "@/lib/flows";
 import { recoveryOn } from "@/lib/recovery-setting";
 import { type Store, ensureStoreId, saleHandles, storeRef, storesAfter } from "@/lib/store";
+import { noteKept } from "@/lib/move-members";
 import { listingsNamed, sellsThings } from "@/lib/catalog";
-import { AFFILIATE_ID_PATTERN, affiliatesOn, listPartners, noteSession } from "@/lib/affiliates";
+import { AFFILIATE_ID_PATTERN, type Affiliate, VIA_PENDING_META, affiliatesOn, listPartners, notePayPalPendings, notePendingDue, notePendingLinks, noteSession, settleUnconfirmed } from "@/lib/affiliates";
 import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
+import { bondsBuyers } from "@/lib/affiliate-bond";
+import { creditsContacts } from "@/lib/affiliate-setting";
 import { revokeRefunded, storeHasKeys } from "@/lib/licence-keys";
 import { markRefundedReviews, storeHasReviews } from "@/lib/review-proof";
 import { listensToSales, noteSales } from "@/lib/sale-events";
@@ -73,6 +77,7 @@ import { settleStoreList, storesWithRequests } from "@/lib/payment-request-store
 import { createHash } from "node:crypto";
 import { TAKE_DATA, dataKey, monthOf, type DataStore } from "@/lib/store-data";
 import { contentRoomFor } from "@/lib/store-data-rules";
+import { certificatePassesDue, mayHaveCertificates, takeCertificatePass, withdrawRefundedCertificates } from "@/lib/certificate-refunds";
 import { OPEN_HOURS, releaseExpiredHolds } from "@/lib/order-admission";
 import { paidOrdersLimitFor } from "@/lib/order-rules";
 
@@ -338,6 +343,32 @@ type WalkKind = "complete" | "expired";
 const walkKey = (kind: WalkKind, account: string, store: Store) => `nl:sweep:walk:${kind}:${account}:${store.sid || store.handle}`;
 const WALK_SESSION = /^cs_(?:test|live)_[A-Za-z0-9]{10,200}$/;
 /**
+ * The day's paid checkouts whose affiliate step ended with a known answer (noteSession finished, or nothing on the
+ * order to pass on), so the walk, which reads the day's checkouts again every run, never passes them on again
+ * (Claude 4 cloud X and Codex G on #4413: with buyers kept, every paid checkout with an address read its buyer's bond
+ * again every five minutes). A sorted set by session id, scored by when it was settled, trimmed to the walk's day
+ * (CONFIRM_WITHIN_SECONDS) at every write and kept no longer: at most one member for each of the day's paid
+ * checkouts, a session id of at most 208 characters, no address. The five-minute job's own, like its walk's place.
+ */
+const affiliateSettledKey = (account: string, store: Store) => `nl:sweep:aff:${account}:${store.sid || store.handle}`;
+/**
+ * The affiliate step's settled mark and its retention, in one step (Codex X4 on #4413): the session ids at the run's
+ * time in one ZADD (at most a page's hundred), the day's older ones trimmed, and the key's expiry set to the day. KEYS: the mark; ARGV: the time, the day in
+ * seconds, then the session ids. Answers how many ids it was given.
+ */
+export const KEEP_AFFILIATE_SETTLED = `-- marktmorgen:sweep-affiliate-settled:v1
+local at = tonumber(ARGV[1])
+local keep = tonumber(ARGV[2])
+local members = {}
+for i = 3, #ARGV do
+  members[#members + 1] = at
+  members[#members + 1] = ARGV[i]
+end
+redis.call('ZADD', KEYS[1], unpack(members))
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', at - keep - 1)
+redis.call('EXPIRE', KEYS[1], keep)
+return #ARGV - 2`;
+/**
  * A walk that has taken longer than this to reach the end of the day's checkouts is said in the log, every run it
  * goes on: an order paid in the last part of its checkout's day may then be read late, or leave the day before the
  * walk reaches it (an hour is twelve runs, at most 3,600 sessions of one kind, when the store is reached every run).
@@ -499,6 +530,24 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     } catch (error) {
       console.error("asking PayPal about a store's orders failed", store.handle, error);
     }
+    // A PayPal order whose affiliate link could not be read at checkout, decided or told about as a Stripe one is
+    // (owner's decision 6, lib/affiliates.ts): its own list, read only by a store with a program.
+    try {
+      const failed = await notePayPalPendings(store);
+      if (failed) counts.failed += failed;
+    } catch (error) {
+      console.error("reading a store's pending PayPal affiliate links failed", store.handle, error);
+    }
+  }
+  // A sale whose second tier waits for its buyer's address (lib/affiliates.ts settleUnconfirmed): read again, a batch a
+  // run, and decided by itself. Only a store with a program on: one command a run, and only that.
+  if (affiliatesOn(store) && (store.stripeAccountId || store.paypalSeller)) {
+    try {
+      const unconfirmed = await settleUnconfirmed(store, undefined, deadline);
+      if (unconfirmed.failed) counts.failed += unconfirmed.failed;
+    } catch (error) {
+      console.error("reading a store's sales with an unconfirmed buyer failed", store.handle, error);
+    }
   }
   if (reviewed) {
     try {
@@ -552,10 +601,27 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     // it are counted as failed and wait for the next pass (the writes are HSETNX, so a retry records a share once),
     // while the confirmations, the library and the rest below go on. A click wins over a code (Codex H2 on #3238):
     // an order whose `via` is an affiliate id is decided by noteSession without the codes, the same test it uses.
-    if (affiliatesOn(store) && paid.length) {
+    // Asked first, in one command: which of the page's paid checkouts already had their affiliate step settled
+    // (affiliateSettledKey). An answer in another shape settles nobody: every one is passed on, as before.
+    const settledKey = store.stripeAccountId ? affiliateSettledKey(store.stripeAccountId, store) : "";
+    const settledBefore = new Set<string>();
+    if (affiliatesOn(store) && paid.length && settledKey) {
+      const scores = await redisPipeline([["ZMSCORE", settledKey, ...paid.map((row) => row.id as string)]])
+        .then((reply) => repliesFor(repliesFor(reply, 1)?.[0], paid.length))
+        .catch(() => null);
+      paid.forEach((row, i) => {
+        // Settled only on a score as Redis writes one (a number, or its text); anything else settles nobody (Codex X4's LOW).
+        const score = scores?.[i];
+        if ((typeof score === "number" && Number.isFinite(score)) || (typeof score === "string" && /^\d{1,15}(\.\d+)?$/.test(score))) settledBefore.add(row.id as string);
+      });
+    }
+    // What the affiliates' part below read, handed on to the pending links after it (undefined: read there if needed).
+    let readOwners: Map<string, string> | undefined;
+    let readPartners: Affiliate[] | undefined;
+    if (affiliatesOn(store) && paid.some((row) => !settledBefore.has(row.id as string))) {
       // A gift through "Support my work" sold nothing, so it earns nobody a share (lib/store-tips.ts),
       // and a payment request is the creator's own bill to someone they already deal with (lib/payment-requests.ts).
-      const sold = paid.filter((row) => row.metadata?.kind !== "tip" && row.metadata?.kind !== "request");
+      const sold = paid.filter((row) => row.metadata?.kind !== "tip" && row.metadata?.kind !== "request" && !settledBefore.has(row.id as string));
       const needsCodes = (row: SessionRecord) =>
         promoCodesOn(row as { discounts?: unknown }).length > 0 && !AFFILIATE_ID_PATTERN.test(row.metadata?.via ?? "");
       const coded = sold.some(needsCodes);
@@ -567,6 +633,10 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
         coded ? codeOwners(store).catch(unread("the codes given to affiliates")) : new Map<string, string>(),
         listPartners(store).catch(unread("the store's partners")),
       ]);
+      readOwners = owners ?? undefined;
+      readPartners = partners ?? undefined;
+      // Settled this run with a known answer: noteSession finished, or there was nothing on the order to pass on.
+      const settledNow: string[] = [];
       for (const row of sold) {
         const id = row.id as string;
         if (partners === null || (owners === null && needsCodes(row))) {
@@ -574,21 +644,62 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
           continue;
         }
         const code = owners?.size ? affiliateForCodes(row as { discounts?: unknown }, owners) : "";
-        if (row.metadata?.via || code || partners.length) {
+        // A buyer kept with the affiliate who first brought them, or brought as a confirmed lead, is credited by
+        // noteSession from the address alone, with no link or code on the order: passed on too, or a buyer who
+        // never came back to the thanks page would earn that affiliate nothing.
+        const email = (row as { customer_details?: { email?: unknown } | null }).customer_details?.email;
+        const byBuyer = typeof email === "string" && email !== "" && (bondsBuyers(store) || creditsContacts(store.affiliates));
+        if (row.metadata?.via || code || partners.length || byBuyer) {
           try {
             await noteSession(store, row as Parameters<typeof noteSession>[1], owners ?? undefined, partners);
+            settledNow.push(id);
           } catch (error) {
             failOrder(id);
             console.error("an affiliate's sale was left for the next run", id, describe(error));
           }
-        }
+        } else settledNow.push(id);
+      }
+      // Written once the page's step is done; a write that fails leaves them unsettled, passed on again next run,
+      // where noteSession's writes (HSETNX) record nothing twice.
+      // The mark and its expiry are one script (KEEP_AFFILIATE_SETTLED; Codex X4 on #4413): a write cut after its first
+      // command can never leave the day's sessions marked with no expiry, which the next pass would read as settled
+      // and never write again. Either all of it is done or none, and the next pass marks them again.
+      if (settledNow.length && settledKey) {
+        const at = Math.floor(Date.now() / 1000);
+        // Taken as written only on its exact answer, one count of the sessions marked (the script's #ARGV - 2): any other
+        // shape is said like a failed write (Codex X6's LOW, retained by Codex L on #4413); either way they are read
+        // again next run, where noteSession's writes (HSETNX) record nothing twice.
+        await redisPipeline([["EVAL", KEEP_AFFILIATE_SETTLED, 1, settledKey, at, CONFIRM_WITHIN_SECONDS, ...settledNow]])
+          .then((replies) => {
+            const marked = repliesFor(replies, 1);
+            if (!marked || countOf(marked[0]) !== settledNow.length) {
+              console.error("the affiliate step's settled mark got no exact answer; read again next run", store.handle);
+            }
+          })
+          .catch((error) => console.error("noting the checkouts whose affiliate step is settled failed (settled mark); read again next run", store.handle, describe(error)));
       }
     }
     // The store's first sale ever, noted once, with the yearly plan offered
     // at the moment it is most worth keeping (lib/yearly-offer.ts). Not on the
-    // demo's account, which canConfirm leaves out.
+    // demo's account, which canConfirm leaves out. Its reading of earlier sales keeps to the sweep's deadline: what it
+    // could not read before it is not known, and the next pass asks again.
     if (paid.length && canConfirm(store)) {
-      await noteFirstSale(store, paid).catch((error) => console.error("noting a first sale failed", store.handle, error));
+      await noteFirstSale(store, paid, PLANS_ON_SALE, deadline).catch((error) => console.error("noting a first sale failed", store.handle, error));
+    }
+    // An order whose affiliate could not be read at checkout carries the click as pending (owner's decision 6):
+    // read again at each pass, credited once it answers, the creator told past PENDING_LINK_SECONDS; whether the
+    // program is on now or not, since the sale was made while it was. Never ends the store's pass: an order that does
+    // not read is counted as failed and waits for the next run. A gift or a payment request sold nothing.
+    const pendingRows = paid.filter((row) => row.metadata?.kind !== "tip" && row.metadata?.kind !== "request" && typeof row.metadata?.[VIA_PENDING_META] === "string");
+    if (pendingRows.length) {
+      const pending = await notePendingLinks(store, pendingRows as Parameters<typeof notePendingLinks>[1], now, readOwners, readPartners, undefined, deadline).catch((error: unknown) => {
+        console.error("reading the pending affiliate links failed; they wait for the next run", store.handle, describe(error));
+        return null;
+      });
+      if (pending === null) for (const row of pendingRows) failOrder(row.id as string);
+      for (const id of pending?.failed ?? []) failOrder(id);
+      // A creator who could not be told (refused REFUSED_TRIES times) is said in the run's log, by order count only.
+      if (pending?.untold) console.error("creators not told about unconfirmed affiliate links", store.handle, pending.untold);
     }
     // A sale paid from a page running a test counts for the version its buyer was shown, once (lib/headline-test.ts).
     if (paid.some((row) => row.metadata?.ab)) {
@@ -602,6 +713,18 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     // The creator's phone and email platform, told of each sale once.
     if (listensToSales(store)) {
       await noteSales(store, paid).catch((error) => console.error("telling about sales failed", store.handle, error));
+    }
+    // A membership moved from another platform, paid (or started on its trial): its invitation is kept now, whether or
+    // not its member came back to the thanks page, so the link never opens a second membership, and a price taken off
+    // sale since stays theirs alone (lib/move-members.ts; Claude 4 on #2690).
+    {
+      const handles = saleHandles(store);
+      for (const row of paid) {
+        const meta = row.metadata ?? {};
+        const email = typeof row.customer_details?.email === "string" ? row.customer_details.email : typeof row.customer_email === "string" ? row.customer_email : "";
+        if (meta.moved !== "yes" || !meta.product || !email || !handles.has(meta.store ?? "")) continue;
+        await noteKept(store, email, meta.product).catch((error) => console.error("noting a moved membership kept failed", store.handle, error));
+      }
     }
     const confirming = canConfirm(store);
     // Which confirmations already went: one exact answer per order, 0 or 1 (CX-123 rule 24, L6). Anything else is
@@ -753,6 +876,12 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
   await retryPayPalCancelNotices(deadline).catch((error) => console.error("trying canceled PayPal orders' notices again failed", error));
   // The stores with open payment requests, read once a run.
   const requesting = await storesWithRequests().catch(() => new Set<string>());
+  // Pending affiliate links the stores' own listings no longer bring (past their checkout's day, a store this run does
+  // not reach), first, inside the run's deadline (lib/affiliates.ts notePendingDue, owner's decision 6).
+  counts.failed += await notePendingDue(Math.floor(Date.now() / 1000), deadline).catch((error: unknown) => {
+    console.error("reading the pending affiliate links' list failed", describe(error));
+    return 0;
+  });
   // Redis's SCAN may hand back the same key on more than one page (and a store
   // moving between addresses is seen under both), so each store is swept at
   // most once a run: the job's per-store figures (PAYPAL_WATCH_RANGES and
@@ -761,6 +890,8 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
 
   while (Date.now() < deadline) {
     const { stores, next } = await storesAfter(cursor);
+    // Whose certificates' refund pass is due, read once for the batch (lib/certificate-refunds.ts; focal review of #3409, ALTO 2).
+    const certificatesDue = await certificatePassesDue(stores.slice(skip));
     let done = 0;
     for (const store of stores) {
       if (done < skip) {
@@ -784,6 +915,15 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
           // One store's account refusing, or Stripe having a moment, does not
           // hold up everyone after it. It is reached again next time round.
           console.error("reading a store's checkouts failed", store.handle, error);
+        }
+      }
+      // A certificate whose course's payment was given back is withdrawn (lib/certificate-refunds.ts; DONO-18), for a
+      // store with a course whatever else it sells, on its turn. One failing never holds up the stores after it.
+      if (mayHaveCertificates(store) && certificatesDue.has(store.statsId!) && Date.now() < deadline) {
+        try {
+          if (await takeCertificatePass(store)) counts.revoked += await withdrawRefundedCertificates(store, deadline);
+        } catch (error) {
+          console.error("reading a store's refunds for certificates failed", store.handle, error instanceof Error ? error.name : typeof error);
         }
       }
       done += 1;

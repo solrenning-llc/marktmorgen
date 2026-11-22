@@ -111,6 +111,7 @@ is("and names the other actions LOCKED_ACTIONS holds that are not deleting: a ne
 // The account's own actions that refuse a locked session by themselves, each read in its route and named in the note.
 const ACCOUNT_LOCKS: Record<string, RegExp> = {
   "app/api/auth/signout-all/route.ts": /"Sign out everywhere"/,
+  "app/api/auth/signout-others/route.ts": /"Log out of other devices"/,
   "app/api/auth/passkey/route.ts": /\badd or remove a passkey\b/,
   "app/api/auth/two-step/route.ts": /\bchange two-step login\b/,
   "app/api/auth/recovery-address/route.ts": /\bchange your recovery address\b/,
@@ -146,7 +147,8 @@ const lockers = (dir: string): string[] =>
     if (statSync(join(process.cwd(), path)).isDirectory()) return lockers(path);
     return /\.tsx?$/.test(name) && /\blockedUntil\(/.test(source(path)) ? [path] : [];
   });
-const SHOWN_OR_CHECKED = ["lib/two-step.ts", "lib/studio-route.ts", "app/studio/page.tsx"];
+// lib/two-step-ask.ts reads the lock for the studio page only, to hide the first-sale ask (Codex H2 on #3511); it refuses nothing.
+const SHOWN_OR_CHECKED = ["lib/two-step.ts", "lib/studio-route.ts", "app/studio/page.tsx", "lib/two-step-ask.ts"];
 is("no other route refuses a locked session without the note saying so", [...lockers("app"), ...lockers("lib")].filter((file) => !SHOWN_OR_CHECKED.includes(file) && !(file in ACCOUNT_LOCKS)), []);
 is("every sentence shown is under twenty-one words", [...SIGN_IN_NOTES, ...LOCKED_NOTE].every((n) => n.split(/\s+/).length < 21), true);
 

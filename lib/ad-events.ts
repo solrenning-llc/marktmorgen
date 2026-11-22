@@ -60,7 +60,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
 import { onAccount } from "@/lib/stripe-account";
-import { type Store, ensureListId, saleHandles, storeRef } from "@/lib/store";
+import { ERASING_KEY, MAX_STORE_BYTES, STORE_ID_PATTERN, type Store, ensureListId, erasingField, ownerKey, saleHandles, storeIdCommand, storeRef } from "@/lib/store";
 import { toMajor } from "@/lib/money";
 import { bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { ADS_SERVER_PLATFORMS, type AdsServerPlatform, LEAD_ID, adsCookieName, readAdsCookie } from "@/lib/ad-consent";
@@ -73,6 +73,34 @@ export const SERVER_PLATFORMS: ServerPlatform[] = [...ADS_SERVER_PLATFORMS];
 
 const configKey = (statsId: string) => `nl:adsrv:${statsId}`;
 const lastKey = (statsId: string) => `nl:adsrv:last:${statsId}`;
+/**
+ * The platforms' last answers, kept only while the store is live and its erasure has not begun, in one step (Codex L,
+ * L-20261119-1153): a platform can answer after the store was erased, and a plain SET then wrote back for ninety days
+ * the record the eraser had just deleted. KEYS: the store's id (storeIdCommand), or for a store kept from before ids
+ * (sid "") its record under its owner's address (Claude 3's LOW 1 on #4900); nl:closed:erasing; the answers' record.
+ * ARGV: the store's erasing field, the JSON, its seconds, "id" or "legacy", the store's statsId, the largest record read.
+ * An id is never given to another store, but an owner's address is: once a store from before ids is closed, its owner
+ * can open another one there (Codex L-20261120-1242). So a legacy store is the same store only while the record at its
+ * owner's address holds the same statsId, made once and never changed (closeStoreRecord's sameLegacy), an id given to
+ * it since included. 1 kept; 0 gone, another store, or erasing; -1 the record could not be read. Only 1 writes.
+ */
+export const KEEP_LAST_IF_LIVE = `-- marktmorgen:ads-last-live:v2
+if ARGV[4] == "id" then
+  if redis.call("EXISTS", KEYS[1]) ~= 1 then return 0 end
+elseif ARGV[4] == "legacy" then
+  if ARGV[5] == "" then return -1 end
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  if #raw > tonumber(ARGV[6]) then return -1 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" or type(record.statsId) ~= "string" or record.statsId == "" then return -1 end
+  if record.statsId ~= ARGV[5] then return 0 end
+else
+  return -1
+end
+if redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return 0 end
+redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
+return 1`;
 const sentKey = (id: string) => `nl:adsrv:sent:${id}`;
 /** What a renewal's sent mark takes in the store's data room for its forty days. */
 export const RENEWAL_MARK_BYTES = 192;
@@ -570,7 +598,13 @@ async function deliver(store: Store, stored: Stored, c: Conversion, buyer: Buyer
   );
   // In one order whatever answered first, so the studio reads them the same way each time.
   const ordered = Object.fromEntries(SERVER_PLATFORMS.filter((p) => answers[p]).map((p) => [p, answers[p]]));
-  await redisPipeline([["SET", lastKey(store.statsId), JSON.stringify({ at: now, kind: c.kind, ...ordered }), "EX", 90 * 86400]]);
+  // Kept only while the store is live and not being erased: an answer may come back after the eraser deleted it.
+  const json = JSON.stringify({ at: now, kind: c.kind, ...ordered });
+  const hasId = STORE_ID_PATTERN.test(store.sid);
+  await redisPipeline([
+    ["EVAL", KEEP_LAST_IF_LIVE, 3, hasId ? storeIdCommand(store.sid)[1] : await ownerKey(storeRef(store)), ERASING_KEY, lastKey(store.statsId),
+      await erasingField(storeRef(store)), json, 90 * 86400, hasId ? "id" : "legacy", store.statsId, MAX_STORE_BYTES],
+  ]);
   return platforms.length;
 }
 

@@ -95,6 +95,11 @@ async function main(): Promise<void> {
     rows = [];
     is(`only the imported purchase, the read answers ${label}: unknown, not none`, await memberPriceFor(store, product, proved), { state: "unknown" });
   }
+  // Claude 6's LEVE 1 on #2794: one legible row (another product) beside one that does not read is not "nothing
+  // brought over" for the guide: the 30% may rest on the unreadable row, so unknown, never none.
+  reply = { value: ["someotherproduct", JSON.stringify({ at: 1, job: "b".repeat(24), items: [] }), guide.product.id, JSON.stringify({ at: 1, job: "b".repeat(24), items: [], option: "not a valid option" })] };
+  rows = [];
+  is("a mixed imported read (one row unreadable): unknown, not none", await memberPriceFor(store, product, proved), { state: "unknown" });
   reply = { value: [] };
   rows = [];
   is("an empty reply is a real nothing imported: none", await memberPriceFor(store, product, proved), { state: "none" });

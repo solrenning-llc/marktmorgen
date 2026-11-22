@@ -15,7 +15,9 @@ import { recordDeletions } from "@/lib/backup-deletions";
 import type { BackupDeletionReason } from "@/lib/backup-files-contract";
 import * as blob from "@/lib/blob";
 import { deleteVault, headVault, listVault, readVault, vaultHeld, vaultUrl, writeVault } from "@/lib/vault";
+import { BLOB_LIST_PAGES } from "@/lib/storage-rules";
 import { VAULT_PREFIX, isVaultPath } from "@/lib/vault-rules";
+import { blobHeldToday } from "@/lib/blob-tally";
 
 export type Measured = { pathname: string; size: number; contentType: string };
 
@@ -158,12 +160,33 @@ export async function listFiles(prefix: string): Promise<string[]> {
  * incomplete listings: a partial total cannot authorize another upload.
  */
 export async function filesHeld(folder: string): Promise<number> {
+  return withVault(folder, await blobHeld(folder));
+}
+
+/**
+ * The same, with the Blob folder listed at most once a UTC day (lib/blob-tally.ts, the owner's decision of
+ * 16 November 2026): the day's listed total and every byte tallied into the folder since, never less than what is
+ * there. The vault is measured whole every time. Throws "storage_daily" when the day's one listing is spent with no
+ * total kept, and as filesHeld does on anything else unknown.
+ */
+export async function filesHeldToday(folder: string): Promise<number> {
+  return withVault(folder, await blobHeldToday(folder, blobHeld));
+}
+
+async function withVault(folder: string, bytes: number): Promise<number> {
+  const vault = await vaultHeld(folder);
+  if (vault === null || !Number.isSafeInteger(vault) || vault < 0 || !Number.isSafeInteger(bytes + vault)) throw new Error("incomplete vault measurement");
+  return bytes + vault;
+}
+
+/** Every byte of the store's Blob folder, by a full listing: at most 20 pages of 1000, each an Advanced Operation. */
+export async function blobHeld(folder: string): Promise<number> {
   let bytes = 0;
   let cursor: string | undefined;
   const seen = new Set<string>();
   const paths = new Set<string>();
   let complete = false;
-  for (let page = 0; page < 20; page += 1) {
+  for (let page = 0; page < BLOB_LIST_PAGES; page += 1) {
     const answer = await blob.list({ prefix: `stores/${folder}/`, limit: 1000, cursor });
     if (!answer || !Array.isArray(answer.blobs) || answer.blobs.length > 1000 || typeof answer.hasMore !== "boolean") throw new Error("invalid storage listing");
     for (const entry of answer.blobs) {
@@ -179,7 +202,5 @@ export async function filesHeld(folder: string): Promise<number> {
     cursor = answer.cursor;
   }
   if (!complete) throw new Error("storage listing exceeded page limit");
-  const vault = await vaultHeld(folder);
-  if (vault === null || !Number.isSafeInteger(vault) || vault < 0 || !Number.isSafeInteger(bytes + vault)) throw new Error("incomplete vault measurement");
-  return bytes + vault;
+  return bytes;
 }

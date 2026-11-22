@@ -29,6 +29,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { countOf, repliesFor } from "@/lib/redis-reply";
+import { claimWhileStoreLive } from "@/lib/store-live-cache";
 import { isBillingConfigured, readSubscription } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
@@ -135,8 +136,10 @@ export async function noteFirstSale(store: Store, paid: Checkout[], plansOnSale 
     // so later passes stop at the EXISTS above without asking Stripe again (third money pre-review of
     // claude5/affiliate-refund-list-exact2). A mark whose writing is not known is let go if it is ours, and the next
     // pass reads again.
+    // Taken only while the store is still its own and not erasing, in one step (Codex L-20261120-1745): the Stripe
+    // pages above can outlast the store, and nl:soldbefore is the store's own data, erased with it, never written back.
     const stop = claimValue(at);
-    if ((await claimMark(soldBeforeUnknownKey(store), null, stop)) === "unknown") await releaseMark(soldBeforeUnknownKey(store), stop);
+    if ((await claimWhileStoreLive(store, soldBeforeUnknownKey(store), null, stop)) === "unknown") await releaseMark(soldBeforeUnknownKey(store), stop);
     return false;
   }
   // The first sale's day is noted once, for good: ours only on OK or our own value read back. The value is the day in
@@ -267,9 +270,11 @@ async function offerOnce(store: Store, plansOnSale: boolean): Promise<"sent" | "
   if (!plansOnSale || !subscription || !isBillingConfigured() || !isSenderConfigured() || !store.email) return "no";
   const live = await readSubscription(subscription);
   if (live.state !== "active" || live.cycle !== "month" || live.cancelsAtEnd || live.changePending) return "no";
-  // Once per subscription, for good: ours only on OK or our own value read back (CX-123 rule 24, L9).
+  // Once per subscription, for good: ours only on OK or our own value read back (CX-123 rule 24, L9), and only while the
+  // store is still its own and not erasing (Codex L-20261120-1745): this Store was read before the first sale's Stripe
+  // pages, and an erased store's owner is never written to at the address it held. "gone" sends nothing.
   const offer = claimValue();
-  const claimed = await claimMark(offeredKey(subscription), null, offer);
+  const claimed = await claimWhileStoreLive(store, offeredKey(subscription), null, offer);
   if (claimed === "unknown") {
     // It may have landed, and kept for good it would stop every later offer (Claude 5 on #2722). Nothing was sent on
     // it, so it is let go if it still holds our own value (never another run's), and a later pass tries again.

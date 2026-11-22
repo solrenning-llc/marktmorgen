@@ -1,6 +1,6 @@
 /**
  * The reviews' refund pass (lib/review-proof.ts markRefundedReviews) asks which refunds of a page an earlier pass
- * already took with one SMISMEMBER a page, never one SISMEMBER a row (Claude 1 c1-revcusto on #5092, 22/11/2026: the
+ * already took with one ZMSCORE a page (a sorted set scored by the row's time, trimmed each run), never one SISMEMBER a row (Claude 1 c1-revcusto on #5092, 22/11/2026: the
  * pass had no cost line, and a page of 100 refunds re-read every run was 100 commands). Synthetic store, reviews and
  * refunds; Stripe answered by a stand-in; the Redis stand-in's pipeline counted.
  */
@@ -67,18 +67,18 @@ async function main(): Promise<void> {
   sent.length = 0;
   const marked = await markRefundedReviews(store, Date.now() + 60_000);
   const seenKey = `nl:rev:refunds:seen:${statsId}`;
-  const smismember = sent.filter((c) => c[0] === "SMISMEMBER" && c[1] === seenKey);
+  const smismember = sent.filter((c) => c[0] === "ZMSCORE" && c[1] === seenKey);
   const sismember = sent.filter((c) => c[0] === "SISMEMBER" && c[1] === seenKey);
   is("the three refunded reviews are marked", marked, 3);
   // The rows' three ids, then their three payments' ids (a payment marked once, whatever its parts: 9th audit on #5100).
-  is("one SMISMEMBER for the page, with its three ids and their payments' ids", [smismember.length, smismember[0]?.length], [1, 8]);
+  is("one ZMSCORE for the page, with its three ids and their payments' ids", [smismember.length, smismember[0]?.length], [1, 8]);
   is("and no SISMEMBER a row", sismember.length, 0);
 
   part("A pass with nothing new asks once more, with one command");
   sent.length = 0;
   const again = await markRefundedReviews(store, Date.now() + 60_000);
   is("nothing marked again", again, 0);
-  is("the rows still on the page asked about with one command", sent.filter((c) => c[0] === "SMISMEMBER" && c[1] === seenKey).length <= 1, true);
+  is("the rows still on the page asked about with one command", sent.filter((c) => c[0] === "ZMSCORE" && c[1] === seenKey).length <= 1, true);
   is("and still no SISMEMBER a row", sent.filter((c) => c[0] === "SISMEMBER" && c[1] === seenKey).length, 0);
   done();
 }

@@ -349,6 +349,11 @@ export const REVIEW_REFUND_ROWS_PER_MONTH: Readonly<Record<Tier, number>> = { cr
 export const REVIEW_REFUND_PAGES = 3;
 const REFUND_PAGES = REVIEW_REFUND_PAGES;
 const anchorKey = (statsId: string) => `nl:rev:refunds:since:${statsId}`;
+/**
+ * The refund rows handled and the payments marked, a sorted set scored by the row's time: trimmed each run below the
+ * window read (ZREMRANGEBYSCORE), so it holds at most the window's rows and their payments, never the store's whole
+ * history (Claude 2 lpgvy's MEDIUM 2 on #5100: a set whose expiry every write renewed had no bound).
+ */
 const seenKey = (statsId: string) => `nl:rev:refunds:seen:${statsId}`;
 /** The rows handled in a calendar month (REVIEW_REFUND_ROWS_PER_MONTH), kept forty days. */
 const rowsKey = (statsId: string, month: string) => `nl:rev:refunds:rows:${statsId}:${month}`;
@@ -436,6 +441,9 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   const [anchorRaw] = await redisPipeline([["GET", anchorKey(statsId)]]);
   const anchor = Number(anchorRaw) > 0 ? Number(anchorRaw) : now - REFUND_LOOKBACK_SECONDS;
   const since = Math.max(0, anchor - 300);
+  // Rows older than the window are never read again: their ids and payments leave the seen set (one command a run;
+  // a reply in another shape only leaves them a run longer).
+  await redisPipeline([["ZREMRANGEBYSCORE", seenKey(statsId), "-inf", String(since - 1)]]);
   let newest = anchor;
   let marked = 0;
   let after = "";
@@ -477,19 +485,19 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
         .filter((refund) => typeof refund.id === "string" && refund.id && rowGivesBack(refund))
         .map((refund) => ({ id: refund.id as string, created: typeof refund.created === "number" ? refund.created : 0, pi: idOf(refund.payment_intent) }));
       // Which of them an earlier pass already took, and which payments it already marked, in one command for the
-      // page (SMISMEMBER: the rows' ids, then the payments' ids), read exactly: one flag each, 0 or 1; anything else
-      // is unknown, and the page is not handled this run (its anchor keeps). A payment refunded in parts gives one
-      // row a part, each with the charge refunded: its reviews are marked with the first row handled, and the rows
-      // after it are only taken as seen (9th triple audit on #5100, point 1).
+      // page (ZMSCORE: the rows' ids, then the payments' ids), read exactly: one answer each, null (never taken) or
+      // the time it was taken at; anything else is unknown, and the page is not handled this run (its anchor keeps).
+      // A payment refunded in parts gives one row a part, each with the charge refunded: its reviews are marked with
+      // the first row handled, and the rows after it are only taken as seen (9th triple audit on #5100, point 1).
       const pis = [...new Set(full.map((refund) => refund.pi).filter((pi) => INTENT_ID.test(pi)))];
       const asked = [...full.map((refund) => refund.id), ...pis];
-      const flags = asked.length ? repliesFor(await redisPipeline([["SMISMEMBER", seenKey(statsId), ...asked]]), 1)?.[0] : [];
-      if (!Array.isArray(flags) || flags.length !== asked.length || !flags.every((flag) => countOf(flag) === 0 || countOf(flag) === 1)) {
+      const scores = asked.length ? repliesFor(await redisPipeline([["ZMSCORE", seenKey(statsId), ...asked]]), 1)?.[0] : [];
+      if (!Array.isArray(scores) || scores.length !== asked.length || !scores.every((score) => score === null || Number.isFinite(Number(score)))) {
         throw new UnknownReplyError("which of the refunds' rows were already read");
       }
-      const seen = flags as unknown[];
-      const paymentSeen = new Set(pis.filter((_, i) => countOf(seen[full.length + i]) === 1));
-      const unseen = full.filter((_, i) => countOf(seen[i]) !== 1);
+      const seen = (scores as unknown[]).map((score) => score !== null);
+      const paymentSeen = new Set(pis.filter((_, i) => seen[full.length + i]));
+      const unseen = full.filter((_, i) => !seen[i]);
       // The month's rows (REVIEW_REFUND_ROWS_PER_MONTH), taken for the page's rows not handled yet before any is:
       // past the ceiling only what was left of it is handled, oldest first, the place keeps (unsure) and the pass
       // ends here; the rest waits for next month. Nothing is skipped.
@@ -509,7 +517,7 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       const kept = allowed >= unseen.length ? unseen : allowed > 0 ? unseen.slice(unseen.length - allowed) : [];
       const handled = new Set(kept.map((refund) => refund.id));
       for (const [i, refund] of full.entries()) {
-        if (countOf(seen[i]) === 1) {
+        if (seen[i]) {
           newest = Math.max(newest, refund.created);
           continue;
         }
@@ -521,7 +529,7 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
         }
         // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
         await redisPipeline([
-          ["SADD", seenKey(statsId), refund.id, ...(payment ? [refund.pi] : [])],
+          ["ZADD", seenKey(statsId), refund.created, refund.id, ...(payment ? [refund.created, refund.pi] : [])],
           ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
         ]);
         newest = Math.max(newest, refund.created);
@@ -547,7 +555,7 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   // that went on from a kept place moves the job no further than the newest closing it read, so a dispute closed
   // meanwhile is read from the top next run (review of #2158, inbox C4-24).
   if (lostRead) {
-    if (!(await confirmLostRead(lostRead, seenKey(statsId)))) unsure = true;
+    if (!(await confirmLostRead(lostRead, seenKey(statsId), "sorted"))) unsure = true;
     else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
   }
   // The place moves only past what was read to the end, sure and inside its time. A store with no place yet keeps

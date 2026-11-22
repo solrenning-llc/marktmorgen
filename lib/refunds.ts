@@ -350,11 +350,14 @@ export type LostRead = { rows: GivenBackRow[]; complete: boolean; newest: number
  * a row passed over for the run's lookups, its time or an error leaves the
  * place where it was, and the next run reads it again. True when kept.
  */
-export async function confirmLostRead(read: LostRead, seenKey: string): Promise<boolean> {
+export async function confirmLostRead(read: LostRead, seenKey: string, kept: "set" | "sorted" = "set"): Promise<boolean> {
   const ids = read.rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
   if (ids.length) {
-    const [flags] = await redisPipeline([["SMISMEMBER", seenKey, ...ids]]);
-    if (!Array.isArray(flags) || flags.length !== ids.length || flags.some((flag) => Number(flag) !== 1)) return false;
+    // The job's handled rows: a set (SMISMEMBER, 1 each) or, for the reviews' job, a sorted set scored by the row's
+    // time (ZMSCORE, a score each, never null).
+    const [flags] = await redisPipeline([[kept === "sorted" ? "ZMSCORE" : "SMISMEMBER", seenKey, ...ids]]);
+    if (!Array.isArray(flags) || flags.length !== ids.length) return false;
+    if (kept === "sorted" ? flags.some((flag) => flag === null || flag === undefined) : flags.some((flag) => Number(flag) !== 1)) return false;
   }
   await read.commit();
   return true;

@@ -634,7 +634,9 @@ async function creatorChange(
     // What a shorter answer frees is given back only once it is written.
     if (room && grown < 0) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: -grown }]);
     if (summary === "uncount") {
-      if (gone) await uncountRefunded(statsId, productId, before);
+      // Whatever `hidden` is: the kept numbers count a hidden review's stars (lib/review-summary.ts summarise), so a
+      // hidden review refunded leaves them too (Claude 2 lpgvy's MEDIUM 1 on #5100); `gone` above is the AI summary's.
+      if (after.refunded && !before.refunded) await uncountRefunded(statsId, productId, before);
     } else await recount(statsId, productId);
     return after;
   });

@@ -12,6 +12,10 @@ async function main() {
   const key = "nl:mail:drafts:" + store.listId;
   const lock = key + ":lock:" + id;
   const original = redis.pipeline;
+  /** A draft's save or delete: a plain HSET/HDEL, or (under the lease, since #3343's follow-up) one script naming the drafts hash. */
+  const writesDraft = (c: (string | number)[], kind: "set" | "del" | "any") =>
+    (c[1] === key && (kind === "any" ? c[0] === "HSET" || c[0] === "HDEL" : c[0] === (kind === "set" ? "HSET" : "HDEL")))
+    || (c[0] === "EVAL" && c.includes(key) && (kind === "any" ? /^-- marktmorgen:draft-(set|del)-held:/ : new RegExp("^-- marktmorgen:draft-" + kind + "-held:")).test(String(c[1])));
   const read = async () => JSON.parse(String((await original.call(redis, [["HGET", key, id]]))[0]));
   part("An older session cannot overwrite a newer saved version");
   const newer = await saveDraft(store, "other@example.com", { ...input, id, body: "Other team member", expectedSavedAt: first.draft.savedAt });
@@ -57,7 +61,7 @@ async function main() {
   const deleting = new Promise<void>(resolve => { finishDelete = resolve; });
   const deletionReached = new Promise<void>(resolve => { deletionStarted = resolve; });
   redis.pipeline = async commands => {
-    if (commands.some(c => c[0] === "HDEL" && c[1] === key)) { deletionStarted(); await deleting; }
+    if (commands.some(c => writesDraft(c, "del"))) { deletionStarted(); await deleting; }
     return original.call(redis, commands);
   };
   const pendingDelete = removeDraft(store, id);
@@ -72,7 +76,7 @@ async function main() {
   let writes = 0;
   for (const reply of [[], [undefined], [true], [1], ["ok"], ["OK", null], new Error("lock response lost")]) {
     redis.pipeline = async commands => {
-      writes += commands.filter(c => c[0] === "HSET" || c[0] === "HDEL").length;
+      writes += commands.filter(c => writesDraft(c, "any")).length;
       if (commands.some(c => c[0] === "SET" && c[1] === lock)) {
         if (reply instanceof Error) throw reply;
         return reply;

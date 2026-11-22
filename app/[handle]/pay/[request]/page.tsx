@@ -17,6 +17,7 @@ import { confirmPurchase } from "@/lib/purchase-email";
 import { PrintButton } from "@/components/print-button";
 import { StoreResting } from "@/components/store-resting";
 import { WhoAnswers } from "@/components/who-answers";
+import { BillingCountryField } from "@/components/billing-country-field";
 
 type Params = {
   params: Promise<{ handle: string; request: string }>;
@@ -60,14 +61,21 @@ export default async function PaymentRequestPage({ params, searchParams }: Param
     // The receipt and the order's count, once, whichever of this page and the five-minute job is first.
     if (request.state === "paid" && request.session === sessionId) await confirmPurchase(store, sessionId).catch((error) => console.error("confirming a payment request failed", error));
   }
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const now = new Date().getTime();
   const status = statusOf(request, now);
   const said = speechFor(store.language, request.currency);
   const w = requestWords(store.language);
-  const notice = typeof query.notice === "string" ? w.notices[query.notice] : undefined;
+  const payable = status === "open" && requestsOpen(store);
+  // The EU VAT gate's answers (app/api/store/pay-request) ask the buyer to choose a country and try again: said only
+  // while the request can still be paid here, never beside "Payment received" or "withdrawn". The billing-country field
+  // is then marked invalid and described by the notice, so a screen reader names the problem on reaching it (WCAG
+  // 3.3.1, 3.3.3).
+  const countryAnswer = query.notice === "abroad" || query.notice === "country";
+  const notice = typeof query.notice === "string" && (payable || !countryAnswer) ? w.notices[query.notice] : undefined;
+  const countryProblem = notice && countryAnswer ? "pay-request-notice" : undefined;
   const day = (d: string) => said.date(Date.parse(`${d}T12:00:00Z`));
   const total = said.money(request.total);
-  const payable = status === "open" && requestsOpen(store);
   const rehearsal = payable && sellsInTestMode(store);
   const reportUrl = `/report?url=${encodeURIComponent(`${SITE_URL}/@${store.handle}`)}`;
 
@@ -84,7 +92,7 @@ export default async function PaymentRequestPage({ params, searchParams }: Param
       <main id="content" className="relative mx-auto max-w-xl px-4 py-12 sm:py-16">
         <div className="st-card p-6 sm:p-10">
           <p className="st-muted text-sm font-semibold">{w.eyebrow(store.name)}</p>
-          <h1 className="mt-2 font-display text-3xl font-semibold leading-tight sm:text-4xl">{heading}</h1>
+          <h1 id="pay-request-title" className="mt-2 font-display text-3xl font-semibold leading-tight sm:text-4xl">{heading}</h1>
           {status === "paid" ? (
             <p className="st-muted mt-4 text-lg">
               {request.outside
@@ -99,13 +107,13 @@ export default async function PaymentRequestPage({ params, searchParams }: Param
           {status === "open" && sessionId ? <p className="st-muted mt-4">{w.waitingBody}</p> : null}
           {status === "open" && !sessionId ? <p className="st-muted mt-4 text-lg">{w.lead(store.name)}</p> : null}
           {notice ? (
-            <div className="st-note mt-5" role="alert">
+            <div id="pay-request-notice" className="st-note mt-5" role="alert">
               <p className="font-bold" style={{ color: "var(--st-text)" }}>{notice.title}</p>
               <p className="mt-1 text-sm">{notice.body}</p>
             </div>
           ) : null}
 
-          <table className="mt-6 w-full text-left text-sm">
+          <table aria-labelledby="pay-request-title" className="mt-6 w-full text-left text-sm">
             <thead>
               <tr className="st-muted">
                 <th scope="col" className="py-2 pr-3 font-semibold">{w.item}</th>
@@ -141,6 +149,10 @@ export default async function PaymentRequestPage({ params, searchParams }: Param
             <form action="/api/store/pay-request" method="post" target="_top" className="mt-7">
               <input type="hidden" name="handle" value={store.handle} />
               <input type="hidden" name="request" value={request.id} />
+              {/* Where the buyer is buying from (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate). */}
+              <div className="mb-5">
+                <BillingCountryField id={`bc-request-${request.id}`} locale={said.lang.locale} label={w.billingCountry} choose={said.w.chooseCountry} problem={countryProblem} />
+              </div>
               <button type="submit" className="btn st-btn w-full">{w.pay(total)}</button>
               <p className="st-muted mt-3 text-sm">{w.secure(store.name)}</p>
               <WhoAnswers store={store} className="st-muted mt-1 text-sm" />

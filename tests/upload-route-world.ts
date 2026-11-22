@@ -9,8 +9,21 @@ export async function studioAccess(){return state.auth?{ok:true,access:{store:st
 export const storeForEmail=async()=>state.store;
 export const storeFolder=async()=>FOLDER;
 export const storeRef=()=>'owner@example.test';
+// What lib/store-live-cache.ts reads to build the route's store fence (Codex L-20261120-0141); the world's own
+// openReservedVault stands in for the open, so the fence is only carried.
+export const ERASING_KEY='nl:closed:erasing';
+export const STORE_ID_PATTERN=/^[0-9a-f]{32}$/;
+export const erasingField=async()=>'e'.repeat(40);
+export const ownerKey=async()=>'nl:store:owner:'+'o'.repeat(40);
+export const storeIdCommand=(sid:string):[string,string]=>['GET','nl:store:id:'+sid];
 export const ownsDeliveryId=()=>state.owns;
 export const readKind=async()=>[{course:{id:'course-1'}}];
+/** No product here has a file yet (lib/catalog.ts readDelivery, deliveredFile), so the door's lock check (#3936) lets every open through. */
+export const readDelivery=async()=>null;
+export const deliveredFile=()=>null;
+/** No session here is locked (lib/two-step.ts lockedFor). */
+export const lockedFor=async()=>false;
+export const refusedJson=(reason:string)=>Response.json({ok:false,error:reason},{status:403});
 export const ITEM_ID_PATTERN=/^[A-Za-z0-9_-]{1,40}$/;
 export const VIDEO_TYPES=['video/mp4'];
 export const readCourses=async()=>new Map([['course-1',{id:'course-1'}]]);

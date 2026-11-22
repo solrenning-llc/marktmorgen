@@ -1,11 +1,12 @@
 "use client";
 
 import { useId, useState } from "react";
-import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
+import { uploadReason, uploadSoldFile, uploadWords } from "@/lib/sold-file-upload";
 import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { MAX_FILE_BYTES, maxFileLabel, readableSize } from "@/lib/product-file";
 import { EPISODE_ACCEPT, EPISODE_TYPES, type Episode, MAX_EPISODES, MAX_EPISODE_NOTES, MAX_EPISODE_TITLE, type Podcast } from "@/lib/podcast-rules";
+import { PodcastPublicFeed } from "@/components/podcast-public-feed";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -74,7 +75,7 @@ export function PodcastEditor({ productId, folder, initial }: { productId: strin
       }
     } catch (thrown) {
       const reason = uploadReason(thrown);
-      setError(reason === "wrong_type" ? MESSAGES.type : MESSAGES[reason] ?? MESSAGES.server_error ?? "Something went wrong.");
+      setError(uploadWords(thrown) ?? (reason === "wrong_type" ? MESSAGES.type : MESSAGES[reason] ?? MESSAGES.server_error ?? "Something went wrong."));
     } finally {
       setPercent(null);
     }
@@ -152,6 +153,8 @@ export function PodcastEditor({ productId, folder, initial }: { productId: strin
           </ol>
         )}
       </section>
+
+      <PodcastPublicFeed productId={productId} episodes={podcast.episodes} />
     </div>
   );
 }

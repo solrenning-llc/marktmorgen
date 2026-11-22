@@ -13,12 +13,18 @@
  * no writing job; it takes the store's data room like any page, and a page
  * that does not fit is simply not made (the product is kept all the same).
  */
+import { MAX_TITLE_LENGTH } from "@/lib/catalog-rules";
 import { MAX_BIO_LENGTH, type Store, addProduct, setFaq, setProductPage, updateDetails } from "@/lib/store";
 import { parseFaq } from "@/lib/store-faq";
 import { EMPTY_PAGE, blocksFromTemplate, parsePage } from "@/lib/sales-page";
 import { writePage } from "@/lib/sales-page-store";
 
-export type SetupKept = { bio: boolean; products: number; pages: number; faq: boolean; refused: string[] };
+/**
+ * refused: names not kept because the store cannot charge their price yet; long: names not kept because they are
+ * longer than a product's title holds (MAX_TITLE_LENGTH). A name is never cut short to fit: the creator is told
+ * and shortens it themselves (docs/cross-product-handoff.md, "do not silently rewrite or truncate").
+ */
+export type SetupKept = { bio: boolean; products: number; pages: number; faq: boolean; refused: string[]; long: string[] };
 
 /** The page template for a drafted product's kind: what a buyer of that kind of product is shown. */
 export function setupTemplate(kind: unknown, free: boolean): string {
@@ -29,13 +35,17 @@ export function setupTemplate(kind: unknown, free: boolean): string {
 const text = (value: unknown, max: number) => (typeof value === "string" ? value.slice(0, max) : "");
 
 export async function keepStoreSetup(ref: string, store: Store, body: Record<string, unknown>): Promise<SetupKept> {
-  const done: SetupKept = { bio: false, products: 0, pages: 0, faq: false, refused: [] };
+  const done: SetupKept = { bio: false, products: 0, pages: 0, faq: false, refused: [], long: [] };
   const bio = text(body.bio, MAX_BIO_LENGTH * 2).trim().slice(0, MAX_BIO_LENGTH);
   if (bio) done.bio = (await updateDetails(ref, store.name, bio)).ok;
   for (const raw of Array.isArray(body.products) ? body.products.slice(0, 3) : []) {
     const p = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-    const title = text(p.title, 120);
+    const title = text(p.title, MAX_TITLE_LENGTH * 2);
     if (!title.trim()) continue;
+    if (title.trim().length > MAX_TITLE_LENGTH) {
+      done.long.push(title.trim());
+      continue;
+    }
     const membership = p.kind === "membership";
     const made = await addProduct(ref, title, text(p.summary, 200), text(p.price, 20), membership ? { interval: "month", trialDays: 0, payments: 0 } : null, null, true);
     if (!made.ok) {

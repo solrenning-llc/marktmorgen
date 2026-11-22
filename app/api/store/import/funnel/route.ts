@@ -1,9 +1,9 @@
-import { windowId } from "@/lib/allowance-window";
+import { windowId, windowKeySeconds } from "@/lib/allowance-window";
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { withinLimit, withinMonth } from "@/lib/request-guard";
 import { importAllowanceFor } from "@/lib/import-limits";
-import { costPauseCode } from "@/lib/plan-standing";
+import { newCostCode } from "@/lib/plan-standing";
 import { can } from "@/lib/team-roles";
 import { MAX_TRIMMED_PAGE_CHARS, convertSavedPage } from "@/lib/clickfunnels-page";
 import { planFunnelImport, saveFunnelImport } from "@/lib/clickfunnels-funnel";
@@ -42,8 +42,9 @@ export async function POST(request: NextRequest) {
   // worst month counts (tests/plan-cost-registry.ts); the short windows only spread the work.
   const allowance = importAllowanceFor(store);
   // Nothing of a funnel migration runs while the plan's renewal is unpaid or a
-  // payment for it is disputed (232 [CA1] unit 4b2, lib/plan-standing.ts).
-  const paused = costPauseCode(store);
+  // payment for it is disputed (232 [CA1] unit 4b2, lib/plan-standing.ts),
+  // nor once the plan has ended (the original 4c, newCostCode).
+  const paused = newCostCode(store);
   if (paused) return refuse(paused, 409);
 
   try {
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
       // Sixty pages in ten minutes is several whole funnels, read and read again. Reading a page
       // touches no store record: the allowance bounds the work, not a bill.
       if (!(await withinLimit("import-cf-page", who, 60, 600))) return refuse("slow", 429);
-      if (!(await withinMonth("import-cf-page-month", who, allowance.pageReads, windowId(store)))) return refuse("month", 429, { limit: allowance.pageReads });
+      if (!(await withinMonth("import-cf-page-month", who, allowance.pageReads, windowId(store), windowKeySeconds(store, 32 * 86_400)))) return refuse("month", 429, { limit: allowance.pageReads });
       const html = typeof body.html === "string" ? body.html : "";
       if (!html.trim()) return refuse("empty");
       if (html.length > MAX_TRIMMED_PAGE_CHARS) return refuse("too_big", 413);
@@ -65,11 +66,11 @@ export async function POST(request: NextRequest) {
       // allowances of their own, checked before any work (docs/clickfunnels-import.md).
       if (action === "plan") {
         if (!(await withinLimit("import-cf-plan", who, 120, 600))) return refuse("slow", 429);
-        if (!(await withinMonth("import-cf-plan-month", who, allowance.funnelChecks, windowId(store)))) return refuse("month", 429, { limit: allowance.funnelChecks });
+        if (!(await withinMonth("import-cf-plan-month", who, allowance.funnelChecks, windowId(store), windowKeySeconds(store, 32 * 86_400)))) return refuse("month", 429, { limit: allowance.funnelChecks });
       }
       if (action === "save") {
         if (!(await withinLimit("import-cf-save", who, 10, 86_400))) return refuse("slow", 429);
-        if (!(await withinMonth("import-cf-save-month", who, allowance.funnelSaves, windowId(store)))) return refuse("month", 429, { limit: allowance.funnelSaves });
+        if (!(await withinMonth("import-cf-save-month", who, allowance.funnelSaves, windowId(store), windowKeySeconds(store, 32 * 86_400)))) return refuse("month", 429, { limit: allowance.funnelSaves });
       }
       const input = { name: body.name, pages: body.pages };
       if (action === "plan") return Response.json({ ok: true, plan: await planFunnelImport(store, input) }, { headers: NO_STORE });

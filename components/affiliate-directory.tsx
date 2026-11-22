@@ -13,7 +13,11 @@ const EVERY = { day: "daily", week: "weekly", month: "monthly", year: "yearly" }
 function earnWords(product: DirectoryRow["products"][number]): string {
   const after = product.intro ? ", after the introductory price" : "";
   if (product.months === undefined) return `${product.paidInFull ? "a sale paid in full" : "a sale"}${after}`;
-  const payment = `a ${product.interval ? EVERY[product.interval] : ""} payment`.replace("  ", " ");
+  // Charged every few weeks or months (609 [WP8]): "a payment every 3 months", never "a monthly payment".
+  const payment =
+    product.interval && (product.every ?? 1) > 1
+      ? `a payment every ${product.every} ${product.interval}s`
+      : `a ${product.interval ? EVERY[product.interval] : ""} payment`.replace("  ", " ");
   if (product.months >= RECURRING_ALWAYS) return `${payment}, while they pay${after}`;
   return `${payment}, for ${product.months} ${product.months === 1 ? "month" : "months"} from sign-up${product.trialDays ? ", free days included" : ""}${after}`;
 }
@@ -196,7 +200,7 @@ function Numbers({ numbers, currency }: { numbers: DirectoryNumbers; currency: s
     { label: numbers.affiliates === 1 ? "affiliate" : "affiliates", value: count(numbers.affiliates), note: since ? `since ${since}` : "" },
     { label: numbers.clicks === 1 ? "click brought" : "clicks brought", value: count(numbers.clicks), note: `${count(numbers.clickSales)} ${numbers.clickSales === 1 ? "sale" : "sales"} from them` },
     numbers.conversion !== null
-      ? { label: "of clicks became a sale", value: `${numbers.conversion}%`, note: numbers.per100Cents !== null ? `${formatMoney(numbers.per100Cents, currency)} earned per 100 clicks` : "" }
+      ? { label: "sales per 100 clicks", value: `${numbers.conversion}`, note: numbers.per100Cents !== null ? `${formatMoney(numbers.per100Cents, currency)} earned per 100 clicks` : "" }
       : { label: "rates per click", value: "\u2014", note: `shown after ${MIN_CLICKS_FOR_RATES} clicks` },
     { label: "recorded as paid", value: formatMoney(numbers.paidCents, currency), note: `of ${formatMoney(numbers.earnedCents, currency)} earned` },
   ];

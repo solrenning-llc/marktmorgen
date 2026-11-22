@@ -1,3 +1,4 @@
+// Rule 23: complete the synthetic Member fixture with the new empty profile-links field; assertions unchanged.
 /**
  * Rule 30 on Codex G's residual MEDIUM on #3123 (review 5815472405): the
  * same class in lib/community.ts setProfile. A member's @handle is claimed in
@@ -23,8 +24,8 @@ let beforeCas: null | (() => Promise<void>) = null;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: Command[]) => {
   if(failed==="read"&&commands.length===1&&commands[0][0]==="HGET"&&String(commands[0][1]).endsWith(":m"))return [];
-  if(failed==="cas"&&commands.length===1&&commands[0][0]==="EVAL"&&String(commands[0][1]).startsWith('local cur = redis.call("HGET"'))return [];
-  if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith('local cur = redis.call("HGET"')) {
+  if(failed==="cas"&&commands.length===1&&commands[0][0]==="EVAL"&&String(commands[0][1]).includes('local cur = redis.call("HGET", KEYS[1], ARGV[1])'))return [];
+  if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).includes('local cur = redis.call("HGET", KEYS[1], ARGV[1])')) {
     if (beforeCas) {
       const act = beforeCas;
       beforeCas = null;
@@ -69,7 +70,7 @@ async function main(): Promise<void> {
     n += 1;
     const email = `member${n}@handleorphan.example`;
     const key = memberKey(email);
-    const record: Member = { k: key, e: email, n: "", h: "", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+    const record: Member = { k: key, e: email, n: "", h: "", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [] };
     await pipeline([["HSET", members, key, JSON.stringify(record)]]);
     return { key, email };
   }

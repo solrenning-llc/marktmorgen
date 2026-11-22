@@ -16,7 +16,6 @@ import { FORGET_MARK_SECONDS, RESPONSES_KEY, ResearchForgetIncomplete, forgetMar
 import { store } from "./redis-stub";
 
 const pipeline = store.pipeline.bind(store);
-type Command = (string | number)[];
 globalThis.fetch = (async () => { throw new Error("Unexpected external request"); }) as typeof fetch;
 process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
 

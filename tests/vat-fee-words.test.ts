@@ -429,7 +429,7 @@ test("one table: each sale a gate refuses while it collects, with the item of th
   assert.deepEqual(sale({ ...ESS, bundle: ["link"] }, "FR", "FR", mixedMembers), { ok: true, collect: { country: "FR" } }, "the bundle without the call is charged");
 });
 
-test("the behaviour holds the future: every kind the words promise is charged, every item of the list is a refusal (coord 9b51's MEDIUM, LEVE 1)", () => {
+test("the behavior holds the future: every kind the words promise is charged, every item of the list is a refusal (coord 9b51's MEDIUM, LEVE 1)", () => {
   const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!;
   const both: SwitchInput = { ...EU_ON, uk: UK_ON.uk, reviews: [...(EU_ON.reviews ?? []), ...(UK_ON.reviews ?? [])] };
   const at = (country: string) => ({ headers: new Headers({ "x-vercel-ip-country": country }), form: new URLSearchParams({ billing_country: country }) });

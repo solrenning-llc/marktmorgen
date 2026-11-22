@@ -173,8 +173,24 @@ export async function joinWaitlist(input: {
   // The links go before the place, noted for a deletion of the person: one
   // that runs in between deletes them too, and never leaves a link with the
   // address on it or a link to leave nobody counted.
-  const links = (leave: string) =>
-    redisPipeline([grant("confirm", confirm), grant("leave", leave), ...noteForErasure(sid, email, tokenKey(confirm)), ...noteForErasure(sid, email, tokenKey(leave))]);
+  // Every reply read exactly (Codex G, MEDIUM): a link is never emailed unless both grants and their deletion notes are
+  // there. False is not known to be unwritten: the caller deletes the tokens it made and gives back what it took.
+  const links = async (leave: string): Promise<boolean> => {
+    const commands = [grant("confirm", confirm), grant("leave", leave), ...noteForErasure(sid, email, tokenKey(confirm)), ...noteForErasure(sid, email, tokenKey(leave))];
+    const replies = repliesFor(await redisPipeline(commands).catch((error: unknown) => {
+      console.error("writing waitlist links answered no receipt", error);
+      return null;
+    }), commands.length);
+    if (!replies) return false;
+    return commands.every((command, i) => {
+      if (command[0] === "SET") return replies[i] === "OK";
+      const count = countOf(replies[i]);
+      if (count === null) return false;
+      if (command[0] === "ZADD") return count <= 1;
+      if (command[0] === "EXPIRE") return count === 1;
+      return command[0] === "ZREMRANGEBYSCORE";
+    });
+  };
 
   // A place written by another request between the read and the write (a
   // double click) is read again and asked again; one deleted in between is
@@ -208,7 +224,12 @@ export async function joinWaitlist(input: {
       // (kept as long as the list); with no room the list is full for it.
       const taken = placeBytes(sid, product.id, email, value);
       if (!(await takeData(store, [{ slot: waitSlot(product.id), bytes: taken }])).ok) return "full";
-      await links(t);
+      if (!(await links(t))) {
+        // Not proved: this request's two tokens go (best effort), and so does the room it took for the place.
+        await redisPipeline([["DEL", tokenKey(confirm), tokenKey(t)]]).catch((error: unknown) => console.error("an unproved waitlist join's link tokens could not be deleted; they expire on their own", error));
+        await giveData(store, [{ slot: waitSlot(product.id), bytes: taken }]);
+        return "error";
+      }
       // Written only while the product is still coming soon, in one step with that check (WAIT_JOIN; #4462, Claude 7
       // MÉDIO 1): a removal that lands after isSoon above takes the mark off before it deletes the list (dropWaitlist),
       // so this join then writes nothing, and never puts an address back on a list no deletion could reach.
@@ -257,7 +278,13 @@ export async function joinWaitlist(input: {
       if (mustExist) await redisPipeline([["DEL", tokenKey(confirm)]]);
       return "error";
     }
-    await links(t);
+    if (!(await links(t))) {
+      // Not proved: the new link to confirm goes; the place's own link to leave stays, and nothing was written over it,
+      // so what was counted for its growth goes back.
+      await redisPipeline([["DEL", tokenKey(confirm)]]).catch((error: unknown) => console.error("an unproved waitlist join's link token to confirm could not be deleted; it expires on its own", error));
+      await settleEntryWrite(store, product.id, grown, 0);
+      return "error";
+    }
     lastLink = t;
     // Asked again over a place as it was read, and only while the product is still coming soon (WAIT_JOIN, as above).
     const [swapped] = await redisPipeline([["EVAL", WAIT_JOIN, 2, soonKey(sid), listKey(sid, product.id), product.id, email, existing, value]]);

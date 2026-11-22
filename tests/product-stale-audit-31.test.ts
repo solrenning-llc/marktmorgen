@@ -11,7 +11,7 @@
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/product/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductAbout, setProductSummary, setProductTitle, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, editProduct, ensureStatsId, ensureStoreId, setProductAbout, setProductSummary, setProductTitle, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { dataKey } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
@@ -102,6 +102,31 @@ async function main() {
   const old = await save({ ...form, rev: r0, title: "A tab opened before the agent" });
   is("a tab opened before the agent's proposal is refused, never undoing it", [old.status, old.body.error], [409, "stale"]);
   is("the agent's title stays", (await readListing((await storeForEmail(owner))!, id))!.title, "Agent title");
+
+  part("4. A description that does not fit leaves the product's own room as it was (Claude 4 2Wb's MEDIUM on 249b11f056)");
+  // A record made smaller (a long summary shortened) with a description the room has no place for: the save is refused,
+  // the old record stays, and so must every slot it counts, the product's own included (MR: never less than is kept).
+  const longSummary = "s".repeat(300);
+  const summed = await setProductSummary(owner, id, longSummary);
+  if (!summed.ok) throw Error("summary fixture failed");
+  const recordSlot = `p:${id}`;
+  const slotsBefore = await plain([["HGET", room, recordSlot], ["HGET", room, slot]]);
+  redis.pipeline = async (commands) => {
+    // Every take that names the description's slot is answered full, as a room with no place left answers.
+    const full = commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-data:v1") && c.includes(slot));
+    return full ? commands.map(() => [0, 1000]) : plain(commands);
+  };
+  let refused = "";
+  try {
+    await editProduct(owner, id, "Agent title", "short", "20", null, null, await revNow(), { about: "a long description" });
+  } catch (error) {
+    refused = error instanceof Error ? error.name : String(error);
+  } finally {
+    redis.pipeline = plain;
+  }
+  is("the save is refused", refused !== "", true);
+  is("the summary kept is the long one", (await readListing((await storeForEmail(owner))!, id))!.summary, longSummary);
+  is("the product's own room and the description's are as they were", await plain([["HGET", room, recordSlot], ["HGET", room, slot]]), slotsBefore);
   done();
 }
 

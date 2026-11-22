@@ -37,6 +37,7 @@ export { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin,
 import { MAX_LINKS, type NumbersLink, parseLinks } from "@/lib/numbers-links";
 import { type ShipProblem, type Shipping, shipProblem, readShippingSku } from "@/lib/shipping";
 import { type CartDeal, NO_DEAL, parseCartDeal } from "@/lib/cart-rules";
+import { HELD_INDEX, type HeldLink, parseHeldLinks } from "@/lib/takedown-hold";
 import { type Video, parseVideo } from "@/lib/sales-page";
 import { type FaqItem, parseFaq } from "@/lib/store-faq";
 import { type FaqAddRefusal, faqAddition } from "@/lib/faq-from-inbox";
@@ -703,6 +704,13 @@ export type Store = {
    */
   suspended: string;
   strikes: Strike[];
+  /**
+   * Links taken down for a copyright notice and held until the counter-notice window ends (lib/takedown-hold.ts):
+   * on no page, still counted against MAX_STORE_LINKS so one can always go back. `heldUnread` keeps, as stored, an
+   * entry not in its exact shape, never acted on. Absent on stores that never had one.
+   */
+  heldLinks?: HeldLink[];
+  heldUnread?: unknown[];
   /** The store's own questions and answers, on its page (lib/store-faq.ts). */
   faq: FaqItem[];
   /**
@@ -1021,6 +1029,16 @@ export async function imageFolder(email: string): Promise<string> {
   return (await sha256Hex(`nimbus-images:${email.toLowerCase()}`)).slice(0, 24);
 }
 
+/** A record's held links, and the entries it could not read, kept as they are (lib/takedown-hold.ts). */
+function heldOf(value: Record<string, unknown>): Pick<Store, "heldLinks" | "heldUnread"> {
+  const all = [...(Array.isArray(value.heldLinks) ? value.heldLinks : []), ...(Array.isArray(value.heldUnread) ? value.heldUnread : [])];
+  const { held, unread } = parseHeldLinks(all);
+  return { ...(held.length ? { heldLinks: held } : {}), ...(unread.length ? { heldUnread: unread } : {}) };
+}
+
+/** How many places in the list of links held links keep (lib/takedown-hold.ts). */
+const heldPlaces = (store: Pick<Store, "heldLinks" | "heldUnread">) => (store.heldLinks?.length ?? 0) + (store.heldUnread?.length ?? 0);
+
 /**
  * A store's allowance anchor as read: none, a whole one, or one that cannot be read, kept as an anchor that is never
  * a window (lib/allowance-window.ts isAllowanceAnchor), never dropped to none.
@@ -1176,6 +1194,7 @@ function parseStore(raw: unknown): Store | null {
             ? value.suspended
             : "unknown",
       strikes: parseStrikes(value.strikes),
+      ...heldOf(value as Record<string, unknown>),
       faq: parseFaq(value.faq),
       intro: parseVideo(value.intro),
       order: parseOrder(value.order),
@@ -1245,6 +1264,17 @@ export async function storeForEmailSeen(
   if (!store || typeof store.email !== "string" ||
       storeRef(store).toLowerCase() !== email.toLowerCase()) return null;
   return store;
+}
+
+/**
+ * Whether a store's record is kept under this ref: false only when Redis answers that no record is there, true when
+ * one is, and null for anything else (rule 24): an unknown reply is never taken for a store that is gone.
+ */
+export async function storeRecordKept(ref: string): Promise<boolean | null> {
+  if (!ref || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["EXISTS", await ownerKey(ref)]]), 1);
+  const there = replies ? countOf(replies[0]) : null;
+  return there === 0 ? false : there === 1 ? true : null;
 }
 
 /**
@@ -1437,6 +1467,153 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
   if (email.startsWith(RELEASED_PREFIX)) return null;
   const [raw] = await redisPipeline([["GET", await ownerKey(email)]]);
   return parseStore(raw);
+}
+
+/**
+ * The longest string of the record a count reads (storeForHit): past it the field reads as missing. Every field the
+ * script answers is held to this or is a number or a flag, so its answer is bounded whatever the record holds.
+ */
+export const HIT_FIELD_MAX_BYTES = 320;
+
+/** The record's text fields a count reads (storeForHit): ids, the plan and its window, nothing a page shows. */
+export const HIT_TEXT_FIELDS = ["handle", "name", "email", "sid", "statsId", "tier", "cycle", "subscriptionId", "planEndedAt"] as const;
+
+/**
+ * The most bytes storeForHit's script answers: every text field (and the anchor's subscription) at HIT_FIELD_MAX_BYTES,
+ * each byte escaped at its longest (a control character is written \u00XX, six bytes), and the rest (flags, numbers,
+ * the names of the fields) inside 1,024. Measured in bytes, as the wire carries it (Claude 2's independent review).
+ */
+export const HIT_FIELDS_MAX_BYTES = (HIT_TEXT_FIELDS.length + 1) * HIT_FIELD_MAX_BYTES * 6 + 1_024;
+
+/**
+ * The fields of a store's record a count needs (app/api/store/hit), read inside Redis: one script reads the record,
+ * decodes it there and answers only them, so the rest of the record (its products, pages and words, up to
+ * MAX_STORE_BYTES) never crosses the wire (#1496, option A; coordinator, 21 November 2026). Nothing is written and no
+ * second copy is kept: the record stays the one source. KEYS[1] the record; ARGV the link id and the product id to
+ * look for ("" for none) and HIT_FIELD_MAX_BYTES. As the whole record is read (parseStore):
+ *   - a lone surrogate, which JSON.stringify writes as an escape (a text cut in an emoji's middle, as a name kept to
+ *     60 characters can be) and Redis's cjson refuses, is read as U+FFFD first, so the record still decodes (Claude
+ *     2's independent review: without it the store would not be counted at all);
+ *   - a link is known as parseStoreLinks keeps it (lib/store-link.ts, the first MAX_STORE_LINKS kept);
+ *   - a product as productIdFor names it (lib/catalog.ts, parseCatalog: the items of a catalog with its own id, or the
+ *     old products list of a record from before catalogs; the first of each id, MAX_PRODUCTS at most);
+ *   - a period or an anchor that parseStore would not take (a funded or renews of another kind, an anchor that is not
+ *     an object) is answered so that parseStore does not take it either.
+ * Modelled by lib/redis-memory.ts.
+ */
+export const STORE_FOR_HIT = `-- marktmorgen:store-for-hit:v1
+local raw = redis.call('GET', KEYS[1])
+if not raw then return false end
+local bs = string.char(92)
+raw = (string.gsub(raw, '(' .. bs .. '+)u([dD][89a-fA-F]%x%x)', function(slashes, hex)
+  if #slashes % 2 == 1 then return string.sub(slashes, 1, -2) .. bs .. 'ufffd' end
+  return nil
+end))
+local ok, r = pcall(cjson.decode, raw)
+if not ok or type(r) ~= 'table' then return '' end
+local cap = tonumber(ARGV[3])
+local function str(v) if type(v) == 'string' and #v <= cap then return v end return nil end
+local function num(v) if type(v) == 'number' then return v end return nil end
+local function safe(v) return type(v) == 'string' and #v >= 1 and #v <= 64 and v:match('^[%w_%-]+$') ~= nil end
+local out = {}
+for _, k in ipairs({'${HIT_TEXT_FIELDS.join("', '")}'}) do out[k] = str(r[k]) end
+out.extra = r.extra == true
+out.subscriptionActive = r.subscriptionActive == true
+out.trialEnds = num(r.trialEnds)
+if type(r.period) == 'table' then
+  local p = r.period
+  out.period = {start = num(p.start), ['end'] = num(p['end'])}
+  if p.renews ~= nil then if type(p.renews) == 'boolean' then out.period.renews = p.renews else out.period.renews = 0 end end
+  if p.funded ~= nil then out.period.funded = (p.funded == true) end
+end
+if r.allowanceAnchor ~= nil and r.allowanceAnchor ~= cjson.null then
+  local a = r.allowanceAnchor
+  if type(a) == 'table' then
+    out.allowanceAnchor = {subscriptionId = str(a.subscriptionId), start = num(a.start), ['end'] = num(a['end'])}
+  else
+    out.allowanceAnchor = {subscriptionId = '', start = 0, ['end'] = 0}
+  end
+end
+out.affiliatesEnabled = type(r.affiliates) == 'table' and r.affiliates.enabled == true
+out.linkKnown = false
+if ARGV[1] ~= '' and type(r.links) == 'table' then
+  local kept = 0
+  for _, l in ipairs(r.links) do
+    if type(l) == 'table' and type(l.id) == 'string' and l.id ~= '' and type(l.title) == 'string' and l.title ~= '' and type(l.url) == 'string' and (l.header == true or l.url ~= '') then
+      if l.id == ARGV[1] then out.linkKnown = true break end
+      kept = kept + 1
+      if kept >= ${MAX_STORE_LINKS} then break end
+    end
+  end
+end
+out.productKnown = false
+if ARGV[2] ~= '' then
+  local c = r.catalog
+  local seen, count = {}, 0
+  if type(c) == 'table' and type(c.id) == 'string' and #c.id == 32 and c.id:match('^[0-9a-f]+$') then
+    if type(c.items) == 'table' then
+      for _, item in ipairs(c.items) do
+        if type(item) == 'table' and safe(item[1]) and not seen[item[1]] then
+          seen[item[1]] = true
+          if item[1] == ARGV[2] then out.productKnown = true break end
+          local named = false
+          for i = 3, #item do if safe(item[i]) and item[i] == ARGV[2] then named = true break end end
+          if named then break end
+          count = count + 1
+          if count >= ${MAX_PRODUCTS} then break end
+        end
+      end
+    end
+  elseif type(r.products) == 'table' then
+    for _, product in ipairs(r.products) do
+      if type(product) == 'table' and safe(product.id) and not seen[product.id] and type(product.title) == 'string' and product.title ~= '' and type(product.priceCents) == 'number' and product.priceCents >= 0 and product.priceCents == math.floor(product.priceCents) then
+        seen[product.id] = true
+        if product.id == ARGV[2] then out.productKnown = true break end
+        local named = false
+        if type(product.options) == 'table' then
+          for _, option in ipairs(product.options) do if type(option) == 'table' and safe(option.id) and option.id == ARGV[2] then named = true break end end
+        end
+        if named then break end
+        count = count + 1
+        if count >= ${MAX_PRODUCTS} then break end
+      end
+    end
+  end
+end
+return cjson.encode(out)`;
+
+/** A store as a count reads it (storeForHit), and whether the link and the product it asked about are the store's. */
+export type HitStore = { store: Store; linkKnown: boolean; productKnown: boolean };
+
+/**
+ * The store behind a public address with only the fields a count needs (STORE_FOR_HIT), or null if that handle is
+ * free, let go, or its record cannot be read. The Store it gives has no links and no products: a count asks about the
+ * one link or product it names (`ask`), and every field it reads is one the script answers (held in
+ * tests/hit-store-fields.test.ts). Never to be saved or shown: it is not the whole record.
+ */
+export async function storeForHit(handle: string, ask: { link?: string; product?: string } = {}): Promise<HitStore | null> {
+  if (!isRedisConfigured()) return null;
+  if (handleProblem(handle)) return null;
+  const [email] = await redisPipeline([["GET", handleKey(handle)]]);
+  if (typeof email !== "string" || !email) return null;
+  // A name that was let go is held, not owned: it leads nowhere on purpose.
+  if (email.startsWith(RELEASED_PREFIX)) return null;
+  const link = typeof ask.link === "string" ? ask.link.slice(0, 64) : "";
+  const product = typeof ask.product === "string" ? ask.product.slice(0, 64) : "";
+  const [reply] = await redisPipeline([["EVAL", STORE_FOR_HIT, 1, await ownerKey(email), link, product, HIT_FIELD_MAX_BYTES]]);
+  if (typeof reply !== "string" || !reply || new TextEncoder().encode(reply).length > HIT_FIELDS_MAX_BYTES) return null;
+  let fields: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(reply) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    fields = parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const { affiliatesEnabled, linkKnown, productKnown, ...rest } = fields;
+  const store = parseStore(JSON.stringify({ ...rest, affiliates: { enabled: affiliatesEnabled === true } }));
+  if (!store) return null;
+  return { store, linkKnown: linkKnown === true, productKnown: productKnown === true };
 }
 
 /**
@@ -2020,6 +2197,27 @@ async function withStore<T>(email: string, work: (store: Store, save: Save, held
 }
 
 /**
+ * Runs `work` only while this very store is live, under the same lock closeStoreRecord takes (Codex L-20261120-1151):
+ * for a write beside the record (a key of a family the closing walk deletes) that read the store before and writes
+ * after. The walk writes the erasing mark and deletes the live store's data under this lock, so either the work ends
+ * first and the walk deletes what it wrote, or the walk has begun (the mark is there) or ended (no record) and the work
+ * does not run. Null then. The same store is the same sid, or for a store from before ids the same statsId (as
+ * closeStoreRecord's sameLegacy). An erasing mark that cannot be read throws UnknownReplyError, with nothing run.
+ */
+export async function withLiveStore<T>(
+  known: Pick<Store, "email" | "sid" | "extra" | "statsId">,
+  work: (current: Store) => Promise<T>,
+): Promise<T | null> {
+  const ref = storeRef(known);
+  return withStore(ref, async (current) => {
+    const same = STORE_ID_PATTERN.test(known.sid) ? current.sid === known.sid : Boolean(known.statsId) && current.statsId === known.statsId;
+    if (!same) return null;
+    if ((await erasingSince(ref)) !== null) return null;
+    return work(current);
+  });
+}
+
+/**
  * Holds the locks of several stores at once, one inside the other, and hands
  * `work` the stores as they are with all of them held. A key with no store
  * behind it is left out. Only for a change that has to write several stores
@@ -2308,6 +2506,7 @@ export async function deleteStore(email: string, queue: (store: Store) => Promis
       ["SREM", await accountKey(store.email), store.sid],
       ["ZREM", ENDED_INDEX, storeRef(store)],
       ["SREM", SHARING_INDEX, storeRef(store)],
+      ["ZREM", HELD_INDEX, storeRef(store)],
     ];
     let replies: unknown[] | null = null;
     try {
@@ -2399,6 +2598,8 @@ export async function closeStoreRecord(
       ...(STORE_ID_PATTERN.test(sid) ? [{ op: "DEL", key: storeIdKey(sid), words: [] }, ...[...accounts].map((account) => ({ op: "SREM", key: account, words: [sid] }))] : []),
       { op: "ZREM", key: ENDED_INDEX, words: [storeRef(store)] },
       { op: "SREM", key: SHARING_INDEX, words: [storeRef(store)] },
+      // This PR's held links (lib/takedown-hold.ts): the closing store leaves the index of stores holding one.
+      { op: "ZREM", key: HELD_INDEX, words: [storeRef(store)] },
       // The record is the very last change, so it goes in the last step even when the changes take more than one
       // (applyIfHeld splits them past FENCED_KEYS or FENCED_WORDS; Claude 5's LOW on #3156).
       // The erasing mark goes in the same step as the record (Codex N1's HIGH on #3156), never before it.
@@ -3618,7 +3819,7 @@ export async function setCurrency(email: string, currency: Currency): Promise<Cu
 export async function setAffiliateSetting(
   email: string,
   setting: AffiliateSetting,
-): Promise<{ ok: true; store: Store } | { ok: false; reason: "none" }> {
+): Promise<{ ok: true; store: Store } | { ok: false; reason: "none" | "listing" }> {
   const next = await patchStore(email, (store) => {
     const known = new Set(productIds(store));
     const parsed = parseAffiliateSetting(setting);
@@ -3628,8 +3829,15 @@ export async function setAffiliateSetting(
   // Whether this creator's program is listed in the affiliate directory, kept
   // in step on the save rather than reconstructed by walking every store
   // (lib/directory-index.ts); the save also drops the directory's kept rows.
+  // A rejected index write is never a saved answer (Codex N1 on #3062): the program is saved, but a creator who left the
+  // directory would stay listed until a rebuild, so they are told to save again. The same save sent again writes the
+  // same program and keeps the index in step.
   if (next) {
-    await rememberListing(next).catch((error) => console.error("remembering a directory listing failed", error));
+    const kept = await rememberListing(next).then(() => true, (error: unknown) => {
+      console.error("remembering a directory listing failed", error);
+      return false;
+    });
+    if (!kept) return { ok: false, reason: "listing" };
   }
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
 }
@@ -3816,6 +4024,8 @@ function freshId(store: Store): string {
   // somebody else. Products, their options and links are all counted.
   const taken = usedIds(store);
   for (const link of store.links) taken.add(link.id);
+  // A held link goes back under its own id (lib/takedown-hold.ts): never given to another one meanwhile.
+  for (const held of store.heldLinks ?? []) taken.add(held.link.id);
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const id = crypto.randomUUID().replace(/-/g, "").slice(0, 10);
     if (!taken.has(id)) return id;
@@ -4033,14 +4243,19 @@ export async function setProductSummary(email: string, id: string, rawSummary: s
 export const MOVE_BESIDE_BATCH = 250;
 /**
  * The most batches one sweep runs: enough for MAX_PRODUCTS. Each batch, under the store's lock, at the most: the lock
- * taken and let go, the store read (withStore), the pool's fields and the room's slots read (two HMGETs), the lock
- * held on (holdLock), then the pool's TAKE_DATA taking the batch's shares and the room's giving them back, each at
- * its inner commands as Upstash bills them (lib/store-data.ts, poolTakeCommands and takeDataCommands; Claude 4's
- * MEDIUM on #4847); and the sweep's mark read and written once a sweep.
+ * taken, counted at every SET NX try of its LOCK_WAIT_MS wait (STORE_LOCK_TRIES_AT_MOST, which tests check equals
+ * lib/read-ceilings.ts STORE_LOCK_TRIES, as CLOSE_RECORD_COMMANDS counts it), the store read (withStore, one GET), the
+ * pool's fields and the room's slots read (two HMGETs), the lock held on (holdLock: EVAL, GET, EXPIRE), then the pool's
+ * TAKE_DATA taking the batch's shares and the room's giving them back, each at its inner commands as Upstash bills them
+ * (lib/store-data.ts, poolTakeCommands and takeDataCommands; Claude 4's MEDIUM on #4847), and the lock let go (EVAL,
+ * GET, DEL; Claude 3's LOW on #4847). Once a sweep: the store read that opens it (storeForEmail, one GET of up to
+ * MAX_STORE_BYTES), the sweep's mark read and the mark written when it ends.
  */
 export const MOVE_BESIDE_BATCHES = Math.ceil(MAX_PRODUCTS / MOVE_BESIDE_BATCH);
-export const MOVE_BESIDE_BATCH_COMMANDS = 3 + 1 + 2 + 1 + poolTakeCommands(MOVE_BESIDE_BATCH) + takeDataCommands(MOVE_BESIDE_BATCH);
-export const MOVE_BESIDE_SWEEP_COMMANDS = 2;
+/** Every SET NX try of the store lock's LOCK_WAIT_MS wait (20, 40, 80 and 160 ms, then every 250 ms), and the last. */
+const STORE_LOCK_TRIES_AT_MOST = 4 + Math.ceil((LOCK_WAIT_MS - (20 + 40 + 80 + 160)) / 250) + 1;
+export const MOVE_BESIDE_BATCH_COMMANDS = STORE_LOCK_TRIES_AT_MOST + 1 + 2 + 3 + 3 + poolTakeCommands(MOVE_BESIDE_BATCH) + takeDataCommands(MOVE_BESIDE_BATCH);
+export const MOVE_BESIDE_SWEEP_COMMANDS = 3;
 
 /**
  * Moves the beside share of a paying store's products that were counted whole in its room (saved before it paid) to
@@ -4152,7 +4367,7 @@ export async function moveProduct(
 
 export type FileResult =
   | { ok: true; store: Store; removed: ProductFile | null }
-  | { ok: false; reason: "none" | "unknown" | "invalid" | "call" | "course" | "bundle" | "shipped" };
+  | { ok: false; reason: "none" | "unknown" | "invalid" | "call" | "course" | "bundle" | "shipped" | "changed" };
 
 /** What is handed over when something is paid for. One or the other. */
 export type Delivery = { file: ProductFile | null; link: string | null };
@@ -4198,11 +4413,15 @@ async function changeDelivery(
   id: string,
   giving: boolean,
   change: (current: Delivery) => Delivery,
-): Promise<{ ok: true; store: Store; previous: Delivery } | { ok: false; reason: "none" | "unknown" | "call" | "course" | "bundle" | "shipped" }> {
+  onlyIf?: (product: Product) => boolean,
+): Promise<{ ok: true; store: Store; previous: Delivery } | { ok: false; reason: "none" | "unknown" | "call" | "course" | "bundle" | "shipped" | "changed" }> {
   const result = await withStore(email, async (store, save) => {
     const owner = productIdFor(store, id);
     const product = owner ? await readProduct(store, owner) : null;
     if (!product) return { ok: false as const, reason: "unknown" as const };
+    // A caller that checked the product before slow work checks it again here, under the same lock as the write
+    // (Codex X3/X6 MEDIUM on #3474): one that no longer passes is left exactly as it is.
+    if (onlyIf && !onlyIf(product)) return { ok: false as const, reason: "changed" as const };
     // A call delivers a booking, a course its lessons and a bundle its
     // products, not a file or a link of their own.
     if (giving && product.id === id && product.call) return { ok: false as const, reason: "call" as const };
@@ -4232,12 +4451,13 @@ export async function setProductFile(
   email: string,
   id: string,
   file: ProductFile | null,
+  onlyIf?: (product: Product) => boolean,
 ): Promise<FileResult> {
   // A file replaces a link. One thing is delivered, never two.
   const done = await changeDelivery(email, id, file !== null, (current) => ({
     file,
     link: file ? null : current.link,
-  }));
+  }), onlyIf);
   if (!done.ok) return done;
   return { ok: true, store: done.store, removed: done.previous.file };
 }
@@ -4316,7 +4536,8 @@ export async function addStoreLink(
   if (!title) return { ok: false, reason: "title" };
 
   const result = await withStore<LinkResult>(email, async (store, save) => {
-    if (store.links.length >= MAX_STORE_LINKS) {
+    // A link held after a copyright notice keeps its place, so it can always go back (lib/takedown-hold.ts).
+    if (store.links.length + heldPlaces(store) >= MAX_STORE_LINKS) {
       return { ok: false, reason: "too_many", limit: MAX_STORE_LINKS };
     }
     const link: StoreLink = {
@@ -4366,6 +4587,77 @@ export async function removeStoreLink(
     return { ok: true, store: await save({ ...store, links: store.links.filter((link) => link.id !== id) }), removed: going.image ?? null };
   });
   return result ?? { ok: false, reason: "none" };
+}
+
+export type HoldResult = { ok: true } | { ok: false; reason: "none" | "unknown" | "changed" };
+
+/**
+ * Takes a link off the page and keeps it, held after a copyright notice (lib/takedown-hold.ts): at the end of the
+ * list of held links, with its place, its notice and where its picture is kept. "unknown" when the link is not on
+ * the page; "changed" when its picture is no longer `picture`, the one copied before this (lib/takedown.ts).
+ */
+export async function holdStoreLink(email: string, id: string, picture: string | null, entry: Omit<HeldLink, "link" | "place">): Promise<HoldResult> {
+  const result = await withStore<HoldResult>(email, async (store, save) => {
+    const place = store.links.findIndex((link) => link.id === id && !link.header);
+    if (place < 0) return { ok: false, reason: "unknown" };
+    const link = store.links[place];
+    if ((link.image?.path ?? null) !== picture) return { ok: false, reason: "changed" };
+    await save({ ...store, links: store.links.filter((l) => l.id !== id), heldLinks: [...(store.heldLinks ?? []), { link, place, ...entry }] });
+    return { ok: true };
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
+const sameHold = (held: HeldLink, report: string, id: string, heldAt: string) => held.report === report && held.link.id === id && held.heldAt === heldAt;
+
+/**
+ * Puts a held link back at its place, under its own id, with its picture at its old address (copied back first,
+ * lib/takedown.ts). "none" when it is not held any more.
+ */
+export async function restoreHeldLink(email: string, report: string, id: string, heldAt: string): Promise<{ ok: true } | { ok: false; reason: "none" | "full" }> {
+  const result = await withStore<{ ok: true } | { ok: false; reason: "none" | "full" }>(email, async (store, save) => {
+    const held = (store.heldLinks ?? []).find((h) => sameHold(h, report, id, heldAt));
+    if (!held) return { ok: false, reason: "none" };
+    // Its place was kept (addStoreLink counts it), so this is never past the list's limit; a record that somehow is
+    // keeps it held rather than lose a link when the list is read (parseStoreLinks stops at MAX_STORE_LINKS).
+    if (store.links.length >= MAX_STORE_LINKS) return { ok: false, reason: "full" };
+    const taken = store.links.some((l) => l.id === held.link.id);
+    const link = taken ? { ...held.link, id: freshId(store) } : held.link;
+    const links = [...store.links];
+    links.splice(Math.min(held.place, links.length), 0, link);
+    const rest = (store.heldLinks ?? []).filter((h) => h !== held);
+    const { heldLinks: _was, ...without } = store;
+    void _was;
+    await save({ ...without, links, ...(rest.length ? { heldLinks: rest } : {}) });
+    return { ok: true };
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
+/** Forgets a held link, once its picture is deleted (lib/takedown.ts). False when it is not held any more. */
+export async function dropHeldLink(email: string, report: string, id: string, heldAt: string): Promise<boolean> {
+  const result = await withStore<boolean>(email, async (store, save) => {
+    const rest = (store.heldLinks ?? []).filter((h) => !sameHold(h, report, id, heldAt));
+    if (rest.length === (store.heldLinks ?? []).length) return false;
+    const { heldLinks: _was, ...without } = store;
+    void _was;
+    await save({ ...without, ...(rest.length ? { heldLinks: rest } : {}) });
+    return true;
+  });
+  return result ?? false;
+}
+
+/** Writes on a held link that its counter-notice came in, or that the sender went to court; the entry as it is now. */
+export async function markHeldLink(email: string, report: string, id: string, heldAt: string, mark: { counter: string } | { court: true }): Promise<HeldLink | null> {
+  const result = await withStore<HeldLink | null>(email, async (store, save) => {
+    const all = store.heldLinks ?? [];
+    const at = all.findIndex((h) => sameHold(h, report, id, heldAt));
+    if (at < 0) return null;
+    const next = { ...all[at], ...mark };
+    await save({ ...store, heldLinks: all.map((h, i) => (i === at ? next : h)) });
+    return next;
+  });
+  return result ?? null;
 }
 
 /**
@@ -4672,19 +4964,22 @@ export async function setProductImage(
 export async function moveProductImage(
   email: string,
   id: string,
-  from: { path: string; small: string | null },
-  to: { path: string; small: string | null },
+  from: { path: string; small: string | null; thumb?: string | null },
+  to: { path: string; small: string | null; thumb?: string | null },
 ): Promise<{ ok: true } | { ok: false; reason: "none" | "unknown" } | { ok: false; reason: "changed"; shown: string[] }> {
   let shown: string[] = [];
   const done = await onProduct<"changed">(email, id, (product) => {
     const image = product.image;
-    shown = image ? [image.path, ...(image.small ? [image.small.path] : [])] : [];
-    if (!image || image.path !== from.path || (image.small?.path ?? null) !== from.small) {
+    shown = image ? [image.path, ...(image.small ? [image.small.path] : []), ...(image.thumb ? [image.thumb.path] : [])] : [];
+    if (!image || image.path !== from.path || (image.small?.path ?? null) !== from.small || (image.thumb?.path ?? null) !== (from.thumb ?? null)) {
       return { ok: false, reason: "changed" } as const;
     }
-    const { r2: _r2, ...rest } = image;
+    const { r2: _r2, thumb: _thumb, ...rest } = image;
     void _r2;
-    return { ...product, image: { ...rest, path: to.path, small: image.small && to.small ? { ...image.small, path: to.small } : null, withdrawn: true as const } };
+    void _thumb;
+    // The thumbnail copy moves with the picture (#2801); one with no new name is dropped, never left at its old name.
+    const thumb = image.thumb && to.thumb ? { thumb: { ...image.thumb, path: to.thumb } } : {};
+    return { ...product, image: { ...rest, path: to.path, small: image.small && to.small ? { ...image.small, path: to.small } : null, ...thumb, withdrawn: true as const } };
   });
   if (done.ok) return { ok: true };
   return done.reason === "changed" ? { ok: false, reason: "changed", shown } : { ok: false, reason: done.reason };
@@ -4924,6 +5219,20 @@ export async function setPostCount(email: string, count: number): Promise<Store 
 /** Switches stamping the buyer's email into a product's PDFs on or off. */
 export async function setProductStamp(email: string, id: string, on: boolean): Promise<ProductPartResult> {
   return changeProduct(email, id, (product) => ({ ...product, stamp: on }));
+}
+
+/**
+ * The creator's answer to whether a product is an electronically supplied publication, for VAT (lib/catalog.ts,
+ * Product.publication; 789 [IV1] step 3, unit 5a): `true` or `false` is kept as answered, `null` clears it back to not
+ * answered. The route (app/api/store/publication/route.ts) refuses anything else, so a bad value never reads as "not a
+ * publication".
+ */
+export async function setProductPublication(email: string, id: string, value: boolean | null): Promise<ProductPartResult> {
+  return changeProduct(email, id, (product) => {
+    const rest: Product = { ...product };
+    delete rest.publication;
+    return value === null ? rest : { ...rest, publication: value };
+  });
 }
 
 /** How many first pages of a product's PDF anyone may read before buying (lib/pdf-preview.ts); 0 switches it off. */
@@ -5480,6 +5789,78 @@ export async function setExitOffer(email: string, productId: string | null): Pro
     return { ok: true, store: await save({ ...store, exitOffer: product.id }) };
   });
   return result ?? { ok: false, reason: "none" };
+}
+
+/**
+ * Takes one price option off sale, or puts it back (642 [WG2]). Only the
+ * flag changes: the option keeps its id, price, file, link and lines, so
+ * whoever already bought it keeps what they have and a membership on it is
+ * billed exactly as before (Stripe is never called here). Off sale, it leaves
+ * every page and checkout (sellableOptions); back on sale, the flag is gone.
+ * Asking for what it already is changes nothing.
+ */
+export async function setOptionOnSale(email: string, id: string, onSale: boolean): Promise<OptionResult> {
+  return onOption(email, id, (product, at) => {
+    if ((product.options[at].offSale === true) !== onSale) return null;
+    const options = product.options.map((option, index) => {
+      if (index !== at) return option;
+      if (!onSale) return { ...option, offSale: true as const };
+      const kept = { ...option };
+      delete kept.offSale;
+      return kept;
+    });
+    return { product: { ...product, options }, removed: [] };
+  });
+}
+
+/** What putting an option back on sale, or taking it off, answers when the plan rule is decided in the write. */
+export type OptionSaleResult =
+  | { ok: true; store: Store; removed: ProductFile[]; planStopped: boolean }
+  | Extract<OptionResult, { ok: false }>
+  | { ok: false; reason: "plan_pauses"; limit?: undefined };
+
+/**
+ * setOptionOnSale, with the payment plan decided under the same store lock as
+ * the write (Claude 5 on #2690): the studio asks before a price put back on
+ * sale stops the plan, but from its own copy of the product, which another tab
+ * may have outdated. `stopsPlan` reads the product as it is stored right then
+ * (planPausedByRestore in lib/product-extras.ts, passed by the route); when
+ * putting the price back would stop the plan and `stopConfirmed` is not
+ * exactly true, nothing is written and the answer is "plan_pauses".
+ * `planStopped` says whether this write did stop it, so the studio's words are
+ * true either way. Taking a price off sale never asks.
+ */
+export async function setOptionOnSaleChecked(
+  email: string,
+  id: string,
+  onSale: boolean,
+  stopsPlan: (product: Product, optionId: string) => boolean,
+  stopConfirmed: boolean,
+): Promise<OptionSaleResult> {
+  let refused = false;
+  let planStopped = false;
+  const result = await onOption(email, id, (product, at) => {
+    refused = false;
+    planStopped = false;
+    if ((product.options[at].offSale === true) !== onSale) return null;
+    if (onSale) {
+      planStopped = stopsPlan(product, id);
+      if (planStopped && stopConfirmed !== true) {
+        refused = true;
+        return { ok: false, reason: "none" };
+      }
+    }
+    const options = product.options.map((option, index) => {
+      if (index !== at) return option;
+      if (!onSale) return { ...option, offSale: true as const };
+      const kept = { ...option };
+      delete kept.offSale;
+      return kept;
+    });
+    return { product: { ...product, options }, removed: [] };
+  });
+  if (refused) return { ok: false, reason: "plan_pauses" };
+  return result.ok ? { ...result, planStopped } : result;
 }
 
 export type LegalResult =

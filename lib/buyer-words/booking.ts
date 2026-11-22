@@ -206,6 +206,7 @@ const en = {
   wasAt: (when: string) => `Was: ${when}`,
   joinAtNewTime: (room: string) => `Join here at the new time: ${room}`,
   newTimeAttached: "The calendar file attached has the new time. If your calendar still shows the old one as well, delete the old one.",
+  moveOldEvent: "If this booking is in your calendar, move it to the new time.",
   moveAgainLink: (link: string, count: number) => `To move it again: ${link} (you can move a booking ${count} times in all).`,
   cannotMoveAgain: (store: string) =>
     `This booking cannot be moved again from the link. To change it, reply to this email; the reply goes to ${store}.`,
@@ -430,6 +431,7 @@ const es: BookingWords = {
   wasAt: (when) => `Antes: ${when}`,
   joinAtNewTime: (room) => `Únete aquí en el nuevo horario: ${room}`,
   newTimeAttached: "El archivo de calendario adjunto tiene el nuevo horario. Si tu calendario sigue mostrando también el anterior, elimina el anterior.",
+  moveOldEvent: "Si esta reserva está en tu calendario, muévela al nuevo horario.",
   moveAgainLink: (link, count) => `Para volver a cambiarla: ${link} (puedes cambiar una reserva ${count} veces en total).`,
   cannotMoveAgain: (store) =>
     `Esta reserva ya no se puede cambiar desde el enlace. Para modificarla, responde a este email; la respuesta le llega a ${store}.`,
@@ -641,6 +643,7 @@ const fr: BookingWords = {
   wasAt: (when) => `Avant${S}: ${when}`,
   joinAtNewTime: (room) => `Participez ici au nouvel horaire${S}: ${room}`,
   newTimeAttached: "Le fichier de calendrier joint contient le nouvel horaire. Si votre agenda affiche encore l'ancien aussi, supprimez l'ancien.",
+  moveOldEvent: "Si cette réservation figure dans votre agenda, déplacez-la au nouvel horaire.",
   moveAgainLink: (link, count) => `Pour la déplacer de nouveau${S}: ${link} (une réservation peut être déplacée ${count}${S}fois en tout).`,
   cannotMoveAgain: (store) =>
     `Cette réservation ne peut plus être déplacée depuis le lien. Pour la modifier, répondez à cet e-mail${S}; la réponse est transmise à ${store}.`,
@@ -848,6 +851,7 @@ const de: BookingWords = {
   wasAt: (when) => `Bisher: ${when}`,
   joinAtNewTime: (room) => `Nehmen Sie zum neuen Termin hier teil: ${room}`,
   newTimeAttached: "Die angehängte Kalenderdatei enthält den neuen Termin. Wenn Ihr Kalender zusätzlich noch den alten anzeigt, löschen Sie den alten.",
+  moveOldEvent: "Wenn diese Buchung in Ihrem Kalender steht, verschieben Sie sie auf den neuen Termin.",
   moveAgainLink: (link, count) => `Um erneut zu verschieben: ${link} (eine Buchung kann insgesamt ${count}-mal verschoben werden).`,
   cannotMoveAgain: (store) =>
     `Diese Buchung kann über den Link nicht mehr verschoben werden. Um sie zu ändern, antworten Sie auf diese E-Mail; die Antwort geht an ${store}.`,
@@ -1057,6 +1061,7 @@ const it: BookingWords = {
   wasAt: (when) => `Prima: ${when}`,
   joinAtNewTime: (room) => `Partecipa qui al nuovo orario: ${room}`,
   newTimeAttached: "Il file del calendario allegato ha il nuovo orario. Se il tuo calendario mostra ancora anche quello vecchio, elimina quello vecchio.",
+  moveOldEvent: "Se questa prenotazione è nel tuo calendario, spostala al nuovo orario.",
   moveAgainLink: (link, count) => `Per spostarla di nuovo: ${link} (puoi spostare una prenotazione ${count} volte in tutto).`,
   cannotMoveAgain: (store) =>
     `Questa prenotazione non si può più spostare dal link. Per modificarla, rispondi a questa email; la risposta arriva a ${store}.`,
@@ -1265,6 +1270,7 @@ const nl: BookingWords = {
   wasAt: (when) => `Eerder: ${when}`,
   joinAtNewTime: (room) => `Doe op de nieuwe tijd hier mee: ${room}`,
   newTimeAttached: "Het bijgevoegde agendabestand heeft de nieuwe tijd. Staat de oude ook nog in je agenda, verwijder dan de oude.",
+  moveOldEvent: "Staat deze boeking in je agenda, verplaats haar dan naar de nieuwe tijd.",
   moveAgainLink: (link, count) => `Om opnieuw te verplaatsen: ${link} (je kunt een boeking in totaal ${count} keer verplaatsen).`,
   cannotMoveAgain: (store) =>
     `Deze boeking kan niet meer via de link worden verplaatst. Om hem te wijzigen, beantwoord je deze e-mail; het antwoord gaat naar ${store}.`,
@@ -1474,6 +1480,7 @@ const pt: BookingWords = {
   wasAt: (when) => `Antes: ${when}`,
   joinAtNewTime: (room) => `Entre aqui no novo horário: ${room}`,
   newTimeAttached: "O ficheiro de calendário em anexo tem o novo horário. Se o seu calendário ainda mostrar também o anterior, apague o anterior.",
+  moveOldEvent: "Se esta marcação estiver no seu calendário, mude-a para o novo horário.",
   moveAgainLink: (link, count) => `Para a mudar novamente: ${link} (pode mudar uma marcação ${count} vezes no total).`,
   cannotMoveAgain: (store) =>
     `Esta marcação já não pode ser mudada a partir da ligação. Para a alterar, responda a este email; a resposta chega a ${store}.`,

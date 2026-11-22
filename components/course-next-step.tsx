@@ -59,7 +59,7 @@ export function CourseNextStep({
       }
       // "None" saves no line: the one typed for the old product goes too, so the form is not dirty again at once (Codex X5 on #3530, LEVE).
       if (!picked) setLine("");
-      toast(picked ? "Saved. Students see this next step on the course's page." : "Saved. No next step is shown.");
+      toast(picked ? "Saved. Students see this next step on the course and after its last lesson." : "Saved. No next step is shown.");
       router.refresh();
     } catch {
       setError("That could not be saved just now. Try again in a moment.");

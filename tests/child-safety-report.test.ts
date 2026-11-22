@@ -26,6 +26,8 @@ import { transparencyCounts } from "@/lib/transparency";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { answering } from "./security/next-headers";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
 
 type Sent = { to: string[] | string; subject: string; text: string; key?: string };
 const sent: Sent[] = [];
@@ -253,7 +255,11 @@ async function main(): Promise<void> {
       is("other: it states what the person confirmed on the form", (notice?.text ?? "").includes("accurate and complete to the best of their knowledge"), true);
     }
     const token = notice?.text.match(/\/takedown\/([0-9a-f]{48})/)?.[1] ?? "";
+    // Only the operator opens the notice page since main's #4036 (tests/takedown-operator-only.test.ts): it is read as
+    // the operator's request, with the session cookie it carries (tests/security/next-headers.ts, aliased for this file).
+    answering(new Request(`https://marktmorgen.com/takedown/${token}`, { headers: { cookie: `${SESSION_COOKIE}=${await openSession(process.env.DEMO_STUDIO_ADMIN ?? "")}` } }));
     const page = wordsOf(await TakedownPage({ params: Promise.resolve({ token }) }));
+    answering(null);
     is(`${report.kind}: the notice page states no oath under penalty of perjury, nor both statements for a report that has none`, [/perjury/i.test(page), report.kind === "child_safety" && /Signed:|both statements/.test(page)], [false, false]);
     is(`${report.kind}: the notice page shows no empty sender name`, /From:\s*</.test(page), false);
     if (report.kind === "child_safety") is("child_safety: the notice page names the kind", [page.includes("Child safety report"), page.includes("Notice of illegal content")], [true, false]);

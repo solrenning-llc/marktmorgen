@@ -53,20 +53,27 @@ export const BENEFIT_STRIPE_PAGES = 10;
  * readOwedMarks), with the reading's own share. So a store with few members pays for one page, and one with
  * BENEFIT_STRIPE_PAGES pages pays for each. Every page load that lists them and every give or undo press reads them.
  */
-export const BENEFIT_PAGE_UNITS = 5;
+export const BENEFIT_PAGE_UNITS = 6;
 
 /** Characters in the address written on a mark: the sign-in address's own cap (lib/auth.ts, MAX_EMAIL_LENGTH). */
 export const MARK_BY_MAX = 254;
 /**
- * Whether an address may be written on a mark as who gave it (audit cd8d, Claude 1 coord 0b58): one to MARK_BY_MAX
- * characters of printable ASCII with no space, quote, backslash, <, > or &, in the shape of an address. A mark is read
- * back as a JSON string inside the database's JSON reply, so a control character, a lone surrogate, a quote or a
- * backslash would cost up to 7 bytes on the wire, and <, > and & 6 under an HTML-safe encoder (Claude 2 upbeat on
- * #5123); with this rule each character of the address costs 1 under any JSON encoder, and
- * BENEFIT_MARK_VALUE_BYTES (tests/plan-cost-registry.ts) holds the worst mark that can be written.
+ * Whether an address may be written on a mark as who gave it (audit cd8d; coordinator 0b58, then cd33): what sign-in
+ * accepts (an address of one to MARK_BY_MAX UTF-16 units, no whitespace), less what costs more on the wire. A mark is
+ * read back as a JSON string inside the database's JSON reply, so a control character (C0, DEL or C1) or a lone
+ * surrogate costs up to 7 bytes, a quote or a backslash 4, and <, > and & 6 under an HTML-safe encoder (Claude 2
+ * upbeat on #5123); those are refused. Accented letters, ideographs and the rest still mark (Claude 7 3uv on #5123),
+ * and the dearest of them is 3 bytes for one UTF-16 unit, the bound BENEFIT_MARK_VALUE_BYTES
+ * (tests/plan-cost-registry.ts) is built on.
  */
 export function markableBy(by: string): boolean {
-  return by.length >= 1 && by.length <= MARK_BY_MAX && /^[\x21\x23-\x25\x27-\x3B\x3D\x3F-\x5B\x5D-\x7E]+$/.test(by) && /^[^@]+@[^@]+\.[^@]+$/.test(by);
+  return (
+    by.length >= 1 &&
+    by.length <= MARK_BY_MAX &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(by) &&
+    !/[\u0000-\u001F\u007F-\u009F"\\<>&]/.test(by) &&
+    !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(by)
+  );
 }
 
 export const CADENCES = ["once", "monthly"] as const;

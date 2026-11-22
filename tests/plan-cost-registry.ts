@@ -1584,11 +1584,12 @@ export const BENEFIT_MARK_FIELD_BYTES = 94;
 /**
  * A mark, `{"at":<seconds>,"by":"<address>"}`, as readOwedMarks gets it back: a JSON string inside the database's JSON
  * reply, so its own quotes are escaped again (34 bytes with the seconds at 11 digits). The address is one that
- * giveBenefit lets onto a mark (markableBy, lib/tier-benefit-rules.ts): at most MARK_BY_MAX characters of printable
- * ASCII with no quote or backslash, one byte each on the wire (audit cd8d; a control character there cost 7, and the
- * worst mark measured 2274 bytes against the 672 declared before). Measured by tests/benefit-mark-wire-bytes.test.ts.
+ * giveBenefit lets onto a mark (markableBy, lib/tier-benefit-rules.ts): at most MARK_BY_MAX UTF-16 units, none of them
+ * costing more than 3 bytes on the wire, with its "@" and one "." at a byte each (audit cd8d; a control character there
+ * cost 7, and the worst mark measured 2274 bytes against the 672 declared before). Measured by
+ * tests/benefit-mark-wire-bytes.test.ts.
  */
-export const BENEFIT_MARK_VALUE_BYTES = 34 + MARK_BY_MAX;
+export const BENEFIT_MARK_VALUE_BYTES = 34 + 3 * (MARK_BY_MAX - 2) + 2;
 /** A person's marks key, and a store's deleted-person print, at the most. */
 export const BENEFIT_PERSON_BYTES = 96;
 export const BENEFITS_LIST_COMMANDS = 4;

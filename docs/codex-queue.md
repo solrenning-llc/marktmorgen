@@ -23891,6 +23891,38 @@ Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_RE
 
 Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
 
+## VT — Resposta ao primeiro toque na página da loja, sem perder visitas (20/11/2026)
+
+Etiqueta: [VT1], item 791.
+
+Solicitação do dono (20/11/2026, 18h47, horário de Fortaleza), identificador DONO-20261120-1847-PR3642, na sessão do Claude 3 (nuvem R), com cópia ao Claude 5 (coordenador) no canal #4932 (7051442793). Ela fechou o #3642 como redundante (PV (b), nota 7051439487): o problema de CI que o motivou foi resolvido pelo #3638 (`71abddd3e9`), e o desenho dele deixava de contar toda visita de menos de cerca de 2 segundos (0 de 5 no teste, contra 5 de 5 no main).
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. A busca no main e nos PRs abertos, por INP, primeiro toque, `countsAtPause`, `quiet-moment`, a data e a etiqueta [VT1] (livre), não achou registro equivalente. Os itens de INP já gravados (HT14, HT16) tratam da home e das páginas públicas, não da contagem de visitas na página da loja.
+
+Estado inicial: na fila. Posição: ordem normal da fila, sem passar na frente dos itens do Bloco de abertura. A ordem dos outros itens não muda.
+
+Regra do dono, que vale para este item e para qualquer outro: **visitas curtas nunca deixam de ser contadas.** A contagem de visitas é um limite visível do plano e um número mostrado ao criador. Contar a menos mostra ao criador um número falso (VR) e deixa passar uso acima do limite pago, o que é custo sem receita.
+
+Problema concreto que resolve (VR, item 3): o primeiro toque na página da loja demora quando a verificação anti-robô (BotID) é feita naquele momento, o que piora a resposta à interação (INP) em celular simples.
+
+Como se confere:
+- um teste prova que a contagem é igual à do main: 5 de 5, inclusive visitas curtas (300 ms a 2 s), com a aba fechada, escondida e trocada de página;
+- um teste mede a velocidade do primeiro toque antes e depois, na mesma matriz (CPU ×4, rede lenta, 390 × 844), com o ganho provado em número;
+- sem ganho provado, o item não entra.
+
+Como traz lucro: a página da loja responde mais rápido ao comprador, sem perder nenhuma visita contada.
+
+O que fazer, em unidades pequenas:
+1. **Desenho:** por exemplo, aquecer a verificação no primeiro momento ocioso depois de `load`, mantendo a contagem da visita no próprio carregamento, como o main faz hoje. Nenhum desenho que adie a contagem para a primeira pausa é aceito.
+2. **Custo:** todo custo novo (por exemplo, uma verificação anti-robô a mais por visita) entra no registro de custos (`tests/plan-cost-registry.ts`) com teto automático antes do gasto. Custo desconhecido reprova, nunca é zero.
+3. **Prova:** os dois testes acima, com o teste vermelho primeiro.
+
+Acessibilidade (AX274, Parte A, integral): desempenho em celular simples e rede lenta conferido; nada muda no que o comprador vê ou na ordem do foco. Cada PR registra o que foi conferido, como e com que resultado.
+
+Proibido: deixar de contar qualquer visita; mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; usar dados reais nos testes.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
 ## FZ — Horários no fuso do cliente (21/11/2026)
 
 ### 792 [FZ1] — Todo horário visível ao cliente no fuso dele, que pode trocá-lo

@@ -21,7 +21,7 @@ import { HOLD_SECONDS } from "@/lib/stripe-account";
 import { BUYER_COOKIE, BUYER_COOKIE_SECONDS, newBuyerKey } from "@/lib/learn";
 import { canWrite } from "@/lib/mail";
 import { outOfKeys } from "@/lib/licence-keys";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { readListings, readProduct } from "@/lib/catalog";
 import { bundleReady, chosenItems, deliverableItems, picks } from "@/lib/bundle-rules";
 import { cameFrom } from "@/lib/came-from";
@@ -181,7 +181,10 @@ export async function POST(request: NextRequest) {
   // a limited unit for half an hour, so one connection gets twenty in ten
   // minutes per store: far past any buyer, and short of a script holding
   // every unit to keep real buyers out.
-  if (!(await withinLimit("checkout", `${clientAddress(request)}|${store.handle}`, 20, 600))) {
+  const room = await withinLimit("checkout", `${clientAddress(request)}|${store.handle}`, 20, 600).catch(unknownLimit);
+  // A count that could not be read is never "a lot of tries" (rule 24): the payment page did not open.
+  if (room === "unknown") return away(`/@${store.handle}?status=error`);
+  if (!room) {
     return away(`/@${store.handle}?status=slow`);
   }
 
@@ -241,7 +244,9 @@ export async function POST(request: NextRequest) {
   // for that address, after that box like any purchase. Every other answer
   // goes back to the field with its reason; nothing is charged, and the
   // buyer can still buy without it.
-  let returning: { code: ReturningCode; email: string } | null = null;
+  let returning: { code: ReturningCode; email: string; until: number } | null = null;
+  // Set once the link is spent: from then on nothing gives it back, even if something after it throws.
+  let linkSpent = false;
   // A typed code goes back with the answer, so the field is filled in again (WCAG 3.3.7); the email never goes in an address.
   const again = readTypedCode(typedCode);
   const backToField = (status: string) => away(`/@${store.handle}/p/${product.id}?returning=${status}${again ? `&rc=${again}` : ""}#returning`);
@@ -458,13 +463,16 @@ export async function POST(request: NextRequest) {
     );
     if (!held.ok) {
       if (charged) await giveBackHold(store, clientAddress(request));
-      // No checkout opened: the link's claim is let go, so it can be used again.
-      if (returning) await releaseReturningLink(linkToken);
+      // No checkout opened: the link's claim is let go, with the time it had left, so it can be used again.
+      if (returning) await releaseReturningLink(linkToken, returning.until);
       return away(`/@${store.handle}?status=${held.reason}`);
     }
     // The link is spent only once its checkout exists: going back from Stripe's
     // page and pressing buy again before that still has it.
-    if (returning) await spendReturningLink(linkToken);
+    if (returning) {
+      linkSpent = true;
+      await spendReturningLink(linkToken);
+    }
     // A plan, or a membership that ends after a set number of payments, was
     // written down to be given its end by createCheckout itself (rememberPlan),
     // as for every other door that opens a checkout.
@@ -489,8 +497,9 @@ export async function POST(request: NextRequest) {
     // Refused before a checkout opened (Stripe not asked, or its 400 refusal of the code's coupon): no unit stays
     // held, so the hold count is given back.
     if (charged && (error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof ReturningCodeRefused || error instanceof EuVatCollectRefused)) await giveBackHold(store, clientAddress(request));
-    // No checkout opened: the link's claim is let go, so it can be used again.
-    if (returning) await releaseReturningLink(linkToken);
+    // No checkout opened: the link's claim is let go, with the time it had left, so it can be used again. A link already
+    // spent is never given back: its checkout exists (Codex N1 LOW on #3690).
+    if (returning && !linkSpent) await releaseReturningLink(linkToken, returning.until);
     // The store's orders for the month are reached (lib/order-admission.ts): said plainly, nothing charged.
     if (error instanceof OrdersPausedError) return away(`/@${store.handle}?status=${error.reason === "paused" ? "paused" : "error"}`);
     // The box was not checked, or the page was from before its words

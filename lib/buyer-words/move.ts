@@ -32,6 +32,8 @@ const en = {
     unavailable: { title: "This membership is not on sale just now", body: "Nothing was charged. The store's owner can tell you more." },
     price: { title: "This price is no longer offered", body: "The store no longer offers the price this link was for, so it cannot keep your membership at that price. Nothing was charged." },
     refused: { title: "The payment page could not be opened", body: "Nothing was charged. Try again in a few minutes." },
+    unknown: { title: "We could not check this link", body: "We could not tell whether this membership was already moved here, so this link does not open a payment page. Nothing was charged. The store's owner can help." },
+    checking: { title: "Your last try is still being checked", body: "A payment page may already be open from it, so a new one is not opened, and nothing is charged twice. If you did not pay there, press the button again tomorrow, or ask the store's owner." },
     limited: { title: "That was a lot of tries", body: "Nothing was charged. Wait a few minutes and press the button again." },
   } satisfies Record<string, Notice>,
   inviteSubject: (title: string, store: string) => `Keep your membership of ${title} with ${store}`,
@@ -48,6 +50,11 @@ const en = {
     `Your membership of ${title} with ${store} has not moved yet. Keep it with the link below. Nothing is charged before ${date}, and the first payment here is ${amount}.`,
   reminderLast: "This is the only reminder. If you do nothing, nothing is charged here.",
   sentBy: (store: string) => `Sent by Marktmorgen on behalf of ${store}.`,
+  stopLine: (store: string, link: string) => `Stop emails from ${store} about moving your membership: ${link}`,
+  stopAsk: (who: string) => `Stop emails from ${who || "this store"} about moving your membership?`,
+  stopButton: "Stop these emails",
+  stopDoneTitle: "No more emails about it",
+  stopDone: (email: string, who: string) => `${email} will not get more emails from ${who || "this store"} about moving a membership, nor any other reminder from it. Nothing else is needed.`,
 };
 
 export type MoveWords = {
@@ -72,6 +79,8 @@ const es: MoveWords = {
     unavailable: { title: "Esta membresía no está a la venta ahora mismo", body: "No se cobró nada. El dueño de la tienda puede darte más información." },
     price: { title: "Este precio ya no se ofrece", body: "La tienda ya no ofrece el precio para el que era este enlace, así que no puede conservar tu membresía a ese precio. No se cobró nada." },
     refused: { title: "No se pudo abrir la página de pago", body: "No se cobró nada. Inténtalo de nuevo en unos minutos." },
+    unknown: { title: "No pudimos comprobar este enlace", body: "No pudimos saber si esta membresía ya se trasladó aquí, así que este enlace no abre una página de pago. No se cobró nada. El dueño de la tienda puede ayudarte." },
+    checking: { title: "Tu último intento todavía se está comprobando", body: "Puede que ya haya una página de pago abierta de ese intento, así que no se abre otra y no se cobra nada dos veces. Si no pagaste allí, vuelve a pulsar el botón mañana o pregunta al dueño de la tienda." },
     limited: { title: "Han sido muchos intentos", body: "No se cobró nada. Espera unos minutos y pulsa el botón otra vez." },
   },
   inviteSubject: (title, store) => `Conserva tu membresía de ${title} con ${store}`,
@@ -88,6 +97,11 @@ const es: MoveWords = {
     `Tu membresía de ${title} con ${store} aún no se ha trasladado. Consérvala con el enlace de abajo. No se cobra nada antes del ${date}, y el primer pago aquí es de ${amount}.`,
   reminderLast: "Este es el único recordatorio. Si no haces nada, aquí no se cobra nada.",
   sentBy: (store) => `Enviado por Marktmorgen en nombre de ${store}.`,
+  stopLine: (store, link) => `Dejar de recibir correos de ${store} sobre el traslado de tu membresía: ${link}`,
+  stopAsk: (who) => `¿Dejar de recibir correos de ${who || "esta tienda"} sobre el traslado de tu membresía?`,
+  stopButton: "Dejar de recibir estos correos",
+  stopDoneTitle: "No más correos sobre esto",
+  stopDone: (email, who) => `${email} no recibirá más correos de ${who || "esta tienda"} sobre el traslado de una membresía, ni ningún otro recordatorio suyo. No hace falta nada más.`,
 };
 
 const fr: MoveWords = {
@@ -108,6 +122,8 @@ const fr: MoveWords = {
     unavailable: { title: "Cet abonnement n'est pas en vente pour le moment", body: "Rien n'a été débité. Le propriétaire de la boutique peut vous en dire plus." },
     price: { title: "Ce prix n'est plus proposé", body: "La boutique ne propose plus le prix auquel ce lien correspondait, il ne peut donc pas garder votre abonnement à ce prix. Rien n'a été débité." },
     refused: { title: "La page de paiement n'a pas pu s'ouvrir", body: "Rien n'a été débité. Réessayez dans quelques minutes." },
+    unknown: { title: "Nous n'avons pas pu vérifier ce lien", body: "Nous n'avons pas pu savoir si cet abonnement a déjà été transféré ici, ce lien n'ouvre donc pas de page de paiement. Rien n'a été débité. Le propriétaire de la boutique peut vous aider." },
+    checking: { title: "Votre dernier essai est encore en cours de vérification", body: "Une page de paiement est peut-être déjà ouverte depuis cet essai, donc aucune autre n'est ouverte et rien n'est débité deux fois. Si vous n'y avez pas payé, appuyez de nouveau sur le bouton demain ou demandez au propriétaire de la boutique." },
     limited: { title: "Cela fait beaucoup d'essais", body: "Rien n'a été débité. Patientez quelques minutes puis appuyez de nouveau sur le bouton." },
   },
   inviteSubject: (title, store) => `Gardez votre abonnement à ${title} chez ${store}`,
@@ -124,6 +140,11 @@ const fr: MoveWords = {
     `Votre abonnement à ${title} chez ${store} n'a pas encore été transféré. Gardez-le avec le lien ci-dessous. Rien n'est débité avant le ${date}, et le premier paiement ici est de ${amount}.`,
   reminderLast: "C'est le seul rappel. Si vous ne faites rien, rien n'est débité ici.",
   sentBy: (store) => `Envoyé par Marktmorgen pour le compte de ${store}.`,
+  stopLine: (store, link) => `Ne plus recevoir d'e-mails de ${store} sur le transfert de votre abonnement${S}: ${link}`,
+  stopAsk: (who) => `Ne plus recevoir d'e-mails de ${who || "cette boutique"} sur le transfert de votre abonnement${S}?`,
+  stopButton: "Ne plus recevoir ces e-mails",
+  stopDoneTitle: "Plus d'e-mails à ce sujet",
+  stopDone: (email, who) => `${email} ne recevra plus d'e-mails de ${who || "cette boutique"} sur le transfert d'un abonnement, ni aucun autre de ses rappels. Vous n'avez rien d'autre à faire.`,
 };
 
 const de: MoveWords = {
@@ -144,6 +165,8 @@ const de: MoveWords = {
     unavailable: { title: "Diese Mitgliedschaft wird gerade nicht angeboten", body: "Es wurde nichts berechnet. Der Inhaber des Shops kann Ihnen mehr sagen." },
     price: { title: "Dieser Preis wird nicht mehr angeboten", body: "Der Shop bietet den Preis, für den dieser Link galt, nicht mehr an, deshalb kann er Ihre Mitgliedschaft nicht zu diesem Preis fortführen. Es wurde nichts berechnet." },
     refused: { title: "Die Zahlungsseite konnte nicht geöffnet werden", body: "Es wurde nichts berechnet. Versuchen Sie es in ein paar Minuten noch einmal." },
+    unknown: { title: "Wir konnten diesen Link nicht prüfen", body: "Wir konnten nicht feststellen, ob diese Mitgliedschaft bereits hierher übertragen wurde, daher öffnet dieser Link keine Zahlungsseite. Es wurde nichts berechnet. Der Inhaber des Shops kann Ihnen helfen." },
+    checking: { title: "Ihr letzter Versuch wird noch geprüft", body: "Vielleicht ist aus diesem Versuch schon eine Zahlungsseite offen, darum wird keine neue geöffnet und nichts doppelt berechnet. Wenn Sie dort nicht bezahlt haben, drücken Sie die Schaltfläche morgen noch einmal oder fragen Sie den Inhaber des Shops." },
     limited: { title: "Das waren viele Versuche", body: "Es wurde nichts berechnet. Warten Sie ein paar Minuten und drücken Sie dann erneut auf die Schaltfläche." },
   },
   inviteSubject: (title, store) => `Behalten Sie Ihre Mitgliedschaft bei ${title} von ${store}`,
@@ -160,6 +183,11 @@ const de: MoveWords = {
     `Ihre Mitgliedschaft bei ${title} von ${store} ist noch nicht umgezogen. Behalten Sie sie über den Link unten. Vor dem ${date} wird nichts berechnet, und die erste Zahlung hier beträgt ${amount}.`,
   reminderLast: "Dies ist die einzige Erinnerung. Wenn Sie nichts tun, wird hier nichts berechnet.",
   sentBy: (store) => `Gesendet von Marktmorgen im Auftrag von ${store}.`,
+  stopLine: (store, link) => `Keine E-Mails mehr von ${store} zum Umzug Ihrer Mitgliedschaft: ${link}`,
+  stopAsk: (who) => `Keine E-Mails mehr von ${who || "diesem Shop"} zum Umzug Ihrer Mitgliedschaft?`,
+  stopButton: "Diese E-Mails stoppen",
+  stopDoneTitle: "Keine E-Mails mehr dazu",
+  stopDone: (email, who) => `${email} erhält keine E-Mails mehr von ${who || "diesem Shop"} zum Umzug einer Mitgliedschaft und auch keine anderen Erinnerungen von dort. Sonst ist nichts nötig.`,
 };
 
 const it: MoveWords = {
@@ -180,6 +208,8 @@ const it: MoveWords = {
     unavailable: { title: "Questo abbonamento al momento non è in vendita", body: "Non è stato addebitato nulla. Il proprietario del negozio può darti più informazioni." },
     price: { title: "Questo prezzo non è più offerto", body: "Il negozio non offre più il prezzo a cui si riferiva questo link, quindi non può mantenere il tuo abbonamento a quel prezzo. Non è stato addebitato nulla." },
     refused: { title: "Non è stato possibile aprire la pagina di pagamento", body: "Non è stato addebitato nulla. Riprova tra qualche minuto." },
+    unknown: { title: "Non è stato possibile verificare questo link", body: "Non è stato possibile capire se questo abbonamento è già stato spostato qui, quindi questo link non apre una pagina di pagamento. Non è stato addebitato nulla. Il proprietario del negozio può aiutarti." },
+    checking: { title: "Il tuo ultimo tentativo è ancora in verifica", body: "Potrebbe esserci già una pagina di pagamento aperta da quel tentativo, quindi non se ne apre un'altra e non viene addebitato nulla due volte. Se non hai pagato lì, premi di nuovo il pulsante domani o chiedi al proprietario del negozio." },
     limited: { title: "Sono stati molti tentativi", body: "Non è stato addebitato nulla. Aspetta qualche minuto e premi di nuovo il pulsante." },
   },
   inviteSubject: (title, store) => `Mantieni il tuo abbonamento a ${title} con ${store}`,
@@ -196,6 +226,11 @@ const it: MoveWords = {
     `Il tuo abbonamento a ${title} con ${store} non è ancora stato trasferito. Mantienilo con il link qui sotto. Non viene addebitato nulla prima del ${date}, e il primo pagamento qui è di ${amount}.`,
   reminderLast: "Questo è l'unico promemoria. Se non fai nulla, qui non viene addebitato nulla.",
   sentBy: (store) => `Inviato da Marktmorgen per conto di ${store}.`,
+  stopLine: (store, link) => `Non ricevere più email da ${store} sul trasferimento del tuo abbonamento: ${link}`,
+  stopAsk: (who) => `Non ricevere più email da ${who || "questo negozio"} sul trasferimento del tuo abbonamento?`,
+  stopButton: "Interrompi queste email",
+  stopDoneTitle: "Niente più email su questo",
+  stopDone: (email, who) => `${email} non riceverà più email da ${who || "questo negozio"} sul trasferimento di un abbonamento, né altri suoi promemoria. Non serve altro.`,
 };
 
 const nl: MoveWords = {
@@ -216,6 +251,8 @@ const nl: MoveWords = {
     unavailable: { title: "Dit lidmaatschap is nu niet te koop", body: "Er is niets afgeschreven. De eigenaar van de winkel kan je meer vertellen." },
     price: { title: "Deze prijs wordt niet meer aangeboden", body: "De winkel biedt de prijs waarvoor deze link was niet meer aan, dus hij kan je lidmaatschap niet tegen die prijs houden. Er is niets afgeschreven." },
     refused: { title: "De betaalpagina kon niet worden geopend", body: "Er is niets afgeschreven. Probeer het over een paar minuten opnieuw." },
+    unknown: { title: "We konden deze link niet controleren", body: "We konden niet nagaan of dit lidmaatschap al hierheen is overgezet, dus deze link opent geen betaalpagina. Er is niets afgeschreven. De eigenaar van de winkel kan je helpen." },
+    checking: { title: "Je laatste poging wordt nog gecontroleerd", body: "Er staat misschien al een betaalpagina open van die poging, dus er wordt geen nieuwe geopend en er wordt niets dubbel afgeschreven. Als je daar niet hebt betaald, druk morgen opnieuw op de knop of vraag het de eigenaar van de winkel." },
     limited: { title: "Dat waren veel pogingen", body: "Er is niets afgeschreven. Wacht een paar minuten en druk dan opnieuw op de knop." },
   },
   inviteSubject: (title, store) => `Houd je lidmaatschap van ${title} bij ${store}`,
@@ -232,6 +269,11 @@ const nl: MoveWords = {
     `Je lidmaatschap van ${title} bij ${store} is nog niet verhuisd. Houd het via de link hieronder. Er wordt niets afgeschreven vóór ${date}, en de eerste betaling hier is ${amount}.`,
   reminderLast: "Dit is de enige herinnering. Als je niets doet, wordt hier niets afgeschreven.",
   sentBy: (store) => `Verstuurd door Marktmorgen namens ${store}.`,
+  stopLine: (store, link) => `Geen e-mails meer van ${store} over het verhuizen van je lidmaatschap: ${link}`,
+  stopAsk: (who) => `Geen e-mails meer van ${who || "deze winkel"} over het verhuizen van je lidmaatschap?`,
+  stopButton: "Stop deze e-mails",
+  stopDoneTitle: "Geen e-mails meer hierover",
+  stopDone: (email, who) => `${email} krijgt geen e-mails meer van ${who || "deze winkel"} over het verhuizen van een lidmaatschap, en ook geen andere herinneringen van daar. Verder hoef je niets te doen.`,
 };
 
 const pt: MoveWords = {
@@ -252,6 +294,8 @@ const pt: MoveWords = {
     unavailable: { title: "Esta subscrição não está à venda neste momento", body: "Não foi cobrado nada. O proprietário da loja pode dar-lhe mais informações." },
     price: { title: "Este preço já não é oferecido", body: "A loja já não oferece o preço a que esta ligação se referia, por isso não pode manter a sua subscrição a esse preço. Não foi cobrado nada." },
     refused: { title: "Não foi possível abrir a página de pagamento", body: "Não foi cobrado nada. Tente novamente dentro de alguns minutos." },
+    unknown: { title: "Não foi possível verificar esta ligação", body: "Não foi possível saber se esta subscrição já foi transferida para aqui, por isso esta ligação não abre uma página de pagamento. Não foi cobrado nada. O proprietário da loja pode ajudá-lo." },
+    checking: { title: "A sua última tentativa ainda está a ser verificada", body: "Pode já haver uma página de pagamento aberta dessa tentativa, por isso não se abre outra e nada é cobrado duas vezes. Se não pagou lá, carregue no botão de novo amanhã ou pergunte ao dono da loja." },
     limited: { title: "Foram muitas tentativas", body: "Não foi cobrado nada. Aguarde alguns minutos e prima o botão novamente." },
   },
   inviteSubject: (title, store) => `Mantenha a sua subscrição de ${title} com ${store}`,
@@ -268,6 +312,11 @@ const pt: MoveWords = {
     `A sua subscrição de ${title} com ${store} ainda não foi transferida. Mantenha-a com a ligação abaixo. Não é cobrado nada antes de ${date}, e o primeiro pagamento aqui é de ${amount}.`,
   reminderLast: "Este é o único lembrete. Se não fizer nada, não é cobrado nada aqui.",
   sentBy: (store) => `Enviado pela Marktmorgen em nome de ${store}.`,
+  stopLine: (store, link) => `Deixar de receber emails de ${store} sobre a transferência da sua subscrição: ${link}`,
+  stopAsk: (who) => `Deixar de receber emails ${who ? `de ${who}` : "desta loja"} sobre a transferência da sua subscrição?`,
+  stopButton: "Deixar de receber estes emails",
+  stopDoneTitle: "Sem mais emails sobre isto",
+  stopDone: (email, who) => `${email} não voltará a receber emails ${who ? `de ${who}` : "desta loja"} sobre a transferência de uma subscrição, nem nenhum outro lembrete seu. Não é preciso mais nada.`,
 };
 
 export const MOVE_WORDS: Record<LanguageCode, MoveWords> = { en, es, fr, de, it, nl, pt };

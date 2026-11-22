@@ -208,6 +208,10 @@ export const nl: BuyerWords = {
       title: "PayPal heeft de betaling niet aangenomen",
       body: "Er is niets afgeschreven. Probeer het opnieuw met een andere kaart of rekening in PayPal, of betaal hier met een kaart.",
     },
+    "paypal-confirming": {
+      title: "Deze PayPal-betaling wordt bevestigd",
+      body: "Een ander tabblad of een tweede klik rondt hem nu af. Kijk in je e-mail of het ontvangstbewijs komt voordat je opnieuw betaalt. Als PayPal een afschrijving toont en er geen ontvangstbewijs komt, schrijf de winkel dan door op het ontvangstbewijs van PayPal te antwoorden.",
+    },
     "paypal-error": {
       title: "Die PayPal-betaling kon niet aan deze winkel worden gekoppeld",
       body: "Er is daarvoor niets geleverd. Laat PayPal een afschrijving zien, schrijf de winkel dan door op de bon van PayPal te antwoorden.",

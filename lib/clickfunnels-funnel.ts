@@ -52,7 +52,7 @@ import { writePage } from "@/lib/sales-page-store";
 import { MAX_SITE_PAGES, SITE_KINDS, type SitePage, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
 import { freeSlug } from "@/lib/funnel-types";
 import { MAX_FUNNEL_PAGES, MAX_PAGE_FUNNELS, type PageFunnelStep, funnelSlugFrom, funnelSlugProblem, newFunnelId, productStepProblem, MAX_FUNNEL_NAME } from "@/lib/page-funnel";
-import { readPageFunnelsStrict, writePageFunnel } from "@/lib/page-funnel-store";
+import { readPageFunnelsStrict, writeStorePageFunnel } from "@/lib/page-funnel-store";
 import { MAX_BUTTON, MAX_FIELDS, MAX_FORM_NAME, MAX_LABEL, newFormId, parseForm } from "@/lib/forms";
 import { canAddForms, writeForm } from "@/lib/form-store";
 import { type Funnel, MAX_FUNNEL_STEPS, MAX_HEADLINE_LENGTH, MAX_STEP_TEXT_LENGTH, funnelProblem, parseFunnel } from "@/lib/funnel";
@@ -544,11 +544,11 @@ export async function saveFunnelImport(store: Store, raw: unknown): Promise<Save
     const existing = await readPageFunnelsStrict(statsId);
     const before = plan.partial ? existing.find((f) => f.id === plan.partial) ?? null : null;
     let funnel;
-    if (before) funnel = await writePageFunnel(statsId, { ...before, steps }, existing, current);
+    if (before) funnel = await writeStorePageFunnel(statsId, { ...before, steps }, existing, current);
     else {
       let slug = make.funnel.slug;
       for (let n = 2; funnelSlugProblem(slug, existing) !== null && n < 100; n += 1) slug = `${(funnelSlugFrom(make.funnel.name) || "funnel").slice(0, 36)}-${n}`;
-      funnel = await writePageFunnel(statsId, { id: newFunnelId(), name: make.funnel.name, slug, steps, on: false, since: Math.floor(Date.now() / 1000) }, existing, current);
+      funnel = await writeStorePageFunnel(statsId, { id: newFunnelId(), name: make.funnel.name, slug, steps, on: false, since: Math.floor(Date.now() / 1000) }, existing, current);
     }
     await redisPipeline([["HSET", ledger, `run:${plan.key}`, JSON.stringify({ state: "funnel", funnel: funnel.id, at: Date.now() })]]);
 

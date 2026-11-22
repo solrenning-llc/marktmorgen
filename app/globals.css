@@ -219,6 +219,12 @@
   /* The largest radius utilities are calmer than Tailwind's defaults. */
   --radius-2xl: 1rem;
   --radius-3xl: 1.25rem;
+
+  /* Small text keeps a line height of at least 1.5 (WCAG 1.4.8 AAA, 274 [AX1]). Tailwind's defaults are 1.43 for
+     text-sm and 1.33 for text-xs, so every paragraph set in those sizes was under it. An explicit leading-* still
+     wins. Held by tests/e2e/accessibility-buyer-actions.mjs (blocksOff148). */
+  --text-xs--line-height: 1.5;
+  --text-sm--line-height: 1.5;
 }
 
 /* ---------------------------------------------------------------- base */
@@ -1748,6 +1754,11 @@ a.chip {
   font-weight: 600;
   font-size: 1.25rem;
   letter-spacing: -0.02em;
+}
+/* No block of an article's or the mission's prose is wider than 80 characters, at any width or with text spacing
+   (1.4.8 AAA, tests/mission-article-line-length.test.ts). */
+.prose-nb :where(p, li, blockquote) {
+  max-width: 46ch;
 }
 .prose-nb a {
   color: var(--violet-deep);

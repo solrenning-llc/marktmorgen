@@ -209,6 +209,10 @@ export const it: BuyerWords = {
       title: "PayPal non ha accettato il pagamento",
       body: "Non è stato addebitato nulla. Riprova con un'altra carta o un altro conto su PayPal, oppure paga qui con la carta.",
     },
+    "paypal-confirming": {
+      title: "Questo pagamento PayPal è in fase di conferma",
+      body: "Un'altra scheda o un secondo clic lo sta completando ora. Controlla la tua email per la ricevuta prima di pagare di nuovo. Se PayPal mostra un addebito e non arriva nessuna ricevuta, scrivi al negozio rispondendo alla ricevuta di PayPal.",
+    },
     "paypal-error": {
       title: "Non è stato possibile associare quel pagamento PayPal a questo negozio",
       body: "Non è stato consegnato nulla per quel pagamento. Se PayPal mostra un addebito, scrivi al negozio rispondendo alla ricevuta di PayPal.",

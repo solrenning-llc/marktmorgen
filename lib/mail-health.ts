@@ -76,14 +76,20 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { stopWriting } from "@/lib/contacts";
 import { normaliseEmail } from "@/lib/auth";
 import type { Store } from "@/lib/store";
-import { BOUNCE_FLOOR, BOUNCE_RATE, COMPLAINT_FLOOR, COMPLAINT_RATE, HEALTH_WINDOW_DAYS, PAUSE_DAYS, RAMP_FIRST, RAMP_GAP_MINUTES, RAMP_LAST, RAMP_TRIGGER } from "@/lib/mail-health-rules";
+import { BOUNCE_FLOOR, BOUNCE_RATE, COMPLAINT_FLOOR, COMPLAINT_RATE, HEALTH_WINDOW_DAYS, PAUSE_DAYS, RAMP_FIRST, RAMP_GAP_MINUTES, RAMP_LAST, RAMP_TRIGGER, STOP_TAG, stopTags } from "@/lib/mail-health-rules";
 
-export { BOUNCE_FLOOR, BOUNCE_RATE, COMPLAINT_FLOOR, COMPLAINT_RATE, HEALTH_WINDOW_DAYS, PAUSE_DAYS };
+export { BOUNCE_FLOOR, BOUNCE_RATE, COMPLAINT_FLOOR, COMPLAINT_RATE, HEALTH_WINDOW_DAYS, PAUSE_DAYS, STOP_TAG, stopTags };
 
 /** The tag a watched email carries, naming the store it is counted for. */
 export const STORE_TAG = "nl_store";
 /** And, on a list email, the list the address is on, so it can be taken off it. */
 export const LIST_TAG = "nl_list";
+/**
+ * And, on a moved member's email (lib/imports.ts: their first email and their reminder), the store's stats id that
+ * its reminders' stop mark is kept under, so a bounce for good or a spam report stops them (heardFromSender; review
+ * of #3476, MEDIUM 2). Those emails carry no list tag: the member may be on no list.
+ */
+export const MOVE_TAG = "nl_move";
 /** The email shared by all of its recipients, for aggregate delivery reporting. */
 export const MAIL_REPORT_TAG = "nl_mail";
 export const HEALTH_ID = /^[0-9a-f]{32}$/;
@@ -113,6 +119,12 @@ export function healthTags(store: Pick<Store, "sid" | "listId">, onList: boolean
 }
 
 
+/** The tags of a moved member's email: a watched email off the list, with its store's stats id (MOVE_TAG). */
+export function moveTags(store: Pick<Store, "sid" | "listId" | "statsId">): Record<string, string> {
+  const tags = healthTags(store, false);
+  return tags[STORE_TAG] && store.statsId && HEALTH_ID.test(store.statsId) ? { ...tags, [MOVE_TAG]: store.statsId } : tags;
+}
+
 export type PauseReason = "bounces" | "complaints";
 export type Pause = { reason: PauseReason; until: number; sent: number; count: number };
 export type Health = { sent: number; bounced: number; complained: number };
@@ -125,6 +137,34 @@ const fromKey = (id: string) => `nl:mail:health:${id}:from`;
 /** Unit 2 gives daily report hashes their reviewed 30-day lifetime and cost ceiling. */
 export const MAIL_HEALTH_DAY_SECONDS = (HEALTH_WINDOW_DAYS + 3) * 86_400;
 const MAIL_HEALTH_SEEN_SECONDS = (HEALTH_WINDOW_DAYS + 3) * 86_400;
+
+/**
+ * Counts an outcome and leaves a recoverable checkpoint in one Redis turn.
+ * A lost answer is safe: redelivery sees `pending`, re-evaluates the pause,
+ * and never increments the same address twice.
+ */
+export const BEGIN_MAIL_HEALTH_OUTCOME = `-- marktmorgen:mail-health-outcome:v1
+local state = redis.call('GET', KEYS[1])
+if state == 'done' or state == '1' then return 0 end
+if state == 'pending' then return 2 end
+if state then return -1 end
+redis.call('HINCRBY', KEYS[2], ARGV[1], 1)
+redis.call('EXPIRE', KEYS[2], ARGV[2])
+redis.call('SET', KEYS[1], 'pending', 'EX', ARGV[3])
+return 1`;
+
+function exactRedisReply(value: unknown, length: number): unknown[] | null {
+  if (!Array.isArray(value)) return null;
+  const size = Object.getOwnPropertyDescriptor(value, "length");
+  if (!size || !Object.hasOwn(size, "value") || size.value !== length) return null;
+  const out: unknown[] = [];
+  for (let i = 0; i < length; i += 1) {
+    const item = Object.getOwnPropertyDescriptor(value, String(i));
+    if (!item || !Object.hasOwn(item, "value")) return null;
+    out.push(item.value);
+  }
+  return out;
+}
 
 async function add(id: string, field: "s" | "b" | "c", n: number, now: number): Promise<void> {
   const key = mailHealthDayKey(id, now);
@@ -144,18 +184,50 @@ export async function noteSent(id: string, n: number, now = Date.now()): Promise
 export async function listHealth(id: string, now = Date.now()): Promise<Health> {
   const days: string[] = [];
   for (let i = 0; i < HEALTH_WINDOW_DAYS; i += 1) days.push(dayOf(now - i * 86_400_000));
-  const [from, ...rows] = await redisPipeline([["GET", fromKey(id)], ...days.map((day) => ["HMGET", `nl:mail:health:${id}:${day}`, "s", "b", "c"])]);
+  const exact = (value: unknown, length: number): unknown[] | null => {
+    if (!Array.isArray(value)) return null;
+    const size = Object.getOwnPropertyDescriptor(value, "length");
+    if (!size || !Object.hasOwn(size, "value") || size.value !== length) return null;
+    const out: unknown[] = [];
+    for (let i = 0; i < length; i += 1) {
+      const item = Object.getOwnPropertyDescriptor(value, String(i));
+      if (!item || !Object.hasOwn(item, "value")) return null;
+      out.push(item.value);
+    }
+    return out;
+  };
+  const count = (value: unknown): number | undefined => {
+    if (value === null) return 0;
+    if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) return undefined;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : undefined;
+  };
+  const reply = exact(
+    await redisPipeline([["GET", fromKey(id)], ...days.map((day) => ["HMGET", `nl:mail:health:${id}:${day}`, "s", "b", "c"])]),
+    HEALTH_WINDOW_DAYS + 1,
+  );
+  if (!reply) throw new Error("The mail health read is unconfirmed");
+  const [from, ...rows] = reply;
+  if (from !== null && (typeof from !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(from) || dayOf(Date.parse(`${from}T00:00:00Z`)) !== from)) {
+    throw new Error("The mail health read is unconfirmed");
+  }
   const total: Health = { sent: 0, bounced: 0, complained: 0 };
-  rows.forEach((row, i) => {
-    if (!Array.isArray(row)) return;
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = exact(rows[i], 3);
+    if (!row) throw new Error("The mail health read is unconfirmed");
+    const values = row.map(count);
+    if (values.some(value => value === undefined)) throw new Error("The mail health read is unconfirmed");
     // A store that has served a pause starts its count again from the day
     // the pause ends: the bounces it was paused for, and the ones that came
     // in late from the same emails, are not held against it twice.
-    if (typeof from === "string" && days[i] < from) return;
-    total.sent += Number(row[0]) || 0;
-    total.bounced += Number(row[1]) || 0;
-    total.complained += Number(row[2]) || 0;
-  });
+    if (typeof from === "string" && days[i] < from) continue;
+    total.sent += values[0]!;
+    total.bounced += values[1]!;
+    total.complained += values[2]!;
+    if (!Number.isSafeInteger(total.sent) || !Number.isSafeInteger(total.bounced) || !Number.isSafeInteger(total.complained)) {
+      throw new Error("The mail health read is unconfirmed");
+    }
+  }
   return total;
 }
 
@@ -212,8 +284,17 @@ async function pauseIfOver(id: string, now: number): Promise<Pause | null> {
   const over = overTheLine(health);
   if (!over) return null;
   const pause: Pause = { reason: over.reason, until: Math.floor(now / 1000) + PAUSE_DAYS * 86_400, sent: health.sent, count: over.count };
-  const [set] = await redisPipeline([["SET", pausedKey(id), JSON.stringify(pause), "NX", "EX", PAUSE_DAYS * 86_400]]);
+  const value = JSON.stringify(pause);
+  // Read exactly (CX-123 rule 24, Claude 6's LEVE 3 on #2687): "OK" is this run's pause, null one already running.
+  // Any other answer is read back by its value, so a pause that landed with its reply lost still starts its ramp and a
+  // running pause's end is never moved; a read-back that does not read throws, and the notice is heard again.
+  const set = exactRedisReply(await redisPipeline([["SET", pausedKey(id), value, "NX", "EX", PAUSE_DAYS * 86_400]]), 1)?.[0];
   if (set === null) return null;
+  if (set !== "OK") {
+    const held = exactRedisReply(await redisPipeline([["GET", pausedKey(id)]]), 1)?.[0];
+    if (typeof held === "string" && held !== value) return null;
+    if (held !== value) throw new Error("The mail health pause is unconfirmed");
+  }
   await redisPipeline([["SET", fromKey(id), dayOf(pause.until * 1000), "EX", (PAUSE_DAYS + HEALTH_WINDOW_DAYS + 1) * 86_400]]);
   // When the week is over it starts again with a hundred people, not with
   // everyone who is left: what is left of a bad list is still a bad list.
@@ -338,7 +419,8 @@ export async function forgetHealth(id: string, emails: string[], now = Date.now(
   await redisPipeline([["DEL", ...keys]]);
 }
 
-export type Told = "counted" | "paused" | "ignored";
+/** "stopped": a non-list email's address was taken off its store's list (STOP_TAG), and nothing was counted. */
+export type Told = "counted" | "paused" | "stopped" | "ignored";
 
 /** What the sender said about one email, whichever sender it was (app/api/mail/inbound). */
 export type SenderNotice = {
@@ -349,6 +431,10 @@ export type SenderNotice = {
   /** The email's tags, as it was sent with them. */
   store: string;
   list: string;
+  /** On a store's non-list email, its list (STOP_TAG): taken off it, never counted. */
+  stop?: string;
+  /** A moved member's email only (MOVE_TAG): the store's stats id. */
+  move?: string;
 };
 
 /**
@@ -356,23 +442,53 @@ export type SenderNotice = {
  * was marked as spam. The address is taken off that store's list, the day's
  * count goes up, and the store is paused if that puts it over a line.
  *
+ * A store's email that is not a list email (a receipt, a reminder, a notice)
+ * carries only its list (STOP_TAG): the address is taken off it the same way,
+ * and nothing is counted ("stopped").
+ *
  * "ignored" for anything that is not ours to act on: an email that carried no
  * tag (a login link to a mistyped address is nobody's bad list), a bounce
  * that is only temporary, or an address already counted this week — the same
  * address bouncing twice is one bad address.
  */
 export async function heardFromSender(notice: SenderNotice, now = Date.now()): Promise<Told> {
-  if (!isRedisConfigured() || !HEALTH_ID.test(notice.store)) return "ignored";
+  if (!isRedisConfigured()) return "ignored";
+  const counted = HEALTH_ID.test(notice.store);
+  // A list email names its list (LIST_TAG); any other email of a store names
+  // it as STOP_TAG (ALL-160): a complaint or a bounce for good on a checkout
+  // reminder, a receipt or an announcement takes the address off the list
+  // too, so the person is never sent the store's marketing again.
+  const list = HEALTH_ID.test(notice.list) ? notice.list : typeof notice.stop === "string" && HEALTH_ID.test(notice.stop) ? notice.stop : "";
+  if (!counted && !list) return "ignored";
   if (notice.kind === "bounced" && !notice.permanent) return "ignored";
   const email = normaliseEmail(notice.to);
   if (!email) return "ignored";
   // Off the list first, and every time: this is the part that must not be
   // skipped because a count had already been made.
-  if (HEALTH_ID.test(notice.list)) await stopWriting(notice.list, email, notice.kind);
-  const [first] = await redisPipeline([["SET", seenKey(notice.store, email), "1", "NX", "EX", MAIL_HEALTH_SEEN_SECONDS]]);
-  if (first === null) return "ignored";
-  await add(notice.store, notice.kind === "complained" ? "c" : "b", 1, now);
-  return (await pauseIfOver(notice.store, now)) ? "paused" : "counted";
+  if (list) await stopWriting(list, email, notice.kind);
+  // A moved member's email has no list to take them off: their no is kept as the stop mark of that store's reminders,
+  // the one their stop link writes, so the move's reminder never goes to them (lib/checkout-recovery.ts
+  // stopRemindersFor; review of #3476, MEDIUM 2). Every time as well, and a write not confirmed throws, so the notice
+  // is heard again. Imported when needed: lib/checkout-recovery.ts reaches this file through lib/mail.ts.
+  if (notice.move && HEALTH_ID.test(notice.move)) {
+    const { stopRemindersFor } = await import("@/lib/checkout-recovery");
+    await stopRemindersFor(notice.move, email);
+  }
+  // A non-list email is not counted as sent for the store, so its bounces
+  // are not counted against it either, and never pause its list email.
+  if (!counted) return "stopped";
+  const seen = seenKey(notice.store, email);
+  const field = notice.kind === "complained" ? "c" : "b";
+  const begun = exactRedisReply(await redisPipeline([[
+    "EVAL", BEGIN_MAIL_HEALTH_OUTCOME, 2, seen, mailHealthDayKey(notice.store, now),
+    field, MAIL_HEALTH_DAY_SECONDS, MAIL_HEALTH_SEEN_SECONDS,
+  ]]), 1)?.[0];
+  if (begun === 0) return "ignored";
+  if (begun !== 1 && begun !== 2) throw new Error("The mail health outcome is unconfirmed");
+  const paused = await pauseIfOver(notice.store, now);
+  const finished = exactRedisReply(await redisPipeline([["SET", seen, "done", "XX", "EX", MAIL_HEALTH_SEEN_SECONDS]]), 1)?.[0];
+  if (finished !== "OK") throw new Error("The mail health outcome is unconfirmed");
+  return paused ? "paused" : "counted";
 }
 
 const n = (x: number) => x.toLocaleString("en-US");

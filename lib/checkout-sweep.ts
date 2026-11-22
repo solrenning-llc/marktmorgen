@@ -489,7 +489,7 @@ function describe(error: unknown): string {
 }
 
 /** One store: its checkouts of the last day, each handed to what it needs. */
-async function sweepStore(store: Store, counts: SweepCounts, deadline: number, reviewed: boolean, requesting: boolean, taxPass: { policy: unknown; pagesLeft: number }): Promise<void> {
+async function sweepStore(store: Store, counts: SweepCounts, deadline: number, reviewed: boolean, reviewDue: boolean, requesting: boolean, taxPass: { policy: unknown; pagesLeft: number }): Promise<void> {
   // Refunds first: a key that should no longer open anything matters more
   // than a reminder. One failing never stops the checkouts below.
   if (storeHasKeys(store)) {
@@ -549,10 +549,11 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       console.error("reading a store's sales with an unconfirmed buyer failed", store.handle, error);
     }
   }
-  if (reviewed) {
+  if (reviewed && reviewDue) {
     try {
       // On the store's turn only (lib/review-proof.ts, REVIEW_REFUND_PASS_EVERY_SECONDS): a turn taken is held, so the
-      // pass never runs more often than its line prices (tests/plan-cost-registry.ts, review-refund-sweep).
+      // pass never runs more often than its line prices (tests/plan-cost-registry.ts, review-refund-sweep). The rest
+      // of the store's sweep (its revocations, reminders and confirmations) keeps its five-minute run.
       if (await takeReviewPass(store)) counts.unrated += await markRefundedReviews(store, deadline);
     } catch (error) {
       console.error("reading a store's refunds for reviews failed", store.handle, error);
@@ -909,12 +910,13 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
         continue;
       }
       swept.add(id);
-      const reviewed = Boolean(store.stripeAccountId && store.statsId && reviewsDue.has(store.statsId)) && (await storeHasReviews(store).catch(() => false));
+      const reviewed = Boolean(store.stripeAccountId) && (await storeHasReviews(store).catch(() => false));
+      const reviewDue = Boolean(store.statsId && reviewsDue.has(store.statsId));
       const asks = Boolean(store.sid) && requesting.has(store.sid);
       if (worthAsking(store, asks) || reviewed || store.paypalSeller || store.paypalPast) {
         counts.stores += 1;
         try {
-          await sweepStore(store, counts, deadline, reviewed, asks, taxPass);
+          await sweepStore(store, counts, deadline, reviewed, reviewDue, asks, taxPass);
         } catch (error) {
           // One store's account refusing, or Stripe having a moment, does not
           // hold up everyone after it. It is reached again next time round.

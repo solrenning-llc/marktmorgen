@@ -2024,7 +2024,11 @@ export function certificatePassMonthUsd(tier: Tier): number {
  * and one more for a turn that lapses at its edge.
  */
 export const REVIEW_REFUND_PASS_RUNS = Math.ceil((DAY_WINDOWS * 86_400) / REVIEW_REFUND_PASS_EVERY_SECONDS) + 1;
-/** The sweep reads every store's turn each run (one MGET a batch, a slot a store): 288 runs a day for the month's days. */
+/**
+ * The sweep reads every store's turn each run (one MGET a batch, a slot a store) and asks whether the store has a review
+ * (one SISMEMBER a store, as before the pace), 288 runs a day for the month's days; the store's own sweep (its
+ * revocations, reminders and confirmations) keeps its five-minute run whatever the turn says.
+ */
 export const REVIEW_REFUND_TURN_READS = DAY_WINDOWS * 288;
 /** One store's slot in that MGET: its key asked and its turn answered. */
 export const REVIEW_REFUND_TURN_BYTES = 128;
@@ -2058,12 +2062,13 @@ export const REVIEW_REFUND_MARK_BYTES = 3 * 8_192;
  */
 export const REVIEW_REFUND_QUOTES_COMMANDS = 60;
 /**
- * The most the pass costs one store on a plan in a month, in dollars: its turns read, its runs (commands, the Stripe
+ * The most the pass costs one store on a plan in a month, in dollars: its turns read (the slot's bytes and the store's
+ * SISMEMBER each run), its runs (commands, the Stripe
  * pages waited on, the rows' bytes, and the quotes' refresh once a run), and every payment of the month refunded (MR:
  * all of its orders, each with the most products an order hands over and a review of each), its reviews marked.
  */
 export function reviewRefundSweepMonthUsd(tier: Tier): number {
-  const turns = REVIEW_REFUND_TURN_READS * REVIEW_REFUND_TURN_BYTES * DB_BYTE;
+  const turns = REVIEW_REFUND_TURN_READS * (COMMAND + REVIEW_REFUND_TURN_BYTES * DB_BYTE);
   const runs = REVIEW_REFUND_PASS_RUNS * ((REVIEW_REFUND_RUN_COMMANDS + REVIEW_REFUND_QUOTES_COMMANDS) * COMMAND + REVIEW_REFUND_RUN_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND + REVIEW_REFUND_RUN_BYTES * DB_BYTE);
   const marks = ORDERS_INCLUDED[tier] * ((REVIEW_REFUND_PAYMENT_COMMANDS + MAX_DELIVERED * REVIEW_REFUND_MARK_COMMANDS) * COMMAND + MAX_DELIVERED * REVIEW_REFUND_MARK_BYTES * DB_BYTE);
   return turns + runs + marks;

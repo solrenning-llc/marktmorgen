@@ -96,7 +96,9 @@ export const QUEUED_PAGE = 500;
  * ZSCAN and a SET a page of QUEUED_PAGE, 3 a run): at Upstash's $2 a million, $0.000004 a member, so the queue main
  * reads at its own bound (10,000 pages of 500, 5,000,000 members) would cost about $20.04 once, over 501 runs. With
  * PLANS_ON_SALE false the queue is empty at deploy, so the fill ends on its first run (GET, GET, ZSCAN, SET, DEL).
- * If it ever holds jobs at the opening, that one-time sum belongs in the fixed costs (FX275).
+ * If it ever holds jobs at the opening, that one-time sum belongs in the fixed costs (FX275). Recurring, once done:
+ * one GET of the mark a run, 288 a day, about 8,640 commands a month ($0.017 a month), a company fixed cost of the
+ * five-minute job (Claude 1 E's NIT on #5135).
  */
 export const FILL_ROUNDS = 20;
 /** The most commands one run of the fill sends: FILL_ROUNDS pages of one ZSCAN and two commands a member. */
@@ -124,14 +126,18 @@ export async function fillQueuedIndexes(deadline: number): Promise<"done" | "mor
     left -= commands.length;
     return repliesFor(await redisPipeline(commands), commands.length);
   };
-  const read = await send([["GET", FILL_DONE_KEY], ["GET", FILL_CURSOR_KEY]]);
-  if (!read) throw new UnknownReplyError("the fill of the stores' queued indexes");
-  if (filledFrom(read[0])) return "done";
-  const at = typeof read[1] === "string" ? FILL_AT.exec(read[1]) : null;
-  if (read[1] !== null && !at) throw new UnknownReplyError("where the fill of the stores' queued indexes goes on");
+  // Once done, one GET a run and nothing else: the fill's recurring cost (Claude 1 E's NIT on #5135).
+  const done = await send([["GET", FILL_DONE_KEY]]);
+  if (!done) throw new UnknownReplyError("the fill of the stores' queued indexes");
+  if (filledFrom(done[0])) return "done";
+  const kept = await send([["GET", FILL_CURSOR_KEY]]);
+  if (!kept) throw new UnknownReplyError("where the fill of the stores' queued indexes goes on");
+  const at = typeof kept[0] === "string" ? FILL_AT.exec(kept[0]) : null;
+  if (kept[0] !== null && !at) throw new UnknownReplyError("where the fill of the stores' queued indexes goes on");
   let cursor = at?.[1] ?? "0";
   let after = at?.[2] ?? "";
   // Each step: one ZSCAN, the notes that fit, and one write of where it goes on (or of the mark).
+  let first = true;
   while (left >= 4 && Date.now() < deadline) {
     const page = (await send([["ZSCAN", QUEUE_KEY, cursor, "COUNT", QUEUED_PAGE]]))?.[0];
     const pair = Array.isArray(page) && page.length === 2 ? (page as unknown[]) : null;
@@ -142,6 +148,16 @@ export async function fillQueuedIndexes(deadline: number): Promise<"done" | "mor
     const members = flat.filter((_, i) => i % 2 === 0).filter((m) => m > after).sort();
     // Room is kept for the step's last write: the position (1) or the mark with the position's DEL (2).
     const fit = Math.min(members.length, Math.max(0, Math.floor((left - 2) / 2)));
+    // A page that does not fit in what this run has left, but would in a whole run, is read again whole on the next run
+    // from its cursor alone, never from after a member: the same cursor may answer more members once the queue's dict
+    // has shrunk, and the SCAN protocol returns those only on that read (Claude 1 E's LEVE on #5135). The SADD is
+    // idempotent, so a page noted twice costs only its commands. Only a page larger than a whole run goes on after its
+    // last member noted, so the fill always ends.
+    if (fit < members.length && !first) {
+      await send([["SET", FILL_CURSOR_KEY, cursor]]);
+      return "more";
+    }
+    first = false;
     const notes: (string | number)[][] = [];
     for (const member of members.slice(0, fit)) {
       const [statsId, id] = member.split("|");

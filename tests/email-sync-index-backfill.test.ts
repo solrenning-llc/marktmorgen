@@ -101,3 +101,39 @@ test("each run of the fill sends at most FILL_RUN_COMMANDS commands, and the fil
   for (let s = 0; s < 50; s += 1) noted += Number(redis.run(["SCARD", `nl:esync:qd:store${String(s).padStart(3, "0")}`]));
   assert.equal(noted, jobs, "every waiting job is in its store's index");
 });
+
+test("a page that does not fit in what a run has left is read again whole from its cursor, never from after a member", async () => {
+  // Claude 1 E's LEVE on #5135: the same cursor may answer more members once the queue's dict has shrunk, and the SCAN
+  // protocol returns those only on that read, so a resume from after a member could leave one out of every index.
+  redis.clear();
+  const member = (i: number) => `store${String(i % 7).padStart(3, "0")}|esj_${i.toString(16).padStart(24, "0")}`;
+  const flat = (from: number, to: number) => Array.from({ length: to - from }, (_, k) => [member(from + k), "1"]).flat();
+  const pages: Record<string, [string, string[]]> = { "0": ["5", flat(0, 600)], "5": ["0", flat(600, 10_600)] };
+  const plain = redis.pipeline;
+  redis.pipeline = (async (batch: Batch) => {
+    const [name, key, cursor] = batch[0] ?? [];
+    if (batch.length === 1 && name === "ZSCAN" && key === QUEUE_KEY) {
+      seen.push(...batch);
+      return [pages[String(cursor)]];
+    }
+    return plain(batch);
+  }) as typeof redis.pipeline;
+  try {
+    assert.equal(await fillQueuedIndexes(Date.now() + 60_000), "more", "the second page does not fit after the first");
+    assert.equal(redis.run(["GET", "nl:esync:qdfill:cursor"]), "5", "kept as its cursor alone, with no member to go on after");
+    assert.equal(await fillQueuedIndexes(Date.now() + 60_000), "done", "the next run reads that page whole and ends");
+    let noted = 0;
+    for (let s = 0; s < 7; s += 1) noted += Number(redis.run(["SCARD", `nl:esync:qd:store${String(s).padStart(3, "0")}`]));
+    assert.equal(noted, 10_600, "every member is noted");
+  } finally {
+    redis.pipeline = plain;
+  }
+});
+
+test("once the fill is done, a run sends one GET and nothing else", async () => {
+  redis.clear();
+  redis.run(["SET", "nl:esync:qdfill:done", "1"]);
+  seen.length = 0;
+  assert.equal(await fillQueuedIndexes(Date.now() + 60_000), "done");
+  assert.deepEqual(seen, [["GET", "nl:esync:qdfill:done"]]);
+});

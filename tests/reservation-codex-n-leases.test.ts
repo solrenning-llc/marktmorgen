@@ -38,8 +38,21 @@ test("Codex A3's row for the closed #2338 (codex/a3-c97a-email) is released", ()
   assert.equal(text.includes("codex/a3-c97a-email"), false);
 });
 
-test("Codex A3's open #2352 row (codex/a3-c97b-mail-readiness) stays", () => {
-  assert.ok(held("CX-101(3) / CX-102(c)").includes("lib/email.ts"));
+// On 21/11/2026 the coordinator (Claude 1, C1-20261121-2129-TODOS-2, item 3, comment 7071581632) released two more
+// stale Codex rows that kept reservation-check failing on #4473 and #3813: Codex W's rows for #2508 (merged 14/11)
+// and Codex A3's rows for #2352 (open, adopted by Claude 2 gallant, who re-reserves lib/email.ts in a claude2/ row if
+// #2352 needs it again). A releaser only removes whole rows (onlyRemoves).
+test("Codex A3's #2352 rows (codex/a3-c97b-mail-readiness) are released, and lib/email.ts is no longer reserved", () => {
+  assert.deepEqual(held("CX-101(3) / CX-102(c)"), []);
+  assert.equal(text.includes("codex/a3-c97b-mail-readiness"), false);
+  assert.equal(rows.some((r) => r.file === "lib/email.ts"), false, "lib/email.ts is still reserved in codex.md");
+});
+
+test("Codex W's rows for the merged #2508 (codex/w-reminder-queue-evidence) are released, and lib/call-reminders.ts is free", () => {
+  assert.equal(text.includes("codex/w-reminder-queue-evidence"), false);
+  assert.equal(rows.some((r) => r.file === "lib/call-reminders.ts"), false, "lib/call-reminders.ts is still reserved in codex.md");
+  // Codex W's other unit (codex/w-meeting-record-evidence) is not part of this release and stays.
+  assert.ok(held("427 [VR1], CX-123(24): exact meeting record replies").includes("lib/meet-records.ts"));
 });
 
 test("no row records lib/inbox.ts as a hunk lease, since main released it on 09/11", () => {

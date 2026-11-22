@@ -56,7 +56,7 @@
  * import will check it, against the store as it is, and nothing written.
  */
 import { DataRoomError } from "@/lib/store-data";
-import { allowanceWindow, resetWords, windowId } from "@/lib/allowance-window";
+import { allowanceWindow, resetWords, windowId, windowKeySeconds } from "@/lib/allowance-window";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { namesAddress } from "@/lib/address-match";
@@ -83,7 +83,7 @@ import { priceInRange, rangeWords, readMoney } from "@/lib/money";
 import { LINK_PROBLEMS, type LinkProblem, readLink } from "@/lib/product-link";
 import { MAX_ABOUT_LENGTH, cleanAbout, writeAbout } from "@/lib/product-about";
 import { BATCH_BYTES, BATCH_ROWS } from "@/lib/import-batches";
-import { type ContactOutcome, type ImportedContact, MAX_CONTACT_NAME, importContactRows, leftListAmong, previewContactRows, readTags } from "@/lib/contacts";
+import { ContactImportUnknownError, type ContactOutcome, type ImportedContact, MAX_CONTACT_NAME, importContactRows, leftListAmong, previewContactRows, readTags } from "@/lib/contacts";
 import { moveStopLink, remindersStoppedAmong } from "@/lib/checkout-recovery";
 import { csvLine, readConsent } from "@/lib/csv";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
@@ -94,6 +94,7 @@ import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, mailD
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { newCostCode } from "@/lib/plan-standing";
 import { healthTags, moveTags, noteSent, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
+import { stopTags } from "@/lib/mail-health-rules";
 import { isPaidUp } from "@/lib/billing";
 import { storeBase } from "@/lib/purchase-email";
 import { movedPurchaseWords } from "@/lib/buyer-words/moved-purchases";
@@ -176,7 +177,7 @@ async function holdMoved(store: Store, n: number, now = Date.now()): Promise<num
 /**
  * Store's own figure (IMPORT_ALLOWANCES.creator.movedEmails a month): takes up to `n`, all over it given back at once.
  * The replies are read exactly (CX-123 rule 24): the INCRBY a whole number (a give-back can take the count below zero),
- * then the EXPIRE NX's 0 or 1 (lib/window-count.ts, so the month's key never outlives its window); any other shape
+ * then the EXPIRE NX's 0 or 1 (lib/window-count.ts; windowKeySeconds, so the key outlives its window, stretched or not); any other shape
  * throws UnknownReplyError. Before, the count was read with Number(),
  * which took a list or `true` for a small number.
  */
@@ -188,7 +189,7 @@ async function takeMovedCount(store: Store, n: number, now: number): Promise<num
   const key = movedKey(store.sid, window);
   const replies = repliesFor(
     await redisPipeline([
-      ...windowCountBy(key, 32 * 86_400, n),
+      ...windowCountBy(key, windowKeySeconds(store, 32 * 86_400, now), n),
     ]),
     2,
   );
@@ -230,8 +231,8 @@ export async function takeImportRows(store: Store, n: number, now = Date.now(), 
   try {
     // Read exactly (CX-123 rule 24), as takeMovedCount reads the same pair: the INCRBY a whole number, the EXPIRE's
     // 0 or 1 (main's windowCountBy). Any other shape (true, a list, a fraction) is not a count and takes nothing; what
-    // an INCRBY may have added stays counted (more, never less).
-    const replies = repliesFor(await redisPipeline(windowCountBy(key, 32 * 86_400, n)), 2);
+    // an INCRBY may have added stays counted (more, never less). Kept as long as the window (windowKeySeconds, #4561).
+    const replies = repliesFor(await redisPipeline(windowCountBy(key, windowKeySeconds(store, 32 * 86_400, now), n)), 2);
     const total = replies?.[0];
     const counted = typeof total === "number" ? total : typeof total === "string" && /^(0|-?[1-9][0-9]{0,14})$/.test(total) ? Number(total) : NaN;
     if (!replies || (replies[1] !== 0 && replies[1] !== 1) || !Number.isSafeInteger(counted)) return { ok: false, reason: "unavailable", limit };
@@ -383,6 +384,12 @@ export type ImportJob = {
     contacts?: number;
     /** Contacts: could be emailed until now, and left where the file came from, so no longer here. */
     stopped?: number;
+    /**
+     * Contacts: rows a failed step may have written as added (ContactImportUnknownError), never counted as added.
+     * Only the ramp reads it, so their next emails still go out in portions. An upper bound: a step tried more than
+     * once may count the same rows again, which only makes the portions start sooner.
+     */
+    maybeAdded?: number;
   };
   options: {
     /** Contacts: the creator confirmed these people agreed to hear from them. */
@@ -1083,7 +1090,18 @@ async function contactsStep(job: ImportJob, store: Store, rows: string[][]): Pro
     skipped.push({ line: v.line, column: "email", problem: `The same address as row ${seen[i]}`, value: v.email });
     return false;
   });
-  const outcomes = await importContactRows(listId, fresh.map(asImported), store);
+  let outcomes: ContactOutcome[];
+  try {
+    outcomes = await importContactRows(listId, fresh.map(asImported), store);
+  } catch (error) {
+    // Rows that may have been written while the step failed: kept apart from the added count (never claimed as
+    // added) and saved before the step is tried again, so the ramp still covers them (Claude 1 review 6800603295).
+    if (error instanceof ContactImportUnknownError && error.possiblyAdded > 0) {
+      job.counts.maybeAdded = (job.counts.maybeAdded ?? 0) + error.possiblyAdded;
+      await redisPipeline([saveJob(job)]).catch(() => null);
+    }
+    throw error;
+  }
   outcomes.forEach((outcome, i) => {
     const row = fresh[i];
     if (outcome === "added") job.counts.added += 1;
@@ -1776,6 +1794,11 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
       const listId = await listFor(store).catch(() => {
         throw new UnknownReplyError("the store's list");
       });
+      // Every store email names its list (stopTags), so a bounce for good or a spam report on it takes the address off
+      // that list too (ALL-160 item 7; Codex L and U on #4245). The list read here, so a store given its list just now
+      // has it named as well.
+      const suppression = stopTags({ listId });
+      for (const message of messages) message.tags = { ...message.tags, ...suppression };
       const tos = messages.map((m) => m.to);
       deleted = await deletedAmong(listId, tos);
       refused = await leftListAmong(listId, tos);
@@ -2066,7 +2089,7 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
           // store's next emails to them go out in portions that double
           // (lib/mail-health.ts). A file of contacts by how many it added;
           // past buyers, when they are to be emailed, by how many those are.
-          if (job.kind === "contacts") await startRamp(job.sid, job.counts.added);
+          if (job.kind === "contacts") await startRamp(job.sid, job.counts.added + (job.counts.maybeAdded ?? 0));
           else if (job.options.email) {
             // SCARD in its exact shape (CX-123 rule 24); thrown, the job is left as it was.
             const toMail = countOf(repliesFor(await redisPipeline([["SCARD", mailKey(job.id)]]), 1)?.[0]);
@@ -2097,7 +2120,7 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
             if (!(error instanceof DataRoomError)) throw error;
             await note(job, [{ line: 0, column: "", problem: error.message, value: "" }], "errors");
             // The contacts already brought in are of unknown age too: their next emails still go out in portions that double.
-            if (job.kind === "contacts") await startRamp(job.sid, job.counts.added);
+            if (job.kind === "contacts") await startRamp(job.sid, job.counts.added + (job.counts.maybeAdded ?? 0));
             job.state = "failed";
             job.finishedAt = Date.now();
             const back = heldLeft(job);
@@ -2218,6 +2241,9 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       await remindLater(sid, field, now - 3_600 * 1000);
       continue;
     }
+    // The renewal date, once read: no reminder can go after it (reminderEmail), so an answer that stays unknown is
+    // tried again only before it, never for ever (Claude 4's LEVE on #3598).
+    let renews: number | null = null;
     // The line only leases what it hands out (dueReminders): a reminder put back for later says so, and every other
     // way out of this turn (sent, nothing to send, no longer wanted) takes it off the line at the end.
     let later = false;
@@ -2230,6 +2256,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       if (!store?.statsId || !isPaidUp(store)) continue;
       const invite = await readInvite(store.statsId, field);
       if (!invite || invite.kept) continue;
+      renews = invite.r * 1000;
       // It carries the creator's postal address: with none, it is not sent now. Checked before any other read (review
       // of #3476, Claude 7's cost MEDIUM 1), and tried again once a day while the renewal date is still more than a day
       // away, so a creator who saves the address again still has it sent (review of #3476, LOW 2); after that there is
@@ -2300,7 +2327,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
             html: letterHtml(store, text),
             replyTo: store.email,
             headers: { "List-Unsubscribe": `<${stop.oneClick}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
-            tags: moveTags(store),
+            tags: { ...moveTags(store), ...stopTags(store) },
           },
         ],
         `nimbus-move-remind:${store.statsId}:${field}`, { by: "monthly" },
@@ -2315,7 +2342,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       }
     } catch (error) {
       console.error("sending a moved member's reminder failed", error);
-      await putBack(now);
+      if (renews === null || now < renews) await putBack(now);
     } finally {
       // A drop that cannot reach Redis leaves the lease to bring it back, where the send's own key keeps it once.
       if (!later) await dropReminder(sid, field).catch((error) => console.error("taking a finished moved member's reminder off the line failed", error));

@@ -137,7 +137,7 @@ const shared = (): Record<string, string[]> => ({
  * run none of that, so for them the list of other addresses stays at the
  * file storage the studio uploads to.
  */
-export function dynamicPolicy(nonce: string, options: { store?: boolean; room?: boolean; embed?: boolean } = {}): string {
+export function dynamicPolicy(nonce: string, options: { store?: boolean; room?: boolean; embed?: boolean; selfOnly?: boolean } = {}): string {
   const store = options.store !== false;
   const room = store && options.room === true;
   return join({
@@ -152,8 +152,10 @@ export function dynamicPolicy(nonce: string, options: { store?: boolean; room?: 
     // The video service's own address is where the studio sends a lesson
     // video's pieces, and its player the one a lesson page frames
     // (lib/stream.ts); the player, like the other three, on a store's pages only.
-    "connect-src": ["'self'", BLOB_API, BLOB_FILES, VAULT_FILES, STREAM_API_ORIGIN, ...(store ? PIXEL_CONNECT : [])],
-    "frame-src": ["'self'", ...(store ? [...PIXEL_FRAMES, ...VIDEO_FRAME_ORIGINS, ...AUDIO_FRAME_ORIGINS, STREAM_PLAYER_ORIGIN] : []), ...(room ? [ROOM_FRAME_ORIGIN] : [])],
+    // The Terms and the pricing page upload and frame nothing, so per request they reach only the site itself, as their
+    // policy built ahead of time does (staticPolicy; #5086, Claude 1 coord's LEVE).
+    "connect-src": options.selfOnly ? ["'self'"] : ["'self'", BLOB_API, BLOB_FILES, VAULT_FILES, STREAM_API_ORIGIN, ...(store ? PIXEL_CONNECT : [])],
+    "frame-src": options.selfOnly ? ["'self'"] : ["'self'", ...(store ? [...PIXEL_FRAMES, ...VIDEO_FRAME_ORIGINS, ...AUDIO_FRAME_ORIGINS, STREAM_PLAYER_ORIGIN] : []), ...(room ? [ROOM_FRAME_ORIGIN] : [])],
   });
 }
 
@@ -209,7 +211,12 @@ export function isDynamicPage(pathname: string, vatPagesPerRequest: boolean = va
   return /^\/(?:@|%40)/i.test(pathname) || /^\/(studio|signin|unsubscribe)(\/|$)/.test(pathname) || isEmbedPage(pathname)
     // The Terms and the pricing page render per request exactly when a VAT switch can turn on (lib/vat-registrations.ts,
     // vatCanTurnOn; components/per-request.tsx), so they get the nonce policy on that same answer, never apart from it.
-    || (vatPagesPerRequest && /^\/(terms|pricing)\/?$/.test(pathname));
+    || (vatPagesPerRequest && isVatWordsPage(pathname));
+}
+
+/** The Terms and the pricing page, the two pages that carry the VAT words (lib/vat-fee-words.ts). */
+export function isVatWordsPage(pathname: string): boolean {
+  return /^\/(terms|pricing)\/?$/.test(pathname);
 }
 
 /** The card a creator pastes into their own site, and the checkout script's card and sign-up form (/embed/<store>/join): framed anywhere, and nothing else is. */

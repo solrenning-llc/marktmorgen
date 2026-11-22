@@ -3,7 +3,8 @@
  * what the Terms and the pricing page tell a creator about the VAT Marktmorgen collects as the deemed supplier, with a
  * worked example in figures, from lib/vat-fee-words.ts.
  *
- *   - Shown only while that VAT is really collected (euVatCollectOn / ukVatCollectOn) and its costs are known: today,
+ *   - Shown only while that VAT is really collected (vatCollecting, the checkout's own condition: the deemed-supplier
+ *     record says "collect" and the whole switch is on) and its costs are known: today,
  *     with both switches off, nothing is shown (AGENTS.md VR, item 2).
  *   - The example is worked out by the code that charges (vatOnTop, ukVatOnTop, vatCollectionCostOf), never typed.
  *   - The words keep the owner's rule: the VAT on top of the price, the real costs of receiving it in the platform's fee
@@ -20,7 +21,9 @@ import { vatOnTop } from "@/lib/eu-vat-amount";
 import { ukVatOnTop } from "@/lib/uk-vat";
 import { vatCollectionCostOf, type VatFxAllowance } from "@/lib/eu-vat-collection-cost";
 import type { SwitchInput } from "@/lib/vat-registrations";
-import { isDynamicPage } from "@/lib/csp";
+import { dynamicPolicy, isDynamicPage, staticPolicy } from "@/lib/csp";
+import { VAT_REFUSED_SALES } from "@/lib/vat-fee-words";
+import { applyEuCollect, euSaleGate } from "@/lib/eu-vat-collect";
 
 const NOW = new Date("2026-11-22T12:00:00Z");
 const ALLOWANCES: VatFxAllowance[] = [
@@ -39,6 +42,9 @@ const UK_ON: SwitchInput = {
   reviews: [{ jurisdiction: "UK", registration: "123456789", reviewedOn: "2026-11-02", reviewer: "owner" }],
 };
 const OFF: SwitchInput = { reviewed: false, now: NOW };
+const RECORD = { treatment: "collect", implementedIn: "lib/eu-vat-collect.ts", recordedOn: "2026-11-02", evidence: "tests/vat-fee-words.test.ts" };
+/** The deemed-supplier records the checkout collects on (lib/deemed-supplier.ts): both places say "collect". */
+const COLLECT = [{ ...RECORD, jurisdiction: "EU", registration: "IE OSS" }, { ...RECORD, jurisdiction: "UK", registration: "UK VAT 123456789" }];
 
 const money = (cents: number, currency: string) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: currency.toUpperCase() }).format(cents / 100);
@@ -47,15 +53,15 @@ const all = (words: NonNullable<ReturnType<typeof vatFeeWords>>) => [...words.te
 
 test("today nothing is shown: both switches are off", () => {
   assert.equal(vatFeeWords(), null);
-  assert.equal(vatFeeWords({ eu: OFF, uk: OFF, now: NOW, allowances: ALLOWANCES }), null);
+  assert.equal(vatFeeWords({ records: COLLECT, eu: OFF, uk: OFF, now: NOW, allowances: ALLOWANCES }), null);
 });
 
 test("a switch on but an unknown cost of receiving the VAT shows nothing, never a zero cost", () => {
-  assert.equal(vatFeeWords({ eu: EU_ON, uk: UK_ON, now: NOW, allowances: [] }), null);
+  assert.equal(vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: [] }), null);
 });
 
 test("the EU example is worked out by the code that charges", () => {
-  const words = vatFeeWords({ eu: EU_ON, uk: OFF, now: NOW, allowances: ALLOWANCES });
+  const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: OFF, now: NOW, allowances: ALLOWANCES });
   assert.ok(words);
   assert.deepEqual(words.places, ["EU"]);
   const vat = vatOnTop(10_000, "DE", undefined, NOW);
@@ -76,7 +82,7 @@ test("the EU example is worked out by the code that charges", () => {
 });
 
 test("with only the UK on, the example is in pounds at the UK rate", () => {
-  const words = vatFeeWords({ eu: OFF, uk: UK_ON, now: NOW, allowances: ALLOWANCES });
+  const words = vatFeeWords({ records: COLLECT, eu: OFF, uk: UK_ON, now: NOW, allowances: ALLOWANCES });
   assert.ok(words);
   assert.deepEqual(words.places, ["UK"]);
   const vat = ukVatOnTop(10_000);
@@ -94,7 +100,7 @@ test("with only the UK on, the example is in pounds at the UK rate", () => {
 });
 
 test("both on: both places are named, the example stays in euros", () => {
-  const words = vatFeeWords({ eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES });
+  const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES });
   assert.ok(words);
   assert.deepEqual(words.places, ["EU", "UK"]);
   assert.equal(words.figures.currency, "eur");
@@ -102,7 +108,7 @@ test("both on: both places are named, the example stays in euros", () => {
 });
 
 test("the words keep the owner's rule, item 2 (a) to (d), option A", () => {
-  const words = vatFeeWords({ eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES });
+  const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES });
   assert.ok(words);
   for (const part of [words.terms, words.pricing]) {
     const text = part.join(" ");
@@ -117,7 +123,7 @@ test("the words keep the owner's rule, item 2 (a) to (d), option A", () => {
 });
 
 test("the scope is what the code collects for: products delivered automatically online, never live calls or goods (Claude 1's MEDIUM)", () => {
-  const words = vatFeeWords({ eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES });
+  const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES });
   assert.ok(words);
   for (const part of [words.terms, words.pricing]) {
     const text = part.join(" ");
@@ -133,7 +139,7 @@ test("pages and checkout read the same decision: with both reviewed constants of
   for (const day of ["2026-11-01", "2026-12-31", "2027-06-30", "2030-01-01"]) {
     const now = new Date(`${day}T12:00:00Z`);
     const off = { ...EU_ON, reviewed: false, now };
-    assert.equal(vatFeeWords({ eu: off, uk: { ...UK_ON, reviewed: false, now }, now, allowances: ALLOWANCES }), null, `off on ${day}`);
+    assert.equal(vatFeeWords({ records: COLLECT, eu: off, uk: { ...UK_ON, reviewed: false, now }, now, allowances: ALLOWANCES }), null, `off on ${day}`);
   }
   for (const page of ["app/terms/page.tsx", "app/pricing/page.tsx"]) {
     const source = readFileSync(join(process.cwd(), page), "utf8");
@@ -157,16 +163,16 @@ test("the nonce policy follows the same decision: /terms and /pricing are per-re
 test("only allowances the cost code accepts date the words; a malformed one never throws (Claude 1 f9afa7's LEVE)", () => {
   const later: SwitchInput = { ...EU_ON, reviews: [{ jurisdiction: "EU", registration: "EU372000000", reviewedOn: "2026-11-02", reviewer: "owner" }] };
   const malformed = [...ALLOWANCES, { currency: "eur", bps: 300, source: "https://www.ecb.europa.eu/", checkedOn: "2026-11-1a", validThrough: "2026-12-31" }];
-  const a = vatFeeWords({ eu: later, uk: OFF, now: NOW, allowances: malformed });
+  const a = vatFeeWords({ records: COLLECT, eu: later, uk: OFF, now: NOW, allowances: malformed });
   assert.ok(a);
   assert.equal(a.since, "2026-11-02", "the malformed day is not read");
   assert.doesNotThrow(() => termsLastUpdated("2026-11-10", a));
   const plainHttp = [...ALLOWANCES, { currency: "eur", bps: 300, source: "http://www.ecb.europa.eu/", checkedOn: "2026-11-20", validThrough: "2026-12-31" }];
-  assert.equal(vatFeeWords({ eu: later, uk: OFF, now: NOW, allowances: plainHttp })?.since, "2026-11-02", "an allowance the cost code refuses does not move the date");
+  assert.equal(vatFeeWords({ records: COLLECT, eu: later, uk: OFF, now: NOW, allowances: plainHttp })?.since, "2026-11-02", "an allowance the cost code refuses does not move the date");
 });
 
 test("short sentences in plain US English", () => {
-  const words = vatFeeWords({ eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES });
+  const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES });
   assert.ok(words);
   for (const sentence of all(words).split(/(?<=[.:])\s+/)) {
     assert.ok(sentence.split(/\s+/).length <= 30, `"${sentence}" has at most 30 words`);
@@ -184,21 +190,21 @@ function files(dir: string): string[] {
 
 test("the words carry the first day they can show: the latest of the registration, the owner's review and the allowance", () => {
   const later: SwitchInput = { ...EU_ON, reviews: [{ jurisdiction: "EU", registration: "EU372000000", reviewedOn: "2026-11-20", reviewer: "owner" }] };
-  const words = vatFeeWords({ eu: later, uk: OFF, now: NOW, allowances: ALLOWANCES });
+  const words = vatFeeWords({ records: COLLECT, eu: later, uk: OFF, now: NOW, allowances: ALLOWANCES });
   assert.ok(words);
   assert.equal(words.since, "2026-11-20");
   const lateAllowance = ALLOWANCES.map((a) => ({ ...a, checkedOn: "2026-11-21" }));
-  assert.equal(vatFeeWords({ eu: later, uk: OFF, now: NOW, allowances: lateAllowance })?.since, "2026-11-21");
+  assert.equal(vatFeeWords({ records: COLLECT, eu: later, uk: OFF, now: NOW, allowances: lateAllowance })?.since, "2026-11-21");
   // One day earlier the words are not shown at all, so the Terms' date is never earlier than the text.
   const dayBefore = new Date("2026-11-19T12:00:00Z");
-  assert.equal(vatFeeWords({ eu: { ...later, now: dayBefore }, uk: OFF, now: dayBefore, allowances: ALLOWANCES }), null);
-  const both = vatFeeWords({ eu: EU_ON, uk: { ...UK_ON, reviews: [{ jurisdiction: "UK", registration: "123456789", reviewedOn: "2026-11-18", reviewer: "owner" }] }, now: NOW, allowances: ALLOWANCES });
+  assert.equal(vatFeeWords({ records: COLLECT, eu: { ...later, now: dayBefore }, uk: OFF, now: dayBefore, allowances: ALLOWANCES }), null);
+  const both = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: { ...UK_ON, reviews: [{ jurisdiction: "UK", registration: "123456789", reviewedOn: "2026-11-18", reviewer: "owner" }] }, now: NOW, allowances: ALLOWANCES });
   assert.equal(both?.since, "2026-11-18", "with both on, the later place's dates count");
 });
 
 test("the Terms' Last updated date moves with the VAT paragraph, never earlier than its first day (section 15)", () => {
   assert.equal(termsLastUpdated("2026-11-10", null), "November 10, 2026");
-  const words = vatFeeWords({ eu: { ...EU_ON, reviews: [{ jurisdiction: "EU", registration: "EU372000000", reviewedOn: "2026-11-20", reviewer: "owner" }] }, uk: OFF, now: NOW, allowances: ALLOWANCES });
+  const words = vatFeeWords({ records: COLLECT, eu: { ...EU_ON, reviews: [{ jurisdiction: "EU", registration: "EU372000000", reviewedOn: "2026-11-20", reviewer: "owner" }] }, uk: OFF, now: NOW, allowances: ALLOWANCES });
   assert.ok(words);
   assert.equal(termsLastUpdated("2026-11-10", words), "November 20, 2026");
   assert.equal(termsLastUpdated("2026-11-25", words), "November 25, 2026", "a later Terms change keeps its own date");
@@ -220,4 +226,55 @@ test("the Terms and the pricing page show these words, and only while vatFeeWord
     .filter((path) => !path.endsWith(join("lib", "vat-fee-words.ts")))
     .filter((path) => /never take a share of tax|We add no profit/.test(readFileSync(path, "utf8")));
   assert.deepEqual(typed, []);
+});
+
+test("the words show on the checkout's own condition: a switch on with a record that does not say collect shows nothing (MEDIUM 1)", () => {
+  const refusing = COLLECT.map((r) => ({ ...r, treatment: "refuse-consumers" }));
+  assert.equal(vatFeeWords({ records: refusing, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES }), null, "both switches on, no record says collect");
+  const euOnly = [COLLECT[0], { ...COLLECT[1], treatment: "refuse-consumers" }];
+  assert.deepEqual(vatFeeWords({ records: euOnly, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })?.places, ["EU"], "only the place that collects");
+  assert.equal(vatFeeWords({ eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES }), null, "today's DEEMED_SUPPLIER_RECORDS collect nowhere");
+  // The checkout reads the same records: with the refusing ones it collects nothing for a German buyer either.
+  const headers = new Headers({ "x-vercel-ip-country": "DE" });
+  const form = new URLSearchParams({ billing_country: "DE" });
+  const product = { kind: "download", publication: false } as never;
+  const gate = euSaleGate({ product, headers, form, records: refusing, vatSwitch: EU_ON, now: NOW });
+  assert.equal(gate.ok && gate.collect !== null, false, "the checkout does not collect where the words would not show");
+});
+
+test("the words name every sale the checkout refuses, each beside the check that refuses it (MEDIUM 2)", () => {
+  const code = readFileSync(join(process.cwd(), "lib/eu-vat-collect.ts"), "utf8");
+  for (const r of VAT_REFUSED_SALES) assert.ok(code.includes(`"${r.check}"`) || code.includes(r.check), `lib/eu-vat-collect.ts still refuses: ${r.check}`);
+  const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!;
+  for (const part of [words.terms, words.pricing]) {
+    const text = part.join(" ");
+    for (const r of VAT_REFUSED_SALES) assert.ok(text.includes(r.words), `named: ${r.words}`);
+    assert.ok(!/membership's content/.test(text), "a subscription is never promised");
+  }
+  // Each one really is refused by the checkout's body check.
+  const body = (extra: Record<string, string>) => new URLSearchParams({ mode: "payment", "line_items[0][quantity]": "1", "line_items[0][price_data][currency]": "eur", "line_items[0][price_data][unit_amount]": "10000", "adaptive_pricing[enabled]": "false", ...extra });
+  const input = { country: "DE", chooseYourPrice: false, buyerCurrencyLive: false, now: NOW, costsCents: () => 10 };
+  assert.throws(() => applyEuCollect(body({ "subscription_data[metadata][x]": "1" }), input), /subscription/);
+  assert.throws(() => applyEuCollect(body({}), { ...input, chooseYourPrice: true }), /price the buyer chooses/);
+  assert.throws(() => applyEuCollect(body({ allow_promotion_codes: "true" }), input), /promotion/);
+  assert.throws(() => applyEuCollect(body({}), { ...input, buyerCurrencyLive: true }), /buyer's currency/);
+  assert.throws(() => applyEuCollect(body({ "line_items[0][quantity]": "2" }), input), /quantity/);
+  assert.throws(() => applyEuCollect(body({}), { ...input, costsCents: () => null }), /cost of receiving the VAT is unknown/);
+});
+
+test("US English: the tax authority, no 'pay it over', no 'tax office', no 'the payment itself' (LEVEs)", () => {
+  const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!;
+  const text = [words.title, ...words.terms, ...words.pricing, ...words.example].join(" ");
+  assert.doesNotMatch(text, /pay it over|tax office|payment itself/);
+  assert.match(text, /tax authority/);
+});
+
+test("per request, /terms and /pricing reach only the site itself, as their page built ahead of time does (LEVE)", () => {
+  const directive = (policy: string, name: string) => policy.split(";").map((d) => d.trim()).find((d) => d.startsWith(`${name} `));
+  const plain = dynamicPolicy("bm9uY2U=", { store: false, selfOnly: true });
+  assert.equal(directive(plain, "connect-src"), "connect-src 'self'");
+  assert.equal(directive(plain, "frame-src"), "frame-src 'self'");
+  assert.equal(directive(staticPolicy(), "connect-src"), "connect-src 'self'");
+  const proxy = readFileSync(join(process.cwd(), "proxy.ts"), "utf8");
+  assert.match(proxy, /selfOnly: isVatWordsPage\(path\)/, "the proxy gives the two pages that policy");
 });

@@ -13,7 +13,8 @@
  *     and the creator pays it, as on every sale; Marktmorgen does not give it back;
  *   - never a card surcharge to the buyer; never a share of tax.
  *
- * Shown only while that VAT is really collected: null while neither euVatCollectOn() nor ukVatCollectOn() holds, and
+ * Shown only while that VAT is really collected: null while vatCollecting holds for neither place, the same condition the
+ * checkout charges on (lib/eu-vat-collect.ts: the deemed-supplier record says "collect" and the whole switch is on), and
  * null while the example cannot be worked out (no sourced rate, or an unknown cost of receiving the VAT, which also
  * refuses the sale itself). So no page shows a rule that is not live (AGENTS.md VR, item 2). The example's figures come
  * from the code that charges (vatOnTop, ukVatOnTop, vatCollectionCostOf), never typed; only the example's Stripe rate
@@ -25,7 +26,7 @@ import { vatOnTop } from "@/lib/eu-vat-amount";
 import { REVIEWED_VAT_FX_ALLOWANCES, allowanceInForce, vatCollectionCostOf, type VatFxAllowance } from "@/lib/eu-vat-collection-cost";
 import { UK_VAT_RATE_VALID_UNTIL, ukVatOnTop } from "@/lib/uk-vat";
 import {
-  EU_OSS_REGISTRATION, UK_VAT_REGISTRATION, VAT_COMMERCIAL_REVIEWS, euVatCollectOn, type SwitchInput, ukVatCollectOn, vatCanTurnOn,
+  EU_OSS_REGISTRATION, UK_VAT_REGISTRATION, VAT_COMMERCIAL_REVIEWS, type SwitchInput, vatCanTurnOn, vatCollecting,
 } from "@/lib/vat-registrations";
 
 /** The Stripe rate the example uses, in basis points: an illustration, never a creator's real rate. */
@@ -70,6 +71,8 @@ export type VatFeeWords = {
 export type VatFeeInput = {
   eu?: SwitchInput;
   uk?: SwitchInput;
+  /** Tests only: the deemed-supplier records instead of DEEMED_SUPPLIER_RECORDS (lib/deemed-supplier.ts). */
+  records?: unknown;
   now?: Date;
   allowances?: readonly VatFxAllowance[];
 };
@@ -103,8 +106,8 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
   const now = input.now ?? new Date();
   const allowances = input.allowances ?? REVIEWED_VAT_FX_ALLOWANCES;
   const places: VatFeePlace[] = [];
-  if (euVatCollectOn({ now, ...input.eu })) places.push("EU");
-  if (ukVatCollectOn({ now, ...input.uk })) places.push("UK");
+  if (vatCollecting("EU", input.records, { now, ...input.eu })) places.push("EU");
+  if (vatCollecting("UK", input.records, { now, ...input.uk })) places.push("UK");
   if (places.length === 0) return null;
   const f = figuresOf(places[0], now, allowances);
   if (!f) return null;
@@ -113,32 +116,35 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
   const m = (cents: number) => money(cents, f.currency);
   return {
     places,
-    title: "VAT we collect for the tax office",
+    title: "VAT we collect for the tax authority",
     terms: [
-      "This section covers products delivered automatically online: a download, a link, license keys, a recorded course, a private podcast or a membership's content.",
+      "This section covers one-off purchases of products delivered automatically online: a download, a link, license keys, a recorded course or a private podcast.",
       `When you sell one to a consumer in ${where}, the law makes Marktmorgen responsible for the VAT on that sale.`,
       "Live calls and anything that ships are not covered by this section.",
       "So the checkout adds that VAT on top of your price, and the buyer sees it before paying.",
-      "Our platform fee on that sale carries the VAT, which we pay to the tax office.",
-      "The fee also carries what it costs us to receive that VAT and pay it over.",
-      "That is currency conversion, exchange-rate movement, the payment itself, and reserves for refunds and disputes on the VAT.",
+      ...REFUSED_TERMS(where),
+      "Our platform fee on that sale carries the VAT, which we pay to the tax authority.",
+      "The fee also carries what it costs us to receive that VAT and pay it to the tax authority.",
+      "That is currency conversion, exchange-rate movement, sending the money on, and reserves for refunds and disputes on the VAT.",
       "We add no profit to those costs, and we never take a share of tax.",
       "Stripe takes its processing fee from your Stripe account on the whole amount the buyer pays, VAT included, at your own Stripe rates.",
       "The part of that fee that falls on the VAT is a cost you pay, as on every sale.",
       "The buyer never pays a card surcharge for it.",
     ],
     pricing: [
-      "Products delivered automatically online are a download, a link, license keys, a recorded course, a private podcast or a membership's content.",
+      "This covers one-off purchases of products delivered automatically online: a download, a link, license keys, a recorded course or a private podcast.",
       `On such a sale to a consumer in ${where}, the checkout adds VAT on top of your price.`,
       "Live calls and anything that ships are not covered here.",
-      "Our fee on that sale carries the VAT, which we pay to the tax office, and what it costs us to receive it and pay it over, with no profit.",
+      ...REFUSED_PRICING(where),
+      "Our fee on that sale carries the VAT, which we pay to the tax authority.",
+      "It also carries what it costs us to receive that VAT, with no profit.",
       "Stripe's processing fee on the VAT part is a cost you pay, at your own Stripe rates.",
       "The buyer never pays a card surcharge, and we never take a share of tax.",
     ],
     example: [
       `Example: a buyer in ${buyer} buys a ${m(f.priceCents)} product.`,
       `VAT at ${percent(f.basisPoints)} is ${m(f.vatCents)}, so the buyer pays ${m(f.totalCents)} into your Stripe account.`,
-      `Our fee on this sale is ${m(f.feeCents)}: the ${m(f.vatCents)} of VAT and ${m(f.costCents)} to receive it and pay it over.`,
+      `Our fee on this sale is ${m(f.feeCents)}: the ${m(f.vatCents)} of VAT and ${m(f.costCents)} to receive it and pay it to the tax authority.`,
       `So you keep your ${m(f.priceCents)} price, less ${m(f.costCents)} and Stripe's fee.`,
       `At a ${percent(EXAMPLE_PROCESSING_BPS)} rate, which is only an example, the part of Stripe's fee that falls on the VAT is ${m(f.stripePartCents)}.`,
     ],
@@ -146,6 +152,28 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
     since: sinceOf(places, input, now, f.currency, allowances),
   };
 }
+
+/**
+ * What the checkout refuses to a consumer there while it collects (lib/eu-vat-collect.ts applyEuCollect and euSaleGate,
+ * #5086, Claude 1 coord's MEDIUM 2), said plainly so no page promises a sale the checkout turns down. VAT_REFUSED_SALES
+ * names each refusal beside the check that makes it; tests/vat-fee-words.test.ts holds the two together.
+ */
+export const VAT_REFUSED_SALES = [
+  { words: "subscriptions and memberships", check: "shipping or a subscription" },
+  { words: "pay-what-you-want prices", check: "a price the buyer chooses" },
+  { words: "discount or promotion codes", check: "a discount or a promotion box" },
+  { words: "prices converted to the buyer's own currency", check: "a conversion to the buyer's currency" },
+  { words: "more than one of the same product", check: "a quantity other than one" },
+  { words: "e-books and other e-publications", check: "notAPublication" },
+  { words: "any sale whose VAT, or the cost of receiving it, we cannot work out, such as one in a currency with no checked exchange rate", check: "the cost of receiving the VAT is unknown" },
+] as const;
+
+const refused = (where: string, intro: string): string[] => [
+  `${intro} ${where}.`,
+  ...VAT_REFUSED_SALES.map((r) => `It refuses ${r.words}.`),
+];
+const REFUSED_TERMS = (where: string): string[] => refused(where, "For now, nothing is charged and the checkout refuses these sales to a consumer in");
+const REFUSED_PRICING = (where: string): string[] => refused(where, "For now, the checkout refuses these sales to a consumer in");
 
 function sinceOf(places: VatFeePlace[], input: VatFeeInput, now: Date, currency: string, allowances: readonly VatFxAllowance[]): string {
   const dates: string[] = [];

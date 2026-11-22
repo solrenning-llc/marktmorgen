@@ -48,11 +48,10 @@ import { euCheckout } from "@/lib/eu-vat-checkout";
 import { EU_VAT_RATES, type EuVatRate, type VatOnTop, vatOnTop } from "@/lib/eu-vat-amount";
 import { applyEuVatLines } from "@/lib/eu-vat-lines";
 import { euVatCollectionCostCents } from "@/lib/eu-vat-collection-cost";
-import { recordedTreatment } from "@/lib/deemed-supplier";
 import { UK_VAT_RATE_VALID_UNTIL, toPence, ukCheckout, ukVatOnTop } from "@/lib/uk-vat";
 import { HMRC_PERIOD_RATES, type HmrcPeriodRate, hmrcPeriodRate } from "@/lib/hmrc-period-rates";
 import { decimalsOf, isCurrency } from "@/lib/money";
-import { type SwitchInput, euVatCollectOn, ukVatCollectOn } from "@/lib/vat-registrations";
+import { type SwitchInput, vatCollecting } from "@/lib/vat-registrations";
 
 /** What the checkout route does with the buyer before anything is held: go on, collect EU VAT, or refuse. */
 export type EuSaleGate =
@@ -75,14 +74,14 @@ export class EuVatCollectRefused extends Error {
  */
 export { euVatCollectionCostCents };
 
-/** Whether the EU may be collected now: the EU record says "collect" and the whole switch (lib/vat-registrations.ts) is on. */
+/** Whether the EU may be collected now: the EU record says "collect" and the whole switch is on (lib/vat-registrations.ts, vatCollecting). */
 function collectingEu(records: unknown, vatSwitch: Omit<SwitchInput, "now"> | undefined, now: Date): boolean {
-  return recordedTreatment("EU", records) === "collect" && euVatCollectOn({ ...(vatSwitch ?? {}), now }) === true;
+  return vatCollecting("EU", records, { ...(vatSwitch ?? {}), now });
 }
 
 /** Whether the UK may be collected now: the UK record says "collect" and the UK's whole switch is on. */
 function collectingUk(records: unknown, vatSwitch: Omit<SwitchInput, "now"> | undefined, now: Date): boolean {
-  return recordedTreatment("UK", records) === "collect" && ukVatCollectOn({ ...(vatSwitch ?? {}), now }) === true;
+  return vatCollecting("UK", records, { ...(vatSwitch ?? {}), now });
 }
 
 /**

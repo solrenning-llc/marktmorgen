@@ -17,6 +17,7 @@
  * lib/commercial-margin.ts and stripePlatformEligibilityReady keep every store closed by themselves. Imports nothing,
  * so the checkouts import it without a cycle.
  */
+import { recordedTreatment } from "@/lib/deemed-supplier";
 
 /** Collecting EU VAT (and the art. 196 reverse charge): false until a reviewer checks the whole EU treatment. */
 export const EU_VAT_COLLECT_REVIEWED = false;
@@ -113,3 +114,14 @@ export const ukVatCollectOn = (input: SwitchInput = {}): boolean => vatSwitchPro
  * them the nonce policy on the same answer (lib/csp.ts, isDynamicPage).
  */
 export const vatCanTurnOn = (): boolean => EU_VAT_COLLECT_REVIEWED || UK_VAT_COLLECT_REVIEWED;
+
+/**
+ * Whether a place's VAT is collected now: its deemed-supplier record says "collect" (lib/deemed-supplier.ts,
+ * DEEMED_SUPPLIER_RECORDS unless `records` is given, for tests) and its whole switch is on. The one condition the
+ * checkout charges on (lib/eu-vat-collect.ts) and the Terms and pricing words show on (lib/vat-fee-words.ts), so no page
+ * says VAT is collected where the checkout does not collect it (#5086, Claude 1 coord's MEDIUM 1).
+ */
+export function vatCollecting(place: "EU" | "UK", records?: unknown, vatSwitch: SwitchInput = {}): boolean {
+  if (recordedTreatment(place, ...(records === undefined ? [] : [records])) !== "collect") return false;
+  return place === "EU" ? euVatCollectOn(vatSwitch) === true : ukVatCollectOn(vatSwitch) === true;
+}

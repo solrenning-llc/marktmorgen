@@ -4,11 +4,12 @@
  * set. Only openSession adds to that set, always a session key, but a member in any other shape was deleted as a key
  * all the same: whatever key it named was gone. Now every member must be a session key
  * (nl:auth:session:<40 hex>); any other member makes the set unknown, so nothing is deleted and the answer is null
- * ("not known"), never a count.
+ * ("not known"), never a count. The same set is read by dropSecondStep (a passkey removed, the app turned off), which
+ * throws SessionsUnknownError on it (Claude 6 z5v4's LEVE on #5144).
  *
  * Synthetic only: the in-memory Redis.
  */
-import { emailForSession, endAllSessions, endOtherSessions, openSession } from "@/lib/auth";
+import { SessionsUnknownError, dropSecondStep, emailForSession, endAllSessions, endOtherSessions, openSession } from "@/lib/auth";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -47,6 +48,18 @@ async function main(): Promise<void> {
     part(`${label}: control, every member a session key`);
     is("closed and counted", typeof (await run(keep)), "number");
   }
+
+  part("dropSecondStep (a passkey removed, the app turned off): a member that is not a session key");
+  await openSession(email);
+  redis.run(["SET", VICTIM, "kept"]);
+  extra = VICTIM;
+  const dropped = await dropSecondStep(email, () => true).then(
+    (count) => `closed ${count}`,
+    (error: unknown) => (error instanceof SessionsUnknownError ? "unknown" : String(error)),
+  );
+  extra = null;
+  is("the set is unknown: nothing is closed", dropped, "unknown");
+  is("the key it named is untouched", redis.run(["GET", VICTIM]), "kept");
 
   done();
 }

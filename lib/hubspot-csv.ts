@@ -262,12 +262,14 @@ export function readHubSpotDate(raw: string): { date: string | null; note: strin
 
 /**
  * A word of a cell that holds an "@": everything between two separators (a space, ";", ",", "<", ">", brackets or
- * quotes), whole, so an address is read whole or not at all, never only its last characters before the "@"
+ * double quotes), whole, so an address is read whole or not at all, never only its last characters before the "@". An
+ * apostrophe is part of an address (conan.o'brien@example.com), never a separator: as one, it read brien@example.com, another
+ * person (coordinator's triple audit of #2048 @bbd4481d5d, MEDIUM 1); quotes are only taken off its edges (addressesIn)
  * (coordinator's LOW 1 on #2048, 32nd batch). The cell is made one line first (oneLine: no control character, which no
  * address has and the CRM never keeps), so the address checked against the store's deleted people is the one the save
  * writes (coordinator's LOW 1 on #2048, 29th batch).
  */
-const ADDRESS_WORD = /[^\s;,<>()"']*@[^\s;,<>()"']*/g;
+const ADDRESS_WORD = /[^\s;,<>()"]*@[^\s;,<>()"]*/g;
 
 /** An address: one "@", something before it, and its last part letters, digits or dashes after a dot. */
 const ADDRESS_SHAPE = /^[^@]+@[^@]+\.[A-Za-z0-9-]{2,}$/;
@@ -280,13 +282,20 @@ export const HUBSPOT_ADDRESS_LOCAL_MAX = 64;
 
 /**
  * The addresses of a cell, in order, as the save keeps them (one line, well formed, lowercased): each word with an "@",
- * a dot that ends a sentence left out, that has an address's shape. `local` is the part before "@" as written.
+ * a dot that ends a sentence and quotes at its edges left out, that has an address's shape. `local` is the part before
+ * "@" as written. Null when a word looks like an address but is not one a deal keeps (ADDRESS_MALFORMED_REASON).
  */
-function addressesIn(cell: string | undefined): { address: string; local: number }[] {
-  return (oneLine(cell).match(ADDRESS_WORD) ?? []).flatMap((word) => {
-    const address = word.replace(/\.+$/, "");
-    return ADDRESS_SHAPE.test(address) ? [{ address: address.toLowerCase(), local: address.indexOf("@") }] : [];
-  });
+function addressesIn(cell: string | undefined): { address: string; local: number }[] | null {
+  const out: { address: string; local: number }[] = [];
+  for (const word of oneLine(cell).match(ADDRESS_WORD) ?? []) {
+    const address = word.replace(/^'+|'+$/g, "").replace(/\.+$/, "").replace(/'+$/, "");
+    if (ADDRESS_SHAPE.test(address)) out.push({ address: address.toLowerCase(), local: address.indexOf("@") });
+    // Something on both sides of an "@" that is not an address a deal keeps (no dot after it, two "@", a domain not in
+    // letters, digits and dashes): the row is refused, never brought in with the address left out without a word
+    // (coordinator's triple audit of #2048 @bbd4481d5d, LOW 3). A lone "@" between words is not an address.
+    else if (/[^@]@[^@]/.test(address)) return null;
+  }
+  return out;
 }
 
 /**
@@ -294,6 +303,13 @@ function addressesIn(cell: string | undefined): { address: string; local: number
  * part before "@" is past 64 characters once lowercased, which lowercasing a few letters can do): never kept changed.
  */
 export const ADDRESS_NOT_KEPT_REASON = "This deal's associated contact has an email address a deal here cannot keep as it is written, so this row was not brought in. Fix the address in HubSpot, then export again.";
+
+/**
+ * Why a deal whose associated contact has something that looks like an email address but is not one a deal keeps
+ * (jane@x, a@b@c.com, a domain not written in letters, digits and dashes) does not come in: never kept empty without a
+ * word (coordinator's triple audit of #2048 @bbd4481d5d, LOW 3). The address is not said back.
+ */
+export const ADDRESS_MALFORMED_REASON = "This deal's associated contact has an email address that is not a full email address, like jane@example.com, so this row was not brought in. Fix the address in HubSpot, then export again.";
 
 /** Why a deal whose associated address has more before "@" than a deal keeps does not come in: never cut. */
 export const ADDRESS_LOCAL_TOO_LONG_REASON = `This deal's associated contact has an email address whose part before the @ is longer than ${HUBSPOT_ADDRESS_LOCAL_MAX} characters, which a deal here cannot keep, so this row was not brought in. Fix the address in HubSpot, then export again.`;
@@ -442,7 +458,9 @@ export function planHubSpotDeals(file: { header: readonly string[]; rows: readon
     const close = readHubSpotDate(cell(columns.closeDate));
     // Each address as the save keeps it (parseDeal: one line, well formed, lowercased), so the dry run, the check against
     // the store's deleted people and the save all read the same one (coordinator's LOW 1 on #2048, 29th batch).
-    const found = columns.contacts.flatMap((at) => addressesIn(row[at]));
+    const cells = columns.contacts.map((at) => addressesIn(row[at]));
+    if (cells.some((c) => c === null)) return refuse(columns.contacts[0], "", ADDRESS_MALFORMED_REASON);
+    const found = cells.flatMap((c) => c ?? []);
     const unique = [...new Set(found.map((a) => a.address))];
     // An address longer than a deal keeps, or with more before "@", is refused with its row, never cut (coordinator's
     // LOW 2 on #2048, 29th batch, and LOW 1, 32nd batch). The address is not said back: it may be someone the store deleted.

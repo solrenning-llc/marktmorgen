@@ -200,13 +200,22 @@ export async function addResponse(statsId: string, formId: string, response: For
   await needData(room, [{ slot: ANSWERS_SLOT(formId), bytes: charged }]);
   // Once the keep is sent, a lost or unreadable receipt does not say whether it was kept. Unknown, the room holds the
   // most the keep can have added, the whole new response: the oldest read before it may have been deleted meanwhile
-  // (its bytes given back) and the keep then dropped nothing (Codex X3 on #2857). Only an exact receipt settles less.
-  const unconfirmed = async (): Promise<never> => {
-    if (guessed > 0) {
-      await noteData(room, [{ slot: ANSWERS_SLOT(formId), bytes: guessed }]).catch((error: unknown) =>
-        console.error("could not hold a form response's whole room after its keep was not confirmed", error),
+  // (its bytes given back) and the keep then dropped nothing (Codex X3 on #2857). So that hold is written before the
+  // keep is sent (write-ahead; Claude 6 i51q on #2857, LOW): the same outage that loses the receipt cannot also refuse
+  // it. If the hold itself cannot be written, nothing is kept: the charge is given back and the keep is not sent. Only
+  // an exact receipt settles the room down to what the keep really changed.
+  if (guessed > 0) {
+    try {
+      await noteData(room, [{ slot: ANSWERS_SLOT(formId), bytes: guessed }]);
+    } catch (error) {
+      await giveData(room, [{ slot: ANSWERS_SLOT(formId), bytes: charged }]).catch((giveBack: unknown) =>
+        console.error("could not give back a form response's room after its whole hold was not written", giveBack),
       );
+      throw error;
     }
+  }
+  const held = charged + guessed;
+  const unconfirmed = async (): Promise<never> => {
     throw new UnconfirmedKeep(what);
   };
   let list: unknown[] | null;
@@ -219,7 +228,7 @@ export async function addResponse(statsId: string, formId: string, response: For
   if (!list || list.some(raw => parseResponse(raw) === null)) return unconfirmed();
   // Unknown writes retain their reservation; only an exact receipt can release room.
   const dropped = list.reduce<number>((sum, raw) => sum + dataBytes([raw as string], 1), 0);
-  const off = dataBytes([json], 1) - dropped - charged;
+  const off = dataBytes([json], 1) - dropped - held;
   if (off > 0) await noteData(room, [{ slot: ANSWERS_SLOT(formId), bytes: off }]);
   else if (off < 0) await giveData(room, [{ slot: ANSWERS_SLOT(formId), bytes: -off }]);
 }

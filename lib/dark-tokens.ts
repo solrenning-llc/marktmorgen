@@ -144,6 +144,13 @@ export const LEGACY_TOKENS: Record<string, DarkToken> = {
  * `:where(DARK_SELECTOR)` so it weighs exactly what the rule it replaces weighs: it wins by coming later (and, over a
  * Tailwind utility, by being outside its layer), while a :hover or :focus of the same class still wins over it.
  */
+/**
+ * How much of the link color a legal link's underline takes in the dark (Codex N1 LOW, #3557). The underline is the
+ * cue that tells a link from text there, so on every surface a link sits on it resolves to at least 3:1
+ * (tests/dark-tokens.test.ts). Its hover, the full link color, still weighs more.
+ */
+export const LINK_UNDERLINE_MIX = 60;
+
 export const DARK_OVERRIDE_PREFIX = `:where(${DARK_SELECTOR}) `;
 export const DARK_OVERRIDES: readonly { selector: string; set: Record<string, string> }[] = [
   // Fixed light utilities.
@@ -173,6 +180,8 @@ export const DARK_OVERRIDES: readonly { selector: string; set: Record<string, st
   { selector: ".btn-danger-solid:hover", set: { "background-color": "var(--danger-text)" } },
   { selector: ".nb-toast", set: { color: "var(--action-on)" } },
   { selector: ".nb-toast-close", set: { color: "var(--action-on)" } },
+  // A legal link's underline: the light indigo at 35% would vanish on a dark page.
+  { selector: ".legal-body a", set: { "text-decoration-color": `color-mix(in srgb, var(--link) ${LINK_UNDERLINE_MIX}%, transparent)` } },
   // Selected text on a dark band keeps the band's white.
   { selector: ".on-dark ::selection", set: { color: "var(--on-dark)", background: "rgba(255, 255, 255, 0.2)" } },
 ];

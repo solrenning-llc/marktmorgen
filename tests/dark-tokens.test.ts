@@ -8,6 +8,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { done, is, part } from "./check";
+import * as darkTokens from "@/lib/dark-tokens";
 import {
   DARK_BLOCK_END, DARK_BLOCK_START, DARK_PAIRS, DARK_TOKENS, DECORATIVE_TOKENS, ROLE_MINIMUM, type DarkToken, contrastRatio, darkTokensCss,
 } from "@/lib/dark-tokens";
@@ -70,5 +71,25 @@ const walk = (dir: string) => {
 ["app", "components", "lib"].forEach(walk);
 const setters = sources.map((p) => p.replace(/\\/g, "/")).filter((p) => p !== "lib/dark-tokens.ts" && /data-color-scheme|colorScheme\s*=\s*["']dark|dataset\.colorScheme/.test(readFileSync(p, "utf8")));
 is("only the script and the switch set the attribute (stage 2); the layout only names it", setters.sort(), ["app/layout.tsx", "components/color-scheme-switch.tsx", "lib/color-scheme.ts"]);
+
+
+// Codex N1/X6 LOW @30effde586: a legal link's underline kept the light indigo at 35% in the dark. The underline is the
+// cue that tells a link from text there, so on every surface a link sits on it resolves to a component's 3:1.
+part("A legal link's underline in the dark");
+{
+  const mix = (darkTokens as { LINK_UNDERLINE_MIX?: number }).LINK_UNDERLINE_MIX;
+  const rule = darkTokens.DARK_OVERRIDES.find((o) => o.selector === ".legal-body a");
+  is("the dark sets its own underline color, from the link token", rule?.set["text-decoration-color"], mix === undefined ? "missing" : `color-mix(in srgb, var(--link) ${mix}%, transparent)`);
+  const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const blend = (top: string, under: string, part: number) =>
+    `#${rgb(top).map((c, i) => Math.round(c * part + rgb(under)[i] * (1 - part)).toString(16).padStart(2, "0")).join("")}`;
+  const surfaces = darkTokens.DARK_PAIRS.filter((p) => p.fg === "link").map((p) => p.bg);
+  for (const bg of surfaces) {
+    const under = darkTokens.DARK_TOKENS[bg];
+    const ratio = mix === undefined ? 0 : darkTokens.contrastRatio(blend(darkTokens.DARK_TOKENS.link, under, mix / 100), under);
+    is(`on ${bg}: at least 3:1`, ratio >= 3, true);
+  }
+  is("its hover, the full link color, still weighs more", /\.legal-body a:hover \{\s*text-decoration-color: currentColor;/.test(readFileSync("app/globals.css", "utf8")), true);
+}
 
 done();

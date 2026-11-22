@@ -65,7 +65,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
-import { type FencedChange, type Held as LockHeld, LockBusyError, applyIfHeld, holdLock } from "@/lib/redis-lock";
+import { type FencedChange, type Held as LockHeld, LockBusyError, applyIfHeld, holdLock, withLock } from "@/lib/redis-lock";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { CLAIM_PAGES, CLAIMS_LEFT_DAYS, DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE, closesStore } from "@/lib/plan-closing-rules";
 import { standingOf } from "@/lib/plan-standing";
@@ -481,8 +481,16 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
     // The erasing mark first (Codex N1's HIGH on #3156): written through the same fence as the deletes, before any of
     // them, so from the first delete on no plan starts on this store (lib/store.ts, setSubscription) and a payment for it
     // is returned (closingSince). Its write not proved throws here, with nothing deleted. It goes with the record.
-    await keep();
-    await apply([["HSET", ERASING_KEY, await erasingField(ref), String(now)]]);
+    // Written under the PayPal press's own lock too (Codex L-20261120-0448): a press holding it (lib/paypal-payouts.ts,
+    // payWithPayPal) finishes, its money asked for and its batch written down, before the erasure begins, and one that
+    // comes after finds the mark and asks for nothing (KEEP_OPEN_IF_LIVE). A lock held past its wait throws
+    // LockBusyError here, with nothing marked or deleted, and the walk tries the store again later.
+    const markErasing = async () => {
+      await keep();
+      await apply([["HSET", ERASING_KEY, await erasingField(ref), String(now)]]);
+    };
+    if (store.statsId) await withLock(`nl:pp:${store.statsId}:lock`, 120, 5_000, markErasing);
+    else await markErasing();
     // Its calendar hosts' claims, which are kept by the host, across the stores they serve: each page read exactly, each
     // HDEL made through the lock (fencedBy), the lock made to last before a host's first, and where a walk stopped kept
     // for the next (clearClaims, Claude 4 on #3660). The key of that place goes with the store's other keys below.

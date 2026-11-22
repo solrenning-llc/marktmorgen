@@ -394,6 +394,55 @@ async function main(): Promise<void> {
     is("an ordinary close keeps its record", (await readSubmission(FOLDER, sent.id))?.state, "submitted");
   }
 
+  part("A close that writes between the erasure's record delete and its places' removal is undone (Codex N1 on #3570, MEDIUM)");
+  {
+    // The narrower gap of N1-20261120-0616: the close has taken its door and waits at the vault; the erasure deletes
+    // the buyer's records, and only then does the close's write run, while the buyer's place and index entry are still
+    // there. Its record must never outlive the erasure that said done.
+    const who = "6".repeat(32);
+    let openVault!: () => void;
+    const atVault = new Promise<void>((resolve) => (openVault = resolve));
+    const racing = world({
+      closeReservedVault: async (pathname) => {
+        await atVault;
+        return { ok: true, file: { pathname, bytes: 5 * MiB, contentType: "video/mp4" } };
+      },
+    });
+    const opened = await openSubmissionDoor(ask(who, lesson(32)), racing.steps);
+    if (!opened.ok) throw new Error(`open refused: ${opened.reason}`);
+    const path = opened.upload.pathname;
+    const id = path.split("/")[2].slice(4);
+    const closing = closeSubmissionDoor({ store: SHOP, folder: FOLDER, courseId: COURSE, lessonId: lesson(32), who, data: SHOP, note: "Private note." }, path, ["e"], NOW, racing.steps).catch((error: unknown) => ({ thrown: String(error) }));
+    // Let the close take its door and reach the vault.
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+    const original = redis.pipeline.bind(redis);
+    let closedInGap = false;
+    redis.pipeline = (async (list: (string | number)[][]) => {
+      const reply = await original(list);
+      // Right after the erasure deletes this buyer's record, the close at the vault goes on and writes.
+      if (!closedInGap && list.some((command) => command[0] === "DEL" && command[1] === `nl:sub:rec:${FOLDER}:${id}`)) {
+        closedInGap = true;
+        redis.pipeline = original;
+        openVault();
+        await closing;
+      }
+      return reply;
+    }) as typeof redis.pipeline;
+    const erasedFiles: string[] = [];
+    let erased: number | string;
+    try {
+      erased = await forgetSubmissionsPerson(FOLDER, who, erasedFiles, world().steps).catch((error: unknown) => String(error));
+    } finally {
+      redis.pipeline = original;
+    }
+    is("control: the close ran inside the erasure, after its record delete", closedInGap, true);
+    is("the erasure said done, naming the file", [typeof erased, erasedFiles.includes(path)], ["number", true]);
+    is("after the erasure said done, no record of the erased buyer remains", await readSubmission(FOLDER, id), null);
+    const left = await redis.pipeline([["ZCARD", `nl:sub:who:${FOLDER}:${who}`], ["ZRANGEBYSCORE", `nl:sub:list:${FOLDER}:${COURSE}`, "-inf", "+inf"], ["ZSCORE", "nl:sub:due", `${FOLDER}|${path}`]]);
+    is("nor their index, nor a line on the studio's list", [left[0], (left[1] as string[]).some((member) => member.includes(id))], [0, false]);
+    is("and the file stays due at once on the sweep's list", left[2] !== null && Number(left[2]) <= NOW, true);
+  }
+
   // Review of #3570 (Claude 1 cloud, MEDIUM; taken by Claude 3): an abort that read the door, then a close that took it
   // and wrote its record while the abort was at the vault, then the abort letting the place and the index entry go.
   part("An abort and a close of the same upload: only one of them ever owns it");

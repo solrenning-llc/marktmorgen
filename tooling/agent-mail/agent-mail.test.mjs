@@ -216,6 +216,11 @@ r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "rev", FAKE_PR: "2", FAKE_B
 is("a READY record whose comment says CHANGES is shown as not checked (A15)", r.ok && /não traz o veredito READY/.test(r.out), r.out);
 r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "rev", FAKE_PR: "2", FAKE_BODY: `Review @${H2.slice(0, 10)}: READY`, FAKE_ASSOC: "NONE" });
 is("a comment from someone outside the repository does not check the record (A15)", r.ok && /não é de quem trabalha no repositório/.test(r.out), r.out);
+// LOW 1 of Claude 2 lpgvy on #5113: a CHANGES review that mentions READY further down is not a READY.
+r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "rev", FAKE_PR: "2", FAKE_BODY: `Review #2 @${H2.slice(0, 10)} — CHANGES, one MEDIUM. Needs 2 focal READY on the head that fixes it.` });
+is("a CHANGES comment that mentions READY below its first line does not check a READY record (A15)", r.ok && /não traz o veredito READY/.test(r.out), r.out);
+r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "rev", FAKE_PR: "2", FAKE_BODY: `Review #2 @${H2.slice(0, 10)} — READY, 0 findings. No CHANGES asked.` });
+is("a READY first line checks the record even when CHANGES appears below it (A15)", r.ok && !/não traz o veredito/.test(r.out) && !/Link conferido: NÃO/.test(r.out), r.out);
 
 console.log("a record counts only for its head (2.3)");
 g(["checkout", "-q", "pr1"], P); const H1b = commit("f1.txt", "1b\n", "pr1 b"); g(["push", "-q", "../prs.git", "HEAD:refs/pull/1/head"], P);
@@ -539,6 +544,19 @@ console.log("step 6: free text never becomes a field (A12), unidentified acks ar
   is("an unidentified ack is written with a warning (A13)", r.ok && /ATENÇÃO.*não identificada/.test(r.out), r.out);
   r = run(["read", "--as", "Claude 3 Z"], { ...m7, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
   is("the family, reading identified, is told a message of its own was acknowledged by an unidentified write (A13)", new RegExp(`${idA13}.*não identificada|não identificada.*${idA13}`, "s").test(r.out), r.out);
+  // LOW 2 of Claude 2 lpgvy on #5113: read looks only at acks written in the last 24 hours, not at every ack of the family.
+  {
+    const c = join(T, `velhas-${Math.random().toString(16).slice(2)}`);
+    g(["clone", "-q", "-b", "correio", join(T, "mail7.git"), c]); mkdirSync(join(c, "lidas", "claude-3-z"), { recursive: true });
+    for (let i = 0; i < 20; i++) writeFileSync(join(c, "lidas", "claude-3-z", `20261101T00000${i}Z-velha-${i}`), "2026-11-01T00:00:00.000Z\nSessão: não identificada (fora da nuvem do Claude Code)\n");
+    const velho = new Date(Date.now() - 3 * 86400000).toISOString();
+    execFileSync("git", ["add", "."], { cwd: c }); execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "old acks"], { cwd: c, env: { ...process.env, GIT_AUTHOR_DATE: velho, GIT_COMMITTER_DATE: velho } });
+    g(["push", "-q", "origin", "HEAD:correio"], c);
+    const tr = join(T, `trace-show-${Math.random().toString(16).slice(2)}.txt`);
+    spawnSync("node", [TOOL, "read", "--as", "Claude 3 Z"], { cwd: join(T, "w"), env: { ...base, ...m7, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA", GIT_TRACE: tr }, encoding: "utf8" });
+    const lidasLidas = readFileSync(tr, "utf8").split("\n").filter((l) => /trace: built-in: git show /.test(l) && /lidas\/claude-3-z\/20261101T/.test(l)).length;
+    is("read does not open the family's acks older than 24 hours (LOW 2 on #5113)", lidasLidas === 0, `${lidasLidas} old acks opened`);
+  }
   // A11: one decision reads one snapshot of the mailbox. GIT_TRACE records every git command; only fetches of the mailbox count.
   const buscas = (args, env) => {
     const tr = join(T, `trace-${Math.random().toString(16).slice(2)}.txt`);

@@ -138,6 +138,7 @@ import { MAX_FORMS } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
 import { SNS_RECEIPT_COMMANDS_MOST, SNS_RECEIPT_VALUE_BYTES_MOST } from "@/lib/sns-receipt-rules";
+import { SOLD_REFRESH_ATTEMPTS_PER_DAY, SOLD_REFRESH_COMMANDS } from "@/lib/sold-count";
 import { ALL_TIME_PAGES } from "@/lib/stats";
 import { BOOK_KEPT_SLICE, MAX_PAID_BYTES, PAYPAL_REFUNDS_READ, REFUND_TELL_TRIES_AT_MOST } from "@/lib/paypal-sales";
 import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
@@ -1817,6 +1818,15 @@ export const PAYPAL_REFUND_TOLD = { ownNoteReadsPerRefund: 1, tellAgainAfterSeco
 export const BUYER_LEDGER_COPY_SECONDS = 3_600;
 export const BUYER_LEDGER_COPY_KEPT = BUYER_LEDGER_BYTES * DB_BYTE_MONTH * (BUYER_LEDGER_COPY_SECONDS / (30 * 86_400));
 export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND + BUYER_LEDGER_COPY_KEPT;
+
+/**
+ * One public sold-count refresh at its worst (lib/sold-count.ts refreshSoldCounts; line sold-count-refresh): its
+ * SOLD_REFRESH_COMMANDS billed commands, up to two rows of 320 bytes for each sale ALL_TIME_PAGES pages hold through
+ * the database, and those pages read from Stripe one after another.
+ */
+export function soldRefreshCost(): number {
+  return request("heavy", SOLD_REFRESH_COMMANDS, 2 * ALL_TIME_PAGES * 100 * 320) + ALL_TIME_PAGES * STRIPE_LIST_PAGE;
+}
 /**
  * A narrowed email's reading of the store's buyers made by the scheduled job
  * (lib/broadcasts.ts, readNarrowing; the "scheduled-reads" line): one
@@ -3065,6 +3075,16 @@ export const COST_LINES: CostLine[] = [
     basis: "Every reading of every UTC day of the window, each counted before it is read: HEAVY_READINGS_PER_DAY of the store's sales from Stripe and PayPal (its recent sales or its twelve months of earnings, each within SALES_READ_SHAPE and counted as one of them), the rest of STORE_READINGS_PER_DAY at the dearer of its visits and its memberships (STORE_READING_SHAPES); what a studio page reads of the kept readings (up to three, READING_COPY_MAX_BYTES each) and of the day's counts (two) for every page the studio figure allows; and the readings kept a day, one of each of READING_KINDS (four since the earnings). The page itself is the studio's STUDIO_PAGE_UNITS, as the Terms say.",
   },
   {
+    id: "sold-count-refresh",
+    feature: "A store's public \"Bought N times\" count read again from its Stripe account after a store or product page is sent (lib/sold-count.ts, refreshSoldCounts; the coordinator's option A on #4966, 22 November 2026)",
+    monthlyUsd: () => DAY_WINDOWS * SOLD_REFRESH_ATTEMPTS_PER_DAY * soldRefreshCost(),
+    sources: [
+      { file: "lib/sold-count.ts", names: ["SOLD_REFRESH_ATTEMPTS_PER_DAY", "SOLD_REFRESH_COMMANDS", "SOLD_FRESH_MS / 1000", "setWhileStoreLive"] },
+      { file: "lib/stats.ts", names: ["ALL_TIME_PAGES", "readAllTimeSales"] },
+    ],
+    basis: "One attempt per store per SOLD_FRESH_MS, whatever its outcome: the attempt's lock is held that long, so a read that fails or keeps nothing is not tried again by the next visit (tests/sold-count-refresh-bound.test.ts). Each attempt at its worst: SOLD_REFRESH_COMMANDS billed commands (the lock, the all-time reading on a cache miss with its fenced writes, the count's fenced write), up to two rows of 320 bytes for each sale ALL_TIME_PAGES pages hold, through the database, and ALL_TIME_PAGES Stripe list pages waited on one after another. A store in its trial shows the count too, so it is priced there at Store's figures.",
+  },
+  {
     id: "calendar-feed",
     feature: "The private booking calendar a creator subscribes to (/api/store/calendar/<token>.ics): every answer from the last good copy, and the copy made again (C4-4, 4 November 2026)",
     monthlyUsd: () =>
@@ -3624,7 +3644,7 @@ export function nonPayingWorst(): number {
     + ["imports", "clickfunnels", "funnel-share", "team-scheduling", "quizzes"].reduce((sum, id) => sum + creator(id), 0)
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
     // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.
-    + ["calendar-feed", "store-readings"].reduce((sum, id) => sum + creator(id), 0)
+    + ["calendar-feed", "sold-count-refresh", "store-readings"].reduce((sum, id) => sum + creator(id), 0)
     // The drip job's reads of its students' starts, at Store's figure, which is more than a trial's (lib/drip-start.ts:
     // a store that pays nothing reads only with one of the month's places).
     + creator("drip-start-read")

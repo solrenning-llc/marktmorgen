@@ -37,6 +37,13 @@ export const SOLD_FRESH_MS = 6 * 60 * 60 * 1000;
  * lock is held that long (refreshSoldCounts). Priced per attempt in tests/plan-cost-registry.ts, "sold-count-refresh".
  */
 export const SOLD_REFRESH_ATTEMPTS_PER_DAY = Math.ceil(86_400_000 / SOLD_FRESH_MS);
+/**
+ * The billed database commands of one refresh at its worst: the attempt's lock (one), the store's all-time reading on a
+ * cache miss with both its writes fenced (lib/stats.ts readAllTimeSales: ten, ALL_TIME_READ_COMMANDS once #4970 is in),
+ * and this count's own fenced write (lib/live-fence.ts SET_IF_STORE_LIVE: the EVAL and the HGET, GET and SET it runs).
+ * Held by tests/sold-count-refresh-bound.test.ts; priced in tests/plan-cost-registry.ts, "sold-count-refresh".
+ */
+export const SOLD_REFRESH_COMMANDS = 1 + 10 + 4;
 /** How long a reading is kept at all: a page never shows a count older than this. */
 const SOLD_KEEP_SECONDS = 7 * 24 * 60 * 60;
 

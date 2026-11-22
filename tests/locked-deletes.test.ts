@@ -439,6 +439,7 @@ async function main(): Promise<void> {
   const HELD: Record<string, string[]> = {
     "affiliates": ["need:settings"],
     "agreements": ["need:send"],
+    "ai-file": ["not:only the PDF this request just wrote under a fresh name, removed when it could not be kept on the draft product"],
     "api-keys": ["need:export"],
     "answers": ["act:page:clear"],
     "assistant": ["not:a buyer deleting their own conversation with the assistant"],
@@ -558,6 +559,10 @@ async function main(): Promise<void> {
   const ACTIONS: Record<string, string | Record<string, string>> = {
     "affiliates": "need:settings",
     "agreements": "need:send",
+    "ai-file": {
+      outline: "open:a plan written back to the creator; nothing is kept, deleted or sent", save: "open:adds",
+      sections: "open:the parts written back to the creator; nothing is kept, deleted or sent",
+    },
     "api-keys": "need:export",
     "assistant": "not:a buyer's own conversation with the store's assistant",
     "blog": { delete: "act:page" },
@@ -623,7 +628,7 @@ async function main(): Promise<void> {
     },
     "notes": { add: "open:adds", remove: "act:stats" },
     "numbers-links": "need:settings",
-    "option": { add: "open:adds", edit: "open:edits", remove: "act:products" },
+    "option": { add: "open:adds", count: "open:reads", edit: "open:edits", invited: "open:reads", remove: "act:products", sale: "open:reversible" },
     "outreach": { draft: "open:adds", drop: "act:draft", edit: "open:edits", find: "open:reads", sender: "open:edits", status: "open:edits" },
     "page-funnels": { "from-type": "open:adds", remove: "act:products" },
     "path": { forget: "need:delete", remind: "need:settings", start: "need:settings", wording: "need:settings" },

@@ -31,6 +31,8 @@ import {
   MOVE_ISSUE_COMMANDS,
   MOVE_LINK_COMMANDS,
   MOVE_LINK_UNITS,
+  MOVE_APPLY_COMMANDS,
+  MOVE_CONFIRM_UNITS,
   askMoveRoute,
   askToMovePurchases,
   confirmMoveLink,
@@ -227,7 +229,24 @@ async function main(): Promise<void> {
     is("the new address's page says it confirmed", after.kind === "open" ? [after.confirmed, after.state] : after, [true, "waiting-from"]);
     is("Confirm on the current address: both", await viaRoute(fromLink), `${ORIGIN}/@moss/orders/move/confirm?${new URLSearchParams({ t: fromLink, c: "both" })}`);
     const request = await readPurchaseMove(id);
-    is("both kept, nothing moved yet (a later unit)", [typeof request?.fromConfirmedAt, typeof request?.toConfirmedAt, request?.appliedAt], ["number", "number", null]);
+    is("both kept, and the move written into the index (unit 4a)", [typeof request?.fromConfirmedAt, typeof request?.toConfirmedAt, typeof request?.appliedAt], ["number", "number", "number"]);
+  }
+
+  part("A store with no room left says so, not that the move is merely unfinished (Claude 1 on #3625)");
+  {
+    const token = await signIn("full.buyer@example.com");
+    const m = mails.length;
+    is("asked", await askToMovePurchases({ store: moss, token, to: "full.new@example.com", origin: ORIGIN }), "received");
+    // Decision (C): the new address confirms first, and only then the current address gets its link.
+    is("the first confirmation waits", await confirmMoveLink({ store: moss, token: linkTo("full.new@example.com", m), origin: ORIGIN }), "waiting");
+    const b = linkTo("full.buyer@example.com", m);
+    // The store's data room answers full when the move takes its room.
+    odd = { command: "EVAL", prefix: "-- marktmorgen:store-data", reply: [0, 1], times: 1, skip: 0 };
+    const answer = await confirmMoveLink({ store: moss, token: b ?? "" });
+    odd = null;
+    is("the answer is full", answer, "full");
+    const said = moveWords.confirmed[answer];
+    is("its words name the store's room, never \"in a few minutes\"", [/room/i.test(said.title + said.body), /few minutes/i.test(said.body)], [true, false]);
   }
 
   part("A link that does not work here");
@@ -373,6 +392,29 @@ async function main(): Promise<void> {
     is("the fourth is refused", answers, ["received", "received", "received", "over"]);
   }
 
+  part("A deleted address is counted in the day like any other, so asking cannot sort deleted people from the rest");
+  {
+    // Codex N4 on #3625 (MEDIUM): the deleted people were read before the day's count was taken, so a buyer
+    // could try any number of addresses and tell which asked to be deleted here.
+    const now = Math.floor(Date.now() / 1000);
+    const over = await signIn("over.buyer@example.com");
+    const answers: string[] = [];
+    for (let i = 0; i < MAX_MOVES_PER_ADDRESS_DAY; i += 1) answers.push(await askToMovePurchases({ store: moss, token: over, to: `over.new${i}@example.com`, origin: ORIGIN }));
+    const [m, k] = [mails.length, moveKeys().length];
+    for (let i = 0; i < 5; i += 1) {
+      await redis.pipeline([suppressCommand(moss.listId!, `over.gone${i}@example.com`, now)]);
+      answers.push(await askToMovePurchases({ store: moss, token: over, to: `over.gone${i}@example.com`, origin: ORIGIN }));
+    }
+    is("past the day's asks, a deleted address is answered as any other address", answers, [...Array(MAX_MOVES_PER_ADDRESS_DAY).fill("received"), ...Array(5).fill("over")]);
+    is("and nothing was written or sent for them", [moveKeys().length - k, mails.length - m], [0, 0]);
+
+    const first = await signIn("first.buyer@example.com");
+    await redis.pipeline([suppressCommand(moss.listId!, "first.gone@example.com", now)]);
+    const day: string[] = [await askToMovePurchases({ store: moss, token: first, to: "first.gone@example.com", origin: ORIGIN })];
+    for (let i = 0; i < MAX_MOVES_PER_ADDRESS_DAY; i += 1) day.push(await askToMovePurchases({ store: moss, token: first, to: `first.new${i}@example.com`, origin: ORIGIN }));
+    is("an ask to a deleted address takes one of the day's asks, answered as any other", day, [...Array(MAX_MOVES_PER_ADDRESS_DAY).fill("received"), "over"]);
+  }
+
   part("The store's access emails spent or unreadable: said as it is");
   {
     const one = await signIn("spent.buyer@example.com");
@@ -428,8 +470,8 @@ async function main(): Promise<void> {
   {
     is("the ask", request("light", MOVE_ASK_COMMANDS, 4_096) <= MOVE_ASK_UNITS * laterPageCost(), true);
     is("a link's page", request("light", MOVE_LINK_COMMANDS, 4_096) <= MOVE_LINK_UNITS * laterPageCost(), true);
-    is("a confirmation", request("light", MOVE_CONFIRM_COMMANDS, 8_192) <= MOVE_LINK_UNITS * laterPageCost(), true);
-    is("the new address's confirmation, with the current address's link it makes", request("light", MOVE_CONFIRM_COMMANDS + MOVE_ISSUE_COMMANDS, 8_192) <= MOVE_LINK_UNITS * laterPageCost(), true);
+    is("a confirmation, with the move it writes when it is the second", request("light", MOVE_CONFIRM_COMMANDS + MOVE_APPLY_COMMANDS, 12_288) <= MOVE_CONFIRM_UNITS * laterPageCost(), true);
+    is("the new address's confirmation, with the current address's link it makes", request("light", MOVE_CONFIRM_COMMANDS + MOVE_ISSUE_COMMANDS, 12_288) <= MOVE_CONFIRM_UNITS * laterPageCost(), true);
     const token = await signIn("count.buyer@example.com");
     const m = mails.length;
     await askToMovePurchases({ store: moss, token, to: "count.new@example.com", origin: ORIGIN });

@@ -88,6 +88,33 @@ export function dataDe(id) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Ordem e instantes (dono, OWNER-20261121-1904-MAIL-TOOL-FIX-ORDER, passo 3). O nome de cada arquivo traz um instante
+// escrito por quem o gravou, pelo relógio dele; a ordem verdadeira é a dos commits do ramo, que só anda para a frente
+// (sem force push nem exclusão, regra 27091177). Por isso a ordem dos pedidos, das tomadas, dos interruptores e das
+// cotas é a do commit que criou cada arquivo, e um instante declarado mais de FUTURO_MIN minutos à frente da hora de
+// quem lê não vale: não segura pedido, não mantém CLAIMED e não liga interruptor. Num clone raso, os arquivos de antes da
+// borda empatam no commit da borda e se desempatam como antes, pelo nome.
+// ---------------------------------------------------------------------------------------------------------------------
+export const FUTURO_MIN = 5;
+const ordens = new Map();
+
+/** A posição de cada arquivo na sequência dos commits (a do commit que o criou) e a hora desse commit. */
+export function ordem(commit) {
+  if (!commit) return new Map();
+  if (ordens.has(commit)) return ordens.get(commit);
+  const mapa = new Map();
+  let i = -1, t = 0;
+  for (const linha of git(["log", "--reverse", "--topo-order", "--format=%x01%ct", "--name-only", "--diff-filter=A", "--no-renames", commit]).split("\n")) {
+    if (linha.startsWith("\x01")) { i += 1; t = Number(linha.slice(1)) * 1000; } else if (linha && !mapa.has(linha)) mapa.set(linha, { i, t });
+  }
+  ordens.set(commit, mapa);
+  return mapa;
+}
+
+/** Um instante declarado mais de FUTURO_MIN minutos à frente de agora. */
+export const noFuturo = (d, agora = new Date()) => Boolean(d && !Number.isNaN(d.getTime()) && d.getTime() - agora.getTime() > FUTURO_MIN * 60000);
+
+// ---------------------------------------------------------------------------------------------------------------------
 // Identidade (dono, 21/11/2026: "melhora a segurança, reduz os riscos o máximo que puder reduzir"). Todos gravam no
 // correio com a mesma conta do GitHub, então o nome de quem escreve é declarado por ele. Na nuvem do Claude Code, a
 // sessão vem do próprio ambiente (CLAUDE_CODE_REMOTE_SESSION_ID), sem nada digitado; o prefixo dela é da conta da família
@@ -336,15 +363,20 @@ export function pedidos(tipo, agora = new Date(), commit = buscar()) {
   const semCota = new Set(Object.entries(cotas(agora, commit)).filter(([, v]) => v.sem).map(([f]) => f));
   const tomadas = new Map();
   const devolvidas = new Map(); // id -> famílias que devolveram (por exemplo, por terem commits no PR); não pegam de novo
+  const ord = ordem(commit);
   for (const c of arquivos(commit, `${tipo}/tomadas`)) {
     const [, , id, n] = c.split("/");
     const [marca, por, acao] = conteudo(commit, c).split("\n");
     if (acao === "DEVOLVIDO") devolvidas.set(id, new Set([...(devolvidas.get(id) ?? []), familia(por || remetenteDe(marca))]));
     const atual = tomadas.get(id);
     if (atual && Number(n) <= atual.n) continue;
-    tomadas.set(id, { n: Number(n), por: por || remetenteDe(marca), quando: dataDe(marca), devolvida: acao === "DEVOLVIDO" });
+    // Passo 3: a tomada vale da hora declarada ou da do commit, a que vier primeiro; uma declarada no futuro não vale.
+    const declarada = dataDe(marca), feita = ord.get(c)?.t;
+    const quando = noFuturo(declarada, agora) ? null : declarada && feita ? new Date(Math.min(declarada.getTime(), feita)) : declarada;
+    tomadas.set(id, { n: Number(n), por: por || remetenteDe(marca), quando, devolvida: acao === "DEVOLVIDO" });
   }
-  return arquivos(commit, `${tipo}/pedidos`).map(idDe).sort().map((id) => {
+  const pos = (id) => ord.get(`${tipo}/pedidos/${id}.md`)?.i ?? Infinity;
+  return arquivos(commit, `${tipo}/pedidos`).map(idDe).sort((a, b) => pos(a) - pos(b) || a.localeCompare(b)).map((id) => {
     const texto = conteudo(commit, `${tipo}/pedidos/${id}.md`);
     const tomada = tomadas.get(id);
     const viva = tomada && !tomada.devolvida && tomada.quando && (agora - tomada.quando) / 60000 < (tipo === "fila" ? TOMADA_FILA_MIN : TOMADA_MIN) && !semCota.has(familia(tomada.por));
@@ -684,15 +716,22 @@ export function ligacaoValida(estado, por, texto) {
   return privilegioValido(texto, por);
 }
 
-export function chave(nome, commit = buscar()) {
-  const lista = arquivos(commit, `chaves/${nome}`).map((c) => ({ c, t: Number(c.split("/").pop().split("-")[0]) }))
-    .filter((x) => Number.isFinite(x.t)).sort((a, b) => a.t - b.t || a.c.localeCompare(b.c));
+export function chave(nome, commit = buscar(), agora = new Date()) {
+  // Passo 3: vale o registro do commit mais recente; e desligado prevalece: um ON não liga enquanto houver um OFF com
+  // instante declarado igual ou posterior ao dele, nem com o próprio instante no futuro.
+  const ord = ordem(commit);
+  const lista = arquivos(commit, `chaves/${nome}`).map((c) => ({ c, t: Number(c.split("/").pop().split("-")[0]), i: ord.get(c)?.i ?? -1 }))
+    .filter((x) => Number.isFinite(x.t)).sort((a, b) => a.i - b.i || a.t - b.t || a.c.localeCompare(b.c));
   if (!lista.length) return { ligada: false, por: null, quando: null, motivo: "" };
   const { c: ultimo, t } = lista[lista.length - 1];
   const texto = conteudo(commit, ultimo);
   const [estado, por, ...resto] = texto.split("\n");
   const motivo = resto.filter((l) => !/^(Sessão|Pedido|Identificador do pedido|Reserva): /.test(l)).join(" ").trim();
   if (!ligacaoValida(estado, por, texto)) return { ligada: false, por, quando: new Date(t), motivo: `ON IGNORADO: sem a sessão nomeada e o pedido do coordenador (${motivo})` };
+  if (estado === "ON" && noFuturo(new Date(t), agora)) return { ligada: false, por, quando: new Date(t), motivo: `ON IGNORADO: instante no futuro (${motivo})` };
+  if (estado === "ON" && lista.some((x) => x.c !== ultimo && x.t >= t && conteudo(commit, x.c).split("\n")[0] === "OFF")) {
+    return { ligada: false, por, quando: new Date(t), motivo: `ON IGNORADO: há um OFF com instante igual ou posterior; desligado prevalece (${motivo})` };
+  }
   return { ligada: estado === "ON", por, quando: new Date(t), motivo };
 }
 
@@ -1052,10 +1091,13 @@ export function retirar({ tipo, eu, id, motivo = "", agora = new Date() }) {
 
 /** A situação de cota de cada família que já declarou: { familia: { sem, ate, por, marca } }. */
 export function cotas(agora = new Date(), commit = buscar()) {
+  // Passo 3: a declaração mais nova é a do commit mais recente, não a de maior marca.
   const ultima = new Map();
+  const ord = ordem(commit);
   for (const c of arquivos(commit, "estado")) {
     const [, fam, marca] = c.split("/");
-    if (!ultima.has(fam) || marca > ultima.get(fam).marca) ultima.set(fam, { marca, caminho: c });
+    const i = ord.get(c)?.i ?? -1, atual = ultima.get(fam);
+    if (!atual || i > atual.i || (i === atual.i && marca > atual.marca)) ultima.set(fam, { marca, caminho: c, i });
   }
   const saida = {};
   for (const [fam, { marca, caminho }] of ultima) {
@@ -1150,7 +1192,8 @@ export function estadoPr(pr, agora = new Date(), commit = buscar()) {
   const texto = conteudo(commit, c);
   const acao = campo(texto, "Ação");
   const quando = new Date(campo(texto, "Data"));
-  const ativo = acao === "HOLD" || (acao === "CLAIMED" && (agora - quando) / 60000 < CLAIM_MIN);
+  // Passo 3: um CLAIMED com data no futuro não fica ativo (um HOLD fica: segurar é o lado seguro).
+  const ativo = acao === "HOLD" || (acao === "CLAIMED" && !noFuturo(quando, agora) && (agora - quando) / 60000 < CLAIM_MIN);
   return { acao, por: campo(texto, "Por"), motivo: campo(texto, "Motivo"), quando, ativo, proximo: k + 1 };
 }
 

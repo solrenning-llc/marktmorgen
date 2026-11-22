@@ -107,7 +107,7 @@ export async function tellCanceled(store: Store, canceled: CanceledOrder, who: T
       productLink: `${storeBase(store)}/p/${canceled.product}`,
     });
     told.buyer = await sendEmailOutcome({
-      meter: { by: "order" },
+      meter: { by: "order", store },
       from: fromStore(store),
       to: canceled.email,
       replyTo: store.email,
@@ -127,7 +127,7 @@ export async function tellCanceled(store: Store, canceled: CanceledOrder, who: T
       disconnected: !store.paypalSeller,
     });
     told.creator = await sendEmailOutcome({
-      meter: { by: "order" },
+      meter: { by: "order", store },
       from: NIMBUS_FROM,
       to: store.email,
       replyTo: SUPPORT,

@@ -61,8 +61,8 @@ export async function POST(request: NextRequest) {
   let moved: { from: string; to: string } | null = null;
   try {
     moved = await spendMoveLink(token);
-  } catch (error) {
-    console.error("address move failed", error);
+  } catch {
+    console.error("address move failed");
   }
   if (!moved) return away("/signin?status=expired");
 
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
   // two addresses' ways in are never merged (security review of da5191515).
   // A question that could not be answered refuses the move as one that could not be finished just now, never as an
   // address with ways in of its own (CX-123 rule 24; audit of the API routes, 11 Nov 2026): nothing has moved yet.
-  const holds = await holdsSecondStep(moved.to).catch((error: unknown) => (console.error("reading the new address's ways in failed", error), null));
+  const holds = await holdsSecondStep(moved.to).catch(() => (console.error("reading the new address's ways in failed"), null));
   if (holds === null) return away("/signin?status=move-unread");
   if (holds) return away("/signin?status=move-has-login");
 
@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
   // MEDIUM): with none, nothing was written, so the mark is taken off at once and nothing moves.
   const op = await markBrokenMove(from, to).catch(() => null);
   if (op === "full") {
-    await endMoving(from, to, mark).catch((error) => console.error("unmarking a move failed", error));
+    await endMoving(from, to, mark).catch(() => console.error("unmarking a move failed"));
     return away("/signin?status=move-held");
   }
   if (!op) return away("/signin?status=move-error");
@@ -121,19 +121,23 @@ export async function POST(request: NextRequest) {
       broken = true;
     });
   } finally {
-    const cleared = broken ? false : await clearBrokenMove(from, to, op).then(() => true, (error) => (console.error("clearing a move's record failed", error), false));
+    const cleared = broken ? false : await clearBrokenMove(from, to, op).then(() => true, () => (console.error("clearing a move's record failed"), false));
     // Kept when the record could not be cleared either way: it holds the addresses until it is repaired.
-    if (cleared || broken) await endMoving(from, to, mark).catch((error) => console.error("unmarking a move failed", error));
+    if (cleared || broken) await endMoving(from, to, mark).catch(() => console.error("unmarking a move failed"));
   }
 }
 
-/** Runs one step of an undo; false, logged, when it failed. */
-async function step(what: string, work: () => Promise<unknown>): Promise<boolean> {
+/**
+ * Runs one step of an undo; false, logged, when it failed. The caller writes
+ * the log line itself, one fixed string, so nothing but that label reaches
+ * the server log (tests/auth-log-redaction.test.ts).
+ */
+async function step(work: () => Promise<unknown>, logFailure: () => void): Promise<boolean> {
   try {
     await work();
     return true;
-  } catch (error) {
-    console.error(`${what} failed`, error);
+  } catch {
+    logFailure();
     return false;
   }
 }
@@ -155,19 +159,19 @@ async function finishMove(from: string, to: string, op: string, link: string, aw
   const undo = async () => {
     let ok = true;
     if (keysMoved) {
-      ok = (await step("forgetting passkeys added midway", () => discardPasskeys(from))) && ok;
-      ok = (await step("moving passkeys back", () => movePasskeys(to, from))) && ok;
+      ok = (await step(() => discardPasskeys(from), () => console.error("forgetting passkeys added midway failed"))) && ok;
+      ok = (await step(() => movePasskeys(to, from), () => console.error("moving passkeys back failed"))) && ok;
     }
     if (appMoved) {
-      ok = (await step("forgetting two-step login added midway", () => discardTwoStep(from))) && ok;
-      ok = (await step("moving two-step login back", () => moveTwoStep(to, from))) && ok;
+      ok = (await step(() => discardTwoStep(from), () => console.error("forgetting two-step login added midway failed"))) && ok;
+      ok = (await step(() => moveTwoStep(to, from), () => console.error("moving two-step login back failed"))) && ok;
     } else if (appCopy) {
-      ok = (await step("forgetting a copy of two-step login", () => discardTwoStep(to))) && ok;
+      ok = (await step(() => discardTwoStep(to), () => console.error("forgetting a copy of two-step login failed"))) && ok;
     }
     // Sessions that could not be read are not logged out (audit SG2): the move is then left marked to repair.
-    ok = (await step("logging out after an undone move", async () => {
+    ok = (await step(async () => {
       if ((await endAllSessions(from)) === null) throw new Error("the sessions could not be read");
-    })) && ok;
+    }, () => console.error("logging out after an undone move failed"))) && ok;
     if (!ok) broke();
     return ok;
   };
@@ -178,7 +182,7 @@ async function finishMove(from: string, to: string, op: string, link: string, aw
     await moveTwoStep(from, to);
     appMoved = true;
   } catch (error) {
-    console.error("moving the ways in refused", error);
+    console.error("moving the ways in refused");
     // Passkeys that could not be put back cleanly: the move is kept marked until it is repaired.
     if (error instanceof MoveSplitError) broke();
     const undone = await undo();
@@ -219,25 +223,25 @@ async function finishMove(from: string, to: string, op: string, link: string, aw
     [carried, teams] = await Promise.all([
       moveRecoveryAddress(from, to).then(
         () => true,
-        (error) => (console.error("carrying the recovery address failed", error), false),
+        () => (console.error("carrying the recovery address failed"), false),
       ),
       moveMemberships(from, to, unswept).then(
         (stayed) => stayed.length === 0,
-        (error) => (console.error("carrying the places on other teams failed", error), false),
+        () => (console.error("carrying the places on other teams failed"), false),
       ),
       // Low risk, only logged: a browser left listed under `from` lets nobody in, it only goes unlisted (lib/auth.ts).
-      moveDevices(from, to).catch((error) => console.error("moving the browsers the account signs in from failed", error)),
+      moveDevices(from, to).catch(() => console.error("moving the browsers the account signs in from failed")),
     ]);
     // Not carried, whatever is still kept under `from` is forgotten (it may be the address itself, when the carry
     // failed before writing, or a value that could not be read): an account made at `from` later would otherwise
     // inherit it as its own way back in. Tried twice; still unanswered, it is logged, the person is told anyway.
-    if (!carried && !(await forgetLeftRecovery(from))) console.error("a recovery address may be left under an address an account moved away from", { from });
+    if (!carried && !(await forgetLeftRecovery(from))) console.error("a recovery address may be left under an address an account moved away from");
     // Likewise a place on a team not carried: an account made at `from` later would otherwise be on that team. And a
     // place taken off whose sweep of the API keys was not finished has it repeated there, as `from` has no role left
     // on that team to be taken off for (Claude 2's third review of #3326). Unanswered, the keys are not known as held.
     if (!teams || unswept.size) {
       const dropped = await dropMemberships(from, unswept).catch(() => null);
-      if (!dropped?.settled) console.error("a place on a team, or an API key made from one, may be left under an address an account moved away from", { from });
+      if (!dropped?.settled) console.error("a place on a team, or an API key made from one, may be left under an address an account moved away from");
       // Held only when the clean-up settled with nothing left open: it may answer unsettled with no store listed (one it
       // could not read, with no sweep left from the carry), and that is not known as held either (Codex X2 on #3326, rule 24).
       keys = dropped?.settled === true && dropped.unswept.length === 0;
@@ -248,7 +252,7 @@ async function finishMove(from: string, to: string, op: string, link: string, aw
     await tellMoved(from, to, link, { recovery: !carried, teams: !teams, keys: !keys });
     // Phones follow once the memberships have: an owner's stay the owner's,
     // a team member's become the new address's (lib/phone-alerts.ts).
-    await movePhoneDevices(from, to).catch((error) => console.error("moving phone devices failed", error));
+    await movePhoneDevices(from, to).catch(() => console.error("moving phone devices failed"));
     // Sessions that could not be read are not closed (lib/auth.ts endAllSessions answers null; review of #2556):
     // the move stands, as the store and its ways in are all at `to`, and the studio says so, not "every session closed".
     closed = (await endAllSessions(from)) !== null;
@@ -256,16 +260,16 @@ async function finishMove(from: string, to: string, op: string, link: string, aw
     closed = (await endAllSessions(to)) !== null && closed;
     sessionId = await openSession(to);
     // Passkeys set to be removed moved with the rest (lib/passkeys.ts movePasskeys); a removal whose days are over is applied at every login.
-    await pendingRemoval(to).catch((error) => console.error("applying a passkey removal failed", error));
-  } catch (error) {
-    console.error("address move failed", error);
+    await pendingRemoval(to).catch(() => console.error("applying a passkey removal failed"));
+  } catch {
+    console.error("address move failed");
     // Undone only when the store is known to be still at `from` alone: a passing error reading it never undoes
     // a move whose store already landed at `to`. Known at `to` alone, the move stands with its ways in. Any
     // other state (unknown, or on both addresses) is kept marked until it is repaired.
     const [there, here] = await Promise.all([storeForEmail(to).catch(() => undefined), storeForEmail(from).catch(() => undefined)]);
     if (there === null && here) await undo();
     else if (!(there && here === null)) {
-      console.error("a failed move left in an unknown state", { from, to });
+      console.error("a failed move left in an unknown state");
       broke();
     }
     return away("/signin?status=move-error");

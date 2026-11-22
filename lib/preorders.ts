@@ -33,7 +33,7 @@ import { type Listing, type Store, saleHandles, setPastBuyers, storeRef } from "
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 import { preorderWords } from "@/lib/buyer-words/preorder";
-import { isSettled } from "@/lib/instant-pay";
+import { isSettled, paymentIntentForDelivery } from "@/lib/instant-pay";
 import { formatMoney } from "@/lib/money";
 import { type Preorder, keptDay, parsePreorder, preorderCounts, preorderJob, preorderOpen, preorderProblem, readPreorderJob } from "@/lib/preorder-rules";
 // On its own line, so open pull requests that change the imports above still merge cleanly.
@@ -172,7 +172,6 @@ const keep = (sid: string, product: string): (string | number)[] => ["EXPIRE", e
 const now = () => Math.floor(Date.now() / 1000);
 
 const SESSION_ID = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
-const INTENT_ID = /^pi_[A-Za-z0-9]{8,255}$/;
 
 // ------------------------------------------------------------------ the pages
 
@@ -488,15 +487,14 @@ type Session = {
 };
 
 /** What a paid pre-order checkout says: its product, buyer and payment. Null for anything else. */
-function readSession(store: Store, session: Session): { id: string; productId: string; email: string; at: number; pi: string; ship: boolean } | null {
+function readSession(store: Store, session: Session): { id: string; productId: string; email: string; at: number; pi: string | null; ship: boolean } | null {
   const meta = session.metadata ?? {};
   if (meta.preorder !== "yes" || !saleHandles(store).has(meta.store ?? "")) return null;
   if (!isSettled(session)) return null;
   const id = typeof session.id === "string" ? session.id : "";
   const email = typeof session.customer_details?.email === "string" ? session.customer_details.email.trim() : "";
-  const pi = typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent as { id?: unknown } | null)?.id;
   if (!SESSION_ID.test(id) || !email || !meta.product) return null;
-  return { id, productId: meta.product, email, at: typeof session.created === "number" ? session.created : now(), pi: typeof pi === "string" && INTENT_ID.test(pi) ? pi : "", ship: meta.ship === "yes" };
+  return { id, productId: meta.product, email, at: typeof session.created === "number" ? session.created : now(), pi: paymentIntentForDelivery(session), ship: meta.ship === "yes" };
 }
 
 /**
@@ -506,7 +504,7 @@ function readSession(store: Store, session: Session): { id: string; productId: s
  * the paid pre-order never handed over. confirmPreorderOnce then lets its mark go and the webhook is retried; HSETNX
  * keeps the first entry, so the retry records it once.
  */
-async function recordPreorder(store: Store, read: NonNullable<ReturnType<typeof readSession>>): Promise<Preorder> {
+async function recordPreorder(store: Store, read: NonNullable<ReturnType<typeof readSession>> & { pi: string }): Promise<Preorder> {
   const sid = store.statsId as string;
   const entry: Preorder = { to: read.email, at: read.at, pi: read.pi, ship: read.ship };
   const commands: (string | number)[][] = [
@@ -588,7 +586,7 @@ async function sendOut(store: Store, product: Listing, to: string, deps: HandOve
   const p = preorderWords(store.language);
   const g = givingWords(store.language);
   const link = product.course ? `${deps.base}/course/${product.id}` : ((await deps.ordersLink(to)) ?? `${deps.base}/orders`);
-  return sendEmail({ meter: { by: "order" },
+  return sendEmail({ meter: { by: "order", store },
     from: deps.from,
     to,
     subject: p.outSubject(product.title).slice(0, 200),
@@ -621,7 +619,7 @@ async function sendReceipt(store: Store, product: Listing, session: Session, to:
     return false;
   }
   const said = speech(store);
-  return sendEmail({ meter: { by: "order" },
+  return sendEmail({ meter: { by: "order", store },
     from: deps.from,
     to,
     subject: p.receiptSubject(product.title).slice(0, 200),
@@ -656,9 +654,30 @@ export async function confirmPreorder(store: Store, session: Session, product: L
   if (!store.statsId || !isRedisConfigured()) return "skip";
   const read = readSession(store, session);
   if (!read || read.productId !== product.id) return "skip";
-  await recordPreorder(store, read);
+  if (read.pi === null) throw new UnknownReplyError("a pre-order checkout's payment reference");
+  await recordPreorder(store, { ...read, pi: read.pi });
   const { soon, day } = await soonOne(store, product.id);
   if (!soon) {
+    // Refunded in full or lost to a dispute before it was first confirmed: the refund pass may have read that refund
+    // before this pre-order was written down to meet it (nl:pre:pi:), so it would never take it back. Read the payment
+    // itself first, as the release does (MM-E2E-RG-2); a read that fails or answers for another payment throws and the
+    // confirmation is tried again.
+    if (read.pi && store.stripeAccountId) {
+      const payment = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(read.pi)}?expand[]=latest_charge`);
+      if (!payment || typeof payment !== "object" || (payment as { id?: unknown }).id !== read.pi) throw new UnknownReplyError("a pre-order's payment");
+      if (await givenBack(store.stripeAccountId, payment)) {
+        // Written just above (recordPreorder): an entry that is now gone cannot be taken as handled, so the
+        // confirmation is tried again rather than skipped (Codex X6's LOW on #4408).
+        const current = await readPreorderExact(store.statsId, product.id, read.id);
+        if (!current) throw new UnknownReplyError("a pre-order given back, whose entry is gone");
+        if (!current.given && !current.revoked) {
+          const replies = repliesFor(await redisPipeline([["HSET", entriesKey(store.statsId, product.id), read.id, JSON.stringify({ ...current, revoked: now() } satisfies Preorder)], keep(store.statsId, product.id)]), 2);
+          // Both replies are read: the HSET's count and the EXPIRE's 1 (the entries were just written, so 0 is unknown).
+          if (!replies || typeof replies[0] !== "number" || replies[1] !== 1) throw new UnknownReplyError("a pre-order given back");
+        }
+        return "skip";
+      }
+    }
     const outcome = await handOverPreorder(store, product, read.id, deps);
     return outcome === "skip" ? "skip" : "given";
   }
@@ -673,8 +692,8 @@ export async function confirmPreorder(store: Store, session: Session, product: L
  */
 export async function resendPreorder(store: Store, session: Session, product: Listing, deps: HandOverDeps): Promise<"sent" | "refunded" | "unknown" | "failed"> {
   const read = readSession(store, session);
-  if (!read || read.productId !== product.id) return "unknown";
-  const entry = (await readPreorder(store, product.id, read.id)) ?? (await recordPreorder(store, read));
+  if (!read || read.productId !== product.id || read.pi === null) return "unknown";
+  const entry = (await readPreorder(store, product.id, read.id)) ?? (await recordPreorder(store, { ...read, pi: read.pi }));
   if (entry.revoked) return "refunded";
   if (entry.given) return (await sendOut(store, product, entry.to, deps)) ? "sent" : "failed";
   const { day } = await soonOne(store, product.id);

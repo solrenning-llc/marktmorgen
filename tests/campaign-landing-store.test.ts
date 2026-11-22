@@ -9,10 +9,9 @@ import { LANDINGS_GONE_SECONDS, LandingsDropUnconfirmed, LandingsGone, LandingsU
 import { MAX_HEADLINE } from "@/lib/sales-page";
 import { PageDropIncomplete, dropPage, picturesOfFailedDrop } from "@/lib/sales-page-store";
 import { DataRoomError, dataKey, dataUsed, needData } from "@/lib/store-data";
-import type { DataStore } from "@/lib/store-data";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { ROOM } from "./data-room";
+import { ROOM, resetLandingRoom, seedLandingRoom } from "./landing-live-room";
 
 const STATS = "l".repeat(16);
 const landing = (campaign: string, headline = "Cook a real dinner in twenty minutes"): CampaignLanding => ({ campaign, headline, sub: "A short course on knife skills.", button: "" });
@@ -20,7 +19,7 @@ const key = (product: string) => `nl:product:landing:${STATS}:${product}`;
 const has = (name: string) => redis.keys().includes(name);
 
 async function main(): Promise<void> {
-  redis.clear();
+  resetLandingRoom();
 
   part("One landing per campaign");
   is("a product with none", await readLandings(STATS, "p1"), []);
@@ -43,7 +42,8 @@ async function main(): Promise<void> {
   is("the store says full, and keeps the ten", [await saveLanding(STATS, "p3", landing("c11"), ROOM), (await readLandings(STATS, "p3")).length], ["full", MAX_LANDINGS]);
 
   part("Room in the store's data room, taken first");
-  const tiny: DataStore = { ...ROOM, sid: "landing-tiny", tier: undefined, subscriptionActive: false, subscriptionId: "", trialEnds: 0, planEndedAt: "" };
+  const tiny = { ...ROOM, sid: "4".repeat(32), tier: undefined, subscriptionActive: false, subscriptionId: "", trialEnds: 0, planEndedAt: "" };
+  seedLandingRoom(tiny);
   const before = (await dataUsed(ROOM))?.used ?? 0;
   is("what is kept is counted", before > 0, true);
   // Fill the small room so the next save cannot fit.

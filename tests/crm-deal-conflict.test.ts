@@ -9,7 +9,7 @@
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/crm/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { MOVE_CRM_DEAL, dealSlot, dealVersion, readDeal, readDealExact, readPipelines, readStages, writeDealOver } from "@/lib/crm";
+import { MOVE_CRM_DEAL, dealSlot, dealVersion, readDeal, readDealExact, readPipelines, writeDealOver, readStageView } from "@/lib/crm";
 import { crmAnswer } from "@/lib/crm-response";
 import { redisPipeline } from "@/lib/redis";
 import { dataKey, noteData } from "@/lib/store-data";
@@ -45,7 +45,7 @@ async function main(): Promise<void> {
   const stored = async (id: string) => (await redisPipeline([["HGET", dealsKey, id]]))[0] as string | null;
   // A workflow step's write ("rotate"): over the exact record it read, as lib/flow steps do.
   const rotate = async (id: string) => {
-    const read = await readDealExact(statsId, id, await readStages(statsId));
+    const read = await readDealExact(statsId, id, await readStageView(statsId));
     return writeDealOver(statsId, { ...read.deal!, assignee: "maya@example.com", nextAction: "Call Dana back", dueDate: "2026-11-10" }, read.raw!, store);
   };
   const newDeal = async (title: string, stage = "lead00") => {
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
   const [sales] = await readPipelines(statsId);
   const removed = await post({ action: "pipeline", pipeline: { ...sales, stages: sales.stages.filter((s) => s.id !== "talk00") }, moves: { talk00: "lead00" } });
   const afterPipeline = JSON.parse((await stored(dee.id))!);
-  is("(the stage removed: the record is as it was, and the deal is read in the stage chosen)", [removed.status, afterPipeline.stage, afterPipeline.updatedAt, (await readDeal(statsId, dee.id, await readStages(statsId)))?.stage], [200, "talk00", updatedBefore, "lead00"]);
+  is("(the stage removed: the record is as it was, and the deal is read in the stage chosen)", [removed.status, afterPipeline.stage, afterPipeline.updatedAt, (await readDeal(statsId, dee.id, await readStageView(statsId)))?.stage], [200, "talk00", updatedBefore, "lead00"]);
   // No deal was written by the change (lib/crm-rules.ts nextStageMoves), so the version the board holds is still the
   // deal's: the edit is saved, with the stage the deal is read in.
   const stale = await post({ action: "deal", version: dee.version, deal: { id: dee.id, note: "Still talking" } });

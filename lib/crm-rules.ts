@@ -235,14 +235,17 @@ export function parseStages(raw: unknown): Stage[] | null {
 
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 
-/** A deal as sent or stored, made safe; null without a title or a stage the store has. */
-export function parseDeal(raw: unknown, stages: readonly Stage[]): Deal | null {
+/**
+ * A deal as sent or stored, made safe; null without a title or a stage the store has. `moved` is where each stage
+ * taken away now shows its deals (Pipeline.moved, stageMoves): a deal kept in one is read there, and saved there the
+ * next time it is saved. Required, so every reader says which aliases it reads through.
+ */
+export function parseDeal(raw: unknown, stages: readonly Stage[], moved: StageMoves): Deal | null {
   if (!raw || typeof raw !== "object") return null;
   const value = raw as Record<string, unknown>;
   const id = typeof value.id === "string" && DEAL_ID.test(value.id) ? value.id : "";
   const title = oneLine(value.title, MAX_DEAL_TITLE);
-  // A stage taken away is read where its deals were moved (Pipeline.moved), so the deal is saved there next time.
-  const stage = shownStage(value.stage, stages as Stages);
+  const stage = shownStage(value.stage, stages, moved);
   if (!id || !title || !stage) return null;
   const email = oneLine(value.email, 254).toLowerCase();
   const cents = typeof value.cents === "number" && Number.isFinite(value.cents) ? Math.max(0, Math.min(MAX_DEAL_CENTS, Math.round(value.cents))) : 0;
@@ -342,11 +345,15 @@ export const FIRST_PIPELINE_NAME = "Sales";
 export type Pipeline = { id: string; name: string; stages: Stage[]; moved?: Record<string, string> };
 
 /**
- * The most stages taken away a store's pipelines keep a destination for (Pipeline.moved): a change past it is
- * refused ("stage_moves") before anything is written, so the record and its read stay bounded. Each is two ids, about
- * 20 bytes in the record, counted in the store's data room with it.
+ * The most stages taken away a store's pipelines keep a destination for (Pipeline.moved), so the record and its read
+ * stay bounded. Each is two ids, about 20 bytes in the record, counted in the store's data room with it. An internal
+ * size limit, never a lock and never shown: a change that would keep more than ALIAS_COMPACT_AT first writes every
+ * deal kept in an older one into the stage it shows in (lib/crm.ts, compactStageMoves) and drops those aliases, so a
+ * change is refused ("stage_moves") only when deals changed while they were written still hold more than it.
  */
 export const MAX_STAGE_MOVES = 200;
+/** Past this many aliases a change compacts them first (lib/crm.ts): well inside MAX_STAGE_MOVES, never shown. */
+export const ALIAS_COMPACT_AT = 150;
 
 /** Stages taken away, as kept: each a stage id to a stage id; null when any entry is not, or past MAX_STAGE_MOVES. */
 export function parseStageMoves(raw: unknown): Record<string, string> | null {
@@ -426,7 +433,8 @@ export function parsePipelines(raw: unknown, sameNames = false): Pipeline[] | nu
  * it for the creator to read, change and save as a new pipeline.
  */
 export function copyPipeline(source: Pipeline, pipelines: readonly Pipeline[], newId: () => string = () => newCrmId()): Pipeline {
-  const taken = new Set(allStages(pipelines).map((s) => s.id));
+  // Nor the id of a stage taken away, still read through its alias (Pipeline.moved): that id is never a stage again.
+  const taken = new Set([...allStages(pipelines).map((s) => s.id), ...Object.keys(stageMoves(pipelines))]);
   const ids = new Set(pipelines.map((p) => p.id));
   const fresh = (used: Set<string>) => {
     for (;;) {
@@ -447,34 +455,33 @@ export function copyPipeline(source: Pipeline, pipelines: readonly Pipeline[], n
   return { id: fresh(ids), name, stages: source.stages.map((stage) => ({ id: fresh(taken), name: stage.name, kind: stage.kind })) };
 }
 
-/**
- * Every stage of every pipeline, in order, carrying (not enumerable, so it never shows or is sent) where a stage
- * taken away now shows its deals: what parseDeal reads a deal's stage against.
- */
-export type Stages = readonly Stage[] & { readonly moved?: Readonly<Record<string, string>> };
+/** Where each stage taken away now shows its deals: a stage id to a stage id (Pipeline.moved). */
+export type StageMoves = Readonly<Record<string, string>>;
+/** What a deal's stage is read against: every stage of every pipeline, and where each stage taken away shows its deals. */
+export type StageView = { stages: readonly Stage[]; moved: StageMoves };
 /** Where each stage taken away now shows its deals, from every pipeline that keeps some (the first, when written here). */
 export const stageMoves = (pipelines: readonly Pipeline[]): Record<string, string> => Object.assign({}, ...pipelines.map((p) => p.moved ?? {})) as Record<string, string>;
-export const allStages = (pipelines: readonly Pipeline[]): Stage[] => {
-  const out = pipelines.flatMap((p) => p.stages);
-  const moved = stageMoves(pipelines);
-  if (Object.keys(moved).length) Object.defineProperty(out, "moved", { value: moved, enumerable: false });
-  return out;
-};
+/** Every stage of every pipeline, in order. */
+export const allStages = (pipelines: readonly Pipeline[]): Stage[] => pipelines.flatMap((p) => p.stages);
+/** The stages and aliases of these pipelines, for reading deals (parseDeal). */
+export const stageView = (pipelines: readonly Pipeline[]): StageView => ({ stages: allStages(pipelines), moved: stageMoves(pipelines) });
+/** The view of a store that never changed its board: the stages it starts with, nothing taken away. */
+export const DEFAULT_VIEW: StageView = { stages: DEFAULT_STAGES, moved: {} };
 
 /** The stage a deal shows in: its own while the store has it, else the one it was moved to; "" for none. */
-export function shownStage(stage: unknown, stages: Stages): string {
+export function shownStage(stage: unknown, stages: readonly Stage[], moved: StageMoves): string {
   if (typeof stage !== "string") return "";
   if (stages.some((s) => s.id === stage)) return stage;
-  const to = stages.moved?.[stage];
+  const to = Object.hasOwn(moved, stage) ? moved[stage] : undefined;
   return to !== undefined && stages.some((s) => s.id === to) ? to : "";
 }
 
 /**
  * The stage moves to keep after a change: those kept before, each pointing where its target went if that one is
  * taken away too (a chain is written as one step), plus each stage taken away now and where its deals go; none for a
- * stage that is still there. Null past MAX_STAGE_MOVES.
+ * stage that is still there. The caller holds it to ALIAS_COMPACT_AT and MAX_STAGE_MOVES (lib/crm.ts).
  */
-export function nextStageMoves(before: Readonly<Record<string, string>>, taken: Readonly<Record<string, string>>, kept: ReadonlySet<string>): Record<string, string> | null {
+export function nextStageMoves(before: StageMoves, taken: StageMoves, kept: ReadonlySet<string>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [from, to] of Object.entries(before)) {
     if (kept.has(from)) continue;
@@ -482,7 +489,7 @@ export function nextStageMoves(before: Readonly<Record<string, string>>, taken: 
     if (next !== undefined && kept.has(next)) out[from] = next;
   }
   for (const [from, to] of Object.entries(taken)) if (!kept.has(from) && kept.has(to)) out[from] = to;
-  return Object.keys(out).length > MAX_STAGE_MOVES ? null : out;
+  return out;
 }
 
 /** Whether a stage of `next` has the id of a stage taken away before, still read through its alias. */
@@ -492,7 +499,7 @@ export function reusesStageMove(current: readonly Pipeline[], next: readonly Pip
 }
 
 /** The pipelines to write with `moved` on the first one only. */
-export function withStageMoves(pipelines: readonly Pipeline[], moved: Readonly<Record<string, string>>): Pipeline[] {
+export function withStageMoves(pipelines: readonly Pipeline[], moved: StageMoves): Pipeline[] {
   return pipelines.map((p, i) => {
     const rest: Pipeline = { id: p.id, name: p.name, stages: p.stages };
     return i === 0 && Object.keys(moved).length ? { ...rest, moved: { ...moved } } : rest;
@@ -558,7 +565,14 @@ export function pipelineTotals(pipeline: Pipeline, deals: readonly Deal[]): Pipe
   return out;
 }
 
-export type PipelineChange = { ok: true; pipelines: Pipeline[]; moves: Record<string, string> } | { ok: false; error: "pipelines" | "pipeline_limit" | "pipeline_last" | "unknown" | "moves" | "stage_moves" };
+/**
+ * A change checked (changePipeline), or why it was refused. `unsent`: the stages taken away with no destination sent,
+ * whose deals were not counted; the change is saved only once they are shown to hold none (lib/crm.ts,
+ * savePipelineChange, which counts them and checks the change again).
+ */
+export type PipelineChange =
+  | { ok: true; pipelines: Pipeline[]; moves: Record<string, string>; unsent: string[] }
+  | { ok: false; error: "pipelines" | "pipeline_limit" | "pipeline_last" | "unknown" | "moves" | "stage_moves" | "stage_gone" | "studio_used" | "unavailable" };
 
 /**
  * A change to one pipeline, checked against the store's pipelines now: its
@@ -567,11 +581,12 @@ export type PipelineChange = { ok: true; pipelines: Pipeline[]; moves: Record<st
  * deals go to; a stage that goes with deals in it and no such choice is
  * refused ("moves"), so a deal is never deleted or moved where the creator
  * did not say; for a pipeline removed, `moves` may be one stage for all of
- * its deals. `counts` is how many deals each stage holds now; null when they
- * are not read (a change saved as stage moves, Pipeline.moved): then every
- * stage that goes has a destination, the one sent or, when none is, the first
- * open stage of its own pipeline (the first pipeline's for a pipeline
- * removed), and one sent that is not kept is still refused. The name saved
+ * its deals. `counts` is how many deals each stage shows now (a deal in a
+ * stage taken away before counts where it shows, shownStage); a stage known
+ * to hold none goes with no destination, and none is kept for it. With
+ * `counts` null (the deals not read), a stage that goes with no destination
+ * sent is listed in `unsent`, never given one: the caller counts the deals and
+ * checks again. A destination sent is always checked. The name saved
  * must differ from every other pipeline's that the saver sees (`sees`, 639
  * [GL7](7)); one they may not see never refuses it, so a refusal never tells
  * them a hidden pipeline's name.
@@ -596,14 +611,17 @@ export function changePipeline(
     const at = current.findIndex((p) => p.id === pipeline.id);
     // A new pipeline counts against the plan's number; an existing one may always be edited.
     if (at < 0 && current.length >= Math.min(limit, MAX_PIPELINES)) return { ok: false, error: "pipeline_limit" };
-    next = at < 0 ? [...current, pipeline] : current.map((p, i) => (i === at ? pipeline : p));
-    saved = pipeline;
+    // The aliases stay with the record (withStageMoves), never taken from what was sent.
+    const { moved: _sent, ...sent } = pipeline;
+    void _sent;
+    next = at < 0 ? [...current, sent] : current.map((p, i) => (i === at ? sent : p));
+    saved = sent;
   }
   const checked = parsePipelines(next, true);
   if (!checked) return { ok: false, error: "pipelines" };
   // A stage taken away keeps its id as an alias for where its deals went: that id is never a stage again, or those deals
-  // would come back into it, from a pipeline the person changing this one may not see.
-  if (reusesStageMove(current, checked)) return { ok: false, error: "pipelines" };
+  // would come back into it, from a pipeline the person changing this one may not see. Said as a stage removed.
+  if (reusesStageMove(current, checked)) return { ok: false, error: "stage_gone" };
   const named = saved;
   // A name kept as it was (two pipelines may already share one) never refuses the rest of the change.
   const before = named ? current.find((p) => p.id === named.id) : undefined;
@@ -613,18 +631,20 @@ export function changePipeline(
   // One stage for every deal that has to move (a pipeline removed), or a stage for each stage removed.
   const asked = moves && typeof moves === "object" && !Array.isArray(moves) ? (moves as Record<string, unknown>) : {};
   const out: Record<string, string> = {};
-  const firstOpen = (pipeline: Pipeline | undefined) => pipeline?.stages.find((s) => s.kind === "open")?.id;
-  for (const pipeline of current) {
-    for (const stage of pipeline.stages) {
-      if (kept.has(stage.id)) continue;
-      if (counts !== null && !(counts.get(stage.id) ?? 0)) continue;
-      const sent = typeof moves === "string" && moves !== "" ? moves : Object.hasOwn(asked, stage.id) ? asked[stage.id] : undefined;
-      const target = sent !== undefined || counts !== null ? sent : firstOpen(checked.find((p) => p.id === pipeline.id)) ?? firstOpen(checked[0]);
-      if (typeof target !== "string" || !kept.has(target)) return { ok: false, error: "moves" };
-      out[stage.id] = target;
+  const unsent: string[] = [];
+  for (const stage of allStages(current)) {
+    if (kept.has(stage.id)) continue;
+    const held = counts === null ? null : (counts.get(stage.id) ?? 0);
+    if (held === 0) continue;
+    const target = typeof moves === "string" ? (moves === "" ? undefined : moves) : Object.hasOwn(asked, stage.id) ? asked[stage.id] : undefined;
+    if (target === undefined && held === null) {
+      unsent.push(stage.id);
+      continue;
     }
+    if (typeof target !== "string" || !kept.has(target)) return { ok: false, error: "moves" };
+    out[stage.id] = target;
   }
-  return { ok: true, pipelines: checked, moves: out };
+  return { ok: true, pipelines: checked, moves: out, unsent };
 }
 
 /** A new pipeline's stages to start from: the usual road, with ids of its own. */

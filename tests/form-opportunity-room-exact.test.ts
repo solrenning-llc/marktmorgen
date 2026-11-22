@@ -9,7 +9,7 @@
  * than what it keeps.
  */
 import { createFormOpportunity } from "@/lib/form-opportunity";
-import { DEFAULT_STAGES, MAX_DEALS, type Deal } from "@/lib/crm-rules";
+import { MAX_DEALS, type Deal, DEFAULT_VIEW } from "@/lib/crm-rules";
 import { dealBytes, readDeals } from "@/lib/crm";
 import { dataUsed, type DataStore } from "@/lib/store-data";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -32,7 +32,7 @@ const used = async (room: DataStore) => (await dataUsed(room))?.used ?? -1;
 
 async function create(statsId: string, ref: string, draft: Deal, room: DataStore): Promise<string> {
   try {
-    return (await createFormOpportunity(statsId, ref, draft, DEFAULT_STAGES, room)).state;
+    return (await createFormOpportunity(statsId, ref, draft, DEFAULT_VIEW, room)).state;
   } catch (error) {
     return error instanceof UnknownReplyError ? "unknown" : `threw: ${(error as Error).message}`;
   }
@@ -52,11 +52,11 @@ async function main(): Promise<void> {
     taken = await used(room);
     // The deal's own bytes (dealBytes, as createFormOpportunity reserves them) plus the 64 bytes the data room
     // counts for a slot's own field while it is there (lib/store-data.ts, NEED script): 480 + 64 = 544 here.
-    const kept = (await readDeals(statsId, DEFAULT_STAGES))[0];
+    const kept = (await readDeals(statsId, DEFAULT_VIEW))[0];
     is("the new opportunity takes its exact room: the deal's bytes plus its slot's field", [taken, kept ? dealBytes(kept) + 64 : -1], [544, 544]);
     is("asked again, it is the existing one", await create(statsId, ref, draft, room), "existing");
     is("and its room is unchanged", await used(room), taken);
-    is("one deal kept", (await readDeals(statsId, DEFAULT_STAGES)).length, 1);
+    is("one deal kept", (await readDeals(statsId, DEFAULT_VIEW)).length, 1);
   }
   {
     const { statsId, ref, room, draft } = fresh();
@@ -91,7 +91,7 @@ async function main(): Promise<void> {
       redis.pipeline = original;
     }
     is(`${label}: refused as unknown`, state, "unknown");
-    is(`${label}: the deal landed, and its room is still counted`, [(await readDeals(statsId, DEFAULT_STAGES)).length, await used(room)], [1, taken]);
+    is(`${label}: the deal landed, and its room is still counted`, [(await readDeals(statsId, DEFAULT_VIEW)).length, await used(room)], [1, taken]);
   }
 
   part("A read before the write that fails never zeroes the room of a deal that exists");

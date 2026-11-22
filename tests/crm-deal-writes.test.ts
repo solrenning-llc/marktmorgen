@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dropDeal, writeDeal } from "@/lib/crm";
-import { DEFAULT_STAGES, MAX_DEALS, type Deal } from "@/lib/crm-rules";
+import { MAX_DEALS, type Deal, DEFAULT_VIEW } from "@/lib/crm-rules";
 import { createFormOpportunity } from "@/lib/form-opportunity";
 import { crmAnswer } from "@/lib/crm-response";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
@@ -61,7 +61,7 @@ async function main() {
   const outcomes = await Promise.all(Array.from({ length: 64 }, async (_, i) => {
     if (i % 2 === 0) return await writeDeal(raceStore, { ...deal, id: "m" + String(i).padStart(9, "0") }, ROOM) ? "created" : "full";
     const ref = String(i).padStart(10, "0") + "a".repeat(54);
-    return (await createFormOpportunity(raceStore, ref, deal, DEFAULT_STAGES, ROOM)).state;
+    return (await createFormOpportunity(raceStore, ref, deal, DEFAULT_VIEW, ROOM)).state;
   }));
   is("only one of 64 competing manual/form creations can occupy the last slot", [outcomes.filter(result => result === "created").length, outcomes.filter(result => result === "full").length, (await redis.pipeline([["HLEN", raceKey]]))[0]], [1, 63, MAX_DEALS]);
   is("existing records remain editable at capacity", await writeDeal(raceStore, { ...deal, id: "f000000000", title: "Edited at capacity" }, ROOM), true);

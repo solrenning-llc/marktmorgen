@@ -73,7 +73,7 @@ import { changeLabels, readTags } from "@/lib/contacts";
 import { type ActionContext } from "@/lib/flow-rules";
 import { CrmDealReadUnavailable, CrmPersonGone, readGenerations, readDealExact, readFieldsWhole, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
 import { type Held, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
-import { type Deal, allStages, newCrmId, pipelineOf } from "@/lib/crm-rules";
+import { type Deal, newCrmId, pipelineOf, stageView } from "@/lib/crm-rules";
 import { personKey } from "@/lib/person-key";
 import { readForm } from "@/lib/form-store";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -1354,13 +1354,13 @@ async function actOnDeals(
   held: Held | null,
 ): Promise<Acted[]> {
   let pipelines: Awaited<ReturnType<typeof readPipelines>>;
-  let stages: ReturnType<typeof allStages>;
+  let view: ReturnType<typeof stageView>;
   let deals: Awaited<ReturnType<typeof readDeals>>;
   try {
     // The store's own pipelines, or nothing: unknown ones are never read as the default stages (CX-123 rule 30).
     pipelines = await readPipelines(statsId);
-    stages = allStages(pipelines);
-    deals = await readDeals(statsId, stages);
+    view = stageView(pipelines);
+    deals = await readDeals(statsId, view);
   } catch {
     // Nothing was written: tried again later, which is safe.
     return each(emails, "deferred", "Your deals board could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
@@ -1380,7 +1380,7 @@ async function actOnDeals(
   }
   if (action.do === "rotate" && team) {
     for (const who of [store.email.toLowerCase(), ...team.members.filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())]) load.set(who, 0);
-    const openStage = new Set(stages.filter((s) => s.kind === "open").map((s) => s.id));
+    const openStage = new Set(view.stages.filter((s) => s.kind === "open").map((s) => s.id));
     for (const d of deals) if (d.assignee && openStage.has(d.stage) && load.has(d.assignee)) load.set(d.assignee, (load.get(d.assignee) ?? 0) + 1);
   }
   if (action.do === "assign" && team) {
@@ -1388,12 +1388,12 @@ async function actOnDeals(
     const eligible = action.assignee === store.email.toLowerCase() || team.members.some((m) => m.email.toLowerCase() === action.assignee && can(m.role, "orders"));
     if (!eligible) return each(emails, "failed", `${action.assignee} can no longer be responsible for deals in this store.`);
   }
-  const stage = action.do === "deal" ? stages.find((s) => s.id === action.stage) : undefined;
+  const stage = action.do === "deal" ? view.stages.find((s) => s.id === action.stage) : undefined;
   if (action.do === "deal" && !stage) return each(emails, "failed", "The deal stage was removed from your board.");
   // A deal step works in the pipeline of its stage: their open deal there moves, and another pipeline's deal is left as it is.
   const inPipeline = stage ? new Set(pipelineOf(pipelines, stage.id)?.stages.map((s) => s.id) ?? []) : null;
   const out: Acted[] = [];
-  const isOpen = (d: Deal | null, email: string): d is Deal => Boolean(d && d.email === email && (!inPipeline || inPipeline.has(d.stage)) && stages.find((s) => s.id === d.stage)?.kind === "open");
+  const isOpen = (d: Deal | null, email: string): d is Deal => Boolean(d && d.email === email && (!inPipeline || inPipeline.has(d.stage)) && view.stages.find((s) => s.id === d.stage)?.kind === "open");
   for (const email of emails) {
     // Their open deal moves; with none open, a new one is made for them.
     let open: Deal | undefined = deals.find((d) => isOpen(d, email));
@@ -1403,7 +1403,7 @@ async function actOnDeals(
     if (open) {
       let fresh: Awaited<ReturnType<typeof readDealExact>>;
       try {
-        fresh = await readDealExact(statsId, open.id, stages);
+        fresh = await readDealExact(statsId, open.id, view);
       } catch {
         out.push({ email, state: "deferred", note: "Your deals board could not be read; tried again in a few minutes.", wait: "board" });
         continue;

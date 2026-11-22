@@ -58,7 +58,12 @@ const MESSAGES: Record<string, string> = {
   pipeline_limit: "Your store has all the pipelines it can keep now. Remove one to make another.",
   pipeline_last: "A store keeps at least one pipeline.",
   moves: "Choose where the deals of each stage you remove go.",
-  stage_moves: "Your store has removed as many stages as it can keep track of, so nothing was saved. Rename a stage instead of removing it.",
+  stage_moves: "Some deals changed while this was being saved, so nothing was saved. Reload the page and try again.",
+  stage_gone: "That stage was removed. Reload the page.",
+  // Removing a stage with no destination reads the deals first, and many removed stages are tidied up by moving their
+  // deals for good (lib/crm.ts): both are paid from the studio's requests, and refused when it cannot pay or count them.
+  studio_used: "Your studio has no requests left this month for this change, so nothing was saved. Your pipeline is as it was.",
+  unavailable: "This change could not be counted just now, so nothing was saved. Try again in a minute.",
   crm_conflict: "Somebody else changed your pipelines a moment ago, so nothing was saved. Reload the page and make your change again.",
   deal_conflict: "Somebody else changed this deal a moment ago, so nothing was saved. Reload the page and make your change again.",
   // A session let in without its second step takes nothing away for good (lib/two-step.ts): a deal, a pipeline or a field waits.
@@ -502,6 +507,12 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   const why = pausedWords({ unconfirmed: writeUnconfirmed, saving: busy, refreshing, editing });
   // How many deals each saved stage holds now: a stage removed with deals in it asks where they go.
   const dealsIn = (stageId: string) => deals.filter(d => d.stage === stageId).length;
+  // Where a removed stage's deals go until the creator chooses: the first open stage kept in its pipeline, shown in
+  // the choice and sent, never a stage the server picks. A pipeline removed: the first open stage of another one they
+  // may change. The server reads the deals of a stage removed with none chosen, and refuses it if it holds any.
+  const firstOpenKept = pipelineDraft?.stages.find(st => st.kind === "open" && st.name.trim())?.id ?? "";
+  const firstOpenElsewhere = editable.filter(p => p.id !== pipeline.id).flatMap(p => p.stages).find(st => st.kind === "open")?.id ?? "";
+  const moveOf = (stageId: string) => pipelineDraft?.moves[stageId] || firstOpenKept;
 
   /** Opens the pipeline editor from the control `from`, with focus on its name (2.4.3). */
   const pipelineOpened = (from: string) => { opener.current = from; clearMessages(); moveFocus(PIPELINE_NAME_ID); };
@@ -515,9 +526,9 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     if (problems.length) return showInvalid(problems, problems.includes(PIPELINE_NAME_ID) ? MESSAGES.pipelines : MESSAGES.stages);
     const kept = new Set(pipelineDraft.stages.map(s => s.id));
     const gone = pipelineDraft.isNew ? [] : pipeline.stages.filter(s => !kept.has(s.id) && dealsIn(s.id) > 0);
-    const unplaced = gone.filter(s => !pipelineDraft.moves[s.id]).map(s => stageMovesId(s.id));
+    const unplaced = gone.filter(s => !moveOf(s.id)).map(s => stageMovesId(s.id));
     if (unplaced.length) return showInvalid(unplaced, MESSAGES.moves);
-    const moves = Object.fromEntries(gone.map(s => [s.id, pipelineDraft.moves[s.id]]));
+    const moves = Object.fromEntries(gone.map(s => [s.id, moveOf(s.id)]));
     const saved = pipelineDraft;
     void run({ action: "pipeline", pipeline: { id: pipelineDraft.id, name: pipelineDraft.name, stages: pipelineDraft.stages }, moves }, pipelineDraft.isNew ? "Pipeline added." : gone.length ? "Pipeline saved, and its deals moved." : "Pipeline saved.", () => { if (saved.isNew) setPipelineId(saved.id); closePipeline(saved.isNew ? `pipeline-tab-${saved.id}` : null); }, undefined, "pipeline-save", error => error === "pipelines" ? [PIPELINE_NAME_ID] : error === "stages" ? pipelineProblems(saved, []) : error === "moves" ? gone.map(s => stageMovesId(s.id)) : []);
   }
@@ -525,9 +536,10 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   function removePipeline() {
     if (!pipelineDraft || pipelineDraft.isNew || locked || writeUnconfirmed) return;
     const holding = pipelineDeals.length;
-    if (holding && !pipelineDraft.removeTo) return showInvalid([PIPELINE_REMOVE_TO_ID], MESSAGES.moves);
+    const moveTo = holding ? pipelineDraft.removeTo || firstOpenElsewhere : "";
+    if (holding && !moveTo) return showInvalid([PIPELINE_REMOVE_TO_ID], MESSAGES.moves);
     const next = pipelines.find(p => p.id !== pipeline.id)?.id ?? pipelines[0].id;
-    void run({ action: "unpipeline", id: pipeline.id, moveTo: pipelineDraft.removeTo }, holding ? `Pipeline removed; its ${holding === 1 ? "deal was" : `${holding} deals were`} moved.` : "Pipeline removed.", () => { setPipelineId(next); closePipeline(`pipeline-tab-${next}`); }, undefined, "pipeline-remove", error => error === "moves" ? [PIPELINE_REMOVE_TO_ID] : []);
+    void run({ action: "unpipeline", id: pipeline.id, moveTo }, holding ? `Pipeline removed; its ${holding === 1 ? "deal was" : `${holding} deals were`} moved.` : "Pipeline removed.", () => { setPipelineId(next); closePipeline(`pipeline-tab-${next}`); }, undefined, "pipeline-remove", error => error === "moves" ? [PIPELINE_REMOVE_TO_ID] : []);
   }
 
   // A change typed in the pipeline editor while it is being saved is not taken.
@@ -959,8 +971,8 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
                       <div key={s.id}>
                         <label className="block">
                           <span className="field-label">{`${s.name}: ${dealsIn(s.id)} ${dealsIn(s.id) === 1 ? "deal" : "deals"} go to`}</span>
-                          <select id={stageMovesId(s.id)} {...badProps(stageMovesId(s.id))} className="field mt-2" value={pipelineDraft.moves[s.id] ?? ""} onChange={e => { putPipeline({ ...pipelineDraft, moves: { ...pipelineDraft.moves, [s.id]: e.target.value } }); fixed(stageMovesId(s.id)); }}>
-                            <option value="">Choose a stage</option>
+                          <select id={stageMovesId(s.id)} {...badProps(stageMovesId(s.id))} className="field mt-2" value={moveOf(s.id)} onChange={e => { putPipeline({ ...pipelineDraft, moves: { ...pipelineDraft.moves, [s.id]: e.target.value } }); fixed(stageMovesId(s.id)); }}>
+                            {firstOpenKept ? null : <option value="">Choose a stage</option>}
                             <StageOptions pipelines={targets} names={names} />
                           </select>
                         </label>
@@ -993,8 +1005,8 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
                     <div>
                       <label className="block">
                         <span className="field-label">{`Its ${pipelineDeals.length} ${pipelineDeals.length === 1 ? "deal goes" : "deals go"} to`}</span>
-                        <select id={PIPELINE_REMOVE_TO_ID} {...badProps(PIPELINE_REMOVE_TO_ID)} className="field mt-2" value={pipelineDraft.removeTo} onChange={e => { putPipeline({ ...pipelineDraft, removeTo: e.target.value }); fixed(PIPELINE_REMOVE_TO_ID); }}>
-                          <option value="">Choose a stage of another pipeline</option>
+                        <select id={PIPELINE_REMOVE_TO_ID} {...badProps(PIPELINE_REMOVE_TO_ID)} className="field mt-2" value={pipelineDraft.removeTo || firstOpenElsewhere} onChange={e => { putPipeline({ ...pipelineDraft, removeTo: e.target.value }); fixed(PIPELINE_REMOVE_TO_ID); }}>
+                          {firstOpenElsewhere ? null : <option value="">Choose a stage of another pipeline</option>}
                           <StageOptions pipelines={editable.filter(p => p.id !== pipeline.id)} names={names} />
                         </select>
                       </label>

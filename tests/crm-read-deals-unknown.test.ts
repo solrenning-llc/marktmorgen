@@ -8,7 +8,7 @@
  *
  * Nothing real: the Redis stub, a stand-in email provider, synthetic stores.
  */
-import { CrmDealReadUnavailable, readDeals, readStages, writeDeal } from "@/lib/crm";
+import { CrmDealReadUnavailable, readDeals, writeDeal, readStageView } from "@/lib/crm";
 import { upsertContact } from "@/lib/contacts";
 import { enroll, saveFlow, sendDueSteps } from "@/lib/flows";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
@@ -69,16 +69,16 @@ async function main(): Promise<void> {
   const list = store.listId!;
   dealsKey = `nl:crm:deals:${sid}`;
   await original([["SET", `nl:crm:pipes:${sid}`, JSON.stringify(PIPES)]]);
-  const stages = await readStages(sid);
-  const anaDeals = async () => (await readDeals(sid, stages)).filter((d) => d.email === "ana@example.com").map((d) => [d.id, d.stage]);
+  const view = await readStageView(sid);
+  const anaDeals = async () => (await readDeals(sid, view)).filter((d) => d.email === "ana@example.com").map((d) => [d.id, d.stage]);
 
   part("The read: an empty board only for an empty list");
-  is("control: no deals yet", await readDeals(sid, stages), []);
+  is("control: no deals yet", await readDeals(sid, view), []);
   await writeDeal(sid, { id: "anadeal001", title: "Ana's", email: "ana@example.com", cents: 0, stage: OPEN, note: "", createdAt: 1, updatedAt: 1 }, ROOM);
   is("control: Ana's open deal reads", await anaDeals(), [["anadeal001", OPEN]]);
   for (const [what, reply] of CROOKED) {
     hvals = reply;
-    is(`HVALS answered ${what}: unknown, never no deals`, await outcome(() => readDeals(sid, stages)), "CrmDealReadUnavailable");
+    is(`HVALS answered ${what}: unknown, never no deals`, await outcome(() => readDeals(sid, view)), "CrmDealReadUnavailable");
     hvals = null;
   }
 

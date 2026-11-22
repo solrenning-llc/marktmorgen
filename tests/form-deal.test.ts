@@ -4,7 +4,7 @@ import { parseForm } from "@/lib/forms";
 import { readResponses, writeForm } from "@/lib/form-store";
 import { claimHandle, ensureStatsId, ensureStoreId, setSitePages, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { DEFAULT_STAGES, dealFollowUps } from "@/lib/crm-rules";
+import { DEFAULT_STAGES, dealFollowUps, DEFAULT_VIEW } from "@/lib/crm-rules";
 import { readDeals } from "@/lib/crm";
 import { listCounts } from "@/lib/contacts";
 import { POST as submitForm } from "@/app/api/store/form/route";
@@ -44,22 +44,22 @@ async function main() {
   const submitted = await submitForm(new NextRequest("https://marktmorgen.com/api/store/form", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: body.toString() }));
   const responses = await readResponses(store.statsId, form.id);
   is("public submission stores one response and redirects", [submitted.status, responses.total], [303, 1]);
-  is("submission alone creates no CRM opportunity", (await readDeals(store.statsId, DEFAULT_STAGES)).length, 0);
+  is("submission alone creates no CRM opportunity", (await readDeals(store.statsId, DEFAULT_VIEW)).length, 0);
   const prefill = formDealDraft(form, responses.responses[0]);
   const session = await openSession(owner);
   const created = await saveCrm(new NextRequest("https://marktmorgen.com/api/store/crm", { method: "POST", headers: { "content-type": "application/json", "x-nimbus-store": store.sid, cookie: SESSION_COOKIE + "=" + session }, body: JSON.stringify({ action: "deal", deal: { title: prefill.title, email: prefill.email, note: prefill.note, stage: "lead00", cents: 125000, nextAction: "Review form response", dueDate: "2026-10-16", assignee: owner } }) }));
   const saved = await created.json();
-  const deals = await readDeals(store.statsId, DEFAULT_STAGES);
+  const deals = await readDeals(store.statsId, DEFAULT_VIEW);
   is("explicit reviewed save creates the opportunity in this store", [saved.ok, deals.length, deals[0]?.email, deals[0]?.cents, deals[0]?.nextAction, deals[0]?.note.includes("A new website"), deals[0]?.dueDate, deals[0]?.assignee], [true, 1, "lead@example.com", 125000, "Review form response", true, "2026-10-16", owner]);
   const queue = dealFollowUps(DEFAULT_STAGES, deals, "2026-10-16");
   is("the dated opportunity is ready in today's follow-up queue", [queue.today.map(deal => deal.id), queue.unplanned.length], [[deals[0].id], 0]);
   for (const [change, expected] of [[{ dueDate: "2026-02-30", nextAction: "Call" }, "date"], [{ dueDate: "2026-10-17", nextAction: "" }, "followup"], [{ assignee: "outsider@example.com" }, "assignee"]] as const) {
     const refused = await saveCrm(new NextRequest("https://marktmorgen.com/api/store/crm", { method: "POST", headers: { "content-type": "application/json", "x-nimbus-store": store.sid, cookie: SESSION_COOKIE + "=" + session }, body: JSON.stringify({ action: "deal", deal: { title: "Invalid follow-up", stage: "lead00", ...change } }) }));
-    is("invalid follow-up cannot create another opportunity", [(await refused.json()).error, (await readDeals(store.statsId, DEFAULT_STAGES)).length], [expected, 1]);
+    is("invalid follow-up cannot create another opportunity", [(await refused.json()).error, (await readDeals(store.statsId, DEFAULT_VIEW)).length], [expected, 1]);
   }
   is("creating a deal does not change the marketing list", await listCounts(store.listId), beforeCounts);
   const denied = await saveCrm(new NextRequest("https://marktmorgen.com/api/store/crm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "deal", deal: { title: "Unauthorized", stage: "lead00" } }) }));
-  is("signed-out creation is refused without another deal", [denied.status, (await readDeals(store.statsId, DEFAULT_STAGES)).length], [401, 1]);
+  is("signed-out creation is refused without another deal", [denied.status, (await readDeals(store.statsId, DEFAULT_VIEW)).length], [401, 1]);
   part("Server-owned submission identity");
   const now = Date.now;
   const repeatedBody = new URLSearchParams(body); repeatedBody.set("id", "a".repeat(32));
@@ -70,7 +70,7 @@ async function main() {
   const latest = (await readResponses(store.statsId, form.id)).responses.slice(0, 2);
   is("identical same-second public submissions receive distinct persisted IDs", [latest.length, latest.every(response => /^[a-f0-9]{32}$/.test(response.id ?? "")), new Set(latest.map(response => response.id)).size, latest[0]?.at === latest[1]?.at], [2, true, 2, true]);
   is("the public sender cannot choose either submission identity", latest.some(response => response.id === "a".repeat(32)), false);
-  is("distinct submission IDs do not create CRM opportunities automatically", (await readDeals(store.statsId, DEFAULT_STAGES)).length, 1);
+  is("distinct submission IDs do not create CRM opportunities automatically", (await readDeals(store.statsId, DEFAULT_VIEW)).length, 1);
   done();
 }
 main().catch(error => { console.error(error); process.exit(1); });

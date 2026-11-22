@@ -22,7 +22,7 @@ import { POST as mailRoute } from "@/app/api/store/mail/route";
 import { POST as formOpportunityRoute } from "@/app/api/store/form-opportunity/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { upsertContact } from "@/lib/contacts";
-import { readDeals, readPipelines, readStages, readValues, writeFields } from "@/lib/crm";
+import { readDeals, readPipelines, readStages, readValues, writeFields, readStageView } from "@/lib/crm";
 import { personKey } from "@/lib/person-key";
 import { DEFAULT_STAGES } from "@/lib/crm-rules";
 import { enroll, readFlows, saveFlow, sendDueSteps } from "@/lib/flows";
@@ -170,15 +170,15 @@ async function main(): Promise<void> {
   faults.set(pipesKey, "{not json");
   await run();
   faults.clear();
-  const stages = await readStages(sid);
-  is("while unknown: no deal written", (await readDeals(sid, stages)).filter((d) => d.email === "ana@example.com").length, 0);
+  const view = await readStageView(sid);
+  is("while unknown: no deal written", (await readDeals(sid, view)).filter((d) => d.email === "ana@example.com").length, 0);
   // Deferred, not "failed: the stage was removed" nor "uncertain" (held, never tried again by itself): back in the
   // queue for later. The wait is passed by making what is queued due now.
   const [queued] = await redis.pipeline([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]);
   is("while unknown: the step is queued again, not ended", (queued as string[]).length, 1);
   await redis.pipeline((queued as string[]).map((member) => ["ZADD", "nl:mail:flowq", 0, member]));
   await run();
-  is("once they read: the deal is made in the store's own stage", (await readDeals(sid, stages)).filter((d) => d.email === "ana@example.com").map((d) => d.stage), [WON]);
+  is("once they read: the deal is made in the store's own stage", (await readDeals(sid, view)).filter((d) => d.email === "ana@example.com").map((d) => d.stage), [WON]);
 
 
   part("Fields read in an unknown shape are unknown too, never none (review of #2981, LEVE 2; rule 30)");

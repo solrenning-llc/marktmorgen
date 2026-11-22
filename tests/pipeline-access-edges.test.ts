@@ -77,10 +77,8 @@ async function main(): Promise<void> {
 
   part("The older stages request changes the pipeline that is first now");
   await writePipelineAccess(statsId, "sam@example.com", { wkshp1: "none" }, store);
-  // Sales is empty, and Sam may change it, but with no destination sent its deals would be read in Workshops, which
-  // Sam may not change (deals are not counted before a removal): refused as access. The owner removes it instead.
-  is("Sam removing Sales with no stage of his own to send its deals to is refused as access", [(await crm("sam@example.com", { action: "unpipeline", id: "sales0", moveTo: "" })).body.error, (await readPipelines(statsId)).map((p) => p.id)], ["pipeline_access", ["sales0", "wkshp1"]]);
-  is("(the owner removes the empty Sales pipeline)", (await crm(owner, { action: "unpipeline", id: "sales0", moveTo: "" })).status, 200);
+  // Sales is empty, and Sam may change it: Sam removes it, so Workshops, which Sam may not see, is first.
+  is("(Sam removes the empty Sales pipeline)", (await crm("sam@example.com", { action: "unpipeline", id: "sales0", moveTo: "" })).status, 200);
   is("(Workshops is first now)", (await readPipelines(statsId)).map((p) => p.id), ["wkshp1"]);
   const legacy = await crm("sam@example.com", { action: "stages", stages: [{ id: "xnew01", name: "Hijacked", kind: "open" }, { id: "xwon01", name: "Won", kind: "won" }, { id: "xlst01", name: "Lost", kind: "lost" }] });
   is("Sam cannot rewrite Workshops' stages through it: refused as access, and nothing changes", [legacy.status, legacy.body.error, (await readPipelines(statsId)).map((p) => [p.id, p.stages.map((s) => s.name)]), JSON.parse(String((await redisPipeline([["HGET", dealsKey, dealId]]))[0])).stage], [403, "pipeline_access", [["wkshp1", ["New", "Talking", "Won", "Lost"]]], "wtlk01"]);
@@ -408,7 +406,7 @@ async function main(): Promise<void> {
   await redisPipeline([["SET", pipesKey, JSON.stringify(lineUp)]]);
   const calm = await crm("sam@example.com", { action: "stages", stages: [...checked.stages] });
   is("with nothing in between, the first pipeline's stages are saved", [calm.status, (await readPipelines(statsId))[0].id], [200, checked.id]);
-  is("the route checks, and writeStages writes, the same pipeline", readFileSync("app/api/store/crm/route.ts", "utf8").includes("await writeStages(statsId, stages, store, first)"), true);
+  is("the route checks, and writeStages writes, the same pipeline", readFileSync("app/api/store/crm/route.ts", "utf8").includes("await writeStages(statsId, stages, store, first, payer)"), true);
 
   part("Round 8: an access record that cannot be read adds no pipeline either");
   // One pipeline only, so the plan has room for another and only the access is in the way.

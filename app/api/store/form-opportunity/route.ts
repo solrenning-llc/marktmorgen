@@ -3,7 +3,7 @@ import { guardStoreWrite } from "@/lib/store-request";
 import { can } from "@/lib/team-roles";
 import { readForm, readResponses } from "@/lib/form-store";
 import { FORM_ID } from "@/lib/forms";
-import { CrmSchemaReadUnavailable, readStages } from "@/lib/crm";
+import { CrmSchemaReadUnavailable, readStageView } from "@/lib/crm";
 import { MAX_DEAL_CENTS, MAX_DEAL_NOTE, MAX_DEAL_TITLE, parseDeal, readFollowUp } from "@/lib/crm-rules";
 import { readTeam } from "@/lib/team";
 import { StoreFullError } from "@/lib/store-full";
@@ -22,8 +22,9 @@ export async function POST(request: NextRequest) {
   if (!store.statsId) return refuse("unavailable", 503);
   if (typeof body.form !== "string" || !FORM_ID.test(body.form) || typeof body.responseRef !== "string" || !/^[a-f0-9]{64}$/.test(body.responseRef)) return refuse("invalid");
   try {
-    const stages = await readStages(store.statsId);
-    const existing = await readFormOpportunity(store.statsId, body.responseRef, stages);
+    const view = await readStageView(store.statsId);
+    const { stages } = view;
+    const existing = await readFormOpportunity(store.statsId, body.responseRef, view);
     if (existing) return Response.json({ ok: true, state: "existing", deal: existing });
     const form = await readForm(store.statsId, body.form);
     if (!form) return refuse("unknown", 404);
@@ -44,9 +45,9 @@ export async function POST(request: NextRequest) {
       if (follow.value.assignee !== store.email && !team.members.some(member => member.email === follow.value.assignee && can(member.role, "orders"))) return refuse("assignee");
     }
     const now = Math.floor(Date.now() / 1000);
-    const deal = parseDeal({ ...raw, ...follow.value, id: body.responseRef.slice(0, 10), createdAt: now, updatedAt: now }, stages);
+    const deal = parseDeal({ ...raw, ...follow.value, id: body.responseRef.slice(0, 10), createdAt: now, updatedAt: now }, stages, view.moved);
     if (!deal) return refuse("invalid");
-    const result = await createFormOpportunity(store.statsId, body.responseRef, deal, stages, store);
+    const result = await createFormOpportunity(store.statsId, body.responseRef, deal, view, store);
     if (result.state === "full") return refuse("full");
     return Response.json({ ok: true, state: result.state, deal: result.deal });
   } catch (error) {

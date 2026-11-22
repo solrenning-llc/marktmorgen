@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, readDeal, readStages, writeFields, writeStages } from "@/lib/crm";
+import { CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, readDeal, writeFields, writeStages, readStageView } from "@/lib/crm";
 import { DEFAULT_STAGES, type CrmField } from "@/lib/crm-rules";
 import { crmAnswer } from "@/lib/crm-response";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
@@ -51,7 +51,7 @@ async function main(){
     part("Confirmed writes preserve the intended cleanup and custom-stage move");
     await seed();is("field replacement returns confirmed definitions",await writeFields(sid,nextFields),nextFields);is("removed-field answers are deleted",(await original.call(redis,[["HGET",vk(),"person"]]))[0],null);
     await seed();await original.call(redis,[["DEL",vk()]]);is("confirmed absent answers need no deletion",await writeFields(sid,nextFields),nextFields);
-    await seed();is("custom-stage replacement succeeds",await writeStages(sid,DEFAULT_STAGES,ROOM),DEFAULT_STAGES);is("a deal of the removed custom stage is read in the first open one",(await readDeal(sid,oldDeal.id,await readStages(sid)))?.stage,"lead00");is("and its record is byte-for-byte unchanged",(await original.call(redis,[["HGET",dk(),oldDeal.id]]))[0],JSON.stringify(oldDeal));is("retained-stage record is byte-for-byte unchanged",(await original.call(redis,[["HGET",dk(),kept.id]]))[0],JSON.stringify(kept));
+    await seed();is("custom-stage replacement succeeds",await writeStages(sid,DEFAULT_STAGES,ROOM),DEFAULT_STAGES);is("a deal of the removed custom stage is read in the first open one",(await readDeal(sid,oldDeal.id,await readStageView(sid)))?.stage,"lead00");is("and its record is byte-for-byte unchanged",(await original.call(redis,[["HGET",dk(),oldDeal.id]]))[0],JSON.stringify(oldDeal));is("retained-stage record is byte-for-byte unchanged",(await original.call(redis,[["HGET",dk(),kept.id]]))[0],JSON.stringify(kept));
     part("API and UI retain the prewrite versus uncertain distinction");
     const owner="schema-owner@example.com";await claimHandle(owner,"schema-check","Schema Check","");await ensureStatsId(owner);sid=(await storeForEmail(owner))!.statsId!;const session=await openSession(owner);
     const call=async(body:Record<string,unknown>)=>{const r=await POST(new NextRequest("https://marktmorgen.com/api/store/crm",{method:"POST",headers:{"content-type":"application/json",cookie:SESSION_COOKIE+"="+session},body:JSON.stringify(body)}));return {status:r.status,body:await r.json()};};
@@ -67,7 +67,7 @@ async function main(){
   const concurrentEdit = { ...oldDeal, note: "Updated by another session", cents: 98765, futureMetadata: { source: "edited", tags: ["new"] } };
   await writeStages(sid, DEFAULT_STAGES, ROOM);
   await original.call(redis, [["HSET", dk(), oldDeal.id, JSON.stringify(concurrentEdit)]]);
-  is("an edit after the change is kept whole, and the deal is read in the first open stage", [(await original.call(redis, [["HGET", dk(), oldDeal.id]]))[0], (await readDeal(sid, oldDeal.id, await readStages(sid)))?.stage], [JSON.stringify(concurrentEdit), "lead00"]);
+  is("an edit after the change is kept whole, and the deal is read in the first open stage", [(await original.call(redis, [["HGET", dk(), oldDeal.id]]))[0], (await readDeal(sid, oldDeal.id, await readStageView(sid)))?.stage], [JSON.stringify(concurrentEdit), "lead00"]);
   done();
 }
 void main();

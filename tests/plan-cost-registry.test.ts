@@ -10,7 +10,7 @@ import { MAX_UNLOCK_PRODUCTS } from "@/lib/community-locked";
 import { SEARCH_CONVERSATIONS } from "@/lib/community-dm";
 import { ACCESS_CHECK_READ, searchRead, walkRead } from "./plan-cost-registry";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
-import { CRM_VALUE_SAVE, CRM_VALUE_SAVE_SECONDS, SHAPES } from "./plan-cost-registry";
+import { COMMAND, CRM_VALUE_SAVE, CRM_VALUE_SAVE_SECONDS, DB_BYTE, SHAPES, crmDealScanCost } from "./plan-cost-registry";
 import { COMPANIES_PAGE_READ, COMPANIES_REQUEST, STUDIO_UNIT_SENT } from "./plan-cost-registry";
 import { COMPANIES_READ_UNITS, COMPANIES_REQUEST_UNITS, COMPANY_MARKUP_BYTES, COMPANY_PERSON_MARKUP_BYTES, MAX_COMPANIES, MAX_COMPANIES_BYTES, MAX_COMPANY_PEOPLE, SENT_TIMES, sentBytes } from "@/lib/crm-companies-rules";
 import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS, benefitsRead } from "./plan-cost-registry";
@@ -52,8 +52,8 @@ import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
 import { PLAN_INVOICES_READ, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD } from "./plan-cost-registry";
-import { CRM_VALUE_MOST_BYTES, CRM_VALUE_SAVE_BYTES, CRM_VALUE_SAVE_COMMANDS, CRM_VALUE_SAVE_TRIPS, CRM_VALUE_SAVE_UNITS, TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
-import { MAX_FIELD_OPTION, MAX_FIELD_OPTIONS, MAX_FIELD_VALUE } from "@/lib/crm-rules";
+import { CRM_VALUE_MOST_BYTES, CRM_VALUE_SAVE_BYTES, CRM_VALUE_SAVE_COMMANDS, CRM_VALUE_SAVE_TRIPS, CRM_VALUE_SAVE_UNITS, DEAL_KEYS_WIRE_BYTES, DEAL_SCAN_BATCH, DEAL_WIRE_BYTES, MOVE_INSIDE_COMMANDS, SCAN_ROOM_COMMANDS, SCAN_TAKE_COMMANDS, SCAN_TAKE_TRIPS, SCAN_ROOM_TRIPS, SCAN_UNIT_BYTES, SCAN_UNIT_COMMANDS, SCAN_UNIT_TRIPS, TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, dealScanUnits, tasksRecountUnits } from "@/lib/crm";
+import { MAX_DEALS, MAX_FIELD_OPTION, MAX_FIELD_OPTIONS, MAX_FIELD_VALUE } from "@/lib/crm-rules";
 import { STUDIO_REQUEST_BYTES, flowHistoryUnits, keepVersionBytes, listVersionsBytes, restoreBytes, restoreTryBytes } from "@/lib/flow-versions-rules";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, POLL_VOTE_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request, SHORT_LINK_OPEN_READ } from "./plan-cost-registry";
@@ -482,6 +482,22 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(CRM_VALUE_SAVE_BYTES >= 2 * CRM_VALUE_MOST_BYTES);
   assert.ok(read("app/api/store/crm/route.ts").includes('body.action === "value" ? CRM_VALUE_SAVE_UNITS : 1'), "both are taken by the route's guard, with the first");
   assert.ok(!/takeAllowance\(store, "studio"/.test(read("lib/flows.ts")), "a workflow's field step takes no studio request");
+  // A change of stages that reads or rewrites the deals (lib/crm.ts, scanDeals and compactStageMoves): each step takes
+  // dealScanUnits studio requests first, a share of a request for each SCAN_UNIT_COMMANDS commands, SCAN_UNIT_BYTES
+  // bytes and SCAN_UNIT_TRIPS trips. Each share alone costs no more than a whole studio request, so shares that add up
+  // cover all three together; and the take itself is inside them (SCAN_TAKE_COMMANDS is TAKE_COMMANDS).
+  const tripCost = (trips: number) => crmDealScanCost(0, 0, trips + SHAPES.studio.seconds / ROUND_TRIP_SECONDS) - request("studio", 0, 0);
+  assert.ok(SCAN_UNIT_COMMANDS * COMMAND <= UNIT_COST.studio && SCAN_UNIT_BYTES * DB_BYTE <= UNIT_COST.studio && tripCost(SCAN_UNIT_TRIPS) <= UNIT_COST.studio, "each share of a scan's unit is inside a studio request");
+  assert.equal(SCAN_TAKE_COMMANDS, TAKE_COMMANDS);
+  const stepCost = (commands: number, bytes: number, trips: number) => commands * COMMAND + bytes * DB_BYTE + tripCost(trips);
+  for (const [commands, bytes, trips] of [[1, 1, 1], [5, DEAL_KEYS_WIRE_BYTES, 4], [5, DEAL_SCAN_BATCH * DEAL_WIRE_BYTES, 4], [DEAL_SCAN_BATCH * (1 + MOVE_INSIDE_COMMANDS) + SCAN_TAKE_COMMANDS + SCAN_ROOM_COMMANDS, 4 * DEAL_SCAN_BATCH * DEAL_WIRE_BYTES, 6], [12_345, 9_876_543, 21]]) {
+    assert.ok(dealScanUnits(commands, bytes, trips) * UNIT_COST.studio >= stepCost(commands, bytes, trips), `dealScanUnits(${commands}, ${bytes}, ${trips}) below what it covers`);
+  }
+  // At the most: every deal read (its ids, then a batch at a time), and every one rewritten, at its widest record.
+  const batches = Math.ceil(MAX_DEALS / DEAL_SCAN_BATCH);
+  const scanUnits = dealScanUnits(1 + SCAN_TAKE_COMMANDS, DEAL_KEYS_WIRE_BYTES, 1 + SCAN_TAKE_TRIPS) + batches * dealScanUnits(1 + SCAN_TAKE_COMMANDS, DEAL_SCAN_BATCH * (DEAL_WIRE_BYTES + 13) + 128, 1 + SCAN_TAKE_TRIPS);
+  const compactUnits = batches * dealScanUnits(DEAL_SCAN_BATCH * (1 + MOVE_INSIDE_COMMANDS) + SCAN_TAKE_COMMANDS + SCAN_ROOM_COMMANDS, DEAL_SCAN_BATCH * (4 * DEAL_WIRE_BYTES + 1_024), 1 + SCAN_TAKE_TRIPS + SCAN_ROOM_TRIPS);
+  console.log(`a change of stages that reads every deal: ${scanUnits} studio requests at most; that also rewrites every one: ${scanUnits + compactUnits} (a record at most ${DEAL_WIRE_BYTES} bytes on the wire)`);
   console.log(`a field saved from the studio: $${CRM_VALUE_SAVE.toFixed(6)} at most (${CRM_VALUE_SAVE_TRIPS} trips, ${CRM_VALUE_SAVE_SECONDS} s, ${CRM_VALUE_SAVE_COMMANDS} commands, ${CRM_VALUE_SAVE_BYTES} bytes), counted as ${CRM_VALUE_SAVE_UNITS} studio requests at $${UNIT_COST.studio.toFixed(6)}`);
   // A workflow's history (lib/flow-versions-rules.ts; Claude 5 on #1927, decision B): each path takes flowHistoryUnits of what it moves, measured
   // first, at UNIT_COST.studio's 50 KB, which covers its commands and those bytes at a whole studio request's shape.

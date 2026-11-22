@@ -10,7 +10,7 @@ import { MAX_STEP_NEXT_ACTION, MAX_STEP_NEXT_DAYS, readAction } from "@/lib/flow
 import { parseFlowList } from "@/lib/flow-list";
 import { enroll, readFlows, saveFlow, sendDueSteps } from "@/lib/flows";
 import { upsertContact } from "@/lib/contacts";
-import { readDeals, readStages, writeDeal } from "@/lib/crm";
+import { readDeals, readStages, writeDeal, readStageView } from "@/lib/crm";
 import { stepWhat } from "@/components/workflow-tools";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -42,6 +42,7 @@ async function main(): Promise<void> {
   const statsId = store.statsId!;
   const list = store.listId!;
   const stages = await readStages(statsId);
+  const view = await readStageView(statsId);
   const open = stages.find((s) => s.kind === "open")!;
   const won = stages.find((s) => s.kind === "won")!;
 
@@ -81,7 +82,7 @@ is("cleaned as the deals board cleans it", readAction({ do: "next", text: `Call$
   const before = Math.floor(Date.now() / 1000);
   for (const email of ["ana@example.com", "ben@example.com", "cy@example.com"]) await enroll(store, email, { joined: true });
   for (let i = 0; i < 4; i += 1) await run();
-  const deals = await readDeals(statsId, stages);
+  const deals = await readDeals(statsId, view);
   const ben = deals.find((d) => d.id === "bendeal001")!;
   const due = (days: number) => new Date((before + days * 86_400) * 1000).toISOString().slice(0, 10);
   is("the open deal gets the next action and the day it is due, in UTC", [ben.nextAction, ben.dueDate], ["Call to check in", due(3)]);
@@ -92,10 +93,10 @@ is("cleaned as the deals board cleans it", readAction({ do: "next", text: `Call$
   part("A deal that already has it");
   const again = await saveFlow(store, { name: "Follow up again", trigger: "tagged", tag: "again", active: true, steps: [{ delayHours: 0, action: { do: "next", text: "Call to check in", days: 3 } }] }, { activate: true });
   is("a second workflow with the same step saves", again.ok, true);
-  const stamped = (await readDeals(statsId, stages)).find((d) => d.id === "bendeal001")!.updatedAt;
+  const stamped = (await readDeals(statsId, view)).find((d) => d.id === "bendeal001")!.updatedAt;
   await enroll(store, "ben@example.com", { joined: false, tag: "again" });
   for (let i = 0; i < 4; i += 1) await run();
-  is("the same next action and due date: confirmed, not written again", (await readDeals(statsId, stages)).find((d) => d.id === "bendeal001")!.updatedAt, stamped);
+  is("the same next action and due date: confirmed, not written again", (await readDeals(statsId, view)).find((d) => d.id === "bendeal001")!.updatedAt, stamped);
 
   part("Said in words");
   const studio = readFileSync("components/email-studio.tsx", "utf8");

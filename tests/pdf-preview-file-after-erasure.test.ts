@@ -11,12 +11,14 @@
  *   - a live store keeps both its preview file and its record (control);
  *   - a request made under the old owner ref of a store moved to another account meanwhile is refused, but the file
  *     is not deleted: the moved store is live, and its own fresh request may have kept a record for that same path;
- *   - an unknown answer from the keeper deletes nothing: the record may have been kept (rule 24).
+ *   - an unknown answer from the keeper deletes nothing: the record may have been kept (rule 24);
+ *   - a store whose id key is not set yet while its record already carries its id (lib/store.ts ensureStoreId saves the
+ *     record first; Claude 5 icEJ's LEVE on #5140) is refused without deleting the file, and served once the key is set.
  * Synthetic stores, a synthetic PDF made with pdf-lib, an in-memory file store, the Redis stub.
  */
 import { NextRequest } from "next/server";
 import { PDFDocument } from "pdf-lib";
-import { addProduct, claimHandle, closeStoreRecord, ensureStatsId, ERASING_KEY, erasingField, moveAccount, setProductFile, setProductPreview, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { addProduct, claimHandle, closeStoreRecord, ensureStatsId, ERASING_KEY, erasingField, moveAccount, setProductFile, setProductPreview, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
 import { dataKey } from "@/lib/store-data";
 import type { ProductFile } from "@/lib/product-file";
 import { previewKey } from "@/lib/pdf-preview";
@@ -71,7 +73,7 @@ async function fixture(): Promise<{ id: string; file: ProductFile; folder: strin
 const isKeeper = (key: string) => (commands: (string | number)[][]) => commands.some((c) => (c[0] === "SET" && c[1] === key) || (c[0] === "EVAL" && c[5] === key));
 
 async function main(): Promise<void> {
-  for (const state of ["live", "erasing", "closed", "moved-live"] as const) {
+  for (const state of ["live", "erasing", "closed", "moved-live", "id-being-set"] as const) {
     part(`The preview file once its store's folder was cleaned before the keeper: ${state}`);
     const f = await fixture();
     const key = previewKey(f.file, 3);
@@ -94,6 +96,9 @@ async function main(): Promise<void> {
           if (!moved.ok || !found || found.sid !== parent.sid || found.statsId !== parent.statsId) throw new Error("move fixture");
           // The moved store's own visitor makes and keeps the preview, at the same path, before the stale keeper answers.
           freshStatus = await ask(f.id);
+        } else if (state === "id-being-set") {
+          // Between ensureStoreId's save of the record (with its sid) and its SET of the id key: the key is not there yet.
+          await pipeline([["DEL", storeIdCommand(parent.sid)[1]]]);
         }
         if (state === "erasing" || state === "closed") {
           // The erasure's folder cleanup passed this folder before the preview file was written: everything else is gone.
@@ -116,6 +121,11 @@ async function main(): Promise<void> {
       is("the stale request under the old owner is refused", status, 404);
       is("the moved store's record is kept", typeof kept === "string", true);
       is("and the file it names is still there: the stale request deletes nothing", typeof kept === "string" && files.has((JSON.parse(kept) as ProductFile).pathname), true);
+    } else if (state === "id-being-set") {
+      is("the request is refused while the id key is not set, with no record", [status, kept], [404, null]);
+      is("but the preview file is not deleted: the store is live and only being given its id", previewFiles(f.folder).length, 1);
+      await pipeline([["SET", storeIdCommand(parent.sid)[1], storeRef(parent)]]);
+      is("once the id key is set, the next request is served", await ask(f.id), 200);
     } else {
       is("the erased store's request is refused, with no record", [status, kept], [404, null]);
       is("and no preview file is left in the erased store's folder", previewFiles(f.folder), []);

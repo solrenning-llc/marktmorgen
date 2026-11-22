@@ -65,17 +65,14 @@ const SCRIPTS: Record<string, Script> = {
     return n;
   },
   // lib/live-fence.ts SET_IF_STORE_LIVE: a store's cache written only while it is not erasing and its key is still
-  // its own: the id key holds this store's ref, or (from before ids) the owner's record carries its statsId. 0 erased
-  // (erasing, or its id key gone), 2 no longer this ref's (its id key repointed, or its owner's record gone or another's).
-  "store-cache-live:v4": (run, [live, erasing, key], [field, value, seconds, statsId, ref]) => {
+  // its own: the id key holds this store's ref, or (from before ids) the owner's record carries its statsId.
+  "store-cache-live:v3": (run, [live, erasing, key], [field, value, seconds, statsId, ref]) => {
     if (run(["HGET", erasing, field]) !== null) return 0;
     if (statsId === "") {
-      const held = run(["GET", live]);
-      if (held === null) return 0;
-      if (held !== ref) return 2;
+      if (run(["GET", live]) !== ref) return 0;
     } else {
       const raw = run(["GET", live]);
-      if (raw === null) return 2;
+      if (raw === null) return 0;
       let record: unknown;
       try {
         record = JSON.parse(String(raw));
@@ -83,12 +80,48 @@ const SCRIPTS: Record<string, Script> = {
         return -1;
       }
       if (!record || typeof record !== "object") return -1;
-      if ((record as { statsId?: unknown }).statsId !== statsId) return 2;
+      if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
     }
     run(["SET", key, value, "EX", seconds]);
     return 1;
   },
   // lib/store-live-cache.ts CLAIM_IF_STORE_LIVE: a mark taken once (SET NX) only while the store is its own and not
+  // lib/live-fence.ts SET_IF_STORE_LIVE_TELLING: SET_IF_STORE_LIVE's write with the refusal told apart. 0 erased (the
+  // erasing mark, or the id key gone with the owner's record gone or another store's), 2 not known erased (the id key
+  // repointed, or gone while the record still carries this sid; from before ids, the record gone or another's).
+  "store-cache-live-telling:v1": (run, [live, erasing, key, owner], [field, value, seconds, statsId, ref, sid]) => {
+    if (run(["HGET", erasing, field]) !== null) return 0;
+    if (statsId === "") {
+      const held = run(["GET", live]);
+      if (held === ref) {
+        run(["SET", key, value, "EX", seconds]);
+        return 1;
+      }
+      if (held !== null) return 2;
+      const raw = run(["GET", owner]);
+      if (raw === null) return 0;
+      let record: unknown;
+      try {
+        record = JSON.parse(String(raw));
+      } catch {
+        return -1;
+      }
+      if (!record || typeof record !== "object") return -1;
+      return (record as { sid?: unknown }).sid === sid ? 2 : 0;
+    }
+    const raw = run(["GET", live]);
+    if (raw === null) return 2;
+    let record: unknown;
+    try {
+      record = JSON.parse(String(raw));
+    } catch {
+      return -1;
+    }
+    if (!record || typeof record !== "object") return -1;
+    if ((record as { statsId?: unknown }).statsId !== statsId) return 2;
+    run(["SET", key, value, "EX", seconds]);
+    return 1;
+  },
   // erasing, by the same identity rule; -1 gone or erasing, -2 an owner's record that does not parse, 1 ours, 0 taken.
   "store-claim-live:v1": (run, [live, erasing, key], [field, value, seconds, statsId, ref]) => {
     if (run(["HGET", erasing, field]) !== null) return -1;

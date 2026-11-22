@@ -38,11 +38,12 @@ export async function setWhileStoreLive(store: Pick<Store, "email" | "sid" | "ex
 }
 
 /**
- * setWhileStoreLive telling "erased" (its erasure begun, or its id key gone) from "gone" (no longer this ref's, as after
- * a move, so it may still be live): lib/live-fence.ts setIfStoreLiveTelling.
+ * setWhileStoreLive telling "erased" (its erasure begun, or its id key and its record gone or replaced) from "gone" (no
+ * longer this ref's, as after a move, or its id still being set, so it may still be live): lib/live-fence.ts
+ * setIfStoreLiveTelling, with the store's own record key and id.
  */
 export async function setWhileStoreLiveTelling(store: Pick<Store, "email" | "sid" | "extra" | "statsId">, key: string, value: string, seconds: number): Promise<"kept" | "erased" | "gone" | "unknown"> {
-  return setIfStoreLiveTelling(await storeLiveFence(store), key, value, seconds);
+  return setIfStoreLiveTelling(await storeLiveFence(store), await ownerKey(storeRef(store)), store.sid ?? "", key, value, seconds);
 }
 
 // The same identity rule as SET_IF_STORE_LIVE, for a mark taken once (lib/claim-mark.ts claimMark's SET NX): a job that

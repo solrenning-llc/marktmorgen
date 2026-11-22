@@ -809,7 +809,9 @@ export const CHAVES = ["record-review", "ready-check", "on-call"];
 //  1. só a sessão nomeada (Claude 5 ibqho) age; a reserva (Claude 1 A) só em três casos: 60 minutos sem sinal da
 //     nomeada no correio, a família Claude 5 declarada sem cota, ou mensagem do dono (--owner-message, gravada);
 //  3. nunca num PR que a sessão escreveu (trailer Claude-Session nos commits), revisou ou enfileirou (no correio);
-//  4. só com o pedido do coordenador publicado na #4932, conferido na hora pelo gh (--request): um comentário com a linha
+//  4. só com o pedido do coordenador publicado no canal de coordenação em vigor (a issue aberta com o rótulo canal-ativo,
+//     AC (y); hoje a #5104, que continua a #4932) ou na parte que ele continua, conferido na hora pelo gh (--request):
+//     um comentário com a linha
 //     "AGENT-MAIL-REQUEST <identificador C1-...> <comando> <alvo>", de no máximo PEDIDO_MAX_H horas, usado uma vez só
 //     (revisão do Claude 4 3Kc no #5052); a ação é avisada a todos no mesmo commit, com o pedido. Desligar continua livre.
 // O sinal da sessão nomeada é lido do histórico local do correio; num clone raso que não cobre os 60 minutos, a falta de
@@ -821,12 +823,33 @@ export const CHAVES = ["record-review", "ready-check", "on-call"];
 // ---------------------------------------------------------------------------------------------------------------------
 export const SESSAO_NOMEADA = "session_012ST5ibqhoHCYrphJXU5az3"; // Claude 5 ibqho
 export const SESSAO_RESERVA = "session_01DKvYQaxPrZTrVdXNwosXYi"; // Claude 1 A
-export const CANAL_PEDIDOS = 4932;
+export const CANAL_PEDIDOS = 4932; // a parte do canal em que a regra nasceu; o canal em vigor é lido em canaisDePedido()
 export const SINAL_MIN = 60;
 export const PEDIDO_MAX_H = 2;
 export const PREFIXO_COORDENADOR = "C1"; // o coordenador é o Claude 1 (C1-20261121-2036-C6-1, condição 5)
-const LINK_PEDIDO = /^(?:https:\/\/github\.com\/solrenning-llc\/marktmorgen\/issues\/4932#issuecomment-)?(\d+)$/;
-const LINHA_PEDIDO = /^Pedido: https:\/\/github\.com\/solrenning-llc\/marktmorgen\/issues\/4932#issuecomment-\d+$/m;
+const LINK_PEDIDO = /^(?:https:\/\/github\.com\/solrenning-llc\/marktmorgen\/issues\/(\d+)#issuecomment-)?(\d+)$/;
+const LINHA_PEDIDO = /^Pedido: https:\/\/github\.com\/solrenning-llc\/marktmorgen\/issues\/\d+#issuecomment-\d+$/m;
+
+/**
+ * As issues em que um pedido do coordenador vale agora: a única issue aberta com o rótulo canal-ativo (AC (y)) e a parte
+ * que ela continua ("continues #N" no título), lidas na hora no GitHub. O canal troca de parte aos 2.250 comentários
+ * (AC (p)): em 22/11/2026 a #5104 assumiu da #4932, e um pedido escrito nela era recusado. null = NÃO CONFERIDO (o gh
+ * não respondeu, nenhuma ou mais de uma issue com o rótulo): quem chama não faz nada (passo 4).
+ */
+export function canaisDePedido() {
+  try {
+    if (testeLigado("CORREIO_SEM_GH")) throw new Error("sem gh");
+    const saida = execFileSync("gh", ["api", "repos/solrenning-llc/marktmorgen/issues?labels=canal-ativo&state=open&per_page=100", "--jq", ".[] | [.number, (.title // \"\")] | @json"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
+    const abertas = saida.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+    if (abertas.length !== 1 || !Number.isInteger(abertas[0][0])) return null;
+    const [ativo, titulo] = abertas[0];
+    const anterior = Number(/\(continues #(\d+)\)/i.exec(String(titulo))?.[1]);
+    return { ativo, anterior: Number.isInteger(anterior) && anterior !== ativo ? anterior : null };
+  } catch {
+    return null;
+  }
+}
 const sessaoInteira = (s) => String(s?.texto ?? "").split(" ")[0];
 
 /** Um registro privilegiado só vale com a sessão nomeada ou a reserva, o nome da família dela e a linha do pedido. */
@@ -853,13 +876,19 @@ export function ultimoSinal(sessao, commit = buscar(), agora = new Date()) {
 }
 
 /**
- * Confere no GitHub, agora, que o pedido é um comentário da #4932, de no máximo PEDIDO_MAX_H horas, com a linha
+ * Confere no GitHub, agora, que o pedido é um comentário do canal em vigor ou da parte que ele continua (canaisDePedido),
+ * de no máximo PEDIDO_MAX_H horas, com a linha
  * "AGENT-MAIL-REQUEST <identificador do coordenador> <comando> <alvo>", ainda não usado; devolve o endereço e o identificador.
  */
 export function conferirPedido(pedido, comando, alvo, commit = buscar(), agora = new Date()) {
-  const m = LINK_PEDIDO.exec(String(pedido === true ? "" : pedido ?? "").trim());
-  if (!m) throw new Error(`--request é obrigatório: o comentário do coordenador na #${CANAL_PEDIDOS} que pede esta ação (https://github.com/solrenning-llc/marktmorgen/issues/${CANAL_PEDIDOS}#issuecomment-N), C1-20261121-2036-C6-1, condição 4`);
-  const esperado = `https://github.com/solrenning-llc/marktmorgen/issues/${CANAL_PEDIDOS}#issuecomment-${m[1]}`;
+  const lido = LINK_PEDIDO.exec(String(pedido === true ? "" : pedido ?? "").trim());
+  if (!lido) throw new Error("--request é obrigatório: o comentário do coordenador no canal em vigor (a issue com o rótulo canal-ativo) que pede esta ação (https://github.com/solrenning-llc/marktmorgen/issues/<canal>#issuecomment-N), C1-20261121-2036-C6-1, condição 4");
+  const m = [lido[0], lido[2]];
+  const canais = canaisDePedido();
+  if (!canais) throw new Error(`o canal em vigor (a issue aberta com o rótulo canal-ativo) NÃO FOI CONFERIDO no GitHub agora; o pedido ${m[1]} não foi usado e nada foi feito (passo 4)`);
+  const validos = [canais.ativo, canais.anterior].filter(Boolean);
+  const nomeCanais = `#${canais.ativo}${canais.anterior ? ` ou da #${canais.anterior}, a parte que ele continua` : ""}`;
+  if (lido[1] && !validos.includes(Number(lido[1]))) throw new Error(`o comentário ${m[1]} não é do canal em vigor (${nomeCanais}): #${lido[1]}`);
   let url, corpo, criado;
   try {
     if (testeLigado("CORREIO_SEM_GH")) throw new Error("sem gh");
@@ -868,7 +897,8 @@ export function conferirPedido(pedido, comando, alvo, commit = buscar(), agora =
   } catch {
     throw new Error(`o pedido ${m[1]} NÃO FOI CONFERIDO no GitHub agora; nada foi feito (passo 4: nada NÃO CONFERIDO segue)`);
   }
-  if (url !== esperado) throw new Error(`o comentário ${m[1]} não é da #${CANAL_PEDIDOS}: ${url}`);
+  const esperado = validos.map((n) => `https://github.com/solrenning-llc/marktmorgen/issues/${n}#issuecomment-${m[1]}`).find((u) => u === url);
+  if (!esperado) throw new Error(`o comentário ${m[1]} não é do canal em vigor (${nomeCanais}): ${url}`);
   const quando = new Date(criado);
   if (Number.isNaN(quando.getTime()) || agora - quando > PEDIDO_MAX_H * 3600000 || quando - agora > 5 * 60000) {
     throw new Error(`o comentário ${m[1]} não é um pedido recente (de no máximo ${PEDIDO_MAX_H} horas): ${criado || "sem data"}`);

@@ -25,8 +25,7 @@ import { vatOnTop } from "@/lib/eu-vat-amount";
 import { REVIEWED_VAT_FX_ALLOWANCES, allowanceInForce, vatCollectionCostOf, type VatFxAllowance } from "@/lib/eu-vat-collection-cost";
 import { UK_VAT_RATE_VALID_UNTIL, ukVatOnTop } from "@/lib/uk-vat";
 import {
-  EU_OSS_REGISTRATION, EU_VAT_COLLECT_REVIEWED, UK_VAT_COLLECT_REVIEWED, UK_VAT_REGISTRATION, VAT_COMMERCIAL_REVIEWS, euVatCollectOn,
-  type SwitchInput, ukVatCollectOn,
+  EU_OSS_REGISTRATION, UK_VAT_REGISTRATION, VAT_COMMERCIAL_REVIEWS, euVatCollectOn, type SwitchInput, ukVatCollectOn, vatCanTurnOn,
 } from "@/lib/vat-registrations";
 
 /** The Stripe rate the example uses, in basis points: an illustration, never a creator's real rate. */
@@ -165,12 +164,11 @@ function sinceOf(places: VatFeePlace[], input: VatFeeInput, now: Date, currency:
 }
 
 /**
- * Whether the words can ever show in this build: only while EU_VAT_COLLECT_REVIEWED or UK_VAT_COLLECT_REVIEWED is true.
- * Both are constants, so while both are false no clock turns a switch on and a page built ahead of time says what the
- * checkout does. Once one is true, the switch also turns on with dates (a registration, a review, an allowance), so the
- * Terms and the pricing page render per request and read the same decision as the checkout (Claude 1 f9afa7's MEDIUM).
+ * Whether the words can ever show in this build (lib/vat-registrations.ts). While it is false no clock turns a switch on,
+ * so a page built ahead of time says what the checkout does; once it is true, the Terms and the pricing page render per
+ * request (components/per-request.tsx) and the proxy gives them the nonce policy (lib/csp.ts), on this same answer.
  */
-export const vatCanTurnOn = (): boolean => EU_VAT_COLLECT_REVIEWED || UK_VAT_COLLECT_REVIEWED;
+export { vatCanTurnOn };
 
 const realDay = (day: string): boolean => {
   const at = new Date(`${day}T00:00:00Z`);

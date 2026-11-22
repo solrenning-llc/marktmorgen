@@ -62,6 +62,7 @@ import { AUDIO_FRAME_ORIGINS } from "./audio-embed";
 import { STREAM_API_ORIGIN, STREAM_PLAYER_ORIGIN } from "./stream-rules";
 import { VAULT_FILES } from "./vault-rules";
 import { REVEAL_HASHES } from "./reveal-scripts";
+import { vatCanTurnOn } from "./vat-registrations";
 
 /** Where the ad platforms' own scripts send what they measure. */
 const PIXEL_CONNECT = [
@@ -204,8 +205,11 @@ export function newNonce(): string {
  * On a creator's own domain every page is a store page, so the proxy asks
  * this about the path it rewrites to, which always starts with /@.
  */
-export function isDynamicPage(pathname: string): boolean {
-  return /^\/(?:@|%40)/i.test(pathname) || /^\/(studio|signin|unsubscribe)(\/|$)/.test(pathname) || isEmbedPage(pathname);
+export function isDynamicPage(pathname: string, vatPagesPerRequest: boolean = vatCanTurnOn()): boolean {
+  return /^\/(?:@|%40)/i.test(pathname) || /^\/(studio|signin|unsubscribe)(\/|$)/.test(pathname) || isEmbedPage(pathname)
+    // The Terms and the pricing page render per request exactly when a VAT switch can turn on (lib/vat-registrations.ts,
+    // vatCanTurnOn; components/per-request.tsx), so they get the nonce policy on that same answer, never apart from it.
+    || (vatPagesPerRequest && /^\/(terms|pricing)\/?$/.test(pathname));
 }
 
 /** The card a creator pastes into their own site, and the checkout script's card and sign-up form (/embed/<store>/join): framed anywhere, and nothing else is. */

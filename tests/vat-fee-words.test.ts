@@ -20,6 +20,7 @@ import { vatOnTop } from "@/lib/eu-vat-amount";
 import { ukVatOnTop } from "@/lib/uk-vat";
 import { vatCollectionCostOf, type VatFxAllowance } from "@/lib/eu-vat-collection-cost";
 import type { SwitchInput } from "@/lib/vat-registrations";
+import { isDynamicPage } from "@/lib/csp";
 
 const NOW = new Date("2026-11-22T12:00:00Z");
 const ALLOWANCES: VatFxAllowance[] = [
@@ -141,6 +142,16 @@ test("pages and checkout read the same decision: with both reviewed constants of
   }
   const marker = readFileSync(join(process.cwd(), "components/per-request.tsx"), "utf8");
   assert.match(marker, /await connection\(\);/, "the marker waits for the request (next/server connection)");
+});
+
+test("the nonce policy follows the same decision: /terms and /pricing are per-request pages exactly when vatCanTurnOn() (Claude 1 E's LEVE)", () => {
+  for (const path of ["/terms", "/pricing"]) {
+    assert.equal(isDynamicPage(path), vatCanTurnOn(), `${path}: the proxy's nonce decision is the pages' per-request decision`);
+    assert.equal(isDynamicPage(path, true), true, `${path} gets the nonce policy once a switch can turn on`);
+    assert.equal(isDynamicPage(path, false), false, `${path} keeps the static policy while it is built ahead of time`);
+  }
+  for (const path of ["/terms-of-sale", "/pricing/compare", "/help"]) assert.equal(isDynamicPage(path, true), false, `${path} is not one of the two pages`);
+  assert.equal(isDynamicPage("/studio", false), true, "the pages that were per request stay so");
 });
 
 test("only allowances the cost code accepts date the words; a malformed one never throws (Claude 1 f9afa7's LEVE)", () => {

@@ -105,3 +105,11 @@ export function vatSwitchProblems(jurisdiction: "EU" | "UK", input: SwitchInput 
 export const euVatCollectOn = (input: SwitchInput = {}): boolean => vatSwitchProblems("EU", input).length === 0;
 /** Whether UK VAT may be collected now: UK_VAT_COLLECT_REVIEWED, the UK registration and the owner's review together. */
 export const ukVatCollectOn = (input: SwitchInput = {}): boolean => vatSwitchProblems("UK", input).length === 0;
+
+/**
+ * Whether a VAT switch can turn on in this build at all: only while EU_VAT_COLLECT_REVIEWED or UK_VAT_COLLECT_REVIEWED
+ * is true. Both are constants, so while both are false no clock or date turns a switch on before a new deploy. The
+ * Terms and the pricing page render per request exactly when this is true (lib/vat-fee-words.ts), and the proxy gives
+ * them the nonce policy on the same answer (lib/csp.ts, isDynamicPage).
+ */
+export const vatCanTurnOn = (): boolean => EU_VAT_COLLECT_REVIEWED || UK_VAT_COLLECT_REVIEWED;

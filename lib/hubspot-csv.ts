@@ -43,7 +43,7 @@ export type HubSpotFile = "contacts" | "deals";
 export const HUBSPOT_LABELS = {
   recordId: "Record ID",
   contacts: { email: "Email", firstName: "First name", lastName: "Last name", phone: "Phone number" },
-  deals: { title: "Deal name", stage: "Deal stage", pipeline: "Pipeline", amount: "Amount", closeDate: "Close date", currency: "Currency" },
+  deals: { title: "Deal name", stage: "Deal stage", pipeline: "Pipeline", amount: "Amount", closeDate: "Close date", currency: "Currency", associatedContact: "Associated Contact" },
 } as const;
 
 /** How the start of an associated-contacts column reads, once squashed (see `squash`). */
@@ -260,8 +260,24 @@ export function readHubSpotDate(raw: string): { date: string | null; note: strin
   return { date: day, note: "" };
 }
 
-/** An address in a cell: its last part letters, digits or dashes, so a dot that ends a sentence is never kept. */
-const ADDRESS = /[^\s@;,<>()"']{1,64}@[^\s@;,<>()"']{1,255}\.[A-Za-z0-9-]{2,}/g;
+/**
+ * An address in a cell: its last part letters, digits or dashes, so a dot that ends a sentence is never kept, and no
+ * control character, which no address has and the CRM never keeps (oneLine), so the address checked against the
+ * store's deleted people is the one the save writes (coordinator's LOW 1 on #2048, 29th batch).
+ */
+const ADDRESS = /[^\s@;,<>()"'\u0000-\u001f\u007f]{1,64}@[^\s@;,<>()"'\u0000-\u001f\u007f]{1,255}\.[A-Za-z0-9-]{2,}/g;
+
+/** The longest address a deal keeps, once lowercased (parseDeal, lib/crm-rules.ts). */
+export const HUBSPOT_ADDRESS_MAX = 254;
+
+/**
+ * Why a deal whose associated address the CRM would not keep exactly as read does not come in (an address whose
+ * part before "@" is past 64 characters once lowercased, which lowercasing a few letters can do): never kept changed.
+ */
+export const ADDRESS_NOT_KEPT_REASON = "This deal's associated contact has an email address a deal here cannot keep as it is written, so this row was not brought in. Fix the address in HubSpot, then export again.";
+
+/** Why a deal whose associated address is longer than a deal keeps does not come in: the address is never cut. */
+export const ADDRESS_TOO_LONG_REASON = `This deal's associated contact has an email address longer than ${HUBSPOT_ADDRESS_MAX} characters, which a deal here cannot keep, so this row was not brought in. Fix the address in HubSpot, then export again.`;
 
 /** A deal as it would come in, before anything is saved: names, not ids, for the pipeline and stage. */
 export type HubSpotDealDraft = {
@@ -373,7 +389,17 @@ export function tooManyDealsSentence(count: number, room: number): string {
  */
 export function planHubSpotDeals(file: { header: readonly string[]; rows: readonly (readonly string[])[]; lines?: readonly number[] }, options: HubSpotDealsOptions): HubSpotDealsPlan {
   const columns = hubSpotDealColumns(file.header);
-  const label = (at: number) => (at >= 0 ? (file.header[at] ?? "").trim() : "");
+  // A refusal names its column as HubSpot labels it, never as the file spells it: a label of up to HUBSPOT_MAX_CELL
+  // characters, said again on every row refused, would make the answer many times the file (coordinator's MEDIUM on
+  // #2048, 29th batch; HUBSPOT_ROW_SENT_BYTES, lib/hubspot-import.ts).
+  const labelOf = new Map<number, string>([
+    [columns.recordId, HUBSPOT_LABELS.recordId],
+    [columns.title, HUBSPOT_LABELS.deals.title],
+    [columns.stage, HUBSPOT_LABELS.deals.stage],
+    [columns.pipeline, HUBSPOT_LABELS.deals.pipeline],
+    ...columns.contacts.map((at) => [at, HUBSPOT_LABELS.deals.associatedContact] as [number, string]),
+  ]);
+  const label = (at: number) => (at >= 0 ? (labelOf.get(at) ?? "") : "");
   const refused: HubSpotRefusal[] = [];
   const read: (HubSpotDealDraft & { key: string })[] = [];
   const seen = new Map<string, number>();
@@ -392,8 +418,13 @@ export function planHubSpotDeals(file: { header: readonly string[]; rows: readon
     if (pipeline.length > MAX_PIPELINE_NAME) return refuse(columns.pipeline, pipeline, `A pipeline name here holds up to ${MAX_PIPELINE_NAME} characters, and this one is longer. Rename the pipeline in HubSpot, then export again.`);
     const amount = readHubSpotAmount(cell(columns.amount), options.currency, cell(columns.currency), options.statedCurrency ?? "");
     const close = readHubSpotDate(cell(columns.closeDate));
-    const addresses = columns.contacts.flatMap((at) => (row[at] ?? "").match(ADDRESS) ?? []).map((a) => a.toLowerCase());
+    // Each address as the save keeps it (parseDeal: one line, well formed, lowercased), so the dry run, the check against
+    // the store's deleted people and the save all read the same one (coordinator's LOW 1 on #2048, 29th batch).
+    const addresses = columns.contacts.flatMap((at) => (row[at] ?? "").match(ADDRESS) ?? []).map((a) => oneLine(a).toLowerCase());
     const unique = [...new Set(addresses)];
+    // An address longer than a deal keeps is refused with its row, never cut (coordinator's LOW 2 on #2048, 29th batch).
+    // The address is not said back: it may be someone the store deleted.
+    if ((unique[0] ?? "").length > HUBSPOT_ADDRESS_MAX) return refuse(columns.contacts[0], "", ADDRESS_TOO_LONG_REASON);
     read.push({
       key: pipeline.toLowerCase(),
       line,

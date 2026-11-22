@@ -30,7 +30,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { CRM_LOCKED_CHANGE_UNITS, CRM_LOCK_COMMANDS_MOST, CRM_LOCK_WAIT_MS, IMPORT_CRM_DEALS, dealCount, readDeal, readDeals, readOpportunityReview, readPipelines, savePipelineChange, takeCrmLock, writeDeal } from "@/lib/crm";
 import { MAX_DEALS, MAX_DEAL_CENTS, MAX_DEAL_NOTE, MAX_DEAL_TITLE, MAX_STAGES, PIPELINES_BY_TIER, allStages, parseDeal, readFollowUp } from "@/lib/crm-rules";
 import { STAGE_PAST_REASON, pipelineRoomReason } from "@/lib/hubspot-csv";
-import { DEAL_JSON_MAX_BYTES, DEAL_MOVED_MAX_BYTES, HUBSPOT_CHECK_BYTES, HUBSPOT_CHECK_COMMANDS, HUBSPOT_MAX_ROWS, HUBSPOT_PRINT_BYTES, HUBSPOT_SAVE_BYTES, HUBSPOT_SAVE_COMMANDS, HUBSPOT_IMPORT_WORDS, type HubSpotImportResult, hubSpotDealId, hubSpotDealNote, importHubSpotDeals } from "@/lib/hubspot-import";
+import { DEAL_JSON_MAX_BYTES, DEAL_MOVED_MAX_BYTES, ERASED_NOTE, HUBSPOT_BODY_BYTES, HUBSPOT_CHECK_BYTES, HUBSPOT_CHECK_COMMANDS, HUBSPOT_LISTS_LEFT_OUT, HUBSPOT_MAX_ROWS, HUBSPOT_PIPELINES_SENT_BYTES, HUBSPOT_PRINT_BYTES, HUBSPOT_ROW_SENT_BYTES, HUBSPOT_SAVE_BYTES, HUBSPOT_SAVE_COMMANDS, HUBSPOT_SENT_MAX_BYTES, HUBSPOT_IMPORT_WORDS, type HubSpotImportResult, hubSpotAnswerBody, hubSpotDealId, hubSpotDealNote, importHubSpotDeals } from "@/lib/hubspot-import";
 import { takeImportRows } from "@/lib/imports";
 import { IMPORT_ALLOWANCES, IMPORT_WORST_BYTES_PER_ROW } from "@/lib/import-limits";
 import { LockBusyError, releaseLock } from "@/lib/redis-lock";
@@ -577,6 +577,14 @@ async function main(): Promise<void> {
   const backIn = (await readDeals(goneId, allStages(await readPipelines(goneId)))).find((d) => d.id === hubSpotDealId("7001"));
   is("the deleted person's deal comes in without their address", [secondIn.status, secondIn.body.summary?.added, backIn?.email], [200, 1, ""]);
   is("nor does the summary name it", JSON.stringify(secondIn.body).includes("ada@example.com"), false);
+  // Coordinator's LOW 1 on #2048 (29th batch): an address with a control character in front is read as the save keeps
+  // it, so the dry run says what the save does and the save is never refused as erased for it.
+  const ctrlFile = { header: HEADER, currency: "usd", rows: [row("7003", "Ada again", "New", "Sales", "", "", "Ada (\u0001ada@example.com)")] };
+  const ctrlDry = await call({ action: "check", ...ctrlFile }, gone.session);
+  is("the dry run reads the deleted address with a control character in front as hers: the deal comes in without it", [ctrlDry.status, ctrlDry.body.summary?.added, ctrlDry.body.summary?.notices?.map((x: { note: string }) => x.note)], [200, 1, [ERASED_NOTE]]);
+  const ctrlIn = await call({ action: "save", ...ctrlFile }, gone.session);
+  const ctrlDeal = (await readDeals(goneId, allStages(await readPipelines(goneId)))).find((d) => d.id === hubSpotDealId("7003"));
+  is("and the save brings it in as the dry run said, never refused as erased", [ctrlIn.status, ctrlIn.body.error ?? "", ctrlIn.body.summary?.added, ctrlDeal?.email], [200, "", 1, ""]);
 
   const late = await paidStore("erasedlate");
   const lateStore = (await ensureListId(late.owner))!;
@@ -725,6 +733,21 @@ async function main(): Promise<void> {
     is("control: the address is within 254 as sent, past it once lowercased", [dotted.length <= 254, dotted.toLowerCase().length > 254], [true, true]);
     is("the deal is read, its address never past 254", [Boolean(deal), deal.email.length <= 254], [true, true]);
     is("and an assignee that lowercases longer is refused, as before", readFollowUp({ assignee: dotted }).ok, false);
+
+    // Coordinator's LOW 3 on #2048 (29th batch): on the board, such an address is refused with what to fix, never kept empty.
+    const board = await paidStore("hubsboardmail");
+    const boardCall = async (body: Record<string, unknown>) => {
+      const response = await CRM_POST(new NextRequest("https://marktmorgen.com/api/store/crm", { method: "POST", headers: { "content-type": "application/json", cookie: SESSION_COOKIE + "=" + board.session }, body: JSON.stringify(body) }));
+      return { status: response.status, body: await response.json() };
+    };
+    const boardStage = allStages(await readPipelines(board.store.statsId!))[0].id;
+    const fine = await boardCall({ action: "deal", deal: { title: "Plain", email: "Plain@Example.com", stage: boardStage } });
+    is("control: a plain address is saved, lowercased", [fine.status, fine.body.deal?.email], [200, "plain@example.com"]);
+    for (const [name, email] of [["once lowercased", dotted], ["as sent", `${"a".repeat(64)}@${"b".repeat(200)}.com`]] as const) {
+      const refused = await boardCall({ action: "deal", deal: { title: "Long address", email, stage: boardStage } });
+      is(`an address past 254 ${name} is refused on the board as the address`, [refused.status, refused.body.error], [400, "email"]);
+    }
+    is("and nothing was saved for them", await dealCount(board.store.statsId!), 1);
   }
 
   part("Coordinator's LOW 4 on #2048 (22nd batch): a pipeline and a stage with a lone surrogate match the ones they made on the next import");
@@ -792,6 +815,63 @@ async function main(): Promise<void> {
     is("answered: every deal already here, nothing added", [fatSave.out.status, fatSave.out.body.summary?.added, fatSave.out.body.summary?.alreadyThere], [200, 0, MAX_DEALS]);
     is("within HUBSPOT_SAVE_COMMANDS and HUBSPOT_SAVE_BYTES", [fatSave.commands <= HUBSPOT_SAVE_COMMANDS, fatSave.bytes <= HUBSPOT_SAVE_BYTES], [true, true]);
     is("each new deal's write past its row is priced: HUBSPOT_SAVE_BYTES holds MAX_DEALS of them over HUBSPOT_CHECK_BYTES", HUBSPOT_SAVE_BYTES - HUBSPOT_CHECK_BYTES >= MAX_DEALS * Math.max(0, DEAL_MOVED_MAX_BYTES - IMPORT_WORST_BYTES_PER_ROW), true);
+  }
+
+  part("Coordinator's MEDIUM on #2048 (29th batch): what a request carries in and its answer carries out are priced, and the answer never weighs more");
+  {
+    // The answer as the route sends it, counted in UTF-8, beside the request as it arrived.
+    const wire = async (body: Record<string, unknown>, token: string) => {
+      const sentBody = JSON.stringify(body);
+      const response = await POST(new NextRequest("https://marktmorgen.com/api/store/import/hubspot", { method: "POST", headers: { "content-type": "application/json", cookie: SESSION_COOKIE + "=" + token }, body: sentBody }));
+      const text = await response.text();
+      return { status: response.status, body: JSON.parse(text), received: Buffer.byteLength(sentBody), sent: Buffer.byteLength(text) };
+    };
+    // What the answer may weigh for this request: what it repeats of the request, at most the request itself, and
+    // HUBSPOT_ROW_SENT_BYTES a row over it, with the pipelines' part and the summary's keys.
+    const bound = (received: number, rows: number) => received + rows * HUBSPOT_ROW_SENT_BYTES + HUBSPOT_PIPELINES_SENT_BYTES + 1_024;
+    const far = (i: number) => 9_000_000_000_000_000 + i;
+    const wide = (n: number) => "\u4e2d".repeat(n);
+    // 254 characters at 3 bytes each, the longest address a deal keeps: 64, "@", 185, "." and 3.
+    const longAddress = `${wide(64)}@${wide(185)}.com`;
+    const cases: [string, { status: number; body: { error?: string; summary?: { added?: number; alreadyThere?: number; refused?: unknown[]; notices?: unknown[]; listsLeftOut?: true } }; received: number; sent: number }, number][] = [];
+
+    // Every deal already here named once, its name in the file at 3 bytes a character, its name here 90 quotes, and each
+    // named again, refused as a second row with its Record ID; every line at 16 digits.
+    const hereRows = [...fatDeals.map((_, i) => row(String(8000 + i), wide(90), "New", "Sales")), ...fatDeals.map((_, i) => row(String(8000 + i), "Again", "New", "Sales"))];
+    cases.push(["every deal here named, as many refused", await wire({ action: "check", header: HEADER, rows: hereRows, lines: hereRows.map((_, i) => far(i)) }, heavy.session), hereRows.length]);
+
+    // A thousand deals that come in, each with all three notices at their longest (an amount that reads two ways, a
+    // close date that is not one, two addresses, the kept one at 254 characters of 3 bytes): the most a row says back.
+    const noted = await paidStore("hubsnoted");
+    const notedRows = Array.from({ length: MAX_DEALS }, (_, i) => row(String(30_000 + i), "N", "New", "Sales", "1.500", "x", `${longAddress} b${i}@example.com`));
+    cases.push(["a thousand deals with every notice", await wire({ action: "check", header: HEADER, currency: "usd", rows: notedRows, lines: notedRows.map((_, i) => far(i)) }, noted.session), notedRows.length]);
+
+    // Rows refused for a name too long, each name said back as written, at 3 bytes a character, filling the request.
+    const named = await paidStore("hubsnamed");
+    const namedRows = Array.from({ length: HUBSPOT_MAX_ROWS }, (_, i) => row(String(50_000 + i), wide(MAX_DEAL_TITLE + 50), "New", "Sales"));
+    cases.push(["every row refused with its long name said back", await wire({ action: "check", header: HEADER, rows: namedRows }, named.session), namedRows.length]);
+
+    // A header of columns not brought in, each said back once, filling the request.
+    const ignoredHeader = [...HEADER, ...Array.from({ length: 190 }, (_, i) => `Extra ${i} ${"\\".repeat(1_980)}`)];
+    cases.push(["a header of long columns not brought in", await wire({ action: "check", header: ignoredHeader, rows: [row("60000", "One", "New", "Sales")] }, named.session), 1]);
+
+    for (const [name, out, rows] of cases) console.log("HubSpot answer", name, JSON.stringify({ status: out.status, error: out.body.error ?? "", received: out.received, sent: out.sent, bound: bound(out.received, rows), leftOut: out.body.summary?.listsLeftOut ?? false }));
+    is("control: each file was read and answered with its lists, within the most a request carries", cases.map(([, out]) => [out.status, out.received <= HUBSPOT_BODY_BYTES, out.body.summary?.listsLeftOut ?? false]), cases.map(() => [200, true, false]));
+    is("control: the files say back what they were built to", cases.map(([, out]) => [out.body.summary?.added, out.body.summary?.alreadyThere, out.body.summary?.refused?.length, out.body.summary?.notices?.length]), [[0, MAX_DEALS, MAX_DEALS, 0], [MAX_DEALS, 0, 0, 3 * MAX_DEALS], [0, 0, HUBSPOT_MAX_ROWS, 0], [1, 0, 0, 0]]);
+    is("each answer weighs at most what it repeats of its request and HUBSPOT_ROW_SENT_BYTES a row", cases.map(([name, out, rows]) => [name, out.sent <= bound(out.received, rows)]), cases.map(([name]) => [name, true]));
+    is("so each is within HUBSPOT_SENT_MAX_BYTES, which counts the most a request carries and HUBSPOT_MAX_ROWS rows", [cases.every(([, out]) => out.sent <= HUBSPOT_SENT_MAX_BYTES), HUBSPOT_SENT_MAX_BYTES >= HUBSPOT_BODY_BYTES + HUBSPOT_MAX_ROWS * HUBSPOT_ROW_SENT_BYTES], [true, true]);
+    // A row's own part at its worst: a deal that comes in with every notice says the most for the least in the request
+    // (its amount and close date as written are three bytes and one; its address is counted here, not as said back).
+    const perRow = (cases[1][1].sent - 1_024) / cases[1][2];
+    console.log("HubSpot answer, a deal with every notice, a row", Math.round(perRow));
+    is("a row at its worst says less than HUBSPOT_ROW_SENT_BYTES on top of what it repeats", [perRow > 1_000, perRow < HUBSPOT_ROW_SENT_BYTES], [true, true]);
+
+    // Held by the code, not only by this measure: an answer that would weigh more is sent with its counts only.
+    const huge = { written: false, pipelinesCreated: [], stagesCreated: [], stagesJoined: [], added: 0, alreadyThere: 0, alreadyThereDeals: [], refused: Array.from({ length: 3 * HUBSPOT_MAX_ROWS }, (_, i) => ({ line: i + 2, column: "Deal name", value: "x".repeat(2_000), reason: STAGE_PAST_REASON })), notices: [], ignored: [] };
+    const capped = hubSpotAnswerBody(huge);
+    const cappedBody = JSON.parse(capped);
+    is("an answer past HUBSPOT_SENT_MAX_BYTES is sent with its counts only, and says so", [Buffer.byteLength(JSON.stringify({ ok: true, summary: huge })) > HUBSPOT_SENT_MAX_BYTES, Buffer.byteLength(capped) <= HUBSPOT_SENT_MAX_BYTES, cappedBody.summary.listsLeftOut, cappedBody.summary.refused, cappedBody.message], [true, true, true, [], HUBSPOT_LISTS_LEFT_OUT]);
+    is("one within it is sent whole", hubSpotAnswerBody({ ...huge, refused: huge.refused.slice(0, 2) }), JSON.stringify({ ok: true, summary: { ...huge, refused: huge.refused.slice(0, 2) } }));
   }
 
   part("Coordinator's LOW f on #2048 (18th batch): the CRM lock adds at most CRM_LOCK_COMMANDS_MOST commands, within one more studio request");

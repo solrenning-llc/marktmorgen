@@ -6,7 +6,7 @@ import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { lockRead } from "@/lib/two-step-unknown";
 import { ensureStatsId } from "@/lib/store";
-import { type Deal, DEAL_ID, FIRST_PIPELINE_ID, newCrmId, pipelineLimit, readFollowUp, parseDeal, parseFields, parseStages } from "@/lib/crm-rules";
+import { type Deal, DEAL_ID, FIRST_PIPELINE_ID, dealEmailFits, newCrmId, pipelineLimit, readFollowUp, parseDeal, parseFields, parseStages } from "@/lib/crm-rules";
 import { type AccessMap, PIPELINE_ACCESS_REFUSAL, accessOf, pipelineOfStage, visiblePipelines } from "@/lib/pipeline-access-rules";
 import { readPipelineAccess } from "@/lib/pipeline-access";
 import { dealEnteredStage } from "@/lib/deal-stage-trigger";
@@ -178,6 +178,8 @@ export async function POST(request: NextRequest) {
         const eligible = follow.value.assignee === store.email || team.members.some(m => m.email === follow.value.assignee && can(m.role, "orders"));
         if (!eligible) return refuse("assignee");
       }
+      // An address longer than a deal keeps is refused as the address, never cut or kept empty (lib/crm-rules.ts).
+      if (!dealEmailFits(merged.email)) return refuse("email");
       const now = Math.floor(Date.now() / 1000);
       const deal = parseDeal({ ...merged, ...follow.value, formResponseRef: existing?.formResponseRef, id: existing?.id ?? newCrmId(10), createdAt: existing?.createdAt ?? now, updatedAt: now }, stages);
       if (!deal) return refuse(typeof merged.title === "string" && merged.title.trim() ? "stage" : "title");

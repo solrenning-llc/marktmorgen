@@ -4,10 +4,9 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { ensureStatsId } from "@/lib/store";
 import { withinLimit, withinMonth } from "@/lib/request-guard";
 import { IMPORTS_PAUSED, importAllowanceFor } from "@/lib/import-limits";
-import { BATCH_BYTES } from "@/lib/imports";
 import { costPauseCode } from "@/lib/plan-standing";
 import { can } from "@/lib/team-roles";
-import { HUBSPOT_MAX_CELL, HUBSPOT_MAX_COLUMNS, HUBSPOT_MAX_ROWS, type HubSpotFile, importHubSpotDeals } from "@/lib/hubspot-import";
+import { HUBSPOT_BODY_BYTES, HUBSPOT_MAX_CELL, HUBSPOT_MAX_COLUMNS, HUBSPOT_MAX_ROWS, type HubSpotFile, hubSpotAnswerBody, importHubSpotDeals } from "@/lib/hubspot-import";
 
 /**
  * Moving deals from HubSpot (lib/hubspot-import.ts, the rules in
@@ -61,7 +60,7 @@ function readFile(body: Record<string, unknown>): HubSpotFile | null {
 }
 
 export async function POST(request: NextRequest) {
-  const guarded = await guardStoreWrite(request, "import", BATCH_BYTES);
+  const guarded = await guardStoreWrite(request, "import", HUBSPOT_BODY_BYTES);
   if (!guarded.ok) return guarded.response;
   const { body, role } = guarded;
   const action = text(body.action, 10);
@@ -94,7 +93,9 @@ export async function POST(request: NextRequest) {
       const status = result.reason === "busy" || result.reason === "changed" || result.reason === "erased" || result.reason === "store_full" || result.reason === "deals_full" ? 409 : result.reason === "rows_month" ? 429 : result.reason === "unavailable" || result.reason === "lock_lost" ? 503 : result.reason === "unconfirmed" ? 502 : 400;
       return refuse(result.reason, result.message, status, result.limit === undefined ? {} : { limit: result.limit });
     }
-    return Response.json({ ok: true, summary: result.summary }, { headers: NO_STORE });
+    // Never past HUBSPOT_SENT_MAX_BYTES, which every dry run and save is priced at with the request's own bytes
+    // (tests/plan-cost-registry.ts, HUBSPOT_REQUEST_WIRE; coordinator's MEDIUM on #2048, 29th batch).
+    return new Response(hubSpotAnswerBody(result.summary), { headers: { ...NO_STORE, "Content-Type": "application/json" } });
   } catch (error) {
     console.error("a HubSpot deals import failed", error);
     return refuse("server_error", WORDS.server_error, 500);

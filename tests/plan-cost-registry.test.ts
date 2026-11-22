@@ -491,6 +491,10 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   const registry = read("tests/plan-cost-registry.ts");
   assert.ok(registry.includes('request("write", HUBSPOT_SAVE_COMMANDS, HUBSPOT_SAVE_BYTES)') && registry.includes('request("write", HUBSPOT_CHECK_COMMANDS, HUBSPOT_CHECK_BYTES)'), "the HubSpot save and dry run are priced as write requests");
   assert.ok(!/request\("(heavy|light|studio)", HUBSPOT_(SAVE|CHECK)_/.test(registry), "no HubSpot save or dry run is priced at a shorter shape");
+  // What a HubSpot request carries in and its answer carries out, at their most, on every save and dry run (coordinator's
+  // MEDIUM on #2048, 29th batch): the answer is held at HUBSPOT_SENT_MAX_BYTES by the route (tests/hubspot-import.test.ts).
+  assert.ok(registry.includes('request("write", HUBSPOT_SAVE_COMMANDS, HUBSPOT_SAVE_BYTES) + HUBSPOT_REQUEST_WIRE') && registry.includes('request("write", HUBSPOT_CHECK_COMMANDS, HUBSPOT_CHECK_BYTES) + HUBSPOT_REQUEST_WIRE'), "the HubSpot save and dry run are priced with what they receive and send");
+  assert.ok(registry.includes("export const HUBSPOT_REQUEST_WIRE = (HUBSPOT_BODY_BYTES + HUBSPOT_SENT_MAX_BYTES) * ORIGIN_PER_BYTE;"), "every byte of the request and the answer is priced at Fast Origin Transfer");
   assert.ok(SHAPES.write.seconds >= SHAPES.heavy.seconds + CRM_LOCK_WAIT_MS / 1000, "a write holds a heavy request's work after the lock's longest wait");
   assert.ok(!/takeAllowance\(store, "studio"/.test(read("lib/flows.ts")), "a workflow's field step takes no studio request");
   console.log(`a field saved from the studio: $${CRM_VALUE_SAVE.toFixed(6)} at most (${CRM_VALUE_SAVE_TRIPS} trips, ${CRM_VALUE_SAVE_SECONDS} s, ${CRM_VALUE_SAVE_COMMANDS} commands, ${CRM_VALUE_SAVE_BYTES} bytes), counted as ${CRM_VALUE_SAVE_UNITS} studio requests at $${UNIT_COST.studio.toFixed(6)}`);

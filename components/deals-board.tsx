@@ -46,6 +46,7 @@ import {
 
 const MESSAGES: Record<string, string> = {
   title: "Give the deal a name.",
+  email: "Use an email address of up to 254 characters.",
   followup: "Write a next action before setting its date. Keep it within 200 characters.",
   date: "Choose a real calendar date.",
   assignee: "Choose someone on this store’s team who can read deals.",

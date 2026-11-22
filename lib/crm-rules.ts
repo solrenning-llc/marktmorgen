@@ -244,6 +244,13 @@ export function parseStages(raw: unknown): Stage[] | null {
 
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 
+/**
+ * Whether an address sent for a deal is kept whole: at most 254 characters as one line once lowercased, as parseDeal
+ * keeps it. The board refuses a longer one as the address (app/api/store/crm, "email"), so parseDeal never cuts it or
+ * keeps it empty without a word (coordinator's LOW 3 on #2048, 29th batch).
+ */
+export const dealEmailFits = (value: unknown) => typeof value !== "string" || oneLine(value, Number.MAX_SAFE_INTEGER).toLowerCase().length <= 254;
+
 /** A deal as sent or stored, made safe; null without a title or a stage the store has. */
 export function parseDeal(raw: unknown, stages: readonly Stage[]): Deal | null {
   if (!raw || typeof raw !== "object") return null;

@@ -59,9 +59,9 @@
  */
 import { createHash } from "node:crypto";
 import { CRM_LOCK_COMMANDS_MOST, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, CrmDealsFull, CrmLockLost, CrmPersonErased, CrmSchemaConflict, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, importRoom, importSnapshot, readDealMarks, takeCrmLock, writeImport } from "@/lib/crm";
-import { type Deal, type Pipeline, type Stage, MAX_DEALS, MAX_PIPELINES, MAX_STAGES, allStages, newCrmId, parseDeal, parsePipelines, pipelineLimit } from "@/lib/crm-rules";
-import { HUBSPOT_LABELS, type HubSpotDealDraft, type HubSpotRefusal, STAGE_PAST_REASON, hubSpotDealColumns, hubSpotFileOf, oneLine, pipelineRoomReason, planHubSpotDeals, tooManyDealsSentence } from "@/lib/hubspot-csv";
-import { giveImportRows, takeImportRows } from "@/lib/imports";
+import { type Deal, type Pipeline, type Stage, MAX_DEALS, MAX_PIPELINE_NAME, MAX_PIPELINES, MAX_STAGE_NAME, MAX_STAGES, allStages, newCrmId, parseDeal, parsePipelines, pipelineLimit } from "@/lib/crm-rules";
+import { ADDRESS_NOT_KEPT_REASON, HUBSPOT_LABELS, type HubSpotDealDraft, type HubSpotRefusal, STAGE_PAST_REASON, hubSpotDealColumns, hubSpotFileOf, oneLine, pipelineRoomReason, planHubSpotDeals, tooManyDealsSentence } from "@/lib/hubspot-csv";
+import { BATCH_BYTES, giveImportRows, takeImportRows } from "@/lib/imports";
 import { IMPORT_WORST_BYTES_PER_ROW, rowsWords } from "@/lib/import-limits";
 import { type Held, LockBusyError, releaseLock } from "@/lib/redis-lock";
 import { DataRoomError, dataKey, monthOf, needData } from "@/lib/store-data";
@@ -116,6 +116,11 @@ export type HubSpotImportSummary = {
   /** What a deal came in without (an amount, a close date, a second person), and why. */
   notices: { line: number; note: string }[];
   ignored: string[];
+  /**
+   * Set only when the lists above would make the answer longer than HUBSPOT_SENT_MAX_BYTES, which a file the route
+   * takes never does (tests/hubspot-import.test.ts): the counts are sent, the lists left out (hubSpotAnswerBody).
+   */
+  listsLeftOut?: true;
 };
 
 export type HubSpotImportRefusal =
@@ -296,6 +301,12 @@ function planAgainst(
       refused.push({ line: draft.line, column: HUBSPOT_LABELS.deals.title, value: draft.title, reason: "This deal could not be read. Check its name and stage in HubSpot, then export again." });
       continue;
     }
+    // An address the deal would not keep exactly as read is refused with its row, never kept cut or empty, so the dry
+    // run says what the save does (coordinator's LOW 2 on #2048, 29th batch). The address is not said back.
+    if (deal.email !== draft.email) {
+      refused.push({ line: draft.line, column: HUBSPOT_LABELS.deals.associatedContact, value: "", reason: ADDRESS_NOT_KEPT_REASON });
+      continue;
+    }
     deals.push(deal);
     for (const note of [draft.amountNote, draft.closeDateNote, draft.emailNote]) if (note) notices.push({ line: draft.line, note });
   }
@@ -371,6 +382,50 @@ export const HUBSPOT_CHECK_COMMANDS = 15;
  */
 export const HUBSPOT_SAVE_COMMANDS = HUBSPOT_CHECK_COMMANDS + CRM_LOCK_COMMANDS_MOST + 6;
 export const HUBSPOT_SAVE_BYTES = HUBSPOT_CHECK_BYTES + MAX_DEALS * Math.max(0, DEAL_MOVED_MAX_BYTES + 64 - IMPORT_WORST_BYTES_PER_ROW);
+
+/** The most a request to the route weighs as it arrives (app/api/store/import/hubspot, guardStoreWrite): the upload's. */
+export const HUBSPOT_BODY_BYTES = BATCH_BYTES;
+
+/**
+ * The most the answer to one request says for one row of the file beyond what it repeats of the file itself
+ * (coordinator's MEDIUM on #2048, 29th batch). Every text of the answer taken from the file (a deal's name, a stage, a
+ * pipeline, a Record ID, an amount or a close date as written, a column not brought in) is said at most once, made one
+ * line and well formed first, so in JSON it weighs no more than it did in the request: those are held by
+ * HUBSPOT_BODY_BYTES. A refusal names its column as HubSpot labels it, never as the file spells it (lib/hubspot-csv.ts).
+ * What a row adds on top: a refusal's longest reason (about 350 characters, the Record ID within it at 40) with its
+ * line, column and keys; or a deal already here with the name it has here (90 characters at 3 bytes each); or a deal
+ * that comes in with its three notices at the most (an amount, a close date, its addresses: the kept one at 254
+ * characters at 3 bytes each), each with its line of up to 16 digits: 1,279 bytes measured at the most, held at 2,048.
+ * tests/hubspot-import.test.ts measures each kind of row at its worst under it.
+ */
+export const HUBSPOT_ROW_SENT_BYTES = 2_048;
+
+/**
+ * The most the answer says of pipelines and stages: at most MAX_PIPELINES pipelines, each made with up to MAX_STAGES
+ * stages, or with up to MAX_STAGES stages made in it or joined to its won or lost one, every name at 3 bytes a
+ * character with its keys.
+ */
+export const HUBSPOT_PIPELINES_SENT_BYTES = MAX_PIPELINES * (MAX_PIPELINE_NAME * 3 + 32 + MAX_STAGES * (MAX_STAGE_NAME * 3 + 8) + MAX_STAGES * (MAX_PIPELINE_NAME * 3 + 2 * MAX_STAGE_NAME * 3 + 48));
+
+/**
+ * The most one answer of the route weighs (coordinator's MEDIUM on #2048, 29th batch: a file of 757,129 bytes was
+ * answered with 1,436,478, and nothing priced what was sent or received): what it repeats of the file
+ * (HUBSPOT_BODY_BYTES), HUBSPOT_ROW_SENT_BYTES for each of HUBSPOT_MAX_ROWS rows, the pipelines' part and the summary's
+ * own keys and counts. Priced on every dry run and save with the request's own bytes (tests/plan-cost-registry.ts,
+ * HUBSPOT_REQUEST_WIRE), and held by the code: an answer that would weigh more is sent with its counts only
+ * (hubSpotAnswerBody), so what is sent never passes what is priced.
+ */
+export const HUBSPOT_SENT_MAX_BYTES = HUBSPOT_BODY_BYTES + HUBSPOT_MAX_ROWS * HUBSPOT_ROW_SENT_BYTES + HUBSPOT_PIPELINES_SENT_BYTES + 1_024;
+
+/** Said when the lists of an answer are left out to keep it within HUBSPOT_SENT_MAX_BYTES. */
+export const HUBSPOT_LISTS_LEFT_OUT = "The list of rows is too long to show, so only the counts are shown. Bring the file in as two smaller files to see each row.";
+
+/** The answer the route sends for a summary, never past HUBSPOT_SENT_MAX_BYTES (counted as sent, in UTF-8). */
+export function hubSpotAnswerBody(summary: HubSpotImportSummary): string {
+  const whole = JSON.stringify({ ok: true, summary });
+  if (Buffer.byteLength(whole) <= HUBSPOT_SENT_MAX_BYTES) return whole;
+  return JSON.stringify({ ok: true, summary: { ...summary, alreadyThereDeals: [], refused: [], notices: [], ignored: [], listsLeftOut: true }, message: HUBSPOT_LISTS_LEFT_OUT });
+}
 
 /** What the data room counts for a slot's own field while it is there (TAKE_DATA, lib/store-data.ts). */
 const NEW_FIELD_BYTES = 64;

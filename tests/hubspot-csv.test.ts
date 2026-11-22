@@ -18,6 +18,7 @@ import { parseCsv } from "@/lib/csv";
 import { COLUMNS } from "@/lib/imports";
 import { MAX_DEAL_TITLE, MAX_DEALS, MAX_STAGES } from "@/lib/crm-rules";
 import {
+  ADDRESS_TOO_LONG_REASON,
   HUBSPOT_CONTACT_FIELDS,
   HUBSPOT_DEFAULT_STAGES,
   HUBSPOT_ENGLISH_ONLY,
@@ -221,6 +222,30 @@ is("the deals in the others are refused with a reason", threeOk.refused.map((r) 
 is("the reason says the room and what to do", /room for 2 more pipelines/.test(threeOk.refused[0].reason), true);
 const none = ok(plan([row("1", "A", "Contract sent", "First")], { pipelineRoom: 0 }));
 is("no room makes no pipeline", [none.pipelines.length, none.deals.length, /no more pipelines/.test(none.refused[0].reason)], [0, 0, true]);
+
+part("Coordinator's LOWs 1 and 2 on #2048 (29th batch): an address read as the save keeps it, and never cut");
+{
+  const kept = (contact: string) => ok(plan([row("1", "Ada deal", "Contract sent", "P", "", "", contact)]));
+  is("a control character in front of an address is not part of it", kept("Ada (\u0001ada@example.com)").deals[0].email, "ada@example.com");
+  is("nor one inside it: the address is read after it", kept("Ada (ada\u0007lovelace@example.com)").deals[0].email, "lovelace@example.com");
+  is("a lone surrogate is the replacement character, as the deal keeps it", kept("ad\ud800a@example.com").deals[0].email, "ad\ufffda@example.com");
+  const long = `${"a".repeat(64)}@${"b".repeat(200)}.com`;
+  const dotted = `${"a".repeat(64)}@${"\u0130".repeat(120)}.com`;
+  is("control: one is past 254 as sent, the other only once lowercased", [long.length > 254, dotted.length <= 254, dotted.toLowerCase().length > 254], [true, true, true]);
+  for (const [name, address] of [["as sent", long], ["once lowercased", dotted]] as const) {
+    const refused = kept(`Ada (${address})`);
+    is(`an address past 254 ${name} refuses its row, never cut`, [refused.deals.length, refused.refused.map((r) => [r.line, r.column, r.value, r.reason])], [0, [[2, "Associated Contact", "", ADDRESS_TOO_LONG_REASON]]]);
+  }
+  is("and the reason says what to do, without the address", [/longer than 254 characters/.test(ADDRESS_TOO_LONG_REASON), /Fix the address in HubSpot/.test(ADDRESS_TOO_LONG_REASON)], [true, true]);
+}
+
+part("Coordinator's MEDIUM on #2048 (29th batch): a refusal names its column as HubSpot labels it, never the file's long spelling");
+{
+  const spelled = ["Record ID", `Deal${"-".repeat(1_900)} name`, "Deal stage", "Pipeline"];
+  const odd = ok(plan([["1", "", "Contract sent", "P"]], {}, spelled));
+  is("control: the long spelling is the deal name column", hubSpotDealColumns(spelled).title, 1);
+  is("the refusal says Deal name, not the file's 1,900 dashes", odd.refused.map((r) => r.column), ["Deal name"]);
+}
 
 part("Notes");
 is("the notes sentence says they are not in the export and not imported", /not in the file HubSpot exports/.test(HUBSPOT_NOTES_NOT_IMPORTED) && /does not bring them in/.test(HUBSPOT_NOTES_NOT_IMPORTED), true);

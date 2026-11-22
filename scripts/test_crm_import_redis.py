@@ -1,8 +1,9 @@
 """Execute the actual CRM deals import Lua script (lib/crm.ts, IMPORT_CRM_DEALS) against an isolated local CI Redis.
 No application credentials or production host configuration are read.
 
-The script's v3 contract (lib/crm.ts, writeImport): KEYS are the deals, the pipelines, the stages and the CRM lock;
-ARGV are the pipelines snapshot, the new pipelines, their stages, MAX_DEALS and the lock's token, then id/deal pairs.
+The script's v4 contract (lib/crm.ts, writeImport): 5 KEYS, the deals, the pipelines, the stages, the CRM lock and
+the store's deleted people's prints; ARGV are the pipelines snapshot, the new pipelines, their stages, MAX_DEALS and
+the lock's token, then id/deal/print triples (print "" for a deal with no address).
 """
 import concurrent.futures
 import os

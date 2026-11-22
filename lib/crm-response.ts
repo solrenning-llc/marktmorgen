@@ -3,7 +3,11 @@ import { DEAL_ID, type Deal } from "@/lib/crm-rules";
 /** The deal as it is now, sent with a crm_conflict on an edit (635 [GL3]): the board puts the creator's changes back on it. */
 export type CrmCurrentDeal = { deal: Deal; version: string };
 /** A confirmed CRM change; `workflows` says whether a deal entering a stage had its workflow checked (lib/deal-stage-trigger.ts). */
-export type CrmAnswer = { ok: true; workflows?: "checked" | "not_checked" } | { ok: false; error: string; current?: CrmCurrentDeal };
+export type CrmAnswer =
+  /** `studioRequestsUsed`: a pipeline change that tidied up stages removed before says how many studio requests it used. */
+  | { ok: true; workflows?: "checked" | "not_checked"; studioRequestsUsed?: number }
+  /** `message`: for "studio_used", the server's words for the figure, with when it opens again (lib/store-allowance.ts). */
+  | { ok: false; error: string; current?: CrmCurrentDeal; message?: string };
 const REFUSALS = new Set(["title", "followup", "date", "assignee", "stage", "full", "unknown", "fields", "stages", "value", "invalid", "role", "origin", "signed_out", "locked", "store_gone", "none", "unavailable", "bad_request", "forbidden", "crm_deal_read_unavailable", "crm_schema_read_unavailable", "pipelines", "pipeline_limit", "pipeline_last", "moves", "stage_moves", "stage_gone", "crm_conflict", "deal_conflict", "pipeline_access", "store_full", "studio_used", "stale"]);
 const VERSION = /^[0-9a-f]{32}$/;
 const text = (value: unknown) => typeof value === "string";
@@ -42,9 +46,15 @@ export function crmAnswer(responseOk: boolean, raw: unknown): CrmAnswer {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return uncertain;
   const answer = raw as Record<string, unknown>;
   if (!Object.hasOwn(answer, "ok")) return uncertain;
-  if (responseOk && answer.ok === true && !Object.hasOwn(answer, "error")) return answer.workflows === "checked" || answer.workflows === "not_checked" ? { ok: true, workflows: answer.workflows } : { ok: true };
+  if (responseOk && answer.ok === true && !Object.hasOwn(answer, "error")) {
+    const used = answer.studioRequestsUsed;
+    const counted = typeof used === "number" && Number.isSafeInteger(used) && used > 0 ? { studioRequestsUsed: used } : {};
+    return answer.workflows === "checked" || answer.workflows === "not_checked" ? { ok: true, workflows: answer.workflows, ...counted } : { ok: true, ...counted };
+  }
   if (answer.ok === false && typeof answer.error === "string" && REFUSALS.has(answer.error) && !["deal", "stages", "fields", "pipelines"].some(key => Object.hasOwn(answer, key))) {
-    if (!Object.hasOwn(answer, "current")) return { ok: false, error: answer.error };
+    // Only the figure's own words, as text of a sentence's length; anything else is left out, never shown.
+    const words = answer.error === "studio_used" && typeof answer.message === "string" && answer.message.trim() && answer.message.length <= 500 ? { message: answer.message } : {};
+    if (!Object.hasOwn(answer, "current")) return { ok: false, error: answer.error, ...words };
     // Only an edit's conflict carries the deal as it is now, and only in its exact shape.
     const current = answer.error === "crm_conflict" ? currentDeal(answer.current) : null;
     return current ? { ok: false, error: answer.error, current } : uncertain;

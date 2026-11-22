@@ -571,8 +571,10 @@ export function pipelineTotals(pipeline: Pipeline, deals: readonly Deal[]): Pipe
  * savePipelineChange, which counts them and checks the change again).
  */
 export type PipelineChange =
-  | { ok: true; pipelines: Pipeline[]; moves: Record<string, string>; unsent: string[] }
-  | { ok: false; error: "pipelines" | "pipeline_limit" | "pipeline_last" | "unknown" | "moves" | "stage_moves" | "stage_gone" | "studio_used" | "unavailable" };
+  /** `studioRequests`: what a compaction of the aliases took of the studio's requests, beyond the request's own (lib/crm.ts). */
+  | { ok: true; pipelines: Pipeline[]; moves: Record<string, string>; unsent: string[]; studioRequests?: number }
+  /** `message`: for a change its studio's requests could not pay for, the figure's own words, with when it opens again. */
+  | { ok: false; error: "pipelines" | "pipeline_limit" | "pipeline_last" | "unknown" | "moves" | "stage_moves" | "stage_gone" | "studio_used" | "unavailable"; message?: string };
 
 /**
  * A change to one pipeline, checked against the store's pipelines now: its

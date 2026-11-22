@@ -52,7 +52,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
 import { PLAN_INVOICES_READ, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD } from "./plan-cost-registry";
-import { CRM_VALUE_MOST_BYTES, CRM_VALUE_SAVE_BYTES, CRM_VALUE_SAVE_COMMANDS, CRM_VALUE_SAVE_TRIPS, CRM_VALUE_SAVE_UNITS, DEAL_KEYS_WIRE_BYTES, DEAL_SCAN_BATCH, DEAL_WIRE_BYTES, MOVE_INSIDE_COMMANDS, SCAN_ROOM_COMMANDS, SCAN_TAKE_COMMANDS, SCAN_TAKE_TRIPS, SCAN_ROOM_TRIPS, SCAN_UNIT_BYTES, SCAN_UNIT_COMMANDS, SCAN_UNIT_TRIPS, TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, dealScanUnits, tasksRecountUnits } from "@/lib/crm";
+import { CRM_VALUE_MOST_BYTES, CRM_VALUE_SAVE_BYTES, CRM_VALUE_SAVE_COMMANDS, CRM_VALUE_SAVE_TRIPS, CRM_VALUE_SAVE_UNITS, DEAL_KEYS_WIRE_BYTES, DEAL_SCAN_BATCH, DEAL_WIRE_BYTES, MOVE_INSIDE_COMMANDS, SCAN_COST_ROOM, SCAN_ROOM_COMMANDS, SCAN_TAKE_COMMANDS, SCAN_TAKE_TRIPS, SCAN_ROOM_TRIPS, SCAN_UNIT_BYTES, SCAN_UNIT_COMMANDS, SCAN_UNIT_TRIPS, TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, dealScanShare, tasksRecountUnits } from "@/lib/crm";
 import { MAX_DEALS, MAX_FIELD_OPTION, MAX_FIELD_OPTIONS, MAX_FIELD_VALUE } from "@/lib/crm-rules";
 import { STUDIO_REQUEST_BYTES, flowHistoryUnits, keepVersionBytes, listVersionsBytes, restoreBytes, restoreTryBytes } from "@/lib/flow-versions-rules";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
@@ -482,22 +482,28 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(CRM_VALUE_SAVE_BYTES >= 2 * CRM_VALUE_MOST_BYTES);
   assert.ok(read("app/api/store/crm/route.ts").includes('body.action === "value" ? CRM_VALUE_SAVE_UNITS : 1'), "both are taken by the route's guard, with the first");
   assert.ok(!/takeAllowance\(store, "studio"/.test(read("lib/flows.ts")), "a workflow's field step takes no studio request");
-  // A change of stages that reads or rewrites the deals (lib/crm.ts, scanDeals and compactStageMoves): each step takes
-  // dealScanUnits studio requests first, a share of a request for each SCAN_UNIT_COMMANDS commands, SCAN_UNIT_BYTES
-  // bytes and SCAN_UNIT_TRIPS trips. Each share alone costs no more than a whole studio request, so shares that add up
-  // cover all three together; and the take itself is inside them (SCAN_TAKE_COMMANDS is TAKE_COMMANDS).
+  // A change of stages that reads or rewrites the deals (lib/crm.ts, scanDeals and compactStageMoves): each step adds
+  // its share of studio requests (dealScanShare) before it is sent, one request for each SCAN_UNIT_COMMANDS commands,
+  // SCAN_UNIT_BYTES bytes and SCAN_UNIT_TRIPS trips, with SCAN_COST_ROOM: the 5% room this file's priced lines keep
+  // (API_SALES_UNITS, the plan invoices). Each share is a studio request's price rounded down by less than one, so the
+  // shares cover all three together and charge no more than that rounding over the cost; the take itself is inside.
   const tripCost = (trips: number) => crmDealScanCost(0, 0, trips + SHAPES.studio.seconds / ROUND_TRIP_SECONDS) - request("studio", 0, 0);
-  assert.ok(SCAN_UNIT_COMMANDS * COMMAND <= UNIT_COST.studio && SCAN_UNIT_BYTES * DB_BYTE <= UNIT_COST.studio && tripCost(SCAN_UNIT_TRIPS) <= UNIT_COST.studio, "each share of a scan's unit is inside a studio request");
+  assert.equal(SCAN_COST_ROOM, 1.05);
+  for (const [n, price, step] of [[SCAN_UNIT_COMMANDS, COMMAND, 1], [SCAN_UNIT_BYTES, DB_BYTE, 100_000], [SCAN_UNIT_TRIPS, tripCost(1), 1]] as const) {
+    assert.ok(n * price <= UNIT_COST.studio && (n + step) * price > UNIT_COST.studio, `${n} at $${price}: not a studio request's price rounded down`);
+  }
   assert.equal(SCAN_TAKE_COMMANDS, TAKE_COMMANDS);
   const stepCost = (commands: number, bytes: number, trips: number) => commands * COMMAND + bytes * DB_BYTE + tripCost(trips);
-  for (const [commands, bytes, trips] of [[1, 1, 1], [5, DEAL_KEYS_WIRE_BYTES, 4], [5, DEAL_SCAN_BATCH * DEAL_WIRE_BYTES, 4], [DEAL_SCAN_BATCH * (1 + MOVE_INSIDE_COMMANDS) + SCAN_TAKE_COMMANDS + SCAN_ROOM_COMMANDS, 4 * DEAL_SCAN_BATCH * DEAL_WIRE_BYTES, 6], [12_345, 9_876_543, 21]]) {
-    assert.ok(dealScanUnits(commands, bytes, trips) * UNIT_COST.studio >= stepCost(commands, bytes, trips), `dealScanUnits(${commands}, ${bytes}, ${trips}) below what it covers`);
+  for (const [commands, bytes, trips] of [[1, 1, 1], [1, DEAL_KEYS_WIRE_BYTES, 1], [1, DEAL_SCAN_BATCH * DEAL_WIRE_BYTES, 1], [DEAL_SCAN_BATCH * (1 + MOVE_INSIDE_COMMANDS) + SCAN_ROOM_COMMANDS, 4 * DEAL_SCAN_BATCH * DEAL_WIRE_BYTES, 1 + SCAN_ROOM_TRIPS], [12_345, 9_876_543, 21]]) {
+    const share = dealScanShare(commands, bytes, trips) * UNIT_COST.studio;
+    assert.ok(share >= 1.05 * stepCost(commands, bytes, trips) && share <= 1.06 * stepCost(commands, bytes, trips), `dealScanShare(${commands}, ${bytes}, ${trips}): $${share} against $${stepCost(commands, bytes, trips)}`);
   }
   // At the most: every deal read (its ids, then a batch at a time), and every one rewritten, at its widest record.
   const batches = Math.ceil(MAX_DEALS / DEAL_SCAN_BATCH);
-  const scanUnits = dealScanUnits(1 + SCAN_TAKE_COMMANDS, DEAL_KEYS_WIRE_BYTES, 1 + SCAN_TAKE_TRIPS) + batches * dealScanUnits(1 + SCAN_TAKE_COMMANDS, DEAL_SCAN_BATCH * (DEAL_WIRE_BYTES + 13) + 128, 1 + SCAN_TAKE_TRIPS);
-  const compactUnits = batches * dealScanUnits(DEAL_SCAN_BATCH * (1 + MOVE_INSIDE_COMMANDS) + SCAN_TAKE_COMMANDS + SCAN_ROOM_COMMANDS, DEAL_SCAN_BATCH * (4 * DEAL_WIRE_BYTES + 1_024), 1 + SCAN_TAKE_TRIPS + SCAN_ROOM_TRIPS);
-  console.log(`a change of stages that reads every deal: ${scanUnits} studio requests at most; that also rewrites every one: ${scanUnits + compactUnits} (a record at most ${DEAL_WIRE_BYTES} bytes on the wire)`);
+  const takes = (1 + batches) * dealScanShare(SCAN_TAKE_COMMANDS, 0, SCAN_TAKE_TRIPS);
+  const scanShare = dealScanShare(1, DEAL_KEYS_WIRE_BYTES, 1) + batches * dealScanShare(1, DEAL_SCAN_BATCH * (DEAL_WIRE_BYTES + 13) + 128, 1) + takes;
+  const compactShare = batches * (dealScanShare(DEAL_SCAN_BATCH * (1 + MOVE_INSIDE_COMMANDS), DEAL_SCAN_BATCH * (2 * DEAL_WIRE_BYTES + 1_024), 1) + dealScanShare(SCAN_TAKE_COMMANDS, 0, SCAN_TAKE_TRIPS));
+  console.log(`a change of stages that reads every deal: ${Math.ceil(scanShare)} studio requests at most; that also rewrites every one: ${Math.ceil(scanShare + compactShare)} (a record at most ${DEAL_WIRE_BYTES} bytes on the wire)`);
   console.log(`a field saved from the studio: $${CRM_VALUE_SAVE.toFixed(6)} at most (${CRM_VALUE_SAVE_TRIPS} trips, ${CRM_VALUE_SAVE_SECONDS} s, ${CRM_VALUE_SAVE_COMMANDS} commands, ${CRM_VALUE_SAVE_BYTES} bytes), counted as ${CRM_VALUE_SAVE_UNITS} studio requests at $${UNIT_COST.studio.toFixed(6)}`);
   // A workflow's history (lib/flow-versions-rules.ts; Claude 5 on #1927, decision B): each path takes flowHistoryUnits of what it moves, measured
   // first, at UNIT_COST.studio's 50 KB, which covers its commands and those bytes at a whole studio request's shape.

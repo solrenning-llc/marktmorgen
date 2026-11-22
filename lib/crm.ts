@@ -625,11 +625,11 @@ async function writePipelines(statsId: string, snapshotRaw: string, pipelines: P
  * take is refused when the figure is spent. A refusal is said as it is: used, or not counted ("unknown").
  */
 export type StudioPayer = {
-  take: (units: number) => Promise<{ ok: true } | { ok: false; reason: "used" | "unknown" | "pool" }>;
+  take: (units: number) => Promise<{ ok: true } | { ok: false; reason: "used" | "unknown" | "pool"; message: string }>;
   force: (units: number) => Promise<void>;
 };
 /** No way to pay: a change that needs the deals read is refused, never done unpaid. */
-const UNPAID: StudioPayer = { take: async () => ({ ok: false, reason: "unknown" }), force: async () => {} };
+const UNPAID: StudioPayer = { take: async () => ({ ok: false, reason: "unknown", message: "This can't be counted right now. Try again in a minute." }), force: async () => {} };
 
 /** Deals read or written in one step of a scan (scanDeals, compactStageMoves), each step paid for before it is sent. */
 export const DEAL_SCAN_BATCH = 100;
@@ -638,13 +638,15 @@ export const DEAL_SCAN_BATCH = 100;
  * id, title, address, stage, note, next action, date, responsible teammate and form reference.
  */
 export const DEAL_TEXT_UNITS = 10 + MAX_DEAL_TITLE + 254 + 6 + MAX_DEAL_NOTE + 200 + 10 + 254 + 64;
+/** One deal record's three numbers and its keys, quotes and commas, as kept, at the most. */
+const DEAL_FRAME_BYTES = 3 * 16 + 256;
 /**
- * One deal record as kept, at the most: each unit at six bytes (a lone half of a pair cut by a length cap, or a control
- * character, is written as a \u escape), its three numbers and its keys and quotes.
+ * One deal record on the wire at the most. Kept, a unit of text is at most six bytes (a lone half of a pair cut by a
+ * length cap, or a control character, is written as a \u escape). Upstash's REST answer is JSON, which escapes again
+ * only the backslash and the quote, so on the wire a unit is at most seven bytes (a \u escape gains one backslash, a
+ * kept \" becomes four bytes), and the record's frame at most twice its bytes, with the answer's own quotes.
  */
-export const DEAL_KEPT_BYTES = 6 * DEAL_TEXT_UNITS + 3 * 16 + 256;
-/** And on the wire: Upstash's REST answer is JSON, so each byte of the record is escaped once more at the most. */
-export const DEAL_WIRE_BYTES = 2 * DEAL_KEPT_BYTES + 64;
+export const DEAL_WIRE_BYTES = 7 * DEAL_TEXT_UNITS + 2 * DEAL_FRAME_BYTES + 64;
 /** The store's deal ids on the wire at the most (HKEYS): MAX_DEALS ids of ten characters, quoted, and the framing. */
 export const DEAL_KEYS_WIRE_BYTES = MAX_DEALS * 13 + 64;
 /** Commands and trips one take of studio requests costs at the most: its count, a place for a store that pays nothing, a refusal given back. */
@@ -659,39 +661,74 @@ export const MOVE_INSIDE_COMMANDS = 2;
 export const SCAN_ROOM_COMMANDS = 2 * (1 + 6 + 2 * 24);
 export const SCAN_ROOM_TRIPS = 2;
 /**
- * What one more studio request covers of a scan (tests/plan-cost-registry.ts, crmDealScanCost; its test holds each under
- * UNIT_COST.studio): twenty commands, a million bytes through the database, or six trips at the review ceiling of a
- * trip (a studio request's 1.5 s). The shares add up, so together they cover all three.
+ * What one studio request's price buys of a scan, each alone (tests/plan-cost-registry.ts, UNIT_COST.studio, at
+ * Upstash's and Vercel's prices; tests/plan-cost-registry.test.ts holds each at or under it, rounded down): 36
+ * commands, 2,400,000 bytes through the database, or 48 trips at the review ceiling of a trip held at 2 GB. A step's
+ * share is the sum of its three, so the shares cover all of it together, and SCAN_COST_ROOM above that: the room
+ * the registry's priced lines keep above their worst (at least 5% more).
  */
-export const SCAN_UNIT_COMMANDS = 20;
-export const SCAN_UNIT_BYTES = 1_000_000;
-export const SCAN_UNIT_TRIPS = 6;
-export function dealScanUnits(commands: number, bytes: number, trips: number): number {
-  return Math.max(1, Math.ceil(commands / SCAN_UNIT_COMMANDS + bytes / SCAN_UNIT_BYTES + trips / SCAN_UNIT_TRIPS));
+export const SCAN_UNIT_COMMANDS = 36;
+export const SCAN_UNIT_BYTES = 2_400_000;
+export const SCAN_UNIT_TRIPS = 48;
+export const SCAN_COST_ROOM = 1.05;
+/** A step's share of studio requests, with its room: a fraction, added up over the change (studioMeter). */
+export function dealScanShare(commands: number, bytes: number, trips: number): number {
+  return SCAN_COST_ROOM * (commands / SCAN_UNIT_COMMANDS + bytes / SCAN_UNIT_BYTES + trips / SCAN_UNIT_TRIPS);
 }
+
+/**
+ * The studio requests a change of stages takes as it goes: each step's share is added before the step is sent, and
+ * whole requests are taken only when the shares pass what was taken, the take's own commands and trips added first.
+ * So the change takes the smallest whole number of requests that covers its work with its room, never less. What a
+ * record weighed past what was paid for is added and counted at once (`past`, forceAllowance).
+ */
+function studioMeter(payer: StudioPayer) {
+  let owed = 0;
+  let taken = 0;
+  const due = () => Math.ceil(owed - 1e-9) - taken;
+  return {
+    async cover(commands: number, bytes: number, trips: number): Promise<{ ok: true } | ScanRefused> {
+      owed += dealScanShare(commands, bytes, trips);
+      if (due() <= 0) return { ok: true };
+      owed += dealScanShare(SCAN_TAKE_COMMANDS, 0, SCAN_TAKE_TRIPS);
+      const units = due();
+      const paid = await payer.take(units);
+      if (!paid.ok) return { refused: paid.reason === "used" ? "studio_used" : "unavailable", message: paid.message };
+      taken += units;
+      return { ok: true };
+    },
+    async past(bytes: number): Promise<void> {
+      if (bytes <= 0) return;
+      owed += dealScanShare(0, bytes, 0);
+      const units = due();
+      if (units <= 0) return;
+      await payer.force(units);
+      taken += units;
+    },
+    used: () => taken,
+  };
+}
+type StudioMeter = ReturnType<typeof studioMeter>;
 
 /** A deal as kept, for a change of stages: its id, its exact record and that record read. */
 type KeptDeal = { id: string; raw: string; record: Record<string, unknown> };
-/** A step of a scan that could not be paid for: nothing more is read or written. */
-type ScanRefused = { refused: "studio_used" | "unavailable" };
-const refusedFor = (reason: "used" | "unknown" | "pool"): ScanRefused => ({ refused: reason === "used" ? "studio_used" : "unavailable" });
+/** A step of a scan that could not be paid for, with the words the figure said (when it opens again): nothing more is read or written. */
+type ScanRefused = { refused: "studio_used" | "unavailable"; message: string };
 
 /**
- * Every deal of the store, read a batch at a time, each batch paid for first (`payer`), at what it can weigh: its
+ * Every deal of the store, read a batch at a time, each batch paid for first (`meter`), at what it can weigh: its
  * ids with the first batch (DEAL_KEYS_WIRE_BYTES), then DEAL_SCAN_BATCH records at DEAL_WIRE_BYTES each. A record
  * of an older build may keep fields this code no longer writes, so no size is certain before it is read: each answer
  * is measured as it came, and what it weighed past what was paid is counted (`force`) before anything more is read,
  * so the next step is refused once the figure is spent. A reply in an unknown shape throws CrmDealReadUnavailable.
  */
-async function scanDeals(statsId: string, payer: StudioPayer): Promise<KeptDeal[] | ScanRefused> {
+async function scanDeals(statsId: string, meter: StudioMeter): Promise<KeptDeal[] | ScanRefused> {
   const wire = (sent: unknown, reply: unknown) => Buffer.byteLength(JSON.stringify(sent)) + Buffer.byteLength(JSON.stringify(reply ?? null));
-  const pastPaid = async (used: number, paid: number) => {
-    if (used > paid) await payer.force(Math.ceil((used - paid) / SCAN_UNIT_BYTES));
-  };
+  const pastPaid = (used: number, paid: number) => meter.past(used - paid);
   const keysSent = [["HKEYS", dealsKey(statsId)]];
   const keysPaid = DEAL_KEYS_WIRE_BYTES + Buffer.byteLength(JSON.stringify(keysSent));
-  const first = await payer.take(dealScanUnits(1 + SCAN_TAKE_COMMANDS, keysPaid, 1 + SCAN_TAKE_TRIPS));
-  if (!first.ok) return refusedFor(first.reason);
+  const first = await meter.cover(1, keysPaid, 1);
+  if ("refused" in first) return first;
   let keys: unknown;
   try {
     keys = await redisPipeline(keysSent);
@@ -704,8 +741,8 @@ async function scanDeals(statsId: string, payer: StudioPayer): Promise<KeptDeal[
     const batch = (ids as string[]).slice(at, at + DEAL_SCAN_BATCH);
     const sent = [["HMGET", dealsKey(statsId), ...batch]];
     const paid = Buffer.byteLength(JSON.stringify(sent)) + batch.length * DEAL_WIRE_BYTES + 64;
-    const taken = await payer.take(dealScanUnits(1 + SCAN_TAKE_COMMANDS, paid, 1 + SCAN_TAKE_TRIPS));
-    if (!taken.ok) return refusedFor(taken.reason);
+    const taken = await meter.cover(1, paid, 1);
+    if ("refused" in taken) return taken;
     let reply: unknown;
     try {
       reply = await redisPipeline(sent);
@@ -734,7 +771,7 @@ async function scanDeals(statsId: string, payer: StudioPayer): Promise<KeptDeal[
  * batch is paid for before it is sent, at the exact commands and bytes it sends; one refused leaves what was written
  * right and every alias still read. The ids still held by a deal that changed meanwhile are kept.
  */
-async function compactStageMoves(statsId: string, deals: readonly KeptDeal[], view: StageView, payer: StudioPayer, room: DataStore): Promise<Set<string> | ScanRefused> {
+async function compactStageMoves(statsId: string, deals: readonly KeptDeal[], view: StageView, meter: StudioMeter, room: DataStore): Promise<Set<string> | ScanRefused> {
   const held = new Set<string>();
   const rewrites: (KeptDeal & { stage: string; after: string })[] = [];
   for (const d of deals) {
@@ -752,11 +789,12 @@ async function compactStageMoves(statsId: string, deals: readonly KeptDeal[], vi
     const batch = rewrites.slice(at, at + DEAL_SCAN_BATCH);
     const sent = batch.map((r) => ["EVAL", MOVE_CRM_DEAL, 1, dealsKey(statsId), r.id, r.raw, r.after]);
     const bytes = Buffer.byteLength(JSON.stringify(sent)) + 64 * batch.length;
-    const billed = batch.length * (1 + MOVE_INSIDE_COMMANDS) + SCAN_TAKE_COMMANDS + SCAN_ROOM_COMMANDS;
-    const taken = await payer.take(dealScanUnits(billed, bytes, 1 + SCAN_TAKE_TRIPS + SCAN_ROOM_TRIPS));
-    if (!taken.ok) return refusedFor(taken.reason);
-    // The room moves by what each record changes (writeDealOver): taken first for what grows, given back after.
+    // The room moves by what each record changes (writeDealOver): taken first for what grows, given back after. A batch
+    // whose records keep their length (a stage id is always six characters) moves no room, and pays for none.
     const grown = batch.map((r) => dataBytes([r.id, r.after], 1) - dataBytes([r.id, r.raw], 1));
+    const roomed = grown.some((g) => g !== 0);
+    const taken = await meter.cover(batch.length * (1 + MOVE_INSIDE_COMMANDS) + (roomed ? SCAN_ROOM_COMMANDS : 0), bytes, 1 + (roomed ? SCAN_ROOM_TRIPS : 0));
+    if ("refused" in taken) return taken;
     const growing = batch.flatMap((r, i) => (grown[i] > 0 ? [{ slot: dealSlot(r.id), bytes: grown[i] }] : []));
     if (growing.length) await needData(room, growing);
     let reply: unknown;
@@ -787,18 +825,18 @@ async function compactStageMoves(statsId: string, deals: readonly KeptDeal[], vi
  * where it shows (compactStageMoves), and those aliases go: after that only a change that could not be paid for, or
  * one taking more stages away at once than MAX_STAGE_MOVES, is refused (CrmStageMovesFull).
  */
-async function settleStageMoves(statsId: string, current: readonly Pipeline[], taken: StageMoves, kept: ReadonlySet<string>, payer: StudioPayer, room: DataStore, deals: KeptDeal[] | null): Promise<{ moves: Record<string, string> } | ScanRefused> {
+async function settleStageMoves(statsId: string, current: readonly Pipeline[], taken: StageMoves, kept: ReadonlySet<string>, meter: StudioMeter, room: DataStore, deals: KeptDeal[] | null): Promise<{ moves: Record<string, string>; compacted: boolean } | ScanRefused> {
   const view = stageView(current);
   const next = nextStageMoves(view.moved, taken, kept);
-  if (Object.keys(next).length <= ALIAS_COMPACT_AT) return { moves: next };
-  const read = deals ?? (await scanDeals(statsId, payer));
+  if (Object.keys(next).length <= ALIAS_COMPACT_AT) return { moves: next, compacted: false };
+  const read = deals ?? (await scanDeals(statsId, meter));
   if (!Array.isArray(read)) return read;
-  const held = await compactStageMoves(statsId, read, view, payer, room);
+  const held = await compactStageMoves(statsId, read, view, meter, room);
   if (!(held instanceof Set)) return held;
   const still = Object.fromEntries(Object.entries(view.moved).filter(([from]) => held.has(from)));
   const after = nextStageMoves(still, taken, kept);
   if (Object.keys(after).length > MAX_STAGE_MOVES) throw new CrmStageMovesFull();
-  return { moves: after };
+  return { moves: after, compacted: true };
 }
 
 /**
@@ -819,10 +857,11 @@ export async function savePipelineChange(statsId: string, change: { pipeline?: u
   const { raw, pipelines: current } = await pipelineSnapshot(statsId);
   let result = changePipeline(current, change, moves, null, limit, sees);
   if (!result.ok) return result;
+  const meter = studioMeter(payer);
   let deals: KeptDeal[] | null = null;
   if (result.unsent.length) {
-    const read = await scanDeals(statsId, payer);
-    if (!Array.isArray(read)) return { ok: false, error: read.refused };
+    const read = await scanDeals(statsId, meter);
+    if (!Array.isArray(read)) return { ok: false, error: read.refused, message: read.message };
     deals = read;
     const view = stageView(current);
     const counts = new Map<string, number>();
@@ -834,17 +873,18 @@ export async function savePipelineChange(statsId: string, change: { pipeline?: u
     if (!result.ok) return result;
   }
   const kept = new Set(allStages(result.pipelines).map((s) => s.id));
-  let settled: { moves: Record<string, string> } | ScanRefused;
+  let settled: { moves: Record<string, string>; compacted: boolean } | ScanRefused;
   try {
-    settled = await settleStageMoves(statsId, current, result.moves, kept, payer, room, deals);
+    settled = await settleStageMoves(statsId, current, result.moves, kept, meter, room, deals);
   } catch (error) {
     if (error instanceof CrmStageMovesFull) return { ok: false, error: "stage_moves" };
     throw error;
   }
-  if ("refused" in settled) return { ok: false, error: settled.refused };
+  if ("refused" in settled) return { ok: false, error: settled.refused, message: settled.message };
   const pipelines = withStageMoves(result.pipelines, settled.moves);
   await writePipelines(statsId, raw, pipelines, room);
-  return { ...result, pipelines };
+  // A compaction says how many of the studio's requests it took beyond the request's own, for the creator to read.
+  return { ...result, pipelines, ...(settled.compacted ? { studioRequests: meter.used() } : {}) };
 }
 
 /**
@@ -896,15 +936,15 @@ export async function writeStages(statsId: string, stages: Stage[], room: DataSt
   const kept = new Set(allStages(next).map(s => s.id));
   // Each stage of the first pipeline taken away shows its deals in the first open one (Pipeline.moved); no deal is read.
   const taken = Object.fromEntries(current[0].stages.filter(s => !kept.has(s.id)).map(s => [s.id, first.id]));
-  const settled = await settleStageMoves(statsId, current, taken, kept, payer, room, null);
-  if ("refused" in settled) throw new CrmStudioRefused(settled.refused);
+  const settled = await settleStageMoves(statsId, current, taken, kept, studioMeter(payer), room, null);
+  if ("refused" in settled) throw new CrmStudioRefused(settled.refused, settled.message);
   await writePipelines(statsId, raw, withStageMoves(next, settled.moves), room);
   return stages;
 }
 
 /** A change of stages needed the deals read or rewritten, and the store's studio requests could not pay for it: nothing was written. */
 export class CrmStudioRefused extends Error {
-  constructor(readonly refused: "studio_used" | "unavailable") { super("CRM stage change not paid for"); this.name = "CrmStudioRefused"; }
+  constructor(readonly refused: "studio_used" | "unavailable", readonly words: string) { super("CRM stage change not paid for"); this.name = "CrmStudioRefused"; }
 }
 
 /** A stage was sent with the id of one taken away, still read through its alias: nothing was written. */

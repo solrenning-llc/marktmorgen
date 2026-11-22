@@ -1484,10 +1484,12 @@ export const STRIPE_LIST_PAGE = EXPORT_PAGE_SECONDS * MEMORY_SECOND + 0.1 * CPU_
  * A change of pipelines or stages that reads or rewrites the store's deals (app/api/store/crm/route.ts; lib/crm.ts,
  * scanDeals and compactStageMoves): the whole request at a studio request's shape, every command it
  * sends with what its scripts run inside (which Upstash bills one by one), every byte both ways on the wire, and each
- * trip past the studio request's 1.5 s held at 2 GB at the review ceiling of a trip (ROUND_TRIP_SECONDS). Each step
- * takes dealScanUnits studio requests before it is sent: tests/plan-cost-registry.test.ts holds each share of a unit
- * under UNIT_COST.studio, and tests/crm-stage-aliases.test.ts measures the whole request, in its worst cases (a
- * restricted teammate with every alias, a scan and a compaction of MAX_DEALS deals at their widest), under what it took.
+ * trip past the studio request's 1.5 s held at 2 GB at the review ceiling of a trip (ROUND_TRIP_SECONDS). Each step's
+ * share (lib/crm.ts dealScanShare) is added before it is sent, with the registry's 5% room, and whole studio requests
+ * are taken as the shares pass them: tests/plan-cost-registry.test.ts holds each share of a unit at its price, rounded
+ * down by less than one, and tests/crm-stage-aliases.test.ts measures the whole request, in its worst cases (a
+ * restricted teammate with every alias, a scan and a compaction of MAX_DEALS deals at their widest), between 1.05 times
+ * its cost and one studio request more than the fewest that cover that.
  */
 export function crmDealScanCost(commands: number, bytes: number, trips: number): number {
   return request("studio", commands, bytes) + Math.max(0, trips * ROUND_TRIP_SECONDS - SHAPES.studio.seconds) * MEMORY_SECOND;
@@ -3016,9 +3018,10 @@ export const COST_LINES: CostLine[] = [
       // A store that kept tasks about people before their count has every task read once to make it, after tasksRecountUnits studio requests are taken (review of #1959, 4 November 2026).
       { file: "lib/crm.ts", names: ["TASKS_RECOUNT_UNITS", "tasksRecountUnits", "TASK_COUNT_FIELD"] },
       // A change of stages that reads the deals (a stage removed with no destination, shown to hold none) or rewrites them
-      // (aliases compacted past ALIAS_COMPACT_AT) takes dealScanUnits studio requests before each batch is sent, and
-      // counts what a record weighed past them before going on (crmDealScanCost; tests/crm-stage-aliases.test.ts).
-      { file: "lib/crm.ts", names: ["dealScanUnits", "DEAL_SCAN_BATCH", "DEAL_WIRE_BYTES", "DEAL_KEYS_WIRE_BYTES", "SCAN_UNIT_COMMANDS", "SCAN_UNIT_BYTES", "SCAN_UNIT_TRIPS", "MOVE_INSIDE_COMMANDS", "payer.force"] },
+      // (aliases compacted past ALIAS_COMPACT_AT) adds each batch's share (dealScanShare, with its 5% room) before it is
+      // sent and takes whole studio requests as the shares pass them (studioMeter), counting what a record weighed past
+      // them before going on (crmDealScanCost; tests/crm-stage-aliases.test.ts measures both ends).
+      { file: "lib/crm.ts", names: ["dealScanShare", "studioMeter", "SCAN_COST_ROOM = 1.05", "DEAL_SCAN_BATCH", "DEAL_WIRE_BYTES", "DEAL_KEYS_WIRE_BYTES", "SCAN_UNIT_COMMANDS", "SCAN_UNIT_BYTES", "SCAN_UNIT_TRIPS", "MOVE_INSIDE_COMMANDS", "payer.force"] },
       { file: "app/api/store/crm/route.ts", names: ["takeAllowance(store, \"studio\", units)", "forceAllowance(store, \"studio\", units)"] },
       // A field saved from the studio is counted as CRM_VALUE_SAVE_UNITS studio requests, the second taken before anything is
       // read (C3-125, 4 November 2026; tests/plan-cost-registry.ts, CRM_VALUE_SAVE).

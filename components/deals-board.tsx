@@ -62,7 +62,7 @@ const MESSAGES: Record<string, string> = {
   stage_gone: "That stage was removed. Reload the page.",
   // Removing a stage with no destination reads the deals first, and many removed stages are tidied up by moving their
   // deals for good (lib/crm.ts): both are paid from the studio's requests, and refused when it cannot pay or count them.
-  studio_used: "Your studio has no requests left this month for this change, so nothing was saved. Your pipeline is as it was.",
+  studio_used: "Your studio has no requests left this month for this change. Nothing was saved, and nothing was lost: everything is as it was. Try again when this month's studio requests open again.",
   unavailable: "This change could not be counted just now, so nothing was saved. Try again in a minute.",
   crm_conflict: "Somebody else changed your pipelines a moment ago, so nothing was saved. Reload the page and make your change again.",
   deal_conflict: "Somebody else changed this deal a moment ago, so nothing was saved. Reload the page and make your change again.",
@@ -284,7 +284,10 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     gate.current.leave();
     setBusy(false);
     if (answer.ok) {
-      toast(answer.workflows === "not_checked" ? `${done} The workflow for this stage was not started for this person.` : done);
+      // A change that also moved, for good, the deals of stages removed earlier says what that used of the month.
+      const used = answer.studioRequestsUsed;
+      const said = used ? `${done} Deals in stages you removed earlier were moved for good too, which used ${used.toLocaleString("en-US")} of this month's studio requests.` : done;
+      toast(answer.workflows === "not_checked" ? `${said} The workflow for this stage was not started for this person.` : said);
       after?.();
       startRefresh(() => router.refresh());
       return;
@@ -319,6 +322,8 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     setError(
       answer.error === "pipeline_limit" && someHidden ? "Your store has all the pipelines it can keep now. Ask the store's owner if you need another."
         : answer.error === "deal_conflict" && body.action === "undeal" ? "Somebody else changed this deal a moment ago, so nothing was removed. Reload the page and look at it again."
+        // The figure's own words say when the studio's requests open again (lib/store-allowance.ts, usedWords).
+        : answer.error === "studio_used" && answer.message ? `Nothing was saved, and nothing was lost: everything is as it was. ${answer.message}`
         : (MESSAGES[answer.error] ?? MESSAGES.server_error),
     );
   }

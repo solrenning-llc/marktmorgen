@@ -74,7 +74,10 @@ export async function POST(request: NextRequest) {
     // A change of stages that has to read or rewrite the deals pays for it from the store's studio requests, each step
     // before it is sent (lib/crm.ts scanDeals, compactStageMoves; tests/plan-cost-registry.ts, crmDealScanCost).
     const payer: StudioPayer = {
-      take: (units) => takeAllowance(store, "studio", units),
+      take: async (units) => {
+        const taken = await takeAllowance(store, "studio", units);
+        return taken.ok ? { ok: true } : { ok: false, reason: taken.reason, message: taken.message };
+      },
       force: async (units) => { await forceAllowance(store, "studio", units); },
     };
     const noAccess = () => Response.json({ ok: false, error: "pipeline_access", message: PIPELINE_ACCESS_REFUSAL }, { status: 403 });
@@ -145,7 +148,10 @@ export async function POST(request: NextRequest) {
       const shown = restricted ? visiblePipelines(result.ok ? result.pipelines : [], guarded.role, access).map((p) => ({ id: p.id, name: p.name, stages: p.stages })) : result.ok ? result.pipelines : [];
       if (!result.ok && result.error === "unknown" && restricted) return noAccess();
       // `stagesMoved`: how many removed stages now show their deals elsewhere (not how many deals: none is counted).
-      return result.ok ? Response.json({ ok: true, pipelines: shown, stagesMoved: Object.keys(result.moves).length }) : refuse(result.error, PIPELINE_STATUS[result.error] ?? 400);
+      // `studioRequestsUsed`: when stages removed before were tidied up first (lib/crm.ts compactStageMoves), how many
+      // of the studio's requests the change used in all, this one included, for the board to say.
+      if (result.ok) return Response.json({ ok: true, pipelines: shown, stagesMoved: Object.keys(result.moves).length, ...(result.studioRequests !== undefined ? { studioRequestsUsed: 1 + result.studioRequests } : {}) });
+      return result.message ? Response.json({ ok: false, error: result.error, message: result.message }, { status: PIPELINE_STATUS[result.error] ?? 400 }) : refuse(result.error, PIPELINE_STATUS[result.error] ?? 400);
     }
     const view = await readStageView(statsId);
     const { stages } = view;
@@ -232,7 +238,7 @@ export async function POST(request: NextRequest) {
     // Too many removed stages are still read through their aliases, even compacted (lib/crm.ts settleStageMoves), or
     // the reading or rewriting of the deals could not be paid for: nothing was written.
     if (error instanceof CrmStageMovesFull) return refuse("stage_moves", PIPELINE_STATUS.stage_moves);
-    if (error instanceof CrmStudioRefused) return refuse(error.refused, PIPELINE_STATUS[error.refused]);
+    if (error instanceof CrmStudioRefused) return Response.json({ ok: false, error: error.refused, message: error.words }, { status: PIPELINE_STATUS[error.refused] });
     if (error instanceof CrmStageIdTaken) return refuse("stage_gone", PIPELINE_STATUS.stage_gone);
     if (error instanceof CrmDealConflict) return refuse("deal_conflict", 409);
     if (error instanceof CrmFieldsKept) return refusedJson("locked");

@@ -1,10 +1,11 @@
 /**
  * What an all-time sales reading costs the store's studio figure (Codex P's LOW on #4970, confirmed by Claude 1 in
  * 7071702187). The reading's two cache writes are fenced on the store's life (lib/live-fence.ts SET_IF_STORE_LIVE),
- * so each is a script Upstash bills as itself and each redis.call it runs: on its worst path, a cache miss,
- * ALL_TIME_READ_COMMANDS (10) billed commands where two plain SETs made 4. The studio's GET /api/store/stats asks for
- * it, and that request is priced as one studio request (UNIT_COST.studio in tests/plan-cost-registry.ts: twenty
- * commands, TAKE_COMMANDS and LOCKED_UNTIL_STAR_COMMANDS); this test holds the whole route inside it.
+ * so each is a script Upstash bills as itself and each redis.call it runs: on its worst path, a cache miss with a
+ * PayPal sale (the PayPal read's range and the MGET of its records; Claude 1 on #4970), ALL_TIME_READ_COMMANDS (11)
+ * billed commands. The studio's GET /api/store/stats asks for it, and that request is priced as one studio request
+ * (UNIT_COST.studio in tests/plan-cost-registry.ts: twenty commands, TAKE_COMMANDS and LOCKED_UNTIL_STAR_COMMANDS);
+ * this test holds the whole route inside it in commands only, not in bytes or Stripe pages.
  *
  * Synthetic data, a Stripe stand-in.
  */
@@ -14,6 +15,7 @@ import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscri
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { GET as statsRoute } from "@/app/api/store/stats/route";
 import { LOCKED_UNTIL_STAR_COMMANDS, TAKE_COMMANDS } from "./plan-cost-registry";
+import { paidKey, salesKey } from "@/lib/paypal-sales";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -73,13 +75,19 @@ async function freshStore(): Promise<Store> {
 }
 
 async function main(): Promise<void> {
-  part("The reading alone, on a cache miss: ALL_TIME_READ_COMMANDS billed commands");
+  part("The reading alone, on a cache miss with a PayPal sale: ALL_TIME_READ_COMMANDS billed commands");
   {
     const store = await freshStore();
+    // One PayPal sale, so the PayPal read takes its MGET too: the worst path (Claude 1 on #4970).
+    const order = "PPSYNTHALLSALES001";
+    await redis.pipeline([
+      ["ZADD", salesKey(store.statsId!), String(S), order],
+      ["SET", paidKey(order), JSON.stringify({ store: store.statsId, order, capture: "CAPSYNTH001", email: "b@example.com", product: "p1", cents: 2000, currency: "usd", at: S })],
+    ]);
     const count = counting();
     const read = await readAllTimeSales(store);
     hook = null;
-    is("it read the one sale", read?.totals, { sales: 1, cents: 5000 });
+    is("it read both sales, the Stripe one and the PayPal one", read?.totals, { sales: 2, cents: 7000 });
     is("its commands, each fenced write counted with what it runs, are ALL_TIME_READ_COMMANDS", count.commands(), ALL_TIME_READ_COMMANDS);
     is("both caches were kept", [Number(redis.run(["EXISTS", `nl:stats:${store.statsId}:allsales`])), Number(redis.run(["EXISTS", `nl:next:${store.statsId}`]))], [1, 1]);
   }
@@ -92,7 +100,7 @@ async function main(): Promise<void> {
     const response = await statsRoute(new NextRequest("https://marktmorgen.com/api/store/stats", { headers: { cookie: `${SESSION_COOKIE}=${session}` } }));
     hook = null;
     is("answered with the reading", [response.status, ((await response.json()) as { ok?: boolean }).ok], [200, true]);
-    is(`its commands, scripts counted with what they run (${count.commands()}), fit one studio request`, count.commands() <= 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, true);
+    is(`its commands, scripts counted with what they run (${count.commands()}), fit one studio request in commands`, count.commands() <= 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, true);
   }
 
   part("A kept reading costs one GET");

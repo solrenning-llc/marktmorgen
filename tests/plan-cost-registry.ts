@@ -2914,6 +2914,8 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/first-product/pdf/route.ts", names: ["countStudio(store, null, FIRST_PRODUCT_PDF_UNITS - 1)", "FIRST_PRODUCT_BODY_BYTES"] },
       { file: "lib/first-product-pdf.ts", names: ["FIRST_PRODUCT_PDF_UNITS = 4", "FIRST_PRODUCT_LONG_WORD = 40"] },
       { file: "lib/first-product-limits.ts", names: ["FIRST_PRODUCT_MAX_TEXT = 60_000", "FIRST_PRODUCT_MAX_PART = 4_000"] },
+      // Contact paste admits its complete command/transfer work before any contact read or atomic import write; same studio figure, no extra allowance.
+      { file: "lib/contact-import-rules.ts", names: ["CONTACT_IMPORT_WORK", "pastedContactWork"] },
       // The activity log's fence, priced on every studio request (teamLogFenceUsd).
       { file: "lib/team.ts", names: ["TEAM_LOG_COMMANDS", "TEAM_LOG_FENCE_COMMANDS", "KEEP_LOG_IF_LIVE"] },
       { file: "lib/studio-route.ts", names: ["logTeam(access.store.sid"] },

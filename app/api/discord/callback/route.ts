@@ -99,7 +99,7 @@ export async function GET(request: NextRequest) {
   }
   // Written only while the store is still live (lib/discord-store.ts, saveServer): its erasure may have begun or ended
   // while the code was exchanged (Codex L-20261120-0732). Not confirmed: the code is spent, so the creator is told the
-  // outcome is unknown, never "connected", and no notice or team log is made.
+  // outcome is unknown ("unsaved"), never "connected", and no notice or team log is made.
   try {
     await saveServer(store, {
       id: granted.serverId,
@@ -109,7 +109,8 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error("keeping the connected Discord server was not confirmed", error);
-    return back("discord=unconfirmed");
+    // Its own notice (Claude 6 on #5097): what is unknown here is whether the NEW server was kept, not the old one.
+    return back("discord=unsaved");
   }
   after(() => noticeCreator(store, { kind: "discord-connected", server: granted.serverName || "you chose" }));
   if (role !== "owner") await logTeam(store.sid, { who: email, role, what: `${PERMISSION_WORDS.settings}: connected Discord` });

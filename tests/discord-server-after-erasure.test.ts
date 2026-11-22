@@ -10,9 +10,9 @@
  * What is checked, through the real routes and the real writer, synthetic data only (Discord is a stand-in fetch,
  * Redis the in-memory stand-in):
  *   - erased (closeStoreRecord, the walk's last step) while the code is exchanged: no server kept, and the creator
- *     is told the outcome is unknown ("unconfirmed"), never "connected", and the connected notice is never queued;
+ *     is told the new server is not confirmed ("unsaved"), never "connected", and the connected notice is never queued;
  *   - its erasing mark set while the code is exchanged: the same;
- *   - an answer of the fenced step that does not read (rule 24): "unconfirmed", nothing written, no plain SET after;
+ *   - an answer of the fenced step that does not read (rule 24): "unsaved", nothing written, no plain SET after;
  *   - the kick option, erased (or marked) between its read and its write: 503, nothing written back;
  *   - control: a live store is connected and its kick option kept, as before, at the EVAL and its three calls.
  */
@@ -145,7 +145,7 @@ async function main(): Promise<void> {
     const back = await callback(w.session, w.store);
     is("the code was exchanged with the stand-in", discord.includes("POST /oauth2/token"), true);
     is("no server kept for the erased store", await kept(w.target), null);
-    is("the creator is told the outcome is unknown, never \"connected\", and no connected notice is queued", back, { status: "unconfirmed", noticed: false });
+    is("the creator is told the outcome is unknown, never \"connected\", and no connected notice is queued", back, { status: "unsaved", noticed: false });
   }
 
   part("The fenced step's answer does not read (rule 24): unknown, never connected, no plain SET after it");
@@ -153,7 +153,7 @@ async function main(): Promise<void> {
     const w = await world();
     hook.reply = [];
     const back = await callback(w.session, w.store);
-    is("unconfirmed, no notice", back, { status: "unconfirmed", noticed: false });
+    is("unsaved, no notice", back, { status: "unsaved", noticed: false });
     is("nothing written", await kept(w.target), null);
   }
 

@@ -428,6 +428,9 @@ export function WorkflowRuns({ flowId, steps, request }: { flowId: string; steps
   const [erasing, setErasing] = useState(false);
   const eraseButton = useRef<HTMLButtonElement>(null);
   const keepButton = useRef<HTMLButtonElement>(null);
+  const yesButton = useRef<HTMLButtonElement>(null);
+  /** Set while the erasure is on its way, so a second press of either answer does nothing (Codex N1). */
+  const forgetting = useRef(false);
 
   // The question takes the focus when it opens, on the answer that keeps everything.
   useEffect(() => {
@@ -457,12 +460,18 @@ export function WorkflowRuns({ flowId, steps, request }: { flowId: string; steps
   }
 
   async function erasePerson() {
-    if (!open) return;
+    if (!open || forgetting.current) return;
+    forgetting.current = true;
     setBusy(true);
     setError(null);
     const a = await request({ action: "flow-forget", email: open.run.email });
+    forgetting.current = false;
     setBusy(false);
-    if (!a.ok) return setError(RUN_ERRORS[a.error ?? ""] ?? "The erasure could not be confirmed. Try again in a moment.");
+    if (!a.ok) {
+      // The question stays open and the focus stays on "Yes", which never left the focus order (Codex X6).
+      yesButton.current?.focus();
+      return setError(RUN_ERRORS[a.error ?? ""] ?? "The erasure could not be confirmed. Try again in a moment.");
+    }
     const gone = open.run.person;
     setErasing(false);
     setOpen(null);
@@ -552,14 +561,25 @@ export function WorkflowRuns({ flowId, steps, request }: { flowId: string; steps
               </p>
               <p className="mt-1">Their runs, history and waiting steps go from all your workflows. This cannot be undone.</p>
               <div className="mt-3 flex flex-wrap gap-3">
-                <button type="button" className="btn btn-primary btn-sm" disabled={busy} aria-busy={busy} onClick={erasePerson}>
+                {/* aria-disabled, not disabled: the focused answer stays in the focus order while the erasure runs (Codex X6). */}
+                <button
+                  ref={yesButton}
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  aria-disabled={busy}
+                  aria-busy={busy}
+                  onClick={() => void erasePerson()}
+                >
                   Yes, erase them
                 </button>
                 <button
                   ref={keepButton}
                   type="button"
                   className="btn btn-secondary btn-sm"
+                  aria-disabled={busy}
                   onClick={() => {
+                    // Closing the question while an erasure that cannot be taken back is on its way would hide its outcome (Codex N1).
+                    if (forgetting.current) return;
                     setErasing(false);
                     eraseButton.current?.focus();
                   }}

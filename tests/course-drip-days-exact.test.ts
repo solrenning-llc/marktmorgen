@@ -17,9 +17,9 @@ import { done, is, part } from "./check";
 const ID = "a".repeat(32);
 const lesson = { id: "lessonaaaaa1", title: "One", preview: false, video: null, files: [], link: null, hasBody: false, quiz: null };
 const stored = (drip: unknown) => {
-  const module: Record<string, unknown> = { id: "moduleaaaaa1", title: "Week 2", lessons: [lesson] };
-  if (drip !== undefined) module.dripDays = drip;
-  return JSON.stringify({ id: ID, modules: [{ id: "moduleaaaaa0", title: "Week 1", dripDays: 0, lessons: [] }, module], certificate: false, startsAt: null });
+  const week: Record<string, unknown> = { id: "moduleaaaaa1", title: "Week 2", lessons: [lesson] };
+  if (drip !== undefined) week.dripDays = drip;
+  return JSON.stringify({ id: ID, modules: [{ id: "moduleaaaaa0", title: "Week 1", dripDays: 0, lessons: [] }, week], certificate: false, startsAt: null });
 };
 const drip = (raw: unknown) => {
   const course = parseCourse(stored(raw));

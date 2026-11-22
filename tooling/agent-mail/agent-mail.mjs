@@ -319,21 +319,28 @@ export function naoLidas(eu, commit = buscar()) {
  * confirmam assim de propósito, mas outro também poderia, com o nome da família.
  */
 export function confirmadasSemIdentidade(eu, agora = new Date(), commit = buscar()) {
+  if (!commit) return [];
   const me = slug(eu), fam = familia(eu);
-  const acks = new Map();
-  for (const l of arquivos(commit, "lidas")) {
-    if (familia(l.split("/")[1]) !== fam) continue;
-    const id = idDe(l), texto = conteudo(commit, l), s = sessaoDe(texto);
-    const quando = new Date(texto.split("\n")[0]);
-    const x = acks.get(id) ?? { identificada: false, semId: false, quando: null };
-    if (!s || s.identificada) x.identificada = true;
-    else { x.semId = true; x.quando = Number.isNaN(quando.getTime()) ? null : quando; }
-    acks.set(id, x);
-  }
+  // Um git log só, sem abrir arquivo nenhum (LEVE do Claude 2 lpgvy no #5113): cada commit que acrescentou confirmações
+  // traz a sessão de quem escreveu no trailer Mail-Session. Primeiro, as confirmações não identificadas das últimas 24
+  // horas; depois, só para essas mensagens, se alguma sessão identificada da família também as confirmou.
+  const lerLog = (args) => {
+    const saida = [];
+    let sessao = "", quando = 0;
+    for (const linha of gitC(["log", "--format=%x01%ct%x02%(trailers:key=Mail-Session,valueonly,separator=%x20)", "--name-only", "--diff-filter=A", "--no-renames", ...args]).split("\n")) {
+      if (linha.startsWith("\x01")) { const [t, ses] = linha.slice(1).split("\x02"); quando = Number(t) * 1000; sessao = ses.trim(); continue; }
+      if (linha.startsWith("lidas/") && familia(linha.split("/")[1]) === fam) saida.push({ id: idDe(linha), quando, identificada: /^session_[0-9A-Za-z]{20,40} \(/.test(sessao) });
+    }
+    return saida;
+  };
+  const semId = new Map();
+  for (const a of lerLog(["--since=24.hours", commit, "--", "lidas"])) if (!a.identificada && agora - a.quando < 24 * 3600000) semId.set(a.id, a.quando);
+  if (!semId.size) return [];
+  const caminhos = arquivos(commit, "lidas").filter((c) => semId.has(idDe(c)) && familia(c.split("/")[1]) === fam);
+  const comId = new Set(lerLog([commit, "--", ...caminhos]).filter((a) => a.identificada).map((a) => a.id));
   return [...arquivos(commit, `caixas/${me}`), ...(me !== fam ? arquivos(commit, `caixas/${fam}`) : [])]
-    .filter((c) => c.endsWith(".md")).map((c) => ({ id: idDe(c), caminho: c }))
-    .filter(({ id }) => { const x = acks.get(id); return x && x.semId && !x.identificada && x.quando && agora - x.quando < 24 * 3600000; })
-    .map(({ id, caminho }) => ({ id, assunto: campo(conteudo(commit, caminho), "Assunto") }));
+    .filter((c) => c.endsWith(".md") && semId.has(idDe(c)) && !comId.has(idDe(c)))
+    .map((c) => idDe(c)).sort();
 }
 
 export function confirmar({ eu, ids, agora = new Date() }) {
@@ -880,7 +887,11 @@ export function conferirLink(link, pr, sha, resultado = null) {
     if (!String(url).includes(`/pull/${pr}`)) return { ok: false, motivo: "o link não é deste PR" };
     const curto = String(sha).slice(0, 10);
     if (!String(corpo).includes(curto) && !String(commitId).startsWith(curto)) return { ok: false, motivo: `o comentário não cita o head ${curto}` };
-    if (resultado && !new RegExp(`\\b${resultado}\\b`).test(String(corpo))) return { ok: false, motivo: `o comentário não traz o veredito ${resultado}` };
+    // O veredito vem da primeira linha do comentário, onde as revisões daqui o escrevem, e sem o veredito oposto nela:
+    // uma revisão CHANGES que diz mais abaixo "faltam 2 READY" não confere um registro READY (LEVE do Claude 2 lpgvy no #5113).
+    const primeira = String(corpo).split(/\r?\n/).find((l) => l.trim()) ?? "";
+    const oposto = resultado === "READY" ? "CHANGES" : "READY";
+    if (resultado && (!new RegExp(`\\b${resultado}\\b`).test(primeira) || new RegExp(`\\b${oposto}\\b`).test(primeira))) return { ok: false, motivo: `o comentário não traz o veredito ${resultado} na primeira linha` };
     if (!QUEM_TRABALHA.has(String(associacao))) return { ok: false, motivo: `o comentário não é de quem trabalha no repositório (${associacao || "autor desconhecido"})` };
     return { ok: true, motivo: "" };
   } catch {
@@ -1611,9 +1622,10 @@ async function main(argv) {
     const commit = buscar();
     const lista = naoLidas(o.eu, commit);
     if (sessaoAtual()) {
-      for (const m of confirmadasSemIdentidade(o.eu, new Date(), commit)) {
-        console.log(`ATENÇÃO: ${m.id} ("${m.assunto}") foi confirmada só por escrita não identificada nas últimas 24 horas; se não foi a sua família, leia-a no correio.`);
-      }
+      // Uma linha só, com a contagem e até 5 identificadores: para o Claude 1 (que também lê no computador do dono) e o
+      // Codex, isso é o normal, e um aviso por mensagem viraria ruído (LEVE do Claude 2 lpgvy no #5113).
+      const semId = confirmadasSemIdentidade(o.eu, new Date(), commit);
+      if (semId.length) console.log(`ATENÇÃO: ${semId.length} mensagem(ns) da sua caixa foram confirmadas só por escrita não identificada nas últimas 24 horas (${semId.slice(-5).join(", ")}${semId.length > 5 ? ", ..." : ""}); se não foi uma sessão da sua família fora da nuvem, leia-as no correio.`);
     }
     if (!lista.length) console.log("nenhuma mensagem nova");
     else { mostrar(lista); console.log(`\n${lista.length} não lida(s). Confirme com: node agent-mail.mjs ack --as "${o.eu}" ${lista.map((m) => m.id).join(" ")}`); }

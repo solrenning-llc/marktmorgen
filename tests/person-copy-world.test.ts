@@ -63,6 +63,9 @@ const EXPECTED_EMPTY: string[] = ["lib/shipment-mail-outbox.ts", "lib/order-conf
 
 // 610 [WP9] unit 2: the world activates no license key on a device; its copy is held in tests/licence-activations.test.ts.
 EXPECTED_EMPTY.splice(EXPECTED_EMPTY.indexOf("lib/licence-keys.ts") + 1, 0, "lib/licence-activations.ts");
+// #5125 (checkoutsOf casing): the world's buyers type their address in lower case, so no spelling of it is kept; the
+// copy of kept spellings, and their erasure, are held in tests/checkout-spellings.test.ts.
+EXPECTED_EMPTY.splice(EXPECTED_EMPTY.indexOf("lib/checkout-ask.ts"), 0, "lib/checkout-spellings.ts");
 
 main().catch((error) => {
   console.error(error);

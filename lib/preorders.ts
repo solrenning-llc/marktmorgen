@@ -41,7 +41,7 @@ import { type StripePage, StripeListUnreadable, readStripePage } from "@/lib/str
 
 const soonKey = (sid: string) => `nl:wl:${sid}:soon`;
 const dayKey = (sid: string) => `nl:wl:${sid}:pre`;
-const entriesKey = (sid: string, product: string) => `nl:pre:${sid}:${product}`;
+export const entriesKey = (sid: string, product: string) => `nl:pre:${sid}:${product}`;
 export const piKey = (pi: string) => `nl:pre:pi:${pi}`;
 const anyKey = (sid: string) => `nl:pre:${sid}:any`;
 const anchorKey = (sid: string) => `nl:pre:${sid}:refunds`;

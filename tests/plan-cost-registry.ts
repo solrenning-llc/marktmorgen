@@ -61,6 +61,7 @@ import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
 import { CERTIFICATE_PASS_EVERY_SECONDS, CERTIFICATE_REFUND_CHECKS_PER_MONTH, CERTIFICATE_REFUND_PAGES_PER_STORE, CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH } from "@/lib/certificate-refunds";
+import { SPELLING_ORDER_COMMANDS } from "@/lib/checkout-spellings";
 import { LOST_DISPUTE_PAGES } from "@/lib/refunds";
 import { RECEIPT_BATCH_SHAPE } from "@/lib/receipt-batch";
 import { monthlyEmails, type Tier } from "@/lib/plan";
@@ -378,6 +379,13 @@ export const STRIPE_WAIT_SECONDS = 2;
  */
 export const ORDER_RENEWAL_STOP = (STRIPE_WAIT_SECONDS / RENEWALS_AT_ONCE + STRIPE_WAIT_SECONDS / 100) * MEMORY_SECOND;
 /**
+ * The spelling of an order's buyer's address as typed, kept for the copy of their data by the five-minute sweep
+ * (lib/checkout-spellings.ts, keepSpellings; #5125, "checkoutsOf casing", 22 November 2026): every try of its checked
+ * write at its most, SPELLING_ORDER_COMMANDS. Its bytes are kept for good inside ORDER_DATA_BYTES, priced with the
+ * room (tests/store-data-registry.ts, nl:spell:).
+ */
+export const ORDER_SPELLING = SPELLING_ORDER_COMMANDS * COMMAND;
+/**
  * A purchase for several's settlement (lib/group-buy.ts settleGroup; Claude 7's cost MEDIUM on #4494): before any place
  * is handed out, its payment is read on the creator's account with its charge expanded, and givenBack may then read the
  * payment's dispute: GROUP_SETTLE_STRIPE_CALLS waits at the most, each STRIPE_WAIT_SECONDS held at 2 GB, once per group
@@ -483,7 +491,7 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  * No PER_EMAIL/ORDER_COST coefficient, real review, quota protection, paid
  * financial envelope or retention approval is changed/certified here.
  */
-export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP;
+export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP + ORDER_SPELLING;
 
 /** The shapes requests are costed at: wall seconds held at 2 GB, and CPU seconds. Review ceilings, not measurements. */
 export const SHAPES = {
@@ -2391,6 +2399,9 @@ export const COST_LINES: CostLine[] = [
     sources: [
       { file: "lib/order-rules.ts", names: ["ORDERS_INCLUDED", "paidOrdersLimitFor", "freeCopiesLimitFor", "ORDER_CENTS_PER_THOUSAND_OVER"] },
       { file: "lib/order-admission.ts", names: ["ADMIT_ORDERS", "admitOrders"] },
+      // Each paid checkout's address as typed, kept by the sweep for the copy of the buyer's data (#5125): ORDER_SPELLING.
+      { file: "lib/checkout-spellings.ts", names: ["SPELLING_ORDER_COMMANDS", "keepSpellings", "orderWriteIfSame"] },
+      { file: "lib/checkout-sweep.ts", names: ["keepSpellings(store, paid)"] },
       { file: "lib/order-rules.ts", names: ["CALL_ORDER_UNITS", "TRIAL_ORDERS"] },
       { file: "lib/calls.ts", names: ["admitOrders(store, CALL_ORDER_UNITS)", "countOrder"] },
       { file: "lib/call-packages.ts", names: ["admitOrders(store, 1)"] },

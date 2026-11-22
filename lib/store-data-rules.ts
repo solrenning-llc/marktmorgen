@@ -38,7 +38,7 @@
  * refused at.
  */
 import type { Tier } from "@/lib/plan";
-import { paidOrdersLimitFor } from "@/lib/order-rules";
+import { ORDERS_INCLUDED, TRIAL_ORDERS, paidOrdersLimitFor } from "@/lib/order-rules";
 import { MAX_CART } from "@/lib/cart-rules";
 import { MAX_BUMPS } from "@/lib/product-extras";
 import { MAX_BUNDLE_ITEMS } from "@/lib/bundle-rules";
@@ -48,15 +48,36 @@ import { DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
 
 const MB = 1_000_000;
 
+/** Windows of a plan's orders, of one product each, that what a store keeps leaves room for. */
+export const ORDER_RESERVE_WINDOWS = 2;
+
+/**
+ * What one order keeps for good of its buyer's address as typed at checkout, for the copy of their data
+ * (lib/checkout-spellings.ts; #5125, "checkoutsOf casing", 22 November 2026), as lib/order-data.ts charges it at
+ * its most: the store's hash made new (its 41-character name and ORDER_KEY_BYTES) and a new field (the address's
+ * SHA-256, 64 characters, a spelling of at most SPELLING_MOST_BYTES, 254, and ORDER_ENTRY_BYTES), a quarter more,
+ * rounded up to DATA_STEP_BYTES (tests/checkout-spellings.test.ts). Inside ORDER_DATA_BYTES; the room of each plan
+ * grows by the same amount for every order its reserve holds, so what a store may keep besides its orders is what it
+ * was before.
+ */
+export const ORDER_SPELLING_BYTES = 656;
+
+/** What the room grows by so the reserve's ORDER_SPELLING_BYTES never come out of what a store keeps besides. */
+const spellingRoom = (orders: number) => ORDER_RESERVE_WINDOWS * orders * ORDER_SPELLING_BYTES;
+
 /**
  * The room each plan's store has in the database, in bytes: what it keeps
  * and what its orders leave, together. Sized so each plan keeps the owner's
  * 60% after tax at full use of everything (tests/spend-floor.test.ts).
+ * Since 22 November 2026 (#5125) each grows by its orders' spellings
+ * (spellingRoom), so the reserve's growth never comes out of what a store
+ * keeps besides, pending the owner's decision on the printed figure (18 MB,
+ * 135 MB and 250 MB before; a trial 10 MB).
  */
 export const DATA_ROOM_BYTES: Record<Tier, number> = {
-  creator: 18 * MB,
-  pro: 135 * MB,
-  scale: 250 * MB,
+  creator: 18 * MB + spellingRoom(ORDERS_INCLUDED.creator),
+  pro: 135 * MB + spellingRoom(ORDERS_INCLUDED.pro),
+  scale: 250 * MB + spellingRoom(ORDERS_INCLUDED.scale),
 };
 
 /**
@@ -64,7 +85,7 @@ export const DATA_ROOM_BYTES: Record<Tier, number> = {
  * ended. What it already keeps stays; past this nothing new is kept.
  */
 export const NON_PAYING_DATA_ROOM_BYTES: Record<Exclude<Standing, "paid">, number> = {
-  trial: 10 * MB,
+  trial: 10 * MB + spellingRoom(TRIAL_ORDERS),
   none: 5 * MB,
   ended: 5 * MB,
 };
@@ -83,7 +104,7 @@ export const NON_PAYING_DATA_ROOM_BYTES: Record<Exclude<Standing, "paid">, numbe
  * What an order keeps only for a while is priced on its own, at every order
  * of the window (the registry's parts by the order).
  */
-export const ORDER_DATA_BYTES = 4_608;
+export const ORDER_DATA_BYTES = 4_608 + ORDER_SPELLING_BYTES;
 
 /**
  * What each product an order hands over keeps for good besides: its place in
@@ -149,9 +170,6 @@ export function besidePoolFor(store: DataFields, nowSeconds = Date.now() / 1000)
  * the first look at the diary this many days after the call (lib/calls.ts).
  */
 export const PAST_CALL_DAYS = 90;
-
-/** Windows of a plan's orders, of one product each, that what a store keeps leaves room for. */
-export const ORDER_RESERVE_WINDOWS = 2;
 
 /**
  * What each entry a write adds is counted at besides its own bytes: the key

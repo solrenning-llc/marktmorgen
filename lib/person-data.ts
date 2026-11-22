@@ -45,6 +45,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/discount-schedule.ts", how: "none", what: "A discount code's start and end (511 [CK3]): the code's word, its times and its tries, by the store; nothing about any buyer, so deleting a person changes nothing here" },
   { file: "lib/redis-memory.ts", how: "none", what: "In-memory database adapter: follows callers' keys and deletions and keeps no separate per-person index" },
   // ---------------------------------------------------------------- the list and email
+  { file: "lib/checkout-spellings.ts", how: "erased", what: "How they typed their email address at checkout, kept only so a copy of their data finds every payment they made; while a pre-order of theirs is kept on purpose, it is kept with it" },
   { file: "lib/contacts.ts", how: "erased", what: "Their row on your list: address, name, labels, what they asked for or bought, and whether they agreed to hear from you" },
   { file: "lib/contacts.ts", how: "erased", what: "The link in your emails that unsubscribes them" },
   { file: "lib/person-erasure.ts", how: "kept", what: "While a deletion is not finished: the names of the person's uploaded files that could not be deleted yet, under the one-way fingerprint, never the address.", why: "So deleting the same person again finds those files and deletes them. Each one goes as soon as its file is deleted or handed to the daily cleanup, and not before, so no file is left with nothing pointing to it." },

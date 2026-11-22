@@ -56,6 +56,7 @@ import { onAccount, platformKey } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { CONFIRM_WITHIN_SECONDS, type SessionRecord, canConfirm, confirmPurchase, confirmationKey } from "@/lib/purchase-email";
 import { REMIND_WITHIN_SECONDS, remindAbandoned } from "@/lib/checkout-recovery";
+import { keepSpellings } from "@/lib/checkout-spellings";
 import { enroll, readFlows } from "@/lib/flows";
 import { recoveryOn } from "@/lib/recovery-setting";
 import { type Store, ensureStoreId, saleHandles, storeRef, storesAfter } from "@/lib/store";
@@ -580,6 +581,10 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
   await walkDay(store, "complete", since, deadline, counts, async (rows) => {
     // Asked in one round trip: which of the paid ones were already confirmed.
     const paid = rows.filter((row) => isSettled(row) && typeof row.id === "string");
+    // Each paid checkout's address as its buyer typed it, kept before anything else of the page (lib/checkout-spellings.ts):
+    // the copy of a person's data finds their payments by it. A write not confirmed throws, so the walk does not go past
+    // this page and the next run reads it again; everything after it here is kept once by its own mark.
+    await keepSpellings(store, paid);
     // This is independent of the email's sent mark and cannot hold up an
     // existing buyer's confirmation. Without the reviewed policy it does no IO.
     // SCAN may repeat an owner. The optional diagnostic work has a budget

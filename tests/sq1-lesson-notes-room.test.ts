@@ -36,7 +36,7 @@
 import { readFileSync } from "node:fs";
 import { emailKey } from "@/lib/learn";
 import * as notesLib from "@/lib/lesson-notes";
-import { TALLY_BYTES, clearCourseNotes, forgetLessonNotesPerson, readNote, saveNote } from "@/lib/lesson-notes";
+import { MAX_NOTES_BYTES_PER_STUDENT, TALLY_BYTES, clearCourseNotes, forgetLessonNotesPerson, readNote, saveNote } from "@/lib/lesson-notes";
 import * as dataLib from "@/lib/store-data";
 import { takeData, type DataStore } from "@/lib/store-data";
 import * as rulesLib from "@/lib/store-data-rules";
@@ -61,6 +61,12 @@ const COURSE = "c".repeat(32);
 const lessonId = (n: number) => `l${String(n).padStart(11, "0")}`;
 /** A note at the most characters, each four bytes: about 16 KB kept. */
 const BIG = "🙂".repeat(4_000);
+/**
+ * The big notes each R1 student writes: one under their own cap (MAX_NOTES_BYTES_PER_STUDENT), so the tenth, not their
+ * cap, is what refuses the last of them, after several kept, whatever the room's size (#5125, 22 November 2026: with the
+ * room grown by its orders' spellings, a student who wrote up to their cap left the next one refused at their first).
+ */
+const R1_NOTES = Math.floor(MAX_NOTES_BYTES_PER_STUDENT / Buffer.byteLength(BIG)) - 1;
 const tenth = () => Math.floor(dataRoomFor(SHOP) / 10);
 
 /** What the notes take in the room, summed from each student's own tally (what their notes weigh, and the tally's own TALLY_BYTES). */
@@ -99,7 +105,7 @@ async function fillsATenth(): Promise<void> {
   const students = Array.from({ length: 12 }, (_, i) => emailKey(`r1-${i}@example.com`));
   let refused: { who: number; n: number; reason: string } | null = null;
   for (let s = 0; s < students.length && !refused; s++) {
-    for (let n = 0; n < 60; n++) {
+    for (let n = 0; n < R1_NOTES; n++) {
       const saved = await saveNote({ statsId: STATS, learner: students[s], courseId: COURSE, lessonId: lessonId(n), text: BIG, was: "", room: SHOP });
       // One student's own cap: the next one goes on.
       if (!saved.ok && saved.reason === "mine") break;
@@ -172,6 +178,12 @@ async function together<T>(acts: (() => Promise<T>)[]): Promise<T[]> {
 
 async function race(): Promise<void> {
   part("R3: two students racing for the last room under the cap");
+  // What a new student's first big note takes, measured on a store of its own: the fill below leaves room for one
+  // such note and not two, whatever the room's size.
+  await clear();
+  const before = await noteSlots();
+  await saveNote({ statsId: STATS, learner: emailKey("r3-probe@example.com"), courseId: COURSE, lessonId: lessonId(0), text: BIG, was: "", room: SHOP });
+  const firstNote = (await noteSlots()) - before;
   await clear();
   // Fill to just under the tenth, leaving room for one big note and not two; a filler whose own cap refuses them
   // ("mine") hands over to the next.
@@ -179,8 +191,8 @@ async function race(): Promise<void> {
   let n = 0;
   for (;;) {
     const slots = await noteSlots();
-    if (tenth() - slots < 2 * 16_400 && tenth() - slots >= 16_400) break;
-    const text = tenth() - slots >= 3 * 16_400 ? BIG : "x".repeat(200);
+    if (tenth() - slots < 2 * firstNote && tenth() - slots >= firstNote) break;
+    const text = tenth() - slots >= 3 * firstNote ? BIG : "x".repeat(200);
     const saved = await saveNote({ statsId: STATS, learner: emailKey(`r3-filler-${filler}@example.com`), courseId: COURSE, lessonId: lessonId(n), text, was: "", room: SHOP });
     n += 1;
     if (!saved.ok && saved.reason === "mine") {

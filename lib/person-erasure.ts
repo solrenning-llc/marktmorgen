@@ -83,6 +83,7 @@ import { DROPPED_PROBES, type RemovedCourse, droppedCourseIds, droppedCourseReco
 import { forgetBondPerson } from "@/lib/affiliate-bond";
 import { forgetLeadPerson } from "@/lib/affiliate-leads";
 import { forgetImportedPerson } from "@/lib/imported-purchases";
+import { forgetSpellingsPerson } from "@/lib/checkout-spellings";
 import { forgetPodcastPerson, podcastProductCount } from "@/lib/podcast-access";
 import { forgetWelcomePerson } from "@/lib/welcome-offer-send";
 import { forgetWinbackPerson } from "@/lib/winback-send";
@@ -180,6 +181,8 @@ export const ERASERS: Eraser[] = [
   { module: "lib/affiliate-bond.ts", run: (s) => forgetBondPerson(s.statsId, s.email) },
   { module: "lib/affiliate-leads.ts", run: (s) => forgetLeadPerson(s.store, s.email) },
   { module: "lib/imported-purchases.ts", only: "person", run: (s) => forgetImportedPerson(s.statsId, s.email, s.store) },
+  // How they typed their address at checkout (#5125): deleted, unless it still leads to a pre-order kept on purpose.
+  { module: "lib/checkout-spellings.ts", run: (s) => forgetSpellingsPerson(s.store, s.email) },
   { module: "lib/podcast-access.ts", run: (s) => forgetPodcastPerson(s.store, s.productIds, s.email) },
   { module: "lib/welcome-offer-send.ts", run: (s) => forgetWelcomePerson(s.statsId, s.email) },
   { module: "lib/winback-send.ts", run: (s) => forgetWinbackPerson(s.statsId, s.productIds, s.email) },

@@ -45,6 +45,7 @@ import { notesOf } from "@/lib/lesson-notes";
 import { bondRecordOf } from "@/lib/affiliate-bond";
 import { leadOf } from "@/lib/affiliate-leads";
 import { importedFrom, importedKey } from "@/lib/imported-purchases";
+import { spellingsOf } from "@/lib/checkout-spellings";
 import { inviteField, inviteForCopy, withPendingInvites } from "@/lib/move-members";
 import { openConversation, readInbox } from "@/lib/inbox";
 import { accountOf, readMember as readDiscordMember } from "@/lib/discord-store";
@@ -128,6 +129,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/stock-alerts.ts": { how: "copied", what: "Your places on the store's back-in-stock lists" },
   "lib/affiliate-bond.ts": { how: "copied", what: "Which affiliate brought you to the store" },
   "lib/affiliate-leads.ts": { how: "copied", what: "Sign-ups, free products and calls an affiliate was credited for" },
+  "lib/checkout-spellings.ts": { how: "copied", what: "How you typed your email address at checkout, kept so this copy finds every payment you made" },
   "lib/imported-purchases.ts": { how: "copied", what: "What an import from another platform, a gift or a PayPal order gave you" },
   "lib/podcast-access.ts": { how: "copied", what: "Which products' private podcast feeds you have (the feed's secret address is in the email that sent it)" },
   "lib/welcome-offer-send.ts": { how: "marks", what: "When your welcome offer began, and that its reminder was set" },
@@ -456,6 +458,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return [copy];
   },
   // Read whether or not the store still lets imported buyers in (importedFor asks that, and notes them as it reads).
+  // How they typed their address at checkout (#5125), each spelling kept for this store, read exactly.
+  "lib/checkout-spellings.ts": async (s) => (await spellingsOf(s.statsId, s.email)).map((typed) => ({ typedAtCheckout: typed })),
   "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true }),
   "lib/move-members.ts": async (s) => {
     const out: unknown[] = [];

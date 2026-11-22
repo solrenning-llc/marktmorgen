@@ -59,7 +59,7 @@ import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { MAX_REMOVED_COURSES } from "@/lib/removed-courses";
 import { MAX_LESSONS, MAX_MODULES } from "@/lib/course";
 import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
-import { ENTRY_BYTES } from "@/lib/store-data-rules";
+import { ENTRY_BYTES, ORDER_SPELLING_BYTES } from "@/lib/store-data-rules";
 import { ERASED_MARK_SECONDS, TASK_COUNT_WEIGHT } from "@/lib/crm";
 import { MAX_STORE_BYTES, PHOTO_LEFT_MAX } from "@/lib/store";
 import { MAIL_GAP_CHECKS_PER_EMAIL } from "@/lib/mail-frequency";
@@ -449,6 +449,9 @@ export const FAMILIES: Record<string, Family> = {
   ] },
   "nl:pkg:s:@lib/call-packages.ts": { what: "The packages a store sold, so a closed store finds them (18 October 2026)", parts: [item(160, "A checkout's id in the store's set, one per package.", "call")] },
   "nl:call:moved:@lib/call-records.ts": short("A call moved: its record, kept until 200 days after the call it moved to, two years at most", "call", 730, KB),
+  // A buyer's address as typed at a paid checkout (#5125, checkoutsOf casing): at most one new spelling an order, kept as
+  // long as the store is (the records it leads to can outlive any date set from the order), inside ORDER_DATA_BYTES.
+  "nl:spell:@lib/checkout-spellings.ts": { what: "The spellings of buyers' addresses typed at the store's paid checkouts", parts: [kept(ORDER_SPELLING_BYTES, "A buyer's address as typed: its field (the address's SHA-256) or one more line in it, at most SPELLING_MOST_BYTES.")] },
   "nl:closed:claims:@lib/closed-store-data.ts": company("Where a closing store's preparation stopped in its hosts' claims, until it reaches their end", "The company's job: one key a closing store with more claims than a walk reads, deleted with the store and expiring by itself CLAIMS_LEFT_DAYS (14) after the last walk that wrote it (lib/closed-store-data.ts, clearClaims)."),
   "nl:closed:batch@lib/closed-store-data.ts": company("What the walk needs of each store it deletes, while it runs", "The company's job: a field a closing store, deleted when its walk is done (lib/closed-store-data.ts); one whose hosts' own calendars are not decided yet stays after its walk, set aside with only its ref, its id and those hosts, until each is known (decideCalendars)."),
   "nl:closed:due@lib/closed-store-data.ts": company("Closed stores waiting for the walk that deletes their records", "The company's job: a member a closed store, taken out when its walk begins."),

@@ -40,9 +40,9 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 export const REPO = process.env.CORREIO_REPO || "https://github.com/solrenning-llc/repo-id-transfer-test";
 export const RAMO = process.env.CORREIO_RAMO || "correio";
@@ -69,11 +69,21 @@ export function git(args, input, prazoMs = GIT_PRAZO_MS, dir = null, envExtra = 
 // commits gravados e a referência do só-acrescentar) fica num repositório git só da ferramenta, fora do clone onde ela
 // roda: um push --mirror desse clone nunca leva o correio. As leituras dos PRs (dados públicos) continuam no clone.
 export const DIR_CORREIO = process.env.CORREIO_GIT_DIR || join(homedir(), ".agent-mail", "correio.git");
+/** A marca antiga do clone, guardada pelo comando que criou o repositório do correio (MÉDIO do Claude 4 3Kc no #5117). */
+const ARQUIVO_ANCORA = () => join(DIR_CORREIO, "agent-mail-ancora-do-clone");
 let dirPronto = false;
 /** O git no repositório do correio, criado na primeira vez. */
 export function gitC(args, input) {
   if (!dirPronto) {
-    if (!existsSync(join(DIR_CORREIO, "HEAD"))) execFileSync("git", ["init", "-q", "--bare", DIR_CORREIO], { stdio: ["ignore", "pipe", "pipe"] });
+    if (!existsSync(join(DIR_CORREIO, "HEAD"))) {
+      execFileSync("git", ["init", "-q", "--bare", DIR_CORREIO], { stdio: ["ignore", "pipe", "pipe"] });
+      // MÉDIO do Claude 4 3Kc no #5117: o comando que cria o repositório (qualquer um, inclusive read) guarda a marca
+      // antiga do só-acrescentar que estiver no clone, antes que o aviso leve a apagá-la; a vigia a usa depois.
+      try {
+        const velha = git(["rev-parse", "--verify", "-q", REF_VERIFICADO]);
+        if (/^[0-9a-f]{40}$/.test(velha)) writeFileSync(ARQUIVO_ANCORA(), `${velha}\n`);
+      } catch { /* o clone não tem marca antiga */ }
+    }
     dirPronto = true;
   }
   return git(args, input, GIT_PRAZO_MS, DIR_CORREIO);
@@ -1592,7 +1602,10 @@ export function avisarClone() {
     console.error(`ATENÇÃO: este clone guarda ${refs.length} referência(s) do correio privado, de uma versão anterior da ferramenta (${refs.slice(0, 3).join(", ")}${refs.length > 3 ? ", ..." : ""}); um push --mirror as publicaria. O correio agora fica em ${DIR_CORREIO}. Apague-as com: git for-each-ref --format='%(refname)' refs/correio refs/agent-mail | xargs -r -n1 git update-ref -d`);
   }
   const aqui = new URL(import.meta.url).pathname;
-  if (aqui.startsWith(`${tmpdir()}/`) && !process.env.AGENT_MAIL_TEST) console.error(`ATENÇÃO: a ferramenta roda de ${aqui}, numa pasta que todos podem escrever; instale com o comando de CO (b) do AGENTS.md, em ~/.agent-mail.`);
+  // NIT 2 do Claude 1 no #5113: pelas permissões da pasta, não pelo caminho; uma pasta só da sessão (700) não é aviso.
+  let todosEscrevem = false;
+  try { todosEscrevem = (statSync(dirname(aqui)).mode & 0o002) !== 0; } catch { /* sem como ler: sem aviso */ }
+  if (todosEscrevem && !process.env.AGENT_MAIL_TEST) console.error(`ATENÇÃO: a ferramenta roda de ${aqui}, numa pasta que todos podem escrever; instale com o comando de CO (b) do AGENTS.md, em ~/.agent-mail.`);
 }
 
 async function main(argv) {
@@ -1656,6 +1669,10 @@ async function main(argv) {
         const c = buscar();
         let antes = null;
         try { antes = gitC(["rev-parse", "--verify", "-q", REF_VERIFICADO]); } catch { /* primeira conferência */ }
+        // NIT 1 do Claude 1 no #5113: na primeira vez do repositório próprio, vale a marca antiga do clone, se houver;
+        // assim uma reescrita feita antes da troca de versão ainda é denunciada.
+        if (!antes) { try { antes = /^[0-9a-f]{40}/.exec(readFileSync(ARQUIVO_ANCORA(), "utf8"))?.[0] ?? null; } catch { /* nenhuma guardada */ } }
+        if (!antes) { try { antes = git(["rev-parse", "--verify", "-q", REF_VERIFICADO]); } catch { /* o clone não tem marca antiga */ } }
         const r = conferirSoAcrescentar(c, antes || null);
         if (c) gitC(["update-ref", REF_VERIFICADO, c]);
         if (r.reescrito || r.problemas.length) alarme = [r.reescrito ? "o ramo foi reescrito (a última conferência não está mais no histórico)" : "", ...r.problemas].filter(Boolean).join("; ");

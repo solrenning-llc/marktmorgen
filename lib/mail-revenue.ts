@@ -82,10 +82,11 @@ export function moneyByCampaign(
   sales: { source: string; campaign: string; cents: number; currency: string }[],
   currency: string,
 ): Record<string, MailMoney> {
-  const by: Record<string, MailMoney> = {};
+  const by = new Map<string, MailMoney>();
   for (const sale of sales) {
     if (sale.source !== MAIL_SOURCE || !sale.campaign) continue;
-    const row = (by[sale.campaign] ??= { sales: 0, cents: 0 });
+    const row = by.get(sale.campaign) ?? { sales: 0, cents: 0 };
+    by.set(sale.campaign, row);
     if (sale.currency !== currency) {
       row.elsewhere = (row.elsewhere ?? 0) + 1;
       continue;
@@ -93,7 +94,7 @@ export function moneyByCampaign(
     row.sales += 1;
     row.cents += sale.cents;
   }
-  return by;
+  return Object.fromEntries(by);
 }
 
 /**
@@ -104,6 +105,7 @@ export function broadcastMoney(revenue: MailRevenue | null, broadcastId: string)
   if (!revenue) return null;
   const total: MailMoney = { sales: 0, cents: 0 };
   for (const campaign of broadcastCampaigns(broadcastId)) {
+    if (!Object.hasOwn(revenue.by, campaign)) continue;
     const money = revenue.by[campaign];
     if (!money) continue;
     total.sales += money.sales;
@@ -212,8 +214,7 @@ export async function readMailVisits(store: Pick<Store, "statsId">, broadcastIds
     if (!by) {
       const views = await campaignViews(store.statsId, broadcastIds.flatMap(broadcastCampaigns));
       if (!views) return null;
-      by = {};
-      for (const id of broadcastIds) by[id] = broadcastCampaigns(id).reduce((sum, campaign) => sum + (views[campaign] ?? 0), 0);
+      by = Object.fromEntries(broadcastIds.map((id) => [id, broadcastCampaigns(id).reduce((sum, campaign) => sum + (Object.hasOwn(views, campaign) ? views[campaign] : 0), 0)]));
       await redisPipeline([["SET", visitsKey(store.statsId), JSON.stringify(by), "EX", CACHE_SECONDS]]).catch(() => {});
     }
     return by;

@@ -61,3 +61,8 @@
   .pricing-section-index { background: Canvas; color: CanvasText; }
   .pricing-section-index a { color: LinkText; }
 }
+/* WCAG 2.2 1.4.8 (AAA): no block of the page's text is wider than 80 characters, at any width and with text spacing
+   (tests/pricing-line-length.test.ts). Scoped by the section index, so it stays off any other page. */
+main:has(.pricing-section-index) :where(p, dd, li:not(nav li)) {
+  max-width: 50ch;
+}

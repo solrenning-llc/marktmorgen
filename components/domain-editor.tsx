@@ -132,7 +132,7 @@ export function DomainEditor({
       )}
 
       {shown && !shown.live ? (
-        <div className="mt-4 overflow-x-auto">
+        <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="DNS records to add, as a table">
           <table className="w-full min-w-[20rem] text-left text-sm">
             <caption className="sr-only">DNS records to add</caption>
             <thead>

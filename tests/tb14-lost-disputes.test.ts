@@ -413,6 +413,12 @@ async function main(): Promise<void> {
     is(`gifts, ${label}: the next run finishes it and marks it read`, [await holds(to), Boolean((await readGift(started.gift.id))?.revoked), await read(giftSeen, String(event.id))], [false, true, 1]);
   }
 
+  // The refunds already handled are kept thirty days from the last one marked (tests/store-data-registry.ts), never for good.
+  for (const key of [preSeen, giftSeen]) {
+    const ttl = (await realPipeline([["TTL", key]]))[0] as number;
+    is(`${key.split(":")[1]}: the refunds already handled keep an expiry of at most thirty days`, [ttl > 0, ttl <= 30 * 86_400], [true, true]);
+  }
+
   part("Booked calls: a lost dispute frees the booking's time, as a full refund does");
   const call = (n: number, disputed: boolean) => ({
     id: `cs_test_tb14call${String(n).padStart(8, "0")}`,

@@ -133,6 +133,30 @@ async function main() {
     is("a page in another shape throws, never reads as none", threw, true);
   }
 
+  part("A page cannot present a single invoice twice (#4734)");
+  for (const [label, other] of [
+    ["an identical copy", invoice()],
+    ["a contradictory copy, still due", invoice({ status: "open", amount_paid: 0, amount_remaining: 6900 })],
+    ["a copy still a draft", invoice({ status: "draft", number: null, amount_paid: 0, amount_remaining: 6900 })],
+  ] as const) {
+    let refused = false;
+    try {
+      readPlanInvoicePage({ object: "list", data: [invoice(), other], has_more: false }, OWNER);
+    } catch {
+      refused = true;
+    }
+    is(`${label} of an invoice: the page is unknown`, refused, true);
+  }
+  is(
+    "control: distinct invoices and another store's row are still read",
+    readPlanInvoicePage({ object: "list", data: [invoice(), invoice({ id: "in_PlanInvoice0002", number: "ABCD1234-0002" }), invoice({ id: "in_PlanInvoice0003", customer: "cus_SomeoneElse01" })], has_more: false }, OWNER).invoices.map((i) => i.id),
+    ["in_PlanInvoice0001", "in_PlanInvoice0002"],
+  );
+  reply = { status: 200, body: { object: "list", data: [invoice(), invoice()], has_more: false } };
+  const repeated = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, async () => "within");
+  is("the invoice history reports a page with a repeated invoice as unreadable", repeated, { state: "unknown" });
+  is("the Studio does not show the invoice twice", html(repeated).includes("ABCD1234-0001"), false);
+
   part("A store with no plan subscription asks nothing and takes nothing");
   {
     const taken: number[] = [];

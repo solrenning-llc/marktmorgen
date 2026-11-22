@@ -28,12 +28,15 @@ import { createCheckout } from "@/lib/store-checkout";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { paidIntentReply } from "./paid-intent-standin";
 
 type Sent = { to: string[]; subject: string; text: string };
 const emails: Sent[] = [];
 const checkouts: URLSearchParams[] = [];
 let refunds: Record<string, unknown>[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const paid = paidIntentReply(input, init?.method ?? "GET");
+  if (paid) return paid;
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
     emails.push(JSON.parse(String(init?.body)) as Sent);
@@ -120,7 +123,9 @@ async function main(): Promise<void> {
       ordersLink: async (email) => `https://marktmorgen.com/@harbor/orders?token=${"a".repeat(64)}&for=${email}`,
     });
   is("given", await deliver(), "given");
-  is("twice is once", await deliver(), "already");
+  // Twice is once: the second run finds the first run's kept mark and throws, never "already" for emails it did not
+  // send (Claude 6 on #2872); the caller's "sent" mark answers every run after the first.
+  is("twice is once", await deliver().then(() => "returned", () => "threw"), "threw");
   store = (await storeForEmail("owner@example.com"))!;
   is("it is the recipient's", (await importedFor(store, "friend@example.com")).map((p) => [p.productId, p.job]), [[product.id, `gift:${started.gift.id}`]]);
   is("a course would be dated from the payment", started2, [`friend@example.com|${product.id}|1900000000`]);

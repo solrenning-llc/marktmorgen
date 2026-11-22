@@ -9,6 +9,7 @@ import { StudentsBulk } from "@/components/students-bulk";
 import { readKind } from "@/lib/catalog";
 import { lessonCount, readCourse } from "@/lib/course";
 import { can } from "@/lib/team-roles";
+import { seesBuyerAddresses } from "@/lib/buyer-addresses";
 import { studentList } from "@/lib/student-bulk";
 import { MAX_STUDENT_ACTION, PROGRESS_WORDS, STUDENTS_PER_PAGE, filterStudents, readFilters } from "@/lib/student-bulk-rules";
 import { count } from "@/lib/bulk-label-rules";
@@ -39,6 +40,9 @@ export default async function StudioStudentsPage({ searchParams }: Params) {
   }
   const { view } = found;
   const { store } = view;
+  // Students are listed and chosen by their email address, and buyers' addresses are orders data (ALL-160,
+  // lib/buyer-addresses.ts): a role without "orders", such as an Editor, is refused here as on any screen it may not open.
+  if (!seesBuyerAddresses(view.role)) redirect(studioPath(store, "team=forbidden"));
   const canTag = can(view.role, "send");
   const canExport = can(view.role, "export");
   const courses = (await readKind(store, "course")).filter((p) => p.course);

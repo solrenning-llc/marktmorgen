@@ -52,6 +52,7 @@ import { withinLimit } from "@/lib/request-guard";
 import { NEW_PER_DAY } from "@/lib/inbox-rules";
 import { POST as withdrawRoute } from "@/app/api/store/withdraw/route";
 import WithdrawPage from "@/app/[handle]/orders/withdraw/page";
+import { paidIntentReply } from "./paid-intent-standin";
 
 const OWNER = "mara@example.com";
 const BUYER = "ana@example.com";
@@ -64,6 +65,8 @@ const mails: { to: string; subject: string; text: string }[] = [];
 let refuseMail = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const paid = paidIntentReply(input, init?.method ?? "GET");
+  if (paid) return paid;
   const url = new URL(String(input instanceof Request ? input.url : input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "api.resend.com") {
@@ -289,6 +292,9 @@ test("D: the day of payment is the latest calendar day anywhere on Earth", () =>
 const preorderSession = (id: string, product: string, created: number, metadata: Record<string, string> = {}) => ({
   ...paid(id, product, created, { preorder: "yes", ...metadata }),
   payment_intent: `pi_test${id.padEnd(16, "0")}`,
+  // What Stripe charged, as every settled checkout says it: the pre-order receipt states it, read exactly (audit R48).
+  amount_total: 4900,
+  currency: "usd",
 });
 const deps = { base: `${ORIGIN}/@mara`, from: "Mara <orders@example.com>", ordersLink: async () => null, recordStart: async () => {} };
 

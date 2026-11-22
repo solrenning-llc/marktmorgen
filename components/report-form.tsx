@@ -114,7 +114,7 @@ export function ReportForm({ url: given }: { url: string }) {
       ) : null}
       <div>
         <label htmlFor="report-url" className="field-label">The page on Marktmorgen</label>
-        <UrlField id="report-url" value={fields.url} onChange={(url) => setFields({ ...fields, url })} check={REPORT_URL_CHECK} describedBy="report-url-help" placeholder="https://marktmorgen.com/@store/p/…" className={field} />
+        <UrlField id="report-url" value={fields.url} onChange={(url) => setFields({ ...fields, url })} check={REPORT_URL_CHECK} describedBy="report-url-help" placeholder="https://marktmorgen.com/@harborkitchen" className={field} />
         <p id="report-url-help" className="mt-1 text-sm text-ink-soft">The store page or the product page, and in what you write below, which part of it.</p>
       </div>
       <div>
@@ -145,7 +145,7 @@ export function ReportForm({ url: given }: { url: string }) {
       </div>
       <fieldset className="space-y-3">
         <legend className="field-label">Your statements</legend>
-        <label className="flex items-start gap-3 text-sm text-ink">
+        <label className="flex min-h-11 items-start gap-3 text-sm text-ink">
           <input type="checkbox" checked={goodFaith} onChange={(e) => setGoodFaith(e.target.checked)} className="mt-0.5 size-5 shrink-0 accent-violet-brand" />
           <span>
             {copyright
@@ -155,7 +155,7 @@ export function ReportForm({ url: given }: { url: string }) {
                 : "I believe in good faith that the content described above is illegal, for the reasons I gave."}
           </span>
         </label>
-        <label className="flex items-start gap-3 text-sm text-ink">
+        <label className="flex min-h-11 items-start gap-3 text-sm text-ink">
           <input type="checkbox" checked={accurate} onChange={(e) => setAccurate(e.target.checked)} className="mt-0.5 size-5 shrink-0 accent-violet-brand" />
           <span>
             {copyright

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { ensureStatsId, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { MAX_FEED_URL, addFeed, newFeedToken, removeFeed } from "@/lib/calendar-sync";
+import { CalendarChangeBusyError, MAX_FEED_URL, addFeed, newFeedToken, removeFeed } from "@/lib/calendar-sync";
 import { CALENDAR_ADDS_PER_CONNECTION_TEN_MINUTES, CALENDAR_ADDS_PER_TEN_MINUTES } from "@/lib/calendar-limits";
 import { clientAddress, essentialLimitState } from "@/lib/request-guard";
 import { shareAddress } from "@/lib/traffic-rules";
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
         if (state === "exceeded") return Response.json({ ok: false, error: "slow" }, { status: 429 });
       }
       const result = await addFeed(store, text(guarded.body.url, MAX_FEED_URL + 1));
-      if (!result.ok) return Response.json({ ok: false, error: result.reason, message: result.message }, { status: result.reason === "unavailable" ? 503 : 400 });
+      if (!result.ok) return Response.json({ ok: false, error: result.reason, message: result.message }, { status: result.reason === "unavailable" || result.reason === "busy" ? 503 : 400 });
       return Response.json({ ok: true, view: result.view, busyTimes: result.busyTimes });
     }
     if (action === "remove") {
@@ -47,6 +47,8 @@ export async function POST(request: NextRequest) {
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {
+    // Other changes to the store's calendars kept winning the write (issue #3984): nothing was changed.
+    if (error instanceof CalendarChangeBusyError) return Response.json({ ok: false, error: "busy", message: error.message }, { status: 503 });
     console.error("changing calendars failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

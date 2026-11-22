@@ -29,7 +29,8 @@ let alter: Alter = (_b, a) => a;
 let lease: "refused" | "emulated" = "refused";
 redis.pipeline = (async (batch: Batch) => {
   const [command] = batch;
-  if (batch.length === 1 && command?.[0] === "EVAL") {
+  // Only the lease script; a named script (lib/email-sync.ts WRITE_IF_READ) runs in the in-memory double itself.
+  if (batch.length === 1 && command?.[0] === "EVAL" && !String(command[1]).startsWith("-- marktmorgen:")) {
     if (lease === "refused") return [0];
     const [, , , key, member, now, until] = command;
     const due = redis.run(["ZSCORE", String(key), String(member)]);
@@ -224,4 +225,19 @@ test("a lost reply while the five-minute run retires a waiting send already out 
     if (!stopLosing()) break;
     await stillFoundOrGone(id, step, "the five-minute run");
   }
+});
+
+test("an impossible finished-job DEL count keeps the address-bearing record in the log", async () => {
+  const id = await seed(LOG_SIZE - 1);
+  redis.run(["ZREM", QUEUE_KEY, `${STATS}|${id}`]);
+  const held = record(id);
+  alter = (batch, answers) => {
+    if (batch.length !== 1 || batch[0]?.[0] !== "DEL" || batch[0]?.[1] !== jobKey(id)) return answers;
+    redis.run(["SET", jobKey(id), String(held)]);
+    return [2];
+  };
+  await queuePerson(store, person("pusher@example.com", false));
+  alter = (_batch, answers) => answers;
+  assert.equal(record(id) !== null, true);
+  assert.equal(logged(id), true);
 });

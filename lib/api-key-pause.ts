@@ -60,7 +60,7 @@ import {
   keyRecords,
   makerPrint,
   makerPrints,
-  revokeKey,
+  revokeKeyOutcome,
   type PauseWhy,
   pauseWhy,
   rewriteMakers,
@@ -362,6 +362,27 @@ export async function tellOwnerOfExit(store: Store, who: string, exit: Exit, ori
 }
 
 /**
+ * Tells the store's owner that a teammate taken off when they moved their
+ * sign-in address (lib/team.ts dropMemberships) may still have API keys that
+ * work: the sweep after the removal could not be finished, even repeated, so
+ * a key they made while being taken off may not be held. Names no key, as the
+ * keys could not be read; says where to revoke them. Returns whether it went.
+ */
+export async function tellOwnerOfUnswept(store: Store, who: string, origin = SITE_URL): Promise<boolean> {
+  return sendEmail({
+    meter: { by: "store", store, kind: "email" },
+    from: NIMBUS_FROM,
+    to: store.email,
+    subject: headerText(`Some API keys for ${store.name} may still work`, 200),
+    text: [
+      `${who} is no longer on the team of ${store.name}: they moved their sign-in to another address. We could not pause every API key they made, so some may still work.`,
+      "",
+      `Open API keys in the studio (${origin}/studio?store=${store.sid}#api) and revoke any key you do not recognize. Nothing was deleted.`,
+    ].join("\n"),
+  }).catch(() => false);
+}
+
+/**
  * Tells the store's owner which keys nobody is recorded as having made were
  * paused because a teammate's role changed: they may be the owner's own.
  */
@@ -507,16 +528,18 @@ export async function turnKeyOn(store: Store, email: string, role: Role, id: str
   return (await swapHolds(store.sid, [id], "vouched", [key.hold])).length ? "ok" : "not_paused";
 }
 
-export type Revoke = "ok" | "unknown" | "owner_only";
+export type Revoke = "ok" | "unknown" | "owner_only" | "revoke_unconfirmed";
 
 /** Revokes a key; the endpoints it added stop with it (read at every send). A key whose maker left the team is the owner's alone to revoke. */
 export async function revokeChecked(store: Store, role: Role, id: string): Promise<Revoke> {
   if (!store.sid) return "unknown";
-  const [keys, team] = await Promise.all([keyRecords(store.sid), teamNow(store)]);
+  const [keys, team] = await Promise.all([keyRecords(store.sid, true), teamNow(store)]);
   const key = keys.find((k) => k.id === id);
   if (!key) return "unknown";
   if (pauseWhy(store.sid, key.maker, key.hold, team.members, key.write, team.rule) === "left" && role !== "owner") return "owner_only";
-  return (await revokeKey(store.sid, id)) ? "ok" : "unknown";
+  // Already gone (another tab revoked it) is said as such; only an unconfirmed deletion is "unconfirmed".
+  const outcome = await revokeKeyOutcome(store.sid, id);
+  return outcome === "revoked" ? "ok" : outcome === "gone" ? "unknown" : "revoke_unconfirmed";
 }
 
 /**

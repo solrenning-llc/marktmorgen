@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
+import { BillingCountryField } from "@/components/billing-country-field";
 import { consentKind, deliversDigitally } from "@/lib/digital-consent";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -68,7 +69,9 @@ export default async function MovePage({ params, searchParams }: Params) {
   const blocking = unknown ? m.notices.refused : !invite ? m.notices.expired : unknownState ? m.notices.unknown : invite.kept !== 0 ? m.notices.kept : priceGone ? m.notices.price : !price ? m.notices.unavailable : null;
   // With the price gone there is no button, so never "try again" or "press the button again": only that it is gone.
   // "price" in the address says nothing by itself: only the product does.
-  const said = status === "price" ? undefined : m.notices[status as keyof typeof m.notices];
+  // "abroad" and "country" are the EU VAT gate's (lib/eu-vat-gate.ts pressGate), said as on the product's page.
+  const vat = status === "abroad" || status === "country" ? status : null;
+  const said = status === "price" ? undefined : vat ? say.w.notices[vat] : m.notices[status as keyof typeof m.notices];
   // An unknown state is what the page says, whatever the address carries: never "moved" from a status in the link.
   const notice = unknownState ? m.notices.unknown : priceGone ? m.notices.price : (said ?? blocking);
   // Where the prices offered today are, when the one named is gone: the product's own page, while buyers can see it.
@@ -102,7 +105,7 @@ export default async function MovePage({ params, searchParams }: Params) {
           {named ? <p className="st-muted mt-4 text-lg leading-relaxed">{m.intro(store.name, named.title)}</p> : null}
 
           {notice ? (
-            <div className="st-note mt-6 text-sm" role="status">
+            <div id={vat && notice === said ? "move-country-problem" : undefined} className="st-note mt-6 text-sm" role="status">
               <p className="font-semibold">{notice.title}</p>
               <p className="mt-1">{notice.body}</p>
               {pricesLink ? (
@@ -128,6 +131,10 @@ export default async function MovePage({ params, searchParams }: Params) {
                   : m.now(price.amount, price.line)}
               </p>
               <p className="st-muted mt-3 text-sm">{m.forAddress(invite.e)}</p>
+              {/* Where the member is buying from (EU VAT art. 9a, lib/eu-vat-gate.ts pressGate), as beside every paid checkout. */}
+              <div className="mt-5">
+                <BillingCountryField id={`bc-move-${product.id}`} locale={say.lang.locale} label={say.w.billingCountry} choose={say.w.chooseCountry} problem={vat && notice === said ? "move-country-problem" : undefined} />
+              </div>
               {/* A membership's content is handed over digitally: the box to start access at once (lib/digital-consent.ts). */}
               {deliversDigitally(product) ? <DigitalConsentBox id={`dc-move-${product.id}`} kind={consentKind(product)} lang={store.language} refused={status === "consent"} className="mt-5" /> : null}
               <button type="submit" className="btn st-btn btn-lg btn-block mt-5">

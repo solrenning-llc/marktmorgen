@@ -15,6 +15,7 @@
  *     free trial on top;
  *   - one reminder, never to somebody who already kept it.
  */
+import { OUTSIDE_EU } from "./eu-vat-press-fixture";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { MIN_DEFER_SECONDS, datesInFile, firstChargeAt, letteredDate, readRenewal, reminderAt } from "@/lib/move-rules";
@@ -179,16 +180,16 @@ async function main(): Promise<void> {
   is("it is Ada's, for this membership", (await readMove(store, adaLink[1], adaLink[2]))?.e, "ada@example.com");
   is("it opens nothing for another product", await readMove(store, guide.product.id, adaLink[2]), null);
   is("and nothing with a token made up", await readMove(store, adaLink[1], "f".repeat(40)), null);
-  const unasked = await openMove(store, adaLink[1], adaLink[2], "https://marktmorgen.com", now);
+  const unasked = await openMove(store, adaLink[1], adaLink[2], "https://marktmorgen.com", now, null, OUTSIDE_EU);
   is("without the box to start the membership before the 14 days end (lib/digital-consent.ts), no checkout opens", unasked.ok ? "opened" : unasked.reason, "consent");
-  const opened = await openMove(store, adaLink[1], adaLink[2], "https://marktmorgen.com", now, TEST_CONSENT);
+  const opened = await openMove(store, adaLink[1], adaLink[2], "https://marktmorgen.com", now, TEST_CONSENT, OUTSIDE_EU);
   is("the checkout opens", opened.ok, true);
   const body = checkouts.at(-1)!;
   is("for her address only", body.get("customer_email"), "ada@example.com");
   is("first charged on the renewal date", body.get("subscription_data[trial_end]"), String(in20));
   is("with no free trial on top", body.get("subscription_data[trial_period_days]"), null);
   is("marked as moved, on the payment and on the subscription", [body.get("metadata[moved]"), body.get("subscription_data[metadata][moved]"), body.get("metadata[first_charge]")], ["yes", "yes", String(in20)]);
-  await openMove(store, benLink[1], benLink[2], "https://marktmorgen.com", now, TEST_CONSENT);
+  await openMove(store, benLink[1], benLink[2], "https://marktmorgen.com", now, TEST_CONSENT, OUTSIDE_EU);
   const due = checkouts.at(-1)!;
   is("a payment already due is taken at checkout", [due.get("subscription_data[trial_end]"), due.get("metadata[moved]")], [null, "yes"]);
 
@@ -212,12 +213,12 @@ async function main(): Promise<void> {
   const halLink = hal.text.match(/\/move\/([A-Za-z0-9_-]+)\?k=([0-9a-f]{40})/);
   if (!halLink) throw new Error("no link for Hal");
   const checkoutsBefore = checkouts.length;
-  const halAgain = await openMove(store, halLink[1], halLink[2], "https://marktmorgen.com", now, TEST_CONSENT);
+  const halAgain = await openMove(store, halLink[1], halLink[2], "https://marktmorgen.com", now, TEST_CONSENT, OUTSIDE_EU);
   is("Hal, noted as having kept it, gets no checkout from the same link", [halAgain.ok ? "opened" : halAgain.reason, checkouts.length], ["kept", checkoutsBefore]);
   // Ada paid through her link; the thanks page has not noted it yet, but her membership is live on the creator's account.
   customersByEmail.set("ada@example.com", "cus_Ada000001");
   liveSubs.set("cus_Ada000001", [{ id: "sub_Ada0000001", status: "trialing", metadata: { store: "harbor", product: club.product.id, moved: "yes" } }]);
-  const adaAgain = await openMove(store, adaLink[1], adaLink[2], "https://marktmorgen.com", now, TEST_CONSENT);
+  const adaAgain = await openMove(store, adaLink[1], adaLink[2], "https://marktmorgen.com", now, TEST_CONSENT, OUTSIDE_EU);
   is("Ada, whose membership is live, gets no second checkout either", [adaAgain.ok ? "opened" : adaAgain.reason, checkouts.length], ["kept", checkoutsBefore]);
   is("and her invitation is noted as kept", await moveCounts(store), { invited: 3, kept: 2 });
 
@@ -234,7 +235,7 @@ async function main(): Promise<void> {
   for (const [what, reply] of benTries) {
     oddSubs.set("cus_Ben000001", reply);
     const before = checkouts.length;
-    const benAgain = await openMove(store, benLink[1], benLink[2], "https://marktmorgen.com", now, TEST_CONSENT);
+    const benAgain = await openMove(store, benLink[1], benLink[2], "https://marktmorgen.com", now, TEST_CONSENT, OUTSIDE_EU);
     is(`Ben, whose memberships came back as ${what}, gets no checkout`, [benAgain.ok ? "opened" : benAgain.reason, checkouts.length], ["refused", before]);
   }
   oddSubs.delete("cus_Ben000001");
@@ -243,7 +244,7 @@ async function main(): Promise<void> {
   oddSubs.set("cus_Ben000001", { object: "list", data: [{ id: "sub_Ben0000003", status: "canceled", metadata: { store: "harbor", product: club.product.id } }], has_more: true });
   pagedAfter = { customer: "cus_Ben000001", after: "sub_Ben0000003", reply: { object: "list", data: [{ id: "sub_Ben0000004", status: "active", metadata: { store: "harbor", product: club.product.id } }], has_more: false } };
   const beforePaged = checkouts.length;
-  const benPaged = await openMove(store, benLink[1], benLink[2], "https://marktmorgen.com", now, TEST_CONSENT);
+  const benPaged = await openMove(store, benLink[1], benLink[2], "https://marktmorgen.com", now, TEST_CONSENT, OUTSIDE_EU);
   is("Ben, whose live membership is on the second page, is found to have kept it", [benPaged.ok ? "opened" : benPaged.reason, checkouts.length], ["kept", beforePaged]);
 
   done();

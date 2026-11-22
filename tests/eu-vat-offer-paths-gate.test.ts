@@ -20,6 +20,7 @@ import { addOption, addProduct, claimHandle, ensureStatsId, setProductLink, setS
 import { readListing, readProduct } from "@/lib/catalog";
 import { requestCopy } from "@/lib/free";
 import { inviteMembers, readInvite } from "@/lib/move-members";
+import { REFUSE_CONSUMERS_DRAFTS, REFUSE_CONSUMERS_OPEN } from "@/lib/deemed-supplier-drafts";
 import { POST as welcomeRoute } from "@/app/api/store/welcome/open/route";
 import { POST as comeBackRoute } from "@/app/api/store/come-back/open/route";
 import { POST as moveRoute } from "@/app/api/store/move/open/route";
@@ -200,6 +201,10 @@ async function main(): Promise<void> {
       return calls.some((at) => !gates.some((gate) => gate < at));
     }).map((c) => c.file);
     is("none calls createCheckout without a gate asked before it in the same file", loose, []);
+    for (const draft of REFUSE_CONSUMERS_DRAFTS) {
+      is(`${draft.jurisdiction}: the drafts name the buttons' gate and this test`, [draft.implementedIn.includes("lib/eu-vat-gate.ts (pressGate"), draft.evidence.includes("tests/eu-vat-offer-paths-gate.test.ts")], [true, true]);
+    }
+    is("no path is left open", REFUSE_CONSUMERS_OPEN, []);
   }
 
   done();

@@ -172,6 +172,16 @@ export default async function RenewPage({ params, searchParams }: Params) {
               <p className="st-muted mt-2 text-sm">
                 {m.offerFor(offer.email, until)}
               </p>
+              {/* Where the buyer is buying from (EU VAT art. 9a, lib/eu-vat-gate.ts pressGate), and why it was asked again. */}
+              {status === "abroad" || status === "country" ? (
+                <div id={`back-country-problem-${product.id}`} className="st-note mt-5" role="alert">
+                  <p className="font-bold">{say.w.notices[status].title}</p>
+                  <p className="mt-1 text-sm">{say.w.notices[status].body}</p>
+                </div>
+              ) : null}
+              <div className="mt-5">
+                <BillingCountryField id={`bc-back-${product.id}`} locale={say.lang.locale} label={say.w.billingCountry} choose={say.w.chooseCountry} problem={status === "abroad" || status === "country" ? `back-country-problem-${product.id}` : undefined} />
+              </div>
               {/* A membership hands over its content digitally: the box to start access at once (lib/digital-consent.ts). */}
               {deliversDigitally(product) ? <DigitalConsentBox id={`dc-back-${product.id}`} kind={consentKind(product)} lang={store.language} refused={status === "consent"} className="mt-5" /> : null}
               <button type="submit" className="btn st-btn btn-lg btn-block mt-5">

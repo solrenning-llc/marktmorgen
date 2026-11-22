@@ -8,6 +8,7 @@
  * an option off sale, and an invitation already kept does not reopen it.
  * Stripe and the email sender are played by a stand-in for `fetch`.
  */
+import { OUTSIDE_EU } from "./eu-vat-press-fixture";
 import { renderToStaticMarkup } from "react-dom/server";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addOption, addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -115,7 +116,7 @@ async function main(): Promise<void> {
 
   part("The invited member keeps the price they had");
   const before = checkouts.length;
-  const opened = await openMove(store, id, ada.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+  const opened = await openMove(store, id, ada.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU);
   is("their link opens a checkout", opened.ok ? "opened" : opened.reason, "opened");
   is("at Basic, by the id the invitation recorded, at Basic's price", [checkouts.length - before, checkouts.at(-1)?.get("metadata[option]"), checkouts.at(-1)?.get("line_items[0][price_data][unit_amount]")], [1, basic, "1900"]);
   is("their email names Basic's price", (await inviteEmail(store, benField))?.text.includes("$19") ?? false, true);
@@ -128,7 +129,7 @@ async function main(): Promise<void> {
   is("priceWords for the product as it is still refuses it (no invitation)", priceWords(store, product, basic), null);
   is("the gift and group picker still leaves it out", givableOptions({ ...product, recurring: null } as never).map((o) => o.id), [plus]);
   await noteKept(store, "ada@example.com", id);
-  const keptAgain = await openMove(store, id, ada.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+  const keptAgain = await openMove(store, id, ada.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU);
   is("an invitation already kept does not reopen the price off sale: it says it was kept (\"kept\", main's answer since #4121; Revisor 1 on #2685)", keptAgain.ok ? "opened" : keptAgain.reason, "kept");
 
   part("An invitation whose \"kept\" cannot be read is not taken as unused (Codex C2 on #2685)");
@@ -136,7 +137,7 @@ async function main(): Promise<void> {
   for (const odd of ["yes", {}, [], null, -1, 1.5]) {
     redis.run(["HSET", `nl:mv:${statsId}`, benField, JSON.stringify({ ...benRecord, kept: odd })]);
     const before = checkouts.length;
-    const tried = await openMove(store, id, ben.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+    const tried = await openMove(store, id, ben.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU);
     is(`kept ${JSON.stringify(odd)}: the price off sale is not opened`, [tried.ok, checkouts.length - before], [false, 0]);
   }
   redis.run(["HSET", `nl:mv:${statsId}`, benField, JSON.stringify(benRecord)]);
@@ -144,7 +145,7 @@ async function main(): Promise<void> {
   part("Such an invitation is never said to be moved: its state is said to be unknown (Claude 4's MÉDIO on #2685)");
   redis.run(["HSET", `nl:mv:${statsId}`, benField, JSON.stringify({ ...benRecord, kept: "x" })]);
   const unknownBefore = checkouts.length;
-  const unread = await openMove(store, id, ben.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+  const unread = await openMove(store, id, ben.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU);
   is("pressing it opens nothing and answers \"unknown\", never \"kept\"", [unread.ok ? "opened" : unread.reason, checkouts.length - unknownBefore], ["unknown", 0]);
   const notices = (language: Parameters<typeof moveWords>[0]) => moveWords(language).notices as Record<string, { title: string; body: string } | undefined>;
   const html = (text: string) => text.replace(/'/g, "&#x27;");
@@ -181,10 +182,10 @@ async function main(): Promise<void> {
   part("One invitation opens one checkout, however often it is pressed (Claude 4 on #2690)");
   const opens = checkouts.length;
   const [first, second] = await Promise.all([
-    openMove(store, id, ben.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT),
-    openMove(store, id, ben.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT),
+    openMove(store, id, ben.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU),
+    openMove(store, id, ben.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU),
   ]);
-  const third = await openMove(store, id, ben.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+  const third = await openMove(store, id, ben.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU);
   is("two at once and one after: Stripe is asked once", checkouts.length - opens, 1);
   const urls = [first, second, third].flatMap((o) => (o.ok ? [o.url] : []));
   is("whoever gets a page gets that same checkout", [urls.length >= 2, new Set(urls).size], [true, 1]);
@@ -206,12 +207,12 @@ async function main(): Promise<void> {
   const [deeField] = await inviteMembers(store, "job_inviteoffsale_dee", [{ email: "dee@example.com", productId: id, option: plus, renews }]);
   if (!deeField) throw new Error("dee not invited");
   const dee = (await readInvite(statsId, deeField))!;
-  const deeFirst = await openMove(store, id, dee.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+  const deeFirst = await openMove(store, id, dee.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU);
   is("the first press opens a checkout at Plus", deeFirst.ok, true);
   await noteKept(store, "dee@example.com", id);
   redis.run(["DEL", `nl:mv:open:${statsId}:${deeField}`]);
   const deeBefore = checkouts.length;
-  const deeAgain = await openMove(store, id, dee.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+  const deeAgain = await openMove(store, id, dee.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU);
   is("once kept, a day later, the link opens no second membership", [deeAgain.ok ? "opened" : deeAgain.reason, checkouts.length - deeBefore], ["kept", 0]);
   const deePage = await movePage("inviteoffsale", id, { k: dee.t });
   is("its page says so, with no button to press", [deePage.includes(moveWords("en").notices.kept.title), deePage.includes(moveWords("en").keep)], [true, false]);

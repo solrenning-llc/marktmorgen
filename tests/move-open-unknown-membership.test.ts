@@ -4,6 +4,7 @@
  * invitation opens no checkout (no POST) and the reminder's keptAlready throws. A whole list with a canceled row,
  * a live row of another product or no row at all still reads as "not kept". Stripe is a stand-in; nothing real is charged.
  */
+import { OUTSIDE_EU } from "./eu-vat-press-fixture";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addOption, addProduct, claimHandle, ensureStatsId, setProductLink, setRecovery, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
@@ -96,7 +97,7 @@ async function main(): Promise<void> {
   // inviteMembers answers false for an address deleted from the store (main, 573513b4): none is here.
   if (!fields.every((field): field is string => typeof field === "string")) throw new Error("not invited");
   const invites = Object.fromEntries(await Promise.all(people.map(async (name, i) => [name, (await readInvite(statsId, fields[i]!))!] as const)));
-  const press = (name: string) => openMove(store, productId, invites[name].t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+  const press = (name: string) => openMove(store, productId, invites[name].t, "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU);
 
   part('Unknown membership rows must not become proof that no membership exists');
   const rows: [string, string, unknown, boolean | null][] = [

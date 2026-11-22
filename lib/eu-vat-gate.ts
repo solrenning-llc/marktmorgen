@@ -123,3 +123,20 @@ export function consumerGate(input: {
   if (billing === null || !OFFERED.has(billing)) return { ok: false, reason: "billing", message: BILLING_COUNTRY_NEEDED };
   return { ok: true };
 }
+
+/** What a buyer's press sent, as consumerGate reads it (lib/eu-vat-evidence.ts): the request's headers and its form. */
+export type PressEvidence = { headers: Headers; form: URLSearchParams | FormData };
+
+/**
+ * consumerGate for a button that opens one product's checkout from an email's page (the welcome offer, the come-back
+ * offer, a moved member's invitation; Claude 1 coord's MEDIUM, 6809): null when the press may go on, otherwise the
+ * status the other routes send back to the page, "abroad" for the EU or the UK and "country" when the billing country
+ * is missing. Asked before anything is counted, marked or sent to Stripe. A press with no evidence at all is read as
+ * one that names no country: a free product or a live service goes on as consumerGate lets it, and anything else is
+ * "country", never let through, so a caller that forgets the evidence opens nothing.
+ */
+export function pressGate(product: EuSupplyFields, evidence: PressEvidence | undefined, members?: ReadonlyMap<string, EuSupplyFields>): "abroad" | "country" | null {
+  const { headers, form } = evidence ?? { headers: new Headers(), form: new URLSearchParams() };
+  const gate = consumerGate({ product, members, headers, form });
+  return gate.ok ? null : gate.reason === "refused" ? "abroad" : "country";
+}

@@ -27,6 +27,7 @@ import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { addressHash } from "@/lib/imported-purchases";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
+import { type PressEvidence, pressGate } from "@/lib/eu-vat-gate";
 import { namedPriceGone, namedPriceOffered, withInvitedOption } from "@/lib/product-option";
 import { withStockHold } from "@/lib/stock";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -565,7 +566,7 @@ export async function readMove(store: Store, productId: string, token: string): 
   return { ...invite, field: link.f };
 }
 
-export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "kept" | "unavailable" | "price" | "refused" | "consent" | "checking" | "unknown" };
+export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "kept" | "unavailable" | "price" | "refused" | "consent" | "checking" | "unknown" | "abroad" | "country" };
 
 /** The open mark's value once a try's outcome is not known (a checkout may exist): later presses say so. */
 const OPEN_UNKNOWN = "unknown";
@@ -579,6 +580,8 @@ export async function openMove(
   now = Date.now(),
   /** The box to start access at once, checked on the button's page (lib/digital-consent.ts). */
   consent: DigitalConsent | null = null,
+  /** The press's headers and form, for the EU VAT gate (lib/eu-vat-gate.ts pressGate); none opens nothing that needs it. */
+  evidence?: PressEvidence,
 ): Promise<MoveOpen> {
   // An unknown read opens nothing, and the member is asked to try again.
   let invite: Awaited<ReturnType<typeof readMove>>;
@@ -607,6 +610,11 @@ export async function openMove(
   if (namedPriceGone(product, invite.o)) return { ok: false, reason: "price" };
   // Not on sale now, or the option kept with nothing to hand over: the general answer, nothing charged.
   if (!canSellProduct(store, product) || !namedPriceOffered(product, invite.o)) return { ok: false, reason: "unavailable" };
+  // EU VAT art. 9a, as every other checkout asks it (Claude 1 coord's MEDIUM, 6809): before anything is counted, read
+  // from Stripe or marked, a buyer in the EU or the UK goes back to the page with "abroad", one with no billing country
+  // with "country".
+  const refused = pressGate(product, evidence);
+  if (refused) return { ok: false, reason: refused };
   // Kept already, found live on the creator's account (review of #4121; B4): paid in a checkout the thanks page and
   // the sweep never saw. A second checkout would be a second membership of the same thing, charged every period
   // beside the first, so the link opens nothing more and says it was kept, before any checkout this link opened is

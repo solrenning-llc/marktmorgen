@@ -31,6 +31,7 @@ import { readStripePage } from "@/lib/stripe-list";
 import { type Store, saleHandles, storesAfter } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
+import { type PressEvidence, pressGate } from "@/lib/eu-vat-gate";
 import { namedPriceGone, namedPriceOffered } from "@/lib/product-option";
 import { withStockHold } from "@/lib/stock";
 import { fromLine, render } from "@/lib/mail";
@@ -606,7 +607,7 @@ export async function readWinBack(store: Store, product: string, token: string):
 /** "unknown": the link could not be read just now (readWinBack threw); never said as "expired". */
 export type OpenResult =
   | { ok: true; url: string }
-  | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "member" | "limited" | "opening" | "unknown" };
+  | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "member" | "limited" | "opening" | "unknown" | "abroad" | "country" };
 
 /** The checkout a come-back link opens: this product, this address, the offer applied, no second trial. */
 export async function openWinBack(
@@ -616,6 +617,8 @@ export async function openWinBack(
   origin: string,
   /** The box to start access at once, checked on the button's page (lib/digital-consent.ts). */
   consent: DigitalConsent | null = null,
+  /** The press's headers and form, for the EU VAT gate (lib/eu-vat-gate.ts pressGate); none opens nothing that needs it. */
+  evidence?: PressEvidence,
 ): Promise<OpenResult> {
   let grant: WinBackGrant | null;
   try {
@@ -635,6 +638,11 @@ export async function openWinBack(
   // Not on sale now, or the option kept with nothing to hand over: the general answer, nothing charged.
   if (!canSellProduct(store, product) || !namedPriceOffered(product, grant.option)) return { ok: false, reason: "unavailable" };
   const option = product.options.length ? grant.option : undefined;
+  // EU VAT art. 9a, as every other checkout asks it (Claude 1 coord's MEDIUM, 6809): before anything is counted, marked
+  // or sent to Stripe, a buyer in the EU or the UK goes back to the page with "abroad", one with no billing country with
+  // "country".
+  const refused = pressGate(product, evidence);
+  if (refused) return { ok: false, reason: refused };
   // Never a second membership beside one that has not ended (R43, follow-up to #3371): the reading is counted first,
   // then a running membership under any customer of the address refuses, and so does a reading that cannot be made
   // whole (CX-123 rule 24). Nothing is opened or charged on either.

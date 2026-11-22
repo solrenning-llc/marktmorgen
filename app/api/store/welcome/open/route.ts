@@ -22,8 +22,11 @@ export async function POST(request: NextRequest) {
   let token = "";
   // The box to start access at once (lib/digital-consent.ts), checked again where the charge is built.
   let consent: DigitalConsent | null = null;
+  // The form as sent, for the billing country the EU VAT gate reads (lib/eu-vat-gate.ts pressGate).
+  let sent = new FormData();
   try {
     const form = await (await limited(request, MAX_BODY_BYTES)).formData();
+    sent = form;
     consent = consentFromForm(form);
     handle = normaliseHandle(String(form.get("handle") ?? ""));
     token = String(form.get("token") ?? "").slice(0, 80);
@@ -38,7 +41,7 @@ export async function POST(request: NextRequest) {
   const room = await withinStore("welcome-open", `${clientAddress(request)}|${store.handle}`, 20, 600, store).catch(unknownLimit);
   if (room === "unknown") return back("refused");
   if (!room) return back("limited");
-  const opened = await openWelcome(store, token, linkOrigin(request, store), Math.floor(Date.now() / 1000), consent);
+  const opened = await openWelcome(store, token, linkOrigin(request, store), Math.floor(Date.now() / 1000), consent, { headers: request.headers, form: sent });
   if (!opened.ok) return back(opened.reason);
   return new Response(null, { status: 303, headers: { Location: opened.url, "Cache-Control": "no-store" } });
 }

@@ -104,7 +104,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       noReceipt.delete(id);
       return answer({ object: "customer_balance_transaction", amount });
     }
-    return answer({ id: row.id, object: "customer_balance_transaction", amount });
+    return answer({ id: row.id, object: "customer_balance_transaction", customer: id, amount, currency: form.get("currency"), metadata });
   }
   return answer({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
 }) as typeof fetch;

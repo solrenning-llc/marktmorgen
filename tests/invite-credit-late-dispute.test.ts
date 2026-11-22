@@ -62,7 +62,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (failing.has(txns[1])) return answer({ error: { type: "api_error", message: "TEST ONLY down" } }, 500);
     const form = new URLSearchParams(String(init?.body ?? ""));
     posts.set(txns[1], [...(posts.get(txns[1]) ?? []), Number(form.get("amount"))]);
-    return answer({ id: `cbtxn_${Math.random().toString(36).slice(2, 10)}`, amount: Number(form.get("amount")) });
+    return answer({ id: `cbtxn_${Math.random().toString(36).slice(2, 10)}`, object: "customer_balance_transaction", customer: txns[1], amount: Number(form.get("amount")), currency: form.get("currency"), metadata: { nimbus_invite_credit: form.get("metadata[nimbus_invite_credit]") } });
   }
   return answer({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
 }) as typeof fetch;

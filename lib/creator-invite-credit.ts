@@ -530,7 +530,7 @@ async function putOnPlan(id: string, history: Map<string, Map<string, string>>, 
     const metadata = made.metadata;
     if (typeof made.id !== "string" || !made.id.startsWith("cbtxn_") || made.id.length <= "cbtxn_".length ||
         made.object !== "customer_balance_transaction" || made.customer !== customer ||
-        made.amount !== -credit.cents || made.currency !== credit.cur ||
+        made.amount !== -sent.cents || made.currency !== credit.cur ||
         !metadata || typeof metadata !== "object" || Array.isArray(metadata) ||
         (metadata as Record<string, unknown>).nimbus_invite_credit !== id) {
       throw new UnknownReplyError(`invite credits: the receipt for ${id}`);

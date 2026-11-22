@@ -37,7 +37,10 @@ async function main(): Promise<void> {
   part("Deleting the person erases the reason and keeps the block");
   is("one reason erased", await forgetBlockedPerson(store, RUDE, 1_790_000_100_000), 1);
   const after = await blockedState(store, RUDE);
-  is("still blocked, with no reason", after, { blocked: true, reason: "", at: 1_790_000_100_000 });
+  // The block's own date stays: the copy says since when the store blocked them, never when they were deleted
+  // (Claude 6's LEVE on #3839).
+  is("still blocked, with no reason and its own date", after, { blocked: true, reason: "", at: 1_790_000_000_000 });
+  is("the copy after the deletion says since when, with no reason", await COPIERS["lib/buyer-block.ts"]?.(scope), [{ blocked: new Date(1_790_000_000_000).toISOString(), reason: "" }]);
   is("still may not write", await mayWrite(store, RUDE), false);
   const raw = String((await redis.pipeline([["HGET", blockKey(store.sid!), personMark(RUDE)!]]))[0]);
   is("the reason's words are gone from the database", raw.includes("insult"), false);

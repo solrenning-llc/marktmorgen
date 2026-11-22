@@ -192,7 +192,8 @@ export const VAT_REFUSED_SALES: readonly { words: string; checks: readonly strin
   { words: "A product you have not yet marked, on the product, as not an e-publication", checks: ["notAPublication"] },
   { words: "A product with nothing to deliver online and no live call, so we cannot tell what it is", checks: ["euSupplyOf"] },
   { words: VAT_REFUSED_PLACES_WORDS, checks: ["euCheckout"] },
-  { words: "A sale where the buyer's internet address and billing address are in different countries", checks: ["checkoutEvidence"] },
+  { words: "A bundle that combines a live call with something delivered online", checks: ["consumerGate"] },
+  { words: "A sale where the buyer's internet address shows no country, or a different country from their billing address", checks: ["checkoutEvidence"] },
   { words: "Any sale whose VAT, or the cost of receiving it, we cannot work out, such as one in a currency with no checked exchange rate", checks: ["no sourced rate, or no sterling rate", "the cost of receiving the VAT is unknown"] },
 ];
 

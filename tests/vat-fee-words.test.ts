@@ -338,7 +338,7 @@ test("every route and gate that refuses an EU or UK consumer is named: PayPal, t
   // Evidence that disagrees (internet address in Germany, billing address in France) is refused, never charged on a guess.
   const split = euSaleGate({ product: ESS, headers, form: new URLSearchParams({ billing_country: "FR" }), records: COLLECT, vatSwitch: EU_ON, now: NOW, rates: RATES });
   assert.equal(split.ok, false);
-  assert.ok(listed.some((w) => /internet address and billing address are in different countries/.test(w)), "and the list names it");
+  assert.ok(listed.some((w) => /internet address shows no country, or a different country from their billing address/.test(w)), "and the list names it");
   // A product with no answer on whether it is an e-publication is refused.
   assert.equal(euSaleGate({ product: { ...ESS, publication: null } as never, headers, form, records: COLLECT, vatSwitch: EU_ON, now: NOW, rates: RATES }).ok, false);
   assert.ok(listed.some((w) => /not yet marked, on the product, as not an e-publication/.test(w)), "and the list names it");
@@ -389,4 +389,38 @@ test("every place the checkout refuses while it collects is named, and no place 
   }
   for (const [code, name] of Object.entries(VAT_REFUSED_PLACE_NAMES)) assert.ok(places.includes(code) && !charged.includes(code), `${name} (${code}) is named only while it is refused`);
   for (const place of ["DE", "FR", "IT", "PT", "GB"]) assert.ok(charged.includes(place), `${place} is charged`);
+});
+
+test("one table: each sale a gate refuses while it collects, with the item of the list that names it (coord f49f)", () => {
+  const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!;
+  const both: SwitchInput = { ...EU_ON, uk: UK_ON.uk, reviews: [...(EU_ON.reviews ?? []), ...(UK_ON.reviews ?? [])] };
+  const at = (ip: string | null, billing: string | null) => {
+    const headers = new Headers();
+    if (ip) headers.set("x-vercel-ip-country", ip);
+    return { headers, form: new URLSearchParams(billing ? { billing_country: billing } : {}) };
+  };
+  const call = { ...ESS, link: null, call: { minutes: 30 } } as never as EuSupplyFields;
+  const sale = (product: EuSupplyFields, ip: string | null, billing: string | null, members?: ReadonlyMap<string, EuSupplyFields>) =>
+    euSaleGate({ product, members, ...at(ip, billing), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES });
+  const mixed = { ...ESS, bundle: ["link", "call"] };
+  const mixedMembers = new Map([["link", ESS], ["call", call]]);
+  const rows: { case: string; refused: () => boolean; item: RegExp }[] = [
+    { case: "a bundle of a live call and a link, to France", refused: () => !sale(mixed, "FR", "FR", mixedMembers).ok, item: /combines a live call with something delivered online/ },
+    { case: "a bundle of a live call and a link, to the UK", refused: () => !sale(mixed, "GB", "GB", mixedMembers).ok, item: /combines a live call with something delivered online/ },
+    { case: "no country from the internet address, billing in Germany", refused: () => !sale(ESS, null, "DE").ok, item: /internet address shows no country/ },
+    { case: "internet address in Germany, billing in France", refused: () => !sale(ESS, "DE", "FR").ok, item: /a different country from their billing address/ },
+    { case: "no answer on the e-publication question", refused: () => !sale({ ...ESS, publication: null } as never, "DE", "DE").ok, item: /not yet marked, on the product, as not an e-publication/ },
+    { case: "a product that ships", refused: () => !sale({ ...ESS, link: null, shipping: { countries: ["DE"] } } as never, "DE", "DE").ok, item: /^Products that ship$/ },
+    { case: "nothing to deliver online and no call", refused: () => !sale({ ...ESS, link: null }, "DE", "DE").ok, item: /nothing to deliver online and no live call/ },
+    { case: "a bundle in a cart", refused: () => !euCartGate({ products: [{ ...ESS, bundle: ["link"] }], ...at("DE", "DE"), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES }).ok, item: /^A bundle in a cart$/ },
+    { case: "a buyer in Spain", refused: () => !sale(ESS, "ES", "ES").ok, item: /Spain/ },
+  ];
+  for (const row of rows) {
+    assert.ok(row.refused(), `${row.case}: refused`);
+    assert.equal(words.refused.filter((w) => row.item.test(w)).length, 1, `${row.case}: named by exactly one item`);
+  }
+  // The control: the same link alone, a live call alone and the same bundle without the call are not refused.
+  assert.deepEqual(sale(ESS, "FR", "FR"), { ok: true, collect: { country: "FR" } });
+  assert.equal(sale(call, "FR", "FR").ok, true, "a live call alone is sold as before");
+  assert.deepEqual(sale({ ...ESS, bundle: ["link"] }, "FR", "FR", mixedMembers), { ok: true, collect: { country: "FR" } }, "the bundle without the call is charged");
 });

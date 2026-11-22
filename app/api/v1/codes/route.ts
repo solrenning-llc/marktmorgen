@@ -7,6 +7,7 @@ import { readCodeAsked } from "@/lib/discount-input";
 import { dropSchedule } from "@/lib/discount-schedule";
 import { returningWordIn } from "@/lib/returning-code-make";
 import { setHasDiscounts, storeRef, type Store } from "@/lib/store";
+import { giveAllowance } from "@/lib/store-allowance";
 import { canSell } from "@/lib/store-checkout";
 
 /**
@@ -54,24 +55,36 @@ export async function POST(request: Request) {
   // Two calls to the creator's Stripe account, taken before either is made (lib/api-read-rules.ts, codeMakeWork).
   const refused = await takeMoreApi(store, apiReadUnits(codeMakeWork()));
   if (refused) return refused;
+  // The one more call that switches the code off if a code for returning buyers takes its word meanwhile, set aside
+  // before anything is made, so a clash is never left live for want of it, and given back when it is not needed
+  // (Claude 5 icEJ's LEVE on #3691).
+  const stopUnits = apiReadUnits({ stripePages: 1 });
+  const noStopRoom = await takeMoreApi(store, stopUnits, apiReadUnits(codeMakeWork()));
+  if (noStopRoom) {
+    // Nothing is made, so the making's own requests come back too.
+    await giveAllowance(store, "api", apiReadUnits(codeMakeWork())).catch(() => undefined);
+    return noStopRoom;
+  }
+  const spare = () => giveAllowance(store, "api", stopUnits).catch(() => undefined);
   try {
     const made = await createCode(store.stripeAccountId as string, code, off, maxRedemptions, minimum);
     if (!made.ok) {
+      await spare();
       return made.reason === "taken"
         ? apiError(409, "taken", "Your Stripe account already has a code with these letters. Choose another.")
         : apiError(502, "unavailable", "The code could not be made on Stripe just now. Try again in a moment.");
     }
     // Made first, then checked against the store read after it (Codex N1 LOW on #3691): a code for returning buyers
-    // kept with this word meanwhile wins, and this one is switched off. That one more call to Stripe is taken first;
-    // unknown is never "free".
+    // kept with this word meanwhile wins, and this one is switched off, with the call set aside above. Unknown is
+    // never "free".
     const clash = returningWordIn(await setHasDiscounts(storeRef(store), true), code);
     if (clash !== false) {
-      const noRoom = await takeMoreApi(store, apiReadUnits({ commands: 0, bytes: 0, sent: 0, stripePages: 1, roundTrips: 0 }));
-      if (noRoom || !(await stopCode(store.stripeAccountId as string, made.code.id))) console.error("api: a code made beside a returning-buyer code with the same word could not be switched off", made.code.id);
+      if (!(await stopCode(store.stripeAccountId as string, made.code.id))) console.error("api: a code made beside a returning-buyer code with the same word could not be switched off", made.code.id);
       return clash
         ? apiError(409, "taken", "Your store already has a code for returning buyers with these letters. Choose another.")
         : apiError(502, "unavailable", "The code could not be made on Stripe just now. Try again in a moment.");
     }
+    await spare();
     return apiOk({ data: codeOut(made.code) });
   } catch (error) {
     console.error("api: making a code failed", error);

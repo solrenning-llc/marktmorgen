@@ -140,8 +140,10 @@ async function main(): Promise<void> {
   const leaveFor = 1 + makeUnits;
   if (api && api.figure - api.used > leaveFor) await forceAllowance(store, "api", api.figure - api.used - leaveFor);
   writes.length = 0;
+  const usedTight = await allowanceUsed(store, "api");
   const tight = await make({ code: "NOROOMSTOP", percent: 10 });
   is("room for making a code but not for its possible switch-off: refused, and nothing reaches Stripe", [tight.status, writes], [429, []]);
+  is("and the making's own requests come back: only the door is counted", (await allowanceUsed(store, "api")) - usedTight, 1);
 
   done();
 }

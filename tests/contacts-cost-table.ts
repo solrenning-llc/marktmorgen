@@ -3,10 +3,12 @@
  * really keep, and what keeping them costs, measured with the code.
  */
 import { MAX_LEADS, MAX_CONTACT_NAME, MAX_CONTACT_TAGS, MAX_TAG_LENGTH } from "@/lib/contact-rules";
-import { contactBytes, type Contact } from "@/lib/contacts";
+import { TOKEN_BYTES, contactBytes, type Contact } from "@/lib/contacts";
 import { contactCeiling, smallestContact } from "@/lib/contact-ceiling";
 import { MAX_TITLE_LENGTH } from "@/lib/catalog-rules";
-import { DATA_ROOM_BYTES } from "@/lib/store-data-rules";
+import { DATA_ROOM_BYTES, DATA_STEP_BYTES, utf8Length } from "@/lib/store-data-rules";
+import { ORDER_ENTRY_BYTES } from "@/lib/order-data";
+import { MAX_EMAIL_LENGTH } from "@/lib/auth";
 import { PLAN_TITLES, TIERS, type Tier } from "@/lib/plan";
 
 const ISO = new Date(0).toISOString();
@@ -15,15 +17,24 @@ const MAX_TITLES = 20;
 /** The longest product id lib/product-extras.ts accepts. */
 const LONGEST_PRODUCT_ID = 40;
 
-/** Every title, id, name, label and mark at its longest. */
+/**
+ * The costliest a free text can be written per character the limits count
+ * (UTF-16 units, cut with slice): JSON escapes a control character or a lone
+ * surrogate as six bytes, more than any character takes unescaped (at most
+ * three bytes a unit). So the largest contact below is an upper bound for any
+ * text a title, name or label can hold, whatever the alphabet (Codex X6, 7059427028).
+ */
+const COSTLIEST = "\u0001";
+
+/** Every title, id, name, label and mark at its longest, each text in its costliest characters. */
 export function largestContact(): Contact {
   return {
     agreed: true, agreedAt: ISO, firstAt: ISO, lastAt: ISO,
-    titles: Array.from({ length: MAX_TITLES }, () => "x".repeat(MAX_TITLE_LENGTH)),
+    titles: Array.from({ length: MAX_TITLES }, () => COSTLIEST.repeat(MAX_TITLE_LENGTH)),
     ids: Array.from({ length: MAX_TITLES }, () => "a".repeat(LONGEST_PRODUCT_ID)),
     source: "import", unsub: true, unsubAt: ISO, gone: "complained", t: "f".repeat(40),
-    name: "n".repeat(MAX_CONTACT_NAME),
-    tags: Array.from({ length: MAX_CONTACT_TAGS }, (_, i) => `${i}`.padEnd(MAX_TAG_LENGTH, "t")),
+    name: COSTLIEST.repeat(MAX_CONTACT_NAME),
+    tags: Array.from({ length: MAX_CONTACT_TAGS }, (_, i) => `${i}`.padEnd(MAX_TAG_LENGTH, COSTLIEST)),
     importedAt: ISO, clicks: ISO,
   };
 }
@@ -34,7 +45,9 @@ export type ContactRow = { tier: Tier; roomBytes: number; smallestBytes: number;
 
 export function contactRows(): ContactRow[] {
   const smallestBytes = contactBytes(smallestContact());
-  const largestBytes = contactBytes(largestContact());
+  // The largest is the dearer of the two ways a contact is counted (Codex X6, 7059427028), each as it is stored, with
+  // where its room is counted (r: "c" outside an order, "o" by an order; Claude 5 icEJ on #3864).
+  const largestBytes = Math.max(contactBytes({ ...largestContact(), r: "c" }), orderContactBytes({ ...largestContact(), r: "o" }));
   return TIERS.map((tier) => {
     const roomBytes = DATA_ROOM_BYTES[tier];
     const fitSmallest = Math.floor(roomBytes / smallestBytes);
@@ -57,12 +70,13 @@ Queue item 457 [EL1] asks for the worst-case cost of keeping contacts on each pl
 
 ## Where a contact is kept, and what it costs
 
-- **Every contact is taken from the plan's data room.** That holds for a sign-up, an import, the API and labels (\`needContacts\`, \`lib/contacts.ts\`), and for a buyer an order puts on the list (\`lib/order-data.ts\`). A contact takes its record plus its future unsubscribe link (\`contactBytes\`). When the room is full, the write is refused.
+- **Every contact is taken from the plan's data room.** That holds for a sign-up, an import, the API and labels (\`needContacts\`, \`lib/contacts.ts\`), and for a buyer an order puts on the list (\`lib/order-data.ts\`). A contact written outside an order takes its record plus its future unsubscribe link (\`contactBytes\`). When the room is full, the write is refused.
+- **A contact an order writes is counted differently,** in the orders' part: its address, its whole record and an entry, a quarter more, rounded up (\`lib/order-data.ts\`), and each later change by what it grew, a quarter more, rounded up each time (\`orderGrowth\`, \`lib/contacts.ts\`). The largest such contact written whole takes **${n(orderContactBytes({ ...largestContact(), r: "o" }))} bytes**, more than the same contact counted outside an order. A contact an order wrote and that then grew in many small writes can take a little more again: each write rounds up to ${n(DATA_STEP_BYTES)} bytes, which this table does not add.
 - **The room is already priced full, every day of the month,** in the \`database-storage\` line of \`tests/plan-cost-registry.ts\`. Keeping contacts therefore adds no storage cost of its own, on any plan, monthly or yearly. What a plan keeps after it ends is priced in \`retained-data\`. Sending to contacts is priced by the plan's monthly emails, and reading them for an export by the \`export\` reads, which count up to \`MAX_LEADS\`.
 
 ## How many fit
 
-The smallest contact (a yes from a form, nothing else) takes **${n(rows[0].smallestBytes)} bytes**. The largest (every title, label, name and mark at its longest) takes **${n(rows[0].largestBytes)} bytes**. The table assumes the room holds nothing else: no products, pages, orders or courses. So these are the most a plan could ever keep.
+The smallest contact (a yes from a form, nothing else) takes **${n(rows[0].smallestBytes)} bytes**. The largest takes at most **${n(rows[0].largestBytes)} bytes**: every title, label, name and mark at its longest, each text written in the characters that take the most bytes (a character JSON writes as an escape, six bytes), counted the dearer of the two ways above. The table assumes the room holds nothing else: no products, pages, orders or courses. So these are the most a plan could ever keep.
 
 | Plan | Data room | Smallest contacts that fit | Largest contacts that fit | MAX_LEADS | Real ceiling |
 | --- | --- | --- | --- | --- | --- |
@@ -83,4 +97,17 @@ It cannot be said on any plan. However the cap is set, the data room bounds the 
 
 A document only: no page, component or email changes. Steps and decisions of the main task: 0 → 0.
 `;
+}
+
+/**
+ * What a contact an order writes takes when written whole: lib/order-data.ts
+ * counts it in the orders' part as its field (the address, at most
+ * MAX_EMAIL_LENGTH), its whole value and ORDER_ENTRY_BYTES, a quarter more,
+ * rounded up to DATA_STEP_BYTES; and its unsubscribe link, as contactBytes
+ * counts it. Later writes to it are charged by orderGrowth in lib/contacts.ts
+ * (what it grew by, a quarter more, rounded up each time).
+ */
+export function orderContactBytes(contact: Contact): number {
+  const raw = MAX_EMAIL_LENGTH + utf8Length(JSON.stringify(contact)) + ORDER_ENTRY_BYTES;
+  return Math.ceil((raw * 5) / 4 / DATA_STEP_BYTES) * DATA_STEP_BYTES + TOKEN_BYTES;
 }

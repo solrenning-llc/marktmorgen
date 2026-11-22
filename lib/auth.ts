@@ -477,7 +477,8 @@ export async function dropSecondStep(email: string, gone: (mark: string) => bool
   if (!isRedisConfigured()) return 0;
   const owned = await sessionsKey(normaliseEmail(email));
   const [members] = await redisPipeline([["SMEMBERS", owned]]);
-  const keys = stringList(members);
+  // Every member a session's key, as endAllSessions reads it (Claude 6 z5v4's LEVE on #5144): any other is never DELed.
+  const keys = sessionMembers(members);
   if (!keys) throw new SessionsUnknownError("an account's sessions");
   if (!keys.length) return 0;
   const marks = await Promise.all(keys.map((key) => secondKeyOf(key)));

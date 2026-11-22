@@ -812,6 +812,11 @@ console.log("secrets never printed: a credential in the mailbox address stays ou
   const limpo = mod.semSegredo?.(`fetch https://user:${TOKEN}@github.com/x.git; Authorization: Bearer abc.def; http.extraheader=AUTHORIZATION: basic Zm9v; ${TOKEN}; github_pat_11AAAAAAAAAAAAAAAAAAAA_bbbb`) ?? "";
   is("semSegredo removes the URL credential, a bearer header, an extraheader and bare GitHub tokens (CodeQL 257)",
     limpo && !limpo.includes(TOKEN) && !/abc\.def|Zm9v|github_pat_11/.test(limpo) && /https:\/\/\*\*\*@github\.com\/x\.git/.test(limpo), limpo);
+  const eg = mod.erroDoGit?.(["fetch", "-q", `https://x-access-token:${TOKEN}@github.com/o/correio.git`, "+refs/heads/correio:refs/x"],
+    { status: 128, stderr: "fatal: unable to access 'https://github.com/o/correio.git/': 403\n", message: `Command failed: git fetch -q https://x-access-token:${TOKEN}@github.com/o/correio.git` });
+  is("a failed git becomes an error without the command line: subcommand, exit code and git's own last line only (CodeQL 257 at line 2013)",
+    eg && eg.message === "git fetch falhou (código 128): fatal: unable to access 'https://github.com/o/correio.git/': 403" && eg.status === 128 && !eg.message.includes(TOKEN) && !/Command failed|refs\/heads/.test(eg.message), eg?.message);
+  is("a subcommand outside the tool's list is named 'comando', never taken from the arguments (CodeQL 257)", mod.erroDoGit?.([`https://${TOKEN}@x`], { status: 1 })?.message === "git comando falhou (código 1)");
   is("semSegredo keeps an ordinary message as it is (CodeQL 257)", mod.semSegredo?.("já existe no correio: prs/3/0; nada é reescrito") === "já existe no correio: prs/3/0; nada é reescrito");
 }
 

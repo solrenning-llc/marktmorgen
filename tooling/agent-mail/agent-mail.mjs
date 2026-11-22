@@ -62,6 +62,9 @@ export function semSegredo(texto) {
     .replace(/(authorization:\s*(?:(?:basic|bearer|token)\s+)?)[^\s'";]+/gi, "$1***");
 }
 
+/** Os subcomandos do git que a ferramenta usa: o nome mostrado num erro sai desta lista, nunca dos argumentos. */
+const SUBCOMANDOS_GIT = ["cat-file", "commit-tree", "config", "diff", "fetch", "for-each-ref", "grep", "hash-object", "init", "log", "ls-remote",
+  "ls-tree", "merge-base", "merge-tree", "push", "read-tree", "rev-list", "rev-parse", "show", "update-index", "update-ref", "write-tree"];
 /** Prazo de cada comando do git (passo 4): um comando que trava não segura a ferramenta; vence e falha com o motivo. */
 export const GIT_PRAZO_MS = 120000;
 export function git(args, input, prazoMs = GIT_PRAZO_MS, dir = null, envExtra = {}) {
@@ -70,18 +73,28 @@ export function git(args, input, prazoMs = GIT_PRAZO_MS, dir = null, envExtra = 
     return execFileSync("git", args, { input, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], maxBuffer: 64 << 20, timeout: prazoMs, killSignal: "SIGKILL", env }).trim();
   } catch (erro) {
     if (erro?.code === "ETIMEDOUT" || (erro?.signal === "SIGKILL" && !erro?.status)) {
-      const e = new Error(`git ${args.filter((a) => !String(a).startsWith("-c")).slice(0, 2).join(" ")} passou do limite de tempo (${prazoMs / 1000} s) e foi parado; nada foi feito com o resultado`);
+      const e = new Error(`git ${SUBCOMANDOS_GIT.find((c) => c === args?.[0]) ?? "comando"} passou do limite de tempo (${prazoMs / 1000} s) e foi parado; nada foi feito com o resultado`);
       e.status = null; e.stderr = e.message;
       throw e;
     }
-    // O erro sai sem credenciais (CodeQL 257): quem o imprime, ou confere stderr, nunca vê o token do endereço.
-    if (erro && typeof erro === "object") {
-      for (const k of ["message", "stack", "stderr", "stdout"]) if (typeof erro[k] === "string") erro[k] = semSegredo(erro[k]);
-      if (Array.isArray(erro.spawnargs)) erro.spawnargs = erro.spawnargs.map(semSegredo);
-      if (Array.isArray(erro.output)) erro.output = erro.output.map((x) => (typeof x === "string" ? semSegredo(x) : x));
-    }
-    throw erro;
+    throw erroDoGit(args, erro);
   }
+}
+
+/**
+ * O erro de um git que falhou, sem a linha de comando (CodeQL 257 no #5080): o erro do Node traz o comando inteiro,
+ * com o endereço do correio, que pode ter um token. O erro novo diz só o subcomando, o código de saída e o fim da saída
+ * de erro do git (que já mascara credenciais), também passada por semSegredo; status, signal, code, stderr e stdout
+ * continuam, para quem confere o resultado.
+ */
+export function erroDoGit(args, erro) {
+  const nome = SUBCOMANDOS_GIT.find((c) => c === args?.[0]) ?? "comando";
+  const stderr = semSegredo(typeof erro?.stderr === "string" ? erro.stderr : "");
+  const fim = stderr.trim().split("\n").slice(-3).join(" ").slice(0, 500);
+  const e = new Error(`git ${nome} falhou${typeof erro?.status === "number" ? ` (código ${erro.status})` : ""}${fim ? `: ${fim}` : ""}`);
+  e.status = erro?.status ?? null; e.signal = erro?.signal ?? null; e.code = erro?.code;
+  e.stderr = stderr; e.stdout = semSegredo(typeof erro?.stdout === "string" ? erro.stdout : "");
+  return e;
 }
 
 // Passo 6 (A14): o correio é privado e o marktmorgen é público. Tudo o que é do correio (as buscas, os objetos, os
@@ -260,7 +273,9 @@ function acrescentar(novos, mensagem) {
     const base = buscarDeNovo();
     const indice = join(tmpdir(), `correio-indice-${process.pid}-${randomBytes(4).toString("hex")}`);
     const env = { ...process.env, GIT_INDEX_FILE: indice, GIT_DIR: DIR_CORREIO };
-    const comIndice = (args, input) => execFileSync("git", args, { input, encoding: "utf8", env, stdio: ["pipe", "pipe", "pipe"] }).trim();
+    const comIndice = (args, input) => {
+      try { return execFileSync("git", args, { input, encoding: "utf8", env, stdio: ["pipe", "pipe", "pipe"] }).trim(); } catch (erro) { throw erroDoGit(args, erro); }
+    };
     let commit;
     try {
       if (base) comIndice(["read-tree", base]); else comIndice(["read-tree", "--empty"]);

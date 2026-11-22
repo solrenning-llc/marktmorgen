@@ -777,6 +777,13 @@ exit 0
   writeFileSync(join(M3, "race-left"), "0\n");
 }
 
+console.log("outside a git clone: the version check says to run from inside one (22/11/2026)");
+{
+  const fora = mkdtempSync(join(tmpdir(), "fora-de-clone-"));
+  const x = spawnSync("node", [TOOL, "list-switches"], { cwd: fora, env: { ...base, CORREIO_SEM_VERSAO: "", GIT_CEILING_DIRECTORIES: tmpdir() }, encoding: "utf8" });
+  is("run outside a git clone, the tool says the folder is not a git clone and to run from inside one", /não é um clone git/.test(`${x.stdout}${x.stderr}`), `${x.stdout}${x.stderr}`.slice(0, 300));
+}
+
 console.log("version: the copy's SHA-256 against the reviewed one on main (owner, OWNER-20261121-1904, step 1)");
 const meu = createHash("sha256").update(readFileSync(TOOL)).digest("hex");
 const comHash = (h) => { g(["checkout", "-q", "-B", "mainh", M], P); mkdirSync(join(P, "tooling", "agent-mail"), { recursive: true });
@@ -831,6 +838,9 @@ console.log("secrets never printed: a credential in the mailbox address stays ou
     { status: 128, stderr: "fatal: unable to access 'https://github.com/o/correio.git/': 403\n", message: `Command failed: git fetch -q https://x-access-token:${TOKEN}@github.com/o/correio.git` });
   is("a failed git becomes an error without the command line: subcommand, exit code and git's own last line only (CodeQL 257 at line 2013)",
     eg && eg.message === "git fetch falhou (código 128): fatal: unable to access 'https://github.com/o/correio.git/': 403" && eg.status === 128 && !eg.message.includes(TOKEN) && !/Command failed|refs\/heads/.test(eg.message), eg?.message);
+  const egs = mod.erroDoGit?.(["push"], { status: 1, stderr: `remote: denied to https://u:${TOKEN}@github.com/o/c.git\n` });
+  is("the stderr kept on a git error has its credential masked too (NIT of Claude 5 iacVn3r on #5080)",
+    Boolean(egs) && !egs.stderr.includes(TOKEN) && !egs.message.includes(TOKEN) && /https:\/\/\*\*\*@github\.com/.test(egs.stderr), egs?.stderr);
   is("a subcommand outside the tool's list is named 'comando', never taken from the arguments (CodeQL 257)", mod.erroDoGit?.([`https://${TOKEN}@x`], { status: 1 })?.message === "git comando falhou (código 1)");
   // CodeQL 257 at line 2028: the session comes from CLAUDE_CODE_REMOTE_SESSION_ID, a sensitive name for CodeQL; no error
   // message carries it, and the family named comes from the fixed list.

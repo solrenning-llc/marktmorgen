@@ -1326,7 +1326,12 @@ function avisarVersao() {
   if (testeLigado("CORREIO_SEM_VERSAO")) return true;
   const publicado = hashPublicado();
   if (!publicado) {
-    console.error("ATENÇÃO: não consegui ler o SHA-256 da versão revisada (main do Marktmorgen); a versão desta cópia NÃO FOI CONFERIDA.");
+    // A busca do main roda no clone onde a ferramenta está (README, "Instalar e vigiar"): fora de um clone git, diz isso.
+    let noClone = true;
+    try { git(["rev-parse", "--git-dir"]); } catch { noClone = false; }
+    console.error(noClone
+      ? "ATENÇÃO: não consegui ler o SHA-256 da versão revisada (main do Marktmorgen); a versão desta cópia NÃO FOI CONFERIDA."
+      : "ATENÇÃO: esta pasta não é um clone git, e a conferência da versão roda dentro de um; rode a ferramenta de dentro de qualquer clone git (o do Marktmorgen serve). A versão desta cópia NÃO FOI CONFERIDA.");
     return false;
   }
   if (publicado !== hashProprio()) {

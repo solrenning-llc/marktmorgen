@@ -202,36 +202,46 @@ export async function unblockPerson(store: BlockStore, email: string): Promise<b
 }
 
 /**
- * Erases the reason of one block and keeps the block, in one step, only while it is there: a block lifted meanwhile is
- * never written back. The entry is no larger than before, so the data room's charge stays as it was.
- * KEYS[1] the list; ARGV the mark, the entry with no reason. 1 erased, 0 no block (or no reason left to erase).
+ * Erases the reason of one block and keeps the block with its own date, in one step, only while the entry is the one
+ * read: a block lifted or made again meanwhile is never written over. The entry is no larger than before, so the data
+ * room's charge stays as it was.
+ * KEYS[1] the list; ARGV the mark, the entry with no reason, the entry as read. 1 erased, 0 changed meanwhile.
  */
 export const FORGET_REASON_LUA = `-- marktmorgen:buyer-block-forget:v1
 local old = redis.call('HGET', KEYS[1], ARGV[1])
-if not old then return 0 end
-if old == ARGV[2] then return 0 end
+if old ~= ARGV[3] then return 0 end
 redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
 return 1
 `;
 
 /**
  * Deleting a person (lib/person-erasure.ts): the creator's reason for blocking them in this store is erased and the
- * block itself stays, as a one-way mark of the address (Codex X6 on #3839): it is the creator's protection, and a
- * person could otherwise lift it by asking to be deleted. 1 when a reason was erased, 0 when there was none. Throws on
- * an unknown reply.
+ * block itself stays, with the date it was made, as a one-way mark of the address (Codex X6 on #3839): it is the
+ * creator's protection, and a person could otherwise lift it by asking to be deleted; the date is kept so their copy
+ * still says since when (Claude 6 on #3839). 1 when a reason was erased, 0 when there was none or the entry changed
+ * meanwhile. Throws on an unknown reply.
  */
-export async function forgetBlockedPerson(store: BlockStore, email: string, now = Date.now()): Promise<number> {
+export async function forgetBlockedPerson(store: BlockStore, email: string): Promise<number> {
   if (!store.sid || !isRedisConfigured()) return 0;
   const mark = personMark(email);
   if (!mark) throw new Error("the erasure of a block's reason was not confirmed: there is no key to find the person");
-  const state = await blockedState(store, email);
-  if (state === "unknown") throw new Error("the erasure of a block's reason was not confirmed");
-  if (!state.blocked) return 0;
-  // Already erased: nothing to write, and the date the reason went is kept.
-  if (state.reason === "") return 0;
+  const key = blockKey(store.sid);
+  let read: unknown[] | null;
+  try {
+    read = repliesFor(await redisPipeline([["HGET", key, mark]]), 1);
+  } catch {
+    throw new Error("the erasure of a block's reason was not confirmed");
+  }
+  if (!read) throw new Error("the erasure of a block's reason was not confirmed");
+  const raw = read[0];
+  if (raw === null) return 0;
+  const entry = parseEntry(raw);
+  if (!entry || typeof raw !== "string") throw new Error("the erasure of a block's reason was not confirmed");
+  // Already erased: nothing to write.
+  if (entry.reason === "") return 0;
   let replies: unknown[] | null;
   try {
-    replies = repliesFor(await redisPipeline([["EVAL", FORGET_REASON_LUA, 1, blockKey(store.sid), mark, JSON.stringify({ r: "", at: now })]]), 1);
+    replies = repliesFor(await redisPipeline([["EVAL", FORGET_REASON_LUA, 1, key, mark, JSON.stringify({ r: "", at: entry.at }), raw]]), 1);
   } catch {
     throw new Error("the erasure of a block's reason was not confirmed");
   }

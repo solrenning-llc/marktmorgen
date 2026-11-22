@@ -828,12 +828,11 @@ export class MemoryRedis {
           this.run(["HSET", list, mark, entry]);
           return 1;
         }
-        // lib/buyer-block.ts FORGET_REASON_LUA: a block's reason erased, the block kept, only while it is there.
-        if (key.startsWith("-- marktmorgen:buyer-block-forget:v1\n") && args[0] === "1" && args.length === 4) {
-          const [, list, mark, entry] = args;
-          const old = this.run(["HGET", list, mark]);
-          if (old === null || old === undefined) return 0;
-          if (old === entry) return 0;
+        // lib/buyer-block.ts FORGET_REASON_LUA: a block's reason erased, the block and its date kept, only while the
+        // entry is the one read.
+        if (key.startsWith("-- marktmorgen:buyer-block-forget:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, list, mark, entry, read] = args;
+          if (this.run(["HGET", list, mark]) !== read) return 0;
           this.run(["HSET", list, mark, entry]);
           return 1;
         }

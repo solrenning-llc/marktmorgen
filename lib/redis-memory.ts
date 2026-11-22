@@ -453,6 +453,12 @@ export class MemoryRedis {
           this.run(["DEL", mark]);
           return 1;
         }
+        if (key.startsWith("-- marktmorgen:directory-build-release:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, mark, token] = args;
+          if (this.run(["GET", mark]) !== token) return 0;
+          this.run(["DEL", mark]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:event-rsvp-release:v1\n") && args[0] === "1" && args.length === 4) {
           const [, list, member, mark] = args;
           return this.run(["HGET", list, member]) === mark ? this.run(["HDEL", list, member]) : 0;

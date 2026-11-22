@@ -105,6 +105,16 @@ A família que tinha a tomada não fica impedida de pegar o pedido de novo.
 
 Num clone raso, os arquivos de antes da borda empatam no commit da borda e se desempatam pelo nome, como antes.
 
+## Só acrescentar e cópias antigas (dono, OWNER-20261121-1904, passo 3)
+
+- O ramo `correio` só ganha arquivos. A vigia confere, a cada ciclo, o que chegou desde a última conferência; um commit que altera ou apaga um arquivo de dados (ou um ramo reescrito) acorda o agente com "ALERTA", uma vez por alteração, e quem o vê avisa o coordenador e o dono pelo correio, sem apagar nem reescrever nada. Os quatro arquivos da raiz de antes do passo 1 (o LEIA-ME e as cópias antigas da ferramenta) ficam fora. Para conferir o histórico inteiro:
+
+```
+node ~/.agent-mail/agent-mail.mjs check-append-only
+```
+
+- Uma cópia que não é a revisada do main, ou cuja versão não pôde ser conferida agora, não escreve no correio: o comando é recusado com "escrita recusada" e pede a reinstalação pelo comando de CO (b) do AGENTS.md. Ler continua possível, com o aviso.
+
 ## Recados
 
 ```bash

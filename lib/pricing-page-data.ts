@@ -7,7 +7,7 @@ import { planShareWords } from "@/lib/fee-words";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { MAX_FILE_BYTES } from "@/lib/product-file";
-import { MAX_LEADS } from "@/lib/contact-rules";
+import { contactCeiling } from "@/lib/contact-ceiling";
 import { PAID_STORAGE_BYTES } from "@/lib/storage-rules";
 import { DATA_ROOM_BYTES, dataWords } from "@/lib/store-data-rules";
 import { VISITS_INCLUDED, publicVisitLimit } from "@/lib/traffic-rules";
@@ -53,7 +53,7 @@ export const PRICING_GROUPS:PricingGroup[]=[
   row("data-room","Space for store records",t=>dataWords(DATA_ROOM_BYTES[t]),"Products, contacts, orders and community records share this space. Both count and byte limits apply."),
   row("catalog","Catalog products",()=>count(MAX_PRODUCTS)),
   row("single-file","Largest individual file",()=>gigabytes(MAX_FILE_BYTES),"Storage and monthly upload limits also apply."),
-  row("contacts","Contact count ceiling",()=>count(MAX_LEADS),"The store-record space can fill before a count ceiling is reached."),
+  row("contacts","Most contacts on the list",t=>count(contactCeiling(t)),"The most with nothing else stored: products, orders and community records share the same space."),
   row("delivery","Published file-delivery allowance",()=>gigabytes(DELIVERY_ALLOWANCE_BYTES)+"/month","This is not a hard block on paid downloads. Paid-file continuity follows the existing delivery rules; crossing it is not an automatic overage bill."),
   row("free-delivery","Free-file delivery pause threshold",()=>gigabytes(FREE_PAUSE_ABOVE_BYTES)+"/month"),
  ]},

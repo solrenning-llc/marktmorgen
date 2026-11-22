@@ -39,6 +39,19 @@ async function main(): Promise<void> {
   is("one batch, to the two members only", sent.map((batch) => batch.length), [2]);
   is("out of line and out of its community's sends", [db.run(["SISMEMBER", "nl:cm:mailq", id]), db.run(["SISMEMBER", sends, id])], [0, 0]);
 
+  part("a send that ends failed takes its recipient list with it (Claude 7 xAF on #5072, LEVE)");
+  reset();
+  const failing = "9".repeat(24);
+  db.run(["SET", `nl:cm:mail:${failing}`, JSON.stringify({ ...job, id: failing, total: 2 })]);
+  db.run(["RPUSH", `nl:cm:mail:${failing}:to`, members[0].k, members[1].k]);
+  db.run(["SADD", "nl:cm:mailq", failing]);
+  db.run(["SADD", sends, failing]);
+  // Its community is not there any more: the send fails, and no erasure walks it after this.
+  await advanceAnnouncement(failing, async () => null, Date.now() + 10_000);
+  is("failed, its member keys gone, out of line and out of its community's sends",
+    [read(failing).status, db.run(["EXISTS", `nl:cm:mail:${failing}:to`]), db.run(["SISMEMBER", "nl:cm:mailq", failing]), db.run(["SISMEMBER", sends, failing])],
+    ["failed", 0, 0, 0]);
+
   part("a queued send is noted in its community's sends under way");
   reset();
   const queued = await queueAnnouncement(store, config, post);

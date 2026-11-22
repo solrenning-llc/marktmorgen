@@ -74,3 +74,12 @@ test(`more than ${MAX_SENDS_UNDER_WAY} sends under way refuses the erasure, neve
   await call([["SADD", sends(community), ...many]]);
   await assert.rejects(forgetCommunityPerson(community, who, email, []));
 });
+
+test("a member of the sends that is not a send's id is let go and never blocks the erasure (Claude 7 xAF on #5072)", async () => {
+  await seed();
+  await call([["SADD", sends(community), "not-a-send-id"]]);
+  await forgetCommunityPerson(community, who, email, []);
+  const [left, odd] = await call([["LRANGE", recipients(job), 0, -1], ["SISMEMBER", sends(community), "not-a-send-id"]]);
+  assert.deepEqual(left, [ERASED_MARK, next]);
+  assert.equal(odd, 0);
+});

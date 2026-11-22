@@ -154,16 +154,25 @@ async function holdSendPlace(community: string, id: string): Promise<boolean> {
   const others = (listed as string[]).filter((other) => other !== id && JOB_ID.test(other));
   const there = others.length ? repliesFor(await redisPipeline(others.map((other) => ["EXISTS", jobKey(other)])), others.length) : [];
   if (!there) throw new UnknownReplyError("a community's announcements under way");
-  const stale = others.filter((_, i) => there[i] === 0);
+  // A member that is not a send's id holds no place either (Claude 7 xAF on #5072, NIT).
+  const stale = [...others.filter((_, i) => there[i] === 0), ...(listed as string[]).filter((other) => !JOB_ID.test(other))];
   if (stale.length) await redisPipeline([["SREM", key, ...stale]]);
   if ((await count()) <= MAX_SENDS_UNDER_WAY) return true;
   await redisPipeline([["SREM", key, id]]);
   return false;
 }
 
-/** The commands that take a finished send out of line and out of its community's sends. */
-const outOfLine = (id: string, community?: string): (string | number)[][] =>
-  community ? [["SREM", QUEUE, id], ["SREM", sendsKey(community), id]] : [["SREM", QUEUE, id]];
+/**
+ * Takes a send that is over (sent, failed, stopped, or its record gone) out of line and out of its community's sends.
+ * Its recipient list goes first, confirmed (Claude 7 xAF on #5072, LEVE): a failed send no longer in the community's
+ * sends is not walked by a person's erasure, so its member keys must not outlive it. While the list is not known gone
+ * the send stays in line and in its community's sends, so the next run tries again and an erasure still reaches it.
+ */
+async function letGo(id: string, community?: string): Promise<void> {
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", toKey(id)]]), 1)?.[0]);
+  if (gone === null || gone > 1) throw new UnknownReplyError("an announcement's recipient list");
+  await redisPipeline(community ? [["SREM", QUEUE, id], ["SREM", sendsKey(community), id]] : [["SREM", QUEUE, id]]);
+}
 
 /**
  * Writes the erased mark over a deleted member's key in every send of the community still under way (Codex
@@ -175,11 +184,16 @@ const outOfLine = (id: string, community?: string): (string | number)[][] =>
 export async function forgetAnnouncementRecipient(community: string, who: string): Promise<number> {
   if (!who || !isRedisConfigured()) return 0;
   const listed = repliesFor(await redisPipeline([["SMEMBERS", sendsKey(community)]]), 1)?.[0];
-  if (!Array.isArray(listed) || listed.length > MAX_SENDS_UNDER_WAY || listed.some((id) => typeof id !== "string" || !JOB_ID.test(id))) {
+  if (!Array.isArray(listed) || listed.length > MAX_SENDS_UNDER_WAY || listed.some((id) => typeof id !== "string")) {
     throw new UnknownReplyError("a community's announcements under way");
   }
-  if (!listed.length) return 0;
-  return (await blankInLists((listed as string[]).map(toKey), who)) > 0 ? 1 : 0;
+  // A member that is not a send's id names no list this code made: let go here, so it never blocks an erasure again
+  // (Claude 7 xAF on #5072, NIT), and never walked.
+  const sends = (listed as string[]).filter((id) => JOB_ID.test(id));
+  const odd = (listed as string[]).filter((id) => !JOB_ID.test(id));
+  if (odd.length) await redisPipeline([["SREM", sendsKey(community), ...odd]]);
+  if (!sends.length) return 0;
+  return (await blankInLists(sends.map(toKey), who)) > 0 ? 1 : 0;
 }
 
 /** Writes down an announcement's email to go now, to everyone who asked. */
@@ -461,7 +475,7 @@ export async function advanceAnnouncement(
       throw error;
     }
     if (!job || job.status === "sent" || job.status === "failed") {
-      await redisPipeline(outOfLine(id, job?.community));
+      await letGo(id, job?.community);
       return job;
     }
     const store = await load(job.handle);
@@ -469,7 +483,7 @@ export async function advanceAnnouncement(
     if (!store || !config) {
       job = { ...job, status: "failed", note: "The community is not here anymore." };
       await save(job);
-      await redisPipeline(outOfLine(id, job.community));
+      await letGo(id, job.community);
       return job;
     }
     // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule 24):
@@ -576,10 +590,10 @@ export async function advanceAnnouncement(
     }
     if (job.status === "sending" && job.done >= job.total) {
       job = { ...job, status: "sent", note: skippedNote(job.skipped) };
-      await redisPipeline([["DEL", toKey(id)]]);
     }
     await save(job);
-    if (job.status === "sent" || job.status === "failed") await redisPipeline(outOfLine(id, job.community));
+    // Its recipient list goes with it, sent or failed (letGo).
+    if (job.status === "sent" || job.status === "failed") await letGo(id, job.community);
     return job;
   } finally {
     await releaseMark(lockKey(id), lock);
@@ -612,7 +626,7 @@ async function countError(id: string, error: unknown): Promise<void> {
         ? `This send stopped after the same error ${ANNOUNCEMENT_ERRORS_MOST} times in a row. Nothing more was sent.`
         : "Paused for a moment: something went wrong on our side. It is tried again by itself.",
     });
-    if (stopped) await redisPipeline(outOfLine(id, job.community));
+    if (stopped) await letGo(id, job.community);
   } finally {
     await releaseMark(lockKey(id), lock);
   }

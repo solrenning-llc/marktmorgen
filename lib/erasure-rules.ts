@@ -110,10 +110,11 @@ export const ERASE_SUBMISSIONS: readonly [number, number] = [301, 70_000];
  * forgetAnnouncementRecipient): the community's sends read (one SMEMBERS, at most MAX_SENDS_UNDER_WAY ids of 24
  * characters), then one script (BLANK_IN_LISTS, lib/erasure-lists.ts) that reads each send's list on the Redis side and
  * writes the mark over the person's place: its EVAL, an LRANGE a send and an LSET a send at the most (a member is
- * in a send's list once), as Upstash bills them. Bytes: the script's text, the keys and the replies, under 3,000,
+ * in a send's list once), as Upstash bills them, and one SREM of any member that is not a send's id (Claude 7 xAF on
+ * #5072). Bytes: the script's text, the keys and the replies, under 3,000,
  * counted at 5,000; the lists themselves stay inside Redis. Held by tests/community-mail-recipient-erasure.test.ts.
  */
-export const ERASE_ANNOUNCEMENT_LISTS: readonly [number, number] = [2 + 2 * MAX_SENDS_UNDER_WAY, 5_000];
+export const ERASE_ANNOUNCEMENT_LISTS: readonly [number, number] = [3 + 2 * MAX_SENDS_UNDER_WAY, 5_000];
 
 /**
  * Commands every erasure sends whatever the store: each module's own, workflows at their cap, a sync log at its length,

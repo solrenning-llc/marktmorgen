@@ -12,6 +12,7 @@ import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { type SubmissionSetup } from "@/lib/submission-rules";
 import { type DoorSteps, SUBMISSION_BUYER_OPENS, SUBMISSION_BUYER_OPEN_COMMANDS, SUBMISSION_STEP_COMMANDS, abortSubmissionDoor, forgetSubmissionsPerson, openSubmissionDoor } from "@/lib/submission-store";
 import { type DataStore, dataKey } from "@/lib/store-data";
+import { contentRoomFor } from "@/lib/store-data-rules";
 import { SUBMISSIONS_WORDS } from "@/lib/buyer-words/submissions";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -122,11 +123,19 @@ async function main(): Promise<void> {
   {
     const fay = "f".repeat(32);
     const original = redis.pipeline.bind(redis);
-    // The room answers full only for the count's own take: the one entry kept until a time ("~" and a month).
+    // The room is full at the moment the count's own step runs (the buyer's place was taken in it just before): the
+    // count's script finds no room for its bytes. The room's total is put back after, for the rest of the file.
     redis.pipeline = (async (list: (string | number)[][]) => {
-      const take = list.length === 1 && String(list[0][0]).toUpperCase() === "EVAL" && String(list[0][1]).startsWith("-- marktmorgen:store-data:v1");
-      if (take && list[0].slice(3).some((part) => String(part).startsWith("~"))) return [[0, 0]];
-      return original(list);
+      const count = list.length === 1 && String(list[0][0]).toUpperCase() === "EVAL" && String(list[0][1]).startsWith("-- marktmorgen:submission-buyer-open:");
+      if (!count) return original(list);
+      const room = dataKey(SHOP)!;
+      const [held] = await original([["HGET", room, "#"]]);
+      await original([["HSET", room, "#", String(contentRoomFor(SHOP, NOW))]]);
+      try {
+        return await original(list);
+      } finally {
+        await original([held === null ? ["HDEL", room, "#"] : ["HSET", room, "#", String(held)]]);
+      }
     }) as typeof redis.pipeline;
     let first: string;
     try {

@@ -37,13 +37,15 @@ import { freshChecks } from "@/lib/ai-draft-review";
  * unavailable while a run is on.
  */
 
-export type StepView = "waiting" | "running" | "done" | "skipped";
+export type StepView = "waiting" | "running" | "done" | "skipped" | "unfinished";
 
 const STATE_WORDS: Record<StepView, string> = {
   waiting: "Not started",
   running: "Running",
   done: "Done",
   skipped: "Not run, not charged",
+  // A part of a file that started and did not come back (758 [STN5] unit 3): whether it counts is said with the result.
+  unfinished: "Started, did not come back",
 };
 
 const MESSAGES: Record<string, string> = {
@@ -55,6 +57,8 @@ const MESSAGES: Record<string, string> = {
   off: "The writing help is not available right now.",
   forbidden: "Your role on this store cannot do this.",
   file: "The product's PDF could not be read. Draft the page without it, or upload the PDF again.",
+  // A box whose notes do not change what an empty reading gives passes its own words (messages.empty).
+  empty: "We found nothing to write from in your PDF's first pages, so nothing was written. Nothing was changed here. Add a few words about the product above, then try again.",
 };
 const REFUSED_BEFORE_START = new Set(["long", "invalid", "unknown"]);
 // True whenever writing started after a Stop: pressed before or after it began, the server read it too late.
@@ -139,6 +143,7 @@ export function AiStepsAssist<T>({
   extra,
   allowEmpty = false,
   validateResult,
+  messages,
 }: {
   title: string;
   hint: string;
@@ -153,8 +158,12 @@ export function AiStepsAssist<T>({
   extra?: React.ReactNode | ((busy: boolean) => React.ReactNode);
   allowEmpty?: boolean;
   validateResult?: (value: unknown) => value is T;
+  /** This job's own words for an error, in place of the box's (e.g. "file", when its PDF could not be read). */
+  messages?: Partial<Record<string, string>>;
 }) {
   const ai = useContext(AiOn);
+  const words: Record<string, string> = { ...MESSAGES };
+  for (const [key, value] of Object.entries(messages ?? {})) if (typeof value === "string" && value) words[key] = value;
   const startKnown = allowanceOf(ai) !== null;
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
@@ -231,7 +240,7 @@ export function AiStepsAssist<T>({
       setAllowanceKnown(!unsure);
       setReadOnce(true);
       if (validateResult && !validateResult(line.value)) {
-        finish({ error: MESSAGES.unconfirmed });
+        finish({ error: words.unconfirmed });
         return;
       }
       const given =
@@ -260,9 +269,7 @@ export function AiStepsAssist<T>({
       setAnnounce("");
       const stopped = line.error === "stopped";
       const empty = line.error === "empty";
-      const opening = empty
-        ? "We found nothing to write from in your PDF's first pages, so the page was not written. Nothing was changed here. Add a few words about the product above, then try again."
-        : "The writing help could not finish just now. Nothing was changed here.";
+      const opening = empty ? words.empty : "The writing help could not finish just now. Nothing was changed here.";
       if (line.returned === null || line.left === null) {
         setAllowanceKnown(false);
         const words = "We could not confirm the writing jobs given back: reload to check your allowance.";
@@ -283,9 +290,9 @@ export function AiStepsAssist<T>({
       return;
     }
     const refused = REFUSED_BEFORE_START.has(line.error);
-    if (!refused && !Object.hasOwn(MESSAGES, line.error)) setAllowanceKnown(false);
+    if (!refused && !Object.hasOwn(words, line.error)) setAllowanceKnown(false);
     setAnnounce("");
-    finish({ error: refused ? MESSAGES.failed : Object.hasOwn(MESSAGES, line.error) ? MESSAGES[line.error] : MESSAGES.unconfirmed });
+    finish({ error: refused ? words.failed : Object.hasOwn(words, line.error) ? words[line.error] : words.unconfirmed });
   }
 
   function stepLine(line: AiStepLine) {
@@ -317,7 +324,7 @@ export function AiStepsAssist<T>({
   async function run() {
     if (busy) return;
     if (!allowEmpty && !notes.trim()) {
-      setError(MESSAGES.notes);
+      setError(words.notes);
       return;
     }
     const id = crypto.randomUUID().replace(/-/g, "");
@@ -374,7 +381,7 @@ export function AiStepsAssist<T>({
     else {
       setAllowanceKnown(false);
       setAnnounce("");
-      finish({ error: MESSAGES.unconfirmed });
+      finish({ error: words.unconfirmed });
     }
     setStopping(false);
     busyRef.current = false;

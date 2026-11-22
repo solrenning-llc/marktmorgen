@@ -170,6 +170,15 @@ async function main(): Promise<void> {
   const undone = await benefitsDue(store, NOW * 1000);
   is("waiting again", undone.state === "ok" ? undone.rows.find((r) => r.benefit === print.benefit.id && r.sub === "sub_active00001")?.given : "x", null);
 
+  part("An accented sign-in address marks; one that costs more on the wire does not (audit cd8d, coordinator cd33)");
+  is("an accented address marks as given", await giveBenefit(store, "José@Exemplo.com.br", print.benefit.id, [{ sub: "sub_active00001", period: "once" }], NOW * 1000), { ok: true, given: 1, already: 0, notOwed: 0, unknown: 0 });
+  const accented = await benefitsDue(store, NOW * 1000);
+  is("and the mark says who, as signed in", accented.state === "ok" ? accented.rows.find((r) => r.benefit === print.benefit.id && r.sub === "sub_active00001")?.given : "x", { at: NOW, by: "josé@exemplo.com.br" });
+  for (const odd of ['a"b@example.com', "a\u0001b@example.com", "a<b@example.com"]) {
+    is(`an address with ${JSON.stringify(odd.charAt(1))} is refused before anything is marked`, await giveBenefit(store, odd, print.benefit.id, [{ sub: "sub_pastdue0001", period: "once" }], NOW * 1000), { ok: false, reason: "who" });
+  }
+  is("the accented mark taken back", await undoGiven(store, print.benefit.id, "sub_active00001", "once", NOW * 1000), { ok: true, undone: true });
+
   part("What cannot be read is unknown, never nobody waiting and never given");
   mode = "error";
   is("Stripe down: unknown", (await benefitsDue(store, NOW * 1000)).state, "unknown");

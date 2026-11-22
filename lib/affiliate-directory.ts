@@ -438,7 +438,7 @@ export async function readDirectoryPage(): Promise<DirectoryPage> {
   }
   if (claim !== "OK") throw new UnknownReplyError(claim === null ? "the directory's build mark, held," : "the directory's build mark");
   const room = await reserveBuild().catch(() => "unknown" as const);
-  if (room !== "build") return lastDirectory(room);
+  if (room !== "build") return lastDirectory(room, token);
   let built: Awaited<ReturnType<typeof buildDirectory>>;
   try {
     built = await buildDirectory();
@@ -538,13 +538,15 @@ async function reserveBuild(): Promise<"build" | "full" | "unknown"> {
 
 /**
  * The last good build, without every store no longer in the listed set, for a visit that may not build: nothing is
- * kept from it. The build mark is dropped in the same pipeline, so the next visit is not held by a build that never
- * ran (the DEL's own reply changes nothing: a mark it did not drop ends by its BUILD_HOLD_SECONDS). No last build is
+ * kept from it. The build mark is let go in the same pipeline, so the next visit is not held by a build that never
+ * ran, and only while it is still this visit's own (RELEASE_IF_OWNER, Codex N1 on #3062): a visit whose mark ended
+ * during its count never drops the mark a later build took. The release's own reply changes nothing: a mark it did
+ * not drop ends by its BUILD_HOLD_SECONDS. No last build is
  * DirectoryBusyError past the ceiling and UnknownReplyError after an unknown count; a reply in any other shape, or
  * rows that do not match their sids, is UnknownReplyError, never the rows unfiltered or an empty list.
  */
-async function lastDirectory(room: "full" | "unknown"): Promise<DirectoryPage> {
-  const replies = repliesFor(await redisPipeline([["DEL", DIRECTORY_BUILD], ["GET", DIRECTORY_LAST]]), 2);
+async function lastDirectory(room: "full" | "unknown", token: string): Promise<DirectoryPage> {
+  const replies = repliesFor(await redisPipeline([["EVAL", RELEASE_IF_OWNER, 1, DIRECTORY_BUILD, token], ["GET", DIRECTORY_LAST]]), 2);
   if (!replies) throw new UnknownReplyError("the directory's last build (GET)");
   const reply = replies[1];
   if (reply === null) {
@@ -583,6 +585,12 @@ return 1`;
 const FAIL_IF_OWNER = `-- marktmorgen:directory-build-fail:v1
 if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
 redis.call("SET", KEYS[1], "failed", "EX", ARGV[2])
+return 1`;
+
+/** Lets the mark go, only while it is the visit's own: a visit past the ceiling whose mark ended leaves the next one's (Codex N1 on #3062). */
+const RELEASE_IF_OWNER = `-- marktmorgen:directory-build-release:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("DEL", KEYS[1])
 return 1`;
 
 /** A late build (its mark taken by the next one) answers its page but keeps nothing over the next build's; true when this build kept it. */

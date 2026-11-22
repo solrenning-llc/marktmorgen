@@ -139,6 +139,26 @@ async function main(): Promise<void> {
     is(label + " nor its data room", redis.run(["EXISTS", room]), 0);
   }
 
+  part("The stand-in answers as the Lua does, and counts its inner calls (Claude 6 018ZjhH's LEVE on #5112)");
+  {
+    const { MEMORY_WRITE_LIVE } = await import("@/lib/assistant-memory-store");
+    const run = async (record: string | null, statsId: string) => {
+      redis.clear();
+      redis.run(["SET", "t:lock", "tok"]);
+      if (record !== null) redis.run(["SET", "t:live", record]);
+      const before = redis.scriptCalls;
+      const [answer] = await redis.pipeline([["EVAL", MEMORY_WRITE_LIVE, 4, "t:lock", "t:notes", "t:live", "t:erasing", "tok", "[1]", "f", statsId, "r"]]);
+      return { answer, calls: redis.scriptCalls - before, notes: redis.run(["GET", "t:notes"]) };
+    };
+    // cjson decodes a JSON array to a table too, so its statsId is nil: another store (-4), never unreadable (-3).
+    is("an owner record that is a JSON array is another store (-4), as in Redis", (await run("[1,2]", "s1")).answer, -4);
+    is("an owner record that is not JSON is unreadable (-3)", (await run("not json", "s1")).answer, -3);
+    is("an owner record that is a JSON number is unreadable (-3)", (await run("7", "s1")).answer, -3);
+    const kept = await run(JSON.stringify({ statsId: "s1" }), "s1");
+    is("a live store from before ids writes, with its 4 inner calls (GET, HGET, GET, SET)", [kept.answer, kept.calls, kept.notes], [1, 4, "[1]"]);
+    is("a store with an id that moved: 3 inner calls, nothing written", await run("r2", ""), { answer: -5, calls: 3, notes: null });
+  }
+
   part("The route changes notes only through the fenced writers");
   const source = readFileSync("app/api/store/assistant-memory/route.ts", "utf8");
   for (const bare of ["keepNote", "changeNote", "dropNote"]) is(`never the bare ${bare}`, new RegExp(`\\b${bare}\\(`).test(source), false);

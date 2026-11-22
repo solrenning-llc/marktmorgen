@@ -60,7 +60,8 @@ import { feedsOf } from "@/lib/podcast-access";
 import { remindersOf } from "@/lib/assistant-reminder";
 import { asksOf } from "@/lib/checkout-ask";
 import { syncJobsOf } from "@/lib/email-sync";
-import { memberTraces, readMember as readCommunityMember } from "@/lib/community";
+import { type MemberTracesPage, memberTracesPage, readMember as readCommunityMember } from "@/lib/community";
+import { COPY_PAGE_MAX_COMMANDS, type PageCursor, ReadBudget, openCursor, sealCursor } from "@/lib/copy-pages";
 import { pointsRecordOf } from "@/lib/community-points";
 import { allNoticesOf } from "@/lib/community-notify";
 import { benefitMarksOf } from "@/lib/tier-benefits";
@@ -69,7 +70,6 @@ import { conversationsOf } from "@/lib/community-dm";
 import { chatMessagesOf } from "@/lib/community-chat";
 import { rsvpsOf } from "@/lib/community-events";
 import { challengesOf } from "@/lib/community-challenges";
-import { votesOf } from "@/lib/community-polls";
 import { heldCopy, heldOf } from "@/lib/community-approval";
 import { keysOf } from "@/lib/licence-keys";
 import { activationsOf } from "@/lib/licence-activations";
@@ -235,6 +235,10 @@ export type PersonCopy = {
   complete: boolean;
   /** What is kept but could not be read for this copy, said in words; never left out in silence. */
   notComplete: string[];
+  /** Which page of the copy this is: 1, unless it was asked for with a cursor (lib/copy-pages.ts). */
+  page: number;
+  /** While the copy has another page: the cursor to ask for it with, sealed to this store and address. */
+  next?: string;
 };
 
 const iso = (seconds: number) => (seconds > 0 ? new Date(seconds * 1000).toISOString() : "");
@@ -257,6 +261,46 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
   }
   return read;
 }
+
+/** The module whose copy goes in pages (lib/copy-pages.ts): a member's community activity. */
+const COMMUNITY_MODULE = "lib/community-erasure.ts";
+/** Where a community copy's cursor points: the module and the community, so a cursor never reads another. */
+const communityAt = (id: string) => `${COMMUNITY_MODULE}#${id}`;
+
+/** This request's paged read: what it may still send, and where the community's activity goes on. */
+const pagesOf = new WeakMap<ErasureScope, { budget: ReadBudget; resume?: string }>();
+
+/** The first page of a member's community activity, inside this request's budget; where it goes on is kept for copyPerson. */
+async function firstCommunityPage(s: ErasureScope, id: string, who: string): Promise<MemberTracesPage> {
+  let paging = pagesOf.get(s);
+  if (!paging) {
+    paging = { budget: new ReadBudget(COPY_PAGE_MAX_COMMANDS) };
+    pagesOf.set(s, paging);
+  }
+  const page = await memberTracesPage(id, who, paging.budget);
+  paging.resume = page.resume;
+  return page;
+}
+
+/** What a member wrote and did, as the copy shows it, from one page. */
+function wroteOf(page: MemberTracesPage) {
+  const { traces, votes } = page;
+  return {
+    posts: traces.posts.map((p) => ({ ...p, at: iso(p.at), edited: iso(p.edited) })),
+    comments: traces.comments.map((c) => ({ ...c, at: iso(c.at), edited: iso(c.edited) })),
+    likedPosts: traces.likedPosts,
+    likedComments: traces.likedComments,
+    reported: traces.reported,
+    votes,
+  };
+}
+
+/** Whether a page holds anything they wrote or did. */
+const hasWrote = (traces: MemberTracesPage["traces"], votes: MemberTracesPage["votes"]) =>
+  votes.length > 0 || traces.posts.length > 0 || traces.comments.length > 0 || traces.likedPosts.length > 0 || traces.likedComments.length > 0 || traces.reported.length > 0;
+
+/** What the copy says while it has another page, in words, with the page to ask for. */
+export const morePagesLine = (page: number) => `This copy continues on page ${page}. Ask for it with the cursor in "next" to read the rest of your community activity.`;
 
 /** What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts). */
 const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true });
@@ -515,21 +559,21 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     if (!id) return [];
     const who = s.learner;
     const member = await readCommunityMember(id, who);
-    const [points, notices, devices, conversations, room, events, traces, challenges, held] = await Promise.all([
+    const [points, notices, devices, conversations, room, events, page, challenges, held] = await Promise.all([
       pointsRecordOf(id, who),
       allNoticesOf(id, who),
       deviceCount(id, who),
       conversationsOf(id, who),
       chatMessagesOf(id, who),
       rsvpsOf(id, who),
-      memberTraces(id, who),
+      // Their posts, comments, likes, reports and votes, the first page of them (lib/copy-pages.ts).
+      firstCommunityPage(s, id, who),
       challengesOf(id, who),
       // What they sent that waits for approval, and the notes about what was not published (543 [CM2]).
       heldOf(id, who),
     ]);
-    const votes = await votesOf(id, who, traces.pollPosts);
-    const { pollPosts: _polls, ...wrote } = traces;
-    void _polls;
+    const { traces, votes } = page;
+    const wrote = wroteOf(page);
     const record = {
       // The link in their announcement emails is a key, left out: they have it in those emails.
       profile: member ? { email: member.e, name: member.n, handle: member.h, inDirectory: member.dir, links: member.s.map((l) => l.url), announcementEmails: member.mail, joined: iso(member.at), lastSeen: iso(member.seen), muted: member.muted } : null,
@@ -541,15 +585,10 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       room: room.map((m) => ({ text: m.text, at: iso(m.at) })),
       events: events.map((e) => ({ event: e.event, at: iso(e.at) })),
       challenges: challenges.map((c) => ({ challenge: c.challenge, title: c.title, joined: iso(c.joined), checkedIn: c.checkIns })),
-      posts: wrote.posts.map((p) => ({ ...p, at: iso(p.at), edited: iso(p.edited) })),
-      comments: wrote.comments.map((c) => ({ ...c, at: iso(c.at), edited: iso(c.edited) })),
-      likedPosts: wrote.likedPosts,
-      likedComments: wrote.likedComments,
-      reported: wrote.reported,
-      votes,
+      ...wrote,
       waitingForApproval: held.map(heldCopy),
     };
-    const empty = !member && points.total === 0 && !notices.length && !devices && !conversations.length && !room.length && !events.length && !challenges.length && !votes.length && !held.length && Object.values(wrote).every((list) => !list.length);
+    const empty = !member && points.total === 0 && !notices.length && !devices && !conversations.length && !room.length && !events.length && !challenges.length && !held.length && !hasWrote(traces, votes);
     return empty ? [] : [record];
   },
   "lib/licence-keys.ts": async (s) => (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key, sale: k.reference, given: iso(k.at), revoked: iso(k.revokedAt), revokedBy: k.revokedBy })),
@@ -677,7 +716,50 @@ export const ALSO_COPIERS: Readonly<Record<string, PartCopier>> = {
  * erasureScope). Each module's reader runs in turn; one that fails fails the
  * whole copy, so a copy is never handed over with a part silently missing.
  */
-export async function copyPerson(scope: ErasureScope, now = Date.now()): Promise<PersonCopy> {
+export async function copyPerson(scope: ErasureScope, now = Date.now(), options: { cursor?: string } = {}): Promise<PersonCopy> {
+  const whose = { sid: scope.sid, email: scope.email };
+  // A cursor sealed for this store and address, for this store's community: its next page only. Any other cursor,
+  // or none, is the copy from its first page.
+  const at = options.cursor === undefined ? null : openCursor(whose, options.cursor);
+  if (at && scope.communityId && at.module === communityAt(scope.communityId)) return communityPage(scope, now, at);
+  const paging = { budget: new ReadBudget(COPY_PAGE_MAX_COMMANDS) } as { budget: ReadBudget; resume?: string };
+  pagesOf.set(scope, paging);
+  try {
+    return await firstPage(scope, now, paging);
+  } finally {
+    pagesOf.delete(scope);
+  }
+}
+
+/** The sealed cursor for a page after this one; a copy with more to read and no key to seal it with fails rather than stop short. */
+function nextCursor(scope: ErasureScope, at: PageCursor): string {
+  const cursor = sealCursor({ sid: scope.sid, email: scope.email }, at);
+  if (!cursor) throw new Error("the copy has another page, but where it goes on cannot be sealed (no deployment key)");
+  return cursor;
+}
+
+/** A later page: only the member's community activity, from where the last page stopped. */
+async function communityPage(scope: ErasureScope, now: number, at: PageCursor): Promise<PersonCopy> {
+  const page = await memberTracesPage(scope.communityId!, scope.learner, new ReadBudget(COPY_PAGE_MAX_COMMANDS), at.resume);
+  const sections: CopySection[] = hasWrote(page.traces, page.votes) ? [{ module: COMMUNITY_MODULE, what: COPY_PLAN[COMMUNITY_MODULE]!.what, records: [wroteOf(page)] }] : [];
+  const next = page.resume === undefined ? undefined : nextCursor(scope, { ...at, page: at.page + 1, resume: page.resume });
+  return {
+    store: { name: scope.store.name, handle: scope.store.handle },
+    email: scope.email,
+    made: new Date(now).toISOString(),
+    sections,
+    marks: [],
+    elsewhere: [],
+    passing: [],
+    // The last page says whether the whole copy is complete: every earlier page read everything it reached.
+    complete: next === undefined && at.complete,
+    notComplete: next === undefined ? [] : [morePagesLine(at.page + 1)],
+    page: at.page,
+    ...(next === undefined ? {} : { next }),
+  };
+}
+
+async function firstPage(scope: ErasureScope, now: number, paging: { budget: ReadBudget; resume?: string }): Promise<PersonCopy> {
   const sections: CopySection[] = [];
   for (const [module, plan] of Object.entries(COPY_PLAN)) {
     if (plan.how !== "copied") continue;
@@ -698,7 +780,9 @@ export async function copyPerson(scope: ErasureScope, now = Date.now()): Promise
   const marks = copyMarks();
   const elsewhere = Object.values(COPY_PLAN).filter((p) => p.how === "elsewhere").map((p) => p.what);
   const passing = Object.values(COPY_ALSO).flatMap((p) => (p.how === "passing" ? [`${p.what} (at most ${p.days} ${p.days === 1 ? "day" : "days"}).`] : []));
-  return { store: { name: scope.store.name, handle: scope.store.handle }, email: scope.email, made: new Date(now).toISOString(), sections, marks, elsewhere, passing, complete: notComplete.length === 0, notComplete };
+  const next = paging.resume === undefined ? undefined : nextCursor(scope, { module: communityAt(scope.communityId!), page: 2, resume: paging.resume, complete: notComplete.length === 0 });
+  if (next !== undefined) notComplete.push(morePagesLine(2));
+  return { store: { name: scope.store.name, handle: scope.store.handle }, email: scope.email, made: new Date(now).toISOString(), sections, marks, elsewhere, passing, complete: notComplete.length === 0, notComplete, page: 1, ...(next === undefined ? {} : { next }) };
 }
 
 export type { Store };

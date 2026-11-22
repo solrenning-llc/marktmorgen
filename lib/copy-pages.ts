@@ -63,16 +63,22 @@ function mac(key: Buffer, scope: CursorScope, body: string): Buffer {
 /** Whose copy a cursor belongs to. */
 export type CursorScope = { sid: string; email: string };
 
+/**
+ * Where a copy goes on: the module and its position, the page this cursor asks for, and whether every page before it
+ * read everything it reached (so the last page can say whether the whole copy is complete).
+ */
+export type PageCursor = { module: string; page: number; resume: string; complete: boolean };
+
 /** The cursor for the next request, sealed to this store and address; null with no deployment key. */
-export function sealCursor(scope: CursorScope, module: string, page: number, resume: string): string | null {
+export function sealCursor(scope: CursorScope, at: PageCursor): string | null {
   const key = cursorKey();
-  if (!key || !RESUME.test(resume) || !Number.isSafeInteger(page) || page < 2) return null;
-  const body = Buffer.from(JSON.stringify({ v: VERSION, m: module, p: page, r: resume })).toString("base64url");
+  if (!key || !RESUME.test(at.resume) || !Number.isSafeInteger(at.page) || at.page < 2 || at.module.length > 200) return null;
+  const body = Buffer.from(JSON.stringify({ v: VERSION, m: at.module, p: at.page, r: at.resume, c: at.complete })).toString("base64url");
   return `${body}.${mac(key, scope, body).toString("base64url")}`;
 }
 
-/** The module, page number and position a cursor holds, only when it was sealed for this store and address. */
-export function openCursor(scope: CursorScope, cursor: unknown): { module: string; page: number; resume: string } | null {
+/** What a cursor holds, only when it was sealed for this store and address and has not been changed. */
+export function openCursor(scope: CursorScope, cursor: unknown): PageCursor | null {
   const key = cursorKey();
   if (!key || typeof cursor !== "string" || cursor.length > 600) return null;
   const [body, seal, extra] = cursor.split(".");
@@ -86,8 +92,8 @@ export function openCursor(scope: CursorScope, cursor: unknown): { module: strin
   } catch {
     return null;
   }
-  const v = value as { v?: unknown; m?: unknown; p?: unknown; r?: unknown };
+  const v = value as { v?: unknown; m?: unknown; p?: unknown; r?: unknown; c?: unknown };
   if (!v || typeof v !== "object" || v.v !== VERSION || typeof v.m !== "string" || typeof v.r !== "string" || !RESUME.test(v.r)) return null;
-  if (typeof v.p !== "number" || !Number.isSafeInteger(v.p) || v.p < 2) return null;
-  return { module: v.m, page: v.p, resume: v.r };
+  if (typeof v.p !== "number" || !Number.isSafeInteger(v.p) || v.p < 2 || typeof v.c !== "boolean") return null;
+  return { module: v.m, page: v.p, resume: v.r, complete: v.c };
 }

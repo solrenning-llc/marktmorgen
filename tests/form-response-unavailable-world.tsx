@@ -29,6 +29,7 @@ export async function readResponse(_stats:unknown,id:string,responseId:string){i
 export async function readCards(){return new Map();}
 export async function readOpportunityReview(){return {available:false,stages:[],deals:[],pipelines:[],versions:{}};}
 export async function readStages(){return [];}
+export async function readStageView(){return {stages:[],moved:{}};}
 export async function readPipelines(){return [];}
 export class CrmSchemaReadUnavailable extends Error{constructor(){super('CRM configuration preflight could not be confirmed');this.name='CrmSchemaReadUnavailable';}}
 export async function readTeam(){return {members:[]};}

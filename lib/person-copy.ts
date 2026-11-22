@@ -59,7 +59,7 @@ import { stockAlertsOf } from "@/lib/stock-alerts";
 import { feedsOf } from "@/lib/podcast-access";
 import { remindersOf } from "@/lib/assistant-reminder";
 import { asksOf } from "@/lib/checkout-ask";
-import { syncJobsOf } from "@/lib/email-sync";
+import { syncJobsPage } from "@/lib/email-sync";
 import { type MemberTracesPage, memberTracesPage, readMember as readCommunityMember } from "@/lib/community";
 import { COPY_PAGE_MAX_COMMANDS, type PageCursor, ReadBudget, openCursor, sealCursor } from "@/lib/copy-pages";
 import { pointsRecordOf } from "@/lib/community-points";
@@ -264,6 +264,8 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
 
 /** The module whose copy goes in pages (lib/copy-pages.ts): a member's community activity. */
 const COMMUNITY_MODULE = "lib/community-erasure.ts";
+/** A paged module too: the record of sending the person to the store's email platform (#5125). */
+const EMAIL_SYNC_MODULE = "lib/email-sync.ts";
 
 /**
  * This request's paged read: what it may still send, and the first paged module that ran out of it, with where it
@@ -339,6 +341,14 @@ export const PAGED_MODULES: Readonly<Record<string, PagedModule>> = {
     page: async (s, budget, resume) => {
       const page = await memberTracesPage(s.communityId!, s.learner, budget, resume);
       return { sections: hasWrote(page.traces, page.votes) ? [{ module: COMMUNITY_MODULE, what: COPY_PLAN[COMMUNITY_MODULE]!.what, records: [wroteOf(page)] }] : [], resume: page.resume };
+    },
+  },
+  [EMAIL_SYNC_MODULE]: {
+    at: (s) => (s.statsId ? `${EMAIL_SYNC_MODULE}#${s.statsId}` : null),
+    what: "the record of sending you to the store's email platform",
+    page: async (s, budget, resume) => {
+      const page = await syncJobsPage(s.statsId, s.email, budget, resume);
+      return { sections: page.jobs.length ? [{ module: EMAIL_SYNC_MODULE, what: COPY_PLAN[EMAIL_SYNC_MODULE]!.what, records: page.jobs }] : [], resume: page.resume };
     },
   },
 };
@@ -608,7 +618,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/podcast-access.ts": async (s) => (await feedsOf(s.store, s.productIds, s.email)).map((product) => ({ product, privateFeed: true })),
   "lib/assistant-reminder.ts": async (s) => (await remindersOf(s.statsId, s.email)).map((r) => ({ ...r, at: new Date(r.at).toISOString() })),
   "lib/checkout-ask.ts": async (s) => asksOf(s.statsId, s.email),
-  "lib/email-sync.ts": async (s) => syncJobsOf(s.statsId, s.email),
+  // The first page of what was sent to the store's email platform, inside this request's budget (PAGED_MODULES, #5125).
+  "lib/email-sync.ts": async (s) => (await pagedFirst(s, `${EMAIL_SYNC_MODULE}#${s.statsId}`, (budget) => syncJobsPage(s.statsId, s.email, budget)))?.jobs ?? [],
   "lib/community-erasure.ts": async (s) => {
     const id = s.communityId;
     if (!id) return [];

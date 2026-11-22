@@ -2381,7 +2381,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/order-rules.ts", names: ["CALL_ORDER_UNITS", "TRIAL_ORDERS"] },
       { file: "lib/calls.ts", names: ["admitOrders(store, CALL_ORDER_UNITS)", "countOrder"] },
       // A buyer's email platform job noted in the store's own queued index (#5125): SADD, EXPIRE, SREM.
-      { file: "lib/email-sync.ts", names: ["queuedKey", "QUEUED_PAGE", "QUEUED_ROUNDS"] },
+      { file: "lib/email-sync.ts", names: ["queuedKey", "QUEUED_PAGE"] },
       { file: "lib/call-packages.ts", names: ["admitOrders(store, 1)"] },
       { file: "lib/group-buy.ts", names: ["placesHeld", "admitOrders(store, 1)", "settleAdmitted(store, hour)"] },
       // A gift's and a purchase for several's exact reads and "OK"-checked writes, a place's compare-and-set scripts and a

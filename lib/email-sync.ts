@@ -71,12 +71,15 @@ import { type EmailSyncRef, type Store, setEmailSyncRef, storeRef } from "@/lib/
 import { productIds } from "@/lib/catalog";
 import { SITE_URL } from "@/lib/site-url";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
+import type { ReadBudget } from "@/lib/copy-pages";
 
 /** Jobs a store's studio keeps. */
 export const LOG_SIZE = 50;
-/** The store's queued index is read a page of QUEUED_PAGE ids at a time, at most QUEUED_ROUNDS pages (#5125). */
+/**
+ * The store's queued index is read a page of QUEUED_PAGE ids at a time (#5125): a copy in pages, inside its request's
+ * budget (syncJobsPage); an erasure to the end, never failing closed at a fixed count (Claude 1 coord, mail 7937).
+ */
 export const QUEUED_PAGE = 500;
-export const QUEUED_ROUNDS = 20;
 /** Minutes to wait before each try after the first. */
 export const RETRY_MINUTES = [5, 15, 60, 180, 720, 1440];
 export const MAX_ATTEMPTS = RETRY_MINUTES.length + 1;
@@ -1025,13 +1028,15 @@ function countsFor(replies: unknown, commands: readonly (readonly (string | numb
  * The store's jobs put on the queue, read from the store's own index (queuedKey), never from the queue every store
  * shares (#5125, email-sync row: a ZSCAN of the global queue cost one
  * store's copy as much as every store's waiting jobs). Read with SSCAN, which returns every member present for the
- * whole read; `whole` is false when a reply does not read exactly or the read runs past QUEUED_ROUNDS: what was read
- * is kept, never taken as all of them (CX-123 rule 24).
+ * whole read, to the end: the erasures (forgetSyncPerson, forgetStoreSync) never stop at a fixed count, which would
+ * leave a store with more jobs waiting never erased (Claude 1 coord, mail 7937; a copy reads in pages, syncJobsPage).
+ * Their cost is the store's own waiting jobs, never the queue every store shares, as main read it. `whole` is false
+ * when a reply does not read exactly: what was read is kept, never taken as all of them (CX-123 rule 24).
  */
 async function queuedIdsOf(statsId: string): Promise<{ ids: string[]; whole: boolean }> {
   const ids = new Set<string>();
   let cursor = "0";
-  for (let round = 0; round < QUEUED_ROUNDS; round += 1) {
+  for (;;) {
     const reply = repliesFor(await redisPipeline([["SSCAN", queuedKey(statsId), cursor, "COUNT", QUEUED_PAGE]]), 1)?.[0];
     const pair = Array.isArray(reply) && reply.length === 2 ? (reply as unknown[]) : null;
     const next = typeof pair?.[0] === "number" ? String(pair[0]) : pair?.[0];
@@ -1041,7 +1046,6 @@ async function queuedIdsOf(statsId: string): Promise<{ ids: string[]; whole: boo
     cursor = next;
     if (cursor === "0") return { ids: [...ids], whole: true };
   }
-  return { ids: [...ids], whole: false };
 }
 
 /**
@@ -1064,10 +1068,15 @@ async function loggedJobsWithLog(statsId: string): Promise<{ jobs: { id: string;
   const { ids: queued, whole } = await queuedIdsOf(statsId);
   if (!whole) throw new UnknownReplyError("a store's email platform jobs waiting on the queue");
   const logged = [...new Set([...ids, ...queued])];
-  if (!logged.length) return { jobs: [], logLength: ids.length };
-  const raws = repliesFor(await redisPipeline(logged.map((id) => ["GET", jobKey(id)])), logged.length);
+  return { jobs: await readJobs(logged), logLength: ids.length };
+}
+
+/** The records of these jobs, read exactly: another shape throws; one that is gone (it expired) is null, known absence. */
+async function readJobs(ids: readonly string[]): Promise<{ id: string; job: Job | null }[]> {
+  if (!ids.length) return [];
+  const raws = repliesFor(await redisPipeline(ids.map((id) => ["GET", jobKey(id)])), ids.length);
   if (!raws) throw new UnknownReplyError("a store's email platform jobs");
-  const jobs = logged.map((id, i) => {
+  return ids.map((id, i) => {
     const raw = raws[i];
     if (raw === null) return { id, job: null };
     let value: unknown = null;
@@ -1081,7 +1090,6 @@ async function loggedJobsWithLog(statsId: string): Promise<{ jobs: { id: string;
     }
     return { id, job: value as Job };
   });
-  return { jobs, logLength: ids.length };
 }
 
 /** Forgets the platform and its key. Anything still waiting to be sent fails at its next try. */
@@ -1139,9 +1147,65 @@ export async function syncJobsOf(statsId: string | null, email: string): Promise
   if (!statsId || !isRedisConfigured()) return [];
   const address = normaliseEmail(email);
   // Read as the erasure reads them (rule 30): another shape throws, so the copy fails whole rather than miss a part.
-  return (await loggedJobs(statsId)).flatMap(({ job }) => {
+  return viewsOf(await loggedJobs(statsId), address);
+}
+
+/** The jobs that are this address's, as the copy shows them. */
+function viewsOf(jobs: readonly { job: Job | null }[], address: string): JobView[] {
+  return jobs.flatMap(({ job }) => {
     if (!job || normaliseEmail(job.email) !== address) return [];
     const { id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt } = job;
     return [{ id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt }];
   });
+}
+
+/**
+ * One page of syncJobsOf, for a copy in pages (lib/copy-pages.ts; #5125: a store may have more jobs waiting than one
+ * request may read, so the copy never stops at a fixed count and never reads past its budget). It reads the store's
+ * log first ("l"), then its queued index (queuedKey) with SSCAN from a cursor ("q:<cursor>"), leaving out the jobs
+ * the log holds now, which the first page read. Each read takes its commands from `budget` before it is sent: the log
+ * is one LRANGE and a GET a job, each index page one SSCAN and a GET a job. When the next read does not fit, the
+ * page stops and gives where it goes on ("q:<cursor>:<last id read>" inside an index page, which may hold more
+ * jobs than a budget: SSCAN's COUNT is only a hint); with no room even to begin it gives a resume and reads nothing. SSCAN returns every job present for the whole read, so
+ * the pages together hold every job of theirs one whole read finds. Read exactly (CX-123 rule 24): another shape
+ * throws, so the copy fails rather than miss a part.
+ */
+export async function syncJobsPage(statsId: string | null, email: string, budget: ReadBudget, resume?: string): Promise<{ jobs: JobView[]; resume?: string }> {
+  if (!statsId || !isRedisConfigured()) return { jobs: [] };
+  const address = normaliseEmail(email);
+  const from = resume ?? "l";
+  const scan = /^q:(\d+)(?::(esj_[0-9a-f]{24}))?$/.exec(from);
+  if (from !== "l" && !scan) throw new Error("an email platform copy page goes on from a position that is not its own");
+  if (!budget.take(1)) return { jobs: [], resume: from };
+  const logged = stringList(repliesFor(await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]), 1)?.[0]);
+  if (!logged) throw new UnknownReplyError("a store's email platform job log");
+  const inLog = [...new Set(logged.filter((id) => JOB_ID.test(id)))];
+  const jobs: JobView[] = [];
+  let cursor = scan ? scan[1]! : "0";
+  // Within one index page, the jobs already read: the page is read in id order, so a page cut short goes on after
+  // the last id it read, and every job on that page for the whole read is read once.
+  let after = scan?.[2] ?? "";
+  if (!scan) {
+    if (!budget.take(inLog.length)) return { jobs: [], resume: from };
+    jobs.push(...viewsOf(await readJobs(inLog), address));
+  }
+  const inLogNow = new Set(inLog);
+  for (;;) {
+    const here = after ? `q:${cursor}:${after}` : `q:${cursor}`;
+    if (!budget.take(1)) return { jobs, resume: here };
+    const reply = repliesFor(await redisPipeline([["SSCAN", queuedKey(statsId), cursor, "COUNT", QUEUED_PAGE]]), 1)?.[0];
+    const pair = Array.isArray(reply) && reply.length === 2 ? (reply as unknown[]) : null;
+    const next = typeof pair?.[0] === "number" ? String(pair[0]) : pair?.[0];
+    const page = pair ? stringList(pair[1]) : null;
+    if (typeof next !== "string" || !/^\d+$/.test(next) || !page) throw new UnknownReplyError("a store's email platform jobs waiting on the queue");
+    const ids = [...new Set(page.filter((id) => JOB_ID.test(id) && !inLogNow.has(id) && id > after))].sort();
+    // As many of the page's records as the budget still holds; the rest on the next page, after the last one read.
+    const fit = Math.min(ids.length, budget.left);
+    if (!budget.take(fit)) return { jobs, resume: here };
+    jobs.push(...viewsOf(await readJobs(ids.slice(0, fit)), address));
+    if (fit < ids.length) return { jobs, resume: fit ? `q:${cursor}:${ids[fit - 1]}` : here };
+    cursor = next;
+    after = "";
+    if (cursor === "0") return { jobs };
+  }
 }

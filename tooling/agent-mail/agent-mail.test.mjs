@@ -239,11 +239,11 @@ r = run(["claim-enqueue", "--as", "Claude 6 X"], as("c6"));
 is("a request at the branch head is not declined while refs/pull/N/head lags", /pegou/.test(r.out) && /igual ao do pedido \(pelo ramo feature-4\)/.test(r.out), r.out);
 run(["complete-enqueue", "--as", "Claude 6 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], as("c6"));
 g(["checkout", "-q", "pr4"], P); const H4c = commit("f4.txt", "4c\n", "pr4 c");
-run(["request-enqueue", "--from", "Claude 2", "--pr", "4", "--sha", H4c.slice(0, 10), "--text", "fila #4 c"], { ...as("c2"), CORREIO_SEM_COMMITS: "" });
+// H4c is not pushed yet, so the request finds no branch, and the local refs/pull/4/head (still H4a) is authoritative:
+// since step 4 the request itself is refused, instead of being recorded and declined at the take.
+r = run(["request-enqueue", "--from", "Claude 2", "--pr", "4", "--sha", H4c.slice(0, 10), "--text", "fila #4 c"], { ...as("c2"), CORREIO_SEM_COMMITS: "" });
+is("without a recorded branch, a local repository's refs/pull is authoritative and a request for another head is refused", !r.ok && /não é o head atual/.test(r.out), r.out);
 g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-4"], P);
-// the request recorded no branch (H4c was not pushed yet), so only the local refs/pull/4/head (still H4a) is read: declined, authoritative locally
-r = run(["claim-enqueue", "--as", "Claude 6 X"], as("c6"));
-is("without a recorded branch, a local repository's refs/pull is authoritative and a different head is declined", /mudou de/.test(r.out), r.out);
 g(["checkout", "-q", "pr4"], P); const H4d = commit("f4.txt", "4d\n", "pr4 d"); g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-4"], P);
 run(["request-enqueue", "--from", "Claude 2", "--pr", "4", "--sha", H4d.slice(0, 10), "--text", "fila #4 d"], { ...as("c2"), CORREIO_SEM_COMMITS: "" });
 const H4e = commit("f4.txt", "4e\n", "pr4 e"); g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-4"], P);
@@ -255,10 +255,8 @@ g(["checkout", "-q", "-B", "pr7", M], P); const H7a = commit("f7.txt", "7\n", "p
 g(["push", "-q", "../prs.git", "HEAD:refs/heads/backup-7"], P);
 const H7b = commit("f7.txt", "7b\n", "pr7 b"); g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-7"], P); g(["push", "-q", "../prs.git", "HEAD:refs/pull/7/head"], P);
 r = run(["request-enqueue", "--from", "Claude 2", "--pr", "7", "--sha", H7a.slice(0, 10), "--text", "fila #7 (old head)\nRamo: backup-7"], { ...as("c2"), CORREIO_SEM_COMMITS: "" });
-const id7a = /registrado: (\S+)/.exec(r.out)?.[1];
-is("no branch is recorded for an old head held only by a backup branch", r.ok && !/^Ramo:/m.test(g(["show", `refs/heads/correio:fila/pedidos/${id7a}.md`], join(T, "mail.git")).split(/\n\s*\n/)[0]), r.out);
-r = run(["claim-enqueue", "--as", "Claude 6 X"], as("c6"));
-is("a 'Ramo:' line in the free text is ignored, and the old head is declined", /mudou de/.test(r.out) && new RegExp(H7b.slice(0, 10)).test(r.out), r.out);
+is("a request for an old head held only by a backup branch is refused (step 4), naming the PR's head", !r.ok && /não é o head atual/.test(r.out) && new RegExp(H7b.slice(0, 10)).test(r.out), r.out);
+is("a 'Ramo:' line in the free text does not make it pass: nothing is recorded for #7", !/#7 @/.test(run(["list-queue"]).out), run(["list-queue"]).out);
 
 console.log("switch off returns to the old behaviour (R1)");
 r = run(["set-switch", "--as", "Claude 2 X", "--name", "record-review", "--off", "--reason", "parar"], as("c2"));
@@ -286,13 +284,30 @@ g(["checkout", "-q", "-B", "pr6", M], P); const H6a = commit("f6.txt", "6\n", "p
 const H6b = commit("f6.txt", "6b\n", "pr6 b");
 const ghEnv = (k) => ({ ...as(k), CORREIO_PR_REPO: GH, CORREIO_SEM_COMMITS: "" });
 
-run(["request-enqueue", "--from", "Claude 2", "--pr", "6", "--sha", H6b.slice(0, 10), "--text", "fila #6"], ghEnv("c2"));
+// Since step 4 (Claude 5 ibuF's MEDIUM on #5069): on GitHub, a request needs the PR's branch, found from the head or,
+// for a stale head, from the PR's current reference; without it nothing is requested, so no request can hold the queue.
+r = run(["request-enqueue", "--from", "Claude 2", "--pr", "6", "--sha", H6b.slice(0, 10), "--text", "fila #6"], ghEnv("c2"));
+is("on GitHub, with no branch of the PR found, the request is refused (it could never be delivered)", !r.ok && /ramo de #6 não foi achado/.test(r.out), r.out);
+is("so nothing holds the first place of the queue", !/#6 @/.test(run(["list-queue"]).out), run(["list-queue"]).out);
+g(["push", "-q", GH, `${H6b}:refs/heads/feature-6`], P);
+r = run(["request-enqueue", "--from", "Claude 2", "--pr", "6", "--sha", H6b.slice(0, 10), "--text", "fila #6"], ghEnv("c2"));
+const id6 = /registrado: (\S+)/.exec(r.out)?.[1];
+is("with the branch at the new head while refs/pull/6/head lags, the request records the branch and the full head", r.ok && /^Ramo: feature-6$/m.test(g(["show", `refs/heads/correio:fila/pedidos/${id6}.md`], join(T, "mail.git"))) && new RegExp(`^Head: ${H6b}$`, "m").test(g(["show", `refs/heads/correio:fila/pedidos/${id6}.md`], join(T, "mail.git"))), r.out);
 r = run(["claim-enqueue", "--as", "Claude 6 X"], ghEnv("c6"));
-is("not delivered and not declined: 'não conferível agora'", /não conferível agora/.test(r.out) && !/pegou|recusado/.test(r.out), r.out);
-is("the request stays first and open, with no take", /#6 @\S+ +autor Claude 2 +aberto/.test(run(["list-queue"]).out), run(["list-queue"]).out);
-g(["push", "-q", GH, `${H6b}:refs/pull/6/head`], P);
-r = run(["claim-enqueue", "--as", "Claude 6 X"], ghEnv("c6"));
-is("once refs/pull/N/head catches up, it is delivered, the head still NOT CHECKED by branch", /pegou/.test(r.out) && /NÃO CONFERIDO/.test(r.out), r.out);
+is("the take checks the head by the branch, not by the lagging reference, and delivers it", /pegou/.test(r.out) && /pelo ramo feature-6/.test(r.out), r.out);
+run(["complete-enqueue", "--as", "Claude 6 X", id6, "--result", "declined", "--text", "fim do teste"], ghEnv("c6"));
+g(["checkout", "-q", "pr6"], P); const H6c = commit("f6.txt", "6c\n", "pr6 c"); g(["push", "-q", GH, `${H6c}:refs/heads/feature-6`], P); g(["push", "-q", GH, `${H6c}:refs/pull/6/head`], P);
+r = run(["request-enqueue", "--from", "Claude 2", "--pr", "6", "--sha", H6b.slice(0, 10), "--text", "fila #6 stale"], ghEnv("c2"));
+is("on GitHub, a request for a stale head is refused: the branch is found from the PR's reference", !r.ok && /não é o head atual/.test(r.out) && new RegExp(H6c.slice(0, 10)).test(r.out), r.out);
+// A request recorded before step 4, with no Ramo:, is held at the take; the hint must be one that works: pedir refuses a
+// second request for the same PR and head, so the author cancels first (Claude 7 3uv's LEVE on #5069).
+{
+  g(["init", "-q", "--bare", "mail5.git"]); g(["push", "-q", "../mail5.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m5 = { CORREIO_REPO: join(T, "mail5.git") };
+  run(["request-enqueue", "--from", "Claude 2", "--pr", "6", "--sha", H6c.slice(0, 10), "--text", "old-style, no branch"], { ...ghEnv("c2"), ...m5, CORREIO_SEM_COMMITS: "1" });
+  r = run(["claim-enqueue", "--as", "Claude 6 X"], { ...ghEnv("c6"), ...m5 });
+  is("an old request without a branch is held, and the hint says to cancel it first and request again", /NÃO CONFERIDO agora/.test(r.out) && /cancel-enqueue/.test(r.out), r.out);
+}
 
 console.log("unidentified writes are marked when read (OWNER-20261121-1904 step 2)");
 run(["send", "--from", "Codex X", "--to", "Claude 3 Z", "--subject", "s", "--text", "sem sessão"]);
@@ -382,6 +397,41 @@ console.log("takes by commit, a capped future OFF, the maximum take, the coordin
   raw(`fila/tomadas/${id15}/9`, `${carimbo(-1000)}-claude-7-x-dd02\nClaude 7 X\n`);
   raw(`fila/tomadas/${id15}/10`, `${carimbo(0)}-claude-7-x-dd03\nClaude 7 X\nLIBERADO\nforged\n`);
   is("a release written without the named session and the request does not count", /#15 @\S+ +autor Claude 2 +tomado por Claude 7 X/.test(run(["list-queue"]).out), run(["list-queue"]).out);
+}
+
+console.log("step 4: a full head, nothing NOT CHECKED goes on, the take checked right before enqueueing (OWNER-20261121-1904)");
+{
+  // A mailbox of its own, so the queue here starts empty.
+  g(["init", "-q", "--bare", "mail4.git"]); g(["push", "-q", "../mail4.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m4 = { CORREIO_REPO: join(T, "mail4.git") };
+  const H17 = pr(17, "f17.txt", "17\n");
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "17", "--sha", H17.slice(0, 10), "--text", "fila #17"], { ...as("c2"), ...m4 });
+  const id17 = /registrado: (\S+)/.exec(r.out)?.[1];
+  is("a request is recorded with the full 40-character head", r.ok && new RegExp(`^Head: ${H17}$`, "m").test(g(["show", `refs/heads/correio:fila/pedidos/${id17}.md`], join(T, "mail4.git"))), r.out);
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "17", "--sha", H1.slice(0, 10), "--text", "wrong head"], { ...as("c2"), ...m4 });
+  is("a request for a head that is not the PR's current one is refused", !r.ok && /não é o head atual/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 6 X"], { ...as("c6"), ...m4 });
+  is("the request is delivered", /pegou/.test(r.out), r.out);
+  r = run(["verify-enqueue", "--as", "Claude 6 X", id17], { ...as("c6"), ...m4 });
+  is("verify-enqueue right before enqueueing: the take is this session's and the head is unchanged", r.ok && new RegExp(`enfileire ${H17}`).test(r.out), r.out);
+  r = run(["verify-enqueue", "--as", "Claude 6 Y", id17], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_018ZjhHYYYYYYYYYYYYYYYYYY", ...m4 });
+  is("another session of the same family does not hold that take", !r.ok && /não é desta sessão/.test(r.out), r.out);
+  g(["checkout", "-q", "pr17"], P); const H17b = commit("f17.txt", "17b\n", "pr17 b"); g(["push", "-q", "../prs.git", "HEAD:refs/pull/17/head"], P);
+  r = run(["verify-enqueue", "--as", "Claude 6 X", id17], { ...as("c6"), ...m4 });
+  is("after a new push, verify-enqueue refuses: the head changed", !r.ok && /mudou/.test(r.out), r.out);
+  r = run(["complete-enqueue", "--as", "Claude 6 X", id17, "--result", "enqueued", "--text", "t"], { ...as("c6"), ...m4 });
+  is("complete-enqueue as enqueued is refused when the head changed", !r.ok && /mudou/.test(r.out), r.out);
+  run(["complete-enqueue", "--as", "Claude 6 X", id17, "--result", "declined", "--text", "head changed"], { ...as("c6"), ...m4 });
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "17", "--sha", H17b.slice(0, 10), "--text", "fila #17 b"], { ...as("c2"), ...m4 });
+  const id17b = /registrado: (\S+)/.exec(r.out)?.[1];
+  run(["claim-enqueue", "--as", "Claude 6 X"], { ...as("c6"), ...m4 });
+  r = run(["complete-enqueue", "--as", "Claude 6 X", id17b, "--result", "enqueued", "--text", "fila #17 b"], { ...as("c6"), ...m4 });
+  is("the completion records the head that was enqueued", r.ok && new RegExp(`^Head enfileirado: ${H17b}$`, "m").test(g(["show", `refs/heads/correio:fila/feitas/${id17b}.md`], join(T, "mail4.git"))), r.out);
+  // A git command that hangs is stopped by the time limit.
+  const mod = await import(TOOL);
+  let erro = "";
+  try { mod.git(["-c", "alias.dorme=!sleep 5", "dorme"], undefined, 500); } catch (e) { erro = String(e.message ?? e); }
+  is("a git command past its time limit is stopped, with a clear error", /limite de tempo|ETIMEDOUT/.test(erro), erro);
 }
 
 console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");

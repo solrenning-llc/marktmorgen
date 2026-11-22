@@ -181,6 +181,32 @@ async function main(): Promise<void> {
     ["stripe", true, true, false],
   );
   is("and it can still be stopped", await stopReturningCode(OWNER, await store(), "UNREAD"), true);
+  // Codex N1 LOW on #3691 @b47a13e216 (and X6's re-check): a write that failed without an answer may still land later
+  // (its reply and its lock's release both lost), so reading the store again and finding nothing does not prove it never
+  // will. Here the store write throws before it is applied, the read again finds nothing, and then the write lands.
+  sent.length = 0;
+  let delayed: (string | number)[][] | null = null;
+  (redis as unknown as { pipeline: typeof pipeline }).pipeline = async (commands: (string | number)[][]) => {
+    if (!delayed && commands.some((c) => c.some((a) => String(a).includes('"DELAYED"')))) {
+      delayed = commands;
+      throw new Error("connection reset, the write still on its way (synthetic)");
+    }
+    return pipeline(commands);
+  };
+  try {
+    made = await makeReturningCode(OWNER, await store(), asked("DELAYED"));
+  } finally {
+    restore();
+  }
+  is("control: the write was held back, and the store did not have it when read again", [delayed !== null, made.ok], [true, false]);
+  await pipeline(delayed as unknown as (string | number)[][]).catch(() => null);
+  const late = (await store()).returningCodes.find((c) => c.code === "DELAYED");
+  is(
+    "a write whose outcome is unknown never has its coupon deleted, so a code it lands later still points at a coupon",
+    [sent.some((s) => s.method === "DELETE"), late ? sent.some((s) => s.method === "POST" && s.path === "/coupons") : true],
+    [false, true],
+  );
+  if (late) await stopReturningCode(OWNER, await store(), "DELAYED");
   await stopReturningCode(OWNER, await store(), "LOSTWORD");
 
   part("Twenty at most");

@@ -59,6 +59,8 @@ export { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALP
 import { saleHandles } from "@/lib/store";
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
+// One script carries at most this many commands, which the buyers' lists fill counts in its run's commands.
+import { ORDER_WRITE_MAX } from "@/lib/order-data";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { StripeListUnreadable, type StripeRow, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
@@ -215,8 +217,17 @@ export const HOLDER_FILL_ALL_DONE = "nl:keysfill:done";
 export const HOLDER_FILL_ROUND = "nl:keysfill:round";
 /** Records one HSCAN step asks for (Redis may give a whole small hash at once). */
 const FILL_PAGE = 100;
-/** The commands one store's fill may start in one run of the sweep: a one-time company cost, never a store's. */
+/**
+ * The most commands one store's fill sends in one run of the sweep, counted as the cost registry counts them (a script
+ * is 1 plus its commands): a one-time company cost, never a store's. tests/licence-holder-fill.test.ts holds it.
+ */
 export const FILL_RUN_COMMANDS = 400;
+/** The `done` value of a store whose fill could not fit one page in a run: its copy keeps main's whole read for good. */
+export const HOLDER_FILL_WHOLE = "whole";
+/** One orderWrite of one HSET (the place, or the `done` mark): the script and its command. */
+const FILL_MARK_COMMANDS = 2;
+/** What orderWrite of `n` commands costs: one script per ORDER_WRITE_MAX commands, each 1 plus its commands. */
+const writeCommands = (n: number) => (n ? n + Math.ceil(n / ORDER_WRITE_MAX) : 0);
 
 /**
  * What the refund job writes in a sale's place among the keys given (`:sale`) when the sale was refunded in full or
@@ -1176,7 +1187,8 @@ export async function holderFillDone(store: Pick<Store, "statsId">): Promise<boo
   if (!store.statsId || !isRedisConfigured()) return false;
   const reply = repliesFor(await redisPipeline([["HGET", fillKey(store), "done"]]), 1);
   const mark = reply?.[0];
-  if (!reply || (mark !== null && mark !== "1")) throw new UnknownReplyError("the license keys' fill mark");
+  if (!reply || (mark !== null && mark !== "1" && mark !== HOLDER_FILL_WHOLE)) throw new UnknownReplyError("the license keys' fill mark");
+  // `whole` is a store whose fill could not fit one page in a run: it keeps main's whole read, so it is never "done".
   return mark === "1";
 }
 
@@ -1297,24 +1309,31 @@ export async function keysWithoutHolderLine(store: Store, productIds: string[]):
 /**
  * One run's share of a store's fill (#5136): walks the store's products in id order, each one's records with HSCAN from
  * the kept place, writes every missing line of the buyers' lists (orderWrite, counted in the store's room), keeps its
- * place after each step, and marks the store done only once the last product's walk is back at cursor 0. Starts no step
- * past `budget` commands or the deadline (a step is one HSCAN page and its lines). Answers whether the store is done.
- * An unknown reply throws (rule 24): the place stays as it was, never "done".
+ * place after each step, and marks the store done only once the last product's walk is back at cursor 0. Answers whether
+ * the store needs no more runs. An unknown reply throws (rule 24): the place stays as it was, never "done".
+ *
+ * The commands a run sends never pass `budget` (coordinator 14f3), counted as the cost registry counts them: a
+ * pipelined command is 1 and an orderWrite script is 1 plus its commands. A step (one HSCAN page, its HMGETs, its
+ * missing lines and the place) runs only when its worst case, known once the page is read, still leaves room for the
+ * `done` mark; otherwise the run stops before writing anything of that page and the next run reads it again. A page that
+ * cannot fit in a whole run even alone (Redis may answer an HSCAN with more than COUNT records) marks the store
+ * `whole`: its copy keeps main's read of every product's records for good, complete, and the sweep stops asking it.
  */
 export async function fillHolderLines(store: Store, deadline: number, budget = FILL_RUN_COMMANDS): Promise<boolean> {
   if (!store.statsId || !isRedisConfigured()) return false;
   const state = repliesFor(await redisPipeline([["HMGET", fillKey(store), "done", "at"]]), 1)?.[0];
   if (!Array.isArray(state) || state.length !== 2) throw new UnknownReplyError("the license keys' fill state");
   const [mark, at] = state;
-  if ((mark !== null && mark !== "1") || (at !== null && typeof at !== "string")) throw new UnknownReplyError("the license keys' fill state");
-  if (mark === "1") return true;
+  if ((mark !== null && mark !== "1" && mark !== HOLDER_FILL_WHOLE) || (at !== null && typeof at !== "string")) throw new UnknownReplyError("the license keys' fill state");
+  if (mark !== null) return true;
   const place = typeof at === "string" ? /^(\d{1,6}):(\d{1,20})$/.exec(at) : null;
   if (at !== null && !place) throw new UnknownReplyError("the license keys' fill place");
   const ids = [...new Set(store.catalog.items.map((item) => item.id))].sort();
   let index = place ? Number(place[1]) : 0;
   let cursor = place ? place[2] : "0";
   let used = 1;
-  while (index < ids.length && Date.now() < deadline && used < budget) {
+  let steps = 0;
+  while (index < ids.length && Date.now() < deadline && used + 1 + FILL_MARK_COMMANDS <= budget) {
     const product = { id: ids[index] };
     const page = repliesFor(await redisPipeline([["HSCAN", infoKey(store, product), cursor, "COUNT", FILL_PAGE]]), 1)?.[0];
     used += 1;
@@ -1330,28 +1349,41 @@ export async function fillHolderLines(store: Store, deadline: number, budget = F
       byHolder.set(holder, [...(byHolder.get(holder) ?? []), holderField(product, flat[k])]);
     }
     const holders = [...byHolder.entries()];
+    const fields = holders.reduce((n, [, f]) => n + f.length, 0);
+    // The step's worst case: one HMGET a buyer, every line missing, and the place.
+    const worst = holders.length + writeCommands(fields) + FILL_MARK_COMMANDS;
+    if (used + worst + FILL_MARK_COMMANDS > budget) {
+      if (steps > 0) return false;
+      // Not even one page fits in a whole run: this store keeps main's read for good (complete), and is not asked again.
+      if (2 + worst + FILL_MARK_COMMANDS > budget) {
+        await orderWrite(store, [["HSET", fillKey(store), "done", HOLDER_FILL_WHOLE]]);
+        return true;
+      }
+      return false;
+    }
     if (holders.length) {
-      const lines = repliesFor(await redisPipeline(holders.map(([holder, fields]) => ["HMGET", holder, ...fields])), holders.length);
+      const lines = repliesFor(await redisPipeline(holders.map(([holder, f]) => ["HMGET", holder, ...f])), holders.length);
       used += holders.length;
       if (!lines) throw new UnknownReplyError("the buyers' lists of license keys");
       const missing: [string, string, string, string][] = [];
-      holders.forEach(([holder, fields], i) => {
+      holders.forEach(([holder, f], i) => {
         const values = lines[i];
-        if (!Array.isArray(values) || values.length !== fields.length) throw new UnknownReplyError("HMGET of a buyer's list of license keys");
-        fields.forEach((field, k) => {
+        if (!Array.isArray(values) || values.length !== f.length) throw new UnknownReplyError("HMGET of a buyer's list of license keys");
+        f.forEach((field, k) => {
           if (values[k] === null) missing.push(["HSET", holder, field, "1"]);
           else if (values[k] !== "1") throw new UnknownReplyError("an entry of a buyer's list of license keys");
         });
       });
       if (missing.length) {
         await orderWrite(store, missing);
-        used += missing.length;
+        used += writeCommands(missing.length);
       }
     }
     cursor = page[0];
     if (cursor === "0") index += 1;
     await orderWrite(store, [["HSET", fillKey(store), "at", `${index}:${cursor}`]]);
-    used += 1;
+    used += FILL_MARK_COMMANDS;
+    steps += 1;
   }
   if (index < ids.length) return false;
   await orderWrite(store, [["HSET", fillKey(store), "done", "1"]]);

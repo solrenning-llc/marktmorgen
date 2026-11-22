@@ -8,13 +8,55 @@
  */
 import { addProduct, claimHandle, ensureStatsId, setProductKeys, setProductLink, setSubscription, storeForEmail, type Listing } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { endHolderFillRound, fillHolderLines, holderFillDone, holderFillLeft, holderFillOn, keyForSale, keysOf, keysWithoutHolderLine, startHolderFillRound } from "@/lib/licence-keys";
+import { FILL_RUN_COMMANDS, HOLDER_FILL_WHOLE, endHolderFillRound, fillHolderLines, holderFillDone, holderFillLeft, holderFillOn, keyForSale, keysOf, keysWithoutHolderLine, startHolderFillRound } from "@/lib/licence-keys";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
 const OWNER = "fill-owner@example.com";
 const DANA = "dana@example.com";
+
+/** The commands sent, counted as the cost registry counts them: a pipelined command is 1, a script 1 plus its commands. */
+function counted(commands: (string | number)[][]): number {
+  return commands.reduce((n, c) => n + (c[0] === "EVAL" ? 1 + Number(c[3 + Number(c[2])]) : 1), 0);
+}
+
+/** Runs `run` and answers what it answered and the commands it sent (`counted`). */
+async function metered<T>(run: () => Promise<T>): Promise<{ value: T; commands: number }> {
+  let commands = 0;
+  const real = redis.pipeline.bind(redis);
+  redis.pipeline = (async (sent: (string | number)[][]) => {
+    commands += counted(sent);
+    return real(sent);
+  }) as typeof redis.pipeline;
+  try {
+    return { value: await run(), commands };
+  } finally {
+    redis.pipeline = real;
+  }
+}
+
+/** A store with keys made the way they were before the lists: `perProduct[i]` records on product i, no line, no key in settle. */
+async function oldKeysStore(owner: string, handle: string, perProduct: number[]) {
+  await claimHandle(owner, handle, "Fill Keys", "");
+  await ensureStatsId(owner);
+  await setSubscription(owner, { customerId: `cus_${handle}01`, subscriptionId: `sub_${handle}01`, active: true, period: paidPeriod() });
+  const ids: string[] = [];
+  for (let p = 0; p < perProduct.length; p += 1) {
+    const made = await addProduct(owner, `Fill ${p}`, "", "29", null);
+    if (!made.ok) throw new Error("no product");
+    await setProductLink(owner, made.product.id, `https://example.com/${handle}-${p}`);
+    await setProductKeys(owner, made.product.id, { source: "generated", prefix: "FIX", groups: 4, groupLength: 4, lowAt: 0 });
+    ids.push(made.product.id);
+  }
+  const store = (await storeForEmail(owner))!;
+  perProduct.forEach((n, p) => {
+    for (let i = 0; i < n; i += 1) {
+      redis.run(["HSET", `nl:keys:${store.statsId}:${ids[p]}:info`, `OLDK-${p}-${String(i).padStart(4, "0")}-ZZZZ`, JSON.stringify({ r: `cs_test_${`${p}x${i}`.padStart(24, "y")}`, e: `${handle}${p}b${i}@example.com`, at: 1_790_000_000 })]);
+    }
+  });
+  return { store, ids };
+}
 
 async function main(): Promise<void> {
   redis.clear();
@@ -51,15 +93,18 @@ async function main(): Promise<void> {
   is("250 keys have no line yet", (await keysWithoutHolderLine(store, ids)).length, 250);
 
   part("A fill cut short marks nothing done, and goes on from where it stopped");
-  // A budget of 2 commands lets a run take one step (one HSCAN page and its lines), here one product's records.
-  const first = await fillHolderLines(store, Date.now() + 60_000, 2);
+  // The Redis stub answers an HSCAN with a product's whole records, so a step is one product's: about 125 buyers, their
+  // HMGETs and lines, 257 commands. A budget of 300 lets a run take one such step and not a second.
+  const cut = await metered(() => fillHolderLines(store, Date.now() + 60_000, 300));
+  const first = cut.value;
   is("the first small run is not done", first, false);
+  is("and it sent no more commands than its budget", cut.commands <= 300, true);
   is("so the store is not marked done", await holderFillDone(store), false);
   is("one product's lines were written, the other's not yet", (await keysWithoutHolderLine(store, ids)).length, 125);
   is("the copy still reads every key", (await keysOf(store, ids, DANA)).map((k) => k.key).sort(), [OLD, fresh.key].sort());
-  let runs = 1;
-  while (!(await fillHolderLines(store, Date.now() + 60_000, 2)) && runs < 100) runs += 1;
-  is("the fill ends on the next run, from where the first stopped", runs, 1);
+  const next = await metered(() => fillHolderLines(store, Date.now() + 60_000, 300));
+  is("the fill ends on the next run, from where the first stopped", next.value, true);
+  is("that run too stays within its budget", next.commands <= 300, true);
 
   part("After the fill: every key has its line, and the copy reads the person's list only");
   is("the store is marked done", await holderFillDone(store), true);
@@ -78,7 +123,7 @@ async function main(): Promise<void> {
   }
   is("Dana's two keys, old and new, are in her copy", after, [OLD, fresh.key].sort());
   is("and no product's whole records are read", reads.some((r) => r.startsWith("HGETALL") && r.includes(":info")), false);
-  is("a fill already done does nothing more", await fillHolderLines(store, Date.now() + 60_000, 2), true);
+  is("a fill already done does nothing more", await fillHolderLines(store, Date.now() + 60_000, 300), true);
 
   part("The sweep's rounds: only a whole clean round stops the asking");
   is("before any round, the sweep still asks", await holderFillOn(), true);
@@ -101,6 +146,35 @@ async function main(): Promise<void> {
     threw = true;
   }
   is("an unknown mark throws", threw, true);
+
+  part("A run never sends more than FILL_RUN_COMMANDS, and the fill still ends");
+  is("the cap is the constant the sweep runs with", FILL_RUN_COMMANDS, 400);
+  const big = await oldKeysStore("fill-big@example.com", "fillbig", [150, 150, 150, 40]);
+  const bigIds = big.ids;
+  let bigRuns = 0;
+  let most = 0;
+  let ended = false;
+  while (!ended && bigRuns < 20) {
+    const run = await metered(() => fillHolderLines(big.store, Date.now() + 60_000));
+    ended = run.value;
+    most = Math.max(most, run.commands);
+    bigRuns += 1;
+  }
+  is("every run of the sweep's budget stays at or under it", most <= FILL_RUN_COMMANDS, true);
+  is("490 keys take more than one run", bigRuns > 1, true);
+  is("and the fill ends, every key with its line", ended && (await keysWithoutHolderLine(big.store, bigIds)).length === 0, true);
+  is("that store is done", await holderFillDone(big.store), true);
+
+  part("A page that cannot fit in a whole run leaves the store on main's read for good");
+  const huge = await oldKeysStore("fill-huge@example.com", "fillhuge", [300]);
+  const one = await metered(() => fillHolderLines(huge.store, Date.now() + 60_000));
+  is("the run answers that the store needs no more runs", one.value, true);
+  is("and stays within the cap", one.commands <= FILL_RUN_COMMANDS, true);
+  is("its mark says whole", redis.run(["HGET", `nl:keys:${huge.store.statsId}:whofill`, "done"]), HOLDER_FILL_WHOLE);
+  is("which is not done: the copy keeps main's read", await holderFillDone(huge.store), false);
+  const hugeKey = (await keysOf(huge.store, huge.ids, "fillhuge0b7@example.com")).map((k) => k.key);
+  is("so a buyer's old key is still in their copy", hugeKey, ["OLDK-0-0007-ZZZZ"]);
+  is("and the sweep does not ask that store again", await fillHolderLines(huge.store, Date.now() + 60_000), true);
   done();
 }
 

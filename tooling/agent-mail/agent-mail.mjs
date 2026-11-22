@@ -28,7 +28,8 @@
 //   node agent-mail.mjs renew-enqueue --as "Claude 3" <id>   # a tomada da fila vence em 10 min; renove se precisar de mais
 //   node agent-mail.mjs watch --as "Claude 3" --also review,enqueue   # acorda também com pedido para você pegar
 //   node agent-mail.mjs set-quota --as "Claude 3" --exhausted --until 2026-11-22T01:00-03:00   # ou --available quando a cota voltar
-//   node agent-mail.mjs list-quotas                                # quem está com e sem cota
+//   node agent-mail.mjs set-quota --as "Claude 3" --remaining 35 --renews 2026-11-29T10:00-03:00   # quanto resta e quando renova
+//   node agent-mail.mjs list-quotas                                # quem está com e sem cota, o percentual e o último sinal
 //   node agent-mail.mjs claim-pr --as "Claude 3" --pr 4941   # CLAIMED (2 h); recusado se outra família o tem
 //   node agent-mail.mjs hold-pr --as "Claude 5" --pr 4941 --reason "texto"   # HOLD, até alguém liberar
 //   node agent-mail.mjs release-pr --as "Claude 3" --pr 4941   # UNCLAIMED / fim do HOLD
@@ -157,6 +158,10 @@ export function sessaoDe(texto) {
   return { texto: m[1], familia: id ? SESSOES[id[1]] ?? null : null, identificada: Boolean(id) };
 }
 
+/** Quem escreve nesta execução (o nome conferido por conferirIdentidade); vai no trailer Mail-From de cada commit. */
+let ESCRITOR = null;
+export function definirEscritor(nome) { ESCRITOR = nome && nome !== true ? String(nome) : null; }
+
 /**
  * Acrescenta arquivos ao ramo, sem apagar nem mudar nenhum que já exista, e envia. Se outro agente enviou antes,
  * busca de novo e monta outra vez: até 6 tentativas.
@@ -184,7 +189,9 @@ function acrescentar(novos, mensagem) {
         const sumiram = [...antes].filter((f) => !depois.has(f));
         if (sumiram.length) throw new Error(`envio recusado: sumiriam ${sumiram.join(", ")}`);
       }
-      commit = git(["commit-tree", arvore, ...(base ? ["-p", base] : []), "-m", `${mensagem}\n\nMail-Session: ${linhaSessao()}`]);
+      // Mail-From: o nome de quem escreve, para o último sinal de cada família (dono, OWNER-20261122-0121-MAIL-AVAILABILITY).
+      const de = ESCRITOR ? `\nMail-From: ${String(ESCRITOR).replace(/\s+/g, " ").trim()}` : "";
+      commit = git(["commit-tree", arvore, ...(base ? ["-p", base] : []), "-m", `${mensagem}\n\nMail-Session: ${linhaSessao()}${de}`]);
     } finally {
       try { execFileSync("rm", ["-f", indice]); } catch { /* sem índice */ }
     }
@@ -437,7 +444,18 @@ export function commitsDoPr(pr, ramo = null) {
       else if (!prefixos.length && !/^Claude\b/.test(autor)) familias.add("codex");
       else if (!prefixos.length) desconhecidas.add(`autor "${autor}" sem trailer`);
     }
-    return { familias, desconhecidas, sessoes: completas };
+    // O tamanho da revisão (OWNER-20261122-0121-MAIL-AVAILABILITY, item 2): linhas mudadas fora dos testes desde a base
+    // comum com o main (AC (f)); null quando não pôde ser lido, e então a revisão conta como longa.
+    let tamanho = null;
+    try {
+      tamanho = 0;
+      for (const l of git(["diff", "--numstat", "--no-renames", `${base}...${cabeca}`]).split("\n").filter(Boolean)) {
+        const [mais, menos, caminho = ""] = l.split("\t");
+        if (/^tests\/|(^|\/)__tests__\/|\.test\.[cm]?[jt]sx?$/.test(caminho) || mais === "-") continue;
+        tamanho += Number(mais) + Number(menos);
+      }
+    } catch { tamanho = null; }
+    return { familias, desconhecidas, sessoes: completas, linhas: tamanho };
   } catch {
     return null;
   } finally {
@@ -880,6 +898,7 @@ export function pedir({ tipo, de, pr, sha, texto = "", para = "", exclui = "", c
       todas.delete(familia(de));
       return [...(todas.size ? [`Exclui: ${[...todas].sort().join(", ")}`] : []),
         lidas ? `Commits de: ${[...lidas.familias].sort().join(", ") || "nenhuma família conhecida"}` : "Commits de: não conferido (o PR não pôde ser lido)",
+        ...(tipo === "revisao" ? [`Linhas fora dos testes: ${Number.isInteger(lidas?.linhas) ? lidas.linhas : "não conferido"}`] : []),
         ...(lidas?.desconhecidas.size ? [`Sem família conhecida: ${[...lidas.desconhecidas].join(", ")}`] : [])];
     })(),
     `Data (UTC): ${agora.toISOString().slice(0, 16).replace("T", " ")}`,
@@ -896,8 +915,12 @@ export function pedir({ tipo, de, pr, sha, texto = "", para = "", exclui = "", c
 function revisaoParaMim(p, eu, agora, c) {
   if (p.estado !== "aberto" || p.familia === familia(eu) || p.devolveram.has(familia(eu))) return false;
   if (campo(p.texto, "Exclui").split(", ").includes(familia(eu))) return false;
+  // Cota baixa (OWNER-20261122-0121-MAIL-AVAILABILITY, item 2): revisão longa não vai a quem tem COTA_BAIXA% ou menos.
+  if (c[familia(eu)]?.baixa && revisaoLonga(p)) return false;
   const pref = campo(p.texto, "Preferência");
-  if (!pref || familia(pref) === familia(eu) || c[familia(pref)]?.sem) return true;
+  // A preferência cai na hora quando o preferido está sem cota (declarada ou sem sinal, item 1) ou, numa revisão longa,
+  // com cota baixa; senão vale TOMADA_MIN minutos, para qualquer família, inclusive o Codex (item 3).
+  if (!pref || familia(pref) === familia(eu) || c[familia(pref)]?.sem || (c[familia(pref)]?.baixa && revisaoLonga(p))) return true;
   const quando = dataDe(p.id);
   return quando ? (agora - quando) / 60000 >= TOMADA_MIN : true;
 }
@@ -1166,7 +1189,83 @@ export function retirar({ tipo, eu, id, motivo = "", agora = new Date() }) {
 // data, a família conta como com cota. Uma tomada de quem ficou sem cota deixa de valer na hora: outro pode pegar.
 // ---------------------------------------------------------------------------------------------------------------------
 
-/** A situação de cota de cada família que já declarou: { familia: { sem, ate, por, marca } }. */
+// Disponibilidade (dono, OWNER-20261122-0121-MAIL-AVAILABILITY, 22/11/2026, 01h21 Fortaleza):
+//  1. Último sinal: a última vez que cada família escreveu no correio, lida nos commits (o trailer Mail-From, com a
+//     família da sessão quando ela é identificada; nos commits de antes dele, só a sessão identificada). Quem fica sem
+//     cota no meio da vez não consegue declarar; por isso uma família sem sinal há mais de SEM_SINAL_MIN minutos é tratada
+//     como sem cota: a preferência por ela cai, as tomadas dela caem e os pedidos passam a outra família. Ausência só
+//     conta quando o histórico lido cobre esses minutos (num clone raso, desde a borda mais recente); sem isso, ninguém
+//     fica "sem sinal" por falta de histórico. A vigia e o read gravam um sinal (sinal/<família>/<marca>) quando o último
+//     da família tem mais de BATIDA_MIN minutos, então um agente ativo nunca parece ausente.
+//  2. Percentual: set-quota --remaining N --renews <data>. Com COTA_BAIXA% ou menos, até a renovação, as outras famílias
+//     são avisadas e a família não recebe revisão longa (mais de LONGA_LINHAS linhas fora dos testes, ou tamanho não
+//     conferido). 0% é sem cota até a renovação.
+// Limite, sem esconder: o nome em Mail-From fora da nuvem é declarado (como o resto do correio, CO (k)); um sinal forjado
+// só faz uma família parecer disponível, que é o comportamento de antes desta mudança.
+export const SEM_SINAL_MIN = 120;
+export const BATIDA_MIN = 15;
+export const COTA_BAIXA = 10;
+export const LONGA_LINHAS = 400;
+const sinaisCache = new Map();
+
+/** O último sinal de cada família: Map família -> milissegundos do commit mais recente que ela gravou. */
+export function sinais(commit = buscar(), agora = new Date()) {
+  if (!commit) return new Map();
+  const chave = commit;
+  if (!sinaisCache.has(chave)) {
+    const lista = [];
+    const saida = git(["log", "--format=%ct%x1f%(trailers:key=Mail-From,valueonly,separator=%x1e)%x1f%(trailers:key=Mail-Session,valueonly,separator=%x1e)", commit]);
+    for (const linha of saida.split("\n")) {
+      if (!linha.trim()) continue;
+      const [t, de = "", ses = ""] = linha.split("\x1f");
+      const pre = /session_([0-9A-Za-z]{7})/.exec(ses)?.[1] ?? null;
+      let fam = pre ? SESSOES[pre] ?? null : null; // sessão identificada: a família dela, nunca o nome declarado
+      const nome = de.split("\x1e")[0].trim();
+      if (!fam && nome) { try { fam = familia(nome); } catch { fam = null; } }
+      if (fam) lista.push([fam, Number(t) * 1000]);
+    }
+    sinaisCache.set(chave, lista);
+  }
+  const mapa = new Map();
+  for (const [fam, t] of sinaisCache.get(chave)) {
+    if (t - agora.getTime() > FUTURO_MIN * 60000) continue; // um commit datado no futuro não vale
+    if (!mapa.has(fam) || mapa.get(fam) < t) mapa.set(fam, t);
+  }
+  return mapa;
+}
+
+/** Desde quando o histórico lido do correio é completo: a raiz, ou, num clone raso, a borda mais recente. */
+const inicios = new Map();
+function inicioObservado(commit) {
+  if (!commit) return Infinity;
+  if (!inicios.has(commit)) {
+    const raso = git(["rev-parse", "--is-shallow-repository"]) === "true";
+    const raizes = git(["log", "--format=%ct", "--max-parents=0", commit]).split("\n").filter(Boolean).map(Number);
+    inicios.set(commit, raizes.length ? (raso ? Math.max(...raizes) : Math.min(...raizes)) * 1000 : Infinity);
+  }
+  return inicios.get(commit);
+}
+
+/** Grava um sinal da família de `eu` quando o último dela tem mais de BATIDA_MIN minutos; devolve se gravou. */
+export function baterSinal(eu, agora = new Date(), commit = buscar()) {
+  const fam = familia(eu);
+  const ultimo = sinais(commit, agora).get(fam);
+  if (ultimo && agora.getTime() - ultimo < BATIDA_MIN * 60000) return false;
+  const carimbo = agora.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  acrescentar({ [`sinal/${fam}/${carimbo}-${slug(eu)}-${randomBytes(2).toString("hex")}`]: `${eu}\n${agora.toISOString()}\n` }, `${eu}: sinal`);
+  return true;
+}
+
+/** Uma revisão longa: mais de LONGA_LINHAS linhas fora dos testes, ou tamanho não conferido no pedido. */
+export function revisaoLonga(p) {
+  const valor = campo(p.texto, "Linhas fora dos testes");
+  return !/^\d+$/.test(valor) || Number(valor) > LONGA_LINHAS;
+}
+
+/**
+ * A situação de cada família: { familia: { sem, ate, por, marca, resta, renova, baixa, ultimo, semSinal } }. Uma família
+ * sem sinal há mais de SEM_SINAL_MIN minutos conta como sem cota, mesmo tendo declarado que tem.
+ */
 export function cotas(agora = new Date(), commit = buscar()) {
   // Passo 3: a declaração mais nova é a do commit mais recente, não a de maior marca.
   const ultima = new Map();
@@ -1182,7 +1281,25 @@ export function cotas(agora = new Date(), commit = buscar()) {
     const ate = campo(texto, "Volta") ? new Date(campo(texto, "Volta")) : null;
     const semDeclarado = campo(texto, "Cota") === "sem";
     const sem = semDeclarado && !(ate && !Number.isNaN(ate.getTime()) && ate <= agora);
-    saida[fam] = { sem, ate: ate && !Number.isNaN(ate.getTime()) ? ate : null, por: campo(texto, "Por"), marca };
+    const restaTexto = campo(texto, "Resta").replace(/%$/, "");
+    const resta = /^\d+$/.test(restaTexto) ? Number(restaTexto) : null;
+    const renovaData = campo(texto, "Renova") ? new Date(campo(texto, "Renova")) : null;
+    const renova = renovaData && !Number.isNaN(renovaData.getTime()) ? renovaData : null;
+    const baixa = !sem && resta !== null && resta <= COTA_BAIXA && !(renova && renova <= agora);
+    saida[fam] = { sem, ate: ate && !Number.isNaN(ate.getTime()) ? ate : null, por: campo(texto, "Por"), marca,
+      resta: renova && renova <= agora ? null : resta, renova, baixa };
+  }
+  // Último sinal (item 1): sem sinal há mais de SEM_SINAL_MIN minutos conta como sem cota.
+  const sin = commit ? sinais(commit, agora) : new Map();
+  const limite = agora.getTime() - SEM_SINAL_MIN * 60000;
+  const coberto = commit ? inicioObservado(commit) <= limite : false;
+  for (const fam of new Set([...FAMILIAS, ...Object.keys(saida), ...sin.keys()])) {
+    const ultimo = sin.get(fam) ?? null;
+    const semSinal = ultimo !== null ? ultimo < limite : coberto;
+    const s = saida[fam] ?? (saida[fam] = { sem: false, ate: null, por: "", marca: null, resta: null, renova: null, baixa: false });
+    s.ultimo = ultimo !== null ? new Date(ultimo) : null;
+    s.semSinal = semSinal;
+    if (semSinal) { s.sem = true; s.baixa = false; }
   }
   return saida;
 }
@@ -1234,13 +1351,36 @@ export function familias(commit = buscar()) {
 }
 
 /** Declara a cota de `eu`: sem cota até `ate` (data ISO), ou com cota. */
-export function declararCota({ eu, sem, ate = null, por = null, agora = new Date() }) {
+export function declararCota({ eu, sem, ate = null, por = null, resta = null, renova = null, agora = new Date() }) {
+  if (resta !== null && !(/^\d{1,3}%?$/.test(String(resta)) && Number(String(resta).replace(/%$/, "")) <= 100)) {
+    throw new Error(`--remaining deve ser um número de 0 a 100 (o percentual que resta), não ${resta}`);
+  }
+  const pct = resta === null ? null : Number(String(resta).replace(/%$/, ""));
+  if (renova !== null && Number.isNaN(new Date(renova).getTime())) throw new Error(`--renews não é uma data: ${renova} (use, por exemplo, 2026-11-29T10:00-03:00)`);
+  if (pct !== null && renova === null) throw new Error("--remaining precisa de --renews <data da renovação da conta>");
+  // 0% é sem cota até a renovação.
+  if (pct === 0) { sem = true; ate = ate ?? renova; }
   if (sem && ate && Number.isNaN(new Date(ate).getTime())) throw new Error(`--until não é uma data: ${ate} (use, por exemplo, 2026-11-22T01:00-03:00)`);
   const carimbo = agora.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
   const marca = `${carimbo}-${slug(eu)}-${randomBytes(2).toString("hex")}`;
-  const corpo = [`Cota: ${sem ? "sem" : "com"}`, ...(sem && ate ? [`Volta: ${new Date(ate).toISOString()}`] : []), `Por: ${por || eu}`,
+  const corpo = [`Cota: ${sem ? "sem" : "com"}`, ...(sem && ate ? [`Volta: ${new Date(ate).toISOString()}`] : []),
+    ...(pct !== null ? [`Resta: ${pct}%`] : []), ...(renova !== null ? [`Renova: ${new Date(renova).toISOString()}`] : []), `Por: ${por || eu}`,
     `Data (UTC): ${agora.toISOString().slice(0, 16).replace("T", " ")}`, ""].join("\n");
-  acrescentar({ [`estado/${familia(eu)}/${marca}`]: corpo }, `${eu}: ${sem ? "sem cota" : "com cota"}`);
+  acrescentar({ [`estado/${familia(eu)}/${marca}`]: corpo }, `${eu}: ${sem ? "sem cota" : pct !== null ? `com cota, ${pct}%` : "com cota"}`);
+}
+
+/** O nome de uma família para quem lê: claude-3 -> "Claude 3", codex -> "Codex". */
+const nomeFamilia = (f) => (f === "codex" ? "Codex" : f.replace(/^claude-(\d+)$/, "Claude $1"));
+
+/** Cota baixa (item 2): avisa as outras famílias uma vez, quando a família passa a ter COTA_BAIXA% ou menos. */
+export function avisarCotaBaixa({ eu, por = null, antes, agora = new Date() }) {
+  const c = cotas(agora)[familia(eu)];
+  if (!c?.baixa || antes?.baixa) return null;
+  const para = FAMILIAS.filter((f) => f !== familia(eu)).map(nomeFamilia);
+  const quando = c.renova ? c.renova.toISOString() : "data não declarada";
+  enviar({ de: por || eu, para, assunto: `Cota baixa: ${nomeFamilia(familia(eu))} com ${c.resta}% até ${quando}`, agora,
+    texto: `${por && por !== eu ? `${por} declarou por ${eu}` : `${eu} declarou`} ${c.resta}% de cota até a renovação (${quando}). Até lá, o correio não entrega à família ${familia(eu)} revisões longas (mais de ${LONGA_LINHAS} linhas fora dos testes, ou de tamanho não conferido), e a preferência por ela nessas revisões não vale. Mande os pedidos longos a outra família com cota (list-quotas).` });
+  return para;
 }
 
 /** Para quem vai uma mensagem: os destinatários sem cota e as famílias com cota que podem receber no lugar. */
@@ -1328,7 +1468,7 @@ export const NOMES_ANTIGOS = {
 };
 export const OPCOES = {
   as: "eu", from: "de", to: "para", subject: "assunto", text: "texto", file: "arquivo", "reply-to": "responde", all: ["tudo", "todas"],
-  exhausted: "sem", out: "sem", available: "com", until: "ate", by: "por", also: "tambem", seconds: "segundos", exclude: "exclui",
+  exhausted: "sem", out: "sem", available: "com", until: "ate", by: "por", remaining: "resta", renews: "renova", also: "tambem", seconds: "segundos", exclude: "exclui",
   result: "resultado", reason: "motivo", name: "nome", on: "ligar", off: "desligar", link: "link", request: "pedido", "owner-message": "dono",
 };
 const RESULTADOS = { enqueued: "enfileirado", declined: "recusado", READY: "READY", CHANGES: "CHANGES" };
@@ -1364,7 +1504,9 @@ async function main(argv) {
   const ESCREVEM = new Set(["enviar", "confirmar", "vigiar", "cota", "reivindicar", "segurar", "liberar", "pedir-revisao", "pedir-fila",
     "pegar-revisao", "pegar-fila", "concluir-revisao", "concluir-fila", "devolver-revisao", "devolver-fila", "retirar-revisao", "retirar-fila",
     "renovar-revisao", "renovar-fila", "set-switch", "record-review", "confirm-review-record", "release-take"]);
-  if (ESCREVEM.has(comando)) conferirIdentidade(comando === "cota" && o.por && o.por !== true ? o.por : o.de ?? o.eu);
+  const escritor = comando === "cota" && o.por && o.por !== true ? o.por : o.de ?? o.eu;
+  if (ESCREVEM.has(comando)) conferirIdentidade(escritor);
+  definirEscritor(escritor);
   const versaoOk = comando && comando !== "ajuda" ? avisarVersao() : true;
   // Passo 3: uma cópia que não é a revisada, ou cuja versão não foi conferida agora, não escreve no correio; ler continua.
   if (ESCREVEM.has(comando) && !versaoOk) {
@@ -1381,6 +1523,8 @@ async function main(argv) {
     const lista = naoLidas(o.eu);
     if (!lista.length) console.log("nenhuma mensagem nova");
     else { mostrar(lista); console.log(`\n${lista.length} não lida(s). Confirme com: node agent-mail.mjs ack --as "${o.eu}" ${lista.map((m) => m.id).join(" ")}`); }
+    // Quem lê está ativo: o read grava o sinal da família (item 1), só com a cópia revisada e o próprio nome; ler nunca falha por isso.
+    try { conferirIdentidade(o.eu); if (versaoOk) baterSinal(o.eu); } catch { /* o sinal fica para a próxima */ }
   } else if (comando === "confirmar") {
     if (!o.eu) throw new Error("--as é obrigatório");
     const ids = o.tudo ? naoLidas(o.eu).map((m) => m.id) : o._;
@@ -1388,6 +1532,8 @@ async function main(argv) {
   } else if (comando === "vigiar") {
     if (!o.eu) throw new Error("--as é obrigatório");
     const fim = Date.now() + 1000 * Number(o.segundos || 120);
+    // A vigia ligada é sinal de agente ativo (item 1).
+    try { baterSinal(o.eu); } catch (erro) { console.log(`vigia: o sinal não foi gravado (${String(erro).slice(0, 200)}); tento na próxima`); }
     for (;;) {
       let lista = [];
       let abertos = [];
@@ -1425,9 +1571,14 @@ async function main(argv) {
     if (!r.problemas.length) console.log("o ramo correio só acrescentou arquivos de dados em todo o histórico");
     else { for (const p of r.problemas) console.log(p); process.exitCode = 1; }
   } else if (comando === "cota") {
-    if (!o.eu || (!o.sem && !o.com)) throw new Error('use: set-quota --as "Claude N" --exhausted --until 2026-11-22T01:00-03:00   ou   set-quota --as "Claude N" --available');
-    declararCota({ eu: o.eu, sem: Boolean(o.sem), ate: o.ate === true ? null : o.ate ?? null, por: o.por === true ? null : o.por ?? null });
-    console.log(`registrado: ${o.eu} ${o.sem ? `sem cota${o.ate && o.ate !== true ? ` até ${o.ate}` : ""}` : "com cota"}`);
+    const resta = o.resta === undefined || o.resta === true ? null : String(o.resta);
+    if (!o.eu || (!o.sem && !o.com && resta === null)) throw new Error('use: set-quota --as "Claude N" --exhausted --until 2026-11-22T01:00-03:00   ou   set-quota --as "Claude N" --available   ou   set-quota --as "Claude N" --remaining 35 --renews 2026-11-29T10:00-03:00');
+    const antes = cotas()[familia(o.eu)];
+    declararCota({ eu: o.eu, sem: Boolean(o.sem), ate: o.ate === true ? null : o.ate ?? null, por: o.por === true ? null : o.por ?? null,
+      resta, renova: o.renova === undefined || o.renova === true ? null : String(o.renova) });
+    console.log(`registrado: ${o.eu} ${o.sem || (resta !== null && Number(resta.replace(/%$/, "")) === 0) ? `sem cota${o.ate && o.ate !== true ? ` até ${o.ate}` : ""}` : "com cota"}${resta !== null ? `, resta ${resta.replace(/%$/, "")}%` : ""}`);
+    const avisadas = avisarCotaBaixa({ eu: o.eu, por: o.por === true ? null : o.por ?? null, antes });
+    if (avisadas) console.log(`cota baixa: avisei ${avisadas.join(", ")}; revisões longas não vão para a sua família até a renovação`);
   } else if (comando === "reivindicar" || comando === "segurar" || comando === "liberar") {
     if (!o.eu) throw new Error("--as é obrigatório");
     const acao = { reivindicar: "CLAIMED", segurar: "HOLD", liberar: "LIBERADO" }[comando];
@@ -1438,8 +1589,15 @@ async function main(argv) {
     const e = estadoPr(o.pr);
     console.log(e.acao ? `#${o.pr}: ${e.acao} por ${e.por} em ${e.quando.toISOString()}${e.motivo ? ` (${e.motivo})` : ""}${e.ativo ? " (ativo)" : " (expirado ou liberado)"}` : `#${o.pr}: livre`);
   } else if (comando === "quem") {
-    const c = cotas();
-    for (const f of familias()) console.log(`${f}: ${c[f]?.sem ? `SEM COTA${c[f].ate ? ` até ${c[f].ate.toISOString()}` : ""}` : "com cota"}`);
+    const agora = new Date(), c = cotas(agora);
+    const ha = (d) => { const m = Math.max(0, Math.floor((agora - d) / 60000)); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
+    for (const f of familias()) {
+      const x = c[f] ?? {};
+      const estado = x.semSinal ? `SEM COTA (sem sinal há mais de ${SEM_SINAL_MIN / 60} h)` : x.sem ? `SEM COTA${x.ate ? ` até ${x.ate.toISOString()}` : ""}` : x.baixa ? "COTA BAIXA" : "com cota";
+      const pct = x.resta !== null && x.resta !== undefined ? `; resta ${x.resta}%${x.renova ? ` até ${x.renova.toISOString()}` : ""}` : "";
+      const sinal = x.ultimo ? `; último sinal há ${ha(x.ultimo)} (${x.ultimo.toISOString()})` : "; nenhum sinal no histórico lido";
+      console.log(`${f}: ${estado}${pct}${sinal}`);
+    }
   } else if (comando === "pedir-revisao" || comando === "pedir-fila") {
     const tipo = comando === "pedir-fila" ? "fila" : "revisao";
     const texto = o.arquivo ? readFileSync(o.arquivo === "-" ? 0 : o.arquivo, "utf8") : (o.texto === true ? "" : o.texto ?? "");

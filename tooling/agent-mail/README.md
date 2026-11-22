@@ -36,7 +36,7 @@ Deixe a vigia sempre ligada em segundo plano. Ela confere a cada 30 segundos e t
 node ~/.agent-mail/agent-mail.mjs watch --as "Claude 2" --also review,enqueue
 ```
 
-O Codex não mantém vigia em segundo plano. Ele roda `read`, `list-reviews` e `list-queue` a cada tarefa de hora em hora, então uma mensagem para ele pode levar até 1 hora.
+O Codex não mantém vigia em segundo plano. Ele roda `read`, `list-reviews` e `list-queue` no começo de cada tarefa, antes de cada unidade nova e pelo menos a cada 15 minutos enquanto trabalha; a tarefa agendada dele roda no menor intervalo que o aplicativo do Codex aceitar, hoje de hora em hora (dono, 22/11/2026: "ele precisa ler mais frequentemente. veja o adequado"). Fora de uma tarefa, uma mensagem para ele pode levar até esse intervalo. Cada `read` dele grava o sinal da família (abaixo, em Cota).
 
 ## Identidade
 
@@ -135,12 +135,20 @@ node ~/.agent-mail/agent-mail.mjs list-pending --from "Claude 2"             # o
 ```bash
 node ~/.agent-mail/agent-mail.mjs set-quota --as "Claude 2" --exhausted --until 2026-11-22T01:00-03:00   # ao ficar sem cota: até quando
 node ~/.agent-mail/agent-mail.mjs set-quota --as "Claude 2" --available                                # quando a cota voltar
-node ~/.agent-mail/agent-mail.mjs list-quotas                                                      # quem está com e sem cota
+node ~/.agent-mail/agent-mail.mjs set-quota --as "Claude 2" --remaining 35 --renews 2026-11-29T10:00-03:00   # quanto resta e quando a conta renova
+node ~/.agent-mail/agent-mail.mjs list-quotas                                                      # quem está com e sem cota, o percentual e o último sinal
 ```
 
 - Declare quando ficar sem cota, com a data em que ela volta. Passada essa data, o correio conta você como com cota de novo.
 - Quem envia para um agente sem cota recebe o aviso na hora, com a lista de quem tem cota para receber no lugar.
 - Um pedido que você tinha pegado deixa de ser seu assim que você fica sem cota, e outro agente pode pegá-lo.
+
+**Disponibilidade** (dono, OWNER-20261122-0121-MAIL-AVAILABILITY, 22/11/2026, 01h21 Fortaleza):
+
+- **Último sinal.** Quem fica sem cota no meio da vez não consegue declarar. Por isso a ferramenta lê, nos commits do correio, a última vez que cada família escreveu: o trailer `Mail-From` (o nome de quem escreve) e, quando a sessão é identificada, a família da sessão. A vigia e o `read` gravam um sinal (`sinal/<família>/<marca>`) quando o último da família tem mais de 15 minutos. Uma família sem sinal há mais de 2 horas é tratada como sem cota, mesmo tendo declarado que tem: a preferência por ela cai, as tomadas dela caem e os pedidos de revisão e de fila passam a outra família. A ausência só conta quando o histórico lido cobre essas 2 horas; num clone raso que não as cobre, ninguém fica sem sinal por falta de histórico.
+- **Percentual.** Quem vê o próprio uso declara quanto resta e quando a conta renova (`--remaining` de 0 a 100, sempre com `--renews`). Com 10% ou menos, até a renovação, o correio avisa as outras famílias uma vez e não entrega a essa família revisão longa: mais de 400 linhas mudadas fora dos testes (AC (f)), contadas pelo `request-review`, ou de tamanho não conferido. A preferência por ela numa revisão longa também não vale. 0% é sem cota até a renovação.
+- **Preferência.** A preferência por um revisor (`--to`), o Codex inclusive, vale 30 minutos e cai na hora quando ele está sem cota ou sem sinal.
+- **Limite, sem esconder.** Fora da nuvem, o nome em `Mail-From` é declarado, como o resto do correio (Identidade, acima). Um sinal forjado só faz uma família parecer disponível, que é como a ferramenta se comportava antes.
 
 ## Pedidos de revisão
 

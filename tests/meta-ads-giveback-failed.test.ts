@@ -26,7 +26,7 @@ delete process.env.META_GRAPH_VERSION;
 
 const USER = "10150000000000033";
 /** How Meta answers DELETE /me/permissions in this run. */
-let revoke: "ok" | "server-error" | "unreachable" | "error-body" | "no-success" = "ok";
+let revoke: "ok" | "server-error" | "unreachable" | "error-body" | "no-success" | "empty" = "ok";
 let revokeCalls = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -47,6 +47,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (revoke === "server-error") return json({ error: { code: 2, message: "Service temporarily unavailable" } }, 503);
     if (revoke === "error-body") return json({ error: { code: 190, message: "Error validating access token" } }, 400);
     if (revoke === "no-success") return json({ success: false });
+    // The old control of tests/meta-spend-review-2924.test.ts: Meta answering "{}" (coordinator e0c0, condition 2).
+    if (revoke === "empty") return json({});
     return json({ success: true });
   }
   if (path === "/me/permissions") return json({ data: [{ permission: "ads_read", status: "granted" }] });
@@ -76,7 +78,7 @@ async function main(): Promise<void> {
   const removed = await disconnectMeta(ok.statsId!);
   is("the disconnect says the permission was given back", removed && removed.metaAccess, "removed");
 
-  for (const failure of ["server-error", "unreachable", "error-body", "no-success"] as const) {
+  for (const failure of ["server-error", "unreachable", "error-body", "no-success", "empty"] as const) {
     part(`Meta's give-back does not succeed (${failure}): failed, never removed`);
     revoke = failure;
     const before = revokeCalls;

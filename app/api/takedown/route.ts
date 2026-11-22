@@ -3,7 +3,7 @@ import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { isOperator } from "@/lib/search-console";
-import { type TakedownAction, TakedownNoticeUnsent, openReport, sendOwedNotice, takeDown } from "@/lib/takedown";
+import { type HeldOp, type TakedownAction, TakedownNoticeUnsent, actOnHeld, openReport, sendOwedNotice, takeDown } from "@/lib/takedown";
 
 /**
  * Acts on a notice (app/takedown/[token]): `{ token, action }`, where the
@@ -12,7 +12,10 @@ import { type TakedownAction, TakedownNoticeUnsent, openReport, sendOwedNotice, 
  * "Send the email to the creator") it only sends the notice still owed, in
  * its kept words, and never takes anything down, even content up again; a
  * takedown never confirmed as landed, whose content is up, answers 409
- * "unconfirmed" and sends nothing.
+ * "unconfirmed" and sends nothing. `{ type: "held", id, op }` acts on a link
+ * the notice holds (lib/takedown-hold.ts): "counter" records that a
+ * counter-notice came in, "court" that the sender went to court, "restore"
+ * puts it back once it is due.
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
@@ -36,6 +39,18 @@ export async function POST(request: NextRequest) {
   if (!opened.store) return Response.json({ ok: false, error: "no_store" }, { status: 400 });
   const raw = body.action && typeof body.action === "object" ? (body.action as Record<string, unknown>) : {};
   const id = typeof raw.id === "string" ? raw.id.slice(0, 64) : "";
+  if (raw.type === "held") {
+    const op: HeldOp | null = raw.op === "counter" || raw.op === "court" || raw.op === "restore" ? raw.op : null;
+    if (!id || !op || body.owed !== undefined) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+    try {
+      const done = await actOnHeld(opened.report, opened.store, id, op, originFrom(request));
+      if (!done) return Response.json({ ok: false, error: "nothing" }, { status: 409 });
+      return Response.json({ ok: true, done });
+    } catch (error) {
+      console.error("acting on a held link failed", error);
+      return Response.json({ ok: false, error: "error" }, { status: 500 });
+    }
+  }
   const action: TakedownAction | null =
     raw.type === "link" && id ? { type: "link", id }
     : raw.type === "product" && id ? { type: "product", id }
@@ -52,7 +67,7 @@ export async function POST(request: NextRequest) {
       if (!sent) return Response.json({ ok: false, error: "nothing" }, { status: 409 });
       return Response.json({ ok: true, done: sent.done });
     }
-    const done = await takeDown(opened.report, opened.store, action, originFrom(request));
+    const done = await takeDown(opened.report, opened.store, action, originFrom(request), typeof body.token === "string" ? body.token : "");
     if (!done) return Response.json({ ok: false, error: "nothing" }, { status: 409 });
     return Response.json({ ok: true, done });
   } catch (error) {

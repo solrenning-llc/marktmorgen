@@ -6,13 +6,13 @@ import { StoreFullError, imageFolder, isFree, setProductPage } from "@/lib/store
 import { productIdFor, readListing } from "@/lib/catalog";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { EMPTY_PAGE, MAX_BLOCKS, type SalesPage, copyOfPage, declareMeasure, oversized, pageProblem, parsePage, picturePaths } from "@/lib/sales-page";
-import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { countStudio, jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { lockRead } from "@/lib/two-step-unknown";
 import { claimNewPictures, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
-import { del } from "@/lib/blob";
+import { deleteOrSweep } from "@/lib/file-drop";
 import { imagePaths, ownsImagePath } from "@/lib/product-image";
-import { isStoredPicture } from "@/lib/picture-check";
+import { pictureChecker } from "@/lib/picture-check";
 
 /**
  * Thirty full blocks as JSON, twice — a page and a second version tested
@@ -109,29 +109,46 @@ export async function POST(request: NextRequest) {
       if (!store.statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
       const folder = await imageFolder(guarded.ref);
       const own = new Set(imagePaths(product.image));
-      for (const path of fresh) {
-        if (!ownsImagePath(path, folder) || own.has(path) || !(await isStoredPicture(path))) {
-          return Response.json({ ok: false, error: "pictures" }, { status: 400 });
-        }
+      if (fresh.some((path) => !ownsImagePath(path, folder) || own.has(path))) {
+        return Response.json({ ok: false, error: "pictures" }, { status: 400 });
       }
       // Each new one fresh from the picture door or already this page's, never another record's picture from the
       // shared folder, so taking it off later deletes only this page's own (lib/sales-page-store.ts, claimNewPictures).
-      if (!(await claimNewPictures(store.statsId, id, fresh))) {
+      // Only those this save takes from the door are checked in the file store, and once (MR audit gap 1): one taken
+      // by an earlier save was checked then, so a save tried again never asks Blob about the same picture twice.
+      if (!(await claimNewPictures(store.statsId, id, fresh, pictureChecker(async (units) => (await countStudio(store, "products", units)).ok)))) {
         return Response.json({ ok: false, error: "pictures" }, { status: 400 });
       }
     }
 
-    const marked = await setProductPage(guarded.ref, id, has);
-    if (!marked.ok) return Response.json({ ok: false, error: marked.reason }, { status: 400 });
-    if (!marked.store.statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
     // A running test declares, once, the measure it is decided by (lib/headline-test-rules.ts, rule 2).
     const saved = declareMeasure(page, stored, isFree(product) ? "checkouts" : "money");
-    await writePage(marked.store.statsId, id, saved, marked.store);
+    // Checked again on the product as it is now, and written under the lock that publishes it: a draft published
+    // since the check above never takes a page that check would have refused (754 [STN1], Codex P on #3693).
+    let onStore: { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft> } | null = null;
+    const marked = await setProductPage(guarded.ref, id, has, {
+      refuse: (now) => {
+        if (now.hidden === true) return null;
+        onStore = { fast: fastMoneyOnPage(pageWords(page)), left: templateLeft(page) };
+        return onStore.fast || onStore.left ? "on_store" : null;
+      },
+      write: async (written) => {
+        if (!written.statsId) throw new Error("a product page has nowhere to be kept");
+        await writePage(written.statsId, id, saved, written);
+      },
+    });
+    if (!marked.ok && marked.reason === "on_store" && onStore) {
+      const { fast, left } = onStore as { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft> };
+      if (fast) return Response.json({ ok: false, error: "fast_money", passage: fast }, { status: 409 });
+      if (left) return Response.json({ ok: false, error: "placeholder", ...left }, { status: 400 });
+    }
+    if (!marked.ok) return Response.json({ ok: false, error: marked.reason }, { status: 400 });
+    if (!marked.store.statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
     // A picture taken off the page is deleted, best effort and only after the
     // page that no longer shows it is written.
     const gone = await releasePictures(marked.store.statsId, id, before.filter((path) => !shown.includes(path))).catch(() => [] as string[]);
     if (gone.length > 0) {
-      await del(gone).catch((error: unknown) => console.error("could not delete pictures taken off a page", error));
+      await deleteOrSweep(gone, "pictures taken off a page");
     }
     // The page as it was kept, so the editor shows exactly that without starting over.
     return Response.json({ ok: true, blocks: saved.blocks.length, page: saved });

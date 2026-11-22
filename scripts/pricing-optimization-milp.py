@@ -1,33 +1,30 @@
 """The mixed-integer program of docs/pricing-optimization-2026-10-18.md.
 
-Reads docs/pricing-optimization-milp-input-2026-10-18.json (written by
-tests/pricing-optimization-table.ts milpInput(), every coefficient from the
-repository's own margin code) and writes
-docs/pricing-optimization-milp-output-2026-10-18.json: for each demand
-scenario and alternative, each plan's monthly price and the share of each
-#553 figure. tests/pricing-optimization.test.ts checks every solution again
-with the repository's code and against an exhaustive search.
+Reads the program's input as JSON on stdin (tests/pricing-optimization-table.ts
+milpInput(), every coefficient from the repository's own margin code) and
+prints, as JSON on stdout, for each demand scenario and alternative, each
+plan's monthly price and the share of each #553 figure. Nothing is written:
+the input and the output are generated on demand (owner, 20/11/2026), and
+tests/pricing-optimization.test.ts checks every solution again with the
+repository's code and against an exhaustive search.
 
-    python3 scripts/pricing-optimization-milp.py
+    node scripts/pricing-optimization.mjs --milp-output
 
-Needs numpy and scipy (scipy.optimize.milp, the HiGHS solver).
+Needs numpy and scipy (scipy.optimize.milp, the HiGHS solver), pinned in
+scripts/requirements-solver.txt.
 """
 import json
-import pathlib
+import os
 import sys
 
 import numpy as np
 import scipy
 from scipy.optimize import Bounds, LinearConstraint, milp
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
-INPUT = ROOT / "docs/pricing-optimization-milp-input-2026-10-18.json"
-OUTPUT = ROOT / "docs/pricing-optimization-milp-output-2026-10-18.json"
 
 
 def solve(data, scenario, alternative):
     tiers, printed = data["tiers"], data["printed"]
-    lower = data["alternatives"][alternative]
     kept = data["taxKeptBps"] / 10_000
     # Variable layout: for each tier and option, x (binary), then one share per printed figure.
     index, n = {}, 0
@@ -70,7 +67,8 @@ def solve(data, scenario, alternative):
                 s = index[(t, j, r)]
                 if not fixed:
                     c[s] += q * kept * plan["coefMonth"][r] / 100
-                share_floor = lower if plan["figures"][r] > 0 else 1
+                # Never below what a page prints for the figure (tests/pricing-optimization-table.ts lowestShare).
+                share_floor = plan["lowest"][alternative][r]
                 # share_floor * x <= s <= x
                 add({s: 1, x: -share_floor}, 0, np.inf)
                 add({s: 1, x: -1}, -np.inf, 0)
@@ -104,11 +102,21 @@ def solve(data, scenario, alternative):
 
 
 def main():
-    data = json.loads(INPUT.read_text())
-    solutions = [solve(data, str(e) if e != int(e) else str(int(e)), alt) for e in data["elasticities"] for alt in data["alternatives"]]
+    data = json.loads(sys.stdin.read())
+    # HiGHS can write a diagnostic straight to file descriptor 1 whatever options={"disp": False} says (21/11/2026:
+    # "HighsMipSolverData::transformNewIntegerFeasibleSolution ..."), so fd 1 points to stderr while it runs and
+    # stdout carries only the JSON (tests/generated-on-demand.test.ts).
+    sys.stdout.flush()
+    saved = os.dup(1)
+    try:
+        os.dup2(sys.stderr.fileno(), 1)
+        solutions = [solve(data, str(e) if e != int(e) else str(int(e)), alt) for e in data["elasticities"] for alt in data["alternatives"]]
+    finally:
+        sys.stdout.flush()
+        os.dup2(saved, 1)
+        os.close(saved)
     out = {"solver": f"scipy.optimize.milp (HiGHS), scipy {scipy.__version__.split('.')[0]}.x", "solutions": solutions}
-    OUTPUT.write_text(json.dumps(out, indent=1) + "\n")
-    print(f"Wrote {OUTPUT}")
+    sys.stdout.write(json.dumps(out, indent=1) + "\n")
     if any(not s["plans"] for s in solutions):
         sys.exit("a scenario had no solution")
 

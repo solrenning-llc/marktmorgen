@@ -19,6 +19,7 @@
  *     (node scripts/feature-videos-cost.mjs).
  */
 import { readFileSync, existsSync } from "node:fs";
+import { onDemandReport, onDemandText } from "./generated-on-demand";
 import { slugsFor } from "@/lib/site-pages";
 import { viewingBytes, TOP_HEIGHT } from "@/lib/stream-rules";
 import { FETCHED_AHEAD, GB } from "./plan-cost-registry";
@@ -53,6 +54,6 @@ const doc = renderFeatureVideosCost();
 is("a PROPOSAL, said first", doc.split("\n").slice(0, 4).join("\n").includes("PROPOSAL"), true);
 is("unknowns are named, never zero", [/never zero/i.test(doc), /unknown/i.test(doc)], [true, true]);
 is("it has an Acessibilidade section", doc.includes("## Acessibilidade"), true);
-is("docs/feature-videos-cost.md is current (node scripts/feature-videos-cost.mjs)", existsSync("docs/feature-videos-cost.md") ? readFileSync("docs/feature-videos-cost.md", "utf8") : "", doc);
+is("docs/feature-videos-cost.md holds only its fixed text: the record is generated on demand (node scripts/feature-videos-cost.mjs)", existsSync("docs/feature-videos-cost.md") ? readFileSync("docs/feature-videos-cost.md", "utf8") : "", onDemandText(onDemandReport("docs/feature-videos-cost.md")));
 
 done();

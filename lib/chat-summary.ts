@@ -24,11 +24,33 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { seal, unseal } from "@/lib/secret-box";
+import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
 
 import { type ChatKind, chatKind } from "@/lib/chat-kind";
 
 // The reading of an address lives in lib/chat-kind.ts, browser-safe, so the studio's field checks it the same way.
 export { chatKind, type ChatKind };
+
+/** EVAL plus GET (the id key, or the owner's record for a store from before ids), HEXISTS and SET replaces one SET: three extra billed commands. The v2 request is about 741 bytes before the sealed value, inside the 2 KiB below. */
+export const CHAT_ADDRESS_FENCE_EXTRA_COMMANDS = 3;
+/** Extra script/key/envelope bytes, above the sealed value already in the old SET. */
+export const CHAT_ADDRESS_FENCE_EXTRA_BYTES = 2_048;
+// v2 (Claude 6's MEDIUM on #4936): a store from before ids (ARGV[3] its statsId) is live only while its owner's
+// record still carries that statsId, as in lib/store-live-cache.ts store-cache-live:v2; -1 when the record does not read.
+// v3 (Claude 2's MEDIUM on #4936): a store with an id is live only while its id key holds this very ref (ARGV[4]), as
+// store-claim-live:v1 reads: moveAccount repoints the key, so its mere existence does not tell this store from the next.
+const KEEP_ADDRESS_IF_LIVE = `-- marktmorgen:chat-address-live:v3
+if redis.call("HEXISTS", KEYS[2], ARGV[1]) ~= 0 then return 0 end
+if ARGV[3] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[4] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[3] then return 0 end
+end
+return redis.call("SET", KEYS[3], ARGV[2])`;
 
 const key = (statsId: string) => `nl:chatsum:${statsId}`;
 const context = (statsId: string) => `chat-summary|${statsId}`;
@@ -39,22 +61,32 @@ export function chatBody(kind: ChatKind, text: string): Record<string, unknown> 
   return { content: text.length > 1990 ? `${text.slice(0, 1985)}…` : text, allowed_mentions: { parse: [] } };
 }
 
-/** Posts one message to an address; whether the chat took it. */
-export async function postToChat(url: string, text: string): Promise<boolean> {
+/**
+ * What a post came to: "sent" when the chat took it; "refused" when it surely did not show it (an address of
+ * neither kind, never sent, or a 4xx answer); "unknown" when it may have (a timeout, an abort, a thrown error, a
+ * 5xx or any other answer). Rule 24 (CX-123): a caller that must not post twice never reads "unknown" as "did
+ * not go" (lib/stats-report.ts, sendPart, keeps the part's mark on it).
+ */
+export type ChatPost = "sent" | "refused" | "unknown";
+
+/** Posts one message to an address; what it came to (ChatPost). Never throws. */
+export async function postToChat(url: string, text: string): Promise<ChatPost> {
   const kind = chatKind(url);
-  if (!kind) return false;
+  if (!kind) return "refused";
+  let response: Response;
   try {
-    const response = await fetch(url, {
+    response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(chatBody(kind, text)),
       redirect: "error",
       signal: AbortSignal.timeout(8_000),
     });
-    return response.ok;
   } catch {
-    return false;
+    return "unknown";
   }
+  if (response.ok) return "sent";
+  return response.status >= 400 && response.status < 500 ? "refused" : "unknown";
 }
 
 /** Which chat the store posts to, never the address. */
@@ -84,7 +116,7 @@ export async function chatAddress(statsId: string | null): Promise<string | null
  * throws UnknownReplyError (CX-123 rule 24), so the creator is never told the
  * posting stopped while the address stays and the jobs keep posting to it.
  */
-export async function setChatAddress(statsId: string, storeName: string, raw: unknown): Promise<"saved" | "removed" | "invalid" | "refused"> {
+export async function setChatAddress(statsId: string, storeName: string, raw: unknown, scope: Pick<Store, "email" | "sid" | "extra" | "statsId">): Promise<"saved" | "removed" | "invalid" | "refused"> {
   const url = typeof raw === "string" ? raw.trim() : "";
   if (!url) {
     const [deleted] = repliesFor(await redisPipeline([["DEL", key(statsId)]]), 1) ?? [undefined];
@@ -93,9 +125,15 @@ export async function setChatAddress(statsId: string, storeName: string, raw: un
     return "removed";
   }
   if (!chatKind(url)) return "invalid";
-  const ok = await postToChat(url, `Marktmorgen will post ${storeName}'s numbers here: the week every Monday, and the month on the 1st.`);
+  if (!scope || scope.statsId !== statsId || !scope.email) throw new UnknownReplyError("the chat summary store scope");
+  const ref = storeRef(scope);
+  const withId = STORE_ID_PATTERN.test(scope.sid);
+  const live = withId ? storeIdCommand(scope.sid)[1] : await ownerKey(ref);
+  const erasing = await erasingField(ref);
+  const ok = (await postToChat(url, `Marktmorgen will post ${storeName}'s numbers here: the week every Monday, and the month on the 1st.`)) === "sent";
   if (!ok) return "refused";
-  const [kept] = repliesFor(await redisPipeline([["SET", key(statsId), seal(url, context(statsId))]]), 1) ?? [undefined];
+  const [kept] = repliesFor(await redisPipeline([["EVAL", KEEP_ADDRESS_IF_LIVE, 3, live, ERASING_KEY, key(statsId), erasing, seal(url, context(statsId)), withId ? "" : statsId, ref]]), 1) ?? [undefined];
+  if (kept === 0) return "refused";
   if (kept !== "OK") throw new UnknownReplyError("the chat summary address save");
   return "saved";
 }

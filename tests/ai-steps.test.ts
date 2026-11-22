@@ -16,6 +16,7 @@
  *   - every command and byte a stepped generation adds is priced in the ai
  *     line of tests/plan-cost-registry.ts.
  */
+import type { AiStepId, AiStepState } from "@/lib/ai-steps";
 import { PDFDocument } from "pdf-lib";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import * as ai from "@/lib/ai";
@@ -31,7 +32,8 @@ import { paidPeriod } from "./billing-period-fixture";
 import { refuse, reservations as spent } from "./ai-steps-spend-stub";
 
 type Step = { step: string; state: string };
-type Steps = { run: string; onStep: (step: "read" | "write", state: "started" | "done") => void };
+// The library's own step types: a run that writes a file has a step per part too (`section-N`, #3474).
+type Steps = { run: string; onStep: (step: AiStepId, state: AiStepState) => void };
 type Stopped = { ok: false; reason: "stopped" | "failed" | "empty"; returned: number | null; left: number | null };
 const writePage = ai.writePage as unknown as (
   store: Parameters<typeof ai.writePage>[0],
@@ -302,6 +304,28 @@ async function main(): Promise<void> {
   fresh();
   const reserved = await writePage(store, input, Date.now(), stepsOf("runreserved00001", []));
   is("a reserved run still marks itself live before its first step, so a stop finds it", [reserved.ok, sent.findIndex((c) => c[0] === "SET" && String(c[1]).startsWith("nl:ai:stop:")) > sent.findIndex((c) => c[0] === "INCRBY" && c[1] === monthKey)], [true, true]);
+
+  part("A stop asked while a PDF assist reads is taken, as for a page (readPdfThenWrite, #3447 over #3435)");
+  fresh();
+  const pdfRun = "runpdfassist0001";
+  let stopTaken: boolean | null = null;
+  const pdfSteps: Steps = {
+    run: pdfRun,
+    onStep: (step, state) => {
+      if (step === "read" && state === "started") {
+        void ai.markAiStop(store, pdfRun).then((taken) => {
+          stopTaken = taken;
+        });
+      }
+    },
+  };
+  const assisted = await ai.readPdfThenWrite(store, pdf, Date.now(), pdfSteps, {
+    maxTokens: 400,
+    request: () => ({ system: "Write.", prompt: "From the facts." }),
+    keep: (answer: string) => answer,
+  });
+  is("the stop asked while the reading runs is kept, over the run's own live mark", stopTaken, true);
+  is("so the writing step is never asked for, and its job is given back", [assisted.ok ? "ok" : assisted.reason, calls], ["stopped", 1]);
 
   part("Every command and byte a stepped generation adds is priced");
   const line = COST_LINES.find((l) => l.id === "ai")!;

@@ -63,7 +63,8 @@ async function main(): Promise<void> {
 
   const page = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
   is("the page never reads unknown captions as none", /streamCaptions\(videoPaths\)\.catch\(\(\) => null\)/.test(page) && !/streamCaptions\(videoPaths\)\.catch\(\(\) => \(\{\}\)\)/.test(page), true);
-  is("the page never reads unknown AI writing as none", /autoWriting\(videoPaths\)\.catch\(\(\) => null\)/.test(page) && !/autoWriting\(videoPaths\)\.catch\(\(\) => \(\{\}\)\)/.test(page), true);
+  // #3346 merge: the writing and held states come from one exact read (autoCaptionStates); unknown is null, never {}.
+  is("the page never reads unknown AI writing as none", /autoCaptionStates\(videoPaths\)\.catch\(\(\) => null\)/.test(page) && !/autoCaptionStates\(videoPaths\)\.catch\(\(\) => \(\{/.test(page) && /const writing = captionStates \? captionStates\.writing : null;/.test(page), true);
 
   done();
 }

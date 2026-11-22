@@ -58,7 +58,7 @@ async function main(): Promise<void> {
 
   for (const [name, call] of [
     ["withinLimit", () => withinLimit("shape-test", "who", 5, 60)],
-    ["withinMonth", () => withinMonth("shape-test", "who", 5, "2026-11")],
+    ["withinMonth", () => withinMonth("shape-test", "who", 5, "2026-11", 32 * 86_400)],
   ] as const) {
     part(`${name}: only the exact reply is read`);
     for (const [label, value] of MALFORMED) {

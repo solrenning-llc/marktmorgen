@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { handleProblem, normaliseHandle, type Store } from "@/lib/store";
+import { STORE_ID_PATTERN, handleProblem, normaliseHandle, type Store } from "@/lib/store";
 import { storeForHandleExactly } from "@/lib/store-exact";
 import { productIdFromAddress, readListingExactly } from "@/lib/catalog";
 import { readPodcast } from "@/lib/podcast";
@@ -9,8 +9,10 @@ import {
   PUBLIC_FEED_HOLD_UNITS,
   buildUnits,
   cachedFeed,
+  forgetFeed,
   etagOf,
   keepFeed,
+  keptStoreLive,
   matchesTag,
   publicCandidates,
   readPublicShow,
@@ -116,6 +118,21 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const now = Date.now();
 
   let feed = cachedFeed(key, now);
+  // A kept feed is answered only while its store is still the live store at this address (Codex L-20261120-1144):
+  // erased, its address let go, or its erasure begun, the kept feed is let go and nothing of it is sent.
+  if (feed) {
+    let live: boolean | "unknown";
+    try {
+      live = await keptStoreLive(feed.store);
+    } catch {
+      live = "unknown";
+    }
+    if (live !== true) {
+      forgetFeed(key);
+      if (live === false) return notFound();
+      feed = null;
+    }
+  }
   if (!feed) {
     let store: Awaited<ReturnType<typeof storeForHandleExactly>>;
     try {
@@ -130,7 +147,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (built === "none") return notFound();
     if (built === "unavailable") return unavailable();
     if (built === "resting") return resting();
-    keepFeed(key, built, now);
+    // A store kept from before ids has no id key for keptStoreLive to check: its feed is built each time, never kept.
+    if (STORE_ID_PATTERN.test(store.sid)) keepFeed(key, built, now);
     feed = built;
   }
 

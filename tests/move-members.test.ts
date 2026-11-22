@@ -16,7 +16,7 @@
  *   - one reminder, never to somebody who already kept it.
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
-import { addProduct, claimHandle, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { MIN_DEFER_SECONDS, datesInFile, firstChargeAt, letteredDate, readRenewal, reminderAt } from "@/lib/move-rules";
 import { addRows, finishUpload, runImport, sendMoveReminders, startImport } from "@/lib/imports";
 import { moveCounts, openMove, readMove } from "@/lib/move-members";
@@ -30,8 +30,10 @@ const nowS = Math.floor(now / 1000);
 const noon = (d: Date) => Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12) / 1000);
 const iso = (seconds: number) => new Date(seconds * 1000).toISOString().slice(0, 10);
 
-type Sent = { to: string | string[]; subject: string; text: string };
+type Sent = { to: string | string[]; subject: string; text: string; tags?: { name: string; value: string }[] };
 const emails: Sent[] = [];
+const tagsOf = (message: Sent): Record<string, string> =>
+  Object.fromEntries((message.tags ?? []).map((tag) => [tag.name, tag.value]));
 const checkouts: URLSearchParams[] = [];
 const customersByEmail = new Map<string, string>();
 const liveSubs = new Map<string, { id: string; status: string; metadata: Record<string, string> }[]>();
@@ -120,6 +122,7 @@ async function main(): Promise<void> {
   const OWNER = "owner@example.com";
   await claimHandle(OWNER, "harbor", "Harbor Kitchen", "");
   await ensureStatsId(OWNER);
+  await ensureListId(OWNER);
   // A members import needs the postal address its emails carry (lib/move-members.ts, movePostal).
   await setMailSettings(OWNER, { fromName: "Harbor Kitchen", address: "12 Harbor Lane, Portland, ME 04101, USA" });
   await setStripeAccount(OWNER, "acct_1TestHarbor0001", true);
@@ -160,6 +163,7 @@ async function main(): Promise<void> {
 
   const ada = emails.find((e) => [e.to].flat()[0] === "ada@example.com")!;
   const ben = emails.find((e) => [e.to].flat()[0] === "ben@example.com")!;
+  is("a migration invitation names the list that must suppress a bounce or complaint (Codex L/U on #4245)", tagsOf(ada).nl_stop, (await storeForEmail(OWNER))?.listId);
   is("the subject names the membership and the store", ada.subject, "Keep your membership of The Inner Circle with Harbor Kitchen");
   is("a member whose renewal is ahead hears nothing is charged before it", ada.text.includes(`Nothing is charged before ${new Date(in20 * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}, the day it would have renewed, and the first payment here is $29.`), true);
   is("and that one reminder may follow", ada.text.includes("one reminder is sent a few days before"), true);
@@ -198,6 +202,7 @@ async function main(): Promise<void> {
   const reminded = await sendMoveReminders(Date.now() + 30_000, (in20 - 3 * DAY + 3_600) * 1000);
   is("Ada is reminded; Hal, who kept it, is not", [reminded.sent, reminded.kept, emails.slice(sentBefore).map((e) => [e.to].flat()[0])], [1, 1, ["ada@example.com"]]);
   is("the reminder says it is the only one", emails.at(-1)?.text.includes("This is the only reminder."), true);
+  is("the migration reminder names the list that must suppress a bounce or complaint (Codex L/U on #4245)", tagsOf(emails.at(-1)!).nl_stop, (await storeForEmail(OWNER))?.listId);
   const again = await sendMoveReminders(Date.now() + 30_000, (in20 - 2 * DAY) * 1000);
   is("and it is sent once", [again.sent, emails.length], [0, sentBefore + 1]);
   is("the studio counts who was invited and who kept it", await moveCounts(store), { invited: 3, kept: 1 });

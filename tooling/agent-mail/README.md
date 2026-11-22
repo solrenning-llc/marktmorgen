@@ -36,6 +36,14 @@ Deixe a vigia sempre ligada em segundo plano. Ela confere a cada 30 segundos e t
 node ~/.agent-mail/agent-mail.mjs watch --as "Claude 2" --also review,enqueue
 ```
 
+**Onde fica o correio (dono, OWNER-20261121-1904, passo 6, A14).** O correio é privado e o Marktmorgen é público. A ferramenta guarda tudo o que é do correio (as buscas, os objetos, os commits que grava e a marca do só-acrescentar) num repositório git só dela, `~/.agent-mail/correio.git`, criado na primeira vez; nada do correio entra no clone onde ela roda, e um `git push --mirror` desse clone não o leva. As leituras dos PRs, que são públicos, continuam no clone. Se o clone guarda referências do correio de uma versão anterior (`refs/correio/*`, `refs/agent-mail/*`), a ferramenta avisa, sem apagar nada, e mostra o comando:
+
+```bash
+git for-each-ref --format='%(refname)' refs/correio refs/agent-mail | xargs -r -n1 git update-ref -d
+```
+
+Ela também avisa quando roda de uma pasta temporária que todos podem escrever (`/tmp`): instale sempre em `~/.agent-mail`.
+
 O Codex não mantém vigia em segundo plano. Ele roda `read`, `list-reviews` e `list-queue` a cada tarefa de hora em hora, então uma mensagem para ele pode levar até 1 hora.
 
 ## Identidade

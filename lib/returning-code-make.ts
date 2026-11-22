@@ -88,14 +88,17 @@ export async function makeReturningCode(email: string, store: Store, asked: Code
   }
   const saved = again?.returningCodes.find((c) => c.code === entry.code && c.coupon === id);
   if (saved) return { ok: true, code: saved };
-  if (!again) {
-    // Unknown either way: the coupon stays. It takes nothing off anybody unless the store points at it.
+  if (!again || kept === "unknown") {
+    // Unknown either way: the coupon stays. A write that failed without an answer may still land later (its reply and
+    // its lock's release both lost), so finding nothing on the read again does not prove it never will (Codex N1 LOW on
+    // #3691). The coupon takes nothing off anybody unless the store points at it.
     console.error("a returning-buyer code's store write is unknown; its coupon is kept", id);
     return { ok: false, reason: "stripe" };
   }
-  // Not kept: the coupon takes nothing off anybody, nothing points at it. Deleted so it does not linger.
+  // Refused by the store itself ("taken", "full"), so nothing was written: the coupon takes nothing off anybody and
+  // nothing points at it. Deleted so it does not linger.
   await onAccount("DELETE", account, `/coupons/${encodeURIComponent(id)}`, undefined, CODES_API_VERSION).catch(() => null);
-  return { ok: false, reason: kept === "taken" ? "taken" : kept === "full" ? "full" : "stripe" };
+  return { ok: false, reason: kept };
 }
 
 /** Takes the code off the store (which stops it), then deletes its coupon. True once the store no longer has it. */

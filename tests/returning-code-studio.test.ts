@@ -151,7 +151,9 @@ async function main(): Promise<void> {
   } finally {
     restore();
   }
-  is("never written: refused, and its coupon deleted", [made.ok ? "" : made.reason, (await store()).returningCodes.some((c) => c.code === "NEVERKEPT"), sent.some((s) => s.method === "DELETE")], ["stripe", false, true]);
+  // A write that failed without an answer is not known never to land (Codex N1 LOW on #3691, below): refused, and its
+  // coupon kept, taking nothing off anybody while nothing points at it.
+  is("failed before the write, as far as anyone can tell: refused, and its coupon kept", [made.ok ? "" : made.reason, (await store()).returningCodes.some((c) => c.code === "NEVERKEPT"), sent.some((s) => s.method === "DELETE")], ["stripe", false, false]);
   // Written, answer lost, and the read again fails too: unknown either way, so the coupon the store may point at stays
   // (Claude 3 focal on db795a88, LEVE 1: this branch had no test).
   sent.length = 0;

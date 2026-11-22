@@ -13,6 +13,7 @@
  */
 import { NextRequest } from "next/server";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { refusedBeforeStripe, stockLeft, withStockHold } from "@/lib/stock";
@@ -22,7 +23,8 @@ import { createCheckout } from "@/lib/store-checkout";
 import { consumerGate } from "@/lib/eu-vat-gate";
 import { EuVatCollectRefused, applyEuCollect, euCartGate, euSaleGate, euVatCollectionCostCents } from "@/lib/eu-vat-collect";
 import { DEEMED_SUPPLIER_RECORDS } from "@/lib/deemed-supplier";
-import { EU_VAT_COLLECT_REVIEWED } from "@/lib/vat-registrations";
+import { EU_VAT_COLLECT_REVIEWED, OSS_IDENTIFICATION_CODES, OSS_RETURN_CURRENCY } from "@/lib/vat-registrations";
+import { vatCollectionCostOf } from "@/lib/eu-vat-collection-cost";
 import type { EuSupplyFields } from "@/lib/eu-vat-supply";
 import { EU_VAT_RATES, EU_VAT_RATES_VALID_UNTIL } from "@/lib/eu-vat-amount";
 import { TEST_CONSENT, withConsent } from "./digital-consent-fixture";
@@ -233,6 +235,27 @@ async function main(): Promise<void> {
   }, refusal).then((value) => value, (error: unknown) => (error instanceof EuVatCollectRefused ? "rethrown" : String(error)));
   is("the refusal goes on to the route's catch", held, "rethrown");
   is("and the unit is back at once", await stockLeft(now, (await readListing(now, id))!), 1);
+
+  part("An EU sale is declared in euros: one charged in pounds is refused, by the real cost of receiving the VAT (coord 79fb's LEVE 2)");
+  {
+    // The real cost function, with a reviewed-looking allowance for the euro and for the pound but none of the pound
+    // against the euro: the EU path asks the euro as the return currency, so the gap of a pound sale has no allowance.
+    const allowance = (currency: string) => ({ currency, bps: 200, source: "https://example.invalid/fx", checkedOn: "2027-01-01", validThrough: "2027-12-31" });
+    const realCost = (vatCents: number, currency: string, back?: string) => vatCollectionCostOf(vatCents, currency, [allowance("eur"), allowance("gbp")], NOW, back)?.feeCents ?? null;
+    const inPounds = plainBody();
+    inPounds.set("line_items[0][price_data][currency]", "gbp");
+    is("an EU sale in euros is charged with the real cost", tryCollect(plainBody(), { costsCents: realCost }), "ok");
+    is("RED → GREEN: an EU sale in pounds is refused (no allowance of the pound against the euro)", tryCollect(inPounds, { costsCents: realCost }), "refused");
+    is("the EU return currency is the euro", OSS_RETURN_CURRENCY, "eur");
+    // A Member State of identification outside the euro area may require its own currency (art. 365): adding one must
+    // revisit OSS_RETURN_CURRENCY, so this list is held as it stands (coord 79fb's LEVE 3).
+    is("the accepted Member States of identification are the ones whose return is in euros", Object.keys(OSS_IDENTIFICATION_CODES), ["IE"]);
+    // The comments say what the code does (coord 79fb's LEVEs 1 and 5): no "only euros and pounds", and the citation
+    // names art. 365 (the return in euro) and art. 366 (the ECB rate on the last day of the period).
+    const source = readFileSync(join(process.cwd(), "lib/eu-vat-collect.ts"), "utf8") + readFileSync(join(process.cwd(), "tests/vat-fee-words.test.ts"), "utf8");
+    is("no comment says the EU side reads euros and pounds", /only euros and pounds/.test(source), false);
+    is("the citation names arts. 365 and 366", /art\. 365[\s\S]{0,400}art\. 366/.test(readFileSync(join(process.cwd(), "lib/eu-vat-collect.ts"), "utf8")), true);
+  }
 
   done();
 }

@@ -41,6 +41,15 @@ export const VAT_COMMERCIAL_REVIEWS: readonly VatCommercialReview[] = [];
 /** The Member States accepted as the OSS Member State of identification, with their ISO 3166-1 numeric code. */
 export const OSS_IDENTIFICATION_CODES: Readonly<Record<string, string>> = { IE: "372" };
 
+/**
+ * The currency the non-Union OSS return is made out in: the euro (Directive 2006/112/EC art. 365), which every Member
+ * State of identification above uses. A Member State outside the euro area may require its own currency, so adding
+ * one to OSS_IDENTIFICATION_CODES must revisit this: tests/eu-vat-collect-card.test.ts fails until it does.
+ */
+export const OSS_RETURN_CURRENCY = "eur";
+/** The currency of the UK VAT return: the pound (VAT Notice 700/21, 4.1: "expressed in sterling"). */
+export const UK_RETURN_CURRENCY = "gbp";
+
 /** What a switch may be asked with besides the clock: tests only (a checkout passes it through whole, never a bare yes). */
 export type SwitchInput = {
   reviewed?: boolean;

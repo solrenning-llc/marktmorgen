@@ -486,7 +486,8 @@ test("the behavior holds the future: every kind the words promise is charged, ev
       !euSaleGate({ product: ESS, headers: new Headers(), form: new URLSearchParams({ billing_country: "DE" }), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES }).ok
       && !euSaleGate({ product: ESS, headers: new Headers({ "x-vercel-ip-country": "DE" }), form: new URLSearchParams(), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES }).ok
       && !euSaleGate({ product: ESS, headers: new Headers({ "x-vercel-ip-country": "DE" }), form: new URLSearchParams({ billing_country: "FR" }), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES }).ok,
-    // The EU side reads only euros and pounds, whatever allowance exists; the UK side declares any currency in pounds (coord 85bd's MEDIUM B).
+    // The EU side declares in euros and the UK side in pounds: a sale in another currency needs a reviewed allowance against
+    // the return's currency, and none is reviewed (coord 85bd's MEDIUM B; coordinator's decision dad8).
     "Sales to buyers in the European Union in a currency other than the euro": () => {
       // The EU path declares in euros: the return currency it asks for is "eur" (spied), so a sale in pounds or dollars
       // needs an allowance against the euro, and none is reviewed (REVIEWED_VAT_FX_ALLOWANCES), so it is refused.

@@ -119,7 +119,7 @@ export async function createCartCheckout(
      * Only when the cart route's EU gate said to collect (lib/eu-vat-collect.ts euCartGate; never while nothing
      * collects): the VAT on top of the lines, or a refusal before Stripe. `costsCents`, `now` and `rates` are for tests.
      */
-    euVat?: { country: string; costsCents?: (vatCents: number, currency: string) => number | null; now?: Date; rates?: readonly EuVatRate[] };
+    euVat?: { country: string; costsCents?: (vatCents: number, currency: string, returnCurrency?: string) => number | null; now?: Date; rates?: readonly EuVatRate[] };
   } = {},
 ): Promise<{ url: string; id: string }> {
   if (!store.stripeAccountId) throw new Error("This store has no account");

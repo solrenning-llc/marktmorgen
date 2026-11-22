@@ -215,7 +215,7 @@ export async function createCheckout(
      * off. Put on the built body after the share, or the checkout is refused (EuVatCollectRefused) before Stripe is
      * asked. `costsCents`, `now` and `rates` are for tests only.
      */
-    euVat?: { country: string; costsCents?: (vatCents: number, currency: string) => number | null; now?: Date; rates?: readonly EuVatRate[] };
+    euVat?: { country: string; costsCents?: (vatCents: number, currency: string, returnCurrency?: string) => number | null; now?: Date; rates?: readonly EuVatRate[] };
     /**
      * The fingerprint of the secret the buyer's browser keeps, when an upsell
      * follows: the card is then kept for payments made while they are there.

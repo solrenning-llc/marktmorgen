@@ -24,8 +24,10 @@
  * receiving the VAT, or a body applyEuVatLines will not take each refuse the checkout before Stripe is asked
  * (EuVatCollectRefused). The cost of receiving the VAT is computed part by part in lib/eu-vat-collection-cost.ts
  * (unit 6), but its exchange-rate allowance until the return is paid is not reviewed yet: euVatCollectionCostCents
- * answers null, so even with the switch on, every sale would be refused until one is. It reads only euros and pounds,
- * so a sale in any other currency is refused too, while the euro or pound amount owed on it is not known at the sale.
+ * answers null, so even with the switch on, every sale would be refused until one is. An EU sale is declared in euros
+ * and a UK sale in pounds (OSS_RETURN_CURRENCY, UK_RETURN_CURRENCY): a sale charged in another currency needs its own
+ * reviewed allowance against that return's currency for the gap to the period rate, and none is reviewed, so it is
+ * refused, while the euro or pound amount owed on it is not known at the sale.
  * Pure but for nothing: no IO.
  *
  * Unit 2 (coordinator C5-20261120-2130): the UK, the same way, with the "UK" record and UK_VAT_COLLECT_REVIEWED's whole
@@ -51,7 +53,7 @@ import { euVatCollectionCostCents } from "@/lib/eu-vat-collection-cost";
 import { UK_VAT_RATE_VALID_UNTIL, toPence, ukCheckout, ukVatOnTop } from "@/lib/uk-vat";
 import { HMRC_PERIOD_RATES, type HmrcPeriodRate, hmrcPeriodRate } from "@/lib/hmrc-period-rates";
 import { decimalsOf, isCurrency } from "@/lib/money";
-import { type SwitchInput, vatCollecting } from "@/lib/vat-registrations";
+import { OSS_RETURN_CURRENCY, type SwitchInput, UK_RETURN_CURRENCY, vatCollecting } from "@/lib/vat-registrations";
 
 /** What the checkout route does with the buyer before anything is held: go on, collect EU VAT, or refuse. */
 export type EuSaleGate =
@@ -279,12 +281,14 @@ function collectOn(
   // A UK sale is declared to HMRC in pounds whatever it was charged in, so its exchange-rate allowance is the pound's
   // (unit 7). An EU sale is declared in the non-Union scheme's return in euros (Directive 2006/112/EC art. 365: the
   // return is made out in euro, and a Member State of identification outside the euro area may require its own
-  // currency; Ireland and Estonia are both in the euro area), so its return currency is the euro: a sale charged in
+  // currency; art. 366: a supply in another currency is converted at the European Central Bank's rate on the last day
+  // of the tax period, or the next day it publishes one; the accepted Member States of identification are in
+  // OSS_IDENTIFICATION_CODES, today Ireland, in the euro area), so its return currency is the euro: a sale charged in
   // pounds or any other currency needs its own reviewed allowance against the euro for the gap to the period rate, and
   // without one it is refused (#5086, Claude 1 f9afa7's second point; coordinator's decision dad8, option 1). Not
-  // re-read at the official source on 22 November 2026: eur-lex.europa.eu does not resolve from the session that wrote
-  // this; to be read again, with its date, before opening. The refusal stands either way.
-  const cost = (input.costsCents ?? euVatCollectionCostCents)(vat!.vatCents, currency, input.country === "GB" ? "gbp" : "eur");
+  // re-read at the official source on 22 November 2026 (arts. 365 and 366): eur-lex.europa.eu does not resolve from the
+  // session that wrote this; to be read again, with its date, before opening. The refusal stands either way.
+  const cost = (input.costsCents ?? euVatCollectionCostCents)(vat!.vatCents, currency, input.country === "GB" ? UK_RETURN_CURRENCY : OSS_RETURN_CURRENCY);
   if (cost === null || !Number.isSafeInteger(cost) || cost < 0) refuse("the cost of receiving the VAT is unknown");
   const mark = input.country === "GB" ? "uk_vat" : "eu_vat";
   if (applyEuVatLines(body, { vat: vat!, recurring: false, vatCostsCents: cost, currency, mark }) !== "ok") refuse("the VAT line");

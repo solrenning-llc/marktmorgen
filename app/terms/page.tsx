@@ -27,7 +27,7 @@ import { STORAGE_BRAKE_BYTES, storageWords } from "@/lib/storage-quota";
 import { NON_PAYING_DATA_ROOM_BYTES, dataRoomListWords, dataWords } from "@/lib/store-data-rules";
 import { INVITE_PROGRAM_OPEN, INVITE_PAUSE_NOTICE, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS, INVITE_SHARE_PERCENT } from "@/lib/creator-invite-rules";
 import { feeWords, planPriceWords } from "@/lib/fee-words";
-import { termsLastUpdated, vatCanTurnOn, vatFeeWords } from "@/lib/vat-fee-words";
+import { VAT_REFUSED_PLACES_WORDS, termsLastUpdated, vatCanTurnOn, vatFeeWords } from "@/lib/vat-fee-words";
 import { PerRequest } from "@/components/per-request";
 import { TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { HELD_DAYS } from "@/lib/community-approval-rules";
@@ -184,7 +184,7 @@ export default function TermsPage() {
               {vat.terms.join(" ")}
             </p>
             <p>{vat.refusedLead.terms}</p>
-            <ul className="list-disc pl-6">{vat.refused.map((item) => <li key={item}>{item}.</li>)}</ul>
+            <ul className="list-disc pl-6">{vat.refused.map((item) => <li key={item}>{item === VAT_REFUSED_PLACES_WORDS ? <>{item}:<ul className="list-disc pl-6">{vat.refusedPlaces.map((place) => <li key={place}>{place}</li>)}</ul></> : `${item}.`}</li>)}</ul>
             <p>{vat.example.join(" ")}</p>
           </>
         ) : null}

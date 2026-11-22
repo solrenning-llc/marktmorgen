@@ -271,7 +271,9 @@ test("the words name every sale the checkout refuses, each beside the check that
   }
   assert.deepEqual(words.refused, VAT_REFUSED_SALES.map((r) => r.words), "every refusal is an item of the list on both pages");
   for (const page of ["app/terms/page.tsx", "app/pricing/page.tsx"]) {
-    assert.match(readFileSync(join(process.cwd(), page), "utf8"), /vat\.refused\.map\(\(item\) => <li key=\{item\}>/, `${page} shows the list`);
+    const source = readFileSync(join(process.cwd(), page), "utf8");
+    assert.match(source, /vat\.refused\.map\(\(item\) => <li key=\{item\}>/, `${page} shows the list`);
+    assert.match(source, /vat\.refusedPlaces\.map\(\(place\) => <li key=\{place\}>/, `${page} shows each place on its own line (2as's LEVE)`);
   }
   assert.ok(words.refused.some((w) => /e-publications, which are books, newspapers or magazines read on a screen/.test(w)), "e-publication is explained where it is used (3.1.3)");
   assert.ok(words.refused.some((w) => /not yet marked, on the product, as not an e-publication/.test(w)), "the creator's answer is asked for");
@@ -370,7 +372,8 @@ test("every kind of supply the gate refuses to an EU or UK consumer is named; pr
 
 test("every place the checkout refuses while it collects is named, and no place it charges is (coord 0cb1's MEDIUM)", () => {
   const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!;
-  const placesItem = words.refused.find((w) => w.startsWith("Buyers in ")) ?? "";
+  assert.ok(words.refused.includes("Buyers in these places"), "one item leads the places");
+  const placesItem = words.refusedPlaces.join("\n");
   const both: SwitchInput = { ...EU_ON, uk: UK_ON.uk, reviews: [...(EU_ON.reviews ?? []), ...(UK_ON.reviews ?? [])] };
   const allRates = [...EU_VAT_COUNTRIES].map((country) => ({ country, basisPoints: 2000, source: `https://example.invalid/${country.toLowerCase()}`, readOn: "2026-11-02" }));
   const places = [...new Set([...REFUSED_PLACES, ...TERRITORY_UNSETTLED])].sort();
@@ -413,7 +416,7 @@ test("one table: each sale a gate refuses while it collects, with the item of th
     { case: "a product that ships", refused: () => !sale({ ...ESS, link: null, shipping: { countries: ["DE"] } } as never, "DE", "DE").ok, item: /^Products that ship$/ },
     { case: "nothing to deliver online and no call", refused: () => !sale({ ...ESS, link: null }, "DE", "DE").ok, item: /nothing to deliver online and no live call/ },
     { case: "a bundle in a cart", refused: () => !euCartGate({ products: [{ ...ESS, bundle: ["link"] }], ...at("DE", "DE"), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES }).ok, item: /^A bundle in a cart$/ },
-    { case: "a buyer in Spain", refused: () => !sale(ESS, "ES", "ES").ok, item: /Spain/ },
+    { case: "a buyer in Spain", refused: () => !sale(ESS, "ES", "ES").ok && words.refusedPlaces.includes("Spain"), item: /^Buyers in these places$/ },
   ];
   for (const row of rows) {
     assert.ok(row.refused(), `${row.case}: refused`);

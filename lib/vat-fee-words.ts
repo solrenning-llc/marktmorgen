@@ -61,6 +61,8 @@ export type VatFeeWords = {
   pricing: string[];
   /** What the checkout does not accept there for now, led by `refusedLead`, shown as a list on both pages. */
   refused: string[];
+  /** The places under the VAT_REFUSED_PLACES_WORDS item, one a line (VAT_REFUSED_PLACE_NAMES). */
+  refusedPlaces: string[];
   refusedLead: { terms: string; pricing: string };
   /** The worked example, one sentence each, the same on both pages. */
   example: string[];
@@ -151,6 +153,7 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
       `At a ${percent(EXAMPLE_PROCESSING_BPS)} rate, which is only an example, the part of Stripe's fee that falls on the VAT is ${m(f.stripePartCents)}.`,
     ],
     refused: VAT_REFUSED_SALES.map((r) => r.words),
+    refusedPlaces: Object.values(VAT_REFUSED_PLACE_NAMES),
     refusedLead: REFUSED_LEAD(where),
     figures: f,
     since: sinceOf(places, input, now, f.currency, allowances),
@@ -172,8 +175,8 @@ export const VAT_REFUSED_PLACE_NAMES: Readonly<Record<string, string>> = {
   ES: "Spain", EA: "Ceuta and Melilla", IC: "the Canary Islands", MC: "Monaco", GF: "French Guiana", GP: "Guadeloupe",
   MQ: "Martinique", RE: "Réunion", YT: "Mayotte", MF: "Saint Martin", AX: "the Åland Islands", IM: "the Isle of Man",
 };
-const placeNames = Object.values(VAT_REFUSED_PLACE_NAMES);
-const VAT_REFUSED_PLACES_WORDS = `Buyers in ${placeNames.slice(0, -1).join(", ")} or ${placeNames[placeNames.length - 1]}`;
+/** The item that leads the places, shown with each place on its own line under it (AX274 3.1.5; Claude 1 2as's LEVE). */
+export const VAT_REFUSED_PLACES_WORDS = "Buyers in these places";
 
 export const VAT_REFUSED_SALES: readonly { words: string; checks: readonly string[]; files?: readonly string[] }[] = [
   { words: "Products that ship", checks: ["shipping or a subscription"] },

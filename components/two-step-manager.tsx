@@ -96,6 +96,9 @@ function Codes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
   );
 }
 
+/** Said in place of every change when this browser's lock could not be read just now (`lockUnknown`). */
+const LOCK_UNKNOWN = "This page could not check just now whether this browser got in without its second step, so two-step login cannot be changed from here. Nothing was changed. Open this page again in a moment.";
+
 /** Said in place of the recovery sentence or the turn-on form when the recovery address could not be read just now. */
 const RECOVERY_UNKNOWN = "Your recovery address could not be read just now.";
 
@@ -108,8 +111,11 @@ const RECOVERY_UNKNOWN = "Your recovery address could not be read just now.";
  * nothing is offered that would change it (CX-123 rule 24, lib/redis-reply.ts).
  * `recoveryUnknown`: the recovery address could not be read just now, so the
  * manager never says there is none and does not ask for one to turn it on.
+ * `lockUnknown`: whether this browser is locked (`locked`) could not be read
+ * just now, so it is never taken for "not locked": nothing a lock would refuse
+ * is offered (turn on, turn off, new codes, Cancel), and the manager says why.
  */
-export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: initialReset, backup: backupShown, recoveryUnknown = false, fresh, locked = false, unread = false }: { on: boolean; codesLeft: number; reset: number; backup: string; recoveryUnknown?: boolean; fresh: boolean; locked?: boolean; unread?: boolean }) {
+export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: initialReset, backup: backupShown, recoveryUnknown = false, fresh, locked = false, lockUnknown = false, unread = false }: { on: boolean; codesLeft: number; reset: number; backup: string; recoveryUnknown?: boolean; fresh: boolean; locked?: boolean; lockUnknown?: boolean; unread?: boolean }) {
   const [reset, setReset] = useState(initialReset);
   const [recoveryShown, setRecoveryShown] = useState(backupShown);
   const [on, setOn] = useState(initialOn);
@@ -179,13 +185,18 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
         <p className="notice mt-4 text-sm" role="status">
           You got in without your second step, so two-step login cannot be changed from this browser until it turns off; the date is at the top of your studio.
         </p>
+      ) : lockUnknown ? (
+        <p className="notice notice-warn mt-4 text-sm" role="status">
+          {LOCK_UNKNOWN}
+        </p>
       ) : null}
 
       {!locked && on && reset > 0 ? (
         <div className="notice notice-warn mt-4" role="status">
           <p className="text-sm text-ink">
-            {`Set to turn off on ${new Date(reset).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}, asked from the login page by somebody without a code or a passkey. If that was not you, cancel it and change your email password.`}
+            {`Set to turn off on ${new Date(reset).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}, asked from the login page by somebody without a code or a passkey. If that was not you, ${lockUnknown ? "open this page again in a moment to cancel it" : "cancel it"} and change your email password.`}
           </p>
+          {lockUnknown ? null : (
           <button
             type="button"
             className="btn btn-primary mt-3"
@@ -201,6 +212,7 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
           >
             Cancel: keep two-step login on
           </button>
+          )}
         </div>
       ) : null}
 
@@ -214,7 +226,7 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
         />
       ) : null}
 
-      {locked ? null : stale && !on ? (
+      {locked || lockUnknown ? null : stale && !on ? (
         <div className="mt-4 rounded-[12px] bg-paper px-4 py-4 ring-1 ring-line">
           <p className="text-sm text-ink-soft">{MESSAGES.reauth}</p>
           <Link href="/signin?status=reauth" className="btn btn-secondary mt-3">

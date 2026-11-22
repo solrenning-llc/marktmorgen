@@ -30,7 +30,8 @@
  */
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { claimMark } from "@/lib/claim-mark";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { isSettled } from "@/lib/instant-pay";
 import { alertCreator } from "@/lib/phone-alerts";
 import { queuePerson } from "@/lib/email-sync";
@@ -67,9 +68,15 @@ export function listensToSales(store: Store): boolean {
   return Boolean(store.stripeAccountId) && (store.phoneSales || store.emailSync !== null || store.chatSales || store.recentSales);
 }
 
-/** An amount as the checkout charged it: in its own currency, the store's when Stripe did not say. */
-function money(amount: number, currency: unknown, store: Store): string {
-  return formatMoney(amount, typeof currency === "string" && currency ? currency : store.currency);
+/**
+ * An amount as the checkout charged it, read exactly (CX-123 rule 24; audit R48): a whole number of cents, never
+ * below zero, in a three-letter currency. Anything else is unknown and answers null, so the line leaves the amount
+ * out: never "$0", and never the store's own currency in place of the one charged.
+ */
+function charged(amount: unknown, currency: unknown): string | null {
+  return Number.isSafeInteger(amount) && Number(amount) >= 0 && typeof currency === "string" && /^[a-z]{3}$/.test(currency)
+    ? formatMoney(Number(amount), currency)
+    : null;
 }
 
 /**
@@ -97,7 +104,7 @@ async function tell(store: Store, record: SaleRecord, session: string): Promise<
     inside.length ? readListings(store, inside) : Promise.resolve([] as Listing[]),
   ]);
   const title = product?.title ?? meta.title ?? "A product";
-  const amount = typeof record.amount_total === "number" ? record.amount_total : 0;
+  const paid = charged(record.amount_total, record.currency);
   const at = typeof record.created === "number" ? record.created * 1000 : Date.now();
 
   // The store's own pages, where the creator shows its latest purchases (lib/recent-sales.ts).
@@ -108,7 +115,7 @@ async function tell(store: Store, record: SaleRecord, session: string): Promise<
       store,
       "sale",
       {
-        title: `${meta.kind === "tip" ? "New support" : "New sale"}: ${money(amount, record.currency, store)}`,
+        title: `${meta.kind === "tip" ? "New support" : "New sale"}${paid ? `: ${paid}` : ""}`,
         body: [title, ...bumps.map((added) => added.title)].join(" + "),
         url: studioAt(store, "#numbers"),
       },
@@ -124,7 +131,7 @@ async function tell(store: Store, record: SaleRecord, session: string): Promise<
     if (url) {
       const what = meta.kind === "call" ? "New booking" : meta.kind === "tip" ? "New support" : "New sale";
       const channel = meta.utm_source || (meta.channel && meta.channel !== "direct" ? meta.channel : "");
-      const line = `${what} on ${store.name}: ${money(amount, record.currency, store)}, ${[title, ...bumps.map((added) => added.title)].join(" + ")}${channel ? ` (from ${channelName(channel)})` : ""}`;
+      const line = `${what} on ${store.name}: ${paid ? `${paid}, ` : ""}${[title, ...bumps.map((added) => added.title)].join(" + ")}${channel ? ` (from ${channelName(channel)})` : ""}`;
       await postToChat(url, line).catch(() => false);
     }
   }
@@ -149,6 +156,18 @@ async function tell(store: Store, record: SaleRecord, session: string): Promise<
 /**
  * Tells the listeners about each paid checkout of this store among `records`
  * that has not been told yet. Returns how many were told.
+ *
+ * Read exactly (CX-123 rule 24): the "told already?" answer is 1 (skipped) or 0
+ * (claimed, then told); the sale's mark is claimed before telling
+ * (lib/claim-mark.ts), so only a claim that is ours tells, and two places
+ * noticing the same checkout at once tell it once. Anything else tells nothing
+ * and records nothing: the recent-purchases block (lib/recent-sales.ts) keeps
+ * no dedupe and the team's chat keeps no mark, so an unknown taken as "not told"
+ * would show the same purchase twice and post the same line twice. An unknown
+ * answer for one sale leaves only that sale for a later pass (the thanks page
+ * or the five-minute job): the rest of the batch is told, and then the run
+ * throws UnknownReplyError so the caller says it was not wholly done. A
+ * pipeline answered in another shape as a whole tells nothing and throws.
  */
 export async function noteSales(store: Store, records: SaleRecord[]): Promise<number> {
   if (!listensToSales(store) || !isRedisConfigured()) return 0;
@@ -158,14 +177,38 @@ export async function noteSales(store: Store, records: SaleRecord[]): Promise<nu
   );
   if (!paid.length) return 0;
   // One round trip for which of them were told already.
-  const marks = await redisPipeline(paid.map((r) => ["EXISTS", toldKey(r.id)]));
+  const marks = repliesFor(await redisPipeline(paid.map((r) => ["EXISTS", toldKey(r.id)])), paid.length);
+  if (!marks) throw new UnknownReplyError("which sales were told already");
   let told = 0;
+  let unknown = 0;
   for (let i = 0; i < paid.length; i += 1) {
-    if (Number(marks[i]) === 1) continue;
-    await tell(store, paid[i], paid[i].id);
-    await redisPipeline([["SET", toldKey(paid[i].id), "1", "EX", TOLD_SECONDS]]);
+    const mark = countOf(marks[i]);
+    if (mark === 1) continue;
+    if (mark !== 0) {
+      unknown += 1;
+      continue;
+    }
+    const key = toldKey(paid[i].id);
+    const mine = claimValue();
+    const claimed = await claimMark(key, TOLD_SECONDS, mine);
+    if (claimed === "taken") continue;
+    if (claimed === "unknown") {
+      // A mark this run may have written is let go only while it holds this run's value, so a later pass tells it.
+      await releaseMark(key, mine);
+      unknown += 1;
+      continue;
+    }
+    try {
+      await tell(store, paid[i], paid[i].id);
+    } catch (error) {
+      // tell() throws only while reading the products, before anything is told: the mark goes, so the next pass
+      // tells it, as when the mark was written after telling.
+      await releaseMark(key, mine);
+      throw error;
+    }
     told += 1;
   }
+  if (unknown) throw new UnknownReplyError(`whether ${unknown} of ${paid.length} sales were told already`);
   return told;
 }
 
@@ -179,19 +222,19 @@ export async function noteOfferSale(store: Store, product: Listing, payment: Rec
   if (!store.phoneSales && !store.chatSales) return;
   const id = typeof payment.id === "string" ? payment.id : "";
   if (!id) return;
-  const amount = typeof payment.amount === "number" ? payment.amount : 0;
+  const paid = charged(payment.amount, payment.currency);
   if (store.chatSales && isRedisConfigured()) {
     // Once, like the phone's: the payment's own mark.
     // Ours only on an exact claim (lib/claim-mark.ts): an unknown answer posts nothing.
     const fresh = await claimMark(toldKey(id), TOLD_SECONDS);
     const url = fresh === "ours" ? await chatAddress(store.statsId).catch(() => null) : null;
-    if (url) await postToChat(url, `New sale on ${store.name}: ${money(amount, payment.currency, store)}, ${product.title} (one-click offer)`).catch(() => false);
+    if (url) await postToChat(url, `New sale on ${store.name}: ${paid ? `${paid}, ` : ""}${product.title} (one-click offer)`).catch(() => false);
   }
   if (!store.phoneSales) return;
   await alertCreator(
     store,
     "sale",
-    { title: `New sale: ${money(amount, payment.currency, store)}`, body: `${product.title} (one-click offer)`, url: studioAt(store, "#numbers") },
+    { title: `New sale${paid ? `: ${paid}` : ""}`, body: `${product.title} (one-click offer)`, url: studioAt(store, "#numbers") },
     { seed: id, at: typeof payment.created === "number" ? payment.created * 1000 : Date.now() },
   );
 }

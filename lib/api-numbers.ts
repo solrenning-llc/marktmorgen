@@ -93,6 +93,12 @@ function rows(value: unknown, valid: (row: unknown) => boolean): boolean {
   return Array.isArray(value) && value.every(valid);
 }
 
+/** One row of sales by code (lib/discount-impact.ts, DiscountCodeRow): a named code, or null for the other and typed codes. */
+function discountCodeRow(row: unknown): boolean {
+  if (!fields(row, [], ["sales", "cents", "off", "refunded"])) return false;
+  return (row.group === "code" && typeof row.code === "string") || ((row.group === "others" || row.group === "typed") && row.code === null);
+}
+
 function windows(value: unknown, keys: readonly string[], valid: (window: unknown) => boolean): boolean {
   return objectOf(value) && keys.every((key) => Object.hasOwn(value, key) && valid(value[key]));
 }
@@ -193,7 +199,11 @@ function statsData(value: unknown): value is StatsData {
   if (value.cashflowComplete !== undefined && typeof value.cashflowComplete !== "boolean") return false;
   if (value.paymentsComplete !== undefined && typeof value.paymentsComplete !== "boolean") return false;
   if (value.discounts !== undefined && value.discounts !== null && (!fields(value.discounts, [], [], ["refundsRead"]) ||
-      (value.discounts.rows !== null && !rows(value.discounts.rows, (row) => fields(row, ["kind"], ["sales", "cents", "off", "refunded", "buyers", "again"]))))) return false;
+      (value.discounts.rows !== null && !rows(value.discounts.rows, (row) => fields(row, ["kind"], ["sales", "cents", "off", "refunded", "buyers", "again"]))) ||
+      // Sales in another currency, per currency (22 [E5] unit 2); a figure kept before it was added has none.
+      (value.discounts.elsewhere !== undefined && !rows(value.discounts.elsewhere, (row) => fields(row, ["currency"], ["sales", "cents", "discounted", "off"]))) ||
+      // Sales by code (760 [STN7] unit 2); a figure kept before it was added has none.
+      (value.discounts.codes !== undefined && !rows(value.discounts.codes, discountCodeRow)))) return false;
   if (value.hours !== undefined && value.hours !== null && (!fields(value.hours) || !rows(value.hours.sales, safeInteger) || !rows(value.hours.cents, safeInteger))) return false;
   if (value.topBuyers !== undefined && !rows(value.topBuyers, (row) => fields(row, ["email", "reference"], ["cents", "orders", "last"]))) return false;
   return true;

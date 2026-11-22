@@ -11,6 +11,7 @@ import {
   FAIR_MAX_CHOICES,
   type FairPricing,
   MAX_FAIR_COUNTRIES,
+  MAX_FAIR_PRODUCTS,
   countryOff,
   storeCountryOff,
 } from "@/lib/fair-price";
@@ -66,6 +67,11 @@ export function FairPriceEditor({
   const priceAt = (off: number) => formatMoney(examplePrice - Math.round((examplePrice * off) / 100), currency);
 
   async function save() {
+    // More picked than fair prices can be limited to: said here, and nothing is sent (the server refuses it too).
+    if (!all && picked.length > MAX_FAIR_PRODUCTS) {
+      setError(STUDIO_MESSAGES.fair_products);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -99,7 +105,7 @@ export function FairPriceEditor({
     <div className="card p-6 sm:p-8" id="fair-prices">
       <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Fair prices by country</p>
       <p className="mt-2 text-ink-soft">
-        Buyers in the countries you choose see a lower price, at the level you choose, and pay it on Stripe&apos;s page with no code to type.
+        Buyers in the countries you choose see a lower price, at the level you choose, and pay it at checkout, on Stripe&apos;s page or with PayPal, with no code to type.
         Off until you switch it on.
       </p>
 
@@ -228,7 +234,7 @@ export function FairPriceEditor({
           </label>
           <label className="flex min-h-11 items-center gap-3 text-sm text-ink">
             <input type="radio" name="fair-products" checked={!all} onChange={() => setAll(false)} className="h-4 w-4" />
-            Only the ones I pick
+            Only the ones I pick (up to {MAX_FAIR_PRODUCTS})
           </label>
           {!all ? (
             products.length ? (

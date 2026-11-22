@@ -12,14 +12,14 @@ import { GET } from "@/app/api/store/file/download/route";
 import { type Refusal, refusal } from "./file-download-refusals-world";
 import { done, is, part } from "./check";
 
-const REASONS: [Refusal, number][] = [
-  ["signed_out", 401],
-  ["no_store", 404],
-  ["forbidden", 403],
-  ["gone", 403],
-  ["used", 429],
-  ["locked", 403],
-  ["two_step", 403],
+const REASONS: [Refusal, number, string][] = [
+  ["signed_out", 401, "Log in first."],
+  ["no_store", 404, "There is no store here yet."],
+  ["forbidden", 403, "Your role on this store does not include its files."],
+  ["gone", 403, "That store is not one you can open."],
+  ["used", 429, "This store's studio requests for this month are used."],
+  ["locked", 403, "You got in without your second step, so this waits until two-step login turns off. The date is at the top of your studio."],
+  ["two_step", 403, "This store asks everyone on its team to turn on two-step login first."],
 ];
 
 function request(): NextRequest {
@@ -29,7 +29,7 @@ function request(): NextRequest {
 
 async function main() {
   part("Each refusal is answered, never thrown");
-  for (const [reason, status] of REASONS) {
+  for (const [reason, status, expectedText] of REASONS) {
     refusal.reason = reason;
     refusal.message = reason === "used" ? "This store's studio requests for this month are used." : undefined;
     let answer: { status: number; text: string } | string;
@@ -39,9 +39,8 @@ async function main() {
     } catch (error) {
       answer = `threw: ${String(error)}`;
     }
-    const got = typeof answer === "string" ? answer : [answer.status, answer.text.length > 0];
-    is(`${reason}: ${status} with words`, got, [status, true]);
-    if (reason === "used" && typeof answer !== "string") is("used: says what the studio's count said", answer.text, refusal.message);
+    const got = typeof answer === "string" ? answer : [answer.status, answer.text];
+    is(`${reason}: exact refusal`, got, [status, expectedText]);
   }
   done();
 }

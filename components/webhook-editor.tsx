@@ -211,6 +211,14 @@ export function WebhookEditor({ view: initial }: { view: WebhooksView }) {
                       </span>
                     </span>
                   ) : null}
+                  {endpoint.keyState === "unknown" ? (
+                    <span className="mt-1 block text-sm">
+                      <span className="font-semibold text-ink">State unknown.</span>{" "}
+                      <span className="text-ink-soft">
+                        An API key added this endpoint, and that key&apos;s state could not be read just now. Nothing is sent here until it can be read. Reload this page to check again.
+                      </span>
+                    </span>
+                  ) : null}
                 </span>
                 <span className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => test(endpoint.id)} disabled={busy !== null} aria-busy={busy === `test:${endpoint.id}`} className="btn btn-secondary btn-sm">
@@ -307,7 +315,7 @@ export function WebhookEditor({ view: initial }: { view: WebhooksView }) {
       ) : null}
 
       <details className="mt-5 rounded-[12px] bg-paper px-4 py-3 text-sm ring-1 ring-line">
-        <summary className="cursor-pointer font-semibold text-ink-soft transition hover:text-violet-deep">How sending works</summary>
+        <summary className="cursor-pointer py-3 font-semibold text-ink-soft transition hover:text-violet-deep">How sending works</summary>
         <ul className="mt-3 space-y-2 text-ink-soft">
           <li>Each event is a POST with a JSON body: its id, type, time, your store, and the details (product, amount, buyer).</li>
           <li>

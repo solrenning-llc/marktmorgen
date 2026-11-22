@@ -110,6 +110,8 @@ export function standIns(stripe: StripeWorld, sent: Sent[], passThrough: ((input
         const since = Number(url.searchParams.get("created[gte]") ?? 0), until = Number(url.searchParams.get("created[lt]") ?? Infinity);
         return json({ object: "list", data: stripe.sessions.filter((s) => s.account === account && Number(s.created) >= since && Number(s.created) < until), has_more: false });
       }
+      // A closing day expires the store's open plan checkouts on the platform (lib/closing-plan-guard.ts); none is open here.
+      if (path === "/checkout/sessions" && !account) return json({ object: "list", data: [], has_more: false });
       if (path === "/payment_intents/search") return json({ object: "search_result", data: [], has_more: false, next_page: null });
       if (path === "/subscriptions/search" && account) {
         const query = url.searchParams.get("query") ?? "";
@@ -159,8 +161,8 @@ async function everyFamily(world: World, tag: string): Promise<void> {
       await redisPipeline([["SET", key, JSON.stringify({ s: s.statsId, probe: tag })]]);
     } else if (rule.how === "index" && prefix !== "nl:plan:ended") {
       // (The stores whose plan ended are read by the daily job as stores: a probe there would be looked at as one.)
-      // Member holds, final closings and billing-coverage holds are sorted sets; generic indexes may be sets.
-      if (prefix === "nl:closing:held" || prefix === "nl:closing:final" || prefix === "nl:held:stores") await redisPipeline([["ZADD", prefix, 1, `${s.sid}|probe-${tag}`]]);
+      // Member holds, final closings, billing-coverage holds and the held-links index are sorted sets; generic indexes may be sets.
+      if (prefix === "nl:closing:held" || prefix === "nl:closing:final" || prefix === "nl:held:stores" || prefix === "nl:report:held") await redisPipeline([["ZADD", prefix, 1, `${s.sid}|probe-${tag}`]]);
       else await addMember(prefix.endsWith(":") ? `${prefix}2026-11` : prefix, `${s.sid}|probe-${tag}`);
     } else if (rule.how === "expires") {
       await redisPipeline([["SET", `${prefix}${sha(`${prefix}${tag}`).slice(0, 32)}`, JSON.stringify({ s: s.statsId }), "EX", Math.min(rule.days, 2) * 86_400]]);

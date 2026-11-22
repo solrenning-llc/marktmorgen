@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { claimHandle, setStripeAccount, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
-import { type Hands, closeEnded, closeOne, closingOf, closingLetter } from "@/lib/plan-closing";
+import { type Hands, CLOSING_STATE_SAVE, closeEnded, closeOne, closingOf, closingLetter } from "@/lib/plan-closing";
 import { CLOSING_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import {
   BUYER_NOTICE_DAYS,
@@ -196,6 +196,18 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (status === "draft") return json({ object: "list", data: row.draft ? [{ id: row.draft.id, status: "draft", ...ownerOf(row), auto_advance: row.draft.auto_advance, metadata: row.draft.metadata }] : [], has_more: false });
     if (status === "open") return json({ object: "list", data: row.open?.status === "open" ? [{ id: row.open.id, status: "open", ...ownerOf(row) }] : [], has_more: false });
     return json({ object: "list", data: [], has_more: false });
+  }
+  // One paid invoice read alone, and its list of payments: read before every refund since #4428 (Codex P and X5). Each
+  // paid invoice here was paid by its own one payment.
+  const paidOne = (id: string | null) => [...world.subs.values()].flatMap(paidInvoicesOf).find((inv) => inv.id === id) as { id: string; payment_intent?: unknown } | undefined;
+  const readOne = path.match(/^\/invoices\/(in_\w+)$/);
+  if (readOne && method === "GET") {
+    const inv = paidOne(readOne[1]);
+    return inv ? json(inv) : json({ error: { message: `no such invoice ${readOne[1]}` } }, 404);
+  }
+  if (path === "/invoice_payments" && method === "GET") {
+    const inv = paidOne(url.searchParams.get("invoice"));
+    return json({ object: "list", has_more: false, data: inv ? [{ id: `inpay_${inv.id.slice(3)}`, object: "invoice_payment", invoice: inv.id, status: "paid", payment: { type: "payment_intent", payment_intent: inv.payment_intent } }] : [] });
   }
   const drafted = path.match(/^\/invoices\/(in_\w+)$/);
   if (drafted && method === "POST") {
@@ -437,6 +449,38 @@ async function main() {
   is("a refund twice is impossible: the next day refunds nothing", [(await daily(ben, B, CLOSING_DAYS + 1, CLOSING_DAYS + 1)).length, world.refunds.length], [1, [unusedYear, unusedMonth].filter((n) => n > 0).length]);
   void benDone;
 
+  part("A closing day whose own record could not be written: refunded from that day, not from a later run");
+  {
+    world.refunds.length = 0;
+    const zed = await storeWith("zed");
+    const zedYear = member("zed", "zedyear", 12_000, S(Date.UTC(2027, 8, 1)), { metadata: { store: "zed", yearly: "1" } });
+    clockAt(Date.UTC(2026, 10, 3, 13));
+    const Zd = await ended(zed);
+    await daily(zed, Zd, 0, CLOSING_DAYS - 1);
+    const zedDay = (await closingOf((await storeForEmail(zed))!, Zd + (CLOSING_DAYS - 1) * DAY))!.day;
+    // On the closing day the write of the day itself fails once (Redis down for that one command).
+    const healthy = redis.pipeline;
+    let dropped = 0;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      // closeOne writes its state as ["EVAL", CLOSING_STATE_SAVE, 1, key, mode, seen, text]; the body is c[6].
+      const c = commands[0];
+      if (!dropped && commands.length === 1 && c[0] === "EVAL" && c[1] === CLOSING_STATE_SAVE && String(c[3]).startsWith("nl:plan:closing:") && /"day":/.test(String(c[6])) && !/"renewals":/.test(String(c[6]))) {
+        dropped += 1;
+        throw new Error("stand-in Redis down for the closing day's own record");
+      }
+      return healthy(commands);
+    }) as typeof redis.pipeline;
+    const failedAt = Zd + CLOSING_DAYS * DAY + 60_000;
+    clockAt(failedAt);
+    try { await closeOne(zed, failedAt, hands, Number.POSITIVE_INFINITY); } catch { /* the run stops; the next one carries on */ }
+    redis.pipeline = healthy;
+    is("the closing day's own record failed once", dropped, 1);
+    is("while it is not written, the day shown is the closing day, the same an hour later", [(await closingOf((await storeForEmail(zed))!, failedAt))?.day, (await closingOf((await storeForEmail(zed))!, failedAt + 3_600_000))?.day], [zedDay, zedDay]);
+    await daily(zed, Zd, CLOSING_DAYS + 3, CLOSING_DAYS + 3);
+    const zedOwed = unusedOf({ amt: 12_000, ps: zedYear.pe - 365 * 86_400, pe: zedYear.pe }, zedDay);
+    is("the member is refunded the unused part from the closing day, not from the run that finished it", world.refunds.map((r) => [r.payment_intent, r.amount]), [["pi_zedyear", zedOwed]]);
+  }
+
   part("A balance that does not cover a refund: never made, the member told");
   world.refunds.length = 0;
   const cleo = await storeWith("cleo");
@@ -522,7 +566,7 @@ async function main() {
   // This ending's budget, set before any call as the daily job sets it, cut here to one member's worth (8 calls) to see the cap work.
   const joFolder = await storeFolder(jo);
   const { createHash } = await import("node:crypto");
-  await startCallBudget(joFolder, 8);
+  await startCallBudget(joFolder, 8, J);
   // Its emails, as the daily job sets them with the budget (lib/closing-credit.ts).
   await redis.pipeline([["SET", creditKey(joFolder), 100]]);
   await redis.pipeline([["SET", `nl:plan:closing:${createHash("sha256").update(jo).digest("hex").slice(0, 40)}`, JSON.stringify({ of: J, holdFrom: J })]]);
@@ -615,7 +659,7 @@ async function main() {
   const half = await closeOne(ned, N + CLOSING_DAYS * DAY + 60_000, failing, Number.POSITIVE_INFINITY);
   console.error = real;
   is("the day began: its membership ended, the store not removed yet", [half.state, world.subs.get("sub_nedmonth")!.status], ["held", "canceled"]);
-  const lateNed = { id: "sub_nedlate001", status: "active", created: S(N + CLOSING_DAYS * DAY), customer: { id: "cus_ned0001", email: ned }, metadata: { store: "ned" }, items: { data: [{ quantity: 1, current_period_start: S(N + CLOSING_DAYS * DAY), current_period_end: S(N + (CLOSING_DAYS + 31) * DAY), price: { lookup_key: "nimbus_creator_month", unit_amount: 6900, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } };
+  const lateNed = { id: "sub_nedlate001", status: "active", created: S(N + CLOSING_DAYS * DAY), customer: { id: "cus_ned0001", email: ned }, metadata: { store: "ned" }, cancel_at: null, cancel_at_period_end: false, items: { data: [{ quantity: 1, current_period_start: S(N + CLOSING_DAYS * DAY), current_period_end: S(N + (CLOSING_DAYS + 31) * DAY), price: { lookup_key: "nimbus_creator_month", unit_amount: 6900, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } };
   world.plans.push(lateNed);
   world.failPlanSearch = true;
   const listsBefore = world.planListReads, lateWrites = world.writes.length;
@@ -652,7 +696,7 @@ async function main() {
   console.error = real;
   const ninaDay = (await closingOf((await storeForEmail(nina))!, Ni + (CLOSING_DAYS - 1) * DAY + 60_000))!.day;
   const paidAt = S(ninaDay) - 180;
-  world.plans.push({ id: "sub_ninaplan02", object: "subscription", status: "active", created: paidAt, customer: { id: "cus_nina0001", email: nina }, metadata: { store: "nina", tier: "creator" }, cancel_at_period_end: false, items: { data: [{ quantity: 1, current_period_start: paidAt, current_period_end: paidAt + 30 * 86_400, price: { unit_amount: PLAN_PRICES.creator.month, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } });
+  world.plans.push({ id: "sub_ninaplan02", object: "subscription", status: "active", created: paidAt, customer: { id: "cus_nina0001", email: nina }, metadata: { store: "nina", tier: "creator" }, cancel_at: null, cancel_at_period_end: false, items: { data: [{ quantity: 1, current_period_start: paidAt, current_period_end: paidAt + 30 * 86_400, price: { unit_amount: PLAN_PRICES.creator.month, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } });
   const ninaBefore = sent.length;
   const ninaWrites = world.writes.length;
   clockAt(ninaDay + 60_000);

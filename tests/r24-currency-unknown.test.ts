@@ -21,6 +21,7 @@
 import { readAllTimeSales, readRenewalPayments, readSales } from "@/lib/stats";
 import { addProduct, claimHandle, ensureStatsId, setProductFunnel, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { newUpsellKey, takeUpsell } from "@/lib/upsell";
+import { shownRef } from "./upsell-ref-fixture";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -182,11 +183,11 @@ async function offers() {
     const id = `cs_test_r24off${String(order).padStart(8, "0")}`;
     sessions[id] = withCurrency({
       id, status: "complete", payment_status: "paid", created: Math.floor(Date.now() / 1000) - 60, customer: "cus_TestBuyer01",
-      metadata: { store: "r24off", product: front, upsell_key: browser.fingerprint }, customer_details: { email: "buyer@example.com" },
-      payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
+      metadata: { store: "r24off", product: front, upsell_key: browser.fingerprint }, customer_details: { email: "buyer@example.com", address: { country: "US" } },
+      payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01", card: { country: "US" } } },
     }, currency);
     const before = charged;
-    const result = await takeUpsell({ store, session: id, secret: browser.secret, origin: "https://marktmorgen.com", step: "kit001", answer: "yes", consent: TEST_CONSENT });
+    const result = await takeUpsell({ headers: new Headers(), store, session: id, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
     return [result.kind, charged - before];
   };
 

@@ -1,13 +1,14 @@
 import type { NextRequest } from "next/server";
-import { del } from "@/lib/blob";
+import { deleteOrSweep } from "@/lib/file-drop";
 import { StoreFullError, imageFolder, setLinkImage, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { ownsImagePath } from "@/lib/product-image";
+import { checkedSizes, ownsImagePath } from "@/lib/product-image";
 import { LINK_IMAGE_SIDE, type LinkImage } from "@/lib/store-link";
 import { checkUploadedImage } from "@/lib/uploaded-image";
 import { dropTakenPictures, takePictureDoor } from "@/lib/picture-door";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 
 /**
  * A link's own small picture (lib/store-link.ts, LinkImage): put on after
@@ -42,7 +43,9 @@ export async function POST(request: NextRequest) {
       if (!store) return Response.json({ ok: false, error: "none" }, { status: 400 });
       const link = store.links.find((each) => each.id === id);
       // A new picture deletes the one there: not from a session let in without its second step (lib/two-step.ts).
-      if ((await lockedFor(request, "page", "replace")) && link?.image) return refusedJson("locked");
+      const lock = await lockRead(lockedFor(request, "page", "replace"));
+      if (lock instanceof Response) return lock;
+      if (lock && link?.image) return refusedJson("locked");
       const path = text(body.path, 200);
       if (!ownsImagePath(path, await imageFolder(ref))) {
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
@@ -63,18 +66,27 @@ export async function POST(request: NextRequest) {
         await dropFresh(path);
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
-      const checked = await checkUploadedImage(path);
-      if (!checked.ok) {
-        await dropFresh(path);
-        return Response.json({ ok: false, error: checked.error }, { status: checked.error === "too_big" ? 413 : 400 });
-      }
       // A name in the shared folder that is neither fresh from the door nor this link's own may be a product's,
       // another link's, a page's, a buyer's review photo or an email's picture: refused and kept, so taking this
-      // link or its picture off later can never delete it (lib/picture-door.ts).
+      // link or its picture off later can never delete it (lib/picture-door.ts). It is answered before the file store is
+      // asked anything, like a missing link above: a read is only ever of a file this request took from the door
+      // (C1-20261107-1550-TODOS-10).
       if (!fresh.has(path) && link.image?.path !== path) {
         return Response.json({ ok: false, error: "in_use" }, { status: 400 });
       }
-      image = { path, width, height, bytes: checked.bytes };
+      // The link's own picture, sent again and not fresh: checked when it was put on, so its size comes from the record.
+      // One whose size the record cannot vouch for is refused, not read on its say-so (checkedSizes, rule 24).
+      let bytes = fresh.has(path) ? undefined : checkedSizes(link.image).get(path);
+      if (bytes === undefined && !fresh.has(path)) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+      if (bytes === undefined) {
+        const checked = await checkUploadedImage(path);
+        if (!checked.ok) {
+          await dropFresh(path);
+          return Response.json({ ok: false, error: checked.error }, { status: checked.error === "too_big" ? 413 : 400 });
+        }
+        bytes = checked.bytes;
+      }
+      image = { path, width, height, bytes };
     }
 
     const result = await setLinkImage(ref, id, image);
@@ -84,9 +96,7 @@ export async function POST(request: NextRequest) {
     }
     // Best effort, and deliberately after the write.
     if (result.removed && result.removed.path !== image?.path) {
-      await del(result.removed.path).catch((error: unknown) => {
-        console.error("could not delete a replaced link picture", error);
-      });
+      await deleteOrSweep(result.removed.path, "a replaced link picture");
     }
     return Response.json({ ok: true });
   } catch (error) {

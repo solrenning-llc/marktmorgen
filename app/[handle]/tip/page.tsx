@@ -8,6 +8,8 @@ import { speech } from "@/lib/buyer-words";
 import { tipsWords } from "@/lib/buyer-words/tips";
 import { formatMoney } from "@/lib/money";
 import { readTip } from "@/lib/store-tip-checkout";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -23,7 +25,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 
 /**
  * Where a supporter lands from Stripe's page (lib/store-tip-checkout.ts):
- * thanked, with the amount Stripe took, only once Stripe says it was paid.
+ * thanked, with the amount Stripe took, only once Stripe says it was paid;
+ * without a figure when Stripe did not tell the amount.
  */
 export default async function TipPage({ params, searchParams }: Params) {
   const { handle: raw } = await params;
@@ -31,13 +34,20 @@ export default async function TipPage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // One of the store's public requests, as its other pages take (lib/traffic.ts):
+  // past them the page rests with the store, before Stripe is asked (R20 finding 3).
+  if (await isResting(store)) return <StoreResting store={store} />;
   const query = await searchParams;
   const session = typeof query.session_id === "string" ? query.session_id : "";
   const said = speech(store);
   const w = tipsWords(store.language);
   const tip = await readTip(store, session);
   const title = tip.state === "paid" ? w.thanksTitle : w.waitingTitle;
-  const body = tip.state === "paid" ? w.thanksBody(store.name, formatMoney(tip.amount, tip.currency, said.lang.locale)) : w.waitingBody;
+  // An amount Stripe did not tell is never printed as zero or in a guessed currency (issue #3941).
+  const body =
+    tip.state !== "paid" ? w.waitingBody
+    : tip.amount === null ? w.thanksBodyNoAmount(store.name)
+    : w.thanksBody(store.name, formatMoney(tip.amount, tip.currency, said.lang.locale));
   return (
     <div lang={said.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
       <main id="content" className="relative mx-auto max-w-xl px-4 py-16">

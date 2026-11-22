@@ -22,10 +22,12 @@ import { COURSES_WORDS } from "@/lib/buyer-words/courses";
 import { MEMBERSHIP_WORDS } from "@/lib/buyer-words/membership";
 import { GIVING_WORDS } from "@/lib/buyer-words/giving";
 import { AFFILIATES_WORDS } from "@/lib/buyer-words/affiliates";
+import { AFFILIATE_TOOL_WORDS } from "@/lib/buyer-words/affiliate-tools";
 import { COMMUNITY_WORDS } from "@/lib/buyer-words/community";
 import { THANKS_WORDS } from "@/lib/buyer-words/thanks";
 import { BLOCK_WORDS } from "@/lib/buyer-words/blocks";
 import { JOIN_WORDS } from "@/lib/buyer-words/join";
+import { PRODUCT_SAFETY_WORDS } from "@/lib/buyer-words/product-safety";
 import { GUIDE_WORDS } from "@/lib/buyer-words/guide";
 import { CONTACT_WORDS } from "@/lib/buyer-words/contact";
 import { TIPS_WORDS } from "@/lib/buyer-words/tips";
@@ -94,6 +96,8 @@ const SAME: Record<string, Record<string, string[]>> = {
   // "Label: link".
   // "Product" is the Dutch word too.
   affiliates: { es: ["doorText"], de: ["doorText"], it: ["doorText"], nl: ["doorText", "kit.product"], pt: ["doorText"] },
+  // "Commission" is the French word too, and "Product" the Dutch one.
+  "affiliate tools": { fr: ["commission"], nl: ["product"] },
   // Words the languages took from English: Community, Feed, Level, Post, Messages, likes, studio; "7 h 7 min", "7 pts".
   community: {
     es: ["lengthHoursMinutes", "pts"],
@@ -109,6 +113,8 @@ const SAME: Record<string, Record<string, string[]>> = {
   "page blocks": { es: ["bonusN"], fr: ["pagesMenu"], de: ["socialWebsite"], it: ["socialEmail", "videoWindowMark"], nl: ["socialWebsite", "videoWindowMark"] },
   // "Audience" is the French word too.
   "media kit": { fr: ["audienceTitle"] },
+  // "per kilogram", "per liter", "per meter": the Dutch words too (618 [SZ2]).
+  "product safety": { nl: ["per"] },
   // "Total" is the word in these languages too.
   cart: { es: ["total"], fr: ["total"], pt: ["total"] },
   thanks: { es: ["priceEvery"], fr: ["priceEvery"], de: ["priceEvery"], it: ["priceEvery"], nl: ["priceEvery"], pt: ["priceEvery"] },
@@ -173,6 +179,7 @@ async function main(): Promise<void> {
     ["membership", (code) => MEMBERSHIP_WORDS[code]],
     ["giving", (code) => GIVING_WORDS[code]],
     ["affiliates", (code) => AFFILIATES_WORDS[code]],
+    ["affiliate tools", (code) => AFFILIATE_TOOL_WORDS[code]],
     ["community", (code) => COMMUNITY_WORDS[code]],
     ["thanks", (code) => THANKS_WORDS[code]],
     ["page blocks", (code) => BLOCK_WORDS[code]],
@@ -189,6 +196,7 @@ async function main(): Promise<void> {
     ["given through the API", (code) => ACCESS_WORDS[code]],
     ["welcome offer", (code) => WELCOME_WORDS[code]],
     ["store chat", (code) => CHAT_WORDS[code]],
+    ["product safety", (code) => PRODUCT_SAFETY_WORDS[code]],
   ];
   for (const [area, wordsOf] of AREAS) {
     const englishWords = wordsOf("en");

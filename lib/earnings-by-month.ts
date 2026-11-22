@@ -94,7 +94,8 @@ export type ListReading =
  * A provider's lists; `notRead` names kinds it has that are never read
  * (PayPal's disputes), said on every month, only from MAY_LEAVE_OUT. Every kind of EXPECTED_KINDS for
  * the provider is either in a list (read or unread) or in `notRead`, never
- * both; several lists of one kind are added (Stripe's checkouts and extras are
+ * both, and no list or `notRead` holds a kind the provider does not have
+ * (a PayPal renewal is refused, Codex M on #2941); several lists of one kind are added (Stripe's checkouts and extras are
  * two of "sale"), and the ids keep a record from being added twice.
  */
 export type ProviderReading = { source: "stripe" | "paypal"; lists: ListReading[]; notRead?: MoneyKind[] };
@@ -361,7 +362,7 @@ function providerMonths(provider: ProviderReading, months: string[], format: Int
   // Every kind the provider has is in a list or said not read, never both, and only kinds the rule knows (Claude 2 on #2941).
   if (!Array.isArray(provider.lists) || (provider.notRead !== undefined && !Array.isArray(provider.notRead))) return unknownEverywhere(source, months, "invalid");
   const notRead = [...new Set(provider.notRead ?? [])];
-  if (!notRead.every(isKind)) return unknownEverywhere(source, months, "invalid");
+  if (!notRead.every((kind) => isKind(kind) && EXPECTED_KINDS[source].includes(kind))) return unknownEverywhere(source, months, "invalid");
   // A kind it must read, said not read: the source was not read, never a total without it (pre-review of #2941).
   if (!notRead.every((kind) => MAY_LEAVE_OUT[source].includes(kind))) return unknownEverywhere(source, months, "unread");
   const listed = new Set(provider.lists.map((list) => (list && typeof list === "object" ? list.kind : undefined)));
@@ -373,7 +374,9 @@ function providerMonths(provider: ProviderReading, months: string[], format: Int
   const prefix = `${source}:`;
   let unread = false;
   for (const list of provider.lists) {
-    if (!list || typeof list !== "object" || !isKind(list.kind)) return unknownEverywhere(source, months, "invalid");
+    // Only a kind this provider has: a PayPal list of renewals (even empty or said unread) is an off-shape reading,
+    // refused, never added because the rule knows the kind elsewhere (Codex M on #2941 at 857f7251).
+    if (!list || typeof list !== "object" || !isKind(list.kind) || !EXPECTED_KINDS[source].includes(list.kind)) return unknownEverywhere(source, months, "invalid");
     if ("unread" in list) {
       unread = true;
       continue;

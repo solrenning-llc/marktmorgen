@@ -169,11 +169,11 @@ export function hasPixels(pixels: Pixels): boolean {
   return PIXEL_KINDS.some((kind) => pixels[kind] !== null);
 }
 
-/** "Meta, Google and TikTok". */
-export function pixelNames(pixels: Pixels): string {
+/** "Meta, Google and TikTok"; `and` in the store's language (lib/buyer-words/tracking-consent.ts). */
+export function pixelNames(pixels: Pixels, and = "and"): string {
   const names = PIXEL_KINDS.filter((kind) => pixels[kind]).map((kind) => PIXEL_INFO[kind].name);
   if (names.length <= 1) return names.join("");
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return `${names.slice(0, -1).join(", ")} ${and} ${names[names.length - 1]}`;
 }
 
 /**
@@ -186,6 +186,10 @@ export function pixelNames(pixels: Pixels): string {
 export const CONSENT_COUNTRIES = new Set([
   "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU",
   "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE", "IS", "LI", "NO", "GB", "CH", "BR",
+  // Parts of the EU with their own ISO 3166-1 code, which a visitor's country
+  // header gives instead of FR or FI: French Guiana, Guadeloupe, Martinique,
+  // Réunion, Mayotte, Saint Martin and the Åland Islands.
+  "GF", "GP", "MQ", "RE", "YT", "MF", "AX",
 ]);
 
 /** Whether a visitor from this country is asked first. Unknown means ask. */

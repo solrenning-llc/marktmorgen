@@ -27,11 +27,12 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { seal, unseal } from "@/lib/secret-box";
 import { REDIRECT_URIS, googleAccount, refreshTokens } from "@/lib/meet-providers";
 import { configuredDemoStudioAdmin } from "@/lib/house-store";
 import { SITE_URL } from "@/lib/site-url";
-import type { Store } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, type Store, storeIdCommand, storeRef } from "@/lib/store";
 
 export const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
 /** The property every store lives under: the URL-prefix property verified by public/google*.html. */
@@ -45,6 +46,16 @@ const CONTEXT = "search-console|marktmorgen";
 const STATE = /^gsc\.[A-Za-z0-9_-]{20,64}$/;
 export const SEARCH_ROWS = 25;
 const DAY_MS = 86_400_000;
+/**
+ * A delayed supplier answer is cached only while this store is still live: its own key (the id key, or for a store
+ * kept from before ids its record under its owner's address, as lib/store-live-cache.ts reads it) must exist and its
+ * erasing mark must be absent, in one step with the SET.
+ */
+const KEEP_SEARCHES_IF_LIVE = `-- marktmorgen:gsc-keep-if-live:v2
+if redis.call("EXISTS", KEYS[1]) ~= 1 then return 0 end
+if redis.call("HEXISTS", KEYS[2], ARGV[1]) ~= 0 then return 0 end
+redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
+return 1`;
 
 export const isOperator = (email: string | null | undefined) => {
   const operator = configuredDemoStudioAdmin();
@@ -53,6 +64,12 @@ export const isOperator = (email: string | null | undefined) => {
 const env = (name: string) => process.env[name]?.trim() ?? "";
 export const searchConsoleConfigured = () => Boolean(env("GOOGLE_OAUTH_CLIENT_ID") && env("GOOGLE_OAUTH_CLIENT_SECRET"));
 export const isSearchConsoleState = (state: string) => STATE.test(state);
+
+/** A single SET kept only on its exact "OK" (CX-123 rule 24); any other reply is unknown and throws. */
+async function kept(command: (string | number)[], what: string): Promise<void> {
+  const replies = repliesFor(await redisPipeline([command]), 1);
+  if (!replies || replies[0] !== "OK") throw new UnknownReplyError(what);
+}
 
 export type SearchRow = { query: string; clicks: number; impressions: number; position: number };
 export type StoreSearches = { from: string; to: string; rows: SearchRow[] };
@@ -73,7 +90,7 @@ export async function searchConsoleStatus(): Promise<{ connected: boolean; accou
 export async function beginSearchConsole(email: string): Promise<string | null> {
   if (!isOperator(email) || !searchConsoleConfigured() || !isRedisConfigured()) return null;
   const state = `gsc.${randomBytes(24).toString("base64url")}`;
-  await redisPipeline([["SET", stateKey(state), JSON.stringify({ email: email.toLowerCase() }), "EX", 600]]);
+  await kept(["SET", stateKey(state), JSON.stringify({ email: email.toLowerCase() }), "EX", 600], "keeping the consent page's state");
   const query = new URLSearchParams({
     client_id: env("GOOGLE_OAUTH_CLIENT_ID"),
     redirect_uri: REDIRECT_URIS.google,
@@ -125,16 +142,24 @@ export async function finishSearchConsole(state: string, code: string, email: st
     if (!scope.split(/\s+/).includes(SEARCH_CONSOLE_SCOPE)) return "scope";
     if (!refresh || refresh.length > 4000) return "error";
     const account = googleAccount(json.id_token)?.email ?? "";
-    await redisPipeline([["SET", CONN, JSON.stringify({ refresh: seal(refresh, CONTEXT), account, at: Date.now() })]]);
+    await kept(["SET", CONN, JSON.stringify({ refresh: seal(refresh, CONTEXT), account, at: Date.now() })], "keeping the Search Console connection");
     return "connected";
   } catch {
     return "error";
   }
 }
 
-/** Takes the connection away. */
+/**
+ * Takes the connection away. Done only on DEL's count, 0 or 1 (0: it was not there);
+ * any other reply throws, so nobody is told it is disconnected while the
+ * sealed token may still be kept and read (CX-123 rule 24).
+ */
 export async function disconnectSearchConsole(): Promise<void> {
-  if (isRedisConfigured()) await redisPipeline([["DEL", CONN]]);
+  if (!isRedisConfigured()) return;
+  const replies = repliesFor(await redisPipeline([["DEL", CONN]]), 1);
+  const gone = replies ? countOf(replies[0]) : null;
+  // One key: only 0 or 1 is a possible answer.
+  if (gone === null || gone > 1) throw new UnknownReplyError("taking the Search Console connection away");
 }
 
 /** The page filter for one store: its own address and everything under it, nothing else. */
@@ -200,6 +225,29 @@ function keptSearches(raw: string): StoreSearches | null | undefined {
 }
 
 /**
+ * Cache one answer only while the store is live and its erasure has not begun. A store kept from before ids (sid "")
+ * has no id key, so its record is the key fenced on (Claude 3's MEDIUM on #4934).
+ */
+async function keepSearchesIfLive(store: Store, value: StoreSearches | null, seconds: number): Promise<boolean> {
+  const ref = storeRef(store);
+  const live = STORE_ID_PATTERN.test(store.sid) ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  const replies = repliesFor(await redisPipeline([[
+    "EVAL",
+    KEEP_SEARCHES_IF_LIVE,
+    3,
+    live,
+    ERASING_KEY,
+    cacheKey(store.statsId as string),
+    await erasingField(ref),
+    JSON.stringify(value),
+    seconds,
+  ]]), 1);
+  const reply = replies?.[0];
+  if (!replies || (reply !== 0 && reply !== 1)) throw new UnknownReplyError("keeping the store's Search Console answer while it is live");
+  return reply === 1;
+}
+
+/**
  * The searches that found one store, kept a day. Null when our side is not
  * connected, the store is on a domain of its own, or Google did not answer.
  */
@@ -225,8 +273,8 @@ export async function storeSearches(store: Store, now = Date.now()): Promise<Sto
   }
   if (!refresh) return null;
   const window = searchWindow(now);
-  const keep = (value: StoreSearches | null, seconds: number) =>
-    redisPipeline([["SET", cacheKey(store.statsId as string), JSON.stringify(value), "EX", seconds]]).catch(() => undefined);
+  let value: StoreSearches | null = null;
+  let seconds = 3600;
   try {
     const { access } = await refreshTokens("google", refresh);
     const response = await fetch(`https://searchconsole.googleapis.com/webmasters/v3/sites/${encodeURIComponent(SEARCH_CONSOLE_SITE)}/searchAnalytics/query`, {
@@ -243,15 +291,17 @@ export async function storeSearches(store: Store, now = Date.now()): Promise<Sto
     });
     if (!response.ok) {
       console.error("reading Search Console failed", response.status, (await response.text().catch(() => "")).slice(0, 300));
-      await keep(null, 3600);
-      return null;
+    } else {
+      value = { ...window, rows: readRows(await response.json()) };
+      seconds = 86_400;
     }
-    const value = { ...window, rows: readRows(await response.json()) };
-    await keep(value, 86_400);
-    return value;
   } catch (error) {
     console.error("reading Search Console failed", error);
-    await keep(null, 3600);
+  }
+  try {
+    return (await keepSearchesIfLive(store, value, seconds)) ? value : null;
+  } catch (error) {
+    console.error("keeping Search Console answer failed", error);
     return null;
   }
 }

@@ -1,5 +1,6 @@
 import { withinStore } from "@/lib/metered-limits";
 import { type DigitalConsent, consentFromForm } from "@/lib/digital-consent";
+import { membershipWords } from "@/lib/buyer-words/membership";
 import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
@@ -7,6 +8,13 @@ import { openWinBack } from "@/lib/winback-send";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;
+/**
+ * A press ends by this time at the most: no longer than the claim it opens the checkout under (OPENING_SECONDS in
+ * lib/winback-send.ts, taken after this request's first reads), so the claim never runs out while the press still
+ * works and a second press never opens a second discounted checkout beside it (Claude 4's LEVE 1 on #3482,
+ * tests/winback-open-claim-outlives.test.ts).
+ */
+export const maxDuration = 60;
 
 /**
  * "Come back": the button on the page a come-back email's link opens
@@ -40,6 +48,13 @@ export async function POST(request: NextRequest) {
     new Response(null, { status: 303, headers: { Location: `${page}?back=${encodeURIComponent(token)}&status=${status}`, "Cache-Control": "no-store" } });
   if (!(await withinStore("come-back", `${clientAddress(request)}|${store.handle}`, 20, 600, store))) return back("limited");
   const opened = await openWinBack(store, product, token, linkOrigin(request, store), consent);
+  // The link could not be read just now (CX-123 rule 24): 503 with the store's words, never sent back as "expired".
+  if (!opened.ok && opened.reason === "unknown") {
+    return new Response(membershipWords(store.language).offerNotices.unknown, {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "30" },
+    });
+  }
   if (!opened.ok) return back(opened.reason);
   return new Response(null, { status: 303, headers: { Location: opened.url, "Cache-Control": "no-store" } });
 }

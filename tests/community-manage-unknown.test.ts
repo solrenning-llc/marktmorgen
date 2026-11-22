@@ -139,6 +139,32 @@ async function main(): Promise<void> {
   await redis.pipeline([["DEL", `nl:cm:${id}:p:${gone}`]]);
   const cleared = await call({ action: "report-hide", key: `p:${gone}` });
   is("a post that is exactly gone: its report is cleared, ok", [cleared.status, cleared.ok, await queued()], [200, true, []]);
+
+  // 3. Every other action reads the setup the same exact way: a lost read is never taken for "not set up", which would
+  // tell a creator whose community is set up to set it up first (independent review of #2997, LOW).
+  const setUp = shape(await readConfig(id));
+  const others: Record<string, unknown>[] = [
+    { action: "settings", name: "Renamed", about: "" },
+    { action: "space-add", name: "Extra", about: "", creatorOnly: false, only: [], level: 0 },
+    { action: "access", products: [product] },
+    { action: "onboarding", questions: ["New?"], welcome: "Hi." },
+    { action: "dismiss", key: `p:${hideMe}` },
+  ];
+  for (const mode of ["cfg-empty", "cfg-queued", "cfg-text"] as const) {
+    for (const body of others) {
+      part(`3. ${String(body.action)} while the setup's read is unknown (${mode})`);
+      lose = mode;
+      const answer = await call(body);
+      lose = "none";
+      is("refused as unavailable, not as not set up", [answer.status, answer.ok, answer.error], [503, false, "setup_read_unavailable"]);
+      is("the setup is unchanged", shape(await readConfig(id)), setUp);
+    }
+  }
+
+  part("3. Control: a setup that is exactly gone is still not set up");
+  await redis.pipeline([["DEL", `nl:cm:${id}:cfg`]]);
+  const unset = await call({ action: "settings", name: "Renamed", about: "" });
+  is("400 not_set_up, nothing written", [unset.status, unset.error, await readConfig(id)], [400, "not_set_up", null]);
   done();
 }
 main();

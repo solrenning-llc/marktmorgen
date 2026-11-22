@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { StudioEmptyState } from "@/components/empty-state";
 import { MIN_SUMMARY_REVIEWS, SUMMARY_REFRESH_SECONDS, type SummaryTheme, summaryLine } from "@/lib/review-ai-summary-rules";
 
 type Kept = { at: number; read: number; themes: SummaryTheme[] } | null;
@@ -30,7 +31,7 @@ const REFUSALS: Record<string, string> = {
  * of the month's AI jobs. AI only names a theme; the counts are the
  * reviewers'. Buyers do not see it yet.
  */
-export function ReviewAiSummaries({ products, now }: { products: Product[]; /** The request's time, in seconds, read once on the server. */ now: number }) {
+export function ReviewAiSummaries({ products, now, canAsk = false }: { products: Product[]; /** The request's time, in seconds, read once on the server. */ now: number; /** True for a role that can switch the review email on: only then is the jump to "Asking for reviews" drawn. */ canAsk?: boolean }) {
   const [shown, setShown] = useState(products);
   const [busy, setBusy] = useState<string | null>(null);
   const [said, setSaid] = useState<Record<string, string>>({});
@@ -146,7 +147,7 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
           })}
         </ul>
       ) : (
-        <p className="mt-2 text-sm text-ink-soft">No product has reviews yet.</p>
+        <StudioEmptyState title="No product has reviews yet" body={`Each product shows here once buyers review it. A summary needs at least ${MIN_SUMMARY_REVIEWS} reviews with words, and you make it when you are ready.`} action={canAsk ? { href: "#asking-for-reviews", label: "Ask buyers for a review" } : undefined} className="mt-3" />
       )}
     </section>
   );

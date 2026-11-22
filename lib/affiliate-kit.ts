@@ -8,7 +8,7 @@
  *   nl:affkit:<statsId>:<YYYY-MM>                  drafts the store's affiliates asked for that month
  *   nl:ai:<statsId>:<YYYY-MM>                      the store's month of writing jobs, which each draft is one of (lib/ai.ts)
  */
-import { windowId } from "@/lib/allowance-window";
+import { windowId, windowKeySeconds } from "@/lib/allowance-window";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { randomUUID } from "node:crypto";
 import { affiliateCampaignLink } from "@/lib/affiliate-promotion";
@@ -19,7 +19,7 @@ import { commissionRate } from "@/lib/affiliate-setting";
 import { readListing, type Listing } from "@/lib/catalog";
 import { readAbout } from "@/lib/product-about";
 import { readPage } from "@/lib/sales-page-store";
-import { pageShown } from "@/lib/sales-page";
+import { pageShown, type SalesPage } from "@/lib/sales-page";
 import { factsFor } from "@/lib/answers";
 import { aiAllowance, aiAvailableFor, aiMonthKey, writeAffiliatePosts } from "@/lib/ai";
 import { storeBase } from "@/lib/purchase-email";
@@ -56,6 +56,20 @@ export function productAffiliateLink(store: Store, product: Pick<Listing, "id" |
 
 export type KitResult = { ok: true; posts: AffiliatePosts; left: number } | { ok: false; reason: "off" | "unknown" | "day" | "month" | "failed" | "unavailable" };
 
+/**
+ * The page a kit is written from: the page as visitors see it, null when it keeps nothing from them, or "unread" when
+ * its read's answer is not known, so no post is drafted from facts with the page left out (C4-20261106-2610-C6-153,
+ * unit B). The same one read as before.
+ */
+export async function kitPageRead(store: Store, product: Listing): Promise<SalesPage | null | "unread"> {
+  try {
+    const page = await readPage(store.statsId, product.id);
+    return pageShown(page) ? page : null;
+  } catch {
+    return "unread";
+  }
+}
+
 /** Drafts one affiliate's three posts about one product, within the limits. */
 export async function draftKit(store: Store, affiliate: Affiliate, productId: string, rawNote: string, now = new Date()): Promise<KitResult> {
   if (!aiAvailableFor(store) || !isRedisConfigured() || !store.statsId || !affiliatesOn(store) || !store.affiliates.kit || affiliate.status !== "approved") return { ok: false, reason: "off" };
@@ -69,13 +83,15 @@ export async function draftKit(store: Store, affiliate: Affiliate, productId: st
   const month = monthKey(store, now);
   const jobs = aiMonthKey(store, now);
   if (!month || !jobs) return { ok: false, reason: "month" };
+  // Kept at least as long as the window they are counted in (Claude 6 on #4561).
+  const kept = windowKeySeconds(store, 40 * 86_400, now.getTime());
   const [today, , thisMonth, , storeMonth] = await redisPipeline([
     ["INCR", day],
     ["EXPIRE", day, 2 * 86_400],
     ["INCR", month],
-    ["EXPIRE", month, 40 * 86_400],
+    ["EXPIRE", month, kept],
     ["INCR", jobs],
-    ["EXPIRE", jobs, 40 * 86_400],
+    ["EXPIRE", jobs, kept],
   ]);
   if (![today, thisMonth, storeMonth].every(value => (typeof value === "number" || (typeof value === "string" && /^\d+$/.test(value))) && Number.isSafeInteger(Number(value)) && Number(value) >= 1)) return { ok: false, reason: "off" };
   const giveBack = () => redisPipeline([["DECR", day], ["DECR", month], ["DECR", jobs]]).catch(() => null);
@@ -88,11 +104,18 @@ export async function draftKit(store: Store, affiliate: Affiliate, productId: st
     return { ok: false, reason: "month" };
   }
   let posts: AffiliatePosts | null = null;
+  let unread = false;
   try {
-    const [about, page] = await Promise.all([readAbout(store.statsId, product.id).catch(() => ""), readPage(store.statsId, product.id).catch(() => null)]);
-    posts = await writeAffiliatePosts(store, { facts: factsFor(store, product, about, page && pageShown(page) ? page : null), note });
+    const [about, page] = await Promise.all([readAbout(store.statsId, product.id).catch(() => ""), kitPageRead(store, product)]);
+    if (page === "unread") unread = true;
+    else posts = await writeAffiliatePosts(store, { facts: factsFor(store, product, about, page), note });
   } catch (error) {
     console.error("drafting an affiliate's posts failed", error);
+  }
+  // The page could not be read: nothing was drafted or spent, so the day's and the month's counts go back.
+  if (unread) {
+    await giveBack();
+    return { ok: false, reason: "unavailable" };
   }
   // Started work may be billed even when no usable text comes back.
   if (!posts) return { ok: false, reason: "failed" };

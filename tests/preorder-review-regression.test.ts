@@ -27,6 +27,9 @@ async function main() {
   redis.pipeline = pipeline;
   redis.clear();
   await pipeline([["SADD", "nl:pre:jobs", ...members]]);
+  // The first store's job has a paid pre-order waiting, so its coming-soon state is what decides it (#2963 lets a job
+  // with nothing left to hand over go on that confirmed reading alone, before any coming-soon read).
+  await pipeline([["HSET", `nl:pre:${stores[0].statsId}:${product.id}`, "cs_test_releasewaiting0001", JSON.stringify({ to: "buyer@example.test", at: 1, pi: "" })]]);
   let commands = 0;
   let healthyRead = false;
   redis.pipeline = async (batch: (string | number)[][]) => {

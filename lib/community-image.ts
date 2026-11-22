@@ -71,7 +71,9 @@ export async function checkCommunityImage(path: string, communityId: string, fil
     await files.del(path).catch(() => {});
     return "too_big";
   }
-  const bytes = await files.firstBytes(path).catch(() => null);
+  // Not caught (CX-123 rule 24): first bytes that could not be read are not a wrong type. The picture is neither
+  // deleted nor refused for it; the caller keeps it for the member to send again, as for a head that failed.
+  const bytes = await files.firstBytes(path);
   const kind = bytes ? sniffPhotoType(bytes) : null;
   const expected = communityImageType(path);
   if (!kind || !(IMAGE_CONTENT_TYPES as readonly string[]).includes(kind) || kind !== found.contentType || kind !== expected) {

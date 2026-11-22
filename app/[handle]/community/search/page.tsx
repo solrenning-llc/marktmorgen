@@ -12,7 +12,7 @@ import { takePublicRequest } from "@/lib/traffic";
 import { CREATOR } from "@/lib/community";
 import { searchRoom } from "@/lib/community-chat";
 import { unreadCount } from "@/lib/community-notify";
-import { visibleSpaces } from "@/lib/community-access";
+import { holdingsOf, visibleSpaces } from "@/lib/community-access";
 import { communityVisitor } from "@/lib/community-page";
 import { type SearchKind, MAX_QUERY_LENGTH, queryWords, search, searchEverything } from "@/lib/community-search";
 import { walkCommunity } from "@/lib/community-walk";
@@ -130,44 +130,60 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   const used = pages?.post.used ?? [];
   // Read, not indexed, so there is nothing that can fall out of step: the room
   // as it is now, and this person's own recent conversations and no one else's.
+  // One that could not be read is unknown (null), never "no match" (CX-123
+  // rule 24): its tab carries no number, and opening it says it was not searched.
+  const unread = <T,>(read: Promise<T[]>) => read.catch((): null => null);
   const [roomHits, dmHits] = used.length
     ? await Promise.all([
-        config.chat.on ? searchRoom(id, used).catch(() => []) : Promise.resolve([]),
-        config.dm.on ? searchMessages(id, key, used).catch(() => []) : Promise.resolve([]),
+        config.chat.on ? unread(searchRoom(id, used)) : Promise.resolve([]),
+        config.dm.on ? unread(searchMessages(id, key, used)) : Promise.resolve([]),
       ])
     : [[], []];
-  const count = (t: Tab) =>
-    t === "room" ? roomHits.length : t === "dm" ? dmHits.length : (pages?.[t].total ?? 0);
+  const count = (t: Tab): number | null =>
+    t === "room" ? (roomHits?.length ?? null) : t === "dm" ? (dmHits?.length ?? null) : (pages?.[t].total ?? 0);
   // Nobody pressed a tab yet, so open the first one holding anything. Landing
   // on an empty Posts tab with four lessons sitting one press away reads as
   // "nothing found", and the member has to notice a small number to learn
   // otherwise. Posts when everything is empty, so the page is never tabless.
-  const tab: Tab = chosen ?? (pages ? (TABS.find((t) => count(t.kind) > 0)?.kind ?? "post") : "post");
+  const tab: Tab = chosen ?? (pages ? (TABS.find((t) => (count(t.kind) ?? 0) > 0)?.kind ?? "post") : "post");
   const empty = { posts: [], next: null, used: [], total: 0 };
   const first = indexed(tab) ? (pages?.[tab] ?? empty) : empty;
   const page = indexed(tab) && before !== null && pages ? await search(id, asked, before, tab) : first;
 
-  const spaces = await visibleSpaces(store, config, { owner, email });
+  const spaces = await visibleSpaces(store, config, { owner, email, holdings: viewer.holdings });
   const mineIds = new Set(spaces.map((s) => s.id));
   // A space this viewer is gated out of hides its posts here too. A post in a
   // space that no longer exists is not gated, and stays findable.
   const shut = new Set(config.spaces.filter((s) => s.only.length && !mineIds.has(s.id)).map((s) => s.id));
 
   // Only the tab being read is opened: the other three are counted, not built.
-  const gate = { owner, email, key };
   const posts =
     tab === "post" && page.posts.length
       ? (await readPosts(id, page.posts)).filter((p) => (owner || !p.hid) && !shut.has(p.sp))
       : [];
-  // Who holds each product or event shown may be asked of Stripe: each check paid before it is made.
-  const checks = tab === "lesson" ? new Set(page.posts.map((ref) => readLessonRef(ref)?.productId ?? "")).size : tab === "event" ? page.posts.length : 0;
-  if (checks && !(await takePublicRequest(store, "buyer", undefined, checkUnits(checks)))) redirect(`/@${store.handle}/resting`);
-  const lessons = tab === "lesson" ? await lessonsFound(store, config, page.posts, gate) : [];
-  const events = tab === "event" ? await eventsFound(store, config, page.posts, gate) : [];
+  // Who holds the products of the lessons or events shown is answered from one reading of what this member holds
+  // (holdingsOf), kept for the community; read and paid for, once, only when none is kept (the pre-review of
+  // 9 November 2026, P1: it was 16 requests for each check, 320 for a page of twenty).
+  const lessonProducts = tab === "lesson" ? [...new Set(page.posts.map((ref) => readLessonRef(ref)?.productId ?? "").filter(Boolean))] : [];
+  const checks = tab === "lesson" ? lessonProducts.length : tab === "event" ? page.posts.length : 0;
+  const holdings = owner || !checks ? viewer.holdings : await holdingsOf(store, config, email, lessonProducts, () => takePublicRequest(store, "buyer", undefined, checkUnits(checks)));
+  if (holdings === "refused") redirect(`/@${store.handle}/resting`);
+  // A door whose products the shared reading ran out of refund questions for reads them on its own, paid as one more check.
+  const gate = { owner, email, key, holdings, pay: () => takePublicRequest(store, "buyer", undefined, checkUnits(1)) };
+  const lessonsRead = tab === "lesson" ? await lessonsFound(store, config, page.posts, gate) : { found: [], unchecked: 0, lasting: false };
+  const eventsRead = tab === "event" ? await eventsFound(store, config, page.posts, gate) : { found: [], unchecked: 0, lasting: false };
+  const lessons = lessonsRead.found;
+  const events = eventsRead.found;
+  // Matches on this page whose answer was not known: not shown, and said as not checked, never as not theirs.
+  const unchecked = lessonsRead.unchecked + eventsRead.unchecked;
+  // Not known for good (more purchases than are read): said with a way to the creator, never "reload the page".
+  const uncheckedForGood = lessonsRead.lasting || eventsRead.lasting;
   const people = tab === "member" ? await membersFound(id, page.posts) : [];
 
-  const talk = tab === "room" ? roomHits.slice(0, SHOWN_TALK) : [];
-  const mine = tab === "dm" ? dmHits.slice(0, SHOWN_TALK) : [];
+  const talk = tab === "room" ? (roomHits ?? []).slice(0, SHOWN_TALK) : [];
+  const mine = tab === "dm" ? (dmHits ?? []).slice(0, SHOWN_TALK) : [];
+  // The tab being read could not be searched: said, never "No match".
+  const unsearched: "room" | "dm" | null = tab === "room" && roomHits === null ? "room" : tab === "dm" && dmHits === null ? "dm" : null;
   // Names for whoever wrote what is listed, never their addresses.
   const talkers = [...talk.map((m) => m.a), ...mine.map((h) => h.other)].filter((a) => a !== CREATOR);
   const [members, numbers, polls] = await Promise.all([
@@ -201,7 +217,7 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   // spans every page: "4 more are in something you do not have" under a page
   // of twenty, with sixty more to come, would be a sentence that is simply
   // false.
-  const held = page.posts.length - shown;
+  const held = Math.max(0, page.posts.length - shown - unchecked);
 
   return (
     <div lang={locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
@@ -247,19 +263,24 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
                     aria-current={on ? "page" : undefined}
                   >
                     {t.label}
-                    <span className="cm-tab-n">{n}</span>
+                    {n === null ? null : <span className="cm-tab-n">{n}</span>}
                   </Link>
                 );
               })}
             </nav>
 
-            <p className="st-muted mt-3 text-sm">
-              {w.found(tab, shown, used.length === 1)}
-              {dropped && used.length ? ` ${w.searchedFor(used.join(", "))}` : ""}
-              {held > 0 ? ` ${w.heldMore(held)}` : ""}
-            </p>
+            {unsearched ? (
+              <p className="cm-flash cm-flash-warn mt-3" role="status">{w.searchUnread(unsearched)}</p>
+            ) : (
+              <p className="st-muted mt-3 text-sm">
+                {w.found(tab, shown, used.length === 1)}
+                {dropped && used.length ? ` ${w.searchedFor(used.join(", "))}` : ""}
+                {held > 0 ? ` ${w.heldMore(held)}` : ""}
+                {unchecked > 0 ? ` ${uncheckedForGood ? w.uncheckedMoreLasting(unchecked) : w.uncheckedMore(unchecked)}` : ""}
+              </p>
+            )}
 
-            {shown === 0 ? (
+            {shown === 0 && !unsearched ? (
               <div className="st-note mt-5 text-center">
                 <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.noMatch}</p>
                 <p className="mt-1 text-sm">
@@ -383,12 +404,12 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
                 search that read the last 500 messages of the room, or 30
                 conversations, should not let somebody think it read everything
                 ever written. */}
-            {tab === "room" ? (
+            {tab === "room" && roomHits ? (
               <p className="st-muted mt-5 text-xs">
                 {`${w.roomSearched(500)}${roomHits.length > SHOWN_TALK ? ` ${w.newestShown(SHOWN_TALK)}` : ""}`}
               </p>
             ) : null}
-            {tab === "dm" ? (
+            {tab === "dm" && dmHits ? (
               <p className="st-muted mt-5 text-xs">
                 {`${w.dmSearched(SEARCH_CONVERSATIONS, SEARCH_MESSAGES)}${dmHits.length > SHOWN_TALK ? ` ${w.newestShown(SHOWN_TALK)}` : ""}`}
               </p>

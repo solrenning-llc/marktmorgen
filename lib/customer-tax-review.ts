@@ -1,4 +1,5 @@
 import { mostCorrectTaxesOf } from './receiving-costs';
+import { isCommercialTermsDigest, termsMatchDigest } from '@/lib/commercial-terms-digest';
 
 /** A reviewed ceiling, not proof of legal facts or permission to sell. No real
  * review is supplied here. Legacy callers retain their historical protection. */
@@ -12,7 +13,8 @@ export const CUSTOMER_TAX_REVIEW_POLICY = Object.freeze({
 } as const);
 export type TaxEvidence = { date: string; source: string; facts: string };
 export type ContractTaxCoverage = {
-  reviewId: string; termsSnapshot: string;
+  /** The digest of the terms (lib/commercial-terms-digest.ts); the contract's context holds their one full text. */
+  reviewId: string; termsDigest: string;
   admissionsFrom: string; admissionsUntil: string; liabilitiesThrough: string;
   evidence: TaxEvidence;
 };
@@ -41,9 +43,47 @@ export type CustomerTaxReview = {
   components: Record<(typeof OTHER_CUSTOMER_TAX_COMPONENTS)[number], Component>;
 };
 
+/** Thrown only by the fast pass, before it touches a node whose reflection or
+ * cloning could run caller code; the checked pass then starts from scratch. */
+const REPLAY_CHECKED = Symbol('replay checked detach');
+let probeCache: ((v: object) => boolean) | null | undefined;
+/** Proxies run traps on reflection; native errors run getters inside
+ * structuredClone, and a Map's or Set's entries (which the copy pass never
+ * sees) are walked by it. Without node:util every call takes the checked pass. */
+function codeRunningProbe(): ((v: object) => boolean) | null {
+  if (probeCache === undefined) {
+    try {
+      const types = typeof process === 'object' && typeof process.getBuiltinModule === 'function'
+        ? process.getBuiltinModule('node:util')?.types : undefined;
+      probeCache = types && typeof types.isProxy === 'function' && typeof types.isNativeError === 'function' &&
+        typeof types.isMap === 'function' && typeof types.isSet === 'function'
+        ? (v: object) => types.isProxy(v) || types.isNativeError(v) || types.isMap(v) || types.isSet(v) : null;
+    } catch { probeCache = null; }
+  }
+  return probeCache;
+}
+
 /** Bound and detach data without invoking getters, iterators or JSON hooks.
- * Work limits are internal review limits; oversize books refuse, never truncate. */
+ * Work limits are internal review limits; oversize books refuse, never truncate.
+ *
+ * Same outcome as structuredClone on every node after its children (the
+ * checked pass), without re-serializing each subtree once per ancestor. The
+ * fast pass reflects only on objects that are not a Proxy, an Error, a Map or
+ * a Set, and runs only while Object.prototype has no own symbol keys (Node
+ * finds a transferable's clone hook by symbol, so an inherited symbol getter
+ * could run inside the clone). Under those conditions no caller code runs and
+ * nothing can change while it copies; one structuredClone of the root then
+ * succeeds exactly when every per-node clone would. On a Proxy, an Error, a
+ * Map or a Set it stops before touching it, and otherwise the checked pass
+ * runs instead. */
 function detached(value: unknown): unknown {
+  const probe = codeRunningProbe();
+  if (probe && Object.getOwnPropertySymbols(Object.prototype).length === 0) {
+    try { return detachedPass(value, probe); } catch (error) { if (error !== REPLAY_CHECKED) throw error; }
+  }
+  return detachedPass(value, null);
+}
+function detachedPass(value: unknown, fast: ((v: object) => boolean) | null): unknown {
   let nodes = 0, bytes = 0;
   const active = new Set<object>();
   function copy(v: unknown, depth: number): unknown {
@@ -57,6 +97,7 @@ function detached(value: unknown): unknown {
       if (v.length > 32_768 || bytes > 512_000) throw Error('review bytes');
       return v;
     }
+    if (fast && v && typeof v === 'object' && fast(v)) throw REPLAY_CHECKED;
     if (!v || typeof v !== 'object' || active.has(v)) throw Error('review data');
     const array = Array.isArray(v), proto = Object.getPrototypeOf(v);
     if (proto !== (array ? Array.prototype : Object.prototype) && !(proto === null && !array)) throw Error('prototype');
@@ -91,11 +132,13 @@ function detached(value: unknown): unknown {
     // reflection may conceal a tax or exchange; reject it before an outer
     // snapshot can lose that evidence. Children are checked first so a Proxy
     // cannot introduce a getter into an earlier branch before it is cloned.
-    structuredClone(v);
+    if (!fast) structuredClone(v);
     active.delete(v);
     return out;
   }
-  return copy(value, 0);
+  const out = copy(value, 0);
+  if (fast && value !== null && typeof value === 'object') structuredClone(value);
+  return out;
 }
 /** A detached evidence pair, never a fiscal approval. Both fields must be
  * explicit own enumerable data; no getter, inherited default or extra field
@@ -127,7 +170,7 @@ function context(v: TaxContext): boolean {
   if (!v || !text(v.scenario) || v.scenario.length > 128 || !day(v.from) || !day(v.through) || (v.months !== 1 && v.months !== 12) || v.from >= v.through) return false;
   if (Object.hasOwn(v, 'contract')) {
     const c = v.contract;
-    if (!c || !text(c.reviewId) || !/^[A-Za-z0-9_-]{1,128}$/.test(c.reviewId) || !text(c.termsSnapshot) || !evidence(c.evidence)) return false;
+    if (!c || !text(c.reviewId) || !/^[A-Za-z0-9_-]{1,128}$/.test(c.reviewId) || !isCommercialTermsDigest(c.termsDigest) || !evidence(c.evidence)) return false;
     const from = timestamp(c.admissionsFrom), until = timestamp(c.admissionsUntil), through = timestamp(c.liabilitiesThrough);
     if (from === null || until === null || through === null || from > until || until >= through) return false;
     return v.from === c.admissionsFrom.slice(0, 10) &&
@@ -143,7 +186,7 @@ function sameContext(a: TaxContext, b: TaxContext): boolean {
   if (a.scenario !== b.scenario || a.from !== b.from || a.through !== b.through || a.months !== b.months) return false;
   if (!Object.hasOwn(a, 'contract') && !Object.hasOwn(b, 'contract')) return true;
   const x = a.contract, y = b.contract;
-  return !!x && !!y && x.reviewId === y.reviewId && x.termsSnapshot === y.termsSnapshot &&
+  return !!x && !!y && x.reviewId === y.reviewId && x.termsDigest === y.termsDigest &&
     x.admissionsFrom === y.admissionsFrom && x.admissionsUntil === y.admissionsUntil && x.liabilitiesThrough === y.liabilitiesThrough &&
     x.evidence.date === y.evidence.date && x.evidence.source === y.evidence.source && x.evidence.facts === y.evidence.facts;
 }
@@ -257,7 +300,7 @@ export function customerTaxContractContextSupported(context: unknown, policy: un
       const c = detached(fields.taxContext) as TaxContext, r = detached(fields.taxReview) as CustomerTaxReview;
       const bound = c?.contract;
       if (!c || !r || !contextValidForContract(c, String(key)) || !sameContext(c, r.scope) || !bound ||
-          bound.reviewId !== own(policy, 'reviewId') || bound.termsSnapshot !== own(context, 'termsSnapshot') ||
+          bound.reviewId !== own(policy, 'reviewId') || !termsMatchDigest(bound.termsDigest, own(context, 'termsSnapshot')) ||
           bound.admissionsUntil !== own(policy, 'admissionsUntil') || bound.liabilitiesThrough !== own(policy, 'liabilitiesThrough')) return false;
       const from = timestamp(bound.admissionsFrom), until = timestamp(bound.admissionsUntil);
       if (from === null || until === null || at < from || at > until) return false;

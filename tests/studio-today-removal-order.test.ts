@@ -37,6 +37,7 @@ import { StatsPanel } from "@/components/stats-panel";
 import { TwoStepManager } from "@/components/two-step-manager";
 import { makePasskey } from "./passkey-world";
 import { store as redis } from "./redis-stub";
+import { readsKey, readsKeyWhere } from "./listing-reads";
 import { done, is, part } from "./check";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
@@ -159,6 +160,8 @@ async function writeOrder(aligned: boolean): Promise<void> {
     return reply;
   };
   const stripePeriod = { current_period_start: startS + 60, current_period_end: startS + 60 + 30 * 86_400 };
+  // The plan line and stop fields Stripe always sends with a subscription (CX-123 rule 24, lib/billing.ts stateOf).
+  const creatorMonth = { lookup_key: "nimbus_labs_creator_month", unit_amount: 6900, recurring: { interval: "month" } };
   const keptFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
@@ -168,8 +171,8 @@ async function writeOrder(aligned: boolean): Promise<void> {
     if (method === "GET" && url.pathname === "/v1/subscriptions/sub_TodayOrder01")
       return Response.json(
         shifted
-          ? { id: "sub_TodayOrder01", status: "active", cancel_at_period_end: false, items: { data: [stripePeriod] } }
-          : { id: "sub_TodayOrder01", status: "trialing", trial_end: startS + 60, cancel_at_period_end: false, items: { data: [{ current_period_start: startS - 86_400, current_period_end: startS + 60 }] } },
+          ? { id: "sub_TodayOrder01", status: "active", cancel_at: null, cancel_at_period_end: false, items: { data: [{ ...stripePeriod, price: creatorMonth }] } }
+          : { id: "sub_TodayOrder01", status: "trialing", trial_end: startS + 60, cancel_at: null, cancel_at_period_end: false, items: { data: [{ current_period_start: startS - 86_400, current_period_end: startS + 60, price: creatorMonth }] } },
       );
     if (method === "GET" && url.pathname === "/v1/subscriptions/sub_TodayAssist01") return Response.json({ id: "sub_TodayAssist01", status: "active", cancel_at_period_end: false, items: { data: [stripePeriod] } });
     if (method === "GET") return Response.json({ object: "list", data: [], has_more: false });
@@ -262,7 +265,9 @@ async function main(): Promise<void> {
   await makePasskey(THIRD, "cred-today-two-step").keep();
   const recordKey = `nl:2fa:${hex(`nimbus-2fa:${THIRD}`).slice(0, 40)}`;
   const reset = Date.now() + 3 * 86_400_000;
-  await redis.pipeline([["SET", recordKey, JSON.stringify({ s: "synthetic-secret", since: Date.now() - 86_400_000, codes: [], last: -1, reset, backup: "" })]]);
+  // In the shape lib/two-step.ts writes: the day is RESET_DAYS after the first request, which came after it was
+  // turned on, so it was on at least four days before that request (a day too close to "since" reads as unknown).
+  await redis.pipeline([["SET", recordKey, JSON.stringify({ s: "synthetic-secret", since: Date.now() - 5 * 86_400_000, codes: [], last: -1, reset, backup: "" })]]);
   const thirdSession = await openSession(THIRD);
   // The page's parts are waited for inside the request, as React waits for them (#2900).
   const render = async (fault: boolean): Promise<{ text: string; twoStep: string[]; invites: number }> => {
@@ -342,8 +347,9 @@ async function main(): Promise<void> {
     let faults = 0;
     redis.pipeline = async (commands) => {
       if (commands.some((c) => c[0] === "INCRBY" && String(c[1]).startsWith("nl:reading:day:"))) spent += 1;
-      if (fault === "shelf" && commands.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:catalog:"))) throw new Error("SYNTHETIC_PRODUCTS_READ_FAULT");
-      if (fault === "listing" && spent > 0 && commands.some((c) => c[0] === "GET" && String(c[1]) === listing)) {
+      // A product record read alone (GET) or among others (MGET, lib/catalog.ts getMany since 10 November 2026).
+      if (fault === "shelf" && commands.some((c) => readsKeyWhere(c, (key) => key.startsWith("nl:catalog:")))) throw new Error("SYNTHETIC_PRODUCTS_READ_FAULT");
+      if (fault === "listing" && spent > 0 && commands.some((c) => readsKey(c, listing))) {
         faults += 1;
         throw new Error("SYNTHETIC_LISTING_READ_FAULT");
       }

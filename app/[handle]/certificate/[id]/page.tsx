@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { SITE_URL } from "@/lib/site-url";
 import { storeKey } from "@/lib/learn";
-import { CERT_ID_PATTERN, type Certificate, linkedInAddUrl, linkedInShareUrl, readCertificate, standingOf } from "@/lib/certificate";
+import { CERT_ID_PATTERN, type Certificate, linkedInAddUrl, linkedInShareUrl, publicName, readCertificate, standingOf } from "@/lib/certificate";
 import { readCourse } from "@/lib/course";
 import { CertificateActions } from "@/components/certificate-actions";
 import { readCourseListing } from "@/lib/catalog";
@@ -15,17 +16,29 @@ import { speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 
 type Params = {
   params: Promise<{ handle: string; id: string }>;
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
-async function load(rawHandle: string, id: string, product: string | undefined) {
+/**
+ * The page and its tab's title share this one load within a request (React
+ * cache), so a page drawn is one of the store's public requests, as every
+ * store page is, and a title asked for alone pays the same. It is taken
+ * before the certificate, or the sample's listing and course, is read, as
+ * the PDF's is (./pdf/route.ts): past them, or when the count cannot be
+ * read, the store rests and nothing more is read (R20 finding 3; the
+ * anonymous-traffic audit, for the title).
+ */
+const load = cache(async (rawHandle: string, id: string, product: string | undefined) => {
   const decoded = decodeURIComponent(rawHandle);
   if (!decoded.startsWith("@")) return null;
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) return null;
+  if (await isResting(store)) return { store, resting: true as const };
   // The sample a creator looks at before any student has finished: the
   // course's real title and the creator's name, a placeholder for the rest.
   if (id === "sample") {
@@ -47,15 +60,15 @@ async function load(rawHandle: string, id: string, product: string | undefined) 
       issuedAt: Math.floor(Date.now() / 1000),
       withdrawnAt: 0,
     };
-    return { store, certificate: sample, sample: true };
+    return { store, certificate: sample, sample: true, resting: false as const };
   }
   if (!CERT_ID_PATTERN.test(id)) return null;
   const certificate = await readCertificate(id);
   // A certificate is only ever shown under the store that issued it, at any
   // address that store has used.
   if (!certificate || certificate.store !== storeKey(store)) return null;
-  return { store, certificate, sample: false };
-}
+  return { store, certificate, sample: false, resting: false as const };
+});
 
 /** The store's language, for a page whose certificate was not found. */
 async function languageOf(rawHandle: string): Promise<unknown> {
@@ -71,12 +84,18 @@ export async function generateMetadata({ params, searchParams }: Params): Promis
   const { handle, id } = await params;
   const query = await searchParams;
   const found = await load(handle, id, typeof query.product === "string" ? query.product : undefined);
+  // A resting store's tab says so, as the resting page's does (../../resting/page.tsx),
+  // in its language from the record the load already read.
+  if (found?.resting) return { title: `${speech(found.store).w.restingTitle} — Marktmorgen`, robots: { index: false, follow: false } };
   if (!found) return { title: coursesWords(await languageOf(handle)).metaCertNotFound, robots: { index: false, follow: false } };
   const { certificate } = found;
   const w = coursesWords(found.store.language);
+  // Withdrawn because its course's payment was given back: no name in the tab or in a link's preview either (DONO-18).
+  const name = publicName(certificate);
+  if (name === null) return { title: w.withdrawnOn(speech(found.store).date(certificate.withdrawnAt * 1000)), robots: { index: false, follow: false } };
   return {
-    title: w.metaCert(certificate.name, certificate.title),
-    description: w.metaCertDescription(certificate.name, certificate.title, certificate.creator),
+    title: w.metaCert(name, certificate.title),
+    description: w.metaCertDescription(name, certificate.title, certificate.creator),
     robots: { index: false, follow: false },
   };
 }
@@ -95,11 +114,16 @@ export default async function CertificatePage({ params, searchParams }: Params) 
   const query = await searchParams;
   const found = await load(handle, id, typeof query.product === "string" ? query.product : undefined);
   if (!found) notFound();
+  if (found.resting) return <StoreResting store={found.store} />;
   const { store, certificate, sample } = found;
   const said = speech(store);
   const w = coursesWords(store.language);
   const withdrawn = certificate.withdrawnAt > 0;
+  // Null once withdrawn because its course's payment was given back (lib/certificate-refunds.ts): the page then says
+  // why, and draws no sheet, so the name is shown nowhere (DONO-18; Claude 2 on #3374).
+  const name = publicName(certificate);
   // A certificate past its validity (639 [GL7](32)) says so, and is still the record of what it certified.
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const expired = !sample && standingOf(certificate, Math.floor(new Date().getTime() / 1000)) === "expired";
   const url = `${SITE_URL}/@${store.handle}/certificate/${certificate.id}`;
   const shortUrl = url.replace(/^https?:\/\//, "");
@@ -120,8 +144,12 @@ export default async function CertificatePage({ params, searchParams }: Params) 
             </div>
           ) : withdrawn ? (
             <div className="rounded-2xl bg-danger-soft px-5 py-4 text-sm text-ink" role="status">
-              <p className="font-bold">{w.withdrawnOn(said.date(certificate.withdrawnAt * 1000))}</p>
-              <p className="mt-1">{w.withdrawnBody(certificate.creator)}</p>
+              {name === null ? (
+                <h1 className="font-bold">{w.withdrawnOn(said.date(certificate.withdrawnAt * 1000))}</h1>
+              ) : (
+                <p className="font-bold">{w.withdrawnOn(said.date(certificate.withdrawnAt * 1000))}</p>
+              )}
+              <p className="mt-1">{name === null ? w.withdrawnRefundBody : w.withdrawnBody(certificate.creator)}</p>
             </div>
           ) : expired ? (
             <div className="rounded-2xl px-5 py-4 text-sm" style={{ background: "var(--st-item)", color: "var(--st-text)" }} role="status">
@@ -152,9 +180,10 @@ export default async function CertificatePage({ params, searchParams }: Params) 
           )}
         </div>
 
+        {name === null ? null : (
         <article
           className={`cert-sheet mx-auto mt-6 ${withdrawn ? "cert-withdrawn" : ""}`}
-          aria-label={w.certAria(certificate.name)}
+          aria-label={w.certAria(name)}
         >
           <div className="cert-frame">
             <div className="cert-head">
@@ -171,7 +200,7 @@ export default async function CertificatePage({ params, searchParams }: Params) 
 
             <h1 className="cert-kicker">{w.kicker}<span className="font-accent">{w.kickerAccent}</span></h1>
             <p className="cert-lead">{w.certifies}</p>
-            <p className="cert-name">{certificate.name}</p>
+            <p className="cert-name">{name}</p>
             <p className="cert-lead">{w.hasCompleted}</p>
             <p className="cert-title">{certificate.title}</p>
             <p className="cert-by">{w.taughtBy(certificate.creator, issued)}</p>
@@ -181,13 +210,15 @@ export default async function CertificatePage({ params, searchParams }: Params) 
                 <span>{"✓"}</span>
               </div>
               <div className="cert-proof">
-                <p>{sample ? w.sampleId : w.certId(certificate.id)}</p>
+                {/* Until when, on the sheet that is printed too, as on the PDF (639 [GL7](32)): an expired one never prints as standing. */}
+                <p>{sample ? w.sampleId : certificate.validUntil ? `${w.certId(certificate.id)} · ${w.validUntil(said.date(certificate.validUntil * 1000))}` : w.certId(certificate.id)}</p>
                 <p>{sample ? w.sampleCheck : w.checkAt(shortUrl)}</p>
               </div>
             </div>
             {sample ? <p className="cert-stamp" aria-hidden="true">{w.stampSample}</p> : withdrawn ? <p className="cert-stamp" aria-hidden="true">{w.stampWithdrawn}</p> : null}
           </div>
         </article>
+        )}
 
         <div className="cert-noprint mt-8 text-center">
           <Link href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">

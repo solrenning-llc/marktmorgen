@@ -155,7 +155,10 @@ test("the sweep continues handing a paid purchase to its list when observation I
   globalThis.fetch = (async input => {
     const url = new URL(String(input));
     assert.equal(url.hostname, "api.stripe.com");
-    if (url.pathname === "/v1/checkout/sessions") providerPages++;
+    // The pages of completed checkouts, which carry the paid ones the journal observes; the sweep's second walk, of
+    // expired checkouts for reminders and workflows, is counted apart (Claude 5, audit A2: before it, one walk of every
+    // status, so this counted every page; tests/checkout-sweep-complete.test.ts holds both walks' cost).
+    if (url.pathname === "/v1/checkout/sessions" && url.searchParams.get("status") === "complete") providerPages++;
     return Response.json({ data: url.pathname === "/v1/checkout/sessions" ? [{
       ...row(), status: "complete", mode: "payment", created: Math.floor(actualNow / 1000),
       metadata: { store: store.handle, product: product.product.id, news: "yes" },
@@ -163,8 +166,9 @@ test("the sweep continues handing a paid purchase to its list when observation I
   }) as typeof fetch;
   try {
     const result = await sweepCheckouts(Date.now() + 20_000, p);
-    assert.equal(providerPages, 6);
-    assert.equal(attempts, 3); // One shared diagnostic pass budget, despite the repeated store.
+    // The repeated key is swept once a run (Codex T on #3064), so its three pages are read once, not twice.
+    assert.equal(providerPages, 3);
+    assert.equal(attempts, 3); // One shared diagnostic pass budget, despite the repeated key.
     assert.equal(result.listed, 1);
     assert.equal((await sweepCheckouts(Date.now() + 20_000)).listed, 0);
     assert.equal(attempts, 3); // No policy in the next real sweep: no extra journal IO.

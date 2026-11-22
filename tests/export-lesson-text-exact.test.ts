@@ -81,8 +81,14 @@ test("an unknown lesson-text answer is never exported as an empty lesson", async
       await assert.rejects(readAllBodies([{ id: courseId, lessons: [withText, withoutText] }]), `${name}: the read refuses`);
       const file = await textOf(storeExport((await storeForEmail(OWNER))!));
       const parsed = JSON.parse(file);
-      assert.equal(parsed.courses, undefined, `${name}: no courses written from an unknown answer`);
-      assert.match(file, /"unreadPart2":"This part could not be read just now/, `${name}: the export says the part could not be read`);
+      // Rule 23 (claude5/store-export-exact): the lessons' text that cannot be read no longer takes the whole part
+      // (products and outlines) with it. The products and the course outlines stay; no course carries a lessonText
+      // written from the unknown answer, and the file says the text could not be read (lessonTextNote), where it
+      // said "unreadPart2" and had no products or courses at all.
+      assert.equal(parsed.courses.length, 1, `${name}: the course outline is kept`);
+      assert.equal("lessonText" in parsed.courses[0], false, `${name}: no lesson text written from an unknown answer`);
+      assert.equal(parsed.products.length, 1, `${name}: the products are kept`);
+      assert.match(file, /"lessonTextNote":"The lessons' text could not be read just now/, `${name}: the export says the text could not be read`);
       assert.doesNotMatch(file, new RegExp(`"${withText}":""`), `${name}: the lesson with text is never written as empty`);
     }
   } finally {

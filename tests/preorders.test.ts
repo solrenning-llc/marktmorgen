@@ -47,7 +47,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "api.stripe.com") {
     const intent = url.pathname.match(/\/v1\/payment_intents\/(pi_\w+)/)?.[1];
     if (intent) return new Response(JSON.stringify({ id: intent, object: "payment_intent", latest_charge: { object: "charge", refunded: refunded.has(intent), amount: 2500, amount_refunded: refunded.has(intent) ? 2500 : 0 } }));
-    if (url.pathname === "/v1/refunds") return new Response(JSON.stringify({ data: refunds }));
+    if (url.pathname === "/v1/refunds") return new Response(JSON.stringify({ object: "list", data: refunds, has_more: false }));
   }
   return new Response("{}", { status: 404 });
 }) as typeof fetch;

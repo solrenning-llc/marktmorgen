@@ -14,10 +14,10 @@ let listed: unknown[] = [];
 let posts = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const path = new URL(String(input)).pathname;
-  if (path === "/v1/balance") return Response.json({ available: [{ amount: 100000, currency: "usd" }] });
+  if (path === "/v1/balance") return Response.json({ object: "balance", available: [{ amount: 100000, currency: "usd" }] });
   if (path === `/v1/invoices/${INV}`) return Response.json({ id: INV, payment_intent: null });
   if (path === "/v1/invoice_payments") return Response.json({ object: "list", has_more: false, data: listed });
-  if (path === `/v1/payment_intents/${PI}`) return Response.json({ id: PI, latest_charge: { id: "ch_GOtherType01", amount: 1000, currency: "usd", amount_refunded: 0, disputed: false } });
+  if (path === `/v1/payment_intents/${PI}`) return Response.json({ id: PI, latest_charge: { id: "ch_GOtherType01", amount: 1000, currency: "usd", amount_refunded: 0, disputed: false, balance_transaction: null } });
   if (path === "/v1/refunds" && init?.method === "POST") {
     posts++;
     const b = new URLSearchParams(String(init.body));
@@ -65,7 +65,9 @@ async function main() {
     listed = order === "unread first" ? rows : rows.reverse();
     const { store } = await seed(order.split(" ")[0]);
     const got = await giveBackUnused(store, DAY, { final: true });
-    is(`${order}: a readable paid intent is refunded once whatever the order`, typeof got === "object" ? [got.failed, got.done.map((x) => x.sub), posts] : got, [0, [SUB], 1]);
+    // A deliberate tightening (Codex L on #4428) of the decision reviewed on #3120, never a loosening: the paid row
+    // that does not read may already have been given back or disputed, so nothing is given back beside it.
+    is(`${order}: a paid row that does not read beside a readable one gives nothing back, and is tried again`, typeof got === "object" ? [got.failed, got.done.map((x) => x.sub), posts] : got, [1, [], 0]);
   }
   listed = [row("open", { type: "payment_intent", payment_intent: PI }), row("canceled", { type: "charge", charge: "ch_GOtherType01" })];
   const { store } = await seed("unpaid");

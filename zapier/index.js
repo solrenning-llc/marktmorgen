@@ -79,9 +79,101 @@ const readResult = (response, z, { one = false, matches = () => true } = {}) => 
   return data;
 };
 
+/**
+ * How a message from the store's webhooks is known to be one (lib/webhooks.ts,
+ * `signature`): its Marktmorgen-Signature header is "t=<seconds>,v1=<hex>",
+ * the hex HMAC-SHA256 of "<seconds>.<raw body>" under the secret the Zap kept
+ * when it subscribed, with a second v1 under the old secret for a day after
+ * the creator makes a new one. A message is passed on only when one v1
+ * matches and its time is within SIGNATURE_TOLERANCE_SECONDS of now, either
+ * way. The server sets no number of its own (it signs at each try, a retry
+ * included, and gives up on a try after 8 seconds); five minutes is the
+ * window Stripe's scheme, which this one follows, checks.
+ *
+ * Repeats are not ignored here: Zapier runs this once per message with no
+ * memory between runs, so knowing an event id was already passed on would
+ * need storage this app does not have (docs/zapier-app.md).
+ */
+const SIGNATURE_TOLERANCE_SECONDS = 300;
+
+/** A header from Zapier's rawRequest, whose names come as "Http-Name", in any case. */
+const headerOf = (headers, name) => {
+  if (!plain(headers)) return undefined;
+  const wanted = [name, `http-${name}`];
+  const key = Object.keys(headers).find((k) => wanted.includes(k.toLowerCase()));
+  return key === undefined ? undefined : headers[key];
+};
+
+/** The time and every v1 of a signature header, or null when it is not that shape. */
+const parseSignature = (header) => {
+  if (typeof header !== "string") return null;
+  let t = null;
+  const v1 = [];
+  for (const part of header.split(",")) {
+    const at = part.indexOf("=");
+    const name = part.slice(0, at);
+    const value = part.slice(at + 1);
+    if (name === "t" && t === null && /^[0-9]{1,12}$/.test(value)) t = Number(value);
+    else if (name === "v1" && /^[0-9a-f]{64}$/.test(value)) v1.push(value);
+    else return null;
+  }
+  return t === null || v1.length === 0 ? null : { t, v1 };
+};
+
+const hmacHex = async (secret, payload) => {
+  const subtle = globalThis.crypto && globalThis.crypto.subtle;
+  if (!subtle) return null;
+  const encode = (value) => new TextEncoder().encode(value);
+  const key = await subtle.importKey("raw", encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await subtle.sign("HMAC", key, encode(payload)));
+  return Array.from(mac, (byte) => byte.toString(16).padStart(2, "0")).join("");
+};
+
+/** Equal hex of equal length, compared in time that does not depend on where they differ. */
+const sameHex = (a, b) => {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+};
+
+/** Halts the run before the Zap: shown in its history, and never counted toward turning it off. */
+const notPassedOn = (z, why) => {
+  const Halted = z.errors.HaltedError || z.errors.Error;
+  throw new Halted(`This message was not passed on: ${why}`, "unsigned_event", 401);
+};
+
+/** The message, parsed from the very bytes that were signed, once its signature and time check out. */
+const verifiedMessage = async (z, bundle) => {
+  const secret = bundle.subscribeData && bundle.subscribeData.secret;
+  const raw = bundle.rawRequest;
+  if (!text(secret)) notPassedOn(z, "this Zap has no signing secret. Turn it off and on again.");
+  if (!plain(raw) || typeof raw.content !== "string") notPassedOn(z, "its body could not be read to check its signature.");
+  const signed = parseSignature(headerOf(raw.headers, "marktmorgen-signature"));
+  if (!signed) notPassedOn(z, "it has no Marktmorgen signature.");
+  if (Math.abs(Math.floor(Date.now() / 1000) - signed.t) > SIGNATURE_TOLERANCE_SECONDS) notPassedOn(z, "it was not signed within the last 5 minutes.");
+  const expected = await hmacHex(secret, `${signed.t}.${raw.content}`);
+  if (!expected) notPassedOn(z, "its signature could not be checked here.");
+  let matched = false;
+  for (const candidate of signed.v1) matched = sameHex(candidate, expected) || matched;
+  if (!matched) notPassedOn(z, "its signature does not match this Zap's secret.");
+  try {
+    return JSON.parse(raw.content);
+  } catch {
+    return notPassedOn(z, "its signed body is not JSON.");
+  }
+};
+
 /** What each action's answer must be, exactly as lib/api-write.ts gives it. */
 const SUBSCRIBER = (data) => text(data.email) && (data.status === "added" || data.status === "already");
 const LABELS = (data) => text(data.email) && Array.isArray(data.labels) && data.labels.every((label) => typeof label === "string");
+/** A code as lib/api-codes.ts codeOut gives it: made, switched on, and with what it takes off. */
+const CODE = (data) =>
+  text(data.id) &&
+  text(data.code) &&
+  data.active === true &&
+  plain(data.off) &&
+  ((data.off.kind === "percent" && Number.isInteger(data.off.percent)) || (data.off.kind === "amount" && Number.isInteger(data.off.amount_cents) && text(data.off.currency)));
 const ACCESS = (data) => text(data.email) && text(data.product) && (data.status === "given" || data.status === "already") && typeof data.emailed === "boolean";
 
 const authentication = {
@@ -249,7 +341,9 @@ const hookTrigger = (spec) => ({
       const response = await z.request({ url: `${API}/hooks`, method: "POST", body: { url: bundle.targetUrl, events: [spec.event] } });
       return hookResult(response, z, (data) =>
         typeof data.id === "string" && /^we_[0-9a-f]{16}$/.test(data.id) &&
-        Array.isArray(data.events) && data.events.length === 1 && data.events[0] === spec.event,
+        Array.isArray(data.events) && data.events.length === 1 && data.events[0] === spec.event &&
+        // Kept as subscribeData: every message is checked against it.
+        text(data.secret),
       );
     },
     performUnsubscribe: async (z, bundle) => {
@@ -258,8 +352,8 @@ const hookTrigger = (spec) => ({
       return hookResult(response, z, (data) => typeof id === "string" && /^we_[0-9a-f]{16}$/.test(id) && data.id === id && data.status === "removed");
     },
     perform: async (z, bundle) => {
-      const body = bundle.cleanedRequest;
-      return body && body.type === spec.event ? [body] : [];
+      const body = await verifiedMessage(z, bundle);
+      return plain(body) && body.type === spec.event ? [body] : [];
     },
     performList: async (z) => {
       const response = await z.request({ url: `${API}/events`, params: { type: spec.event, limit: 3 } });
@@ -371,6 +465,48 @@ const giveAccess = {
   },
 };
 
+/**
+ * A discount code on the creator's own Stripe account, made exactly as the
+ * studio makes one (POST /api/v1/codes, lib/discount-input.ts readCodeAsked):
+ * the same letters, limits and refusals, and only while the store is taking
+ * payments. Letters already used on that account are refused as taken, so a
+ * Zap run twice never makes two codes.
+ */
+const createDiscountCode = {
+  key: "create_discount_code",
+  noun: "Discount Code",
+  display: {
+    label: "Create Discount Code",
+    description: "Makes a discount code on your own Stripe account, as making one in your studio does.",
+  },
+  operation: {
+    inputFields: [
+      { key: "code", label: "Code", required: true, type: "string", helpText: "The letters buyers type at checkout, such as SPRING20." },
+      { key: "kind", label: "Takes Off", required: false, choices: { percent: "A percent of the price", amount: "An amount of money" }, default: "percent" },
+      { key: "percent", label: "Percent Off", required: false, type: "string", helpText: "A whole number from 1 to 100. Used when it takes off a percent." },
+      { key: "amount", label: "Amount Off", required: false, type: "string", helpText: "In your store's currency, such as 10 or 9.50. Used when it takes off an amount." },
+      { key: "uses", label: "Times It Can Be Used", required: false, type: "integer", helpText: "Leave empty for no limit." },
+      { key: "minimum", label: "Smallest Order", required: false, type: "string", helpText: "In your store's currency. Leave empty for any order." },
+    ],
+    perform: async (z, bundle) => {
+      const input = bundle.inputData || {};
+      const given = (value) => (value === undefined || value === null || value === "" ? null : String(value));
+      const body = { code: given(input.code) || "" };
+      if (input.kind === "amount") {
+        body.kind = "amount";
+        body.amount = given(input.amount) || "";
+      } else {
+        body.percent = given(input.percent) || "";
+      }
+      if (given(input.uses)) body.uses = given(input.uses);
+      if (given(input.minimum)) body.minimum = given(input.minimum);
+      const response = await z.request({ url: `${API}/codes`, method: "POST", body });
+      return hookResult(response, z, CODE);
+    },
+    sample: { id: "promo_1Q2w3E4r5T6y7U8i", code: "SPRING20", off: { kind: "percent", percent: 20 }, times_redeemed: 0, max_redemptions: null, expires_at: null, active: true, minimum: null, first_order: false, duration: null, other_rules: false },
+  },
+};
+
 const byKey = (list) => Object.fromEntries(list.map((item) => [item.key, item]));
 
 module.exports = {
@@ -381,7 +517,7 @@ module.exports = {
   afterResponse: [explain],
   triggers: byKey(triggers),
   searches: {},
-  creates: byKey([addSubscriber, changeLabels, giveAccess]),
+  creates: byKey([addSubscriber, changeLabels, giveAccess, createDiscountCode]),
   resources: {},
   // For the site's own checks: which events the triggers stand for.
   EVENTS: EVENTS.map((e) => ({ key: e.key, event: e.event })),

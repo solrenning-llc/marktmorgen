@@ -167,12 +167,12 @@ async function main(): Promise<void> {
   await upsertContact(LIST, "gone@example.com", { agreed: true, explicit: true, source: "buyer" }, ROOM);
   await stopWriting(LIST, "gone@example.com", "complained");
   const file = await buyerAudience({ ...store, listId: LIST });
-  is("only buyers who agreed and are still on the list, one address a line", [file.csv, file.rows], ["email\r\na@example.com\r\nb@example.com\r\n", 2]);
+  is("only buyers who agreed and are still on the list, one address a line", [file.csv, file.rows], ['email\r\n"a@example.com"\r\n"b@example.com"\r\n', 2]);
   is("an empty file still has its header", audienceCsv([]), "email\r\n");
 
   part("The month's goal");
   is("a goal is a whole positive amount, or 0 for none", [readGoal(300000), readGoal(0), readGoal(-1), readGoal(1.5), readGoal("x")], [300000, 0, null, null, null]);
-  await setSalesGoal(store.statsId!, 300_000, "usd", Date.parse("2026-10-01T03:00:00Z"));
+  await setSalesGoal(store, 300_000, "usd", Date.parse("2026-10-01T03:00:00Z"));
   is("kept for the store, with the month it was set in", await readSalesGoal(store.statsId, "usd"), { cents: 300_000, since: "2026-10" });
   is("and not read as a goal in another currency", await readSalesGoal(store.statsId, "jpy"), { cents: 0, since: "" });
   const channelDays = { instagram: { "2026-10-01": 50_000, "2026-10-05": 40_000, "2026-09-30": 99_000 }, direct: { "2026-10-05": 10_000 } };
@@ -265,18 +265,18 @@ async function main(): Promise<void> {
 
   part("Slack and Discord");
   is("only a Slack or Discord webhook address is taken", [chatKind(SLACK), chatKind(DISCORD), chatKind("https://example.com/hook"), chatKind("http://hooks.slack.com/services/T0000/B0000/abcdefghijk"), chatKind("https://discord.com.evil.io/api/webhooks/123456/abcdefghijklmnopqrstuvwxyz")], ["slack", "discord", null, null, null]);
-  is("anything else is refused before a request is made", [await setChatAddress(store.statsId!, "Harbor Kitchen", "https://127.0.0.1/x"), posted.length], ["invalid", 0]);
+  is("anything else is refused before a request is made", [await setChatAddress(store.statsId!, "Harbor Kitchen", "https://127.0.0.1/x", store), posted.length], ["invalid", 0]);
   chatAnswers = 404;
-  is("an address the chat will not post to is not kept", [await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK), await chatSetup(store.statsId)], ["refused", null]);
+  is("an address the chat will not post to is not kept", [await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK, store), await chatSetup(store.statsId)], ["refused", null]);
   chatAnswers = 200;
-  is("one that took a first message is kept", [await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK), await chatSetup(store.statsId), await chatAddress(store.statsId)], ["saved", "slack", SLACK]);
+  is("one that took a first message is kept", [await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK, store), await chatSetup(store.statsId), await chatAddress(store.statsId)], ["saved", "slack", SLACK]);
   const [kept] = await redisPipeline([["GET", `nl:chatsum:${store.statsId}`]]);
   is("sealed, never as given", [typeof kept, String(kept).includes("hooks.slack.com")], ["string", false]);
   is("Slack's marks escaped, so a name cannot ping a channel", chatBody("slack", "<!channel> & co"), { text: "&lt;!channel&gt; &amp; co" });
   is("Discord pings nobody and stays under its length", [chatBody("discord", "@everyone").allowed_mentions, String(chatBody("discord", "x".repeat(3000)).content).length], [{ parse: [] }, 1986]);
   is("the email's lines about stopping it are not posted", forChat("Sales: 3\n\nYou get this every Monday while your store has visitors. To stop it: https://x"), "Sales: 3");
   is("kept by the store, not by its address, so another store with the same handle never reaches the channel", [await chatAddress("harbor"), await chatAddress(null)], [null, null]);
-  is("forgotten when emptied", [await setChatAddress(store.statsId!, "Harbor Kitchen", ""), await chatSetup(store.statsId)], ["removed", null]);
+  is("forgotten when emptied", [await setChatAddress(store.statsId!, "Harbor Kitchen", "", store), await chatSetup(store.statsId)], ["removed", null]);
 
   done();
 }

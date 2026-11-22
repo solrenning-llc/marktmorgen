@@ -71,7 +71,7 @@ test("a free trial is one window from the day it began; no plan, an ended plan a
 });
 
 test("the period is read from Stripe's subscription, on the item first, and none while trialing", () => {
-  const sub = { status: "active", items: { data: [{ current_period_start: s(at(2026, 10, 19)), current_period_end: s(at(2026, 11, 19)), price: { unit_amount: 2200, recurring: { interval: "month" } } }] } };
+  const sub = { status: "active", cancel_at: null, cancel_at_period_end: false, items: { data: [{ current_period_start: s(at(2026, 10, 19)), current_period_end: s(at(2026, 11, 19)), price: { unit_amount: 2200, recurring: { interval: "month" } } }] } };
   const state = stateOf(sub);
   assert.equal(state.state, "active");
   assert.deepEqual(state.state === "active" ? state.period : null, { start: s(at(2026, 10, 19)), end: s(at(2026, 11, 19)), renews: true });

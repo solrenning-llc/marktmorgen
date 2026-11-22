@@ -9,6 +9,7 @@
  */
 import { createHash } from "node:crypto";
 import inventory from "@/docs/accessibility-inventory.json";
+import { STATEMENT_REVIEWS } from "@/lib/accessibility-statement-reviews";
 
 /** A test that runs in the CI on each proposed change and every day, in the words the page uses, and where it runs. */
 export type AccessibilityCheck = {
@@ -42,10 +43,10 @@ export const ACCESSIBILITY_CHECKS: readonly AccessibilityCheck[] = [
   },
   {
     name: "The studio",
-    what: "Two studio pages, the studio's front page and its list of pages, viewed only (nothing is saved), in Chromium, Firefox and WebKit.",
+    what: "Thirteen studio screens, viewed only (nothing is saved), in Chromium, Firefox and WebKit: the studio's front page and its list of pages at five screen widths from 320 to 1920 pixels, and eleven more (the site, people, email, numbers, adding, forms, funnels, deals, reviews, the checkup and the team) on a narrow and a wide screen.",
     workflow: ".github/workflows/accessibility-studio-matrix.yml",
     script: "tests/e2e/accessibility-studio-matrix.mjs",
-    proof: [ENGINES, ...AAA_RULES, "Two authenticated read-only studio/editor surfaces only"],
+    proof: [ENGINES, ...AAA_RULES, '["site","people","email","totals","add","forms","funnels","deals","reviews","checkup","team"]', "[320,1280]", "Thirteen authenticated read-only studio screens"],
   },
   {
     name: "Products",
@@ -71,7 +72,7 @@ export const ACCESSIBILITY_CHECKS: readonly AccessibilityCheck[] = [
 ];
 
 type Gap = { area: string; status: string; publicWording: string };
-type Inventory = { openWork: Gap[]; pageTemplates: { status: string }[] };
+type Inventory = { openWork: Gap[]; pageTemplates: { status: string; routeTemplate: string }[] };
 
 /** Every open item the inventory records, in the plain words it keeps for this page. */
 export function accessibilityGaps(): { area: string; words: string }[] {
@@ -87,16 +88,29 @@ export function reviewCounts(): { total: number; reviewed: number } {
   return { total: templates.length, reviewed: templates.filter((t) => t.status === REVIEWED_STATUS).length };
 }
 
-/** A fingerprint of everything the page takes from the records; when it changes, the review date must change too. */
-export function statementDigest(): string {
-  const { openWork, pageTemplates } = inventory as Inventory;
-  const basis = JSON.stringify({ openWork, statuses: pageTemplates.map((t) => t.status), checks: ACCESSIBILITY_CHECKS });
-  return createHash("sha256").update(basis).digest("hex").slice(0, 16);
-}
+const fingerprint = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
 
 /**
- * The page's "last updated" date and the records it was reviewed against.
- * tests/accessibility-statement.test.ts fails when the records change and this
- * is not reviewed again (DA1 (b)).
+ * A fingerprint of each record the page takes, one a record: each page template's status ("page:" and its route),
+ * each open item ("open:" and its area) and each check ("check:" and its name). When one changes, its own review line
+ * in lib/accessibility-statement-reviews.ts must change too (DA1 (b)); a change to another record never touches it, so
+ * two changes to different records never edit the same line (Proposal 2, BROADCAST-282).
  */
-export const STATEMENT_REVIEW = { date: "November 7, 2026", digest: "d1d5babaf7654f2d" } as const;
+export function statementParts(): Record<string, string> {
+  const { openWork, pageTemplates } = inventory as Inventory;
+  const parts: Record<string, string> = {};
+  for (const template of pageTemplates) parts[`page:${template.routeTemplate}`] = fingerprint({ status: template.status });
+  for (const item of openWork) parts[`open:${item.area}`] = fingerprint(item);
+  for (const check of ACCESSIBILITY_CHECKS) parts[`check:${check.name}`] = fingerprint(check);
+  return parts;
+}
+
+export { STATEMENT_REVIEWS };
+
+/**
+ * The page's "last updated" date: the latest of its review lines. tests/accessibility-statement.test.ts fails when a
+ * record changes and its line is not reviewed again (DA1 (b)).
+ */
+export const STATEMENT_REVIEW = {
+  date: Object.values(STATEMENT_REVIEWS).map((line) => line.date).sort((a, b) => Date.parse(a) - Date.parse(b)).at(-1) ?? "",
+} as const;

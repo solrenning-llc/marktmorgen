@@ -33,6 +33,7 @@ import { NextRequest } from "next/server";
 import { paidPeriod } from "./billing-period-fixture";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { paidIntentReply } from "./paid-intent-standin";
 
 type Command = (string | number)[];
 
@@ -86,6 +87,9 @@ const SUB = "sub_CardGate000001";
 const CUSTOMER = "cus_CardGate00001";
 const ACCOUNT = "acct_1NumberGatesAAA";
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  // The payment a purchase for several is read with before it is settled (lib/group-buy.ts settleGroup): paid, not given back.
+  const paid = paidIntentReply(input, init?.method ?? "GET");
+  if (paid) return paid;
   const url = new URL(String(input instanceof Request ? input.url : input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "api.resend.com") {
@@ -128,6 +132,20 @@ const SET_INCR_UNKNOWN: [string, unknown][] = [
   ["a count that is not whole", ["OK", 1.5]],
   ["a reply that is not a list", { x: 1 }],
   ["a reply cut short", ["OK"]],
+  ["an empty reply", []],
+  ["a counter that never answers", "throw"],
+];
+
+/** Replies of a window count (lib/window-count.ts: INCR, then EXPIRE NX) that are not a confirmed count. */
+const WINDOW_COUNT_UNKNOWN: [string, unknown][] = [
+  ["an EXPIRE answered false", [1, false]],
+  ["a count that is null", [null, 1]],
+  ["a count written as text", ["1", 1]],
+  ["a count of zero after INCR", [0, 1]],
+  ["a count that is true", [true, 1]],
+  ["a count that is not whole", [1.5, 1]],
+  ["a reply that is not a list", { x: 1 }],
+  ["a reply cut short", [1]],
   ["an empty reply", []],
   ["a counter that never answers", "throw"],
 ];
@@ -212,7 +230,7 @@ async function main(): Promise<void> {
     let n = 0;
     const ask = () => outcome(() => askPlace({ store, id, email: `place${(n += 1)}@numbergates.example`, product, base: BASE, from: FROM, ordersLink: async () => null }));
     const isTaken = (commands: Command[]) => commands.length === 3 && commands[0]?.[0] === "HEXISTS" && commands[1]?.[0] === "HLEN" && key(commands[1]).startsWith("nl:grp:");
-    const isMail = (commands: Command[]) => commands[0]?.[0] === "SET" && /^nl:grp:.+:mail$/.test(key(commands[0]));
+    const isMail = (commands: Command[]) => commands[0]?.[0] === "INCR" && /^nl:grp:.+:mail$/.test(key(commands[0]));
     const after = (from: number) => seen.slice(from).filter((c) => (c[0] === "INCR" && /:mail$/.test(key(c))) || key(c).startsWith("nl:grp:take:")).length;
     for (const [label, reply] of [
       ["a membership answered as text", ["0", 0, null]],
@@ -238,7 +256,7 @@ async function main(): Promise<void> {
       const [sent, from] = [mails.length, seen.length];
       is("places taken, a read that never answers: thrown to the route, which says unavailable; no email, nothing kept", [await ask(), mails.length - sent, after(from)], ["threw Error", 0, 0]);
     }
-    for (const [label, reply] of SET_INCR_UNKNOWN) {
+    for (const [label, reply] of WINDOW_COUNT_UNKNOWN) {
       counter = { match: isMail, reply };
       const [calls, sent, from] = [counterCalls, mails.length, seen.length];
       const got = await ask();
@@ -250,7 +268,7 @@ async function main(): Promise<void> {
     is("places taken confirmed as all of them: full, as before", await ask(), "full");
     counter = { match: isTaken, reply: [1, 2, null] };
     is("an address's own mark with nothing given is not counted against it: a new link", await ask(), "sent");
-    counter = { match: isMail, reply: [null, 10_000] };
+    counter = { match: isMail, reply: [10_000, 0] };
     is("links sent confirmed past the day's number: slow, as before", await ask(), "slow");
     counter = null;
     const sent = mails.length;
@@ -390,7 +408,9 @@ async function main(): Promise<void> {
       .keys()
       .filter((k) => k.startsWith("nl:orders:open:") && !k.endsWith(":b"))
       .reduce((sum, k) => sum + (redis.run(["HVALS", k]) as string[]).reduce((n, v) => n + Number(v), 0), 0);
-  const ordersCounted = (from: number) => seen.slice(from).filter((c) => c[0] === "INCR" && key(c).startsWith("nl:orders:n:")).length;
+  // An order's count is sent as one step with its mark (lib/orders.ts, COUNT_ORDER: its count key, then 1 to count).
+  const ordersCounted = (from: number) => seen.slice(from).filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:orders-count:v1\n") &&
+    String(c[4]).startsWith("nl:orders:n:") && String(c[7]) === "1").length;
   /** The page's notice after an open that threw, for a link that is one. */
   const noticeAfterThrow = (token: string) => placeNotice({ token, tokenValid: true, taken: null, threw: true, status: "" });
 

@@ -6,6 +6,7 @@ import { productIds, readListings } from "@/lib/catalog";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { can } from "@/lib/team-roles";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { canWrite } from "@/lib/mail";
 import { HIDDEN_RULE, OVERVIEW_READ_MAX, type StudioRow, averageText, reviewsSince, showsRating, studioReviews, summaries } from "@/lib/reviews";
@@ -60,6 +61,7 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
   const asked = Number(typeof query.page === "string" ? query.page : "1");
   const page = Number.isInteger(asked) && asked >= 1 ? asked : 1;
   // The request's own time, read once on the server, for the months below (636 [GL4](c)).
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const now = new Date().getTime();
   const [list, numbers, recent] = await Promise.all([
     studioReviews(store.statsId, { queue, offset: (page - 1) * PAGE_SIZE, limit: PAGE_SIZE }).catch(() => null),
@@ -121,7 +123,7 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Reviews</p>
+        <StudioTrail store={store} here="Reviews" />
         <h1 className="t-h2 mt-3">What your buyers say</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Only people who paid can review, from their thank-you page, their list of purchases or the email that asks. Each
@@ -294,7 +296,7 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
                 <h2 id="ai-summaries-title" className="font-semibold text-ink">AI review summaries</h2>
                 <p role="status" className="mt-2 text-sm text-ink-soft">Review summaries couldn&apos;t be loaded. Reload to try again.</p>
               </section>
-            ) : <ReviewAiSummaries products={aiSummaries} now={Math.floor(now / 1000)} />}
+            ) : <ReviewAiSummaries products={aiSummaries} now={Math.floor(now / 1000)} canAsk={can(view.role, "settings")} />}
 
             <div className="card p-5 sm:p-6">
               <h2 id="asking-for-reviews" tabIndex={-1} className="font-semibold text-ink">Asking for reviews</h2>

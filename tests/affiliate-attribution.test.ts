@@ -215,7 +215,7 @@ test("the click wins over the code, always", () => {
   const src = readFileSync(join(process.cwd(), "lib/affiliates.ts"), "utf8");
   const start = src.indexOf("export async function noteSession");
   assert.ok(start > 0, "noteSession should exist");
-  const body = src.slice(start, start + 3_000);
+  const body = src.slice(start, src.indexOf("export async function noteCharge"));
   const cookie = body.indexOf("meta.via");
   const code = body.indexOf("affiliateForCodes");
   assert.ok(cookie > 0 && code > 0, "both paths should be in noteSession");
@@ -251,8 +251,8 @@ test("the sweep looks at codes too, or a sale with no click is never written dow
   );
   assert.match(
     sweep,
-    /codeOwners\(store\), listPartners\(store\)/,
-    "reading the store's given-away codes and its partners once, not once per order",
+    /Promise\.all\(\[\s*coded \? codeOwners\(store\)[^\n]*\n\s*listPartners\(store\)/,
+    "reading the store's given-away codes (only for a page with a code on it) and its partners once, not once per order",
   );
 });
 

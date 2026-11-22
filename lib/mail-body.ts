@@ -52,7 +52,7 @@ export function hasPlaceholder(text: string): boolean {
  * the same address with the email's tag on it (lib/mail-links.ts). The reader
  * always sees what the creator typed.
  */
-function linked(text: string, goesTo?: (href: string) => string): string {
+function linked(text: string, goesTo?: (href: string) => string, link = "#4c1d95"): string {
   return text
     .split(URL_PATTERN)
     .map((part, i) => {
@@ -60,7 +60,7 @@ function linked(text: string, goesTo?: (href: string) => string): string {
       // "…at https://example.com/plan." — the full stop belongs to the sentence.
       const tail = part.match(TRAILING)?.[0] ?? "";
       const href = tail ? part.slice(0, -tail.length) : part;
-      return `<a href="${escape(goesTo ? goesTo(href) : href)}" style="color:#4c1d95;text-decoration:underline">${escape(href)}</a>${escape(tail)}`;
+      return `<a href="${escape(goesTo ? goesTo(href) : href)}" style="color:${link};text-decoration:underline">${escape(href)}</a>${escape(tail)}`;
     })
     .join("");
 }
@@ -157,18 +157,29 @@ function buttonColours(accent: string): { fill: string; ink: string } {
 }
 
 /**
+ * The colors and heading letters of an email that wears its store's look
+ * (lib/email-theme.ts, 369 [SU2]), each already checked to read at 7:1 on the
+ * card it is drawn on.
+ */
+export type BodyPaint = { text: string; link: string; line: string; headFont: string; button: { fill: string; ink: string } };
+
+/**
  * The creator's text as HTML: headings, paragraphs, lists, links, buttons,
  * lines across and the pictures kept for it, nothing else. `accent` is the
- * starting colour of a button, adjusted only when its text cannot reach 7:1.
+ * starting colour of a button, adjusted only when its text cannot reach 7:1;
+ * `paint`, when given, draws it in the store's email colors instead.
  */
-export function bodyHtml(body: string, goesTo?: (href: string) => string, accent = "#4c1d95"): string {
-  const colors = buttonColours(accent);
+export function bodyHtml(body: string, goesTo?: (href: string) => string, accent = "#4c1d95", paint?: BodyPaint): string {
+  const colors = paint ? paint.button : buttonColours(accent);
+  const link = paint?.link ?? "#4c1d95";
+  const headingStyle = paint ? `color:${paint.text};font-family:${paint.headFont}` : "color:#1c1917";
+  const lineColor = paint?.line ?? "#e7e5e4";
   const out: string[] = [];
   let pictures = 0;
   for (const block of parseMailBlocks(body)) {
     switch (block.kind) {
       case "heading":
-        out.push(`<h2 style="margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:700;color:#1c1917">${escape(block.text)}</h2>`);
+        out.push(`<h2 style="margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:700;${headingStyle}">${escape(block.text)}</h2>`);
         break;
       case "button": {
         const href = goesTo ? goesTo(block.href) : block.href;
@@ -178,7 +189,7 @@ export function bodyHtml(body: string, goesTo?: (href: string) => string, accent
         break;
       }
       case "divider":
-        out.push(`<hr style="margin:24px 0;border:0;border-top:1px solid #e7e5e4">`);
+        out.push(`<hr style="margin:24px 0;border:0;border-top:1px solid ${lineColor}">`);
         break;
       case "picture": {
         const picture = pictures < MAX_MAIL_PICTURES ? readPicture(block.line) : null;
@@ -188,20 +199,20 @@ export function bodyHtml(body: string, goesTo?: (href: string) => string, accent
             `<p style="margin:0 0 16px"><img src="${escape(picture.url)}" alt="${escape(picture.alt)}" width="512" style="display:block;width:100%;max-width:512px;height:auto;border:0;border-radius:12px"></p>`,
           );
         } else {
-          out.push(`<p style="margin:0 0 16px">${linked(block.line, goesTo)}</p>`);
+          out.push(`<p style="margin:0 0 16px">${linked(block.line, goesTo, link)}</p>`);
         }
         break;
       }
       case "list":
-        out.push(`<ul style="margin:0 0 16px;padding-left:22px">${block.items.map((item) => `<li style="margin:0 0 6px">${linked(item, goesTo)}</li>`).join("")}</ul>`);
+        out.push(`<ul style="margin:0 0 16px;padding-left:22px">${block.items.map((item) => `<li style="margin:0 0 6px">${linked(item, goesTo, link)}</li>`).join("")}</ul>`);
         break;
       case "text": {
         // A paragraph that mixes lines and points keeps both, in order.
         let para: string[] = [];
         let list: string[] = [];
         const flush = () => {
-          if (para.length) out.push(`<p style="margin:0 0 16px">${linked(para.join("\n"), goesTo)}</p>`);
-          if (list.length) out.push(`<ul style="margin:0 0 16px;padding-left:22px">${list.map((l) => `<li style="margin:0 0 6px">${linked(l, goesTo)}</li>`).join("")}</ul>`);
+          if (para.length) out.push(`<p style="margin:0 0 16px">${linked(para.join("\n"), goesTo, link)}</p>`);
+          if (list.length) out.push(`<ul style="margin:0 0 16px;padding-left:22px">${list.map((l) => `<li style="margin:0 0 6px">${linked(l, goesTo, link)}</li>`).join("")}</ul>`);
           para = [];
           list = [];
         };

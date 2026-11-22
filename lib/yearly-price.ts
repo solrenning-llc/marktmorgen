@@ -31,7 +31,7 @@ export function parseYearly(raw: unknown): Yearly | null {
 export type YearlyCandidate = {
   id: string;
   priceCents: number;
-  recurring: { interval: string; trialDays: number; payments: number } | null;
+  recurring: { interval: string; trialDays: number; payments: number; every?: number } | null;
   options: unknown[];
   pwyw: unknown;
   intro?: unknown;
@@ -43,7 +43,8 @@ export type YearlyProblem = "membership" | "month" | "payments" | "options" | "p
 export function yearlyProblem(product: YearlyCandidate, yearly: Yearly, minCents: number, tiers: readonly string[] = []): YearlyProblem | null {
   const recurring = product.recurring;
   if (!recurring || product.priceCents <= 0) return "membership";
-  if (recurring.interval !== "month") return "month";
+  // Twelve monthly payments, so only beside one charged every month, never every few (609 [WP8]).
+  if (recurring.interval !== "month" || (recurring.every ?? 1) > 1) return "month";
   if (recurring.payments > 0) return "payments";
   if (product.options.length > 0) return "options";
   if (product.pwyw) return "pwyw";
@@ -63,4 +64,22 @@ export function activeYearly(product: YearlyCandidate & { yearly?: Yearly | null
 /** What paying yearly saves against twelve monthly payments. */
 export function yearlySaving(monthlyCents: number, yearly: Yearly): number {
   return Math.max(0, monthlyCents * 12 - yearly.cents);
+}
+
+/**
+ * What the first charge after a membership's free trial costs, as its checkout
+ * made it: the year's price when the buyer chose yearly (lib/store-checkout.ts
+ * sets that unit amount with `metadata[every]=year`), otherwise the option's
+ * or the product's monthly price. Null when it was bought yearly and no
+ * yearly price can be read now: the amount is then left unsaid, never the
+ * monthly one in its place.
+ */
+export function firstChargeCents(
+  product: YearlyCandidate & { yearly?: Yearly | null },
+  option: { priceCents: number } | null,
+  every: string | undefined,
+  tiers: readonly string[] = [],
+): number | null {
+  if (every === "year") return activeYearly(product, tiers)?.cents ?? null;
+  return option ? option.priceCents : product.priceCents;
 }

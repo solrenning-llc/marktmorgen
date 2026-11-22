@@ -6,3 +6,5 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | Opening readiness, locks 2 and 3 (Claude 1 cloud A, coordinator 14/11/2026) | claude1/opening-readiness | `docs/opening-readiness/stripe-platform.md`, `docs/opening-readiness/deemed-supplier.md` | 14/11/2026 21h30 |
+| Claude 1 | Fixes #3954: a creator's review written only over the work it read (REVIEW_WRITE_IF) | claude/great-allen-xski78 | `lib/assignment.ts` (review only), `tests/assignment-review-race.test.ts` | 12/11/2026 12h39 |

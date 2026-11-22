@@ -31,8 +31,8 @@ It does not say that Marktmorgen is secure.
 | MM-SA-15 | Medium | "Require two-step for the team" checks that a member has a second factor, not that this session used it: a member with only a passkey signs in by the email link alone | With Claude 3, 612 [WP11] owns `lib/team.ts` (reproduced) |
 | MM-SA-16 | Medium | The public erasure-request form sends access emails without the MM-SA-05 ceiling: strangers can spend the month's access emails and buyers get no link | In progress: `claude4/sg1-erasure-invite` (reproduced) |
 | MM-SA-17 | Medium | The certificate PDF is built on every GET with no public-request window, no pacing and no shared cache (about 81 ms of CPU and 107 KB each) | With Claude 3, who holds the route (measured) |
-| MM-SA-18 | Medium | A lost chargeback does not close the buyer's access: courses, community, downloads, private feeds and license keys stay open | Decision with Claude 1 (refunds); proposed: close on `dispute.status = lost` (reproduced) |
-| MM-SA-19 | Low | The reset path's notices go only to the sign-in inbox the path assumes someone else holds; the confirmed recovery address hears nothing | Waits for #2078 (same file, `lib/two-step.ts`), then Claude 4 (reproduced) |
+| MM-SA-18 | Medium | A lost chargeback does not close the buyer's access: courses, community, downloads, private feeds and license keys stay open | Fixed on main: a dispute Stripe closed as lost closes the same doors as a full refund (`lib/refunds.ts`, header and `lostOnCharge`; `tests/lost-dispute-access.test.ts`). Status corrected 12/11/2026 from the code |
+| MM-SA-19 | Low | The reset path's notices go only to the sign-in inbox the path assumes someone else holds; the confirmed recovery address hears nothing | Fixed on main: the reset path's notices also go to the confirmed recovery address (`lib/two-step.ts`, `lib/passkeys.ts`, `lib/recovery-address.ts`, each marked MM-SA-19). Status corrected 12/11/2026 from the code |
 | MM-SA-20 | Low | Accepting a team invite opens a full fresh session without the code for an account with an authenticator and no store or team | In progress: `claude4/sg1-erasure-invite` (read) |
 | MM-SA-21 | Low | `/signin/lost` answers later when the address has a recovery address: the timing tells which addresses have accounts | With Codex, who holds the route (read) |
 | MM-SA-22 | Low | API keys, webhook endpoints and calendar feeds an Admin created survive the Admin's removal from the team | With Claude 3 (`lib/team.ts`) (read) |
@@ -40,10 +40,10 @@ It does not say that Marktmorgen is secure.
 | MM-SA-24 | Low | Each request of a funded store would send a ~7.9 KB `EVAL` without `EVALSHA`, not counted in the cost registry; dormant while no store is funded | With Codex (costs) (read) |
 | MM-SA-25 | Low | The Stripe session id and the PayPal order id are sent to the creator's ad pixels as event and order ids, and in the full page address; whoever reads the ad account's events can use the order for 3 days | With Claude 2 (thanks page) and Claude 3 (pixels) (read) |
 | MM-SA-26 | Info | The file download route had no words for three refusals (`used`, `locked`, `two_step`), so they became server errors | Fixed in this PR (test fails before) |
-| MM-SA-27 | Info | The video watch-depth listener accepts any origin that looks like YouTube or Vimeo (`evilvimeo.com`); it adds nothing the public beacon does not already allow | Listed |
-| MM-SA-28 | Info | `safeFetch` forwards the caller's headers when a GET is redirected to another host; no caller sends a secret on a redirecting GET today | Listed: rule below |
-| MM-SA-29 | Info | A sold file over 20 MB kept in Vercel Blob is not forced to download (`saveAs` ignored), on another origin without our cookies; the door is closed in production | Listed |
-| MM-SA-30 | Info | A draft product's title and price are visible to whoever knows its 40-bit id (sample certificate, cart GET, preview lessons) | The sample certificate (page, tab title and PDF), the course's front door, its lessons and their downloads, a call's booking page, the reviews page, a podcast's page and the free page's notice: in `claude4/sg1-mm-sa-30`, each answering a draft as an id that does not exist (test fails before). A published sample PDF stays at the CDN up to five minutes after going back to draft. The cart's GET: with Claude 2, 513 [PF1] holds the route (reproduced) |
+| MM-SA-27 | Info | The video watch-depth listener accepts any origin that looks like YouTube or Vimeo (`evilvimeo.com`); it adds nothing the public beacon does not already allow | Fixed on main: a message counts only from the exact origin of a player frame the page drew, from that frame's own window (`lib/player-origin.ts`, `tests/player-origin.test.ts`). Status corrected 12/11/2026 from the code |
+| MM-SA-28 | Info | `safeFetch` forwards the caller's headers when a GET is redirected to another host; no caller sends a secret on a redirecting GET today | Fixed on main: credential headers are dropped when a redirect changes origin (`lib/safe-fetch.ts`, `sensitiveHeader` and `withoutCredentials`; `tests/safe-fetch-redirect.test.ts`). Status corrected 12/11/2026 from the code |
+| MM-SA-29 | Info | A sold file over 20 MB kept in Vercel Blob is not forced to download (`saveAs` ignored), on another origin without our cookies; the door is closed in production | Fixed on main: a Vercel Blob address for a file to save is asked with `download=1` (`lib/file-store.ts`; `tests/blob-download-attachment.test.ts`). Status corrected 12/11/2026 from the code |
+| MM-SA-30 | Info | A draft product's title and price are visible to whoever knows its 40-bit id (sample certificate, cart GET, preview lessons) | The sample certificate (page, tab title and PDF), the course's front door, its lessons and their downloads, a call's booking page, the reviews page, a podcast's page and the free page's notice: in `claude4/sg1-mm-sa-30`, each answering a draft as an id that does not exist (test fails before). A published sample PDF stays at the CDN up to five minutes after going back to draft. The cart's GET (`app/api/store/cart/route.ts`) now answers a draft as an id the store does not have, with no line, name or price, in `claude1/sg1-cart-draft` (`tests/cart-draft-get.test.ts`, fails before) |
 
 Also noted, no path found: a 60 s lock in `lib/review-ai-summary.ts` released
 without checking its owner (studio only, bounded by the month's AI jobs); the
@@ -124,3 +124,72 @@ leaves (documented in `lib/chat-pass.ts`).
 Real browsers, real Redis under load, the production configuration of Vercel,
 R2 and Blob, and the routes as served by a running Next.js (areas D and E were
 shown on the library functions and route handlers, not through the server).
+
+## Third pass: every route, 12 November 2026 (MM-SA-31 onward)
+
+Run by a Claude 1 cloud session over `origin/main` at `7dfaa097`, after
+MM-SA-30's cart GET (#3884) showed that a draft's title and price reached
+anyone with its id. All 347 route files (`app/**/route.ts`: 336 under
+`app/api`, 11 elsewhere) were read by seven independent reviewers, one per
+slice, for: who may call the route; authentication; the store and the object
+behind every id (IDOR); drafts, hidden, suspended and closed content;
+webhook signatures and replay; the cron and operator secrets; windows and
+cost ceilings on anything that emails or calls a paid service; input sizes,
+paths and redirects; personal data in answers and logs; and writes from
+another site. There are no server actions (`"use server"` appears nowhere).
+"Reproduced" means a synthetic test that calls the real route or library
+function on the in-memory Redis, with Stripe and email answered by
+stand-ins, failed before the fix; "read" means code reading only. Nothing
+real was reached and no message was sent. Findings already open elsewhere
+are named with their PR and not fixed again.
+
+| Id | Severity | Finding | State |
+| --- | --- | --- | --- |
+| MM-SA-31 | Medium | The studio inbox's `saved` and `chat` actions wrote through `store.email`, the key of the owner's FIRST store: a Support member of a second store overwrote the first store's saved replies, and a member with `settings` switched the first store's public chat | Fixed in `claude/gracious-meitner-kqpnck` (reproduced; `tests/inbox-store-ref.test.ts` fails before) |
+| MM-SA-32 | High | A call package paid for any other call of the store: `/api/store/book` checked that the package belonged to the store, never to the call booked, so the cheapest package opened a 100%-off checkout for the dearest call, once per session left | Fixed in `claude/sa-32-call-package`, in the route (`lib/call-packages.ts` is Codex W's) (reproduced; `tests/call-package-other-call.test.ts`) |
+| MM-SA-33 | Medium | A draft could be a checkout box (order bump): the public product page drew the draft's title and price and the checkout charged it as a line; the same rule fed the offer after paying and a call's add-ons | Fixed in `claude/sa-33-draft-bump`: a draft is its own pause, `targetDraft` (reproduced; `tests/draft-bump.test.ts`) |
+| MM-SA-34 | Medium | "Get my link" signed any holder of an order id, of any age, in to the payer's EXISTING affiliate account (address, earnings, where commissions are paid); the id travels in emails, the thanks page's address and the ad pixels (MM-SA-25) | Fixed in `claude/sa-34-affiliate-join`: an order makes a new affiliate only; a known one gets the emailed sign-in link (reproduced; `tests/affiliate-join-known.test.ts`). Left: an order id leaked before its buyer joins still makes that buyer's affiliate record (no earnings yet); the buyer is the one emailed |
+| MM-SA-35 | Medium | The recovery-address code was limited per sending account only, a company-metered email: free accounts could send a stranger's inbox our email without bound | Fixed in `claude/sa-35-recovery-recipient`: also 5 an hour per recipient, hashed (reproduced; `tests/recovery-address-recipient.test.ts`). The two-step backup address has the same shape: MM-SA-49 |
+| MM-SA-36 | Medium | `/api/report` counted its 5 notices an hour per exact address; one machine holds a whole IPv6 /64, so notices, support emails, 400-day records and the transparency count had no limit | Fixed in `claude/sa-36-report-network`: counted per network (IPv6 /48, IPv4 itself), in the route (`lib/takedown.ts` counters are Codex N's) (reproduced; `tests/report-network-limit.test.ts`) |
+| MM-SA-37 | Medium | An Editor (no `send`) could launch a waitlist: an email in its own words, in the store's name, to every confirmed address | Already fixed in open PR #3801 (reproduced again here) |
+| MM-SA-38 | Medium | `/api/store/package` opened a Stripe checkout and held an order slot for 25 hours with no window per connection: one stranger filled the month's orders and paused every checkout of the store | Already fixed in open PR #3802 (reproduced again here) |
+| MM-SA-39 | Low | `/api/store/free/download` serves a free copy's file after the product went back to draft, was hidden by a takedown, or the store was suspended (links live 7 days) | Listed: refuse on `product.hidden \|\| store.suspended` with the existing 410 (read) |
+| MM-SA-40 | Low | `/api/store/form` starts a form's sequences for any address typed that is already on the list, with the outcome the sender picks | Listed: enroll only after the address is proven (read) |
+| MM-SA-41 | Low | `/api/store/community/open` and `/api/store/course/open` spend the emailed token on a GET and set the pass, which outranks a non-owner session: a link of the sender's own, opened by someone else, makes their browser act as the sender | Listed: confirm with a same-site POST, as sign-in does (read) |
+| MM-SA-42 | Low | A community member's key is an unsalted hash of their email, the same in every store, and is shown to other members: an address can be tested offline and linked across stores | Listed: a keyed hash per community (needs a migration) (read) |
+| MM-SA-43 | Low | `/api/store/read` counts reading depth with no window per connection (its sibling `/api/store/hit` has one): numbers can be skewed and Redis commands spent | Listed (read) |
+| MM-SA-44 | Low | `/api/store/upsell` reads the Stripe checkout before checking the offer's secret, outside the store's public window | Listed: stop when the secret is missing; use `withinStore` (read) |
+| MM-SA-45 | Low | The weekly email's stop token and its "off" mark are kept by handle: after a handle is released and taken, the old owner's link still stops the new store's email | Listed: key them by store id (read) |
+| MM-SA-46 | Low | `/api/store/address` answers `taken` before the fresh-session check and the hourly window: any signed-in creator can test which addresses have a store | Listed: move the answer after both (read) |
+| MM-SA-47 | Low | The buyer library link (`lib/buyer-library.ts`) and the affiliate hub email (`lib/affiliate-hub.ts`) take a store's access emails without `asked`, so a buyer or affiliate asking for their own link can spend the month's figure (the MM-SA-05 class) | Listed; dormant while nothing is on sale (read) |
+| MM-SA-48 | Low | `stopCounting` in `lib/mail-clicks.ts` writes back a whole contact read earlier, without a lock: racing an unsubscribe or a bounce, it can write `unsub: false` back | Listed: write only the clicks field (read) |
+| MM-SA-49 | Low | The two-step backup address (`lib/two-step.ts`) has MM-SA-35's shape: codes limited per account only | With Claude 4, who holds the file (read) |
+| MM-SA-50 | Low | `/api/creators` keeps every survey answer (up to ~20 KB, 24 months) with a per-connection window only and no length cap or robot check | Listed (read) |
+| MM-SA-51 | Low | `/api/auth/move` logs both addresses in a `console.error` | Listed: log neither (read) |
+| MM-SA-52 | Info | A draft's existence (no title or price) shows in where three forms redirect: `paypal/checkout`, `package`, `podcast/link` | Listed: answer a draft as an unknown id (read) |
+| MM-SA-53 | Info | Waitlist launch accepts a draft; `letters/open` issues a pass for a suspended store; manifest, store robots and the blog feed answer for a suspended or resting store; `/go/[funnel]`, feeds and manifests read Redis outside the store's public window (MM-SA-01/11 class) | Listed (read) |
+| MM-SA-54 | Info | Six studio routes call `ensureStatsId(store.email)`, MM-SA-31's mistake; dormant because every store is made with a statsId | Listed: use `guarded.ref` (read) |
+| MM-SA-55 | Info | Discord's buyer `join` return is not bound to the browser (OAuth CSRF that only adds the victim's Discord to the sender's server); `meta/deauthorize` has no replay mark; `mail/inbound` keeps no replay mark when Redis throws; `/invite/[code]/accept` sets its cookie on a GET (dormant) | Listed (read) |
+
+Also checked and held in this pass: every studio route resolves its store
+through `studioAccess`/`guardStoreWrite` with its permission and reads each
+id inside that store; the v1 API and MCP read only the key's store; all 19
+cron routes put `cronAllowed` first; SNS, Svix, Bunny, Zoom and Meta
+signatures are checked in constant time; `guardApi` lets no other site write
+to `/api/` except the unsubscribe; every model call reserves its ceiling
+first; every public route that shows a product by id checks `hidden`, except
+the cart GET (#3884) and the box of MM-SA-33.
+
+### Rules added by this pass
+
+5. A studio route writes through the reference it was settled on
+   (`guarded.ref`), never `store.email`, which names the owner's first store
+   (MM-SA-31).
+6. A credit, package or grant bought for one product is checked against the
+   product it is spent on, in the same request that spends it (MM-SA-32).
+7. A public form that sends email is limited per recipient as well as per
+   sender, and a per-connection window counts IPv6 by network, never by
+   exact address (MM-SA-35, MM-SA-36).
+8. A bearer id that travels in emails or addresses (a checkout id) proves a
+   purchase; it never signs anyone in to an account that already existed
+   (MM-SA-34).

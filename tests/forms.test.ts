@@ -24,6 +24,8 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { POST as saveForms } from "@/app/api/store/forms/route";
 import { POST as sendForm } from "@/app/api/store/form/route";
 import { store as redis } from "./redis-stub";
+import { personKey } from "@/lib/person-key";
+import { redisPipeline } from "@/lib/redis";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
 
@@ -70,9 +72,9 @@ async function main(): Promise<void> {
   is("the result the most answers point at; the first on a tie", [outcomeOf(form, good.answers)?.id, outcomeOf(form, { bbbbbb: "opt002", cccccc: ["opt003"] })?.id, outcomeOf(form, {})], ["res001", "res002", null]);
 
   part("The file of answers");
-  is("a cell that would be a formula is not one", [safeCell("=SUM(A1)"), safeCell("+1"), safeCell("plain"), safeCell('says "hi", twice')], ["'=SUM(A1)", "'+1", "plain", '"says ""hi"", twice"']);
+  is("a cell that would be a formula is not one", [safeCell("=SUM(A1)"), safeCell("+1"), safeCell("plain"), safeCell('says "hi", twice')], ['"\'=SUM(A1)"', '"\'+1"', '"plain"', '"says ""hi"", twice"']);
   const csv = responsesCsv(form, [{ at: 0, page: "", answers: good.answers, outcome: "res001", joined: true }]);
-  is("a row with the options' words, the result and the list", csv.split("\r\n")[1], "1970-01-01T00:00:00.000Z,a@example.com,An hour,Bread; Soup,7,Quick meals,\"Yes, once they confirm by email\"");
+  is("a row with the options' words, the result and the list", csv.split("\r\n")[1], "\"1970-01-01T00:00:00.000Z\",\"a@example.com\",\"An hour\",\"Bread; Soup\",\"7\",\"Quick meals\",\"Yes, once they confirm by email\"");
 
   part("Sent from a store's page");
   const OWNER = "forms@example.com";
@@ -103,6 +105,14 @@ async function main(): Promise<void> {
   is("and the answers are kept, with the result", [kept.total, kept.responses[0]?.outcome, kept.responses[0]?.answers.aaaaaa], [1, "res002", "b@example.com"]);
   const trap = await post([...base, ["q_aaaaaa", "c@example.com"], ["q_bbbbbb", "opt001"], ["website", "spam"]]);
   is("a robot filling the hidden field is told it worked, and nothing is kept", [trap.status, (await readResponses(store.statsId, formId)).total], [303, 1]);
+
+  // Revisor 2 (#2287): anybody can type an address into a form, so a form sent with a deleted person's address is not
+  // their return, and the mark of their deletion stays.
+  const deletedMark = `nl:crm:erased:${store.statsId}:${personKey(store.statsId!, "d@example.com")}`;
+  await redisPipeline([["SET", deletedMark, String(Date.now() - 60_000), "EX", 3600]]);
+  const typed = await post([...base, ["q_aaaaaa", "d@example.com"], ["q_bbbbbb", "opt002"]]);
+  is("a form sent with a deleted person's address is kept, and their deletion mark stays", [typed.status, (await redisPipeline([["EXISTS", deletedMark]]))[0]], [303, 1]);
+  await redisPipeline([["DEL", deletedMark]]);
 
   part("A step of a funnel");
   await writePageFunnel(store.statsId!, { id: "funnel0001", name: "Survey", slug: "survey", steps: [{ kind: "page", id: "pagepage01" }, { kind: "product", id: course.product.id }], on: true, since: 1 }, [], ROOM);

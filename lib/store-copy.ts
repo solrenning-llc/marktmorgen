@@ -31,11 +31,11 @@ import { freeSlug } from "@/lib/funnel-types";
 import { MAX_FORMS } from "@/lib/forms";
 import { readForms, writeForm } from "@/lib/form-store";
 import { MAX_PAGE_FUNNELS, funnelSlugFrom, funnelSlugProblem } from "@/lib/page-funnel";
-import { readPageFunnelsStrict, writePageFunnel } from "@/lib/page-funnel-store";
+import { readPageFunnelsStrict, writeStorePageFunnel } from "@/lib/page-funnel-store";
 import { dataKey, dataUsed, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { allowanceFor } from "@/lib/store-allowance-rules";
-import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
+import { allowanceUsedExact, takeAllowance } from "@/lib/store-allowance";
 import {
   COPY_COMMANDS,
   COPY_KEEP_SECONDS,
@@ -211,7 +211,8 @@ async function planFor(from: Store, to: Store, setup: boolean): Promise<Planned>
   const funnels = await readPageFunnelsStrict(to.statsId);
   const forms = await readForms(to.statsId);
   const used = await dataUsed(to).catch(() => null);
-  const unitsUsed = await allowanceUsed(to, "studio").catch(() => null);
+  // Null when the other store's count cannot be read: the plan stops on it, never takes it for room (rule 24).
+  const unitsUsed = await allowanceUsedExact(to, "studio");
   const needs: CopyNeeds = {
     products: source.copyable.length,
     skipped: source.skipped,
@@ -399,7 +400,7 @@ export async function copyStep(from: Store, to: Store, copyId: string, setup: bo
         const base = funnelSlugFrom(funnel.slug || funnel.name) || "funnel";
         let slug = base;
         for (let n = 2; funnelSlugProblem(slug, existing) !== null && n < 100; n += 1) slug = `${base.slice(0, 36)}-${n}`;
-        const made = await writePageFunnel(to.statsId, copiedFunnel(funnel, id, slug, pages, products, Math.floor(now / 1000), left), existing, to);
+        const made = await writeStorePageFunnel(to.statsId, copiedFunnel(funnel, id, slug, pages, products, Math.floor(now / 1000), left), existing, to);
         existing = [...existing, made];
         p.made.funnels += 1;
       }

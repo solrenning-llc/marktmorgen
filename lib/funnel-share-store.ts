@@ -18,10 +18,13 @@
  * is honored only while both are there, so a half-finished revoke never
  * leaves a link that works.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type BundleOutline, type FunnelBundle } from "@/lib/funnel-bundle";
 import { MAX_SHARE_DAYS, MAX_SHARE_NAME, SHARE_CODE, SHARE_ID } from "@/lib/funnel-share-rules";
+import { ERASING_KEY, STORE_ID_PATTERN, type Store, ensureStoreId, erasingField, storeIdCommand, storeRef } from "@/lib/store";
 
 const listKey = (statsId: string) => `nl:fshares:${statsId}`;
 export const lookupKey = (hash: string) => `nl:fshare:${hash}`;
@@ -62,19 +65,25 @@ function parseEntry(raw: unknown): ShareEntry | null {
   }
 }
 
-/** A store's share links, newest first. Ones that have run out are cleared from the list as it is read. Throws when the list cannot be read. */
+/**
+ * A store's share links, newest first. Ones that have run out are cleared from the list as it is read.
+ * Throws when the list cannot be read, or when whether a snapshot is there comes back in any shape but
+ * an exact 0 or 1 (CX-123 rule 24): clearing a row revokes its link, so only a confirmed 0 clears one.
+ */
 export async function listShares(statsId: string | null, nowSeconds = Math.floor(Date.now() / 1000)): Promise<ShareEntry[]> {
   if (!statsId || !isRedisConfigured()) throw new Error("Share links unavailable");
   const replies = await redisPipeline([["HGETALL", listKey(statsId)]]);
-  if (replies.length !== 1 || !Array.isArray(replies[0])) throw new Error("Share links unavailable");
-  const flat = replies[0] as unknown[];
+  const flat = repliesFor(replies, 1) ? stringList(replies[0]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new Error("Share links unavailable");
   const entries: { field: string; entry: ShareEntry | null }[] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) entries.push({ field: String(flat[i]), entry: parseEntry(flat[i + 1]) });
+  for (let i = 0; i + 1 < flat.length; i += 2) entries.push({ field: flat[i], entry: parseEntry(flat[i + 1]) });
   // The snapshot's own expiry is the one that counts: an entry whose snapshot is gone is cleared too.
   const readable = entries.filter((row) => row.entry && row.entry.expiresAt > nowSeconds);
   const exists = readable.length ? await redisPipeline(readable.map((row) => ["EXISTS", lookupKey(row.entry!.hash)])) : [];
-  if (exists.length !== readable.length) throw new Error("Share links unavailable");
-  const live: ShareEntry[] = readable.filter((_, i) => Number(exists[i]) === 1).map((row) => row.entry!);
+  if (!repliesFor(exists, readable.length)) throw new Error("Share links unavailable");
+  const there = exists.map(countOf);
+  if (there.some((n) => n !== 0 && n !== 1)) throw new UnknownReplyError("whether a shared snapshot is there");
+  const live: ShareEntry[] = readable.filter((_, i) => there[i] === 1).map((row) => row.entry!);
   const stale = entries.filter((row) => !live.includes(row.entry!)).map((row) => row.field);
   if (stale.length) await redisPipeline([["HDEL", listKey(statsId), ...stale]]).catch(() => {});
   return live.sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id));
@@ -100,6 +109,16 @@ export async function createShare(
   input: { name: string; funnelId: string; days: number; from: string; bundle: FunnelBundle; outline: BundleOutline; limit: number },
   nowSeconds = Math.floor(Date.now() / 1000),
 ): Promise<{ ok: true; code: string; entry: ShareEntry } | { ok: false; error: "full" }> {
+  return makeShare(statsId, input, nowSeconds, null);
+}
+
+/** The share itself, with the store's erasure fence (createStoreShare) or without it (createShare, the tests' primitive). */
+async function makeShare(
+  statsId: string,
+  input: { name: string; funnelId: string; days: number; from: string; bundle: FunnelBundle; outline: BundleOutline; limit: number },
+  nowSeconds: number,
+  fence: { idKey: string; field: string } | null,
+): Promise<{ ok: true; code: string; entry: ShareEntry } | { ok: false; error: "full" }> {
   const days = Math.min(Math.max(1, Math.floor(input.days)), MAX_SHARE_DAYS);
   const code = `mmf_${randomBytes(16).toString("hex")}`;
   const hash = hashOf(code);
@@ -113,24 +132,74 @@ export async function createShare(
     hash,
   };
   const record: ShareRecord = { statsId, id: entry.id, expiresAt: entry.expiresAt, from: input.from.slice(0, 80) };
+  const args = [entry.id, JSON.stringify(entry), JSON.stringify(record), JSON.stringify(input.outline), JSON.stringify(input.bundle), input.limit, days * 86_400];
   const replies = await redisPipeline([
-    ["EVAL", CREATE_SHARE, 2, listKey(statsId), lookupKey(hash), entry.id, JSON.stringify(entry), JSON.stringify(record), JSON.stringify(input.outline), JSON.stringify(input.bundle), input.limit, days * 86_400],
+    fence
+      ? ["EVAL", CREATE_STORE_SHARE, 4, listKey(statsId), lookupKey(hash), fence.idKey, ERASING_KEY, ...args, fence.field]
+      : ["EVAL", CREATE_SHARE, 2, listKey(statsId), lookupKey(hash), ...args],
   ]);
-  if (replies.length !== 1) throw new Error("Share link could not be confirmed");
-  const reply = Number(replies[0]);
+  // Gone or erasing is an exact -4, read before countOf (which takes only counts): nothing was written.
+  if (fence && repliesFor(replies, 1) && replies[0] === -4) throw new ShareStoreGoneError();
+  const reply = repliesFor(replies, 1) ? countOf(replies[0]) : null;
   if (reply === 1) return { ok: true, code, entry };
   if (reply === 0) return { ok: false, error: "full" };
   throw new Error("Share link could not be confirmed");
 }
 
-/** Revokes a link at once: its snapshot first, then its line in the list. */
+/**
+ * CREATE_SHARE fenced by the store's erasure (Codex L, L-20261120-1836): the same creation in one step with the check
+ * that the store is still live. A share is made after its funnel was collected from the store, so its creation can land
+ * after the closing walk passed the store's (empty) share list; a plain CREATE_SHARE would then put back the list and a
+ * snapshot that opens with the erased store's name as its sender, for up to MAX_SHARE_DAYS. The fence is
+ * lib/store-live-cache.ts's: the erasing mark (lib/store.ts ERASING_KEY) must be absent and the store's id key must
+ * exist (closeStoreRecord deletes it in the same fenced step as the mark). -4 when either fails, nothing written.
+ * KEYS as CREATE_SHARE's, then the store's id key and ERASING_KEY; ARGV as CREATE_SHARE's, then the store's erasing
+ * field. Inner commands: HGET and EXISTS more than CREATE_SHARE's (SHARE_FENCE_EXTRA_COMMANDS).
+ */
+export const CREATE_STORE_SHARE = `-- marktmorgen:funnel-share-live:v1
+if redis.call("HGET", KEYS[4], ARGV[8]) then return -4 end
+if redis.call("EXISTS", KEYS[3]) ~= 1 then return -4 end
+${CREATE_SHARE.split("\n").slice(1).join("\n")}`;
+
+/** What the fence adds to a share's creation, as Upstash bills a script's inner commands: its HGET and EXISTS. */
+export const SHARE_FENCE_EXTRA_COMMANDS = 2;
+
+/** A share refused because the store is gone or its erasure has begun: no list, snapshot or code was made. */
+export class ShareStoreGoneError extends Error {
+  constructor() {
+    super("the store is gone or being erased, so no share link was made");
+    this.name = "ShareStoreGoneError";
+  }
+}
+
+/**
+ * createShare for a live store, fenced by its erasure (CREATE_STORE_SHARE): the only one the studio's share route
+ * calls. A store from before ids is given its id first (ensureStoreId, once for good, as the owner's studio does), and
+ * only while its record still carries the same statsId; a new store under the same owner is refused, never written
+ * for. ShareStoreGoneError when the store is gone or erasing; "full" and every other answer as createShare.
+ */
+export async function createStoreShare(
+  store: Store,
+  input: { name: string; funnelId: string; days: number; from: string; bundle: FunnelBundle; outline: BundleOutline; limit: number },
+  nowSeconds = Math.floor(Date.now() / 1000),
+): Promise<{ ok: true; code: string; entry: ShareEntry } | { ok: false; error: "full" }> {
+  const statsId = store.statsId;
+  if (!statsId) throw new Error("a share link needs the store's statsId");
+  const named = STORE_ID_PATTERN.test(store.sid) ? store : await ensureStoreId(storeRef(store));
+  if (!named || !STORE_ID_PATTERN.test(named.sid) || named.statsId !== statsId) throw new ShareStoreGoneError();
+  return makeShare(statsId, input, nowSeconds, { idKey: storeIdCommand(named.sid)[1], field: await erasingField(storeRef(named)) });
+}
+
+/** Revokes a link at once: its snapshot first, then its line in the list. Throws when a reply is in another shape: "not there" only on a confirmed absence. */
 export async function revokeShare(statsId: string, id: string): Promise<boolean> {
   const replies = await redisPipeline([["HGET", listKey(statsId), id]]);
+  if (!repliesFor(replies, 1) || (replies[0] !== null && typeof replies[0] !== "string")) throw new UnknownReplyError("a share link");
   const entry = parseEntry(replies[0]);
   if (!entry) return false;
   const done = await redisPipeline([["DEL", lookupKey(entry.hash)], ["HDEL", listKey(statsId), id]]);
-  if (done.length !== 2) throw new Error("Revoking could not be confirmed");
-  return Number(done[1]) === 1;
+  const counts = repliesFor(done, 2) ? done.map(countOf) : null;
+  if (!counts || counts.some((n) => n !== 0 && n !== 1)) throw new Error("Revoking could not be confirmed");
+  return counts[1] === 1;
 }
 
 /**
@@ -158,7 +227,9 @@ export async function openShare<T extends "sum" | "bundle">(
   if (typeof record.statsId !== "string" || typeof record.id !== "string" || typeof record.expiresAt !== "number" || record.expiresAt <= nowSeconds) return null;
   // Still on the sender's list: a revoke that stopped halfway still revokes.
   const [listed] = await redisPipeline([["HEXISTS", listKey(record.statsId), record.id]]);
-  if (Number(listed) !== 1) return null;
+  const on = countOf(listed);
+  if (on !== 0 && on !== 1) throw new UnknownReplyError("whether a share link is listed");
+  if (on !== 1) return null;
   return { id: record.id, statsId: record.statsId, from: typeof record.from === "string" ? record.from : "", value };
 }
 
@@ -168,9 +239,8 @@ export async function openShare<T extends "sum" | "bundle">(
  * cannot be read: an unread count is not zero.
  */
 export async function countUse(key: string, limit: number, windowSeconds: number): Promise<boolean> {
-  const replies = await redisPipeline([["SET", key, "0", "EX", windowSeconds, "NX"], ["INCR", key]]);
-  const count = Number(replies[1]);
-  if (replies.length !== 2 || !Number.isSafeInteger(count) || count < 1) throw new Error("Use count unavailable");
+  const count = windowCountOf(await redisPipeline(windowCount(key, windowSeconds)));
+  if (count === null || count < 1) throw new Error("Use count unavailable");
   return count <= limit;
 }
 

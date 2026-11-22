@@ -14,10 +14,10 @@
  */
 import { NextRequest } from "next/server";
 import { DEFAULT_STAGES, boardTotals, fieldValue, newCrmId, parseDeal, parseFields, parseStages } from "@/lib/crm-rules";
-import { allValues, readDeals, readFields, readValues } from "@/lib/crm";
+import { pageMark, readDeals, readFields, readValues, valuesOf } from "@/lib/crm";
 import { personKey } from "@/lib/person-key";
 import { listAsCsv } from "@/lib/free";
-import { upsertContact } from "@/lib/contacts";
+import { plainRead, upsertContact } from "@/lib/contacts";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { POST } from "@/app/api/store/crm/route";
@@ -112,9 +112,9 @@ async function main(): Promise<void> {
   is("fields saved", (await call_({ action: "fields", fields: fields.map((f) => ({ ...f })) })).ok, true);
   is("a field sent twice by name, refused", (await call_({ action: "fields", fields: [{ id: "aaaaaa", name: "A", type: "text" }, { id: "bbbbbb", name: "a", type: "text" }] })).error, "fields");
   const person = personKey(store.statsId!, "dana@example.com");
-  is("an answer kept", (await call_({ action: "value", person, field: "offer1", value: "Coaching" })).ok, true);
-  is("an answer the field does not keep, refused", (await call_({ action: "value", person, field: "seats1", value: "lots" })).ok, false);
-  is("an unknown field, refused", (await call_({ action: "value", person, field: "nope00", value: "x" })).error, "unknown");
+  is("an answer kept", (await call_({ action: "value", person, field: "offer1", value: "Coaching", mark: pageMark(store.statsId!, person, 0) })).ok, true);
+  is("an answer the field does not keep, refused", (await call_({ action: "value", person, field: "seats1", value: "lots", mark: pageMark(store.statsId!, person, 0) })).ok, false);
+  is("an unknown field, refused", (await call_({ action: "value", person, field: "nope00", value: "x", mark: pageMark(store.statsId!, person, 0) })).error, "unknown");
   is("read back for the person", await readValues(store.statsId, person, await readFields(store.statsId)), { offer1: "Coaching" });
 
   await upsertContact(store.listId!, "dana@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
@@ -123,7 +123,7 @@ async function main(): Promise<void> {
   is("and the person's answer in it", csv[1].endsWith(',"","Coaching","",""'), true);
 
   await call_({ action: "fields", fields: fields.filter((f) => f.id !== "offer1") });
-  is("a field taken away takes its answers", (await allValues(store.statsId, [{ id: "offer1", name: "Offer", type: "choice", options: [] }])).offer1, {});
+  is("a field taken away takes its answers", (await valuesOf(store.statsId!, [{ id: "offer1", name: "Offer", type: "choice", options: [] }], [person], plainRead)).offer1, [null]);
 
   is("removed", (await call_({ action: "undeal", id })).ok, true);
   is("removed twice, unknown", (await call_({ action: "undeal", id })).error, "unknown");

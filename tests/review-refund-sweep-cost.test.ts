@@ -11,10 +11,14 @@
  *   - the two ceilings count in the store's billing month (windowId), one key across the calendar months it touches,
  *     so each is spent and priced once a month (11th triple audit on #5100, ALTO (a));
  *   - a review busy at every try costs the lock's priced tries (REVIEW_REFUND_LOCK_TRIES, ALTO (b)) within
- *     REVIEW_REFUND_BUSY_COMMANDS, and puts the pass off REVIEW_REFUND_BUSY_WAIT_SECONDS (MÉDIO 3).
+ *     REVIEW_REFUND_FAILED_MARK_COMMANDS, the reviews before it written and counted (Claude 2 upbeat's LEVE), keeps
+ *     one of the month's REVIEW_REFUND_FAILED_MARKS_PER_MONTH and puts the pass off REVIEW_REFUND_BUSY_WAIT_SECONDS;
+ *   - any other failure after the payment's take does the same, and a deferral that does not land costs no more:
+ *     the failed marks' ceiling stops the tries (13th triple audit, LEVES 1 and 2);
+ *   - the try past a ceiling sends exactly REVIEW_REFUND_CAPPED_TRY_COMMANDS (LEVE 3).
  * Synthetic store, reviews and refunds; Stripe answered by a stand-in; the Redis stand-in's pipeline counted.
  */
-import { REVIEW_REFUND_BUSY_WAIT_SECONDS, REVIEW_REFUND_PASS_EVERY_SECONDS, REVIEW_REFUND_PAYMENTS_PER_MONTH, REVIEW_REFUND_ROWS_PER_MONTH, markRefundedReviews, reviewPassesDue, takeReviewPass } from "@/lib/review-proof";
+import { REVIEW_REFUND_BUSY_WAIT_SECONDS, REVIEW_REFUND_FAILED_MARKS_PER_MONTH, REVIEW_REFUND_PASS_EVERY_SECONDS, REVIEW_REFUND_PAYMENTS_PER_MONTH, REVIEW_REFUND_ROWS_PER_MONTH, markRefundedReviews, reviewPassesDue, takeReviewPass } from "@/lib/review-proof";
 import { windowId } from "@/lib/allowance-window";
 import { MAX_REPLY_TEXT, MAX_REVIEW_NAME, MAX_REVIEW_PHOTOS, MAX_REVIEW_TEXT } from "@/lib/review-summary";
 import { markRefunded, saveReview, setHidden } from "@/lib/reviews";
@@ -22,7 +26,7 @@ import { type Store, addProduct, claimHandle, ensureStatsId, setStripeAccount, s
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
-import { REVIEW_REFUND_BUSY_COMMANDS, REVIEW_REFUND_LOCK_TRIES, REVIEW_REFUND_MARK_BYTES, REVIEW_REFUND_MARK_COMMANDS, REVIEW_REFUND_PAYMENT_COMMANDS, REVIEW_REFUND_QUOTES_COMMANDS, REVIEW_REFUND_ROW_COMMANDS, REVIEW_REFUND_RUN_COMMANDS, lockTriesAtMost } from "./plan-cost-registry";
+import { REVIEW_REFUND_CAPPED_TRY_COMMANDS, REVIEW_REFUND_FAILED_MARK_COMMANDS, REVIEW_REFUND_LOCK_TRIES, REVIEW_REFUND_MARK_BYTES, REVIEW_REFUND_MARK_COMMANDS, REVIEW_REFUND_PAYMENT_COMMANDS, REVIEW_REFUND_QUOTES_COMMANDS, REVIEW_REFUND_ROW_COMMANDS, REVIEW_REFUND_RUN_COMMANDS, lockTriesAtMost } from "./plan-cost-registry";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_review_refund_sweep_cost";
 const NOW = Math.floor(Date.now() / 1000);
@@ -50,6 +54,9 @@ type Batch = (string | number)[][];
 const billed = (command: (string | number)[]) => {
   if (command[0] !== "EVAL") return 1;
   const script = String(command[1]);
+  // The fenced count (lib/live-fence.ts COUNT_IF_STORE_LIVE) runs one of its two branches: its two reads (the
+  // erasing mark, then the live key's GET, written once in each branch), INCRBY and EXPIRE.
+  if (script.startsWith("-- marktmorgen:store-count-live:v1")) return 1 + 2 + 2;
   if (script.startsWith("-- marktmorgen:store-write-live:v1")) {
     const keys = Number(command[2]);
     const list = JSON.parse(String(command[3 + keys + 3])) as unknown[];
@@ -57,15 +64,19 @@ const billed = (command: (string | number)[]) => {
   }
   return 1 + (script.match(/redis\.call\(/g)?.length ?? 0);
 };
+// The keys a command touches: its first argument, or an EVAL's KEYS.
+const keysOf = (command: (string | number)[]) => (command[0] === "EVAL" ? command.slice(3, 3 + Number(command[2])).map(String) : [String(command[1])]);
 let commands = 0;
 let sent: Batch = [];
 const healthy = redis.pipeline.bind(redis);
 const replaced = new Map<string, unknown>();
+// A reply changed by the case under way (a deferral that did not land, a stored review that does not read).
+let tamper: ((command: (string | number)[], reply: unknown) => unknown) | null = null;
 redis.pipeline = (async (batch: Batch) => {
   commands += batch.reduce((sum, command) => sum + billed(command), 0);
   sent.push(...batch);
   const replies = await healthy(batch);
-  return replies.map((reply, i) => (batch[i][0] === "MGET" && replaced.has("MGET") ? replaced.get("MGET") : reply));
+  return replies.map((reply, i) => (batch[i][0] === "MGET" && replaced.has("MGET") ? replaced.get("MGET") : tamper ? tamper(batch[i], reply) : reply));
 }) as typeof redis.pipeline;
 
 let n = 0;
@@ -126,6 +137,12 @@ async function main(): Promise<void> {
   const marks = marked * REVIEW_REFUND_MARK_COMMANDS;
   const bound = REVIEW_REFUND_RUN_COMMANDS + REVIEW_REFUND_QUOTES_COMMANDS + REVIEW_REFUND_PAYMENT_COMMANDS + marks;
   is("both reviews are marked", marked, 2);
+  // The marks' fenced writes (lib/live-fence.ts WRITE_IF_STORE_LIVE: the review's write and the product's numbers,
+  // each one EVAL with the fence's two reads): what they bill beyond the calls they make is the +6 in
+  // REVIEW_REFUND_MARK_COMMANDS, measured here so it cannot be dropped unseen (13th triple audit on #5100, LEVE 3).
+  const markWrites = sent.filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-write-live:v1") && keysOf(c).some((k) => k.startsWith(`nl:rev:${one.statsId}:`) || k.startsWith(`nl:rev:sum:${one.statsId}`)));
+  const fencePerMark = (markWrites.length * 3) / marked;
+  is(`each mark's fenced writes add ${fencePerMark} billed commands (the EVAL and the fence's two reads, twice), within REVIEW_REFUND_MARK_COMMANDS (${REVIEW_REFUND_MARK_COMMANDS}) beside the lock's tries and the calls`, fencePerMark > 0 && REVIEW_REFUND_MARK_COMMANDS >= REVIEW_REFUND_LOCK_TRIES + 1 + 5 + 2 + 4 + fencePerMark, true);
   is(`the pass's billed commands (${passCommands}) are within the line's bound (${bound})`, passCommands <= bound, true);
   is("the pass read Stripe's refunds and lost disputes", stripeCalls >= 2, true);
 
@@ -248,35 +265,64 @@ async function main(): Promise<void> {
   const saidFour: string[] = [];
   console.error = (...args: unknown[]) => { saidFour.push(String(args[0])); };
   let fourMarked = -1;
+  const failsKey = `nl:rev:refunds:fails:${capped.statsId}:${month}`;
+  // The commands of the try past the ceiling: the payment's reviews listed, and what touches the two counts.
+  // Billed, as the line prices it: a fenced count or give-back is one EVAL with the fence's two reads and its calls.
+  const cappedTry = () => sent.filter((c) => (c[0] === "HGET" && String(c[1]) === `nl:rev:pay:${capped.statsId}` && c[2] === fourPi) || keysOf(c).includes(marksKey) || keysOf(c).includes(failsKey)).reduce((sum, c) => sum + billed(c), 0);
+  sent = [];
   try {
     fourMarked = await markRefundedReviews(capped.store, Date.now() + 60_000);
   } finally {
     console.error = quiet;
   }
+  is(`the try past the payments' ceiling sends ${cappedTry()} billed commands, within REVIEW_REFUND_CAPPED_TRY_COMMANDS (${REVIEW_REFUND_CAPPED_TRY_COMMANDS})`, cappedTry() > 0 && cappedTry() <= REVIEW_REFUND_CAPPED_TRY_COMMANDS, true);
   is("nothing marked", fourMarked, 0);
   is("the row is not taken as seen", (await healthy([["ZSCORE", `nl:rev:refunds:seenat:${capped.statsId}`, `re_cost${String(n).padStart(8, "0")}`]]))[0], null);
   is("the month's payments stand at the ceiling (the take given back)", Number((await healthy([["GET", marksKey]]))[0]), paymentsCeiling);
   is("the pass said so once", saidFour.filter((line) => line.includes("payments of the month are spent")).length, 1);
   is("and the review is not marked", (JSON.parse(String((await healthy([["HGET", `nl:rev:${capped.statsId}:${capped.products[0]}`, fourSaved.review.id]]))[0])) as { refunded?: boolean }).refunded, false);
-  await healthy([["DEL", marksKey]]);
+  // Past the failed marks' ceiling instead: the payment's take and the failure's, both given back, the dearer stop.
+  await healthy([["DEL", marksKey], ["SET", failsKey, String(REVIEW_REFUND_FAILED_MARKS_PER_MONTH)], ["DEL", `nl:rev:refunds:next:${capped.statsId}`]]);
+  await takeReviewPass(capped.store);
+  saidFour.length = 0;
+  sent = [];
+  console.error = (...args: unknown[]) => { saidFour.push(String(args[0])); };
+  try {
+    fourMarked = await markRefundedReviews(capped.store, Date.now() + 60_000);
+  } finally {
+    console.error = quiet;
+  }
+  is("past the failed marks' ceiling nothing is marked, and the pass says so once", [fourMarked, saidFour.filter((line) => line.includes("failed marks of the month are spent")).length], [0, 1]);
+  is(`and no lock is tried: the try sends exactly REVIEW_REFUND_CAPPED_TRY_COMMANDS (${REVIEW_REFUND_CAPPED_TRY_COMMANDS}), the term the run prices (13th audit, LEVE 3)`, [cappedTry(), sent.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:rev:lock:"))], [REVIEW_REFUND_CAPPED_TRY_COMMANDS, false]);
+  is("both counts stand where they were (the takes given back)", [Number((await healthy([["GET", marksKey]]))[0]), Number((await healthy([["GET", failsKey]]))[0])], [0, REVIEW_REFUND_FAILED_MARKS_PER_MONTH]);
+  await healthy([["DEL", marksKey], ["DEL", failsKey]]);
   await healthy([["DEL", `nl:rev:refunds:next:${capped.statsId}`]]);
   await takeReviewPass(capped.store);
   is("next month (the count gone), the payment is marked", await markRefundedReviews(capped.store, Date.now() + 60_000), 1);
   // The stand-in answers every refund to any account: the other stores' payments have no review here, so they are
   // rows, not payments, and take none of the month's payments.
   is("and counted as one of the month's payments, the other stores' rows taking none", Number((await healthy([["GET", marksKey]]))[0]), 1);
+  is("a mark that succeeded gives its failure slot back", Number((await healthy([["GET", failsKey]]))[0] ?? 0), 0);
 
-  part("A busy review gives the month's rows and payment back, costs its priced tries and puts the pass off a day (10th audit, MÉDIO 3; 11th audit, ALTO (b) and MÉDIO 3)");
+  part("A busy review: the reviews before it are written, its payment goes back, a failure is kept and the pass is put off (10th audit, MÉDIO 3; 11th audit; 13th audit; Claude 2 upbeat's LEVE)");
   is(`REVIEW_REFUND_MARK_COMMANDS (${REVIEW_REFUND_MARK_COMMANDS}) prices the product's lock at its tries over 1.6 s (${lockTriesAtMost(1_600)}), not one SET`, REVIEW_REFUND_MARK_COMMANDS >= lockTriesAtMost(1_600) + 1 + 5 + 2 + 4, true);
-  const five = await shop("cost-five@example.com", "costfive", 1);
+  // One payment that bought two products, each reviewed; the second product's lock is held, so the first review is
+  // written in the try and the second is busy.
+  const five = await shop("cost-five@example.com", "costfive", 2);
   const fivePi = "pi_costFivePayment001";
-  const fiveSaved = await saveReview(five.statsId, { productId: five.products[0], email: "five@example.com", reference: "cs_test_costfive0000000000", pi: fivePi, rating: 5, text: "Clear and kind.", name: "Buyer", paidAt: NOW - 86_400 }, ROOM, (NOW - 86_400) * 1000);
-  if (fiveSaved.state !== "created") throw new Error(`five's review not saved: ${fiveSaved.state}`);
+  const fiveIds: string[] = [];
+  for (const [i, productId] of five.products.entries()) {
+    const saved = await saveReview(five.statsId, { productId, email: "five@example.com", reference: `cs_test_costfive${i}000000000`, pi: fivePi, rating: 5, text: "Clear and kind.", name: "Buyer", paidAt: NOW - 86_400 }, ROOM, (NOW - 86_400) * 1000);
+    if (saved.state !== "created") throw new Error(`five's review ${i} not saved: ${saved.state}`);
+    fiveIds.push(saved.review.id);
+  }
   refunds.push(refundOf(fivePi));
   const fiveRows = `nl:rev:refunds:rows:${five.statsId}:${month}`;
   const fiveMarks = `nl:rev:refunds:marks:${five.statsId}:${month}`;
-  const fiveLock = `nl:rev:lock:${five.statsId}:${five.products[0]}`;
+  const fiveFails = `nl:rev:refunds:fails:${five.statsId}:${month}`;
+  const fiveLock = `nl:rev:lock:${five.statsId}:${five.products[1]}`;
   const fiveNext = `nl:rev:refunds:next:${five.statsId}`;
+  const refundedOf = async (i: number) => (JSON.parse(String((await healthy([["HGET", `nl:rev:${five.statsId}:${five.products[i]}`, fiveIds[i]]]))[0])) as { refunded?: boolean }).refunded === true;
   await healthy([["SET", fiveLock, "held-by-the-test", "EX", 60]]);
   await takeReviewPass(five.store);
   const fiveAnchor = (await healthy([["GET", `nl:rev:refunds:since:${five.statsId}`]]))[0];
@@ -294,11 +340,12 @@ async function main(): Promise<void> {
     console.error = quiet;
   }
   const busyCommands = commands - before;
-  is("the busy review ends the pass without a throw, nothing marked", [fiveThrew, fiveMarked], ["", 0]);
+  is("the busy review ends the pass without a throw; the review before it is marked and counted, so the quotes are refreshed", [fiveThrew, fiveMarked, await refundedOf(0), await refundedOf(1)], ["", 1, true, false]);
   is("the pass said so once", saidFive.filter((line) => line.includes("a review is busy")).length, 1);
   const lockTries = sent.filter((c) => c[0] === "SET" && c[1] === fiveLock && c.includes("NX")).length;
   is(`the lock was tried again over its wait (${lockTries} SET NX), within REVIEW_REFUND_LOCK_TRIES (${REVIEW_REFUND_LOCK_TRIES}): the one SET the line priced before was never its most`, lockTries > 1 && lockTries <= REVIEW_REFUND_LOCK_TRIES, true);
-  is(`the busy try's billed commands (${busyCommands}) are within the run and REVIEW_REFUND_BUSY_COMMANDS (${REVIEW_REFUND_RUN_COMMANDS + REVIEW_REFUND_BUSY_COMMANDS})`, busyCommands <= REVIEW_REFUND_RUN_COMMANDS + REVIEW_REFUND_BUSY_COMMANDS, true);
+  is(`the busy try's billed commands (${busyCommands}), a review written before the busy one included, are within the run and REVIEW_REFUND_FAILED_MARK_COMMANDS (${REVIEW_REFUND_RUN_COMMANDS + REVIEW_REFUND_FAILED_MARK_COMMANDS})`, busyCommands <= REVIEW_REFUND_RUN_COMMANDS + REVIEW_REFUND_FAILED_MARK_COMMANDS, true);
+  is("and each review of a failed try is priced at a whole mark, not at its lock and read (Claude 2 upbeat's LEVE)", REVIEW_REFUND_FAILED_MARK_COMMANDS >= 1 + 2 + 2 + 87 * REVIEW_REFUND_MARK_COMMANDS + 1 + 1, true);
   const fiveTtl = Number((await healthy([["TTL", fiveNext]]))[0]);
   is(`the store's turn is put off REVIEW_REFUND_BUSY_WAIT_SECONDS (${REVIEW_REFUND_BUSY_WAIT_SECONDS}), past the pass's two hours`, fiveTtl > REVIEW_REFUND_PASS_EVERY_SECONDS && fiveTtl <= REVIEW_REFUND_BUSY_WAIT_SECONDS, true);
   is("so the store's pass is not due at the next run", (await reviewPassesDue([five.store])).has(five.statsId), false);
@@ -308,12 +355,69 @@ async function main(): Promise<void> {
   // not handle was given back, so the count is the rows taken as seen, no more.
   const seenRows = async () => ((await healthy([["ZRANGE", `nl:rev:refunds:seenat:${five.statsId}`, 0, -1]]))[0] as string[]).filter((m) => m.startsWith("re_")).length;
   is("the month's rows stand at the rows taken as seen: what the page did not handle was given back", Number((await healthy([["GET", fiveRows]]))[0]), await seenRows());
-  is("and the payment's take was given back", Number((await healthy([["GET", fiveMarks]]))[0]), 0);
+  is("the payment's take was given back, and one failed mark of the month is kept", [Number((await healthy([["GET", fiveMarks]]))[0]), Number((await healthy([["GET", fiveFails]]))[0])], [0, 1]);
   await healthy([["DEL", fiveLock], ["DEL", fiveNext]]);
   await takeReviewPass(five.store);
-  is("the retry marks it", await markRefundedReviews(five.store, Date.now() + 60_000), 1);
-  is("and the month counts the rows taken as seen and one payment, never the retry twice", [Number((await healthy([["GET", fiveRows]]))[0]), Number((await healthy([["GET", fiveMarks]]))[0])], [await seenRows(), 1]);
+  is("the retry marks the second", [await markRefundedReviews(five.store, Date.now() + 60_000), await refundedOf(1)], [1, true]);
+  is("and the month counts the rows taken as seen, one payment and the one failure, never the retry twice", [Number((await healthy([["GET", fiveRows]]))[0]), Number((await healthy([["GET", fiveMarks]]))[0]), Number((await healthy([["GET", fiveFails]]))[0])], [await seenRows(), 1, 1]);
   is("a turn taken after the mark is held the pass's two hours again", Number((await healthy([["TTL", fiveNext]]))[0]) <= REVIEW_REFUND_PASS_EVERY_SECONDS, true);
+
+  part("A deferral that does not land costs no more: the failed marks' ceiling stops the tries (13th audit, LEVE 1)");
+  const seven = await shop("cost-seven@example.com", "costseven", 1);
+  const sevenPi = "pi_costSevenPayment01";
+  const sevenSaved = await saveReview(seven.statsId, { productId: seven.products[0], email: "seven@example.com", reference: "cs_test_costseven000000000", pi: sevenPi, rating: 5, text: "Clear and kind.", name: "Buyer", paidAt: NOW - 86_400 }, ROOM, (NOW - 86_400) * 1000);
+  if (sevenSaved.state !== "created") throw new Error(`seven's review not saved: ${sevenSaved.state}`);
+  refunds.push(refundOf(sevenPi));
+  const sevenLock = `nl:rev:lock:${seven.statsId}:${seven.products[0]}`;
+  const sevenNext = `nl:rev:refunds:next:${seven.statsId}`;
+  const sevenFails = `nl:rev:refunds:fails:${seven.statsId}:${month}`;
+  await healthy([["SET", sevenLock, "held-by-the-test", "EX", 600], ["SET", sevenFails, String(REVIEW_REFUND_FAILED_MARKS_PER_MONTH - 1)]]);
+  // The turn's SET EX of a day answers in another shape: the deferral does not land.
+  // On this PR the deferral is one fenced write (lib/live-fence.ts WRITE_IF_STORE_LIVE) whose KEYS hold the turn.
+  tamper = (command, reply) => ((command[0] === "SET" && command[1] === sevenNext && command[3] === "EX" && command[4] === REVIEW_REFUND_BUSY_WAIT_SECONDS) || (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:store-write-live:v1") && keysOf(command).includes(sevenNext)) ? "QUEUED" : reply);
+  const saidSeven: string[] = [];
+  console.error = (...args: unknown[]) => { saidSeven.push(String(args[0])); };
+  try {
+    await takeReviewPass(seven.store);
+    is("the last failed mark of the month is tried and kept", [await markRefundedReviews(seven.store, Date.now() + 60_000), Number((await healthy([["GET", sevenFails]]))[0])], [0, REVIEW_REFUND_FAILED_MARKS_PER_MONTH]);
+    is("the deferral that did not land is read as such and said", saidSeven.filter((line) => line.includes("turn was not put off")).length, 1);
+    // The turn stays at its two hours; two hours on, the pass runs again and tries nothing that costs a lock.
+    await healthy([["DEL", sevenNext]]);
+    await takeReviewPass(seven.store);
+    sent = [];
+    saidSeven.length = 0;
+    is("the next pass marks nothing", await markRefundedReviews(seven.store, Date.now() + 60_000), 0);
+    is("and tries no lock: the failed marks of the month are spent, and it says so", [sent.some((c) => c[0] === "SET" && c[1] === sevenLock), saidSeven.filter((line) => line.includes("failed marks of the month are spent")).length], [false, 1]);
+  } finally {
+    tamper = null;
+    console.error = quiet;
+  }
+  await healthy([["DEL", sevenLock], ["DEL", sevenFails], ["DEL", sevenNext]]);
+
+  part("Any other failure after the payment's take keeps a failure and puts the pass off too (13th audit, LEVE 2)");
+  const eight = await shop("cost-eight@example.com", "costeight", 1);
+  const eightPi = "pi_costEightPayment01";
+  const eightSaved = await saveReview(eight.statsId, { productId: eight.products[0], email: "eight@example.com", reference: "cs_test_costeight000000000", pi: eightPi, rating: 5, text: "Clear and kind.", name: "Buyer", paidAt: NOW - 86_400 }, ROOM, (NOW - 86_400) * 1000);
+  if (eightSaved.state !== "created") throw new Error(`eight's review not saved: ${eightSaved.state}`);
+  refunds.push(refundOf(eightPi));
+  const eightNext = `nl:rev:refunds:next:${eight.statsId}`;
+  // The stored review does not read in its shape: the mark throws after the payment's take.
+  tamper = (command, reply) => (command[0] === "HGET" && command[1] === `nl:rev:${eight.statsId}:${eight.products[0]}` && command[2] === eightSaved.review.id ? 7 : reply);
+  let eightThrew = "";
+  console.error = () => {};
+  try {
+    await takeReviewPass(eight.store);
+    await markRefundedReviews(eight.store, Date.now() + 60_000);
+  } catch (error) {
+    eightThrew = error instanceof Error ? error.name : String(error);
+  } finally {
+    tamper = null;
+    console.error = quiet;
+  }
+  is("the failure is thrown, as before", eightThrew.length > 0, true);
+  const eightTtl = Number((await healthy([["TTL", eightNext]]))[0]);
+  is("the store's turn is put off a day, as for a busy review", eightTtl > REVIEW_REFUND_PASS_EVERY_SECONDS && eightTtl <= REVIEW_REFUND_BUSY_WAIT_SECONDS, true);
+  is("the payment's take is given back and the failure kept", [Number((await healthy([["GET", `nl:rev:refunds:marks:${eight.statsId}:${month}`]]))[0]), Number((await healthy([["GET", `nl:rev:refunds:fails:${eight.statsId}:${month}`]]))[0])], [0, 1]);
 
   part("The ceilings count in the store's billing month, one key across the calendar months it touches (11th audit, ALTO (a))");
   // A paying store whose billing month began ten days ago and runs twenty more: its rows of two runs, one in this

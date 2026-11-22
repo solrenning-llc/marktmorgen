@@ -803,21 +803,17 @@ export function setReply(statsId: string, productId: string, id: string, text: s
 }
 
 /**
- * Marks as refunded every review a payment paid for, once Stripe says the
- * payment was given back in full. Returns how many changed. With the store's
- * fence (lib/store-live-cache.ts storeLiveFence), each review is written only
- * while the store is live: one erased meanwhile is left as the closing walk
- * leaves it, never written back, and ReviewStoreGoneError is thrown so the
- * sweep writes nothing more for that store (Codex L-20261120-0838).
- */
-/**
  * A review of the payment was busy (its product's lock held, lib/redis-lock.ts): what was marked before it stays
- * marked, the refund is not taken as seen, and the pass puts off its next run a day (lib/review-proof.ts,
- * REVIEW_REFUND_BUSY_WAIT_SECONDS), so a review busy at every try costs at most that many tries a month.
+ * marked (`marked`, so the store's quotes are refreshed for it), the refund is not taken as seen, and the pass counts a
+ * failed mark of the month and puts off its next run a day (lib/review-proof.ts, REVIEW_REFUND_FAILED_MARKS_PER_MONTH
+ * and REVIEW_REFUND_BUSY_WAIT_SECONDS).
  */
 export class ReviewBusyError extends Error {
-  constructor(what: string) {
+  readonly marked: number;
+  constructor(what: string, marked = 0) {
     super(`a review is busy; ${what} is marked on the next try`);
+    this.name = "ReviewBusyError";
+    this.marked = marked;
   }
 }
 
@@ -828,6 +824,14 @@ export class PaymentsSpentError extends Error {
   }
 }
 
+/**
+ * Marks as refunded every review a payment paid for, once Stripe says the
+ * payment was given back in full. Returns how many changed. With the store's
+ * fence (lib/store-live-cache.ts storeLiveFence), each review is written only
+ * while the store is live: one erased meanwhile is left as the closing walk
+ * leaves it, never written back, and ReviewStoreGoneError is thrown so the
+ * sweep writes nothing more for that store (Codex L-20261120-0838).
+ */
 export async function markRefunded(
   statsId: string,
   pi: string,
@@ -856,7 +860,7 @@ export async function markRefunded(
       return { ...review, refunded: true };
     }, null, fence, "uncount");
     // A review busy just now is not marked: thrown, so the refund is not taken as seen and the sweep tries again.
-    if (done === "busy") throw new ReviewBusyError("the refund");
+    if (done === "busy") throw new ReviewBusyError("the refund", changed);
     // The store erased meanwhile: nothing written, and the sweep must write nothing more for it (seen, anchor).
     if (done === "gone") throw new ReviewStoreGoneError();
     if (hit && typeof done !== "string") changed += 1;

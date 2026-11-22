@@ -11,6 +11,19 @@ type Command = (string | number)[];
 type Script = (run: (command: Command) => unknown, keys: string[], argv: string[]) => unknown;
 
 const SCRIPTS: Record<string, Script> = {
+  // lib/product-about-live.ts ABOUT_WRITE_IF_STORE_LIVE: a store's product description written (or compared and written) only
+  // while it is not erasing and its id key still holds its ref. {1} written, {0, length} changed, {-1} gone, moved or erasing.
+  "about-write-live:v2": (run, [storeId, erasing, about], [field, compare, expected, text, ref]) => {
+    if (run(["HGET", erasing, field]) !== null) return [-1];
+    if (run(["GET", storeId]) !== ref) return [-1];
+    if (compare === "1") {
+      const now = run(["GET", about]);
+      const held = typeof now === "string" ? now : "";
+      if (held !== expected) return [0, Buffer.byteLength(held, "utf8")];
+    }
+    run(text === "" ? ["DEL", about] : ["SET", about, text]);
+    return [1];
+  },
   // lib/card-update.ts KEEP_CARD_OPEN_IF_LIVE: a setup page kept only while its store (id key, or record before ids) is live.
   "card-open-live:v1": (run, [storeId, erasing, open], [erasingField, session, seconds]) => {
     if (run(["EXISTS", storeId]) !== 1 || run(["HEXISTS", erasing, erasingField]) === 1) return "gone";
@@ -39,6 +52,12 @@ const SCRIPTS: Record<string, Script> = {
     if (value === "") return run(["DEL", key]);
     run(["SET", key, value]);
     return 1;
+  },
+  "store-forget-complete:v1": (run, [queue, month], [field, seconds]) => {
+    if (run(["HDEL", queue, field]) !== 1) return [0, 0];
+    const done = run(["HINCRBY", month, "done", 1]);
+    run(["EXPIRE", month, seconds]);
+    return [1, done];
   },
   "set-take-count:v1": (run, [set]) => {
     const n = Number(run(["SCARD", set])) || 0;

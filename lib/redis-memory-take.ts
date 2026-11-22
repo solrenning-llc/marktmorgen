@@ -144,6 +144,14 @@ export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
     run(["EXPIRE", count, seconds]);
     return Number(after);
   },
+  // lib/store-forget-retry.ts COMPLETE_FORGET: a deleted store's forgetting leaves the daily line and is counted done
+  // for its month, only while it is still in line: {1, done} taken out, {0, 0} not there (#4348).
+  "store-forget-complete:v1": (run, [queue, month], [field, seconds]) => {
+    if (run(["HDEL", queue, field]) !== 1) return [0, 0];
+    const done = run(["HINCRBY", month, "done", 1]);
+    run(["EXPIRE", month, seconds]);
+    return [1, done];
+  },
   // lib/live-fence.ts WRITE_IF_STORE_LIVE: several writes made together only while the store is its own and not
   // erasing, by the same identity rule; argv[4] lists them as JSON, {"k": n} standing for KEYS[n] (Codex L-20261120-0838).
   "store-write-live:v1": (run, keys, [field, statsId, ref, commands]) => {

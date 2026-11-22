@@ -359,6 +359,15 @@ export const REVIEW_REFUND_ROWS_PER_MONTH: Readonly<Record<Tier, number>> = { cr
  * INCRBY before markRefunded; past it the row stays unhandled, the place keeps and the pass stops until next month.
  */
 export const REVIEW_REFUND_PAYMENTS_PER_MONTH: Readonly<Record<Tier, number>> = ORDERS_INCLUDED;
+/**
+ * Marks that may fail in a store's billing month after their payment was taken (a review busy at every try, a stored
+ * review that does not read, any other error), whatever the plan: one a day of the longest billing month. Each try
+ * takes one before markRefunded writes anything and gives it back only when the mark succeeded, so a failure keeps it
+ * whatever happens after (a deferral of the turn that did not land, a reply of another shape): past the ceiling the
+ * pass stops where it is until next month. tests/plan-cost-registry.ts prices each at a whole failed try (13th triple
+ * audit on #5100, LEVES 1 and 2: the tries were bounded only by a deferral whose answer was not read).
+ */
+export const REVIEW_REFUND_FAILED_MARKS_PER_MONTH = 32;
 /** Pages of refunds (100 each) one pass reads from the creator's account, at the most. */
 export const REVIEW_REFUND_PAGES = 3;
 const REFUND_PAGES = REVIEW_REFUND_PAGES;
@@ -382,6 +391,8 @@ export const SEEN_SET_UNTIL_20261122 = "nl:rev:refunds:seen:";
 const rowsKey = (statsId: string, month: string) => `nl:rev:refunds:rows:${statsId}:${month}`;
 /** The payments marked in a billing month (REVIEW_REFUND_PAYMENTS_PER_MONTH), kept forty days at the least (countKeep). */
 const marksKey = (statsId: string, month: string) => `nl:rev:refunds:marks:${statsId}:${month}`;
+/** The marks that failed after their payment was taken, in a billing month (REVIEW_REFUND_FAILED_MARKS_PER_MONTH). */
+const failsKey = (statsId: string, month: string) => `nl:rev:refunds:fails:${statsId}:${month}`;
 /**
  * The month the ceilings count in: the store's billing month (lib/allowance-window.ts windowId, the window every
  * other allowance of the plan is counted in; the calendar month for a store not paying), so a ceiling is spent once
@@ -402,15 +413,16 @@ function ofPlan(store: Store, figures: Readonly<Record<Tier, number>>): number {
  * the certificates' pass does (lib/certificate-refunds.ts). Before 22/11/2026 the pass ran on every run of the
  * five-minute sweep for every store with reviews (288 a day), re-reading the refunds of the last thirty days and
  * the lost disputes each time: a spend with no line and no ceiling (Claude 1 c1-revcusto on #5092; MR). A refunded
- * buyer's review is marked within this long of the refund, never sooner than the sweep's next run.
+ * buyer's review is marked within this long of the refund, never sooner than the sweep's next run; a day when a mark
+ * of the store failed (REVIEW_REFUND_BUSY_WAIT_SECONDS), and not before next month past the month's ceilings.
  */
 export const REVIEW_REFUND_PASS_EVERY_SECONDS = 2 * 3_600;
 /**
- * How long the store's turn is held after a review of a refunded payment was busy (its product's lock held at every
- * try, lib/reviews.ts ReviewBusyError): the pass ends there, keeps its place and runs again a day later, so a review
- * busy at every try is tried at most REVIEW_REFUND_BUSY_RUNS times a month, each priced at the full tries
- * (tests/plan-cost-registry.ts; 11th triple audit on #5100, MÉDIO 3: a mark that failed was tried again at every
- * run with no price). A lock is held for milliseconds, so the next try almost always marks it.
+ * How long the store's turn is held after a mark failed (a review busy at every try, lib/reviews.ts ReviewBusyError,
+ * or any other error after its payment was taken): the pass ends there, keeps its place and runs again a day later.
+ * The cost of the failed tries is bounded by REVIEW_REFUND_FAILED_MARKS_PER_MONTH, counted before each try, not by
+ * this deferral, so a deferral that does not land costs no more (13th triple audit on #5100, LEVE 1). A lock is held
+ * for milliseconds, so the next try almost always marks it.
  */
 export const REVIEW_REFUND_BUSY_WAIT_SECONDS = 86_400;
 const nextKey = (statsId: string) => `nl:rev:refunds:next:${statsId}`;
@@ -503,13 +515,13 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
     if (n > 0) await writeWhileLive([["DECRBY", key, n]]);
   };
   /**
-   * Puts off the store's next pass REVIEW_REFUND_BUSY_WAIT_SECONDS after a busy review, with one SET EX over the turn
-   * this run holds, through the fence (a store gone gets nothing written; a reply in another shape only leaves the
-   * turn at its two hours, and the tries are then bounded by the turn as before).
+   * Puts off the store's next pass REVIEW_REFUND_BUSY_WAIT_SECONDS after a failed mark, with one SET EX over the turn
+   * this run holds, through the fence, the answer read exactly: "kept", "gone" (a store gone gets nothing written) or
+   * "unknown", which the pass says. The failed tries stay bounded by REVIEW_REFUND_FAILED_MARKS_PER_MONTH, taken before
+   * each try, whatever this answers (13th triple audit on #5100, LEVE 1).
    */
-  const deferWhileLive = async (): Promise<void> => {
-    await writeIfStoreLive(fence, [["SET", { key: nextKey(statsId) }, NOT_DUE, "EX", REVIEW_REFUND_BUSY_WAIT_SECONDS]]);
-  };
+  const deferWhileLive = (): Promise<"kept" | "gone" | "unknown"> =>
+    writeIfStoreLive(fence, [["SET", { key: nextKey(statsId) }, NOT_DUE, "EX", REVIEW_REFUND_BUSY_WAIT_SECONDS]]);
   const now = Math.floor(Date.now() / 1000);
   const [anchorRaw] = await redisPipeline([["GET", anchorKey(statsId)]]);
   const anchor = Number(anchorRaw) > 0 ? Number(anchorRaw) : now - REFUND_LOOKBACK_SECONDS;
@@ -601,7 +613,7 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       const kept = allowed >= unseen.length ? unseen : allowed > 0 ? unseen.slice(unseen.length - allowed) : [];
       const handled = new Set(kept.map((refund) => refund.id));
       let done = 0;
-      let busy = false;
+      let failed = false;
       try {
         for (const [i, refund] of full.entries()) {
           if (seen[i]) {
@@ -612,16 +624,27 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
           const payment = INTENT_ID.test(refund.pi) && !paymentSeen.has(refund.pi);
           if (payment) {
             // One of the month's payments (REVIEW_REFUND_PAYMENTS_PER_MONTH), taken inside the mark once the payment
-            // is known to have reviews (a payment with none is a row, not a payment): past the ceiling the row stays
-            // unhandled (its take given back), the place keeps and the pass ends here; a mark that fails after the
-            // take (a busy review) gives it back too. Through the fence: a store gone meanwhile is not counted.
+            // is known to have reviews (a payment with none is a row, not a payment), and one of the month's failed
+            // marks (REVIEW_REFUND_FAILED_MARKS_PER_MONTH), taken with it and given back only once the mark succeeded:
+            // past either ceiling the row stays unhandled (its takes given back), the place keeps and the pass ends
+            // here. A mark that fails after the takes gives the payment back and keeps the failure. Through the
+            // fence: a store gone meanwhile is not counted.
             const payments = ofPlan(store, REVIEW_REFUND_PAYMENTS_PER_MONTH);
             let taken = false;
+            let failsSpent = false;
             const take = async (): Promise<"ok" | "spent"> => {
               const count = await countWhileLive(marksKey(statsId, month), 1);
               if (count === "gone") throw new ReviewStoreGoneError();
               if (count > payments) {
                 await giveBackWhileLive(marksKey(statsId, month), 1);
+                return "spent";
+              }
+              const fails = await countWhileLive(failsKey(statsId, month), 1);
+              if (fails === "gone") throw new ReviewStoreGoneError();
+              if (fails > REVIEW_REFUND_FAILED_MARKS_PER_MONTH) {
+                await giveBackWhileLive(failsKey(statsId, month), 1);
+                await giveBackWhileLive(marksKey(statsId, month), 1);
+                failsSpent = true;
                 return "spent";
               }
               taken = true;
@@ -632,24 +655,32 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
             } catch (error) {
               if (error instanceof PaymentsSpentError) {
                 spent = true;
-                console.error(`reviews' refund pass: a store's payments of the month are spent (${payments}); the rest waits for next month`, store.handle);
+                console.error(failsSpent
+                  ? `reviews' refund pass: a store's failed marks of the month are spent (${REVIEW_REFUND_FAILED_MARKS_PER_MONTH}); the rest waits for next month`
+                  : `reviews' refund pass: a store's payments of the month are spent (${payments}); the rest waits for next month`, store.handle);
                 break;
               }
               if (error instanceof ReviewStoreGoneError) {
                 gone = true;
                 break;
               }
-              if (taken) await giveBackWhileLive(marksKey(statsId, month), 1);
-              if (error instanceof ReviewBusyError) {
-                // A review busy at every try: the row is not taken as seen and the place keeps, so the next pass
-                // marks it; that pass is a day off (deferWhileLive), never the next run, so a review busy at every
-                // try is tried at most REVIEW_REFUND_BUSY_RUNS times a month, each within its price.
-                busy = true;
-                console.error(`reviews' refund pass: a review is busy; the pass tries again in ${REVIEW_REFUND_BUSY_WAIT_SECONDS} s`, store.handle);
-                break;
+              if (!taken) throw error;
+              // A mark that failed after its takes (13th triple audit on #5100, LEVE 2): the payment goes back, the
+              // failure stays counted, and the turn is put off a day, for a busy review and for any other error alike.
+              await giveBackWhileLive(marksKey(statsId, month), 1);
+              if (error instanceof ReviewBusyError) marked += error.marked;
+              failed = true;
+              if (!(error instanceof ReviewBusyError)) {
+                if ((await deferWhileLive()) === "unknown") console.error("reviews' refund pass: the store's turn was not put off; the failed marks of the month still bound the tries", store.handle);
+                throw error;
               }
-              throw error;
+              // A review busy at every try: the row is not taken as seen and the place keeps, so the next pass marks it.
+              console.error(`reviews' refund pass: a review is busy; the pass tries again in ${REVIEW_REFUND_BUSY_WAIT_SECONDS} s`, store.handle);
+              break;
             }
+            // The mark succeeded: its failure slot goes back, only when one was taken (a payment with no review of
+            // ours takes none); an answer in another shape only leaves the count high.
+            if (taken) await giveBackWhileLive(failsKey(statsId, month), 1);
             paymentSeen.add(refund.pi);
           }
           // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
@@ -669,8 +700,10 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
         if (!gone) await giveBackWhileLive(rowsKey(statsId, month), unseen.length - done);
       }
       if (gone) break;
-      if (busy) await deferWhileLive();
-      if (spent || busy) {
+      if (failed && (await deferWhileLive()) === "unknown") {
+        console.error("reviews' refund pass: the store's turn was not put off; the failed marks of the month still bound the tries", store.handle);
+      }
+      if (spent || failed) {
         unsure = true;
         break;
       }

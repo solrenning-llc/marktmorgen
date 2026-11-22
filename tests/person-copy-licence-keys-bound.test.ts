@@ -8,7 +8,7 @@
  */
 import { addProduct, claimHandle, ensureStatsId, setProductKeys, setProductLink, setSubscription, storeForEmail, type Listing } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { holderKey, keyForSale } from "@/lib/licence-keys";
+import { holderKey, keyForSale, keysWithoutHolderLine } from "@/lib/licence-keys";
 import { CLOSING, closingFamilyOf, countedInRoom } from "@/lib/data-families";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -129,6 +129,14 @@ async function main(): Promise<void> {
   ]);
   const settle = readFileSync("lib/licence-keys.ts", "utf8").split("async function settle(")[1].split("\n}\n")[0];
   is("settle writes the list in the same orderWriteIfNew as the key", /orderWriteIfNew\(store, \[[^]*"HSETNX", saleKey[^]*"HSET", infoKey[^]*\.\.\.holder/.test(settle) && settle.includes('["HSET", holderKey(store, email)'), true);
+
+  part("The opening check: no key given without its buyer's line");
+  is("every key given here has its line", await keysWithoutHolderLine(store, products.map((p) => p.id)), []);
+  // A key written the way it was before the list existed (its record, no line): the check names it.
+  const oldKey = "OLDKEY-AAAA-BBBB-CCCC";
+  redis.run(["HSET", `nl:keys:${store.statsId}:${products[0].id}:info`, oldKey, JSON.stringify({ r: "cs_test_before_the_list0000", e: "early@example.com", at: 1_790_000_000 })]);
+  is("a key with no line in its buyer's list is named", await keysWithoutHolderLine(store, products.map((p) => p.id)), [{ product: products[0].id, key: oldKey }]);
+  redis.run(["HDEL", `nl:keys:${store.statsId}:${products[0].id}:info`, oldKey]);
 
   part("A person with no key reads no key record");
   const none = await readsOf(() => COPIERS["lib/licence-keys.ts"]({ ...scope, email: "nobody@example.com" } as ErasureScope));

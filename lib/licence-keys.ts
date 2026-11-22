@@ -1203,6 +1203,46 @@ export function keysForCopy(scope: { store: Store; productIds: string[]; email: 
   return read;
 }
 
+/**
+ * The opening check of issue #5125 (coordinator f416), read only and never called by a route: every key a product
+ * gave whose line is missing from its buyer's own list (holderKey), so the person's copy would leave it out. Keys are
+ * given only by settle, which writes the line in the same step, and no store could sell before this list existed;
+ * this proves it on the real data before sales open. Reads each product's whole record hash and, per buyer, one
+ * HMGET of their list: an audit's cost, not a request's. An unknown reply throws (rule 24), never "none missing".
+ */
+export async function keysWithoutHolderLine(store: Store, productIds: string[]): Promise<{ product: string; key: string }[]> {
+  if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
+  const replies = repliesFor(await redisPipeline(productIds.map((id) => ["HGETALL", infoKey(store, { id })])), productIds.length);
+  if (!replies) throw new UnknownReplyError("the license keys' records");
+  const byHolder = new Map<string, { email: string; fields: { product: string; key: string }[] }>();
+  productIds.forEach((product, i) => {
+    const flat = stringList(replies[i]);
+    if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("HGETALL of a product's license keys");
+    for (let k = 0; k + 1 < flat.length; k += 2) {
+      const info = readInfo(flat[k + 1]);
+      // A sale with no address has nobody to list it under (settle writes no line for it).
+      if (!normaliseEmail(info.e)) continue;
+      const holder = holderKey(store, info.e);
+      const entry = byHolder.get(holder) ?? { email: info.e, fields: [] };
+      entry.fields.push({ product, key: flat[k] });
+      byHolder.set(holder, entry);
+    }
+  });
+  const holders = [...byHolder.entries()];
+  if (!holders.length) return [];
+  const lines = repliesFor(await redisPipeline(holders.map(([holder, e]) => ["HMGET", holder, ...e.fields.map((f) => holderField({ id: f.product }, f.key))])), holders.length);
+  if (!lines) throw new UnknownReplyError("the buyers' lists of license keys");
+  return holders.flatMap(([, e], i) => {
+    const values = lines[i];
+    if (!Array.isArray(values) || values.length !== e.fields.length) throw new UnknownReplyError("HMGET of a buyer's list of license keys");
+    return e.fields.filter((_, k) => {
+      if (values[k] === "1") return false;
+      if (values[k] === null) return true;
+      throw new UnknownReplyError("an entry of a buyer's list of license keys");
+    });
+  });
+}
+
 // ---------------------------------------------------------------- email
 
 function displayName(name: string): string {

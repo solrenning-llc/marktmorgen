@@ -70,7 +70,8 @@ import {
   requestOrdersLink,
 } from "@/lib/buyer-orders";
 import { ordersWords } from "@/lib/buyer-words/orders";
-import { saveServer, setProductRoles } from "@/lib/discord-store";
+import { setProductRoles } from "@/lib/discord-store";
+import { seedDiscordServer as saveServer } from "./discord-server-fixture";
 import { storeKey } from "@/lib/learn";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { BUMP_KEYS, MAX_BUNDLE_ITEMS, bundleMeta } from "@/lib/bundle-rules";

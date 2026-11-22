@@ -43,7 +43,7 @@ O Codex não mantém vigia em segundo plano. Ele roda `read`, `list-reviews` e `
 Todos gravam no correio com a mesma conta do GitHub, então o nome de quem escreve é declarado por ele. Para evitar engano e troca de nome:
 
 - Na nuvem do Claude Code, a ferramenta lê a sessão do próprio ambiente (`CLAUDE_CODE_REMOTE_SESSION_ID`), sem nada digitado, e grava essa sessão no fim de cada mensagem e registro (`Sessão: ...`) e no commit (trailer `Mail-Session: ...`).
-- Ela **recusa escrever com o nome de outra família**: uma sessão da conta do Claude 6 não escreve como "Claude 2". Para registrar a falta de cota de outra família, use `set-quota --as "Claude N" --exhausted --until ... --by "<seu nome>"`.
+- Ela **recusa escrever com o nome de outra família**: uma sessão da conta do Claude 6 não escreve como "Claude 2". A cota de outra família só é declarada pela própria família ou pelo coordenador (passo 5, em "Cota").
 - Ao ler, uma mensagem cujo remetente não bate com a família da sessão que a gravou aparece com **ATENÇÃO, IDENTIDADE**: confira com o remetente antes de agir.
 - Fora da nuvem (o Claude 1 no computador do dono, o Codex), a escrita fica marcada como `Sessão: não identificada`.
 - Limite: isto evita engano; não é assinatura criptográfica. Quem altera o ambiente ou a ferramenta de propósito ainda pode se passar por outro.
@@ -127,6 +127,7 @@ node ~/.agent-mail/agent-mail.mjs verify-enqueue --as "Claude N" <id do pedido>
 
 - `complete-enqueue --result enqueued` faz a mesma conferência e grava o head enfileirado ("Head enfileirado:"); com a tomada de outra sessão ou com o head mudado, é recusado.
 - Cada comando do git tem um limite de tempo (2 minutos): um comando que trava é parado e falha com o motivo.
+- As variáveis de teste (`CORREIO_SEM_COMMITS`, `CORREIO_SEM_GH` e `CORREIO_SEM_VERSAO`) só valem com a marca `AGENT_MAIL_TEST=1` e com os repositórios do correio e dos PRs locais: um caminho absoluto ou `file://`, nunca outra forma de endereço (scp, `ext::`, caminho relativo). Fora disso, cada uma é ignorada com um aviso, uma vez só, e a ferramenta faz a conferência de verdade: uma variável esquecida no ambiente não pula nenhuma conferência.
 
 ## Recados
 
@@ -154,6 +155,7 @@ node ~/.agent-mail/agent-mail.mjs list-quotas                                   
 - Declare quando ficar sem cota, com a data em que ela volta. Passada essa data, o correio conta você como com cota de novo.
 - Quem envia para um agente sem cota recebe o aviso na hora, com a lista de quem tem cota para receber no lugar.
 - Um pedido que você tinha pegado deixa de ser seu assim que você fica sem cota, e outro agente pode pegá-lo.
+- **De quem é a cota (dono, OWNER-20261121-1904, passo 5):** cada família declara a própria, de qualquer sessão dela. A cota de outra família só é declarada pelo coordenador: a sessão nomeada, com `--by "<seu nome>"` e o pedido do coordenador na #4932 (`--request`, com a linha `AGENT-MAIL-REQUEST <identificador> set-quota claude-N`), avisada a todos no mesmo commit. Ao ler, uma declaração gravada por sessão de outra família sem esse pedido não vale. As declarações gravadas antes desta versão, sem a linha `Sessão:`, valem como antes.
 
 ## Pedidos de revisão
 
@@ -204,7 +206,13 @@ node ~/.agent-mail/agent-mail.mjs release-pr --as "Claude 3" --pr 4941
 node ~/.agent-mail/agent-mail.mjs pr-status --pr 4941
 ```
 
-- Reivindicar um PR com CLAIMED ativo, ou com HOLD, de outra família é recusado. Se dois agentes reivindicam ao mesmo tempo, só um fica com o PR.
+- Reivindicar um PR com CLAIMED ativo de outra sessão, ou com HOLD ativo, é recusado. Se dois agentes reivindicam ao mesmo tempo, só um fica com o PR.
+- **De quem é cada marca (dono, OWNER-20261121-1904, passo 5):**
+  - um **CLAIMED é da sessão** que o gravou: outra sessão, mesmo da mesma família, não o toma nem o libera enquanto ele vale (2 horas); o coordenador o libera com `--request`;
+  - um **HOLD** é liberado só por quem o pôs (a família que pôs todos os HOLDs ativos; com dois HOLDs de famílias diferentes, nenhuma delas libera o da outra), pelo autor (uma família com commits no PR, conferida na hora e gravada na linha `Autor:`) ou pelo coordenador (a sessão nomeada, com `--request` e a linha `AGENT-MAIL-REQUEST <identificador> release-pr <N>`, nunca num PR que ela escreveu, revisou ou enfileirou);
+  - um CLAIMED não passa por cima de um HOLD ativo: o HOLD sai primeiro;
+  - sem conseguir ler os commits do PR agora, quem não pôs o HOLD não o libera (NÃO CONFERIDO);
+  - ao ler, uma marca gravada nesta versão sem esse direito (à mão ou por cópia antiga) é ignorada; as marcas antigas, sem a linha `Sessão:`, valem como antes.
 - Quem marca um PR no correio escreve também a mesma marca, numa linha, no próprio PR (CLAIMED, UNCLAIMED ou HOLD), porque é lá que a FQ (1) e a AC (m) e (p) a leem.
 
 ## Quando pedir ao dono

@@ -10,6 +10,7 @@ import { MAX_UNLOCK_PRODUCTS } from "@/lib/community-locked";
 import { SEARCH_CONVERSATIONS } from "@/lib/community-dm";
 import { ACCESS_CHECK_READ, searchRead, walkRead } from "./plan-cost-registry";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
+import { CRM_VALUE_SAVE, CRM_VALUE_SAVE_SECONDS, SHAPES } from "./plan-cost-registry";
 import { COMPANIES_PAGE_READ, COMPANIES_REQUEST, STUDIO_UNIT_SENT } from "./plan-cost-registry";
 import { COMPANIES_READ_UNITS, COMPANIES_REQUEST_UNITS, COMPANY_MARKUP_BYTES, COMPANY_PERSON_MARKUP_BYTES, MAX_COMPANIES, MAX_COMPANIES_BYTES, MAX_COMPANY_PEOPLE, SENT_TIMES, sentBytes } from "@/lib/crm-companies-rules";
 import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS, benefitsRead, benefitsGive } from "./plan-cost-registry";
@@ -51,10 +52,11 @@ import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
 import { PLAN_INVOICES_READ, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD } from "./plan-cost-registry";
-import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
+import { CRM_VALUE_MOST_BYTES, CRM_VALUE_SAVE_BYTES, CRM_VALUE_SAVE_COMMANDS, CRM_VALUE_SAVE_TRIPS, CRM_VALUE_SAVE_UNITS, TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
+import { MAX_FIELD_OPTION, MAX_FIELD_OPTIONS, MAX_FIELD_VALUE } from "@/lib/crm-rules";
 import { STUDIO_REQUEST_BYTES, flowHistoryUnits, keepVersionBytes, listVersionsBytes, restoreBytes, restoreTryBytes } from "@/lib/flow-versions-rules";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
-import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request, SHORT_LINK_OPEN_READ } from "./plan-cost-registry";
+import { ADD_ON_LINES, ASSIST_REMIND_READ, POLL_VOTE_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request, SHORT_LINK_OPEN_READ } from "./plan-cost-registry";
 import { SHORT_LINK_OPEN_UNITS } from "@/lib/short-link-open-rules";
 import { MAX_FUNNEL_PAGES } from "@/lib/page-funnel";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
@@ -62,6 +64,8 @@ import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { RETURNING_CODE_REQUEST_UNITS } from "@/lib/returning-code";
 import { SHELF_REQUEST_UNITS } from "@/lib/course-shelf";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
+import { POLL_VOTE_REQUEST_UNITS } from "@/lib/email-poll-rules";
+import { DRIP_MONTH_UNITS_PER_STORE_EMAIL, dripStartUnits } from "@/lib/drip-start-rules";
 import { WINBACK_OPEN_REQUEST_UNITS } from "@/lib/winback";
 import { WINBACK_OPEN_READ } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES, ORDERS_METERED_PROGRESS } from "./plan-cost-registry";
@@ -82,7 +86,7 @@ import { laterPageCost } from "./traffic-cost";
 import { PICTURE_REQUEST_UNITS } from "@/lib/buyer-actions";
 import { LIBRARY_WAITING_UNITS, PRODUCT_CARD_UNITS, affiliateLoadUnits, affiliatePageUnits, listingUnits, sitemapUnits } from "@/lib/public-read-rules";
 import { MAX_POST_PAGES } from "@/lib/store-sitemap";
-import { affiliateLoadRead, affiliatePageRead, libraryCardWait, libraryWaitingRead, publicListingsRead, sitemapRead } from "./plan-cost-registry";
+import { affiliateLoadRead, affiliatePageRead, dripStartRead, libraryCardWait, libraryWaitingRead, publicListingsRead, sitemapRead } from "./plan-cost-registry";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { BOOK_POST_EXTRA_UNITS, BOOK_STRIPE_READS, bookTimesUnits } from "@/lib/book-page-rules";
 import { DISPUTE_READS_PER_READING } from "@/lib/calls";
@@ -313,6 +317,28 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // And its checkout reminder is ASSIST_REMIND_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(ASSIST_REMIND_REQUEST_UNITS * laterPageCost() >= ASSIST_REMIND_READ, `${ASSIST_REMIND_REQUEST_UNITS} x ${laterPageCost()} < ${ASSIST_REMIND_READ}`);
   console.log(`a Store assistant checkout reminder: $${ASSIST_REMIND_READ.toFixed(6)} at most besides its email and model, counted as ${ASSIST_REMIND_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // A confirmed answer to a poll in a broadcast is POLL_VOTE_REQUEST_UNITS public requests, taken before it is kept: more than its reads and writes cost.
+  assert.ok(POLL_VOTE_REQUEST_UNITS * laterPageCost() >= POLL_VOTE_READ, `${POLL_VOTE_REQUEST_UNITS} x ${laterPageCost()} < ${POLL_VOTE_READ}`);
+  console.log(`a confirmed answer to an email poll: $${POLL_VOTE_READ.toFixed(6)} at most, counted as ${POLL_VOTE_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // A drip run's read of a student's start takes units of the store's monthly figure sized by the store's courses
+  // (lib/drip-start-rules.ts), never the store's public requests: at every size, from a store with no course to one
+  // whose every product is a course, the units, each at a later page's cost, cost more than the read.
+  for (const courses of [0, 1, 5, 6, 7, 12, 13, 100, 1_000, MAX_PRODUCTS]) {
+    assert.ok(dripStartUnits(courses) * laterPageCost() >= dripStartRead(courses), `drip start, ${courses} courses: ${dripStartUnits(courses)} x ${laterPageCost()} < ${dripStartRead(courses)}`);
+  }
+  // One read of a one-course store for each email of the store's window, across all its runs (dripMonthUnits).
+  assert.equal(DRIP_MONTH_UNITS_PER_STORE_EMAIL, dripStartUnits(1));
+  assert.ok(read("lib/learn.ts").includes("await takeDripStartUnits(store, units, nowSeconds * 1000)"), "the drip job takes its reads from the store's monthly figure, before each read");
+  assert.ok(read("lib/drip-start.ts").includes("dripMonthUnits(store, now / 1000)") && read("lib/drip-start.ts").includes("allowanceWindow(store, now)"), "counted in the store's allowance window");
+  assert.ok(!read("lib/learn.ts").includes("takeBuyerRead"), "the drip job takes nothing from the store's public requests");
+  assert.ok(read("vercel.json").includes("\"path\": \"/api/cron/courses\",\n      \"schedule\": \"0 11 * * *\""), "the course job runs once a day");
+  console.log(`a drip run's read of one student's start: $${dripStartRead(1).toFixed(6)} at most for a store of one course, taken as ${dripStartUnits(1)} units of the store's monthly figure at $${laterPageCost().toFixed(6)}`);
+  for (const tier of ["creator", "pro", "scale"] as const) {
+    const month = STORE_ALLOWANCES[tier].email * DRIP_MONTH_UNITS_PER_STORE_EMAIL * laterPageCost();
+    assert.ok(month > 0, `the drip job's month for ${tier} is never zero`);
+    assert.equal(COST_LINES.find((line) => line.id === "drip-start-read")?.monthlyUsd(tier), month, `the drip job's start reads are a ${tier} plan line`);
+    console.log(`the drip job's start reads for one ${tier} store: $${month.toFixed(4)} a month at most (plan line drip-start-read)`);
+  }
   // Opening a come-back link's checkout reads whether the person has a membership still running (lib/winback-send.ts): WINBACK_OPEN_REQUEST_UNITS
   // public requests, taken before it, more than its calls to the creator's Stripe account cost.
   assert.ok(WINBACK_OPEN_REQUEST_UNITS * laterPageCost() >= WINBACK_OPEN_READ, `${WINBACK_OPEN_REQUEST_UNITS} x ${laterPageCost()} < ${WINBACK_OPEN_READ}`);
@@ -441,6 +467,22 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   }
   assert.ok(TASKS_RECOUNT_UNITS * UNIT_COST.studio >= request("studio", 4, TASKS_RECOUNT_BYTES));
   console.log(`a recount of a store's tasks: ${TASKS_RECOUNT_BYTES} bytes at most, ${TASKS_RECOUNT_UNITS} studio requests at most, once a store`);
+  // A field saved from the studio (lib/crm.ts, setValue; C3-125): the whole request, every trip at the review ceiling of
+  // a trip. Its trips (more than six) do not fit in one studio request's 1.5 s, so it is counted as two, both taken with
+  // the first, before anything is read, never three; the line is held under what the two cost, in time, commands and bytes.
+  const studioShape = request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000);
+  assert.equal(UNIT_COST.studio, studioShape);
+  assert.equal(CRM_VALUE_SAVE_UNITS, 2);
+  assert.ok(CRM_VALUE_SAVE_TRIPS * ROUND_TRIP_SECONDS > SHAPES.studio.seconds, "the save does not fit in one studio request: it is counted as two");
+  assert.equal(CRM_VALUE_SAVE_SECONDS, CRM_VALUE_SAVE_TRIPS * ROUND_TRIP_SECONDS);
+  assert.ok(CRM_VALUE_SAVE_SECONDS <= CRM_VALUE_SAVE_UNITS * SHAPES.studio.seconds, `${CRM_VALUE_SAVE_SECONDS} s > ${CRM_VALUE_SAVE_UNITS} x ${SHAPES.studio.seconds} s`);
+  assert.ok(CRM_VALUE_SAVE_COMMANDS <= CRM_VALUE_SAVE_UNITS * (20 + TAKE_COMMANDS) && CRM_VALUE_SAVE_BYTES <= CRM_VALUE_SAVE_UNITS * 50_000);
+  assert.ok(CRM_VALUE_SAVE <= CRM_VALUE_SAVE_UNITS * UNIT_COST.studio, `${CRM_VALUE_SAVE} > ${CRM_VALUE_SAVE_UNITS} x ${UNIT_COST.studio}`);
+  assert.ok(CRM_VALUE_MOST_BYTES >= 3 * MAX_FIELD_VALUE && CRM_VALUE_MOST_BYTES >= 3 * (MAX_FIELD_OPTIONS * MAX_FIELD_OPTION + MAX_FIELD_OPTIONS - 1));
+  assert.ok(CRM_VALUE_SAVE_BYTES >= 2 * CRM_VALUE_MOST_BYTES);
+  assert.ok(read("app/api/store/crm/route.ts").includes('body.action === "value" ? CRM_VALUE_SAVE_UNITS : 1'), "both are taken by the route's guard, with the first");
+  assert.ok(!/takeAllowance\(store, "studio"/.test(read("lib/flows.ts")), "a workflow's field step takes no studio request");
+  console.log(`a field saved from the studio: $${CRM_VALUE_SAVE.toFixed(6)} at most (${CRM_VALUE_SAVE_TRIPS} trips, ${CRM_VALUE_SAVE_SECONDS} s, ${CRM_VALUE_SAVE_COMMANDS} commands, ${CRM_VALUE_SAVE_BYTES} bytes), counted as ${CRM_VALUE_SAVE_UNITS} studio requests at $${UNIT_COST.studio.toFixed(6)}`);
   // A workflow's history (lib/flow-versions-rules.ts; Claude 5 on #1927, decision B): each path takes flowHistoryUnits of what it moves, measured
   // first, at UNIT_COST.studio's 50 KB, which covers its commands and those bytes at a whole studio request's shape.
   assert.equal(STUDIO_REQUEST_BYTES, 50_000);

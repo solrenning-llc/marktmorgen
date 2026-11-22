@@ -1,3 +1,5 @@
+import { storeIdCommand } from "@/lib/store";
+import { store as summaryRedis } from "./redis-stub";
 // Synthetic stand-ins for the weekly and monthly numbers-email routes (tests/numbers-email-claim.test.ts):
 // no network, no provider, no real store. Each export replaces the named lib module's export of the same name.
 export const control = {
@@ -16,7 +18,7 @@ export const sendEmailPinned = (message: Parameters<typeof sendEmail>[0]) => sen
 export async function cronAllowed(): Promise<boolean> { return true; }
 export async function visitedFolders(): Promise<string[]> { return [...control.folders]; }
 export async function storeOf(folder: string) {
-  return { handle: folder, name: "Fixture Store", email: "owner@example.test", statsId: "st-fixture", sid: "", currency: "usd", weeklyAi: false, subscriptionActive: true, trialEnds: 0 };
+  return { handle: folder, name: "Fixture Store", email: "owner@example.test", statsId: "b".repeat(32), sid: "f".repeat(32), currency: "usd", weeklyAi: false, subscriptionActive: true, trialEnds: 0 };
 }
 export async function weeklySummary(): Promise<string | null> { return null; }
 export function aiAvailableFor(): boolean { return false; }
@@ -49,3 +51,6 @@ export function studioStats() {
 }
 export async function sourcesToday() { return []; }
 export async function viewsBefore() { return 0; }
+
+/** Live synthetic identity, seeded by each test reset, never by the production admission or by storeOf. */
+export function seedNumbersStore(): void { summaryRedis.run(["SET", storeIdCommand("f".repeat(32))[1], "owner@example.test"]); }

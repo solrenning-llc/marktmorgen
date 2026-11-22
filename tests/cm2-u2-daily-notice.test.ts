@@ -52,7 +52,10 @@ type Sent = { meter: unknown; from: string; to: string; subject: string; text: s
 
 async function main(): Promise<void> {
   redis.clear();
-  const t0 = Math.floor(Date.now() / 1000);
+  // One hour into today's UTC day, never the real clock: every step below adds at most a few minutes to a day, so a
+  // run near midnight UTC no longer crosses into the next day between "the same day" steps (the merge queue's
+  // failure of #4967 at 23:58 UTC, 21/11/2026).
+  const t0 = Math.floor(Date.now() / 1000 / DAY) * DAY + 3_600;
   const ms = (seconds: number) => seconds * 1000;
   let outbox: Sent[] = [];
   let answer = true;

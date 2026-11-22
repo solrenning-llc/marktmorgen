@@ -6,5 +6,6 @@
   "@/lib/community-access": "podcast-grant-read-world.ts",
   "@/lib/email": "podcast-grant-read-world.ts",
   "@/lib/auth": "podcast-grant-read-world.ts",
-  "@/lib/buyer-words/courses": "podcast-grant-read-world.ts"
+  "@/lib/buyer-words/courses": "podcast-grant-read-world.ts",
+  "@/lib/store": "podcast-grant-read-world.ts"
 }

@@ -147,6 +147,24 @@ async function main(): Promise<void> {
   await toggleLike(ID, POST, WHO, ROOM);
   await real([["DEL", likes, trace]]);
 
+  part("#2576 on #3819: a press that added the trace entry itself and then took it out gives its room back once");
+  await real([["DEL", likes, trace]]);
+  is("setup: liked", await toggleLike(ID, POST, WHO, ROOM), true);
+  // The like is there, but its trace entry is not (it was written before traces were kept): its room is not counted.
+  await real([["SREM", trace, `l:${POST}`]]);
+  await giveData(ROOM, [TRACE_ENTRY]);
+  const likeOnly = await used();
+  // The press reads the like as absent (a press at the same moment wrote it right after this read), so it takes a
+  // like's and a trace entry's room. Its SADD of the like answers 0, its SADD of the trace 1 (the entry is new), and the
+  // take-back removes both: the trace entry it removed is the one it added, inside the room it took, never a second one.
+  bend = { name: "SISMEMBER", key: likes, reply: 0 };
+  const pressed = await toggleLike(ID, POST, WHO, ROOM);
+  bend = null;
+  is("taken back", pressed, false);
+  is("no like and no trace entry left", [await members(likes), await members(trace)], [[], []]);
+  is("the room is back to what was counted less the like it removed: the trace room given back once, not twice", await used(), (likeOnly ?? 0) - SET_ENTRY_BYTES);
+  await real([["DEL", likes, trace]]);
+
   part("Codex T and Codex U on #3819: two presses at once of one member never leave a point or a like the other did not");
   // What the route does with a press: the like, then the author's point. pressLike (lib/community.ts) holds both under
   // one lock per member and liked thing; before it, the route ran them as two steps, as this stand-in does.

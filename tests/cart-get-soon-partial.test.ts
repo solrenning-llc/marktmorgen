@@ -40,7 +40,7 @@ async function main() {
   const owner = "soon-partial@example.test";
   if (!(await claimHandle(owner, "soonpartial", "Soon shop", "")).ok) throw new Error("no store");
   await ensureStatsId(owner);
-  await setStripeAccount(owner, "acct_1TestSoonPartial", true);
+  await setStripeAccount(owner, "acct_1TestCartSoon1", true);
   await setSubscription(owner, { customerId: "cus_SoonPartial01", subscriptionId: "sub_SoonPartial01", active: true, tier: "creator", period: paidPeriod() });
   const made = await addProduct(owner, "Public guide", "Out now", "19", null);
   if (!made.ok) throw new Error("no product");

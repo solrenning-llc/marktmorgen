@@ -24,7 +24,10 @@ import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_MEMORY_NOTE, MAX_MEMORY_NOTES, type MemoryNote, type MemoryResult, addNote, editNote, parseMemory, removeNote } from "@/lib/assistant-memory-rules";
 import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
+import type { StoreLiveFence } from "@/lib/live-fence";
+import type { Store } from "@/lib/store";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { dataBytes, dataBytesOfLength } from "@/lib/store-data-rules";
 
 const memoryKey = (statsId: string) => `nl:amem:${statsId}`;
@@ -88,6 +91,36 @@ if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
 if ARGV[2] == '' then redis.call('DEL', KEYS[2]) else redis.call('SET', KEYS[2], ARGV[2]) end
 return 1`;
 /**
+ * MEMORY_WRITE, done only while the notes' store is still live (Codex P-20261120-0045, #5010 row 44): a change holds
+ * only the notes' own lock, which the store's erasure does not take, so a change that read the notes before the
+ * erasure and wrote after the closing walk passed nl:amem: would leave the creator's notes under the erased statsId,
+ * with no expiry. The fence is lib/store-live-cache.ts storeLiveFence, as in funnel-save-live:v3
+ * (lib/page-funnel-store.ts): the erasing mark (KEYS[4], field ARGV[3]) absent and, for a store with an id, its id key
+ * (KEYS[3]) still holding this store's ref (ARGV[5]); for one from before ids, its owner's record still this store's
+ * own (its statsId, ARGV[4]). Answers 1 written, 0 the lock gone, -4 the store gone or being erased, -5 its id key
+ * holding another ref with nothing being erased (moved and live), -3 its owner's record unreadable; nothing is
+ * written on any answer but 1. Two more commands than MEMORY_WRITE (the HGET and the GET). Modelled by
+ * lib/redis-memory.ts.
+ */
+export const MEMORY_WRITE_LIVE = `-- marktmorgen:amem-write-live:v1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+if redis.call('HGET', KEYS[4], ARGV[3]) then return -4 end
+if ARGV[4] == '' then
+  local held = redis.call('GET', KEYS[3])
+  if not held then return -4 end
+  if held ~= ARGV[5] then return -5 end
+else
+  local raw = redis.call('GET', KEYS[3])
+  if not raw then return -4 end
+  local parsed, record = pcall(cjson.decode, raw)
+  if not parsed or type(record) ~= 'table' then return -3 end
+  if record['statsId'] ~= ARGV[4] then return -4 end
+end
+if ARGV[2] == '' then redis.call('DEL', KEYS[2]) else redis.call('SET', KEYS[2], ARGV[2]) end
+return 1`;
+/** Commands MEMORY_WRITE_LIVE adds to MEMORY_WRITE: the erasing mark's HGET and the store key's GET. */
+export const MEMORY_LIVE_GUARD_COMMANDS = 2;
+/**
  * Forgets the notes and makes the lock the forgetting's own (ARGV[1], for
  * ARGV[2] seconds) in the same step: a change still in flight finds its lock
  * gone and writes nothing back (Codex G2 on #1949), and no new change can
@@ -107,6 +140,19 @@ export class MemoryWriteUnconfirmed extends Error {
   constructor() {
     super("The assistant's notes may or may not have changed");
     this.name = "MemoryWriteUnconfirmed";
+  }
+}
+
+/**
+ * The notes' store is gone, being erased or no longer the store this change read: nothing was written. On -4 (gone
+ * or being erased) nothing is given back to its room, since giving back would write its room's key again; on -5 (moved
+ * and live under its new ref) what the change took is given back, because the room, keyed by the sid the move keeps,
+ * is still the live store's.
+ */
+export class MemoryStoreGoneError extends Error {
+  constructor() {
+    super("This store is gone or being closed, so the assistant's notes were not changed.");
+    this.name = "MemoryStoreGoneError";
   }
 }
 
@@ -141,14 +187,19 @@ export async function readMemory(statsId: string | null): Promise<MemoryNote[]> 
  * took goes back, refused as busy. An answer that is not Redis's own:
  * unconfirmed, what it took kept.
  */
-async function writeMemory(held: Held, statsId: string, notes: MemoryNote[], wasBytes: number, room: DataStore): Promise<void> {
+async function writeMemory(held: Held, statsId: string, notes: MemoryNote[], wasBytes: number, room: DataStore, live: Store | null): Promise<void> {
   const json = notes.length ? JSON.stringify(notes) : "";
   const bytes = notes.length ? dataBytes([json], 1) : 0;
   const grown = bytes - wasBytes;
   if (grown > 0) await needData(room, [{ slot: MEMORY_SLOT, bytes: grown }]);
   let reply: unknown;
   try {
-    reply = await redisPipeline([["EVAL", MEMORY_WRITE, 2, held.key, memoryKey(statsId), held.token, json]]);
+    const fence: StoreLiveFence | null = live ? await storeLiveFence(live) : null;
+    reply = await redisPipeline([
+      fence
+        ? ["EVAL", MEMORY_WRITE_LIVE, 4, held.key, memoryKey(statsId), fence.live, fence.erasing, held.token, json, fence.field, fence.statsId === "" ? "" : statsId, fence.ref]
+        : ["EVAL", MEMORY_WRITE, 2, held.key, memoryKey(statsId), held.token, json],
+    ]);
   } catch {
     throw new MemoryWriteUnconfirmed();
   }
@@ -157,8 +208,12 @@ async function writeMemory(held: Held, statsId: string, notes: MemoryNote[], was
     if (grown < 0) await giveData(room, [{ slot: MEMORY_SLOT, bytes: -grown }]);
     return;
   }
-  if (answer === 0) {
+  // A store known gone or being erased has no room left to give back to: giving it back would write its room's key again.
+  if (live && answer === -4) throw new MemoryStoreGoneError();
+  if (answer === 0 || (live && (answer === -5 || answer === -3))) {
     if (grown > 0) await giveData(room, [{ slot: MEMORY_SLOT, bytes: grown }]);
+    if (answer === -5) throw new MemoryStoreGoneError();
+    if (answer === -3) throw new MemoryWriteUnconfirmed();
     throw new LockBusyError();
   }
   throw new MemoryWriteUnconfirmed();
@@ -171,7 +226,7 @@ async function writeMemory(held: Held, statsId: string, notes: MemoryNote[], was
  * change held the lock too long, and as unreadable when the record is there
  * but cannot be read, with nothing written either way.
  */
-async function changeMemory(statsId: string, room: DataStore, change: (notes: MemoryNote[]) => MemoryResult): Promise<MemoryChange> {
+async function changeMemory(statsId: string, room: DataStore, change: (notes: MemoryNote[]) => MemoryResult, live: Store | null = null): Promise<MemoryChange> {
   let held: Held;
   try {
     held = await takeLock(lockKey(statsId), LOCK_SECONDS, MEMORY_LOCK_WAIT_MS);
@@ -185,7 +240,7 @@ async function changeMemory(statsId: string, room: DataStore, change: (notes: Me
     // A note the rules leave out is kept: the list is never written over it (Codex G2 on #1949).
     if (!read.whole) return { ok: false, error: "unreadable" };
     const result = change(read.notes);
-    if (result.ok && result.notes !== read.notes) await writeMemory(held, statsId, result.notes, read.bytes, room);
+    if (result.ok && result.notes !== read.notes) await writeMemory(held, statsId, result.notes, read.bytes, room, live);
     return result;
   } catch (error) {
     if (error instanceof LockBusyError) return { ok: false, error: "busy" };
@@ -215,6 +270,36 @@ export async function dropNote(statsId: string, id: string, room: DataStore): Pr
     const next = removeNote(notes, id);
     return { ok: true, notes: next.length === notes.length ? notes : next };
   });
+}
+
+/**
+ * The same changes, written only while `store` is still live (MEMORY_WRITE_LIVE): MemoryStoreGoneError when it is
+ * gone, being erased or moved, and nothing is written. Every studio change goes through these
+ * (tests/assistant-memory-erasure-fence.test.ts); the bare ones above are for the rules' own tests. A store without a
+ * statsId has no notes to change.
+ */
+function liveStatsId(store: Store): string {
+  if (!store.statsId) throw new MemoryWriteUnconfirmed();
+  return store.statsId;
+}
+
+/** keepNote, only while `store` is live. */
+export async function keepStoreNote(store: Store, input: { kind: unknown; text: unknown }, nowSeconds = Date.now() / 1000): Promise<MemoryChange> {
+  const id = newNoteId();
+  return changeMemory(liveStatsId(store), store, (notes) => addNote(notes, input, id, nowSeconds), store);
+}
+
+/** changeNote, only while `store` is live. */
+export async function changeStoreNote(store: Store, id: string, input: { kind?: unknown; text?: unknown }, nowSeconds = Date.now() / 1000): Promise<MemoryChange> {
+  return changeMemory(liveStatsId(store), store, (notes) => editNote(notes, id, input, nowSeconds), store);
+}
+
+/** dropNote, only while `store` is live. */
+export async function dropStoreNote(store: Store, id: string): Promise<MemoryChange> {
+  return changeMemory(liveStatsId(store), store, (notes) => {
+    const next = removeNote(notes, id);
+    return { ok: true, notes: next.length === notes.length ? notes : next };
+  }, store);
 }
 
 /** Tries at the lock while waiting `waitMs` (lib/redis-lock.ts takeLock: one SET each, waits of 20 ms doubling up to 250 ms). */

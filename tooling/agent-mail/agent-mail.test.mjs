@@ -342,7 +342,8 @@ console.log("order by the commit sequence; instants in the future refused; off p
   const mail = join(T, "mail.git");
   const ons = g(["ls-tree", "-r", "--name-only", "refs/heads/correio", "chaves/record-review"], mail).split("\n")
     .map((c) => ({ c, t: g(["show", `refs/heads/correio:${c}`], mail) })).filter((x) => /^ON\nClaude 5 ibqho\n/.test(x.t) && /^Pedido: /m.test(x.t));
-  const valido = ons[ons.length - 1].t;
+  // Run against the audited version (step 7), no valid ON was ever written: a fixed one stands in, so the run goes on.
+  const valido = ons.length ? ons[ons.length - 1].t : "ON\nClaude 5 ibqho\nteste\nPedido: https://github.com/solrenning-llc/marktmorgen/issues/4932#issuecomment-1\nSessão: session_012ST5ibqhoHCYrphJXU5az3 (claude-5)\n";
   raw("chaves/on-call/4102444800000-claude-5-ibqho-ab12", valido);
   is("an ON whose instant is in the future is ignored", /on-call: DESLIGADO/.test(run(["list-switches"]).out), run(["list-switches"]).out);
   // A valid ON stamped 3 minutes ahead and written first, then an OFF written after it: the OFF, written last, holds.
@@ -591,6 +592,44 @@ console.log("step 6: the private mailbox never lands in the public clone (A14)")
   r = run(["list-queue"], { CORREIO_REPO: join(T, "mail7.git") });
   is("a mailbox ref left by an older version in the clone is reported, with the command to delete it (A14)", /ATENÇÃO.*refs\/agent-mail\/append-only-checked/.test(r.out) && /update-ref -d/.test(r.out), r.out);
   g(["update-ref", "-d", "refs/agent-mail/append-only-checked"], W);
+  // NIT 1 of Claude 1 on #5113: the first run of the new repository keeps the old anchor of the clone, so a rewrite
+  // made before the switch is still caught.
+  g(["init", "-q", "--bare", "mail8.git"]); g(["push", "-q", "../mail8.git", "HEAD:refs/heads/correio"], W);
+  const m8 = { CORREIO_REPO: join(T, "mail8.git"), CORREIO_GIT_DIR: join(T, "dir8-antigo.git") };
+  run(["send", "--from", "Claude 2 X", "--to", "Claude 3 Z", "--subject", "s", "--text", "um"], { ...as("c2"), ...m8 });
+  const ancora = g(["rev-parse", "refs/heads/correio"], join(T, "mail8.git"));
+  g(["fetch", "-q", join(T, "mail8.git"), `+refs/heads/correio:refs/agent-mail/old-copy`], W);
+  g(["update-ref", "refs/agent-mail/append-only-checked", ancora], W); g(["update-ref", "-d", "refs/agent-mail/old-copy"], W);
+  const re = join(T, `rewrite-${Math.random().toString(16).slice(2)}`);
+  g(["clone", "-q", "-b", "correio", join(T, "mail8.git"), re]); g(["reset", "-q", "--hard", "HEAD~1"], re);
+  g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "rewritten"], re); g(["push", "-q", "-f", "origin", "HEAD:correio"], re);
+  r = run(["watch", "--as", "Claude 3 Z", "--seconds", "1"], { CORREIO_REPO: join(T, "mail8.git"), CORREIO_GIT_DIR: join(T, "dir8-novo.git"), CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+  is("on the first run of a new mailbox repository, a rewrite made before it is caught by the clone's old anchor (NIT 1 on #5113)", /ALERTA: o ramo correio não só acrescentou: o ramo foi reescrito/.test(r.out), r.out);
+  g(["update-ref", "-d", "refs/agent-mail/append-only-checked"], W);
+  // MEDIUM of Claude 4 3Kc on #5117: in CO (b)'s order (read first, then the warned delete, then the watch), the old anchor
+  // is kept when the tool's repository is created by any command, so the watch still catches the rewrite.
+  {
+    g(["init", "-q", "--bare", "mail9.git"]); g(["push", "-q", "../mail9.git", "HEAD:refs/heads/correio"], W);
+    run(["send", "--from", "Claude 2 X", "--to", "Claude 3 Z", "--subject", "s", "--text", "um"], { ...as("c2"), CORREIO_REPO: join(T, "mail9.git"), CORREIO_GIT_DIR: join(T, "dir9-antigo.git") });
+    const a9 = g(["rev-parse", "refs/heads/correio"], join(T, "mail9.git"));
+    g(["fetch", "-q", join(T, "mail9.git"), "+refs/heads/correio:refs/agent-mail/old-copy"], W);
+    g(["update-ref", "refs/agent-mail/append-only-checked", a9], W); g(["update-ref", "-d", "refs/agent-mail/old-copy"], W);
+    const novo = { CORREIO_REPO: join(T, "mail9.git"), CORREIO_GIT_DIR: join(T, "dir9-novo.git"), CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" };
+    run(["read", "--as", "Claude 3 Z"], novo);
+    for (const ref of g(["for-each-ref", "--format=%(refname)", "refs/correio", "refs/agent-mail"], W).split("\n").filter(Boolean)) g(["update-ref", "-d", ref], W);
+    const re9 = join(T, `rewrite9-${Math.random().toString(16).slice(2)}`);
+    g(["clone", "-q", "-b", "correio", join(T, "mail9.git"), re9]); g(["reset", "-q", "--hard", "HEAD~1"], re9);
+    g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "rewritten"], re9); g(["push", "-q", "-f", "origin", "HEAD:correio"], re9);
+    r = run(["watch", "--as", "Claude 3 Z", "--seconds", "1"], novo);
+    is("read first, the clone's refs deleted as warned, then the watch: the rewrite made before the switch is still caught (MEDIUM on #5117)", /ALERTA: o ramo correio não só acrescentou: o ramo foi reescrito/.test(r.out), r.out);
+  }
+  // NIT 2: the shared-folder warning looks at the folder's permissions, not at its path.
+  for (const [modo, aviso] of [[0o700, false], [0o777, true]]) {
+    const d = join(T, `pasta-${modo.toString(8)}`); mkdirSync(d); chmodSync(d, modo);
+    writeFileSync(join(d, "agent-mail.mjs"), readFileSync(TOOL));
+    const x = spawnSync("node", [join(d, "agent-mail.mjs"), "list-switches"], { cwd: W, env: { ...base, AGENT_MAIL_TEST: "", CORREIO_SEM_VERSAO: "" }, encoding: "utf8" });
+    is(`a copy in a folder with mode ${modo.toString(8)} ${aviso ? "is" : "is not"} warned about a folder anyone can write (NIT 2 on #5113)`, /pasta que todos podem escrever/.test(`${x.stdout}${x.stderr}`) === aviso, `${x.stdout}${x.stderr}`.slice(0, 300));
+  }
 }
 
 console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");
@@ -605,6 +644,13 @@ console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");
   is("the watch raises the alarm once, and says to tell the coordinator and the owner", /ALERTA: o ramo correio não só acrescentou/.test(r.out) && /coordenador e o dono/.test(r.out), r.out);
   r = run(["watch", "--as", "Claude 3 Z", "--seconds", "1"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
   is("the same change is not raised again on the next watch", !/ALERTA: o ramo correio/.test(r.out), r.out);
+  // The audit's proof of concept 3 (step 7): a request deleted by a plain commit is reported too, by name.
+  const pedidoAlvo = g(["ls-tree", "-r", "--name-only", "refs/heads/correio", "fila/pedidos"], join(T, "mail.git")).split("\n")[0];
+  const cl = join(T, `rm-${Math.random().toString(16).slice(2)}`);
+  g(["clone", "-q", "-b", "correio", join(T, "mail.git"), cl]); g(["rm", "-q", pedidoAlvo], cl);
+  g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "raw delete"], cl); g(["push", "-q", "origin", "HEAD:correio"], cl);
+  r = run(["check-append-only"]);
+  is("a commit that deletes a request is reported, with the file (proof of concept 3)", !r.ok && new RegExp(`APAGOU ${pedidoAlvo.replace(/[.]/g, "[.]")}`).test(r.out), r.out);
 }
 
 console.log("version: the copy's SHA-256 against the reviewed one on main (owner, OWNER-20261121-1904, step 1)");

@@ -38,12 +38,24 @@ import { formatMoney } from "@/lib/money";
 import { type Preorder, keptDay, parsePreorder, preorderCounts, preorderJob, preorderOpen, preorderProblem, readPreorderJob } from "@/lib/preorder-rules";
 // On its own line, so open pull requests that change the imports above still merge cleanly.
 import { type StripePage, StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
+import { createHash } from "node:crypto";
+import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 
 const soonKey = (sid: string) => `nl:wl:${sid}:soon`;
 const dayKey = (sid: string) => `nl:wl:${sid}:pre`;
-const entriesKey = (sid: string, product: string) => `nl:pre:${sid}:${product}`;
+export const entriesKey = (sid: string, product: string) => `nl:pre:${sid}:${product}`;
 export const piKey = (pi: string) => `nl:pre:pi:${pi}`;
 const anyKey = (sid: string) => `nl:pre:${sid}:any`;
+/**
+ * A person's pre-orders, for the copy of their data (#5125; coordinator b3f6 and 8dc1, 22 November 2026): beside each
+ * product's hash of pre-orders, a hash from the SHA-256 of the buyer's address in lower case to their checkouts for it,
+ * one a line, written in the same script as the entry (PREORDER_RECORD) and given its expiry with it at every write
+ * (keep), so the two are made and run out together. And the store's products that ever took a pre-order, so the copy
+ * finds those the store no longer lists. Product ids hold no ":", so neither can be a product's own hash.
+ */
+export const whoKey = (sid: string, product: string) => `nl:pre:${sid}:who:${product}`;
+export const productsKey = (sid: string) => `nl:pre:${sid}:prods`;
+export const whoField = (email: string) => createHash("sha256").update(email.trim().toLowerCase()).digest("hex");
 const anchorKey = (sid: string) => `nl:pre:${sid}:refunds`;
 
 /**
@@ -168,7 +180,18 @@ const giveKey = (session: string) => `nl:pre:give:${session}`;
 const JOBS = "nl:pre:jobs";
 /** How long a pre-order is kept after it was last changed: past any refund window, as a gift is. */
 const KEPT_SECONDS = 400 * 86_400;
-const keep = (sid: string, product: string): (string | number)[] => ["EXPIRE", entriesKey(sid, product), KEPT_SECONDS];
+/**
+ * The expiry every write of a product's pre-orders gives again: its hash, the index of whose they are beside it, and
+ * the store's list of products with pre-orders, so the index never runs out before an entry it leads to, and the list
+ * never before a product in it (tests/preorders-person-read.test.ts holds every EXPIRE of a product's hash to this).
+ */
+const keep = (sid: string, product: string): (string | number)[][] => [
+  ["EXPIRE", entriesKey(sid, product), KEPT_SECONDS],
+  ["EXPIRE", whoKey(sid, product), KEPT_SECONDS],
+  ["EXPIRE", productsKey(sid), KEPT_SECONDS],
+];
+/** keep's three EXPIREs each answer 0 or 1 (the index of an entry written before #5137 may be missing: 0). */
+const kept3 = (replies: unknown[]) => replies.length === 3 && replies.every((r) => r === 0 || r === 1);
 const now = () => Math.floor(Date.now() / 1000);
 
 const SESSION_ID = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
@@ -454,30 +477,51 @@ async function givenExactly(sid: string, productId: string, sessionId: string): 
   throw new UnknownReplyError("a pre-order's entry");
 }
 
+/** The products a person's copy reads the index of in one request at the most (coordinator 66f4): MAX_PRODUCTS. */
+export const PREORDER_COPY_PRODUCTS_MOST = MAX_PRODUCTS;
+
 /**
- * A person's pre-orders and what became of them, for the copy of their data (619 [SZ3]). Only reads. A pre-order is
- * written only by recordPreorder, for a paid checkout of the store's own Stripe account whose metadata names it a
- * pre-order and its product (readSession), under that checkout's id; so the person's own paid checkouts (lib/person-copy.ts
- * checkoutsOf, which reads them whole or fails) name every pre-order of theirs, and only those entries are read, one
- * HGET each, never every product's whole hash (#5125, coordinator 6e01). tests/preorders-person-read.test.ts holds the
- * paths that make a pre-order to that one.
+ * A person's pre-orders and what became of them, for the copy of their data (619 [SZ3]; #5125, coordinator b3f6). Only
+ * reads, and never Stripe: the store's products that ever took a pre-order (productsKey), the person's line of each
+ * product's index (whoKey, whoField), then each entry those lines name, one HGET each, never a product's whole hash.
+ * Every pre-order is made by recordPreorder alone, whose one script writes the entry and its line together, and every
+ * write of a product's hash gives the index its expiry again (keep), so a kept entry always has its line
+ * (tests/preorders-person-read.test.ts holds both). Every reply is read exactly; anything unknown throws, so the copy is
+ * not handed over without them. A store with more products in its list than PREORDER_COPY_PRODUCTS_MOST throws too,
+ * until the copy reads it in pages (#5131): never a copy said to be whole without them.
  */
-export async function preordersOf(store: Store, checkouts: readonly { id: string; meta: Record<string, string> }[], email: string): Promise<(Preorder & { product: string; checkout: string })[]> {
+export async function preordersOf(store: Store, email: string): Promise<(Preorder & { product: string; checkout: string })[]> {
   if (!store.statsId || !isRedisConfigured()) return [];
   const sid = store.statsId;
   const address = email.trim().toLowerCase();
-  const asked = checkouts.filter((c) => c.meta.preorder === "yes" && Boolean(c.meta.product));
+  const listed = repliesFor(await redisPipeline([["SMEMBERS", productsKey(sid)]]), 1);
+  const products = listed ? stringList(listed[0]) : null;
+  if (!products || products.some((p) => !p || p.includes(":"))) throw new UnknownReplyError("the store's products with pre-orders");
+  if (!products.length) return [];
+  if (products.length > PREORDER_COPY_PRODUCTS_MOST) throw new UnknownReplyError("more products with pre-orders than one copy request reads");
+  const field = whoField(address);
+  const lines = repliesFor(await redisPipeline(products.map((p) => ["HGET", whoKey(sid, p), field])), products.length);
+  if (!lines) throw new UnknownReplyError("a person's index of pre-orders");
+  const asked: { product: string; checkout: string }[] = [];
+  products.forEach((product, i) => {
+    const line = lines[i];
+    if (line === null) return;
+    if (typeof line !== "string" || !line) throw new UnknownReplyError("a person's index of pre-orders");
+    for (const checkout of line.split("\n")) {
+      if (!SESSION_ID.test(checkout)) throw new UnknownReplyError("a person's index of pre-orders");
+      asked.push({ product, checkout });
+    }
+  });
   if (!asked.length) return [];
-  // Read exactly (CX-123 rule 24): an unknown reply throws, so the copy is not handed over without their pre-orders.
-  const replies = repliesFor(await redisPipeline(asked.map((c) => ["HGET", entriesKey(sid, c.meta.product), c.id])), asked.length);
+  const replies = repliesFor(await redisPipeline(asked.map((a) => ["HGET", entriesKey(sid, a.product), a.checkout])), asked.length);
   if (!replies) throw new UnknownReplyError("a person's pre-orders");
-  return asked.flatMap((c, i) => {
+  return asked.flatMap((a, i) => {
     const raw = replies[i];
-    // No entry for a paid pre-order checkout: never written down, or kept past KEPT_SECONDS. Nothing of theirs is kept.
+    // A line whose entry is gone: never, while keep gives both their expiry together; read as none, not as unknown.
     if (raw === null) return [];
     const entry = typeof raw === "string" ? parsePreorder(raw) : null;
     if (!entry) throw new UnknownReplyError("a person's pre-orders");
-    return entry.to.trim().toLowerCase() === address ? [{ ...entry, product: c.meta.product, checkout: c.id }] : [];
+    return entry.to.trim().toLowerCase() === address ? [{ ...entry, product: a.product, checkout: a.checkout }] : [];
   });
 }
 
@@ -505,6 +549,26 @@ function readSession(store: Store, session: Session): { id: string; productId: s
 }
 
 /**
+ * A paid pre-order's entry and, only when the entry is new, the checkout's line in its buyer's index (whoKey, field
+ * whoField) and the product in the store's list (productsKey), in one step, so an entry is never without its line;
+ * then keep's three expiries, and the entry as kept. KEYS: the product's hash, its index, the store's list. ARGV: the
+ * buyer's field, the checkout, the entry, the product, the expiry. Answers {1 or 0, the entry}. Simulated in
+ * lib/redis-memory.ts and held in tests/preorders-person-read.test.ts.
+ */
+export const PREORDER_RECORD = `-- marktmorgen:preorder-record:v1
+local made = redis.call("HSETNX", KEYS[1], ARGV[2], ARGV[3])
+if made == 1 then
+  local list = redis.call("HGET", KEYS[2], ARGV[1])
+  if list then list = list .. "\\n" .. ARGV[2] else list = ARGV[2] end
+  redis.call("HSET", KEYS[2], ARGV[1], list)
+  redis.call("SADD", KEYS[3], ARGV[4])
+end
+redis.call("EXPIRE", KEYS[1], ARGV[5])
+redis.call("EXPIRE", KEYS[2], ARGV[5])
+redis.call("EXPIRE", KEYS[3], ARGV[5])
+return {made, redis.call("HGET", KEYS[1], ARGV[2])}`;
+
+/**
  * Writes a paid pre-order down, once. Returns it as it is kept. Every reply is read exactly (CX-123 rule 24; Claude 5
  * on #2963): HSETNX and EXPIRE answer 0 or 1, HGET the entry as kept, each SET "OK". Anything else throws
  * UnknownReplyError, never "recorded": a receipt for an entry that does not exist, or a "skip" on sale, would leave
@@ -515,14 +579,14 @@ async function recordPreorder(store: Store, read: NonNullable<ReturnType<typeof 
   const sid = store.statsId as string;
   const entry: Preorder = { to: read.email, at: read.at, pi: read.pi, ship: read.ship };
   const commands: (string | number)[][] = [
-    ["HSETNX", entriesKey(sid, read.productId), read.id, JSON.stringify(entry)],
-    ["HGET", entriesKey(sid, read.productId), read.id],
-    keep(sid, read.productId),
+    // The entry and, only when it is new, its line in the buyer's index and its product in the store's list: one step.
+    ["EVAL", PREORDER_RECORD, 3, entriesKey(sid, read.productId), whoKey(sid, read.productId), productsKey(sid), whoField(read.email), read.id, JSON.stringify(entry), read.productId, KEPT_SECONDS],
     ...(read.pi ? [["SET", piKey(read.pi), `${sid}|${read.productId}|${read.id}`, "EX", KEPT_SECONDS]] : []),
     ["SET", anyKey(sid), "1"],
   ];
   const replies = repliesFor(await redisPipeline(commands), commands.length);
-  const kept = replies && oneWrite(replies[0]) && oneWrite(replies[2]) && replies.slice(3).every((r) => r === "OK") ? parsePreorder(replies[1]) : null;
+  const made = replies?.[0];
+  const kept = replies && Array.isArray(made) && made.length === 2 && oneWrite(made[0]) && replies.slice(1).every((r) => r === "OK") ? parsePreorder(made[1]) : null;
   if (!kept) throw new UnknownReplyError("a paid pre-order's record");
   return kept;
 }
@@ -579,8 +643,8 @@ export async function handOverPreorder(store: Store, product: Listing, sessionId
     // The "given" mark read exactly (rule 30 of Claude 5's finding on #2963): HSET and EXPIRE of one field answer 0 or
     // 1. On anything else the grant and the email above stand; it throws, never "given": the caller retries, and the
     // retry finds it given or marks it.
-    const marked = repliesFor(await redisPipeline([["HSET", entriesKey(sid, product.id), sessionId, JSON.stringify({ ...entry, given: now() } satisfies Preorder)], keep(sid, product.id)]), 2);
-    if (!marked || !oneWrite(marked[0]) || !oneWrite(marked[1])) throw new UnknownReplyError("a pre-order's given mark");
+    const marked = repliesFor(await redisPipeline([["HSET", entriesKey(sid, product.id), sessionId, JSON.stringify({ ...entry, given: now() } satisfies Preorder)], ...keep(sid, product.id)]), 4);
+    if (!marked || !oneWrite(marked[0]) || !kept3(marked.slice(1))) throw new UnknownReplyError("a pre-order's given mark");
     return "given";
   } finally {
     // Let go only while it still holds this run's value (releaseMark never throws).
@@ -678,9 +742,9 @@ export async function confirmPreorder(store: Store, session: Session, product: L
         const current = await readPreorderExact(store.statsId, product.id, read.id);
         if (!current) throw new UnknownReplyError("a pre-order given back, whose entry is gone");
         if (!current.given && !current.revoked) {
-          const replies = repliesFor(await redisPipeline([["HSET", entriesKey(store.statsId, product.id), read.id, JSON.stringify({ ...current, revoked: now() } satisfies Preorder)], keep(store.statsId, product.id)]), 2);
-          // Both replies are read: the HSET's count and the EXPIRE's 1 (the entries were just written, so 0 is unknown).
-          if (!replies || typeof replies[0] !== "number" || replies[1] !== 1) throw new UnknownReplyError("a pre-order given back");
+          const replies = repliesFor(await redisPipeline([["HSET", entriesKey(store.statsId, product.id), read.id, JSON.stringify({ ...current, revoked: now() } satisfies Preorder)], ...keep(store.statsId, product.id)]), 4);
+          // Every reply is read: the HSET's count, the entries' EXPIRE's 1 (they were just written, so 0 is unknown) and keep's other two.
+          if (!replies || typeof replies[0] !== "number" || replies[1] !== 1 || !kept3(replies.slice(1))) throw new UnknownReplyError("a pre-order given back");
         }
         return "skip";
       }
@@ -810,7 +874,7 @@ async function releaseJob(
           try {
             const current = await readPreorderExact(sid, pid, session);
             if (current && !current.given && !current.revoked) {
-              await redisPipeline([["HSET", entriesKey(sid, pid), session, JSON.stringify({ ...current, revoked: now() } satisfies Preorder)], keep(sid, pid)]);
+              await redisPipeline([["HSET", entriesKey(sid, pid), session, JSON.stringify({ ...current, revoked: now() } satisfies Preorder)], ...keep(sid, pid)]);
             }
             // Handed over since it was read: the refund pass (revokeRefundedPreorders) takes back what was given.
           } finally {
@@ -941,8 +1005,8 @@ export async function revokeRefundedPreorders(
               if (!oneWrite(removed?.[0])) return false;
             }
           }
-          const saved = repliesFor(await redisPipeline([["HSET", entriesKey(sid, productId), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, productId)]), 2);
-          if (!oneWrite(saved?.[0]) || !oneWrite(saved?.[1])) return false;
+          const saved = repliesFor(await redisPipeline([["HSET", entriesKey(sid, productId), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], ...keep(sid, productId)]), 4);
+          if (!saved || !oneWrite(saved[0]) || !kept3(saved.slice(1))) return false;
           revoked += 1;
         }
       } finally {

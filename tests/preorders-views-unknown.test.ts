@@ -1,14 +1,12 @@
 /**
  * The studio's view of each product's pre-orders and a person's pre-orders in the copy of their data, read only in
  * their exact shape (CX-123 rule 24; rule-30 siblings of waitingCount, tests/preorders-waiting-unknown.test.ts).
- * Synthetic only: the in-memory Redis double; every fetch answers 404 but the store's Stripe list of the buyer's paid
- * checkouts, which the copy reads its pre-orders through.
+ * Synthetic only: the in-memory Redis double, every fetch answers 404.
  *
  * Before: lib/preorders.ts read an HVALS or HGETALL that answered no reply, a number or text as "no pre-orders":
  *   1. preorderViews: the studio said a product had no pre-orders (and offered "Take pre-orders" as if none were
  *      ever taken) while buyers who paid waited; the pre-order switch answered ok with 0 waiting;
- *   2. preordersOf: the copy of a person's data was handed over without their paid pre-orders in it (read since #5125
- *      entry by entry, through the person's own paid checkouts).
+ *   2. preordersOf: the copy of a person's data was handed over without their paid pre-orders in it.
  * Now: an unknown read throws UnknownReplyError; the switch answers 503 "preorders_unread" (its day is saved, the
  * counts are not invented); the studio says the pre-orders could not be read; the copy is not made.
  * And the day's own HSET/HDEL answered in another shape throws PreorderDayUnconfirmed: the switch answers 502
@@ -21,7 +19,7 @@ import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, storeForEmail } from "@/lib/store";
 import { setSoon } from "@/lib/waitlist";
-import { preorderViews, preordersOf, setExpectedDay } from "@/lib/preorders";
+import { preorderViews, preordersOf, productsKey, setExpectedDay, whoField, whoKey } from "@/lib/preorders";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { COPIERS } from "@/lib/person-copy";
 import type { ErasureScope } from "@/lib/erasure-rules";
@@ -32,18 +30,7 @@ import { done, is, part } from "./check";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
-process.env.STRIPE_SECRET_KEY ??= "sk_test_preorders_views_unknown_only";
-// The store's Stripe answers only the buyer's paid checkouts (the copy reads a person's pre-orders through them since
-// #5125, lib/person-copy.ts checkoutsOf); everything else is not reached.
-const BUYER_SESSIONS: { id: string; product: string }[] = [];
-globalThis.fetch = (async (input: string | URL | Request) => {
-  const url = new URL(String(input instanceof Request ? input.url : input));
-  if (url.hostname === "api.stripe.com" && url.pathname === "/v1/checkout/sessions" && url.searchParams.get("customer_details[email]") === "buyer@example.com") {
-    const data = BUYER_SESSIONS.map((s) => ({ id: s.id, status: "complete", payment_status: "paid", payment_intent: null, metadata: { store: "previews", preorder: "yes", product: s.product } }));
-    return new Response(JSON.stringify({ object: "list", data, has_more: false }), { status: 200, headers: { "content-type": "application/json" } });
-  }
-  return new Response("{}", { status: 404 });
-}) as typeof fetch;
+globalThis.fetch = (async () => new Response("{}", { status: 404 })) as typeof fetch;
 
 const OWNER = "preorders.views@example.com";
 const BUYER = "buyer@example.com";
@@ -156,14 +143,14 @@ async function main(): Promise<void> {
     await setProductLink(OWNER, pid, "https://example.com/the-thing");
     await setSoon(await store(), pid, true);
     const key = `nl:pre:${sid}:${pid}`;
-    if (withBuyer) await redis.pipeline([["HSET", key, CHECKOUT, WAITING]]);
+    // The buyer's pre-order with its line in the buyer's index and its product in the store's list, as recordPreorder
+    // writes them (#5125, coordinator b3f6): the copy reads a person's pre-orders through them.
+    if (withBuyer) await redis.pipeline([["HSET", key, CHECKOUT, WAITING], ["HSET", whoKey(sid, pid), whoField(BUYER), CHECKOUT], ["SADD", productsKey(sid), pid]]);
     return { pid, key };
   };
   const switchDay = (pid: string) =>
     preorderRoute(new NextRequest(`${ORIGIN}/api/store/preorder`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ id: pid, day: DAY, agree: true }) }));
-  const scopeOf = async (productIds: string[]) => ({ store: { ...(await store()), stripeAccountId: "acct_1PreViewsCopy" }, statsId: sid, productIds, email: BUYER }) as unknown as ErasureScope;
-  /** The buyer's paid pre-order checkout of `pid`, as the store's Stripe lists it for the copy. */
-  const paidFor = (pid: string) => [{ id: CHECKOUT, meta: { store: HANDLE, preorder: "yes", product: pid } }];
+  const scopeOf = async (productIds: string[]) => ({ store: await store(), statsId: sid, productIds, email: BUYER }) as unknown as ErasureScope;
 
   part("Healthy control: read exactly");
   const { pid: a, key: aKey } = await setUp("Course A");
@@ -171,9 +158,10 @@ async function main(): Promise<void> {
   const { pid: e } = await setUp("Course E");
   is("the studio sees the buyer who waits, and nothing for a product nobody pre-ordered", await preorderViews(await store(), [a, b]), { [a]: { day: null, waiting: 1, given: 0, refunded: 0 } });
   is("the switch answers the view with its day and the buyer who waits", await switchDay(a).then((r) => r.json()), { ok: true, view: { day: DAY, waiting: 1, given: 0, refunded: 0 } });
-  BUYER_SESSIONS.push({ id: CHECKOUT, product: a });
-  is("the copy of the buyer's data has their pre-order", (await preordersOf(await store(), paidFor(a), BUYER)).map((p) => [p.product, p.checkout, p.to]), [[a, CHECKOUT, BUYER]]);
-  is("and the copier hands it over", (await COPIERS["lib/preorders.ts"](await scopeOf([a, b]))).length, 1);
+  // Since #5125 the copy reads every product the store took a pre-order for, not only those it is asked about: the
+  // buyer's pre-order of E, which the scope below does not list, is theirs too and is in it.
+  is("the copy of the buyer's data has their pre-orders", (await preordersOf(await store(), BUYER)).map((p) => [p.product, p.checkout, p.to]).sort(), [[a, CHECKOUT, BUYER], [e, CHECKOUT, BUYER]].sort());
+  is("and the copier hands them over", (await COPIERS["lib/preorders.ts"](await scopeOf([a, b]))).length, 2);
 
   for (const [label, reply] of SHAPES) {
     part(`Unknown (${label}): the HVALS of a product's pre-orders answers in another shape`);
@@ -195,9 +183,10 @@ async function main(): Promise<void> {
   }
 
   for (const [label, reply] of HASH_SHAPES) {
+    // Since #5125 the copy reads the buyer's entry by its checkout (HGET), never the product's whole hash.
     part(`Unknown (${label}): the read of the buyer's pre-order for the copy answers in another shape`);
     const shop = await store();
-    is(`(${label}) preordersOf says it does not know, never "no pre-orders"`, await withBent("HGET", aKey, reply, () => rejection(() => preordersOf(shop, paidFor(a), BUYER))), "UnknownReplyError");
+    is(`(${label}) preordersOf says it does not know, never "no pre-orders"`, await withBent("HGET", aKey, reply, () => rejection(() => preordersOf(shop, BUYER))), "UnknownReplyError");
     const scope = await scopeOf([a, b]);
     is(`(${label}) so the copy is not made without them`, await withBent("HGET", aKey, reply, () => rejection(() => COPIERS["lib/preorders.ts"](scope))), "UnknownReplyError");
   }

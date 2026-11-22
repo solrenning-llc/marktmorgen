@@ -1,72 +1,73 @@
 /**
- * A person's copy of their pre-orders reads only their own (#5125, coordinator 6e01, 22 November 2026): the copier
- * takes the person's own paid checkouts from the store's Stripe account (lib/person-copy.ts checkoutsOf), keeps those
- * that are pre-orders, and reads each one's entry by its checkout, never every product's whole hash of pre-orders.
- * That is complete because a pre-order is only ever made from such a checkout (lib/preorders.ts recordPreorder, from
- * readSession); the last part holds that path to the code, so a new way to make a pre-order fails this test before
- * it can leave a person's copy short. Checked against the stand-in Redis and a stand-in Stripe; nothing real is reached.
+ * A person's copy of their pre-orders reads only their own, and never Stripe (#5125; coordinator b3f6, 8dc1 and 66f4,
+ * 22 November 2026, after Claude 2's MEDIUM on #5137: a copy read through the store's current Stripe account lost the
+ * pre-orders paid on an account the creator had disconnected or replaced). recordPreorder writes each entry and its
+ * line in the buyer's index beside the product's hash in one script; every write of the product's hash gives the index
+ * its expiry again; the copy reads the store's list of products with pre-orders, the person's line of each index and
+ * one HGET for each entry, never a product's whole hash. Checked against the stand-in Redis; nothing real is reached.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, clearStripeAccount, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Listing } from "@/lib/store";
+import { readListing } from "@/lib/catalog";
+import { setSoon } from "@/lib/waitlist";
 import { COPIERS } from "@/lib/person-copy";
-import { preordersOf } from "@/lib/preorders";
+import { PREORDER_COPY_PRODUCTS_MOST, confirmPreorder, entriesKey, preordersOf, productsKey, whoField, whoKey } from "@/lib/preorders";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import type { ErasureScope } from "@/lib/erasure-rules";
 import { store as redis } from "./redis-stub";
+import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 
-process.env.STRIPE_SECRET_KEY = "sk_test_preorders_person_read_only";
+process.env.STRIPE_SECRET_KEY ??= "sk_test_preorders_person_read_only";
+// Stripe is never asked by the copy: any request to it while the copy runs fails this test.
+let stripeAsked = 0;
+globalThis.fetch = (async (input: string | URL | Request) => {
+  const url = new URL(String(input instanceof Request ? input.url : input));
+  if (url.hostname === "api.stripe.com") stripeAsked += 1;
+  return new Response("{}", { status: 404 });
+}) as typeof fetch;
 
 const OWNER = "preorders-person@example.com";
 const HANDLE = "prepersonread";
-const ACCOUNT = "acct_1PreorderPerson";
 const ADA = "ada@example.com";
 const BOB = "bob@example.com";
-const PRODUCT_A = "preprodaaaaaa";
-const PRODUCT_B = "preprodbbbbbb";
+const NOW = Math.floor(Date.now() / 1000);
 const checkout = (n: string) => `cs_test_${n.padEnd(24, "0")}`;
-/**
- * Ada bought two pre-orders (one of a product the store no longer lists), Bob one, and Ada one plain sale. Stripe's
- * filter on the address is taken as exact, which is what the copy asks it for (as typed, and trimmed and lower-cased);
- * whether Stripe also matches another casing is a #5125 row of its own, for every copier that reads checkoutsOf.
- */
-const SESSIONS: Record<string, { email: string; meta: Record<string, string> }> = {
-  [checkout("ada1")]: { email: ADA, meta: { store: HANDLE, preorder: "yes", product: PRODUCT_A } },
-  [checkout("ada2")]: { email: ADA, meta: { store: HANDLE, preorder: "yes", product: PRODUCT_B } },
-  [checkout("adasale")]: { email: ADA, meta: { store: HANDLE, product: PRODUCT_A } },
-  [checkout("bob1")]: { email: BOB, meta: { store: HANDLE, preorder: "yes", product: PRODUCT_A } },
-};
-const entry = (to: string) => JSON.stringify({ to, at: 1_790_000_000, pi: "", ship: false });
-
-globalThis.fetch = (async (input: string | URL | Request) => {
-  const url = new URL(String(input instanceof Request ? input.url : input));
-  const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
-  if (url.hostname !== "api.stripe.com" || url.pathname !== "/v1/checkout/sessions") return json({ error: { message: "no stand-in" } }, 404);
-  // Stripe's own filter, as the stand-in takes it: the address exactly as asked.
-  const asked = url.searchParams.get("customer_details[email]") ?? "";
-  const data = Object.entries(SESSIONS)
-    .filter(([, s]) => s.email === asked)
-    .map(([id, s]) => ({ id, status: "complete", payment_status: "paid", payment_intent: null, metadata: s.meta, customer_details: { email: s.email } }));
-  return json({ object: "list", data, has_more: false });
-}) as typeof fetch;
+const deps = { base: "https://marktmorgen.com/@prepersonread", from: '"Pre" <hello@marktmorgen.com>', ordersLink: async () => null, recordStart: async () => {} };
 
 async function main() {
   redis.clear();
   await claimHandle(OWNER, HANDLE, "Pre person read", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, ACCOUNT, true);
-  const store = (await storeForEmail(OWNER))!;
-  const sid = store.statsId!;
-  const key = (product: string) => `nl:pre:${sid}:${product}`;
-  await redis.pipeline([
-    ["HSET", key(PRODUCT_A), checkout("ada1"), entry(" ADA@example.com"), checkout("bob1"), entry(BOB)],
-    ["HSET", key(PRODUCT_B), checkout("ada2"), entry(ADA)],
-  ]);
-  // Other buyers' pre-orders of the same product: a person's copy never reads them.
-  for (let i = 0; i < 200; i += 1) await redis.pipeline([["HSET", key(PRODUCT_A), checkout(`other${i}`), entry(`other${i}@example.com`)]]);
-  // The scope lists only the product the store still has, as an erasure scope would.
-  const scope = (email: string) => ({ store, statsId: sid, email, productIds: [PRODUCT_A] }) as unknown as ErasureScope;
+  await setStripeAccount(OWNER, "acct_1PreorderPerson", true);
+  await setSubscription(OWNER, { customerId: "cus_PreOwner0001", subscriptionId: "sub_PreOwner0001", active: true, period: paidPeriod() });
+  const product = async (title: string) => {
+    const made = await addProduct(OWNER, title, "", "25", null);
+    if (!made.ok) throw new Error("no product");
+    await setProductLink(OWNER, made.product.id, "https://example.com/thing");
+    // Coming soon: a paid pre-order is written down and receipted, and nothing is handed over or asked of Stripe yet.
+    await setSoon((await storeForEmail(OWNER))!, made.product.id, true);
+    return made.product.id;
+  };
+  const A = await product("Course A");
+  const B = await product("Course B");
+  const store = async () => (await storeForEmail(OWNER))!;
+  const sid = (await store()).statsId!;
+  // Each pre-order made by the real path: a paid pre-order checkout confirmed (recordPreorder), its product coming soon.
+  const preorder = async (id: string, email: string, pid: string) => {
+    const shop = await store();
+    const listing = (await readListing(shop, pid)) as Listing;
+    const session = { id, created: NOW - 600, status: "complete", payment_status: "paid", amount_total: 2500, currency: "usd", payment_intent: `pi_${id.slice(8, 30)}`, metadata: { store: HANDLE, product: pid, preorder: "yes" }, customer_details: { email } };
+    return confirmPreorder(shop, session as never, listing, deps);
+  };
+  await preorder(checkout("ada1"), ADA, A);
+  // Ada typed another casing on her second: her index is by the address in lower case, so it is found all the same.
+  await preorder(checkout("ada2"), "ADA@Example.com", B);
+  await preorder(checkout("bob1"), BOB, A);
+  for (let i = 0; i < 20; i += 1) await preorder(checkout(`other${i}`), `other${i}@example.com`, A);
+
+  const scope = async (email: string) => ({ store: await store(), statsId: sid, email, productIds: [A] }) as unknown as ErasureScope;
   const real = redis.pipeline.bind(redis);
   const watched = async <T>(run: () => Promise<T>) => {
     const sent: unknown[][] = [];
@@ -74,61 +75,96 @@ async function main() {
       sent.push(...commands);
       return real(commands as never);
     }) as typeof redis.pipeline;
+    stripeAsked = 0;
     try {
-      return { out: await run(), sent };
+      return { out: await run(), sent, stripe: stripeAsked };
     } finally {
       redis.pipeline = real;
     }
   };
 
-  part("A person's copy holds every pre-order of theirs, and reads only theirs");
+  part("A person's copy holds every pre-order of theirs, reads only theirs, and never asks Stripe");
   {
-    const { out, sent } = await watched(() => COPIERS["lib/preorders.ts"](scope(ADA)));
-    is("Ada's two pre-orders, the one of a product the store no longer lists included", (out as { checkout: string; product: string }[]).map((p) => [p.checkout, p.product]).sort(), [[checkout("ada1"), PRODUCT_A], [checkout("ada2"), PRODUCT_B]]);
-    is("no product's whole hash of pre-orders is read", sent.some((c) => (c[0] === "HGETALL" || c[0] === "HVALS" || c[0] === "HKEYS" || c[0] === "HSCAN") && String(c[1]).startsWith(`nl:pre:${sid}:`)), false);
-    is("one HGET for each of her pre-order checkouts, and nothing for her plain sale", sent.filter((c) => c[0] === "HGET").map((c) => [c[1], c[2]]).sort(), [[key(PRODUCT_A), checkout("ada1")], [key(PRODUCT_B), checkout("ada2")]]);
-    is("Bob's one", ((await COPIERS["lib/preorders.ts"](scope(BOB))) as { checkout: string }[]).map((p) => p.checkout), [checkout("bob1")]);
-    is("a person with no pre-order: nothing", await COPIERS["lib/preorders.ts"](scope("nobody@example.com")), []);
+    const adaScope = await scope(ADA);
+    const { out, sent, stripe } = await watched(() => COPIERS["lib/preorders.ts"](adaScope));
+    const rows = out as { checkout: string; product: string }[];
+    is("Ada's two, the one typed in another casing and the one of a product not in the scope's list included", rows.map((p) => [p.checkout, p.product]).sort(), [[checkout("ada1"), A], [checkout("ada2"), B]].sort());
+    is("Stripe is not asked", stripe, 0);
+    is("no product's whole hash of pre-orders is read", sent.some((c) => ["HGETALL", "HVALS", "HKEYS", "HSCAN"].includes(String(c[0])) && String(c[1]).startsWith(`nl:pre:${sid}:`)), false);
+    is("the reads: the store's list, her line of each product's index, one HGET for each of her pre-orders", sent.map((c) => [c[0], c[1], c[2]]).sort(), [
+      ["HGET", entriesKey(sid, A), checkout("ada1")], ["HGET", entriesKey(sid, B), checkout("ada2")],
+      ["HGET", whoKey(sid, A), whoField(ADA)], ["HGET", whoKey(sid, B), whoField(ADA)],
+      ["SMEMBERS", productsKey(sid), undefined],
+    ].sort());
+    is("Bob's one", ((await COPIERS["lib/preorders.ts"](await scope(BOB))) as { checkout: string }[]).map((p) => p.checkout), [checkout("bob1")]);
+    is("a person with no pre-order: nothing", await COPIERS["lib/preorders.ts"](await scope("nobody@example.com")), []);
   }
 
-  part("An entry is read exactly: unknown is never 'no pre-order', and a missing entry is none");
+  part("The creator disconnects Stripe, or connects another account: the copy still holds them (Claude 2 on #5137)");
   {
-    const ada = [{ id: checkout("ada1"), meta: SESSIONS[checkout("ada1")].meta }];
-    const bent = async (reply: unknown) => {
+    await clearStripeAccount(OWNER);
+    is("no account: Ada's two still in her copy", ((await preordersOf(await store(), ADA)) as { checkout: string }[]).map((p) => p.checkout).sort(), [checkout("ada1"), checkout("ada2")]);
+    await setStripeAccount(OWNER, "acct_1PreorderOther", true);
+    is("another account: still both", ((await preordersOf(await store(), ADA)) as { checkout: string }[]).map((p) => p.checkout).sort(), [checkout("ada1"), checkout("ada2")]);
+  }
+
+  part("The index runs out with its entries, never before: every write of a product's hash gives both their expiry");
+  {
+    // Two days later, another buyer's pre-order of A renews A's hash; Ada's line beside it is renewed with it.
+    redis.advance(2 * 86_400_000);
+    const before = [redis.run(["TTL", entriesKey(sid, A)]), redis.run(["TTL", whoKey(sid, A)]), redis.run(["TTL", productsKey(sid)])];
+    await preorder(checkout("late1"), "late@example.com", A);
+    const after = [redis.run(["TTL", entriesKey(sid, A)]), redis.run(["TTL", whoKey(sid, A)]), redis.run(["TTL", productsKey(sid)])];
+    is("renewed, all three", after.every((t, i) => Number(t) > Number(before[i])), true);
+    is("the index and the entries run out together", after[0], after[1]);
+    is("the store's list never before a product in it", Number(after[2]) >= Number(after[0]), true);
+    is("B's untouched, still both together", redis.run(["TTL", entriesKey(sid, B)]), redis.run(["TTL", whoKey(sid, B)]));
+  }
+
+  part("Read exactly: unknown is never 'no pre-order', and a store past one request's products fails rather than be cut");
+  {
+    const shop = await store();
+    const bent = async (command: string, key: string, reply: unknown) => {
       redis.pipeline = (async (commands: unknown[][]) => {
         const replies = (await real(commands as never)) as unknown[];
-        return commands.map((c, i) => (c[0] === "HGET" && c[1] === key(PRODUCT_A) ? reply : replies[i]));
+        return commands.map((c, i) => (c[0] === command && c[1] === key ? reply : replies[i]));
       }) as typeof redis.pipeline;
       try {
-        return await preordersOf(store, ada, ADA).then((rows) => `rows:${rows.length}`, (error) => (error instanceof UnknownReplyError ? "unknown" : `other: ${String(error)}`));
+        return await preordersOf(shop, ADA).then((rows) => `rows:${rows.length}`, (error) => (error instanceof UnknownReplyError ? "unknown" : `other: ${String(error)}`));
       } finally {
         redis.pipeline = real;
       }
     };
-    for (const [what, reply] of [["no reply", undefined], ["a number", 3], ["a list", [entry(ADA)]], ["text that is not a pre-order", "not json"], ["a pre-order with no buyer", JSON.stringify({ at: 1, pi: "" })]] as const) {
-      is(`${what}: the copy is not made`, await bent(reply), "unknown");
+    for (const [what, reply] of [["no reply", undefined], ["a number", 3], ["text", "x"], ["a list with a number", [A, 7]], ["a product id with a colon", ["a:b"]]] as const) {
+      is(`the store's list as ${what}: unknown`, await bent("SMEMBERS", productsKey(sid), reply), "unknown");
     }
-    is("an entry Redis says is not there: none", await bent(null), "rows:0");
-    is("a checkout that is not a pre-order is never read", await watched(() => preordersOf(store, [{ id: checkout("adasale"), meta: SESSIONS[checkout("adasale")].meta }], ADA)).then((r) => [r.out, r.sent.length]), [[], 0]);
+    for (const [what, reply] of [["no reply", undefined], ["a number", 3], ["a list", [checkout("ada1")]], ["an empty text", ""], ["a line that is not a checkout", "not-a-checkout"]] as const) {
+      is(`her line as ${what}: unknown`, await bent("HGET", whoKey(sid, A), reply), "unknown");
+    }
+    for (const [what, reply] of [["no reply", undefined], ["a number", 3], ["a list", ["x"]], ["text that is not a pre-order", "not json"]] as const) {
+      is(`her entry as ${what}: unknown`, await bent("HGET", entriesKey(sid, A), reply), "unknown");
+    }
+    is("no line in a product's index: none there", await bent("HGET", whoKey(sid, A), null), "rows:1");
+    is("an entry gone: none", await bent("HGET", entriesKey(sid, A), null), "rows:1");
+    const many = Array.from({ length: PREORDER_COPY_PRODUCTS_MOST + 1 }, (_, i) => `prod${String(i).padStart(9, "0")}`);
+    is("more products than one copy request reads: unknown, never a copy cut short", await bent("SMEMBERS", productsKey(sid), many), "unknown");
   }
 
-  part("A pre-order is made only from the person's own paid checkout of the store (the copy's completeness rests on it)");
+  part("A pre-order is made only by recordPreorder's one script, with its line; every EXPIRE of a product's hash renews the index");
   {
     const source = readFileSync("lib/preorders.ts", "utf8");
-    // The only write that makes an entry: HSETNX on a product's pre-orders, inside recordPreorder.
-    const makes = [...source.matchAll(/\["HSETNX", entriesKey\(/g)].map((m) => m.index ?? 0);
-    const record = source.indexOf("async function recordPreorder(");
-    const recordEnd = source.indexOf("\n}\n", record);
-    is("one HSETNX makes an entry, and it is recordPreorder's", makes.length === 1 && makes[0] > record && makes[0] < recordEnd, true);
-    // Every other write of an entry is an HSET of one already read (given, revoked), never a new one.
-    const sets = [...source.matchAll(/\["HSET", entriesKey\([^\]]*JSON\.stringify\(\{ \.\.\.(\w+)/g)].map((m) => m[1]);
-    is("every HSET of an entry writes over one read before it", sets.length > 0 && sets.every((name) => ["entry", "current"].includes(name)), true);
-    // recordPreorder is called only with what readSession read from a paid checkout session of the store.
-    const calls = [...source.matchAll(/recordPreorder\(store, \{ \.\.\.(\w+), pi: \1\.pi \}\)/g)].map((m) => m[1]);
-    is("recordPreorder's callers pass only readSession's result", calls.length >= 1 && calls.length === source.split("recordPreorder(store,").length - 1 && calls.every((name) => name === "read") && [...source.matchAll(/const read = readSession\(store, session\);/g)].length === calls.length, true);
-    const reader = source.slice(source.indexOf("function readSession("), source.indexOf("function readSession(") + 1200);
-    is("readSession takes only a settled pre-order checkout of one of the store's handles", ['meta.preorder !== "yes"', "saleHandles(store)", "isSettled(session)", "customer_details?.email"].every((part) => reader.includes(part)), true);
-    // No other file writes a pre-order's entry key (nl:pre:<store>:<product>).
+    is("no HSETNX of an entry outside the script", /\["HSETNX", entriesKey\(/.test(source), false);
+    const script = source.slice(source.indexOf("export const PREORDER_RECORD = `"), source.indexOf("`;", source.indexOf("export const PREORDER_RECORD = `")));
+    is("the script makes the entry and, only when new, its line and the product in the list, then the three expiries", ['redis.call("HSETNX", KEYS[1]', 'if made == 1 then', 'redis.call("HSET", KEYS[2], ARGV[1], list)', 'redis.call("SADD", KEYS[3], ARGV[4])', 'redis.call("EXPIRE", KEYS[1], ARGV[5])', 'redis.call("EXPIRE", KEYS[2], ARGV[5])', 'redis.call("EXPIRE", KEYS[3], ARGV[5])'].every((part) => script.includes(part)), true);
+    is("the script is recordPreorder's, with the three keys in that order", /\["EVAL", PREORDER_RECORD, 3, entriesKey\(sid, read\.productId\), whoKey\(sid, read\.productId\), productsKey\(sid\)/.test(source), true);
+    // Every EXPIRE of a product's hash is keep's, and keep gives the index and the list theirs in the same breath.
+    const expires = [...source.matchAll(/\["EXPIRE", entriesKey\(/g)].length;
+    is("one EXPIRE of a product's hash in the code, keep's", expires, 1);
+    is("keep gives the hash, the index and the list their expiry together", /const keep = [^;]*\["EXPIRE", entriesKey\(sid, product\), KEPT_SECONDS\],\s*\["EXPIRE", whoKey\(sid, product\), KEPT_SECONDS\],\s*\["EXPIRE", productsKey\(sid\), KEPT_SECONDS\],/s.test(source), true);
+    const writes = [...source.matchAll(/\["HSET", entriesKey\(([^,]+), ([^,)]+)\), [^\]]*\], \.\.\.keep\(\1, \2\)/g)].length;
+    const allWrites = [...source.matchAll(/\["HSET", entriesKey\(/g)].length;
+    is("every HSET of an entry is sent with keep for the same product", writes > 0 && writes === allWrites, true);
+    // No other file writes a pre-order's keys.
     const files: string[] = [];
     const walk = (dir: string) => {
       for (const name of readdirSync(dir)) {
@@ -140,8 +176,9 @@ async function main() {
     for (const dir of ["lib", "app", "scripts"]) walk(dir);
     const elsewhere = files.filter((path) => path !== join("lib", "preorders.ts") && /nl:pre:/.test(readFileSync(path, "utf8")));
     is("the other files that name nl:pre: are the families' list, the gifts' comment and the dispute review's read", elsewhere.sort(), [join("lib", "data-families.ts"), join("lib", "dispute-preorder-review.ts"), join("lib", "gifts.ts")]);
-    const review = readFileSync(join("lib", "dispute-preorder-review.ts"), "utf8");
-    is("the dispute review only reads a pre-order (HGET and PTTL in its script)", /redis\.call\("HGET"/.test(review) && !/redis\.call\("H(SET|SETNX|DEL|MSET)"/.test(review), true);
+    is("the dispute review only reads a pre-order (HGET and PTTL in its script)", /redis\.call\("HGET"/.test(readFileSync(join("lib", "dispute-preorder-review.ts"), "utf8")) && !/redis\.call\("H(SET|SETNX|DEL|MSET)"/.test(readFileSync(join("lib", "dispute-preorder-review.ts"), "utf8")), true);
+    // The erasure keeps pre-orders on purpose (lib/person-data.ts): no eraser touches them, so their index stays with them.
+    is("no eraser for lib/preorders.ts: kept on purpose, the index with it", /module: "lib\/preorders\.ts"/.test(readFileSync(join("lib", "person-erasure.ts"), "utf8")), false);
   }
 
   done();

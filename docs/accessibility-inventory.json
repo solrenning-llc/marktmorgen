@@ -33,6 +33,17 @@
       ]
     },
     {
+      "source": "app/[handle]/back-in-stock/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/back-in-stock",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/blog/[post]/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/blog/[post]",
@@ -822,6 +833,12 @@
       "parameters": []
     },
     {
+      "source": "app/help/trust-and-safety/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/help/trust-and-safety",
+      "parameters": []
+    },
+    {
       "source": "app/help/zoom/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/help/zoom",
@@ -1060,6 +1077,12 @@
       "source": "app/studio/card/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/card",
+      "parameters": []
+    },
+    {
+      "source": "app/studio/check-in/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/check-in",
       "parameters": []
     },
     {
@@ -1444,6 +1467,7 @@
     "components/client-sessions.tsx",
     "components/closing-refunds-confirm.tsx",
     "components/collections-editor.tsx",
+    "components/color-scheme-switch.tsx",
     "components/community-approval-studio.tsx",
     "components/community-challenges-studio.tsx",
     "components/community-challenges.tsx",
@@ -1571,6 +1595,7 @@
     "components/link-editor.tsx",
     "components/link-picture.tsx",
     "components/link-request-form.tsx",
+    "components/list-health-table.tsx",
     "components/local-clock.tsx",
     "components/local-day.tsx",
     "components/logo.tsx",
@@ -1582,6 +1607,7 @@
     "components/mark-shipped.tsx",
     "components/meeting-connections.tsx",
     "components/member-discount.tsx",
+    "components/member-link-boxes.tsx",
     "components/member-price.tsx",
     "components/membership-by-price.tsx",
     "components/more-from.tsx",
@@ -1763,6 +1789,7 @@
     "components/students-bulk.tsx",
     "components/studio-app.tsx",
     "components/studio-bell.tsx",
+    "components/studio-focus-clear.tsx",
     "components/studio-header.tsx",
     "components/studio-help.tsx",
     "components/studio-screens.tsx",
@@ -1785,6 +1812,7 @@
     "components/test-counts-notice.tsx",
     "components/thanks-note-editor.tsx",
     "components/thanks-note-view.tsx",
+    "components/ticket-check-in.tsx",
     "components/tier-benefits.tsx",
     "components/tier-editor.tsx",
     "components/tips-editor.tsx",
@@ -1794,6 +1822,7 @@
     "components/topic-page.tsx",
     "components/translate-page.tsx",
     "components/trust-checks.tsx",
+    "components/two-step-ask.tsx",
     "components/two-step-manager.tsx",
     "components/url-field.tsx",
     "components/usage-meter.tsx",
@@ -1847,6 +1876,7 @@
     "app/api/billing/withdraw/route.ts",
     "app/api/creators/route.ts",
     "app/api/cron/affiliates/route.ts",
+    "app/api/cron/backup/route.ts",
     "app/api/cron/closed-data/route.ts",
     "app/api/cron/closing/route.ts",
     "app/api/cron/courses/route.ts",
@@ -1882,6 +1912,7 @@
     "app/api/library/route.ts",
     "app/api/mail/clicked/route.ts",
     "app/api/mail/inbound/route.ts",
+    "app/api/mail/poll/route.ts",
     "app/api/mail/ses/route.ts",
     "app/api/mail/unsubscribe/route.ts",
     "app/api/mcp/route.ts",
@@ -1937,6 +1968,7 @@
     "app/api/store/cart/route.ts",
     "app/api/store/chat-summary/route.ts",
     "app/api/store/chat/route.ts",
+    "app/api/store/check-in/route.ts",
     "app/api/store/checkout/route.ts",
     "app/api/store/claim/route.ts",
     "app/api/store/closing-refunds/route.ts",
@@ -2137,6 +2169,9 @@
     "app/api/store/stamp/route.ts",
     "app/api/store/stats/range/route.ts",
     "app/api/store/stats/route.ts",
+    "app/api/store/stock-alert/confirm/route.ts",
+    "app/api/store/stock-alert/leave/route.ts",
+    "app/api/store/stock-alert/route.ts",
     "app/api/store/store-copy/route.ts",
     "app/api/store/stores/route.ts",
     "app/api/store/stream/captions/route.ts",
@@ -2276,6 +2311,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 155
+    "pageTemplates": 158
   }
 }

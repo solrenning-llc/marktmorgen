@@ -797,5 +797,23 @@ const linhas = readFileSync(trace, "utf8").split("\n").filter((l) => /git(\.c:\d
 is("the version check runs a fetch (so the next check means something)", linhas.length > 0, readFileSync(trace, "utf8").slice(0, 600));
 is("no git fetch of the tool uses --depth (review of Claude 1 A)", !linhas.some((l) => /--depth/.test(l)), linhas.filter((l) => /--depth/.test(l)).join("\n").slice(0, 600));
 
+console.log("secrets never printed: a credential in the mailbox address stays out of every message (CodeQL alert 257 on #5080)");
+{
+  const TOKEN = "ghp_FAKEtoken0123456789abcdefABCDEF0000";
+  comHash(meu); // the copy is the reviewed one for real, so a write and the watch get as far as git
+  const longe = { CORREIO_REPO: `https://x-access-token:${TOKEN}@127.0.0.1:9/mail.git`, CORREIO_GIT_DIR: join(T, "dir-secret.git"), CORREIO_SEM_VERSAO: "" };
+  r = run(["read", "--as", "Claude 2 Z"], { ...as("c2"), ...longe });
+  is("a failed read does not print the token in the mailbox address (CodeQL 257)", !r.ok && !r.out.includes(TOKEN) && !/x-access-token:[^*]/.test(r.out), r.out);
+  r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "x"], { ...as("c2"), ...longe });
+  is("a failed send gets as far as git and does not print the token either (CodeQL 257)", !r.ok && !/escrita recusada/.test(r.out) && !r.out.includes(TOKEN), r.out);
+  r = run(["watch", "--as", "Claude 2 Z", "--seconds", "1"], { ...as("c2"), ...longe });
+  is("the watch, failing to reach the mailbox, says so and does not print the token (CodeQL 257)", /vigia: /.test(r.out) && !r.out.includes(TOKEN), r.out);
+  const mod = await import(TOOL);
+  const limpo = mod.semSegredo?.(`fetch https://user:${TOKEN}@github.com/x.git; Authorization: Bearer abc.def; http.extraheader=AUTHORIZATION: basic Zm9v; ${TOKEN}; github_pat_11AAAAAAAAAAAAAAAAAAAA_bbbb`) ?? "";
+  is("semSegredo removes the URL credential, a bearer header, an extraheader and bare GitHub tokens (CodeQL 257)",
+    limpo && !limpo.includes(TOKEN) && !/abc\.def|Zm9v|github_pat_11/.test(limpo) && /https:\/\/\*\*\*@github\.com\/x\.git/.test(limpo), limpo);
+  is("semSegredo keeps an ordinary message as it is (CodeQL 257)", mod.semSegredo?.("já existe no correio: prs/3/0; nada é reescrito") === "já existe no correio: prs/3/0; nada é reescrito");
+}
+
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);
 process.exitCode = falhas ? 1 : 0;

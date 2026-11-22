@@ -50,6 +50,18 @@ export const RAMO = process.env.CORREIO_RAMO || "correio";
 /** Depois deste tempo sem leitura, a mensagem aparece como atrasada em `pendentes` e em `ler`. */
 export const ATRASO_MIN = 30;
 
+/**
+ * Um texto sem credenciais, para imprimir (alerta 257 do CodeQL no #5080): quando o git falha, o Node põe a linha de
+ * comando inteira no erro, com o endereço do correio, que pode trazer um token (https://usuário:token@...). Tira a parte
+ * de usuário e senha de todo endereço, os tokens do GitHub soltos e o valor de um cabeçalho Authorization.
+ */
+export function semSegredo(texto) {
+  return String(texto ?? "")
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@'"]+@/gi, "$1***@")
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,})/g, "***")
+    .replace(/(authorization:\s*(?:(?:basic|bearer|token)\s+)?)[^\s'";]+/gi, "$1***");
+}
+
 /** Prazo de cada comando do git (passo 4): um comando que trava não segura a ferramenta; vence e falha com o motivo. */
 export const GIT_PRAZO_MS = 120000;
 export function git(args, input, prazoMs = GIT_PRAZO_MS, dir = null, envExtra = {}) {
@@ -61,6 +73,12 @@ export function git(args, input, prazoMs = GIT_PRAZO_MS, dir = null, envExtra = 
       const e = new Error(`git ${args.filter((a) => !String(a).startsWith("-c")).slice(0, 2).join(" ")} passou do limite de tempo (${prazoMs / 1000} s) e foi parado; nada foi feito com o resultado`);
       e.status = null; e.stderr = e.message;
       throw e;
+    }
+    // O erro sai sem credenciais (CodeQL 257): quem o imprime, ou confere stderr, nunca vê o token do endereço.
+    if (erro && typeof erro === "object") {
+      for (const k of ["message", "stack", "stderr", "stdout"]) if (typeof erro[k] === "string") erro[k] = semSegredo(erro[k]);
+      if (Array.isArray(erro.spawnargs)) erro.spawnargs = erro.spawnargs.map(semSegredo);
+      if (Array.isArray(erro.output)) erro.output = erro.output.map((x) => (typeof x === "string" ? semSegredo(x) : x));
     }
     throw erro;
   }
@@ -1816,7 +1834,8 @@ async function main(argv) {
     if (!o.eu) throw new Error("--as é obrigatório");
     const fim = Date.now() + 1000 * Number(o.segundos || 120);
     // A vigia ligada é sinal de agente ativo (item 1).
-    try { baterSinal(o.eu); } catch (erro) { console.log(`vigia: o sinal não foi gravado (${String(erro).slice(0, 200)}); tento na próxima`); }
+    // Mensagem fixa, sem o texto do erro (CodeQL 257); o erro, já sem credenciais, aparece rodando read.
+    try { baterSinal(o.eu); } catch { console.log("vigia: o sinal não foi gravado; tento na próxima (rode read para ver o erro)"); }
     for (;;) {
       let lista = [];
       let abertos = [];
@@ -1832,7 +1851,7 @@ async function main(argv) {
             : ps.filter((p) => revisaoParaMim(p, o.eu, agora, c));
           abertos.push(...vez.map((p) => `${tipo} #${p.pr}`));
         }
-      } catch (erro) { console.log(`vigia: falha ao ler o correio (${String(erro).slice(0, 200)}); tento de novo`); }
+      } catch { console.log("vigia: falha ao ler o correio; tento de novo (rode read para ver o erro)"); }
       try { avisarFilaParada(o.eu); } catch {}
       // Passo 3: o que chegou ao correio desde a última conferência só acrescentou arquivos? Avisa uma vez por alteração.
       let alarme = "";
@@ -1991,5 +2010,5 @@ async function main(argv) {
 }
 
 if (process.argv[1] && /(?:^|[/\\])(?:agent-mail|correio)\.mjs$/.test(process.argv[1])) {
-  main(process.argv.slice(2)).catch((erro) => { console.error(String(erro.message ?? erro)); process.exitCode = 1; });
+  main(process.argv.slice(2)).catch((erro) => { console.error(semSegredo(erro?.message ?? erro)); process.exitCode = 1; });
 }

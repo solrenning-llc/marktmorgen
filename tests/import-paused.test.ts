@@ -234,6 +234,11 @@ async function main() {
   is("it leaves the five-minute job's line", await redis.pipeline([["SISMEMBER", "nl:imports:active", endedId]]), [0]);
   is("and the next pass writes nothing more", (await runImport(endedId, Date.now() + 30_000))?.state, "failed");
   is("an ended import leaves no source-derived report rows beyond its original deadline", await redis.pipeline([["LRANGE", `nl:import:${endedId}:errors`, 0, -1]]), [[]]);
+  // Codex L on #3980 (LEVE): a plan that ended, or that the creator paused, was not necessarily left unpaid. The reason
+  // is now said by the report from the job itself, since the report's rows are deleted at the deadline.
+  const said = lapsed ? await imports.reportCsv(lapsed) : "";
+  is("the report still says why it stopped, never that the plan was unpaid", [/not paid/.test(said), said.includes(imports.PAUSED_STOP_WORDS), said.includes(imports.REPORT_GONE_WORDS)], [false, true, true]);
+  is("and never says more rows are not listed when none are", /more rows like these/.test(said), false);
 
   part("A paused report's original deadline survives refreshes, a full report and old sliding TTLs");
   const actualNow = Date.now;
@@ -270,7 +275,9 @@ async function main() {
     is("a personal copy also omits an expired legacy report", JSON.stringify((await imports.importTracesOf(ended, person)).records).includes(person), false);
     is("the copy removes that legacy report", await realPipeline([["EXISTS", reportKey]]), [0]);
     await realPipeline([["RPUSH", reportKey, row], ["EXPIRE", reportKey, IMPORT_KEEP_SECONDS]]);
-    is("an old sliding-TTL report cannot return personal values after day 14", (await imports.reportCsv(specimen)).includes(person), false);
+    const legacyCsv = await imports.reportCsv(specimen);
+    is("an old sliding-TTL report cannot return personal values after day 14", legacyCsv.includes(person), false);
+    is("a deleted report says so, and a paused job's report gives no stop reason", [legacyCsv.includes(imports.REPORT_GONE_WORDS), legacyCsv.includes(imports.PAUSED_STOP_WORDS), /more rows like these/.test(legacyCsv)], [true, false, false]);
     is("the expired legacy report is deleted, not merely hidden", await realPipeline([["EXISTS", reportKey]]), [0]);
 
     // A full report leaves note() no room to append: terminal cleanup must still delete its original values.
@@ -279,6 +286,8 @@ async function main() {
     is("the expired job terminates without applying a row", [endedReport?.state, endedReport?.done], ["failed", 0]);
     is("the full personal report does not survive the terminal pass", await realPipeline([["EXISTS", reportKey]]), [0]);
     is("its report CSV cannot return the old address either", (await imports.reportCsv(specimen)).includes(person), false);
+    const endedCsv = endedReport ? await imports.reportCsv(endedReport) : "";
+    is("the ended job's report says why it stopped and that its rows were deleted", [endedCsv.includes(person), endedCsv.includes(imports.PAUSED_STOP_WORDS), endedCsv.includes(imports.REPORT_GONE_WORDS)], [false, true, true]);
     is("cleanup keeps another import's report", await realPipeline([["LRANGE", otherReport, 0, -1]]), [["unrelated synthetic report"]]);
     is("the expired job leaves the active set", await realPipeline([["SISMEMBER", "nl:imports:active", reportId]]), [0]);
   } finally {

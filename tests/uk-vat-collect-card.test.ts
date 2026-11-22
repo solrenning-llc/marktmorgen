@@ -130,11 +130,13 @@ async function main(): Promise<void> {
   is("the fee is the VAT and its cost, so it never comes out of the share or the revenue", body.get("payment_intent_data[application_fee_amount]"), String(580 + 12));
   is("marked uk_vat, never eu_vat", [body.get("payment_intent_data[metadata][uk_vat]"), body.has("payment_intent_data[metadata][eu_vat]")], ["GB:2000:580", false]);
   is("and the creator's own automatic tax off for this sale", body.has("automatic_tax[enabled]"), false);
-  // RED → GREEN: a sale in another currency has no sterling rate here, so it refuses with the body untouched.
+  // RED → GREEN: a sale in another currency with no sterling rate for its month refuses with the body untouched. Since
+  // unit 7 HMRC's period rates are read (lib/hmrc-period-rates.ts, tests/uk-vat-other-currency.test.ts), so the month
+  // with no rate is given here as an empty table.
   for (const currency of ["eur", "usd"]) {
     const other = plainBody(currency);
     const before = other.toString();
-    is(`a sale in ${currency}: no sterling rate, refused, the body untouched`, [tryCollect(other), other.toString()], ["refused", before]);
+    is(`a sale in ${currency}: no sterling rate, refused, the body untouched`, [tryCollect(other, { sterlingRates: [] }), other.toString()], ["refused", before]);
   }
   const late = plainBody();
   is("past the rate's review date: refused, the body untouched", [tryCollect(late, { now: LATE }), late.toString()], ["refused", plainBody().toString()]);

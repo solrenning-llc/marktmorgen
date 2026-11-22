@@ -29,7 +29,10 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 /** The next pipeline holding a command `match` picks never reaches Redis for that command; its reply is `reply`. */
 let lost: { match: (command: (string | number)[]) => boolean; reply: unknown } | null = null;
 const real = redis.pipeline.bind(redis);
+/** The student rows read, to count how many times a checkout's note ran (its HGETs). */
+let rowReads = 0;
 redis.pipeline = async (commands) => {
+  rowReads += commands.filter((c) => c[0] === "HGET" && String(c[1]).endsWith(":students")).length;
   const picked = lost;
   const hit = picked ? commands.findIndex(picked.match) : -1;
   if (!picked || hit < 0) return real(commands);
@@ -89,6 +92,28 @@ async function main(): Promise<void> {
   is("the confirmation is not kept as sent while the note is unknown", redis.run(["GET", confirmationKey(dropped)]) === "sent" && noted() === 0, false);
   if (outcome !== "sent") is("tried again: sent", await confirmPurchase(store, dropped, checkout(dropped) as never), "sent");
   is("and the purchase is noted", noted(), 1);
+
+  part("Bought again, its confirmation email refused five times: the note runs once (Claude 1's MEDIUM on #5034)");
+  await openedBefore();
+  emailsWork = false;
+  const often = "cs_test_confirmnote0often001";
+  rowReads = 0;
+  for (let i = 0; i < 5; i += 1) await confirmPurchase(store, often, checkout(often) as never);
+  is("five passes, none sent", redis.run(["GET", confirmationKey(often)]), null);
+  is("the student's row read for the note once, not once a pass", rowReads, 1);
+  is("noted", noted(), 1);
+  emailsWork = true;
+  is("then sent", await confirmPurchase(store, often, checkout(often) as never), "sent");
+  is("still read once", rowReads, 1);
+
+  part("Two passes at once: the note runs once");
+  await openedBefore();
+  const twice = "cs_test_confirmnote0twice001";
+  rowReads = 0;
+  const both = await Promise.all([confirmPurchase(store, twice, checkout(twice) as never), confirmPurchase(store, twice, checkout(twice) as never)]);
+  is("one of them sends", both.filter((o) => o === "sent").length, 1);
+  is("the row read once", rowReads, 1);
+  is("noted", noted(), 1);
 
   part("Controls");
   await redis.pipeline([["DEL", again]]);

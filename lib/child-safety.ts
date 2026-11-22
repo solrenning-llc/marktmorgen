@@ -260,8 +260,17 @@ export async function heldInSale(store: Store, product: Listing, bumps: readonly
     const inBundle = product.bundle ?? [];
     let ticked: Listing[] = [];
     if (bumps.length > 0 && product.bumps.length > 0) {
-      const shown = activeBumps(await readListings(store, bumpTargets(product)), product);
+      const targets = await readListings(store, bumpTargets(product));
+      const shown = activeBumps(targets, product);
       ticked = shown.filter((offer, at) => bumps.includes(offer.target.id) || (at === 0 && bumps.includes("yes"))).map((offer) => offer.target);
+      // A box whose product was taken off the store is paused and never charged (lib/product-extras.ts bumpState, a
+      // hidden product), but a form that still names it, or "yes" for the first box set up, is refused all the same:
+      // the box's product is asked about whether or not it is shown, so the refusal never rests on the hiding alone.
+      const named = new Set(ticked.map((target) => target.id));
+      const first = bumpTargets(product)[0];
+      for (const target of targets) {
+        if (!named.has(target.id) && (bumps.includes(target.id) || (target.id === first && bumps.includes("yes")))) ticked.push(target);
+      }
     }
     const asked = [...new Set([product.id, ...inBundle, ...ticked.flatMap((target) => [target.id, ...(target.bundle ?? [])])])];
     const held = await heldIdsAmong(store, asked);

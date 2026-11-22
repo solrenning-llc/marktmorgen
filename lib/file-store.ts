@@ -18,6 +18,7 @@ import { deleteVault, headVault, listVault, readVault, vaultHeld, vaultUrl, writ
 import { BLOB_LIST_PAGES } from "@/lib/storage-rules";
 import { VAULT_PREFIX, isVaultPath } from "@/lib/vault-rules";
 import { isFileHeld } from "@/lib/held-files";
+import { blobHeldToday } from "@/lib/blob-tally";
 
 export type Measured = { pathname: string; size: number; contentType: string };
 
@@ -162,6 +163,27 @@ export async function listFiles(prefix: string): Promise<string[]> {
  * incomplete listings: a partial total cannot authorize another upload.
  */
 export async function filesHeld(folder: string): Promise<number> {
+  return withVault(folder, await blobHeld(folder));
+}
+
+/**
+ * The same, with the Blob folder listed at most once a UTC day (lib/blob-tally.ts, the owner's decision of
+ * 16 November 2026): the day's listed total and every byte tallied into the folder since, never less than what is
+ * there. The vault is measured whole every time. Throws "storage_daily" when the day's one listing is spent with no
+ * total kept, and as filesHeld does on anything else unknown.
+ */
+export async function filesHeldToday(folder: string): Promise<number> {
+  return withVault(folder, await blobHeldToday(folder, blobHeld));
+}
+
+async function withVault(folder: string, bytes: number): Promise<number> {
+  const vault = await vaultHeld(folder);
+  if (vault === null || !Number.isSafeInteger(vault) || vault < 0 || !Number.isSafeInteger(bytes + vault)) throw new Error("incomplete vault measurement");
+  return bytes + vault;
+}
+
+/** Every byte of the store's Blob folder, by a full listing: at most 20 pages of 1000, each an Advanced Operation. */
+export async function blobHeld(folder: string): Promise<number> {
   let bytes = 0;
   let cursor: string | undefined;
   const seen = new Set<string>();
@@ -183,7 +205,5 @@ export async function filesHeld(folder: string): Promise<number> {
     cursor = answer.cursor;
   }
   if (!complete) throw new Error("storage listing exceeded page limit");
-  const vault = await vaultHeld(folder);
-  if (vault === null || !Number.isSafeInteger(vault) || vault < 0 || !Number.isSafeInteger(bytes + vault)) throw new Error("incomplete vault measurement");
-  return bytes + vault;
+  return bytes;
 }

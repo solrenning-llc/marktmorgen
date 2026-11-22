@@ -1,12 +1,15 @@
+import { createHash } from "node:crypto";
 import { cleanTag } from "@/lib/flow-rules";
+import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { readFileWhole } from "@/lib/file-store";
-import { READ_PDF_PAGES } from "@/lib/ai-rules";
+import { READ_PDF_JOBS, READ_PDF_PAGES } from "@/lib/ai-rules";
 import { firstPages } from "@/lib/pdf-preview";
 import { MAX_STAMP_BYTES, readableFile } from "@/lib/product-file";
 import { withinEssentialLimit } from "@/lib/request-guard";
-import { markAiStop, describePicture, fillBlock, reviewPage, rewriteBlock, writeTestHeadline, replyToReview, translatePage, writeBio, writeKitPitch, writeStoreFaq, writeStoreSetup, writeBlogPost, writeEmail, writePosts, writeOutline, writePage, writeProduct, writeQuiz, writeSequence, writeFeedback } from "@/lib/ai";
+import { aiJobRefusal, markAiStop, describePicture, fillBlock, reviewPage, rewriteBlock, writeTestHeadline, replyToReview, translatePage, writeBio, writeKitPitch, writeStoreFaq, writeStoreSetup, writeBlogPost, writeEmail, writePosts, writeOutline, writePage, writeProduct, writeQuiz, writeSequence, writeFeedback } from "@/lib/ai";
 import { readTaskFor, submissionOf } from "@/lib/assignment";
 import { SOCIALS, type SocialNetwork, isSocialNetwork } from "@/lib/store-socials";
 import { isRewriteStyle } from "@/lib/block-rewrite-rules";
@@ -33,11 +36,13 @@ import { imageFolder } from "@/lib/store";
 import { findLesson, readBody, readCourse } from "@/lib/course";
 import { DEFAULT_QUIZ_DRAFT, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 import { funnelType } from "@/lib/funnel-types";
-import { AI_RUN_ID, AI_STEP_PADDING_BYTES, type AiStepLine } from "@/lib/ai-steps";
+import { AI_RUN_ID, AI_STEP_PADDING_BYTES, type AiStepId, type AiStepLine, type AiStepState } from "@/lib/ai-steps";
 import { readFunnelAsk, readFunnelFacts, writeFunnelDraft, writeFunnelResearch } from "@/lib/funnel-ai";
 import { heldPictureRefusal, heldRefusal, heldRefusalAmong } from "@/lib/child-safety";
 import { heldInCatalog, touchesHeld } from "@/lib/child-safety-holds";
 import { writeProductIdeas } from "@/lib/product-ideas";
+import { writeFromPdf } from "@/lib/product-pdf-assist";
+import type { AiDraftedGiven, AiResult, AiStopped } from "@/lib/ai";
 
 const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call", "bundle"];
 
@@ -45,7 +50,7 @@ const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call"
 const HELD_KINDS = new Set(["page", "review", "block", "headline", "fill", "alt", "translate", "posts", "reply"]);
 
 /**
- * The writing help (lib/ai.ts): `{ kind: "product" | "page" | "review" | "block" | "fill" | "alt" | "translate" | "bio" | "faq" | "kit" | "setup" | "reply" | "posts" | "blog" | "outline" | "email" | "quiz" | "feedback" | "sequence" | "funnel" | "funnel-research" | "ideas", … }`.
+ * The writing help (lib/ai.ts): `{ kind: "product" | "page" | "review" | "block" | "fill" | "alt" | "translate" | "bio" | "faq" | "kit" | "setup" | "reply" | "posts" | "blog" | "outline" | "email" | "quiz" | "feedback" | "sequence" | "funnel" | "funnel-research" | "ideas" | "product-pdf", … }`.
  * It writes into the studio's own boxes and saves nothing: whatever comes back
  * is the creator's to read, change and keep, or not.
  *
@@ -92,8 +97,8 @@ export async function POST(request: NextRequest) {
     if (!AI_RUN_ID.test(run)) return fail("invalid");
     return (await markAiStop(store, run)) ? Response.json({ ok: true }) : fail("unconfirmed", 503);
   }
-  // A page asked for step by step names its run, so it can be stopped; one that does not is refused before anything is asked.
-  const stepped = body.kind === "page" && body.steps === true;
+  // A page asked for step by step, or a title and benefits from a product's PDF (always in steps), names its run, so it can be stopped; one that does not is refused before anything is asked.
+  const stepped = (body.kind === "page" && body.steps === true) || body.kind === "product-pdf";
   if (stepped && !AI_RUN_ID.test(text(body.run, 60))) return fail("invalid");
   if (!(await withinEssentialLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return fail("slow", 429);
   const notes = text(body.notes, MAX_AI_NOTES + 100);
@@ -145,6 +150,10 @@ export async function POST(request: NextRequest) {
     // paid file-store read on a request it is then refused.
     let pdf: (() => Promise<Uint8Array | null>) | null = null;
     if (body.readFile === true) {
+      // Nothing is read from storage for a job that could not be admitted, this month's balance included (read only,
+      // nothing reserved); what is admitted is then read only once its jobs are taken (lib/ai.ts, writePage).
+      const refused = await aiJobRefusal(store, 1 + READ_PDF_JOBS);
+      if (refused) return fail(refused);
       const file = readableFile(product);
       if (!file) return fail("file");
       pdf = async () => {
@@ -162,44 +171,35 @@ export async function POST(request: NextRequest) {
       pdf,
     };
     if (!stepped) return answer(writePage(store, input));
-    // Step by step (758 [STN5]): one line as each step starts and ends, then
-    // the result, so the studio can say what is running and offer to stop.
     const run = text(body.run, 60);
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        const send = (line: AiStepLine | { pad: string }) => {
-          try {
-            controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
-          } catch {
-            // The page has gone; the job goes on to its end and keeps its count, as one without steps does.
-          }
-        };
-        send({ pad: " ".repeat(AI_STEP_PADDING_BYTES) });
-        let last: AiStepLine = { done: true, ok: false, error: "failed" };
-        try {
-          const done = await writePage(store, input, Date.now(), { run, onStep: (step, state) => send({ step, state }) });
-          last = done.ok
-            ? "returned" in done
-              ? { done: true, ok: true, value: done.value, left: done.left, returned: done.returned }
-              : { done: true, ok: true, value: done.value, left: done.left }
-            : "returned" in done
-              ? { done: true, ok: false, error: done.reason, returned: done.returned, left: done.left }
-              : { done: true, ok: false, error: done.reason };
-        } catch (error) {
-          console.error("a page drafted step by step failed", error);
-        }
-        send(last);
-        try {
-          controller.close();
-        } catch {
-          // Already closed by the page going away.
-        }
-      },
-    });
-    return new Response(stream, {
-      headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff" },
-    });
+    return inSteps((onStep) => writePage(store, input, Date.now(), { run, onStep }), "a page drafted step by step failed");
+  }
+  if (body.kind === "product-pdf") {
+    // A title, a short description and benefits from the product's own PDF
+    // (758 [STN5], unit 4): the product and its file are read here, from the
+    // store's own record, never taken from the browser.
+    const product = await readListing(store, text(body.product, 40));
+    if (!product) return fail("unknown", 404);
+    const refused = await aiJobRefusal(store, 1 + READ_PDF_JOBS);
+    if (refused) return fail(refused);
+    // The description first: one that cannot be read stops the job before the large file is read (Codex N1's LEVE 1
+    // on #3447).
+    const about = product.about ? await readAbout(store.statsId, product.id) : "";
+    const file = readableFile(product);
+    if (!file || !store.statsId) return fail("file");
+    // A PDF that could not be read is not downloaded and parsed again for a day (UNREADABLE_PDF_SECONDS): reading it
+    // takes no job, since nothing can be written from it, so without the mark every request would read it again for
+    // free (Codex N1's MEDIUM on #3447). A mark that does not read exactly reads nothing either (rule 24).
+    const mark = unreadablePdfKey(store.statsId, file.pathname);
+    const noted = await unreadablePdfNoted(mark);
+    if (noted !== "no") return fail(noted === "yes" ? "file" : "failed", noted === "yes" ? 400 : 503);
+    const pdf = await pdfPagesOf(product);
+    if (!pdf) {
+      await redisPipeline([["SET", mark, "1", "EX", UNREADABLE_PDF_SECONDS]]).catch((error) => console.error("a PDF that could not be read could not be noted", error));
+      return fail("file");
+    }
+    const run = text(body.run, 60);
+    return inSteps((onStep) => writeFromPdf(store, { title: product.title, summary: product.summary, about, notes, pdf }, Date.now(), { run, onStep }), "a title and benefits from a PDF failed");
   }
   if (body.kind === "review") {
     // The page as it stands in the editor, saved or not, held to the same
@@ -463,4 +463,71 @@ export async function POST(request: NextRequest) {
     return answer(writeEmail(store, { goal, product: text(body.product, 200), link: text(body.link, 400), notes }));
   }
   return fail("invalid");
+}
+
+/** How long a product's PDF that could not be read is not read again for the AI assistance (Codex N1's MEDIUM on #3447). */
+const UNREADABLE_PDF_SECONDS = 86_400;
+
+/** The mark of a PDF that could not be read, by the store and the file's own path (a new upload is a new path). */
+function unreadablePdfKey(statsId: string, pathname: string): string {
+  return `nl:ai:pdfno:${statsId}:${createHash("sha256").update(pathname).digest("hex").slice(0, 24)}`;
+}
+
+/** Whether that mark is there, read exactly (rule 24): "yes", "no", or "unknown" for any other reply or a failed call. */
+async function unreadablePdfNoted(mark: string): Promise<"yes" | "no" | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  const read = repliesFor(await redisPipeline([["GET", mark]]).catch(() => null), 1);
+  if (!read) return "unknown";
+  return read[0] === null ? "no" : read[0] === "1" ? "yes" : "unknown";
+}
+
+/** A product's own PDF, its first pages only (lib/ai.ts, readPdfFacts), or null when it has none to read or it cannot be read. */
+async function pdfPagesOf(product: Parameters<typeof readableFile>[0]): Promise<Uint8Array | null> {
+  const file = readableFile(product);
+  if (!file) return null;
+  const bytes = await readFileWhole(file.pathname, MAX_STAMP_BYTES).catch(() => null);
+  return bytes ? await firstPages(bytes, READ_PDF_PAGES).catch(() => null) : null;
+}
+
+/**
+ * A job told step by step (758 [STN5]): one line as each step starts and
+ * ends, then the result, so the studio can say what is running and offer to
+ * stop. The first line is padding some browsers wait for.
+ */
+function inSteps<T>(job: (onStep: (step: AiStepId, state: AiStepState) => void) => Promise<AiResult<T> | AiStopped | AiDraftedGiven<T> | { ok: false; reason: "file" }>, failure: string): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (line: AiStepLine | { pad: string }) => {
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+        } catch {
+          // The page has gone; the job goes on to its end and keeps its count, as one without steps does.
+        }
+      };
+      send({ pad: " ".repeat(AI_STEP_PADDING_BYTES) });
+      let last: AiStepLine = { done: true, ok: false, error: "failed" };
+      try {
+        const done = await job((step, state) => send({ step, state }));
+        last = done.ok
+          ? "returned" in done
+            ? { done: true, ok: true, value: done.value, left: done.left, returned: done.returned }
+            : { done: true, ok: true, value: done.value, left: done.left }
+          : "returned" in done
+            ? { done: true, ok: false, error: done.reason, returned: done.returned, left: done.left }
+            : { done: true, ok: false, error: done.reason };
+      } catch (error) {
+        console.error(failure, error);
+      }
+      send(last);
+      try {
+        controller.close();
+      } catch {
+        // Already closed by the page going away.
+      }
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff" },
+  });
 }

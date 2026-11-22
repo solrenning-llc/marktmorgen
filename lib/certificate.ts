@@ -373,9 +373,13 @@ export async function issueCertificate(input: {
     throw error;
   }
   if (existing) {
-    // This press made nothing that stands: its record goes, the standing one is the answer.
-    await redisPipeline([["DEL", certKey(id)]]);
-    await giveData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]);
+    // This press made nothing that stands: its record goes, the standing one is the answer. The DEL's reply is read
+    // exactly (rule 24; Codex P, #4287 item 13): 1 gives the room back, 0 (already gone) keeps it counted, and any
+    // other answer throws with the room as it was, so a record that may still be kept never stops counting.
+    const deleted = "the deletion of a press's provisional certificate";
+    const [gone] = exactReplies(await redisPipeline([["DEL", certKey(id)]]), 1, deleted);
+    if (replyCount(gone, deleted) > 1) throw new UnknownReply(deleted);
+    if (gone === 1) await giveData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]);
     // The standing one goes on the course's two lists again (SADD is idempotent): a press whose index write failed
     // after its slot was claimed left it off them, and only a later press can repair that (#4277). Each reply read
     // exactly as 0 or 1 (rule 24); any other throws, and the next press tries again.

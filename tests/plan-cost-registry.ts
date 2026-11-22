@@ -2068,10 +2068,16 @@ export const REVIEW_REFUND_PASS_RUNS = Math.ceil((DAY_WINDOWS * 86_400) / REVIEW
  * revocations, reminders and confirmations) keeps its five-minute run whatever the turn says.
  */
 export const REVIEW_REFUND_TURN_READS = DAY_WINDOWS * 288;
+/**
+ * Commands one store's turn read costs a run, at the most: its SISMEMBER and, in a batch of one store, the whole MGET
+ * (auditor 2's LEVE (b), 20261122T203956Z-claude-1-coord-a42f: priced at one before).
+ */
+export const REVIEW_REFUND_TURN_COMMANDS = 2;
 /** One store's slot in that MGET: its key asked and its turn answered. */
 export const REVIEW_REFUND_TURN_BYTES = 128;
 /**
- * Commands one run of the pass sends outside its refunds, at the most: the turn's SET NX EX, the store's SISMEMBER
+ * Commands one run of the pass sends outside its refunds, at the most: the turn's SET NX EX (one EVAL with the store's
+ * fence, its two reads first, and a GET reading a lost answer back: auditor 2's LEVE (c), a42f), the store's SISMEMBER
  * (whether it has a review), the anchor's GET, the seen rows' trim below the window (ZREMRANGEBYSCORE), the lost
  * disputes' place (GET, and its SET or DEL), one ZMSCORE a page of refunds (the rows already read and the payments
  * marked, one command a page whatever the page holds), the month's rows a page as one EVAL with the store's fence
@@ -2088,7 +2094,7 @@ export const REVIEW_REFUND_TURN_BYTES = 128;
  * tests/review-refund-sweep-cost.test.ts (13th triple audit on #5100, LEVE 3).
  */
 export const REVIEW_REFUND_CAPPED_TRY_COMMANDS = 1 + 5 + 5 + 4 + 4;
-export const REVIEW_REFUND_RUN_COMMANDS = 1 + 1 + 1 + 1 + (1 + 4) + REVIEW_REFUND_PAGES + 10 * REVIEW_REFUND_PAGES + 1 + REVIEW_REFUND_CAPPED_TRY_COMMANDS + 5;
+export const REVIEW_REFUND_RUN_COMMANDS = (4 + 1) + 1 + 1 + 1 + (1 + 4) + REVIEW_REFUND_PAGES + 10 * REVIEW_REFUND_PAGES + 1 + REVIEW_REFUND_CAPPED_TRY_COMMANDS + 5;
 /** Stripe pages one run waits on, at the most: the refunds' and the lost disputes', each EXPORT_PAGE_SECONDS at 2 GB. */
 export const REVIEW_REFUND_RUN_PAGES = REVIEW_REFUND_PAGES + LOST_DISPUTE_PAGES;
 /** The ids asked and the flags answered for every row of those pages, at most 64 bytes each way. */
@@ -2163,7 +2169,7 @@ export const REVIEW_REFUND_QUOTES_COMMANDS = 60;
  * billing month and was priced at one).
  */
 export function reviewRefundSweepMonthUsd(tier: Tier): number {
-  const turns = REVIEW_REFUND_TURN_READS * (COMMAND + REVIEW_REFUND_TURN_BYTES * DB_BYTE);
+  const turns = REVIEW_REFUND_TURN_READS * (REVIEW_REFUND_TURN_COMMANDS * COMMAND + REVIEW_REFUND_TURN_BYTES * DB_BYTE);
   const runs = REVIEW_REFUND_PASS_RUNS * ((REVIEW_REFUND_RUN_COMMANDS + REVIEW_REFUND_QUOTES_COMMANDS) * COMMAND + REVIEW_REFUND_RUN_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND + REVIEW_REFUND_RUN_BYTES * DB_BYTE);
   // The month's payments marked at a mark's full cost: REVIEW_REFUND_PAYMENTS_PER_MONTH is the plan's orders, and a
   // ceiling the pass counts before each mark (10th triple audit on #5100), not only what the plan's orders suggest.

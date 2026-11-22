@@ -44,7 +44,7 @@ import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisp
 import { ordersGrant } from "@/lib/buyer-orders";
 import { DOWNLOAD_WINDOW_SECONDS } from "@/lib/store-checkout";
 import { PaymentsSpentError, REVIEW_STORES_KEY, ReviewBusyError, ReviewStoreGoneError, markRefunded } from "@/lib/reviews";
-import { storeLiveFence } from "@/lib/store-live-cache";
+import { claimWhileStoreLive, storeLiveFence } from "@/lib/store-live-cache";
 import { type FencedCommand, countIfStoreLive, writeIfStoreLive } from "@/lib/live-fence";
 import { windowId, windowKeySeconds } from "@/lib/allowance-window";
 import { refreshStoreQuotes } from "@/lib/store-quotes";
@@ -443,8 +443,9 @@ export async function reviewPassesDue(stores: Store[]): Promise<Set<string>> {
     const values = repliesFor(await redisPipeline([["MGET", ...sids.map(nextKey)]]), 1)?.[0];
     if (!Array.isArray(values) || values.length !== sids.length) throw new UnknownReplyError("the turns for the reviews' refund pass");
     values.forEach((value, i) => {
+      // Held by a run (its own value, lib/store-live-cache.ts claimWhileStoreLive) or put off (NOT_DUE): not due.
       if (value === null) due.add(sids[i]);
-      else if (value !== NOT_DUE) console.error("a store's turn for the reviews' refund pass did not read; no pass this run");
+      else if (typeof value !== "string" || value === "") console.error("a store's turn for the reviews' refund pass did not read; no pass this run");
     });
   } catch (error) {
     console.error("the turns for the reviews' refund pass did not read; no pass this run", error instanceof Error ? error.name : typeof error);
@@ -454,16 +455,17 @@ export async function reviewPassesDue(stores: Store[]): Promise<Set<string>> {
 }
 
 /**
- * Takes the store's turn for its pass, held REVIEW_REFUND_PASS_EVERY_SECONDS, with one SET NX EX read exactly: true
- * when this run took it; false when another run holds it. Any other reply throws: no pass runs on a turn not known to
- * be taken, so a pass never runs more often than its price says.
+ * Takes the store's turn for its pass, held REVIEW_REFUND_PASS_EVERY_SECONDS, with one SET NX EX through the store's
+ * fence (lib/store-live-cache.ts claimWhileStoreLive, a value of this run's own, a lost answer read back by it): true
+ * when this run took it; false when another run holds it or the store is erasing or gone, so a store deleted meanwhile
+ * gets no turn written back (auditor 2's LEVE (c), 20261122T203956Z-claude-1-coord-a42f). An answer not known throws:
+ * no pass runs on a turn not known to be taken, so a pass never runs more often than its price says.
  */
 export async function takeReviewPass(store: Store): Promise<boolean> {
   if (!store.statsId || !isRedisConfigured()) return false;
-  const taken = repliesFor(await redisPipeline([["SET", nextKey(store.statsId), NOT_DUE, "NX", "EX", REVIEW_REFUND_PASS_EVERY_SECONDS]]), 1)?.[0];
-  if (taken === null) return false;
-  if (taken !== "OK") throw new UnknownReplyError("the store's turn for the reviews' refund pass");
-  return true;
+  const taken = await claimWhileStoreLive(store, nextKey(store.statsId), REVIEW_REFUND_PASS_EVERY_SECONDS);
+  if (taken === "unknown") throw new UnknownReplyError("the store's turn for the reviews' refund pass");
+  return taken === "ours";
 }
 
 /** Whether a store has any review, so the refund pass is worth a call to Stripe. */

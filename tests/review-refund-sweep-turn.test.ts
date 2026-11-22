@@ -7,8 +7,8 @@
  */
 import { sweepCheckouts } from "@/lib/checkout-sweep";
 import { saveReview } from "@/lib/reviews";
-import { REVIEW_REFUND_PASS_EVERY_SECONDS } from "@/lib/review-proof";
-import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
+import { REVIEW_REFUND_PASS_EVERY_SECONDS, takeReviewPass } from "@/lib/review-proof";
+import { ERASING_KEY, claimHandle, ensureStatsId, erasingField, setStripeAccount, storeForEmail, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { installSesMailFixture } from "./ses-mail-fixture";
@@ -34,7 +34,9 @@ redis.pipeline = (async (batch: Batch) => {
   sent.push(...batch);
   return healthy(batch);
 }) as typeof redis.pipeline;
-const turnTakes = (statsId: string) => sent.filter((c) => c[0] === "SET" && c[1] === `nl:rev:refunds:next:${statsId}` && c.includes("NX")).length;
+// The turn is taken by SET NX through the store's fence (lib/store-live-cache.ts claimWhileStoreLive: one EVAL whose
+// third key is the turn; auditor 2's LEVE (c), a42f), or, before, by a plain SET NX: either counts as a take.
+const turnTakes = (statsId: string) => sent.filter((c) => (c[0] === "SET" && c[1] === `nl:rev:refunds:next:${statsId}` && c.includes("NX")) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-claim-live:v1") && c[5] === `nl:rev:refunds:next:${statsId}`)).length;
 
 async function main(): Promise<void> {
   redis.clear();
@@ -105,6 +107,19 @@ async function main(): Promise<void> {
   } finally {
     Date.now = realNow;
   }
+
+  part("A store erasing gets no turn written back (auditor 2's LEVE (c), a42f)");
+  // The turn used to be a plain SET NX: a store deleted between the sweep's read and the take got
+  // nl:rev:refunds:next: back for up to two hours. It goes through the store's fence now.
+  redis.pipeline = healthy;
+  await healthy([["DEL", turn]]);
+  const field = await erasingField(storeRef(store));
+  await healthy([["HSET", ERASING_KEY, field, String(Date.now())]]);
+  is("the erasing store's turn is not taken", await takeReviewPass(store), false);
+  is("and nothing is written under it", Number((await healthy([["EXISTS", turn]]))[0]), 0);
+  await healthy([["HDEL", ERASING_KEY, field]]);
+  is("control: once live again, the turn is taken", await takeReviewPass(store), true);
+  is("and held by this run's own value, which the next read takes as not due", typeof (await healthy([["GET", turn]]))[0] === "string", true);
   done();
 }
 

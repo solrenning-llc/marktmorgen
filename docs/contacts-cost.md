@@ -6,18 +6,19 @@ Queue item 457 [EL1] asks for the worst-case cost of keeping contacts on each pl
 
 ## Where a contact is kept, and what it costs
 
-- **Every contact is taken from the plan's data room.** That holds for a sign-up, an import, the API and labels (`needContacts`, `lib/contacts.ts`), and for a buyer an order puts on the list (`lib/order-data.ts`). A contact takes its record plus its future unsubscribe link (`contactBytes`). When the room is full, the write is refused.
+- **Every contact is taken from the plan's data room.** That holds for a sign-up, an import, the API and labels (`needContacts`, `lib/contacts.ts`), and for a buyer an order puts on the list (`lib/order-data.ts`). A contact written outside an order takes its record plus its future unsubscribe link (`contactBytes`). When the room is full, the write is refused.
+- **A contact an order writes is counted differently,** in the orders' part: its address, its whole record and an entry, a quarter more, rounded up (`lib/order-data.ts`), and each later change by what it grew, a quarter more, rounded up each time (`orderGrowth`, `lib/contacts.ts`). The largest such contact written whole takes **18,320 bytes**, more than the same contact counted outside an order. A contact an order wrote and that then grew in many small writes can take a little more again: each write rounds up to 16 bytes, which this table does not add.
 - **The room is already priced full, every day of the month,** in the `database-storage` line of `tests/plan-cost-registry.ts`. Keeping contacts therefore adds no storage cost of its own, on any plan, monthly or yearly. What a plan keeps after it ends is priced in `retained-data`. Sending to contacts is priced by the plan's monthly emails, and reading them for an export by the `export` reads, which count up to `MAX_LEADS`.
 
 ## How many fit
 
-The smallest contact (a yes from a form, nothing else) takes **912 bytes**. The largest (every title, label, name and mark at its longest) takes **4,016 bytes**. The table assumes the room holds nothing else: no products, pages, orders or courses. So these are the most a plan could ever keep.
+The smallest contact (a yes from a form, nothing else) takes **912 bytes**. The largest takes at most **18,320 bytes**: every title, label, name and mark at its longest, each text written in the characters that take the most bytes (a character JSON writes as an escape, six bytes), counted the dearer of the two ways above. The table assumes the room holds nothing else: no products, pages, orders or courses. So these are the most a plan could ever keep.
 
 | Plan | Data room | Smallest contacts that fit | Largest contacts that fit | MAX_LEADS | Real ceiling |
 | --- | --- | --- | --- | --- | --- |
-| Store | 18,000,000 bytes | 19,736 | 4,482 | 100,000 | **19,736** |
-| Studio | 135,000,000 bytes | 148,026 | 33,615 | 100,000 | **100,000** |
-| Scale | 250,000,000 bytes | 274,122 | 62,250 | 100,000 | **100,000** |
+| Store | 18,000,000 bytes | 19,736 | 982 | 100,000 | **19,736** |
+| Studio | 135,000,000 bytes | 148,026 | 7,368 | 100,000 | **100,000** |
+| Scale | 250,000,000 bytes | 274,122 | 13,646 | 100,000 | **100,000** |
 
 **On Store, the published 100,000 cannot be reached.** The room fills first, at most at 19,736 (Store), and sooner when the store keeps anything else. The home page says "A list of up to 100,000 people" (`components/home-parts.tsx`, `listSizeWords`). The studio speaks of 100,000 as the most one store holds (`app/studio/page.tsx`). Neither says it depends on the plan. That is a published number that does not hold on that plan (VR, item 2). The fix is for the owner to choose ("Depende do dono"):
 - show each plan's real number, which lowers the visible figure on that plan, against the owner's rule not to cut a visible limit;

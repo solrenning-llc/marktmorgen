@@ -646,7 +646,23 @@ export function ramoDoHead(sha, pr) {
     const ramos = git(["ls-remote", REPO_PRS, "refs/heads/*"]).split("\n").filter(Boolean).map((l) => l.split("\t"))
       .filter(([h, ref]) => h.startsWith(String(sha)) && !ref.startsWith("refs/heads/gh-readonly-queue/")).map(([, ref]) => ref.slice("refs/heads/".length))
       .filter((ramo) => ramoDoPr(pr, ramo));
-    return ramos.length === 1 ? ramos[0] : null;
+    if (ramos.length === 1) return ramos[0];
+    // Dois ou mais ramos na mesma ponta (um ramo auxiliar usado para preparar uma junção por avanço simples, caso do
+    // #5080): vale o ramo que o próprio GitHub diz ser o do PR (head.ref), se for um deles. Sem o GitHub, não adivinha
+    // (LEVE do Claude 6 z5v4, 22/11/2026): um ramo auxiliar parado num commit velho leria o head errado depois.
+    if (ramos.length > 1) { const doPr = ramoNoGitHub(pr); return doPr && ramos.includes(doPr) ? doPr : null; }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** O ramo do PR segundo o GitHub (head.ref), ou null se não deu para ler. */
+export function ramoNoGitHub(pr) {
+  if (testeLigado("CORREIO_SEM_GH") || !/^\d+$/.test(String(pr ?? ""))) return null;
+  try {
+    const ref = execFileSync("gh", ["api", `repos/solrenning-llc/marktmorgen/pulls/${pr}`, "--jq", ".head.ref"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 }).trim();
+    return /^[A-Za-z0-9._\/-]+$/.test(ref) ? ref : null;
   } catch {
     return null;
   }

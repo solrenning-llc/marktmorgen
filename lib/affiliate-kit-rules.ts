@@ -30,11 +30,11 @@ import type { LanguageCode } from "@/lib/store-language";
 
 /**
  * One kit's own database work at its worst (Codex P-20261120-1412): the fenced take of its three counters (KIT_COUNTS
- * "take": EVAL, HGET, GET and three INCR with their EXPIRE, 9), their fenced return (KIT_COUNTS "back": EVAL, MGET and
- * three DECR, 5) and the three content reads (the listing, the about text, the page). Priced as each integration's
- * commands (tests/plan-cost-registry.ts, figure "integration").
+ * "take": EVAL, HGET, GET and three INCR with their EXPIRE, 9), their fenced return (KIT_COUNTS "back": EVAL, the same
+ * HGET and GET, MGET and three DECR, 7; Claude 1 2as on #5101) and the three content reads (the listing, the about
+ * text, the page): 19. Priced as each integration's commands (tests/plan-cost-registry.ts, figure "integration").
  */
-export const KIT_COMMANDS_MOST = 17;
+export const KIT_COMMANDS_MOST = 19;
 
 /** Drafts one affiliate may ask for in a day. */
 export const KIT_PER_DAY = 3;

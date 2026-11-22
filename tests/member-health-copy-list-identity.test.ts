@@ -67,9 +67,10 @@ async function main() {
     const live = await memberHealth(store, true);
     const current = (await storeForEmail(owner))!;
     is(`${mode}: the completed erasure has an id that the captured snapshot lacks`, [erased, store.listId, typeof current.listId], [true, null, "string"]);
-    // #4749: a snapshot that cannot certify its members answers nothing, never the erased address.
-    is(`${mode}: the stale snapshot cannot certify a member-bearing answer`, live, null);
-    is(`${mode}: the stale snapshot never repopulates the local copy`, copy(key), null);
+    // #4749: never the erased address. Since the LOW of Claude 3 and Claude 2 on #4914, the stale snapshot's list is
+    // read fresh (listForNaming), so it certifies through the namespace the erasure saved and answers the rest.
+    is(`${mode}: the stale snapshot answers only the remaining member, through the namespace read fresh`, live?.members.map((member) => member.email), ["remaining@example.test"]);
+    is(`${mode}: and its copy never names the erased address`, copy(key)?.members.map((member) => member.email), ["remaining@example.test"]);
     await memberHealth(current, true);
     is(`${mode}: a new snapshot uses the saved namespace and keeps only the remaining member`, copy(key)?.members.map(member => member.email), ["remaining@example.test"]);
   }

@@ -14,7 +14,8 @@ import { db, members, reset, sent, store } from "./community-mail-read-world";
 import { done, is, part } from "./check";
 
 const id = "e".repeat(24);
-const listId = "l".repeat(24);
+// A list id in the shape a store has (lib/store.ts LIST_ID_PATTERN), so the announcement can carry it as its stop tag.
+const listId = "1".repeat(32);
 const listed: Store = { ...store, listId } as Store;
 const job: AnnouncementJob = {
   id, community: store.community!.id, handle: store.handle, post: "f".repeat(12),
@@ -35,6 +36,9 @@ async function main(): Promise<void> {
   seed(contact({}));
   const healthy = await advanceAnnouncement(id, async () => listed, Date.now() + 10_000);
   is("sent to both", [healthy?.status, to()], ["sent", [members[0].e, members[1].e]]);
+  // The real announcement names the store's list, so a bounce for good or a complaint on it takes the address off the
+  // list (Claude 1 cloud's MEDIUM 2 on #4245: the bounce test sent a stand-in, never this sender).
+  is("each announcement names the store's list", sent.flat().map((m) => (m as { tags?: Record<string, string> }).tags?.nl_stop), [listId, listId]);
 
   for (const why of ["complained", "bounced", "refused"] as const) {
     part(`Taken off the store's list as ${why}`);

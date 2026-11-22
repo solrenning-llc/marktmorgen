@@ -12,6 +12,7 @@
  * closing day is priced as the paid plan it is, at the plan's figures.
  * Synthetic stores, keys and senders only; nothing leaves this machine.
  */
+import { mock } from "node:test";
 import { holdMoreApi, takeMoreApi } from "@/lib/api-guard";
 import { sendEmail } from "@/lib/email";
 import { monthlyAllowance, reserve, takeFromMonth } from "@/lib/mail";
@@ -25,6 +26,11 @@ import { AFTER_TRIAL_UNITS, TRIAL_UNITS } from "./store-data-registry";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+
+// A store with no plan counts its emails in the calendar month (lib/allowance-window.ts), read again at each send:
+// a run crossing 00:00 UTC on a month's last day between two sends started a new month's figure, and more went out
+// than the standing's figure. Only Date is stopped, for the whole run; timers and performance.now() run as usual.
+mock.timers.enable({ apis: ["Date"], now: Date.now() });
 
 process.env.RESEND_API_KEY = "re_test_after_trial_units_only";
 let sent = 0;
@@ -110,6 +116,13 @@ async function afterTrial(label: string, s: Store, standing: "ended" | "none"): 
 
 async function main(): Promise<void> {
   redis.clear();
+
+  part("The reviewed non-paying resource ceilings");
+  is("trial, no plan, and ended plan", NON_PAYING_ALLOWANCES, {
+    trial: { studio: 1_000, api: 100, inbox: 30, email: 30, transactional: 40, integration: 20, buyer: 50, webhook: 50 },
+    none: { studio: 300, api: 0, inbox: 20, email: 25, transactional: 20, integration: 5, buyer: 20, webhook: 0 },
+    ended: { studio: 100, api: 0, inbox: 0, email: 0, transactional: 20, integration: 0, buyer: 20, webhook: 0 },
+  });
 
   part("A delivery made during the trial and never tried, tried after it: not sent, and its message not kept");
   const trial = await store("trial");

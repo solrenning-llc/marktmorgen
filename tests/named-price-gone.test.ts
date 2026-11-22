@@ -37,6 +37,19 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     checkouts.push(new URLSearchParams(String(init?.body)));
     return new Response(JSON.stringify({ id: `cs_test_${"p".repeat(20)}${checkouts.length}`, url: "https://checkout.stripe.com/c/pay/test" }));
   }
+  // Nobody here has a membership still running (lib/winback-send.ts reads it before a come-back checkout opens).
+  // Altered 2026-11-12: a move link now asks whether the member already kept it (lib/move-members.ts, openMove);
+  // nobody here has, so the creator's account lists no customer for the address.
+  // What openMove reads around the checkout, as Stripe answers it (Revisor 1 on #2685): nobody here is a member yet
+  // (whole, empty lists), and each checkout closes when its body said, or in a day.
+  const method = init?.method ?? "GET";
+  if (method === "GET" && (path === "/customers" || path === "/subscriptions")) return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
+  if (path === "/customers/search") return new Response(JSON.stringify({ object: "search_result", data: [], has_more: false, next_page: null }));
+  const session = /^\/checkout\/sessions\/cs_test_p+(\d+)$/.exec(path);
+  if (method === "GET" && session) {
+    const body = checkouts[Number(session[1]) - 1];
+    return new Response(JSON.stringify({ id: path.split("/").pop(), object: "checkout.session", expires_at: Number(body?.get("expires_at")) || nowS + DAY }));
+  }
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${path}` } }), { status: 404 });
 }) as typeof fetch;
 

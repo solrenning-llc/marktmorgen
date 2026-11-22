@@ -36,11 +36,13 @@
 import { CALENDAR_LIST_PAUSED, integrationPauseWord } from "@/lib/integration-pause";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimValue, releaseMark } from "@/lib/claim-mark";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import type { Busy } from "@/lib/call-setup";
 import { readFeed, providerOf } from "@/lib/calendar-sync";
 import { checkUrl, problemWords as fetchProblemWords, SafeFetchError } from "@/lib/safe-fetch";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
-import { NotConnected, accessFor, disconnectFor, hostConnectionFrom, hostConnectionKey, hostConnectionView } from "@/lib/meet-connect";
+import { type MeetStore, NotConnected, accessFor, disconnectFor, hostConnectionFrom, hostConnectionKey, hostConnectionView } from "@/lib/meet-connect";
 import { type GoogleCalendar, MAX_READ_CALENDARS, ProviderError, googleCalendars, googleFreeBusy, grantedParts, hostSyncOn } from "@/lib/meet-providers";
 import { HOST_STALE_MINUTES, HOST_SYNC_MINUTES } from "@/lib/team-scheduling-rules";
 import { hostId } from "@/lib/host-claims";
@@ -60,7 +62,28 @@ export const STALE_SECONDS = HOST_STALE_MINUTES * 60;
 export const HOST_LOOKAHEAD_DAYS = 92;
 /** How long the last reading and the last failure are kept, for the studio. */
 const KEEP_SECONDS = 7 * 86_400;
+/** EVAL and the config GET added to the former reading write; inner writes retain their former count. */
+export const HOST_READING_FENCE_COMMANDS = 2;
+const KEEP_READING_IF_CURRENT = `-- marktmorgen:host-reading-current:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
+if ARGV[4] == "good" then redis.call("DEL", KEYS[3]) end
+return 1`;
+
+/** No result of a removed/replaced calendar can restore its private reading or error. */
+async function keepReading(host: string, config: string, value: string, kind: "good" | "error"): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["EVAL", KEEP_READING_IF_CURRENT, 3,
+    cfgKey(host), kind === "good" ? goodKey(host) : errKey(host), errKey(host),
+    config, value, KEEP_SECONDS, kind,
+  ]]), 1);
+  if (!reply || (reply[0] !== 0 && reply[0] !== 1)) throw new UnknownReplyError("a host's calendar reading write");
+  return reply[0] === 1;
+}
 export const MAX_ICS_URL = 1000;
+/** Writer-format bound: escaped email/calendar ids plus a sealed UTF-8 ICS URL and record overhead. */
+export const HOST_READING_CONFIG_BYTES = 2_048 + 6 * (320 + MAX_READ_CALENDARS * 300 + 300) + 4 * MAX_ICS_URL;
+/** The exact config is sent again, alongside the short script, keys and command envelope. */
+export const HOST_READING_FENCE_BYTES = HOST_READING_CONFIG_BYTES + 2_048;
 
 export type HostSource = "google" | "ics" | "none";
 
@@ -71,6 +94,13 @@ const cfgKey = (host: string) => `nl:hostcal:cfg:${host}`;
 const goodKey = (host: string) => `nl:hostcal:good:${host}`;
 const errKey = (host: string) => `nl:hostcal:err:${host}`;
 const lockKey = (host: string) => `nl:hostcal:lock:${host}`;
+/** How long a host's reading holds its lock. */
+const HOST_LOCK_SECONDS = 20;
+/**
+ * What the lock costs beyond the plain SET NX and DEL it was: the compare-and-delete script's EVAL and GET
+ * (releaseMark) in place of the DEL. The SET NX is the same one command, under a value of its own.
+ */
+export const HOST_LOCK_OWNER_COMMANDS = 2;
 /** Every key a host's calendar keeps, by the host: for a store that closes, when it was the host's last (lib/closed-store-data.ts). */
 export const hostCalendarKeys = (host: string): string[] => [cfgKey(host), goodKey(host), errKey(host), lockKey(host)];
 const icsContext = (host: string) => `hostcal|${host}|ics`;
@@ -98,7 +128,7 @@ function storedReply(reply: unknown, count: number): (string | null)[] {
 
 function parseConfig(raw: unknown): Config | null {
   if (raw === null) return null;
-  if (typeof raw !== "string") throw unreadable();
+  if (typeof raw !== "string" || raw.length > HOST_READING_CONFIG_BYTES || new TextEncoder().encode(raw).byteLength > HOST_READING_CONFIG_BYTES) throw unreadable();
   try {
     const v = JSON.parse(raw) as Partial<Config>;
     if (!v || (v.source !== "google" && v.source !== "ics" && v.source !== "none") ||
@@ -144,8 +174,21 @@ async function readConfig(host: string): Promise<Config | null> {
   return parseConfig(raw);
 }
 
+/**
+ * Writes a host's settings, only when Redis answers "OK" (CX-123 rule 24): any other reply leaves the write
+ * unknown, so it throws, and the route says it failed rather than that an address was forgotten.
+ */
 async function writeConfig(host: string, config: Config): Promise<void> {
-  await redisPipeline([["SET", cfgKey(host), JSON.stringify(config)]]);
+  const [saved] = repliesFor(await redisPipeline([["SET", cfgKey(host), JSON.stringify(config)]]), 1) ?? [];
+  if (saved !== "OK") throw new UnknownReplyError("a host's calendar settings write");
+}
+
+/** Forgets a host's last reading and last failure, only on a count Redis answered for it. */
+async function forgetReadings(host: string): Promise<void> {
+  const [gone] = repliesFor(await redisPipeline([["DEL", goodKey(host), errKey(host)]]), 1) ?? [];
+  // One DEL of the two keys above answers 0, 1 or 2: a bigger count is not this command's (Codex G, G-20261119-0442).
+  const count = countOf(gone);
+  if (count === null || count > 2) throw new UnknownReplyError("forgetting a host's calendar readings");
 }
 
 function emptyConfig(email: string): Config {
@@ -191,9 +234,9 @@ function result(source: HostSource, state: SyncState, good: Good | null, message
 /** Test seams: a stand-in for the calendar feed fetch; production passes nothing. */
 export type SyncHooks = { feed?: Parameters<typeof readFeed>[3] };
 
-async function readBusyNow(statsId: string, host: string, config: Config, tz: string, now: number, hooks: SyncHooks): Promise<[number, number][]> {
+async function readBusyNow(store: MeetStore, host: string, config: Config, tz: string, now: number, hooks: SyncHooks): Promise<[number, number][]> {
   if (config.source === "google") {
-    const access = await accessFor(statsId, "google", undefined, host);
+    const access = await accessFor(store.statsId ?? "", "google", undefined, host, store);
     return googleFreeBusy(access.token, config.read, now - 86_400_000, now + HOST_LOOKAHEAD_DAYS * 86_400_000);
   }
   const opened = unseal(config.ics, icsContext(host));
@@ -242,7 +285,7 @@ export async function prefetchHosts(store: Pick<Store, "statsId">, emails: strin
  * cannot be known blocks the host.
  */
 export async function hostSync(
-  store: Pick<Store, "statsId">,
+  store: MeetStore,
   email: string,
   tz: string,
   options: { now?: number; refresh?: boolean; force?: boolean; hooks?: SyncHooks; known?: HostPrefetch } = {},
@@ -251,6 +294,7 @@ export async function hostSync(
   if (!store.statsId || !isRedisConfigured()) return result("none", "none", null);
   const host = hostId(email);
   let config: Config | null;
+  let configRead: string | null = null;
   let good: Good | null;
   let failure: { at: number; message: string } | null;
   try {
@@ -260,6 +304,7 @@ export async function hostSync(
       ? storedValues([options.known.cfg, options.known.good, options.known.err], 3)
       : storedReply(await redisPipeline([["MGET", cfgKey(host), goodKey(host), errKey(host)]]), 3);
     config = parseConfig(c);
+    configRead = c;
     good = parseGood(g);
     failure = parseError(e);
     if (good && good.at > now) throw unreadable();
@@ -287,28 +332,35 @@ export async function hostSync(
   // Failed automatic reads share the same host-wide retry interval as good reads.
   // A kept failure must not turn each booking-page view into another provider call.
   if (!options.force && failure && Number.isFinite(failure.at) && failure.at <= now && now - failure.at < SYNC_SECONDS * 1000) return fallback();
+  // The lock under a value only this reading writes (claimValue, lib/claim-mark.ts), let go only while it still holds it: a
+  // reading that outlived its twenty seconds never deletes the lock a later reading took (Claude 4, 20/11).
+  // Only an exact "OK" is the lock; any other reply sends nothing more (tests/host-calendar-read-evidence.test.ts).
+  const lock = claimValue();
   let mine: string | null;
   try {
-    [mine] = storedValues(await redisPipeline([["SET", lockKey(host), "1", "NX", "EX", 20]]), 1);
+    [mine] = storedValues(await redisPipeline([["SET", lockKey(host), lock, "NX", "EX", HOST_LOCK_SECONDS]]), 1);
   } catch {
     return fallback();
   }
   if (mine !== "OK") return fallback();
   try {
-    const busy = await readBusyNow(store.statsId, host, config, tz, now, options.hooks ?? {});
+    let busy: [number, number][];
+    try {
+      busy = await readBusyNow(store, host, config, tz, now, options.hooks ?? {});
+    } catch (error) {
+      const message = syncWords(error);
+      const kept = configRead !== null && await keepReading(host, configRead, JSON.stringify({ at: now, message }), "error").catch(() => false);
+      if (!kept) return result(source, "failed", null, "Your calendar settings could not be read just now.");
+      if (age < STALE_SECONDS * 1000) return result(source, "ok", good, message);
+      return result(source, good ? "stale" : "failed", good, message);
+    }
     const reading: Good = { at: now, busy, source };
-    await redisPipeline([
-      ["SET", goodKey(host), JSON.stringify(reading), "EX", KEEP_SECONDS],
-      ["DEL", errKey(host)],
-    ]);
+    // A failed/unconfirmed commit never starts a second write to keep an error about that write.
+    const kept = configRead !== null && await keepReading(host, configRead, JSON.stringify(reading), "good").catch(() => false);
+    if (!kept) return result(source, "failed", null, "Your calendar settings could not be read just now.");
     return result(source, "ok", reading);
-  } catch (error) {
-    const message = syncWords(error);
-    await redisPipeline([["SET", errKey(host), JSON.stringify({ at: now, message }), "EX", KEEP_SECONDS]]).catch(() => {});
-    if (age < STALE_SECONDS * 1000) return result(source, "ok", good, message);
-    return result(source, good ? "stale" : "failed", good, message);
   } finally {
-    await redisPipeline([["DEL", lockKey(host)]]).catch(() => {});
+    await releaseMark(lockKey(host), lock);
   }
 }
 
@@ -352,7 +404,7 @@ export async function hostCalendarView(store: Store, email: string, tz: string):
       calendarsError = "Calendar choices are temporarily unavailable. Try again later.";
     } else {
       try {
-        const access = await accessFor(statsId, "google", undefined, host);
+        const access = await accessFor(statsId, "google", undefined, host, store);
         calendars = await googleCalendars(access.token);
       } catch (error) {
         calendarsError = syncWords(error);
@@ -412,7 +464,7 @@ export async function setHostCalendars(store: Store, email: string, read: string
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "unavailable";
   let listed: GoogleCalendar[];
   try {
-    const access = await accessFor(store.statsId, "google", undefined, host);
+    const access = await accessFor(store.statsId, "google", undefined, host, store);
     listed = await googleCalendars(access.token);
   } catch {
     return "google_none";
@@ -473,7 +525,7 @@ export async function removeHostIcs(store: Pick<Store, "statsId">, email: string
   const config = await readConfig(host);
   if (!config) return;
   await writeConfig(host, { ...config, ics: "", icsAddedAt: "", source: config.source === "ics" ? "none" : config.source });
-  await redisPipeline([["DEL", goodKey(host), errKey(host)]]);
+  await forgetReadings(host);
 }
 
 /**
@@ -490,7 +542,7 @@ export async function disconnectHostGoogle(store: Pick<Store, "statsId">, email:
   const { providerAccessRemoved } = await disconnectFor(store.statsId, "google", host);
   const config = await readConfig(host);
   if (config) await writeConfig(host, { ...config, read: [], write: "", source: config.source === "google" ? "none" : config.source });
-  await redisPipeline([["DEL", goodKey(host), errKey(host)]]);
+  await forgetReadings(host);
   return providerAccessRemoved;
 }
 

@@ -121,6 +121,18 @@ async function main() {
   is("our door no longer knowing the upload ends it at once, with no pauses", [await reasonOf(vaultUpload(file(25), "p", "a.zip", { door: w.door, put: w.put, wait: w.wait })), w.waits.length], ["unknown", 0]);
   w = world({ done: { ok: false, error: "invalid" } });
   is("a file the store measured as something else is refused at the end", await reasonOf(vaultUpload(file(25), "p", "a.zip", { door: w.door, put: w.put, wait: w.wait })), "invalid");
+  // Issue #4082 (Codex V): a "done" that did not answer ok left the upload's session and its storage reservation
+  // open at the store, and the page kept no handle to close them, so the same file could not be sent again at once.
+  is("and the upload is closed at the store, so the file can be sent again at once", of(w, "abort").map((d) => d.pathname), ["vault/f/p/0011223344556677-a.zip"]);
+  w = world({ done: { ok: false, error: "files_unavailable" } });
+  is("a store that could not join the pieces just now says so", await reasonOf(vaultUpload(file(25), "p", "a.zip", { door: w.door, put: w.put, wait: w.wait })), "files_unavailable");
+  is("and the upload is closed at the store too", of(w, "abort").length, 1);
+  w = world({ done: {} });
+  is("an answer of no known shape is an error of ours", await reasonOf(vaultUpload(file(25), "p", "a.zip", { door: w.door, put: w.put, wait: w.wait })), "server_error");
+  is("and the upload is closed at the store", of(w, "abort").length, 1);
+  w = world();
+  await vaultUpload(file(25), "p", "a.zip", { door: w.door, put: w.put, wait: w.wait });
+  is("a finished upload is never thrown away", of(w, "abort").length, 0);
 
   part("The store that takes these is not set up");
   w = world({ open: { ok: false, error: "off" } });

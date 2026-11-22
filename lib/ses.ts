@@ -56,6 +56,7 @@ import { createHash } from "node:crypto";
 import { type AwsKey, signV4 } from "@/lib/aws-sign";
 import { SES_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 
 export type SesConfig = {
   /** The only identity allowed to send: a role borrowed with the host token. */
@@ -546,6 +547,34 @@ export async function sesSend(config: SesConfig, message: SesMessage): Promise<{
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const didKey = (batchKey: string, to: string) => `nl:ses:did:${createHash("sha256").update(`${batchKey}\n${to}`).digest("hex").slice(0, 40)}`;
 const DID_SECONDS = 2 * 86_400;
+/**
+ * A recipient whose acceptance was lost on the way back (sesSend's `uncertain`): Amazon may already have taken the
+ * email. Kept apart from the `did` mark, which only a confirmed acceptance earns, and read by the sender before a
+ * retry of the same batch, so a batch tried again never writes to that person twice, as one email alone is never
+ * sent again once its answer was lost (lib/email.ts, viaAmazon). Outage drill, 13 November 2026.
+ */
+const maybeKey = (batchKey: string, to: string) => `nl:ses:maybe:${createHash("sha256").update(`${batchKey}\n${to}`).digest("hex").slice(0, 40)}`;
+
+/**
+ * The messages whose acceptance under this key was never lost on the way back; null when that cannot be read, never
+ * permission to send.
+ */
+export async function notMaybeTaken<T extends { to: string }>(batchKey: string, messages: T[]): Promise<T[] | null> {
+  if (!messages.length) return messages;
+  if (messages.length > 100) return null;
+  try {
+    const found = repliesFor(await redisPipeline(messages.map((m) => ["GET", maybeKey(batchKey, m.to)])), messages.length);
+    if (!found) return null;
+    const clear: T[] = [];
+    for (let i = 0; i < messages.length; i += 1) {
+      if (found[i] === null) clear.push(messages[i]);
+      else if (found[i] !== "1") return null;
+    }
+    return clear;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Recipients whose existing marker explicitly confirms absence. A known
@@ -577,6 +606,51 @@ export async function notYetTaken<T extends { to: string }>(batchKey: string, me
   }
 }
 
+/**
+ * Marks each message of a wave as possibly taken, before it is handed to Amazon: true only when every mark is
+ * confirmed new. Otherwise the marks this call may have written are taken off (best effort) and nothing is sent.
+ * `held` is the marks this call already wrote and still holds: the same address earlier in the batch, or twice in
+ * this wave (one review ask per order, lib/review-requests.ts), is this call's own mark, not somebody else's
+ * evidence, so it is not written again; SET NX would answer "already there" and stall the batch on every run
+ * (review of #4530, 15 November 2026).
+ */
+async function markMaybe(batchKey: string, wave: { to: string }[], held: Set<string>): Promise<boolean> {
+  const keys = [...new Set(wave.map((m) => maybeKey(batchKey, m.to)))].filter((key) => !held.has(key));
+  if (!keys.length) return true;
+  try {
+    const replies = repliesFor(await redisPipeline(keys.map((key) => ["SET", key, "1", "NX", "EX", DID_SECONDS])), keys.length);
+    if (replies && replies.every((reply) => reply === "OK")) {
+      for (const key of keys) held.add(key);
+      return true;
+    }
+    // Taken off only where this call wrote, or may have: an existing mark (null) is somebody else's evidence.
+    const ours = replies ? keys.filter((_, i) => replies[i] === "OK") : keys;
+    if (ours.length) await redisPipeline(ours.map((key) => ["DEL", key])).catch(() => {});
+    return false;
+  } catch {
+    // Unknown whether any landed: take them off, as none was there when the batch read them (notMaybeTaken).
+    await redisPipeline(keys.map((key) => ["DEL", key])).catch(() => {});
+    return false;
+  }
+}
+
+/**
+ * Takes off the marks of messages Amazon said for certain it did not take, except where another email of this call
+ * to the same address was taken or may have been (`kept`); one that cannot be confirmed is logged. A mark taken off
+ * leaves `held`, so a later wave to that address writes it again before Amazon is asked.
+ */
+async function unmarkMaybe(batchKey: string, messages: { to: string }[], held: Set<string>, kept: Set<string>): Promise<void> {
+  const keys = [...new Set(messages.map((m) => maybeKey(batchKey, m.to)))].filter((key) => !kept.has(key));
+  if (!keys.length) return;
+  for (const key of keys) held.delete(key);
+  try {
+    const replies = repliesFor(await redisPipeline(keys.map((key) => ["DEL", key])), keys.length);
+    if (!replies || replies.some((reply) => reply !== 1)) console.error("an email Amazon did not take could not be confirmed unmarked");
+  } catch (error) {
+    console.error("an email Amazon did not take could not be unmarked", error);
+  }
+}
+
 /** The longest one batch may take here; what is left after it goes by the other sender. */
 const BATCH_MS = 9_000;
 
@@ -585,7 +659,9 @@ const BATCH_MS = 9_000;
  * may send, and says which it took and which are left for the other sender:
  * the ones not reached in time, and all of them from the moment Amazon
  * refuses one for the account's own sake. One it refused for the email's own
- * sake is in neither: it is not sent by anybody. An uncertain acceptance
+ * sake is in neither: it is not sent by anybody, and it is in `refused`
+ * with what Amazon said, so a caller can tell an address Amazon will not
+ * take from an email it will not take as it is. An uncertain acceptance
  * stops new waves and rounds; callers must not hand its remainder elsewhere.
  */
 export async function sesBatch<T extends SesMessage>(
@@ -593,26 +669,44 @@ export async function sesBatch<T extends SesMessage>(
   state: SesState,
   messages: T[],
   batchKey: string,
-): Promise<{ taken: T[]; left: T[]; down: string; uncertain?: true }> {
+  /** Whether whoever may have been taken is marked for notMaybeTaken: a plain batch's, never a list batch's (lib/email.ts). */
+  options: { maybeMarks?: boolean } = {},
+): Promise<{ taken: T[]; left: T[]; refused: { message: T; why: string }[]; down: string; uncertain?: true; stalled?: true }> {
   const taken: T[] = [];
-  const refused = new Set<T>();
+  const refused = new Map<T, string>();
   const perSecond = Math.max(1, Math.floor(state.rate || 1));
   const started = Date.now();
   let down = "";
   let uncertain = false;
+  let stalled = false;
+  // The possibly-taken marks this call wrote and holds, and those that must stay because an email of this call to
+  // that address was taken or may have been (markMaybe, unmarkMaybe).
+  const held = new Set<string>();
+  const kept = new Set<string>();
   let queue = [...messages];
-  for (let round = 0; round < 2 && queue.length && !down && !uncertain; round += 1) {
+  for (let round = 0; round < 2 && queue.length && !down && !uncertain && !stalled; round += 1) {
     const again: T[] = [];
-    for (let i = 0; i < queue.length && !down && !uncertain; i += perSecond) {
+    for (let i = 0; i < queue.length && !down && !uncertain && !stalled; i += perSecond) {
       if (Date.now() - started > BATCH_MS) {
         again.push(...queue.slice(i));
         break;
       }
       const waveStarted = Date.now();
       const wave = queue.slice(i, i + perSecond);
+      // Written down before Amazon is asked (notMaybeTaken): if its answer is then lost, a retry of this batch leaves
+      // these people out even when Redis cannot be written afterwards. A mark that is not confirmed sends nothing of
+      // the wave: the rest waits, and nothing is left marked that was not asked (outage drill, 13 November 2026).
+      if (options.maybeMarks === true && !(await markMaybe(batchKey, wave, held))) {
+        again.push(...queue.slice(i));
+        stalled = true;
+        break;
+      }
       const results = await Promise.all(wave.map((m) => sesSend(config, m)));
       const done: T[] = [];
+      const notTaken: T[] = [];
       results.forEach((result, j) => {
+        if (result.outcome !== "sent" && result.uncertain !== true) notTaken.push(wave[j]);
+        else if (options.maybeMarks === true) kept.add(maybeKey(batchKey, wave[j].to));
         if (result.uncertain === true) {
           // A provider may have accepted this email before losing its reply.
           // Keep it unresolved, with no second attempt in this call.
@@ -620,7 +714,7 @@ export async function sesBatch<T extends SesMessage>(
           again.push(wave[j]);
         } else if (result.outcome === "sent") done.push(wave[j]);
         else if (result.outcome === "refused") {
-          refused.add(wave[j]);
+          refused.set(wave[j], result.why);
           console.error("Amazon SES refused an email", result.why);
         } else {
           again.push(wave[j]);
@@ -633,14 +727,26 @@ export async function sesBatch<T extends SesMessage>(
         // leaves these people out.
         await redisPipeline(done.map((m) => ["SET", didKey(batchKey, m.to), "1", "EX", DID_SECONDS])).catch(() => {});
       }
+      // Amazon said for certain it did not take these: their marks go, so a retry may send them. One that cannot be
+      // taken off leaves that person out of a retry, as an answer that was lost does.
+      if (notTaken.length && options.maybeMarks === true) await unmarkMaybe(batchKey, notTaken, held, kept);
       if (down || uncertain) again.push(...queue.slice(i + perSecond));
       else if (i + perSecond < queue.length) await pause(Math.max(0, 1_000 - (Date.now() - waveStarted)));
     }
     queue = again;
-    if (queue.length && !down && !uncertain && round === 0) {
+    if (queue.length && !down && !uncertain && !stalled && round === 0) {
       if (Date.now() - started > BATCH_MS) break;
       await pause(1_000);
     }
   }
-  return { taken, left: queue.filter((m) => !refused.has(m)), down, ...(uncertain ? { uncertain: true as const } : {}) };
+  return {
+    taken,
+    left: queue.filter((m) => !refused.has(m)),
+    refused: [...refused].map(([message, why]) => ({ message, why })),
+    down,
+    ...(uncertain ? { uncertain: true as const } : {}),
+    // Our own Redis could not write down who may be taken: Amazon was not asked for the rest, and it is not
+    // Amazon's doing, so the rest waits for Amazon rather than going to the other sender.
+    ...(stalled ? { stalled: true as const } : {}),
+  };
 }

@@ -32,13 +32,15 @@ import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccoun
 import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { type CallListing, holdAndCheckout, moveBooking, slotsForProduct } from "@/lib/calls";
-import { type CallSetup, zonedToUtc } from "@/lib/call-setup";
+import type { CallSetup } from "@/lib/call-setup";
+import { CLAIM_MARGIN_MS, claimsKey, hostId } from "@/lib/host-claims";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { weekdayAt } from "./weekday";
 import { paidPeriod } from "./billing-period-fixture";
+import { runCallLockWaitsAtOnce } from "./calls-lock-wait";
 
 const HOUR = 3_600_000;
-const DAY = 24 * HOUR;
 const NY = "America/New_York";
 
 /** What Stripe lists as the account's completed checkouts, per account, by the page asked for (its starting_after). */
@@ -93,6 +95,8 @@ redis.pipeline = async (commands) => {
     return replies[i];
   });
 };
+// The 250 ms waits between a held lock's retries run at once; every retry still runs (tests/calls-lock-wait.ts).
+runCallLockWaitsAtOnce();
 function unswap(): void {
   delete swap.nx;
   delete swap.get;
@@ -116,17 +120,6 @@ const weekly = {
   seats: 1,
   sessions: [],
 } as unknown as CallSetup;
-
-function weekdayAt(days: number, minute: number): number {
-  for (let d = days; d < days + 8; d += 1) {
-    const day = new Date(Date.now() + d * DAY);
-    const p = new Intl.DateTimeFormat("en-US", { timeZone: NY, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(day);
-    const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
-    if (get("weekday") === "Sat" || get("weekday") === "Sun") continue;
-    return zonedToUtc(Number(get("year")), Number(get("month")), Number(get("day")), minute, NY) as number;
-  }
-  throw new Error("no weekday");
-}
 
 type World = { store: Store; call: CallListing; full: Product & { call: CallSetup } };
 
@@ -163,8 +156,9 @@ async function sellSession(w: World, start: number): Promise<string> {
 
 const lockOf = (w: World) => `nl:call:lock:${w.store.callsId}`;
 const diaryOf = (w: World) => `nl:call:busy:${w.store.callsId}`;
+// The store owner's claims too: a hold claims the owner's time (lib/calls.ts, claimOwner), and a time cleared here is free.
 async function clear(w: World): Promise<void> {
-  await run([["DEL", lockOf(w)], ["DEL", diaryOf(w)]]);
+  await run([["DEL", lockOf(w)], ["DEL", diaryOf(w)], ["DEL", claimsKey(hostId(w.store.email))]]);
 }
 
 async function main(): Promise<void> {
@@ -381,9 +375,17 @@ async function main(): Promise<void> {
   const until = (JSON.parse(expiringRaw) as { until: number }).until;
   const clock = Date.now;
   try {
+    // Rule 23 (#3490, Claude 6's MEDIUM 1): the owner's claim of a weekly hold outlasts the hold by CLAIM_MARGIN_MS, as
+    // a team hold's claim does, so a buyer confirmed late is never sold twice on another store. The time comes back once
+    // that margin is over; before, it came back as the hold ran out.
+    // Rule 23 again (owner's decision, 16 November 2026, on #3490: "ler só no checkout"): the page no longer reads the
+    // owner's claims on a visit, so it shows the time as soon as the hold is tidied away; the checkout, which reads them,
+    // refuses it until the margin is over.
     Date.now = () => until + 1;
-    is("control: a real hold whose time ran out gives its time back", (await offered(h))?.includes(H), true);
-    is("control: …and is tidied away", (await run([["HGET", diaryOf(h), expiring]]))[0], null);
+    is("control: a real hold whose time ran out is tidied away, and the page shows its time", [(await offered(h))?.includes(H), (await run([["HGET", diaryOf(h), expiring]]))[0]], [true, null]);
+    is("control: …but the checkout refuses it while the owner's claim outlasts the hold", await sell(h, H), "taken");
+    Date.now = () => until + CLAIM_MARGIN_MS + 1;
+    is("control: …and sells it once the claim's margin is over", await sell(h, H), "opened");
   } finally {
     Date.now = clock;
   }

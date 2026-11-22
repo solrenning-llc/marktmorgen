@@ -23,7 +23,7 @@ let casReply: null | (() => unknown) = null;
 const pipeline = redis.pipeline.bind(redis);
 // The member CAS as Redis runs it: no await between HGET, the comparison, HSET and the directory.
 redis.pipeline = (async (commands: Command[]) => {
-  if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith('local cur = redis.call("HGET"')) {
+  if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).includes('local cur = redis.call("HGET", KEYS[1], ARGV[1])')) {
     if (gate) await gate();
     if (casReply) return casReply();
     const [, , , members, dir, field, expected, next, listed, at] = commands[0];

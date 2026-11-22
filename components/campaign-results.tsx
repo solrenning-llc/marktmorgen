@@ -9,7 +9,7 @@ import { campaignResultsReport } from "@/lib/channel-reports";
 import { channelName } from "@/lib/channel-names";
 import { formatMoney } from "@/lib/money";
 import { ReportDownload } from "@/components/report-download";
-export function CampaignResultsPanel({ data, range, spends }: { data: StatsData; range: "d7" | "d30" | "d90"; spends: AdSpend[] }) {
+export function CampaignResultsPanel({ data, range, spends }: { data: StatsData; range: "d7" | "d30" | "d90"; spends: AdSpend[] | undefined }) {
   const fieldId=useId();
   const [query,setQuery]=useState("");
   const [sort,setSort]=useState<CampaignSort>("ads");

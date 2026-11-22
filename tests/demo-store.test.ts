@@ -256,13 +256,13 @@ async function main(): Promise<void> {
   is("nor one from another store's folder", parseProductImage({ ...big, small: { ...copy, path: `images/${"b".repeat(24)}/${"2".repeat(32)}.webp` } })?.small, null);
   is("both files are deleted together", imagePaths({ ...big, small: copy }), [big.path, copy.path]);
   const card = withoutComments(read("components/store-product.tsx"));
-  is("the store page's card hands the browser both", /srcSet=\{servedSrcSet\(image\)\}/.test(card) && /sizes=\{image\.small \?/.test(card), true);
+  is("the store page's card hands the browser both", /srcSet=\{servedSrcSet\(image\)\}/.test(card) && /sizes=\{smallerCopies\(image\)\.length \?/.test(card), true);
   is("and tells it to fetch the first product's picture first", /fetchPriority=\{first \? "high" : undefined\}/.test(card), true);
   is("the product's own page hands it both too", /srcSet=\{servedSrcSet\(product\.image\)\}/.test(withoutComments(read("app/[handle]/p/[product]/page.tsx"))), true);
   const editor = withoutComments(read("components/product-image-editor.tsx"));
   is("the studio makes the copy when a picture is added, and sends it with the picture", /await shrink\(file, SMALL_LONG_SIDE\)/.test(editor) && /\.\.\.\(small \? \{ small \} : \{\}\)/.test(editor), true);
   const attach = withoutComments(read("app/api/store/image/route.ts"));
-  is("what is attached is checked as the picture is, and deleted with it", /smallWidth < width/.test(attach) && /copyKind === copy\.contentType/.test(attach) && /const replaced = imagePaths\(result\.removed\)/.test(attach) && /del\(replaced\)/.test(attach), true);
+  is("what is attached is checked as the picture is, and deleted with it", /smallWidth < width/.test(attach) && /copyKind === copy\.contentType/.test(attach) && /const replaced = imagePaths\(result\.removed\)/.test(attach) && /deleteOrSweep\(replaced,/.test(attach), true);
 
   part("Its checkout is the real one, on the demo's own account and key");
   is("the demo's account is asked with the demo's key", keyFor(DEMO_CONNECTED_ACCOUNT), DEMO_KEY);

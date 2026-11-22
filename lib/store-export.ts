@@ -33,6 +33,7 @@ import { type Store } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
 import { ENDED_STORE_EXPORTS } from "@/lib/plan-closing-rules";
 import { readThanksNotes } from "@/lib/thanks-note-store";
+import { listValuesShape } from "@/lib/free";
 
 /**
  * What an export reads: every byte the store's data room counts at the
@@ -71,8 +72,21 @@ export function exportUnits(shape: ExportShape): number {
   return 1 + EXPORT_WAIT_UNITS + Math.ceil(Math.max(0, shape.commands) / EXPORT_COMMANDS_PER_UNIT) + Math.ceil(Math.max(0, shape.bytes) / EXPORT_BYTES_PER_UNIT);
 }
 
-/** What exporting this store reads, counted before it is read: the room's bytes, and its products, lessons, posts, forms and contacts. */
+/**
+ * What exporting this store reads, counted before it is read: the room's
+ * bytes, and its products, lessons, posts, forms and contacts; and what the
+ * contacts' file reads beside its list, page by page, for the people on it
+ * (lib/free.ts, listValuesShape), read exactly so an export is never priced
+ * without it (second cost review of #3354).
+ */
 export async function exportShape(store: Store): Promise<ExportShape> {
+  const shape = await roomShape(store);
+  const values = await listValuesShape(store);
+  return { bytes: shape.bytes + values.bytes, commands: shape.commands + values.commands };
+}
+
+/** The room's bytes, and its products, lessons, posts, forms and contacts. */
+async function roomShape(store: Store): Promise<ExportShape> {
   const used = await dataUsed(store);
   // The full export is paid for from this measurement. Unknown room usage
   // cannot be priced as an empty room before the remaining reads begin.
@@ -132,6 +146,8 @@ const ORDERS_GAP: Record<SalesGap, string> = {
   "stripe-pages": "More orders than one file reads: the rest are on your own Stripe account.",
   paypal: "Not every PayPal sale could be read into this file: your own PayPal account lists them all.",
   currency: "Stripe did not name the currency of some orders, so their currency is blank in this file: your own Stripe account shows it.",
+  unread: "Stripe did not give the date of some paid orders, so they are not in this file: your own Stripe account shows them.",
+  amount: "Stripe did not give a clear amount for some paid orders, so they are not in this file: your own Stripe account lists them.",
 };
 function ordersNote(gaps: SalesGap[]): string {
   // A partial reading that names no reason is said as it is, never put on a source.

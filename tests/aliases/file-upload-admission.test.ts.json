@@ -1,0 +1,18 @@
+{
+  "@/lib/redis": "upload-budget-redis.ts",
+  "@/lib/upload-budget-policy": "upload-budget-approved-policy.ts",
+  "@/lib/store": "upload-route-world.ts",
+  "@/lib/catalog": "upload-route-world.ts",
+  "@/lib/course": "upload-route-world.ts",
+  "@/lib/delivery": "upload-route-world.ts",
+  "@/lib/storage-quota": "upload-route-world.ts",
+  "@/lib/stream": "upload-route-world.ts",
+  "@/lib/vault": "upload-route-world.ts",
+  "@/lib/vault-storage": "upload-route-world.ts",
+  "@/lib/request-guard": "upload-route-world.ts",
+  "@/lib/store-request": "upload-route-world.ts",
+  "@/lib/studio-route": "file-upload-admission-world.ts",
+  "@/lib/blob": "upload-route-world.ts",
+  "@/lib/metered-limits": "upload-route-world.ts",
+  "@vercel/blob/client": "upload-route-world.ts"
+}

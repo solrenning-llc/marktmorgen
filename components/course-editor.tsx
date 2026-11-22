@@ -6,12 +6,16 @@ import { UrlField } from "@/components/url-field";
 import { LessonText } from "@/components/lesson-text";
 import { type StoreLook, lookStyle } from "@/lib/store-look";
 import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
+import { accessEndWhen } from "@/lib/course-access-end";
+import { useHydrated } from "@/components/use-hydrated";
 import { useRouter } from "next/navigation";
-import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
+import { uploadReason, uploadSoldFile, uploadWords } from "@/lib/sold-file-upload";
 import { toast } from "@/components/toast";
 import { QuizEditor } from "@/components/quiz-editor";
 import { CourseDayPreview } from "@/components/course-day-preview";
 import { TaskEditor } from "@/components/task-editor";
+import { SubmissionSettings } from "@/components/submission-settings";
+import { SUBMISSIONS_READY } from "@/lib/submission-switch";
 import {
   type Course,
   type CourseModule,
@@ -42,6 +46,7 @@ import { CAPTION_LANGUAGES, type CaptionTrack, MAX_CAPTION_BYTES, MAX_CAPTION_TR
 import { captionsAnchor } from "@/lib/course-access-check";
 import { CENTS_PER_MINUTE, GIVE_UP_HOURS, MAX_AUTO_LANGUAGES, MAX_AUTO_MINUTES, MIN_CENTS, autoCaptionCents, dollars } from "@/lib/auto-captions-rules";
 import { TusError, tusUpload } from "@/lib/tus-upload";
+import { SUPPORT_EMAIL } from "@/lib/creator-research";
 
 type Outline = { modules: { title: string; lessons: string[] }[] };
 
@@ -72,6 +77,7 @@ const MESSAGES: Record<string, string> = {
   caption_many: `A video holds captions in up to ${MAX_CAPTION_TRACKS} languages. Remove one first.`,
   caption_not_ready: "The video has to finish uploading before captions can be added.",
   caption_language: "Choose a language from the list.",
+  caption_writing: "AI captions in this language are still being written for this video. Add your own file once they are done, or after the request ends.",
   caption_unknown: "That video is not there anymore. Reload the page.",
   auto_not_ready: "The video has to finish uploading and being prepared before captions can be written.",
   auto_language: "Choose languages this video has no captions in yet, the one spoken first, three at most.",
@@ -81,6 +87,7 @@ const MESSAGES: Record<string, string> = {
   auto_plan: "Captions written by AI are charged to the card your plan is paid with, so they need a plan first.",
   auto_card: "There is no card on your plan to charge. Add one under Plan and billing, then try again.",
   auto_declined: "Your card was declined, so nothing was charged and nothing is being written.",
+  auto_held: "We could not confirm earlier AI captions for this video with our video provider, so new ones can't be bought for it yet. Write to " + SUPPORT_EMAIL + " about it.",
   auto_owed: "A refund for an earlier request for this video's captions is not confirmed by Stripe yet, so new AI captions can't be bought for it until it is. Its state is shown at the top of this page.",
   auto_refund_pending: "The video service would not write these captions. The charge is being refunded, but Stripe has not confirmed the refund yet; its state is shown at the top of this page.",
   auto_refunded: "The video service would not write these captions, so the charge was refunded to your card. Nothing is being written; try again in a moment.",
@@ -111,6 +118,8 @@ const Streams = createContext<{
   /** The languages captions are being written in by AI, by video (lib/auto-captions.ts). */
   writing: Record<string, string[]>;
   wrote: (path: string, langs: string[]) => void;
+  /** The videos whose AI captions could not be confirmed with the video service and are kept for a person. */
+  held: string[];
   /** Whether this person may have captions written by AI, charged to the plan's card; and the store's language. */
   auto: { can: boolean; spoken: string };
 }>({
@@ -119,6 +128,7 @@ const Streams = createContext<{
   captions: {},
   writing: {},
   wrote: () => {},
+  held: [],
   auto: { can: false, spoken: "en" },
   captioned: () => {},
 });
@@ -229,13 +239,17 @@ export function CourseEditor({
   streams = {},
   captions = {},
   writing = {},
+  held = [],
   auto = { can: false, spoken: "en" },
   initialTemplate = null,
   openFirst = null,
   look = null,
   language = "en",
+  draft = false,
 }: {
   productId: string;
+  /** Whether the course's product is hidden from the store (a draft): each lesson then says so (754 [STN1]). */
+  draft?: boolean;
   /** The store's look, so a lesson's text is previewed as students see it. */
   look?: StoreLook | null;
   /** The store's language, so the preview is marked as the lesson page is. */
@@ -252,6 +266,8 @@ export function CourseEditor({
   captions?: Record<string, CaptionTrack[]>;
   /** The languages captions were being written in by AI, by video, when the page was drawn. */
   writing?: Record<string, string[]>;
+  /** The videos whose AI captions could not be confirmed with the video service, kept for a person (lib/auto-captions.ts). */
+  held?: string[];
   /** Whether this person may have captions written by AI, and the store's language to start from. */
   auto?: { can: boolean; spoken: string };
   /** The course's name, for the writing help. */
@@ -299,7 +315,7 @@ export function CourseEditor({
 
   return (
     <Look.Provider value={look ? { look, language } : null}>
-    <Streams.Provider value={{ states: streamStates, learned, captions: captionTracks, captioned, writing: writingNow, wrote, auto }}>
+    <Streams.Provider value={{ states: streamStates, learned, captions: captionTracks, captioned, writing: writingNow, wrote, held, auto }}>
     <div className="mt-8 space-y-6">
       {error ? (
         <p className="notice notice-error" role="alert">{error}</p>
@@ -356,6 +372,7 @@ export function CourseEditor({
           openLesson={openLesson}
           setOpenLesson={setOpenLesson}
           room={MAX_LESSONS - lessons}
+          draft={draft}
           run={run}
           onCourse={setCourse}
           onError={setError}
@@ -476,11 +493,14 @@ function ModuleCard({
   openLesson,
   setOpenLesson,
   room,
+  draft,
   run,
   onCourse,
   onError,
 }: {
   unit: CourseModule;
+  /** The course is a draft: each lesson says it is hidden. */
+  draft: boolean;
   index: number;
   last: boolean;
   busy: boolean;
@@ -589,6 +609,8 @@ function ModuleCard({
                   .join(" · ") || "empty"}
               </p>
             </div>
+            {/* Said in words on each lesson, not by colour, so a free preview is never taken for one buyers see (754 [STN1]). */}
+            {draft ? <p className="mt-1 text-sm text-ink-soft">Off your store: new buyers cannot see it, but people who already bought the course still do.</p> : null}
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm font-bold">
               <button type="button" className={small} onClick={() => setOpenLesson(openLesson === lesson.id ? null : lesson.id)} aria-expanded={openLesson === lesson.id}>
                 {openLesson === lesson.id ? "Close" : "Edit lesson"}
@@ -732,6 +754,8 @@ function VideosToLessons({
       known.add(lesson.id);
       onCourse(added.course);
       let problem: string | null = null;
+      // The route's own sentence for a refusal, shown before the editor's.
+      let words: string | undefined;
       try {
         const pathname = await putVideo(lesson.id, file, folder, (percent) => setWorking({ at: i + 1, of: take.length, name: file.name, percent }));
         const placed = await postPatiently({ id: productId, action: "media", lessonId: lesson.id, kind: "video", pathname, name: file.name });
@@ -744,13 +768,15 @@ function VideosToLessons({
         }
       } catch (thrown) {
         problem = uploadProblem(thrown);
+        words = uploadWords(thrown);
       }
       if (problem) {
         // Its lesson goes again, so no empty lesson is left behind.
         const removed = await postPatiently({ id: productId, action: "edit", op: "lesson-remove", lessonId: lesson.id });
         if (removed.ok && removed.course) onCourse(removed.course);
-        missed.push({ name: file.name, why: MESSAGES[problem] });
-        if (STOPS_THE_REST.has(problem)) {
+        missed.push({ name: file.name, why: words ?? MESSAGES[problem] });
+        // A refusal in the studio's own words holds for the next video too.
+        if (STOPS_THE_REST.has(problem) || words !== undefined) {
           take.slice(i + 1).forEach((f) => missed.push({ name: f.name, why: "Not sent, because the video before it could not go." }));
           break;
         }
@@ -900,7 +926,7 @@ function LessonEditor({
         }
       }
     } catch (thrown) {
-      onError(MESSAGES[uploadProblem(thrown)]);
+      onError(uploadWords(thrown) ?? MESSAGES[uploadProblem(thrown)]);
     } finally {
       setUploading(null);
     }
@@ -935,7 +961,7 @@ function LessonEditor({
         >
           {/* In the same card the lesson page puts behind the words, so the color behind them and the line length match. */}
           <div className="st-card p-5 sm:p-8">
-            {now.trim() ? <LessonText text={now} /> : <p className="text-sm">The lesson&apos;s words appear here as you write.</p>}
+            {now.trim() ? <LessonText text={now} lang={locale} /> : <p className="text-sm">The lesson&apos;s words appear here as you write.</p>}
           </div>
         </div>
       </div>
@@ -1125,6 +1151,8 @@ function LessonEditor({
       {/* A lesson is finished by a quiz or by an assignment (lib/assignment-rules.ts), never by both. */}
       {lesson.task ? null : <QuizEditor productId={productId} lessonId={lesson.id} setup={lesson.quiz} onCourse={onCourse} />}
       <TaskEditor productId={productId} lessonId={lesson.id} setup={lesson.task ?? null} hasQuiz={Boolean(lesson.quiz)} onCourse={onCourse} />
+      {/* Files buyers send for review (750 [CD1]): shown only once the buyer's side works (lib/submission-switch.ts). */}
+      {SUBMISSIONS_READY ? <SubmissionSettings productId={productId} lessonId={lesson.id} /> : null}
 
       <div className="border-t border-line pt-4">
         {removing ? (
@@ -1236,7 +1264,11 @@ function Captions({
           None yet. Have them written by AI below, or upload a .vtt or .srt file, and the player shows a captions button.
         </p>
       )}
-      {(streams.writing[pathname] ?? []).length ? (
+      {streams.held.includes(pathname) ? (
+        <p className="mt-2 max-w-[80ch] text-sm text-ink" role="status" data-captions-held>
+          {`We could not confirm these AI captions with our video provider, so the charge for them is not final. We have stopped checking on our own. Write to ${SUPPORT_EMAIL} about it.`}
+        </p>
+      ) : (streams.writing[pathname] ?? []).length ? (
         <p className="mt-2 text-sm text-ink" role="status" data-captions-writing>
           {`Being written by AI: ${(streams.writing[pathname] ?? []).map((code) => CAPTION_LANGUAGES.find((l) => l.code === code)?.label ?? code).join(", ")}. Most lessons take a few minutes; they appear here when they are done.`}
         </p>
@@ -1591,6 +1623,147 @@ export function CourseStart({ productId, startsAt }: { productId: string; starts
       </div>
       {error ? (
         <p className="notice notice-error mt-2" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * When access to the course ends (24 [E7]). Fair to every buyer: the date reaches only people who buy the course on
+ * its own page while it is said there (the checkout stamps the date they were shown). Moving it later or removing it
+ * reaches them too, including people whose access already ended; it never moves earlier (lib/course.ts). A membership
+ * course never takes one: members keep it while they pay.
+ */
+export function CourseAccessEnd({
+  productId,
+  endsAt,
+  passed,
+  membership = false,
+  planOffered = false,
+}: {
+  productId: string;
+  endsAt: number | null;
+  passed: boolean;
+  membership?: boolean;
+  /** The course offers its payment plan (lib/product-extras.ts): buyers who take it are never held to the date. */
+  planOffered?: boolean;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // A date input wants "YYYY-MM-DD" in the viewer's own zone; the end is the close of that day, there. Drawn only once
+  // the page runs in the browser (useHydrated), so the server's zone never decides the day shown and the two renders
+  // agree; until the creator types, the field shows the day of the end already set.
+  const hydrated = useHydrated();
+  const [typed, setTyped] = useState<string | null>(null);
+  const savedDay = (() => {
+    if (!hydrated || endsAt === null) return "";
+    const d = new Date(endsAt * 1000 - 1000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const day = typed ?? savedDay;
+  const setDay = setTyped;
+  // The same moment on the creator's own clock, beside the UTC one the buyers read.
+  const local = hydrated && endsAt !== null ? new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeStyle: "short" }).format(new Date(endsAt * 1000)) : null;
+  const id = `access-end-${productId}`;
+
+  async function send(at: number | null) {
+    setBusy(true);
+    setError(null);
+    const answer = await post({ id: productId, action: "access-end", at });
+    setBusy(false);
+    if (!answer.ok) {
+      setError(
+        answer.error === "access_end_earlier"
+          ? "The date can only move later. Buyers were told the current date. To end sooner for new buyers, remove the date and set a new one. People who already bought keep the date they were shown."
+          : answer.error === "access_end"
+            ? "Pick a day after today and at most ten years ahead."
+            : answer.error === "access_end_membership"
+              ? "A membership course has no end date: members keep it while they pay."
+              : problem(answer),
+      );
+      return;
+    }
+    toast(at === null ? "Access to this course no longer ends." : "The end date is set.");
+    router.refresh();
+  }
+
+  if (membership) {
+    return (
+      <div>
+        <p className="field-label">The day access ends</p>
+        <p className="field-hint mt-1">This course is sold as a membership, so it has no end date: members keep it while they pay.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <label className="field-label" htmlFor={id}>
+        The day access ends
+      </label>
+      <p id={`${id}-hint`} className="field-hint mt-1">
+        Leave it empty and students keep this course with no end, which is how it works now. Set a day and access closes
+        at the end of that day. The date applies only to people who buy this course on its own page, where it is shown
+        before they pay. People who bought before, or through your store page, the cart, a bundle, a gift, a group, a
+        pre-order or PayPal, keep the course with no end. Where the course is sold only through PayPal, the date is not
+        shown. In the last 24 hours before the date, it is no longer shown, and people
+        who buy then keep the course with no end too. You can move the date later or remove it, but not earlier. Moving
+        it later or removing it also gives access back to students whose access already ended.
+        {planOffered ? " People who pay in a payment plan keep the course with no end, as members do." : null}
+      </p>
+      {endsAt !== null ? (
+        <p className="mt-2 text-sm" role="status">
+          {passed ? "Access ended on " : "Students see: access ends on "}
+          <strong>{accessEndWhen(endsAt, "en")}</strong>
+          {local ? <> (your time: {local})</> : null}.
+        </p>
+      ) : null}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <input
+          id={id}
+          type="date"
+          value={day}
+          disabled={busy}
+          className="field w-auto"
+          aria-describedby={error ? `${id}-hint ${id}-error` : `${id}-hint`}
+          aria-invalid={error ? true : undefined}
+          onChange={(event) => setDay(event.target.value)}
+        />
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={busy || !day}
+          onClick={() => {
+            // The close of the chosen day, in this browser's own zone: midnight at the start of the next one.
+            const [y, m, d] = day.split("-").map(Number);
+            if (!y || !m || !d) {
+              setError("Type the whole date: month, day and year.");
+              return;
+            }
+            void send(Math.floor(new Date(y, m - 1, d + 1, 0, 0, 0, 0).getTime() / 1000));
+          }}
+        >
+          {busy ? "Saving…" : endsAt === null ? "Set the end date" : "Move the date later"}
+        </button>
+        {endsAt !== null ? (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={busy}
+            onClick={() => {
+              setDay("");
+              void send(null);
+            }}
+          >
+            Remove the date
+          </button>
+        ) : null}
+      </div>
+      {error ? (
+        <p id={`${id}-error`} className="notice notice-error mt-2" role="alert">
           {error}
         </p>
       ) : null}

@@ -77,7 +77,7 @@ import { LOCKED_LIST } from "@/lib/locked-words";
 import { seal, unseal } from "@/lib/secret-box";
 import { SITE_URL } from "@/lib/site-url";
 import { newSecret, otpauthUri, stepOf } from "@/lib/totp";
-import { alignRecoveryLock, endRecoveryLock, hideAddress, keepRecoveryAddress, recoveryAddress } from "@/lib/recovery-address";
+import { alignRecoveryLock, bindLink, endRecoveryLock, hideAddress, keepRecoveryAddress, linkStillBound, recoveryAddress } from "@/lib/recovery-address";
 
 export { hideAddress };
 
@@ -357,15 +357,17 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
  *     ("lesson-remove", "module-remove", "media-remove"), an assignment taken
  *     off with the work handed in ("task-remove"), a quiz taken off
  *     ("quiz-remove"), a student's certificate withdrawn ("withdraw") and a
- *     lesson comment deleted ("cm-delete"); and "launch" (app/api/store/
- *     waitlist: the product goes on sale with one email, in the creator's
- *     own words, to everyone on its waitlist);
+ *     lesson comment deleted ("cm-delete"). A waitlist's "launch" (one email,
+ *     in the creator's own words, to everyone on it) needs "send" since the
+ *     audit of 11 November 2026, so it is held by LOCKED_NEEDS above;
  *   - page: "remove" (a form with its answers, a site page, a saved block, a
  *     link, a short link, the store photo), "delete" (a blog post), "clear"
  *     (the questions the answers and the assistant missed) and "replace";
  *   - events: "cancel" and "delete" (an event, emailing everyone coming) and
  *     "move" (an edit that changes the time, emailing everyone coming);
- *   - community: "report-delete" (a reported post or comment), and, for the
+ *   - community: "report-delete" (a reported post or comment), "held-remove"
+ *     (a member's post or comment waiting for approval, not published:
+ *     app/api/store/community/approval), and, for the
  *     creator inside their own community (app/api/store/community, chat and
  *     the lesson comments, where the owner is known by the address and not
  *     by studioAccess), "email" (an announcement emailed to every member),
@@ -387,10 +389,10 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
  * tests/locked-deletes.test.ts holds every route that deletes to one of them.
  */
 export const LOCKED_ACTIONS: Readonly<Record<string, readonly string[]>> = {
-  products: ["remove", "clear", "detach", "replace", "launch", "lesson-remove", "module-remove", "media-remove", "task-remove", "quiz-remove", "withdraw", "cm-delete"],
+  products: ["remove", "clear", "detach", "replace", "lesson-remove", "module-remove", "media-remove", "task-remove", "quiz-remove", "withdraw", "cm-delete"],
   page: ["remove", "delete", "clear", "replace"],
   events: ["cancel", "delete", "move"],
-  community: ["report-delete", "email", "delete", "delete-comment", "unsay", "clear"],
+  community: ["report-delete", "held-remove", "email", "delete", "delete-comment", "unsay", "clear"],
   orders: ["remove", "unnote", "undeal", "unpipeline", "fields-remove", "resend"],
   stats: ["remove"],
   draft: ["drop", "segment-remove", "draft-remove"],
@@ -482,9 +484,14 @@ export async function lockedUntil(session: string | undefined, now = Date.now())
  * whether this session is a member; an answer of another shape counts as one.
  * Three commands, only for the sessions of such an account, for as long as its
  * mark lasts (at most SESSION_TTL_SECONDS and a day after the failed read).
+ * The three replies are read only in their exact shape (CX-123 rule 24): a
+ * pipeline cut short, with a reply too many, a hole, a getter or a Proxy is
+ * unknown, and an unknown lock is locked, never set free by a stray zero.
  */
 async function keptListed(session: string, owner: string, now: number): Promise<number> {
-  const [kept, member, left] = await redisPipeline([["EXISTS", keptLockedKey(owner)], ["SISMEMBER", lockedSetKey(owner), session], ["PTTL", lockedSetKey(owner)]]);
+  const replies = repliesFor(await redisPipeline([["EXISTS", keptLockedKey(owner)], ["SISMEMBER", lockedSetKey(owner), session], ["PTTL", lockedSetKey(owner)]]), 3);
+  if (!replies) return now + SESSION_TTL_SECONDS * 1000;
+  const [kept, member, left] = replies;
   if (countOf(kept) === 0 || countOf(member) === 0) return 0;
   const ms = countOf(left);
   return now + (ms !== null && ms > 0 ? ms : SESSION_TTL_SECONDS * 1000);
@@ -502,11 +509,12 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   const email = held?.email ?? null;
   const record = email ? await read(email) : null;
   if (!email || !record) return null;
+  // Who is told, and everything else the notice needs, is read before anything is written (review of #2883; Claude 6
+  // on #2948): an unknown recovery address (rule 24) throws here, with the waiting login not spent, no reset day set
+  // and nothing opened, so two-step login never turns off on a login the owner was not told of.
+  const backup = await backupOf(email, record);
   const through = (to: "sign-in" | "recovery") =>
     held?.viaRecovery ? "a login link sent to your recovery address" : to === "sign-in" ? "a login link sent to this address" : "a login link sent to the sign-in address";
-  // Everything the notice needs is read before anything is written (Claude 6 on #2948): a read that fails here spends
-  // nothing, sets no day and opens nothing, so two-step login never turns off on a login the owner was not told of.
-  const backup = await backupOf(email, record);
   // Spent, as a right code spends it: one waiting login, one session.
   const [removed] = await redisPipeline([["DEL", holdKey(token)]]);
   if (countOf(removed) !== 1) return null;
@@ -631,28 +639,48 @@ async function endLocked(email: string, now = Date.now()): Promise<boolean> {
   const sessions = stringList(members);
   if (!sessions) {
     console.error("logging out the sessions let in without a second step failed", new UnknownReplyError("the locked sessions"));
-    // Not read, only kept: the set outlives every session in it, so a lock that lapses on its day (one written
-    // before 5 November 2026) still finds its session listed (lockedUntil, keptListed).
-    const [, listed] = await redisPipeline([
-      ["SET", keptLockedKey(email), String(now), "EX", SESSION_TTL_SECONDS + 86_400],
-      // Listed by a one-way tag of the account, never its address: once, at most KEPT_ANY_MAX (KEEP_ANY).
-      ["EVAL", KEEP_ANY, 1, KEPT_ANY_KEY, accountTag(email), KEPT_ANY_MAX, SESSION_TTL_SECONDS + 86_400],
-      ["EXPIRE", lockedSetKey(email), SESSION_TTL_SECONDS + 86_400],
-    ]);
-    // The list past its ceiling ("*", or an answer of another shape): every session with no lock of its own now
-    // pays LOCKED_UNTIL_STAR_EXTRA (tests/plan-cost-registry.ts) on each lockedUntil. Said, and counted for the
-    // owner's report (keptStarMonth, keptStarLine; review of #2556 at 4d8ac350e), never only kept.
-    if (listed !== 1) {
-      console.error(`more than ${KEPT_ANY_MAX} accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until ${SESSION_TTL_SECONDS / 86_400 + 1} days after the last`);
-      const month = new Date(now).toISOString().slice(0, 7);
-      await redisPipeline([["INCR", keptStarKey(month)], ["EXPIRE", keptStarKey(month), 400 * 86_400]]);
-    }
+    await keepLocked(email, now);
     return false;
   }
-  for (const session of sessions) await endSession(session);
+  // Each logout read as endSession answers it (CX-123 rule 24): only one confirmed loses its lock and its place in
+  // the list. One not confirmed (a delete answering in another shape, or a failure) may still be open: its lock and
+  // its place stay, and the account is kept locked as when the list cannot be read, so it stays locked past its day
+  // and the owner is never told it was logged out.
+  const open: string[] = [];
+  for (const session of sessions) if ((await endSession(session)) !== true) open.push(session);
+  if (open.length) {
+    const ended = sessions.filter((session) => !open.includes(session));
+    if (ended.length) await redisPipeline([["DEL", ...ended.map((session) => lockedKey(session))], ["SREM", lockedSetKey(email), ...ended]]);
+    await keepLocked(email, now);
+    return false;
+  }
   await redisPipeline([["DEL", lockedSetKey(email), ...sessions.map((session) => lockedKey(session))]]);
   // A passkey removal one of them asked for stays: only "Keep it" calls one off (lib/passkeys.ts).
   return true;
+}
+
+/**
+ * Keeps an account's locked sessions locked when they could not all be logged out (endLocked): the list is kept
+ * and the account is marked with the moment, so that every locked session opened before it stays locked until it
+ * ends, past its day too (lockedUntil, keptListed).
+ */
+async function keepLocked(email: string, now: number): Promise<void> {
+  // Not read, only kept: the set outlives every session in it, so a lock that lapses on its day (one written
+  // before 5 November 2026) still finds its session listed (lockedUntil, keptListed).
+  const [, listed] = await redisPipeline([
+    ["SET", keptLockedKey(email), String(now), "EX", SESSION_TTL_SECONDS + 86_400],
+    // Listed by a one-way tag of the account, never its address: once, at most KEPT_ANY_MAX (KEEP_ANY).
+    ["EVAL", KEEP_ANY, 1, KEPT_ANY_KEY, accountTag(email), KEPT_ANY_MAX, SESSION_TTL_SECONDS + 86_400],
+    ["EXPIRE", lockedSetKey(email), SESSION_TTL_SECONDS + 86_400],
+  ]);
+  // The list past its ceiling ("*", or an answer of another shape): every session with no lock of its own now
+  // pays LOCKED_UNTIL_STAR_EXTRA (tests/plan-cost-registry.ts) on each lockedUntil. Said, and counted for the
+  // owner's report (keptStarMonth, keptStarLine; review of #2556 at 4d8ac350e), never only kept.
+  if (listed !== 1) {
+    console.error(`more than ${KEPT_ANY_MAX} accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until ${SESSION_TTL_SECONDS / 86_400 + 1} days after the last`);
+    const month = new Date(now).toISOString().slice(0, 7);
+    await redisPipeline([["INCR", keptStarKey(month)], ["EXPIRE", keptStarKey(month), 400 * 86_400]]);
+  }
 }
 
 /**
@@ -662,7 +690,7 @@ async function endLocked(email: string, now = Date.now()): Promise<boolean> {
  * until they end (endLocked); whoever says so to the owner never says they
  * were logged out (review of #2556).
  */
-export async function cancelReset(email: string, why: "login" | "studio"): Promise<boolean | "kept-locked"> {
+export async function cancelReset(email: string, why: "login" | "studio" | "recovery"): Promise<boolean | "kept-locked"> {
   const called = await withTwoStep(email, async (held) => {
     const record = await read(email);
     if (!record || record.reset === 0) return false;
@@ -674,7 +702,9 @@ export async function cancelReset(email: string, why: "login" | "studio"): Promi
   const canceled =
     why === "login"
       ? "Your account was just logged in with a code or a passkey, so the request to turn off two-step login was canceled"
-      : "The request to turn off two-step login was canceled from your studio";
+      : why === "recovery"
+        ? "The recovery address was changed from your studio, so the request to turn off two-step login was canceled"
+        : "The request to turn off two-step login was canceled from your studio";
   await tell(
     email,
     "Two-step login stays on for your Marktmorgen account",
@@ -823,9 +853,14 @@ export async function finishSetup(
   });
   if (made !== "made") return made;
   // The account's recovery address from now on, for losing the email too (lib/recovery-address.ts).
-  await keepRecoveryAddress(email, pending.b);
+  // Two-step login is on either way, and its codes are answered once: a keep Redis did not confirm is said as not
+  // kept, never as a way back in (review of #2883).
+  const keptBackup = await keepRecoveryAddress(email, pending.b);
   await redisPipeline([["DEL", setupKey(session)]]);
-  await tell(email, "Two-step login is on for your Marktmorgen account", `Two-step login was turned on for your Marktmorgen account. From now on, logging in with the emailed link also asks for the code in your authenticator app. If you ever lose your phone and your recovery codes, a link sent to your recovery address (${hideAddress(pending.b)}) lets you back in.`);
+  const way = keptBackup
+    ? `If you ever lose your phone and your recovery codes, a link sent to your recovery address (${hideAddress(pending.b)}) lets you back in.`
+    : `Your recovery address (${hideAddress(pending.b)}) could not be saved just now: add it again under Account in your studio, so a link sent there can let you back in if you ever lose your phone and your recovery codes.`;
+  await tell(email, "Two-step login is on for your Marktmorgen account", `Two-step login was turned on for your Marktmorgen account. From now on, logging in with the emailed link also asks for the code in your authenticator app. ${way}`);
   return { codes };
 }
 
@@ -845,6 +880,8 @@ export async function sendRescue(token: string, origin: string): Promise<"sent" 
   if (!backup) return "none";
   if (!(await withinLimit("two-step-rescue", normaliseEmail(email), 3, 60 * 60))) return "limited";
   const rescue = randomBytes(32).toString("hex");
+  // Tied to the address it goes to first: once the owner takes that address away or replaces it, it turns nothing off.
+  if (!(await bindLink("rescue", rescue, backup, 15 * 60))) return "unsent";
   await redisPipeline([["SET", rescueKey(rescue), normaliseEmail(email), "EX", 15 * 60]]);
   const sent = isSenderConfigured()
     ? await sendEmail({ meter: { by: "company" },
@@ -878,6 +915,9 @@ export async function spendRescue(token: string): Promise<string | null> {
   }
   if (typeof email !== "string" || !email) return null;
   const address = email;
+  // Mailed to a recovery address the owner has since taken away or replaced: it turns nothing off.
+  const record = await read(address);
+  if (!record || !(await linkStillBound("rescue", token, await backupOf(address, record)))) return null;
   // Never for an address in a move, or left by one that broke (lib/auth.ts isMoving): its two-step login stays.
   const off = await withTwoStep(address, async (held) => !(await isMoving(address)) && (await twoStepOn(address)) && deleteHeld(held, [recordKey(address)]));
   if (!off) return null;

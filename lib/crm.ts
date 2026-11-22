@@ -12,19 +12,23 @@
  *   nl:crm:tasks:<statsId>           hash  person -> their tasks (JSON, lib/person-tasks.ts), gone with the person;
  *                                    and TASK_COUNT_FIELD -> how many tasks the store keeps in all
  *   nl:crm:tasklock:<statsId>        one change of the store's tasks at a time (lib/redis-lock.ts), ten seconds at the most
+ *   nl:crm:erased:<statsId>:<person> a person deleted and not come back (server time), ERASED_MARK_SECONDS: no value is set
+ *   nl:crm:gen:<statsId>:<person>    a person's generation, the time of their last deletion: a page read before one is refused
  *   nl:crm:taskrecount:<statsId>     one paid recount of the store's tasks at a time (lib/redis-lock.ts), thirty seconds at the most
  *
  * A value is kept under the person's key, never the address (as a note
  * about them is), one hash a field, so the list's file reads each field once
  * however long the list is.
  */
-import { createHash } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { deriveKey } from "@/lib/secret-box";
+import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf as replyCount, repliesFor, stringList } from "@/lib/redis-reply";
 import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type DueTask, MAX_PERSON_TASKS, MAX_STORE_TASKS, type PersonTask, type TaskResult, parseTasks } from "@/lib/person-tasks";
 import {
   type CrmField,
@@ -33,6 +37,9 @@ import {
   DEFAULT_STAGES,
   DEAL_ID,
   MAX_DEALS,
+  MAX_FIELD_OPTION,
+  MAX_FIELD_OPTIONS,
+  MAX_FIELD_VALUE,
   type Pipeline,
   type PipelineChange,
   type Stage,
@@ -45,6 +52,7 @@ import {
   parseFields,
   parseStages,
 } from "@/lib/crm-rules";
+import type { ListRead } from "@/lib/contacts";
 
 export class CrmDealReadUnavailable extends Error {
   constructor() { super("CRM deal preflight could not be confirmed"); this.name = "CrmDealReadUnavailable"; }
@@ -56,6 +64,10 @@ export class CrmDealWriteUnconfirmed extends Error {
 export class CrmValueWriteUnconfirmed extends Error {
   constructor() { super("CRM contact value change could not be confirmed"); this.name = "CrmValueWriteUnconfirmed"; }
 }
+/** The person was deleted from the store (forgetCrmPerson): nothing about them is written, and the room taken is given back. */
+export class CrmPersonGone extends Error {
+  constructor() { super("This person was deleted from the store"); this.name = "CrmPersonGone"; }
+}
 
 export class CrmSchemaReadUnavailable extends Error {
   constructor() { super("CRM configuration preflight could not be confirmed"); this.name = "CrmSchemaReadUnavailable"; }
@@ -63,6 +75,11 @@ export class CrmSchemaReadUnavailable extends Error {
 export class CrmSchemaWriteUnconfirmed extends Error {
   constructor() { super("CRM configuration change could not be confirmed"); this.name = "CrmSchemaWriteUnconfirmed"; }
 }
+/** Somebody else changed (or removed) the deal between this change's read and its write: nothing was written. */
+export class CrmDealConflict extends Error {
+  constructor() { super("CRM deal changed meanwhile"); this.name = "CrmDealConflict"; }
+}
+
 /** A field would be taken away, with its answers, by a write that may not take any. */
 export class CrmFieldsKept extends Error {
   constructor() { super("CRM fields may not be taken away here"); this.name = "CrmFieldsKept"; }
@@ -142,6 +159,154 @@ export const TASKS_RECOUNT_UNITS = tasksRecountUnits(MAX_STORE_TASKS);
 /** The most bytes a recount reads. */
 export const TASKS_RECOUNT_BYTES = MAX_STORE_TASKS * (TASK_KEPT_BYTES + TASK_PERSON_BYTES);
 const PERSON = /^[0-9a-f]{32}$/;
+/**
+ * A person deleted from the store (forgetCrmPerson): one key under their
+ * person key (lib/person-key.ts, a one-way hash, never the address), holding
+ * only the server's time of the deletion. While it is there, nothing is set
+ * about them (SET_CRM_VALUE refuses, whatever a request says). Only the
+ * server takes it away, when the person comes back on their own: a paid
+ * order, a confirmed sign-up or waitlist place, a free product claimed
+ * through the emailed link (personReturned). A request's own word never
+ * does (C3-125), nor an address typed into a form, which anybody can type.
+ */
+const erasedKey = (statsId: string, person: string) => `nl:crm:erased:${statsId}:${person}`;
+/**
+ * The person's generation: 0 until they are first deleted, then the time of
+ * their last deletion in milliseconds, so it never comes back to a value it
+ * had: once it lapsed, a count would start again from 1 and match a page read
+ * between two deletions (Claude 5 on #2287). A page reads it with the person,
+ * and a save from it carries it: one read before a deletion differs, and is
+ * refused, even after the person came back (SET_CRM_VALUE). Kept
+ * ERASED_MARK_SECONDS from the last deletion.
+ */
+const generationKey = (statsId: string, person: string) => `nl:crm:gen:${statsId}:${person}`;
+/**
+ * How long the mark and the generation are kept: at least the longest a page
+ * read before the deletion can still save, which is the longest of
+ *   - a studio page opened before the deletion and saved while its session
+ *     lasts: SESSION_TTL_SECONDS, 30 days (lib/auth.ts);
+ *   - a workflow step already taken when the deletion removed the person's
+ *     queued and waiting steps (lib/flows.ts, forgetWorkflowPerson): its
+ *     lease, LEASE_SECONDS, 15 minutes; it is never tried again after.
+ * Thirty days, and one more: 31 days (tests/crm-person-room.test.ts holds it
+ * above each). A mark left there that long (they never came back) goes by
+ * itself, and a value set after it is a new one, as for anyone.
+ */
+export const ERASED_MARK_SECONDS = 31 * 86_400;
+
+/**
+ * How long a page's read of a person (pageMark) may save: less than the
+ * mark and the generation are kept, so a page read before a deletion can
+ * never outlive the generation that refuses it (Codex G2, #2287: once the
+ * generation lapsed back to 0, a renewed session saved from a page read
+ * before the deletion). An hour less, for clocks that differ.
+ */
+export const PAGE_MARK_SECONDS = ERASED_MARK_SECONDS - 3_600;
+const PAGE_MARK = /^(\d{1,15})\.(\d{1,12})\.([A-Za-z0-9_-]{22})$/;
+let pageKey: Buffer | null | undefined;
+function pageSignature(statsId: string, person: string, generation: number, at: number): string {
+  if (pageKey === undefined) pageKey = deriveKey("crm-page-read");
+  return pageKey ? createHmac("sha256", pageKey).update(`${statsId}|${person}|${generation}|${at}`).digest("base64url").slice(0, 22) : "";
+}
+
+/**
+ * What a page that reads a person carries to save about them: the person's
+ * generation as read, when it was read, and the server's signature over both
+ * (a key of this deployment, lib/secret-box.ts). "" when nothing can be signed.
+ */
+export function pageMark(statsId: string, person: string, generation: number, now = Date.now()): string {
+  if (!PERSON.test(person) || !Number.isSafeInteger(generation) || generation < 0) return "";
+  const at = Math.floor(now / 1000);
+  const signature = pageSignature(statsId, person, generation, at);
+  return signature ? `${generation}.${at}.${signature}` : "";
+}
+
+/**
+ * The generation a page's mark carries, or null: a mark that is not this
+ * deployment's for this person, or one read more than PAGE_MARK_SECONDS ago,
+ * saves nothing, and its page is reloaded.
+ */
+export function readPageMark(statsId: string, person: string, mark: unknown, now = Date.now()): number | null {
+  const parts = typeof mark === "string" ? PAGE_MARK.exec(mark) : null;
+  if (!parts || !PERSON.test(person)) return null;
+  const generation = Number(parts[1]);
+  const at = Number(parts[2]);
+  const age = Math.floor(now / 1000) - at;
+  if (!Number.isSafeInteger(generation) || age < -300 || age > PAGE_MARK_SECONDS) return null;
+  const expected = pageSignature(statsId, person, generation, at);
+  if (!expected || expected.length !== parts[3].length || !timingSafeEqual(Buffer.from(expected), Buffer.from(parts[3]))) return null;
+  return generation;
+}
+
+/**
+ * A generation exactly as GET answers it (rule 24): null is a person never
+ * deleted (0), a decimal string of a safe whole number is that generation;
+ * a missing slot, a number, a fraction, a sign, a leading zero or any other
+ * text is unknown (-1), never 0 (independent review of #2287, LOW 2). An
+ * unknown generation signs no page mark (pageMark) and is never written over.
+ */
+function generationOf(raw: unknown): number {
+  if (raw === null) return 0;
+  if (typeof raw !== "string" || !/^(0|[1-9][0-9]{0,15})$/.test(raw)) return -1;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) ? n : -1;
+}
+
+/** The person's generation as it is now (generationKey): what a page reads with them, and a save from it carries. */
+export async function readGeneration(statsId: string | null, person: string): Promise<number> {
+  if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
+  const replies = await redisPipeline([["GET", generationKey(statsId, person)]]);
+  return Array.isArray(replies) && replies.length === 1 ? generationOf(replies[0]) : -1;
+}
+
+/** Several people's generations at once, in one trip: what a workflow step reads when it starts, before it sets their values. */
+export async function readGenerations(statsId: string, persons: string[]): Promise<number[]> {
+  if (!persons.length || !isRedisConfigured()) return persons.map(() => 0);
+  const replies = await redisPipeline(persons.map((person) => ["GET", generationKey(statsId, person)]));
+  // One reply per person, exactly (Codex X6 on #2287): an envelope that is not an array, or one of another length, short
+  // or long, is not the reply to these reads, so every slot is unknown (-1), never 0 and never read by position.
+  if (!Array.isArray(replies) || replies.length !== persons.length) return persons.map(() => -1);
+  return persons.map((_, i) => generationOf(replies[i]));
+}
+
+/**
+ * The person came back on their own (a paid order, a confirmed sign-up or
+ * place, a free product claimed through the emailed link; never an address
+ * typed into a form, Revisor 2 on #2287): the mark of their deletion goes,
+ * so the store may keep fields about them again. Their generation stays, so
+ * a page read before the deletion is still refused. Server paths only; never
+ * throws (a mark that stays only refuses more).
+ *
+ * `at` is when the person did it, in milliseconds, from the server's own
+ * record of the act (for a paid order, when its checkout was opened; when the
+ * sign-up, the place or the copy was asked for), never from a request. The
+ * mark goes only when that is after the deletion, compared in one step with
+ * the mark as it is (MARK_RETURNED): an order paid before the deletion and
+ * listed only after it (a late job, a thanks page opened again), or an old
+ * link used again, is not a return (Codex D, #2287). An unknown time keeps the
+ * mark. So does a checkout opened before the deletion and paid after it, and
+ * an order at a store with no mailing list, which is never listed
+ * (lib/buyer-list.ts): both keep refusing field saves until the mark lapses,
+ * 31 days at the most; never the other way round (review of #2287, LOW 3).
+ */
+export async function personReturned(statsId: string | null, email: string, at: number): Promise<void> {
+  if (!statsId || !email || !Number.isSafeInteger(at) || at <= 0 || !isRedisConfigured()) return;
+  await redisPipeline([["EVAL", MARK_RETURNED, 1, erasedKey(statsId, personKey(statsId, email)), String(at)]]).catch((error: unknown) => console.error("clearing a deletion mark failed", error));
+}
+
+/**
+ * Takes a deletion mark away only when the act that brought the person back
+ * (ARGV[1], milliseconds) came after the deletion it records. A mark that is
+ * not a time is kept. Modelled by lib/redis-memory.ts.
+ */
+export const MARK_RETURNED = `-- marktmorgen:crm-erased-returned:v1
+local mark = tonumber(redis.call('GET', KEYS[1]) or '')
+if mark == nil then return 0 end
+if mark < tonumber(ARGV[1]) then
+  redis.call('DEL', KEYS[1])
+  return 1
+end
+return 0`;
 /** Where people's field values are counted in the store's data room (lib/store-data.ts). */
 const VALUES_SLOT = "crm:v";
 /** Where the pipelines are counted in it: one slot, at what their record weighs. */
@@ -156,10 +321,14 @@ const json = (raw: unknown): unknown => {
   }
 };
 
+/**
+ * The store's fields exactly as saved: none only when none were ever saved. A reply in an unknown shape, or a record
+ * that does not read whole, throws CrmSchemaReadUnavailable, never "no fields" (CX-123 rules 24 and 30): a person's
+ * deletion, copy or list file read from it would otherwise leave out every answer kept for them.
+ */
 export async function readFields(statsId: string | null): Promise<CrmField[]> {
-  if (!statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["GET", fieldsKey(statsId)]]);
-  return parseFields(json(raw));
+  // One reading, the same as readFieldsWhole's (merge of #2901 with main): a single exact read of the record.
+  return readFieldsWhole(statsId);
 }
 
 /**
@@ -203,42 +372,147 @@ export async function writeFields(statsId: string, fields: CrmField[], keepAll =
   return fields;
 }
 
-/** One person's values, by field id. */
+/** One person's values, by field id. A reply in an unknown shape throws UnknownReplyError, never "no value". */
 export async function readValues(statsId: string | null, person: string, fields: CrmField[]): Promise<Record<string, string>> {
   if (!statsId || !PERSON.test(person) || !fields.length || !isRedisConfigured()) return {};
-  const got = await redisPipeline(fields.map((f) => ["HGET", valuesKey(statsId, f.id), person]));
+  const got = repliesFor(await redisPipeline(fields.map((f) => ["HGET", valuesKey(statsId, f.id), person])), fields.length);
+  if (!got || !got.every((value) => value === null || typeof value === "string")) throw new UnknownReplyError("a person's CRM values");
   return Object.fromEntries(fields.flatMap((f, i) => (typeof got[i] === "string" && got[i] ? [[f.id, got[i] as string]] : [])));
 }
 
-/** Sets one value for one person; "" clears it. False when it is not a value the field keeps. */
-export async function setValue(statsId: string, person: string, field: CrmField, raw: unknown, room: DataStore): Promise<boolean> {
+/**
+ * The most a value takes, in UTF-8: the longest a field keeps (a text, an address
+ * or a number at MAX_FIELD_VALUE; every choice of a field of several, one a
+ * line), at three bytes a UTF-16 unit, the most any takes.
+ */
+export const CRM_VALUE_MOST_BYTES = 3 * Math.max(MAX_FIELD_VALUE, MAX_FIELD_OPTIONS * MAX_FIELD_OPTION + MAX_FIELD_OPTIONS - 1);
+/** What SET_CRM_VALUE runs inside, at the most, which Upstash bills one by one beside the EVAL: the mark and the generation read, a workflow run's lease read, the value read and written. */
+export const CRM_VALUE_SCRIPT_CALLS = 5;
+/**
+ * A field saved from the studio (app/api/store/crm/route.ts, "value"), at the
+ * most, measured through the real route in tests/crm-contact-writes.test.ts
+ * as the studio sends it (the store named by every request,
+ * components/studio-store-pin.tsx): the trips to the database one after
+ * another (the session, the store and its team, the studio's count with
+ * both its requests, a teammate's line in the log, the fields, the room
+ * taken, the write, the room given back: 9 for the owner, 12 for a
+ * teammate), the commands sent with what the scripts run inside, and the
+ * bytes.
+ */
+export const CRM_VALUE_SAVE_TRIPS = 12;
+export const CRM_VALUE_SAVE_COMMANDS = 30;
+export const CRM_VALUE_SAVE_BYTES = 2 * CRM_VALUE_MOST_BYTES + 16_384;
+/**
+ * Studio requests a field saved from the studio is counted as, all taken
+ * with the first, before anything else is read (guardStoreWrite's `units`):
+ * its trips at the review ceiling of a trip do not fit in one studio
+ * request's 1.5 s, and never more than two (C3-123, C3-125;
+ * tests/plan-cost-registry.test.ts holds the figures).
+ */
+export const CRM_VALUE_SAVE_UNITS = 2;
+
+/**
+ * Sets one person's value of one field, or clears it with "", in one step on
+ * the Redis side: 2, and nothing written, while the person's deletion mark is
+ * there (KEYS[2]) or when the save carries another generation than theirs
+ * (KEYS[3], ARGV[3]: the page was read before a deletion), or, for a
+ * workflow step, when its run no longer holds its own take of the lease
+ * (KEYS[4], ARGV[4] with the score that take wrote, ARGV[5]); otherwise the
+ * value is written, and the answer is {1, before} with what it replaced, or
+ * {1}. It never takes the mark away. Inside: the mark and the generation
+ * read, the value read and written (CRM_VALUE_SCRIPT_CALLS).
+ */
+export const SET_CRM_VALUE = `-- marktmorgen:crm-value-set:v6
+if redis.call("EXISTS", KEYS[2]) == 1 then return 2 end
+if KEYS[4] and tonumber(redis.call("ZSCORE", KEYS[4], ARGV[4]) or "-1") ~= tonumber(ARGV[5]) then return 2 end
+if tonumber(redis.call("GET", KEYS[3]) or "0") ~= tonumber(ARGV[3]) then return 2 end
+local before = redis.call("HGET", KEYS[1], ARGV[1])
+if ARGV[2] == "" then redis.call("HDEL", KEYS[1], ARGV[1]) else redis.call("HSET", KEYS[1], ARGV[1], ARGV[2]) end
+if before then return {1, before} end
+return {1}`;
+
+/**
+ * Sets one value for one person; "" clears it. False when it is not a value the field keeps.
+ *
+ * `generation` is the person's generation as the page read it (readGeneration), or as a workflow step read it when
+ * it started. A workflow step also gives its run's `lease` (lib/flows.ts, LEASE): a deletion takes the run out of it
+ * (forgetWorkflowPerson), so a run already under way when the person was deleted writes nothing, in the same step as
+ * the write, even if they came back before its generation was read (Codex G, #2287). The lease is checked at the score
+ * its own take wrote, which no other take writes (lib/flows.ts, leaseScore), so the same entry taken again by a later
+ * run for the person who came back is not this run's (Codex G2, #2287). While the person's deletion mark is there, or for a save that carries another generation (a page read
+ * before a deletion, even if they came back since), nothing is written (CrmPersonGone, with the room taken given
+ * back), in the same step as the write. The deletion leaves its mark before it takes the values away, and each value
+ * is taken in one script that answers what it removed, so a write is either refused or deleted with the rest. The new
+ * value's whole room is taken first (DataRoomError, and nothing written, when it does not fit); the write answers what
+ * it replaced, in the same step, and that room is given back after. So what is counted is exactly what is kept.
+ *
+ * From the studio it is counted as CRM_VALUE_SAVE_UNITS studio requests, taken before anything is read
+ * (app/api/store/crm/route.ts; tests/plan-cost-registry.ts, CRM_VALUE_SAVE).
+ */
+export async function setValue(statsId: string, person: string, field: CrmField, raw: unknown, room: DataStore, generation: number, lease?: { key: string; member: string; score: number }): Promise<boolean> {
   if (!PERSON.test(person)) return false;
   const value = fieldValue(field, raw);
   if (value === null) return false;
-  // A value takes room in the store's data room first (DataRoomError when it does not fit); one cleared gives it back.
-  const [before] = await redisPipeline([["HGET", valuesKey(statsId, field.id), person]]);
+  // Not a generation: none the person can have, so refused wherever they were deleted, and written for anyone else
+  // only when they were never deleted (0).
+  const carried = Number.isSafeInteger(generation) && generation >= 0 ? generation : -1;
   const weight = (v: unknown) => (typeof v === "string" && v ? dataBytes([person, v], 1) : 0);
-  const grown = weight(value) - weight(before);
-  if (grown > 0) await needData(room, [{ slot: VALUES_SLOT, bytes: grown }]);
-  else if (grown < 0) await giveData(room, [{ slot: VALUES_SLOT, bytes: -grown }]);
+  const charged = weight(value);
+  if (charged > 0) await needData(room, [{ slot: VALUES_SLOT, bytes: charged }]);
+  let answer: unknown;
   try {
-    const response = await redisPipeline([value ? ["HSET", valuesKey(statsId, field.id), person, value] : ["HDEL", valuesKey(statsId, field.id), person]]);
-    if (!Array.isArray(response) || response.length !== 1 || (response[0] !== 0 && response[0] !== 1)) throw new CrmValueWriteUnconfirmed();
+    const keys = [valuesKey(statsId, field.id), erasedKey(statsId, person), generationKey(statsId, person), ...(lease ? [lease.key] : [])];
+    const response = await redisPipeline([["EVAL", SET_CRM_VALUE, keys.length, ...keys, person, value, carried, ...(lease ? [lease.member, String(lease.score)] : [])]]);
+    answer = Array.isArray(response) && response.length === 1 ? response[0] : undefined;
   } catch { throw new CrmValueWriteUnconfirmed(); }
+  if (answer === 2) {
+    // The person was deleted (and has not come back), or the page was read before a deletion: nothing was written, so
+    // the room taken goes back.
+    if (charged > 0) await giveData(room, [{ slot: VALUES_SLOT, bytes: charged }]).catch(() => {});
+    throw new CrmPersonGone();
+  }
+  // Any other answer may or may not have landed: the room taken stays counted, never less than what is kept.
+  if (!Array.isArray(answer) || answer[0] !== 1 || answer.length > 2 || (answer.length === 2 && typeof answer[1] !== "string")) throw new CrmValueWriteUnconfirmed();
+  const freed = weight(answer[1]);
+  // The value replaced gives its room back; one that cannot be given back now stays counted (more, never less, than kept).
+  if (freed > 0) await giveData(room, [{ slot: VALUES_SLOT, bytes: freed }]).catch(() => {});
   return true;
 }
 
-/** Every value of every field, by field id and then by person: for the list's file. */
-export async function allValues(statsId: string | null, fields: CrmField[]): Promise<Record<string, Record<string, string>>> {
-  if (!statsId || !fields.length || !isRedisConfigured()) return {};
-  const got = await redisPipeline(fields.map((f) => ["HGETALL", valuesKey(statsId, f.id)]));
+/** A person's key as one argument of a read of their values (lib/person-key.ts: 32 hexadecimal characters), with its quotes and its comma. */
+export const PERSON_ARG_BYTES = 35;
+
+/**
+ * The most bytes one value of `field` comes back as in a read: its longest
+ * value (one of several is the field's choices, one a line), every character
+ * at the widest a JSON answer writes it (three bytes; a line break, two), with
+ * its quotes and its comma. Control characters are never kept (fieldValue).
+ */
+export function valueReadBytes(field: Pick<CrmField, "type">): number {
+  const longest = field.type === "several" ? MAX_FIELD_OPTIONS * (MAX_FIELD_OPTION + 1) : MAX_FIELD_VALUE;
+  return 3 * longest + 3;
+}
+
+/**
+ * The values of `persons` (their person keys, lib/person-key.ts) for each
+ * field, by field id, in the order of `persons` (null for none): for the
+ * list's file, read only for the people it holds, one HMGET a field, never
+ * the whole of a field's values, which outlive a person's leaving the list
+ * (second cost review of #3354). Each read goes through `read`, held at the
+ * most its values can weigh. Read in its exact shape (CX-123 rule 24): a
+ * value is a string or none, one for each person; any other answer throws
+ * UnknownReplyError, never a file with a value left out.
+ */
+export async function valuesOf(statsId: string, fields: CrmField[], persons: string[], read: ListRead): Promise<Record<string, (string | null)[]>> {
+  if (!fields.length || !persons.length) return Object.fromEntries(fields.map((f) => [f.id, persons.map(() => null)]));
+  const most = fields.reduce((sum, f) => sum + persons.length * valueReadBytes(f) + 2, 0);
+  const got = await read(fields.map((f) => ["HMGET", valuesKey(statsId, f.id), ...persons]), most);
+  if (!Array.isArray(got) || got.length !== fields.length) throw new UnknownReplyError("a store's fields' values");
   return Object.fromEntries(
     fields.map((f, i) => {
-      const raw = got[i];
-      const map: Record<string, string> = {};
-      if (Array.isArray(raw)) for (let k = 0; k + 1 < raw.length; k += 2) map[String(raw[k])] = String(raw[k + 1]);
-      else if (raw && typeof raw === "object") Object.assign(map, raw as Record<string, string>);
-      return [f.id, map];
+      const values: unknown = got[i];
+      if (!Array.isArray(values) || values.length !== persons.length || values.some((v) => v !== null && typeof v !== "string")) throw new UnknownReplyError("a store's field's values");
+      return [f.id, values.map((v: string | null) => v || null)];
     }),
   );
 }
@@ -261,6 +535,12 @@ export async function readStages(statsId: string | null): Promise<Stage[]> {
   return allStages(await readPipelines(statsId));
 }
 
+/**
+ * The pipelines as saved, for a change made from them (639 [GL7](7), a teammate's access). Since main's
+ * readPipelines reads exactly too (CX-123 rules 24 and 30), this is the same reader under the name its callers use.
+ */
+export const readPipelinesExact = readPipelines;
+
 /** The pipelines exactly as saved, for a change: an unreadable or malformed record never stands in for the defaults. */
 async function pipelineSnapshot(statsId: string): Promise<{ raw: string; pipelines: Pipeline[] }> {
   try {
@@ -269,7 +549,7 @@ async function pipelineSnapshot(statsId: string): Promise<{ raw: string; pipelin
     const [pipes, legacy] = response;
     if (pipes !== null) {
       if (typeof pipes !== "string") throw new CrmSchemaReadUnavailable();
-      const pipelines = parsePipelines(json(pipes));
+      const pipelines = parsePipelines(json(pipes), true);
       if (!pipelines) throw new CrmSchemaReadUnavailable();
       return { raw: pipes, pipelines };
     }
@@ -353,17 +633,22 @@ async function writePipelines(statsId: string, snapshotRaw: string, pipelines: P
  * `moves` says. A refusal writes nothing. Moves made here start no
  * workflow: a stage removed is not a deal entering a stage.
  */
-export async function savePipelineChange(statsId: string, change: { pipeline?: unknown; remove?: string }, moves: unknown, limit: number, room: DataStore): Promise<PipelineChange> {
+export async function savePipelineChange(statsId: string, change: { pipeline?: unknown; remove?: string }, moves: unknown, limit: number, room: DataStore, mayEdit: (pipelineId: string) => boolean = () => true, sees: (pipelineId: string) => boolean = () => true): Promise<PipelineChange> {
   const deals = await dealSnapshot(statsId);
   const { raw, pipelines: current } = await pipelineSnapshot(statsId);
   const counts = new Map<string, number>();
   for (const d of deals) counts.set(String(d.record.stage), (counts.get(String(d.record.stage)) ?? 0) + 1);
-  const result = changePipeline(current, change, moves, counts, limit);
+  const result = changePipeline(current, change, moves, counts, limit, sees);
   if (!result.ok) return result;
   const kept = new Set(allStages(result.pipelines).map((s) => s.id));
   const fallback = result.pipelines[0].stages.find((s) => s.kind === "open")!.id;
-  // A deal whose stage was already in no pipeline (written by an older board) is brought back to the first pipeline's first open stage.
-  const moved = deals.filter((d) => !kept.has(String(d.record.stage))).map((d) => ({ ...d, record: { ...d.record, stage: result.moves[String(d.record.stage)] ?? fallback } }));
+  // A deal whose stage was already in no pipeline (written by an older board) is brought back to the first
+  // pipeline's first open stage, only by someone who may change that pipeline (`mayEdit`, 639 [GL7](7));
+  // anyone else leaves it where it is.
+  const adopt = mayEdit(result.pipelines[0].id);
+  const moved = deals
+    .filter((d) => !kept.has(String(d.record.stage)) && (Object.hasOwn(result.moves, String(d.record.stage)) || adopt))
+    .map((d) => ({ ...d, record: { ...d.record, stage: Object.hasOwn(result.moves, String(d.record.stage)) ? result.moves[String(d.record.stage)] : fallback } }));
   await writePipelines(statsId, raw, result.pipelines, moved, room);
   return result;
 }
@@ -372,14 +657,23 @@ export async function savePipelineChange(statsId: string, change: { pipeline?: u
  * A compare-and-set script's "changed" answer (SAVE_CRM_PIPELINES, MOVE_CRM_DEAL): the UTF-8 length of the record
  * there now, null when there is none, undefined for any other answer.
  */
-function changedLength(answer: unknown): number | null | undefined {
-  if (!Array.isArray(answer) || answer[0] !== -1) return undefined;
+function changedLength(answer: unknown, code: -1 | 3 = -1): number | null | undefined {
+  if (!Array.isArray(answer) || answer[0] !== code) return undefined;
   if (answer.length === 1) return null;
   return answer.length === 2 && Number.isSafeInteger(answer[1]) && answer[1] >= 0 ? answer[1] : undefined;
 }
 
-/** Move only the exact snapshot reviewed; never resurrect a deleted opportunity. */
-export const MOVE_CRM_DEAL = `-- marktmorgen:crm-deal-move:v2
+/**
+ * Move only the exact snapshot reviewed; never resurrect a deleted opportunity. With a run's lease (KEYS[2]), only
+ * while it holds this take's score: otherwise {3, length of the record there now} ({3} when there is none), so the
+ * room goes back to what is kept, never to the record the run read (Codex G2 on #2287).
+ */
+export const MOVE_CRM_DEAL = `-- marktmorgen:crm-deal-move:v4
+if KEYS[2] and tonumber(redis.call("ZSCORE", KEYS[2], ARGV[4]) or "-1") ~= tonumber(ARGV[5]) then
+  local kept = redis.call("HGET", KEYS[1], ARGV[1])
+  if kept then return {3, string.len(kept)} end
+  return {3}
+end
 local current = redis.call("HGET", KEYS[1], ARGV[1])
 if not current then return 0 end
 if current ~= ARGV[2] then return {-1, string.len(current)} end
@@ -389,14 +683,18 @@ return 1`;
 /**
  * Saves the first pipeline's stages, as the board did before pipelines (the
  * studio's older "stages" request): a deal in a stage that is gone moves to
- * the first open one of them.
+ * the first open one of them. With `firstId` (the pipeline whose access was
+ * checked), the stages are written only while that pipeline is still the
+ * first one, in the same snapshot that is written over: otherwise
+ * CrmSchemaConflict and nothing is written.
  */
-export async function writeStages(statsId: string, stages: Stage[], room: DataStore): Promise<Stage[]> {
+export async function writeStages(statsId: string, stages: Stage[], room: DataStore, firstId?: string): Promise<Stage[]> {
   const first = stages.find(s => s.kind === "open");
   if (!first) throw new CrmSchemaReadUnavailable();
   const deals = await dealSnapshot(statsId);
   const { raw, pipelines: current } = await pipelineSnapshot(statsId);
-  const next = parsePipelines([{ ...current[0], stages }, ...current.slice(1)]);
+  if (firstId !== undefined && current[0].id !== firstId) throw new CrmSchemaConflict();
+  const next = parsePipelines([{ ...current[0], stages }, ...current.slice(1)], true);
   if (!next) throw new CrmSchemaReadUnavailable();
   const kept = new Set(allStages(next).map(s => s.id));
   // Preserve every saved field; moving stages must not normalize away unrelated data.
@@ -408,8 +706,11 @@ export async function writeStages(statsId: string, stages: Stage[], room: DataSt
 /** Every deal, newest change first. `stages` reads a deal in a stage the store still has. */
 export async function readDeals(statsId: string | null, stages: readonly Stage[]): Promise<Deal[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HVALS", dealsKey(statsId)]]);
-  return (Array.isArray(raw) ? raw : [])
+  // Rule 24: "no deals" only for an empty list; any other reply is unknown,
+  // never a board with no deals (a workflow would make a second one).
+  const raw = repliesFor(await redisPipeline([["HVALS", dealsKey(statsId)]]), 1)?.[0];
+  if (!Array.isArray(raw) || !raw.every((value) => typeof value === "string")) throw new CrmDealReadUnavailable();
+  return raw
     .map((value) => parseDeal(json(value), stages))
     .filter((d): d is Deal => d !== null)
     .sort((a, b) => b.updatedAt - a.updatedAt);
@@ -439,7 +740,7 @@ export async function readOpportunityReview(statsId: string | null): Promise<Opp
     let pipelines: Pipeline[] | null = null;
     if (replies[2] !== null) {
       if (typeof replies[2] !== "string") return unavailable;
-      pipelines = parsePipelines(json(replies[2]));
+      pipelines = parsePipelines(json(replies[2]), true);
       if (!pipelines) return unavailable;
       stages = allStages(pipelines);
     } else if (replies[0] === null) stages = DEFAULT_STAGES;
@@ -474,14 +775,23 @@ export async function readOpportunityReview(statsId: string | null): Promise<Opp
  * Capacity and save share one Redis operation, including alongside form
  * conversions. An edit (ARGV[4] "edit") writes only a deal that is still
  * there: one deleted since it was read (by its person's deletion, or by
- * someone else) answers 2 and is never written back.
+ * someone else) answers 2 and is never written back. Written: {1, the length
+ * of the record it replaced} ({1} when there was none), measured in the same
+ * step, so the room moves by exactly what the write changed (Codex G2 on #2287).
  */
-export const SAVE_CRM_DEAL = `-- marktmorgen:crm-deal-save:v2
+export const SAVE_CRM_DEAL = `-- marktmorgen:crm-deal-save:v5
+if KEYS[2] and tonumber(redis.call("ZSCORE", KEYS[2], ARGV[5]) or "-1") ~= tonumber(ARGV[6]) then
+  local kept = redis.call("HGET", KEYS[1], ARGV[1])
+  if kept then return {3, string.len(kept)} end
+  return {3}
+end
 local there = redis.call("HEXISTS", KEYS[1], ARGV[1])
 if there == 0 and ARGV[4] == "edit" then return 2 end
 if there == 0 and redis.call("HLEN", KEYS[1]) >= tonumber(ARGV[3]) then return 0 end
+local was = redis.call("HGET", KEYS[1], ARGV[1])
 redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
-return 1`;
+if was then return {1, string.len(was)} end
+return {1}`;
 
 /** Where a deal is counted in the store's data room (lib/store-data.ts): one slot a deal, at what it weighs. */
 export const dealSlot = (id: string) => `dl:${id}`;
@@ -494,23 +804,50 @@ export const dealBytes = (deal: Deal) => dataBytes([deal.id, JSON.stringify(deal
  * written only if it is still there: "gone" when it was deleted since it was
  * read, with its room given back, so a deleted person's deal never comes back.
  */
+/**
+ * A workflow run's own take of its lease (lib/flows.ts): a deal or a note it writes is written only while the lease
+ * holds that exact score, in the same script, and answers "superseded" otherwise (Codex G2 on #2287, C3-141).
+ */
+export type RunTake = { key: string; member: string; score: number };
+
 export async function writeDeal(statsId: string, deal: Deal, room: DataStore): Promise<boolean>;
 export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit: "edit"): Promise<boolean | "gone">;
-export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit?: "edit"): Promise<boolean | "gone"> {
+export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit: undefined, take: RunTake): Promise<boolean | "superseded">;
+export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit?: "edit", take?: RunTake): Promise<boolean | "gone" | "superseded"> {
   let preflight: unknown;
   try {
-    preflight = await redisPipeline([["HEXISTS", dealsKey(statsId), deal.id], ["HLEN", dealsKey(statsId)]]);
+    preflight = await redisPipeline([["HEXISTS", dealsKey(statsId), deal.id], ["HLEN", dealsKey(statsId)], ["HSTRLEN", dealsKey(statsId), deal.id]]);
   } catch { throw new CrmDealReadUnavailable(); }
-  if (!Array.isArray(preflight) || preflight.length !== 2 || (preflight[0] !== 0 && preflight[0] !== 1) || typeof preflight[1] !== "number" || !Number.isSafeInteger(preflight[1]) || preflight[1] < preflight[0]) throw new CrmDealReadUnavailable();
+  const whole = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+  if (!Array.isArray(preflight) || preflight.length !== 3 || (preflight[0] !== 0 && preflight[0] !== 1) || !whole(preflight[1]) || preflight[1] < preflight[0] || !whole(preflight[2])) throw new CrmDealReadUnavailable();
+  // An edit of a deal deleted since it was read is "gone", full board or not, and its room is not touched.
+  if (preflight[0] === 0 && edit) return "gone";
   if (preflight[0] === 0 && preflight[1] >= MAX_DEALS) return false;
-  await needData(room, [{ slot: dealSlot(deal.id), bytes: dealBytes(deal), set: true }]);
+  // The room moves by what this write changes, never set to a total (Codex G2 on #2287: a total set from an answer
+  // that came late cut a newer record's room). Taken first by what it grows past the record there now; once written,
+  // put right by what it really replaced, as the script measured it; refused, only this write's own taking goes back;
+  // an answer that is not Redis's own keeps what it took.
+  const weight = (length: number) => dataBytesOfLength(utf8Length(deal.id) + length, 1);
+  const taken = Math.max(0, dealBytes(deal) - (preflight[0] === 1 ? weight(preflight[2]) : 0));
+  if (taken > 0) await needData(room, [{ slot: dealSlot(deal.id), bytes: taken }]);
+  let saved: unknown;
   try {
-    const saved = await redisPipeline([["EVAL", SAVE_CRM_DEAL, 1, dealsKey(statsId), deal.id, JSON.stringify(deal), MAX_DEALS, edit ?? ""]]);
-    if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 0 && saved[0] !== 1 && !(edit && saved[0] === 2))) throw new CrmDealWriteUnconfirmed();
-    // Full after all, or deleted since it was read: the deal's room goes back.
-    if (saved[0] !== 1) await giveData(room, [{ slot: dealSlot(deal.id), bytes: 0, set: true }]);
-    return saved[0] === 2 ? "gone" : saved[0] === 1;
+    const keys = take ? [dealsKey(statsId), take.key] : [dealsKey(statsId)];
+    saved = await redisPipeline([["EVAL", SAVE_CRM_DEAL, keys.length, ...keys, deal.id, JSON.stringify(deal), MAX_DEALS, edit ?? "", ...(take ? [take.member, String(take.score)] : [])]]);
   } catch { throw new CrmDealWriteUnconfirmed(); }
+  const answer = Array.isArray(saved) && saved.length === 1 ? saved[0] : undefined;
+  const written = Array.isArray(answer) && answer[0] === 1 && (answer.length === 1 || (answer.length === 2 && whole(answer[1]))) ? answer : null;
+  const kept = take ? changedLength(answer, 3) : undefined;
+  if (!written && answer !== 0 && !(edit && answer === 2) && kept === undefined) throw new CrmDealWriteUnconfirmed();
+  if (written) {
+    const change = dealBytes(deal) - (written.length === 2 ? weight(written[1] as number) : 0) - taken;
+    if (change > 0) await noteData(room, [{ slot: dealSlot(deal.id), bytes: change }]);
+    if (change < 0) await giveData(room, [{ slot: dealSlot(deal.id), bytes: -change }]);
+    return true;
+  }
+  // Nothing written (taken over, full after all, or deleted since it was read): only this write's taking goes back.
+  if (taken > 0) await giveData(room, [{ slot: dealSlot(deal.id), bytes: taken }]);
+  return kept !== undefined ? "superseded" : answer === 2 ? "gone" : false;
 }
 
 /**
@@ -536,21 +873,27 @@ export async function readDealExact(statsId: string, id: string, stages: readonl
  * over what the creator did on the board meanwhile. Its room is taken first,
  * and put back as it was when nothing was written.
  */
-export async function writeDealOver(statsId: string, deal: Deal, before: string, room: DataStore): Promise<"saved" | "changed"> {
-  await needData(room, [{ slot: dealSlot(deal.id), bytes: dealBytes(deal), set: true }]);
+export async function writeDealOver(statsId: string, deal: Deal, before: string, room: DataStore, take?: RunTake): Promise<"saved" | "changed" | "superseded"> {
+  // It writes only over `before`, so what it changes is known here: the room moves by that, never set to a total.
+  const grown = dealBytes(deal) - dataBytes([deal.id, before], 1);
+  if (grown > 0) await needData(room, [{ slot: dealSlot(deal.id), bytes: grown }]);
   let saved: unknown;
   try {
-    saved = await redisPipeline([["EVAL", MOVE_CRM_DEAL, 1, dealsKey(statsId), deal.id, before, JSON.stringify(deal)]]);
+    const keys = take ? [dealsKey(statsId), take.key] : [dealsKey(statsId)];
+    saved = await redisPipeline([["EVAL", MOVE_CRM_DEAL, keys.length, ...keys, deal.id, before, JSON.stringify(deal), ...(take ? [take.member, String(take.score)] : [])]]);
   } catch { throw new CrmDealWriteUnconfirmed(); }
   const answer = Array.isArray(saved) && saved.length === 1 ? saved[0] : undefined;
   const lost = changedLength(answer);
-  if (answer !== 1 && answer !== 0 && typeof lost !== "number") throw new CrmDealWriteUnconfirmed();
-  if (answer === 1) return "saved";
-  // Nothing written: its room put back to what the record kept there now weighs (the board's own write sized it to
-  // that), as the script measured it in the same step, or none when it is gone. So a record the board made bigger is
-  // never counted at its old size, and no second read can fail in between.
-  await giveData(room, [{ slot: dealSlot(deal.id), bytes: typeof lost === "number" ? dataBytesOfLength(utf8Length(deal.id) + lost, 1) : 0, set: true }]);
-  return "changed";
+  const kept = take ? changedLength(answer, 3) : undefined;
+  if (answer !== 1 && answer !== 0 && kept === undefined && typeof lost !== "number") throw new CrmDealWriteUnconfirmed();
+  if (answer === 1) {
+    if (grown < 0) await giveData(room, [{ slot: dealSlot(deal.id), bytes: -grown }]);
+    return "saved";
+  }
+  // Nothing written (the run taken over, or the record changed or gone): only this write's own taking goes back, by
+  // difference, so the room a newer write counted for itself is never undone, however late this answer arrives.
+  if (grown > 0) await giveData(room, [{ slot: dealSlot(deal.id), bytes: grown }]);
+  return kept !== undefined ? "superseded" : "changed";
 }
 
 export async function readDeal(statsId: string, id: string, stages: readonly Stage[]): Promise<Deal | null> {
@@ -559,12 +902,26 @@ export async function readDeal(statsId: string, id: string, stages: readonly Sta
   return parseDeal(json(raw), stages);
 }
 
-export async function dropDeal(statsId: string, id: string, room: DataStore): Promise<boolean> {
+/** Removes a deal only while it is the exact record read when the removal was checked: 1 removed, 0 already gone, -1 changed meanwhile. */
+export const DROP_CRM_DEAL = `-- marktmorgen:crm-deal-drop:v1
+local current = redis.call("HGET", KEYS[1], ARGV[1])
+if not current then return 0 end
+if current ~= ARGV[2] then return -1 end
+redis.call("HDEL", KEYS[1], ARGV[1])
+return 1`;
+
+/**
+ * Removes a deal. With `expected` (the record read when the removal was
+ * checked with readDealExact, 639 [GL7](7)), one changed since, moved into a pipeline the
+ * person may not change for instance, is never removed: CrmDealConflict.
+ */
+export async function dropDeal(statsId: string, id: string, room: DataStore, expected?: string): Promise<boolean> {
   if (!DEAL_ID.test(id)) return false;
   let removed: unknown;
   try {
-    removed = await redisPipeline([["HDEL", dealsKey(statsId), id]]);
+    removed = await redisPipeline([expected === undefined ? ["HDEL", dealsKey(statsId), id] : ["EVAL", DROP_CRM_DEAL, 1, dealsKey(statsId), id, expected]]);
   } catch { throw new CrmDealWriteUnconfirmed(); }
+  if (Array.isArray(removed) && removed.length === 1 && removed[0] === -1 && expected !== undefined) throw new CrmDealConflict();
   if (!Array.isArray(removed) || removed.length !== 1 || (removed[0] !== 0 && removed[0] !== 1)) throw new CrmDealWriteUnconfirmed();
   if (removed[0] === 1) await giveData(room, [{ slot: dealSlot(id), bytes: 0, set: true }]);
   return removed[0] === 1;
@@ -578,12 +935,41 @@ export async function dropDeal(statsId: string, id: string, room: DataStore): Pr
  * still taken after the wait throws (LockBusyError), with everything already
  * deleted once. A change that reaches the lock after the store is gone finds
  * no store and writes nothing (changePersonTasks).
+ *
+ * A fields read in an unknown shape (CrmSchemaReadUnavailable) never keeps
+ * the rest: the deals, which name buyers, the stages, pipelines and tasks go
+ * all the same. Only the fields record stays, with the answers kept under
+ * it, so a later try can still find their keys; and the error is thrown
+ * after, so the caller knows they are still kept (Claude 6 on #2901).
  */
 export async function forgetCrm(statsId: string | null): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  const fields = await readFields(statsId);
-  await redisPipeline([["DEL", fieldsKey(statsId), stagesKey(statsId), pipesKey(statsId), dealsKey(statsId), tasksKey(statsId), ...fields.map((f) => valuesKey(statsId, f.id))]]);
-  await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, () => redisPipeline([["DEL", tasksKey(statsId)]]));
+  const fields = await readFields(statsId).catch((error: unknown) => {
+    if (error instanceof CrmSchemaReadUnavailable) return null;
+    throw error;
+  });
+  const answers = fields ? [fieldsKey(statsId), ...fields.map((f) => valuesKey(statsId, f.id))] : [];
+  const keys = [stagesKey(statsId), pipesKey(statsId), dealsKey(statsId), tasksKey(statsId), ...answers];
+  // Each DEL's own count read exactly (#4675, CX-123 rule 24): a whole number from 0 to the keys sent. A reply
+  // that is missing or of another shape is unknown and throws, so the store's closing never counts it as done.
+  // The first DEL's verdict is kept, and the DEL under the tasks' lock is sent all the same, so tasks written back by
+  // a change read before the first DEL still go when its reply could not be read; then the first failure is thrown
+  // (Claude 6 on #4693), as an unread fields record is (delete everything that can go, then say what could not).
+  let first: unknown = null;
+  try {
+    confirmDeleted(await redisPipeline([["DEL", ...keys]]), keys.length, "a store's CRM records");
+  } catch (error) { first = error; }
+  try {
+    confirmDeleted(await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, () => redisPipeline([["DEL", tasksKey(statsId)]])), 1, "a store's CRM tasks");
+  } catch (error) { first ??= error; }
+  if (first) throw first;
+  if (!fields) throw new CrmSchemaReadUnavailable();
+}
+
+/** One DEL's own count, read exactly: a whole number from 0 to the keys it was sent, or UnknownReplyError. */
+function confirmDeleted(replies: unknown, keys: number, what: string): void {
+  const count = replyCount(repliesFor(replies, 1)?.[0]);
+  if (count === null || count > keys) throw new UnknownReplyError(what);
 }
 
 /** One person's value of a field deleted, answered with what it was (null when there was none). */
@@ -600,16 +986,32 @@ return value`;
  */
 export async function forgetCrmPerson(statsId: string | null, person: string, email: string, room?: DataStore): Promise<number> {
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
+  // First the mark that they were deleted, and their next generation, before anything is taken away: a value set from
+  // here on is refused until they come back on their own, and from a page read before now for good (SET_CRM_VALUE); one
+  // written before is taken away below. An erasure whose mark is not confirmed fails, to be run again.
+  const marked = await redisPipeline([
+    ["SET", erasedKey(statsId, person), String(Date.now()), "EX", ERASED_MARK_SECONDS],
+    ["SET", generationKey(statsId, person), String(Date.now()), "EX", ERASED_MARK_SECONDS],
+  ]);
+  if (!Array.isArray(marked) || marked.length !== 2 || marked[0] !== "OK" || marked[1] !== "OK") throw new CrmValueWriteUnconfirmed();
   const fields = await readFields(statsId);
   const address = email.trim().toLowerCase();
-  const [raw] = await redisPipeline([["HGETALL", dealsKey(statsId)]]);
+  // Every deal, exactly as a flat list of pairs: a reply in another shape is unknown and the deletion fails and says
+  // so, never "done" with the person's deals kept (CX-123 rules 24 and 30).
+  const flat = stringList(repliesFor(await redisPipeline([["HGETALL", dealsKey(statsId)]]), 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a store's deals");
   const pairs: [string, string][] = [];
-  if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) pairs.push([String(raw[i]), String(raw[i + 1])]);
-  else if (raw && typeof raw === "object") for (const [k, v] of Object.entries(raw as Record<string, string>)) pairs.push([k, String(v)]);
-  const theirs = pairs.filter(([, value]) => {
-    const deal = json(value) as { email?: unknown } | null;
-    return typeof deal?.email === "string" && deal.email.trim().toLowerCase() === address;
-  }).map(([id]) => id);
+  for (let i = 0; i < flat.length; i += 2) pairs.push([flat[i], flat[i + 1]]);
+  // Only a whole HGETALL of distinct fields, each a deal that reads as an object, may decide whose deals these are: a
+  // deal that does not read may be the person's (a truncated value still names them), so the step is unknown before
+  // anything is deleted, never "somebody else's" (#4810, Codex G; coordinator's note on #2287).
+  if (new Set(pairs.map(([id]) => id)).size !== pairs.length) throw new UnknownReplyError("a store's deals (a deal named twice)");
+  const deals = pairs.map(([id, value]) => {
+    const deal = json(value);
+    if (!deal || typeof deal !== "object" || Array.isArray(deal)) throw new UnknownReplyError("a store's deals (a deal that does not read)");
+    return [id, deal as { email?: unknown }] as const;
+  });
+  const theirs = deals.filter(([, deal]) => typeof deal.email === "string" && deal.email.trim().toLowerCase() === address).map(([id]) => id);
   // Each value taken out in one script that answers what it deleted, each deal
   // deleted on its own: what goes back to the store's data room is exactly
   // what was removed, even with a change of the same value at the same time.
@@ -617,16 +1019,30 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
     ...fields.map((f) => ["EVAL", TAKE_CRM_VALUE, 1, valuesKey(statsId, f.id), person]),
     ...theirs.map((id) => ["HDEL", dealsKey(statsId), id]),
   ];
-  const replies = commands.length ? await redisPipeline(commands) : [];
+  // Each reply read exactly (CX-123 rules 24 and 30): a value's script answers the value it deleted or nil, a deal's
+  // HDEL 1 or 0. Any other reply, or a reply list of another length, is unknown, never "nothing was there": what did
+  // read is given back below, and the deletion then throws UnknownReplyError, so the erasure says it did not finish
+  // and is pressed again, never confirmed with the person's answers or deals possibly kept.
+  const replies = commands.length ? repliesFor(await redisPipeline(commands), commands.length) : [];
+  if (!replies) throw new UnknownReplyError("a person's CRM deletion");
+  let unknown = false;
   let records = 0;
   let valuesFreed = 0;
   fields.forEach((_, i) => {
     const taken = replies[i];
-    if (typeof taken !== "string") return;
+    if (taken === null) return;
+    if (typeof taken !== "string") {
+      unknown = true;
+      return;
+    }
     records += 1;
     if (taken) valuesFreed += dataBytes([person, taken], 1);
   });
-  const dealsGone = theirs.filter((_, i) => replies[fields.length + i] === 1);
+  const dealsGone = theirs.filter((_, i) => {
+    const gone = replyCount(replies[fields.length + i]);
+    if (gone === null || gone > 1) unknown = true;
+    return gone === 1;
+  });
   records += dealsGone.length;
   if (room && (valuesFreed > 0 || dealsGone.length)) {
     await giveData(room, [
@@ -656,6 +1072,8 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
     if (freed > 0 && room) await giveData(room, [{ slot: TASKS_SLOT, bytes: freed }]);
     return taken[0] ? 1 : 0;
   });
+  // Their tasks went above all the same; a reply of the values or deals that did not read leaves the deletion unconfirmed.
+  if (unknown) throw new UnknownReplyError("a person's CRM deletion");
   return records;
 }
 
@@ -688,9 +1106,11 @@ return {value, redis.call("HDEL", KEYS[1], ARGV[4])}`;
  * the person's tasks are no longer what was read (a lock that ran out let
  * another change in); 1 once written; 2 once written when a count that was
  * not a whole number was dropped or replaced, whose room goes back. A count
- * that is there is moved by the change.
+ * that is there is moved by the change. KEYS[2] is the tasks lock, ARGV[7] its token: -2 means the
+ * lease was lost and nothing was written. The existing unconfirmed-write path retains the prior room reservation.
  */
-export const WRITE_PERSON_TASKS = `-- marktmorgen:crm-tasks-write:v1
+export const WRITE_PERSON_TASKS = `-- marktmorgen:crm-tasks-write:v2
+if redis.call("GET", KEYS[2]) ~= ARGV[7] then return -2 end
 local before = redis.call("HGET", KEYS[1], ARGV[1]) or ""
 if before ~= ARGV[2] then return -1 end
 if ARGV[3] == "" then redis.call("HDEL", KEYS[1], ARGV[1]) else redis.call("HSET", KEYS[1], ARGV[1], ARGV[3]) end
@@ -710,9 +1130,11 @@ return 1`;
 /**
  * The store's count saved on its own, once every task was read to make it:
  * 0 when a whole number is there already (nothing written), 1 when written
- * where there was none, 2 when written over one that was not a whole number.
+ * where there was none, 2 when written over one that was not a whole number. KEYS[2] is the tasks lock,
+ * ARGV[3] its token; -1 refuses a lost lease before any read/write of the tasks hash.
  */
-export const SAVE_TASK_COUNT = `-- marktmorgen:crm-tasks-count-save:v1
+export const SAVE_TASK_COUNT = `-- marktmorgen:crm-tasks-count-save:v2
+if redis.call("GET", KEYS[2]) ~= ARGV[3] then return -1 end
 local kept = redis.call("HGET", KEYS[1], ARGV[1])
 if kept and string.match(kept, "^%d+$") then return 0 end
 redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
@@ -801,8 +1223,12 @@ export async function readPersonTasks(statsId: string | null, person: string): P
  */
 export async function taskPeople(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [fields, counted] = await redisPipeline([["HLEN", tasksKey(statsId)], ["HEXISTS", tasksKey(statsId), TASK_COUNT_FIELD]]);
-  return Math.max(0, (Number(fields) || 0) - (counted === 1 ? 1 : 0));
+  // Rule 24: HLEN and HEXISTS as Redis answered them, or unknown; never "nobody has tasks".
+  const replies = repliesFor(await redisPipeline([["HLEN", tasksKey(statsId)], ["HEXISTS", tasksKey(statsId), TASK_COUNT_FIELD]]), 2);
+  const fields = replyCount(replies?.[0]);
+  const counted = replies?.[1];
+  if (fields === null || (counted !== 0 && counted !== 1)) throw new TasksUnreadable("the store's task count reply");
+  return Math.max(0, fields - counted);
 }
 
 /**
@@ -905,7 +1331,11 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
   if (added > 0 && count === null) {
     // No count yet: none is needed for a store with no tasks; one that has
     // some has every task read, once, paid for first.
-    const people = Math.max(0, (Number(fields) || 0) - (kept === null || kept === undefined ? 0 : 1));
+    // Rule 24: a reply that is not a whole count is unknown, never a store with
+    // no tasks, which would start the count over from this change alone.
+    const fieldCount = replyCount(fields);
+    if (fieldCount === null) throw new TasksUnreadable("the store's task count reply");
+    const people = Math.max(0, fieldCount - (kept === null || kept === undefined ? 0 : 1));
     if (people > 0) {
       const units = tasksRecountUnits(people);
       if (units > paid) return { units };
@@ -917,7 +1347,7 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
       if (!(await holdLock(held))) throw new LockBusyError();
       let saved: unknown;
       try {
-        [saved] = await redisPipeline([["EVAL", SAVE_TASK_COUNT, 1, tasksKey(statsId), TASK_COUNT_FIELD, String(count)]]);
+        [saved] = await redisPipeline([["EVAL", SAVE_TASK_COUNT, 2, tasksKey(statsId), held.key, TASK_COUNT_FIELD, String(count), held.token]]);
       } catch {
         throw new CrmValueWriteUnconfirmed();
       }
@@ -943,7 +1373,7 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
   if (grown > 0) await needData(room, [{ slot: TASKS_SLOT, bytes: grown }]);
   let written: unknown;
   try {
-    const response = await redisPipeline([["EVAL", WRITE_PERSON_TASKS, 1, tasksKey(statsId), person, typeof before === "string" ? before : "", value, added, start, TASK_COUNT_FIELD]]);
+    const response = await redisPipeline([["EVAL", WRITE_PERSON_TASKS, 2, tasksKey(statsId), held.key, person, typeof before === "string" ? before : "", value, added, start, TASK_COUNT_FIELD, held.token]]);
     if (!Array.isArray(response) || response.length !== 1 || (response[0] !== 1 && response[0] !== 2 && response[0] !== -1)) throw new CrmValueWriteUnconfirmed();
     written = response[0];
   } catch {
@@ -963,6 +1393,9 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
 /** How many deals the store keeps: what deleting a person reads (lib/person-erasure.ts). */
 export async function dealCount(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["HLEN", dealsKey(statsId)]]);
-  return Number(n) || 0;
+  // Read exactly (unknown is never zero): it sizes the studio allowance a person's erasure takes before its work runs
+  // (lib/person-erasure.ts, erasureSize), so a reply in another shape throws and the erasure answers "unavailable".
+  const n = replyCount(repliesFor(await redisPipeline([["HLEN", dealsKey(statsId)]]), 1)?.[0]);
+  if (n === null) throw new UnknownReplyError("the count of the store's deals");
+  return n;
 }

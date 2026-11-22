@@ -121,6 +121,18 @@ async function main(): Promise<void> {
   is("with how many there are in all", pages.map((p) => p.body.total), [STUDENTS, STUDENTS, STUDENTS]);
   const rows = pages.flatMap((p) => p.body.data);
   is("progress and blocking as kept", [rows.find((r) => r.email === emails[0])?.lessons_done, rows.find((r) => r.email === emails[0])?.lessons_total, rows.find((r) => r.email === emails[1])?.blocked, rows.find((r) => r.email === emails[2])?.blocked], [1, 2, true, false]);
+  // Independent cost oracle: a full page is 200 x 17,024 row/progress bytes + 64 blocked bytes,
+  // 201 commands, 204,800 response bytes and one database trip. With reservation overhead it costs 15 units.
+  is("full-page student read work stays at the reviewed envelope", studentsPageWork(API_PAGE, 1), {
+    commands: 201,
+    bytes: 3_404_864,
+    sent: 204_800,
+    stripePages: 0,
+    roundTrips: 1,
+  });
+  is("that fixed envelope costs 15 further requests", apiReadUnits({
+    commands: 201, bytes: 3_404_864, sent: 204_800, stripePages: 0, roundTrips: 1,
+  }), 15);
   is("a page of students costs more than one request", apiReadUnits(studentsPageWork(API_PAGE, 1)) > 0, true);
   is("all of it counted", await used(course), expected);
 

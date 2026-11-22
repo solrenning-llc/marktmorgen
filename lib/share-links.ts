@@ -14,7 +14,7 @@ export const SHARE_MEDIUM = "share";
 export type SharePlace = "x" | "facebook" | "linkedin" | "whatsapp" | "email" | "qr" | "device" | "instagram";
 
 /** Replace attribution tags without duplicates, preserving other query values and anchors. */
-function withTags(url: string, tags: Record<string, string>): string {
+export function withTags(url: string, tags: Record<string, string>): string {
   const hash = url.indexOf("#");
   const fragment = hash < 0 ? "" : url.slice(hash);
   const address = hash < 0 ? url : url.slice(0, hash);

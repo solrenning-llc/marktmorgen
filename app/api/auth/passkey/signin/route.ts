@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
-import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
+import { DEVICE_COOKIE, SESSION_COOKIE, endSession, isMoving, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
 import { LockBusyError } from "@/lib/redis-lock";
 import { repairMove } from "@/lib/move-repair";
 import { isRedisConfigured } from "@/lib/redis";
@@ -57,8 +57,16 @@ export async function POST(request: NextRequest) {
       // A move left broken is repaired before any session opens, as at every other login (lib/move-repair.ts):
       // nobody gets into a copy of the store the repair is about to settle. When the repair moved this passkey
       // to the address that holds the store, the person is asked to try again, and lands there.
-      await repairMove(email).catch((error) => console.error("repairing a broken move failed", error));
-      if (!(await listPasskeys(email)).some((p) => p.id === signed.id)) return Response.json({ ok: false, error: "busy" }, { status: 503 });
+      // Only a move that is settled lets a session open, as at the emailed link and the recovery
+      // (lib/signin-finish.ts, app/api/auth/lost/confirm): repairMove answers false on purpose while a move is still
+      // running, cannot be told apart or holds ways in on both sides, and a repair that fails counts as one that did not.
+      const blocked = (await isMoving(email)) && !(
+        (await repairMove(email).catch((error) => {
+          console.error("repairing a broken move failed", error);
+          return false;
+        })) && !(await isMoving(email))
+      );
+      if (blocked || !(await listPasskeys(email)).some((p) => p.id === signed.id)) return Response.json({ ok: false, error: "busy" }, { status: 503 });
 
       // Opened with its second step: a passkey (lib/auth.ts SecondStep), which a team that asks for one reads (lib/team.ts).
       const id = await openSession(email, "passkey", signed.id);

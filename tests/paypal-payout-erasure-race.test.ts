@@ -14,7 +14,7 @@
  * Synthetic: stand-ins for PayPal, Stripe and Redis; no money, account or credential is real.
  */
 import { connectPayPal, payWithPayPal, settlePayPal } from "@/lib/paypal-payouts";
-import { ERASING_KEY, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
+import { ERASING_KEY, claimHandle, closeStoreRecord, ensureStatsId, ensureStoreId, erasingField, moveAccount, ownerKey, setAffiliateSetting, setCurrency, setStripeAccount, storeForEmail, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { markLive } from "./live-store";
 import { done, is, part } from "./check";
@@ -73,15 +73,15 @@ function shop(): Store {
 }
 
 /** One approved affiliate with two sales, the store live, its PayPal app kept. */
-async function seed(store: Store): Promise<void> {
-  redis.clear();
+async function seed(store: Store, reset = true): Promise<void> {
+  if (reset) redis.clear();
   posts.length = 0;
   during = null;
   const at = Math.floor(Date.now() / 1000) - 86_400;
   const id = "a00000000000";
   await redis.pipeline([
-    ["HSET", `nl:aff:${STATS}:people`, id, JSON.stringify({ id, email: "p0@example.com", code: "code0", status: "approved", appliedAt: 1, decidedAt: 2, note: "" })],
-    ...[1, 2].map((n) => ["HSET", `nl:aff:${STATS}:sales`, `cs_0_${n}`, JSON.stringify({ ref: `cs_0_${n}`, pi: `pi_0_${n}`, aff: id, at, product: "p1", title: "Guide", base: 10000, total: 10000, currency: "usd", rate: 30, self: false })]),
+    ["HSET", `nl:aff:${store.statsId}:people`, id, JSON.stringify({ id, email: "p0@example.com", code: "code0", status: "approved", appliedAt: 1, decidedAt: 2, note: "" })],
+    ...[1, 2].map((n) => ["HSET", `nl:aff:${store.statsId}:sales`, `cs_0_${n}`, JSON.stringify({ ref: `cs_0_${n}`, pi: `pi_0_${n}`, aff: id, at, product: "p1", title: "Guide", base: 10000, total: 10000, currency: "usd", rate: 30, self: false })]),
   ]);
   await markLive(store);
   if (!(await connectPayPal(store, CLIENT, SECRET)).ok) throw new Error("synthetic PayPal app not kept");
@@ -207,6 +207,62 @@ async function main(): Promise<void> {
   await payWithPayPal(legacy);
   await settlePayPal(legacy);
   is("its batch is still on its way", await openLeft(), 1);
+
+
+  // Codex L: unlike unknown-batch retry, a known-batch status read holds no PayPal lock. A real account move can
+  // finish during that read; the same sid then resolves to a different ref, where the closing walk writes its mark.
+  for (const erasing of [false, true]) {
+    part(`Settling: an old owner snapshot after a real account move, moved store ${erasing ? "erasing" : "live"}`);
+    redis.clear();
+    const from = "old-payout-owner@example.test";
+    const to = "new-payout-owner@example.test";
+    const claimed = await claimHandle(from, "payoutmove", "Payout Move", "");
+    if (!claimed.ok) throw new Error("synthetic store claim");
+    await ensureStatsId(from);
+    await ensureStoreId(from);
+    await setStripeAccount(from, "acct_1TestRace000001", true);
+    const currency = await setCurrency(from, "usd");
+    if (!currency.ok) throw new Error("synthetic USD store");
+    await setAffiliateSetting(from, { ...shop().affiliates, enabled: true });
+    const oldStore = await storeForEmail(from);
+    if (!oldStore?.statsId || !oldStore.sid) throw new Error("synthetic live store");
+    await seed(oldStore, false);
+    const paid = await payWithPayPal(oldStore);
+    const key = `nl:pp:open:${oldStore.statsId}`;
+    is("setup: a live real store kept a batch", [paid.ok, redis.run(["HLEN", key])], [true, 1]);
+    let raced = 0;
+    during = { path: "batch", run: async () => {
+      raced += 1;
+      is("the real account move succeeds while status is pending", (await moveAccount(from, to)).ok, true);
+      const moved = await storeForEmail(to);
+      if (!moved) throw new Error("moved store missing");
+      is("move preserves both immutable store identities", [moved.sid, moved.statsId], [oldStore.sid, oldStore.statsId]);
+      is("the live sid maps to the new ref", redis.run(storeIdCommand(oldStore.sid)), storeRef(moved));
+      is("the stale owner ref has no erasing marker", redis.run(["HGET", ERASING_KEY, await erasingField(storeRef(oldStore))]), null);
+      // Pause at the exact write-back boundary: remove the previously known batch. For the erasing case this models
+      // the closing walk having passed this family; the final close below must not delete this family a second time.
+      await redis.pipeline([["DEL", key]]);
+      if (erasing) await redis.pipeline([["HSET", ERASING_KEY, await erasingField(storeRef(moved)), String(Date.now())]]);
+    } };
+    const postsBefore = posts.length;
+    await settlePayPal(oldStore);
+    is("the actual provider status boundary ran exactly once", raced, 1);
+    is("settling asked for no further money", posts.length, postsBefore);
+    is("the stale snapshot cannot recreate the private batch", redis.run(["HLEN", key]), 0);
+    const moved = await storeForEmail(to);
+    if (!moved) throw new Error("moved store missing after settle");
+    if (erasing) {
+      is("the real moved record closes with no repeated batch cleanup", await closeStoreRecord(moved), true);
+      is("no receiver print or affiliate line survives the final close", redis.run(["HGETALL", key]), []);
+    } else {
+      // A current snapshot is still allowed to settle. Re-seed the original known batch through the existing press,
+      // not a direct model of the fence, then prove that the fresh settlement preserves it.
+      await seed(moved, false);
+      is("a current moved store still pays", (await payWithPayPal(moved)).ok, true);
+      await settlePayPal(moved);
+      is("the current ref keeps its pending batch", redis.run(["HLEN", key]), 1);
+    }
+  }
 
   part("The erasure's mark waits for the press's own lock (lib/closed-store-data.ts)");
   const source = (await import("node:fs")).readFileSync("lib/closed-store-data.ts", "utf8");

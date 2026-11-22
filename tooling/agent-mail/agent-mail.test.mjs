@@ -398,6 +398,84 @@ console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");
   is("the same change is not raised again on the next watch", !/ALERTA: o ramo correio/.test(r.out), r.out);
 }
 
+console.log("availability: last signal, percent of quota, Codex preference (owner, OWNER-20261122-0121-MAIL-AVAILABILITY)");
+{
+  // A mailbox whose history starts 4 hours ago, so "no signal for more than 2 hours" can be observed.
+  const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
+  const M2 = join(T, "mail2.git"); g(["init", "-q", "--bare", "mail2.git"]);
+  const W2 = join(T, "w2"); g(["init", "-q", "w2"]);
+  const env2 = { CORREIO_REPO: M2 };
+  const dated = (min) => ({ ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t", GIT_AUTHOR_DATE: ago(min), GIT_COMMITTER_DATE: ago(min) });
+  execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "init"], { cwd: W2, env: dated(240) });
+  g(["push", "-q", M2, "HEAD:refs/heads/correio"], W2);
+  // A commit written `min` minutes ago with the given trailers, as the tool writes them.
+  const old = (path, text, min, trailers) => {
+    g(["pull", "-q", M2, "correio"], W2);
+    mkdirSync(join(W2, path, ".."), { recursive: true }); writeFileSync(join(W2, path), text); g(["add", "."], W2);
+    execFileSync("git", ["commit", "-q", "-m", `old\n\n${trailers}`], { cwd: W2, env: dated(min) });
+    g(["push", "-q", M2, "HEAD:refs/heads/correio"], W2);
+  };
+  const q2 = () => run(["list-quotas"], env2).out;
+  old("estado/claude-3/20261121T000000Z-claude-3-x-aa01", "Cota: com\nPor: Claude 3 X\n", 180, "Mail-Session: session_014YNUxAAAAAAAAAAAAAAAAA (claude-3)\nMail-From: Claude 3 X");
+  old("sinal/claude-7/20261121T000000Z-claude-7-x-aa02", "Claude 7 X\n", 30, "Mail-Session: session_01HfzozAAAAAAAAAAAAAAAAA (claude-7)\nMail-From: Claude 7 X");
+  // Item 1: list-quotas shows each family's last signal; more than 2 hours without one counts as no quota.
+  r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 4 Z", "--subject", "s", "--text", "oi"], { ...env2, ...as("c2") });
+  is("list-quotas shows the last signal of a family that just wrote", /claude-2: com cota; .*último sinal há 0 min/.test(q2()), q2());
+  is("a family that last wrote 3 hours ago is shown without quota, for lack of signal", /claude-3: SEM COTA \(sem sinal há mais de 2 h\)/.test(q2()), q2());
+  is("a family that wrote 30 minutes ago keeps its quota", /claude-7: com cota; .*último sinal há 3\d min/.test(q2()), q2());
+  is("a family with no signal in a history that covers 2 hours is also without quota", /claude-5: SEM COTA \(sem sinal/.test(q2()), q2());
+  is("in a mailbox younger than 2 hours, nobody is without quota for lack of signal", !/sem sinal/.test(run(["list-quotas"]).out), run(["list-quotas"]).out);
+  // The preference for a family without signal falls at once: another family takes the review now.
+  const H31 = pr(31, "f31.txt", "31\n");
+  run(["request-review", "--from", "Claude 6", "--pr", "31", "--sha", H31.slice(0, 10), "--to", "Claude 3", "--text", "t"], { ...env2, ...as("c6") });
+  r = run(["claim-review", "--as", "Claude 4 Z"], { ...env2, ...as("c4") });
+  is("the preference for a family without signal falls at once: another family takes the review", r.ok && /pegou:/.test(r.out), r.out);
+  // The watch writes a signal, at most one every 15 minutes per family.
+  r = run(["watch", "--as", "Claude 3 Z", "--seconds", "1"], { ...env2, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+  is("the watch writes a signal: the family is back with quota", /claude-3: com cota; .*último sinal há 0 min/.test(q2()), r.out + q2());
+  run(["watch", "--as", "Claude 3 Y", "--seconds", "1"], { ...env2, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxBBBBBBBBBBBBBBBBB" });
+  const nSinais = () => g(["ls-tree", "-r", "--name-only", "refs/heads/correio", "sinal/claude-3"], M2).split("\n").filter(Boolean).length;
+  is("a second watch of the same family within 15 minutes writes no new signal", nSinais() === 1, String(nSinais()));
+  // The Codex, outside the cloud, signals by reading.
+  r = run(["read", "--as", "Codex"], env2);
+  is("the Codex's read writes its signal, under its declared name", /codex: com cota; .*último sinal há 0 min/.test(q2()), r.out + q2());
+  // Item 2: the percent of quota and the renewal date.
+  r = run(["set-quota", "--as", "Claude 2 Z", "--remaining", "35", "--renews", "2099-11-29T10:00-03:00"], { ...env2, ...as("c2") });
+  is("set-quota takes the percent left and the renewal date", r.ok && /claude-2: com cota; resta 35% até 2099-11-29T13:00:00\.000Z/.test(q2()), r.out + q2());
+  r = run(["set-quota", "--as", "Claude 2 Z", "--remaining", "35"], { ...env2, ...as("c2") });
+  is("a percent without the renewal date is refused", !r.ok && /--renews/.test(r.out), r.out);
+  r = run(["set-quota", "--as", "Claude 2 Z", "--remaining", "8", "--renews", "2099-11-29T10:00-03:00"], { ...env2, ...as("c2") });
+  is("at 10% or less the family shows a low quota", r.ok && /claude-2: COTA BAIXA; resta 8%/.test(q2()), r.out + q2());
+  const aviso = run(["read", "--as", "Claude 4 Z"], { ...env2, ...as("c4") }).out;
+  is("the other families are told when a quota gets low", /Cota baixa: Claude 2 com 8%/.test(aviso), aviso);
+  run(["set-quota", "--as", "Claude 2 Z", "--remaining", "6", "--renews", "2099-11-29T10:00-03:00"], { ...env2, ...as("c2") });
+  is("a lower percent while already low is not announced again", (run(["read", "--as", "Claude 5 Z"], { ...env2, ...as("c5") }).out.match(/Cota baixa: Claude 2/g) ?? []).length === 1, run(["read", "--as", "Claude 5 Z"], { ...env2, ...as("c5") }).out);
+  // A long review (more than 400 lines outside tests) is not handed to a family with a low quota; a short one is.
+  const H32 = pr(32, "big.txt", `${Array.from({ length: 450 }, (_, i) => `linha ${i}`).join("\n")}\n`);
+  run(["request-review", "--from", "Claude 6", "--pr", "32", "--sha", H32.slice(0, 10), "--text", "longa"], { ...env2, ...as("c6") });
+  r = run(["claim-review", "--as", "Claude 2 Z"], { ...env2, ...as("c2") });
+  is("a long review is not handed to a family with a low quota", /nada para pegar/.test(r.out), r.out);
+  const H33 = pr(33, "big.test.ts", `${Array.from({ length: 450 }, (_, i) => `// ${i}`).join("\n")}\n`);
+  run(["request-review", "--from", "Claude 6", "--pr", "33", "--sha", H33.slice(0, 10), "--text", "só testes"], { ...env2, ...as("c6") });
+  r = run(["claim-review", "--as", "Claude 2 Z"], { ...env2, ...as("c2") });
+  is("a review whose lines are tests only is short, and goes to the low family", r.ok && /pegou:/.test(r.out) && /#33|PR: 33/.test(r.out), r.out);
+  r = run(["claim-review", "--as", "Claude 4 Z"], { ...env2, ...as("c4") });
+  is("the long review goes to a family with quota", r.ok && /PR: 32/.test(r.out), r.out);
+  // Item 3: a preference for the Codex holds 30 minutes, then any other family with quota takes the review.
+  run(["read", "--as", "Codex"], env2);
+  const H34 = pr(34, "f34.txt", "34\n");
+  run(["request-review", "--from", "Claude 6", "--pr", "34", "--sha", H34.slice(0, 10), "--to", "Codex", "--text", "t"], { ...env2, ...as("c6") });
+  r = run(["claim-review", "--as", "Claude 4 Z"], { ...env2, ...as("c4") });
+  is("a fresh preference for the Codex, with signal, holds", /nada para pegar/.test(r.out), r.out);
+  const stamp = new Date(Date.now() - 31 * 60000).toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  const H35 = pr(35, "f35.txt", "35\n");
+  old(`revisao/pedidos/${stamp}-claude-6-ab35.md`, `Tipo: revisão\nPR: 35\nHead: ${H35.slice(0, 10)}\nAutor: Claude 6\nPreferência: Codex\nCommits de: codex\nLinhas fora dos testes: 1\nId: ${stamp}-claude-6-ab35\n\nt\n`, 31, "Mail-From: Claude 6");
+  r = run(["claim-review", "--as", "Claude 4 Z"], { ...env2, ...as("c4") });
+  is("after 30 minutes the preference for the Codex no longer holds: another family takes it", r.ok && /PR: 35/.test(r.out), r.out);
+  run(["set-quota", "--as", "Claude 2 Z", "--remaining", "0", "--renews", "2099-11-29T10:00-03:00"], { ...env2, ...as("c2") });
+  is("0% is without quota until the renewal", /claude-2: SEM COTA até 2099-11-29T13:00:00\.000Z/.test(q2()), q2());
+}
+
 console.log("version: the copy's SHA-256 against the reviewed one on main (owner, OWNER-20261121-1904, step 1)");
 const meu = createHash("sha256").update(readFileSync(TOOL)).digest("hex");
 const comHash = (h) => { g(["checkout", "-q", "-B", "mainh", M], P); mkdirSync(join(P, "tooling", "agent-mail"), { recursive: true });

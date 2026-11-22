@@ -113,7 +113,7 @@ Num clone raso, os arquivos de antes da borda empatam no commit da borda e se de
 node ~/.agent-mail/agent-mail.mjs check-append-only
 ```
 
-- Uma cópia que não é a revisada do main, ou cuja versão não pôde ser conferida agora, não escreve no correio: o comando é recusado com "escrita recusada" e pede a reinstalação pelo comando de CO (b) do AGENTS.md. Ler continua possível, com o aviso.
+- Uma cópia que não é a revisada do main, ou cuja versão não pôde ser conferida agora, não escreve no correio e também não liga a vigia (`watch`), que confirma leituras e grava avisos: o comando é recusado com "escrita recusada" e pede a reinstalação pelo comando de CO (b) do AGENTS.md. Os comandos que só leem (`read`, `list-queue`, `list-reviews`, `pr-status`, `list-switches`, `check-append-only` e afins) continuam funcionando, com o aviso.
 
 ## Recados
 

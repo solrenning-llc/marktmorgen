@@ -141,6 +141,16 @@ export type LowStockCheck = "crossed" | "no" | "off" | "unknown";
  * as noteUnitsLeft: a crossing that reached nobody stays one to say.
  * Anything else, including a newer count, is left as it is.
  */
+/**
+ * The low-stock record's key and field, and what the CAS of noteUnitsLeft wrote for these units left: for
+ * lib/low-stock-alert.ts's give-back, which puts the count seen back in the same step as the day's mark (Codex X6
+ * on #3725). Null when there is nowhere to write.
+ */
+export function unitsSeenRestore(store: DataStore, productId: string, left: number, before: LowStock): { key: string; field: string; wroteSha: string; before: string } | null {
+  if (!store.statsId || !productId) return null;
+  return { key: keyOf(store.statsId), field: productId, wroteSha: sha1(JSON.stringify({ low: before.low, seen: left })), before: JSON.stringify(before) };
+}
+
 export async function restoreUnitsSeen(store: DataStore, productId: string, left: number, before: LowStock): Promise<boolean> {
   if (!store.statsId || !productId || !isRedisConfigured()) return false;
   const written = JSON.stringify({ low: before.low, seen: left });

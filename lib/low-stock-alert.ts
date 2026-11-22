@@ -24,7 +24,7 @@
  */
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
-import { noteUnitsLeft, lowStockOf, restoreUnitsSeen, wouldCrossLow } from "@/lib/low-stock";
+import { noteUnitsLeft, lowStockOf, unitsSeenRestore, wouldCrossLow, type LowStock } from "@/lib/low-stock";
 import { alertCreator } from "@/lib/phone-alerts";
 import { SITE_URL } from "@/lib/site-url";
 import { weeklyOffState, weeklyToken } from "@/lib/stats-report";
@@ -76,22 +76,30 @@ export async function tellLowStock(store: Store, product: { id: string; title: s
   }
   if (count === null || count < 1) return "unknown";
   if (count > LOW_STOCK_ALERTS_A_STORE_DAY) return "no";
+  // A crossing that cannot send (a record gone or changed under it, a day's claim taken or unknown) gives its place
+  // back, so crossings of a product already told today never use up the places of the store's other products (Codex
+  // X6 on #3725). A give-back that fails leaves one place too few, never one too many.
+  const placeBack = async <T>(answer: T): Promise<T> => {
+    if (store.statsId) await redisPipeline([["DECR", storeDayKey(store.statsId, day)]]).catch(() => {});
+    return answer;
+  };
   // The record as it was, to put back if nothing reaches the creator.
-  let before: { low: number; seen: number | null } | null = null;
+  let before: LowStock | null = null;
   try {
     before = await lowStockOf(store, product.id);
   } catch {
-    return "unknown";
+    return placeBack("unknown" as const);
   }
-  if (!before) return "off";
+  if (!before) return placeBack("off" as const);
   const low = before.low;
   const crossed = await noteUnitsLeft(store, product.id, left);
-  if (crossed !== "crossed") return crossed;
+  if (crossed !== "crossed") return placeBack(crossed);
   const key = toldKey(store.statsId, product.id, day);
   const value = claimValue(now);
   const claimed = await claimMark(key, TOLD_SECONDS, value);
-  if (claimed === "unknown") return "unknown";
-  if (claimed !== "ours") return "no";
+  // A claim not ours, or unknown, sends nothing: its place goes back; the crossing stays spent, never said twice.
+  if (claimed === "unknown") return placeBack("unknown" as const);
+  if (claimed !== "ours") return placeBack("no" as const);
 
   const units = left as number;
   const title = `${product.title.slice(0, 140)}: ${units} left`;
@@ -150,18 +158,45 @@ export async function tellLowStock(store: Store, product: { id: string; title: s
   return "told";
 }
 
-/** Puts back what a crossing that reached nobody took: the day's mark, the count seen and, when asked, the store's place. */
+/**
+ * Puts back, in one step, what a crossing that reached nobody took: the day's mark (only while it is still this
+ * crossing's) and the count seen (only while the record still holds what this crossing wrote), both or neither
+ * (Codex X6 on #3725: two separate steps could release the mark and keep the crossing spent, so it was never said);
+ * and, when asked, the store's place. A step that fails leaves everything spent, never half: the crossing waits
+ * for the next day's mark.
+ */
 async function giveBack(
   store: Store,
   productId: string,
   left: number,
-  before: Parameters<typeof restoreUnitsSeen>[3],
+  before: LowStock,
   key: string,
   value: string,
   day: string,
   place: boolean,
 ): Promise<void> {
-  await releaseMark(key, value).catch(() => {});
-  await restoreUnitsSeen(store, productId, left, before).catch(() => {});
-  if (place && store.statsId) await redisPipeline([["DECR", storeDayKey(store.statsId, day)]]).catch(() => {});
+  const seen = unitsSeenRestore(store, productId, left, before);
+  if (!seen || !store.statsId) return;
+  await redisPipeline([[
+    "EVAL", LOW_STOCK_GIVE_BACK, 3, key, seen.key, storeDayKey(store.statsId, day),
+    value, seen.field, seen.wroteSha, seen.before, place ? "1" : "0",
+  ]]).catch((error) => console.error("a low-stock crossing could not be given back; it stays spent", error));
 }
+
+/**
+ * The give-back of a crossing that reached nobody, in one step (Codex X6 on #3725): KEYS[1] the day's mark, KEYS[2]
+ * the low-stock record, KEYS[3] the store's day count; ARGV[1] the mark's value, ARGV[2] the product, ARGV[3] the
+ * SHA-1 of what the crossing wrote, ARGV[4] the record as it was, ARGV[5] "1" to give the store's place back.
+ * Nothing is changed unless the mark and the record still hold what this crossing left. 1 when given back, 0 when
+ * not. lib/redis-memory.ts runs the same.
+ */
+const LOW_STOCK_GIVE_BACK = [
+  "-- marktmorgen:low-stock-give-back:v1",
+  'if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end',
+  'local cur = redis.call("HGET", KEYS[2], ARGV[2])',
+  "if not cur or redis.sha1hex(cur) ~= ARGV[3] then return 0 end",
+  'redis.call("HSET", KEYS[2], ARGV[2], ARGV[4])',
+  'redis.call("DEL", KEYS[1])',
+  'if ARGV[5] == "1" then redis.call("DECR", KEYS[3]) end',
+  "return 1",
+].join("\n");

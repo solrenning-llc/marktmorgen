@@ -246,6 +246,34 @@ async function main(): Promise<void> {
     is("the list holds exactly its ceiling", redis.run(["HLEN", lastKey]), MAX_STOCK_ALERTS);
   }
 
+  part("A place nobody confirmed stops counting after its confirm link ends, and an ask lengthens only its own place (Codex X6 on #3616)");
+  {
+    const deadKey = `nl:sa:${sid}:${pid2}`;
+    redis.run(["DEL", deadKey]);
+    const DAY = 86_400_000;
+    const start = Date.now() - 300 * DAY;
+    // One address asked and confirmed 300 days ago: its place has 65 days left.
+    const old = await askStockAlert({ store, productId: pid2, email: "old@example.com", left: 0, now: start });
+    if (!old.ok) throw new Error("not asked");
+    is("the old place confirmed", await confirmStockAlert(old.confirm, store, start), { ok: true, productId: pid2 });
+    // One address asked 8 days ago and never confirmed: its confirm link is spent, so its place no longer counts.
+    const stale = await askStockAlert({ store, productId: pid2, email: "stale@example.com", left: 0, now: Date.now() - 8 * DAY });
+    if (!stale.ok) throw new Error("not asked");
+    const held = JSON.stringify({ at: 1, ok: 1, t: "a".repeat(48), x: Math.floor(Date.now() / 1000) + 30 * 86_400 });
+    for (let i = 0; i < MAX_STOCK_ALERTS - 2; i += 1) redis.run(["HSET", deadKey, `held${i}@example.com`, held]);
+    is("the list is at its ceiling with the stale place", redis.run(["HLEN", deadKey]), MAX_STOCK_ALERTS);
+    const roomBefore = (await dataUsed(store))?.used ?? Number.NaN;
+    const fresh = await askStockAlert({ store, productId: pid2, email: "fresh@example.com", left: 0 });
+    is("a new address takes the place the stale one held", fresh.ok, true);
+    is("the stale place is gone, the new one is there", [redis.run(["HEXISTS", deadKey, "stale@example.com"]), redis.run(["HEXISTS", deadKey, "fresh@example.com"]), redis.run(["HLEN", deadKey])], [0, 1, MAX_STOCK_ALERTS]);
+    is("the stale place's leave link went with it", await leaveStockAlert(stale.leave, store), false);
+    const roomAfter = (await dataUsed(store))?.used ?? Number.NaN;
+    is("its room came back: the store holds no more than before, besides the new place's confirm link", roomAfter - roomBefore < 400, true);
+    const left = redis.run(["TTL", deadKey]) as number;
+    is("the new ask did not lengthen the list past the old place's own end (65 days), let alone a year", left <= 65 * 86_400 + 5 && left > 64 * 86_400, true);
+    is("the old place is still on the restock list", (await confirmedForRestock(store, pid2)).includes("old@example.com"), true);
+  }
+
   done();
 }
 

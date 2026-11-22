@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { ASK_ERASE_BATCH } from "@/lib/erasure-rules";
 import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/path-board-rules";
+import { TAKE_SCRIPTS } from "@/lib/redis-memory-take";
 const sha1ForContactImport = (value: string) => createHash("sha1").update(value).digest("hex");
 
 /** lib/store-data.ts NOTES_TOTAL_FIELD: the room's one slot for every student's lesson notes (lib/lesson-notes.ts). */
@@ -273,6 +274,14 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // The take scripts and their kin (lib/redis-memory-take.ts, one record shared with the tests' stand-in), by the
+        // name on the script's first line: here too, so `next dev` and the demo store run them (#4969's Mobile render).
+        const takeName = /^-- marktmorgen:([a-z-]+:v\d+)\n/.exec(key)?.[1] ?? "";
+        if (Object.hasOwn(TAKE_SCRIPTS, takeName)) {
+          const count = Number(args[0]);
+          const rest = args.slice(1);
+          return TAKE_SCRIPTS[takeName]((command) => this.run(command), rest.slice(0, count), rest.slice(count));
+        }
         if (key.startsWith("-- marktmorgen:contact-import:v1\n")) {
           if (args[0] !== "4" || args.length <= 5 || (args.length - 5) % 6 !== 0) throw new Error("invalid contact import");
           const [, contacts, erased, agreed, unsub, ...rows] = args;

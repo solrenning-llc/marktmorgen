@@ -13,6 +13,9 @@
  *                                        for the cap, the deletion and the copy of a person's data
  *   nl:apply:d:<sid>:<day>       string  how many applications the store took that UTC day
  *                                        (APPLY_PER_STORE_DAY at most), kept two days
+ *   nl:apply:on:<sid>            set     the store's products that ask for an application first
+ *                                        (MAX_PRODUCTS at most); only read here, written by the
+ *                                        studio's product setting (a later unit)
  *
  * Every key has an expiry, set in the same step that writes it. A record is
  * written by one script on the Redis side (NEW): the store's and the person's
@@ -27,6 +30,10 @@
  * was asked for is read back where a write may have landed, and is otherwise
  * "unavailable" (a write) or null / UnknownReplyError (a read), never an empty
  * list, a saved application or a person with nothing kept.
+ *
+ * The record also keeps the exact sentence the person agreed to and its
+ * version (APPLY_CONSENT_TEXT, APPLY_CONSENT_VERSION), at the time they
+ * applied: an application is never kept without it.
  *
  * The record keeps the address the person applied with, because the creator
  * must see who applied and the approved person must be sent their link. The
@@ -70,7 +77,7 @@ export const APPLY_PER_STORE_DAY = 200;
 export const APPLY_MAX_KEPT = 500;
 /** Applications one address keeps in one store at once. */
 export const APPLY_MAX_PER_PERSON = 5;
-/** The largest stored application: the rules' record (2 KB at most) with the address, written once more as text. */
+/** The largest stored application: the rules' record (2 KB at most) with the address and the sentence agreed to, written once more as text. */
 export const APPLY_RECORD_MAX_BYTES = 3_072;
 /** The day count's life: the day it counts and the next. */
 export const APPLY_DAY_SECONDS = 2 * 86_400;
@@ -85,6 +92,34 @@ export const APPLY_DAY_SECONDS = 2 * 86_400;
  */
 export const APPLY_SUBMIT_COMMANDS = 16;
 export const APPLY_DECIDE_COMMANDS = 11;
+/** The mode's read on a product (SISMEMBER), before an application is kept. */
+export const APPLY_MODE_COMMANDS = 1;
+/**
+ * Public requests one application takes before anything about it is read
+ * (app/api/store/apply/route.ts): its own commands, the mode's read, the
+ * connection's hourly count and the product's read, held under the price of
+ * that many later pages in tests/apply-first-routes.test.ts.
+ */
+export const APPLY_SUBMIT_REQUEST_UNITS = 2;
+/**
+ * Studio requests a decision takes more than the one its door counts
+ * (app/api/store/applications/route.ts): its commands with the door's own
+ * stay inside two studio requests, held in tests/apply-first-routes.test.ts.
+ */
+export const APPLY_DECIDE_STUDIO_UNITS = 1;
+
+/** Applications sent from one connection to one store in an hour (app/api/store/apply/route.ts). */
+export const APPLY_PER_CONNECTION_HOUR = 10;
+/** What the product's page is told, in its address, about an application; never anything typed. */
+export type ApplyStatus = "sent" | "email" | "consent" | "closed" | "busy" | "limited" | "full" | "person" | "error";
+
+/** The version of the sentence an applicant agrees to; bumped whenever its words change. */
+export const APPLY_CONSENT_VERSION = "apply-first-1";
+/** The sentence itself, kept with every application as it was shown. */
+export const APPLY_CONSENT_TEXT =
+  "Keep my email address with my application, so the creator can read it and email me their answer.";
+/** Every version's words, so a kept application is read only with the words it was given under. */
+const CONSENT_WORDS: Readonly<Record<string, string>> = { [APPLY_CONSENT_VERSION]: APPLY_CONSENT_TEXT };
 export const APPLY_LIST_COMMANDS = 2;
 export const APPLY_COPY_COMMANDS = 2;
 export const APPLY_FORGET_COMMANDS = 1 + APPLY_MAX_PER_PERSON * 2 + 2;
@@ -92,6 +127,7 @@ export const APPLY_FORGET_COMMANDS = 1 + APPLY_MAX_PER_PERSON * 2 + 2;
 const recordKey = (sid: string, id: string) => `nl:apply:r:${sid}:${id}`;
 const storeIndex = (sid: string) => `nl:apply:s:${sid}`;
 const personIndex = (sid: string, email: string) => `nl:apply:p:${sid}:${personKey(sid, email)}`;
+const modeKey = (sid: string) => `nl:apply:on:${sid}`;
 const dayKey = (sid: string, now: number) => `nl:apply:d:${sid}:${new Date(now).toISOString().slice(0, 10).replace(/-/g, "")}`;
 
 /**
@@ -142,6 +178,8 @@ export type ApplicationView = {
   decidedAt: number;
   expiresAt: number;
   usedAt: number;
+  /** The sentence they agreed to when they applied, and its version. */
+  consent: { text: string; version: string };
 };
 
 /** One press of "approve" (16 random bytes, hex), chosen by the caller and sent again with the same press. */
@@ -154,7 +192,7 @@ const DIGEST = /^[0-9a-f]{64}$/;
  * op: the digest of the key of the press that approved it (approvalDigest),
  * kept only while approved or used, never the key itself.
  */
-type Kept = { email: string; app: Application; op?: string };
+type Kept = { email: string; app: Application; consent: { text: string; version: string }; op?: string };
 
 /** What the record keeps of a press's key: bound to the store and the application, under this file's own label. */
 function approvalDigest(sid: string, id: string, key: string): string {
@@ -174,7 +212,10 @@ const seconds = (until: number, now: number) => Math.max(60, Math.ceil((until - 
 
 /** The stored text: the address and the rules' record, in one fixed shape. */
 function storedText(kept: Kept): string {
-  return JSON.stringify({ v: 1, email: kept.email, app: JSON.stringify(kept.app), ...(kept.op ? { op: kept.op } : {}) });
+  return JSON.stringify({
+    v: 1, email: kept.email, app: JSON.stringify(kept.app), consent: { text: kept.consent.text, version: kept.consent.version },
+    ...(kept.op ? { op: kept.op } : {}),
+  });
 }
 
 /**
@@ -192,20 +233,22 @@ function readKept(raw: unknown, id: string): Kept | null {
     return null;
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const { v, email, app, op } = value as Record<string, unknown>;
-  if (v !== 1 || typeof email !== "string" || typeof app !== "string") return null;
+  const { v, email, app, consent, op } = value as Record<string, unknown>;
+  if (v !== 1 || typeof email !== "string" || typeof app !== "string" || !consent || typeof consent !== "object") return null;
+  const { text, version } = consent as Record<string, unknown>;
+  if (typeof text !== "string" || typeof version !== "string" || !Object.hasOwn(CONSENT_WORDS, version) || CONSENT_WORDS[version] !== text) return null;
   if (op !== undefined && (typeof op !== "string" || !DIGEST.test(op))) return null;
   // Written exactly as storedText writes it, or it was not written here.
-  if (JSON.stringify({ v: 1, email, app, ...(op ? { op } : {}) }) !== raw) return null;
+  if (JSON.stringify({ v: 1, email, app, consent: { text, version }, ...(op ? { op } : {}) }) !== raw) return null;
   const parsed = parseApplication(app);
   if (!parsed || parsed.id !== id || normaliseEmail(email) !== email || applicantDigest(email) !== parsed.applicant) return null;
   if (op && parsed.state !== "approved" && parsed.state !== "used") return null;
-  return op ? { email, app: parsed, op } : { email, app: parsed };
+  return op ? { email, app: parsed, consent: { text, version }, op } : { email, app: parsed, consent: { text, version } };
 }
 
 function viewOf(kept: Kept): ApplicationView {
   const { id, offer, state, at, decidedAt, expiresAt, usedAt } = kept.app;
-  return { id, offer, email: kept.email, state, at, decidedAt, expiresAt, usedAt };
+  return { id, offer, email: kept.email, state, at, decidedAt, expiresAt, usedAt, consent: { ...kept.consent } };
 }
 
 /** A pipeline's one reply read back after an unknown answer: the key holding exactly `value` means it landed. */
@@ -220,7 +263,7 @@ async function landed(key: string, value: string): Promise<boolean> {
 
 export type Submitted =
   | { ok: true; application: ApplicationView }
-  | { ok: false; reason: "bad-input" | "day" | "full" | "person" | "unavailable" };
+  | { ok: false; reason: "bad-input" | "consent" | "day" | "full" | "person" | "unavailable" };
 
 /**
  * Keeps one form attempt, within the store's day and storage caps. The caller must keep the same key on
@@ -229,10 +272,12 @@ export type Submitted =
  */
 export async function submitApplication(
   store: Pick<Store, "sid" | "listId">,
-  input: { offer: string; email: string; key: string },
+  input: { offer: string; email: string; consentVersion: string; key: string },
   now = Date.now(),
 ): Promise<Submitted> {
   if (!store.sid || !store.listId || !isRedisConfigured()) return { ok: false, reason: "unavailable" };
+  // Kept only with the sentence the person agreed to, in the version they were shown.
+  if (input.consentVersion !== APPLY_CONSENT_VERSION) return { ok: false, reason: "consent" };
   if (typeof input.key !== "string" || !SUBMISSION_KEY.test(input.key)) return { ok: false, reason: "bad-input" };
   const sid = store.sid;
   const applicant = applicantDigest(input.email);
@@ -241,7 +286,7 @@ export async function submitApplication(
   const id = createHash("sha256").update(JSON.stringify(["apply-first-submit:v1", sid, applicant, input.key])).digest("hex").slice(0, 32);
   const app = newApplication({ id, offer: input.offer, email: input.email, now });
   if (!app) return { ok: false, reason: "bad-input" };
-  const kept: Kept = { email: normaliseEmail(input.email), app };
+  const kept: Kept = { email: normaliseEmail(input.email), app, consent: { text: APPLY_CONSENT_TEXT, version: APPLY_CONSENT_VERSION } };
   const text = storedText(kept);
   if (Buffer.byteLength(text, "utf8") > APPLY_RECORD_MAX_BYTES || !readKept(text, app.id)) return { ok: false, reason: "bad-input" };
   const key = recordKey(sid, app.id);
@@ -328,7 +373,9 @@ export async function decideApplication(
       return { ok: false, reason: "unavailable" };
     }
     // A decline drops the press's digest with the link; an approval keeps its own press's, or none.
-    const next: Kept = answer.next.state === "approved" && op ? { email: kept.email, app: answer.next, op } : { email: kept.email, app: answer.next };
+    const next: Kept = answer.next.state === "approved" && op
+      ? { email: kept.email, app: answer.next, consent: kept.consent, op }
+      : { email: kept.email, app: answer.next, consent: kept.consent };
     const text = storedText(next);
     if (Buffer.byteLength(text, "utf8") > APPLY_RECORD_MAX_BYTES) return { ok: false, reason: "unavailable" };
     // A record's life only grows: a decline after an approval keeps the longer one, so its index entries, and the
@@ -364,6 +411,18 @@ function reissued(app: Application, now: number, days: number, token: string): R
   if (!Number.isSafeInteger(days) || days < APPLY_LINK_DAYS_MIN || days > APPLY_LINK_DAYS_MAX || now < app.decidedAt) return { ok: false, why: "bad-input" };
   const next = parseApplication(JSON.stringify({ ...app, decidedAt: now, expiresAt: now + days * DAY, tokenDigest: applyTokenDigest(token) }));
   return next && next.tokenDigest !== app.tokenDigest ? { ok: true, next } : { ok: false, why: "unknown" };
+}
+
+/**
+ * Whether a product of the store asks for an application before it is bought:
+ * one SISMEMBER, read exactly. Anything but 0 or 1 throws UnknownReplyError,
+ * never "no" or "yes". No store id or no database is "no": nothing is taken.
+ */
+export async function isApplyFirst(store: Pick<Store, "sid">, productId: string): Promise<boolean> {
+  if (!store.sid || !isRedisConfigured() || typeof productId !== "string" || !productId) return false;
+  const reply = repliesFor(await redisPipeline([["SISMEMBER", modeKey(store.sid), productId]]), 1);
+  if (!reply || (reply[0] !== 0 && reply[0] !== 1)) throw new UnknownReplyError("whether a product asks for an application");
+  return reply[0] === 1;
 }
 
 /** The ids an index names, read exactly: a list of application ids, or UnknownReplyError. */

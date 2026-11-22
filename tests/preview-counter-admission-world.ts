@@ -26,12 +26,14 @@ export async function storeForHandle() { state.lookups += 1; return state.storeF
 export async function takePublicRequest() { state.publicCalls += 1; return state.publicAllowed; }
 export const takePublicRequestExact = takePublicRequest;
 /** The meter a new preview's storage measurement is paid from (lib/stamp-cost-rules.ts): handed to previewCopy, never called by the route itself. */
+export async function setWhileStoreLive() { throw new Error("The preview stand-in must not invoke its keeper"); }
 export async function holdPublicRequests() { throw new Error("The route must not hold requests itself; previewCopy does, before it measures"); }
 export async function givePublicRequests() { throw new Error("The route must not give requests back itself"); }
 export async function readListing() { state.listings += 1; return { id: "p1234", hidden: false, preview: 3, file: { pathname: "synthetic.pdf" } }; }
 export const MAX_PREVIEW_PAGES = 10;
-export async function previewCopy(_file: unknown, _pages: number, _store: unknown, meter: { take?: unknown; give?: unknown } | undefined) {
+export async function previewCopy(_file: unknown, _pages: number, _store: unknown, meter: { take?: unknown; give?: unknown } | undefined, keep: unknown) {
   if (typeof meter?.take !== "function" || typeof meter?.give !== "function") throw new Error("A preview is made only with a meter for its storage measurement");
+  if (typeof keep !== "function") throw new Error("A preview record is kept only through the store-live keeper");
   state.copies += 1; return { pathname: "synthetic-preview.pdf" };
 }
 export function plain(status: number, body: string) { return new Response(body, { status }); }

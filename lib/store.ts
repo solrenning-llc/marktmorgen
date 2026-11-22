@@ -2337,6 +2337,24 @@ export type CreateResult =
   | { ok: true; store: Store }
   | { ok: false; reason: "taken" | "reserved" | "shape" | "first" | "too_many"; limit?: number };
 
+/** How many times a refused store id's take-back is sent before it is said to be unknown. */
+const TAKE_BACK_TRIES = 3;
+
+/**
+ * Takes a refused new store id back out of its account's set, and reads that it went (Claude 4 AC's LOW on #4348).
+ * A take-back that is lost leaves the id in the set for good: on a full account the set then holds
+ * MAX_STORES_PER_ACCOUNT members, which the closing of that owner's stores reads as unknown, and they wait forever.
+ * So the reply is read exactly, 0 or 1 (already gone counts as gone); a throw or another shape sends it again, and
+ * after TAKE_BACK_TRIES the take-back is said as unknown instead of hidden.
+ */
+async function takeBackStoreId(account: string, sid: string): Promise<void> {
+  for (let tries = 0; tries < TAKE_BACK_TRIES; tries += 1) {
+    const reply = await redisPipeline([["SREM", account, sid]]).then((replies) => replies[0], () => undefined);
+    if (reply === 0 || reply === 1) return;
+  }
+  throw new UnknownReplyError("a refused store id's take-back from its account");
+}
+
 /**
  * Makes another store for an account that already has its first.
  *
@@ -2367,17 +2385,17 @@ export async function createStore(
   // another shape (NaN before, which passed the ceiling) takes the new id back out and makes no store.
   const count = added ? countOf(added[1]) : null;
   if (count === null) {
-    await redisPipeline([["SREM", account, sid]]);
+    await takeBackStoreId(account, sid);
     throw new UnknownReplyError("an account's count of stores");
   }
   if (count + 1 > MAX_STORES_PER_ACCOUNT) {
-    await redisPipeline([["SREM", account, sid]]);
+    await takeBackStoreId(account, sid);
     return { ok: false, reason: "too_many", limit: MAX_STORES_PER_ACCOUNT };
   }
 
   const [taken] = await redisPipeline([["SET", handleKey(handle), ref, "NX"]]);
   if (taken === null) {
-    await redisPipeline([["SREM", account, sid]]);
+    await takeBackStoreId(account, sid);
     return { ok: false, reason: "taken" };
   }
 
@@ -3803,7 +3821,7 @@ export async function setCurrency(email: string, currency: Currency): Promise<Cu
 export async function setAffiliateSetting(
   email: string,
   setting: AffiliateSetting,
-): Promise<{ ok: true; store: Store } | { ok: false; reason: "none" }> {
+): Promise<{ ok: true; store: Store } | { ok: false; reason: "none" | "listing" }> {
   const next = await patchStore(email, (store) => {
     const known = new Set(productIds(store));
     const parsed = parseAffiliateSetting(setting);
@@ -3813,8 +3831,15 @@ export async function setAffiliateSetting(
   // Whether this creator's program is listed in the affiliate directory, kept
   // in step on the save rather than reconstructed by walking every store
   // (lib/directory-index.ts); the save also drops the directory's kept rows.
+  // A rejected index write is never a saved answer (Codex N1 on #3062): the program is saved, but a creator who left the
+  // directory would stay listed until a rebuild, so they are told to save again. The same save sent again writes the
+  // same program and keeps the index in step.
   if (next) {
-    await rememberListing(next).catch((error) => console.error("remembering a directory listing failed", error));
+    const kept = await rememberListing(next).then(() => true, (error: unknown) => {
+      console.error("remembering a directory listing failed", error);
+      return false;
+    });
+    if (!kept) return { ok: false, reason: "listing" };
   }
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
 }

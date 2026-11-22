@@ -100,7 +100,7 @@
  */
 import { BACKUP_MAX_BYTES } from "@/lib/backup-export";
 import { BackupObjectLockedError, type BackupBucket, type BackupListedObject, type BackupObjectStore } from "@/lib/backup-roundtrip";
-import { MAX_PARTS, copyInParts, manifestBound, openManifest, runStoredBound } from "@/lib/backup-parts";
+import { MAX_PARTS, copyInParts, isManifestEnvelope, manifestBound, openManifest, runStoredBound } from "@/lib/backup-parts";
 import { BACKUP_LIST_PAGE_KEYS, backupStoreConfig, r2BackupStore } from "@/lib/backup-store";
 import { timeLeft, withCutoff } from "@/lib/fetch-timeout";
 import { redisPipeline } from "@/lib/redis";
@@ -281,13 +281,45 @@ export type BackupRunResult =
         | "room_error" | "room_pages" | "room_cutoff" | "room_unverified" | "room_locked" | "room_shrunk"
         | "export_limits" | "export_budget" | "export_cutoff" | "export_scan_pages" | "export_too_many" | "export_too_big" | "export_too_many_parts" | "export_unreadable" | "export_error"
         | "verify";
-    };
+    }
+  /**
+   * A key over the backup's ceiling (BACKUP_KEY_MAX_BYTES, lib/backup-parts.ts): every other key copied as a verified
+   * set (`id`), but `missing` keys left out, so it is never the last good copy: the mark stays on the previous one,
+   * nothing is pruned, and the owner's report and the alarm carry this state (rule 24).
+   */
+  | { ok: false; reason: "export_key_over_ceiling"; id: string; missing: number; keys: number; bytes: number; parts: number };
+
+/** 32 bytes from a setting's base64; null for anything else. */
+function keyFrom(raw: string | undefined): Uint8Array | null {
+  const text = raw?.trim();
+  if (!text || !/^[A-Za-z0-9+/]+={0,2}$/.test(text)) return null;
+  const key = Buffer.from(text, "base64");
+  return key.length === 32 ? new Uint8Array(key) : null;
+}
 
 export function backupKey(): Uint8Array | null {
-  const raw = process.env.BACKUP_ENCRYPTION_KEY?.trim();
-  if (!raw || !/^[A-Za-z0-9+/]+={0,2}$/.test(raw)) return null;
-  const key = Buffer.from(raw, "base64");
-  return key.length === 32 ? new Uint8Array(key) : null;
+  return keyFrom(process.env.BACKUP_ENCRYPTION_KEY);
+}
+
+/** Days after a rotation that the previous key still opens copies (inbox C4-36 item 3): the retention's 30, twice. */
+export const BACKUP_KEY_PREVIOUS_DAYS = 60;
+
+/**
+ * The keys a run uses (inbox C4-36 item 3): the current key (BACKUP_ENCRYPTION_KEY) writes and reads; after a
+ * rotation, the previous one (BACKUP_ENCRYPTION_KEY_PREVIOUS) is also read, from the rotation day
+ * (BACKUP_ENCRYPTION_KEY_ROTATED_AT, YYYY-MM-DD, UTC) for BACKUP_KEY_PREVIOUS_DAYS days, never before that day, never
+ * after, never when malformed or the same key. Null without a current key.
+ */
+export function backupKeyring(now: number = Date.now()): { current: Uint8Array; readers: Uint8Array[] } | null {
+  const current = backupKey();
+  if (!current) return null;
+  const previous = keyFrom(process.env.BACKUP_ENCRYPTION_KEY_PREVIOUS);
+  const day = (process.env.BACKUP_ENCRYPTION_KEY_ROTATED_AT ?? "").trim();
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(day) ? Date.parse(`${day}T00:00:00Z`) : NaN;
+  const real = Number.isFinite(from) && dayOf(from) === day;
+  const open = real && now >= from && now <= from + BACKUP_KEY_PREVIOUS_DAYS * DAY_MS;
+  const same = previous !== null && Buffer.from(previous).equals(Buffer.from(current));
+  return { current, readers: previous && open && !same ? [current, previous] : [current] };
 }
 
 
@@ -299,6 +331,8 @@ export type BackupRunOptions = {
   key?: Uint8Array | null;
   /** The run's cutoff, in ms from when it starts listing; BACKUP_RUN_CUTOFF_MS unless a test shortens it. */
   cutoffMs?: number;
+  /** Keys besides `key` that copies may be opened with (never written with): the keyring's previous key by default. */
+  previousKeys?: Uint8Array[];
 };
 
 function defaultStore(): BackupBucket | null {
@@ -307,6 +341,7 @@ function defaultStore(): BackupBucket | null {
 }
 
 /** The keys and bytes of the last good set a new copy is compared with before the prune (inbox C4-36 item 1). */
+/** A verified set's size for the shrink guard: `keys` counts its rows as its manifest does (a chunked key's chunks each). */
 type BackupBase = { keys: number; bytes: number };
 const isCount = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
 
@@ -347,6 +382,9 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
   if (!store) return { ok: false, reason: "off_store" };
   const key = "key" in options ? options.key : backupKey();
   if (!key || key.length !== 32) return { ok: false, reason: "off_key" };
+  // Read with the current key first, then the previous one while it may still open copies (backupKeyring).
+  const extra = "previousKeys" in options ? (options.previousKeys ?? []) : (backupKeyring(now)?.readers.slice(1) ?? []);
+  const readers = [key, ...extra.filter((k) => k instanceof Uint8Array && k.length === 32)];
 
   const keep = outcomeSeconds(review);
   // One run at a time, before anything else (inbox C4-53): a call that finds a run going is refused, and noted so a
@@ -387,7 +425,7 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
   let markReply: Promise<unknown> | null = null;
   const readMark: MarkReader = () => (markReply ??= redisPipeline([["GET", LAST_OK]]));
   const result: BackupRunResult = await withCutoff(cutoff, async () => {
-    const room = await makeRoom(review, store, key, now, readMark);
+    const room = await makeRoom(review, store, readers, now, readMark);
     lost = room.lost;
     if (!room.ok) return { ok: false, reason: room.reason };
     const copied = await copy(review, store, key, now);
@@ -396,9 +434,12 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
     if (!copied.ok) return copied;
     // After a verified write, as best it can: a failure is reported and never costs the copy just made. The copy just
     // made is the last verified one now, and it is younger than the retention.
-    const pruned = await prune(review, store, key, now, copied, readMark);
+    // The shrink guard compares rows with rows: a set's manifest counts a chunked key's chunks each, so the copy is
+    // measured the same way, never by keys (Codex X6 on #3277). The report still says how many keys were copied.
+    const { rows, ...made } = copied;
+    const pruned = await prune(review, store, readers, now, { ...made, keys: rows }, readMark);
     mark = pruned.mark;
-    return { ...copied, pruned: room.deleted + pruned.deleted, prune: pruned.state, ...(lost ? { note: "last_good_copy_lost" as const } : {}) };
+    return { ...made, pruned: room.deleted + pruned.deleted, prune: pruned.state, ...(lost ? { note: "last_good_copy_lost" as const } : {}) };
   });
   try {
     await redisPipeline(
@@ -420,7 +461,7 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
                 ? [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: "last_good_copy_lost", note: LOST_NOTE }), "EX", keep]]
                 : []),
           ]
-        : [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.reason, ...(lost ? { note: LOST_NOTE } : {}) }), "EX", keep]],
+        : [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.reason, ...("missing" in result ? { missing: result.missing, set: result.id } : {}), ...(lost ? { note: LOST_NOTE } : {}) }), "EX", keep]],
     );
   } catch {
     // The copy stands as it is; a lost note only makes the report look older.
@@ -469,7 +510,7 @@ class LostLastGood extends Error {
  * good copy": the mark is kept for good once written, so its absence is a loss, and the run never deletes to make
  * room without knowing what to keep; copies left that way go by the bucket's lifecycle rule.
  */
-async function lastVerified(store: BackupBucket, key: Uint8Array, listed: BackupListedObject[], readMark: MarkReader): Promise<{ keep: Set<string>; heldSince: number | null }> {
+async function lastVerified(store: BackupBucket, key: Uint8Array[], listed: BackupListedObject[], readMark: MarkReader): Promise<{ keep: Set<string>; heldSince: number | null }> {
   const replies: unknown = await readMark();
   if (!Array.isArray(replies) || replies.length !== 1 || typeof replies[0] !== "string") throw new Unverified();
   const mark = readLastOk(replies[0]);
@@ -490,11 +531,13 @@ async function lastVerified(store: BackupBucket, key: Uint8Array, listed: Backup
 
 /**
  * Every verified set still in the bucket, when the last good copy is lost: each listed object small enough to be a
- * manifest is read and opened, and every manifest that opens is kept with every part it names. An object that cannot
- * be read throws Unverified (nothing deleted on doubt); one that reads but does not open as a manifest is not one.
- * Reads at most backupKeptObjects objects (Class B, priced in lib/backup-cost.ts).
+ * manifest is read and opened with the keyring, and every manifest that opens is kept with every part it names. An
+ * object that cannot be read throws Unverified (nothing deleted on doubt), and so does one that begins as a manifest
+ * but does not open (under a key the keyring lacks, or damaged: inbox C4-36 item 3), since the parts it names cannot
+ * be known; one that does not begin as a manifest is not one. Reads at most backupKeptObjects objects (Class B, priced
+ * in lib/backup-cost.ts).
  */
-async function verifiedInBucket(store: BackupBucket, key: Uint8Array, listed: BackupListedObject[]): Promise<Set<string>> {
+async function verifiedInBucket(store: BackupBucket, key: Uint8Array[], listed: BackupListedObject[]): Promise<Set<string>> {
   return (await setsInBucket(store, key, listed)).keep;
 }
 
@@ -502,7 +545,7 @@ async function verifiedInBucket(store: BackupBucket, key: Uint8Array, listed: Ba
  * verifiedInBucket's reads, with each verified set's keys and bytes as its run counted them (the manifest's rows; its
  * parts' sizes and the manifest's own), so a copy with no mark can be compared with them (Claude 6's N1).
  */
-async function setsInBucket(store: BackupBucket, key: Uint8Array, listed: BackupListedObject[]): Promise<{ keep: Set<string>; sets: BackupBase[] }> {
+async function setsInBucket(store: BackupBucket, key: Uint8Array[], listed: BackupListedObject[]): Promise<{ keep: Set<string>; sets: BackupBase[] }> {
   const keep = new Set<string>();
   const sets: BackupBase[] = [];
   for (const object of listed) {
@@ -520,7 +563,8 @@ async function setsInBucket(store: BackupBucket, key: Uint8Array, listed: Backup
       for (const part of manifest.parts) keep.add(part.id);
       sets.push({ keys: manifest.rows, bytes: manifest.parts.reduce((n, part) => n + part.bytes, 0) + bytes.byteLength });
     } catch {
-      // Not a manifest that opens with this key: a part, or a failed run's leftover.
+      if (isManifestEnvelope(bytes)) throw new Unverified();
+      // Not a manifest at all: a part, or a failed run's leftover.
     }
   }
   return { keep, sets };
@@ -539,7 +583,7 @@ async function setsInBucket(store: BackupBucket, key: Uint8Array, listed: Backup
 async function makeRoom(
   review: BackupCostReview,
   store: BackupBucket,
-  key: Uint8Array,
+  key: Uint8Array[],
   now: number,
   readMark: MarkReader,
 ): Promise<{ ok: true; deleted: number; lost: boolean } | { ok: false; reason: "room_error" | "room_pages" | "room_cutoff" | "room_unverified" | "room_locked" | "room_shrunk"; lost: boolean }> {
@@ -650,7 +694,7 @@ async function shrinkCheck(
 async function prune(
   review: BackupCostReview,
   store: BackupBucket,
-  key: Uint8Array,
+  key: Uint8Array[],
   now: number,
   copied: { id: string; keys: number; bytes: number; parts: number },
   readMark: MarkReader,
@@ -702,7 +746,7 @@ async function prune(
   }
 }
 
-async function copy(review: BackupCostReview, store: BackupObjectStore, key: Uint8Array, now: number): Promise<Exclude<BackupRunResult, { ok: true }> | { ok: true; id: string; keys: number; bytes: number; parts: number }> {
+async function copy(review: BackupCostReview, store: BackupObjectStore, key: Uint8Array, now: number): Promise<Exclude<BackupRunResult, { ok: true }> | { ok: true; id: string; keys: number; rows: number; bytes: number; parts: number }> {
   // The copy in parts (lib/backup-parts.ts): every part verified as written, the set verified by its manifest last.
   let done: Awaited<ReturnType<typeof copyInParts>>;
   try {
@@ -710,9 +754,10 @@ async function copy(review: BackupCostReview, store: BackupObjectStore, key: Uin
   } catch {
     return { ok: false, reason: "export_error" };
   }
-  if (done.ok) return { ok: true, id: done.id, keys: done.keys, bytes: done.bytes, parts: done.parts };
+  if (done.ok) return { ok: true, id: done.id, keys: done.keys, rows: done.rows, bytes: done.bytes, parts: done.parts };
   // Sealing, a write or a read-back failed: every earlier set is left as it was.
   if (done.reason === "verify") return { ok: false, reason: "verify" };
+  if (done.reason === "key_over_ceiling") return { ok: false, reason: "export_key_over_ceiling", id: done.id, missing: done.missing, keys: done.keys, bytes: done.bytes, parts: done.parts };
   return { ok: false, reason: `export_${done.reason}` };
 }
 
@@ -724,13 +769,15 @@ export async function backupStale(now: number = Date.now()): Promise<boolean> {
 }
 
 /** The latest failure kept, if any. */
-export async function backupLastFailure(): Promise<{ at: number; reason: string; note?: string } | null> {
+export async function backupLastFailure(): Promise<{ at: number; reason: string; note?: string; missing?: number } | null> {
   const [raw] = await redisPipeline([["GET", LAST_FAIL]]);
   if (typeof raw !== "string") return null;
   try {
-    const parsed = JSON.parse(raw) as { at: unknown; reason: unknown; note?: unknown };
+    const parsed = JSON.parse(raw) as { at: unknown; reason: unknown; note?: unknown; missing?: unknown };
     if (typeof parsed.at !== "number" || typeof parsed.reason !== "string") return null;
-    return typeof parsed.note === "string" ? { at: parsed.at, reason: parsed.reason, note: parsed.note } : { at: parsed.at, reason: parsed.reason };
+    // How many keys were left out over the ceiling (export_key_over_ceiling), when the failure says.
+    const missing = Number.isSafeInteger(parsed.missing) && Number(parsed.missing) > 0 ? { missing: Number(parsed.missing) } : {};
+    return typeof parsed.note === "string" ? { at: parsed.at, reason: parsed.reason, note: parsed.note, ...missing } : { at: parsed.at, reason: parsed.reason, ...missing };
   } catch {
     return null;
   }

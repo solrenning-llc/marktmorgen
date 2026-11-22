@@ -51,6 +51,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:certrefunds:n:", "nl:certrefunds:next:", "nl:certrefunds:seen:", "nl:certrefunds:since:",
   "nl:call:room:", "nl:card:link:", "nl:card:open:", "nl:card:opens:", "nl:catalog:move:cursor",
   "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:claims:", "nl:closed:due", "nl:closed:erasing", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:ap:stores", "nl:cm:ap:turns", "nl:cm:evmail:",
+  "nl:closing:paidby:",
   "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:", "nl:confirm-room:",
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:coursegone:", "nl:courses:drip", "nl:courses:lock", "nl:crefund:told:",
   "nl:creators:responses", "nl:crm:co:lock:", "nl:crm:erased:", "nl:crm:fields:", "nl:crm:gen:", "nl:crm:pacc:lock:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:", "nl:dsched:", "nl:dsched:due", "nl:dsched:lock:", "nl:dsched:tell",
@@ -250,7 +251,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:closing:lock": C,
   "nl:closed:batch": C, "nl:closed:claims:": C, "nl:closed:due": C, "nl:closed:erasing": C, "nl:closed:walk": C, "nl:closed:lock": C,
   // Queue item 307 [EC1]: a store's closing emails, the addresses told and its members' last payments, named by its folder; the stores whose members are held.
-  "nl:closing:credit:": E, "nl:closing:told:": E, "nl:closing:paid:": E, "nl:closing:held": I, "nl:closing:final": I, "nl:closing:work:": E, "nl:closing:refund:": C,
+  "nl:closing:credit:": E, "nl:closing:told:": E, "nl:closing:paid:": E, "nl:closing:paidby:": E, "nl:closing:held": I, "nl:closing:final": I, "nl:closing:work:": E, "nl:closing:refund:": C,
   // A plan paid for a store already closing, until it is ended and returned (company); a closed store's address, hashed, until it expires.
   "nl:closing:undo": C, "nl:closing:shut:": Cr(30),
   "nl:cm:": E, "nl:cm:ap:stores": I, "nl:cm:ap:turns": I, "nl:cm:evmail:": X(30), "nl:cm:evmailq": I, "nl:cm:evq": I, "nl:cm:link:": X(1),

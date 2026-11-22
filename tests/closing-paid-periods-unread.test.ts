@@ -16,7 +16,7 @@
  * Checked against the stand-in Redis and a stand-in Stripe.
  */
 import { unusedRows } from "@/lib/closing-refunds";
-import { HELD_INDEX, heldPaymentsOf, holdCounts, membersOf, paidKey, releaseHolds, releaseRestarted, workKey } from "@/lib/closing-holds";
+import { HELD_INDEX, heldAddressField, heldPaymentsOf, holdCounts, membersOf, paidByKey, paidKey, releaseHolds, releaseRestarted, workKey } from "@/lib/closing-holds";
 import { claimHandle, setSubscription, storeFolder, storeForEmail, storeRef, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -51,7 +51,8 @@ async function main() {
   const seller: Store = { ...(await storeForEmail(email))!, stripeAccountId: "acct_paidunread" };
   const folder = await storeFolder(email);
   const row = JSON.stringify({ inv: "in_paidunread", amt: 1000, tot: 1000, cur: "usd", ps: DAY_SECONDS - 15 * 86_400, pe: DAY_SECONDS + 15 * 86_400, e: "member@example.com" });
-  await redis.pipeline([["HSET", paidKey(folder), "sub_paidunread1", row], ["HSET", workKey(folder), "calls", 20, "rcalls", 10]]);
+  // The row with its place in the member's index, as the hold writes them (lib/closing-holds.ts, PAID_HOLD; #5125).
+  await redis.pipeline([["HSET", paidKey(folder), "sub_paidunread1", row], ["HSET", paidByKey(folder), heldAddressField("member@example.com"), "sub_paidunread1"], ["HSET", workKey(folder), "calls", 20, "rcalls", 10]]);
 
   part("Control: the member's payment read as written");
   is("one member paid for time past the day", await outcome(() => unusedRows(seller, DAY)), "rows:1");
@@ -62,7 +63,8 @@ async function main() {
     part(`The members' payments answer ${name}`);
     redis.pipeline = (async (commands: (string | number)[][]) => {
       const replies = await pipeline(commands);
-      return commands.map((command, i) => (command[0] === "HGETALL" && command[1] === paidKey(folder) ? reply : replies[i]));
+      // The whole hash (the closing's own reads) and the person's rows (heldPaymentsOf, since #5125) answer the same.
+      return commands.map((command, i) => ((command[0] === "HGETALL" || command[0] === "HMGET") && command[1] === paidKey(folder) ? reply : replies[i]));
     }) as typeof redis.pipeline;
     // paidPeriods itself (the rows owed, the closing day's refunds) is read exactly by #4454 (Fixes #4310; it replaces the closed #4442),
     // with its own test, tests/closing-paid-periods-exact.test.ts; this file holds the member's copy.

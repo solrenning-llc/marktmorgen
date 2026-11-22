@@ -147,10 +147,12 @@ What Marktmorgen pays for it is bounded per closing, before any of it is spent: 
 
 | Plan that ended | Buyers at the cap | Ceiling of one closing |
 |---|---|---|
-| Store | 4,800 | $9.20 |
-| Studio | 10,800 | $20.71 |
-| Scale | 36,000 | $69.02 |
+| Store | 4,800 | $9.22 |
+| Studio | 10,800 | $20.75 |
+| Scale | 36,000 | $69.16 |
 | A store that never paid | 100 | $0.19 |
+
+The ceilings above count, since 22 November 2026 (#5125), each held member's entry in the closing's index of its kept payments by address (`CLOSING_PAID_INDEX_BYTES` and `CLOSING_PAID_INDEX_COMMANDS`, tests/plan-cost-registry.ts), so a person's copy of their data reads only their own rows; before it they were $9.20, $20.71, $69.02 and $0.19. tests/closing-held-payments-index.test.ts holds this table to `closingBuyersCost`.
 
 **Why it is here and not in the closure line.** The item asked for it in the closure line (`PER_PAYMENT_LINES`). Priced there, at the price list of 18 October 2026 Store's monthly unit no longer keeps the historical 60% sizing floor that tests/limits-proposal.test.ts, tests/pricing-optimization.test.ts and tests/pricing-usage-proposal.test.ts hold (they propose cutting Store's visible figures for a few cents a month), and no test may be relaxed. So it is carried as the company's post-cancellation exposure, one occurrence per closing (a closing follows at least a payment or a trial), at the ceilings above; the exposure review stays null and release stays closed, as before. Whether to move it into the closure line (with a price change) or lower the cap is in "Depende do dono" of docs/codex-queue.md, item 307. Buyers past the cap are not written to by Marktmorgen and are counted for the creator in every notice and in the studio, so nothing is silent; while the cap is what it is, a store with more distinct buyers than its cap is the one case the checkout's sentence does not cover in full.
 

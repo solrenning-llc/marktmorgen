@@ -407,9 +407,17 @@ export const GROUP_SETTLE_STRIPE_WAIT = GROUP_SETTLE_STRIPE_CALLS * STRIPE_WAIT_
  * a few cents), so whether it moves into the closure line is the owner's.
  */
 export const CLOSING_STRIPE_CALLS = STRIPE_CALLS_PER_MEMBER;
+/**
+ * A held member's entry in the closing's index of its rows by address (lib/closing-holds.ts, PAID_HOLD, nl:closing:paidby;
+ * #5125, coordinator 6a9d, 22 November 2026): the address's 64-character hash and the member's subscription id, comma-joined,
+ * under 160 bytes, kept as long as the member's row; and the HGET and HSET the hold's script adds to its write
+ * (CLOSING_PAID_INDEX_COMMANDS), so a person's copy reads only their own rows, never the store's whole hash.
+ */
+export const CLOSING_PAID_INDEX_BYTES = 160;
+export const CLOSING_PAID_INDEX_COMMANDS = 2;
 export const CLOSING_BUYER_COST = EMAILS_PER_BUYER_PER_ENDING * PER_EMAIL
-  + 2 * 1024 * ((CLOSING_DAYS + WARN_WEEK_DAYS + BUYER_SEND_DAYS) / 30) * DB_BYTE_MONTH
-  + (CLOSING_STRIPE_CALLS + 1 / 100) * STRIPE_WAIT_SECONDS * MEMORY_SECOND + 6 * COMMAND;
+  + (2 * 1024 + CLOSING_PAID_INDEX_BYTES) * ((CLOSING_DAYS + WARN_WEEK_DAYS + BUYER_SEND_DAYS) / 30) * DB_BYTE_MONTH
+  + (CLOSING_STRIPE_CALLS + 1 / 100) * STRIPE_WAIT_SECONDS * MEMORY_SECOND + (6 + CLOSING_PAID_INDEX_COMMANDS) * COMMAND;
 /**
  * One page of a closing store's PayPal buyers (lib/closing-buyers.ts, PAYPAL_PAGE; #4258): its range and one MGET of
  * PAYPAL_PAGE records at MAX_PAID_BYTES each through the database, the probe past the cap, the told list's read and

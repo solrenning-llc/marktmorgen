@@ -271,14 +271,16 @@ async function checkOne(entry: string, now: number, deps: LowStockDeps): Promise
  */
 export async function runLowStockChecks(deadline: number, deps: LowStockDeps): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const reply = repliesFor(await redisPipeline([["ZRANGEBYSCORE", LOW_STOCK_DUE, "-inf", Date.now(), "LIMIT", 0, LOW_STOCK_RUN_PRODUCTS]]), 1);
-  const entries = reply ? stringList(reply[0]) : null;
+  const reply = repliesFor(await redisPipeline([["ZRANGEBYSCORE", LOW_STOCK_DUE, "-inf", Date.now(), "WITHSCORES", "LIMIT", 0, LOW_STOCK_RUN_PRODUCTS]]), 1);
+  const flat = reply ? stringList(reply[0]) : null;
+  // Each entry with the score it was read at, so the reschedule below moves only what is still as read.
+  const entries = flat && flat.length % 2 === 0 ? flat.flatMap((entry, i) => (i % 2 === 0 ? [[entry, flat[i + 1]] as const] : [])) : null;
   if (!entries) {
     console.error("checking low-stock numbers: the products due were read in an unknown shape, so they wait", new UnknownReplyError("the low-stock products due"));
     return 0;
   }
   let told = 0;
-  for (const entry of entries) {
+  for (const [entry, readAt] of entries) {
     if (Date.now() > deadline) break;
     let turn: "told" | "done" | "later";
     try {
@@ -289,7 +291,22 @@ export async function runLowStockChecks(deadline: number, deps: LowStockDeps): P
     }
     if (turn === "told") told += 1;
     if (turn === "done") await redisPipeline([["ZREM", LOW_STOCK_DUE, entry]]);
-    else await redisPipeline([["ZADD", LOW_STOCK_DUE, "XX", Date.now() + LOW_STOCK_WAIT_MS, entry]]);
+    // Later only while it is still as read: a sale that made it due during the check (lowStockTouched) keeps it due,
+    // never pushed back a day (Codex X6's LOW on #3814).
+    else await redisPipeline([["EVAL", LOW_STOCK_RESCHEDULE, 1, LOW_STOCK_DUE, entry, readAt, Date.now() + LOW_STOCK_WAIT_MS]]);
   }
   return told;
 }
+
+/**
+ * A product's next check, set only while its score is still the one the job read (KEYS[1] the set, ARGV[1] the
+ * entry, ARGV[2] the score read, ARGV[3] the next check): 1 when moved, 0 when a sale moved it since or it left the
+ * set. lib/redis-memory.ts runs the same.
+ */
+const LOW_STOCK_RESCHEDULE = [
+  "-- marktmorgen:low-stock-reschedule:v1",
+  'local score = redis.call("ZSCORE", KEYS[1], ARGV[1])',
+  "if not score or tonumber(score) ~= tonumber(ARGV[2]) then return 0 end",
+  'redis.call("ZADD", KEYS[1], "XX", ARGV[3], ARGV[1])',
+  "return 1",
+].join("\n");

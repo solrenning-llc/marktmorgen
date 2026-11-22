@@ -3083,6 +3083,16 @@ export class MemoryRedis {
           if (place === "1") this.run(["DECR", dayCount]);
           return 1;
         }
+        // lib/low-stock-alert.ts LOW_STOCK_RESCHEDULE: a product's next check, set only while its score is still the one
+        // the job read (Codex X6's LOW on #3814).
+        if (key.startsWith("-- marktmorgen:low-stock-reschedule:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, set, entry, readAt, next] = args;
+          this.scriptCalls += 1;
+          const score = this.run(["ZSCORE", set, entry]);
+          if (score === null || Number(score) !== Number(readAt)) return 0;
+          this.run(["ZADD", set, "XX", next, entry]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:form-keep:v1\n") && args[0] === "1" && args.length === 4) {
           const listKey = args[1];
           this.live(listKey);

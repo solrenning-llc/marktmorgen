@@ -99,6 +99,25 @@ async function main(): Promise<void> {
   is(`and ${LOW_STOCK_RUN_PRODUCTS} products a run`, LOW_STOCK_RUN_PRODUCTS, 50);
   is("no name in the job reads as a person", /\bmembers?\b/.test(readFileSync("lib/low-stock-alert.ts", "utf8")), false);
 
+  // Codex X6's LOW on #3814 (7059424886): a sale that makes the product due while the job is checking it is never
+  // pushed back a day by the job's own reschedule; the job moves it later only while it is still as the job read it.
+  part("A sale during the check keeps its product due (Codex X6 on #3814)");
+  redis.run(["ZADD", LOW_STOCK_DUE, 0, member]);
+  let touchedAt = 0;
+  await runLowStockChecks(Date.now() + 30_000, {
+    ...real,
+    left: async (s, p) => {
+      await lowStockTouched(store, [pid]);
+      touchedAt = Number(redis.run(["ZSCORE", LOW_STOCK_DUE, member]));
+      return stockLeft(s, p);
+    },
+  });
+  is("the sale's touch made it due during the check", touchedAt > 0 && touchedAt <= Date.now(), true);
+  is("and it is still due after the check, not a day later", Number(redis.run(["ZSCORE", LOW_STOCK_DUE, member])) <= Date.now(), true);
+  redis.run(["ZADD", LOW_STOCK_DUE, 0, member]);
+  await runLowStockChecks(Date.now() + 30_000, real);
+  is("with no sale during the check, it waits a day as before", Number(redis.run(["ZSCORE", LOW_STOCK_DUE, member])) > Date.now() + LOW_STOCK_WAIT_MS - 60_000, true);
+
   part("Off takes it off the set");
   store = (await storeForEmail(OWNER)) as Store;
   is("off", await setLowStock(store, pid, 0, 4), "off");

@@ -1,3 +1,5 @@
+import { seedNumbersStore } from "./numbers-email-claim-world";
+import { summaryClaimKey } from "./summary-claim-command";
 import { NextRequest } from "next/server";
 import { GET as weekly } from "@/app/api/cron/weekly/route";
 import { GET as monthly } from "@/app/api/cron/monthly/route";
@@ -20,7 +22,7 @@ let teamReply: unknown = undefined;
 const request = (path: string) => new NextRequest(`https://example.test${path}`);
 
 function reset(): void {
-  redis.clear();
+  redis.clear(); seedNumbersStore();
   commands.length = 0;
   control.sent.length = 0;
   control.numbers = "visitors-5";
@@ -31,9 +33,9 @@ function reset(): void {
 /** Whether the period's claim for the fixture store is held now (the SET … NX on the sent key itself). */
 function held(prefix: "nl:weekly:sent:" | "nl:monthly:sent:"): boolean {
   const pattern = new RegExp(`^${prefix}[^:]+:fixture-store$`);
-  const set = commands.find((c) => c[0] === "SET" && pattern.test(String(c[1])) && c.includes("NX"));
+  const set = commands.find((c) => pattern.test(summaryClaimKey(c)));
   if (!set) throw new Error(`no claim was tried under ${prefix}`);
-  return redis.run(["GET", String(set[1])]) !== null;
+  return redis.run(["GET", summaryClaimKey(set)]) !== null;
 }
 
 const owner = () => retry.mails.filter((to) => to === "owner@example.test").length;

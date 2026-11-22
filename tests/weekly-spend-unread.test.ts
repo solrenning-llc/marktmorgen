@@ -1,3 +1,5 @@
+import { seedNumbersStore } from "./numbers-email-claim-world";
+import { summaryClaimKey } from "./summary-claim-command";
 /**
  * The weekly email when the ad spend could not be read (#3297, coordinator's decision of 15 Nov 2026, option A: main's
  * design from the review of #4027). The email still goes, says the spend was not read, and shows no ad figure: no $0,
@@ -11,7 +13,7 @@ import { control, texts } from "./weekly-spend-unread-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
-const STATS = "st-fixture";
+const STATS = "b".repeat(32);
 const today = new Date().toISOString().slice(0, 10);
 const request = () => new NextRequest("https://example.test/api/cron/weekly");
 const real = redis.pipeline.bind(redis);
@@ -26,11 +28,11 @@ async function main(): Promise<void> {
   }) as typeof redis.pipeline;
   /** Whether this run took the week's claim (SET … NX on nl:weekly:sent:) and still holds it. */
   const claimed = () => {
-    const set = commands.find((c) => c[0] === "SET" && String(c[1]).startsWith("nl:weekly:sent:") && c.includes("NX"));
-    return Boolean(set) && redis.run(["GET", String(set![1])]) !== null;
+    const set = commands.find((c) => summaryClaimKey(c).startsWith("nl:weekly:sent:"));
+    return Boolean(set) && redis.run(["GET", summaryClaimKey(set!)]) !== null;
   };
   const reset = async (unread: boolean) => {
-    redis.clear();
+    redis.clear(); seedNumbersStore();
     control.sent.length = 0;
     texts.length = 0;
     control.numbers = "visitors-5";

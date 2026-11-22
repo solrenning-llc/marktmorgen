@@ -3,7 +3,7 @@
  * An upload threshold does not delete existing customer content or prove
  * a supplier-dollar ceiling, retention funding or the all-tax margin.
  */
-import { filesHeld } from "@/lib/file-store";
+import { filesHeld, filesHeldToday } from "@/lib/file-store";
 import { streamHeld } from "@/lib/stream";
 import { STORAGE_BRAKE_BYTES } from "@/lib/storage-rules";
 export { STORAGE_BRAKE_BYTES, storageBrakeFor } from "@/lib/storage-rules";
@@ -26,10 +26,23 @@ export type StorageUse = { bytes: number; brake: number; left: number; full: boo
  * Existing downloads and content are unaffected; upload doors return a temporary failure.
  */
 export async function storageUsed(folder: string, brake: number = STORAGE_BRAKE_BYTES): Promise<StorageUse> {
+  return measured(folder, brake, filesHeld);
+}
+
+/**
+ * The same for a vault open, with the store's Blob folder listed at most once a UTC day (lib/file-store.ts,
+ * filesHeldToday; the owner's decision of 16 November 2026): never less than what is held. Throws "storage_daily",
+ * for the caller to say, when the day's one listing is spent with no total kept; anything else unknown is unavailable.
+ */
+export async function storageUsedToday(folder: string, brake: number = STORAGE_BRAKE_BYTES): Promise<StorageUse> {
+  return measured(folder, brake, filesHeldToday);
+}
+
+async function measured(folder: string, brake: number, held: (folder: string) => Promise<number>): Promise<StorageUse> {
   const unavailable: StorageUse = { bytes: 0, brake, left: 0, full: false, available: false };
   if (!folder || !Number.isSafeInteger(brake) || brake <= 0) return unavailable;
   try {
-    const files = await filesHeld(folder);
+    const files = await held(folder);
     const videos = await streamHeld(folder);
     if (videos === null || !Number.isSafeInteger(files) || files < 0 ||
         !Number.isSafeInteger(videos) || videos < 0) return unavailable;
@@ -37,6 +50,7 @@ export async function storageUsed(folder: string, brake: number = STORAGE_BRAKE_
     if (!Number.isSafeInteger(bytes)) return unavailable;
     return { bytes, brake, left: Math.max(0, brake - bytes), full: bytes >= brake, available: true };
   } catch (error) {
+    if (error instanceof Error && error.message === "storage_daily") throw error;
     console.error("could not read what a store is storing", error);
     return unavailable;
   }

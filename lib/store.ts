@@ -94,7 +94,7 @@ import { type AffiliateSetting, parseAffiliateSetting } from "@/lib/affiliate-se
 import { type ReviewAsk, parseReviewAsk } from "@/lib/review-ask";
 import { type PwywProblem, pwywProblem } from "@/lib/pay-what-you-want";
 import { type CheckoutField } from "@/lib/checkout-fields";
-import { aboutKeyOf, takeAboutRoom } from "@/lib/product-about";
+import { aboutKeyOf } from "@/lib/product-about";
 import { type Currency, DEFAULT_CURRENCY, currencyRule, parseCurrency, priceBounds, priceInRange, readMoney } from "@/lib/money";
 import { type Intro, type IntroProblem, introProblem } from "@/lib/intro-price";
 import { type Yearly, type YearlyProblem, yearlyProblem } from "@/lib/yearly-price";
@@ -164,7 +164,7 @@ import {
 import { type Announcement, type StoreSection, parseAnnouncement, parseSections, sectionsWithout } from "@/lib/store-sections";
 import { type VisitUs, parseVisitUs, readVisitUs } from "@/lib/visit-us";
 import { besideHeld, besideSwept, giveBeside, giveData, markBesideSwept, noteData, poolTakeCommands, roomSlots, takeBeside, takeData, takeDataCommands } from "@/lib/store-data";
-import { BESIDE_PRODUCT_BYTES as BESIDE_PRODUCT, besidePoolFor } from "@/lib/store-data-rules";
+import { BESIDE_PRODUCT_BYTES as BESIDE_PRODUCT, besidePoolFor, dataBytes } from "@/lib/store-data-rules";
 import { standingOf } from "@/lib/plan-standing";
 import { type Collection, type CollectionsProblem, MAX_PAIRS, collectionsWithout, parseCollections, readCollectionsInput, readProductIds } from "@/lib/store-collections";
 import { type SitePage, parseSitePages, MAX_SITE_PAGES, slugProblem } from "@/lib/site-page-rules";
@@ -2021,7 +2021,7 @@ type ProductChange = {
    * `fence` is the store's erasure fence of lib/product-about-live.ts (its id key, the erasing mark's field, its ref):
    * the two are written only while the store is live, never after its erasure began or its account moved (#4969).
    */
-  about?: { product: string; key: string; text: string; fence: { idKey: string; field: string; ref: string }; room: Store };
+  about?: { product: string; key: string; text: string; fence: { idKey: string; field: string; ref: string } };
 };
 
 /**
@@ -2176,6 +2176,10 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
     ...put.map((product) => ({ slot: `p:${product.id}`, bytes: productBytes(product) + (pooled.has(product.id) ? 0 : BESIDE_PRODUCT), set: true })),
     ...gone.map((id) => ({ slot: `p:${id}`, bytes: 0, set: true })),
     ...(goneInRoom.length ? [{ slot: "dp", bytes: goneInRoom.length * BESIDE_PRODUCT }] : []),
+    // The description's room in the same take as the product's own, so the two are taken together or not at all: a
+    // description that does not fit changes no slot, the product's record included (Claude 4 2Wb's MEDIUM on #4238
+    // @249b11f056); and a save stopped before this point changes no room (31st triple audit, MEDIUM 2). As takeAboutRoom.
+    ...(change.about ? [{ slot: `ab:${change.about.product}`, bytes: change.about.text ? dataBytes([change.about.text], 1) : 0, set: true }] : []),
   ];
   if (room.length) {
     const taken = await takeData(before, room);
@@ -2192,8 +2196,6 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
   // its lock is refused rather than landed over whatever came after it.
   if (!(await holdLock(held))) throw new StoreBusyError();
   if (fenced) {
-    // The description's room, taken as writeAbout takes it, only now: a save stopped before this point changes no room.
-    await takeAboutRoom(change.about!.room, change.about!.product, change.about!.text);
     const reply = repliesFor(await redisPipeline([fenced]), 1)?.[0];
     if (reply === -1) throw new ProductStoreGoneError();
     if (reply !== 1) throw new UnknownReplyError("a product's record and description");
@@ -4308,12 +4310,12 @@ export async function editProduct(
           await redisPipeline([["SET", storeIdKey(room.sid), storeRef(room)]]);
           namedSid = room.sid;
         }
-        // Its room is taken in the catalog commit, once the save holds its lock and just before the fenced write (31st
-        // triple audit, MEDIUM 2: taken here, a commit that failed before writing left the room counting the new text
-        // while the old one stayed kept). The text goes with the product's record and its `rev` (Codex N1 on #4238).
+        // Its room is taken in the catalog commit, in the same take as the product's own slots (31st triple audit,
+        // MEDIUM 2: taken here, a commit that failed before writing left the room counting the new text while the old one
+        // stayed kept). The text goes with the product's record and its `rev` (Codex N1 on #4238).
         const ref = storeRef(room);
         const fence = { idKey: storeIdKey(room.sid), field: await erasingField(ref), ref };
-        aboutWrite = { product: id, key: aboutKeyOf(descriptionId, id), text: parts.about, fence, room };
+        aboutWrite = { product: id, key: aboutKeyOf(descriptionId, id), text: parts.about, fence };
         next.about = parts.about !== "";
       }
       return next;

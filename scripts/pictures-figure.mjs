@@ -1,12 +1,13 @@
 /**
- * Writes docs/pictures-figure-proposal.md (507 [SG3], a PROPOSAL) from tests/pictures-figure-table.ts,
+ * Prints the report at docs/pictures-figure-proposal.md (507 [SG3], a PROPOSAL) from tests/pictures-figure-table.ts,
  * with the same wiring the test runner uses (tests/test-config.mjs), so the
- * document's figures are never typed. tests/pictures-figure.test.ts fails
- * when the file on disk is not what this writes.
+ * document's figures are never typed. Generated on demand (owner, 20/11/2026): the path holds
+ * only a fixed text, and nothing is written. tests/pictures-figure.test.ts checks the
+ * output computed on demand.
  *
  *   node scripts/pictures-figure.mjs
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,9 +40,7 @@ process.stdout.write(renderPicturesFigure());
     process.stderr.write(run.stderr);
     process.exit(1);
   }
-  const target = join(root, "docs/pictures-figure-proposal.md");
-  writeFileSync(target, run.stdout);
-  console.log(`Wrote ${target}`);
+  process.stdout.write(run.stdout);
 } finally {
   rmSync(out, { recursive: true, force: true });
 }

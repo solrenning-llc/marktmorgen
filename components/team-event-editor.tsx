@@ -55,7 +55,8 @@ const MESSAGES: Record<string, string> = {
   unknown: "That product is not a call any more. Reload the page.",
   signed_out: "Your session ended. Log in again.",
   role: "Your role cannot change products.",
-  unavailable: "We could not confirm your team was saved. Reload the page to see what is saved, then try again.",
+  // The route answers 503 "unavailable" when the save could not be confirmed (it may have landed), never "nothing saved".
+  unavailable: "We could not confirm the save. Reload the page to see what is saved, then try again.",
   server_error: "Something went wrong on our side. Nothing was saved; try again in a moment.",
 };
 

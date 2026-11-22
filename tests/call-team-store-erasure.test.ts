@@ -140,3 +140,16 @@ test("a call's host setup cannot be restored after store erasure wins", { timeou
   } finally { redis.pipeline = real; globalThis.fetch = originalFetch; }
 });
 
+
+// Claude 5's LOW on #4987 (7052805472): the route's 503 "unavailable" is a save that could not be confirmed (the
+// write may have landed, lib/team-booking.ts), so the editor never shows it as server_error's "Nothing was saved".
+test("the editor names an unconfirmed save as unconfirmed, never as nothing saved", async () => {
+  const { readFileSync } = await import("node:fs");
+  const editor = readFileSync("components/team-event-editor.tsx", "utf8");
+  const entry = /^\s*unavailable: "([^"]+)",$/m.exec(editor);
+  assert.ok(entry, "components/team-event-editor.tsx has no message for the route's 503 unavailable");
+  assert.doesNotMatch(entry![1], /nothing was saved/i);
+  assert.match(entry![1], /could not confirm/i);
+  assert.match(entry![1], /reload/i);
+  assert.match(readFileSync("app/api/store/call-team/route.ts", "utf8"), /error: "unavailable" \}, \{ status: 503 \}/);
+});

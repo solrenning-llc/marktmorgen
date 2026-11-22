@@ -15,7 +15,7 @@
  * one made before every store had one. A deleted address on several rows is left out on each, never written into
  * the report or kept among the rows the import saw.
  */
-import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { addRows, finishUpload, previewImport, readJob, reportCsv, runImport, sendMoveReminders, startImport } from "@/lib/imports";
 import { importedFor } from "@/lib/imported-purchases";
 import { erasePerson } from "@/lib/person-erasure";
@@ -120,6 +120,8 @@ function withoutList(sid: string) {
 async function openStore(owner: string, handle: string, account: string, id: string, withList = true) {
   await claimHandle(owner, handle, "Harbor Kitchen", "");
   await ensureStatsId(owner);
+  // A members import needs the postal address its emails carry (lib/move-members.ts, movePostal).
+  await setMailSettings(owner, { fromName: "Harbor Kitchen", address: "12 Harbor Lane, Portland, ME 04101, USA" });
   if (withList) await ensureListId(owner);
   else withoutList((await storeForEmail(owner))!.sid);
   await setStripeAccount(owner, account, true);
@@ -424,7 +426,7 @@ async function main(): Promise<void> {
     /** Answers the checked writes' script in `reply` (or throws) without running it; every other command as it is. */
     const scriptAnswers = (name: string, reply: unknown) => {
       redis.pipeline = async (commands: (string | number)[][]) => {
-        if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith(`-- marktmorgen:${name}:v1\n`))) {
+        if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith(`-- marktmorgen:${name}:v`))) {
           if (reply === "throw") throw new Error("synthetic script failure");
           return commands.map(() => reply);
         }

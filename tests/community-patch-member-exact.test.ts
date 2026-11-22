@@ -1,3 +1,4 @@
+// Rule 23: complete the synthetic Member fixture with the new empty profile-links field; assertions unchanged.
 /**
  * A change to a community member's record (lib/community.ts patchMember) is
  * said done only once its read and its write were answered in their exact
@@ -139,7 +140,7 @@ async function main(): Promise<void> {
     const email = `member${n}@patchmember.example`;
     const key = memberKey(email);
     const token = n.toString(16).padStart(40, "a");
-    const record: Member = { k: key, e: email, n: `Member ${n}`, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: token, q: [], qa: 0, qq: [] };
+    const record: Member = { k: key, e: email, n: `Member ${n}`, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: token, q: [], qa: 0, qq: [], s: [] };
     await redis.pipeline([["HSET", members, key, JSON.stringify(record)], ["SET", `nl:cm:unsub:${token}`, `${cid}|${key}|${club.handle}`]]);
     return { key, token, email };
   }

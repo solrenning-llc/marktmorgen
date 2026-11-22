@@ -1,3 +1,4 @@
+// Rule 23: complete the synthetic Member fixture with the new empty profile-links field; assertions unchanged.
 /**
  * Controls beside Codex G's proof (tests/community-handle-reserve-unknown.test.ts,
  * review 5815559331 of #3123): when setProfile's member update after the handle
@@ -20,7 +21,8 @@ import { store as redis } from "./redis-stub";
 import { done, is } from "./check";
 
 type Command = (string | number)[];
-const CAS = 'local cur = redis.call("HGET"';
+// Found anywhere in the script: #2576 heads the member CAS with its "-- marktmorgen:member-cas:v1" tag.
+const CAS = 'local cur = redis.call("HGET", KEYS[1], ARGV[1])';
 const GIVE_BACK = "-- marktmorgen:community-handle-give-back:v1\n";
 let casMode: "apply" | "applied-lost" | "lost" = "apply";
 let giveBackAnswer: null | unknown[] = null;
@@ -28,7 +30,7 @@ let beforeCas: null | (() => Promise<void>) = null;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: Command[]) => {
   if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith(GIVE_BACK) && giveBackAnswer) return giveBackAnswer;
-  if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith(CAS)) {
+  if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).includes(CAS)) {
     if (beforeCas) {
       const act = beforeCas;
       beforeCas = null;
@@ -68,7 +70,7 @@ async function main(): Promise<void> {
     n += 1;
     const email = `member${n}@handlegiveback.example`;
     const key = memberKey(email);
-    const record: Member = { k: key, e: email, n: "", h: "", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+    const record: Member = { k: key, e: email, n: "", h: "", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [] };
     await pipeline([["HSET", members, key, JSON.stringify(record)]]);
     return { key, email };
   }

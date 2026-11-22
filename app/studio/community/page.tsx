@@ -22,7 +22,7 @@ import {
 } from "@/lib/community";
 import { announcementReach, canAnnounceByEmail } from "@/lib/community-mail";
 import { can } from "@/lib/team-roles";
-import { CommunityStudio, type QueueRow, type StudioMember } from "@/components/community-studio";
+import { CommunityStudio, type QueueRow, type StudioMember, type StudioTotals } from "@/components/community-studio";
 import { CommunityEventsStudio, type StudioEvent } from "@/components/community-events-studio";
 import { CommunityChallengesStudio, type StudioChallenge } from "@/components/community-challenges-studio";
 import { challengeCounts, keptChallenges } from "@/lib/community-challenges";
@@ -85,8 +85,9 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
   // 543 [CM2]: each space's approval rule and what waits for it; null when not read.
   let rules: SpaceRule[] | null = [];
   let held: HeldRow[] | null = [];
-  let members: StudioMember[] = [];
-  let totals = { members: 0, listed: 0, posts: 0, reach: 0 };
+  // Null where it could not be read (rule 24): shown as not loaded, never as none.
+  let members: StudioMember[] | null = [];
+  let totals: StudioTotals = { members: 0, listed: 0, posts: 0, reach: 0 };
   let rewards: Reward[] = [];
   let coming: StudioEvent[] = [];
   let over: StudioEvent[] = [];
@@ -95,7 +96,15 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
   // can have a meeting made on, for the form. Nothing is read when the
   // deployment has neither.
   const meetOn = configuredProviders().length > 0;
-  const meet = id && meetOn && can(view.role, "events") ? await meetView(store.statsId, store).catch(() => null) : null;
+  const meetRead = Boolean(id && meetOn && can(view.role, "events"));
+  const meet = meetRead
+    ? await meetView(store.statsId, store).catch((error) => {
+        console.error("reading the meeting connections failed", error);
+        return null;
+      })
+    : null;
+  // Read and not answered (CX-123 rule 24): the form says the connections could not be checked, never "connect it again".
+  const meetUnread = meetRead && meet === null;
   const meetAccounts: MeetAccount[] = meet
     ? meet.providers.flatMap((p) => {
         const c = meet.connected[p];
@@ -170,25 +179,35 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
     coming = soon.map((e, i) => shape(e, i));
     over = past.events.map((e, i) => shape(e, soon.length + i));
 
-    const [reports, first, listed, posts, reach] = await Promise.all([
+    // Everyone, when the community is small; the most recently seen when it is not. A page of the list that does
+    // not read (lib/community.ts memberPage, rule 24) leaves the list and its count unknown, said so on the page,
+    // never shown as "Nobody has come in yet" or as a shorter list.
+    const roster = async (): Promise<{ all: Member[]; total: number }> => {
+      const first = await memberPage(id, "0", 1000);
+      let all: Member[] = first.members;
+      let cursor = first.next;
+      for (let page = 0; cursor !== "0" && page < 60; page += 1) {
+        const next = await memberPage(id, cursor, 1000);
+        all = all.concat(next.members);
+        cursor = next.next;
+      }
+      return { all, total: first.total };
+    };
+    const unread = (what: string) => (error: unknown) => {
+      console.error(`studio community: ${what} could not be read`, error);
+      return null;
+    };
+    const [reports, read, listed, posts, reach] = await Promise.all([
       reportQueue(id, 100).catch(() => null),
-      memberPage(id, "0", 1000),
+      roster().catch(unread("the member list")),
       directorySize(id),
       postCount(id),
-      announcementReach(id),
+      announcementReach(id).catch(unread("the announcement reach")),
     ]);
-    // Everyone, when the community is small; the most recently seen when it is not.
-    let all: Member[] = first.members;
-    let cursor = first.next;
-    for (let page = 0; cursor !== "0" && page < 60; page += 1) {
-      const next = await memberPage(id, cursor, 1000);
-      all = all.concat(next.members);
-      cursor = next.next;
-    }
-    all.sort((a, b) => b.seen - a.seen);
+    const all = read ? [...read.all].sort((a, b) => b.seen - a.seen) : [];
     const points = await pointsOf(id, all.slice(0, MEMBERS_SHOWN).map((m) => m.k));
     rewards = await readRewards(id);
-    members = all.slice(0, MEMBERS_SHOWN).map((m) => ({
+    members = read === null ? null : all.slice(0, MEMBERS_SHOWN).map((m) => ({
       key: m.k,
       email: m.e,
       name: m.n,
@@ -201,7 +220,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
       points: points.get(m.k) ?? 0,
       answers: m.qa ? m.qq.map((q, i) => ({ q, a: m.q[i] ?? "" })) : [],
     }));
-    totals = { members: first.total, listed, posts, reach };
+    totals = { members: read === null ? null : read.total, listed, posts, reach };
 
     rules = await approvalsOf(id, config.spaces.map((s) => s.id)).then(
       (found) =>
@@ -339,6 +358,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
                 handle={store.handle}
                 roomNote={VIDEO_ROOM_NOTE}
                 meetings={meetAccounts}
+                meetUnread={meetUnread}
                 hostStore={can(view.role, "settings") ? store.sid || "" : null}
               />
             ) : null

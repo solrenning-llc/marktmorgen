@@ -24,9 +24,15 @@ export async function redisPipeline(commands: (string | number)[][]): Promise<un
 export const normaliseHandle = (value: string) => value;
 export async function storeForHandle() { state.lookups += 1; return state.storeFound ? store : null; }
 export async function takePublicRequest() { state.publicCalls += 1; return state.publicAllowed; }
+/** The meter a new preview's storage measurement is paid from (lib/stamp-cost-rules.ts): handed to previewCopy, never called by the route itself. */
+export async function holdPublicRequests() { throw new Error("The route must not hold requests itself; previewCopy does, before it measures"); }
+export async function givePublicRequests() { throw new Error("The route must not give requests back itself"); }
 export async function readListing() { state.listings += 1; return { id: "p1234", hidden: false, preview: 3, file: { pathname: "synthetic.pdf" } }; }
 export const MAX_PREVIEW_PAGES = 10;
-export async function previewCopy() { state.copies += 1; return { pathname: "synthetic-preview.pdf" }; }
+export async function previewCopy(_file: unknown, _pages: number, _store: unknown, meter: { take?: unknown; give?: unknown } | undefined) {
+  if (typeof meter?.take !== "function" || typeof meter?.give !== "function") throw new Error("A preview is made only with a meter for its storage measurement");
+  state.copies += 1; return { pathname: "synthetic-preview.pdf" };
+}
 export function plain(status: number, body: string) { return new Response(body, { status }); }
 export async function serveFile(_file: unknown, options: { paid: boolean }) {
   if (options.paid !== false) throw new Error("Preview must keep its existing free-download path");

@@ -1,4 +1,6 @@
 import {waitForReactHandler} from "./react-hydration.mjs";
+import {waitForReactChangeHandler} from "./react-hydration.mjs";
+import {waitForReactHydrated} from "./react-hydration.mjs";
 /** Every creator-pick save/removal is intercepted, with no buyer or public data writes. */
 export async function checkPairsAcknowledgment({browser,LOCAL,fixture,is}){
  const cases=[
@@ -25,6 +27,10 @@ export async function checkPairsAcknowledgment({browser,LOCAL,fixture,is}){
    await page.locator("main details").evaluateAll(nodes=>nodes.forEach(n=>{n.open=true;}));
    const toggle=page.locator('button[aria-controls="product-panel-'+fixture.product+'"]');
    await toggle.waitFor();await page.waitForFunction(el=>typeof el.onclick==="function",await toggle.elementHandle());
+   // PAIRS_INITIAL_SELECTION in WebKit showed the first choice undone by its own input event: the
+   // studio root was still hydrating, the event made React finish at once, and that commit put the
+   // server value back into the select, so "Save picks" stayed disabled. Act only after the commit.
+   await waitForReactHydrated(page,toggle);
    if(await toggle.getAttribute("aria-expanded")!=="true")await toggle.click();
    const section=page.locator('[data-pairs-editor="'+fixture.product+'"]');await section.waitFor();
    is("creator-pick three labeled selectors "+width,await section.locator("select").count(),3);
@@ -41,6 +47,8 @@ export async function checkPairsAcknowledgment({browser,LOCAL,fixture,is}){
    // still drawing the panel can be lost, which left the button disabled for good.
    const saveButton=section.getByRole("button",{name:"Save picks",exact:true});
    await waitForReactHandler(page,saveButton,"onClick");
+   // And the select's own onChange (#4044): a choice made before React attaches it is reset to "" on hydration.
+   await waitForReactChangeHandler(page,first);
    await first.selectOption(target);
    console.log("PAIRS_INITIAL_SELECTION",JSON.stringify(await section.evaluate((root,target)=>({
     target,events:window.__pairsSelectionEvents,

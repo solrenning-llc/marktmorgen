@@ -950,6 +950,9 @@ console.log("ce2d: the reviewer of a comment, on the real formats of today (Clau
     [`**Fixed at ${h}** (Claude 7 xAF, author), answering Claude 6 i51q's CHANGES at 899e35bbdc.`, null, "a 'Fixed at' note with CHANGES on its line is not a review"],
     [`Note on my review above (7081962031): Claude 1 E had already given a focal money READY on ${h} (7081897226)`, null, "a note on another review is not a review"],
     [`This answers Claude 2 X's CHANGES on ${h}: the merge is redone.`, null, "an answer to a review is not a review"],
+    [`Claude 4 2Wb — #5143 @${h}\nREADY: tests pass`, "claude-4", "family and head on line 1, the verdict on line 2, without the word review (LEVE of Claude 5 ibqho on #5141)"],
+    [`Claude 1 coord: #5141 @${h}, 1 of 2 READY, waiting on a second family`, null, "a status line counting verdicts is not a review (LEVE of Claude 4 Z on #5141)"],
+    [`Claude 1 coord: #5141 @${h}, 1 de 2 READY`, null, "the same status line in Portuguese"],
   ];
   for (const [corpo, esperado, porque] of casos) {
     const achou = typeof mod.revisoraDoComentario === "function" ? mod.revisoraDoComentario(corpo, h) : "(missing)";

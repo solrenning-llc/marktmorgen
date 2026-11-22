@@ -50,6 +50,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { stockLeft } from "@/lib/stock";
 import { restocked } from "@/lib/stock-alert-rules";
 import {
+  STOCK_ALERT_ASK_UNITS,
   STOCK_ALERT_DUE,
   askStockAlert,
   clearStockAlerts,
@@ -59,6 +60,7 @@ import {
   stockAlertAddresses,
 } from "@/lib/stock-alerts";
 import { type ExactStore, storeForIdExactly } from "@/lib/store-exact";
+import { takePublicRequest } from "@/lib/traffic";
 import type { Listing, Store } from "@/lib/store";
 
 /** The most products one run of the email job looks at. */
@@ -125,7 +127,7 @@ export function backEmail(store: Store, product: Listing, leave: string) {
   return render(store, w.backSubject(product.title), body, null, door(store, w, SITE_URL, leave, w.backWhy(product.title)));
 }
 
-export type StockAlertAsked = "sent" | "email" | "full" | "closed" | "unsent" | "error";
+export type StockAlertAsked = "sent" | "email" | "full" | "closed" | "limited" | "unsent" | "error";
 
 /**
  * An address typed in "Email me when it's back": kept (lib/stock-alerts.ts)
@@ -135,11 +137,14 @@ export type StockAlertAsked = "sent" | "email" | "full" | "closed" | "unsent" | 
 export async function askBackInStock(input: { store: Store; product: Listing; email: string; left: unknown; origin: string; now?: number }): Promise<StockAlertAsked> {
   const { store, product } = input;
   if (!stockAlertsOpen(store) || product.hidden) return "closed";
-  const asked = await askStockAlert({ store, productId: product.id, email: input.email, left: input.left, now: input.now }).catch((error) => {
+  // Before it writes, the ask takes STOCK_ALERT_ASK_UNITS more of the store's public requests (Claude 2 main's M1 on
+  // #5124): its drops and scripts, at their worst, fit in those and the route's own; refused, nothing is written.
+  const pay = () => takePublicRequest(store, "public", input.now ?? Date.now(), STOCK_ALERT_ASK_UNITS);
+  const asked = await askStockAlert({ store, productId: product.id, email: input.email, left: input.left, now: input.now, pay }).catch((error) => {
     console.error("keeping a back-in-stock address failed", error);
     return { ok: false as const, reason: "unknown" as const };
   });
-  if (!asked.ok) return asked.reason === "unknown" ? "error" : asked.reason;
+  if (!asked.ok) return asked.reason === "unknown" ? "error" : asked.reason === "busy" ? "limited" : asked.reason;
   const mail = confirmEmail(store, product, asked, input.origin);
   const written = { maybe: false };
   const sent = await sendEmail(

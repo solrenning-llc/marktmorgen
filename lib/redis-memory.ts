@@ -2522,16 +2522,46 @@ export class MemoryRedis {
           if (this.run(["HGET", batch, field]) !== expected) return 0;
           return this.run(["HDEL", batch, field]);
         }
-        // lib/stock-alerts.ts ADD_PLACE: up to `drop` other places whose end passed are dropped first (returned after the
-        // outcome); then a new place only while absent and under the ceiling, else only over the entry read; the list
-        // and its index of ends last until the new place's end only when they would end sooner.
-        if (key.startsWith("-- marktmorgen:stock-alert-add:v2\n") && args[0] === "2" && args.length === 10) {
-          const [, list, index, field, expected, next, max, nowText, endsText, drop] = args;
+        // lib/stock-alerts.ts ADD_PLACE: a new place only while absent and under the ceiling, else only over the entry
+        // read; its end goes into the index of ends (none for a place kept from before ends were kept); the list and the
+        // index last `keep` seconds after the write.
+        if (key.startsWith("-- marktmorgen:stock-alert-add:v3\n") && args[0] === "2" && args.length === 9) {
+          const [, list, index, field, expected, next, max, ends, keep] = args;
+          const current = this.run(["HGET", list, field]);
+          if (expected === "") {
+            if (current !== null) return 0;
+            if ((this.run(["HLEN", list]) as number) >= Number(max)) return -1;
+          } else if (current !== expected) return 0;
+          this.run(["HSET", list, field, next]);
+          if (ends !== "") this.run(["ZADD", index, Number(ends), field]);
+          this.run(["EXPIRE", list, keep]);
+          this.run(["EXPIRE", index, keep]);
+          return 1;
+        }
+        // lib/stock-alerts.ts CONFIRM_PLACE: a back-in-stock place confirmed only over exactly the entry read.
+        if (key.startsWith("-- marktmorgen:stock-alert-confirm:v3\n") && args[0] === "2" && args.length === 8) {
+          const [, list, index, field, expected, next, ends, keep] = args;
+          if (this.run(["HGET", list, field]) !== expected) return 0;
+          this.run(["HSET", list, field, next]);
+          if (ends !== "") this.run(["ZADD", index, Number(ends), field]);
+          this.run(["EXPIRE", list, keep]);
+          this.run(["EXPIRE", index, keep]);
+          return 1;
+        }
+        // lib/stock-alerts.ts DROP_ENDED: the asking address's own ended place over exactly what was read, then up to
+        // `most` others of the index whose kept end passed, each answered with its kept text; an unreadable one only
+        // loses its index line, one asked or confirmed again has its line set right.
+        if (key.startsWith("-- marktmorgen:stock-alert-drop:v1\n") && args[0] === "2" && args.length === 7) {
+          const [, list, index, nowText, most, asker, own] = args;
           const now = Number(nowText);
-          const out: (number | string)[] = [0];
-          const due = this.run(["ZRANGEBYSCORE", index, "-inf", now, "LIMIT", 0, Number(drop)]) as string[];
+          const out: string[] = [];
+          if (own !== "" && this.run(["HGET", list, asker]) === own) {
+            this.run(["HDEL", list, asker]);
+            this.run(["ZREM", index, asker]);
+            out.push(asker, own);
+          }
+          const due = this.run(["ZRANGEBYSCORE", index, "-inf", now, "LIMIT", 0, Number(most)]) as string[];
           for (const who of due) {
-            if (who === field) continue;
             const raw = this.run(["HGET", list, who]) as string | null;
             let ends: number | null = null;
             if (raw !== null) {
@@ -2549,31 +2579,7 @@ export class MemoryRedis {
             if (ends === null || ends <= now) this.run(["ZREM", index, who]);
             else this.run(["ZADD", index, ends, who]);
           }
-          const current = this.run(["HGET", list, field]);
-          if (expected === "") {
-            if (current !== null) return out;
-            if ((this.run(["HLEN", list]) as number) >= Number(max)) {
-              out[0] = -1;
-              return out;
-            }
-          } else if (current !== expected) return out;
-          this.run(["HSET", list, field, next]);
-          this.run(["ZADD", index, Number(endsText), field]);
-          const life = Number(endsText) - now;
-          for (const k of [list, index]) if ((this.run(["TTL", k]) as number) < life) this.run(["EXPIRE", k, life]);
-          out[0] = 1;
           return out;
-        }
-        // lib/stock-alerts.ts CONFIRM_PLACE: a back-in-stock place confirmed only over exactly the entry read; the list and
-        // its index of ends last until the confirmed place's end only when they would end sooner.
-        if (key.startsWith("-- marktmorgen:stock-alert-confirm:v2\n") && args[0] === "2" && args.length === 8) {
-          const [, list, index, field, expected, next, nowText, endsText] = args;
-          if (this.run(["HGET", list, field]) !== expected) return 0;
-          this.run(["HSET", list, field, next]);
-          this.run(["ZADD", index, Number(endsText), field]);
-          const life = Number(endsText) - Number(nowText);
-          for (const k of [list, index]) if ((this.run(["TTL", k]) as number) < life) this.run(["EXPIRE", k, life]);
-          return 1;
         }
         // lib/closed-store-data.ts BATCH_SWAP: one batch entry rewritten, or dropped when the new text is empty, only
         // over exactly the text read.

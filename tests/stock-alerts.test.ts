@@ -76,9 +76,10 @@ async function main(): Promise<void> {
   is("two different links, each 48 hex characters", [ALERT_TOKEN.test(dana.confirm), ALERT_TOKEN.test(dana.leave), dana.confirm !== dana.leave, dana.again], [true, true, true, false]);
   is("nobody to email before the confirmation", await confirmedForRestock(store, pid), []);
   const listKey = `nl:sa:${sid}:${pid}`;
-  // Each place ends on its own (Codex X6 on #3616): an unconfirmed one with its confirm link, so the list too.
-  const firstTtl = redis.run(["TTL", listKey]) as number;
-  is("the list ends by itself, with its only place's confirm link", firstTtl > CONFIRM_SECONDS - 5 && firstTtl <= CONFIRM_SECONDS, true);
+  // The list lasts a year after its latest write, as before ends were kept: a place's room is held until it is
+  // dropped, left or cleared (Claude 2 main's M2 on #5124), so the list never lapses under a place still counted.
+  is("the list ends by itself", (redis.run(["TTL", listKey]) as number) > WAIT_SECONDS - 5, true);
+  is("its place ends with its confirm link", (JSON.parse(redis.run(["HGET", listKey, "dana@example.com"]) as string) as { x: number }).x <= Math.floor(Date.now() / 1000) + CONFIRM_SECONDS, true);
   const tokenKeys = redis.keys().filter((k) => k.startsWith("nl:sa:t:"));
   is("both links are kept, each ending by itself", [tokenKeys.length, ...tokenKeys.map((k) => (redis.run(["TTL", k]) as number) > 0)], [2, true, true]);
   const ttls = tokenKeys.map((k) => redis.run(["TTL", k]) as number).sort((a, b) => a - b);
@@ -278,8 +279,7 @@ async function main(): Promise<void> {
     is("the stale place's leave link went with it", await leaveStockAlert(stale.leave, store), false);
     const roomAfter = (await dataUsed(store))?.used ?? Number.NaN;
     is("its room came back: the store holds no more than before, besides the new place's confirm link", roomAfter - roomBefore < 400, true);
-    const left = redis.run(["TTL", deadKey]) as number;
-    is("the new ask did not lengthen the list past the old place's own end (65 days), let alone a year", left <= 65 * 86_400 + 5 && left > 64 * 86_400, true);
+    is("the new ask did not lengthen the old place's own end (65 days)", (JSON.parse(redis.run(["HGET", deadKey, "old@example.com"]) as string) as { x: number }).x, oldEnds);
     is("the old place is still on the restock list", (await confirmedForRestock(store, pid2)).includes("old@example.com"), true);
   }
 

@@ -9,9 +9,12 @@
  * A place ends on its own (Codex X6 on #3616): one nobody confirmed when its
  * confirm link ends (CONFIRM_SECONDS after its latest ask), a confirmed one
  * WAIT_SECONDS after it was confirmed or asked again. An ended place no longer
- * counts toward MAX_STOCK_ALERTS: the next ask drops it, with its leave link,
- * and its room comes back. A write never lengthens another place's life: the
- * list and its index end with the latest-ending place, never later.
+ * counts toward MAX_STOCK_ALERTS, confirms nothing, gets no restock email and
+ * is not revived by asking again: the next ask drops it, with its leave link,
+ * before it takes room, and its room comes back (Claude 2 main on #5124). The
+ * list and its index still last WAIT_SECONDS after their latest write, as
+ * before: a place's room is held until it is dropped, left or cleared, so the
+ * list never lapses under a place still counted in the room.
  *
  * <store> is the store's statsId. The waitlist's pattern (lib/waitlist.ts),
  * with its own keys and links, so a back-in-stock link can never confirm or
@@ -44,14 +47,28 @@ import { CONFIRM_SECONDS, WAIT_SECONDS } from "@/lib/waitlist-rules";
 /** A link's secret: 48 hex characters. */
 export const ALERT_TOKEN = /^[0-9a-f]{48}$/;
 
-/** One address's place: when it asked, when it confirmed (0: not yet), its leave link, and when the place ends (`x`). */
-type AlertEntry = { at: number; ok: number; t: string; x: number };
+/**
+ * One address's place: when it asked, when it confirmed (0: not yet), its leave link, and when the place ends (`x`).
+ * A place written before ends were kept has no `x` (Claude 2 main's L2 on #5124): it ends by the old rule (endOf), has no
+ * line in the index of ends and is kept that way, so its room stays what was taken for it.
+ */
+type AlertEntry = { at: number; ok: number; t: string; x?: number };
+
+/** When a place ends: its own `x`, or, for one written before ends were kept, a year after it was confirmed, a week after it asked. */
+const endOf = (entry: AlertEntry) => entry.x ?? (entry.ok > 0 ? entry.ok + WAIT_SECONDS : entry.at + CONFIRM_SECONDS);
 type Grant = { s: string; p: string; e: string; k: "confirm" | "leave" };
 
 const listKey = (sid: string, pid: string) => `nl:sa:${sid}:${pid}`;
 const endsKey = (sid: string, pid: string) => `nl:sa:${sid}:${pid}:x`;
-/** The most ended places one ask drops: one is enough for its own place, a few more keep the list short. */
-export const DROP_ENDED_PER_ASK = 8;
+/** The most ended places one ask drops besides its own: one is enough for its own place, one more keeps the list short. */
+export const DROP_ENDED_PER_ASK = 2;
+
+/**
+ * Public requests an ask takes before it writes, besides the one its route takes (Claude 2 main's M1 on #5124): its
+ * worst, the drops and every call inside each script counted, fits in that many later pages' commands
+ * (tests/stock-alert-ended-review.test.ts).
+ */
+export const STOCK_ALERT_ASK_UNITS = 1;
 /** The products the restock job looks at (lib/stock-alert-send.ts), by the store's own id, which no change of handle moves. */
 export const STOCK_ALERT_DUE = "nl:sa:due";
 export const dueMember = (storeId: string, productId: string) => `${storeId}|${productId}`;
@@ -71,8 +88,8 @@ function parseEntry(raw: unknown): AlertEntry | null {
     if (typeof at !== "number" || !Number.isInteger(at) || at <= 0) return null;
     if (typeof ok !== "number" || !Number.isInteger(ok) || ok < 0) return null;
     if (typeof t !== "string" || !ALERT_TOKEN.test(t)) return null;
-    if (typeof x !== "number" || !Number.isInteger(x) || x <= 0) return null;
-    return { at, ok, t, x };
+    if (x !== undefined && (typeof x !== "number" || !Number.isInteger(x) || x <= 0)) return null;
+    return x === undefined ? { at, ok, t } : { at, ok, t, x };
   } catch {
     return null;
   }
@@ -117,7 +134,7 @@ export async function stockAlertLink(token: string): Promise<{ statsId: string; 
 
 /** The bytes one address's place, its line in the index of ends and its leave link take in the data room. */
 function placeBytes(email: string, entry: AlertEntry, leave: Grant): number {
-  return dataBytes([email, JSON.stringify(entry)], 1) + dataBytes([email, String(entry.x)], 1) + dataBytes([tokenKey(entry.t), JSON.stringify(leave)], 1);
+  return dataBytes([email, JSON.stringify(entry)], 1) + (entry.x !== undefined ? dataBytes([email, String(entry.x)], 1) : 0) + dataBytes([tokenKey(entry.t), JSON.stringify(leave)], 1);
 }
 
 /**
@@ -141,7 +158,7 @@ async function giveBackEnded(store: DataStore, sid: string, productId: string, d
   if (known.length) await giveData(store, [{ slot: slotOf(productId), bytes: known.reduce((sum, p) => sum + placeBytes(p.email, p.entry, leave(p.email)), 0) }], now);
 }
 
-export type AlertAsk = { ok: true; confirm: string; leave: string; again: boolean } | { ok: false; reason: "email" | "closed" | "full" | "unknown" };
+export type AlertAsk = { ok: true; confirm: string; leave: string; again: boolean } | { ok: false; reason: "email" | "closed" | "full" | "busy" | "unknown" };
 
 /**
  * An address asks to be emailed when a sold-out limited product is back.
@@ -149,7 +166,7 @@ export type AlertAsk = { ok: true; confirm: string; leave: string; again: boolea
  * counts only once its confirm link is used; asking again keeps the same
  * place and leave link and makes a new confirm link.
  */
-export async function askStockAlert(input: { store: DataStore; productId: string; email: unknown; left: unknown; now?: number }): Promise<AlertAsk> {
+export async function askStockAlert(input: { store: DataStore; productId: string; email: unknown; left: unknown; now?: number; pay?: () => Promise<boolean> }): Promise<AlertAsk> {
   const { store, productId } = input;
   const now = input.now ?? Date.now();
   const raw = typeof input.email === "string" ? input.email.trim() : "";
@@ -162,23 +179,41 @@ export async function askStockAlert(input: { store: DataStore; productId: string
   const email = normaliseEmail(raw);
   const key = listKey(sid, productId);
 
-  // The list's size less the places that have ended, which the write below drops first (at most DROP_ENDED_PER_ASK).
+  // The address's place, the list's size and how many of its places have ended (they no longer count).
   const read = repliesFor(await redisPipeline([["HGET", key, email], ["HLEN", key], ["ZCOUNT", endsKey(sid, productId), "-inf", nowSeconds(now)]]), 3);
   const held = read ? countOf(read[1]) : null;
   const ended = read ? countOf(read[2]) : null;
   if (!read || held === null || ended === null) return { ok: false, reason: "unknown" };
-  const size = Math.max(0, held - Math.min(ended, DROP_ENDED_PER_ASK));
-  const before = read[0] === null ? null : parseEntry(read[0]);
+  let before = read[0] === null ? null : parseEntry(read[0]);
   if (read[0] !== null && !before) return { ok: false, reason: "unknown" };
+  // Its own place, once ended, is gone (Claude 2 main's L1 on #5124): asking again makes a new unconfirmed place, with
+  // a new link to leave and a new confirmation, and never revives a confirmation that has ended.
+  const ownEnded = before !== null && endOf(before) <= nowSeconds(now);
+
+  // Paid before anything is written (M1): the drops and the place's scripts fit in what the ask takes.
+  if (input.pay && !(await input.pay())) return { ok: false, reason: "busy" };
+
+  // Ended places go first, and their room comes back, before this place's room is taken (Claude 2 main's M2 on #5124),
+  // so a store whose room is full of them frees itself.
+  let size = held;
+  if (ended > 0 || ownEnded) {
+    const dropped = await dropEnded(store, sid, productId, email, ownEnded ? String(read[0]) : "", now);
+    if (dropped === null) return { ok: false, reason: "unknown" };
+    if (ownEnded && !dropped.includes(email)) return { ok: false, reason: "unknown" };
+    if (ownEnded) before = null;
+    size = Math.max(0, held - dropped.length);
+  }
   if (!before && stockAlertSignup(input.left, size) === "full") return { ok: false, reason: "full" };
 
   const leave = before?.t ?? newToken();
   // The confirm link is the leave link's, for the day (never guessable: the leave link is secret): asking again the
   // same day makes the same email under the same key, which the service answers once (Codex G on #3620).
   const confirm = confirmFor(leave, now);
-  // The place ends with its own new confirm link while unconfirmed, a year after this ask once confirmed.
+  // The place ends with its own new confirm link while unconfirmed, a year after this ask once confirmed. A place kept
+  // from before ends were kept stays as it is written (no `x`), so its room is unchanged.
   const ends = nowSeconds(now) + (before?.ok ? WAIT_SECONDS : CONFIRM_SECONDS);
-  const entry: AlertEntry = { at: before?.at ?? nowSeconds(now), ok: before?.ok ?? 0, t: leave, x: ends };
+  const indexed = !before || before.x !== undefined;
+  const entry: AlertEntry = indexed ? { at: before?.at ?? nowSeconds(now), ok: before?.ok ?? 0, t: leave, x: ends } : { at: before!.at, ok: before!.ok, t: leave };
   const grant = (k: Grant["k"]): Grant => ({ s: sid, p: productId, e: email, k });
   const changes: DataChange[] = [{ until: now + CONFIRM_SECONDS * 1000, bytes: dataBytes([tokenKey(confirm), JSON.stringify(grant("confirm"))], 1) }];
   if (!before) changes.push({ slot: slotOf(productId), bytes: placeBytes(email, entry, grant("leave")) });
@@ -187,16 +222,12 @@ export async function askStockAlert(input: { store: DataStore; productId: string
 
   // The place, written in one step only over what was read: a new address only while it is still absent and the list
   // has room, an address asking again only over its own entry as read (Codex G on #3616: two new addresses at once for
-  // the last place). Places that ended first make way (Codex X6 on #3616). 1 written, 0 changed since it was read, -1 full.
+  // the last place). 1 written, 0 changed since it was read, -1 full.
   const placed = repliesFor(
-    await redisPipeline([["EVAL", ADD_PLACE, 2, key, endsKey(sid, productId), email, read[0] === null ? "" : String(read[0]), JSON.stringify(entry), MAX_STOCK_ALERTS, nowSeconds(now), ends, DROP_ENDED_PER_ASK]]),
+    await redisPipeline([["EVAL", ADD_PLACE, 2, key, endsKey(sid, productId), email, before ? String(read[0]) : "", JSON.stringify(entry), MAX_STOCK_ALERTS, indexed ? ends : "", WAIT_SECONDS]]),
     1,
   );
-  const reply = placed && Array.isArray(placed[0]) ? (placed[0] as unknown[]) : null;
-  const outcome = reply ? reply[0] : null;
-  if (reply && reply.length > 1) {
-    await giveBackEnded(store, sid, productId, reply.slice(1), now).catch((error) => console.error("giving back ended back-in-stock places' room failed", error));
-  }
+  const outcome = placed ? placed[0] : null;
   if (outcome === -1 || outcome === 0) {
     // Nothing written: the room taken for it comes back, and no link goes out.
     await giveData(store, changes, now).catch((error) => console.error("giving back a back-in-stock place's room failed", error));
@@ -216,64 +247,86 @@ export async function askStockAlert(input: { store: DataStore; productId: string
 }
 
 /**
- * A place written in one step. KEYS[1] the list, KEYS[2] its index of ends; ARGV[1] the address, ARGV[2] the entry read
- * ('' for a new address), ARGV[3] the entry to write, ARGV[4] the ceiling, ARGV[5] now, ARGV[6] the new place's end,
- * ARGV[7] the most ended places to drop. First, up to ARGV[7] other places whose end has passed are dropped (their kept
- * text returned after the outcome, so their leave links and room can follow). Then a new address is written only while
- * it is absent and the list holds fewer than ARGV[4]; one asking again only over exactly the entry read. The list and
- * its index are made to last until the new place's end only when they would end sooner: a write never lengthens
- * another place's life. Answers {outcome, address, kept text, ...}: 1 written, 0 changed since read, -1 full.
+ * Drops ended places in one step (DROP_ENDED): the asking address's own place when `own` is its kept text (read as
+ * ended), and up to DROP_ENDED_PER_ASK others from the index of ends. Their links to leave go and their room comes back
+ * (giveBackEnded). Answers the addresses dropped, or null when the reply does not read (rule 24).
  */
-export const ADD_PLACE = `-- marktmorgen:stock-alert-add:v2
-local now = tonumber(ARGV[5])
-local out = {0}
-local due = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', now, 'LIMIT', 0, tonumber(ARGV[7]))
-for _, who in ipairs(due) do
-  if who ~= ARGV[1] then
-    local raw = redis.call('HGET', KEYS[1], who)
-    local ends = nil
-    if raw then
-      local fine, entry = pcall(cjson.decode, raw)
-      if fine and type(entry) == 'table' then ends = tonumber(entry.x) end
-    end
-    if raw and ends and ends <= now then
-      redis.call('HDEL', KEYS[1], who)
-      table.insert(out, who)
-      table.insert(out, raw)
-    end
-    if not ends or ends <= now then redis.call('ZREM', KEYS[2], who) else redis.call('ZADD', KEYS[2], ends, who) end
-  end
+async function dropEnded(store: DataStore, sid: string, productId: string, email: string, own: string, now: number): Promise<string[] | null> {
+  const replies = repliesFor(await redisPipeline([["EVAL", DROP_ENDED, 2, listKey(sid, productId), endsKey(sid, productId), nowSeconds(now), DROP_ENDED_PER_ASK, email, own]]), 1);
+  const reply = replies ? replies[0] : null;
+  if (!Array.isArray(reply) || reply.length % 2 !== 0 || reply.length > 2 * (DROP_ENDED_PER_ASK + 1) || reply.some((v) => typeof v !== "string")) return null;
+  await giveBackEnded(store, sid, productId, reply, now).catch((error) => console.error("giving back ended back-in-stock places' room failed", error));
+  return reply.filter((_, i) => i % 2 === 0) as string[];
+}
+
+/**
+ * Ended places dropped in one step. KEYS[1] the list, KEYS[2] its index of ends; ARGV[1] now, ARGV[2] the most others to
+ * drop, ARGV[3] the asking address, ARGV[4] its place as read when it has ended ('' otherwise). Its own goes only over
+ * exactly what was read; another goes only while its kept `x` has passed (a place asked or confirmed again since is
+ * kept, its index line set right). A place that does not read is never dropped: only its index line goes. Answers
+ * {address, kept text, ...}.
+ */
+export const DROP_ENDED = `-- marktmorgen:stock-alert-drop:v1
+local now = tonumber(ARGV[1])
+local out = {}
+if ARGV[4] ~= '' and redis.call('HGET', KEYS[1], ARGV[3]) == ARGV[4] then
+  redis.call('HDEL', KEYS[1], ARGV[3])
+  redis.call('ZREM', KEYS[2], ARGV[3])
+  table.insert(out, ARGV[3])
+  table.insert(out, ARGV[4])
 end
+local due = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', now, 'LIMIT', 0, tonumber(ARGV[2]))
+for _, who in ipairs(due) do
+  local raw = redis.call('HGET', KEYS[1], who)
+  local ends = nil
+  if raw then
+    local fine, entry = pcall(cjson.decode, raw)
+    if fine and type(entry) == 'table' then ends = tonumber(entry.x) end
+  end
+  if raw and ends and ends <= now then
+    redis.call('HDEL', KEYS[1], who)
+    table.insert(out, who)
+    table.insert(out, raw)
+  end
+  if not ends or ends <= now then redis.call('ZREM', KEYS[2], who) else redis.call('ZADD', KEYS[2], ends, who) end
+end
+return out`;
+
+/**
+ * A place written in one step. KEYS[1] the list, KEYS[2] its index of ends; ARGV[1] the address, ARGV[2] the entry read
+ * ('' for a new address), ARGV[3] the entry to write, ARGV[4] the ceiling, ARGV[5] the place's end for the index ('' for
+ * a place kept from before ends were kept, which has no line), ARGV[6] how long the list lasts after its latest write.
+ * A new address is written only while it is absent and the list holds fewer than ARGV[4]; one asking again only over
+ * exactly the entry read. The list and its index last WAIT_SECONDS after their latest write, as before ends were kept:
+ * a place's room is held until it is dropped, left or cleared, so the list never lapses under a place still counted.
+ * 1 written, 0 changed since read, -1 full.
+ */
+export const ADD_PLACE = `-- marktmorgen:stock-alert-add:v3
 local current = redis.call('HGET', KEYS[1], ARGV[1])
 if ARGV[2] == '' then
-  if current then return out end
-  if redis.call('HLEN', KEYS[1]) >= tonumber(ARGV[4]) then out[1] = -1 return out end
+  if current then return 0 end
+  if redis.call('HLEN', KEYS[1]) >= tonumber(ARGV[4]) then return -1 end
 elseif current ~= ARGV[2] then
-  return out
+  return 0
 end
 redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
-redis.call('ZADD', KEYS[2], tonumber(ARGV[6]), ARGV[1])
-local life = tonumber(ARGV[6]) - now
-for _, key in ipairs(KEYS) do
-  if redis.call('TTL', key) < life then redis.call('EXPIRE', key, life) end
-end
-out[1] = 1
-return out`;
+if ARGV[5] ~= '' then redis.call('ZADD', KEYS[2], tonumber(ARGV[5]), ARGV[1]) end
+redis.call('EXPIRE', KEYS[1], ARGV[6])
+redis.call('EXPIRE', KEYS[2], ARGV[6])
+return 1`;
 
 /**
  * A place confirmed only over exactly the entry the confirmation read, in one step: a leave pressed in between (its
  * HDEL) is never undone by the confirmation's write (Codex G on #3616). KEYS[1] the list, KEYS[2] its index of ends;
- * ARGV[4] now, ARGV[5] the confirmed place's end. The list and its index last until then only when they would end
- * sooner (Codex X6 on #3616). 1 written, 0 changed since it was read.
+ * ARGV[4] the confirmed place's end for the index ('' for a place kept from before ends were kept), ARGV[5] how long the
+ * list lasts after its latest write. 1 written, 0 changed since it was read.
  */
-export const CONFIRM_PLACE = `-- marktmorgen:stock-alert-confirm:v2
+export const CONFIRM_PLACE = `-- marktmorgen:stock-alert-confirm:v3
 if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then
   redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
-  redis.call('ZADD', KEYS[2], tonumber(ARGV[5]), ARGV[1])
-  local life = tonumber(ARGV[5]) - tonumber(ARGV[4])
-  for _, key in ipairs(KEYS) do
-    if redis.call('TTL', key) < life then redis.call('EXPIRE', key, life) end
-  end
+  if ARGV[4] ~= '' then redis.call('ZADD', KEYS[2], tonumber(ARGV[4]), ARGV[1]) end
+  redis.call('EXPIRE', KEYS[1], ARGV[5])
+  redis.call('EXPIRE', KEYS[2], ARGV[5])
   return 1
 end
 return 0`;
@@ -297,12 +350,15 @@ export async function confirmStockAlert(token: string, store: DataStore, now = D
     if (!read) throw new UnknownReplyError("a back-in-stock place");
     const entry = parseEntry(read[0]);
     if (!entry) return { ok: false };
+    // A place that has ended confirms nothing: its address asks again for a new place (Claude 2 main's L1 on #5124).
+    if (endOf(entry) <= nowSeconds(now)) return { ok: false };
     if (!entry.ok) {
       // Confirmed only over exactly the entry read (CONFIRM_PLACE): a leave pressed in between is never undone. The
-      // confirmed place ends a year from now, and the list and its index last until then only when they would end sooner.
+      // confirmed place ends a year from now; one kept from before ends were kept stays as it is written (no `x`).
       const ends = nowSeconds(now) + WAIT_SECONDS;
+      const next: AlertEntry = entry.x !== undefined ? { ...entry, ok: nowSeconds(now), x: ends } : { ...entry, ok: nowSeconds(now) };
       const wrote = repliesFor(
-        await redisPipeline([["EVAL", CONFIRM_PLACE, 2, key, endsKey(grant.s, grant.p), grant.e, String(read[0]), JSON.stringify({ ...entry, ok: nowSeconds(now), x: ends }), nowSeconds(now), ends]]),
+        await redisPipeline([["EVAL", CONFIRM_PLACE, 2, key, endsKey(grant.s, grant.p), grant.e, String(read[0]), JSON.stringify(next), entry.x !== undefined ? ends : "", WAIT_SECONDS]]),
         1,
       );
       const done = wrote ? countOf(wrote[0]) : null;
@@ -360,7 +416,7 @@ async function readList(sid: string, productId: string): Promise<[string, AlertE
  */
 export async function stockAlertAddresses(store: DataStore, productId: string, now = Date.now()): Promise<{ email: string; confirmed: boolean }[]> {
   if (!store.statsId || !isRedisConfigured()) throw new UnknownReplyError("a back-in-stock list");
-  return (await readList(store.statsId, productId)).map(([email, entry]) => ({ email, confirmed: entry.ok > 0 && entry.x > nowSeconds(now) }));
+  return (await readList(store.statsId, productId)).map(([email, entry]) => ({ email, confirmed: entry.ok > 0 && endOf(entry) > nowSeconds(now) }));
 }
 
 /**
@@ -381,7 +437,7 @@ export async function stillWaiting(store: DataStore, productId: string, emails: 
     const entry = parseEntry(row);
     if (!entry) throw new UnknownReplyError(what);
     // A confirmed place whose own end has passed is no longer waiting (Codex X6 on #3616).
-    return entry.ok > 0 && entry.x > nowSeconds(now) ? entry.t : null;
+    return entry.ok > 0 && endOf(entry) > nowSeconds(now) ? entry.t : null;
   });
 }
 
@@ -391,7 +447,7 @@ export async function stillWaiting(store: DataStore, productId: string, emails: 
  */
 export async function confirmedForRestock(store: DataStore, productId: string, now = Date.now()): Promise<string[]> {
   if (!store.statsId || !isRedisConfigured()) throw new UnknownReplyError("a back-in-stock list");
-  return (await readList(store.statsId, productId)).filter(([, entry]) => entry.ok > 0 && entry.x > nowSeconds(now)).map(([email]) => email);
+  return (await readList(store.statsId, productId)).filter(([, entry]) => entry.ok > 0 && endOf(entry) > nowSeconds(now)).map(([email]) => email);
 }
 
 /** After the restock email: the addresses it went to are deleted, with their leave links, and their room comes back. */

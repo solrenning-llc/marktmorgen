@@ -215,7 +215,9 @@ async function intentsOf(account: string, invoice: string, count: () => void): P
   const named = typeof direct === "string" && INTENT_ID.test(direct) ? direct : "";
   count();
   const listed = await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ invoice, limit: "10" })}`);
-  const rows = objectOf(listed)?.data;
+  // Only a Stripe list (`object: "list"`) is read as one: a reply with the same fields and no `object` is not known to
+  // be this invoice's whole list, and an empty one would settle the member "none" for good (Codex X8-20261120-0318).
+  const rows = objectOf(listed)?.object === "list" ? objectOf(listed)?.data : undefined;
   if (!Array.isArray(rows)) throw new Error("an invoice's payments did not come as a list");
   // A paid row is a payment made, whatever it reads as: one that does not name a readable intent proves no absence.
   // A readable paid intent of this invoice is still found whatever the row order.
@@ -392,7 +394,8 @@ export async function giveBackUnused(
       count();
       const listed = objectOf(await onAccount("GET", account, `/disputes?${new URLSearchParams({ charge: id, limit: "10" })}`));
       const rows = listed?.data;
-      if (!listed || !Array.isArray(rows) || listed.has_more !== false) throw new Error("a charge's disputes could not be read whole");
+      // Only a Stripe list (`object: "list"`), as the invoice's payments above (Codex X8-20261120-0318).
+      if (!listed || listed.object !== "list" || !Array.isArray(rows) || listed.has_more !== false) throw new Error("a charge's disputes could not be read whole");
       let away = 0;
       for (const item of rows) {
         const row = objectOf(item);

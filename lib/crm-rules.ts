@@ -88,14 +88,23 @@ export const DEFAULT_STAGES: Stage[] = [
   { id: "lost00", name: "Lost", kind: "lost" },
 ];
 
-/** One line as the deals board keeps it: controls made spaces, spaces made one, trimmed (exported for a workflow step, lib/flow-rules.ts). */
+/**
+ * A lone UTF-16 surrogate made U+FFFD, the replacement character, which JSON writes as 3 bytes, where a lone surrogate
+ * is written escaped, as 6 (coordinator's MEDIUM 2 on #2048, 18th batch). Run after any cut, since a cut can split a
+ * pair. A string with none is returned as it is.
+ */
+export const wellFormed = (value: string) => value.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+
+/** One line as the deals board keeps it: controls made spaces, spaces made one, trimmed, no lone surrogate (exported for a workflow step, lib/flow-rules.ts). */
 export const oneLine = (value: unknown, max: number) =>
   typeof value === "string"
-    ? value
-        .replace(/[\u0000-\u001f\u007f]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, max)
+    ? wellFormed(
+        value
+          .replace(/[\u0000-\u001f\u007f]+/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, max),
+      )
     : "";
 
 /** A new id: six letters and digits for a field or a stage, ten for a deal. */
@@ -247,11 +256,13 @@ export function parseDeal(raw: unknown, stages: readonly Stage[]): Deal | null {
   const cents = typeof value.cents === "number" && Number.isFinite(value.cents) ? Math.max(0, Math.min(MAX_DEAL_CENTS, Math.round(value.cents))) : 0;
   const note =
     typeof value.note === "string"
-      ? value.note
-          .replace(/\r\n?/g, "\n")
-          .replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/g, " ")
-          .trim()
-          .slice(0, MAX_DEAL_NOTE)
+      ? wellFormed(
+          value.note
+            .replace(/\r\n?/g, "\n")
+            .replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/g, " ")
+            .trim()
+            .slice(0, MAX_DEAL_NOTE),
+        )
       : "";
   const at = (v: unknown) => (typeof v === "number" && Number.isInteger(v) && v > 0 ? v : 0);
   const follow = readFollowUp(value);

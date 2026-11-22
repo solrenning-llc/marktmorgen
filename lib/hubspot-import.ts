@@ -314,7 +314,8 @@ function planAgainst(
 /**
  * The most one stored deal's JSON weighs (parseDeal, lib/crm-rules.ts): its title (90), note (500) and next action
  * (200) at 3 bytes a UTF-16 unit, the most one takes in JSON once control characters are gone (a new line or a quote
- * is 2); its two addresses at 254 characters, every one but "@" and "." a quote (2 bytes); its form reference, ids,
+ * is 2) and a lone surrogate, which JSON would write as 6, is the replacement character (wellFormed, lib/crm-rules.ts);
+ * its two addresses at 254 characters, every one but "@" and "." a quote (2 bytes); its form reference, ids,
  * stage, due date, the largest amount, two dates of 16 digits and the keys: 3,666 bytes, rounded up.
  * tests/hubspot-import.test.ts holds a deal at every cap under it.
  */
@@ -434,9 +435,16 @@ export async function importHubSpotDeals(store: Store, file: HubSpotFile, option
     if (used === null) return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
     if (grows > 0 && used + grows > contentRoomFor(store, nowSeconds)) return refuse("store_full", dataFullWords(used, dataRoomFor(store, nowSeconds), largerPlanFor(store, nowSeconds)));
 
+    // Nothing to write (every deal already here, no pipeline or stage to make): writeImport would return at once, so no
+    // month's rows are taken for it. A file sent again, as "unconfirmed" asks, never spends the month on deals already
+    // here (coordinator's MEDIUM 1 on #2048, 18th batch).
+    if (!pipelines && !deals.length) return { ok: true, summary: { ...summary, written: true } };
     // The month's rows first, then the room: the room's work for each deal is done only for rows the month still has,
     // so a file refused for the month costs nothing per deal (Codex J on #2048). Nothing is written until both are taken.
-    const rows = await takeImportRows(store, file.rows.length, now, options.bytes ?? 0);
+    // Only the deals that really come in are counted, and the request's bytes in the same share: a row already here,
+    // refused or past a pipeline is written by nobody.
+    const share = file.rows.length > 0 ? Math.ceil(((options.bytes ?? 0) * deals.length) / file.rows.length) : 0;
+    const rows = await takeImportRows(store, Math.max(deals.length, 1), now, share);
     if (!rows.ok) {
       if (rows.reason === "unavailable") return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
       return refuse("rows_month", `Your store can bring in ${rowsWords(rows.limit)} a month from files, and this file would go past that. Nothing was brought in. Bring it in when your next billing month starts, or bring in a smaller file.`, rows.limit);

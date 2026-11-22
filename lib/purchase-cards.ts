@@ -49,6 +49,7 @@ import type { CardDelivery, CardKey, CardProgress, PurchaseCardModel } from "@/c
 import type { OrdersShared } from "@/components/orders-shared";
 import type { OrdersBundleLine } from "@/components/orders-bundle";
 import { parseLanguage } from "@/lib/store-language";
+import { unknownLimit } from "@/lib/request-guard";
 import { type Course, readCoursesExact } from "@/lib/course";
 import { lessonsDoneIn } from "@/lib/learn";
 
@@ -332,7 +333,12 @@ export function cardOf(store: Store, purchase: Purchase, token: string, extras: 
           ? pre.ordersLine(on(Date.parse(`${purchase.preorder.day}T00:00:00Z`) / 1000))
           : pre.receiptLater
         : null,
-    ended: purchase.ended ? { note: words.endedNote, renew: { href: renewPath(store, { id: purchase.productId }), label: words.renew } } : null,
+    // A store switched off after a report (lib/takedown.ts) sells nothing: the membership is said to be over, with no Renew.
+    ended: purchase.ended
+      ? store.suspended
+        ? { note: words.endedClosedNote, renew: null }
+        : { note: words.endedNote, renew: { href: renewPath(store, { id: purchase.productId }), label: words.renew } }
+      : null,
     course: purchase.courseProduct ? { href: `/@${handle}/course/${purchase.courseProduct}`, label: words.openTitle(purchase.title) } : null,
     progress: purchase.courseProduct ? progressFor(purchase.courseProduct, "main") : null,
     package:
@@ -365,7 +371,8 @@ export function cardOf(store: Store, purchase: Purchase, token: string, extras: 
       ...purchase.added.flatMap((added) => keyOf(`${purchase.reference}|${added.key}`, added.title)),
     ],
     review:
-      !purchase.ended && reviewableIn
+      // Not while the store is switched off after a report: its review page is closed then (app/[handle]/review).
+      !purchase.ended && reviewableIn && !store.suspended
         ? {
             href: `/@${handle}/review?${new URLSearchParams({ token, ref: purchase.reference })}`,
             label: purchase.added.length || purchase.items ? words.reviewAll : words.reviewTitle(purchase.title),
@@ -444,7 +451,7 @@ export function bundleLinesOf(store: Store, token: string, which: "main" | BumpK
 }
 
 /** What a request for a bundle's products or a batch of older purchases answers: what to draw, or why not, with its status. */
-export type Asked<T> = { ok: true; value: T } | { ok: false; status: 404 | 410 | 429 | 502; message: string };
+export type Asked<T> = { ok: true; value: T } | { ok: false; status: 404 | 410 | 429 | 502 | 503; message: string };
 
 /**
  * A bundle's products, asked for with the button under it (the route
@@ -458,7 +465,10 @@ export async function askBundle(store: Store, token: string, reference: string, 
   const say = ordersWords(store.language).downloadProblems;
   const which: "main" | BumpKey | null = item === "main" ? "main" : (BUMP_KEYS as readonly string[]).includes(item) ? (item as BumpKey) : null;
   if (!which) return { ok: false, status: 404, message: say.nothingToDownload };
-  if (!(await withinStore("orders-bundle", `${store.handle}:t:${token}`, ORDERS_BUNDLE_PER_HOUR, 3600, store, "buyer"))) return { ok: false, status: 429, message: say.tooOften };
+  const room = await withinStore("orders-bundle", `${store.handle}:t:${token}`, ORDERS_BUNDLE_PER_HOUR, 3600, store, "buyer").catch(unknownLimit);
+  // A count that could not be read is never "too often" (rule 24).
+  if (room === "unknown") return { ok: false, status: 503, message: say.error };
+  if (!room) return { ok: false, status: 429, message: say.tooOften };
   let shown;
   try {
     shown = await bundleFor(store, token, reference, which);
@@ -483,7 +493,9 @@ export async function askBundle(store: Store, token: string, reference: string, 
  */
 export async function askOlder(store: Store, token: string, older: string): Promise<Asked<{ cards: PurchaseCardModel[]; older: string | null; left: string; said: string }>> {
   const words = ordersWords(store.language);
-  if (!(await withinStore("orders-older", `${store.handle}:t:${token}`, ORDERS_OLDER_PER_HOUR, 3600, store, "buyer"))) return { ok: false, status: 429, message: words.downloadProblems.tooOften };
+  const room = await withinStore("orders-older", `${store.handle}:t:${token}`, ORDERS_OLDER_PER_HOUR, 3600, store, "buyer").catch(unknownLimit);
+  if (room === "unknown") return { ok: false, status: 503, message: words.downloadProblems.error };
+  if (!room) return { ok: false, status: 429, message: words.downloadProblems.tooOften };
   let found;
   try {
     found = await olderFor(store, token, older, (purchases, email, meter) => extrasFor(store, email, purchases, meter));

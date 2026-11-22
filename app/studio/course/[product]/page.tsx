@@ -3,16 +3,19 @@ import { commentsOn, markSeen, recentComments } from "@/lib/lesson-comments";
 import { CREATOR_AUTHOR, commentClock } from "@/lib/lesson-comments-rules";
 import type { Metadata } from "next";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
+import { aiOnValue } from "@/lib/ai-on-value";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { storeFolder } from "@/lib/store";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { StudioEmptyState } from "@/components/empty-state";
 import { productSegment } from "@/lib/product-slug";
-import { lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
+import { activePlan } from "@/lib/product-extras";
+import { accessEndAhead, lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
 import { captionsAnchor, lessonCaptionCheck } from "@/lib/course-access-check";
 import { CourseAccessCheck } from "@/components/course-access-check";
 import { emailKey, studentEmail, studentsOf } from "@/lib/learn";
@@ -21,7 +24,7 @@ import { passedFor } from "@/lib/quiz";
 import { certificatesFor } from "@/lib/certificate";
 import { CertificateValidity } from "@/components/certificate-validity";
 import {
-  CertificateSwitch, CourseStart,
+  CertificateSwitch, CourseAccessEnd, CourseStart,
   CourseEditor,
   GiveTriesBack,
   StudentAccess,
@@ -29,14 +32,20 @@ import {
 } from "@/components/course-editor";
 import { readListing, readTitles, visibleIds } from "@/lib/catalog";
 import { CourseShelfStudio } from "@/components/course-shelf-studio";
+import { CourseNextStep } from "@/components/course-next-step";
+import { MAX_NEXT_STEP_LINE } from "@/lib/course-next-step-rules";
 import { templateById } from "@/lib/course-templates";
 import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
-import { autoRefundsOwed, autoWriting } from "@/lib/auto-captions";
+import { autoCaptionStates, autoCaptionsMoney } from "@/lib/auto-captions";
+import { CaptionsRefundsOwed } from "@/components/captions-refunds-owed";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
+import { NO_BUYER_ADDRESSES, seesBuyerAddresses } from "@/lib/buyer-addresses";
 import { parseLanguage } from "@/lib/store-language";
 import { CourseWorkStudio, type StudioWork } from "@/components/course-work-studio";
+import { SubmissionReview } from "@/components/submission-review";
+import { SUBMISSIONS_READY } from "@/lib/submission-switch";
 import { isUnreadSubmission, submissionsOf, waitingWork } from "@/lib/assignment";
 
 
@@ -69,6 +78,9 @@ export default async function StudioCoursePage({
   }
   const { view } = found;
   const { store } = view;
+  // Students' email addresses are orders data (ALL-160): a role without "orders", such as an Editor, sees the
+  // course and its students' progress without them, and is told why (lib/buyer-addresses.ts).
+  const seesBuyers = seesBuyerAddresses(view.role);
   const product = await readListing(store, productId);
   if (!product?.course) redirect(studioPath(store));
   const course = await readCourse(product.course.id);
@@ -78,12 +90,20 @@ export default async function StudioCoursePage({
   const videoPaths = lessonsInOrder(course).flatMap(({ lesson }) => (lesson.video ? [lesson.video.pathname] : []));
   const streams = await streamStates(videoPaths).catch(() => ({}));
   // And the languages each one has captions in.
-  const captions = await streamCaptions(videoPaths).catch(() => ({}));
+  const captions = await streamCaptions(videoPaths).catch(() => null);
   // And those being written by AI (lib/auto-captions.ts), which only somebody
-  // who may spend on the plan's card, on a store with a plan, may ask for.
-  const writing = await autoWriting(videoPaths).catch(() => ({}));
-  // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card.
-  const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => []) : [];
+  // who may spend on the plan's card, on a store with a plan, may ask for; and
+  // those whose captions could not be confirmed, kept for a person (`held`).
+  // Null when it could not be read (rule 24): said as unknown, never as none.
+  const captionStates = await autoCaptionStates(videoPaths).catch(() => null);
+  const writing = captionStates ? captionStates.writing : null;
+  const held = captionStates ? captionStates.held : [];
+  // AI captions money not settled, shown to whoever may see the plan's card: refunds Stripe has not confirmed yet
+  // (main's CaptionsRefundsOwed), and charges kept for a person, apart. One exact read for both (autoCaptionsMoney):
+  // null when it could not be read (rule 24), so the page says so instead of hiding as if nothing were owed.
+  const captionsMoney: Awaited<ReturnType<typeof autoCaptionsMoney>> | null = can(view.role, "billing") ? await autoCaptionsMoney(folder).catch(() => null) : { owed: [], unconfirmed: [] };
+  const owedRows = captionsMoney ? captionsMoney.owed : null;
+  const unconfirmedRows = captionsMoney ? captionsMoney.unconfirmed : [];
   const autoCan =
     can(view.role, "billing") && store.subscriptionActive && Boolean(store.subscriptionId && store.stripeCustomerId) && isBillingConfigured() && isStreamConfigured();
   // Null when the students could not be read (rule 24): the page says so instead of "No students yet" or counts of 0.
@@ -98,18 +118,27 @@ export default async function StudioCoursePage({
   const passed = quizLessons.length ? await passedFor(course.id, students.map((s) => emailKey(s.email))) : [];
   const certificates = await certificatesFor(course.id).catch(() => null);
   const standing = certificates ? certificates.list.filter((c) => !c.withdrawnAt).length : null;
-  // The newest comments under the lessons, marked new since this page last showed them.
-  const [talking, recent] = await Promise.all([commentsOn(course.id), recentComments(course.id, 50)]);
-  await markSeen(course.id);
+  // The newest comments under the lessons, marked new since this page last showed them. Null when they could not be
+  // read (rule 24): the page says so instead of "No comments yet", and what it did not show is not marked seen.
+  const [talking, recent] = await Promise.all([commentsOn(course.id).catch(() => null), recentComments(course.id, 50).catch(() => null)]);
+  if (recent) await markSeen(course.id);
   const titles = new Map(lessonsInOrder(course).map(({ lesson }) => [lesson.id, lesson.title]));
-  const aiState = aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 };
+  // The store's products by title, read once for both pickers below, the "Next step" (560 [AS1]) and the "More from"
+  // shelf (628 [HN4](b)) (lib/catalog.ts readTitles). Null when they could not be read: each section says so, never
+  // offering an empty list as if the store sold nothing else (rule 24).
+  const storeTitles = await readTitles(store).catch(() => null);
+  const nextChoices = storeTitles
+    ? [...storeTitles].filter(([pid]) => pid !== product.id).map(([pid, title]) => ({ id: pid, title })).sort((a, b) => a.title.localeCompare(b.title, "en"))
+    : null;
+  // An unread allowance is said as unknown by every AiOn reader, never as 0 left (rule 24; lib/ai-on-value.ts).
+  const aiState = aiAvailableFor(store) ? aiOnValue(true, await aiLeft(store).catch(() => null)) : aiOnValue(false, null);
   // Work handed in for the course's assignments (lib/assignment.ts): what is waiting, or everything.
   const hasTasks = lessonsInOrder(course).some(({ lesson }) => lesson.task);
   const showingWork = query.work === "all" ? "all" : "waiting";
   const work = hasTasks ? await waitingWork(course.id, 50, showingWork === "all") : { rows: [], total: 0 };
   const [handed, addresses] = await Promise.all([
     submissionsOf(course.id, work.rows),
-    Promise.all(work.rows.map((row) => studentEmail(course.id, row.who).catch(() => null))),
+    seesBuyers ? Promise.all(work.rows.map((row) => studentEmail(course.id, row.who).catch(() => null))) : work.rows.map(() => null),
   ]);
   const workRows: StudioWork[] = work.rows.flatMap((row, i) => {
     const submission = handed[i];
@@ -120,11 +149,11 @@ export default async function StudioCoursePage({
   const unreadWork = work.rows.filter((row, i) => isUnreadSubmission(handed[i]) && titles.has(row.lessonId)).length;
   // The "More from" shelf (628 [HN4](b)): the store's listed products to pick from, the course left out, by name.
   // Null when the names could not be read: the section says so instead of an empty list (rule 24).
-  const shelfTitles = await readTitles(store).catch(() => null);
+  const shelfTitles = storeTitles;
   const shelfOptions = shelfTitles ? visibleIds(store).filter((pid) => pid !== product.id && shelfTitles.has(pid)).map((pid) => ({ id: pid, title: shelfTitles.get(pid)! })) : [];
   const shelfSaved = shelfTitles ? (course.shelf ?? []).filter((pid) => shelfTitles.has(pid)).map((pid) => ({ id: pid, title: shelfTitles.get(pid)! })) : [];
-  const byId = new Map(recent.comments.map((c) => [c.id, c]));
-  const shownComments: StudioComment[] = recent.comments
+  const byId = new Map((recent?.comments ?? []).map((c) => [c.id, c]));
+  const shownComments: StudioComment[] = (recent?.comments ?? [])
     .filter((c) => titles.has(c.lesson))
     .map((c) => {
       const parent = c.parent ? byId.get(c.parent) : undefined;
@@ -139,7 +168,7 @@ export default async function StudioCoursePage({
         hidden: c.hidden,
         answerTo: c.parent ? (parent ? (parent.by === CREATOR_AUTHOR ? store.name : parent.name) : "") : null,
         parentId: c.parent,
-        fresh: c.at > recent.seen && c.by !== CREATOR_AUTHOR,
+        fresh: c.at > (recent?.seen ?? 0) && c.by !== CREATOR_AUTHOR,
       };
     });
 
@@ -155,7 +184,7 @@ export default async function StudioCoursePage({
       <StudioStorePin sid={store.sid}>
 
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Course</p>
+        <StudioTrail store={store} path={[{ label: "Products", href: `${studioPath(store)}#products` }]} here="Course" />
         <h1 className="t-h2 mt-3 break-words">{product.title}</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Modules hold lessons. A lesson can have a video, text, downloads, a link, and a quiz or an assignment, and any lesson can be a
@@ -180,17 +209,27 @@ export default async function StudioCoursePage({
           </span>
         </div>
 
-        {owedRows.length ? (
-          <section aria-labelledby="captions-refunds" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-refunds>
-            <h2 id="captions-refunds" className="text-base font-bold text-ink">
-              Refunds for AI captions not confirmed yet
+        {owedRows === null ? (
+          <section aria-labelledby="captions-refunds-unread" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-refunds-unread data-captions-money-unread>
+            <h2 id="captions-refunds-unread" className="text-base font-bold text-ink">
+              Refunds and charges for AI captions could not be checked
             </h2>
-            <ul className="mt-2 space-y-1 text-sm text-ink">
-              {owedRows.map((row) => (
+            <p className="mt-2 text-sm text-ink">
+              We could not read whether a refund for AI captions is still waiting for Stripe, or whether a charge for AI captions is still waiting for a person to confirm it. Reload this page to try again. If this keeps happening, write to {SUPPORT_EMAIL}.
+            </p>
+          </section>
+        ) : (
+          <CaptionsRefundsOwed rows={owedRows} />
+        )}
+        {unconfirmedRows.length ? (
+          <section aria-labelledby="captions-unconfirmed" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-unconfirmed>
+            <h2 id="captions-unconfirmed" className="text-base font-bold text-ink">
+              AI captions charges not confirmed yet
+            </h2>
+            <ul className="mt-2 max-w-[80ch] space-y-1 text-sm text-ink">
+              {unconfirmedRows.map((row) => (
                 <li key={row.id}>
-                  {row.stuck
-                    ? `A refund of $${(row.cents / 100).toFixed(2)} for AI captions was not confirmed by Stripe, and we have stopped checking it on our own. Write to ${SUPPORT_EMAIL} about it.`
-                    : `A refund of $${(row.cents / 100).toFixed(2)} for AI captions was asked for, and Stripe has not confirmed it yet. We check it again on our own; you do not need to do anything.`}
+                  {`We could not confirm with our video provider which AI captions were written for a charge of $${(row.cents / 100).toFixed(2)}. That charge is not final, and any refund for it is not decided yet. We have stopped checking on our own. Write to ${SUPPORT_EMAIL} about it.`}
                 </li>
               ))}
             </ul>
@@ -211,8 +250,10 @@ export default async function StudioCoursePage({
           draft={product.hidden === true}
           folder={folder}
           streams={streams}
-          captions={captions}
-          writing={writing}
+          // The editor's own lesson Captions part still reads a missing entry as none (a leftover; the check above says unknown).
+          captions={captions ?? {}}
+          writing={writing ?? {}}
+          held={held}
           auto={{ can: autoCan, spoken: parseLanguage(store.language) }}
           title={product.title}
           ai={aiState}
@@ -232,11 +273,15 @@ export default async function StudioCoursePage({
           />
         ) : null}
 
+        {/* Files buyers sent for review (750 [CD1]): shown only once the buyer's side works (lib/submission-switch.ts). */}
+        {SUBMISSIONS_READY ? <SubmissionReview productId={product.id} showBuyerAddresses={seesBuyers} /> : null}
+
         <CourseCommentsStudio
           productId={product.id}
           storeName={store.name}
           initialOn={talking}
           initial={shownComments}
+          unread={recent === null}
           lessonHref={view.role === "owner" ? `/@${store.handle}/course/${product.id}` : null}
           now={commentClock()}
         />
@@ -272,6 +317,7 @@ export default async function StudioCoursePage({
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
             <CourseStart productId={product.id} startsAt={course.startsAt} />
+            <CourseAccessEnd productId={product.id} endsAt={course.accessEndsAt ?? null} passed={course.accessEndsAt !== undefined && accessEndAhead(course) === null} membership={product.recurring !== null} planOffered={activePlan(product) !== null} />
             <CertificateSwitch productId={product.id} on={course.certificate} />
             {course.certificate ? <CertificateValidity productId={product.id} months={course.certificateMonths ?? null} /> : null}
             {course.certificate ? (
@@ -298,12 +344,14 @@ export default async function StudioCoursePage({
               body={course.certificate ? "Nobody has finished yet. When a student does and asks for their certificate, it is listed here." : "Switch certificates on above and each student who finishes is listed here with theirs."}
             />
           ) : (
+            <>
+            {seesBuyers ? null : <p className="mt-3 text-sm text-ink-soft">{NO_BUYER_ADDRESSES}</p>}
             <div className="mt-3 overflow-x-auto" tabIndex={0} role="region" aria-label="Certificates issued, one row each">
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="text-ink-mute">
                     <th scope="col" className="py-2 pr-3 font-semibold">Name on it</th>
-                    <th scope="col" className="py-2 pr-3 font-semibold">Student</th>
+                    {seesBuyers ? <th scope="col" className="py-2 pr-3 font-semibold">Student</th> : null}
                     <th scope="col" className="py-2 pr-3 font-semibold">Issued</th>
                     <th scope="col" className="py-2 font-semibold"><span className="sr-only">Actions</span></th>
                   </tr>
@@ -314,7 +362,7 @@ export default async function StudioCoursePage({
                       <td className={`max-w-[14rem] break-words py-2 pr-3 font-semibold ${certificate.withdrawnAt ? "text-ink-mute line-through" : "text-ink"}`}>
                         {certificate.name}
                       </td>
-                      <td className="max-w-[14rem] break-all py-2 pr-3">{certificate.email}</td>
+                      {seesBuyers ? <td className="max-w-[14rem] break-all py-2 pr-3">{certificate.email}</td> : null}
                       <td className="whitespace-nowrap py-2 pr-3">
                         {day(certificate.issuedAt)}
                         {certificate.withdrawnAt ? <span className="block text-xs text-ink-mute">{`Withdrawn ${day(certificate.withdrawnAt)}`}</span> : null}
@@ -335,6 +383,24 @@ export default async function StudioCoursePage({
                 </tbody>
               </table>
             </div>
+            </>
+          )}
+        </section>
+
+        <section className="card mt-8 p-6 sm:p-8" aria-labelledby="next-step-title" data-next-step="">
+          <h2 id="next-step-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Next step</h2>
+          <p className="mt-2 max-w-2xl text-ink-soft">
+            Suggest one of your products for students who are ready for more. They see it on the course&apos;s page and right after
+            they finish the last lesson, with its price and your line, and can say &quot;No thanks&quot;.
+          </p>
+          {nextChoices === null ? (
+            <p className="notice notice-error mt-4" role="status">
+              Your products could not be read just now, so the next step cannot be changed. Reload this page in a moment.
+            </p>
+          ) : nextChoices.length === 0 && !course.nextStep ? (
+            <p className="mt-4 text-sm text-ink-soft">Add another product to your store to suggest it here.</p>
+          ) : (
+            <CourseNextStep productId={product.id} current={course.nextStep ?? null} choices={nextChoices} maxLine={MAX_NEXT_STEP_LINE} />
           )}
         </section>
 
@@ -344,6 +410,15 @@ export default async function StudioCoursePage({
             Everyone who has opened the course since buying it, with how many lessons they marked done. Buyers are
             read from your own Stripe account; this list is what they did here.
           </p>
+          {seesBuyers ? (
+            <p className="mt-2 text-sm">
+              <Link href={studioPath(store, `product=${encodeURIComponent(product.id)}`, "students")} className="inline-flex min-h-11 items-center underline">
+                Filter students and change many at once
+              </Link>
+            </p>
+          ) : (
+            <p className="mt-2 text-sm text-ink-soft">{NO_BUYER_ADDRESSES}</p>
+          )}
           {studentsRead === null ? null : (
             <div className="mt-5 grid grid-cols-3 gap-3 text-center">
               <div className="rounded-[var(--r-sm)] bg-sand p-4">
@@ -378,32 +453,35 @@ export default async function StudioCoursePage({
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="text-ink-mute">
-                    <th scope="col" className="py-2 pr-3 font-semibold">Student</th>
+                    {seesBuyers ? <th scope="col" className="py-2 pr-3 font-semibold">Student</th> : null}
                     <th scope="col" className="py-2 pr-3 font-semibold">Joined</th>
                     <th scope="col" className="py-2 pr-3 font-semibold">Done</th>
                     <th scope="col" className="py-2 pr-3 font-semibold">Last here</th>
                     {quizLessons.length ? <th scope="col" className="py-2 pr-3 font-semibold">Quizzes passed</th> : null}
-                    <th scope="col" className="py-2 font-semibold"><span className="sr-only">Access</span></th>
+                    {seesBuyers ? <th scope="col" className="py-2 font-semibold"><span className="sr-only">Access</span></th> : null}
                   </tr>
                 </thead>
                 <tbody>
                   {students.map((student, i) => (
-                    <tr key={student.email} className="border-t border-line align-top">
-                      <td className="max-w-[14rem] break-all py-2 pr-3">{student.email}</td>
+                    <tr key={seesBuyers ? student.email : i} className="border-t border-line align-top">
+                      {seesBuyers ? <td className="max-w-[14rem] break-all py-2 pr-3">{student.email}</td> : null}
                       <td className="whitespace-nowrap py-2 pr-3">{day(student.since)}</td>
                       <td className="whitespace-nowrap py-2 pr-3 tabular-nums">{`${Math.min(student.done, lessons)} of ${lessons}`}</td>
                       <td className="whitespace-nowrap py-2 pr-3">{day(student.lastSeen)}</td>
                       {quizLessons.length ? (
                         <td className="whitespace-nowrap py-2 pr-3 tabular-nums">
-                          {`${quizLessons.filter((id) => passed[i]?.has(id)).length} of ${quizLessons.length}`}
+                          {/* Null: this student's passes could not be read just now (rule 24), never shown as 0. */}
+                          {passed[i] === null ? "Could not be read" : `${quizLessons.filter((id) => passed[i]?.has(id)).length} of ${quizLessons.length}`}
                         </td>
                       ) : null}
-                      <td className="py-2">
-                        <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                          <StudentAccess productId={product.id} email={student.email} blocked={student.blocked} />
-                          {quizLessons.some((id) => !passed[i]?.has(id)) ? <GiveTriesBack productId={product.id} email={student.email} /> : null}
-                        </span>
-                      </td>
+                      {seesBuyers ? (
+                        <td className="py-2">
+                          <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                            <StudentAccess productId={product.id} email={student.email} blocked={student.blocked} />
+                            {passed[i] !== null && quizLessons.some((id) => !passed[i]?.has(id)) ? <GiveTriesBack productId={product.id} email={student.email} /> : null}
+                          </span>
+                        </td>
+                      ) : null}
                     </tr>
                   ))}
                 </tbody>

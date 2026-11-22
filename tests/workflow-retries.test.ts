@@ -22,6 +22,9 @@ import {
   MAX_WAIT_DAYS_PER_STEP,
   QUEUE_COMMANDS_PER_STEP,
   RUN_START_COMMANDS,
+  SES_COUNTED_WAIT_COMMANDS_PER_TRY,
+  SES_WAIT_COMMANDS_PER_TRY,
+  SES_WAKE_COMMANDS_PER_TRY,
   WAIT_COMMANDS_PER_TRY,
   WORKFLOW_LIMITS,
   WORST_COMMANDS_PER_RUN,
@@ -40,6 +43,9 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
 import { installSesMailFixture } from "./ses-mail-fixture";
+import { skipWaits } from "./skip-waits";
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 
 const RealDate = Date;
 // Reproduce the near-midnight boundary without depending on the CI clock.
@@ -106,10 +112,13 @@ async function main(): Promise<void> {
 
   part("The worst case per run counts every wait and every retry");
   is(
-    "start, every step and each retry of the creator's, and every wait",
+    "start, every step and each retry of the creator's, every wait, and every try that can meet no Amazon SES room",
     WORST_COMMANDS_PER_RUN,
-    RUN_START_COMMANDS + (MAX_STEPS + MAX_RETRIES_BY_YOU) * (HISTORY_COMMANDS_PER_STEP + QUEUE_COMMANDS_PER_STEP) + MAX_WAITS_PER_RUN * WAIT_COMMANDS_PER_TRY,
+    // Each counted wait at the dearer of an ordinary try and an SES try past its parks (review of #4246 by cloud AA).
+    RUN_START_COMMANDS + (MAX_STEPS + MAX_RETRIES_BY_YOU) * (HISTORY_COMMANDS_PER_STEP + QUEUE_COMMANDS_PER_STEP) + MAX_WAITS_PER_RUN * Math.max(WAIT_COMMANDS_PER_TRY, SES_COUNTED_WAIT_COMMANDS_PER_TRY)
+      + (MAX_STEPS + MAX_RETRIES_BY_YOU + MAX_WAITS_PER_RUN) * (SES_WAIT_COMMANDS_PER_TRY + SES_WAKE_COMMANDS_PER_TRY),
   );
+  is("waiting for Amazon SES room only adds to the worst case, never takes from it", WORST_COMMANDS_PER_RUN > RUN_START_COMMANDS + (MAX_STEPS + MAX_RETRIES_BY_YOU) * (HISTORY_COMMANDS_PER_STEP + QUEUE_COMMANDS_PER_STEP) + MAX_WAITS_PER_RUN * WAIT_COMMANDS_PER_TRY, true);
   is("and the commercial review captures the bounds", [WORKFLOW_LIMITS.maxWaitsPerRun, WORKFLOW_LIMITS.maxWaitDaysPerStep, WORKFLOW_LIMITS.maxRetriesByYou, WORKFLOW_LIMITS.worstCommandsPerRun], [MAX_WAITS_PER_RUN, MAX_WAIT_DAYS_PER_STEP, MAX_RETRIES_BY_YOU, WORST_COMMANDS_PER_RUN]);
 
   part("Every way a run stops, listed");

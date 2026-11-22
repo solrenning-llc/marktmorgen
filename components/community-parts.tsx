@@ -4,8 +4,12 @@ import { photoUrl } from "@/lib/photo-limits";
 import { isFree, type Listing, type Store } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
 import { communityWords, pollWhenIn, whenIn } from "@/lib/buyer-words/community";
+import { communityUnreadWords } from "@/lib/buyer-words/community-unread";
+import { challengeWords } from "@/lib/buyer-words/challenges";
+import { APPROVAL_WARN, approvalWords } from "@/lib/buyer-words/community-approval";
 import { LANGUAGES } from "@/lib/store-language";
 import { CREATOR, type CommunityConfig, type Member, type Post } from "@/lib/community";
+import { aboutWords } from "@/lib/community-about";
 import { communityImageFile } from "@/lib/community-image";
 import { initialOf, segments } from "@/lib/community-text";
 import { MAX_QUERY_LENGTH } from "@/lib/community-search";
@@ -30,13 +34,19 @@ import { NewTab } from "@/components/new-tab";
 const WARN = new Set([
   "noemail", "dmoff", "dmbetween", "dmfull", "chatoff", "pollclosed", "polloptions", "polltitle", "notyours", "empty", "links", "slow",
   "name", "questions", "image", "creatoronly", "level", "muted", "full", "fullposts", "fullcomments", "pinfull", "gone", "forbidden",
-  "eventfull", "eventcancelled", "eventover", "eventlocked", "host", "nospace", "spacelocked", "out", "off", "error", "locked",
+  "eventfull", "eventcancelled", "eventover", "eventlocked", "eventunknown", "eventunknownlasting", "host", "nospace", "spacelocked", "spaceunknown", "spaceunknownlasting", "out", "off", "error", "locked",
+  "notemailed",
+  // Saved, with a profile link turned away (lib/member-links.ts).
+  "savedlinkoff",
 ]);
 
 /** What happened after a button, in the store's language (lib/buyer-words/community.ts). */
 export function communityNotices(language: unknown): Record<string, { text: string; tone?: "warn" }> {
   const w = communityWords(language);
-  return Object.fromEntries(Object.entries(w.notices).map(([key, text]) => [key, WARN.has(key) ? { text, tone: "warn" as const } : { text }]));
+  // With what waits for the creator's approval (543 [CM2], lib/buyer-words/community-approval.ts), and a post that went
+  // up while who asked for its email could not be read (lib/buyer-words/community-unread.ts).
+  const all: Record<string, string> = { ...w.notices, ...approvalWords(language).notices, notemailed: communityUnreadWords(language).notEmailed };
+  return Object.fromEntries(Object.entries(all).map(([key, text]) => [key, WARN.has(key) || APPROVAL_WARN.has(key) ? { text, tone: "warn" as const } : { text }]));
 }
 
 /** After asking for a link to come in, in the store's language. */
@@ -65,7 +75,7 @@ export function communityImageUrl(store: Store, path: string): string {
   return `/api/store/community/image?h=${encodeURIComponent(store.handle)}&f=${communityImageFile(path)}`;
 }
 
-export type Tab = "feed" | "events" | "members" | "leaderboard" | "you" | "search" | "messages" | "notifications" | "chat";
+export type Tab = "feed" | "events" | "challenges" | "members" | "leaderboard" | "you" | "search" | "messages" | "notifications" | "chat";
 
 /** The bar across the top of every community page. */
 export function CommunityBar({
@@ -100,6 +110,7 @@ export function CommunityBar({
     { id: "feed", label: w.tabFeed, href: home },
     ...(room ? [{ id: "chat" as Tab, label: w.tabRoom, href: `${home}/chat` }] : []),
     { id: "events", label: w.tabEvents, href: `${home}/events` },
+    { id: "challenges", label: challengeWords(store.language).tab, href: `${home}/challenges` },
     { id: "members", label: w.tabMembers, href: `${home}/members` },
     { id: "leaderboard", label: w.tabLeaderboard, href: `${home}/leaderboard` },
     { id: "you", label: w.tabYou, href: `${home}/you` },
@@ -620,13 +631,16 @@ export function Gate({
   store,
   config,
   state,
+  lasting = false,
   email,
   products,
   link,
 }: {
   store: Store;
   config: CommunityConfig;
-  state: "out" | "closed" | "removed";
+  state: "out" | "closed" | "removed" | "unknown";
+  /** With "unknown": asking again will tell no more (more purchases than are read), so it says to write to the creator. */
+  lasting?: boolean;
   email: string | null;
   products: { id: string; title: string; kind: string }[];
   link: { title: string; body: string } | null;
@@ -637,6 +651,12 @@ export function Gate({
       <p className="st-label">{w.pageTitle}</p>
       <h1 className="font-display mt-1 text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-3xl">{config.name}</h1>
       {config.about ? <PostText text={config.about} className="st-muted mt-3 leading-relaxed" /> : null}
+      {/* The public About page (233 [SK1]), only while the creator has it on; its words name the community (WCAG 2.4.9). */}
+      {state !== "removed" && config.page.on ? (
+        <p className="mt-3 text-sm">
+          <Link href={`/@${store.handle}/community/about`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">{aboutWords(store.language).link(config.name)}</Link>
+        </p>
+      ) : null}
 
       {link ? (
         <div className="st-note mt-6" role="status">
@@ -645,19 +665,35 @@ export function Gate({
         </div>
       ) : null}
 
+      {/* Each state's title is a heading under the community's name (WCAG 2.4.10), drawn as the bold line it was. */}
       {state === "removed" ? (
         <div className="st-note mt-6" role="status">
-          <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.removedTitle(store.name)}</p>
+          <h2 className="text-base font-bold" style={{ color: "var(--st-text)" }}>{w.removedTitle(store.name)}</h2>
           <p className="mt-1 text-sm">{w.removedBody(email ?? "")}</p>
         </div>
       ) : state === "closed" ? (
         <div className="st-note mt-6" role="status">
-          <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.closedTitle}</p>
+          <h2 className="text-base font-bold" style={{ color: "var(--st-text)" }}>{w.closedTitle}</h2>
           <p className="mt-1 text-sm">{w.closedBody(email ?? "", store.name)}</p>
+        </div>
+      ) : state === "unknown" ? (
+        // What they hold could not be read whole: neither in nor told they have nothing, nor offered a product they
+        // may hold already (CX-123 rule 24). For now: a way to check again. For good (more purchases than are read):
+        // write to the creator, never "try again in a minute" (the pre-review of 9 November 2026, P3).
+        <div className="st-note mt-6" role="status">
+          <h2 className="text-base font-bold" style={{ color: "var(--st-text)" }}>{w.unknownTitle}</h2>
+          <p className="mt-1 text-sm">{lasting ? w.unknownLastingBody(email ?? "", store.name) : w.unknownBody(email ?? "", store.name)}</p>
+          {lasting ? null : (
+            <p className="mt-2 text-sm">
+              <Link href={`/@${store.handle}/community`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4" style={{ color: "var(--st-text)" }}>
+                {w.unknownAgain}
+              </Link>
+            </p>
+          )}
         </div>
       ) : null}
 
-      {state !== "removed" && products.length > 0 ? (
+      {state !== "removed" && state !== "unknown" && products.length > 0 ? (
         <div className="mt-6">
           <p className="text-sm font-semibold">{w.openToEveryone}</p>
           <ul className="mt-2 space-y-2">
@@ -673,12 +709,13 @@ export function Gate({
         </div>
       ) : null}
 
+      {/* Kept while the access is not known, so another address can still be used (the pre-review's P2 and P3). */}
       {state !== "removed" ? (
         <LinkRequestForm
           action="/api/store/community/link"
           hidden={{ handle: store.handle }}
           id="community-email"
-          label={state === "closed" ? w.tryAnotherAddress : w.alreadyMember}
+          label={state === "closed" || state === "unknown" ? w.tryAnotherAddress : w.alreadyMember}
           explain={w.linkExplain}
           button={w.sendLink}
           placeholder={speech(store).w.emailPlaceholder}

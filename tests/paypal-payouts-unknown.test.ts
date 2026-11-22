@@ -13,6 +13,7 @@ import { connectPayPal, onTheirWay, payWithPayPal, settlePayPal } from "@/lib/pa
 import { autoPayEmail } from "@/lib/affiliate-payday";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statsunk01";
@@ -27,7 +28,7 @@ let reads = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
-  if (url.hostname === "api.stripe.com") return json({ data: [], has_more: false });
+  if (url.hostname === "api.stripe.com") return json({ object: "list", data: [], has_more: false });
   if (url.hostname !== "api-m.paypal.com") return json({ error: "unexpected" }, 404);
   if (url.pathname === "/v1/oauth2/token") return json({ access_token: "A21AAtoken", token_type: "Bearer", scope: SCOPE, expires_in: 32400 });
   if (url.pathname === "/v1/payments/payouts" && init?.method === "POST") {
@@ -70,6 +71,7 @@ async function seed(store: Store): Promise<void> {
     ["HSET", `nl:aff:${STATS}:sales`, "cs_1", sale("cs_1", "aaaaaaaaaaaa", 10000)],
     ["HSET", `nl:aff:${STATS}:sales`, "cs_2", sale("cs_2", "bbbbbbbbbbbb", 5000)],
   ]);
+  await markLive(store);
   const linked = await connectPayPal(store, CLIENT, SECRET);
   if (!linked.ok) throw new Error(`not linked: ${JSON.stringify(linked)}`);
 }

@@ -12,7 +12,7 @@ import { canSellProduct } from "@/lib/store-checkout";
 import { productPath } from "@/components/store-product";
 import { readListing } from "@/lib/catalog";
 import { priceWords, readMove } from "@/lib/move-members";
-import { namedPriceGone } from "@/lib/product-option";
+import { namedPriceGone, withInvitedOption } from "@/lib/product-option";
 import { firstChargeAt } from "@/lib/move-rules";
 
 type Params = {
@@ -47,21 +47,33 @@ export default async function MovePage({ params, searchParams }: Params) {
   if (!store) notFound();
   const say = speech(store);
   const m = moveWords(store.language);
-  const product = (await readListing(store, productId)) ?? null;
-  const invite = product ? await readMove(store, product.id, token).catch(() => null) : null;
+  const listing = (await readListing(store, productId)) ?? null;
+  // A read in an unknown shape (lib/move-members.ts, readMove throws) is not "this link no longer works": the member is
+  // asked to try again, and no button is shown on it.
+  const read = listing ? await readMove(store, listing.id, token).catch(() => undefined) : null;
+  const unknown = read === undefined;
+  const invite = read ?? null;
+  // The price their invitation names, even one since taken off sale, while not yet kept (642 [WG2], lib/move-members.ts openMove).
+  const product = listing && invite && !invite.kept ? withInvitedOption(listing, invite.o) : listing;
   const selling = product?.recurring ? canSellProduct(store, product) : false;
   const price = invite && product && selling ? priceWords(store, product, invite.o) : null;
   const first = invite ? firstChargeAt(invite.r) : null;
   // The price the email named is gone (an option removed, even the last): said, never swapped for another (lib/move-members.ts, openMove).
   const priceGone = Boolean(invite && product?.recurring && namedPriceGone(product, invite.o));
   // What stops the member here, and what happened on the last press: a refused page or too many tries leave the button.
-  const blocking = !invite ? m.notices.expired : priceGone ? m.notices.price : !price ? m.notices.unavailable : null;
+  // Kept already: said so, with no button (main's "kept", review of #4121; Revisor 1 on #2685). Its state cannot be
+  // read: said to be unknown, never kept, with no button either (Claude 4's MÉDIO on #2685). A link read in an unknown
+  // shape: the member is asked to try again (main, readMove throws).
+  const unknownState = Boolean(invite?.keptUnknown);
+  const blocking = unknown ? m.notices.refused : !invite ? m.notices.expired : unknownState ? m.notices.unknown : invite.kept !== 0 ? m.notices.kept : priceGone ? m.notices.price : !price ? m.notices.unavailable : null;
   // With the price gone there is no button, so never "try again" or "press the button again": only that it is gone.
   // "price" in the address says nothing by itself: only the product does.
   const said = status === "price" ? undefined : m.notices[status as keyof typeof m.notices];
-  const notice = priceGone ? m.notices.price : (said ?? blocking);
+  // An unknown state is what the page says, whatever the address carries: never "moved" from a status in the link.
+  const notice = unknownState ? m.notices.unknown : priceGone ? m.notices.price : (said ?? blocking);
   // Where the prices offered today are, when the one named is gone: the product's own page, while buyers can see it.
-  const pricesLink = priceGone && product && !product.hidden ? product : null;
+  // Never to a store switched off after a report (lib/takedown.ts), which sells nothing.
+  const pricesLink = priceGone && product && !product.hidden && !store.suspended ? product : null;
   // A draft is named only to whoever holds this move's private invitation; otherwise it is a product not known here (MM-SA-30).
   const named = product && (!product.hidden || invite) ? product : null;
 

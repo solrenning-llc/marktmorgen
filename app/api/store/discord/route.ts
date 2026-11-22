@@ -26,7 +26,9 @@ const no = (error: string, status = 400) => Response.json({ ok: false, error }, 
  * connected server read in another shape is not "no server": "unavailable"
  * (503), nothing changed. A disconnect forgets nothing until Discord confirmed
  * the bot left (lib/discord.ts, leaveServer); otherwise "server" (502), with
- * everything kept, so the creator can press again.
+ * everything kept, so the creator can press again. When the bot left but the
+ * people kept could not be read exactly (lib/discord-store.ts, forgetServer),
+ * "not_finished" (503): nothing is forgotten, and pressing again finishes it.
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return no("forbidden", 403);
@@ -81,14 +83,29 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, role: made });
     }
     if (body.action === "kick") {
-      await saveServer(room, { ...server, kick: body.on === true });
+      // Kept only while the store is live (lib/discord-store.ts, saveServer): erased or being erased since it was read,
+      // or an answer that does not read, is "unavailable" (503), never ok (Codex L-20261120-0732).
+      try {
+        await saveServer(store, { ...server, kick: body.on === true });
+      } catch (error) {
+        if (error instanceof UnknownReplyError) return no("unavailable", 503);
+        throw error;
+      }
       await log(body.on === true ? "set Discord to remove people whose access ended" : "set Discord to keep people whose access ended");
       return Response.json({ ok: true });
     }
     if (body.action === "disconnect") {
       // The bot first: told "disconnected" only once Discord confirmed it left.
       if (!(await leaveServer(server.id))) return no("server", 502);
-      const people = await forgetServer(room, store.sid);
+      let people: number;
+      try {
+        people = await forgetServer(room, store.sid);
+      } catch (error) {
+        // The bot left, but who was kept could not be read exactly: nothing was forgotten, so pressing again
+        // (Discord then answers 404, read as "it is out") finishes it. Never "disconnected" with addresses kept.
+        if (error instanceof UnknownReplyError) return no("not_finished", 503);
+        throw error;
+      }
       await log("disconnected Discord");
       return Response.json({ ok: true, people });
     }

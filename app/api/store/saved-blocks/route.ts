@@ -2,14 +2,19 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { jsonAccess } from "@/lib/studio-route";
 import { can } from "@/lib/team-roles";
-import { readCards } from "@/lib/catalog";
-import { SAVED_BLOCK_ID } from "@/lib/sales-page";
+import { readCards, readListing } from "@/lib/catalog";
+import { SAVED_BLOCK_ID, type SalesPage, oversized, pageProblem } from "@/lib/sales-page";
 import { readPage, writePage } from "@/lib/sales-page-store";
-import { SITE_KINDS, isSiteKey } from "@/lib/site-page-rules";
+import { SITE_KINDS, isSiteKey, outFrom } from "@/lib/site-page-rules";
+import { fastMoneyMessage, fastMoneyOnPage } from "@/lib/terms-check-rules";
+import { pageWords } from "@/lib/page-translate";
+import { templateLeft } from "@/lib/template-text";
+import { templateLeftMessage } from "@/lib/template-text-rules";
 import { BLOCK_KINDS, type BlockKind } from "@/lib/sales-page";
 import { type SavedSection, SECTION_WHY, newSectionId, readSectionInput, updateProblem, withSection } from "@/lib/saved-blocks";
 import { dropSection, readSection, readSections, sectionUses, writeSection } from "@/lib/saved-block-store";
 import { MONTH_USE_SECONDS, countUse, storeMonthKey } from "@/lib/funnel-share-store";
+import { windowKeySeconds } from "@/lib/allowance-window";
 import { MAX_APPLY_PAGES, shareLimitsFor, monthOfUse } from "@/lib/funnel-share-rules";
 import type { Store } from "@/lib/store";
 
@@ -36,6 +41,28 @@ const kindsFor = (key: string): readonly BlockKind[] => (isSiteKey(key) ? SITE_K
 /** Whether this role may change the page under this key. */
 const mayChange = (role: Parameters<typeof can>[0], key: string) => can(role, isSiteKey(key) ? "page" : "products");
 
+/**
+ * Why a page cannot take a section's latest version, by the same rules its own save applies (app/api/store/page/route.ts
+ * for a product's page, app/api/store/site-page/route.ts for a store page), or null when it can. "apply" is a save of
+ * each page, so a page the editor would refuse is passed over with the reason, never written (tests/saved-section-apply-checks.test.ts).
+ */
+async function saveProblem(store: Store, key: string, page: SalesPage): Promise<string | null> {
+  if (oversized(page)) return "This page would be too long with it. Shorten the section or this page.";
+  if (pageProblem({ blocks: page.blocks, variant: null }, page)) return "This page would not save with it. Open the page and save it there to see why.";
+  const site = isSiteKey(key);
+  if (!site && page.blocks.some((block) => block.kind === "booking")) return "This page would not save with it. Open the page and save it there to see why.";
+  // What visitors see: a store page shown or scheduled, a product's page while the product is published.
+  const out = site ? outFrom(page) !== -1 : (await readListing(store, key))?.hidden !== true;
+  if (!out) return null;
+  if (!site) {
+    const refused = fastMoneyOnPage(pageWords(page));
+    if (refused) return fastMoneyMessage(refused, "save");
+  }
+  const left = templateLeft(page);
+  if (left) return templateLeftMessage(left, left.kind ? (BLOCK_KINDS.find((k) => k.kind === left.kind)?.label ?? null) : null, site ? "site" : "product");
+  return null;
+}
+
 /** A page's key as this store has it, with its title, or null. */
 function pageOf(store: Store, key: string, titles: Map<string, string>): { key: string; title: string; site: boolean } | null {
   if (isSiteKey(key)) {
@@ -60,8 +87,10 @@ async function usesOf(store: Store, section: SavedSection, except = ""): Promise
     const held = await heldPage(statsId, key);
     const problem = updateProblem(held, section.id);
     if (problem === "gone") continue;
-    const fits = problem === null && withSection(held, section, kindsFor(key)) !== null;
-    out.push({ ...page, why: problem ? SECTION_WHY[problem] : fits ? "" : "The section no longer fits on this page." });
+    const next = problem === null ? withSection(held, section, kindsFor(key)) : null;
+    // Said before the creator picks the page, with the reason "apply" would pass it over for.
+    const refused = next ? await saveProblem(store, key, next) : null;
+    out.push({ ...page, why: problem ? SECTION_WHY[problem] : !next ? "The section no longer fits on this page." : (refused ?? "") });
   }
   return out;
 }
@@ -143,7 +172,9 @@ export async function POST(request: NextRequest) {
       // The month's count is taken first, as before, so a request past the figure reads no page at all (Codex Z on
       // #2830: those reads would be beyond what the request's studio unit covers). Then every page is read before any
       // is written, so an unknown read writes nothing; the try it counted is said in the answer (page_unread_counted).
-      if (!(await countUse(storeMonthKey(statsId, "apply", month), limits.appliesPerMonth, MONTH_USE_SECONDS))) return refuse("applies_full", 429, { limit: limits.appliesPerMonth });
+      // Kept as long as its window, never a fixed 32 days: a stretched window would otherwise open a second priced
+      // allowance (Claude 6 on #4561, rule 30; as the funnel-share routes do).
+      if (!(await countUse(storeMonthKey(statsId, "apply", month), limits.appliesPerMonth, windowKeySeconds(store, MONTH_USE_SECONDS)))) return refuse("applies_full", 429, { limit: limits.appliesPerMonth });
       const titles = new Map([...(await readCards(store)).values()].map((card) => [card.id, card.title]));
       const planned: { key: string; next: NonNullable<ReturnType<typeof withSection>> }[] = [];
       const skipped: { key: string; why: string }[] = [];
@@ -163,6 +194,11 @@ export async function POST(request: NextRequest) {
         const next = problem ? null : withSection(held, section, kindsFor(key));
         if (!next) {
           skipped.push({ key, why: problem ? SECTION_WHY[problem] : "The section no longer fits on this page." });
+          continue;
+        }
+        const refused = await saveProblem(store, key, next);
+        if (refused) {
+          skipped.push({ key, why: refused });
           continue;
         }
         planned.push({ key, next });

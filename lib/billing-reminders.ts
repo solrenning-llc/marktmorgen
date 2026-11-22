@@ -10,7 +10,7 @@
  * charge, and says the date, the amount and the one click that stops it.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { isAddOn, keepCardThatPays, listSubscriptions, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
+import { isAddOn, keepCardThatPays, listSubscriptions, ownLatestInvoice, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { recordUnpaidRenewal } from "@/lib/billing-sync";
@@ -175,7 +175,8 @@ export function failedPlan(subscription: Record<string, unknown>): FailedPlan | 
     | { id?: unknown; status?: unknown; amount_due?: unknown; hosted_invoice_url?: unknown; next_payment_attempt?: unknown; billing_reason?: unknown }
     | string
     | null;
-  if (!invoice || typeof invoice !== "object") return null;
+  // Only the subscription's own invoice (#4449): another subscription's or customer's never gives this email its link.
+  if (!invoice || typeof invoice !== "object" || !ownLatestInvoice(subscription, invoice as Record<string, unknown>)) return null;
   const invoiceId = typeof invoice.id === "string" && INVOICE_ID.test(invoice.id) ? invoice.id : "";
   const amountCents = typeof invoice.amount_due === "number" ? invoice.amount_due : 0;
   const payUrl = typeof invoice.hosted_invoice_url === "string" ? invoice.hosted_invoice_url : "";
@@ -288,9 +289,16 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
         counts.seen += 1;
         const reminder = dueReminder(subscription, nowSeconds);
         if (!reminder) continue;
-        const key = `nl:remind:${reminder.kind}:${reminder.subscription}:${reminder.at}`;
-        const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", 60 * DAY]]);
-        if (claimed === null) continue;
+        // Once per charge: its date, and the plan and amount it charges. A
+        // switch inside a trial keeps the trial's end, and one between plans
+        // of the same interval keeps the period's end, so the date alone would
+        // let the notice about the plan left stand for a charge of another
+        // amount. A mark from before the plan was in it (`legacy`) still
+        // counts for that date, so nobody is written to twice for it.
+        const legacy = `nl:remind:${reminder.kind}:${reminder.subscription}:${reminder.at}`;
+        const key = `${legacy}:${reminder.tier}:${reminder.cycle}:${reminder.amountCents}`;
+        const [before, claimed] = await redisPipeline([["EXISTS", legacy], ["SET", key, "1", "NX", "EX", 60 * DAY]]);
+        if (claimed === null || before === 1) continue;
         const { subject, text } = reminderEmail(reminder);
         const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: reminder.email, subject, text, replyTo: SUPPORT_EMAIL });
         if (ok) counts.sent += 1;

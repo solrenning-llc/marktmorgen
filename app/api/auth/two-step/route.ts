@@ -2,8 +2,9 @@ import type { NextRequest } from "next/server";
 import { SESSION_COOKIE, SessionsUnknownError, dropSecondStep, emailForSession, isFreshSession, sessionMark } from "@/lib/auth";
 import { isRedisConfigured } from "@/lib/redis";
 import { canSeal } from "@/lib/secret-box";
-import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { cancelReset, finishSetup, lockedUntil, replaceCodes, startSetup, turnOff } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 import { liveSecondStep, mayAddNow, mayAddSecondStep } from "@/lib/second-step-gate";
 import { LockBusyError } from "@/lib/redis-lock";
 
@@ -42,7 +43,9 @@ export async function POST(request: NextRequest) {
   const email = await emailForSession(session);
   if (!email) return Response.json({ ok: false, error: "signed_out" }, { status: 401 });
   // A session let in without its second step changes nothing about it (lib/two-step.ts).
-  if ((await lockedUntil(session)) > 0) return Response.json({ ok: false, error: "locked" }, { status: 403 });
+  const until = await lockRead(lockedUntil(session));
+  if (until instanceof Response) return until;
+  if (until > 0) return Response.json({ ok: false, error: "locked" }, { status: 403 });
   if (!isRedisConfigured() || !canSeal()) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
 
   let body: Record<string, unknown>;
@@ -53,7 +56,10 @@ export async function POST(request: NextRequest) {
   } catch {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
-  if (!(await withinLimit("two-step-change", email, CHANGES_PER_HOUR, 60 * 60))) {
+  const room = await withinLimit("two-step-change", email, CHANGES_PER_HOUR, 60 * 60).catch(unknownLimit);
+  // A count that could not be read is never "too many changes" (rule 24).
+  if (room === "unknown") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  if (!room) {
     return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
   }
   const code = typeof body.code === "string" ? body.code.slice(0, 40) : "";
@@ -93,7 +99,7 @@ export async function POST(request: NextRequest) {
         () => true,
         (error: unknown) => {
           if (!(error instanceof SessionsUnknownError)) throw error;
-          console.error("logging out what the app opened failed", error);
+          console.error("logging out what the app opened failed");
           return false;
         },
       );
@@ -107,7 +113,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // Another change to the same passkeys held them past the wait (lib/passkeys.ts): said so, to try again.
     if (error instanceof LockBusyError) return refuse("busy", 503);
-    console.error("changing two-step login failed", error);
+    console.error("changing two-step login failed");
     return refuse("server_error", 500);
   }
 }

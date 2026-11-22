@@ -1,3 +1,4 @@
+import {targetsUnder44} from "./target-size.mjs";
 import "./orders-list-actions.mjs";
 import {createRequire} from "node:module";
 import {spawn} from "node:child_process";
@@ -49,19 +50,30 @@ try{
 let app,reviewedApp,output="";
 let browser,cases=0,audits=0,failed=0,libraryLink=null;const gaps=[];
 const redact=value=>String(value).replace(/token=[^&\s"']+/g,"token=redacted");
-// 2.5.5 Target Size (Enhanced, AAA): every control a buyer presses on the checkout's own pages is at least 44 by 44 CSS px.
-// A link inside a sentence is the criterion's inline exception; a box counts with its label, which presses it too.
-const targetsUnder44=(page,scope="body")=>page.evaluate(scope=>{
- const out=[],shown=n=>{const r=n.getBoundingClientRect(),s=getComputedStyle(n);return r.width>0&&r.height>0&&s.visibility!=="hidden"&&!n.closest("[hidden],[inert],.sr-only");};
- for(const n of document.querySelector(scope)?.querySelectorAll("a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button]")??[]){
-  const label=n.matches("input")?(n.labels?.[0]??n.closest("label")):null;
-  if(!shown(n)&&!(label&&shown(label)))continue;
-  if(n.tagName==="A"&&getComputedStyle(n).display==="inline"){const p=n.parentElement;if(p&&(p.textContent||"").trim().length>(n.textContent||"").trim().length+3)continue;}
-  const r=n.getBoundingClientRect(),l=label?label.getBoundingClientRect():r,width=Math.max(r.width,l.width),height=Math.max(r.height,l.height);
-  if(width<43.5||height<43.5)out.push({tag:n.tagName,name:(n.getAttribute("aria-label")||n.textContent||"").trim().slice(0,60),width:Math.round(width),height:Math.round(height)});
+// 1.4.8 Visual Presentation (AAA) on the buyer's own pages: a paragraph's lines are at least 1.5 apart, never justified,
+// and a block of more than 80 characters is no wider than 80 of its own "0" glyphs (the platform caps its words below
+// that, docs/accessibility-programme.md). Only blocks a buyer reads in main; a box drawn as a row (p.flex, p.grid) keeps
+// its width, as in app/globals.css.
+// The preview bar above the site's menu is scanned too (its line spacing; #3997 review): it is on every buyer page.
+const blocksOff148=page=>page.evaluate(()=>{
+ const out=[];
+ for(const n of document.querySelectorAll("main :is(p,li,dd,blockquote,figcaption), [data-preview-bar] p")){
+  const text=(n.textContent||"").trim();
+  if(!n.getClientRects().length||n.closest(".sr-only,[hidden],[inert]")||text.length<41)continue;
+  const s=getComputedStyle(n),size=parseFloat(s.fontSize),line=s.lineHeight==="normal"?size*1.2:parseFloat(s.lineHeight);
+  const name=n.tagName+":"+text.slice(0,50);
+  if(line/size<1.49)out.push({name,lineHeight:Math.round(line/size*100)/100});
+  if(s.textAlign==="justify")out.push({name,justified:true});
+  if(n.matches("li,p.flex,p.grid,[data-preview-bar] p")||text.length<=80)continue;
+  // 80 of the block's own characters, not 80 "0" glyphs: in a proportional font the average letter and space is
+  // narrower than a "0", so a width of 80 zeros let about 95 real characters through (#3997 review).
+  const probe=document.createElement("span");probe.textContent=text.replace(/\s+/g," ").slice(0,80);probe.style.cssText="position:absolute;visibility:hidden;white-space:nowrap;font:inherit;letter-spacing:inherit;word-spacing:inherit";
+  n.appendChild(probe);const eighty=probe.getBoundingClientRect().width;probe.remove();
+  const width=n.getBoundingClientRect().width-parseFloat(s.paddingLeft)-parseFloat(s.paddingRight);
+  if(width>eighty*1.02)out.push({name,characters:Math.round(width/(eighty/80))});
  }
  return out;
-},scope);
+});
 const localLink=value=>String(value).replace("https://marktmorgen.com",origin);
 try{
  reviewedApp=await prepareReviewedMailApp(root,env);
@@ -117,7 +129,9 @@ try{
     });
     audits++;console.log("BUYER_MATRIX_AUDIT:"+JSON.stringify({engine,width,mode,state,...result}));
     if(result.scroll>result.client||result.violations.length)throw Error("Accessibility/overflow failure at "+state);
-    if(["product-checkout-form","simulated-paid-receipt"].includes(state)){const small=await targetsUnder44(page);if(small.length)throw Error("Target under 44 by 44 px at "+state+" "+JSON.stringify(small));}
+    // Every state the buyer passes through, the site's own header and footer on the library included (2.5.5).
+    const small=await targetsUnder44(page);if(small.length)throw Error("Target under 44 by 44 px at "+state+" "+JSON.stringify(small));
+    if(mode!=="text-spacing"){const off=await blocksOff148(page);if(off.length)throw Error("1.4.8 line spacing/justification/width at "+state+" "+JSON.stringify(off));}
     if(result.incomplete.length)gaps.push({width,mode,state,manualReview:result.incomplete});
    }
    // Sent back without the box (app/api/store/checkout, consent=needed): the reason is written beside it and tied to it, the box is
@@ -125,7 +139,9 @@ try{
    // present from the start), and checking the box by its label clears the mark and the reason.
    await page.goto(origin+"/@localshop/p/"+ids["Weeknight Dinners"]+"?consent=needed#buy",{waitUntil:"networkidle"});await restoreDarkAfterNavigation();
    const refusedBox=page.locator('#buy form[data-checkout] input[name="dc"]').first();
-   await page.waitForTimeout(400);
+   // Waits for what hydration does (components/digital-consent-box.tsx: the box takes the focus, then its live region is
+   // filled), not for a fixed time; a page that never gets there falls through to the check below, which names what is wrong.
+   await page.waitForFunction(n=>{const wrap=n.closest("[data-digital-consent]");const live=wrap&&wrap.querySelector('[aria-live="assertive"]');return document.activeElement===n&&Boolean(live&&live.textContent.trim());},await refusedBox.elementHandle(),{timeout:15000}).catch(()=>{});
    const refusedState=await refusedBox.evaluate(n=>{const ids=(n.getAttribute("aria-describedby")||"").split(" ");const error=document.getElementById(ids[0]);const wrap=n.closest("[data-digital-consent]");const live=wrap&&wrap.querySelector('[aria-live="assertive"]');return {invalid:n.getAttribute("aria-invalid"),error:error?error.textContent.trim():"",focused:document.activeElement===n,live:live?live.textContent.trim():"",alertAtLoad:Boolean(wrap&&wrap.querySelector('[role="alert"]'))};});
    if(refusedState.invalid!=="true"||!refusedState.error||!refusedState.focused||refusedState.live!==refusedState.error||refusedState.alertAtLoad)throw Error("Refused consent box state wrong "+JSON.stringify(refusedState));
    await page.locator('#buy form[data-checkout] label:has(> input[name="dc"])').first().click();
@@ -138,6 +154,15 @@ try{
    const extras=buyForm.locator('input[name="bump"]');
    if(await extras.evaluateAll(nodes=>nodes.some(n=>n.checked)))throw Error("An extra was selected for the buyer");
    if(mode==="baseline"){await page.keyboard.press("Tab");if(!await page.evaluate(()=>document.activeElement!==document.body))throw Error("Native keyboard focus missing");}
+   // The billing country (components/billing-country-field.tsx, EU VAT art. 9a gate): a required, labelled native select,
+   // with no country chosen for the buyer. A buyer outside the EU and the UK (the United States here) chooses it and can buy;
+   // the refusal of EU and UK places is held in tests/eu-vat-consumer-gate.test.ts and tests/eu-vat-checkout-routes.test.ts.
+   const country=buyForm.locator('select[name="billing_country"]');
+   if(await country.count()!==1)throw Error("Billing country field missing");
+   const field=await country.evaluate(n=>({value:n.value,required:n.required,labelled:Boolean(n.labels&&n.labels.length&&n.labels[0].innerText.trim()),us:[...n.options].some(o=>o.value==="US")}));
+   if(field.value!==""||!field.required||!field.labelled||!field.us)throw Error("Billing country is not an empty, required, labelled select offering the United States "+JSON.stringify(field));
+   await country.focus();await country.selectOption("US");
+   if(await country.inputValue()!=="US")throw Error("The billing country could not be chosen");
    // The box to start during the cancellation period (lib/digital-consent.ts): a real, labelled, required checkbox, never checked for the buyer.
    const consent=buyForm.locator('input[name="dc"]');
    if(await consent.count()!==1)throw Error("Immediate-access consent box missing");
@@ -211,6 +236,39 @@ try{
   finally{emptyCases++;cases++;await context.close();}
  }
  console.log("EMPTY_STATE_COST:"+JSON.stringify({engine,cases:emptyCases,milliseconds:Date.now()-emptyStarted}));
+ // Where a buyer lands on a wrong address: a store that does not exist (the site's own 404, app/not-found.tsx), a page
+ // a store does not have (the store's own 404, app/[handle]/not-found.tsx), and the help written for buyers
+ // (app/help/buyers). Everything is inside a landmark (axe "region": the site's preview bar sits in the header),
+ // every control is 44 by 44 px (2.5.5: the site's menu, its footer's short links, the way back to the store, the trail),
+ // and the 1.4.8 checks above hold. Baseline at 320 and 1280 px; its time is printed so its cost is measured.
+ const missingStarted=Date.now();let missingCases=0;
+ for(const width of [320,1280])for(const [path,want,siteMenu] of [["/@nosuchstore",404,true],["/@localshop/nothing-here",404,false],["/help/buyers",200,true]]){
+  const context=await browser.newContext({viewport:{width,height:900},serviceWorkers:"block",extraHTTPHeaders:{"x-forwarded-for":"198.51.100."+(100+missingCases)}});
+  try{
+   const page=await context.newPage();const errors=[];page.on("pageerror",error=>errors.push(redact(error)));
+   await context.route("**/*",route=>{const url=new URL(route.request().url());if(url.origin!==origin&&url.origin!==FAKE)return route.abort();if(url.pathname==="/api/store/hit")return route.fulfill({status:204,body:""});if(!["GET","HEAD"].includes(route.request().method()))return route.abort();return route.continue();});
+   const response=await page.goto(origin+path,{waitUntil:"networkidle",timeout:60000});
+   if(response?.status()!==want)throw Error("HTTP "+response?.status());
+   await page.addScriptTag({content:axe});
+   const result=await page.evaluate(async()=>{const root=document.documentElement,run=await window.axe.run(document,{rules:{"color-contrast-enhanced":{enabled:true}}});return {scroll:root.scrollWidth,client:root.clientWidth,violations:run.violations.map(v=>({id:v.id,targets:v.nodes.map(n=>n.target).slice(0,6)})),incomplete:run.incomplete.map(v=>v.id)};});
+   const small=await targetsUnder44(page),off=await blocksOff148(page);
+   // The site's menu stays on screen when the page scrolls (#3997 review): a page that wraps <SiteNav /> in its own
+   // <header> lets the sticky menu scroll away with that short wrapper. Only where the page is long enough to scroll.
+   // What sticks is the menu's <header> (components/site-nav.tsx), measured itself: the nav inside it is hidden under
+   // lg and sits below the header's top in its row. The scroll is instant, not the page's smooth scroll-behavior, so
+   // the reading is where it lands. The store's own 404 (app/[handle]/not-found.tsx) draws the store's header, not
+   // the site's menu, so the check runs only where SiteNav is drawn (#3997 review, Claude 6 rvB3).
+   if(siteMenu){
+    const menuTop=await page.evaluate(async()=>{const header=document.querySelector('nav[aria-label="Main"]')?.closest("header");if(!header)return null;const room=document.documentElement.scrollHeight-innerHeight;if(room<200)return 0;scrollTo({top:Math.min(1500,room),behavior:"instant"});await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));const top=Math.round(header.getBoundingClientRect().top);scrollTo({top:0,behavior:"instant"});return top;});
+    if(menuTop!==0)throw Error("The site menu does not stay on screen when "+path+" scrolls: its top is "+menuTop);
+   }
+   audits++;console.log("MISSING_PAGE_AUDIT:"+JSON.stringify({engine,width,path,small,off,...result}));
+   if(result.scroll>result.client||result.violations.length||small.length||off.length||errors.length)throw Error("Missing-page accessibility failure "+JSON.stringify({violations:result.violations,small,off,errors}));
+   if(result.incomplete.length)gaps.push({width,mode:"baseline",state:"missing "+path,manualReview:result.incomplete});
+  }catch(error){failed++;console.error("MISSING_PAGE_FAILURE:"+JSON.stringify({engine,width,path,error:redact(error)}));}
+  finally{missingCases++;cases++;await context.close();}
+ }
+ console.log("MISSING_PAGE_COST:"+JSON.stringify({engine,cases:missingCases,milliseconds:Date.now()-missingStarted}));
  // The cart (components/store-cart.tsx), the checkout for several products at once, by keyboard only: every control in it
  // 44 by 44 px (2.5.5); removing a product keeps the focus in the cart (2.4.3); Escape and Close shut it and give the focus
  // back to its button (2.4.3, 2.1.1); and moving the focus out of it shuts it, so the open panel never covers the control
@@ -228,6 +286,11 @@ try{
    for(const n of [0,1]){await adds.nth(n).focus();await page.keyboard.press("Enter");}
    const opener=page.locator("#cart .st-cart-open"),panel=page.locator("#cart .st-cart-panel"),lines=panel.locator("li");
    const openByKeyboard=async()=>{await opener.focus();await page.keyboard.press("Enter");await panel.waitFor();};
+   // At the top of the page nothing scrolls a control out from under the cart's button: no part of any control there may
+   // lie under it (2.4.12; the store's line of news did on a phone, found walking the buyer path, tests/store-fixed-focus-room.test.ts).
+   await opener.waitFor();await page.evaluate(()=>scrollTo(0,0));
+   const underCart=await page.evaluate(()=>{const c=document.querySelector("#cart .st-cart-open").getBoundingClientRect();return [...document.querySelectorAll("a[href],button,input,select,textarea,summary,[tabindex]:not([tabindex='-1'])")].filter(n=>!n.closest("#cart")&&!n.matches(".sr-only")&&[...n.getClientRects()].some(r=>r.width&&r.height&&r.left<c.right&&r.right>c.left&&r.top<c.bottom&&r.bottom>c.top)).map(n=>(n.getAttribute("aria-label")||n.textContent||n.tagName).trim().slice(0,60));});
+   if(underCart.length)throw Error("Part of a control at the top of the page lies under the cart's button at "+width+" px: "+JSON.stringify(underCart));
    const focus=()=>page.evaluate(()=>{const a=document.activeElement;return {inCart:Boolean(a?.closest("#cart")),inPanel:Boolean(a?.closest(".st-cart-panel")),opener:Boolean(a?.matches(".st-cart-open")),tag:a?.tagName??"",name:(a?.getAttribute("aria-label")||a?.textContent||"").trim().slice(0,60)};});
    await openByKeyboard();await lines.nth(1).waitFor({timeout:15_000});await panel.locator("form[data-checkout]").waitFor({timeout:15_000});
    const small=await targetsUnder44(page,"#cart .st-cart-panel");

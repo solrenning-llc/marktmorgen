@@ -42,6 +42,42 @@ test("provider refusal retains capacity beyond expiration; confirmed retirement 
   assert.equal(await retireStorage(folder(4), Date.now() + 1000, async () => true), true);
   await reserveStorage(folder(4), 10, 10, async () => 0);
 });
+test("one session the provider will not retire never blocks the cleanup of the others", async () => {
+  const at = (name: string) => "vault/" + folder(13) + "/product/0123456789abcdef-" + name;
+  const bind = async (bytes: number, name: string) => {
+    const entry = await reserveStorage(folder(13), bytes, 10, async () => 0);
+    await bindStorage(folder(13), entry.id, at(name), "session-" + name);
+  };
+  await bind(4, "a");
+  await bind(6, "b");
+  const asked: string[] = [];
+  const onlyB = async (row: Readonly<{ uploadId?: string }>) => { asked.push(row.uploadId ?? ""); return row.uploadId === "session-b"; };
+  assert.equal(await retireStorage(folder(13), Date.now() + 1000, onlyB), true);
+  assert.deepEqual(asked, ["session-a", "session-b"]);
+  await reserveStorage(folder(13), 6, 10, async () => 0);
+  await assert.rejects(reserveStorage(folder(13), 1, 10, async () => 0), /storage_(limit|pending)/, "the session that was not retired keeps its bytes");
+
+  // Many stuck sessions: each call asks the provider a bounded number of times, and the ones
+  // that refused go to the back, so a later call reaches a session that can be retired.
+  const many = folder(14);
+  const path = (n: number) => "vault/" + many + "/product/0123456789abcdef-f" + n;
+  for (let n = 0; n < 6; n++) {
+    const entry = await reserveStorage(many, 1, 10, async () => 0);
+    await bindStorage(many, entry.id, path(n), "stuck-" + n);
+  }
+  const tries: string[] = [];
+  const onlyLast = async (row: Readonly<{ uploadId?: string }>) => { tries.push(row.uploadId ?? ""); return row.uploadId === "stuck-5"; };
+  let retired = false;
+  for (let call = 0; call < 6 && !retired; call++) {
+    const before = tries.length;
+    retired = await retireStorage(many, Date.now() + 1000, onlyLast);
+    assert.ok(tries.length - before <= 2, "at most two provider calls per cleanup");
+  }
+  assert.equal(retired, true);
+  assert.deepEqual(tries, ["stuck-0", "stuck-1", "stuck-2", "stuck-3", "stuck-4", "stuck-5"], "every stuck session was asked once before any twice");
+  await reserveStorage(many, 5, 10, async () => 0);
+  await assert.rejects(reserveStorage(many, 1, 10, async () => 0), /storage_(limit|pending)/, "the five stuck sessions keep their bytes");
+});
 test("lost leases cannot persist stale reservations or delete a successor lease", async () => {
   const lock = "nl:storage:pending:" + folder(5) + ":lock";
   await assert.rejects(reserveStorage(folder(5), 1, 10, async () => { original(["SET", lock, "successor"]); return 0; }), /storage_lease_lost/);
@@ -94,28 +130,65 @@ test("R2 opens reserve capacity and failed provider cancellation cannot free it"
   }) as typeof fetch;
   const input = {folder: folder(8), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf"};
   try {
-    const opened = await openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true }));
+    const opened = await openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true }), async () => true);
     assert.equal(opened.ok, true);
     if (!opened.ok) throw new Error("open failed");
     assert.equal(opened.upload.multipart, true);
-    await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true })), /storage_(limit|pending)/);
+    await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true }), async () => true), /storage_(limit|pending)/);
     assert.equal(await abortReservedVault(opened.upload.pathname), false);
-    await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true })), /storage_(limit|pending)/);
-    missingSession = true;
-    assert.equal(await abortReservedVault(opened.upload.pathname), false);
-    await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true })), /storage_(limit|pending)/);
-    missingSession = false;
+    await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true }), async () => true), /storage_(limit|pending)/);
+    // An unconfirmed cancel is not written down (lib/vault.ts): a retry,
+    // inside the requests one upload is priced for, asks the provider again,
+    // and once it confirms, the bytes come back at once.
     cancel = true;
     assert.equal(await abortReservedVault(opened.upload.pathname), true);
-    const reopened = await openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true }));
+    const reopened = await openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true }), async () => true);
     assert.equal(reopened.ok, true);
     if (!reopened.ok) throw new Error("reopen failed");
+    // A session R2 no longer has, with the object there, is a finish that won the race, never a cancel (Codex X6's
+    // MEDIUM on #3502): the cancel is not confirmed and its reservation stays held for the finish or the expiry.
     missingSession = true;
     completedObject = true;
-    assert.equal(await abortReservedVault(reopened.upload.pathname), true);
-    await assert.rejects(reserveStorage(input.folder, 1, 10, async () => 10), /storage_limit/);
+    assert.equal(await abortReservedVault(reopened.upload.pathname), false);
+    await assert.rejects(reserveStorage(input.folder, 1, 10, async () => 10), /storage_(limit|pending)/);
     const openedBefore = openedSessions;
-    await assert.rejects(openReservedVault({ ...input, folder: folder(9) }, 10, async () => ({ bytes: 0, brake: 10, left: 0, full: false, available: false })), /storage_unknown/);
+    await assert.rejects(openReservedVault({ ...input, folder: folder(9) }, 10, async () => ({ bytes: 0, brake: 10, left: 0, full: false, available: false }), async () => true), /storage_unknown/);
     assert.equal(openedSessions, openedBefore);
+  } finally { globalThis.fetch = saved; }
+});
+
+test("the upload budget is taken only after storage has room, and a refused budget frees the room", async () => {
+  process.env.R2_ACCOUNT_ID = "0123456789abcdef0123456789abcdef";
+  process.env.R2_ACCESS_KEY_ID = "1234567890123456";
+  process.env.R2_SECRET_ACCESS_KEY = "x".repeat(32);
+  process.env.R2_BUCKET = "test-files";
+  const saved = globalThis.fetch;
+  let openedSessions = 0;
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    if (!new URL(String(_url)).hostname.endsWith(".r2.cloudflarestorage.com")) throw new Error("Unexpected provider request");
+    if (init?.method === "POST") { openedSessions++; return new Response("<UploadId>test-session</UploadId>"); }
+    throw new Error("Unexpected provider request");
+  }) as typeof fetch;
+  const input = {folder: folder(12), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf"};
+  const measure = (bytes: number) => async () => ({ bytes, brake: 10, left: 10 - bytes, full: bytes >= 10, available: true });
+  let admissions = 0;
+  const admit = (answer: boolean) => async () => { admissions++; return answer; };
+  try {
+    await assert.rejects(openReservedVault(input, 10, measure(5), admit(true)), /storage_limit/);
+    assert.equal(admissions, 0, "a storage refusal never reaches the budget");
+    assert.deepEqual(await openReservedVault(input, 10, measure(0), admit(false)), { ok: false, reason: "budget" });
+    assert.equal(admissions, 1);
+    assert.equal(openedSessions, 0, "no session is opened without the budget");
+    await releaseStorage(input.folder, (await reserveStorage(input.folder, 10, 10, async () => 0)).id);
+    const opened = await openReservedVault(input, 10, measure(0), admit(true));
+    assert.equal(opened.ok, true);
+    assert.equal(openedSessions, 1);
+    await assert.rejects(openReservedVault(input, 10, measure(0), admit(true)), /storage_pending/);
+    assert.equal(admissions, 2, "a pending refusal never reaches the budget either");
+    // admit has no default (review of #4019): a caller that leaves it out does not compile, so no session can be
+    // opened with nothing paid for. tsc fails on an unused expectation if the default ever comes back.
+    // @ts-expect-error admit is required
+    const forgot: Parameters<typeof openReservedVault> = [input, 10, measure(0)];
+    assert.equal(forgot.length, 3);
   } finally { globalThis.fetch = saved; }
 });

@@ -2,7 +2,7 @@ import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
 import { ACCOUNT_NAMES, IncompleteForget, forgetUser } from "@/lib/meet-connect";
 import { isConfigured, zoomClientId, zoomSigned, zoomValidation } from "@/lib/meet-providers";
-import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 
 /** Zoom's notices are small; anything bigger is not one. */
@@ -21,7 +21,9 @@ const PER_MINUTE = 120;
  * is acted on once: its signature is kept for ten minutes, longer than the
  * five it is accepted for, and the same one again is acknowledged and
  * ignored — so a notice captured and sent again cannot, say, disconnect an
- * account the creator connected again a minute after removing the app.
+ * account the creator connected again a minute after removing the app. A
+ * notice Zoom sends again after a first try failed is signed anew, so its
+ * removal time (deauthorization_time) is what keeps a connection made since.
  *
  *   endpoint.url_validation   Zoom checking the address: answered with the
  *                             plain token and its HMAC, as Zoom asks.
@@ -33,7 +35,10 @@ const PER_MINUTE = 120;
  */
 export async function POST(request: NextRequest) {
   if (!isConfigured("zoom")) return new Response("Not found.", { status: 404 });
-  if (!(await withinLimit("zoom-notice", clientAddress(request), PER_MINUTE, 60))) {
+  const room = await withinLimit("zoom-notice", clientAddress(request), PER_MINUTE, 60).catch(unknownLimit);
+  // A count that could not be read is unknown (rule 24): 503, so the notice is sent again, never "too many".
+  if (room === "unknown") return Response.json({ ok: false }, { status: 503 });
+  if (!room) {
     return Response.json({ ok: false }, { status: 429 });
   }
   let body: string;
@@ -88,7 +93,10 @@ export async function POST(request: NextRequest) {
       }
     };
     try {
-      tell(await forgetUser("zoom", user));
+      // When the person removed the app, as Zoom says: a notice sent again after a failed first try never takes away a
+      // connection made since (a new grant). A time that does not read forgets every connection, as before.
+      const removedAt = typeof payload.deauthorization_time === "string" ? Date.parse(payload.deauthorization_time) : NaN;
+      tell(await forgetUser("zoom", user, Number.isFinite(removedAt) ? removedAt : undefined));
       return Response.json({ ok: true });
     } catch (error) {
       console.error("forgetting a Zoom user failed", error);

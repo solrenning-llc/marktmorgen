@@ -3,6 +3,7 @@ import { BLOG_POSTS } from "@/lib/blog";
 import { PAGES } from "@/lib/site-pages";
 import { SITE_URL } from "@/lib/site-url";
 import { HOUSE_HANDLE } from "@/lib/house-store";
+import { helpPagePaths } from "@/lib/help-pages";
 
 /**
  * Every page on this site that is worth finding, listed for search engines.
@@ -31,12 +32,15 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const fixed: { path: string; priority: number }[] = [
     { path: "/", priority: 1 },
     { path: "/pricing", priority: 0.8 },
+    { path: "/start-here", priority: 0.6 },
+    { path: "/grow-without-switching", priority: 0.5 },
     { path: "/blog", priority: 0.8 },
     { path: "/platform", priority: 0.8 },
     { path: "/grow-sales", priority: 0.8 },
     { path: "/mission", priority: 0.6 },
     { path: "/help", priority: 0.6 },
     { path: "/help/buyers", priority: 0.5 },
+    { path: "/help/trust-and-safety", priority: 0.5 },
     { path: "/developers", priority: 0.4 },
     { path: "/developers/checkout-script", priority: 0.4 },
     { path: "/creators", priority: 0.5 },
@@ -53,6 +57,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       url: url(page.path),
       changeFrequency: "weekly" as const,
       priority: page.priority,
+    })),
+    // Each section and each answer of the help center has a page of its own (564 [HC1]).
+    ...helpPagePaths().map((page) => ({
+      url: url(page.answer ? `/help/${page.section}/${page.answer}` : `/help/${page.section}`),
+      changeFrequency: "monthly" as const,
+      priority: page.answer ? 0.4 : 0.5,
     })),
     ...PAGES.map((page) => ({
       url: url(`/${page.section}/${page.slug}`),

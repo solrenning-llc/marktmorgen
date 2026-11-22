@@ -24,6 +24,7 @@ import { OUTREACH_COUNTRIES, pitchFooter } from "@/lib/outreach-rules";
 import { SITE_URL } from "@/lib/site-url";
 import { HOUSE_HANDLE } from "@/lib/house-store";
 import { IMPORT_DATE, IMPORT_LEFT_WORDS, IMPORT_WORDS, OUTCOME_WORDS, type Outcome } from "@/lib/import-words";
+import { dealCount } from "@/lib/deal-close";
 
 /**
  * The pictures at the top of each feature page.
@@ -584,7 +585,7 @@ function WebhooksVisual() {
                   <span className="font-mono font-semibold text-ink">{d.type}</span>
                   <span className="text-ink-soft">{` · ${d.when}`}</span>
                 </span>
-                <span className={`shrink-0 text-[12px] font-semibold ${d.ok ? "text-mint-deep" : "text-ink-soft"}`}>{d.result}</span>
+                <span className={`shrink-0 text-[12px] font-semibold ${d.ok ? "text-[var(--mint-text)]" : "text-ink-soft"}`}>{d.result}</span>
               </li>
             ))}
           </ul>
@@ -887,7 +888,7 @@ function WaysVisual() {
             <p className="text-[11px] font-bold uppercase tracking-[0.06em] text-ink-mute">{g.title}</p>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {g.ways.map((w) => (
-                <span key={w} className="inline-flex items-center gap-1 rounded-full bg-mint-soft px-2.5 py-0.5 text-[12px] font-semibold text-mint-deep">
+                <span key={w} className="inline-flex items-center gap-1 rounded-full bg-mint-soft px-2.5 py-0.5 text-[12px] font-semibold text-[var(--mint-text)]">
                   <Icon name="check" size={12} />
                   {w}
                 </span>
@@ -1157,7 +1158,7 @@ function CrmVisual() {
         <div className="flex flex-wrap gap-2">
           <span className="btn btn-primary btn-sm pointer-events-none">
             {FIRST_PIPELINE_NAME}
-            <span className="tabular-nums opacity-80">{` · ${open.length} open`}</span>
+            <span className="tabular-nums">{` · ${open.length} open`}</span>
           </span>
           {CRM_PIPELINES > 1 ? (
             <span className="btn btn-ghost btn-sm pointer-events-none">
@@ -1173,7 +1174,7 @@ function CrmVisual() {
             <div key={stage.id} className="min-w-0 rounded-2xl bg-paper p-3 ring-1 ring-line">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <p className="text-[12.5px] font-semibold text-ink">{stage.name}</p>
-                <p className="text-[12px] tabular-nums text-ink-soft">{`${here.length} · ${money(sum(here))}`}</p>
+                <p className="text-[12px] tabular-nums text-ink-soft">{`${dealCount(here.length)} · ${money(sum(here))}`}</p>
               </div>
               {here.map((deal) => (
                 <div key={deal.title} className="mt-2 rounded-xl bg-white p-2.5 text-[12px] ring-1 ring-line">
@@ -1289,10 +1290,10 @@ function ImportDoneVisual() {
   const rows = counts.added + counts.already + counts.skipped + counts.errors;
   const words = IMPORT_WORDS.contacts;
   const tiles = [
-    { label: words.added, n: counts.added, tone: "bg-mint-soft", text: "text-mint-deep" },
+    { label: words.added, n: counts.added, tone: "bg-mint-soft", text: "text-[var(--mint-text)]" },
     { label: words.already, n: counts.already, tone: "bg-paper", text: "text-ink-soft" },
     { label: IMPORT_LEFT_WORDS.skipped, n: counts.skipped, tone: "bg-paper", text: "text-ink-soft" },
-    { label: IMPORT_LEFT_WORDS.errors, n: counts.errors, tone: counts.errors ? "bg-danger-soft" : "bg-paper", text: counts.errors ? "text-danger" : "text-ink-soft" },
+    { label: IMPORT_LEFT_WORDS.errors, n: counts.errors, tone: counts.errors ? "bg-danger-soft" : "bg-paper", text: counts.errors ? "text-danger-text" : "text-ink-soft" },
   ];
   return (
     <Window bar="Studio · Import">
@@ -1350,7 +1351,7 @@ function DryRunVisual() {
         <div className="grid grid-cols-2 gap-1.5">
           {shown.map((o) => (
             <div key={o} className={`min-w-0 rounded-xl px-2.5 py-1.5 ${o === "added" ? "bg-mint-soft" : o === "error" ? "bg-danger-soft" : "bg-paper"}`}>
-              <p className={`break-words text-[10.5px] font-semibold ${o === "added" ? "text-mint-deep" : o === "error" ? "text-danger" : "text-ink-soft"}`}>{words[o]}</p>
+              <p className={`break-words text-[10.5px] font-semibold ${o === "added" ? "text-[var(--mint-text)]" : o === "error" ? "text-danger-text" : "text-ink-soft"}`}>{words[o]}</p>
               <p className="text-[13px] font-bold tabular-nums text-ink">{(counts[o] ?? 0).toLocaleString("en-US")}</p>
             </div>
           ))}

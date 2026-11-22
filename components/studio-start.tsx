@@ -1,6 +1,7 @@
 import type { ActivationTiming } from "@/lib/store-activation";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
+import { StudioFocusClear } from "@/components/studio-focus-clear";
 import { START_STEP_UNKNOWN, startList, startProgressWords } from "@/lib/studio-start-rules";
 
 export type StartStep = {
@@ -12,6 +13,14 @@ export type StartStep = {
   unknown?: boolean;
   href: string;
 };
+
+/** A span of whole minutes in plain English: "less than a minute", "1 minute", "12 minutes" (never "1 minutes"). */
+export function minutesWords(minutes: number | null): string {
+  const n = minutes ?? 0;
+  if (n < 1) return "less than a minute";
+  return n === 1 ? "1 minute" : `${n.toLocaleString("en-US")} minutes`;
+}
+const upperFirst = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 /**
  * The first steps of a new store, in order, with what is already done ticked
@@ -47,7 +56,7 @@ export function StudioStart({ steps: all, activation, launchChecklist }: { steps
         ) : null}
       </div>
       {activation ? <p className="mt-3 text-sm text-ink-soft" data-activation-timing>
-        {activation.state === "published" ? `First offer published ${activation.minutes} minutes after this store was registered.` : activation.state === "waiting" ? `${activation.minutes} minutes since this store was registered. Your first offer is still in preparation.` : "The original first-publication time is not recorded for this store."}
+        {activation.state === "published" ? `First offer published ${minutesWords(activation.minutes)} after this store was registered.` : activation.state === "waiting" ? `${upperFirst(minutesWords(activation.minutes))} since this store was registered. Your first offer is still in preparation.` : "The original first-publication time is not recorded for this store."}
         {" "}This measures store registration, not an earlier sign-in or a sale. Drafts do not count as published offers.
       </p> : null}
       <div
@@ -102,22 +111,25 @@ export function StudioStart({ steps: all, activation, launchChecklist }: { steps
  * The studio's sections, one tap away, on every width. On a phone the row
  * scrolls sideways; its right edge fades out, so it is plain there is more,
  * and a little room after the last one lets it come clear of the fade.
+ * Each link is a 44 × 44 px target (WCAG 2.5.5 AAA, AX274), even a short one
+ * like "API" (tests/studio-nav-targets.test.ts).
  */
 export function StudioNav({ items }: { items: { href: string; label: string }[] }) {
   return (
-    <nav aria-label="Studio sections" className="sticky top-16 z-30 -mx-4 mt-6 border-b border-line bg-paper/95 px-4 backdrop-blur sm:mx-0 sm:rounded-full sm:border sm:px-2">
+    <nav aria-label="Studio sections" data-studio-nav="" className="sticky top-16 z-30 -mx-4 mt-6 border-b border-line bg-paper/95 px-4 backdrop-blur sm:mx-0 sm:rounded-full sm:border sm:px-2">
       <ul className="flex gap-1 overflow-x-auto py-2 pr-10 [-webkit-mask-image:linear-gradient(to_right,#000_calc(100%-3rem),transparent)] [mask-image:linear-gradient(to_right,#000_calc(100%-3rem),transparent)] [scrollbar-width:none] sm:pr-0 sm:[mask-image:none]">
         {items.map((item) => (
           <li key={item.href} className="shrink-0">
             <Link
               href={item.href}
-              className="inline-flex h-9 items-center rounded-full px-3.5 text-sm font-semibold text-ink-soft transition-colors hover:bg-white hover:text-ink focus-visible:bg-white"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full px-3.5 text-sm font-semibold text-ink-soft transition-colors hover:bg-white hover:text-ink focus-visible:bg-white"
             >
               {item.label}
             </Link>
           </li>
         ))}
       </ul>
+      <StudioFocusClear />
     </nav>
   );
 }

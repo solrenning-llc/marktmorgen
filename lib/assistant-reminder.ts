@@ -19,8 +19,9 @@
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { isSenderConfigured } from "@/lib/email";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { createHash } from "node:crypto";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isHouseStore } from "@/lib/house-store";
@@ -129,7 +130,7 @@ export async function keepAssistReminder(input: { store: Store; session: string;
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return "email";
   const statsId = store.statsId as string;
   try {
-    if (!(await withinLimit("assist-remind-store", statsId, ASSIST_REMINDERS_PER_STORE_DAY, 86_400))) return "limited";
+    if (!(await withinEssentialLimit("assist-remind-store", statsId, ASSIST_REMINDERS_PER_STORE_DAY, 86_400))) return "limited";
     const consent: Consent = { s: statsId, e: email, t: assistReminderWords(store.language).box, v: ASSIST_REMIND_VERSION, l: store.language, at: now };
     const key = assistRemindKey(input.session);
     // Due an hour after the checkout closes, which it does an hour after it opened (lib/store-checkout.ts).
@@ -152,13 +153,47 @@ export async function keepAssistReminder(input: { store: Store; session: string;
  * the consents and the note of their checkouts. A reminder still queued for
  * one of them finds nothing and is not sent.
  */
+/**
+ * Reads, checks and erases one person's reminder consents in one Redis step (review of #4483, Codex X5): read in one
+ * call and deleted in another, a list read in part deleted the index and only the consents it named, and a member that
+ * is not a session was skipped while the whole index went; either way a consent holding the erased address was no
+ * longer found by any later try. A member that is not a session (SESSION) answers {-1, members} before anything is
+ * deleted; otherwise {deleted, members}. A keep that lands meanwhile waits for the script, so it is never lost.
+ */
+const FORGET_PERSON = `-- marktmorgen:assist-reminder-forget:v1
+local members = redis.call('SMEMBERS', KEYS[1])
+for _, session in ipairs(members) do
+  local rest = string.match(session, '^cs_test_([A-Za-z0-9]+)$') or string.match(session, '^cs_live_([A-Za-z0-9]+)$')
+  if not rest or string.len(rest) < 10 or string.len(rest) > 200 then return {-1, #members} end
+end
+local gone = 0
+for _, session in ipairs(members) do gone = gone + redis.call('DEL', ARGV[1] .. session) end
+gone = gone + redis.call('DEL', KEYS[1])
+return {gone, #members}`;
+
 export async function forgetAssistReminderPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !email || !isRedisConfigured()) return 0;
   const who = whoKey(statsId, email);
-  const [members] = await redisPipeline([["SMEMBERS", who]]);
-  const sessions = (Array.isArray(members) ? members : []).map(String).filter((s) => SESSION.test(s));
-  const [gone] = await redisPipeline([["DEL", who, ...sessions.map(assistRemindKey)]]);
-  return Number(gone) || 0;
+  // Read exactly (issue #4380, rule 24): an unreadable answer is unknown, never "no reminders", so the erasure stays
+  // open and is run again instead of leaving a consent that holds the erased address for the queue to send to.
+  const replies = repliesFor(await redisPipeline([["EVAL", FORGET_PERSON, 1, who, assistRemindKey("")]]), 1);
+  const answer = replies?.[0];
+  const pair = Array.isArray(answer) && answer.length === 2 ? answer : null;
+  if (pair?.[0] === -1) throw new UnknownReplyError("a person's checkout reminders (a member that is not a session)");
+  const [gone, members] = pair ? pair.map(countOf) : [null, null];
+  if (gone === null || members === null || gone > members + 1) throw new UnknownReplyError("erasing a person's checkout reminders");
+  return gone;
+}
+
+/** The checkouts one address said yes on, from their note, read exactly; anything else throws. */
+async function sessionsOf(who: string): Promise<string[]> {
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", who]]), 1);
+  const members = replies ? stringList(replies[0]) : null;
+  if (!members) throw new UnknownReplyError("the checkouts an address said yes to a reminder on");
+  // Only a checkout id is ever added to the note (keepAssistReminder), so a member of another shape is a reply that
+  // does not read: skipped, the note would be deleted and that consent kept with nothing to find it by (Codex X6).
+  if (!members.every((s) => SESSION.test(s))) throw new UnknownReplyError("a checkout an address said yes to a reminder on");
+  return members;
 }
 
 /**
@@ -168,17 +203,16 @@ export async function forgetAssistReminderPerson(statsId: string | null, email: 
  */
 export async function remindersOf(statsId: string | null, email: string): Promise<{ address: string; sentence: string; version: string; at: number }[]> {
   if (!statsId || !email || !isRedisConfigured()) return [];
-  const [members] = await redisPipeline([["SMEMBERS", whoKey(statsId, email)]]);
-  const sessions = (Array.isArray(members) ? members : []).map(String).filter((s) => SESSION.test(s));
+  const sessions = await sessionsOf(whoKey(statsId, email));
   if (!sessions.length) return [];
-  const raws = await redisPipeline(sessions.map((s) => ["GET", assistRemindKey(s)]));
+  // Each consent its text or nothing (gone by itself with its three days): another shape is unknown, never "none".
+  const raws = repliesFor(await redisPipeline(sessions.map((s) => ["GET", assistRemindKey(s)])), sessions.length);
+  if (!raws) throw new UnknownReplyError("the consents of an address's checkout reminders");
   return raws.flatMap((raw) => {
-    try {
-      const v = JSON.parse(String(raw)) as Partial<Consent>;
-      return typeof v.e === "string" ? [{ address: v.e, sentence: String(v.t ?? ""), version: String(v.v ?? ""), at: Number(v.at) || 0 }] : [];
-    } catch {
-      return [];
-    }
+    if (raw === null) return [];
+    const v = typeof raw === "string" ? parseConsent(raw) : null;
+    if (!v) throw new UnknownReplyError("a checkout reminder's consent");
+    return [{ address: v.e, sentence: v.t, version: v.v, at: v.at }];
   });
 }
 

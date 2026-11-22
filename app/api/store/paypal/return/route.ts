@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { clientAddress, withinLimit } from "@/lib/request-guard";
+import { clientAddress, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { captureOrder } from "@/lib/paypal-sales";
 import { handOverPayPal } from "@/lib/paypal-delivery";
 
@@ -19,7 +19,9 @@ export async function GET(request: NextRequest) {
   if (!handle) return away("/");
   const store = await storeForHandle(handle);
   if (!store) return away("/");
-  if (!(await withinLimit("paypal-return", `${clientAddress(request)}|${store.handle}`, 30, 600))) return away(`/@${store.handle}?status=slow`);
+  const room = await withinLimit("paypal-return", `${clientAddress(request)}|${store.handle}`, 30, 600).catch(unknownLimit);
+  if (room === "unknown") return away(`/@${store.handle}?status=error`);
+  if (!room) return away(`/@${store.handle}?status=slow`);
   const result = await captureOrder(store, order);
   if (result.ok) {
     if (result.fresh) await handOverPayPal(store, result.paid).catch((error) => console.error("handing over a PayPal purchase failed", error));
@@ -29,5 +31,8 @@ export async function GET(request: NextRequest) {
   // so, and the sweep hands it over if PayPal completes it.
   if (result.reason === "pending" || result.reason === "error") return away(`/@${store.handle}/thanks?paypal=${encodeURIComponent(order)}`);
   if (result.reason === "declined") return away(`/@${store.handle}?status=paypal-declined`);
+  // Another load of the same order is taking the payment right now: neither the thanks page (nothing is under watch
+  // for this one) nor "could not be matched" (it may be handed over a moment later).
+  if (result.reason === "confirming") return away(`/@${store.handle}?status=paypal-confirming`);
   return away(`/@${store.handle}?status=paypal-error`);
 }

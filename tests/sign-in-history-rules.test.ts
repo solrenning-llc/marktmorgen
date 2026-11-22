@@ -111,12 +111,34 @@ is("and names the other actions LOCKED_ACTIONS holds that are not deleting: a ne
 // The account's own actions that refuse a locked session by themselves, each read in its route and named in the note.
 const ACCOUNT_LOCKS: Record<string, RegExp> = {
   "app/api/auth/signout-all/route.ts": /"Sign out everywhere"/,
+  "app/api/auth/signout-others/route.ts": /"Log out of other devices"/,
   "app/api/auth/passkey/route.ts": /\badd or remove a passkey\b/,
   "app/api/auth/two-step/route.ts": /\bchange two-step login\b/,
   "app/api/auth/recovery-address/route.ts": /\bchange your recovery address\b/,
   "app/api/store/address/route.ts": /\byour sign-in address\b/,
+  // The operator's own Search Console connection is a site setting; the note's "settings" covers it.
+  "app/api/operator/search-console/route.ts": /\bsettings\b/,
 };
-is("each account action the note names really refuses a locked session in its route", Object.keys(ACCOUNT_LOCKS).map((file) => [file, /lockedUntil\([^)]*\)\)\s*>\s*0/.test(source(file))]), Object.keys(ACCOUNT_LOCKS).map((file) => [file, true]));
+/**
+ * A route refuses a locked session when it compares the lock's date with 0: either directly,
+ * or through lib/two-step-unknown.ts lockRead, whose answer is first checked for the unread
+ * reply (answered 503, never read as free) and then compared with 0.
+ */
+const refusesLocked = (text: string): boolean => {
+  if (/lockedUntil\([^)]*\)\)\s*>\s*0/.test(text)) return true;
+  const read = /const (\w+) = (?:[^;]*\? )?await lockRead\(lockedUntil\([^)]*\)[^;]*;\s*if \(\1 instanceof Response\) return \1;/.exec(text);
+  return read !== null && new RegExp(`\\b${read[1]} > 0`).test(text.slice(read.index + read[0].length));
+};
+is(
+  "control: a lockRead whose answer is never compared with 0, or never checked for the unread reply, is not a refusal",
+  [
+    refusesLocked("const until = await lockRead(lockedUntil(session));\nif (until instanceof Response) return until;\nreturn ok();"),
+    refusesLocked("const until = await lockRead(lockedUntil(session));\nif (until > 0) return no();"),
+    refusesLocked("const until = await lockRead(lockedUntil(session));\nif (until instanceof Response) return until;\nif (until > 0) return no();"),
+  ],
+  [false, false, true],
+);
+is("each account action the note names really refuses a locked session in its route", Object.keys(ACCOUNT_LOCKS).map((file) => [file, refusesLocked(source(file))]), Object.keys(ACCOUNT_LOCKS).map((file) => [file, true]));
 is("each is named in the note", Object.entries(ACCOUNT_LOCKS).map(([file, words]) => [file, words.test(note)]), Object.keys(ACCOUNT_LOCKS).map((file) => [file, true]));
 /** Every file under app/ and lib/ that refuses a locked session, other than the lock itself, the studio's permission check and the studio page that only shows it. */
 const lockers = (dir: string): string[] =>
@@ -125,7 +147,8 @@ const lockers = (dir: string): string[] =>
     if (statSync(join(process.cwd(), path)).isDirectory()) return lockers(path);
     return /\.tsx?$/.test(name) && /\blockedUntil\(/.test(source(path)) ? [path] : [];
   });
-const SHOWN_OR_CHECKED = ["lib/two-step.ts", "lib/studio-route.ts", "app/studio/page.tsx"];
+// lib/two-step-ask.ts reads the lock for the studio page only, to hide the first-sale ask (Codex H2 on #3511); it refuses nothing.
+const SHOWN_OR_CHECKED = ["lib/two-step.ts", "lib/studio-route.ts", "app/studio/page.tsx", "lib/two-step-ask.ts"];
 is("no other route refuses a locked session without the note saying so", [...lockers("app"), ...lockers("lib")].filter((file) => !SHOWN_OR_CHECKED.includes(file) && !(file in ACCOUNT_LOCKS)), []);
 is("every sentence shown is under twenty-one words", [...SIGN_IN_NOTES, ...LOCKED_NOTE].every((n) => n.split(/\s+/).length < 21), true);
 

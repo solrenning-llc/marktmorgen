@@ -5,8 +5,10 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { MemberDiscount } from "@/components/member-discount";
+import { MembershipByPrice } from "@/components/membership-by-price";
 import { LEAVE_NAMES, STAY_AGES, isLeaveReason, membershipNumbers } from "@/lib/membership-numbers";
 import { channelName } from "@/lib/channel-names";
 import { readListings } from "@/lib/catalog";
@@ -17,6 +19,9 @@ import { memberHealth } from "@/lib/member-health";
 import { AWAY_POINTS, BAND_NAMES, HEALTH_WORDS } from "@/lib/member-health-rules";
 import { can } from "@/lib/team-roles";
 import { MrrChart } from "@/components/mrr-chart";
+import { type BenefitsPanel, TierBenefits } from "@/components/tier-benefits";
+import { benefitsDue } from "@/lib/tier-benefits";
+import { MAX_GIVE_AT_ONCE } from "@/lib/tier-benefit-rules";
 
 export const metadata: Metadata = {
   title: "Membership numbers — Marktmorgen",
@@ -65,12 +70,48 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
       })
     : null;
   const seesBuyers = can(access.role, "orders");
+  // Benefits handed over by hand (422 [PT2]): for a role that may see buyers or change settings; read from Stripe only when there is one.
+  const benefitRoles = { define: can(access.role, "settings"), mark: seesBuyers };
+  const benefits: BenefitsPanel | null = numbers && (benefitRoles.define || benefitRoles.mark)
+    ? await benefitsDue(store).then(
+        (due): BenefitsPanel => {
+          if (due.state !== "ok") return due;
+          // At most MAX_GIVE_AT_ONCE waiting and as many marked a benefit go to the page; the rest are counted.
+          const more: Record<string, number> = {};
+          const rows = due.benefits.flatMap((b) => {
+            const own = due.rows.filter((r) => r.benefit === b.id);
+            const pending = own.filter((r) => r.given === null);
+            more[b.id] = Math.max(0, pending.length - MAX_GIVE_AT_ONCE);
+            return [...pending.slice(0, MAX_GIVE_AT_ONCE), ...own.filter((r) => r.given !== null).slice(0, MAX_GIVE_AT_ONCE)];
+          });
+          return {
+            state: "ok",
+            benefits: due.benefits,
+            rows: rows.map((r) => ({ benefit: r.benefit, sub: r.sub, email: seesBuyers ? r.email : "", period: r.period, until: r.until, given: seesBuyers ? r.given : r.given === "unknown" ? "unknown" : r.given ? { at: r.given.at, by: "" } : null })),
+            more,
+            waiting: due.waiting,
+            complete: due.complete,
+            unreadable: due.unreadable,
+          };
+        },
+        (error: unknown): BenefitsPanel => {
+          console.error("reading membership benefits failed", error);
+          return { state: "unknown", why: "stripe" };
+        },
+      )
+    : null;
+  const membershipProducts = benefits && benefitRoles.define
+    ? (await readListings(store).catch(() => [])).filter((p) => p.recurring).map((p) => ({ id: p.id, title: p.title }))
+    : [];
   // This month on the store's own cancel page (lib/leave-flow.ts), when it asks.
   const asked = numbers && store.leaving.on ? await leaveMonth(store.statsId).catch(() => null) : null;
   // One of the reasons the store's own page offers, or one the creator wrote (lib/leave-rules.ts).
   const reasonName = (reason: string) =>
     isLeaveReason(reason) ? LEAVE_NAMES[reason] : numbers?.leaving?.own[reason] ? `“${numbers.leaving.own[reason]}”` : "A reason you have since removed";
-  const titles = numbers ? new Map((await readListings(store, numbers.byProduct.map((p) => p.product))).map((p) => [p.id, p.title])) : new Map();
+  // The listings are read once: their titles name each membership, and their prices feed "By price" (MembershipByPrice).
+  const listings = numbers ? await readListings(store, numbers.byProduct.map((p) => p.product)) : [];
+  const listingsById = new Map(listings.map((p) => [p.id, p]));
+  const titles = new Map(listings.map((p) => [p.id, p.title]));
   const money = (cents: number) => formatMoney(cents, numbers?.currency ?? store.currency);
   const when = numbers
     ? new Date(numbers.at * 1000).toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" })
@@ -104,7 +145,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Membership numbers</p>
+          <StudioTrail store={store} here="Membership numbers" />
           <h1 className="t-h2 mt-3">How your memberships are doing</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             Read from your own Stripe account: every membership of this store it holds. Payment plans are not memberships and
@@ -207,7 +248,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                 {numbers.byProduct.length === 0 ? (
                   <p className="mt-2 text-sm text-ink-soft">No membership is running right now.</p>
                 ) : (
-                  <div className="mt-4 overflow-x-auto">
+                  <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="By membership, as a table">
                     <table className="w-full text-left text-sm">
                       <thead>
                         <tr className="text-xs uppercase tracking-[0.08em] text-ink-mute">
@@ -230,6 +271,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                     </table>
                   </div>
                 )}
+                <MembershipByPrice numbers={numbers} listings={listingsById} />
               </section>
 
               {health && (health.members.length || health.unscored) ? (
@@ -291,6 +333,15 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                     {health.unscored ? <li>{`${health.unscored} running ${health.unscored === 1 ? "membership is" : "memberships are"}`} not counted here because Stripe did not send all their details. The numbers above leave them out and are partial.</li> : null}
                     {health.complete ? null : <li>Your Stripe account holds more memberships than one reading takes, so the oldest are not scored.</li>}
                   </ul>
+                </section>
+              ) : null}
+
+              {benefits ? (
+                <section aria-labelledby="benefits-title" className="card mt-8 p-6 sm:p-8" data-tier-benefits>
+                  <h2 id="benefits-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Benefits you hand over</h2>
+                  <div className="mt-2">
+                    <TierBenefits panel={benefits} memberships={membershipProducts} canDefine={benefitRoles.define} canMark={benefitRoles.mark} />
+                  </div>
                 </section>
               ) : null}
 
@@ -363,7 +414,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                     </p>
                   ) : null}
                   {numbers.leaving.reasons.length ? (
-                    <div className="mt-4 overflow-x-auto">
+                    <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="Why members leave, as a table">
                       <table className="w-full text-left text-sm">
                         <thead>
                           <tr className="text-xs uppercase tracking-[0.08em] text-ink-mute">
@@ -414,7 +465,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                     The memberships begun in each month, and the share still running one, two, three, six and twelve months
                     later. If the newer rows keep fewer people than the older ones, something changed for those who join now.
                   </p>
-                  <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-labelledby="stay-title">
+                  <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="Who stays, month by month, as a table">
                     <table className="w-full text-left text-sm">
                       <thead>
                         <tr className="text-xs uppercase tracking-[0.08em] text-ink-mute">

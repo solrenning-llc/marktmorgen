@@ -67,7 +67,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const guarded = await guardStoreWrite(request, "products", MAX_BODY_BYTES);
+  // Deleting a call's team of hosts (team: null) is a removal a locked session may not make (LOCKED_ACTIONS.products, #4264).
+  const guarded = await guardStoreWrite(request, "products", MAX_BODY_BYTES, (sent) => (sent.team === null ? "remove" : ""));
   if (!guarded.ok) return guarded.response;
   const { store, body } = guarded;
   const id = text(body.id, 40);

@@ -32,7 +32,7 @@ import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store } from "@/lib/store"
 import type { LimitState } from "@/lib/request-guard";
 import { ESSENTIAL_PER_DAY } from "@/lib/studio-allowance-rules";
 import { takeEssentialBelow } from "@/lib/studio-route";
-import { STRIPE_LIST_VERSION, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
+import { STRIPE_LIST_VERSION, StripeListUnreadable, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 /** One page of the most recent invoices: two years of a monthly plan. */
 export const PLAN_INVOICES_SHOWN = 24;
@@ -119,7 +119,7 @@ export function readPlanInvoicePage(page: unknown, owner: Owner): { invoices: Pl
         subscriptionOf(row) === owner.subscription &&
         (status === "draft" || (SHOWN_STATUSES as readonly unknown[]).includes(status)) &&
         hasOwnField(row, "number") && (number === null || (typeof number === "string" && number.length > 0 && number.length <= 100)) &&
-        typeof created === "number" && Number.isSafeInteger(created) && created > 0 &&
+        typeof created === "number" && Number.isSafeInteger(created) && created > 0 && Number.isFinite(new Date(created * 1000).getTime()) &&
         typeof total === "number" && Number.isSafeInteger(total) &&
         cents(ownField(row, "amount_paid")) && cents(ownField(row, "amount_remaining")) &&
         typeof currency === "string" && /^[a-z]{3}$/.test(currency)
@@ -127,6 +127,14 @@ export function readPlanInvoicePage(page: unknown, owner: Owner): { invoices: Pl
     },
     INVOICE_ID,
   );
+  // One invoice listed twice, identical or not (paid and still due, or one still a draft): the page cannot say which
+  // is true, so it is unknown and the studio says the history is unavailable, never shows it twice (#4734). Checked
+  // before drafts are left out, so a draft copy is caught too.
+  const ids = new Set<string>();
+  for (const { id } of read.rows) {
+    if (ids.has(id)) throw new StripeListUnreadable("a plan invoice listed twice");
+    ids.add(id);
+  }
   const invoices = read.rows
     .filter((row) => ownField(row, "status") !== "draft")
     .map((row) => ({

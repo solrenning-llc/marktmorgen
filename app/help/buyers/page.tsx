@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { SiteFooter } from "@/components/site-footer";
-import { SiteNav } from "@/components/site-nav";
+import { Breadcrumb } from "@/components/breadcrumb";
+import { SiteNav } from "@/components/site-nav-server";
 import { BUYER_HELP, BUYER_HELP_CHECKED } from "@/lib/buyer-help";
 
 export const metadata: Metadata = {
@@ -22,15 +23,7 @@ export default function BuyerHelpPage() {
       <main id="content" className="flex-1">
         <section className="surface-dawn border-b border-line">
           <div className="container-page py-14 sm:py-18">
-            <nav aria-label="Breadcrumb" className="text-sm">
-              <ol className="flex flex-wrap gap-2 text-ink-soft">
-                <li>
-                  <Link href="/help" className="link">Help center</Link>
-                  <span aria-hidden="true"> /</span>
-                </li>
-                <li aria-current="page">Help for buyers</li>
-              </ol>
-            </nav>
+            <Breadcrumb path={[{ label: "Help center", href: "/help" }]} here="Help for buyers" />
             <h1 className="t-h1 mt-4">You bought from a creator here</h1>
             <p className="t-lead mt-5 max-w-2xl text-ink-soft">
               Each store on Marktmorgen belongs to its creator. You paid them directly, and they answer for what they sell. Here is how to get back to
@@ -60,7 +53,7 @@ export default function BuyerHelpPage() {
               <h2 id={`${item.id}-q`} className="t-section">{item.q}</h2>
               <div className="mt-3 space-y-3">
                 {item.a.map((paragraph) => (
-                  <p key={paragraph} className="max-w-[70ch] leading-relaxed text-ink-soft">{paragraph}</p>
+                  <p key={paragraph} className="max-w-[46ch] leading-relaxed text-ink-soft">{paragraph}</p>
                 ))}
               </div>
             </section>

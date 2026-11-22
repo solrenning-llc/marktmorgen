@@ -7,7 +7,7 @@ import { cookies } from "next/headers";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
 import { notFound, redirect } from "next/navigation";
-import { normaliseHandle, storeForPage } from "@/lib/store";
+import { normaliseHandle, storeFolder, storeForPage, storeRef } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { linkHost } from "@/lib/product-link";
 import { readableSize } from "@/lib/product-file";
@@ -19,7 +19,7 @@ import { LessonText } from "@/components/lesson-text";
 import { LessonQuiz } from "@/components/lesson-quiz";
 import { LessonTask } from "@/components/lesson-task";
 import { readTaskFor, submissionOf } from "@/lib/assignment";
-import type { Submission } from "@/lib/assignment-rules";
+import { type Submission, taskFolder } from "@/lib/assignment-rules";
 import { readListing } from "@/lib/catalog";
 import { LessonComments } from "@/components/lesson-comments";
 import { commenterName, commentsOn, lessonComments } from "@/lib/lesson-comments";
@@ -37,8 +37,14 @@ import { lessonPath } from "@/lib/lesson-position-rules";
 import { resumeWordsOf } from "@/lib/lesson-position-rules";
 import { videoStampText } from "@/lib/video-stamp";
 import { LessonNotes } from "@/components/lesson-notes";
+import { LessonFocus } from "@/components/lesson-focus";
 import { readNote } from "@/lib/lesson-notes";
 import { EmptyState } from "@/components/empty-state";
+import { nextStepCookie, nextStepFor } from "@/lib/course-next-step";
+import { finishedNow, nextStepPlace } from "@/lib/course-next-step-rules";
+import { CourseNextStepCard } from "@/components/course-next-step-card";
+import { pricePill, productPath } from "@/components/store-product";
+import { AccessUncheckedNote } from "@/components/access-unchecked-note";
 
 type Params = {
   params: Promise<{ handle: string; product: string; lesson: string }>;
@@ -90,12 +96,12 @@ export default async function LessonPage({ params, searchParams }: Params) {
   const product = await readListing(store, productId);
   if (!product?.course) redirect(`/@${store.handle}`);
   const jar = await cookies();
-  const access = await courseAccess(store, product, jar);
+  const course = await readCourse(product.course.id);
+  const access = await courseAccess(store, product, jar, course);
   // A draft is not: only its students and the store's owner and team, signed
   // in, see anything of it, a free preview included (MM-SA-30). Anyone else
   // goes where an id that does not exist goes, before its lessons are read.
   if (product.hidden && access.state !== "open" && !(await seesDrafts(store, jar.get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
-  const course = await readCourse(product.course.id);
   const base = `/@${store.handle}/course/${product.id}`;
   const found = course ? findLesson(course, lessonId) : null;
   if (!course || !found) redirect(base);
@@ -105,7 +111,9 @@ export default async function LessonPage({ params, searchParams }: Params) {
   const open = access.state === "open" && isOpen(course, found.unit, access.start);
   // A free preview is open to anyone; everything else to a student whose
   // module has opened.
-  if (!open && !found.lesson.preview) redirect(base);
+  // Not even a free preview while the store is switched off after a report (lib/takedown.ts), except to its
+  // students: they keep every lesson they could open, a preview in a module not open yet included.
+  if (!open && (!found.lesson.preview || (store.suspended && access.state !== "open"))) redirect(base);
 
   const { lesson, unit } = found;
   const start = access.state === "open" ? access.start : null;
@@ -129,7 +137,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
     lesson.hasBody ? readBody(course.id, lesson.id) : Promise.resolve(""),
     // A store with no plan that can be charged plays video for the hours
     // it has, and is paused past them (lib/plan-standing.ts).
-    lesson.video ? lessonVideo(lesson.video, videoLimitFor(store), windowId(store), store) : Promise.resolve(null),
+    lesson.video ? lessonVideo(lesson.video, videoLimitFor(store), windowId(store), store, { free: access.state !== "open" }) : Promise.resolve(null),
     lesson.quiz ? readQuizFor(course.id, lesson.id) : Promise.resolve(null),
     lesson.quiz && student ? attemptOf(course.id, lesson.id, who) : Promise.resolve<Attempt | null>(null),
     // An assignment, and what this student handed in for it (lib/assignment.ts).
@@ -137,6 +145,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
     lesson.task && student ? submissionOf(course.id, lesson.id, who) : Promise.resolve<Submission | null>(null),
   ]);
   const quizMode = access.state === "open" && access.learner.owner ? "owner" : student && open ? "student" : "visitor";
+  // Where this student's file for the assignment is sent (lib/assignment-rules.ts): the upload door checks the name in it.
+  const taskFolderFor = task?.file && quizMode === "student" ? taskFolder(await storeFolder(storeRef(store)), course.id, lesson.id, who) : "";
   // A student sees only the questions their try draws from a bank (lib/quiz.ts).
   const asked = quiz && attempt && quizMode === "student" ? studentQuiz(quiz, course.id, lesson.id, who, attempt) : null;
   // Comments are for the course's students and its creator; a visitor on a
@@ -169,6 +179,15 @@ export default async function LessonPage({ params, searchParams }: Params) {
   const previous = order.slice(0, at).reverse().find(reachable) ?? null;
   const next = order.slice(at + 1).find(reachable) ?? null;
   const isDone = done?.has(lesson.id) ?? false;
+  // The course's "Next step" (560 [AS1]) right after the student marks its last lesson done: on a lesson with no lesson
+  // after it, once every lesson is marked done (lessons done read exactly; unknown is not finished). Read and paid for
+  // as on the course's page, never in the middle of the lessons (lib/course-next-step-rules.ts nextStepPlace).
+  const finishedHere = Boolean(student && open) && finishedNow({ lessons: order.map((entry) => entry.lesson.id), done, at: lesson.id, hasNext: next !== null });
+  const nextCookie = nextStepCookie(course.id);
+  const nextProduct =
+    student && course.nextStep && nextStepPlace({ page: "lesson", finishedNow: finishedHere })
+      ? await nextStepFor({ store, course, courseProductId: product.id, email: student.email, dismissed: jar.get(nextCookie)?.value === "1" }).catch(() => null)
+      : null;
   // Where the student stopped, kept on their device and offered back (650 [WG10], components/lesson-player.tsx),
   // under a key only the server can make (lib/lesson-position.ts); never for the creator or a visitor.
   const placeKey = student ? devicePlaceKey(course.id, student.email) : null;
@@ -188,12 +207,14 @@ export default async function LessonPage({ params, searchParams }: Params) {
     >
       <main id="content" className="relative mx-auto max-w-5xl px-4 py-8 sm:py-12">
         {lastPerson && lastPath ? <RememberLastLesson person={lastPerson} path={lastPath} courseId={course.id} lesson={lesson.title} course={product.title} store={store.name} /> : null}
-        <p className="text-sm">
+        {/* 295 [SQ6]: "Focus mode" hides everything here marked group-data-[focus=on]/focus:hidden. */}
+        <LessonFocus words={{ focusOn: w.focusOn, focusOff: w.focusOff, focusOnSaid: w.focusOnSaid, focusOffSaid: w.focusOffSaid }}>
+        <p className="text-sm group-data-[focus=on]/focus:hidden">
           <Link href={base} className="st-footer-link font-semibold">{product.title}</Link>
           <span className="st-muted">{w.crumb(moduleNumber, unit.title)}</span>
         </p>
 
-        <div className="mt-4 grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="mt-4 grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem] group-data-[focus=on]/focus:mt-0 group-data-[focus=on]/focus:lg:grid-cols-1">
           <article className="st-card min-w-0 p-5 sm:p-8">
             <h1 className="font-display text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-3xl">{lesson.title}</h1>
             {!open ? (
@@ -300,6 +321,10 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 <p className="st-note mt-6" role="status">
                   <strong>{w.pausedStrong}</strong>{` ${w.pausedRest(store.name)}`}
                 </p>
+              ) : video?.kind === "free_paused" ? (
+                <p className="st-note mt-6" role="status">
+                  <strong>{w.pausedStrong}</strong>{` ${w.freePausedRest}`}
+                </p>
               ) : video?.kind === "failed" ? (
                 <p className="st-note mt-6">{w.videoFailed(store.name)}</p>
               ) : (
@@ -309,7 +334,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
 
             {body ? (
               <div className="mt-6" style={{ color: "var(--st-text)" }}>
-                <LessonText text={body} codeLabel={w.codeBlock} />
+                <LessonText text={body} codeLabel={w.codeBlock} lang={said.lang.locale} />
               </div>
             ) : null}
 
@@ -366,16 +391,19 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 mode={quizMode}
                 where={{ handle: store.handle, product: product.id, lesson: lesson.id }}
                 storeName={store.name}
+                folder={taskFolderFor}
                 language={store.language}
               />
             ) : null}
 
             {note ? (
+              <div className="group-data-[focus=on]/focus:hidden">
               <LessonNotes
                 initial={note.state === "kept" ? { state: "kept", text: note.text } : note}
                 where={{ handle: store.handle, product: product.id, lesson: lesson.id }}
                 language={store.language}
               />
+              </div>
             ) : null}
 
             <div className="mt-8 flex flex-wrap items-center gap-3 border-t pt-6" style={{ borderColor: "var(--st-line)" }}>
@@ -407,26 +435,46 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 </form>
               ) : null}
               {next && (isDone || done === null || !student || !open || lesson.task) ? (
-                <Link href={`${base}/${next.lesson.id}`} className="btn st-btn">{w.nextLesson}</Link>
+                // .btn sets its own display, so the hiding is on a wrapper.
+                <span className="group-data-[focus=on]/focus:hidden"><Link href={`${base}/${next.lesson.id}`} className="btn st-btn">{w.nextLesson}</Link></span>
               ) : null}
               {previous ? (
-                <Link href={`${base}/${previous.lesson.id}`} className="st-footer-link text-sm font-semibold">{w.previousLesson}</Link>
+                <Link href={`${base}/${previous.lesson.id}`} className="st-footer-link text-sm font-semibold group-data-[focus=on]/focus:hidden">{w.previousLesson}</Link>
               ) : null}
             </div>
+            {nextProduct && course.nextStep ? (
+              <CourseNextStepCard
+                handle={store.handle}
+                courseId={course.id}
+                productId={product.id}
+                lessonId={lesson.id}
+                href={productPath(store, nextProduct)}
+                title={nextProduct.title}
+                price={pricePill(store, nextProduct)}
+                line={course.nextStep.line}
+                words={{ label: w.nextStepLabel, see: w.nextStepSee(nextProduct.title), noThanks: w.nextStepNoThanks, done: w.nextStepNoThanksDone }}
+              />
+            ) : null}
           </article>
 
-          <aside className="st-card h-fit p-5 sm:p-6 lg:row-span-2">
+          <aside className="st-card h-fit p-5 sm:p-6 lg:row-span-2 group-data-[focus=on]/focus:hidden">
             <p className="st-label">{w.inThisCourse}</p>
             <div className="mt-3">
               <CourseOutline course={course} base={base} start={start} done={done ?? new Set<string>()} current={lesson.id} held={held} language={store.language} />
             </div>
+            {/* A student whose access could not be checked just now is told so, never sent to buy what they may own
+                (lib/course-door.ts); on a free preview, the only lesson such a student reaches. */}
             {!open ? (
-              <Link href={base} className="btn st-btn btn-block mt-5">{w.getWhole}</Link>
+              access.state === "unknown" ? (
+                <AccessUncheckedNote title={w.uncheckedTitle} body={w.uncheckedBody} retry={w.uncheckedRetry} href={`${base}/${lesson.id}`} className="mt-5" />
+              ) : (
+                <Link href={base} className="btn st-btn btn-block mt-5">{w.getWhole}</Link>
+              )
             ) : null}
           </aside>
 
           {reader && talking ? (
-            <div className="min-w-0 lg:col-start-1 lg:row-start-2">
+            <div className="min-w-0 lg:col-start-1 lg:row-start-2 group-data-[focus=on]/focus:hidden">
               <LessonComments
                 threads={threads}
                 reader={reader}
@@ -441,6 +489,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
             </div>
           ) : null}
         </div>
+        </LessonFocus>
       </main>
     </div>
   );

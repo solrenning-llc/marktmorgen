@@ -1,11 +1,11 @@
 import type { NextRequest } from "next/server";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
-import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
+import { DEVICE_COOKIE, SESSION_COOKIE, endSession, isMoving, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
 import { LockBusyError } from "@/lib/redis-lock";
 import { repairMove } from "@/lib/move-repair";
 import { isRedisConfigured } from "@/lib/redis";
 import { UnknownReplyError } from "@/lib/redis-reply";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { PASSKEY_COOKIE, listPasskeys, pendingRemoval, signInOptions, signInWith, unlessSetToGo } from "@/lib/passkeys";
 import { cancelReset, endRecoveryAccess } from "@/lib/two-step";
 
@@ -36,7 +36,10 @@ export async function POST(request: NextRequest) {
   } catch {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
-  if (!(await withinLimit("passkey", clientAddress(request), TRIES, 10 * 60))) {
+  const room = await withinLimit("passkey", clientAddress(request), TRIES, 10 * 60).catch(unknownLimit);
+  // A count that could not be read is never "too many tries" (rule 24).
+  if (room === "unknown") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  if (!room) {
     return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
   }
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
@@ -57,8 +60,16 @@ export async function POST(request: NextRequest) {
       // A move left broken is repaired before any session opens, as at every other login (lib/move-repair.ts):
       // nobody gets into a copy of the store the repair is about to settle. When the repair moved this passkey
       // to the address that holds the store, the person is asked to try again, and lands there.
-      await repairMove(email).catch((error) => console.error("repairing a broken move failed", error));
-      if (!(await listPasskeys(email)).some((p) => p.id === signed.id)) return Response.json({ ok: false, error: "busy" }, { status: 503 });
+      // Only a move that is settled lets a session open, as at the emailed link and the recovery
+      // (lib/signin-finish.ts, app/api/auth/lost/confirm): repairMove answers false on purpose while a move is still
+      // running, cannot be told apart or holds ways in on both sides, and a repair that fails counts as one that did not.
+      const blocked = (await isMoving(email)) && !(
+        (await repairMove(email).catch(() => {
+          console.error("repairing a broken move failed");
+          return false;
+        })) && !(await isMoving(email))
+      );
+      if (blocked || !(await listPasskeys(email)).some((p) => p.id === signed.id)) return Response.json({ ok: false, error: "busy" }, { status: 503 });
 
       // Opened with its second step: a passkey (lib/auth.ts SecondStep), which a team that asks for one reads (lib/team.ts).
       const id = await openSession(email, "passkey", signed.id);
@@ -72,7 +83,7 @@ export async function POST(request: NextRequest) {
         waiting = await pendingRemoval(email);
         listed = (await listPasskeys(email)).some((p) => p.id === signed.id);
       } catch (error) {
-        await endSession(id).catch((ended) => console.error("closing a passkey session that could not be checked failed", ended));
+        await endSession(id).catch(() => console.error("closing a passkey session that could not be checked failed"));
         throw error;
       }
       if (!listed) {
@@ -95,9 +106,9 @@ export async function POST(request: NextRequest) {
       const doomed = signed.doomed || waiting?.ids.includes(signed.id) === true;
       if (!doomed) {
         await unlessSetToGo(email, signed.id, async () => {
-          await cancelReset(email, "login").catch((error) => console.error("calling off a two-step reset failed", error));
-          await endRecoveryAccess(email).catch((error) => console.error("closing a recovery login failed", error));
-        }).catch((error) => console.error("calling off a two-step reset failed", error));
+          await cancelReset(email, "login").catch(() => console.error("calling off a two-step reset failed"));
+          await endRecoveryAccess(email).catch(() => console.error("closing a recovery login failed"));
+        }).catch(() => console.error("calling off a two-step reset failed"));
       }
       const response = Response.json({ ok: true, next: "/studio" });
       response.headers.append("Set-Cookie", sessionCookie(id));
@@ -115,10 +126,10 @@ export async function POST(request: NextRequest) {
     // A record that could not be read in its exact shape (lib/passkeys.ts, CX-123 rule 24): the login is refused, no
     // session is opened, and the person is told, without detail, that it failed on our side and to try again.
     if (error instanceof UnknownReplyError) {
-      console.error("logging in with a passkey was refused: a record could not be read", error);
+      console.error("logging in with a passkey was refused: a record could not be read");
       return Response.json({ ok: false, error: "server_error" }, { status: 503 });
     }
-    console.error("logging in with a passkey failed", error);
+    console.error("logging in with a passkey failed");
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
 }

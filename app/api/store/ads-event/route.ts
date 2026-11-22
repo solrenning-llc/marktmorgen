@@ -1,7 +1,7 @@
 import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 import { clientIp } from "@/lib/visit";
 import { openAdEventRelay, sendServerPurchase } from "@/lib/ad-events";
 import { hasPixels } from "@/lib/pixels";
@@ -21,6 +21,8 @@ const done = () => new Response(null, { status: 204, headers: { "Cache-Control":
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return done();
+  // Global Privacy Control is the buyer's no to every store: whatever the page asked, nothing is sent.
+  if (request.headers.get("sec-gpc") === "1") return done();
   if (Number(request.headers.get("content-length") ?? "0") > MAX_BODY_BYTES) return done();
   let body: Record<string, unknown> = {};
   try {
@@ -33,7 +35,8 @@ export async function POST(request: NextRequest) {
   if (!handle) return done();
   const store = await storeForHandle(handle).catch(() => null);
   if (!store || !hasPixels(store.pixels)) return done();
-  if (!(await withinStore("ads-event", `${clientAddress(request)}|${store.handle}`, 10, 600, store))) return done();
+  // Past the limit, or a count that could not be read (unknown, rule 24): nothing is sent, and the answer is the same.
+  if ((await withinStore("ads-event", `${clientAddress(request)}|${store.handle}`, 10, 600, store).catch(unknownLimit)) !== true) return done();
   // The page the purchase was on, without its query, which names the order.
   let url = "";
   try {

@@ -72,7 +72,7 @@ COMMUNITY_PLATFORM_GUIDE,
     },
     {
       "type": "p",
-      "text": "On October 20, Kajabi listed Basic at $179 monthly, Growth at $249 and Pro at $499. Annual billing displayed monthly equivalents of $143, $199 and $399. Those equivalents describe an annual commitment, not monthly purchase prices."
+      "text": "On November 15, Kajabi listed Basic at $179 monthly, Growth at $249 and Pro at $499. Annual billing displayed monthly equivalents of $143, $199 and $399. Those equivalents describe an annual commitment, not monthly purchase prices."
     },
     {
       "type": "h2",
@@ -105,7 +105,7 @@ COMMUNITY_PLATFORM_GUIDE,
     },
     {
       "type": "note",
-      "text": "Sources read October 20, 2026. These are dated published USD figures, not a personalized checkout quote, earnings forecast or assertion that one product replaces everything in another."
+      "text": "Sources read November 15, 2026. These are dated published USD figures, not a personalized checkout quote, earnings forecast or assertion that one product replaces everything in another."
     },
     {
       "type": "links",
@@ -143,7 +143,7 @@ COMMUNITY_PLATFORM_GUIDE,
   "body": [
     {
       "type": "p",
-      "text": "Skool's pricing page listed Hobby at $9 a month and Pro at $99 when read on October 20, 2026. It advertises two months free for yearly billing; this article does not turn that headline into a verified annual invoice."
+      "text": "Skool's pricing page listed Hobby at $9 a month and Pro at $99 when read on November 15, 2026. It advertises two months free for yearly billing; this article does not turn that headline into a verified annual invoice."
     },
     {
       "type": "h2",
@@ -175,7 +175,7 @@ COMMUNITY_PLATFORM_GUIDE,
     },
     {
       "type": "note",
-      "text": "Official sources read October 20, 2026. No exact annual invoice or unresolved transaction band is treated as zero. Marktmorgen paid sales remain closed; its community and pricing pages describe actual scope and limits, not a Skool Discovery substitute."
+      "text": "Official sources read November 15, 2026. No exact annual invoice or unresolved transaction band is treated as zero. Marktmorgen paid sales remain closed; its community and pricing pages describe actual scope and limits, not a Skool Discovery substitute."
     },
     {
       "type": "links",
@@ -225,7 +225,7 @@ COMMUNITY_PLATFORM_GUIDE,
     },
     {
       "type": "p",
-      "text": "Teachable's October 20 pricing listed Starter, Builder and Growth at $39, $89 and $189 monthly, with annual monthly equivalents of $29, $69 and $139. Product counts were 5, 10 and 50. Custom needs a quote; the annual display is not an independently verified invoice."
+      "text": "Teachable's November 15 pricing listed Starter, Builder and Growth at $39, $89 and $189 monthly, with annual monthly equivalents of $29, $69 and $139. Product counts were 5, 10 and 50. Custom needs a quote; the annual display is not an independently verified invoice."
     },
     {
       "type": "h2",
@@ -262,7 +262,7 @@ COMMUNITY_PLATFORM_GUIDE,
     },
     {
       "type": "note",
-      "text": "Sources read October 20, 2026. This checklist makes no earnings, savings or blanket feature-equivalence claim. Existing buyer languages, creator content and permissions must survive any migration."
+      "text": "Sources read November 15, 2026. This checklist makes no earnings, savings or blanket feature-equivalence claim. Existing buyer languages, creator content and permissions must survive any migration."
     },
     {
       "type": "links",
@@ -424,7 +424,7 @@ COMMUNITY_PLATFORM_GUIDE,
       },
       {
         type: "note",
-        text: "Every figure here is from Gumroad's own pages, read on September 20, 2026 and checked again on September 28, 2026: their pricing page for 10% plus 50 cents, 30% on Discover and the merchant-of-record change of January 1, 2025; “Gumroad's fees” for card processing at 2.9% plus 30 cents not being included and for the $20,000 discount; “Getting paid by Gumroad” for the $100 minimum, the seven-day hold, the payout days, the 2% PayPal fee, the 3% instant payout, the currency conversion and the one-to-three-week review; “Adding PayPal to checkout” for PayPal sales paid into your own PayPal account; and their “Account suspension FAQ” for what can happen to a balance. The same 2.9% plus 30 cents is Stripe's published United States rate for domestic cards. If any of it has changed since, this page is wrong until we fix it, and we would rather be told than left looking accurate.",
+        text: "Every figure here is from Gumroad's own pages, read on November 15, 2026: their pricing page for 10% plus 50 cents, 30% on Discover and the merchant-of-record change of January 1, 2025; “Gumroad's fees” for card processing at 2.9% plus 30 cents not being included and for the $20,000 discount; “Getting paid by Gumroad” for the $100 minimum, the seven-day hold, the payout days, the 2% PayPal fee, the 3% instant payout, the currency conversion and the one-to-three-week review; “Adding PayPal to checkout” for PayPal sales paid into your own PayPal account; and their “Account suspension FAQ” for what can happen to a balance. The same 2.9% plus 30 cents is Stripe's published United States rate for domestic cards. If any of it has changed since, this page is wrong until we fix it, and we would rather be told than left looking accurate.",
       },
     ],
   },
@@ -887,6 +887,7 @@ COMMUNITY_PLATFORM_GUIDE,
         type: "ul",
         items: [
           `Range: automatic Instagram replies, ${PAYPAL ? "" : "PayPal at checkout, "}${STAN_AFFILIATES_AHEAD}, one builder for funnels, Zoom links made for each booking and webinar, and stores with no limit on products. We have none of those. ${PAYPAL ? "" : `PayPal is not at our checkout yet: ${PAYPAL_WAITS}. `}Our affiliates are ${AFFILIATES_PAID}, which needs a PayPal Business account with Payouts switched on; our funnels are pages and offers you connect rather than one builder; our video rooms, for calls and live events alike, are Google Meet links made on your connected Google Calendar, your own meeting link, or Jitsi Meet rooms, where the first person in may have to sign in to Jitsi; and a store holds up to 2,000 products.`,
+          "Prices in the buyer's own currency: Stan's help center says buyers in more than 150 countries see the price in their own currency, with a conversion fee of 2% to 4% included in it. Our stores charge in one of 15 currencies, chosen by you, and never convert it.",
           "Years of running: their support library is deep, and ours is a few pages.",
           "A native creator app: their help center states their creator app is currently available only on iPhone and iPad. We do not have a native app at all — our studio and every store install to the home screen from the browser, on both iPhone and Android, and the studio can send notifications of sales, which is a different trade-off, not a better one in every case.",
           "Integrations with third-party tools, which they list on their site. We have webhooks that Zapier, Make or your own server can catch, and no app of our own in anyone's directory.",
@@ -899,8 +900,8 @@ COMMUNITY_PLATFORM_GUIDE,
           "The money lands in your own Stripe account, so payouts, receipts and refunds are yours.",
           "Price options on a single product, with the right file delivered for the tier that was paid for.",
           "Reviews only buyers can write, checked against the payment. Stan's help center says reviews there are added by the creator.",
-          "A team with roles, each person signing in with their own email. Stan's help center says the only way to give someone admin access to a store there is to share your login.",
-          `Sales pages, landing pages, discount codes, payment plans and offers after payment on the ${PLAN_AT.creator} plan (Stan's help center puts discount codes, payment plans and upsells on their $99 Creator Pro plan), and a store in any of 15 currencies.`,
+          `A team with roles on the ${PLAN_AT.creator} plan, each person signing in with their own email. Stan's help center puts admin seats only on a new $299-a-month Creator Max plan that it says is not yet open to every creator.`,
+          `Sales pages, landing pages, discount codes, payment plans and offers after payment on the ${PLAN_AT.creator} plan (Stan's help center puts discount codes, payment plans and upsells on their $99 Creator Pro plan).`,
           "Bundles that hand over each of your products as if bought on its own. Stan's help center lists bundles among the files you can sell as one download.",
           "Moving in from a spreadsheet: up to 50,000 contacts, 500 products and 20,000 past buyers per file, where Stan's help center sets a limit of 5,000 imported contacts per store in all, and buyers are given access one at a time.",
           "A live demo store anyone can buy from with a test card, before signing up for anything.",
@@ -999,11 +1000,6 @@ export function postBySlug(slug: string): BlogPost | undefined {
   return BLOG_POSTS.find((post) => post.slug === slug);
 }
 
-export function formatPostDate(date: string): string {
-  return new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-}
+// A post's date as the blog shows it, kept in lib/post-date.ts so the blog's browser filter reads it
+// without this file's posts (tests/blog-browser-bundle.test.ts).
+export { formatPostDate } from "@/lib/post-date";

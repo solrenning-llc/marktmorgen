@@ -105,11 +105,17 @@ part("Words from another file date the answer by the commit that changed them");
     };
     commit("$69", "2026-11-05T12:00:00Z", true);
     commit("$79", "2026-11-07T12:00:00Z", false);
+    // A step that does not build (an import of a name that is not there), then the fix that brings the price to $89:
+    // the change is dated by the fix, the first commit after it that builds, never earlier.
+    writeFileSync(join(dep, "lib", "price.ts"), 'export const PRICES = "$89";\n');
+    run(["add", "."]);
+    run(["commit", "-q", "-m", "broken"], { GIT_AUTHOR_DATE: "2026-11-08T12:00:00Z", GIT_COMMITTER_DATE: "2026-11-08T12:00:00Z" });
+    commit("$89", "2026-11-09T12:00:00Z", false);
     execFileSync(process.execPath, [join(process.cwd(), "scripts", "help-dates.mjs")], { cwd: dep, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     const written = readFileSync(join(dep, "lib", "help-dates.ts"), "utf8");
     const row = written.match(/"what-does-the-plan-cost": \{ created: "([0-9-]+)", updated: "([0-9-]+)"/);
     is("created on the day the question was written", row?.[1], "2026-11-05");
-    is("updated on the day its price changed, in lib/price.ts", row?.[2], "2026-11-07");
+    is("updated on the day its price changed, in lib/price.ts, past a step that did not build", row?.[2], "2026-11-09");
   } finally {
     rmSync(dep, { recursive: true, force: true });
   }

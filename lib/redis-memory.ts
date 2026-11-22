@@ -1665,6 +1665,24 @@ export class MemoryRedis {
           this.run(["EXPIRE", ledger, seconds]); return 1;
         }
 
+        // lib/creator-research-room.ts KEEP_RESEARCH_ANSWER: the answer kept only while the list is under its ceiling, in one step.
+        if (key.startsWith("-- marktmorgen:research-answer-keep:v3\n") && args[0] === "1" && args.length === 10) {
+          const [, list, max, row, today, share, perDay, reserve, account, plain] = args;
+          const length = this.run(["LLEN", list]) as number;
+          if (length >= Number(max)) return 0;
+          let reserved = 0;
+          for (const kept of this.run(["LRANGE", list, 0, -1]) as string[]) {
+            if (!kept.includes('"reservedFor":"')) continue;
+            reserved += 1;
+            if (account !== "" && kept.includes(`"reservedFor":"${account}"`)) return "already";
+          }
+          if (account !== "" && reserved < Number(reserve)) return this.run(["LPUSH", list, row]);
+          const room = Number(max) - Number(reserve);
+          const anonymous = length - reserved;
+          if (anonymous >= room) return 0;
+          const cap = Math.max(1, Math.min(Number(perDay), Math.floor((room - anonymous) / Number(share))));
+          return Number(today) > cap ? `busy:${cap}` : this.run(["LPUSH", list, plain]);
+        }
         // lib/redis-lock.ts releaseLock and holdLock: the lock deleted, or made to last, only while it holds the token.
         if (key.startsWith("-- marktmorgen:release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, lock, token] = args;
@@ -2275,6 +2293,39 @@ export class MemoryRedis {
         // the places of those who were answered, and the copy gone.
         if (key.startsWith("-- marktmorgen:reading-copy:v1\n") && args[0] === "2" && args.length >= 6) {
           const [, copy, erased, value, seconds, ...prints] = args;
+          this.scriptCalls += 1;
+          const found = this.run(["HMGET", erased, ...prints]) as unknown[];
+          const gone = found.flatMap((one, i) => (one !== null ? [i + 1] : []));
+          this.scriptCalls += 1;
+          if (gone.length) this.run(["DEL", copy]);
+          else this.run(["SET", copy, value, "EX", seconds]);
+          return gone;
+        }
+        // lib/store-live-copy.ts, KEEP_UNLESS_ERASED_LIVE: READING_COPY behind the store's fence in the same step:
+        // the store's key gone, no longer holding its ref, or its erasing mark set, the copy goes and [0] is answered.
+        if (key.startsWith("-- marktmorgen:reading-copy-live:v3\n") && args[0] === "4" && args.length >= 11) {
+          const [, live, erasing, copy, erased, field, value, seconds, statsId, ref, ...prints] = args;
+          this.scriptCalls += 2;
+          let alive = this.run(["HGET", erasing, field]) === null;
+          if (alive && statsId === "") alive = this.run(["GET", live]) === ref;
+          else if (alive) {
+            const raw = this.run(["GET", live]);
+            if (raw !== null) {
+              let record: unknown;
+              try {
+                record = JSON.parse(String(raw));
+              } catch {
+                return -1;
+              }
+              if (!record || typeof record !== "object" || Array.isArray(record)) return -1;
+              alive = (record as { statsId?: unknown }).statsId === statsId;
+            } else alive = false;
+          }
+          if (!alive) {
+            this.scriptCalls += 1;
+            this.run(["DEL", copy]);
+            return [0];
+          }
           this.scriptCalls += 1;
           const found = this.run(["HMGET", erased, ...prints]) as unknown[];
           const gone = found.flatMap((one, i) => (one !== null ? [i + 1] : []));

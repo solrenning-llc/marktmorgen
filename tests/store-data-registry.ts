@@ -205,6 +205,7 @@ const KIND = (kind: string) => `order kind/${kind}`;
 export const FAMILIES: Record<string, Family> = {
   // ---------------------------------------------------------------- app/
   "nl:rl:creators:@app/api/creators/route.ts": company("Applications to the creators' page, per connection", "The company's own sign-up page for creators, not a store's."),
+  "nl:rl:creators:day:@app/api/creators/route.ts": company("New answers to the creators' survey in one UTC day, everyone together: one counter a day, kept two days, refusing past RESEARCH_ANSWERS_PER_DAY (lib/creator-research-room.ts; Claude 7 on #3584)", "The company's own research form, not a store's."),
   "nl:aff:payday:lock@app/api/cron/affiliates/route.ts": lock("The affiliates' payday job"),
   "nl:closing:lock@app/api/cron/closing/route.ts": lock("The closing job"),
   "nl:lock:plan-stop:@lib/billing.ts": lock("A plan's stop, while a plan refund or the creator changes it (30 s, one per subscription)"),
@@ -622,7 +623,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ref:mine:@lib/creator-invites.ts": company("A creator's credits", "The company's program for creators."),
   "nl:ref:mycode:@lib/creator-invites.ts": company("A creator's code", "The company's program for creators."),
   "nl:ref:owed@lib/creator-invites.ts": company("Credits owed", "The company's program for creators."),
-  "nl:creators:responses@lib/creator-research-store.ts": company("Answers to the creators' survey", "The company's own research."),
+  "nl:creators:responses@lib/creator-research-store.ts": company("Answers to the creators' survey", "The company's own research. One list, at most RESEARCH_MAX_ANSWERS (320) answers of at most RESEARCH_ANSWER_MAX_BYTES (12,288 bytes) each, counted and written in one step (KEEP_RESEARCH_ANSWER) and refused past it (lib/creator-research-room.ts, tests/creator-research-room.test.ts): RESEARCH_MAX_BYTES (3,932,160 bytes), under one backup part; answers older than 24 months go daily."),
   "nl:crm:deals:@lib/crm.ts": { what: "Deals: one slot a deal, at what it weighs, at most MAX_DEALS", room: ["lib/crm.ts"] },
   "nl:crm:co:@lib/crm-companies.ts": { what: "Companies and the people linked to them, at what each weighs, at most MAX_COMPANIES", room: ["lib/crm-companies.ts"] },
   "nl:crm:co:lock:@lib/crm-companies.ts": short("One change to a store's companies at a time, ten seconds at the most", "studio", 1, 128),

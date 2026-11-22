@@ -40,9 +40,9 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, isAbsolute, join } from "node:path";
 
 export const REPO = process.env.CORREIO_REPO || "https://github.com/solrenning-llc/repo-id-transfer-test";
 export const RAMO = process.env.CORREIO_RAMO || "correio";
@@ -51,9 +51,10 @@ export const ATRASO_MIN = 30;
 
 /** Prazo de cada comando do git (passo 4): um comando que trava não segura a ferramenta; vence e falha com o motivo. */
 export const GIT_PRAZO_MS = 120000;
-export function git(args, input, prazoMs = GIT_PRAZO_MS) {
+export function git(args, input, prazoMs = GIT_PRAZO_MS, dir = null, envExtra = {}) {
   try {
-    return execFileSync("git", args, { input, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], maxBuffer: 64 << 20, timeout: prazoMs, killSignal: "SIGKILL" }).trim();
+    const env = dir ? { ...process.env, ...envExtra, GIT_DIR: dir } : { ...process.env, ...envExtra };
+    return execFileSync("git", args, { input, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], maxBuffer: 64 << 20, timeout: prazoMs, killSignal: "SIGKILL", env }).trim();
   } catch (erro) {
     if (erro?.code === "ETIMEDOUT" || (erro?.signal === "SIGKILL" && !erro?.status)) {
       const e = new Error(`git ${args.filter((a) => !String(a).startsWith("-c")).slice(0, 2).join(" ")} passou do limite de tempo (${prazoMs / 1000} s) e foi parado; nada foi feito com o resultado`);
@@ -62,6 +63,30 @@ export function git(args, input, prazoMs = GIT_PRAZO_MS) {
     }
     throw erro;
   }
+}
+
+// Passo 6 (A14): o correio é privado e o marktmorgen é público. Tudo o que é do correio (as buscas, os objetos, os
+// commits gravados e a referência do só-acrescentar) fica num repositório git só da ferramenta, fora do clone onde ela
+// roda: um push --mirror desse clone nunca leva o correio. As leituras dos PRs (dados públicos) continuam no clone.
+export const DIR_CORREIO = process.env.CORREIO_GIT_DIR || join(homedir(), ".agent-mail", "correio.git");
+/** A marca antiga do clone, guardada pelo comando que criou o repositório do correio (MÉDIO do Claude 4 3Kc no #5117). */
+const ARQUIVO_ANCORA = () => join(DIR_CORREIO, "agent-mail-ancora-do-clone");
+let dirPronto = false;
+/** O git no repositório do correio, criado na primeira vez. */
+export function gitC(args, input) {
+  if (!dirPronto) {
+    if (!existsSync(join(DIR_CORREIO, "HEAD"))) {
+      execFileSync("git", ["init", "-q", "--bare", DIR_CORREIO], { stdio: ["ignore", "pipe", "pipe"] });
+      // MÉDIO do Claude 4 3Kc no #5117: o comando que cria o repositório (qualquer um, inclusive read) guarda a marca
+      // antiga do só-acrescentar que estiver no clone, antes que o aviso leve a apagá-la; a vigia a usa depois.
+      try {
+        const velha = git(["rev-parse", "--verify", "-q", REF_VERIFICADO]);
+        if (/^[0-9a-f]{40}$/.test(velha)) writeFileSync(ARQUIVO_ANCORA(), `${velha}\n`);
+      } catch { /* o clone não tem marca antiga */ }
+    }
+    dirPronto = true;
+  }
+  return git(args, input, GIT_PRAZO_MS, DIR_CORREIO);
 }
 
 /** O nome de um agente como pasta: "Claude 5 ibqho" -> "claude-5-ibqho"; "todos" é reservado. */
@@ -75,21 +100,32 @@ export function slug(nome) {
  * Busca o ramo; devolve o commit, ou null se o ramo ainda não existe. Cada busca usa uma referência própria, apagada em
  * seguida: o vigia e um envio rodando ao mesmo tempo no mesmo clone nunca disputam a mesma referência.
  */
+// Passo 6 (A11): uma decisão lê um retrato só do correio. A primeira leitura do comando busca e guarda o retrato; as
+// seguintes usam o mesmo. Toda escrita busca de novo a ponta, para montar em cima dela, e depois o retrato passa a ser o
+// commit que ela gravou. A vigia esquece o retrato a cada volta.
+let retrato;
 function buscar() {
+  if (retrato === undefined) retrato = buscarDeNovo();
+  return retrato;
+}
+/** Esquece o retrato guardado: a próxima leitura busca o correio de novo. */
+export function esquecerRetrato() { retrato = undefined; }
+
+function buscarDeNovo() {
   const ref = `refs/correio/${RAMO}-${process.pid}-${randomBytes(4).toString("hex")}`;
   try {
-    git(["fetch", "-q", "--no-write-fetch-head", REPO, `+refs/heads/${RAMO}:${ref}`]);
-    return git(["rev-parse", ref]);
+    gitC(["fetch", "-q", "--no-write-fetch-head", REPO, `+refs/heads/${RAMO}:${ref}`]);
+    return gitC(["rev-parse", ref]);
   } catch (erro) {
     if (/couldn't find remote ref|not found/i.test(String(erro.stderr ?? erro))) return null;
     throw erro;
   } finally {
-    try { git(["update-ref", "-d", ref]); } catch { /* não foi criada */ }
+    try { gitC(["update-ref", "-d", ref]); } catch { /* não foi criada */ }
   }
 }
 
-const arquivos = (commit, pasta) => (commit ? git(["ls-tree", "-r", "--name-only", commit, "--", pasta]).split("\n").filter(Boolean) : []);
-const conteudo = (commit, caminho) => git(["show", `${commit}:${caminho}`]);
+const arquivos = (commit, pasta) => (commit ? gitC(["ls-tree", "-r", "--name-only", commit, "--", pasta]).split("\n").filter(Boolean) : []);
+const conteudo = (commit, caminho) => gitC(["show", `${commit}:${caminho}`]);
 const idDe = (caminho) => caminho.split("/").pop().replace(/\.md$/, "");
 /** Quem enviou, lido da id "<data>Z-<remetente>-<4 hex>", exatamente (assim "claude-5" não se confunde com "claude-5-ibqho"). */
 export const remetenteDe = (id) => String(id).replace(/^\d{8}T\d{6}Z-/, "").replace(/-[0-9a-f]{4}$/, "");
@@ -119,7 +155,7 @@ export function ordem(commit) {
   if (ordens.has(commit)) return ordens.get(commit);
   const mapa = new Map();
   let i = -1, t = 0;
-  for (const linha of git(["log", "--reverse", "--topo-order", "--format=%x01%ct", "--name-only", "--diff-filter=A", "--no-renames", commit]).split("\n")) {
+  for (const linha of gitC(["log", "--reverse", "--topo-order", "--format=%x01%ct", "--name-only", "--diff-filter=A", "--no-renames", commit]).split("\n")) {
     if (linha.startsWith("\x01")) { i += 1; t = Number(linha.slice(1)) * 1000; } else if (linha && !mapa.has(linha)) mapa.set(linha, { i, t });
   }
   ordens.set(commit, mapa);
@@ -176,9 +212,9 @@ export function sessaoDe(texto) {
  */
 function acrescentar(novos, mensagem) {
   for (let tentativa = 1; ; tentativa += 1) {
-    const base = buscar();
+    const base = buscarDeNovo();
     const indice = join(tmpdir(), `correio-indice-${process.pid}-${randomBytes(4).toString("hex")}`);
-    const env = { ...process.env, GIT_INDEX_FILE: indice };
+    const env = { ...process.env, GIT_INDEX_FILE: indice, GIT_DIR: DIR_CORREIO };
     const comIndice = (args, input) => execFileSync("git", args, { input, encoding: "utf8", env, stdio: ["pipe", "pipe", "pipe"] }).trim();
     let commit;
     try {
@@ -187,22 +223,23 @@ function acrescentar(novos, mensagem) {
         if (base && arquivos(base, caminho).includes(caminho)) throw new Error(`já existe no correio: ${caminho}; nada é reescrito`);
         // A sessão de quem escreve vai no fim de cada mensagem ou registro .md (os outros arquivos têm formato fixo).
         const gravado = caminho.endsWith(".md") ? `${String(texto).replace(/\n*$/, "\n")}Sessão: ${linhaSessao()}\n` : texto;
-        const blob = git(["hash-object", "-w", "--stdin"], gravado);
+        const blob = gitC(["hash-object", "-w", "--stdin"], gravado);
         comIndice(["update-index", "--add", "--cacheinfo", `100644,${blob},${caminho}`]);
       }
       const arvore = comIndice(["write-tree"]);
       if (base) {
         const antes = new Set(arquivos(base, "."));
-        const depois = new Set(git(["ls-tree", "-r", "--name-only", arvore]).split("\n"));
+        const depois = new Set(gitC(["ls-tree", "-r", "--name-only", arvore]).split("\n"));
         const sumiram = [...antes].filter((f) => !depois.has(f));
         if (sumiram.length) throw new Error(`envio recusado: sumiriam ${sumiram.join(", ")}`);
       }
-      commit = git(["commit-tree", arvore, ...(base ? ["-p", base] : []), "-m", `${mensagem}\n\nMail-Session: ${linhaSessao()}`]);
+      commit = gitC(["commit-tree", arvore, ...(base ? ["-p", base] : []), "-m", `${mensagem}\n\nMail-Session: ${linhaSessao()}`]);
     } finally {
       try { execFileSync("rm", ["-f", indice]); } catch { /* sem índice */ }
     }
     try {
-      git(["push", "-q", REPO, `${commit}:refs/heads/${RAMO}`]);
+      gitC(["push", "-q", REPO, `${commit}:refs/heads/${RAMO}`]);
+      retrato = commit;
       return commit;
     } catch (erro) {
       if (tentativa >= 6) throw new Error(`envio falhou depois de ${tentativa} tentativas: ${String(erro.stderr ?? erro).slice(0, 300)}`);
@@ -286,6 +323,36 @@ export function naoLidas(eu, commit = buscar()) {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/**
+ * Passo 6 (A13): as mensagens da caixa de `eu` (e da família) que só foram confirmadas por escrita não identificada nas
+ * últimas 24 horas. Quem lê identificado é avisado delas, sem ser acordado: o Claude 1 no computador do dono e o Codex
+ * confirmam assim de propósito, mas outro também poderia, com o nome da família.
+ */
+export function confirmadasSemIdentidade(eu, agora = new Date(), commit = buscar()) {
+  if (!commit) return [];
+  const me = slug(eu), fam = familia(eu);
+  // Um git log só, sem abrir arquivo nenhum (LEVE do Claude 2 lpgvy no #5113): cada commit que acrescentou confirmações
+  // traz a sessão de quem escreveu no trailer Mail-Session. Primeiro, as confirmações não identificadas das últimas 24
+  // horas; depois, só para essas mensagens, se alguma sessão identificada da família também as confirmou.
+  const lerLog = (args) => {
+    const saida = [];
+    let sessao = "", quando = 0;
+    for (const linha of gitC(["log", "--format=%x01%ct%x02%(trailers:key=Mail-Session,valueonly,separator=%x20)", "--name-only", "--diff-filter=A", "--no-renames", ...args]).split("\n")) {
+      if (linha.startsWith("\x01")) { const [t, ses] = linha.slice(1).split("\x02"); quando = Number(t) * 1000; sessao = ses.trim(); continue; }
+      if (linha.startsWith("lidas/") && familia(linha.split("/")[1]) === fam) saida.push({ id: idDe(linha), quando, identificada: /^session_[0-9A-Za-z]{20,40} \(/.test(sessao) });
+    }
+    return saida;
+  };
+  const semId = new Map();
+  for (const a of lerLog(["--since=24.hours", commit, "--", "lidas"])) if (!a.identificada && agora - a.quando < 24 * 3600000) semId.set(a.id, a.quando);
+  if (!semId.size) return [];
+  const caminhos = arquivos(commit, "lidas").filter((c) => semId.has(idDe(c)) && familia(c.split("/")[1]) === fam);
+  const comId = new Set(lerLog([commit, "--", ...caminhos]).filter((a) => a.identificada).map((a) => a.id));
+  return [...arquivos(commit, `caixas/${me}`), ...(me !== fam ? arquivos(commit, `caixas/${fam}`) : [])]
+    .filter((c) => c.endsWith(".md") && semId.has(idDe(c)) && !comId.has(idDe(c)))
+    .map((c) => idDe(c)).sort();
+}
+
 export function confirmar({ eu, ids, agora = new Date() }) {
   // Duas sessões da mesma família confirmando a mesma mensagem ao mesmo tempo: relê e tenta de novo, sem as já gravadas.
   for (let tentativa = 0; ; tentativa++) {
@@ -293,6 +360,7 @@ export function confirmar({ eu, ids, agora = new Date() }) {
       return confirmarUmaVez({ eu, ids, agora });
     } catch (erro) {
       if (tentativa >= 3 || !/já existe no correio/.test(String(erro.message ?? erro))) throw erro;
+      esquecerRetrato();
     }
   }
 }
@@ -304,7 +372,9 @@ function confirmarUmaVez({ eu, ids, agora }) {
   ids = ids.filter((id) => !ja.has(id));
   if (!ids.length) return 0;
   const novos = {};
-  for (const id of ids) novos[`lidas/${me}/${id}`] = `${agora.toISOString()}\n`;
+  // Passo 6 (A13): a confirmação guarda a sessão que a fez; uma não identificada sai com aviso, e a família é avisada ao ler.
+  for (const id of ids) novos[`lidas/${me}/${id}`] = `${agora.toISOString()}\nSessão: ${linhaSessao()}\n`;
+  if (!sessaoAtual()) console.error(`ATENÇÃO: esta confirmação fica como não identificada (fora da nuvem do Claude Code); a família de ${eu} vai ver, ao ler identificada, que ${ids.length === 1 ? "a mensagem foi confirmada" : "as mensagens foram confirmadas"} assim.`);
   acrescentar(novos, `Lidas por ${eu}: ${ids.length}`);
   return ids.length;
 }
@@ -367,8 +437,9 @@ function campoCabecalho(texto, nome) {
   return new RegExp(`^${nome}: (.*)$`, "m").exec(cabecalho)?.[1]?.trim() ?? "";
 }
 
+// Passo 6 (A12): todo campo vem do cabeçalho; uma linha "Exclui:" ou "Preferência:" no texto livre nunca vira campo.
 function campo(texto, nome) {
-  return new RegExp(`^${nome}: (.*)$`, "m").exec(texto)?.[1]?.trim() ?? "";
+  return campoCabecalho(texto, nome);
 }
 
 /** Os pedidos de um tipo, na ordem de chegada, com o estado de cada um. */
@@ -452,7 +523,7 @@ export const SESSOES = { "01DKvYQ": "claude-1", "01FR6Z1": "claude-2", "014YNUx"
 export function commitsDoPr(pr, ramo = null) {
   if (testeLigado("CORREIO_SEM_COMMITS")) return null;
   const sufixo = `${process.pid}-${randomBytes(4).toString("hex")}`;
-  const base = `refs/correio/prs-main-${sufixo}`, cabeca = `refs/correio/prs-${pr}-${sufixo}`;
+  const base = `refs/agent-mail-pr/prs-main-${sufixo}`, cabeca = `refs/agent-mail-pr/prs-${pr}-${sufixo}`;
   try {
     git(["fetch", "-q", "--no-tags", REPO_PRS, `+refs/heads/main:${base}`, `+${fonteDoHead(pr, ramo)}:${cabeca}`]);
     const linhas = git(["log", "--format=%an%x1f%(trailers:key=Claude-Session,valueonly,separator=%x1e)", `${base}..${cabeca}`]).split("\n").filter(Boolean);
@@ -502,7 +573,7 @@ export function ramoDoHead(sha, pr) {
 export function ramoDoPr(pr, ramo) {
   if (!/^\d+$/.test(String(pr ?? "")) || !ramo) return false;
   const sufixo = `${process.pid}-${randomBytes(4).toString("hex")}`;
-  const a = `refs/agent-mail/rp-${pr}-${sufixo}`, b = `refs/agent-mail/rr-${sufixo}`;
+  const a = `refs/agent-mail-pr/rp-${pr}-${sufixo}`, b = `refs/agent-mail-pr/rr-${sufixo}`;
   try {
     git(["fetch", "-q", "--no-tags", REPO_PRS, `+refs/pull/${pr}/head:${a}`, `+refs/heads/${ramo}:${b}`]);
     try { git(["merge-base", "--is-ancestor", a, b]); return true; } catch { return false; }
@@ -551,7 +622,7 @@ function fonteDoHead(pr, ramo = null) {
 export function situacaoNoGitHub(pr, ramo = null) {
   if (testeLigado("CORREIO_SEM_COMMITS")) return null;
   const sufixo = `${process.pid}-${randomBytes(4).toString("hex")}`;
-  const base = `refs/correio/sg-main-${sufixo}`, cabeca = `refs/correio/sg-${pr}-${sufixo}`;
+  const base = `refs/agent-mail-pr/sg-main-${sufixo}`, cabeca = `refs/agent-mail-pr/sg-${pr}-${sufixo}`;
   try {
     const naFila = git(["ls-remote", REPO_PRS, "refs/heads/gh-readonly-queue/*"]).split("\n").some((l) => new RegExp(`/pr-${pr}-[0-9a-f]+$`).test(l));
     git(["fetch", "-q", "--no-tags", REPO_PRS, `+refs/heads/main:${base}`, `+${fonteDoHead(pr, ramo)}:${cabeca}`]);
@@ -577,9 +648,9 @@ export function conflitosDoPr(pr, ramo = null) {
   const criados = [];
   try {
     const filas = git(["ls-remote", REPO_PRS, "refs/heads/gh-readonly-queue/*"]).split("\n").filter(Boolean).map((l) => l.split("\t")[1]);
-    const cabeca = `refs/correio/cf-${pr}-${sufixo}`, base = `refs/correio/cf-main-${sufixo}`;
+    const cabeca = `refs/agent-mail-pr/cf-${pr}-${sufixo}`, base = `refs/agent-mail-pr/cf-main-${sufixo}`;
     const pares = [`+refs/heads/main:${base}`, `+${fonteDoHead(pr, ramo)}:${cabeca}`];
-    const grupos = filas.map((ref, i) => ({ ref, local: `refs/correio/cf-q${i}-${sufixo}`, pr: /\/pr-(\d+)-/.exec(ref)?.[1] ?? null }))
+    const grupos = filas.map((ref, i) => ({ ref, local: `refs/agent-mail-pr/cf-q${i}-${sufixo}`, pr: /\/pr-(\d+)-/.exec(ref)?.[1] ?? null }))
       .filter((g) => g.pr !== String(pr));
     for (const g of grupos) pares.push(`+${g.ref}:${g.local}`);
     criados.push(base, cabeca, ...grupos.map((g) => g.local));
@@ -666,12 +737,12 @@ export function privilegioValido(texto, por) {
  */
 export function ultimoSinal(sessao, commit = buscar(), agora = new Date()) {
   if (!commit) return { quando: null, conferido: true };
-  const t = git(["log", "-1", "--format=%ct", "-F", `--grep=Mail-Session: ${sessao}`, commit]);
+  const t = gitC(["log", "-1", "--format=%ct", "-F", `--grep=Mail-Session: ${sessao}`, commit]);
   if (t) return { quando: new Date(Number(t) * 1000), conferido: true };
-  if (git(["rev-parse", "--is-shallow-repository"]) !== "true") return { quando: null, conferido: true };
+  if (gitC(["rev-parse", "--is-shallow-repository"]) !== "true") return { quando: null, conferido: true };
   // Num clone raso, os commits da borda aparecem sem pais. Com mais de uma borda (uma junção), um caminho pode parar na
   // mais recente: o histórico só está completo desde ela (revisão do Claude 4 AC no #5052).
-  const bordas = git(["log", "--format=%ct", "--max-parents=0", commit]).split("\n").filter(Boolean).map(Number);
+  const bordas = gitC(["log", "--format=%ct", "--max-parents=0", commit]).split("\n").filter(Boolean).map(Number);
   const inicio = bordas.length ? Math.max(...bordas) * 1000 : Infinity;
   return { quando: null, conferido: inicio <= agora.getTime() - SINAL_MIN * 60000 };
 }
@@ -703,7 +774,7 @@ export function conferirPedido(pedido, comando, alvo, commit = buscar(), agora =
   if (!linha) throw new Error(`o comentário ${m[1]} não traz a linha "AGENT-MAIL-REQUEST <identificador ${PREFIXO_COORDENADOR}-AAAAMMDD-HHMM-ASSUNTO> ${comando} ${alvo}"`);
   let achados = [];
   try {
-    achados = git(["grep", "-l", "-F", `Pedido: ${esperado}`, commit, "--", "chaves", "revisao/confirmados", "estado", "prs", "fila/tomadas", "revisao/tomadas"]).split("\n").filter(Boolean);
+    achados = gitC(["grep", "-l", "-F", `Pedido: ${esperado}`, commit, "--", "chaves", "revisao/confirmados", "estado", "prs", "fila/tomadas", "revisao/tomadas"]).split("\n").filter(Boolean);
   } catch (erro) {
     // O git grep sai com 1 quando não acha nada; qualquer outra falha deixa o uso NÃO CONFERIDO (revisão do Claude 4 AC).
     if (erro?.status !== 1) throw new Error(`o uso único do pedido ${m[1]} NÃO FOI CONFERIDO (git grep falhou); nada foi feito`);
@@ -813,17 +884,25 @@ export function mudarChave({ nome, eu, ligar, motivo = "", pedido = "", dono = "
 const LINK_REVISAO = (pr) => new RegExp(`^https://github\\.com/solrenning-llc/marktmorgen/pull/${pr}#(issuecomment|pullrequestreview)-(\\d+)$`);
 
 /** Confere no GitHub (API REST, pelo gh) que o link é um comentário ou revisão deste PR que cita o head. null = não conferido. */
-export function conferirLink(link, pr, sha) {
+// Passo 6 (A15): o comentário precisa trazer o veredito dado e vir de quem trabalha no repositório.
+const QUEM_TRABALHA = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+export function conferirLink(link, pr, sha, resultado = null) {
   if (testeLigado("CORREIO_SEM_GH")) return null;
   const m = LINK_REVISAO(pr).exec(link);
   if (!m) return { ok: false, motivo: "link fora do formato" };
   try {
     const rota = m[1] === "issuecomment" ? `repos/solrenning-llc/marktmorgen/issues/comments/${m[2]}` : `repos/solrenning-llc/marktmorgen/pulls/${pr}/reviews/${m[2]}`;
-    const saida = execFileSync("gh", ["api", rota, "--jq", "[.html_url, (.body // \"\"), (.commit_id // \"\")] | @json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
-    const [url, corpo, commitId] = JSON.parse(saida.trim()); // o gh imprime o texto do @json sem aspas: uma camada só
+    const saida = execFileSync("gh", ["api", rota, "--jq", "[.html_url, (.body // \"\"), (.commit_id // \"\"), (.author_association // \"\")] | @json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
+    const [url, corpo, commitId, associacao] = JSON.parse(saida.trim()); // o gh imprime o texto do @json sem aspas: uma camada só
     if (!String(url).includes(`/pull/${pr}`)) return { ok: false, motivo: "o link não é deste PR" };
     const curto = String(sha).slice(0, 10);
     if (!String(corpo).includes(curto) && !String(commitId).startsWith(curto)) return { ok: false, motivo: `o comentário não cita o head ${curto}` };
+    // O veredito vem da primeira linha do comentário, onde as revisões daqui o escrevem, e sem o veredito oposto nela:
+    // uma revisão CHANGES que diz mais abaixo "faltam 2 READY" não confere um registro READY (LEVE do Claude 2 lpgvy no #5113).
+    const primeira = String(corpo).split(/\r?\n/).find((l) => l.trim()) ?? "";
+    const oposto = resultado === "READY" ? "CHANGES" : "READY";
+    if (resultado && (!new RegExp(`\\b${resultado}\\b`).test(primeira) || new RegExp(`\\b${oposto}\\b`).test(primeira))) return { ok: false, motivo: `o comentário não traz o veredito ${resultado} na primeira linha` };
+    if (!QUEM_TRABALHA.has(String(associacao))) return { ok: false, motivo: `o comentário não é de quem trabalha no repositório (${associacao || "autor desconhecido"})` };
     return { ok: true, motivo: "" };
   } catch {
     return null;
@@ -837,7 +916,7 @@ export function registrarRevisao({ eu, pr, sha, resultado, link, agora = new Dat
   if (!/^(READY|CHANGES)$/.test(String(resultado ?? ""))) throw new Error("--result deve ser READY ou CHANGES");
   if (!LINK_REVISAO(pr).test(String(link ?? ""))) throw new Error(`--link é obrigatório: o endereço do comentário da revisão no PR #${pr} (https://github.com/solrenning-llc/marktmorgen/pull/${pr}#issuecomment-N)`);
   const atual = headAtual(pr);
-  const lk = conferirLink(link, pr, sha);
+  const lk = conferirLink(link, pr, sha, resultado);
   const carimbo = agora.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
   const id = `${carimbo}-${slug(eu)}-${randomBytes(2).toString("hex")}`;
   const corpo = [`Tipo: registro de revisão`, `PR: ${pr}`, `Head: ${sha}`, `Resultado: ${resultado}`, `Por: ${eu}`, `Link: ${link}`,
@@ -1122,12 +1201,12 @@ export function hashProprio() {
   return createHash("sha256").update(readFileSync(new URL(import.meta.url))).digest("hex");
 }
 export function hashPublicado() {
-  const ref = `refs/agent-mail/main-${process.pid}-${randomBytes(4).toString("hex")}`;
+  const ref = `refs/agent-mail-pr/main-${process.pid}-${randomBytes(4).toString("hex")}`;
   try {
     // Busca normal, nunca --depth: uma busca rasa tornaria raso o repositório de quem roda a ferramenta (revisão do
     // Claude 1 A no #5044). No clone do Marktmorgen, ela só traz o que falta.
     git(["fetch", "-q", "--no-tags", REPO_PRS, `+refs/heads/main:${ref}`]);
-    return /^[0-9a-f]{64}/.exec(conteudo(ref, ARQUIVO_HASH))?.[0] ?? null;
+    return /^[0-9a-f]{64}/.exec(git(["show", `${ref}:${ARQUIVO_HASH}`]))?.[0] ?? null; // no clone: o main é público
   } catch {
     return null;
   } finally {
@@ -1163,11 +1242,11 @@ export const REF_VERIFICADO = "refs/agent-mail/append-only-checked";
 export function conferirSoAcrescentar(commit, desde = null) {
   if (!commit) return { reescrito: false, problemas: [] };
   let reescrito = false;
-  if (desde) { try { git(["merge-base", "--is-ancestor", desde, commit]); } catch { reescrito = true; } }
+  if (desde) { try { gitC(["merge-base", "--is-ancestor", desde, commit]); } catch { reescrito = true; } }
   const faixa = desde && !reescrito ? `${desde}..${commit}` : commit;
   const problemas = [];
   let atual = "";
-  for (const linha of git(["log", "--format=%x01%H", "--name-status", "--diff-filter=MDT", "--no-renames", "--diff-merges=first-parent", faixa]).split("\n")) {
+  for (const linha of gitC(["log", "--format=%x01%H", "--name-status", "--diff-filter=MDT", "--no-renames", "--diff-merges=first-parent", faixa]).split("\n")) {
     if (linha.startsWith("\x01")) { atual = linha.slice(1); continue; }
     const m = /^([MDT])\t(.+)$/.exec(linha);
     if (m && !RAIZ_HISTORICA.has(m[2])) problemas.push(`${atual.slice(0, 10)} ${m[1] === "D" ? "APAGOU" : "ALTEROU"} ${m[2]}`);
@@ -1511,7 +1590,26 @@ export function traduzir(comandoDado, o) {
   return { comando, o: traduzidas };
 }
 
+/**
+ * Passo 6 (A14): referências do correio deixadas no clone por versões anteriores (refs/correio/*, refs/agent-mail/*)
+ * apontam para o histórico privado; um push --mirror as publicaria. A ferramenta não apaga nada no clone de ninguém:
+ * avisa, com o comando. Avisa também quando ela roda de uma pasta temporária que todos podem escrever.
+ */
+export function avisarClone() {
+  let refs = [];
+  try { refs = git(["for-each-ref", "--format=%(refname)", "refs/correio", "refs/agent-mail"]).split("\n").filter(Boolean); } catch { /* não é um repositório git */ }
+  if (refs.length) {
+    console.error(`ATENÇÃO: este clone guarda ${refs.length} referência(s) do correio privado, de uma versão anterior da ferramenta (${refs.slice(0, 3).join(", ")}${refs.length > 3 ? ", ..." : ""}); um push --mirror as publicaria. O correio agora fica em ${DIR_CORREIO}. Apague-as com: git for-each-ref --format='%(refname)' refs/correio refs/agent-mail | xargs -r -n1 git update-ref -d`);
+  }
+  const aqui = new URL(import.meta.url).pathname;
+  // NIT 2 do Claude 1 no #5113: pelas permissões da pasta, não pelo caminho; uma pasta só da sessão (700) não é aviso.
+  let todosEscrevem = false;
+  try { todosEscrevem = (statSync(dirname(aqui)).mode & 0o002) !== 0; } catch { /* sem como ler: sem aviso */ }
+  if (todosEscrevem && !process.env.AGENT_MAIL_TEST) console.error(`ATENÇÃO: a ferramenta roda de ${aqui}, numa pasta que todos podem escrever; instale com o comando de CO (b) do AGENTS.md, em ~/.agent-mail.`);
+}
+
 async function main(argv) {
+  avisarClone();
   const [comandoDado, ...resto] = argv;
   const { comando, o } = traduzir(comandoDado, opcoes(resto));
   const ESCREVEM = new Set(["enviar", "confirmar", "vigiar", "cota", "reivindicar", "segurar", "liberar", "pedir-revisao", "pedir-fila",
@@ -1531,7 +1629,14 @@ async function main(argv) {
     for (const s of sem) console.log(`ATENÇÃO: ${s.nome} está sem cota${s.ate ? ` até ${s.ate.toISOString()}` : ""}: pode não ler tão cedo. Com cota: ${com.join(", ") || "nenhuma outra declarada"}.`);
   } else if (comando === "ler") {
     if (!o.eu) throw new Error("--as é obrigatório");
-    const lista = naoLidas(o.eu);
+    const commit = buscar();
+    const lista = naoLidas(o.eu, commit);
+    if (sessaoAtual()) {
+      // Uma linha só, com a contagem e até 5 identificadores: para o Claude 1 (que também lê no computador do dono) e o
+      // Codex, isso é o normal, e um aviso por mensagem viraria ruído (LEVE do Claude 2 lpgvy no #5113).
+      const semId = confirmadasSemIdentidade(o.eu, new Date(), commit);
+      if (semId.length) console.log(`ATENÇÃO: ${semId.length} mensagem(ns) da sua caixa foram confirmadas só por escrita não identificada nas últimas 24 horas (${semId.slice(-5).join(", ")}${semId.length > 5 ? ", ..." : ""}); se não foi uma sessão da sua família fora da nuvem, leia-as no correio.`);
+    }
     if (!lista.length) console.log("nenhuma mensagem nova");
     else { mostrar(lista); console.log(`\n${lista.length} não lida(s). Confirme com: node agent-mail.mjs ack --as "${o.eu}" ${lista.map((m) => m.id).join(" ")}`); }
   } else if (comando === "confirmar") {
@@ -1544,6 +1649,7 @@ async function main(argv) {
     for (;;) {
       let lista = [];
       let abertos = [];
+      esquecerRetrato(); // passo 6 (A11): cada volta lê um retrato novo, e só um
       try {
         lista = naoLidas(o.eu);
         // --also review,enqueue: acorda também quando há pedido que este agente pode pegar (de outra família).
@@ -1562,9 +1668,13 @@ async function main(argv) {
       try {
         const c = buscar();
         let antes = null;
-        try { antes = git(["rev-parse", "--verify", "-q", REF_VERIFICADO]); } catch { /* primeira conferência */ }
+        try { antes = gitC(["rev-parse", "--verify", "-q", REF_VERIFICADO]); } catch { /* primeira conferência */ }
+        // NIT 1 do Claude 1 no #5113: na primeira vez do repositório próprio, vale a marca antiga do clone, se houver;
+        // assim uma reescrita feita antes da troca de versão ainda é denunciada.
+        if (!antes) { try { antes = /^[0-9a-f]{40}/.exec(readFileSync(ARQUIVO_ANCORA(), "utf8"))?.[0] ?? null; } catch { /* nenhuma guardada */ } }
+        if (!antes) { try { antes = git(["rev-parse", "--verify", "-q", REF_VERIFICADO]); } catch { /* o clone não tem marca antiga */ } }
         const r = conferirSoAcrescentar(c, antes || null);
-        if (c) git(["update-ref", REF_VERIFICADO, c]);
+        if (c) gitC(["update-ref", REF_VERIFICADO, c]);
         if (r.reescrito || r.problemas.length) alarme = [r.reescrito ? "o ramo foi reescrito (a última conferência não está mais no histórico)" : "", ...r.problemas].filter(Boolean).join("; ");
       } catch {}
       if (alarme) { console.log(`ALERTA: o ramo correio não só acrescentou: ${alarme}. Avise o coordenador e o dono pelo correio agora; não apague nem reescreva nada.`); return; }

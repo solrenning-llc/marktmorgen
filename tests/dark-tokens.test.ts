@@ -1,12 +1,14 @@
 /**
  * Dark mode, stage 1 (complement WG (a) of 274 [AX1]): the dormant dark tokens of lib/dark-tokens.ts. Each part fails
  * on the wrong behavior it names: a pair under its AAA threshold, a token nobody proved, a CSS block that drifted
- * from the module, a block that applies without the attribute (a visible change today), a page that sets the
- * attribute before stage 2, a link and a button sharing one color, and a contrast formula that is not WCAG's.
+ * from the module, a block that applies without the attribute or off the covered pages, an unexpected file that sets
+ * the attribute, a link and a button sharing one color, and a contrast formula that is not WCAG's. Stage 2's switch,
+ * script and page-by-page proof are held by tests/dark-scheme-switch.test.ts.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { done, is, part } from "./check";
+import * as darkTokens from "@/lib/dark-tokens";
 import {
   DARK_BLOCK_END, DARK_BLOCK_START, DARK_PAIRS, DARK_TOKENS, DECORATIVE_TOKENS, ROLE_MINIMUM, type DarkToken, contrastRatio, darkTokensCss,
 } from "@/lib/dark-tokens";
@@ -48,14 +50,15 @@ is("a link is only ever text; a button's fill is a background for its label and 
 ], [true, false, false]);
 is("the button's label reads on the button at 7:1", contrastRatio(DARK_TOKENS["action-on"], DARK_TOKENS["action-bg"]) >= 7, true);
 
-part("Dormant: app/globals.css carries the block exactly, and only under the attribute");
+part("app/globals.css carries the block exactly, and only under the attribute");
 const css = readFileSync("app/globals.css", "utf8").replace(/\r\n/g, "\n");
 is("the block is there, byte for byte as the module makes it", css.includes(darkTokensCss()), true);
 is("once", css.split(DARK_BLOCK_START).length - 1, 1);
 const block = css.slice(css.indexOf(DARK_BLOCK_START), css.indexOf(DARK_BLOCK_END));
 const selectors = [...block.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{/g)].map((m) => m[1].trim());
-is("its one rule applies only under :root[data-color-scheme=\"dark\"]", selectors, [':root[data-color-scheme="dark"]']);
-is("no prefers-color-scheme rule anywhere yet (stage 2 adds the switch)", /prefers-color-scheme/.test(css), false);
+is("its tokens apply only under the attribute, on a covered page", selectors[0], ':root[data-color-scheme="dark"]:has(.legal-body)');
+is("every other rule in it too", selectors.slice(1).filter((s) => !s.startsWith(':where(:root[data-color-scheme="dark"]:has(.legal-body)) ')), []);
+is("no prefers-color-scheme rule anywhere: the device's setting counts only when the reader chose \"Match my device\"", /prefers-color-scheme/.test(css), false);
 
 const sources: string[] = [];
 const walk = (dir: string) => {
@@ -66,7 +69,27 @@ const walk = (dir: string) => {
   }
 };
 ["app", "components", "lib"].forEach(walk);
-const setters = sources.filter((p) => !p.replace(/\\/g, "/").endsWith("lib/dark-tokens.ts") && /data-color-scheme|colorScheme\s*=\s*["']dark|dataset\.colorScheme/.test(readFileSync(p, "utf8")));
-is("nothing in app, components or lib sets the attribute, so no page changes today", setters, []);
+const setters = sources.map((p) => p.replace(/\\/g, "/")).filter((p) => p !== "lib/dark-tokens.ts" && /data-color-scheme|colorScheme\s*=\s*["']dark|dataset\.colorScheme/.test(readFileSync(p, "utf8")));
+is("only the script and the switch set the attribute (stage 2); the layout only names it", setters.sort(), ["app/layout.tsx", "components/color-scheme-switch.tsx", "lib/color-scheme.ts"]);
+
+
+// Codex N1/X6 LOW @30effde586: a legal link's underline kept the light indigo at 35% in the dark. The underline is the
+// cue that tells a link from text there, so on every surface a link sits on it resolves to a component's 3:1.
+part("A legal link's underline in the dark");
+{
+  const mix = (darkTokens as { LINK_UNDERLINE_MIX?: number }).LINK_UNDERLINE_MIX;
+  const rule = darkTokens.DARK_OVERRIDES.find((o) => o.selector === ".legal-body a");
+  is("the dark sets its own underline color, from the link token", rule?.set["text-decoration-color"], mix === undefined ? "missing" : `color-mix(in srgb, var(--link) ${mix}%, transparent)`);
+  const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const blend = (top: string, under: string, part: number) =>
+    `#${rgb(top).map((c, i) => Math.round(c * part + rgb(under)[i] * (1 - part)).toString(16).padStart(2, "0")).join("")}`;
+  const surfaces = darkTokens.DARK_PAIRS.filter((p) => p.fg === "link").map((p) => p.bg);
+  for (const bg of surfaces) {
+    const under = darkTokens.DARK_TOKENS[bg];
+    const ratio = mix === undefined ? 0 : darkTokens.contrastRatio(blend(darkTokens.DARK_TOKENS.link, under, mix / 100), under);
+    is(`on ${bg}: at least 3:1`, ratio >= 3, true);
+  }
+  is("its hover, the full link color, still weighs more", /\.legal-body a:hover \{\s*text-decoration-color: currentColor;/.test(readFileSync("app/globals.css", "utf8")), true);
+}
 
 done();

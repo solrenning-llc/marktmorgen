@@ -1419,6 +1419,21 @@ export class MemoryRedis {
           this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
           return [1];
         }
+        // lib/product-about-live.ts ABOUT_WRITE_IF_STORE_LIVE: the same write (or compared write), only while the store is
+        // not erasing and its id key still holds its ref: {1} written, {0, length now} changed, {-1} gone, moved or
+        // erasing (#4969).
+        if (key.startsWith("-- marktmorgen:about-write-live:v2\n") && args[0] === "3" && args.length === 9) {
+          const [, storeId, erasing, about, field, compare, expected, text, ref] = args;
+          if (this.run(["HGET", erasing, field]) !== null) return [-1];
+          if (this.run(["GET", storeId]) !== ref) return [-1];
+          if (compare === "1") {
+            const now = this.run(["GET", about]);
+            const held = typeof now === "string" ? now : "";
+            if (held !== expected) return [0, Buffer.byteLength(held, "utf8")];
+          }
+          this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
+          return [1];
+        }
         // lib/learn.ts DROP_COURSE_IF_STARTED: a course and its "no end" mark deleted only while the course holds the start given.
         if (key.startsWith("-- marktmorgen:course-drop-if-started:v1\n") && args[0] === "1" && args.length === 5) {
           const [, hash, field, value, mark] = args;

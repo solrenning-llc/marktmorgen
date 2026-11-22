@@ -526,6 +526,37 @@ console.log("availability: last signal, percent of quota, Codex preference (owne
   is("0% is without quota until the renewal", /claude-2: SEM COTA até 2099-11-29T13:00:00\.000Z/.test(q2()), q2());
 }
 
+console.log("a busy mailbox: a write that loses the race to another agent tries again quickly (22/11/2026, 166 commits in 10 minutes)");
+{
+  // A mailbox whose server moves the branch under the first N pushes (a pre-receive hook commits on top of the tip), so
+  // each of those pushes is rejected exactly as when another agent wrote first. race-left holds N.
+  const M3 = join(T, "mail3.git"); g(["init", "-q", "--bare", "mail3.git"]);
+  g(["push", "-q", M3, "refs/heads/correio:refs/heads/correio"], join(T, "mail.git"));
+  writeFileSync(join(M3, "hooks", "pre-receive"), `#!/bin/sh
+[ -f race-left ] || exit 0
+n=$(cat race-left); [ "$n" -gt 0 ] || exit 0
+echo $((n-1)) > race-left
+unset GIT_QUARANTINE_PATH GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+tip=$(git rev-parse refs/heads/correio)
+c=$(GIT_AUTHOR_NAME=x GIT_AUTHOR_EMAIL=x@x GIT_COMMITTER_NAME=x GIT_COMMITTER_EMAIL=x@x git commit-tree "$tip^{tree}" -p "$tip" -m race)
+git update-ref refs/heads/correio "$c" "$tip"
+exit 0
+`); chmodSync(join(M3, "hooks", "pre-receive"), 0o755);
+  const left = () => readFileSync(join(M3, "race-left"), "utf8").trim();
+  const caixa3 = () => g(["ls-tree", "-r", "--name-only", "refs/heads/correio", "caixas/claude-3-z"], M3).split("\n").filter(Boolean).length;
+  const antes3 = caixa3();
+  writeFileSync(join(M3, "race-left"), "8\n");
+  const t0 = Date.now();
+  r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "race", "--text", "x"], { ...as("c2"), CORREIO_REPO: M3 });
+  is("a write that loses the race 8 times in a row still goes through", r.ok && /enviada/.test(r.out) && left() === "0", `${r.out} left=${left()}`);
+  is("and it retries quickly, not with waits of seconds (under 15 s for 8 lost races)", Date.now() - t0 < 15000, `${Date.now() - t0} ms`);
+  is("the message is in the mailbox once", caixa3() === antes3 + 1, `${antes3} -> ${caixa3()}`);
+  writeFileSync(join(M3, "race-left"), "1000\n");
+  r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "race 2", "--text", "x"], { ...as("c2"), CORREIO_REPO: M3 });
+  is("a race that never ends stops after 30 tries and says why", !r.ok && /30 por o correio ter andado no meio/.test(r.out), r.out);
+  writeFileSync(join(M3, "race-left"), "0\n");
+}
+
 console.log("version: the copy's SHA-256 against the reviewed one on main (owner, OWNER-20261121-1904, step 1)");
 const meu = createHash("sha256").update(readFileSync(TOOL)).digest("hex");
 const comHash = (h) => { g(["checkout", "-q", "-B", "mainh", M], P); mkdirSync(join(P, "tooling", "agent-mail"), { recursive: true });

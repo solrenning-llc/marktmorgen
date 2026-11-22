@@ -22,7 +22,9 @@ import { ukVatOnTop } from "@/lib/uk-vat";
 import { vatCollectionCostOf, type VatFxAllowance } from "@/lib/eu-vat-collection-cost";
 import type { SwitchInput } from "@/lib/vat-registrations";
 import { dynamicPolicy, isDynamicPage, staticPolicy } from "@/lib/csp";
-import { VAT_BODY_REFUSALS, VAT_REFUSED_SALES } from "@/lib/vat-fee-words";
+import { VAT_BODY_REFUSALS, VAT_REFUSED_SALES, VAT_SUPPLY_WORDS } from "@/lib/vat-fee-words";
+import { consumerGate } from "@/lib/eu-vat-gate";
+import { euSupplyOf } from "@/lib/eu-vat-supply";
 import { applyEuCollect, euCartGate, euSaleGate } from "@/lib/eu-vat-collect";
 import type { EuSupplyFields } from "@/lib/eu-vat-supply";
 
@@ -133,7 +135,8 @@ test("the scope is what the code collects for: products delivered automatically 
     const text = part.join(" ");
     assert.doesNotMatch(text, /digital product/i, "never the wider \"digital product\", which a creator reads as including a live call");
     assert.match(text, /delivered automatically online/, "the scope of lib/eu-vat-supply.ts \"ess\"");
-    assert.match(text, /Live calls and anything that ships are not covered/, "the \"human\" and \"goods\" supplies are named as outside it");
+    assert.match(text, /Live calls are not covered/, "the \"human\" supply is named as outside it");
+    assert.ok(words.refused.includes("Products that ship"), "the \"goods\" supply is named among the refused sales (f9afa7's LEVE)");
   }
 });
 
@@ -336,3 +339,26 @@ test("every route and gate that refuses an EU or UK consumer is named: PayPal, t
   assert.equal(euSaleGate({ product: { ...ESS, publication: null } as never, headers, form, records: COLLECT, vatSwitch: EU_ON, now: NOW, rates: RATES }).ok, false);
 });
 
+
+test("every kind of supply the gate refuses to an EU or UK consumer is named; products that ship among them (f9afa7's LEVE)", () => {
+  const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!;
+  const headers = new Headers({ "x-vercel-ip-country": "DE" });
+  const form = new URLSearchParams({ billing_country: "DE" });
+  const kinds: Record<keyof typeof VAT_SUPPLY_WORDS, EuSupplyFields> = {
+    ess: ESS,
+    human: { ...ESS, link: null, call: { minutes: 30 } } as never,
+    free: { ...ESS, priceCents: 0 },
+    goods: { ...ESS, link: null, shipping: { countries: ["DE"] } } as never,
+    unknown: { ...ESS, link: null },
+  };
+  for (const [kind, product] of Object.entries(kinds) as [keyof typeof VAT_SUPPLY_WORDS, EuSupplyFields][]) {
+    assert.equal(euSupplyOf(product), kind, `the sample is a ${kind} supply`);
+    const refused = !consumerGate({ product, headers, form }).ok;
+    const said = VAT_SUPPLY_WORDS[kind];
+    if (!refused) assert.equal(said, "outside", `${kind}: sold as before, said to be outside the section`);
+    else if (said === "covered") assert.deepEqual(euSaleGate({ product, headers, form, records: COLLECT, vatSwitch: EU_ON, now: NOW, rates: RATES }), { ok: true, collect: { country: "DE" } }, `${kind}: covered means charged`);
+    else assert.ok(words.refused.includes(said), `${kind}: refused, so named in the list: ${said}`);
+  }
+  const text = [...words.terms, ...words.pricing].join(" ");
+  assert.doesNotMatch(text, /anything that ships are not covered/, "goods are never said to be merely outside the section");
+});

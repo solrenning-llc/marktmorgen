@@ -23,6 +23,7 @@
  * Pure and browser-safe: no IO, no secret.
  */
 import { vatOnTop } from "@/lib/eu-vat-amount";
+import type { EuSupply } from "@/lib/eu-vat-supply";
 import { REVIEWED_VAT_FX_ALLOWANCES, allowanceInForce, vatCollectionCostOf, type VatFxAllowance } from "@/lib/eu-vat-collection-cost";
 import { UK_VAT_RATE_VALID_UNTIL, ukVatOnTop } from "@/lib/uk-vat";
 import {
@@ -123,7 +124,7 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
     terms: [
       "This section covers one-off purchases of products delivered automatically online: a download, a link, license keys, a recorded course or a private podcast.",
       `When you sell one to a consumer in ${where}, the law makes Marktmorgen responsible for the VAT on that sale.`,
-      "Live calls and anything that ships are not covered by this section.",
+      "Live calls are not covered by this section.",
       "So the checkout adds that VAT on top of your price, and the buyer sees it before paying.",
       "Our platform fee on that sale carries the VAT, which we pay to the tax authority.",
       "The fee also carries what it costs us to receive that VAT and pay it to the tax authority.",
@@ -136,7 +137,7 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
     pricing: [
       "This covers one-off purchases of products delivered automatically online: a download, a link, license keys, a recorded course or a private podcast.",
       `On such a sale to a consumer in ${where}, the checkout adds VAT on top of your price.`,
-      "Live calls and anything that ships are not covered here.",
+      "Live calls are not covered here.",
       "Our fee on that sale carries the VAT, which we pay to the tax authority.",
       "It also carries what it costs us to receive that VAT, with no profit.",
       "Stripe's processing fee on the VAT part is a cost you pay, at your own Stripe rates.",
@@ -162,6 +163,7 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
  * names each refusal beside the check that makes it; tests/vat-fee-words.test.ts holds the two together.
  */
 export const VAT_REFUSED_SALES: readonly { words: string; checks: readonly string[]; files?: readonly string[] }[] = [
+  { words: "Products that ship", checks: ["shipping or a subscription"] },
   { words: "Subscriptions and memberships", checks: ["shipping or a subscription"] },
   { words: "Payment plans", checks: ["not a one-off payment"] },
   { words: "Pay-what-you-want prices", checks: ["a price the buyer chooses"] },
@@ -176,9 +178,23 @@ export const VAT_REFUSED_SALES: readonly { words: string; checks: readonly strin
   { words: "Tips and payment requests", checks: [], files: ["app/api/store/tip/route.ts", "app/api/store/pay-request/route.ts"] },
   { words: "E-books and other e-publications, which are books, newspapers or magazines read on a screen", checks: ["notAPublication"] },
   { words: "A product you have not yet marked, on the product, as not an e-publication", checks: ["notAPublication"] },
+  { words: "A product with nothing to deliver online and no live call, so we cannot tell what it is", checks: ["euSupplyOf"] },
   { words: "A sale where the buyer's internet address and billing address are in different countries", checks: ["checkoutEvidence"] },
   { words: "Any sale whose VAT, or the cost of receiving it, we cannot work out, such as one in a currency with no checked exchange rate", checks: ["no sourced rate, or no sterling rate", "the cost of receiving the VAT is unknown"] },
 ];
+
+/**
+ * How the words treat each kind of supply (lib/eu-vat-supply.ts EuSupply), so no kind the gate refuses goes unnamed
+ * (#5086, Claude 1 f9afa7's LEVE): "covered" is charged VAT under the rule above; "outside" is sold as before; any
+ * other answer is the item of VAT_REFUSED_SALES that names the refusal.
+ */
+export const VAT_SUPPLY_WORDS: Readonly<Record<EuSupply, "covered" | "outside" | string>> = {
+  ess: "covered",
+  human: "outside",
+  free: "outside",
+  goods: "Products that ship",
+  unknown: "A product with nothing to deliver online and no live call, so we cannot tell what it is",
+};
 
 /**
  * The checkout's other refusals (lib/eu-vat-collect.ts), each a body our own code builds wrong, never a creator's

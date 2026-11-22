@@ -251,6 +251,12 @@ async function main(): Promise<void> {
   const unknown = await askAssistant({ store, text: "Does it include vegan dinners?", facts, now });
   is("said plainly, with the creator offered", unknown.ok ? [unknown.reply.status, unknown.reply.text] : unknown, ["unknown", assistantWords("en").unknown("Assist Shop")]);
   is("and the question is kept for the creator, with the day and nothing about who asked", (await assistantMissed(store)).map((m) => [m.question, Object.keys(m).sort().join(",")]), [["Does it include vegan dinners?", "at,question"]]);
+  // Claude 7 privacy hunt: an address, a phone number or a link typed into a question it could not answer is not kept
+  // on the creator's list, which lasts four months, outlives the chat and is never reached by deleting the person.
+  next = { reply: JSON.stringify({ status: "unknown", reply: "" }) };
+  await askAssistant({ store, text: "Do you ship to Lisbon? Write me at sam.private@example.com or " + "+" + "1 415 555 0134, see https://sam.example/me", facts, now });
+  const kept = (await assistantMissed(store))[0]?.question ?? "";
+  is("a question it could not answer keeps no address, phone number or link of who asked", [kept.includes("sam.private@example.com"), kept.includes("555 0134"), kept.includes("sam.example"), kept.startsWith("Do you ship to Lisbon?")], [false, false, false, true]);
   next = { reply: JSON.stringify({ status: "handoff", reply: "" }) };
   is("the model can hand a question over", ((r) => (r.ok ? r.reply.status : r))(await askAssistant({ store, text: "My download link does not open", facts, now })), "handoff");
   const calls = asked.length, spentBefore = (await poolOf(store.statsId!, window.id)).spent;

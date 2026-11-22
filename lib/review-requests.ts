@@ -28,6 +28,9 @@
  *
  *   nl:rev:ask:sent:<reference>    that order was asked ("sent:<seconds>", the time the first went out;
  *                                  "sent" alone before that time was kept), and reminded ("again"), 120 days
+ *   nl:rev:ask:sent:<reference>:again   a run's claim on that order's one reminder, stretched to 120 days
+ *                                  when the reminder goes and kept, so a reminder is never sent twice; a
+ *                                  second mark an order with a reminder holds, priced beside the first
  *   nl:rev:off:<statsId>:<hash>    that address pressed stop, kept for good
  *   nl:rev:stop:<token>            who a stop link belongs to, 400 days
  */
@@ -38,8 +41,9 @@ import { batchCountKept, batchCountSettled, keepBatchCount } from "@/lib/batch-c
 import { type BatchMessage, sendBatchOutcome } from "@/lib/email";
 import { stopTags } from "@/lib/mail-health-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { holdLock } from "@/lib/redis-lock";
 import { canWrite, fromLine, mailDay, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
@@ -65,11 +69,20 @@ export const LATE_SECONDS = 14 * 86_400;
 /** How long a waiting order waits before it is looked at again. */
 const RETRY_SECONDS = { plan: 6 * 3600, stripe: 3600, sender: 1800 };
 const SENT_MARK_SECONDS = 120 * 86_400;
+/**
+ * How long a run's claim on an order lasts before it is sent (Codex T on #4360): a claim is written this short and
+ * stretched to SENT_MARK_SECONDS, confirmed, only just before its batch goes. A run that stops, or fails to let go of a
+ * claim it took, leaves a claim that lapses on its own, so the order is asked again, never dropped by a stuck mark; a
+ * claim found stretched may have gone, and is never sent again.
+ */
+const CLAIM_SECONDS = 3600;
 const STOP_LINK_SECONDS = 400 * 86_400;
 export const REVIEW_STOP = /^[0-9a-f]{40}$/;
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const sentKey = (reference: string) => `nl:rev:ask:sent:${reference}`;
+/** A run's claim on an order's one reminder (CLAIM_SECONDS, stretched before it goes), kept beside its first's mark. */
+const againKey = (reference: string) => `${sentKey(reference)}:again`;
 /** That address's stop on review requests, for the person's copy to read (lib/person-copy.ts). */
 export const reviewStopMarkKey = (statsId: string, email: string) => offKey(statsId, email);
 const offKey = (statsId: string, email: string) => `nl:rev:off:${statsId}:${sha(`nimbus-review-off:${normaliseEmail(email)}`).slice(0, 32)}`;
@@ -234,8 +247,25 @@ export function afterSent(
   ];
 }
 
-type Ready = { entry: AskEntry; member: string; message: BatchMessage; stage: "first" | "again"; claim?: string };
+type Ready = { entry: AskEntry; member: string; message: BatchMessage; stage: "first" | "again"; claim: string };
+/** Where a ready order's claim is kept: the first's mark, or its reminder's own claim. */
+const claimKeyOf = (stage: "first" | "again", reference: string) => (stage === "first" ? sentKey(reference) : againKey(reference));
 
+
+/**
+ * Whether a stretch holdLock did not confirm landed all the same, its acknowledgement lost (Codex V on #4360): the
+ * claim still this run's token on two reads around its TTL, and that TTL past a short claim (CLAIM_SECONDS) and no
+ * longer than the stretch itself. Then the claim is this run's to send, once: let go it would not be (a release can be
+ * lost too), and the next run would read the long mark as an email that may have gone and drop an order never sent.
+ * Another run's token, a short claim or a reply not read exactly answer false, and nothing is sent on them. Read only
+ * when the stretch did not confirm: three commands for each such claim.
+ */
+async function stretchLanded(key: string, claim: string): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["GET", key], ["TTL", key], ["GET", key]]).catch(() => null), 3);
+  if (!replies) return false;
+  const [before, ttl, after] = replies;
+  return before === claim && after === claim && typeof ttl === "number" && Number.isSafeInteger(ttl) && ttl > CLAIM_SECONDS && ttl <= SENT_MARK_SECONDS;
+}
 /**
  * Sends the review requests that are due, until the deadline or fifty
  * orders, whichever comes first. Safe to run from two places: each order is
@@ -262,9 +292,27 @@ export async function sendReviewRequests(
     counts.waiting += 1;
     await redisPipeline([["ZADD", ASK_DUE_KEY, "XX", at, member]]);
   };
+  // What a claim's TTL says, read exactly (Codex X8, X5 and U on #4360). 0 to CLAIM_SECONDS: a short claim still alive
+  // (Redis rounds TTL to seconds, so its last fraction reads 0), and the order waits for it, never dropped while the run
+  // that holds it can still finish without sending. Longer, or no expiry (-1): stretched just before a batch went, so
+  // the email may have gone, and it is done. Gone (-2) or anything else: left in line for the next run.
+  const byClaimTtl = async (member: string, ttl: unknown, firstHasReminder = false) => {
+    if (typeof ttl !== "number" || !Number.isSafeInteger(ttl)) return;
+    // The first sender still needs this same member for its ZADD XX. Give a recent stretch time to finish
+    // without deleting either an in-flight first or the reminder it just scheduled. Older stretches still clear.
+    if (firstHasReminder && ttl > SENT_MARK_SECONDS - CLAIM_SECONDS && ttl <= SENT_MARK_SECONDS) return;
+    if (ttl > CLAIM_SECONDS || ttl === -1) await drop(member);
+    else if (ttl >= 0) await later(member, nowSeconds + ttl + 1);
+  };
 
   for (const member of members) {
     if (Date.now() >= deadline) break;
+    // What this run took for the order before it is sent: a first's "sending:" mark, or a reminder taken off the
+    // list. A throw before the email is ready (a Redis read, the review link, the stop link) undoes it below, so the
+    // order is asked again by the next run, never dropped by its own stuck mark (webhooks/cron audit, Claude 1,
+    // 12/11/2026).
+    let held: { key: string; claim: string } | null = null;
+    try {
     const entry = readAskMember(member);
     if (!entry) {
       await drop(member);
@@ -294,9 +342,15 @@ export async function sendReviewRequests(
     }
     // Asked already: only the one reminder may follow, when the creator chose it; anything else is done.
     // Read exactly (CX-123 rule 24, L9): one reply, nil or text. Anything else is unknown and waits, never "not asked".
-    const read = repliesFor(await redisPipeline([["GET", sentKey(entry.reference)]]), 1);
-    if (!read || (read[0] !== null && typeof read[0] !== "string")) continue;
+    const read = repliesFor(await redisPipeline([["GET", sentKey(entry.reference)], ["TTL", sentKey(entry.reference)]]), 2);
+    if (!read || (read[0] !== null && typeof read[0] !== "string") || typeof read[1] !== "number") continue;
     const mark = read[0];
+    // A first being sent, or a claim a run could not let go of (Codex T on #4360): still short, it lapses on its own
+    // and the order waits for it; stretched (taken just before a batch went), the email may have gone and it is done.
+    if (typeof mark === "string" && mark.startsWith("sending:")) {
+      await byClaimTtl(member, read[1], Boolean(store.reviewAsk.again));
+      continue;
+    }
     const stage = askStage(mark, store.reviewAsk.again);
     if (!stage) {
       await drop(member);
@@ -354,9 +408,11 @@ export async function sendReviewRequests(
     // askStage. Taken by another run: dropped as before. Not known: let go if ours, left for the next run, nothing sent.
     const claim = stage === "first" ? `sending:${claimValue()}` : undefined;
     if (claim) {
-      const claimed = await claimMark(sentKey(entry.reference), SENT_MARK_SECONDS, claim);
+      const claimed = await claimMark(sentKey(entry.reference), CLAIM_SECONDS, claim);
       if (claimed === "taken") {
-        await drop(member);
+        // Another run's: it may still let go without sending (a failed preparation, a refused allowance), so the order
+        // stays in line and waits for that claim, as a reminder's does (Codex X5 and U on #4360).
+        await byClaimTtl(member, repliesFor(await redisPipeline([["TTL", sentKey(entry.reference)]]), 1)?.[0], Boolean(store.reviewAsk.again));
         continue;
       }
       if (claimed === "unknown") {
@@ -366,10 +422,24 @@ export async function sendReviewRequests(
         await releaseMark(sentKey(entry.reference), claim);
         continue;
       }
+      held = { key: sentKey(entry.reference), claim };
     } else {
-      const taken = repliesFor(await redisPipeline([["ZREM", ASK_DUE_KEY, member]]), 1);
-      if (!taken || countOf(taken[0]) !== 1) continue;
+      // The reminder is claimed as the first is, and stays on the list until it is sent (Codex T on #4360): taking it
+      // off before sending lost it whenever putting it back failed too.
+      const mine = claimValue();
+      const claimed = await claimMark(againKey(entry.reference), CLAIM_SECONDS, mine);
+      if (claimed === "unknown") {
+        await releaseMark(againKey(entry.reference), mine);
+        continue;
+      }
+      if (claimed === "taken") {
+        // Another run's, still short: it waits for that run; stretched, it may have gone, and is done.
+        await byClaimTtl(member, repliesFor(await redisPipeline([["TTL", againKey(entry.reference)]]), 1)?.[0]);
+        continue;
+      }
+      held = { key: againKey(entry.reference), claim: mine };
     }
+    const claimNow = held.claim;
     const token = await mintReviewLink(store, entry.reference, email);
     const stop = await stopLink(store, email);
     const fromName = store.mail?.fromName || store.name;
@@ -391,56 +461,127 @@ export async function sendReviewRequests(
       entry,
       member,
       stage,
-      claim,
+      claim: claimNow,
       message: { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers, tags: stopTags(store) },
     });
     groups.set(entry.handle, group);
+    } catch (error) {
+      console.error("preparing a review request failed; it is asked again by the next run", error);
+      // Its own claim let go, still on the list; a release that fails leaves a claim that lapses in CLAIM_SECONDS.
+      if (held) {
+        await releaseMark(held.key, held.claim);
+        counts.waiting += 1;
+      }
+    }
   }
 
-  for (const { store, ready } of groups.values()) {
-    // Undone when nothing was sent: the first's mark goes, the reminder goes back on the list.
-    const unclaim = async (at: number | null) => {
-      const firsts = ready.filter((item) => item.stage === "first");
-      const agains = ready.filter((item) => item.stage === "again");
-      // Only this run's own first marks are let go (releaseMark), never one another run holds now.
-      for (const item of firsts) if (item.claim) await releaseMark(sentKey(item.entry.reference), item.claim);
-      if (at !== null && agains.length) await redisPipeline(agains.map((item) => ["ZADD", ASK_DUE_KEY, at, item.member]));
-      if (at !== null) for (const item of firsts) await later(item.member, at);
-      counts.waiting += at === null ? 0 : agains.length;
+  for (const { store, ready: prepared } of groups.values()) {
+    // Undone when nothing was sent: this run's own claims are let go (releaseMark), never one another run holds now;
+    // every order is still on the list, and waits there.
+    const unclaim = async (items: Ready[], at: number | null) => {
+      for (const item of items) await releaseMark(claimKeyOf(item.stage, item.entry.reference), item.claim);
+      if (at !== null) for (const item of items) await later(item.member, at);
     };
+    // A throw before the batch went (the reservation, the stretch, the sender, or the undo of a batch not sent) undoes
+    // the group's claims, so the next run asks again; one after the batch went keeps them (it was sent). Two flags, not
+    // one (Claude 7 on #4360): an undo that threw part-way is finished by the catch, a finished one never runs twice.
+    let sent = false;
+    let undone = false;
+    let maybeSent = false;
+    let ready: Ready[] = prepared;
+    let unheld = 0;
+    // A batch refused for good went nowhere: its whole share is owed back, and the finally gives it once, so a throw in
+    // its clean-up (a ZREM in drop) never keeps the month counted for an email that never went (Codex G on #4360).
+    let refusedOwed = 0;
+    // A batch whose earlier answer was not known already holds its count (lib/batch-count.ts, #4073): this run's own
+    // reservation for it is owed back, given once by the finally, so it is counted once, never twice.
+    let keptOwed = 0;
+    // Every give-back goes to the day the allowance was taken from (lib/mail.ts mailDay, #3928), never to a later one.
+    const day = mailDay();
+    try {
+    // The allowance is reserved while every claim is still short (Codex G on #4360): a refusal here, or a stop
+    // before the claims are stretched, leaves claims that lapse in CLAIM_SECONDS, so the order is asked again.
+    const reserved = await reserve(store, prepared.length, false, day);
+    if (reserved !== "ok") {
+      await unclaim(prepared, nowSeconds + RETRY_SECONDS.plan);
+      undone = true;
+      continue;
+    }
+    // Each claim stretched to SENT_MARK_SECONDS, confirmed, just before its batch goes (Codex T on #4360): from here
+    // on the email may have gone, and a claim found stretched is never sent again. One not stretched (another run's
+    // by now, or a reply not read) goes back to waiting, its own claim let go, and is not sent on this run; its share
+    // of the allowance is given back once the batch is decided.
+    ready = [];
+    for (const item of prepared) {
+      const key = claimKeyOf(item.stage, item.entry.reference);
+      if ((await holdLock({ key, token: item.claim, ttlSeconds: SENT_MARK_SECONDS }).catch(() => false)) || (await stretchLanded(key, item.claim))) {
+        ready.push(item);
+        continue;
+      }
+      unheld += 1;
+      await releaseMark(key, item.claim);
+      await later(item.member, nowSeconds + RETRY_SECONDS.sender).catch(() => undefined);
+    }
+    if (!ready.length) {
+      undone = true;
+      continue;
+    }
     const batchKey = `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`;
     const to = ready.map((item) => item.message.to);
-    // A retry of a batch whose answer was not known sends under the count kept for it (lib/batch-count.ts).
+    // A retry of a batch whose answer was not known sends under the count kept for it (lib/batch-count.ts, #4073). It
+    // is read after the claims are stretched, so it is the batch that goes, under the key it goes with.
     const kept = await batchCountKept(batchKey, to);
-    const day = mailDay();
-    const reserved = kept ? "ok" : await reserve(store, ready.length, false, day);
-    if (reserved !== "ok") {
-      await unclaim(nowSeconds + RETRY_SECONDS.plan);
-      continue;
-    }
+    if (kept) keptOwed = ready.length;
     const outcome = await sendBatchOutcome(ready.map((item) => item.message), batchKey, { by: "monthly" });
     if (outcome === "sent") await batchCountSettled(batchKey, to);
-    if (outcome !== "sent") {
-      // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given
-      // back, and marked so that the same batch tried again is not counted again. A count kept by an earlier
-      // unknown answer stays whatever this one says.
-      // Amazon's unknown answer ("unconfirmed") is kept and marked too: the same batch tried again never writes to
-      // whoever Amazon may have taken (lib/email.ts, notMaybeTaken), and the mark ends before that evidence does
-      // (lib/batch-count.ts), so the retry is not counted again (Codex X6 on #4073, replacing #4073 MEDIUM 1).
-      if (outcome === "uncertain" || outcome === "unconfirmed") {
-        if (!kept) await keepBatchCount(batchKey, to);
-      } else if (!kept) await release(store, ready.length, day);
-      if (outcome === "refused") {
-        await unclaim(null);
-        for (const item of ready) await drop(item.member);
-      } else {
-        await unclaim(nowSeconds + RETRY_SECONDS.sender);
-      }
+    if (outcome === "refused") {
+      // Refused for good, so nothing went: its share is owed back from here, given once by the finally even when the
+      // undo below throws (Codex G on #4360), and a give-back that throws leaves the undo done (Codex X2 on #4360).
+      // The order leaves the list, as on main. A count kept by an earlier unknown answer stays (#4073): only this
+      // run's own reservation goes back, already in keptOwed.
+      refusedOwed = kept ? 0 : ready.length;
+      await unclaim(ready, null);
+      for (const item of ready) await drop(item.member);
+      undone = true;
       continue;
     }
+    if (outcome === "uncertain" || outcome === "unconfirmed") {
+      // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given
+      // back, and marked so that the same batch tried again is not counted again; a count kept by an earlier unknown
+      // answer stays whatever this one says. Amazon's unknown answer ("unconfirmed") is kept and marked too: the same
+      // batch tried again never writes to whoever Amazon may have taken (lib/email.ts, notMaybeTaken), and the mark
+      // ends before that evidence does (lib/batch-count.ts), so the retry is not counted again (Codex X6 on #4073).
+      if (!kept) await keepBatchCount(batchKey, to);
+      await unclaim(ready, nowSeconds + RETRY_SECONDS.sender);
+      undone = true;
+      continue;
+    }
+    if (outcome !== "sent") {
+      // "retry" may also mean the provider took the batch and its answer was lost (lib/email.ts). The claims are let
+      // go only once the give-back succeeded; when it throws they stay stretched, as on main, so the order is never
+      // put in another batch under another key and sent twice (Codex X2 on #4360). Under a kept count, nothing more
+      // is given back than this run's own reservation (keptOwed).
+      maybeSent = true;
+      if (!kept) await release(store, ready.length, day);
+      maybeSent = false;
+      await unclaim(ready, nowSeconds + RETRY_SECONDS.sender);
+      undone = true;
+      continue;
+    }
+    sent = true;
+    counts.sent += ready.length;
     // After the first, the order waits on the list for its one reminder, when the creator chose one.
     await redisPipeline(afterSent(ready.map((item) => ({ reference: item.entry.reference, member: item.member, paidAt: item.entry.paidAt, stage: item.stage })), store.reviewAsk, nowSeconds));
-    counts.sent += ready.length;
+    } catch (error) {
+      console.error("sending a store's review requests failed", error);
+      if (!sent && !undone && !maybeSent) await unclaim(ready, nowSeconds + RETRY_SECONDS.sender).catch(() => undefined);
+    } finally {
+      // Nothing went for the claims not stretched, nor for a batch refused for good: their share of the allowance is
+      // given back once, best effort (a give-back that fails only leaves the month counted higher, never an email sent
+      // past it).
+      const owed = unheld + refusedOwed + keptOwed;
+      if (owed > 0) await release(store, owed, day).catch((error) => console.error("giving back a review request's allowance failed", error));
+    }
   }
   return counts;
 }

@@ -182,6 +182,7 @@ export async function studioAccess(
   request: NextRequest,
   need: Need,
   action = "",
+  /** How many of the studio's requests this one is counted as (guardStoreWrite's `units`). */
   units = 1,
 ): Promise<{ ok: true; access: Access } | { ok: false; reason: Refusal; store?: Store; message?: string; why?: "used" | "unknown" | "pool" | "daily" }> {
   const session = request.cookies.get(SESSION_COOKIE)?.value;
@@ -227,7 +228,7 @@ export async function studioAccess(
       who: access.email,
       role: access.role,
       what: `${need === "member" ? "Team" : PERMISSION_WORDS[need]}: ${route}${detail ? ` (${detail.slice(0, 40)})` : ""}`,
-    });
+    }, access.ref);
   }
   return result;
 }

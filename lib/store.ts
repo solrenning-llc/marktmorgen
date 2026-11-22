@@ -37,6 +37,7 @@ export { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin,
 import { MAX_LINKS, type NumbersLink, parseLinks } from "@/lib/numbers-links";
 import { type ShipProblem, type Shipping, shipProblem, readShippingSku } from "@/lib/shipping";
 import { type CartDeal, NO_DEAL, parseCartDeal } from "@/lib/cart-rules";
+import { HELD_INDEX, type HeldLink, parseHeldLinks } from "@/lib/takedown-hold";
 import { type Video, parseVideo } from "@/lib/sales-page";
 import { type FaqItem, parseFaq } from "@/lib/store-faq";
 import { type FaqAddRefusal, faqAddition } from "@/lib/faq-from-inbox";
@@ -161,12 +162,9 @@ import {
 } from "@/lib/catalog";
 import { type Announcement, type StoreSection, parseAnnouncement, parseSections, sectionsWithout } from "@/lib/store-sections";
 import { type VisitUs, parseVisitUs, readVisitUs } from "@/lib/visit-us";
-import { noteData, takeData } from "@/lib/store-data";
-import { DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
-import { PRODUCT_SIDE_BYTES } from "@/lib/store-data-rules";
-
-/** What a product keeps beside its own records: its page's reading and the rest (lib/store-data-rules.ts). */
-const BESIDE_PRODUCT = DEPTH_RECORD_BYTES + PRODUCT_SIDE_BYTES;
+import { besideHeld, besideSwept, giveBeside, giveData, markBesideSwept, noteData, poolTakeCommands, roomSlots, takeBeside, takeData, takeDataCommands } from "@/lib/store-data";
+import { BESIDE_PRODUCT_BYTES as BESIDE_PRODUCT, besidePoolFor } from "@/lib/store-data-rules";
+import { standingOf } from "@/lib/plan-standing";
 import { type Collection, type CollectionsProblem, MAX_PAIRS, collectionsWithout, parseCollections, readCollectionsInput, readProductIds } from "@/lib/store-collections";
 import { type SitePage, parseSitePages, MAX_SITE_PAGES, slugProblem } from "@/lib/site-page-rules";
 import { type AnswersSetting, NO_ANSWERS, parseAnswers } from "@/lib/answers-rules";
@@ -698,6 +696,13 @@ export type Store = {
    */
   suspended: string;
   strikes: Strike[];
+  /**
+   * Links taken down for a copyright notice and held until the counter-notice window ends (lib/takedown-hold.ts):
+   * on no page, still counted against MAX_STORE_LINKS so one can always go back. `heldUnread` keeps, as stored, an
+   * entry not in its exact shape, never acted on. Absent on stores that never had one.
+   */
+  heldLinks?: HeldLink[];
+  heldUnread?: unknown[];
   /** The store's own questions and answers, on its page (lib/store-faq.ts). */
   faq: FaqItem[];
   /**
@@ -1016,6 +1021,16 @@ export async function imageFolder(email: string): Promise<string> {
   return (await sha256Hex(`nimbus-images:${email.toLowerCase()}`)).slice(0, 24);
 }
 
+/** A record's held links, and the entries it could not read, kept as they are (lib/takedown-hold.ts). */
+function heldOf(value: Record<string, unknown>): Pick<Store, "heldLinks" | "heldUnread"> {
+  const all = [...(Array.isArray(value.heldLinks) ? value.heldLinks : []), ...(Array.isArray(value.heldUnread) ? value.heldUnread : [])];
+  const { held, unread } = parseHeldLinks(all);
+  return { ...(held.length ? { heldLinks: held } : {}), ...(unread.length ? { heldUnread: unread } : {}) };
+}
+
+/** How many places in the list of links held links keep (lib/takedown-hold.ts). */
+const heldPlaces = (store: Pick<Store, "heldLinks" | "heldUnread">) => (store.heldLinks?.length ?? 0) + (store.heldUnread?.length ?? 0);
+
 /**
  * A store's allowance anchor as read: none, a whole one, or one that cannot be read, kept as an anchor that is never
  * a window (lib/allowance-window.ts isAllowanceAnchor), never dropped to none.
@@ -1170,6 +1185,7 @@ function parseStore(raw: unknown): Store | null {
             ? value.suspended
             : "unknown",
       strikes: parseStrikes(value.strikes),
+      ...heldOf(value as Record<string, unknown>),
       faq: parseFaq(value.faq),
       intro: parseVideo(value.intro),
       order: parseOrder(value.order),
@@ -1239,6 +1255,17 @@ export async function storeForEmailSeen(
   if (!store || typeof store.email !== "string" ||
       storeRef(store).toLowerCase() !== email.toLowerCase()) return null;
   return store;
+}
+
+/**
+ * Whether a store's record is kept under this ref: false only when Redis answers that no record is there, true when
+ * one is, and null for anything else (rule 24): an unknown reply is never taken for a store that is gone.
+ */
+export async function storeRecordKept(ref: string): Promise<boolean | null> {
+  if (!ref || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["EXISTS", await ownerKey(ref)]]), 1);
+  const there = replies ? countOf(replies[0]) : null;
+  return there === 0 ? false : there === 1 ? true : null;
 }
 
 /**
@@ -1941,15 +1968,32 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
   // already drawn can still write to, and its side records), which stays
   // counted (lib/store-data-rules.ts, PRODUCT_SIDE_BYTES). The record itself
   // is bounded by MAX_STORE_BYTES.
+  //
+  // Since C1-20261117 (2,000 products on every plan) what is kept beside a product is held, while the store pays,
+  // in its beside pool (lib/store-data-rules.ts, BESIDE_POOL_BYTES) and not in its room, so the room counts the
+  // product at its real size; a product whose share the pool holds keeps it there once deleted, and one the pool
+  // has no room for is counted in the room as before. A product saved before the pool moves to it here.
   const gone = [...drop].filter((id) => !put.some((product) => product.id === id));
+  const pooled = await besideHeld(before, [...put.map((product) => product.id), ...gone]);
+  if (!pooled) throw new StoreBusyError();
+  const toPool = put.map((product) => product.id).filter((id) => !pooled.has(id));
+  const moved = toPool.length > 0 && (await takeBeside(before, toPool, BESIDE_PRODUCT)) ? toPool : [];
+  for (const id of moved) pooled.add(id);
+  const goneInRoom = gone.filter((id) => !pooled.has(id));
   const room = [
-    ...put.map((product) => ({ slot: `p:${product.id}`, bytes: productBytes(product) + BESIDE_PRODUCT, set: true })),
+    ...put.map((product) => ({ slot: `p:${product.id}`, bytes: productBytes(product) + (pooled.has(product.id) ? 0 : BESIDE_PRODUCT), set: true })),
     ...gone.map((id) => ({ slot: `p:${id}`, bytes: 0, set: true })),
-    ...(gone.length ? [{ slot: "dp", bytes: gone.length * BESIDE_PRODUCT }] : []),
+    ...(goneInRoom.length ? [{ slot: "dp", bytes: goneInRoom.length * BESIDE_PRODUCT }] : []),
   ];
   if (room.length) {
     const taken = await takeData(before, room);
-    if (!taken.ok) throw taken.reason === "full" ? new StoreFullError() : new StoreBusyError();
+    if (!taken.ok) {
+      // Only "full" says the room's script wrote nothing. An unreadable answer may come after it ran (a timeout, a
+      // reply not read), the product then counted in the room without the share it carries outside the pool, so the
+      // share stays held: the pool looks fuller than it is, never emptier (Codex P on #4846, MEDIUM).
+      if (taken.reason === "full") await giveBeside(before, moved);
+      throw taken.reason === "full" ? new StoreFullError() : new StoreBusyError();
+    }
   }
   // The lock is made to last another term before anything is written, and
   // the record is written only while it is still ours: a write held up past
@@ -1994,6 +2038,27 @@ async function withStore<T>(email: string, work: (store: Store, save: Save, held
     // ran out and was taken by the next write is theirs.
     await releaseLock(held);
   }
+}
+
+/**
+ * Runs `work` only while this very store is live, under the same lock closeStoreRecord takes (Codex L-20261120-1151):
+ * for a write beside the record (a key of a family the closing walk deletes) that read the store before and writes
+ * after. The walk writes the erasing mark and deletes the live store's data under this lock, so either the work ends
+ * first and the walk deletes what it wrote, or the walk has begun (the mark is there) or ended (no record) and the work
+ * does not run. Null then. The same store is the same sid, or for a store from before ids the same statsId (as
+ * closeStoreRecord's sameLegacy). An erasing mark that cannot be read throws UnknownReplyError, with nothing run.
+ */
+export async function withLiveStore<T>(
+  known: Pick<Store, "email" | "sid" | "extra" | "statsId">,
+  work: (current: Store) => Promise<T>,
+): Promise<T | null> {
+  const ref = storeRef(known);
+  return withStore(ref, async (current) => {
+    const same = STORE_ID_PATTERN.test(known.sid) ? current.sid === known.sid : Boolean(known.statsId) && current.statsId === known.statsId;
+    if (!same) return null;
+    if ((await erasingSince(ref)) !== null) return null;
+    return work(current);
+  });
 }
 
 /**
@@ -2285,6 +2350,7 @@ export async function deleteStore(email: string, queue: (store: Store) => Promis
       ["SREM", await accountKey(store.email), store.sid],
       ["ZREM", ENDED_INDEX, storeRef(store)],
       ["SREM", SHARING_INDEX, storeRef(store)],
+      ["ZREM", HELD_INDEX, storeRef(store)],
     ];
     let replies: unknown[] | null = null;
     try {
@@ -2369,6 +2435,8 @@ export async function closeStoreRecord(
       ...(STORE_ID_PATTERN.test(sid) ? [{ op: "DEL", key: storeIdKey(sid), words: [] }, ...[...accounts].map((account) => ({ op: "SREM", key: account, words: [sid] }))] : []),
       { op: "ZREM", key: ENDED_INDEX, words: [storeRef(store)] },
       { op: "SREM", key: SHARING_INDEX, words: [storeRef(store)] },
+      // This PR's held links (lib/takedown-hold.ts): the closing store leaves the index of stores holding one.
+      { op: "ZREM", key: HELD_INDEX, words: [storeRef(store)] },
       // The record is the very last change, so it goes in the last step even when the changes take more than one
       // (applyIfHeld splits them past FENCED_KEYS or FENCED_WORDS; Claude 5's LOW on #3156).
       // The erasing mark goes in the same step as the record (Codex N1's HIGH on #3156), never before it.
@@ -2545,7 +2613,9 @@ export async function setSubscription(
   const source = expected ? { sid: expected.sid, statsId: expected.statsId,
     stripeCustomerId: expected.stripeCustomerId, subscriptionId: expected.subscriptionId,
     subscriptionActive: expected.subscriptionActive, tier: expected.tier, cycle: expected.cycle } : null;
+  let standingAtStart: ReturnType<typeof standingOf> | null = null;
   const result = await withStore<Store | null>(email, async (store, save) => {
+    standingAtStart = standingOf(store);
     // No plan runs on a store whose erasure has begun (Codex N1's HIGH on #3156): read under the store's lock, exactly,
     // so a start racing the walk's first delete is refused; a payment for it is returned (closingSince).
     if (fields.active && (await erasingSince(storeRef(store))) !== null) return null;
@@ -2643,6 +2713,14 @@ export async function setSubscription(
     }
     return saved;
   });
+  // A store that starts paying (from a trial, from nothing, back from an end): what its products keep beside them moves
+  // to its beside pool, after the lock is let go (moveBesideToPool takes it a batch at a time). Never on a write that
+  // finds it paying already, so opening the studio sweeps nothing; a sweep that fails leaves the room fuller.
+  // A sweep that cannot run is caught here (Claude 4's LOW on #4847): the plan is saved, and what stays in the room
+  // errs fuller and moves when it is saved again.
+  if (result && standingAtStart !== "paid" && standingOf(result) === "paid") {
+    await moveBesideToPool(email).catch((error) => console.error("sweeping a store's products into its beside pool failed", error));
+  }
   return result ?? null;
 }
 
@@ -3776,6 +3854,8 @@ function freshId(store: Store): string {
   // somebody else. Products, their options and links are all counted.
   const taken = usedIds(store);
   for (const link of store.links) taken.add(link.id);
+  // A held link goes back under its own id (lib/takedown-hold.ts): never given to another one meanwhile.
+  for (const held of store.heldLinks ?? []) taken.add(held.link.id);
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const id = crypto.randomUUID().replace(/-/g, "").slice(0, 10);
     if (!taken.has(id)) return id;
@@ -3989,6 +4069,64 @@ export async function setProductSummary(email: string, id: string, rawSummary: s
   return result.ok ? { ok: true, store: result.store, product: result.product } : result;
 }
 
+/** How many products the beside pool's sweep moves a lock at the most (C1-20261117-1500-c6c4-1, PR 2). */
+export const MOVE_BESIDE_BATCH = 250;
+/**
+ * The most batches one sweep runs: enough for MAX_PRODUCTS. Each batch, under the store's lock, at the most: the lock
+ * taken, counted at every SET NX try of its LOCK_WAIT_MS wait (STORE_LOCK_TRIES_AT_MOST, which tests check equals
+ * lib/read-ceilings.ts STORE_LOCK_TRIES, as CLOSE_RECORD_COMMANDS counts it), the store read (withStore, one GET), the
+ * pool's fields and the room's slots read (two HMGETs), the lock held on (holdLock: EVAL, GET, EXPIRE), then the pool's
+ * TAKE_DATA taking the batch's shares and the room's giving them back, each at its inner commands as Upstash bills them
+ * (lib/store-data.ts, poolTakeCommands and takeDataCommands; Claude 4's MEDIUM on #4847), and the lock let go (EVAL,
+ * GET, DEL; Claude 3's LOW on #4847). Once a sweep: the store read that opens it (storeForEmail, one GET of up to
+ * MAX_STORE_BYTES), the sweep's mark read and the mark written when it ends.
+ */
+export const MOVE_BESIDE_BATCHES = Math.ceil(MAX_PRODUCTS / MOVE_BESIDE_BATCH);
+/** Every SET NX try of the store lock's LOCK_WAIT_MS wait (20, 40, 80 and 160 ms, then every 250 ms), and the last. */
+const STORE_LOCK_TRIES_AT_MOST = 4 + Math.ceil((LOCK_WAIT_MS - (20 + 40 + 80 + 160)) / 250) + 1;
+export const MOVE_BESIDE_BATCH_COMMANDS = STORE_LOCK_TRIES_AT_MOST + 1 + 2 + 3 + 3 + poolTakeCommands(MOVE_BESIDE_BATCH) + takeDataCommands(MOVE_BESIDE_BATCH);
+export const MOVE_BESIDE_SWEEP_COMMANDS = 3;
+
+/**
+ * Moves the beside share of a paying store's products that were counted whole in its room (saved before it paid) to
+ * its beside pool, MOVE_BESIDE_BATCH products a lock, letting the lock go between batches so no edit waits long.
+ * Only a product whose room slot holds the whole share moves, and its slot comes down by exactly that share, so the
+ * room never counts less than it holds. The pool is taken first and the room given back after: a give-back that is
+ * lost leaves both counting it, fuller, never emptier. Stops at a batch the pool cannot take (full or unknown) or the
+ * store cannot be read: what is left stays counted in the room, as before, and moves when it is saved again (lazily,
+ * in commit). A store sweeps once: a sweep that started is marked when it ends, however it ended, so a store that
+ * starts paying again reads one field and sweeps nothing (MOVE_BESIDE_SWEEP_COMMANDS); a mark that cannot be read is
+ * not "not swept". Returns how many products moved.
+ */
+export async function moveBesideToPool(email: string): Promise<number> {
+  const first = await storeForEmail(email);
+  if (!first || besidePoolFor(first) <= 0 || (await besideSwept(first)) !== false) return 0;
+  let moved = 0;
+  for (let batch = 0; batch < MOVE_BESIDE_BATCHES; batch += 1) {
+    const step = await withStore<number | "end" | "stop">(email, async (store, _save, held) => {
+      if (besidePoolFor(store) <= 0) return "stop";
+      const ids = store.catalog.items.slice(batch * MOVE_BESIDE_BATCH, (batch + 1) * MOVE_BESIDE_BATCH).map((item) => item.id);
+      if (ids.length === 0) return "end";
+      const pooled = await besideHeld(store, ids);
+      const slots = pooled ? await roomSlots(store, ids.map((id) => `p:${id}`)) : null;
+      if (!pooled || !slots) return "stop";
+      const toPool = ids.filter((id, i) => !pooled.has(id) && slots[i] > BESIDE_PRODUCT);
+      if (toPool.length === 0) return ids.length < MOVE_BESIDE_BATCH ? "end" : 0;
+      if (!(await holdLock(held))) return "stop";
+      if (!(await takeBeside(store, toPool, BESIDE_PRODUCT))) return "stop";
+      await giveData(store, toPool.map((id) => ({ slot: `p:${id}`, bytes: BESIDE_PRODUCT })));
+      moved += toPool.length;
+      return ids.length < MOVE_BESIDE_BATCH ? "end" : toPool.length;
+    }).catch((error) => {
+      console.error("moving a store's products beside its room stopped", error);
+      return "stop" as const;
+    });
+    if (step === null || step === "stop" || step === "end") break;
+  }
+  await markBesideSwept(first);
+  return moved;
+}
+
 /** Takes something off the store. Returns the product as it was, for its files. */
 export async function removeProduct(
   email: string,
@@ -4059,7 +4197,7 @@ export async function moveProduct(
 
 export type FileResult =
   | { ok: true; store: Store; removed: ProductFile | null }
-  | { ok: false; reason: "none" | "unknown" | "invalid" | "call" | "course" | "bundle" | "shipped" };
+  | { ok: false; reason: "none" | "unknown" | "invalid" | "call" | "course" | "bundle" | "shipped" | "changed" };
 
 /** What is handed over when something is paid for. One or the other. */
 export type Delivery = { file: ProductFile | null; link: string | null };
@@ -4105,11 +4243,15 @@ async function changeDelivery(
   id: string,
   giving: boolean,
   change: (current: Delivery) => Delivery,
-): Promise<{ ok: true; store: Store; previous: Delivery } | { ok: false; reason: "none" | "unknown" | "call" | "course" | "bundle" | "shipped" }> {
+  onlyIf?: (product: Product) => boolean,
+): Promise<{ ok: true; store: Store; previous: Delivery } | { ok: false; reason: "none" | "unknown" | "call" | "course" | "bundle" | "shipped" | "changed" }> {
   const result = await withStore(email, async (store, save) => {
     const owner = productIdFor(store, id);
     const product = owner ? await readProduct(store, owner) : null;
     if (!product) return { ok: false as const, reason: "unknown" as const };
+    // A caller that checked the product before slow work checks it again here, under the same lock as the write
+    // (Codex X3/X6 MEDIUM on #3474): one that no longer passes is left exactly as it is.
+    if (onlyIf && !onlyIf(product)) return { ok: false as const, reason: "changed" as const };
     // A call delivers a booking, a course its lessons and a bundle its
     // products, not a file or a link of their own.
     if (giving && product.id === id && product.call) return { ok: false as const, reason: "call" as const };
@@ -4139,12 +4281,13 @@ export async function setProductFile(
   email: string,
   id: string,
   file: ProductFile | null,
+  onlyIf?: (product: Product) => boolean,
 ): Promise<FileResult> {
   // A file replaces a link. One thing is delivered, never two.
   const done = await changeDelivery(email, id, file !== null, (current) => ({
     file,
     link: file ? null : current.link,
-  }));
+  }), onlyIf);
   if (!done.ok) return done;
   return { ok: true, store: done.store, removed: done.previous.file };
 }
@@ -4223,7 +4366,8 @@ export async function addStoreLink(
   if (!title) return { ok: false, reason: "title" };
 
   const result = await withStore<LinkResult>(email, async (store, save) => {
-    if (store.links.length >= MAX_STORE_LINKS) {
+    // A link held after a copyright notice keeps its place, so it can always go back (lib/takedown-hold.ts).
+    if (store.links.length + heldPlaces(store) >= MAX_STORE_LINKS) {
       return { ok: false, reason: "too_many", limit: MAX_STORE_LINKS };
     }
     const link: StoreLink = {
@@ -4273,6 +4417,77 @@ export async function removeStoreLink(
     return { ok: true, store: await save({ ...store, links: store.links.filter((link) => link.id !== id) }), removed: going.image ?? null };
   });
   return result ?? { ok: false, reason: "none" };
+}
+
+export type HoldResult = { ok: true } | { ok: false; reason: "none" | "unknown" | "changed" };
+
+/**
+ * Takes a link off the page and keeps it, held after a copyright notice (lib/takedown-hold.ts): at the end of the
+ * list of held links, with its place, its notice and where its picture is kept. "unknown" when the link is not on
+ * the page; "changed" when its picture is no longer `picture`, the one copied before this (lib/takedown.ts).
+ */
+export async function holdStoreLink(email: string, id: string, picture: string | null, entry: Omit<HeldLink, "link" | "place">): Promise<HoldResult> {
+  const result = await withStore<HoldResult>(email, async (store, save) => {
+    const place = store.links.findIndex((link) => link.id === id && !link.header);
+    if (place < 0) return { ok: false, reason: "unknown" };
+    const link = store.links[place];
+    if ((link.image?.path ?? null) !== picture) return { ok: false, reason: "changed" };
+    await save({ ...store, links: store.links.filter((l) => l.id !== id), heldLinks: [...(store.heldLinks ?? []), { link, place, ...entry }] });
+    return { ok: true };
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
+const sameHold = (held: HeldLink, report: string, id: string, heldAt: string) => held.report === report && held.link.id === id && held.heldAt === heldAt;
+
+/**
+ * Puts a held link back at its place, under its own id, with its picture at its old address (copied back first,
+ * lib/takedown.ts). "none" when it is not held any more.
+ */
+export async function restoreHeldLink(email: string, report: string, id: string, heldAt: string): Promise<{ ok: true } | { ok: false; reason: "none" | "full" }> {
+  const result = await withStore<{ ok: true } | { ok: false; reason: "none" | "full" }>(email, async (store, save) => {
+    const held = (store.heldLinks ?? []).find((h) => sameHold(h, report, id, heldAt));
+    if (!held) return { ok: false, reason: "none" };
+    // Its place was kept (addStoreLink counts it), so this is never past the list's limit; a record that somehow is
+    // keeps it held rather than lose a link when the list is read (parseStoreLinks stops at MAX_STORE_LINKS).
+    if (store.links.length >= MAX_STORE_LINKS) return { ok: false, reason: "full" };
+    const taken = store.links.some((l) => l.id === held.link.id);
+    const link = taken ? { ...held.link, id: freshId(store) } : held.link;
+    const links = [...store.links];
+    links.splice(Math.min(held.place, links.length), 0, link);
+    const rest = (store.heldLinks ?? []).filter((h) => h !== held);
+    const { heldLinks: _was, ...without } = store;
+    void _was;
+    await save({ ...without, links, ...(rest.length ? { heldLinks: rest } : {}) });
+    return { ok: true };
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
+/** Forgets a held link, once its picture is deleted (lib/takedown.ts). False when it is not held any more. */
+export async function dropHeldLink(email: string, report: string, id: string, heldAt: string): Promise<boolean> {
+  const result = await withStore<boolean>(email, async (store, save) => {
+    const rest = (store.heldLinks ?? []).filter((h) => !sameHold(h, report, id, heldAt));
+    if (rest.length === (store.heldLinks ?? []).length) return false;
+    const { heldLinks: _was, ...without } = store;
+    void _was;
+    await save({ ...without, ...(rest.length ? { heldLinks: rest } : {}) });
+    return true;
+  });
+  return result ?? false;
+}
+
+/** Writes on a held link that its counter-notice came in, or that the sender went to court; the entry as it is now. */
+export async function markHeldLink(email: string, report: string, id: string, heldAt: string, mark: { counter: string } | { court: true }): Promise<HeldLink | null> {
+  const result = await withStore<HeldLink | null>(email, async (store, save) => {
+    const all = store.heldLinks ?? [];
+    const at = all.findIndex((h) => sameHold(h, report, id, heldAt));
+    if (at < 0) return null;
+    const next = { ...all[at], ...mark };
+    await save({ ...store, heldLinks: all.map((h, i) => (i === at ? next : h)) });
+    return next;
+  });
+  return result ?? null;
 }
 
 /**
@@ -4579,19 +4794,22 @@ export async function setProductImage(
 export async function moveProductImage(
   email: string,
   id: string,
-  from: { path: string; small: string | null },
-  to: { path: string; small: string | null },
+  from: { path: string; small: string | null; thumb?: string | null },
+  to: { path: string; small: string | null; thumb?: string | null },
 ): Promise<{ ok: true } | { ok: false; reason: "none" | "unknown" } | { ok: false; reason: "changed"; shown: string[] }> {
   let shown: string[] = [];
   const done = await onProduct<"changed">(email, id, (product) => {
     const image = product.image;
-    shown = image ? [image.path, ...(image.small ? [image.small.path] : [])] : [];
-    if (!image || image.path !== from.path || (image.small?.path ?? null) !== from.small) {
+    shown = image ? [image.path, ...(image.small ? [image.small.path] : []), ...(image.thumb ? [image.thumb.path] : [])] : [];
+    if (!image || image.path !== from.path || (image.small?.path ?? null) !== from.small || (image.thumb?.path ?? null) !== (from.thumb ?? null)) {
       return { ok: false, reason: "changed" } as const;
     }
-    const { r2: _r2, ...rest } = image;
+    const { r2: _r2, thumb: _thumb, ...rest } = image;
     void _r2;
-    return { ...product, image: { ...rest, path: to.path, small: image.small && to.small ? { ...image.small, path: to.small } : null, withdrawn: true as const } };
+    void _thumb;
+    // The thumbnail copy moves with the picture (#2801); one with no new name is dropped, never left at its old name.
+    const thumb = image.thumb && to.thumb ? { thumb: { ...image.thumb, path: to.thumb } } : {};
+    return { ...product, image: { ...rest, path: to.path, small: image.small && to.small ? { ...image.small, path: to.small } : null, ...thumb, withdrawn: true as const } };
   });
   if (done.ok) return { ok: true };
   return done.reason === "changed" ? { ok: false, reason: "changed", shown } : { ok: false, reason: done.reason };
@@ -4831,6 +5049,20 @@ export async function setPostCount(email: string, count: number): Promise<Store 
 /** Switches stamping the buyer's email into a product's PDFs on or off. */
 export async function setProductStamp(email: string, id: string, on: boolean): Promise<ProductPartResult> {
   return changeProduct(email, id, (product) => ({ ...product, stamp: on }));
+}
+
+/**
+ * The creator's answer to whether a product is an electronically supplied publication, for VAT (lib/catalog.ts,
+ * Product.publication; 789 [IV1] step 3, unit 5a): `true` or `false` is kept as answered, `null` clears it back to not
+ * answered. The route (app/api/store/publication/route.ts) refuses anything else, so a bad value never reads as "not a
+ * publication".
+ */
+export async function setProductPublication(email: string, id: string, value: boolean | null): Promise<ProductPartResult> {
+  return changeProduct(email, id, (product) => {
+    const rest: Product = { ...product };
+    delete rest.publication;
+    return value === null ? rest : { ...rest, publication: value };
+  });
 }
 
 /** How many first pages of a product's PDF anyone may read before buying (lib/pdf-preview.ts); 0 switches it off. */
@@ -5387,6 +5619,78 @@ export async function setExitOffer(email: string, productId: string | null): Pro
     return { ok: true, store: await save({ ...store, exitOffer: product.id }) };
   });
   return result ?? { ok: false, reason: "none" };
+}
+
+/**
+ * Takes one price option off sale, or puts it back (642 [WG2]). Only the
+ * flag changes: the option keeps its id, price, file, link and lines, so
+ * whoever already bought it keeps what they have and a membership on it is
+ * billed exactly as before (Stripe is never called here). Off sale, it leaves
+ * every page and checkout (sellableOptions); back on sale, the flag is gone.
+ * Asking for what it already is changes nothing.
+ */
+export async function setOptionOnSale(email: string, id: string, onSale: boolean): Promise<OptionResult> {
+  return onOption(email, id, (product, at) => {
+    if ((product.options[at].offSale === true) !== onSale) return null;
+    const options = product.options.map((option, index) => {
+      if (index !== at) return option;
+      if (!onSale) return { ...option, offSale: true as const };
+      const kept = { ...option };
+      delete kept.offSale;
+      return kept;
+    });
+    return { product: { ...product, options }, removed: [] };
+  });
+}
+
+/** What putting an option back on sale, or taking it off, answers when the plan rule is decided in the write. */
+export type OptionSaleResult =
+  | { ok: true; store: Store; removed: ProductFile[]; planStopped: boolean }
+  | Extract<OptionResult, { ok: false }>
+  | { ok: false; reason: "plan_pauses"; limit?: undefined };
+
+/**
+ * setOptionOnSale, with the payment plan decided under the same store lock as
+ * the write (Claude 5 on #2690): the studio asks before a price put back on
+ * sale stops the plan, but from its own copy of the product, which another tab
+ * may have outdated. `stopsPlan` reads the product as it is stored right then
+ * (planPausedByRestore in lib/product-extras.ts, passed by the route); when
+ * putting the price back would stop the plan and `stopConfirmed` is not
+ * exactly true, nothing is written and the answer is "plan_pauses".
+ * `planStopped` says whether this write did stop it, so the studio's words are
+ * true either way. Taking a price off sale never asks.
+ */
+export async function setOptionOnSaleChecked(
+  email: string,
+  id: string,
+  onSale: boolean,
+  stopsPlan: (product: Product, optionId: string) => boolean,
+  stopConfirmed: boolean,
+): Promise<OptionSaleResult> {
+  let refused = false;
+  let planStopped = false;
+  const result = await onOption(email, id, (product, at) => {
+    refused = false;
+    planStopped = false;
+    if ((product.options[at].offSale === true) !== onSale) return null;
+    if (onSale) {
+      planStopped = stopsPlan(product, id);
+      if (planStopped && stopConfirmed !== true) {
+        refused = true;
+        return { ok: false, reason: "none" };
+      }
+    }
+    const options = product.options.map((option, index) => {
+      if (index !== at) return option;
+      if (!onSale) return { ...option, offSale: true as const };
+      const kept = { ...option };
+      delete kept.offSale;
+      return kept;
+    });
+    return { product: { ...product, options }, removed: [] };
+  });
+  if (refused) return { ok: false, reason: "plan_pauses" };
+  return result.ok ? { ...result, planStopped } : result;
 }
 
 export type LegalResult =

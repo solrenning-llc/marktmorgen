@@ -31,6 +31,7 @@ import { type Store, saleHandles } from "@/lib/store";
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured } from "@/lib/redis";
 import { claimMark } from "@/lib/claim-mark";
+import { claimWhileStoreLive } from "@/lib/store-live-cache";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
@@ -112,7 +113,10 @@ export async function checkQuiet(store: Store, now = Date.now()): Promise<QuietO
   if (times === null) return "skipped";
   const verdict = isQuiet(times, now);
   if (!verdict.quiet) return "fine";
-  const claimed = await claimMark(sentKey(store.handle, verdict.last), 90 * 86400);
+  // The sales were read on the Store as it was when this run began: the stretch's mark is taken only while that store
+  // is still its own and not erasing, in one step, so an erased store gets no mark back and its old address no email
+  // (Codex L-20261120-1852). Gone or unknown sends nothing.
+  const claimed = await claimWhileStoreLive(store, sentKey(store.handle, verdict.last), 90 * 86400);
   if (claimed === "taken") return "fine";
   if (claimed !== "ours") return "skipped";
 

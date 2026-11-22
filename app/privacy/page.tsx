@@ -5,6 +5,7 @@ import {PATH_WORDING_PRIVACY} from "@/lib/path-wording-rules";
 import {RETURN_PRIVACY_LINE} from "@/lib/path-return-rules";
 import { PAST_CALL_DAYS } from "@/lib/store-data-rules";
 import { CLOSING_DAYS, ERASE_WITHIN_DAYS } from "@/lib/plan-closing-rules";
+import { MAX_SUBMISSION_KEEP_DAYS } from "@/lib/submission-rules";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
@@ -432,7 +433,7 @@ export default function PrivacyPage() {
         <p id="billing-address">
           <strong className="text-black">Your billing address.</strong>{" "}
           Stripe asks for your billing address on every paid checkout on its
-          page, except, for now, when you buy a package of calls. PayPal asks
+          page, a package of calls included. PayPal asks
           for what it needs on its own page. Stripe keeps the address with the
           payment, on the Stripe account of whoever is paid:
           the creator&apos;s for a store&apos;s sale, ours for a Marktmorgen
@@ -876,6 +877,20 @@ export default function PrivacyPage() {
           you are not written to by that creator again unless you check their
           box again yourself.
         </p>
+        <p id="email-polls">
+          <strong className="text-black">Polls in a creator&apos;s emails.</strong>{" "}
+          A creator&apos;s email may ask a question with a few answers to choose
+          from. When you choose one, we keep which answer you chose under your
+          place in the list that email went to, never your email address. You
+          may change your answer, or take it back, while the poll is open. The
+          creator sees only how many people chose each answer, never who chose
+          what. Your answer is kept until the poll closes and for
+          30 days after the poll closes, so at most 60 days after the email was
+          sent, and then it is deleted by itself; it is also deleted if the
+          creator closes their store. Because it is kept under your place in the list and not under
+          your address, deleting your data from that creator does not find it,
+          but it is still deleted by itself within that time.
+        </p>
         <p id="community">
           <strong className="text-black">A creator&apos;s community.</strong>{" "}
           When a creator opens a community on their store, we decide who may
@@ -886,13 +901,17 @@ export default function PrivacyPage() {
           hour. Using it sets a cookie for that store in their browser for 90
           days, the same one a course uses. For each member we keep their email
           address, the name they choose to be seen by, whether they chose to be
-          listed in the member directory and to be emailed announcements, when
+          listed in the member directory and to be emailed announcements, the
+          links to their profiles on social networks that they add there
+          (only https addresses on the network&apos;s own site, at most three,
+          never an email address or a phone number), when
           they joined and were last there, and whether the creator muted or
           removed them. We keep what members write: posts, comments, the
           pictures they add, likes, and reports of a post or comment. Posts,
           comments, pictures and likes are seen by the other members and by the
-          creator. The directory shows only the chosen name, and only of those
-          who asked to be listed. A member&apos;s email address is seen by the
+          creator. The directory shows only the chosen name and those links, and
+          only of those who asked to be listed and are not muted; the links
+          open the other site with no referrer and nothing added to them. A member&apos;s email address is seen by the
           creator and never by other members. What is written is kept while
           the community exists, until its author or the creator deletes it;
           deleting a post deletes its comments, likes, reports and picture.
@@ -1321,7 +1340,18 @@ export default function PrivacyPage() {
           store that issued them is open, so the page goes on proving what it
           says; a withdrawn one says it was withdrawn. When the store closes
           (section 6), its certificates go with it.
-          A student who wants theirs withdrawn asks the creator.
+          A student who wants theirs withdrawn asks the creator. A certificate
+          whose course was refunded in full or lost in a dispute is withdrawn
+          on its own once the course no longer opens for the student, usually
+          within three hours (longer when the payment service cannot be read,
+          and until the next month when a store has many refunds in one
+          month), and its page then no longer shows the name, the course or
+          the date. The same goes for one the creator already withdrew and
+          for the student&apos;s earlier certificates of that course. A
+          refund still pending, failed or canceled withdraws
+          nothing. A certificate of a course paid through PayPal, given as a
+          gift, pre-ordered, bought for a group, added in one click after
+          checkout or paid in installments is withdrawn by the creator.
         </p>
         <p id="assignments">
           <strong className="text-black">Course assignments.</strong> When a
@@ -1337,6 +1367,25 @@ export default function PrivacyPage() {
           asks AI to draft a reply, the assignment and what the student wrote
           are sent to Anthropic to write it, never the file. A student who
           wants their work deleted asks the creator.
+        </p>
+        <p id="lesson-submissions">
+          <strong className="text-black">Files sent for review.</strong> When a
+          creator asks the buyers of a course to send a video, a photo or a PDF
+          for review on a lesson, we keep each file a buyer sends with its
+          name, size and type, the note they wrote with it, when they sent it,
+          their email address, and the creator&apos;s reply once there is
+          one. The file goes straight from the buyer&apos;s browser to the
+          creator&apos;s private store files, where it counts toward the
+          creator&apos;s storage. When the keeping time the creator chose ends
+          (at most {MAX_SUBMISSION_KEEP_DAYS} days after the file was sent),
+          the file is deleted within about a day, and its record with it; if
+          the file could not be deleted that day, we try again every day until
+          it is. When a buyer is deleted from the store, their files and
+          records are deleted at once (a file within a day, if the file
+          store does not answer right away), and an upload they had started
+          is canceled. A buyer who wants what they sent deleted sooner can delete
+          themselves from the store with the privacy link at the foot of its
+          page, or ask the creator.
         </p>
         <p id="discord">
           <strong className="text-black">Discord access.</strong> When a
@@ -1948,7 +1997,10 @@ export default function PrivacyPage() {
             product&apos;s description, a course outline or an email), and
             which receives only what that creator typed into the box for it,
             the product&apos;s name, price and kind, and the store&apos;s
-            name; never anything about their buyers, members or list. For an
+            name; never anything about their buyers, members or list. When the
+            creator asks it to read a product&apos;s own PDF, it also receives
+            the first pages of that file and the product&apos;s description,
+            never the rest of the file. For an
             Outreach email it receives what the creator typed, the
             creator&apos;s name, the names of their products, and the name and
             description a business gives itself on its own website; never
@@ -2122,7 +2174,9 @@ export default function PrivacyPage() {
           The files a creator sells, their lessons&apos; videos and their
           podcast&apos;s episodes, the files their students hand in and the
           pictures in their community&apos;s posts are kept until they are
-          removed with what they belong to. Where a
+          removed with what they belong to. Files buyers send for review are
+          kept only for the keeping time their creator chose, at most{" "}
+          {MAX_SUBMISSION_KEEP_DAYS} days. Where a
           store&apos;s plan has ended, they are deleted 30 days after the plan
           ended, after three emails to the store&apos;s owner; for a plan that
           ended before October 18, 2026, only where the store keeps more than a

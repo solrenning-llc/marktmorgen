@@ -40,6 +40,8 @@ export const withinLimit = async (scope: string) => (state.events.push(`limit:${
 // lib/store.ts
 export const normaliseHandle = (raw: string) => raw.trim().toLowerCase();
 export const storeRef = () => "owner@example.test";
+/** lib/store.ts ensureListId: a store from before list ids is given one, written to the record (noted as an event). */
+export const ensureListId = async () => (state.events.push("list-id"), { ...state.store, listId: "list_made_now" });
 export const storeFolder = async () => FOLDER;
 /** lib/auth.ts normaliseEmail, which lib/suppression.ts (the open's ask whether the buyer was deleted) reads. */
 export const normaliseEmail = (email: string) => email.trim().toLowerCase();

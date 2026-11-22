@@ -109,6 +109,28 @@ const W2 = join(T, "w2"); g(["init", "-q", W2]); g(["fetch", "-q", "--depth", "1
 run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "b"], as("c2"));
 r = run(["set-switch", "--as", "Claude 1 A", "--name", "record-review", "--on", "--reason", "t", ...pedidoDe(marca("set-switch", "record-review")).args], { ...as("c1a"), ...pedidoDe(marca("set-switch", "record-review")).env, FAKE_ID: String(nReq - 1) }, W2);
 is("in a shallow clone that does not cover 60 minutes, the backup does not act on 'no sign'", !r.ok && /NÃO FOI CONFERIDO: o histórico local do correio é raso/.test(r.out), r.out);
+// Two boundaries: a merge whose side parent is 2 hours old. Coverage is the NEWEST boundary, not the oldest (review of Claude 4 AC).
+{
+  const c = join(T, "raw-merge"); g(["clone", "-q", "-b", "correio", join(T, "mail.git"), c]);
+  const antigo = new Date(Date.now() - 2 * 3600000).toISOString();
+  const env2 = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t", GIT_AUTHOR_DATE: antigo, GIT_COMMITTER_DATE: antigo };
+  execFileSync("git", ["checkout", "-q", "-b", "side", "HEAD~3"], { cwd: c }); execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "old side"], { cwd: c, env: env2 });
+  g(["checkout", "-q", "correio"], c); g(["-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-ff", "-m", "merge side", "side"], c); g(["push", "-q", "origin", "HEAD:correio"], c);
+}
+const W3 = join(T, "w3"); g(["init", "-q", W3]); g(["fetch", "-q", "--depth", "2", `file://${join(T, "mail.git")}`, "+refs/heads/correio:refs/x"], W3);
+const qw3 = pedidoDe(marca("set-switch", "record-review"));
+r = run(["set-switch", "--as", "Claude 1 A", "--name", "record-review", "--on", "--reason", "t", ...qw3.args], { ...as("c1a"), ...qw3.env }, W3);
+is("with an old side boundary and a recent main boundary, coverage is the newest boundary: still NOT CHECKED", !r.ok && /NÃO FOI CONFERIDO: o histórico local do correio é raso/.test(r.out), r.out);
+// A git failure in the single-use check refuses; it never reads as "not used" (review of Claude 4 AC).
+{
+  const mod = await import(TOOL);
+  const antes = { PATH: process.env.PATH, FAKE_GH: process.env.FAKE_GH, FAKE_ID: process.env.FAKE_ID, FAKE_BODY: process.env.FAKE_BODY };
+  Object.assign(process.env, { PATH: `${BIN}:${process.env.PATH}`, FAKE_GH: "req", FAKE_ID: "999", FAKE_BODY: marca("set-switch", "record-review") });
+  let erro = "";
+  try { mod.conferirPedido("999", "set-switch", "record-review", "0".repeat(40)); } catch (e) { erro = String(e.message ?? e); }
+  for (const [k, v] of Object.entries(antes)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  is("a git error in the single-use check refuses the request (NOT CHECKED)", /NÃO FOI CONFERIDO/.test(erro) && /uso/.test(erro), erro);
+}
 r = ligar("Claude 1 A", "c1a", pedidoDe(marca("set-switch", "record-review")));
 is("the backup is refused while the named session signed in the last 60 minutes", !r.ok && /três casos/.test(r.out), r.out);
 r = ligar("Claude 1 A", "c1a", pedidoDe(marca("set-switch", "record-review")), ["--owner-message", "OWNER-20261121-2100-TEST"]);

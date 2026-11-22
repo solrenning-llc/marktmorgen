@@ -7,7 +7,7 @@
  * Checked against the stand-in Redis and a stand-in Stripe; nothing real is reached.
  */
 import { readFileSync } from "node:fs";
-import { addProduct, claimHandle, clearStripeAccount, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Listing, type Store } from "@/lib/store";
+import { addProduct, claimHandle, clearStripeAccount, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Listing } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { buyerField, buyerGiftsKey, deliverGift, giftsBoughtBy, revokeRefundedGifts, startGift } from "@/lib/gifts";
 import { COPIERS } from "@/lib/person-copy";

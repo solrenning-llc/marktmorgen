@@ -53,6 +53,41 @@ async function main() {
   is("a mark is made", /^[0-9a-f]{32}$/.test(mark), true);
   is("and it is not an unkeyed hash of the address", mark === unkeyed, false);
   is("and it does not hold the address", mark.includes("account"), false);
+  is("two accounts never share a mark", mark === (await researchAccountMark("other.account@example.test")), false);
+
+  part("A row marked under the earlier key is still found and erased (Claude 5's LEVE 1)");
+  const stripe = process.env.STRIPE_SECRET_KEY;
+  process.env.STRIPE_SECRET_KEY = "sk_test_tests-only-earlier-root";
+  try {
+    const earlier = await researchAccountMark("account@example.test", true);
+    is("an earlier key gives its own mark", /^[0-9a-f]{32}$/.test(earlier) && earlier !== mark, true);
+    store.clear();
+    await store.pipeline([["LPUSH", RESPONSES_KEY, JSON.stringify({ id: "earlier-row", ...payload, email: "typed@example.test", createdAt: new Date().toISOString(), reservedFor: earlier })]]);
+    is("the account's copy finds the row marked under the earlier key", (await researchCopyPerson("account@example.test")).map((row) => row.email), ["typed@example.test"]);
+    is("and erasing the account removes it", [await forgetResearchPerson("account@example.test"), (await rows()).length], [1, 0]);
+  } finally {
+    if (stripe === undefined) delete process.env.STRIPE_SECRET_KEY;
+    else process.env.STRIPE_SECRET_KEY = stripe;
+  }
+
+  part("No key, no mark: the account answers as anonymous (Claude 5's LEVE 2)");
+  const dataKey = process.env.NIMBUS_DATA_KEY;
+  const stripeKey = process.env.STRIPE_SECRET_KEY;
+  delete process.env.NIMBUS_DATA_KEY;
+  delete process.env.STRIPE_SECRET_KEY;
+  try {
+    is("no mark is made", [await researchAccountMark("account@example.test"), await researchAccountMark("account@example.test", true)], ["", ""]);
+    store.clear();
+    const session = await openSession("account@example.test");
+    is("a signed-in answer is still saved", await ask("typed@example.test", session), 201);
+    is("with no mark written", (await rows()).map((row) => Object.hasOwn(row, "reservedFor")), [false]);
+    is("and a second one is not refused as already answered: it is anonymous", await ask("typed@example.test", session), 201);
+    is("so no answer carries a mark another account could share", (await rows()).every((row) => !Object.hasOwn(row, "reservedFor")), true);
+    is("another account's copy does not reach them", (await researchCopyPerson("other.account@example.test")).length, 0);
+  } finally {
+    if (dataKey !== undefined) process.env.NIMBUS_DATA_KEY = dataKey;
+    if (stripeKey !== undefined) process.env.STRIPE_SECRET_KEY = stripeKey;
+  }
   done();
 }
 main().catch((error: unknown) => {

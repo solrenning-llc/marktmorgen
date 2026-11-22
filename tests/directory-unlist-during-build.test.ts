@@ -90,6 +90,49 @@ async function main(): Promise<void> {
   is("the build says it is unknown", unknown, "UnknownReplyError");
   is("and keeps no page from it", await kept(), null);
 
+  part("Unlisted while a lone DEL of the kept page fails: still gone at once (Claude 6's MÉDIO 1 on #3118)");
+  // The save took the store out of the set and then sent the DEL of the kept page in a request of its own: when that
+  // request failed, the save still succeeded and the kept page showed the store for its whole hour.
+  advance(HOUR);
+  await program("cakes@example.com", true);
+  is("control: both are listed and kept", [await attempt(), await keptHandles()], [["breadhouse", "cakeshop"], ["breadhouse", "cakeshop"]]);
+  redis.pipeline = (async (commands: Commands) => {
+    if (commands.length === 1 && commands[0]?.[0] === "DEL" && commands[0]?.[1] === DIRECTORY_CACHE) throw new Error("synthetic network failure");
+    return original(commands);
+  }) as typeof redis.pipeline;
+  await program("cakes@example.com", false);
+  redis.pipeline = original;
+  for (const [step, at] of [[1, 1], [29, 30], [28, 58]]) {
+    advance(step * MINUTE);
+    is(`a visit at minute ${at} after unlisting does not show it`, ((await attempt()) as string[]).includes("cakeshop"), false);
+  }
+
+  part("After a build, the DEL of the kept page is read exactly (Codex X6 on #3118)");
+  for (const [label, reply] of [["null", null], ["QUEUED", "QUEUED"], ["a string", "1"], ["missing", undefined]] as const) {
+    advance(HOUR);
+    await program("cakes@example.com", true);
+    let armed = true;
+    let saved = false;
+    let swapped = false;
+    redis.pipeline = (async (commands: Commands) => {
+      if (armed && ((commands[0]?.[0] === "SET" && commands[0]?.[1] === DIRECTORY_CACHE) || (commands[0]?.[0] === "EVAL" && commands[0].slice(3).includes(DIRECTORY_CACHE)))) {
+        armed = false;
+        await program("cakes@example.com", false);
+        saved = true;
+      }
+      // Only the build's own DEL after its check, never the save's.
+      if (saved && !swapped && commands.length === 1 && commands[0]?.[0] === "DEL" && commands[0]?.[1] === DIRECTORY_CACHE) {
+        swapped = true;
+        return reply === undefined ? [] : [reply];
+      }
+      return original(commands);
+    }) as typeof redis.pipeline;
+    const answer = await attempt();
+    redis.pipeline = original;
+    is(`a DEL of the kept page answering ${label} after a build: the build says it is unknown`, [swapped, answer], [true, "UnknownReplyError"]);
+  }
+  await program("cakes@example.com", true);
+
   part("Control: a build with nobody leaving keeps the page with both");
   advance(HOUR);
   is("both are listed", await attempt(), ["breadhouse", "cakeshop"]);

@@ -166,7 +166,7 @@ test("control: a live store's pass takes the refund as seen and keeps its anchor
   refundsAt.length = 0;
   refundsAt.push(refundOf(pi, 2));
   const live = await racing(async () => undefined, () => markRefundedReviews(swept, Date.now() + 60_000));
-  assert.deepEqual([live.marked, live.plainWrites, live.answers], [1, 0, [1, 1, 1, 1]], "the review, the product's numbers, the read refund and the anchor, each through the fence");
+  assert.deepEqual([live.marked, live.plainWrites, live.answers], [1, 0, [1, 1, 1, 1, 1]], "the review, the product's numbers, the failed mark's slot given back once the mark succeeded (13th triple audit on #5100), the read refund and the anchor, each through the fence");
   assert.deepEqual(await exists([`nl:rev:refunds:seenat:${statsId}`, `nl:rev:refunds:since:${statsId}`]), [1, 1], "the read refund and the anchor are kept");
 });
 
@@ -181,7 +181,7 @@ test("a store erasing before the page's rows are counted gets no count of the mo
   const erasing = await racing(async () => undefined, () => markRefundedReviews(swept, Date.now() + 60_000));
   await original([["HDEL", ERASING_KEY, field]]);
   assert.deepEqual([erasing.marked, erasing.plainWrites], [0, 0], "nothing marked, no plain write");
-  assert.deepEqual(await exists([`nl:rev:refunds:rows:${statsId}:${month}`, `nl:rev:refunds:marks:${statsId}:${month}`, `nl:rev:refunds:seenat:${statsId}`]), [0, 0, 0], "no count of the month, no payment taken, no seen row: the count went through the fence and answered gone");
+  assert.deepEqual(await exists([`nl:rev:refunds:rows:${statsId}:${month}`, `nl:rev:refunds:marks:${statsId}:${month}`, `nl:rev:refunds:fails:${statsId}:${month}`, `nl:rev:refunds:seenat:${statsId}`]), [0, 0, 0, 0], "no count of the month, no payment or failed mark taken, no seen row: the count went through the fence and answered gone");
 });
 
 test("the store closed during the Stripe read, before any review was read: the read refunds and the anchor stay gone (Claude 1 E on #5092)", async () => {

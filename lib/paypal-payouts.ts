@@ -984,8 +984,13 @@ export async function settlePayPal(store: Store, options: { paced?: boolean; pre
  */
 async function needsManualCheck(store: Store, field: string, sent: OpenBatch): Promise<"manual"> {
   if (sent.m === 1) return "manual";
-  const [held] = await redisPipeline([await keepOpenCommand(store, field, JSON.stringify({ ...sent, m: 1 }), false)]);
-  if (held === -1) return "manual";
+  const reply = repliesFor(await redisPipeline([await keepOpenCommand(store, field, JSON.stringify({ ...sent, m: 1 }), false)]), 1);
+  if (reply?.[0] === -1) return "manual";
+  // Counted only once Redis confirms the mark (Codex G-20261121-0346; rule 24): the script's own {HSET, 0} (no set
+  // entry is asked for). Any other answer is not known: nothing is counted, the batch stays on its way unmarked, and
+  // the next run writes the mark again, so one batch is never counted twice in the owner's monthly report.
+  const written = reply ? repliesFor(reply[0], 2) : null;
+  if (!written || (written[0] !== 0 && written[0] !== 1) || written[1] !== 0) throw new UnknownReplyError("marking a PayPal batch for a manual check");
   await countUnknown("manual");
   return "manual";
 }

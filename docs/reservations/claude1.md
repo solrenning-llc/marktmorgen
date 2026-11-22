@@ -8,3 +8,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 | --- | --- | --- | --- | --- |
 | Claude 1 | Opening readiness, locks 2 and 3 (Claude 1 cloud A, coordinator 14/11/2026) | claude1/opening-readiness | `docs/opening-readiness/stripe-platform.md`, `docs/opening-readiness/deemed-supplier.md` | 14/11/2026 21h30 |
 | Claude 1 | Fixes #3954: a creator's review written only over the work it read (REVIEW_WRITE_IF) | claude/great-allen-xski78 | `lib/assignment.ts` (review only), `tests/assignment-review-race.test.ts` | 12/11/2026 12h39 |
+| Claude 1 | Codex G-20261121-0346 (board #5010): a PayPal manual-check mark counted only once Redis confirms it | claude/pensive-wozniak-s7bk9y | `lib/paypal-payouts.ts` (`needsManualCheck` only), `tests/paypal-payouts-reconcile.test.ts` | 22/11/2026 01h13 |

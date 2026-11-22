@@ -15,6 +15,14 @@ type Case = { what: string; setup: Command[]; keys: string[]; argv: (string | nu
 
 const record = (statsId: string) => JSON.stringify({ statsId, handle: "shop" });
 const CASES: Record<string, Case[]> = {
+  "about-write-live:v2": [
+    { what: "a live store, written", setup: [["SET", "k:id", "ref1"], ["SET", "k:about", "old"]], keys: ["k:id", "k:erasing", "k:about"], argv: ["f1", "0", "", "new", "ref1"] },
+    { what: "a live store, compared and written", setup: [["SET", "k:id", "ref1"], ["SET", "k:about", "old"]], keys: ["k:id", "k:erasing", "k:about"], argv: ["f1", "1", "old", "new", "ref1"] },
+    { what: "a description changed meanwhile", setup: [["SET", "k:id", "ref1"], ["SET", "k:about", "other"]], keys: ["k:id", "k:erasing", "k:about"], argv: ["f1", "1", "old", "new", "ref1"] },
+    { what: "an empty text deletes it", setup: [["SET", "k:id", "ref1"], ["SET", "k:about", "old"]], keys: ["k:id", "k:erasing", "k:about"], argv: ["f1", "0", "", "", "ref1"] },
+    { what: "an id key holding another ref", setup: [["SET", "k:id", "ref2"], ["SET", "k:about", "old"]], keys: ["k:id", "k:erasing", "k:about"], argv: ["f1", "0", "", "new", "ref1"] },
+    { what: "an erasing store", setup: [["SET", "k:id", "ref1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:id", "k:erasing", "k:about"], argv: ["f1", "0", "", "new", "ref1"] },
+  ],
   "card-open-live:v1": [
     { what: "a live store", setup: [["SET", "k:id", "s1"]], keys: ["k:id", "k:erasing", "k:open"], argv: ["f1", "sess", 600] },
     { what: "no store", setup: [], keys: ["k:id", "k:erasing", "k:open"], argv: ["f1", "sess", 600] },

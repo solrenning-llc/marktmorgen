@@ -941,9 +941,12 @@ export class MemoryRedis {
           this.run(["EXPIRE", log, keep]);
           return 1;
         }
-        // lib/store.ts PRODUCT_WITH_ABOUT: a product's record and its description, written together.
-        if (key.startsWith("-- marktmorgen:product-with-about:v1\n") && args[0] === "2" && args.length === 5) {
-          const [, record, about, json, text] = args;
+        // lib/store.ts PRODUCT_WITH_ABOUT: a product's record and its description, written together, only while the store
+        // is not erasing and its id key still holds its ref: 1 written, -1 gone, moved or erasing (nothing written).
+        if (key.startsWith("-- marktmorgen:product-with-about:v2\n") && args[0] === "4" && args.length === 9) {
+          const [, record, about, storeId, erasing, json, text, field, ref] = args;
+          if (this.run(["HGET", erasing, field]) !== null) return -1;
+          if (this.run(["GET", storeId]) !== ref) return -1;
           this.run(["SET", record, json]);
           if (text === "") this.run(["DEL", about]);
           else this.run(["SET", about, text]);

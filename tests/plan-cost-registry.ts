@@ -2997,6 +2997,8 @@ export const COST_LINES: CostLine[] = [
       // Goal save/removal: EVAL plus EXISTS, HEXISTS and one SET or DEL; four billed commands inside the studio request.
       { file: "lib/sales-goal.ts", names: ["SALES_GOAL_WRITE_COMMANDS"] },
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "studio"] },
+      // A product save's record and description in one fenced script, billed as the fenced write it replaces (#4238).
+      { file: "lib/store.ts", names: ["PRODUCT_WITH_ABOUT"] },
       { file: "lib/studio-allowance-rules.ts", names: ["STUDIO_PAGE_UNITS", "ESSENTIAL_PER_DAY", "ESSENTIAL_NEEDS"] },
       { file: "lib/store-data.ts", names: ["BESIDE_SAVE_COMMANDS", "poolTakeCommands"] },
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },

@@ -2018,19 +2018,36 @@ type ProductChange = {
   /**
    * One put product's description, written with that product's record in one step (PRODUCT_WITH_ABOUT), so the
    * description and the record's `rev` land together or not at all (Codex N1 on #4238). Its room is taken before.
+   * `fence` is the store's erasure fence of lib/product-about-live.ts (its id key, the erasing mark's field, its ref):
+   * the two are written only while the store is live, never after its erasure began or its account moved (#4969).
    */
-  about?: { product: string; key: string; text: string };
+  about?: { product: string; key: string; text: string; fence: { idKey: string; field: string; ref: string } };
 };
 
 /**
  * A product's record and its description in one step (Codex N1 on #4238): the record carries the product's `rev`, so
- * a save whose catalog commit fails never leaves its new description beside the old revision. KEYS: the record, the
- * description. ARGV: the record, the description ("" deletes it). Writes both, answers 1.
+ * a save whose catalog commit fails never leaves its new description beside the old revision. Fenced as every
+ * description write is (lib/product-about-live.ts ABOUT_WRITE_IF_STORE_LIVE, #4969): written only while the store's
+ * erasing mark is absent and its id key still holds its own ref, so a save held up past the store's erasure, or past a
+ * move of its account, never puts a deleted store's private text back. KEYS: the record, the description, the store's
+ * id key, ERASING_KEY. ARGV: the record, the description ("" deletes it), the store's erasing field, its ref. Answers 1
+ * written (both), -1 the store is gone, moved or erasing (nothing written). Billed as the fenced write it replaces: the
+ * EVAL, HGET, GET and two SET or DEL.
  */
-export const PRODUCT_WITH_ABOUT = `-- marktmorgen:product-with-about:v1
+export const PRODUCT_WITH_ABOUT = `-- marktmorgen:product-with-about:v2
+if redis.call("HGET", KEYS[4], ARGV[3]) then return -1 end
+if redis.call("GET", KEYS[3]) ~= ARGV[4] then return -1 end
 redis.call("SET", KEYS[1], ARGV[1])
 if ARGV[2] == "" then redis.call("DEL", KEYS[2]) else redis.call("SET", KEYS[2], ARGV[2]) end
 return 1`;
+
+/** A product save refused because its store is gone, moved or being erased (PRODUCT_WITH_ABOUT): nothing was written. */
+export class ProductStoreGoneError extends Error {
+  constructor() {
+    super("the store is gone or being erased, so the product and its description were not written");
+    this.name = "ProductStoreGoneError";
+  }
+}
 
 type Save = (next: Store, change?: ProductChange) => Promise<Store>;
 
@@ -2103,13 +2120,17 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
   const put = change.put ?? [];
   const drop = new Set(change.drop ?? []);
   // Refused before anything is written, like the record's own ceiling below.
+  let fenced: (string | number)[] | null = null;
   const writes = put.flatMap((product) => {
     const own = productWrites(id, product);
     if (change.about?.product !== product.id) return own;
-    // The record's SET and the description in one script, so they land together (PRODUCT_WITH_ABOUT).
+    // The record's SET and the description in one fenced script, so they land together and only while the store is
+    // live (PRODUCT_WITH_ABOUT). It is sent first and alone, so a refusal stops the save before anything else is written.
     const [record, ...rest] = own;
     if (record?.[0] !== "SET") throw new Error("a product's record write is not a SET");
-    return [["EVAL", PRODUCT_WITH_ABOUT, 2, record[1], change.about.key, record[2], change.about.text], ...rest];
+    const { key, text, fence } = change.about;
+    fenced = ["EVAL", PRODUCT_WITH_ABOUT, 4, record[1], key, fence.idKey, ERASING_KEY, record[2], text, fence.field, fence.ref];
+    return rest;
   });
   if (change.about && !put.some((product) => product.id === change.about?.product)) throw new Error("a description without its product");
 
@@ -2170,6 +2191,11 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
   // the record is written only while it is still ours: a write held up past
   // its lock is refused rather than landed over whatever came after it.
   if (!(await holdLock(held))) throw new StoreBusyError();
+  if (fenced) {
+    const reply = repliesFor(await redisPipeline([fenced]), 1)?.[0];
+    if (reply === -1) throw new ProductStoreGoneError();
+    if (reply !== 1) throw new UnknownReplyError("a product's record and description");
+  }
   await runWrites(writes);
   if (!(await setIfHeld(held, owner, json))) throw new StoreBusyError();
   if (items.length !== before.catalog.items.length) await redisPipeline([movedMark(id, items.length)]);
@@ -4193,6 +4219,7 @@ export async function editProduct(
   // what a free product gets (below) whatever the price turned out to be.
   let freeNow = false;
   let descriptionId: string | null = null;
+  let namedSid: string | null = null;
   // The description, written with the product's record in the catalog commit (PRODUCT_WITH_ABOUT, Codex N1 on #4238).
   let aboutWrite: ProductChange["about"];
   const result = await onProduct<"free" | "call" | "course" | "pwyw" | "title" | "price" | "bundle" | "shipped" | "stale" | `intro_${IntroProblem}` | `yearly_${YearlyProblem}`>(
@@ -4263,18 +4290,27 @@ export async function editProduct(
       if (typeof parts?.about === "string" && (parts.about !== "" || next.about)) {
         // A legacy store's namespace must be durable before text is put under it; a refused catalog commit must
         // never leave text in a newly allocated namespace that the store's erasure cannot find.
-        const room = store.statsId ? store : await save({ ...store, statsId: newListId() });
+        let room = store.statsId ? store : await save({ ...store, statsId: newListId() });
         descriptionId = room.statsId;
         if (!descriptionId) throw new StoreBusyError();
+        // The erasure fence reads the store's id key (PRODUCT_WITH_ABOUT): a store from before ids gets one now, once
+        // and for good, as ensureStoreId names it (lib/product-about-live.ts storeNamedForAbout), here under its lock.
+        if (!STORE_ID_PATTERN.test(room.sid)) {
+          room = await save({ ...room, sid: newListId() });
+          await redisPipeline([["SET", storeIdKey(room.sid), storeRef(room)]]);
+          namedSid = room.sid;
+        }
         // Its room first, as writeAbout takes it; the text itself goes with the product's record and its `rev` in the
         // catalog commit, so a commit that fails keeps neither (Codex N1 on #4238).
         await takeAboutRoom(room, id, parts.about);
-        aboutWrite = { product: id, key: aboutKeyOf(descriptionId, id), text: parts.about };
+        const ref = storeRef(room);
+        const fence = { idKey: storeIdKey(room.sid), field: await erasingField(ref), ref };
+        aboutWrite = { product: id, key: aboutKeyOf(descriptionId, id), text: parts.about, fence };
         next.about = parts.about !== "";
       }
       return next;
     },
-    (store) => ({ listId: store.listId ?? (freeNow ? newListId() : null), ...(descriptionId ? { statsId: descriptionId } : {}) }),
+    (store) => ({ listId: store.listId ?? (freeNow ? newListId() : null), ...(descriptionId ? { statsId: descriptionId } : {}), ...(namedSid ? { sid: namedSid } : {}) }),
     undefined,
     () => aboutWrite,
   );

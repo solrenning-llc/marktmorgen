@@ -91,7 +91,7 @@ import { grantUnlessErased, importedFor, importedFrom, importedKey } from "@/lib
 import { deliverableItems } from "@/lib/bundle-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
 import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, mailDay, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
-import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
+import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, IMPORT_WORST_BYTES_PER_ROW, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { newCostCode } from "@/lib/plan-standing";
 import { healthTags, moveTags, noteSent, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
 import { stopTags } from "@/lib/mail-health-rules";
@@ -100,7 +100,7 @@ import { storeBase } from "@/lib/purchase-email";
 import { movedPurchaseWords } from "@/lib/buyer-words/moved-purchases";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
-import { inviteEmail, inviteMembers, keptAlready, moveFoot, movePostal, noteKept, dropReminder, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
+import { INVITE_OWN_READ_COMMANDS, inviteEmail, inviteMembers, keptAlready, moveFoot, movePostal, noteKept, dropReminder, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
 import { type DateOrder, MAX_AHEAD_DAYS, MAX_MOVED_MEMBERS, REMIND_DAYS_BEFORE, readRenewal } from "@/lib/move-rules";
 import { type ContactConsent, consentFrom, readClickFunnelsStatus, readOrderStatus } from "@/lib/clickfunnels-csv";
 
@@ -133,6 +133,15 @@ const CELL_CAPS: Record<ImportKind, number[]> = {
 
 /** Rows applied in one step, by kind: small enough that a step is a few seconds at most. */
 const CHUNK: Record<ImportKind, number> = { contacts: 1_000, products: 50, purchases: 250, members: 250 };
+/**
+ * What a step done again reads of what it may have written on the try that failed (issue #3957), priced on every
+ * step, since any step can be one: a purchases step one HGET for each row it saw before that answered "already"
+ * (grantedByThisImport, at most a step's rows), a members step one HMGET of the invitations found already written
+ * (lib/move-members.ts ownInvites). Each record read is one this import wrote for one row, at most a row's
+ * IMPORT_WORST_BYTES_PER_ROW (tests/import-mail-retry.test.ts measures both).
+ */
+export const RETRY_OWN_READ_COMMANDS = Math.max(CHUNK.purchases, INVITE_OWN_READ_COMMANDS);
+export const RETRY_OWN_READ_BYTES = Math.max(CHUNK.purchases, CHUNK.members) * IMPORT_WORST_BYTES_PER_ROW;
 /** Buyers emailed in one step. */
 const MAIL_CHUNK = 100;
 /**

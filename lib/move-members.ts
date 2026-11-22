@@ -253,6 +253,9 @@ export async function inviteMembers(
  * HMGET, read exactly (CX-123 rule 24). A reply in any other shape throws, so the step is left as it was and done
  * again, never taken as somebody else's. Nothing is read when none was found already written.
  */
+/** ownInvites's one HMGET, in a members step that found invitations already written (priced on every step). */
+export const INVITE_OWN_READ_COMMANDS = 1;
+
 async function ownInvites(statsId: string, job: string, found: { row: { email: string; productId: string }; field: string }[]): Promise<Map<string, Invite>> {
   const own = new Map<string, Invite>();
   if (!found.length) return own;

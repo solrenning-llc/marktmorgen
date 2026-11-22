@@ -32,6 +32,11 @@ import { setWhileStoreLive } from "@/lib/store-live-cache";
 export const SHOWN_FROM = 10;
 /** How long a reading is used as it is before it is read again in the background. */
 export const SOLD_FRESH_MS = 6 * 60 * 60 * 1000;
+/**
+ * The most refresh attempts a store makes in a day: one per SOLD_FRESH_MS whatever its outcome, since the attempt's
+ * lock is held that long (refreshSoldCounts). Priced per attempt in tests/plan-cost-registry.ts, "sold-count-refresh".
+ */
+export const SOLD_REFRESH_ATTEMPTS_PER_DAY = Math.ceil(86_400_000 / SOLD_FRESH_MS);
 /** How long a reading is kept at all: a page never shows a count older than this. */
 const SOLD_KEEP_SECONDS = 7 * 24 * 60 * 60;
 
@@ -88,7 +93,9 @@ export async function refreshSoldCounts(
   now = Date.now(),
 ): Promise<SoldCounts | null> {
   if (!store.look.sold || !store.statsId || !store.stripeAccountId || !isRedisConfigured()) return null;
-  const [mine] = await redisPipeline([["SET", lockKey(store.statsId), "1", "NX", "EX", 300]]);
+  // The lock is the attempt's own bound: held SOLD_FRESH_MS whatever the outcome, so a read that fails or keeps
+  // nothing is not tried again by the next visit (SOLD_REFRESH_ATTEMPTS_PER_DAY; coordinator 20261122T023645Z on #4966).
+  const [mine] = await redisPipeline([["SET", lockKey(store.statsId), "1", "NX", "EX", SOLD_FRESH_MS / 1000]]);
   if (mine !== "OK") return null;
   try {
     const all = await read(store);

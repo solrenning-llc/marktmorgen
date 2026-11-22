@@ -53,10 +53,14 @@ return 1`;
  * a settled checkout being handled (lib/sale-events.ts awaits the product reads first) when the erasure removes
  * nl:recent:<statsId> must not write it back. KEYS[1] the store's id key, KEYS[2] the erasing marks, KEYS[3] the
  * purchase list, KEYS[4] the cached feed; ARGV[1] the store's erasing field, ARGV[2] the purchase, ARGV[3] the last
- * index kept, ARGV[4] the list's lifetime. "gone", nothing written; 1, written. Billed 1 + 2 + the 4 writes it holds.
+ * index kept, ARGV[4] the list's lifetime, ARGV[5] the store's ref. "gone", nothing written; 1, written. Billed 1 + 2
+ * + the 4 writes it holds. The store is live only while its id key still holds its ref, never only while it exists
+ * (v2; Claude 6 i51q adopting #4965, the rule of lib/live-fence.ts store-cache-live:v3): moveAccount repoints the id
+ * key to the new owner's ref, and an erasure begun after a move marks the new ref's field, so a write read under the
+ * old ref would pass an EXISTS and an HEXISTS of the old field.
  */
-const KEEP_SALE_IF_LIVE = `-- marktmorgen:recent-sale-live:v1
-if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return "gone" end
+const KEEP_SALE_IF_LIVE = `-- marktmorgen:recent-sale-live:v2
+if redis.call("GET", KEYS[1]) ~= ARGV[5] or redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return "gone" end
 redis.call("LPUSH", KEYS[3], ARGV[2])
 redis.call("LTRIM", KEYS[3], 0, ARGV[3])
 redis.call("EXPIRE", KEYS[3], ARGV[4])
@@ -118,7 +122,7 @@ export async function rememberSale(store: Pick<Store, "statsId" | "recentSales" 
   await redisPipeline([[
     "EVAL", KEEP_SALE_IF_LIVE, 4,
     storeIdCommand(store.sid)[1], ERASING_KEY, listKey(store.statsId), feedKey(store.statsId),
-    await erasingField(storeRef(store)), JSON.stringify(kept), KEPT - 1, (RECENT_DAYS + 1) * 86_400,
+    await erasingField(storeRef(store)), JSON.stringify(kept), KEPT - 1, (RECENT_DAYS + 1) * 86_400, storeRef(store),
   ]]);
 }
 

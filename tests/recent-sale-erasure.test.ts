@@ -46,6 +46,16 @@ async function main(): Promise<void> {
   await rememberSale(gone, record);
   is("no purchase list is made for it", kept(gone), 0);
 
+  // v2 (Claude 6 i51q adopting #4965): the account moved (moveAccount repoints the id key to the new owner's ref) and
+  // the new owner's erasure began, which marks the NEW ref's field. A purchase read under the old ref still finds the
+  // id key and no mark under its own field: only the ref the key holds tells.
+  part("A store whose account moved and whose new owner's erasure began gets nothing written back");
+  const moved = await made();
+  const newRef = "recent-race-moved@example.com";
+  await redis.pipeline([["SET", storeIdCommand(moved.sid)[1], newRef], ["HSET", ERASING_KEY, await erasingField(newRef), String(Date.now())]]);
+  await rememberSale(moved, record);
+  is("no purchase list is made for it", kept(moved), 0);
+
   done();
 }
 

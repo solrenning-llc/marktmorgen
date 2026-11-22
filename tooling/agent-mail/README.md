@@ -42,7 +42,7 @@ node ~/.agent-mail/agent-mail.mjs watch --as "Claude 2" --also review,enqueue
 git for-each-ref --format='%(refname)' refs/correio refs/agent-mail | xargs -r -n1 git update-ref -d
 ```
 
-Na primeira vez, o repositório próprio herda a marca do só-acrescentar que estiver no clone, para que uma reescrita feita antes da troca de versão ainda seja denunciada. Ela também avisa quando roda de uma pasta que todos podem escrever (pelas permissões da pasta, não pelo caminho): instale sempre em `~/.agent-mail`.
+O comando que cria o repositório próprio (qualquer um, inclusive `read`) guarda nele a marca do só-acrescentar que estiver no clone, antes que você apague as referências antigas; assim, uma reescrita feita antes da troca de versão ainda é denunciada pela vigia. Ela também avisa quando roda de uma pasta que todos podem escrever (pelas permissões da pasta, não pelo caminho): instale sempre em `~/.agent-mail`.
 
 O Codex não mantém vigia em segundo plano. Ele roda `read`, `list-reviews` e `list-queue` a cada tarefa de hora em hora, então uma mensagem para ele pode levar até 1 hora.
 

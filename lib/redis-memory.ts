@@ -2141,6 +2141,23 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
+        if (key.startsWith("-- marktmorgen:esync-enqueue:v1\n")) {
+          const keyCount = Number(args[0]);
+          const [job, log, queue, marks] = args.slice(1, 1 + keyCount);
+          const [print, consent, record, ttl, id, logSize, now, member] = args.slice(1 + keyCount);
+          if (marks) {
+            const deleted = this.run(["HGET", marks, print]);
+            if (deleted !== null) {
+              if (typeof deleted !== "string" || !/^\d{1,12}$/.test(deleted)) return "unknown";
+              if (consent === "" || Number(consent) <= Number(deleted)) return "erased";
+            }
+          }
+          this.run(["SET", job, record, "EX", ttl]);
+          this.run(["LPUSH", log, id]);
+          const overflow = this.run(["LRANGE", log, logSize, -1]);
+          this.run(["ZADD", queue, now, member]);
+          return overflow;
+        }
         // lib/funnel-share-store.ts CREATE_STORE_SHARE: CREATE_SHARE only while the store's erasing mark is absent and its id
         // key exists (-4 otherwise, nothing written).
         if (key.startsWith("-- marktmorgen:funnel-share-live:v1\n") && args[0] === "4" && args.length === 13) {

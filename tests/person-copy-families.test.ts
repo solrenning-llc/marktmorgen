@@ -129,6 +129,45 @@ async function main(): Promise<void> {
   is("what is held only while a job is done is said, with how long", Array.isArray(copy.passing) && copy.passing.some((p) => p.includes("sending list") && p.includes("at most 60 days")), true);
   is("everything was read: the copy is complete", [copy.complete, copy.notComplete], [true, []]);
 
+  part("A secondary-cell mention never includes a different person's pending import row");
+  const ownershipCases = [
+    { kind: "contacts", mine: ["2", "Nina@Example.com", "Nina", "cohort", "yes"], other: ["3", OTHER, "Otto Example private name", `friend=${PERSON}`, "yes"] },
+    { kind: "purchases", mine: ["2", "Nina@Example.com", "Own product", "paid"], other: ["3", OTHER, `Private purchase for ${PERSON}`, "paid"] },
+    { kind: "members", mine: ["2", "Nina@Example.com", "Own membership", "2026-12-01", "Annual"], other: ["3", OTHER, `Private membership for ${PERSON}`, "2026-12-01", "Annual"] },
+    { kind: "products", mine: null, other: ["3", `Class for ${PERSON}`, "20", "Otto Example private product note", "digital", ""] },
+  ] as const;
+  for (const [index, specimen] of ownershipCases.entries()) {
+    const id = (index + 3).toString(16).repeat(24);
+    const file = `ownership-${specimen.kind}.csv`;
+    const key = `nl:import:${id}`;
+    const rowKey = `${key}:rows`;
+    redis.run(["SET", key, JSON.stringify({ ...job, id, kind: specimen.kind, file, state: "queued", done: 0 }), "EX", 14 * 86_400]);
+    redis.run(["LPUSH", `nl:imports:list:${sid}`, id]);
+    try {
+      const own = specimen.mine ? [specimen.mine] : [];
+      // Control: a longer, different address does not make this person's copy incomplete.
+      const longerOnly = specimen.other.map((cell) => cell.replaceAll(PERSON, LONGER));
+      redis.run(["RPUSH", rowKey, JSON.stringify([...own, longerOnly])]);
+      const control = await copyPerson((await erasureScope(store, PERSON))!, Date.now());
+      is(`${specimen.kind}: a different address does not create an unresolved trace`, control.complete, true);
+      is(`${specimen.kind}: that unrelated row is not copied`, JSON.stringify(control).includes(OTHER), false);
+
+      redis.run(["DEL", rowKey]);
+      redis.run(["RPUSH", rowKey, JSON.stringify([...own, specimen.other])]);
+      const result = await copyPerson((await erasureScope(store, PERSON))!, Date.now());
+      const records = (result.sections.find((s) => s.module === "lib/imports.ts")?.records ?? []) as Record<string, unknown>[];
+      const record = records.find((r) => r.import === file);
+      is(`${specimen.kind}: only mapped subject rows are included`, record?.rowsWaiting ?? [], own);
+      is(`${specimen.kind}: another person's address never appears anywhere in the copy`, JSON.stringify(result).includes(OTHER), false);
+      is(`${specimen.kind}: ambiguous mentions are explicitly incomplete`, result.complete, false);
+      is(`${specimen.kind}: a value-free review trace is supplied`, result.notComplete.some((line) => line.includes("outside its mapped email field") && line.includes("values were not copied")), true);
+      is(`${specimen.kind}: the unresolved trace discloses no other address or raw row`, JSON.stringify(result.notComplete).includes(OTHER) || JSON.stringify(result.notComplete).includes("Otto Example"), false);
+    } finally {
+      redis.run(["DEL", key, rowKey]);
+      redis.run(["LREM", `nl:imports:list:${sid}`, 0, id]);
+    }
+  }
+
   part("An address with letters outside ASCII is found whole too (Claude 3 cloud S on #4321)");
   // The import takes such addresses, so the copy must find them: a token cut at the first non-ASCII letter never
   // equals the address, and their own rows went missing while the copy still said it was complete.
@@ -142,10 +181,10 @@ async function main(): Promise<void> {
     const wideImport = "c3".repeat(12);
     redis.run(["SET", `nl:import:${wideImport}`, JSON.stringify({ ...job, id: wideImport, file: "wide.csv" }), "EX", 14 * 86_400]);
     redis.run(["LPUSH", `nl:imports:list:${sid}`, wideImport]);
-    redis.run(["RPUSH", `nl:import:${wideImport}:rows`, JSON.stringify([["2", "José@Müller.de", "José", "prod1"], ["3", `x${WIDE}`, "Xosé", "prod1"]])]);
+    redis.run(["RPUSH", `nl:import:${wideImport}:rows`, JSON.stringify([["2", "José@Müller.de", "José", "prod1"], ["3", `x${WIDE}`, "Xosé", "prod1"], ["4", "jose\u0301@mu\u0308ller.de", "NFC control", "prod1"]])]);
     const wideCopy = await copyPerson((await erasureScope(store, WIDE))!, Date.now());
     const wideRows = ((wideCopy.sections.find((s) => s.module === "lib/imports.ts")?.records ?? []) as Record<string, unknown>[]).find((r) => r.import === "wide.csv")?.rowsWaiting;
-    is("their own import row is in their copy, and only theirs", wideRows, [["2", "José@Müller.de", "José", "prod1"]]);
+    is("their own import rows are found through case and NFC, and only theirs", wideRows, [["2", "José@Müller.de", "José", "prod1"], ["4", "jose\u0301@mu\u0308ller.de", "NFC control", "prod1"]]);
   }
 
   part("What is kept but cannot be read makes the copy say it is not complete");

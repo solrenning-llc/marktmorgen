@@ -388,7 +388,7 @@ async function main(): Promise<void> {
   await ensureStatsId(OWNER);
   await setStripeAccount(OWNER, "acct_fixture2", true);
   const wholeSession = await openSession(OWNER);
-  pages = [page([line("charge", 5000, nowSeconds - 3600, charge("ch_whole"), 175)], false)];
+  pages = [page([line("charge", 5000, nowSeconds - 3 * 3600, charge("ch_whole"), 175)], false)];
   const wholeFile = await exportFees(new NextRequest("https://marktmorgen.com/api/store/fees/export", { method: "GET", headers: { host: "marktmorgen.com", "sec-fetch-site": "same-origin", cookie: `${SESSION_COOKIE}=${wholeSession}` } }));
   is("a whole reading gives the file", [wholeFile.status, wholeFile.headers.get("Content-Type")], [200, "text/csv; charset=utf-8"]);
   const wholeParsed = parseCsv(await wholeFile.text());

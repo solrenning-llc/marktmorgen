@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
   if (Buffer.byteLength(csv, "utf8") + 4 > SALE_FEES_FILE_MAX_BYTES) return plain(503, FILE_TOO_LARGE_WORDS);
   const day = new Date(state.kept.at).toISOString().slice(0, 10);
   // The byte-order mark makes Excel read the file as UTF-8.
-  return new Response(`﻿${csv}\n`, {
+  return new Response(`﻿${csv}\r\n`, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": `attachment; filename="fees-${store.handle}-${day}.csv"`,

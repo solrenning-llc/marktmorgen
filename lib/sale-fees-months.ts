@@ -152,6 +152,8 @@ export function readAtCell(ms: number, timeZone: string): string | null {
     return null;
   }
   const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  // ISO 8601's plain form holds four-digit years only; any other year is no reading time, never a malformed cell.
+  if (!/^\d{4}$/.test(part("year")) || parts.some((p) => p.type === "era")) return null;
   const zone = part("timeZoneName");
   const offset = zone === "GMT" ? "+00:00" : zone.replace(/^GMT/, "");
   if (!/^[+-]\d{2}:\d{2}$/.test(offset)) return null;
@@ -176,6 +178,9 @@ export function saleFeesCsv(report: SaleFees, timeZone: string, readAt: number):
   // Every row carries when the reading was taken (audits 2fb6, 0861): never a note row a reader would take for the header.
   const lines = [csvLine([...SALE_FEES_CSV_HEADER])];
   for (const row of report.rows) {
+    // A line made after the reading's own time is refused, as the months refuse it ("late"): never a file that
+    // says it was read before one of its sales.
+    if (row.at !== null && row.at * 1000 > readAt) return null;
     const c = row.currency;
     const date = row.at !== null && inRange(row.at * 1000) ? dayIn(format, row.at * 1000) : UNAVAILABLE;
     lines.push(
@@ -194,5 +199,6 @@ export function saleFeesCsv(report: SaleFees, timeZone: string, readAt: number):
       lines.push(csvLine(["", ACCOUNT_FEE_WORDS[key], own.toUpperCase(), "", "", "", "", "", "", "", amountCell(accountFee[key], own), read]));
     }
   }
-  return lines.join("\n");
+  // Rows end in CRLF, as RFC 4180 has them.
+  return lines.join("\r\n");
 }

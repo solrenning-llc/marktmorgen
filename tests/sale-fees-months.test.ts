@@ -112,7 +112,7 @@ function main(): void {
   const READ_AT = Date.UTC(2026, 10, 11, 15, 4, 5);
   const readAt = readAtCell(READ_AT, ZONE);
   const csv = saleFeesCsv(report, ZONE, READ_AT);
-  is("header, sales newest first, then account fees, each with when it was read", csv?.split("\n"), [
+  is("header, sales newest first, then account fees, each with when it was read", csv?.split("\r\n"), [
     SALE_FEES_CSV_HEADER.map((h) => `"${h}"`).join(","),
     `"2026-10-31","ch_a","USD","50.00","(1.75)","0.00","0.00","0.00","(10.00)","0.00","38.25","${readAt}"`,
     `"Unavailable","ch_old","USD","Unavailable","0.00","0.00","0.00","0.00","(3.00)","0.00","Unavailable","${readAt}"`,
@@ -124,12 +124,16 @@ function main(): void {
   is("in UTC", readAtCell(READ_AT, "UTC"), "2026-11-11T15:04:05+00:00");
   is("in a zone behind UTC", readAtCell(READ_AT, "America/Fortaleza"), "2026-11-11T12:04:05-03:00");
   is("an unknown zone: none", readAtCell(READ_AT, "Mars/Olympus"), null);
+  is("a year past four digits: none, never a malformed cell", [readAtCell(Date.UTC(20000, 0, 1), "UTC"), readAtCell(Date.UTC(-1, 0, 1), "UTC")], [null, null]);
+  is("and so no file", saleFeesCsv(report, ZONE, Date.UTC(20000, 0, 1)), null);
+  is("a sale made after the reading's own time: no file, as the months refuse it", saleFeesCsv(report, ZONE, OCT_LATE_LOCAL * 1000 - 1000), null);
+  is("rows end in CRLF, none in a bare LF", [csv?.includes("\r\n"), /[^\r]\n/.test(csv ?? "")], [true, false]);
   {
     const parsed = parseCsv(csv ?? "");
     is("read back with the repository's own reader: the header is the header", parsed.header, [...SALE_FEES_CSV_HEADER]);
     is("and every row has as many fields as it", parsed.rows.every((r) => r.length === SALE_FEES_CSV_HEADER.length), true);
   }
-  is("no cell starts like a formula", csv?.split("\n").every((l) => !/(^|,)"[=+\-@]/.test(l)), true);
+  is("no cell starts like a formula", csv?.split("\r\n").every((l) => !/(^|,)"[=+\-@]/.test(l)), true);
   is("an unavailable report gives no file", saleFeesCsv({ available: false, why: "unreadable" }, ZONE, READ_AT), null);
   is("an unknown time zone gives no file", saleFeesCsv(report, "Mars/Olympus", READ_AT), null);
   is("nothing sold: the header alone", saleFeesCsv(saleFees([], { complete: true }), ZONE, READ_AT), SALE_FEES_CSV_HEADER.map((h) => `"${h}"`).join(","));

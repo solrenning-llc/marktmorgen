@@ -662,6 +662,38 @@ async function main(): Promise<void> {
   console.log("HubSpot dry run at its worst", JSON.stringify(importOnly));
   is("a dry run of a file naming every deal reads within HUBSPOT_CHECK_BYTES, in HUBSPOT_CHECK_COMMANDS", [heavyCheck.status, heavyBytes <= HUBSPOT_CHECK_BYTES, heavyCommands <= HUBSPOT_CHECK_COMMANDS], [200, true, true]);
 
+  part("Coordinator's MEDIUM 2 on #2048 (18th batch): a deal full of lone surrogates still weighs at most DEAL_JSON_MAX_BYTES");
+  {
+    // JSON.stringify writes a lone surrogate escaped (6 bytes); every text field at its cap, in them, plus one cut in
+    // the middle of a pair by the title's own cap.
+    const lone = (n: number) => "\ud800".repeat(n);
+    const loose = parseDeal({
+      id: hubSpotDealId("8900"), title: `${lone(89)}\ud83d\ude00`, email: quoted, cents: MAX_DEAL_CENTS, stage: heavyStages[0].id,
+      note: `${hubSpotDealNote("8900", "", false)}\n${lone(480)}`, nextAction: lone(200), dueDate: "2026-12-31", assignee: quoted,
+      formResponseRef: "f".repeat(64), createdAt: Number.MAX_SAFE_INTEGER, updatedAt: Number.MAX_SAFE_INTEGER,
+    }, heavyStages)!;
+    const bytes = Buffer.byteLength(JSON.stringify(loose));
+    is("it is read, every text field well formed", [Boolean(loose), [loose.title, loose.note, loose.nextAction ?? ""].every((t) => t.isWellFormed())], [true, true]);
+    is("and it weighs at most DEAL_JSON_MAX_BYTES", bytes <= DEAL_JSON_MAX_BYTES, true);
+    is("a lone surrogate is the replacement character, a whole pair is kept", [loose.title.startsWith("\ufffd"), "a\ud83d\ude00b".length === parseDeal({ id: hubSpotDealId("8901"), title: "a\ud83d\ude00b", stage: heavyStages[0].id }, heavyStages)!.title.length, parseDeal({ id: hubSpotDealId("8902"), title: "a\ud83d\ude00b", stage: heavyStages[0].id }, heavyStages)!.title], [true, true, "a\ud83d\ude00b"]);
+  }
+
+  part("Coordinator's MEDIUM 1 on #2048 (18th batch): a file whose deals are all here takes none of the month's rows");
+  {
+    const again = await paidStore("hubsresend");
+    const rowsNow = async () => Number((await redis.pipeline([["GET", `nl:imports:rows:${again.store.sid}:${windowId(again.store, Date.now())}`]]))[0] ?? 0);
+    const file = { header: HEADER, rows: [row("8801", "One", "New", "Leads"), row("8802", "Two", "New", "Leads"), row("8803", "Three", "New", "Leads")] };
+    const first = await call({ action: "save", ...file }, again.session);
+    is("control: the first save brings the three deals in and counts the month's rows", [first.status, first.body.summary?.added, (await rowsNow()) > 0], [200, 3, true]);
+    // The month left with fewer rows than one upload counts (IMPORT_MIN_ROWS_PER_UPLOAD): a resend that took rows would be refused.
+    const before = await rowsNow();
+    is("the month's rows nearly spent", (await takeImportRows(again.store, IMPORT_ALLOWANCES.creator.rows - before - 10)).ok, true);
+    const spent = await rowsNow();
+    const resend = await call({ action: "save", ...file }, again.session);
+    is("the same file sent again, as an unconfirmed save asks, is answered with every deal already here", [resend.status, resend.body.summary?.added, resend.body.summary?.alreadyThere], [200, 0, 3]);
+    is("and takes none of the month's rows", await rowsNow(), spent);
+  }
+
   done();
 }
 

@@ -8,10 +8,9 @@
 import { sweepCheckouts } from "@/lib/checkout-sweep";
 import { saveReview } from "@/lib/reviews";
 import { REVIEW_REFUND_PASS_EVERY_SECONDS } from "@/lib/review-proof";
-import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { paidPeriod } from "./billing-period-fixture";
 import { installSesMailFixture } from "./ses-mail-fixture";
 import { ROOM } from "./data-room";
 
@@ -41,17 +40,16 @@ async function main(): Promise<void> {
   redis.clear();
   mail.configure();
   await mail.setReady(true, { max24: 50_000, rate: 100 });
+  // A store the sweep reaches only for its reviews: a connected account and one review, with nothing listed, no list,
+  // no pixels, no keys and no sale listeners, so that worthAsking (lib/checkout-sweep.ts) is false and the store is
+  // counted by `reviewed` alone. With a paid listing the store would be swept anyway, and the gate under test would be
+  // invisible to the count.
   await claimHandle(OWNER, "turnsweep", "Turn Sweep", "");
   await ensureStatsId(OWNER);
-  await ensureListId(OWNER);
   await setStripeAccount(OWNER, "acct_1TestTurnSwp1", true);
-  await setSubscription(OWNER, { customerId: "cus_TurnSweep1", subscriptionId: "sub_TurnSweep1", active: true, tier: "pro", period: paidPeriod() });
-  await setMailSettings(OWNER, { fromName: "Turn Sweep", address: "1 Main St, Portland, OR 97201" });
-  const made = await addProduct(OWNER, "Guide", "", "49", null);
-  if (!made.ok) throw new Error("no product");
   const store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
-  const saved = await saveReview(statsId, { productId: made.product.id, email: "buyer@example.com", reference: "cs_test_turnsweep000000000", pi: "pi_turnsweep0000001", rating: 5, text: "Clear and kind.", name: "Buyer", paidAt: Math.floor(Date.now() / 1000) - 86_400 }, ROOM);
+  const saved = await saveReview(statsId, { productId: "turnsweepguide1", email: "buyer@example.com", reference: "cs_test_turnsweep000000000", pi: "pi_turnsweep0000001", rating: 5, text: "Clear and kind.", name: "Buyer", paidAt: Math.floor(Date.now() / 1000) - 86_400 }, ROOM);
   if (saved.state !== "created") throw new Error(`review not saved: ${saved.state}`);
   const turn = `nl:rev:refunds:next:${statsId}`;
 

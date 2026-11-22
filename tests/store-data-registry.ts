@@ -1288,7 +1288,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:vault:ctl:@lib/vault.ts": short("A vault upload's finish and cancel count and first answers", "upload", 1, 512),
   "nl:verified:@lib/verified-numbers.ts": { what: "The store's verified numbers, cached", parts: [capped(16 * KB, "One a store.")] },
   "nl:verified:cursor@lib/verified-numbers.ts": company("Where the verification job stopped", "One key, the company's job."),
-  "nl:wl:@lib/waitlist.ts": { what: "Waitlists: who is waiting, launches", room: ["lib/waitlist.ts", "lib/store.ts"], parts: [per("store", 120, KEY, "A launch's record and each address's place in it.", MAIL("launch"))] },
+  "nl:wl:@lib/waitlist.ts": { what: "Waitlists: who is waiting (with an index of the unconfirmed places, each counted with its place), launches", room: ["lib/waitlist.ts", "lib/store.ts"], parts: [per("store", 120, KEY, "A launch's record and each address's place in it.", MAIL("launch"))] },
   "nl:wl:jobs@lib/waitlist.ts": company("Launches still sending", "One set, members gone when done."),
   "nl:wl:t:@lib/waitlist-tokens.ts": { what: "A waitlist's confirm and leave links", room: ["lib/waitlist.ts"], parts: [per("store", 7, LINK_BYTES, "A confirm link, seven days.", MAIL("waitlist"))] },
   "nl:sa:@lib/stock-alerts.ts": room("Back-in-stock lists (623 [SZ7]) and their index of ends: each address's place, at most MAX_STOCK_ALERTS a product, ending on its own (a week unconfirmed, a year after confirming; an ended place is dropped by the next ask, its room given back), taken from the room before it is written", "lib/stock-alerts.ts"),

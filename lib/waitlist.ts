@@ -3,6 +3,8 @@
  *
  *   nl:wl:<store>:soon          set    products coming soon
  *   nl:wl:<store>:<product>     hash   address → WaitEntry
+ *   nl:wl:<store>:<product>:u   zset   unconfirmed address → when its confirm link ends, so a join that finds the
+ *                                      list full drops a place nobody confirmed in time (WAIT_PRUNE)
  *   nl:wl:<store>:<product>:job string the launch email, while it goes out and for 90 days after
  *   nl:wl:<store>:<product>:send list   who the launch email goes to, fixed when it starts
  *   nl:wl:t:<sha(token)>        string what a confirm or leave link is for
@@ -57,6 +59,8 @@ const soonKey = (sid: string) => `nl:wl:${sid}:soon`;
 const listKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}`;
 const jobKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}:job`;
 const sendKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}:send`;
+/** The index of a waitlist's unconfirmed places, each scored with when its latest confirm link ends (WaitEntry.w 2). */
+const endsKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}:u`;
 const JOBS = "nl:wl:jobs";
 // Noted before a product is removed and taken off only once its waitlist is confirmed gone (dropWaitlist), so a person's
 // deletion still reaches a waitlist whose drop failed (#4462, Codex X8 and Claude 7). ":" is never in a product id, so
@@ -217,9 +221,15 @@ export async function joinWaitlist(input: {
         await redisPipeline([["DEL", tokenKey(confirm), ...(lastLink ? [tokenKey(lastLink)] : [])]]);
         return "error";
       }
-      if (size >= MAX_WAITLIST) return "full";
+      // A full list first drops places nobody confirmed before their confirm link ended (Codex X6's LOW on #3616, the
+      // same shape here): they no longer count. Only what is confirmed dropped makes room; unknown is an error.
+      if (size >= MAX_WAITLIST) {
+        const dropped = await dropEndedPlaces(store, sid, product.id);
+        if (dropped === null) return "error";
+        if (size - dropped >= MAX_WAITLIST) return "full";
+      }
       const t = newToken();
-      const value = JSON.stringify({ at: now(), ok: 0, c: consent, ...(consent && input.clicks ? { k: true } : {}), t, w: 1 } satisfies WaitEntry);
+      const value = JSON.stringify({ at: now(), ok: 0, c: consent, ...(consent && input.clicks ? { k: true } : {}), t, w: 2 } satisfies WaitEntry);
       // A new address takes room in the store's data room, with its link to leave
       // (kept as long as the list); with no room the list is full for it.
       const taken = placeBytes(sid, product.id, email, value);
@@ -233,12 +243,13 @@ export async function joinWaitlist(input: {
       // Written only while the product is still coming soon, in one step with that check (WAIT_JOIN; #4462, Claude 7
       // MÉDIO 1): a removal that lands after isSoon above takes the mark off before it deletes the list (dropWaitlist),
       // so this join then writes nothing, and never puts an address back on a list no deletion could reach.
-      const [added] = await redisPipeline([["EVAL", WAIT_JOIN, 2, soonKey(sid), listKey(sid, product.id), product.id, email, "", value]]);
-      if (added === -1) {
-        // Not written (an exact -1): its room and both links go, and the list is closed to it.
+      // The ceiling is checked in the same step (-2): two joins at once for the last place never both take it.
+      const [added] = await redisPipeline([["EVAL", WAIT_JOIN, 3, soonKey(sid), listKey(sid, product.id), endsKey(sid, product.id), product.id, email, "", value, MAX_WAITLIST, now() + CONFIRM_SECONDS]]);
+      if (added === -1 || added === -2) {
+        // Not written (an exact -1 or -2): its room and both links go, and the list is closed or full to it.
         await giveData(store, [{ slot: waitSlot(product.id), bytes: taken }]);
         await redisPipeline([["DEL", tokenKey(confirm), tokenKey(t)]]);
-        return "closed";
+        return added === -1 ? "closed" : "full";
       }
       if (added === 1) {
         leave = t;
@@ -270,7 +281,9 @@ export async function joinWaitlist(input: {
     const t = before.t;
     const asked = Boolean(before.c) || consent;
     // How its link was counted stays with the place (WaitEntry.w): an older place is never counted again as a new one.
-    const value = JSON.stringify({ at: before.at, ok: before.ok, c: asked, ...(asked && (before.k || (consent && input.clicks)) ? { k: true } : {}), t, ...(before.w ? { w: 1 } : {}) } satisfies WaitEntry);
+    // Still unconfirmed, its new confirm link gives it a new end in the index (w 2); a place counted with its line keeps it.
+    const indexed = before.w === 2 || (before.w === 1 && !before.ok);
+    const value = JSON.stringify({ at: before.at, ok: before.ok, c: asked, ...(asked && (before.k || (consent && input.clicks)) ? { k: true } : {}), t, ...(before.w ? { w: indexed ? 2 : 1 } : {}) } satisfies WaitEntry);
     // Its growth counted before it is written (countEntryGrowth): a count not confirmed writes nothing, and a link to
     // confirm this request already wrote goes, as for a place that does not read.
     const grown = await countEntryGrowth(store, sid, product.id, email, existing, value);
@@ -287,7 +300,8 @@ export async function joinWaitlist(input: {
     }
     lastLink = t;
     // Asked again over a place as it was read, and only while the product is still coming soon (WAIT_JOIN, as above).
-    const [swapped] = await redisPipeline([["EVAL", WAIT_JOIN, 2, soonKey(sid), listKey(sid, product.id), product.id, email, existing, value]]);
+    const ends = before.w && !before.ok ? now() + CONFIRM_SECONDS : "";
+    const [swapped] = await redisPipeline([["EVAL", WAIT_JOIN, 3, soonKey(sid), listKey(sid, product.id), endsKey(sid, product.id), product.id, email, existing, value, MAX_WAITLIST, ends]]);
     if (swapped === -1) {
       // Not written (an exact -1): what was counted for it comes back, and its link to confirm goes. The place as it
       // was, with its own link to leave, goes with the list when the removal deletes it.
@@ -325,7 +339,7 @@ export async function joinWaitlist(input: {
     const ran = Math.max(0, Math.ceil(Date.now() / 1000) - startedAt);
     const recent = repliesFor(await redisPipeline([erasedWithinCommand(store.listId, email, ERASURE_SECONDS + ran)]), 1)?.[0];
     if (recent !== 0) {
-      const [taken] = await redisPipeline([["EVAL", HASH_TAKE_FIELD, 1, listKey(sid, product.id), email], ["DEL", tokenKey(confirm), tokenKey(leave)]]);
+      const [taken] = await redisPipeline([["EVAL", HASH_TAKE_FIELD, 1, listKey(sid, product.id), email], ["DEL", tokenKey(confirm), tokenKey(leave)], ["ZREM", endsKey(sid, product.id), email]]);
       if (typeof taken === "string") await giveData(store, [{ slot: waitSlot(product.id), bytes: placeBytes(sid, product.id, email, taken) }]);
       return "error";
     }
@@ -357,22 +371,88 @@ export async function joinWaitlist(input: {
 
 /**
  * A join's write, fenced by the coming-soon mark (#4462): KEYS[1] the store's coming-soon set, KEYS[2] the product's
- * waitlist; ARGV[1] the product, ARGV[2] the address, ARGV[3] the place as it was read ("" for none: written only if
- * still absent, as HSETNX), ARGV[4] the place to write. Answers -1 when the product is no longer coming soon (nothing
- * written), else 1 written or 0 not (the place changed since it was read). Billed as one EVAL and the calls inside it,
- * at most WAIT_JOIN_CALLS (SISMEMBER, HGET and HSET), in place of the HSETNX or the HASH_SWAP_IF it replaced.
+ * waitlist, KEYS[3] its index of unconfirmed places; ARGV[1] the product, ARGV[2] the address, ARGV[3] the place as it
+ * was read ("" for none: written only if still absent, and only while the list holds fewer than ARGV[5]), ARGV[4] the
+ * place to write, ARGV[6] when its confirm link ends ("" for a confirmed place, which has no line in the index).
+ * Answers -1 when the product is no longer coming soon, -2 when a new place finds the list at its ceiling (nothing
+ * written either way), else 1 written or 0 not (the place changed since it was read). Checking the ceiling here, in the
+ * same step as the write, keeps two joins at once from both taking the last place. Billed as one EVAL and the calls
+ * inside it, at most WAIT_JOIN_CALLS (SISMEMBER, HEXISTS, HLEN, HSET and ZADD).
  */
 export const WAIT_JOIN = [
-  "-- marktmorgen:waitlist-join:v2",
+  "-- marktmorgen:waitlist-join:v3",
   'if redis.call("SISMEMBER", KEYS[1], ARGV[1]) == 0 then return -1 end',
-  'if ARGV[3] == "" then return redis.call("HSETNX", KEYS[2], ARGV[2], ARGV[4]) end',
-  'if redis.call("HGET", KEYS[2], ARGV[2]) ~= ARGV[3] then return 0 end',
+  'if ARGV[3] == "" then',
+  '  if redis.call("HEXISTS", KEYS[2], ARGV[2]) == 1 then return 0 end',
+  '  if redis.call("HLEN", KEYS[2]) >= tonumber(ARGV[5]) then return -2 end',
+  'elseif redis.call("HGET", KEYS[2], ARGV[2]) ~= ARGV[3] then',
+  "  return 0",
+  "end",
   'redis.call("HSET", KEYS[2], ARGV[2], ARGV[4])',
+  'if ARGV[6] ~= "" then redis.call("ZADD", KEYS[3], tonumber(ARGV[6]), ARGV[2]) end',
   "return 1",
 ].join("\n");
 
-/** The most redis.call one run of WAIT_JOIN makes: SISMEMBER, then HGET and HSET (a new place: HSETNX alone). */
-export const WAIT_JOIN_CALLS = 3;
+/** The most redis.call one run of WAIT_JOIN makes: SISMEMBER, HEXISTS, HLEN, HSET and ZADD (a new place). */
+export const WAIT_JOIN_CALLS = 5;
+
+/** The most ended places one join drops from a full list: one is enough for its own place, one more keeps it short. */
+export const WAIT_DROP_ENDED = 2;
+
+/**
+ * Drops, from a full list, up to ARGV[2] places nobody confirmed whose confirm link ended by ARGV[1] (KEYS[1] the
+ * waitlist, KEYS[2] its index of unconfirmed places), in one step, and answers each as {address, place as kept, ...},
+ * so their links to leave and their room can follow. A place confirmed since, gone, or kept in a shape that does not
+ * read is never dropped: only its line in the index goes. Billed as one EVAL and the calls inside it, at most
+ * WAIT_PRUNE_CALLS (ZRANGEBYSCORE, then HGET, HDEL and ZREM for each).
+ */
+export const WAIT_PRUNE = [
+  "-- marktmorgen:waitlist-prune:v1",
+  "local out = {}",
+  'local due = redis.call("ZRANGEBYSCORE", KEYS[2], "-inf", ARGV[1], "LIMIT", 0, tonumber(ARGV[2]))',
+  "for _, who in ipairs(due) do",
+  '  local raw = redis.call("HGET", KEYS[1], who)',
+  "  if raw then",
+  "    local fine, entry = pcall(cjson.decode, raw)",
+  "    if fine and type(entry) == \"table\" and entry.ok == 0 and entry.w == 2 then",
+  '      redis.call("HDEL", KEYS[1], who)',
+  "      table.insert(out, who)",
+  "      table.insert(out, raw)",
+  "    end",
+  "  end",
+  '  redis.call("ZREM", KEYS[2], who)',
+  "end",
+  "return out",
+].join("\n");
+
+/** The most redis.call one run of WAIT_PRUNE makes: ZRANGEBYSCORE, then HGET, HDEL and ZREM for each of WAIT_DROP_ENDED. */
+export const WAIT_PRUNE_CALLS = 1 + 3 * WAIT_DROP_ENDED;
+
+/**
+ * Drops the ended unconfirmed places of a full list (WAIT_PRUNE): their links to leave go, and the room each took comes
+ * back once its link's delete is known. Answers how many places were dropped, or null when the drop's reply does not
+ * read (rule 24): the join is then refused, never let past the ceiling.
+ */
+async function dropEndedPlaces(store: DataStore, sid: string, productId: string): Promise<number | null> {
+  const [reply] = await redisPipeline([["EVAL", WAIT_PRUNE, 2, listKey(sid, productId), endsKey(sid, productId), now(), WAIT_DROP_ENDED]]);
+  if (!Array.isArray(reply) || reply.length % 2 !== 0 || reply.length > 2 * WAIT_DROP_ENDED || reply.some((v) => typeof v !== "string")) return null;
+  const places: { email: string; raw: string; entry: WaitEntry }[] = [];
+  for (let i = 0; i < reply.length; i += 2) {
+    const entry = parseEntry(reply[i + 1]);
+    // Dropped already: a place that no longer reads keeps its room, the room erring fuller.
+    if (entry) places.push({ email: reply[i] as string, raw: reply[i + 1] as string, entry });
+  }
+  if (places.length) {
+    const gone = repliesFor(await redisPipeline(places.map(({ entry }) => ["DEL", tokenKey(entry.t)])), places.length);
+    const known = places.filter((_, i) => {
+      const n = gone ? countOf(gone[i]) : null;
+      return n !== null && n <= 1;
+    });
+    const back = known.reduce((sum, p) => sum + placeBytes(sid, productId, p.email, p.raw), 0);
+    if (back > 0) await giveData(store, [{ slot: waitSlot(productId), bytes: back }]);
+  }
+  return reply.length / 2;
+}
 
 /** What a link is for, without using it: for the page that shows its button. */
 export async function readWaitToken(token: string): Promise<TokenGrant | null> {
@@ -383,19 +463,22 @@ export async function readWaitToken(token: string): Promise<TokenGrant | null> {
 
 /**
  * Writes a confirmed waitlist entry back only while its confirmation link still exists and the entry still holds what
- * it was read with, in one step (#4268, #2576): KEYS[1] the link, KEYS[2] the waitlist; ARGV[1] the address, ARGV[2]
- * the entry, ARGV[3] the entry as it was read. Answers 1 written, 0 not. Billed as one EVAL and the calls inside it,
- * at most WAIT_CONFIRM_CALLS; lib/redis-memory.ts runs the same check in one step.
+ * it was read with, in one step (#4268, #2576): KEYS[1] the link, KEYS[2] the waitlist, KEYS[3] its index of
+ * unconfirmed places; ARGV[1] the address, ARGV[2] the entry, ARGV[3] the entry as it was read. A confirmed place
+ * leaves the index in the same step, so it never takes a join's turn to drop an ended place (WAIT_PRUNE). Answers 1
+ * written, 0 not. Billed as one EVAL and the calls inside it, at most WAIT_CONFIRM_CALLS; lib/redis-memory.ts runs the
+ * same check in one step.
  */
 const WAIT_CONFIRM = [
-  "-- marktmorgen:waitlist-confirm:v2",
+  "-- marktmorgen:waitlist-confirm:v3",
   'if redis.call("EXISTS", KEYS[1]) == 0 or redis.call("HGET", KEYS[2], ARGV[1]) ~= ARGV[3] then return 0 end',
   'redis.call("HSET", KEYS[2], ARGV[1], ARGV[2])',
+  'redis.call("ZREM", KEYS[3], ARGV[1])',
   "return 1",
 ].join("\n");
 
-/** The most redis.call one run of WAIT_CONFIRM makes: EXISTS, HGET and HSET (tests/waitlist-confirm-cost.test.ts). */
-export const WAIT_CONFIRM_CALLS = 3;
+/** The most redis.call one run of WAIT_CONFIRM makes: EXISTS, HGET, HSET and ZREM (tests/waitlist-confirm-cost.test.ts). */
+export const WAIT_CONFIRM_CALLS = 4;
 
 /**
  * Public requests of the store's a press takes before it writes anything (#4404): the page the button is on pays one,
@@ -443,7 +526,7 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
     // is said not done, so it is pressed again.
     const grown = await countEntryGrowth(store, grant.s, grant.p, grant.e, raw as string, next);
     if (grown === null) return { ok: false };
-    const [written] = await redisPipeline([["EVAL", WAIT_CONFIRM, 2, tokenKey(token), listKey(grant.s, grant.p), grant.e, next, raw as string]]);
+    const [written] = await redisPipeline([["EVAL", WAIT_CONFIRM, 3, tokenKey(token), listKey(grant.s, grant.p), endsKey(grant.s, grant.p), grant.e, next, raw as string]]);
     // Written: a shrink goes back; an exact 0: what was counted goes back; anything else may have landed: it stays.
     await settleEntryWrite(store, grant.p, grown, written);
     if (written === 1) {
@@ -490,11 +573,14 @@ const leaveBytes = (sid: string, productId: string, email: string, token: string
  * and asking again rewrote it without counting what it grew by, so what it holds now was never what the slot holds for
  * it (Codex N1, and Claude 6's MEDIUM on #2576). The room only errs fuller.
  */
+/** A place's line in the index of unconfirmed places (WaitEntry.w 2): its address and a score in seconds. */
+const indexLineBytes = (email: string) => dataBytes([email, "0000000000"], 1);
+
 function placeBytes(sid: string, productId: string, email: string, raw: string): number {
   const entry = parseEntry(raw);
   // A place that does not read held no link counted, and was counted as it is (#4792), as before.
   if (!entry) return dataBytes([email, raw], 1);
-  return entry.w ? dataBytes([email, raw], 1) + leaveBytes(sid, productId, email, entry.t) : 0;
+  return entry.w ? dataBytes([email, raw], 1) + leaveBytes(sid, productId, email, entry.t) + (entry.w === 2 ? indexLineBytes(email) : 0) : 0;
 }
 
 /**
@@ -506,8 +592,10 @@ function placeBytes(sid: string, productId: string, email: string, raw: string):
 async function takeList(room: DataStore, sid: string, productId: string, at = Date.now()): Promise<boolean> {
   let places: [string, string][];
   try {
-    const [taken] = await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, listKey(sid, productId)]]);
+    // Its index of unconfirmed places goes with it, in the same pipeline, confirmed as exactly as the take.
+    const [taken, unindexed] = await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, listKey(sid, productId)], ["DEL", endsKey(sid, productId)]]);
     places = takenPairs(taken, "a launched waitlist's deletion");
+    if (!within(unindexed, 1)) throw new UnknownReplyError("a launched waitlist's index of unconfirmed places");
   } catch (error) {
     // Unknown whether the list went: nothing is given back, the room erring fuller, and the launch stays on the
     // queue (JOBS), unfinished, so the next run deletes it again (Claude 1 on #2576): a list already gone answers
@@ -559,6 +647,7 @@ export async function leaveWaitlist(token: string, room?: DataStore | null): Pro
   const [taken] = await redisPipeline([
     ["EVAL", HASH_TAKE_FIELD, 1, listKey(grant.s, grant.p), grant.e],
     ["DEL", tokenKey(token)],
+    ["ZREM", endsKey(grant.s, grant.p), grant.e],
   ]);
   if (room && typeof taken === "string") await giveData(room, [{ slot: waitSlot(grant.p), bytes: placeBytes(grant.s, grant.p, grant.e, taken) }]);
   return true;
@@ -913,7 +1002,7 @@ export async function holdWaitlistDrop(sid: string | null | undefined, pid: stri
  * expiry, for a product nobody could buy or be told about.
  *
  * The mark goes first, in the same ordered pipeline as the DEL, so a join already past its check writes nothing after
- * it (WAIT_JOIN). Each reply is held to what it can be (0 or 1 for an SREM, 0 to 3 for the DEL of three keys); anything
+ * it (WAIT_JOIN). Each reply is held to what it can be (0 or 1 for an SREM, 0 to 4 for the DEL of four keys); anything
  * else throws (rule 24, #4462). The note holdWaitlistDrop made goes only once all of that is confirmed: until then it is
  * what leads a deletion to the addresses.
  */
@@ -922,10 +1011,10 @@ export async function dropWaitlist(sid: string | null | undefined, pid: string, 
   const what = "the removal of a product's waitlist";
   const gone = repliesFor(await redisPipeline([
     ["SREM", soonKey(sid), pid],
-    ["DEL", listKey(sid, pid), sendKey(sid, pid), jobKey(sid, pid)],
+    ["DEL", listKey(sid, pid), sendKey(sid, pid), jobKey(sid, pid), endsKey(sid, pid)],
     ["SREM", JOBS, `${sid}|${pid}`],
   ]), 3);
-  if (!gone || !within(gone[0], 1) || !within(gone[1], 3) || !within(gone[2], 1)) throw new UnknownReplyError(what);
+  if (!gone || !within(gone[0], 1) || !within(gone[1], 4) || !within(gone[2], 1)) throw new UnknownReplyError(what);
   // The room its addresses and their links took (joinWaitlist), given back as dropThanksNote gives back its own.
   if (room) await giveData(room, [{ slot: `wl:${pid}`, bytes: 0, set: true }]);
   const released = repliesFor(await redisPipeline([["SREM", droppingKey(sid), pid]]), 1);
@@ -1039,6 +1128,11 @@ export async function forgetWaitlistPerson(sid: string | null, ids: string[], em
   if (room && freed.length) await giveData(room, freed);
   const blanked = await blankInLists(productIds.map((p) => sendKey(sid, p)), address);
   if (replies.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError(what);
+  // The address goes from each list's index of unconfirmed places too, each reply read exactly (0 or 1).
+  if (productIds.length) {
+    const unindexed = repliesFor(await redisPipeline(productIds.map((p) => ["ZREM", endsKey(sid, p), address])), productIds.length);
+    if (!unindexed || unindexed.some((reply) => !within(reply, 1))) throw new UnknownReplyError(what);
+  }
   return freed.length + blanked;
 }
 

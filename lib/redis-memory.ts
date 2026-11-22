@@ -1227,28 +1227,70 @@ export class MemoryRedis {
           return 1;
         }
         // lib/waitlist.ts WAIT_CONFIRM: a waitlist entry written back only while its confirmation link exists and the entry still holds what was read.
-        if (key.startsWith("-- marktmorgen:waitlist-confirm:v2\n") && args[0] === "2" && args.length === 6) {
-          const [, link, list, email, entry, read] = args;
+        if (key.startsWith("-- marktmorgen:waitlist-confirm:v3\n") && args[0] === "3" && args.length === 7) {
+          const [, link, list, index, email, entry, read] = args;
           this.scriptCalls += 1;
           if (this.run(["EXISTS", link]) === 0) return 0;
           this.scriptCalls += 1;
           if (this.run(["HGET", list, email]) !== read) return 0;
           this.run(["HSET", list, email, entry]);
           this.scriptCalls += 1;
+          this.run(["ZREM", index, email]);
+          this.scriptCalls += 1;
           return 1;
         }
         // lib/waitlist.ts WAIT_JOIN: a join's place written only while its product is still coming soon (#4462).
-        // -1 when no longer coming soon; "" as the place read writes only if still absent (HSETNX), else only over it.
-        if (key.startsWith("-- marktmorgen:waitlist-join:v2\n") && args[0] === "2" && args.length === 7) {
-          const [, soon, list, product, email, read, entry] = args;
+        // -1 when no longer coming soon; "" as the place read writes only if still absent and under the ceiling (-2 at
+        // it), else only over the place read; an unconfirmed place's end goes into the index of unconfirmed places.
+        if (key.startsWith("-- marktmorgen:waitlist-join:v3\n") && args[0] === "3" && args.length === 10) {
+          const [, soon, list, index, product, email, read, entry, max, ends] = args;
           this.scriptCalls += 1;
           if (this.run(["SISMEMBER", soon, product]) === 0) return -1;
-          this.scriptCalls += 1;
-          if (read === "") return this.run(["HSETNX", list, email, entry]);
-          if (this.run(["HGET", list, email]) !== read) return 0;
+          if (read === "") {
+            this.scriptCalls += 1;
+            if (this.run(["HEXISTS", list, email]) === 1) return 0;
+            this.scriptCalls += 1;
+            if ((this.run(["HLEN", list]) as number) >= Number(max)) return -2;
+          } else {
+            this.scriptCalls += 1;
+            if (this.run(["HGET", list, email]) !== read) return 0;
+          }
           this.run(["HSET", list, email, entry]);
           this.scriptCalls += 1;
+          if (ends !== "") {
+            this.run(["ZADD", index, Number(ends), email]);
+            this.scriptCalls += 1;
+          }
           return 1;
+        }
+        // lib/waitlist.ts WAIT_PRUNE: up to `most` unconfirmed places of the index whose confirm link ended by `now` are
+        // dropped, each answered with the place as kept; a place confirmed, gone or unreadable only loses its index line.
+        if (key.startsWith("-- marktmorgen:waitlist-prune:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, list, index, nowText, most] = args;
+          const out: string[] = [];
+          const due = this.run(["ZRANGEBYSCORE", index, "-inf", Number(nowText), "LIMIT", 0, Number(most)]) as string[];
+          this.scriptCalls += 1;
+          for (const who of due) {
+            const raw = this.run(["HGET", list, who]) as string | null;
+            this.scriptCalls += 1;
+            if (raw !== null) {
+              let entry: Record<string, unknown> | null = null;
+              try {
+                const value = JSON.parse(raw) as unknown;
+                entry = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+              } catch {
+                entry = null;
+              }
+              if (entry && entry.ok === 0 && entry.w === 2) {
+                this.run(["HDEL", list, who]);
+                this.scriptCalls += 1;
+                out.push(who, raw);
+              }
+            }
+            this.run(["ZREM", index, who]);
+            this.scriptCalls += 1;
+          }
+          return out;
         }
         // lib/contacts.ts CAS_HSET: each contact set only while it still holds what was read (its SHA-1, "" for none), in one step.
         if (key.startsWith("-- marktmorgen:contact-cas-hset:v1\n") && args[0] === "1" && args.length >= 5 && (args.length - 2) % 3 === 0) {

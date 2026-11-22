@@ -76,7 +76,8 @@ async function main(): Promise<void> {
   // Joined as this PR writes a place (w: 1), its room taken; the confirmation email is not this test's subject, so its
   // link is written here as joinWaitlist writes it.
   await joinWaitlist({ store, product, email: "bo@example.com", consent: false, clicks: false, ip: "10.0.0.9", origin: "https://marktmorgen.com" });
-  is("Bo's place is written with its mark", parseEntry(redis.run(["HGET", listKey, "bo@example.com"]))?.w, 1);
+  // w 2 since an unconfirmed place also has a line in the index of unconfirmed places (lib/waitlist.ts, endsKey).
+  is("Bo's place is written with its mark", parseEntry(redis.run(["HGET", listKey, "bo@example.com"]))?.w, 2);
   const confirm = "e".repeat(48);
   redis.run(["SET", waitlistTokenKey(confirm), JSON.stringify({ s: sid, h: store.handle, p: product.id, e: "bo@example.com", k: "confirm" }), "EX", CONFIRM_SECONDS]);
   const joined = held() - base;

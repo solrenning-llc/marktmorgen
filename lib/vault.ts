@@ -41,6 +41,7 @@
  *   nl:vault:ctl:<hash>:abort  its first cancel, and that cancel's answer
  *   nl:vault:fresh:<hash>  an upload that was finished and not yet attached (FRESH_UPLOAD_SECONDS)
  */
+import { deletable } from "@/lib/held-files";
 import { createHash, randomBytes } from "node:crypto";
 import { type AwsKey, EMPTY_HASH, hashOf, presignV4, signV4 } from "@/lib/aws-sign";
 import { VAULT_TIMEOUT_MS, VAULT_WRITE_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
@@ -589,10 +590,14 @@ export async function headVault(pathname: string): Promise<{ bytes: number; cont
 
 /** Deletes these files. True when every one is gone, or was never there. */
 export async function deleteVault(pathnames: string[]): Promise<boolean> {
+  // A file kept for a child-safety report stays (lib/held-files.ts); a mark that cannot be read deletes nothing.
+  const free = await deletable(pathnames).catch(() => null);
+  if (!free) return false;
+  if (!free.length) return true;
   const config = vaultConfig();
   if (!config) return false;
   let all = true;
-  for (const pathname of pathnames) {
+  for (const pathname of free) {
     if (!isVaultPath(pathname)) continue;
     const answer = await ask(config, "DELETE", objectUrl(config, pathname));
     if (answer.status !== 204 && answer.status !== 200 && answer.status !== 404) all = false;

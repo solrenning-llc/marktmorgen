@@ -45,6 +45,7 @@ import { PDFDocument, PDFName, PDFOperator, PDFOperatorNames, degrees, rgb } fro
 import fontkit from "@pdf-lib/fontkit";
 import { loadFonts } from "@/lib/certificate-pdf";
 import { deleteFile, headFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
+import { isFileHeld } from "@/lib/held-files";
 import { VAULT_PREFIX, isVaultPath, keyName } from "@/lib/vault-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -392,6 +393,9 @@ export async function stampedDelivery(
   meter: CopyMeter,
 ): Promise<StampedDelivery> {
   if (!isStampable(file) || !sale.reference || !sale.email) return ORIGINAL;
+  // A file kept for a child-safety report is copied for nobody, kept copy, new or on the fly (lib/held-files.ts): the
+  // caller then serves the original, which refuses it; a mark that cannot be read copies nothing either.
+  if (await isFileHeld(file.pathname).catch(() => true)) return ORIGINAL;
   if (file.bytes > MAX_STAMP_BYTES) {
     await noteProblem(file.pathname, "too_big");
     return ORIGINAL;

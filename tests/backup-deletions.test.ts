@@ -39,6 +39,9 @@ const dayList = () => `nl:backup:del:${today()}`;
 const countKey = (folder: string) => `nl:backup:delcount:${folder}:${month()}`;
 
 let commands: unknown[][] = [];
+// The deletion records' own commands: a delete batch also reads its files' child-safety marks first (lib/held-files.ts
+// deletable, one pipelined GET of nl:csa:file:, #3480), which is not a record and is counted apart.
+const recordCommands = () => commands.filter((c) => !(c[0] === "GET" && String(c[1]).startsWith("nl:csa:file:")));
 let inject: ((list: unknown[][]) => unknown) | null = null;
 const realPipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (list: unknown[][]) => {
@@ -102,7 +105,7 @@ async function main(): Promise<void> {
   reset(false);
   await deleteFile([blobFile(F, "a.pdf"), vaultFile(F, "b.pdf")]);
   is("both files are deleted, as before", [deletionWorld.deleted, vaultDeletes], [[[blobFile(F, "a.pdf")]], [vaultFile(F, "b.pdf")]]);
-  is("no database command at all", commands.length, 0);
+  is("no database command at all, but the child-safety marks read before any delete", recordCommands().length, 0);
 
   part("on: one record for each file deleted from a store's folder, after its deletion");
   reset();
@@ -188,7 +191,7 @@ async function main(): Promise<void> {
   reset();
   setDeletionRecordsReview(false);
   await deleteFile([blobFile(F, "a.pdf"), vaultFile(F, "b.pdf")]);
-  is("no record review: both files deleted, no record and no database command", [deletionWorld.deleted.flat(), vaultDeletes, commands.length], [[blobFile(F, "a.pdf")], [vaultFile(F, "b.pdf")], 0]);
+  is("no record review: both files deleted, no record and no database command", [deletionWorld.deleted.flat(), vaultDeletes, recordCommands().length], [[blobFile(F, "a.pdf")], [vaultFile(F, "b.pdf")], 0]);
 
   part("a record never weighs more than RECORD_BYTES_MOST (Claude 2, MEDIUM 2 on #3349)");
   reset();

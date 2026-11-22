@@ -13,7 +13,7 @@ import { countHit } from "@/lib/visit";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
 import { affiliateCookieName, attributionOrPending, pendingChannel } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { readProduct } from "@/lib/catalog";
 import { chargeNow } from "@/lib/call-deposit";
 import { packageFor, payBookTimes } from "@/lib/book-page-admission";
@@ -125,7 +125,9 @@ export async function POST(request: NextRequest) {
   // Each try holds a time for half an hour while Stripe's page is open, so
   // one connection gets fifteen in ten minutes per store: enough to change
   // one's mind many times, not enough to hold a creator's whole week.
-  if (!(await withinLimit("book", `${clientAddress(request)}|${store.handle}`, 15, 600))) return back("slow");
+  const room = await withinLimit("book", `${clientAddress(request)}|${store.handle}`, 15, 600).catch(unknownLimit);
+  if (room === "unknown") return back("error");
+  if (!room) return back("slow");
   // The times it reads (lib/calls.ts, holdAndCheckout: readBusy) and the request itself are paid for before anything is
   // read from Stripe (review of #3478; lib/book-page-admission.ts): a package proved bought for this call books from the
   // buyers' reserve, anything else from the public side, held and given back when refused. Past them, nothing is read.
@@ -189,13 +191,19 @@ export async function POST(request: NextRequest) {
   // The session counts against the package from now; if another tab took the
   // last one meanwhile, this time is let go again.
   if (prepared && prepared.ok && prepared.checkout) {
-    const counted = await holdSession(store, prepared.checkout, result.session, Math.floor(Date.now() / 1000) + HOLD_SECONDS).catch(() => false);
-    if (!counted) {
+    // false is a package read with no session left; a hold that could not be read or written is unknown (null), told
+    // as "try again", never as "no sessions left" (Codex X6's LOW on #2617, 7052207176).
+    const counted = await holdSession(store, prepared.checkout, result.session, Math.floor(Date.now() / 1000) + HOLD_SECONDS).catch((error: unknown) => {
+      console.error("Counting a package session failed (pkg-error):", error instanceof Error ? error.message : error);
+      return null;
+    });
+    if (counted !== true) {
+      const reason = counted === false ? "pkg-used" : "pkg-error";
       // This request opened that checkout: it is closed at Stripe even if the hold cannot be read, and a failure is logged.
       await releaseOwnHold(store, result.session, { openedHere: true }).catch((error: unknown) => {
-        console.error("Call hold could not be released (pkg-used):", error instanceof Error ? error.message : error);
+        console.error(`Call hold could not be released (${reason}):`, error instanceof Error ? error.message : error);
       });
-      return back("pkg-used");
+      return back(reason);
     }
   }
   after(() => countHit(request, store, { kind: "checkout", id: product.id }));

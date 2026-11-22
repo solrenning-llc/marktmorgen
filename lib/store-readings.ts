@@ -35,6 +35,8 @@ import { UnknownReplyError, countOf, replyList, repliesFor } from "@/lib/redis-r
 import { keyFor } from "@/lib/stripe-account";
 import { KEEP_UNLESS_ERASED, suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Store, ensureListId, storeRef } from "@/lib/store";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
+import { KEEP_UNLESS_ERASED_LIVE, keepUnlessErasedWhileLive } from "@/lib/store-live-copy";
 import { type SalesStats, type Stats, type StatsData, readSales, readStats, readsSales, studioStats } from "@/lib/stats";
 import { type Numbers, membershipCacheKey, membershipNumbersNamed, withoutMemberWords } from "@/lib/membership-numbers";
 
@@ -46,8 +48,15 @@ export const READING_KEEP_SECONDS = 86_400;
 /** The largest reading kept, in bytes; one larger is read each time, from the budget. */
 export const READING_COPY_MAX_BYTES = 131_072;
 
-export type ReadingKind = "stats" | "sales" | "members";
-export const READING_KINDS: readonly ReadingKind[] = ["stats", "sales", "members"];
+export type ReadingKind = "stats" | "sales" | "members" | "earnings";
+/** Every kind kept; each copy is priced in the store-readings line (tests/plan-cost-registry.ts), READING_KINDS.length of them. */
+export const READING_KINDS: readonly ReadingKind[] = ["stats", "sales", "members", "earnings"];
+/**
+ * The kinds that read the store's sales (every PayPal sale and refund record, lib/read-ceilings.ts SALES_READ_SHAPE):
+ * each takes one of the day's HEAVY_READINGS_PER_DAY. The twelve months of earnings (lib/earnings-read.ts) are one,
+ * read within the same shape (426 [BX2]), so the line's two heavy readings a day price them.
+ */
+export const HEAVY_KINDS: ReadonlySet<ReadingKind> = new Set<ReadingKind>(["sales", "earnings"]);
 
 const copyKey = (kind: ReadingKind, statsId: string) => `nl:reading:${kind}:${statsId}`;
 const dayKey = (statsId: string, day: string) => `nl:reading:day:${statsId}:${day}`;
@@ -185,6 +194,12 @@ export type Kept<T> = { value: T; at: number; stale: boolean; failed?: boolean; 
  * SALES_READ_SHAPE); lib/redis-memory.ts runs it the same way.
  */
 export const READING_COPY = KEEP_UNLESS_ERASED;
+/**
+ * READING_COPY for a whole store, fenced on its erasure in the same step (Codex L-20261119-2235): the shared
+ * KEEP_UNLESS_ERASED_LIVE (lib/store-live-copy.ts), run by keepUnlessErasedWhileLive. Billed 2 more than
+ * READING_COPY (GET, HGET; lib/read-ceilings.ts, READING_LIVE_FENCE_COMMANDS).
+ */
+export const READING_COPY_LIVE = KEEP_UNLESS_ERASED_LIVE;
 
 /**
  * Who a reading names by their address, for keeping it (READING_COPY): the
@@ -206,9 +221,25 @@ export type ReadingGuard<T> = {
  * was spent; inbox C4-53): the last one kept is shown, stale and `failed`, or
  * ReadingFailed is thrown when there is none. One that stopped before calling
  * anyone (NotRead) gives its unit back. With a `guard` naming people, it is
- * kept by READING_COPY, never over someone deleted since `read` looked.
+ * kept by READING_COPY, never over someone deleted since `read` looked. With
+ * `accept`, a kept copy it refuses (the earnings of another time zone) is
+ * taken as none at all, never shown fresh or stale (review of #3022).
  */
-export async function keptReading<T>(store: Pick<Store, "statsId">, kind: ReadingKind, read: () => Promise<T>, now = Date.now(), fresh = false, guard?: ReadingGuard<T>): Promise<Kept<T> | null> {
+/** A store as a reading is kept for: a whole one is fenced on its erasure; one given by its statsId alone is not. */
+type ReadingStore = Pick<Store, "statsId"> & Partial<Pick<Store, "email" | "sid" | "extra">>;
+const fenced = (store: ReadingStore): store is Pick<Store, "statsId" | "email" | "sid" | "extra"> =>
+  typeof store.email === "string" && typeof store.sid === "string" && typeof store.extra === "boolean";
+
+/**
+ * A copy written only while the store is live, the copy otherwise left as it was (lib/store-live-cache.ts); a
+ * store given by its statsId alone, a plain SET.
+ */
+async function keepCopy(store: ReadingStore, key: string, text: string): Promise<void> {
+  if (fenced(store)) await setWhileStoreLive(store, key, text, READING_KEEP_SECONDS).catch(() => "unknown");
+  else await redisPipeline([["SET", key, text, "EX", READING_KEEP_SECONDS]]).catch(() => {});
+}
+
+export async function keptReading<T>(store: ReadingStore, kind: ReadingKind, read: () => Promise<T>, now = Date.now(), fresh = false, guard?: ReadingGuard<T>, accept?: (value: unknown) => boolean): Promise<Kept<T> | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const key = copyKey(kind, store.statsId);
   let kept: Kept<T> | null = null;
@@ -216,13 +247,13 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     const [raw] = await redisPipeline([["GET", key]]);
     if (typeof raw === "string" && raw) {
       const parsed = JSON.parse(raw) as { at?: unknown; value?: unknown; unnamed?: unknown };
-      if (typeof parsed.at === "number" && parsed.value !== undefined) kept = { value: parsed.value as T, at: parsed.at, stale: false, ...(parsed.unnamed === true ? { unnamed: true } : {}) };
+      if (typeof parsed.at === "number" && parsed.value !== undefined && (!accept || accept(parsed.value))) kept = { value: parsed.value as T, at: parsed.at, stale: false, ...(parsed.unnamed === true ? { unnamed: true } : {}) };
     }
   } catch {
     kept = null;
   }
   if (kept && !fresh && now - kept.at < READING_FRESH_SECONDS * 1000) return kept;
-  if (!(await takeStoreReading(store, now, kind === "sales"))) {
+  if (!(await takeStoreReading(store, now, HEAVY_KINDS.has(kind)))) {
     if (kept) return { ...kept, stale: true };
     throw new ReadingsUsed();
   }
@@ -231,7 +262,7 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     value = await read();
   } catch (error) {
     if (error instanceof NotRead) {
-      await giveStoreReading(store, now, kind === "sales");
+      await giveStoreReading(store, now, HEAVY_KINDS.has(kind));
       if (kept) return { ...kept, stale: true };
       throw error;
     }
@@ -242,7 +273,7 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
   if (value === null || value === undefined || Buffer.byteLength(text, "utf8") > READING_COPY_MAX_BYTES) return { value, at: now, stale: false };
   const names = guard ? [...new Set(guard.names(value))] : [];
   if (!guard || !names.length) {
-    await redisPipeline([["SET", key, text, "EX", READING_KEEP_SECONDS]]).catch(() => {});
+    await keepCopy(store, key, text);
     return { value, at: now, stale: false };
   }
   // No list to look them up in: kept and shown naming nobody (review of 2c1af02e0). Safe: an erasure always gives
@@ -250,7 +281,7 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
   // is never one an erasure has to undo.
   if (!guard.listId) {
     const unnamed = guard.without(value, new Set(names));
-    await redisPipeline([["SET", key, JSON.stringify({ at: now, value: unnamed, unnamed: true }), "EX", READING_KEEP_SECONDS]]).catch(() => {});
+    await keepCopy(store, key, JSON.stringify({ at: now, value: unnamed, unnamed: true }));
     return { value: unnamed, at: now, stale: false, unnamed: true };
   }
   // Kept only when nobody it names was deleted meanwhile, checked where it is written (READING_COPY). Someone was:
@@ -263,6 +294,11 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     return { value: guard.without(value, new Set(names)), at: now, stale: false };
   };
   try {
+    if (fenced(store)) {
+      // The store gone or erasing answers every name: shown naming nobody, nothing kept.
+      const gone = await keepUnlessErasedWhileLive(store, key, listId, text, READING_KEEP_SECONDS, names);
+      return gone.size ? { value: guard.without(value, gone), at: now, stale: false } : { value, at: now, stale: false };
+    }
     const replies = repliesFor(await redisPipeline([["EVAL", READING_COPY, 2, key, suppressedKey(listId), text, READING_KEEP_SECONDS, ...names.map((e) => suppressionPrint(listId, e))]]), 1);
     // Each place read from the list's own slots (lib/redis-reply.ts), as keepUnlessErased does: a hole or a getter is
     // not a place, where Array#every would skip a hole (review of #2865).

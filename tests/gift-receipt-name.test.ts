@@ -14,6 +14,7 @@ import { paidPeriod } from "./billing-period-fixture";
 
 type Sent = { to: string[]; subject: string; text: string };
 const emails: Sent[] = [];
+const notFound = new Set<string>();
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
@@ -24,6 +25,14 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const method = init?.method ?? "GET";
   if (path === "/checkout/sessions" && method === "POST") return new Response(JSON.stringify({ id: `cs_test_${"n".repeat(24)}`, url: "https://checkout.stripe.com/c/pay/test" }));
   if (path === "/refunds") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
+  // The gift's payment, read before it is given (lib/gifts.ts, deliverGift; #4408): paid, its charge neither refunded
+  // nor disputed, as Stripe answers GET /payment_intents/{id}?expand[]=latest_charge. One in `notFound` answers 404.
+  const intent = /^\/payment_intents\/(pi_[A-Za-z0-9]+)$/.exec(path)?.[1];
+  if (intent && method === "GET") {
+    if (notFound.has(intent)) return new Response(JSON.stringify({ error: { message: `No such payment_intent: '${intent}'` } }), { status: 404 });
+    const charge = { object: "charge", id: `ch_${intent.slice(3)}`, payment_intent: intent, amount: 900, amount_refunded: 0, refunded: false, disputed: false, status: "succeeded", paid: true };
+    return new Response(JSON.stringify({ id: intent, object: "payment_intent", amount: 900, amount_received: 900, currency: "usd", status: "succeeded", latest_charge: charge }));
+  }
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${method} ${path}` } }), { status: 404 });
 }) as typeof fetch;
 
@@ -68,6 +77,17 @@ async function main(): Promise<void> {
   const named = await give("Ana", "Happy birthday!", 2);
   is("the recipient's email", named.friend.subject, "Ana sent you a gift: Pantry Checklist");
   is("the receipt", named.receipt.text.includes("We emailed friend@example.com just now, with your name, your message and a link to open it."), true);
+
+  part("A payment Stripe does not answer for is unknown: nothing is given and nothing is sent (rule 24)");
+  notFound.add("pi_GiftName0003");
+  let threw = false;
+  try {
+    await give("Bo", "", 3);
+  } catch {
+    threw = true;
+  }
+  is("the gift is not given on a payment that could not be read", [threw, emails.length], [true, 0]);
+  notFound.delete("pi_GiftName0003");
 
   part("The same in every language of a store");
   const phrases: Record<string, [string, string]> = { es: ["tu nombre", "tu mensaje"], fr: ["votre nom", "votre message"], de: ["Ihrem Namen", "Ihrer Nachricht"], it: ["il tuo nome", "il tuo messaggio"], nl: ["je naam", "je bericht"], pt: ["o seu nome", "a sua mensagem"] };

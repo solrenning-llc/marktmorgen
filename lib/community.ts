@@ -275,6 +275,22 @@ const POST_SLOT = (post: string) => `cm:p:${post}`;
 const MEMBERS_SLOT = "cm:m";
 /** A like, a vote or a member key in a set: its member and Redis's own. */
 export const SET_ENTRY_BYTES = 96;
+
+/**
+ * What deleting a post or a comment may spend, beyond what their items' own actions paid for. Deleting is uncounted
+ * (app/api/store/community/route.ts UNCOUNTED; lib/buyer-actions.ts): every post, comment, like, vote and report
+ * was a buyer action, priced at a hundred commands and 60 KB including "its deletion later" (tests/plan-cost-registry.ts,
+ * buyer-actions). So a deletion spends a fixed part of plain commands (DELETE_POST_COMMANDS for a post: the reads of
+ * its comments, likers and voters, the four deletes, the read and the delete of its index; DELETE_THREAD_COMMANDS for
+ * a comment and its replies: the read of the comments, the four deletes and the three reads that reindex the post)
+ * and the room's own scripts, two reads a comment (DELETE_COMMENT_COMMANDS: who liked it, who reported it), one SREM
+ * a member with every entry of theirs at once, never one an entry, and one ZREM a word the index drops, which its
+ * writing added once; at the most DELETE_ITEM_COMMANDS an item, far under the hundred (tests/community-delete-cost.test.ts).
+ */
+export const DELETE_POST_COMMANDS = 9;
+export const DELETE_THREAD_COMMANDS = 8;
+export const DELETE_COMMENT_COMMANDS = 2;
+export const DELETE_ITEM_COMMANDS = 3;
 /** What a post counts for: its record, its two places in the feeds, and its words. */
 function postBytes(post: Post): number {
   // A post's picture keeps a mark for as long as the post keeps it (lib/community-files.ts, PICTURE_MARK_BYTES):
@@ -1215,12 +1231,8 @@ export async function deletePost(id: string, post: Post, room: DataStore): Promi
     ["ZREM", spaceKey(id, post.sp), post.id],
     ["ZREM", reportsKey(id), ...targets],
   ]);
-  // Only what really left a trace gives its room back, in batches a request carries.
-  let left = 0;
-  for (let i = 0; i < entries.length; i += TRACE_BATCH) {
-    const gone = await redisPipeline(entries.slice(i, i + TRACE_BATCH).map(([who, ref]) => ["SREM", traceKey(id, who), ref]));
-    left += gone.filter((one) => Number(one) === 1).length;
-  }
+  // Only what really left a trace gives its room back: one SREM a member, with every entry of theirs (DELETE_ITEM_COMMANDS).
+  const left = await dropTraces(id, entries);
   if (left) await giveData(room, [{ ...TRACE_ENTRY, bytes: left * TRACE_ENTRY.bytes }]);
   await unindexPost(id, post.id).catch((error) => {
     console.error("taking a deleted post out of the search index failed", error);
@@ -1635,13 +1647,9 @@ export async function deleteComment(id: string, post: string, comment: Comment, 
     ["HDEL", commentsKey(id, post), ...gone],
     ["DEL", ...gone.map((c) => commentLikesKey(id, post, c))],
     ["ZREM", reportsKey(id), ...gone.map((c) => `c:${post}:${c}`)],
-    ...gone.map((c) => ["DEL", reportersKey(id, `c:${post}:${c}`)]),
+    ["DEL", ...gone.map((c) => reportersKey(id, `c:${post}:${c}`))],
   ]);
-  let left = 0;
-  for (let i = 0; i < entries.length; i += TRACE_BATCH) {
-    const out = await redisPipeline(entries.slice(i, i + TRACE_BATCH).map(([who, ref]) => ["SREM", traceKey(id, who), ref]));
-    left += out.filter((one) => Number(one) === 1).length;
-  }
+  const left = await dropTraces(id, entries);
   // Each like took SET_ENTRY_BYTES of the post's slot (toggleIn): it comes back with the comment.
   await giveData(room, [{ slot: POST_SLOT(post), bytes: freed + likes * SET_ENTRY_BYTES }, ...(left ? [{ ...TRACE_ENTRY, bytes: left * TRACE_ENTRY.bytes }] : [])]);
   await reindexComments(id, post);
@@ -1828,6 +1836,23 @@ export async function forgetMemberRecord(id: string, who: string, raw: string | 
 
 /** Commands sent at once while reading a whole community for one member's copy. */
 const TRACE_BATCH = 500;
+
+/**
+ * Takes the entries out of their members' traces, one SREM a member with every entry of theirs (so a deletion spends
+ * one command a member, never one an entry), in batches a request carries; how many entries really left, so only
+ * their room is given back. An unreadable count is no entry left (rule 24): the room stays taken, never given twice.
+ */
+async function dropTraces(id: string, entries: [string, string][]): Promise<number> {
+  const byMember = new Map<string, string[]>();
+  for (const [who, ref] of entries) byMember.set(who, [...(byMember.get(who) ?? []), ref]);
+  const members = [...byMember];
+  let left = 0;
+  for (let i = 0; i < members.length; i += TRACE_BATCH) {
+    const gone = await redisPipeline(members.slice(i, i + TRACE_BATCH).map(([who, refs]) => ["SREM", traceKey(id, who), ...refs]));
+    for (const one of gone) if (Number.isSafeInteger(Number(one)) && Number(one) > 0) left += Number(one);
+  }
+  return left;
+}
 
 export type MemberTraces = {
   posts: { post: string; space: string; title: string; text: string; at: number; edited: number; hidden: boolean }[];

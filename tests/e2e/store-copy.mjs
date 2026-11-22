@@ -257,10 +257,12 @@ try {
       // same-origin _rsc fetch, and only once the document is leaving, is dropped; every other failure still throws.
       // beforeunload can be canceled (the page's own unload protection, which Playwright's dialog handling answers
       // by staying): a failure after it waits for the decision. pagehide is the real unload, and drops it. The document
-      // stays when the harness says so (window.__mmStayed: a goto or reload that failed, and the sweep over every
-      // open page before "no page threw"; a leave a dialog or a newer navigation canceled reaches that sweep, since a
-      // failed navigation request alone cannot tell a stay from a leave replaced by a newer one) or when pageshow
-      // restores it from the back/forward cache; then the failure is thrown (Codex V's MEDIUM on #4844). The decision
+      // stays when the harness says so (window.__mmStayed: a goto or reload that failed, a beforeunload dialog
+      // answered by staying, and the sweep over every open page before "no page threw"; a failed navigation request
+      // alone says nothing, since a navigation a newer one replaced fails its request while the page leaves), when a
+      // second attempt to leave begins, or when pageshow restores it from the back/forward cache; then the failure is
+      // thrown (Codex V's MEDIUM on #4844; Claude 4 AC on #5059: a leave canceled long ago must never swallow a
+      // later, real failure). The decision
       // is never a clock: until 21 November 2026 a fixed second decided it, and a navigation whose new document took
       // longer than that to arrive (1.1 s in the merge-queue run of #3774) threw the cut-off with the old document
       // still alive, although it left a moment later.
@@ -273,7 +275,9 @@ try {
         resolveLeave = undefined;
       };
       addEventListener("beforeunload", () => {
-        if (leaving || pendingLeave) return;
+        if (leaving) return;
+        // A second attempt to leave proves the first one did not: whatever waited on it is thrown now.
+        if (pendingLeave) finishLeave(false);
         pendingLeave = new Promise((resolve) => { resolveLeave = resolve; });
       });
       addEventListener("pagehide", () => finishLeave(true));
@@ -312,9 +316,10 @@ try {
         },undefined,{timeout:60000});
         await page.evaluate(()=>{delete window.__mmRscIdleSince;});
       };
-      // The document stayed: a failure that waited for the leave is thrown now (window.__mmStayed above). Only a
-      // goto or reload the harness itself saw fail says so here; a failed request of the main frame would also be
-      // reported for a navigation a newer one replaced (net::ERR_ABORTED), where the page is in fact leaving.
+      // The document stayed: a failure that waited for the leave is thrown now (window.__mmStayed above). A goto or
+      // reload the harness itself saw fail says so, and so does a beforeunload dialog answered by staying; a failed
+      // request of the main frame would also be reported for a navigation a newer one replaced (net::ERR_ABORTED),
+      // where the page is in fact leaving, so it says nothing.
       const stayed = () => page.isClosed() ? Promise.resolve() : page.evaluate(() => window.__mmStayed?.()).catch(() => undefined);
       const navigated = async (navigate) => {
         let response;
@@ -322,6 +327,13 @@ try {
         if (response === null) await stayed();
         return response;
       };
+      // A beforeunload dialog is answered by staying, as Playwright answers every dialog when nobody listens, and the
+      // page is told it stayed. Any other dialog is left to the step that waits for it (growth-contact, path-reminder);
+      // with no such step, it is dismissed as before.
+      page.on("dialog", (dialog) => {
+        if (dialog.type() === "beforeunload") { void dialog.dismiss().then(stayed, () => undefined); return; }
+        if (page.listenerCount("dialog") <= 1) void dialog.dismiss().catch(() => undefined);
+      });
       const goto=page.goto.bind(page),reload=page.reload.bind(page),resize=page.setViewportSize.bind(page),close=page.close.bind(page);
       page.goto=async (...args)=>{await settle();return navigated(()=>goto(...args));};
       page.reload=async (...args)=>{await settle();return navigated(()=>reload(...args));};

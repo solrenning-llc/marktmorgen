@@ -85,7 +85,38 @@ test("a leave whose new document takes longer than any clock still drops the cut
   assert.equal(page.window.__mmNavigationRsc?.[0]?.done, true);
 });
 
-test("the harness says \"stayed\" where it knows it: a failed goto or reload and the sweep before \"no page threw\", never a failed navigation request", () => {
+test("a leave canceled long ago never swallows a later, real failure (Claude 4 AC on #5059)", async () => {
+  // The unload protection answers the beforeunload dialog by staying: the harness tells the page it stayed.
+  const page = environment();
+  page.fire("beforeunload");
+  page.window.__mmStayed?.();
+  await idle();
+  const result = observe(page.window.fetch("/studio?_rsc=synthetic"));
+  await idle();
+  assert.equal(result(), failed, "a failure with the document fully alive is reported at once");
+  // Much later the test clicks to another page: nothing waits on that leave.
+  page.fire("pagehide");
+  await idle();
+  assert.equal(result(), failed);
+});
+
+test("a second attempt to leave proves the first one did not: a failure that waited on it is thrown", async () => {
+  const page = environment();
+  page.fire("beforeunload");
+  const stale = observe(page.window.fetch("/studio?_rsc=stale"));
+  await idle();
+  assert.equal(stale(), "pending");
+  page.fire("beforeunload");
+  await idle();
+  assert.equal(stale(), failed, "the earlier failure belongs to a document that stayed");
+  const cut = observe(page.window.fetch("/studio?_rsc=cut"));
+  await idle();
+  page.fire("pagehide");
+  await idle();
+  assert.equal(cut(), "pending", "the fetch the second leave cut off is dropped");
+});
+
+test("the harness says \"stayed\" where it knows it: a failed goto or reload, a beforeunload dialog answered by staying, and the sweep before \"no page threw\", never a failed navigation request", () => {
   const harness = source.slice(last);
   assert.match(harness, /const stayed = \(\) => page\.isClosed\(\) \? Promise\.resolve\(\) : page\.evaluate\(\(\) => window\.__mmStayed\?\.\(\)\)/);
   assert.match(harness, /catch \(error\) \{ await stayed\(\); throw error; \}/);
@@ -93,6 +124,8 @@ test("the harness says \"stayed\" where it knows it: a failed goto or reload and
   assert.match(harness, /page\.goto=async \(\.\.\.args\)=>\{await settle\(\);return navigated\(\(\)=>goto\(\.\.\.args\)\);\};/);
   assert.match(harness, /page\.reload=async \(\.\.\.args\)=>\{await settle\(\);return navigated\(\(\)=>reload\(\.\.\.args\)\);\};/);
   assert.doesNotMatch(harness, /requestfailed/, "a navigation a newer one replaced also fails its request while the page leaves");
+  assert.match(harness, /if \(dialog\.type\(\) === "beforeunload"\) \{ void dialog\.dismiss\(\)\.then\(stayed, \(\) => undefined\); return; \}/);
+  assert.match(harness, /if \(page\.listenerCount\("dialog"\) <= 1\) void dialog\.dismiss\(\)\.catch\(\(\) => undefined\);/, "any other dialog is left to the step that waits for it, or dismissed as Playwright would");
   const sweep = harness.indexOf("window.__mmStayed?.(); return new Promise((resolve) => setTimeout(resolve, 0));");
   const verdict = harness.indexOf('is("no page threw", errors, []);');
   assert.ok(sweep >= 0 && verdict > sweep, "every open page is told it stayed right before the verdict");

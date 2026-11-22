@@ -335,9 +335,59 @@ export function readDoor(get: (name: string) => string): Door | null {
 // ---------------------------------------------------------------- refunds
 
 const REFUND_LOOKBACK_SECONDS = 30 * 86_400;
-const REFUND_PAGES = 3;
+/** Pages of refunds (100 each) one pass reads from the creator's account, at the most. */
+export const REVIEW_REFUND_PAGES = 3;
+const REFUND_PAGES = REVIEW_REFUND_PAGES;
 const anchorKey = (statsId: string) => `nl:rev:refunds:since:${statsId}`;
 const seenKey = (statsId: string) => `nl:rev:refunds:seen:${statsId}`;
+/**
+ * How often a store's pass runs, at the most: its turn is taken with one SET NX EX held this long (takeReviewPass), as
+ * the certificates' pass does (lib/certificate-refunds.ts). Before 22/11/2026 the pass ran on every run of the
+ * five-minute sweep for every store with reviews (288 a day), re-reading the refunds of the last thirty days and
+ * the lost disputes each time: a spend with no line and no ceiling (Claude 1 c1-revcusto on #5092; MR). A refunded
+ * buyer's review is marked within this long of the refund, never sooner than the sweep's next run.
+ */
+export const REVIEW_REFUND_PASS_EVERY_SECONDS = 2 * 3_600;
+const nextKey = (statsId: string) => `nl:rev:refunds:next:${statsId}`;
+const NOT_DUE = "1";
+
+/**
+ * The stats ids of these stores whose review refund pass is due, read in one MGET for them all: a store's turn absent
+ * (nil) is due; one that reads NOT_DUE is not. A reply in any other shape, for one store or for all, runs none of
+ * those passes this run (CX-123 rule 24): nothing is marked and nothing is taken as seen, and the next run reads again.
+ * Only a store paid through Stripe with a stats id can have a pass.
+ */
+export async function reviewPassesDue(stores: Store[]): Promise<Set<string>> {
+  const due = new Set<string>();
+  if (!isRedisConfigured()) return due;
+  const sids = [...new Set(stores.filter((store) => store.stripeAccountId && store.statsId).map((store) => store.statsId as string))];
+  if (!sids.length) return due;
+  try {
+    const values = repliesFor(await redisPipeline([["MGET", ...sids.map(nextKey)]]), 1)?.[0];
+    if (!Array.isArray(values) || values.length !== sids.length) throw new UnknownReplyError("the turns for the reviews' refund pass");
+    values.forEach((value, i) => {
+      if (value === null) due.add(sids[i]);
+      else if (value !== NOT_DUE) console.error("a store's turn for the reviews' refund pass did not read; no pass this run");
+    });
+  } catch (error) {
+    console.error("the turns for the reviews' refund pass did not read; no pass this run", error instanceof Error ? error.name : typeof error);
+    return new Set();
+  }
+  return due;
+}
+
+/**
+ * Takes the store's turn for its pass, held REVIEW_REFUND_PASS_EVERY_SECONDS, with one SET NX EX read exactly: true
+ * when this run took it; false when another run holds it. Any other reply throws: no pass runs on a turn not known to
+ * be taken, so a pass never runs more often than its price says.
+ */
+export async function takeReviewPass(store: Store): Promise<boolean> {
+  if (!store.statsId || !isRedisConfigured()) return false;
+  const taken = repliesFor(await redisPipeline([["SET", nextKey(store.statsId), NOT_DUE, "NX", "EX", REVIEW_REFUND_PASS_EVERY_SECONDS]]), 1)?.[0];
+  if (taken === null) return false;
+  if (taken !== "OK") throw new UnknownReplyError("the store's turn for the reviews' refund pass");
+  return true;
+}
 
 /** Whether a store has any review, so the refund pass is worth a call to Stripe. */
 export async function storeHasReviews(store: Store): Promise<boolean> {
@@ -399,9 +449,15 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       const full = [...(lost?.rows ?? []), ...refunds]
         .filter((refund) => typeof refund.id === "string" && refund.id && rowGivesBack(refund))
         .map((refund) => ({ id: refund.id as string, created: typeof refund.created === "number" ? refund.created : 0, pi: idOf(refund.payment_intent) }));
-      const seen = full.length ? await redisPipeline(full.map((refund) => ["SISMEMBER", seenKey(statsId), refund.id])) : [];
+      // Which of them an earlier pass already took, in one command for the page (SMISMEMBER), read exactly: one flag
+      // a row, each 0 or 1; anything else is unknown, and the page is not handled this run (its anchor keeps).
+      const flags = full.length ? repliesFor(await redisPipeline([["SMISMEMBER", seenKey(statsId), ...full.map((refund) => refund.id)]]), 1)?.[0] : [];
+      if (!Array.isArray(flags) || flags.length !== full.length || !flags.every((flag) => countOf(flag) === 0 || countOf(flag) === 1)) {
+        throw new UnknownReplyError("which of the refunds' rows were already read");
+      }
+      const seen = flags as unknown[];
       for (const [i, refund] of full.entries()) {
-        if (Number(seen[i]) !== 1) {
+        if (countOf(seen[i]) !== 1) {
           if (INTENT_ID.test(refund.pi)) marked += await markRefunded(statsId, refund.pi, fence);
           // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
           await redisPipeline([

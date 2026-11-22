@@ -62,6 +62,7 @@ import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
 import { CERTIFICATE_PASS_EVERY_SECONDS, CERTIFICATE_REFUND_CHECKS_PER_MONTH, CERTIFICATE_REFUND_PAGES_PER_STORE, CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH } from "@/lib/certificate-refunds";
 import { LOST_DISPUTE_PAGES } from "@/lib/refunds";
+import { REVIEW_REFUND_PAGES, REVIEW_REFUND_PASS_EVERY_SECONDS } from "@/lib/review-proof";
 import { RECEIPT_BATCH_SHAPE } from "@/lib/receipt-batch";
 import { monthlyEmails, type Tier } from "@/lib/plan";
 import { BESIDE_SAVE_COMMANDS } from "@/lib/store-data";
@@ -2011,6 +2012,65 @@ export function certificatePassMonthUsd(tier: Tier): number {
   return turns + runs + checks + retries;
 }
 
+
+/**
+ * The reviews' refund pass (lib/review-proof.ts markRefundedReviews, in the five-minute checkout sweep for every store
+ * paid through Stripe with a review): reads the refunds made on the creator's account since its last complete pass and
+ * marks every review a fully refunded payment paid for. Priced since 22/11/2026 (Claude 1 c1-revcusto on #5092: a
+ * spend with no line, MR). Until then it ran on every run of the sweep, 288 a day a store, re-reading the last thirty
+ * days' refunds and the lost disputes each time with one SISMEMBER a row.
+ *
+ * Runs a month at the most, on the store's turn (REVIEW_REFUND_PASS_EVERY_SECONDS): the days a billing month touches,
+ * and one more for a turn that lapses at its edge.
+ */
+export const REVIEW_REFUND_PASS_RUNS = Math.ceil((DAY_WINDOWS * 86_400) / REVIEW_REFUND_PASS_EVERY_SECONDS) + 1;
+/** The sweep reads every store's turn each run (one MGET a batch, a slot a store): 288 runs a day for the month's days. */
+export const REVIEW_REFUND_TURN_READS = DAY_WINDOWS * 288;
+/** One store's slot in that MGET: its key asked and its turn answered. */
+export const REVIEW_REFUND_TURN_BYTES = 128;
+/**
+ * Commands one run of the pass sends outside its refunds, at the most: the turn's SET NX EX, the store's SISMEMBER
+ * (whether it has a review), the anchor's GET, the lost disputes' place (GET, and its SET or DEL), one SMISMEMBER a
+ * page of refunds (the rows already read, one command a page whatever the page holds), one SMISMEMBER of the lost
+ * disputes handled, and the anchor's SET with the read refunds' EXPIRE (tests/review-refund-sweep-cost.test.ts
+ * measures a pass under it).
+ */
+export const REVIEW_REFUND_RUN_COMMANDS = 1 + 1 + 1 + 2 + REVIEW_REFUND_PAGES + 1 + 2;
+/** Stripe pages one run waits on, at the most: the refunds' and the lost disputes', each EXPORT_PAGE_SECONDS at 2 GB. */
+export const REVIEW_REFUND_RUN_PAGES = REVIEW_REFUND_PAGES + LOST_DISPUTE_PAGES;
+/** The ids asked and the flags answered for every row of those pages, at most 64 bytes each way. */
+export const REVIEW_REFUND_RUN_BYTES = 2 * 100 * REVIEW_REFUND_RUN_PAGES * 64;
+/** Commands one refunded payment costs outside its reviews: its reviews' list (HGET) and the refund taken as seen (SADD, EXPIRE). */
+export const REVIEW_REFUND_PAYMENT_COMMANDS = 1 + 2;
+/**
+ * Billed commands one review's mark costs, at the most (lib/reviews.ts markRefunded, creatorChange): the product's lock
+ * (SET NX), the review's HGET, its write (HSET, ZREM, ZADD) with the AI summary's going (SET, ZREMRANGEBYSCORE) when
+ * it was counted, the product's HGETALL and its numbers' HSET, and the lock's release (an EVAL of three calls, billed
+ * four). Since the sweep's marks go through the store's fence (lib/live-fence.ts WRITE_IF_STORE_LIVE, Codex
+ * L-20261120-0838): the write and the numbers' HSET each as one EVAL with the fence's two reads (HGET, GET), three
+ * more each. The same test measures one mark under it.
+ */
+export const REVIEW_REFUND_MARK_COMMANDS = 1 + 1 + 5 + 2 + 4 + 6;
+/** Bytes one mark moves through the database, at the most: the review read and written again, and the product's reviews read for its numbers. */
+export const REVIEW_REFUND_MARK_BYTES = 3 * 8_192;
+/**
+ * Commands the store page's "What buyers say" refresh costs once a pass that marked something (lib/store-quotes.ts
+ * refreshStoreQuotes): the newest reviews read (three commands and one HMGET a product among them), each product's
+ * listing, and the quotes kept under the store's lock. Measured by the same test.
+ */
+export const REVIEW_REFUND_QUOTES_COMMANDS = 60;
+/**
+ * The most the pass costs one store on a plan in a month, in dollars: its turns read, its runs (commands, the Stripe
+ * pages waited on, the rows' bytes, and the quotes' refresh once a run), and every payment of the month refunded (MR:
+ * all of its orders, each with the most products an order hands over and a review of each), its reviews marked.
+ */
+export function reviewRefundSweepMonthUsd(tier: Tier): number {
+  const turns = REVIEW_REFUND_TURN_READS * REVIEW_REFUND_TURN_BYTES * DB_BYTE;
+  const runs = REVIEW_REFUND_PASS_RUNS * ((REVIEW_REFUND_RUN_COMMANDS + REVIEW_REFUND_QUOTES_COMMANDS) * COMMAND + REVIEW_REFUND_RUN_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND + REVIEW_REFUND_RUN_BYTES * DB_BYTE);
+  const marks = ORDERS_INCLUDED[tier] * ((REVIEW_REFUND_PAYMENT_COMMANDS + MAX_DELIVERED * REVIEW_REFUND_MARK_COMMANDS) * COMMAND + MAX_DELIVERED * REVIEW_REFUND_MARK_BYTES * DB_BYTE);
+  return turns + runs + marks;
+}
+
 /** CX-61: two bounded provider reads, independent of released-name history.
  * Vercel's official regional table read 2026-11-04 has a highest memory rate
  * of $0.0183/GB-hour. Use it for this row while deployment region is unknown.
@@ -2228,6 +2288,22 @@ export const COST_LINES: CostLine[] = [
       { file: "vercel.json", names: ["/api/cron/mail", "*/5 * * * *"] },
     ],
     basis: "One store on a plan, a calendar month of DAY_WINDOWS days (the pass runs for any store paid through Stripe with a course, whatever its plan). Every run of the five-minute sweep reads the turns of its batch of stores in one MGET (a company fixed cost of the sweep, one command a batch whatever the number of stores), of which a store's share is CERTIFICATE_TURN_BYTES; a store whose pass is not due costs no command of its own. At most CERTIFICATE_PASS_RUNS passes, one each CERTIFICATE_PASS_EVERY_SECONDS (the store's turn, SET NX EX), at CERTIFICATE_PASS_RUN_COMMANDS and CERTIFICATE_PASS_RUN_BYTES each (CERTIFICATE_REFUND_PAGES_PER_STORE GET /refunds and LOST_DISPUTE_PAGES GET /events, Stripe bills no API call). No look at the store's courses: only the courses a refunded checkout gave are read. Every row looked up (at most CERTIFICATE_REFUND_LOOKUPS_PER_STORE a pass: 2 GET /refunds?charge and 1 GET /checkout/sessions, and the buyer's checkouts as courseStandingFor reads them) asks Stripe only until a course its checkout gave is read: each such course takes one of the plan's CERTIFICATE_REFUND_CHECKS_PER_MONTH before anything is read for it, and each row one before it is marked handled, each at CERTIFICATE_PASS_CHECK_COMMANDS and a listing and 16 KB of records; past them the pass waits for the next month at that row. A row that took its checks and was left unknown waits its age, between CERTIFICATE_REFUND_RETRY_SECONDS and CERTIFICATE_REFUND_RETRY_MAX_SECONDS, before it takes any again; it is tried again after every row read for the first time in the pass, and takes its checks from the month's checks, its first take in the pass also counted in the part of them kept for rows tried again (CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH, let through only while it is not spent before it), each such take at CERTIFICATE_RETRY_TAKE_COMMANDS; past that part it waits for the next month. The pass's time is inside CERTIFICATE_REFUND_PASS_MS of the sweep's run, whose schedule bounds it (a company fixed cost). Each reply read in its exact shape.",
+  },
+  {
+    id: "review-refund-sweep",
+    feature: "Reviews marked as refunded when their payment is given back: the checkout sweep's pass on the creator's refunds and lost disputes (Claude 1 c1-revcusto on #5092, 22/11/2026)",
+    monthlyUsd: (tier) => reviewRefundSweepMonthUsd(tier),
+    sources: [
+      { file: "lib/review-proof.ts", names: ["REVIEW_REFUND_PASS_EVERY_SECONDS", "REVIEW_REFUND_PAGES", "reviewPassesDue", "takeReviewPass", "markRefundedReviews", "SMISMEMBER", "refreshStoreQuotes(store)"] },
+      { file: "lib/reviews.ts", names: ["markRefunded", "creatorChange", "payMembers"] },
+      { file: "lib/checkout-sweep.ts", names: ["reviewPassesDue(stores.slice(skip))", "takeReviewPass(store)", "markRefundedReviews(store, deadline)"] },
+      { file: "lib/refunds.ts", names: ["LOST_DISPUTE_PAGES", "confirmLostRead"] },
+      { file: "lib/bundle-rules.ts", names: ["MAX_DELIVERED"] },
+      { file: "lib/order-rules.ts", names: ["ORDERS_INCLUDED"] },
+      { file: "app/api/cron/mail/route.ts", names: ["sweepCheckouts"] },
+      { file: "vercel.json", names: ["/api/cron/mail", "*/5 * * * *"] },
+    ],
+    basis: "One store on a plan, a calendar month of DAY_WINDOWS days (the pass runs for any store paid through Stripe with a review, whatever its plan). Every run of the five-minute sweep reads the turns of its batch of stores in one MGET (a slot a store, REVIEW_REFUND_TURN_BYTES). A store's pass runs on its turn, held REVIEW_REFUND_PASS_EVERY_SECONDS, so REVIEW_REFUND_PASS_RUNS times a month at the most; each run sends REVIEW_REFUND_RUN_COMMANDS commands outside its refunds, waits on REVIEW_REFUND_RUN_PAGES Stripe pages at EXPORT_PAGE_SECONDS each, moves REVIEW_REFUND_RUN_BYTES through the database, and refreshes the store page's quotes once when it marked something (REVIEW_REFUND_QUOTES_COMMANDS, counted on every run). The worst month (MR) refunds every order of the plan (ORDERS_INCLUDED), each paid for the most products an order hands over (MAX_DELIVERED) with a review of each: a payment costs REVIEW_REFUND_PAYMENT_COMMANDS and each of its reviews REVIEW_REFUND_MARK_COMMANDS and REVIEW_REFUND_MARK_BYTES. No Stripe fee for a read is charged today; the Stripe endpoint tariff stays unknown (not certified zero), as for every other Stripe read in this registry.",
   },
   {
     id: "platform-subscription-search",

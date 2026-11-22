@@ -66,7 +66,7 @@ import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-cod
 import { bondsBuyers } from "@/lib/affiliate-bond";
 import { creditsContacts } from "@/lib/affiliate-setting";
 import { revokeRefunded, storeHasKeys } from "@/lib/licence-keys";
-import { markRefundedReviews, storeHasReviews } from "@/lib/review-proof";
+import { markRefundedReviews, reviewPassesDue, storeHasReviews, takeReviewPass } from "@/lib/review-proof";
 import { listensToSales, noteSales } from "@/lib/sale-events";
 import { putOnList, listedAlready } from "@/lib/buyer-list";
 import { rememberBuyers } from "@/lib/buyer-library";
@@ -551,7 +551,9 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
   }
   if (reviewed) {
     try {
-      counts.unrated += await markRefundedReviews(store, deadline);
+      // On the store's turn only (lib/review-proof.ts, REVIEW_REFUND_PASS_EVERY_SECONDS): a turn taken is held, so the
+      // pass never runs more often than its line prices (tests/plan-cost-registry.ts, review-refund-sweep).
+      if (await takeReviewPass(store)) counts.unrated += await markRefundedReviews(store, deadline);
     } catch (error) {
       console.error("reading a store's refunds for reviews failed", store.handle, error);
     }
@@ -892,6 +894,8 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
     const { stores, next } = await storesAfter(cursor);
     // Whose certificates' refund pass is due, read once for the batch (lib/certificate-refunds.ts; focal review of #3409, ALTO 2).
     const certificatesDue = await certificatePassesDue(stores.slice(skip));
+    // Whose reviews' refund pass is due, read once for the batch too (lib/review-proof.ts, reviewPassesDue).
+    const reviewsDue = await reviewPassesDue(stores.slice(skip));
     let done = 0;
     for (const store of stores) {
       if (done < skip) {
@@ -905,7 +909,7 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
         continue;
       }
       swept.add(id);
-      const reviewed = Boolean(store.stripeAccountId) && (await storeHasReviews(store).catch(() => false));
+      const reviewed = Boolean(store.stripeAccountId && store.statsId && reviewsDue.has(store.statsId)) && (await storeHasReviews(store).catch(() => false));
       const asks = Boolean(store.sid) && requesting.has(store.sid);
       if (worthAsking(store, asks) || reviewed || store.paypalSeller || store.paypalPast) {
         counts.stores += 1;

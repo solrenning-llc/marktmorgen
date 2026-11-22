@@ -1047,6 +1047,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rlm:@lib/request-guard.ts": short("Monthly counts by their scope, kept at least as long as their window (windowKeySeconds)", "day", 63, 128),
   "nl:rev:ask:due@lib/review-ask.ts": company("Review asks due", "One sorted set for every store: each an order's, gone when asked."),
   "nl:rev:link:@lib/review-proof.ts": short("A review link, sixty days", "monthly", 60, LINK_BYTES, MAIL("review ask")),
+  "nl:rev:refunds:next:@lib/review-proof.ts": { what: "The store's turn for the reviews' refund pass", parts: [capped(KEY, "One a store: \"1\" while its pass is not due, for two hours.")] },
   "nl:rev:refunds:seen:@lib/review-proof.ts": { what: "Refunds already handled for reviews", parts: [capped(64 * KB, "Sixty-one days after the last one read.")] },
   "nl:rev:refunds:since:@lib/review-proof.ts": { what: "How far refunds were read", parts: [capped(KEY, "One a store.")] },
   "nl:none@lib/review-requests.ts": company("A key that is never written", "Read in place of a list a store does not have."),

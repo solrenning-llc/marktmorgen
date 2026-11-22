@@ -1,11 +1,13 @@
 /**
  * The WebKit leave guard of tests/e2e/store-copy.mjs (#4844) drops a same-origin RSC fetch failure only when the page
  * really leaves (Codex V's MEDIUM on #4844, C1-20261117-2340-todos-1 item 2). beforeunload can be canceled: a fetch
- * that failed in the grace second of a leave the page refused must still reach "no page threw" once the document
- * stays; pagehide confirms the leave, pageshow restores reporting, and any other failure throws at once.
+ * that failed after a leave the page refused must still reach "no page threw" once the harness says the document
+ * stayed; pagehide confirms the leave, pageshow restores reporting, and any other failure throws at once. No clock
+ * decides it: a navigation whose new document takes longer than any fixed grace to arrive still drops the cut-off
+ * fetch (21 November 2026, the merge-queue run of #3774: the new document took 1.1 s and the old guard threw at 1 s).
  *
  * The test runs the browser initializer itself, cut from the e2e file, in node:vm with a synthetic fetch, events and
- * timers: no browser, network or real page.
+ * timers: no browser, network or real page. The harness side (what says "stayed") is checked in the source.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -21,7 +23,7 @@ const origin = "https://example.test";
 const failed = new TypeError("synthetic fetch failure");
 const idle = () => new Promise((resolve) => setImmediate(resolve));
 
-type Page = { window: { fetch: (input: string) => Promise<unknown>; __mmNavigationRsc?: { done: boolean }[] }; fire: (name: string) => void; advance: () => void };
+type Page = { window: { fetch: (input: string) => Promise<unknown>; __mmNavigationRsc?: { done: boolean }[]; __mmStayed?: () => void }; fire: (name: string) => void; advance: () => void };
 
 function environment(): Page {
   const events = new Map<string, () => void>();
@@ -57,14 +59,82 @@ test("the browser initializer is found in tests/e2e/store-copy.mjs", () => {
   assert.ok(first >= 0 && last > first, "the browser initializer was located");
 });
 
-test("a canceled leave still reports a fetch failure that arrived in its grace second", async () => {
+test("a canceled leave still reports a fetch failure once the harness says the document stayed", async () => {
+  const page = environment();
+  page.fire("beforeunload");
+  const result = observe(page.window.fetch("/studio?_rsc=synthetic"));
+  await idle();
+  assert.equal(result(), "pending");
+  assert.equal(typeof page.window.__mmStayed, "function", "the harness can say the document stayed");
+  page.window.__mmStayed?.();
+  await idle();
+  assert.equal(result(), failed);
+});
+
+test("a leave whose new document takes longer than any clock still drops the cut-off fetch", async () => {
   const page = environment();
   page.fire("beforeunload");
   const result = observe(page.window.fetch("/studio?_rsc=synthetic"));
   await idle();
   page.advance();
   await idle();
+  assert.equal(result(), "pending", "no timer decides that the document stayed");
+  page.fire("pagehide");
+  await idle();
+  assert.equal(result(), "pending");
+  assert.equal(page.window.__mmNavigationRsc?.[0]?.done, true);
+});
+
+test("a leave canceled long ago never swallows a later, real failure (Claude 4 AC on #5059)", async () => {
+  // The unload protection answers the beforeunload dialog by staying: the harness tells the page it stayed.
+  const page = environment();
+  page.fire("beforeunload");
+  page.window.__mmStayed?.();
+  await idle();
+  const result = observe(page.window.fetch("/studio?_rsc=synthetic"));
+  await idle();
+  assert.equal(result(), failed, "a failure with the document fully alive is reported at once");
+  // Much later the test clicks to another page: nothing waits on that leave.
+  page.fire("pagehide");
+  await idle();
   assert.equal(result(), failed);
+});
+
+test("a second attempt to leave proves the first one did not: a failure that waited on it is thrown", async () => {
+  const page = environment();
+  page.fire("beforeunload");
+  const stale = observe(page.window.fetch("/studio?_rsc=stale"));
+  await idle();
+  assert.equal(stale(), "pending");
+  page.fire("beforeunload");
+  await idle();
+  assert.equal(stale(), failed, "the earlier failure belongs to a document that stayed");
+  const cut = observe(page.window.fetch("/studio?_rsc=cut"));
+  await idle();
+  page.fire("pagehide");
+  await idle();
+  assert.equal(cut(), "pending", "the fetch the second leave cut off is dropped");
+});
+
+test("the harness says \"stayed\" where it knows it: a failed goto or reload, a beforeunload dialog answered by staying, and the sweep before \"no page threw\", never a failed navigation request", () => {
+  const harness = source.slice(last);
+  assert.match(harness, /const stayed = \(\) => page\.isClosed\(\) \? Promise\.resolve\(\) : page\.evaluate\(\(\) => window\.__mmStayed\?\.\(\)\)/);
+  assert.match(harness, /catch \(error\) \{ await stayed\(\); throw error; \}/);
+  assert.match(harness, /if \(response === null\) await stayed\(\);/);
+  assert.match(harness, /page\.goto=async \(\.\.\.args\)=>\{await settle\(\);return navigated\(\(\)=>goto\(\.\.\.args\)\);\};/);
+  assert.match(harness, /page\.reload=async \(\.\.\.args\)=>\{await settle\(\);return navigated\(\(\)=>reload\(\.\.\.args\)\);\};/);
+  assert.doesNotMatch(harness, /requestfailed/, "a navigation a newer one replaced also fails its request while the page leaves");
+  const handler = harness.indexOf('page.on("dialog", (dialog) => {');
+  assert.ok(handler >= 0, "every page gets a dialog handler");
+  const body = harness.slice(handler, harness.indexOf("});", handler));
+  assert.match(body, /^\s*if \(page\.listenerCount\("dialog"\) > 1\) return;/m, "a dialog a step waits for is that step's to answer, beforeunload included (path-reminder accepts one)");
+  assert.ok(body.indexOf('listenerCount("dialog") > 1') < body.indexOf('dialog.type() === "beforeunload"'), "the step's own listener is checked before anything is answered");
+  assert.match(body, /if \(dialog\.type\(\) === "beforeunload"\) \{ void dialog\.dismiss\(\)\.then\(stayed, \(\) => undefined\); return; \}/);
+  assert.match(body, /void dialog\.dismiss\(\)\.catch\(\(\) => undefined\);/, "any other dialog is dismissed as Playwright would when nobody listens");
+  const sweep = harness.indexOf("window.__mmStayed?.(); return new Promise((resolve) => setTimeout(resolve, 0));");
+  const verdict = harness.indexOf('is("no page threw", errors, []);');
+  assert.ok(sweep >= 0 && verdict > sweep, "every open page is told it stayed right before the verdict");
+  assert.doesNotMatch(initialize, /setTimeout|leaveTimer/, "the initializer keeps no clock");
 });
 
 test("pagehide confirms a cut-off fetch, and pageshow restores error reporting", async () => {

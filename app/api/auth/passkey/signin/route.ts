@@ -5,7 +5,7 @@ import { LockBusyError } from "@/lib/redis-lock";
 import { repairMove } from "@/lib/move-repair";
 import { isRedisConfigured } from "@/lib/redis";
 import { UnknownReplyError } from "@/lib/redis-reply";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { PASSKEY_COOKIE, listPasskeys, pendingRemoval, signInOptions, signInWith, unlessSetToGo } from "@/lib/passkeys";
 import { cancelReset, endRecoveryAccess } from "@/lib/two-step";
 
@@ -36,7 +36,10 @@ export async function POST(request: NextRequest) {
   } catch {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
-  if (!(await withinLimit("passkey", clientAddress(request), TRIES, 10 * 60))) {
+  const room = await withinLimit("passkey", clientAddress(request), TRIES, 10 * 60).catch(unknownLimit);
+  // A count that could not be read is never "too many tries" (rule 24).
+  if (room === "unknown") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  if (!room) {
     return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
   }
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";

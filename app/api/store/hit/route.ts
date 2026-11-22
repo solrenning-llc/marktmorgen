@@ -5,7 +5,7 @@ import { countAffiliateClick, countHit, countVisit, isStorePeople } from "@/lib/
 import { isBot } from "@/lib/source-rules";
 import { funnelMark, stepIndex } from "@/lib/page-funnel";
 import { countFunnelStep, funnelVisitor, readPageFunnel } from "@/lib/page-funnel-store";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { browserProof } from "@/lib/bot-check";
 
 const MAX_BODY_BYTES = 1_500;
@@ -53,7 +53,8 @@ export async function POST(request: NextRequest) {
   // store at length never crowds out the steps they walk afterwards: one
   // person walks twenty at most.
   const allowance = kind === "f" ? (["hit-funnel", 60] as const) : (["hit", 120] as const);
-  if (!(await withinLimit(allowance[0], `${clientAddress(request)}|${store.handle}`, allowance[1], 600))) return done();
+  // Past the limit, or a count that could not be read (unknown, rule 24): not counted, and the answer is the same.
+  if ((await withinLimit(allowance[0], `${clientAddress(request)}|${store.handle}`, allowance[1], 600).catch(unknownLimit)) !== true) return done();
   // A page opened (a visit, another page, a funnel's step) is counted only when the host's check says a person's
   // browser sent this (lib/bot-check.ts, browserProof). A program, a check that failed or did not answer, is counted
   // nowhere: not toward the visits the store's plan covers, never in its numbers as a visit. What pages cost is still

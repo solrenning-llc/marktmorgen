@@ -881,7 +881,9 @@ async function main() {
         { told: 0, restarted: 0, failed: 1, dropped: 0 });
       is("the fixture reaches the nullable writer after one synthetic provider result",
         [created.length - before, refusedReads > 0], [1, true]);
-      is("no success or refusal email follows an unacknowledged write", emails.length, 0);
+      // Stripe may have started the plan while the store could not be written: the creator is told once to check
+      // before starting again, never that it started or that nothing was charged (tripla auditoria of #3671, MÉDIO).
+      is("an unacknowledged write after Stripe answered tells the creator once to check", emails.map((e) => e.subject), ["Your Marktmorgen plan restart needs a check"]);
       const [record, last, due] = await pipeline([
         ["GET", key], ["GET", year], ["ZSCORE", "nl:pause:due", ref],
       ]);
@@ -922,7 +924,7 @@ async function main() {
       is("the intervening subscription is preserved", current?.subscriptionId, changed !== "customer" ? "sub_ManualRestartRace01" : id);
       is("the intervening customer is preserved", current?.stripeCustomerId, changed === "customer" ? "cus_ChangedRestartRace01" : store.stripeCustomerId);
       is("the intervening active state is preserved", current?.subscriptionActive, changed === "subscription");
-      is("no restart success or refusal notice is sent", emails.length, 0);
+      is("no restart success or refusal notice; once, that it needs a check", emails.map((e) => e.subject), ["Your Marktmorgen plan restart needs a check"]);
       const [record, last, due] = await pauseRedis.pipeline([
         ["GET", key], ["GET", year], ["ZSCORE", "nl:pause:due", ref],
       ]);
@@ -934,7 +936,7 @@ async function main() {
       is("a changed inactive source remains held, out of the next due pass", await runBreaks(paused.record.until + 120),
         { told: 0, restarted: 0, failed: 0, dropped: 0 });
       is("a source mismatch performs no provider read or new charge", [providerCalls, created.length], [calls, beforeRetry]);
-      is("a source mismatch sends no later notice", emails.length, 0);
+      is("a source mismatch sends no later notice", emails.length, 1);
     }
     await undoPause(store, paused.record.until + 60);
   }
@@ -969,11 +971,11 @@ async function main() {
       is("plan mismatch retains exact pause and annual evidence, with only its attempt written", await pauseRedis.pipeline([["GET", key], ["GET", year]]), [withAttempt(evidence[0], paused.record.until + 60), evidence[1]]);
       const [due] = await pauseRedis.pipeline([["ZSCORE", "nl:pause:due", ref]]);
       is("plan mismatch retains due membership, past every batch's deadline", due, String(paused.record.until + PAUSE_HELD_OFFSET));
-      is("no false plan restart notice", emails.length, 0);
+      is("no false plan restart notice; once, that it needs a check", emails.map((e) => e.subject), ["Your Marktmorgen plan restart needs a check"]);
       const calls = providerCalls, charges = created.length;
       is("the changed plan stays held, out of the next due pass", await runBreaks(paused.record.until + 120),
         { told: 0, restarted: 0, failed: 0, dropped: 0 });
-      is("changed plan causes no later provider read or new charge", [providerCalls, created.length, emails.length], [calls, charges, 0]);
+      is("changed plan causes no later provider read, new charge or notice", [providerCalls, created.length, emails.length], [calls, charges, 1]);
     } finally { beforeRestartAnswer = null; }
     await undoPause(store, paused.record.until + 60);
   }

@@ -490,6 +490,34 @@ export class MemoryRedis {
           return this.run(["DEL", lock]);
         }
         // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
+        if (key.startsWith("-- marktmorgen:picture-bytes-give:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, target, rawBytes] = args;
+          const bytes = Number(rawBytes);
+          if (!Number.isSafeInteger(bytes) || bytes <= 0) return 0;
+          this.live(target);
+          const raw = this.data.get(target);
+          if (raw === undefined) return 1;
+          if (typeof raw !== "string") throw new Error("WRONGTYPE");
+          const count = Number(raw);
+          if (!/^\d+$/.test(raw) || !Number.isSafeInteger(count)) return 0;
+          if (count <= bytes) this.run(["DEL", target]); else this.run(["DECRBY", target, String(bytes)]);
+          return 1;
+        }
+
+        if (key.startsWith("-- marktmorgen:picture-bytes-take:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, target, rawBytes, rawLimit] = args;
+          const bytes = Number(rawBytes), limit = Number(rawLimit);
+          if (!Number.isSafeInteger(bytes) || bytes <= 0 || !Number.isSafeInteger(limit) || limit <= 0) return 0;
+          this.live(target);
+          const raw = this.data.get(target);
+          if (raw !== undefined && typeof raw !== "string") throw new Error("WRONGTYPE");
+          const count = raw === undefined ? 0 : Number(raw);
+          if (raw !== undefined && (!/^\d+$/.test(raw) || !Number.isSafeInteger(count))) return 0;
+          if (count + bytes > limit) return 0;
+          this.run(["INCRBY", target, String(bytes)]);
+          return 1;
+        }
+
         if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {
           const [, pass, token] = args;
           const held = this.run(["GET", pass]);

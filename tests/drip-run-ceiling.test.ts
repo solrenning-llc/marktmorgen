@@ -40,7 +40,10 @@ redis.pipeline = (async (commands: Cmd[]) => {
   return inject?.(commands) ?? original(commands);
 }) as typeof redis.pipeline;
 
-const NOW = Math.floor(Date.now() / 1000);
+// Pinned to 13:00 UTC of today (Claude 4 Z's diagnosis on #3344): the students are enrolled 36 hours before NOW, and
+// which of their pairs fall due "today" depends on where NOW sits in its UTC day. Read at the clock's own hour, a run
+// before 12:00 UTC found 43 due where the checks count 60 and 120, and the file failed or passed by the hour it ran.
+const NOW = Math.floor(Date.now() / 86_400_000) * 86_400 + 13 * 3600;
 const DRIP = "nl:courses:drip";
 const lesson = { id: "lesson000001", title: "First", preview: false, video: null, files: [], link: null, hasBody: false, quiz: null };
 const courseWith = (id: string) => ({ id, certificate: false, startsAt: null, modules: [{ id: "module000002", title: "Week two", dripDays: 1, lessons: [lesson] }] }) as unknown as Course;

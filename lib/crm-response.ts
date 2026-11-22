@@ -4,8 +4,11 @@ import { DEAL_ID, type Deal } from "@/lib/crm-rules";
 export type CrmCurrentDeal = { deal: Deal; version: string };
 /** A confirmed CRM change; `workflows` says whether a deal entering a stage had its workflow checked (lib/deal-stage-trigger.ts). */
 export type CrmAnswer =
-  /** `studioRequestsUsed`: a pipeline change that tidied up stages removed before says how many studio requests it used. */
-  | { ok: true; workflows?: "checked" | "not_checked"; studioRequestsUsed?: number }
+  /**
+   * `studioRequestsUsed`: a change of stages that read the deals says how many studio requests it used, or "some" to
+   * someone who does not see every pipeline (the number grows with deals they may not see).
+   */
+  | { ok: true; workflows?: "checked" | "not_checked"; studioRequestsUsed?: number | "some" }
   /** `message`: for "studio_used", the server's words for the figure, with when it opens again (lib/store-allowance.ts). */
   | { ok: false; error: string; current?: CrmCurrentDeal; message?: string };
 const REFUSALS = new Set(["title", "followup", "date", "assignee", "stage", "full", "unknown", "fields", "stages", "value", "invalid", "role", "origin", "signed_out", "locked", "store_gone", "none", "unavailable", "bad_request", "forbidden", "crm_deal_read_unavailable", "crm_schema_read_unavailable", "pipelines", "pipeline_limit", "pipeline_last", "moves", "stage_moves", "stage_gone", "crm_conflict", "deal_conflict", "pipeline_access", "store_full", "studio_used", "stale"]);
@@ -48,7 +51,7 @@ export function crmAnswer(responseOk: boolean, raw: unknown): CrmAnswer {
   if (!Object.hasOwn(answer, "ok")) return uncertain;
   if (responseOk && answer.ok === true && !Object.hasOwn(answer, "error")) {
     const used = answer.studioRequestsUsed;
-    const counted = typeof used === "number" && Number.isSafeInteger(used) && used > 0 ? { studioRequestsUsed: used } : {};
+    const counted: { studioRequestsUsed?: number | "some" } = (typeof used === "number" && Number.isSafeInteger(used) && used > 0) || used === "some" ? { studioRequestsUsed: used } : {};
     return answer.workflows === "checked" || answer.workflows === "not_checked" ? { ok: true, workflows: answer.workflows, ...counted } : { ok: true, ...counted };
   }
   if (answer.ok === false && typeof answer.error === "string" && REFUSALS.has(answer.error) && !["deal", "stages", "fields", "pipelines"].some(key => Object.hasOwn(answer, key))) {

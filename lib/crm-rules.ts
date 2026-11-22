@@ -571,7 +571,7 @@ export function pipelineTotals(pipeline: Pipeline, deals: readonly Deal[]): Pipe
  * savePipelineChange, which counts them and checks the change again).
  */
 export type PipelineChange =
-  /** `studioRequests`: what a compaction of the aliases took of the studio's requests, beyond the request's own (lib/crm.ts). */
+  /** `studioRequests`: what reading or rewriting the deals took of the studio's requests, beyond the request's own (lib/crm.ts). */
   | { ok: true; pipelines: Pipeline[]; moves: Record<string, string>; unsent: string[]; studioRequests?: number }
   /** `message`: for a change its studio's requests could not pay for, the figure's own words, with when it opens again. */
   | { ok: false; error: "pipelines" | "pipeline_limit" | "pipeline_last" | "unknown" | "moves" | "stage_moves" | "stage_gone" | "studio_used" | "unavailable"; message?: string };
@@ -579,16 +579,18 @@ export type PipelineChange =
 /**
  * A change to one pipeline, checked against the store's pipelines now: its
  * name and stages saved (a new id adds it), or (`remove`) the pipeline taken
- * away. `moves` says, for each stage that goes, which stage still kept its
- * deals go to; a stage that goes with deals in it and no such choice is
- * refused ("moves"), so a deal is never deleted or moved where the creator
- * did not say; for a pipeline removed, `moves` may be one stage for all of
- * its deals. `counts` is how many deals each stage shows now (a deal in a
- * stage taken away before counts where it shows, shownStage); a stage known
- * to hold none goes with no destination, and none is kept for it. With
- * `counts` null (the deals not read), a stage that goes with no destination
- * sent is listed in `unsent`, never given one: the caller counts the deals and
- * checks again. A destination sent is always checked. The name saved
+ * away. Every stage that goes keeps its id as an alias for where its deals
+ * now show (Pipeline.moved), so no deal ever stops showing, one written while
+ * the change is made included: the stage `moves` names (a stage kept), or,
+ * with none sent, the first open stage kept in its own pipeline (the default
+ * the board shows). For a pipeline removed, `moves` may be one stage for all
+ * of its deals; with none sent it goes only once its deals are counted
+ * (`counts`, how many each stage shows now) and it holds none, and its stages
+ * then show in the first open stage of the first pipeline left that the
+ * person may change (`mayEdit`), or of the first one; one that holds deals is
+ * refused ("moves"), so a deal is never moved where nobody chose. With
+ * `counts` null those stages are listed in `unsent`: the caller counts the
+ * deals and checks again. A destination sent is always checked. The name saved
  * must differ from every other pipeline's that the saver sees (`sees`, 639
  * [GL7](7)); one they may not see never refuses it, so a refusal never tells
  * them a hidden pipeline's name.
@@ -600,6 +602,7 @@ export function changePipeline(
   counts: ReadonlyMap<string, number> | null,
   limit: number,
   sees: (pipelineId: string) => boolean = () => true,
+  mayEdit: (pipelineId: string) => boolean = () => true,
 ): PipelineChange {
   let next: Pipeline[];
   let saved: Pipeline | null = null;
@@ -634,17 +637,29 @@ export function changePipeline(
   const asked = moves && typeof moves === "object" && !Array.isArray(moves) ? (moves as Record<string, unknown>) : {};
   const out: Record<string, string> = {};
   const unsent: string[] = [];
-  for (const stage of allStages(current)) {
-    if (kept.has(stage.id)) continue;
-    const held = counts === null ? null : (counts.get(stage.id) ?? 0);
-    if (held === 0) continue;
-    const target = typeof moves === "string" ? (moves === "" ? undefined : moves) : Object.hasOwn(asked, stage.id) ? asked[stage.id] : undefined;
-    if (target === undefined && held === null) {
-      unsent.push(stage.id);
-      continue;
+  const firstOpen = (pipeline: Pipeline | undefined) => pipeline?.stages.find((s) => s.kind === "open")?.id;
+  // A pipeline removed with nothing sent: the first open stage of the first pipeline left that the person may change,
+  // or of the first one left (then only a deal written while the empty pipeline goes lands there, never lost).
+  const fallback = firstOpen(checked.find((p) => mayEdit(p.id))) ?? firstOpen(checked[0]);
+  for (const pipeline of current) {
+    const stays = checked.find((p) => p.id === pipeline.id);
+    for (const stage of pipeline.stages) {
+      if (kept.has(stage.id)) continue;
+      const sent = typeof moves === "string" ? (moves === "" ? undefined : moves) : Object.hasOwn(asked, stage.id) ? asked[stage.id] : undefined;
+      let target: unknown = sent;
+      if (sent === undefined && stays) target = firstOpen(stays);
+      else if (sent === undefined) {
+        const held = counts === null ? null : (counts.get(stage.id) ?? 0);
+        if (held === null) {
+          unsent.push(stage.id);
+          continue;
+        }
+        if (held > 0) return { ok: false, error: "moves" };
+        target = fallback;
+      }
+      if (typeof target !== "string" || !kept.has(target)) return { ok: false, error: "moves" };
+      out[stage.id] = target;
     }
-    if (typeof target !== "string" || !kept.has(target)) return { ok: false, error: "moves" };
-    out[stage.id] = target;
   }
   return { ok: true, pipelines: checked, moves: out, unsent };
 }

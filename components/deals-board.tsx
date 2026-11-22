@@ -44,6 +44,9 @@ import {
   copyPipeline,
 } from "@/lib/crm-rules";
 
+/** The changes of pipelines and stages, whose refusal for the studio's requests says the stages did not change. */
+const PIPELINE_ACTIONS = new Set(["pipeline", "unpipeline", "stages"]);
+
 const MESSAGES: Record<string, string> = {
   title: "Give the deal a name.",
   followup: "Write a next action before setting its date. Keep it within 200 characters.",
@@ -58,6 +61,7 @@ const MESSAGES: Record<string, string> = {
   pipeline_limit: "Your store has all the pipelines it can keep now. Remove one to make another.",
   pipeline_last: "A store keeps at least one pipeline.",
   moves: "Choose where the deals of each stage you remove go.",
+  moves_reload: "Deals were added after this page was loaded, so nothing was saved. Reload the page to choose where they go.",
   stage_moves: "Some deals changed while this was being saved, so nothing was saved. Reload the page and try again.",
   stage_gone: "That stage was removed. Reload the page.",
   // Removing a stage with no destination reads the deals first, and many removed stages are tidied up by moving their
@@ -284,9 +288,10 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     gate.current.leave();
     setBusy(false);
     if (answer.ok) {
-      // A change that also moved, for good, the deals of stages removed earlier says what that used of the month.
+      // A change that read the deals (to check a removed pipeline was empty, or to move for good the deals of stages
+      // removed earlier) says what that used of the month: the number only to someone who sees every pipeline.
       const used = answer.studioRequestsUsed;
-      const said = used ? `${done} Deals in stages you removed earlier were moved for good too, which used ${used.toLocaleString("en-US")} of this month's studio requests.` : done;
+      const said = used === "some" ? `${done} Checking your deals for this used some of this month's studio requests.` : used ? `${done} Checking your deals for this used ${used.toLocaleString("en-US")} of this month's studio requests.` : done;
       toast(answer.workflows === "not_checked" ? `${said} The workflow for this stage was not started for this person.` : said);
       after?.();
       startRefresh(() => router.refresh());
@@ -323,7 +328,9 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
       answer.error === "pipeline_limit" && someHidden ? "Your store has all the pipelines it can keep now. Ask the store's owner if you need another."
         : answer.error === "deal_conflict" && body.action === "undeal" ? "Somebody else changed this deal a moment ago, so nothing was removed. Reload the page and look at it again."
         // The figure's own words say when the studio's requests open again (lib/store-allowance.ts, usedWords).
-        : answer.error === "studio_used" && answer.message ? `Nothing was saved, and nothing was lost: everything is as it was. ${answer.message}`
+        : answer.error === "studio_used" && answer.message ? `${PIPELINE_ACTIONS.has(String(body.action)) ? "Nothing was saved, and nothing was lost: your pipelines, stages and deals did not change." : "Nothing was saved, and nothing was lost: everything is as it was."} ${answer.message}`
+        // A stage removed with no choice shown (the board saw no deal in it) that holds deals now: the page is old.
+        : answer.error === "moves" ? MESSAGES.moves_reload
         : (MESSAGES[answer.error] ?? MESSAGES.server_error),
     );
   }
@@ -544,7 +551,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     const moveTo = holding ? pipelineDraft.removeTo || firstOpenElsewhere : "";
     if (holding && !moveTo) return showInvalid([PIPELINE_REMOVE_TO_ID], MESSAGES.moves);
     const next = pipelines.find(p => p.id !== pipeline.id)?.id ?? pipelines[0].id;
-    void run({ action: "unpipeline", id: pipeline.id, moveTo }, holding ? `Pipeline removed; its ${holding === 1 ? "deal was" : `${holding} deals were`} moved.` : "Pipeline removed.", () => { setPipelineId(next); closePipeline(`pipeline-tab-${next}`); }, undefined, "pipeline-remove", error => error === "moves" ? [PIPELINE_REMOVE_TO_ID] : []);
+    void run({ action: "unpipeline", id: pipeline.id, moveTo }, holding ? `Pipeline removed; its ${holding === 1 ? "deal was" : `${holding} deals were`} moved.` : "Pipeline removed.", () => { setPipelineId(next); closePipeline(`pipeline-tab-${next}`); }, undefined, "pipeline-remove", error => error === "moves" && holding ? [PIPELINE_REMOVE_TO_ID] : []);
   }
 
   // A change typed in the pipeline editor while it is being saved is not taken.

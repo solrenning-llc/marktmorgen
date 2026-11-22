@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/crm/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { DEAL_WIRE_BYTES, type StudioPayer, readDeal, readDealExact, readDeals, readOpportunityReview, readPipelines, readStageView, savePipelineChange, writeDeal } from "@/lib/crm";
+import { DEAL_WIRE_BYTES, PIPELINES_WIRE_BYTES, type StudioPayer, readDeal, readDealExact, readDeals, readOpportunityReview, readPipelines, readStageView, savePipelineChange, writeDeal } from "@/lib/crm";
 import { ALIAS_COMPACT_AT, DEFAULT_STAGES, FIRST_PIPELINE_ID, MAX_DEALS, MAX_DEAL_NOTE, MAX_DEAL_TITLE, MAX_PIPELINES, MAX_PIPELINE_NAME, MAX_STAGES, MAX_STAGE_MOVES, MAX_STAGE_NAME, type Deal, type Pipeline, copyPipeline, nextStageMoves, parseDeal, parsePipelines } from "@/lib/crm-rules";
 import { crmAnswer } from "@/lib/crm-response";
 import { writePipelineAccess } from "@/lib/pipeline-access";
@@ -41,8 +41,8 @@ const half = (n: number) => "\ud800".repeat(n);
 const widest = (id: string, stage: string) => ({ formResponseRef: "f".repeat(64), id, title: half(MAX_DEAL_TITLE), email: half(254), cents: 10_000_000_000, stage, note: half(MAX_DEAL_NOTE), nextAction: half(200), dueDate: "2026-12-31", assignee: half(254), createdAt: 9_007_199_254_740_991, updatedAt: 9_007_199_254_740_991 });
 const ids = Array.from({ length: MAX_DEALS }, (_, i) => "d" + String(i).padStart(9, "0"));
 /** A payer for the library's own calls: counts what it is asked for, and stops paying past `most` studio requests. */
-const paying = (most = Number.POSITIVE_INFINITY) => {
-  const book = { taken: 0, forced: 0, takes: 0 };
+const paying = (most = Number.POSITIVE_INFINITY, counts = true) => {
+  const book = { taken: 0, forced: 0, takes: 0, given: 0 };
   const payer: StudioPayer = {
     take: async (units) => {
       if (book.taken + units > most) return { ok: false, reason: "used", message: "This opens again on December 1 (UTC)." };
@@ -50,7 +50,12 @@ const paying = (most = Number.POSITIVE_INFINITY) => {
       book.taken += units;
       return { ok: true };
     },
-    force: async (units) => { book.forced += units; },
+    force: async (units) => {
+      if (!counts) return false;
+      book.forced += units;
+      return true;
+    },
+    give: async (units) => { book.given += units; book.taken -= units; },
   };
   return { payer, book };
 };
@@ -126,21 +131,22 @@ async function main(): Promise<void> {
   part("A removed stage's id is never a stage again");
   is("refused as a stage removed, nothing written", [await savePipelineChange(statsId, { pipeline: { ...withoutProposal, stages: [...withoutProposal.stages, { id: "ccall0", name: "Call booked", kind: "open" }] } }, {}, 2, ROOM), (await readPipelines(statsId))[1].stages.map((s) => s.id)], [{ ok: false, error: "stage_gone" }, ["cnew00", "cwon00", "clost0"]]);
 
-  part("A stage removed with no destination goes only once the deals show it holds none, and spends no alias");
-  const recordNow = (await redis.pipeline([["GET", pipesKey]]))[0];
+  part("A stage removed with no destination keeps an alias too: its deals show in the first open stage kept, none read");
   const withoutOffer = { ...sales, stages: sales.stages.filter((s) => s.id !== "offr00") };
-  is("not paid for: refused, nothing written (the deals are never read for free)", [await savePipelineChange(statsId, { pipeline: withoutOffer }, {}, 2, ROOM), (await redis.pipeline([["GET", pipesKey]]))[0] === recordNow], [{ ok: false, error: "unavailable", message: "This can't be counted right now. Try again in a minute." }, true]);
-  const empty = paying();
-  const goneEmpty = await savePipelineChange(statsId, { pipeline: withoutOffer }, {}, 2, ROOM, empty.payer);
-  is("paid: Offer sent holds no deal, so it goes with no alias", [goneEmpty.ok && goneEmpty.moves, (await readPipelines(statsId))[0].moved], [{}, { ccall0: "cnew00", cprop0: "cnew00" }]);
-  is(`the read took its studio requests first (${empty.book.taken} for ${MAX_DEALS.toLocaleString("en-US")} deals), and nothing past them`, [empty.book.taken > 0, empty.book.forced], [true, 0]);
-  const withoutNew = { ...withoutProposal, stages: withoutProposal.stages.filter((s) => s.id !== "cnew00").concat([{ id: "cnext0", name: "Next", kind: "open" }]) };
-  const keptNow = (await redis.pipeline([["GET", pipesKey]]))[0];
-  is("New, where every deal shows, with no destination: refused, nothing written", [await savePipelineChange(statsId, { pipeline: withoutNew }, {}, 2, ROOM, paying().payer), (await redis.pipeline([["GET", pipesKey]]))[0] === keptNow], [{ ok: false, error: "moves" }, true]);
+  const unread = paying();
+  const goneOffer = await savePipelineChange(statsId, { pipeline: withoutOffer }, {}, 2, ROOM, unread.payer);
+  is("Offer sent goes, shown in New, the first open stage kept in Sales, and no deal is read or paid for", [goneOffer.ok && goneOffer.moves, (await readPipelines(statsId))[0].moved, unread.book.takes], [{ offr00: "lead00" }, { ccall0: "cnew00", cprop0: "cnew00", offr00: "lead00" }, 0]);
+
+  part("A pipeline removed with no destination goes only once its deals, read and paid for, show it holds none");
+  const recordNow = (await redis.pipeline([["GET", pipesKey]]))[0];
+  is("not paid for: refused, nothing written (the deals are never read for free)", [await savePipelineChange(statsId, { remove: "coach0" }, "", 2, ROOM), (await redis.pipeline([["GET", pipesKey]]))[0] === recordNow], [{ ok: false, error: "unavailable", message: "This can't be counted right now. Try again in a minute." }, true]);
+  const held = paying();
+  is("paid: Coaching, where every deal shows, is refused with nothing written", [await savePipelineChange(statsId, { remove: "coach0" }, "", 2, ROOM, held.payer), (await redis.pipeline([["GET", pipesKey]]))[0] === recordNow], [{ ok: false, error: "moves" }, true]);
+  is(`the read took its studio requests first (${held.book.taken} kept for ${MAX_DEALS.toLocaleString("en-US")} deals, ${held.book.given} given back as the records were smaller than the most they can weigh), and nothing past them`, [held.book.taken > 0, held.book.forced], [true, 0]);
 
   part(`Past ${ALIAS_COMPACT_AT} aliases, the deals kept in older ones are written where they show and those aliases go`);
-  // The record with every alias it may keep: the deals in ccall0 and cprop0, and 198 more stages taken away long ago.
-  const older = Object.fromEntries(Array.from({ length: MAX_STAGE_MOVES - 2 }, (_, i) => ["z" + String(i).padStart(5, "0"), "cnew00"]));
+  // The record with every alias it may keep: the deals in ccall0 and cprop0, offr00 that holds none, and 197 more.
+  const older = Object.fromEntries(Array.from({ length: MAX_STAGE_MOVES - 3 }, (_, i) => ["z" + String(i).padStart(5, "0"), "cnew00"]));
   const pipes = JSON.parse(String((await redis.pipeline([["GET", pipesKey]]))[0])) as Pipeline[];
   pipes[0] = { ...pipes[0], moved: { ...pipes[0].moved, ...older } };
   await redis.pipeline([["SET", pipesKey, JSON.stringify(pipes)]]);
@@ -163,6 +169,17 @@ async function main(): Promise<void> {
   const sample = JSON.parse(String((await redis.pipeline([["HGET", dealsKey, ids[7]]]))[0]));
   is("with its updatedAt and every other field, unknown ones too, as they were", sample, { ...deal(ids[7], "cnew00"), futureMetadata: { kept: 7 } });
   is("and no workflow, reminder or webhook started: the compaction never reaches lib/deal-stage-trigger.ts", /from "@\/lib\/deal-stage-trigger"|dealEnteredStage\(/.test(readFileSync("lib/crm.ts", "utf8")), false);
+
+  part("A record wider than DEAL_WIRE_BYTES: what it weighed past what was paid is counted before anything more is read");
+  const x = await studioStore("aliaswide");
+  const xStats = x.store.statsId!;
+  await redis.pipeline([["SET", "nl:crm:pipes:" + xStats, JSON.stringify([sales, coaching])], ...ids.slice(0, 50).map((id) => ["HSET", "nl:crm:deals:" + xStats, id, JSON.stringify(deal(id, "lead00"))]), ["HSET", "nl:crm:deals:" + xStats, ids[50], JSON.stringify({ ...deal(ids[50], "lead00"), olderField: "x".repeat(3_000_000) })]]);
+  const xRecord = (await redis.pipeline([["GET", "nl:crm:pipes:" + xStats]]))[0];
+  const wide = paying();
+  is("an older record of 3 MB: the empty pipeline goes, and the excess is counted at once", [(await savePipelineChange(xStats, { remove: "coach0" }, "", 2, ROOM, wide.payer)).ok, wide.book.forced > 0], [true, true]);
+  await redis.pipeline([["SET", "nl:crm:pipes:" + xStats, xRecord as string]]);
+  const unconfirmed = paying(Number.POSITIVE_INFINITY, false);
+  is("a count of the excess that is not confirmed: refused, nothing written", [await savePipelineChange(xStats, { remove: "coach0" }, "", 2, ROOM, unconfirmed.payer), (await redis.pipeline([["GET", "nl:crm:pipes:" + xStats]]))[0] === xRecord], [{ ok: false, error: "unavailable", message: "This can't be counted right now, so nothing was changed. Try again in a minute." }, true]);
 
   part("Aliases that cannot be freed are \"stage_moves\", 409 from both paths");
   // Every alias kept, each held by a deal that changes while it is being written (so none can go): reached only then.
@@ -198,6 +215,7 @@ async function main(): Promise<void> {
   // Read back as Upstash's REST answers: the stored JSON inside a JSON string, escaped again.
   const wire = Buffer.byteLength(JSON.stringify({ result: JSON.stringify(widestPipes) }));
   is(`${wire.toLocaleString("en-US")} bytes on the wire, inside the 50,000 a studio request is priced at`, request("studio", 1, wire) <= UNIT_COST.studio && wire < 50_000, true);
+  is(`and inside PIPELINES_WIRE_BYTES (${PIPELINES_WIRE_BYTES.toLocaleString("en-US")}), which a change that reads the deals pays for four times`, wire <= PIPELINES_WIRE_BYTES, true);
   const widestWire = Buffer.byteLength(JSON.stringify(JSON.stringify(widest("d000000000", "lead00"))));
   is(`a deal record at its widest is ${widestWire.toLocaleString("en-US")} bytes on the wire, inside DEAL_WIRE_BYTES (${DEAL_WIRE_BYTES.toLocaleString("en-US")})`, widestWire <= DEAL_WIRE_BYTES, true);
 
@@ -218,11 +236,12 @@ async function main(): Promise<void> {
           sent += 1;
           // What a script runs inside, which Upstash bills one by one: MOVE_CRM_DEAL and the pipelines' save two, the
           // activity line's fence its GET, HEXISTS, LPUSH and LTRIM (lib/team.ts TEAM_LOG_COMMANDS, less its own GET and
-          // EVAL); any other as many as the most any runs here (TAKE_DATA with two years of months, lib/sent-links.ts).
+          // EVAL), a give-back its EXISTS, DECRBY and INCRBY; any other as many as the most any runs here (TAKE_DATA with
+          // two years of months, lib/sent-links.ts).
           if (c[0] === "EVAL") {
             const tag = /-- marktmorgen:([a-z0-9-]+)/.exec(String(c[1]))?.[1] ?? "?";
             tags.set(tag, (tags.get(tag) ?? 0) + 1);
-            sent += tag === "crm-deal-move" || tag === "crm-pipelines-save" ? 2 : tag === "team-log-live" ? TEAM_LOG_COMMANDS - 2 : 6 + 2 * 24;
+            sent += tag === "crm-deal-move" || tag === "crm-pipelines-save" ? 2 : tag === "team-log-live" ? TEAM_LOG_COMMANDS - 2 : tag === "allowance-give-back" ? 3 : 6 + 2 * 24;
           }
         }
         moved += Buffer.byteLength(JSON.stringify(cmds)) + Buffer.byteLength(JSON.stringify(reply));
@@ -236,10 +255,11 @@ async function main(): Promise<void> {
     return { status: response.status, body: await response.json(), units, cost, sent, moved, trips, tags: Object.fromEntries(tags) };
   };
   // Both ends (the coordinator's decision on #5128): the studio requests taken cover the cost with the registry's 5%
-  // room (as API_SALES_UNITS and the plan invoices keep it), and are never more than one past the fewest that do.
+  // room (as API_SALES_UNITS and the plan invoices keep it), and are never more than that room past the fewest that do,
+  // or one request where the room is less than one.
   const fewest = (m: Awaited<ReturnType<typeof measure>>) => Math.ceil((1.05 * m.cost) / UNIT_COST.studio);
   const report = (m: Awaited<ReturnType<typeof measure>>) => `${m.sent.toLocaleString("en-US")} commands, ${m.moved.toLocaleString("en-US")} bytes, ${m.trips} trips: $${m.cost.toFixed(6)}, $${(1.05 * m.cost).toFixed(6)} with its room (${fewest(m)} studio requests at the fewest); ${m.units} taken, $${(m.units * UNIT_COST.studio).toFixed(6)}`;
-  const bothEnds = (m: Awaited<ReturnType<typeof measure>>) => m.units * UNIT_COST.studio >= 1.05 * m.cost && m.units <= fewest(m) + 1;
+  const bothEnds = (m: Awaited<ReturnType<typeof measure>>) => m.units * UNIT_COST.studio >= 1.05 * m.cost && m.units <= fewest(m) + Math.max(1, Math.floor(0.05 * fewest(m)));
 
   // (a) A restricted teammate, every alias kept, MAX_DEALS deals at their widest all in them: renaming his own
   // pipeline compacts them all.
@@ -255,14 +275,23 @@ async function main(): Promise<void> {
   is(`(a) ${report(worstA)}`, bothEnds(worstA), true);
   is("(a) the answer says how many studio requests it used, for the board to tell the creator", worstA.body.studioRequestsUsed, worstA.units);
 
-  // (b) The owner removes an empty stage with no destination, MAX_DEALS widest deals elsewhere: every one is read.
+  // (b) The owner removes an empty pipeline with no destination, MAX_DEALS widest deals elsewhere: every one is read.
   const b = await studioStore("aliasworstb");
   const bStats = b.store.statsId!;
-  await redis.pipeline(ids.map((id) => ["HSET", "nl:crm:deals:" + bStats, id, JSON.stringify(widest(id, "lead00"))]));
-  const worstB = await measure(b.owner, bStats, { action: "pipeline", pipeline: { ...sales, stages: sales.stages.filter((s) => s.id !== "offr00") }, moves: {} });
-  is(`(b) an empty stage removed with no destination, ${MAX_DEALS.toLocaleString("en-US")} widest deals read to show it: saved, no alias`, [worstB.status, (await readPipelines(bStats))[0].moved], [200, undefined]);
+  await redis.pipeline([["SET", "nl:crm:pipes:" + bStats, JSON.stringify([sales, coaching])], ...ids.map((id) => ["HSET", "nl:crm:deals:" + bStats, id, JSON.stringify(widest(id, "lead00"))])]);
+  const worstB = await measure(b.owner, bStats, { action: "unpipeline", id: "coach0", moveTo: "" });
+  is(`(b) an empty pipeline removed with no destination, ${MAX_DEALS.toLocaleString("en-US")} widest deals read to show it: removed, its stages shown in New`, [worstB.status, (await readPipelines(bStats)).map((p) => p.id), Object.values((await readPipelines(bStats))[0].moved ?? {})], [200, ["sales0"], ["lead00", "lead00", "lead00", "lead00", "lead00"]]);
   is(`(b) ${report(worstB)}`, bothEnds(worstB), true);
-  is("(b) nothing was tidied up, so the answer says no count", Object.hasOwn(worstB.body, "studioRequestsUsed"), false);
+  is("(b) the deals were read, so the answer says how many studio requests that used", worstB.body.studioRequestsUsed, worstB.units);
+
+  // (b2) The same read over MAX_DEALS ordinary deals: paid at the most a record can weigh, then put right by what the
+  // records really moved, so it ends at the fewest that cover its cost too.
+  const b2 = await studioStore("aliasworstb2");
+  const b2Stats = b2.store.statsId!;
+  await redis.pipeline([["SET", "nl:crm:pipes:" + b2Stats, JSON.stringify([sales, coaching])], ...ids.map((id) => ["HSET", "nl:crm:deals:" + b2Stats, id, JSON.stringify(deal(id, "lead00"))])]);
+  const ordinary = await measure(b2.owner, b2Stats, { action: "unpipeline", id: "coach0", moveTo: "" });
+  is(`(b2) ordinary deals: removed`, ordinary.status, 200);
+  is(`(b2) ${report(ordinary)}`, bothEnds(ordinary), true);
 
   // (c) The owner removes a stage with a destination, past ALIAS_COMPACT_AT aliases, every widest deal in one.
   const c = await studioStore("aliasworstc");
@@ -273,6 +302,16 @@ async function main(): Promise<void> {
   is(`(c) a stage removed past ${ALIAS_COMPACT_AT} aliases, ${MAX_DEALS.toLocaleString("en-US")} widest deals compacted: saved with the one alias it made`, [worstC.status, (await readPipelines(cStats))[0].moved], [200, { talk00: "lead00" }]);
   is(`(c) ${report(worstC)}`, bothEnds(worstC), true);
   is("(c) the answer says how many studio requests it used", worstC.body.studioRequestsUsed, worstC.units);
+
+  // (e) Every alias kept and none held by a deal (every removed stage keeps one, empty or not): the compaction only
+  // reads, rewrites nothing, and drops them all, so the cap never locks.
+  const e = await studioStore("aliasworste");
+  const eStats = e.store.statsId!;
+  const empties = Object.fromEntries(Array.from({ length: MAX_STAGE_MOVES }, (_, i) => ["e" + String(i).padStart(5, "0"), "lead00"]));
+  await redis.pipeline([["SET", "nl:crm:pipes:" + eStats, JSON.stringify([{ ...sales, moved: empties }])], ...ids.map((id) => ["HSET", "nl:crm:deals:" + eStats, id, JSON.stringify(widest(id, "lead00"))])]);
+  const worstE = await measure(e.owner, eStats, { action: "pipeline", pipeline: { ...sales, stages: sales.stages.filter((s) => s.id !== "talk00") }, moves: { talk00: "lead00" } });
+  is(`(e) ${MAX_STAGE_MOVES} empty aliases and ${MAX_DEALS.toLocaleString("en-US")} widest deals: saved, nothing rewritten, only the alias it made kept`, [worstE.status, worstE.tags["crm-deal-move"] ?? 0, (await readPipelines(eStats))[0].moved], [200, 0, { talk00: "lead00" }]);
+  is(`(e) ${report(worstE)}`, bothEnds(worstE), true);
 
   part("A compaction the month's studio requests run out in: 429, nothing lost, and when they open again");
   const d = await studioStore("aliasworstd");
@@ -295,8 +334,8 @@ async function main(): Promise<void> {
   is("429 studio_used, with the figure's own words, which say when it opens again", [ranOut.status, ranOut.body.error, typeof ranOut.body.message === "string" && /opens again/.test(ranOut.body.message), answer.ok === false && answer.message === ranOut.body.message], [429, "studio_used", true, true]);
   is("nothing lost: the pipelines as they were, and every deal shown where it was", [(await redis.pipeline([["GET", "nl:crm:pipes:" + dStats]]))[0] === dRecord, (await readDeals(dStats, await readStageView(dStats))).map((x) => [x.id, x.stage]).sort()], [true, dShown]);
   const boardFile = readFileSync("components/deals-board.tsx", "utf8");
-  is("the board says it in plain words, with the server's words for when", boardFile.includes("`Nothing was saved, and nothing was lost: everything is as it was. ${answer.message}`"), true);
-  is("and, after a compaction, how many requests it used, never the limits", [boardFile.includes("which used ${used.toLocaleString(\"en-US\")} of this month's studio requests."), /\b(150|200)\b/.test(boardFile.split("\n").filter((line) => line.includes("studio requests")).join("\n"))], [true, false]);
+  is("the board says it in plain words, with the server's words for when", boardFile.includes("Nothing was saved, and nothing was lost: your pipelines, stages and deals did not change.") && boardFile.includes("} ${answer.message}`"), true);
+  is("and, after a compaction, how many requests it used, never the limits", [boardFile.includes("Checking your deals for this used ${used.toLocaleString(\"en-US\")} of this month's studio requests."), /\b(150|200)\b/.test(boardFile.split("\n").filter((line) => line.includes("studio requests")).join("\n"))], [true, false]);
   console.log("scripts sent:", JSON.stringify({ a: worstA.tags, b: worstB.tags, c: worstC.tags }));
   done();
 }

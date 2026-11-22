@@ -97,12 +97,16 @@ async function main(): Promise<void> {
   is("an existing one is edited at the limit", changePipeline([sales, coaching], { pipeline: { ...coaching, name: "1:1 coaching" } }, {}, counts, 1).ok, true);
   is("the last pipeline is kept", changePipeline([sales], { remove: FIRST_PIPELINE_ID }, "", counts, 5), { ok: false, error: "pipeline_last" });
   const dropTalking = { ...sales, stages: sales.stages.filter((s) => s.id !== "talk00") };
-  is("a stage removed with deals needs a stage for them", changePipeline([sales, coaching], { pipeline: dropTalking }, {}, counts, 5), { ok: false, error: "moves" });
+  // Option B (35th batch): every stage removed keeps an alias; with none sent, the first open stage kept in its pipeline.
+  is("a stage removed with no choice shows its deals in the first open stage kept, the board's default", changePipeline([sales, coaching], { pipeline: dropTalking }, {}, counts, 5), { ok: true, pipelines: [dropTalking, coaching], moves: { talk00: "lead00" }, unsent: [] });
   is("and never one being removed", changePipeline([sales, coaching], { pipeline: dropTalking }, { talk00: "talk00" }, counts, 5), { ok: false, error: "moves" });
-  is("an inherited name is not a choice", changePipeline([sales, coaching], { pipeline: dropTalking }, Object.create({ talk00: "lead00" }), counts, 5), { ok: false, error: "moves" });
+  is("an inherited name is not a choice: the default is taken, never the inherited one", changePipeline([sales, coaching], { pipeline: dropTalking }, Object.create({ talk00: "cnew00" }), counts, 5), { ok: true, pipelines: [dropTalking, coaching], moves: { talk00: "lead00" }, unsent: [] });
   is("with a stage kept, in this pipeline or another", [changePipeline([sales, coaching], { pipeline: dropTalking }, { talk00: "lead00" }, counts, 5), changePipeline([sales, coaching], { pipeline: dropTalking }, { talk00: "cnew00" }, counts, 5).ok], [{ ok: true, pipelines: [dropTalking, coaching], moves: { talk00: "lead00" }, unsent: [] }, true]);
   is("an empty stage goes without a choice", changePipeline([sales, coaching], { pipeline: { ...sales, stages: sales.stages.filter((s) => s.id !== "offr00") } }, {}, counts, 5).ok, true);
-  is("a pipeline removed with deals sends them all to one stage of another", changePipeline([sales, coaching], { remove: "coach0" }, "lead00", counts, 5), { ok: true, pipelines: [sales], moves: { ccall0: "lead00" }, unsent: [] });
+  is("a pipeline removed with deals sends them all to one stage of another, each of its stages an alias", changePipeline([sales, coaching], { remove: "coach0" }, "lead00", counts, 5), { ok: true, pipelines: [sales], moves: Object.fromEntries(coaching.stages.map((s) => [s.id, "lead00"])), unsent: [] });
+  is("with deals and no stage sent: refused", changePipeline([sales, coaching], { remove: "coach0" }, "", counts, 5), { ok: false, error: "moves" });
+  is("its deals not counted yet: listed for the caller to count", changePipeline([sales, coaching], { remove: "coach0" }, "", null, 5), { ok: true, pipelines: [sales], moves: {}, unsent: coaching.stages.map((s) => s.id) });
+  is("empty, with no stage sent: its stages shown in the first open stage of the first pipeline they may change", [changePipeline([sales, coaching], { remove: "coach0" }, "", new Map(), 5).ok, changePipeline([sales, coaching, { id: "third0", name: "Third", stages: [{ id: "tnew00", name: "New", kind: "open" }, { id: "twon00", name: "Won", kind: "won" }, { id: "tlost0", name: "Lost", kind: "lost" }] }], { remove: "coach0" }, "", new Map(), 5, () => true, (id) => id === "third0")], [true, { ok: true, pipelines: [sales, { id: "third0", name: "Third", stages: [{ id: "tnew00", name: "New", kind: "open" }, { id: "twon00", name: "Won", kind: "won" }, { id: "tlost0", name: "Lost", kind: "lost" }] }], moves: Object.fromEntries(coaching.stages.map((s) => [s.id, "tnew00"])), unsent: [] }]);
   is("not to one of its own", changePipeline([sales, coaching], { remove: "coach0" }, "cnew00", counts, 5), { ok: false, error: "moves" });
 
   part("Totals are what the recorded values add up to");
@@ -143,12 +147,11 @@ async function main(): Promise<void> {
 
   part("A stage removed moves its deals where the creator said, read through an alias; a refusal writes nothing");
   // The deals are read only when paid for (lib/crm.ts scanDeals): a synthetic payer that always pays.
-  const PAID: StudioPayer = { take: async () => ({ ok: true }), force: async () => {} };
+  const PAID: StudioPayer = { take: async () => ({ ok: true }), force: async () => true, give: async () => {} };
   const before = (await redis.pipeline([["GET", "nl:crm:pipes:" + statsId]]))[0];
   const withoutCall = { ...coaching, stages: coaching.stages.filter((s) => s.id !== "ccall0") };
-  is("without a choice: refused", await savePipelineChange(statsId, { pipeline: withoutCall }, {}, 2, ROOM, PAID), { ok: false, error: "moves" });
-  is("nothing written", [(await redis.pipeline([["GET", "nl:crm:pipes:" + statsId]]))[0] === before, (await readDeal(statsId, old.id, await readStageView(statsId)))?.stage], [true, "ccall0"]);
   is("to one being removed: refused", await savePipelineChange(statsId, { pipeline: withoutCall }, { ccall0: "ccall0" }, 2, ROOM), { ok: false, error: "moves" });
+  is("nothing written", [(await redis.pipeline([["GET", "nl:crm:pipes:" + statsId]]))[0] === before, (await readDeal(statsId, old.id, await readStageView(statsId)))?.stage], [true, "ccall0"]);
   is("with a choice: saved", (await savePipelineChange(statsId, { pipeline: withoutCall }, { ccall0: "cust00" }, 2, ROOM)).ok, true);
   is("the deal is read in the chosen stage, in the other pipeline", (await readDeal(statsId, old.id, await readStageView(statsId)))?.stage, "cust00");
   const back = JSON.parse(String((await redis.pipeline([["HGET", "nl:crm:deals:" + statsId, old.id]]))[0]));
@@ -156,7 +159,7 @@ async function main(): Promise<void> {
   is("the alias is kept with the pipelines", (await readPipelines(statsId))[0].moved, { ccall0: "cust00" });
   const withoutNew = { ...coaching, stages: coaching.stages.filter((s) => s.id !== "ccall0" && s.id !== "cnew00").concat([{ id: "cnext0", name: "Next", kind: "open" }]) };
   const noChoice = await savePipelineChange(statsId, { pipeline: withoutNew }, {}, 2, ROOM, PAID);
-  is("an empty stage goes without a choice, once the deals show it holds none, and with no alias", [noChoice.ok ? noChoice.moves : noChoice, (await readPipelines(statsId))[0].moved], [{}, { ccall0: "cust00" }]);
+  is("a stage goes without a choice, its deals shown in the first open stage kept, and keeps an alias, empty or not", [noChoice.ok ? noChoice.moves : noChoice, (await readPipelines(statsId))[0].moved], [{ cnew00: "cnext0" }, { ccall0: "cust00", cnew00: "cnext0" }]);
   is("a removed stage's id is never a stage again: its deals would come back", await savePipelineChange(statsId, { pipeline: coaching }, {}, 2, ROOM), { ok: false, error: "stage_gone" });
   // Back to the two pipelines as they were, written straight (as the next part does), for the parts that follow.
   await redis.pipeline([["SET", "nl:crm:pipes:" + statsId, JSON.stringify([sales, coaching])]]);

@@ -621,15 +621,17 @@ async function writePipelines(statsId: string, snapshotRaw: string, pipelines: P
 
 /**
  * What a change of stages pays for reading the store's deals, from its studio requests (lib/store-allowance.ts): `take`
- * before the work, all or nothing; `force` counts work already done past what was taken (forceAllowance), so the next
- * take is refused when the figure is spent. A refusal is said as it is: used, or not counted ("unknown").
+ * before the work, all or nothing; `force` counts work already done past what was taken (forceAllowance; false when
+ * Redis did not confirm the count), so the next take is refused when the figure is spent; `give` gives back, at the
+ * end, what the work did not need of what was taken (giveAllowance). A refusal is said as it is: used, or not counted.
  */
 export type StudioPayer = {
   take: (units: number) => Promise<{ ok: true } | { ok: false; reason: "used" | "unknown" | "pool"; message: string }>;
-  force: (units: number) => Promise<void>;
+  force: (units: number) => Promise<boolean>;
+  give: (units: number) => Promise<void>;
 };
 /** No way to pay: a change that needs the deals read is refused, never done unpaid. */
-const UNPAID: StudioPayer = { take: async () => ({ ok: false, reason: "unknown", message: "This can't be counted right now. Try again in a minute." }), force: async () => {} };
+const UNPAID: StudioPayer = { take: async () => ({ ok: false, reason: "unknown", message: "This can't be counted right now. Try again in a minute." }), force: async () => false, give: async () => {} };
 
 /** Deals read or written in one step of a scan (scanDeals, compactStageMoves), each step paid for before it is sent. */
 export const DEAL_SCAN_BATCH = 100;
@@ -652,6 +654,9 @@ export const DEAL_KEYS_WIRE_BYTES = MAX_DEALS * 13 + 64;
 /** Commands and trips one take of studio requests costs at the most: its count, a place for a store that pays nothing, a refusal given back. */
 export const SCAN_TAKE_COMMANDS = 4;
 export const SCAN_TAKE_TRIPS = 3;
+/** And one count of work already done (forceAllowance: its INCRBY and EXPIRE), and one give-back (GIVE_ALLOWANCE_BACK: its EVAL, EXISTS, DECRBY and INCRBY). */
+export const SCAN_FORCE_COMMANDS = 2;
+export const SCAN_GIVE_COMMANDS = 4;
 /** What MOVE_CRM_DEAL runs inside, which Upstash bills one by one beside the EVAL: the record read and written. */
 export const MOVE_INSIDE_COMMANDS = 2;
 /**
@@ -660,6 +665,17 @@ export const MOVE_INSIDE_COMMANDS = 2;
  */
 export const SCAN_ROOM_COMMANDS = 2 * (1 + 6 + 2 * 24);
 export const SCAN_ROOM_TRIPS = 2;
+/**
+ * The change's own records, beyond what its first studio request (the route's guard) is priced at, added once when a
+ * change reads the deals: the pipelines read (two GETs), saved (SAVE_CRM_PIPELINES and the two it runs inside),
+ * copied for the board's old key, and their room taken (TAKE_DATA and what it runs inside at the most, as
+ * SCAN_ROOM_COMMANDS counts one), each its own trip, with the widest pipelines record (PIPELINES_WIRE_BYTES) four times on the wire.
+ */
+export const SCAN_CHANGE_COMMANDS = 2 + 3 + 1 + SCAN_ROOM_COMMANDS / 2;
+export const SCAN_CHANGE_TRIPS = 4;
+/** The widest pipelines record on the wire, every alias in it (tests/crm-stage-aliases.test.ts holds it under). */
+export const PIPELINES_WIRE_BYTES = 20_000;
+export const SCAN_CHANGE_BYTES = 4 * PIPELINES_WIRE_BYTES;
 /**
  * What one studio request's price buys of a scan, each alone (tests/plan-cost-registry.ts, UNIT_COST.studio, at
  * Upstash's and Vercel's prices; tests/plan-cost-registry.test.ts holds each at or under it, rounded down): 36
@@ -679,15 +695,22 @@ export function dealScanShare(commands: number, bytes: number, trips: number): n
 /**
  * The studio requests a change of stages takes as it goes: each step's share is added before the step is sent, and
  * whole requests are taken only when the shares pass what was taken, the take's own commands and trips added first.
- * So the change takes the smallest whole number of requests that covers its work with its room, never less. What a
- * record weighed past what was paid for is added and counted at once (`past`, forceAllowance).
+ * A read is paid for at the most its records can weigh (DEAL_WIRE_BYTES each); once it came, its share is put right
+ * by what it really moved (`past`): more is counted at once (forceAllowance, its own commands added; refused when the
+ * count is not confirmed), less is owed no more, and `settle` gives back, at the end, every whole request the work did
+ * not need. So a change ends charged by what it really did: the fewest whole requests that cover its work with its
+ * room, plus what its own records and takes are counted at beyond their measure (at most that room again, or one
+ * request where the room is less than one, held in tests/crm-stage-aliases.test.ts).
  */
 function studioMeter(payer: StudioPayer) {
-  let owed = 0;
+  // The change's own records are owed from its first step on (SCAN_CHANGE_COMMANDS).
+  let owed = dealScanShare(SCAN_CHANGE_COMMANDS, SCAN_CHANGE_BYTES, SCAN_CHANGE_TRIPS);
   let taken = 0;
-  const due = () => Math.ceil(owed - 1e-9) - taken;
+  let stepped = false;
+  const due = () => (stepped ? Math.ceil(owed - 1e-9) - taken : 0);
   return {
     async cover(commands: number, bytes: number, trips: number): Promise<{ ok: true } | ScanRefused> {
+      stepped = true;
       owed += dealScanShare(commands, bytes, trips);
       if (due() <= 0) return { ok: true };
       owed += dealScanShare(SCAN_TAKE_COMMANDS, 0, SCAN_TAKE_TRIPS);
@@ -697,13 +720,22 @@ function studioMeter(payer: StudioPayer) {
       taken += units;
       return { ok: true };
     },
-    async past(bytes: number): Promise<void> {
-      if (bytes <= 0) return;
+    async past(bytes: number): Promise<{ ok: true } | ScanRefused> {
       owed += dealScanShare(0, bytes, 0);
+      if (bytes <= 0 || due() <= 0) return { ok: true };
+      owed += dealScanShare(SCAN_FORCE_COMMANDS, 0, 1);
       const units = due();
-      if (units <= 0) return;
-      await payer.force(units);
+      // Read already, so counted past the figure if it must be; a count that is not confirmed stops the change.
+      if (!(await payer.force(units))) return { refused: "unavailable", message: "This can't be counted right now, so nothing was changed. Try again in a minute." };
       taken += units;
+      return { ok: true };
+    },
+    async settle(): Promise<void> {
+      if (!stepped) return;
+      const back = taken - Math.ceil(owed + dealScanShare(SCAN_GIVE_COMMANDS, 0, 1) - 1e-9);
+      if (back <= 0) return;
+      await payer.give(back);
+      taken -= back;
     },
     used: () => taken,
   };
@@ -733,7 +765,8 @@ async function scanDeals(statsId: string, meter: StudioMeter): Promise<KeptDeal[
   try {
     keys = await redisPipeline(keysSent);
   } catch { throw new CrmDealReadUnavailable(); }
-  await pastPaid(wire(keysSent, keys), keysPaid);
+  const keysPast = await pastPaid(wire(keysSent, keys), keysPaid);
+  if ("refused" in keysPast) return keysPast;
   const ids = Array.isArray(keys) && keys.length === 1 ? keys[0] : null;
   if (!Array.isArray(ids) || ids.length > MAX_DEALS || ids.some((id) => typeof id !== "string" || !DEAL_ID.test(id)) || new Set(ids).size !== ids.length) throw new CrmDealReadUnavailable();
   const out: KeptDeal[] = [];
@@ -747,7 +780,8 @@ async function scanDeals(statsId: string, meter: StudioMeter): Promise<KeptDeal[
     try {
       reply = await redisPipeline(sent);
     } catch { throw new CrmDealReadUnavailable(); }
-    await pastPaid(wire(sent, reply), paid);
+    const past = await pastPaid(wire(sent, reply), paid);
+    if ("refused" in past) return past;
     const values = Array.isArray(reply) && reply.length === 1 ? reply[0] : null;
     if (!Array.isArray(values) || values.length !== batch.length) throw new CrmDealReadUnavailable();
     batch.forEach((id, i) => {
@@ -843,25 +877,34 @@ async function settleStageMoves(statsId: string, current: readonly Pipeline[], t
  * Saves one pipeline, adds one, or removes one (lib/crm-rules.ts,
  * changePipeline), with the deals of every stage that goes shown where
  * `moves` says: written as the record's stage moves (Pipeline.moved), and
- * each deal is saved there the next time it is saved. A stage that goes with
- * no destination sent goes only once the deals, read and paid for through
- * `payer` (scanDeals), show it holds none, and then with no alias; one that
- * holds some is refused ("moves"), so a deal is never moved where nobody
- * chose. Past ALIAS_COMPACT_AT aliases they are compacted first
+ * each deal is saved there the next time it is saved. Every stage that goes
+ * keeps an alias, one shown to hold no deal included, so a deal written while
+ * the change is made never stops showing (the coordinator's HIGH on
+ * 9c00dab113). With no destination sent, a stage removed from a pipeline that
+ * stays shows in that pipeline's first open stage, and no deal is read; a
+ * pipeline removed goes only once its deals, read and paid for through
+ * `payer` (scanDeals), show it holds none, its stages then shown in the first
+ * open stage of the first pipeline left that the person may change
+ * (`mayEdit`); one that holds some is refused ("moves"), so a deal is never
+ * moved where nobody chose. Past ALIAS_COMPACT_AT aliases they are compacted
+ * first
  * (settleStageMoves). A refusal writes no pipeline. Moves made here start
  * no workflow: a stage removed is not a deal entering a stage. A deal whose
  * stage was already in no pipeline (written by an older board) stays as it
  * was, hidden, until a priced way to bring it back (follow-up of option E).
  */
-export async function savePipelineChange(statsId: string, change: { pipeline?: unknown; remove?: string }, moves: unknown, limit: number, room: DataStore, payer: StudioPayer = UNPAID, sees: (pipelineId: string) => boolean = () => true): Promise<PipelineChange> {
+export async function savePipelineChange(statsId: string, change: { pipeline?: unknown; remove?: string }, moves: unknown, limit: number, room: DataStore, payer: StudioPayer = UNPAID, sees: (pipelineId: string) => boolean = () => true, mayEdit: (pipelineId: string) => boolean = () => true): Promise<PipelineChange> {
   const { raw, pipelines: current } = await pipelineSnapshot(statsId);
-  let result = changePipeline(current, change, moves, null, limit, sees);
+  let result = changePipeline(current, change, moves, null, limit, sees, mayEdit);
   if (!result.ok) return result;
   const meter = studioMeter(payer);
   let deals: KeptDeal[] | null = null;
   if (result.unsent.length) {
     const read = await scanDeals(statsId, meter);
-    if (!Array.isArray(read)) return { ok: false, error: read.refused, message: read.message };
+    if (!Array.isArray(read)) {
+      await meter.settle();
+      return { ok: false, error: read.refused, message: read.message };
+    }
     deals = read;
     const view = stageView(current);
     const counts = new Map<string, number>();
@@ -869,8 +912,11 @@ export async function savePipelineChange(statsId: string, change: { pipeline?: u
       const shown = shownStage(d.record.stage, view.stages, view.moved);
       if (shown) counts.set(shown, (counts.get(shown) ?? 0) + 1);
     }
-    result = changePipeline(current, change, moves, counts, limit, sees);
-    if (!result.ok) return result;
+    result = changePipeline(current, change, moves, counts, limit, sees, mayEdit);
+    if (!result.ok) {
+      await meter.settle();
+      return result;
+    }
   }
   const kept = new Set(allStages(result.pipelines).map((s) => s.id));
   let settled: { moves: Record<string, string>; compacted: boolean } | ScanRefused;
@@ -880,11 +926,12 @@ export async function savePipelineChange(statsId: string, change: { pipeline?: u
     if (error instanceof CrmStageMovesFull) return { ok: false, error: "stage_moves" };
     throw error;
   }
+  await meter.settle();
   if ("refused" in settled) return { ok: false, error: settled.refused, message: settled.message };
   const pipelines = withStageMoves(result.pipelines, settled.moves);
   await writePipelines(statsId, raw, pipelines, room);
-  // A compaction says how many of the studio's requests it took beyond the request's own, for the creator to read.
-  return { ...result, pipelines, ...(settled.compacted ? { studioRequests: meter.used() } : {}) };
+  // A change that read the deals says how many of the studio's requests that took beyond its own, for the creator.
+  return { ...result, pipelines, ...(deals !== null || settled.compacted ? { studioRequests: meter.used() } : {}) };
 }
 
 /**
@@ -924,7 +971,7 @@ return 1`;
  * same snapshot that is written over: otherwise CrmSchemaConflict and nothing
  * is written. A compaction that could not be paid for throws CrmStudioRefused.
  */
-export async function writeStages(statsId: string, stages: Stage[], room: DataStore, firstId?: string, payer: StudioPayer = UNPAID): Promise<Stage[]> {
+export async function writeStages(statsId: string, stages: Stage[], room: DataStore, firstId?: string, payer: StudioPayer = UNPAID, used: (studioRequests: number) => void = () => {}): Promise<Stage[]> {
   const first = stages.find(s => s.kind === "open");
   if (!first) throw new CrmSchemaReadUnavailable();
   const { raw, pipelines: current } = await pipelineSnapshot(statsId);
@@ -936,8 +983,12 @@ export async function writeStages(statsId: string, stages: Stage[], room: DataSt
   const kept = new Set(allStages(next).map(s => s.id));
   // Each stage of the first pipeline taken away shows its deals in the first open one (Pipeline.moved); no deal is read.
   const taken = Object.fromEntries(current[0].stages.filter(s => !kept.has(s.id)).map(s => [s.id, first.id]));
-  const settled = await settleStageMoves(statsId, current, taken, kept, studioMeter(payer), room, null);
+  const meter = studioMeter(payer);
+  const settled = await settleStageMoves(statsId, current, taken, kept, meter, room, null);
+  await meter.settle();
   if ("refused" in settled) throw new CrmStudioRefused(settled.refused, settled.message);
+  // A compaction says how many of the studio's requests it took beyond the request's own (`used`).
+  if (settled.compacted) used(meter.used());
   await writePipelines(statsId, raw, withStageMoves(next, settled.moves), room);
   return stages;
 }

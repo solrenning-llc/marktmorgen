@@ -12,7 +12,7 @@ import { dealEnteredStage } from "@/lib/deal-stage-trigger";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 import { CRM_VALUE_SAVE_UNITS, CrmDealConflict, CrmFieldsKept, CrmPersonGone, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, CrmStageIdTaken, CrmStageMovesFull, CrmStudioRefused, type StudioPayer, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStageView, setValue, writeDeal, writeDealOver, writeFields, writeStages, readPageMark } from "@/lib/crm";
-import { forceAllowance, takeAllowance } from "@/lib/store-allowance";
+import { forceAllowance, giveAllowance, takeAllowance } from "@/lib/store-allowance";
 
 /** Ten fields of ten choices, a pipeline with its stages and moves, or a deal with its note, as JSON. */
 const MAX_BODY_BYTES = 20_000;
@@ -78,9 +78,15 @@ export async function POST(request: NextRequest) {
         const taken = await takeAllowance(store, "studio", units);
         return taken.ok ? { ok: true } : { ok: false, reason: taken.reason, message: taken.message };
       },
-      force: async (units) => { await forceAllowance(store, "studio", units); },
+      force: (units) => forceAllowance(store, "studio", units),
+      give: (units) => giveAllowance(store, "studio", units),
     };
     const noAccess = () => Response.json({ ok: false, error: "pipeline_access", message: PIPELINE_ACCESS_REFUSAL }, { status: 403 });
+    // How many studio requests a change used reading the deals (lib/crm.ts scanDeals, compactStageMoves), this one
+    // included: the number only to someone who sees every pipeline, since it grows with the deals of all of them (639
+    // [GL7](7)); to anyone else only that some were used.
+    const seesEvery = !restricted || (access !== null && !Object.values(access).includes("none"));
+    const requestsUsed = (beyond: number | undefined) => (beyond === undefined ? {} : { studioRequestsUsed: seesEvery ? 1 + beyond : "some" });
 
     if (body.action === "fields") {
       const sent = Array.isArray(body.fields) ? body.fields : [];
@@ -115,7 +121,9 @@ export async function POST(request: NextRequest) {
       if (restricted && !mayEdit(first)) return noAccess();
       const stages = parseStages(body.stages);
       if (!stages) return refuse("stages");
-      return Response.json({ ok: true, stages: await writeStages(statsId, stages, store, first, payer) });
+      let beyond: number | undefined;
+      const saved = await writeStages(statsId, stages, store, first, payer, (n) => { beyond = n; });
+      return Response.json({ ok: true, stages: saved, ...requestsUsed(beyond) });
     }
     if (body.action === "pipeline" || body.action === "unpipeline") {
       const removing = body.action === "unpipeline";
@@ -143,14 +151,14 @@ export async function POST(request: NextRequest) {
         const sentStages = body.pipeline && typeof body.pipeline === "object" && Array.isArray((body.pipeline as { stages?: unknown }).stages) ? ((body.pipeline as { stages: { id?: unknown }[] }).stages.map((st) => st?.id).filter((v): v is string => typeof v === "string")) : [];
         if (targets.some((stage) => !sentStages.includes(stage) && !mayEdit(pipelineOfStage(pipelines, stage)))) return noAccess();
       }
-      const result = await savePipelineChange(statsId, removing ? { remove: id } : { pipeline: body.pipeline }, moves, pipelineLimit(store), store, payer, (pipelineId) => accessOf(guarded.role, access, pipelineId) !== "none");
+      const result = await savePipelineChange(statsId, removing ? { remove: id } : { pipeline: body.pipeline }, moves, pipelineLimit(store), store, payer, (pipelineId) => accessOf(guarded.role, access, pipelineId) !== "none", (pipelineId) => mayEdit(pipelineId));
       // Someone restricted gets back only the pipelines they may see, never the names and stages of the others.
       const shown = restricted ? visiblePipelines(result.ok ? result.pipelines : [], guarded.role, access).map((p) => ({ id: p.id, name: p.name, stages: p.stages })) : result.ok ? result.pipelines : [];
       if (!result.ok && result.error === "unknown" && restricted) return noAccess();
       // `stagesMoved`: how many removed stages now show their deals elsewhere (not how many deals: none is counted).
-      // `studioRequestsUsed`: when stages removed before were tidied up first (lib/crm.ts compactStageMoves), how many
-      // of the studio's requests the change used in all, this one included, for the board to say.
-      if (result.ok) return Response.json({ ok: true, pipelines: shown, stagesMoved: Object.keys(result.moves).length, ...(result.studioRequests !== undefined ? { studioRequestsUsed: 1 + result.studioRequests } : {}) });
+      // `studioRequestsUsed`: when the deals were read (a pipeline removed with no destination, or stages removed before
+      // tidied up first), how many of the studio's requests the change used in all, for the board to say (requestsUsed).
+      if (result.ok) return Response.json({ ok: true, pipelines: shown, stagesMoved: Object.keys(result.moves).length, ...requestsUsed(result.studioRequests) });
       return result.message ? Response.json({ ok: false, error: result.error, message: result.message }, { status: PIPELINE_STATUS[result.error] ?? 400 }) : refuse(result.error, PIPELINE_STATUS[result.error] ?? 400);
     }
     const view = await readStageView(statsId);

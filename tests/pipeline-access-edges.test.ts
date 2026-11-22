@@ -406,7 +406,7 @@ async function main(): Promise<void> {
   await redisPipeline([["SET", pipesKey, JSON.stringify(lineUp)]]);
   const calm = await crm("sam@example.com", { action: "stages", stages: [...checked.stages] });
   is("with nothing in between, the first pipeline's stages are saved", [calm.status, (await readPipelines(statsId))[0].id], [200, checked.id]);
-  is("the route checks, and writeStages writes, the same pipeline", readFileSync("app/api/store/crm/route.ts", "utf8").includes("await writeStages(statsId, stages, store, first, payer)"), true);
+  is("the route checks, and writeStages writes, the same pipeline", readFileSync("app/api/store/crm/route.ts", "utf8").includes("await writeStages(statsId, stages, store, first, payer, "), true);
 
   part("Round 8: an access record that cannot be read adds no pipeline either");
   // One pipeline only, so the plan has room for another and only the access is in the way.

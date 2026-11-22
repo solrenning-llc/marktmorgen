@@ -185,7 +185,7 @@ export const PERSON_DATA: PersonData[] = [
 
   // ---------------------------------------------------------------- not a store's people
   { file: "app/api/creators/route.ts", how: "account", what: "Answers creators send to Marktmorgen's own research, with their own retention" },
-  { file: "lib/creator-research-store.ts", how: "expires", days: 1, what: "While your answers to Marktmorgen's own research are being deleted, a mark that stops new answers from your address or account, kept under a scrambled form of your address for an hour at the most" },
+  { file: "lib/creator-research-store.ts", how: "account", what: "While your answers to Marktmorgen's own research are being deleted, a mark that stops new answers from your address or account, kept under a scrambled form of your address for an hour at the most" },
   { file: "lib/auth.ts", how: "account", what: "Sign-in sessions, links and devices of an account" },
   { file: "lib/passkeys.ts", how: "account", what: "An account's passkeys" },
   { file: "lib/two-step.ts", how: "account", what: "An account's two-step sign-in" },

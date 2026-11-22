@@ -176,9 +176,10 @@ export async function POST(request: NextRequest) {
     const kept = repliesFor(await redisPipeline([["EVAL", KEEP_RESEARCH_ANSWER, 3, RESPONSES_KEY, forgetMarkKey(email), forgetMarkKey(account ?? email), RESEARCH_MAX_ANSWERS, row, today, RESEARCH_DAY_SHARE, RESEARCH_ANSWERS_PER_DAY, RESEARCH_RESERVED, mark, plain]]), 1);
     // The address or the account asked for its answers to be deleted, and that deletion is still under way (or lapsed
     // within the hour): nothing kept (Codex L-20261120-0837). The form is open to anyone and trusts the address typed,
-    // so the refusal says nothing about the address, neither its code nor its words: it never tells a third party that
-    // an address answered or asked to be erased (Claude 4 Z's LEVE on #5139).
-    if (kept && (kept[0] === -1 || kept[0] === "-1")) return fail(503, "later");
+    // so the refusal says nothing about the address, neither its code nor its words: it is the very answer the route
+    // gives when the database is not reachable ("unavailable", 503), so it never tells a third party that an address
+    // answered or asked to be erased (Claude 4 Z's LEVE and Claude 1 f9afa7's LEVE on #5139).
+    if (kept && (kept[0] === -1 || kept[0] === "-1")) return fail(503, "unavailable");
     if (kept && kept[0] === "already") return fail(409, "already");
     const share = kept && typeof kept[0] === "string" ? /^busy:(\d+)$/.exec(kept[0]) : null;
     if (share) {

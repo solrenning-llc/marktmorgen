@@ -3,7 +3,8 @@
  * outlives the deletion (Codex L-20261120-0837, #5010 row 41). forgetResearchPerson (lib/creator-research-store.ts)
  * sets a mark under a hash of the address before its first walk and lifts it only once a walk found none of theirs;
  * KEEP_RESEARCH_ANSWER (lib/creator-research-room.ts) reads the mark in the same step as the write, so the form keeps
- * nothing from the address while it stands (the route answers 503 "later", in words that say nothing about the address).
+ * nothing from the address while it stands (the route answers exactly as when the database is not reachable, 503
+ * "unavailable", so nothing in the reply says the address asked to be erased).
  * A deletion that did not end confirmed
  * leaves the mark to expire (FORGET_MARK_SECONDS), and the next walk sets it again.
  * Synthetic answers only; no external request.
@@ -16,7 +17,7 @@ import { NextRequest } from "next/server";
 import { POST } from "@/app/api/creators/route";
 import { KEEP_RESEARCH_ANSWER, RESEARCH_ANSWERS_PER_DAY, RESEARCH_DAY_SHARE, RESEARCH_MAX_ANSWERS, RESEARCH_RESERVED, researchAccountMark } from "@/lib/creator-research-room";
 import { FORGET_MARK_SECONDS, RESPONSES_KEY, ResearchForgetIncomplete, forgetMarkKey, forgetResearchPerson } from "@/lib/creator-research-store";
-import { store } from "./redis-stub";
+import { setRedisConfigured, store } from "./redis-stub";
 
 const pipeline = store.pipeline.bind(store);
 globalThis.fetch = (async () => { throw new Error("Unexpected external request"); }) as typeof fetch;
@@ -107,19 +108,28 @@ test("a deletion that did not end confirmed leaves the mark, so the form stays c
   assert.equal(await keep("ana@example.com", answer("ana@example.com")), -1, "and the form keeps nothing from the address meanwhile");
 });
 
-test("the route refuses while the mark stands, saying nothing about the address (503 \"later\"), and keeps once it is gone", async () => {
+test("the route refuses while the mark stands with the very reply it gives when the database is not reachable, and keeps once it is gone", async () => {
   await fresh();
   const payload = { name: "Synthetic Creator", email: "ana@example.com", platform: "Other", country: "Test country", problem: "A synthetic research answer for a regression test.", link: "", tools: "", cost: "", consentResearch: true, consentFollowUp: false, consentUpdates: false, website: "" };
   const ask = (ip: string) => POST(new NextRequest("https://marktmorgen.com/api/creators", { method: "POST", headers: { "Content-Type": "application/json", Origin: "https://marktmorgen.com", Host: "marktmorgen.com", "x-forwarded-for": ip }, body: JSON.stringify(payload) }));
+  // Another cause of the same reply: the database not reachable at all (Claude 1 f9afa7's LEVE on #5139: a code only the
+  // mark gives would still tell a third party, for an hour, that the address asked to be erased).
+  setRedisConfigured(false);
+  let other: Response;
+  try {
+    other = await ask("192.0.2.40");
+  } finally {
+    setRedisConfigured(true);
+  }
   await pipeline([["SET", forgetMarkKey("ana@example.com"), "1", "EX", FORGET_MARK_SECONDS]]);
   const refused = await ask("192.0.2.41");
+  assert.equal(refused.status, other.status);
+  assert.equal(await refused.text(), await other.text(), "the same status and the same body as the database not reachable");
   assert.equal(refused.status, 503);
-  assert.deepEqual(await refused.json(), { ok: false, error: "later" }, "a code that names no deletion (Claude 4 Z's LEVE on #5139)");
-  // The form's words for that code: anyone may type the address, so they never say it asked to be deleted.
+  // The form has no words of its own for the mark: it shows what it shows for "unavailable".
   const form = readFileSync(join(process.cwd(), "components/creator-research-form.tsx"), "utf8");
-  const words = /\n\s*later: `([^`]*)`/.exec(form)?.[1] ?? "";
-  assert.ok(words.length > 0, "the form has words for the refusal");
-  assert.doesNotMatch(words, /delet|erase|forget|removed|you asked/i, "they say nothing about a deletion");
+  assert.doesNotMatch(form, /\n\s*later:/, "no message of the mark's own");
+  assert.doesNotMatch(form, /delet|erase|forget|you asked/i, "the form's words say nothing about a deletion");
   assert.deepEqual(await theirs("ana@example.com"), [], "nothing kept");
   await pipeline([["DEL", forgetMarkKey("ana@example.com")]]);
   const kept = await ask("192.0.2.42");

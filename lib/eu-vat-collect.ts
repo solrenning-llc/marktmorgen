@@ -277,10 +277,13 @@ function collectOn(
   const vat = input.country === "GB" ? uk?.vat ?? null : vatOnTop(total, input.country, input.rates ?? EU_VAT_RATES, now);
   if (!vat || vat.country !== input.country) refuse("no sourced rate, or no sterling rate");
   // A UK sale is declared to HMRC in pounds whatever it was charged in, so its exchange-rate allowance is the pound's
-  // (unit 7). An EU sale is declared in the OSS return in euros (Implementing Regulation 282/2011 art. 61b; Directive
-  // art. 369h), so its return currency is the euro: a sale charged in pounds or any other currency needs its own
-  // reviewed allowance against the euro for the gap to the period rate, and without one it is refused (#5086, Claude 1
-  // f9afa7's second point; coordinator's option 1).
+  // (unit 7). An EU sale is declared in the non-Union scheme's return in euros (Directive 2006/112/EC art. 365: the
+  // return is made out in euro, and a Member State of identification outside the euro area may require its own
+  // currency; Ireland and Estonia are both in the euro area), so its return currency is the euro: a sale charged in
+  // pounds or any other currency needs its own reviewed allowance against the euro for the gap to the period rate, and
+  // without one it is refused (#5086, Claude 1 f9afa7's second point; coordinator's decision dad8, option 1). Not
+  // re-read at the official source on 22 November 2026: eur-lex.europa.eu does not resolve from the session that wrote
+  // this; to be read again, with its date, before opening. The refusal stands either way.
   const cost = (input.costsCents ?? euVatCollectionCostCents)(vat!.vatCents, currency, input.country === "GB" ? "gbp" : "eur");
   if (cost === null || !Number.isSafeInteger(cost) || cost < 0) refuse("the cost of receiving the VAT is unknown");
   const mark = input.country === "GB" ? "uk_vat" : "eu_vat";

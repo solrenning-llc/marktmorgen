@@ -501,6 +501,19 @@ test("the behavior holds the future: every kind the words promise is charged, ev
         && ["gbp", "usd", "cad", "aud"].every((currency) => vatCollectionCostOf(190, currency, reviewedPlusEur, NOW, "eur") === null)
         && vatCollectionCostOf(190, "usd", [allowance("gbp"), { ...allowance("usd"), against: "gbp" as const }], NOW, "gbp") !== null;
     },
+    "Sales to buyers in the United Kingdom in a currency other than the pound": () => {
+      // The UK path declares in pounds (spied); another currency needs a reviewed allowance against the pound, and none is
+      // reviewed, so it is refused today. A reviewed one would make this proof fail until the words change.
+      const asked: (string | undefined)[] = [];
+      const spy = (vat: number, currency: string, back?: string) => { asked.push(back); return 10; };
+      applyEuCollect(body({ "line_items[0][price_data][currency]": "gbp" }), { ...input, country: "GB", costsCents: spy });
+      const allowance = (currency: string) => ({ currency, bps: 200, source: "https://example.invalid/fx", checkedOn: "2026-11-01", validThrough: "2026-12-31" });
+      const reviewedPlusGbp = [...REVIEWED_VAT_FX_ALLOWANCES, allowance("gbp")];
+      return asked.length === 1 && asked[0] === "gbp"
+        && !REVIEWED_VAT_FX_ALLOWANCES.some((a) => a.against === "gbp")
+        && vatCollectionCostOf(190, "gbp", reviewedPlusGbp, NOW, "gbp") !== null
+        && ["eur", "usd", "cad", "aud"].every((currency) => vatCollectionCostOf(190, currency, reviewedPlusGbp, NOW, "gbp") === null);
+    },
     "Any other sale whose VAT, or the cost of receiving it, we cannot work out": () => throws(() => applyEuCollect(body({}), { ...input, costsCents: () => null })),
   };
   assert.deepEqual([...words.refused].sort(), Object.keys(proofs).sort(), "every item of the list has its own proof, and no proof is of an item the list lacks");
@@ -519,6 +532,8 @@ test("the places follow the side that is charging (coord 9b51's LEVE 2)", () => 
   assert.deepEqual(uk.refusedPlaces, ["the Isle of Man"], "UK only: no EU place under the United Kingdom");
   assert.ok(eu.refused.some((w) => /European Union in a currency other than the euro$/.test(w)), "EU: the currency item");
   assert.ok(!uk.refused.some((w) => /European Union/.test(w)), "UK only: no item about the European Union");
+  assert.ok(uk.refused.includes("Sales to buyers in the United Kingdom in a currency other than the pound"), "UK: the pound item");
+  assert.ok(!eu.refused.some((w) => /United Kingdom/.test(w)), "EU only: no item about the United Kingdom");
   assert.ok(all.refusedPlaces.includes("the French part of Saint Martin") && !all.refusedPlaces.includes("Saint Martin"), "never read as Sint Maarten, which is sold");
   for (const words of [eu, uk, all]) assert.ok(words.terms.includes("Marktmorgen does not refund it.") && words.pricing.includes("Marktmorgen does not refund it."), "the Stripe fee on the VAT is not refunded (IV (j) 2)");
   assert.deepEqual(all.refusedPlaces, Object.values(VAT_REFUSED_PLACE_NAMES), "both: every place");

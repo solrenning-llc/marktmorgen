@@ -154,7 +154,7 @@ O "reprova antes" é a mesma corrida contra a versão auditada (aff69c9, do ramo
 mkdir -p ~/.agent-mail/auditada && git --git-dir ~/.agent-mail/correio.git show aff69c95:agent-mail.mjs > ~/.agent-mail/auditada/agent-mail.mjs && node tooling/agent-mail/audit-cases.mjs ~/.agent-mail/auditada/agent-mail.mjs --expect fail
 ```
 
-Resultado em 22/11/2026, com 153 verificações:
+Resultado em 22/11/2026, com 156 verificações:
 
 | Caso | Gravidade | Verificações | Falham na aff69c9 | Falham agora |
 | --- | --- | --- | --- | --- |
@@ -163,19 +163,21 @@ Resultado em 22/11/2026, com 153 verificações:
 | A3 | ALTO | 3 | 3 | 0 |
 | A4 | ALTO | 9 | 8 | 0 |
 | A5 | ALTO | 6 | 6 | 0 |
-| A6 | MÉDIO | 5 | 5 | 0 |
+| A6 | MÉDIO | 5 | 4 | 0 |
 | A7 | MÉDIO | 7 | 5 | 0 |
 | A8 | MÉDIO | 3 | 3 | 0 |
 | A9 | MÉDIO | 15 | 15 | 0 |
-| A10 | MÉDIO | 15 | 14 | 0 |
+| A10 | MÉDIO | 15 | 13 | 0 |
 | A11 | LEVE | 4 | 2 | 0 |
 | A12 | LEVE | 1 | 1 | 0 |
 | A13 | LEVE | 2 | 2 | 0 |
 | A14 | LEVE | 3 | 2 | 0 |
-| A15 | LEVE | 2 | 2 | 0 |
+| A15 | LEVE | 4 | 3 | 0 |
 | Prova de conceito 1 | prova | 1 | 1 | 0 |
 | Prova de conceito 3 | prova | 2 | 2 | 0 |
 | API fora do ar | prova | 4 | 3 | 0 |
+
+Contra a versão auditada, o número exato de falhas varia um pouco de uma corrida para outra (em três corridas, A6 deu 4 ou 5 e A10 deu 13 ou 14), porque algumas verificações dependem do relógio. O que o passo 7 exige não varia: cada caso tem ao menos uma falha na versão auditada e nenhuma na atual.
 
 Ficam de fora, declarados, os dois limites que só a identidade autenticada resolve: a prova de conceito 2 (pôr HOLD como outra família com a variável de sessão forjada) e o resto do A2 (a sessão vem de uma variável de ambiente, copiável e herdada por subagente; a linha `Sessão:` pode ser escrita à mão no git). Eles vão na proposta de identidade autenticada, ao dono, antes do passo 8. Nenhum teste finge resolvê-los.
 

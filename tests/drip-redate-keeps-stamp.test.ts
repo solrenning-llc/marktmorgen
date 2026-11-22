@@ -5,7 +5,9 @@
 // row sent a module that opens after the student's access had ended (Claude 6's LEVE on #3369).
 // Synthetic: the Redis stand-in, a Stripe world and a mail world only.
 import type { Course } from "@/lib/course";
-import { emailKey, noteBoughtAgain, recordEnrollment, registerDrip, sendDripEmails } from "@/lib/learn";
+import { STAMP_BYTES, emailKey, noteBoughtAgain, recordEnrollment, registerDrip, sendDripEmails } from "@/lib/learn";
+import { dataKey } from "@/lib/store-data";
+import { contentRoomFor } from "@/lib/store-data-rules";
 import type { Listing, Store } from "@/lib/store";
 import { catalog } from "./course-repurchase-catalog-world";
 import { stripe } from "./course-repurchase-stripe-world";
@@ -100,15 +102,36 @@ async function main() {
     current = base;
   }
 
-  part("A row that had no end and a purchase with one: left off, as a stamp without its bytes is (touchStudent)");
+  // A stamp is written only with its bytes taken from the store's room (touchStudent). On main the re-date had no room
+  // to take from and left it off; with the drip index (#3344) the stamp is put back by noteStudentStamp, which takes its
+  // bytes first, so the rule is held by what is taken, not by a row left stampless (Claude 6 on #3344, 7073926808).
+  const room = dataKey(store)!;
+  const doneSlot = async () => Number((await redis.pipeline([["HGET", room, `cd:${courseId}`]]))[0] ?? 0);
+  part("A row that had no end and a purchase with one: the stamp is written with its bytes taken (touchStudent)");
   {
     const endNew = second + 45 * DAY;
     current = { ...base, accessEndsAt: endNew, accessEndsKept: [] };
     await boughtAgain([session("cs_test_second", second, false, endNew), session("cs_test_first", first, true)], { e: buyer, s: first, l: first });
+    const before = await doneSlot();
     is("Month 1 goes", await run(second + 30 * DAY), [subject("Month 1")]);
     const row = await rowOf();
     is("the row takes the day", row?.s, second);
-    is("no stamp written without its bytes taken", row && "x" in row, false);
+    is("the stamp is the new purchase's end", row?.x, endNew);
+    is("and the course's slot grew by exactly the stamp's bytes", (await doneSlot()) - before, STAMP_BYTES);
+    current = base;
+  }
+
+  part("The same with the store's room full: no stamp is written and nothing is taken");
+  {
+    const endNew = second + 45 * DAY;
+    current = { ...base, accessEndsAt: endNew, accessEndsKept: [] };
+    await boughtAgain([session("cs_test_second", second, false, endNew), session("cs_test_first", first, true)], { e: buyer, s: first, l: first });
+    await redis.pipeline([["HSET", room, "#", String(contentRoomFor(store as never, second + 30 * DAY))]]);
+    const before = await doneSlot();
+    await run(second + 30 * DAY);
+    const row = await rowOf();
+    is("no stamp written without its bytes taken", row !== null && "x" in row, false);
+    is("and nothing taken from the room for it", await doneSlot(), before);
     current = base;
   }
   done();

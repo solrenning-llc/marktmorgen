@@ -1,11 +1,12 @@
 /**
- * The scripts of lib/redis-take.ts and their kin (lib/card-update.ts, lib/sales-goal.ts, lib/live-fence.ts,
+ * A mirror, for lib/redis-memory.ts, of the scripts the tests' stand-in Redis runs (tests/redis-take-scripts.ts): the
+ * scripts of lib/redis-take.ts and their kin (lib/card-update.ts, lib/sales-goal.ts, lib/live-fence.ts,
  * lib/store-live-cache.ts, lib/community.ts's CAS_MEMBER, lib/payment-recovery-report.ts, lib/recent-sales.ts), each
- * as the same plain commands in one step: read and deleted, written or deleted only as read. One record, run by
- * lib/redis-memory.ts itself (so `next dev`, the demo store and the Mobile render job have them) and by the tests'
- * stand-in (tests/redis-take-scripts.ts); before 22/11/2026 they lived only in the stand-in, and the demo's seeding
- * failed on one of them (#4969). Keyed by the name on the script's first line (`-- marktmorgen:<name>`), in
- * alphabetical order (AGENTS.md AC (q)); tests/redis-memory-take-scripts.test.ts holds a case for each.
+ * as the same plain commands in one step. Before 22/11/2026 they lived only in the stand-in, so `next dev`, the demo
+ * store and the Mobile render job, which use MemoryRedis with no test stub, refused them (#4969). Keyed by the name on
+ * the script's first line (`-- marktmorgen:<name>`), in alphabetical order (AGENTS.md AC (q)).
+ * tests/redis-memory-take-scripts.test.ts runs every script of the stand-in here too and fails when one is missing or
+ * answers differently, so a script added to the stand-in is added here in the same PR.
  */
 type Command = (string | number)[];
 export type TakeScript = (run: (command: Command) => unknown, keys: string[], argv: string[]) => unknown;

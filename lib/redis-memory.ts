@@ -274,14 +274,6 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
-        // The take scripts and their kin (lib/redis-memory-take.ts, one record shared with the tests' stand-in), by the
-        // name on the script's first line: here too, so `next dev` and the demo store run them (#4969's Mobile render).
-        const takeName = /^-- marktmorgen:([a-z-]+:v\d+)\n/.exec(key)?.[1] ?? "";
-        if (Object.hasOwn(TAKE_SCRIPTS, takeName)) {
-          const count = Number(args[0]);
-          const rest = args.slice(1);
-          return TAKE_SCRIPTS[takeName]((command) => this.run(command), rest.slice(0, count), rest.slice(count));
-        }
         if (key.startsWith("-- marktmorgen:contact-import:v1\n")) {
           if (args[0] !== "4" || args.length <= 5 || (args.length - 5) % 6 !== 0) throw new Error("invalid contact import");
           const [, contacts, erased, agreed, unsub, ...rows] = args;
@@ -3777,6 +3769,15 @@ export class MemoryRedis {
           return removed;
         }
         if (key.startsWith("-- marktmorgen:meet-keep:v1\n")) return this.meetKeep(args);
+        // The take scripts and their kin, mirrored from the tests' stand-in (lib/redis-memory-take.ts), by the name on the
+        // script's first line, so `next dev` and the demo store run them too (#4969's Mobile render). Last, before the
+        // refusal: a script the chain above already runs is never taken here.
+        const takeName = /^-- marktmorgen:([a-z-]+:v\d+)\n/.exec(key)?.[1] ?? "";
+        if (Object.hasOwn(TAKE_SCRIPTS, takeName)) {
+          const count = Number(args[0]);
+          const rest = args.slice(1);
+          return TAKE_SCRIPTS[takeName]((command) => this.run(command), rest.slice(0, count), rest.slice(count));
+        }
         if (!key.startsWith("-- marktmorgen:form-opportunity:v1\n") || args[0] !== "1" || args.length !== 5) throw new Error("MemoryRedis: unsupported EVAL");
         const target = args[1];
         this.live(target);

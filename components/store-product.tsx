@@ -17,7 +17,7 @@ import { shipsToWords } from "@/lib/shipping";
 import { shippingNow } from "@/lib/physical-legal-ship";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { activePwyw } from "@/lib/pay-what-you-want";
-import { IMAGE_SIZES } from "@/lib/product-image";
+import { IMAGE_SIZES, smallerCopies } from "@/lib/product-image";
 import type { PageAction } from "@/components/sales-blocks";
 import { RatingLine } from "@/components/review-list";
 import type { Summary } from "@/lib/review-summary";
@@ -1264,7 +1264,7 @@ export function ProductCard({
     <img
       src={servedImageUrl(image)}
       srcSet={servedSrcSet(image)}
-      sizes={image.small ? (style === "preview" ? (grid ? IMAGE_SIZES.grid : IMAGE_SIZES.cover) : IMAGE_SIZES.thumb) : undefined}
+      sizes={smallerCopies(image).length ? (style === "preview" ? (grid ? IMAGE_SIZES.grid : IMAGE_SIZES.cover) : IMAGE_SIZES.thumb) : undefined}
       alt={image.alt}
       width={image.width}
       height={image.height}

@@ -14,12 +14,13 @@ import { limited } from "@/lib/request-guard";
 /**
  * Sends the creator into Stripe to open or attach their own account.
  *
- * The account is opened once and written down before the creator leaves, so a
- * trip that is abandoned halfway does not leave an account behind that nobody
- * here knows about. The attempt is written on the store before Stripe is asked,
- * and Stripe is asked with its idempotency key (Codex L-20261120-0258): an answer
- * lost on the way is found again by pressing once more, two tabs get one account,
- * and the store is not deleted while Stripe may hold one only it can name.
+ * The account is opened once and written down before the creator leaves. The
+ * attempt is written on the store before Stripe is asked, and Stripe is asked
+ * with its idempotency key (Codex L-20261120-0258): an answer lost on the way is
+ * found again by pressing once more, two tabs get one account, and the store is
+ * not deleted or closed for a day after each press. A store deleted later than
+ * that, with an answer lost and never pressed again, leaves its account known
+ * only to Stripe and the creator (a residue told in #5095).
  */
 export async function POST(request: NextRequest) {
   const creator = await creatorFrom(request, "payments");
@@ -64,8 +65,10 @@ export async function POST(request: NextRequest) {
             idempotencyKey: `connect-${store.sid}-${attempt.id}`,
           });
         } catch (error) {
-          // Only a refusal that says nothing was made closes the attempt; anything else keeps it for the next press.
-          if (error instanceof StripeConnectError && error.madeNothing) await clearStripeConnect(ref, store.sid, attempt.id).catch(() => false);
+          // Only a refusal that says nothing was made, of the first press that ever sent this key, closes the attempt
+          // (clearStripeConnect checks the count again under the lock); anything else keeps it for the next press: a
+          // refusal of a press again says nothing of what an earlier one may have made (20261122T200746Z-claude-1-coord-305c).
+          if (error instanceof StripeConnectError && error.madeNothing && attempt.sends === 1) await clearStripeConnect(ref, store.sid, attempt.id).catch(() => false);
           throw error;
         }
         // Written with the attempt closed, only while it is still the store's: when two tabs connect at once they ask

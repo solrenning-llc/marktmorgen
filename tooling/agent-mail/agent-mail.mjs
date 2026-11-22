@@ -1012,6 +1012,64 @@ export function conferirLink(link, pr, sha, resultado = null) {
   }
 }
 
+/**
+ * A família revisora de um comentário com veredito neste head, ou null. O head (os 10 primeiros caracteres) e o veredito
+ * (READY ou CHANGES) ficam nas duas primeiras linhas com texto; a revisora é a primeira família citada na primeira linha,
+ * ou, se ela não cita nenhuma, na segunda, antes ou depois da palavra "review" ("Focal review #N @head — READY — Claude 5
+ * ibuF", "Codex N1 CHANGES (transcrito por Claude 5)"; revisão do Claude 5 ibuF no #5141). As famílias citadas depois dela
+ * (quem transcreveu, quem tem commits, a quem se responde) não contam, e um pedido ou uma marca ("re-review needed",
+ * "review needed", CLAIMED, UNCLAIMED, HOLD, "fila #N") não é revisão: o "This answers Claude 1 DKvY's CHANGES" do #5135
+ * não tira o Claude 1 da fila que a nova revisão pede (revisão do Claude 1 E no #5141).
+ * O veredito fica na primeira linha, ou na segunda quando a primeira é o cabeçalho de uma revisão; a nota do autor
+ * ("Fixed/Fixes/Corrigido/Resolved/This answers/Note on ...") também não é revisão (revisão do Claude 5 ibqho no #5141,
+ * comentário 7085420176).
+ */
+export function revisoraDoComentario(corpo, curto) {
+  const linhas = String(corpo ?? "").split(/\r?\n/).filter((l) => l.trim()).slice(0, 2);
+  const [l1 = "", l2 = ""] = linhas, veredito = /\b(READY|CHANGES)\b/;
+  if (!curto || !linhas.join("\n").includes(curto)) return null;
+  // O veredito na primeira linha, ou na segunda quando a primeira é o cabeçalho de uma revisão ("Independent review
+  // (Codex G) of head X" e "Verdict: CHANGES"); a nota do autor que cita "READY or CHANGES" mais abaixo não é revisão.
+  if (!veredito.test(l1) && !(/\breview\b/i.test(l1) && veredito.test(l2))) return null;
+  const inicio = l1.replace(/^[\s*>_#`-]+/, "");
+  if (/^(re-?review needed|review needed|claimed\b|unclaimed\b|hold\b|fila #|fix(?:ed|es)?\b|corrigid|resolved\b|this answers|answer\b|note on\b)/i.test(inicio)) return null;
+  for (const l of linhas) {
+    const m = /\b(Claude \d+|Codex)\b/i.exec(l);
+    if (m) return familia(m[1]);
+  }
+  return null;
+}
+
+/**
+ * As famílias que deram veredito (READY ou CHANGES) neste head só nos comentários e revisões do PR, fora do correio
+ * (coordenador, ce2d: no #5118, claim-enqueue entregou duas vezes o pedido a quem tinha revisado o head no PR). Vale o
+ * comentário de quem trabalha no repositório, com a revisora lida por revisoraDoComentario. null = NÃO CONFERIDO (o GitHub não respondeu); quem chama não entrega nada nesse caso (passo 4).
+ */
+const vereditosNoPr = new Map();
+export function revisoresNoPr(pr, sha) {
+  if (testeLigado("CORREIO_SEM_GH")) return new Set();
+  if (!/^\d+$/.test(String(pr ?? "")) || !sha) return null;
+  const curto = String(sha).slice(0, 10), chaveCache = `${pr}@${curto}`;
+  if (vereditosNoPr.has(chaveCache)) return vereditosNoPr.get(chaveCache);
+  const f = new Set();
+  try {
+    for (const rota of [`repos/solrenning-llc/marktmorgen/issues/${pr}/comments`, `repos/solrenning-llc/marktmorgen/pulls/${pr}/reviews`]) {
+      const saida = execFileSync("gh", ["api", "--paginate", rota, "--jq", '.[] | [(.body // ""), (.author_association // "")] | @json'],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
+      for (const linha of saida.split("\n").filter((l) => l.trim())) {
+        const [corpo, associacao] = JSON.parse(linha);
+        if (!QUEM_TRABALHA.has(String(associacao))) continue;
+        const quem = revisoraDoComentario(corpo, curto);
+        if (quem) f.add(quem);
+      }
+    }
+  } catch {
+    return null;
+  }
+  vereditosNoPr.set(chaveCache, f);
+  return f;
+}
+
 export function registrarRevisao({ eu, pr, sha, resultado, link, agora = new Date() }) {
   if (!chave("record-review").ligada) throw new Error("o registro de revisão está DESLIGADO (interruptor record-review); só o coordenador o liga");
   if (!/^\d+$/.test(String(pr ?? ""))) throw new Error("--pr é obrigatório (o número do PR)");
@@ -1153,6 +1211,12 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     // Commits no PR não impedem enfileirar: a FQ (1) exclui só a família do autor e quem revisou o head; a regra de não ter
     // commits é da revisão (CO (e)). Correção do coordenador, 21/11/2026, 19h41 UTC (antes, achado do Claude 4 3rC).
     // HOLD de qualquer um, ou CLAIMED de outra família, segura o primeiro da fila; os mais novos esperam atrás dele.
+    // ce2d: quem deu veredito neste head só no PR também não o enfileira; sem ler o PR, ele não é entregue.
+    if (alvo) {
+      const noPr = revisoresNoPr(alvo.pr, alvo.sha);
+      if (noPr === null) return { espera: `as revisões escritas no #${alvo.pr} não puderam ser conferidas agora (NÃO CONFERIDO); a fila espera; tente de novo` };
+      if (noPr.has(familia(eu))) return { espera: `o primeiro da fila, #${alvo.pr}, tem veredito da sua família neste head no PR; outra família o enfileira (FQ (1), ce2d)` };
+    }
     const marca = alvo ? estadoPr(alvo.pr, agora) : null;
     if (marca?.ativo && (marca.acao === "HOLD" || familia(marca.por) !== familia(eu))) {
       return { espera: `o primeiro da fila, #${alvo.pr}, está com ${marca.acao} de ${marca.por}${marca.motivo ? ` (${marca.motivo})` : ""}; a fila espera até alguém liberar, ou até o autor (ou quem pôs o HOLD) retirar o pedido com cancel-enqueue ${alvo.id}` };
@@ -1162,6 +1226,16 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     // Na hora de pegar, confere de novo os commits do PR (o head pode ter mudado): se a família de `eu` tem commit nele,
     // devolve sozinha com o motivo, para ela não receber esse pedido de novo, e segue para o próximo.
     for (const p of lista.filter((x) => revisaoParaMim(x, eu, agora, c))) {
+      // ce2d: quem deu veredito neste head só no PR também devolve, com o motivo; sem ler o PR, nada é entregue.
+      const noPr = revisoresNoPr(p.pr, p.sha);
+      if (noPr === null) return { espera: `as revisões escritas no #${p.pr} não puderam ser conferidas agora (NÃO CONFERIDO); nada foi pegado; tente de novo` };
+      if (noPr.has(familia(eu))) {
+        const carimboV = agora.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+        try {
+          acrescentar({ [`${tipo}/tomadas/${p.id}/${p.proximaTomada}`]: `${carimboV}-${slug(eu)}-${randomBytes(2).toString("hex")}\n${eu}\nDEVOLVIDO\na família ${familia(eu)} deu veredito neste head no PR (conferido pela ferramenta, ce2d)\n` }, `${eu} devolveu revisao #${p.pr}: veredito no PR`);
+        } catch {}
+        continue;
+      }
       const lidas = commitsDoPr(p.pr);
       if (lidas?.familias.has(familia(eu))) {
         const carimboD = agora.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");

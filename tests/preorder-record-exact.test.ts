@@ -83,10 +83,14 @@ async function outcome(run: () => Promise<unknown>): Promise<string> {
   }
 }
 
-/** The record's pipeline (the one that starts with HSETNX on the entries) answered `mangle` of the real replies; `lost` sends nothing to Redis. */
+/**
+ * The record's pipeline answered `mangle` of the real replies; `lost` sends nothing to Redis. Since #5125 the record
+ * is one script (lib/preorders.ts PREORDER_RECORD: the entry, its index line and the expiries, answering {made, the
+ * entry}), then the payment's SET and the store's SET; the vectors below bend the same answers as before inside it.
+ */
 function recordAnswers(mangle: (real: unknown[]) => unknown, lost = false): void {
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands[0]?.[0] === "HSETNX" && commands[0][1] === entries) return mangle(lost ? [] : await pipeline(commands));
+    if (commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:preorder-record:v1") && commands[0][3] === entries) return mangle(lost ? [] : await pipeline(commands));
     return pipeline(commands);
   }) as typeof redis.pipeline;
 }
@@ -110,15 +114,17 @@ async function main(): Promise<void> {
 
   part("Coming soon: every reply in another shape is unknown");
   const vectors: [string, (r: unknown[]) => unknown][] = [
-    ["HSETNX answered OK", (r) => ["OK", ...r.slice(1)]],
-    ["HSETNX answered null", (r) => [null, ...r.slice(1)]],
-    ["HSETNX answered 2", (r) => [2, ...r.slice(1)]],
-    ["HGET answered a number", (r) => [r[0], 7, ...r.slice(2)]],
-    ["HGET answered null", (r) => [r[0], null, ...r.slice(2)]],
-    ["HGET answered text that is no pre-order", (r) => [r[0], "{", ...r.slice(2)]],
-    ["EXPIRE answered null", (r) => [r[0], r[1], null, ...r.slice(3)]],
-    ["the payment's SET answered null", (r) => [...r.slice(0, 3), null, r[4]]],
-    ["the store's SET answered 1", (r) => [...r.slice(0, 4), 1]],
+    ["HSETNX answered OK", (r) => [["OK", (r[0] as unknown[])[1]], ...r.slice(1)]],
+    ["HSETNX answered null", (r) => [[null, (r[0] as unknown[])[1]], ...r.slice(1)]],
+    ["HSETNX answered 2", (r) => [[2, (r[0] as unknown[])[1]], ...r.slice(1)]],
+    ["HGET answered a number", (r) => [[(r[0] as unknown[])[0], 7], ...r.slice(1)]],
+    ["HGET answered null", (r) => [[(r[0] as unknown[])[0], null], ...r.slice(1)]],
+    ["HGET answered text that is no pre-order", (r) => [[(r[0] as unknown[])[0], "{"], ...r.slice(1)]],
+    // The expiries are inside the script now; its answer in another shape stands where the EXPIRE's did.
+    ["the script answered one item", (r) => [[(r[0] as unknown[])[0]], ...r.slice(1)]],
+    ["the script answered not a list", (r) => [1, ...r.slice(1)]],
+    ["the payment's SET answered null", (r) => [r[0], null, r[2]]],
+    ["the store's SET answered 1", (r) => [r[0], r[1], 1]],
     ["one reply short", (r) => r.slice(0, -1)],
     ["one reply too many", (r) => [...r, "OK"]],
     ["not a list", () => "OK"],

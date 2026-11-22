@@ -1,9 +1,9 @@
 import type { NextRequest } from "next/server";
 import { creatorFrom } from "@/lib/studio-route";
-import { keptSaleFees } from "@/lib/sale-fees-reading";
+import { SALE_FEES_FILE_MAX_BYTES, keptSaleFees } from "@/lib/sale-fees-reading";
 import { saleFeesCsv } from "@/lib/sale-fees-months";
 import { saleFees } from "@/lib/sale-fees-rules";
-import { exportReachRefusal, stateWords, unavailableWords } from "@/lib/sale-fees-view";
+import { FILE_TOO_LARGE_WORDS, exportReachRefusal, readWords, stateWords, unavailableWords } from "@/lib/sale-fees-view";
 import { readingSince } from "@/lib/earnings-by-month";
 
 /**
@@ -26,8 +26,11 @@ export async function GET(request: NextRequest) {
   const short = exportReachRefusal(state.kept.since, readingSince(state.kept.at, "UTC"));
   if (short !== null) return plain(409, short);
   const report = saleFees(state.kept.lines, { complete: true });
-  const csv = saleFeesCsv(report, "UTC");
+  // A copy shown in place of a reading that failed or was refused says when it was read, inside the file (audit 2fb6).
+  const csv = saleFeesCsv(report, "UTC", state.kept.stale || state.kept.failed ? readWords(state.kept) : undefined);
   if (csv === null) return plain(503, unavailableWords(report.available ? "incomplete" : report.why));
+  // Never larger than what the download is priced to send (SALE_FEES_FILE_MAX_BYTES; audit 2fb6).
+  if (Buffer.byteLength(csv, "utf8") + 4 > SALE_FEES_FILE_MAX_BYTES) return plain(503, FILE_TOO_LARGE_WORDS);
   const day = new Date(state.kept.at).toISOString().slice(0, 10);
   // The byte-order mark makes Excel read the file as UTF-8.
   return new Response(`﻿${csv}\n`, {

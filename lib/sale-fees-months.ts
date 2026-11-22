@@ -149,10 +149,11 @@ export function amountCell(amount: number | null, currency: string): string {
 const ACCOUNT_FEE_WORDS = { taxFees: "Stripe Tax fees", stripeFees: "Other Stripe fees" } as const;
 
 /** The CSV of fees and net per sale; null when the report is unavailable or the zone unknown. */
-export function saleFeesCsv(report: SaleFees, timeZone: string): string | null {
+export function saleFeesCsv(report: SaleFees, timeZone: string, note?: string): string | null {
   const format = dayFormat(timeZone);
   if (!report.available || !format) return null;
-  const lines = [csvLine([...SALE_FEES_CSV_HEADER])];
+  // A file from a copy kept before a failed or refused reading says when it was read, in the file itself (audit 2fb6).
+  const lines = [...(note ? [csvLine([note])] : []), csvLine([...SALE_FEES_CSV_HEADER])];
   for (const row of report.rows) {
     const c = row.currency;
     const date = row.at !== null && inRange(row.at * 1000) ? dayIn(format, row.at * 1000) : UNAVAILABLE;

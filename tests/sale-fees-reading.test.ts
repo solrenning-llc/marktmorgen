@@ -319,7 +319,17 @@ async function main(): Promise<void> {
   const bigPage = (p: number, more: boolean, count = SALE_FEES_PAGE_SIZE) => page(Array.from({ length: count }, (_, i) => ({ ...line("charge", 100, created - p * 1000 - i, charge("ch_big"), 3), id: `txn_${p}_${i}_${"x".repeat(800)}` })), more);
   pages = [bigPage(0, true), bigPage(1, true), bigPage(2, true), bigPage(3, true), bigPage(4, false, 1)];
   const tooBig = await keptSaleFees(STORE, NOW);
-  is("read, but not kept", tooBig.kind === "read" ? [tooBig.kept.stored, redis.keys().some((k) => k.startsWith("nl:salefees:copy:"))] : null, [false, false]);
+  is("read, but not kept, and said too large", tooBig.kind === "read" ? [tooBig.kept.stored, tooBig.kept.tooLarge, redis.keys().some((k) => k.startsWith("nl:salefees:copy:"))] : null, [false, true, false]);
+  reset();
+  pages = [page([sale], false)];
+  const setPipeline = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:salefees:copy:")) throw new Error("synthetic: the copy could not be written");
+    return setPipeline(commands);
+  }) as typeof redis.pipeline;
+  const unwritten = await keptSaleFees(STORE, NOW);
+  redis.pipeline = setPipeline;
+  is("a copy that could not be written: not kept, never said too large (audit 2fb6)", unwritten.kind === "read" ? [unwritten.kept.stored, unwritten.kept.tooLarge ?? false] : null, [false, false]);
   reset();
   pages = [page([sale], false)];
   const small = await keptSaleFees(STORE, NOW);
@@ -379,6 +389,16 @@ async function main(): Promise<void> {
   pages = [page([line("charge", 5000, nowSeconds - 3600, charge("ch_whole"), 175)], false)];
   const wholeFile = await exportFees(new NextRequest("https://marktmorgen.com/api/store/fees/export", { method: "GET", headers: { host: "marktmorgen.com", "sec-fetch-site": "same-origin", cookie: `${SESSION_COOKIE}=${wholeSession}` } }));
   is("a whole reading gives the file", [wholeFile.status, wholeFile.headers.get("Content-Type")], [200, "text/csv; charset=utf-8"]);
+  is("a fresh reading's file starts with its header, no note", (await wholeFile.text()).replace(/^\uFEFF/, "").startsWith('"Date",'), true);
+  // The copy two hours old and the day's readings used: the file is the copy, and says when it was read (audit 2fb6).
+  const wholeStore = await storeForEmail(OWNER);
+  const copyName = `nl:salefees:copy:${wholeStore!.statsId}`;
+  const copied = JSON.parse(String((await redis.pipeline([["GET", copyName]]))[0])) as { at: number };
+  copied.at = Date.now() - 2 * HOUR;
+  await redis.pipeline([["SET", copyName, JSON.stringify(copied)], ["SET", `nl:salefees:day:${wholeStore!.statsId}:${new Date().toISOString().slice(0, 10)}`, String(SALE_FEES_READINGS_PER_DAY)]]);
+  const staleFile = await exportFees(new NextRequest("https://marktmorgen.com/api/store/fees/export", { method: "GET", headers: { host: "marktmorgen.com", "sec-fetch-site": "same-origin", cookie: `${SESSION_COOKIE}=${wholeSession}` } }));
+  const staleText = (await staleFile.text()).replace(/^\uFEFF/, "");
+  is("a file from the kept copy, past the day's readings, says when it was read inside it", [staleFile.status, staleText.split("\n")[0].includes("Read from your Stripe account on"), staleText.split("\n")[1].startsWith('"Date",')], [200, true, true]);
 
   done();
 }

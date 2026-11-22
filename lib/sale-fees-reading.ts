@@ -57,6 +57,12 @@ export const SALE_FEES_KEEP_SECONDS = 86_400;
 /** The largest copy kept, in bytes: SALE_FEES_PAGES × SALE_FEES_PAGE_SIZE lines of the money fields at their largest. */
 export const SALE_FEES_COPY_MAX_BYTES = 262_144;
 /**
+ * The largest file the download sends, in bytes (app/api/store/fees/export/route.ts refuses a larger one, never sends
+ * it): far above SALE_FEES_PAGES × SALE_FEES_PAGE_SIZE sales at a row each, and priced as sent for every download
+ * (SALE_FEES_KEPT_SHAPE.outBytes; audit 2fb6).
+ */
+export const SALE_FEES_FILE_MAX_BYTES = 262_144;
+/**
  * The most bytes one page of balance transactions may weigh as read (lib/stripe-account.ts onAccount, maxBytes): a
  * hundred lines, each with its expanded source, at a generous 16 KiB a line. Past it the reading fails, as any page in
  * another shape does, and stays counted; never read without a ceiling.
@@ -71,7 +77,7 @@ export const SALE_FEES_READ_COMMANDS = 1 + 3 + 1;
  * copy at its largest and the day's count tried (INCRBY and EXPIRE NX, then a DECRBY when over). Priced per studio
  * request in the sale-fees-reading line (tests/plan-cost-registry.ts), as the store's kept readings are (audit f89b).
  */
-export const SALE_FEES_KEPT_SHAPE: ReadShape = { seconds: 0, cpu: 0.05, commands: 1 + 3, dbBytes: SALE_FEES_COPY_MAX_BYTES + 64, outBytes: 0, stripePages: 0 };
+export const SALE_FEES_KEPT_SHAPE: ReadShape = { seconds: 0, cpu: 0.05, commands: 1 + 3, dbBytes: SALE_FEES_COPY_MAX_BYTES + 64, outBytes: SALE_FEES_FILE_MAX_BYTES, stripePages: 0 };
 /** One reading at its worst, in the shape lib/read-ceilings.ts prices: every page waited on one after another. */
 export const SALE_FEES_READ_SHAPE: ReadShape = {
   seconds: 2,
@@ -91,8 +97,11 @@ const copyKey = (statsId: string) => `nl:salefees:copy:${statsId}`;
 const dayKey = (statsId: string, now: number) => `nl:salefees:day:${statsId}:${new Date(now).toISOString().slice(0, 10)}`;
 const DAY_KEY_SECONDS = 2 * 86_400;
 
-/** `stored` false: read now but too large to keep, so a download would read again (the page offers none; audit f89b). */
-export type SaleFeesKept = { lines: unknown[]; since: number; at: number; stale: boolean; failed?: boolean; stored?: boolean };
+/**
+ * `stored` false: read now but not kept, so a download would read again (the page offers none; audit f89b): `tooLarge`
+ * when it was past SALE_FEES_COPY_MAX_BYTES, otherwise the copy could not be written (audit 2fb6).
+ */
+export type SaleFeesKept = { lines: unknown[]; since: number; at: number; stale: boolean; failed?: boolean; stored?: boolean; tooLarge?: boolean };
 export type SaleFeesState =
   | { kind: "read"; kept: SaleFeesKept }
   | { kind: "none" }
@@ -242,8 +251,9 @@ export async function keptSaleFees(store: Account, now = Date.now(), fresh = fal
   }
   const text = JSON.stringify({ account, at: now, since: read.since, lines: read.lines });
   let stored = false;
-  if (Buffer.byteLength(text, "utf8") <= SALE_FEES_COPY_MAX_BYTES) {
+  const tooLarge = Buffer.byteLength(text, "utf8") > SALE_FEES_COPY_MAX_BYTES;
+  if (!tooLarge) {
     stored = await redisPipeline([["SET", copyKey(statsId), text, "EX", SALE_FEES_KEEP_SECONDS]]).then(() => true, () => false);
   }
-  return { kind: "read", kept: { lines: read.lines, since: read.since, at: now, stale: false, stored } };
+  return { kind: "read", kept: { lines: read.lines, since: read.since, at: now, stale: false, stored, ...(tooLarge ? { tooLarge } : {}) } };
 }

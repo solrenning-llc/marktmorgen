@@ -12,7 +12,7 @@
  *   - at the level, both room cells say the next notice of either kind
  *     pauses (pauseIfOver runs after every one counted), and the distance
  *     sentence is not shown (KB20's advice already says so);
- *   - nothing sent: no table, one sentence;
+ *   - nothing sent: nothing of its own, since the health line above says so;
  *   - no word that claims an outcome no sender can know, outside the one
  *     honest sentence that says so;
  *   - the words explained in place, and the markup bounded at any count;
@@ -22,7 +22,7 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { healthLevels, shareWords, type HealthLevel } from "@/lib/mail-health-levels";
+import { healthLevels, healthLine, shareWords, type HealthLevel } from "@/lib/mail-health-levels";
 import { BOTH_NEEDED, SOFT_BOUNCE_NOTE, TERMS, UNREAD, healthRows, levelWords, roomBeforePause, roomLine, roomWords } from "@/lib/list-health-rules";
 import { ListHealthTable, ListHealthUnread } from "@/components/list-health-table";
 import { overTheLine } from "@/lib/mail-health";
@@ -119,7 +119,12 @@ function main(): void {
   part("Nothing sent");
   const none = render(h(0));
   is("no table", none.includes("<table"), false);
-  is("one sentence that nothing was sent", none, "<p class=\"mt-3 text-sm text-ink-soft\">Nothing was sent in these 7 days, so there is nothing yet to compare with the level that pauses email to your list.</p>");
+  // The health line above the table already says "none sent" (lib/mail-health-levels.ts healthLine), so nothing of its
+  // own is added: the section keeps main's height with no email sent, the state the studio matrix opens (Studio AAA
+  // webkit on #2314: the page's 32 px more left the "Studio" breadcrumb half under the sticky header after the
+  // baseline's ten Tabs, axe target-size; Claude 1 coord e0c2, a page change that passes the unchanged test).
+  is("nothing of its own: the health line above already says none were sent", none, "");
+  is("the health line says it", healthLine(h(0)).endsWith(": none sent."), true);
   is("unreadable counts: nothing at all", render(h(10, Number.NaN)), "");
 
   part("Not read just now (Codex S and Claude 5 on #2314)");

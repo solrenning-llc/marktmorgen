@@ -55,6 +55,7 @@ import { personOf, readRun } from "@/lib/flow-runs";
 import { storeKey } from "@/lib/learn";
 import { clicksOf } from "@/lib/mail-clicks";
 import { waitlistPlacesOf } from "@/lib/waitlist";
+import { stockAlertsOf } from "@/lib/stock-alerts";
 import { feedsOf } from "@/lib/podcast-access";
 import { remindersOf } from "@/lib/assistant-reminder";
 import { asksOf } from "@/lib/checkout-ask";
@@ -124,6 +125,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/lesson-notes.ts": { how: "copied", what: "Your private notes on lessons" },
   "lib/community-erasure.ts": { how: "copied", what: "Your community profile, points, notifications, private messages, what you said in its room, the events you said you are coming to, your posts, comments, likes, votes and reports, and what you sent that waits for approval" },
   "lib/waitlist.ts": { how: "copied", what: "Your places on the store's waitlists" },
+  "lib/stock-alerts.ts": { how: "copied", what: "Your places on the store's back-in-stock lists" },
   "lib/affiliate-bond.ts": { how: "copied", what: "Which affiliate brought you to the store" },
   "lib/affiliate-leads.ts": { how: "copied", what: "Sign-ups, free products and calls an affiliate was credited for" },
   "lib/imported-purchases.ts": { how: "copied", what: "What an import from another platform, a gift or a PayPal order gave you" },
@@ -191,6 +193,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/batch-count.ts": { how: "passing", days: 1, what: "If the email service's answer to a batch of the store's emails to you was lost, a mark that the batch's count is already kept, named by a one-way fingerprint of the batch and its addresses, with no address in it" },
   "lib/email-polls.ts": { how: "passing", days: 60, what: "If you answered a poll in one of the store's emails, your answer is kept under your place in that email's list, never your address, so it cannot be found for you; it is deleted by itself 30 days after the poll closes" },
   "lib/community-event-mail.ts": { how: "passing", days: 30, what: "If an email about a community event is going out to you now, its sending list holds your address until it finishes" },
+  "lib/stock-alert-send.ts": { how: "passing", days: 1, what: "If a back-in-stock email from the store is going out to you now, its batch holds your address until it is sent, a day at the most" },
   "lib/ad-events.ts": { how: "passing", days: 4, what: "What a checkout you opened with your yes to ad measurement carries to its sale (network address, browser, page, ad cookies), kept under the checkout's own token for four days at the most and deleted as soon as its sale is known" },
   "lib/checkout-ask.ts": { how: "passing", days: 4, what: "A reminder you asked for on a product's page or at checkout waits in a queue with your address until it is sent: in an hour, a day or three days, as you chose, and a few hours more if a try fails" },
   "lib/imports.ts": { how: "copied", what: "Rows of a file the store imported from another platform that name you, kept 14 days from the import, and whether an email to you from that import still waits" },
@@ -502,6 +505,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/buyer-library.ts": async (s) => ((await storesKnownFor(s.email)).includes(s.sid) ? [{ inYourLibrary: true }] : []),
   "lib/mail-clicks.ts": async (s) => (await clicksOf(s.listId, s.email)).map((email) => ({ email })),
   "lib/waitlist.ts": async (s) => (await waitlistPlacesOf(s.statsId, [...s.productIds, ...(s.waitlistIds ?? [])], s.email)).map((w) => ({ product: w.product, joined: iso(w.joined), confirmed: iso(w.confirmed), alsoAskedForNews: w.news })),
+  "lib/stock-alerts.ts": async (s) => (await stockAlertsOf(s.statsId, s.productIds, s.email)).map((a) => ({ product: a.product, asked: iso(a.asked), confirmed: iso(a.confirmed) })),
   "lib/tier-benefits.ts": async (s) => (await benefitMarksOf(s.store, s.person)).map((m) => ({ benefit: m.benefit, period: m.period, markedGiven: iso(m.at) })),
   "lib/podcast-access.ts": async (s) => (await feedsOf(s.store, s.productIds, s.email)).map((product) => ({ product, privateFeed: true })),
   "lib/assistant-reminder.ts": async (s) => (await remindersOf(s.statsId, s.email)).map((r) => ({ ...r, at: new Date(r.at).toISOString() })),

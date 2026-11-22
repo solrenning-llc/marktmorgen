@@ -1262,6 +1262,28 @@ export class MemoryRedis {
           }
           return out;
         }
+        // lib/contacts.ts TOKEN_CAS_HSET: for each address, the unsubscribe link's record and the contact with its token,
+        // only while the address's erasure print is not there and the contact holds what was read (Codex V on #3925).
+        if (key.startsWith("-- marktmorgen:contact-token-cas-hset:v1\n")) {
+          const keys = Number(args[0]);
+          const count = keys - 2;
+          if (!Number.isSafeInteger(keys) || count < 1 || args.length !== 1 + keys + 5 * count) throw new Error("ERR wrong number of arguments for the token write");
+          const [list, marks] = [args[1], args[2]];
+          const records = args.slice(3, 3 + count);
+          const argv = args.slice(1 + keys);
+          const out: number[] = [];
+          for (let j = 0; j < count; j += 1) {
+            const [field, print, was, value, record] = argv.slice(5 * j, 5 * j + 5);
+            const current = this.run(["HGET", list, field]);
+            const seen = typeof current === "string" ? createHash("sha1").update(current).digest("hex") : "";
+            if (this.run(["HEXISTS", marks, print]) === 0 && seen === was) {
+              this.run(["SET", records[j], record]);
+              this.run(["HSET", list, field, value]);
+              out.push(1);
+            } else out.push(0);
+          }
+          return out;
+        }
         // lib/contacts.ts CONTACT_WRITE_IF: a contact's row written only while it and the address's deleted mark hold what was read, with its counts.
         // With the person's set of stores joined (KEYS[5], ARGV[9] the store, ARGV[10] its day), added to after the checks.
         if (key.startsWith("-- marktmorgen:contact-write-if:v1\n") && ((args[0] === "4" && args.length === 13) || (args[0] === "5" && args.length === 16))) {
@@ -1416,6 +1438,21 @@ export class MemoryRedis {
           const now = this.run(["GET", about]);
           const held = typeof now === "string" ? now : "";
           if (held !== expected) return [0, Buffer.byteLength(held, "utf8")];
+          this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
+          return [1];
+        }
+        // lib/product-about-live.ts ABOUT_WRITE_IF_STORE_LIVE: the same write (or compared write), only while the store is
+        // not erasing and its id key still holds its ref: {1} written, {0, length now} changed, {-1} gone, moved or
+        // erasing (#4969).
+        if (key.startsWith("-- marktmorgen:about-write-live:v2\n") && args[0] === "3" && args.length === 9) {
+          const [, storeId, erasing, about, field, compare, expected, text, ref] = args;
+          if (this.run(["HGET", erasing, field]) !== null) return [-1];
+          if (this.run(["GET", storeId]) !== ref) return [-1];
+          if (compare === "1") {
+            const now = this.run(["GET", about]);
+            const held = typeof now === "string" ? now : "";
+            if (held !== expected) return [0, Buffer.byteLength(held, "utf8")];
+          }
           this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
           return [1];
         }
@@ -2480,6 +2517,26 @@ export class MemoryRedis {
           if (this.run(["HGET", batch, field]) !== expected) return 0;
           return this.run(["HDEL", batch, field]);
         }
+        // lib/stock-alerts.ts ADD_PLACE: a new place only while absent and under the ceiling; else only over the entry read.
+        if (key.startsWith("-- marktmorgen:stock-alert-add:v1\n") && args[0] === "1" && args.length === 7) {
+          const [, list, field, expected, next, max, seconds] = args;
+          const current = this.run(["HGET", list, field]);
+          if (expected === "") {
+            if (current !== null) return 0;
+            if ((this.run(["HLEN", list]) as number) >= Number(max)) return -1;
+          } else if (current !== expected) return 0;
+          this.run(["HSET", list, field, next]);
+          this.run(["EXPIRE", list, seconds]);
+          return 1;
+        }
+        // lib/stock-alerts.ts CONFIRM_PLACE: a back-in-stock place confirmed only over exactly the entry read.
+        if (key.startsWith("-- marktmorgen:stock-alert-confirm:v1\n") && args[0] === "1" && args.length === 6) {
+          const [, list, field, expected, next, seconds] = args;
+          if (this.run(["HGET", list, field]) !== expected) return 0;
+          this.run(["HSET", list, field, next]);
+          this.run(["EXPIRE", list, seconds]);
+          return 1;
+        }
         // lib/closed-store-data.ts BATCH_SWAP: one batch entry rewritten, or dropped when the new text is empty, only
         // over exactly the text read.
         if (key.startsWith("-- marktmorgen:closed-batch-swap:v1\n") && args[0] === "1" && args.length === 5) {
@@ -3269,6 +3326,29 @@ export class MemoryRedis {
             });
           }
           return n;
+        }
+        // lib/low-stock-alert.ts LOW_STOCK_GIVE_BACK: a crossing that reached nobody put back in one step, the day's mark
+        // and the count seen both or neither, and the store's place when asked (Codex X6 on #3725).
+        if (key.startsWith("-- marktmorgen:low-stock-give-back:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, mark, record, dayCount, value, field, wroteSha, before, place] = args;
+          this.scriptCalls += 1;
+          if (this.run(["GET", mark]) !== value) return 0;
+          const current = this.run(["HGET", record, field]);
+          if (typeof current !== "string" || createHash("sha1").update(current).digest("hex") !== wroteSha) return 0;
+          this.run(["HSET", record, field, before]);
+          this.run(["DEL", mark]);
+          if (place === "1") this.run(["DECR", dayCount]);
+          return 1;
+        }
+        // lib/low-stock-alert.ts LOW_STOCK_RESCHEDULE: a product's next check, set only while its score is still the one
+        // the job read (Codex X6's LOW on #3814).
+        if (key.startsWith("-- marktmorgen:low-stock-reschedule:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, set, entry, readAt, next] = args;
+          this.scriptCalls += 1;
+          const score = this.run(["ZSCORE", set, entry]);
+          if (score === null || Number(score) !== Number(readAt)) return 0;
+          this.run(["ZADD", set, "XX", next, entry]);
+          return 1;
         }
         if (key.startsWith("-- marktmorgen:form-keep:v1\n") && args[0] === "1" && args.length === 4) {
           const listKey = args[1];

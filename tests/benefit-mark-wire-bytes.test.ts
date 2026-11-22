@@ -47,6 +47,29 @@ async function main() {
     assert.equal(bytes, BENEFIT_MARK_VALUE_BYTES, "the declared value is the measured worst, no higher than needed");
   });
 
+  // The database's own encoder is not documented here; an HTML-safe one (Go's encoding/json by default) also writes
+  // <, > and & as <, > and & (Claude 2 upbeat's LOW on #5123, as Claude 5 ibqho's on #2048). Every
+  // printable ASCII character a mark may hold must cost one byte under such an encoder too.
+  const htmlSafe = (s: string) => s.replace(/[<>&]/g, (c) => `\\u00${c.charCodeAt(0).toString(16)}`);
+  await check("every character a mark may hold costs one byte even under an HTML-safe encoder", () => {
+    for (let code = 0x21; code <= 0x7e; code += 1) {
+      const ch = String.fromCharCode(code);
+      if (!markableBy(`${ch}@b.co`) && !markableBy(`a${ch}a@b.co`)) continue;
+      assert.equal(Buffer.byteLength(htmlSafe(JSON.stringify(JSON.stringify(ch)))), Buffer.byteLength(JSON.stringify(JSON.stringify("a"))), `${ch} costs more than one byte`);
+    }
+  });
+  for (const ch of ["<", ">", "&"]) {
+    const by = `${ch.repeat(MARK_BY_MAX - 5)}@b.co`;
+    await check(`an address of ${ch} is not markable`, () => {
+      assert.equal(markableBy(by), false);
+    });
+    await check(`a mark of ${ch} would cost more than declared under an HTML-safe encoder (why it is refused)`, () => {
+      const bytes = Buffer.byteLength(htmlSafe(JSON.stringify(JSON.stringify({ at, by }))));
+      console.log(`MEASURE ${ch} under an HTML-safe encoder: ${bytes} bytes`);
+      assert.ok(bytes > BENEFIT_MARK_VALUE_BYTES);
+    });
+  }
+
   // What the old rule let through, each 320 characters: each is refused now, and each would cost more than declared.
   const refused: [string, string][] = [["control U+0001", "\u0001"], ["lone surrogate", "\ud800"], ["quote", '"'], ["backslash", "\\"], ["ideograph", "中"], ["space inside", "a b"]];
   for (const [name, ch] of refused) {

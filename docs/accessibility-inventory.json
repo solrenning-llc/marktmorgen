@@ -33,6 +33,17 @@
       ]
     },
     {
+      "source": "app/[handle]/back-in-stock/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/back-in-stock",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/blog/[post]/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/blog/[post]",
@@ -810,6 +821,32 @@
       "parameters": []
     },
     {
+      "source": "app/help/[section]/[answer]/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/help/[section]/[answer]",
+      "parameters": [
+        {
+          "name": "section",
+          "kind": "segment"
+        },
+        {
+          "name": "answer",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
+      "source": "app/help/[section]/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/help/[section]",
+      "parameters": [
+        {
+          "name": "section",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/help/buyers/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/help/buyers",
@@ -1456,6 +1493,7 @@
     "components/client-sessions.tsx",
     "components/closing-refunds-confirm.tsx",
     "components/collections-editor.tsx",
+    "components/color-scheme-switch.tsx",
     "components/community-approval-studio.tsx",
     "components/community-challenges-studio.tsx",
     "components/community-challenges.tsx",
@@ -1548,7 +1586,9 @@
     "components/group-link-box.tsx",
     "components/handle-form.tsx",
     "components/heard-ask.tsx",
+    "components/help-answer-tools.tsx",
     "components/help-search.tsx",
+    "components/help-topics.tsx",
     "components/home-claim.tsx",
     "components/home-examples.tsx",
     "components/home-interactive.tsx",
@@ -1583,6 +1623,7 @@
     "components/link-editor.tsx",
     "components/link-picture.tsx",
     "components/link-request-form.tsx",
+    "components/list-health-table.tsx",
     "components/local-clock.tsx",
     "components/local-day.tsx",
     "components/logo.tsx",
@@ -2156,6 +2197,9 @@
     "app/api/store/stamp/route.ts",
     "app/api/store/stats/range/route.ts",
     "app/api/store/stats/route.ts",
+    "app/api/store/stock-alert/confirm/route.ts",
+    "app/api/store/stock-alert/leave/route.ts",
+    "app/api/store/stock-alert/route.ts",
     "app/api/store/store-copy/route.ts",
     "app/api/store/stores/route.ts",
     "app/api/store/stream/captions/route.ts",
@@ -2295,6 +2339,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 157
+    "pageTemplates": 160
   }
 }

@@ -71,6 +71,9 @@ export async function usedThisMonthExact(){return 0;}
 export async function usedThisMonth(){return 0;}
 export function healthId(){return 'synthetic-health';}
 export async function listHealth(){return null;}
+// The seven days read exactly (#2314, lib/list-health-read.ts imports these from @/lib/mail-health): the window and a synthetic day key.
+export const HEALTH_WINDOW_DAYS=7;
+export const mailHealthDayKey=(id:string,ms:number)=>`nl:mail:health:${id}:${Math.floor(ms/86_400_000)}`;
 export async function pauseForSending(){return null;}
 export function pauseWords(){return '';}
 export async function pausedFor(){return null;}

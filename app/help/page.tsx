@@ -8,6 +8,8 @@ import { HelpSearch } from "@/components/help-search";
 import { CopyLink } from "@/components/copy-link";
 import { HELP_SECTIONS, answerId } from "@/lib/help-content";
 import { HELP_AREAS } from "@/lib/help-areas";
+import { datedAnswers, helpAnswerPath, helpDay, newestAnswers, recentlyUpdated } from "@/lib/help-pages";
+import { HELP_DATES } from "@/lib/help-dates";
 
 export const metadata: Metadata = {
   title: "Help center — Marktmorgen",
@@ -40,10 +42,6 @@ export default function HelpPage() {
               Every answer here is about the product as it is today. Where the answer is &ldquo;not yet,&rdquo; it says
               not yet.
             </p>
-            <p className="mt-3 flex items-center gap-2 text-sm text-ink-mute">
-              <Icon name="check" size={15} className="text-mint-deep" />
-              Checked against the product on September 28, 2026.
-            </p>
             <p className="mt-3">
               Bought something from a creator here?{" "}
               <Link href="/help/buyers" className="link font-medium">Help for buyers</Link>
@@ -64,19 +62,49 @@ export default function HelpPage() {
         <nav aria-labelledby="help-areas-title" className="container-page pt-14 sm:pt-18" data-help-areas>
           <h2 id="help-areas-title" className="t-section">Help for each part of your studio</h2>
           <ul className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {[...HELP_AREAS].sort((a, b) => a.name.localeCompare(b.name, "en-US")).map((area) => (
+            {[...HELP_AREAS]
+              .filter((area) => questionOf.has(area.answer))
+              .sort((a, b) => a.name.localeCompare(b.name, "en-US"))
+              .map((area) => (
               <li key={area.folder} className="min-w-0">
                 <a
                   href={`#${area.answer}`}
-                  className="flex min-h-11 flex-col justify-center rounded-[var(--r-md)] border border-line bg-white px-4 py-3 hover:border-line-strong"
+                  className="flex min-h-11 items-start gap-3 rounded-[var(--r-md)] border border-line bg-white px-4 py-3 hover:border-line-strong"
                 >
-                  <span className="font-semibold text-ink">{area.name}</span>
-                  <span className="text-sm text-ink-soft">{questionOf.get(area.answer)}</span>
+                  <Icon name={area.icon} size={20} className="mt-0.5 shrink-0 text-violet-deep" />
+                  <span className="flex min-w-0 flex-col">
+                    <span className="font-semibold text-ink">{area.name}</span>
+                    <span className="text-sm text-ink-soft">{questionOf.get(area.answer)}</span>
+                  </span>
                 </a>
               </li>
             ))}
           </ul>
         </nav>
+
+        {/* What is new in the help center, and what changed (564 [HC1]): the dates come from lib/help-dates.ts, never from a guess. */}
+        <div className="container-page grid gap-8 pt-12 sm:grid-cols-2" data-help-recent>
+          {[
+            { id: "help-new-title", title: "New answers", rows: newestAnswers(datedAnswers(HELP_DATES)), day: "created" as const },
+            { id: "help-updated-title", title: "Recently updated", rows: recentlyUpdated(datedAnswers(HELP_DATES)), day: "updated" as const },
+          ].map((list) =>
+            list.rows.length ? (
+              <section key={list.id} aria-labelledby={list.id}>
+                <h2 id={list.id} className="t-section">{list.title}</h2>
+                <ul className="mt-3 space-y-1">
+                  {list.rows.map((row) => (
+                    <li key={row.id} className="flex flex-wrap items-baseline gap-x-3">
+                      <Link href={helpAnswerPath(row.section, row.id)} className="inline-flex min-h-11 items-center text-ink underline underline-offset-4 hover:text-violet-deep">
+                        {row.q}
+                      </Link>
+                      <time dateTime={row[list.day]} className="text-sm text-ink-soft">{helpDay(row[list.day])}</time>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null,
+          )}
+        </div>
 
         <div className="container-page grid gap-10 py-14 sm:py-20 lg:grid-cols-[15rem_1fr] lg:gap-16">
           <nav aria-label="Help sections" className="min-w-0 lg:sticky lg:top-24 lg:self-start">
@@ -125,7 +153,12 @@ export default function HelpPage() {
                             {paragraph}
                           </p>
                         ))}
-                        <CopyLink id={answerId(item.q)} />
+                        <p className="flex flex-wrap items-center gap-x-4">
+                          <CopyLink id={answerId(item.q)} />
+                          <Link href={helpAnswerPath(section.id, answerId(item.q))} className="inline-flex min-h-11 items-center text-sm font-medium text-violet-deep underline underline-offset-4">
+                            This answer on its own page
+                          </Link>
+                        </p>
                       </div>
                     </details>
                   ))}

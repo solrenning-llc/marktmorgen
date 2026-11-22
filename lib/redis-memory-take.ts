@@ -121,6 +121,14 @@ export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
     }
     return run(["SET", key, value, "NX", "EX", seconds]) === "OK" ? 1 : 0;
   },
+  // lib/store-forget-retry.ts COMPLETE_FORGET: a deleted store's forgetting leaves the daily line and is counted done
+  // for its month, only while it is still in line: {1, done} taken out, {0, 0} not there (#4348).
+  "store-forget-complete:v1": (run, [queue, month], [field, seconds]) => {
+    if (run(["HDEL", queue, field]) !== 1) return [0, 0];
+    const done = run(["HINCRBY", month, "done", 1]);
+    run(["EXPIRE", month, seconds]);
+    return [1, done];
+  },
   "zset-take-count:v1": (run, [zset]) => {
     const n = Number(run(["ZCARD", zset])) || 0;
     run(["DEL", zset]);

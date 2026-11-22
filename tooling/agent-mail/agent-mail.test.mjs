@@ -32,6 +32,7 @@ writeFileSync(join(BIN, "gh"), `#!/bin/sh
 case "$FAKE_GH" in
   down) echo "gh: connection refused" >&2; exit 1 ;;
   req) printf '%s\\n' '["https://github.com/solrenning-llc/marktmorgen/issues/'"\${FAKE_ISSUE:-4932}"'#issuecomment-'"$FAKE_ID"'","'"$FAKE_BODY"'","'"\${FAKE_CREATED:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"'"]' ;;
+  headref) echo "$FAKE_REF" ;;
   nohead) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","READY, no head here","","COLLABORATOR"]' ;;
   rev) printf '%s\\n' '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","'"$FAKE_BODY"'","","'"\${FAKE_ASSOC:-COLLABORATOR}"'"]' ;;
   *) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","Review @'"$FAKE_SHA"' READY","","COLLABORATOR"]' ;;
@@ -630,6 +631,20 @@ console.log("step 6: the private mailbox never lands in the public clone (A14)")
     const x = spawnSync("node", [join(d, "agent-mail.mjs"), "list-switches"], { cwd: W, env: { ...base, AGENT_MAIL_TEST: "", CORREIO_SEM_VERSAO: "" }, encoding: "utf8" });
     is(`a copy in a folder with mode ${modo.toString(8)} ${aviso ? "is" : "is not"} warned about a folder anyone can write (NIT 2 on #5113)`, /pasta que todos podem escrever/.test(`${x.stdout}${x.stderr}`) === aviso, `${x.stdout}${x.stderr}`.slice(0, 300));
   }
+}
+
+console.log("two branches at the PR's head: the PR's own branch, from GitHub's head.ref (LOW of Claude 6 z5v4, #5080)");
+{
+  g(["init", "-q", "--bare", "mail11.git"]); g(["push", "-q", "../mail11.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m11 = { CORREIO_REPO: join(T, "mail11.git") };
+  g(["checkout", "-q", "-B", "pr41", M], P); const H41 = commit("f41.txt", "41\n", "pr41");
+  for (const ref of ["refs/pull/41/head", "refs/heads/feature-41", "refs/heads/helper-41"]) g(["push", "-q", "../prs.git", `HEAD:${ref}`], P);
+  const ramoDo = (out) => /registrado: (\S+)/.exec(out)?.[1] ? (/^Ramo: (.*)$/m.exec(g(["show", `refs/heads/correio:fila/pedidos/${/registrado: (\S+)/.exec(out)[1]}.md`], join(T, "mail11.git")))?.[1] ?? "") : null;
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "41", "--sha", H41.slice(0, 10), "--text", "fila #41"], { ...m11, ...as("c2"), CORREIO_SEM_COMMITS: "", FAKE_GH: "headref", FAKE_REF: "feature-41" });
+  is("with two branches at the head, the request records the PR's own branch, named by GitHub (LOW on #5080)", ramoDo(r.out) === "feature-41", r.out);
+  run(["cancel-enqueue", "--as", "Claude 2", /registrado: (\S+)/.exec(r.out)?.[1] ?? "x", "--reason", "t"], { ...m11, ...as("c2") });
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "41", "--sha", H41.slice(0, 10), "--text", "fila #41"], { ...m11, ...as("c2"), CORREIO_SEM_COMMITS: "", FAKE_GH: "down" });
+  is("with GitHub unreachable, no branch is guessed among the two", ramoDo(r.out) === "" || ramoDo(r.out) === null, r.out);
 }
 
 console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");

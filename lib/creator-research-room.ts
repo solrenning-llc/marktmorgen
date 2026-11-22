@@ -1,3 +1,5 @@
+import { createHmac } from "node:crypto";
+import { deriveKey, deriveLegacyKey } from "@/lib/secret-box";
 /**
  * How much the creator research list may hold (nl:creators:responses).
  *
@@ -48,6 +50,8 @@ export const RESEARCH_DAY_SHARE = 16;
  * (a named follow-up) is what would reach them.
  */
 export const RESEARCH_RESERVED = 64;
+/** The label of the key a reserved answer's account mark is made with (researchAccountMark). */
+const MARK_LABEL = "creator-research-reserve/v1";
 /** The kept length past which every answer kept tells the owner, in the log, how full the list is (80%). */
 export const RESEARCH_WARN_AT = Math.floor(RESEARCH_MAX_ANSWERS * 0.8);
 
@@ -57,9 +61,13 @@ export function researchDayCap(anonymous: number): number {
 }
 
 /** The one-way mark of a signed-in account in its answer (reservedFor): 32 hex characters, never the address. */
-export async function researchAccountMark(email: string): Promise<string> {
-  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`creator-research-reserve:${email.trim().toLowerCase()}`));
-  return Array.from(new Uint8Array(bytes).slice(0, 16), (b) => b.toString(16).padStart(2, "0")).join("");
+export async function researchAccountMark(email: string, legacy = false): Promise<string> {
+  // Keyed with this deployment's secret (lib/secret-box.ts), so a mark cannot be found from an address alone
+  // (Claude 2's MEDIUM on #3584). With no secret there is no mark: the account answers as anonymous, never unmarked
+  // in a reserved place. The person's copy and erasure also look for the mark made under the earlier root (legacy).
+  const key = legacy ? deriveLegacyKey(MARK_LABEL) : deriveKey(MARK_LABEL);
+  if (!key) return "";
+  return createHmac("sha256", key).update(email.trim().toLowerCase()).digest("hex").slice(0, 32);
 }
 export const RESEARCH_MAX_BYTES = RESEARCH_ANSWER_MAX_BYTES * RESEARCH_MAX_ANSWERS;
 

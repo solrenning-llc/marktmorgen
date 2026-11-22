@@ -13,7 +13,8 @@
 
 /** Families counted in a store's data room. */
 export const COUNTED_FAMILIES: readonly string[] = [
-  "nl:ab:", "nl:adsrv:ctx:", "nl:adsrv:sent:", "nl:aff:", "nl:agent:book:", "nl:paths:",
+  "nl:ab:", "nl:adsrv:ctx:", "nl:adsrv:sent:", "nl:aff:", "nl:agent:book:",
+  "nl:paths:",
   "nl:agree:p:", "nl:agree:r:", "nl:agree:s:", "nl:agree:v:", "nl:amem:", "nl:blog:body:", "nl:blog:meta:", "nl:blog:pub:",
   "nl:call:busy:", "nl:call:confirmed:", "nl:call:series:", "nl:callteam:", "nl:callteam:rr:", "nl:catalog:", "nl:cert:",
   "nl:cm:", "nl:cm:unsub:", "nl:copy:", "nl:course:", "nl:crm:co:", "nl:crm:deals:", "nl:crm:pacc:", "nl:crm:pipes:", "nl:crm:tasks:", "nl:crm:v:", "nl:data:", "nl:dc:addr:",
@@ -37,8 +38,9 @@ export const COUNTED_FAMILIES: readonly string[] = [
 export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:", "nl:*", "nl:2fa:", "nl:2fa:hold:", "nl:2fa:locked:", "nl:2fa:lock:", "nl:2fa:lockedset:", "nl:2fa:keptstar:", "nl:2fa:once:", "nl:2fa:rescue:",
   "nl:2fa:setup:", "nl:ab:paid:", "nl:account:stores:", "nl:adsrv:", "nl:adsrv:last:", "nl:adsrv:sub:",
-  "nl:aff:leads:lock:", "nl:aff:link:", "nl:aff:payday:", "nl:aff:payday:lock", "nl:aff:pend:", "nl:aff:pend:due", "nl:aff:pend:pp:", "nl:aff:seen:", "nl:aff:session:", "nl:aff:unc:month:", "nl:affhub:", "nl:agent:book:lock:", "nl:paths:lock:",
-  "nl:affhub:link:", "nl:affkit:", "nl:agree:lock:", "nl:ai-spend:v2:{", "nl:ai-spend:v2:{YYYY-MM}", "nl:ai:", "nl:ai:pdfno:", "nl:ai:stop:", "nl:alert:",
+  "nl:aff:leads:lock:", "nl:aff:link:", "nl:aff:payday:", "nl:aff:payday:lock", "nl:aff:pend:", "nl:aff:pend:due", "nl:aff:pend:pp:", "nl:aff:seen:", "nl:aff:session:", "nl:aff:unc:month:", "nl:affhub:", "nl:agent:book:lock:",
+  "nl:paths:lock:",
+  "nl:affhub:link:", "nl:affkit:", "nl:agree:lock:", "nl:ai-spend:v2:{", "nl:ai-spend:v2:{YYYY-MM}", "nl:ai:", "nl:ai:file:", "nl:ai:pdfno:", "nl:ai:stop:", "nl:alert:",
   "nl:alert:seen:", "nl:allow:", "nl:amem:lock:", "nl:api:hold:", "nl:api:k:", "nl:api:keys:", "nl:api:used:", "nl:ask:", "nl:ask:a:", "nl:ask:missed:",
   "nl:assist:c:", "nl:assist:missed:", "nl:assist:next:", "nl:assist:nextlock:", "nl:assist:pool:", "nl:assist:remind:", "nl:assist:remindq", "nl:assist:remindwho:",
   "nl:auth:devices:", "nl:auth:fresh:", "nl:auth:link:", "nl:auth:move:", "nl:auth:move-broken:", "nl:auth:move-broken:open", "nl:auth:move-room:", "nl:auth:moving:", "nl:auth:rec:",
@@ -76,7 +78,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:meet:refresh:", "nl:meet:refund-turns", "nl:meet:refund-turns:said", "nl:meet:rf:", "nl:meet:state:", "nl:meet:stores", "nl:meet:test:", "nl:meet:user:",
   "nl:meet:zoomseen:", "nl:member:c:", "nl:member:status:", "nl:metaads:conn:", "nl:metaads:gone:", "nl:metaads:gen", "nl:metaads:pass", "nl:metaads:read:", "nl:metaads:reading:",
   "nl:metaads:state:", "nl:metaads:stores", "nl:metaads:user:", "nl:mnum:", "nl:monthly:lock",
-  "nl:monthly:seen:", "nl:monthly:sent:", "nl:mv:due", "nl:mv:gone:", "nl:mv:pend:", "nl:next:", "nl:next:lock:", "nl:nlink:", "nl:nlink:opens:", "nl:none",
+  "nl:monthly:seen:", "nl:monthly:sent:", "nl:mv:due", "nl:mv:gone:", "nl:mv:open:", "nl:mv:pend:", "nl:next:", "nl:next:lock:", "nl:nlink:", "nl:nlink:opens:", "nl:none",
   "nl:order-confirmation:closed:", "nl:order-confirmation:erased:", "nl:order-confirmation:due", "nl:order-confirmation:person:", "nl:order-confirmation:row:",
   "nl:order-confirmation:source:", "nl:order-confirmation:store:",
   "nl:nudge:", "nl:nudge:count:", "nl:nudge:cursor", "nl:orders:folders:", "nl:orders:link:", "nl:orders:n:",
@@ -205,13 +207,14 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // ---------------------------------------------------------------- a-b
   "nl:ab:": E, "nl:ab:paid:": X(40),
   "nl:adsrv:": E, "nl:adsrv:ctx:": X(4), "nl:adsrv:last:": E, "nl:adsrv:sent:": X(3), "nl:adsrv:sub:": X(400),
-  "nl:aff:": E, "nl:agent:book:": E, "nl:agent:book:lock:": X(1), "nl:paths:": E, "nl:paths:lock:": X(1), "nl:aff:leads:lock:": X(1), "nl:aff:link:": X(1), "nl:aff:payday:": E, "nl:aff:payday:lock": C, "nl:aff:pend:": X(2), "nl:aff:pend:due": Cr(2), "nl:aff:pend:pp:": X(2), "nl:aff:seen:": X(2), "nl:aff:session:": X(30), "nl:aff:unc:month:": Cr(400),
+  "nl:paths:": E, "nl:paths:lock:": X(1),
+  "nl:aff:": E, "nl:agent:book:": E, "nl:agent:book:lock:": X(1), "nl:aff:leads:lock:": X(1), "nl:aff:link:": X(1), "nl:aff:payday:": E, "nl:aff:payday:lock": C, "nl:aff:pend:": X(2), "nl:aff:pend:due": Cr(2), "nl:aff:pend:pp:": X(2), "nl:aff:seen:": X(2), "nl:aff:session:": X(30), "nl:aff:unc:month:": Cr(400),
   "nl:affhub:": L, "nl:affhub:link:": Cr(1), "nl:affkit:": E,
   // Proposals and agreements (lib/agreement-store.ts): the store's lists go, and each agreement and its versions through them.
   "nl:agree:s:": E, "nl:agree:p:": E, "nl:agree:r:": T("nl:agree:s:", 400), "nl:agree:v:": T("nl:agree:s:", 400), "nl:agree:lock:": X(1),
   // The creator's own notes for their assistant (lib/assistant-memory-store.ts): go with the store.
   "nl:amem:": E, "nl:amem:lock:": X(1),
-  "nl:ai-spend:v2:{": C, "nl:ai-spend:v2:{YYYY-MM}": C, "nl:ai:": E, "nl:ai:pdfno:": X(1), "nl:ai:stop:": X(1),
+  "nl:ai-spend:v2:{": C, "nl:ai-spend:v2:{YYYY-MM}": C, "nl:ai:": E, "nl:ai:file:": X(1), "nl:ai:pdfno:": X(1), "nl:ai:stop:": X(1),
   "nl:alert:": E, "nl:alert:seen:": Cr(2), "nl:allow:": E,
   "nl:api:hold:": E, "nl:api:k:": T("prepare"), "nl:api:keys:": E, "nl:api:used:": E,
   "nl:ask:": E, "nl:ask:a:": X(1), "nl:ask:missed:": E,
@@ -345,7 +348,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:metaads:conn:": E, "nl:metaads:gone:": Cr(1), "nl:metaads:gen": C, "nl:metaads:pass": C, "nl:metaads:read:": E, "nl:metaads:reading:": E, "nl:metaads:state:": X(1), "nl:metaads:stores": I, "nl:metaads:user:": I,
   "nl:mnum:": E,
   "nl:monthly:lock": C, "nl:monthly:seen:": Cr(40), "nl:monthly:sent:": Cr(62),
-  "nl:mv:": E, "nl:mv:due": I, "nl:mv:gone:": X(1), "nl:mv:link:": T("nl:mv:"), "nl:mv:pend:": E,
+  "nl:mv:": E, "nl:mv:due": I, "nl:mv:gone:": X(1), "nl:mv:link:": T("nl:mv:"), "nl:mv:open:": X(2), "nl:mv:pend:": E,
   // ---------------------------------------------------------------- n-p
   "nl:next:": E, "nl:next:lock:": E,
   "nl:nlink:": E, "nl:nlink:opens:": E,

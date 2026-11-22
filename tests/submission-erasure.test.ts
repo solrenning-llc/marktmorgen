@@ -513,7 +513,7 @@ async function main(): Promise<void> {
       },
     });
     is("the open is refused", await openSubmissionDoor(ask(who, lesson(42)), racing.steps), { ok: false, reason: "unavailable" });
-    is("its provider session is cancelled", racing.calls.some((call) => call.startsWith("abort ")), true);
+    is("its provider session is canceled", racing.calls.some((call) => call.startsWith("abort ")), true);
     is("and no door was written", (await redis.pipeline([["EXISTS", `nl:sub:door:${FOLDER}:${id}`]]))[0], 0);
   }
 
@@ -725,7 +725,7 @@ async function main(): Promise<void> {
 
     // The erasure whole between the open's second ask and its door's write: the print came after both asks, its read
     // of the buyer's index found the place's entry, and it said done. The door is never written after that
-    // (SUBMISSION_DOOR_OPEN_WRITE): the provider's session is cancelled and the open is refused.
+    // (SUBMISSION_DOOR_OPEN_WRITE): the provider's session is canceled and the open is refused.
     const late = "d4".repeat(16);
     let asks = 0;
     let erasedLate: number | string = "not run";
@@ -750,7 +750,7 @@ async function main(): Promise<void> {
     is("the open is refused", openedLate, { ok: false, reason: "unavailable" });
     const aborted = lateWorld.calls.find((call) => call.startsWith("abort "));
     const lateId = aborted?.split("/")[2]?.slice(4) ?? "no abort";
-    is("the provider's session was opened and then cancelled", [lateWorld.calls.filter((call) => !call.startsWith("abort ")), typeof aborted], [["vault:open"], "string"]);
+    is("the provider's session was opened and then canceled", [lateWorld.calls.filter((call) => !call.startsWith("abort ")), typeof aborted], [["vault:open"], "string"]);
     const lateDoor = (await redis.pipeline([["EXISTS", `nl:sub:door:${FOLDER}:${lateId}`]]))[0];
     is("no door that names the buyer was written, no place and no entry remain", [lateDoor, ...(await nothing(late, lesson(54)))], [0, 0, 0]);
   }

@@ -638,7 +638,7 @@ export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_
     // The buyer's entry now names the file, so their erasure finds it from here on: written only while their place and
     // entry are still there (SUBMISSION_DOOR_OPEN_WRITE). An erasure that ran meanwhile (its print written after the
     // second ask above, its read of the buyer's index finding this place's entry) removed both, so the door, which
-    // names the buyer, is never written after it said done; the provider's session is cancelled and nothing is kept.
+    // names the buyer, is never written after it said done; the provider's session is canceled and nothing is kept.
     const written = repliesFor(
       await redisPipeline([[
         "EVAL", SUBMISSION_DOOR_OPEN_WRITE, 3,

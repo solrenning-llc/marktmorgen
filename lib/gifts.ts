@@ -27,6 +27,7 @@ import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { confirmLostRead, givenBack, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
 import { UnknownReplyError, countOf, replyList, repliesFor, stringList } from "@/lib/redis-reply";
 import { formatMoney } from "@/lib/money";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -247,8 +248,10 @@ export async function startGift(store: Store, product: Listing, input: GiftInput
   };
   // Written down exactly before any checkout opens (sweep A3; CX-123 rules 24 and 30): a write answered in another
   // shape may not have landed, and a gift paid for with no record is never handed over. Refused instead, as
-  // "unavailable" (the page says nothing was charged), and no checkout is made.
-  if (!(await saveGift(gift, GIFT_PENDING_SECONDS))) return { ok: false, reason: "unavailable" };
+  // "unavailable" (the page says nothing was charged), and no checkout is made. Written only while the store is still
+  // its own and not erasing, in the same step (Codex L-20261120-1034): this Store was read before the route's other
+  // reads, and the recipient's address, the giver's name and the private message never outlive an erasure that won.
+  if ((await setWhileStoreLive(store, giftKey(gift.id), JSON.stringify(gift), GIFT_PENDING_SECONDS)) !== "kept") return { ok: false, reason: "unavailable" };
   return { ok: true, gift };
 }
 

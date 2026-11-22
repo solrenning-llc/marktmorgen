@@ -43,7 +43,10 @@ function unknownFor(match: (c: Command) => boolean, lands: boolean): void {
 const restore = () => {
   redis.pipeline = real;
 };
-const isSet = (prefix: string, also: (c: Command) => boolean = () => true) => (c: Command) => c[0] === "SET" && String(c[1]).startsWith(prefix) && also(c);
+// A plain SET, or the store-live fenced write a gift's draft goes through since Codex L-20261120-1034 (lib/live-fence.ts
+// SET_IF_STORE_LIVE: an EVAL whose key is its fifth argument).
+const written = (c: Command) => (c[0] === "SET" ? String(c[1]) : c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-cache-live:v3\n") ? String(c[5]) : null);
+const isSet = (prefix: string, also: (c: Command) => boolean = () => true) => (c: Command) => (written(c) ?? "").startsWith(prefix) && written(c) !== null && also(c);
 /** What a call came to: its answer, or "threw" when it refused by throwing. */
 const outcome = <T>(p: Promise<T>): Promise<T | "threw"> => p.then((v) => v, () => "threw" as const);
 

@@ -49,3 +49,55 @@ export async function setIfStoreLive(fence: StoreLiveFence, key: string, value: 
   const answer = replies?.[0];
   return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
 }
+
+/** One command of a fenced step: a key is written as `{ key }`, so the step declares every key it touches. */
+export type FencedCommand = (string | number | { key: string })[];
+
+// The same identity rule as SET_IF_STORE_LIVE, for several writes made together only while the store is live: the
+// review a refund sweep marks, with its indexes and the product's numbers (lib/reviews.ts creatorChange; Codex
+// L-20261120-0838). ARGV[4] lists the commands as JSON; an argument written as {"k": n} stands for KEYS[n], so every
+// key the step touches is declared (KEYS[1] and KEYS[2] are the fence's, the commands' keys follow). 0: gone or
+// erasing, nothing written; -1: the owner's record could not be read, nothing written; 1: every command ran.
+export const WRITE_IF_STORE_LIVE = `-- marktmorgen:store-write-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[2] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[3] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[2] then return 0 end
+end
+for _, command in ipairs(cjson.decode(ARGV[4])) do
+  for i, part in ipairs(command) do
+    if type(part) == "table" then command[i] = KEYS[part["k"]] end
+  end
+  redis.call(unpack(command))
+end
+return 1`;
+
+/**
+ * Runs `commands` together, in one step, while the fenced store is live: "kept"; "gone" when its erasure has begun
+ * or its record is gone, and then nothing is written; "unknown" for any other answer (nothing known to be written).
+ * Billed as one command plus the fence's two reads plus one for each command.
+ */
+export async function writeIfStoreLive(fence: StoreLiveFence, commands: FencedCommand[]): Promise<"kept" | "gone" | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  if (fence.statsId === null) return "unknown";
+  const keys: string[] = [];
+  const encoded = commands.map((command) =>
+    command.map((part) => {
+      if (typeof part !== "object") return part;
+      let at = keys.indexOf(part.key);
+      if (at < 0) at = keys.push(part.key) - 1;
+      return { k: at + 3 };
+    }),
+  );
+  const replies = repliesFor(
+    await redisPipeline([["EVAL", WRITE_IF_STORE_LIVE, 2 + keys.length, fence.live, fence.erasing, ...keys, fence.field, fence.statsId, fence.ref, JSON.stringify(encoded)]]),
+    1,
+  );
+  const answer = replies?.[0];
+  return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
+}

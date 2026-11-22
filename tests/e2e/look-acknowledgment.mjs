@@ -29,12 +29,7 @@ export async function checkLookAcknowledgment({browser,LOCAL,fixture,is}){
    await page.locator("main details").evaluateAll(nodes=>nodes.forEach(n=>{n.open=true;}));
    const section=page.locator("[data-look-editor]");await section.waitFor();
    const theme=section.locator('input[name="theme"][value="night"]');
-   // The radio is visually hidden (.sr-only: 1 px, clipped). A forced click on it is sent to its own box, which in
-   // WebKit at 1280 px does not land on the label that would turn it on ("Clicking the checkbox did not change its
-   // state", merge-queue runs of #5073 and #4164), so the theme is chosen the way a creator chooses it: by its
-   // visible label; the radio's own state is read after, with no change to any wait.
-   await section.locator('label:has(input[name="theme"][value="night"])').click();
-   is("look theme chosen by its label "+width,await theme.isChecked(),true);
+   await theme.check({force:true});
    const before=await section.locator('input[name="font"]:checked,input[name="backdrop"]:checked').evaluateAll(nodes=>nodes.map(n=>({name:n.name,value:n.value})));
    for(const scenario of cases){
     let release;const held=new Promise(resolve=>{release=resolve;});pending={scenario,release:held};

@@ -41,6 +41,7 @@ import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisp
 import { ordersGrant } from "@/lib/buyer-orders";
 import { DOWNLOAD_WINDOW_SECONDS } from "@/lib/store-checkout";
 import { REVIEW_STORES_KEY, markRefunded } from "@/lib/reviews";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { refreshStoreQuotes } from "@/lib/store-quotes";
 import type { Listing, Store } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
@@ -353,6 +354,7 @@ export async function storeHasReviews(store: Store): Promise<boolean> {
 export async function markRefundedReviews(store: Store, deadline: number): Promise<number> {
   if (!store.stripeAccountId || !store.statsId || !isRedisConfigured()) return 0;
   const statsId = store.statsId;
+  const fence = await storeLiveFence(store);
   const now = Math.floor(Date.now() / 1000);
   const [anchorRaw] = await redisPipeline([["GET", anchorKey(statsId)]]);
   const anchor = Number(anchorRaw) > 0 ? Number(anchorRaw) : now - REFUND_LOOKBACK_SECONDS;
@@ -400,7 +402,7 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       const seen = full.length ? await redisPipeline(full.map((refund) => ["SISMEMBER", seenKey(statsId), refund.id])) : [];
       for (const [i, refund] of full.entries()) {
         if (Number(seen[i]) !== 1) {
-          if (INTENT_ID.test(refund.pi)) marked += await markRefunded(statsId, refund.pi);
+          if (INTENT_ID.test(refund.pi)) marked += await markRefunded(statsId, refund.pi, fence);
           // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
           await redisPipeline([
             ["SADD", seenKey(statsId), refund.id],

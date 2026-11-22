@@ -44,6 +44,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { type FencedCommand, type StoreLiveFence, writeIfStoreLive } from "@/lib/live-fence";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
@@ -312,8 +313,15 @@ async function locked<T>(statsId: string, productId: string, work: () => Promise
   }
 }
 
-/** Counts a product's numbers again from its reviews, and keeps them. */
-async function recount(statsId: string, productId: string): Promise<Summary> {
+/** A pipeline command with its one key marked, for a fenced step (lib/live-fence.ts writeIfStoreLive). */
+const keyed = (command: (string | number)[]): FencedCommand => [command[0], { key: String(command[1]) }, ...command.slice(2)];
+
+/**
+ * Counts a product's numbers again from its reviews, and keeps them. With a store's fence, kept only while that
+ * store is live (one step with the fence's reads): "gone" when its erasure has begun or its record is gone, and
+ * then nothing is written (Codex L-20261120-0838); an answer of another shape throws.
+ */
+async function recount(statsId: string, productId: string, fence: StoreLiveFence | null = null): Promise<Summary | "gone"> {
   // Read exactly (rule 24): a reply cut short or of another shape throws before the summary is written, never an
   // empty-looking list that deleted the product's stars and count.
   const flat = stringList(repliesFor(await redisPipeline([["HGETALL", productKey(statsId, productId)]]), 1)?.[0]);
@@ -324,23 +332,41 @@ async function recount(statsId: string, productId: string): Promise<Summary> {
     if (review) reviews.push(review);
   }
   const summary = summarise(reviews);
-  await redisPipeline([
-    reviews.length ? ["HSET", summaryKey(statsId), productId, JSON.stringify(summary)] : ["HDEL", summaryKey(statsId), productId],
-  ]);
+  const kept: (string | number)[] = reviews.length ? ["HSET", summaryKey(statsId), productId, JSON.stringify(summary)] : ["HDEL", summaryKey(statsId), productId];
+  if (fence) {
+    const written = await writeIfStoreLive(fence, [keyed(kept)]);
+    if (written === "unknown") throw new UnknownReplyError("a product's numbers, kept while its store is live");
+    if (written === "gone") return "gone";
+    return summary;
+  }
+  await redisPipeline([kept]);
   return summary;
 }
 
-/** Writes a review; `also` goes in the same request (the AI summary's deletion), so a failure fails the write too. */
-async function write(statsId: string, review: Review, also: (string | number)[][] = []): Promise<void> {
+/**
+ * Writes a review; `also` goes in the same request (the AI summary's deletion), so a failure fails the write too.
+ * With a store's fence, written only while that store is live, in one step with the fence's reads: "gone" when its
+ * erasure has begun or its record is gone, and then nothing is written, so a refund sweep that read the review
+ * before the store's erasure never writes the person's words, name and indexes back after the closing walk passed
+ * them (Codex L-20261120-0838); an answer of another shape throws.
+ */
+async function write(statsId: string, review: Review, also: (string | number)[][] = [], fence: StoreLiveFence | null = null): Promise<"kept" | "gone"> {
   const member = `${review.productId}|${review.id}`;
-  await redisPipeline([
+  const commands: (string | number)[][] = [
     ["HSET", productKey(statsId, review.productId), review.id, JSON.stringify(review)],
     review.hidden
       ? ["ZREM", visibleKey(statsId, review.productId), review.id]
       : ["ZADD", visibleKey(statsId, review.productId), review.createdAt, review.id],
     ["ZADD", allKey(statsId), review.createdAt, member],
     ...also,
-  ]);
+  ];
+  if (fence) {
+    const written = await writeIfStoreLive(fence, commands.map(keyed));
+    if (written === "unknown") throw new UnknownReplyError("a review, written while its store is live");
+    return written;
+  }
+  await redisPipeline(commands);
+  return "kept";
 }
 
 export type SaveInput = {
@@ -595,13 +621,19 @@ export async function deleteReview(statsId: string, productId: string, id: strin
   return result;
 }
 
-/** Changes one review as the creator may: hide or show it, or answer it. Never its words or its stars. */
+/**
+ * Changes one review as the creator may: hide or show it, or answer it. Never its words or its stars. With a store's
+ * fence (the refund sweep, lib/review-proof.ts, which runs while the store may be erased), the review and the
+ * product's numbers are written only while the store is live; a store gone meanwhile answers "missing", with nothing
+ * written (Codex L-20261120-0838). A fenced change takes no room (`room` is null).
+ */
 async function creatorChange(
   statsId: string,
   productId: string,
   id: string,
   change: (review: Review) => Review,
   room: DataStore | null,
+  fence: StoreLiveFence | null = null,
 ): Promise<Review | "missing" | "busy"> {
   if (!REVIEW_ID_PATTERN.test(id) || !PRODUCT_ID_PATTERN.test(productId)) return "missing";
   return locked(statsId, productId, async () => {
@@ -620,10 +652,10 @@ async function creatorChange(
     // it goes in the same request as the change, so a failure fails the change too.
     // One already hidden or refunded was never counted, so hiding or refunding it takes none away.
     const gone = counted(before) && ((after.hidden && !before.hidden) || (after.refunded && !before.refunded));
-    await write(statsId, after, gone ? summaryGone(statsId, productId, before.createdAt) : []);
+    if ((await write(statsId, after, gone ? summaryGone(statsId, productId, before.createdAt) : [], fence)) === "gone") return "missing" as const;
     // What a shorter answer frees is given back only once it is written.
     if (room && grown < 0) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: -grown }]);
-    await recount(statsId, productId);
+    if ((await recount(statsId, productId, fence)) === "gone") return "missing" as const;
     return after;
   });
 }
@@ -688,9 +720,12 @@ export function setReply(statsId: string, productId: string, id: string, text: s
 
 /**
  * Marks as refunded every review a payment paid for, once Stripe says the
- * payment was given back in full. Returns how many changed.
+ * payment was given back in full. Returns how many changed. With the store's
+ * fence (lib/store-live-cache.ts storeLiveFence), each review is written only
+ * while the store is live: one erased meanwhile is left as the closing walk
+ * leaves it, never written back (Codex L-20261120-0838).
  */
-export async function markRefunded(statsId: string, pi: string): Promise<number> {
+export async function markRefunded(statsId: string, pi: string, fence: StoreLiveFence | null = null): Promise<number> {
   if (!STATS_ID_PATTERN.test(statsId) || !pi) return 0;
   const members = await payMembers(statsId, pi);
   let changed = 0;
@@ -704,10 +739,11 @@ export async function markRefunded(statsId: string, pi: string): Promise<number>
       if (review.pi !== pi || review.refunded) return review;
       hit = true;
       return { ...review, refunded: true };
-    }, null);
+    }, null, fence);
     // A review busy just now is not marked: thrown, so the refund is not taken as seen and the sweep tries again.
     if (done === "busy") throw new Error("a review is busy; the refund is marked on the next try");
-    if (hit) changed += 1;
+    // Counted only once written: one whose store was erased meanwhile ("missing" from the fence) was not.
+    if (hit && typeof done !== "string") changed += 1;
   }
   return changed;
 }

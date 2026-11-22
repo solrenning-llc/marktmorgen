@@ -111,6 +111,30 @@ export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
     }
     return run(["SET", key, value, "NX", "EX", seconds]) === "OK" ? 1 : 0;
   },
+  // lib/live-fence.ts WRITE_IF_STORE_LIVE: several writes made together only while the store is its own and not
+  // erasing, by the same identity rule; argv[4] lists them as JSON, {"k": n} standing for KEYS[n] (Codex L-20261120-0838).
+  "store-write-live:v1": (run, keys, [field, statsId, ref, commands]) => {
+    const [live, erasing] = keys;
+    if (run(["HGET", erasing, field]) !== null) return 0;
+    if (statsId === "") {
+      if (run(["GET", live]) !== ref) return 0;
+    } else {
+      const raw = run(["GET", live]);
+      if (raw === null) return 0;
+      let record: unknown;
+      try {
+        record = JSON.parse(String(raw));
+      } catch {
+        return -1;
+      }
+      if (!record || typeof record !== "object") return -1;
+      if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+    }
+    for (const command of JSON.parse(String(commands)) as (string | number | { k: number })[][]) {
+      run(command.map((part) => (typeof part === "object" && part !== null ? keys[part.k - 1] : part)));
+    }
+    return 1;
+  },
   "zset-take-count:v1": (run, [zset]) => {
     const n = Number(run(["ZCARD", zset])) || 0;
     run(["DEL", zset]);

@@ -20,20 +20,20 @@ Since 17 Oct 2026 the AI spend policy and the upload budget policy are computed 
 
 **Hold per request.** `askModel` computes the most a request can cost from the request itself (`aiRequestHoldMicroUsd`): each UTF-8 byte of instructions and text counts as one input token (a token always covers at least one byte), plus 1,024 framing tokens and 32 per content block; an image adds 4,784 tokens (the largest the provider keeps after downscaling); a PDF is held at the whole 1M-token context window because its extracted text is not bounded by its size; every `max_tokens` output token is counted. The hold is reserved in the monthly ledger before the fetch. #468's rules are unchanged: failed, timed-out, lost and successful attempts keep their full reservation, retries reserve again, request bounds and the per-job call envelope still apply, and non-paying scopes still reserve their funded exposure first.
 
-**Ceiling per plan.** A plan's monthly dollar ceiling is its writing jobs times the priced writing job plus its visitor answers times the priced answer:
+**Ceiling per plan.** Since 20 November 2026 (433 [PV3] (b)), a plan's monthly dollar ceiling funds every right it publishes used in full at once, each call at the worst request its own feature can send (`requiredAiRightsMicroUsd` in lib/ai-entitlement-rules.ts, from the cost table; the models are fixed in code, `WRITING_MODEL` and `ANSWER_MODEL` in lib/ai-request-rules.ts):
 
-- Priced writing job: one Sonnet 5.5 call with 12 KiB of input and 3,000 output tokens = $0.062699.
-- Priced answer: one Haiku 5.5 call with 24 KiB of input and 400 output tokens = $0.003383.
-- PDF reading: Haiku 5.5 at the full context window with 1,500 output tokens = $0.554467, so it takes `READ_PDF_JOBS` = 9 writing jobs on top of the page's own one.
+- A writing job: two calls, each at the dearest text request either fixed model can send (16 KiB of instructions, 64 KiB of text, one image, 6,000 output tokens; Sonnet 5.5) = $0.259555 a call.
+- A PDF read: Haiku 5.5 at the full context window with 6,000 output tokens = $0.566842, in place of one writing call. It runs only inside a page draft that took 1 + `READ_PDF_JOBS` = 10 writing jobs for it (lib/ai.ts refuses any other document request), so a month reads at most floor((jobs − 1) / 9) PDFs.
+- A visitor answer or a store-guide reply: Haiku 5.5 at its dearest text request, which stays below Haiku's 100,000-token tier = $0.013304.
 
-| Plan | Writing jobs | Visitor answers | Monthly AI ceiling |
-|---|---:|---:|---:|
-| Store | 0 | 0 | $0 |
-| Studio | 40 | 250 | $3.353710 |
-| Scale | 80 | 400 | $6.369120 |
-| Free trial, setup, ended | 0 | 0 | $0 (no allocation) |
+| Plan | Writing jobs | PDF reads at most | Visitor answers | Monthly AI ceiling |
+|---|---:|---:|---:|---:|
+| Store | 0 | 0 | 0 | $0 |
+| Studio | 40 | 4 | 250 | $25.319548 |
+| Scale | 80 | 8 | 400 | $49.308696 |
+| Free trial, setup, ended | 0 | 0 | 0 | $0 (no allocation) |
 
-A request larger than the priced unit sets aside more of the budget, so a store that makes many very long requests can reach its ceiling before its job count. The public copy says so.
+Each request still sets aside only its own hard bound, so in practice a store's ceiling outlasts its jobs; until 20 November 2026 the ceiling funded only a reference job and answer ($3.353710 on Studio and $6.369120 on Scale), so long requests could exhaust it before the job count.
 
 `MARKTMORGEN_AI_SPEND_CEILING_PERCENT` (a whole number from 0 to 100) is optional and can only lower every ceiling; above 100 counts as 100 and anything else is ignored.
 
@@ -84,4 +84,4 @@ The commercial gate's own AI coverage check (`aiEntitlementsFunded`) still requi
 - A signed part URL can be replayed until it expires (one hour); each replay is a Class A operation not in the priced allowance, bounded only by the uploader's bandwidth.
 - Paid standing includes a card in Stripe's past-due grace period, as before.
 - A full loss of Redis data (ledger and marker together) would reopen a month at zero. An Anthropic workspace spend limit set once in the console would bound that case independently.
-- The demo store is on Studio (`DEMO_STORE.tier` in lib/demo-seed.ts) so the public demo shows the AI features. It pays no subscription, so its usage is a company cost bounded by Studio's own automatic ceilings: at most $3.3537 of AI a month, plus Studio's visit allowance; it sends no email to anybody (lib/house-store.ts).
+- The demo store is on Studio (`DEMO_STORE.tier` in lib/demo-seed.ts) so the public demo shows the AI features. It pays no subscription, so its usage is a company cost bounded by Studio's own automatic ceilings: at most $25.3195 of AI a month since 20 November 2026 (433 [PV3] (b); $3.3537 before), of which only the visitor answers ($3.326 at most) can be asked by the public, since only the operator opens its studio, plus Studio's visit allowance; it sends no email to anybody (lib/house-store.ts).

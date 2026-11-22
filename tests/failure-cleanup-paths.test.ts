@@ -161,7 +161,7 @@ async function main(): Promise<void> {
   for (const file of [...routes.sort(), ...LIB]) {
     const source = readFileSync(file, "utf8");
     const lines = source.split("\n");
-    lines.forEach((line, i) => {
+    lines.forEach((line) => {
       // deleteOrSweep (lib/file-drop.ts) deletes as del does, and hands a failed delete to the daily job.
       const call = line.match(/\b(del|deleteFile|dropFresh|deleteOrSweep)\(/);
       if (!call || call.index === undefined || /^\s*(\/\/|\*)/.test(line) || /^\s*const dropFresh/.test(line)) return;
@@ -200,12 +200,18 @@ async function main(): Promise<void> {
     "link-image dropFresh(path)": "only a path this request took from the picture door",
     "link-image dropFresh(image.path)": "only a path this request took from the picture door",
     'link-image deleteOrSweep(result.removed.path, "a replaced link picture")': "the link's own picture the new one replaced, after the record that replaced it was written; attach admits only a fresh or own name",
+    "ai-file deleteFile(pathname)": "only the PDF this request just drew and wrote under a fresh random name (lib/ai-file.ts saveAiFile), when it could not be kept on the draft; never a name the browser sent",
     'course deleteOrSweep(files, "handed-in work")': "handed-in work of a removed assignment, read from its own records",
     'course deleteOrSweep(file.pathname, "a lesson file")': "lesson files the course no longer holds, after it was written",
     "course/task deleteFile(path, \"site_cleanup\")": "a student's upload taken once through the door (takeTaskUpload)",
     "course/task deleteFile(file.path)": "the same taken upload, when the work could not be kept",
     "course/task deleteFile(done.replaced.path)": "the file the handed-in work held, after it was replaced",
     "lib/takedown.ts del(path)": "the own picture of the link the takedown removed, read from the record it wrote (path = done.removed.path; a failed delete goes to the daily job); link-image attach admits only a fresh or own name",
+    "lib/takedown.ts del(kept)": "the copy of a link's picture this press made under a fresh name, when the hold it was made for was not written (lib/takedown-hold.ts)",
+    "lib/takedown.ts del(original)": "the old file of a link's own picture, only after the record holds the link with its copy (lib/takedown-hold.ts)",
+    "lib/takedown.ts del(held.link.image.path)": "the same old file again, for a link this notice holds, read from the held record",
+    "lib/takedown.ts del(held.picture)": "the kept copy of a held link's picture, after the link went back with its picture copied back to its own address",
+    "lib/takedown.ts del(files)": "a held link's kept copy and old file, read from the held record, when its window ended without a counter-notice or after the sender went to court",
     "lib/review-photo.ts del(photo.path)": "a review's photo, read from the review record, or the one this request stored under a fresh name",
   };
   const unexplained = [...new Set(found)].filter((entry) => !Object.hasOwn(REASONS, entry));

@@ -197,7 +197,7 @@ export default function DevelopersPage() {
       "interval": null,
       "interval_count": null,
       "hidden": false,
-      "url": "https://marktmorgen.com/@harbor/p/k3j9x2p1ab"
+      "url": "https://shop.example.com/p/k3j9x2p1ab"
     }
   ],
   "next": null
@@ -208,7 +208,9 @@ export default function DevelopersPage() {
           <code className="font-mono">course</code> or <code className="font-mono">call</code>.{" "}
           <code className="font-mono">interval</code> is set for a membership, and{" "}
           <code className="font-mono">interval_count</code> says how many of them one charge covers: 3 with{" "}
-          <code className="font-mono">month</code> is every 3 months.
+          <code className="font-mono">month</code> is every 3 months.{" "}
+          <code className="font-mono">url</code> is the product&apos;s page: on your own domain once it is
+          connected, as in this example, and on your store&apos;s Marktmorgen address otherwise.
         </p>
       </LegalSection>
 

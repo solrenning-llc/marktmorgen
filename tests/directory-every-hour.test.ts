@@ -89,7 +89,11 @@ function screens(): { help: string; studio: string; page: string } {
   const help = JSON.stringify(HELP_SECTIONS).match(/To be found by people looking for something to promote[^"]*/)?.[0] ?? "";
   const studioFile = readFileSync("components/affiliate-studio.tsx", "utf8");
   const at = studioFile.indexOf("List my program in the affiliate directory");
-  const studio = at < 0 ? "" : studioFile.slice(at, studioFile.indexOf("</label>", at)).replace(/\s+/g, " ");
+  const box = at < 0 ? "" : studioFile.slice(at, studioFile.indexOf("</label>", at));
+  // The numbers' box is a label of its own, just after it.
+  const numbersAt = studioFile.indexOf("Show my program&apos;s numbers there too");
+  const numbersBox = numbersAt < 0 ? "" : studioFile.slice(numbersAt, studioFile.indexOf("</label>", numbersAt));
+  const studio = `${box} ${numbersBox}`.replace(/\s+/g, " ");
   const page = readFileSync("app/affiliate-programs/page.tsx", "utf8");
   return { help, studio, page };
 }
@@ -167,6 +171,16 @@ async function main(): Promise<void> {
   const minutes = (text: string) => [...text.matchAll(/(\d+|ten|fifteen|five|thirty)\s+minutes?/gi)].map((m) => m[0]);
   is("no directory sentence promises minutes", [minutes(help), minutes(studio), minutes(page)], [[], [], []]);
   is("and taking a store out still says at once", [/leaves the page at once/.test(help), /leaves the page at once/.test(studio)], [true, true]);
+
+  part("The screens say what can take longer (Claude 6's LEVE 1 and LEVE 2, Codex X6 on #3118)");
+  // A failed build leaves the last good build (kept two hours) on the page: a change can take up to two hours.
+  is("the help says a change can take up to two hours when the page could not be refreshed", /up to two hours if the page could not be refreshed/.test(help), true);
+  is("the studio's checkbox says it too", /up to two hours if the page could not be refreshed/.test(studio), true);
+  // Nothing drops the kept page when a store stops taking payments: it leaves at the next build.
+  is("both say a store that stops taking payments leaves on the same timing, not at once", [/a store that stops taking payments/.test(help), /a store that stops taking payments/.test(studio)], [true, true]);
+  // The numbers' box: shown from the next build, taken back at once.
+  is("both say the numbers show from the next refresh of the page", [/numbers show there from the next refresh of the page/.test(help), /numbers show there from the next refresh of the page/.test(studio)], [true, true]);
+  is("and that taking the numbers back is at once", [/they leave the page at once/.test(help), /they leave the page at once/.test(studio)], [true, true]);
 
   done();
 }

@@ -16,6 +16,6 @@ is("in the same order", paged, reached.filter((m) => paged.includes(m)));
 part("The line a page with more says names each part still to read");
 const community = "lib/community-erasure.ts#c1";
 is("one part", morePagesLine(2, [community]), 'This copy continues on page 2. Ask for it with the cursor in "next" to read the rest: your community activity (1 part still to read).');
-for (const module of paged) is(`${module} says what it is in words`, PAGED_MODULES[module]!.what.length > 0 && !PAGED_MODULES[module]!.what.includes("lib/"), true);
+for (const name of paged) is(`${name} says what it is in words`, PAGED_MODULES[name]!.what.length > 0 && !PAGED_MODULES[name]!.what.includes("lib/"), true);
 
 done();

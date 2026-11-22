@@ -53,6 +53,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import {
   type EmailProvider,
@@ -335,6 +336,45 @@ function firstName(name: string | null | undefined): string | null {
 }
 
 /**
+ * Whether this address was deleted from the store (lib/suppression.ts) and the yes being handed over (`at`, ms) is not
+ * known to be later: the print holds the second of the deletion on Redis's clock, so only a yes from the next second on
+ * is. A store with no list has deleted nobody. A print that does not read as whole seconds is unknown and throws
+ * (CX-123 rule 24), never "not deleted".
+ */
+/**
+ * The reads of a person's deletion print a hand-over makes (queuePerson): one before anything is marked, and one when
+ * its job is published atomically (Codex C2 and G on #3908). Named in tests/plan-cost-registry.ts (orders and
+ * public-requests), held by tests/email-sync-erased-replay.test.ts.
+ */
+export const HAND_OVER_ERASED_READS = 2;
+
+async function consentBeforeErasure(listId: string | null | undefined, email: string, at: number): Promise<boolean> {
+  if (!listId) return false;
+  const replies = repliesFor(await redisPipeline([["HGET", suppressedKey(listId), suppressionPrint(listId, email)]]), 1);
+  const raw = replies ? replies[0] : undefined;
+  if (raw === null) return false;
+  const text = typeof raw === "number" ? String(raw) : raw;
+  if (typeof text !== "string" || !/^\d{1,12}$/.test(text)) throw new UnknownReplyError("whether a person handed to an email platform was deleted");
+  return !(Number.isFinite(at) && at >= (Number(text) + 1) * 1000);
+}
+
+/** Checks the erasure print in the same Redis step that publishes a sendable job. */
+const ENQUEUE_PERSON = `-- marktmorgen:esync-enqueue:v1
+if KEYS[4] then
+  local deleted = redis.call("HGET", KEYS[4], ARGV[1])
+  if deleted then
+    if #deleted > 12 or not string.match(deleted, "^%d+$") then return "unknown" end
+    local consent = tonumber(ARGV[2])
+    if not consent or consent <= tonumber(deleted) then return "erased" end
+  end
+end
+redis.call("SET", KEYS[1], ARGV[3], "EX", ARGV[4])
+redis.call("LPUSH", KEYS[2], ARGV[5])
+local overflow = redis.call("LRANGE", KEYS[2], ARGV[6], -1)
+redis.call("ZADD", KEYS[3], ARGV[7], ARGV[8])
+return overflow`;
+
+/**
  * Hands one person to the creator's platform, when the creator's settings
  * take them and they agreed. Returns what happened: "off" (not connected, or
  * not wanted), "seen" (sent already), "skipped" (did not agree: logged,
@@ -355,6 +395,10 @@ export async function queuePerson(store: Store, person: Person, now = Date.now()
   if (!wanted || person.at < config.since - GRACE_MS) return "off";
   const email = (person.email ?? "").trim().toLowerCase();
   if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "off";
+  // A person deleted from this store is never handed to a platform on a yes given before the deletion: a thank-you page
+  // reloaded after the sale's and this person's marks ran out repeats the checkout's old consent. Read first, so
+  // nothing is marked, queued or logged for them.
+  if (await consentBeforeErasure(store.listId, email, person.at)) return "off";
   // Read exactly (CX-123 rule 24): only a mark that is ours writes a job. One held by another run is a person already
   // handed over; one that cannot be read writes nothing and is said as not done, so a person is never handed over twice.
   const seen = seenKey(statsId, `${person.source}|${person.seed}`);
@@ -385,15 +429,33 @@ export async function queuePerson(store: Store, person: Person, now = Date.now()
     lastAt: agreed ? 0 : now,
     createdAt: now,
   };
-  const written: (string | number)[][] = [
-    ["SET", jobKey(job.id), JSON.stringify(job), "EX", JOB_SECONDS],
-    ...(agreed ? [["ZADD", QUEUE_KEY, now, `${statsId}|${job.id}`]] : []),
-    ["LPUSH", logKey(statsId), job.id],
-    // What this push moved past the studio's LOG_SIZE, read rather than trimmed blind (dropOverflow).
-    ["LRANGE", logKey(statsId), LOG_SIZE, -1],
-  ];
-  const overflow = stringList(repliesFor(await redisPipeline(written), written.length)?.[written.length - 1]);
-  // An overflow that does not read is left in the log, where the copy and the erasure still find it; the next push reads it again.
+  let overflow: string[] | null;
+  if (agreed) {
+    const keys = [jobKey(job.id), logKey(statsId), QUEUE_KEY];
+    if (store.listId) keys.push(suppressedKey(store.listId));
+    const print = store.listId ? suppressionPrint(store.listId, email) : "";
+    const second = Number.isFinite(person.at) ? Math.floor(person.at / 1000) : "";
+    const published = repliesFor(await redisPipeline([[
+      "EVAL", ENQUEUE_PERSON, keys.length, ...keys,
+      print, second, JSON.stringify(job), JOB_SECONDS, job.id, LOG_SIZE, now, `${statsId}|${job.id}`,
+    ]]), 1)?.[0];
+    if (published === "erased") return "off";
+    if (published === "unknown") {
+      // This exact result is returned before any job is written, so only our mark is safe to let go.
+      await releaseMark(seen, mine);
+      throw new UnknownReplyError("whether a person handed to an email platform was deleted");
+    }
+    overflow = stringList(published);
+    if (!overflow) throw new UnknownReplyError("a job handed to an email platform, published");
+  } else {
+    const written: (string | number)[][] = [
+      ["SET", jobKey(job.id), JSON.stringify(job), "EX", JOB_SECONDS],
+      ["LPUSH", logKey(statsId), job.id],
+      ["LRANGE", logKey(statsId), LOG_SIZE, -1],
+    ];
+    overflow = stringList(repliesFor(await redisPipeline(written), written.length)?.[written.length - 1]);
+  }
+  // An overflow that does not read is left in the log, where the copy and the erasure still find it.
   if (overflow?.length) await dropOverflow(statsId, overflow);
   if (!agreed) return "skipped";
   await soon(async () => {
@@ -585,7 +647,8 @@ function isScore(reply: unknown): boolean {
 
 /** Puts jobs back at the end of a store's log, throwing when the push does not answer the log's length. */
 async function putBack(log: string, ids: string[]): Promise<void> {
-  if (!countsFor(await redisPipeline([["RPUSH", log, ...ids]]), 1)) throw new UnknownReplyError("a store's email platform job log, putting a job back");
+  const push: (string | number)[][] = [["RPUSH", log, ...ids]];
+  if (!countsFor(await redisPipeline(push), push)) throw new UnknownReplyError("a store's email platform job log, putting a job back");
 }
 
 /**
@@ -596,7 +659,12 @@ async function putBack(log: string, ids: string[]): Promise<void> {
 async function forgetFinished(log: string, ids: string[]): Promise<void> {
   if (!ids.length) return;
   const deleted = repliesFor(await redisPipeline(ids.map((id) => ["DEL", jobKey(id)])), ids.length);
-  const gone = ids.filter((_, i) => countOf(deleted?.[i]) !== null);
+  // Each DEL names one key, so only 0 or 1 confirms it; any other count leaves the id in the log for a later cleanup
+  // (Codex G, G-20261119-0446).
+  const gone = ids.filter((_, i) => {
+    const count = countOf(deleted?.[i]);
+    return count === 0 || count === 1;
+  });
   if (gone.length) await redisPipeline(gone.map((id) => ["LREM", log, 0, id]));
 }
 
@@ -620,7 +688,8 @@ async function retire(statsId: string, id: string, now: number): Promise<void> {
   const logged = stringList(repliesFor(await redisPipeline([["LRANGE", log, 0, -1]]), 1)?.[0]);
   if (!logged) throw new UnknownReplyError("a store's email platform job log, retiring a job");
   if (!logged.includes(id)) {
-    if (!countsFor(await redisPipeline([["DEL", jobKey(id)]]), 1)) throw new UnknownReplyError("the record of an email platform job, retiring it");
+    const drop: (string | number)[][] = [["DEL", jobKey(id)]];
+    if (!countsFor(await redisPipeline(drop), drop)) throw new UnknownReplyError("the record of an email platform job, retiring it");
     await redisPipeline([["ZREM", QUEUE_KEY, member]]);
     return;
   }
@@ -628,7 +697,8 @@ async function retire(statsId: string, id: string, now: number): Promise<void> {
     const again = repliesFor(await redisPipeline([["ZREM", QUEUE_KEY, member], ["LRANGE", log, 0, -1]]), 2);
     const still = stringList(again?.[1]);
     if (still?.includes(id)) return;
-    if (still && countsFor(await redisPipeline([["DEL", jobKey(id)]]), 1)) return;
+    const drop: (string | number)[][] = [["DEL", jobKey(id)]];
+    if (still && countsFor(await redisPipeline(drop), drop)) return;
   } catch (error) {
     await redisPipeline([["ZADD", QUEUE_KEY, now + LEASE_MS, member]]);
     throw error;
@@ -951,7 +1021,7 @@ export async function testConnection(store: Store): Promise<{ ok: boolean; messa
  * the records of its jobs — which hold buyers' addresses — are deleted
  * rather than left to expire.
  */
-export async function forgetStoreSync(statsId: string | null): Promise<void> {
+export async function forgetStoreSync(statsId: string | null, apply: (commands: (string | number)[][]) => Promise<unknown> = redisPipeline): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
   // Every reply read exactly (CX-123 rule 24): a log or a queue page in another shape is unknown, never "no job".
   // What was read is still deleted (the sealed key with the settings), the log is kept when it did not read, so
@@ -966,20 +1036,37 @@ export async function forgetStoreSync(statsId: string | null): Promise<void> {
     if (JOB_ID.test(id)) ids.add(id);
   }
   // The records go before the queue lets go of them (Claude 4 on #2860), so a batch cut short never leaves one
-  // holding an address off the queue; the log is deleted last.
+  // holding an address off the queue; the log is deleted last. `apply` sends the deletes: the closing walk's makes
+  // them only while it still holds the store's lock (lib/closed-store-data.ts, fencedBy).
   const commands: (string | number)[][] = [
     ...[...ids].map((id) => ["DEL", jobKey(id)]),
     ...(queued.length ? [["ZREM", QUEUE_KEY, ...queued]] : []),
     ["DEL", cfgKey(statsId), tagsKey(statsId), badKey(statsId), ...(logged ? [logKey(statsId)] : [])],
   ];
-  if (!countsFor(await redisPipeline(commands), commands.length)) throw new UnknownReplyError("the forgetting of a deleted store's email platform jobs");
+  const replies = await apply(commands);
+  // A plain pipeline's replies are read exactly, one count per command, each within what it names (Claude 6's MEDIUM
+  // on #4911). The closing walk's fenced apply answers no counts: it reads its own EVAL reply exactly and throws itself
+  // on a lost lock or a reply in another shape.
+  if (apply === redisPipeline && !countsFor(replies, commands)) throw new UnknownReplyError("the forgetting of a deleted store's email platform jobs");
   if (unread) throw new UnknownReplyError("a deleted store's email platform jobs");
 }
 
-/** Whether a pipeline of deletions answered exactly one count for each command. */
-function countsFor(replies: unknown, commands: number): boolean {
-  const exact = repliesFor(replies, commands);
-  return !!exact && exact.every((reply) => countOf(reply) !== null);
+/**
+ * Whether a pipeline answered exactly one count for each command, and each count is one Redis can give: a DEL never
+ * more than the keys it names, a ZREM never more than its members (Claude 6's MEDIUM on #4911); a count above them is
+ * no proof the records holding addresses are gone. Any other command (RPUSH, the list's new length) only needs a count.
+ */
+function countsFor(replies: unknown, commands: readonly (readonly (string | number)[])[]): boolean {
+  const exact = repliesFor(replies, commands.length);
+  if (!exact) return false;
+  return exact.every((reply, i) => {
+    const count = countOf(reply);
+    if (count === null) return false;
+    const [name] = commands[i];
+    if (name === "DEL") return count <= commands[i].length - 1;
+    if (name === "ZREM") return count <= commands[i].length - 2;
+    return true;
+  });
 }
 
 /**

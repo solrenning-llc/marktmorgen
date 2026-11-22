@@ -3,11 +3,11 @@ import { type NextRequest, after } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { dropReviewQuote, refreshStoreQuotes } from "@/lib/store-quotes";
 import { ensureStatsId, normaliseHandle, setReviewed, storeForHandle, storeRef } from "@/lib/store";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { type Door, doorFields, openDoor, readDoor, reviewPagePath } from "@/lib/review-proof";
 import { MAX_REVIEW_PHOTO_BYTES, type ReviewPhoto, deleteReview, markOneRefunded, readRating, readReview, reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
 import { checkReviewPhoto, dropReviewPhoto, putReviewPhoto } from "@/lib/review-photo";
-import { costsPaused } from "@/lib/plan-standing";
+import { newCostCode } from "@/lib/plan-standing";
 import { forgetReviewWords, forgetVoicePerson } from "@/lib/customer-voice";
 
 /** The words, and a photo shrunk by the buyer's browser (lib/review-photo.ts) sent as text. */
@@ -70,13 +70,17 @@ export async function POST(request: NextRequest) {
   // paid call and no try; the yes is checked like any other request.
   if (action === "delete" && read("confirm") !== "yes") return answer("confirmDelete", door, `r-${productId}-delete`);
 
-  if (!(await withinStore("review", `${clientAddress(request)}|${store.handle}`, IP_LIMIT, 3600, store))) return answer("slow");
+  const counted = await withinStore("review", `${clientAddress(request)}|${store.handle}`, IP_LIMIT, 3600, store).catch(unknownLimit);
+  if (counted === "unknown") return answer("error");
+  if (!counted) return answer("slow");
 
   const opened = await openDoor(store, door);
   if (opened.state !== "ok") return answer(opened.state === "error" ? "error" : opened.state);
   const proof = opened.proof;
   if (!proof.products.some((p) => p.id === productId)) return answer("no");
-  if (!(await withinLimit("review-order", proof.reference, ORDER_LIMIT, 3600))) return answer("slow");
+  const room = await withinLimit("review-order", proof.reference, ORDER_LIMIT, 3600).catch(unknownLimit);
+  if (room === "unknown") return answer("error");
+  if (!room) return answer("slow");
 
   if (!store.statsId) {
     // By the key the store is kept under: an account's other stores are not
@@ -123,9 +127,11 @@ export async function POST(request: NextRequest) {
     if (rating === null) return answer("rating");
     // A photo is checked first, with no network, so a photo that cannot be used changes nothing.
     // While the store's plan renewal is unpaid or its plan payment disputed
-    // (232 [CA1] 4b), a new photo is new storage nobody is paying for: the
-    // words are still saved, the photo is not kept, and the buyer is told.
-    const photoPaused = Boolean(read("photo")) && costsPaused(store);
+    // (232 [CA1] 4b), or once its plan has ended (232 [CA1], the original 4c,
+    // lib/plan-standing.ts newCostCode), a new photo is new storage nobody is
+    // paying for: the words are still saved, the photo is not kept, and the
+    // buyer is told.
+    const photoPaused = Boolean(read("photo")) && newCostCode(store) !== null;
     const sentPhoto = photoPaused ? "" : read("photo");
     const checked = sentPhoto ? checkReviewPhoto(sentPhoto) : null;
     if (checked === "photo") return answer("photo");

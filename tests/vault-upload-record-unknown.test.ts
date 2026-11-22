@@ -148,7 +148,7 @@ const UNKNOWN: [string, (real: unknown[]) => unknown][] = [
 ];
 
 test("a cancellation never reports done, nor frees reserved bytes, on an upload record it could not read", async () => {
-  const opened = await openReservedVault(input(1), 10, measure(1));
+  const opened = await openReservedVault(input(1), 10, measure(1), async () => true);
   assert.equal(opened.ok, true);
   if (!opened.ok) throw new Error("open failed");
   const pathname = opened.upload.pathname;
@@ -159,7 +159,7 @@ test("a cancellation never reports done, nor frees reserved bytes, on an upload 
   recordReads = [];
   const askedOnAbort = [...asked];
   // A second upload of the same size, then both finished, as the studio's browsers would.
-  const second = await openReservedVault(input(1), 10, measure(1)).then(r => r, e => e);
+  const second = await openReservedVault(input(1), 10, measure(1), async () => true).then(r => r, e => e);
   assert.equal(await finish(pathname), true);
   if (second && second.ok) await finish(second.upload.pathname);
   assert.ok(kept(1) <= 10, `the folder keeps ${kept(1)} bytes against a limit of 10`);
@@ -170,7 +170,7 @@ test("a cancellation never reports done, nor frees reserved bytes, on an upload 
 });
 
 test("a session id in a shape never written is not taken for a file sent whole: nothing is deleted and the bytes stay reserved", async () => {
-  const opened = await openReservedVault(input(2), 10, measure(2));
+  const opened = await openReservedVault(input(2), 10, measure(2), async () => true);
   if (!opened.ok) throw new Error("open failed");
   const pathname = opened.upload.pathname;
   const signed = await signPieces(pathname, [1]);
@@ -183,17 +183,17 @@ test("a session id in a shape never written is not taken for a file sent whole: 
   assert.ok(outcome instanceof UnknownReplyError, `the cancellation said ${String(outcome)}`);
   assert.deepEqual(asked, [], "the object address was not sent a DELETE in place of the session's");
   assert.ok([...sessions.values()].some(s => s.key === pathname), "the multipart session is still the one the ledger tracks");
-  await assert.rejects(openReservedVault(input(2), 10, measure(2)), /storage_(limit|pending)/, "the bytes stay reserved");
+  await assert.rejects(openReservedVault(input(2), 10, measure(2), async () => true), /storage_(limit|pending)/, "the bytes stay reserved");
   // Read healthily again, the upload is cancelled at the provider and only then given back.
   assert.equal(await abortReservedVault(pathname), true);
   assert.equal([...sessions.values()].some(s => s.key === pathname), false);
-  assert.equal((await openReservedVault(input(2), 10, measure(2))).ok, true);
+  assert.equal((await openReservedVault(input(2), 10, measure(2), async () => true)).ok, true);
 });
 
 test("every reader of the upload record refuses each unknown shape and does nothing", async () => {
   for (const [name, shape] of UNKNOWN) {
     const n = 100 + UNKNOWN.findIndex(([m]) => m === name);
-    const opened = await openReservedVault(input(n), 10, measure(n));
+    const opened = await openReservedVault(input(n), 10, measure(n), async () => true);
     if (!opened.ok) throw new Error("open failed");
     const pathname = opened.upload.pathname;
     for (const [reader, run] of [
@@ -212,7 +212,7 @@ test("every reader of the upload record refuses each unknown shape and does noth
       assert.deepEqual(asked, [], `${reader} on ${name} asked the provider ${asked.join(", ")}`);
     }
     // The bytes are still held, and the upload is still whole.
-    await assert.rejects(openReservedVault(input(n), 10, measure(n)), /storage_(limit|pending)/);
+    await assert.rejects(openReservedVault(input(n), 10, measure(n), async () => true), /storage_(limit|pending)/);
     assert.equal(await finish(pathname), true, `the upload survives ${name}`);
     assert.equal(kept(n), 10);
   }
@@ -223,18 +223,18 @@ test("an unacknowledged record write hands out no upload and gives its bytes bac
     const n = 200 + made;
     recordWrite = reply;
     asked.length = 0;
-    const outcome = await openReservedVault(input(n), 10, measure(n)).then(r => r, e => e);
+    const outcome = await openReservedVault(input(n), 10, measure(n), async () => true).then(r => r, e => e);
     recordWrite = null;
     assert.ok(outcome instanceof UnknownReplyError, `open on ${name}: ${JSON.stringify(outcome)}`);
     assert.deepEqual(asked, ["POST", "DELETE session"], `the session opened for ${name} is cancelled at the provider`);
     // Nothing was handed out, so the reservation is given back.
-    const again = await openReservedVault(input(n), 10, measure(n));
+    const again = await openReservedVault(input(n), 10, measure(n), async () => true);
     assert.equal(again.ok, true);
   }
 });
 
 test("confirmed absence and healthy records are read as before", async () => {
-  const opened = await openReservedVault(input(300), 10, measure(300));
+  const opened = await openReservedVault(input(300), 10, measure(300), async () => true);
   if (!opened.ok) throw new Error("open failed");
   const pathname = opened.upload.pathname;
   const id = await vaultReservationId(pathname);
@@ -245,15 +245,17 @@ test("confirmed absence and healthy records are read as before", async () => {
   // The record is gone after the join: a confirmed absence.
   assert.equal(await vaultReservationId(pathname), undefined);
   assert.equal(await signPieces(pathname, [1]), null);
-  assert.deepEqual(await closeVaultUpload(pathname, ["a".repeat(32)]), { ok: false, reason: "unknown" });
+  // A repeat of the finish is given the first one's answer (lib/vault.ts), the provider not asked.
   asked.length = 0;
-  assert.equal(await abortVaultUpload(pathname), true);
+  assert.deepEqual(await closeVaultUpload(pathname, ["a".repeat(32)]), { ok: true, file: { pathname, bytes: 10, contentType: "application/pdf" } });
+  // A cancel after the finish never confirms the finished file canceled (Codex X6's MEDIUM on #3502), R2 not asked.
+  assert.equal(await abortVaultUpload(pathname), false);
   assert.deepEqual(asked, []);
   // A healthy cancellation asks the provider and gives the bytes back.
-  const second = await openReservedVault(input(301), 10, measure(301));
+  const second = await openReservedVault(input(301), 10, measure(301), async () => true);
   if (!second.ok) throw new Error("open failed");
   asked.length = 0;
   assert.equal(await abortReservedVault(second.upload.pathname), true);
   assert.deepEqual(asked, ["DELETE session"]);
-  assert.equal((await openReservedVault(input(301), 10, measure(301))).ok, true);
+  assert.equal((await openReservedVault(input(301), 10, measure(301), async () => true)).ok, true);
 });

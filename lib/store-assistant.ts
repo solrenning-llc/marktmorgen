@@ -20,7 +20,6 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 import { boundedAiRequest } from "@/lib/ai-request-rules";
 import { AI_CALL_INFRA_MICRO_USD, aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
 import { modelKeySet, postToModel } from "@/lib/ai";
@@ -32,6 +31,7 @@ import { forAi } from "@/lib/inbox-rules";
 import { handOver } from "@/lib/inbox";
 import { isHouseStore } from "@/lib/house-store";
 import { assistantWords } from "@/lib/buyer-words/assistant";
+import { UnknownReplyError, listSlots, repliesFor, stringList } from "@/lib/redis-reply";
 import type { Listing, Store } from "@/lib/store";
 import {
   ASSISTANT_FACTS_BYTES,
@@ -56,6 +56,7 @@ import {
   assistantWindow,
   heldToFacts,
   readAssistantText,
+  MAX_ASSISTANT_QUESTION,
 } from "@/lib/store-assistant-rules";
 
 export const ASSISTANT_TOKEN = /^[A-Za-z0-9_-]{32}$/;
@@ -419,12 +420,13 @@ export async function askAssistant(input: { store: Store; token?: unknown; text:
   // Shown only when it says nothing the store did not publish: a figure, a deal, a code, a link.
   if (status === "answer" && reply && heldToFacts(reply, facts)) return finish({ text: reply, status: "answer" });
 
-  // Not known, or not shown. When the model said it did not know, the creator sees the question; never who asked.
+  // Not known, or not shown. When the model said it did not know, the creator sees the question; never who asked:
+  // an address, a phone number or a link typed into it is taken out first, as in the conversation kept.
   if (json && json.status === "unknown") {
     await redisPipeline([
       // Kept as the model read it (forAi): an address, a phone number or a link typed into the question is not kept
       // for the creator, who never learns who asked (audit MEDIUM 1, 9 Nov 2026).
-      ["LPUSH", missedKey(store.statsId), JSON.stringify({ q: forAi(text, 600), at: Math.floor(now / 1000) })],
+      ["LPUSH", missedKey(store.statsId), JSON.stringify({ q: forAi(text, MAX_ASSISTANT_QUESTION), at: Math.floor(now / 1000) })],
       ["LTRIM", missedKey(store.statsId), 0, ASSISTANT_MISSED_KEPT - 1],
       ["EXPIRE", missedKey(store.statsId), ASSISTANT_MISSED_SECONDS],
     ]).catch((error) => console.error("keeping an unanswered question failed", error));
@@ -500,6 +502,33 @@ export async function assistantMissed(store: Store, limit = 20, now = Date.now()
     } catch {}
   }
   return out;
+}
+
+/**
+ * The same list read exactly, for a report that stands for the whole of it
+ * (lib/customer-voice.ts): a reply that is not a list, or a row this code
+ * never wrote (not JSON, no question, no time), throws UnknownReplyError
+ * instead of being read as fewer questions or none (rule 24). Never who asked.
+ */
+export async function assistantMissedExact(store: Store, limit = ASSISTANT_MISSED_KEPT): Promise<{ question: string; at: number }[]> {
+  if (!store.statsId || !isRedisConfigured()) return [];
+  const reply = repliesFor(await redisPipeline([["LRANGE", missedKey(store.statsId), 0, Math.max(0, limit - 1)]]), 1);
+  const rows = reply ? listSlots(reply[0]) : null;
+  if (!rows) throw new UnknownReplyError("the assistant's unanswered questions");
+  return rows.map((row) => {
+    let value: { q?: unknown; at?: unknown } | null = null;
+    try {
+      value = typeof row === "string" ? (JSON.parse(row) as { q?: unknown; at?: unknown }) : null;
+    } catch {}
+    // Read by the shape it was written in (a non-empty question and a time), never by today's length bounds, which
+    // may change after the row was kept (Claude 2 on #3731, LEVE 1); then cleaned for the prompt as before. A row may
+    // have been kept before the writer took contact details out, so they are taken out here too, as the studio's own
+    // reader does (forAi; Codex P and X4 on #3731, MEDIUM).
+    const typed = typeof value?.q === "string" ? value.q.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim() : "";
+    const question = forAi(typed, MAX_ASSISTANT_QUESTION);
+    if (!question || typeof value?.at !== "number" || !Number.isSafeInteger(value.at) || value.at <= 0) throw new UnknownReplyError("an unanswered question of the assistant");
+    return { question, at: value.at };
+  });
 }
 
 /** Forgets the list: the creator has read it. */

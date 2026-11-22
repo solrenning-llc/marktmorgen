@@ -82,7 +82,9 @@ export function importRowsFor(store: PlanFields & { tier: Tier }, nowSeconds = D
  * bytes it moves (stored as it arrives, read back by the step that applies
  * it, written where it lands).
  */
-export const IMPORT_WORST_COMMANDS_PER_ROW = 6;
+// A product row's long description is written fenced by the store's erasure since 20 November 2026 (lib/product-about-live.ts,
+// ABOUT_FENCE_EXTRA_COMMANDS: an EVAL with HGET, EXISTS and SET inside, three more than the plain SET): priced on every row.
+export const IMPORT_WORST_COMMANDS_PER_ROW = 9;
 /** The fewest rows an upload counts as, so the requests an allowance can start are bounded by it. */
 export const IMPORT_MIN_ROWS_PER_UPLOAD = 50;
 /**
@@ -109,12 +111,15 @@ export const IMPORT_ROWS_KEPT_DAYS = 3;
 export const IMPORTS_PAUSED = {
   renewal_unpaid: `Your plan's renewal payment did not go through, so imports are paused. Check the notice at the top of your studio to pay it. An import already started goes on where it stopped once it is paid, and what it already brought in stays. Rows not brought in yet are kept ${IMPORT_ROWS_KEPT_DAYS} days from their upload; after that, start again with the rows not brought in.`,
   plan_disputed: `A payment for your plan is disputed with your bank, so imports are paused. Check the notice at the top of your studio for what happens next. An import already started goes on where it stopped if everything starts again, and what it already brought in stays. Rows not brought in yet are kept ${IMPORT_ROWS_KEPT_DAYS} days from their upload; after that, start again with the rows not brought in.`,
+  // 232 [CA1], the original 4c (lib/plan-standing.ts newCostCode): a plan ended, or on a break. No closing date is named.
+  plan_ended: `Your store's plan is not running, so imports are paused. Try again once a plan is running: an import already started goes on where it stopped, and what it already brought in stays. Rows not brought in yet are kept ${IMPORT_ROWS_KEPT_DAYS} days from their upload; after that, start again with the rows not brought in.`,
 } as const;
 
 /** The same, for a ClickFunnels funnel migration, which keeps no rows. */
 export const FUNNEL_PAUSED = {
   renewal_unpaid: "Your plan's renewal payment did not go through, so funnel imports are paused. Check the notice at the top of your studio to pay it; you can import the funnel once it is paid. Pages already made stay as they are.",
   plan_disputed: "A payment for your plan is disputed with your bank, so funnel imports are paused. Check the notice at the top of your studio for what happens next. Pages already made stay as they are.",
+  plan_ended: "Your store's plan is not running, so funnel imports are paused. Try again once a plan is running. Pages already made are not changed by this.",
 } as const;
 
 /** "2,000 rows", for the studio. */

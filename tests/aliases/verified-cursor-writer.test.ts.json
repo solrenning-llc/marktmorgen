@@ -1,0 +1,6 @@
+{
+  "@/lib/redis": "verified-cursor-writer-world.ts",
+  "@/lib/mcp-tools": "verified-cursor-writer-world.ts",
+  "@/lib/catalog": "verified-cursor-writer-world.ts",
+  "@/lib/store": "verified-cursor-writer-world.ts"
+}

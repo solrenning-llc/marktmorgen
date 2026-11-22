@@ -17,6 +17,11 @@ import { type Store, saleHandles } from "@/lib/store";
 
 export type PaidCheckout = { id: string; meta: Record<string, string>; payment: string };
 
+/** One page of a person's checkouts, read for each way their address is written; more than a page fails the copy. */
+export const CHECKOUTS_PER_ADDRESS = 100;
+/** The most paid checkouts one copy can list: a page for the address as typed and one as kept (#5125 (1)). */
+export const MAX_PAID_CHECKOUTS = 2 * CHECKOUTS_PER_ADDRESS;
+
 const SESSION = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 
 export async function paidCheckoutsOf(store: Store, email: string): Promise<PaidCheckout[] | null> {
@@ -26,13 +31,13 @@ export async function paidCheckoutsOf(store: Store, email: string): Promise<Paid
   const out = new Map<string, PaidCheckout>();
   try {
     for (const variant of [...new Set([email.trim(), normaliseEmail(email)])]) {
-      const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
+      const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: String(CHECKOUTS_PER_ADDRESS) });
       const listed: unknown = await onAccount("GET", account, `/checkout/sessions?${query}`);
       // A missing list or continuation flag cannot prove that nothing is
       // retained by payment. Reject the whole copy, including earlier rows.
       if (!listed || typeof listed !== "object" || Array.isArray(listed)) return null;
       const page = listed as Record<string, unknown>;
-      if (page.object !== "list" || page.has_more !== false || !Array.isArray(page.data) || page.data.length > 100) return null;
+      if (page.object !== "list" || page.has_more !== false || !Array.isArray(page.data) || page.data.length > CHECKOUTS_PER_ADDRESS) return null;
       for (let i = 0; i < page.data.length; i++) {
         if (!Object.hasOwn(page.data, i)) return null;
         const value: unknown = page.data[i];

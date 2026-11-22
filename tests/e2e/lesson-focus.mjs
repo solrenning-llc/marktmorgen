@@ -99,8 +99,22 @@ try {
   await tab.goto("about:blank");
   await tab.goto("https://lesson.test/#c-x");
   is("the link opens a fresh page, not the same document with a second copy of the lesson", await tab.evaluate(() => window.previousVisit === undefined), true);
+  // The first draw that offers the button must already show the reply: a draw with the reply hidden and the
+  // button up, undone a moment later, is a flash the student can see, and what a reader sees between the two
+  // draws is chance (webkit, 21 November 2026: the merge-queue run of #3774 read the hidden draw).
+  await tab.evaluate(() => {
+    window.firstDraw = null;
+    new MutationObserver((_, observer) => {
+      const button = [...document.querySelectorAll("button")].find((b) => /focus mode/i.test(b.textContent ?? ""));
+      if (!button) return;
+      observer.disconnect();
+      const reply = document.getElementById("c-x");
+      window.firstDraw = { focus: button.closest("[data-focus]")?.getAttribute("data-focus"), replyShown: reply !== null && reply.getClientRects().length > 0 };
+    }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-focus"] });
+  });
   await tab.addScriptTag({ content: bundle.outputFiles[0].text });
   await tab.getByRole("button", { name: /focus mode/i }).waitFor();
+  is("the first draw with the button already shows the reply the link points at", await tab.evaluate(() => window.firstDraw), { focus: "off", replyShown: true });
   is("a link to a hidden reply opens with focus mode off for that visit, the reply shown", [await tab.locator("#c-x").isVisible(), await tab.getByRole("button", { name: /focus mode/i }).textContent()], [true, "Focus mode"]);
   is("brought into view", await tab.locator("#c-x").evaluate((el) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.top < window.innerHeight; }), true);
   is("the remembered choice is left as it was", await tab.evaluate(() => localStorage.getItem("mm:lesson-focus")), "on");

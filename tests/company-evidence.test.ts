@@ -3,7 +3,7 @@
  * not one whole reply is never "no companies" (a page fails, a copy of a person's data fails, a deletion is not
  * done), and a write is written only on its exact 1 and refused only on its exact 0; anything else is unconfirmed
  * and keeps the room it took. Real CRM company mutation, erasure and export; synthetic transport only. G2's case of
- * an undo after an erasure comes with its fix, on the deletion's mark of #2287.
+ * an undo after an erasure (its ninth) is kept with its fix in tests/company-erased-person.test.ts.
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';

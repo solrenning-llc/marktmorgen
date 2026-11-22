@@ -1,12 +1,11 @@
 import type { NextRequest } from "next/server";
-import { normaliseHandle, storeForHandle } from "@/lib/store";
+import { normaliseHandle, storeForHit } from "@/lib/store";
 import { classifySource, cleanTag } from "@/lib/stats";
 import { countAffiliateClick, countHit, countVisit, isStorePeople } from "@/lib/visit";
 import { isBot } from "@/lib/source-rules";
 import { funnelMark, stepIndex } from "@/lib/page-funnel";
 import { countFunnelStep, funnelVisitor, readPageFunnel } from "@/lib/page-funnel-store";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
-import { productIdFor } from "@/lib/catalog";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { browserProof } from "@/lib/bot-check";
 
 const MAX_BODY_BYTES = 1_500;
@@ -42,16 +41,20 @@ export async function POST(request: NextRequest) {
 
   const handle = normaliseHandle(read("h", 40));
   if (!handle) return done();
-  const store = await storeForHandle(handle).catch(() => null);
-  if (!store) return done();
+  const kind = read("k", 2);
+  // Only the fields a count needs, read inside the database: the store's record, up to MAX_STORE_BYTES, never crosses
+  // the wire for a count (lib/store.ts, storeForHit; #1496, option A). A link's or a product's id is asked about there.
+  const hit = await storeForHit(handle, { link: kind === "l" ? read("id", 40) : "", product: kind === "p" ? read("p", 40) : "" }).catch(() => null);
+  if (!hit) return done();
+  const { store } = hit;
   // A page sends one of these per visit and per click; a script sending
   // thousands would only inflate the creator's numbers, so it stops counting.
   // A funnel's steps have an allowance of their own, so a person browsing the
   // store at length never crowds out the steps they walk afterwards: one
   // person walks twenty at most.
-  const kind = read("k", 2);
   const allowance = kind === "f" ? (["hit-funnel", 60] as const) : (["hit", 120] as const);
-  if (!(await withinLimit(allowance[0], `${clientAddress(request)}|${store.handle}`, allowance[1], 600))) return done();
+  // Past the limit, or a count that could not be read (unknown, rule 24): not counted, and the answer is the same.
+  if ((await withinLimit(allowance[0], `${clientAddress(request)}|${store.handle}`, allowance[1], 600).catch(unknownLimit)) !== true) return done();
   // A page opened (a visit, another page, a funnel's step) is counted only when the host's check says a person's
   // browser sent this (lib/bot-check.ts, browserProof). A program, a check that failed or did not answer, is counted
   // nowhere: not toward the visits the store's plan covers, never in its numbers as a visit. What pages cost is still
@@ -75,10 +78,10 @@ export async function POST(request: NextRequest) {
     // (lib/stats.ts): what its checkouts and sales are measured against.
     await countVisit(request, store);
     const product = read("p", 40);
-    if (product && productIdFor(store, product) === product) await countHit(request, store, { kind: "product", id: product });
+    if (product && hit.productKnown) await countHit(request, store, { kind: "product", id: product });
   } else if (kind === "l") {
     const id = read("id", 40);
-    if (store.links.some((link) => link.id === id)) await countHit(request, store, { kind: "link", id });
+    if (id && hit.linkKnown) await countHit(request, store, { kind: "link", id });
   } else if (kind === "f") {
     // A step of a funnel of pages was opened (lib/page-funnel.ts): one person
     // once for that step, never the store's own people, and only for a page

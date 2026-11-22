@@ -28,7 +28,7 @@ import { newLeadId, sendPaidOrders, sendRenewals, sendServerLead, sendServerPurc
 import { adsCookieName, nextAdsCookie } from "@/lib/ad-consent";
 import { erasePerson } from "@/lib/person-erasure";
 import { NO_PIXELS } from "@/lib/pixels";
-import { ensureListId, setAdsServer, setPixels, storeForEmail } from "@/lib/store";
+import { ERASING_KEY, claimHandle, closeStoreRecord, ensureListId, ensureStatsId, erasingField, ownerKey, setAdsServer, setPixels, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
 import { suppressCommand } from "@/lib/suppression";
 import { OWNER, makeWorld } from "./erasure-world";
 import { store as redis } from "./redis-stub";
@@ -39,6 +39,7 @@ process.env.STRIPE_SECRET_KEY = "sk_test_ad_events_erasure_stand_in";
 
 const NOW = Date.now();
 const SEC = Math.floor(NOW / 1000);
+const storeIdDel = (sid: string): (string | number)[] => ["DEL", storeIdCommand(sid)[1]];
 const META_TOKEN = "EAAB" + "m".repeat(60);
 const BUYER = "Member@Example.com";
 const COOKIES = { _fbp: "fb.1.1700000000.111", _fbc: "fb.1.1700000000.IwAR0abc", _ttp: "ttp0abc", _ga: "GA1.1.123.456", fbclid: "IwAR0abc", clickAt: String(SEC - 3600) };
@@ -46,12 +47,23 @@ const COOKIES = { _fbp: "fb.1.1700000000.111", _fbc: "fb.1.1700000000.IwAR0abc",
 let sessions: Record<string, unknown>[] = [];
 let invoices: Record<string, unknown>[] = [];
 let toMeta = 0;
+/** Codex L's L-20261119-1153: the store's erasure, run while Meta is still answering a conversion already started. */
+let eraseStoreDuringMeta: { sid: string; statsId: string } | null = null;
+/** Codex L's L-20261120-1242: the store closed and another opened at its owner's address while Meta answers. */
+let whileMetaAnswers: (() => Promise<void>) | null = null;
+let metaFailure: string | null = null;
 
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "graph.facebook.com") {
     toMeta += 1;
+    if (eraseStoreDuringMeta) {
+      const { sid, statsId } = eraseStoreDuringMeta;
+      await redis.pipeline([storeIdDel(sid), ["DEL", `nl:adsrv:last:${statsId}`]]);
+    }
+    await whileMetaAnswers?.();
+    if (metaFailure) return json({ error: { message: metaFailure } }, 400);
     return json({ events_received: 1 });
   }
   const path = url.pathname.replace(/^\/v1/, "");
@@ -257,6 +269,83 @@ async function main(): Promise<void> {
   is("the five-minute pass sends the other", await sendPaidOrders(store, [sessions[1]], NOW), 1);
   is("both to Meta", toMeta, 2);
   is("what either checkout kept is gone", [redis.run(["GET", ctxKey(T3)]), redis.run(["GET", ctxKey(T4)])], [null, null]);
+
+  part("An ad platform's answer that comes back after the store was erased does not write the studio's last answers again (Codex L, L-20261119-1153)");
+  {
+    const idKey = storeIdCommand(store.sid)[1];
+    is("the store is live before the lead", Number(redis.run(["EXISTS", idKey])), 1);
+    eraseStoreDuringMeta = { sid: store.sid, statsId };
+    try {
+      is("the lead already started still reaches the platform", await sendServerLead(store, asking(yes), { id: newLeadId(), email: "late-answer@example.com", product: "guide00001" }, NOW), true);
+    } finally {
+      eraseStoreDuringMeta = null;
+    }
+    is("the erasure took the store's live id while Meta answered", Number(redis.run(["EXISTS", idKey])), 0);
+    is("and the late answer did not recreate the last-answer record it deleted", Number(redis.run(["EXISTS", `nl:adsrv:last:${statsId}`])), 0);
+  }
+  part("While the store's erasure is under way (its field in nl:closed:erasing), a late answer writes nothing either");
+  {
+    const idKey = storeIdCommand(store.sid)[1];
+    redis.run(["SET", idKey, storeRef(store)]);
+    const field = await erasingField(storeRef(store));
+    redis.run(["HSET", ERASING_KEY, field, "1"]);
+    is("the lead still reaches the platform", await sendServerLead(store, asking(yes), { id: newLeadId(), email: "late-answer2@example.com", product: "guide00001" }, NOW), true);
+    is("nothing is written under erasure", Number(redis.run(["EXISTS", `nl:adsrv:last:${statsId}`])), 0);
+    redis.run(["HDEL", ERASING_KEY, field]);
+    is("once live and not erasing, the last answers are kept as before", await sendServerLead(store, asking(yes), { id: newLeadId(), email: "late-answer3@example.com", product: "guide00001" }, NOW), true);
+    const kept = redis.run(["GET", `nl:adsrv:last:${statsId}`]);
+    is("kept with the platform's answer", typeof kept === "string" && (JSON.parse(kept) as { kind?: string }).kind === "lead", true);
+    is("for ninety days", Number(redis.run(["TTL", `nl:adsrv:last:${statsId}`])), 90 * 86400);
+  }
+
+  part("A store kept from before ids (sid \"\") still keeps its last answers while live, and none once erasing (Claude 3's LOW 1 on #4900)");
+  {
+    const legacy: typeof store = { ...store, sid: "" };
+    const ref = storeRef(legacy);
+    is("its record, under its owner's address, is there", Number(redis.run(["EXISTS", await ownerKey(ref)])), 1);
+    redis.run(["DEL", `nl:adsrv:last:${statsId}`]);
+    is("the lead reaches the platform", await sendServerLead(legacy, asking(yes), { id: newLeadId(), email: "legacy-live@example.com", product: "guide00001" }, NOW), true);
+    const kept = redis.run(["GET", `nl:adsrv:last:${statsId}`]);
+    is("a live legacy store keeps the platform's answer for the studio", typeof kept === "string" && (JSON.parse(kept) as { kind?: string }).kind === "lead", true);
+    redis.run(["DEL", `nl:adsrv:last:${statsId}`]);
+    const field = await erasingField(ref);
+    redis.run(["HSET", ERASING_KEY, field, "1"]);
+    is("under erasure the lead still reaches the platform", await sendServerLead(legacy, asking(yes), { id: newLeadId(), email: "legacy-erasing@example.com", product: "guide00001" }, NOW), true);
+    is("and nothing is written for the erasing legacy store", Number(redis.run(["EXISTS", `nl:adsrv:last:${statsId}`])), 0);
+    redis.run(["HDEL", ERASING_KEY, field]);
+  }
+
+  part("A legacy answer in flight is not kept once the owner has opened a different store at the same address (Codex L-20261120-1242)");
+  {
+    // The legacy control above shows an id given since this snapshot is still the same store.
+    const legacy: typeof store = { ...store, sid: "" };
+    const last = `nl:adsrv:last:${statsId}`;
+    redis.run(["SET", last, "prior synthetic diagnostic", "EX", 90 * 86400]);
+    let replacement: typeof store | null = null;
+    whileMetaAnswers = async () => {
+      // The real final close deletes the diagnostic and the erasing mark with the record.
+      is("the old record really closes", await closeStoreRecord(legacy, [last]), true);
+      is("the old account has no store", await storeForEmail(OWNER), null);
+      is("its diagnostic was deleted before the late answer", redis.run(["GET", last]), null);
+      is("its erasing mark is gone", redis.run(["HGET", ERASING_KEY, await erasingField(storeRef(legacy))]), null);
+      is("the same owner opens a new store at another handle", (await claimHandle(OWNER, "new-ads-shop", "New Ads Shop", "")).ok, true);
+      await ensureStatsId(OWNER);
+      replacement = (await storeForEmail(OWNER))!;
+      is("it has a different statsId", Boolean(replacement.statsId) && replacement.statsId !== statsId, true);
+    };
+    metaFailure = "Synthetic refusal for erased-owner@example.com";
+    try {
+      is("the lead already started completes", await sendServerLead(legacy, asking(yes), { id: newLeadId(), email: "late-legacy@example.com", product: "guide00001" }, NOW), true);
+    } finally {
+      whileMetaAnswers = null;
+      metaFailure = null;
+    }
+    is("the replacement was opened during the platform's answer", replacement !== null, true);
+    is("the erased store's diagnostic stays absent", redis.run(["GET", last]), null);
+    const fresh = (await storeForEmail(OWNER))!;
+    is("the replacement's record is untouched", fresh.handle, "new-ads-shop");
+    is("no old diagnostic is kept under the replacement", redis.run(["GET", `nl:adsrv:last:${fresh.statsId}`]), null);
+  }
 
   done();
 }

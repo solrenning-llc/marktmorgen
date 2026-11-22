@@ -118,6 +118,8 @@ export async function navigateToContent(reader,page,kind,foreground){
   await page.evaluate(()=>document.getElementById("__guidepup_marker__")?.remove());
  }
  // Item chooser interaction can leave the cursor at a later heading.
- // Establish the area start only after removing the temporary marker.
- await reader.perform(voiceOverKeyCodeCommands.moveToAreaTop,{capture:false});
+ // Establish the area start only after removing the temporary marker. Its own phrase is captured: under capture
+ // "initial", the next command logs the first phrase that differs from the last logged one, so an unlogged area-top
+ // phrase was taken for the first heading's and the heading's own was never read (merge queue, 20 and 22 Nov 2026).
+ await reader.perform(voiceOverKeyCodeCommands.moveToAreaTop,{capture:true});
 }

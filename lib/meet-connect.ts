@@ -56,6 +56,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import * as exactReply from "@/lib/redis-reply";
 import { type Held, LockBusyError, setIfHeld, withLock } from "@/lib/redis-lock";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import { type MeetProvider, MEET_NAMES, isMeetProvider } from "@/lib/call-setup";
@@ -74,6 +75,10 @@ import {
   refreshTokens,
   revoke,
 } from "@/lib/meet-providers";
+import type { Store } from "@/lib/store";
+import { type Member, readTeamMembers } from "@/lib/team";
+import { can } from "@/lib/team-roles";
+import { hostId } from "@/lib/host-claims";
 
 /** What a provider is called in the studio: the account, not the meeting. */
 export const ACCOUNT_NAMES: Record<MeetProvider, string> = { google: "Google Calendar", zoom: "Zoom" };
@@ -161,10 +166,26 @@ function parseConnection(raw: unknown, provider: MeetProvider): Connection | nul
   }
 }
 
+/**
+ * A connection from what GET answered at its key (CX-123 rule 24): null for
+ * a confirmed none (the slot answered null), and for text kept there that is
+ * not a connection (damaged: nothing in it can be used, and connecting again
+ * replaces it). Any other reply (a number, true, a list, an object, nothing)
+ * is unknown and throws, so no screen asks to connect again, no booking is
+ * refused as "not connected", and nothing is disconnected, forgotten or
+ * written over a connection that may be there.
+ */
+function connectionFrom(reply: unknown, provider: MeetProvider): Connection | null {
+  if (reply !== null && typeof reply !== "string") throw new exactReply.UnknownReplyError("a meeting connection");
+  return parseConnection(reply, provider);
+}
+
 async function readConnection(statsId: string, provider: MeetProvider, host = ""): Promise<Connection | null> {
   if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", connKey(statsId, provider, host)]]);
-  return parseConnection(raw, provider);
+  // One reply for the one command, or unknown.
+  const replies = exactReply.repliesFor(await redisPipeline([["GET", connKey(statsId, provider, host)]]), 1);
+  if (!replies) throw new exactReply.UnknownReplyError("a meeting connection");
+  return connectionFrom(replies[0], provider);
 }
 
 /** A team host's own Google Calendar connection, as their studio page shows it, with what it was granted. */
@@ -225,36 +246,49 @@ export type MeetView = {
 };
 
 function viewOf(c: Connection): ConnectionView {
-  return { provider: c.provider, account: c.account.email || c.account.name || "your account", connectedAt: c.connectedAt, by: c.by, broken: c.broken };
+  const view = { provider: c.provider, account: c.account.email || c.account.name || "your account", connectedAt: c.connectedAt, by: c.by, broken: c.broken };
+  ownerWhenConnected.set(view, c.owner.email);
+  return view;
 }
+
+/** The store owner's address a view's connection was made for (makerRefusal), kept off the view itself, so nothing more reaches the studio. */
+const ownerWhenConnected = new WeakMap<ConnectionView, string>();
 
 /** Which configured accounts can serve bookings. Disabled providers stay excluded. */
 export async function meetView(statsId: string | null, sid?: OfferedTo, review = false): Promise<MeetView> {
   const configured = configuredProviders();
   const offered = sid === undefined ? configured : offeredProviders(sid, review);
-  return readMeetingView(statsId, configured, offered);
+  return withMakers(await readMeetingView(statsId, configured, offered), sid);
 }
 
 /** Settings alone also show retained disabled connections, so consent can be
  * withdrawn. Never use this view to select a provider for new bookings. */
 export async function meetSettingsView(statsId: string | null, sid: OfferedTo, review = false): Promise<MeetView> {
-  return readMeetingView(statsId, ["google", "zoom"], offeredProviders(sid, review));
+  return withMakers(await readMeetingView(statsId, ["google", "zoom"], offeredProviders(sid, review)), sid);
 }
 
 /** At most two connection reads and one bounded problem-list read. */
 async function readMeetingView(statsId: string | null, candidates: MeetProvider[], offered: MeetProvider[]): Promise<MeetView> {
   if (!candidates.length || !statsId || !isRedisConfigured()) return { providers: offered, connected: {}, problems: [] };
-  const replies = await redisPipeline([...candidates.map((p) => ["GET", connKey(statsId, p)]), ["LRANGE", logKey(statsId), 0, LOG_SIZE - 1]]);
+  // Read exactly (CX-123 rule 24): a reply of another shape throws, so the
+  // studio says it could not check, never that nothing is connected.
+  const replies = exactReply.repliesFor(
+    await redisPipeline([...candidates.map((p) => ["GET", connKey(statsId, p)]), ["LRANGE", logKey(statsId), 0, LOG_SIZE - 1]]),
+    candidates.length + 1,
+  );
+  if (!replies) throw new exactReply.UnknownReplyError("the meeting connections");
   const connected: MeetView["connected"] = {};
   candidates.forEach((p, i) => {
-    const c = parseConnection(replies[i], p);
+    const c = connectionFrom(replies[i], p);
     if (c) connected[p] = viewOf(c);
   });
+  const log = exactReply.stringList(replies[candidates.length]);
+  if (!log) throw new exactReply.UnknownReplyError("the meeting problems");
   const providers = candidates.filter((p) => offered.includes(p) || connected[p]);
   const problems: MeetProblem[] = [];
-  for (const raw of Array.isArray(replies[candidates.length]) ? (replies[candidates.length] as unknown[]) : []) {
+  for (const raw of log) {
     try {
-      const v = JSON.parse(String(raw)) as MeetProblem;
+      const v = JSON.parse(raw) as MeetProblem;
       if (isMeetProvider(v.provider) && typeof v.what === "string" && typeof v.error === "string") problems.push(v);
     } catch {
       // Skipped.
@@ -379,8 +413,11 @@ export async function finishConsent(
     return await withLock(refreshLockKey(input.statsId, provider, input.host ?? ""), 20, 9_000, (held) => keepConnection(provider, input, traded, held));
   } catch (error) {
     // Not kept: what Google or Zoom just gave is given back rather than left
-    // granted with nothing here that knows of it.
-    if (error instanceof LockBusyError) {
+    // granted with nothing here that knows of it. An earlier connection that
+    // could not be read (rule 24) stops the write before it, so that grant is
+    // not kept either. An unknown acknowledgement after the keep may already
+    // have stored the new grant: leave it live, rather than revoke what Redis may hold.
+    if (error instanceof LockBusyError || error instanceof PriorConnectionUnreadError) {
       await revoke(provider, provider === "zoom" ? traded.tokens.access : traded.tokens.refresh).catch(() => {});
     }
     throw error;
@@ -406,6 +443,9 @@ redis.call("SADD", KEYS[3], ARGV[4])
 redis.call("SET", KEYS[2], ARGV[2])
 return 1`;
 
+/** A malformed prior read stops this attempt before the grant's write. */
+class PriorConnectionUnreadError extends UnknownReplyError {}
+
 async function keepConnection(
   provider: MeetProvider,
   input: { statsId: string; by: string; owner: { email: string; handle: string }; host?: string; startedAt: number },
@@ -413,7 +453,13 @@ async function keepConnection(
   held: Held,
 ): Promise<ConnectResult> {
   const host = input.host ?? "";
-  const before = await readConnection(input.statsId, provider, host);
+  let before: Connection | null;
+  try {
+    before = await readConnection(input.statsId, provider, host);
+  } catch (error) {
+    if (error instanceof UnknownReplyError) throw new PriorConnectionUnreadError("the prior meeting connection before keeping a new grant");
+    throw error;
+  }
   const connection: Connection = {
     provider,
     account: traded.account,
@@ -719,15 +765,90 @@ async function markBroken(held: Held, statsId: string, provider: MeetProvider, w
 /** Hook for telling the owner once that a connection broke (set by the caller that knows the store). */
 export type BrokenHook = (provider: MeetProvider) => Promise<void>;
 
+/** The store a connection is used for: its stats id, its team's id and its owner's address now. */
+export type MeetStore = Pick<Store, "statsId" | "sid" | "email">;
+
+/** Why a connection is not used when its maker may not use it now (issue #4010), after the account's name. */
+const MAKER_GONE = "was connected by someone who is no longer on the team, or whose role no longer allows it";
+const MAKER_UNRECORDED = "has nobody recorded as having connected it";
+
+/**
+ * Why a connection may not be used for this store now, or "" when it may
+ * (issue #4010): each new booking puts the buyer's name and address in the
+ * calendar of whoever connected it, so who that is gets read against the team
+ * at every use, as for the inbox (R25) and API keys (lib/api-keys.ts pauseWhy).
+ *
+ * A store's connection: whoever connected it (`by`) is the store's owner now,
+ * or the owner it was connected for (`ownerThen`: a store's owner changes only
+ * when that same person moves their address, lib/store.ts moveAccount, and
+ * nothing rewrites `by` then), or someone on the team now whose role allows
+ * "settings" (lib/team-roles.ts), the same people who may connect one. A
+ * teammate who moved their address is not matched (lib/team.ts
+ * moveMemberships does not rewrite `by`): theirs needs connecting again, never
+ * used for someone unknown. One with nobody recorded (every connection
+ * written here records `by`; only a damaged one lacks it) cannot be told from
+ * a former teammate's, so it is not used either, unlike an API key made before
+ * makers were recorded (lib/api-key-rules.ts MAKER_UNRECORDED).
+ *
+ * A team host's own calendar (`host`): used for this store only while that
+ * host is its owner or on its team now, whatever their role (any member may
+ * connect their own, lib/meet-routes.ts startHostConnect).
+ *
+ * The team is read only when the owner is not the one who connected it: one
+ * GET, exactly (lib/team.ts readTeamMembers), whose unknown reply throws
+ * UnknownReplyError, never taken as allowed. Nothing is deleted or given back
+ * here (#4011): the owner or a current Admin connects it again, or the person
+ * is put back on the team and it works again.
+ */
+async function makerRefusal(store: Pick<MeetStore, "sid" | "email">, by: string, ownerThen: string, host: string, team: () => Promise<Member[]>): Promise<string> {
+  const same = (a: string, b: string) => Boolean(a.trim()) && a.trim().toLowerCase() === b.trim().toLowerCase();
+  if (host) {
+    if (hostId(store.email) === host) return "";
+    return (await team()).some((m) => hostId(m.email) === host) ? "" : MAKER_GONE;
+  }
+  if (!by.trim()) return MAKER_UNRECORDED;
+  if (same(by, store.email) || same(by, ownerThen)) return "";
+  return (await team()).some((m) => same(by, m.email) && can(m.role, "settings")) ? "" : MAKER_GONE;
+}
+
+/** The store's team, read at most once, and only when asked. */
+function teamOnce(sid: string): () => Promise<Member[]> {
+  let read: Promise<Member[]> | null = null;
+  return () => (read ??= readTeamMembers(sid));
+}
+
+/**
+ * The studio's view, with each connection whose maker may no longer use it
+ * shown as needing connecting again (makerRefusal), when the store is at hand
+ * (the studio's pages and routes pass it). The team is read once at most.
+ */
+async function withMakers(view: MeetView, store: OfferedTo): Promise<MeetView> {
+  if (!store || typeof store !== "object") return view;
+  const owner = { sid: store.sid ?? "", email: store.email ?? "" };
+  const team = teamOnce(owner.sid);
+  for (const provider of Object.keys(view.connected) as MeetProvider[]) {
+    const c = view.connected[provider];
+    if (!c || c.broken) continue;
+    const why = await makerRefusal(owner, c.by, ownerWhenConnected.get(c) ?? "", "", team);
+    if (why) view.connected[provider] = { ...c, broken: `${ACCOUNT_NAMES[provider]} ${why}` };
+  }
+  return view;
+}
+
 /**
  * An access token for the store's connection, renewed when it is within a
- * minute of running out. Throws NotConnected when there is none that works.
+ * minute of running out. Throws NotConnected when there is none that works,
+ * or when whoever connected it may not use it for `store` now (makerRefusal),
+ * and UnknownReplyError when the team could not be read.
  */
-export async function accessFor(statsId: string, provider: MeetProvider, onBroken?: BrokenHook, host = ""): Promise<Access> {
+export async function accessFor(statsId: string, provider: MeetProvider, onBroken: BrokenHook | undefined, host: string, store: MeetStore): Promise<Access> {
   if (!isConfigured(provider)) throw new NotConnected(`${ACCOUNT_NAMES[provider]} is not switched on`);
+  if (store.statsId !== statsId) throw new NotConnected(`${ACCOUNT_NAMES[provider]} is not connected`);
   const c = await readConnection(statsId, provider, host);
   if (!c) throw new NotConnected(`${ACCOUNT_NAMES[provider]} is not connected`);
   if (c.broken) throw new NotConnected(`${ACCOUNT_NAMES[provider]} needs connecting again: ${c.broken}`, true);
+  const why = await makerRefusal(store, c.by, c.owner.email, host, teamOnce(store.sid));
+  if (why) throw new NotConnected(`${ACCOUNT_NAMES[provider]} needs connecting again: it ${why}`, true);
   if (c.expires > Date.now() + 60_000) {
     const open = unseal(c.access, context(statsId, provider, "access", host));
     if (open.ok) return { token: open.value, account: c.account.id };

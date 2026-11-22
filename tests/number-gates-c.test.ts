@@ -326,7 +326,9 @@ async function main(): Promise<void> {
       return [response.status, ((await response.json()) as { error?: string }).error ?? "ok"];
     };
     const isRate = windowIncr("nl:rl:creators:");
-    const kept = (from: number) => wroteSince(from, (c) => c[0] === "LPUSH" && key(c) === RESPONSES_KEY);
+    // The answer is kept by LPUSH inside KEEP_RESEARCH_ANSWER (lib/creator-research-room.ts), whose list is its first key.
+    const kept = (from: number) =>
+      wroteSince(from, (c) => (c[0] === "LPUSH" && key(c) === RESPONSES_KEY) || (c[0] === "EVAL" && key(c).startsWith("-- marktmorgen:research-answer-keep:") && String(c[3]) === RESPONSES_KEY));
     const quiet = console.error;
     console.error = () => {};
     for (const [label, reply] of WINDOW_UNKNOWN) {
@@ -369,6 +371,9 @@ async function main(): Promise<void> {
   const cid = club.community!.id;
   await saveConfig(cid, { ...freshConfig(club.name), access: [ticket.product.id], chat: parseChatSetting({ on: true }), dm: parseDmSetting({ on: true, between: true }) });
   await redis.pipeline([["SET", `nl:cm:${cid}:ok:${emailKey(MEMBER)}`, JSON.stringify({ v: 1, ok: true })]]);
+  // Rule 23 (the pre-review of 9 November 2026, P1): the door reads the one kept reading of what the address holds
+  // (lib/community-access.ts holdingsOf), so the member is kept there too.
+  await redis.pipeline([["SET", `nl:cm:${cid}:h:${emailKey(MEMBER)}`, JSON.stringify({ v: 1, ids: [ticket.product.id], held: [ticket.product.id] })]]);
   const cookie = `${passCookieName(club)}=${await mintPass(club, MEMBER, "all")}`;
   const viewer = await communityViewer(club, { get: (name: string) => (name === passCookieName(club) ? { value: cookie.split("=")[1] } : undefined) } as never);
   if (viewer.state !== "in" || !viewer.member) throw new Error("the member is not in: " + viewer.state);

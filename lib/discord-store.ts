@@ -21,6 +21,7 @@ import { orderWrite } from "@/lib/order-data";
 import { emailKey, storeKey } from "@/lib/learn";
 import { normaliseEmail } from "@/lib/auth";
 import type { Store } from "@/lib/store";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { CHECK_HOURS, type DiscordServer, MAX_DISCORD_PRODUCTS, SNOWFLAKE, cleanRoles, parseServer } from "@/lib/discord-rules";
 
 const serverKey = (room: string) => `nl:dc:srv:${room}`;
@@ -28,6 +29,15 @@ const productsKey = (room: string) => `nl:dc:prod:${room}`;
 const membersKey = (room: string) => `nl:dc:mem:${room}`;
 const addressKey = (room: string, email: string) => `nl:dc:addr:${room}:${emailKey(email)}`;
 const DUE_KEY = "nl:dc:due";
+
+/**
+ * How long a run holds the people it took from the line (dueMembers) before they come due again on their own: longer
+ * than one run (lib/discord-access.ts sweepDiscord, a 45 s budget; the run's lock lasts 120 s), shorter than the gap
+ * between runs (every 30 minutes, vercel.json).
+ */
+export const DUE_LEASE_SECONDS = 15 * 60;
+/** The most people one run of the line takes (dueMembers): its cost is NOT_A_COST.DISCORD_DUE_PER_RUN (tests/plan-cost-registry.ts). */
+export const DISCORD_DUE_PER_RUN = 200;
 const STATE_SECONDS = 10 * 60;
 const stateKey = (token: string) => `nl:dc:state:${createHash("sha256").update(`nimbus-discord:${token}`).digest("hex").slice(0, 40)}`;
 
@@ -71,8 +81,46 @@ export async function readServerOrThrow(room: string): Promise<DiscordServer | n
   return server;
 }
 
-export async function saveServer(room: string, server: DiscordServer): Promise<void> {
-  await redisPipeline([["SET", serverKey(room), JSON.stringify(server)]]);
+/**
+ * The server's write, only while its store is live (Codex L-20261120-0732), by the rule of lib/live-fence.ts: the
+ * store's erasing mark absent, and its id key still holding this very store's ref (ARGV[3] ""), or, for a store from
+ * before ids, its owner's record still carrying its statsId (ARGV[3]). KEYS: the live key, the erasing hash, the
+ * server. 1: written; 0: the store is gone, moved or being erased, and nothing was written; -1: the owner's record does
+ * not parse (unknown). No expiry, as before.
+ */
+const SAVE_SERVER_IF_LIVE = `-- marktmorgen:discord-server-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[3] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[4] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[3] then return 0 end
+end
+redis.call("SET", KEYS[3], ARGV[2])
+return 1`;
+
+/** Billed for one server write on a live store: the EVAL and its HGET, GET and SET (lib/capped-count.ts's count). */
+export const DISCORD_SERVER_WRITE_COMMANDS = 4;
+
+/**
+ * Keeps the store's connected server, in one step fenced on the store being live (SAVE_SERVER_IF_LIVE): the callback
+ * waits on Discord's code exchange and the studio's kick option on its read, and the store's erasure may begin or end
+ * meanwhile; a plain SET then wrote the erased store's server back after its walk. Returns only when the write is
+ * confirmed (the exact 1); a store gone, moved or being erased, a store from before ids with no statsId, or any other
+ * answer throws UnknownReplyError, and nothing falls back to an unfenced write.
+ */
+export async function saveServer(store: Store, server: DiscordServer): Promise<void> {
+  const what = "the connected Discord server, kept while its store is live";
+  const fence = await storeLiveFence(store);
+  if (fence.statsId === null) throw new UnknownReplyError(what);
+  const reply = oneReply(await redisPipeline([[
+    "EVAL", SAVE_SERVER_IF_LIVE, 3, fence.live, fence.erasing, serverKey(storeKey(store)),
+    fence.field, JSON.stringify(server), fence.statsId, fence.ref,
+  ]]), what);
+  if (reply !== 1) throw new UnknownReplyError(what);
 }
 
 /**
@@ -292,21 +340,40 @@ export async function forgetMember(room: string, sid: string, userId: string, em
   }
 }
 
+/** Takes a person off the line when there is nobody left to check: their store, server or member record is gone. */
+export async function dropDue(sid: string, userId: string): Promise<void> {
+  await redisPipeline([["ZREM", DUE_KEY, `${sid}|${userId}`]]);
+}
+
 /** Puts a person first in line to be checked: a refund made in the studio, say. */
 export async function checkSoon(sid: string, userId: string): Promise<void> {
   await redisPipeline([["ZADD", DUE_KEY, 0, `${sid}|${userId}`]]);
 }
 
-/** Who is due to be checked, taken off the line; they are put back when kept. */
-export async function dueMembers(now = Date.now(), limit = 200): Promise<{ sid: string; userId: string }[]> {
+/**
+ * Who is due to be checked, leased rather than taken off the line (webhooks/cron audit, Claude 1, 12/11/2026): each
+ * is moved DUE_LEASE_SECONDS ahead, only while still in line (XX, so somebody forgotten in between is never added
+ * back). A check that finishes sets their next time (keepMember) or takes them off (forgetMember, dropDue); one the
+ * run never finishes (the function stopped, Redis failing for the put-back too) comes due again when the lease runs
+ * out, instead of being dropped for good with the creator's paid roles still given.
+ */
+export async function dueMembers(now = Date.now(), limit = DISCORD_DUE_PER_RUN): Promise<{ sid: string; userId: string }[]> {
   if (!isRedisConfigured()) return [];
   const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, 0, Math.floor(now / 1000), "LIMIT", 0, limit]]);
   const entries = (Array.isArray(due) ? due : []).filter((m): m is string => typeof m === "string");
-  if (entries.length) await redisPipeline([["ZREM", DUE_KEY, ...entries]]);
-  return entries.flatMap((entry) => {
-    const [sid, userId] = entry.split("|");
-    return sid && userId && SNOWFLAKE.test(userId) ? [{ sid, userId }] : [];
+  const parsed = entries.map((entry) => {
+    const [sid, userId, ...rest] = entry.split("|");
+    return { entry, person: sid && userId && rest.length === 0 && SNOWFLAKE.test(userId) ? { sid, userId } : null };
   });
+  const leased = parsed.filter((p) => p.person).map((p) => p.entry);
+  // An entry that is not sid|userId is nobody to check: taken off, never leased again and again (nuvem B's L1 on #4239).
+  const junk = parsed.filter((p) => !p.person).map((p) => p.entry);
+  const until = Math.floor(now / 1000) + DUE_LEASE_SECONDS;
+  const commands: (string | number)[][] = [];
+  if (leased.length) commands.push(["ZADD", DUE_KEY, "XX", ...leased.flatMap((entry) => [until, entry])]);
+  if (junk.length) commands.push(["ZREM", DUE_KEY, ...junk]);
+  if (commands.length) await redisPipeline(commands);
+  return parsed.flatMap((p) => (p.person ? [p.person] : []));
 }
 
 // ---------------------------------------------------------------- trips to Discord's page

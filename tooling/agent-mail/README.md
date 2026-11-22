@@ -42,7 +42,7 @@ node ~/.agent-mail/agent-mail.mjs watch --as "Claude 2" --also review,enqueue
 git for-each-ref --format='%(refname)' refs/correio refs/agent-mail | xargs -r -n1 git update-ref -d
 ```
 
-Ela também avisa quando roda de uma pasta temporária que todos podem escrever (`/tmp`): instale sempre em `~/.agent-mail`.
+Na primeira vez, o repositório próprio herda a marca do só-acrescentar que estiver no clone, para que uma reescrita feita antes da troca de versão ainda seja denunciada. Ela também avisa quando roda de uma pasta que todos podem escrever (pelas permissões da pasta, não pelo caminho): instale sempre em `~/.agent-mail`.
 
 O Codex não mantém vigia em segundo plano. Ele roda `read`, `list-reviews` e `list-queue` a cada tarefa de hora em hora, então uma mensagem para ele pode levar até 1 hora.
 
@@ -154,7 +154,7 @@ O "reprova antes" é a mesma corrida contra a versão auditada (aff69c9, do ramo
 mkdir -p ~/.agent-mail/auditada && git --git-dir ~/.agent-mail/correio.git show aff69c95:agent-mail.mjs > ~/.agent-mail/auditada/agent-mail.mjs && node tooling/agent-mail/audit-cases.mjs ~/.agent-mail/auditada/agent-mail.mjs --expect fail
 ```
 
-Resultado em 22/11/2026, com 150 verificações:
+Resultado em 22/11/2026, com 153 verificações:
 
 | Caso | Gravidade | Verificações | Falham na aff69c9 | Falham agora |
 | --- | --- | --- | --- | --- |
@@ -163,11 +163,11 @@ Resultado em 22/11/2026, com 150 verificações:
 | A3 | ALTO | 3 | 3 | 0 |
 | A4 | ALTO | 9 | 8 | 0 |
 | A5 | ALTO | 6 | 6 | 0 |
-| A6 | MÉDIO | 5 | 4 | 0 |
+| A6 | MÉDIO | 5 | 5 | 0 |
 | A7 | MÉDIO | 7 | 5 | 0 |
 | A8 | MÉDIO | 3 | 3 | 0 |
 | A9 | MÉDIO | 15 | 15 | 0 |
-| A10 | MÉDIO | 15 | 13 | 0 |
+| A10 | MÉDIO | 15 | 14 | 0 |
 | A11 | LEVE | 4 | 2 | 0 |
 | A12 | LEVE | 1 | 1 | 0 |
 | A13 | LEVE | 2 | 2 | 0 |

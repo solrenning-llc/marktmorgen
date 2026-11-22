@@ -16,6 +16,8 @@ import {
   confirmStockAlert,
   confirmedForRestock,
   forgetStockAlertPerson,
+  stillWaiting,
+  stockAlertAddresses,
   leaveStockAlert,
   stockAlertsOf,
 } from "@/lib/stock-alerts";
@@ -279,6 +281,22 @@ async function main(): Promise<void> {
     const left = redis.run(["TTL", deadKey]) as number;
     is("the new ask did not lengthen the list past the old place's own end (65 days), let alone a year", left <= 65 * 86_400 + 5 && left > 64 * 86_400, true);
     is("the old place is still on the restock list", (await confirmedForRestock(store, pid2)).includes("old@example.com"), true);
+  }
+
+  part("A confirmed place that has ended is not waiting any more, for the restock job's readers too");
+  {
+    const endKey = `nl:sa:${sid}:${pid}`;
+    redis.run(["DEL", endKey, `${endKey}:x`]);
+    const gone = await askStockAlert({ store, productId: pid, email: "gone@example.com", left: 0 });
+    const live = await askStockAlert({ store, productId: pid, email: "live@example.com", left: 0 });
+    if (!gone.ok || !live.ok) throw new Error("not asked");
+    await confirmStockAlert(gone.confirm, store);
+    await confirmStockAlert(live.confirm, store);
+    // gone@ confirmed a year and a day ago: its place has ended.
+    const kept = JSON.parse(redis.run(["HGET", endKey, "gone@example.com"]) as string) as Record<string, number>;
+    redis.run(["HSET", endKey, "gone@example.com", JSON.stringify({ ...kept, x: Math.floor(Date.now() / 1000) - 86_400 })]);
+    is("the restock job's list says only the live place is confirmed", (await stockAlertAddresses(store, pid)).map((a) => [a.email, a.confirmed]).sort(), [["gone@example.com", false], ["live@example.com", true]]);
+    is("and just before an email, only the live place is still waiting", (await stillWaiting(store, pid, ["gone@example.com", "live@example.com"])).map((t) => t !== null), [false, true]);
   }
 
   done();

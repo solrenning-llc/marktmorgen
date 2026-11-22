@@ -9,7 +9,9 @@
  *     with none the page says the readings are used, never zero;
  *   - one reading asks for the year's balance transactions with their
  *     sources, at most SALE_FEES_PAGES pages; when the pages run out the
- *     reading says how far back it reached, never further;
+ *     reading says how far back it reached, never further; the same when
+ *     the reading's priced time runs out after a page was read;
+ *   - the export route gives no file from a reading short of the year (409);
  *   - a page in any other shape, or a Stripe error, fails the reading: it
  *     stays counted, and the last copy is shown as failed, or nothing;
  *   - the copy keeps only the money fields of each line: never a buyer's
@@ -27,6 +29,11 @@ import {
   keptSaleFees,
 } from "@/lib/sale-fees-reading";
 import { STRIPE_LIST_VERSION } from "@/lib/stripe-list";
+import { exportReachRefusal } from "@/lib/sale-fees-view";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
+import { GET as exportFees } from "@/app/api/store/fees/export/route";
+import { NextRequest } from "next/server";
 import { setRedisConfigured, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -39,13 +46,15 @@ type Asked = { url: string; account: string | null; method: string; version: str
 let asked: Asked[] = [];
 let pages: Array<() => { status: number; body: unknown }> = [];
 let slowMs = 0;
+// The requests answered at once before the slow ones start (0: every one is slow).
+let slowFrom = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const headers = new Headers(init?.headers);
   asked.push({ url: String(input), account: headers.get("Stripe-Account"), method: init?.method ?? "GET", version: headers.get("Stripe-Version") });
   const next = pages.shift();
   if (!next) throw new Error("no page left in the synthetic Stripe");
-  if (slowMs > 0) {
+  if (slowMs > 0 && asked.length > slowFrom) {
     // A page that answers late, as a slow Stripe would: the request is given up when its signal aborts.
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(resolve, slowMs);
@@ -228,6 +237,25 @@ async function main(): Promise<void> {
   is("a page past the reading's time fails it, counted", [slow.kind, (await redis.pipeline([["GET", "nl:salefees:day:stats1:2026-11-11"]]))[0]], ["failed", "1"]);
   is("and the wait stops at the reading's time", Date.now() - slowStarted < SALE_FEES_READ_SHAPE.seconds * 1000 + 250, true);
 
+  part("A reading whose time runs out keeps the pages already read, as when the pages run out (audit iacVn3r)");
+  reset();
+  const partOldest = created - 2000;
+  pages = [page([line("charge", 100, created, charge("ch_t1"), 3), line("charge", 100, partOldest + 1, charge("ch_t2"), 3), line("charge", 100, partOldest, charge("ch_t3"), 3)], true), page([sale], false)];
+  slowFrom = 1;
+  slowMs = SALE_FEES_READ_SHAPE.seconds * 1000 + 300;
+  const partStarted = Date.now();
+  const partial = await keptSaleFees(STORE, NOW);
+  slowMs = 0;
+  slowFrom = 0;
+  is("the first page is kept: read, counted, two pages asked", [partial.kind, asked.length, (await redis.pipeline([["GET", "nl:salefees:day:stats1:2026-11-11"]]))[0]], ["read", 2, "1"]);
+  if (partial.kind === "read") {
+    is("it says it reached only to the second after its oldest line", partial.kept.since, (partOldest + 1) * 1000);
+    is("and keeps no line of that oldest second", partial.kept.lines.map((l) => (l as { created: number }).created), [created, partOldest + 1]);
+  }
+  is("the wait still stops at the reading's time", Date.now() - partStarted < SALE_FEES_READ_SHAPE.seconds * 1000 + 250, true);
+  const keptPartial = await keptSaleFees(STORE, NOW + 60_000);
+  is("the part is kept as the copy, with how far it reached", keptPartial.kind === "read" ? keptPartial.kept.since : null, (partOldest + 1) * 1000);
+
   part("The day's count always carries its expiry (lib/window-count.ts; tests/window-count-expiry.test.ts)");
   // The worst moment: the key expires right after the pipeline's first command. With SET NX then INCRBY the INCRBY made
   // the key again with no expiry, so the count only grew and the store was refused for good; INCRBY then EXPIRE NX
@@ -254,6 +282,34 @@ async function main(): Promise<void> {
   await keptSaleFees(STORE, NOW + 2 * HOUR, true);
   redis.pipeline = real;
   is("the key expired between the two commands: it is gone or has an expiry, never kept forever", await ttl() !== -1, true);
+
+  part("The file is refused from a reading that stopped before the year's first month (the route itself; audit iacVn3r)");
+  // Through the export route as the studio calls it, so the refusal is held by what the route does, not by its text.
+  reset();
+  const OWNER = "sale-fees-export@example.test";
+  await claimHandle(OWNER, "salefeesexport", "Synthetic fees", "");
+  await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, "acct_fixture2", true);
+  const session = await openSession(OWNER);
+  const download = () => exportFees(new NextRequest("https://marktmorgen.com/api/store/fees/export", { method: "GET", headers: { host: "marktmorgen.com", "sec-fetch-site": "same-origin", cookie: `${SESSION_COOKIE}=${session}` } }));
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  for (let p = 0; p < SALE_FEES_PAGES; p += 1) pages.push(page([line("charge", 100, nowSeconds - 3600 - p * 60, charge("ch_x" + p), 3)], true));
+  const shortFile = await download();
+  const shortWords = await shortFile.text();
+  const exportStore = await storeForEmail(OWNER);
+  const kept = exportStore ? await keptSaleFees(exportStore) : null;
+  const expected = kept?.kind === "read" ? exportReachRefusal(kept.kept.since, readingSince(kept.kept.at, "UTC")) : null;
+  is("a reading short of the year gives no file: 409", shortFile.status, 409);
+  is("with the words that say why", [expected !== null, shortWords], [true, expected]);
+  is("and no spreadsheet", shortFile.headers.get("Content-Type"), "text/plain; charset=utf-8");
+  reset();
+  await claimHandle(OWNER, "salefeesexport", "Synthetic fees", "");
+  await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, "acct_fixture2", true);
+  const wholeSession = await openSession(OWNER);
+  pages = [page([line("charge", 5000, nowSeconds - 3600, charge("ch_whole"), 175)], false)];
+  const wholeFile = await exportFees(new NextRequest("https://marktmorgen.com/api/store/fees/export", { method: "GET", headers: { host: "marktmorgen.com", "sec-fetch-site": "same-origin", cookie: `${SESSION_COOKIE}=${wholeSession}` } }));
+  is("a whole reading gives the file", [wholeFile.status, wholeFile.headers.get("Content-Type")], [200, "text/csv; charset=utf-8"]);
 
   done();
 }

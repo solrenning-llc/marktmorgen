@@ -4,8 +4,9 @@
  * their sources (so a refund or dispute names its charge), from the first
  * day of the year's oldest month shown (readingSince, in UTC), newest
  * first, SALE_FEES_PAGE_SIZE a page, at most SALE_FEES_PAGES pages one after
- * another. When the pages run out before the year does, the reading says how
- * far back it reached: the second after its oldest line, whose second may
+ * another, within the reading's priced time (SALE_FEES_READ_SHAPE.seconds).
+ * When the pages or that time run out before the year does, the reading keeps
+ * the pages already read and says how far back it reached: the second after its oldest line, whose second may
  * go on beyond the last page, so its lines are left out; older months are
  * then unknown (lib/sale-fees-months.ts), never lower.
  *
@@ -33,6 +34,7 @@
  *   nl:salefees:day:<statsId>:<day>  the day's readings, two days
  */
 import { readingSince } from "@/lib/earnings-by-month";
+import { NO_TIME_TO_ASK } from "@/lib/fetch-timeout";
 import { nextUtcMidnight } from "@/lib/local-clock";
 import type { ReadShape } from "@/lib/read-ceilings";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -130,8 +132,16 @@ async function readPages(account: string, now: number): Promise<{ lines: Record<
     if (after) query.set("starting_after", after);
     // The pinned version of every list read here (lib/stripe-list.ts), and a ceiling on the bytes read.
     const left = deadline - Date.now();
-    if (left < SALE_FEES_PAGE_MIN_WAIT_MS) throw new PageRefused();
-    const reply = await onAccount("GET", account, `/balance_transactions?${query}`, undefined, STRIPE_LIST_VERSION, undefined, Math.floor(left), SALE_FEES_PAGE_MAX_BYTES);
+    // The reading's time is up: the pages already read are kept, as when the pages run out (audit iacVn3r).
+    if (left < SALE_FEES_PAGE_MIN_WAIT_MS) return reachedBack(lines);
+    let reply: Record<string, unknown>;
+    try {
+      reply = await onAccount("GET", account, `/balance_transactions?${query}`, undefined, STRIPE_LIST_VERSION, undefined, Math.floor(left), SALE_FEES_PAGE_MAX_BYTES);
+    } catch (error) {
+      // Given up because the reading's time ran out: the same; any other failure fails the reading.
+      if (ranOutOfTime(error)) return reachedBack(lines);
+      throw error;
+    }
     const data = reply.data;
     if (reply.object !== "list" || !Array.isArray(data) || typeof reply.has_more !== "boolean" || data.length > SALE_FEES_PAGE_SIZE) throw new PageRefused();
     for (const item of data) {
@@ -142,11 +152,26 @@ async function readPages(account: string, now: number): Promise<{ lines: Record<
     if (!data.length) throw new PageRefused();
     after = (data[data.length - 1] as { id: string }).id;
   }
-  // The pages ran out: the reading reaches back to the second after its oldest line, whose second may go on.
+  return reachedBack(lines);
+}
+
+/**
+ * A reading that stopped before its first day (the pages or its time ran out): it reaches back to the second after its
+ * oldest line, whose second may go on, and says so. Nothing read yet fails it.
+ */
+function reachedBack(lines: Record<string, unknown>[]): { lines: Record<string, unknown>[]; since: number } {
   const times = lines.map((l) => l.created);
   if (!times.length || !times.every((t): t is number => typeof t === "number" && Number.isSafeInteger(t))) throw new PageRefused();
   const oldest = Math.min(...(times as number[]));
   return { lines: lines.filter((l) => (l.created as number) > oldest), since: (oldest + 1) * 1000 };
+}
+
+/** A request given up because its time ran out (lib/fetch-timeout.ts, timed), never a failure Stripe or the network gave. */
+function ranOutOfTime(error: unknown): boolean {
+  if (!(error instanceof TypeError) || error.message !== "fetch failed") return false;
+  const cause = (error as { cause?: unknown }).cause;
+  if (cause instanceof DOMException) return cause.name === "TimeoutError";
+  return cause instanceof Error && cause.message === NO_TIME_TO_ASK;
 }
 
 /** One of the day's readings, taken whole or not at all: "used" past the day's figure, "unknown" when the count cannot be read. */

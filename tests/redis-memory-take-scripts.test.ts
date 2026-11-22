@@ -80,8 +80,9 @@ const CASES: Record<string, Case[]> = {
     { what: "a set", setup: [["SADD", "k:s", "a", "b", "c"]], keys: ["k:s"], argv: [] },
     { what: "no set", setup: [], keys: ["k:s"], argv: [] },
   ],
-  "store-cache-live:v3": [
+  "store-cache-live:v4": [
     { what: "an id key holding its ref", setup: [["SET", "k:live", "ref1"]], keys: ["k:live", "k:erasing", "k:cache"], argv: ["f1", "v", 60, "", "ref1"] },
+    { what: "no id key: erased", setup: [], keys: ["k:live", "k:erasing", "k:cache"], argv: ["f1", "v", 60, "", "ref1"] },
     { what: "an id key holding another ref", setup: [["SET", "k:live", "ref2"]], keys: ["k:live", "k:erasing", "k:cache"], argv: ["f1", "v", 60, "", "ref1"] },
     { what: "an owner's record carrying its statsId", setup: [["SET", "k:live", record("st1")]], keys: ["k:live", "k:erasing", "k:cache"], argv: ["f1", "v", 60, "st1", ""] },
     { what: "an owner's record of another store", setup: [["SET", "k:live", record("st2")]], keys: ["k:live", "k:erasing", "k:cache"], argv: ["f1", "v", 60, "st1", ""] },

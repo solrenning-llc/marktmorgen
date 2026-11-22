@@ -66,19 +66,14 @@ is("(j) merges only on a conflict or a check failing for the base's age", [j.inc
 is("(j) does not merge a clean base (MV (c))", j.includes("com `git merge-tree` limpo e verificações verdes, não junta (MV (c))"), true);
 is("(j) changes the base to main without merging when it is in or closed", j.includes("muda a base para `main`, sem juntar"), true);
 
-part("(bb): the cost-PR window, until option D (coordinator C5-20261119-0150-bb)");
+part("(bb): resolved is what GitHub shows (owner, 20/11/2026)");
 {
   const bb = rule("bb");
   is("the rule is there, after (aa)", [bb.length > 0, ac.indexOf("\n(bb) **") > ac.indexOf("\n(aa) **")], [true, true]);
-  is("cost PRs enter only at the start of a 2-hour window", bb.includes("janela de 2 horas"), true);
-  is("one merge of the generated documents a window, not one an entry", bb.includes("uma vez, depois que a janela fecha"), true);
-  is("the red-main fix and GRAVE or ALTO fixes are never held", [bb.includes("MV (a)"), bb.includes("GRAVE ou ALTO")], [true, true]);
-  is("the window's Store year stays under US$66, measured on the merge", [bb.includes("US$66"), bb.includes("plan-margin")], [true, true]);
-  is("it lasts until option D, which the owner left for Claude 1's return", bb.includes("opção D"), true);
-  // Item 6: the owner's new sentence of 20/11/2026 ("DEVE TAMBEM APARECER COMO RESOLVIDO NO CLAUDE").
-  is("6: it keeps the owner's new sentence", bb.includes("DEVE TAMBEM APARECER COMO RESOLVIDO NO CLAUDE"), true);
-  is("6: resolved means mergeable_state read by REST after the push, not dirty", [bb.includes(".mergeable_state"), bb.includes("diferente de `dirty`"), bb.includes("depois do push")], [true, true, true]);
-  is("6: a clean local merge-tree or an unsent merge does not count", [bb.includes("`git merge-tree` limpo na árvore local"), bb.includes("ainda não enviada")], [true, true]);
-  is("6: every open PR of the author, and a stack against its base and main", [bb.includes("todos os PRs abertos do autor"), bb.includes("contra a própria base e contra o main (aa)")], [true, true]);
+  is("it keeps the owner's new sentence", bb.includes("DEVE TAMBEM APARECER COMO RESOLVIDO NO CLAUDE"), true);
+  is("resolved means mergeable_state read by REST after the push, not dirty", [bb.includes(".mergeable_state"), bb.includes("diferente de `dirty`"), bb.includes("depois do push")], [true, true, true]);
+  is("a clean local merge-tree or an unsent merge does not count", [bb.includes("`git merge-tree` limpo na árvore local"), bb.includes("ainda não enviada")], [true, true]);
+  is("every open PR of the author, and a stack against its base and main", [bb.includes("todos os PRs abertos do autor"), bb.includes("contra a própria base e contra o main (aa)")], [true, true]);
+  is("the cost-PR windows of 19/11 do not come back (overtaken by the on-demand reports and the cost turn)", [bb.includes("janela de 2 horas"), bb.includes("não entram")], [false, true]);
 }
 done();

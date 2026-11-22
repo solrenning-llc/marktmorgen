@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { EXAMPLE_PROCESSING_BPS, termsLastUpdated, vatCanTurnOn, vatFeeWords } from "@/lib/vat-fee-words";
 import { vatOnTop } from "@/lib/eu-vat-amount";
 import { ukVatOnTop } from "@/lib/uk-vat";
-import { vatCollectionCostOf, type VatFxAllowance } from "@/lib/eu-vat-collection-cost";
+import { REVIEWED_VAT_FX_ALLOWANCES, vatCollectionCostOf, type VatFxAllowance } from "@/lib/eu-vat-collection-cost";
 import type { SwitchInput } from "@/lib/vat-registrations";
 import { dynamicPolicy, isDynamicPage, staticPolicy } from "@/lib/csp";
 import { VAT_BODY_REFUSALS, VAT_REFUSED_PLACE_NAMES, VAT_REFUSED_SALES, VAT_SUPPLY_WORDS } from "@/lib/vat-fee-words";
@@ -487,10 +487,19 @@ test("the behavior holds the future: every kind the words promise is charged, ev
       && !euSaleGate({ product: ESS, headers: new Headers({ "x-vercel-ip-country": "DE" }), form: new URLSearchParams(), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES }).ok
       && !euSaleGate({ product: ESS, headers: new Headers({ "x-vercel-ip-country": "DE" }), form: new URLSearchParams({ billing_country: "FR" }), records: COLLECT, vatSwitch: both, now: NOW, rates: RATES }).ok,
     // The EU side reads only euros and pounds, whatever allowance exists; the UK side declares any currency in pounds (coord 85bd's MEDIUM B).
-    "Sales to buyers in the European Union in a currency other than the euro or the pound": () => {
+    "Sales to buyers in the European Union in a currency other than the euro": () => {
+      // The EU path declares in euros: the return currency it asks for is "eur" (spied), so a sale in pounds or dollars
+      // needs an allowance against the euro, and none is reviewed (REVIEWED_VAT_FX_ALLOWANCES), so it is refused.
+      const asked: (string | undefined)[] = [];
+      const spy = (vat: number, currency: string, back?: string) => { asked.push(back); return 10; };
+      for (const currency of ["eur", "gbp"]) applyEuCollect(body({ "line_items[0][price_data][currency]": currency }), { ...input, costsCents: spy, rates: RATES });
       const allowance = (currency: string) => ({ currency, bps: 200, source: "https://example.invalid/fx", checkedOn: "2026-11-01", validThrough: "2026-12-31" });
-      return vatCollectionCostOf(190, "usd", [allowance("usd")], NOW) === null && vatCollectionCostOf(190, "eur", [allowance("eur")], NOW) !== null
-        && vatCollectionCostOf(190, "gbp", [allowance("gbp")], NOW) !== null && vatCollectionCostOf(190, "usd", [allowance("gbp"), { ...allowance("usd"), against: "gbp" as const }], NOW, "gbp") !== null;
+      const reviewedPlusEur = [...REVIEWED_VAT_FX_ALLOWANCES, allowance("eur")];
+      return asked.every((back) => back === "eur") && asked.length === 2
+        && !REVIEWED_VAT_FX_ALLOWANCES.some((a) => a.against === "eur")
+        && vatCollectionCostOf(190, "eur", reviewedPlusEur, NOW, "eur") !== null
+        && ["gbp", "usd", "cad", "aud"].every((currency) => vatCollectionCostOf(190, currency, reviewedPlusEur, NOW, "eur") === null)
+        && vatCollectionCostOf(190, "usd", [allowance("gbp"), { ...allowance("usd"), against: "gbp" as const }], NOW, "gbp") !== null;
     },
     "Any other sale whose VAT, or the cost of receiving it, we cannot work out": () => throws(() => applyEuCollect(body({}), { ...input, costsCents: () => null })),
   };
@@ -508,7 +517,7 @@ test("the places follow the side that is charging (coord 9b51's LEVE 2)", () => 
   assert.ok(eu.refusedPlaces.includes("Spain") && !eu.refusedPlaces.includes("the Isle of Man"), "EU only: no UK place under the European Union");
   assert.match(uk.refusedLead.terms, /consumer in the United Kingdom;/);
   assert.deepEqual(uk.refusedPlaces, ["the Isle of Man"], "UK only: no EU place under the United Kingdom");
-  assert.ok(eu.refused.some((w) => /European Union in a currency other than the euro or the pound/.test(w)), "EU: the currency item");
+  assert.ok(eu.refused.some((w) => /European Union in a currency other than the euro$/.test(w)), "EU: the currency item");
   assert.ok(!uk.refused.some((w) => /European Union/.test(w)), "UK only: no item about the European Union");
   assert.ok(all.refusedPlaces.includes("the French part of Saint Martin") && !all.refusedPlaces.includes("Saint Martin"), "never read as Sint Maarten, which is sold");
   for (const words of [eu, uk, all]) assert.ok(words.terms.includes("Marktmorgen does not refund it.") && words.pricing.includes("Marktmorgen does not refund it."), "the Stripe fee on the VAT is not refunded (IV (j) 2)");

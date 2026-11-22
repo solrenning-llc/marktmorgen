@@ -277,10 +277,11 @@ function collectOn(
   const vat = input.country === "GB" ? uk?.vat ?? null : vatOnTop(total, input.country, input.rates ?? EU_VAT_RATES, now);
   if (!vat || vat.country !== input.country) refuse("no sourced rate, or no sterling rate");
   // A UK sale is declared to HMRC in pounds whatever it was charged in, so its exchange-rate allowance is the pound's
-  // (unit 7); an EU sale keeps its own currency's, as before.
-  const cost = input.country === "GB"
-    ? (input.costsCents ?? euVatCollectionCostCents)(vat!.vatCents, currency, "gbp")
-    : (input.costsCents ?? euVatCollectionCostCents)(vat!.vatCents, currency);
+  // (unit 7). An EU sale is declared in the OSS return in euros (Implementing Regulation 282/2011 art. 61b; Directive
+  // art. 369h), so its return currency is the euro: a sale charged in pounds or any other currency needs its own
+  // reviewed allowance against the euro for the gap to the period rate, and without one it is refused (#5086, Claude 1
+  // f9afa7's second point; coordinator's option 1).
+  const cost = (input.costsCents ?? euVatCollectionCostCents)(vat!.vatCents, currency, input.country === "GB" ? "gbp" : "eur");
   if (cost === null || !Number.isSafeInteger(cost) || cost < 0) refuse("the cost of receiving the VAT is unknown");
   const mark = input.country === "GB" ? "uk_vat" : "eu_vat";
   if (applyEuVatLines(body, { vat: vat!, recurring: false, vatCostsCents: cost, currency, mark }) !== "ok") refuse("the VAT line");

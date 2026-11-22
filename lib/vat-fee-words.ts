@@ -205,7 +205,7 @@ export const VAT_REFUSED_SALES: readonly { words: string; checks: readonly strin
   { words: VAT_REFUSED_PLACES_WORDS, checks: ["euCheckout"] },
   { words: "A bundle that combines a live call with something delivered online", checks: ["consumerGate"] },
   { words: "A sale where the buyer's internet address or billing address shows no country, or the two show different countries", checks: ["checkoutEvidence"] },
-  { words: "Sales to buyers in the European Union in a currency other than the euro or the pound", checks: ["the cost of receiving the VAT is unknown"], side: "EU" },
+  { words: "Sales to buyers in the European Union in a currency other than the euro", checks: ["the cost of receiving the VAT is unknown"], side: "EU" },
   { words: "Any other sale whose VAT, or the cost of receiving it, we cannot work out", checks: ["no sourced rate, or no sterling rate", "the cost of receiving the VAT is unknown"] },
 ];
 

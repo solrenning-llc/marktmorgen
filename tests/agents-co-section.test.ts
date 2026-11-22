@@ -33,6 +33,9 @@ is("the install command takes the tool from main and installs it only with the r
 is("the watcher, waking on mail and on review or queue requests", co.includes('node ~/.agent-mail/agent-mail.mjs watch --as "Claude N" --also review,enqueue'), true);
 is("the correio branch holds only data; the code is reviewed in tooling/agent-mail/", [/O ramo `correio` guarda só dados/.test(co), /`tooling\/agent-mail\/` do main deste repositório, revisado por PR/.test(co)], [true, true]);
 is("the Codex reads it at each hourly task", /Codex[^.]*hora em hora/.test(co), true);
+is("the Codex also reads it before each unit and at least every 15 minutes while working (owner, 22/11/2026)", /Codex[^.]*antes de cada unidade nova e pelo menos a cada 15 minutos/.test(co), true);
+is("a family without signal for more than 2 hours counts as without quota (OWNER-20261122-0121-MAIL-AVAILABILITY)", /sem sinal há mais de 2 horas é tratada como sem cota/.test(co), true);
+is("the percent of quota and the low-quota rule are taught", [co.includes("`set-quota --remaining 35 --renews <data>`"), /com 10% ou menos, o correio avisa as outras famílias/.test(co)], [true, true]);
 
 part("everything the owner asked it to cover");
 for (const command of ["send", "ack", "request-review", "claim-review", "complete-review", "request-enqueue", "claim-enqueue", "complete-enqueue",

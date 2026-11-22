@@ -618,7 +618,7 @@ console.log("step 6: the private mailbox never lands in the public clone (A14)")
     run(["read", "--as", "Claude 3 Z"], novo);
     for (const ref of g(["for-each-ref", "--format=%(refname)", "refs/correio", "refs/agent-mail"], W).split("\n").filter(Boolean)) g(["update-ref", "-d", ref], W);
     const re9 = join(T, `rewrite9-${Math.random().toString(16).slice(2)}`);
-    g(["clone", "-q", "-b", "correio", join(T, "mail9.git"), re9]); g(["reset", "-q", "--hard", "HEAD~1"], re9);
+    g(["clone", "-q", "-b", "correio", join(T, "mail9.git"), re9]); g(["reset", "-q", "--hard", `${a9}~1`], re9); // before the anchor itself: read and watch also write a signal (#5080)
     g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "rewritten"], re9); g(["push", "-q", "-f", "origin", "HEAD:correio"], re9);
     r = run(["watch", "--as", "Claude 3 Z", "--seconds", "1"], novo);
     is("read first, the clone's refs deleted as warned, then the watch: the rewrite made before the switch is still caught (MEDIUM on #5117)", /ALERTA: o ramo correio não só acrescentou: o ramo foi reescrito/.test(r.out), r.out);
@@ -651,6 +651,115 @@ console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");
   g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "raw delete"], cl); g(["push", "-q", "origin", "HEAD:correio"], cl);
   r = run(["check-append-only"]);
   is("a commit that deletes a request is reported, with the file (proof of concept 3)", !r.ok && new RegExp(`APAGOU ${pedidoAlvo.replace(/[.]/g, "[.]")}`).test(r.out), r.out);
+}
+
+console.log("availability: last signal, percent of quota, Codex preference (owner, OWNER-20261122-0121-MAIL-AVAILABILITY)");
+{
+  // A mailbox whose history starts 4 hours ago, so "no signal for more than 2 hours" can be observed.
+  const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
+  const M2 = join(T, "mail2.git"); g(["init", "-q", "--bare", "mail2.git"]);
+  const W2 = join(T, "w2"); g(["init", "-q", "w2"]);
+  const env2 = { CORREIO_REPO: M2 };
+  const dated = (min) => ({ ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t", GIT_AUTHOR_DATE: ago(min), GIT_COMMITTER_DATE: ago(min) });
+  execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "init"], { cwd: W2, env: dated(240) });
+  g(["push", "-q", M2, "HEAD:refs/heads/correio"], W2);
+  // A commit written `min` minutes ago with the given trailers, as the tool writes them.
+  const old = (path, text, min, trailers) => {
+    g(["pull", "-q", M2, "correio"], W2);
+    mkdirSync(join(W2, path, ".."), { recursive: true }); writeFileSync(join(W2, path), text); g(["add", "."], W2);
+    execFileSync("git", ["commit", "-q", "-m", `old\n\n${trailers}`], { cwd: W2, env: dated(min) });
+    g(["push", "-q", M2, "HEAD:refs/heads/correio"], W2);
+  };
+  const q2 = () => run(["list-quotas"], env2).out;
+  old("estado/claude-3/20261121T000000Z-claude-3-x-aa01", "Cota: com\nPor: Claude 3 X\n", 180, "Mail-Session: session_014YNUxAAAAAAAAAAAAAAAAA (claude-3)\nMail-From: Claude 3 X");
+  old("sinal/claude-7/20261121T000000Z-claude-7-x-aa02", "Claude 7 X\n", 30, "Mail-Session: session_01HfzozAAAAAAAAAAAAAAAAA (claude-7)\nMail-From: Claude 7 X");
+  // Item 1: list-quotas shows each family's last signal; more than 2 hours without one counts as no quota.
+  r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 4 Z", "--subject", "s", "--text", "oi"], { ...env2, ...as("c2") });
+  is("list-quotas shows the last signal of a family that just wrote", /claude-2: com cota; .*último sinal há 0 min/.test(q2()), q2());
+  is("a family that last wrote 3 hours ago is shown without quota, for lack of signal", /claude-3: SEM COTA \(sem sinal há mais de 2 h\)/.test(q2()), q2());
+  is("a family that wrote 30 minutes ago keeps its quota", /claude-7: com cota; .*último sinal há 3\d min/.test(q2()), q2());
+  is("a family with no signal in a history that covers 2 hours is also without quota", /claude-5: SEM COTA \(sem sinal/.test(q2()), q2());
+  is("in a mailbox younger than 2 hours, nobody is without quota for lack of signal", !/sem sinal/.test(run(["list-quotas"]).out), run(["list-quotas"]).out);
+  // The preference for a family without signal falls at once: another family takes the review now.
+  const H31 = pr(31, "f31.txt", "31\n");
+  run(["request-review", "--from", "Claude 6", "--pr", "31", "--sha", H31.slice(0, 10), "--to", "Claude 3", "--text", "t"], { ...env2, ...as("c6") });
+  r = run(["claim-review", "--as", "Claude 4 Z"], { ...env2, ...as("c4") });
+  is("the preference for a family without signal falls at once: another family takes the review", r.ok && /pegou:/.test(r.out), r.out);
+  // The watch writes a signal, at most one every 15 minutes per family.
+  r = run(["watch", "--as", "Claude 3 Z", "--seconds", "1"], { ...env2, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+  is("the watch writes a signal: the family is back with quota", /claude-3: com cota; .*último sinal há 0 min/.test(q2()), r.out + q2());
+  run(["watch", "--as", "Claude 3 Y", "--seconds", "1"], { ...env2, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxBBBBBBBBBBBBBBBBB" });
+  const nSinais = () => g(["ls-tree", "-r", "--name-only", "refs/heads/correio", "sinal/claude-3"], M2).split("\n").filter(Boolean).length;
+  is("a second watch of the same family within 15 minutes writes no new signal", nSinais() === 1, String(nSinais()));
+  // The Codex, outside the cloud, signals by reading.
+  r = run(["read", "--as", "Codex"], env2);
+  is("the Codex's read writes its signal, under its declared name", /codex: com cota; .*último sinal há 0 min/.test(q2()), r.out + q2());
+  // Item 2: the percent of quota and the renewal date.
+  r = run(["set-quota", "--as", "Claude 2 Z", "--remaining", "35", "--renews", "2099-11-29T10:00-03:00"], { ...env2, ...as("c2") });
+  is("set-quota takes the percent left and the renewal date", r.ok && /claude-2: com cota; resta 35% até 2099-11-29T13:00:00\.000Z/.test(q2()), r.out + q2());
+  r = run(["set-quota", "--as", "Claude 2 Z", "--remaining", "35"], { ...env2, ...as("c2") });
+  is("a percent without the renewal date is refused", !r.ok && /--renews/.test(r.out), r.out);
+  r = run(["set-quota", "--as", "Claude 2 Z", "--remaining", "8", "--renews", "2099-11-29T10:00-03:00"], { ...env2, ...as("c2") });
+  is("at 10% or less the family shows a low quota", r.ok && /claude-2: COTA BAIXA; resta 8%/.test(q2()), r.out + q2());
+  const aviso = run(["read", "--as", "Claude 4 Z"], { ...env2, ...as("c4") }).out;
+  is("the other families are told when a quota gets low", /Cota baixa: Claude 2 com 8%/.test(aviso), aviso);
+  run(["set-quota", "--as", "Claude 2 Z", "--remaining", "6", "--renews", "2099-11-29T10:00-03:00"], { ...env2, ...as("c2") });
+  is("a lower percent while already low is not announced again", (run(["read", "--as", "Claude 5 Z"], { ...env2, ...as("c5") }).out.match(/Cota baixa: Claude 2/g) ?? []).length === 1, run(["read", "--as", "Claude 5 Z"], { ...env2, ...as("c5") }).out);
+  // A long review (more than 400 lines outside tests) is not handed to a family with a low quota; a short one is.
+  const H32 = pr(32, "big.txt", `${Array.from({ length: 450 }, (_, i) => `linha ${i}`).join("\n")}\n`);
+  run(["request-review", "--from", "Claude 6", "--pr", "32", "--sha", H32.slice(0, 10), "--text", "longa"], { ...env2, ...as("c6") });
+  r = run(["claim-review", "--as", "Claude 2 Z"], { ...env2, ...as("c2") });
+  is("a long review is not handed to a family with a low quota", /nada para pegar/.test(r.out), r.out);
+  const H33 = pr(33, "big.test.ts", `${Array.from({ length: 450 }, (_, i) => `// ${i}`).join("\n")}\n`);
+  run(["request-review", "--from", "Claude 6", "--pr", "33", "--sha", H33.slice(0, 10), "--text", "só testes"], { ...env2, ...as("c6") });
+  r = run(["claim-review", "--as", "Claude 2 Z"], { ...env2, ...as("c2") });
+  is("a review whose lines are tests only is short, and goes to the low family", r.ok && /pegou:/.test(r.out) && /#33|PR: 33/.test(r.out), r.out);
+  r = run(["claim-review", "--as", "Claude 4 Z"], { ...env2, ...as("c4") });
+  is("the long review goes to a family with quota", r.ok && /PR: 32/.test(r.out), r.out);
+  // Item 3: a preference for the Codex holds 30 minutes, then any other family with quota takes the review.
+  run(["read", "--as", "Codex"], env2);
+  const H34 = pr(34, "f34.txt", "34\n");
+  run(["request-review", "--from", "Claude 6", "--pr", "34", "--sha", H34.slice(0, 10), "--to", "Codex", "--text", "t"], { ...env2, ...as("c6") });
+  r = run(["claim-review", "--as", "Claude 4 Z"], { ...env2, ...as("c4") });
+  is("a fresh preference for the Codex, with signal, holds", /nada para pegar/.test(r.out), r.out);
+  const stamp = new Date(Date.now() - 31 * 60000).toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  const H35 = pr(35, "f35.txt", "35\n");
+  old(`revisao/pedidos/${stamp}-claude-6-ab35.md`, `Tipo: revisão\nPR: 35\nHead: ${H35.slice(0, 10)}\nAutor: Claude 6\nPreferência: Codex\nCommits de: codex\nLinhas fora dos testes: 1\nId: ${stamp}-claude-6-ab35\n\nt\n`, 31, "Mail-From: Claude 6");
+  r = run(["claim-review", "--as", "Claude 4 Z"], { ...env2, ...as("c4") });
+  is("after 30 minutes the preference for the Codex no longer holds: another family takes it", r.ok && /PR: 35/.test(r.out), r.out);
+  run(["set-quota", "--as", "Claude 2 Z", "--remaining", "0", "--renews", "2099-11-29T10:00-03:00"], { ...env2, ...as("c2") });
+  is("0% is without quota until the renewal", /claude-2: SEM COTA até 2099-11-29T13:00:00\.000Z/.test(q2()), q2());
+}
+
+console.log("a busy mailbox: a write that loses the race to another agent tries again quickly (22/11/2026, 166 commits in 10 minutes)");
+{
+  // A mailbox whose server moves the branch under the first N pushes (a pre-receive hook commits on top of the tip), so
+  // each of those pushes is rejected exactly as when another agent wrote first. race-left holds N.
+  const M3 = join(T, "mail3.git"); g(["init", "-q", "--bare", "mail3.git"]);
+  g(["push", "-q", M3, "refs/heads/correio:refs/heads/correio"], join(T, "mail.git"));
+  writeFileSync(join(M3, "hooks", "pre-receive"), `#!/bin/sh
+[ -f race-left ] || exit 0
+n=$(cat race-left); [ "$n" -gt 0 ] || exit 0
+echo $((n-1)) > race-left
+unset GIT_QUARANTINE_PATH GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+tip=$(git rev-parse refs/heads/correio)
+c=$(GIT_AUTHOR_NAME=x GIT_AUTHOR_EMAIL=x@x GIT_COMMITTER_NAME=x GIT_COMMITTER_EMAIL=x@x git commit-tree "$tip^{tree}" -p "$tip" -m race)
+git update-ref refs/heads/correio "$c" "$tip"
+exit 0
+`); chmodSync(join(M3, "hooks", "pre-receive"), 0o755);
+  const left = () => readFileSync(join(M3, "race-left"), "utf8").trim();
+  const caixa3 = () => g(["ls-tree", "-r", "--name-only", "refs/heads/correio", "caixas/claude-3-z"], M3).split("\n").filter(Boolean).length;
+  const antes3 = caixa3();
+  writeFileSync(join(M3, "race-left"), "8\n");
+  const t0 = Date.now();
+  r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "race", "--text", "x"], { ...as("c2"), CORREIO_REPO: M3 });
+  is("a write that loses the race 8 times in a row still goes through", r.ok && /enviada/.test(r.out) && left() === "0", `${r.out} left=${left()}`);
+  is("and it retries quickly, not with waits of seconds (under 15 s for 8 lost races)", Date.now() - t0 < 15000, `${Date.now() - t0} ms`);
+  is("the message is in the mailbox once", caixa3() === antes3 + 1, `${antes3} -> ${caixa3()}`);
+  writeFileSync(join(M3, "race-left"), "1000\n");
+  r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "race 2", "--text", "x"], { ...as("c2"), CORREIO_REPO: M3 });
+  is("a race that never ends stops after 30 tries and says why", !r.ok && /30 por o correio ter andado no meio/.test(r.out), r.out);
+  writeFileSync(join(M3, "race-left"), "0\n");
 }
 
 console.log("version: the copy's SHA-256 against the reviewed one on main (owner, OWNER-20261121-1904, step 1)");
@@ -687,6 +796,39 @@ spawnSync("node", [TOOL, "list-switches"], { cwd: join(T, "w"), env: { ...base, 
 const linhas = readFileSync(trace, "utf8").split("\n").filter((l) => /git(\.c:\d+)?\s.*trace: (built-in|exec): git fetch/.test(l) || /trace: built-in: git fetch/.test(l));
 is("the version check runs a fetch (so the next check means something)", linhas.length > 0, readFileSync(trace, "utf8").slice(0, 600));
 is("no git fetch of the tool uses --depth (review of Claude 1 A)", !linhas.some((l) => /--depth/.test(l)), linhas.filter((l) => /--depth/.test(l)).join("\n").slice(0, 600));
+
+console.log("secrets never printed: a credential in the mailbox address stays out of every message (CodeQL alert 257 on #5080)");
+{
+  const TOKEN = "ghp_FAKEtoken0123456789abcdefABCDEF0000";
+  comHash(meu); // the copy is the reviewed one for real, so a write and the watch get as far as git
+  const longe = { CORREIO_REPO: `https://x-access-token:${TOKEN}@127.0.0.1:9/mail.git`, CORREIO_GIT_DIR: join(T, "dir-secret.git"), CORREIO_SEM_VERSAO: "" };
+  r = run(["read", "--as", "Claude 2 Z"], { ...as("c2"), ...longe });
+  is("a failed read does not print the token in the mailbox address (CodeQL 257)", !r.ok && !r.out.includes(TOKEN) && !/x-access-token:[^*]/.test(r.out), r.out);
+  r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "x"], { ...as("c2"), ...longe });
+  is("a failed send gets as far as git and does not print the token either (CodeQL 257)", !r.ok && !/escrita recusada/.test(r.out) && !r.out.includes(TOKEN), r.out);
+  r = run(["watch", "--as", "Claude 2 Z", "--seconds", "1"], { ...as("c2"), ...longe });
+  is("the watch, failing to reach the mailbox, says so and does not print the token (CodeQL 257)", /vigia: /.test(r.out) && !r.out.includes(TOKEN), r.out);
+  const mod = await import(TOOL);
+  const limpo = mod.semSegredo?.(`fetch https://user:${TOKEN}@github.com/x.git; Authorization: Bearer abc.def; http.extraheader=AUTHORIZATION: basic Zm9v; ${TOKEN}; github_pat_11AAAAAAAAAAAAAAAAAAAA_bbbb`) ?? "";
+  is("semSegredo removes the URL credential, a bearer header, an extraheader and bare GitHub tokens (CodeQL 257)",
+    limpo && !limpo.includes(TOKEN) && !/abc\.def|Zm9v|github_pat_11/.test(limpo) && /https:\/\/\*\*\*@github\.com\/x\.git/.test(limpo), limpo);
+  const eg = mod.erroDoGit?.(["fetch", "-q", `https://x-access-token:${TOKEN}@github.com/o/correio.git`, "+refs/heads/correio:refs/x"],
+    { status: 128, stderr: "fatal: unable to access 'https://github.com/o/correio.git/': 403\n", message: `Command failed: git fetch -q https://x-access-token:${TOKEN}@github.com/o/correio.git` });
+  is("a failed git becomes an error without the command line: subcommand, exit code and git's own last line only (CodeQL 257 at line 2013)",
+    eg && eg.message === "git fetch falhou (código 128): fatal: unable to access 'https://github.com/o/correio.git/': 403" && eg.status === 128 && !eg.message.includes(TOKEN) && !/Command failed|refs\/heads/.test(eg.message), eg?.message);
+  is("a subcommand outside the tool's list is named 'comando', never taken from the arguments (CodeQL 257)", mod.erroDoGit?.([`https://${TOKEN}@x`], { status: 1 })?.message === "git comando falhou (código 1)");
+  // CodeQL 257 at line 2028: the session comes from CLAUDE_CODE_REMOTE_SESSION_ID, a sensitive name for CodeQL; no error
+  // message carries it, and the family named comes from the fixed list.
+  r = run(["send", "--from", "Claude 3 X", "--to", "Claude 4 X", "--subject", "s", "--text", "x"], as("c2"));
+  is("the identity error names the family, never the session id read from the environment (CodeQL 257)",
+    !r.ok && /esta sessão é da família claude-2/.test(r.out) && !r.out.includes("01FR6Z1Q87"), r.out);
+  r = run(["set-switch", "--as", "Claude 2 X", "--name", "ready-check", "--on", "--reason", "t", "--request", "x"], as("c2"));
+  is("the privileged-action refusal does not print the session id either (CodeQL 257)",
+    !r.ok && /esta sessão não é nenhuma das duas/.test(r.out) && !r.out.includes("01FR6Z1Q87"), r.out);
+  is("familiaDaLista returns a family from the fixed list, and 'desconhecida' for anything else (CodeQL 257)",
+    mod.familiaDaLista?.("claude-2") === "claude-2" && mod.familiaDaLista?.("01FR6Z1Q87JZvT") === "desconhecida");
+  is("semSegredo keeps an ordinary message as it is (CodeQL 257)", mod.semSegredo?.("já existe no correio: prs/3/0; nada é reescrito") === "já existe no correio: prs/3/0; nada é reescrito");
+}
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);
 process.exitCode = falhas ? 1 : 0;

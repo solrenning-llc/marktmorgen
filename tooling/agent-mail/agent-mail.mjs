@@ -286,6 +286,29 @@ export function naoLidas(eu, commit = buscar()) {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/**
+ * Passo 6 (A13): as mensagens da caixa de `eu` (e da família) que só foram confirmadas por escrita não identificada nas
+ * últimas 24 horas. Quem lê identificado é avisado delas, sem ser acordado: o Claude 1 no computador do dono e o Codex
+ * confirmam assim de propósito, mas outro também poderia, com o nome da família.
+ */
+export function confirmadasSemIdentidade(eu, agora = new Date(), commit = buscar()) {
+  const me = slug(eu), fam = familia(eu);
+  const acks = new Map();
+  for (const l of arquivos(commit, "lidas")) {
+    if (familia(l.split("/")[1]) !== fam) continue;
+    const id = idDe(l), texto = conteudo(commit, l), s = sessaoDe(texto);
+    const quando = new Date(texto.split("\n")[0]);
+    const x = acks.get(id) ?? { identificada: false, semId: false, quando: null };
+    if (!s || s.identificada) x.identificada = true;
+    else { x.semId = true; x.quando = Number.isNaN(quando.getTime()) ? null : quando; }
+    acks.set(id, x);
+  }
+  return [...arquivos(commit, `caixas/${me}`), ...(me !== fam ? arquivos(commit, `caixas/${fam}`) : [])]
+    .filter((c) => c.endsWith(".md")).map((c) => ({ id: idDe(c), caminho: c }))
+    .filter(({ id }) => { const x = acks.get(id); return x && x.semId && !x.identificada && x.quando && agora - x.quando < 24 * 3600000; })
+    .map(({ id, caminho }) => ({ id, assunto: campo(conteudo(commit, caminho), "Assunto") }));
+}
+
 export function confirmar({ eu, ids, agora = new Date() }) {
   // Duas sessões da mesma família confirmando a mesma mensagem ao mesmo tempo: relê e tenta de novo, sem as já gravadas.
   for (let tentativa = 0; ; tentativa++) {
@@ -304,7 +327,9 @@ function confirmarUmaVez({ eu, ids, agora }) {
   ids = ids.filter((id) => !ja.has(id));
   if (!ids.length) return 0;
   const novos = {};
-  for (const id of ids) novos[`lidas/${me}/${id}`] = `${agora.toISOString()}\n`;
+  // Passo 6 (A13): a confirmação guarda a sessão que a fez; uma não identificada sai com aviso, e a família é avisada ao ler.
+  for (const id of ids) novos[`lidas/${me}/${id}`] = `${agora.toISOString()}\nSessão: ${linhaSessao()}\n`;
+  if (!sessaoAtual()) console.error(`ATENÇÃO: esta confirmação fica como não identificada (fora da nuvem do Claude Code); a família de ${eu} vai ver, ao ler identificada, que ${ids.length === 1 ? "a mensagem foi confirmada" : "as mensagens foram confirmadas"} assim.`);
   acrescentar(novos, `Lidas por ${eu}: ${ids.length}`);
   return ids.length;
 }
@@ -367,8 +392,9 @@ function campoCabecalho(texto, nome) {
   return new RegExp(`^${nome}: (.*)$`, "m").exec(cabecalho)?.[1]?.trim() ?? "";
 }
 
+// Passo 6 (A12): todo campo vem do cabeçalho; uma linha "Exclui:" ou "Preferência:" no texto livre nunca vira campo.
 function campo(texto, nome) {
-  return new RegExp(`^${nome}: (.*)$`, "m").exec(texto)?.[1]?.trim() ?? "";
+  return campoCabecalho(texto, nome);
 }
 
 /** Os pedidos de um tipo, na ordem de chegada, com o estado de cada um. */
@@ -812,17 +838,21 @@ export function mudarChave({ nome, eu, ligar, motivo = "", pedido = "", dono = "
 const LINK_REVISAO = (pr) => new RegExp(`^https://github\\.com/solrenning-llc/marktmorgen/pull/${pr}#(issuecomment|pullrequestreview)-(\\d+)$`);
 
 /** Confere no GitHub (API REST, pelo gh) que o link é um comentário ou revisão deste PR que cita o head. null = não conferido. */
-export function conferirLink(link, pr, sha) {
+// Passo 6 (A15): o comentário precisa trazer o veredito dado e vir de quem trabalha no repositório.
+const QUEM_TRABALHA = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+export function conferirLink(link, pr, sha, resultado = null) {
   if (testeLigado("CORREIO_SEM_GH")) return null;
   const m = LINK_REVISAO(pr).exec(link);
   if (!m) return { ok: false, motivo: "link fora do formato" };
   try {
     const rota = m[1] === "issuecomment" ? `repos/solrenning-llc/marktmorgen/issues/comments/${m[2]}` : `repos/solrenning-llc/marktmorgen/pulls/${pr}/reviews/${m[2]}`;
-    const saida = execFileSync("gh", ["api", rota, "--jq", "[.html_url, (.body // \"\"), (.commit_id // \"\")] | @json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
-    const [url, corpo, commitId] = JSON.parse(saida.trim()); // o gh imprime o texto do @json sem aspas: uma camada só
+    const saida = execFileSync("gh", ["api", rota, "--jq", "[.html_url, (.body // \"\"), (.commit_id // \"\"), (.author_association // \"\")] | @json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
+    const [url, corpo, commitId, associacao] = JSON.parse(saida.trim()); // o gh imprime o texto do @json sem aspas: uma camada só
     if (!String(url).includes(`/pull/${pr}`)) return { ok: false, motivo: "o link não é deste PR" };
     const curto = String(sha).slice(0, 10);
     if (!String(corpo).includes(curto) && !String(commitId).startsWith(curto)) return { ok: false, motivo: `o comentário não cita o head ${curto}` };
+    if (resultado && !new RegExp(`\\b${resultado}\\b`).test(String(corpo))) return { ok: false, motivo: `o comentário não traz o veredito ${resultado}` };
+    if (!QUEM_TRABALHA.has(String(associacao))) return { ok: false, motivo: `o comentário não é de quem trabalha no repositório (${associacao || "autor desconhecido"})` };
     return { ok: true, motivo: "" };
   } catch {
     return null;
@@ -836,7 +866,7 @@ export function registrarRevisao({ eu, pr, sha, resultado, link, agora = new Dat
   if (!/^(READY|CHANGES)$/.test(String(resultado ?? ""))) throw new Error("--result deve ser READY ou CHANGES");
   if (!LINK_REVISAO(pr).test(String(link ?? ""))) throw new Error(`--link é obrigatório: o endereço do comentário da revisão no PR #${pr} (https://github.com/solrenning-llc/marktmorgen/pull/${pr}#issuecomment-N)`);
   const atual = headAtual(pr);
-  const lk = conferirLink(link, pr, sha);
+  const lk = conferirLink(link, pr, sha, resultado);
   const carimbo = agora.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
   const id = `${carimbo}-${slug(eu)}-${randomBytes(2).toString("hex")}`;
   const corpo = [`Tipo: registro de revisão`, `PR: ${pr}`, `Head: ${sha}`, `Resultado: ${resultado}`, `Por: ${eu}`, `Link: ${link}`,
@@ -1530,7 +1560,13 @@ async function main(argv) {
     for (const s of sem) console.log(`ATENÇÃO: ${s.nome} está sem cota${s.ate ? ` até ${s.ate.toISOString()}` : ""}: pode não ler tão cedo. Com cota: ${com.join(", ") || "nenhuma outra declarada"}.`);
   } else if (comando === "ler") {
     if (!o.eu) throw new Error("--as é obrigatório");
-    const lista = naoLidas(o.eu);
+    const commit = buscar();
+    const lista = naoLidas(o.eu, commit);
+    if (sessaoAtual()) {
+      for (const m of confirmadasSemIdentidade(o.eu, new Date(), commit)) {
+        console.log(`ATENÇÃO: ${m.id} ("${m.assunto}") foi confirmada só por escrita não identificada nas últimas 24 horas; se não foi a sua família, leia-a no correio.`);
+      }
+    }
     if (!lista.length) console.log("nenhuma mensagem nova");
     else { mostrar(lista); console.log(`\n${lista.length} não lida(s). Confirme com: node agent-mail.mjs ack --as "${o.eu}" ${lista.map((m) => m.id).join(" ")}`); }
   } else if (comando === "confirmar") {

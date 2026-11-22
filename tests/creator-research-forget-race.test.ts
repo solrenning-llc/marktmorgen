@@ -3,11 +3,14 @@
  * outlives the deletion (Codex L-20261120-0837, #5010 row 41). forgetResearchPerson (lib/creator-research-store.ts)
  * sets a mark under a hash of the address before its first walk and lifts it only once a walk found none of theirs;
  * KEEP_RESEARCH_ANSWER (lib/creator-research-room.ts) reads the mark in the same step as the write, so the form keeps
- * nothing from the address while it stands (the route answers 409 "forgetting"). A deletion that did not end confirmed
+ * nothing from the address while it stands (the route answers 503 "later", in words that say nothing about the address).
+ * A deletion that did not end confirmed
  * leaves the mark to expire (FORGET_MARK_SECONDS), and the next walk sets it again.
  * Synthetic answers only; no external request.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/creators/route";
@@ -104,14 +107,19 @@ test("a deletion that did not end confirmed leaves the mark, so the form stays c
   assert.equal(await keep("ana@example.com", answer("ana@example.com")), -1, "and the form keeps nothing from the address meanwhile");
 });
 
-test("the route says so: 409 \"forgetting\" while the mark stands, 201 once it is gone", async () => {
+test("the route refuses while the mark stands, saying nothing about the address (503 \"later\"), and keeps once it is gone", async () => {
   await fresh();
   const payload = { name: "Synthetic Creator", email: "ana@example.com", platform: "Other", country: "Test country", problem: "A synthetic research answer for a regression test.", link: "", tools: "", cost: "", consentResearch: true, consentFollowUp: false, consentUpdates: false, website: "" };
   const ask = (ip: string) => POST(new NextRequest("https://marktmorgen.com/api/creators", { method: "POST", headers: { "Content-Type": "application/json", Origin: "https://marktmorgen.com", Host: "marktmorgen.com", "x-forwarded-for": ip }, body: JSON.stringify(payload) }));
   await pipeline([["SET", forgetMarkKey("ana@example.com"), "1", "EX", FORGET_MARK_SECONDS]]);
   const refused = await ask("192.0.2.41");
-  assert.equal(refused.status, 409);
-  assert.deepEqual(await refused.json(), { ok: false, error: "forgetting" });
+  assert.equal(refused.status, 503);
+  assert.deepEqual(await refused.json(), { ok: false, error: "later" }, "a code that names no deletion (Claude 4 Z's LEVE on #5139)");
+  // The form's words for that code: anyone may type the address, so they never say it asked to be deleted.
+  const form = readFileSync(join(process.cwd(), "components/creator-research-form.tsx"), "utf8");
+  const words = /\n\s*later: `([^`]*)`/.exec(form)?.[1] ?? "";
+  assert.ok(words.length > 0, "the form has words for the refusal");
+  assert.doesNotMatch(words, /delet|erase|forget|removed|you asked/i, "they say nothing about a deletion");
   assert.deepEqual(await theirs("ana@example.com"), [], "nothing kept");
   await pipeline([["DEL", forgetMarkKey("ana@example.com")]]);
   const kept = await ask("192.0.2.42");

@@ -11,6 +11,10 @@ import { UnknownReplyError } from "@/lib/redis-reply";
 import type { Listing, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { paidIntentReply } from "./paid-intent-standin";
+
+// The payment a pre-order of a product on sale is read by before it is handed over (paid-intent-standin) needs a key.
+process.env.STRIPE_SECRET_KEY ||= "sk_test_preorder_paid_read_only";
 
 const STATS = "r".repeat(32);
 const NOW = Date.parse("2026-11-07T12:00:00Z");
@@ -18,6 +22,8 @@ const pipeline = redis.pipeline.bind(redis);
 
 const emails: { to: string; subject: string; once: string | null }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const paid = paidIntentReply(input, init?.method ?? "GET");
+  if (paid) return paid;
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
     const body = JSON.parse(String(init?.body));
@@ -157,6 +163,9 @@ async function main(): Promise<void> {
   const once = emails.filter((e) => e.to === "buyer4@example.com" && e.subject.startsWith("It is out")).map((e) => e.once);
   is("the retry marks it given; each email of the way in carries the same idempotency key, so the buyer gets one", [await confirmPreorder(store, session(4), product, deps), Boolean((await readPreorder(store, product.id, session(4).id))?.given), new Set([...once, ...emails.filter((e) => e.to === "buyer4@example.com" && e.subject.startsWith("It is out")).map((e) => e.once)]).size], ["given", true, 1]);
 
+  part("#4408 merge: a missing payment reference is unknown before any pre-order is recorded");
+  is("positive paid pre-order missing payment stays unconfirmed and unrecorded", [await outcome(() => confirmPreorder(store, { ...session(5), payment_intent: undefined }, product, deps)), await granted(5), await readPreorder(store, product.id, session(5).id)], ["unconfirmed", false, null]);
+  is("the same pre-order retries with its expanded payment reference", [await confirmPreorder(store, { ...session(5), payment_intent: { id: session(5).payment_intent } }, product, deps), await granted(5)], ["given", true]);
   done();
 }
 

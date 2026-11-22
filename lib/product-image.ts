@@ -45,6 +45,13 @@ export const IMAGE_LONG_SIDE = 1600;
  */
 export const SMALL_LONG_SIDE = 800;
 
+/**
+ * A third copy, for a small picture in a list (56 px wide, at most 2x that on a sharp screen): about this long on its
+ * long side, made in the creator's browser like the smaller copy (Encanto 5b-2), and never more than this many bytes.
+ */
+export const THUMB_LONG_SIDE = 240;
+export const MAX_THUMB_BYTES = 40_000;
+
 /** Long enough to describe a cover to somebody who cannot see it. */
 export const MAX_ALT_LENGTH = 150;
 
@@ -69,6 +76,11 @@ export type ProductImage = {
    * were made — those are shown from the one file, as they always were.
    */
   small: SmallCopy | null;
+  /**
+   * The thumbnail copy (THUMB_LONG_SIDE, at most MAX_THUMB_BYTES), when one was made (Encanto 5b-2): narrower than the
+   * smaller copy, in the same folder. Absent for every picture from before; those are served as they were.
+   */
+  thumb?: SmallCopy;
   /**
    * The picture and its smaller copy are also in the pictures' own R2 bucket (313 [CV1] unit 4b,
    * lib/picture-r2-copy.ts). Absent for every picture copied nowhere; nothing serves from there yet.
@@ -168,9 +180,19 @@ export function imageUrl(image: Pick<ProductImage, "path">): string {
  * What to hand the browser so it picks the copy that fits the screen: the
  * two files with the width of each, or nothing when there is only one.
  */
-export function imageSrcSet(image: Pick<ProductImage, "path" | "width" | "small">): string | undefined {
-  if (!image.small || image.small.width >= image.width) return undefined;
-  return `${imageUrl(image.small)} ${image.small.width}w, ${imageUrl(image)} ${image.width}w`;
+export function imageSrcSet(image: Pick<ProductImage, "path" | "width" | "small"> & { thumb?: SmallCopy | null }): string | undefined {
+  const copies = smallerCopies(image);
+  return copies.length ? [...copies, { path: image.path, width: image.width }].map((copy) => `${imageUrl(copy)} ${copy.width}w`).join(", ") : undefined;
+}
+
+/**
+ * A picture's smaller copies, narrowest first: the thumbnail copy (Encanto 5b-2) and the smaller copy, each only
+ * when it is narrower than the next one up. Empty for a picture with neither, which is served from the one file.
+ */
+export function smallerCopies(image: Pick<ProductImage, "width" | "small"> & { thumb?: SmallCopy | null }): SmallCopy[] {
+  const small = image.small && image.small.width < image.width ? image.small : null;
+  const thumb = image.thumb && image.thumb.width < (small ? small.width : image.width) ? image.thumb : null;
+  return [...(thumb ? [thumb] : []), ...(small ? [small] : [])];
 }
 
 /**
@@ -205,13 +227,16 @@ export function parseProductImage(raw: unknown): ProductImage | null {
   const width = side(value.width);
   const height = side(value.height);
   if (!width || !height) return null;
+  const small = parseSmall(value.small, value.path, width);
+  const thumb = parseThumb(value.thumb, value.path, width, small);
   return {
     path: value.path,
     width,
     height,
     alt: typeof value.alt === "string" ? value.alt.replace(/\s+/g, " ").trim().slice(0, MAX_ALT_LENGTH) : "",
     bytes: typeof value.bytes === "number" && value.bytes > 0 ? value.bytes : 0,
-    small: parseSmall(value.small, value.path, width),
+    small,
+    ...(thumb ? { thumb } : {}),
     ...(value.r2 === true ? { r2: true as const } : {}),
     ...(typeof value.tone === "string" && TONE_PATTERN.test(value.tone) ? { tone: value.tone } : {}),
     ...(value.withdrawn === true ? { withdrawn: true as const } : {}),
@@ -229,10 +254,52 @@ function parseSmall(raw: unknown, path: string, width: number): SmallCopy | null
   return { path: value.path, width: w, bytes: typeof value.bytes === "number" && value.bytes > 0 ? value.bytes : 0 };
 }
 
-/** Every file a picture is kept in: itself and its smaller copy. For deleting them together. */
-export function imagePaths(image: Pick<ProductImage, "path" | "small"> | null | undefined): string[] {
+/**
+ * The thumbnail copy as it was stored: in the same folder, neither the picture nor its smaller copy, narrower than
+ * the smaller copy (or the picture, without one), and within MAX_THUMB_BYTES. Anything else is dropped.
+ */
+function parseThumb(raw: unknown, path: string, width: number, small: SmallCopy | null): SmallCopy | null {
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as Record<string, unknown>;
+  if (typeof value.path !== "string" || !IMAGE_PATH_PATTERN.test(value.path) || value.path === path || value.path === small?.path) return null;
+  if (value.path.slice(0, value.path.lastIndexOf("/")) !== path.slice(0, path.lastIndexOf("/"))) return null;
+  const w = typeof value.width === "number" && Number.isInteger(value.width) ? value.width : 0;
+  if (w <= 0 || w >= (small ? small.width : width)) return null;
+  const bytes = typeof value.bytes === "number" && Number.isInteger(value.bytes) ? value.bytes : 0;
+  if (bytes <= 0 || bytes > MAX_THUMB_BYTES) return null;
+  return { path: value.path, width: w, bytes };
+}
+
+/**
+ * The checked size of each file a record shows, by name. A product's or a link's record is written only after every
+ * file in it passed the checks of app/api/store/image or app/api/store/link-image (the file store's own size and type,
+ * and its first bytes), so a name it shows, sent again and not fresh from the picture door, needs no new read
+ * (C1-20261107-1550-TODOS-10). A size that is not a whole number from 1 to MAX_IMAGE_BYTES, or a name the record gives
+ * two sizes, is left out, and that file is checked again: unknown is never taken as checked (rule 24).
+ */
+export function checkedSizes(
+  image: { path: string; bytes: number; small?: SmallCopy | null; thumb?: SmallCopy | null } | null | undefined,
+): Map<string, number> {
+  const sizes = new Map<string, number>();
+  const doubtful = new Set<string>();
+  const note = (file: { path: unknown; bytes: unknown } | null | undefined) => {
+    if (!file || typeof file.path !== "string" || !file.path) return;
+    const bytes = file.bytes;
+    const good = typeof bytes === "number" && Number.isInteger(bytes) && bytes > 0 && bytes <= MAX_IMAGE_BYTES;
+    if (!good || (sizes.has(file.path) && sizes.get(file.path) !== bytes)) doubtful.add(file.path);
+    else sizes.set(file.path, bytes);
+  };
+  note(image);
+  note(image?.small);
+  note(image?.thumb);
+  for (const path of doubtful) sizes.delete(path);
+  return sizes;
+}
+
+/** Every file a picture is kept in: itself, its smaller copy and its thumbnail copy. For deleting them together. */
+export function imagePaths(image: (Pick<ProductImage, "path" | "small"> & { thumb?: SmallCopy | null }) | null | undefined): string[] {
   if (!image) return [];
-  return image.small ? [image.path, image.small.path] : [image.path];
+  return [image.path, ...(image.small ? [image.small.path] : []), ...(image.thumb ? [image.thumb.path] : [])];
 }
 
 /**

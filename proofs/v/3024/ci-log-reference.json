@@ -1,0 +1,12 @@
+{
+  "commit": "8485adb9db2127e75327b405c205989db0d8832b",
+  "path": "proofs/v/3024/ci-verify-128455255478.log",
+  "gitBlob": "f383901524b1160e6b0d54f43f5f6007e1294236",
+  "sha256": "6212eec2f54449aca76f7697e0c9fd27abde3d4ecf43f44e4bce54b57a689c30",
+  "bytes": 6278216,
+  "run": 42388481496,
+  "job": 128455255478,
+  "failedFiles": [
+    "accessibility-inventory.test.ts"
+  ]
+}

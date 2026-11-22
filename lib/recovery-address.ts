@@ -331,7 +331,7 @@ export async function endRecoveryLock(email: string): Promise<boolean> {
     const [removed] = await redisPipeline([["DEL", untilKey(email)]]);
     return countOf(removed) !== 0;
   } catch (error) {
-    console.error("ending the recovery login's lock could not be confirmed", error);
+    console.error("ending the recovery login's lock could not be confirmed");
     return true;
   }
 }

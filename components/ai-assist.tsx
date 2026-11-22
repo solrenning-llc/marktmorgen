@@ -5,7 +5,7 @@ import { readAiAnswer } from "@/lib/ai-response";
 import { Icon } from "@/components/icons";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
 import { AiDraftReview } from "@/components/ai-draft-review";
-import { draftStrings, draftTopics, freshChecks, reviewDone, unsourcedNumbers, type DraftTopics } from "@/lib/ai-draft-review";
+import { draftStrings, draftTopics, freshChecks, givenTexts, reviewDone, unsourcedNumbers, type DraftTopics } from "@/lib/ai-draft-review";
 
 /**
  * Whether the writing help (lib/ai.ts) is there for this person on this page,
@@ -116,9 +116,10 @@ export function AiAssist<T>({
     onBusyChange?.(true);
     setError(null);
     setFilled(false);
-    // What the creator gave this job, kept to tell the draft's own numbers from theirs.
-    const sent = payload();
     try {
+      // What the creator gave this job, kept to tell the draft's own numbers from theirs; read inside
+      // the try, so a payload that throws still resets the box (Claude 6's review of #3437, note).
+      const sent = payload();
       const response = await fetch("/api/store/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -135,7 +136,8 @@ export function AiAssist<T>({
         setChecks(freshChecks());
         // Each string as written, never the JSON text, where "\nInvesting" reads as "nInvesting"; in the draft's language.
         setTopics(draftTopics(draftStrings(data.value), data.language));
-        setEstimates(unsourcedNumbers(draftStrings(data.value), `${notes}\n${JSON.stringify(sent)}`));
+        // Compared with what was typed and the job's own values, never its JSON, where an id's digits read as numbers.
+        setEstimates(unsourcedNumbers(draftStrings(data.value), [notes, ...givenTexts(sent)], data.language));
         onReviewChange?.(false);
         setDrafted(true);
         setFilled(true);

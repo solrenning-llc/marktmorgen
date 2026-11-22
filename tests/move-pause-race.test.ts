@@ -51,10 +51,14 @@ async function main(): Promise<void> {
 
   part("A break asked for between the move's read of the mark and its last write");
   const pipeline = redis.pipeline.bind(redis);
+  // Where the move's read of a mark sits in a pipeline, -1 if it is not there: its GET and PTTL ride in the move's own
+  // read of the address moved to (lib/store.ts breakYearReads), not in a trip of their own.
+  const markRead = (commands: (string | number)[][], ref: string) =>
+    commands.findIndex((command, i) => command[0] === "GET" && command[1] === `nl:pause:last:${ref}` && commands[i + 1]?.[0] === "PTTL");
   let asked: string = "not asked";
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const answer = await pipeline(commands);
-    if (asked === "not asked" && commands.length === 2 && commands[0][0] === "GET" && commands[0][1] === `nl:pause:last:${oldRef}` && commands[1][0] === "PTTL") {
+    if (asked === "not asked" && markRead(commands, oldRef) >= 0) {
       asked = "asking";
       asked = await pausePlan(store, 1, NOW).then((r) => r.kind === "paused" ? "paused" : `refused ${r.reason}`, (error: Error) => `threw ${error.name}`);
     }
@@ -95,8 +99,9 @@ async function main(): Promise<void> {
   let readLeft: number | null = null;
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const answer = await pipeline(commands);
-    if (readLeft === null && commands.length === 2 && commands[0][0] === "GET" && commands[0][1] === `nl:pause:last:${SLOW}` && commands[1][0] === "PTTL") {
-      readLeft = Number((answer as unknown[])[1]);
+    const at = markRead(commands, SLOW);
+    if (readLeft === null && at >= 0) {
+      readLeft = Number((answer as unknown[])[at + 1]);
       await new Promise((resolve) => setTimeout(resolve, WAIT_MS));
     }
     return answer;

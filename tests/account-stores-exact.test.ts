@@ -110,8 +110,10 @@ test("moveAccount: a store id in text this version does not know moves nothing a
 for (const [label, value] of [["text", "x"], ["null", null], ["a list", []]] as [string, unknown][]) {
   test(`moveAccount: the count of the new address's stores read as ${label} is unknown, never "it owns none"`, async () => {
     await fixture;
-    const scard = (batch: Batch) => batch.length === 2 && batch[1][0] === "SCARD";
-    const result = await answered(scard, (r) => [r[0], value], () => moveAccount(OWNER, "newhome@example.com"));
+    // The address moved to is read with the break mark's GET and PTTL in the same trip (lib/store.ts breakYearReads):
+    // only the count is changed, the mark's replies are kept, so the move stops for the count and nothing else.
+    const scard = (batch: Batch) => batch.length >= 2 && batch[1][0] === "SCARD";
+    const result = await answered(scard, (r) => [r[0], value, ...r.slice(2)], () => moveAccount(OWNER, "newhome@example.com"));
     assert.ok(result.error || (result.value && !result.value.ok), `not moved, not ${JSON.stringify(result.value)}`);
     assert.equal((await storeForEmail(OWNER))?.handle, "firstshop");
     assert.equal(await storeForEmail("newhome@example.com"), null);

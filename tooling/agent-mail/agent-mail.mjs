@@ -42,7 +42,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 export const REPO = process.env.CORREIO_REPO || "https://github.com/solrenning-llc/repo-id-transfer-test";
 export const RAMO = process.env.CORREIO_RAMO || "correio";
@@ -458,7 +458,8 @@ export const REPO_PRS = process.env.CORREIO_PR_REPO || "https://github.com/solre
 // com a marca AGENT_MAIL_TEST=1 e com os dois repositórios locais (nenhum endereço de rede). Fora disso a variável é
 // ignorada, com um aviso, e a ferramenta faz a conferência de verdade.
 const avisadas = new Set();
-const repoLocal = (r) => !/^(https?:|git@|ssh:|git:)/i.test(String(r));
+// "Local" é o que é local: um caminho absoluto ou file://; qualquer outra forma (scp, ext::, relativo) não conta.
+const repoLocal = (r) => isAbsolute(String(r)) || /^file:\/\/\//i.test(String(r));
 /** true só quando a variável de teste `nome` está em "1", com a marca de teste e os repositórios locais. */
 export function testeLigado(nome) {
   if (process.env[nome] !== "1") return false;

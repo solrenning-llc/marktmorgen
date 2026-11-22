@@ -70,7 +70,8 @@ async function main(): Promise<void> {
   const smismember = sent.filter((c) => c[0] === "SMISMEMBER" && c[1] === seenKey);
   const sismember = sent.filter((c) => c[0] === "SISMEMBER" && c[1] === seenKey);
   is("the three refunded reviews are marked", marked, 3);
-  is("one SMISMEMBER for the page, with its three ids", [smismember.length, smismember[0]?.length], [1, 5]);
+  // The rows' three ids, then their three payments' ids (a payment marked once, whatever its parts: 9th audit on #5100).
+  is("one SMISMEMBER for the page, with its three ids and their payments' ids", [smismember.length, smismember[0]?.length], [1, 8]);
   is("and no SISMEMBER a row", sismember.length, 0);
 
   part("A pass with nothing new asks once more, with one command");

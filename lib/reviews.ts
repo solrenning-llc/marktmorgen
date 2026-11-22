@@ -602,6 +602,12 @@ async function creatorChange(
   id: string,
   change: (review: Review) => Review,
   room: DataStore | null,
+  /**
+   * How the product's numbers follow the change: counted again from every review ("recount", the HGETALL of the
+   * product), or, for a refund's mark, taken off the kept numbers in two commands ("uncount", uncountRefunded), so a
+   * pass over a store's refunds never reads a product's whole reviews (9th triple audit on #5100, point 5).
+   */
+  summary: "recount" | "uncount" = "recount",
 ): Promise<Review | "missing" | "busy"> {
   if (!REVIEW_ID_PATTERN.test(id) || !PRODUCT_ID_PATTERN.test(productId)) return "missing";
   return locked(statsId, productId, async () => {
@@ -612,6 +618,10 @@ async function creatorChange(
     const before = storedReview(replies[0], "a review");
     if (!before) return "missing" as const;
     const after = change(before);
+    // A change that gives the review back as it is writes nothing and counts nothing again (9th triple audit on
+    // #5100, point 1: a refund in parts marked the same review once a part, each time rewriting it and reading the
+    // product's whole reviews).
+    if (after === before) return before;
     // What the creator's answer grows the review by takes room first (DataRoomError when it does not fit);
     // `room` is null for what only flips a mark or swaps a photo's path, which never refuses.
     const grown = reviewBytes(after) - reviewBytes(before);
@@ -623,9 +633,49 @@ async function creatorChange(
     await write(statsId, after, gone ? summaryGone(statsId, productId, before.createdAt) : []);
     // What a shorter answer frees is given back only once it is written.
     if (room && grown < 0) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: -grown }]);
-    await recount(statsId, productId);
+    if (summary === "uncount") {
+      if (gone) await uncountRefunded(statsId, productId, before);
+    } else await recount(statsId, productId);
     return after;
   });
+}
+
+/**
+ * Takes a review just marked refunded off the product's kept numbers, as a recount would: one review and its stars
+ * fewer, one refunded more; two commands and the summary's own bytes, never the product's whole reviews. Only on a
+ * summary read in its exact shape that still counts the review (its count, its stars and its star's share each at
+ * least the review's); anything else is left as it is and said in the log, for the next change that counts the
+ * product again (saveReview, a hide, a delete), never a summary made up from a reply that proved nothing (rule 24).
+ */
+async function uncountRefunded(statsId: string, productId: string, review: Review): Promise<void> {
+  const [raw] = repliesFor(await redisPipeline([["HGET", summaryKey(statsId), productId]]), 1) ?? [undefined];
+  const kept = exactSummary(raw);
+  const star = review.rating - 1;
+  if (!kept || kept.count < 1 || kept.stars < review.rating || kept.dist[star] < 1) {
+    console.error("a refunded review's product keeps its numbers until the next recount", productId, raw === null ? "no summary" : "the summary does not count it");
+    return;
+  }
+  const dist = [...kept.dist] as Summary["dist"];
+  dist[star] -= 1;
+  const next: Summary = { ...kept, count: kept.count - 1, stars: kept.stars - review.rating, refunded: kept.refunded + 1, dist };
+  await redisPipeline([["HSET", summaryKey(statsId), productId, JSON.stringify(next)]]);
+}
+
+/** A kept summary in its exact shape: six whole numbers, the distribution of five; anything else is null. */
+function exactSummary(raw: unknown): Summary | null {
+  if (typeof raw !== "string") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const o = parsed as Record<string, unknown>;
+  const whole = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  if (!whole(o.count) || !whole(o.stars) || !whole(o.visible) || !whole(o.hidden) || !whole(o.refunded)) return null;
+  if (!Array.isArray(o.dist) || o.dist.length !== 5 || !o.dist.every(whole)) return null;
+  return { count: o.count, stars: o.stars, visible: o.visible, hidden: o.hidden, refunded: o.refunded, dist: [...o.dist] as Summary["dist"] };
 }
 
 /**
@@ -704,7 +754,7 @@ export async function markRefunded(statsId: string, pi: string): Promise<number>
       if (review.pi !== pi || review.refunded) return review;
       hit = true;
       return { ...review, refunded: true };
-    }, null);
+    }, null, "uncount");
     // A review busy just now is not marked: thrown, so the refund is not taken as seen and the sweep tries again.
     if (done === "busy") throw new Error("a review is busy; the refund is marked on the next try");
     if (hit) changed += 1;

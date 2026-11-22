@@ -10,13 +10,14 @@
  *   - a pass with nothing to mark stays within REVIEW_REFUND_RUN_COMMANDS.
  * Synthetic store, reviews and refunds; Stripe answered by a stand-in; the Redis stand-in's pipeline counted.
  */
-import { REVIEW_REFUND_PASS_EVERY_SECONDS, markRefundedReviews, reviewPassesDue, takeReviewPass } from "@/lib/review-proof";
+import { REVIEW_REFUND_PASS_EVERY_SECONDS, REVIEW_REFUND_ROWS_PER_MONTH, markRefundedReviews, reviewPassesDue, takeReviewPass } from "@/lib/review-proof";
+import { MAX_REPLY_TEXT, MAX_REVIEW_NAME, MAX_REVIEW_PHOTOS, MAX_REVIEW_TEXT } from "@/lib/review-summary";
 import { saveReview } from "@/lib/reviews";
 import { type Store, addProduct, claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
-import { REVIEW_REFUND_MARK_COMMANDS, REVIEW_REFUND_PAYMENT_COMMANDS, REVIEW_REFUND_QUOTES_COMMANDS, REVIEW_REFUND_RUN_COMMANDS } from "./plan-cost-registry";
+import { REVIEW_REFUND_MARK_BYTES, REVIEW_REFUND_MARK_COMMANDS, REVIEW_REFUND_PAYMENT_COMMANDS, REVIEW_REFUND_QUOTES_COMMANDS, REVIEW_REFUND_ROW_COMMANDS, REVIEW_REFUND_RUN_COMMANDS } from "./plan-cost-registry";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_review_refund_sweep_cost";
 const NOW = Math.floor(Date.now() / 1000);
@@ -117,6 +118,68 @@ async function main(): Promise<void> {
   const idleCommands = commands - before;
   is("nothing marked", idle, 0);
   is(`an idle pass's billed commands (${idleCommands}) are within REVIEW_REFUND_RUN_COMMANDS (${REVIEW_REFUND_RUN_COMMANDS})`, idleCommands <= REVIEW_REFUND_RUN_COMMANDS, true);
+
+  part("A payment refunded in parts: its reviews are marked with the first row, the other rows cost a row each (9th audit, point 1)");
+  // A second store, one product reviewed, one payment given back in three parts: three rows, each with the charge refunded.
+  const parts = "pi_costPartsPayment1";
+  const savedParts = await saveReview(two.statsId, { productId: two.products[0], email: "parts@example.com", reference: "cs_test_costparts000000000", pi: parts, rating: 4, text: "Good, in parts.", name: "Buyer", paidAt: NOW - 86_400 }, ROOM, (NOW - 86_400) * 1000);
+  if (savedParts.state !== "created") throw new Error(`parts review not saved: ${savedParts.state}`);
+  refunds.push(refundOf(parts), refundOf(parts), refundOf(parts));
+  await takeReviewPass(two.store);
+  before = commands;
+  sent = [];
+  const partsMarked = await markRefundedReviews(two.store, Date.now() + 60_000);
+  const partsCommands = commands - before;
+  const reviewWrites = sent.filter((c) => c[0] === "HSET" && String(c[1]) === `nl:rev:${two.statsId}:${two.products[0]}`).length;
+  const partsBound = REVIEW_REFUND_RUN_COMMANDS + REVIEW_REFUND_QUOTES_COMMANDS + REVIEW_REFUND_PAYMENT_COMMANDS + REVIEW_REFUND_MARK_COMMANDS + 2 * REVIEW_REFUND_ROW_COMMANDS;
+  is("the review is marked once", partsMarked, 1);
+  is("and written once: the second and third rows rewrite nothing", reviewWrites, 1);
+  is("the product's whole reviews are never read for its numbers", sent.some((c) => c[0] === "HGETALL" && String(c[1]).startsWith("nl:rev:")), false);
+  is(`the pass's billed commands (${partsCommands}) are within a payment, a mark and two rows (${partsBound})`, partsCommands <= partsBound, true);
+  is("the payment is taken as seen with its rows", Number((await healthy([["SISMEMBER", `nl:rev:refunds:seen:${two.statsId}`, parts]]))[0]), 1);
+  const summaryAfter = JSON.parse(String((await healthy([["HGET", `nl:rev:sum:${two.statsId}`, two.products[0]]]))[0])) as { count: number; stars: number; refunded: number; dist: number[] };
+  is("the product's numbers lost the review and count it refunded", [summaryAfter.count, summaryAfter.stars, summaryAfter.refunded, summaryAfter.dist[3]], [0, 0, 1, 0]);
+
+  part("The month's rows ceiling: past it the pass handles what was left, keeps its place and waits for next month (9th audit, point 2)");
+  const ceiling = REVIEW_REFUND_ROWS_PER_MONTH.creator;
+  const month = new Date().toISOString().slice(0, 7);
+  const rowsKey = `nl:rev:refunds:rows:${two.statsId}:${month}`;
+  await healthy([["SET", rowsKey, String(ceiling - 1)]]);
+  const anchorBefore = (await healthy([["GET", `nl:rev:refunds:since:${two.statsId}`]]))[0];
+  // The stand-in answers every refund to any account, so this store's seen set also holds the other store's row.
+  const seenBefore = Number((await healthy([["SCARD", `nl:rev:refunds:seen:${two.statsId}`]]))[0]);
+  refunds.push(refundOf("pi_costOther000001"), refundOf("pi_costOther000002"), refundOf("pi_costOther000003"));
+  const quiet = console.error;
+  const said: string[] = [];
+  console.error = (...args: unknown[]) => { said.push(String(args[0])); };
+  try {
+    await healthy([["DEL", `nl:rev:refunds:next:${two.statsId}`]]);
+    await takeReviewPass(two.store);
+    is("nothing marked (the rows have no review)", await markRefundedReviews(two.store, Date.now() + 60_000), 0);
+  } finally {
+    console.error = quiet;
+  }
+  const seenNow = Number((await healthy([["SCARD", `nl:rev:refunds:seen:${two.statsId}`]]))[0]);
+  is("only the one row left of the month was handled: that row and its payment taken as seen, nothing more", seenNow, seenBefore + 2);
+  is("the month's count stands at the ceiling", Number((await healthy([["GET", rowsKey]]))[0]), ceiling + 2);
+  is("the pass said so once", said.filter((line) => line.includes("rows of the month are spent")).length, 1);
+  is("and kept its place", (await healthy([["GET", `nl:rev:refunds:since:${two.statsId}`]]))[0], anchorBefore);
+  await healthy([["DEL", `nl:rev:refunds:next:${two.statsId}`]]);
+  await takeReviewPass(two.store);
+  console.error = () => {};
+  try {
+    await markRefundedReviews(two.store, Date.now() + 60_000);
+  } finally {
+    console.error = quiet;
+  }
+  is("the next run of the month handles none of the rest", Number((await healthy([["SCARD", `nl:rev:refunds:seen:${two.statsId}`]]))[0]), seenNow);
+
+  part("REVIEW_REFUND_MARK_BYTES covers a review at its largest, read and written, with the product's numbers (9th audit, point 5)");
+  const four = "\u{1F600}";
+  const largest = JSON.stringify({ id: "a".repeat(32), productId: "p".repeat(40), email: "x".repeat(254), pi: "pi_" + "x".repeat(40), reference: "cs_" + "x".repeat(66), rating: 5, text: four.repeat(MAX_REVIEW_TEXT), name: four.repeat(MAX_REVIEW_NAME), reply: four.repeat(MAX_REPLY_TEXT), repliedAt: 1_700_000_000_000, createdAt: 1_700_000_000_000, editedAt: 1_700_000_000_000, paidAt: 1_700_000_000, hidden: false, refunded: true, hiddenReason: "", photos: Array.from({ length: MAX_REVIEW_PHOTOS }, (_, i) => `reviews/${"x".repeat(32)}/${"y".repeat(32)}-${i}.webp`) });
+  const largestBytes = new TextEncoder().encode(largest).length;
+  const summaryBytes = JSON.stringify({ count: 2000, stars: 10000, visible: 2000, hidden: 2000, refunded: 2000, dist: [2000, 2000, 2000, 2000, 2000] }).length;
+  is(`a review at its largest (${largestBytes} bytes) read and written, and the numbers (${summaryBytes}) read and written, fit REVIEW_REFUND_MARK_BYTES (${REVIEW_REFUND_MARK_BYTES})`, 2 * largestBytes + 2 * summaryBytes <= REVIEW_REFUND_MARK_BYTES, true);
   done();
 }
 

@@ -6,6 +6,7 @@
  * Redis stand-in's pipeline watched.
  */
 import { sweepCheckouts } from "@/lib/checkout-sweep";
+import { readFileSync } from "node:fs";
 import { saveReview } from "@/lib/reviews";
 import { REVIEW_REFUND_PASS_EVERY_SECONDS } from "@/lib/review-proof";
 import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
@@ -76,6 +77,15 @@ async function main(): Promise<void> {
   refundReads.length = 0;
   const again = await sweepCheckouts(Date.now() + 20_000);
   is("the run after: the store swept, the turn held, no take and no read", [again.stores, turnTakes(statsId), refundReads.length], [1, 0, 0]);
+
+  part("The pass's turn is never taken past the run's time (9th audit, point 4)");
+  await healthy([["DEL", turn]]);
+  sent.length = 0;
+  refundReads.length = 0;
+  // The run's time already over when the store is reached: the sweep's own loop stops before the store, so the
+  // guard is read in the source, as the certificates' pass has it.
+  const sweep = readFileSync("lib/checkout-sweep.ts", "utf8");
+  is("takeReviewPass is reached only while Date.now() < deadline", /Date\.now\(\) < deadline && \(await takeReviewPass\(store\)\)/.test(sweep), true);
   done();
 }
 

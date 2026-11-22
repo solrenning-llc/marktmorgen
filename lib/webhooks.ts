@@ -1419,18 +1419,29 @@ export async function recentMessagesOf(store: Store, type: WebhookEvent, ids: st
   const messages: Record<string, unknown>[] = [];
   // Each message's buyer and payment second (paidBuyerOf) with the second it was made in, as its tries read them.
   const paidBuyers: ({ address: string; second: number; madeSecond: number } | null)[] = [];
-  for (const delivery of raws.map(parseDelivery)) {
+  for (const [i, delivery] of raws.map(parseDelivery).entries()) {
     if (messages.length >= most) break;
-    if (!delivery || delivery.type !== type || delivery.statsId !== store.statsId || seen.has(delivery.eventId)) continue;
-    seen.add(delivery.eventId);
-    try {
-      messages.push(JSON.parse(delivery.body) as Record<string, unknown>);
-      const paid = paidBuyerOf(delivery);
-      const made = delivery.createdAt;
-      paidBuyers.push(paid && typeof made === "number" && Number.isFinite(made) && made >= 0 ? { ...paid, madeSecond: Math.floor(made / 1000) } : null);
-    } catch {
+    // A delivery gone (expired) is left out; one there that does not read is not a shorter history (#4204, rule 24):
+    // the reading is unavailable, as a reading not answered exactly is.
+    if (!delivery) {
+      if (raws[i] !== null) throw new DeliveriesUnreadable();
       continue;
     }
+    if (delivery.type !== type || delivery.statsId !== store.statsId || seen.has(delivery.eventId)) continue;
+    seen.add(delivery.eventId);
+    // A delivery given up keeps no message (body "", as this code writes it: the endpoint removed, the person deleted,
+    // the month's figure spent): left out, as before. Only a message kept that does not read is unreadable.
+    if (delivery.body === "") continue;
+    let message: Record<string, unknown>;
+    try {
+      message = JSON.parse(delivery.body) as Record<string, unknown>;
+    } catch {
+      throw new DeliveriesUnreadable();
+    }
+    messages.push(message);
+    const paid = paidBuyerOf(delivery);
+    const made = delivery.createdAt;
+    paidBuyers.push(paid && typeof made === "number" && Number.isFinite(made) && made >= 0 ? { ...paid, madeSecond: Math.floor(made / 1000) } : null);
   }
   // Never handed back about a person deleted from the store since (lib/person-data.ts: a webhook's message is never
   // acted on for a deleted address; Claude 7's webhook hunt, 14 November 2026): one HMGET of the store's prints for

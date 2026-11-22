@@ -42,6 +42,7 @@ async function post(payload: Record<string, unknown>): Promise<Answer> {
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   gone: "That comment is no longer there. Reload the page.",
+  unavailable: "We could not confirm that change just now. Reload the page to see whether comments are on, then try again.",
   empty: "Write something first.",
   replies: "That comment has as many answers as it can take.",
 };

@@ -236,8 +236,16 @@ export async function commentsOn(courseId: string): Promise<boolean> {
   throw unreadableComments();
 }
 
+/**
+ * Switches comments on (the mark deleted) or off (the mark set), and returns
+ * only once Redis confirmed the write: SET answers "OK", DEL a count of 0 or
+ * 1. Any other reply throws, so the studio never says "Off" while students
+ * still see and post comments (Codex N1 MEDIUM on #3554, rule 24).
+ */
 export async function setCommentsOn(courseId: string, on: boolean): Promise<void> {
-  await redisPipeline([on ? ["DEL", offKey(courseId)] : ["SET", offKey(courseId), "1"]]);
+  const reply = oneReply(await redisPipeline([on ? ["DEL", offKey(courseId)] : ["SET", offKey(courseId), "1"]]));
+  const confirmed = on ? reply === 0 || reply === 1 : reply === "OK";
+  if (!confirmed) throw unreadableComments();
 }
 
 /**

@@ -298,3 +298,46 @@ test("the studio pages keep an unread list or count apart from none", () => {
   const editor = read("components/product-editor.tsx");
   assert.doesNotMatch(editor, /newComments\[product\.id\] \?\? 0/);
 });
+
+/**
+ * The creator's switch is confirmed only on a confirmed write (Codex N1 MEDIUM on #3554, 7055767058): SET answers
+ * "OK" and DEL answers 0 or 1; any other reply throws, and the studio's route answers "unavailable", never success,
+ * so the studio never shows "Off" while students still see and post comments.
+ */
+const writeReplies: [string, () => unknown][] = [
+  ...malformed,
+  ["a text that is not OK", () => ["QUEUED"]],
+  ["a count above one", () => [2]],
+  ["a negative count", () => [-1]],
+  ["a fractional count", () => [0.5]],
+  ["a text count", () => ["1"]],
+];
+
+for (const on of [false, true]) {
+  const command = on ? "DEL" : "SET";
+  for (const [label, reply] of writeReplies) {
+    test(`switching comments ${on ? "on" : "off"}: ${label} for ${command} is unknown, never confirmed`, async () => {
+      redis.clear();
+      await assert.rejects(answering((c) => c[0] === command && String(c[1]).endsWith(":off"), reply, () => setCommentsOn(COURSE, on)));
+    });
+  }
+}
+
+test("switching comments off then on: OK and a count of 0 or 1 are confirmed", async () => {
+  redis.clear();
+  await setCommentsOn(COURSE, false);
+  assert.equal(await commentsOn(COURSE), false);
+  await setCommentsOn(COURSE, true);
+  assert.equal(await commentsOn(COURSE), true);
+  await setCommentsOn(COURSE, true); // DEL of a mark already gone answers 0: still confirmed
+  assert.equal(await commentsOn(COURSE), true);
+  await assert.doesNotReject(answering((c) => c[0] === "SET", () => ["OK"], () => setCommentsOn(COURSE, false)));
+  await assert.doesNotReject(answering((c) => c[0] === "DEL", () => [1], () => setCommentsOn(COURSE, true)));
+});
+
+test("the course route answers unavailable, never success, when the switch is not confirmed", () => {
+  const route = readFileSync("app/api/store/course/route.ts", "utf8");
+  const block = route.slice(route.indexOf('if (action === "cm-on")'), route.indexOf('const commentId = text(body.comment'));
+  assert.match(block, /await setCommentsOn\(courseId, body\.on === true\)\.then\(\(\) => true, \(\) => false\)/);
+  assert.match(block, /error: "unavailable" \}, \{ status: 503 \}/);
+});

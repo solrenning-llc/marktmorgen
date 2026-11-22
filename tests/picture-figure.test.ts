@@ -59,5 +59,30 @@ const unpaid = { subscriptionActive: false, trialEnds: 0, planEndedAt: "" } as n
   is("no answer: refused", await takePictureBytes(folder, 1, 1_000), false);
   redis.pipeline = real;
 
+  // Codex X6 (7059448151): taking and giving back are each one atomic step, so another picture's
+  // take running in between never sees a count raised or lowered only for a moment.
+  part("Two pictures at once, near the figure");
+  const between = async (first: () => Promise<unknown>, other: () => Promise<boolean>): Promise<boolean | undefined> => {
+    let ran: boolean | undefined;
+    let fired = false;
+    redis.pipeline = (async (commands: Parameters<typeof real>[0]) => {
+      const reply = await real(commands);
+      if (!fired) { fired = true; ran = await other(); }
+      return reply;
+    }) as typeof redis.pipeline;
+    try { await first(); } finally { redis.pipeline = real; }
+    return ran;
+  };
+  redis.clear();
+  await takePictureBytes(folder, 600, 1_000);
+  const fits = await between(() => takePictureBytes(folder, 500, 1_000), () => takePictureBytes(folder, 300, 1_000));
+  is("a picture that fits is taken while another that does not is refused", fits, true);
+  is("and the count is the two that were kept", Number(redis.run(["GET", PICTURES_BYTES_KEY(folder)])), 900);
+  redis.clear();
+  await takePictureBytes(folder, 100, 1_000);
+  const during = await between(() => givePictureBytes(folder, 300), () => takePictureBytes(folder, 50, 1_000));
+  is("a give-back past zero never makes room look taken", during, true);
+  is("and the count is what is kept", Number(redis.run(["GET", PICTURES_BYTES_KEY(folder)])), 50);
+
   done();
 })();

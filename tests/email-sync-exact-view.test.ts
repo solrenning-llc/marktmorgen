@@ -4,7 +4,7 @@ import net from "node:net";
 import { connect, disconnect, saveSettings, syncView, testConnection } from "@/lib/email-sync";
 import { setPlatformHooksForTests } from "@/lib/email-platforms";
 import { seal } from "@/lib/secret-box";
-import type { Store } from "@/lib/store";
+import { claimHandle, ownerKey, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -47,6 +47,18 @@ const job = (id: string) => JSON.stringify({
   lastAt: 2,
   createdAt: 1,
 });
+
+/**
+ * The store's own record, as a live store has (since Codex L-20261121-0237 the sealed key is kept only while the store
+ * is live: a store with no record is one that is gone). Made by claimHandle, with this file's statsId and its own sid.
+ */
+async function liveStore(): Promise<void> {
+  await claimHandle(store.email, store.handle, "Synthetic exact view", "");
+  const at = await ownerKey(store.email);
+  const record = JSON.parse(String(redis.run(["GET", at]))) as { sid: string };
+  redis.run(["SET", at, JSON.stringify({ ...record, statsId })]);
+  (store as { sid: string }).sid = record.sid;
+}
 
 type Pipeline = (commands: (string | number)[][]) => Promise<unknown[]>;
 const original = redis.pipeline.bind(redis) as Pipeline;
@@ -129,6 +141,7 @@ async function main(): Promise<void> {
 
   part("An unread log never blocks the four settings actions");
   redis.clear();
+  await liveStore();
   process.env.NIMBUS_DATA_KEY = "synthetic-email-sync-exact-view-key-2026";
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as net.AddressInfo).port;
@@ -157,6 +170,7 @@ async function main(): Promise<void> {
     const badKey = `nl:esync:bad:${statsId}`;
     for (const action of ["connect", "save", "test", "missing-target"] as const) {
       redis.clear();
+      await liveStore();
       const seeded = { ...held, target: action === "missing-target" ? { id: "missing", name: "Missing" } : held.target };
       redis.run(["SET", cfgKey, JSON.stringify(seeded)]);
       redis.run(["SET", badKey, JSON.stringify({ message: "Previous problem", at: 1 })]);

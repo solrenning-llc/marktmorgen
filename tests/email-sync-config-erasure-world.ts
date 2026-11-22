@@ -2,7 +2,7 @@
  * Synthetic transport for tests/email-sync-config-erasure.test.ts: no DNS, socket, provider account or real key. Each
  * request runs `during` first, which is how the test erases the store while the provider is answering.
  */
-import type { SafeFetchOptions, SafeResponse } from "../lib/safe-fetch";
+import type { SafeResponse } from "../lib/safe-fetch";
 export { SafeFetchError } from "../lib/safe-fetch";
 
 let replies: string[] = [];
@@ -18,7 +18,7 @@ export function answerWith(bodies: string[], at = -1, hook: (() => Promise<void>
 let hookAt = -1;
 let seen = 0;
 
-export async function safeFetch(url: string, _options: SafeFetchOptions): Promise<SafeResponse> {
+export async function safeFetch(url: string): Promise<SafeResponse> {
   if (seen === hookAt && during) await during();
   seen += 1;
   const body = replies.shift();

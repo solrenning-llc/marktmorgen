@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
-import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, limited, withinLimit, unknownLimit, limitUnknownResponse } from "@/lib/request-guard";
 import { stopFromLink } from "@/lib/outreach";
 import { STOP_LINK } from "@/lib/outreach-rules";
 
@@ -23,7 +23,10 @@ export async function POST(request: NextRequest) {
     token = "";
   }
   if (!STOP_LINK.test(token)) return new Response("Not found.", { status: 404 });
-  if (!(await withinLimit("outreach-stop", clientAddress(request), 20, 600))) {
+  const room = await withinLimit("outreach-stop", clientAddress(request), 20, 600).catch(unknownLimit);
+  // A count that could not be read is never "too many requests" (rule 24).
+  if (room === "unknown") return limitUnknownResponse();
+  if (!room) {
     return new Response("Too many requests. Try again in a few minutes.", { status: 429 });
   }
   const done = await stopFromLink(token, everyone).catch((error) => {

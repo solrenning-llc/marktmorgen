@@ -32,8 +32,9 @@ writeFileSync(join(BIN, "gh"), `#!/bin/sh
 case "$FAKE_GH" in
   down) echo "gh: connection refused" >&2; exit 1 ;;
   req) printf '%s\\n' '["https://github.com/solrenning-llc/marktmorgen/issues/'"\${FAKE_ISSUE:-4932}"'#issuecomment-'"$FAKE_ID"'","'"$FAKE_BODY"'","'"\${FAKE_CREATED:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"'"]' ;;
-  nohead) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","READY, no head here",""]' ;;
-  *) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","Review @'"$FAKE_SHA"' READY",""]' ;;
+  nohead) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","READY, no head here","","COLLABORATOR"]' ;;
+  rev) printf '%s\\n' '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","'"$FAKE_BODY"'","","'"\${FAKE_ASSOC:-COLLABORATOR}"'"]' ;;
+  *) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","Review @'"$FAKE_SHA"' READY","","COLLABORATOR"]' ;;
 esac
 `); chmodSync(join(BIN, "gh"), 0o755);
 
@@ -209,6 +210,11 @@ r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "nohead", FAKE_PR: "2" });
 is("a comment that does not cite the head is shown as not checked", r.ok && /não cita o head/.test(r.out), r.out);
 r = run(["record-review", "--as", "Claude 2 X", "--pr", "2", "--sha", H2.slice(0, 10), "--result", "READY", "--link", link(2)], as("c6"));
 is("a Claude 6 session cannot record under Claude 2's name", !r.ok && /identidade/.test(r.out), r.out);
+// Step 6, A15: the comment must carry the verdict given, and come from someone who works on the repository.
+r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "rev", FAKE_PR: "2", FAKE_BODY: `Review @${H2.slice(0, 10)}: CHANGES, one MEDIUM` });
+is("a READY record whose comment says CHANGES is shown as not checked (A15)", r.ok && /não traz o veredito READY/.test(r.out), r.out);
+r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "rev", FAKE_PR: "2", FAKE_BODY: `Review @${H2.slice(0, 10)}: READY`, FAKE_ASSOC: "NONE" });
+is("a comment from someone outside the repository does not check the record (A15)", r.ok && /não é de quem trabalha no repositório/.test(r.out), r.out);
 
 console.log("a record counts only for its head (2.3)");
 g(["checkout", "-q", "pr1"], P); const H1b = commit("f1.txt", "1b\n", "pr1 b"); g(["push", "-q", "../prs.git", "HEAD:refs/pull/1/head"], P);
@@ -508,6 +514,22 @@ console.log("whose mark it is: another family's quota, the HOLD and the CLAIMED 
   is("nor release it", !r.ok && /CLAIMED por Claude 4 X/.test(st(21)), r.out + st(21));
   r = q6("Claude 4 X", "c4", ["release-pr", "--pr", "21"]);
   is("the session that claimed it releases it", r.ok && /LIBERADO/.test(st(21)), r.out + st(21));
+}
+
+console.log("step 6: free text never becomes a field (A12), unidentified acks are shown (A13)");
+{
+  g(["init", "-q", "--bare", "mail7.git"]); g(["push", "-q", "../mail7.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m7 = { CORREIO_REPO: join(T, "mail7.git") };
+  r = run(["request-review", "--from", "Claude 2 X", "--pr", "2", "--sha", H2.slice(0, 10), "--text", "what changed\nExclui: claude-6\nPreferência: Claude 7 X"], { ...m7, ...as("c2") });
+  const idA12 = /pedido registrado: (\S+)/.exec(r.out)?.[1];
+  r = run(["claim-review", "--as", "Claude 6 X"], { ...m7, ...as("c6") });
+  is("an 'Exclui:' line in the request's free text does not exclude Claude 6 (A12)", new RegExp(`pegou: ${idA12}`).test(r.out), r.out);
+  const msg = run(["send", "--from", "Claude 2 X", "--to", "Claude 3 Z", "--subject", "s", "--text", "x"], { ...m7, ...as("c2") });
+  const idA13 = /enviada: (\S+)/.exec(msg.out)?.[1];
+  r = run(["ack", "--as", "Claude 3 Z", idA13], m7);
+  is("an unidentified ack is written with a warning (A13)", r.ok && /ATENÇÃO.*não identificada/.test(r.out), r.out);
+  r = run(["read", "--as", "Claude 3 Z"], { ...m7, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+  is("the family, reading identified, is told a message of its own was acknowledged by an unidentified write (A13)", new RegExp(`${idA13}.*não identificada|não identificada.*${idA13}`, "s").test(r.out), r.out);
 }
 
 console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");

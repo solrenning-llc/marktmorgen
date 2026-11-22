@@ -389,7 +389,7 @@ async function main(): Promise<void> {
   const passAgain = await markRefundedReviews(paid, Date.now() + 30_000);
   redis.pipeline = realPass;
   globalThis.fetch = keep;
-  is("a pass over refunds already taken: one request reads the page's, nothing written for them (#2066 review)", [passAgain, passRequests.filter((r) => r.includes("SISMEMBER")).length, passRequests.filter((r) => r.includes("SADD")).length], [0, 1, 0]);
+  is("a pass over refunds already taken: one request reads the page's, nothing written for them (#2066 review)", [passAgain, passRequests.filter((r) => r.includes("SMISMEMBER")).length, passRequests.filter((r) => r.includes("SADD")).length], [0, 1, 0]);
 
   const fifth = await addProduct(OWNER, "Wheel Basics", "", "45");
   if (!fifth.ok) throw new Error("no product");

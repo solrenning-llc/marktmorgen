@@ -3,10 +3,10 @@
  * exactly (lib/auto-captions.ts, requestAutoCaptions; rule 24, finding R32,
  * from Claude 5's second money reviews of #3286, #3345 and #3346):
  *
- *   - only a stated refusal (a 4xx, or `success: false`) gives the charge
+ *   - only a stated refusal (a 4xx other than 408 and 409, or `success: false`) gives the charge
  *     back at once, once, and lets the video go;
  *   - any other answer (no answer at all, a request that was cut off, a 5xx,
- *     a 2xx other than 200) is unknown: the service may be writing them. The
+ *     a 408 or a 409, a 2xx other than 200) is unknown: the service may be writing them. The
  *     request is kept with its charge and queued, nothing is given back on
  *     it, and a retry charges nothing more and asks for nothing more. The
  *     sweep settles it on a known answer: captions delivered are used; none
@@ -38,7 +38,7 @@ type BalanceTxn = { id: string; object: "customer_balance_transaction"; customer
 type Refund = { id: string; object: "refund"; amount: number; currency: "usd"; payment_intent: string; status: string };
 
 /** How the video service answers a request to write captions; it receives (and may bill) every one of them. */
-type Reply = "ok" | "thrown" | "aborted" | "500" | "502" | "503" | "504" | "202" | "400" | "429" | "200-false";
+type Reply = "ok" | "thrown" | "aborted" | "500" | "502" | "503" | "504" | "202" | "400" | "408" | "409" | "429" | "200-false";
 let reply: Reply = "ok";
 let invoices: Invoice[] = [];
 let refunds: Refund[] = [];
@@ -65,6 +65,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       if (reply === "504") return new Response("<html>504 Gateway Time-out</html>", { status: 504 });
       if (reply === "202") return new Response("", { status: 202 });
       if (reply === "400") return json({ success: false, message: "Invalid language", statusCode: 400 }, 400);
+      if (reply === "408") return json({ message: "Request Timeout" }, 408);
+      if (reply === "409") return json({ message: "A transcription is already in progress", statusCode: 409 }, 409);
       if (reply === "429") return json({ message: "Too many requests" }, 429);
       if (reply === "200-false") return json({ success: false, message: "Transcription unavailable", statusCode: 200 });
       return json({ success: true, statusCode: 200 });
@@ -209,6 +211,10 @@ async function main(): Promise<void> {
     { reply: "503", what: "a 503 with no body" },
     { reply: "504", what: "a 504 from the edge" },
     { reply: "202", what: "a 202 with no body" },
+    // The triple audit's LEVE on #3427 @de76065dfc (C1-20261122-0146-TODOS-8): a 408 or a 409 is not a refusal. A 409
+    // can mean the service is already writing them; giving the charge back would hand over captions it bills for.
+    { reply: "408", what: "a 408 (the service timed the request out)" },
+    { reply: "409", what: "a 409 (a conflict: the service may already be writing them)" },
   ];
 
   for (const { reply: unknown, what } of unknowns) {

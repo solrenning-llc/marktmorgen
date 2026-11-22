@@ -35,7 +35,7 @@
  * (inventory of money calls, finding 9, rule 24): any other answer is unknown,
  * never "nothing delivered", and nothing is refunded on it (deliveredIn,
  * unknownLook). The same holds for its answer to the request to write them:
- * only a 4xx or a 2xx saying `success: false` is a refusal, refunded at once;
+ * only a 4xx other than 408 and 409, or a 2xx saying `success: false`, is a refusal, refunded at once;
  * any other answer keeps the request for the sweep (finding R32).
  *
  * Only the service's own captions count as delivered (Claude 5 on #3427):
@@ -243,7 +243,7 @@ export async function autoQuote(pathname: string): Promise<{ minutes: number; se
 /**
  * Charges for captions in the languages asked, and asks the service to write
  * them. Nothing is charged unless all of it can be asked for; a request the
- * service refuses (a 4xx, or a 2xx saying `success: false`) is refunded at
+ * service refuses (a 4xx other than 408 and 409, or a 2xx saying `success: false`) is refunded at
  * once. Any other answer is unknown, never a refusal: the request is kept,
  * charged and queued, and the sweep uses it or gives it back on a known
  * answer.
@@ -339,12 +339,15 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
   });
   const success = (answer.data as { success?: unknown } | null)?.success;
   // Only a stated refusal gives the charge back here (finding R32, Claude 5 on #3286, #3345 and #3346; rule 24): a
-  // 4xx, or a 2xx saying `success: false`. Any other answer that is not a plain 200 (no answer, a request cut off, a
+  // 4xx other than 408 and 409, or a 2xx saying `success: false`. Any other answer that is not a plain 200 (no answer, a request cut off, a
   // 5xx whatever its body says) is unknown: the service may be writing them, so nothing is given back on it and the
   // request stays as written above, charged and queued. The sweep settles it on an answer that says what was
   // delivered: used, or given back once after GIVE_UP_HOURS; a retry meanwhile is told they are being written and
   // charges nothing more.
-  const refused = (answer.status >= 400 && answer.status < 500) || (answer.status >= 200 && answer.status < 300 && success === false);
+  // A 408 (the service timed the request out) and a 409 (a conflict: it may already be writing them) are not refusals:
+  // unknown, like a 5xx (the triple audit's LEVE on #3427 @de76065dfc, C1-20261122-0146-TODOS-8).
+  const unknownClientError = answer.status === 408 || answer.status === 409;
+  const refused = (answer.status >= 400 && answer.status < 500 && !unknownClientError) || (answer.status >= 200 && answer.status < 300 && success === false);
   if (!refused && answer.status !== 200) {
     console.error("the video service's answer to writing captions is unknown; the request is kept and looked at, nothing given back on it", record.id, answer.status);
   }

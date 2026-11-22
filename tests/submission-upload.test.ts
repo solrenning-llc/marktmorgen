@@ -125,8 +125,8 @@ async function main(): Promise<void> {
   resetWorld();
   const { listId } = state.store;
   delete state.store.listId;
-  is("a store with no list id opens nothing", await open(), { status: 503, body: { ok: false, error: "files_unavailable" } });
-  is("before its buyer action", state.events.includes("action"), false);
+  is("a store from before list ids is given one, and the open goes on under it (review of #5065)", (await open()).status, 200);
+  is("the id made before its buyer action", state.events.indexOf("list-id") < state.events.indexOf("action"), true);
   state.store.listId = listId;
 
   part("Signing, closing and giving up");

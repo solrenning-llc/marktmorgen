@@ -43,6 +43,8 @@ export const withinLimit = async (scope: string) => (state.events.push(`limit:${
 // lib/store.ts
 export const normaliseHandle = (raw: string) => raw.trim().toLowerCase();
 export const storeRef = () => "owner@example.test";
+/** lib/store.ts ensureListId: a store from before list ids is given one, written to the record (noted as an event). */
+export const ensureListId = async () => (state.events.push("list-id"), { ...state.store, listId: "list_made_now" });
 export const storeFolder = async () => FOLDER;
 // lib/store.ts, as lib/store-live-cache.ts storeLiveFence reads it (Codex G-20261121-0801).
 export const ERASING_KEY = "nl:closed:erasing";

@@ -13,7 +13,7 @@ import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { visitorAddress } from "@/lib/traffic-rules";
 
 import { RESPONSES_KEY } from "@/lib/creator-research-store";
-import { KEEP_RESEARCH_ANSWER, RESEARCH_ANSWERS_PER_DAY, RESEARCH_ANSWER_MAX_BYTES, RESEARCH_MAX_ANSWERS, answerBytes } from "@/lib/creator-research-room";
+import { KEEP_RESEARCH_ANSWER, RESEARCH_ANSWERS_PER_DAY, RESEARCH_ANSWER_MAX_BYTES, RESEARCH_DAY_SHARE, RESEARCH_MAX_ANSWERS, RESEARCH_WARN_AT, answerBytes } from "@/lib/creator-research-room";
 const RATE_LIMIT = 5;
 const RATE_WINDOW_SECONDS = 60 * 60;
 const MAX_BODY_BYTES = 20_000;
@@ -164,7 +164,14 @@ export async function POST(request: NextRequest) {
     // The list's ceiling and the write in one step (lib/creator-research-room.ts): answers sent at once, a lost
     // reply or a failed step never leave it past the ceiling. Only 0 is full and only a length inside the
     // ceiling is saved; any other reply is not a confirmation (CX-123 rule 24).
-    const kept = repliesFor(await redisPipeline([["EVAL", KEEP_RESEARCH_ANSWER, 1, RESPONSES_KEY, RESEARCH_MAX_ANSWERS, row]]), 1);
+    // The day's share of the room still free is checked in the same step (researchDayCap): "busy:<cap>" is that share
+    // taken, told to the owner once, on the first answer past it.
+    const kept = repliesFor(await redisPipeline([["EVAL", KEEP_RESEARCH_ANSWER, 1, RESPONSES_KEY, RESEARCH_MAX_ANSWERS, row, today, RESEARCH_DAY_SHARE, RESEARCH_ANSWERS_PER_DAY]]), 1);
+    const share = kept && typeof kept[0] === "string" ? /^busy:(\d+)$/.exec(kept[0]) : null;
+    if (share) {
+      if (today === Number(share[1]) + 1) console.error(`creator research: today's cap of ${share[1]} new answers was reached (a share of the room still free); later answers today are refused as busy`);
+      return fail(429, "busy");
+    }
     const length = kept ? countOf(kept[0]) : null;
     if (length === 0) {
       // A full list needs the owner's decision (export, then clear): said in the log every time it refuses one.
@@ -174,6 +181,8 @@ export async function POST(request: NextRequest) {
     if (length === null || length > RESEARCH_MAX_ANSWERS) {
       throw new UnknownReplyError("keeping a creator research answer");
     }
+    // Past 80%, every answer kept tells the owner how full the list is, so it can be exported and cleared in time.
+    if (length >= RESEARCH_WARN_AT) console.error(`creator research: the list is ${Math.floor((length * 100) / RESEARCH_MAX_ANSWERS)}% full (${length} of ${RESEARCH_MAX_ANSWERS} answers); export and clear it before it is full`);
   } catch (error) {
     console.error("creator research submission failed", error);
     return fail(500, "server_error");

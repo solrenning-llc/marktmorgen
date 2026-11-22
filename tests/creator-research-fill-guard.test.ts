@@ -8,7 +8,7 @@
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/creators/route";
 import { RESPONSES_KEY } from "@/lib/creator-research-store";
-import { RESEARCH_ANSWERS_PER_DAY, RESEARCH_MAX_ANSWERS } from "@/lib/creator-research-room";
+import { RESEARCH_ANSWERS_PER_DAY, RESEARCH_MAX_ANSWERS, researchDayCap } from "@/lib/creator-research-room";
 import { store } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -51,15 +51,18 @@ async function main() {
     is("the list is never filled", worstDay < RESEARCH_MAX_ANSWERS, true);
     await nextDay();
     is("a real creator the next day still saves", await ask("203.0.113.77"), [201, "saved"]);
-    is("control: an empty list's day still takes RESEARCH_ANSWERS_PER_DAY", RESEARCH_ANSWERS_PER_DAY, 40);
     is("the owner was told before the list was nearly full", warned.some((line) => /creator research: the list is .*% full/.test(line)), true);
 
-    part("Control: a fresh list takes a whole day's cap, as before");
+    part("Control: a fresh list takes its whole day's share");
     store.clear();
     await nextDay();
     let saved = 0;
     for (let n = 0; n < RESEARCH_ANSWERS_PER_DAY; n += 1) if ((await ask(`198.19.0.${n + 1}`))[0] === 201) saved += 1;
-    is("forty kept", saved, RESEARCH_ANSWERS_PER_DAY);
+    // Counted against the room free at each answer: the day stops when its count passes the share of what is left.
+    let share = 0;
+    while (share + 1 <= researchDayCap(share)) share += 1;
+    is("the day's share of an empty list is kept, and no more", saved, share);
+    is("and it is a real day's worth, never more than the fixed cap", share >= 10 && share <= RESEARCH_ANSWERS_PER_DAY, true);
   } finally {
     console.error = original;
   }

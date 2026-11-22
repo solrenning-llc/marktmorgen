@@ -30,6 +30,22 @@ export const RESEARCH_ANSWER_MAX_BYTES = 12_288;
  */
 export const RESEARCH_ANSWERS_PER_DAY = 40;
 export const RESEARCH_MAX_ANSWERS = 320;
+/**
+ * A day takes at most one RESEARCH_DAY_SHARE-th of the room still free (never more than RESEARCH_ANSWERS_PER_DAY,
+ * never less than one), counted in the same step as the write (KEEP_RESEARCH_ANSWER), so days of rotating connections
+ * fill the list ever more slowly (Claude 3's LOW 1 on #3584): answering every day's cap in full takes it to 80% on
+ * the 28th day and full on the 73rd, instead of full on the 8th, and the owner is told at RESEARCH_WARN_AT. An empty
+ * list's day takes 18 (each answer counted against the room then free); RESEARCH_ANSWERS_PER_DAY stays the fixed
+ * ceiling, checked before the write.
+ */
+export const RESEARCH_DAY_SHARE = 16;
+/** The kept length past which every answer kept tells the owner, in the log, how full the list is (80%). */
+export const RESEARCH_WARN_AT = Math.floor(RESEARCH_MAX_ANSWERS * 0.8);
+
+/** The day's cap with `length` answers kept: a share of the room still free, between one and the fixed day's cap. */
+export function researchDayCap(length: number): number {
+  return Math.max(1, Math.min(RESEARCH_ANSWERS_PER_DAY, Math.floor((RESEARCH_MAX_ANSWERS - length) / RESEARCH_DAY_SHARE)));
+}
 export const RESEARCH_MAX_BYTES = RESEARCH_ANSWER_MAX_BYTES * RESEARCH_MAX_ANSWERS;
 
 /** An answer's size as stored, in UTF-8 bytes. */
@@ -38,10 +54,17 @@ export function answerBytes(row: string): number {
 }
 
 /**
- * The answer kept only while the list holds fewer than the ceiling, the count
- * and the write in one step: 0 when full, else the list's new length.
- * KEYS[1] the list; ARGV[1] the ceiling; ARGV[2] the answer as stored.
+ * The answer kept only while the list holds fewer than the ceiling and the
+ * day's count is within the day's cap for the room still free
+ * (researchDayCap), the count and the write in one step: 0 when full, "busy:<cap>" when
+ * the day's share is taken, else the list's new length. KEYS[1] the list;
+ * ARGV[1] the ceiling; ARGV[2] the answer as stored; ARGV[3] the day's count
+ * with this answer; ARGV[4] RESEARCH_DAY_SHARE; ARGV[5] RESEARCH_ANSWERS_PER_DAY.
  */
-export const KEEP_RESEARCH_ANSWER = `-- marktmorgen:research-answer-keep:v1
-if redis.call("LLEN", KEYS[1]) >= tonumber(ARGV[1]) then return 0 end
+export const KEEP_RESEARCH_ANSWER = `-- marktmorgen:research-answer-keep:v2
+local length = redis.call("LLEN", KEYS[1])
+local max = tonumber(ARGV[1])
+if length >= max then return 0 end
+local cap = math.max(1, math.min(tonumber(ARGV[5]), math.floor((max - length) / tonumber(ARGV[4]))))
+if tonumber(ARGV[3]) > cap then return "busy:" .. cap end
 return redis.call("LPUSH", KEYS[1], ARGV[2])`;

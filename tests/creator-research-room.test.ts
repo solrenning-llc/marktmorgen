@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/creators/route";
 import { RESPONSES_KEY } from "@/lib/creator-research-store";
-import { RESEARCH_ANSWERS_PER_DAY, RESEARCH_ANSWER_MAX_BYTES, RESEARCH_MAX_ANSWERS, RESEARCH_MAX_BYTES } from "@/lib/creator-research-room";
+import { RESEARCH_ANSWERS_PER_DAY, RESEARCH_ANSWER_MAX_BYTES, RESEARCH_MAX_ANSWERS, RESEARCH_MAX_BYTES, researchDayCap } from "@/lib/creator-research-room";
 import { LIMITS } from "@/lib/creator-research";
 import { BACKUP_MAX_BYTES } from "@/lib/backup-export";
 import { store } from "./redis-stub";
@@ -176,8 +176,12 @@ async function main() {
     // One answer from each of many connections (IPv4 and distinct /64s): the day's cap, not each connection's, stops them.
     for (let n = 0; n < RESEARCH_ANSWERS_PER_DAY + 5; n += 1) day.push(await ask(payload, n % 2 ? `192.0.2.${n}` : `2001:db8:${n.toString(16)}::1`));
     console.error = original;
-    is("at most the day's cap is kept", [day.filter(([status]) => status === 201).length, (await rows()).length], [RESEARCH_ANSWERS_PER_DAY, RESEARCH_ANSWERS_PER_DAY]);
-    is("the rest of the day is refused as busy, never kept and never said full", day.slice(RESEARCH_ANSWERS_PER_DAY).map(([status, error]) => `${status} ${error}`), Array(5).fill("429 busy"));
+    // The day's cap is a share of the room still free (researchDayCap, Claude 3's LOW 1): an empty list's day takes 18.
+    // Counted against the room free at each answer, so the day stops when its count passes the share of what is left.
+    let cap = 0;
+    while (cap + 1 <= researchDayCap(cap)) cap += 1;
+    is("at most the day's cap is kept", [day.filter(([status]) => status === 201).length, (await rows()).length], [cap, cap]);
+    is("the rest of the day is refused as busy, never kept and never said full", day.slice(cap).map(([status, error]) => `${status} ${error}`), Array(RESEARCH_ANSWERS_PER_DAY + 5 - cap).fill("429 busy"));
     is("the cap is well under the list's ceiling: one day can never fill it", RESEARCH_ANSWERS_PER_DAY * 4 <= RESEARCH_MAX_ANSWERS, true);
     is("the owner is told, in the log, that the day's cap was reached", warned.some((line) => /creator research: today's cap/.test(line)), true);
   }

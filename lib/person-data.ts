@@ -129,7 +129,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/discord-access.ts", how: "erased", what: "The answers kept about whether they may have Discord roles" },
 
   // ---------------------------------------------------------------- the community
-  { file: "lib/community.ts", how: "erased", via: CE, what: "Their community member record: address, name, handle, answers to your questions and their place in the directory" },
+  { file: "lib/community.ts", how: "erased", via: CE, what: "Their community member record: address, name, handle, answers to your questions, their place in the directory and the links to their profiles elsewhere" },
   { file: "lib/community-mentions.ts", how: "erased", via: CE, what: "The handle others used to mention them" },
   { file: "lib/community-points.ts", how: "erased", via: CE, what: "Their points, rewards and places on the leaderboards" },
   { file: "lib/community-notify.ts", how: "erased", via: CE, what: "What the community told them, and when they last looked" },
@@ -215,6 +215,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/returning-code.ts", how: "expires", days: 1, what: "A code only for buyers who bought from your store before: only when the email typed with it paid for an order here, a link that works once is emailed to it, kept with the code, the product and that email for 30 minutes, then deleted; whoever asked is told the same either way" },
   { file: "lib/next-offer.ts", how: "expires", days: 3, what: "The one next product your Store assistant suggested after an order, under the order's reference and with no name or address, deleted three days later; what the buyer already owns is read from your Stripe account to leave it out, and not kept" },
   { file: "lib/yearly-ask.ts", how: "none", what: "Marks that a membership's yearly offer went, by its Stripe subscription, never by address" },
+  { file: "lib/certificate-refunds.ts", how: "none", what: "The pass that withdraws a certificate whose course was refunded reads the buyer's address from the store's Stripe account only to find their certificate, and keeps no address: only the ids of the refunds and closed disputes it handled, and how far it read" },
 ];
 
 /** Whether a line is said today: the backup's deletion records only once their reviews are filled (VR item 2). */

@@ -9,7 +9,7 @@ test("pricing benefits resolve to existing capabilities before plan choices",()=
 });
 test("Hotmart comparison reuses the existing dated official fee scope rather than a second fee model",()=>{
  const hotmart=COMPETITOR_PRICES.hotmart;
- assert.equal(hotmart.plans[0].source.readOn,"2026-10-20");
+ assert.equal(hotmart.plans[0].source.readOn,"2026-11-15");
  assert.equal(new URL(hotmart.plans[0].source.url).hostname,"hotmart.com");
  assert.equal(hotmart.plans[0].feeSource.url,"https://hotmart.com/en/legal/payments-policy");
  assert.match(hotmart.feeScope,/above \$15/);

@@ -83,7 +83,7 @@ import { priceInRange, rangeWords, readMoney } from "@/lib/money";
 import { LINK_PROBLEMS, type LinkProblem, readLink } from "@/lib/product-link";
 import { MAX_ABOUT_LENGTH, cleanAbout, writeAbout } from "@/lib/product-about";
 import { BATCH_BYTES, BATCH_ROWS } from "@/lib/import-batches";
-import { type ContactOutcome, type ImportedContact, MAX_CONTACT_NAME, importContactRows, leftListAmong, previewContactRows, readTags } from "@/lib/contacts";
+import { ContactImportUnknownError, type ContactOutcome, type ImportedContact, MAX_CONTACT_NAME, importContactRows, leftListAmong, previewContactRows, readTags } from "@/lib/contacts";
 import { moveStopLink, remindersStoppedAmong } from "@/lib/checkout-recovery";
 import { csvLine, readConsent } from "@/lib/csv";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
@@ -385,6 +385,12 @@ export type ImportJob = {
     contacts?: number;
     /** Contacts: could be emailed until now, and left where the file came from, so no longer here. */
     stopped?: number;
+    /**
+     * Contacts: rows a failed step may have written as added (ContactImportUnknownError), never counted as added.
+     * Only the ramp reads it, so their next emails still go out in portions. An upper bound: a step tried more than
+     * once may count the same rows again, which only makes the portions start sooner.
+     */
+    maybeAdded?: number;
   };
   options: {
     /** Contacts: the creator confirmed these people agreed to hear from them. */
@@ -1085,7 +1091,18 @@ async function contactsStep(job: ImportJob, store: Store, rows: string[][]): Pro
     skipped.push({ line: v.line, column: "email", problem: `The same address as row ${seen[i]}`, value: v.email });
     return false;
   });
-  const outcomes = await importContactRows(listId, fresh.map(asImported), store);
+  let outcomes: ContactOutcome[];
+  try {
+    outcomes = await importContactRows(listId, fresh.map(asImported), store);
+  } catch (error) {
+    // Rows that may have been written while the step failed: kept apart from the added count (never claimed as
+    // added) and saved before the step is tried again, so the ramp still covers them (Claude 1 review 6800603295).
+    if (error instanceof ContactImportUnknownError && error.possiblyAdded > 0) {
+      job.counts.maybeAdded = (job.counts.maybeAdded ?? 0) + error.possiblyAdded;
+      await redisPipeline([saveJob(job)]).catch(() => null);
+    }
+    throw error;
+  }
   outcomes.forEach((outcome, i) => {
     const row = fresh[i];
     if (outcome === "added") job.counts.added += 1;
@@ -2091,7 +2108,7 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
           // store's next emails to them go out in portions that double
           // (lib/mail-health.ts). A file of contacts by how many it added;
           // past buyers, when they are to be emailed, by how many those are.
-          if (job.kind === "contacts") await startRamp(job.sid, job.counts.added);
+          if (job.kind === "contacts") await startRamp(job.sid, job.counts.added + (job.counts.maybeAdded ?? 0));
           else if (job.options.email) {
             // SCARD in its exact shape (CX-123 rule 24); thrown, the job is left as it was.
             const toMail = countOf(repliesFor(await redisPipeline([["SCARD", mailKey(job.id)]]), 1)?.[0]);
@@ -2122,7 +2139,7 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
             if (!(error instanceof DataRoomError)) throw error;
             await note(job, [{ line: 0, column: "", problem: error.message, value: "" }], "errors");
             // The contacts already brought in are of unknown age too: their next emails still go out in portions that double.
-            if (job.kind === "contacts") await startRamp(job.sid, job.counts.added);
+            if (job.kind === "contacts") await startRamp(job.sid, job.counts.added + (job.counts.maybeAdded ?? 0));
             job.state = "failed";
             job.finishedAt = Date.now();
             const back = heldLeft(job);
@@ -2243,6 +2260,9 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       await remindLater(sid, field, now - 3_600 * 1000);
       continue;
     }
+    // The renewal date, once read: no reminder can go after it (reminderEmail), so an answer that stays unknown is
+    // tried again only before it, never for ever (Claude 4's LEVE on #3598).
+    let renews: number | null = null;
     // The line only leases what it hands out (dueReminders): a reminder put back for later says so, and every other
     // way out of this turn (sent, nothing to send, no longer wanted) takes it off the line at the end.
     let later = false;
@@ -2255,6 +2275,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       if (!store?.statsId || !isPaidUp(store)) continue;
       const invite = await readInvite(store.statsId, field);
       if (!invite || invite.kept) continue;
+      renews = invite.r * 1000;
       // It carries the creator's postal address: with none, it is not sent now. Checked before any other read (review
       // of #3476, Claude 7's cost MEDIUM 1), and tried again once a day while the renewal date is still more than a day
       // away, so a creator who saves the address again still has it sent (review of #3476, LOW 2); after that there is
@@ -2352,7 +2373,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       }
     } catch (error) {
       console.error("sending a moved member's reminder failed", error);
-      await putBack(now);
+      if (renews === null || now < renews) await putBack(now);
     } finally {
       // A drop that cannot reach Redis leaves the lease to bring it back, where the send's own key keeps it once.
       if (!later) await dropReminder(sid, field).catch((error) => console.error("taking a finished moved member's reminder off the line failed", error));

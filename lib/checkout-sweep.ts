@@ -65,7 +65,7 @@ import { AFFILIATE_ID_PATTERN, type Affiliate, VIA_PENDING_META, affiliatesOn, l
 import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { bondsBuyers } from "@/lib/affiliate-bond";
 import { creditsContacts } from "@/lib/affiliate-setting";
-import { endHolderFillRound, fillHolderLines, holderFillLeft, holderFillOn, revokeRefunded, startHolderFillRound, storeHasKeys } from "@/lib/licence-keys";
+import { revokeRefunded, storeHasKeys } from "@/lib/licence-keys";
 import { markRefundedReviews, storeHasReviews } from "@/lib/review-proof";
 import { listensToSales, noteSales } from "@/lib/sale-events";
 import { putOnList, listedAlready } from "@/lib/buyer-list";
@@ -80,6 +80,8 @@ import { contentRoomFor } from "@/lib/store-data-rules";
 import { certificatePassesDue, mayHaveCertificates, takeCertificatePass, withdrawRefundedCertificates } from "@/lib/certificate-refunds";
 import { OPEN_HOURS, releaseExpiredHolds } from "@/lib/order-admission";
 import { paidOrdersLimitFor } from "@/lib/order-rules";
+// The one-time fill of the buyers' lists of license keys (#5136), kept on its own line beside the other imports.
+import { endHolderFillRound, fillHolderLines, holderFillLeft, holderFillOn, startHolderFillRound } from "@/lib/licence-keys";
 
 const CURSOR_KEY = "nl:sweep:cursor";
 
@@ -455,6 +457,9 @@ async function walkDay(store: Store, kind: WalkKind, since: number, deadline: nu
   }
 }
 
+/** Whether this run of the sweep still fills the buyers' lists of license keys (#5136), keyed by the run's own counts. */
+const holderFillThisRun = new WeakMap<SweepCounts, boolean>();
+
 export type SweepCounts = {
   stores: number;
   confirmed: number;
@@ -489,7 +494,7 @@ function describe(error: unknown): string {
 }
 
 /** One store: its checkouts of the last day, each handed to what it needs. */
-async function sweepStore(store: Store, counts: SweepCounts, deadline: number, reviewed: boolean, requesting: boolean, taxPass: { policy: unknown; pagesLeft: number }, fillOn = false): Promise<void> {
+async function sweepStore(store: Store, counts: SweepCounts, deadline: number, reviewed: boolean, requesting: boolean, taxPass: { policy: unknown; pagesLeft: number }): Promise<void> {
   // Refunds first: a key that should no longer open anything matters more
   // than a reminder. One failing never stops the checkouts below.
   if (storeHasKeys(store)) {
@@ -499,7 +504,7 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       console.error("reading a store's refunds failed", store.handle, error);
     }
     // Keys given before the buyers' own lists get their lines, a bounded share a run, until the store is done (#5136).
-    if (fillOn) {
+    if (holderFillThisRun.get(counts)) {
       const filled = await fillHolderLines(store, deadline).catch((error: unknown) => {
         console.error("filling a store's lists of license keys failed", store.handle, describe(error));
         return false;
@@ -898,6 +903,7 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
   // The buyers' lists of license keys still to fill (#5136): one GET a run until a whole round found nothing left; a
   // round that starts here from the top of the list is marked clean, and its end sets the company's mark.
   const fillOn = await holderFillOn().catch(() => true);
+  holderFillThisRun.set(counts, fillOn);
   if (fillOn && cursor === "0" && skip === 0) await startHolderFillRound().catch(() => undefined);
 
   while (Date.now() < deadline) {
@@ -922,7 +928,7 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
       if (worthAsking(store, asks) || reviewed || store.paypalSeller || store.paypalPast) {
         counts.stores += 1;
         try {
-          await sweepStore(store, counts, deadline, reviewed, asks, taxPass, fillOn);
+          await sweepStore(store, counts, deadline, reviewed, asks, taxPass);
         } catch (error) {
           // One store's account refusing, or Stripe having a moment, does not
           // hold up everyone after it. It is reached again next time round.

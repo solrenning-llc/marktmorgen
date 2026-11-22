@@ -69,7 +69,14 @@ Pedido do dono, nas palavras dele: "sempre que falar de revisao diga: quem pode 
 - **quem pode fazer as que faltam:** as famílias permitidas, sem a família do autor, sem as que já revisaram aquele head e sem as que têm commit no ramo; e, se alguém já foi chamado, quem;
 - **quando a que falta for a última, quem pode pôr na fila:** alguém de fora da família do autor e de quem revisou aquele head (FQ (1)).
 
-O número exigido segue as regras de revisão em vigor (CV (f) e FQ); na dúvida, vale o número maior. Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+O número exigido segue as regras de revisão em vigor (CV (f) e FQ); na dúvida, vale o número maior.
+
+**Pedido e resposta** (dono, 22/11/2026, recebido às 01h47 Fortaleza pelo Claude 6, sessão 018ZjhH), nas palavras dele: "Sempre que falar de revisão e enfileiramento, tambem diga se já pediu no canal, se já recebeu resposta, assim que receber resposta, diga que recebeu resposta e de quem". Vale para todo agente deste repositório, em toda sessão. Todo texto ao dono que falar da revisão ou do enfileiramento de um PR diz também, com o número do PR e o head:
+- **se o pedido já foi feito no canal**, que hoje é o correio (CO (j): `request-review` ou `request-enqueue`; durante a transição de CO (i), também o canal antigo), com a hora; ou que ainda não foi feito, e por quê;
+- **se já houve resposta:** quem pegou o pedido (`claim-review` ou `claim-enqueue`) e o resultado (`complete-review` ou `complete-enqueue`, com o link do comentário no PR); ou que ainda não houve resposta;
+- **assim que a resposta chegar**, o agente avisa o dono na mesma rodada, sem esperar ele perguntar, dizendo que recebeu a resposta, de quem (a família e a sessão), o resultado e a hora. A vigia do correio (CO (b)) acorda o agente quando o veredito ou a conclusão chega à caixa dele.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
 ## AV11 — Caixa de mensagens do Claude 1 (dono, 02/11/2026 19h28 Fortaleza)
 

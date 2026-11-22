@@ -11,7 +11,7 @@
 import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { type SubmissionSetup } from "@/lib/submission-rules";
 import { type DoorSteps, SUBMISSION_BUYER_OPENS, SUBMISSION_BUYER_OPEN_COMMANDS, SUBMISSION_STEP_COMMANDS, abortSubmissionDoor, forgetSubmissionsPerson, openSubmissionDoor } from "@/lib/submission-store";
-import { type DataStore } from "@/lib/store-data";
+import { type DataStore, dataKey } from "@/lib/store-data";
 import { SUBMISSIONS_WORDS } from "@/lib/buyer-words/submissions";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -139,6 +139,26 @@ async function main(): Promise<void> {
     const answers: string[] = [];
     for (let i = 0; i < SHARE; i += 1) answers.push(await openAndGiveUp(fay, lesson(1), world().steps));
     is("so their whole share is still theirs", answers.every((a) => a === "opened"), true);
+  }
+
+  // Claude 2 upbeat on #3574 (LOW): taking the count's bytes on every start filled the room with each refused or
+  // already counted start (240 bytes each). They are taken once a window, in the same step that makes the count.
+  part("Only the window's first start takes the count's bytes; a counted or refused start takes no more");
+  {
+    const gus = "9".repeat(32);
+    const shop = world();
+    const used = async () => Number((await redis.pipeline([["HGET", dataKey(SHOP)!, "#"]]))[0] ?? 0);
+    const before = await used();
+    await openAndGiveUp(gus, lesson(5), shop.steps);
+    const first = await used();
+    // The first start also takes the buyer's slot for their place (given back when it is given up): only the count's
+    // bytes, kept until the count ends, stay.
+    is("control: the window's first start took the count's bytes", first > before, true);
+    for (let i = 1; i < SHARE; i += 1) await openAndGiveUp(gus, lesson(5), shop.steps);
+    is("the other starts of the window take no more", await used(), first);
+    is("control: their share is now used", await openAndGiveUp(gus, lesson(6), shop.steps), "buyer_limit");
+    for (let i = 0; i < 5; i += 1) await openAndGiveUp(gus, lesson(6), shop.steps);
+    is("and refused starts take nothing", await used(), first);
   }
 
   part("The count goes with the person");

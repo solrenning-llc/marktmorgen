@@ -16,6 +16,7 @@
  *   - docs/marktmorgen-affiliates.md holds only its fixed text: the report is generated on demand
  *     (node scripts/marktmorgen-affiliates.mjs; owner, DONO-20261120-2249-OPCAO-D), and nothing is in force.
  */
+import { DISPUTE_DAYS } from "@/lib/refund-reserve-rules";
 import { readFileSync, existsSync } from "node:fs";
 import { PLAN_PRICES, TIERS } from "@/lib/plan";
 import { POSITIVE_NET_CENTS } from "@/lib/receiving-costs";
@@ -40,6 +41,19 @@ for (const row of rows) {
 }
 is("a plan whose net is not positive without a commission gets none", rows.every((row) => (row.netWithoutCommissionCents >= POSITIVE_NET_CENTS) === (row.maxCommissionBps !== null)), true);
 
+part("What the record shows is what the net takes (review of #3756)");
+const shown = renderMarktmorgenAffiliates();
+const usd = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+for (const row of rows) {
+  if (row.maxCommissionBps === null) continue;
+  is(`${row.id}: the commission shown is the one rounded up that the net pays`, shown.includes(`${usd(Math.ceil((row.priceCents * row.maxCommissionBps) / 10_000))} |`), true);
+}
+is("a dispute after the commission was paid is named as a cost not yet covered (review of #3756)", /dispute[^.]*after[^.]*paid[^.]*unknown|unknown[^.]*dispute[^.]*after[^.]*paid/i.test(shown), true);
+// Claude 7 on #3764 (MEDIUM): a yearly plan pays ahead, so its dispute window runs from the end of the year it paid
+// for, not from the charge (lib/refund-reserve-rules.ts, DISPUTE_DAYS, Stripe's "Dispute timing").
+is("the annual dispute example is a model assumption with no certified expiry date", shown.includes(`${DISPUTE_DAYS} days after the later of the payment and the end of the period it paid for`) && shown.includes(`${DISPUTE_DAYS + 365} days in the yearly example`) && shown.includes("Some card network rules allow more time") && shown.includes("the maximum dispute window has not been confirmed"), true);
+is("never only 'after the charge', which would release a yearly commission about a year early", /about 120 days after the charge/.test(shown), false);
+
 part("Nothing is in force");
 is("plans are not on sale", PLANS_ON_SALE, false);
 const doc = renderMarktmorgenAffiliates();
@@ -47,6 +61,11 @@ is("a PROPOSAL, said first", doc.split("\n").slice(0, 4).join("\n").includes("PR
 is("the payout cost abroad is unknown, never zero, and no percentage is certified", [/unknown/i.test(doc), /never zero/i.test(doc), /no percentage is certified/i.test(doc)], [true, true, true]);
 is("the commission is owed only after payment and the 30-day refund window, and taken back on refund or dispute", [/30 days/.test(doc), /refund/i.test(doc), /dispute/i.test(doc)], [true, true, true]);
 is("it has an Acessibilidade section", doc.includes("## Acessibilidade"), true);
+// Claude 6's LEVE 1 on #3764: W-8BEN is a foreign individual's certificate; a foreign entity gives W-8BEN-E.
+is("the foreign certificates are named by who gives them, W-8BEN for an individual and W-8BEN-E for an entity", /\*\*W-8BEN\*\* for a foreign individual/.test(doc) && /\*\*W-8BEN-E\*\* for a foreign entity/.test(doc) && !/W-8BEN\*\* for anyone else/.test(doc), true);
+// Claude 6's LEVE 2 on #3764: both Stripe channels assume the future US LLC platform account (468 [SR2]); on the
+// Brazilian platform account, SR5 records no separate charges and transfers outside Brazil.
+is("the payout channels say which account would send the payment", /US LLC'?s? platform account/.test(doc) && /468 \[SR2\]/.test(doc) && /Brazilian platform/i.test(doc), true);
 
 part("Claude 5's review of #3756 (6910906486): the rules match the refund policy and the table prints what is paid");
 // HIGH: a yearly plan is refunded at any time, less the months already started (app/refunds/page.tsx section 3,
@@ -74,6 +93,13 @@ if (lowestLine) {
   is("one plan cannot pay: it is named", lowestLine([{ name: "A", maxCommissionBps: 5000 }, { name: "B", maxCommissionBps: null }]).includes("B"), true);
   is("every plan can pay: the lowest is given", lowestLine([{ name: "A", maxCommissionBps: 5000 }, { name: "B", maxCommissionBps: 4000 }]).includes("**40.00%**"), true);
 }
+
+part("Paying an affiliate: what was read, with its date and source (unit 2)");
+is("Stripe's own pages are cited, with the day they were read", ["https://stripe.com/connect/pricing", "https://docs.stripe.com/connect/cross-border-payouts", "https://docs.stripe.com/global-payouts", "https://docs.stripe.com/global-payouts/recipient-requirements"].every((url) => doc.includes(url)) && doc.includes("read on 11 November 2026"), true);
+is("Connect's published payout fees are quoted as read", ["$2 per monthly active account", "0.25% + 25¢ per payout sent", "Starting at 0.25% of payout volume"].every((quote) => doc.includes(quote)), true);
+is("a fee that only says where it starts is no ceiling, so it stays unknown", /starting at[^.]*is not a ceiling/i.test(doc), true);
+is("Brazil is marked as private preview, with no assumption that the programme can use it", doc.includes("Brazil (BRL) is listed in private preview") && doc.includes("coverage for a US sender and an individual recipient remains unconfirmed"), true);
+is("PayPal, Wise and the IRS forms could not be read here and stay unknown", ["PayPal", "Wise", "W-8BEN", "W-9"].every((name) => new RegExp(`${name}[^\n]*(could not be read|unknown)`).test(doc)), true);
 
 part("The path holds only its fixed text: the report is generated on demand");
 const path = "docs/marktmorgen-affiliates.md";

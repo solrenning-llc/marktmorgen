@@ -657,7 +657,7 @@ export async function openSession(email: string, second?: SecondStep, passkeyId?
   // the move route say the login failed; the other routes answer an error page, as a Redis error already did.
   const counted = (reply: unknown) => countOf(reply) === 0 || countOf(reply) === 1;
   if (!replies || !replies.slice(0, writes.length).every((reply) => reply === "OK") || !replies.slice(writes.length).every(counted)) {
-    await redisPipeline([["DEL", opened, fresh, mark], ["SREM", owned, opened]]).catch((error: unknown) => console.error("taking back a session that could not be opened failed", error));
+    await redisPipeline([["DEL", opened, fresh, mark], ["SREM", owned, opened]]).catch(() => console.error("taking back a session that could not be opened failed"));
     throw new UnknownReplyError("a new session");
   }
   return id;
@@ -793,7 +793,7 @@ export async function takeSignInLink(token: string): Promise<string | null> {
     const [record] = await redisPipeline([["GETDEL", await linkCodeKey(token)]]);
     if (typeof record === "string" && record.startsWith("nl:auth:code:")) await redisPipeline([["DEL", record]]);
   } catch (error) {
-    console.error("letting a login link's code go failed", error);
+    console.error("letting a login link's code go failed");
   }
   return email;
 }
@@ -891,7 +891,7 @@ export async function takeSignInCode(request: unknown, typed: unknown): Promise<
   // moved the mark, and this code then opens nothing. Read after the spend, so no request can come between the check and
   // the spend; a request that comes after the spend found this code the newest when it was used.
   const after = repliesFor(await redisPipeline([["GET", last as string]]), 1);
-  await redisPipeline([["DEL", record, pointer as string]]).catch((error: unknown) => console.error("letting a spent code go failed", error));
+  await redisPipeline([["DEL", record, pointer as string]]).catch(() => console.error("letting a spent code go failed"));
   if (owner === undefined || !after || (after[0] !== null && typeof after[0] !== "string")) return "unknown";
   if (after[0] !== record) return "expired";
   return owner ? { owner } : "expired";
@@ -983,7 +983,7 @@ export async function endSession(id: string | undefined): Promise<boolean> {
     const gone = countOf(done?.[0]);
     return gone === 0 || gone === 1;
   } catch (error) {
-    console.error("sign-out failed", error);
+    console.error("sign-out failed");
     return false;
   }
 }
@@ -1011,7 +1011,7 @@ export async function endAllSessions(email: string): Promise<number | null> {
     if (!removedEach(await redisPipeline(commands), commands.length)) throw new SessionsUnknownError("the logging out of an account's sessions");
     return keys.length;
   } catch (error) {
-    console.error("sign-out everywhere failed", error);
+    console.error("sign-out everywhere failed");
     // Not "none were closed": unknown (audit SG2, rule 30).
     return null;
   }
@@ -1045,7 +1045,7 @@ export async function endOtherSessions(email: string, keep: string | undefined):
     if (!removedEach(await redisPipeline(commands), commands.length)) throw new SessionsUnknownError("the logging out of an account's other sessions");
     return others.length;
   } catch (error) {
-    console.error("logging out the other devices failed", error);
+    console.error("logging out the other devices failed");
     return null;
   }
 }
@@ -1187,7 +1187,7 @@ export async function noteSignIn(
       }).catch(() => false);
     }
   } catch (error) {
-    console.error("noting a sign-in failed", error);
+    console.error("noting a sign-in failed");
   }
   return cookie;
 }

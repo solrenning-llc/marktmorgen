@@ -8,6 +8,7 @@ import { StudioHeader } from "@/components/studio-header";
 import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { MemberDiscount } from "@/components/member-discount";
+import { MembershipByPrice } from "@/components/membership-by-price";
 import { LEAVE_NAMES, STAY_AGES, isLeaveReason, membershipNumbers } from "@/lib/membership-numbers";
 import { channelName } from "@/lib/channel-names";
 import { readListings } from "@/lib/catalog";
@@ -107,7 +108,10 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
   // One of the reasons the store's own page offers, or one the creator wrote (lib/leave-rules.ts).
   const reasonName = (reason: string) =>
     isLeaveReason(reason) ? LEAVE_NAMES[reason] : numbers?.leaving?.own[reason] ? `“${numbers.leaving.own[reason]}”` : "A reason you have since removed";
-  const titles = numbers ? new Map((await readListings(store, numbers.byProduct.map((p) => p.product))).map((p) => [p.id, p.title])) : new Map();
+  // The listings are read once: their titles name each membership, and their prices feed "By price" (MembershipByPrice).
+  const listings = numbers ? await readListings(store, numbers.byProduct.map((p) => p.product)) : [];
+  const listingsById = new Map(listings.map((p) => [p.id, p]));
+  const titles = new Map(listings.map((p) => [p.id, p.title]));
   const money = (cents: number) => formatMoney(cents, numbers?.currency ?? store.currency);
   const when = numbers
     ? new Date(numbers.at * 1000).toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" })
@@ -244,7 +248,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                 {numbers.byProduct.length === 0 ? (
                   <p className="mt-2 text-sm text-ink-soft">No membership is running right now.</p>
                 ) : (
-                  <div className="mt-4 overflow-x-auto">
+                  <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="By membership, as a table">
                     <table className="w-full text-left text-sm">
                       <thead>
                         <tr className="text-xs uppercase tracking-[0.08em] text-ink-mute">
@@ -267,6 +271,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                     </table>
                   </div>
                 )}
+                <MembershipByPrice numbers={numbers} listings={listingsById} />
               </section>
 
               {health && (health.members.length || health.unscored) ? (
@@ -409,7 +414,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                     </p>
                   ) : null}
                   {numbers.leaving.reasons.length ? (
-                    <div className="mt-4 overflow-x-auto">
+                    <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="Why members leave, as a table">
                       <table className="w-full text-left text-sm">
                         <thead>
                           <tr className="text-xs uppercase tracking-[0.08em] text-ink-mute">
@@ -460,7 +465,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                     The memberships begun in each month, and the share still running one, two, three, six and twelve months
                     later. If the newer rows keep fewer people than the older ones, something changed for those who join now.
                   </p>
-                  <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-labelledby="stay-title">
+                  <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="Who stays, month by month, as a table">
                     <table className="w-full text-left text-sm">
                       <thead>
                         <tr className="text-xs uppercase tracking-[0.08em] text-ink-mute">

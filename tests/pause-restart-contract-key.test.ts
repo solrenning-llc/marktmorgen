@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runBreaks, pauseOf } from "@/lib/plan-pause";
+import { runBreaks, pauseOf, undoPause } from "@/lib/plan-pause";
 import { claimHandle, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { PLAN_PRICES } from "@/lib/plan";
 import { store as redis } from "./redis-stub";
@@ -90,6 +90,51 @@ test("a lost response is never retried after the provider idempotency window", a
     assert.equal(p.requests.length, 1, "expiry cannot turn a retry into a second provider creation");
     assert.equal(p.creations(), 1);
     assert.ok(await pauseOf(f.store));
+  } finally {
+    p.restore();
+    await redis.pipeline([["DEL", `nl:pause:${f.ref}`], ["ZREM", "nl:pause:due", f.ref]]);
+  }
+});
+
+// Codex X6 (7035790940): an attempt whose outcome is unknown must stay enumerable and resolvable,
+// never stranded outside the due index, and never posted a second time.
+test("an unknown restart keeps the pause enumerable, undoable and never posted again", async () => {
+  const f = await fixture("restart-held-undo"), p = provider(f, true, false);
+  try {
+    assert.equal((await runBreaks(f.now)).failed, 1);
+    assert.equal(p.requests.length, 1);
+    assert.equal(redis.run(["ZSCORE", "nl:pause:due", f.ref]), String(f.record.until),
+      "the held attempt keeps its due member, so every later run and the studio can still find it");
+    const held = await pauseOf(f.store);
+    assert.ok(held, "the exact pause evidence remains");
+    assert.equal(held?.attempt, f.now, "the attempt is written into the pause before the only POST");
+    p.expireKey(p.requests[0].key);
+    for (const later of [f.now + DAY, f.now + 2 * DAY, f.now + 40 * DAY]) {
+      const counts = await runBreaks(later);
+      assert.deepEqual([counts.restarted, counts.failed, counts.dropped], [0, 1, 0]);
+    }
+    assert.equal(p.requests.length, 1, "a held attempt is never posted again, inside or after the key window");
+    assert.equal(p.creations(), 1);
+    assert.equal(await undoPause(f.store, f.now + 40 * DAY), "stopped", "the creator can still take the stopped break back");
+    assert.equal(await pauseOf(f.store), null);
+    assert.equal(redis.run(["ZSCORE", "nl:pause:due", f.ref]), null);
+  } finally {
+    p.restore();
+    await redis.pipeline([["DEL", `nl:pause:${f.ref}`], ["ZREM", "nl:pause:due", f.ref]]);
+  }
+});
+
+test("a plan started again by hand after an unknown attempt clears the held pause", async () => {
+  const f = await fixture("restart-held-hand"), p = provider(f, true, false);
+  try {
+    assert.equal((await runBreaks(f.now)).failed, 1);
+    await setSubscription(f.store.email, { customerId: f.record.customer, subscriptionId: "sub_RestartByHand0001",
+      active: true, tier: "creator", cycle: "month" });
+    const counts = await runBreaks(f.now + DAY);
+    assert.deepEqual([counts.restarted, counts.dropped], [0, 1], "the reconciliation path reaches the held record");
+    assert.equal(await pauseOf(f.store), null);
+    assert.equal(redis.run(["ZSCORE", "nl:pause:due", f.ref]), null);
+    assert.equal(p.requests.length, 1, "no second POST");
   } finally {
     p.restore();
     await redis.pipeline([["DEL", `nl:pause:${f.ref}`], ["ZREM", "nl:pause:due", f.ref]]);

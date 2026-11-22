@@ -1582,14 +1582,16 @@ export const BENEFIT_ROW_BYTES = 13 + 6 * MAX_BENEFIT_TEXT + 200;
 /** A mark's field, `<benefit>:<sub>:<period>`: 13 + 1 + 68 + 1 + 11 bytes at the most. */
 export const BENEFIT_MARK_FIELD_BYTES = 94;
 /**
- * A mark, `{"at":<seconds>,"by":"<address>"}`, as readOwedMarks gets it back: a JSON string inside the database's JSON
- * reply, so its own quotes are escaped again (34 bytes with the seconds at 11 digits). The address is one that
- * giveBenefit lets onto a mark (markableBy, lib/tier-benefit-rules.ts): at most MARK_BY_MAX UTF-16 units, none of them
- * costing more than 3 bytes on the wire, with its "@" and one "." at a byte each (audit cd8d; a control character there
- * cost 7, and the worst mark measured 2274 bytes against the 672 declared before). Measured by
- * tests/benefit-mark-wire-bytes.test.ts.
+ * A mark, `{"at":<seconds>,"by":"<address>"}`, as readOwedMarks gets it back. The marks are read in base64
+ * (redisPipelineBase64, "Upstash-Encoding: base64"; audit cd8d, coordinator 6800), so the wire carries 4 bytes for every
+ * 3 kept, whatever escaping the reply's text could otherwise get, plus its quotes and comma. What is kept is at most
+ * 26 bytes of keys and 11-digit seconds and an address that giveBenefit lets onto a mark (markableBy,
+ * lib/tier-benefit-rules.ts): at most MARK_BY_MAX UTF-16 units, 3 bytes each in UTF-8 at the most (an astral pair is 4
+ * for 2), its "@" and one "." at a byte each, so 784 bytes; on the wire 1,051. Before audit cd8d a control character
+ * crossed as 7 bytes, and the worst mark measured 2274 bytes against the 672 declared. Each reply's own wrapper and
+ * the key it names are inside BENEFIT_PERSON_BYTES. Measured by tests/benefit-mark-wire-bytes.test.ts.
  */
-export const BENEFIT_MARK_VALUE_BYTES = 34 + 3 * (MARK_BY_MAX - 2) + 2;
+export const BENEFIT_MARK_VALUE_BYTES = 4 * Math.ceil((26 + 3 * (MARK_BY_MAX - 2) + 2) / 3) + 3;
 /** A person's marks key, and a store's deleted-person print, at the most. */
 export const BENEFIT_PERSON_BYTES = 96;
 export const BENEFITS_LIST_COMMANDS = 4;

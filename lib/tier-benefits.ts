@@ -27,7 +27,7 @@
  * benefit as it falls due); nor are reminders or emails.
  */
 import { randomBytes } from "node:crypto";
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured, redisPipeline, redisPipelineBase64 } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
@@ -204,14 +204,27 @@ async function runningMemberships(
 
 type Given = { at: number; by: string };
 
+/**
+ * A string as redisPipelineBase64 answers it, decoded; null for anything that is not base64 text (it fails closed:
+ * the person's marks are then "unknown"). The marks are read in base64 (audit cd8d, coordinator 6800), as
+ * lib/lesson-notes.ts reads a student's notes, so what crosses the wire is 4 bytes for every 3 kept, however the
+ * reply's text could otherwise be escaped (BENEFIT_MARK_VALUE_BYTES, tests/plan-cost-registry.ts).
+ */
+export function fromBase64(value: unknown): string | null {
+  if (typeof value !== "string" || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) return null;
+  return Buffer.from(value, "base64").toString("utf8");
+}
+
 /** Each person's marks, by field; "unknown" for a person whose marks could not be read in their exact shape. */
 async function readMarks(statsId: string, people: string[]): Promise<Map<string, Map<string, Given> | "unknown">> {
   const out = new Map<string, Map<string, Given> | "unknown">();
   for (let i = 0; i < people.length; i += 200) {
     const slice = people.slice(i, i + 200);
-    const replies = repliesFor(await redisPipeline(slice.map((p) => ["HGETALL", marksKey(statsId, p)])).catch(() => null), slice.length);
+    const replies = repliesFor(await redisPipelineBase64(slice.map((p) => ["HGETALL", marksKey(statsId, p)])).catch(() => null), slice.length);
     slice.forEach((person, n) => {
-      const flat = replies ? stringList(replies[n]) : null;
+      const coded = replies ? stringList(replies[n]) : null;
+      const decoded = coded ? coded.map(fromBase64) : null;
+      const flat = decoded && decoded.every((v): v is string => v !== null) ? decoded : null;
       if (!flat || flat.length % 2 !== 0) return out.set(person, "unknown");
       const marks = new Map<string, Given>();
       for (let j = 0; j < flat.length; j += 2) {
@@ -236,7 +249,7 @@ async function readOwedMarks(statsId: string, wanted: Map<string, string[]>): Pr
   const people = [...wanted.keys()];
   for (let i = 0; i < people.length; i += 200) {
     const slice = people.slice(i, i + 200);
-    const replies = repliesFor(await redisPipeline(slice.map((p) => ["HMGET", marksKey(statsId, p), ...(wanted.get(p) ?? [])])).catch(() => null), slice.length);
+    const replies = repliesFor(await redisPipelineBase64(slice.map((p) => ["HMGET", marksKey(statsId, p), ...(wanted.get(p) ?? [])])).catch(() => null), slice.length);
     slice.forEach((person, n) => {
       const fields = wanted.get(person) ?? [];
       const values: unknown = replies ? replies[n] : null;
@@ -245,7 +258,8 @@ async function readOwedMarks(statsId: string, wanted: Map<string, string[]>): Pr
       for (let j = 0; j < fields.length; j += 1) {
         const value: unknown = values[j];
         if (value === null) continue;
-        const given = typeof value === "string" ? parseGiven(value) : null;
+        const text = fromBase64(value);
+        const given = text === null ? null : parseGiven(text);
         if (!given) return out.set(person, "unknown");
         marks.set(fields[j], given);
       }

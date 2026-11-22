@@ -18,7 +18,7 @@ import { contactBytes } from "@/lib/contacts";
 import { DATA_ROOM_BYTES } from "@/lib/store-data-rules";
 import { TIERS } from "@/lib/plan";
 import { COST_LINES } from "./plan-cost-registry";
-import { contactRows, largestContact, smallestContact, renderContactsCost } from "./contacts-cost-table";
+import { contactRows, largestContact, orderContactBytes, smallestContact, renderContactsCost } from "./contacts-cost-table";
 import { done, is, part } from "./check";
 
 const rows = contactRows();
@@ -27,11 +27,29 @@ part("Contacts are measured with the code's own size");
 is("the smallest contact is smaller than the largest", contactBytes(smallestContact()) < contactBytes(largestContact()), true);
 is("each row uses the smallest contact", rows.every((row) => row.smallestBytes === contactBytes(smallestContact())), true);
 
+// Codex X6 (7059427028), first LOW: a bounded text written in wide or JSON-escaped characters
+// takes more bytes than the same length in "x"; the largest contact must hold for all of them.
+part("The largest contact bounds wide and escaped text");
+const wide = (ch: string) => {
+  const base = largestContact();
+  const fill = (length: number) => ch.repeat(length).slice(0, length);
+  return { ...base, titles: base.titles.map((t) => fill(t.length)), name: fill(base.name.length), tags: base.tags.map((t, i) => (`${i}` + fill(t.length)).slice(0, t.length)) };
+};
+for (const [what, ch] of [["a three-byte character", "€"], ["a quote", '"'], ["a control character", "\u0001"], ["a lone surrogate", "\ud800"], ["an emoji", "😀"]] as const) {
+  is(`no contact written with ${what} takes more than the largest`, contactBytes(wide(ch)) <= rows[0].largestBytes, true);
+}
+// Codex X6 (7059427028), second LOW: a contact an order writes is counted in the orders' part
+// (lib/order-data.ts: the field, the value and an entry, a quarter more, rounded up), not at contactBytes.
+part("A contact an order writes");
+is("the largest counts the order's charge too", rows[0].largestBytes >= orderContactBytes(largestContact()), true);
+is("the order's charge of the largest is above its contacts' charge", orderContactBytes(largestContact()) > contactBytes(largestContact()), true);
+is("the record names the order's charge", renderContactsCost().includes("orderGrowth"), true);
+
 part("What fits in each plan's empty room");
 for (const row of rows) {
   is(`${row.tier}: the room's bytes`, row.roomBytes, DATA_ROOM_BYTES[row.tier]);
   is(`${row.tier}: the most smallest contacts that fit`, row.fitSmallest, Math.floor(DATA_ROOM_BYTES[row.tier] / contactBytes(smallestContact())));
-  is(`${row.tier}: the most largest contacts that fit`, row.fitLargest, Math.floor(DATA_ROOM_BYTES[row.tier] / contactBytes(largestContact())));
+  is(`${row.tier}: the most largest contacts that fit`, row.fitLargest, Math.floor(DATA_ROOM_BYTES[row.tier] / row.largestBytes));
   is(`${row.tier}: the real ceiling is the lower of the room and MAX_LEADS`, row.realCeiling, Math.min(MAX_LEADS, row.fitSmallest));
 }
 is("one row per plan", rows.map((row) => row.tier), [...TIERS]);

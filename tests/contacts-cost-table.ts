@@ -86,3 +86,8 @@ It cannot be said on any plan. However the cap is set, the data room bounds the 
 A document only: no page, component or email changes. Steps and decisions of the main task: 0 → 0.
 `;
 }
+
+/** What a contact an order writes is charged (the record's claim until now: the same as contactBytes). */
+export function orderContactBytes(contact: Contact): number {
+  return contactBytes(contact);
+}

@@ -70,7 +70,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const amount = world.charges.get(intent[1]);
     if (!amount) return json({ error: { message: "No such payment_intent" } }, 404);
     const refunded = world.refunds.filter((row) => row.payment_intent === intent[1] && row.status === "succeeded").reduce((sum, row) => sum + row.amount, 0);
-    return json({ id: intent[1], latest_charge: { id: `ch_${intent[1].slice(3)}`, currency: "usd", amount, amount_refunded: refunded, disputed: false } });
+    return json({ id: intent[1], latest_charge: { id: `ch_${intent[1].slice(3)}`, payment_intent: intent[1], currency: "usd", amount, amount_refunded: refunded, disputed: false } });
   }
   if (path === "/refunds" && method === "GET") return json({ object: "list", data: world.refunds.filter((row) => row.charge === url.searchParams.get("charge")), has_more: false });
   if (path === "/refunds" && method === "POST") {
@@ -97,7 +97,7 @@ async function inLine(name: string, created: number, to: string, customer = "") 
   const id = `sub_${name}`;
   world.subs.set(id, { id, status: "active", created });
   const pi = `pi_${name}`;
-  world.invoices.set(id, { id: `in_${name}`, status: "paid", amount_paid: 6_900, created: S(day) + 60, payment_intent: pi, status_transitions: { paid_at: S(day) + 120 } });
+  world.invoices.set(id, { id: `in_${name}`, subscription: id, status: "paid", amount_paid: 6_900, created: S(day) + 60, payment_intent: pi, status_transitions: { paid_at: S(day) + 120 } });
   world.charges.set(pi, 6_900);
   await redisPipeline([["HSET", UNDO_KEY, id, JSON.stringify({ h: name, c: customer, to, name: "Odd Shop", since: day, ended: day - 30 * DAY, at: day, n: 0 })]]);
   return { id, pi };

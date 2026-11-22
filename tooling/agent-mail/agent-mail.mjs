@@ -588,9 +588,10 @@ export function ultimoSinal(sessao, commit = buscar(), agora = new Date()) {
   const t = git(["log", "-1", "--format=%ct", "-F", `--grep=Mail-Session: ${sessao}`, commit]);
   if (t) return { quando: new Date(Number(t) * 1000), conferido: true };
   if (git(["rev-parse", "--is-shallow-repository"]) !== "true") return { quando: null, conferido: true };
-  // Num clone raso, os commits da borda aparecem sem pais: o mais antigo deles diz até onde o histórico local chega.
+  // Num clone raso, os commits da borda aparecem sem pais. Com mais de uma borda (uma junção), um caminho pode parar na
+  // mais recente: o histórico só está completo desde ela (revisão do Claude 4 AC no #5052).
   const bordas = git(["log", "--format=%ct", "--max-parents=0", commit]).split("\n").filter(Boolean).map(Number);
-  const inicio = bordas.length ? Math.min(...bordas) * 1000 : Infinity;
+  const inicio = bordas.length ? Math.max(...bordas) * 1000 : Infinity;
   return { quando: null, conferido: inicio <= agora.getTime() - SINAL_MIN * 60000 };
 }
 
@@ -620,7 +621,12 @@ export function conferirPedido(pedido, comando, alvo, commit = buscar(), agora =
     .find((x) => x && x[2] === comando && x[3] === alvo);
   if (!linha) throw new Error(`o comentário ${m[1]} não traz a linha "AGENT-MAIL-REQUEST <identificador ${PREFIXO_COORDENADOR}-AAAAMMDD-HHMM-ASSUNTO> ${comando} ${alvo}"`);
   let achados = [];
-  try { achados = git(["grep", "-l", "-F", `Pedido: ${esperado}`, commit, "--", "chaves", "revisao/confirmados"]).split("\n").filter(Boolean); } catch { /* nenhum (o git grep sai com 1) */ }
+  try {
+    achados = git(["grep", "-l", "-F", `Pedido: ${esperado}`, commit, "--", "chaves", "revisao/confirmados"]).split("\n").filter(Boolean);
+  } catch (erro) {
+    // O git grep sai com 1 quando não acha nada; qualquer outra falha deixa o uso NÃO CONFERIDO (revisão do Claude 4 AC).
+    if (erro?.status !== 1) throw new Error(`o uso único do pedido ${m[1]} NÃO FOI CONFERIDO (git grep falhou); nada foi feito`);
+  }
   const usado = achados.map((l) => l.slice(String(commit).length + 1)).find((c) => conteudo(commit, c).split("\n").includes(`Pedido: ${esperado}`));
   if (usado) throw new Error(`o pedido ${m[1]} já foi usado (${usado}); cada ação precisa de um pedido próprio`);
   return { url: esperado, id: linha[1] };

@@ -449,7 +449,7 @@ if count~=pcount+1 or q.attempt~=now or type(p['until'])~='number' or p['until']
 for k,_ in pairs(fields) do if p[k]~=q[k] then return 0 end end
 if redis.call('ZSCORE',KEYS[2],ARGV[1])~=tostring(p['until']) then return 0 end
 redis.call('SET',KEYS[1],ARGV[3],'KEEPTTL')
-redis.call('ZADD',KEYS[2],'XX',tostring(p['until']+1000000000000),ARGV[1])
+redis.call('ZADD',KEYS[2],'XX',tostring(1000000000000+p['until']),ARGV[1])
 return 1
 `;
 

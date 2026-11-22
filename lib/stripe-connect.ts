@@ -99,6 +99,15 @@ export class StripeConnectError extends Error {
     this.stripeMessage = stripeMessage;
   }
 
+  /**
+   * Stripe refused the request itself, so no account was made: a 4xx other than a timeout (408), a conflict (409, a
+   * request with this key still under way), too many requests (429) or a key used with other parameters. Anything
+   * else (a 5xx, no answer, a body that is not one) may have made one (Codex L-20261120-0258).
+   */
+  get madeNothing(): boolean {
+    return this.status >= 400 && this.status < 500 && ![408, 409, 429].includes(this.status) && this.code !== "idempotency_error";
+  }
+
   /** The creator's country is one this platform may not open an account in. */
   get isCrossBorderRefusal(): boolean {
     return this.code === "cross_border_connected_account_creation_not_allowed";
@@ -109,6 +118,7 @@ async function stripeRequest(
   method: "GET" | "POST",
   path: string,
   body?: unknown,
+  options: { idempotencyKey?: string } = {},
 ): Promise<Record<string, unknown>> {
   const key = platformKey();
   if (!key) throw new Error("Stripe is not configured");
@@ -122,6 +132,9 @@ async function stripeRequest(
         "Stripe-Version": STRIPE_VERSION,
         // API v2 speaks JSON, unlike the form-encoded v1 endpoints.
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        // The same key asks for the same object: a request made again after a lost answer gets back what the first
+        // made, never a second one (Stripe keeps a key 24 hours).
+        ...(options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       cache: "no-store",
@@ -237,6 +250,8 @@ export async function createConnectedAccount(options: {
   email: string;
   country: string;
   displayName: string;
+  /** One key per attempt written on the store (lib/store.ts beginStripeConnect, Codex L-20261120-0258). */
+  idempotencyKey: string;
 }): Promise<string> {
   const country = normaliseCountry(options.country);
   if (!country) throw new Error("A country is needed to open an account");
@@ -255,7 +270,7 @@ export async function createConnectedAccount(options: {
         losses_collector: "stripe",
       },
     },
-  });
+  }, { idempotencyKey: options.idempotencyKey });
 
   const id = account.id;
   if (typeof id !== "string" || !id) {

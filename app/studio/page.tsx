@@ -806,6 +806,10 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
     title: "The Store assistant on this store may still be charged",
     body: "A payment for the Store assistant did not go through, and Stripe may still try it again. You can delete this store once Stripe has ended the assistant, or write to support to end it now. Nothing was deleted.",
   },
+  stripe_connecting: {
+    title: "This store's Stripe account is still being opened",
+    body: "Stripe may already have made the account, and only this store can finish or close it. Under \u201cWhere the money goes\u201d, press \u201cConnect your Stripe account\u201d again to finish, then delete the store. If you leave it, you can delete the store after one day. Nothing was deleted.",
+  },
   domain: {
     title: "This store still has its own domain",
     body: "Remove the domain first. Nothing was deleted.",

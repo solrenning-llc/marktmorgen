@@ -8,7 +8,7 @@ import {
   isConnectConfigured,
   normaliseCountry,
 } from "@/lib/stripe-connect";
-import { setStripeAccount } from "@/lib/store";
+import { beginStripeConnect, clearStripeConnect, finishStripeConnect, storeForEmail } from "@/lib/store";
 import { limited } from "@/lib/request-guard";
 
 /**
@@ -16,7 +16,10 @@ import { limited } from "@/lib/request-guard";
  *
  * The account is opened once and written down before the creator leaves, so a
  * trip that is abandoned halfway does not leave an account behind that nobody
- * here knows about.
+ * here knows about. The attempt is written on the store before Stripe is asked,
+ * and Stripe is asked with its idempotency key (Codex L-20261120-0258): an answer
+ * lost on the way is found again by pressing once more, two tabs get one account,
+ * and the store is not deleted while Stripe may hold one only it can name.
  */
 export async function POST(request: NextRequest) {
   const creator = await creatorFrom(request, "payments");
@@ -43,18 +46,38 @@ export async function POST(request: NextRequest) {
   try {
     let accountId = store.stripeAccountId;
     if (!accountId) {
-      accountId = await createConnectedAccount({
-        email: store.email,
-        country,
-        displayName: store.name || store.handle,
-      });
-      // Written only while the store still has none: when two tabs connect at once, the first account written
-      // stays the store's, and the late tab is not sent to onboard one the store does not keep.
-      const saved = await setStripeAccount(ref, accountId, false, { expected: null });
-      if (!saved.ok) return away(origin, studio("stripe=error"));
-      // Where sales are paid is the setting worth stealing a session for, so
-      // the creator is told at their sign-in address (lib/account-notice.ts).
-      after(() => noticeCreator(store, { kind: "stripe-connected" }));
+      // The store's open attempt, or a new one written down first, with what Stripe is asked with.
+      const attempt = await beginStripeConnect(ref, store.sid, { country, email: store.email, name: store.name || store.handle });
+      if (!attempt) {
+        // Another tab finished first: the account it wrote is the store's; otherwise nothing is known.
+        const now = await storeForEmail(ref);
+        if (now?.sid !== store.sid || !now.stripeAccountId) return away(origin, studio("stripe=error"));
+        accountId = now.stripeAccountId;
+      } else {
+        try {
+          accountId = await createConnectedAccount({
+            email: attempt.email,
+            country: attempt.country,
+            displayName: attempt.name,
+            idempotencyKey: `connect-${store.sid}-${attempt.id}`,
+          });
+        } catch (error) {
+          // Only a refusal that says nothing was made closes the attempt; anything else keeps it for the next press.
+          if (error instanceof StripeConnectError && error.madeNothing) await clearStripeConnect(ref, store.sid, attempt.id).catch(() => false);
+          throw error;
+        }
+        // Written with the attempt closed, only while it is still the store's: when two tabs connect at once they ask
+        // with one key and get one account; the late tab finds it written and goes on with it.
+        const saved = await finishStripeConnect(ref, store.sid, attempt.id, accountId);
+        if (saved) {
+          // Where sales are paid is the setting worth stealing a session for, so the creator is told at their
+          // sign-in address (lib/account-notice.ts), once: by the request that wrote the account.
+          after(() => noticeCreator(store, { kind: "stripe-connected" }));
+        } else {
+          const now = await storeForEmail(ref);
+          if (now?.sid !== store.sid || now.stripeAccountId !== accountId) return away(origin, studio("stripe=error"));
+        }
+      }
     }
 
     const link = await createOnboardingLink(accountId, origin, store.sid);

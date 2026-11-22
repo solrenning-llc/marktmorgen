@@ -393,6 +393,13 @@ export type Store = {
    */
   stripeAccountId: string | null;
   /**
+   * An account being opened at Stripe and not yet written here (Codex L-20261120-0258): written before Stripe is asked,
+   * with the very address, name and country it is asked with and the attempt's id, which makes its idempotency key. A
+   * press again reuses it and gets the same account back; the store is not deleted while it is open
+   * (STRIPE_CONNECT_HOLD_SECONDS), so an account Stripe made is never left with nothing here knowing it.
+   */
+  stripeConnecting?: StripeConnecting;
+  /**
    * Whether Stripe last told us that account can take a payment, and when we
    * asked. Kept as a snapshot so the studio does not have to call Stripe on
    * every page load, and shown with its date so it is never read as a promise
@@ -890,6 +897,28 @@ export function syncTakesBuyer(store: Pick<Store, "emailSync">, productId: strin
 /** The shape Stripe gives a connected account: acct_ and then base62. */
 export const STRIPE_ACCOUNT_PATTERN = /^acct_[A-Za-z0-9]{8,64}$/;
 
+/** An attempt to open the creator's Stripe account (Store.stripeConnecting). */
+export type StripeConnecting = { id: string; country: string; email: string; name: string; at: string };
+/**
+ * How long an open attempt holds the store and is reused: the 24 hours Stripe keeps an idempotency key, after which
+ * asking again with it no longer finds the account it made. Past that, it neither holds the store nor is reused.
+ */
+export const STRIPE_CONNECT_HOLD_SECONDS = 24 * 60 * 60;
+const CONNECT_ATTEMPT_ID = /^[0-9a-f]{32}$/;
+function readConnecting(raw: unknown): StripeConnecting | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const v = raw as Record<string, unknown>;
+  if (typeof v.id !== "string" || !CONNECT_ATTEMPT_ID.test(v.id) || typeof v.country !== "string" || !/^[a-z]{2}$/.test(v.country) ||
+      typeof v.email !== "string" || !v.email || v.email.length > 320 || typeof v.name !== "string" || v.name.length > 200 ||
+      typeof v.at !== "string" || !Number.isFinite(Date.parse(v.at))) return undefined;
+  return { id: v.id, country: v.country, email: v.email, name: v.name, at: v.at };
+}
+/** Whether an attempt still holds the store: open, and younger than STRIPE_CONNECT_HOLD_SECONDS. */
+export function connectingHolds(store: Pick<Store, "stripeConnecting">, now = Date.now()): boolean {
+  const at = store.stripeConnecting ? Date.parse(store.stripeConnecting.at) : NaN;
+  return Number.isFinite(at) && now - at < STRIPE_CONNECT_HOLD_SECONDS * 1000;
+}
+
 /** The same, for the customer and subscription that pay us. */
 export const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
 export const SUBSCRIPTION_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
@@ -1075,6 +1104,7 @@ function parseStore(raw: unknown): Store | null {
         STRIPE_ACCOUNT_PATTERN.test(value.stripeAccountId)
           ? value.stripeAccountId
           : null,
+      ...(readConnecting(value.stripeConnecting) ? { stripeConnecting: readConnecting(value.stripeConnecting) } : {}),
       stripeChargesEnabled: value.stripeChargesEnabled === true,
       stripeCheckedAt: value.stripeCheckedAt ?? "",
       stripeCustomerId:
@@ -2432,7 +2462,7 @@ export async function settleDeletedStore(gone: { ref: string; sid: string; email
 export type DeleteResult =
   /** `unsure`: the record is gone, but its addresses' holds and its places' release were not confirmed (rule 24). */
   | { ok: true; store: Store; unsure?: true }
-  | { ok: false; reason: "none" | "first" | "products" | "paying" | "assistant" | "assistant_due" | "domain" | "closing" };
+  | { ok: false; reason: "none" | "first" | "products" | "paying" | "assistant" | "assistant_due" | "domain" | "closing" | "stripe_connecting" };
 
 /**
  * Deletes one of an account's other stores, while there is nothing in it to
@@ -2481,6 +2511,9 @@ export async function deleteStore(email: string, queue: (store: Store) => Promis
     const plan = store.assistantPlan;
     if (plan?.subscriptionId && !plan.active && !plan.cancelsAtEnd && plan.terminal !== true) return { ok: false, reason: "assistant_due" };
     if (store.domain) return { ok: false, reason: "domain" };
+    // Its Stripe account is being opened (Codex L-20261120-0258): Stripe may already hold an account with the creator's
+    // address that only this record can name. Held while the attempt can still be finished with its idempotency key.
+    if (connectingHolds(store)) return { ok: false, reason: "stripe_connecting" };
     // A store whose plan ended is closing: its members are held, then refunded what they paid for and lost, and
     // told, all found by its record. Deleted by hand, the daily runs dropped it as gone and its members stayed paused
     // at Stripe for good, unrefunded and never told (Claude 7's hunt). It is removed by its closing instead, as a
@@ -2689,6 +2722,61 @@ export type StripeAccountResult =
  * "moved". An account forgotten, or another one connected, while Stripe was
  * being asked is never written over (the studio's Stripe routes).
  */
+/**
+ * Writes down an attempt to open the creator's Stripe account before Stripe is asked (Codex L-20261120-0258), under the
+ * store's lock: the store's own attempt if one is open and still holds (so a press again, or a second tab, asks with
+ * the same idempotency key and gets the same account), a new one otherwise. Null when the store is gone, is another
+ * store, or already has an account.
+ */
+export async function beginStripeConnect(
+  email: string,
+  sid: string,
+  ask: { country: string; email: string; name: string },
+  now = Date.now(),
+): Promise<StripeConnecting | null> {
+  return withStore(email, async (store, save) => {
+    if (store.sid !== sid || store.stripeAccountId) return null;
+    if (store.stripeConnecting && connectingHolds(store, now)) return store.stripeConnecting;
+    if (store.stripeConnecting) console.error("a Stripe account attempt past Stripe's idempotency window is replaced", store.sid);
+    const attempt: StripeConnecting = {
+      id: crypto.randomUUID().replace(/-/g, ""),
+      country: ask.country,
+      email: ask.email.slice(0, 320),
+      name: ask.name.slice(0, 200),
+      at: new Date(now).toISOString(),
+    };
+    await save({ ...store, stripeConnecting: attempt });
+    return attempt;
+  });
+}
+
+/**
+ * Writes the account Stripe opened for an attempt and closes the attempt, in one save: only while the store is the same
+ * store, still has this attempt open and has no account (one written meanwhile is never written over). The store as it
+ * now is; null otherwise, the attempt then left open for a press again.
+ */
+export async function finishStripeConnect(email: string, sid: string, attemptId: string, accountId: string): Promise<Store | null> {
+  if (!STRIPE_ACCOUNT_PATTERN.test(accountId)) return null;
+  return withStore(email, async (store, save) => {
+    if (store.sid !== sid || store.stripeConnecting?.id !== attemptId || store.stripeAccountId) return null;
+    const { stripeConnecting: _done, ...rest } = store;
+    void _done;
+    return save({ ...rest, stripeAccountId: accountId, stripeChargesEnabled: false, stripeCheckedAt: new Date().toISOString() });
+  });
+}
+
+/** Closes an attempt Stripe refused outright (no account made): only the same store's same attempt. */
+export async function clearStripeConnect(email: string, sid: string, attemptId: string): Promise<boolean> {
+  const done = await withStore(email, async (store, save) => {
+    if (store.sid !== sid || store.stripeConnecting?.id !== attemptId) return false;
+    const { stripeConnecting: _gone, ...rest } = store;
+    void _gone;
+    await save(rest as Store);
+    return true;
+  });
+  return done === true;
+}
+
 export async function setStripeAccount(
   email: string,
   accountId: string,

@@ -608,9 +608,7 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
  */
 export async function sweepPayPal(store: Store, deadline: number): Promise<{ cleared: number; revoked: number }> {
   const done = await watchPayPal(store, deadline, {
-    handOver: async (paid) => {
-      await handOverPayPal(store, paid);
-    },
+    handOver: async (paid) => (await handOver(store, paid)) === "handed",
     dropStart: (email, productId) => dropEnrollment(store, email, productId),
     // A course put back for a payment that keeps the purchase (Codex G's M1 on #2791): HSETNX, so nothing for one
     // still there, and no email; only for a product that is a course, as handing over does.

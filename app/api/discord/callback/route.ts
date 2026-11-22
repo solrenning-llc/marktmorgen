@@ -97,12 +97,21 @@ export async function GET(request: NextRequest) {
     }
     await leaveServer(before.id).catch(() => false);
   }
-  await saveServer(room, {
-    id: granted.serverId,
-    name: granted.serverName || before?.name || "",
-    at: before?.id === granted.serverId ? before.at : Math.floor(Date.now() / 1000),
-    kick: before?.id === granted.serverId ? before.kick : false,
-  });
+  // Written only while the store is still live (lib/discord-store.ts, saveServer): its erasure may have begun or ended
+  // while the code was exchanged (Codex L-20261120-0732). Not confirmed: the code is spent, so the creator is told the
+  // outcome is unknown ("unsaved"), never "connected", and no notice or team log is made.
+  try {
+    await saveServer(store, {
+      id: granted.serverId,
+      name: granted.serverName || before?.name || "",
+      at: before?.id === granted.serverId ? before.at : Math.floor(Date.now() / 1000),
+      kick: before?.id === granted.serverId ? before.kick : false,
+    });
+  } catch (error) {
+    console.error("keeping the connected Discord server was not confirmed", error);
+    // Its own notice (Claude 6 on #5097): what is unknown here is whether the NEW server was kept, not the old one.
+    return back("discord=unsaved");
+  }
   after(() => noticeCreator(store, { kind: "discord-connected", server: granted.serverName || "you chose" }));
   if (role !== "owner") await logTeam(store.sid, { who: email, role, what: `${PERMISSION_WORDS.settings}: connected Discord` });
   return back("discord=connected");

@@ -233,9 +233,76 @@ async function main() {
   is("it ends as failed, with nothing applied", [lapsed?.state, lapsed?.done], ["failed", 0]);
   is("it leaves the five-minute job's line", await redis.pipeline([["SISMEMBER", "nl:imports:active", endedId]]), [0]);
   is("and the next pass writes nothing more", (await runImport(endedId, Date.now() + 30_000))?.state, "failed");
-  // Codex L on #3980 (LEVE): a plan that ended, or that the creator paused, was not necessarily left unpaid.
-  const said = String((await redis.pipeline([["LRANGE", `nl:import:${endedId}:errors`, 0, -1]]))[0] ?? "");
-  is("the words do not say the plan was unpaid when it ended", [/not paid/.test(said), /plan/.test(said)], [false, true]);
+  is("an ended import leaves no source-derived report rows beyond its original deadline", await redis.pipeline([["LRANGE", `nl:import:${endedId}:errors`, 0, -1]]), [[]]);
+  // Codex L on #3980 (LEVE): a plan that ended, or that the creator paused, was not necessarily left unpaid. The reason
+  // is now said by the report from the job itself, since the report's rows are deleted at the deadline.
+  const said = lapsed ? await imports.reportCsv(lapsed) : "";
+  is("the report still says why it stopped, never that the plan was unpaid", [/not paid/.test(said), said.includes(imports.PAUSED_STOP_WORDS), said.includes(imports.REPORT_GONE_WORDS)], [false, true, true]);
+  is("and never says more rows are not listed when none are", /more rows like these/.test(said), false);
+
+  part("A paused report's original deadline survives refreshes, a full report and old sliding TTLs");
+  const actualNow = Date.now;
+  const t0 = Math.floor(actualNow() / 1000) * 1000;
+  const reportId = "e".repeat(24);
+  const reportKey = `nl:import:${reportId}:errors`;
+  const otherReport = `nl:import:${"f".repeat(24)}:errors`;
+  const person = "retention-person@example.test";
+  const row = JSON.stringify([2, "email", "Synthetic invalid address", person]);
+  const specimen = { ...third.job, id: reportId, at: t0, state: "queued" as const, counts: { ...third.job.counts, errors: 1 } };
+  try {
+    Date.now = () => t0 + 13 * 86_400_000;
+    await realPipeline([
+      ["SET", `nl:import:${reportId}`, JSON.stringify(specimen), "EX", IMPORT_KEEP_SECONDS],
+      ["SET", `nl:imports:busy:${ended.sid}`, reportId, "EX", IMPORT_KEEP_SECONDS],
+      ["SADD", "nl:imports:active", reportId],
+      ["LPUSH", `nl:imports:list:${ended.sid}`, reportId],
+      ["RPUSH", reportKey, row],
+      ["EXPIRE", reportKey, IMPORT_KEEP_SECONDS],
+      ["RPUSH", otherReport, "unrelated synthetic report"],
+      ["EXPIRE", otherReport, IMPORT_KEEP_SECONDS],
+    ]);
+    is("the live report contains its own value", (await imports.reportCsv(specimen)).includes(person), true);
+    const waitingReport = await runImport(reportId, Date.now() + 30_000);
+    is("day 13 still pauses rather than applying rows", [waitingReport?.state, waitingReport?.done], ["queued", 0]);
+    const reportTtl = Number((await realPipeline([["TTL", reportKey]]))[0]);
+    is("a paused pass grants at most the one day left, never another 14 days", reportTtl > 0 && reportTtl <= 86_400, true);
+    is("the same report is still readable before its deadline", (await imports.reportCsv(specimen)).includes(person), true);
+    is("a live personal copy still contains its own report value", JSON.stringify((await imports.importTracesOf(ended, person)).records).includes(person), true);
+
+    Date.now = () => t0 + IMPORT_KEEP_SECONDS * 1000 + 1000;
+    // A record already deployed with the old sliding TTL must also stop disclosing and be removed on read.
+    await realPipeline([["DEL", reportKey], ["RPUSH", reportKey, row], ["EXPIRE", reportKey, IMPORT_KEEP_SECONDS]]);
+    is("a personal copy also omits an expired legacy report", JSON.stringify((await imports.importTracesOf(ended, person)).records).includes(person), false);
+    is("the copy removes that legacy report", await realPipeline([["EXISTS", reportKey]]), [0]);
+    await realPipeline([["RPUSH", reportKey, row], ["EXPIRE", reportKey, IMPORT_KEEP_SECONDS]]);
+    const legacyCsv = await imports.reportCsv(specimen);
+    is("an old sliding-TTL report cannot return personal values after day 14", legacyCsv.includes(person), false);
+    is("a deleted report says so, and a paused job's report gives no stop reason", [legacyCsv.includes(imports.REPORT_GONE_WORDS), legacyCsv.includes(imports.PAUSED_STOP_WORDS), /more rows like these/.test(legacyCsv)], [true, false, false]);
+    is("the expired legacy report is deleted, not merely hidden", await realPipeline([["EXISTS", reportKey]]), [0]);
+
+    // A full report leaves note() no room to append: terminal cleanup must still delete its original values.
+    await realPipeline([["RPUSH", reportKey, ...Array.from({ length: imports.MAX_REPORT_ROWS }, () => row)], ["EXPIRE", reportKey, IMPORT_KEEP_SECONDS]]);
+    const endedReport = await runImport(reportId, Date.now() + 30_000);
+    is("the expired job terminates without applying a row", [endedReport?.state, endedReport?.done], ["failed", 0]);
+    is("the full personal report does not survive the terminal pass", await realPipeline([["EXISTS", reportKey]]), [0]);
+    is("its report CSV cannot return the old address either", (await imports.reportCsv(specimen)).includes(person), false);
+    const endedCsv = endedReport ? await imports.reportCsv(endedReport) : "";
+    is("the ended job's report says why it stopped and that its rows were deleted", [endedCsv.includes(person), endedCsv.includes(imports.PAUSED_STOP_WORDS), endedCsv.includes(imports.REPORT_GONE_WORDS)], [false, true, true]);
+    // Claude 2 upbeat (LEVE on #5063): the reason comes from the job, never from its dates. Another failure just after
+    // day 14, such as rows that waited too long once the plan came back, is said as itself, not as the paused one.
+    const lateWords = "The rows waited more than 3 days to be brought in, so the rest were let go.";
+    const late = { ...specimen, state: "failed" as const, finishedAt: Date.now(), reason: lateWords };
+    const lateCsv = await imports.reportCsv(late);
+    is("a later failure's own reason is said, never the paused one", [lateCsv.includes(lateWords), lateCsv.includes(imports.PAUSED_STOP_WORDS), lateCsv.includes(imports.REPORT_GONE_WORDS)], [true, false, true]);
+    const unsaid = await imports.reportCsv({ ...specimen, state: "failed" as const, finishedAt: Date.now() });
+    is("a failure with no kept reason gives none, even past day 14", [unsaid.includes(imports.PAUSED_STOP_WORDS), unsaid.includes(imports.REPORT_GONE_WORDS)], [false, true]);
+    is("the paused pass keeps its reason on the job", endedReport?.reason, imports.PAUSED_STOP_WORDS);
+    is("cleanup keeps another import's report", await realPipeline([["LRANGE", otherReport, 0, -1]]), [["unrelated synthetic report"]]);
+    is("the expired job leaves the active set", await realPipeline([["SISMEMBER", "nl:imports:active", reportId]]), [0]);
+  } finally {
+    Date.now = actualNow;
+    redis.pipeline = realPipeline;
+  }
 
   part("What the creator is told");
   is("the days the words promise are the days the rows are kept", IMPORT_ROWS_KEPT_DAYS, RAW_DAYS);

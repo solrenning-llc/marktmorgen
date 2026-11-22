@@ -56,7 +56,7 @@ import { CRM_LOCKED_CHANGE_UNITS, CRM_LOCK_COMMANDS_MOST, CRM_LOCK_WAIT_MS, CRM_
 import { MAX_FIELD_OPTION, MAX_FIELD_OPTIONS, MAX_FIELD_VALUE } from "@/lib/crm-rules";
 import { STUDIO_REQUEST_BYTES, flowHistoryUnits, keepVersionBytes, listVersionsBytes, restoreBytes, restoreTryBytes } from "@/lib/flow-versions-rules";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
-import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request, SHORT_LINK_OPEN_READ } from "./plan-cost-registry";
+import { ADD_ON_LINES, ASSIST_REMIND_READ, POLL_VOTE_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request, SHORT_LINK_OPEN_READ } from "./plan-cost-registry";
 import { SHORT_LINK_OPEN_UNITS } from "@/lib/short-link-open-rules";
 import { MAX_FUNNEL_PAGES } from "@/lib/page-funnel";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
@@ -64,6 +64,7 @@ import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { RETURNING_CODE_REQUEST_UNITS } from "@/lib/returning-code";
 import { SHELF_REQUEST_UNITS } from "@/lib/course-shelf";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
+import { POLL_VOTE_REQUEST_UNITS } from "@/lib/email-poll-rules";
 import { DRIP_MONTH_UNITS_PER_STORE_EMAIL, dripStartUnits } from "@/lib/drip-start-rules";
 import { WINBACK_OPEN_REQUEST_UNITS } from "@/lib/winback";
 import { WINBACK_OPEN_READ } from "./plan-cost-registry";
@@ -316,6 +317,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // And its checkout reminder is ASSIST_REMIND_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(ASSIST_REMIND_REQUEST_UNITS * laterPageCost() >= ASSIST_REMIND_READ, `${ASSIST_REMIND_REQUEST_UNITS} x ${laterPageCost()} < ${ASSIST_REMIND_READ}`);
   console.log(`a Store assistant checkout reminder: $${ASSIST_REMIND_READ.toFixed(6)} at most besides its email and model, counted as ${ASSIST_REMIND_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // A confirmed answer to a poll in a broadcast is POLL_VOTE_REQUEST_UNITS public requests, taken before it is kept: more than its reads and writes cost.
+  assert.ok(POLL_VOTE_REQUEST_UNITS * laterPageCost() >= POLL_VOTE_READ, `${POLL_VOTE_REQUEST_UNITS} x ${laterPageCost()} < ${POLL_VOTE_READ}`);
+  console.log(`a confirmed answer to an email poll: $${POLL_VOTE_READ.toFixed(6)} at most, counted as ${POLL_VOTE_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   // A drip run's read of a student's start takes units of the store's monthly figure sized by the store's courses
   // (lib/drip-start-rules.ts), never the store's public requests: at every size, from a store with no course to one
   // whose every product is a course, the units, each at a later page's cost, cost more than the read.

@@ -190,9 +190,18 @@ async function main(): Promise<void> {
 
   part("Every caller of createCheckout asks the EU VAT gate before it");
   {
-    const callers = [...files("lib"), ...files("app")].filter((file) => file !== join("lib", "store-checkout.ts")).flatMap((file) => {
-      const source = readFileSync(file, "utf8");
-      const calls = [...source.matchAll(/\bcreateCheckout\(/g)].map((m) => m.index ?? 0);
+    const sources = [...files("lib"), ...files("app")].filter((file) => file !== join("lib", "store-checkout.ts")).map((file) => ({ file, source: readFileSync(file, "utf8") }));
+    // A function that only hands its arguments on to createCheckout (`...args: Parameters<typeof createCheckout>`) is
+    // createCheckout under another name: its own call is not a sale, and the gate is asked where it is called.
+    const wrappers = sources.flatMap(({ source }) => [...source.matchAll(/function (\w+)\(\.\.\.args: Parameters<typeof createCheckout>\)/g)].map((m) => m[1]));
+    const opener = new RegExp(`\\b(?:${["createCheckout", ...wrappers].join("|")})\\(`, "g");
+    const callers = sources.flatMap(({ file, source }) => {
+      const passOn = /\(\.\.\.args: Parameters<typeof createCheckout>\)/.test(source);
+      // Not a call: a function's own definition, or the wrapper's one hand-on of its arguments.
+      const calls = [...source.matchAll(opener)]
+        .filter((m) => !/function\s+$/.test(source.slice(Math.max(0, (m.index ?? 0) - 12), m.index ?? 0)))
+        .filter((m) => !(passOn && /^createCheckout\(\.\.\.args\)/.test(source.slice(m.index ?? 0))))
+        .map((m) => m.index ?? 0);
       return calls.length ? [{ file, source, calls }] : [];
     });
     is("the callers are found (the card checkout among them)", callers.some((c) => c.file === join("app", "api", "store", "checkout", "route.ts")), true);

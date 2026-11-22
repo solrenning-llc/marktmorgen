@@ -32,12 +32,13 @@ writeFileSync(join(BIN, "gh"), `#!/bin/sh
 case "$FAKE_GH" in
   down) echo "gh: connection refused" >&2; exit 1 ;;
   req) printf '%s\\n' '["https://github.com/solrenning-llc/marktmorgen/issues/'"\${FAKE_ISSUE:-4932}"'#issuecomment-'"$FAKE_ID"'","'"$FAKE_BODY"'","'"\${FAKE_CREATED:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"'"]' ;;
-  nohead) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","READY, no head here",""]' ;;
-  *) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","Review @'"$FAKE_SHA"' READY",""]' ;;
+  nohead) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","READY, no head here","","COLLABORATOR"]' ;;
+  rev) printf '%s\\n' '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","'"$FAKE_BODY"'","","'"\${FAKE_ASSOC:-COLLABORATOR}"'"]' ;;
+  *) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","Review @'"$FAKE_SHA"' READY","","COLLABORATOR"]' ;;
 esac
 `); chmodSync(join(BIN, "gh"), 0o755);
 
-const base = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t", CORREIO_REPO: join(T, "mail.git"), CORREIO_PR_REPO: join(T, "prs.git"), CORREIO_SEM_VERSAO: "1", PATH: `${BIN}:${process.env.PATH}` };
+const base = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t", CORREIO_REPO: join(T, "mail.git"), CORREIO_PR_REPO: join(T, "prs.git"), CORREIO_SEM_VERSAO: "1", AGENT_MAIL_TEST: "1", CORREIO_GIT_DIR: join(T, "correio-local.git"), PATH: `${BIN}:${process.env.PATH}` };
 delete base.CLAUDE_CODE_REMOTE_SESSION_ID;
 // Both outputs are read: warnings go to stderr even when the command succeeds.
 const run = (args, env = {}, cwd = join(T, "w")) => {
@@ -48,9 +49,9 @@ const as = (k) => ({ CLAUDE_CODE_REMOTE_SESSION_ID: SES[k] });
 let falhas = 0, total = 0;
 const is = (nome, cond, extra = "") => { total++; if (!cond) falhas++; console.log(`${cond ? "  ok  " : "  FAIL"}  ${nome}${!cond && extra ? `\n        ${String(extra).slice(0, 400).replace(/\n/g, "\n        ")}` : ""}`); };
 // Writes a file straight into the mailbox with git, as an old or edited copy of the tool could (review of Claude 2 upbeat).
-const raw = (path, text) => {
+const raw = (path, text, repo = join(T, "mail.git")) => {
   const c = join(T, `raw-${Math.random().toString(16).slice(2)}`);
-  g(["clone", "-q", "-b", "correio", join(T, "mail.git"), c]);
+  g(["clone", "-q", "-b", "correio", repo, c]);
   mkdirSync(join(c, path, ".."), { recursive: true }); writeFileSync(join(c, path), text);
   g(["add", "."], c); g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "raw"], c); g(["push", "-q", "origin", "HEAD:correio"], c);
 };
@@ -107,7 +108,8 @@ is("a request is used once only", !r.ok && /já foi usado/.test(r.out), r.out);
 run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "a"], as("c2"));
 const W2 = join(T, "w2"); g(["init", "-q", W2]); g(["fetch", "-q", "--depth", "1", `file://${join(T, "mail.git")}`, "+refs/heads/correio:refs/x"], W2);
 run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "b"], as("c2"));
-r = run(["set-switch", "--as", "Claude 1 A", "--name", "record-review", "--on", "--reason", "t", ...pedidoDe(marca("set-switch", "record-review")).args], { ...as("c1a"), ...pedidoDe(marca("set-switch", "record-review")).env, FAKE_ID: String(nReq - 1) }, W2);
+// Step 6 (A14): the mailbox lives in the tool's own repository, so the shallow history is that repository's.
+r = run(["set-switch", "--as", "Claude 1 A", "--name", "record-review", "--on", "--reason", "t", ...pedidoDe(marca("set-switch", "record-review")).args], { ...as("c1a"), ...pedidoDe(marca("set-switch", "record-review")).env, FAKE_ID: String(nReq - 1), CORREIO_GIT_DIR: join(W2, ".git") }, W2);
 is("in a shallow clone that does not cover 60 minutes, the backup does not act on 'no sign'", !r.ok && /NÃO FOI CONFERIDO: o histórico local do correio é raso/.test(r.out), r.out);
 // Two boundaries: a merge whose side parent is 2 hours old. Coverage is the NEWEST boundary, not the oldest (review of Claude 4 AC).
 {
@@ -119,7 +121,7 @@ is("in a shallow clone that does not cover 60 minutes, the backup does not act o
 }
 const W3 = join(T, "w3"); g(["init", "-q", W3]); g(["fetch", "-q", "--depth", "2", `file://${join(T, "mail.git")}`, "+refs/heads/correio:refs/x"], W3);
 const qw3 = pedidoDe(marca("set-switch", "record-review"));
-r = run(["set-switch", "--as", "Claude 1 A", "--name", "record-review", "--on", "--reason", "t", ...qw3.args], { ...as("c1a"), ...qw3.env }, W3);
+r = run(["set-switch", "--as", "Claude 1 A", "--name", "record-review", "--on", "--reason", "t", ...qw3.args], { ...as("c1a"), ...qw3.env, CORREIO_GIT_DIR: join(W3, ".git") }, W3);
 is("with an old side boundary and a recent main boundary, coverage is the newest boundary: still NOT CHECKED", !r.ok && /NÃO FOI CONFERIDO: o histórico local do correio é raso/.test(r.out), r.out);
 // A git failure in the single-use check refuses; it never reads as "not used" (review of Claude 4 AC).
 {
@@ -209,6 +211,16 @@ r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "nohead", FAKE_PR: "2" });
 is("a comment that does not cite the head is shown as not checked", r.ok && /não cita o head/.test(r.out), r.out);
 r = run(["record-review", "--as", "Claude 2 X", "--pr", "2", "--sha", H2.slice(0, 10), "--result", "READY", "--link", link(2)], as("c6"));
 is("a Claude 6 session cannot record under Claude 2's name", !r.ok && /identidade/.test(r.out), r.out);
+// Step 6, A15: the comment must carry the verdict given, and come from someone who works on the repository.
+r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "rev", FAKE_PR: "2", FAKE_BODY: `Review @${H2.slice(0, 10)}: CHANGES, one MEDIUM` });
+is("a READY record whose comment says CHANGES is shown as not checked (A15)", r.ok && /não traz o veredito READY/.test(r.out), r.out);
+r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "rev", FAKE_PR: "2", FAKE_BODY: `Review @${H2.slice(0, 10)}: READY`, FAKE_ASSOC: "NONE" });
+is("a comment from someone outside the repository does not check the record (A15)", r.ok && /não é de quem trabalha no repositório/.test(r.out), r.out);
+// LOW 1 of Claude 2 lpgvy on #5113: a CHANGES review that mentions READY further down is not a READY.
+r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "rev", FAKE_PR: "2", FAKE_BODY: `Review #2 @${H2.slice(0, 10)} — CHANGES, one MEDIUM.\\nNeeds 2 focal READY on the head that fixes it.` });
+is("a CHANGES comment that mentions READY below its first line does not check a READY record (A15)", r.ok && /não traz o veredito READY/.test(r.out), r.out);
+r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "rev", FAKE_PR: "2", FAKE_BODY: `Review #2 @${H2.slice(0, 10)} — READY, 0 findings.\\nNo CHANGES asked.` });
+is("a READY first line checks the record even when CHANGES appears below it (A15)", r.ok && !/não traz o veredito/.test(r.out) && !/Link conferido: NÃO/.test(r.out), r.out);
 
 console.log("a record counts only for its head (2.3)");
 g(["checkout", "-q", "pr1"], P); const H1b = commit("f1.txt", "1b\n", "pr1 b"); g(["push", "-q", "../prs.git", "HEAD:refs/pull/1/head"], P);
@@ -330,7 +342,8 @@ console.log("order by the commit sequence; instants in the future refused; off p
   const mail = join(T, "mail.git");
   const ons = g(["ls-tree", "-r", "--name-only", "refs/heads/correio", "chaves/record-review"], mail).split("\n")
     .map((c) => ({ c, t: g(["show", `refs/heads/correio:${c}`], mail) })).filter((x) => /^ON\nClaude 5 ibqho\n/.test(x.t) && /^Pedido: /m.test(x.t));
-  const valido = ons[ons.length - 1].t;
+  // Run against the audited version (step 7), no valid ON was ever written: a fixed one stands in, so the run goes on.
+  const valido = ons.length ? ons[ons.length - 1].t : "ON\nClaude 5 ibqho\nteste\nPedido: https://github.com/solrenning-llc/marktmorgen/issues/4932#issuecomment-1\nSessão: session_012ST5ibqhoHCYrphJXU5az3 (claude-5)\n";
   raw("chaves/on-call/4102444800000-claude-5-ibqho-ab12", valido);
   is("an ON whose instant is in the future is ignored", /on-call: DESLIGADO/.test(run(["list-switches"]).out), run(["list-switches"]).out);
   // A valid ON stamped 3 minutes ahead and written first, then an OFF written after it: the OFF, written last, holds.
@@ -434,6 +447,191 @@ console.log("step 4: a full head, nothing NOT CHECKED goes on, the take checked 
   is("a git command past its time limit is stopped, with a clear error", /limite de tempo|ETIMEDOUT/.test(erro), erro);
 }
 
+console.log("test variables only with the marker and local repositories (OWNER-20261121-1904 step 4, part 2)");
+{
+  const mod = await import(TOOL);
+  const antes = { m: process.env.AGENT_MAIL_TEST, c: process.env.CORREIO_SEM_COMMITS };
+  process.env.AGENT_MAIL_TEST = "1"; process.env.CORREIO_SEM_COMMITS = "1";
+  // Imported here without CORREIO_REPO, the tool points at the real GitHub mailbox: a test variable must not count.
+  is("with the marker but the real GitHub repositories, a test variable does not count", typeof mod.testeLigado === "function" && mod.testeLigado("CORREIO_SEM_COMMITS") === false, String(mod.REPO));
+  for (const [k, v] of [["AGENT_MAIL_TEST", antes.m], ["CORREIO_SEM_COMMITS", antes.c]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+}
+// "Local" means a local path: an absolute path or file://, never another remote form (LOW of Claude 1 2as and Claude 4 Z on #5088).
+const ligadoCom = (repo) => spawnSync("node", ["--input-type=module", "-e", `const m = await import(${JSON.stringify(TOOL)}); console.log(String(m.testeLigado("CORREIO_SEM_COMMITS")));`],
+  { env: { ...base, CORREIO_REPO: repo, CORREIO_SEM_COMMITS: "1" }, encoding: "utf8" }).stdout.trim().split("\n").pop();
+for (const remoto of ["deploy@github.com:solrenning-llc/repo-id-transfer-test", "github.com:solrenning-llc/repo-id-transfer-test", "ftp://h/x", "ext::sh -c true", "relative/mail.git"]) {
+  is(`a test variable does not count with the mailbox at ${remoto}`, ligadoCom(remoto) === "false", ligadoCom(remoto));
+}
+is("it counts with an absolute local path", ligadoCom(join(T, "mail.git")) === "true", ligadoCom(join(T, "mail.git")));
+is("and with a file:// address", ligadoCom(`file://${join(T, "mail.git")}`) === "true", ligadoCom(`file://${join(T, "mail.git")}`));
+
+console.log("whose mark it is: another family's quota, the HOLD and the CLAIMED per session (OWNER-20261121-1904 step 5)");
+{
+  g(["init", "-q", "--bare", "mail6.git"]); g(["push", "-q", "../mail6.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m6 = { CORREIO_REPO: join(T, "mail6.git") };
+  const C3 = "cse_014YNUxAAAAAAAAAAAAAAAAA", C3B = "cse_014YNUxBBBBBBBBBBBBBBBBB", C4B = "cse_01S9eVAzzzzzzzzzzzzzzzzz";
+  const em = (k) => (k.startsWith("cse_") ? { CLAUDE_CODE_REMOTE_SESSION_ID: k } : as(k));
+  const q6 = (who, k, args, extra = {}) => run([...args, ...(who ? ["--as", who] : [])], { ...m6, ...em(k), ...extra });
+  const quotas = () => run(["list-quotas"], m6).out;
+  // PR 20 is Claude 3's: its commit carries a Claude 3 session trailer.
+  g(["checkout", "-q", "-B", "pr20", M], P); commit("f20.txt", "20\n", "pr20\n\nClaude-Session: https://claude.ai/code/session_014YNUxAAAAAAAAAAAAAAAAA"); g(["push", "-q", "../prs.git", "HEAD:refs/pull/20/head"], P);
+  g(["checkout", "-q", "-B", "pr21", M], P); commit("f21.txt", "21\n", "pr21\n\nClaude-Session: https://claude.ai/code/session_014YNUxAAAAAAAAAAAAAAAAA"); g(["push", "-q", "../prs.git", "HEAD:refs/pull/21/head"], P);
+
+  // A6: another family's quota only by that family or the coordinator.
+  r = q6("Claude 3 Z", "c6", ["set-quota", "--exhausted", "--until", "2099-01-01T00:00Z", "--by", "Claude 6 Z"]);
+  is("Claude 6 cannot declare Claude 3 out of quota", !r.ok && /própria família ou (pelo )?coordenador/.test(r.out), r.out);
+  is("so Claude 3 still counts as with quota", /claude-3: com cota/.test(quotas()), quotas());
+  r = q6("Claude 3 Z", C3B, ["set-quota", "--exhausted", "--until", "2099-01-01T00:00Z", "--by", "Claude 3 B"]);
+  is("another Claude 3 session declares its own family", r.ok && /SEM COTA/.test(quotas()), r.out + quotas());
+  r = q6("Claude 3 Z", C3, ["set-quota", "--available"]);
+  is("and Claude 3 declares the quota back", r.ok && /claude-3: com cota/.test(quotas()), r.out + quotas());
+  let q = pedidoDe(marca("set-quota", "claude-3"));
+  r = q6("Claude 3 Z", "ibq", ["set-quota", "--exhausted", "--until", "2099-01-01T00:00Z", "--by", "Claude 5 ibqho", ...q.args], q.env);
+  is("the named session declares another family's quota on a coordinator request", r.ok && /claude-3: SEM COTA/.test(quotas()), r.out + quotas());
+  r = q6("Claude 3 Z", "ibq", ["set-quota", "--available", "--by", "Claude 5 ibqho", ...q.args], q.env);
+  is("the same request is not used twice", !r.ok && /já foi usado/.test(r.out), r.out);
+  q6("Claude 3 Z", C3, ["set-quota", "--available"]);
+  // A record of another family's quota written by raw git from a Claude 6 session does not count.
+  raw(`estado/claude-3/29990101T000000Z-claude-6-z-ab12`, "Cota: sem\nVolta: 2099-01-01T00:00:00.000Z\nPor: Claude 6 Z\nData (UTC): 2026-11-22 05:00\nSessão: session_018ZjhHhUoHAGLUkhRVBUuAW (claude-6)\n", m6.CORREIO_REPO);
+  is("a raw record of Claude 3's quota written by a Claude 6 session is ignored", /claude-3: com cota/.test(quotas()), quotas());
+  raw(`estado/claude-7/20261121T050751Z-claude-7-b445`, "Cota: sem\nVolta: 2099-01-01T00:00:00.000Z\nPor: Claude 6 (informado pelo dono)\nData (UTC): 2026-11-21 05:07\n", m6.CORREIO_REPO);
+  is("an old record, written before this version without a session line, still counts as before", /claude-7: SEM COTA/.test(quotas()), quotas());
+
+  // A7: a HOLD is released only by whoever placed it, the PR's author or the coordinator.
+  const st = (n) => run(["pr-status", "--pr", String(n)], m6).out;
+  r = q6("Claude 4 X", "c4", ["hold-pr", "--pr", "20", "--reason", "cost ceiling"]);
+  is("Claude 4 holds #20", r.ok && /HOLD por Claude 4 X/.test(st(20)), r.out + st(20));
+  r = q6("Claude 2 X", "c2", ["release-pr", "--pr", "20"]);
+  is("Claude 2 (not the one who held it, not the author) cannot release the HOLD", !r.ok && /HOLD/.test(r.out) && /HOLD por Claude 4 X/.test(st(20)), r.out + st(20));
+  r = q6("Claude 4 X", C4B, ["claim-pr", "--pr", "20"]);
+  is("a CLAIMED does not replace an active HOLD, even from the family that held it", !r.ok && /HOLD por Claude 4 X/.test(st(20)), r.out + st(20));
+  r = q6("Claude 3 Z", C3, ["release-pr", "--pr", "20"]);
+  is("the PR's author (a family with commits on it) releases the HOLD", r.ok && /LIBERADO/.test(st(20)), r.out + st(20));
+  q6("Claude 4 X", "c4", ["hold-pr", "--pr", "20", "--reason", "cost ceiling"]);
+  q6("Claude 2 X", "c2", ["hold-pr", "--pr", "20", "--reason", "money review"]);
+  r = q6("Claude 4 X", "c4", ["release-pr", "--pr", "20"]);
+  is("with two HOLDs on top of each other, the first holder cannot release the second one's", !r.ok && /HOLD por Claude 2 X/.test(st(20)), r.out + st(20));
+  q = pedidoDe(marca("release-pr", "20"));
+  r = q6("Claude 5 ibqho", "ibq", ["release-pr", "--pr", "20", ...q.args], q.env);
+  is("the coordinator's named session releases it on a request on #4932", r.ok && /LIBERADO/.test(st(20)), r.out + st(20));
+  q6("Claude 4 X", "c4", ["hold-pr", "--pr", "20", "--reason", "cost ceiling"]);
+  r = q6("Claude 5 ibqho", "ibq", ["release-pr", "--pr", "20", ...q.args], q.env);
+  is("a release request is used once", !r.ok && /já foi usado/.test(r.out) && /HOLD por Claude 4 X/.test(st(20)), r.out + st(20));
+  raw("prs/20/99", `Ação: LIBERADO\nPR: 20\nPor: Claude 2 X\nData: ${new Date().toISOString()}\nSessão: session_01FR6Z1Q87JZvTFBRpZ8SNo8 (claude-2)\n`, m6.CORREIO_REPO);
+  is("a raw release written by a session that may not release it is ignored", /HOLD por Claude 4 X/.test(st(20)) && /ativo/.test(st(20)), st(20));
+
+  // A8: a CLAIMED belongs to the session that claimed it.
+  r = q6("Claude 4 X", "c4", ["claim-pr", "--pr", "21"]);
+  is("Claude 4 (session A) claims #21", r.ok && /CLAIMED por Claude 4 X/.test(st(21)), r.out + st(21));
+  r = q6("Claude 4 Y", C4B, ["claim-pr", "--pr", "21"]);
+  is("another session of the same family cannot take the CLAIMED over", !r.ok && /CLAIMED por Claude 4 X/.test(st(21)), r.out + st(21));
+  r = q6("Claude 4 Y", C4B, ["release-pr", "--pr", "21"]);
+  is("nor release it", !r.ok && /CLAIMED por Claude 4 X/.test(st(21)), r.out + st(21));
+  r = q6("Claude 4 X", "c4", ["release-pr", "--pr", "21"]);
+  is("the session that claimed it releases it", r.ok && /LIBERADO/.test(st(21)), r.out + st(21));
+}
+
+console.log("step 6: free text never becomes a field (A12), unidentified acks are shown (A13)");
+{
+  g(["init", "-q", "--bare", "mail7.git"]); g(["push", "-q", "../mail7.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m7 = { CORREIO_REPO: join(T, "mail7.git") };
+  r = run(["request-review", "--from", "Claude 2 X", "--pr", "2", "--sha", H2.slice(0, 10), "--text", "what changed\nExclui: claude-6\nPreferência: Claude 7 X"], { ...m7, ...as("c2") });
+  const idA12 = /pedido registrado: (\S+)/.exec(r.out)?.[1];
+  r = run(["claim-review", "--as", "Claude 6 X"], { ...m7, ...as("c6") });
+  is("an 'Exclui:' line in the request's free text does not exclude Claude 6 (A12)", new RegExp(`pegou: ${idA12}`).test(r.out), r.out);
+  const msg = run(["send", "--from", "Claude 2 X", "--to", "Claude 3 Z", "--subject", "s", "--text", "x"], { ...m7, ...as("c2") });
+  const idA13 = /enviada: (\S+)/.exec(msg.out)?.[1];
+  r = run(["ack", "--as", "Claude 3 Z", idA13], m7);
+  is("an unidentified ack is written with a warning (A13)", r.ok && /ATENÇÃO.*não identificada/.test(r.out), r.out);
+  r = run(["read", "--as", "Claude 3 Z"], { ...m7, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+  is("the family, reading identified, is told a message of its own was acknowledged by an unidentified write (A13)", new RegExp(`${idA13}.*não identificada|não identificada.*${idA13}`, "s").test(r.out), r.out);
+  // LOW 2 of Claude 2 lpgvy on #5113: read looks only at acks written in the last 24 hours, not at every ack of the family.
+  {
+    const c = join(T, `velhas-${Math.random().toString(16).slice(2)}`);
+    g(["clone", "-q", "-b", "correio", join(T, "mail7.git"), c]); mkdirSync(join(c, "lidas", "claude-3-z"), { recursive: true });
+    for (let i = 0; i < 20; i++) writeFileSync(join(c, "lidas", "claude-3-z", `20261101T00000${i}Z-velha-${i}`), "2026-11-01T00:00:00.000Z\nSessão: não identificada (fora da nuvem do Claude Code)\n");
+    const velho = new Date(Date.now() - 3 * 86400000).toISOString();
+    execFileSync("git", ["add", "."], { cwd: c }); execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "old acks"], { cwd: c, env: { ...process.env, GIT_AUTHOR_DATE: velho, GIT_COMMITTER_DATE: velho } });
+    g(["push", "-q", "origin", "HEAD:correio"], c);
+    const tr = join(T, `trace-show-${Math.random().toString(16).slice(2)}.txt`);
+    spawnSync("node", [TOOL, "read", "--as", "Claude 3 Z"], { cwd: join(T, "w"), env: { ...base, ...m7, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA", GIT_TRACE: tr }, encoding: "utf8" });
+    const lidasLidas = readFileSync(tr, "utf8").split("\n").filter((l) => /trace: built-in: git show /.test(l) && /lidas\/claude-3-z\/20261101T/.test(l)).length;
+    is("read does not open the family's acks older than 24 hours (LOW 2 on #5113)", lidasLidas === 0, `${lidasLidas} old acks opened`);
+  }
+  // A11: one decision reads one snapshot of the mailbox. GIT_TRACE records every git command; only fetches of the mailbox count.
+  const buscas = (args, env) => {
+    const tr = join(T, `trace-${Math.random().toString(16).slice(2)}.txt`);
+    const x = spawnSync("node", [TOOL, ...args], { cwd: join(T, "w"), env: { ...base, ...m7, ...env, GIT_TRACE: tr }, encoding: "utf8" });
+    // Only reads of the mailbox branch count; a push's own negotiation (fetch --negotiate-only) is part of the write.
+    const n = readFileSync(tr, "utf8").split("\n").filter((l) => /trace: built-in: git fetch /.test(l) && l.includes("mail7.git") && l.includes("+refs/heads/correio:")).length;
+    return { n, out: `${x.stdout}${x.stderr}` };
+  };
+  let b = buscas(["claim-review", "--as", "Claude 4 X"], as("c4"));
+  is("a claim with nothing to take reads the mailbox once (A11)", b.n === 1, `${b.n} fetches\n${b.out}`);
+  g(["checkout", "-q", "-B", "pr22", M], P); const H22 = commit("f22.txt", "22\n", "pr22"); g(["push", "-q", "../prs.git", "HEAD:refs/pull/22/head"], P);
+  run(["request-review", "--from", "Claude 2 X", "--pr", "22", "--sha", H22.slice(0, 10), "--text", "second"], { ...m7, ...as("c2") });
+  b = buscas(["claim-review", "--as", "Claude 4 X"], as("c4"));
+  is("a claim that takes reads one snapshot to decide and one more to write (A11)", /pegou/.test(b.out) && b.n === 2, `${b.n} fetches\n${b.out}`);
+  b = buscas(["pr-status", "--pr", "2"], {});
+  is("pr-status reads the mailbox once (A11)", b.n === 1, `${b.n} fetches`);
+  b = buscas(["hold-pr", "--as", "Claude 4 X", "--pr", "2", "--reason", "t"], as("c4"));
+  is("hold-pr reads one snapshot to decide and one more to write (A11)", b.n === 2, `${b.n} fetches\n${b.out}`);
+}
+
+console.log("step 6: the private mailbox never lands in the public clone (A14)");
+{
+  const W = join(T, "w");
+  for (const ref of g(["for-each-ref", "--format=%(refname)", "refs/correio", "refs/agent-mail"], W).split("\n").filter(Boolean)) g(["update-ref", "-d", ref], W);
+  r = run(["send", "--from", "Claude 2 X", "--to", "Claude 3 Z", "--subject", "s", "--text", "private words"], { ...as("c2"), CORREIO_REPO: join(T, "mail7.git") });
+  const ponta = g(["rev-parse", "refs/heads/correio"], join(T, "mail7.git"));
+  run(["watch", "--as", "Claude 3 Z", "--seconds", "1"], { CORREIO_REPO: join(T, "mail7.git"), CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+  is("after a send and a watch, the clone the tool runs in has no mailbox ref (A14)", r.ok && g(["for-each-ref", "--format=%(refname)", "refs/correio", "refs/agent-mail"], W) === "", g(["for-each-ref", "refs/correio", "refs/agent-mail"], W));
+  let tem = true; try { g(["cat-file", "-e", ponta], W); } catch { tem = false; }
+  is("and no mailbox commit in its objects (A14)", tem === false, ponta);
+  g(["update-ref", "refs/agent-mail/append-only-checked", g(["rev-parse", "HEAD"], W)], W);
+  r = run(["list-queue"], { CORREIO_REPO: join(T, "mail7.git") });
+  is("a mailbox ref left by an older version in the clone is reported, with the command to delete it (A14)", /ATENÇÃO.*refs\/agent-mail\/append-only-checked/.test(r.out) && /update-ref -d/.test(r.out), r.out);
+  g(["update-ref", "-d", "refs/agent-mail/append-only-checked"], W);
+  // NIT 1 of Claude 1 on #5113: the first run of the new repository keeps the old anchor of the clone, so a rewrite
+  // made before the switch is still caught.
+  g(["init", "-q", "--bare", "mail8.git"]); g(["push", "-q", "../mail8.git", "HEAD:refs/heads/correio"], W);
+  const m8 = { CORREIO_REPO: join(T, "mail8.git"), CORREIO_GIT_DIR: join(T, "dir8-antigo.git") };
+  run(["send", "--from", "Claude 2 X", "--to", "Claude 3 Z", "--subject", "s", "--text", "um"], { ...as("c2"), ...m8 });
+  const ancora = g(["rev-parse", "refs/heads/correio"], join(T, "mail8.git"));
+  g(["fetch", "-q", join(T, "mail8.git"), `+refs/heads/correio:refs/agent-mail/old-copy`], W);
+  g(["update-ref", "refs/agent-mail/append-only-checked", ancora], W); g(["update-ref", "-d", "refs/agent-mail/old-copy"], W);
+  const re = join(T, `rewrite-${Math.random().toString(16).slice(2)}`);
+  g(["clone", "-q", "-b", "correio", join(T, "mail8.git"), re]); g(["reset", "-q", "--hard", "HEAD~1"], re);
+  g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "rewritten"], re); g(["push", "-q", "-f", "origin", "HEAD:correio"], re);
+  r = run(["watch", "--as", "Claude 3 Z", "--seconds", "1"], { CORREIO_REPO: join(T, "mail8.git"), CORREIO_GIT_DIR: join(T, "dir8-novo.git"), CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+  is("on the first run of a new mailbox repository, a rewrite made before it is caught by the clone's old anchor (NIT 1 on #5113)", /ALERTA: o ramo correio não só acrescentou: o ramo foi reescrito/.test(r.out), r.out);
+  g(["update-ref", "-d", "refs/agent-mail/append-only-checked"], W);
+  // MEDIUM of Claude 4 3Kc on #5117: in CO (b)'s order (read first, then the warned delete, then the watch), the old anchor
+  // is kept when the tool's repository is created by any command, so the watch still catches the rewrite.
+  {
+    g(["init", "-q", "--bare", "mail9.git"]); g(["push", "-q", "../mail9.git", "HEAD:refs/heads/correio"], W);
+    run(["send", "--from", "Claude 2 X", "--to", "Claude 3 Z", "--subject", "s", "--text", "um"], { ...as("c2"), CORREIO_REPO: join(T, "mail9.git"), CORREIO_GIT_DIR: join(T, "dir9-antigo.git") });
+    const a9 = g(["rev-parse", "refs/heads/correio"], join(T, "mail9.git"));
+    g(["fetch", "-q", join(T, "mail9.git"), "+refs/heads/correio:refs/agent-mail/old-copy"], W);
+    g(["update-ref", "refs/agent-mail/append-only-checked", a9], W); g(["update-ref", "-d", "refs/agent-mail/old-copy"], W);
+    const novo = { CORREIO_REPO: join(T, "mail9.git"), CORREIO_GIT_DIR: join(T, "dir9-novo.git"), CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" };
+    run(["read", "--as", "Claude 3 Z"], novo);
+    for (const ref of g(["for-each-ref", "--format=%(refname)", "refs/correio", "refs/agent-mail"], W).split("\n").filter(Boolean)) g(["update-ref", "-d", ref], W);
+    const re9 = join(T, `rewrite9-${Math.random().toString(16).slice(2)}`);
+    g(["clone", "-q", "-b", "correio", join(T, "mail9.git"), re9]); g(["reset", "-q", "--hard", `${a9}~1`], re9); // before the anchor itself: read and watch also write a signal (#5080)
+    g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "rewritten"], re9); g(["push", "-q", "-f", "origin", "HEAD:correio"], re9);
+    r = run(["watch", "--as", "Claude 3 Z", "--seconds", "1"], novo);
+    is("read first, the clone's refs deleted as warned, then the watch: the rewrite made before the switch is still caught (MEDIUM on #5117)", /ALERTA: o ramo correio não só acrescentou: o ramo foi reescrito/.test(r.out), r.out);
+  }
+  // NIT 2: the shared-folder warning looks at the folder's permissions, not at its path.
+  for (const [modo, aviso] of [[0o700, false], [0o777, true]]) {
+    const d = join(T, `pasta-${modo.toString(8)}`); mkdirSync(d); chmodSync(d, modo);
+    writeFileSync(join(d, "agent-mail.mjs"), readFileSync(TOOL));
+    const x = spawnSync("node", [join(d, "agent-mail.mjs"), "list-switches"], { cwd: W, env: { ...base, AGENT_MAIL_TEST: "", CORREIO_SEM_VERSAO: "" }, encoding: "utf8" });
+    is(`a copy in a folder with mode ${modo.toString(8)} ${aviso ? "is" : "is not"} warned about a folder anyone can write (NIT 2 on #5113)`, /pasta que todos podem escrever/.test(`${x.stdout}${x.stderr}`) === aviso, `${x.stdout}${x.stderr}`.slice(0, 300));
+  }
+}
+
 console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");
 {
   r = run(["check-append-only"]);
@@ -446,6 +644,13 @@ console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");
   is("the watch raises the alarm once, and says to tell the coordinator and the owner", /ALERTA: o ramo correio não só acrescentou/.test(r.out) && /coordenador e o dono/.test(r.out), r.out);
   r = run(["watch", "--as", "Claude 3 Z", "--seconds", "1"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
   is("the same change is not raised again on the next watch", !/ALERTA: o ramo correio/.test(r.out), r.out);
+  // The audit's proof of concept 3 (step 7): a request deleted by a plain commit is reported too, by name.
+  const pedidoAlvo = g(["ls-tree", "-r", "--name-only", "refs/heads/correio", "fila/pedidos"], join(T, "mail.git")).split("\n")[0];
+  const cl = join(T, `rm-${Math.random().toString(16).slice(2)}`);
+  g(["clone", "-q", "-b", "correio", join(T, "mail.git"), cl]); g(["rm", "-q", pedidoAlvo], cl);
+  g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "raw delete"], cl); g(["push", "-q", "origin", "HEAD:correio"], cl);
+  r = run(["check-append-only"]);
+  is("a commit that deletes a request is reported, with the file (proof of concept 3)", !r.ok && new RegExp(`APAGOU ${pedidoAlvo.replace(/[.]/g, "[.]")}`).test(r.out), r.out);
 }
 
 console.log("availability: last signal, percent of quota, Codex preference (owner, OWNER-20261122-0121-MAIL-AVAILABILITY)");
@@ -570,6 +775,9 @@ r = run(["list-switches"], { CORREIO_SEM_VERSAO: "" });
 is("a different hash on main: the copy is reported as not the reviewed one", /não é a versão revisada do main do Marktmorgen/.test(r.out), r.out);
 r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "x"], { ...as("c2"), CORREIO_SEM_VERSAO: "" });
 is("an old copy cannot write: the send is refused, with the install command to run", !r.ok && /escrita recusada/.test(r.out) && /CO \(b\)/.test(r.out), r.out);
+// Step 4, part 2: a test variable counts only with the marker AGENT_MAIL_TEST=1 and local repositories.
+r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "x"], { ...as("c2"), CORREIO_SEM_VERSAO: "1", AGENT_MAIL_TEST: "" });
+is("without the marker, CORREIO_SEM_VERSAO=1 is ignored: the old copy is still refused, and the tool says the variable was ignored", !r.ok && /escrita recusada/.test(r.out) && /CORREIO_SEM_VERSAO.*ignorada/.test(r.out), r.out);
 r = run(["list-queue"], { CORREIO_SEM_VERSAO: "" });
 is("an old copy can still read, with the warning", r.ok && /não é a versão revisada/.test(r.out), r.out);
 r = run(["list-switches"], { CORREIO_SEM_VERSAO: "", CORREIO_PR_REPO: join(T, "nao-existe.git") });

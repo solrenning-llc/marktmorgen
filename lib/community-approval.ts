@@ -669,10 +669,12 @@ export const HELD_WAITING_COMMANDS = 2;
  * each record is checked to be theirs. An item past HELD_DAYS reads as
  * expired here even before a sweep has written its note.
  */
-export async function heldOf(id: string, who: string, now = nowSeconds()): Promise<Held[]> {
+export async function heldOf(id: string, who: string, now = nowSeconds(), { prune = true }: { prune?: boolean } = {}): Promise<Held[]> {
   // Read on every visit of a member to the community, so one read and no
   // write: what ran out is left out here, and pruned by the member's next
   // hold (and by the list's own expiry), not by every visit (finding 5).
+  // An id whose item is gone is dropped from the list, unless `prune` is false: a person's data copy only reads
+  // (lib/person-copy.ts; issue #5125).
   const replies = repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", mineKey(id, who), "+inf", `(${now - KEEP_SECONDS}`, "LIMIT", 0, MAX_MINE]]), 1);
   const ids = replies ? stringList(replies[0]) : null;
   if (!ids || ids.some((item) => !ITEM_ID.test(item))) throw new UnknownReplyError("a member's held community items");
@@ -690,7 +692,7 @@ export async function heldOf(id: string, who: string, now = nowSeconds()): Promi
     }
     out.push(held.state === "held" && held.at <= now - HELD_DAYS * DAY ? noteOf(held, "expired", "", held.at + HELD_DAYS * DAY) : held);
   });
-  if (stale.length) await redisPipeline([["ZREM", mineKey(id, who), ...stale]]);
+  if (prune && stale.length) await redisPipeline([["ZREM", mineKey(id, who), ...stale]]);
   return out;
 }
 

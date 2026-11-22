@@ -1963,7 +1963,7 @@ export type ImportTrace = {
  * a batch of rows kept in an unreadable shape, and imports older than the store's last LIST_SIZE, which are kept for
  * KEEP_SECONDS but are no longer on its list.
  */
-export async function importTracesOf(store: Store, email: string, now = Date.now()): Promise<{ records: ImportTrace[]; unread: string[] }> {
+export async function importTracesOf(store: Store, email: string, now = Date.now(), { prune = true }: { prune?: boolean } = {}): Promise<{ records: ImportTrace[]; unread: string[] }> {
   const address = normaliseEmail(email);
   const subject = address.normalize("NFC");
   const records: ImportTrace[] = [];
@@ -1977,10 +1977,13 @@ export async function importTracesOf(store: Store, email: string, now = Date.now
   for (const job of jobs) {
     // Old jobs may still hold a pre-deploy sliding-TTL report. The copy must apply the same deadline as reportCsv.
     const reportExpired = now >= reportEndsAt(job) * 1000;
-    const reportRead: Command = reportExpired ? ["DEL", errorsKey(job.id)] : ["LRANGE", errorsKey(job.id), 0, MAX_REPORT_ROWS - 1];
+    // Past its keeping, the report is deleted here, unless `prune` is false: a person's data copy only reads
+    // (lib/person-copy.ts; issue #5125). It then reads nothing of the report, which is not disclosed either way, and
+    // which its own expiry and reportCsv still remove.
+    const reportRead: Command = reportExpired ? (prune ? ["DEL", errorsKey(job.id)] : ["EXISTS", errorsKey(job.id)]) : ["LRANGE", errorsKey(job.id), 0, MAX_REPORT_ROWS - 1];
     const replies = repliesFor(await redisPipeline([reportRead, ["LLEN", rowsKey(job.id)], ["SMEMBERS", mailKey(job.id)]]), 3);
     const deletedReport = reportExpired ? countOf(replies?.[0]) : 0;
-    if (deletedReport !== 0 && deletedReport !== 1) throw new UnknownReplyError("an expired import report deleted for a copy");
+    if (deletedReport !== 0 && deletedReport !== 1) throw new UnknownReplyError("an expired import report, deleted or checked for a copy");
     const errors = reportExpired ? [] : stringList(replies?.[0]);
     const batches = countOf(replies?.[1]);
     const mail = stringList(replies?.[2]);

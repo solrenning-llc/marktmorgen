@@ -219,11 +219,20 @@ export function linhaSessao(s = sessaoAtual()) {
   return s.familia ? `${s.id} (${s.familia})` : `${s.id} (conta sem família conhecida)`;
 }
 
+/**
+ * O nome de uma família para pôr numa mensagem, tirado da lista fixa de SESSOES, nunca do ambiente (CodeQL 257 no #5080):
+ * a sessão vem de CLAUDE_CODE_REMOTE_SESSION_ID, que o CodeQL trata como dado sensível, e uma mensagem de erro chega ao
+ * console. Por isso nenhuma mensagem leva o identificador da sessão, e a família sai da lista.
+ */
+export function familiaDaLista(f) {
+  return Object.values(SESSOES).find((x) => x === f) ?? "desconhecida";
+}
+
 /** Recusa escrever com o nome de outra família quando a sessão da nuvem é de uma família conhecida. */
 export function conferirIdentidade(nome, s = sessaoAtual()) {
   if (!nome || nome === true || !s?.familia) return;
   if (familia(nome) !== s.familia) {
-    throw new Error(`identidade: esta sessão (${s.id.slice(0, 15)}…) é da família ${s.familia} e não escreve como "${nome}" (${familia(nome)}). ` +
+    throw new Error(`identidade: esta sessão é da família ${familiaDaLista(s.familia)} e não escreve como "${nome}" (${familia(nome)}). ` +
       'Use o nome da sua família; a cota de outra família só é declarada por ela mesma ou pelo coordenador (passo 5).');
   }
 }
@@ -867,9 +876,9 @@ export function conferirPedido(pedido, comando, alvo, commit = buscar(), agora =
 export function conferirPrivilegio({ eu, acao, comando, alvo, pedido, dono = "", agora = new Date(), commit = buscar() }) {
   const s = sessaoAtual();
   if (!s || (s.id !== SESSAO_NOMEADA && s.id !== SESSAO_RESERVA)) {
-    throw new Error(`só a sessão nomeada (Claude 5 ibqho, ${SESSAO_NOMEADA}) ${acao}, ou a reserva (Claude 1 A, ${SESSAO_RESERVA}) nos três casos dela; esta sessão é ${s ? s.id : "não identificada"} (C1-20261121-2036-C6-1, condição 1)`);
+    throw new Error(`só a sessão nomeada (Claude 5 ibqho, ${SESSAO_NOMEADA}) ${acao}, ou a reserva (Claude 1 A, ${SESSAO_RESERVA}) nos três casos dela; esta sessão ${s ? "não é nenhuma das duas" : "não é identificada"} (C1-20261121-2036-C6-1, condição 1)`);
   }
-  if (familia(eu) !== s.familia) throw new Error(`identidade: esta sessão é da família ${s.familia} e não age como "${eu}"`);
+  if (familia(eu) !== s.familia) throw new Error(`identidade: esta sessão é da família ${familiaDaLista(s.familia)} e não age como "${eu}"`);
   let reserva = "";
   if (s.id === SESSAO_RESERVA) {
     const ownerMsg = String(dono === true ? "" : dono ?? "").trim();

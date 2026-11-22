@@ -817,6 +817,16 @@ console.log("secrets never printed: a credential in the mailbox address stays ou
   is("a failed git becomes an error without the command line: subcommand, exit code and git's own last line only (CodeQL 257 at line 2013)",
     eg && eg.message === "git fetch falhou (código 128): fatal: unable to access 'https://github.com/o/correio.git/': 403" && eg.status === 128 && !eg.message.includes(TOKEN) && !/Command failed|refs\/heads/.test(eg.message), eg?.message);
   is("a subcommand outside the tool's list is named 'comando', never taken from the arguments (CodeQL 257)", mod.erroDoGit?.([`https://${TOKEN}@x`], { status: 1 })?.message === "git comando falhou (código 1)");
+  // CodeQL 257 at line 2028: the session comes from CLAUDE_CODE_REMOTE_SESSION_ID, a sensitive name for CodeQL; no error
+  // message carries it, and the family named comes from the fixed list.
+  r = run(["send", "--from", "Claude 3 X", "--to", "Claude 4 X", "--subject", "s", "--text", "x"], as("c2"));
+  is("the identity error names the family, never the session id read from the environment (CodeQL 257)",
+    !r.ok && /esta sessão é da família claude-2/.test(r.out) && !r.out.includes("01FR6Z1Q87"), r.out);
+  r = run(["set-switch", "--as", "Claude 2 X", "--name", "ready-check", "--on", "--reason", "t", "--request", "x"], as("c2"));
+  is("the privileged-action refusal does not print the session id either (CodeQL 257)",
+    !r.ok && /esta sessão não é nenhuma das duas/.test(r.out) && !r.out.includes("01FR6Z1Q87"), r.out);
+  is("familiaDaLista returns a family from the fixed list, and 'desconhecida' for anything else (CodeQL 257)",
+    mod.familiaDaLista?.("claude-2") === "claude-2" && mod.familiaDaLista?.("01FR6Z1Q87JZvT") === "desconhecida");
   is("semSegredo keeps an ordinary message as it is (CodeQL 257)", mod.semSegredo?.("já existe no correio: prs/3/0; nada é reescrito") === "já existe no correio: prs/3/0; nada é reescrito");
 }
 

@@ -42,6 +42,7 @@ import { liftCommand, suppressCommand, suppressedAmongCommand, suppressedCommand
 import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, countData, dataKey, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, fieldReleaseBytes, orderWriteIfSame, releaseOrderData } from "@/lib/order-data";
+import { CONTACT_IMPORT_WORK } from "@/lib/contact-import-rules";
 import { DATA_STEP_BYTES, dataBytes, utf8Length } from "@/lib/store-data-rules";
 import { UnknownReply, exactReplies, replyCount } from "@/lib/redis-exact";
 
@@ -430,7 +431,9 @@ export async function upsertContact(
     // Where its room is counted, set once when it is first written (Contact.r, #2576).
     const placedNext = placed(next, before, Boolean(room && isOrderRoom(room)));
     await needContacts(room, [{ before, next: placedNext }]);
-    const counts = { agreed: agreed && !before?.agreed, left: resubscribe ? -1 : 0 } as const;
+    // The count of those who left holds only people who had agreed (unsubscribe, stopWriting, imports): a contact
+    // brought in already unsubscribed was never in it, so their yes takes nothing from it.
+    const counts = { agreed: agreed && !before?.agreed, left: resubscribe && before?.agreed ? -1 : 0 } as const;
     const joined = input.sid ? joinedCommands(input.sid, email) : [];
     // An order's write to a row counted in the contacts' slot is not charged to the order (writeContactIf, inContacts):
     // the slot is counted at what it changed once written.
@@ -497,8 +500,12 @@ export const CONTACT_COMMANDS_MOST = {
   noteProduct: CONTACT_WRITE_TRIES * (1 + 1 + 2) + 1,
   takeBackRound: 1 + 1 + 2,
   takeBack: CONTACT_WRITE_TRIES * (1 + 1 + 2) + 1,
-  /** tokensFor for `n` addresses: both reads, and for each a token's record, its checked write (1 + 2 calls) and, lost, the record taken back. */
-  tokens: (n: number): number => CONTACT_WRITE_TRIES * (2 + n * (1 + 3 + 1)),
+  /**
+   * tokensFor for `n` addresses: both reads, and one script (TOKEN_CAS_HSET) whose calls for each are its row, its
+   * print, the record and the row written (Codex V on #3925); nothing is taken back, since a record is made only with
+   * its row. No more than before for any n: 3 + 4n against 2 + 5n.
+   */
+  tokens: (n: number): number => CONTACT_WRITE_TRIES * (2 + 1 + n * 4),
 } as const;
 
 /**
@@ -737,6 +744,91 @@ export async function isMailable(listId: string, rawEmail: string): Promise<bool
   return contact !== null && mailable(contact);
 }
 
+/** A failed read is unknown, never evidence that an address or erasure is absent. */
+const CONTACT_IMPORT_UNKNOWN = "Contacts were not imported. Try again.";
+function exactImportReply(reply: unknown, length: number): asserts reply is unknown[] {
+  if (!Array.isArray(reply) || reply.length !== length) throw new Error(CONTACT_IMPORT_UNKNOWN);
+  for (let i = 0; i < length; i += 1) {
+    if (!Object.hasOwn(reply, i)) throw new Error(CONTACT_IMPORT_UNKNOWN);
+  }
+}
+function importCount(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error(CONTACT_IMPORT_UNKNOWN);
+  return value;
+}
+function importValues(value: unknown, length: number): (string | null)[] {
+  exactImportReply(value, length);
+  for (const slot of value) {
+    if (slot !== null && typeof slot !== "string") throw new Error(CONTACT_IMPORT_UNKNOWN);
+  }
+  return value as (string | null)[];
+}
+
+/** Atomic import only: a completed erasure always wins over a stale import read. */
+export const IMPORT_CONTACTS_WRITE = `-- marktmorgen:contact-import:v1
+if #KEYS ~= 4 or #ARGV == 0 or #ARGV % 6 ~= 0 then return redis.error_reply("invalid contact import") end
+for i = 1, 4 do
+  local kind = redis.call("TYPE", KEYS[i]).ok
+  local wanted = i <= 2 and "hash" or "string"
+  if kind ~= "none" and kind ~= wanted then return redis.error_reply("invalid contact import type") end
+end
+for i = 3, 4 do
+  local count = redis.call("GET", KEYS[i])
+  if count and (not string.match(count, "^%d+$") or not tonumber(count) or tonumber(count) > 9007199254740991 - #ARGV / 6) then return redis.error_reply("invalid contact import count") end
+end
+for i = 1, #ARGV, 6 do
+  if (ARGV[i + 4] ~= "0" and ARGV[i + 4] ~= "1") or (ARGV[i + 5] ~= "0" and ARGV[i + 5] ~= "1") then
+    return redis.error_reply("invalid contact import flags")
+  end
+end
+local out = {}
+local added = 0
+local left = 0
+for i = 1, #ARGV, 6 do
+  if redis.call("HEXISTS", KEYS[2], ARGV[i + 1]) == 1 then
+    out[#out + 1] = -1
+  else
+    local cur = redis.call("HGET", KEYS[1], ARGV[i])
+    local seen = ""
+    if cur then seen = redis.sha1hex(cur) end
+    if seen == ARGV[i + 2] then
+      redis.call("HSET", KEYS[1], ARGV[i], ARGV[i + 3])
+      added = added + tonumber(ARGV[i + 4])
+      left = left + tonumber(ARGV[i + 5])
+      out[#out + 1] = 1
+    else
+      out[#out + 1] = 0
+    end
+  end
+end
+if added > 0 then redis.call("INCRBY", KEYS[3], added) end
+if left > 0 then redis.call("INCRBY", KEYS[4], left) end
+return out`;
+
+type ImportWrite = { email: string; value: string; was: string; added: boolean; left: boolean };
+async function writeImportedContacts(listId: string, writes: ImportWrite[]): Promise<number[]> {
+  try {
+    const reply = await redisPipeline([["EVAL", IMPORT_CONTACTS_WRITE, 4, leadsKey(listId), suppressedKey(listId), agreedKey(listId), unsubKey(listId),
+      ...writes.flatMap((w) => [w.email, suppressionPrint(listId, w.email), w.was, w.value, w.added ? 1 : 0, w.left ? 1 : 0])]]);
+    exactImportReply(reply, 1);
+    exactImportReply(reply[0], writes.length);
+    if (!reply[0].every((v) => v === -1 || v === 0 || v === 1)) throw new Error(CONTACT_IMPORT_UNKNOWN);
+    return reply[0] as number[];
+  } catch {
+    // Read-only recovery of a lost answer: an exact current value can prove
+    // that it landed. Never write an unfenced HSET or retry the Lua here.
+    const reply = await redisPipeline([
+      ["HMGET", leadsKey(listId), ...writes.map((w) => w.email)],
+      suppressedAmongCommand(listId, writes.map((w) => w.email)),
+    ]);
+    exactImportReply(reply, 2);
+    const now = importValues(reply[0], writes.length);
+    const erased = importValues(reply[1], writes.length);
+    if (!writes.every((w, i) => erased[i] !== null || now[i] === w.value)) throw new Error(CONTACT_IMPORT_UNKNOWN);
+    return writes.map((_, i) => erased[i] !== null ? -1 : 1);
+  }
+}
+
 /**
  * Which of these addresses the list keeps as having left it: unsubscribed
  * themselves, or taken off for a spam report or a bounce for good (`gone`).
@@ -775,22 +867,29 @@ export async function importContacts(
   listId: string,
   emails: string[],
   data: DataStore,
-): Promise<{ added: number; already: number; full: boolean; roomFull?: { left: number; message: string } }> {
+): Promise<{ added: number; already: number; full: boolean; roomFull?: { left: number; message: string }; notImported?: { left: number; message: string }; notConfirmed?: { left: number; message: string } }> {
   if (!isRedisConfigured() || !listId || !emails.length) return { added: 0, already: emails.length, full: false };
   const key = leadsKey(listId);
-  const [size] = await redisPipeline([["HLEN", key]]);
-  let room = MAX_LEADS - (Number(size) || 0);
+  const sizeReply = await redisPipeline([["HLEN", key]]);
+  exactImportReply(sizeReply, 1);
+  let room = MAX_LEADS - importCount(sizeReply[0]);
   const now = new Date().toISOString();
   let added = 0;
   let full = false;
-  for (let i = 0; i < emails.length; i += 500) {
-    const chunk = emails.slice(i, i + 500);
-    const [rows, prints] = await redisPipeline([["HMGET", key, ...chunk], suppressedAmongCommand(listId, chunk)]);
-    const found = Array.isArray(rows) ? rows : [];
-    const deleted = Array.isArray(prints) ? prints : [];
-    const pairs: string[] = [];
+  for (let i = 0; i < emails.length; i += CONTACT_IMPORT_WORK.chunkRows) {
+    const chunk = emails.slice(i, i + CONTACT_IMPORT_WORK.chunkRows);
+    let found: (string | null)[], deleted: (string | null)[];
+    try {
+      const reply = await redisPipeline([["HMGET", key, ...chunk], suppressedAmongCommand(listId, chunk)]);
+      exactImportReply(reply, 2);
+      found = importValues(reply[0], chunk.length);
+      deleted = importValues(reply[1], chunk.length);
+    } catch (error) {
+      if (added === 0) throw error;
+      return { added, already: i - added, full, notImported: { left: emails.length - i, message: "The remaining contacts were not imported. Try again." } };
+    }
+    const writes: ImportWrite[] = [];
     const sizes: ContactPair[] = [];
-    let newlyAgreed = 0;
     chunk.forEach((email, j) => {
       // Deleted from this store: an import never brings them back.
       if (deleted[j] !== null && deleted[j] !== undefined) return;
@@ -819,25 +918,41 @@ export async function importContacts(
         importedAt: now,
       };
       const written = placed(next, before, false);
-      pairs.push(email, JSON.stringify(written));
+      writes.push({ email, value: JSON.stringify(written), was: typeof found[j] === "string" ? sha1(found[j] as string) : "", added: true, left: false });
       sizes.push({ before, next: written });
-      newlyAgreed += 1;
     });
-    if (pairs.length) {
+    if (writes.length) {
       try {
         await needContacts(data, sizes);
       } catch (error) {
         // The store's data room is full: what was added stays and is said, the
         // rest is not written, and the caller still starts the ramp for those added.
-        if (!(error instanceof DataRoomError)) throw error;
+        if (!(error instanceof DataRoomError)) {
+          // The room could not be counted (unknown, never full): nothing of this batch was written and no room was
+          // taken. With nothing confirmed yet the caller is told it failed; with progress confirmed, that progress is
+          // answered and the ramp still starts for it, as with an unreadable batch above.
+          if (added === 0) throw error;
+          return { added, already: i - added, full, notImported: { left: emails.length - i, message: "The remaining contacts were not imported. Try again." } };
+        }
         const left = emails.length - i;
         return { added, already: i - added, full, roomFull: { left, message: error.message } };
       }
-      await redisPipeline([
-        ["HSET", key, ...pairs],
-        ["INCRBY", agreedKey(listId), newlyAgreed],
-      ]);
-      added += newlyAgreed;
+      let result: number[];
+      try {
+        result = await writeImportedContacts(listId, writes);
+      } catch {
+        // The command may have landed. Keep its reserved room and never replay
+        // or call these addresses absent; earlier confirmed progress is still true.
+        const unattempted = emails.length - i - chunk.length;
+        return {
+          added, already: i - added + chunk.length - writes.length, full,
+          notConfirmed: { left: writes.length, message: "The outcome for these contacts could not be confirmed. Try again." },
+          ...(unattempted > 0 ? { notImported: { left: unattempted, message: "The remaining contacts were not imported. Try again." } } : {}),
+        };
+      }
+      const written = result.map((v) => v === 1);
+      await settleContacts(data, sizes, written);
+      added += written.filter(Boolean).length;
     }
   }
   return { added, already: emails.length - added, full };
@@ -945,16 +1060,18 @@ export async function previewContactRows(
   // A store whose list is made when its first import starts: everything is new.
   if (!isRedisConfigured() || !listId) return { outcomes: rows.map((row) => decide(null, row)), room: MAX_LEADS };
   const key = leadsKey(listId);
-  const [size, found, prints] = await redisPipeline([
+  const reply = await redisPipeline([
     ["HLEN", key],
     ["HMGET", key, ...rows.map((r) => r.email)],
     suppressedAmongCommand(listId, rows.map((r) => r.email)),
   ]);
-  const existing = Array.isArray(found) ? found : [];
-  const deleted = Array.isArray(prints) ? prints : [];
+  exactImportReply(reply, 3);
+  const size = importCount(reply[0]);
+  const existing = importValues(reply[1], rows.length);
+  const deleted = importValues(reply[2], rows.length);
   return {
     outcomes: rows.map((row, i) => decide(parseContact(existing[i]), row, deleted[i] !== null && deleted[i] !== undefined)),
-    room: Math.max(0, MAX_LEADS - (Number(size) || 0)),
+    room: Math.max(0, MAX_LEADS - size),
   };
 }
 
@@ -981,23 +1098,37 @@ export async function previewContactRows(
  * in between must not be written back as agreeing. An address that changed
  * meanwhile is read again and left as it now is.
  */
+/**
+ * A file's rows whose write may have landed without the step finishing (the script's answer and its read-only
+ * recovery lost, or a later step failing). `possiblyAdded` is how many of its rows may now be on the list as added:
+ * the import keeps that count apart, never as added, and its ramp still covers them (lib/imports.ts contactsStep).
+ */
+export class ContactImportUnknownError extends Error {
+  readonly possiblyAdded: number;
+  constructor(possiblyAdded: number, cause: unknown) {
+    super(cause instanceof Error ? cause.message : CONTACT_IMPORT_UNKNOWN, { cause });
+    this.name = "ContactImportUnknownError";
+    this.possiblyAdded = possiblyAdded;
+  }
+}
+
 export async function importContactRows(listId: string, rows: ImportedContact[], data: DataStore): Promise<ContactOutcome[]> {
   if (!isRedisConfigured() || !listId || rows.length === 0) return rows.map(() => "full");
   const key = leadsKey(listId);
-  const [size, found, prints] = await redisPipeline([
+  const reply = await redisPipeline([
     ["HLEN", key],
     ["HMGET", key, ...rows.map((r) => r.email)],
     suppressedAmongCommand(listId, rows.map((r) => r.email)),
   ]);
-  let room = MAX_LEADS - (Number(size) || 0);
+  exactImportReply(reply, 3);
+  const size = importCount(reply[0]);
+  const existing = importValues(reply[1], rows.length);
+  const deleted = importValues(reply[2], rows.length);
+  let room = MAX_LEADS - size;
   const now = new Date().toISOString();
-  const existing = Array.isArray(found) ? found : [];
-  const deleted = Array.isArray(prints) ? prints : [];
   // Each write, with the fingerprint of what its address held when read.
-  const writes: { email: string; value: string; was: string; row: number }[] = [];
+  const writes: (ImportWrite & { row: number })[] = [];
   const sizes: ContactPair[] = [];
-  let newlyAgreed = 0;
-  let newlyLeft = 0;
   const outcomes = rows.map((row, i): ContactOutcome => {
     const before = parseContact(existing[i]);
     const decided = decideContact(before, row, now, deleted[i] !== null && deleted[i] !== undefined);
@@ -1008,33 +1139,40 @@ export async function importContactRows(listId: string, rows: ImportedContact[],
     if (decided.next) {
       const raw = existing[i];
       const next = placed(decided.next, before, false);
-      writes.push({ email: row.email, value: JSON.stringify(next), was: typeof raw === "string" ? sha1(raw) : "", row: i });
+      writes.push({ email: row.email, value: JSON.stringify(next), was: typeof raw === "string" ? sha1(raw) : "", row: i, added: decided.outcome === "added", left: decided.outcome === "stopped" });
       sizes.push({ before, next });
     }
-    if (decided.outcome === "added") newlyAgreed += 1;
-    if (decided.outcome === "stopped") newlyLeft += 1;
     return decided.outcome;
   });
   if (!writes.length) return outcomes;
   // What the rows grow the list by takes room first: past it, none of them is written.
   await needContacts(data, sizes);
-  const written = await casWrite(key, writes);
-  const lost = writes.filter((_, i) => !written[i]);
-  if (lost.length) {
-    // Changed in the moment between: whatever it is now stands.
-    const [now] = await redisPipeline([["HMGET", key, ...lost.map((w) => w.email)]]);
-    lost.forEach((w, i) => {
-      const contact = parseContact(Array.isArray(now) ? now[i] : null);
-      if (outcomes[w.row] === "added") newlyAgreed -= 1;
-      if (outcomes[w.row] === "stopped") newlyLeft -= 1;
-      outcomes[w.row] = contact?.unsub ? "left" : "already";
-    });
+  let result: number[];
+  try {
+    result = await writeImportedContacts(listId, writes);
+  } catch (error) {
+    // The script may have landed: any row it would have added may be on the list now (rule 24).
+    throw new ContactImportUnknownError(writes.filter((w) => w.added).length, error);
   }
-  const counters: (string | number)[][] = [];
-  if (newlyAgreed > 0) counters.push(["INCRBY", agreedKey(listId), newlyAgreed]);
-  // Somebody who agreed and has now left counts with those who left, as an unsubscribe does.
-  if (newlyLeft > 0) counters.push(["INCRBY", unsubKey(listId), newlyLeft]);
-  if (counters.length) await redisPipeline(counters);
+  try {
+    const written = result.map((v) => v === 1);
+    await settleContacts(data, sizes, written);
+    writes.forEach((w, i) => { if (result[i] === -1) outcomes[w.row] = "left"; });
+    const lost = writes.filter((_, i) => result[i] === 0);
+    if (lost.length) {
+      // Changed in the moment between: whatever it is now stands.
+      const reply = await redisPipeline([["HMGET", key, ...lost.map((w) => w.email)]]);
+      exactImportReply(reply, 1);
+      const now = importValues(reply[0], lost.length);
+      lost.forEach((w, i) => {
+        const contact = parseContact(now[i]);
+        outcomes[w.row] = contact?.unsub ? "left" : "already";
+      });
+    }
+  } catch (error) {
+    // Written for sure, but the rest of the step failed: the rows added here are on the list.
+    throw new ContactImportUnknownError(writes.filter((w, i) => w.added && result[i] === 1).length, error);
+  }
   return outcomes;
 }
 
@@ -1086,6 +1224,66 @@ async function casWrite(key: string, writes: { email: string; value: string; was
     // made since this read would be written over). The caller answers "not known" and tries again later.
     throw new UnknownReplyError("a contact write");
   }
+}
+
+/**
+ * For each address of tokensFor, in one step: when its erasure print is not in the store's prints (KEYS[2],
+ * lib/suppression.ts) and its contact still holds what was read (by its SHA-1, as CAS_HSET), the unsubscribe link's
+ * record (KEYS[2 + n]) and then the contact with its token; otherwise nothing, for that address. ARGV, five an address:
+ * the address, its print, the SHA-1 read, the contact to write and the record's text. Answers 1 (written) or 0 each.
+ */
+const TOKEN_CAS_HSET = [
+  // Its first line names it, so the tests' Redis (lib/redis-memory.ts) runs the same check in one step.
+  "-- marktmorgen:contact-token-cas-hset:v1",
+  "local out = {}",
+  "for i = 1, #ARGV, 5 do",
+  "  local n = (i - 1) / 5 + 3",
+  '  local cur = redis.call("HGET", KEYS[1], ARGV[i])',
+  '  local seen = ""',
+  "  if cur then seen = redis.sha1hex(cur) end",
+  '  if redis.call("HEXISTS", KEYS[2], ARGV[i + 1]) == 0 and seen == ARGV[i + 2] then',
+  '    redis.call("SET", KEYS[n], ARGV[i + 4])',
+  '    redis.call("HSET", KEYS[1], ARGV[i], ARGV[i + 3])',
+  "    out[#out + 1] = 1",
+  "  else",
+  "    out[#out + 1] = 0",
+  "  end",
+  "end",
+  "return out",
+].join("\n");
+
+/**
+ * Writes each link that its address may still have (TOKEN_CAS_HSET); says which were written. Each answer exactly 1 or
+ * 0; anything else, a failed call included, is read back once, as casWrite does: when every contact holds exactly the
+ * row that was to be written (its new token is random, so only this step can have put it there, and the step writes
+ * the record before the row), the step ran and only its answer was lost: written. Any other read-back is unknown and
+ * throws UnknownReplyError, never "written" and never "not written" (rule 24): the send stops for a retry, which reads
+ * again and finds any record and token that landed on a row nobody deleted.
+ */
+async function tokenCasWrite(listId: string, key: string, handle: string, writes: { email: string; value: string; was: string; token: string }[]): Promise<boolean[]> {
+  let sent: unknown;
+  try {
+    sent = await redisPipeline([
+      [
+        "EVAL",
+        TOKEN_CAS_HSET,
+        2 + writes.length,
+        key,
+        suppressedKey(listId),
+        ...writes.map((w) => tokenKey(w.token)),
+        ...writes.flatMap((w) => [w.email, suppressionPrint(listId, w.email), w.was, w.value, `${listId}|${w.email}|${handle}`]),
+      ],
+    ]);
+  } catch {
+    // Whether the step ran is not known: read back below, never "not written".
+    sent = undefined;
+  }
+  const each = repliesFor(repliesFor(sent, 1)?.[0], writes.length);
+  if (each && each.every((v) => v === 0 || v === 1)) return each.map((v) => v === 1);
+  // Read back only in its exact shape (CX-123 rule 24): one text or nothing for each; any other shape throws.
+  const read = fieldsOf((await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)]]))[0], writes.length, "an unsubscribe link's read-back");
+  if (writes.every((w, i) => read[i] === w.value)) return writes.map(() => true);
+  throw new UnknownReplyError("an unsubscribe link's write");
 }
 
 /** An HMGET's answer for `count` fields, each its text or nothing; any other shape throws UnknownReplyError. */
@@ -1237,25 +1435,15 @@ export async function tokensFor(
       writes.push({ email, value: JSON.stringify({ ...contact, t: token }), was: sha1(raw), token });
     });
     if (!writes.length) break;
-    // The token's own record first, so a link is never sent that leads
-    // nowhere; then each contact only if it is still as it was read, so an
-    // unsubscribe made meanwhile is never written over, and two sends at
-    // once keep one token between them.
-    // Each record answered exactly "OK", or no token is handed out nor kept on a contact: a token whose record may not
-    // exist would put a link and a one-click header leading nowhere into this email and every later one (rule 24).
-    const records = await redisPipeline(writes.map((w) => ["SET", tokenKey(w.token), `${listId}|${w.email}|${handle}`]));
-    const set = repliesFor(records, writes.length);
-    if (!set || set.some((reply) => reply !== "OK")) {
-      await redisPipeline(writes.map((w) => ["DEL", tokenKey(w.token)])).catch(() => null);
-      throw new UnknownReplyError("an unsubscribe link's record");
-    }
-    const done = await casWrite(key, writes);
+    // The token's record and the token on the contact are written in one step (TOKEN_CAS_HSET), and only where the
+    // address's erasure print is still not there and the contact still holds what was read: an erasure that wrote its
+    // print since the read above gets no link, no token on its row and no record naming it, and an unsubscribe made
+    // meanwhile is never written over; two sends at once keep one token between them (Codex V on #3925, MÉDIO 1).
+    const done = await tokenCasWrite(listId, key, handle, writes);
     writes.forEach((w, i) => {
       if (done[i]) out.set(w.email, w.token);
     });
-    const lost = writes.filter((_, i) => !done[i]);
-    if (lost.length) await redisPipeline(lost.map((w) => ["DEL", tokenKey(w.token)]));
-    pending = lost.map((w) => w.email);
+    pending = writes.filter((_, i) => !done[i]).map((w) => w.email);
   }
   return out;
 }
@@ -1433,6 +1621,9 @@ export async function forEachContact(
 ): Promise<void> {
   if (!isRedisConfigured()) return;
   const key = leadsKey(listId);
+  // HSCAN may answer one field more than once while it walks (redis.io, SCAN guarantees): each address is passed on
+  // once, so an email's audience never holds anybody twice (counted twice, a batch refused for good, or sent twice).
+  const seen = new Set<string>();
   let cursor = "0";
   for (let page = 0; page < MAX_LEADS / 500 + 10; page += 1) {
     // HSCAN answers [cursor, [field, value, ...]]: any other shape is unknown (CX-123 rule 24), never the end of the
@@ -1444,6 +1635,8 @@ export async function forEachContact(
     if (!reply || nextCursor === null || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("a page of a store's list");
     cursor = nextCursor;
     for (let i = 0; i + 1 < flat.length; i += 2) {
+      if (seen.has(flat[i])) continue;
+      seen.add(flat[i]);
       const contact = parseContact(flat[i + 1]);
       if (contact) each(flat[i], contact);
     }

@@ -57,7 +57,7 @@ async function main(): Promise<void> {
   const route = readFileSync("app/api/store/mail/route.ts", "utf8");
   is("the paste starts the ramp for those added, full or not, and says so", route.includes("await startRamp(healthId(store), added);") && route.includes("roomFull: roomFull ?? null"), true);
   const imports = readFileSync("lib/imports.ts", "utf8");
-  is("a file of contacts that fills the room starts the ramp for those already in", imports.includes('if (job.kind === "contacts") await startRamp(job.sid, job.counts.added);\n            job.state = "failed";') || /DataRoomError[\s\S]{0,400}if \(job\.kind === "contacts"\) await startRamp\(job\.sid, job\.counts\.added\)/.test(imports), true);
+  is("a file of contacts that fills the room starts the ramp for those already in", /DataRoomError[\s\S]{0,400}if \(job\.kind === "contacts"\) await startRamp\(job\.sid, job\.counts\.added \+ \(job\.counts\.maybeAdded \?\? 0\)\);\s*job\.state = "failed";/.test(imports), true);
   done();
 }
 

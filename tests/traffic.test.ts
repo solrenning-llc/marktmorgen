@@ -33,7 +33,7 @@ import { readAbout } from "@/lib/product-about";
 import { withinLimit } from "@/lib/request-guard";
 import { summaries, summaryOf } from "@/lib/reviews";
 import { stockLeft } from "@/lib/stock";
-import { addProduct, addStoreLink, claimHandle, setAffiliateSetting, setProductFields, setProductFile, setProductLegal, setProductShipping, setSubscription, storeFolder, storeForEmail, storeForHandle, storeForPage } from "@/lib/store";
+import { addProduct, addStoreLink, claimHandle, setAffiliateSetting, setProductFields, setProductFile, setProductLegal, setProductShipping, setSubscription, storeFolder, storeForEmail, storeForHandle, storeForHit, storeForPage } from "@/lib/store";
 import { activeShipping, parseShipping } from "@/lib/shipping";
 import { MAX_PROP65 } from "@/lib/physical-legal";
 import { LEGAL_RECORD_MAX_BYTES } from "@/lib/physical-legal-record";
@@ -76,7 +76,7 @@ import { countHit, countVisit } from "@/lib/visit";
 import { isSoon, soonProducts } from "@/lib/waitlist";
 import { centsWords } from "@/lib/watch-rules";
 import { store as redis } from "./redis-stub";
-import { COMMANDS, EVALS, EVAL_BYTES, FUNDED_SIGNAL_PATH_MEASURED, PAGES_PER_VISIT, SIGNAL_READ_BYTES, STATIC_FILES, STORE_READS, visitCost } from "./traffic-cost";
+import { COMMANDS, EVALS, EVAL_BYTES, FUNDED_SIGNAL_PATH_MEASURED, HIT_READS, PAGES_PER_VISIT, SIGNAL_READ_BYTES, STATIC_FILES, STORE_READS, visitCost } from "./traffic-cost";
 import { POST as readRoute } from "@/app/api/store/read/route";
 import { POST as hitRoute } from "@/app/api/store/hit/route";
 import { NextRequest } from "next/server";
@@ -172,6 +172,8 @@ let evals = 0;
 let admits = 0;
 /** Reads of a store's whole record (lib/store.ts, nl:store:owner:), priced by the byte in tests/traffic-cost.ts (STORE_READS). */
 let records = 0;
+/** Reads of the store through storeForHit (#5054), priced as HIT_READS in tests/traffic-cost.ts: the last measurement's. */
+let hits = 0;
 /** Bytes the database answered with, other than the store's record (priced apart) and the count scripts' answers: the last measurement's. */
 let replyBytes = 0;
 /** And the bytes of the texts in everything it answered, records and scripts too (measured()). */
@@ -192,6 +194,9 @@ const real = redis.pipeline.bind(redis);
     if (command[0] === "GET" && String(command[1]).startsWith("nl:store:owner:")) records += 1;
     if (command[0] !== "EVAL") continue;
     if (String(command[1]).startsWith("-- marktmorgen:capped-count:")) evals += 1;
+    // A count's read of the store (lib/store.ts, storeForHit): the EVAL is one of the request's commands, as the
+    // record's GET was; the GET it runs inside and its bytes are priced as HIT_READS in tests/traffic-cost.ts.
+    else if (String(command[1]).startsWith("-- marktmorgen:store-for-hit:")) hits += 1;
     else if (command[1] === ADMIT_READING) {
       // A reading's admission (lib/page-read.ts), billed as tests/page-read-worst-commands.test.ts bills it: INCR, its
       // EXPIRE when the count is new, then DECR past the ceiling or the mark's SET. Its bytes: READ_ADMIT_BYTES.
@@ -222,6 +227,7 @@ async function counted(work: () => Promise<unknown>): Promise<number> {
   evals = 0;
   admits = 0;
   records = 0;
+  hits = 0;
   replyBytes = 0;
   const inside = redis.scriptCalls;
   measuring = true;
@@ -415,8 +421,9 @@ async function main(): Promise<void> {
   is("a full page of a store that pays is drawn in a few reads", [listings.length, (await counted(drawFront)) <= COMMANDS.frontPage + REQUEST_COMMANDS], [24, true]);
   const evalsSent = { page: [evals], front: [] as number[], later: [] as number[], read: [] as number[] };
   const recordsRead = { page: [records], front: [] as number[], later: [] as number[], read: [] as number[] };
+  const hitsRead = { front: [] as number[], later: [] as number[] };
   const countFront = async (ip: string) => {
-    const store = (await storeForHandle("joy"))!;
+    const { store } = (await storeForHit("joy"))!; // as app/api/store/hit reads it (#5054)
     await withinLimit("hit", `${ip}|${store.handle}`, 120, 600);
     await countHit(asking(ip), store, { kind: "view", source: "instagram", medium: "", campaign: "" });
     await countVisit(asking(ip), store);
@@ -427,9 +434,11 @@ async function main(): Promise<void> {
   const firstView = await counted(() => countFront("192.0.2.50"));
   evalsSent.front.push(evals);
   recordsRead.front.push(records);
+  hitsRead.front.push(hits);
   const secondView = await counted(() => countFront("192.0.2.50"));
   evalsSent.front.push(evals);
   recordsRead.front.push(records);
+  hitsRead.front.push(hits);
   is("counting it a second time that day is inside the model", secondView <= COMMANDS.frontCount, true);
   is("and with what somebody new to the day adds, the whole view is too", firstView <= COMMANDS.frontCount + COMMANDS.firstOfDay, true);
   const product = listings[0];
@@ -479,7 +488,7 @@ async function main(): Promise<void> {
   is("its commands, and its legal read at the record's ceiling, inside what a later page is costed at",
     withLegal * COMMAND + LEGAL_RECORD_MAX_BYTES * DB_BYTE + perMegabyte(LEGAL_RECORD_MAX_BYTES) <= (COMMANDS.laterPage + REQUEST_COMMANDS) * COMMAND, true);
   const countLater = async (ip: string) => {
-    const store = (await storeForHandle("joy"))!;
+    const { store } = (await storeForHit("joy", { product: product.id }))!; // as app/api/store/hit reads it (#5054)
     await withinLimit("hit", `${ip}|${store.handle}`, 120, 600);
     await countVisit(asking(ip), store);
     // A product's own page also counts its visitor for that product, once a day (lib/stats.ts).
@@ -490,13 +499,14 @@ async function main(): Promise<void> {
   const laterCount = await counted(() => countLater("192.0.2.51"));
   evalsSent.later.push(evals);
   recordsRead.later.push(records);
+  hitsRead.later.push(hits);
   is("and saying it was opened is too, with the product's own visitor", laterCount <= COMMANDS.laterCount, true);
   // The heaviest view (313 [CV1], 31 October 2026): a medium and a campaign
   // beside its source, nine counts in all (lib/stats.ts), with the day's
   // record already at its most fields and the all-time one near its own, so
   // the count script also asks which names are there (lib/capped-count.ts).
   const countTagged = async (ip: string) => {
-    const store = (await storeForHandle("joy"))!;
+    const { store } = (await storeForHit("joy"))!; // as app/api/store/hit reads it (#5054)
     await withinLimit("hit", `${ip}|${store.handle}`, 120, 600);
     await countHit(asking(ip), store, { kind: "view", source: "newsletter", medium: "email", campaign: "fall" });
     await countVisit(asking(ip), store);
@@ -509,9 +519,11 @@ async function main(): Promise<void> {
   const fullFirst = await counted(() => countTagged("192.0.2.60"));
   evalsSent.front.push(evals);
   recordsRead.front.push(records);
+  hitsRead.front.push(hits);
   const fullSecond = await counted(() => countTagged("192.0.2.60"));
   evalsSent.front.push(evals);
   recordsRead.front.push(records);
+  hitsRead.front.push(hits);
   is("the heaviest view is inside the model too, at its record's most", [fullSecond <= COMMANDS.frontCount, fullFirst <= COMMANDS.frontCount + COMMANDS.firstOfDay], [true, true]);
   is("and what it counted beyond the most is kept under ~, so the day's total stays right", Number(redis.run(["HGET", `nl:stats:${joyStats}:${today}`, "~"])) >= 2, true);
   // What was counted before 31 October 2026 for this view, and what it is now (printed for the record of 313 [CV1]).
@@ -526,7 +538,7 @@ async function main(): Promise<void> {
   const kimStore = (await storeForHandle("kim"))!;
   const kimDay = `nl:stats:${kimStore.statsId}:${new Date().toISOString().slice(0, 10)}`;
   const tagged = async (handle: string, ip: string) => {
-    const store = (await storeForHandle(handle))!;
+    const { store } = (await storeForHit(handle))!; // as app/api/store/hit reads it (#5054)
     await withinLimit("hit", `${ip}|${store.handle}`, 120, 600);
     await countHit(asking(ip), store, { kind: "view", source: "newsletter", medium: "email", campaign: "fall" });
     await countVisit(asking(ip), store);
@@ -539,6 +551,7 @@ async function main(): Promise<void> {
   const dayFirst = await counted(() => tagged("kim", "192.0.2.71"));
   evalsSent.front.push(evals);
   recordsRead.front.push(records);
+  hitsRead.front.push(hits);
   is("the store's first view of the day, by somebody new, at its records' most, is inside the model", dayFirst <= COMMANDS.frontCount + COMMANDS.firstOfDay, true);
   is("and it is the day's first: its expiry is written with it", redis.run(["TTL", kimDay]) as number > 0, true);
   console.log(`a view's count, billed, the store's first of the day at its records' most, by somebody new: ${dayFirst}`);
@@ -558,12 +571,14 @@ async function main(): Promise<void> {
   const marked = await counted(() => tagged("lia", "192.0.2.81"));
   evalsSent.front.push(evals);
   recordsRead.front.push(records);
+  hitsRead.front.push(hits);
   is("and when that visit is the month's hundredth, with what the month is marked with", [before100, marked <= COMMANDS.frontCount + COMMANDS.firstOfDay + COMMANDS.monthMark, marked - dayFirst <= COMMANDS.monthMark], [99, true, true]);
   console.log(`the same view as the month's hundredth visit, billed: ${marked}`);
   // A product page opened with the day's record at its most (made so above): its one count asks which names are there.
   const laterFull = await counted(() => countLater("192.0.2.61"));
   evalsSent.later.push(evals);
   recordsRead.later.push(records);
+  hitsRead.later.push(hits);
   is("and so is a product's page with the day's record at its most", laterFull <= COMMANDS.laterCount, true);
   console.log(`a later page's count, billed: ${laterCount}; with the day's record at its most: ${laterFull}`);
   // How a page was read, sent by one visitor in eight as they leave (lib/page-read.ts):
@@ -611,9 +626,14 @@ async function main(): Promise<void> {
   is("and every read of the store's whole record is in what a visit is priced at", [
     Math.max(...recordsRead.page) <= STORE_READS.page,
     Math.max(...recordsRead.front, ...recordsRead.later) <= STORE_READS.count,
-    Math.min(...recordsRead.page, ...recordsRead.front, ...recordsRead.later) >= 1,
+    Math.min(...recordsRead.page) >= 1,
     Math.max(...recordsRead.read),
   ], [true, true, true, 0]);
+  // Since #5054 a count reads the store through storeForHit, never whole: once each, priced as HIT_READS.count.
+  is("and each count reads the store once, through storeForHit, as a visit is priced at", [
+    Math.max(...hitsRead.front, ...hitsRead.later) <= HIT_READS.count,
+    Math.min(...hitsRead.front, ...hitsRead.later) >= 1,
+  ], [true, true]);
   console.log(`store records read: a page drawn ${recordsRead.page.join("/")}, a view's count ${recordsRead.front.join("/")}, a later page's count ${recordsRead.later.join("/")}, a reading ${recordsRead.read.join("/")}`);
   console.log(`count scripts sent, each ${EVAL_BYTES} bytes: a view ${evalsSent.front.join("/")}, a later page ${evalsSent.later.join("/")}, a reading ${evalsSent.read.join("/")}`);
   // A click on one of the store's links, a visit through an affiliate's link
@@ -833,7 +853,8 @@ async function main(): Promise<void> {
   const benchData = { sales: "ok", partial: false, totals: { d90: { visitors: 5_000, sales: 100, checkouts: 200 } }, refunds: null, buyers: null };
   // Clicks and steps not counted say nothing of the visits (M1); a view whose count failed does.
   is("clicks and steps not counted leave the visits whole", await visitsWhole(joyNow), true);
-  failWhen = (c) => c[0] === "EVAL";
+  // The count's own script fails (lib/capped-count.ts); the store's read (storeForHit, also an EVAL since #5054) answers.
+  failWhen = (c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:capped-count:");
   await signal({ h: "joy", k: "v", r: "", u: "" }, `192.0.2.${clickIp++}`);
   failWhen = null;
   is("the benchmark leaves out visits that became a sale when its visits were not all counted", [sampleFrom(benchData as never)?.converted, sampleFrom(benchData as never, false)?.converted, sampleFrom(benchData as never, false)?.paid, await visitsWhole(joyNow), await visitsWhole(joyNow, Date.now() + 100 * DAY)], [0.02, undefined, 0.5, false, true]);
@@ -937,7 +958,7 @@ async function main(): Promise<void> {
   const floodReads = await counted(() => signal(clicks.l, `192.0.2.${clickIp++}`)).then(() => records);
   const viewsBefore = await visitsIn(joy.folder, windowOf(joyNow));
   await signal({ h: "joy", k: "v", r: "", u: "" }, `192.0.2.${clickIp++}`);
-  is("a count past the store's ten minutes reads none of its record and is written down, as a click; a view is never under it", [floodReads, (await countGap(joyNow, "clicks")) !== null, (await visitsIn(joy.folder, windowOf(joyNow))) - viewsBefore, /withinLimit\("hit-store", handle, HIT_STORE_LIMIT, 600\)[\s\S]*storeForHandle\(handle\)/.test(read("app/api/store/hit/route.ts"))], [0, true, 1, true]);
+  is("a count past the store's ten minutes reads none of its record and is written down, as a click; a view is never under it", [floodReads, (await countGap(joyNow, "clicks")) !== null, (await visitsIn(joy.folder, windowOf(joyNow))) - viewsBefore, /withinLimit\("hit-store", handle, HIT_STORE_LIMIT, 600\)[\s\S]*storeForHit\(handle/.test(read("app/api/store/hit/route.ts"))], [0, true, 1, true]);
   is("the store's ten minutes are sized at the largest plan's busiest hour, a tenth of its month's signals", HIT_STORE_LIMIT, Math.ceil((SIGNALS_PER_VISIT * VISITS_INCLUDED.scale) / 60));
   redis.run(["DEL", gapKeyOf("joy")]);
   // L1: past the store's ten minutes a flood writes the mark at most once a minute, not three commands a request.
@@ -982,8 +1003,9 @@ async function main(): Promise<void> {
   // visit's readings inside it. Main moved readings to their own line
   // (639 [GL7](25)); merged on 21 November 2026, the visit is computed
   // without them, at $0.000480 by the model, so still above $0.0004: main's
-  // bound of $0.0002 to $0.0003 does not hold #1496's billed commands and reads.
-  is("the visit this is all worked out for is a heavy one", [PAGES_PER_VISIT, STATIC_FILES, visitCost() > 0.0004, visitCost() < 0.0005], [3, 13, true, true]);
+  // bound of $0.0002 to $0.0003 does not hold #1496's billed commands and reads. Since #5054 a count reads the store
+  // through storeForHit (HIT_READS), not whole: the three counts' records are gone and the visit is $0.000398.
+  is("the visit this is all worked out for is a heavy one", [PAGES_PER_VISIT, STATIC_FILES, visitCost() > 0.00035, visitCost() < 0.0005], [3, 13, true, true]);
   console.log(`a visit at the most: ${visitCost().toFixed(7)} dollars`);
 
   part("Where it is counted, and where a store rests");

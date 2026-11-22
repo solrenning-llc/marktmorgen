@@ -67,7 +67,7 @@
  */
 import { CAPPED_COUNT } from "@/lib/capped-count";
 import { STORE_PAGE_SIZE } from "@/lib/catalog";
-import { MAX_STORE_BYTES } from "@/lib/store";
+import { HIT_FIELDS_MAX_BYTES, MAX_STORE_BYTES, STORE_FOR_HIT } from "@/lib/store";
 import { RESEND_TIMEOUT_MS, SES_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { UPSTASH_MICRO_USD_PER_GB_TRANSFER } from "@/lib/spend-cost-table";
 import { TIERS } from "@/lib/plan";
@@ -290,8 +290,19 @@ export const READ_ADMIT_BYTES = Buffer.byteLength(ADMIT_READING);
  * sends (app/api/store/hit) once more, and the live room's leave once
  * (app/api/store/community/chat). A reading of a page does not read it.
  */
-export const STORE_READS = { page: 1, count: 1, roomLeave: 1, signal: 1 };
+export const STORE_READS = { page: 1, count: 0, roomLeave: 1, signal: 0 };
 const storeReadCost = (n: number) => n * MAX_STORE_BYTES * DB_BYTE;
+
+/**
+ * Since #5054 a count and a signal (app/api/store/hit) no longer read the record whole: lib/store.ts storeForHit reads
+ * it inside the database and answers only the fields a count needs, at most HIT_FIELDS_MAX_BYTES, so STORE_READS.count
+ * and .signal are 0 and each pays HIT_READS of these instead. Billed as the GET the script runs inside
+ * (HIT_READ_INNER_COMMANDS; the EVAL itself is one of the request's own commands, as the record's GET was), the
+ * script's bytes sent and its answer's bytes. Measured in tests/traffic.test.ts.
+ */
+export const HIT_READS = { count: 1, signal: 1 };
+export const HIT_READ_INNER_COMMANDS = 1;
+const hitReadCost = (n: number) => n * (HIT_READ_INNER_COMMANDS * COMMAND + (Buffer.byteLength(STORE_FOR_HIT) + HIT_FIELDS_MAX_BYTES) * DB_BYTE);
 
 
 /**
@@ -389,7 +400,7 @@ export function visitCost(): number {
   // count and ceiling in the store's window (lib/page-read.ts, readCeiling), and every reading that ceiling allows
   // is priced at readBeaconCost on its own line (tests/plan-cost-registry.ts, page-readings), whatever the visits.
   const evals = evalCost(EVALS.frontCount + later * EVALS.laterCount);
-  const records = storeReadCost(PAGES_PER_VISIT * (STORE_READS.page + STORE_READS.count));
+  const records = storeReadCost(PAGES_PER_VISIT * (STORE_READS.page + STORE_READS.count)) + hitReadCost(PAGES_PER_VISIT * HIT_READS.count);
   return requests * CDN_PER_REQUEST + commands * COMMAND + evals + records + PAGES_PER_VISIT * (PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE);
 }
 
@@ -403,7 +414,7 @@ export function visitCost(): number {
  * more than a page does.
  */
 export function laterPageCost(): number {
-  return (1 + 1 + PICTURES_ON_A_LATER_PAGE) * CDN_PER_REQUEST + (COMMANDS.laterPage + COMMANDS.laterCount) * COMMAND + evalCost(EVALS.laterCount) + storeReadCost(STORE_READS.page + STORE_READS.count) + PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE;
+  return (1 + 1 + PICTURES_ON_A_LATER_PAGE) * CDN_PER_REQUEST + (COMMANDS.laterPage + COMMANDS.laterCount) * COMMAND + evalCost(EVALS.laterCount) + storeReadCost(STORE_READS.page + STORE_READS.count) + hitReadCost(HIT_READS.count) + PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE;
 }
 
 /**
@@ -432,7 +443,7 @@ export const SIGNAL_READ_BYTES = 8_000;
  * November 2026).
  */
 export function signalCost(): number {
-  return CDN_PER_REQUEST + CALL + (COMMANDS.signal + SHARE_COMMANDS_PER_REQUEST) * COMMAND + evalCost(EVALS.signal) + storeReadCost(STORE_READS.signal) + SIGNAL_READ_BYTES * DB_BYTE + 0.01 * CPU_PER_SECOND + 0.3 * MEMORY_PER_SECOND + 500 * ORIGIN_PER_BYTE;
+  return CDN_PER_REQUEST + CALL + (COMMANDS.signal + SHARE_COMMANDS_PER_REQUEST) * COMMAND + evalCost(EVALS.signal) + storeReadCost(STORE_READS.signal) + hitReadCost(HIT_READS.signal) + SIGNAL_READ_BYTES * DB_BYTE + 0.01 * CPU_PER_SECOND + 0.3 * MEMORY_PER_SECOND + 500 * ORIGIN_PER_BYTE;
 }
 
 /**

@@ -12,7 +12,7 @@ import { addProduct, claimHandle, clearStripeAccount, ensureStatsId, setProductL
 import { readListing } from "@/lib/catalog";
 import { setSoon } from "@/lib/waitlist";
 import { COPIERS } from "@/lib/person-copy";
-import { PREORDER_COPY_PRODUCTS_MOST, confirmPreorder, entriesKey, preordersOf, productsKey, whoField, whoKey } from "@/lib/preorders";
+import { PREORDER_COPY_PRODUCTS_MOST, PREORDER_INDEX_COMMANDS, PREORDER_RECORD, confirmPreorder, entriesKey, preordersOf, productsKey, whoField, whoKey } from "@/lib/preorders";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import type { ErasureScope } from "@/lib/erasure-rules";
 import { store as redis } from "./redis-stub";
@@ -156,6 +156,7 @@ async function main() {
     is("no HSETNX of an entry outside the script", /\["HSETNX", entriesKey\(/.test(source), false);
     const script = source.slice(source.indexOf("export const PREORDER_RECORD = `"), source.indexOf("`;", source.indexOf("export const PREORDER_RECORD = `")));
     is("the script makes the entry and, only when new, its line and the product in the list, then the three expiries", ['redis.call("HSETNX", KEYS[1]', 'if made == 1 then', 'redis.call("HSET", KEYS[2], ARGV[1], list)', 'redis.call("SADD", KEYS[3], ARGV[4])', 'redis.call("EXPIRE", KEYS[1], ARGV[5])', 'redis.call("EXPIRE", KEYS[2], ARGV[5])', 'redis.call("EXPIRE", KEYS[3], ARGV[5])'].every((part) => script.includes(part)), true);
+    is("its priced commands: the EVAL and its eight calls for the entry's three, and keep's two more at each of two later writes", [(PREORDER_RECORD.match(/redis\.call\(/g) ?? []).length, PREORDER_INDEX_COMMANDS], [8, 1 + 8 - 3 + 2 * 2]);
     is("the script is recordPreorder's, with the three keys in that order", /\["EVAL", PREORDER_RECORD, 3, entriesKey\(sid, read\.productId\), whoKey\(sid, read\.productId\), productsKey\(sid\)/.test(source), true);
     // Every EXPIRE of a product's hash is keep's, and keep gives the index and the list theirs in the same breath.
     const expires = [...source.matchAll(/\["EXPIRE", entriesKey\(/g)].length;

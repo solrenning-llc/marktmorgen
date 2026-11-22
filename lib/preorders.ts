@@ -569,6 +569,14 @@ redis.call("EXPIRE", KEYS[3], ARGV[5])
 return {made, redis.call("HGET", KEYS[1], ARGV[2])}`;
 
 /**
+ * What the index costs a pre-order over its life beyond the entry itself, in commands (#5125; priced in the line
+ * order-preorder-index of tests/plan-cost-registry.ts): PREORDER_RECORD's EVAL and its eight calls in place of the three
+ * commands the entry took before (HSETNX, HGET, EXPIRE), and keep's two more EXPIREs at each later write of the entry,
+ * at most two (given, then revoked). Held in tests/preorders-person-read.test.ts.
+ */
+export const PREORDER_INDEX_COMMANDS = 1 + 8 - 3 + 2 * 2;
+
+/**
  * Writes a paid pre-order down, once. Returns it as it is kept. Every reply is read exactly (CX-123 rule 24; Claude 5
  * on #2963): HSETNX and EXPIRE answer 0 or 1, HGET the entry as kept, each SET "OK". Anything else throws
  * UnknownReplyError, never "recorded": a receipt for an entry that does not exist, or a "skip" on sale, would leave

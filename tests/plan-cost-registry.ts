@@ -114,6 +114,7 @@ import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORES_PER_ACCOUNT, MAX_STORE_B
 import { DELETED_STORE_DELETE_BATCH, DELETED_STORE_LIST_PAGES } from "@/lib/deleted-store-files";
 import { FORGET_LATE_PASSES, FORGET_TRIES } from "@/lib/store-forget-retry";
 import { NOTE_RUN_BYTES, NOTE_RUN_COMMANDS } from "@/lib/podcast-access";
+import { PREORDER_INDEX_COMMANDS } from "@/lib/preorders";
 import { BODIES_PER_READ } from "@/lib/course";
 import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ, STUDENT_ROW_BYTES, bookWork } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
@@ -500,6 +501,13 @@ export const ORDER_CONTACT_WRITE_COMMANDS = Math.max(
   MAX_DELIVERED * CONTACT_COMMANDS_MOST.noteProduct,
 );
 export const ORDER_CONTACT_WRITE = ORDER_CONTACT_WRITE_COMMANDS * (COMMAND + CONTACT_READ_BYTES * DB_BYTE);
+/**
+ * A pre-order's line in its buyer's index and its product in the store's list (lib/preorders.ts, PREORDER_RECORD and
+ * keep; #5125, coordinator b3f6, 22 November 2026): PREORDER_INDEX_COMMANDS more commands over its life. Priced on every
+ * order of the plan's figure, as if each were a pre-order; the bytes it keeps are priced with the pre-order's own
+ * (tests/store-data-registry.ts, nl:pre:).
+ */
+export const ORDER_PREORDER_INDEX = PREORDER_INDEX_COMMANDS * COMMAND;
 
 /** The shapes requests are costed at: wall seconds held at 2 GB, and CPU seconds. Review ceilings, not measurements. */
 export const SHAPES = {
@@ -2411,6 +2419,16 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/order-rules.ts", names: ["ORDERS_INCLUDED"] },
     ],
     basis: "Every order of the plan's figure at its worst contact write: one checkout's MAX_DELIVERED products (the product, each bump, a bundle's items for each, the affiliate's extras) put on the list, one upsertContact and a noteProduct for every other product, or a noteProduct for every product, whichever is more (ORDER_CONTACT_WRITE_COMMANDS), each command moving at most one contact row (CONTACT_READ_BYTES). Priced in its own line since 21 November 2026 (Claude 5's decision), not inside ORDER_COMPUTE, where a quarter was declared for it and never held; held in tests/order-compute-shares.test.ts and tests/contacts-write-cost.test.ts.",
+  },
+  {
+    id: "order-preorder-index",
+    feature: "A pre-order's line in its buyer's index, so the copy of their data finds it without Stripe (#5125)",
+    monthlyUsd: (tier) => ORDERS_INCLUDED[tier] * ORDER_PREORDER_INDEX,
+    sources: [
+      { file: "lib/preorders.ts", names: ["PREORDER_INDEX_COMMANDS", "PREORDER_RECORD", "const keep = ", "preordersOf"] },
+      { file: "lib/order-rules.ts", names: ["ORDERS_INCLUDED"] },
+    ],
+    basis: "Every order of the plan's figure taken as a pre-order: PREORDER_INDEX_COMMANDS more commands over its life (the script's calls in place of the entry's three, and keep's two more EXPIREs at each of at most two later writes), held in tests/preorders-person-read.test.ts. The copy's own reads are the copy's (#5125 row 3).",
   },
   {
     id: "orders",

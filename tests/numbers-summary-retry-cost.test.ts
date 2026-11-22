@@ -1,3 +1,5 @@
+import { SUMMARY_LIVE } from "@/lib/summary-live";
+import { seedNumbersStore } from "./numbers-email-claim-world";
 /**
  * #3297, Claude 7's two MEDIUMs at 9c48904a3d.
  *
@@ -18,7 +20,7 @@
 import { NextRequest } from "next/server";
 import { GET as weekly } from "@/app/api/cron/weekly/route";
 import { GET as monthly } from "@/app/api/cron/monthly/route";
-import { SUMMARY_TRIES, SUMMARY_TRY_COMMANDS_MOST } from "@/lib/stats-report";
+import { SUMMARY_TRIES, SUMMARY_TRY_COMMANDS_MOST, SUMMARY_TRY_EXTRA_BYTES } from "@/lib/stats-report";
 import { control, ai, resetRetry, retry } from "./numbers-summary-retry-cost-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -27,9 +29,10 @@ const TRIES = 3; // SUMMARY_TRIES in lib/stats-report.ts
 const request = (path: string) => new NextRequest(`https://example.test${path}`);
 const real = redis.pipeline.bind(redis);
 let sent = 0;
+let fenceBytes = 0;
 
 function reset(): void {
-  redis.clear();
+  redis.clear(); seedNumbersStore();
   control.sent.length = 0;
   control.numbers = "visitors-5";
   resetRetry();
@@ -39,10 +42,17 @@ function reset(): void {
 async function main(): Promise<void> {
   globalThis.fetch = async () => { throw new Error("No real network request belongs in a numbers-email route test"); };
   redis.pipeline = (async (batch: (string | number)[][]) => {
-    sent += batch.length;
-    return real(batch);
+    const before = redis.scriptCalls;
+    const result = await real(batch);
+    sent += batch.length + redis.scriptCalls - before;
+    fenceBytes += Buffer.byteLength(JSON.stringify(batch.filter(c => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:summary-live:v1"))));
+    return result;
   }) as typeof redis.pipeline;
 
+  const largestFence = ["EVAL", SUMMARY_LIVE, 4, "x".repeat(80), "nl:closed:erasing", "x".repeat(80), "x".repeat(80), "x".repeat(40), "\u0001".repeat(320), "b".repeat(32), 40 * 86400, "x".repeat(32), "retry", Date.now(), 23 * 3600000, 3];
+  const largestWire = 5 * Buffer.byteLength(JSON.stringify(largestFence)) + 1024;
+  is("five maximally escaped fences plus four bounded readbacks fit the extra wire room", largestWire <= SUMMARY_TRY_EXTRA_BYTES, true);
+  console.log(`summary extra wire bound: ${largestWire} <= ${SUMMARY_TRY_EXTRA_BYTES}`);
   part("Control: the weekly AI lead is written once, on the week's one run");
   reset();
   retry.chat = "channel";
@@ -73,9 +83,10 @@ async function main(): Promise<void> {
     retry.sendOk = () => false;
     const tries: number[] = [];
     for (let i = 1; i <= TRIES + 1; i += 1) {
-      sent = 0;
+      sent = 0; fenceBytes = 0;
       await route(request(path));
       tries.push(sent);
+      is(`${label}: fenced wire bytes fit their recorded room`, fenceBytes <= SUMMARY_TRY_EXTRA_BYTES, true);
     }
     const longest = Math.max(...tries.slice(0, TRIES));
     console.log(`${label}: commands a run ${JSON.stringify(tries)}`);

@@ -39,6 +39,7 @@ export const SCREEN_HELP: Readonly<Record<string, readonly string[]>> = {
   bundles: ["Can I sell a bundle of products?"],
   calendar: ["Can I sell paid calls?", "Can I sell a package of sessions, like 5 calls booked one at a time?"],
   card: ["Can my store have pages besides its products, like an About page?"],
+  "check-in": [],
   checkup: ["Whose account is the buyer charged on?", "Can I use my own domain?", "Does a buyer who leaves the checkout get a reminder?"],
   "closing-refunds": ["What happens when my plan ends?"],
   community: ["Can I run a community or a webinar?", "How do live events in the community work?"],

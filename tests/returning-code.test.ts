@@ -305,6 +305,35 @@ async function main(): Promise<void> {
   r = await post({ rtoken: unspent }, "198.51.100.36");
   is("once the claim has run out, a second use is still refused, not opened", [r.location, r.session], [back("link"), null]);
 
+  part("A spent link is never given back by a failure after its checkout opened");
+  // The second half of the same LOW: the route's cleanup after a throw let the link go even once it was spent, which
+  // erased the spent mark of a link whose delete had failed. Here the delete fails and the work the route leaves for
+  // after its answer throws once, after the checkout opened.
+  const after = await linkFor(PAST, productId);
+  const push = afterTasks.push.bind(afterTasks);
+  let thrown = false;
+  afterTasks.push = (...items: unknown[]) => {
+    if (!thrown) {
+      thrown = true;
+      throw new Error("after() refused (synthetic)");
+    }
+    return push(...items);
+  };
+  (redis as unknown as { pipeline: typeof pipe }).pipeline = async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "DEL" && String(c[1]).startsWith("nl:rcode:link:") && !String(c[1]).endsWith(":claim"))) throw new Error("connection reset (synthetic)");
+    return pipe(commands);
+  };
+  const openedThen = opened.length;
+  try {
+    await post({ rtoken: after }, "198.51.100.39");
+  } finally {
+    (redis as unknown as { pipeline: typeof pipe }).pipeline = pipe;
+    afterTasks.push = push;
+  }
+  is("control: its checkout opened, then the route threw", [opened.length - openedThen, thrown], [1, true]);
+  r = await post({ rtoken: after }, "198.51.100.40");
+  is("a second use is told the link is spent, and nothing more is opened", [r.location, r.session, opened.length - openedThen], [back("link"), null, 1]);
+
   part("A link let go without a checkout keeps the rest of its half hour");
   // The other side of the same fix: a use refused before any checkout opened gives the link back whole, so the buyer
   // can still use it after the claim's two minutes.

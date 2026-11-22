@@ -542,7 +542,8 @@ console.log("step 6: free text never becomes a field (A12), unidentified acks ar
   const buscas = (args, env) => {
     const tr = join(T, `trace-${Math.random().toString(16).slice(2)}.txt`);
     const x = spawnSync("node", [TOOL, ...args], { cwd: join(T, "w"), env: { ...base, ...m7, ...env, GIT_TRACE: tr }, encoding: "utf8" });
-    const n = readFileSync(tr, "utf8").split("\n").filter((l) => /trace: built-in: git fetch/.test(l) && l.includes("mail7.git")).length;
+    // Only reads of the mailbox branch count; a push's own negotiation (fetch --negotiate-only) is part of the write.
+    const n = readFileSync(tr, "utf8").split("\n").filter((l) => /trace: built-in: git fetch /.test(l) && l.includes("mail7.git") && l.includes("+refs/heads/correio:")).length;
     return { n, out: `${x.stdout}${x.stderr}` };
   };
   let b = buscas(["claim-review", "--as", "Claude 4 X"], as("c4"));

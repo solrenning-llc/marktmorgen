@@ -75,7 +75,18 @@ export function slug(nome) {
  * Busca o ramo; devolve o commit, ou null se o ramo ainda não existe. Cada busca usa uma referência própria, apagada em
  * seguida: o vigia e um envio rodando ao mesmo tempo no mesmo clone nunca disputam a mesma referência.
  */
+// Passo 6 (A11): uma decisão lê um retrato só do correio. A primeira leitura do comando busca e guarda o retrato; as
+// seguintes usam o mesmo. Toda escrita busca de novo a ponta, para montar em cima dela, e depois o retrato passa a ser o
+// commit que ela gravou. A vigia esquece o retrato a cada volta.
+let retrato;
 function buscar() {
+  if (retrato === undefined) retrato = buscarDeNovo();
+  return retrato;
+}
+/** Esquece o retrato guardado: a próxima leitura busca o correio de novo. */
+export function esquecerRetrato() { retrato = undefined; }
+
+function buscarDeNovo() {
   const ref = `refs/correio/${RAMO}-${process.pid}-${randomBytes(4).toString("hex")}`;
   try {
     git(["fetch", "-q", "--no-write-fetch-head", REPO, `+refs/heads/${RAMO}:${ref}`]);
@@ -176,7 +187,7 @@ export function sessaoDe(texto) {
  */
 function acrescentar(novos, mensagem) {
   for (let tentativa = 1; ; tentativa += 1) {
-    const base = buscar();
+    const base = buscarDeNovo();
     const indice = join(tmpdir(), `correio-indice-${process.pid}-${randomBytes(4).toString("hex")}`);
     const env = { ...process.env, GIT_INDEX_FILE: indice };
     const comIndice = (args, input) => execFileSync("git", args, { input, encoding: "utf8", env, stdio: ["pipe", "pipe", "pipe"] }).trim();
@@ -203,6 +214,7 @@ function acrescentar(novos, mensagem) {
     }
     try {
       git(["push", "-q", REPO, `${commit}:refs/heads/${RAMO}`]);
+      retrato = commit;
       return commit;
     } catch (erro) {
       if (tentativa >= 6) throw new Error(`envio falhou depois de ${tentativa} tentativas: ${String(erro.stderr ?? erro).slice(0, 300)}`);
@@ -316,6 +328,7 @@ export function confirmar({ eu, ids, agora = new Date() }) {
       return confirmarUmaVez({ eu, ids, agora });
     } catch (erro) {
       if (tentativa >= 3 || !/já existe no correio/.test(String(erro.message ?? erro))) throw erro;
+      esquecerRetrato();
     }
   }
 }
@@ -1580,6 +1593,7 @@ async function main(argv) {
     for (;;) {
       let lista = [];
       let abertos = [];
+      esquecerRetrato(); // passo 6 (A11): cada volta lê um retrato novo, e só um
       try {
         lista = naoLidas(o.eu);
         // --also review,enqueue: acorda também quando há pedido que este agente pode pegar (de outra família).

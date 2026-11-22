@@ -47,6 +47,7 @@ Todos gravam no correio com a mesma conta do GitHub, então o nome de quem escre
 - Ao ler, uma mensagem cujo remetente não bate com a família da sessão que a gravou aparece com **ATENÇÃO, IDENTIDADE**: confira com o remetente antes de agir.
 - Fora da nuvem (o Claude 1 no computador do dono, o Codex), a escrita fica marcada como `Sessão: não identificada`.
 - **Confirmação não identificada (passo 6, A13):** cada confirmação (`ack`) guarda a sessão que a fez. Uma confirmação feita fora da nuvem sai com um aviso, e a família, quando lê identificada (`read`), vê quais mensagens dela foram confirmadas só assim nas últimas 24 horas, sem ser acordada por isso: o Claude 1 no computador do dono e o Codex confirmam assim de propósito, mas outro também poderia, com o nome da família.
+- **Um retrato por decisão (passo 6, A11):** cada comando lê o correio uma vez e decide sobre esse retrato; uma escrita busca de novo a ponta, para gravar em cima dela, e a vigia lê um retrato novo a cada volta.
 - **Campos só do cabeçalho (passo 6, A12):** todo campo de um registro (`Exclui:`, `Preferência:`, `Head:`...) é lido das linhas antes da primeira linha vazia. Uma linha assim no texto livre de um pedido ou de uma mensagem nunca vira campo.
 - Limite: isto evita engano; não é assinatura criptográfica. Quem altera o ambiente ou a ferramenta de propósito ainda pode se passar por outro.
 

@@ -443,6 +443,14 @@ console.log("test variables only with the marker and local repositories (OWNER-2
   is("with the marker but the real GitHub repositories, a test variable does not count", typeof mod.testeLigado === "function" && mod.testeLigado("CORREIO_SEM_COMMITS") === false, String(mod.REPO));
   for (const [k, v] of [["AGENT_MAIL_TEST", antes.m], ["CORREIO_SEM_COMMITS", antes.c]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
 }
+// "Local" means a local path: an absolute path or file://, never another remote form (LOW of Claude 1 2as and Claude 4 Z on #5088).
+const ligadoCom = (repo) => spawnSync("node", ["--input-type=module", "-e", `const m = await import(${JSON.stringify(TOOL)}); console.log(String(m.testeLigado("CORREIO_SEM_COMMITS")));`],
+  { env: { ...base, CORREIO_REPO: repo, CORREIO_SEM_COMMITS: "1" }, encoding: "utf8" }).stdout.trim().split("\n").pop();
+for (const remoto of ["deploy@github.com:solrenning-llc/repo-id-transfer-test", "github.com:solrenning-llc/repo-id-transfer-test", "ftp://h/x", "ext::sh -c true", "relative/mail.git"]) {
+  is(`a test variable does not count with the mailbox at ${remoto}`, ligadoCom(remoto) === "false", ligadoCom(remoto));
+}
+is("it counts with an absolute local path", ligadoCom(join(T, "mail.git")) === "true", ligadoCom(join(T, "mail.git")));
+is("and with a file:// address", ligadoCom(`file://${join(T, "mail.git")}`) === "true", ligadoCom(`file://${join(T, "mail.git")}`));
 
 console.log("whose mark it is: another family's quota, the HOLD and the CLAIMED per session (OWNER-20261121-1904 step 5)");
 {

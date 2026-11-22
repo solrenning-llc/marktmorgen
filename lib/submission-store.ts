@@ -33,7 +33,8 @@ import { createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { type DataStore, dataKey, giveData, needData, noteData, takeData, takeDataCommands } from "@/lib/store-data";
+import { type DataStore, TAKE_DATA, dataKey, giveData, monthOf, needData, noteData, takeData, takeDataCommands } from "@/lib/store-data";
+import { contentRoomFor } from "@/lib/store-data-rules";
 import { dataBytes } from "@/lib/store-data-rules";
 import { UPLOAD_SECONDS, readVaultPath } from "@/lib/vault-rules";
 import { reserveStoreUpload, reserveUploadControl, type UploadStore } from "@/lib/upload-budget";
@@ -551,21 +552,30 @@ export const SUBMISSION_BUYER_OPENS: Readonly<Record<Tier, number>> = Object.fre
 /** Days the count outlives its window's end, so a late start in the window still finds it. */
 const OPENS_KEEP_EXTRA_SECONDS = 2 * 86_400;
 /**
- * The buyer's count for one window, taken in one step: 1, counted and the first of this window; 2, counted; 0, the
- * share is used, nothing counted; -1, the count does not read, nothing counted. The first line names it for the local
- * stand-in (lib/redis-memory.ts).
+ * The buyer's count for one window and, on the window's first start, the count's bytes in the store's data room, in
+ * one step (Claude 2 upbeat on #3574, LOW): {1, 0} counted; {0, 0} the share is used, nothing counted or taken;
+ * {2, state} the room refused the count's bytes (state 0, full; -1, the room did not read), nothing counted; {-1, 0}
+ * the count does not read, nothing counted. A start already counted in the window, or refused, takes no more room,
+ * and a count is never made without its bytes (the room's own steps, TAKE_DATA, run inside as lib/creator-card.ts
+ * runs them). KEYS[1] the room, KEYS[2] the count. The first line names it for the local stand-in (lib/redis-memory.ts).
  */
-const SUBMISSION_BUYER_OPEN = [
-  "-- marktmorgen:submission-buyer-open:v1",
-  'local used = redis.call("HGET", KEYS[1], ARGV[1])',
-  "local n = 0",
-  "if used then n = tonumber(used) if not n or n < 1 or n ~= math.floor(n) then return -1 end end",
-  "if n >= tonumber(ARGV[2]) then return 0 end",
-  'redis.call("HINCRBY", KEYS[1], ARGV[1], 1)',
-  'redis.call("EXPIRE", KEYS[1], ARGV[3])',
-  "if n == 0 then return 1 end",
-  "return 2",
-].join("\n");
+const SUBMISSION_BUYER_OPEN = `-- marktmorgen:submission-buyer-open:v2
+local function room(limit, month, slot, size)
+  local KEYS = {KEYS[1]}
+  local ARGV = {limit, '0', month, 'a', slot, size}
+${TAKE_DATA}
+end
+local used = redis.call('HGET', KEYS[2], ARGV[1])
+local n = 0
+if used then n = tonumber(used) if not n or n < 1 or n ~= math.floor(n) then return {-1, 0} end end
+if n >= tonumber(ARGV[2]) then return {0, 0} end
+if n == 0 then
+  local taken = room(ARGV[4], ARGV[5], ARGV[6], ARGV[7])
+  if taken[1] ~= 1 then return {2, taken[1]} end
+end
+redis.call('HINCRBY', KEYS[2], ARGV[1], 1)
+redis.call('EXPIRE', KEYS[2], ARGV[3])
+return {1, 0}`;
 /** What the buyer's count weighs in the store's data room: its key with two windows' fields at their longest. */
 const OPENS_BYTES = (folder: string, who: string) => dataBytes([opensKey(folder, who), "2026-10-19", "99999", "2026-11-19", "99999"], 1);
 
@@ -573,26 +583,28 @@ const OPENS_BYTES = (folder: string, who: string) => dataBytes([opensKey(folder,
  * Counts one start of the buyer's in this store's window: "counted", "limit" (their share is used), "full" (the store's
  * data room has no place for the count) or "unwindowed": the store has no allowance window, so nothing is counted here
  * and the store's own allowance, which reserves only in a window (lib/upload-budget.ts), answers for it. The count's
- * bytes are taken in the data room first, until the count ends, on every start (Claude 6 i51q on #3574, LOW): a full
- * or unknown room refuses before anything is counted, so no start is spent on it and no count is ever kept without
- * its bytes. Taken again at each start, they only make the room look fuller, never emptier. Anything not read exactly
- * throws: nothing opens on a guess.
+ * bytes are taken in the same step as the window's first start, until the count ends (SUBMISSION_BUYER_OPEN): a full
+ * room refuses before anything is counted, a refused or already counted start takes no more room, and no count is
+ * ever kept without its bytes. Anything not read exactly throws: nothing opens on a guess.
  */
 async function countBuyerOpen(ask: DoorAsk): Promise<"counted" | "limit" | "full" | "unwindowed"> {
   const window = allowanceWindow(ask.store, ask.nowSeconds * 1000);
   if (!window) return "unwindowed";
+  const room = dataKey(ask.data);
+  if (!room) throw new UnknownReplyError("the store's data room");
   const share = SUBMISSION_BUYER_OPENS[ask.store.tier];
   const keepSeconds = Math.max(1, Math.ceil((window.end - ask.nowSeconds * 1000) / 1000)) + OPENS_KEEP_EXTRA_SECONDS;
-  const room = await takeData(ask.data, [{ until: (ask.nowSeconds + keepSeconds) * 1000, bytes: OPENS_BYTES(ask.folder, ask.who) }], ask.nowSeconds * 1000);
-  if (!room.ok) {
-    if (room.reason === "full") return "full";
-    throw new UnknownReplyError("the store's data room");
-  }
-  const key = opensKey(ask.folder, ask.who);
-  const answer = repliesFor(await redisPipeline([["EVAL", SUBMISSION_BUYER_OPEN, 1, key, window.id, share, keepSeconds]]), 1)?.[0];
-  if (answer === 0) return "limit";
-  if (answer !== 1 && answer !== 2) throw new UnknownReplyError("a buyer's upload starts");
-  return "counted";
+  const nowMs = ask.nowSeconds * 1000;
+  const reply = repliesFor(await redisPipeline([[
+    "EVAL", SUBMISSION_BUYER_OPEN, 2, room, opensKey(ask.folder, ask.who),
+    window.id, share, keepSeconds, contentRoomFor(ask.data, ask.nowSeconds), monthOf(nowMs),
+    `~${monthOf(Math.max((ask.nowSeconds + keepSeconds) * 1000, nowMs))}`, OPENS_BYTES(ask.folder, ask.who),
+  ]]), 1)?.[0];
+  const answer = Array.isArray(reply) && reply.length === 2 ? reply : null;
+  if (answer?.[0] === 1 && answer[1] === 0) return "counted";
+  if (answer?.[0] === 0 && answer[1] === 0) return "limit";
+  if (answer?.[0] === 2 && answer[1] === 0) return "full";
+  throw new UnknownReplyError("a buyer's upload starts");
 }
 
 /**

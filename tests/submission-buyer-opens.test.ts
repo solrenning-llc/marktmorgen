@@ -11,7 +11,8 @@
 import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { type SubmissionSetup } from "@/lib/submission-rules";
 import { type DoorSteps, SUBMISSION_BUYER_OPENS, SUBMISSION_BUYER_OPEN_COMMANDS, SUBMISSION_STEP_COMMANDS, abortSubmissionDoor, forgetSubmissionsPerson, openSubmissionDoor } from "@/lib/submission-store";
-import { type DataStore } from "@/lib/store-data";
+import { type DataStore, dataKey } from "@/lib/store-data";
+import { contentRoomFor } from "@/lib/store-data-rules";
 import { SUBMISSIONS_WORDS } from "@/lib/buyer-words/submissions";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -122,11 +123,19 @@ async function main(): Promise<void> {
   {
     const fay = "f".repeat(32);
     const original = redis.pipeline.bind(redis);
-    // The room answers full only for the count's own take: the one entry kept until a time ("~" and a month).
+    // The room is full at the moment the count's own step runs (the buyer's place was taken in it just before): the
+    // count's script finds no room for its bytes. The room's total is put back after, for the rest of the file.
     redis.pipeline = (async (list: (string | number)[][]) => {
-      const take = list.length === 1 && String(list[0][0]).toUpperCase() === "EVAL" && String(list[0][1]).startsWith("-- marktmorgen:store-data:v1");
-      if (take && list[0].slice(3).some((part) => String(part).startsWith("~"))) return [[0, 0]];
-      return original(list);
+      const count = list.length === 1 && String(list[0][0]).toUpperCase() === "EVAL" && String(list[0][1]).startsWith("-- marktmorgen:submission-buyer-open:");
+      if (!count) return original(list);
+      const room = dataKey(SHOP)!;
+      const [held] = await original([["HGET", room, "#"]]);
+      await original([["HSET", room, "#", String(contentRoomFor(SHOP, NOW))]]);
+      try {
+        return await original(list);
+      } finally {
+        await original([held === null ? ["HDEL", room, "#"] : ["HSET", room, "#", String(held)]]);
+      }
     }) as typeof redis.pipeline;
     let first: string;
     try {
@@ -139,6 +148,26 @@ async function main(): Promise<void> {
     const answers: string[] = [];
     for (let i = 0; i < SHARE; i += 1) answers.push(await openAndGiveUp(fay, lesson(1), world().steps));
     is("so their whole share is still theirs", answers.every((a) => a === "opened"), true);
+  }
+
+  // Claude 2 upbeat on #3574 (LOW): taking the count's bytes on every start filled the room with each refused or
+  // already counted start (240 bytes each). They are taken once a window, in the same step that makes the count.
+  part("Only the window's first start takes the count's bytes; a counted or refused start takes no more");
+  {
+    const gus = "9".repeat(32);
+    const shop = world();
+    const used = async () => Number((await redis.pipeline([["HGET", dataKey(SHOP)!, "#"]]))[0] ?? 0);
+    const before = await used();
+    await openAndGiveUp(gus, lesson(5), shop.steps);
+    const first = await used();
+    // The first start also takes the buyer's slot for their place (given back when it is given up): only the count's
+    // bytes, kept until the count ends, stay.
+    is("control: the window's first start took the count's bytes", first > before, true);
+    for (let i = 1; i < SHARE; i += 1) await openAndGiveUp(gus, lesson(5), shop.steps);
+    is("the other starts of the window take no more", await used(), first);
+    is("control: their share is now used", await openAndGiveUp(gus, lesson(6), shop.steps), "buyer_limit");
+    for (let i = 0; i < 5; i += 1) await openAndGiveUp(gus, lesson(6), shop.steps);
+    is("and refused starts take nothing", await used(), first);
   }
 
   part("The count goes with the person");

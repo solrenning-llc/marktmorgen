@@ -838,19 +838,24 @@ export class MemoryRedis {
           }
           return queued;
         }
-        // One buyer's upload starts in a store's window (lib/submission-store.ts, SUBMISSION_BUYER_OPEN).
-        if (key.startsWith("-- marktmorgen:submission-buyer-open:v1\n") && args[0] === "1" && args.length === 5) {
-          const [, counts, windowId, share, seconds] = args;
+        // One buyer's upload starts in a store's window and, on the window's first start, the count's bytes in the
+        // store's data room, in one step (lib/submission-store.ts, SUBMISSION_BUYER_OPEN).
+        if (key.startsWith("-- marktmorgen:submission-buyer-open:v2\n") && args[0] === "2" && args.length === 10) {
+          const [, room, counts, windowId, share, seconds, limit, month, slot, size] = args;
           const used = this.run(["HGET", counts, windowId]);
           let n = 0;
           if (used !== null) {
             n = Number(used);
-            if (!Number.isSafeInteger(n) || n < 1) return -1;
+            if (!Number.isSafeInteger(n) || n < 1) return [-1, 0];
           }
-          if (n >= Number(share)) return 0;
+          if (n >= Number(share)) return [0, 0];
+          if (n === 0) {
+            const taken = this.storeData([room, limit, "0", month, "a", slot, size]);
+            if (!Array.isArray(taken) || taken[0] !== 1) return [2, Array.isArray(taken) ? taken[0] : -1];
+          }
           this.run(["HINCRBY", counts, windowId, "1"]);
           this.run(["EXPIRE", counts, seconds]);
-          return n === 0 ? 1 : 2;
+          return [1, 0];
         }
         // A creator's reply and the removal of its buyer's waiting place are one atomic step.
         if (key.startsWith("-- marktmorgen:submission-reply-write:v1\n") && args[0] === "3" && args.length === 9) {

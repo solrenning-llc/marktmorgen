@@ -2454,13 +2454,13 @@ export const COST_LINES: CostLine[] = [
   },
   {
     id: "pause-restart-claim",
-    feature: "A legacy pause is claimed once before its uncertain subscription restart",
-    monthlyUsd: () => request("light", 1, 4_096),
+    feature: "A legacy pause records its one restart attempt before the only subscription request",
+    monthlyUsd: () => request("light", 1, 2 * 4_096 + 2_048),
     sources: [
       { file: "lib/plan-pause-rules.ts", names: ["PAUSE_EVERY_DAYS"] },
-      { file: "lib/plan-pause.ts", names: ["forgetObserved(ref, stored.raw, \"claim\")", "PAUSE_WORKER_FORGET"] },
+      { file: "lib/plan-pause.ts", names: ["markObservedAttempt", "PAUSE_WORKER_ATTEMPT"] },
     ],
-    basis: "A pause can be taken at most once per PAUSE_EVERY_DAYS. The due member's exact raw record (at most 4 KB) is claimed by one additional atomic Redis request; charge the full request in any billing month it occurs, with no annual discount.",
+    basis: "A pause can be taken at most once per PAUSE_EVERY_DAYS, and its restart is requested once. Before that request one additional atomic Redis request rewrites the exact due record with its attempt time (KEEPTTL, the due member kept): it sends the observed record and the next one, each at most 4 KB, plus the script and its arguments (under 2 KB); charge the full request in any billing month it occurs, with no annual discount. A held attempt is never posted again; its later daily visits are the company-wide due batch (lib/plan-pause.ts, COMPANY), at most 200 refs a run.",
   },
   {
     id: "store-email",

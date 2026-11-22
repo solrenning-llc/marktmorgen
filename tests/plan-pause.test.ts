@@ -24,6 +24,11 @@ import { paidPeriod } from "./billing-period-fixture";
 import { PLAN_PRICES } from "@/lib/plan";
 import { store as pauseRedis } from "./redis-stub";
 
+/** The observed pause with the one legacy restart attempt written into it before the POST, at `at`. */
+function withAttempt(raw: unknown, at: number): string {
+  return JSON.stringify({ ...(JSON.parse(String(raw)) as Record<string, unknown>), attempt: at });
+}
+
 process.env.STRIPE_SECRET_KEY = "sk_test_plan_pause_only";
 process.env.RESEND_API_KEY = "re_test_plan_pause_only";
 
@@ -505,18 +510,42 @@ async function main() {
     const until = set.kind === "paused" ? set.record.until : 0;
     await setSubscription("decline@example.com", { active: false });
 
-    createAnswer = "down";
-    await runBreaks(until + 60);
-    is("Stripe not answering keeps the break, for the next day", (await pauseOf(store)) !== null, true);
+    // A refusal by the card or bank is definitive: the break ends and the creator is told.
+    // (Until 22/11/2026 an unknown answer was posted again the next day under the same
+    // idempotency key, which Stripe keeps for about 24 hours; a held attempt is now never
+    // posted again, so "unknown, then refused" cannot happen: see the held part below.)
     createAnswer = "declined";
     emails.length = 0;
-    const counts = await runBreaks(until + DAY);
+    const counts = await runBreaks(until + 60);
     is("a refused card ends the break", [counts.failed, await pauseOf(store)], [1, null]);
     is("and the creator is told", emails.map((e) => e.subject), ["Your Marktmorgen plan could not start again"]);
     const notice = emails[0]?.text ?? "";
     is("a refusal after an unknown attempt never promises no charge", notice.includes("Nothing was charged."), false);
     is("earlier uncertainty remains explicit after the later refusal", notice.includes("does not confirm the outcome of any earlier attempt") && notice.includes("contact us before trying again"), true);
     is("the store does not sell", (await storeForEmail("decline@example.com"))?.subscriptionActive, false);
+    createAnswer = "ok";
+  }
+
+  part("Stripe not answering holds the break and never asks again");
+  {
+    subs.sub_HeldDown00001 = subscription("sub_HeldDown00001");
+    const store = await storeWith("helddown@example.com", "helddownstore", "sub_HeldDown00001");
+    const set = await pausePlan(store, 1, NOW);
+    const until = set.kind === "paused" ? set.record.until : 0;
+    await setSubscription("helddown@example.com", { active: false });
+    createAnswer = "down";
+    emails.length = 0;
+    const before = created.length;
+    await runBreaks(until + 60);
+    is("Stripe not answering keeps the break", (await pauseOf(store)) !== null, true);
+    is("the creator is told once to check before starting again", emails.map((e) => e.subject), ["Your Marktmorgen plan restart needs a check"]);
+    createAnswer = "declined";
+    for (const later of [until + DAY, until + 2 * DAY, until + 4 * DAY]) await runBreaks(later);
+    is("the held attempt is never posted again", created.length - before, 1);
+    is("and never emailed again", emails.length, 1);
+    is("the held break is still listed for undo and reconciliation", await pauseRedis.pipeline([["ZSCORE", "nl:pause:due", storeRef(store)]]), [String(until)]);
+    is("the creator can still take the stopped break back", await undoPause(store, until + 4 * DAY), "stopped");
+    is("and then nothing is left", await pauseOf(store), null);
     createAnswer = "ok";
   }
 
@@ -536,6 +565,7 @@ async function main() {
     is("it does not claim that no charge occurred", text.includes("Nothing was charged."), false);
     is("it states uncertainty and asks for checking before another restart", text.includes("whether a charge went through") && text.includes("Before starting the plan again, contact us") && text.includes("do not send card details"), true);
     is("it does not claim the plan is taking payments", text.includes("your checkout is taking payments"), false);
+    is("the held break can still be taken back", await undoPause(store, until + 4 * DAY), "stopped");
     createAnswer = "ok";
   }
 
@@ -556,7 +586,9 @@ async function main() {
       const counts = await runBreaks(until + 60);
       const after = await storeForEmail(email);
       is(`${answer}: observed response does not activate the store`, [counts.restarted, counts.failed, after?.subscriptionActive], [0, 1, false]);
-      is(`${answer}: no success or no-charge message`, emails.length, 0);
+      // A returned subscription that is not the plan asked for may still be a charge: the creator
+      // is told to check first, never told it started or that nothing was charged.
+      is(`${answer}: no success or no-charge message`, emails.map((e) => e.subject), ["Your Marktmorgen plan restart needs a check"]);
       is(`${answer}: pause remains for existing uncertain-outcome handling`, (await pauseOf(store)) !== null, true);
       is(`${answer}: no additional provider attempt in this pass`, created.length - before, 1);
       await undoPause(store, until + 60);
@@ -585,6 +617,9 @@ async function main() {
       JSON.stringify({ ...good, paymentMethod: "not_a_card" }),
       JSON.stringify({ ...good, told: -1 }),
       JSON.stringify({ ...good, told: "unknown" }),
+      JSON.stringify({ ...good, attempt: 0 }),
+      JSON.stringify({ ...good, attempt: until + 0.5 }),
+      JSON.stringify({ ...good, attempt: "earlier" }),
     ]) {
       await pauseRedis.pipeline([["SET", key, raw]]);
       const before = created.length;
@@ -850,7 +885,8 @@ async function main() {
       const [record, last, due] = await pipeline([
         ["GET", key], ["GET", year], ["ZRANGEBYSCORE", "nl:pause:due", "-inf", String(paused.record.until + 4 * DAY)],
       ]);
-      is("exact pause and annual evidence survive missing store acknowledgement", [record, last], evidence);
+      is("exact pause and annual evidence survive missing store acknowledgement, with only its attempt written",
+        [record, last], [withAttempt(evidence[0], paused.record.until + (answer === "unavailable" ? 4 * DAY : 60)), evidence[1]]);
       is("due membership survives missing store acknowledgement", Array.isArray(due) && due.includes(ref), true);
     } finally { pauseRedis.pipeline = pipeline; }
     is("unacknowledged restart never activates the store", (await storeForEmail(email))?.subscriptionActive, false);
@@ -889,7 +925,7 @@ async function main() {
       const [record, last, due] = await pauseRedis.pipeline([
         ["GET", key], ["GET", year], ["ZRANGEBYSCORE", "nl:pause:due", "-inf", String(paused.record.until + 60)],
       ]);
-      is("source mismatch retains exact pause and annual evidence", [record, last], evidence);
+      is("source mismatch retains exact pause and annual evidence, with only its attempt written", [record, last], [withAttempt(evidence[0], paused.record.until + 60), evidence[1]]);
       is("source mismatch retains its due member", Array.isArray(due) && due.includes(ref), true);
     } finally { beforeRestartAnswer = null; }
     if (changed !== "subscription") {
@@ -929,7 +965,7 @@ async function main() {
       is("same subscription and customer are preserved", [current?.subscriptionId, current?.stripeCustomerId], [id, store.stripeCustomerId]);
       is("newer tier and interval are preserved", [current?.tier, current?.cycle, current?.subscriptionActive],
         [changed === "tier" ? "pro" : "creator", changed === "cycle" ? "year" : "month", false]);
-      is("plan mismatch retains exact pause and annual evidence", await pauseRedis.pipeline([["GET", key], ["GET", year]]), evidence);
+      is("plan mismatch retains exact pause and annual evidence, with only its attempt written", await pauseRedis.pipeline([["GET", key], ["GET", year]]), [withAttempt(evidence[0], paused.record.until + 60), evidence[1]]);
       const [due] = await pauseRedis.pipeline([["ZRANGEBYSCORE", "nl:pause:due", "-inf", String(paused.record.until + 60)]]);
       is("plan mismatch retains due membership", Array.isArray(due) && due.includes(ref), true);
       is("no false plan restart notice", emails.length, 0);

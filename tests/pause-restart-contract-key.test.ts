@@ -65,7 +65,7 @@ test("a prior legacy key binding prevents a second subscription and leaves the p
     assert.notEqual(new URLSearchParams(p.requests[0].body).get("billing_mode[type]"), null);
     assert.equal(p.creations(), 0, "the changed body cannot create a second subscription under a fresh key");
     assert.ok(await pauseOf(f.store), "the exact pause evidence remains for reconciliation");
-    assert.equal(redis.run(["ZSCORE", "nl:pause:due", f.ref]), null, "a held attempt is not scheduled for another POST");
+    assert.equal(redis.run(["ZSCORE", "nl:pause:due", f.ref]), String(f.record.until), "a held attempt stays enumerable; its attempt marker, not its due member, stops another POST");
     const later = await runBreaks(f.now + 2 * DAY);
     assert.equal(later.restarted, 0);
     assert.equal(p.requests.length, 1, "a held legacy key is never retried");
@@ -83,7 +83,7 @@ test("a lost response is never retried after the provider idempotency window", a
     assert.equal(p.requests.length, 1);
     assert.equal(p.creations(), 1, "the synthetic provider accepted before losing its response");
     assert.ok(await pauseOf(f.store), "unknown acceptance retains the exact pause");
-    assert.equal(redis.run(["ZSCORE", "nl:pause:due", f.ref]), null, "the held attempt is removed from due before any later run");
+    assert.equal(redis.run(["ZSCORE", "nl:pause:due", f.ref]), String(f.record.until), "the held attempt keeps its due member for undo and reconciliation");
     p.expireKey(p.requests[0].key);
     const later = await runBreaks(f.now + 2 * DAY);
     assert.equal(later.restarted, 0);

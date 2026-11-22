@@ -131,7 +131,8 @@ async function main(): Promise<void> {
 
   part("A secondary-cell mention never includes a different person's pending import row");
   const ownershipCases = [
-    { kind: "contacts", mine: ["2", "Nina@Example.com", "Nina", "cohort", "yes"], other: ["3", OTHER, "Otto Example private name", `friend=${PERSON}`, "yes"] },
+    // "friend=<address>" would be one longer address (= is an address character, lib/address-match.ts), so the mention is set apart by a space.
+    { kind: "contacts", mine: ["2", "Nina@Example.com", "Nina", "cohort", "yes"], other: ["3", OTHER, "Otto Example private name", `friend ${PERSON}`, "yes"] },
     { kind: "purchases", mine: ["2", "Nina@Example.com", "Own product", "paid"], other: ["3", OTHER, `Private purchase for ${PERSON}`, "paid"] },
     { kind: "members", mine: ["2", "Nina@Example.com", "Own membership", "2026-12-01", "Annual"], other: ["3", OTHER, `Private membership for ${PERSON}`, "2026-12-01", "Annual"] },
     { kind: "products", mine: null, other: ["3", `Class for ${PERSON}`, "20", "Otto Example private product note", "digital", ""] },

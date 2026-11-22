@@ -1934,7 +1934,8 @@ export type ImportTrace = {
 
 /**
  * What the store's kept imports hold about one address, for the person's copy (lib/person-copy.ts, GDPR art. 15; C7
- * data-copy hunt): rows of a file still waiting to be brought in (RAW_DAYS) that name the address, the report of rows
+ * data-copy hunt): rows waiting to be brought in (RAW_DAYS) whose mapped email is the subject; secondary mentions are
+ * unread traces, never copied rows. Also the report of rows
  * not brought in (KEEP_SECONDS), the note of which row it was seen on, and whether an email to it still waits. Only
  * reads. Each read in its exact shape (CX-123 rule 24): an unknown answer throws UnknownReplyError, so the copy fails
  * rather than leave this out. What cannot be reached is said in `unread`, never left out in silence: a report line or
@@ -1943,6 +1944,7 @@ export type ImportTrace = {
  */
 export async function importTracesOf(store: Store, email: string, now = Date.now()): Promise<{ records: ImportTrace[]; unread: string[] }> {
   const address = normaliseEmail(email);
+  const subject = address.normalize("NFC");
   const records: ImportTrace[] = [];
   const unread: string[] = [];
   if (!address) return { records, unread };
@@ -1973,6 +1975,7 @@ export async function importTracesOf(store: Store, email: string, now = Date.now
       if (names([value])) notBroughtIn.push({ row, column, problem, value });
     }
     const rowsWaiting: string[][] = [];
+    let mentionsWithoutOwnership = false;
     for (let i = 0; i < batches; i += 1) {
       const read = repliesFor(await redisPipeline([["LINDEX", rowsKey(job.id), i]]), 1);
       if (!read) throw new UnknownReplyError("an import's rows");
@@ -1983,8 +1986,15 @@ export async function importTracesOf(store: Store, email: string, now = Date.now
         unread.push(`Rows of the import "${job.file}" waiting to be brought in could not be read.`);
         continue;
       }
-      rowsWaiting.push(...batch.filter(names));
+      for (const row of batch) {
+        // Only the mapped email column establishes the subject of a contacts/purchases/members row.
+        // A mention in another cell is a trace to review, never permission to copy a different person's raw row.
+        const rowSubject = job.kind === "products" ? "" : normaliseEmail(row[1] ?? "").normalize("NFC");
+        if (rowSubject === subject) rowsWaiting.push(row);
+        else if (names(row)) mentionsWithoutOwnership = true;
+      }
     }
+    if (mentionsWithoutOwnership) unread.push("An import row mentions this address outside its mapped email field and needs review; its values were not copied.");
     const rowsSeen: ImportTrace["rowsSeen"] = [];
     let cursor = "0";
     do {

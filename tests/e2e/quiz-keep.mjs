@@ -52,6 +52,18 @@ const adaAfterRecordedTry = await fixture({ tries: 1 });
 const adaQuizChanged = await fixture({ version: "v2" });
 // The server's page is in the browser before its scripts: a student can pick a choice before the keeping starts.
 const adaClickedFirst = await fixture({ clickedFirst: true });
+/** The community's pass sign-out form (app/[handle]/community/you/page.tsx), with the real ForgetQuizDraftsOnSubmit. */
+const passSignOut = await build({
+  stdin: { contents: `
+    import React from 'react';import {createRoot} from 'react-dom/client';
+    import {ForgetQuizDraftsOnSubmit} from '@/components/quiz-sweep';
+    createRoot(document.getElementById('root')).render(
+      <form action="https://quiz.test/signout" method="post"><ForgetQuizDraftsOnSubmit /><input type="hidden" name="action" value="signout" /><button type="submit">Sign out on this device</button></form>
+    );
+  `, resolveDir: root, loader: "tsx" },
+  bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic",
+  alias: { "@": root }, define: { "process.env.NODE_ENV": '"production"' }, logLevel: "error",
+}).then((b) => b.outputFiles[0].text);
 const bo = await fixture({ who: "b".repeat(32) });
 
 const engine = process.env.E2E_BROWSER ?? "chromium";
@@ -231,6 +243,17 @@ try {
   await restore();
   is("a tab waiting on Restore gets what the other tab kept since", await picked(), [true, false, true, true]);
   await second.close();
+  await tab.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+
+  // Claude 6's LEVE on #4324: a student let in by the store's pass signs out from the community's form, which lands on
+  // the store, never on /signin?status=out; sending that form removes every draft, device and tab, before it leaves.
+  await context.route("https://quiz.test/signout", (route) => route.fulfill({ contentType: "text/html", body: '<!doctype html><html lang="en"><title>Signed out</title><body><p>Signed out</p></body></html>' }));
+  await tab.goto("https://quiz.test/");
+  await tab.addScriptTag({ content: passSignOut });
+  await tab.getByRole("button", { name: "Sign out on this device" }).waitFor();
+  await tab.evaluate((k) => { localStorage.setItem(k, "{}"); sessionStorage.setItem(k, "{}"); localStorage.setItem("mm:place:other", "1"); }, ADA);
+  await Promise.all([tab.waitForURL("https://quiz.test/signout"), tab.getByRole("button", { name: "Sign out on this device" }).click()]);
+  is("signing out of a store's pass removes every draft, device and tab, and nothing else", await tab.evaluate((k) => [localStorage.getItem(k), sessionStorage.getItem(k), localStorage.getItem("mm:place:other")], ADA), [null, null, "1"]);
   await tab.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
 
   await context.addInitScript(() => {

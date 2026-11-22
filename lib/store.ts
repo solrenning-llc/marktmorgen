@@ -3656,7 +3656,7 @@ export async function setCurrency(email: string, currency: Currency): Promise<Cu
 export async function setAffiliateSetting(
   email: string,
   setting: AffiliateSetting,
-): Promise<{ ok: true; store: Store } | { ok: false; reason: "none" }> {
+): Promise<{ ok: true; store: Store } | { ok: false; reason: "none" | "listing" }> {
   const next = await patchStore(email, (store) => {
     const known = new Set(productIds(store));
     const parsed = parseAffiliateSetting(setting);
@@ -3666,8 +3666,15 @@ export async function setAffiliateSetting(
   // Whether this creator's program is listed in the affiliate directory, kept
   // in step on the save rather than reconstructed by walking every store
   // (lib/directory-index.ts); the save also drops the directory's kept rows.
+  // A rejected index write is never a saved answer (Codex N1 on #3062): the program is saved, but a creator who left the
+  // directory would stay listed until a rebuild, so they are told to save again. The same save sent again writes the
+  // same program and keeps the index in step.
   if (next) {
-    await rememberListing(next).catch((error) => console.error("remembering a directory listing failed", error));
+    const kept = await rememberListing(next).then(() => true, (error: unknown) => {
+      console.error("remembering a directory listing failed", error);
+      return false;
+    });
+    if (!kept) return { ok: false, reason: "listing" };
   }
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
 }

@@ -44,7 +44,7 @@ async function main(): Promise<void> {
   };
   const withdrawn = await setAffiliateSetting(owner, { ...listed, directory: false });
   (redis as { pipeline: typeof original }).pipeline = original;
-  is("withdrawing while the index write fails answers a retryable failure, never ok", [refused, withdrawn.ok, withdrawn.ok ? "" : withdrawn.reason], [1, false, "unavailable"]);
+  is("withdrawing while the index write fails answers a retryable failure, never ok", [refused, withdrawn.ok, withdrawn.ok ? "" : withdrawn.reason], [1, false, "listing"]);
   is("  the index still names the store, so the creator must be told to try again", (await redis.pipeline([["SISMEMBER", LISTED, sid]]))[0], 1);
 
   const again = await setAffiliateSetting(owner, { ...listed, directory: false });

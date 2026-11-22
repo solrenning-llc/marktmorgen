@@ -669,6 +669,18 @@ async function creatorChange(
   });
 }
 
+/** creatorChange with no fence, for the creator's own actions: "gone" is never answered without one, so the type says so. */
+async function creatorChangeUnfenced(
+  statsId: string,
+  productId: string,
+  id: string,
+  change: (review: Review) => Review,
+  room: DataStore | null,
+): Promise<Review | "missing" | "busy"> {
+  const done = await creatorChange(statsId, productId, id, change, room);
+  return done === "gone" ? "missing" : done;
+}
+
 /**
  * What takes the product's AI summary of its reviews (lib/review-ai-summary.ts) away when a review it counted goes
  * or changes, sent in the same request as that change, so a failure fails the change too. A new mark first: a
@@ -700,7 +712,7 @@ const summaryGone = (statsId: string, productId: string, createdAt: number | "al
  */
 export async function setReviewPhoto(statsId: string, productId: string, id: string, photo: ReviewPhoto | null): Promise<{ review: Review; removed: ReviewPhoto | null } | "missing" | "busy"> {
   let removed: ReviewPhoto | null = null;
-  const done = await creatorChange(statsId, productId, id, (review) => {
+  const done = await creatorChangeUnfenced(statsId, productId, id, (review) => {
     removed = review.photo && review.photo.path !== photo?.path ? review.photo : null;
     return { ...review, photo };
   }, null);
@@ -715,13 +727,13 @@ export async function setReviewPhoto(statsId: string, productId: string, id: str
 export async function setHidden(statsId: string, productId: string, id: string, hidden: boolean, reason?: unknown) {
   if (hidden && !isHideReason(reason)) return null;
   const hiddenReason: HideReason | null = hidden && isHideReason(reason) ? reason : null;
-  return creatorChange(statsId, productId, id, (review) => ({ ...review, hidden, hiddenReason }), null);
+  return creatorChangeUnfenced(statsId, productId, id, (review) => ({ ...review, hidden, hiddenReason }), null);
 }
 
 /** The creator's public answer; empty text takes it away. */
 export function setReply(statsId: string, productId: string, id: string, text: string, room: DataStore, now = Date.now()) {
   const clean = cleanReviewText(text, MAX_REPLY_TEXT);
-  return creatorChange(statsId, productId, id, (review) => ({
+  return creatorChangeUnfenced(statsId, productId, id, (review) => ({
     ...review,
     reply: clean ? { text: clean, at: review.reply?.text === clean ? review.reply.at : now } : null,
   }), room);
@@ -761,7 +773,7 @@ export async function markRefunded(statsId: string, pi: string, fence: StoreLive
 
 /** Marks a review refunded found some other way (an edit that found the order refunded). */
 export async function markOneRefunded(statsId: string, productId: string, id: string): Promise<void> {
-  const done = await creatorChange(statsId, productId, id, (review) => ({ ...review, refunded: true }), null);
+  const done = await creatorChangeUnfenced(statsId, productId, id, (review) => ({ ...review, refunded: true }), null);
   if (done === "busy") throw new Error("a review is busy; its refund is marked on the next try");
 }
 

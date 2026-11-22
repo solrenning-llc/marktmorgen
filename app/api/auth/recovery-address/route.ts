@@ -1,9 +1,10 @@
 import type { NextRequest } from "next/server";
 import { SESSION_COOKIE, emailForSession, isFreshSession } from "@/lib/auth";
 import { isRedisConfigured } from "@/lib/redis";
-import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { confirmRecoveryAddress, removeRecoveryAddress, startRecoveryAddress } from "@/lib/recovery-address";
 import { cancelReset, lockedUntil } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
 
 /**
@@ -33,7 +34,9 @@ export async function POST(request: NextRequest) {
   const email = await emailForSession(session);
   if (!email) return Response.json({ ok: false, error: "signed_out" }, { status: 401 });
   if (!isRedisConfigured()) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-  if ((await lockedUntil(session)) > 0) return Response.json({ ok: false, error: "locked" }, { status: 403 });
+  const until = await lockRead(lockedUntil(session));
+  if (until instanceof Response) return until;
+  if (until > 0) return Response.json({ ok: false, error: "locked" }, { status: 403 });
 
   let body: Record<string, unknown>;
   try {
@@ -43,7 +46,9 @@ export async function POST(request: NextRequest) {
   } catch {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
-  if (!(await withinLimit("recovery-address-change", email, 20, 60 * 60))) return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
+  const room = await withinLimit("recovery-address-change", email, 20, 60 * 60).catch(unknownLimit);
+  if (room === "unknown") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  if (!room) return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
   if (!(await isFreshSession(session))) return Response.json({ ok: false, error: "reauth" }, { status: 403 });
   if ((await hasSecondStep(email)) && (await liveSecondStep(email, session)) === null) return Response.json({ ok: false, error: "second_step" }, { status: 403 });
 
@@ -56,7 +61,7 @@ export async function POST(request: NextRequest) {
       const done = await confirmRecoveryAddress(email, session, typeof body.code === "string" ? body.code.slice(0, 20) : "");
       if (typeof done === "string") return Response.json({ ok: false, error: done }, { status: 400 });
       // The address is replaced already; a day that could not be called off stays shown in the studio, with Cancel.
-      await cancelReset(email, "recovery").catch((error: unknown) => console.error("calling off a two-step reset after a new recovery address failed", error));
+      await cancelReset(email, "recovery").catch(() => console.error("calling off a two-step reset after a new recovery address failed"));
       return Response.json({ ok: true, address: done.address });
     }
     if (body.action === "remove") {
@@ -66,8 +71,8 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true });
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
-  } catch (error) {
-    console.error("changing a recovery address failed", error);
+  } catch {
+    console.error("changing a recovery address failed");
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
 }

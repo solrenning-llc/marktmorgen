@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { MANAGE_TOKEN_PATTERN, openPortal } from "@/lib/membership-manage";
-import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;
 
@@ -23,6 +23,8 @@ export async function POST(request: NextRequest) {
 
   let handle = "";
   let token = "";
+  // Which membership's page, when the member has several customers (R43 F1 on #2985); none is the newest one's.
+  let subscription = "";
   try {
     const form = await (await limited(request, MAX_BODY_BYTES)).formData();
     const read = (name: string) => {
@@ -31,6 +33,7 @@ export async function POST(request: NextRequest) {
     };
     handle = normaliseHandle(read("handle"));
     token = read("token").slice(0, 80);
+    subscription = read("subscription").slice(0, 80);
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -50,9 +53,11 @@ export async function POST(request: NextRequest) {
 
   if (!MANAGE_TOKEN_PATTERN.test(token)) return back("expired");
   // Each press opens a billing page on the creator's Stripe account.
-  if (!(await withinStore("manage-open", `${clientAddress(request)}|${store.handle}`, 20, 600, store, "buyer"))) return back("limited");
+  const room = await withinStore("manage-open", `${clientAddress(request)}|${store.handle}`, 20, 600, store, "buyer").catch(unknownLimit);
+  if (room === "unknown") return back("error");
+  if (!room) return back("limited");
 
-  const result = await openPortal(store, token, linkOrigin(request, store));
+  const result = await openPortal(store, token, linkOrigin(request, store), subscription);
   if (!result.ok) return back(result.reason);
   return new Response(null, {
     status: 303,

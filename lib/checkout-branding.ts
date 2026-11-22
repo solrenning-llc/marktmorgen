@@ -78,7 +78,7 @@ export function checkoutBranding(look: Pick<StoreLook, "theme" | "accent" | "fon
  * so the store's current theme applies. Every present value is an exact JSON
  * object: extra fields (including a destination or personal data), inherited
  * fields and accessors are refused. Colors are normalized before they can be
- * saved, and both must support AAA text; an invalid present theme never falls
+ * saved, both must support AAA text and the button must keep 3:1 on the background; an invalid present theme never falls
  * back and masquerades as a successfully saved store theme.
  */
 export function readCheckoutLinkTheme(
@@ -117,6 +117,9 @@ export function readCheckoutLinkTheme(
     return { ok: false, reason: "invalid" };
   }
   if (!readableOn(background) || !readableOn(button)) return { ok: false, reason: "contrast" };
+  // The button has to be seen on its page too: 3:1 between them (WCAG 1.4.11), as the store's own buttons keep on
+  // their cards (lib/store-look.ts). Each color reading black or white is not enough: white on white reads both.
+  if (contrast(background, button) < 3) return { ok: false, reason: "contrast" };
 
   const theme: CheckoutLinkTheme = {
     background,

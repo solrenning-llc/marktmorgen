@@ -680,6 +680,14 @@ async function confirmationMutation(op: string, found: FoundOrigin, p: ShipmentM
 }
 async function preparePaid(found: FoundOrigin, p: ShipmentMailPolicy, runtime: ConfirmationOriginRuntime, owner: string): Promise<FoundOrigin | null> {
   const session = await readProviderSession(found, found.row.session, runtime, true);
+  if (session && session.id === found.row.session && session.status === "expired" && session.payment_status !== "paid") {
+    // Stripe's terminal answer from the original account for this exact
+    // verified session: it can never be paid. Release the reserved origin
+    // (shared pool slot and row envelope) instead of holding it forever.
+    // A missing or unverified reply never reaches this and releases nothing.
+    await confirmationMutation("cancel", found, null, runtime);
+    return null;
+  }
   if (!session || session.id !== found.row.session || !knownPhysicalPayment(session)) return null;
   const store = data(found.payload.snapshot.store), product = data(found.payload.snapshot.product);
   if (!store || !product || store.statsId !== found.row.statsId || store.stripeAccountId !== found.row.accountId) return null;

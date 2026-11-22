@@ -21,6 +21,17 @@ export function windowCount(key: string, seconds: number): Command[] {
 }
 
 /**
+ * The same for a count of `n` at once (INCRBY), in the same two commands (Claude 7 on #3369: the SET NX EX + INCRBY
+ * pair raced the same way in lib/store-allowance.ts, lib/imports.ts, lib/backup-run.ts and lib/store-readings.ts).
+ */
+export function windowCountBy(key: string, seconds: number, n: number): Command[] {
+  return [
+    ["INCRBY", key, n],
+    ["EXPIRE", key, seconds, "NX"],
+  ];
+}
+
+/**
  * The count read from windowCount's two replies, at `at` in a pipeline of `total` commands, only in their exact
  * shape: the INCR's own whole number of at least 1 and the EXPIRE's 0 or 1. Null for anything else, never a count
  * made up (CX-123 rule 24).

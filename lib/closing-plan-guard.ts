@@ -44,7 +44,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
+import { CUSTOMER_PATTERN, erasingSince, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
 import { FINAL_INDEX, finalScoreOf } from "@/lib/closing-holds";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { formatMoney } from "@/lib/money";
@@ -287,7 +287,17 @@ export async function shutSince(handle: string): Promise<number | null> {
  * the caller does not adopt a plan it could not check.
  */
 export async function closingSince(store: Store): Promise<ClosingTimes | null> {
-  if (!store.planEndedAt || !isRedisConfigured()) return null;
+  if (!isRedisConfigured()) return null;
+  // A store whose erasure has begun is closing whatever its record says (Codex N1's HIGH on #3156): the walk takes it
+  // out of the final line before it deletes, and its plan may read running if its closing day began under one. A plan
+  // paid for it is returned in full, as on its closing day. Read exactly (erasingSince): a reply that does not read
+  // throws, and the caller does not adopt the plan.
+  const began = await erasingSince(storeRef(store));
+  if (began !== null) {
+    const ended = Date.parse(store.planEndedAt);
+    return { since: began, ended: Number.isFinite(ended) ? ended : began };
+  }
+  if (!store.planEndedAt) return null;
   // Read exactly (finalScoreOf, rule 24): a score that is missing or not a number throws, never "not closing".
   const ended = finalScoreOf(await redisPipeline([["ZSCORE", FINAL_INDEX, storeRef(store)]]));
   if (ended === null) return null;
@@ -440,9 +450,21 @@ function readUndo(raw: unknown): Undo | null {
   }
 }
 
-/** Ends the subscription at once. True once Stripe says it is ended. */
+/**
+ * Ends the subscription at once. True once Stripe says it is ended. Each reply is read for this subscription and in its
+ * exact shape (CX-123 rules 24 and 30): one for another id, with no status, or whose start is not a whole number of
+ * seconds throws, and settleOne keeps the plan in line. A start read as 0 would make the store's own plan a plan for a
+ * closing store and give back what it was rightly paid; a reply for another plan, settle this one on its word.
+ */
 async function endIt(id: string): Promise<{ ended: boolean; created: number }> {
-  const over = (sub: Record<string, unknown>) => ({ ended: sub.status === "canceled" || sub.status === "incomplete_expired", created: Number(sub.created) || 0 });
+  const over = (sub: unknown) => {
+    const status = plainObject(sub) ? ownField(sub, "status") : undefined;
+    const created = plainObject(sub) ? ownField(sub, "created") : undefined;
+    if (!plainObject(sub) || ownField(sub, "id") !== id || typeof status !== "string" || !wholeAtLeast(created, 1)) {
+      throw new Error(`Stripe answered the subscription ${id} in another shape`);
+    }
+    return { ended: status === "canceled" || status === "incomplete_expired", created };
+  };
   try {
     // A DELETE is idempotent at Stripe by itself; no key is sent with it.
     const ended = over(await onPlatform("DELETE", `/subscriptions/${encodeURIComponent(id)}`, undefined, { version: AT }));
@@ -464,8 +486,22 @@ type ChargeOutcome = { settled: boolean; returned: number; disputed: number; cur
 async function giveBack(id: string, key: string, intent: string, least = 1): Promise<ChargeOutcome | null> {
   if (!OBJECT_ID.test(intent)) return { settled: false, returned: 0, disputed: 0, currency: "" };
   const pi = await onPlatform("GET", `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge`, undefined, { version: AT });
+  // Only this payment's own reply, and its own charge, decide what is refunded (rules 24 and 30, #4423): an answer
+  // for another payment throws before any refund is read or asked for, and settleOne keeps the plan in line, never
+  // sized, refunded or reported from someone else's charge. The charge must prove it is this payment's own: its
+  // payment_intent, as an id or as an expanded object with its own id, exactly the one asked for. Absent, null, an
+  // object without an id, another shape or another id is unknown, never taken as this payment's (Codex P on #4423).
+  if (!pi || typeof pi !== "object" || !Object.hasOwn(pi, "id") || (pi as { id?: unknown }).id !== intent) throw new Error("Stripe answered for another payment");
   const charge = pi.latest_charge as Record<string, unknown> | null | undefined;
   if (!charge || typeof charge.id !== "string" || !OBJECT_ID.test(charge.id)) return { settled: false, returned: 0, disputed: 0, currency: "" };
+  const named = Object.hasOwn(charge, "payment_intent") ? charge.payment_intent : undefined;
+  const namedId =
+    typeof named === "string"
+      ? named
+      : named !== null && typeof named === "object" && !Array.isArray(named) && Object.hasOwn(named, "id")
+        ? (named as { id?: unknown }).id
+        : undefined;
+  if (typeof namedId !== "string" || namedId !== intent) throw new Error("Stripe answered with an unproven payment's charge");
   // Each field the refund is decided by, in its exact shape (CX-123 rule 24): one that does not read throws, and
   // settleOne keeps the plan in line, never settled as refunded with nothing given back.
   const amount = ownField(charge, "amount");
@@ -498,8 +534,22 @@ async function giveBack(id: string, key: string, intent: string, least = 1): Pro
     new URLSearchParams({ payment_intent: intent, amount: String(amount - succeeded), reason: "requested_by_customer", "metadata[closing_plan]": id }),
     { version: AT, idempotencyKey: `closing-plan-refund:${key}:${failed}` },
   );
-  const now = made.status === "succeeded" ? succeeded + (Number(made.amount) || 0) : succeeded;
-  return { settled: made.status === "succeeded" && now >= amount, returned: now, disputed: 0, currency };
+  // The creation reply must prove that it is the exact refund just asked for. A successful-looking refund of another
+  // payment or charge must not settle this plan or tell its creator that this payment came back (rules 24 and 30).
+  if (
+    !plainObject(made) ||
+    typeof ownField(made, "id") !== "string" ||
+    !OBJECT_ID.test(ownField(made, "id") as string) ||
+    ownField(made, "payment_intent") !== intent ||
+    ownField(made, "charge") !== charge.id ||
+    ownField(made, "amount") !== amount - succeeded ||
+    !REFUND_STATUSES.has(ownField(made, "status"))
+  ) {
+    throw new Error(`Stripe answered the refund of ${key} in another shape`);
+  }
+  const status = ownField(made, "status");
+  const now = status === "succeeded" ? succeeded + (ownField(made, "amount") as number) : succeeded;
+  return { settled: status === "succeeded" && now >= amount, returned: now, disputed: 0, currency };
 }
 
 /**
@@ -628,8 +678,17 @@ export function planReturnedLetter(name: string, returned: number, disputed: num
 async function tell(id: string, entry: Undo, returned: number, disputed: number, currency: string): Promise<boolean> {
   let to = entry.to;
   if (!to && CUSTOMER_PATTERN.test(entry.c)) {
-    const customer = await onPlatform("GET", `/customers/${encodeURIComponent(entry.c)}`, undefined, { version: AT });
-    to = typeof customer.email === "string" ? customer.email : "";
+    // Read for this customer and its email in its exact shape (CX-123 rules 24 and 30): a reply for another customer
+    // is never written to, and one whose email does not read is never "no address" (the plan would be settled and its
+    // creator never told). A thrown read keeps the plan in line. Only a customer with no email, or a deleted one,
+    // has no address to tell.
+    const customer: unknown = await onPlatform("GET", `/customers/${encodeURIComponent(entry.c)}`, undefined, { version: AT });
+    const email = plainObject(customer) ? ownField(customer, "email") : undefined;
+    const deleted = plainObject(customer) && ownField(customer, "deleted") === true;
+    if (!plainObject(customer) || ownField(customer, "id") !== entry.c || (!deleted && email !== null && typeof email !== "string")) {
+      throw new Error(`Stripe answered the customer of ${id} in another shape`);
+    }
+    to = typeof email === "string" ? email : "";
   }
   const address = normaliseEmail(to);
   if (!EMAIL_PATTERN.test(address)) {

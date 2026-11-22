@@ -28,8 +28,8 @@ import { NextRequest } from "next/server";
 import { cartable } from "@/lib/cart-rules";
 import { createCartCheckout, offersCart } from "@/lib/cart-checkout";
 import { KIND, parseProduct } from "@/lib/catalog";
-import { confirmCartStock, releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
-import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductKeys, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { confirmCartStock, confirmStock, releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
+import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductKeys, setProductLink, setProductPairs, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { GET as readCart, POST as payCart } from "@/app/api/store/cart/route";
 import { NO_DEAL } from "@/lib/cart-rules";
@@ -38,6 +38,7 @@ import { NO_SALE } from "@/lib/store-sale";
 import type { Listing, Product, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { liveStockStore } from "./stock-live-store";
 import { CART_STOCK_COMMANDS_MOST, CART_STOCK_SHARE_OF_ORDER_COMPUTE, CART_STOCK_STRIPE_WAIT_MS, COMMAND, ORDER_COMPUTE } from "./plan-cost-registry";
 import { paidPeriod } from "./billing-period-fixture";
 import { TEST_CONSENT } from "./digital-consent-fixture";
@@ -90,7 +91,8 @@ async function main(): Promise<void> {
   is("a store with two, limited or not, offers a cart", offersCart(catalog([KIND.paid | KIND.limited, KIND.paid])), true);
 
   part("Holding a cart's units");
-  const creator = { statsId: "c".repeat(32), stripeAccountId: "acct_test_cartstock1" } as Store;
+  // Live, so its checkouts' holds are written (STOCK_BIND is fenced on the store being live since Codex L-20261120-0655).
+  const creator = liveStockStore({ statsId: "c".repeat(32), stripeAccountId: "acct_test_cartstock1" } as Store, "c1".repeat(16), "cartstock@example.invalid");
   const a = limited("print1", 1);
   const b = limited("print2", 2);
   let told: boolean | null = null;
@@ -162,6 +164,11 @@ async function main(): Promise<void> {
   await confirmCartStock(creator, [plain("guide1"), a, b], "cs_test_cartstockpaid0001");
   await releaseCartStockHolds(creator, [a, b], "cs_test_cartstockpaid0001");
   is("a paid cart's units are sold, never handed back, and Stripe is not asked to close it", [expired.length, await stockLeft(creator, a), await stockLeft(creator, b)], [1, 0, 1]);
+  // An old receipt's thanks page opened again (its link is in the purchase email) never spends a unit its checkout did not hold:
+  // a product sold before it was limited would otherwise read "Sold out" with every unit still there.
+  await confirmCartStock(creator, [b], "cs_test_cartstockoldrcpt1");
+  await confirmStock(creator, b, "cs_test_cartstockoldrcpt2");
+  is("a checkout that held nothing takes no unit when its thanks page is opened", await stockLeft(creator, b), 1);
 
   part("What can go wrong between the count and the checkout");
   const key = (id: string) => `nl:stock:${creator.statsId}:${id}`;
@@ -184,7 +191,8 @@ async function main(): Promise<void> {
   const after8 = (await redis.pipeline([["HGETALL", key("print8")]]))[0] as string[];
   is("a lock lost before the provisional hold is admitted: nothing held, nothing opened, and Stripe never asked under it", [lost, tried, after8.filter((_, i) => i % 2 === 0), gets.length - asked8], [{ ok: false, reason: "busy" }, 0, ["cs_test_cartstockold00001"], 0]);
   const original = redis.pipeline.bind(redis);
-  redis.pipeline = async (commands) => (commands.some((command) => command[0] === "HSET" && command[2] === "cs_test_cartstockbad00001") ? [] : original(commands));
+  // The checkout's hold is written by the hand-over itself since Codex L-20261120-0655 (STOCK_BIND): unanswered, nothing written.
+  redis.pipeline = async (commands) => (commands.some((command) => command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:stock-bind:") && command.includes("cs_test_cartstockbad00001")) ? [] : original(commands));
   const unwritten = await withCartStockHolds(creator, [limited("print9", 3)], async () => ({ id: "cs_test_cartstockbad00001" }));
   redis.pipeline = original;
   is("a checkout whose hold cannot be written is closed at Stripe, nobody is sent to it, and once closed its unit is let go", [unwritten, expired.includes("cs_test_cartstockbad00001"), await stockLeft(creator, limited("print9", 3))], [{ ok: false, reason: "busy" }, true, 3]);
@@ -196,7 +204,7 @@ async function main(): Promise<void> {
   });
   redis.pipeline = original;
   is("a reply with holes is never taken for the provisional holds' acknowledgment", [sparse, sparseOpened], [{ ok: false, reason: "busy" }, 0]);
-  const script = (commands: (string | number)[][], tag: string) => commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith(`-- marktmorgen:${tag}:v1\n`);
+  const script = (commands: (string | number)[][], tag: string) => commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith(`-- marktmorgen:${tag}:v${tag === "stock-bind" ? 2 : 1}\n`);
   let admitOpened = 0;
   redis.pipeline = async (commands) => (script(commands, "stock-admit") ? [] : original(commands));
   const unadmitted = await withCartStockHolds(creator, [limited("print16", 1)], async () => {
@@ -227,17 +235,18 @@ async function main(): Promise<void> {
   is("a checkout paid but not yet marked sold, which Stripe will not close, keeps its unit", await stockLeft(creator, limited("print10", 1)), 0);
 
   part("The worst a cart's stock costs, in commands and in waiting (review of 5 November 2026)");
-  const costly = { statsId: "e".repeat(32), stripeAccountId: "acct_test_cartstockcost" } as Store;
+  const costly = liveStockStore({ statsId: "e".repeat(32), stripeAccountId: "acct_test_cartstockcost" } as Store, "e1".repeat(16), "cartstockcost@example.invalid");
   const costKey = (id: string) => `nl:stock:${costly.statsId}:${id}`;
   const costLock = (id: string) => `nl:stock:lock:${costly.statsId}:${id}`;
-  // Counted as Upstash bills them: every command of a pipeline, and the ones the admission and the hand-over scripts run inside (three a product).
+  // Counted as Upstash bills them: every command of a pipeline, and the ones the admission and the hand-over scripts run inside
+  // (the admission three a product; the hand-over, since Codex L-20261120-0655, its fence's HGET and GET and two a product).
   let commands = 0;
   const counting = async (batch: (string | number)[][]) => {
     for (const command of batch) {
       commands += 1;
-      // The admission names two keys a product (its lock and its holds), the hand-over one.
+      // The admission names two keys a product (its lock and its holds), the hand-over one a product and the store's two fence keys.
       if (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:stock-admit:v1\n")) commands += 3 * (Number(command[2]) / 2);
-      if (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:stock-bind:v1\n")) commands += 3 * Number(command[2]);
+      if (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:stock-bind:v2\n")) commands += 2 + 2 * (Number(command[2]) - 2);
     }
     return original(batch);
   };
@@ -288,7 +297,7 @@ async function main(): Promise<void> {
   const fail4 = ["f1", "f2", "f3", "f4"].map((id) => limited(id, 6));
   for (const id of ["f1", "f2", "f3", "f4"]) await lapse(id, MAX_LAPSED);
   const closedBefore = expired.length;
-  redis.pipeline = async (batch) => (batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:stock-bind:v1\n") ? (await counting(batch), []) : counting(batch));
+  redis.pipeline = async (batch) => (batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:stock-bind:v2\n") ? (await counting(batch), []) : counting(batch));
   const failed4 = await withCartStockHolds(costly, fail4, async () => ({ id: "cs_test_cartstockcost0002" }));
   const failing = commands;
   redis.pipeline = original;
@@ -327,7 +336,7 @@ async function main(): Promise<void> {
   await releaseCartStockHolds(costly, ["t3", "t4"].map((id) => limited(id, 2)), "cs_test_cartstockprev0002");
   const pairHandedBack = commands;
   commands = 0;
-  redis.pipeline = async (batch) => (batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:stock-bind:v1\n") ? (await counting(batch), []) : counting(batch));
+  redis.pipeline = async (batch) => (batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:stock-bind:v2\n") ? (await counting(batch), []) : counting(batch));
   const pairWorst = await withCartStockHolds(costly, pairFailing, async () => ({ id: "cs_test_cartstockpair0002" }));
   const pairRecount = commands;
   redis.pipeline = original;
@@ -370,7 +379,7 @@ async function main(): Promise<void> {
   }
   const owner = (await storeForEmail(OWNER))!;
   const pay = async (ids: string[], cookie = "") => {
-    const form = new URLSearchParams({ handle: "printshop", dc: "yes", dc_v: TEST_CONSENT.version });
+    const form = new URLSearchParams({ handle: "printshop", dc: "yes", dc_v: TEST_CONSENT.version, billing_country: "US" });
     for (const id of ids) form.append("id", id);
     const answer = await payCart(new NextRequest("https://marktmorgen.com/api/store/cart", { method: "POST", headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com", "content-type": "application/x-www-form-urlencoded", ...(cookie ? { cookie } : {}) }, body: form.toString() }));
     const where = new URL(answer.headers.get("location") ?? "https://x/");
@@ -404,6 +413,15 @@ async function main(): Promise<void> {
     is(`a key count answered ${JSON.stringify(reply)}: nothing opened, try again`, answer.to, "?cart=error");
   }
   is("no checkout was made on an unknown key count", opened, before);
+
+  part("The cart's suggestions never offer a sold out one, nor one whose count cannot be read");
+  const card = await addProduct(OWNER, "Card", "", "20", null);
+  if (!card.ok) throw new Error("no card");
+  await setProductLink(OWNER, card.product.id, "https://example.com/card");
+  const paired = await setProductPairs(OWNER, made.Guide, [made.Print, made.Poster, card.product.id]);
+  if (!paired.ok) throw new Error("no pairs on the guide");
+  const offered = (await (await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=printshop&ids=${made.Guide}`))).json()) as { suggest: { id: string }[] };
+  is("the held print (none left) and the poster (count unread) are not suggested; the card is", offered.suggest.map((one) => one.id), [card.product.id]);
 
   part("Where else a sold out one is not offered");
   const { readFileSync } = await import("node:fs");

@@ -23,6 +23,12 @@ import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEma
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
+import { withinOneUtcDay } from "./one-utc-day";
+
+// The studio requests are counted in the month the clock is in; a real month end passing mid-file read the new
+// month's 0 against the count the check expected. The clock stays inside one UTC day
+// (tests/one-utc-day.ts).
+withinOneUtcDay();
 
 async function main() {
   const STATS = "s".repeat(16);
@@ -196,7 +202,8 @@ async function main() {
   await redisPipeline([["DEL", "nl:stats:ppstats:ledger"]]);
   const stripeAsked: number[] = [];
   const stripeRead = await buyerLedger(stripeOnly, async (units) => { stripeAsked.push(units); return false; }).then(() => "read", (error: unknown) => (error instanceof LedgerNotCounted ? "not counted" : String(error)));
-  is("with Stripe on and PayPal off, the PayPal sales kept are still counted, and their refunds are not read", [stripeRead, stripeAsked], ["not counted", [BUYER_LEDGER_UNITS + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: 300, paypalRefunds: 0 }))]]);
+  // Their refunds kept are read with them, so they are counted too (#4398): a sale refunded in full never comes back.
+  is("with Stripe on and PayPal off, the PayPal sales kept are still counted, and so are their refunds", [stripeRead, stripeAsked], ["not counted", [BUYER_LEDGER_UNITS + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: 300, paypalRefunds: 50 }))]]);
   redis.pipeline = pipe;
 
   part("One page, its fifty included kilobytes counted once (C3-112 (2))");

@@ -649,8 +649,8 @@ async function endLocked(email: string, now = Date.now()): Promise<"ended" | "ke
   // the mark, as the reset day is already called off.
   const members = await redisPipeline([["SMEMBERS", lockedSetKey(email)]]).then(
     ([reply]) => reply,
-    (error: unknown) => {
-      console.error("reading the sessions let in without a second step failed", error);
+    () => {
+      console.error("reading the sessions let in without a second step failed");
       return undefined;
     },
   );
@@ -672,8 +672,8 @@ async function endLocked(email: string, now = Date.now()): Promise<"ended" | "ke
     // on a session that is gone, which opens nothing; one that threw before the mark would set the others free.
     const kept = await keepLocked(email, now);
     if (ended.length) {
-      await redisPipeline([["DEL", ...ended.map((session) => lockedKey(session))], ["SREM", lockedSetKey(email), ...ended]]).catch((error: unknown) =>
-        console.error("clearing the locks of the sessions logged out failed", error),
+      await redisPipeline([["DEL", ...ended.map((session) => lockedKey(session))], ["SREM", lockedSetKey(email), ...ended]]).catch(() =>
+        console.error("clearing the locks of the sessions logged out failed"),
       );
     }
     return kept ? "kept" : "unkept";
@@ -704,8 +704,8 @@ async function keepLocked(email: string, now: number): Promise<boolean> {
     ]).then(
       // A pipeline in another shape (cut short, a reply too many, a hole) is answered but unknown: [].
       (replies): unknown[] => repliesFor(replies, 3) ?? [],
-      (error: unknown) => {
-        console.error("marking the account's locked sessions as kept locked failed", error);
+      () => {
+        console.error("marking the account's locked sessions as kept locked failed");
         return null;
       },
     );
@@ -714,7 +714,7 @@ async function keepLocked(email: string, now: number): Promise<boolean> {
   let replies = await keep();
   if (!confirmed(replies)) replies = await keep();
   const kept = confirmed(replies);
-  if (!kept) console.error("the mark that keeps an account's locked sessions locked past their day was not confirmed", new UnknownReplyError("the kept mark"));
+  if (!kept) console.error("the mark that keeps an account's locked sessions locked past their day was not confirmed");
   // The list past its ceiling ("*", or an answer of another shape): every session with no lock of its own now
   // pays LOCKED_UNTIL_STAR_EXTRA (tests/plan-cost-registry.ts) on each lockedUntil. Said, and counted for the
   // owner's report (keptStarMonth, keptStarLine; review of #2556 at 4d8ac350e), never only kept. Not counted when
@@ -722,8 +722,8 @@ async function keepLocked(email: string, now: number): Promise<boolean> {
   if (replies && countOf(replies[1]) !== 1) {
     console.error("too many accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until the sessions' last day");
     const month = new Date(now).toISOString().slice(0, 7);
-    await redisPipeline([["INCR", keptStarKey(month)], ["EXPIRE", keptStarKey(month), 400 * 86_400]]).catch((error: unknown) =>
-      console.error("counting the list past its ceiling failed", error),
+    await redisPipeline([["INCR", keptStarKey(month)], ["EXPIRE", keptStarKey(month), 400 * 86_400]]).catch(() =>
+      console.error("counting the list past its ceiling failed"),
     );
   }
   return kept;

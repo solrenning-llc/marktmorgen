@@ -13,7 +13,7 @@ import { countHit } from "@/lib/visit";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
 import { affiliateCookieName, attributionOrPending, pendingChannel } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { readProduct } from "@/lib/catalog";
 import { chargeNow } from "@/lib/call-deposit";
 import { packageFor, payBookTimes } from "@/lib/book-page-admission";
@@ -125,7 +125,9 @@ export async function POST(request: NextRequest) {
   // Each try holds a time for half an hour while Stripe's page is open, so
   // one connection gets fifteen in ten minutes per store: enough to change
   // one's mind many times, not enough to hold a creator's whole week.
-  if (!(await withinLimit("book", `${clientAddress(request)}|${store.handle}`, 15, 600))) return back("slow");
+  const room = await withinLimit("book", `${clientAddress(request)}|${store.handle}`, 15, 600).catch(unknownLimit);
+  if (room === "unknown") return back("error");
+  if (!room) return back("slow");
   // The times it reads (lib/calls.ts, holdAndCheckout: readBusy) and the request itself are paid for before anything is
   // read from Stripe (review of #3478; lib/book-page-admission.ts): a package proved bought for this call books from the
   // buyers' reserve, anything else from the public side, held and given back when refused. Past them, nothing is read.

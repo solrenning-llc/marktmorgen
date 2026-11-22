@@ -9,7 +9,7 @@ process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
 const email = "late-calendar@example.com";
 const host = hostId(email);
 const [cfg, good, err] = hostCalendarKeys(host);
-const store = { statsId: "late-calendar-stats" };
+const store = { statsId: "late-calendar-stats", sid: "", email: "" };
 async function seed() {
   redis.clear();
   state.fails = false;

@@ -402,21 +402,24 @@ export async function forgetReviewWords(statsId: string | null, text: string, no
   if (!statsId || !words || !isRedisConfigured()) return 0;
   const quoted = new Set([words, cleanVoice(words)]);
   const keys = keptMonths(now).map((month) => voiceKey(statsId, month));
-  const replies = repliesFor(await redisPipeline(keys.map((key) => ["GET", key])), keys.length);
+  // The reader's lock goes first, before the summaries are read (Codex L-20261120-0948): a summary still being built
+  // may hold these words while no month's summary is kept yet, and its VOICE_KEEP must then find its token gone.
+  const replies = repliesFor(await redisPipeline([["DEL", lockKey(statsId)], ...keys.map((key) => ["GET", key])]), keys.length + 1);
+  const unlocked = countOf(replies?.[0]);
+  if (unlocked === null || unlocked > 1) throw new UnknownReplyError("letting go of the customer summary's reader before deleting review words");
   const gone = keys.filter((key, i) => {
-    const raw = replies ? replies[i] : undefined;
+    const raw = replies ? replies[i + 1] : undefined;
     if (raw === null) return false;
     const summary = parseSummary(raw);
     if (!summary) return true;
     return [...summary.themes, ...(summary.reviewThemes ?? [])].some((theme) => theme.examples.some((example) => example.source === "review" && quoted.has(example.text)));
   });
   if (!gone.length) return 0;
-  // Each DEL read exactly (CX-123 rule 24; Codex U and T): one lock and these summaries can answer at most 1 and
-  // gone.length. Anything else is unknown and throws, so the review route schedules the retry, never "forgotten".
-  const deleted = repliesFor(await redisPipeline([["DEL", lockKey(statsId)], ["DEL", ...gone]]), 2);
-  const unlocked = countOf(deleted?.[0]);
-  const summaries = countOf(deleted?.[1]);
-  if (unlocked === null || unlocked > 1 || summaries === null || summaries > gone.length) {
+  // The DEL read exactly (CX-123 rule 24; Codex U and T): these summaries can answer at most gone.length. Anything
+  // else is unknown and throws, so the review route schedules the retry, never "forgotten".
+  const deleted = repliesFor(await redisPipeline([["DEL", ...gone]]), 1);
+  const summaries = countOf(deleted?.[0]);
+  if (summaries === null || summaries > gone.length) {
     throw new UnknownReplyError("deleting the summaries that quote the deleted review words");
   }
   return summaries;

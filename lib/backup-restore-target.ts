@@ -30,11 +30,15 @@
 import { randomBytes } from "node:crypto";
 import { timed } from "@/lib/fetch-timeout";
 import type { RestoreTarget } from "@/lib/backup-export";
+import { BACKUP_KEY_MAX_BYTES } from "@/lib/backup-codec";
 
 export type RestoreTargetConfig = { url: string; token: string };
 
 const TIMEOUT_MS = 10_000;
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+// Linear (9 November 2026): the quad-grouped pattern overflows V8's regexp stack past about 5 million characters,
+// which a key in chunks reaches (a DUMP of 8 MB is 10.7 million); the length and the round trip do the rest.
+const BASE64_CHARS = /^[A-Za-z0-9+/]*={0,2}$/;
+const BASE64 = { test: (text: string) => text.length % 4 === 0 && BASE64_CHARS.test(text) };
 const env = (name: string) => (process.env[name] ?? "").trim();
 
 /** A setting's host, lowercased, with or without a scheme; "" when it names none. */
@@ -100,6 +104,9 @@ export function backupRestoreTarget(config: RestoreTargetConfig, now: () => numb
     restore: async (key, expiresAt, dump) => {
       if (!dump || !BASE64.test(dump)) return false;
       const bytes = new Uint8Array(Buffer.from(dump, "base64"));
+      // One request carries the whole DUMP: past Upstash's request limit nothing is sent, and the key is not said
+      // restored (Codex X6 on #3277). The backup never keeps a key that large (BACKUP_KEY_MAX_BYTES).
+      if (bytes.byteLength > BACKUP_KEY_MAX_BYTES) return false;
       let ttl = 0;
       if (expiresAt !== null) {
         ttl = expiresAt - now();

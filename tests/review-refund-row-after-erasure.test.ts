@@ -9,7 +9,9 @@
  */
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { markRefunded, saveReview } from "@/lib/reviews";
+import { ReviewStoreGoneError, markRefunded, saveReview } from "@/lib/reviews";
+import { markRefundedReviews } from "@/lib/review-proof";
+import { setStripeAccount } from "@/lib/store";
 import { storeLiveFence } from "@/lib/store-live-cache";
 import { ERASING_KEY, claimHandle, closeStoreRecord, ensureStatsId, ensureStoreId, erasingField, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -84,7 +86,8 @@ test("a store erasing after the sweep's read gets nothing written, and the revie
     () => markRefunded(statsId, pi, fence),
   );
   await original([["HDEL", ERASING_KEY, field]]);
-  assert.deepEqual([erasing.marked, erasing.plainWrites, erasing.answers], [0, 0, [0]], "the fenced write answered gone, nothing marked, no plain write");
+  assert.ok(erasing.error instanceof ReviewStoreGoneError, "the mark says the store is gone, so the sweep writes nothing more");
+  assert.deepEqual([erasing.marked, erasing.plainWrites, erasing.answers], [undefined, 0, [0]], "the fenced write answered gone, nothing marked, no plain write");
   assert.equal((await row(statsId))?.refunded, false, "the review is untouched, for the closing walk");
 });
 
@@ -98,7 +101,8 @@ test("a store closed after the sweep's read: the review, its indexes and the pro
     () => markRefunded(statsId, pi, fence),
   );
   assert.equal((await original([storeIdCommand(store.sid)]))[0], null, "control: the store's id key is gone");
-  assert.deepEqual([closed.marked, closed.plainWrites, closed.answers], [0, 0, [0]], "the fenced write answered gone, nothing marked, no plain write");
+  assert.ok(closed.error instanceof ReviewStoreGoneError, "the mark says the store is gone");
+  assert.deepEqual([closed.marked, closed.plainWrites, closed.answers], [undefined, 0, [0]], "the fenced write answered gone, nothing marked, no plain write");
   assert.deepEqual(await exists(keys), keys.map(() => 0), "no review row, index, queue, payment list or summary came back");
 });
 
@@ -108,4 +112,53 @@ test("without a fence (the creator's own actions), the writes are as before", as
   assert.deepEqual([plain.marked, plain.answers], [1, []]);
   assert.ok(plain.plainWrites >= 1, "written in a plain request");
   assert.equal((await row(statsId))?.refunded, true);
+});
+
+// Claude 1 c1-revisoes-f's MÉDIO on #5092: the whole pass, with the store closed in the middle. The sweep used to take
+// the refund as seen (SADD + EXPIRE), confirm the lost disputes' place and set its anchor after the mark came back
+// "gone", so nl:rev:refunds:seen:<statsId> (with the refund's id) and nl:rev:refunds:since:<statsId> came back after
+// the closing walk passed them. Now a gone store stops the pass before any of those writes.
+process.env.STRIPE_SECRET_KEY = "sk_test_review_refund_row_sweep";
+const refundsAt: { id: string; object: "refund"; created: number; status: string; amount: number; payment_intent: string; charge: Record<string, unknown> }[] = [];
+const listOf = (data: unknown[]) => new Response(JSON.stringify({ object: "list", data, has_more: false }), { status: 200 });
+globalThis.fetch = (async (input: string | URL | Request) => {
+  const url = new URL(String(input));
+  if (url.hostname !== "api.stripe.com") return new Response(JSON.stringify({ error: "nothing leaves this test" }), { status: 500 });
+  const path = url.pathname.replace(/^\/v1/, "");
+  if (path === "/refunds") {
+    const since = Number(url.searchParams.get("created[gte]") ?? 0);
+    return listOf(refundsAt.filter((r) => r.created >= since));
+  }
+  return listOf([]);
+}) as typeof fetch;
+const refundOf = (pi: string, n: number) => ({ id: `re_rowsweep${String(n).padStart(6, "0")}`, object: "refund" as const, created: Math.floor(Date.now() / 1000) - 7_200, status: "succeeded", amount: 4900, payment_intent: pi, charge: { object: "charge", id: `ch_rowsweep${n}`, amount: 4900, amount_refunded: 4900, refunded: true, disputed: false } });
+
+test("the whole pass, with the store closed after its read: the read refunds and the anchor stay gone too (Claude 1 on #5092)", async () => {
+  const { store, statsId, pi, keys } = await shop();
+  await setStripeAccount(store.email, "acct_1RowSweep0000001", true);
+  const swept = (await storeForEmail(store.email))!;
+  refundsAt.push(refundOf(pi, 1));
+  const seen = `nl:rev:refunds:seen:${statsId}`;
+  const since = `nl:rev:refunds:since:${statsId}`;
+  const closed = await racing(
+    async () => {
+      const done = await closeStoreRecord(swept, [...keys, seen, since]);
+      if (!done) throw new Error("synthetic close did not complete");
+    },
+    () => markRefundedReviews(swept, Date.now() + 60_000),
+  );
+  assert.equal((await original([storeIdCommand(swept.sid)]))[0], null, "control: the store's id key is gone");
+  assert.deepEqual([closed.marked, closed.plainWrites, closed.answers], [0, 0, [0]], "the mark answered gone, nothing marked, no plain write");
+  assert.deepEqual(await exists([...keys, seen, since]), [...keys, seen, since].map(() => 0), "no review row, index, summary, read refund or anchor came back");
+});
+
+test("control: a live store's pass takes the refund as seen and keeps its anchor", async () => {
+  const { store, statsId, pi } = await shop();
+  await setStripeAccount(store.email, "acct_1RowSweep0000002", true);
+  const swept = (await storeForEmail(store.email))!;
+  refundsAt.length = 0;
+  refundsAt.push(refundOf(pi, 2));
+  const live = await racing(async () => undefined, () => markRefundedReviews(swept, Date.now() + 60_000));
+  assert.deepEqual([live.marked, live.plainWrites, live.answers], [1, 0, [1, 1]]);
+  assert.deepEqual(await exists([`nl:rev:refunds:seen:${statsId}`, `nl:rev:refunds:since:${statsId}`]), [1, 1], "the read refund and the anchor are kept");
 });

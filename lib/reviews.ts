@@ -621,11 +621,20 @@ export async function deleteReview(statsId: string, productId: string, id: strin
   return result;
 }
 
+/** The store's erasure began, or its record is gone, under a fenced change (creatorChange): nothing was written. */
+export class ReviewStoreGoneError extends Error {
+  constructor() {
+    super("the store is being erased, or is gone: nothing of its reviews is written");
+    this.name = "ReviewStoreGoneError";
+  }
+}
+
 /**
  * Changes one review as the creator may: hide or show it, or answer it. Never its words or its stars. With a store's
  * fence (the refund sweep, lib/review-proof.ts, which runs while the store may be erased), the review and the
- * product's numbers are written only while the store is live; a store gone meanwhile answers "missing", with nothing
- * written (Codex L-20261120-0838). A fenced change takes no room (`room` is null).
+ * product's numbers are written only while the store is live; a store gone meanwhile answers "gone", with nothing
+ * written, so the caller stops writing for that store too (Codex L-20261120-0838; Claude 1 on #5092). Without a
+ * fence "gone" is never answered. A fenced change takes no room (`room` is null).
  */
 async function creatorChange(
   statsId: string,
@@ -634,7 +643,7 @@ async function creatorChange(
   change: (review: Review) => Review,
   room: DataStore | null,
   fence: StoreLiveFence | null = null,
-): Promise<Review | "missing" | "busy"> {
+): Promise<Review | "missing" | "busy" | "gone"> {
   if (!REVIEW_ID_PATTERN.test(id) || !PRODUCT_ID_PATTERN.test(productId)) return "missing";
   return locked(statsId, productId, async () => {
     // Missing only on HGET's exact null; a reply cut short, of another shape or a review that does not read throws
@@ -652,10 +661,10 @@ async function creatorChange(
     // it goes in the same request as the change, so a failure fails the change too.
     // One already hidden or refunded was never counted, so hiding or refunding it takes none away.
     const gone = counted(before) && ((after.hidden && !before.hidden) || (after.refunded && !before.refunded));
-    if ((await write(statsId, after, gone ? summaryGone(statsId, productId, before.createdAt) : [], fence)) === "gone") return "missing" as const;
+    if ((await write(statsId, after, gone ? summaryGone(statsId, productId, before.createdAt) : [], fence)) === "gone") return "gone" as const;
     // What a shorter answer frees is given back only once it is written.
     if (room && grown < 0) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: -grown }]);
-    if ((await recount(statsId, productId, fence)) === "gone") return "missing" as const;
+    if ((await recount(statsId, productId, fence)) === "gone") return "gone" as const;
     return after;
   });
 }
@@ -723,7 +732,8 @@ export function setReply(statsId: string, productId: string, id: string, text: s
  * payment was given back in full. Returns how many changed. With the store's
  * fence (lib/store-live-cache.ts storeLiveFence), each review is written only
  * while the store is live: one erased meanwhile is left as the closing walk
- * leaves it, never written back (Codex L-20261120-0838).
+ * leaves it, never written back, and ReviewStoreGoneError is thrown so the
+ * sweep writes nothing more for that store (Codex L-20261120-0838).
  */
 export async function markRefunded(statsId: string, pi: string, fence: StoreLiveFence | null = null): Promise<number> {
   if (!STATS_ID_PATTERN.test(statsId) || !pi) return 0;
@@ -742,7 +752,8 @@ export async function markRefunded(statsId: string, pi: string, fence: StoreLive
     }, null, fence);
     // A review busy just now is not marked: thrown, so the refund is not taken as seen and the sweep tries again.
     if (done === "busy") throw new Error("a review is busy; the refund is marked on the next try");
-    // Counted only once written: one whose store was erased meanwhile ("missing" from the fence) was not.
+    // The store erased meanwhile: nothing written, and the sweep must write nothing more for it (seen, anchor).
+    if (done === "gone") throw new ReviewStoreGoneError();
     if (hit && typeof done !== "string") changed += 1;
   }
   return changed;

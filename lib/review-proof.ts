@@ -40,7 +40,7 @@ import { isSettled } from "@/lib/instant-pay";
 import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundRowKnown, refundedInFull, rowGivesBack } from "@/lib/refunds";
 import { ordersGrant } from "@/lib/buyer-orders";
 import { DOWNLOAD_WINDOW_SECONDS } from "@/lib/store-checkout";
-import { REVIEW_STORES_KEY, markRefunded } from "@/lib/reviews";
+import { REVIEW_STORES_KEY, ReviewStoreGoneError, markRefunded } from "@/lib/reviews";
 import { storeLiveFence } from "@/lib/store-live-cache";
 import { refreshStoreQuotes } from "@/lib/store-quotes";
 import type { Listing, Store } from "@/lib/store";
@@ -416,6 +416,10 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   // A failed or unfinished read of the lost disputes keeps the anchor.
   let unsure = false;
   let lostRead: LostRead | null = null;
+  // The store's erasure began, or its record is gone, under a mark's fence (ReviewStoreGoneError): the pass stops at
+  // once and writes nothing more for the store, so the read refunds, the anchor, the lost disputes' place and the
+  // quotes never come back after the closing walk passed them (Claude 1 on #5092). The closing walk erases the rest.
+  let gone = false;
   try {
     for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
       const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
@@ -458,7 +462,15 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       const seen = flags as unknown[];
       for (const [i, refund] of full.entries()) {
         if (countOf(seen[i]) !== 1) {
-          if (INTENT_ID.test(refund.pi)) marked += await markRefunded(statsId, refund.pi, fence);
+          if (INTENT_ID.test(refund.pi)) {
+            try {
+              marked += await markRefunded(statsId, refund.pi, fence);
+            } catch (error) {
+              if (!(error instanceof ReviewStoreGoneError)) throw error;
+              gone = true;
+              break;
+            }
+          }
           // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
           await redisPipeline([
             ["SADD", seenKey(statsId), refund.id],
@@ -467,6 +479,7 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
         }
         newest = Math.max(newest, refund.created);
       }
+      if (gone) break;
       if (!listed.hasMore) {
         complete = true;
         break;
@@ -478,8 +491,9 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   } finally {
     // A refunded review leaves "What buyers say" on the store page (lib/store-quotes.ts), also when a busy review
     // stopped the pass after others were marked.
-    if (marked > 0) await refreshStoreQuotes(store);
+    if (marked > 0 && !gone) await refreshStoreQuotes(store);
   }
+  if (gone) return marked;
   // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead); a sweep
   // that went on from a kept place moves the job no further than the newest closing it read, so a dispute closed
   // meanwhile is read from the top next run (review of #2158, inbox C4-24).

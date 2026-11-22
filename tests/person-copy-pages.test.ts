@@ -14,7 +14,7 @@ import { COPY_PAGE_MAX_COMMANDS, openCursor, sealCursor } from "@/lib/copy-pages
 import { TRACED_SINCE } from "@/lib/community-trace";
 import { emailKey } from "@/lib/learn";
 import { erasureScope } from "@/lib/person-erasure";
-import { copyPerson, morePagesLine, type PersonCopy } from "@/lib/person-copy";
+import { COPIERS, copyPerson, morePagesLine, type PersonCopy } from "@/lib/person-copy";
 import { storeForEmail } from "@/lib/store";
 import { OWNER, makeWorld, seedPerson } from "./erasure-world";
 import { store as redis } from "./redis-stub";
@@ -107,6 +107,27 @@ async function main(): Promise<void> {
   const comments = pages.flatMap(community).flatMap((r) => r.comments.map((c) => c.comment)).sort();
   is("their posts, every one once, across the pages", posts, whole.posts.map((p) => p.post).sort());
   is("their comments, every one once, across the pages", comments, whole.comments.map((c) => c.comment).sort());
+
+  part("The last page is complete only when every page before it read everything it reached");
+  const opened = openCursor({ sid: scope.sid, email: scope.email }, first.next)!;
+  is("the first page's cursor says the first page read everything else", opened.complete, true);
+  let cursor: string | undefined = sealCursor({ sid: scope.sid, email: scope.email }, { ...opened, complete: false })!;
+  let end: PersonCopy | null = null;
+  for (let n = 0; cursor && n < 100; n++) {
+    end = await copyPerson(scope, Date.now(), { cursor });
+    cursor = end.next;
+  }
+  is("after a first page that left something unread, the last page is not complete", end?.complete, false);
+  is("and it is still the last page", end?.next, undefined);
+
+  part("The community's copier read alone, outside copyPerson, refuses more than one page rather than stop short");
+  let alone = "";
+  try {
+    await COPIERS["lib/community-erasure.ts"]!(scope);
+  } catch (error) {
+    alone = error instanceof Error ? error.message : String(error);
+  }
+  is("it refuses", /more than one page/.test(alone), true);
 
   part("A cursor that is not theirs reads nothing of theirs: the copy starts again");
   const other = (await erasureScope(store, normaliseEmail("someone-else@example.com")))!;

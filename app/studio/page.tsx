@@ -49,6 +49,7 @@ import { after } from "next/server";
 import {
   pricedProducts,
   connectingHolds,
+  STRIPE_CONNECT_REUSE_SECONDS,
   ensureStatsId,
   imageFolder,
   isFree,
@@ -466,7 +467,7 @@ const STRIPE_NOTICES: Record<string, { title: string; body: string }> = {
   // since an earlier press may have opened the account (Claude 7 xAF's LEVE on #5095).
   "attempt-refused": {
     title: "Stripe refused this try, and an earlier one may have opened your account",
-    body: `An earlier try may already have opened a Stripe account with your email address, so we keep asking Stripe with the same details for up to 29 days from your first try, and never open a second account. Pressing again will most likely be refused the same way. Write to ${SUPPORT_EMAIL} and tell us your store's name, so we can look into it with you. Nothing was charged.`,
+    body: `An earlier try may already have opened a Stripe account with your email address, so we keep asking Stripe with the same details for up to ${STRIPE_CONNECT_REUSE_SECONDS / 86_400} days from your first try, and never open a second account. Pressing again will most likely be refused the same way. Write to ${SUPPORT_EMAIL} and tell us your store's name, so we can look into it with you. Nothing was charged.`,
   },
   "country-unsupported": {
     title: "Stripe will not open an account in that country from here",

@@ -33,6 +33,8 @@ const job = (i: number, email: string) =>
 
 function seed(): Set<string> {
   redis.clear();
+  // The indexes were filled from the shared queue (#5135): the copy reads the store's own index.
+  redis.run(["SET", "nl:esync:qdfill:done", "1"]);
   const theirs = new Set<string>();
   for (let i = 0; i < WAITING; i += 1) {
     const mine = i % THEIRS_EVERY === 0;

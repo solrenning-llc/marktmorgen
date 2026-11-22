@@ -73,7 +73,8 @@ const isLog = (batch: Batch) => batch[0]?.[0] === "LRANGE" && batch[0]?.[1] === 
 const isJobs = (batch: Batch) => batch[0]?.[0] === "GET" && String(batch[0]?.[1]).startsWith("nl:esync:j:");
 // The store's queued jobs are read with a scan since the fix of Codex Q's finding on #2860 (an offset page skips
 // members), and from the store's own queued index, never the shared queue, since #5125.
-const isQueuePage = (batch: Batch) => batch[0]?.[0] === "SSCAN" && String(batch[0]?.[1]).startsWith("nl:esync:qd:");
+// The store's waiting jobs: its own queued index once the indexes are filled, else the shared queue (#5135).
+const isQueuePage = (batch: Batch) => ((batch[0]?.[0] === "SSCAN" && String(batch[0]?.[1]).startsWith("nl:esync:qd:")) || (batch[0]?.[0] === "ZSCAN" && batch[0]?.[1] === "nl:esync:q"));
 const isErase = (batch: Batch) => batch[0]?.[0] === "DEL" && String(batch[0]?.[1]).startsWith("nl:esync:j:");
 
 const LOG_SHAPES: [string, (batch: Batch, answers: unknown[]) => unknown[]][] = [

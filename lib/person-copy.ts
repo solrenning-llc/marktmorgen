@@ -345,7 +345,8 @@ export const PAGED_MODULES: Readonly<Record<string, PagedModule>> = {
   },
   [EMAIL_SYNC_MODULE]: {
     at: (s) => (s.statsId ? `${EMAIL_SYNC_MODULE}#${s.statsId}` : null),
-    what: "the record of sending you to the store's email platform",
+    // A send can show on two pages when the store's index is reorganized between them (SSCAN); never twice on one page.
+    what: "the record of sending you to the store's email platform (a send may show on more than one page)",
     page: async (s, budget, resume) => {
       const page = await syncJobsPage(s.statsId, s.email, budget, resume);
       return { sections: page.jobs.length ? [{ module: EMAIL_SYNC_MODULE, what: COPY_PLAN[EMAIL_SYNC_MODULE]!.what, records: page.jobs }] : [], resume: page.resume };

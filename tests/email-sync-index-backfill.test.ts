@@ -2,13 +2,13 @@
  * Jobs already waiting on the shared queue when the store's queued index (nl:esync:qd:<statsId>, #5135) ships were
  * queued before the index existed, so they are not in it (Claude 1 DKvY's MEDIUM on #5135, mail 4534). A person's copy
  * and erasure that read only the index would miss them, and the record holding the address would outlive the erasure.
- * So: until the five-minute job has filled the index from the shared queue once (syncDue, the fill marker), the copy and
- * both erasures say they cannot finish, never an answer with a part missing; after it, they find those jobs.
+ * So: until the five-minute job has filled the indexes from the shared queue once (syncDue, the fill mark), the copy
+ * and both erasures read the store's waiting jobs from the shared queue, as main did; after it, from the index only.
  * Synthetic data only; nothing is sent anywhere.
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { QUEUE_KEY, forgetStoreSync, forgetSyncPerson, syncDue, syncJobsPage } from "@/lib/email-sync";
+import { QUEUE_KEY, fillQueuedIndexes, forgetStoreSync, forgetSyncPerson, syncDue, syncJobsPage } from "@/lib/email-sync";
 import { ReadBudget } from "@/lib/copy-pages";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
@@ -30,38 +30,51 @@ function seedOld(): void {
   redis.run(["ZADD", QUEUE_KEY, Date.now() + 3_600_000, `${STATS}|${OTHER}`]);
 }
 
-const unknown = async (run: () => Promise<unknown>) => {
-  try {
-    await run();
-    return "answered";
-  } catch (error) {
-    return error instanceof UnknownReplyError ? "unknown" : String(error);
-  }
-};
+type Batch = (string | number)[][];
+const original = redis.pipeline.bind(redis);
+const seen: Batch = [];
+redis.pipeline = (async (batch: Batch) => {
+  seen.push(...batch);
+  return original(batch);
+}) as typeof redis.pipeline;
+const scannedShared = () => seen.filter((c) => c[0] === "ZSCAN" && c[1] === QUEUE_KEY).length;
 
-test("before the index is filled, the copy and both erasures say they cannot finish, never miss the job", async () => {
+test("before the indexes are filled, the copy and the person's erasure read the shared queue and find the old job", async () => {
   seedOld();
-  assert.equal(await unknown(() => syncJobsPage(STATS, PERSON, new ReadBudget(20_000))), "unknown", "the copy");
-  assert.equal(await unknown(() => forgetSyncPerson(STATS, PERSON)), "unknown", "the person's erasure");
-  assert.notEqual(redis.run(["GET", `nl:esync:j:${ID}`]), null, "(nothing was deleted by a read that could not finish)");
-  assert.equal(await unknown(() => forgetStoreSync(STATS)), "unknown", "the store's erasure");
-});
-
-test("once the five-minute job has filled the index, the copy and the person's erasure find the old job", async () => {
-  seedOld();
-  await syncDue(Date.now() + 60_000);
   const page = await syncJobsPage(STATS, PERSON, new ReadBudget(20_000));
   assert.deepEqual(page.jobs.map((j) => j.id), [ID], "the copy holds it");
+  assert.equal(page.resume, undefined, "on one page");
   assert.equal(await forgetSyncPerson(STATS, PERSON), 1, "the erasure deletes it");
   assert.equal(redis.run(["GET", `nl:esync:j:${ID}`]), null, "its record is gone");
   assert.equal(redis.run(["ZSCORE", QUEUE_KEY, `${STATS}|${ID}`]), null, "and its queue member");
   assert.notEqual(redis.run(["GET", `nl:esync:j:${OTHER}`]), null, "another person's job stays");
 });
 
-test("once filled, the store's erasure takes the old jobs off the queue", async () => {
+test("before the indexes are filled, the store's erasure takes its old jobs off the shared queue", async () => {
   seedOld();
-  await syncDue(Date.now() + 60_000);
   await forgetStoreSync(STATS);
   assert.equal(redis.run(["GET", `nl:esync:j:${ID}`]), null);
   assert.equal(redis.run(["ZSCORE", QUEUE_KEY, `${STATS}|${OTHER}`]), null);
+});
+
+test("the five-minute job fills the indexes once; then the copy finds the old job without reading the shared queue", async () => {
+  seedOld();
+  await syncDue(Date.now() + 60_000);
+  assert.equal(redis.run(["GET", "nl:esync:qdfill:done"]), "1", "the fill finished and says so");
+  assert.equal(redis.run(["SISMEMBER", `nl:esync:qd:${STATS}`, ID]), 1, "the old job is in its store's index");
+  seen.length = 0;
+  const page = await syncJobsPage(STATS, PERSON, new ReadBudget(20_000));
+  assert.deepEqual(page.jobs.map((j) => j.id), [ID], "the copy holds it");
+  assert.equal(scannedShared(), 0, "and read only the store's own index");
+  seen.length = 0;
+  assert.equal(await forgetSyncPerson(STATS, PERSON), 1, "the erasure deletes it");
+  assert.equal(scannedShared(), 0, "the erasure too");
+});
+
+test("a fill cut short keeps its cursor and goes on from it; a mark in another shape is never taken as filled", async () => {
+  seedOld();
+  assert.equal(await fillQueuedIndexes(Date.now() - 1), "more", "no page started after the deadline");
+  assert.equal(redis.run(["GET", "nl:esync:qdfill:done"]), null);
+  redis.run(["SET", "nl:esync:qdfill:done", "yes"]);
+  await assert.rejects(() => syncJobsPage(STATS, PERSON, new ReadBudget(20_000)), UnknownReplyError);
 });

@@ -80,6 +80,78 @@ export const LOG_SIZE = 50;
  * budget (syncJobsPage); an erasure to the end, never failing closed at a fixed count (Claude 1 coord, mail 7937).
  */
 export const QUEUED_PAGE = 500;
+
+/**
+ * The one-time fill of the stores' queued indexes from the shared queue (Claude 1 DKvY's MEDIUM on #5135, mail 4534):
+ * jobs already waiting when the index shipped were queued before it, so they are in no index. The five-minute job
+ * (syncDue) reads the shared queue with ZSCAN from a kept cursor, at most FILL_ROUNDS pages of QUEUED_PAGE members a
+ * run, and notes each member's id in its store's index; at the end of the scan it sets FILL_DONE_KEY for good. ZSCAN
+ * returns every member present for the whole scan, and a job queued meanwhile notes itself (queuePerson). Until the
+ * mark is set, a person's copy and both erasures read the store's waiting jobs from the shared queue, as before the
+ * index (waitingPage), never only from an index that may miss one. A one-time company cost: per run at most
+ * FILL_ROUNDS x (1 ZSCAN + 2 a member), until done.
+ */
+export const FILL_ROUNDS = 20;
+const FILL_CURSOR_KEY = "nl:esync:qdfill:cursor";
+const FILL_DONE_KEY = "nl:esync:qdfill:done";
+
+/**
+ * One page of a store's waiting job ids, from `cursor`: from its own queued index once the indexes are filled
+ * (`filled`), else from the shared queue, as before the index, its members of this store only (MATCH where the id is a
+ * plain word; filtered here either way). Read exactly: another shape throws.
+ */
+async function waitingPage(statsId: string, filled: boolean, cursor: string): Promise<{ next: string; ids: string[] }> {
+  const match = /^[A-Za-z0-9_-]+$/.test(statsId) ? ["MATCH", `${statsId}|*`] : [];
+  const command = filled ? ["SSCAN", queuedKey(statsId), cursor, "COUNT", QUEUED_PAGE] : ["ZSCAN", QUEUE_KEY, cursor, ...match, "COUNT", QUEUED_PAGE];
+  const reply = repliesFor(await redisPipeline([command]), 1)?.[0];
+  const pair = Array.isArray(reply) && reply.length === 2 ? (reply as unknown[]) : null;
+  const next = typeof pair?.[0] === "number" ? String(pair[0]) : pair?.[0];
+  const flat = pair ? stringList(pair[1]) : null;
+  if (typeof next !== "string" || !/^\d+$/.test(next) || !flat) throw new UnknownReplyError("a store's email platform jobs waiting on the queue");
+  if (filled) return { next, ids: flat.filter((id) => JOB_ID.test(id)) };
+  // ZSCAN answers member, score, member, score...: this store's members only.
+  const ids: string[] = [];
+  for (let i = 0; i < flat.length; i += 2) {
+    const [owner, id] = flat[i]!.split("|");
+    if (owner === statsId && JOB_ID.test(id ?? "")) ids.push(id!);
+  }
+  return { next, ids };
+}
+
+/** Whether FILL_DONE_KEY's reply says the fill finished; another shape is unknown, never "finished". */
+function filledFrom(reply: unknown): boolean {
+  if (reply === "1") return true;
+  if (reply === null) return false;
+  throw new UnknownReplyError("the mark that the stores' queued indexes were filled");
+}
+
+/** One run's share of the fill (FILL_ROUNDS pages at most, none started after the deadline). Never throws into syncDue. */
+export async function fillQueuedIndexes(deadline: number): Promise<"done" | "more"> {
+  const read = repliesFor(await redisPipeline([["GET", FILL_DONE_KEY], ["GET", FILL_CURSOR_KEY]]), 2);
+  if (!read) throw new UnknownReplyError("the fill of the stores' queued indexes");
+  if (filledFrom(read[0])) return "done";
+  let cursor = typeof read[1] === "string" && /^\d+$/.test(read[1]) ? read[1] : "0";
+  for (let round = 0; round < FILL_ROUNDS && Date.now() < deadline; round += 1) {
+    const reply = repliesFor(await redisPipeline([["ZSCAN", QUEUE_KEY, cursor, "COUNT", QUEUED_PAGE]]), 1)?.[0];
+    const pair = Array.isArray(reply) && reply.length === 2 ? (reply as unknown[]) : null;
+    const next = typeof pair?.[0] === "number" ? String(pair[0]) : pair?.[0];
+    const flat = pair ? stringList(pair[1]) : null;
+    if (typeof next !== "string" || !/^\d+$/.test(next) || !flat) throw new UnknownReplyError("a page of the shared email platform queue");
+    const notes: (string | number)[][] = [];
+    // ZSCAN answers member, score, member, score...: the members only.
+    for (let i = 0; i < flat.length; i += 2) {
+      const [statsId, id] = flat[i]!.split("|");
+      if (!statsId || !JOB_ID.test(id ?? "")) continue;
+      notes.push(["SADD", queuedKey(statsId), id!], ["EXPIRE", queuedKey(statsId), JOB_SECONDS]);
+    }
+    if (notes.length && !repliesFor(await redisPipeline(notes), notes.length)) throw new UnknownReplyError("noting waiting jobs in their stores' indexes");
+    cursor = next;
+    // The cursor is kept only after its page was noted, so a run cut short reads that page again, never skips it.
+    await redisPipeline(cursor === "0" ? [["SET", FILL_DONE_KEY, "1"], ["DEL", FILL_CURSOR_KEY]] : [["SET", FILL_CURSOR_KEY, cursor]]);
+    if (cursor === "0") return "done";
+  }
+  return "more";
+}
 /** Minutes to wait before each try after the first. */
 export const RETRY_MINUTES = [5, 15, 60, 180, 720, 1440];
 export const MAX_ATTEMPTS = RETRY_MINUTES.length + 1;
@@ -689,6 +761,9 @@ async function claim(statsId: string, id: string, now = Date.now()): Promise<boo
 export async function syncDue(deadline: number, now = Date.now()): Promise<{ tried: number; added: number }> {
   const counts = { tried: 0, added: 0 };
   if (!isRedisConfigured()) return counts;
+  // The one-time fill of the stores' queued indexes, a run's share at a time; a failure is logged and tried again on
+  // the next run, never stops the sending.
+  await fillQueuedIndexes(deadline).catch((error) => console.error("filling the stores' email platform queued indexes failed", error));
   const [due] = await redisPipeline([["ZRANGEBYSCORE", QUEUE_KEY, "-inf", now, "LIMIT", 0, MAX_PER_RUN]]);
   const members = Array.isArray(due) ? (due as unknown[]).map(String) : [];
   for (let i = 0; i < members.length && Date.now() < deadline; i += 5) {
@@ -981,12 +1056,16 @@ export async function forgetStoreSync(statsId: string | null, apply: (commands: 
   // Every reply read exactly (CX-123 rule 24): a log or a queue page in another shape is unknown, never "no job".
   // What was read is still deleted (the sealed key with the settings), the log is kept when it did not read, so
   // the next try finds its jobs, and the forgetting throws rather than being taken as finished (Claude 5 sweep A2).
-  const logged = stringList(repliesFor(await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]), 1)?.[0]);
+  const read = repliesFor(await redisPipeline([["LRANGE", logKey(statsId), 0, -1], ["GET", FILL_DONE_KEY]]), 2);
+  const logged = stringList(read?.[0]);
   let unread = !logged;
+  // Until the indexes are filled, the shared queue is read for this store's jobs, as before them (#5135, DKvY 4534).
+  const filled = read ? filledFrom(read[1]) : false;
+  if (!read) unread = true;
   const ids = new Set((logged ?? []).filter((id) => JOB_ID.test(id)));
   // The store's waiting jobs are in its own queued index (#5125), never read from the queue every store shares; every
   // job of the store, logged or not, is taken off the queue by its own member.
-  const { ids: waiting, whole } = await queuedIdsOf(statsId);
+  const { ids: waiting, whole } = await queuedIdsOf(statsId, filled);
   if (!whole) unread = true;
   for (const id of waiting) ids.add(id);
   const queued = [...ids].map((id) => `${statsId}|${id}`);
@@ -1033,17 +1112,19 @@ function countsFor(replies: unknown, commands: readonly (readonly (string | numb
  * Their cost is the store's own waiting jobs, never the queue every store shares, as main read it. `whole` is false
  * when a reply does not read exactly: what was read is kept, never taken as all of them (CX-123 rule 24).
  */
-async function queuedIdsOf(statsId: string): Promise<{ ids: string[]; whole: boolean }> {
+async function queuedIdsOf(statsId: string, filled: boolean): Promise<{ ids: string[]; whole: boolean }> {
   const ids = new Set<string>();
   let cursor = "0";
   for (;;) {
-    const reply = repliesFor(await redisPipeline([["SSCAN", queuedKey(statsId), cursor, "COUNT", QUEUED_PAGE]]), 1)?.[0];
-    const pair = Array.isArray(reply) && reply.length === 2 ? (reply as unknown[]) : null;
-    const next = typeof pair?.[0] === "number" ? String(pair[0]) : pair?.[0];
-    const page = pair ? stringList(pair[1]) : null;
-    if (typeof next !== "string" || !/^\d+$/.test(next) || !page) return { ids: [...ids], whole: false };
-    for (const id of page) if (JOB_ID.test(id)) ids.add(id);
-    cursor = next;
+    let page: { next: string; ids: string[] };
+    try {
+      page = await waitingPage(statsId, filled, cursor);
+    } catch (error) {
+      if (error instanceof UnknownReplyError) return { ids: [...ids], whole: false };
+      throw error;
+    }
+    for (const id of page.ids) ids.add(id);
+    cursor = page.next;
     if (cursor === "0") return { ids: [...ids], whole: true };
   }
 }
@@ -1063,9 +1144,10 @@ async function loggedJobs(statsId: string): Promise<{ id: string; job: Job | nul
 
 /** loggedJobs, with the whole log's length, which bounds each LREM count of an erasure. */
 async function loggedJobsWithLog(statsId: string): Promise<{ jobs: { id: string; job: Job | null }[]; logLength: number }> {
-  const ids = stringList(repliesFor(await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]), 1)?.[0]);
+  const read = repliesFor(await redisPipeline([["LRANGE", logKey(statsId), 0, -1], ["GET", FILL_DONE_KEY]]), 2);
+  const ids = stringList(read?.[0]);
   if (!ids) throw new UnknownReplyError("a store's email platform job log");
-  const { ids: queued, whole } = await queuedIdsOf(statsId);
+  const { ids: queued, whole } = await queuedIdsOf(statsId, filledFrom(read![1]));
   if (!whole) throw new UnknownReplyError("a store's email platform jobs waiting on the queue");
   const logged = [...new Set([...ids, ...queued])];
   return { jobs: await readJobs(logged), logLength: ids.length };
@@ -1174,37 +1256,37 @@ export async function syncJobsPage(statsId: string | null, email: string, budget
   if (!statsId || !isRedisConfigured()) return { jobs: [] };
   const address = normaliseEmail(email);
   const from = resume ?? "l";
-  const scan = /^q:(\d+)(?::(esj_[0-9a-f]{24}))?$/.exec(from);
+  // "q" pages the store's own index, "g" the shared queue while the indexes are not filled yet (waitingPage).
+  const scan = /^([qg]):(\d+)(?::(esj_[0-9a-f]{24}))?$/.exec(from);
   if (from !== "l" && !scan) throw new Error("an email platform copy page goes on from a position that is not its own");
-  if (!budget.take(1)) return { jobs: [], resume: from };
-  const logged = stringList(repliesFor(await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]), 1)?.[0]);
+  if (!budget.take(2)) return { jobs: [], resume: from };
+  const read = repliesFor(await redisPipeline([["LRANGE", logKey(statsId), 0, -1], ["GET", FILL_DONE_KEY]]), 2);
+  const logged = stringList(read?.[0]);
   if (!logged) throw new UnknownReplyError("a store's email platform job log");
   // Every id the log names, read as syncJobsOf reads the log (loggedJobsWithLog).
   const inLog = [...new Set(logged)];
   const jobs: JobView[] = [];
-  let cursor = scan ? scan[1]! : "0";
+  // A page that began on the shared queue goes on there (exact either way); a new read uses the index once filled.
+  const source = scan ? scan[1]! : filledFrom(read![1]) ? "q" : "g";
+  let cursor = scan ? scan[2]! : "0";
   // Within one index page, the jobs already read: the page is read in id order, so a page cut short goes on after
   // the last id it read, and every job on that page for the whole read is read once.
-  let after = scan?.[2] ?? "";
+  let after = scan?.[3] ?? "";
   if (!scan) {
     if (!budget.take(inLog.length)) return { jobs: [], resume: from };
     jobs.push(...viewsOf(await readJobs(inLog), address));
   }
   const inLogNow = new Set(inLog);
   for (;;) {
-    const here = after ? `q:${cursor}:${after}` : `q:${cursor}`;
+    const here = after ? `${source}:${cursor}:${after}` : `${source}:${cursor}`;
     if (!budget.take(1)) return { jobs, resume: here };
-    const reply = repliesFor(await redisPipeline([["SSCAN", queuedKey(statsId), cursor, "COUNT", QUEUED_PAGE]]), 1)?.[0];
-    const pair = Array.isArray(reply) && reply.length === 2 ? (reply as unknown[]) : null;
-    const next = typeof pair?.[0] === "number" ? String(pair[0]) : pair?.[0];
-    const page = pair ? stringList(pair[1]) : null;
-    if (typeof next !== "string" || !/^\d+$/.test(next) || !page) throw new UnknownReplyError("a store's email platform jobs waiting on the queue");
-    const ids = [...new Set(page.filter((id) => JOB_ID.test(id) && !inLogNow.has(id) && id > after))].sort();
+    const { next, ids: page } = await waitingPage(statsId, source === "q", cursor);
+    const ids = [...new Set(page.filter((id) => !inLogNow.has(id) && id > after))].sort();
     // As many of the page's records as the budget still holds; the rest on the next page, after the last one read.
     const fit = Math.min(ids.length, budget.left);
     if (!budget.take(fit)) return { jobs, resume: here };
     jobs.push(...viewsOf(await readJobs(ids.slice(0, fit)), address));
-    if (fit < ids.length) return { jobs, resume: fit ? `q:${cursor}:${ids[fit - 1]}` : here };
+    if (fit < ids.length) return { jobs, resume: fit ? `${source}:${cursor}:${ids[fit - 1]}` : here };
     cursor = next;
     after = "";
     if (cursor === "0") return { jobs };

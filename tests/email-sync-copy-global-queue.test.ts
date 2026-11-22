@@ -35,6 +35,8 @@ const person = (email: string, consent: boolean) => ({ source: "purchase" as con
 
 async function seed(): Promise<string> {
   redis.clear();
+  // The indexes were filled from the shared queue (#5135); before that, a copy reads the shared queue as main did.
+  redis.run(["SET", "nl:esync:qdfill:done", "1"]);
   const now = Date.now();
   redis.run(["SET", cfgKey, JSON.stringify({ handle: "globalq", provider: "kit", key: "sealed-stand-in", last4: "0000", target: { id: "t1", name: "Synthetic list" }, free: true, buyers: "all", products: [], tags: {}, since: now - 60_000, connectedAt: now - 60_000 })]);
   assert.equal(await queuePerson(store, person(FIRST, true)), "queued");

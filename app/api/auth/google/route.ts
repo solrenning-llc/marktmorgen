@@ -33,8 +33,8 @@ export async function POST(request: NextRequest) {
     const response = new Response(null, { status: 303, headers: { Location: begun.url, "Cache-Control": "no-store" } });
     response.headers.append("Set-Cookie", begun.cookie);
     return response;
-  } catch (error) {
-    console.error("starting a login with Google failed", error);
+  } catch {
+    console.error("starting a login with Google failed");
     return back("google-error");
   }
 }

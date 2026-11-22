@@ -59,7 +59,7 @@ import { stockAlertsOf } from "@/lib/stock-alerts";
 import { feedsOf } from "@/lib/podcast-access";
 import { remindersOf } from "@/lib/assistant-reminder";
 import { asksOf } from "@/lib/checkout-ask";
-import { syncJobsOf } from "@/lib/email-sync";
+import { syncJobsPage } from "@/lib/email-sync";
 import { type MemberTracesPage, memberTracesPage, readMember as readCommunityMember } from "@/lib/community";
 import { COPY_PAGE_MAX_COMMANDS, type PageCursor, ReadBudget, openCursor, sealCursor } from "@/lib/copy-pages";
 import { pointsRecordOf } from "@/lib/community-points";
@@ -264,20 +264,38 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
 
 /** The module whose copy goes in pages (lib/copy-pages.ts): a member's community activity. */
 const COMMUNITY_MODULE = "lib/community-erasure.ts";
-/** Where a community copy's cursor points: the module and the community, so a cursor never reads another. */
-const communityAt = (id: string) => `${COMMUNITY_MODULE}#${id}`;
+/** A paged module too: the record of sending the person to the store's email platform (#5125). */
+const EMAIL_SYNC_MODULE = "lib/email-sync.ts";
 
-/** This request's paged read: what it may still send, and where the community's activity goes on. */
-const pagesOf = new WeakMap<ErasureScope, { budget: ReadBudget; resume?: string }>();
+/**
+ * This request's paged read: what it may still send, and the first paged module that ran out of it, with where it
+ * goes on. Every paged module after that one waits whole for the later pages (pagedFirst).
+ */
+type Paging = { budget: ReadBudget; stop?: { at: string; resume: string } };
+const pagesOf = new WeakMap<ErasureScope, Paging>();
 
-/** The first page of a member's community activity, inside this request's budget; where it goes on is kept for copyPerson. */
-async function firstCommunityPage(s: ErasureScope, id: string, who: string): Promise<MemberTracesPage> {
+/**
+ * A paged module's first page, inside this request's budget (lib/copy-pages.ts). Null when an earlier paged module
+ * already ran out: this one is then read whole on the later pages, after it (PAGED_MODULES). Where it goes on is kept
+ * for copyPerson. Read outside copyPerson, nothing would carry where it goes on: more than one page fails, never stops
+ * short.
+ */
+async function pagedFirst<T extends { resume?: string }>(s: ErasureScope, at: string, read: (budget: ReadBudget) => Promise<T>): Promise<T | null> {
   const paging = pagesOf.get(s);
-  const page = await memberTracesPage(id, who, paging?.budget ?? new ReadBudget(COPY_PAGE_MAX_COMMANDS));
-  // Read outside copyPerson, nothing would carry where it goes on: more than one page fails, never stops short.
-  if (!paging && page.resume !== undefined) throw new Error("a member's community activity takes more than one page: read it through copyPerson");
-  if (paging) paging.resume = page.resume;
+  if (paging?.stop) return null;
+  const page = await read(paging?.budget ?? new ReadBudget(COPY_PAGE_MAX_COMMANDS));
+  if (page.resume === undefined) return page;
+  if (!paging) throw new Error(`${at.split("#")[0]} takes more than one page: read it through copyPerson`);
+  paging.stop = { at, resume: page.resume };
   return page;
+}
+
+/**
+ * The first page of a member's community activity, inside this request's budget; nothing yet when a paged part before
+ * it ran out (their posts, comments, likes, reports and votes then come on the later pages).
+ */
+async function firstCommunityPage(s: ErasureScope, id: string, who: string): Promise<MemberTracesPage> {
+  return (await pagedFirst(s, `${COMMUNITY_MODULE}#${id}`, (budget) => memberTracesPage(id, who, budget))) ?? { traces: { posts: [], comments: [], likedPosts: [], likedComments: [], reported: [], pollPosts: [] }, votes: [] };
 }
 
 /** What a member wrote and did, as the copy shows it, from one page. */
@@ -297,8 +315,58 @@ function wroteOf(page: MemberTracesPage) {
 const hasWrote = (traces: MemberTracesPage["traces"], votes: MemberTracesPage["votes"]) =>
   votes.length > 0 || traces.posts.length > 0 || traces.comments.length > 0 || traces.likedPosts.length > 0 || traces.likedComments.length > 0 || traces.reported.length > 0;
 
-/** What the copy says while it has another page, in words, with the page to ask for. */
-export const morePagesLine = (page: number) => `This copy continues on page ${page}. Ask for it with the cursor in "next" to read the rest of your community activity.`;
+/**
+ * A part of the copy that may take more than one request (lib/copy-pages.ts). `at` names this person's instance of it
+ * (`module#instance`, so a cursor never reads another's), or null when they have none. `page` reads it from `resume`
+ * (from its start when absent) inside the budget, and gives where it goes on while there is more; with no room even to
+ * begin, it gives a resume and reads nothing, never throws.
+ */
+type PagedModule = {
+  at: (s: ErasureScope) => string | null;
+  /** What the copy says is still to be read, in words. */
+  what: string;
+  page: (s: ErasureScope, budget: ReadBudget, resume?: string) => Promise<{ sections: CopySection[]; resume?: string }>;
+};
+
+/**
+ * The paged parts, in the order the first page reaches them (COPY_PLAN, then COPY_ALSO;
+ * tests/person-copy-paged-modules.test.ts holds the two orders equal). On the first page they share one budget: the
+ * first that runs out sets the cursor, and every one after it waits whole. A later page goes on with the cursor's
+ * module, then each one after it from its start, while the budget lasts.
+ */
+export const PAGED_MODULES: Readonly<Record<string, PagedModule>> = {
+  [COMMUNITY_MODULE]: {
+    at: (s) => (s.communityId ? `${COMMUNITY_MODULE}#${s.communityId}` : null),
+    what: "your community activity",
+    page: async (s, budget, resume) => {
+      const page = await memberTracesPage(s.communityId!, s.learner, budget, resume);
+      return { sections: hasWrote(page.traces, page.votes) ? [{ module: COMMUNITY_MODULE, what: COPY_PLAN[COMMUNITY_MODULE]!.what, records: [wroteOf(page)] }] : [], resume: page.resume };
+    },
+  },
+  [EMAIL_SYNC_MODULE]: {
+    at: (s) => (s.statsId ? `${EMAIL_SYNC_MODULE}#${s.statsId}` : null),
+    // A send can show on two pages when the store's index is reorganized between them (SSCAN); never twice on one page.
+    what: "the record of sending you to the store's email platform (a send may show on more than one page)",
+    page: async (s, budget, resume) => {
+      const page = await syncJobsPage(s.statsId, s.email, budget, resume);
+      return { sections: page.jobs.length ? [{ module: EMAIL_SYNC_MODULE, what: COPY_PLAN[EMAIL_SYNC_MODULE]!.what, records: page.jobs }] : [], resume: page.resume };
+    },
+  },
+};
+
+/** This person's paged parts from the one a cursor names, that one first, as `module#instance`. */
+function pagedFrom(s: ErasureScope, at: string): string[] {
+  const order = Object.keys(PAGED_MODULES);
+  const from = order.indexOf(at.split("#")[0]!);
+  return order.slice(from).flatMap((module) => PAGED_MODULES[module]!.at(s) ?? []);
+}
+
+/** What the copy says while it has another page, in words: the page to ask for, and each part still to be read. */
+export function morePagesLine(page: number, parts: readonly string[]): string {
+  const what = parts.map((at) => PAGED_MODULES[at.split("#")[0]!]!.what);
+  const count = `${what.length} ${what.length === 1 ? "part" : "parts"} still to read`;
+  return `This copy continues on page ${page}. Ask for it with the cursor in "next" to read the rest: ${what.join("; ")} (${count}).`;
+}
 
 /** What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts). */
 const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true });
@@ -551,7 +619,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/podcast-access.ts": async (s) => (await feedsOf(s.store, s.productIds, s.email)).map((product) => ({ product, privateFeed: true })),
   "lib/assistant-reminder.ts": async (s) => (await remindersOf(s.statsId, s.email)).map((r) => ({ ...r, at: new Date(r.at).toISOString() })),
   "lib/checkout-ask.ts": async (s) => asksOf(s.statsId, s.email),
-  "lib/email-sync.ts": async (s) => syncJobsOf(s.statsId, s.email),
+  // The first page of what was sent to the store's email platform, inside this request's budget (PAGED_MODULES, #5125).
+  "lib/email-sync.ts": async (s) => (await pagedFirst(s, `${EMAIL_SYNC_MODULE}#${s.statsId}`, (budget) => syncJobsPage(s.statsId, s.email, budget)))?.jobs ?? [],
   "lib/community-erasure.ts": async (s) => {
     const id = s.communityId;
     if (!id) return [];
@@ -716,11 +785,12 @@ export const ALSO_COPIERS: Readonly<Record<string, PartCopier>> = {
  */
 export async function copyPerson(scope: ErasureScope, now = Date.now(), options: { cursor?: string } = {}): Promise<PersonCopy> {
   const whose = { sid: scope.sid, email: scope.email };
-  // A cursor sealed for this store and address, for this store's community: its next page only. Any other cursor,
-  // or none, is the copy from its first page.
+  // A cursor sealed for this store and address, for one of this person's paged parts: the next page only. Any other
+  // cursor, or none, is the copy from its first page.
   const at = options.cursor === undefined ? null : openCursor(whose, options.cursor);
-  if (at && scope.communityId && at.module === communityAt(scope.communityId)) return communityPage(scope, now, at);
-  const paging = { budget: new ReadBudget(COPY_PAGE_MAX_COMMANDS) } as { budget: ReadBudget; resume?: string };
+  const part = at ? PAGED_MODULES[at.module.split("#")[0]!] : undefined;
+  if (at && part && part.at(scope) === at.module) return laterPage(scope, now, at);
+  const paging: Paging = { budget: new ReadBudget(COPY_PAGE_MAX_COMMANDS) };
   pagesOf.set(scope, paging);
   try {
     return await firstPage(scope, now, paging);
@@ -736,11 +806,21 @@ function nextCursor(scope: ErasureScope, at: PageCursor): string {
   return cursor;
 }
 
-/** A later page: only the member's community activity, from where the last page stopped. */
-async function communityPage(scope: ErasureScope, now: number, at: PageCursor): Promise<PersonCopy> {
-  const page = await memberTracesPage(scope.communityId!, scope.learner, new ReadBudget(COPY_PAGE_MAX_COMMANDS), at.resume);
-  const sections: CopySection[] = hasWrote(page.traces, page.votes) ? [{ module: COMMUNITY_MODULE, what: COPY_PLAN[COMMUNITY_MODULE]!.what, records: [wroteOf(page)] }] : [];
-  const next = page.resume === undefined ? undefined : nextCursor(scope, { ...at, page: at.page + 1, resume: page.resume });
+/** A later page: the paged part the cursor names, from where the last page stopped, then each one after it. */
+async function laterPage(scope: ErasureScope, now: number, at: PageCursor): Promise<PersonCopy> {
+  const budget = new ReadBudget(COPY_PAGE_MAX_COMMANDS);
+  const parts = pagedFrom(scope, at.module);
+  const sections: CopySection[] = [];
+  let next: string | undefined;
+  let left: string[] = [];
+  for (const [i, part] of parts.entries()) {
+    const page = await PAGED_MODULES[part.split("#")[0]!]!.page(scope, budget, i === 0 ? at.resume : undefined);
+    sections.push(...page.sections);
+    if (page.resume === undefined) continue;
+    next = nextCursor(scope, { module: part, page: at.page + 1, resume: page.resume, complete: at.complete });
+    left = parts.slice(i);
+    break;
+  }
   return {
     store: { name: scope.store.name, handle: scope.store.handle },
     email: scope.email,
@@ -751,13 +831,13 @@ async function communityPage(scope: ErasureScope, now: number, at: PageCursor): 
     passing: [],
     // The last page says whether the whole copy is complete: every earlier page read everything it reached.
     complete: next === undefined && at.complete,
-    notComplete: next === undefined ? [] : [morePagesLine(at.page + 1)],
+    notComplete: next === undefined ? [] : [morePagesLine(at.page + 1, left)],
     page: at.page,
     ...(next === undefined ? {} : { next }),
   };
 }
 
-async function firstPage(scope: ErasureScope, now: number, paging: { budget: ReadBudget; resume?: string }): Promise<PersonCopy> {
+async function firstPage(scope: ErasureScope, now: number, paging: Paging): Promise<PersonCopy> {
   const sections: CopySection[] = [];
   for (const [module, plan] of Object.entries(COPY_PLAN)) {
     if (plan.how !== "copied") continue;
@@ -778,8 +858,9 @@ async function firstPage(scope: ErasureScope, now: number, paging: { budget: Rea
   const marks = copyMarks();
   const elsewhere = Object.values(COPY_PLAN).filter((p) => p.how === "elsewhere").map((p) => p.what);
   const passing = Object.values(COPY_ALSO).flatMap((p) => (p.how === "passing" ? [`${p.what} (at most ${p.days} ${p.days === 1 ? "day" : "days"}).`] : []));
-  const next = paging.resume === undefined ? undefined : nextCursor(scope, { module: communityAt(scope.communityId!), page: 2, resume: paging.resume, complete: notComplete.length === 0 });
-  if (next !== undefined) notComplete.push(morePagesLine(2));
+  const stop = paging.stop;
+  const next = stop === undefined ? undefined : nextCursor(scope, { module: stop.at, page: 2, resume: stop.resume, complete: notComplete.length === 0 });
+  if (stop !== undefined) notComplete.push(morePagesLine(2, pagedFrom(scope, stop.at)));
   return { store: { name: scope.store.name, handle: scope.store.handle }, email: scope.email, made: new Date(now).toISOString(), sections, marks, elsewhere, passing, complete: notComplete.length === 0, notComplete, page: 1, ...(next === undefined ? {} : { next }) };
 }
 

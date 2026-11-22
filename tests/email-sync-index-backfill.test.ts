@@ -1,0 +1,139 @@
+/**
+ * Jobs already waiting on the shared queue when the store's queued index (nl:esync:qd:<statsId>, #5135) ships were
+ * queued before the index existed, so they are not in it (Claude 1 DKvY's MEDIUM on #5135, mail 4534). A person's copy
+ * and erasure that read only the index would miss them, and the record holding the address would outlive the erasure.
+ * So: until the five-minute job has filled the indexes from the shared queue once (syncDue, the fill mark), the copy
+ * and both erasures read the store's waiting jobs from the shared queue, as main did; after it, from the index only.
+ * Synthetic data only; nothing is sent anywhere.
+ */
+import assert from "node:assert/strict";
+import test from "node:test";
+import { FILL_RUN_COMMANDS, QUEUED_PAGE, QUEUE_KEY, fillQueuedIndexes, forgetStoreSync, forgetSyncPerson, syncDue, syncJobsPage } from "@/lib/email-sync";
+import { ReadBudget } from "@/lib/copy-pages";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { store as redis } from "./redis-stub";
+
+const STATS = "backfill00001";
+const PERSON = "dana.reyes@example.com";
+const ID = `esj_${"ab".repeat(12)}`;
+const OTHER = `esj_${"cd".repeat(12)}`;
+
+/** A job queued before the index existed: its record and its queue member, in no log and no index. */
+function seedOld(): void {
+  redis.clear();
+  const job = (id: string, email: string) =>
+    JSON.stringify({ id, statsId: STATS, email, firstName: null, products: [], title: "Synthetic", source: "purchase", attempts: 1, state: "retrying", next: Date.now() + 3_600_000, lastError: "", note: "", lastAt: 1, createdAt: 1 });
+  redis.run(["SET", `nl:esync:j:${ID}`, job(ID, PERSON)]);
+  redis.run(["SET", `nl:esync:j:${OTHER}`, job(OTHER, "other@example.com")]);
+  // Due in an hour, so the five-minute job does not try them here: only the fill touches them.
+  redis.run(["ZADD", QUEUE_KEY, Date.now() + 3_600_000, `${STATS}|${ID}`]);
+  redis.run(["ZADD", QUEUE_KEY, Date.now() + 3_600_000, `${STATS}|${OTHER}`]);
+}
+
+type Batch = (string | number)[][];
+const original = redis.pipeline.bind(redis);
+const seen: Batch = [];
+redis.pipeline = (async (batch: Batch) => {
+  seen.push(...batch);
+  return original(batch);
+}) as typeof redis.pipeline;
+const scannedShared = () => seen.filter((c) => c[0] === "ZSCAN" && c[1] === QUEUE_KEY).length;
+
+test("before the indexes are filled, the copy and the person's erasure read the shared queue and find the old job", async () => {
+  seedOld();
+  const page = await syncJobsPage(STATS, PERSON, new ReadBudget(20_000));
+  assert.deepEqual(page.jobs.map((j) => j.id), [ID], "the copy holds it");
+  assert.equal(page.resume, undefined, "on one page");
+  assert.equal(await forgetSyncPerson(STATS, PERSON), 1, "the erasure deletes it");
+  assert.equal(redis.run(["GET", `nl:esync:j:${ID}`]), null, "its record is gone");
+  assert.equal(redis.run(["ZSCORE", QUEUE_KEY, `${STATS}|${ID}`]), null, "and its queue member");
+  assert.notEqual(redis.run(["GET", `nl:esync:j:${OTHER}`]), null, "another person's job stays");
+});
+
+test("before the indexes are filled, the store's erasure takes its old jobs off the shared queue", async () => {
+  seedOld();
+  await forgetStoreSync(STATS);
+  assert.equal(redis.run(["GET", `nl:esync:j:${ID}`]), null);
+  assert.equal(redis.run(["ZSCORE", QUEUE_KEY, `${STATS}|${OTHER}`]), null);
+});
+
+test("the five-minute job fills the indexes once; then the copy finds the old job without reading the shared queue", async () => {
+  seedOld();
+  await syncDue(Date.now() + 60_000);
+  assert.equal(redis.run(["GET", "nl:esync:qdfill:done"]), "1", "the fill finished and says so");
+  assert.equal(redis.run(["SISMEMBER", `nl:esync:qd:${STATS}`, ID]), 1, "the old job is in its store's index");
+  seen.length = 0;
+  const page = await syncJobsPage(STATS, PERSON, new ReadBudget(20_000));
+  assert.deepEqual(page.jobs.map((j) => j.id), [ID], "the copy holds it");
+  assert.equal(scannedShared(), 0, "and read only the store's own index");
+  seen.length = 0;
+  assert.equal(await forgetSyncPerson(STATS, PERSON), 1, "the erasure deletes it");
+  assert.equal(scannedShared(), 0, "the erasure too");
+});
+
+test("a fill cut short keeps its cursor and goes on from it; a mark in another shape is never taken as filled", async () => {
+  seedOld();
+  assert.equal(await fillQueuedIndexes(Date.now() - 1), "more", "no page started after the deadline");
+  assert.equal(redis.run(["GET", "nl:esync:qdfill:done"]), null);
+  redis.run(["SET", "nl:esync:qdfill:done", "yes"]);
+  await assert.rejects(() => syncJobsPage(STATS, PERSON, new ReadBudget(20_000)), UnknownReplyError);
+});
+
+test("each run of the fill sends at most FILL_RUN_COMMANDS commands, and the fill ends with every job noted", async () => {
+  redis.clear();
+  assert.equal(FILL_RUN_COMMANDS, 20 * (1 + 2 * QUEUED_PAGE), "FILL_ROUNDS x (1 + 2 x 500)");
+  // More waiting jobs than one run can note, all in one ZSCAN page here (the stub answers whole, as a small key does).
+  const jobs = 25_000;
+  for (let i = 0; i < jobs; i += 1) redis.run(["ZADD", QUEUE_KEY, i, `store${String(i % 50).padStart(3, "0")}|esj_${i.toString(16).padStart(24, "0")}`]);
+  let runs = 0;
+  let result: "done" | "more" = "more";
+  while (result === "more") {
+    seen.length = 0;
+    result = await fillQueuedIndexes(Date.now() + 60_000);
+    runs += 1;
+    assert.ok(seen.length <= FILL_RUN_COMMANDS, `run ${runs} sent ${seen.length}, at most ${FILL_RUN_COMMANDS}`);
+    assert.ok(runs < 100, "the fill ends");
+    if (result === "more") assert.equal(redis.run(["GET", "nl:esync:qdfill:done"]), null, "no mark before the scan's end");
+  }
+  assert.ok(runs >= 2, "a queue larger than one run's notes takes more than one run");
+  assert.equal(redis.run(["GET", "nl:esync:qdfill:done"]), "1");
+  let noted = 0;
+  for (let s = 0; s < 50; s += 1) noted += Number(redis.run(["SCARD", `nl:esync:qd:store${String(s).padStart(3, "0")}`]));
+  assert.equal(noted, jobs, "every waiting job is in its store's index");
+});
+
+test("a page that does not fit in what a run has left is read again whole from its cursor, never from after a member", async () => {
+  // Claude 1 E's LEVE on #5135: the same cursor may answer more members once the queue's dict has shrunk, and the SCAN
+  // protocol returns those only on that read, so a resume from after a member could leave one out of every index.
+  redis.clear();
+  const member = (i: number) => `store${String(i % 7).padStart(3, "0")}|esj_${i.toString(16).padStart(24, "0")}`;
+  const flat = (from: number, to: number) => Array.from({ length: to - from }, (_, k) => [member(from + k), "1"]).flat();
+  const pages: Record<string, [string, string[]]> = { "0": ["5", flat(0, 600)], "5": ["0", flat(600, 10_600)] };
+  const plain = redis.pipeline;
+  redis.pipeline = (async (batch: Batch) => {
+    const [name, key, cursor] = batch[0] ?? [];
+    if (batch.length === 1 && name === "ZSCAN" && key === QUEUE_KEY) {
+      seen.push(...batch);
+      return [pages[String(cursor)]];
+    }
+    return plain(batch);
+  }) as typeof redis.pipeline;
+  try {
+    assert.equal(await fillQueuedIndexes(Date.now() + 60_000), "more", "the second page does not fit after the first");
+    assert.equal(redis.run(["GET", "nl:esync:qdfill:cursor"]), "5", "kept as its cursor alone, with no member to go on after");
+    assert.equal(await fillQueuedIndexes(Date.now() + 60_000), "done", "the next run reads that page whole and ends");
+    let noted = 0;
+    for (let s = 0; s < 7; s += 1) noted += Number(redis.run(["SCARD", `nl:esync:qd:store${String(s).padStart(3, "0")}`]));
+    assert.equal(noted, 10_600, "every member is noted");
+  } finally {
+    redis.pipeline = plain;
+  }
+});
+
+test("once the fill is done, a run sends one GET and nothing else", async () => {
+  redis.clear();
+  redis.run(["SET", "nl:esync:qdfill:done", "1"]);
+  seen.length = 0;
+  assert.equal(await fillQueuedIndexes(Date.now() + 60_000), "done");
+  assert.deepEqual(seen, [["GET", "nl:esync:qdfill:done"]]);
+});

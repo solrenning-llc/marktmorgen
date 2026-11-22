@@ -123,7 +123,9 @@ test("the studio still shows the newest LOG_SIZE jobs, and the log stays that lo
   assert.equal((await syncView(store)).log?.length, LOG_SIZE);
 });
 
-const isQueueScan = (batch: Batch) => batch.length === 1 && batch[0]?.[1] === QUEUE_KEY && (batch[0]?.[0] === "ZSCAN" || batch[0]?.[0] === "ZRANGEBYSCORE");
+// The store's own queued index since #5125, never the shared queue.
+// The store's waiting jobs: its own queued index once the indexes are filled, else the shared queue (#5135).
+const isQueueScan = (batch: Batch) => batch.length === 1 && ((batch[0]?.[0] === "SSCAN" && String(batch[0]?.[1]).startsWith("nl:esync:qd:")) || (batch[0]?.[0] === "ZSCAN" && batch[0]?.[1] === "nl:esync:q"));
 for (const [name, answer] of [
   ["no reply", []],
   ["a number", [7]],

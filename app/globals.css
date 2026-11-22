@@ -5408,5 +5408,6 @@ html:has([data-product-editor]) {
 :where(:root[data-color-scheme="dark"]:has(.legal-body)) .btn-danger-solid:hover { background-color: var(--danger-text); }
 :where(:root[data-color-scheme="dark"]:has(.legal-body)) .nb-toast { color: var(--action-on); }
 :where(:root[data-color-scheme="dark"]:has(.legal-body)) .nb-toast-close { color: var(--action-on); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .legal-body a { text-decoration-color: color-mix(in srgb, var(--link) 60%, transparent); }
 :where(:root[data-color-scheme="dark"]:has(.legal-body)) .on-dark ::selection { color: var(--on-dark); background: rgba(255, 255, 255, 0.2); }
 /* end dark tokens */

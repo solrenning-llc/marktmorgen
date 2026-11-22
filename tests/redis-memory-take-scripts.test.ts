@@ -89,6 +89,10 @@ const CASES: Record<string, Case[]> = {
     { what: "an owner's record of another store", setup: [["SET", "k:live", record("st2")]], keys: ["k:live", "k:erasing", "k:mark"], argv: ["f1", "v", 60, "st1", ""] },
     { what: "an erasing store", setup: [["SET", "k:live", "ref1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:live", "k:erasing", "k:mark"], argv: ["f1", "v", 60, "", "ref1"] },
   ],
+  "store-forget-complete:v1": [
+    { what: "a store still in line", setup: [["HSET", "k:q", "st|s1", "{}"], ["HSET", "k:month", "done", "2"]], keys: ["k:q", "k:month"], argv: ["st|s1", 3600] },
+    { what: "a store no longer in line", setup: [["HSET", "k:q", "st|s2", "{}"]], keys: ["k:q", "k:month"], argv: ["st|s1", 3600] },
+  ],
   "zset-take-count:v1": [
     { what: "a sorted set", setup: [["ZADD", "k:z", 1, "a", 2, "b"]], keys: ["k:z"], argv: [] },
     { what: "no sorted set", setup: [], keys: ["k:z"], argv: [] },

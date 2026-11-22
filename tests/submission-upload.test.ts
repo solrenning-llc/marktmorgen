@@ -103,6 +103,13 @@ async function main(): Promise<void> {
   const upload = first.body.upload as { pathname: string } | undefined;
   is("it opens", first.status, 200);
   is("in this order", state.events, ["read:store", "hold", "read:listing", "read:course", "read:access", "limit:submission-open", "action", "budget", "vault:open"]);
+  is("the route carries this store's erasure fence into the vault", state.vaultFence, {
+    live: `nl:store:id:${state.store.sid}`,
+    erasing: "nl:closed:erasing",
+    field: "store-field",
+    statsId: "",
+    ref: "owner@example.test",
+  });
   resetWorld();
   state.budget = false;
   is("no upload allowance left", await open(), { status: 503, body: { ok: false, error: "upload_budget_unavailable" } });

@@ -188,6 +188,22 @@ async function main(): Promise<void> {
     is("an owner id is never a lesson's", submissionOwnerId("0".repeat(32)), "sub_" + "0".repeat(32));
   }
   {
+    // The route builds this identity fence before a provider call. It must
+    // reach openReservedVault: otherwise a delayed multipart reply can write
+    // upload/storage state back after the store's erasure passed those keys.
+    const fence = { live: "nl:store:id:fenced", erasing: "nl:closed:erasing", field: "store-field", statsId: "", ref: "store@example.test" };
+    let carried: Parameters<DoorSteps["openReservedVault"]>[0]["fence"];
+    const fenced = world({
+      openReservedVault: async (input) => {
+        carried = input.fence;
+        return { ok: false, reason: "unavailable" };
+      },
+    });
+    const fencedAsk = { ...ask(BOB), fence } as Parameters<typeof openSubmissionDoor>[0] & { fence: typeof fence };
+    is("a buyer submission carries its store-erasure fence into the vault", await openSubmissionDoor(fencedAsk, fenced.steps), { ok: false, reason: "unavailable" });
+    is("the vault receives that exact fence", carried, fence);
+  }
+  {
     const refused = world({ reserveStoreUpload: async () => false });
     is("no allowance left", await openSubmissionDoor(ask(BOB), refused.steps), { ok: false, reason: "budget" });
     is("the vault is never asked", refused.calls, []);

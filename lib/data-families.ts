@@ -75,7 +75,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:manage:portal:", "nl:meet:conn:", "nl:meet:gone:", "nl:meet:lock:", "nl:meet:log:", "nl:meet:q", "nl:meet:r:",
   "nl:meet:refresh:", "nl:meet:refund-turns", "nl:meet:refund-turns:said", "nl:meet:rf:", "nl:meet:state:", "nl:meet:stores", "nl:meet:test:", "nl:meet:user:",
   "nl:meet:zoomseen:", "nl:member:c:", "nl:member:status:", "nl:metaads:conn:", "nl:metaads:gone:", "nl:metaads:gen", "nl:metaads:pass", "nl:metaads:read:", "nl:metaads:reading:",
-  "nl:metaads:state:", "nl:metaads:stores", "nl:metaads:user:", "nl:mnum:", "nl:monthly:lock",
+  "nl:metaads:state:", "nl:metaads:stores", "nl:metaads:user:", "nl:mgap:checks:", "nl:mgap:gate:", "nl:mgap:last:", "nl:mnum:", "nl:monthly:lock",
   "nl:monthly:seen:", "nl:monthly:sent:", "nl:mv:due", "nl:mv:gone:", "nl:mv:open:", "nl:mv:pend:", "nl:next:", "nl:next:lock:", "nl:nlink:", "nl:nlink:opens:", "nl:none",
   "nl:order-confirmation:closed:", "nl:order-confirmation:erased:", "nl:order-confirmation:due", "nl:order-confirmation:person:", "nl:order-confirmation:row:",
   "nl:order-confirmation:source:", "nl:order-confirmation:store:",
@@ -344,6 +344,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:member:c:": E, // a member price's coupon, named by the store's Stripe account, as nl:fair:c: (lib/fair-coupon.ts)
   "nl:member:status:": E,
   "nl:metaads:conn:": E, "nl:metaads:gone:": Cr(1), "nl:metaads:gen": C, "nl:metaads:pass": C, "nl:metaads:read:": E, "nl:metaads:reading:": E, "nl:metaads:state:": X(1), "nl:metaads:stores": I, "nl:metaads:user:": I,
+  // The per-person email gap (374 [SU7], lib/mail-frequency.ts): records end by themselves within seven days, the month's count within forty.
+  "nl:mgap:checks:": X(40), "nl:mgap:gate:": X(7), "nl:mgap:last:": X(7),
   "nl:mnum:": E,
   "nl:monthly:lock": C, "nl:monthly:seen:": Cr(40), "nl:monthly:sent:": Cr(62),
   "nl:mv:": E, "nl:mv:due": I, "nl:mv:gone:": X(1), "nl:mv:link:": T("nl:mv:"), "nl:mv:open:": X(2), "nl:mv:pend:": E,

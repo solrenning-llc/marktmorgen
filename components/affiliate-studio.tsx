@@ -93,6 +93,7 @@ const MESSAGES: Record<string, string> = {
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
   unavailable: "This could not be done just now, so nothing was saved. Try again in a moment.",
+  listing: "Your program was saved, but the affiliate directory could not be updated just now. Save again in a moment so the directory shows what you chose.",
   suspended: "Your store is switched off after notices about its content, so it takes no new partners. Nothing was sent. You can invite them once your store is back on.",
   store_full: "Your store is full. Remove something before adding more.",
   server_error: "Something went wrong on our side. Try again in a moment.",

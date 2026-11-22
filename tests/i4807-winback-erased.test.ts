@@ -268,7 +268,7 @@ async function main(): Promise<void> {
       commands += 1;
       // The unsubscribe token's contact write (CAS_HSET): the row changes just before it twice (two rounds lost, the
       // most that still hand out a token), and on the third the script runs but its answer is lost (read back).
-      if (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:contact-cas-hset:")) {
+      if (c[0] === "EVAL" && /^-- marktmorgen:contact-(token-)?cas-hset:/.test(String(c[1]))) {
         casRounds += 1;
         if (casRounds <= 2) {
           const raw = run(["HGET", key, email]);

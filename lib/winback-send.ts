@@ -370,11 +370,12 @@ const MARK_COMMANDS = 1 + 1 + 6 + 1;
 const CLAIM_COMMANDS = 1 + 2 + 1;
 /**
  * One address's unsubscribe token (lib/contacts.ts tokensFor) at its worst: its three rounds, each the contact's
- * HMGET, the deleted-addresses HMGET, the token record's SET, the compare-and-set script (one, and its HGET and HSET,
- * as Upstash bills a script) and either the read-back HMGET of a write answered in another shape or the DEL of a
- * token lost to a change made meanwhile.
+ * HMGET, the deleted-addresses HMGET and the one step that writes the token's record with the token on the contact
+ * (TOKEN_CAS_HSET: one EVAL and its HGET, HEXISTS, SET and HSET, as Upstash bills a script; nothing to take back when
+ * it writes nothing, #3925), and once, on the round whose answer came in another shape, the read-back HMGET (it ends
+ * the rounds: written, or unknown and thrown).
  */
-const TOKEN_COMMANDS = 3 * (1 + 1 + 1 + 3 + 1);
+const TOKEN_COMMANDS = 3 * (1 + 1 + 1 + 4) + 1;
 /** The link's SET and its three erasure notes (lib/erasure-index.ts noteForErasure: ZADD, ZREMRANGEBYSCORE, EXPIRE). */
 const LINK_WRITE_COMMANDS = 1 + 3;
 /** The link taken back (DEL) and this run's two marks let go (releaseMark: lib/redis-lock.ts RELEASE, one EVAL and its GET and DEL). */

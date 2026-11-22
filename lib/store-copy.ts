@@ -23,7 +23,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { MAX_PRODUCTS, MAX_PRODUCT_BYTES, type Product, productIds, readProducts } from "@/lib/catalog";
 import { type Store, accountStores, addCopiedProducts, appendSitePages, applyCopiedSetup, storeForId, storeRef } from "@/lib/store";
-import { readAboutExact, writeAbout, MAX_ABOUT_LENGTH } from "@/lib/product-about";
+import { readAboutExact, MAX_ABOUT_LENGTH } from "@/lib/product-about";
+import { writeStoreAbout } from "@/lib/product-about-live";
 import { readPage, writePage } from "@/lib/sales-page-store";
 import { MAX_PAGE_BYTES, type SalesPage } from "@/lib/sales-page";
 import { MAX_SITE_PAGES, type SitePage, siteKey, slugProblem } from "@/lib/site-page-rules";
@@ -31,7 +32,7 @@ import { freeSlug } from "@/lib/funnel-types";
 import { MAX_FORMS } from "@/lib/forms";
 import { readForms, writeForm } from "@/lib/form-store";
 import { MAX_PAGE_FUNNELS, funnelSlugFrom, funnelSlugProblem } from "@/lib/page-funnel";
-import { readPageFunnelsStrict, writePageFunnel } from "@/lib/page-funnel-store";
+import { readPageFunnelsStrict, writeStorePageFunnel } from "@/lib/page-funnel-store";
 import { dataKey, dataUsed, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { allowanceFor } from "@/lib/store-allowance-rules";
@@ -334,7 +335,7 @@ export async function copyStep(from: Store, to: Store, copyId: string, setup: bo
       for (const product of read) {
         const id = products(product.id);
         const text = abouts.get(product.id) ?? "";
-        if (text) await writeAbout(to.statsId, id, text, fresh);
+        if (text) await writeStoreAbout(fresh, id, text);
         const page = pages.get(product.id);
         if (page) await writePage(to.statsId, id, copiedPage(page, products, forms, blocksLeft), fresh);
       }
@@ -400,7 +401,7 @@ export async function copyStep(from: Store, to: Store, copyId: string, setup: bo
         const base = funnelSlugFrom(funnel.slug || funnel.name) || "funnel";
         let slug = base;
         for (let n = 2; funnelSlugProblem(slug, existing) !== null && n < 100; n += 1) slug = `${base.slice(0, 36)}-${n}`;
-        const made = await writePageFunnel(to.statsId, copiedFunnel(funnel, id, slug, pages, products, Math.floor(now / 1000), left), existing, to);
+        const made = await writeStorePageFunnel(to.statsId, copiedFunnel(funnel, id, slug, pages, products, Math.floor(now / 1000), left), existing, to);
         existing = [...existing, made];
         p.made.funnels += 1;
       }

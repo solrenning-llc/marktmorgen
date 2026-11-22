@@ -69,9 +69,17 @@ export async function POST(request: NextRequest) {
   const action = text(body.action, 20);
   const fail = (error: string) => Response.json({ ok: false, error }, { status: ANSWERS[error] ?? 400 });
   // Taken off, but their API keys could not all be paused after: said, so the removal is repeated (owner C3-100).
-  const repeat = () =>
+  // When their phone devices could not be confirmed forgotten either, the answer says both (#4811; Claude 1's LOW 1
+  // on #5105): pressing Remove again finishes the two.
+  const repeat = (devicesForgotten: boolean) =>
     Response.json(
-      { ok: false, error: "repeat", message: "They are off the team, but some of the API keys they made may still work. Press Remove again to finish." },
+      devicesForgotten
+        ? { ok: false, error: "repeat", message: "They are off the team, but some of the API keys they made may still work. Press Remove again to finish." }
+        : {
+            ok: false,
+            error: "repeat_devices",
+            message: "They are off the team, but some of the API keys they made may still work and their phone alerts could not all be removed yet. Press Remove again to finish.",
+          },
       { status: 503 },
     );
   if (!store.sid) return fail("unknown");
@@ -116,9 +124,9 @@ export async function POST(request: NextRequest) {
       if (removed === "repeat") {
         // Off the team already: written in the log now, so pressing again is known for a repeat, which forgets their
         // devices again too (#4811).
-        await forgetDevices(store, who);
+        const forgot = await forgetDevices(store, who);
         await logTeam(store.sid, { who: email, role, what: `Took ${who} off the team` });
-        return repeat();
+        return repeat(forgot);
       }
       if (!removed) {
         if (!gone) return log === null || log.skipped > 0 ? fail("unsure") : fail("not_found");

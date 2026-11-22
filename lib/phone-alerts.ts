@@ -719,19 +719,32 @@ export async function forgetPerson(store: Store, who: string): Promise<number> {
   if (person === normaliseEmail(store.email)) return 0;
   // Their states go first and the devices leave the list after (#4811, Codex G; Claude 2's fix on
   // claude2/defect-phone-alerts-4751-4811): a state HDEL whose reply proves nothing throws while the ids are still
-  // listed, so a repeat finds them; a device added to the list in between has its state removed after, on the same
-  // exact reading.
-  const seen = ((await readConfig(statsId))?.devices ?? []).filter((d) => ownerOf(store, d) === person).map((d) => d.id);
-  if (seen.length > 0) await forgetStates(statsId, seen);
-  let theirs: Device[] = [];
-  await changeConfig(store, (config) => {
-    theirs = (config?.devices ?? []).filter((d) => ownerOf(store, d) === person);
-    return config && theirs.length ? { ...config, devices: config.devices.filter((d) => ownerOf(store, d) !== person) } : null;
-  });
-  const late = theirs.map((d) => d.id).filter((id) => !seen.includes(id));
-  if (late.length > 0) await forgetStates(statsId, late);
-  return theirs.length;
+  // listed, so a repeat finds them. Only devices whose states are already gone leave the list; a device added in
+  // between stays listed and is forgotten in the next round, the same way, so no state is ever deleted after its id
+  // left the list (Claude 1's LOW 2 on #5105). A person who keeps adding devices during their own removal makes this
+  // throw with the newest still listed, and pressing Remove again finishes.
+  const forgotten = new Set<string>();
+  let removed = 0;
+  for (let round = 0; round < FORGET_ROUNDS; round += 1) {
+    const ids = ((await readConfig(statsId))?.devices ?? []).filter((d) => ownerOf(store, d) === person && !forgotten.has(d.id)).map((d) => d.id);
+    if (ids.length > 0) await forgetStates(statsId, ids);
+    for (const id of ids) forgotten.add(id);
+    let going = 0;
+    let left = 0;
+    await changeConfig(store, (config) => {
+      const theirs = (config?.devices ?? []).filter((d) => ownerOf(store, d) === person);
+      going = theirs.filter((d) => forgotten.has(d.id)).length;
+      left = theirs.length - going;
+      return config && going > 0 ? { ...config, devices: config.devices.filter((d) => !(ownerOf(store, d) === person && forgotten.has(d.id))) } : null;
+    });
+    removed += going;
+    if (left === 0) return removed;
+  }
+  throw new Error("Their phone devices kept changing while being forgotten.");
 }
+
+/** How many read, forget, unlist rounds forgetPerson takes before it says the devices are still to remove. */
+const FORGET_ROUNDS = 3;
 
 /** Deletes these devices' states, done only on an exact count of at most as many as were named (rule 24, #4811). */
 async function forgetStates(statsId: string, ids: string[]): Promise<void> {

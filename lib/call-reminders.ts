@@ -127,7 +127,7 @@ async function remindBuyer(store: Store, product: Listing, call: PaidCall, mark:
   const b = bookingWords(store.language);
   const locale = LANGUAGES[parseLanguage(store.language)].locale;
   const isDay = mark === "24";
-  return { meter: { by: "order" },
+  return { meter: { by: "order", store },
     from: storeSender(store),
     to: call.email,
     subject: b.reminderSubject(isDay, product.title, store.name),
@@ -158,7 +158,7 @@ async function remindCreator(store: Store, product: Listing, paid: PaidCall[], c
   const emails = people.map((c) => c.email ?? "a buyer who gave no address");
   const seats = seatsAt(setup, call.start);
   const group = setup.kind === "live" || seats > 1;
-  return { meter: { by: "order" },
+  return { meter: { by: "order", store },
     from: `"Marktmorgen" <${senderAddress()}>`,
     to: store.email,
     subject: `${when(mark)}: ${product.title}, ${readableTime(call.start, setup.tz)}`,
@@ -249,6 +249,9 @@ export async function sendCallReminders(
       counts.dropped += stale.length;
       continue;
     }
+    // A store switched off after notices about its content (lib/takedown.ts) still reminds: the buyer paid for this
+    // call, and the reminder carries only the booking's own details (its time, its place or room, its calendar file
+    // and the buyer's page to move it), nothing of the store's switched-off pages. Held in tests/suspended-store-updates-calls.test.ts.
     const done: string[] = [];
     if (!store || store.callsId !== callsId) {
       await redisPipeline([["ZREM", REMINDER_QUEUE, ...members.map((m) => m.member)]]);
@@ -315,6 +318,7 @@ export async function sendCallReminders(
               currency: call.currency,
               lead: call.lead,
               pi: call.pi,
+              fromPackage: call.pkg,
               due: call.due,
               cancel: call.cancel,
               origin,

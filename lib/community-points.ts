@@ -77,6 +77,25 @@ end
 return {take(KEYS[1], total), take(KEYS[2], today)}`;
 
 /**
+ * What a point on a like writes, for a step that changes the like and the point together (lib/community.ts,
+ * pressLike): null when nobody earns there (not a community, or not a member's key); otherwise the two boards
+ * (all-time first, then today's) and the commands one point adds, as award writes them.
+ */
+export function likePoint(id: string, who: string, now = Date.now()): { boards: [string, string]; add: (string | number)[][] } | null {
+  if (!COMMUNITY.test(id) || !MEMBER.test(who)) return null;
+  const all = allKey(id);
+  const day = dayKey(id, dayOf(now));
+  return {
+    boards: [all, day],
+    add: [
+      ["ZINCRBY", all, 1, who],
+      ["ZINCRBY", day, 1, who],
+      ["EXPIRE", day, DAYS_KEPT * 86_400],
+    ],
+  };
+}
+
+/**
  * Gives a member a point, or takes one back. Only a member's own key earns:
  * the creator, and anything that is not a member key, is passed over.
  * All-time points never go below zero.
@@ -218,35 +237,46 @@ export async function earnedCourses(
   grant = true,
   /** The store whose room what is handed over is counted in (lib/order-data.ts). */
   owner?: DataOwner,
+  /**
+   * For a caller that waits on unknown (the drip job, lib/learn.ts): a reply that does not read throws
+   * UnknownReplyError instead of answering "nothing earned" (Claude 7's MEDIUM on #3369). Not a member (no record),
+   * nothing held and no rewards set stay none.
+   */
+  strict = false,
 ): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (!COMMUNITY.test(id) || !MEMBER.test(member) || !isRedisConfigured()) return out;
+  const unknown = (): Map<string, number> => {
+    if (strict) throw new UnknownReplyError("a member's courses earned in a community");
+    return out;
+  };
   const replies = await redisPipeline([
     ["GET", rewardsKey(id)],
     ["ZSCORE", allKey(id), member],
     ["HGET", membersKey(id), member],
     ["HGETALL", unlockedKey(id, member)],
   ]);
-  if (!Array.isArray(replies) || replies.length !== 4) return out;
+  if (!Array.isArray(replies) || replies.length !== 4) return unknown();
   const [rawRewards, points, record, already] = replies;
   const held = new Map<string, number>();
-  if (!Array.isArray(already) || already.length % 2 !== 0) return out;
+  if (!Array.isArray(already) || already.length % 2 !== 0) return unknown();
   for (let i = 0; i < already.length; i += 2) {
     const product: unknown = already[i];
     const at = rewardInteger(already[i + 1]);
     // Reuse the product rule of the existing reward parser. A retained
     // course does not need to remain in today's reward configuration.
     if (typeof product !== "string" || parseRewards([{ level: 2, product }]).length !== 1 || held.has(product)
-      || at === null || at === 0 || at > 8_640_000_000_000) return out;
+      || at === null || at === 0 || at > 8_640_000_000_000) return unknown();
     held.set(product, at);
   }
-  if (typeof record !== "string") return out;
+  if (record === null) return out;
+  if (typeof record !== "string") return unknown();
   try {
     const value: unknown = JSON.parse(record);
-    if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return unknown();
     const membership = value as { k?: unknown; removed?: unknown };
     if (membership.k !== member || membership.removed !== false) return out;
-  } catch { return out; }
+  } catch { return unknown(); }
   for (const [product, at] of held) out.set(product, at);
   if (!grant) return out;
   const score = points === null ? 0 : rewardInteger(points);

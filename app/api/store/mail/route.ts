@@ -12,7 +12,7 @@ import {
 } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_IMPORT, WHO, type Who, audience, importContacts, isBuyer, leadsKey, listCounts, parseContact, readAddresses, readTags } from "@/lib/contacts";
-import { MAX_MAIL_BODY, MAX_SUBJECT, fromLine, monthlyAllowance, render, reserve, release } from "@/lib/mail";
+import { MAX_MAIL_BODY, MAX_SUBJECT, fromLine, mailDay, monthlyAllowance, render, reserve, release } from "@/lib/mail";
 import { sendBatch } from "@/lib/email";
 import { healthId, startRamp } from "@/lib/mail-health";
 import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, BroadcastsUnreadable, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
@@ -86,7 +86,7 @@ const MAIL_PERMISSIONS: Record<string, Permission> = {
 /**
  * Everything the studio does with email:
  *
- *   { action: "settings", fromName, address }
+ *   { action: "settings", fromName, address, onPolicies? }
  *   { action: "import", text, confirm: true }
  *   { action: "count", productId, notProductId, who, narrow? }   who: "all" | "buyers" | "leads";
  *                            narrow: { minSpent, channel, quietDays, group?, activeDays? } (lib/segments.ts); answers the
@@ -142,7 +142,8 @@ export async function POST(request: NextRequest) {
       const address = text(body.address, 1000).replace(/\s+/g, " ").trim().slice(0, MAX_MAIL_ADDRESS);
       if (!fromName) return fail("from_name");
       if (address.length < 10) return fail("address");
-      await setMailSettings(ref, { fromName, address });
+      // Shown on the public policies page only when the creator checked it, never by default (#1824).
+      await setMailSettings(ref, { fromName, address, ...(body.onPolicies === true ? { onPolicies: true as const } : {}) });
       return Response.json({ ok: true });
     }
 
@@ -155,12 +156,22 @@ export async function POST(request: NextRequest) {
       if (emails.length === 0) return fail("no_addresses");
       if (emails.length > MAX_IMPORT) return fail("too_many");
       store = (await ensureListId(ref)) ?? store;
-      const { added, already, full, roomFull } = await importContacts(store.listId as string, emails, store);
+      const work = await import("@/lib/contact-import-rules");
+      const extra = work.pastedContactWork(emails.length).extraStudioUnits;
+      if (extra > 0) {
+        const { takeAllowance } = await import("@/lib/store-allowance");
+        const admitted = await takeAllowance(store, "studio", extra);
+        if (!admitted.ok) return notCounted(admitted.message);
+      }
+      const { added, already, full, roomFull, notImported, notConfirmed } = await importContacts(store.listId as string, emails, store);
       // A hundred addresses or more, pasted in: of unknown age, so the next
       // emails go out in portions that double (lib/mail-health.ts), also
       // when the store's data room filled up partway and only some went in.
-      await startRamp(healthId(store), added);
-      return Response.json({ ok: true, added, already, skipped, full, roomFull: roomFull ?? null, counts: await listCounts(store.listId) });
+      // A lost write receipt may still have imported that whole batch. Apply
+      // the existing protection to its upper bound without claiming it landed.
+      if (notConfirmed) await startRamp(healthId(store), added + notConfirmed.left);
+      else await startRamp(healthId(store), added);
+      return Response.json({ ok: true, added, already, skipped, full, roomFull: roomFull ?? null, notImported: notImported ?? null, notConfirmed: notConfirmed ?? null, counts: await listCounts(store.listId) });
     }
 
     if (action === "count") {
@@ -223,7 +234,8 @@ export async function POST(request: NextRequest) {
       const content = text(body.body, MAX_MAIL_BODY * 2).trim().slice(0, MAX_MAIL_BODY);
       if (!subject) return fail("subject");
       if (!content) return fail("body");
-      const reserved = await reserve(store, 1);
+      const day = mailDay();
+      const reserved = await reserve(store, 1, false, day);
       if (reserved !== "ok") return fail(reserved === "month" ? "allowance" : reserved === "sender" ? "sender" : "day");
       const r = render(store, `[Test] ${subject}`, content, null);
       const outcome = await sendBatch(
@@ -234,7 +246,7 @@ export async function POST(request: NextRequest) {
         { by: "monthly" },
       );
       if (outcome !== "sent") {
-        await release(store, 1);
+        await release(store, 1, day);
         return fail("send", 502);
       }
       return Response.json({ ok: true, to: email });

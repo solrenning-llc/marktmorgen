@@ -9,6 +9,7 @@
 import { connectPayPal, onTheirWay, payWithPayPal } from "@/lib/paypal-payouts";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statsid1";
@@ -94,6 +95,7 @@ async function main(): Promise<void> {
   process.env.STRIPE_SECRET_KEY = "sk_test_paypal_payouts_lock_only";
   await seed();
   const store = shop();
+  await markLive(store);
   is("connected", (await connectPayPal(store, CLIENT, SECRET)).ok, true);
 
   part("The lock runs out while the book is read, and a later press takes it");

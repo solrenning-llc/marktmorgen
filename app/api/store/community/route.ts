@@ -18,25 +18,25 @@ import {
   editPost,
   moderateMember,
   readComment,
+  readMembers,
   readPost,
   report,
   saveConfig,
   setCommentHidden,
   setPostHidden,
   setProfile,
-  toggleCommentLike,
-  toggleLike,
+  pressLike,
   within,
   withPin,
 } from "@/lib/community";
-import { communityViewer, maySeeSpace } from "@/lib/community-access";
+import { communityViewer, maySeeSpace, spaceAnswer, unknownForGood } from "@/lib/community-access";
 import { approvalFor, holdComment, holdPost, mustHold, withdrawHeld } from "@/lib/community-approval";
 import { MAX_POLL_DAYS, parsePoll, vote } from "@/lib/community-polls";
 import { mentionsIn, whoIs } from "@/lib/community-mentions";
 import { tell } from "@/lib/community-notify";
 import { communityWords } from "@/lib/buyer-words/community";
-import { checkCommunityImage } from "@/lib/community-image";
-import { blobImages, dropCommunityImage, noteCommunityUpload, takeCommunityUpload } from "@/lib/community-files";
+import { checkCommunityImage, ownsCommunityImage } from "@/lib/community-image";
+import { blobImages, dropCommunityImage, takeCommunityUpload, untakeCommunityUpload } from "@/lib/community-files";
 import { RecipientsUnreadError, advanceAnnouncement, queueAnnouncement } from "@/lib/community-mail";
 import {
   ITEM_ID,
@@ -52,9 +52,10 @@ import {
 } from "@/lib/community-text";
 import { limited } from "@/lib/request-guard";
 import { alertCreator } from "@/lib/phone-alerts";
-import { award, levelOf, pointsOf } from "@/lib/community-points";
+import { levelOf, pointsOf } from "@/lib/community-points";
 import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
 import { DataRoomError } from "@/lib/store-data";
+import { memberLinksFromForm } from "@/lib/member-links";
 
 /** The most a form here may weigh: a full post with its picture's details. */
 const MAX_FORM_BYTES = 40_000;
@@ -139,14 +140,20 @@ export async function POST(request: NextRequest) {
     if (action === "profile") {
       if (!viewer.member) return back(`${home}/you`, "full");
       const name = cleanLine(form.get("name"), MAX_DISPLAY_NAME);
+      // Links to their profiles elsewhere (lib/member-links.ts), only from the
+      // page that draws the boxes and says so: a form without them (an older
+      // page still open) leaves the ones kept as they are.
+      const sentLinks = form.get("links") === "1" ? memberLinksFromForm(form.getAll("link")) : null;
       await setProfile(id, viewer.member, {
         name,
         dir: form.get("dir") === "1",
         mail: form.get("mail") === "1",
         // The creator's questions, when there are any (the page sends one field per question).
         ...(config.questions.length ? { answers: form.getAll("answer").map(String), questions: config.questions } : {}),
+        ...(sentLinks ? { links: sentLinks.links } : {}),
       }, store);
-      return back(`${home}/you`, "saved");
+      // The rest is saved; a link turned away is said, never dropped quietly.
+      return back(`${home}/you`, sentLinks && sentLinks.refused ? "savedlinkoff" : "saved");
     }
 
     // Taking back one's own post or comment that waits for the creator's
@@ -158,7 +165,29 @@ export async function POST(request: NextRequest) {
       return back(fromPage, result === "done" ? "withdrawn" : "gone");
     }
 
-    if (!viewer.canWrite) return back(fromPage, viewer.member?.muted ? "muted" : "full");
+    // A muted member writes nothing, but may still report: muting is no reason
+    // to leave somebody unable to flag what is said to or about them.
+    if (!viewer.canWrite && !(action === "report" && viewer.member)) return back(fromPage, viewer.member?.muted ? "muted" : "full");
+
+    // Who may hear about something said in a space: the creator, and members
+    // still in the community who can see that space. A removed member, or one
+    // without the product a gated space asks for, is never told, and so never
+    // gets its first words in their notifications nor a push. A read that
+    // fails leaves the person out: a notice missed is the smaller loss.
+    const mayHear = async (people: string[], spaceOf: { id: string; only: string[] } | undefined): Promise<string[]> => {
+      const wanted = [...new Set(people)].filter(Boolean);
+      if (!wanted.length) return [];
+      const members = await readMembers(id, wanted).catch(() => new Map<string, never>());
+      const out: string[] = [];
+      for (const one of wanted) {
+        if (one === CREATOR) { out.push(one); continue; }
+        const member = members.get(one);
+        if (!member || member.removed) continue;
+        if (spaceOf?.only.length && !(await maySeeSpace(store, config, spaceOf, { owner: false, email: member.e }).catch(() => false))) continue;
+        out.push(one);
+      }
+      return out;
+    };
 
     // ------------------------------------------------------------ a new post
     if (action === "post") {
@@ -167,7 +196,9 @@ export async function POST(request: NextRequest) {
       if (chosen.creatorOnly && !owner) return back(fromPage, "creatoronly");
       // A space kept for the buyers of some products: the same gate the feed
       // asks, asked again here, because a form can be sent from anywhere.
-      if (!(await maySeeSpace(store, config, chosen, { owner, email: viewer.email }))) return back(home, "spacelocked");
+      // Not known is said as not checked, never as a space that is not theirs (CX-123 rule 24).
+      const may = await spaceAnswer(store, config, chosen, { owner, email: viewer.email, holdings: viewer.holdings });
+      if (may !== true) return back(home, may === "unknown" ? (unknownForGood(viewer.holdings) ? "spaceunknownlasting" : "spaceunknown") : "spacelocked");
       // A space that opens for posting at a level (lib/community-points.ts).
       // Reading and commenting stay open to every member.
       if (!owner && chosen.level >= 2) {
@@ -214,16 +245,18 @@ export async function POST(request: NextRequest) {
         };
         const w = side(field("img_w", 6));
         const h = side(field("img_h", 6));
-        if (!(await takeCommunityUpload(path, key))) return back(fromPage, "image");
+        // Only a picture of this community's own folder is ever taken (Claude 6 on #3414): one taken and then refused
+        // by the check below as "path" would keep a mark nothing removes.
+        if (!ownsCommunityImage(path, id) || !(await takeCommunityUpload(path, key))) return back(fromPage, "image");
         let checked: Awaited<ReturnType<typeof checkCommunityImage>>;
         try {
           checked = await checkCommunityImage(path, id, blobImages);
         } catch (error) {
-          // Still this member's, for when they send the form again.
-          await noteCommunityUpload(path, key).catch(() => {});
+          // Still this member's, for when they send the form again (never anybody else's: lib/community-files.ts).
+          await untakeCommunityUpload(path, key).catch(() => {});
           throw error;
         }
-        if (checked === "missing") await noteCommunityUpload(path, key).catch(() => {});
+        if (checked === "missing") await untakeCommunityUpload(path, key).catch(() => {});
         if (checked !== "ok" || !w || !h) {
           // A picture refused here was deleted by the check, or is deleted now: its place goes back.
           if (checked !== "missing" && checked !== "path") await dropCommunityImage(path);
@@ -267,7 +300,7 @@ export async function POST(request: NextRequest) {
         const named = await whoIs(id, mentionsIn(`${title}\n${text}`));
         await tell(
           id,
-          [...named.values()],
+          await mayHear([...named.values()], chosen),
           { kind: "mention", post: made.post.id, comment: "", by: key, words: title || text },
           store,
           { handle: store.handle, who: owner ? store.name : viewer.member?.n || communityWords(store.language).somebody, language: store.language },
@@ -301,9 +334,8 @@ export async function POST(request: NextRequest) {
     const post = await readPost(id, postId);
     if (!post || (post.hid && !owner)) return back(home, "gone");
     const itsSpace = config.spaces.find((s) => s.id === post.sp);
-    if (itsSpace && !(await maySeeSpace(store, config, itsSpace, { owner, email: viewer.email }))) {
-      return back(home, "spacelocked");
-    }
+    const may = itsSpace ? await spaceAnswer(store, config, itsSpace, { owner, email: viewer.email, holdings: viewer.holdings }) : true;
+    if (may !== true) return back(home, may === "unknown" ? (unknownForGood(viewer.holdings) ? "spaceunknownlasting" : "spaceunknown") : "spacelocked");
 
     if (action === "comment") {
       const text = cleanText(form.get("text"), MAX_COMMENT_TEXT);
@@ -333,12 +365,12 @@ export async function POST(request: NextRequest) {
         // a notification nobody can place is a notification nobody opens.
         const doer = owner ? store.name : viewer.member?.n || communityWords(store.language).somebody;
         const phone = { handle: store.handle, who: doer, language: store.language };
-        await tell(id, [post.a], { kind: "reply", post: post.id, comment: made.comment.id, by: key, words: text }, store, phone);
+        await tell(id, await mayHear([post.a], itsSpace), { kind: "reply", post: post.id, comment: made.comment.id, by: key, words: text }, store, phone);
         if (above && above.a !== post.a) {
-          await tell(id, [above.a], { kind: "answer", post: post.id, comment: made.comment.id, by: key, words: text }, store, phone);
+          await tell(id, await mayHear([above.a], itsSpace), { kind: "answer", post: post.id, comment: made.comment.id, by: key, words: text }, store, phone);
         }
         const others = [...named.values()].filter((one) => one !== post.a && one !== above?.a);
-        await tell(id, others, { kind: "mention", post: post.id, comment: made.comment.id, by: key, words: text }, store, phone);
+        await tell(id, await mayHear(others, itsSpace), { kind: "mention", post: post.id, comment: made.comment.id, by: key, words: text }, store, phone);
       }
       return back(postPage, "commented", `comment-${made.comment.id}`);
     }
@@ -386,8 +418,8 @@ export async function POST(request: NextRequest) {
     // the one who gives it: liking your own post is allowed and earns nothing.
     if (action === "like") {
       if (!owner && !(await within(id, key, "like"))) return back(fromPage, "slow", `post-${post.id}`);
-      const added = await toggleLike(id, post.id, key, store);
-      if (post.a !== key) await award(id, post.a, added ? 1 : -1, store);
+      // The like and the author's point under one lock per member and post (lib/community.ts pressLike).
+      await pressLike(id, post.id, null, key, post.a, store, store);
       return back(fromPage, "liked", `post-${post.id}`);
     }
 
@@ -395,8 +427,7 @@ export async function POST(request: NextRequest) {
       const comment = await readComment(id, post.id, field("comment", 12));
       if (!comment || (comment.hid && !owner)) return back(postPage, "gone");
       if (!owner && !(await within(id, key, "like"))) return back(postPage, "slow", `comment-${comment.id}`);
-      const added = await toggleCommentLike(id, post.id, comment.id, key, store);
-      if (comment.a !== key) await award(id, comment.a, added ? 1 : -1, store);
+      await pressLike(id, post.id, comment.id, key, comment.a, store, store);
       return back(postPage, "liked", `comment-${comment.id}`);
     }
 

@@ -76,6 +76,7 @@ const CREDENTIALS = [
   "re_test_payment_requests_only_a_stand_in",
   "re_test_paypal_numbers",
   "re_test_paypal_sales",
+  "re_test_ck3u2_only",
   "re_test_people_only_a_stand_in",
   "re_test_person_erasure_only_a_stand_in",
   "re_test_pipelines_only_a_stand_in",

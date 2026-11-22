@@ -51,7 +51,7 @@ import { paidStorageBytes } from "@/lib/storage-rules";
 import { LANDINGS_FENCE_COMMANDS } from "@/lib/campaign-landing-store";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
 import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
-import { MAX_BENEFITS_KEPT, MAX_BENEFIT_TEXT } from "@/lib/tier-benefit-rules";
+import { MARK_BY_MAX, MAX_BENEFITS_KEPT, MAX_BENEFIT_TEXT } from "@/lib/tier-benefit-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS, publicVisitLimit } from "@/lib/traffic-rules";
 import { READ_SAMPLE } from "@/lib/page-read-sample";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
@@ -1581,8 +1581,14 @@ export const BENEFIT_PAGE_MEMBERS = 100;
 export const BENEFIT_ROW_BYTES = 13 + 6 * MAX_BENEFIT_TEXT + 200;
 /** A mark's field, `<benefit>:<sub>:<period>`: 13 + 1 + 68 + 1 + 11 bytes at the most. */
 export const BENEFIT_MARK_FIELD_BYTES = 94;
-/** A mark, `{"at":<seconds>,"by":"<address>"}`: the address at 320 characters, each escaped to two bytes at the most. */
-export const BENEFIT_MARK_VALUE_BYTES = 32 + 2 * 320;
+/**
+ * A mark, `{"at":<seconds>,"by":"<address>"}`, as readOwedMarks gets it back: a JSON string inside the database's JSON
+ * reply, so its own quotes are escaped again (34 bytes with the seconds at 11 digits). The address is one that
+ * giveBenefit lets onto a mark (markableBy, lib/tier-benefit-rules.ts): at most MARK_BY_MAX characters of printable
+ * ASCII with no quote or backslash, one byte each on the wire (audit cd8d; a control character there cost 7, and the
+ * worst mark measured 2274 bytes against the 672 declared before). Measured by tests/benefit-mark-wire-bytes.test.ts.
+ */
+export const BENEFIT_MARK_VALUE_BYTES = 34 + MARK_BY_MAX;
 /** A person's marks key, and a store's deleted-person print, at the most. */
 export const BENEFIT_PERSON_BYTES = 96;
 export const BENEFITS_LIST_COMMANDS = 4;

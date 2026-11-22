@@ -54,6 +54,7 @@ import {
   benefitJson,
   benefitText,
   isCadence,
+  markableBy,
   owedNow,
   parseBenefit,
 } from "@/lib/tier-benefit-rules";
@@ -348,7 +349,7 @@ export async function benefitsDue(store: Store, now = Date.now(), charge: Benefi
 
 export type GiveResult =
   | { ok: true; given: number; already: number; notOwed: number; unknown: number }
-  | { ok: false; reason: "too_many" | "missing" | "benefits" | "stripe" | "erased" | "used" | "full" | "room" | "unknown"; message?: string };
+  | { ok: false; reason: "too_many" | "missing" | "who" | "benefits" | "stripe" | "erased" | "used" | "full" | "room" | "unknown"; message?: string };
 
 
 /**
@@ -361,6 +362,10 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
   if (!Array.isArray(items) || items.length > MAX_GIVE_AT_ONCE) return { ok: false, reason: "too_many" };
   if (typeof benefit !== "string" || !BENEFIT_ID.test(benefit) || !store.statsId) return { ok: false, reason: "missing" };
   const statsId = store.statsId;
+  // Who gave it is written on the mark only as an address its reading can afford (markableBy; audit cd8d): checked
+  // before anything is read or counted, so a refused press costs nothing.
+  const who = normaliseEmail(by);
+  if (!markableBy(who)) return { ok: false, reason: "who" };
   const due = await benefitsDue(store, now, charge);
   if (due.state === "unknown") return { ok: false, reason: due.why };
   if (due.state === "used") return { ok: false, reason: "used", message: due.message };
@@ -368,7 +373,7 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
   const rows = new Map(due.rows.filter((r) => r.benefit === benefit).map((r) => [`${r.sub}:${r.period}`, r]));
   const seen = new Set<string>();
   const result = { ok: true as const, given: 0, already: 0, notOwed: 0, unknown: 0 };
-  const mark: Given = { at: Math.floor(now / 1000), by: normaliseEmail(by).slice(0, 320) };
+  const mark: Given = { at: Math.floor(now / 1000), by: who };
   const writes: { row: DueRow; field: string; bytes: number }[] = [];
   for (const item of items) {
     const sub = item && typeof item === "object" ? (item as Record<string, unknown>).sub : undefined;

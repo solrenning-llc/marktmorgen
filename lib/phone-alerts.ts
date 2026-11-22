@@ -714,16 +714,29 @@ export async function removeDevice(store: Store, who: string, role: Role, id: st
  */
 export async function forgetPerson(store: Store, who: string): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
+  const statsId = store.statsId;
   const person = normaliseEmail(who);
   if (person === normaliseEmail(store.email)) return 0;
+  // Their states go first and the devices leave the list after (#4811, Codex G; Claude 2's fix on
+  // claude2/defect-phone-alerts-4751-4811): a state HDEL whose reply proves nothing throws while the ids are still
+  // listed, so a repeat finds them; a device added to the list in between has its state removed after, on the same
+  // exact reading.
+  const seen = ((await readConfig(statsId))?.devices ?? []).filter((d) => ownerOf(store, d) === person).map((d) => d.id);
+  if (seen.length > 0) await forgetStates(statsId, seen);
   let theirs: Device[] = [];
   await changeConfig(store, (config) => {
     theirs = (config?.devices ?? []).filter((d) => ownerOf(store, d) === person);
     return config && theirs.length ? { ...config, devices: config.devices.filter((d) => ownerOf(store, d) !== person) } : null;
   });
-  if (theirs.length === 0) return 0;
-  await redisPipeline([["HDEL", stateKey(store.statsId), ...theirs.map((d) => d.id)]]);
+  const late = theirs.map((d) => d.id).filter((id) => !seen.includes(id));
+  if (late.length > 0) await forgetStates(statsId, late);
   return theirs.length;
+}
+
+/** Deletes these devices' states, done only on an exact count of at most as many as were named (rule 24, #4811). */
+async function forgetStates(statsId: string, ids: string[]): Promise<void> {
+  const reply = repliesFor(await redisPipeline([["HDEL", stateKey(statsId), ...ids]]), 1)?.[0];
+  if (typeof reply !== "number" || !Number.isSafeInteger(reply) || reply < 0 || reply > ids.length) throw new UnknownReplyError("the phone device states deleted");
 }
 
 /** Forgets every device of a deleted store, whoever's they were. */

@@ -20,6 +20,8 @@ Uma sessão pode usar o próprio nome, depois do nome da família: "Claude 4 5BC
 - a caixa da família: o que foi mandado para "Claude 4". Basta uma sessão da família confirmar para a mensagem sair da lista de todas;
 - os avisos a `todos`, que cada sessão confirma por si.
 
+Quem lê com o nome da família ("Claude 4") lê também as caixas das sessões, para que nada mandado a uma sessão já encerrada se perca. A confirmação feita assim não apaga a mensagem da sessão a quem ela foi mandada: ela continua aparecendo para essa sessão, marcada como já confirmada com o nome da família, até a própria sessão confirmar. Por isso, cada sessão lê e confirma com o próprio nome.
+
 Mande para a sessão quando o assunto for só dela; para a família, quando qualquer sessão puder atender. Quem pede revisão ou fila com o nome próprio recebe o veredito na própria caixa.
 
 ## Instalar e vigiar

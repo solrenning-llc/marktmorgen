@@ -360,16 +360,18 @@ export function naoLidas(eu, commit = buscar()) {
   const todasLidas = arquivos(commit, "lidas");
   const lidas = new Set(todasLidas.filter((l) => l.split("/")[1] === me).map(idDe));
   const daFamilia = new Set(todasLidas.filter((l) => familia(l.split("/")[1]) === fam).map(idDe));
-  // Na própria caixa de uma sessão, a confirmação feita pela família (com o nome dela) também vale.
+  // Na própria caixa de uma sessão, só a confirmação da própria sessão a esconde (22/11/2026, 88a1): a feita com o nome da
+  // família, por outra sessão que lê as caixas das sessões, não apaga da sessão ativa o que é só dela; a mensagem continua
+  // aparecendo para ela, marcada como já confirmada com o nome da família, até ela mesma confirmar.
+  const pelaFamilia = new Set(todasLidas.filter((l) => l.split("/")[1] === fam).map(idDe));
   const proprias = [...arquivos(commit, `caixas/${me}`), ...arquivos(commit, "caixas/todos")]
-    .filter((c) => !lidas.has(idDe(c)) && !(me !== fam && c.startsWith(`caixas/${me}/`) && daFamilia.has(idDe(c)))
-      && !(c.startsWith("caixas/todos/") && remetenteDe(idDe(c)) === me));
+    .filter((c) => !lidas.has(idDe(c)) && !(c.startsWith("caixas/todos/") && remetenteDe(idDe(c)) === me));
   const familiares = me === fam
     ? arquivos(commit, "caixas").filter((c) => { const d = c.split("/")[1]; return d !== fam && d !== "todos" && familia(d) === fam && !daFamilia.has(idDe(c)); })
     : arquivos(commit, `caixas/${fam}`).filter((c) => !daFamilia.has(idDe(c)));
   return [...proprias, ...familiares]
     .filter((c) => c.endsWith(".md"))
-    .map((c) => ({ id: idDe(c), caminho: c, texto: conteudo(commit, c) }))
+    .map((c) => ({ id: idDe(c), caminho: c, texto: conteudo(commit, c), pelaFamilia: me !== fam && c.startsWith(`caixas/${me}/`) && pelaFamilia.has(idDe(c)) }))
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
@@ -1712,6 +1714,7 @@ function mostrar(lista, agora = new Date()) {
     const quando = dataDe(m.id);
     const idade = quando ? Math.floor((agora - quando) / 60000) : null;
     console.log(`===== ${m.id}${idade !== null && idade >= ATRASO_MIN ? `  (ATRASADA: ${idade} min sem confirmar)` : ""}`);
+    if (m.pelaFamilia) console.log("(já confirmada com o nome da família por outra sessão; é para você: leia e confirme com o seu nome)");
     const s = sessaoDe(m.texto), de = campo(m.texto, "De");
     if (!s?.identificada) console.log("ATENÇÃO: escrita não identificada (fora da nuvem do Claude Code, ou gravada sem a ferramenta): confira com o remetente antes de uma ação que dependa de quem a escreveu.");
     else if (s?.familia && de && familia(de) !== s.familia) console.log(`ATENÇÃO, IDENTIDADE: a mensagem diz ser de "${de}" (${familia(de)}), mas foi gravada por uma sessão da família ${s.familia}. Confira com o remetente antes de agir.`);

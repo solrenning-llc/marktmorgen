@@ -133,6 +133,7 @@ export const STATEMENT_REVIEWS: Readonly<Record<string, { date: string; digest: 
   "page:/studio/bundles": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/studio/calendar": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/studio/card": { date: "November 18, 2026", digest: "eba44788522343cb" },
+  "page:/studio/check-in": { date: "November 19, 2026", digest: "eba44788522343cb" },
   "page:/studio/checkup": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/studio/closing-refunds": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/studio/community": { date: "November 18, 2026", digest: "eba44788522343cb" },

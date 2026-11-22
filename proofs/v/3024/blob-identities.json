@@ -1,0 +1,110 @@
+[
+  {
+    "path": "app/[handle]/community/members/page.tsx",
+    "candidateBlob": "ae7bee3dd2a307deacad2f8b6e6bd2a1b2a527ee",
+    "integrationBlob": "ae7bee3dd2a307deacad2f8b6e6bd2a1b2a527ee",
+    "unchanged": true
+  },
+  {
+    "path": "app/[handle]/community/you/page.tsx",
+    "candidateBlob": "30b90c9674e4b57e4da71b6dadfc21315cc00fa2",
+    "integrationBlob": "30b90c9674e4b57e4da71b6dadfc21315cc00fa2",
+    "unchanged": true
+  },
+  {
+    "path": "app/api/store/community/route.ts",
+    "candidateBlob": "ca06f1f2465b0b6124a188ff44d8af121669dbc5",
+    "integrationBlob": "ca06f1f2465b0b6124a188ff44d8af121669dbc5",
+    "unchanged": true
+  },
+  {
+    "path": "app/privacy/page.tsx",
+    "candidateBlob": "22fd7bf694c7ec04b2b011aa6c9f90b88cd56adf",
+    "integrationBlob": "349e1ce5c67fdbd5d365b93ec77425806328a369",
+    "unchanged": false
+  },
+  {
+    "path": "components/community-parts.tsx",
+    "candidateBlob": "0662fa40435938aef6e523b2e97d42f2c2697901",
+    "integrationBlob": "0662fa40435938aef6e523b2e97d42f2c2697901",
+    "unchanged": true
+  },
+  {
+    "path": "components/member-link-boxes.tsx",
+    "candidateBlob": "19ddd81ec7a5a8e743945b0632235f90059d2f66",
+    "integrationBlob": "19ddd81ec7a5a8e743945b0632235f90059d2f66",
+    "unchanged": true
+  },
+  {
+    "path": "docs/accessibility-inventory.json",
+    "candidateBlob": "b848b7fcd50e4918c25f0b7c86bfbb365ce0738e",
+    "integrationBlob": "8359c7d492f4c657179c03d21d93192c7302cef6",
+    "unchanged": false
+  },
+  {
+    "path": "lib/api-read-rules.ts",
+    "candidateBlob": "d38da1cb457db2c47c0e071c9e443817cfcabd3c",
+    "integrationBlob": "d38da1cb457db2c47c0e071c9e443817cfcabd3c",
+    "unchanged": true
+  },
+  {
+    "path": "lib/buyer-words/community.ts",
+    "candidateBlob": "6d366883169b472e2250a04c4e26585089592abd",
+    "integrationBlob": "4ed1d484ad2cd6dc6a17f5a9e50f03f01b712f5f",
+    "unchanged": false
+  },
+  {
+    "path": "lib/community-walk.ts",
+    "candidateBlob": "fb9f804d4abe89ccd0c9fb90996cd24e8150d393",
+    "integrationBlob": "fb9f804d4abe89ccd0c9fb90996cd24e8150d393",
+    "unchanged": true
+  },
+  {
+    "path": "lib/community.ts",
+    "candidateBlob": "9d1652a3cf2d236074c4d1cbfa8f4ae090711f99",
+    "integrationBlob": "92b5228df81911ea9a9a86c71ec0d8fedea5d77f",
+    "unchanged": false
+  },
+  {
+    "path": "lib/help-content.ts",
+    "candidateBlob": "03dc7ea5dbb040ca55504060bfc393542b1d7ea4",
+    "integrationBlob": "03dc7ea5dbb040ca55504060bfc393542b1d7ea4",
+    "unchanged": true
+  },
+  {
+    "path": "lib/member-links.ts",
+    "candidateBlob": "9e9fd8734b3ece2ce5dfdf3058f5a238ef84fd2f",
+    "integrationBlob": "9e9fd8734b3ece2ce5dfdf3058f5a238ef84fd2f",
+    "unchanged": true
+  },
+  {
+    "path": "lib/person-copy.ts",
+    "candidateBlob": "17e92ba6bbf06c90008ed7295ce76c24ecccf4bf",
+    "integrationBlob": "bdc9c15eb126f087a217b19cfc9c38a7c25d271b",
+    "unchanged": false
+  },
+  {
+    "path": "lib/person-data.ts",
+    "candidateBlob": "1af9f44488825ce27824b52844a527a3cf9a7a1c",
+    "integrationBlob": "1af9f44488825ce27824b52844a527a3cf9a7a1c",
+    "unchanged": true
+  },
+  {
+    "path": "lib/store-socials.ts",
+    "candidateBlob": "e3d6cd44ba019ef5c8400a5a6dd9fad5cfb0c400",
+    "integrationBlob": "e3d6cd44ba019ef5c8400a5a6dd9fad5cfb0c400",
+    "unchanged": true
+  },
+  {
+    "path": "tests/community-mail-read-world.ts",
+    "candidateBlob": "07b2c1fdd215bc93fb30a3ee3c671101c7e87856",
+    "integrationBlob": "77316d63e9fa379373f52f533c24a4c8f21f6dd5",
+    "unchanged": false
+  },
+  {
+    "path": "tests/community-member-links.test.ts",
+    "candidateBlob": "479e4b91484392174eac76a77cafaa2e64a96fa6",
+    "integrationBlob": "479e4b91484392174eac76a77cafaa2e64a96fa6",
+    "unchanged": true
+  }
+]

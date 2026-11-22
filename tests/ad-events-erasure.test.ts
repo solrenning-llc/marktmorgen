@@ -28,7 +28,7 @@ import { newLeadId, sendPaidOrders, sendRenewals, sendServerLead, sendServerPurc
 import { adsCookieName, nextAdsCookie } from "@/lib/ad-consent";
 import { erasePerson } from "@/lib/person-erasure";
 import { NO_PIXELS } from "@/lib/pixels";
-import { ERASING_KEY, ensureListId, erasingField, ownerKey, setAdsServer, setPixels, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
+import { ERASING_KEY, claimHandle, closeStoreRecord, ensureListId, ensureStatsId, erasingField, ownerKey, setAdsServer, setPixels, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
 import { suppressCommand } from "@/lib/suppression";
 import { OWNER, makeWorld } from "./erasure-world";
 import { store as redis } from "./redis-stub";
@@ -49,6 +49,9 @@ let invoices: Record<string, unknown>[] = [];
 let toMeta = 0;
 /** Codex L's L-20261119-1153: the store's erasure, run while Meta is still answering a conversion already started. */
 let eraseStoreDuringMeta: { sid: string; statsId: string } | null = null;
+/** Codex L's L-20261120-1242: the store closed and another opened at its owner's address while Meta answers. */
+let whileMetaAnswers: (() => Promise<void>) | null = null;
+let metaFailure: string | null = null;
 
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
@@ -59,6 +62,8 @@ globalThis.fetch = (async (input: string | URL | Request) => {
       const { sid, statsId } = eraseStoreDuringMeta;
       await redis.pipeline([storeIdDel(sid), ["DEL", `nl:adsrv:last:${statsId}`]]);
     }
+    await whileMetaAnswers?.();
+    if (metaFailure) return json({ error: { message: metaFailure } }, 400);
     return json({ events_received: 1 });
   }
   const path = url.pathname.replace(/^\/v1/, "");
@@ -308,6 +313,38 @@ async function main(): Promise<void> {
     is("under erasure the lead still reaches the platform", await sendServerLead(legacy, asking(yes), { id: newLeadId(), email: "legacy-erasing@example.com", product: "guide00001" }, NOW), true);
     is("and nothing is written for the erasing legacy store", Number(redis.run(["EXISTS", `nl:adsrv:last:${statsId}`])), 0);
     redis.run(["HDEL", ERASING_KEY, field]);
+  }
+
+  part("A legacy answer in flight is not kept once the owner has opened a different store at the same address (Codex L-20261120-1242)");
+  {
+    // The legacy control above shows an id given since this snapshot is still the same store.
+    const legacy: typeof store = { ...store, sid: "" };
+    const last = `nl:adsrv:last:${statsId}`;
+    redis.run(["SET", last, "prior synthetic diagnostic", "EX", 90 * 86400]);
+    let replacement: typeof store | null = null;
+    whileMetaAnswers = async () => {
+      // The real final close deletes the diagnostic and the erasing mark with the record.
+      is("the old record really closes", await closeStoreRecord(legacy, [last]), true);
+      is("the old account has no store", await storeForEmail(OWNER), null);
+      is("its diagnostic was deleted before the late answer", redis.run(["GET", last]), null);
+      is("its erasing mark is gone", redis.run(["HGET", ERASING_KEY, await erasingField(storeRef(legacy))]), null);
+      is("the same owner opens a new store at another handle", (await claimHandle(OWNER, "new-ads-shop", "New Ads Shop", "")).ok, true);
+      await ensureStatsId(OWNER);
+      replacement = (await storeForEmail(OWNER))!;
+      is("it has a different statsId", Boolean(replacement.statsId) && replacement.statsId !== statsId, true);
+    };
+    metaFailure = "Synthetic refusal for erased-owner@example.com";
+    try {
+      is("the lead already started completes", await sendServerLead(legacy, asking(yes), { id: newLeadId(), email: "late-legacy@example.com", product: "guide00001" }, NOW), true);
+    } finally {
+      whileMetaAnswers = null;
+      metaFailure = null;
+    }
+    is("the replacement was opened during the platform's answer", replacement !== null, true);
+    is("the erased store's diagnostic stays absent", redis.run(["GET", last]), null);
+    const fresh = (await storeForEmail(OWNER))!;
+    is("the replacement's record is untouched", fresh.handle, "new-ads-shop");
+    is("no old diagnostic is kept under the replacement", redis.run(["GET", `nl:adsrv:last:${fresh.statsId}`]), null);
   }
 
   done();

@@ -91,6 +91,20 @@ export type ErasureSize = {
 };
 
 /**
+ * A person's files sent for review (750 [CD1], lib/submission-store.ts,
+ * forgetSubmissionsPerson) at MAX_SUBMISSIONS_PER_PERSON (20): their index
+ * read, each entry's door read and its record, door, place on the studio's list and on the sweep's
+ * list deleted, each open upload given up at the vault (its record read and
+ * deleted, its storage reservation given back under its lock: at most eight
+ * commands), their places' keys deleted, and each entry's door deleted again after
+ * them (Claude 6 on #3570: 20 more; with the studio's list, 40 more than
+ * before both), and their slots' turns taken off the store's list in one
+ * ZREM (Claude 6 on #3568). [commands, bytes], held by
+ * tests/submission-erasure.test.ts to cover what it sends.
+ */
+export const ERASE_SUBMISSIONS: readonly [number, number] = [301, 70_000];
+
+/**
  * Commands every erasure sends whatever the store: each module's own, workflows at their cap, a sync log at its length,
  * and (since 18 October 2026) a person's payment requests at their cap, four commands each for twice MAX_PER_PERSON
  * (lib/payment-request-store.ts): 260 before them; and (since 18 October 2026) a person's agreements at their cap, two
@@ -107,18 +121,25 @@ export type ErasureSize = {
  * Since Codex L on #4871 the kept paths have no expiry, so their four EXPIREs are no longer sent; 567 stays the bound.
  * And (#4462, 16 November 2026) the count and the read of the store's waitlist marks (lib/waitlist.ts waitlistMarks: two
  * SCARD, two SMEMBERS), whose members are then counted with the rest (ERASE_PER.waitlists), four more: 571.
+ * And (review of #3929) the read of the note of the carts the person was reminded of (lib/checkout-recovery.ts,
+ * forgetRecoveryPerson), one SMEMBERS, the note itself deleted inside the marks' one DEL: one more (576 with #4290's
+ * own count below).
  */
 // 567 before #4290 and #4462; four more cover the own ask count and the atomic ask eraser's fixed work (ZCARD, EVAL,
-// ZRANGEBYSCORE, DEL), and #4462's four for the waitlist marks: 575.
-export const ERASE_FIXED_COMMANDS = 575;
+// ZRANGEBYSCORE, DEL), and #4462's four for the waitlist marks: 575; and (750 [CD1]) a person's files sent for review,
+// ERASE_SUBMISSIONS: 575 before them.
+// And (review of #3929) the read of the note of the carts the person was reminded of (lib/checkout-recovery.ts,
+// forgetRecoveryPerson), one SMEMBERS, the note deleted inside the marks' one DEL: 576 before ERASE_SUBMISSIONS.
+export const ERASE_FIXED_COMMANDS = 576 + ERASE_SUBMISSIONS[0];
 /**
  * Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read
  * again, and those commands; 310,000 before (Claude 3 on #3473) the memberships whose invitations wait to be deleted
  * (lib/move-members.ts PENDING_MAX, 20): their ids read once (40 bytes each) and, for each, one more field of the
  * person's invitations asked (73 bytes) and its record (at most about 600 bytes with a full address), counted at 15,000;
- * 325,000 before (#4290) the atomic ask eraser's script, two keys, arguments and its two counts, 5,000.
+ * 325,000 before (#4290) the atomic ask eraser's script, two keys, arguments and its two counts, 5,000; and (750 [CD1])
+ * a person's files sent for review, ERASE_SUBMISSIONS: 330,000 before them.
  */
-export const ERASE_FIXED_BYTES = 330_000;
+export const ERASE_FIXED_BYTES = 330_000 + ERASE_SUBMISSIONS[1];
 /** Members removed per command in the atomic checkout-ask eraser; not a cap on a person's erasure. */
 export const ASK_ERASE_BATCH = 512;
 /** Per thing counted: [commands, bytes]. */

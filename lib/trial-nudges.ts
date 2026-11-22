@@ -25,7 +25,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { claimValue, releaseMark } from "@/lib/claim-mark";
 import { holdLock } from "@/lib/redis-lock";
 import { listSubscriptions } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -36,6 +36,7 @@ import { productCount } from "@/lib/catalog";
 import { nextChecks, storeChecks } from "@/lib/store-coach";
 import { studioPath } from "@/lib/studio-route";
 import { SUBSCRIPTION_PATTERN, type Store, storeForHandle } from "@/lib/store";
+import { claimWhileStoreLive } from "@/lib/store-live-cache";
 import { firstSaleKey, soldBeforeUnknownKey } from "@/lib/yearly-offer";
 
 const DAY = 86_400;
@@ -171,18 +172,20 @@ async function firstSaleKnown(store: Pick<Store, "sid" | "handle">): Promise<num
  * read back as ours, so the nudge goes once and is never lost (Codex Q and Claude 5 on #2898); null when one was sent
  * (EXISTS 1, or the mark holding another value, the "1" of marks from before included). Any other answer is unknown:
  * the mark is let go only while it holds this run's value, and it throws (CX-123 rule 24), so a nudge is never sent
- * twice, nor sent without knowing, and goes on the next run.
+ * twice, nor sent without knowing, and goes on the next run. The mark is taken only while the store read for this
+ * nudge is still live (claimWhileStoreLive): a store erased, deleted or moved since that read gets no mark and no
+ * email (null, nothing written; Codex X5, board #5010 row 4).
  */
-async function claimNudge(keys: string[], which: number): Promise<string | null> {
+async function claimNudge(store: Store, keys: string[], which: number): Promise<string | null> {
   const seen = repliesFor(await redisPipeline(keys.map((key) => ["EXISTS", key])), keys.length);
   const counts = seen?.map(countOf);
   if (!counts || counts.some((count) => count !== 0 && count !== 1)) throw new UnknownReplyError("the trial nudges sent");
   if (counts.slice(which).some((count) => count === 1)) return null;
   const mine = claimValue();
   // Pending until it is kept just before the send (keepNudge): a run killed before then does not lose the nudge.
-  const claimed = await claimMark(keys[which], PENDING_SECONDS, mine);
+  const claimed = await claimWhileStoreLive(store, keys[which], PENDING_SECONDS, mine);
   if (claimed === "ours") return mine;
-  if (claimed === "taken") return null;
+  if (claimed === "taken" || claimed === "gone") return null;
   await releaseMark(keys[which], mine);
   throw new UnknownReplyError("a trial nudge's mark");
 }
@@ -305,7 +308,7 @@ async function nudgeOne(
   const keys = NUDGE_DAYS.map((_, i) => sentKey(id, i));
   let claimed: string | null;
   try {
-    claimed = await claimNudge(keys, due.which);
+    claimed = await claimNudge(store, keys, due.which);
   } catch (error) {
     // Not known whether it was sent (CX-123 rule 24): nothing is sent, and the store is said as failed.
     console.error("reading whether a trial nudge was sent failed", id, error);

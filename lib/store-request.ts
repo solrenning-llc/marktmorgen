@@ -27,6 +27,10 @@ import { type Need, refusedJson, studioAccess } from "@/lib/studio-route";
  * `act` answers for a route whose deleting write is named another way (an
  * `op`, a `detach: true`).
  *
+ * `units` is how many of the studio's requests this one is counted as, by
+ * its body (one when not given): taken in the same step as the first, before
+ * anything else is read (app/api/store/crm/route.ts, a field saved).
+ *
  * Returns a Response to send back, or who is asking, the store, the key it is
  * kept under, their role and the parsed body.
  */

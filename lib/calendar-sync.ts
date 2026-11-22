@@ -1076,7 +1076,10 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
     if (typeof raw !== "string" || !/^\d{1,15}$/.test(raw)) return null;
     return Number(raw);
   };
-  const changed = countOf(changedRaw) ?? 0;
+  // The bookings-changed mark in another shape is unknown, never "nothing changed" (rule 24; Codex X2, #4287 item 6):
+  // the kept copy may be stale, so none is served, as when the whole read is unknown.
+  const changed = countOf(changedRaw);
+  if (changed === null) return { state: "none" };
   const changedSince = copy !== null && changed > copy.at;
   const fresh = copy !== null && !changedSince && now - copy.at < CALENDAR_REFRESH_SECONDS * 1000;
   if (fresh) return { state: "copy", ics: copy.ics };

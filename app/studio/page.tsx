@@ -42,6 +42,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Logo } from "@/components/logo";
 import { Icon } from "@/components/icons";
+import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
@@ -460,6 +461,12 @@ const STRIPE_NOTICES: Record<string, { title: string; body: string }> = {
   "attempt-country": {
     title: "An account is still being opened in another country",
     body: "Your last try asked Stripe for an account in the country you chose then, and Stripe may have opened it. A Stripe account's country can't be changed. To finish that account, choose that country again and press \u201cConnect your Stripe account\u201d. To choose another country, try again one day after your last try. Nothing was changed.",
+  },
+  // Stripe refused a press again on an attempt whose key was sent before (app/api/stripe/connect): the attempt is kept,
+  // since an earlier press may have opened the account (Claude 7 xAF's LEVE on #5095).
+  "attempt-refused": {
+    title: "Stripe refused this try, and an earlier one may have opened your account",
+    body: `An earlier try may already have opened a Stripe account with your email address, so we keep asking Stripe with the same details for up to 29 days from your first try, and never open a second account. Pressing again will most likely be refused the same way. Write to ${SUPPORT_EMAIL} and tell us your store's name, so we can look into it with you. Nothing was charged.`,
   },
   "country-unsupported": {
     title: "Stripe will not open an account in that country from here",

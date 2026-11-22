@@ -241,7 +241,7 @@ async function main(): Promise<void> {
     is("the first press: Stripe makes the account and the answer is lost", await connect(owner, store.sid), "error");
     const first = (await storeForId(store.sid))?.stripeConnecting;
     answer = "replay-gone";
-    is("the press again is refused with a plain 400", await connect(owner, store.sid), "error");
+    is("the press again is refused, and the creator is told why, with a way out", await connect(owner, store.sid), "attempt-refused");
     const kept = (await storeForId(store.sid))?.stripeConnecting;
     is("the attempt stays, the same one, its key sent twice", [kept?.id === first?.id, kept?.sends], [true, 2]);
     is("and the store is still held against deletion", (await deleteStore(storeRef(store))).ok ? "deleted" : "kept", "kept");

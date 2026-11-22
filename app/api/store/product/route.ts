@@ -151,9 +151,10 @@ const STATUS: Record<string, number> = {
  * with a word the caller has never seen would be worse than "unknown".
  */
 function asProductReason(
-  reason: "none" | "unknown" | "invalid" | "call" | "course" | "bundle" | "shipped",
+  reason: "none" | "unknown" | "invalid" | "call" | "course" | "bundle" | "shipped" | "changed",
 ): "none" | "unknown" | "call" | "course" | "bundle" | "shipped" {
-  return reason === "invalid" ? "unknown" : reason;
+  // "changed" comes only from a save that asked for a check of the product (lib/ai-file.ts attachDraftFile), never here.
+  return reason === "invalid" || reason === "changed" ? "unknown" : reason;
 }
 
 /**

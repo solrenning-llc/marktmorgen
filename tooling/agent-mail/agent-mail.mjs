@@ -176,11 +176,33 @@ let ESCRITOR = null;
 export function definirEscritor(nome) { ESCRITOR = nome && nome !== true ? String(nome) : null; }
 
 /**
+ * Disputa pelo ramo (22/11/2026, 01h50 a 01h55 Fortaleza): o correio recebeu 166 commits em 10 minutos, um a cada 3,6 s,
+ * e cada escrita (busca, montagem, envio) leva perto disso; com 6 tentativas e esperas de 2 a 7 s, request-review falhou
+ * quatro vezes seguidas com "rejected (fetch first)". Quem perde a corrida tenta de novo logo, com espera curta e
+ * aleatória (para duas sessões não baterem juntas de novo), até ENVIO_TENTATIVAS vezes dentro de ENVIO_PRAZO_MS; os
+ * outros erros (rede, permissão) continuam com ENVIO_FALHAS_OUTRAS tentativas, como antes.
+ */
+export const ENVIO_TENTATIVAS = 30;
+export const ENVIO_FALHAS_OUTRAS = 6;
+export const ENVIO_PRAZO_MS = 150000;
+/** Um envio recusado porque o ramo andou no meio (outro agente gravou antes), e não por outro motivo. */
+export const perdeuCorrida = (erro) => /\(fetch first\)|non-fast-forward|failed to update ref|cannot lock ref|incorrect old value|but expected/i.test(String(erro?.stderr ?? erro?.message ?? erro));
+const esperar = (ms) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, Math.round(ms))); };
+
+/**
  * Acrescenta arquivos ao ramo, sem apagar nem mudar nenhum que já exista, e envia. Se outro agente enviou antes,
- * busca de novo e monta outra vez: até 6 tentativas.
+ * busca de novo e monta outra vez (veja ENVIO_TENTATIVAS).
  */
 function acrescentar(novos, mensagem) {
-  for (let tentativa = 1; ; tentativa += 1) {
+  // Os blobs não mudam entre as tentativas: são gravados uma vez, e cada tentativa só refaz o índice sobre a base nova.
+  const blobs = Object.entries(novos).map(([caminho, texto]) => {
+    // A sessão de quem escreve vai no fim de cada mensagem ou registro .md (os outros arquivos têm formato fixo).
+    const gravado = caminho.endsWith(".md") ? `${String(texto).replace(/\n*$/, "\n")}Sessão: ${linhaSessao()}\n` : texto;
+    return [caminho, git(["hash-object", "-w", "--stdin"], gravado)];
+  });
+  const inicio = Date.now();
+  let corridas = 0, outras = 0;
+  for (;;) {
     const base = buscar();
     const indice = join(tmpdir(), `correio-indice-${process.pid}-${randomBytes(4).toString("hex")}`);
     const env = { ...process.env, GIT_INDEX_FILE: indice };
@@ -188,11 +210,8 @@ function acrescentar(novos, mensagem) {
     let commit;
     try {
       if (base) comIndice(["read-tree", base]); else comIndice(["read-tree", "--empty"]);
-      for (const [caminho, texto] of Object.entries(novos)) {
+      for (const [caminho, blob] of blobs) {
         if (base && arquivos(base, caminho).includes(caminho)) throw new Error(`já existe no correio: ${caminho}; nada é reescrito`);
-        // A sessão de quem escreve vai no fim de cada mensagem ou registro .md (os outros arquivos têm formato fixo).
-        const gravado = caminho.endsWith(".md") ? `${String(texto).replace(/\n*$/, "\n")}Sessão: ${linhaSessao()}\n` : texto;
-        const blob = git(["hash-object", "-w", "--stdin"], gravado);
         comIndice(["update-index", "--add", "--cacheinfo", `100644,${blob},${caminho}`]);
       }
       const arvore = comIndice(["write-tree"]);
@@ -212,8 +231,14 @@ function acrescentar(novos, mensagem) {
       git(["push", "-q", REPO, `${commit}:refs/heads/${RAMO}`]);
       return commit;
     } catch (erro) {
-      if (tentativa >= 6) throw new Error(`envio falhou depois de ${tentativa} tentativas: ${String(erro.stderr ?? erro).slice(0, 300)}`);
-      execFileSync("sleep", [String(1 + tentativa)]);
+      const corrida = perdeuCorrida(erro);
+      if (corrida) corridas += 1; else outras += 1;
+      const tentativas = corridas + outras;
+      if (corridas >= ENVIO_TENTATIVAS || outras >= ENVIO_FALHAS_OUTRAS || Date.now() - inicio > ENVIO_PRAZO_MS) {
+        throw new Error(`envio falhou depois de ${tentativas} tentativas (${corridas} por o correio ter andado no meio, ${outras} por outro erro) em ${Math.round((Date.now() - inicio) / 1000)} s: ${String(erro.stderr ?? erro).slice(0, 300)}`);
+      }
+      // Perdeu a corrida: tenta logo, com espera aleatória curta. Outro erro: espera crescente, como antes.
+      esperar(corrida ? 100 + Math.random() * 900 : 1000 * (1 + outras));
     }
   }
 }

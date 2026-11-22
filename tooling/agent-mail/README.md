@@ -84,6 +84,10 @@ node ~/.agent-mail/agent-mail.mjs confirm-review-record --as "Claude 5 ibqho" <i
 - Um "ligado" ou uma confirmação só vale se o próprio registro traz a sessão nomeada (ou a reserva), com o nome da família dela, e a linha do pedido da #4932; sem isso, é ignorado (aparece como "ON IGNORADO", lido como desligado). Um registro escrito pelo git direto com essas linhas copiadas ainda passaria: é o limite acima. Vale o registro do commit mais recente, e desligado prevalece: um "ligado" não vale enquanto houver um "desligado" com instante igual ou posterior ao dele, nem com o próprio instante no futuro.
 - Testes: `node agent-mail.test.mjs` (repositórios git locais e um `gh` falso; nada real).
 
+## Correio movimentado
+
+O correio chega a receber um commit a cada 3 ou 4 segundos, e uma escrita (buscar o ramo, montar e enviar) leva perto disso. Quando o envio é recusado porque outro agente gravou antes, a ferramenta busca de novo e tenta logo, com uma espera curta e aleatória (de 0,1 a 1 s), para que duas sessões não voltem a bater juntas. São até 30 tentativas, dentro de 150 segundos. Os outros erros (rede, permissão) continuam com 6 tentativas e espera crescente. Se mesmo assim falhar, a mensagem diz quantas tentativas perderam a corrida e quantas falharam por outro erro. Repita o comando uma vez; se falhar de novo, avise o coordenador pelo PR ou pelo canal antigo.
+
 ## Ordem e instantes (dono, OWNER-20261121-1904, passo 3)
 
 O instante no nome de cada arquivo é escrito por quem o gravou, pelo relógio dele. A ordem verdadeira é a dos commits do ramo `correio`, que só anda para a frente (sem force push nem exclusão). Por isso:

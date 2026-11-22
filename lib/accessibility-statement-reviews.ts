@@ -113,6 +113,7 @@ export const STATEMENT_REVIEWS: Readonly<Record<string, { date: string; digest: 
   "page:/proof/[slug]": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/refunds": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/report": { date: "November 18, 2026", digest: "eba44788522343cb" },
+  "page:/report/handled/[token]": { date: "November 21, 2026", digest: "eba44788522343cb" },
   "page:/signin": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/signin/code": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/signin/confirm": { date: "November 18, 2026", digest: "eba44788522343cb" },

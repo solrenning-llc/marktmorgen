@@ -1,5 +1,6 @@
 /** Synthetic service/auth/admission edges around the real POST, form store and data room. */
 import type { Store } from '@/lib/store';
+import { UnknownReplyError } from '@/lib/redis-reply';
 import { ROOM } from './data-room';
 
 export const effects = { admission: 0, enroll: 0, funnel: 0, funnelReads: 0, joins: 0 };
@@ -17,6 +18,8 @@ export function linkOrigin() { return 'https://example.com'; }
 export function clientAddress() { return '127.0.0.1'; }
 export function fromAnotherSite() { return false; }
 export async function limited(request: Request) { return request; }
+/** lib/request-guard.ts unknownLimit, as the real one: an unknown count is "unknown", anything else is thrown again. */
+export function unknownLimit(error: unknown): 'unknown' { if (error instanceof UnknownReplyError) return 'unknown'; throw error; }
 export function normaliseHandle(value: string) { return value; }
 export async function storeForHandle(handle: string) { return handle === shop.handle ? shop : null; }
 export async function enroll() { effects.enroll++; }

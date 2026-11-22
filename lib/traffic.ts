@@ -38,6 +38,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { headers } from "next/headers";
 import { after } from "next/server";
 import { rememberFolderOwner } from "@/lib/delivery";
+import type { StoreLiveFence } from "@/lib/live-fence";
 import { type AllowanceWindow, WINDOW_ID, allowanceWindow, calendarWindow, keepSecondsFor } from "@/lib/allowance-window";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
@@ -47,6 +48,7 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { noteReadStore } from "@/lib/page-read";
 import { deriveKey } from "@/lib/secret-box";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { PARTS_PER_VISIT, SHARE_BATCH, clientDayShare, publicVisitLimit, requestLimitFor, shareAddress, visitLimitFor, visitorAddress } from "@/lib/traffic-rules";
 
 const dayKey = (folder: string, day: string) => `nl:traffic:day:${folder}:${day}`;
@@ -83,7 +85,7 @@ function fingerprint(of: string): string {
  * before a bill could be made from the count: no plan covers fewer than a
  * hundred visits.
  */
-async function markMonth(folder: string, window: string, owner: string | null, now: number): Promise<void> {
+async function markMonth(folder: string, window: string, owner: string | null, now: number, fence: StoreLiveFence): Promise<void> {
   // The counts by the store's window; the line of stores by the calendar
   // month, which is how the daily jobs find them (app/api/cron/usage).
   const month = calendarWindow(now).id;
@@ -94,12 +96,13 @@ async function markMonth(folder: string, window: string, owner: string | null, n
     ["EXPIRE", foldersKey(month), KEEP_SECONDS],
   ]);
   // Whose folder this is, for the daily job that bills and writes
-  // (lib/usage-billing.ts, storeOf).
-  if (owner) await rememberFolderOwner(folder, owner);
+  // (lib/usage-billing.ts, storeOf): through the store's fence, so a visit
+  // counted after the erasure began writes no address back.
+  if (owner) await rememberFolderOwner(folder, owner, fence);
 }
 
 /** One person, on one day, for one store: adds a visit to the month if they are new to today. */
-async function countOnce(folder: string, owner: string | null, who: string, now: number, window: AllowanceWindow): Promise<boolean> {
+async function countOnce(folder: string, owner: string | null, who: string, now: number, window: AllowanceWindow, fence: StoreLiveFence): Promise<boolean> {
   const day = new Date(now).toISOString().slice(0, 10);
   const [fresh] = await redisPipeline([["SADD", dayKey(folder, day), fingerprint(`${day}|${folder}|${who}`)]]);
   if (Number(fresh) !== 1) return false;
@@ -108,7 +111,7 @@ async function countOnce(folder: string, owner: string | null, who: string, now:
     ["EXPIRE", dayKey(folder, day), DAY_KEEP_SECONDS],
   ]);
   const n = Number(count);
-  if (n === 1 || n % 100 === 0) await markMonth(folder, window.id, owner, now);
+  if (n === 1 || n % 100 === 0) await markMonth(folder, window.id, owner, now, fence);
   return true;
 }
 
@@ -123,7 +126,7 @@ export async function recordVisit(store: Store, ip: string, now = Date.now()): P
   const window = allowanceWindow(store, now);
   if (!isRedisConfigured() || !window) return false;
   try {
-    return await countOnce(await storeFolder(storeRef(store)), storeRef(store), visitorAddress(ip), now, window);
+    return await countOnce(await storeFolder(storeRef(store)), storeRef(store), visitorAddress(ip), now, window, await storeLiveFence(store));
   } catch (error) {
     console.error("could not count a visit to a store", error);
     return false;
@@ -140,7 +143,7 @@ export async function recordListener(store: Store, feed: string, now = Date.now(
   const window = allowanceWindow(store, now);
   if (!isRedisConfigured() || !feed || !window) return false;
   try {
-    return await countOnce(await storeFolder(storeRef(store)), storeRef(store), `feed:${feed}`, now, window);
+    return await countOnce(await storeFolder(storeRef(store)), storeRef(store), `feed:${feed}`, now, window, await storeLiveFence(store));
   } catch (error) {
     console.error("could not count a podcast subscriber's day", error);
     return false;
@@ -164,7 +167,7 @@ export async function recordParts(store: Store, parts: number, now = Date.now())
     // The same mending as a visit's: with the first, and each time a
     // hundred visits' worth has been added.
     const step = 100 * PARTS_PER_VISIT;
-    if (held === parts || Math.floor(held / step) !== Math.floor((held - parts) / step)) await markMonth(folder, window.id, owner, now);
+    if (held === parts || Math.floor(held / step) !== Math.floor((held - parts) / step)) await markMonth(folder, window.id, owner, now, await storeLiveFence(store));
     return held;
   } catch (error) {
     console.error("could not count the live room toward a store's visits", error);

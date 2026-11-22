@@ -20,6 +20,7 @@
  * by use, it is measured by the time it was watched and not by the
  * gigabyte, and it has rules of its own (lib/watch-rules.ts).
  */
+import { type StoreLiveFence, setIfStoreLive } from "@/lib/live-fence";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { signedOf, textCountOf } from "@/lib/redis-count";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
@@ -101,10 +102,24 @@ const overKey = (month: string) => `nl:store:delivery:over:${month}`;
  */
 const ownerKey = (folder: string) => `nl:store:folder-owner:${folder}`;
 
-/** Remembers whose folder this is, so the allowance notice can reach them. */
-export async function rememberFolderOwner(folder: string, email: string): Promise<void> {
+/** How long a visit's fenced write of the folder's owner keeps it: as long as the month it is billed with (lib/traffic.ts). */
+export const FOLDER_OWNER_SECONDS = 400 * 24 * 60 * 60;
+
+/**
+ * Remembers whose folder this is, so the allowance notice can reach them. With the store's `fence` (lib/live-fence.ts),
+ * the write happens in one step with the fence's reads and only while the store is live: a visit counted after the
+ * store's erasure began must not write its owner's address back under the folder (Codex L-20261120-0627), so "gone"
+ * writes nothing, kept FOLDER_OWNER_SECONDS when written. Without one (an upload by the creator, a checkpoint), as
+ * before.
+ */
+export async function rememberFolderOwner(folder: string, email: string, fence?: StoreLiveFence): Promise<void> {
   if (!isRedisConfigured() || !folder || !email) return;
   try {
+    if (fence) {
+      const kept = await setIfStoreLive(fence, ownerKey(folder), email.toLowerCase(), FOLDER_OWNER_SECONDS);
+      if (kept === "unknown") console.error("could not remember a folder's owner", "the fenced write's reply was not its own");
+      return;
+    }
     await redisPipeline([["SET", ownerKey(folder), email.toLowerCase()]]);
   } catch (error) {
     console.error("could not remember a folder's owner", error);

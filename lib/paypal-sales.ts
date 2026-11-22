@@ -53,6 +53,8 @@ import { orderWrite } from "@/lib/order-data";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { releaseLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { setIfStoreLive } from "@/lib/live-fence";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
@@ -407,11 +409,25 @@ export function attemptStartedAt(attempt: string): number {
   return m ? Number(m[1]) : 0;
 }
 
-/** Writes a new attempt's mark before the creator is sent to PayPal; throws when the write is not confirmed (rule 24). */
-export async function markOnboarding(statsId: string): Promise<string> {
+/** A connect asked for a store whose erasure has begun, or that is gone: nothing is marked, and PayPal is not reached. */
+export class PayPalStoreGoneError extends Error {
+  constructor() {
+    super("This store is gone, so no PayPal connect starts for it.");
+  }
+}
+
+/**
+ * Writes a new attempt's mark before the creator is sent to PayPal, only while the store is live (lib/live-fence.ts,
+ * one step with the fence's reads): a store erasing or gone meanwhile throws PayPalStoreGoneError and nothing is
+ * written, so the mark never outlives the erasure that deletes it (Codex L-20261120-0310); throws when the write is
+ * not confirmed (rule 24).
+ */
+export async function markOnboarding(store: Pick<Store, "email" | "sid" | "extra" | "statsId">): Promise<string> {
+  if (!store.statsId) throw new PayPalStoreGoneError();
   const attempt = `${String(Date.now()).padStart(13, "0")}-${randomBytes(16).toString("hex")}`;
-  const set = repliesFor(await redisPipeline([["SET", onboardingKey(statsId), attempt, "EX", ONBOARDING_SECONDS]]), 1);
-  if (!set || set[0] !== "OK") throw new UnknownReplyError("a PayPal connect's start");
+  const kept = await setIfStoreLive(await storeLiveFence(store), onboardingKey(store.statsId), attempt, ONBOARDING_SECONDS);
+  if (kept === "gone") throw new PayPalStoreGoneError();
+  if (kept !== "kept") throw new UnknownReplyError("a PayPal connect's start");
   return attempt;
 }
 

@@ -10,8 +10,9 @@
  * then unknown (lib/sale-fees-months.ts), never lower.
  *
  * The ceiling before the call (MR): one of the store's SALE_FEES_READINGS_PER_DAY
- * readings of the UTC day is taken before Stripe is asked (SET NX, INCRBY,
- * DECRBY when past the figure; an unreadable count is a refusal). A reading
+ * readings of the UTC day is taken before Stripe is asked (INCRBY, then the
+ * day's expiry when the key has none, lib/window-count.ts; DECRBY when past the
+ * figure; an unreadable count is a refusal). A reading
  * that called Stripe stays counted, whatever came back. The cost is its own
  * line (tests/plan-cost-registry.ts, sale-fees-reading).
  *
@@ -35,8 +36,9 @@ import { readingSince } from "@/lib/earnings-by-month";
 import { nextUtcMidnight } from "@/lib/local-clock";
 import type { ReadShape } from "@/lib/read-ceilings";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { repliesFor } from "@/lib/redis-reply";
 import { keyFor, onAccount } from "@/lib/stripe-account";
+import { windowCountBy, windowCountOf } from "@/lib/window-count";
 
 /** Readings of a store's fees a UTC day, each taken before Stripe is called. */
 export const SALE_FEES_READINGS_PER_DAY = 3;
@@ -50,7 +52,7 @@ export const SALE_FEES_FRESH_SECONDS = 3_600;
 export const SALE_FEES_KEEP_SECONDS = 86_400;
 /** The largest copy kept, in bytes: SALE_FEES_PAGES × SALE_FEES_PAGE_SIZE lines of the money fields at their largest. */
 export const SALE_FEES_COPY_MAX_BYTES = 262_144;
-/** Database commands of one reading at the most: the copy read, the day's count (SET NX, INCRBY, DECRBY) and the copy written. */
+/** Database commands of one reading at the most: the copy read, the day's count (INCRBY and EXPIRE NX, lib/window-count.ts; a DECRBY when over) and the copy written. */
 export const SALE_FEES_READ_COMMANDS = 1 + 3 + 1;
 /** One reading at its worst, in the shape lib/read-ceilings.ts prices: every page waited on one after another. */
 export const SALE_FEES_READ_SHAPE: ReadShape = {
@@ -134,9 +136,10 @@ async function readPages(account: string, now: number): Promise<{ lines: Record<
 async function takeReading(statsId: string, now: number): Promise<boolean> {
   const key = dayKey(statsId, now);
   try {
-    const replies = repliesFor(await redisPipeline([["SET", key, "0", "NX", "EX", DAY_KEY_SECONDS], ["INCRBY", key, 1]]), 2);
-    const count = replies ? countOf(replies[1]) : null;
-    if (count === null || count < 1) return false;
+    // The INCRBY first and the day's expiry set only when the key has none (lib/window-count.ts): a SET NX then INCRBY
+    // could leave a key with no expiry when it expired between the two (tests/window-count-expiry.test.ts).
+    const count = windowCountOf(await redisPipeline(windowCountBy(key, DAY_KEY_SECONDS, 1)));
+    if (count === null) return false;
     if (count <= SALE_FEES_READINGS_PER_DAY) return true;
     await redisPipeline([["DECRBY", key, 1]]).catch(() => {});
     return false;

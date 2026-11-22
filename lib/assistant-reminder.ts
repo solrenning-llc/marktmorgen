@@ -39,6 +39,7 @@ import { type RemindOutcome, remindAssisted } from "@/lib/checkout-recovery";
 import { REMINDER_RETRIES, reminderRetryAfter, retriesOf } from "@/lib/reminder-retry";
 import type { SessionRecord } from "@/lib/purchase-email";
 import type { Listing, Store } from "@/lib/store";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { LANGUAGES } from "@/lib/store-language";
 import { assistReminderWords } from "@/lib/buyer-words/assistant-reminder";
 import {
@@ -115,6 +116,31 @@ function parseConsent(raw: unknown): Consent | null {
 export type KeepOutcome = "kept" | "email" | "version" | "limited" | "closed";
 
 /**
+ * The buyer's yes, its queue member and its erasure index, written in one step only while the store is live, by the
+ * rule of lib/live-fence.ts (SET_IF_STORE_LIVE): the store's erasing mark absent, and its id key still holding this
+ * very store's ref (ARGV[2] ""), or, for a store from before ids, its owner's record still carrying its statsId
+ * (ARGV[2]). KEYS: the live key, the erasing hash, the consent, the queue, the index. 1: written; 0: the store is
+ * gone, moved or being erased, and nothing was written; -1: the owner's record does not parse (unknown). Billed as the
+ * EVAL and its calls: HGET, GET, SET, ZADD, SADD, EXPIRE on the way that writes (seven; four plain commands before).
+ */
+const KEEP_IF_STORE_LIVE = `-- marktmorgen:assist-reminder-keep-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[2] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[3] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[2] then return 0 end
+end
+redis.call("SET", KEYS[3], ARGV[4], "EX", ARGV[5])
+redis.call("ZADD", KEYS[4], ARGV[6], ARGV[7])
+redis.call("SADD", KEYS[5], ARGV[8])
+redis.call("EXPIRE", KEYS[5], ARGV[5])
+return 1`;
+
+/**
  * Keeps the buyer's yes for one checkout just opened, and puts its reminder
  * in the queue. Only from the checkout routes, only when the box was offered
  * and checked; `version` is the one the page showed. Never throws: a yes
@@ -135,12 +161,20 @@ export async function keepAssistReminder(input: { store: Store; session: string;
     const key = assistRemindKey(input.session);
     // Due an hour after the checkout closes, which it does an hour after it opened (lib/store-checkout.ts).
     const due = Math.floor(now / 1000) + RECOVERY_OPEN_SECONDS + ASSIST_REMIND_AFTER_SECONDS;
-    await redisPipeline([
-      ["SET", key, JSON.stringify(consent), "EX", ASSIST_REMIND_KEEP_SECONDS],
-      ["ZADD", QUEUE, due, JSON.stringify([statsId, store.handle, input.session, due])],
-      ["SADD", whoKey(statsId, email), input.session],
-      ["EXPIRE", whoKey(statsId, email), ASSIST_REMIND_KEEP_SECONDS],
-    ]);
+    // One step, fenced on the store being live at the moment of writing (KEEP_IF_STORE_LIVE): the routes keep the store
+    // they read before opening the checkout, and its erasure may begin or end while the checkout opens or the daily
+    // limit is read (Codex L-20261121-0151). Gone, moved or erasing: nothing is written, and the checkout goes on
+    // with no reminder. An answer that does not read is unknown (rule 24), never "kept".
+    const fence = await storeLiveFence(store);
+    if (fence.statsId === null) return "closed";
+    const member = JSON.stringify([statsId, store.handle, input.session, due]);
+    const replies = repliesFor(await redisPipeline([[
+      "EVAL", KEEP_IF_STORE_LIVE, 5, fence.live, fence.erasing, key, QUEUE, whoKey(statsId, email),
+      fence.field, fence.statsId, fence.ref, JSON.stringify(consent), ASSIST_REMIND_KEEP_SECONDS, due, member, input.session,
+    ]]), 1);
+    const answer = replies?.[0];
+    if (answer === 0) return "closed";
+    if (answer !== 1) throw new UnknownReplyError("a checkout reminder's consent, kept while its store is live");
     return "kept";
   } catch (error) {
     console.error("keeping a checkout reminder's consent failed", error);

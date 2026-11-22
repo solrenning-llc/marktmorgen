@@ -339,6 +339,31 @@ export class MemoryRedis {
           if (members.length) gone += Number(this.run(["DEL", who]));
           return [gone, members.length];
         }
+        // lib/assistant-reminder.ts KEEP_IF_STORE_LIVE: a buyer's yes, its queue member and its erasure index written in
+        // one step only while the store is live and not being erased, by the rule of chat-address-live:v3 below.
+        if (key.startsWith("-- marktmorgen:assist-reminder-keep-live:v1\n") && args[0] === "5" && args.length === 14) {
+          const [, live, erasing, consent, queue, who, field, statsId, ref, value, seconds, due, member, session] = args;
+          if (this.run(["HGET", erasing, field]) !== null) return 0;
+          if (statsId === "") {
+            if (this.run(["GET", live]) !== ref) return 0;
+          } else {
+            const raw = this.run(["GET", live]);
+            if (raw === null) return 0;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -1;
+            }
+            if (!record || typeof record !== "object") return -1;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+          }
+          this.run(["SET", consent, value, "EX", seconds]);
+          this.run(["ZADD", queue, due, member]);
+          this.run(["SADD", who, session]);
+          this.run(["EXPIRE", who, seconds]);
+          return 1;
+        }
         // lib/chat-summary.ts KEEP_ADDRESS_IF_LIVE: a chat address written only while its store is live and not being
         // erased: a store with an id while its id key holds this very ref (argv[3]); a store from before ids (argv[2] its
         // statsId) only while its owner's record still carries that statsId.

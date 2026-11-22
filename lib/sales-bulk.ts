@@ -57,10 +57,19 @@ export async function bulkResend(store: Store, asked: { references: string[]; sk
     if (left < references.length) return { ok: false, error: "emails", left, message: emailsLeftWords(left, references.length) };
   }
   const tally: ResendTally = { asked: references.length + skipped, sent: [], couldNot: [], skipped };
+  // Once the store's hourly counter refused (or could not be read), every later order is refused the same way
+  // without taking its own per-sale counter: none of them could be sent this hour (Codex X6's LEVE on #3543).
+  let storeRefused: "exceeded" | "unknown" | null = null;
   for (const reference of references) {
+    if (storeRefused) {
+      tally.couldNot.push({ reference, why: storeRefused === "exceeded" ? "limited" : "failed" });
+      continue;
+    }
     // The single resend's order: the sale's count first, then the store's (app/api/store/resend/route.ts).
     const saleRoom = await room(deps, "resend-sale", reference, RESEND_PER_SALE_PER_DAY, 24 * 60 * 60);
-    const counted = saleRoom === "within" ? await room(deps, "resend-store", store.sid || store.handle, RESEND_PER_STORE_PER_HOUR, 60 * 60) : saleRoom;
+    const storeRoom = saleRoom === "within" ? await room(deps, "resend-store", store.sid || store.handle, RESEND_PER_STORE_PER_HOUR, 60 * 60) : null;
+    if (storeRoom !== null && storeRoom !== "within") storeRefused = storeRoom;
+    const counted = storeRoom ?? saleRoom;
     if (counted !== "within") {
       tally.couldNot.push({ reference, why: counted === "exceeded" ? "limited" : "failed" });
       continue;

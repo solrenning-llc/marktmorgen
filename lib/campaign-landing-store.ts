@@ -26,6 +26,9 @@ import { MAX_CTA_LABEL, MAX_HEADLINE, MAX_SUBHEADLINE } from "@/lib/sales-page";
 import { type DataStore, DataRoomError, TAKE_DATA, dataKey, monthOf } from "@/lib/store-data";
 import { contentRoomFor, dataBytes, dataFullWords, dataRoomFor } from "@/lib/store-data-rules";
 import { largerPlanFor } from "@/lib/larger-plan";
+import { ERASING_KEY, STORE_ID_PATTERN, ensureStoreId, erasingField, storeIdCommand, storeRef, type Store } from "@/lib/store";
+
+type LandingStore = DataStore & Partial<Pick<Store, "email" | "extra">>;
 
 /** The most campaigns one product keeps a landing for. */
 export const MAX_LANDINGS = 10;
@@ -177,11 +180,14 @@ end`;
 /**
  * Writes a product's landings (ARGV[6], "" to delete them) only over the record that was read (ARGV[5], "" for none),
  * and sets its slot to their size in the same step: answers {4, 0} when they were dropped with their page (KEYS[3]
- * held), {3, 0} when the record changed since it was read, the data room's own answer otherwise ({1, total} written,
+ * held), or the store is gone or erasing (KEYS[4] its own id key, KEYS[5]/ARGV[7] its erasing mark), {3, 0} when the record changed since it was read,
+ * the data room's own answer otherwise ({1, total} written,
  * {0, total} full and nothing written). Modelled by lib/redis-memory.ts.
  */
-export const WRITE_LANDINGS = `-- marktmorgen:landings-write:v2
+export const WRITE_LANDINGS = `-- marktmorgen:landings-write:v3
 ${LANDINGS_ROOM}
+if redis.call('EXISTS', KEYS[4]) ~= 1 then return {4, 0} end
+if redis.call('HEXISTS', KEYS[5], ARGV[7]) ~= 0 then return {4, 0} end
 if redis.call('EXISTS', KEYS[3]) == 1 then return {4, 0} end
 local held = redis.call('GET', KEYS[2])
 if (held or '') ~= ARGV[5] then return {3, 0} end
@@ -206,6 +212,8 @@ return taken`;
 
 /** How many times a change is tried again when another change landed between its read and its write. */
 const WRITE_TRIES = 3;
+/** Two additional script commands per attempt, including all three compare-and-swap retries. */
+export const LANDINGS_FENCE_COMMANDS = 2 * WRITE_TRIES;
 
 /**
  * WRITE_LANDINGS' answer, read exactly: a pipeline of that one script answering {state, total}, the state the number
@@ -237,19 +245,35 @@ export class LandingIdInvalid extends Error {
   }
 }
 
-async function changeLandings(statsId: string, productId: string, room: DataStore, change: (landings: CampaignLanding[]) => CampaignLanding[] | "full" | "same"): Promise<"saved" | "full" | "same"> {
+async function changeLandings(statsId: string, productId: string, room: LandingStore, change: (landings: CampaignLanding[]) => CampaignLanding[] | "full" | "same"): Promise<"saved" | "full" | "same"> {
   // The one gate for writes (Revisor 2, #1947): an id the deletions would not touch is never written either, so a
   // read or a deletion of one answers truthfully that nothing is kept under it.
   if (!LANDING_ID.test(productId)) throw new LandingIdInvalid();
   const key = dataKey(room);
   if (!key || !isRedisConfigured()) throw new LandingsUnreadable();
+  // A bare room is not proof of a live store. Production passes the authenticated store, and the write is fenced on
+  // the store's own id key, checked atomically with TAKE_DATA + SET (WRITE_LANDINGS). A store from before ids is given
+  // its id first (ensureStoreId, once and for good), and only while the store kept under its owner's address is this
+  // very store (the same statsId): its owner's record is not its own key, since the owner's next store is kept under
+  // it once this one is erased (Claude 3 on #4967).
+  if (typeof room.email !== "string" || !room.email || typeof room.sid !== "string") throw new LandingsUnreadable();
+  let sid = room.sid;
+  if (!STORE_ID_PATTERN.test(sid)) {
+    if (room.extra === true) throw new LandingsUnreadable();
+    const named = await ensureStoreId(room.email);
+    if (!named || named.extra || named.statsId !== room.statsId || !STORE_ID_PATTERN.test(named.sid)) throw new LandingsGone();
+    sid = named.sid;
+  }
+  const ref = storeRef({ email: room.email, sid, extra: room.extra === true });
+  const live = storeIdCommand(sid)[1];
+  const field = await erasingField(ref);
   for (let tries = 0; tries < WRITE_TRIES; tries += 1) {
     const { raw, landings } = await readRecord(statsId, productId);
     const next = change(landings);
     if (next === "full" || next === "same") return next;
     const json = next.length ? JSON.stringify(next) : "";
     const now = Date.now();
-    const reply: unknown = await redisPipeline([["EVAL", WRITE_LANDINGS, 3, key, landingKey(statsId, productId), goneKey(statsId, productId), contentRoomFor(room, now / 1000), monthOf(now), LANDING_SLOT(productId), json ? dataBytes([json], 1) : 0, raw ?? "", json]]);
+    const reply: unknown = await redisPipeline([["EVAL", WRITE_LANDINGS, 5, key, landingKey(statsId, productId), goneKey(statsId, productId), live, ERASING_KEY, contentRoomFor(room, now / 1000), monthOf(now), LANDING_SLOT(productId), json ? dataBytes([json], 1) : 0, raw ?? "", json, field]]);
     const receipt = landingsReceipt(reply);
     if (!receipt) throw new LandingsWriteUnconfirmed();
     const { state, total } = receipt;
@@ -263,13 +287,13 @@ async function changeLandings(statsId: string, productId: string, room: DataStor
 }
 
 /** Keeps a campaign's landing, in place of the one it had. "full" when MAX_LANDINGS other campaigns have one. */
-export async function saveLanding(statsId: string, productId: string, landing: CampaignLanding, room: DataStore): Promise<"saved" | "full"> {
+export async function saveLanding(statsId: string, productId: string, landing: CampaignLanding, room: LandingStore): Promise<"saved" | "full"> {
   const done = await changeLandings(statsId, productId, room, (landings) => withLanding(landings, landing) ?? "full");
   return done === "full" ? "full" : "saved";
 }
 
 /** Forgets a campaign's landing; forgetting one that is gone is not an error. */
-export async function removeLanding(statsId: string, productId: string, campaign: string, room: DataStore): Promise<void> {
+export async function removeLanding(statsId: string, productId: string, campaign: string, room: LandingStore): Promise<void> {
   await changeLandings(statsId, productId, room, (landings) => {
     const next = landings.filter((one) => one.campaign !== campaign);
     return next.length === landings.length ? "same" : next;

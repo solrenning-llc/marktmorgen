@@ -24,7 +24,7 @@
 import type { Listing } from "@/lib/store";
 import { formatMoney } from "@/lib/money";
 import { MIN_BUNDLE_ITEMS, heldByABundle } from "@/lib/bundle-rules";
-import { MAX_OPTIONS, OPTION_ID, type ProductOption, optionDelivers } from "@/lib/product-option";
+import { MAX_OPTIONS, OPTION_ID, type ProductOption, optionDelivers, withInvitedOption } from "@/lib/product-option";
 
 export type Bump = {
   /** Another product of the same store. */
@@ -344,10 +344,13 @@ export function parsePlan(raw: unknown): Plan | null {
   return { payments, interval: value.interval, amountCents: value.amountCents };
 }
 
-/** The options a plan has to cover: the ones a buyer is offered (lib/store-checkout.ts, sellableOptions). */
+/**
+ * The options a plan has to cover: the ones a buyer is offered (lib/store-checkout.ts, sellableOptions), so
+ * never one the creator took off sale (642 [WG2]): it needs no payment and never pauses the plan for the rest.
+ */
 function offeredOptions(product: Listing): ProductOption[] {
   const opens = Boolean(product.course || product.podcast || product.shipping);
-  return product.options.filter((option) => optionDelivers(option, opens));
+  return product.options.filter((option) => !option.offSale && optionDelivers(option, opens));
 }
 
 /** The first price on a product with several that its plan does not cover, and why; null when it covers them all. */
@@ -405,6 +408,33 @@ export function activePlan(product: Listing): Plan | null {
 }
 
 /**
+ * The lowest payment of a plan with one payment per price, among the prices
+ * on sale only: what "from $X each" may name. Null when no price on sale has
+ * a payment set (Claude 5 on #2690: an off-sale price's payment is never it).
+ */
+export function lowestPaymentOnSale(plan: Plan, options: ProductOption[]): number | null {
+  const each: number[] = [];
+  for (const option of options) {
+    if (option.offSale) continue;
+    const cents = plan.options?.[option.id];
+    if (typeof cents === "number" && Number.isSafeInteger(cents) && cents > 0) each.push(cents);
+  }
+  return each.length > 0 ? Math.min(...each) : null;
+}
+
+/**
+ * Whether putting this price back on sale stops a payment plan offered now:
+ * the plan has no payment for it, or one that falls short, so planState turns
+ * to "options" or "short" for every price. False when there is no plan, the
+ * plan is paused already, the price is on sale already or the id names none.
+ */
+export function planPausedByRestore(product: Listing, optionId: string): boolean {
+  if (product.options.find((option) => option.id === optionId)?.offSale !== true || activePlan(product) === null) return false;
+  // The same step as an invited member's way in (withInvitedOption): only this price, back on sale.
+  return activePlan(withInvitedOption(product, optionId)) === null;
+}
+
+/**
  * The plan for the price the buyer picked: on a product with one price, the
  * plan itself; on one with several, the same payments at that price's amount.
  * Null when there is no plan, or the id names no price the plan covers.
@@ -413,7 +443,9 @@ export function planFor(product: Listing, optionId: string | null): Plan | null 
   const plan = activePlan(product);
   if (!plan) return null;
   if (product.options.length === 0) return { payments: plan.payments, interval: plan.interval, amountCents: plan.amountCents };
-  const cents = optionId ? plan.options?.[optionId] : undefined;
+  // Only a price on sale: one taken off sale keeps no plan, whatever payment was saved for it.
+  if (!optionId || !offeredOptions(product).some((option) => option.id === optionId)) return null;
+  const cents = plan.options?.[optionId];
   return cents ? { payments: plan.payments, interval: plan.interval, amountCents: cents } : null;
 }
 

@@ -12,11 +12,15 @@
  *   - in the answers written for HC1, every button or screen named in quotes
  *     is in the code of the screens it explains;
  *   - the help page lists every area, each link going to an answer that is on
- *     the page and saying the area and the question.
+ *     the page and saying the area and the question;
+ *   - each answer links to the studio screen it explains and to the area's
+ *     feature page (HC1 item 3), and both addresses are real.
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { AREAS_WITHOUT_HELP, HELP_AREAS, NOT_AREAS } from "@/lib/help-areas";
+import { AREAS_WITHOUT_HELP, HELP_AREAS, NOT_AREAS, answerLinks } from "@/lib/help-areas";
+import { FEATURE_PAGES } from "@/lib/feature-pages";
+import { webhookBeginnerQuestions } from "@/lib/webhook-faq";
 import { HELP_SECTIONS, answerId } from "@/lib/help-content";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -85,10 +89,13 @@ part("The help page lists every area");
 {
   const html = renderToStaticMarkup(createElement(HelpPage));
   const nav = html.slice(html.indexOf("data-help-areas"), html.indexOf("</nav>", html.indexOf("data-help-areas")));
-  const links = [...nav.matchAll(/<a href="#([^"]+)"[^>]*><span[^>]*>([^<]+)<\/span><span[^>]*>([^<]+)<\/span><\/a>/g)];
+  const links = [...nav.matchAll(/<a href="#([^"]+)"[^>]*>(<svg[\s\S]*?<\/svg>)<span[^>]*><span[^>]*>([^<]+)<\/span><span[^>]*>([^<]+)<\/span><\/span><\/a>/g)].map((m) => [m[0], m[1], m[3], m[4], m[2]]);
   is("one link per area", links.length, HELP_AREAS.length);
   is("every link goes to an answer on the page", links.filter((l) => !html.includes(`id="${l[1]}"`)).map((l) => l[1]), []);
   is("every link says its area and a question", links.every((l) => l[2].length > 2 && l[3].endsWith("?")), true);
+  is("each icon is decorative, the name says it all", links.every((l) => /aria-hidden="true"/.test(l[4]) && !/<title/.test(l[4])), true);
+  is("no two areas share an icon (HC1: no repeated image)", HELP_AREAS.map((a) => a.icon).filter((icon, i, all) => all.indexOf(icon) !== i), []);
+  is("no two cards draw the same picture", links.map((l) => l[4].replace(/class="[^"]*"/, "")).filter((svg, i, all) => all.indexOf(svg) !== i).length, 0);
   is("the list has its own heading", /<h2 id="help-areas-title"[^>]*>Help for each part of your studio<\/h2>/.test(html), true);
 }
 
@@ -104,6 +111,7 @@ part("Names quoted in the answers written for HC1 are on the screens");
     "what-is-your-path-and-how-do-i-start-it": ["components/studio-header.tsx", "components/path-studio-reminder.tsx", "app/studio/path/page.tsx", "components/path-onboarding.tsx", "lib/path-checkout.ts"],
     "how-do-i-choose-a-growth-goal-and-see-what-to-do-next": ["app/studio/page.tsx", "components/studio-tools.tsx", "app/studio/growth/page.tsx", "lib/growth-plan.ts", "components/template-library.tsx"],
     "how-do-i-approve-changes-my-ai-assistant-prepared": ["app/studio/agent/page.tsx", "components/agent-proposals.tsx", "app/developers/page.tsx"],
+    "can-i-connect-zapier-make-or-my-own-server": ["components/webhook-editor.tsx"],
     "how-do-i-keep-my-busy-times-out-of-the-team-calls-i-host": ["app/studio/page.tsx", "components/studio-tools.tsx", "components/team-event-editor.tsx", "app/studio/calendar/page.tsx", "components/host-calendar.tsx"],
     // The owner's alert emails (601 [KB22] U6, #3013): its screen had no help (Claude 4's review of #3013, MEDIUM).
     "how-do-i-choose-which-alert-emails-i-get": ["app/studio/page.tsx", "app/studio/notifications/page.tsx", "components/notify-prefs-panel.tsx", "lib/notify-prefs-rules.ts"],
@@ -118,6 +126,45 @@ part("Names quoted in the answers written for HC1 are on the screens");
     const onScreen = (q: string) => new RegExp(`(?<![A-Za-z0-9_])${escape(q)}(?![A-Za-z0-9_])`).test(code);
     is(`${id}: every quoted name is in its screens`, quoted.filter((q) => !onScreen(q)), []);
   }
+}
+
+part("Each area's answer links to its studio screen and its feature page");
+{
+  for (const area of HELP_AREAS) {
+    const screen = existsSync(join("app/studio", area.folder, "page.tsx"));
+    is(`${area.folder}: marked without a screen exactly when /studio/${area.folder} has no page`, area.noScreen === true, !screen);
+    if (!area.feature) continue;
+    const page = FEATURE_PAGES.find((p) => p.slug === area.feature);
+    is(`${area.folder}: /platform/${area.feature} is a feature page`, Boolean(page), true);
+    is(`${area.folder}: /platform/${area.feature} speaks of the area`, JSON.stringify(page ?? {}).toLowerCase().includes(area.mentions.toLowerCase()), true);
+  }
+  const several = answerLinks("can-i-run-more-than-one-store-or-have-someone-help-me");
+  is("an answer for three areas links to each of their screens", several.studio.map((l) => l.href).sort(), ["/studio/new", "/studio/team", "/studio/totals"]);
+  is("and to one feature page, once", several.features, [{ href: "/platform/teams-and-stores", label: "Read the \u201cTeam\u201d feature page" }]);
+  is("the studio link says the area by name", several.studio.find((l) => l.href === "/studio/team")?.label, "Open \u201cTeam\u201d in your studio");
+  const course = answerLinks("can-i-sell-a-course");
+  is("an area with no screen of its own gets no studio link", course.studio, []);
+  is("but keeps its feature page", course.features.map((l) => l.href), ["/platform/courses"]);
+  const elsewhere = [...answers.keys()].find((id) => !HELP_AREAS.some((area) => area.answer === id)) ?? "";
+  is("an answer that is no area's main one", answerLinks(elsewhere), { studio: [], features: [] });
+  const everyLink = HELP_AREAS.flatMap((area) => { const l = answerLinks(area.answer); return [...l.studio, ...l.features]; });
+  is("every studio link opens a real screen", everyLink.filter((l) => l.href.startsWith("/studio/") && !existsSync(join("app", l.href, "page.tsx"))), []);
+}
+
+part("The webhook answer says what the feature page says");
+{
+  const id = "can-i-connect-zapier-make-or-my-own-server";
+  const item = HELP_SECTIONS.flatMap((section) => section.items).find((i) => answerId(i.q) === id);
+  const faq = webhookBeginnerQuestions().map((q) => q.a);
+  is("it opens with what a webhook is, in the feature page's words", item?.a[0], `With a webhook: an${faq[0].slice(2)}`);
+  is("then how to add one, word for word", item?.a[1], faq[1]);
+  is("then Zapier, word for word after its first words", [item?.a[2].startsWith("Zapier works through "), item?.a[2].slice("Zapier works through ".length)], [true, faq[3].slice("Yes, through ".length)]);
+  const kept = Number(/export const LOG_SIZE = (\d+);/.exec(readFileSync("lib/webhooks.ts", "utf8"))?.[1]);
+  is("the deliveries it says the studio lists are the ones it keeps", item?.a[3].includes(`up to ${kept}, each kept for a week`), true);
+  is("and the studio says a week too", readFileSync("components/webhook-editor.tsx", "utf8").includes("Deliveries are kept for a week, the last 50 at most."), kept === 50);
+  is("there is no second webhook answer with a new help address", answers.has("how-do-i-tell-zapier-make-or-my-own-server-when-something-happens-in-my-store"), false);
+  const developerPages = ["app/developers/page.tsx", "app/developers/checkout-script/page.tsx"].map((file) => readFileSync(file, "utf8"));
+  is("both developers pages keep linking to the established help address", developerPages.every((source) => source.includes(`/help#${id}`)), true);
 }
 
 done();

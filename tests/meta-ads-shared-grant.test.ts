@@ -187,6 +187,13 @@ async function main(): Promise<void> {
   is("it says when the permission goes back", editor.includes("Gives the permission back to Meta only when we can confirm no other store uses this Meta login."), true);
   is("the privacy policy never promises an unconditional give-back", /disconnects from the studio, we give the permission back to Meta and delete/.test(privacy), false);
   is("it says the permission is kept while another store may use the same login", /unless another store still uses the same Meta login, or we cannot confirm that none does/.test(privacy), true);
+  // Triple audit, 4th batch (C1-20261122-0146-TODOS-8, VR item 2): the public help center made the same
+  // unconditional promise, and so did the route's own comment.
+  const help = flat(readFileSync("lib/help-content.ts", "utf8"));
+  const route = flat(readFileSync("app/api/integrations/meta/disconnect/route.ts", "utf8"));
+  is("the help center never promises an unconditional give-back", /Disconnecting gives the permission back to Meta and deletes/.test(help), false);
+  is("it says when the permission goes back", help.includes("Disconnecting deletes what was read and gives the permission back to Meta only when we can confirm no other store uses this Meta login; what you typed stays."), true);
+  is("the disconnect route's comment says the same condition", [/gives the permission back \(lib\/meta-routes\.ts\)/.test(route), route.includes("only when no other store is confirmed to use the same Meta login")], [false, true]);
 
   done();
 }

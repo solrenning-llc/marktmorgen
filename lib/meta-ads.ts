@@ -29,7 +29,7 @@
  * about anybody who saw or clicked an ad is asked for. Every call carries
  * appsecret_proof, so a token on its own is of no use to anyone else.
  *
- * Disconnecting gives the permission back (DELETE /me/permissions), so access
+ * Disconnecting gives the permission back (DELETE /me/permissions) when it can, so access
  * ends on Meta's side too, and deletes the connection and every line read
  * from it. Meta's notice that the person removed the app does the same.
  * DELETE /me/permissions ends the person's whole grant to the app, for every
@@ -656,7 +656,7 @@ export type MetaDisconnected = { account: MetaAccount | null; metaAccess: "remov
 
 /**
  * Disconnects: forgets the connection and every line read, then gives the permission back to Meta,
- * unless another store is still connected with the same Meta login (issue #4011, ALL-160).
+ * unless another store is still connected with the same Meta login or that cannot be confirmed (issue #4011, ALL-160).
  */
 export async function disconnectMeta(statsId: string): Promise<MetaDisconnected | false> {
   // Redis not configured is not "not connected" (Codex U on #2924): the route would say "disconnected" with the

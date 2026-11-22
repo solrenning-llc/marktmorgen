@@ -554,7 +554,9 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       // On the store's turn only (lib/review-proof.ts, REVIEW_REFUND_PASS_EVERY_SECONDS): a turn taken is held, so the
       // pass never runs more often than its line prices (tests/plan-cost-registry.ts, review-refund-sweep). The rest
       // of the store's sweep (its revocations, reminders and confirmations) keeps its five-minute run.
-      if (await takeReviewPass(store)) counts.unrated += await markRefundedReviews(store, deadline);
+      // Within the run's time only, as the certificates' pass (9th triple audit on #5100, point 4): a turn is never
+      // taken for a pass that would end at once.
+      if (Date.now() < deadline && (await takeReviewPass(store))) counts.unrated += await markRefundedReviews(store, deadline);
     } catch (error) {
       console.error("reading a store's refunds for reviews failed", store.handle, error);
     }

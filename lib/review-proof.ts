@@ -44,6 +44,7 @@ import { REVIEW_STORES_KEY, ReviewStoreGoneError, markRefunded } from "@/lib/rev
 import { storeLiveFence } from "@/lib/store-live-cache";
 import { type FencedCommand, writeIfStoreLive } from "@/lib/live-fence";
 import { refreshStoreQuotes } from "@/lib/store-quotes";
+import type { Tier } from "@/lib/plan";
 import type { Listing, Store } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
@@ -336,11 +337,39 @@ export function readDoor(get: (name: string) => string): Door | null {
 // ---------------------------------------------------------------- refunds
 
 const REFUND_LOOKBACK_SECONDS = 30 * 86_400;
+/**
+ * Refund rows a store's passes may handle in a calendar month, by its plan: a ceiling of what the pass may spend,
+ * priced in tests/plan-cost-registry.ts (review-refund-sweep), as the certificates' pass has (lib/certificate-refunds.ts,
+ * CERTIFICATE_REFUND_CHECKS_PER_MONTH; 9th triple audit on #5100, point 2). Every row not handled yet counts, with a
+ * review or without, a payment's second part included; past it the pass stops where it is, keeps its place and goes
+ * on next month: nothing is skipped. Several times the plan's orders: refunds are fewer than orders, a refund in parts
+ * gives one row a part, and the lost disputes read with the first page (LOST_DISPUTE_PAGES of 100) count too, so a
+ * healthy pass over several runs is never held. A store whose plan reads in no known way is held to the smallest.
+ */
+export const REVIEW_REFUND_ROWS_PER_MONTH: Readonly<Record<Tier, number>> = { creator: 1_000, pro: 2_000, scale: 5_000 };
 /** Pages of refunds (100 each) one pass reads from the creator's account, at the most. */
 export const REVIEW_REFUND_PAGES = 3;
 const REFUND_PAGES = REVIEW_REFUND_PAGES;
 const anchorKey = (statsId: string) => `nl:rev:refunds:since:${statsId}`;
 const seenKey = (statsId: string) => `nl:rev:refunds:seen:${statsId}`;
+/** The rows handled in a calendar month (REVIEW_REFUND_ROWS_PER_MONTH), kept forty days. */
+const rowsKey = (statsId: string, month: string) => `nl:rev:refunds:rows:${statsId}:${month}`;
+const monthOf = () => new Date(Date.now()).toISOString().slice(0, 7);
+/** The store's rows of the month by its plan; the smallest for a plan read in no known way. */
+function rowsCeiling(store: Store): number {
+  const tier = store.tier as unknown;
+  return tier === "pro" || tier === "scale" ? REVIEW_REFUND_ROWS_PER_MONTH[tier] : REVIEW_REFUND_ROWS_PER_MONTH.creator;
+}
+/**
+ * Adds `n` rows to the month's count, kept forty days, each reply read exactly: the count after it. Anything else is
+ * unknown (UnknownReplyError): the page is not handled this run, and its place keeps.
+ */
+async function countRows(statsId: string, n: number): Promise<number> {
+  const replies = repliesFor(await redisPipeline([["INCRBY", rowsKey(statsId, monthOf()), n], ["EXPIRE", rowsKey(statsId, monthOf()), 40 * 86_400]]), 2);
+  const count = replies ? countOf(replies[0]) : null;
+  if (count === null || countOf(replies?.[1]) !== 1) throw new UnknownReplyError("the refund rows handled this month");
+  return count;
+}
 /**
  * How often a store's pass runs, at the most: its turn is taken with one SET NX EX held this long (takeReviewPass), as
  * the certificates' pass does (lib/certificate-refunds.ts). Before 22/11/2026 the pass ran on every run of the
@@ -464,37 +493,71 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       const full = [...(lost?.rows ?? []), ...refunds]
         .filter((refund) => typeof refund.id === "string" && refund.id && rowGivesBack(refund))
         .map((refund) => ({ id: refund.id as string, created: typeof refund.created === "number" ? refund.created : 0, pi: idOf(refund.payment_intent) }));
-      // Which of them an earlier pass already took, in one command for the page (SMISMEMBER), read exactly: one flag
-      // a row, each 0 or 1; anything else is unknown, and the page is not handled this run (its anchor keeps).
-      const flags = full.length ? repliesFor(await redisPipeline([["SMISMEMBER", seenKey(statsId), ...full.map((refund) => refund.id)]]), 1)?.[0] : [];
-      if (!Array.isArray(flags) || flags.length !== full.length || !flags.every((flag) => countOf(flag) === 0 || countOf(flag) === 1)) {
+      // Which of them an earlier pass already took, and which payments it already marked, in one command for the
+      // page (SMISMEMBER: the rows' ids, then the payments' ids), read exactly: one flag each, 0 or 1; anything else
+      // is unknown, and the page is not handled this run (its anchor keeps). A payment refunded in parts gives one
+      // row a part, each with the charge refunded: its reviews are marked with the first row handled, and the rows
+      // after it are only taken as seen (9th triple audit on #5100, point 1).
+      const pis = [...new Set(full.map((refund) => refund.pi).filter((pi) => INTENT_ID.test(pi)))];
+      const asked = [...full.map((refund) => refund.id), ...pis];
+      const flags = asked.length ? repliesFor(await redisPipeline([["SMISMEMBER", seenKey(statsId), ...asked]]), 1)?.[0] : [];
+      if (!Array.isArray(flags) || flags.length !== asked.length || !flags.every((flag) => countOf(flag) === 0 || countOf(flag) === 1)) {
         throw new UnknownReplyError("which of the refunds' rows were already read");
       }
       const seen = flags as unknown[];
+      const paymentSeen = new Set(pis.filter((_, i) => countOf(seen[full.length + i]) === 1));
+      const unseen = full.filter((_, i) => countOf(seen[i]) !== 1);
+      // The month's rows (REVIEW_REFUND_ROWS_PER_MONTH), taken for the page's rows not handled yet before any is:
+      // past the ceiling only what was left of it is handled, oldest first, the place keeps (unsure) and the pass
+      // ends here; the rest waits for next month. Nothing is skipped.
+      let allowed = unseen.length;
+      let spent = false;
+      if (unseen.length > 0) {
+        const ceiling = rowsCeiling(store);
+        const after = await countRows(statsId, unseen.length);
+        if (after > ceiling) {
+          allowed = Math.max(0, ceiling - (after - unseen.length));
+          spent = true;
+          console.error(`reviews' refund pass: a store's rows of the month are spent (${ceiling}); the rest waits for next month`, store.handle);
+        }
+      }
+      // The rows handled this run: every one not handled yet, or, past the ceiling, the oldest of them (the page
+      // reads newest first) up to what was left.
+      const kept = allowed >= unseen.length ? unseen : allowed > 0 ? unseen.slice(unseen.length - allowed) : [];
+      const handled = new Set(kept.map((refund) => refund.id));
       for (const [i, refund] of full.entries()) {
-        if (countOf(seen[i]) !== 1) {
-          if (INTENT_ID.test(refund.pi)) {
-            try {
-              marked += await markRefunded(statsId, refund.pi, fence);
-            } catch (error) {
-              if (!(error instanceof ReviewStoreGoneError)) throw error;
-              gone = true;
-              break;
-            }
-          }
-          // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
-          // Written only while the store is live: gone meanwhile, the pass stops here.
-          if (!(await writeWhileLive([
-            ["SADD", seenKey(statsId), refund.id],
-            ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
-          ]))) {
+        if (countOf(seen[i]) === 1) {
+          newest = Math.max(newest, refund.created);
+          continue;
+        }
+        if (!handled.has(refund.id)) continue;
+        const payment = INTENT_ID.test(refund.pi) && !paymentSeen.has(refund.pi);
+        if (payment) {
+          try {
+            marked += await markRefunded(statsId, refund.pi, fence);
+          } catch (error) {
+            if (!(error instanceof ReviewStoreGoneError)) throw error;
             gone = true;
             break;
           }
+          paymentSeen.add(refund.pi);
+        }
+        // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
+        // Written only while the store is live: gone meanwhile, the pass stops here.
+        if (!(await writeWhileLive([
+          ["SADD", seenKey(statsId), refund.id, ...(payment ? [refund.pi] : [])],
+          ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
+        ]))) {
+          gone = true;
+          break;
         }
         newest = Math.max(newest, refund.created);
       }
       if (gone) break;
+      if (spent) {
+        unsure = true;
+        break;
+      }
       if (!listed.hasMore) {
         complete = true;
         break;

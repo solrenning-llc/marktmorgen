@@ -16,9 +16,10 @@ import {reviewedReceivingTaxInput} from './reviewed-receiving-fixture';
 import {syntheticTaxContext} from './customer-tax-review-fixture';
 import {netOf} from './plan-cost-model';
 import {worstMonthKept} from './worst-month-kept';
+import {onDemandReport,onDemandText} from './generated-on-demand';
 
 test('the dated report holds the worst month each plan keeps under the LC reading, exactly (Claude 4 LOW on #4854)',()=>{
- const doc=readFileSync('docs/margin-alignment-2026-10-18.md','utf8');
+ const doc=renderMarginAlignment(PLANS_ON_SALE,ASSISTANT_ON_SALE); // generated on demand (owner, 20/11/2026)
  for(const cycle of ['month','year'] as const){
   const label=cycle==='month'?'Monthly plan':'A month of a yearly plan';
   const row=['',label,...worstMonthKept(cycle).map((v)=>'US$'+v),''].join(' | ').trim();
@@ -28,7 +29,7 @@ test('the dated report holds the worst month each plan keeps under the LC readin
 test('the report uses the TX reading and matches its reproducible figures',()=>{
  const generated=renderMarginAlignment(PLANS_ON_SALE,ASSISTANT_ON_SALE);
  assert.ok(generated.startsWith(CURRENT_TAX_NOTICE));
- assert.equal(readFileSync('docs/margin-alignment-2026-10-18.md','utf8'),generated);
+ assert.equal(readFileSync('docs/margin-alignment-2026-10-18.md','utf8'),onDemandText(onDemandReport('docs/margin-alignment-2026-10-18.md')),'the path holds only its fixed text: the report is generated on demand');
  // Owner, 19 November 2026: the legally correct reading only; the old 27.5% floor, the most-tax reading and ISS are gone.
  assert.doesNotMatch(generated,/Binding reading: most-tax|78\.18%|ISS ?5%|most onerous/);
 });

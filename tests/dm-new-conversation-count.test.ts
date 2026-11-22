@@ -61,7 +61,7 @@ async function main(): Promise<void> {
     ["SET", `nl:cm:${cid}:ok:${emailKey(SENDER)}`, JSON.stringify({ v: 1, ok: true })],
     // Since #3395 the doors read what a member holds once (lib/community-access.ts holdingsOf, `:h:`): the same answer, kept.
     ["SET", `nl:cm:${cid}:h:${emailKey(SENDER)}`, JSON.stringify({ v: (await readConfig(cid))!.v, ids: [ticket.product.id], held: [ticket.product.id] })],
-    ["HSET", members, senderKey, JSON.stringify({ k: senderKey, e: SENDER, n: "Sender", h: "sender", dir: true, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] } satisfies Member)],
+    ["HSET", members, senderKey, JSON.stringify({ k: senderKey, e: SENDER, n: "Sender", h: "sender", dir: true, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [] } satisfies Member)],
   ]);
   const pass = await mintPass(club, SENDER, "all");
   const cookie = `${passCookieName(club)}=${pass}`;
@@ -86,7 +86,7 @@ async function main(): Promise<void> {
   }
   const OTHER = "other@huntdmnew.example";
   const otherKey = memberKey(OTHER);
-  await redis.pipeline([["HSET", members, otherKey, JSON.stringify({ k: otherKey, e: OTHER, n: "Other", h: "other", dir: true, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] } satisfies Member)]]);
+  await redis.pipeline([["HSET", members, otherKey, JSON.stringify({ k: otherKey, e: OTHER, n: "Other", h: "other", dir: true, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [] } satisfies Member)]]);
   const first = await sendTo(otherKey);
   is("the day's first new conversation is not refused as slow", first.includes("n=slow"), false);
   is("it arrives as a request", (await requestsOf(otherKey)) === 1 && first.includes("n=dmasked"), true);

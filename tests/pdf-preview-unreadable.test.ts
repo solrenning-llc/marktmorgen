@@ -18,8 +18,8 @@
  */
 import { NextRequest } from "next/server";
 import { PDFDocument } from "pdf-lib";
-import { addProduct, claimHandle, ensureStatsId, setProductFile, setProductPreview, setStripeAccount, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
-import { dataUsed, noteData } from "@/lib/store-data";
+import { addProduct, claimHandle, closeStoreRecord, ensureStatsId, ERASING_KEY, erasingField, setProductFile, setProductPreview, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { dataKey, dataUsed, noteData } from "@/lib/store-data";
 import { problemKey, stampProblems } from "@/lib/pdf-stamp";
 import type { ProductFile } from "@/lib/product-file";
 import { previewKey } from "@/lib/pdf-preview";
@@ -48,7 +48,7 @@ async function encryptedPdf(): Promise<Uint8Array> {
 }
 
 let made = 0;
-async function product(name: string, pdf: Uint8Array): Promise<{ id: string; file: ProductFile }> {
+async function product(name: string, pdf: Uint8Array, fileName?: string): Promise<{ id: string; file: ProductFile }> {
   const added = await addProduct(OWNER, name, `${name}, synthetic`, "12");
   if (!added.ok) throw new Error(`product: ${JSON.stringify(added)}`);
   const id = added.product.id;
@@ -56,7 +56,7 @@ async function product(name: string, pdf: Uint8Array): Promise<{ id: string; fil
   made += 1;
   const pathname = `stores/${folder}/${id}/book-${made}.pdf`;
   files.set(pathname, { bytes: pdf, contentType: "application/pdf" });
-  const file: ProductFile = { pathname, name: `book-${made}.pdf`, bytes: pdf.byteLength, contentType: "application/pdf", addedAt: "2026-11-01T00:00:00.000Z" };
+  const file: ProductFile = { pathname, name: fileName ?? `book-${made}.pdf`, bytes: pdf.byteLength, contentType: "application/pdf", addedAt: "2026-11-01T00:00:00.000Z" };
   const set = await setProductFile(OWNER, id, file);
   if (!set.ok) throw new Error(`file: ${JSON.stringify(set)}`);
   const pv = await setProductPreview(OWNER, id, 3);
@@ -152,9 +152,9 @@ async function main(): Promise<void> {
   is("or took any room", (await used()) - roomFresh, 0);
   const room = await tampered((commands) => commands.length === 1 && commands[0][0] === "HMGET" && commands[0][2] === "#", () => [["x", null]], () => ask(fresh.id));
   is("an unknown count of the store's room is refused before the PDF is read", [room.result, room.picked >= 1, blobReads.get(fresh.file.pathname) ?? 0], [404, true, 0]);
-  const record = await tampered((commands) => commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:preview:"), () => ["QUEUED"], () => ask(fresh.id));
+  const record = await tampered((commands) => commands.length === 1 && ((commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:preview:")) || (commands[0][0] === "EVAL" && String(commands[0][5]).startsWith("nl:preview:"))), () => ["QUEUED"], () => ask(fresh.id));
   is("an unknown answer to keeping the record is not taken as kept", [record.result, record.picked], [404, 1]);
-  // The stub ran that SET before its answer was replaced, so the record is there: the next request is served from it.
+  // The stub ran the keeper before its answer was replaced, so the record is there: the next request is served from it.
   is("with no unknown reply, the same product is served (control)", await ask(fresh.id), 200);
   is("from the record, without reading the PDF again", [await ask(fresh.id), blobReads.get(fresh.file.pathname)], [200, 1]);
   const noted = await product("Noted ebook", await readablePdf());
@@ -170,6 +170,57 @@ async function main(): Promise<void> {
   await noteData(store, [{ slot: "r30-fill", bytes: left.room }]);
   is("no preview right now", await ask(full.id), 404);
   is("and the PDF is not read", blobReads.get(full.file.pathname) ?? 0, 0);
+
+  // The account-move cases (an old owner ref writing after a move) belong to #5010 row 17 (lib/store-live-cache.ts v3).
+  for (const state of ["live", "erasing", "closed"] as const) {
+    part(`A final preview record at the store boundary: ${state}`);
+    redis.clear();
+    files.clear();
+    await claimHandle(OWNER, HANDLE, "R30 Preview", "");
+    await ensureStatsId(OWNER);
+    await setStripeAccount(OWNER, "acct_1R30Preview01", true);
+    await setSubscription(OWNER, { customerId: "cus_R30Preview", subscriptionId: "sub_R30Preview", active: true, period: paidPeriod() });
+    const parent = (await storeForEmail(OWNER))!;
+    const personalName = "Rosa Vale private workbook.pdf";
+    const privateLabel = "Rosa Vale private workbook";
+    const f = await product("Personal preview fixture", await readablePdf(), personalName);
+    const key = previewKey(f.file, 3);
+    const pipeline = redis.pipeline.bind(redis);
+    let hits = 0;
+    redis.pipeline = async (commands) => {
+      const final = commands.some((c) => (c[0] === "SET" && c[1] === key) || (c[0] === "EVAL" && c[5] === key));
+      if (!hits && final) {
+        hits++;
+        const current = parent;
+        if (state === "closed") {
+          is("the real store close deletes this preview and its room", await closeStoreRecord(current, [key, dataKey(current)!]), true);
+          files.clear(); // The file-store double stands for the completed folder cleanup.
+        } else if (state === "erasing") {
+          await pipeline([["HSET", ERASING_KEY, await erasingField(storeRef(current)), String(Date.now())], ["DEL", key, dataKey(current)!]]);
+          files.clear(); // This record's family and its already-created copy have been visited by the walk.
+        }
+      }
+      return pipeline(commands);
+    };
+    let status: number;
+    try { status = await ask(f.id); }
+    finally { redis.pipeline = pipeline; }
+    is("the real route reached its final preview write exactly once", hits, 1);
+    const kept = (await pipeline([["GET", key]]))[0];
+    if (state === "live") {
+      is("the live route serves and keeps its preview name", [status, typeof kept === "string" && kept.includes(privateLabel)], [200, true]);
+    } else {
+      is("the stale/erased request is refused, with no retained preview record", [status, kept], [404, null]);
+      if (state === "erasing") {
+        const finishing = await storeForEmail(OWNER);
+        if (!finishing) throw new Error("closing fixture missing");
+        // Its record family was already visited; final close does not delete this preview a second time.
+        is("the real final close completes", await closeStoreRecord(finishing), true);
+        is("no personal preview name survives final closure", (await pipeline([["GET", key]]))[0], null);
+      }
+    }
+  }
+
   done();
 }
 

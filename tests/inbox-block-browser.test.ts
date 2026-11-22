@@ -7,7 +7,7 @@
  *   says it is checking; what it cannot read is said as not known, with
  *   "Check again", never as "not blocked".
  * - Not blocked: "Block this person" opens a short form with the creator's own
- *   note (only they see it) and says what still reaches them; Block sends the
+ *   note (they, their team and, in a copy of their data, the person see it) and says what still reaches them; Block sends the
  *   conversation and the note, and the result is said in a live region.
  * - Blocked: it says so, shows the note, and "Let them write again" undoes it.
  * - Every button and the summary carry min-h-11 (44 px, 2.5.5); the page's
@@ -60,6 +60,7 @@ try {
   await until(page,()=>Boolean(document.querySelector('summary')));
   out.openText=await text(page);
   out.noteLabel=await page.evaluate(()=>document.querySelector('[data-inbox-block] label')?.textContent??'');
+  out.noteHint=await page.evaluate(()=>{const input=document.querySelector('[data-inbox-block] label input');const id=input?.getAttribute('aria-describedby');return id?document.getElementById(id)?.textContent??'':'';});
   await press(page,'summary');
   out.heights=await tall(page);
   await page.fill('[data-inbox-block] input','Insults in every message',{timeout:5000}).catch(()=>null);
@@ -213,6 +214,7 @@ const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module",
   refused: string;
   refusedSeen: boolean;
   noteLabel: string;
+  noteHint: string;
   refusedText: string;
   focusAfterBlock: string;
   focusAfterUnblock: string;
@@ -246,7 +248,11 @@ is("not known: said so, never as not blocked", [result.unknownText.includes("cou
 is("checked again on request", [result.secondText.includes("Spam"), result.secondCalls.length], [true, 2]);
 is("a refused block is said", result.refused.length > 0, true);
 is("review: a refusal is seen on the screen, not only heard", result.refusedSeen, true);
-is("review: the note's label says the team sees it too", /only you and your team see it/.test(result.noteLabel), true);
+is("the note's label is short", result.noteLabel.trim(), "Your note (optional)");
+is("its hint, tied to the field, says the team sees it", /You and your team see it/.test(result.noteHint), true);
+// Codex X6 on #3839: the note is in the person's copy of their data, and deleting the person keeps the block.
+is("the note's hint says the person can see it in a copy of their data", /sees it too if they ask for a copy of their data/.test(result.noteHint), true);
+is("and that a deletion deletes the note and keeps the block", /the note is deleted and the block stays/.test(result.noteHint), true);
 is("review of #3840: after Block, the focus is on Let them write again", result.focusAfterBlock, "BUTTON:Let them write again");
 is("after Let them write again, the focus is on the summary", result.focusAfterUnblock, "SUMMARY:Block this person");
 is("after Check again, the focus is on what replaced it", result.focusAfterCheck, "SUMMARY:Block this person");

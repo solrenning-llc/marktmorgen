@@ -828,6 +828,15 @@ export class MemoryRedis {
           this.run(["HSET", list, mark, entry]);
           return 1;
         }
+        // lib/buyer-block.ts FORGET_REASON_LUA: a block's reason erased, the block kept, only while it is there.
+        if (key.startsWith("-- marktmorgen:buyer-block-forget:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, list, mark, entry] = args;
+          const old = this.run(["HGET", list, mark]);
+          if (old === null || old === undefined) return 0;
+          if (old === entry) return 0;
+          this.run(["HSET", list, mark, entry]);
+          return 1;
+        }
         // lib/buyer-block.ts UNBLOCK_LUA: the block and its fixed data-room charge leave together.
         if (key.startsWith("-- marktmorgen:buyer-unblock:v1\n") && args[0] === "2" && args.length === 6) {
           const [, list, room, mark, slot, rawBytes] = args;

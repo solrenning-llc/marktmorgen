@@ -5,7 +5,7 @@
  * the list cannot be read; a buyer's report of a problem with an order and
  * the withdrawal notice still reach the creator; only an HMAC of the address
  * is kept, per store; the studio's inbox route blocks, says why and unblocks;
- * deleting the person removes their entry. Synthetic stores, in-memory Redis.
+ * deleting the person erases the reason and keeps the block. Synthetic stores, in-memory Redis.
  */
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
@@ -141,9 +141,10 @@ async function main(): Promise<void> {
 
   part("Deleting the person");
   await redis.pipeline([["DEL", blockKey(store.sid!)]]);
-  await blockPerson(store, RUDE, "");
-  is("their entry is removed", [await forgetBlockedPerson(store, RUDE), await blockedState(store, RUDE)], [1, { blocked: false }]);
-  is("nothing left to remove", await forgetBlockedPerson(store, RUDE), 0);
+  await blockPerson(store, RUDE, "spam");
+  // The reason goes; the block stays (Codex X6 on #3839, tests/buyer-block-erasure-copy.test.ts).
+  is("their reason is erased, the block kept", [await forgetBlockedPerson(store, RUDE, 1_800_000_000_000), await blockedState(store, RUDE)], [1, { blocked: true, reason: "", at: 1_800_000_000_000 }]);
+  is("nothing left to erase", await forgetBlockedPerson(store, RUDE), 0);
 
   done();
 }

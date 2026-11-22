@@ -29,6 +29,7 @@
  */
 import { windowCount, windowCountOf } from "@/lib/window-count";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 type HeaderSource = { headers: Headers };
 
@@ -126,8 +127,11 @@ async function sha256Hex(value: string): Promise<string> {
  * address is kept in the clear. When Redis cannot be asked (it throws) the
  * answer is yes: these limits keep abuse down, and a buyer must never be
  * kept from paying because a counter was out of reach. A reply that did come
- * back in another shape is an unknown count and the answer is no (SG2 17,
- * Claude 1's decision of 05/11/2026). Work that spends money uses
+ * back in another shape is an unknown count (SG2 17, Claude 1's decision of
+ * 05/11/2026): never room and never past the limit, so withinLimit throws
+ * UnknownReplyError and its caller says it could not check just now, never
+ * "too many" (rule 24; follow-up of #2971). A caller that answers it in its
+ * own words reads it with `.catch(unknownLimit)`. Work that spends money uses
  * withinEssentialLimit, which says no on both.
  */
 /** Essential authenticated actions need a confirmed finite allowance before
@@ -216,13 +220,45 @@ export async function withinLimit(scope: string, who: string, limit: number, win
   try {
     const key = await limitKey(scope, who);
     reply = await redisPipeline(windowCount(key, windowSeconds));
-  } catch {
+  } catch (error) {
+    // Redis answered in another shape (lib/redis.ts, UnknownReplyError): an unknown count, never room (SG2 17).
+    if (error instanceof UnknownReplyError) return false;
     // Redis could not be asked: open, so a buyer is never kept from paying by a counter out of reach.
     return true;
   }
   // A reply that came back in another shape, or that cannot even be looked at, is an unknown count, never room
-  // (SG2 17, Claude 1, 05/11/2026; Codex Q on #2670: reading it is outside the catch above).
-  return countWithin(reply, limit);
+  // and never past the limit (SG2 17, Claude 1, 05/11/2026; Codex Q on #2670: reading it is outside the catch above).
+  let count: number | null;
+  try {
+    count = counterReply(reply);
+  } catch {
+    count = null;
+  }
+  if (count === null) throw new UnknownReplyError(`the ${scope} limit's count`);
+  return count <= limit;
+}
+
+/**
+ * withinLimit's (or withinStore's) answer with an unknown count said as
+ * "unknown", for a caller that answers it in its own words: a 503, or its
+ * form's "try again" notice, never its "too many" one. Anything else thrown
+ * is thrown on.
+ */
+export function unknownLimit(error: unknown): "unknown" {
+  if (error instanceof UnknownReplyError) return "unknown";
+  throw error;
+}
+
+/**
+ * The answer of a form or a provider's call whose limit's count could not be
+ * read, where the page it came from has no notice of its own for it: 503,
+ * said plainly and never as "too many", so a person or a sender tries again.
+ */
+export function limitUnknownResponse(): Response {
+  return new Response("This could not be checked just now. Nothing was changed. Try again in a moment.", {
+    status: 503,
+    headers: { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "60", "Cache-Control": "no-store" },
+  });
 }
 
 /** Whether a returned windowCount reply holds a count within `limit`; no for any other shape or a reply that throws when read. */
@@ -331,21 +367,31 @@ function counterReply(reply: unknown): number | null {
  * exactly one of these. `window` is the store's window by its name
  * (lib/allowance-window.ts, windowId): its billing month when it pays us,
  * the calendar month otherwise, so one payment buys one month of each. No
- * window known, nothing let through. Kept 32 days, longer than any window.
+ * window known, nothing let through. Kept `keepSeconds`, which every caller takes from the
+ * store's window (lib/allowance-window.ts, windowKeySeconds(store, 32 * 86_400)): at least 32
+ * days, and never less than the window, so a window stretched to its period's end never outlives
+ * its count (Claude 6's second MEDIUM on #4561, rule 30). A keep under MONTH_KEEP_SECONDS lets
+ * nothing through.
  * Fails open like withinLimit when Redis cannot be asked: the work it guards
  * cannot run either.
  */
-export async function withinMonth(scope: string, who: string, limit: number, window: string | null): Promise<boolean> {
+/** The least a month counter may be kept (withinMonth). */
+const MONTH_KEEP_SECONDS = 32 * 86_400;
+
+export async function withinMonth(scope: string, who: string, limit: number, window: string | null, keepSeconds: number): Promise<boolean> {
   if (!window || !/^\d{4}-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?$/.test(window)) return false;
   if (!isRedisConfigured()) return true;
   if (!Number.isSafeInteger(limit) || limit <= 0) return false;
+  // Never kept less than a month: a keep that is not one would let the window's count lapse inside it.
+  if (!Number.isSafeInteger(keepSeconds) || keepSeconds < MONTH_KEEP_SECONDS) return false;
   let reply: unknown;
   try {
     const month = window;
     const key = `nl:rlm:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}:${month}`;
-    reply = await redisPipeline(windowCount(key, 32 * 86_400));
-  } catch {
-    return true;
+    reply = await redisPipeline(windowCount(key, keepSeconds));
+  } catch (error) {
+    // An answer out of shape is an unknown count, never room; only Redis out of reach opens, as withinLimit.
+    return !(error instanceof UnknownReplyError);
   }
   return countWithin(reply, limit);
 }

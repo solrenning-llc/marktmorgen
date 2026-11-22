@@ -148,7 +148,7 @@ export async function POST(request: NextRequest) {
       };
       const save = async (next: ReturnType<typeof nextOf>) => {
         const result = await setAffiliateSetting(guarded.ref, next);
-        return result.ok ? Response.json({ ok: true }) : fail(result.reason);
+        return result.ok ? Response.json({ ok: true }) : fail(result.reason, result.reason === "listing" ? 503 : 400);
       };
       // A program with no records yet has no partners to check, and nothing a partner could rely on.
       if (!fresh.statsId) return save(nextOf(fresh));

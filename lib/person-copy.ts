@@ -55,6 +55,7 @@ import { personOf, readRun } from "@/lib/flow-runs";
 import { storeKey } from "@/lib/learn";
 import { clicksOf } from "@/lib/mail-clicks";
 import { waitlistPlacesOf } from "@/lib/waitlist";
+import { stockAlertsOf } from "@/lib/stock-alerts";
 import { feedsOf } from "@/lib/podcast-access";
 import { remindersOf } from "@/lib/assistant-reminder";
 import { asksOf } from "@/lib/checkout-ask";
@@ -125,6 +126,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/lesson-notes.ts": { how: "copied", what: "Your private notes on lessons" },
   "lib/community-erasure.ts": { how: "copied", what: "Your community profile, points, notifications, private messages, what you said in its room, the events you said you are coming to, your posts, comments, likes, votes and reports, and what you sent that waits for approval" },
   "lib/waitlist.ts": { how: "copied", what: "Your places on the store's waitlists" },
+  "lib/stock-alerts.ts": { how: "copied", what: "Your places on the store's back-in-stock lists" },
   "lib/affiliate-bond.ts": { how: "copied", what: "Which affiliate brought you to the store" },
   "lib/affiliate-leads.ts": { how: "copied", what: "Sign-ups, free products and calls an affiliate was credited for" },
   "lib/imported-purchases.ts": { how: "copied", what: "What an import from another platform, a gift or a PayPal order gave you" },
@@ -190,6 +192,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/review-requests.ts": { how: "within", in: "lib/suppression.ts", what: "If you pressed stop on review requests, that is in your no" },
   "lib/product-updates.ts": { how: "passing", days: 60, what: "If a product update email from the store is going out to you now, its sending list holds your address until it finishes. If you pressed stop on update emails, that is in your no" },
   "lib/broadcasts.ts": { how: "passing", days: 60, what: "If one of the store's emails to its list is going out to you now, its sending list holds your address until it finishes" },
+  "lib/email-polls.ts": { how: "passing", days: 60, what: "If you answered a poll in one of the store's emails, your answer is kept under your place in that email's list, never your address, so it cannot be found for you; it is deleted by itself 30 days after the poll closes" },
   "lib/community-event-mail.ts": { how: "passing", days: 30, what: "If an email about a community event is going out to you now, its sending list holds your address until it finishes" },
   "lib/ad-events.ts": { how: "passing", days: 4, what: "What a checkout you opened with your yes to ad measurement carries to its sale (network address, browser, page, ad cookies), kept under the checkout's own token for four days at the most and deleted as soon as its sale is known" },
   "lib/checkout-ask.ts": { how: "passing", days: 4, what: "A reminder you asked for on a product's page or at checkout waits in a queue with your address until it is sent: in an hour, a day or three days, as you chose, and a few hours more if a try fails" },
@@ -200,6 +203,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/buyer-orders.ts": { how: "passing", days: 1, what: "A link to your purchases that was emailed to you works for 24 hours" },
   "lib/returning-code.ts": { how: "passing", days: 1, what: "If you asked for a code kept for returning buyers, the one-time link emailed to you is kept with the code, the product and your address for 30 minutes, then deleted" },
   "lib/membership-manage.ts": { how: "passing", days: 1, what: "A link to manage your membership that was emailed to you works for an hour" },
+  "lib/mail-frequency.ts": { how: "passing", days: 7, what: "When the store last emailed you, kept under a one-way code made from the store and your address so the gap the store chose between its emails holds; it says nothing else about you and is gone by itself within seven days" },
   "lib/request-guard.ts": { how: "passing", days: 32, what: "How often your address asked for things, counted by one-way codes, for at most 32 days" },
   "lib/erasure-request.ts": { how: "passing", days: 1, what: "A link you asked for to delete your data works for an hour" },
   "lib/store-assistant.ts": { how: "passing", days: 1, what: "What you asked the store's assistant, under a random code only your browser holds and with no name or address, deleted a day after your last message; it cannot be found by your address" },
@@ -256,7 +260,7 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
 }
 
 /** What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts). */
-const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]);
+const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true });
 
 /** One reader per copied module, each only reading. */
 // A Stripe Checkout Session id, the same shape lib/call-packages.ts keeps a package under.
@@ -453,7 +457,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return [copy];
   },
   // Read whether or not the store still lets imported buyers in (importedFor asks that, and notes them as it reads).
-  "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]),
+  "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true }),
   "lib/move-members.ts": async (s) => {
     const out: unknown[] = [];
     // The catalog's products and the memberships whose removal has not confirmed their invitations gone (Claude 3 on #3473).
@@ -501,6 +505,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/buyer-library.ts": async (s) => ((await storesKnownFor(s.email)).includes(s.sid) ? [{ inYourLibrary: true }] : []),
   "lib/mail-clicks.ts": async (s) => (await clicksOf(s.listId, s.email)).map((email) => ({ email })),
   "lib/waitlist.ts": async (s) => (await waitlistPlacesOf(s.statsId, [...s.productIds, ...(s.waitlistIds ?? [])], s.email)).map((w) => ({ product: w.product, joined: iso(w.joined), confirmed: iso(w.confirmed), alsoAskedForNews: w.news })),
+  "lib/stock-alerts.ts": async (s) => (await stockAlertsOf(s.statsId, s.productIds, s.email)).map((a) => ({ product: a.product, asked: iso(a.asked), confirmed: iso(a.confirmed) })),
   "lib/tier-benefits.ts": async (s) => (await benefitMarksOf(s.store, s.person)).map((m) => ({ benefit: m.benefit, period: m.period, markedGiven: iso(m.at) })),
   "lib/podcast-access.ts": async (s) => (await feedsOf(s.store, s.productIds, s.email)).map((product) => ({ product, privateFeed: true })),
   "lib/assistant-reminder.ts": async (s) => (await remindersOf(s.statsId, s.email)).map((r) => ({ ...r, at: new Date(r.at).toISOString() })),
@@ -528,7 +533,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     void _polls;
     const record = {
       // The link in their announcement emails is a key, left out: they have it in those emails.
-      profile: member ? { email: member.e, name: member.n, handle: member.h, inDirectory: member.dir, announcementEmails: member.mail, joined: iso(member.at), lastSeen: iso(member.seen), muted: member.muted } : null,
+      profile: member ? { email: member.e, name: member.n, handle: member.h, inDirectory: member.dir, links: member.s.map((l) => l.url), announcementEmails: member.mail, joined: iso(member.at), lastSeen: iso(member.seen), muted: member.muted } : null,
       points,
       // What happened, on which post, and when; not who did it, which is theirs.
       notifications: notices.map((n) => ({ kind: n.kind, post: n.post, ...(n.comment ? { comment: n.comment } : {}), at: iso(n.at) })),

@@ -635,9 +635,19 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
       const moved = (await readMoves([sessionId])).get(sessionId);
       const start = moved ? moved.s : Number(meta.start);
       const details = (session.customer_details ?? {}) as { email?: unknown };
-      if (Number.isFinite(start) && (await callRefunded(store, { session: sessionId, product: meta.product ?? "", start, email: typeof details.email === "string" ? details.email : null }))) {
-        handled += 1;
+      // A meeting record that does not read is unknown, never "no meeting" (CX-123 rule 24): this refund alone is marked
+      // as a call's and held for the next pass, and the scan goes on to the store's other refunds, so one record that
+      // never reads cannot stop the rest (Codex X6's LOW on #2619, 6952486935).
+      let ended: boolean;
+      try {
+        ended = Number.isFinite(start) && (await callRefunded(store, { session: sessionId, product: meta.product ?? "", start, email: typeof details.email === "string" ? details.email : null }));
+      } catch (error) {
+        console.error("reading refunds for meetings: a meeting record did not read; this refund is held for later", { store: store.handle, refund: id, error: error instanceof Error ? error.message : String(error) });
+        await redisPipeline([["SADD", seenKey(callsId), callMark(id)], keepSeen()]);
+        later();
+        continue;
       }
+      if (ended) handled += 1;
       // A call refunded in full leaves the private calendar feed (lib/calls.ts, callFromRow, drops a payment
       // refunded in full): marked, its file is made again at the app's next check, not a day later, with or
       // without a meeting room (inbox C4-18, M3). A lost dispute is not marked: the feed reads the payment, which a

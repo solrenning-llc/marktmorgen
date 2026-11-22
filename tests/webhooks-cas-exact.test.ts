@@ -2,7 +2,7 @@
  * The webhook settings' compare-and-set and the resend's mark read the script's reply only in its exact shape
  * (lib/webhooks.ts changeConfig and resendDelivery; CX-123 rules 24 and 30).
  *
- * The script (SAVE_CRM_PIPELINES v2 in lib/crm.ts, modelled by lib/redis-memory.ts) answers 1 when it wrote, and
+ * The settings script (SAVE_WEBHOOK_CONFIG in lib/webhooks.ts, modelled by lib/redis-memory.ts) answers 1 when it wrote, and
  * [-1] or [-1, n] when the text there was not the one read. Any other reply, or a call that fails, is unknown: a
  * settings change reads the settings back once, exactly. The text written means saved (told as saved, its secret
  * handed out); the text read means not written (made again from it, as for [-1]); anything else, or a read back in
@@ -38,7 +38,7 @@ setSendHooksForTests({ fetch: { resolve: (async () => { sends += 1; throw new Er
 
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
-const SETTINGS_CAS = "-- marktmorgen:crm-pipelines-save:v2\n";
+const SETTINGS_CAS = "-- marktmorgen:webhook-config-save:v1\n";
 /** The settings' compare-and-set or the resend's mark (RESEND_MARK): the same compare, the same replies. */
 const isCas = (c: Command) => c[0] === "EVAL" && (String(c[1]).startsWith(SETTINGS_CAS) || String(c[1]).startsWith("-- marktmorgen:webhook-resend-mark:v1\n"));
 /** A reply standing for a call that fails (the connection closed). */
@@ -67,9 +67,6 @@ redis.pipeline = (async (commands: Command[]) => {
     }
     if (casLanded) {
       await real(commands);
-      // Real Redis's SET inside the settings' script clears the key's expiry (it has no KEEPTTL), whatever the model
-      // does; the resend's mark keeps it (KEEPTTL), as real Redis does, so nothing is cleared for it here.
-      if (String(commands[0][1]).startsWith(SETTINGS_CAS)) await real([["PERSIST", String(commands[0][3])]]);
       if (meanwhile) await meanwhile();
       if (casLanded.value === FAILS) throw new Error("the connection closed after the write");
       return [casLanded.value];

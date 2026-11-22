@@ -29,9 +29,9 @@
 //   node agent-mail.mjs watch --as "Claude 3" --also review,enqueue   # acorda também com pedido para você pegar
 //   node agent-mail.mjs set-quota --as "Claude 3" --exhausted --until 2026-11-22T01:00-03:00   # ou --available quando a cota voltar
 //   node agent-mail.mjs list-quotas                                # quem está com e sem cota
-//   node agent-mail.mjs claim-pr --as "Claude 3" --pr 4941   # CLAIMED (2 h); recusado se outra família o tem
+//   node agent-mail.mjs claim-pr --as "Claude 3" --pr 4941   # CLAIMED (2 h), da sessão; recusado com HOLD ou CLAIMED de outra sessão
 //   node agent-mail.mjs hold-pr --as "Claude 5" --pr 4941 --reason "texto"   # HOLD, até alguém liberar
-//   node agent-mail.mjs release-pr --as "Claude 3" --pr 4941   # UNCLAIMED / fim do HOLD
+//   node agent-mail.mjs release-pr --as "Claude 3" --pr 4941   # UNCLAIMED / fim do HOLD (só quem pôs, o autor ou o coordenador)
 //   node agent-mail.mjs pr-status --pr 4941                 # quem tem o PR agora
 //   (request-review aceita --to "Claude 5": a preferência; sem cota ou depois de 30 min, qualquer outra família pega)
 //
@@ -40,9 +40,9 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, isAbsolute, join } from "node:path";
 
 export const REPO = process.env.CORREIO_REPO || "https://github.com/solrenning-llc/repo-id-transfer-test";
 export const RAMO = process.env.CORREIO_RAMO || "correio";
@@ -51,9 +51,10 @@ export const ATRASO_MIN = 30;
 
 /** Prazo de cada comando do git (passo 4): um comando que trava não segura a ferramenta; vence e falha com o motivo. */
 export const GIT_PRAZO_MS = 120000;
-export function git(args, input, prazoMs = GIT_PRAZO_MS) {
+export function git(args, input, prazoMs = GIT_PRAZO_MS, dir = null, envExtra = {}) {
   try {
-    return execFileSync("git", args, { input, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], maxBuffer: 64 << 20, timeout: prazoMs, killSignal: "SIGKILL" }).trim();
+    const env = dir ? { ...process.env, ...envExtra, GIT_DIR: dir } : { ...process.env, ...envExtra };
+    return execFileSync("git", args, { input, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], maxBuffer: 64 << 20, timeout: prazoMs, killSignal: "SIGKILL", env }).trim();
   } catch (erro) {
     if (erro?.code === "ETIMEDOUT" || (erro?.signal === "SIGKILL" && !erro?.status)) {
       const e = new Error(`git ${args.filter((a) => !String(a).startsWith("-c")).slice(0, 2).join(" ")} passou do limite de tempo (${prazoMs / 1000} s) e foi parado; nada foi feito com o resultado`);
@@ -62,6 +63,30 @@ export function git(args, input, prazoMs = GIT_PRAZO_MS) {
     }
     throw erro;
   }
+}
+
+// Passo 6 (A14): o correio é privado e o marktmorgen é público. Tudo o que é do correio (as buscas, os objetos, os
+// commits gravados e a referência do só-acrescentar) fica num repositório git só da ferramenta, fora do clone onde ela
+// roda: um push --mirror desse clone nunca leva o correio. As leituras dos PRs (dados públicos) continuam no clone.
+export const DIR_CORREIO = process.env.CORREIO_GIT_DIR || join(homedir(), ".agent-mail", "correio.git");
+/** A marca antiga do clone, guardada pelo comando que criou o repositório do correio (MÉDIO do Claude 4 3Kc no #5117). */
+const ARQUIVO_ANCORA = () => join(DIR_CORREIO, "agent-mail-ancora-do-clone");
+let dirPronto = false;
+/** O git no repositório do correio, criado na primeira vez. */
+export function gitC(args, input) {
+  if (!dirPronto) {
+    if (!existsSync(join(DIR_CORREIO, "HEAD"))) {
+      execFileSync("git", ["init", "-q", "--bare", DIR_CORREIO], { stdio: ["ignore", "pipe", "pipe"] });
+      // MÉDIO do Claude 4 3Kc no #5117: o comando que cria o repositório (qualquer um, inclusive read) guarda a marca
+      // antiga do só-acrescentar que estiver no clone, antes que o aviso leve a apagá-la; a vigia a usa depois.
+      try {
+        const velha = git(["rev-parse", "--verify", "-q", REF_VERIFICADO]);
+        if (/^[0-9a-f]{40}$/.test(velha)) writeFileSync(ARQUIVO_ANCORA(), `${velha}\n`);
+      } catch { /* o clone não tem marca antiga */ }
+    }
+    dirPronto = true;
+  }
+  return git(args, input, GIT_PRAZO_MS, DIR_CORREIO);
 }
 
 /** O nome de um agente como pasta: "Claude 5 ibqho" -> "claude-5-ibqho"; "todos" é reservado. */
@@ -75,21 +100,32 @@ export function slug(nome) {
  * Busca o ramo; devolve o commit, ou null se o ramo ainda não existe. Cada busca usa uma referência própria, apagada em
  * seguida: o vigia e um envio rodando ao mesmo tempo no mesmo clone nunca disputam a mesma referência.
  */
+// Passo 6 (A11): uma decisão lê um retrato só do correio. A primeira leitura do comando busca e guarda o retrato; as
+// seguintes usam o mesmo. Toda escrita busca de novo a ponta, para montar em cima dela, e depois o retrato passa a ser o
+// commit que ela gravou. A vigia esquece o retrato a cada volta.
+let retrato;
 function buscar() {
+  if (retrato === undefined) retrato = buscarDeNovo();
+  return retrato;
+}
+/** Esquece o retrato guardado: a próxima leitura busca o correio de novo. */
+export function esquecerRetrato() { retrato = undefined; }
+
+function buscarDeNovo() {
   const ref = `refs/correio/${RAMO}-${process.pid}-${randomBytes(4).toString("hex")}`;
   try {
-    git(["fetch", "-q", "--no-write-fetch-head", REPO, `+refs/heads/${RAMO}:${ref}`]);
-    return git(["rev-parse", ref]);
+    gitC(["fetch", "-q", "--no-write-fetch-head", REPO, `+refs/heads/${RAMO}:${ref}`]);
+    return gitC(["rev-parse", ref]);
   } catch (erro) {
     if (/couldn't find remote ref|not found/i.test(String(erro.stderr ?? erro))) return null;
     throw erro;
   } finally {
-    try { git(["update-ref", "-d", ref]); } catch { /* não foi criada */ }
+    try { gitC(["update-ref", "-d", ref]); } catch { /* não foi criada */ }
   }
 }
 
-const arquivos = (commit, pasta) => (commit ? git(["ls-tree", "-r", "--name-only", commit, "--", pasta]).split("\n").filter(Boolean) : []);
-const conteudo = (commit, caminho) => git(["show", `${commit}:${caminho}`]);
+const arquivos = (commit, pasta) => (commit ? gitC(["ls-tree", "-r", "--name-only", commit, "--", pasta]).split("\n").filter(Boolean) : []);
+const conteudo = (commit, caminho) => gitC(["show", `${commit}:${caminho}`]);
 const idDe = (caminho) => caminho.split("/").pop().replace(/\.md$/, "");
 /** Quem enviou, lido da id "<data>Z-<remetente>-<4 hex>", exatamente (assim "claude-5" não se confunde com "claude-5-ibqho"). */
 export const remetenteDe = (id) => String(id).replace(/^\d{8}T\d{6}Z-/, "").replace(/-[0-9a-f]{4}$/, "");
@@ -119,7 +155,7 @@ export function ordem(commit) {
   if (ordens.has(commit)) return ordens.get(commit);
   const mapa = new Map();
   let i = -1, t = 0;
-  for (const linha of git(["log", "--reverse", "--topo-order", "--format=%x01%ct", "--name-only", "--diff-filter=A", "--no-renames", commit]).split("\n")) {
+  for (const linha of gitC(["log", "--reverse", "--topo-order", "--format=%x01%ct", "--name-only", "--diff-filter=A", "--no-renames", commit]).split("\n")) {
     if (linha.startsWith("\x01")) { i += 1; t = Number(linha.slice(1)) * 1000; } else if (linha && !mapa.has(linha)) mapa.set(linha, { i, t });
   }
   ordens.set(commit, mapa);
@@ -156,7 +192,7 @@ export function conferirIdentidade(nome, s = sessaoAtual()) {
   if (!nome || nome === true || !s?.familia) return;
   if (familia(nome) !== s.familia) {
     throw new Error(`identidade: esta sessão (${s.id.slice(0, 15)}…) é da família ${s.familia} e não escreve como "${nome}" (${familia(nome)}). ` +
-      'Use o nome da sua família; para registrar a falta de cota de outra família, use set-quota --as "Claude N" --exhausted --by "<seu nome>".');
+      'Use o nome da sua família; a cota de outra família só é declarada por ela mesma ou pelo coordenador (passo 5).');
   }
 }
 
@@ -176,9 +212,9 @@ export function sessaoDe(texto) {
  */
 function acrescentar(novos, mensagem) {
   for (let tentativa = 1; ; tentativa += 1) {
-    const base = buscar();
+    const base = buscarDeNovo();
     const indice = join(tmpdir(), `correio-indice-${process.pid}-${randomBytes(4).toString("hex")}`);
-    const env = { ...process.env, GIT_INDEX_FILE: indice };
+    const env = { ...process.env, GIT_INDEX_FILE: indice, GIT_DIR: DIR_CORREIO };
     const comIndice = (args, input) => execFileSync("git", args, { input, encoding: "utf8", env, stdio: ["pipe", "pipe", "pipe"] }).trim();
     let commit;
     try {
@@ -187,22 +223,23 @@ function acrescentar(novos, mensagem) {
         if (base && arquivos(base, caminho).includes(caminho)) throw new Error(`já existe no correio: ${caminho}; nada é reescrito`);
         // A sessão de quem escreve vai no fim de cada mensagem ou registro .md (os outros arquivos têm formato fixo).
         const gravado = caminho.endsWith(".md") ? `${String(texto).replace(/\n*$/, "\n")}Sessão: ${linhaSessao()}\n` : texto;
-        const blob = git(["hash-object", "-w", "--stdin"], gravado);
+        const blob = gitC(["hash-object", "-w", "--stdin"], gravado);
         comIndice(["update-index", "--add", "--cacheinfo", `100644,${blob},${caminho}`]);
       }
       const arvore = comIndice(["write-tree"]);
       if (base) {
         const antes = new Set(arquivos(base, "."));
-        const depois = new Set(git(["ls-tree", "-r", "--name-only", arvore]).split("\n"));
+        const depois = new Set(gitC(["ls-tree", "-r", "--name-only", arvore]).split("\n"));
         const sumiram = [...antes].filter((f) => !depois.has(f));
         if (sumiram.length) throw new Error(`envio recusado: sumiriam ${sumiram.join(", ")}`);
       }
-      commit = git(["commit-tree", arvore, ...(base ? ["-p", base] : []), "-m", `${mensagem}\n\nMail-Session: ${linhaSessao()}`]);
+      commit = gitC(["commit-tree", arvore, ...(base ? ["-p", base] : []), "-m", `${mensagem}\n\nMail-Session: ${linhaSessao()}`]);
     } finally {
       try { execFileSync("rm", ["-f", indice]); } catch { /* sem índice */ }
     }
     try {
-      git(["push", "-q", REPO, `${commit}:refs/heads/${RAMO}`]);
+      gitC(["push", "-q", REPO, `${commit}:refs/heads/${RAMO}`]);
+      retrato = commit;
       return commit;
     } catch (erro) {
       if (tentativa >= 6) throw new Error(`envio falhou depois de ${tentativa} tentativas: ${String(erro.stderr ?? erro).slice(0, 300)}`);
@@ -286,6 +323,36 @@ export function naoLidas(eu, commit = buscar()) {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/**
+ * Passo 6 (A13): as mensagens da caixa de `eu` (e da família) que só foram confirmadas por escrita não identificada nas
+ * últimas 24 horas. Quem lê identificado é avisado delas, sem ser acordado: o Claude 1 no computador do dono e o Codex
+ * confirmam assim de propósito, mas outro também poderia, com o nome da família.
+ */
+export function confirmadasSemIdentidade(eu, agora = new Date(), commit = buscar()) {
+  if (!commit) return [];
+  const me = slug(eu), fam = familia(eu);
+  // Um git log só, sem abrir arquivo nenhum (LEVE do Claude 2 lpgvy no #5113): cada commit que acrescentou confirmações
+  // traz a sessão de quem escreveu no trailer Mail-Session. Primeiro, as confirmações não identificadas das últimas 24
+  // horas; depois, só para essas mensagens, se alguma sessão identificada da família também as confirmou.
+  const lerLog = (args) => {
+    const saida = [];
+    let sessao = "", quando = 0;
+    for (const linha of gitC(["log", "--format=%x01%ct%x02%(trailers:key=Mail-Session,valueonly,separator=%x20)", "--name-only", "--diff-filter=A", "--no-renames", ...args]).split("\n")) {
+      if (linha.startsWith("\x01")) { const [t, ses] = linha.slice(1).split("\x02"); quando = Number(t) * 1000; sessao = ses.trim(); continue; }
+      if (linha.startsWith("lidas/") && familia(linha.split("/")[1]) === fam) saida.push({ id: idDe(linha), quando, identificada: /^session_[0-9A-Za-z]{20,40} \(/.test(sessao) });
+    }
+    return saida;
+  };
+  const semId = new Map();
+  for (const a of lerLog(["--since=24.hours", commit, "--", "lidas"])) if (!a.identificada && agora - a.quando < 24 * 3600000) semId.set(a.id, a.quando);
+  if (!semId.size) return [];
+  const caminhos = arquivos(commit, "lidas").filter((c) => semId.has(idDe(c)) && familia(c.split("/")[1]) === fam);
+  const comId = new Set(lerLog([commit, "--", ...caminhos]).filter((a) => a.identificada).map((a) => a.id));
+  return [...arquivos(commit, `caixas/${me}`), ...(me !== fam ? arquivos(commit, `caixas/${fam}`) : [])]
+    .filter((c) => c.endsWith(".md") && semId.has(idDe(c)) && !comId.has(idDe(c)))
+    .map((c) => idDe(c)).sort();
+}
+
 export function confirmar({ eu, ids, agora = new Date() }) {
   // Duas sessões da mesma família confirmando a mesma mensagem ao mesmo tempo: relê e tenta de novo, sem as já gravadas.
   for (let tentativa = 0; ; tentativa++) {
@@ -293,6 +360,7 @@ export function confirmar({ eu, ids, agora = new Date() }) {
       return confirmarUmaVez({ eu, ids, agora });
     } catch (erro) {
       if (tentativa >= 3 || !/já existe no correio/.test(String(erro.message ?? erro))) throw erro;
+      esquecerRetrato();
     }
   }
 }
@@ -304,7 +372,9 @@ function confirmarUmaVez({ eu, ids, agora }) {
   ids = ids.filter((id) => !ja.has(id));
   if (!ids.length) return 0;
   const novos = {};
-  for (const id of ids) novos[`lidas/${me}/${id}`] = `${agora.toISOString()}\n`;
+  // Passo 6 (A13): a confirmação guarda a sessão que a fez; uma não identificada sai com aviso, e a família é avisada ao ler.
+  for (const id of ids) novos[`lidas/${me}/${id}`] = `${agora.toISOString()}\nSessão: ${linhaSessao()}\n`;
+  if (!sessaoAtual()) console.error(`ATENÇÃO: esta confirmação fica como não identificada (fora da nuvem do Claude Code); a família de ${eu} vai ver, ao ler identificada, que ${ids.length === 1 ? "a mensagem foi confirmada" : "as mensagens foram confirmadas"} assim.`);
   acrescentar(novos, `Lidas por ${eu}: ${ids.length}`);
   return ids.length;
 }
@@ -367,8 +437,9 @@ function campoCabecalho(texto, nome) {
   return new RegExp(`^${nome}: (.*)$`, "m").exec(cabecalho)?.[1]?.trim() ?? "";
 }
 
+// Passo 6 (A12): todo campo vem do cabeçalho; uma linha "Exclui:" ou "Preferência:" no texto livre nunca vira campo.
 function campo(texto, nome) {
-  return new RegExp(`^${nome}: (.*)$`, "m").exec(texto)?.[1]?.trim() ?? "";
+  return campoCabecalho(texto, nome);
 }
 
 /** Os pedidos de um tipo, na ordem de chegada, com o estado de cada um. */
@@ -452,7 +523,7 @@ export const SESSOES = { "01DKvYQ": "claude-1", "01FR6Z1": "claude-2", "014YNUx"
 export function commitsDoPr(pr, ramo = null) {
   if (testeLigado("CORREIO_SEM_COMMITS")) return null;
   const sufixo = `${process.pid}-${randomBytes(4).toString("hex")}`;
-  const base = `refs/correio/prs-main-${sufixo}`, cabeca = `refs/correio/prs-${pr}-${sufixo}`;
+  const base = `refs/agent-mail-pr/prs-main-${sufixo}`, cabeca = `refs/agent-mail-pr/prs-${pr}-${sufixo}`;
   try {
     git(["fetch", "-q", "--no-tags", REPO_PRS, `+refs/heads/main:${base}`, `+${fonteDoHead(pr, ramo)}:${cabeca}`]);
     const linhas = git(["log", "--format=%an%x1f%(trailers:key=Claude-Session,valueonly,separator=%x1e)", `${base}..${cabeca}`]).split("\n").filter(Boolean);
@@ -502,7 +573,7 @@ export function ramoDoHead(sha, pr) {
 export function ramoDoPr(pr, ramo) {
   if (!/^\d+$/.test(String(pr ?? "")) || !ramo) return false;
   const sufixo = `${process.pid}-${randomBytes(4).toString("hex")}`;
-  const a = `refs/agent-mail/rp-${pr}-${sufixo}`, b = `refs/agent-mail/rr-${sufixo}`;
+  const a = `refs/agent-mail-pr/rp-${pr}-${sufixo}`, b = `refs/agent-mail-pr/rr-${sufixo}`;
   try {
     git(["fetch", "-q", "--no-tags", REPO_PRS, `+refs/pull/${pr}/head:${a}`, `+refs/heads/${ramo}:${b}`]);
     try { git(["merge-base", "--is-ancestor", a, b]); return true; } catch { return false; }
@@ -551,7 +622,7 @@ function fonteDoHead(pr, ramo = null) {
 export function situacaoNoGitHub(pr, ramo = null) {
   if (testeLigado("CORREIO_SEM_COMMITS")) return null;
   const sufixo = `${process.pid}-${randomBytes(4).toString("hex")}`;
-  const base = `refs/correio/sg-main-${sufixo}`, cabeca = `refs/correio/sg-${pr}-${sufixo}`;
+  const base = `refs/agent-mail-pr/sg-main-${sufixo}`, cabeca = `refs/agent-mail-pr/sg-${pr}-${sufixo}`;
   try {
     const naFila = git(["ls-remote", REPO_PRS, "refs/heads/gh-readonly-queue/*"]).split("\n").some((l) => new RegExp(`/pr-${pr}-[0-9a-f]+$`).test(l));
     git(["fetch", "-q", "--no-tags", REPO_PRS, `+refs/heads/main:${base}`, `+${fonteDoHead(pr, ramo)}:${cabeca}`]);
@@ -577,9 +648,9 @@ export function conflitosDoPr(pr, ramo = null) {
   const criados = [];
   try {
     const filas = git(["ls-remote", REPO_PRS, "refs/heads/gh-readonly-queue/*"]).split("\n").filter(Boolean).map((l) => l.split("\t")[1]);
-    const cabeca = `refs/correio/cf-${pr}-${sufixo}`, base = `refs/correio/cf-main-${sufixo}`;
+    const cabeca = `refs/agent-mail-pr/cf-${pr}-${sufixo}`, base = `refs/agent-mail-pr/cf-main-${sufixo}`;
     const pares = [`+refs/heads/main:${base}`, `+${fonteDoHead(pr, ramo)}:${cabeca}`];
-    const grupos = filas.map((ref, i) => ({ ref, local: `refs/correio/cf-q${i}-${sufixo}`, pr: /\/pr-(\d+)-/.exec(ref)?.[1] ?? null }))
+    const grupos = filas.map((ref, i) => ({ ref, local: `refs/agent-mail-pr/cf-q${i}-${sufixo}`, pr: /\/pr-(\d+)-/.exec(ref)?.[1] ?? null }))
       .filter((g) => g.pr !== String(pr));
     for (const g of grupos) pares.push(`+${g.ref}:${g.local}`);
     criados.push(base, cabeca, ...grupos.map((g) => g.local));
@@ -666,12 +737,12 @@ export function privilegioValido(texto, por) {
  */
 export function ultimoSinal(sessao, commit = buscar(), agora = new Date()) {
   if (!commit) return { quando: null, conferido: true };
-  const t = git(["log", "-1", "--format=%ct", "-F", `--grep=Mail-Session: ${sessao}`, commit]);
+  const t = gitC(["log", "-1", "--format=%ct", "-F", `--grep=Mail-Session: ${sessao}`, commit]);
   if (t) return { quando: new Date(Number(t) * 1000), conferido: true };
-  if (git(["rev-parse", "--is-shallow-repository"]) !== "true") return { quando: null, conferido: true };
+  if (gitC(["rev-parse", "--is-shallow-repository"]) !== "true") return { quando: null, conferido: true };
   // Num clone raso, os commits da borda aparecem sem pais. Com mais de uma borda (uma junção), um caminho pode parar na
   // mais recente: o histórico só está completo desde ela (revisão do Claude 4 AC no #5052).
-  const bordas = git(["log", "--format=%ct", "--max-parents=0", commit]).split("\n").filter(Boolean).map(Number);
+  const bordas = gitC(["log", "--format=%ct", "--max-parents=0", commit]).split("\n").filter(Boolean).map(Number);
   const inicio = bordas.length ? Math.max(...bordas) * 1000 : Infinity;
   return { quando: null, conferido: inicio <= agora.getTime() - SINAL_MIN * 60000 };
 }
@@ -703,7 +774,7 @@ export function conferirPedido(pedido, comando, alvo, commit = buscar(), agora =
   if (!linha) throw new Error(`o comentário ${m[1]} não traz a linha "AGENT-MAIL-REQUEST <identificador ${PREFIXO_COORDENADOR}-AAAAMMDD-HHMM-ASSUNTO> ${comando} ${alvo}"`);
   let achados = [];
   try {
-    achados = git(["grep", "-l", "-F", `Pedido: ${esperado}`, commit, "--", "chaves", "revisao/confirmados"]).split("\n").filter(Boolean);
+    achados = gitC(["grep", "-l", "-F", `Pedido: ${esperado}`, commit, "--", "chaves", "revisao/confirmados", "estado", "prs", "fila/tomadas", "revisao/tomadas"]).split("\n").filter(Boolean);
   } catch (erro) {
     // O git grep sai com 1 quando não acha nada; qualquer outra falha deixa o uso NÃO CONFERIDO (revisão do Claude 4 AC).
     if (erro?.status !== 1) throw new Error(`o uso único do pedido ${m[1]} NÃO FOI CONFERIDO (git grep falhou); nada foi feito`);
@@ -813,17 +884,25 @@ export function mudarChave({ nome, eu, ligar, motivo = "", pedido = "", dono = "
 const LINK_REVISAO = (pr) => new RegExp(`^https://github\\.com/solrenning-llc/marktmorgen/pull/${pr}#(issuecomment|pullrequestreview)-(\\d+)$`);
 
 /** Confere no GitHub (API REST, pelo gh) que o link é um comentário ou revisão deste PR que cita o head. null = não conferido. */
-export function conferirLink(link, pr, sha) {
+// Passo 6 (A15): o comentário precisa trazer o veredito dado e vir de quem trabalha no repositório.
+const QUEM_TRABALHA = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+export function conferirLink(link, pr, sha, resultado = null) {
   if (testeLigado("CORREIO_SEM_GH")) return null;
   const m = LINK_REVISAO(pr).exec(link);
   if (!m) return { ok: false, motivo: "link fora do formato" };
   try {
     const rota = m[1] === "issuecomment" ? `repos/solrenning-llc/marktmorgen/issues/comments/${m[2]}` : `repos/solrenning-llc/marktmorgen/pulls/${pr}/reviews/${m[2]}`;
-    const saida = execFileSync("gh", ["api", rota, "--jq", "[.html_url, (.body // \"\"), (.commit_id // \"\")] | @json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
-    const [url, corpo, commitId] = JSON.parse(saida.trim()); // o gh imprime o texto do @json sem aspas: uma camada só
+    const saida = execFileSync("gh", ["api", rota, "--jq", "[.html_url, (.body // \"\"), (.commit_id // \"\"), (.author_association // \"\")] | @json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
+    const [url, corpo, commitId, associacao] = JSON.parse(saida.trim()); // o gh imprime o texto do @json sem aspas: uma camada só
     if (!String(url).includes(`/pull/${pr}`)) return { ok: false, motivo: "o link não é deste PR" };
     const curto = String(sha).slice(0, 10);
     if (!String(corpo).includes(curto) && !String(commitId).startsWith(curto)) return { ok: false, motivo: `o comentário não cita o head ${curto}` };
+    // O veredito vem da primeira linha do comentário, onde as revisões daqui o escrevem, e sem o veredito oposto nela:
+    // uma revisão CHANGES que diz mais abaixo "faltam 2 READY" não confere um registro READY (LEVE do Claude 2 lpgvy no #5113).
+    const primeira = String(corpo).split(/\r?\n/).find((l) => l.trim()) ?? "";
+    const oposto = resultado === "READY" ? "CHANGES" : "READY";
+    if (resultado && (!new RegExp(`\\b${resultado}\\b`).test(primeira) || new RegExp(`\\b${oposto}\\b`).test(primeira))) return { ok: false, motivo: `o comentário não traz o veredito ${resultado} na primeira linha` };
+    if (!QUEM_TRABALHA.has(String(associacao))) return { ok: false, motivo: `o comentário não é de quem trabalha no repositório (${associacao || "autor desconhecido"})` };
     return { ok: true, motivo: "" };
   } catch {
     return null;
@@ -837,7 +916,7 @@ export function registrarRevisao({ eu, pr, sha, resultado, link, agora = new Dat
   if (!/^(READY|CHANGES)$/.test(String(resultado ?? ""))) throw new Error("--result deve ser READY ou CHANGES");
   if (!LINK_REVISAO(pr).test(String(link ?? ""))) throw new Error(`--link é obrigatório: o endereço do comentário da revisão no PR #${pr} (https://github.com/solrenning-llc/marktmorgen/pull/${pr}#issuecomment-N)`);
   const atual = headAtual(pr);
-  const lk = conferirLink(link, pr, sha);
+  const lk = conferirLink(link, pr, sha, resultado);
   const carimbo = agora.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
   const id = `${carimbo}-${slug(eu)}-${randomBytes(2).toString("hex")}`;
   const corpo = [`Tipo: registro de revisão`, `PR: ${pr}`, `Head: ${sha}`, `Resultado: ${resultado}`, `Por: ${eu}`, `Link: ${link}`,
@@ -1122,12 +1201,12 @@ export function hashProprio() {
   return createHash("sha256").update(readFileSync(new URL(import.meta.url))).digest("hex");
 }
 export function hashPublicado() {
-  const ref = `refs/agent-mail/main-${process.pid}-${randomBytes(4).toString("hex")}`;
+  const ref = `refs/agent-mail-pr/main-${process.pid}-${randomBytes(4).toString("hex")}`;
   try {
     // Busca normal, nunca --depth: uma busca rasa tornaria raso o repositório de quem roda a ferramenta (revisão do
     // Claude 1 A no #5044). No clone do Marktmorgen, ela só traz o que falta.
     git(["fetch", "-q", "--no-tags", REPO_PRS, `+refs/heads/main:${ref}`]);
-    return /^[0-9a-f]{64}/.exec(conteudo(ref, ARQUIVO_HASH))?.[0] ?? null;
+    return /^[0-9a-f]{64}/.exec(git(["show", `${ref}:${ARQUIVO_HASH}`]))?.[0] ?? null; // no clone: o main é público
   } catch {
     return null;
   } finally {
@@ -1163,11 +1242,11 @@ export const REF_VERIFICADO = "refs/agent-mail/append-only-checked";
 export function conferirSoAcrescentar(commit, desde = null) {
   if (!commit) return { reescrito: false, problemas: [] };
   let reescrito = false;
-  if (desde) { try { git(["merge-base", "--is-ancestor", desde, commit]); } catch { reescrito = true; } }
+  if (desde) { try { gitC(["merge-base", "--is-ancestor", desde, commit]); } catch { reescrito = true; } }
   const faixa = desde && !reescrito ? `${desde}..${commit}` : commit;
   const problemas = [];
   let atual = "";
-  for (const linha of git(["log", "--format=%x01%H", "--name-status", "--diff-filter=MDT", "--no-renames", "--diff-merges=first-parent", faixa]).split("\n")) {
+  for (const linha of gitC(["log", "--format=%x01%H", "--name-status", "--diff-filter=MDT", "--no-renames", "--diff-merges=first-parent", faixa]).split("\n")) {
     if (linha.startsWith("\x01")) { atual = linha.slice(1); continue; }
     const m = /^([MDT])\t(.+)$/.exec(linha);
     if (m && !RAIZ_HISTORICA.has(m[2])) problemas.push(`${atual.slice(0, 10)} ${m[1] === "D" ? "APAGOU" : "ALTEROU"} ${m[2]}`);
@@ -1220,7 +1299,7 @@ export function retirar({ tipo, eu, id, motivo = "", agora = new Date() }) {
   if (!p) throw new Error(`pedido não encontrado: ${id}`);
   if (p.estado === "feito") throw new Error(`pedido já concluído: ${id}`);
   const marca = estadoPr(p.pr, agora);
-  const segurou = marca.ativo && marca.acao === "HOLD" && familia(marca.por) === familia(eu);
+  const segurou = marca.ativo && marca.acao === "HOLD" && marca.segurando.has(familia(eu));
   if (familia(eu) !== p.familia && !segurou) throw new Error("só a família do autor, ou quem pôs HOLD no PR, retira o pedido");
   // Com a tomada de outra família ainda valendo, ninguém retira: quem pegou pode estar enfileirando agora (caso do #2498).
   if (p.estado === "tomado" && familia(p.tomadoPor) !== familia(eu)) throw new Error(`o pedido ${id} está com ${p.tomadoPor}, que pode estar enfileirando agora; peça a ele pelo correio que devolva, ou espere a tomada vencer`);
@@ -1246,6 +1325,7 @@ export function cotas(agora = new Date(), commit = buscar()) {
   const ord = ordem(commit);
   for (const c of arquivos(commit, "estado")) {
     const [, fam, marca] = c.split("/");
+    if (!cotaValida(conteudo(commit, c), fam)) continue; // passo 5 (A6): a cota de outra família sem o coordenador não vale
     const i = ord.get(c)?.i ?? -1, atual = ultima.get(fam);
     if (!atual || i > atual.i || (i === atual.i && marca > atual.marca)) ultima.set(fam, { marca, caminho: c, i });
   }
@@ -1306,14 +1386,39 @@ export function familias(commit = buscar()) {
   return [...f].sort();
 }
 
-/** Declara a cota de `eu`: sem cota até `ate` (data ISO), ou com cota. */
-export function declararCota({ eu, sem, ate = null, por = null, agora = new Date() }) {
+/**
+ * Declara a cota de `eu`: sem cota até `ate` (data ISO), ou com cota. A cota de outra família (`por` de outra família)
+ * só é declarada pelo coordenador: a sessão nomeada, com o pedido na #4932 (OWNER-20261121-1904, passo 5; achado A6).
+ */
+export function declararCota({ eu, sem, ate = null, por = null, pedido = "", dono = "", agora = new Date() }) {
   if (sem && ate && Number.isNaN(new Date(ate).getTime())) throw new Error(`--until não é uma data: ${ate} (use, por exemplo, 2026-11-22T01:00-03:00)`);
+  const escritor = por || eu;
+  let p = null;
+  if (familia(escritor) !== familia(eu)) {
+    try {
+      p = conferirPrivilegio({ eu: escritor, acao: "declara a cota de outra família", comando: "set-quota", alvo: familia(eu), pedido, dono, agora });
+    } catch (erro) {
+      throw new Error(`a cota de ${familia(eu)} só é declarada pela própria família ou pelo coordenador (OWNER-20261121-1904, passo 5): ${erro.message ?? erro}`);
+    }
+  }
   const carimbo = agora.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
   const marca = `${carimbo}-${slug(eu)}-${randomBytes(2).toString("hex")}`;
-  const corpo = [`Cota: ${sem ? "sem" : "com"}`, ...(sem && ate ? [`Volta: ${new Date(ate).toISOString()}`] : []), `Por: ${por || eu}`,
-    `Data (UTC): ${agora.toISOString().slice(0, 16).replace("T", " ")}`, ""].join("\n");
-  acrescentar({ [`estado/${familia(eu)}/${marca}`]: corpo }, `${eu}: ${sem ? "sem cota" : "com cota"}`);
+  const corpo = [`Cota: ${sem ? "sem" : "com"}`, ...(sem && ate ? [`Volta: ${new Date(ate).toISOString()}`] : []), `Por: ${escritor}`,
+    `Data (UTC): ${agora.toISOString().slice(0, 16).replace("T", " ")}`, ...(p ? linhasPrivilegio(p) : []), `Sessão: ${linhaSessao()}`, ""].join("\n");
+  acrescentar({ [`estado/${familia(eu)}/${marca}`]: corpo,
+    ...(p ? avisoPrivilegio({ eu: escritor, assunto: `cota de ${familia(eu)} declarada ${sem ? "sem" : "com"} por ${escritor}`, p, agora }) : {}) },
+  `${eu}: ${sem ? "sem cota" : "com cota"}`);
+}
+
+/**
+ * Uma declaração de cota vale se a escreveu a própria família, ou o coordenador com o pedido (passo 5, A6). As antigas,
+ * sem a linha "Sessão:" (antes desta versão), valem como antes: no correio real, a do Claude 3 sem cota até 23/11/2026,
+ * gravada pelo Claude 6 com a informação do dono, continua valendo.
+ */
+export function cotaValida(texto, fam) {
+  if (!sessaoDe(texto)) return true;
+  const por = campo(texto, "Por"), quem = sessaoDe(texto)?.familia ?? familia(por);
+  return (quem === fam && familia(por) === fam) || privilegioValido(texto, por);
 }
 
 /** Para quem vai uma mensagem: os destinatários sem cota e as famílias com cota que podem receber no lugar. */
@@ -1334,30 +1439,84 @@ export function avisoCota(destinos, eu, agora = new Date(), commit = buscar()) {
 
 export const CLAIM_MIN = 120;
 
-/** O estado atual do PR N: { acao, por, motivo, quando, ativo, proximo }. */
+// Passo 5 (OWNER-20261121-1904; achados A7 e A8): de quem é cada marca. Um HOLD só é liberado por uma família que pôs
+// todos os HOLDs ativos, pelo autor (uma família com commits no PR, conferida na hora e gravada na linha "Autor:") ou
+// pelo coordenador (a sessão nomeada, com o pedido na #4932); um CLAIMED não passa por cima de um HOLD ativo. Um
+// CLAIMED é da sessão que o gravou: outra sessão, mesmo da mesma família, não o toma nem o libera enquanto ele vale.
+// A leitura aplica as mesmas regras às marcas gravadas com a linha "Sessão:" (todas as desta versão): uma marca sem
+// direito, escrita à mão ou por cópia antiga, é ignorada. As marcas antigas, sem essa linha, valem como antes.
+const ativoEm = (e, quando) => Boolean(e) && (e.acao === "HOLD" || (e.acao === "CLAIMED" && !noFuturo(e.quando, quando) && (quando - e.quando) / 60000 < CLAIM_MIN));
+const sessaoDaMarca = (texto) => { const s = sessaoDe(texto); return s?.identificada ? sessaoInteira(s) : null; };
+
+/** O estado atual do PR N: { acao, por, sessao, motivo, quando, ativo, proximo, segurando, ignoradas }. */
 export function estadoPr(pr, agora = new Date(), commit = buscar()) {
-  const marcas = arquivos(commit, `prs/${pr}`).map((c) => ({ c, k: Number(c.split("/")[2]) })).sort((a, b) => a.k - b.k);
-  if (!marcas.length) return { acao: null, ativo: false, proximo: 0 };
-  const { c, k } = marcas[marcas.length - 1];
-  const texto = conteudo(commit, c);
-  const acao = campo(texto, "Ação");
-  const quando = new Date(campo(texto, "Data"));
+  const marcas = arquivos(commit, `prs/${pr}`).map((c) => ({ c, k: Number(c.split("/")[2]) })).filter((m) => Number.isInteger(m.k)).sort((a, b) => a.k - b.k);
+  if (!marcas.length) return { acao: null, ativo: false, proximo: 0, segurando: new Set(), ignoradas: [] };
+  let e = null;
+  const ignoradas = [];
+  for (const { c, k } of marcas) {
+    const texto = conteudo(commit, c);
+    const acao = campo(texto, "Ação"), por = campo(texto, "Por"), quando = new Date(campo(texto, "Data"));
+    const s = sessaoDe(texto), sessao = sessaoDaMarca(texto), fam = s?.familia ?? familia(por);
+    const momento = Number.isNaN(quando.getTime()) ? agora : quando;
+    if (s && e && ativoEm(e, momento)) {
+      const priv = privilegioValido(texto, por);
+      let motivo = "";
+      if (e.acao === "HOLD" && acao === "CLAIMED") motivo = "CLAIMED por cima de um HOLD ativo";
+      if (e.acao === "HOLD" && acao === "LIBERADO" && !priv && ![...e.segurando].every((f) => f === fam) && !campo(texto, "Autor").split(", ").includes(fam)) {
+        motivo = "liberação de um HOLD por quem não o pôs, não é o autor nem o coordenador";
+      }
+      if (e.acao === "CLAIMED" && acao !== "HOLD" && !priv && (e.sessao && sessao ? e.sessao !== sessao : familia(e.por) !== familia(por))) {
+        motivo = `${acao} sobre o CLAIMED de outra sessão`;
+      }
+      if (motivo) { ignoradas.push({ caminho: c, por, motivo }); continue; }
+    }
+    const segurando = acao === "HOLD" ? new Set([...(e && ativoEm(e, momento) && e.acao === "HOLD" ? e.segurando : []), fam]) : new Set();
+    e = { acao, por, sessao, motivo: campo(texto, "Motivo"), quando, segurando, k };
+  }
+  const proximo = marcas[marcas.length - 1].k + 1;
+  if (!e) return { acao: null, ativo: false, proximo, segurando: new Set(), ignoradas };
   // Passo 3: um CLAIMED com data no futuro não fica ativo (um HOLD fica: segurar é o lado seguro).
-  const ativo = acao === "HOLD" || (acao === "CLAIMED" && !noFuturo(quando, agora) && (agora - quando) / 60000 < CLAIM_MIN);
-  return { acao, por: campo(texto, "Por"), motivo: campo(texto, "Motivo"), quando, ativo, proximo: k + 1 };
+  return { ...e, ativo: ativoEm(e, agora), proximo, ignoradas };
 }
 
-/** Marca o PR: CLAIMED (só se ninguém de outra família o tem), HOLD ou LIBERADO. */
-export function marcarPr({ pr, eu, acao, motivo = "", agora = new Date() }) {
+/** Marca o PR: CLAIMED, HOLD ou LIBERADO, com as regras de quem pode (passo 5). */
+export function marcarPr({ pr, eu, acao, motivo = "", pedido = "", dono = "", agora = new Date() }) {
   if (!/^\d+$/.test(String(pr ?? ""))) throw new Error("--pr é obrigatório (o número do PR)");
   if (!["CLAIMED", "HOLD", "LIBERADO"].includes(acao)) throw new Error(`ação desconhecida: ${acao}`);
-  const atual = estadoPr(pr, agora);
-  if (acao === "CLAIMED" && atual.ativo && familia(atual.por) !== familia(eu)) {
-    return { recusado: `#${pr} está com ${atual.acao} de ${atual.por}${atual.motivo ? ` (${atual.motivo})` : ""} desde ${atual.quando.toISOString()}` };
+  const commit = buscar();
+  const atual = estadoPr(pr, agora, commit);
+  const minha = sessaoAtual()?.id ?? null;
+  const outraSessao = atual.ativo && atual.acao === "CLAIMED" && (atual.sessao && minha ? atual.sessao !== minha : familia(atual.por) !== familia(eu));
+  const quemPode = "quem o pôs, o autor (família com commits no PR) ou o coordenador (a sessão nomeada, com --request do pedido na #4932)";
+  const extras = [];
+  let priv = null;
+  if (acao === "CLAIMED" && atual.ativo && atual.acao === "HOLD") {
+    return { recusado: `#${pr} está com HOLD de ${atual.por}${atual.motivo ? ` (${atual.motivo})` : ""}; um CLAIMED não passa por cima dele: o HOLD sai primeiro, liberado por ${quemPode}` };
   }
-  const corpo = [`Ação: ${acao}`, `PR: ${pr}`, `Por: ${eu}`, `Data: ${agora.toISOString()}`, ...(motivo ? [`Motivo: ${motivo}`] : []), ""].join("\n");
+  if (acao === "CLAIMED" && outraSessao) {
+    return { recusado: `#${pr} está com CLAIMED de ${atual.por} (outra sessão) desde ${atual.quando.toISOString()}; um CLAIMED é da sessão que o gravou` };
+  }
+  if (acao === "LIBERADO" && atual.ativo && (atual.acao === "HOLD" || outraSessao)) {
+    const segurou = atual.acao === "HOLD" && [...atual.segurando].every((f) => f === familia(eu));
+    if (!segurou) {
+      if (pedido && pedido !== true) {
+        priv = conferirPrivilegio({ eu, acao: "libera a marca de outro num PR", comando: "release-pr", alvo: String(pr), pedido, dono, agora, commit });
+        conferirDistancia(pr, priv.s.id, commit);
+        extras.push(...linhasPrivilegio(priv));
+      } else if (atual.acao === "CLAIMED") {
+        return { recusado: `#${pr} está com CLAIMED de ${atual.por} (outra sessão) desde ${atual.quando.toISOString()}; só a sessão que o gravou o libera (ou o coordenador, com --request), ou ele vence em ${CLAIM_MIN} minutos` };
+      } else {
+        const c = commitsDoPr(pr);
+        if (!c) return { recusado: `#${pr} está com HOLD de ${[...atual.segurando].join(", ")}; os commits do PR NÃO FORAM CONFERIDOS agora, então não sei se você é o autor; o HOLD fica` };
+        if (!c.familias.has(familia(eu))) return { recusado: `#${pr} está com HOLD de ${atual.por} (famílias que o puseram: ${[...atual.segurando].join(", ")}); só o libera ${quemPode}` };
+        extras.push(`Autor: ${[...c.familias].sort().join(", ")}`);
+      }
+    }
+  }
+  const corpo = [`Ação: ${acao}`, `PR: ${pr}`, `Por: ${eu}`, `Data: ${agora.toISOString()}`, ...(motivo ? [`Motivo: ${motivo}`] : []), ...extras, `Sessão: ${linhaSessao()}`, ""].join("\n");
   try {
-    acrescentar({ [`prs/${pr}/${atual.proximo}`]: corpo }, `#${pr}: ${acao} (${eu})`);
+    acrescentar({ [`prs/${pr}/${atual.proximo}`]: corpo, ...(priv ? avisoPrivilegio({ eu, assunto: `#${pr}: ${atual.acao} de ${atual.por} liberado por ${eu}`, p: priv, agora }) : {}) }, `#${pr}: ${acao} (${eu})`);
   } catch (erro) {
     if (/já existe no correio/.test(String(erro.message ?? erro))) return { recusado: `#${pr} acabou de ser marcado por outro agente; confira com pr-status e tente de novo` };
     throw erro;
@@ -1431,7 +1590,26 @@ export function traduzir(comandoDado, o) {
   return { comando, o: traduzidas };
 }
 
+/**
+ * Passo 6 (A14): referências do correio deixadas no clone por versões anteriores (refs/correio/*, refs/agent-mail/*)
+ * apontam para o histórico privado; um push --mirror as publicaria. A ferramenta não apaga nada no clone de ninguém:
+ * avisa, com o comando. Avisa também quando ela roda de uma pasta temporária que todos podem escrever.
+ */
+export function avisarClone() {
+  let refs = [];
+  try { refs = git(["for-each-ref", "--format=%(refname)", "refs/correio", "refs/agent-mail"]).split("\n").filter(Boolean); } catch { /* não é um repositório git */ }
+  if (refs.length) {
+    console.error(`ATENÇÃO: este clone guarda ${refs.length} referência(s) do correio privado, de uma versão anterior da ferramenta (${refs.slice(0, 3).join(", ")}${refs.length > 3 ? ", ..." : ""}); um push --mirror as publicaria. O correio agora fica em ${DIR_CORREIO}. Apague-as com: git for-each-ref --format='%(refname)' refs/correio refs/agent-mail | xargs -r -n1 git update-ref -d`);
+  }
+  const aqui = new URL(import.meta.url).pathname;
+  // NIT 2 do Claude 1 no #5113: pelas permissões da pasta, não pelo caminho; uma pasta só da sessão (700) não é aviso.
+  let todosEscrevem = false;
+  try { todosEscrevem = (statSync(dirname(aqui)).mode & 0o002) !== 0; } catch { /* sem como ler: sem aviso */ }
+  if (todosEscrevem && !process.env.AGENT_MAIL_TEST) console.error(`ATENÇÃO: a ferramenta roda de ${aqui}, numa pasta que todos podem escrever; instale com o comando de CO (b) do AGENTS.md, em ~/.agent-mail.`);
+}
+
 async function main(argv) {
+  avisarClone();
   const [comandoDado, ...resto] = argv;
   const { comando, o } = traduzir(comandoDado, opcoes(resto));
   const ESCREVEM = new Set(["enviar", "confirmar", "vigiar", "cota", "reivindicar", "segurar", "liberar", "pedir-revisao", "pedir-fila",
@@ -1451,7 +1629,14 @@ async function main(argv) {
     for (const s of sem) console.log(`ATENÇÃO: ${s.nome} está sem cota${s.ate ? ` até ${s.ate.toISOString()}` : ""}: pode não ler tão cedo. Com cota: ${com.join(", ") || "nenhuma outra declarada"}.`);
   } else if (comando === "ler") {
     if (!o.eu) throw new Error("--as é obrigatório");
-    const lista = naoLidas(o.eu);
+    const commit = buscar();
+    const lista = naoLidas(o.eu, commit);
+    if (sessaoAtual()) {
+      // Uma linha só, com a contagem e até 5 identificadores: para o Claude 1 (que também lê no computador do dono) e o
+      // Codex, isso é o normal, e um aviso por mensagem viraria ruído (LEVE do Claude 2 lpgvy no #5113).
+      const semId = confirmadasSemIdentidade(o.eu, new Date(), commit);
+      if (semId.length) console.log(`ATENÇÃO: ${semId.length} mensagem(ns) da sua caixa foram confirmadas só por escrita não identificada nas últimas 24 horas (${semId.slice(-5).join(", ")}${semId.length > 5 ? ", ..." : ""}); se não foi uma sessão da sua família fora da nuvem, leia-as no correio.`);
+    }
     if (!lista.length) console.log("nenhuma mensagem nova");
     else { mostrar(lista); console.log(`\n${lista.length} não lida(s). Confirme com: node agent-mail.mjs ack --as "${o.eu}" ${lista.map((m) => m.id).join(" ")}`); }
   } else if (comando === "confirmar") {
@@ -1464,6 +1649,7 @@ async function main(argv) {
     for (;;) {
       let lista = [];
       let abertos = [];
+      esquecerRetrato(); // passo 6 (A11): cada volta lê um retrato novo, e só um
       try {
         lista = naoLidas(o.eu);
         // --also review,enqueue: acorda também quando há pedido que este agente pode pegar (de outra família).
@@ -1482,9 +1668,13 @@ async function main(argv) {
       try {
         const c = buscar();
         let antes = null;
-        try { antes = git(["rev-parse", "--verify", "-q", REF_VERIFICADO]); } catch { /* primeira conferência */ }
+        try { antes = gitC(["rev-parse", "--verify", "-q", REF_VERIFICADO]); } catch { /* primeira conferência */ }
+        // NIT 1 do Claude 1 no #5113: na primeira vez do repositório próprio, vale a marca antiga do clone, se houver;
+        // assim uma reescrita feita antes da troca de versão ainda é denunciada.
+        if (!antes) { try { antes = /^[0-9a-f]{40}/.exec(readFileSync(ARQUIVO_ANCORA(), "utf8"))?.[0] ?? null; } catch { /* nenhuma guardada */ } }
+        if (!antes) { try { antes = git(["rev-parse", "--verify", "-q", REF_VERIFICADO]); } catch { /* o clone não tem marca antiga */ } }
         const r = conferirSoAcrescentar(c, antes || null);
-        if (c) git(["update-ref", REF_VERIFICADO, c]);
+        if (c) gitC(["update-ref", REF_VERIFICADO, c]);
         if (r.reescrito || r.problemas.length) alarme = [r.reescrito ? "o ramo foi reescrito (a última conferência não está mais no histórico)" : "", ...r.problemas].filter(Boolean).join("; ");
       } catch {}
       if (alarme) { console.log(`ALERTA: o ramo correio não só acrescentou: ${alarme}. Avise o coordenador e o dono pelo correio agora; não apague nem reescreva nada.`); return; }
@@ -1503,12 +1693,12 @@ async function main(argv) {
     else { for (const p of r.problemas) console.log(p); process.exitCode = 1; }
   } else if (comando === "cota") {
     if (!o.eu || (!o.sem && !o.com)) throw new Error('use: set-quota --as "Claude N" --exhausted --until 2026-11-22T01:00-03:00   ou   set-quota --as "Claude N" --available');
-    declararCota({ eu: o.eu, sem: Boolean(o.sem), ate: o.ate === true ? null : o.ate ?? null, por: o.por === true ? null : o.por ?? null });
+    declararCota({ eu: o.eu, sem: Boolean(o.sem), ate: o.ate === true ? null : o.ate ?? null, por: o.por === true ? null : o.por ?? null, pedido: o.pedido ?? "", dono: o.dono ?? "" });
     console.log(`registrado: ${o.eu} ${o.sem ? `sem cota${o.ate && o.ate !== true ? ` até ${o.ate}` : ""}` : "com cota"}`);
   } else if (comando === "reivindicar" || comando === "segurar" || comando === "liberar") {
     if (!o.eu) throw new Error("--as é obrigatório");
     const acao = { reivindicar: "CLAIMED", segurar: "HOLD", liberar: "LIBERADO" }[comando];
-    const r = marcarPr({ pr: o.pr, eu: o.eu, acao, motivo: o.motivo === true ? "" : o.motivo ?? "" });
+    const r = marcarPr({ pr: o.pr, eu: o.eu, acao, motivo: o.motivo === true ? "" : o.motivo ?? "", pedido: o.pedido ?? "", dono: o.dono ?? "" });
     console.log(r.recusado ? `RECUSADO: ${r.recusado}` : `#${o.pr}: ${acao} registrado por ${o.eu}`);
     if (r.recusado) process.exitCode = 3;
   } else if (comando === "estado-pr") {

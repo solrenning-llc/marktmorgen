@@ -36,6 +36,14 @@ Deixe a vigia sempre ligada em segundo plano. Ela confere a cada 30 segundos e t
 node ~/.agent-mail/agent-mail.mjs watch --as "Claude 2" --also review,enqueue
 ```
 
+**Onde fica o correio (dono, OWNER-20261121-1904, passo 6, A14).** O correio é privado e o Marktmorgen é público. A ferramenta guarda tudo o que é do correio (as buscas, os objetos, os commits que grava e a marca do só-acrescentar) num repositório git só dela, `~/.agent-mail/correio.git`, criado na primeira vez; nada do correio entra no clone onde ela roda, e um `git push --mirror` desse clone não o leva. As leituras dos PRs, que são públicos, continuam no clone. Se o clone guarda referências do correio de uma versão anterior (`refs/correio/*`, `refs/agent-mail/*`), a ferramenta avisa, sem apagar nada, e mostra o comando:
+
+```bash
+git for-each-ref --format='%(refname)' refs/correio refs/agent-mail | xargs -r -n1 git update-ref -d
+```
+
+O comando que cria o repositório próprio (qualquer um, inclusive `read`) guarda nele a marca do só-acrescentar que estiver no clone, antes que você apague as referências antigas; assim, uma reescrita feita antes da troca de versão ainda é denunciada pela vigia. Ela também avisa quando roda de uma pasta que todos podem escrever (pelas permissões da pasta, não pelo caminho): instale sempre em `~/.agent-mail`.
+
 O Codex não mantém vigia em segundo plano. Ele roda `read`, `list-reviews` e `list-queue` a cada tarefa de hora em hora, então uma mensagem para ele pode levar até 1 hora.
 
 ## Identidade
@@ -43,9 +51,12 @@ O Codex não mantém vigia em segundo plano. Ele roda `read`, `list-reviews` e `
 Todos gravam no correio com a mesma conta do GitHub, então o nome de quem escreve é declarado por ele. Para evitar engano e troca de nome:
 
 - Na nuvem do Claude Code, a ferramenta lê a sessão do próprio ambiente (`CLAUDE_CODE_REMOTE_SESSION_ID`), sem nada digitado, e grava essa sessão no fim de cada mensagem e registro (`Sessão: ...`) e no commit (trailer `Mail-Session: ...`).
-- Ela **recusa escrever com o nome de outra família**: uma sessão da conta do Claude 6 não escreve como "Claude 2". Para registrar a falta de cota de outra família, use `set-quota --as "Claude N" --exhausted --until ... --by "<seu nome>"`.
+- Ela **recusa escrever com o nome de outra família**: uma sessão da conta do Claude 6 não escreve como "Claude 2". A cota de outra família só é declarada pela própria família ou pelo coordenador (passo 5, em "Cota").
 - Ao ler, uma mensagem cujo remetente não bate com a família da sessão que a gravou aparece com **ATENÇÃO, IDENTIDADE**: confira com o remetente antes de agir.
 - Fora da nuvem (o Claude 1 no computador do dono, o Codex), a escrita fica marcada como `Sessão: não identificada`.
+- **Confirmação não identificada (passo 6, A13):** cada confirmação (`ack`) guarda a sessão que a fez. Uma confirmação feita fora da nuvem sai com um aviso, e a família, quando lê identificada (`read`), vê numa linha só quantas mensagens dela foram confirmadas só assim nas últimas 24 horas, com até cinco identificadores, sem ser acordada por isso. A ferramenta tira isso do trailer `Mail-Session` dos commits, num `git log` só, sem abrir cada confirmação: o Claude 1 no computador do dono e o Codex confirmam assim de propósito, mas outro também poderia, com o nome da família.
+- **Um retrato por decisão (passo 6, A11):** cada comando lê o correio uma vez e decide sobre esse retrato; uma escrita busca de novo a ponta, para gravar em cima dela, e a vigia lê um retrato novo a cada volta.
+- **Campos só do cabeçalho (passo 6, A12):** todo campo de um registro (`Exclui:`, `Preferência:`, `Head:`...) é lido das linhas antes da primeira linha vazia. Uma linha assim no texto livre de um pedido ou de uma mensagem nunca vira campo.
 - Limite: isto evita engano; não é assinatura criptográfica. Quem altera o ambiente ou a ferramenta de propósito ainda pode se passar por outro.
 
 ## Versão da ferramenta
@@ -78,7 +89,7 @@ node ~/.agent-mail/agent-mail.mjs confirm-review-record --as "Claude 5 ibqho" <i
 
 - O comentário no PR continua sendo a única prova da revisão para FQ (1), RQ e CV (CO (c)). O registro serve só para tirar a família da fila daquele head e para avisos.
 - O registro vale só para o head registrado: com um head novo, ele deixa de contar.
-- A ferramenta confere no GitHub, pela API REST, que o link é um comentário ou uma revisão daquele PR que cita o head. Se não conseguir, mostra **NÃO CONFERIDO**.
+- A ferramenta confere no GitHub, pela API REST, que o link é um comentário ou uma revisão daquele PR que cita o head, que traz o veredito dado (`READY` ou `CHANGES`, como palavra) na primeira linha, sem o veredito oposto nela, e que é de quem trabalha no repositório (`OWNER`, `MEMBER` ou `COLLABORATOR`) (dono, OWNER-20261121-1904, passo 6, A15). Se não conseguir, mostra **NÃO CONFERIDO**; se algo não bate, mostra o motivo. Isso não prova a revisão: só o comentário no PR prova.
 - Um registro feito por sessão não identificada, de família desconhecida ou gravado com o nome de outra família aparece como NÃO CONFERIDO e não tira ninguém da fila até a sessão nomeada confirmá-lo, a pedido do coordenador.
 - Ao ler, toda mensagem gravada sem sessão identificada aparece com "ATENÇÃO: escrita não identificada".
 - Um "ligado" ou uma confirmação só vale se o próprio registro traz a sessão nomeada (ou a reserva), com o nome da família dela, e a linha do pedido da #4932; sem isso, é ignorado (aparece como "ON IGNORADO", lido como desligado). Um registro escrito pelo git direto com essas linhas copiadas ainda passaria: é o limite acima. Vale o registro do commit mais recente, e desligado prevalece: um "ligado" não vale enquanto houver um "desligado" com instante igual ou posterior ao dele, nem com o próprio instante no futuro.
@@ -129,6 +140,47 @@ node ~/.agent-mail/agent-mail.mjs verify-enqueue --as "Claude N" <id do pedido>
 - Cada comando do git tem um limite de tempo (2 minutos): um comando que trava é parado e falha com o motivo.
 - As variáveis de teste (`CORREIO_SEM_COMMITS`, `CORREIO_SEM_GH` e `CORREIO_SEM_VERSAO`) só valem com a marca `AGENT_MAIL_TEST=1` e com os repositórios do correio e dos PRs locais: um caminho absoluto ou `file://`, nunca outra forma de endereço (scp, `ext::`, caminho relativo). Fora disso, cada uma é ignorada com um aviso, uma vez só, e a ferramenta faz a conferência de verdade: uma variável esquecida no ambiente não pula nenhuma conferência.
 
+## Cada caso da auditoria tem um teste que reprova antes (dono, OWNER-20261121-1904, passo 7)
+
+`audit-cases.mjs` roda `agent-mail.test.mjs` contra uma cópia da ferramenta e mostra, para cada caso da auditoria independente (A1 a A15, as provas de conceito e a API fora do ar), quantas verificações o cobrem e quantas falham. O teste do repositório (`tests/agent-mail-tool.test.ts`) exige, na versão atual, pelo menos uma verificação por caso e nenhuma falha.
+
+```bash
+node tooling/agent-mail/audit-cases.mjs
+```
+
+O "reprova antes" é a mesma corrida contra a versão auditada (aff69c9, do ramo `correio`): cada caso precisa ter pelo menos uma verificação que falha.
+
+```bash
+mkdir -p ~/.agent-mail/auditada && git --git-dir ~/.agent-mail/correio.git show aff69c95:agent-mail.mjs > ~/.agent-mail/auditada/agent-mail.mjs && node tooling/agent-mail/audit-cases.mjs ~/.agent-mail/auditada/agent-mail.mjs --expect fail
+```
+
+Resultado em 22/11/2026, com 156 verificações:
+
+| Caso | Gravidade | Verificações | Falham na aff69c9 | Falham agora |
+| --- | --- | --- | --- | --- |
+| A1 | GRAVE | 10 | 6 | 0 |
+| A2 | ALTO | 31 | 29 | 0 |
+| A3 | ALTO | 3 | 3 | 0 |
+| A4 | ALTO | 9 | 8 | 0 |
+| A5 | ALTO | 6 | 6 | 0 |
+| A6 | MÉDIO | 5 | 4 | 0 |
+| A7 | MÉDIO | 7 | 5 | 0 |
+| A8 | MÉDIO | 3 | 3 | 0 |
+| A9 | MÉDIO | 15 | 15 | 0 |
+| A10 | MÉDIO | 15 | 13 | 0 |
+| A11 | LEVE | 4 | 2 | 0 |
+| A12 | LEVE | 1 | 1 | 0 |
+| A13 | LEVE | 2 | 2 | 0 |
+| A14 | LEVE | 3 | 2 | 0 |
+| A15 | LEVE | 4 | 3 | 0 |
+| Prova de conceito 1 | prova | 1 | 1 | 0 |
+| Prova de conceito 3 | prova | 2 | 2 | 0 |
+| API fora do ar | prova | 4 | 3 | 0 |
+
+Contra a versão auditada, o número exato de falhas varia um pouco de uma corrida para outra (em três corridas, A6 deu 4 ou 5 e A10 deu 13 ou 14), porque algumas verificações dependem do relógio. O que o passo 7 exige não varia: cada caso tem ao menos uma falha na versão auditada e nenhuma na atual.
+
+Ficam de fora, declarados, os dois limites que só a identidade autenticada resolve: a prova de conceito 2 (pôr HOLD como outra família com a variável de sessão forjada) e o resto do A2 (a sessão vem de uma variável de ambiente, copiável e herdada por subagente; a linha `Sessão:` pode ser escrita à mão no git). Eles vão na proposta de identidade autenticada, ao dono, antes do passo 8. Nenhum teste finge resolvê-los.
+
 ## Recados
 
 ```bash
@@ -155,6 +207,7 @@ node ~/.agent-mail/agent-mail.mjs list-quotas                                   
 - Declare quando ficar sem cota, com a data em que ela volta. Passada essa data, o correio conta você como com cota de novo.
 - Quem envia para um agente sem cota recebe o aviso na hora, com a lista de quem tem cota para receber no lugar.
 - Um pedido que você tinha pegado deixa de ser seu assim que você fica sem cota, e outro agente pode pegá-lo.
+- **De quem é a cota (dono, OWNER-20261121-1904, passo 5):** cada família declara a própria, de qualquer sessão dela. A cota de outra família só é declarada pelo coordenador: a sessão nomeada, com `--by "<seu nome>"` e o pedido do coordenador na #4932 (`--request`, com a linha `AGENT-MAIL-REQUEST <identificador> set-quota claude-N`), avisada a todos no mesmo commit. Ao ler, uma declaração gravada por sessão de outra família sem esse pedido não vale. As declarações gravadas antes desta versão, sem a linha `Sessão:`, valem como antes.
 
 ## Pedidos de revisão
 
@@ -205,7 +258,13 @@ node ~/.agent-mail/agent-mail.mjs release-pr --as "Claude 3" --pr 4941
 node ~/.agent-mail/agent-mail.mjs pr-status --pr 4941
 ```
 
-- Reivindicar um PR com CLAIMED ativo, ou com HOLD, de outra família é recusado. Se dois agentes reivindicam ao mesmo tempo, só um fica com o PR.
+- Reivindicar um PR com CLAIMED ativo de outra sessão, ou com HOLD ativo, é recusado. Se dois agentes reivindicam ao mesmo tempo, só um fica com o PR.
+- **De quem é cada marca (dono, OWNER-20261121-1904, passo 5):**
+  - um **CLAIMED é da sessão** que o gravou: outra sessão, mesmo da mesma família, não o toma nem o libera enquanto ele vale (2 horas); o coordenador o libera com `--request`;
+  - um **HOLD** é liberado só por quem o pôs (a família que pôs todos os HOLDs ativos; com dois HOLDs de famílias diferentes, nenhuma delas libera o da outra), pelo autor (uma família com commits no PR, conferida na hora e gravada na linha `Autor:`) ou pelo coordenador (a sessão nomeada, com `--request` e a linha `AGENT-MAIL-REQUEST <identificador> release-pr <N>`, nunca num PR que ela escreveu, revisou ou enfileirou);
+  - um CLAIMED não passa por cima de um HOLD ativo: o HOLD sai primeiro;
+  - sem conseguir ler os commits do PR agora, quem não pôs o HOLD não o libera (NÃO CONFERIDO);
+  - ao ler, uma marca gravada nesta versão sem esse direito (à mão ou por cópia antiga) é ignorada; as marcas antigas, sem a linha `Sessão:`, valem como antes.
 - Quem marca um PR no correio escreve também a mesma marca, numa linha, no próprio PR (CLAIMED, UNCLAIMED ou HOLD), porque é lá que a FQ (1) e a AC (m) e (p) a leem.
 
 ## Quando pedir ao dono

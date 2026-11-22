@@ -22,6 +22,7 @@ export function CourseNextStepCard({
   handle,
   courseId,
   productId,
+  lessonId,
   href,
   title,
   price,
@@ -31,6 +32,8 @@ export function CourseNextStepCard({
   handle: string;
   courseId: string;
   productId: string;
+  /** The lesson the card is drawn under (the last one, #3534): a plain "No thanks" goes back to it, not to the course's home. */
+  lessonId?: string;
   href: string;
   title: string;
   price: string;
@@ -80,6 +83,7 @@ export function CourseNextStepCard({
             <input type="hidden" name="handle" value={handle} />
             <input type="hidden" name="course" value={courseId} />
             <input type="hidden" name="product" value={productId} />
+            {lessonId ? <input type="hidden" name="lesson" value={lessonId} /> : null}
             <a href={href} className="btn st-btn">
               {words.see}
             </a>

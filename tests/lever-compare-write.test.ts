@@ -60,11 +60,6 @@ test("recovery route: saves only when the saved setting is still the one the pag
   assert.deepEqual([stale.status, stale.body], [409, { ok: false, error: "changed" }]);
   assert.equal(JSON.stringify((await read()).recovery), before);
 
-  // The page read another address: it was changed since. Nothing is written.
-  const moved = await send("/api/store/recovery", { enabled: false, address: C, expect: { enabled: true, address: C } });
-  assert.deepEqual([moved.status, moved.body.error], [409, "changed"]);
-  assert.equal(JSON.stringify((await read()).recovery), before);
-
   // An expectation that is not a setting is not a request.
   for (const expect of ["on", null, [], { enabled: "true", address: A }, { enabled: true }, { enabled: true, address: 7 }]) {
     const bad = await send("/api/store/recovery", { enabled: false, address: A, expect });
@@ -77,6 +72,30 @@ test("recovery route: saves only when the saved setting is still the one the pag
   assert.equal(fresh.status, 200);
   assert.equal((await read()).recovery.enabled, false);
   assert.equal((await read()).recovery.address, A);
+});
+
+// Codex X6 (7034411888), first LOW: "Off always works". An off read with an older address still
+// stops the reminders, and it never writes that older address over the newer one.
+test("recovery route: off stops the reminders even when only the address changed since; the newer address stays", async () => {
+  const { send, read } = await world();
+  assert.ok((await setRecovery(OWNER, { enabled: true, address: A, asks: true })).ok);
+  const moved = await send("/api/store/recovery", { enabled: false, address: C, expect: { enabled: true, address: C } });
+  assert.equal(moved.status, 200, JSON.stringify(moved.body));
+  const after = (await read()).recovery;
+  assert.deepEqual([after.enabled, after.address], [false, A]);
+  assert.ok((await setRecovery(OWNER, { enabled: true, address: A, asks: true })).ok);
+  assert.ok((await setRecovery(OWNER, { enabled: false, address: C, asks: true }, { enabled: true, address: C })).ok);
+  assert.deepEqual([(await read()).recovery.enabled, (await read()).recovery.address], [false, A]);
+});
+
+// Codex X6 (7034411888), second LOW: a card elsewhere on the same page can save the same setting,
+// so a refusal never claims it was another tab or another person.
+test("a refused save does not blame another tab or person: it may be this same page", () => {
+  for (const file of ["components/recovery-editor.tsx", "components/store-assistant-editor.tsx"]) {
+    const source = readFileSync(file, "utf8");
+    assert.ok(source.includes("elsewhere on this page"), file);
+    assert.ok(!source.includes("changed in another tab or by someone else after this page loaded"), file);
+  }
 });
 
 test("assistant route: the next offer saves only when it is still the one the page read; its other settings are untouched", async () => {

@@ -1228,10 +1228,11 @@ export class MemoryRedis {
         }
         // lib/contacts.ts CONTACT_FENCED_WRITE_IF: CONTACT_WRITE_IF (the row and the mark as read) only while its fence exists,
         // a mark lifted only when older than the fence (its second, on this clock); 2 refused by the fence, 0 changed, 1 written.
-        if (key.startsWith("-- marktmorgen:contact-fenced-write-if:v3\n") && ((args[0] === "5" && args.length === 15) || (args[0] === "6" && args.length === 18))) {
-          const withIndex = args[0] === "6";
-          const [list, marks, agreedCount, leftCount, fence] = args.slice(1, 6);
-          const [field, was, value, print, markWas, liftAsked, agreed, leftBy, lifetime, member, day] = args.slice(withIndex ? 7 : 6);
+        // KEYS[6] the companies' deletion mark, deleted with the lifted print (#4026); KEYS[7] the stores joined.
+        if (key.startsWith("-- marktmorgen:contact-fenced-write-if:v4\n") && ((args[0] === "6" && args.length === 16) || (args[0] === "7" && args.length === 19))) {
+          const withIndex = args[0] === "7";
+          const [list, marks, agreedCount, leftCount, fence, companyMark] = args.slice(1, 7);
+          const [field, was, value, print, markWas, liftAsked, agreed, leftBy, lifetime, member, day] = args.slice(withIndex ? 8 : 7);
           const sha1 = (text: unknown) => (typeof text === "string" ? createHash("sha1").update(text).digest("hex") : "");
           const left = this.run(["PTTL", fence]) as number;
           this.scriptCalls += 1;
@@ -1252,11 +1253,11 @@ export class MemoryRedis {
           }
           this.run(["HSET", list, field, value]);
           this.scriptCalls += 1;
-          if (lift) { this.run(["HDEL", marks, print]); this.scriptCalls += 1; }
+          if (lift) { this.run(["HDEL", marks, print]); this.run(["DEL", companyMark]); this.scriptCalls += 2; }
           if (agreed === "1") { this.run(["INCR", agreedCount]); this.scriptCalls += 1; }
           if (leftBy === "1") { this.run(["INCR", leftCount]); this.scriptCalls += 1; }
           else if (leftBy === "-1") { this.run(["DECR", leftCount]); this.scriptCalls += 1; }
-          if (withIndex) { this.run(["SADD", args[6], member]); this.run(["EXPIREAT", args[6], day]); this.scriptCalls += 2; }
+          if (withIndex) { this.run(["SADD", args[7], member]); this.run(["EXPIREAT", args[7], day]); this.scriptCalls += 2; }
           return 1;
         }
         // lib/waitlist.ts WAIT_CONFIRM: a waitlist entry written back only while its confirmation link exists and the entry still holds what was read.
@@ -1318,22 +1319,26 @@ export class MemoryRedis {
           return out;
         }
         // lib/contacts.ts CONTACT_WRITE_IF: a contact's row written only while it and the address's deleted mark hold what was read, with its counts.
-        // With the person's set of stores joined (KEYS[5], ARGV[9] the store, ARGV[10] its day), added to after the checks.
-        if (key.startsWith("-- marktmorgen:contact-write-if:v1\n") && ((args[0] === "4" && args.length === 13) || (args[0] === "5" && args.length === 16))) {
-          const withIndex = args[0] === "5";
-          const [list, marks, agreedCount, leftCount] = args.slice(1, 5);
-          const [field, was, value, print, markWas, lift, agreed, left, member, day] = args.slice(withIndex ? 6 : 5);
+        // KEYS[5] the companies' deletion mark, deleted with the lifted suppression (#4026). With the person's set of
+        // stores joined (KEYS[6], ARGV[9] the store, ARGV[10] its day), added to after the checks.
+        if (key.startsWith("-- marktmorgen:contact-write-if:v2\n") && ((args[0] === "5" && args.length === 14) || (args[0] === "6" && args.length === 17))) {
+          const withIndex = args[0] === "6";
+          const [list, marks, agreedCount, leftCount, companyMark] = args.slice(1, 6);
+          const [field, was, value, print, markWas, lift, agreed, left, member, day] = args.slice(withIndex ? 7 : 6);
           const sha1 = (text: unknown) => (typeof text === "string" ? createHash("sha1").update(text).digest("hex") : "");
           if (sha1(this.run(["HGET", list, field])) !== was) return 0;
           if (print !== "" && sha1(this.run(["HGET", marks, print])) !== markWas) return 0;
           this.run(["HSET", list, field, value]);
-          if (lift === "1" && print !== "") this.run(["HDEL", marks, print]);
+          if (lift === "1" && print !== "") {
+            this.run(["HDEL", marks, print]);
+            this.run(["DEL", companyMark]);
+          }
           if (agreed === "1") this.run(["INCR", agreedCount]);
           if (left === "1") this.run(["INCR", leftCount]);
           else if (left === "-1") this.run(["DECR", leftCount]);
           if (withIndex) {
-            this.run(["SADD", args[5], member]);
-            this.run(["EXPIREAT", args[5], day]);
+            this.run(["SADD", args[6], member]);
+            this.run(["EXPIREAT", args[6], day]);
           }
           return 1;
         }
@@ -2932,18 +2937,23 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return typeof was === "string" ? [1, new TextEncoder().encode(was).length] : [1];
         }
-        if (key.startsWith("-- marktmorgen:crm-companies-write:v1\n") && args[0] === "2" && args.length >= 4 && (args.length - 4) % 2 === 0) {
-          // lib/crm-companies.ts WRITE_COMPANIES: written only while the lock still holds this change's token. It differs
-          // from Redis only on keys of the wrong type: a lock key that is not a string reads here as not ours (0), where
-          // Redis's GET would fail the script; a hash key that is not a hash fails in both.
-          const [lock, target, token] = [args[1], args[2], args[3]];
+        const companyKeys = Number(args[0]);
+        if (key.startsWith("-- marktmorgen:crm-companies-write:v2\n") && Number.isSafeInteger(companyKeys) && companyKeys >= 2 && args.length >= companyKeys + 2 && (args.length - companyKeys - 2) % 2 === 0) {
+          // lib/crm-companies.ts WRITE_COMPANIES: written only while the lock still holds this change's token, and none
+          // of the people it links is marked as deleted from the store (2). It differs from Redis only on keys of the
+          // wrong type: a lock key that is not a string reads here as not ours (0), where Redis's GET would fail the
+          // script; a hash key that is not a hash fails in both.
+          const [lock, target] = [args[1], args[2]];
+          const marks = args.slice(3, companyKeys + 1);
+          const token = args[companyKeys + 1];
           this.live(lock);
           this.live(target);
           if (this.data.get(lock) !== token) return 0;
+          if (marks.some((mark) => (this.live(mark), this.data.has(mark)))) return 2;
           const held = this.data.get(target);
           if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
           const hash = this.hash(target);
-          for (let i = 4; i < args.length; i += 2) {
+          for (let i = companyKeys + 2; i < args.length; i += 2) {
             if (args[i + 1] === "") hash.delete(args[i]);
             else hash.set(args[i], args[i + 1]);
           }

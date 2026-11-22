@@ -72,7 +72,7 @@ import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, deleteIfHeldOnly, setIfHeldOnly, withLock } from "@/lib/redis-lock";
-import { withinLimit } from "@/lib/request-guard";
+import { essentialLimitState, withinLimit } from "@/lib/request-guard";
 import { LOCKED_LIST } from "@/lib/locked-words";
 import { seal, unseal } from "@/lib/secret-box";
 import { SITE_URL } from "@/lib/site-url";
@@ -787,7 +787,10 @@ export async function startSetup(email: string, session: string, backupRaw: stri
   const backup = normaliseEmail(backupRaw);
   if (!backup || backup.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(backup)) return "backup";
   if (backup === normaliseEmail(email)) return "same";
-  if (!(await withinLimit("two-step-backup", normaliseEmail(email), 5, 60 * 60))) return "limited";
+  // A company-paid email to an address the person typed: past the hour's codes "limited"; a count that cannot be read
+  // sends nothing and says so ("unsent"), never "limited" and never sent uncounted (Claude 6 on #2674).
+  const codes = await essentialLimitState("two-step-backup", normaliseEmail(email), 5, 60 * 60);
+  if (codes !== "within") return codes === "exceeded" ? "limited" : "unsent";
   const secret = newSecret();
   const confirm = confirmCode();
   const sent = isSenderConfigured()
@@ -878,7 +881,9 @@ export async function sendRescue(token: string, origin: string): Promise<"sent" 
   if (held?.viaRecovery) return "none";
   const backup = await backupOf(email, record);
   if (!backup) return "none";
-  if (!(await withinLimit("two-step-rescue", normaliseEmail(email), 3, 60 * 60))) return "limited";
+  // As the backup code above: an unreadable count sends no link ("unsent"), never "limited" (Claude 6 on #2674).
+  const links = await essentialLimitState("two-step-rescue", normaliseEmail(email), 3, 60 * 60);
+  if (links !== "within") return links === "exceeded" ? "limited" : "unsent";
   const rescue = randomBytes(32).toString("hex");
   // Tied to the address it goes to first: once the owner takes that address away or replaces it, it turns nothing off.
   if (!(await bindLink("rescue", rescue, backup, 15 * 60))) return "unsent";

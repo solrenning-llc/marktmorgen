@@ -64,6 +64,7 @@ import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { RETURNING_CODE_REQUEST_UNITS } from "@/lib/returning-code";
 import { SHELF_REQUEST_UNITS } from "@/lib/course-shelf";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
+import { DRIP_MONTH_UNITS_PER_STORE_EMAIL, dripStartUnits } from "@/lib/drip-start-rules";
 import { WINBACK_OPEN_REQUEST_UNITS } from "@/lib/winback";
 import { WINBACK_OPEN_READ } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES, ORDERS_METERED_PROGRESS } from "./plan-cost-registry";
@@ -84,7 +85,7 @@ import { laterPageCost } from "./traffic-cost";
 import { PICTURE_REQUEST_UNITS } from "@/lib/buyer-actions";
 import { LIBRARY_WAITING_UNITS, PRODUCT_CARD_UNITS, affiliateLoadUnits, affiliatePageUnits, listingUnits, sitemapUnits } from "@/lib/public-read-rules";
 import { MAX_POST_PAGES } from "@/lib/store-sitemap";
-import { affiliateLoadRead, affiliatePageRead, libraryCardWait, libraryWaitingRead, publicListingsRead, sitemapRead } from "./plan-cost-registry";
+import { affiliateLoadRead, affiliatePageRead, dripStartRead, libraryCardWait, libraryWaitingRead, publicListingsRead, sitemapRead } from "./plan-cost-registry";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { BOOK_POST_EXTRA_UNITS, BOOK_STRIPE_READS, bookTimesUnits } from "@/lib/book-page-rules";
 import { DISPUTE_READS_PER_READING } from "@/lib/calls";
@@ -315,6 +316,25 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // And its checkout reminder is ASSIST_REMIND_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(ASSIST_REMIND_REQUEST_UNITS * laterPageCost() >= ASSIST_REMIND_READ, `${ASSIST_REMIND_REQUEST_UNITS} x ${laterPageCost()} < ${ASSIST_REMIND_READ}`);
   console.log(`a Store assistant checkout reminder: $${ASSIST_REMIND_READ.toFixed(6)} at most besides its email and model, counted as ${ASSIST_REMIND_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // A drip run's read of a student's start takes units of the store's monthly figure sized by the store's courses
+  // (lib/drip-start-rules.ts), never the store's public requests: at every size, from a store with no course to one
+  // whose every product is a course, the units, each at a later page's cost, cost more than the read.
+  for (const courses of [0, 1, 5, 6, 7, 12, 13, 100, 1_000, MAX_PRODUCTS]) {
+    assert.ok(dripStartUnits(courses) * laterPageCost() >= dripStartRead(courses), `drip start, ${courses} courses: ${dripStartUnits(courses)} x ${laterPageCost()} < ${dripStartRead(courses)}`);
+  }
+  // One read of a one-course store for each email of the store's window, across all its runs (dripMonthUnits).
+  assert.equal(DRIP_MONTH_UNITS_PER_STORE_EMAIL, dripStartUnits(1));
+  assert.ok(read("lib/learn.ts").includes("await takeDripStartUnits(store, units, nowSeconds * 1000)"), "the drip job takes its reads from the store's monthly figure, before each read");
+  assert.ok(read("lib/drip-start.ts").includes("dripMonthUnits(store, now / 1000)") && read("lib/drip-start.ts").includes("allowanceWindow(store, now)"), "counted in the store's allowance window");
+  assert.ok(!read("lib/learn.ts").includes("takeBuyerRead"), "the drip job takes nothing from the store's public requests");
+  assert.ok(read("vercel.json").includes("\"path\": \"/api/cron/courses\",\n      \"schedule\": \"0 11 * * *\""), "the course job runs once a day");
+  console.log(`a drip run's read of one student's start: $${dripStartRead(1).toFixed(6)} at most for a store of one course, taken as ${dripStartUnits(1)} units of the store's monthly figure at $${laterPageCost().toFixed(6)}`);
+  for (const tier of ["creator", "pro", "scale"] as const) {
+    const month = STORE_ALLOWANCES[tier].email * DRIP_MONTH_UNITS_PER_STORE_EMAIL * laterPageCost();
+    assert.ok(month > 0, `the drip job's month for ${tier} is never zero`);
+    assert.equal(COST_LINES.find((line) => line.id === "drip-start-read")?.monthlyUsd(tier), month, `the drip job's start reads are a ${tier} plan line`);
+    console.log(`the drip job's start reads for one ${tier} store: $${month.toFixed(4)} a month at most (plan line drip-start-read)`);
+  }
   // Opening a come-back link's checkout reads whether the person has a membership still running (lib/winback-send.ts): WINBACK_OPEN_REQUEST_UNITS
   // public requests, taken before it, more than its calls to the creator's Stripe account cost.
   assert.ok(WINBACK_OPEN_REQUEST_UNITS * laterPageCost() >= WINBACK_OPEN_READ, `${WINBACK_OPEN_REQUEST_UNITS} x ${laterPageCost()} < ${WINBACK_OPEN_READ}`);

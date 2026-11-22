@@ -92,11 +92,11 @@ export async function GET(request: NextRequest) {
         decided.push(folder);
         continue;
       }
-      const claim = await monthClaim(store.handle, month);
+      const claim = await monthClaim(store, month);
       if (claim !== "ours") {
         // Claimed already: decided. A claim whose answer is unknown is not (review of #4169): the next run claims
         // again and reads "taken" if this write did land, so the store is never skipped for the rest of the month.
-        if (claim === "taken") decided.push(folder);
+        if (claim === "taken" || claim === "gone") decided.push(folder);
         else out.failed += 1;
         continue;
       }
@@ -119,12 +119,13 @@ export async function GET(request: NextRequest) {
         decided.push(folder);
         continue;
       }
-      const period = monthPeriod(store.handle, month);
+      const period = monthPeriod(store, month);
       let missed = false;
       let unconfirmed = false;
       if (chat) {
         const post = await sendPart(period, "posted", () => postToChat(chat, `${message.subject}\n\n${forChat(message.text)}`));
         if (post === "sent") out.posted += 1;
+        if (post === "gone") { decided.push(folder); continue; }
         if (post === "missed") missed = true;
         if (post === "unconfirmed") unconfirmed = true;
       }
@@ -140,6 +141,7 @@ export async function GET(request: NextRequest) {
           idempotencyKey: `numbers-summary:${period.key}`,
         }), { keyHoldsMs: EMAIL_KEY_HOLDS_MS });
         if (email === "sent") out.sent += 1;
+        if (email === "gone") { decided.push(folder); continue; }
         if (email === "missed") missed = true;
         if (email === "unconfirmed") unconfirmed = true;
       }

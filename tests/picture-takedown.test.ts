@@ -331,6 +331,23 @@ async function main(): Promise<void> {
   is("the published product keeps its picture's address", (await now(back.id)).listing.image?.path, back.image.path);
   is("which is still served", servedYear(await fetchPicture(back.image.path)), year);
 
+
+  part("A picture with its 240 px thumbnail (#2801): the thumbnail's old address answers not found too (Claude 1's HIGH)");
+  {
+    const thumbed = await pictured("Thumb cover pack", 61);
+    const folder = await imageFolder(OWNER);
+    const thumb = `images/${folder}/${hex(61 + 2000, 32)}.jpg`;
+    kept.set(thumb, new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 61, 7]));
+    const withThumb: ProductImage = { ...thumbed.image, thumb: { path: thumb, width: 240, bytes: 6 } } as ProductImage;
+    const set = await setProductImage(OWNER, thumbed.id, withThumb);
+    if (!set.ok) throw new Error("no thumbnail");
+    is("control: the thumbnail is served and kept a year", servedYear(await fetchPicture(thumb)), year);
+    is("the takedown says the product is unpublished", await press(report, thumbed.id), 'The product "Thumb cover pack", now unpublished');
+    is("the thumbnail's old address answers not found, kept by nobody", servedYear(await fetchPicture(thumb)), gone);
+    const after = (await now(thumbed.id)).listing.image as (ProductImage & { thumb?: { path: string; width: number } | null }) | null;
+    is("the record's thumbnail is under a new name in the same folder, with its width", [after?.thumb?.path !== thumb, after?.thumb?.path.slice(0, after.thumb.path.lastIndexOf("/")), after?.thumb?.width], [true, thumb.slice(0, thumb.lastIndexOf("/")), 240]);
+    is("the copy holds the thumbnail's bytes", after?.thumb ? (await fetchPicture(after.thumb.path))[2] : "", "ffd8ffe03d07");
+  }
   part("The pictures' own bucket on, its delete of an old name failing: the takedown is not done until it is gone");
   // Codex X5 and Claude 7 on #4357: a takedown said "moved" while the old name still answered from the bucket.
   const bucket: PictureR2Config = { endpoint: "https://acc.r2.cloudflarestorage.com", bucket: "mm-pictures", origin: "https://images.example.com", key: { accessKeyId: "k".repeat(20), secretAccessKey: "s".repeat(40) } };
@@ -343,7 +360,8 @@ async function main(): Promise<void> {
   const first = await withdrawProductPicture(OWNER, mirrored.id, null, remember, { r2: bucket }).then((v) => v, () => "threw");
   is("the press throws, never says moved", first, "threw");
   is("both old names were sent a delete, the picture's failing", r2Deletes.splice(0), [`DELETE ${mirrored.image.path}`, `DELETE ${mirrored.image.small!.path}`]);
-  is("the old names are kept for the next press", remembered, { path: mirrored.image.path, small: mirrored.image.small!.path });
+  // With #2801's thumbnail copy the kept names carry `thumb` too: null for a picture that has none (rule 23, nothing loosened).
+  is("the old names are kept for the next press", remembered, { path: mirrored.image.path, small: mirrored.image.small!.path, thumb: null });
   is("and the failed one is on the bucket's list to be tried again", (await redis.pipeline([["SMEMBERS", PICTURE_DROP_QUEUE]]))[0], [mirrored.image.path]);
   is("the file store's old names already answer not found", servedYear(await fetchPicture(mirrored.image.path)), gone);
   const second = await withdrawProductPicture(OWNER, mirrored.id, remembered, remember, { r2: bucket }).then((v) => v, () => "threw");

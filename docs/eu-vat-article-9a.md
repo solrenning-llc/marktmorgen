@@ -146,3 +146,27 @@ The studio tax editor previously said without qualification that the creator fil
 The actual form describes itself through both visible explanations. Synthetic browser coverage reads the real studio at390/1280, checks scope text and unique accessible references, verifies fitting text and no POST, and does not open Stripe or save settings. This is clarity evidence, not actual screen-reader testing or every tax-state coverage.
 
 The source change adds372characters of static copy/attributes (under1KB additional rendered static content) within the existing studio-page envelope. No extra provider/database/storage/message operation, record, allowance, rate or price; all plan monthly/annual M0 costs/margins stay before=after. The most-tax gate remains failed and sales stay closed. Actual EU collection, coherent location evidence, retention and their paid worst-case reservations remain separate unfinished C-UE work.
+
+## Owner's decisions of 21 Nov 2026 on the three open points
+
+The owner's literal text is in AGENTS.md, section IV, item (j): OWNER-20261121-1529-ART9A-PENDING-DECISIONS, and its complement OWNER-20261121-HHMM-HMRC-EXCHANGE-RATES. Queue item 793 [IV3] tracks the work. The decisions:
+
+- **HMRC rates.** Two tables are used.
+  - **Per-product VAT rates:** gov.uk "VAT rates on different goods and services" (updated 10 July 2026). It is stored with its address, read date, update date and SHA-256, and a missing rate refuses that product's UK sale; this is its own unit.
+  - **Monthly exchange rates:** HMRC's monthly files on the UK Trade Tariff service, used to state a sale in another currency in sterling (VAT Notice 700, 7.6). November and December 2026 are stored in `docs/hmrc-exchange-rates/` with their SHA-256 (#5032).
+  - **Before opening:** both are read again at the source, dated.
+- **Stripe's processing fee on the VAT part: the creator bears it.** Stripe charges it on the creator's account, like the fee on every sale, and Marktmorgen does not give it back. It never goes into `application_fee_amount`, which is what #5024 already does. Still to be built, each tested:
+  - the rule in the Terms and on the pricing and fees page, in plain US English with a numeric example, before the creator signs;
+  - its own line in each sale's statement;
+  - never a card surcharge on the buyer;
+  - no Marktmorgen commission on tax: a future commission is on the price without the tax.
+  Until then, Marktmorgen's worst case keeps counting it (`worstCaseCents`).
+- **Tax records.** The privacy policy and the Terms change in the same PR that builds the record store, never before.
+  - **EU:** only the art. 63c data and the two location items (arts. 24b, 24f), kept 10 years from the end of the sale's year. Art. 369(2) of Directive 2006/112/EC sets that term, and arts. 369k and 369x give the same for the Union OSS and the IOSS; the legal basis is GDPR art. 6(1)(c).
+  - **UK:** at least 6 years (VAT Notice 700/21, 2.4), read again before opening.
+  - **Norway, Switzerland and Canada:** the term of each law, from a dated official source; unchecked fails.
+  - **Use and deletion:** never used for marketing, protected, and deleted automatically at the end of the term. A deletion request erases everything else at once and keeps these only to the legal term (GDPR art. 17(3)(b)), and the reply says so. Access and export include them.
+  - **At checkout:** a short notice with a link before an EU or UK buyer pays.
+  - **Cost:** the stored space goes into the cost registry with a ceiling.
+
+No price, limit, commission, ceiling, gate or flag changes.

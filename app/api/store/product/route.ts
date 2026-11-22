@@ -326,7 +326,8 @@ export async function POST(request: NextRequest) {
         // The product as editProduct read it under the store's lock, never the store record read before it (VR 2).
         const now = done.current;
         if (!now) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
-        const words = now.about && done.statsId ? await readAbout(done.statsId, now.id) : "";
+        // And its description, read with it under the lock (36th triple audit, LEVE): a pair that existed.
+        const words = done.about ?? "";
         return Response.json(
           { ok: false, error: "stale", current: { ...now, about: words, hasAbout: now.about } },
           { status: 409, headers: { "Cache-Control": "private, no-store" } },

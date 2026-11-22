@@ -72,7 +72,7 @@ async function main(){
  for(const mode of ["empty-after","throw-after","throw-before"] as const){
   const f=await fixture(),p=f.proposals[0],id=f.ids[0];await confirmFor(f.store,f.owner,[p],f.owner);let injected=0;
   redis.pipeline=(async commands=>{
-   if(injected===0&&commands.length===1&&commands[0][0]==="EVAL"&&/^-- marktmorgen:about-write-(if|live):/.test(String(commands[0][1]))){injected++;if(mode==="throw-before")throw Error("lost before");await base(commands);if(mode==="throw-after")throw Error("lost after");return[];}
+   if(injected===0&&commands.length===1&&commands[0][0]==="EVAL"&&/^-- marktmorgen:(about-write-(if|live)|product-with-about):/.test(String(commands[0][1]))){injected++;if(mode==="throw-before")throw Error("lost before");await base(commands);if(mode==="throw-after")throw Error("lost after");return[];}
    return base(commands);
   }) as typeof redis.pipeline;
   let u:Awaited<ReturnType<typeof outcome>>;
@@ -88,7 +88,7 @@ async function main(){
   const about=`nl:product:about:${f.statsId}:${id}`;
   redis.pipeline=(async commands=>{
    const c=commands[0];
-   if(wrote===0&&commands.length===1&&c[0]==="EVAL"&&/^-- marktmorgen:about-write-(if|live):/.test(String(c[1]))){wrote++;throw Error("refused before");}
+   if(wrote===0&&commands.length===1&&c[0]==="EVAL"&&/^-- marktmorgen:(about-write-(if|live)|product-with-about):/.test(String(c[1]))){wrote++;throw Error("refused before");}
    if(wrote===1&&read===0&&commands.length===1&&c[0]==="GET"&&c[1]===about){read++;return shape;}
    return base(commands);
   }) as typeof redis.pipeline;
@@ -114,7 +114,7 @@ async function main(){
  part("Every write of the book failing after a confirmation carried out: confirmed again, it is recorded once, never carried out twice");
  {
   const f=await fixture(),p=f.proposals[0],id=f.ids[0];let applies=0;
-  redis.pipeline=(async commands=>{if(isBookWrite(commands,f.book))throw Error("book unwritable");if(commands.length===1&&commands[0][0]==="EVAL"&&/^-- marktmorgen:about-write-(if|live):/.test(String(commands[0][1])))applies++;return base(commands);}) as typeof redis.pipeline;
+  redis.pipeline=(async commands=>{if(isBookWrite(commands,f.book))throw Error("book unwritable");if(commands.length===1&&commands[0][0]==="EVAL"&&/^-- marktmorgen:(about-write-(if|live)|product-with-about):/.test(String(commands[0][1])))applies++;return base(commands);}) as typeof redis.pipeline;
   let r:Awaited<ReturnType<typeof outcome>>;
   try{r=await outcome(()=>confirmFor(f.store,f.owner,[p],f.owner));}finally{redis.pipeline=base;}
   const stuck=await readBook(f.statsId);

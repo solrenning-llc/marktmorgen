@@ -94,7 +94,7 @@ import { type AffiliateSetting, parseAffiliateSetting } from "@/lib/affiliate-se
 import { type ReviewAsk, parseReviewAsk } from "@/lib/review-ask";
 import { type PwywProblem, pwywProblem } from "@/lib/pay-what-you-want";
 import { type CheckoutField } from "@/lib/checkout-fields";
-import { aboutKeyOf } from "@/lib/product-about";
+import { aboutKeyOf, readAbout, readAboutExact } from "@/lib/product-about";
 import { type Currency, DEFAULT_CURRENCY, currencyRule, parseCurrency, priceBounds, priceInRange, readMoney } from "@/lib/money";
 import { type Intro, type IntroProblem, introProblem } from "@/lib/intro-price";
 import { type Yearly, type YearlyProblem, yearlyProblem } from "@/lib/yearly-price";
@@ -163,7 +163,7 @@ import {
 } from "@/lib/catalog";
 import { type Announcement, type StoreSection, parseAnnouncement, parseSections, sectionsWithout } from "@/lib/store-sections";
 import { type VisitUs, parseVisitUs, readVisitUs } from "@/lib/visit-us";
-import { besideHeld, besideSwept, giveBeside, giveData, markBesideSwept, noteData, poolTakeCommands, roomSlots, takeBeside, takeData, takeDataCommands } from "@/lib/store-data";
+import { besideHeld, besideSwept, dataKey, giveBeside, giveData, markBesideSwept, noteData, poolTakeCommands, roomSlots, takeBeside, takeData, takeDataCommands } from "@/lib/store-data";
 import { BESIDE_PRODUCT_BYTES as BESIDE_PRODUCT, besidePoolFor, dataBytes } from "@/lib/store-data-rules";
 import { standingOf } from "@/lib/plan-standing";
 import { type Collection, type CollectionsProblem, MAX_PAIRS, collectionsWithout, parseCollections, readCollectionsInput, readProductIds } from "@/lib/store-collections";
@@ -2172,6 +2172,18 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
   const moved = toPool.length > 0 && (await takeBeside(before, toPool, BESIDE_PRODUCT)) ? toPool : [];
   for (const id of moved) pooled.add(id);
   const goneInRoom = gone.filter((id) => !pooled.has(id));
+  // What the description's slot counts now (36th triple audit on #4238, MEDIUM 1): the take reserves the larger of it and
+  // the new text, and only once the fenced script has written is it set to the new text exactly, so no failure after the
+  // take (a lost lock, an unknown answer, a store gone) ever leaves it counting less than is kept.
+  const aboutBytes = change.about?.text ? dataBytes([change.about.text], 1) : 0;
+  let aboutCounted = 0;
+  if (change.about) {
+    const roomKey = dataKey(before);
+    const read = roomKey ? repliesFor(await redisPipeline([["HGET", roomKey, `ab:${change.about.product}`]]), 1) : [null];
+    const raw = read?.[0];
+    if (!read || (raw !== null && raw !== undefined && !/^\d{1,15}$/.test(String(raw)))) throw new StoreBusyError();
+    aboutCounted = raw === null || raw === undefined ? 0 : Number(raw);
+  }
   const room = [
     ...put.map((product) => ({ slot: `p:${product.id}`, bytes: productBytes(product) + (pooled.has(product.id) ? 0 : BESIDE_PRODUCT), set: true })),
     ...gone.map((id) => ({ slot: `p:${id}`, bytes: 0, set: true })),
@@ -2179,7 +2191,7 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
     // The description's room in the same take as the product's own, so the two are taken together or not at all: a
     // description that does not fit changes no slot, the product's record included (Claude 4 2Wb's MEDIUM on #4238
     // @249b11f056); and a save stopped before this point changes no room (31st triple audit, MEDIUM 2). As takeAboutRoom.
-    ...(change.about ? [{ slot: `ab:${change.about.product}`, bytes: change.about.text ? dataBytes([change.about.text], 1) : 0, set: true }] : []),
+    ...(change.about ? [{ slot: `ab:${change.about.product}`, bytes: Math.max(aboutCounted, aboutBytes), set: true }] : []),
   ];
   if (room.length) {
     const taken = await takeData(before, room);
@@ -2199,6 +2211,9 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
     const reply = repliesFor(await redisPipeline([fenced]), 1)?.[0];
     if (reply === -1) throw new ProductStoreGoneError();
     if (reply !== 1) throw new UnknownReplyError("a product's record and description");
+    // Written: the description's slot now counts the new text exactly. A note that is not confirmed leaves the larger
+    // reservation, never less than is kept (ABOUT_ROOM_SETTLE_COMMANDS).
+    if (change.about && aboutBytes < Math.max(aboutCounted, aboutBytes)) await noteData(before, [{ slot: `ab:${change.about.product}`, bytes: aboutBytes, set: true }]);
   }
   await runWrites(writes);
   if (!(await setIfHeld(held, owner, json))) throw new StoreBusyError();
@@ -4201,9 +4216,37 @@ export async function addProduct(
 /** Parts submitted with the studio form: omitted fields keep their saved values. */
 export type StudioProductParts = { intro?: Intro | null; yearly?: Yearly | null; about?: string | null };
 
+/**
+ * Commands a description write adds to the catalog commit for its room (36th triple audit on #4238, MEDIUM 1): the slot's
+ * count read (HGET) before the take, and the take that sets it to the new text exactly once written (one slot). Priced in
+ * tests/plan-cost-registry.ts aboutFenceUsd with ABOUT_FENCE_EXTRA_COMMANDS.
+ */
+export const ABOUT_ROOM_SETTLE_COMMANDS = 1 + takeDataCommands(1);
+
+/**
+ * A product's long description prepared for the catalog commit (PRODUCT_WITH_ABOUT), under the store's lock: a store from
+ * before statistics ids or ids is given them first, once and for good (as ensureStoreId and storeNamedForAbout do), so
+ * the text is never put under a namespace its erasure cannot find, then the write with the store's erasure fence. Shared
+ * by the studio's form (editProduct) and an agent's accepted proposal (setProductAboutIf). `statsId` and `sid` are what
+ * the final save must carry when they were given here.
+ */
+async function aboutWriteFor(store: Store, save: Save, id: string, text: string): Promise<{ about: NonNullable<ProductChange["about"]>; statsId: string; sid: string | null }> {
+  let room = store.statsId ? store : await save({ ...store, statsId: newListId() });
+  const statsId = room.statsId;
+  if (!statsId) throw new StoreBusyError();
+  let sid: string | null = null;
+  if (!STORE_ID_PATTERN.test(room.sid)) {
+    room = await save({ ...room, sid: newListId() });
+    await redisPipeline([["SET", storeIdKey(room.sid), storeRef(room)]]);
+    sid = room.sid;
+  }
+  const ref = storeRef(room);
+  return { about: { product: id, key: aboutKeyOf(statsId, id), text, fence: { idKey: storeIdKey(room.sid), field: await erasingField(ref), ref } }, statsId, sid };
+}
+
 export type ProductEditResult =
   | Extract<ProductResult, { ok: true }>
-  | { ok: false; reason: Extract<ProductResult, { ok: false }>["reason"] | "stale" | `intro_${IntroProblem}` | `yearly_${YearlyProblem}`; limit?: number; pwyw?: PwywProblem; current?: Listing; statsId?: string | null };
+  | { ok: false; reason: Extract<ProductResult, { ok: false }>["reason"] | "stale" | `intro_${IntroProblem}` | `yearly_${YearlyProblem}`; limit?: number; pwyw?: PwywProblem; current?: Listing; about?: string };
 
 /** Changes something already on the store, keeping its place in the list. */
 export async function editProduct(
@@ -4224,7 +4267,7 @@ export async function editProduct(
   let freeNow = false;
   let descriptionId: string | null = null;
   let namedSid: string | null = null;
-  let stale: { current: Listing; statsId: string | null } | null = null;
+  let stale: { current: Listing; about: string } | null = null;
   // The description, written with the product's record in the catalog commit (PRODUCT_WITH_ABOUT, Codex N1 on #4238).
   let aboutWrite: ProductChange["about"];
   const result = await onProduct<"free" | "call" | "course" | "pwyw" | "title" | "price" | "bundle" | "shipped" | "stale" | `intro_${IntroProblem}` | `yearly_${YearlyProblem}`>(
@@ -4236,7 +4279,9 @@ export async function editProduct(
       if (baseRev !== undefined && (product.rev ?? 0) !== baseRev) {
         // What is saved now, as read here under the lock, goes back with the refusal: never the store record the request
         // read before it waited for the lock, which may predate the save that won (31st triple audit, MEDIUM 1; VR 2).
-        stale = { current: listingOf(product), statsId: store.statsId ?? null };
+        // The description too, read here under the lock with the listing, so the two shown are a pair that existed (36th
+        // triple audit, LEVE): one GET, within PRODUCT_STALE_READ.
+        stale = { current: listingOf(product), about: product.about && store.statsId ? await readAbout(store.statsId, id) : "" };
         return { ok: false, reason: "stale" };
       }
       // Read in the store's own currency, as the store is under the lock.
@@ -4300,22 +4345,12 @@ export async function editProduct(
       if (typeof parts?.about === "string" && (parts.about !== "" || next.about)) {
         // A legacy store's namespace must be durable before text is put under it; a refused catalog commit must
         // never leave text in a newly allocated namespace that the store's erasure cannot find.
-        let room = store.statsId ? store : await save({ ...store, statsId: newListId() });
-        descriptionId = room.statsId;
-        if (!descriptionId) throw new StoreBusyError();
-        // The erasure fence reads the store's id key (PRODUCT_WITH_ABOUT): a store from before ids gets one now, once
-        // and for good, as ensureStoreId names it (lib/product-about-live.ts storeNamedForAbout), here under its lock.
-        if (!STORE_ID_PATTERN.test(room.sid)) {
-          room = await save({ ...room, sid: newListId() });
-          await redisPipeline([["SET", storeIdKey(room.sid), storeRef(room)]]);
-          namedSid = room.sid;
-        }
-        // Its room is taken in the catalog commit, in the same take as the product's own slots (31st triple audit,
-        // MEDIUM 2: taken here, a commit that failed before writing left the room counting the new text while the old one
-        // stayed kept). The text goes with the product's record and its `rev` (Codex N1 on #4238).
-        const ref = storeRef(room);
-        const fence = { idKey: storeIdKey(room.sid), field: await erasingField(ref), ref };
-        aboutWrite = { product: id, key: aboutKeyOf(descriptionId, id), text: parts.about, fence };
+        // The text goes with the product's record and its `rev` (Codex N1 on #4238), its room in the commit's one take
+        // with the product's own slots (31st triple audit, MEDIUM 2; Claude 4 2Wb's MEDIUM on 249b11f056).
+        const prepared = await aboutWriteFor(store, save, id, parts.about);
+        descriptionId = prepared.statsId;
+        namedSid = prepared.sid ?? namedSid;
+        aboutWrite = prepared.about;
         next.about = parts.about !== "";
       }
       return next;
@@ -4328,8 +4363,8 @@ export async function editProduct(
     if (result.reason === "pwyw") return { ok: false, reason: "pwyw", pwyw: pwywWhy };
     if (refusal) return { ok: false, reason: refusal };
     // Set in the callback above, which TypeScript does not follow.
-    const lockRead = stale as { current: Listing; statsId: string | null } | null;
-    if (result.reason === "stale" && lockRead) return { ok: false, reason: "stale", current: lockRead.current, statsId: lockRead.statsId };
+    const lockRead = stale as { current: Listing; about: string } | null;
+    if (result.reason === "stale" && lockRead) return { ok: false, reason: "stale", current: lockRead.current, about: lockRead.about };
     return result;
   }
   return { ok: true, store: result.store, product: result.product };
@@ -5039,6 +5074,38 @@ export async function setReturningCodes(email: string, codes: ReturningCode[]): 
 export type ProductPartResult =
   | { ok: true; store: Store; product: Product }
   | { ok: false; reason: "none" | "unknown" };
+
+/**
+ * An agent's accepted proposal for a product's long description (lib/agent-kinds.ts PRODUCT_DESCRIPTION), in one step
+ * under the store's lock (36th triple audit on #4238, MEDIUMs 2 and 3): written only while the description still reads
+ * `expected`, compared here under the lock, with the product's mark and a new revision, in the catalog commit
+ * (PRODUCT_WITH_ABOUT) and with its room in the commit's one take. A tab saving meanwhile waits for the lock and is then
+ * refused as stale, and nothing is written or counted outside the lock. "changed" when it reads something else now:
+ * nothing written.
+ */
+export async function setProductAboutIf(email: string, id: string, expected: string, text: string): Promise<ProductPartResult | { ok: false; reason: "changed" }> {
+  let aboutWrite: ProductChange["about"];
+  let given: { statsId: string; sid: string | null } | null = null;
+  const result = await onProduct<"changed">(
+    email,
+    id,
+    async (product, store, _held, save) => {
+      const now = product.about && store.statsId ? await readAboutExact(store.statsId, id) : "";
+      if (now !== expected) return { ok: false, reason: "changed" };
+      const prepared = await aboutWriteFor(store, save, id, text);
+      aboutWrite = prepared.about;
+      given = { statsId: prepared.statsId, sid: prepared.sid };
+      return { ...product, about: text !== "", rev: (product.rev ?? 0) + 1 };
+    },
+    () => {
+      const named = given as { statsId: string; sid: string | null } | null;
+      return named ? { statsId: named.statsId, ...(named.sid ? { sid: named.sid } : {}) } : {};
+    },
+    undefined,
+    () => aboutWrite,
+  );
+  return result.ok ? { ok: true, store: result.store, product: result.product } : result;
+}
 
 /** Changes one product in place with `change`, and saves the store. */
 async function changeProduct(

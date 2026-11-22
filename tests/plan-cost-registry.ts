@@ -108,7 +108,7 @@ import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
 import { PERSON_ARG_BYTES } from "@/lib/crm";
 import { BUYER_NOTICE_DAYS, BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
 import { PAYPAL_PAGE, buyerPagesCap } from "@/lib/closing-buyers";
-import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORES_PER_ACCOUNT, MAX_STORE_BYTES, MOVE_BESIDE_BATCH, MOVE_BESIDE_BATCHES, MOVE_BESIDE_BATCH_COMMANDS, MOVE_BESIDE_SWEEP_COMMANDS } from "@/lib/store";
+import { ABOUT_ROOM_SETTLE_COMMANDS, MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORES_PER_ACCOUNT, MAX_STORE_BYTES, MOVE_BESIDE_BATCH, MOVE_BESIDE_BATCHES, MOVE_BESIDE_BATCH_COMMANDS, MOVE_BESIDE_SWEEP_COMMANDS } from "@/lib/store";
 import { DELETED_STORE_DELETE_BATCH, DELETED_STORE_LIST_PAGES } from "@/lib/deleted-store-files";
 import { FORGET_LATE_PASSES, FORGET_TRIES } from "@/lib/store-forget-retry";
 import { NOTE_RUN_BYTES, NOTE_RUN_COMMANDS } from "@/lib/podcast-access";
@@ -1315,11 +1315,13 @@ export function besideSaveUsd(tier: Tier): number {
  * A product's long description written fenced by the store's erasure (lib/product-about-live.ts writeStoreAbout and
  * writeStoreAboutIf, Codex L-20261120-1755): ABOUT_FENCE_EXTRA_COMMANDS more than the unfenced write, as Upstash bills a
  * script's inner commands. Priced on every studio and API request of the month as if each wrote two (an agent's
- * proposal confirmed, then put back), the most one request writes. An import's rows carry theirs in
+ * proposal confirmed, then put back), the most one request writes. Each such write in a product's catalog commit
+ * (lib/store.ts PRODUCT_WITH_ABOUT: the studio's form and an agent's proposal) also reads its room's count and sets it
+ * exactly once written, ABOUT_ROOM_SETTLE_COMMANDS more (36th triple audit on #4238). An import's rows carry theirs in
  * IMPORT_WORST_COMMANDS_PER_ROW and a store copy's products in COPY_COMMANDS.product.
  */
 export function aboutFenceUsd(tier: Tier): number {
-  return (STORE_ALLOWANCES[tier].studio + STORE_ALLOWANCES[tier].api) * 2 * ABOUT_FENCE_EXTRA_COMMANDS * COMMAND;
+  return (STORE_ALLOWANCES[tier].studio + STORE_ALLOWANCES[tier].api) * 2 * (ABOUT_FENCE_EXTRA_COMMANDS + ABOUT_ROOM_SETTLE_COMMANDS) * COMMAND;
 }
 
 /**
@@ -2998,7 +3000,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/sales-goal.ts", names: ["SALES_GOAL_WRITE_COMMANDS"] },
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "studio"] },
       // A product save's record and description in one fenced script, billed as the fenced write it replaces (#4238).
-      { file: "lib/store.ts", names: ["PRODUCT_WITH_ABOUT"] },
+      { file: "lib/store.ts", names: ["PRODUCT_WITH_ABOUT", "ABOUT_ROOM_SETTLE_COMMANDS"] },
       { file: "lib/studio-allowance-rules.ts", names: ["STUDIO_PAGE_UNITS", "ESSENTIAL_PER_DAY", "ESSENTIAL_NEEDS"] },
       { file: "lib/store-data.ts", names: ["BESIDE_SAVE_COMMANDS", "poolTakeCommands"] },
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },

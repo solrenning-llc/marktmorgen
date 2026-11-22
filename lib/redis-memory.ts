@@ -3365,6 +3365,29 @@ export class MemoryRedis {
           }
           return n;
         }
+        // lib/low-stock-alert.ts LOW_STOCK_GIVE_BACK: a crossing that reached nobody put back in one step, the day's mark
+        // and the count seen both or neither, and the store's place when asked (Codex X6 on #3725).
+        if (key.startsWith("-- marktmorgen:low-stock-give-back:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, mark, record, dayCount, value, field, wroteSha, before, place] = args;
+          this.scriptCalls += 1;
+          if (this.run(["GET", mark]) !== value) return 0;
+          const current = this.run(["HGET", record, field]);
+          if (typeof current !== "string" || createHash("sha1").update(current).digest("hex") !== wroteSha) return 0;
+          this.run(["HSET", record, field, before]);
+          this.run(["DEL", mark]);
+          if (place === "1") this.run(["DECR", dayCount]);
+          return 1;
+        }
+        // lib/low-stock-alert.ts LOW_STOCK_RESCHEDULE: a product's next check, set only while its score is still the one
+        // the job read (Codex X6's LOW on #3814).
+        if (key.startsWith("-- marktmorgen:low-stock-reschedule:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, set, entry, readAt, next] = args;
+          this.scriptCalls += 1;
+          const score = this.run(["ZSCORE", set, entry]);
+          if (score === null || Number(score) !== Number(readAt)) return 0;
+          this.run(["ZADD", set, "XX", next, entry]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:form-keep:v1\n") && args[0] === "1" && args.length === 4) {
           const listKey = args[1];
           this.live(listKey);

@@ -30,8 +30,10 @@ import { inTrial, monthlyAllowance, usedThisMonthExact } from "@/lib/mail";
 import { isRedisConfigured } from "@/lib/redis";
 import { confirmedEmailUsage } from "@/lib/email-usage-summary";
 import { EmailUsageSummary } from "@/components/email-usage-summary";
-import { healthId, listHealth, pauseForSending, pauseWords, pausedFor } from "@/lib/mail-health";
+import { healthId, pauseForSending, pauseWords, pausedFor } from "@/lib/mail-health";
+import { listHealthExact } from "@/lib/list-health-read";
 import { HEALTH_NOTE, healthAdvice, healthLevels, healthLine } from "@/lib/mail-health-levels";
+import { ListHealthTable, ListHealthUnread } from "@/components/list-health-table";
 import { PLAN_TITLES, PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";
 import { EmailStudio } from "@/components/email-studio";
 import { AutomationDraftBox } from "@/components/automation-draft";
@@ -96,7 +98,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
     // of its addresses bounced or reported it (lib/mail-health.ts).
     pausedFor(healthId(store)),
     // The same seven days the pause reads, said before it comes (599 [KB20], lib/mail-health-levels.ts).
-    listHealth(healthId(store)).catch(() => null),
+    // Read exactly (lib/list-health-read.ts, rule 24; Claude 1 cloud on #2314): a reply not read whole is null, never counts.
+    listHealthExact(healthId(store)).catch(() => null),
     // Whether no pause is confirmed (null), unlike pausedFor, which says null when it could not read: the
     // health section is shown only then, so a failed read never says "no pause coming" during a pause.
     pauseForSending(healthId(store)).catch(() => undefined),
@@ -267,6 +270,15 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               <p className="mt-2 text-sm text-ink-soft">{healthLine(health)}</p>
               <p className="mt-2 text-sm">{advice.text}</p>
               <p className="mt-2 text-sm text-ink-soft">{HEALTH_NOTE}</p>
+              {/* The same seven days as a table, how far each count is from a pause, and the words explained (570 [DR1], unit 2): no new reading. */}
+              <ListHealthTable health={health} />
+            </section>
+          ) : confirmedPause === null && health === null ? (
+            // The seven days could not be read whole (lib/list-health-read.ts listHealthExact throws on an incomplete
+            // or malformed reply, CX-123 rule 24): said as not read, never hidden as if there were nothing, never as counts.
+            <section aria-labelledby="mail-health-title" className="mt-8 rounded-[var(--r-md)] border border-line bg-white p-5 text-ink" data-mail-health="unread">
+              <h2 id="mail-health-title" className="text-lg font-semibold">Email health: not read just now</h2>
+              <ListHealthUnread />
             </section>
           ) : null}
           {loadedForms === null ? <p role="status" className="notice notice-warn mt-6">Forms could not be checked. Reload before creating or changing a sequence.</p> : null}

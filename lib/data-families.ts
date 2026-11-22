@@ -19,7 +19,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
   "nl:cm:", "nl:cm:unsub:", "nl:copy:", "nl:course:", "nl:crm:co:", "nl:crm:deals:", "nl:crm:pacc:", "nl:crm:pipes:", "nl:crm:tasks:", "nl:crm:v:", "nl:data:", "nl:dc:addr:",
   "nl:dc:mem:", "nl:dc:prod:", "nl:depth:", "nl:erased:", "nl:esync:tags:", "nl:form:r:", "nl:imp:buy:",
   "nl:imp:who:", "nl:inbox:", "nl:inbox:tok:", "nl:intro:c:", "nl:keys:", "nl:lc:", "nl:lnote:", "nl:learn:enr:", "nl:letters:i:", "nl:letters:s:", "nl:oprob:", "nl:withdraw:",
-  "nl:lib:", "nl:mail:bc:", "nl:mail:bcs:", "nl:mail:enr:", "nl:mail:flowq", "nl:mail:flows:", "nl:mail:mk:",
+  "nl:lib:", "nl:ls:", "nl:mail:bc:", "nl:mail:bcs:", "nl:mail:enr:", "nl:mail:flowq", "nl:mail:flows:", "nl:mail:mk:",
   "nl:path:board:v1", "nl:path:board:owners:v1",
   "nl:mail:unsub:", "nl:mv:", "nl:mv:link:", "nl:outreach:", "nl:outreach:stoplink:", "nl:path:",
   "nl:payreq:due", "nl:payreq:o:", "nl:payreq:p:", "nl:payreq:r:", "nl:payreq:s:", "nl:person:",
@@ -100,7 +100,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:rl:aff:click:", "nl:rl:aff:ip:", "nl:rl:cm:addr:", "nl:rl:cm:ev:", "nl:rl:cm:ip:", "nl:rl:creators:", "nl:rl:creators:day:",
   "nl:rl:export:", "nl:rl:free:addr:", "nl:rl:free:ip:", "nl:rl:hooks:test:", "nl:rl:licence:",
   "nl:rl:manage:addr:", "nl:rl:manage:ip:", "nl:rl:orders:addr:", "nl:rl:orders:ip:", "nl:rl:phone:quiet:",
-  "nl:rl:phone:test:", "nl:rl:signin:", "nl:rl:team-invite:", "nl:rlm:", "nl:sale:told:", "nl:sblocks:",
+  "nl:rl:phone:test:", "nl:rl:signin:", "nl:rl:team-invite:", "nl:rlm:", "nl:sa:due", "nl:sale:told:", "nl:sblocks:",
   "nl:sdemo:", "nl:sdemo:{<session>}:<family>[:<part>]", "nl:sender:", "nl:ses:did:", "nl:ses:h:", "nl:ses:maybe:", "nl:ses:once:", "nl:ses:rest:", "nl:ses:state", "nl:ses:told:",
   "nl:share:applied", "nl:share:lock", "nl:share:read-until", "nl:share:stores", "nl:ship:done:",
   "nl:ship:mail:all", "nl:ship:mail:closed:", "nl:ship:mail:due", "nl:ship:mail:erased:",
@@ -122,7 +122,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:voice:", "nl:voice:lock:", "nl:watch:due", "nl:watch:folders:", "nl:watch:monthly:",
   "nl:watch:opened:", "nl:watch:sec:", "nl:wb:", "nl:wb:cursor", "nl:wb:link:", "nl:wb:n:", "nl:wb:once:", "nl:wb:open:",
   "nl:weekly:lock", "nl:weekly:off", "nl:weekly:seen:", "nl:weekly:sent:", "nl:weekly:to:", "nl:wf:abandoned:", "nl:wf:day:", "nl:wf:ver:pause:",
-  "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
+  "nl:ls:due", "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
   "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check",
   "nl:yearly:fallback:try:", "nl:yearly:fallback:void", "nl:yearly:link:",
   "nl:mail:pin:", "nl:ppsell:receipt:", "nl:ppsell:mail:", "nl:ppsell:start:", "nl:ppsell:try:",
@@ -325,6 +325,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:lib:": L, "nl:lib:joined:": L, "nl:lib:link:": X(1),
   "nl:pm:c:": X(1), "nl:pm:day:": X(2), "nl:pm:done:": X(2), "nl:pm:r:": X(1), "nl:pm:t:": X(1),
   "nl:listed:": X(8),
+  "nl:ls:": E, "nl:ls:due": I,
   "nl:lostdispute:cursor:": X(30), // a job's place in a store's lost disputes (lib/refunds.ts), thirty days at the most
   // ---------------------------------------------------------------- m
   "nl:mail-check:last": C, "nl:mail-check:lock": C, "nl:mail-check:runs": C,
@@ -450,7 +451,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // A store's receipt numbers (601 [KB22] U2, lib/receipt-number.ts): by its id, gone with it.
   "nl:rcpt:n:": E, "nl:rcpt:seq:": E,
   "nl:sale:told:": X(40),
-  "nl:sa:": E, "nl:sa:t:": T("nl:erase:ix:", 7),
+  "nl:sa:": E, "nl:sa:due": I, "nl:sa:t:": T("nl:erase:ix:", 7),
   "nl:save:": E,
   "nl:sblock:uses:": E, "nl:sblocks:": E,
   "nl:sender:": C,

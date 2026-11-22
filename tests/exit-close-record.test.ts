@@ -70,5 +70,43 @@ const notice: ExitNotice = { to: "https://example.com/shop", host: "example.com"
     is(`${handle}: held until the notice ends, never less than the quarantine`, left >= Math.max(RELEASE_QUARANTINE_DAYS * 86_400, until) - 5 && left <= Math.max(RELEASE_QUARANTINE_DAYS * 86_400, until), true);
   }
   is("the record itself is gone", await get(ownerKey("leaver@example.com")), null);
+
+  // Codex X6's MEDIUM on #3648 (7058659057): the notice can change between the caller's read and the closing lock.
+  // What the old addresses carry, and how long they are held, is read from the record under the lock, never from the
+  // caller's copy: a notice chosen since is the one published; one taken off since is not.
+  part("A notice changed after the caller read the store");
+  const later: ExitNotice = { to: "https://example.org/new-home", host: "example.org", closedAt: now - DAY, setAt: now - 2 * DAY };
+  is("a store with no notice yet is made", (await claimHandle("chooser@example.com", "chooser-shop", "Chooser", "")).ok, true);
+  const stale = await storeForEmail("chooser@example.com");
+  is("the caller's copy has no notice", stale?.exitNotice, undefined);
+  await withRecord("chooser@example.com", (value) => { value.exitNotice = later; });
+  await closeStoreRecord(stale!);
+  const chosen = await get(storeHandleKey("chooser-shop"));
+  is("the notice chosen since is the one the old address carries", exitFromReleased(chosen), later);
+  const chosenLeft = await ttl(storeHandleKey("chooser-shop"));
+  const chosenUntil = Math.ceil((later.closedAt + EXIT_NOTICE_DAYS * DAY - Date.now()) / 1000);
+  is("and the address is held until that notice ends", chosenLeft >= Math.max(RELEASE_QUARANTINE_DAYS * 86_400, chosenUntil) - 5, true);
+
+  is("a store with a notice is made", (await claimHandle("undo@example.com", "undo-shop", "Undo", "")).ok, true);
+  await withRecord("undo@example.com", (value) => { value.exitNotice = notice; });
+  const withNotice = await storeForEmail("undo@example.com");
+  is("the caller's copy has the notice", withNotice?.exitNotice, notice);
+  await withRecord("undo@example.com", (value) => { delete value.exitNotice; });
+  await closeStoreRecord(withNotice!);
+  const undone = await get(storeHandleKey("undo-shop"));
+  is("a notice taken off since is not published", exitFromReleased(undone), null);
+  is("the address is released as a store with no notice", /^released:\d{4}-\d{2}-\d{2}T[^ ]+$/.test(String(undone)), true);
+  is("and held for the quarantine only", await ttl(storeHandleKey("undo-shop")), RELEASE_QUARANTINE_DAYS * 86_400);
+
+  // The same for a suspension (Codex X6 on #3730, 7059362180): a store suspended since the caller's read carries no
+  // notice, as a suspended store never does (review of #3730).
+  is("a store with a notice, not suspended, is made", (await claimHandle("paused@example.com", "paused-shop", "Paused", "")).ok, true);
+  await withRecord("paused@example.com", (value) => { value.exitNotice = notice; });
+  const notSuspended = await storeForEmail("paused@example.com");
+  is("the caller's copy is not suspended", Boolean(notSuspended?.suspended), false);
+  await withRecord("paused@example.com", (value) => { value.suspended = new Date(now).toISOString(); });
+  await closeStoreRecord(notSuspended!);
+  is("suspended since: its old address carries no notice", exitFromReleased(await get(storeHandleKey("paused-shop"))), null);
+  is("and is held for the quarantine only", await ttl(storeHandleKey("paused-shop")), RELEASE_QUARANTINE_DAYS * 86_400);
   done();
 })();

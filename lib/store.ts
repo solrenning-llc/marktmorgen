@@ -2366,13 +2366,6 @@ export async function closeStoreRecord(
   extraKeys: string[] = [],
   beforeDelete?: (fresh: Store | null, held: Held) => Promise<void>,
 ): Promise<boolean> {
-  // With a moved notice chosen, the notice goes into the same value and the addresses are held until it ends, never
-  // less than the quarantine (lib/exit-redirect-rules.ts); with none, exactly as before.
-  const now = Date.now();
-  // A suspended store's old address carries no notice (review of #3730).
-  const notice = store.suspended ? null : store.exitNotice ?? null;
-  const released = releasedValue(new Date(now), notice);
-  const hold = notice ? exitHoldSeconds(notice.closedAt, now, RELEASE_QUARANTINE_DAYS) : RELEASE_QUARANTINE_DAYS * 24 * 60 * 60;
   const owner = await ownerKey(storeRef(store));
   let held: Held;
   try {
@@ -2405,6 +2398,16 @@ export async function closeStoreRecord(
     // leaves its account's list at both addresses read, as one moved since is the account's now (Claude 6 on #3643). An
     // answer that is not "done" or "not ours" throws before anything is said closed (rule 24): the closing walk reads the
     // record before it walks the store, and prepares it again while it is there.
+    // With a moved notice chosen, the notice goes into the same value and the addresses are held until it ends, never
+    // less than the quarantine (lib/exit-redirect-rules.ts); with none, exactly as before. Read from the record as it
+    // is under the lock, never from the caller's copy: a notice chosen or taken off since the caller's read is the one
+    // published (Codex X6's MEDIUM on #3648). With the record already gone, the caller's copy is the last known.
+    // A suspended store's old address carries no notice (review of #3730), suspended as the record says under the lock.
+    const kept = fresh ?? store;
+    const exitNotice = kept.suspended ? null : kept.exitNotice ?? null;
+    const now = Date.now();
+    const released = releasedValue(new Date(now), exitNotice);
+    const hold = exitNotice ? exitHoldSeconds(exitNotice.closedAt, now, RELEASE_QUARANTINE_DAYS) : RELEASE_QUARANTINE_DAYS * 24 * 60 * 60;
     const handles = new Set([store.handle, ...store.previousHandles, ...(fresh ? [fresh.handle, ...fresh.previousHandles] : [])]);
     const accounts = new Set(await Promise.all([store.email, ...(fresh ? [fresh.email] : [])].map((email) => accountKey(email))));
     // The id this record holds now: a store from before ids given one since (sameLegacy) releases that one.

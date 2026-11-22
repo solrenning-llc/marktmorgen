@@ -12,13 +12,13 @@
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, storeForEmail } from "@/lib/store";
 import * as alerts from "@/lib/stock-alerts";
-import { askStockAlert, confirmStockAlert, confirmedForRestock, stockAlertAddresses } from "@/lib/stock-alerts";
+import { askStockAlert, clearStockAlerts, confirmStockAlert, confirmedForRestock, leaveStockAlert, stockAlertAddresses } from "@/lib/stock-alerts";
 
 /** How many public requests an ask takes besides the route's own (0 where the code takes none). */
 const STOCK_ALERT_ASK_UNITS = Number((alerts as Record<string, unknown>).STOCK_ALERT_ASK_UNITS ?? 0);
 import { MAX_STOCK_ALERTS } from "@/lib/stock-alert-rules";
 import { CONFIRM_SECONDS, WAIT_SECONDS } from "@/lib/waitlist-rules";
-import { dataUsed } from "@/lib/store-data";
+import { dataKey, dataUsed } from "@/lib/store-data";
 import { COMMANDS } from "./traffic-cost";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -98,6 +98,40 @@ async function main(): Promise<void> {
     is("a new address is taken once ended places make room", fresh.ok, true);
     is("ended places went, and their room came back", ((await dataUsed(store))?.used ?? Number.NaN) < usedFull, true);
     redis.run(["DEL", key, `${key}:x`]);
+  }
+
+  part("Room: a list of unconfirmed places never strands room, whether its places end, leave or are cleared");
+  {
+    await claimHandle("third@example.com", "meadow", "Meadow Goods", "");
+    await ensureStatsId("third@example.com");
+    await ensureListId("third@example.com");
+    const made3 = await addProduct("third@example.com", "Print Three", "", "40", null);
+    if (!made3.ok) throw new Error("no product");
+    const store3 = (await storeForEmail("third@example.com"))!;
+    const pid3 = made3.product.id;
+    const list3 = `nl:sa:${store3.statsId}:${pid3}`;
+    const room3 = dataKey(store3)!;
+    const slot = () => Number(redis.run(["HGET", room3, `sa:${pid3}`]) ?? 0);
+    const ask3 = (email: string, now?: number) => askStockAlert({ store: store3, productId: pid3, email, left: 0, now, pay });
+    const start = realNow() - (CONFIRM_SECONDS * 1000 + DAY);
+    const old: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const r = await at(start, () => ask3(`old${i}@example.com`, start));
+      if (r.ok) old.push(r.leave);
+    }
+    is("three unconfirmed places, their room held in the list's slot", [old.length, slot() > 0], [3, true]);
+    const nowS = Math.floor(realNow() / 1000);
+    const ends = (redis.run(["HVALS", list3]) as string[]).map((v) => (JSON.parse(v) as { x: number }).x);
+    is("the list lasts past every place's own end, so none lapses under room still held", (redis.run(["TTL", list3]) as number) > Math.max(...ends) - nowS, true);
+    // The three have ended: the next ask drops two of them (DROP_ENDED_PER_ASK), the one after the last.
+    const a = await ask3("a@example.com");
+    const b = await ask3("b@example.com");
+    if (!a.ok || !b.ok) throw new Error("not asked");
+    is("the ended places are gone", (redis.run(["HKEYS", list3]) as string[]).sort(), ["a@example.com", "b@example.com"]);
+    // One leaves; the other's restock clears it.
+    is("one leaves", await leaveStockAlert(a.leave, store3), true);
+    is("the other is cleared", await clearStockAlerts(store3, pid3, ["b@example.com"]), 1);
+    is("the list is empty and its slot holds nothing: no room stranded", [redis.run(["HLEN", list3]), slot()], [0, 0]);
   }
 
   part("M1: an ask's worst commands fit in the public requests it takes");

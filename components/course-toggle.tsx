@@ -20,8 +20,11 @@ const MESSAGES: Record<string, string> = {
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 
-/** Turning a product into a course, and the way to its lessons once it is one. */
-export function CourseToggle({ product, newComments = 0 }: { product: Product; newComments?: number }) {
+/**
+ * Turning a product into a course, and the way to its lessons once it is one. `newComments` is null when the new
+ * comments could not be counted: the line says so, never that there are none (rule 24).
+ */
+export function CourseToggle({ product, newComments = 0 }: { product: Product; newComments?: number | null }) {
   const studioHref = useStudioHref();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -41,7 +44,11 @@ export function CourseToggle({ product, newComments = 0 }: { product: Product; n
           <Link href={studioHref(`/studio/course/${product.id}`)} className="btn btn-primary btn-sm">
             {n === 0 ? "Add lessons" : "Edit the course"}
           </Link>
-          {newComments > 0 ? (
+          {newComments === null ? (
+            <Link href={`${studioHref(`/studio/course/${product.id}`)}#comments`} className="text-sm font-semibold text-violet-deep underline underline-offset-4">
+              New comments could not be loaded. Open the course comments
+            </Link>
+          ) : newComments > 0 ? (
             <Link href={`${studioHref(`/studio/course/${product.id}`)}#comments`} className="text-sm font-semibold text-violet-deep underline underline-offset-4">
               {`${newComments} new ${newComments === 1 ? "comment" : "comments"} to read`}
             </Link>

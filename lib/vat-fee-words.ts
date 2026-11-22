@@ -23,7 +23,9 @@
 import { vatOnTop } from "@/lib/eu-vat-amount";
 import { REVIEWED_VAT_FX_ALLOWANCES, vatCollectionCostOf, type VatFxAllowance } from "@/lib/eu-vat-collection-cost";
 import { UK_VAT_RATE_VALID_UNTIL, ukVatOnTop } from "@/lib/uk-vat";
-import { euVatCollectOn, type SwitchInput, ukVatCollectOn } from "@/lib/vat-registrations";
+import {
+  EU_OSS_REGISTRATION, UK_VAT_REGISTRATION, VAT_COMMERCIAL_REVIEWS, euVatCollectOn, type SwitchInput, ukVatCollectOn,
+} from "@/lib/vat-registrations";
 
 /** The Stripe rate the example uses, in basis points: an illustration, never a creator's real rate. */
 export const EXAMPLE_PROCESSING_BPS = 300;
@@ -57,6 +59,11 @@ export type VatFeeWords = {
   /** The worked example, one sentence each, the same on both pages. */
   example: string[];
   figures: VatFeeFigures;
+  /**
+   * The first day these words can show, YYYY-MM-DD: the latest of each place's registration start, the owner's review
+   * of it and the exchange-rate allowance the example's cost rests on. The day before, vatFeeWords gives null.
+   */
+  since: string;
 };
 
 export type VatFeeInput = {
@@ -131,5 +138,37 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
       `At a ${percent(EXAMPLE_PROCESSING_BPS)} rate, which is only an example, the part of Stripe's fee that falls on the VAT is ${m(f.stripePartCents)}.`,
     ],
     figures: f,
+    since: sinceOf(places, input, now, f.currency, allowances),
   };
+}
+
+function sinceOf(places: VatFeePlace[], input: VatFeeInput, now: Date, currency: string, allowances: readonly VatFxAllowance[]): string {
+  const dates: string[] = [];
+  for (const place of places) {
+    const own = place === "EU" ? input.eu : input.uk;
+    const registration = place === "EU" ? (own?.eu ?? EU_OSS_REGISTRATION) : (own?.uk ?? UK_VAT_REGISTRATION);
+    dates.push(registration.effectiveFrom);
+    for (const review of (own?.reviews ?? VAT_COMMERCIAL_REVIEWS) as readonly { jurisdiction?: unknown; reviewedOn?: unknown }[]) {
+      if (review && review.jurisdiction === place && typeof review.reviewedOn === "string") dates.push(review.reviewedOn);
+    }
+  }
+  const day = now.toISOString().slice(0, 10);
+  for (const a of allowances) {
+    if (a.currency === currency && a.against === undefined && a.checkedOn <= day && day <= a.validThrough) dates.push(a.checkedOn);
+  }
+  return dates.reduce((latest, date) => (date > latest ? date : latest), "");
+}
+
+const REAL_DAY = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+/**
+ * The Terms' "Last updated" date (Terms section 15: it changes when the Terms do): `base`, the day the Terms' own text
+ * last changed, or the first day the VAT paragraph shows (`words.since`) when that is later. An impossible day throws,
+ * so no page prints a date that is not one.
+ */
+export function termsLastUpdated(base: string, words: VatFeeWords | null): string {
+  const day = words && words.since > base ? words.since : base;
+  const at = new Date(`${day}T00:00:00Z`);
+  if (!REAL_DAY.test(day) || !Number.isFinite(at.getTime()) || at.toISOString().slice(0, 10) !== day) throw new Error(`Not a calendar day: ${day}`);
+  return new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }).format(at);
 }

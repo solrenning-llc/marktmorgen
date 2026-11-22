@@ -27,7 +27,7 @@ import { STORAGE_BRAKE_BYTES, storageWords } from "@/lib/storage-quota";
 import { NON_PAYING_DATA_ROOM_BYTES, dataRoomListWords, dataWords } from "@/lib/store-data-rules";
 import { INVITE_PROGRAM_OPEN, INVITE_PAUSE_NOTICE, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS, INVITE_SHARE_PERCENT } from "@/lib/creator-invite-rules";
 import { feeWords, planPriceWords } from "@/lib/fee-words";
-import { vatFeeWords } from "@/lib/vat-fee-words";
+import { termsLastUpdated, vatFeeWords } from "@/lib/vat-fee-words";
 import { TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { HELD_DAYS } from "@/lib/community-approval-rules";
 import { COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
@@ -39,11 +39,14 @@ export const metadata: Metadata = {
     "Terms of Service for Marktmorgen: the creator store at marktmorgen.com, what a creator is responsible for when they sell through it, and how payment works.",
 };
 
+/** The day these Terms' own text last changed; the VAT paragraph moves the shown date when it first appears. */
+const TERMS_UPDATED_ON = "2026-11-10";
+
 export default function TermsPage() {
   const domains = isDomainsConfigured();
   const vat = vatFeeWords();
   return (
-    <LegalPage title="Terms of Service" lastUpdated="November 10, 2026">
+    <LegalPage title="Terms of Service" lastUpdated={termsLastUpdated(TERMS_UPDATED_ON, vat)}>
       <p>
         These Terms of Service (“Terms”) govern your access to and use of the
         websites, products, and subscription services operated by Solrenning

@@ -15,7 +15,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { EXAMPLE_PROCESSING_BPS, vatFeeWords } from "@/lib/vat-fee-words";
+import { EXAMPLE_PROCESSING_BPS, termsLastUpdated, vatFeeWords } from "@/lib/vat-fee-words";
 import { vatOnTop } from "@/lib/eu-vat-amount";
 import { ukVatOnTop } from "@/lib/uk-vat";
 import { vatCollectionCostOf, type VatFxAllowance } from "@/lib/eu-vat-collection-cost";
@@ -131,6 +131,32 @@ function files(dir: string): string[] {
     return /\.(ts|tsx)$/.test(name) ? [path] : [];
   });
 }
+
+test("the words carry the first day they can show: the latest of the registration, the owner's review and the allowance", () => {
+  const later: SwitchInput = { ...EU_ON, reviews: [{ jurisdiction: "EU", registration: "EU372000000", reviewedOn: "2026-11-20", reviewer: "owner" }] };
+  const words = vatFeeWords({ eu: later, uk: OFF, now: NOW, allowances: ALLOWANCES });
+  assert.ok(words);
+  assert.equal(words.since, "2026-11-20");
+  const lateAllowance = ALLOWANCES.map((a) => ({ ...a, checkedOn: "2026-11-21" }));
+  assert.equal(vatFeeWords({ eu: later, uk: OFF, now: NOW, allowances: lateAllowance })?.since, "2026-11-21");
+  // One day earlier the words are not shown at all, so the Terms' date is never earlier than the text.
+  const dayBefore = new Date("2026-11-19T12:00:00Z");
+  assert.equal(vatFeeWords({ eu: { ...later, now: dayBefore }, uk: OFF, now: dayBefore, allowances: ALLOWANCES }), null);
+  const both = vatFeeWords({ eu: EU_ON, uk: { ...UK_ON, reviews: [{ jurisdiction: "UK", registration: "123456789", reviewedOn: "2026-11-18", reviewer: "owner" }] }, now: NOW, allowances: ALLOWANCES });
+  assert.equal(both?.since, "2026-11-18", "with both on, the later place's dates count");
+});
+
+test("the Terms' Last updated date moves with the VAT paragraph, never earlier than its first day (section 15)", () => {
+  assert.equal(termsLastUpdated("2026-11-10", null), "November 10, 2026");
+  const words = vatFeeWords({ eu: { ...EU_ON, reviews: [{ jurisdiction: "EU", registration: "EU372000000", reviewedOn: "2026-11-20", reviewer: "owner" }] }, uk: OFF, now: NOW, allowances: ALLOWANCES });
+  assert.ok(words);
+  assert.equal(termsLastUpdated("2026-11-10", words), "November 20, 2026");
+  assert.equal(termsLastUpdated("2026-11-25", words), "November 25, 2026", "a later Terms change keeps its own date");
+  assert.throws(() => termsLastUpdated("2026-02-30", null), "an impossible base date is refused, never printed");
+  const page = readFileSync(join(process.cwd(), "app/terms/page.tsx"), "utf8");
+  assert.match(page, /lastUpdated=\{termsLastUpdated\(TERMS_UPDATED_ON, vat\)\}/, "the Terms page dates itself through termsLastUpdated");
+  assert.doesNotMatch(page, /lastUpdated="/, "no typed Last updated date on the Terms page");
+});
 
 test("the Terms and the pricing page show these words, and only while vatFeeWords gives them", () => {
   for (const page of ["app/terms/page.tsx", "app/pricing/page.tsx"]) {

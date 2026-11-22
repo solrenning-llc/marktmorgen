@@ -830,5 +830,28 @@ console.log("secrets never printed: a credential in the mailbox address stays ou
   is("semSegredo keeps an ordinary message as it is (CodeQL 257)", mod.semSegredo?.("já existe no correio: prs/3/0; nada é reescrito") === "já existe no correio: prs/3/0; nada é reescrito");
 }
 
+console.log("a session's own box: an ack under the family name does not hide it from that session (22/11/2026, 88a1)");
+{
+  const irma = { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_018ZjhHhsz3gLez5RRaBkkvu" }; // another Claude 6 session, reading as "Claude 6"
+  r = run(["send", "--from", "Claude 2 X", "--to", "Claude 6 UoHAG", "--subject", "only for UoHAG", "--text", "pessoal"], as("c2"));
+  const id = /enviada: (\S+)/.exec(r.out)?.[1];
+  r = run(["ack", "--as", "Claude 6", id], irma);
+  is("a sibling reading as the family can acknowledge it (the box of a closed session is not lost)", r.ok && /confirmadas: 1/.test(r.out), r.out);
+  r = run(["read", "--as", "Claude 6 UoHAG"], as("c6"));
+  is("the session it was sent to still sees it, marked as already acknowledged by the family", r.ok && r.out.includes(id) && /já confirmada com o nome da família/.test(r.out), r.out);
+  r = run(["ack", "--as", "Claude 6 UoHAG", id], as("c6"));
+  is("once the session acknowledges it, it no longer shows", r.ok && !run(["read", "--as", "Claude 6 UoHAG"], as("c6")).out.includes(id), r.out);
+  is("the family reader does not see it again after its own ack (unchanged)", !run(["read", "--as", "Claude 6"], irma).out.includes(id));
+  r = run(["send", "--from", "Claude 2 X", "--to", "Claude 6", "--subject", "for the family", "--text", "familia"], as("c2"));
+  const idF = /enviada: (\S+)/.exec(r.out)?.[1];
+  run(["ack", "--as", "Claude 6", idF], irma);
+  r = run(["send", "--from", "Claude 2 X", "--to", "Claude 6 UoHAG, Claude 6 z5v4", "--subject", "to two sessions", "--text", "duas"], as("c2"));
+  const idDuas = /enviada: (\S+)/.exec(r.out)?.[1];
+  run(["ack", "--as", "Claude 6 UoHAG", idDuas], as("c6"));
+  is("a message to two sessions of a family, acknowledged by one, still shows to the other (the 7f0a of 22/11/2026)",
+    Boolean(idDuas) && run(["read", "--as", "Claude 6 z5v4"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_018ZjhHhz5v4kPZ3osC8Cr6g" }).out.includes(idDuas), r.out);
+  is("a message to the family, acknowledged by the family, does not show to a session (unchanged)", !run(["read", "--as", "Claude 6 UoHAG"], as("c6")).out.includes(idF));
+}
+
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);
 process.exitCode = falhas ? 1 : 0;

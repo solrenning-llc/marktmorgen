@@ -61,6 +61,11 @@ const lockKey = (id: string) => `nl:cm:mail:${id}:lock`;
 /** A community's sends waiting or under way, kept as long as a send's record (SENDS_SECONDS). */
 const sendsKey = (community: string) => `nl:cm:${community}:sends`;
 const SENDS_SECONDS = 60 * 86_400;
+/**
+ * The most ids an erasure reads from a community's sends and looks up (ERASE_ANNOUNCEMENT_LISTS): twice the cap, room
+ * for places whose send is gone (a refused send's lost SREM). More than that refuses the erasure for its retry.
+ */
+export const ERASE_SENDS_READ_MOST = 2 * MAX_SENDS_UNDER_WAY;
 export const unsubKey = (token: string) => `nl:cm:unsub:${token}`;
 const JOB_ID = /^[0-9a-f]{24}$/;
 
@@ -184,14 +189,24 @@ async function letGo(id: string, community?: string): Promise<void> {
 export async function forgetAnnouncementRecipient(community: string, who: string): Promise<number> {
   if (!who || !isRedisConfigured()) return 0;
   const listed = repliesFor(await redisPipeline([["SMEMBERS", sendsKey(community)]]), 1)?.[0];
-  if (!Array.isArray(listed) || listed.length > MAX_SENDS_UNDER_WAY || listed.some((id) => typeof id !== "string")) {
+  if (!Array.isArray(listed) || listed.length > ERASE_SENDS_READ_MOST || listed.some((id) => typeof id !== "string")) {
     throw new UnknownReplyError("a community's announcements under way");
   }
   // A member that is not a send's id names no list this code made: let go here, so it never blocks an erasure again
   // (Claude 7 xAF on #5072, NIT), and never walked.
-  const sends = (listed as string[]).filter((id) => JOB_ID.test(id));
+  let sends = (listed as string[]).filter((id) => JOB_ID.test(id));
   const odd = (listed as string[]).filter((id) => !JOB_ID.test(id));
-  if (odd.length) await redisPipeline([["SREM", sendsKey(community), ...odd]]);
+  // Past the cap (a refused send whose own SREM was lost, Claude 2 lpgvy on #5072, LOW 2), the places whose send
+  // record is gone are let go too, read exactly; only real sends past the cap refuse the erasure, for its retry.
+  let stale: string[] = [];
+  if (sends.length > MAX_SENDS_UNDER_WAY) {
+    const there = repliesFor(await redisPipeline(sends.map((id) => ["EXISTS", jobKey(id)])), sends.length);
+    if (!there || there.some((n) => n !== 0 && n !== 1)) throw new UnknownReplyError("a community's announcements under way");
+    stale = sends.filter((_, i) => there[i] === 0);
+    sends = sends.filter((_, i) => there[i] === 1);
+  }
+  if (odd.length || stale.length) await redisPipeline([["SREM", sendsKey(community), ...odd, ...stale]]);
+  if (sends.length > MAX_SENDS_UNDER_WAY) throw new UnknownReplyError("a community's announcements under way");
   if (!sends.length) return 0;
   return (await blankInLists(sends.map(toKey), who)) > 0 ? 1 : 0;
 }

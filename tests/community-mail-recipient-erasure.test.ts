@@ -70,7 +70,25 @@ test("a read of the sends under way in an unknown shape refuses the erasure", as
 
 test(`more than ${MAX_SENDS_UNDER_WAY} sends under way refuses the erasure, never a partial pass said finished`, async () => {
   await seed();
-  const many = Array.from({ length: MAX_SENDS_UNDER_WAY + 1 }, (_, i) => i.toString(16).padStart(24, "c"));
+  const many = Array.from({ length: MAX_SENDS_UNDER_WAY }, (_, i) => i.toString(16).padStart(24, "c"));
+  await call([["SADD", sends(community), ...many], ...many.map((id): Command => ["SET", `nl:cm:mail:${id}`, "{}"])]);
+  await assert.rejects(forgetCommunityPerson(community, who, email, []));
+});
+
+test("places whose send is gone are let go, so a lost SREM never blocks the erasure (Claude 2 lpgvy on #5072, LOW 2)", async () => {
+  await seed();
+  // The seeded send and MAX_SENDS_UNDER_WAY ids with no send record: one past the cap, as a refused send's lost SREM leaves.
+  const gone = Array.from({ length: MAX_SENDS_UNDER_WAY }, (_, i) => i.toString(16).padStart(24, "d"));
+  await call([["SADD", sends(community), ...gone]]);
+  await forgetCommunityPerson(community, who, email, []);
+  const [left, count] = await call([["LRANGE", recipients(job), 0, -1], ["SCARD", sends(community)]]);
+  assert.deepEqual(left, [ERASED_MARK, next], "the real send is walked");
+  assert.equal(count, 1, "only the real send keeps its place");
+});
+
+test("more ids than an erasure reads refuses it", async () => {
+  await seed();
+  const many = Array.from({ length: 2 * MAX_SENDS_UNDER_WAY }, (_, i) => i.toString(16).padStart(24, "e"));
   await call([["SADD", sends(community), ...many]]);
   await assert.rejects(forgetCommunityPerson(community, who, email, []));
 });

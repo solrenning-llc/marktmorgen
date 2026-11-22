@@ -171,6 +171,33 @@ async function main(): Promise<void> {
   pages = [page([sale], false)];
   is("it reads again", [(await keptSaleFees(STORE, NOW)).kind, asked.length], ["read", 1]);
 
+  part("The day's count always carries its expiry (lib/window-count.ts; tests/window-count-expiry.test.ts)");
+  // The worst moment: the key expires right after the pipeline's first command. With SET NX then INCRBY the INCRBY made
+  // the key again with no expiry, so the count only grew and the store was refused for good; INCRBY then EXPIRE NX
+  // gives a key the increment makes its expiry in the same pipeline, whatever happened before.
+  const dayKey = "nl:salefees:day:stats1:2026-11-11";
+  const ttl = async () => (await redis.pipeline([["TTL", dayKey]]))[0] as number;
+  reset();
+  pages = [page([sale], false)];
+  await keptSaleFees(STORE, NOW);
+  const firstTtl = await ttl();
+  is("a first reading: the count has an expiry of at most two days", firstTtl > 0 && firstTtl <= 2 * 86_400, true);
+  const real = redis.pipeline.bind(redis);
+  let expireBetween = true;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!expireBetween || commands.length < 2 || String(commands[0][1]) !== dayKey) return real(commands);
+    expireBetween = false;
+    const firstReply = await real([commands[0]]);
+    await real([["DEL", dayKey]]);
+    return [...firstReply, ...(await real(commands.slice(1)))];
+  }) as typeof redis.pipeline;
+  await redis.pipeline([["SET", dayKey, "1", "EX", 2 * 86_400]]);
+  expireBetween = true;
+  pages = [page([sale], false)];
+  await keptSaleFees(STORE, NOW + 2 * HOUR, true);
+  redis.pipeline = real;
+  is("the key expired between the two commands: it is gone or has an expiry, never kept forever", await ttl() !== -1, true);
+
   done();
 }
 

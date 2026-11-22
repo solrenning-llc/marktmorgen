@@ -65,7 +65,7 @@ import { AFFILIATE_ID_PATTERN, type Affiliate, VIA_PENDING_META, affiliatesOn, l
 import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { bondsBuyers } from "@/lib/affiliate-bond";
 import { creditsContacts } from "@/lib/affiliate-setting";
-import { revokeRefunded, storeHasKeys } from "@/lib/licence-keys";
+import { endHolderFillRound, fillHolderLines, holderFillLeft, holderFillOn, revokeRefunded, startHolderFillRound, storeHasKeys } from "@/lib/licence-keys";
 import { markRefundedReviews, storeHasReviews } from "@/lib/review-proof";
 import { listensToSales, noteSales } from "@/lib/sale-events";
 import { putOnList, listedAlready } from "@/lib/buyer-list";
@@ -489,7 +489,7 @@ function describe(error: unknown): string {
 }
 
 /** One store: its checkouts of the last day, each handed to what it needs. */
-async function sweepStore(store: Store, counts: SweepCounts, deadline: number, reviewed: boolean, requesting: boolean, taxPass: { policy: unknown; pagesLeft: number }): Promise<void> {
+async function sweepStore(store: Store, counts: SweepCounts, deadline: number, reviewed: boolean, requesting: boolean, taxPass: { policy: unknown; pagesLeft: number }, fillOn = false): Promise<void> {
   // Refunds first: a key that should no longer open anything matters more
   // than a reminder. One failing never stops the checkouts below.
   if (storeHasKeys(store)) {
@@ -497,6 +497,14 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       counts.revoked += await revokeRefunded(store, deadline);
     } catch (error) {
       console.error("reading a store's refunds failed", store.handle, error);
+    }
+    // Keys given before the buyers' own lists get their lines, a bounded share a run, until the store is done (#5136).
+    if (fillOn) {
+      const filled = await fillHolderLines(store, deadline).catch((error: unknown) => {
+        console.error("filling a store's lists of license keys failed", store.handle, describe(error));
+        return false;
+      });
+      if (!filled) await holderFillLeft().catch(() => undefined);
     }
   }
   // A gift refunded in full is taken back from whoever it was given to
@@ -887,6 +895,10 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
   // most once a run: the job's per-store figures (PAYPAL_WATCH_RANGES and
   // NOT_A_COST.PAYPAL_WATCH_BATCH in tests/plan-cost-registry.ts) hold.
   const swept = new Set<string>();
+  // The buyers' lists of license keys still to fill (#5136): one GET a run until a whole round found nothing left; a
+  // round that starts here from the top of the list is marked clean, and its end sets the company's mark.
+  const fillOn = await holderFillOn().catch(() => true);
+  if (fillOn && cursor === "0" && skip === 0) await startHolderFillRound().catch(() => undefined);
 
   while (Date.now() < deadline) {
     const { stores, next } = await storesAfter(cursor);
@@ -910,7 +922,7 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
       if (worthAsking(store, asks) || reviewed || store.paypalSeller || store.paypalPast) {
         counts.stores += 1;
         try {
-          await sweepStore(store, counts, deadline, reviewed, asks, taxPass);
+          await sweepStore(store, counts, deadline, reviewed, asks, taxPass, fillOn);
         } catch (error) {
           // One store's account refusing, or Stripe having a moment, does not
           // hold up everyone after it. It is reached again next time round.
@@ -936,7 +948,10 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
     cursor = next;
     // The end of the list: the next run starts again from the top, rather
     // than this one reading the first stores twice in a row.
-    if (next === "0") break;
+    if (next === "0") {
+      if (fillOn) await endHolderFillRound().catch(() => undefined);
+      break;
+    }
   }
   await redisPipeline([["SET", CURSOR_KEY, `${cursor}|0`]]);
   return counts;

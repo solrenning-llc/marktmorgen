@@ -8,7 +8,7 @@
  */
 import { addProduct, claimHandle, ensureStatsId, setProductKeys, setProductLink, setSubscription, storeForEmail, type Listing } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { holderKey, keyForSale, keysWithoutHolderLine } from "@/lib/licence-keys";
+import { fillHolderLines, holderKey, keyForSale, keysWithoutHolderLine } from "@/lib/licence-keys";
 import { CLOSING, closingFamilyOf, countedInRoom } from "@/lib/data-families";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -73,13 +73,16 @@ async function main(): Promise<void> {
     danas.push(given.key);
   }
 
+  // The store's lists are filled (the five-minute sweep does it once; tests/licence-holder-fill.test.ts): from then on the
+  // copy reads the person's list only. Before it, it reads as main did.
+  while (!(await fillHolderLines(store, Date.now() + 60_000))) { /* one bounded share a run */ }
   const scope = { store, statsId: store.statsId, listId: store.listId ?? null, email: DANA, productIds: products.map((p) => p.id) } as unknown as ErasureScope;
 
   part("Dana's copy holds her three keys, and only hers");
   const keys = await readsOf(() => COPIERS["lib/licence-keys.ts"](scope));
   const copied = (keys.value as { key: string }[]).map((k) => k.key).sort();
   is("her three keys, from a checkout, a bundle's product and an offer after paying", copied, [...danas].sort());
-  is("in one read of her list and one of each product's records", keys.reads.length, 1 + products.length);
+  is("in one read of the store's fill mark, one of her list and one of each product's records", keys.reads.length, 2 + products.length);
   is("no other buyer's key is in her copy", others.some((k) => copied.includes(k)), false);
 
   part("Reading them never reads the store's whole set of keys");

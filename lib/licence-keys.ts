@@ -1189,6 +1189,20 @@ export async function keysOf(store: Store, productIds: string[], email: string):
   });
 }
 
+/**
+ * The person's keys as their data copy reads them (lib/person-copy.ts): read once per copy, so the keys part and the
+ * devices part (lib/licence-activations.ts) share one read (issue #5125). `scope` is the copy's own scope object.
+ */
+const copyReads = new WeakMap<object, ReturnType<typeof keysOf>>();
+export function keysForCopy(scope: { store: Store; productIds: string[]; email: string }): ReturnType<typeof keysOf> {
+  let read = copyReads.get(scope);
+  if (!read) {
+    read = keysOf(scope.store, scope.productIds, scope.email);
+    copyReads.set(scope, read);
+  }
+  return read;
+}
+
 // ---------------------------------------------------------------- email
 
 function displayName(name: string): string {

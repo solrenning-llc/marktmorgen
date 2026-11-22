@@ -272,13 +272,11 @@ const pagesOf = new WeakMap<ErasureScope, { budget: ReadBudget; resume?: string 
 
 /** The first page of a member's community activity, inside this request's budget; where it goes on is kept for copyPerson. */
 async function firstCommunityPage(s: ErasureScope, id: string, who: string): Promise<MemberTracesPage> {
-  let paging = pagesOf.get(s);
-  if (!paging) {
-    paging = { budget: new ReadBudget(COPY_PAGE_MAX_COMMANDS) };
-    pagesOf.set(s, paging);
-  }
-  const page = await memberTracesPage(id, who, paging.budget);
-  paging.resume = page.resume;
+  const paging = pagesOf.get(s);
+  const page = await memberTracesPage(id, who, paging?.budget ?? new ReadBudget(COPY_PAGE_MAX_COMMANDS));
+  // Read outside copyPerson, nothing would carry where it goes on: more than one page fails, never stops short.
+  if (!paging && page.resume !== undefined) throw new Error("a member's community activity takes more than one page: read it through copyPerson");
+  if (paging) paging.resume = page.resume;
   return page;
 }
 

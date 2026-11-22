@@ -4,7 +4,10 @@
  * as a deleted person's files are (lib/person-erasure.ts). The creator's
  * notice says "The link and its file are deleted": before, a delete the file
  * store failed was swallowed, the notice still went out, and the picture
- * stayed with nothing left pointing at it. Synthetic data only.
+ * stayed with nothing left pointing at it. A copyright notice holds the link
+ * instead (#3539, lib/takedown-hold.ts, tests/takedown-restore.test.ts), so
+ * this runs with the other kind of notice, whose link is deleted at once.
+ * Synthetic data only.
  */
 import { addStoreLink, claimHandle, ensureStatsId, setLinkImage, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readReport } from "@/lib/takedown-rules";
@@ -26,9 +29,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 const NOTICE = {
-  kind: "copyright",
+  kind: "other",
   url: "https://marktmorgen.com/@picturenotice",
-  work: "My photograph 'Harbor at dawn', used as this link's picture without my permission.",
+  work: "This link's picture shows my photograph 'Harbor at dawn' and the link sells counterfeit prints of it.",
   original: "https://example.com/harbor-at-dawn",
   name: "Rita Owner",
   email: "rita@example.com",

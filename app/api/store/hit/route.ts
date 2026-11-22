@@ -1,12 +1,11 @@
 import type { NextRequest } from "next/server";
-import { handleTaken, normaliseHandle, storeForHandle } from "@/lib/store";
+import { handleTaken, normaliseHandle, storeForHit } from "@/lib/store";
 import { classifySource, cleanTag } from "@/lib/stats";
 import { countAffiliateClick, countHit, countVisit, isStorePeople } from "@/lib/visit";
 import { isBot } from "@/lib/source-rules";
 import { funnelMark, stepIndex } from "@/lib/page-funnel";
 import { countFunnelStep, funnelVisitor, readPageFunnel } from "@/lib/page-funnel-store";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
-import { productIdFor } from "@/lib/catalog";
 import { markCountGap, takeSignal } from "@/lib/traffic";
 import { type CountKind, HIT_STORE_LIMIT, shareAddress } from "@/lib/traffic-rules";
 import { affiliatesOn } from "@/lib/affiliates";
@@ -110,8 +109,11 @@ export async function POST(request: NextRequest) {
   // An affiliate's arrival is sent on load, like a visit, so it is under the check too (Claude 1's audit, 7070726978, (ii));
   // only a link's click, sent as the page is left, goes without it.
   if ((kind === "v" || kind === "p" || kind === "f" || kind === "a") && (await browserProof()) !== "human") return done();
-  const store = await storeForHandle(handle).catch(() => null);
-  if (!store) return done();
+  // Only the fields a count needs, read inside the database: the store's record, up to MAX_STORE_BYTES, never crosses
+  // the wire for a count (lib/store.ts, storeForHit; #1496, option A). A link's or a product's id is asked about there.
+  const hit = await storeForHit(handle, { link: kind === "l" ? read("id", 40) : "", product: kind === "p" ? read("p", 40) : "" }).catch(() => null);
+  if (!hit) return done();
+  const { store } = hit;
 
   if (kind === "v") {
     const source = classifySource({
@@ -129,7 +131,7 @@ export async function POST(request: NextRequest) {
     // (lib/stats.ts): what its checkouts and sales are measured against.
     await countVisit(request, store);
     const product = read("p", 40);
-    if (product && productIdFor(store, product) === product) await countHit(request, store, { kind: "product", id: product });
+    if (product && hit.productKnown) await countHit(request, store, { kind: "product", id: product });
   } else if (kind === "l") {
     // A click on one of the store's links, an affiliate's visit and a
     // funnel's step are not a page of a visit: each is written inside one of
@@ -142,7 +144,7 @@ export async function POST(request: NextRequest) {
     // independent review of #1496). Never the requests the store's pages are
     // drawn from: these never bring its pages to rest.
     const id = read("id", 40);
-    if (store.statsId && store.links.some((link) => link.id === id) && !isBot(request.headers.get("user-agent") ?? "")) {
+    if (id && hit.linkKnown && store.statsId && !isBot(request.headers.get("user-agent") ?? "")) {
       await countHit(request, store, { kind: "link", id }, (write) => takeSignal(store, write));
     }
   } else if (kind === "f") {

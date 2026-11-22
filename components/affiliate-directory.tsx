@@ -200,7 +200,7 @@ function Numbers({ numbers, currency }: { numbers: DirectoryNumbers; currency: s
     { label: numbers.affiliates === 1 ? "affiliate" : "affiliates", value: count(numbers.affiliates), note: since ? `since ${since}` : "" },
     { label: numbers.clicks === 1 ? "click brought" : "clicks brought", value: count(numbers.clicks), note: `${count(numbers.clickSales)} ${numbers.clickSales === 1 ? "sale" : "sales"} from them` },
     numbers.conversion !== null
-      ? { label: "of clicks became a sale", value: `${numbers.conversion}%`, note: numbers.per100Cents !== null ? `${formatMoney(numbers.per100Cents, currency)} earned per 100 clicks` : "" }
+      ? { label: "sales per 100 clicks", value: `${numbers.conversion}`, note: numbers.per100Cents !== null ? `${formatMoney(numbers.per100Cents, currency)} earned per 100 clicks` : "" }
       : numbers.incomplete
         ? { label: "rates per click", value: "\u2014", note: numbers.incomplete }
         : { label: "rates per click", value: "\u2014", note: `shown after ${MIN_CLICKS_FOR_RATES} clicks` },

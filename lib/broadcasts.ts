@@ -711,6 +711,9 @@ export async function createBroadcast(
   const narrow = isNarrowed(asNarrowed) ? asNarrowed : null;
   // A label as a file or a sequence writes one: cleaned, at most MAX_TAG_LENGTH; empty is none.
   const label = typeof input.label === "string" ? readTags([input.label])[0] ?? null : null;
+  // Only "" (or nothing) is a label left out: text that cleans to no label at all (spaces, a tab) was asked for and is
+  // refused, never read as no narrowing and so as the whole list (Codex X6 on #3925, LOW).
+  if (typeof input.label === "string" && input.label !== "" && label === null) return { ok: false, reason: "label" };
   const now = Math.floor(Date.now() / 1000);
   let sendAt = now;
   if (input.sendAt !== undefined && input.sendAt !== null && input.sendAt !== "") {

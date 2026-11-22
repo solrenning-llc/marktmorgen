@@ -57,6 +57,9 @@ const malformed: [string, Record<string, unknown>][] = [
   ["a product left out that is a number", { notProductId: 7 }],
   ["a label that is a list", { label: ["vip"] }],
   ["a label that is an object", { label: { name: "vip" } }],
+  // Codex X6 on #3925 @b02964c779 (LOW): text that cleans to no label at all is not "left out" ("" is), so never everyone.
+  ["a label of spaces only", { label: "   " }],
+  ["a label of a tab and a line break", { label: "\t\n" }],
 ];
 
 for (const [name, field] of malformed) {

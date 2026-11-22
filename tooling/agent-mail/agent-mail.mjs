@@ -880,17 +880,19 @@ export function pedir({ tipo, de, pr, sha, texto = "", para = "", exclui = "", c
   if (repetido) throw new Error(`já existe pedido de ${tipo} aberto para #${pr} @${repetido.sha}: ${repetido.id}`);
   const carimbo = agora.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
   const id = `${carimbo}-${slug(de)}-${randomBytes(2).toString("hex")}`;
-  const ramo = ramoDoHead(sha, pr);
-  // Passo 4: o pedido grava o head inteiro (40 caracteres), lido agora. Com o head lido de fonte que vale (o ramo do PR ou
-  // um repositório local), um head diferente é recusado; com só a referência do GitHub, que pode atrasar, fica o que foi
-  // dado, e a tomada só entrega o pedido quando o head puder ser conferido.
+  let ramo = ramoDoHead(sha, pr);
+  // Passo 4: o pedido grava o head inteiro (40 caracteres), lido agora de fonte que vale: o ramo do PR, ou um repositório
+  // local. Um head velho não é ponta de ramo nenhum, então o ramo é achado pela referência atual do PR; e, no GitHub, sem
+  // ramo achado, nada é pedido, porque um pedido assim nunca seria entregue e seguraria o primeiro lugar da fila (MÉDIO
+  // do Claude 5 ibuF no #5069).
   let shaFinal = String(sha);
   if (process.env.CORREIO_SEM_COMMITS !== "1") {
+    if (!ramo) { const ref = headDoPr(pr, null).sha; if (ref) ramo = ramoDoHead(ref, pr); }
     const h = headDoPr(pr, ramo);
     if (!h.sha) throw new Error(`o head atual de #${pr} NÃO FOI CONFERIDO agora; nada foi pedido (passo 4: nada NÃO CONFERIDO segue); tente de novo`);
-    const igual = h.sha.startsWith(shaFinal) || shaFinal.startsWith(h.sha);
-    if (igual) shaFinal = h.sha;
-    else if (h.fonte !== "ref") throw new Error(`${shaFinal.slice(0, 10)} não é o head atual de #${pr} (${h.sha.slice(0, 10)}); peça com o head que foi revisado e está no PR`);
+    if (h.fonte === "ref") throw new Error(`o ramo de #${pr} não foi achado (só a referência refs/pull/${pr}/head, que pode atrasar, foi lida, e nenhum ramo tem a ponta nela); nada foi pedido; tente de novo em alguns minutos e confira se o ramo do PR existe e é um só`);
+    if (!(h.sha.startsWith(shaFinal) || shaFinal.startsWith(h.sha))) throw new Error(`${shaFinal.slice(0, 10)} não é o head atual de #${pr} (${h.sha.slice(0, 10)}); peça com o head que foi revisado e está no PR`);
+    shaFinal = h.sha;
   }
   sha = shaFinal;
   const corpo = [`Tipo: ${tipo === "fila" ? "fila" : "revisão"}`, `PR: ${pr}`, `Head: ${sha}`, `Autor: ${de}`, ...(ramo ? [`Ramo: ${ramo}`] : []), ...(para ? [`Preferência: ${para}`] : []),

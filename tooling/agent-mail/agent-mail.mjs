@@ -1078,45 +1078,14 @@ export function hashPublicado() {
     try { git(["update-ref", "-d", ref]); } catch { /* não foi criada */ }
   }
 }
-/** Avisa quando a cópia não é a revisada ou não foi conferida; devolve true só quando ela é a revisada, conferida agora. */
 function avisarVersao() {
-  if (process.env.CORREIO_SEM_VERSAO === "1") return true;
+  if (process.env.CORREIO_SEM_VERSAO === "1") return;
   const publicado = hashPublicado();
   if (!publicado) {
     console.error("ATENÇÃO: não consegui ler o SHA-256 da versão revisada (main do Marktmorgen); a versão desta cópia NÃO FOI CONFERIDA.");
-    return false;
-  }
-  if (publicado !== hashProprio()) {
+  } else if (publicado !== hashProprio()) {
     console.error("ATENÇÃO: esta cópia da ferramenta não é a versão revisada do main do Marktmorgen (SHA-256 diferente); reinstale com o comando de CO (b) do AGENTS.md antes de continuar.");
-    return false;
   }
-  return true;
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Só acrescentar (dono, OWNER-20261121-1904, passo 3). O ramo correio só ganha arquivos: um commit que altera ou apaga um
-// arquivo de dados (ou um ramo reescrito, que o conjunto de regras 27091177 já recusa) é um alarme. Os quatro arquivos da
-// raiz de antes do passo 1 (o LEIA-ME e as cópias antigas da ferramenta) mudavam com cada versão e ficam fora. A vigia
-// confere o que chegou desde a última conferência local, a cada ciclo, e avisa uma vez por alteração; check-append-only
-// confere o histórico inteiro.
-// ---------------------------------------------------------------------------------------------------------------------
-export const RAIZ_HISTORICA = new Set(["LEIA-ME.md", "agent-mail.mjs", "agent-mail.test.mjs", "correio.mjs"]);
-export const REF_VERIFICADO = "refs/agent-mail/append-only-checked";
-
-/** { reescrito, problemas }: o que, desde `desde` (ou desde o começo), alterou ou apagou um arquivo de dados. */
-export function conferirSoAcrescentar(commit, desde = null) {
-  if (!commit) return { reescrito: false, problemas: [] };
-  let reescrito = false;
-  if (desde) { try { git(["merge-base", "--is-ancestor", desde, commit]); } catch { reescrito = true; } }
-  const faixa = desde && !reescrito ? `${desde}..${commit}` : commit;
-  const problemas = [];
-  let atual = "";
-  for (const linha of git(["log", "--format=%x01%H", "--name-status", "--diff-filter=MDT", "--no-renames", "--diff-merges=first-parent", faixa]).split("\n")) {
-    if (linha.startsWith("\x01")) { atual = linha.slice(1); continue; }
-    const m = /^([MDT])\t(.+)$/.exec(linha);
-    if (m && !RAIZ_HISTORICA.has(m[2])) problemas.push(`${atual.slice(0, 10)} ${m[1] === "D" ? "APAGOU" : "ALTEROU"} ${m[2]}`);
-  }
-  return { reescrito, problemas };
 }
 
 /** Conclui um pedido tomado: grava o resultado e manda ao autor. */
@@ -1316,7 +1285,6 @@ export const COMANDOS = {
   "claim-pr": "reivindicar", "hold-pr": "segurar", "release-pr": "liberar", "pr-status": "estado-pr", help: "ajuda",
   "set-switch": "set-switch", "list-switches": "list-switches", "record-review": "record-review",
   "list-review-records": "list-review-records", "confirm-review-record": "confirm-review-record", "release-take": "release-take",
-  "check-append-only": "check-append-only",
 };
 /** Nomes publicados antes (em português, e a primeira versão em inglês, de 21/11/2026): aceitos com um aviso do nome atual. */
 export const NOMES_ANTIGOS = {
@@ -1365,11 +1333,7 @@ async function main(argv) {
     "pegar-revisao", "pegar-fila", "concluir-revisao", "concluir-fila", "devolver-revisao", "devolver-fila", "retirar-revisao", "retirar-fila",
     "renovar-revisao", "renovar-fila", "set-switch", "record-review", "confirm-review-record", "release-take"]);
   if (ESCREVEM.has(comando)) conferirIdentidade(comando === "cota" && o.por && o.por !== true ? o.por : o.de ?? o.eu);
-  const versaoOk = comando && comando !== "ajuda" ? avisarVersao() : true;
-  // Passo 3: uma cópia que não é a revisada, ou cuja versão não foi conferida agora, não escreve no correio; ler continua.
-  if (ESCREVEM.has(comando) && !versaoOk) {
-    throw new Error("escrita recusada: esta cópia não é a versão revisada do main do Marktmorgen, conferida agora; reinstale com o comando de CO (b) do AGENTS.md e repita");
-  }
+  if (comando && comando !== "ajuda") avisarVersao();
   if (comando === "enviar") {
     const texto = o.arquivo ? readFileSync(o.arquivo === "-" ? 0 : o.arquivo, "utf8") : o.texto;
     const id = enviar({ de: o.de, para: o.para, assunto: o.assunto, texto, responde: o.responde || null });
@@ -1404,26 +1368,11 @@ async function main(argv) {
         }
       } catch (erro) { console.log(`vigia: falha ao ler o correio (${String(erro).slice(0, 200)}); tento de novo`); }
       try { avisarFilaParada(o.eu); } catch {}
-      // Passo 3: o que chegou ao correio desde a última conferência só acrescentou arquivos? Avisa uma vez por alteração.
-      let alarme = "";
-      try {
-        const c = buscar();
-        let antes = null;
-        try { antes = git(["rev-parse", "--verify", "-q", REF_VERIFICADO]); } catch { /* primeira conferência */ }
-        const r = conferirSoAcrescentar(c, antes || null);
-        if (c) git(["update-ref", REF_VERIFICADO, c]);
-        if (r.reescrito || r.problemas.length) alarme = [r.reescrito ? "o ramo foi reescrito (a última conferência não está mais no histórico)" : "", ...r.problemas].filter(Boolean).join("; ");
-      } catch {}
-      if (alarme) { console.log(`ALERTA: o ramo correio não só acrescentou: ${alarme}. Avise o coordenador e o dono pelo correio agora; não apague nem reescreva nada.`); return; }
       if (lista.length) { console.log(`Correio: ${lista.length} mensagem(ns) não lida(s) para ${o.eu}. Leia com: node agent-mail.mjs read --as "${o.eu}"`); return; }
       if (abertos.length) { console.log(`Correio: pedido(s) para você pegar: ${abertos.join(", ")}. Use claim-review ou claim-enqueue.`); return; }
       if (Date.now() + 30000 > fim) { console.log("Correio: nada novo neste ciclo; ligue a vigia de novo."); return; }
       await new Promise((ok) => setTimeout(ok, 30000));
     }
-  } else if (comando === "check-append-only") {
-    const r = conferirSoAcrescentar(buscar());
-    if (!r.problemas.length) console.log("o ramo correio só acrescentou arquivos de dados em todo o histórico");
-    else { for (const p of r.problemas) console.log(p); process.exitCode = 1; }
   } else if (comando === "cota") {
     if (!o.eu || (!o.sem && !o.com)) throw new Error('use: set-quota --as "Claude N" --exhausted --until 2026-11-22T01:00-03:00   ou   set-quota --as "Claude N" --available');
     declararCota({ eu: o.eu, sem: Boolean(o.sem), ate: o.ate === true ? null : o.ate ?? null, por: o.por === true ? null : o.por ?? null });

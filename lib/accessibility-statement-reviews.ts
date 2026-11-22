@@ -27,6 +27,7 @@ export const STATEMENT_REVIEWS: Readonly<Record<string, { date: string; digest: 
   "page:/[handle]": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/[handle]/[slug]": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/[handle]/affiliates": { date: "November 18, 2026", digest: "eba44788522343cb" },
+  "page:/[handle]/back-in-stock": { date: "November 20, 2026", digest: "eba44788522343cb" },
   "page:/[handle]/blog": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/[handle]/blog/[post]": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/[handle]/book/[product]": { date: "November 18, 2026", digest: "eba44788522343cb" },

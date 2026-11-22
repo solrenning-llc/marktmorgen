@@ -31,6 +31,13 @@ const BIN = join(T, "bin"); mkdirSync(BIN);
 writeFileSync(join(BIN, "gh"), `#!/bin/sh
 case "$FAKE_GH" in
   down) echo "gh: connection refused" >&2; exit 1 ;;
+esac
+# The PR's own comments and reviews (ce2d): one JSON line [body, association] per comment, from FAKE_COMMENTS.
+for a in "$@"; do case "$a" in
+  repos/*/issues/[0-9]*/comments) [ "$FAKE_COMMENTS_DOWN" = 1 ] && { echo "gh: 502" >&2; exit 1; }; printf '%s' "\${FAKE_COMMENTS:-}"; exit 0 ;;
+  repos/*/pulls/[0-9]*/reviews) exit 0 ;;
+esac; done
+case "$FAKE_GH" in
   req) printf '%s\\n' '["https://github.com/solrenning-llc/marktmorgen/issues/'"\${FAKE_ISSUE:-4932}"'#issuecomment-'"$FAKE_ID"'","'"$FAKE_BODY"'","'"\${FAKE_CREATED:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"'"]' ;;
   headref) echo "$FAKE_REF" ;;
   nohead) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","READY, no head here","","COLLABORATOR"]' ;;
@@ -876,6 +883,38 @@ console.log("a session's own box: an ack under the family name does not hide it 
   is("a message to two sessions of a family, acknowledged by one, still shows to the other (the 7f0a of 22/11/2026)",
     Boolean(idDuas) && run(["read", "--as", "Claude 6 z5v4"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_018ZjhHhz5v4kPZ3osC8Cr6g" }).out.includes(idDuas), r.out);
   is("a message to the family, acknowledged by the family, does not show to a session (unchanged)", !run(["read", "--as", "Claude 6 UoHAG"], as("c6")).out.includes(idF));
+}
+
+console.log("a family with a verdict on the head written only on the PR does not take it (coordinator ce2d, #5118)");
+{
+  const g5 = (args) => g(args, join(T, "p"));
+  g5(["checkout", "-q", "-B", "ce2d", M]); writeFileSync(join(T, "p", "ce2d.txt"), "x\n"); g5(["add", "."]); g5(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "ce2d\n\nClaude-Session: https://claude.ai/code/session_01S9eVA3KcXUkc6qPJmpNg4a"]);
+  g5(["push", "-q", "-f", "../prs.git", "HEAD:refs/heads/ce2d", "HEAD:refs/pull/60/head"]);
+  const H60 = g5(["rev-parse", "HEAD"]);
+  g(["init", "-q", "--bare", "mail60.git"]); g(["push", "-q", "../mail60.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m60 = { CORREIO_REPO: join(T, "mail60.git"), CORREIO_GIT_DIR: join(T, "dir60.git") };
+  const veredito = (familiaTxt, v) => JSON.stringify([`${familiaTxt} review #60 @${H60.slice(0, 10)}: ${v}\n\nbody`, "COLLABORATOR"]);
+  const fora = JSON.stringify([`fila #60 @${H60.slice(0, 10)}: 2 READY (Claude 2 X, Claude 7 X)`, "COLLABORATOR"]);
+  const comentarios = [veredito("Claude 2 X", "READY"), fora, JSON.stringify([`Claude 3 X review #60 @0000000000: READY`, "COLLABORATOR"]), JSON.stringify([`Claude 7 X review #60 @${H60.slice(0, 10)}: CHANGES`, "NONE"])].join("\n") + "\n";
+  r = run(["request-review", "--from", "Claude 4 X", "--pr", "60", "--sha", H60, "--text", "t"], { ...m60, ...as("c4"), FAKE_COMMENTS: comentarios });
+  is("ce2d: the review request is written", r.ok, r.out);
+  r = run(["claim-review", "--as", "Claude 2 X"], { ...m60, ...as("c2"), FAKE_COMMENTS: comentarios });
+  is("ce2d: a family that gave READY on this head only in a PR comment does not take the review; it is returned with the reason", !/pegou:/.test(r.out) && /nenhum pedido/.test(r.out), r.out);
+  const id60 = /^(\S+)\s+#60\b/m.exec(run(["list-reviews"], m60).out)?.[1] ?? "";
+  const devolucao = (() => { try { return g(["show", `refs/heads/correio:revisao/tomadas/${id60}/0`], join(T, "mail60.git")); } catch { return ""; } })();
+  is("ce2d: and the request records why, so the watch stops offering it to that family", /DEVOLVIDO/.test(devolucao) && /veredito neste head no PR/.test(devolucao), `${id60}\n${devolucao}`);
+  r = run(["claim-review", "--as", "Claude 7 X"], { ...m60, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", FAKE_COMMENTS: comentarios });
+  is("ce2d: a verdict from outside the repository (author_association NONE) does not exclude anyone", /pegou:/.test(r.out), r.out);
+  r = run(["claim-review", "--as", "Claude 3 X"], { ...m60, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA", FAKE_COMMENTS: comentarios });
+  is("ce2d: a verdict on another head, or a family only named in a line that is not a review, does not exclude", /nenhum pedido|já/.test(r.out) || /pegou:/.test(r.out), r.out);
+  r = run(["request-enqueue", "--from", "Claude 4 X", "--pr", "60", "--sha", H60, "--text", "t"], { ...m60, ...as("c4"), FAKE_COMMENTS: comentarios });
+  const fila60 = r;
+  r = run(["claim-enqueue", "--as", "Claude 2 X"], { ...m60, ...as("c2"), FAKE_COMMENTS: comentarios });
+  is("ce2d: the queue is not delivered to a family with a verdict on this head only in the PR (FQ (1))", fila60.ok && !/pegou:/.test(r.out) && /veredito da sua família neste head no PR/.test(r.out), fila60.out + r.out);
+  r = run(["claim-enqueue", "--as", "Claude 3 X"], { ...m60, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA", FAKE_COMMENTS_DOWN: "1" });
+  is("ce2d: with the PR's comments unreadable, the queue waits (NOT CHECKED)", !/pegou:/.test(r.out) && /NÃO CONFERIDO/.test(r.out), r.out);
+  r = run(["claim-review", "--as", "Claude 2 X"], { ...m60, ...as("c2"), FAKE_COMMENTS_DOWN: "1" });
+  is("ce2d: when the PR's comments cannot be read, nothing is taken (NOT CHECKED)", !/pegou:/.test(r.out), r.out);
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

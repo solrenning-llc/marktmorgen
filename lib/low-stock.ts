@@ -136,6 +136,37 @@ const CAS_HSET = [
 export type LowStockCheck = "crossed" | "no" | "off" | "unknown";
 
 /**
+ * The low-stock record's key and field, and what the CAS of noteUnitsLeft wrote for these units left: for
+ * lib/low-stock-alert.ts's give-back, which puts the count seen back in the same step as the day's mark (Codex X6
+ * on #3725). Null when there is nowhere to write.
+ */
+export function unitsSeenRestore(store: DataStore, productId: string, left: number, before: LowStock): { key: string; field: string; wroteSha: string; before: string } | null {
+  if (!store.statsId || !productId) return null;
+  return { key: keyOf(store.statsId), field: productId, wroteSha: sha1(JSON.stringify({ low: before.low, seen: left })), before: JSON.stringify(before) };
+}
+
+/**
+ * Whether these units left would cross the creator's number, read only:
+ * nothing is written, so a crossing that cannot be said yet (the store's
+ * daily bound, an unreadable count) is still there at the next check.
+ */
+export async function wouldCrossLow(store: DataStore, productId: string, left: unknown): Promise<LowStockCheck> {
+  if (!isLeft(left) || !store.statsId || !productId || !isRedisConfigured()) return "unknown";
+  try {
+    const raw = await readRaw(store.statsId, productId);
+    if (raw === null) return "off";
+    const kept = parse(raw);
+    if (!kept) return "unknown";
+    if (kept.seen === left) return "no";
+    const crossed = crossedLow(kept.seen, left, kept.low);
+    return crossed === "unknown" ? "unknown" : crossed === "yes" ? "crossed" : "no";
+  } catch (error) {
+    console.error("reading a low-stock number failed", error);
+    return "unknown";
+  }
+}
+
+/**
  * The units left of a product now (`left`, as lib/stock.ts reads them):
  * "crossed" once when they fell from above the creator's number to it or
  * under it, "no" otherwise, "off" when no number is set. The count seen moves

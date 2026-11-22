@@ -28,7 +28,10 @@
  *
  *   nl:rev:link:<hash>             -> the order and address a review link is for, 60 days
  *   nl:rev:refunds:since:<statsId> -> how far the refund pass has read
- *   nl:rev:refunds:seen:<statsId>  -> refunds already handled
+ *   nl:rev:refunds:seenat:<statsId> -> refunds already handled and payments marked, scored by the row's time
+ *   nl:rev:refunds:next:<statsId>  -> the store's turn for its pass, while the pass is not due
+ *   nl:rev:refunds:rows:<statsId>:<window>  -> rows handled in the store's billing month
+ *   nl:rev:refunds:marks:<statsId>:<window> -> payments marked in the store's billing month
  */
 import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
@@ -40,9 +43,10 @@ import { isSettled } from "@/lib/instant-pay";
 import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundRowKnown, refundedInFull, rowGivesBack } from "@/lib/refunds";
 import { ordersGrant } from "@/lib/buyer-orders";
 import { DOWNLOAD_WINDOW_SECONDS } from "@/lib/store-checkout";
-import { PaymentsSpentError, REVIEW_STORES_KEY, ReviewStoreGoneError, markRefunded } from "@/lib/reviews";
+import { PaymentsSpentError, REVIEW_STORES_KEY, ReviewBusyError, ReviewStoreGoneError, markRefunded } from "@/lib/reviews";
 import { storeLiveFence } from "@/lib/store-live-cache";
 import { type FencedCommand, countIfStoreLive, writeIfStoreLive } from "@/lib/live-fence";
+import { windowId, windowKeySeconds } from "@/lib/allowance-window";
 import { refreshStoreQuotes } from "@/lib/store-quotes";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import type { Tier } from "@/lib/plan";
@@ -339,7 +343,7 @@ export function readDoor(get: (name: string) => string): Door | null {
 
 const REFUND_LOOKBACK_SECONDS = 30 * 86_400;
 /**
- * Refund rows a store's passes may handle in a calendar month, by its plan: a ceiling of what the pass may spend,
+ * Refund rows a store's passes may handle in a billing month, by its plan: a ceiling of what the pass may spend,
  * priced in tests/plan-cost-registry.ts (review-refund-sweep), as the certificates' pass has (lib/certificate-refunds.ts,
  * CERTIFICATE_REFUND_CHECKS_PER_MONTH; 9th triple audit on #5100, point 2). Every row not handled yet counts, with a
  * review or without, a payment's second part included; past it the pass stops where it is, keeps its place and goes
@@ -349,7 +353,7 @@ const REFUND_LOOKBACK_SECONDS = 30 * 86_400;
  */
 export const REVIEW_REFUND_ROWS_PER_MONTH: Readonly<Record<Tier, number>> = { creator: 1_000, pro: 2_000, scale: 5_000 };
 /**
- * Payments whose reviews a store's passes may mark in a calendar month, by its plan: the plan's orders
+ * Payments whose reviews a store's passes may mark in a billing month, by its plan: the plan's orders
  * (ORDERS_INCLUDED), which is what the line prices at a mark's full cost (10th triple audit on #5100: the rows'
  * ceiling alone let up to a thousand older payments be marked at full cost in one month). Counted with the same exact
  * INCRBY before markRefunded; past it the row stays unhandled, the place keeps and the pass stops until next month.
@@ -374,34 +378,24 @@ const seenKey = (statsId: string) => `nl:rev:refunds:seenat:${statsId}`;
  * keeps the family until the last key is gone (tests/store-data-registry.ts).
  */
 export const SEEN_SET_UNTIL_20261122 = "nl:rev:refunds:seen:";
-/** The rows handled in a calendar month (REVIEW_REFUND_ROWS_PER_MONTH), kept forty days. */
+/** The rows handled in a billing month (REVIEW_REFUND_ROWS_PER_MONTH), kept forty days at the least (countKeep). */
 const rowsKey = (statsId: string, month: string) => `nl:rev:refunds:rows:${statsId}:${month}`;
-/** The payments marked in a calendar month (REVIEW_REFUND_PAYMENTS_PER_MONTH), kept forty days. */
+/** The payments marked in a billing month (REVIEW_REFUND_PAYMENTS_PER_MONTH), kept forty days at the least (countKeep). */
 const marksKey = (statsId: string, month: string) => `nl:rev:refunds:marks:${statsId}:${month}`;
-const monthOf = () => new Date(Date.now()).toISOString().slice(0, 7);
+/**
+ * The month the ceilings count in: the store's billing month (lib/allowance-window.ts windowId, the window every
+ * other allowance of the plan is counted in; the calendar month for a store not paying), so a ceiling is spent once
+ * a billing month and the line prices it once (tests/plan-cost-registry.ts: a counter by the calendar month would
+ * touch two in one billing month and be priced at two; 11th triple audit on #5100, ALTO (a)). Null for a paying store
+ * whose period is not known: then nothing that costs money may start, and the pass does not run.
+ */
+const monthOf = (store: Store) => windowId(store);
+/** Seconds a count of the month is kept: forty days, and never less than the window's own keep (windowKeySeconds). */
+const countKeep = (store: Store) => windowKeySeconds(store, 40 * 86_400);
 /** The store's figure of the month by its plan; the smallest for a plan read in no known way. */
 function ofPlan(store: Store, figures: Readonly<Record<Tier, number>>): number {
   const tier = store.tier as unknown;
   return tier === "pro" || tier === "scale" ? figures[tier] : figures.creator;
-}
-/**
- * Adds `n` to a count of the month, kept forty days, each reply read exactly: the count after it. Anything else is
- * unknown (UnknownReplyError): what it guarded is not handled this run, and the place keeps. The key is one, computed
- * once, so the count and its expiry never fall on two months at the month's turn (10th audit on #5100, LEVE 6).
- */
-async function countUp(key: string, n: number): Promise<number> {
-  const replies = repliesFor(await redisPipeline([["INCRBY", key, n], ["EXPIRE", key, 40 * 86_400]]), 2);
-  const count = replies ? countOf(replies[0]) : null;
-  if (count === null || countOf(replies?.[1]) !== 1) throw new UnknownReplyError("a count of the month");
-  return count;
-}
-/**
- * Gives `n` back to a count of the month: what was taken for rows or payments that were not handled after all (a
- * busy review, the run's time, the ceiling), so a retry never spends the month's figure twice (10th audit on #5100,
- * MÉDIO 3). A reply in another shape only leaves the count a little high.
- */
-async function giveBack(key: string, n: number): Promise<void> {
-  if (n > 0) await redisPipeline([["DECRBY", key, n]]);
 }
 /**
  * How often a store's pass runs, at the most: its turn is taken with one SET NX EX held this long (takeReviewPass), as
@@ -411,6 +405,14 @@ async function giveBack(key: string, n: number): Promise<void> {
  * buyer's review is marked within this long of the refund, never sooner than the sweep's next run.
  */
 export const REVIEW_REFUND_PASS_EVERY_SECONDS = 2 * 3_600;
+/**
+ * How long the store's turn is held after a review of a refunded payment was busy (its product's lock held at every
+ * try, lib/reviews.ts ReviewBusyError): the pass ends there, keeps its place and runs again a day later, so a review
+ * busy at every try is tried at most REVIEW_REFUND_BUSY_RUNS times a month, each priced at the full tries
+ * (tests/plan-cost-registry.ts; 11th triple audit on #5100, MÉDIO 3: a mark that failed was tried again at every
+ * run with no price). A lock is held for milliseconds, so the next try almost always marks it.
+ */
+export const REVIEW_REFUND_BUSY_WAIT_SECONDS = 86_400;
 const nextKey = (statsId: string) => `nl:rev:refunds:next:${statsId}`;
 const NOT_DUE = "1";
 
@@ -467,6 +469,14 @@ export async function storeHasReviews(store: Store): Promise<boolean> {
 export async function markRefundedReviews(store: Store, deadline: number): Promise<number> {
   if (!store.stripeAccountId || !store.statsId || !isRedisConfigured()) return 0;
   const statsId = store.statsId;
+  // The billing month the ceilings count in, one for the run; a paying store whose period is not known starts nothing
+  // that costs money (lib/allowance-window.ts): no pass, its turn runs out as taken.
+  const month = monthOf(store);
+  if (month === null) {
+    console.error("reviews' refund pass: the store's billing month is not known; no pass this turn", store.handle);
+    return 0;
+  }
+  const keep = countKeep(store);
   const fence = await storeLiveFence(store);
   // The pass's own keys (the read refunds, the anchor) are written only while the store is live, in one step with the
   // fence's reads (lib/live-fence.ts): false when the store is erasing or gone, and then nothing was written; an answer
@@ -479,18 +489,26 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
     return written === "kept";
   };
   /**
-   * Adds `n` to a count of the month through the fence (COUNT_IF_STORE_LIVE: INCRBY and EXPIRE forty days in one step
-   * with the fence's reads): the count after it, or "gone" for a store erasing or gone (nothing written); an answer in
-   * another shape throws (rule 24), so nothing it guarded is handled this run.
+   * Adds `n` to a count of the month through the fence (COUNT_IF_STORE_LIVE: INCRBY and EXPIRE, kept `keep` seconds,
+   * in one step with the fence's reads): the count after it, or "gone" for a store erasing or gone (nothing written);
+   * an answer in another shape throws (rule 24), so nothing it guarded is handled this run.
    */
   const countWhileLive = async (key: string, n: number): Promise<number | "gone"> => {
-    const answer = await countIfStoreLive(fence, key, n, 40 * 86_400);
+    const answer = await countIfStoreLive(fence, key, n, keep);
     if (answer === "unknown") throw new UnknownReplyError("a count of the month");
     return answer;
   };
   /** Gives `n` back to a count of the month, through the fence (a store gone gets nothing written). */
   const giveBackWhileLive = async (key: string, n: number): Promise<void> => {
     if (n > 0) await writeWhileLive([["DECRBY", key, n]]);
+  };
+  /**
+   * Puts off the store's next pass REVIEW_REFUND_BUSY_WAIT_SECONDS after a busy review, with one SET EX over the turn
+   * this run holds, through the fence (a store gone gets nothing written; a reply in another shape only leaves the
+   * turn at its two hours, and the tries are then bounded by the turn as before).
+   */
+  const deferWhileLive = async (): Promise<void> => {
+    await writeIfStoreLive(fence, [["SET", { key: nextKey(statsId) }, NOT_DUE, "EX", REVIEW_REFUND_BUSY_WAIT_SECONDS]]);
   };
   const now = Math.floor(Date.now() / 1000);
   const [anchorRaw] = await redisPipeline([["GET", anchorKey(statsId)]]);
@@ -561,7 +579,6 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       // past the ceiling only what was left of it is handled, oldest first, the place keeps (unsure) and the pass
       // ends here; the rest waits for next month. Nothing is skipped. What is taken and not handled after all is
       // given back when the page ends, however it ends.
-      const month = monthOf();
       let allowed = unseen.length;
       let spent = false;
       if (unseen.length > 0) {
@@ -584,6 +601,7 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       const kept = allowed >= unseen.length ? unseen : allowed > 0 ? unseen.slice(unseen.length - allowed) : [];
       const handled = new Set(kept.map((refund) => refund.id));
       let done = 0;
+      let busy = false;
       try {
         for (const [i, refund] of full.entries()) {
           if (seen[i]) {
@@ -622,6 +640,14 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
                 break;
               }
               if (taken) await giveBackWhileLive(marksKey(statsId, month), 1);
+              if (error instanceof ReviewBusyError) {
+                // A review busy at every try: the row is not taken as seen and the place keeps, so the next pass
+                // marks it; that pass is a day off (deferWhileLive), never the next run, so a review busy at every
+                // try is tried at most REVIEW_REFUND_BUSY_RUNS times a month, each within its price.
+                busy = true;
+                console.error(`reviews' refund pass: a review is busy; the pass tries again in ${REVIEW_REFUND_BUSY_WAIT_SECONDS} s`, store.handle);
+                break;
+              }
               throw error;
             }
             paymentSeen.add(refund.pi);
@@ -643,12 +669,8 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
         if (!gone) await giveBackWhileLive(rowsKey(statsId, month), unseen.length - done);
       }
       if (gone) break;
-      if (spent) {
-        unsure = true;
-        break;
-      }
-      if (gone) break;
-      if (spent) {
+      if (busy) await deferWhileLive();
+      if (spent || busy) {
         unsure = true;
         break;
       }

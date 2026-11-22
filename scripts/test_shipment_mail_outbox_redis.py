@@ -642,11 +642,21 @@ def main():
         return out
 
     def measured(fn, ceiling):
+        # INFO COMMANDSTATS counts every client of the server, and the Lua redis.call()s inside the EVAL, so a count
+        # above the ceiling can be the script (a command added to it) or another client's traffic landing between the
+        # two readings. On a failure the message names each command that moved and the server's client list, so the run
+        # log tells the two apart (#5076: 17 > 16 once, green on rerun, with no diff of the script); the ceiling itself
+        # does not change here.
         before = stats()
         result = fn()
         after = stats()
-        count = sum(n - before.get(cmd, 0) for cmd, n in after.items())
-        assert count <= ceiling, (count, ceiling, result)
+        delta = {cmd: n - before.get(cmd, 0) for cmd, n in after.items() if n != before.get(cmd, 0)}
+        count = sum(delta.values())
+        if count > ceiling:
+            clients = redis.command("CLIENT", "LIST")
+            raise AssertionError(
+                f"{count} commands billed, ceiling {ceiling}; per command {json.dumps(delta, sort_keys=True)}; "
+                f"clients on the server: {clients!r}; reply {result!r}")
         return result, count
 
     try:

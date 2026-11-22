@@ -810,6 +810,17 @@ export function setReply(statsId: string, productId: string, id: string, text: s
  * leaves it, never written back, and ReviewStoreGoneError is thrown so the
  * sweep writes nothing more for that store (Codex L-20261120-0838).
  */
+/**
+ * A review of the payment was busy (its product's lock held, lib/redis-lock.ts): what was marked before it stays
+ * marked, the refund is not taken as seen, and the pass puts off its next run a day (lib/review-proof.ts,
+ * REVIEW_REFUND_BUSY_WAIT_SECONDS), so a review busy at every try costs at most that many tries a month.
+ */
+export class ReviewBusyError extends Error {
+  constructor(what: string) {
+    super(`a review is busy; ${what} is marked on the next try`);
+  }
+}
+
 /** The month's payments are spent (lib/review-proof.ts): the payment is not marked, and the pass stops until next month. */
 export class PaymentsSpentError extends Error {
   constructor() {
@@ -845,7 +856,7 @@ export async function markRefunded(
       return { ...review, refunded: true };
     }, null, fence, "uncount");
     // A review busy just now is not marked: thrown, so the refund is not taken as seen and the sweep tries again.
-    if (done === "busy") throw new Error("a review is busy; the refund is marked on the next try");
+    if (done === "busy") throw new ReviewBusyError("the refund");
     // The store erased meanwhile: nothing written, and the sweep must write nothing more for it (seen, anchor).
     if (done === "gone") throw new ReviewStoreGoneError();
     if (hit && typeof done !== "string") changed += 1;
@@ -856,7 +867,7 @@ export async function markRefunded(
 /** Marks a review refunded found some other way (an edit that found the order refunded). */
 export async function markOneRefunded(statsId: string, productId: string, id: string): Promise<void> {
   const done = await creatorChangeUnfenced(statsId, productId, id, (review) => ({ ...review, refunded: true }), null);
-  if (done === "busy") throw new Error("a review is busy; its refund is marked on the next try");
+  if (done === "busy") throw new ReviewBusyError("its refund");
 }
 
 /** Takes reviews out of the creator's queue: those named, or all of them. */

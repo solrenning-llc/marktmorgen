@@ -143,7 +143,7 @@ test("one upload start never costs more R2 operations than the cost table prices
   const BLOB_PAGES = 19;
   storageAnswers.pages = Array.from({ length: BLOB_PAGES }, (_, page) => ({ blobs: [], hasMore: true, cursor: `blob-${page}` }));
   storageAnswers.pages.push({ blobs: [], hasMore: false });
-  const opened = await openReservedVault({ folder: FOLDER, ownerId: "product01", name: "a.zip", bytes: 1, type: "application/zip", multipart: true }, storageBrakeFor("paid", "scale"));
+  const opened = await openReservedVault({ folder: FOLDER, ownerId: "product01", name: "a.zip", bytes: 1, type: "application/zip", multipart: true }, storageBrakeFor("paid", "scale"), undefined, async () => true);
   assert.equal(opened.ok, true, "the start is admitted after the whole listing is read");
   if (!opened.ok) return;
   assert.equal(billed.filter(row => row.what === "ListObjectsV2").length, LIST_PAGES, "admission read every page of the vault listing");

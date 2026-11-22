@@ -41,10 +41,17 @@ const CASES: Record<string, Case[]> = {
     { what: "as read, taken off the directory", setup: [["HSET", "k:m", "u1", "old"], ["ZADD", "k:dir", 1, "u1"]], keys: ["k:m", "k:dir"], argv: ["u1", "old", "new", "0", 1700000000] },
     { what: "changed meanwhile", setup: [["HSET", "k:m", "u1", "other"]], keys: ["k:m", "k:dir"], argv: ["u1", "old", "new", "1", 1700000000] },
   ],
-  "recent-feed-live:v1": [
-    { what: "a live store", setup: [["SET", "k:live", "x"]], keys: ["k:live", "k:erasing", "k:feed"], argv: ["f1", "[]", 300] },
-    { what: "an erasing store", setup: [["SET", "k:live", "x"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:live", "k:erasing", "k:feed"], argv: ["f1", "[]", 300] },
-    { what: "no store", setup: [], keys: ["k:live", "k:erasing", "k:feed"], argv: ["f1", "[]", 300] },
+  "recent-feed-live:v2": [
+    { what: "a live store", setup: [["SET", "k:live", "ref1"]], keys: ["k:live", "k:erasing", "k:feed"], argv: ["f1", "[]", 300, "ref1"] },
+    { what: "an id key holding another ref", setup: [["SET", "k:live", "ref2"]], keys: ["k:live", "k:erasing", "k:feed"], argv: ["f1", "[]", 300, "ref1"] },
+    { what: "an erasing store", setup: [["SET", "k:live", "ref1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:live", "k:erasing", "k:feed"], argv: ["f1", "[]", 300, "ref1"] },
+    { what: "no store", setup: [], keys: ["k:live", "k:erasing", "k:feed"], argv: ["f1", "[]", 300, "ref1"] },
+  ],
+  "recent-sale-live:v2": [
+    { what: "a live store", setup: [["SET", "k:id", "ref1"], ["SET", "k:feed", "cached"]], keys: ["k:id", "k:erasing", "k:list", "k:feed"], argv: ["f1", "{}", 4, 600, "ref1"] },
+    { what: "an id key holding another ref", setup: [["SET", "k:id", "ref2"], ["SET", "k:feed", "cached"]], keys: ["k:id", "k:erasing", "k:list", "k:feed"], argv: ["f1", "{}", 4, 600, "ref1"] },
+    { what: "no store", setup: [], keys: ["k:id", "k:erasing", "k:list", "k:feed"], argv: ["f1", "{}", 4, 600, "ref1"] },
+    { what: "an erasing store", setup: [["SET", "k:id", "ref1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:id", "k:erasing", "k:list", "k:feed"], argv: ["f1", "{}", 4, 600, "ref1"] },
   ],
   "recovery-report-live:v1": [
     { what: "a live store", setup: [["SET", "k:id", "s1"]], keys: ["k:id", "k:erasing", "k:report"], argv: ["f1", "{}", 300] },

@@ -42,9 +42,19 @@ export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
     run(listed === "1" ? ["ZADD", dir, at, member] : ["ZREM", dir, member]);
     return 1;
   },
-  "recent-feed-live:v1": (run, [live, erasing, feed], [field, json, seconds]) => {
-    if (Number(run(["EXISTS", live])) !== 1 || Number(run(["HEXISTS", erasing, field])) === 1) return "gone";
+  "recent-feed-live:v2": (run, [live, erasing, feed], [field, json, seconds, ref]) => {
+    if (run(["GET", live]) !== ref || Number(run(["HEXISTS", erasing, field])) === 1) return "gone";
     run(["SET", feed, json, "EX", seconds]);
+    return 1;
+  },
+  // lib/recent-sales.ts KEEP_SALE_IF_LIVE: a purchase written down only while the store's id key holds its ref and its
+  // erasure has not begun; "gone", nothing written (#4965).
+  "recent-sale-live:v2": (run, [live, erasing, list, feed], [field, json, last, seconds, ref]) => {
+    if (run(["GET", live]) !== ref || Number(run(["HEXISTS", erasing, field])) === 1) return "gone";
+    run(["LPUSH", list, json]);
+    run(["LTRIM", list, 0, last]);
+    run(["EXPIRE", list, seconds]);
+    run(["DEL", feed]);
     return 1;
   },
   "recovery-report-live:v1": (run, [storeId, erasing, report], [field, value, seconds]) => {

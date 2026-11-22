@@ -4,7 +4,10 @@
  * labels; a forced click is sent to the radio's own box, and in WebKit at 1280 px it did not land on the label, so
  * the radio stayed off and Playwright threw "Clicking the checkbox did not change its state" (merge-queue runs of
  * #5073 at 04:25 UTC and #4164 at 04:52 UTC on 22 November 2026, jobs 137090949323 and 137097272731). A creator
- * clicks the label; the check does the same, then reads the radio's state, and no wait changes.
+ * clicks the label; the check does the same, then reads the radio's state, and no wait changes. The deeper cause is
+ * the hydration race documented in tests/e2e/react-hydration.mjs (waitForReactHydrated): an input event before React
+ * has committed the page's hydration makes it finish at once, and that commit puts the server's theme back into the
+ * controlled radio; so the check waits for the committed hydration first.
  *
  * The test reads the harness source: no browser, network or page.
  */
@@ -13,6 +16,13 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const source = readFileSync("tests/e2e/look-acknowledgment.mjs", "utf8");
+
+test("the check waits for React to have committed the page's hydration before touching the theme", () => {
+  assert.match(source, /import \{waitForReactHydrated\} from "\.\/react-hydration\.mjs";/);
+  const wait = source.indexOf("await waitForReactHydrated(page,theme);");
+  const click = source.indexOf("label:has(input[name=\"theme\"][value=\"night\"])");
+  assert.ok(wait > 0 && click > wait, "the hydration wait comes before the label click");
+});
 
 test("the theme is chosen by its visible label, as a creator does", () => {
   assert.match(source, /section\.locator\('label:has\(input\[name="theme"\]\[value="night"\]\)'\)\.click\(\)/);

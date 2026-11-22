@@ -363,13 +363,21 @@ async function main(): Promise<void> {
     }
     return refundsFetch(input, init);
   }) as typeof fetch;
-  // The second review is busy: its lock held by another request.
+  // The second review is busy: its lock held by another request. The pass ends there without a throw (its turn put
+  // off a day, lib/review-proof.ts REVIEW_REFUND_BUSY_WAIT_SECONDS, 11th triple audit on #5100), the first marked.
   await redis.pipeline([["SET", `nl:rev:lock:${statsId}:${mixId}`, "held-by-a-test", "EX", 10]]);
-  const pass = await markRefundedReviews(paid, Date.now() + 30_000).then(() => "done", () => "thrown");
-  await redis.pipeline([["DEL", `nl:rev:lock:${statsId}:${mixId}`]]);
+  const quietPass = console.error;
+  console.error = () => {};
+  let pass: string;
+  try {
+    pass = await markRefundedReviews(paid, Date.now() + 30_000).then((marked) => `done ${marked}`, () => "thrown");
+  } finally {
+    console.error = quietPass;
+  }
+  await redis.pipeline([["DEL", `nl:rev:lock:${statsId}:${mixId}`], ["DEL", `nl:rev:refunds:next:${statsId}`]]);
   globalThis.fetch = keep;
   const quotesAfter = (await storeForEmail(OWNER))!.quotes ?? [];
-  is("the pass stops at the busy review, the first marked", [pass, (await readReview(statsId, mixIds[0], freeOne.id))?.refunded, (await readReview(statsId, mixId, busyOneReview.id))?.refunded], ["thrown", true, false]);
+  is("the pass stops at the busy review, the first marked", [pass, (await readReview(statsId, mixIds[0], freeOne.id))?.refunded, (await readReview(statsId, mixId, busyOneReview.id))?.refunded], ["done 1", true, false]);
   is("and the store's quotes are refreshed for what it marked, the refunded review left out", [JSON.stringify(quotesAfter) !== quotesBefore, quotesAfter.some((q) => q.t.includes("Lovely glaze mixes"))], [true, false]);
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));

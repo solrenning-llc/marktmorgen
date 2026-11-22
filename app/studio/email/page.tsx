@@ -68,6 +68,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const { store } = view;
 
   const allowance = monthlyAllowance(store);
+  const loadedForms = allowance !== 0 ? await readForms(store.statsId).catch(() => null) : [];
   const monthWindow = windowId(store);
   // The emails are read without their bodies, which this page never shows: the list first, inside this page's own
   // studio requests; then what asking each one's size comes to is taken before it is asked, and what reading them
@@ -112,7 +113,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const emailTemplate = typeof query.emailTemplate === "string" ? MAIL_TEMPLATES.find(item => item.id === query.emailTemplate) : undefined;
   const visiblePaid = idsOfKind(store,"paid").filter(id => !idsOfKind(store,"hidden").includes(id));
   const firstPaid = visiblePaid.find(id => listings.has(id));
-  const sequence = loadedFlows && can(role,"send") && (query.sequenceTemplate === "welcome" || query.sequenceTemplate === "bought")
+  const sequence = loadedForms !== null && loadedFlows && can(role,"send") && (query.sequenceTemplate === "welcome" || query.sequenceTemplate === "bought")
     ? starterFlows({
       fromName:store.mail?.fromName || store.name,storeLink:storeBase(store),ordersLink:storeBase(store)+"/orders",
       product:firstPaid ? {title:listings.get(firstPaid)!,link:productLink(store,firstPaid)} : null,paidCount:visiblePaid.length
@@ -268,6 +269,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               <p className="mt-2 text-sm text-ink-soft">{HEALTH_NOTE}</p>
             </section>
           ) : null}
+          {loadedForms === null ? <p role="status" className="notice notice-warn mt-6">Forms could not be checked. Reload before creating or changing a sequence.</p> : null}
           {emailsRefused !== null ? (
             <p role="status" className="mt-6 max-w-2xl">
               Your sent and scheduled emails could not be shown: reading them counts as studio requests, and there are not enough left. {emailsRefused}
@@ -338,7 +340,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             }))}
             currency={store.currency}
             sells={sellsSomething(store)}
-            flowsReadFailed={loadedFlows === null}
+            flowsReadFailed={loadedFlows === null || loadedForms === null}
             draftsReadFailed={loadedDrafts === null}
             flows={flows.map((f) => ({ ...f, statsAvailable: stats?.has(f.id) ?? false, stats: stats?.get(f.id) ?? { started: 0, sent: 0, reached: 0, skipped: 0, acted: 0 }, money: flowMoney(revenue, f.id) }))}
             links={Object.fromEntries([...listings].map(([id]) => [id, productLink(store, id)]))}
@@ -349,7 +351,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             calls={idsOfKind(store, "call")}
             paidProducts={idsOfKind(store, "paid")}
             automation={{
-              forms: (await readForms(store.statsId).catch(() => [])).filter((f) => f.fields.some((x) => x.type === "email")).map((f) => ({ id: f.id, name: f.name, outcomes: f.outcomes.map((o) => ({ id: o.id, title: o.title })) })),
+              forms: (loadedForms ?? []).filter((f) => f.fields.some((x) => x.type === "email")).map((f) => ({ id: f.id, name: f.name, outcomes: f.outcomes.map((o) => ({ id: o.id, title: o.title })) })),
               fields: (await readFields(store.statsId).catch(() => [])).map((f) => ({ id: f.id, name: f.name, type: f.type, options: f.options })),
               // Each stage named with its pipeline once there is more than one (lib/crm-rules.ts).
               stages: labeledStages(await readPipelines(store.statsId).catch(() => [])).map((st) => ({ id: st.id, name: st.name })),

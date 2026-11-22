@@ -140,9 +140,11 @@ Pedido do dono, nas palavras dele: "quero regra e politica para nao ocorrer mais
 (a) **Quantas revisões, por tipo de PR**, todas de família diferente da do autor:
 - dinheiro, imposto, cobrança, custo, segurança e apagamento de dados: 2, de duas famílias diferentes;
 - workflow: 2, mais o SIM do dono registrado para o head exato (FQ (1));
-- código comum (telas, textos do site, testes): 1;
-- só texto interno (AGENTS.md, documentos): 1;
-- junção do main ou correção de achado num PR já aprovado: revisão focal no head novo, tantas quantas o tipo do PR pede acima (2 nos PRs de dinheiro, imposto, cobrança, custo, segurança, apagamento e workflow; 1 nos demais). Se uma junção sem outra mudança pode ter só 1 nesses tipos é pergunta aberta ao dono; até ele decidir, valem 2 (na dúvida, o número maior).
+- código comum (telas, textos do site, testes), ferramentas e o correio: 2;
+- só texto interno (AGENTS.md, documentos): 2;
+- junção do main ou correção de achado num PR já aprovado: revisão focal no head novo, 2 READY de duas famílias de fora, em todo tipo de PR, inclusive a junção sem outra mudança.
+
+**Mínimo de 2 em todo PR** (regra do coordenador C1-20261121-2002-TODOS-1, comentário 7070602908, 21/11/2026, 20h02 Fortaleza, depois de o dono lembrar, nas palavras dele: "há certas coisas que precisa de mais de duas revisoes"): todo head novo tem no mínimo 2 READY focais, de duas famílias de fora, no head exato, também quando o PR é de ferramenta, de teste ou só uma junção. É ordem posterior às linhas de "1" que estavam acima (código comum, texto interno e junção dos demais tipos) e prevalece sobre elas (Pedidos repetidos, passo 3 (b)); em 22/11/2026 o #5084 entrou na fila com 1 READY por essa leitura antiga e saiu até ter o 2º (painel C1 das 06h40). As exigências maiores continuam e nunca diminuem: a revisão de dinheiro de verdade num PR de custo, dinheiro ou cobrança; as revisões de dinheiro de fora pela exceção OWNER-20261121-1437 enquanto o Codex estiver fora; duas revisões de dinheiro, de duas famílias, num contrato (terms-digest) enquanto o Codex estiver fora; a auditoria do Codex nos PRs dessa exceção quando ele voltar, antes de qualquer venda; o número que o dono pedir em segurança e privacidade; as revisões que cada HOLD pedir; e o SIM do dono em travas, preços, limites visíveis, comissão, impostos, art. 9a, revisão comercial, `.github/workflows`, contas e pagamentos. A lista completa é a de C1-20261121-2002-TODOS-1 (comentário 7070602908).
 
 Na dúvida, vale o número maior. Quem classifica é o coordenador, pela lista de arquivos, nunca o autor (FQ, "Depende do dono").
 

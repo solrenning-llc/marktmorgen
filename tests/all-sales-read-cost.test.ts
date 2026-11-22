@@ -67,7 +67,7 @@ async function freshStore(): Promise<Store> {
   await claimHandle(OWNER, HANDLE, "All Sales Cost", "");
   await ensureStatsId(OWNER);
   await ensureStoreId(OWNER);
-  await setStripeAccount(OWNER, "acct_synthAllSalesCost", true);
+  await setStripeAccount(OWNER, "acct_1TestAllSales", true);
   await setSubscription(OWNER, { customerId: "cus_allsalescost", subscriptionId: "sub_allsalescost", active: true, tier: "creator", period: paidPeriod() });
   return (await storeForEmail(OWNER))!;
 }

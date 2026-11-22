@@ -115,6 +115,17 @@ test("the words keep the owner's rule, item 2 (a) to (d), option A", () => {
   assert.match(all(words), new RegExp(`${EXAMPLE_PROCESSING_BPS / 100}% rate`), "the example's Stripe rate is named as an example");
 });
 
+test("the scope is what the code collects for: products delivered automatically online, never live calls or goods (Claude 1's MEDIUM)", () => {
+  const words = vatFeeWords({ eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES });
+  assert.ok(words);
+  for (const part of [words.terms, words.pricing]) {
+    const text = part.join(" ");
+    assert.doesNotMatch(text, /digital product/i, "never the wider \"digital product\", which a creator reads as including a live call");
+    assert.match(text, /delivered automatically online/, "the scope of lib/eu-vat-supply.ts \"ess\"");
+    assert.match(text, /Live calls and anything that ships are not covered/, "the \"human\" and \"goods\" supplies are named as outside it");
+  }
+});
+
 test("short sentences in plain US English", () => {
   const words = vatFeeWords({ eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES });
   assert.ok(words);

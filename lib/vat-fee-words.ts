@@ -1,6 +1,7 @@
 /**
  * 793 [IV3] unit 2, item (a): what the Terms and the pricing page tell a creator about the VAT Marktmorgen collects
- * as the supplier for VAT of a digital sale to an EU or UK consumer, with a worked example in figures
+ * as the supplier for VAT of a sale to an EU or UK consumer of a product delivered automatically online (lib/eu-vat-supply.ts
+ * "ess"; never a live call or goods), with a worked example in figures
  * (OWNER-20261121-1529-ART9A-PENDING-DECISIONS, item 2; OWNER-20261122-0022-CODEX-LIST-VAT-COSTS, option A: AGENTS.md
  * IV (b) stands, so the platform's fee carries the VAT and the real costs of receiving it, with no profit).
  *
@@ -114,7 +115,9 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
     places,
     title: "VAT we collect for the tax office",
     terms: [
-      `When you sell a digital product to a consumer in ${where}, the law makes Marktmorgen responsible for the VAT on that sale.`,
+      "This section covers products delivered automatically online: a download, a link, license keys, a recorded course, a private podcast or a membership's content.",
+      `When you sell one to a consumer in ${where}, the law makes Marktmorgen responsible for the VAT on that sale.`,
+      "Live calls and anything that ships are not covered by this section.",
       "So the checkout adds that VAT on top of your price, and the buyer sees it before paying.",
       "Our platform fee on that sale carries the VAT, which we pay to the tax office.",
       "The fee also carries what it costs us to receive that VAT and pay it over.",
@@ -125,7 +128,9 @@ export function vatFeeWords(input: VatFeeInput = {}): VatFeeWords | null {
       "The buyer never pays a card surcharge for it.",
     ],
     pricing: [
-      `On a digital sale to a consumer in ${where}, the checkout adds VAT on top of your price.`,
+      "Products delivered automatically online are a download, a link, license keys, a recorded course, a private podcast or a membership's content.",
+      `On such a sale to a consumer in ${where}, the checkout adds VAT on top of your price.`,
+      "Live calls and anything that ships are not covered here.",
       "Our fee on that sale carries the VAT, which we pay to the tax office, and what it costs us to receive it and pay it over, with no profit.",
       "Stripe's processing fee on the VAT part is a cost you pay, at your own Stripe rates.",
       "The buyer never pays a card surcharge, and we never take a share of tax.",

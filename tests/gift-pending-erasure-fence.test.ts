@@ -23,7 +23,7 @@ async function shop() {
   await claimHandle(OWNER, "giftfence", "Gift Fence", "");
   await ensureStoreId(OWNER);
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestGiftFence01", true);
+  await setStripeAccount(OWNER, "acct_1TestGiftFnce", true);
   const made = await addProduct(OWNER, "Bread Course", "", "49", null);
   if (!made.ok) throw new Error("no product");
   await setProductLink(OWNER, made.product.id, "https://example.com/bread");

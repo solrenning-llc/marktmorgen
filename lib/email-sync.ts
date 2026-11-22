@@ -82,18 +82,90 @@ export const LOG_SIZE = 50;
 export const QUEUED_PAGE = 500;
 
 /**
- * The one-time fill of the stores' queued indexes from the shared queue (Claude 1 DKvY's MEDIUM on #5135, mail 4534):
- * jobs already waiting when the index shipped were queued before it, so they are in no index. The five-minute job
- * (syncDue) reads the shared queue with ZSCAN from a kept cursor, at most FILL_ROUNDS pages of QUEUED_PAGE members a
- * run, and notes each member's id in its store's index; at the end of the scan it sets FILL_DONE_KEY for good. ZSCAN
- * returns every member present for the whole scan, and a job queued meanwhile notes itself (queuePerson). Until the
- * mark is set, a person's copy and both erasures read the store's waiting jobs from the shared queue, as before the
- * index (waitingPage), never only from an index that may miss one. A one-time company cost: per run at most
- * FILL_ROUNDS x (1 ZSCAN + 2 a member), until done.
+ * The one-time fill of the stores' queued indexes from the shared queue (Claude 1 DKvY's MEDIUM on #5135, mail 4534;
+ * design Claude 1 coord bb02): jobs already waiting when the index shipped were queued before it, so they are in no
+ * index. The five-minute job (syncDue) reads the shared queue with ZSCAN from a kept position and notes each member's
+ * id in its store's index (SADD and EXPIRE); at the end of the scan it sets FILL_DONE_KEY for good. ZSCAN returns every
+ * member present for the whole scan, and a job queued meanwhile notes itself (queuePerson). Until the mark is set, a
+ * person's copy and both erasures read the store's waiting jobs from the shared queue, as before the index
+ * (waitingPage), never only from an index that may miss one.
+ *
+ * Cost (Claude 1 coord 4680: a one-time company cost, no registry line): one run sends at most FILL_RUN_COMMANDS
+ * commands, every read and write counted before it is sent, a page larger than what is left noted in member order
+ * and gone on from after its last member. A queue of Q members takes about 2.004 Q commands in all (2 a member, a
+ * ZSCAN and a SET a page of QUEUED_PAGE, 3 a run): at Upstash's $2 a million, $0.000004 a member, so the queue main
+ * reads at its own bound (10,000 pages of 500, 5,000,000 members) would cost about $20.04 once, over 501 runs. With
+ * PLANS_ON_SALE false the queue is empty at deploy, so the fill ends on its first run (GET, GET, ZSCAN, SET, DEL).
+ * If it ever holds jobs at the opening, that one-time sum belongs in the fixed costs (FX275).
  */
 export const FILL_ROUNDS = 20;
+/** The most commands one run of the fill sends: FILL_ROUNDS pages of one ZSCAN and two commands a member. */
+export const FILL_RUN_COMMANDS = FILL_ROUNDS * (1 + 2 * QUEUED_PAGE);
 const FILL_CURSOR_KEY = "nl:esync:qdfill:cursor";
 const FILL_DONE_KEY = "nl:esync:qdfill:done";
+/** Where the fill goes on: a ZSCAN cursor, and within that page the last member already noted (or none). */
+const FILL_AT = /^(\d+)(?: (.{1,600}))?$/;
+
+/** Whether FILL_DONE_KEY's reply says the fill finished; another shape is unknown, never "finished". */
+function filledFrom(reply: unknown): boolean {
+  if (reply === "1") return true;
+  if (reply === null) return false;
+  throw new UnknownReplyError("the mark that the stores' queued indexes were filled");
+}
+
+/**
+ * One run's share of the fill: at most FILL_RUN_COMMANDS commands, none sent after the deadline. "done" once the mark
+ * is set; "more" when the run stopped first. Its position is kept after each step, so a run cut short goes on from
+ * where it stopped, never skips a member.
+ */
+export async function fillQueuedIndexes(deadline: number): Promise<"done" | "more"> {
+  let left = FILL_RUN_COMMANDS;
+  const send = async (commands: (string | number)[][]) => {
+    left -= commands.length;
+    return repliesFor(await redisPipeline(commands), commands.length);
+  };
+  const read = await send([["GET", FILL_DONE_KEY], ["GET", FILL_CURSOR_KEY]]);
+  if (!read) throw new UnknownReplyError("the fill of the stores' queued indexes");
+  if (filledFrom(read[0])) return "done";
+  const at = typeof read[1] === "string" ? FILL_AT.exec(read[1]) : null;
+  if (read[1] !== null && !at) throw new UnknownReplyError("where the fill of the stores' queued indexes goes on");
+  let cursor = at?.[1] ?? "0";
+  let after = at?.[2] ?? "";
+  // Each step: one ZSCAN, the notes that fit, and one write of where it goes on (or of the mark).
+  while (left >= 4 && Date.now() < deadline) {
+    const page = (await send([["ZSCAN", QUEUE_KEY, cursor, "COUNT", QUEUED_PAGE]]))?.[0];
+    const pair = Array.isArray(page) && page.length === 2 ? (page as unknown[]) : null;
+    const next = typeof pair?.[0] === "number" ? String(pair[0]) : pair?.[0];
+    const flat = pair ? stringList(pair[1]) : null;
+    if (typeof next !== "string" || !/^\d+$/.test(next) || !flat) throw new UnknownReplyError("a page of the shared email platform queue");
+    // ZSCAN answers member, score, member, score...: the members, in order, past the last one already noted.
+    const members = flat.filter((_, i) => i % 2 === 0).filter((m) => m > after).sort();
+    // Room is kept for the step's last write: the position (1) or the mark with the position's DEL (2).
+    const fit = Math.min(members.length, Math.max(0, Math.floor((left - 2) / 2)));
+    const notes: (string | number)[][] = [];
+    for (const member of members.slice(0, fit)) {
+      const [statsId, id] = member.split("|");
+      if (!statsId || !JOB_ID.test(id ?? "")) continue;
+      notes.push(["SADD", queuedKey(statsId), id!], ["EXPIRE", queuedKey(statsId), JOB_SECONDS]);
+    }
+    if (notes.length && !(await send(notes))) throw new UnknownReplyError("noting waiting jobs in their stores' indexes");
+    if (fit < members.length) {
+      // The page goes on after its last member noted, from the same cursor.
+      after = members[fit - 1] ?? after;
+      await send([["SET", FILL_CURSOR_KEY, after ? `${cursor} ${after}` : cursor]]);
+      return "more";
+    }
+    cursor = next;
+    after = "";
+    if (cursor === "0") {
+      // The mark only at the end of the scan, and the kept position goes with it.
+      await send([["SET", FILL_DONE_KEY, "1"], ["DEL", FILL_CURSOR_KEY]]);
+      return "done";
+    }
+    await send([["SET", FILL_CURSOR_KEY, cursor]]);
+  }
+  return "more";
+}
 
 /**
  * One page of a store's waiting job ids, from `cursor`: from its own queued index once the indexes are filled
@@ -118,40 +190,6 @@ async function waitingPage(statsId: string, filled: boolean, cursor: string): Pr
   return { next, ids };
 }
 
-/** Whether FILL_DONE_KEY's reply says the fill finished; another shape is unknown, never "finished". */
-function filledFrom(reply: unknown): boolean {
-  if (reply === "1") return true;
-  if (reply === null) return false;
-  throw new UnknownReplyError("the mark that the stores' queued indexes were filled");
-}
-
-/** One run's share of the fill (FILL_ROUNDS pages at most, none started after the deadline). Never throws into syncDue. */
-export async function fillQueuedIndexes(deadline: number): Promise<"done" | "more"> {
-  const read = repliesFor(await redisPipeline([["GET", FILL_DONE_KEY], ["GET", FILL_CURSOR_KEY]]), 2);
-  if (!read) throw new UnknownReplyError("the fill of the stores' queued indexes");
-  if (filledFrom(read[0])) return "done";
-  let cursor = typeof read[1] === "string" && /^\d+$/.test(read[1]) ? read[1] : "0";
-  for (let round = 0; round < FILL_ROUNDS && Date.now() < deadline; round += 1) {
-    const reply = repliesFor(await redisPipeline([["ZSCAN", QUEUE_KEY, cursor, "COUNT", QUEUED_PAGE]]), 1)?.[0];
-    const pair = Array.isArray(reply) && reply.length === 2 ? (reply as unknown[]) : null;
-    const next = typeof pair?.[0] === "number" ? String(pair[0]) : pair?.[0];
-    const flat = pair ? stringList(pair[1]) : null;
-    if (typeof next !== "string" || !/^\d+$/.test(next) || !flat) throw new UnknownReplyError("a page of the shared email platform queue");
-    const notes: (string | number)[][] = [];
-    // ZSCAN answers member, score, member, score...: the members only.
-    for (let i = 0; i < flat.length; i += 2) {
-      const [statsId, id] = flat[i]!.split("|");
-      if (!statsId || !JOB_ID.test(id ?? "")) continue;
-      notes.push(["SADD", queuedKey(statsId), id!], ["EXPIRE", queuedKey(statsId), JOB_SECONDS]);
-    }
-    if (notes.length && !repliesFor(await redisPipeline(notes), notes.length)) throw new UnknownReplyError("noting waiting jobs in their stores' indexes");
-    cursor = next;
-    // The cursor is kept only after its page was noted, so a run cut short reads that page again, never skips it.
-    await redisPipeline(cursor === "0" ? [["SET", FILL_DONE_KEY, "1"], ["DEL", FILL_CURSOR_KEY]] : [["SET", FILL_CURSOR_KEY, cursor]]);
-    if (cursor === "0") return "done";
-  }
-  return "more";
-}
 /** Minutes to wait before each try after the first. */
 export const RETRY_MINUTES = [5, 15, 60, 180, 720, 1440];
 export const MAX_ATTEMPTS = RETRY_MINUTES.length + 1;

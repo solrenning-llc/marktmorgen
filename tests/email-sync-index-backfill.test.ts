@@ -8,7 +8,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { QUEUE_KEY, fillQueuedIndexes, forgetStoreSync, forgetSyncPerson, syncDue, syncJobsPage } from "@/lib/email-sync";
+import { FILL_RUN_COMMANDS, QUEUED_PAGE, QUEUE_KEY, fillQueuedIndexes, forgetStoreSync, forgetSyncPerson, syncDue, syncJobsPage } from "@/lib/email-sync";
 import { ReadBudget } from "@/lib/copy-pages";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
@@ -77,4 +77,27 @@ test("a fill cut short keeps its cursor and goes on from it; a mark in another s
   assert.equal(redis.run(["GET", "nl:esync:qdfill:done"]), null);
   redis.run(["SET", "nl:esync:qdfill:done", "yes"]);
   await assert.rejects(() => syncJobsPage(STATS, PERSON, new ReadBudget(20_000)), UnknownReplyError);
+});
+
+test("each run of the fill sends at most FILL_RUN_COMMANDS commands, and the fill ends with every job noted", async () => {
+  redis.clear();
+  assert.equal(FILL_RUN_COMMANDS, 20 * (1 + 2 * QUEUED_PAGE), "FILL_ROUNDS x (1 + 2 x 500)");
+  // More waiting jobs than one run can note, all in one ZSCAN page here (the stub answers whole, as a small key does).
+  const jobs = 25_000;
+  for (let i = 0; i < jobs; i += 1) redis.run(["ZADD", QUEUE_KEY, i, `store${String(i % 50).padStart(3, "0")}|esj_${i.toString(16).padStart(24, "0")}`]);
+  let runs = 0;
+  let result: "done" | "more" = "more";
+  while (result === "more") {
+    seen.length = 0;
+    result = await fillQueuedIndexes(Date.now() + 60_000);
+    runs += 1;
+    assert.ok(seen.length <= FILL_RUN_COMMANDS, `run ${runs} sent ${seen.length}, at most ${FILL_RUN_COMMANDS}`);
+    assert.ok(runs < 100, "the fill ends");
+    if (result === "more") assert.equal(redis.run(["GET", "nl:esync:qdfill:done"]), null, "no mark before the scan's end");
+  }
+  assert.ok(runs >= 2, "a queue larger than one run's notes takes more than one run");
+  assert.equal(redis.run(["GET", "nl:esync:qdfill:done"]), "1");
+  let noted = 0;
+  for (let s = 0; s < 50; s += 1) noted += Number(redis.run(["SCARD", `nl:esync:qd:store${String(s).padStart(3, "0")}`]));
+  assert.equal(noted, jobs, "every waiting job is in its store's index");
 });

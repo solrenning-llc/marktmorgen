@@ -110,9 +110,18 @@ const SCRIPTS: Record<string, Script> = {
     run(["DEL", set, ...plain]);
     return [members, values, gone];
   },
-  "recent-feed-live:v1": (run, [live, erasing, feed], [field, json, seconds]) => {
-    if (Number(run(["EXISTS", live])) !== 1 || Number(run(["HEXISTS", erasing, field])) === 1) return "gone";
+  "recent-feed-live:v2": (run, [live, erasing, feed], [field, json, seconds, ref]) => {
+    if (run(["GET", live]) !== ref || Number(run(["HEXISTS", erasing, field])) === 1) return "gone";
     run(["SET", feed, json, "EX", seconds]);
+    return 1;
+  },
+  // lib/recent-sales.ts KEEP_SALE_IF_LIVE: a purchase written down (and the feed dropped) only while the store is live.
+  "recent-sale-live:v2": (run, [live, erasing, list, feed], [field, json, last, seconds, ref]) => {
+    if (run(["GET", live]) !== ref || Number(run(["HEXISTS", erasing, field])) === 1) return "gone";
+    run(["LPUSH", list, json]);
+    run(["LTRIM", list, 0, last]);
+    run(["EXPIRE", list, seconds]);
+    run(["DEL", feed]);
     return 1;
   },
 };

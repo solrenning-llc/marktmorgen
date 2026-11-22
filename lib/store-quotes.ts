@@ -12,13 +12,27 @@
  */
 import { type Review, studioReviews } from "@/lib/reviews";
 import { readListings } from "@/lib/catalog";
-import { type Store, dropQuotes, keepQuotes, setQuotes, storeRef } from "@/lib/store";
+import { STORE_ID_PATTERN, type Store, dropQuotes, keepQuotes, storeRef } from "@/lib/store";
 import { MAX_STORE_QUOTES, type StoreQuote, quoteText } from "@/lib/store-quotes-rules";
 
 /** Words shorter than this say too little to quote. */
 const MIN_QUOTE = 20;
 /** How far down the newest reviews are looked for three with words. */
 const LOOK_AT = 40;
+
+/**
+ * The record read under the owner's address is another store's (Claude 2 lpgvy on #5092, coordinator 26d3): the store
+ * these quotes were worked out for was closed, and the owner opened a new one at the same address since. Nothing is
+ * written then: never the closed store's buyers' names and words on the new store's page, never the new store's own
+ * quotes taken off. The same store is the same sid, or for a copy read before the store had an id the same statsId,
+ * as lib/store.ts withLiveStore reads it. Thrown inside keepQuotes, so its lock is let go with nothing written.
+ */
+class OtherStoreError extends Error {}
+
+function sameStoreOrThrow(known: Store, current: Store): void {
+  const same = STORE_ID_PATTERN.test(known.sid) ? current.sid === known.sid : Boolean(known.statsId) && current.statsId === known.statsId;
+  if (!same) throw new OtherStoreError("another store is at this address now");
+}
 
 /**
  * Reads the newest reviews and keeps the ones to quote on the store's record, read and written with the store's lock
@@ -44,6 +58,7 @@ export async function keepStoreQuotes(store: Store): Promise<void> {
   if (!statsId) return;
   try {
     const kept = await keepQuotes(storeRef(store), async (current) => {
+      sameStoreOrThrow(store, current);
       const { rows } = await studioReviews(statsId, { queue: false, offset: 0, limit: LOOK_AT });
       const quotes: StoreQuote[] = [];
       for (const row of rows) {
@@ -58,14 +73,22 @@ export async function keepStoreQuotes(store: Store): Promise<void> {
     });
     if (!kept) throw new Error("the store's record was not read");
   } catch (error) {
+    if (error instanceof OtherStoreError) return;
     // Not read is not "as before": since the last keep a review may have been hidden, refunded or deleted, or its
     // words changed, so nothing is quoted rather than words that may be off its page now; the next change keeps them.
     // Once nothing is quoted, no one's words are left to take off: a review that never reads again (a stale entry)
-    // must not keep every erasure of the store from being done.
-    const cleared = await setQuotes(storeRef(store), []).catch((failed: unknown) => {
+    // must not keep every erasure of the store from being done. Taken off only on this same store's record.
+    let cleared: Store | null;
+    try {
+      cleared = await keepQuotes(storeRef(store), async (current) => {
+        sameStoreOrThrow(store, current);
+        return [];
+      });
+    } catch (failed) {
+      if (failed instanceof OtherStoreError) return;
       console.error("taking a store's quotes off failed", failed);
-      return null;
-    });
+      cleared = null;
+    }
     if (cleared?.quotes.length !== 0) throw error;
     console.error("keeping a store's newest reviews failed; its quotes are off until the next change", error);
   }

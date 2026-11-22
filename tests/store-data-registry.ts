@@ -62,6 +62,7 @@ import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { ENTRY_BYTES } from "@/lib/store-data-rules";
 import { ERASED_MARK_SECONDS, TASK_COUNT_WEIGHT } from "@/lib/crm";
 import { MAX_STORE_BYTES, PHOTO_LEFT_MAX } from "@/lib/store";
+import { MAIL_GAP_CHECKS_PER_EMAIL } from "@/lib/mail-frequency";
 import { SALE_FEES_COPY_MAX_BYTES } from "@/lib/sale-fees-reading";
 import { SEARCH_INDEX_MAX_BYTES } from "@/lib/store-search-index";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
@@ -205,6 +206,7 @@ const KIND = (kind: string) => `order kind/${kind}`;
 export const FAMILIES: Record<string, Family> = {
   // ---------------------------------------------------------------- app/
   "nl:rl:creators:@app/api/creators/route.ts": company("Applications to the creators' page, per connection", "The company's own sign-up page for creators, not a store's."),
+  "nl:rl:creators:day:@app/api/creators/route.ts": company("New answers to the creators' survey in one UTC day, everyone together: one counter a day, kept two days, refusing past RESEARCH_ANSWERS_PER_DAY (lib/creator-research-room.ts; Claude 7 on #3584)", "The company's own research form, not a store's."),
   "nl:aff:payday:lock@app/api/cron/affiliates/route.ts": lock("The affiliates' payday job"),
   "nl:closing:lock@app/api/cron/closing/route.ts": lock("The closing job"),
   "nl:lock:plan-stop:@lib/billing.ts": lock("A plan's stop, while a plan refund or the creator changes it (30 s, one per subscription)"),
@@ -622,7 +624,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ref:mine:@lib/creator-invites.ts": company("A creator's credits", "The company's program for creators."),
   "nl:ref:mycode:@lib/creator-invites.ts": company("A creator's code", "The company's program for creators."),
   "nl:ref:owed@lib/creator-invites.ts": company("Credits owed", "The company's program for creators."),
-  "nl:creators:responses@lib/creator-research-store.ts": company("Answers to the creators' survey", "The company's own research."),
+  "nl:creators:responses@lib/creator-research-store.ts": company("Answers to the creators' survey", "The company's own research. One list, at most RESEARCH_MAX_ANSWERS (320) answers of at most RESEARCH_ANSWER_MAX_BYTES (12,288 bytes) each, counted and written in one step (KEEP_RESEARCH_ANSWER) and refused past it (lib/creator-research-room.ts, tests/creator-research-room.test.ts): RESEARCH_MAX_BYTES (3,932,160 bytes), under one backup part; answers older than 24 months go daily."),
   "nl:crm:deals:@lib/crm.ts": { what: "Deals: one slot a deal, at what it weighs, at most MAX_DEALS", room: ["lib/crm.ts"] },
   "nl:crm:co:@lib/crm-companies.ts": { what: "Companies and the people linked to them, at what each weighs, at most MAX_COMPANIES", room: ["lib/crm-companies.ts"] },
   "nl:crm:co:lock:@lib/crm-companies.ts": short("One change to a store's companies at a time, ten seconds at the most", "studio", 1, 128),
@@ -810,6 +812,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:mail:clk:@lib/mail-clicks.ts": short("The emails whose links a person used, ninety days", "monthly", 90, 128, MAIL("list")),
   "nl:mail:mk:@lib/mail-clicks.ts": { what: "The stop token a link key was made from: one a contact, counted with it (TOKEN_BYTES)", room: ["lib/contacts.ts"] },
   "nl:mail:drafts:@lib/mail-drafts.ts": { what: "Email drafts", parts: [capped(MAX_DRAFTS * (MAX_MAIL_BODY * 3 + 2 * KB), "MAX_DRAFTS drafts.", src("lib/mail-drafts.ts", "MAX_DRAFTS"), src("lib/mail.ts", "MAX_MAIL_BODY"))] },
+  // 374 [SU7] unit 2: the per-person email gap. Each person checked may be written once (a claim and its record), seven days at the most;
+  // checks are at most MAIL_GAP_CHECKS_PER_EMAIL a monthly email in a calendar month, and a billing month touches two.
+  "nl:mgap:last:@lib/mail-frequency.ts": short("When a person was last sent one of the store's emails, seven days", "monthly", 7, 2 * MAIL_GAP_CHECKS_PER_EMAIL * MARK),
+  "nl:mgap:gate:@lib/mail-frequency.ts": short("The one claim on a person's next email from the store, seven days", "monthly", 7, 2 * MAIL_GAP_CHECKS_PER_EMAIL * MARK),
+  "nl:mgap:checks:@lib/mail-frequency.ts": { what: "The store's count of gap checks in a calendar month, forty days", parts: [capped(windowsOver(40) * MARK, "One count a calendar month, forty days from its first check: up to three calendar months alive at once.", src("lib/mail-frequency.ts", "MAIL_GAP_CHECK_WINDOW_SECONDS = 40 * 86_400"))] },
   // 282 [HG1] unit 3: the store's reading of its fees, a day, and the day's count of readings, two days.
   "nl:salefees:copy:@lib/sale-fees-reading.ts": short("The last reading of the store's fees from its Stripe account, money fields only, a day", "day", 1, SALE_FEES_COPY_MAX_BYTES),
   "nl:salefees:day:@lib/sale-fees-reading.ts": short("The day's count of fee readings, two days", "day", 2, MARK),

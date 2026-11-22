@@ -822,6 +822,12 @@
       "parameters": []
     },
     {
+      "source": "app/help/trust-and-safety/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/help/trust-and-safety",
+      "parameters": []
+    },
+    {
       "source": "app/help/zoom/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/help/zoom",
@@ -1456,6 +1462,7 @@
     "components/client-sessions.tsx",
     "components/closing-refunds-confirm.tsx",
     "components/collections-editor.tsx",
+    "components/color-scheme-switch.tsx",
     "components/community-approval-studio.tsx",
     "components/community-challenges-studio.tsx",
     "components/community-challenges.tsx",
@@ -2296,6 +2303,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 157
+    "pageTemplates": 158
   }
 }

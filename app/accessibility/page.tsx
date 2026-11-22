@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { ColorSchemeSwitch } from "@/components/color-scheme-switch";
 import { LegalPage, LegalSection } from "@/components/legal-page";
 import { ACCESSIBILITY_CHECKS, STATEMENT_REVIEW, accessibilityGaps, reviewCounts } from "@/lib/accessibility-statement";
 
@@ -87,7 +88,15 @@ export default function AccessibilityPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="7. Words on this page">
+      <LegalSection title="7. Light or dark">
+        <p>
+          You can choose light text on a dark background. &ldquo;Match my device&rdquo; follows the light or dark setting
+          of your phone or computer.
+        </p>
+        <ColorSchemeSwitch />
+      </LegalSection>
+
+      <LegalSection title="8. Words on this page">
         <dl className="space-y-3">
           <div>
             <dt className="font-semibold">{WCAG}</dt>

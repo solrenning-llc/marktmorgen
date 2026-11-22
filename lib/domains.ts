@@ -378,10 +378,14 @@ export async function connectDomain(store: Store, raw: string, pending: PendingD
   const alreadyHere =
     added.status === 409 && (await vercel("GET", `/v9/projects/${vercelProject()}/domains/${name}`)).status === 200;
   if (added.status !== 200 && !alreadyHere) {
-    // Only this store's own claim is let go of, never a key another store holds by now (an unproved claim this
-    // store connected beside included); one that cannot be let go lapses on its own. It is let go only once the
-    // pending domain is confirmed off the store; otherwise both stay, and the studio's Remove finishes it.
-    if (await pending.clear(name).catch(() => false)) await releaseMark(domainKey(name), claim);
+    // Only a refusal Vercel gave (a 4xx: the request was not taken) proves the domain was not added. An answer that is
+    // not known (a 5xx, or the wrapper's own 502 when Vercel did not answer in time) may have added it (rule 24): the
+    // pending domain and the claim stay on the store, and the studio's Remove takes it off at Vercel and here (Claude 1
+    // on #5108). On a refusal, only this store's own claim is let go of, never a key another store holds by now (an
+    // unproved claim this store connected beside included), and only once the pending domain is confirmed off the
+    // store; otherwise both stay, and Remove finishes it.
+    const refused = added.status >= 400 && added.status < 500;
+    if (refused && (await pending.clear(name).catch(() => false))) await releaseMark(domainKey(name), claim);
     cache.delete(name);
     if (added.status === 409) return { ok: false, reason: "elsewhere" };
     if (added.status === 400) return { ok: false, reason: "shape" };

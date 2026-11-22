@@ -106,7 +106,9 @@ async function main(): Promise<void> {
   part("(a) controls: Vercel not answering, then the next press");
   await setUp();
   postThrows = true;
-  is("Vercel's call throwing: unavailable, the store's own claim let go at once", [await connect(), held()], [{ ok: false, reason: "unavailable" }, null]);
+  // Not answering is not a refusal: Vercel may have added it, so the store's own claim is kept, with the pending domain,
+  // for the studio's Remove (Claude 1 on #5108; Codex L-20261120-0152).
+  is("Vercel's call throwing: unavailable, the store's own claim kept", [await connect(), held()], [{ ok: false, reason: "unavailable" }, "?mystore"]);
   postThrows = false;
   is("the next press connects", [await connect(), held()], [{ ok: true, name: NAME }, "?mystore"]);
 

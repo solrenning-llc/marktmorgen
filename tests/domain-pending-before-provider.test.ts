@@ -29,6 +29,8 @@ const replaceDomainIf: ReplaceDomainIf = (...args) => {
 };
 
 let postStatus = 200;
+let postThrows = false;
+let getStatus = 200;
 let duringPost: (() => Promise<void>) | null = null;
 const posts: string[] = [];
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -37,8 +39,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (method === "POST") {
     posts.push(url.pathname);
     if (duringPost) await duringPost();
+    if (postThrows) throw new TypeError("fetch failed");
   }
-  const status = method === "POST" ? postStatus : 200;
+  // A GET answers 200 (the domain is on this project) unless the test says it is on another one.
+  const status = method === "POST" ? postStatus : getStatus;
   return new Response(JSON.stringify({ name: NAME }), { status, headers: { "Content-Type": "application/json" } });
 }) as typeof fetch;
 
@@ -83,15 +87,33 @@ async function main(): Promise<void> {
   }
 
   part("The provider refuses: the pending domain is cleared, then the claim is let go");
-  {
+  for (const [status, reason] of [[400, "shape"], [409, "elsewhere"]] as const) {
     redis.run(["DEL", KEY]);
     const { ref, store } = await extraStore();
-    postStatus = 500;
+    postStatus = status;
+    getStatus = 404; // not on this project: a 409 is another project's
     const result = await connectDomain(onPlan(store), NAME, pendingFor(ref, store.sid)).catch(() => "threw" as const);
     postStatus = 200;
-    is("unavailable", result, { ok: false, reason: "unavailable" });
-    is("the store holds no domain", await domainOf(ref), null);
-    is("the claim is let go", redis.run(["GET", KEY]), null);
+    getStatus = 200;
+    is(`a ${status}: ${reason}`, result, { ok: false, reason });
+    is(`a ${status}: the store holds no domain`, await domainOf(ref), null);
+    is(`a ${status}: the claim is let go`, redis.run(["GET", KEY]), null);
+  }
+
+  // Claude 1 2as's MEDIUM on #5108: an answer that is not known may have added the domain at Vercel. It is never taken
+  // as a refusal: the pending domain and the claim stay, so the studio's Remove can take it off at Vercel and here.
+  part("An unknown answer is not a refusal: the pending domain and the claim stay");
+  for (const [label, status, throws] of [["a 500", 500, false], ["a 503", 503, false], ["no answer (the wrapper's 502)", 200, true]] as const) {
+    redis.run(["DEL", KEY]);
+    const { ref, store } = await extraStore();
+    postStatus = status;
+    postThrows = throws;
+    const result = await connectDomain(onPlan(store), NAME, pendingFor(ref, store.sid)).catch(() => "threw" as const);
+    postStatus = 200;
+    postThrows = false;
+    is(`${label}: unavailable`, result, { ok: false, reason: "unavailable" });
+    is(`${label}: the store still holds the domain, for Remove`, await domainOf(ref), NAME);
+    is(`${label}: the claim is kept`, redis.run(["GET", KEY]) !== null, true);
   }
 
   part("A pending write that cannot be confirmed asks the provider nothing");
@@ -109,11 +131,11 @@ async function main(): Promise<void> {
   {
     redis.run(["DEL", KEY]);
     const { ref, store } = await extraStore();
-    postStatus = 500;
+    postStatus = 400;
     const stuck = { keep: pendingFor(ref, store.sid).keep, clear: async () => false };
     const result = await connectDomain(onPlan(store), NAME, stuck).catch(() => "threw" as const);
     postStatus = 200;
-    is("unavailable", result, { ok: false, reason: "unavailable" });
+    is("refused as a bad name", result, { ok: false, reason: "shape" });
     is("the claim is kept while the store may still hold the domain", redis.run(["GET", KEY]) !== null, true);
     is("and the store does hold it", await domainOf(ref), NAME);
     redis.run(["DEL", KEY]);

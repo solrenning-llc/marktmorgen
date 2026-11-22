@@ -122,8 +122,9 @@ async function main(): Promise<void> {
   reset("otherstore");
   is("held by another store: taken, Vercel not asked, its key kept", [await connectDomain(me, NAME, PENDING_OK), vercelCalls.length, held()], [{ ok: false, reason: "taken" }, 0, "otherstore"]);
   reset();
-  postStatus = 500;
-  is("a free domain Vercel refuses: unavailable, this store's claim let go", [await connectDomain(me, NAME, PENDING_OK), held()], [{ ok: false, reason: "unavailable" }, null]);
+  // A refusal is a 4xx; a 5xx is not known and keeps the claim (Claude 1 on #5108, tests/domain-pending-before-provider.test.ts).
+  postStatus = 400;
+  is("a free domain Vercel refuses: refused, this store's claim let go", [await connectDomain(me, NAME, PENDING_OK), held()], [{ ok: false, reason: "shape" }, null]);
 
   part("2. connectDomain — the SET NX answered neither OK nor nil while another store holds the domain");
   for (const [shape, reply] of ODD) {
@@ -151,9 +152,9 @@ async function main(): Promise<void> {
 
   part("2. connectDomain — a claim Vercel refuses is let go only while it is still this store's");
   reset();
-  postStatus = 500;
+  postStatus = 400;
   answer(letGo, (real) => real, { before: () => void redis.run(["SET", KEY, "otherstore"]) });
-  is("another store's claim in the key by then: kept", [await outcome(connectDomain(me, NAME, PENDING_OK)), held()], [{ ok: false, reason: "unavailable" }, "otherstore"]);
+  is("another store's claim in the key by then: kept", [await outcome(connectDomain(me, NAME, PENDING_OK)), held()], [{ ok: false, reason: "shape" }, "otherstore"]);
 
   part("3. proveDomain — healthy controls");
   reset("mystore");

@@ -37,6 +37,45 @@ export async function setWhileStoreLive(store: Pick<Store, "email" | "sid" | "ex
   return setIfStoreLive(await storeLiveFence(store), key, value, seconds);
 }
 
+// The same identity rule as SET_IF_STORE_LIVE, for a setting kept with no expiry (Codex L-20261121-0237): the email
+// platform's sealed key and settings (lib/email-sync.ts writeConfig), written after a slow provider call, only while
+// the store is still its own and not erasing, in one step, so a store erased while the provider answered never gets
+// its sealed key back. 0: gone or erasing, nothing written; -1: the owner's record could not be read; 1: kept.
+const SET_PERSISTENT_IF_STORE_LIVE = `-- marktmorgen:store-cache-persistent-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[3] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[4] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[3] then return 0 end
+end
+redis.call("SET", KEYS[3], ARGV[2])
+return 1`;
+
+/**
+ * What the fence adds to the plain SET it replaces, as Upstash bills a script (the EVAL and its inner HGET, GET and
+ * SET): 4 billed commands for 1. Priced on every call out of the window (tests/plan-cost-registry.ts, UNIT_COST
+ * integration), where connecting an email platform and saving its settings are counted.
+ */
+export const PERSISTENT_FENCE_EXTRA_COMMANDS = 3;
+
+/**
+ * Keeps `value` under `key`, with no expiry, while `store` is live: "kept"; "gone" when its erasure has begun or its
+ * record is gone, and then nothing is written; "unknown" for any other answer (nothing known to be written). Billed as
+ * the EVAL and its three inner calls (HGET, GET, SET): three commands more than the plain SET it replaces.
+ */
+export async function setPersistentWhileStoreLive(store: Pick<Store, "email" | "sid" | "extra" | "statsId">, key: string, value: string): Promise<"kept" | "gone" | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  const fence = await storeLiveFence(store);
+  if (fence.statsId === null) return "unknown";
+  const replies = repliesFor(await redisPipeline([["EVAL", SET_PERSISTENT_IF_STORE_LIVE, 3, fence.live, fence.erasing, key, fence.field, value, fence.statsId, fence.ref]]), 1);
+  const answer = replies?.[0];
+  return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
+}
+
 // The same identity rule as SET_IF_STORE_LIVE, for a mark taken once (lib/claim-mark.ts claimMark's SET NX): a job that
 // read slowly on an old Store takes its mark only while that store is still its own and not erasing, in one step, so a
 // late run never recreates an erased store's family nor goes on to contact its old addresses (Codex L-20261120-1852 and

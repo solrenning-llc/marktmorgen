@@ -203,7 +203,10 @@ export async function listPasskeys(email: string): Promise<Passkey[]> {
   } catch {
     throw new UnknownReplyError("a passkey list");
   }
-  const whole = (p: unknown) => Boolean(p) && typeof p === "object" && !Array.isArray(p) && typeof (p as Passkey).id === "string" && typeof (p as Passkey).publicKey === "string";
+  // The signature counter too, as registration and sign-in write it: a whole number from 0 up (rule 24; Codex G, #4287
+  // item 2). Any other shape is never handed to WebAuthn's verification as 0, the counter that guards against a clone.
+  const counted = (c: unknown) => typeof c === "number" && Number.isSafeInteger(c) && c >= 0;
+  const whole = (p: unknown) => Boolean(p) && typeof p === "object" && !Array.isArray(p) && typeof (p as Passkey).id === "string" && typeof (p as Passkey).publicKey === "string" && counted((p as Passkey).counter);
   if (!Array.isArray(value) || !value.every(whole)) throw new UnknownReplyError("a passkey list");
   // Never more than an account may hold, and each credential once (Codex G on #2723): a list past either is not one
   // this code wrote, and is never cut down to fit, since what is cut would be lost on the next write.
@@ -424,7 +427,8 @@ async function readDrop(email: string): Promise<DropRecord | null> {
     throw unknown();
   }
   const plain = (x: unknown): x is Record<string, unknown> => x !== null && typeof x === "object" && !Array.isArray(x);
-  const moment = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
+  // A moment as writeDrop writes it: whole milliseconds from 0 up (rule 24; Codex G, #4287 item 3).
+  const moment = (x: unknown): x is number => typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
   if (!plain(parsed)) throw unknown();
   const value = parsed;
   // Built as entries, never by assigning keys, so an id such as "__proto__" stays an id.

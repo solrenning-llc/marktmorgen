@@ -19,7 +19,24 @@ const amount=(value:unknown)=>typeof value==='string'&&/^(0|[1-9][0-9]*)$/.test(
 export async function redisPipeline(commands:(string|number)[][]):Promise<unknown[]>{
  calls.push(commands);if(failing)throw Error('Redis unavailable');if(reply)return reply;
  if(commands.length===2&&commands[0][0]==='EVAL'&&commands[0][2]===2){const first=openLedger(commands[0]);const second=take(commands[1]);return lostAck?[]:[first,second[0]];}
+ if(commands.length===1&&commands[0][0]==='EVAL'&&commands[0][2]===2)return [check(commands[0])];
  return take(commands[0],commands.length);
+}
+/** Contract double of CHECK_UPLOAD_BUDGET: what OPEN (automatic) then RESERVE would answer, with every
+ * write undone (the same row objects keep their exact contents). `lostAck` models a lost write reply,
+ * so it does not apply to this read. The real Lua is held to the real scripts in scripts/test_upload_budget_redis.py. */
+function check(cmd:(string|number)[]):number{
+ const [,,,key,marker,...rest]=cmd;const args=rest.slice(0,12),automatic=String(rest[12])==='1',review=rest[13],funded=rest.slice(14,20);
+ const saved=[...hashes].map(([name,row])=>[name,row,new Map(row)] as const),savedOpened=new Set(opened),savedLost=lostAck;
+ try{
+  lostAck=false;
+  if(String(args[3])!=='open')return 0;
+  if(automatic&&openLedger(['EVAL','',2,key,marker,review,args[0],...funded])!==1)return 0;
+  return take(['EVAL','',1,key,...args])[0]===1?1:0;
+ }finally{
+  lostAck=savedLost;hashes.clear();opened.clear();savedOpened.forEach(name=>opened.add(name));
+  for(const [name,row,copy] of saved){row.clear();copy.forEach((value,field)=>row.set(field,value));hashes.set(name,row);}
+ }
 }
 /** Contract double of OPEN_UPLOAD_BUDGET; the Lua itself runs against real Redis in CI. */
 function openLedger(cmd:(string|number)[]):number{

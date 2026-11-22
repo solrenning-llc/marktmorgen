@@ -16,6 +16,8 @@ export type ActionResult = { id: string; title: string; href: string; plan: stri
 export function available(action: StudioAction, ctx: GalleryContext): boolean {
   const screen = action.segment ? STUDIO_MODULES.find((entry) => entry.segment === action.segment) : undefined;
   if (screen) return shows(screen, ctx);
+  // The plan's section is drawn only where the plan page is (billingReady && may("billing")): nobody else is offered it.
+  if (action.onPlanPage && ctx.planHref === null) return false;
   return action.permission === "member" || ctx.may(action.permission);
 }
 

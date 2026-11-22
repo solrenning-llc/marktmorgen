@@ -34,8 +34,12 @@
  * line's real amount, marked `uk_vat`, never `eu_vat`, so neither return reads the other's sale. Two more unknowns
  * refuse, never collect zero: whether the product is an e-publication (zero-rated in the UK; since unit 5a the
  * creator's own answer on each product, lib/catalog.ts Product.publication, read by notAPublication), and the sterling
- * rate of a sale in another currency (HMRC's rate at the time of the supply, VAT Notice 700, 7.6, is not read here),
- * so only a sale in pounds can collect.
+ * rate of a sale in another currency (VAT Notice 700, 7.6). Since unit 7 that rate is HMRC's period rate for the
+ * supply's month (lib/hmrc-period-rates.ts): with a row, a sale in another store currency written in hundredths is
+ * collected at 20% in its own currency and its sterling VAT kept as `uk_vat_gbp`, only while the checkout cannot be paid
+ * in another month, and only with a reviewed allowance for the gap between that period rate and the market rate on the
+ * sale (lib/eu-vat-collection-cost.ts, `against: "gbp"`). HMRC's rates for November and December 2026 are read; what
+ * keeps every such sale closed today is REVIEWED_VAT_FX_ALLOWANCES, empty, and the switches, off.
  */
 import { EU_UK_REFUSED, consumerGate } from "@/lib/eu-vat-gate";
 import { type EuSupplyFields, euSupplyOf } from "@/lib/eu-vat-supply";
@@ -45,7 +49,9 @@ import { EU_VAT_RATES, type EuVatRate, type VatOnTop, vatOnTop } from "@/lib/eu-
 import { applyEuVatLines } from "@/lib/eu-vat-lines";
 import { euVatCollectionCostCents } from "@/lib/eu-vat-collection-cost";
 import { recordedTreatment } from "@/lib/deemed-supplier";
-import { UK_VAT_RATE_VALID_UNTIL, ukCheckout, ukVatOnTop } from "@/lib/uk-vat";
+import { UK_VAT_RATE_VALID_UNTIL, toPence, ukCheckout, ukVatOnTop } from "@/lib/uk-vat";
+import { HMRC_PERIOD_RATES, type HmrcPeriodRate, hmrcPeriodRate } from "@/lib/hmrc-period-rates";
+import { decimalsOf, isCurrency } from "@/lib/money";
 import { type SwitchInput, euVatCollectOn, ukVatCollectOn } from "@/lib/vat-registrations";
 
 /** What the checkout route does with the buyer before anything is held: go on, collect EU VAT, or refuse. */
@@ -184,9 +190,11 @@ export function applyEuCollect(
     chooseYourPrice: boolean;
     /** Set by createCheckout: lib/buyer-currency.ts BUYER_CURRENCY_LIVE, which would convert the amount after this. */
     buyerCurrencyLive: boolean;
-    costsCents?: (vatCents: number, currency: string) => number | null;
+    costsCents?: (vatCents: number, currency: string, returnCurrency?: string) => number | null;
     now?: Date;
     rates?: readonly EuVatRate[];
+    /** Tests only: HMRC's period rates (lib/hmrc-period-rates.ts) instead of HMRC_PERIOD_RATES. */
+    sterlingRates?: readonly HmrcPeriodRate[];
   },
 ): void {
   collectOn(body, input, false);
@@ -205,9 +213,11 @@ export function applyEuCollectCart(
     country: string;
     /** Set by createCartCheckout: lib/buyer-currency.ts BUYER_CURRENCY_LIVE, which would convert the amounts after this. */
     buyerCurrencyLive: boolean;
-    costsCents?: (vatCents: number, currency: string) => number | null;
+    costsCents?: (vatCents: number, currency: string, returnCurrency?: string) => number | null;
     now?: Date;
     rates?: readonly EuVatRate[];
+    /** Tests only: HMRC's period rates (lib/hmrc-period-rates.ts) instead of HMRC_PERIOD_RATES. */
+    sterlingRates?: readonly HmrcPeriodRate[];
   },
 ): void {
   collectOn(body, { ...input, chooseYourPrice: false }, true);
@@ -220,9 +230,11 @@ function collectOn(
     country: string;
     chooseYourPrice: boolean;
     buyerCurrencyLive: boolean;
-    costsCents?: (vatCents: number, currency: string) => number | null;
+    costsCents?: (vatCents: number, currency: string, returnCurrency?: string) => number | null;
     now?: Date;
     rates?: readonly EuVatRate[];
+    /** Tests only: HMRC's period rates (lib/hmrc-period-rates.ts) instead of HMRC_PERIOD_RATES. */
+    sterlingRates?: readonly HmrcPeriodRate[];
   },
   cart: boolean,
 ): void {
@@ -262,22 +274,63 @@ function collectOn(
   }
   if (!Number.isSafeInteger(total)) refuse("the lines' total");
   const now = input.now ?? new Date();
-  const vat = input.country === "GB" ? ukVat(total, currency, now) : vatOnTop(total, input.country, input.rates ?? EU_VAT_RATES, now);
+  const uk = input.country === "GB" ? ukVat(total, currency, now, input.sterlingRates ?? HMRC_PERIOD_RATES, body.get("expires_at")) : null;
+  const vat = input.country === "GB" ? uk?.vat ?? null : vatOnTop(total, input.country, input.rates ?? EU_VAT_RATES, now);
   if (!vat || vat.country !== input.country) refuse("no sourced rate, or no sterling rate");
-  const cost = (input.costsCents ?? euVatCollectionCostCents)(vat!.vatCents, currency);
+  // A UK sale is declared to HMRC in pounds whatever it was charged in, so its exchange-rate allowance is the pound's
+  // (unit 7); an EU sale keeps its own currency's, as before.
+  const cost = input.country === "GB"
+    ? (input.costsCents ?? euVatCollectionCostCents)(vat!.vatCents, currency, "gbp")
+    : (input.costsCents ?? euVatCollectionCostCents)(vat!.vatCents, currency);
   if (cost === null || !Number.isSafeInteger(cost) || cost < 0) refuse("the cost of receiving the VAT is unknown");
   const mark = input.country === "GB" ? "uk_vat" : "eu_vat";
   if (applyEuVatLines(body, { vat: vat!, recurring: false, vatCostsCents: cost, currency, mark }) !== "ok") refuse("the VAT line");
+  // The sale's VAT in sterling at HMRC's period rate, kept on the payment beside `uk_vat` for the invoice and the VAT
+  // Return (VAT Notice 700/21, 4.1: "expressed in sterling"): pence, the rate as HMRC wrote it, and its month.
+  if (uk?.sterling) body.set("payment_intent_data[metadata][uk_vat_gbp]", `${uk.sterling.pence}:${uk.sterling.perPound}:${uk.sterling.month}`);
 }
 
 /**
- * The UK VAT on a line, at the rate read on gov.uk while it is not past UK_VAT_RATE_VALID_UNTIL; null otherwise, and
- * null for a sale in any currency but pounds: its VAT must be stated in sterling at HMRC's rate at the time of the
- * supply (VAT Notice 700, 7.6), which is not read here.
+ * The UK VAT on a line, at the rate read on gov.uk while it is not past UK_VAT_RATE_VALID_UNTIL; null otherwise. A sale
+ * in pounds is itself in sterling. A sale in another store currency written in hundredths is charged at 20% in its own
+ * currency, and its VAT stated in sterling at HMRC's period rate for the supply's month (VAT Notice 700, 7.6;
+ * lib/hmrc-period-rates.ts): no row for that month and currency, or a currency not in hundredths, is null (unit 7).
  */
-function ukVat(amountCents: number, currency: string, now: Date): VatOnTop | null {
-  if (currency.toLowerCase() !== "gbp") return null;
-  if (!Number.isFinite(now.getTime()) || now.toISOString().slice(0, 10) > UK_VAT_RATE_VALID_UNTIL) return null;
+function ukVat(amountCents: number, currency: string, now: Date, table: readonly HmrcPeriodRate[], expiresAt: string | null): { vat: VatOnTop; sterling: { pence: number; perPound: string; month: string } | null } | null {
+  if (!Number.isFinite(now.getTime())) return null;
+  const today = now.toISOString().slice(0, 10);
+  if (today > UK_VAT_RATE_VALID_UNTIL) return null;
   const vat = ukVatOnTop(amountCents);
-  return vat ? { ...vat, country: "GB" } : null;
+  if (!vat) return null;
+  const code = currency.toLowerCase();
+  if (code === "gbp") return { vat: { ...vat, country: "GB" }, sterling: null };
+  if (!isCurrency(code) || decimalsOf(code) !== 2) return null;
+  // The rate is the one of the month the buyer pays in (Notice 700, 7.6: "current at the time of the supply"), and
+  // the checkout is opened now: it is collected only while it cannot be paid in another month. Without its own
+  // `expires_at`, a Stripe Checkout Session stays open 24 hours (Claude 1's LOW on #5032).
+  const closes = expiresAt === null ? now.getTime() + 86_400_000 : /^[1-9]\d{0,11}$/.test(expiresAt) ? Number(expiresAt) * 1000 : Number.NaN;
+  if (!Number.isFinite(closes) || closes < now.getTime()) return null;
+  // The month is the UK's (Claude 2's LOW on #5032): in summer time the last hour of a UTC month is already the next
+  // month in London. Both ends must fall in one month in London and in UTC alike, so the rate never depends on which.
+  const opened = ukDay(now.getTime());
+  const shut = ukDay(closes);
+  if (!opened || !shut) return null;
+  const month = opened.slice(0, 7);
+  if (shut.slice(0, 7) !== month || today.slice(0, 7) !== month || new Date(closes).toISOString().slice(0, 7) !== month) return null;
+  const rate = hmrcPeriodRate(code, opened, table);
+  const pence = rate ? toPence(vat.vatCents, rate.perPound) : null;
+  if (!rate || pence === null) return null;
+  return { vat: { ...vat, country: "GB" }, sterling: { pence, perPound: rate.perPound, month } };
+}
+
+/** The calendar day in the UK (Europe/London) at an instant, as YYYY-MM-DD; null when it cannot be read. */
+function ukDay(ms: number): string | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(ms));
+    const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    const day = `${part("year")}-${part("month")}-${part("day")}`;
+    return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null;
+  } catch {
+    return null;
+  }
 }

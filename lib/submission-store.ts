@@ -569,6 +569,9 @@ export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_
       opened = await steps.openReservedVault(
         { folder: ask.folder, ownerId: submissionOwnerId(place.id), name: ask.file.name, bytes: ask.file.bytes, type: ask.file.type, multipart: true },
         ask.file.limitBytes,
+        undefined,
+        // The upload budget is already taken above, before storage is measured: nothing more to pay for here.
+        async () => true,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "";

@@ -8,8 +8,10 @@ import { productSegment } from "@/lib/product-slug";
 import { takePublicRequest } from "@/lib/traffic";
 import { APPLY_PER_CONNECTION_HOUR, APPLY_SUBMIT_REQUEST_UNITS, type ApplyStatus, isApplyFirst, submitApplication } from "@/lib/apply-first-store";
 
-/** The form's fields, with room to spare: a handle, a product id, an address, two words and a version. */
+/** The form's fields, with room to spare: a handle, a product id, an address, two words, a version and an attempt key. */
 const MAX_BODY_BYTES = 2_000;
+/** The attempt key the form makes once and sends again on every retry: 16 random bytes, in lowercase hex. */
+const ATTEMPT = /^[0-9a-f]{32}$/;
 
 /**
  * An application to buy a product that asks for one first (604 [WP3], lib/apply-first-store.ts):
@@ -36,6 +38,7 @@ export async function POST(request: NextRequest) {
   let consent = false;
   let version = "";
   let honeypot = "";
+  let attempt = "";
   try {
     const form = await (await limited(request, MAX_BODY_BYTES)).formData();
     const read = (name: string, max: number) => {
@@ -48,6 +51,7 @@ export async function POST(request: NextRequest) {
     consent = read("consent", 3) === "yes";
     version = read("version", 40);
     honeypot = read("website", 200);
+    attempt = read("attempt", 40);
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -76,7 +80,10 @@ export async function POST(request: NextRequest) {
     if (!(await withinStore("apply-ip", `${clientAddress(request)}|${store.sid}`, APPLY_PER_CONNECTION_HOUR, 3_600, store))) return answer("limited");
     if (!(await isApplyFirst(store, product.id))) return answer("closed");
     if (!consent) return answer("consent");
-    const kept = await submitApplication(store, { offer: product.id, email, consentVersion: version }, now);
+    // The form's own key for this attempt (#3564): a retry after a lost answer sends the same one and is the same
+    // application. Never made here, for each request, which would make that retry a second application.
+    if (!ATTEMPT.test(attempt)) return answer("error");
+    const kept = await submitApplication(store, { offer: product.id, email, consentVersion: version, key: attempt }, now);
     if (kept.ok) return answer("sent");
     const status: Record<typeof kept.reason, ApplyStatus> = {
       "bad-input": "email",

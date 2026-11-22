@@ -27,9 +27,13 @@ export function runScript(command: Cmd): unknown {
   const extend = (indexes: string[], ttl: string) => {
     for (const index of indexes) if (Number(inner(["TTL", index])) < Number(ttl)) inner(["EXPIRE", index, ttl]);
   };
+  // APPLY_NEW v2 (#3564, Claude 4 nuvem Z): refused once the person's erasure print is there (6); a record already
+  // there is answered with its kept text, so a retry of the same attempt is the same application.
   if (script === APPLY_NEW) {
-    const [record, stores, person, id, text, ttl, until, now, most, mostPerson] = rest;
-    if (inner(["EXISTS", record]) !== 0) return 3;
+    const [record, stores, person, erased, id, text, ttl, until, now, most, mostPerson, print] = rest;
+    if (inner(["HEXISTS", erased, print]) !== 0) return 6;
+    const kept = inner(["GET", record]);
+    if (kept !== null && kept !== undefined) return kept;
     inner(["ZREMRANGEBYSCORE", stores, "-inf", now]);
     inner(["ZREMRANGEBYSCORE", person, "-inf", now]);
     if (Number(inner(["ZCARD", stores])) >= Number(most)) return 4;

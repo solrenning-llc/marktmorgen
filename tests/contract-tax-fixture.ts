@@ -2,6 +2,7 @@ import { canonicalFinancialSnapshot, type ContractFundingContext, type ContractF
 import { CUSTOMER_COST_CATEGORIES } from '../lib/net-margin-rules';
 import type { ContractTaxCoverage, TaxContext } from '../lib/customer-tax-review';
 import { contractFixture } from './contract-funding-fixture';
+import { commercialTermsDigest } from '../lib/commercial-terms-digest';
 import type {CommercialMarginReview} from '../lib/commercial-margin';
 import { txCustomerFixture, syntheticTaxEvidence } from './customer-tax-review-fixture';
 
@@ -9,7 +10,7 @@ import { txCustomerFixture, syntheticTaxEvidence } from './customer-tax-review-f
  * No actual future profit, exchange quote, legal fact or bank reserve is proved. */
 export function applyContractTaxCoverage<T extends {now:Date;review:CommercialMarginReview;context:ContractFundingContext;policy:ContractFundingPolicy}>(f:T):T {
   const contract: ContractTaxCoverage = {
-    reviewId: f.policy.reviewId, termsSnapshot: f.context.termsSnapshot,
+    reviewId: f.policy.reviewId, termsDigest: commercialTermsDigest(f.context.termsSnapshot)!,
     admissionsFrom: f.now.toISOString(), admissionsUntil: f.policy.admissionsUntil,
     liabilitiesThrough: f.policy.liabilitiesThrough, evidence: syntheticTaxEvidence(),
   };

@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { DataRoomError } from "@/lib/store-data";
 import { originFrom, linkOrigin } from "@/lib/request-origin";
-import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readForm, addResponse } from "@/lib/form-store";
 import { enroll } from "@/lib/flows";
@@ -70,7 +70,9 @@ export async function POST(request: NextRequest) {
   if (one("website").trim()) return go(done("", false));
 
   const ip = clientAddress(request);
-  if (!(await withinStore("form-ip", `${statsId}|${ip}`, PER_HOUR, 3_600, store))) return back("limited");
+  const room = await withinStore("form-ip", `${statsId}|${ip}`, PER_HOUR, 3_600, store).catch(unknownLimit);
+  if (room === "unknown") return back("error");
+  if (!room) return back("limited");
 
   const read = readAnswers(def, (name) => form.getAll(name).filter((v): v is string => typeof v === "string").map((v) => v.slice(0, 4_000)));
   if (!read.ok) return back(read.error);
@@ -88,6 +90,8 @@ export async function POST(request: NextRequest) {
       joined = asked === "sent";
     }
     await addResponse(statsId, def.id, { id: randomBytes(16).toString("hex"), at: Math.floor(Date.now() / 1000), page: page?.id ?? "", answers: read.answers, outcome: outcome?.id ?? "", joined, ...(measured ? { score: measured.total, scores: measured.categories } : {}) }, store);
+    // A form is not a return: anybody can type an address into it (Revisor 2, #2287). The person comes back by
+    // confirming the sign-up the form asked for (lib/store-join.ts, confirmJoin), by paying or by a copy they asked for.
     // Somebody already on the list: the sequences that start with this form start now (lib/flows.ts checks they may be written to).
     if (read.email) await enroll(store, read.email, { joined: false, form: def.id, formOutcome: outcome?.id ?? "" });
 

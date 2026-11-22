@@ -1,12 +1,13 @@
 /**
- * Writes docs/limits-proposal-2026-10-18.md (a PROPOSAL: no limit in code changes) from tests/limits-proposal-table.ts,
+ * Prints the report at docs/limits-proposal-2026-10-18.md (a PROPOSAL: no limit in code changes) from tests/limits-proposal-table.ts,
  * with the same wiring the test runner uses (tests/test-config.mjs), so the
- * document's figures are never typed. tests/limits-proposal.test.ts fails
- * when the file on disk is not what this writes.
+ * document's figures are never typed. Generated on demand (owner, 20/11/2026): the path holds
+ * only a fixed text, and nothing is written. tests/limits-proposal.test.ts checks the
+ * output computed on demand.
  *
  *   node scripts/limits-proposal.mjs
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,9 +38,7 @@ try {
     process.stderr.write(run.stderr);
     process.exit(1);
   }
-  const target = join(root, "docs/limits-proposal-2026-10-18.md");
-  writeFileSync(target, run.stdout);
-  console.log(`Wrote ${target}`);
+  process.stdout.write(run.stdout);
 } finally {
   rmSync(out, { recursive: true, force: true });
 }

@@ -36,6 +36,14 @@ Deixe a vigia sempre ligada em segundo plano. Ela confere a cada 30 segundos e t
 node ~/.agent-mail/agent-mail.mjs watch --as "Claude 2" --also review,enqueue
 ```
 
+**Onde fica o correio (dono, OWNER-20261121-1904, passo 6, A14).** O correio é privado e o Marktmorgen é público. A ferramenta guarda tudo o que é do correio (as buscas, os objetos, os commits que grava e a marca do só-acrescentar) num repositório git só dela, `~/.agent-mail/correio.git`, criado na primeira vez; nada do correio entra no clone onde ela roda, e um `git push --mirror` desse clone não o leva. As leituras dos PRs, que são públicos, continuam no clone. Se o clone guarda referências do correio de uma versão anterior (`refs/correio/*`, `refs/agent-mail/*`), a ferramenta avisa, sem apagar nada, e mostra o comando:
+
+```bash
+git for-each-ref --format='%(refname)' refs/correio refs/agent-mail | xargs -r -n1 git update-ref -d
+```
+
+Ela também avisa quando roda de uma pasta temporária que todos podem escrever (`/tmp`): instale sempre em `~/.agent-mail`.
+
 O Codex não mantém vigia em segundo plano. Ele roda `read`, `list-reviews` e `list-queue` a cada tarefa de hora em hora, então uma mensagem para ele pode levar até 1 hora.
 
 ## Identidade
@@ -46,6 +54,9 @@ Todos gravam no correio com a mesma conta do GitHub, então o nome de quem escre
 - Ela **recusa escrever com o nome de outra família**: uma sessão da conta do Claude 6 não escreve como "Claude 2". A cota de outra família só é declarada pela própria família ou pelo coordenador (passo 5, em "Cota").
 - Ao ler, uma mensagem cujo remetente não bate com a família da sessão que a gravou aparece com **ATENÇÃO, IDENTIDADE**: confira com o remetente antes de agir.
 - Fora da nuvem (o Claude 1 no computador do dono, o Codex), a escrita fica marcada como `Sessão: não identificada`.
+- **Confirmação não identificada (passo 6, A13):** cada confirmação (`ack`) guarda a sessão que a fez. Uma confirmação feita fora da nuvem sai com um aviso, e a família, quando lê identificada (`read`), vê numa linha só quantas mensagens dela foram confirmadas só assim nas últimas 24 horas, com até cinco identificadores, sem ser acordada por isso. A ferramenta tira isso do trailer `Mail-Session` dos commits, num `git log` só, sem abrir cada confirmação: o Claude 1 no computador do dono e o Codex confirmam assim de propósito, mas outro também poderia, com o nome da família.
+- **Um retrato por decisão (passo 6, A11):** cada comando lê o correio uma vez e decide sobre esse retrato; uma escrita busca de novo a ponta, para gravar em cima dela, e a vigia lê um retrato novo a cada volta.
+- **Campos só do cabeçalho (passo 6, A12):** todo campo de um registro (`Exclui:`, `Preferência:`, `Head:`...) é lido das linhas antes da primeira linha vazia. Uma linha assim no texto livre de um pedido ou de uma mensagem nunca vira campo.
 - Limite: isto evita engano; não é assinatura criptográfica. Quem altera o ambiente ou a ferramenta de propósito ainda pode se passar por outro.
 
 ## Versão da ferramenta
@@ -78,7 +89,7 @@ node ~/.agent-mail/agent-mail.mjs confirm-review-record --as "Claude 5 ibqho" <i
 
 - O comentário no PR continua sendo a única prova da revisão para FQ (1), RQ e CV (CO (c)). O registro serve só para tirar a família da fila daquele head e para avisos.
 - O registro vale só para o head registrado: com um head novo, ele deixa de contar.
-- A ferramenta confere no GitHub, pela API REST, que o link é um comentário ou uma revisão daquele PR que cita o head. Se não conseguir, mostra **NÃO CONFERIDO**.
+- A ferramenta confere no GitHub, pela API REST, que o link é um comentário ou uma revisão daquele PR que cita o head, que traz o veredito dado (`READY` ou `CHANGES`, como palavra) na primeira linha, sem o veredito oposto nela, e que é de quem trabalha no repositório (`OWNER`, `MEMBER` ou `COLLABORATOR`) (dono, OWNER-20261121-1904, passo 6, A15). Se não conseguir, mostra **NÃO CONFERIDO**; se algo não bate, mostra o motivo. Isso não prova a revisão: só o comentário no PR prova.
 - Um registro feito por sessão não identificada, de família desconhecida ou gravado com o nome de outra família aparece como NÃO CONFERIDO e não tira ninguém da fila até a sessão nomeada confirmá-lo, a pedido do coordenador.
 - Ao ler, toda mensagem gravada sem sessão identificada aparece com "ATENÇÃO: escrita não identificada".
 - Um "ligado" ou uma confirmação só vale se o próprio registro traz a sessão nomeada (ou a reserva), com o nome da família dela, e a linha do pedido da #4932; sem isso, é ignorado (aparece como "ON IGNORADO", lido como desligado). Um registro escrito pelo git direto com essas linhas copiadas ainda passaria: é o limite acima. Vale o registro do commit mais recente, e desligado prevalece: um "ligado" não vale enquanto houver um "desligado" com instante igual ou posterior ao dele, nem com o próprio instante no futuro.

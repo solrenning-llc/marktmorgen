@@ -21,7 +21,10 @@
  * Stripe is played by a stand-in for `fetch`; synthetic data only.
  */
 import { readFileSync } from "node:fs";
-import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { NextRequest } from "next/server";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { POST as discountRoute } from "@/app/api/store/discount/route";
+import { addReturningCode, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { makeReturningCode, stopReturningCode } from "@/lib/returning-code-make";
 import { readReturningConfirmation } from "@/lib/discount-confirmation";
 import { MAX_RETURNING_CODES } from "@/lib/returning-code-rules";
@@ -38,6 +41,9 @@ let livePromotions: string[] = [];
 let promotionList: "list" | "garbled" = "list";
 let couponAnswer: "exact" | "other" | "error" = "exact";
 let deleteFails = false;
+// A code of the other kind made with the same word while this one is made (Codex N1 LOW on #3691).
+let racingPromotion: string | null = null;
+let racingReturning: string | null = null;
 let n = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -54,11 +60,23 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (method === "POST" && path === "/coupons") {
     if (couponAnswer === "error") return answer({ error: { message: "synthetic failure" } }, 500);
+    if (racingPromotion) livePromotions.push(racingPromotion);
     n += 1;
     const id = `cpn_Returning${String(n).padStart(4, "0")}`;
     const percent = body.get("percent_off");
     const echo = { id, object: "coupon", duration: body.get("duration"), percent_off: percent ? Number(percent) : null, amount_off: body.get("amount_off") ? Number(body.get("amount_off")) : null, currency: body.get("currency"), max_redemptions: body.get("max_redemptions") ? Number(body.get("max_redemptions")) : null };
     return answer(couponAnswer === "other" ? { ...echo, percent_off: 99 } : echo);
+  }
+  if (method === "POST" && path === "/promotion_codes") {
+    const word = body.get("code") ?? "";
+    if (racingReturning === word) {
+      await addReturningCode(OWNER, { code: word, coupon: "cpn_RacingReturn1", off: { kind: "percent", percent: 20 }, endsAt: null, createdAt: 1 });
+    }
+    return answer({ id: "promo_RacingMade01", object: "promotion_code", code: word, active: true, times_redeemed: 0, max_redemptions: null, expires_at: null, promotion: { coupon: { percent_off: 20 } } });
+  }
+  const stopping = path.match(/^\/promotion_codes\/(promo_\w+)$/);
+  if (method === "POST" && stopping && body.get("active") === "false") {
+    return answer({ id: stopping[1], object: "promotion_code", code: "STOPPED", active: false, times_redeemed: 0, max_redemptions: null, expires_at: null, promotion: { coupon: { percent_off: 20 } } });
   }
   if (method === "DELETE" && path.startsWith("/coupons/")) {
     if (deleteFails) return answer({ error: { message: "synthetic failure" } }, 500);
@@ -210,6 +228,44 @@ async function main(): Promise<void> {
   );
   if (late) await stopReturningCode(OWNER, await store(), "DELAYED");
   await stopReturningCode(OWNER, await store(), "LOSTWORD");
+
+  part("A normal code and a returning-buyer code made with one word at the same time: never both");
+  // Codex N1 LOW on #3691 @b47a13e216 (and X6's re-check): each kind checked the other before it made its own, outside
+  // any step they share, so two requests at once could both pass. Now each is made first and checked after.
+  // The returning-buyer side: a normal code with the word is made on Stripe while this one's coupon is made.
+  sent.length = 0;
+  racingPromotion = "RACEONE";
+  try {
+    made = await makeReturningCode(OWNER, await store(), asked("RACEONE"));
+  } finally {
+    racingPromotion = null;
+  }
+  is(
+    "the returning-buyer code gives way: refused as taken, not kept, and its coupon deleted",
+    [made.ok ? "" : made.reason, (await store()).returningCodes.some((c) => c.code === "RACEONE"), sent.some((s) => s.method === "DELETE")],
+    ["taken", false, true],
+  );
+  livePromotions = livePromotions.filter((word) => word !== "RACEONE");
+  if ((await store()).returningCodes.some((c) => c.code === "RACEONE")) await stopReturningCode(OWNER, await store(), "RACEONE");
+  // The normal side, through the studio: a returning-buyer code with the word is kept while the promotion code is made.
+  const session = await openSession(OWNER);
+  const studio = (body: Record<string, unknown>) =>
+    discountRoute(new NextRequest("https://marktmorgen.com/api/store/discount", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify(body) }));
+  sent.length = 0;
+  racingReturning = "RACETWO";
+  let raced: Response;
+  try {
+    raced = await studio({ action: "add", code: "RACETWO", kind: "percent", percent: "20" });
+  } finally {
+    racingReturning = null;
+  }
+  is("control: the returning-buyer code was kept meanwhile", (await store()).returningCodes.some((c) => c.code === "RACETWO"), true);
+  is(
+    "the normal code gives way: refused as taken, and switched off on Stripe",
+    [raced.status, ((await raced.json()) as { error?: string }).error, sent.some((s) => s.method === "POST" && s.path === "/promotion_codes/promo_RacingMade01" && s.body.get("active") === "false")],
+    [409, "taken", true],
+  );
+  await stopReturningCode(OWNER, await store(), "RACETWO");
 
   part("Twenty at most");
   for (let i = (await store()).returningCodes.length; i < MAX_RETURNING_CODES; i += 1) await makeReturningCode(OWNER, await store(), asked(`THANKS-${i}`));

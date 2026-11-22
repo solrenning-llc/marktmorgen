@@ -426,6 +426,11 @@ export type ImportJob = {
    * and counter. Absent on imports started before it existed, which take from the month as they send.
    */
   held?: { n: number; window: string; monthly: boolean };
+  /**
+   * Why a failed import stopped, in words that name no row (failImport): kept on the job as well as in the report, so
+   * the report can still say it once its rows are deleted at their deadline (reportCsv). Absent before 22/11/2026.
+   */
+  reason?: string;
 };
 
 const jobKey = (id: string) => `nl:import:${id}`;
@@ -961,14 +966,15 @@ function reportEndsAt(job: ImportJob): number {
   return Math.floor(job.at / 1000) + KEEP_SECONDS;
 }
 
-/** Why a paused import stopped, for its report. It names no row, so it is given from the job, not kept with the rows. */
+/** Why a paused import stopped once its keeping ran out (runImport). */
 export const PAUSED_STOP_WORDS = `This import waited ${KEEP_SECONDS / 86_400} days while the store's plan was not running, so it stopped. What was already brought in stays. Start the import again once the plan is running.`;
 /** What the report says once its rows are deleted (lib/person-data.ts: kept 14 days after the import began). */
 export const REPORT_GONE_WORDS = `The rows of this report were deleted ${KEEP_SECONDS / 86_400} days after the import began, as the privacy policy says.`;
 
-/** The paused import ended by its own keeping (runImport), the only failure that comes after it. */
-function pausedStopped(job: ImportJob): boolean {
-  return job.state === "failed" && typeof job.finishedAt === "number" && job.finishedAt - job.at > KEEP_SECONDS * 1000;
+/** A failure's reason, which names no row: on the job (`reason`, read by reportCsv) and as a line of the report. */
+async function failWith(job: ImportJob, words: string): Promise<void> {
+  job.reason = words;
+  await note(job, [{ line: 0, column: "", problem: words, value: "" }], "errors");
 }
 
 async function note(job: ImportJob, problems: Problem[], kind: "errors" | "skipped"): Promise<void> {
@@ -2074,7 +2080,8 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
       // leaves the five-minute job's line, so a store nobody pays costs no pass after that. What was brought in stays.
       if (Date.now() - job.at > KEEP_SECONDS * 1000) {
         // The report's rows are past their deadline and deleted below with the rest, so the reason is not written
-        // into it: reportCsv says it from the job itself (pausedStopped), and the count keeps the download offered.
+        // into it: reportCsv says it from the job itself (`reason`), and the count keeps the download offered.
+        job.reason = PAUSED_STOP_WORDS;
         job.counts.errors += 1;
         job.state = "failed";
         job.finishedAt = Date.now();
@@ -2098,7 +2105,7 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
         if (job.cursor.batch >= count) {
           // Rows let go before they were brought in (RAW_DAYS): say so, rather than call it done.
           if (job.done < job.total) {
-            await note(job, [{ line: 0, column: "", problem: `The rows waited more than ${RAW_DAYS} days to be brought in, so the rest were let go. Start the import again with the rows not brought in yet.`, value: "" }], "errors");
+            await failWith(job, `The rows waited more than ${RAW_DAYS} days to be brought in, so the rest were let go. Start the import again with the rows not brought in yet.`);
             job.state = "failed";
             job.finishedAt = Date.now();
             const back = heldLeft(job);
@@ -2140,7 +2147,7 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
             // brought in stays, nothing more is, and the import says why
             // rather than trying the same rows again every few minutes.
             if (!(error instanceof DataRoomError)) throw error;
-            await note(job, [{ line: 0, column: "", problem: error.message, value: "" }], "errors");
+            await failWith(job, error.message);
             // The contacts already brought in are of unknown age too: their next emails still go out in portions that double.
             if (job.kind === "contacts") await startRamp(job.sid, job.counts.added + (job.counts.maybeAdded ?? 0));
             job.state = "failed";
@@ -2236,8 +2243,9 @@ export async function reportCsv(job: ImportJob): Promise<string> {
     // Also clean a pre-deploy report with a sliding TTL, without reading its personal values (Codex L-20261120-2243).
     const gone = countOf(repliesFor(await redisPipeline([["DEL", errorsKey(job.id)]]), 1)?.[0]);
     if (gone !== 0 && gone !== 1) throw new UnknownReplyError("an expired import report deleted");
-    // Said, never an empty file or "more rows like these, not listed" when none are listed.
-    if (pausedStopped(job)) lines.push(csvLine([0, "", PAUSED_STOP_WORDS, ""]));
+    // Said, never an empty file or "more rows like these, not listed" when none are listed; the reason a failed
+    // import stopped is read from the job, never guessed from its dates (Claude 2 upbeat, LEVE on #5063).
+    if (job.state === "failed" && typeof job.reason === "string" && job.reason) lines.push(csvLine([0, "", job.reason, ""]));
     lines.push(csvLine(["", "", REPORT_GONE_WORDS, ""]));
     return `\uFEFF${lines.join("\r\n")}\r\n`;
   }

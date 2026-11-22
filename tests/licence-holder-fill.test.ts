@@ -6,7 +6,7 @@
  * and marks the store done only when every product's records were walked to the end; after that the copy reads the
  * person's list only. Synthetic store, Redis stub, no provider.
  */
-import { addProduct, claimHandle, ensureStatsId, setProductKeys, setProductLink, setSubscription, storeForEmail, type Listing } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, removeProduct, setProductKeys, setProductLink, setSubscription, storeForEmail, type Listing } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { FILL_RUN_COMMANDS, HOLDER_FILL_WHOLE, endHolderFillRound, fillHolderLines, holderFillDone, holderFillLeft, holderFillOn, keyForSale, keysOf, keysWithoutHolderLine, startHolderFillRound } from "@/lib/licence-keys";
 import { store as redis } from "./redis-stub";
@@ -175,6 +175,28 @@ async function main(): Promise<void> {
   const hugeKey = (await keysOf(huge.store, huge.ids, "fillhuge0b7@example.com")).map((k) => k.key);
   is("so a buyer's old key is still in their copy", hugeKey, ["OLDK-0-0007-ZZZZ"]);
   is("and the sweep does not ask that store again", await fillHolderLines(huge.store, Date.now() + 60_000), true);
+
+  part("A product removed between two runs does not skip the next one (Claude 4 3Kc's MEDIUM on d2df5637dd)");
+  // Claude 4 3Kc's scenario: old keys of sizes 3, 60 and 3 in id order, a run cut at the start of the big one, then the
+  // first product removed. The kept index would then name the third product and the big one's keys would never get
+  // their lines, yet the store would be marked done.
+  const moved = await oldKeysStore("fill-moved@example.com", "fillmoved", [0, 0, 0]);
+  const order = [...moved.ids].sort();
+  [3, 60, 3].forEach((n, p) => {
+    for (let i = 0; i < n; i += 1) {
+      redis.run(["HSET", `nl:keys:${moved.store.statsId}:${order[p]}:info`, `MOVK-${p}-${String(i).padStart(4, "0")}-ZZZZ`, JSON.stringify({ r: `cs_test_${`m${p}x${i}`.padStart(24, "y")}`, e: `moved${p}b${i}@example.com`, at: 1_790_000_000 })]);
+    }
+  });
+  is("a 25-command run stops at the start of the big product", await fillHolderLines(moved.store, Date.now() + 60_000, 25), false);
+  await removeProduct("fill-moved@example.com", order[0]);
+  const shrunk = (await storeForEmail("fill-moved@example.com"))!;
+  const left = shrunk.catalog.items.map((item) => item.id);
+  is("the first product is gone from the catalog", left.includes(order[0]), false);
+  let movedRuns = 0;
+  while (!(await fillHolderLines(shrunk, Date.now() + 60_000)) && movedRuns < 20) movedRuns += 1;
+  is("the store ends done", await holderFillDone(shrunk), true);
+  is("and no key of a product still listed is left without its line", (await keysWithoutHolderLine(shrunk, left)).length, 0);
+  is("so a buyer of the big product has their old key in their copy", (await keysOf(shrunk, left, "moved1b42@example.com")).map((k) => k.key), ["MOVK-1-0042-ZZZZ"]);
   done();
 }
 

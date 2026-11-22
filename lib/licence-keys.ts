@@ -206,11 +206,17 @@ export const holderKey = (store: Pick<Store, "statsId">, email: string) => `nl:k
 /** The field of one key in a holder's hash: the product and the key, which has no space in it (lib/licence-key-rules.ts). */
 export const holderField = (product: Pick<Listing, "id">, key: string) => `${product.id}\t${key}`;
 /**
- * A store's fill of its buyers' lists (#5136, Claude 4 3rC's MEDIUM): `at` is where it is ("<product index>:<HSCAN
- * cursor>" over the store's products in id order) and `done` is "1" once every product's records were walked to the
- * end. Keys given before the lists existed (trial stores sold until 5 October 2026) have no line until then.
+ * A store's fill of its buyers' lists (#5136, Claude 4 3rC's MEDIUM): `at` is where it is ("<catalog digest>:<product
+ * index>:<HSCAN cursor>" over the store's products in id order) and `done` is "1" once every product's records were
+ * walked to the end in one unchanged catalog. Keys given before the lists existed (trial stores sold until 5 October
+ * 2026) have no line until then. The digest is of the catalog's sorted ids (catalogDigest): when a product is added or
+ * removed between two runs, the index would name another product (Claude 4 3Kc's MEDIUM on d2df5637dd: a removed product
+ * before it skipped the next one, and the store was marked done with its keys left out), so the walk starts again from
+ * the top. Walking again only reads what has its lines already; it never skips a product.
  */
 const fillKey = (store: Pick<Store, "statsId">) => `nl:keys:${store.statsId}:whofill`;
+/** The fill place's mark of the catalog it was walked in: the first 16 hex of a SHA-256 of the sorted product ids. */
+const catalogDigest = (ids: string[]) => createHash("sha256").update(ids.join("\n")).digest("hex").slice(0, 16);
 /** The company's mark that every store the sweep reached in one whole round had its fill done: the sweep stops asking. */
 export const HOLDER_FILL_ALL_DONE = "nl:keysfill:done";
 /** The round's mark: "clean" from the round's first store, "dirty" once a store's fill was left unfinished in it. */
@@ -1269,8 +1275,10 @@ export function keysForCopy(scope: { store: Store; productIds: string[]; email: 
 /**
  * The opening check of issue #5125 (coordinator f416), read only and never called by a route: every key a product
  * gave whose line is missing from its buyer's own list (holderKey), so the person's copy would leave it out. Keys are
- * given only by settle, which writes the line in the same step, and no store could sell before this list existed;
- * this proves it on the real data before sales open. Reads each product's whole record hash and, per buyer, one
+ * given only by settle, which writes the line in the same step; keys given before this list existed (stores sold on a
+ * trial until 5 October 2026) get theirs from the sweep's fill (fillHolderLines). Once the company's fill mark is set,
+ * this proves it on the real data before sales open, except in a store marked `whole`, whose copy reads every product's
+ * records as main did. Reads each product's whole record hash and, per buyer, one
  * HMGET of their list: an audit's cost, not a request's. An unknown reply throws (rule 24), never "none missing".
  */
 export async function keysWithoutHolderLine(store: Store, productIds: string[]): Promise<{ product: string; key: string }[]> {
@@ -1326,11 +1334,14 @@ export async function fillHolderLines(store: Store, deadline: number, budget = F
   const [mark, at] = state;
   if ((mark !== null && mark !== "1" && mark !== HOLDER_FILL_WHOLE) || (at !== null && typeof at !== "string")) throw new UnknownReplyError("the license keys' fill state");
   if (mark !== null) return true;
-  const place = typeof at === "string" ? /^(\d{1,6}):(\d{1,20})$/.exec(at) : null;
+  const place = typeof at === "string" ? /^([0-9a-f]{16}):(\d{1,6}):(\d{1,20})$/.exec(at) : null;
   if (at !== null && !place) throw new UnknownReplyError("the license keys' fill place");
   const ids = [...new Set(store.catalog.items.map((item) => item.id))].sort();
-  let index = place ? Number(place[1]) : 0;
-  let cursor = place ? place[2] : "0";
+  const digest = catalogDigest(ids);
+  // A place kept in another catalog would name another product (a product added or removed since): walk from the top.
+  const same = place !== null && place[1] === digest;
+  let index = same ? Number(place[2]) : 0;
+  let cursor = same ? place[3] : "0";
   let used = 1;
   let steps = 0;
   while (index < ids.length && Date.now() < deadline && used + 1 + FILL_MARK_COMMANDS <= budget) {
@@ -1381,7 +1392,7 @@ export async function fillHolderLines(store: Store, deadline: number, budget = F
     }
     cursor = page[0];
     if (cursor === "0") index += 1;
-    await orderWrite(store, [["HSET", fillKey(store), "at", `${index}:${cursor}`]]);
+    await orderWrite(store, [["HSET", fillKey(store), "at", `${digest}:${index}:${cursor}`]]);
     used += FILL_MARK_COMMANDS;
     steps += 1;
   }

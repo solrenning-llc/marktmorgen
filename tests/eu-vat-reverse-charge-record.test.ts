@@ -60,3 +60,15 @@ test("an adjustment never comes before its sale, carries the rate's VAT on its a
   assert.equal(euVatAdjustment(record, { at: later, taxableCents: -1000, vatCents: -100, reason: "refund" }), null, "a full refund leaves no VAT behind");
   assert.equal(euVatAdjustment(record, { at: later, taxableCents: -500, vatCents: 95, reason: "refund" }), null, "signs disagree");
 });
+
+// Codex U-20261120-2231 (#5010 row 2): the reverse-charge record keeps amountCents as hundredths, like the art. 63c
+// record, which already refuses a currency with another minor unit (Claude 7 on #4572). A sale in yen, won, dinars or
+// Bahraini dinars written as "cents" would be declared at a hundredth or ten times its value, so none is recorded.
+test("a reverse-charged sale in a currency not written in hundredths makes no record (JPY, KRW, KWD, BHD)", () => {
+  for (const currency of ["jpy", "krw", "kwd", "bhd", "JPY"]) {
+    assert.equal(euReverseChargeRecord({ ...sale, currency }), null, currency);
+  }
+  for (const currency of ["eur", "usd", "gbp", "sek"]) {
+    assert.notEqual(euReverseChargeRecord({ ...sale, currency }), null, currency);
+  }
+});

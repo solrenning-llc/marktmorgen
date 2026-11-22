@@ -73,7 +73,10 @@ async function main(): Promise<void> {
   await setup();
   await redis.pipeline([["ZADD", `nl:ppsell:refunded:${SID}`, String(AT), ORDER], ["DEL", `nl:ppsell:paid:${ORDER}`]]);
   const gone = await offered();
-  is("the book is not checked", gone.checked, false);
+  // Main since #3464 (9 November 2026 design): a refund mark is a refund in full, with no paid record needed, read
+  // exactly by payment, so the book is checked and the sale's commission is taken back; nothing passes the guard.
+  is("the refund is read exactly: the book is checked", gone.checked, true);
+  is("its commission taken back", gone.commission, 0);
   is("nothing passes the refund guard", gone.through, 0);
 
   part("More refunds than one reading takes, the sale's beyond it");
@@ -86,7 +89,10 @@ async function main(): Promise<void> {
   commands.push(["ZADD", `nl:ppsell:refunded:${SID}`, String(AT + 1), ORDER]);
   await redis.pipeline(commands);
   const cut = await offered();
-  is("the book is not checked", cut.checked, false);
+  // Main since #3464: the book asks about its own payments only, never lists the store's refunds, so no listing cap
+  // (PAYPAL_REFUNDS_READ) can hide the sale's refund: it is read, the book checked, nothing offered.
+  is("no listing cap hides the sale's refund: the book is checked", cut.checked, true);
+  is("its commission taken back", cut.commission, 0);
   is("nothing passes the refund guard", cut.through, 0);
 
   is("no provider was asked", external, 0);

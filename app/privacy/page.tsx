@@ -5,6 +5,7 @@ import {PATH_WORDING_PRIVACY} from "@/lib/path-wording-rules";
 import {RETURN_PRIVACY_LINE} from "@/lib/path-return-rules";
 import { PAST_CALL_DAYS } from "@/lib/store-data-rules";
 import { CLOSING_DAYS, ERASE_WITHIN_DAYS } from "@/lib/plan-closing-rules";
+import { MAX_SUBMISSION_KEEP_DAYS } from "@/lib/submission-rules";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
@@ -29,7 +30,7 @@ export default function PrivacyPage() {
   // Named only while the files creators sell are kept there (lib/vault.ts).
   const cloudflare = isVaultConfigured();
   return (
-    <LegalPage title="Privacy Policy" lastUpdated="November 4, 2026">
+    <LegalPage title="Privacy Policy" lastUpdated="November 13, 2026">
       <p>
         Marktmorgen (“Marktmorgen,” “we,” “us,” or “our”) is operated by
         Solrenning, an independent software studio. This Privacy Policy
@@ -62,8 +63,13 @@ export default function PrivacyPage() {
           <strong className="text-black">Payment information.</strong> Payments
           are processed by Stripe, our payment processor. We do not store your
           full credit or debit card number, CVC, or equivalent payment
-          credentials. Stripe may collect billing name, address, and
-          payment method details as needed to complete the transaction. We may
+          credentials. Stripe may ask for your billing address when you pay on
+          its checkout page (see{" "}
+          <a href="#billing-address" className="underline">
+            how we use your billing address
+          </a>
+          ), and may collect other payment method details as needed to
+          complete the transaction. We may
           receive limited payment metadata, such as the last four digits of a
           card, payment status, and subscription period.
         </p>
@@ -75,7 +81,11 @@ export default function PrivacyPage() {
           you put on the page, and the files you upload for delivery to your
           buyers. Your photo is shrunk on your own device before it is sent, is
           shown publicly on your store page and in previews of links to it, and
-          is deleted from our storage when you remove or replace it.
+          is deleted from our storage when you remove or replace it. The
+          postal address you type for the bottom of your emails goes in those
+          emails only; it is shown on your store&apos;s public policies page too only
+          if you check the box for that where you type it, and comes off the
+          page as soon as you uncheck it and save.
         </p>
         <p>
           <strong className="text-black">Buyer information.</strong> When
@@ -304,15 +314,22 @@ export default function PrivacyPage() {
           the creator&apos;s list (sign-ups are not sent to Google). With each
           we send its id, time, amount, currency and products, whether the
           buyer had paid that creator before, the page, the email address
-          hashed with SHA-256, the network address and browser of the request
+          hashed with SHA-256 (a sign-up for something free or a waitlist is
+          sent without it, because the address is not confirmed yet), the
+          network address and browser of the request
           that opened the checkout or sent the sign-up (not with a later
           membership payment), and the platform&apos;s own cookies and ad click
           id from that browser. It goes to that platform on the creator&apos;s
           behalf and under its own privacy policy. A visitor who did not allow
-          ad measurement is never sent. We keep the token sealed; for four days,
-          the request that opened a checkout; for 400 days, the cookies and ad
+          ad measurement is never sent, and neither is a purchase, payment or
+          sign-up of somebody deleted from the store, unless it was already
+          being sent when they were deleted. We keep the token sealed; for
+          four days at the most, the request that opened a checkout, deleted
+          once its purchase is known; for 400 days, the cookies and ad
           click id a membership&apos;s later payments are sent with, never an
-          address or browser; for three days (40 for a membership payment) that
+          address or browser, deleted with the buyer when they are deleted
+          from the store;
+          for three days (40 for a membership payment) that
           each was sent; and the platform&apos;s last answer for the creator to
           see.
         </p>
@@ -411,9 +428,29 @@ export default function PrivacyPage() {
           When a buyer chooses a payment plan, Stripe keeps their card on the
           creator&apos;s account for the remaining payments, and we keep the
           checkout on a list until the plan has been given its end date, so it
-          stops after the last payment. When a creator switches on sales tax,
-          Stripe asks the buyer for the address it needs to work the tax out,
-          under Stripe&apos;s own privacy policy; we do not keep it.
+          stops after the last payment.
+        </p>
+        <p id="billing-address">
+          <strong className="text-black">Your billing address.</strong>{" "}
+          Stripe asks for your billing address on every paid checkout on its
+          page, a package of calls included. PayPal asks
+          for what it needs on its own page. Stripe keeps the address with the
+          payment, on the Stripe account of whoever is paid:
+          the creator&apos;s for a store&apos;s sale, ours for a Marktmorgen
+          plan or add-on. Stripe&apos;s own privacy policy applies. It is not
+          asked when
+          something is free. We read the country in it and, for a buyer in the
+          United States or Canada, the state or province. We use them to work
+          out where you are buying from: for the VAT or sales tax that applies
+          to the sale, for the creator&apos;s tax summary, and to decide whether
+          an offer after paying can be shown to you. The country also appears
+          in the creator&apos;s sales figures and sales export, and, where the
+          creator switches it on, in{" "}
+          <a href="#recent-purchases">the card of a store&apos;s latest purchases</a>.
+          We do not keep the street address, and it is never used for marketing.
+          Before we start keeping the tax records the law asks for on sales to
+          the European Union, which must be kept for 10 years, this policy will
+          say so.
         </p>
         <p id="podcasts">
           <strong className="text-black">Private podcasts.</strong>{" "}
@@ -423,7 +460,11 @@ export default function PrivacyPage() {
           an episode, we check that your address still holds the podcast, and
           we count those reads to stop a feed from being shared; we do not
           keep which episodes you play. The creator sees neither your feed nor
-          what you listen to.
+          what you listen to. We keep your feed until you ask the store to
+          delete your data or the store closes, even after the creator removes
+          the podcast. Right after some updates, usually for less than an
+          hour, a deletion may not yet reach every feed. Then it says it is
+          not finished, and you can ask again.
         </p>
         <p id="packages">
           <strong className="text-black">Packages of sessions.</strong>{" "}
@@ -836,6 +877,20 @@ export default function PrivacyPage() {
           you are not written to by that creator again unless you check their
           box again yourself.
         </p>
+        <p id="email-polls">
+          <strong className="text-black">Polls in a creator&apos;s emails.</strong>{" "}
+          A creator&apos;s email may ask a question with a few answers to choose
+          from. When you choose one, we keep which answer you chose under your
+          place in the list that email went to, never your email address. You
+          may change your answer, or take it back, while the poll is open. The
+          creator sees only how many people chose each answer, never who chose
+          what. Your answer is kept until the poll closes and for
+          30 days after the poll closes, so at most 60 days after the email was
+          sent, and then it is deleted by itself; it is also deleted if the
+          creator closes their store. Because it is kept under your place in the list and not under
+          your address, deleting your data from that creator does not find it,
+          but it is still deleted by itself within that time.
+        </p>
         <p id="community">
           <strong className="text-black">A creator&apos;s community.</strong>{" "}
           When a creator opens a community on their store, we decide who may
@@ -846,13 +901,17 @@ export default function PrivacyPage() {
           hour. Using it sets a cookie for that store in their browser for 90
           days, the same one a course uses. For each member we keep their email
           address, the name they choose to be seen by, whether they chose to be
-          listed in the member directory and to be emailed announcements, when
+          listed in the member directory and to be emailed announcements, the
+          links to their profiles on social networks that they add there
+          (only https addresses on the network&apos;s own site, at most three,
+          never an email address or a phone number), when
           they joined and were last there, and whether the creator muted or
           removed them. We keep what members write: posts, comments, the
           pictures they add, likes, and reports of a post or comment. Posts,
           comments, pictures and likes are seen by the other members and by the
-          creator. The directory shows only the chosen name, and only of those
-          who asked to be listed. A member&apos;s email address is seen by the
+          creator. The directory shows only the chosen name and those links, and
+          only of those who asked to be listed and are not muted; the links
+          open the other site with no referrer and nothing added to them. A member&apos;s email address is seen by the
           creator and never by other members. What is written is kept while
           the community exists, until its author or the creator deletes it;
           deleting a post deletes its comments, likes, reports and picture.
@@ -938,7 +997,8 @@ export default function PrivacyPage() {
           saying what moved and how to open it. We send it on the
           creator&apos;s instruction and on their word that these people
           bought from them and may be told so, which we cannot check against
-          the other platform. A store may send up to 20,000 of these in 30
+          the other platform. Nobody who left that creator&apos;s list is
+          written to. A store may send up to 20,000 of these in 30
           days, and for that we keep only a count.
         </p>
         <p id="moved-members">
@@ -960,7 +1020,12 @@ export default function PrivacyPage() {
           the membership, so somebody who kept it is not written to. We send
           these on the creator&apos;s instruction and on their word that these
           people are their members, which we cannot check against the other
-          platform; they count within the same 20,000 in 30 days. Keeping the
+          platform; they count within the same 20,000 in 30 days. Nobody who
+          left that creator&apos;s list is written to. Each of these emails
+          carries the creator&apos;s postal address and a link that stops
+          them, tied to the address and the store, for 400 days; pressing it
+          keeps a one-way hash of the address for that store for good, so
+          that store never sends them a reminder again. Keeping the
           membership is a checkout on the creator&apos;s own Stripe account,
           like any purchase in their store.
         </p>
@@ -1045,11 +1110,21 @@ export default function PrivacyPage() {
           section&apos;s count. On a store&apos;s own page it sends the furthest
           item they saw &mdash; a product, a link or a part of the page &mdash;
           where it stood, and the item they clicked, if any, and we add one to
-          that day&apos;s count of it. Each page decides at random to send this
-          for one visitor in eight, and for nobody else. On a sales page it can
+          that day&apos;s count of it. Our server picks one page view in eight
+          at random and gives only that page a random code, good for two hours
+          from when the page was shown; the page sends this once, with that
+          code, and we keep the code for those two hours only, so the same reading is
+          never counted twice. Each store counts at most a set number of these
+          readings a month, the same for every store on its plan, and past it a
+          reading is not counted. We keep how many readings came that month,
+          and nothing about who sent them, until a day after the month ends. On a sales page it can
           also say how far into the page&apos;s video they got, and, where the
           creator turned the question on, which of five answers they tapped
-          when asked what was stopping them from buying. No cookie is set and
+          when asked what was stopping them from buying. On a sales page it also
+          says how long the page was open in front of them, as one of six ranges
+          (from under 10 seconds to 10 minutes or more), measured until they first
+          switch to another tab or app or leave, and we add one to that
+          range&apos;s count. No cookie is set and
           nothing about the visitor is sent or kept; the device remembers only
           that the question was asked, so it is not asked again.
         </p>
@@ -1241,7 +1316,13 @@ export default function PrivacyPage() {
           went to, when, and the buyer&apos;s email address, so the buyer can
           see it again and the creator can see who has it, and whether the
           creator revoked it. Anyone can ask whether a key is valid; the answer
-          says nothing about who bought it. Keys are kept with the
+          says nothing about who bought it. When a creator limits a key to a
+          few devices, we keep, for each device their software names, a one-way
+          code made with a key only our server holds, different for every
+          license key and never the identifier the software sent, and when the
+          buyer freed a device. Nobody can turn a code back into the device or
+          match it on another key. These codes are kept with the key and go by
+          themselves 400 days after their last change. Keys are kept with the
           store&apos;s records.
         </p>
         <p id="quizzes">
@@ -1259,7 +1340,18 @@ export default function PrivacyPage() {
           store that issued them is open, so the page goes on proving what it
           says; a withdrawn one says it was withdrawn. When the store closes
           (section 6), its certificates go with it.
-          A student who wants theirs withdrawn asks the creator.
+          A student who wants theirs withdrawn asks the creator. A certificate
+          whose course was refunded in full or lost in a dispute is withdrawn
+          on its own once the course no longer opens for the student, usually
+          within three hours (longer when the payment service cannot be read,
+          and until the next month when a store has many refunds in one
+          month), and its page then no longer shows the name, the course or
+          the date. The same goes for one the creator already withdrew and
+          for the student&apos;s earlier certificates of that course. A
+          refund still pending, failed or canceled withdraws
+          nothing. A certificate of a course paid through PayPal, given as a
+          gift, pre-ordered, bought for a group, added in one click after
+          checkout or paid in installments is withdrawn by the creator.
         </p>
         <p id="assignments">
           <strong className="text-black">Course assignments.</strong> When a
@@ -1275,6 +1367,25 @@ export default function PrivacyPage() {
           asks AI to draft a reply, the assignment and what the student wrote
           are sent to Anthropic to write it, never the file. A student who
           wants their work deleted asks the creator.
+        </p>
+        <p id="lesson-submissions">
+          <strong className="text-black">Files sent for review.</strong> When a
+          creator asks the buyers of a course to send a video, a photo or a PDF
+          for review on a lesson, we keep each file a buyer sends with its
+          name, size and type, the note they wrote with it, when they sent it,
+          their email address, and the creator&apos;s reply once there is
+          one. The file goes straight from the buyer&apos;s browser to the
+          creator&apos;s private store files, where it counts toward the
+          creator&apos;s storage. When the keeping time the creator chose ends
+          (at most {MAX_SUBMISSION_KEEP_DAYS} days after the file was sent),
+          the file is deleted within about a day, and its record with it; if
+          the file could not be deleted that day, we try again every day until
+          it is. When a buyer is deleted from the store, their files and
+          records are deleted at once (a file within a day, if the file
+          store does not answer right away), and an upload they had started
+          is canceled. A buyer who wants what they sent deleted sooner can delete
+          themselves from the store with the privacy link at the foot of its
+          page, or ask the creator.
         </p>
         <p id="discord">
           <strong className="text-black">Discord access.</strong> When a
@@ -1575,8 +1686,10 @@ export default function PrivacyPage() {
           themselves. Meetings already made
           stay on the creator&apos;s calendar or Zoom account. If the creator
           removes our app from their Zoom account, Zoom tells us and we delete
-          every connection that user made, with its tokens, at once. If the
-          creator withdraws our access in their Google account, we stop using
+          every connection that user made, with its tokens, at once. We then
+          keep, for one day, a scrambled form of that Zoom user ID and the time
+          Zoom told us, only so that a connection being finished at that very
+          moment is not kept either. If the creator withdraws our access in their Google account, we stop using
           the connection and tell them, and disconnecting deletes it.
         </p>
         <p id="meta-ads" className="scroll-mt-24">
@@ -1596,7 +1709,10 @@ export default function PrivacyPage() {
           and delete the connection, its token and every figure read from
           it. If they remove our app in their Facebook settings, or ask Meta
           for their data to be deleted, Meta tells us and we do the same at
-          once, and tell the store&apos;s owner.
+          once, and tell the store&apos;s owner. We then keep, for one day,
+          a scrambled form of that Meta user ID and the time Meta told us,
+          only so that a connection being finished at that very moment is
+          not kept either.
         </p>
         <p id="comparisons" className="scroll-mt-24">
           <strong className="text-black">Comparisons between stores.</strong>{" "}
@@ -1881,7 +1997,10 @@ export default function PrivacyPage() {
             product&apos;s description, a course outline or an email), and
             which receives only what that creator typed into the box for it,
             the product&apos;s name, price and kind, and the store&apos;s
-            name; never anything about their buyers, members or list. For an
+            name; never anything about their buyers, members or list. When the
+            creator asks it to read a product&apos;s own PDF, it also receives
+            the first pages of that file and the product&apos;s description,
+            never the rest of the file. For an
             Outreach email it receives what the creator typed, the
             creator&apos;s name, the names of their products, and the name and
             description a business gives itself on its own website; never
@@ -1893,9 +2012,11 @@ export default function PrivacyPage() {
             the student wrote for it, never the student&apos;s name, address
             or file. When a creator asks for the month&apos;s summary of what
             their customers say, it receives the words members wrote when
-            canceling, questions a page could not answer, the words of
-            reviews and the words searched for on the store that found
-            nothing, from the last 90 days, never with a name, and with any
+            canceling, questions a page or the store&apos;s assistant could
+            not answer, the words of reviews, the words searched for on the
+            store that found nothing, from the last 90 days, and the names of
+            products coming soon with how many are on their waitlists so far,
+            confirmed or not (never who), never with a name, and with any
             email address, phone number or web address in them taken out
             first. When a creator asks for the summary of one product&apos;s
             reviews, it receives the words of up to 60 of that product&apos;s
@@ -2010,7 +2131,11 @@ export default function PrivacyPage() {
           creator&apos;s store may set these, each for that store alone: a pass
           that lets a
           browser into a course or a community, named <code>nl_learn_</code>{" "}
-          followed by a code for the store, for 90 days; the code and time of
+          followed by a code for the store, for 90 days; a student&apos;s
+          &quot;No thanks&quot; to the next step a course&apos;s creator suggests,
+          named <code>nl_ns_</code> followed by a code for the course, holding
+          only that answer, for a year, so it is not suggested again in that
+          browser; the code and time of
           an affiliate link a visitor followed, named <code>nl_via_</code>{" "}
           followed by the store&apos;s address, for up to {MAX_COOKIE_DAYS} days,
           subject to the browser&apos;s own limits; it may expire sooner. The store also keeps an
@@ -2049,7 +2174,9 @@ export default function PrivacyPage() {
           The files a creator sells, their lessons&apos; videos and their
           podcast&apos;s episodes, the files their students hand in and the
           pictures in their community&apos;s posts are kept until they are
-          removed with what they belong to. Where a
+          removed with what they belong to. Files buyers send for review are
+          kept only for the keeping time their creator chose, at most{" "}
+          {MAX_SUBMISSION_KEEP_DAYS} days. Where a
           store&apos;s plan has ended, they are deleted 30 days after the plan
           ended, after three emails to the store&apos;s owner; for a plan that
           ended before October 18, 2026, only where the store keeps more than a
@@ -2244,7 +2371,8 @@ export default function PrivacyPage() {
             their sales and tax records and are not stored by us; and the few
             order records a purchase still needs for a refund or for delivery,
             each with only what it needs and for the time section 1 gives it:
-            PayPal orders, license keys you bought, gifts and group places,
+            PayPal orders, license keys you bought and the codes of the devices
+            they run on, gifts and group places,
             pre-orders, packages of calls, your place on a booked group
             call&apos;s guest list until 60 days after it, and when a physical
             order shipped. The links emailed to you before stop working. A few
@@ -2265,6 +2393,10 @@ export default function PrivacyPage() {
             shown without your name. Delete them in the community first if you
             want them gone, or ask the creator. What a creator copied elsewhere
             (their email platform, their own files) is theirs to delete there.
+            If a creator removed a course before we began keeping a record of
+            removed courses, the records you left in that course (lessons
+            done, quiz answers, work you handed in, a certificate) are not
+            reached when you ask us to delete your data from that store.
           </p>
         </div>
         <p>

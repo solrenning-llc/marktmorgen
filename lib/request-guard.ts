@@ -29,6 +29,7 @@
  */
 import { windowCount, windowCountOf } from "@/lib/window-count";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 type HeaderSource = { headers: Headers };
 
@@ -170,6 +171,29 @@ export async function essentialLimitState(scope: string, who: string, limit: num
 }
 
 /**
+ * How many seconds are left before the counter of essentialLimitState for `scope` and `who` starts again, so a
+ * person turned away can be told when to come back (491 [PP2] complement, unit 2). One TTL read, nothing written.
+ * null when it cannot be known: Redis not configured or not answering, no counter, a counter without an expiry,
+ * or a reply in any other shape. A wait that cannot be read is never said as "now".
+ */
+export async function limitResetSeconds(scope: string, who: string): Promise<number | null> {
+  if (!isRedisConfigured()) return null;
+  let reply: unknown;
+  try {
+    reply = await redisPipeline([["TTL", await limitKey(scope, who)]]);
+  } catch {
+    return null;
+  }
+  try {
+    if (!Array.isArray(reply) || reply.length !== 1) return null;
+    const seconds: unknown = reply[0];
+    return typeof seconds === "number" && Number.isSafeInteger(seconds) && seconds > 0 ? seconds : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Gives back one count taken by essentialLimitState when the work it admitted did not happen (lib/stock.ts
  * giveBackHold). Best effort: a failed give-back leaves the count as taken, the safe way to be wrong. A window that
  * ended in between starts again at -1 with its own expiry, never a key that outlives it.
@@ -193,7 +217,9 @@ export async function withinLimit(scope: string, who: string, limit: number, win
   try {
     const key = await limitKey(scope, who);
     reply = await redisPipeline(windowCount(key, windowSeconds));
-  } catch {
+  } catch (error) {
+    // Redis answered in another shape (lib/redis.ts, UnknownReplyError): an unknown count, never room (SG2 17).
+    if (error instanceof UnknownReplyError) return false;
     // Redis could not be asked: open, so a buyer is never kept from paying by a counter out of reach.
     return true;
   }
@@ -308,21 +334,31 @@ function counterReply(reply: unknown): number | null {
  * exactly one of these. `window` is the store's window by its name
  * (lib/allowance-window.ts, windowId): its billing month when it pays us,
  * the calendar month otherwise, so one payment buys one month of each. No
- * window known, nothing let through. Kept 32 days, longer than any window.
+ * window known, nothing let through. Kept `keepSeconds`, which every caller takes from the
+ * store's window (lib/allowance-window.ts, windowKeySeconds(store, 32 * 86_400)): at least 32
+ * days, and never less than the window, so a window stretched to its period's end never outlives
+ * its count (Claude 6's second MEDIUM on #4561, rule 30). A keep under MONTH_KEEP_SECONDS lets
+ * nothing through.
  * Fails open like withinLimit when Redis cannot be asked: the work it guards
  * cannot run either.
  */
-export async function withinMonth(scope: string, who: string, limit: number, window: string | null): Promise<boolean> {
+/** The least a month counter may be kept (withinMonth). */
+const MONTH_KEEP_SECONDS = 32 * 86_400;
+
+export async function withinMonth(scope: string, who: string, limit: number, window: string | null, keepSeconds: number): Promise<boolean> {
   if (!window || !/^\d{4}-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?$/.test(window)) return false;
   if (!isRedisConfigured()) return true;
   if (!Number.isSafeInteger(limit) || limit <= 0) return false;
+  // Never kept less than a month: a keep that is not one would let the window's count lapse inside it.
+  if (!Number.isSafeInteger(keepSeconds) || keepSeconds < MONTH_KEEP_SECONDS) return false;
   let reply: unknown;
   try {
     const month = window;
     const key = `nl:rlm:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}:${month}`;
-    reply = await redisPipeline(windowCount(key, 32 * 86_400));
-  } catch {
-    return true;
+    reply = await redisPipeline(windowCount(key, keepSeconds));
+  } catch (error) {
+    // An answer out of shape is an unknown count, never room; only Redis out of reach opens, as withinLimit.
+    return !(error instanceof UnknownReplyError);
   }
   return countWithin(reply, limit);
 }

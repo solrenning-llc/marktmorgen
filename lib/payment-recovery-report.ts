@@ -16,12 +16,16 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
-import { type Store, saleHandles } from "@/lib/store";
+import { ERASING_KEY, erasingField, saleHandles, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { countKey, monthOf, sentKey } from "@/lib/dunning-keys";
 
 const DAY = 86_400;
 const MAX_PAGES = 10;
 const CACHE_SECONDS = 10 * 60;
+const KEEP_REPORT_IF_LIVE = `-- marktmorgen:recovery-report-live:v1
+if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
+return 1`;
 const BILLING_REASONS = new Set([
   "automatic_pending_invoice_item_invoice", "manual", "quote_accept", "subscription",
   "subscription_create", "subscription_cycle", "subscription_threshold", "subscription_update", "upcoming",
@@ -202,6 +206,20 @@ export async function recoveryReport(store: Store, fresh = false, now = Date.now
     month,
     complete,
   };
-  if (isRedisConfigured()) await redisPipeline([["SET", cacheKey(store), JSON.stringify(report), "EX", CACHE_SECONDS]]).catch(() => {});
+  if (isRedisConfigured()) {
+    await redisPipeline([
+      [
+        "EVAL",
+        KEEP_REPORT_IF_LIVE,
+        3,
+        storeIdCommand(store.sid)[1],
+        ERASING_KEY,
+        cacheKey(store),
+        await erasingField(storeRef(store)),
+        JSON.stringify(report),
+        CACHE_SECONDS,
+      ],
+    ]).catch(() => {});
+  }
   return report;
 }

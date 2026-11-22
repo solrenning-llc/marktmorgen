@@ -26,10 +26,13 @@ import { broadcastMoney, flowMoney, readMailRevenue, readMailVisits } from "@/li
 import { sellsSomething } from "@/lib/mail-starters";
 import { readFlowStatsStrict } from "@/lib/flow-stats";
 import { readFlowListStrict } from "@/lib/flow-list";
-import { inTrial, monthlyAllowance, usedThisMonth } from "@/lib/mail";
+import { inTrial, monthlyAllowance, usedThisMonthExact } from "@/lib/mail";
+import { isRedisConfigured } from "@/lib/redis";
+import { confirmedEmailUsage } from "@/lib/email-usage-summary";
+import { EmailUsageSummary } from "@/components/email-usage-summary";
 import { healthId, listHealth, pauseForSending, pauseWords, pausedFor } from "@/lib/mail-health";
 import { HEALTH_NOTE, healthAdvice, healthLevels, healthLine } from "@/lib/mail-health-levels";
-import { PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";
+import { PLAN_TITLES, PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";
 import { EmailStudio } from "@/components/email-studio";
 import { AutomationDraftBox } from "@/components/automation-draft";
 import { emailEquivalence } from "@/lib/email-equivalence";
@@ -65,6 +68,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const { store } = view;
 
   const allowance = monthlyAllowance(store);
+  const monthWindow = windowId(store);
   // The emails are read without their bodies, which this page never shows: the list first, inside this page's own
   // studio requests; then what asking each one's size comes to is taken before it is asked, and what reading them
   // comes to before any is read (lib/broadcasts.ts, readBroadcastHeads).
@@ -75,7 +79,11 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const [counts, used, listedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
     listCounts(store.listId),
     // A garbled month counter is unknown (rule 24), and only that card says so: never the whole page down (#3727).
-    usedThisMonth(store.listId, windowId(store)).catch(() => null),
+    // Reuse the same one-counter read. An absent window/configuration is
+    // not evidence of zero, and an unread counter must not stop draft work.
+    store.listId && monthWindow && isRedisConfigured()
+      ? usedThisMonthExact(store.listId, monthWindow).then(confirmedEmailUsage).catch(() => null)
+      : Promise.resolve(null),
     // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever (main's 57ca6e5a3).
     readBroadcastHeads(store.listId, payStudio, 30, { expired: "skip" }).catch((): BroadcastHeads | null => null),
     readFlowListStrict(store.listId).catch(() => null),
@@ -156,6 +164,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
           one-click unsubscribe, and anyone who leaves is never written to again.
         </p>
 
+        <EmailUsageSummary used={used} allowance={allowance} />
+
         {allowance === 0 && store.subscriptionActive && hasPro(store.tier) ? (
           // Already on Pro or Scale, and stopped by an unpaid renewal or a disputed plan payment
           // (lib/plan.ts canUse): moving "up to Pro" is not the way back (lib/checkup-rules.ts says the same).
@@ -177,7 +187,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
         ) : allowance === 0 ? (
           <div className="card mt-8 p-6 sm:p-8">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Part of Pro</h2>
+              <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">{`Part of the ${PLAN_TITLES.pro} plan`}</h2>
               <span className="tag tag-brand">{priceWords("pro", "month")}</span>
             </div>
             <ul className="mt-4 space-y-2 text-ink-soft">
@@ -189,24 +199,24 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               <li>Import the list you already have, and take it with you as a file whenever you like.</li>
             </ul>
             <p className="mt-4 text-sm text-ink-soft">
-              {`${PLANS_ON_SALE ? "" : "When plans open, Pro is "}${priceWords("pro", "month")}, or ${priceWords("pro", "year")} — $${(yearSaving("pro") / 100).toLocaleString("en-US")} less. Everything else in your store stays exactly as it is.`}
+              {`${PLANS_ON_SALE ? "" : `When plans open, the ${PLAN_TITLES.pro} plan is `}${priceWords("pro", "month")}, or ${priceWords("pro", "year")} — $${(yearSaving("pro") / 100).toLocaleString("en-US")} less. Everything else in your store stays exactly as it is.`}
             </p>
             {!can(role, "billing") ? (
               <p className="mt-5 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">
-                The store&apos;s owner chooses its plan. When they move it to Pro, email opens here for you too.
+                {`The store's owner chooses its plan. When they move it to the ${PLAN_TITLES.pro} plan, email opens here for you too.`}
               </p>
             ) : !PLANS_ON_SALE || !isBillingConfigured() ? (
               // The checkout and the switch both refuse then (app/api/billing/checkout, app/api/billing/switch),
               // so no button offers either.
               <p className="mt-5 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">
-                Paid plans are not on sale yet, so this store cannot move to Pro for now.
+                {`Paid plans are not on sale yet, so this store cannot move to the ${PLAN_TITLES.pro} plan for now.`}
               </p>
             ) : store.subscriptionActive ? (
               store.subscriptionId ? (
                 <form action={`/api/billing/switch?store=${store.sid}`} method="post" className="mt-5">
                   <input type="hidden" name="tier" value="pro" />
                   <input type="hidden" name="cycle" value={store.cycle} />
-                  <button type="submit" className="btn btn-primary">Move up to Pro</button>
+                  <button type="submit" className="btn btn-primary">{`Move up to the ${PLAN_TITLES.pro} plan`}</button>
                 </form>
               ) : null
             ) : (
@@ -214,11 +224,11 @@ export default async function StudioEmailPage({ searchParams }: Params) {
                 <input type="hidden" name="tier" value="pro" />
                 <button type="submit" name="cycle" value="month" className="btn btn-primary btn-wrap">
                   {trialOffered(store)
-                    ? `Start the ${TRIAL_DAYS}-day trial on Pro — ${priceWords("pro", "month")} after that`
-                    : `Start Pro — ${priceWords("pro", "month")}, from today`}
+                    ? `Start the ${TRIAL_DAYS}-day trial on the ${PLAN_TITLES.pro} plan — ${priceWords("pro", "month")} after that`
+                    : `Start the ${PLAN_TITLES.pro} plan — ${priceWords("pro", "month")}, from today`}
                 </button>
                 <button type="submit" name="cycle" value="year" className="btn btn-secondary btn-wrap">
-                  {`Or Pro yearly: ${priceWords("pro", "year")}`}
+                  {`Or the ${PLAN_TITLES.pro} plan yearly: ${priceWords("pro", "year")}`}
                 </button>
               </form>
             )}
@@ -283,7 +293,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             counts={counts}
             used={used}
             allowance={allowance}
-            monthKnown={windowId(store) !== null && used !== null}
+            monthKnown={used !== null}
             trial={trial}
             // The way up for a list that has outgrown Pro, offered beside the
             // month's count to whoever may change the plan (lib/plan.ts).

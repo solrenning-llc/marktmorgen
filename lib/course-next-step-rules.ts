@@ -31,7 +31,7 @@
  * product, the student's purchases and the "No thanks" is the next unit, and
  * takes its own units before it reads.
  */
-import { DEAL_WORDS } from "@/lib/store-assistant-rules";
+import { DEAL_WORDS, writesAFigure } from "@/lib/store-assistant-rules";
 import { PRESSURE } from "@/lib/assistant-reminder-rules";
 
 /** The most characters the creator's line may have: one short sentence or two. */
@@ -40,12 +40,13 @@ export const MAX_NEXT_STEP_LINE = 160;
 /** What the creator picked for one course: a product of the store, and their line (which may be empty). */
 export type NextStep = { productId: string; line: string };
 
-export type NextStepProblem = "product" | "self" | "long" | "hidden" | "link" | "deal" | "pressure" | "number" | "quote" | "exclaim";
+export type NextStepProblem = "product" | "self" | "never" | "long" | "hidden" | "link" | "deal" | "pressure" | "number" | "quote" | "exclaim";
 
 /** What the studio says for each problem, in plain words. */
 export const NEXT_STEP_PROBLEMS: Record<NextStepProblem, string> = {
   product: "Pick a product from your store.",
   self: "Pick another product. A course cannot be its own next step.",
+  never: "Pick another product. A product with a limited number, a free product and a bundle the student builds or with too few products are never shown as a next step.",
   long: `Keep the line to ${MAX_NEXT_STEP_LINE} characters or fewer.`,
   hidden: "Leave out hidden characters, such as zero-width spaces or marks that change the direction of the text. Type the line again in plain words.",
   link: "Leave out links and addresses. The button already opens the product's page.",
@@ -122,9 +123,14 @@ export function lineProblem(line: string): NextStepProblem | null {
   const any = (pattern: RegExp) => read.some((text) => pattern.test(text));
   // Any web address: a scheme, "www.", an email address, or a name, a dot and an ending of letters ("site.de").
   if (any(/https?:|www\.|@|[\p{L}\p{N}-]+\.\p{L}{2,24}(?![\p{L}\p{N}])/iu)) return "link";
-  if (any(DEAL_WORDS)) return "deal";
+  // Pressure first: the assistant's deal words also hold scarcity ("before it's gone"), which on a line here is pressure.
   if (any(PRESSURE)) return "pressure";
-  if (any(/\p{N}/u)) return "number";
+  if (any(DEAL_WORDS)) return "deal";
+  // A figure in digits (any numeric character) or written in words or Roman numerals in any store language, read by the
+  // assistant's own reader (Codex N1, G and T on #3530): "Ten students completed it" is a count too. The reader gets the
+  // reading that keeps its accents: it folds them itself, after it has told the French "très" from the Spanish "tres"
+  // (Codex X7 on #3530), which the accentless reading can no longer do.
+  if (any(/\p{N}/u) || writesAFigure(read[0])) return "number";
   if (any(/["“”«»„‟]/)) return "quote";
   if (any(/[!¡]/)) return "exclaim";
   return null;

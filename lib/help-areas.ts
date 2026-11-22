@@ -50,6 +50,7 @@ export const HELP_AREAS: readonly HelpArea[] = [
   { folder: "meetings", name: "Video calls", answer: "can-i-sell-paid-calls", mentions: "Video calls" },
   { folder: "memberships", name: "Memberships", answer: "can-i-sell-a-membership", mentions: "membership" },
   { folder: "new", name: "A new store", answer: "can-i-run-more-than-one-store-or-have-someone-help-me", mentions: "store" },
+  { folder: "notifications", name: "Alert emails", answer: "how-do-i-choose-which-alert-emails-i-get", mentions: "alert" },
   { folder: "outreach", name: "Outreach", answer: "can-my-store-help-me-find-sponsors-and-partners", mentions: "Outreach" },
   { folder: "pages", name: "Sales pages", answer: "can-i-build-a-sales-page-or-a-landing-page", mentions: "page" },
   { folder: "path", name: "Your Path", answer: "what-is-your-path-and-how-do-i-start-it", mentions: "Path" },
@@ -67,11 +68,14 @@ export const HELP_AREAS: readonly HelpArea[] = [
 
 /** Studio areas the help center has no answer for yet, by folder, each with what that answer is to explain. */
 export const AREAS_WITHOUT_HELP: Readonly<Record<string, string>> = {
+  declines: "The Declined payments report, opened from the disputes review: the help center has no answer about card declines yet. Its screen help lists \"Who handles refunds and disputes?\" as the closest answer, the one for the screen it opens from, not as an answer about declines.",
   students: "Filtering a course's students and changing many at once (the Students screen): the course answer says who opened it and how to take a student off, not this screen.",
 };
 
 /** Studio screens that are not an area of their own. */
 export const NOT_AREAS: Readonly<Record<string, string>> = {
+  "check-in": "The door of one in-person event, where tickets are checked as people arrive; opened from that event, never on its own.",
   checkup: "It is itself a help screen: \"Something not working?\".",
+  devices: "Logs out the person's other devices after asking first, an account action rather than a part of the store.",
   paused: "A state of the studio while it is paused, not a place a creator goes to work.",
 };

@@ -1,3 +1,5 @@
+import { storeIdCommand } from "@/lib/store";
+import { store as summaryRedis } from "./redis-stub";
 // Synthetic stand-ins for the weekly and monthly numbers-email routes (tests/numbers-email-claim.test.ts):
 // no network, no provider, no real store. Each export replaces the named lib module's export of the same name.
 export const control = {
@@ -11,14 +13,17 @@ export async function sendEmail(message: { to: string; subject: string }): Promi
   control.sent.push({ to: message.to, subject: message.subject });
   return true;
 }
+// The owner's email goes through sendEmailPinned (lib/email.ts, #3297): in this one-sender world it is the same stand-in.
+export const sendEmailPinned = (message: Parameters<typeof sendEmail>[0]) => sendEmail(message);
 export async function cronAllowed(): Promise<boolean> { return true; }
 export async function visitedFolders(): Promise<string[]> { return [...control.folders]; }
 export async function storeOf(folder: string) {
-  return { handle: folder, name: "Fixture Store", email: "owner@example.test", statsId: "st-fixture", sid: "", currency: "usd", weeklyAi: false, subscriptionActive: true, trialEnds: 0 };
+  return { handle: folder, name: "Fixture Store", email: "owner@example.test", statsId: "b".repeat(32), sid: "f".repeat(32), currency: "usd", weeklyAi: false, subscriptionActive: true, trialEnds: 0 };
 }
 export async function weeklySummary(): Promise<string | null> { return null; }
 export function aiAvailableFor(): boolean { return false; }
 export async function readTeam() { return { members: [] }; }
+export async function readTeamMembers() { return []; }
 const day = { visitors: 0, checkouts: 0, sales: 0, cents: 0 };
 export async function readStats() {
   if (control.numbers === "throws") throw new Error("synthetic stats read failure");
@@ -46,3 +51,6 @@ export function studioStats() {
 }
 export async function sourcesToday() { return []; }
 export async function viewsBefore() { return 0; }
+
+/** Live synthetic identity, seeded by each test reset, never by the production admission or by storeOf. */
+export function seedNumbersStore(): void { summaryRedis.run(["SET", storeIdCommand("f".repeat(32))[1], "owner@example.test"]); }

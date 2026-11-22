@@ -69,7 +69,10 @@ async function trialStore(): Promise<{ email: string; sub: string }> {
   return { email, sub };
 }
 const isExists = (cmd: Cmd) => cmd[0] === "EXISTS" && String(cmd[1]).startsWith("nl:nudge:");
-const isClaim = (cmd: Cmd) => cmd[0] === "SET" && String(cmd[1]).startsWith("nl:nudge:") && cmd.includes("NX");
+// The nudge's claim: a SET NX before the store-live fence, the store-claim-live script (key at 5) since it.
+const isClaim = (cmd: Cmd) =>
+  (cmd[0] === "SET" && String(cmd[1]).startsWith("nl:nudge:") && cmd.includes("NX")) ||
+  (cmd[0] === "EVAL" && String(cmd[1]).startsWith("-- marktmorgen:store-claim-live:v1\n") && String(cmd[5]).startsWith("nl:nudge:"));
 
 test("a nudge goes once on exact replies (healthy control), and not again (confirmed control)", async () => {
   const { email } = await trialStore();
@@ -89,8 +92,10 @@ for (const [label, reply] of [["undefined", undefined], ["a short pipeline", "sh
     const result = await withReplies([[isExists, 0], [isClaim, reply]], () => sendTrialNudges(START + 3 * DAY));
     assert.deepEqual([emails.length, result.sent], [0, 0]);
     // Read back (lib/claim-mark.ts), the mark holds the earlier send's value: known as sent, so nothing to do, not a
-    // failure. Before the read-back this was unknown and said as failed; either way no second email goes.
-    assert.equal(result.failed, 0, "read back as already sent");
+    // failure. Before the read-back this was unknown and said as failed; either way no second email goes. Since the
+    // claim is the store-claim-live script, 1 is its own "taken here" answer, so a false 1 is not read back: the keep
+    // before the send (holdLock on this run's value) refuses it, nothing is sent and the run says it as failed.
+    assert.equal(result.failed, reply === 1 ? 1 : 0, reply === 1 ? "refused by the keep before the send" : "read back as already sent");
   });
 }
 

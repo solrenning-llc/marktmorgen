@@ -1,3 +1,4 @@
+// Rule 23: complete the synthetic Member fixture with the new empty profile-links field; assertions unchanged.
 /**
  * Codex G on #3123 (review 5815472405): a stop-link record is written only for
  * the token the member's record holds (made canonical first, by the member
@@ -40,7 +41,7 @@ redis.pipeline = (async (commands: Command[]) => {
     }
   }
   // The member CAS as Redis runs it: no await between HGET, the comparison, HSET and the directory.
-  if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith('local cur = redis.call("HGET"')) {
+  if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).includes('local cur = redis.call("HGET", KEYS[1], ARGV[1])')) {
     const [, , , members, dir, field, expected, next, listed, at] = commands[0];
     if (redis.run(["HGET", members, field]) !== expected) return [0];
     redis.run(["HSET", members, field, next]);
@@ -89,7 +90,7 @@ async function main(): Promise<void> {
     n += 1;
     const email = `member${n}@canonicalindex.example`;
     const key = memberKey(email);
-    const record: Member = { k: key, e: email, n: `Member ${n}`, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t, q: [], qa: 0, qq: [] };
+    const record: Member = { k: key, e: email, n: `Member ${n}`, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t, q: [], qa: 0, qq: [], s: [] };
     await pipeline([["HSET", members, key, JSON.stringify(record)]]);
     return { key, email };
   }

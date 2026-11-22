@@ -8,6 +8,7 @@ import { StudioSearch } from "@/components/studio-search";
 import { ScreenHelp } from "@/components/screen-help";
 import { StudioBell } from "@/components/studio-bell";
 import type { BellFacts } from "@/lib/bell-rules";
+import { type DrawnStore, offeredActions } from "@/lib/studio-actions-offered";
 
 type Entry = { store: Pick<Store, "sid" | "name" | "handle">; role: Role };
 
@@ -23,7 +24,8 @@ type Entry = { store: Pick<Store, "sid" | "name" | "handle">; role: Role };
  *
  * Under the bar, in the page rather than over it, the studio's one search box
  * (components/studio-search.tsx, 766 [STN13]), with a buyer's address offered
- * only to the roles that may read orders.
+ * only to the roles that may read orders, and the things this role may do on
+ * this store (486 [IT3]), worked out here with no read.
  */
 export function StudioHeader({
   current,
@@ -32,7 +34,7 @@ export function StudioHeader({
   owned,
   action,
 }: {
-  current: Pick<Store, "sid" | "name" | "handle"> & BellFacts;
+  current: DrawnStore & BellFacts;
   role: Role;
   stores: Entry[];
   /** How many stores this person owns, for the "New store" line. */
@@ -149,7 +151,7 @@ export function StudioHeader({
         </div>
       </div>
     </header>
-    <StudioSearch sid={current.sid} buyers={can(role, "orders")} />
+    <StudioSearch sid={current.sid} buyers={can(role, "orders")} actions={offeredActions(current, role)} />
     <div className="border-b border-line bg-white"><div className="container-page flex flex-wrap items-start gap-2 py-2"><ScreenHelp checkup={can(role, "settings") ? "/studio/checkup?store=" + encodeURIComponent(current.sid) : null} /><StudioBell store={current} role={role} /></div></div>
     </>
   );

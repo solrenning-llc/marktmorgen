@@ -24,16 +24,22 @@ export type StoreLiveFence = { live: string; erasing: string; field: string; sta
 
 // ARGV[4] is "" for a store with an id (its id key must hold ARGV[5], the store's ref); for one from before ids it is
 // the store's statsId, compared with the record's own. A record that does not parse is unknown (-1), never this store.
-export const SET_IF_STORE_LIVE = `-- marktmorgen:store-cache-live:v3
+// Writing nothing either way, it tells erased (0: its erasing mark, or its id key gone, which only the store's deletion
+// or closing does) from no longer this ref's without being known erased (2: its id key repointed by moveAccount, so
+// the store may be live under its new account; or, from before ids, its owner's record gone or another store's, which
+// a move can leave too). The same calls as v3, so the same billed commands.
+export const SET_IF_STORE_LIVE = `-- marktmorgen:store-cache-live:v4
 if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
 if ARGV[4] == "" then
-  if redis.call("GET", KEYS[1]) ~= ARGV[5] then return 0 end
+  local held = redis.call("GET", KEYS[1])
+  if not held then return 0 end
+  if held ~= ARGV[5] then return 2 end
 else
   local raw = redis.call("GET", KEYS[1])
-  if not raw then return 0 end
+  if not raw then return 2 end
   local ok, record = pcall(cjson.decode, raw)
   if not ok or type(record) ~= "table" then return -1 end
-  if record["statsId"] ~= ARGV[4] then return 0 end
+  if record["statsId"] ~= ARGV[4] then return 2 end
 end
 redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
 return 1`;
@@ -43,9 +49,20 @@ return 1`;
  * its record is gone, and then nothing is written; "unknown" for any other answer (nothing known to be written).
  */
 export async function setIfStoreLive(fence: StoreLiveFence, key: string, value: string, seconds: number): Promise<"kept" | "gone" | "unknown"> {
+  const answer = await setIfStoreLiveTelling(fence, key, value, seconds);
+  return answer === "erased" ? "gone" : answer;
+}
+
+/**
+ * setIfStoreLive with its "gone" told apart, nothing written for either: "erased" when the store's erasure has begun or
+ * its id key is gone (its deletion or closing); "gone" when it is only no longer this ref's (moved to another account,
+ * or a store from before ids whose owner's record is gone or another store's), so it may still be live. For a caller
+ * that cleans up after a refused write only when the store is known erased (lib/pdf-preview.ts previewCopy).
+ */
+export async function setIfStoreLiveTelling(fence: StoreLiveFence, key: string, value: string, seconds: number): Promise<"kept" | "erased" | "gone" | "unknown"> {
   if (!isRedisConfigured()) return "unknown";
   if (fence.statsId === null) return "unknown";
   const replies = repliesFor(await redisPipeline([["EVAL", SET_IF_STORE_LIVE, 3, fence.live, fence.erasing, key, fence.field, value, seconds, fence.statsId, fence.ref]]), 1);
   const answer = replies?.[0];
-  return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
+  return answer === 1 ? "kept" : answer === 0 ? "erased" : answer === 2 ? "gone" : "unknown";
 }

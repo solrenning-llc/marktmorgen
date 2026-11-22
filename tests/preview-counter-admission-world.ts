@@ -25,7 +25,7 @@ export const normaliseHandle = (value: string) => value;
 export async function storeForHandle() { state.lookups += 1; return state.storeFound ? store : null; }
 export async function takePublicRequest() { state.publicCalls += 1; return state.publicAllowed; }
 /** The meter a new preview's storage measurement is paid from (lib/stamp-cost-rules.ts): handed to previewCopy, never called by the route itself. */
-export async function setWhileStoreLive() { throw new Error("The preview stand-in must not invoke its keeper"); }
+export async function setWhileStoreLiveTelling() { throw new Error("The preview stand-in must not invoke its keeper"); }
 export async function holdPublicRequests() { throw new Error("The route must not hold requests itself; previewCopy does, before it measures"); }
 export async function givePublicRequests() { throw new Error("The route must not give requests back itself"); }
 export async function readListing() { state.listings += 1; return { id: "p1234", hidden: false, preview: 3, file: { pathname: "synthetic.pdf" } }; }

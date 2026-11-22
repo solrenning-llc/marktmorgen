@@ -308,6 +308,32 @@ async function main(): Promise<void> {
     is("healthy control after the wait: the kept build as written is the list", await attempt(), ["breadhouse", "cakeshop"]);
   }
 
+  part("Past the ceiling, a visit whose mark lapsed never drops the next build's mark (Codex N1 on #3062, MEDIUM)");
+  // The visit takes the mark, then its count takes long enough that the mark ends and a successor takes it: the
+  // count's reply arrives after the successor's SET. Full or unknown, the visit is shown the last build and leaves
+  // the successor's mark as it is, so a third visit cannot start a build beside it.
+  for (const [label, reply] of [["a full count", [CEILING + 1, 600]], ["an unknown count", ["QUEUED", 600]]] as const) {
+    advance(WINDOW_MS);
+    await original([["DEL", DIRECTORY_BUILD]]);
+    await listed("baker@example.com", true);
+    is(`control before ${label}: a healthy build keeps a fresh last build`, (await counted(() => attempt())).words.SSCAN, 1);
+    await listed("baker@example.com", true);
+    const raced = await counted(() => attempt(), (c) =>
+      c[0]?.[0] === "INCR" && c[0]?.[1] === COUNT
+        ? original([["SET", DIRECTORY_BUILD, "building:successor", "EX", 60]]).then(() => [...reply])
+        : undefined,
+    );
+    is(`${label} after the mark lapsed: the last good build is shown`, raced.result, ["breadhouse", "cakeshop"]);
+    is(`${label} after the mark lapsed: the successor's mark is still its own`, await get(DIRECTORY_BUILD), "building:successor");
+  }
+  await original([["DEL", DIRECTORY_BUILD]]);
+  advance(WINDOW_MS);
+  await listed("baker@example.com", true);
+  await attempt();
+  await listed("baker@example.com", true);
+  const own = await counted(() => attempt(), (c) => (c[0]?.[0] === "INCR" && c[0]?.[1] === COUNT ? [CEILING + 1, 600] : undefined));
+  is("control: past the ceiling with its own mark, the visit still lets its mark go", [own.result, await get(DIRECTORY_BUILD)], [["breadhouse", "cakeshop"], null]);
+
   part("#2921's mark still comes first: a held or failed mark builds nothing and counts nothing");
   advance(WINDOW_MS);
   await original([["DEL", DIRECTORY_CACHE], ["DEL", COUNT], ["SET", DIRECTORY_BUILD, "failed", "EX", 600]]);

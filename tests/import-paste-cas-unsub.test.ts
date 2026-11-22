@@ -19,9 +19,10 @@ import { ROOM } from "./data-room";
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
 let between: (() => Promise<void>) | null = null;
-// Runs `between` once, right before the first batch that writes the list's rows (a plain HSET or the checked script).
+// Runs `between` once, right before the first batch that writes the list's rows (a plain HSET or the checked script:
+// CAS_HSET, or main's IMPORT_CONTACTS_WRITE, "-- marktmorgen:contact-import:v1", which a paste now writes through).
 redis.pipeline = (async (batch: Command[]) => {
-  if (between && batch.some((c) => (c[0] === "HSET" && String(c[1]).startsWith("nl:store:leads:")) || (c[0] === "EVAL" && String(c[1]).includes("contact-cas-hset")))) {
+  if (between && batch.some((c) => (c[0] === "HSET" && String(c[1]).startsWith("nl:store:leads:")) || (c[0] === "EVAL" && /contact-cas-hset|contact-import:/.test(String(c[1]))))) {
     const run = between;
     between = null;
     await run();
@@ -68,13 +69,15 @@ async function main(): Promise<void> {
     const out = await real(batch);
     return batch.map((c, i) => (c[0] === "HMGET" && String(c[1]).startsWith("nl:erased:") ? "not-an-array" : out[i]));
   }) as typeof redis.pipeline;
-  const pasted = await importContacts(listId, ["gone@example.com"], store).then(() => "answered", (e: Error) => e.name);
-  is("thrown as unknown", pasted, "UnknownReplyError");
+  // Unknown is UnknownReplyError, or main's import's own "not imported, try again" (CONTACT_IMPORT_UNKNOWN); never an answer.
+  const unknown = (e: Error) => (e.name === "UnknownReplyError" || e.message === "Contacts were not imported. Try again." ? "unknown" : e.name);
+  const pasted = await importContacts(listId, ["gone@example.com"], store).then(() => "answered", unknown);
+  is("thrown as unknown", pasted, "unknown");
   is("the deleted address is not written back", (await real([["HGET", leadsKey(listId), "gone@example.com"]]))[0], null);
   is("and nobody more is counted as agreeing", (await listCounts(listId)).agreed, 2);
   // A file's rows read the same two answers the same way (importContactRows).
-  const filed = await importContactRows(listId, [{ email: "gone@example.com", name: "", tags: [], consent: "agreed" }], store).then(() => "answered", (e: Error) => e.name);
-  is("a file's row: thrown as unknown too", filed, "UnknownReplyError");
+  const filed = await importContactRows(listId, [{ email: "gone@example.com", name: "", tags: [], consent: "agreed" }], store).then(() => "answered", unknown);
+  is("a file's row: thrown as unknown too", filed, "unknown");
   redis.pipeline = real as typeof redis.pipeline;
   is("and the deleted address is still not on the list", (await real([["HGET", leadsKey(listId), "gone@example.com"]]))[0], null);
   done();

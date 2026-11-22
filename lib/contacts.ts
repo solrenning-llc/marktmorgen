@@ -1254,9 +1254,11 @@ const TOKEN_CAS_HSET = [
 
 /**
  * Writes each link that its address may still have (TOKEN_CAS_HSET); says which were written. Each answer exactly 1 or
- * 0; anything else, a failed call included, is unknown and throws UnknownReplyError, never "written" and never "not
- * deleted" (rule 24): the send stops for a retry, which reads again. A step that ran with its answer lost left a
- * record and a token on a row nobody deleted, which that read finds and uses.
+ * 0; anything else, a failed call included, is read back once, as casWrite does: when every contact holds exactly the
+ * row that was to be written (its new token is random, so only this step can have put it there, and the step writes
+ * the record before the row), the step ran and only its answer was lost: written. Any other read-back is unknown and
+ * throws UnknownReplyError, never "written" and never "not written" (rule 24): the send stops for a retry, which reads
+ * again and finds any record and token that landed on a row nobody deleted.
  */
 async function tokenCasWrite(listId: string, key: string, handle: string, writes: { email: string; value: string; was: string; token: string }[]): Promise<boolean[]> {
   let sent: unknown;
@@ -1273,12 +1275,15 @@ async function tokenCasWrite(listId: string, key: string, handle: string, writes
       ],
     ]);
   } catch {
-    // Whether the step ran is not known: never "not written", never "written".
-    throw new UnknownReplyError("an unsubscribe link's write");
+    // Whether the step ran is not known: read back below, never "not written".
+    sent = undefined;
   }
   const each = repliesFor(repliesFor(sent, 1)?.[0], writes.length);
-  if (!each || !each.every((v) => v === 0 || v === 1)) throw new UnknownReplyError("an unsubscribe link's write");
-  return each.map((v) => v === 1);
+  if (each && each.every((v) => v === 0 || v === 1)) return each.map((v) => v === 1);
+  // Read back only in its exact shape (CX-123 rule 24): one text or nothing for each; any other shape throws.
+  const read = fieldsOf((await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)]]))[0], writes.length, "an unsubscribe link's read-back");
+  if (writes.every((w, i) => read[i] === w.value)) return writes.map(() => true);
+  throw new UnknownReplyError("an unsubscribe link's write");
 }
 
 /** An HMGET's answer for `count` fields, each its text or nothing; any other shape throws UnknownReplyError. */

@@ -313,8 +313,8 @@ try {
         await page.evaluate(()=>{delete window.__mmRscIdleSince;});
       };
       // The document stayed: a failure that waited for the leave is thrown now (window.__mmStayed above). Only a
-      // goto or reload the harness itself saw fail says so here; a requestfailed of the main frame would also fire
-      // for a navigation a newer one replaced (net::ERR_ABORTED), where the page is in fact leaving.
+      // goto or reload the harness itself saw fail says so here; a failed request of the main frame would also be
+      // reported for a navigation a newer one replaced (net::ERR_ABORTED), where the page is in fact leaving.
       const stayed = () => page.isClosed() ? Promise.resolve() : page.evaluate(() => window.__mmStayed?.()).catch(() => undefined);
       const navigated = async (navigate) => {
         let response;

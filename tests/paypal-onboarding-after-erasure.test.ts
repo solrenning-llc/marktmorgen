@@ -2,8 +2,8 @@
  * The PayPal connect's mark is written only while the store is live (lib/paypal-sales.ts, markOnboarding).
  *
  * The mark (nl:ppsell:start:<statsId>, a day) was a plain SET EX: a connect started after the store's erasure began
- * wrote it back, so an erased store kept a mark the erasure had deleted, under its statsId, for a day (Codex
- * L-20261120-0310). Now the write goes through the store's fence (lib/live-fence.ts, SET_IF_STORE_LIVE): a store
+ * wrote it back after the erasure had begun, so an erased store kept a mark under its statsId for a day (Codex
+ * L-20261120-0310; the erasure does not delete this family, which runs out within a day, lib/data-families.ts). Now the write goes through the store's fence (lib/live-fence.ts, SET_IF_STORE_LIVE): a store
  * erasing or gone gets null and nothing written, and the connect route sends the creator back to the studio with
  * "error" instead of to PayPal. Adapted from Claude 7 xAF's test on #5109 (closed as a duplicate of this fix).
  *

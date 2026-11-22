@@ -2,7 +2,8 @@ import { serviceRefusalCode, withinServiceWhy } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { away, creatorFrom } from "@/lib/studio-route";
 import { clientAddress } from "@/lib/request-guard";
-import { endOnboarding, markOnboarding, onboardingStill, onboardingUrl, paypalSalesConfigured } from "@/lib/paypal-sales";
+import { contactStoreLive } from "@/lib/inbox";
+import { markOnboarding, onboardingUrl, paypalSalesConfigured } from "@/lib/paypal-sales";
 
 /**
  * Sends the creator into PayPal's own onboarding to connect their PayPal
@@ -18,24 +19,21 @@ export async function POST(request: NextRequest) {
   if (!store.statsId) return away(origin, studio("paypal=error#paypal"));
   const refused = await withinServiceWhy("paypal-sell-connect", `${clientAddress(request)}|${store.handle}`, 10, 3600, store);
   if (refused) return away(origin, studio(`paypal=${serviceRefusalCode(refused, "slow")}#paypal`));
-  let attempt: string | null = null;
   try {
     const pin = store.sid ? `?store=${encodeURIComponent(store.sid)}` : "";
-    // The way back is taken only after a connect started here (lib/paypal-sales.ts, markOnboarding). The mark is
-    // written first, only while the store is live: a store being erased asks PayPal nothing (Codex L-20261120-0310).
-    attempt = await markOnboarding(store);
-    if (!attempt) return away(origin, studio("paypal=error#paypal"));
+    // A store whose erasure has begun, or that is gone, asks PayPal nothing: read in one step, without writing
+    // (lib/inbox.ts contactStoreLive, the fence's rule: its erasing mark absent, its id key still its own).
+    if ((await contactStoreLive(store)) !== true) return away(origin, studio("paypal=error#paypal"));
     const url = await onboardingUrl(store, `${origin}/api/store/paypal/onboarded${pin}`);
-    // PayPal's page is handed over only while this attempt is still the store's: an erasure that began while PayPal
-    // answered has deleted the mark with the store's other keys, and a newer connect or a disconnect has replaced it.
-    if (!url || (await onboardingStill(store.statsId, attempt)) !== true) {
-      await endOnboarding(store.statsId, attempt);
-      return away(origin, studio("paypal=error#paypal"));
-    }
+    if (!url) return away(origin, studio("paypal=error#paypal"));
+    // The way back is taken only after a connect started here (lib/paypal-sales.ts, markOnboarding). The mark is
+    // written once PayPal answered, and only while the store is still live, in the same step as that check
+    // (lib/live-fence.ts): a store whose erasure began while PayPal answered gets no mark and no page (Codex
+    // L-20261120-0310), and a connect that failed leaves an earlier attempt, still open in another tab, as it was.
+    if (!(await markOnboarding(store))) return away(origin, studio("paypal=error#paypal"));
     return new Response(null, { status: 303, headers: { Location: url, "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("starting PayPal onboarding failed", error);
-    if (attempt) await endOnboarding(store.statsId, attempt).catch(() => undefined);
     return away(origin, studio("paypal=error#paypal"));
   }
 }

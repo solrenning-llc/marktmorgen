@@ -409,10 +409,13 @@ export function attemptStartedAt(attempt: string): number {
 }
 
 /**
- * Writes a new attempt's mark before PayPal is asked for anything, and only while the store is live (lib/live-fence.ts:
- * its erasing mark absent, its id key still its own), so a store being erased asks PayPal nothing and never gets its
- * mark back (Codex L-20261120-0310). The attempt's token, or null when the store is gone or being erased; throws when
- * the write is not confirmed (rule 24).
+ * Writes a new attempt's mark once PayPal answered (app/api/store/paypal/connect), and only while the store is live, in
+ * the same step as that check (lib/live-fence.ts: its erasing mark absent, its id key still its own), so a store whose
+ * erasure began meanwhile never gets its mark back (Codex L-20261120-0310). The attempt's token, or null when the store
+ * is gone or being erased (nothing written); throws when the write is not confirmed (rule 24). A mark an unconfirmed
+ * reply did write is left to run out within ONBOARDING_SECONDS, like the mark of a connect the creator left on PayPal's
+ * page: no page was handed over for it, and the way back still connects only the seller PayPal confirms for this
+ * store's own tracking id.
  */
 export async function markOnboarding(store: Pick<Store, "email" | "sid" | "extra" | "statsId">): Promise<string | null> {
   if (!store.statsId) return null;

@@ -124,8 +124,13 @@ test("the harness says \"stayed\" where it knows it: a failed goto or reload, a 
   assert.match(harness, /page\.goto=async \(\.\.\.args\)=>\{await settle\(\);return navigated\(\(\)=>goto\(\.\.\.args\)\);\};/);
   assert.match(harness, /page\.reload=async \(\.\.\.args\)=>\{await settle\(\);return navigated\(\(\)=>reload\(\.\.\.args\)\);\};/);
   assert.doesNotMatch(harness, /requestfailed/, "a navigation a newer one replaced also fails its request while the page leaves");
-  assert.match(harness, /if \(dialog\.type\(\) === "beforeunload"\) \{ void dialog\.dismiss\(\)\.then\(stayed, \(\) => undefined\); return; \}/);
-  assert.match(harness, /if \(page\.listenerCount\("dialog"\) <= 1\) void dialog\.dismiss\(\)\.catch\(\(\) => undefined\);/, "any other dialog is left to the step that waits for it, or dismissed as Playwright would");
+  const handler = harness.indexOf('page.on("dialog", (dialog) => {');
+  assert.ok(handler >= 0, "every page gets a dialog handler");
+  const body = harness.slice(handler, harness.indexOf("});", handler));
+  assert.match(body, /^\s*if \(page\.listenerCount\("dialog"\) > 1\) return;/m, "a dialog a step waits for is that step's to answer, beforeunload included (path-reminder accepts one)");
+  assert.ok(body.indexOf('listenerCount("dialog") > 1') < body.indexOf('dialog.type() === "beforeunload"'), "the step's own listener is checked before anything is answered");
+  assert.match(body, /if \(dialog\.type\(\) === "beforeunload"\) \{ void dialog\.dismiss\(\)\.then\(stayed, \(\) => undefined\); return; \}/);
+  assert.match(body, /void dialog\.dismiss\(\)\.catch\(\(\) => undefined\);/, "any other dialog is dismissed as Playwright would when nobody listens");
   const sweep = harness.indexOf("window.__mmStayed?.(); return new Promise((resolve) => setTimeout(resolve, 0));");
   const verdict = harness.indexOf('is("no page threw", errors, []);');
   assert.ok(sweep >= 0 && verdict > sweep, "every open page is told it stayed right before the verdict");

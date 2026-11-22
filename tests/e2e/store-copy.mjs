@@ -327,12 +327,13 @@ try {
         if (response === null) await stayed();
         return response;
       };
-      // A beforeunload dialog is answered by staying, as Playwright answers every dialog when nobody listens, and the
-      // page is told it stayed. Any other dialog is left to the step that waits for it (growth-contact, path-reminder);
-      // with no such step, it is dismissed as before.
+      // A dialog a step waits for (growth-contact's confirm, path-reminder's beforeunload) is that step's to answer.
+      // With nobody else listening, a beforeunload dialog is answered by staying, as Playwright answers every dialog
+      // when nobody listens, and the page is told it stayed; any other dialog is dismissed as before.
       page.on("dialog", (dialog) => {
+        if (page.listenerCount("dialog") > 1) return;
         if (dialog.type() === "beforeunload") { void dialog.dismiss().then(stayed, () => undefined); return; }
-        if (page.listenerCount("dialog") <= 1) void dialog.dismiss().catch(() => undefined);
+        void dialog.dismiss().catch(() => undefined);
       });
       const goto=page.goto.bind(page),reload=page.reload.bind(page),resize=page.setViewportSize.bind(page),close=page.close.bind(page);
       page.goto=async (...args)=>{await settle();return navigated(()=>goto(...args));};

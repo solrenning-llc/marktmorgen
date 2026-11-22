@@ -58,6 +58,7 @@ const MESSAGES: Record<string, string> = {
   pipeline_limit: "Your store has all the pipelines it can keep now. Remove one to make another.",
   pipeline_last: "A store keeps at least one pipeline.",
   moves: "Choose where the deals of each stage you remove go.",
+  stage_moves: "Your store has removed as many stages as it can keep track of, so nothing was saved. Rename a stage instead of removing it.",
   crm_conflict: "Somebody else changed your pipelines a moment ago, so nothing was saved. Reload the page and make your change again.",
   deal_conflict: "Somebody else changed this deal a moment ago, so nothing was saved. Reload the page and make your change again.",
   // A session let in without its second step takes nothing away for good (lib/two-step.ts): a deal, a pipeline or a field waits.

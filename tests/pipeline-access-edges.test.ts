@@ -77,8 +77,10 @@ async function main(): Promise<void> {
 
   part("The older stages request changes the pipeline that is first now");
   await writePipelineAccess(statsId, "sam@example.com", { wkshp1: "none" }, store);
-  // Sales is empty, and Sam may change it: Sam removes it, so Workshops, which Sam may not see, is first.
-  is("(Sam removes the empty Sales pipeline)", (await crm("sam@example.com", { action: "unpipeline", id: "sales0", moveTo: "" })).status, 200);
+  // Sales is empty, and Sam may change it, but with no destination sent its deals would be read in Workshops, which
+  // Sam may not change (deals are not counted before a removal): refused as access. The owner removes it instead.
+  is("Sam removing Sales with no stage of his own to send its deals to is refused as access", [(await crm("sam@example.com", { action: "unpipeline", id: "sales0", moveTo: "" })).body.error, (await readPipelines(statsId)).map((p) => p.id)], ["pipeline_access", ["sales0", "wkshp1"]]);
+  is("(the owner removes the empty Sales pipeline)", (await crm(owner, { action: "unpipeline", id: "sales0", moveTo: "" })).status, 200);
   is("(Workshops is first now)", (await readPipelines(statsId)).map((p) => p.id), ["wkshp1"]);
   const legacy = await crm("sam@example.com", { action: "stages", stages: [{ id: "xnew01", name: "Hijacked", kind: "open" }, { id: "xwon01", name: "Won", kind: "won" }, { id: "xlst01", name: "Lost", kind: "lost" }] });
   is("Sam cannot rewrite Workshops' stages through it: refused as access, and nothing changes", [legacy.status, legacy.body.error, (await readPipelines(statsId)).map((p) => [p.id, p.stages.map((s) => s.name)]), JSON.parse(String((await redisPipeline([["HGET", dealsKey, dealId]]))[0])).stage], [403, "pipeline_access", [["wkshp1", ["New", "Talking", "Won", "Lost"]]], "wtlk01"]);
@@ -86,7 +88,7 @@ async function main(): Promise<void> {
   const allowed = await crm("sam@example.com", { action: "stages", stages: [{ id: "wnew01", name: "New", kind: "open" }, { id: "wtlk01", name: "Talking", kind: "open" }, { id: "wwon01", name: "Won", kind: "won" }, { id: "wlost1", name: "Lost", kind: "lost" }] });
   is("someone who may change the first pipeline still can", allowed.status, 200);
 
-  part("A deal in no pipeline is moved only by someone who may change the first one");
+  part("A deal in no pipeline is never moved by a pipeline change");
   const coaching = { id: "coach1", name: "Coaching", stages: [{ id: "cnew01", name: "New", kind: "open" }, { id: "cwon01", name: "Won", kind: "won" }, { id: "clst01", name: "Lost", kind: "lost" }] };
   is("(the owner adds Coaching)", (await crm(owner, { action: "pipeline", pipeline: coaching, moves: {} })).status, 200);
   await redisPipeline([["HSET", dealsKey, "orphan0001", JSON.stringify({ id: "orphan0001", title: "Orphan", email: "", cents: 5, stage: "orph01", note: "", createdAt: 1, updatedAt: 1 })]]);
@@ -94,7 +96,8 @@ async function main(): Promise<void> {
   const renamed = await crm("sam@example.com", { action: "pipeline", pipeline: { ...coaching, name: "Coaching 2" }, moves: {} });
   is("Sam, who may only see Workshops, renames Coaching: the deal stays where it was", [renamed.status, JSON.parse(String((await redisPipeline([["HGET", dealsKey, "orphan0001"]]))[0])).stage], [200, "orph01"]);
   const byOwner = await crm(owner, { action: "pipeline", pipeline: { ...coaching, name: "Coaching" }, moves: {} });
-  is("the owner's change still brings it back to the first pipeline's first open stage", [byOwner.status, JSON.parse(String((await redisPipeline([["HGET", dealsKey, "orphan0001"]]))[0])).stage], [200, "wnew01"]);
+  // No pipeline change reads or writes a deal (lib/crm-rules.ts nextStageMoves): a deal in no pipeline stays as it was.
+  is("the owner's change leaves it where it was too", [byOwner.status, JSON.parse(String((await redisPipeline([["HGET", dealsKey, "orphan0001"]]))[0])).stage], [200, "orph01"]);
 
   part("A record holding anything that is not a restriction opens nothing");
   for (const raw of [{ wkshp1: "VIEW" }, { WKSHP1: "none" }, { wkshp1: "view", other: "none" }]) {

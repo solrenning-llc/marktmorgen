@@ -11,7 +11,7 @@ import { readPipelineAccess } from "@/lib/pipeline-access";
 import { dealEnteredStage } from "@/lib/deal-stage-trigger";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
-import { CRM_VALUE_SAVE_UNITS, CrmDealConflict, CrmFieldsKept, CrmPersonGone, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages, readPageMark } from "@/lib/crm";
+import { CRM_VALUE_SAVE_UNITS, CrmDealConflict, CrmFieldsKept, CrmPersonGone, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, CrmStageIdTaken, CrmStageMovesFull, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages, readPageMark } from "@/lib/crm";
 
 /** Ten fields of ten choices, a pipeline with its stages and moves, or a deal with its note, as JSON. */
 const MAX_BODY_BYTES = 20_000;
@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
       const id = typeof body.id === "string" ? body.id : "";
       const moveTo = typeof body.moveTo === "string" ? body.moveTo : "";
       // Removing a pipeline sends every deal in it to the one stage the creator chose.
-      const moves = removing ? moveTo : body.moves;
+      let moves = removing ? moveTo : body.moves;
       if (restricted) {
         // A record that could not be read opens nothing, adding a new pipeline included.
         if (access === null) return noAccess();
@@ -119,6 +119,13 @@ export async function POST(request: NextRequest) {
         if (changing !== null && !mayEdit(changing)) return noAccess();
         // An empty pipeline is removed with no destination; a destination, when there is one, must be theirs to change.
         if (removing && moveTo !== "" && !mayEdit(pipelineOfStage(pipelines, moveTo))) return noAccess();
+        // With no destination sent, the deals are read in the first open stage of the first other pipeline they may
+        // change, never one they may not (deals are no longer counted before a removal: lib/crm-rules.ts nextStageMoves).
+        if (removing && moveTo === "") {
+          const target = pipelines.filter((p) => p.id !== id && mayEdit(p.id)).map((p) => p.stages.find((st) => st.kind === "open")?.id).find((stage) => stage !== undefined);
+          if (target === undefined) return noAccess();
+          moves = target;
+        }
         // Deals of a removed stage may be sent to another pipeline's stage: that one must be theirs to change too.
         // Moves may be one stage for every removed stage (a string) or one per stage (an object): every target is checked.
         const sentMoves = body.moves;
@@ -166,6 +173,9 @@ export async function POST(request: NextRequest) {
         if (into === null && (target === "" || seesAll)) return refuse(typeof raw.title === "string" && raw.title.trim() ? "stage" : "title");
         if (!mayEdit(into)) return noAccess();
       }
+      // A stage sent must be one the store has now: a removed one is only read through its alias (lib/crm-rules.ts
+      // shownStage), never chosen, so a board that read the stages before they changed hears that one is gone.
+      if (typeof raw.stage === "string" && !stages.some((s) => s.id === raw.stage)) return refuse(typeof (raw.title ?? existing?.title) === "string" && String(raw.title ?? existing?.title).trim() ? "stage" : "title");
       const merged = { ...existing, ...raw };
       const follow = readFollowUp(merged);
       if (!follow.ok) return refuse(follow.error);
@@ -208,6 +218,9 @@ export async function POST(request: NextRequest) {
     if (error instanceof CrmSchemaReadUnavailable) return refuse("crm_schema_read_unavailable", 503);
     if (error instanceof CrmSchemaWriteUnconfirmed) return refuse("crm_write_unconfirmed", 502);
     if (error instanceof CrmSchemaConflict) return refuse("crm_conflict", 409);
+    // Too many removed stages are still read through their aliases (lib/crm-rules.ts MAX_STAGE_MOVES): nothing was written.
+    if (error instanceof CrmStageMovesFull) return refuse("stage_moves", 409);
+    if (error instanceof CrmStageIdTaken) return refuse("stages");
     if (error instanceof CrmDealConflict) return refuse("deal_conflict", 409);
     if (error instanceof CrmFieldsKept) return refusedJson("locked");
     if (error instanceof CrmDealReadUnavailable) return refuse("crm_deal_read_unavailable", 503);

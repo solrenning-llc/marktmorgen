@@ -9,7 +9,7 @@
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/crm/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { MOVE_CRM_DEAL, dealSlot, dealVersion, readDealExact, readPipelines, readStages, writeDealOver } from "@/lib/crm";
+import { MOVE_CRM_DEAL, dealSlot, dealVersion, readDeal, readDealExact, readPipelines, readStages, writeDealOver } from "@/lib/crm";
 import { crmAnswer } from "@/lib/crm-response";
 import { redisPipeline } from "@/lib/redis";
 import { dataKey, noteData } from "@/lib/store-data";
@@ -89,15 +89,17 @@ async function main(): Promise<void> {
   is("nothing written", await stored(cy.id), before);
   is("a version that is not one: 409 too", (await post({ action: "deal", version: 42, deal: { id: cy.id, note: "Old tab" } })).status, 409);
 
-  part("A pipeline change that moves the deal's stage (updatedAt left as it was)");
+  part("A pipeline change that moves the deal's stage: read through an alias, its record untouched");
   const dee = await newDeal("Retainer for Dee", "talk00");
   const updatedBefore = JSON.parse((await stored(dee.id))!).updatedAt;
   const [sales] = await readPipelines(statsId);
   const removed = await post({ action: "pipeline", pipeline: { ...sales, stages: sales.stages.filter((s) => s.id !== "talk00") }, moves: { talk00: "lead00" } });
   const afterPipeline = JSON.parse((await stored(dee.id))!);
-  is("(the stage removed, its deal moved, updatedAt unchanged)", [removed.status, afterPipeline.stage, afterPipeline.updatedAt], [200, "lead00", updatedBefore]);
+  is("(the stage removed: the record is as it was, and the deal is read in the stage chosen)", [removed.status, afterPipeline.stage, afterPipeline.updatedAt, (await readDeal(statsId, dee.id, await readStages(statsId)))?.stage], [200, "talk00", updatedBefore, "lead00"]);
+  // No deal was written by the change (lib/crm-rules.ts nextStageMoves), so the version the board holds is still the
+  // deal's: the edit is saved, with the stage the deal is read in.
   const stale = await post({ action: "deal", version: dee.version, deal: { id: dee.id, note: "Still talking" } });
-  is("an edit over the version from before the move: 409, stage as moved", [stale.status, stale.body.current?.deal.stage, JSON.parse((await stored(dee.id))!).note], [409, "lead00", "First call"]);
+  is("an edit over the version from before the change is saved, in the stage as moved", [stale.status, JSON.parse((await stored(dee.id))!).note, JSON.parse((await stored(dee.id))!).stage], [200, "Still talking", "lead00"]);
 
   part("A write between the route's read and its compare-and-set");
   const eve = await newDeal("Course for Eve");

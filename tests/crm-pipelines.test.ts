@@ -141,14 +141,21 @@ async function main(): Promise<void> {
   is("now in Coaching", (await readDeal(statsId, old.id, await readStages(statsId)))?.stage, "ccall0");
   is("and its other fields, unknown ones too, are kept", JSON.parse(String((await redis.pipeline([["HGET", "nl:crm:deals:" + statsId, old.id]]))[0])).futureMetadata, { source: "manual" });
 
-  part("A stage removed moves its deals where the creator said; a refusal writes nothing");
-  const before = (await redis.pipeline([["GET", "nl:crm:pipes:" + statsId]]))[0];
+  part("A stage removed moves its deals where the creator said, read through an alias: no deal is read or written");
   const withoutCall = { ...coaching, stages: coaching.stages.filter((s) => s.id !== "ccall0") };
-  is("without a choice: refused", await savePipelineChange(statsId, { pipeline: withoutCall }, {}, 2, ROOM), { ok: false, error: "moves" });
-  is("nothing written", [(await redis.pipeline([["GET", "nl:crm:pipes:" + statsId]]))[0] === before, (await readDeal(statsId, old.id, await readStages(statsId)))?.stage], [true, "ccall0"]);
+  is("to one being removed: refused", await savePipelineChange(statsId, { pipeline: withoutCall }, { ccall0: "ccall0" }, 2, ROOM), { ok: false, error: "moves" });
   is("with a choice: saved", (await savePipelineChange(statsId, { pipeline: withoutCall }, { ccall0: "cust00" }, 2, ROOM)).ok, true);
+  is("the deal is read in the chosen stage, in the other pipeline", (await readDeal(statsId, old.id, await readStages(statsId)))?.stage, "cust00");
   const back = JSON.parse(String((await redis.pipeline([["HGET", "nl:crm:deals:" + statsId, old.id]]))[0]));
-  is("the deal went to the chosen stage, in the other pipeline, with every field kept", back, { ...old, stage: "cust00" });
+  is("and its record is not rewritten: every field kept as it was", back, { ...old, stage: "ccall0" });
+  is("the alias is kept with the pipelines", (await readPipelines(statsId))[0].moved, { ccall0: "cust00" });
+  const withoutNew = { ...coaching, stages: coaching.stages.filter((s) => s.id !== "ccall0" && s.id !== "cnew00").concat([{ id: "cnext0", name: "Next", kind: "open" }]) };
+  const noChoice = await savePipelineChange(statsId, { pipeline: withoutNew }, {}, 2, ROOM);
+  is("without a choice: its deals go to the first open stage left in its pipeline", noChoice.ok ? noChoice.moves : noChoice, { cnew00: "cnext0" });
+  is("a removed stage's id is never a stage again: its deals would come back", await savePipelineChange(statsId, { pipeline: coaching }, {}, 2, ROOM), { ok: false, error: "pipelines" });
+  // Back to the two pipelines as they were, written straight (as the next part does), for the parts that follow.
+  await redis.pipeline([["SET", "nl:crm:pipes:" + statsId, JSON.stringify([sales, coaching])]]);
+  is("(renamed through the usual write, so the next part's record differs from it)", (await savePipelineChange(statsId, { pipeline: { ...coaching, name: "Coaching B" } }, {}, 2, ROOM)).ok, true);
 
   part("A concurrent change is never overwritten");
   const original = redis.pipeline;
@@ -191,10 +198,9 @@ async function main(): Promise<void> {
   const third = await call({ action: "pipeline", pipeline: { id: "third0", name: "Brand deals", stages: [{ id: "bnew00", name: "Pitched", kind: "open" }, { id: "bwon00", name: "Signed", kind: "won" }, { id: "blost0", name: "Passed", kind: "lost" }] } });
   is("on Studio a third is added", [third.status, third.body.pipelines?.length], [200, 3]);
   const inCoaching = await call({ action: "deal", deal: { title: "Six sessions", email: "", cents: 120000, stage: "cnew00" } });
-  is("a removal with deals and no stage is refused", (await call({ action: "unpipeline", id: "coach0" })).body, { ok: false, error: "moves" });
-  is("or to one of its own stages", (await call({ action: "unpipeline", id: "coach0", moveTo: "cnew00" })).body, { ok: false, error: "moves" });
+  is("not to one of its own stages", (await call({ action: "unpipeline", id: "coach0", moveTo: "cnew00" })).body, { ok: false, error: "moves" });
   const removed = await call({ action: "unpipeline", id: "coach0", moveTo: "bnew00" });
-  is("removed, its deal moved", [removed.status, removed.body.moved, (await readDeal(statsId, inCoaching.body.deal.id, await readStages(statsId)))?.stage], [200, 1, "bnew00"]);
+  is("removed: each of its stages is read in the chosen one, and no deal is rewritten", [removed.status, removed.body.moved, (await readDeal(statsId, inCoaching.body.deal.id, await readStages(statsId)))?.stage, JSON.parse(String((await redis.pipeline([["HGET", "nl:crm:deals:" + statsId, inCoaching.body.deal.id]]))[0])).stage], [200, 4, "bnew00", "cnew00"]);
   is("an unknown pipeline", (await call({ action: "unpipeline", id: "nope00", moveTo: "bnew00" })).status, 404);
   is("a malformed one", (await call({ action: "pipeline", pipeline: { id: "newp00", name: "", stages: starterStages() } })).body, { ok: false, error: "pipelines" });
 

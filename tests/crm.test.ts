@@ -14,7 +14,7 @@
  */
 import { NextRequest } from "next/server";
 import { DEFAULT_STAGES, boardTotals, fieldValue, newCrmId, parseDeal, parseFields, parseStages } from "@/lib/crm-rules";
-import { pageMark, readDeals, readFields, readValues, valuesOf } from "@/lib/crm";
+import { pageMark, readDeals, readFields, readStages, readValues, valuesOf } from "@/lib/crm";
 import { personKey } from "@/lib/person-key";
 import { listAsCsv } from "@/lib/free";
 import { plainRead, upsertContact } from "@/lib/contacts";
@@ -107,7 +107,7 @@ async function main(): Promise<void> {
   const stagesNow = [otherOpen, { id: "done00", name: "Signed", kind: "won" }, { id: "nope00", name: "No", kind: "lost" }];
   is("stages without a won one, refused", (await call_({ action: "stages", stages: stagesNow.filter((s) => s.kind !== "won") })).error, "stages");
   is("stages saved", (await call_({ action: "stages", stages: stagesNow })).ok, true);
-  is("a deal in a stage that is gone moves to the first open one", (await readDeals(store.statsId, stagesNow as never))[0]?.stage, "pitch0");
+  is("a deal in a stage that is gone moves to the first open one", (await readDeals(store.statsId, await readStages(store.statsId!)))[0]?.stage, "pitch0");
 
   is("fields saved", (await call_({ action: "fields", fields: fields.map((f) => ({ ...f })) })).ok, true);
   is("a field sent twice by name, refused", (await call_({ action: "fields", fields: [{ id: "aaaaaa", name: "A", type: "text" }, { id: "bbbbbb", name: "a", type: "text" }] })).error, "fields");

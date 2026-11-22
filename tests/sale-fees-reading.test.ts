@@ -20,10 +20,12 @@ import { readingSince } from "@/lib/earnings-by-month";
 import { saleFees } from "@/lib/sale-fees-rules";
 import {
   SALE_FEES_FRESH_SECONDS,
+  SALE_FEES_PAGE_MAX_BYTES,
   SALE_FEES_PAGES,
   SALE_FEES_READINGS_PER_DAY,
   keptSaleFees,
 } from "@/lib/sale-fees-reading";
+import { STRIPE_LIST_VERSION } from "@/lib/stripe-list";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -32,13 +34,13 @@ const STORE = { statsId: "stats1", stripeAccountId: "acct_fixture1" };
 const NOW = Date.UTC(2026, 10, 11, 15);
 const HOUR = 3_600_000;
 
-type Asked = { url: string; account: string | null; method: string };
+type Asked = { url: string; account: string | null; method: string; version: string | null };
 let asked: Asked[] = [];
 let pages: Array<() => { status: number; body: unknown }> = [];
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const headers = new Headers(init?.headers);
-  asked.push({ url: String(input), account: headers.get("Stripe-Account"), method: init?.method ?? "GET" });
+  asked.push({ url: String(input), account: headers.get("Stripe-Account"), method: init?.method ?? "GET", version: headers.get("Stripe-Version") });
   const next = pages.shift();
   if (!next) throw new Error("no page left in the synthetic Stripe");
   const { status, body } = next();
@@ -170,6 +172,25 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", "nl:salefees:copy:stats1", "{not json", "EX", 60]]);
   pages = [page([sale], false)];
   is("it reads again", [(await keptSaleFees(STORE, NOW)).kind, asked.length], ["read", 1]);
+
+  part("Each page: only lines up to the reading's own second, on the pinned version, within a byte ceiling (audit 1285)");
+  reset();
+  pages = [page([sale], false)];
+  await keptSaleFees(STORE, NOW);
+  const query = new URL(asked[0].url).searchParams;
+  is("created[lte] is the reading's own second: a line made while the pages are read waits for the next reading", query.get("created[lte]"), String(Math.floor(NOW / 1000)));
+  is("the pinned list version is sent", asked[0].version, STRIPE_LIST_VERSION);
+  reset();
+  pages = [() => ({ status: 200, body: { object: "list", data: [sale], has_more: false, url: "/v1/balance_transactions", padding: "x".repeat(SALE_FEES_PAGE_MAX_BYTES) } })];
+  is("a page past the byte ceiling fails the reading, never read whole", (await keptSaleFees(STORE, NOW)).kind, "failed");
+
+  part("A copy read from another Stripe account is not shown (audit 1285)");
+  reset();
+  pages = [page([sale], false)];
+  await keptSaleFees(STORE, NOW);
+  pages = [page([sale], false)];
+  const switched = await keptSaleFees({ ...STORE, stripeAccountId: "acct_fixture2" }, NOW + 60_000);
+  is("the switched account is read again, not shown the other account's fees", [switched.kind, asked.length, asked[asked.length - 1].account], ["read", 2, "acct_fixture2"]);
 
   part("The day's count always carries its expiry (lib/window-count.ts; tests/window-count-expiry.test.ts)");
   // The worst moment: the key expires right after the pipeline's first command. With SET NX then INCRBY the INCRBY made

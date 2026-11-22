@@ -52,6 +52,15 @@ export function reachWords(since: number, firstMonthFloor: number): string | nul
   return `Your Stripe account has more lines than one reading takes, so only what happened since ${dayWords(since)} is shown. Months before it say "Not read", never zero.`;
 }
 
+/**
+ * Why the download is refused when one reading did not reach the year's first month (`since` past `firstMonthFloor`):
+ * a file that starts later would look like the whole year, and a creator would file taxes from it. Null when it did.
+ */
+export function exportReachRefusal(since: number, firstMonthFloor: number): string | null {
+  if (since <= firstMonthFloor) return null;
+  return `Your Stripe account has more lines than one reading takes, so the file would start on ${dayWords(since)}, not at the start of the year. No file is made from a part: it would look like the whole year.`;
+}
+
 /** Why a report is not shown. */
 export function unavailableWords(why: SaleFeesUnavailable | "zone" | "late"): string {
   if (why === "too_large") return "Your Stripe account has more lines than this page can add up at once, so no figures are shown. Nothing here is a zero.";

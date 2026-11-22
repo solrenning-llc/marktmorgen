@@ -6,7 +6,7 @@ import { STORE_ID_PATTERN } from "@/lib/store";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { StudioTrail } from "@/components/breadcrumb";
-import { monthFloor } from "@/lib/earnings-by-month";
+import { readingSince } from "@/lib/earnings-by-month";
 import { keptSaleFees } from "@/lib/sale-fees-reading";
 import { saleFeeMonths } from "@/lib/sale-fees-months";
 import { saleFees } from "@/lib/sale-fees-rules";
@@ -41,7 +41,8 @@ export default async function StudioFeesPage({ searchParams }: Params) {
   const kept = state.kind === "read" ? state.kept : null;
   const months = kept ? saleFeeMonths(kept.lines, { complete: true, since: kept.since, at: kept.at }, "UTC") : null;
   const sales = kept ? saleFees(kept.lines, { complete: true }) : null;
-  const reach = kept && months?.available ? reachWords(kept.since, monthFloor(months.months[months.months.length - 1].month)) : null;
+  // From the reading itself, not from the months: a table that could not be shown still says how far the reading went.
+  const reach = kept ? reachWords(kept.since, readingSince(kept.at, "UTC")) : null;
   const download = `/api/store/fees/export?store=${encodeURIComponent(store.sid)}`;
 
   return (

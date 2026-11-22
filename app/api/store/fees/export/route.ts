@@ -3,7 +3,8 @@ import { creatorFrom } from "@/lib/studio-route";
 import { keptSaleFees } from "@/lib/sale-fees-reading";
 import { saleFeesCsv } from "@/lib/sale-fees-months";
 import { saleFees } from "@/lib/sale-fees-rules";
-import { stateWords, unavailableWords } from "@/lib/sale-fees-view";
+import { exportReachRefusal, stateWords, unavailableWords } from "@/lib/sale-fees-view";
+import { readingSince } from "@/lib/earnings-by-month";
 
 /**
  * Every sale's fees and what the creator kept, as a spreadsheet (282 [HG1],
@@ -21,6 +22,9 @@ export async function GET(request: NextRequest) {
   const plain = (status: number, body: string) => new Response(body, { status, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
   const state = await keptSaleFees(store);
   if (state.kind !== "read") return plain(state.kind === "used" ? 429 : state.kind === "failed" ? 503 : 409, stateWords(state));
+  // A reading that stopped before the year's first month gives no file: it would look like the whole year (audit 1285).
+  const short = exportReachRefusal(state.kept.since, readingSince(state.kept.at, "UTC"));
+  if (short !== null) return plain(409, short);
   const report = saleFees(state.kept.lines, { complete: true });
   const csv = saleFeesCsv(report, "UTC");
   if (csv === null) return plain(503, unavailableWords(report.available ? "incomplete" : report.why));

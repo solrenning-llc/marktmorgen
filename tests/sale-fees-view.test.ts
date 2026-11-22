@@ -15,7 +15,7 @@
  *     own under the keyboard on a narrow screen.
  */
 import { readFileSync } from "node:fs";
-import { FEES_PAGE_SALES, feesOf, keptWords, monthWords, outWords, reachWords, readWords, stateWords, unavailableWords } from "@/lib/sale-fees-view";
+import { FEES_PAGE_SALES, exportReachRefusal, feesOf, keptWords, monthWords, outWords, reachWords, readWords, stateWords, unavailableWords } from "@/lib/sale-fees-view";
 import { saleFeeMonths } from "@/lib/sale-fees-months";
 import { done, is, part } from "./check";
 
@@ -41,6 +41,12 @@ function main(): void {
   is("failed", readWords({ at: AT, stale: true, failed: true }), "Read from your Stripe account on November 11, 2026 at 15:04 UTC. The last try to read it again did not work, so this is the reading before it.");
   is("reached the year: nothing said", reachWords(1000, 1000), null);
   is("did not: says from when, and that older months say Not read", reachWords(Date.UTC(2026, 6, 2, 0, 0, 1), 1000), 'Your Stripe account has more lines than one reading takes, so only what happened since July 2, 2026 is shown. Months before it say "Not read", never zero.');
+
+  part("A download that would not start at the year's start is refused (audit 1285)");
+  is("reached the year: a file", exportReachRefusal(1000, 1000), null);
+  is("did not: no file, and why", exportReachRefusal(Date.UTC(2026, 6, 2, 0, 0, 1), 1000), "Your Stripe account has more lines than one reading takes, so the file would start on July 2, 2026, not at the start of the year. No file is made from a part: it would look like the whole year.");
+  is("the route refuses before it writes the file", route.indexOf("exportReachRefusal(state.kept.since, readingSince(state.kept.at") > 0 && route.indexOf("exportReachRefusal(") < route.indexOf("saleFeesCsv(report"), true);
+  is("the page says how far the reading went even when no month can be shown", /const reach = kept \? reachWords\(kept\.since, readingSince\(kept\.at, "UTC"\)\) : null;/.test(page), true);
 
   part("Nothing to show, said");
   for (const kind of ["none", "not_configured", "used", "failed"] as const) {

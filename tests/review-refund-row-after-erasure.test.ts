@@ -142,7 +142,7 @@ const refundOf = (pi: string, n: number) => ({ id: `re_rowsweep${String(n).padSt
 
 test("the whole pass, with the store closed after its read: the read refunds and the anchor stay gone too (Claude 1 on #5092)", async () => {
   const { store, statsId, pi, keys } = await shop();
-  await setStripeAccount(store.email, "acct_1RowSweep0000001", true);
+  await setStripeAccount(store.email, "acct_1RowSweep1", true);
   const swept = (await storeForEmail(store.email))!;
   refundsAt.push(refundOf(pi, 1));
   const seen = `nl:rev:refunds:seen:${statsId}`;
@@ -161,7 +161,7 @@ test("the whole pass, with the store closed after its read: the read refunds and
 
 test("control: a live store's pass takes the refund as seen and keeps its anchor", async () => {
   const { store, statsId, pi } = await shop();
-  await setStripeAccount(store.email, "acct_1RowSweep0000002", true);
+  await setStripeAccount(store.email, "acct_1RowSweep2", true);
   const swept = (await storeForEmail(store.email))!;
   refundsAt.length = 0;
   refundsAt.push(refundOf(pi, 2));
@@ -172,7 +172,7 @@ test("control: a live store's pass takes the refund as seen and keeps its anchor
 
 test("the store closed during the Stripe read, before any review was read: the read refunds and the anchor stay gone (Claude 1 E on #5092)", async () => {
   const { store, statsId, pi, keys } = await shop();
-  await setStripeAccount(store.email, "acct_1RowSweep0000003", true);
+  await setStripeAccount(store.email, "acct_1RowSweep3", true);
   const swept = (await storeForEmail(store.email))!;
   refundsAt.length = 0;
   refundsAt.push(refundOf(pi, 3));

@@ -32,6 +32,7 @@ writeFileSync(join(BIN, "gh"), `#!/bin/sh
 case "$FAKE_GH" in
   down) echo "gh: connection refused" >&2; exit 1 ;;
   req) printf '%s\\n' '["https://github.com/solrenning-llc/marktmorgen/issues/'"\${FAKE_ISSUE:-4932}"'#issuecomment-'"$FAKE_ID"'","'"$FAKE_BODY"'","'"\${FAKE_CREATED:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"'"]' ;;
+  headref) echo "$FAKE_REF" ;;
   nohead) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","READY, no head here","","COLLABORATOR"]' ;;
   rev) printf '%s\\n' '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","'"$FAKE_BODY"'","","'"\${FAKE_ASSOC:-COLLABORATOR}"'"]' ;;
   *) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","Review @'"$FAKE_SHA"' READY","","COLLABORATOR"]' ;;
@@ -632,6 +633,20 @@ console.log("step 6: the private mailbox never lands in the public clone (A14)")
   }
 }
 
+console.log("two branches at the PR's head: the PR's own branch, from GitHub's head.ref (LOW of Claude 6 z5v4, #5080)");
+{
+  g(["init", "-q", "--bare", "mail11.git"]); g(["push", "-q", "../mail11.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m11 = { CORREIO_REPO: join(T, "mail11.git") };
+  g(["checkout", "-q", "-B", "pr41", M], P); const H41 = commit("f41.txt", "41\n", "pr41");
+  for (const ref of ["refs/pull/41/head", "refs/heads/feature-41", "refs/heads/helper-41"]) g(["push", "-q", "../prs.git", `HEAD:${ref}`], P);
+  const ramoDo = (out) => /registrado: (\S+)/.exec(out)?.[1] ? (/^Ramo: (.*)$/m.exec(g(["show", `refs/heads/correio:fila/pedidos/${/registrado: (\S+)/.exec(out)[1]}.md`], join(T, "mail11.git")))?.[1] ?? "") : null;
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "41", "--sha", H41.slice(0, 10), "--text", "fila #41"], { ...m11, ...as("c2"), CORREIO_SEM_COMMITS: "", FAKE_GH: "headref", FAKE_REF: "feature-41" });
+  is("with two branches at the head, the request records the PR's own branch, named by GitHub (LOW on #5080)", ramoDo(r.out) === "feature-41", r.out);
+  run(["cancel-enqueue", "--as", "Claude 2", /registrado: (\S+)/.exec(r.out)?.[1] ?? "x", "--reason", "t"], { ...m11, ...as("c2") });
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "41", "--sha", H41.slice(0, 10), "--text", "fila #41"], { ...m11, ...as("c2"), CORREIO_SEM_COMMITS: "", FAKE_GH: "down" });
+  is("with GitHub unreachable, no branch is guessed among the two", ramoDo(r.out) === "" || ramoDo(r.out) === null, r.out);
+}
+
 console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");
 {
   r = run(["check-append-only"]);
@@ -762,6 +777,13 @@ exit 0
   writeFileSync(join(M3, "race-left"), "0\n");
 }
 
+console.log("outside a git clone: the version check says to run from inside one (22/11/2026)");
+{
+  const fora = mkdtempSync(join(tmpdir(), "fora-de-clone-"));
+  const x = spawnSync("node", [TOOL, "list-switches"], { cwd: fora, env: { ...base, CORREIO_SEM_VERSAO: "", GIT_CEILING_DIRECTORIES: tmpdir() }, encoding: "utf8" });
+  is("run outside a git clone, the tool says the folder is not a git clone and to run from inside one", /não é um clone git/.test(`${x.stdout}${x.stderr}`), `${x.stdout}${x.stderr}`.slice(0, 300));
+}
+
 console.log("version: the copy's SHA-256 against the reviewed one on main (owner, OWNER-20261121-1904, step 1)");
 const meu = createHash("sha256").update(readFileSync(TOOL)).digest("hex");
 const comHash = (h) => { g(["checkout", "-q", "-B", "mainh", M], P); mkdirSync(join(P, "tooling", "agent-mail"), { recursive: true });
@@ -816,6 +838,9 @@ console.log("secrets never printed: a credential in the mailbox address stays ou
     { status: 128, stderr: "fatal: unable to access 'https://github.com/o/correio.git/': 403\n", message: `Command failed: git fetch -q https://x-access-token:${TOKEN}@github.com/o/correio.git` });
   is("a failed git becomes an error without the command line: subcommand, exit code and git's own last line only (CodeQL 257 at line 2013)",
     eg && eg.message === "git fetch falhou (código 128): fatal: unable to access 'https://github.com/o/correio.git/': 403" && eg.status === 128 && !eg.message.includes(TOKEN) && !/Command failed|refs\/heads/.test(eg.message), eg?.message);
+  const egs = mod.erroDoGit?.(["push"], { status: 1, stderr: `remote: denied to https://u:${TOKEN}@github.com/o/c.git\n` });
+  is("the stderr kept on a git error has its credential masked too (NIT of Claude 5 iacVn3r on #5080)",
+    Boolean(egs) && !egs.stderr.includes(TOKEN) && !egs.message.includes(TOKEN) && /https:\/\/\*\*\*@github\.com/.test(egs.stderr), egs?.stderr);
   is("a subcommand outside the tool's list is named 'comando', never taken from the arguments (CodeQL 257)", mod.erroDoGit?.([`https://${TOKEN}@x`], { status: 1 })?.message === "git comando falhou (código 1)");
   // CodeQL 257 at line 2028: the session comes from CLAUDE_CODE_REMOTE_SESSION_ID, a sensitive name for CodeQL; no error
   // message carries it, and the family named comes from the fixed list.

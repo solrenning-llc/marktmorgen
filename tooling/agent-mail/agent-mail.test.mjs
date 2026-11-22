@@ -217,9 +217,9 @@ is("a READY record whose comment says CHANGES is shown as not checked (A15)", r.
 r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "rev", FAKE_PR: "2", FAKE_BODY: `Review @${H2.slice(0, 10)}: READY`, FAKE_ASSOC: "NONE" });
 is("a comment from someone outside the repository does not check the record (A15)", r.ok && /não é de quem trabalha no repositório/.test(r.out), r.out);
 // LOW 1 of Claude 2 lpgvy on #5113: a CHANGES review that mentions READY further down is not a READY.
-r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "rev", FAKE_PR: "2", FAKE_BODY: `Review #2 @${H2.slice(0, 10)} — CHANGES, one MEDIUM. Needs 2 focal READY on the head that fixes it.` });
+r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "rev", FAKE_PR: "2", FAKE_BODY: `Review #2 @${H2.slice(0, 10)} — CHANGES, one MEDIUM.\\nNeeds 2 focal READY on the head that fixes it.` });
 is("a CHANGES comment that mentions READY below its first line does not check a READY record (A15)", r.ok && /não traz o veredito READY/.test(r.out), r.out);
-r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "rev", FAKE_PR: "2", FAKE_BODY: `Review #2 @${H2.slice(0, 10)} — READY, 0 findings. No CHANGES asked.` });
+r = rec("Claude 2 X", 2, H2, { ...as("c2"), FAKE_GH: "rev", FAKE_PR: "2", FAKE_BODY: `Review #2 @${H2.slice(0, 10)} — READY, 0 findings.\\nNo CHANGES asked.` });
 is("a READY first line checks the record even when CHANGES appears below it (A15)", r.ok && !/não traz o veredito/.test(r.out) && !/Link conferido: NÃO/.test(r.out), r.out);
 
 console.log("a record counts only for its head (2.3)");

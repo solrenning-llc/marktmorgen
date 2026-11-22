@@ -24,7 +24,8 @@ delete process.env.PAYPAL_ENV;
 delete process.env.PAYPAL_API_BASE;
 
 const sid = "synthetic-paypal-sweep-isolation";
-const shop = { statsId: sid, handle: "sweepshop", paypalSeller: { merchant: SELLER } } as unknown as Store;
+// email and sid: main's watchPayPal fences its watch writes against the store's erasure (storeRef, erasingField).
+const shop = { statsId: sid, sid, email: "owner@example.com", handle: "sweepshop", paypalSeller: { merchant: SELLER } } as unknown as Store;
 const EMAIL = "buyer@example.com";
 let n = 0;
 const nextOrder = () => `5O1901SWEEP${String(++n).padStart(4, "0")}`;

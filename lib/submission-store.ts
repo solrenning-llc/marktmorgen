@@ -66,20 +66,33 @@ export const SUBMISSION_SWEEP_GRACE_SECONDS = 7 * DAY;
  */
 const LIVE_SECONDS = MAX_SUBMISSION_KEEP_DAYS * DAY + SUBMISSION_SWEEP_GRACE_SECONDS;
 /**
+ * The commands the sweep sends for one slot, the store's and the run's reads with it: the run's read of the stores,
+ * the store's read of its list and its turn written again, the member taken (one EVAL), and the slot set back
+ * (settleBuyerRoom: two reads, the slot set, and set again at its most when a place was taken meanwhile). Each open
+ * pays for this inside its own commands (SUBMISSION_STEP_COMMANDS.open). Counted as Upstash bills, a script one
+ * command plus one for every redis.call it runs (lib/capped-count.ts), at every call its text has (its most): 24,
+ * measured by tests/submission-store.test.ts (10 when the pipeline's entries were counted, before #5065).
+ */
+export const SUBMISSION_SLOT_SWEEP_COMMANDS = 24;
+/**
  * Redis commands this file sends for each step, at most, when every reply is
  * as asked (the counts before the open included); held by
  * tests/submission-store.test.ts. Each is far inside the hundred a buyer
  * action is priced at (tests/plan-cost-registry.ts, UNIT_COST.buyer).
+ * Counted as Upstash bills (lib/capped-count.ts): a script is one command plus one for every redis.call it runs,
+ * taken at every call its text has, which is its most (review of #5065, Claude 2: the entries of a pipeline, counted
+ * before, were fewer: open 26, done 22, abort 11).
  */
 // Closing and giving up each read the buyer's places twice and set their room slot (settleBuyerRoom): 6 commands at
 // the most, added to their own (review of #3568).
 // Opening also writes the slot's turn on the store's list (two commands) and pays for the sweep's turn on it
 // (SUBMISSION_SLOT_SWEEP_COMMANDS; review of #3568, Claude 6); closing moves that turn to the kept file's keeping time
 // (two commands, the same one sweep).
-// Opening also asks twice whether the buyer was deleted from the store (lib/suppression.ts isSuppressed): before their
-// place is taken and again right after it; and its door's write is one step where it was three (SUBMISSION_DOOR_OPEN_WRITE)
-// (Codex L-20261120-2049, MEDIUM).
-export const SUBMISSION_STEP_COMMANDS = { open: 12 + 2 + 10 + 2, sign: 1, done: 20 + 2, abort: 11 } as const;
+// Opening also asks twice whether the buyer was deleted from the store (lib/suppression.ts isSuppressed, 2): before
+// their place is taken and again right after it; and its door's write is one step where it was three
+// (SUBMISSION_DOOR_OPEN_WRITE: one EVAL and its five calls, 6 billed) (Codex L-20261120-2049, MEDIUM). The open's own
+// at the most: 30, measured; plus the sweep's turn it pays for.
+export const SUBMISSION_STEP_COMMANDS = { open: 30 + SUBMISSION_SLOT_SWEEP_COMMANDS, sign: 1, done: 43, abort: 20 } as const;
 /** Kept files the daily sweep deletes at most in one run; the rest wait for the next. */
 export const SUBMISSION_SWEEP_PER_RUN = 200;
 /** A file the sweep could not delete is tried again this much later, so it never holds back the files behind it. */
@@ -155,13 +168,6 @@ const SLOTS_DUE_KEY = "nl:sub:slotdue";
 export const SUBMISSION_SLOT_SWEEP_PER_RUN = 300;
 /** The most stores one run of the sweep reads the list of. */
 export const SUBMISSION_SLOT_STORES_PER_RUN = 100;
-/**
- * The commands the sweep sends for one slot, the store's and the run's reads with it: the run's read of the stores,
- * the store's read of its list and its turn written again, the member taken (one EVAL), and the slot set back
- * (settleBuyerRoom: two reads, the slot set, and set again at its most when a place was taken meanwhile). Each open
- * pays for this inside its own commands (SUBMISSION_STEP_COMMANDS.open).
- */
-export const SUBMISSION_SLOT_SWEEP_COMMANDS = 1 + 2 + 1 + 6;
 const DATA_ID = /^[A-Za-z0-9_-]{1,80}$/;
 
 /** The owner id a submission's file is kept under in the vault: never a product's, an option's or a lesson's. */
@@ -668,13 +674,6 @@ async function ownDoor(pathname: string, folder: string, courseId: string, lesso
 export type DoorWhere = { store: UploadStore; folder: string; courseId: string; lessonId: string; who: string };
 
 /**
- * A door that a close or an abort took off (GETDEL) is put back after a refused vault step only while the buyer still
- * holds its place: their index entry with this file's path and the lesson's live entry, checked in the same step as
- * the SET NX (Codex N1 on #3570, fix from Codex U and X4). An erasure that ran while the vault was asked removed both,
- * so nothing that names the buyer comes back. 0: not put back (erased, or the place is gone); 1: put back; 2: a door
- * was already there. Anything else is not known and throws (rule 24).
- */
-/**
  * A door's first write, in the same step as the buyer's entry taking the file's path: only while the lesson's live
  * entry and the buyer's bare entry (both taken in takePlace) are still there (Codex L-20261120-2049). An erasure that
  * ran in between removed them, and a door that names the buyer must never be written after it said done. 0: not
@@ -691,6 +690,13 @@ const SUBMISSION_DOOR_OPEN_WRITE = [
   "return 1",
 ].join("\n");
 
+/**
+ * A door that a close or an abort took off (GETDEL) is put back after a refused vault step only while the buyer still
+ * holds its place: their index entry with this file's path and the lesson's live entry, checked in the same step as
+ * the SET NX (Codex N1 on #3570, fix from Codex U and X4). An erasure that ran while the vault was asked removed both,
+ * so nothing that names the buyer comes back. 0: not put back (erased, or the place is gone); 1: put back; 2: a door
+ * was already there. Anything else is not known and throws (rule 24).
+ */
 const SUBMISSION_DOOR_PUT_BACK = [
   "-- marktmorgen:submission-door-put-back:v1",
   'if not redis.call("ZSCORE", KEYS[2], ARGV[1]) then return 0 end',

@@ -42,10 +42,35 @@ const FEED_SECONDS = 300;
 const listKey = (statsId: string) => `nl:recent:${statsId}`;
 const feedKey = (statsId: string) => `nl:recent:feed:${statsId}`;
 
-/** Keeps a public feed only while the store is still live and its erasure has not begun. */
-const KEEP_FEED_IF_LIVE = `-- marktmorgen:recent-feed-live:v1
-if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return "gone" end
+/**
+ * Keeps a public feed only while the store is still live and its erasure has not begun. ARGV[4] is the store's ref:
+ * the store is live only while its id key still holds it, never only while the key exists (v2, the rule of
+ * KEEP_SALE_IF_LIVE below and of lib/live-fence.ts store-cache-live:v3): moveAccount repoints the id key to the new
+ * owner's ref, and an erasure begun after a move marks the new ref's field, so a feed built under the old ref would
+ * pass an EXISTS and an HEXISTS of the old field, and stay FEED_SECONDS under the erased statsId.
+ */
+const KEEP_FEED_IF_LIVE = `-- marktmorgen:recent-feed-live:v2
+if redis.call("GET", KEYS[1]) ~= ARGV[4] or redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return "gone" end
 redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
+return 1`;
+
+/**
+ * Writes a purchase down only while the store is still live and its erasure has not begun (Codex L-20261120-0455):
+ * a settled checkout being handled (lib/sale-events.ts awaits the product reads first) when the erasure removes
+ * nl:recent:<statsId> must not write it back. KEYS[1] the store's id key, KEYS[2] the erasing marks, KEYS[3] the
+ * purchase list, KEYS[4] the cached feed; ARGV[1] the store's erasing field, ARGV[2] the purchase, ARGV[3] the last
+ * index kept, ARGV[4] the list's lifetime, ARGV[5] the store's ref. "gone", nothing written; 1, written. Billed 1 + 2
+ * + the 4 writes it holds. The store is live only while its id key still holds its ref, never only while it exists
+ * (v2; Claude 6 i51q adopting #4965, the rule of lib/live-fence.ts store-cache-live:v3): moveAccount repoints the id
+ * key to the new owner's ref, and an erasure begun after a move marks the new ref's field, so a write read under the
+ * old ref would pass an EXISTS and an HEXISTS of the old field.
+ */
+const KEEP_SALE_IF_LIVE = `-- marktmorgen:recent-sale-live:v2
+if redis.call("GET", KEYS[1]) ~= ARGV[5] or redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return "gone" end
+redis.call("LPUSH", KEYS[3], ARGV[2])
+redis.call("LTRIM", KEYS[3], 0, ARGV[3])
+redis.call("EXPIRE", KEYS[3], ARGV[4])
+redis.call("DEL", KEYS[4])
 return 1`;
 
 /** One purchase as it is kept: the product, when, the billing country and the payment. */
@@ -89,7 +114,7 @@ export function showable(record: RecentRecord, now = Date.now()): boolean {
 }
 
 /** Writes a settled checkout down, when it may be shown. Called once a checkout (lib/sale-events.ts). */
-export async function rememberSale(store: Pick<Store, "statsId" | "recentSales">, record: RecentRecord): Promise<void> {
+export async function rememberSale(store: Pick<Store, "statsId" | "recentSales" | "sid" | "email" | "extra">, record: RecentRecord): Promise<void> {
   if (!store.recentSales || !store.statsId || !isRedisConfigured() || !showable(record)) return;
   const country = record.customer_details?.address?.country;
   const kept: Kept = {
@@ -98,13 +123,13 @@ export async function rememberSale(store: Pick<Store, "statsId" | "recentSales">
     c: typeof country === "string" && /^[A-Z]{2}$/.test(country) ? country : "",
     pi: intentOf(record),
   };
-  await redisPipeline([
-    ["LPUSH", listKey(store.statsId), JSON.stringify(kept)],
-    ["LTRIM", listKey(store.statsId), 0, KEPT - 1],
-    ["EXPIRE", listKey(store.statsId), (RECENT_DAYS + 1) * 86_400],
-    // The pages read it afresh, so a purchase shows within the minute it is confirmed.
-    ["DEL", feedKey(store.statsId)],
-  ]);
+  // The pages read it afresh (the feed deleted), so a purchase shows within the minute it is confirmed; all of it only
+  // while the store is live (KEEP_SALE_IF_LIVE). A store gone or being erased gets nothing written, which is no error.
+  await redisPipeline([[
+    "EVAL", KEEP_SALE_IF_LIVE, 4,
+    storeIdCommand(store.sid)[1], ERASING_KEY, listKey(store.statsId), feedKey(store.statsId),
+    await erasingField(storeRef(store)), JSON.stringify(kept), KEPT - 1, (RECENT_DAYS + 1) * 86_400, storeRef(store),
+  ]]);
 }
 
 function parseKept(raw: unknown): Kept | null {
@@ -181,7 +206,7 @@ export async function recentSales(store: Store, now = Date.now()): Promise<Recen
         })
         .slice(0, SHOWN);
     }
-    const [saved] = await redisPipeline([["EVAL", KEEP_FEED_IF_LIVE, 3, storeIdCommand(store.sid)[1], ERASING_KEY, feedKey(statsId), await erasingField(storeRef(store)), JSON.stringify(shown), FEED_SECONDS]]);
+    const [saved] = await redisPipeline([["EVAL", KEEP_FEED_IF_LIVE, 3, storeIdCommand(store.sid)[1], ERASING_KEY, feedKey(statsId), await erasingField(storeRef(store)), JSON.stringify(shown), FEED_SECONDS, storeRef(store)]]);
     return saved === 1 ? shown : [];
   } catch (error) {
     console.error("reading recent purchases failed", error);

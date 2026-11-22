@@ -48,10 +48,17 @@ const teamKey = (sid: string) => `nl:team:${sid}`;
 let replaced: { word: string; key: string; reply: unknown }[] = [];
 /** One write refused before the database runs it (Codex U on #3660): the next command `word` on `key` throws. */
 let rejectBefore: { word: string; key: string } | null = null;
+/** One answer given instead of the database's, the command not run (Codex U, U-20261119-0633): the next lone `word` on `key`. */
+let answerBefore: { word: string; key: string; reply: unknown } | null = null;
 redis.pipeline = (async (commands: Command[]) => {
   if (rejectBefore && commands.some((command) => command[0] === rejectBefore?.word && String(command[1]) === rejectBefore?.key)) {
     rejectBefore = null;
     throw new Error("synthetic write refused before it ran");
+  }
+  if (answerBefore && commands.length === 1 && commands[0][0] === answerBefore.word && String(commands[0][1]) === answerBefore.key) {
+    const reply = answerBefore.reply;
+    answerBefore = null;
+    return [reply];
   }
   const real = await realPipeline(commands);
   if (!replaced.length) return real;
@@ -93,6 +100,7 @@ async function closing(email: string, handle: string, before: () => Promise<void
 function fresh(): void {
   redis.clear();
   replaced = [];
+  answerBefore = null;
   redis.run(["HSET", WALK_KEY, "phase", "idle", "cursor", "0", "started", 1, "finished", 1]);
 }
 
@@ -130,6 +138,24 @@ async function main(): Promise<void> {
     const at = await closing(OWNER, "closing");
     const stores = await walkAt(at);
     is("control: an owner with no other store loses their calendar with their last store", [stores, calendarKept(OWNER)], [1, [0, 0, 0, 0]]);
+  }
+  // Codex U (U-20261119-0641): the account set holds at most four extra stores.
+  part("MEDIUM: an impossible fifth extra store never proves that an owner has no other store");
+  {
+    fresh();
+    const at = await closing(OWNER, "too-many-owner-stores");
+    // MAX_STORES_PER_ACCOUNT is five including the first store, so its account set can hold at most four extras.
+    // Five syntactically valid, stale members are a damaged/unknown set, never proof that none is live.
+    for (let i = 0; i < 5; i += 1) redis.run(["SADD", accountStoresKey(OWNER), createHash("md5").update(`owner-stale-${i}`).digest("hex")]);
+    const stores = await walkAt(at);
+    is("the store is erased, but the shared calendar stays undecided on the impossible set", [stores, calendarKept(OWNER), redis.run(["HLEN", BATCH_KEY])], [1, [1, 1, 1, 1], 1]);
+  }
+  {
+    fresh();
+    const at = await closing(OWNER, "limitcontrol");
+    for (let i = 0; i < 4; i += 1) redis.run(["SADD", accountStoresKey(OWNER), createHash("md5").update(`owner-stale-control-${i}`).digest("hex")]);
+    const stores = await walkAt(at);
+    is("control: four extra members fit the account limit and, when all are confirmed stale, the last calendar goes", [stores, calendarKept(OWNER), redis.run(["HLEN", BATCH_KEY])], [1, [0, 0, 0, 0], 0]);
   }
 
   // X owns the closing store and hosts on Y's live store as a teammate.
@@ -207,6 +233,20 @@ async function main(): Promise<void> {
     is("... and the store stays in the batch, set aside, so its host's calendar is decided again", batchLeft(), 1);
     for (let k = 1; k <= 3; k += 1) await walkAt(walkTime(at, k));
     is("a later run reads it: the host serves no other store, so their calendar goes, and the store leaves the batch", [calendarKept(OWNER), batchLeft()], [[0, 0, 0, 0], 0]);
+  }
+  {
+    // Codex U (U-20261119-0633): the host's calendar DEL answers a count above the four keys it names, not run. That
+    // proves nothing: the calendar stays, the store stays in the batch, and the next run deletes it exactly.
+    fresh();
+    const at = await closing(OWNER, "bad-calendar-count");
+    replaced = [{ word: "SMEMBERS", key: teamIndexKey(OWNER), reply: "ERR synthetic transient" }];
+    await walkAt(walkTime(at, 0));
+    replaced = [];
+    answerBefore = { word: "DEL", key: calendarOf(OWNER)[0], reply: calendarOf(OWNER).length + 1 };
+    await walkAt(walkTime(at, 1));
+    is("an impossible DEL count does not certify the host calendar erased or finish the store", [calendarKept(OWNER), batchLeft()], [[1, 1, 1, 1], 1]);
+    await walkAt(walkTime(at, 2));
+    is("control: an exact retry deletes the calendar and finishes the store", [calendarKept(OWNER), batchLeft()], [[0, 0, 0, 0], 0]);
   }
   {
     // Fifty-one stores in X's index, the live one among them, first: found among those read, so X is known to serve it.

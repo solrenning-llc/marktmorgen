@@ -804,6 +804,12 @@
       "parameters": []
     },
     {
+      "source": "app/grow-without-switching/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/grow-without-switching",
+      "parameters": []
+    },
+    {
       "source": "app/help/buyers/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/help/buyers",
@@ -1391,6 +1397,7 @@
     "components/agreements-studio.tsx",
     "components/ai-assist.tsx",
     "components/ai-draft-review.tsx",
+    "components/ai-file-assist.tsx",
     "components/ai-posts.tsx",
     "components/ai-steps-assist.tsx",
     "components/answers-editor.tsx",
@@ -1575,7 +1582,9 @@
     "components/mark-shipped.tsx",
     "components/meeting-connections.tsx",
     "components/member-discount.tsx",
+    "components/member-link-boxes.tsx",
     "components/member-price.tsx",
+    "components/membership-by-price.tsx",
     "components/more-from.tsx",
     "components/morning-header.tsx",
     "components/mrr-chart.tsx",
@@ -1786,6 +1795,7 @@
     "components/topic-page.tsx",
     "components/translate-page.tsx",
     "components/trust-checks.tsx",
+    "components/two-step-ask.tsx",
     "components/two-step-manager.tsx",
     "components/url-field.tsx",
     "components/usage-meter.tsx",
@@ -1839,6 +1849,7 @@
     "app/api/billing/withdraw/route.ts",
     "app/api/creators/route.ts",
     "app/api/cron/affiliates/route.ts",
+    "app/api/cron/backup/route.ts",
     "app/api/cron/closed-data/route.ts",
     "app/api/cron/closing/route.ts",
     "app/api/cron/courses/route.ts",
@@ -1855,6 +1866,7 @@
     "app/api/cron/shares/route.ts",
     "app/api/cron/stream/route.ts",
     "app/api/cron/stripe-check/route.ts",
+    "app/api/cron/takedowns/route.ts",
     "app/api/cron/usage/route.ts",
     "app/api/cron/weekly/route.ts",
     "app/api/discord/callback/route.ts",
@@ -1873,6 +1885,7 @@
     "app/api/library/route.ts",
     "app/api/mail/clicked/route.ts",
     "app/api/mail/inbound/route.ts",
+    "app/api/mail/poll/route.ts",
     "app/api/mail/ses/route.ts",
     "app/api/mail/unsubscribe/route.ts",
     "app/api/mcp/route.ts",
@@ -1901,6 +1914,7 @@
     "app/api/store/agent/route.ts",
     "app/api/store/agreement-sign/route.ts",
     "app/api/store/agreements/route.ts",
+    "app/api/store/ai-file/route.ts",
     "app/api/store/ai/route.ts",
     "app/api/store/announcement/route.ts",
     "app/api/store/answers/route.ts",
@@ -2266,6 +2280,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 154
+    "pageTemplates": 155
   }
 }

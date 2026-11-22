@@ -17,9 +17,10 @@ test("Codex N's SG2(17) remaining-callers row is released and no longer reserves
 });
 
 // On 21/11/2026 the coordinator (Claude 5 ibqho, 20261121T220653Z-claude-5-ibqho-c51b, option (a)) released Codex N's
-// #2674 extension row for #3067: #2674's lib/inbound-mail.ts hunk is superseded by main and already conflicts with it
-// (Claude 5 iacVn3r, #2674's adopter, 20261121T220553Z-claude-5-f44e). A releaser only removes whole rows
-// (onlyRemoves), so the row goes; #2674 re-reserves what it still needs on return (Codex is out of use until 25/11).
+// #2674 extension row for #3067: #2674 already conflicts with main in lib/inbound-mail.ts and will be re-merged on top of
+// #3067's block by its adopter (Claude 5 iacVn3r, 20261121T220553Z-claude-5-f44e and 20261121T225749Z-claude-5-cdd3),
+// who re-reserves what it still needs after #3067 enters. #2674's "unknown -> retry" is not superseded by main: main's
+// withinLimit is fail-open when Redis cannot be asked. A releaser only removes whole rows (onlyRemoves), so the row goes.
 test("Codex N's #2674 extension row is released, and lib/inbound-mail.ts is no longer reserved", () => {
   assert.deepEqual(held("SG2(17) #2674 extension"), []);
   assert.equal(rows.some((r) => r.file === "lib/inbound-mail.ts"), false, "lib/inbound-mail.ts is still reserved in codex.md");

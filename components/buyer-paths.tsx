@@ -4,6 +4,18 @@ import Link from "next/link";
 import { useState } from "react";
 import { toast } from "@/components/toast";
 import { useStudioHref } from "@/components/studio-store-pin";
+import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+
+/**
+ * What offering one product after paying for another says when it is refused: the hold's words for a product held
+ * for a report (cloud P on #3471), the offer's own reasons, or that it did not save.
+ */
+export function offerRefusal(code: unknown, from = "this product", to = "that product"): string {
+  if (code === "on_hold" || code === "hold_unread") return STUDIO_MESSAGES[code];
+  if (code === "has_funnel") return `${from} already has offers after paying. Add this one there.`;
+  if (code === "target" || code === "kind") return `${to} cannot be offered after paying for ${from} as they are now.`;
+  return "That did not save. Try again.";
+}
 
 export type PathRow = {
   from: { id: string; title: string };
@@ -37,13 +49,7 @@ export function BuyerPaths({ rows, starts, canEdit }: { rows: PathRow[]; starts:
         setMade((all) => new Set(all).add(key));
         toast(`${row.to.title} is now offered in one click after paying for ${row.from.title}.`);
       } else {
-        toast(
-          body.error === "has_funnel"
-            ? `${row.from.title} already has offers after paying. Add this one there.`
-            : body.error === "target" || body.error === "kind"
-              ? `${row.to.title} cannot be offered after paying for ${row.from.title} as they are now.`
-              : "That did not save. Try again.",
-        );
+        toast(offerRefusal(body.error, row.from.title, row.to.title));
       }
     } catch {
       toast("That did not save. Check your connection and try again.");

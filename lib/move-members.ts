@@ -26,7 +26,8 @@ import { RECOVER_TRACE_BYTES } from "@/lib/checkout-recovery";
 import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { addressHash } from "@/lib/imported-purchases";
-import { canSellProduct, createCheckout } from "@/lib/store-checkout";
+import { canSellProduct } from "@/lib/store-checkout";
+import { HeldInSaleError, createCheckoutUnlessHeld } from "@/lib/held-checkout";
 import { namedPriceGone, namedPriceOffered, withInvitedOption } from "@/lib/product-option";
 import { withStockHold } from "@/lib/stock";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -656,7 +657,7 @@ export async function openMove(
   try {
     const held = await withStockHold(store, product, (holding) => {
       asked = true;
-      return createCheckout(store, product, origin, option, { email: invite.e, noTrial: true, held: holding, moved: { firstChargeAt: firstChargeAt(invite.r, now) }, digitalConsent: consent });
+      return createCheckoutUnlessHeld(store, product, origin, option, { email: invite.e, noTrial: true, held: holding, moved: { firstChargeAt: firstChargeAt(invite.r, now) }, digitalConsent: consent });
     });
     if (!held.ok) {
       // Refused before Stripe was asked (no unit left, or the hold not taken): nothing made. A hold not recorded
@@ -678,15 +679,18 @@ export async function openMove(
     await redisPipeline([["SET", key, held.value.url, "XX", "EX", life]]);
     return { ok: true, url: held.value.url };
   } catch (error) {
-    // Let go only when nothing was made (B3): not asked yet, refused by the store's own rules before Stripe, or
+    // Let go only when nothing was made (B3): not asked yet, refused by the store's own rules before Stripe (a product
+    // kept for a child-safety report among them, lib/held-checkout.ts), or
     // refused by Stripe itself. A failure whose outcome is unknown (an answer lost on the way back, a timeout, a
     // server error) keeps the mark for the longest a checkout lives: the link opens nothing until then.
     const nothingMade =
-      !asked || error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || (error instanceof StripeError && error.status >= 400 && error.status < 500);
+      !asked || error instanceof OrdersPausedError || error instanceof HeldInSaleError || error instanceof DigitalConsentMissing || (error instanceof StripeError && error.status >= 400 && error.status < 500);
     if (nothingMade) await release();
     else await keepUnknown();
     // The store's orders for the month are reached (lib/order-admission.ts): not open right now, nothing charged.
     if (error instanceof OrdersPausedError) return { ok: false, reason: "unavailable" };
+    // It would hand over a product kept for a child-safety report, or a hold could not be read (lib/held-checkout.ts): nothing opened.
+    if (error instanceof HeldInSaleError) return { ok: false, reason: "unavailable" };
     // The box to start access at once was not checked: said beside it, nothing opened.
     if (error instanceof DigitalConsentMissing) return { ok: false, reason: "consent" };
     console.error("opening a moved member's checkout failed", store.handle, error);

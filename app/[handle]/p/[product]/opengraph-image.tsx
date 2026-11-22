@@ -12,6 +12,7 @@ import { takePublicRequest } from "@/lib/traffic";
 import { PRODUCT_CARD_PICTURE_PIXELS, PRODUCT_CARD_UNITS } from "@/lib/public-read-rules";
 import { speech } from "@/lib/buyer-words";
 import { plain } from "@/lib/serve-file";
+import { holdState } from "@/lib/child-safety";
 
 /**
  * The picture a product's link unfolds into when it is shared: the product's
@@ -101,8 +102,9 @@ export default async function OpengraphImage({ params }: Params) {
   // A store switched off after notices (lib/takedown.ts) shows no product on
   // its pages, so its card is the plain one a missing product gets.
   const found = !store.suspended ? await readListing(store, productIdFromAddress(store, id) ?? id).catch(() => null) : null;
-  // A draft has no picture to share either.
-  const product = found && !found.hidden ? found : null;
+  // A draft has no picture to share either, nor a product held for a child-safety report (lib/child-safety.ts),
+  // even when taking it off the store did not go through; a hold that cannot be read is not a yes.
+  const product = found && !found.hidden && (await holdState(store, found.id)) === "free" ? found : null;
   if (PRODUCT_CARD_UNITS > 1 && !(await takePublicRequest(store, "public", now, PRODUCT_CARD_UNITS - 1))) return plain(503, speech(store).w.restingTitle);
   const colours = lookColours(store?.look ?? { theme: "light", accent: "#5a36ee" });
   const title = product?.title ?? "Marktmorgen";

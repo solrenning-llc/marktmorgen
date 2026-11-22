@@ -54,7 +54,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:", "nl:confirm-room:",
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:coursegone:", "nl:courses:drip", "nl:courses:lock", "nl:crefund:told:",
   "nl:creators:responses", "nl:crm:co:lock:", "nl:crm:erased:", "nl:crm:fields:", "nl:crm:gen:", "nl:crm:pacc:lock:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:", "nl:dsched:", "nl:dsched:due", "nl:dsched:lock:", "nl:dsched:tell",
-  "nl:csa:held:", "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dripstart:", "nl:dun:", "nl:dun:card:",
+  "nl:csa:held:", "nl:csa:hide", "nl:csa:keep:", "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dripstart:", "nl:dun:", "nl:dun:card:",
   "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:files:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
   "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:fly:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
   "nl:exposure:v1:", "nl:exposure:v1:YYYY-MM", "nl:fair:c:", "nl:firstsale:", "nl:flow-rotate:", "nl:forms:", "nl:free:claim:",
@@ -275,7 +275,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:dsched:": E, "nl:dsched:due": I, "nl:dsched:lock:": E, "nl:dsched:tell": I,
   "nl:dir:listed": I, "nl:dir:page": Cr(1),
   "nl:domain:": T("prepare"),
-  "nl:csa:held:": X(2),
+  "nl:csa:held:": X(2), "nl:csa:hide": C, "nl:csa:keep:": X(400),
   // The drip job's start reads in the store's window (lib/drip-start.ts), named by the store's own id: go with the store.
   "nl:dripstart:": E,
   "nl:dun:": E, "nl:dun:card:": E, "nl:dun:cards:": E, "nl:dun:count:": E, "nl:dun:cursor": C, "nl:dun:report:": E,

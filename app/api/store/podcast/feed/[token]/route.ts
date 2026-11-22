@@ -12,6 +12,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { productSegment } from "@/lib/product-slug";
+import { holdState } from "@/lib/child-safety";
 
 /**
  * Kept by the CDN, under the feed's own secret address, for a few hours: a
@@ -42,6 +43,11 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const store = await storeForHandle(grant.h);
   const product = store && store.statsId === grant.s ? await readListing(store, grant.p) : null;
   if (!store || !product?.podcast) return new Response("This podcast is no longer here.", { status: 410, headers: { "Cache-Control": "no-store" } });
+  // A podcast held for a child-safety report (lib/child-safety.ts) is no feed for anyone, and no cache keeps the
+  // answer; a hold that cannot be read is asked about again later, never answered with the feed.
+  const hold = await holdState(store, product.id);
+  if (hold === "held") return new Response("No such feed.", { status: 404, headers: { "Cache-Control": "no-store" } });
+  if (hold === "unknown") return new Response("Try again later.", { status: 503, headers: { "Retry-After": "600", "Cache-Control": "no-store" } });
   const allowed = await mayListen(store, product.id, grant.e);
   const own = normaliseEmail(grant.e) === normaliseEmail(store.email);
   // Once the store has used the whole month's visits, a subscriber's feed rests like the

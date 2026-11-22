@@ -18,6 +18,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { StoreFullError } from "@/lib/store";
 import { dropStamped } from "@/lib/pdf-stamp";
 import { readOptionDirection } from "@/lib/option-request";
+import { heldRefusal } from "@/lib/child-safety";
 
 /** The most bytes of kept membership numbers the count reads (one studio request's included bytes, less room). */
 const OPTION_COUNT_BYTES = 40_000;
@@ -61,6 +62,12 @@ export async function POST(request: NextRequest) {
   if (!id) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
+
+  // A product kept for a child-safety report (lib/child-safety.ts) keeps its price options: none added, changed or
+  // removed with its file, nor reordered, while the hold lasts (the id names the product or the option): their order
+  // is part of what is kept. A hold that cannot be read refuses too.
+  const held = await heldRefusal(guarded.store, id);
+  if (held) return held;
 
   try {
     // How many members are on each option, from the kept membership reading only
@@ -118,12 +125,14 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, planStopped: sale.planStopped });
     } else if (action === "remove") {
       result = await removeOption(ref, id);
-    } else {
+    } else if (action === "move") {
       const direction = readOptionDirection(body);
       if (direction === null) {
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
       result = await moveOption(ref, id, direction);
+    } else {
+      return Response.json({ ok: false, error: "invalid" }, { status: 400 });
     }
 
     if (!result.ok) {

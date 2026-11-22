@@ -43,6 +43,9 @@ export const STUDIO_MESSAGES: Record<string, string> = {
   // Also the store's calls to connected services used, or no place this month (lib/metered-limits.ts): no reason is claimed.
   slow_down: "Uploads can't start just now. Try again later.",
   files_unavailable: "File uploads are unavailable right now. Keep your file and try again in a few minutes.",
+  // A product kept on hold (lib/child-safety.ts heldRefusal): said without naming why.
+  on_hold: "This product is on hold, so it cannot be removed, changed or published for now. To ask about it, write to support@marktmorgen.com.",
+  hold_unread: "We could not check whether this product is on hold just now, so nothing was changed. Try again in a few minutes.",
   // The store's files in the host's file store are counted once a day (lib/blob-tally.ts), and today's count did not finish.
   storage_daily: "We count your store's files once a day, and today's count did not finish. Keep your file and try again tomorrow.",
   // The studio's picture door, capped before it signs (lib/picture-door.ts).

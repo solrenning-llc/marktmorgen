@@ -10,6 +10,7 @@ import { notFound, redirect } from "next/navigation";
 import { after } from "next/server";
 import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { SESSION_COOKIE } from "@/lib/auth";
+import { contentOpenTo } from "@/lib/child-safety";
 import { seesDrafts } from "@/lib/draft-view";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
@@ -79,6 +80,10 @@ const load = cache(async (raw: string, productId: string, pkgToken: string, movi
   }
   const product = await readListing(store, productId);
   if (!product || !isCallProduct(product)) return { store, state: "gone" };
+  // Held for a child-safety report, or its mark unread: its title, price and times are the owner's only, before any
+  // time is read, for the page and its tab alike (Codex T's MEDIUM on #3588, folded into #3471; lib/child-safety.ts
+  // contentOpenTo). Anyone else goes where an id that does not exist goes, a move included.
+  if (!(await contentOpenTo(store, product.id, (await cookies()).get(SESSION_COOKIE)?.value))) return { store, state: "gone" };
   // A move is read from Stripe only for a booking in this store's diary (review of #3478; one HEXISTS): anything else
   // is not found, with nothing asked.
   if (moving) return { store, state: "move", product, known: known === true ? true : await bookedHere(store, moving) };

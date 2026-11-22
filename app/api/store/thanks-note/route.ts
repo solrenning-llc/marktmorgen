@@ -5,6 +5,7 @@ import { readListing } from "@/lib/catalog";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { readNote } from "@/lib/thanks-note";
 import { writeThanksNote } from "@/lib/thanks-note-store";
+import { heldRefusal } from "@/lib/child-safety";
 
 /**
  * A product's note after paying (lib/thanks-note.ts), from the studio:
@@ -18,6 +19,8 @@ export async function POST(request: NextRequest) {
   const store = guarded.store;
   const product = id ? await readListing(store, id) : null;
   if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
+  const onHold = await heldRefusal(guarded.store, id);
+  if (onHold) return onHold;
   if (!store.statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   const note = guarded.body.note === null ? null : readNote(guarded.body.note);
   if (typeof note === "string") return Response.json({ ok: false, error: note }, { status: 400 });

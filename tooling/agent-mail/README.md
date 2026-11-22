@@ -269,6 +269,7 @@ node ~/.agent-mail/agent-mail.mjs complete-enqueue --as "Claude 3" <id> --result
 ```bash
 node ~/.agent-mail/agent-mail.mjs claim-pr --as "Claude 3" --pr 4941          # CLAIMED por 2 horas (AC (m))
 node ~/.agent-mail/agent-mail.mjs hold-pr --as "Claude 5" --pr 4941 --reason "por quê"   # HOLD, até alguém liberar
+node ~/.agent-mail/agent-mail.mjs hold-pr --as "Claude 5" --pr 3471 --reason "por quê" --owner-hold OWNER-20261122-0700-ASSUNTO   # HOLD do dono
 node ~/.agent-mail/agent-mail.mjs release-pr --as "Claude 3" --pr 4941
 node ~/.agent-mail/agent-mail.mjs pr-status --pr 4941
 ```
@@ -280,6 +281,7 @@ node ~/.agent-mail/agent-mail.mjs pr-status --pr 4941
   - um CLAIMED não passa por cima de um HOLD ativo: o HOLD sai primeiro;
   - sem conseguir ler os commits do PR agora, quem não pôs o HOLD não o libera (NÃO CONFERIDO);
   - ao ler, uma marca gravada nesta versão sem esse direito (à mão ou por cópia antiga) é ignorada; as marcas antigas, sem a linha `Sessão:`, valem como antes.
+- **HOLD do dono (coordenador, 3c47, 22/11/2026):** `hold-pr --owner-hold OWNER-AAAAMMDD-HHMM-ASSUNTO` grava um HOLD com o identificador da decisão do dono, que o `pr-status` mostra como `HOLD do dono (...)`. Ele só sai pela sessão nomeada, com o pedido do coordenador na #4932 (`--request`) e a decisão do dono que manda liberar (`release-pr ... --owner-decision OWNER-...`); nunca por quem o pôs nem pelo autor. Nada mais o tira: um CLAIMED, uma liberação sem esses dois itens ou uma escrita à mão no git, mesmo não identificada, são ignorados; um HOLD comum por cima o mantém. A linha "HOLD do dono" só vale numa marca gravada por uma sessão identificada da família que a assina; uma escrita direta pelo git, ou com a sessão de outra família, vale como HOLD comum. Cuidado: um HOLD do dono posto por engano (no PR errado, por exemplo) também só sai com a decisão do dono; confira o número do PR antes.
 - Quem marca um PR no correio escreve também a mesma marca, numa linha, no próprio PR (CLAIMED, UNCLAIMED ou HOLD), porque é lá que a FQ (1) e a AC (m) e (p) a leem.
 
 ## Quando pedir ao dono

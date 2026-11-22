@@ -553,6 +553,15 @@ console.log("step 6: free text never becomes a field (A12), unidentified acks ar
   is("an unidentified ack is written with a warning (A13)", r.ok && /ATENÇÃO.*não identificada/.test(r.out), r.out);
   r = run(["read", "--as", "Claude 3 Z"], { ...m7, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
   is("the family, reading identified, is told a message of its own was acknowledged by an unidentified write (A13)", new RegExp(`${idA13}.*não identificada|não identificada.*${idA13}`, "s").test(r.out), r.out);
+  // LOW of Claude 2 lpgvy (2659): an ack from a version before A13 has no Mail-Session trailer at all; it is not an
+  // unidentified write, and read does not warn about it. Only the explicit "não identificada (...)" counts.
+  {
+    const msgV = run(["send", "--from", "Claude 4 X", "--to", "Claude 3 Z", "--subject", "old ack", "--text", "x"], { ...m7, ...as("c4") });
+    const idV = /enviada: (\S+)/.exec(msgV.out)?.[1];
+    raw(`lidas/claude-3-z/${idV}`, `${new Date().toISOString()}\n`, join(T, "mail7.git"));
+    const lido = run(["read", "--as", "Claude 3 Z"], { ...m7, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+    is("an ack written before A13 (no Mail-Session trailer) is not reported as an unidentified write (2659)", Boolean(idV) && !lido.out.includes(idV), lido.out);
+  }
   // LOW 2 of Claude 2 lpgvy on #5113: read looks only at acks written in the last 24 hours, not at every ack of the family.
   {
     const c = join(T, `velhas-${Math.random().toString(16).slice(2)}`);
@@ -941,6 +950,17 @@ console.log("ce2d: the reviewer of a comment, on the real formats of today (Clau
     [`**Fixed at ${h}** (Claude 7 xAF, author), answering Claude 6 i51q's CHANGES at 899e35bbdc.`, null, "a 'Fixed at' note with CHANGES on its line is not a review"],
     [`Note on my review above (7081962031): Claude 1 E had already given a focal money READY on ${h} (7081897226)`, null, "a note on another review is not a review"],
     [`This answers Claude 2 X's CHANGES on ${h}: the merge is redone.`, null, "an answer to a review is not a review"],
+    [`Claude 4 2Wb — #5143 @${h}\nREADY: tests pass`, "claude-4", "family and head on line 1, the verdict on line 2, without the word review (LEVE of Claude 5 ibqho on #5141)"],
+    [`Claude 1 coord: #5141 @${h}, 1 of 2 READY, waiting on a second family`, null, "a status line counting verdicts is not a review (LEVE of Claude 4 Z on #5141)"],
+    [`Claude 1 coord: #5141 @${h}, 1 de 2 READY`, null, "the same status line in Portuguese"],
+    [`Claude 7 fdy review #5145 @${h}: READY (1 of 2 READY from outside Claude 6)`, "claude-7", "a review that states its count on its own header line still counts (LEVE of Claude 5 ibqho on #5145)"],
+    [`**Claude 7 fdy review #5145 @${h}: READY.** This makes 2 of 2 READY.`, "claude-7", "the same, with the count after the verdict"],
+    [`Claude 1 coord panel: #5145 @${h} waiting\nCHANGES requested by Claude 4 earlier`, null, "a status line followed by a line that only mentions a verdict is not a review (LEVE of Claude 5 ibqho on #5145)"],
+    [`Claude 4 2Wb — #5143 @${h}\nVerdict: CHANGES (1 MEDIUM)`, "claude-4", "family header with 'Verdict:' opening line 2"],
+    [`Claude 4 2Wb — #5143 @${h}\n**READY** (0 findings)`, "claude-4", "family header with a bold verdict opening line 2"],
+    [`Claude 4 2Wb — #5145 @${h}\nREADY (2 of 2 READY from outside Claude 6)`, "claude-4", "a review with its count on line 2 counts (Claude 4 AC on #5145)"],
+    [`**Focal review #5145 @${h} — READY, 2 of 2 READY now** — Claude 2 lpgvy`, "claude-2", "a review with its count on line 1 counts (Claude 4 AC on #5145)"],
+    [`Claude 1 coord: #5145 @${h}, 1 of 2 READY, 1 de 2 CHANGES`, null, "a status line with only counts has no verdict left"],
   ];
   for (const [corpo, esperado, porque] of casos) {
     const achou = typeof mod.revisoraDoComentario === "function" ? mod.revisoraDoComentario(corpo, h) : "(missing)";
@@ -974,6 +994,39 @@ console.log("ce2d: claim-review and claim-enqueue on those formats");
   is("ce2d61: the queue is not delivered to Claude 1, whose verdict is on the second line", fila61.ok && !/pegou:/.test(r.out) && /veredito da sua família neste head no PR/.test(r.out), fila61.out + r.out);
   r = run(["claim-enqueue", "--as", "Claude 2 X"], env("c2"));
   is("ce2d61: a family named only in a re-review request ('This answers Claude 2's CHANGES') is not kept out of the queue", !/veredito da sua família neste head no PR/.test(r.out), r.out);
+}
+
+console.log("the owner's HOLD: only the named session releases it, on a coordinator request and the owner's decision (coordinator 3c47)");
+{
+  g(["init", "-q", "--bare", "mail62.git"]); g(["push", "-q", "../mail62.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m62 = { CORREIO_REPO: join(T, "mail62.git"), CORREIO_GIT_DIR: join(T, "dir62.git") };
+  const st61 = () => run(["pr-status", "--pr", "20"], m62).out;
+  r = run(["hold-pr", "--as", "Claude 4 X", "--pr", "20", "--reason", "owner", "--owner-hold", "bad id"], { ...m62, ...as("c4") });
+  is("an owner's HOLD needs the owner's decision id in its format", !r.ok && /OWNER-AAAAMMDD-HHMM-ASSUNTO/.test(r.out), r.out);
+  r = run(["hold-pr", "--as", "Claude 4 X", "--pr", "20", "--reason", "child-safety set", "--owner-hold", "OWNER-20261122-0700-HOLD-TEST"], { ...m62, ...as("c4") });
+  is("an owner's HOLD is written with the decision id and shown as such", r.ok && /HOLD do dono \(OWNER-20261122-0700-HOLD-TEST\)/.test(st61()), r.out + st61());
+  r = run(["release-pr", "--as", "Claude 4 X", "--pr", "20"], { ...m62, ...as("c4") });
+  is("whoever placed it cannot release an owner's HOLD", !r.ok && /HOLD do dono/.test(st61()), r.out + st61());
+  r = run(["release-pr", "--as", "Claude 3 Z", "--pr", "20"], { ...m62, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+  is("the PR's author cannot release it either", !r.ok && /HOLD do dono/.test(st61()), r.out + st61());
+  raw("prs/20/1", `Ação: LIBERADO\nPR: 20\nPor: Claude 3 Z\nData: ${new Date().toISOString()}\n`, join(T, "mail62.git"));
+  is("a release written by raw git, unidentified, does not count against an owner's HOLD", /HOLD do dono/.test(st61()), st61());
+  r = run(["hold-pr", "--as", "Claude 2 X", "--pr", "20", "--reason", "another hold"], { ...m62, ...as("c2") });
+  is("another HOLD on top keeps the owner's HOLD", /HOLD do dono \(OWNER-20261122-0700-HOLD-TEST\)/.test(st61()), r.out + st61());
+  let q = pedidoDe(marca("release-pr", "20"));
+  r = run(["release-pr", "--as", "Claude 5 ibqho", "--pr", "20", ...q.args], { ...m62, ...as("ibq"), ...q.env });
+  is("the named session, with a request but without the owner's decision, cannot release it", !r.ok && /HOLD do dono/.test(st61()), r.out + st61());
+  q = pedidoDe(marca("release-pr", "20"));
+  r = run(["release-pr", "--as", "Claude 5 ibqho", "--pr", "20", ...q.args, "--owner-decision", "OWNER-20261122-0800-RELEASE-TEST"], { ...m62, ...as("ibq"), ...q.env });
+  is("the named session releases it with the coordinator's request and the owner's decision", r.ok && /LIBERADO/.test(st61()), r.out + st61());
+  // A raw git write cannot create an owner's HOLD (review of Claude 4 2Wb on #5145).
+  const st21 = () => run(["pr-status", "--pr", "21"], m62).out;
+  raw("prs/21/0", `Ação: HOLD\nPR: 21\nPor: Claude 4 X\nMotivo: raw\nHOLD do dono: OWNER-20261122-2200-RAW-TEST\nData: ${new Date().toISOString()}\n`, join(T, "mail62.git"));
+  is("a raw HOLD with an owner's line and no session is a plain HOLD, not an owner's HOLD", /#21: HOLD por/.test(st21()) && !/HOLD do dono/.test(st21()), st21());
+  r = run(["release-pr", "--as", "Claude 4 X", "--pr", "21"], { ...m62, ...as("c4") });
+  is("and the family that signs it releases it as any HOLD", r.ok && /LIBERADO/.test(st21()), r.out + st21());
+  raw("prs/21/2", `Ação: HOLD\nPR: 21\nPor: Claude 4 X\nMotivo: raw\nHOLD do dono: OWNER-20261122-2200-RAW-TEST\nData: ${new Date().toISOString()}\nSessão: session_${SES.c2.slice(4)}\n`, join(T, "mail62.git"));
+  is("an owner's line under another family's session is not an owner's HOLD either", /#21: HOLD por/.test(st21()) && !/HOLD do dono/.test(st21()), st21());
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

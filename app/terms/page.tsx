@@ -183,6 +183,8 @@ export default function TermsPage() {
               <strong className="text-black">{vat.title}.</strong>{" "}
               {vat.terms.join(" ")}
             </p>
+            <p>{vat.refusedLead.terms}</p>
+            <ul className="list-disc pl-6">{vat.refused.map((item) => <li key={item}>{item}.</li>)}</ul>
             <p>{vat.example.join(" ")}</p>
           </>
         ) : null}

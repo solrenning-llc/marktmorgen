@@ -23,7 +23,8 @@ import { vatCollectionCostOf, type VatFxAllowance } from "@/lib/eu-vat-collectio
 import type { SwitchInput } from "@/lib/vat-registrations";
 import { dynamicPolicy, isDynamicPage, staticPolicy } from "@/lib/csp";
 import { VAT_BODY_REFUSALS, VAT_REFUSED_SALES } from "@/lib/vat-fee-words";
-import { applyEuCollect, euSaleGate } from "@/lib/eu-vat-collect";
+import { applyEuCollect, euCartGate, euSaleGate } from "@/lib/eu-vat-collect";
+import type { EuSupplyFields } from "@/lib/eu-vat-supply";
 
 const NOW = new Date("2026-11-22T12:00:00Z");
 const ALLOWANCES: VatFxAllowance[] = [
@@ -44,6 +45,9 @@ const UK_ON: SwitchInput = {
 const OFF: SwitchInput = { reviewed: false, now: NOW };
 const RECORD = { treatment: "collect", implementedIn: "lib/eu-vat-collect.ts", recordedOn: "2026-11-02", evidence: "tests/vat-fee-words.test.ts" };
 /** The deemed-supplier records the checkout collects on (lib/deemed-supplier.ts): both places say "collect". */
+/** A product the checkout charges VAT on: a link, answered not an e-publication (lib/eu-vat-collect.ts notAPublication). */
+const ESS: EuSupplyFields = { priceCents: 2900, file: null, link: "https://example.com/pack", keys: null, course: null, recurring: null, call: null, bundle: null, pwyw: null, publication: false };
+const RATES = [{ country: "DE", basisPoints: 1900, source: "https://example.invalid/de", readOn: "2026-11-02" }, { country: "FR", basisPoints: 2000, source: "https://example.invalid/fr", readOn: "2026-11-02" }];
 const COLLECT = [{ ...RECORD, jurisdiction: "EU", registration: "IE OSS" }, { ...RECORD, jurisdiction: "UK", registration: "UK VAT 123456789" }];
 
 const money = (cents: number, currency: string) =>
@@ -237,9 +241,12 @@ test("the words show on the checkout's own condition: a switch on with a record 
   // The checkout reads the same records: with the refusing ones it collects nothing for a German buyer either.
   const headers = new Headers({ "x-vercel-ip-country": "DE" });
   const form = new URLSearchParams({ billing_country: "DE" });
-  const product = { kind: "download", publication: false } as never;
-  const gate = euSaleGate({ product, headers, form, records: refusing, vatSwitch: EU_ON, now: NOW });
-  assert.equal(gate.ok && gate.collect !== null, false, "the checkout does not collect where the words would not show");
+  // A product the checkout really charges VAT on (a link, answered not an e-publication): with "collect" it collects,
+  // with "refuse-consumers" it is refused, so the assertion is about the records and nothing else (coord fb70's LEVE).
+  const collects = euSaleGate({ product: ESS, headers, form, records: COLLECT, vatSwitch: EU_ON, now: NOW, rates: RATES });
+  assert.deepEqual(collects, { ok: true, collect: { country: "DE" } }, "with collect records the same product is charged VAT");
+  const gate = euSaleGate({ product: ESS, headers, form, records: refusing, vatSwitch: EU_ON, now: NOW, rates: RATES });
+  assert.equal(gate.ok, false, "the checkout does not collect where the words would not show: it refuses");
 });
 
 test("the words name every sale the checkout refuses, each beside the check that refuses it (MEDIUM 2)", () => {
@@ -251,13 +258,19 @@ test("the words name every sale the checkout refuses, each beside the check that
   const named = new Set<string>([...VAT_REFUSED_SALES.flatMap((r): readonly string[] => r.checks), ...VAT_BODY_REFUSALS.map((r) => r.check)]);
   for (const refusal of refusals) assert.ok(named.has(refusal), `named in VAT_REFUSED_SALES or VAT_BODY_REFUSALS: ${refusal}`);
   assert.ok(refusals.has("not a one-off payment"));
-  assert.ok(VAT_REFUSED_SALES.some((r) => r.words.includes("payment plans") && (r.checks as readonly string[]).includes("not a one-off payment")), "payment plans are named");
+  assert.ok(VAT_REFUSED_SALES.some((r) => r.words.includes("Payment plans") && (r.checks as readonly string[]).includes("not a one-off payment")), "payment plans are named");
   const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!;
   for (const part of [words.terms, words.pricing]) {
     const text = part.join(" ");
-    for (const r of VAT_REFUSED_SALES) assert.ok(text.includes(r.words), `named: ${r.words}`);
     assert.ok(!/membership's content/.test(text), "a subscription is never promised");
+    assert.doesNotMatch(text, /It refuses/, "the refusals are a list, not sentences (AX274 3.1.5)");
   }
+  assert.deepEqual(words.refused, VAT_REFUSED_SALES.map((r) => r.words), "every refusal is an item of the list on both pages");
+  for (const page of ["app/terms/page.tsx", "app/pricing/page.tsx"]) {
+    assert.match(readFileSync(join(process.cwd(), page), "utf8"), /vat\.refused\.map\(\(item\) => <li key=\{item\}>/, `${page} shows the list`);
+  }
+  assert.ok(words.refused.some((w) => /e-publications, which are books, newspapers or magazines read on a screen/.test(w)), "e-publication is explained where it is used (3.1.3)");
+  assert.ok(words.refused.some((w) => /not yet marked, on the product, as not an e-publication/.test(w)), "the creator's answer is asked for");
   // Each one really is refused by the checkout's body check.
   const body = (extra: Record<string, string>) => new URLSearchParams({ mode: "payment", "line_items[0][quantity]": "1", "line_items[0][price_data][currency]": "eur", "line_items[0][price_data][unit_amount]": "10000", "adaptive_pricing[enabled]": "false", ...extra });
   const input = { country: "DE", chooseYourPrice: false, buyerCurrencyLive: false, now: NOW, costsCents: () => 10 };
@@ -273,7 +286,7 @@ test("US English: the tax authority, no 'pay it over', no 'tax office', no 'the 
   const words = vatFeeWords({ records: COLLECT, eu: EU_ON, uk: UK_ON, now: NOW, allowances: ALLOWANCES })!;
   const text = [words.title, ...words.terms, ...words.pricing, ...words.example].join(" ");
   assert.doesNotMatch(text, /pay it over|tax office|payment itself|nothing is charged and/);
-  assert.match(words.terms.join(" "), /does not accept these sales from a consumer in .*; nothing is charged for them\./);
+  assert.match(words.refusedLead.terms, /does not accept these sales from a consumer in .*; nothing is charged for them:/);
   assert.match(text, /tax authority/);
 });
 
@@ -296,3 +309,30 @@ test("lib/vat-registrations.ts says what it imports (NIT)", () => {
     assert.doesNotMatch(readFileSync(join(process.cwd(), file), "utf8"), /^import [^;]*from "@\//m, `${file} imports by a relative path`);
   }
 });
+
+test("every route and gate that refuses an EU or UK consumer is named: PayPal, the offer after paying, tips, a bundle in a cart (coord 44dd's MEDIUM, fb70)", () => {
+  // Every file that asks consumerGate itself (not through euSaleGate or euCartGate) refuses an EU or UK consumer
+  // whatever the switch: each must be named by a VAT_REFUSED_SALES entry, which names it in the words.
+  const callers = ["app", "components", "lib"].flatMap((dir) => files(join(process.cwd(), dir)))
+    .filter((path) => readFileSync(path, "utf8").includes("consumerGate("))
+    .map((path) => path.slice(process.cwd().length + 1))
+    .filter((path) => path !== "lib/eu-vat-gate.ts" && path !== "lib/eu-vat-collect.ts")
+    .sort();
+  const named = new Set(VAT_REFUSED_SALES.flatMap((r) => r.files ?? []));
+  for (const caller of callers) assert.ok(named.has(caller), `named in VAT_REFUSED_SALES: ${caller}`);
+  for (const file of named) assert.ok(readFileSync(join(process.cwd(), file), "utf8").includes("consumerGate("), `${file} still refuses through consumerGate`);
+  assert.ok(callers.includes("app/api/store/paypal/checkout/route.ts") && callers.includes("lib/upsell.ts"));
+  // A bundle in a cart is refused even when the same bundle alone is charged VAT.
+  const headers = new Headers({ "x-vercel-ip-country": "DE" });
+  const form = new URLSearchParams({ billing_country: "DE" });
+  const bundle = { ...ESS, bundle: ["member"] };
+  const members = new Map([["member", ESS]]);
+  assert.deepEqual(euSaleGate({ product: bundle, members, headers, form, records: COLLECT, vatSwitch: EU_ON, now: NOW, rates: RATES }), { ok: true, collect: { country: "DE" } }, "alone, the bundle is charged");
+  assert.equal(euCartGate({ products: [bundle], headers, form, records: COLLECT, vatSwitch: EU_ON, now: NOW, rates: RATES }).ok, false, "in a cart, it is refused");
+  // Evidence that disagrees (internet address in Germany, billing address in France) is refused, never charged on a guess.
+  const split = euSaleGate({ product: ESS, headers, form: new URLSearchParams({ billing_country: "FR" }), records: COLLECT, vatSwitch: EU_ON, now: NOW, rates: RATES });
+  assert.equal(split.ok, false);
+  // A product with no answer on whether it is an e-publication is refused.
+  assert.equal(euSaleGate({ product: { ...ESS, publication: null } as never, headers, form, records: COLLECT, vatSwitch: EU_ON, now: NOW, rates: RATES }).ok, false);
+});
+

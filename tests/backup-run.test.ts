@@ -3,7 +3,7 @@
  * to the backup's own bucket → read back, the outcome kept for the report.
  * Against the in-memory database and a stand-in store; nothing real. Off three
  * ways today, each checked: no reviewed cost ceiling (BACKUP_COST_REVIEW is
- * null), no backup bucket settings, no encryption key. No schedule calls it.
+ * null), no backup bucket settings, no encryption key. Its route (app/api/cron/backup) is scheduled and refuses while the review is null.
  *
  * What fails here:
  *   - a run that sends a single command while any of the three is missing, or
@@ -145,7 +145,8 @@ async function main(): Promise<void> {
     delete proto.maxParts;
     delete proto.maxRunBytes;
     is("a field added to Object.prototype is never read into the copy", polluted, true);
-    is("a retention of 3 days is admitted", validReview({ ...review, retentionDays: 3 }), true);
+    // The shortest: the bucket lock's 7 days and two (review of 9 November 2026; tests/bk1-bucket-lock.test.ts).
+    is("a retention of 9 days is admitted", validReview({ ...review, retentionDays: 9 }), true);
     const { proxy, revoke } = Proxy.revocable(review, {});
     revoke();
     is("a revoked proxy: refused as a result, never an exception", [(() => {
@@ -165,6 +166,8 @@ async function main(): Promise<void> {
     // hours) says so.
     ["a retention of 1 day", { ...review, retentionDays: 1 }],
     ["a retention of 2 days", { ...review, retentionDays: 2 }],
+    // The bucket lock outlives it: the prune could not keep it (Claude 2's MEDIUM, Claude 6's LOW 1, 9 November 2026).
+    ["a retention of 8 days", { ...review, retentionDays: 8 }],
     ["a storage ceiling the kept copies could pass", { ...review, maxStoredBytes: 30 * 1_000_000 }],
     // One byte short of retention + 2 sets (inbox C4-53): no room for the day's set over a full retention and a day.
     ["a storage ceiling one byte short of retention + 2 sets", { ...review, maxStoredBytes: 32 * SET_BOUND - 1 }],
@@ -182,7 +185,7 @@ async function main(): Promise<void> {
   // In parts (lib/backup-parts.ts): here one part and the manifest that names it.
   is("done, with the keys copied (its own day count and lock among them), one part and its manifest", [ran.ok, ran.ok && ran.keys, ran.ok && ran.parts, objects.size], [true, 4, 1, 2]);
   is("a second run the same day is refused before anything is written", [await runBackup({ now: T0 + HOUR, review, store: broken, key }), objects.size], [{ ok: false, reason: "already_ran" }, 2]);
-  is("the good copy's time and its manifest are kept, and survive that refusal", [await backupStale(T0 + 2 * HOUR), JSON.parse(String(redis.run(["GET", "nl:backup:last-ok"])))], [false, { at: T0, set: ran.ok ? ran.id : "" }]);
+  is("the good copy's time and its manifest are kept, and survive that refusal", [await backupStale(T0 + 2 * HOUR), JSON.parse(String(redis.run(["GET", "nl:backup:last-ok"])))], [false, { at: T0, set: ran.ok ? ran.id : "", base: { keys: ran.ok ? ran.keys : -1, bytes: ran.ok ? ran.bytes : -1 } }]);
   is("the last good copy's mark is kept for good: it names the copy never deleted to make room", Number(redis.run(["TTL", "nl:backup:last-ok"])), -1);
 
   part("Failures say which step, and keep the last good copy's time");
@@ -267,6 +270,9 @@ async function main(): Promise<void> {
     objects.clear();
     writtenAt.clear();
     at(T0 + 40 * DAY);
+    // The database was wiped above while the bucket kept its copies, so the prune held (prune_unverified, C4-36): a
+    // last good set's base of nothing lets this part test the retention alone.
+    redis.run(["SET", "nl:backup:last-ok", JSON.stringify({ at: clock - DAY, set: "00000000-0000-4000-8000-000000000000", base: { keys: 0, bytes: 0 } })]);
     const line = clock - 30 * DAY;
     for (const [id, when] of [["11111111-1111-4111-8111-111111111111", line - 1], ["22222222-2222-4222-8222-222222222222", line], ["33333333-3333-4333-8333-333333333333", line + DAY]] as const) {
       objects.set(id, new Uint8Array([1]));
@@ -304,13 +310,14 @@ async function main(): Promise<void> {
       objects.set(id, new Uint8Array(SET_BOUND));
       writtenAt.set(id, clock + 1_000 + i);
     }
-    at(T0 + 101 * DAY);
+    // Eight days on: every set is past the bucket lock (BACKUP_BUCKET_LOCK_DAYS and its hour), so it may be deleted.
+    at(T0 + 108 * DAY);
     failDelete = true;
     const kept = objects.size;
     const full = await runBackup({ now: clock, review, store, key });
     failDelete = false;
     is("at the ceiling, a delete that fails: nothing written, said so", [full, objects.size - kept, (await backupLastFailure())?.reason], [{ ok: false, reason: "room_error" }, 0, "room_error"]);
-    at(T0 + 101 * DAY + HOUR);
+    at(T0 + 108 * DAY + HOUR);
     deletes.length = 0;
     const room = await runBackup({ now: clock, review, store, key });
     is("the day's new try makes room from the oldest, keeps the last verified copy, and writes", [room.ok, goodIds.length > 1 && goodIds.every((id) => objects.has(id)), deletes.length > 0 && deletes.every((id) => !goodIds.includes(id))], [true, true, true]);
@@ -421,16 +428,17 @@ async function main(): Promise<void> {
     writtenAt.clear();
     wipe();
     redis.run(["SET", "nl:store:one", "a shop"]);
-    const short = { ...review, retentionDays: 3 };
+    const short = { ...review, retentionDays: 9 };
     at(T0 + 700 * DAY);
     const good = await runBackup({ now: clock, review: short, store, key });
     const goodIds = good.ok ? [good.id, ...openManifest(objects.get(good.id)!, key).parts.map((p) => p.id)] : [];
-    at(T0 + 704 * DAY);
+    at(T0 + 710 * DAY);
     const refusing: BackupBucket = { ...store, putNew: async () => { throw new Error("write refused"); } };
     deletes.length = 0;
     const failed = await runBackup({ now: clock, review: short, store: refusing, key });
-    is("day 4, the first write refused: a failure, nothing deleted, the good copy of day 0 whole", [failed.ok, deletes.length, goodIds.length > 1 && goodIds.every((id) => objects.has(id))], [false, 0, true]);
-    at(T0 + 705 * DAY);
+    is("day 10, the first write refused: a failure, nothing deleted, the good copy of day 0 whole", [failed.ok, deletes.length, goodIds.length > 1 && goodIds.every((id) => objects.has(id))], [false, 0, true]);
+    // Past the bucket lock too (BACKUP_BUCKET_LOCK_DAYS and its hour), or the old copy may not be deleted yet.
+    at(T0 + 711 * DAY);
     const next = await runBackup({ now: clock, review: short, store, key });
     is("the next good copy is written, and only then is the old one, past the retention, deleted", [next.ok, goodIds.every((id) => !objects.has(id))], [true, true]);
   }
@@ -447,11 +455,14 @@ async function main(): Promise<void> {
     const partId = good.ok ? openManifest(objects.get(good.id)!, key).parts[0].id : "";
     objects.set(partId, new Uint8Array(review.maxStoredBytes - SET_BOUND + 1 - objects.get(good.ok ? good.id : "")!.byteLength));
     objects.set("bbbbbbbb-bbbb-4bbb-8bbb-000000000001", new Uint8Array(10));
-    writtenAt.set("bbbbbbbb-bbbb-4bbb-8bbb-000000000001", clock + 5);
+    // Older than the bucket lock, younger than the retention.
+    writtenAt.set("bbbbbbbb-bbbb-4bbb-8bbb-000000000001", clock - 8 * DAY);
     at(T0 + 111 * DAY);
     const kept = objects.size;
     const none = await runBackup({ now: clock, review, store, key });
-    is("the others deleted, the last verified copy kept, and still no room: room_error, nothing written", [none, objects.has(partId), objects.has("bbbbbbbb-bbbb-4bbb-8bbb-000000000001"), objects.size, (await backupLastFailure())?.reason], [{ ok: false, reason: "room_error" }, true, false, kept - 1, "room_error"]);
+    // Nothing is asked to go when the others cannot make room (Claude 6's LOW 2, 9 November 2026): before, the other
+    // copy was deleted first and the run still found no room.
+    is("the others cannot make room with the last verified copy kept: room_error, nothing deleted, nothing written", [none, objects.has(partId), objects.has("bbbbbbbb-bbbb-4bbb-8bbb-000000000001"), objects.size, (await backupLastFailure())?.reason], [{ ok: false, reason: "room_error" }, true, true, kept, "room_error"]);
   }
 
   part("A listing longer than the ceiling allows: nothing written, said so");
@@ -577,7 +588,7 @@ async function main(): Promise<void> {
         return store.putNew(id, bytes);
       },
     };
-    is("the run's cutoff: 800 s, under a day (the retention's proof needs it)", BACKUP_RUN_CUTOFF_MS, 800_000);
+    is("the run's cutoff: 240 s, under a day (the retention's proof needs it) and inside the route's 300 s with what runs outside it (inbox C4-36, C2-20261113-1415-ADOTAR-5)", BACKUP_RUN_CUTOFF_MS, 240_000);
     const late = await runBackup({ now: clock, review, store: slow, key, cutoffMs: 200 });
     is("past the cutoff: refused as such, its part left unreferenced, no manifest written", [late, objects.size, (await backupLastFailure())?.reason], [{ ok: false, reason: "export_cutoff" }, 1, "export_cutoff"]);
   }
@@ -586,7 +597,7 @@ async function main(): Promise<void> {
   {
     objects.clear();
     writtenAt.clear();
-    const short = { ...review, retentionDays: 3 };
+    const short = { ...review, retentionDays: 9 };
     at(T0 + 400 * DAY);
     const good = await runBackup({ now: clock, review: short, store, key });
     const kept = [...objects.keys()];
@@ -599,8 +610,8 @@ async function main(): Promise<void> {
     is("two failed days: the good copy is still there, and the report already says no good copy for 48 hours", [good.ok, kept.length, kept.every((id) => objects.has(id)), await backupStale(T0 + 402 * DAY + 2 * HOUR)], [true, 2, true, true]);
   }
 
-  part("Nothing schedules it");
-  is("vercel.json names no backup route", /backup/i.test(readFileSync("vercel.json", "utf8")), false);
+  part("Scheduled, and off: the route refuses before any command while BACKUP_COST_REVIEW is null");
+  is("vercel.json names only the backup's own route (tests/bk1-backup-route.test.ts holds its schedule and its refusal)", readFileSync("vercel.json", "utf8").match(/"\/api\/cron\/[a-z-]*backup[a-z-]*"/g), ['"/api/cron/backup"']);
   done();
 }
 

@@ -228,7 +228,7 @@ export async function studioAccess(
       who: access.email,
       role: access.role,
       what: `${need === "member" ? "Team" : PERMISSION_WORDS[need]}: ${route}${detail ? ` (${detail.slice(0, 40)})` : ""}`,
-    });
+    }, access.ref);
   }
   return result;
 }

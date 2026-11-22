@@ -360,12 +360,13 @@ export function SiteNav({ opening }: { opening: NavOpening }) {
         Skip to the page content
       </a>
       {/* What the site is today, before anything else it says
-          (lib/opening.ts). It scrolls away with the page; the menu stays. */}
+          (lib/opening.ts). It scrolls away with the page; the menu stays.
+          Line spacing 1.5 (WCAG 1.4.8). */}
       {PLANS_ON_SALE ? null : (
         // A named region, so its words are inside a landmark (AX274 Part A; axe "region"). It stays outside the
         // sticky header below so that it scrolls away while the menu stays (tests/public-header-targets.test.ts).
         <section aria-label="What is built today" className="bg-ink text-white" data-preview-bar="">
-          <p className="container-page py-2.5 text-center text-[0.8125rem] leading-snug sm:text-sm">
+          <p className="container-page py-2.5 text-center text-[0.8125rem] leading-normal sm:text-sm">
             {PREVIEW_LINE}{" "}
             <Link prefetch={false} href={PREVIEW_LINK.href} className="whitespace-nowrap font-semibold underline underline-offset-2">
               {PREVIEW_LINK.label}
@@ -452,7 +453,7 @@ export function SiteNav({ opening }: { opening: NavOpening }) {
               onClick={() => setDrawerOpen((v) => !v)}
               aria-expanded={drawerOpen}
               aria-controls="mobile-drawer"
-              className="grid h-11 w-11 place-items-center rounded-[10px] text-ink transition-colors hover:bg-sand lg:hidden"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-[10px] text-ink transition-colors hover:bg-sand lg:hidden"
             >
               <span className="sr-only">{drawerOpen ? "Close the menu" : "Open the menu"}</span>
               <Icon name={drawerOpen ? "close" : "menu"} size={22} />

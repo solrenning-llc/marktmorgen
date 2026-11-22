@@ -113,7 +113,9 @@ test("a complete due pair is processed, with string and numeric scores", async (
 // Claude 3 (nuvem A) and Claude 7 on #2508: the two "keep the reminder" paths must give up, as the paidCalls path does,
 // once the reminder is hours late; otherwise one permanently failing read sits at the head of the queue for good.
 const HOURS = 3600_000;
-const late = `calls-evidence|harbor|cs_test_late00000000000000000000000|1|${now + 3600_000}`;
+// Hours late and of no use any more: its call began a minute ago. A timed reminder still of use is kept however late an
+// outage makes it (Codex X2, #4812, tests/call-reminder-outage-keep.test.ts); this one is not, so it is given up on.
+const late = `calls-evidence|harbor|cs_test_late00000000000000000000000|1|${now - 60_000}`;
 const zrems = () => writes.filter((c) => c[0] === "ZREM").map((c) => c.slice(2));
 
 test("a store read that keeps failing gives up once the reminder is hours late, and keeps the one still of use", async () => {

@@ -60,6 +60,19 @@ function stillUseful(mark: "24" | "1", start: number, now: number): boolean {
   return mark === "24" ? now < start - 3600_000 : now < start;
 }
 
+/**
+ * Whether an entry that could not be dealt with this run (its store, the paid calls or its one paid call unreadable)
+ * is given up on. A timed reminder is kept while it is still of use, however late the outage has made it: a day-before
+ * reminder due six hours ago still has almost eighteen hours to go (Codex X2, #4812). The confirmation, and an entry
+ * whose member does not read, are given up on once they are GIVE_UP_MS late, as before. Either way the wait is
+ * bounded, so one store or session that cannot be read never holds the head of the queue for good.
+ */
+function givenUp(member: string, score: number, now: number): boolean {
+  const item = parseMember(member);
+  if (item && (item.mark === "24" || item.mark === "1")) return !stillUseful(item.mark, item.start, now);
+  return now - score > GIVE_UP_MS;
+}
+
 /** One email, as the sender takes it. */
 type Message = Parameters<typeof sendEmailOutcome>[0];
 
@@ -241,10 +254,10 @@ export async function sendCallReminders(
       store = await findStore(handle);
     } catch (error) {
       // Unknown, not gone: tried again next run, and given up on only once it
-      // is hours late, as when Stripe does not answer below, so one store that
-      // cannot be read never holds the head of the queue for good.
+      // is of no use any more (givenUp), as when Stripe does not answer below,
+      // so one store that cannot be read never holds the head of the queue for good.
       console.error("reading the store for call reminders failed", error);
-      const stale = members.filter((m) => now - m.score > GIVE_UP_MS).map((m) => m.member);
+      const stale = members.filter((m) => givenUp(m.member, m.score, now)).map((m) => m.member);
       if (stale.length) await redisPipeline([["ZREM", REMINDER_QUEUE, ...stale]]);
       counts.dropped += stale.length;
       continue;
@@ -263,9 +276,9 @@ export async function sendCallReminders(
       paid = await paidCalls(store);
     } catch (error) {
       // Stripe did not answer: tried again next run, and given up on only
-      // once it is hours late and no use to anybody.
+      // once it is no use to anybody (givenUp).
       console.error("reading paid calls for reminders failed", error);
-      const stale = members.filter((m) => now - m.score > GIVE_UP_MS).map((m) => m.member);
+      const stale = members.filter((m) => givenUp(m.member, m.score, now)).map((m) => m.member);
       if (stale.length) await redisPipeline([["ZREM", REMINDER_QUEUE, ...stale]]);
       counts.dropped += stale.length;
       continue;
@@ -285,11 +298,11 @@ export async function sendCallReminders(
         call = bySession.get(item.session) ?? await paidCall(store, item.session);
       } catch (error) {
         // Unknown, not unpaid: kept for the next run while it can still be of
-        // use, and given up on once it is hours late, as when the whole list
+        // use, and given up on once it is not (givenUp), as when the whole list
         // does not answer, so a session Stripe answers 404 for on every run (one
         // of the account the store used before) cannot hold the queue.
         console.error("reading one paid call for reminders failed", error);
-        if (now - score > GIVE_UP_MS) counts.dropped += 1;
+        if (givenUp(member, score, now)) counts.dropped += 1;
         else done.pop();
         continue;
       }

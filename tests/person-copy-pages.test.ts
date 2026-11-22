@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   const first = await copyPerson(scope);
   is("page 1", first.page, 1);
   is("not complete", first.complete, false);
-  is("it says the copy continues on page 2", first.notComplete.includes(morePagesLine(2, [`lib/community-erasure.ts#${w.communityId}`])), true);
+  is("it says the copy continues on page 2", first.notComplete.includes(morePagesLine(2, [`lib/community-erasure.ts#${w.communityId}`, ...(scope.statsId ? [`lib/email-sync.ts#${scope.statsId}`] : [])])), true);
   is("with a cursor", typeof first.next, "string");
   is("the rest of the copy is on it, as before", first.sections.some((s) => s.module !== "lib/community-erasure.ts"), true);
 

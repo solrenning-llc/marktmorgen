@@ -1179,7 +1179,8 @@ export async function syncJobsPage(statsId: string | null, email: string, budget
   if (!budget.take(1)) return { jobs: [], resume: from };
   const logged = stringList(repliesFor(await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]), 1)?.[0]);
   if (!logged) throw new UnknownReplyError("a store's email platform job log");
-  const inLog = [...new Set(logged.filter((id) => JOB_ID.test(id)))];
+  // Every id the log names, read as syncJobsOf reads the log (loggedJobsWithLog).
+  const inLog = [...new Set(logged)];
   const jobs: JobView[] = [];
   let cursor = scan ? scan[1]! : "0";
   // Within one index page, the jobs already read: the page is read in id order, so a page cut short goes on after

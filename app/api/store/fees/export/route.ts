@@ -3,7 +3,7 @@ import { creatorFrom } from "@/lib/studio-route";
 import { SALE_FEES_FILE_MAX_BYTES, keptSaleFees } from "@/lib/sale-fees-reading";
 import { saleFeesCsv } from "@/lib/sale-fees-months";
 import { saleFees } from "@/lib/sale-fees-rules";
-import { FILE_TOO_LARGE_WORDS, exportReachRefusal, readWords, stateWords, unavailableWords } from "@/lib/sale-fees-view";
+import { FILE_TOO_LARGE_WORDS, exportReachRefusal, stateWords, unavailableWords } from "@/lib/sale-fees-view";
 import { readingSince } from "@/lib/earnings-by-month";
 
 /**
@@ -26,8 +26,9 @@ export async function GET(request: NextRequest) {
   const short = exportReachRefusal(state.kept.since, readingSince(state.kept.at, "UTC"));
   if (short !== null) return plain(409, short);
   const report = saleFees(state.kept.lines, { complete: true });
-  // A copy shown in place of a reading that failed or was refused says when it was read, inside the file (audit 2fb6).
-  const csv = saleFeesCsv(report, "UTC", state.kept.stale || state.kept.failed ? readWords(state.kept) : undefined);
+  // Every row says when the reading was taken, so a file from a copy kept before a failed or refused reading says it
+  // too, inside the file, and every file is the same table (audits 2fb6, 0861).
+  const csv = saleFeesCsv(report, "UTC", state.kept.at);
   if (csv === null) return plain(503, unavailableWords(report.available ? "incomplete" : report.why));
   // Never larger than what the download is priced to send (SALE_FEES_FILE_MAX_BYTES; audit 2fb6).
   if (Buffer.byteLength(csv, "utf8") + 4 > SALE_FEES_FILE_MAX_BYTES) return plain(503, FILE_TOO_LARGE_WORDS);

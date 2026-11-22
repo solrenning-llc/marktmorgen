@@ -18,7 +18,8 @@
  */
 import { EARNINGS_MONTHS, monthFloor } from "@/lib/earnings-by-month";
 import { saleFees } from "@/lib/sale-fees-rules";
-import { SALE_FEES_CSV_HEADER, amountCell, saleFeeMonths, saleFeesCsv, type FeeMonths } from "@/lib/sale-fees-months";
+import { SALE_FEES_CSV_HEADER, amountCell, readAtCell, saleFeeMonths, saleFeesCsv, type FeeMonths } from "@/lib/sale-fees-months";
+import { parseCsv } from "@/lib/csv";
 import { done, is, part } from "./check";
 
 const ZONE = "America/New_York";
@@ -108,18 +109,30 @@ function main(): void {
 
   part("The CSV, one row per sale");
   const report = saleFees([sale("ch_a", 5000, 175, OCT_LATE_LOCAL), refund("ch_a", 1000, NOV_5), refund("ch_old", 300, NOV_5), taxFee(25, NOV_5)], { complete: true });
-  const csv = saleFeesCsv(report, ZONE);
-  is("header, sales newest first, then account fees", csv?.split("\n"), [
+  const READ_AT = Date.UTC(2026, 10, 11, 15, 4, 5);
+  const readAt = readAtCell(READ_AT, ZONE);
+  const csv = saleFeesCsv(report, ZONE, READ_AT);
+  is("header, sales newest first, then account fees, each with when it was read", csv?.split("\n"), [
     SALE_FEES_CSV_HEADER.map((h) => `"${h}"`).join(","),
-    `"2026-10-31","ch_a","USD","50.00","(1.75)","0.00","0.00","0.00","(10.00)","0.00","38.25"`,
-    `"Unavailable","ch_old","USD","Unavailable","0.00","0.00","0.00","0.00","(3.00)","0.00","Unavailable"`,
-    `"","Stripe Tax fees","USD","","","","","","","","(0.25)"`,
+    `"2026-10-31","ch_a","USD","50.00","(1.75)","0.00","0.00","0.00","(10.00)","0.00","38.25","${readAt}"`,
+    `"Unavailable","ch_old","USD","Unavailable","0.00","0.00","0.00","0.00","(3.00)","0.00","Unavailable","${readAt}"`,
+    `"","Stripe Tax fees","USD","","","","","","","","(0.25)","${readAt}"`,
   ]);
-  is("the header names every column", SALE_FEES_CSV_HEADER, ["Date", "Sale", "Currency", "Gross", "Stripe fee", "Tax on Stripe fee", "Application fee", "Other fees", "Refunds", "Disputes", "Net"]);
+  is("the header names every column", SALE_FEES_CSV_HEADER, ["Date", "Sale", "Currency", "Gross", "Stripe fee", "Tax on Stripe fee", "Application fee", "Other fees", "Refunds", "Disputes", "Net", "Read at"]);
+
+  part("When it was read: ISO 8601 with the zone's offset, the same table in every file (FZ (e); audit 0861)");
+  is("in UTC", readAtCell(READ_AT, "UTC"), "2026-11-11T15:04:05+00:00");
+  is("in a zone behind UTC", readAtCell(READ_AT, "America/Fortaleza"), "2026-11-11T12:04:05-03:00");
+  is("an unknown zone: none", readAtCell(READ_AT, "Mars/Olympus"), null);
+  {
+    const parsed = parseCsv(csv ?? "");
+    is("read back with the repository's own reader: the header is the header", parsed.header, [...SALE_FEES_CSV_HEADER]);
+    is("and every row has as many fields as it", parsed.rows.every((r) => r.length === SALE_FEES_CSV_HEADER.length), true);
+  }
   is("no cell starts like a formula", csv?.split("\n").every((l) => !/(^|,)"[=+\-@]/.test(l)), true);
-  is("an unavailable report gives no file", saleFeesCsv({ available: false, why: "unreadable" }, ZONE), null);
-  is("an unknown time zone gives no file", saleFeesCsv(report, "Mars/Olympus"), null);
-  is("nothing sold: the header alone", saleFeesCsv(saleFees([], { complete: true }), ZONE), SALE_FEES_CSV_HEADER.map((h) => `"${h}"`).join(","));
+  is("an unavailable report gives no file", saleFeesCsv({ available: false, why: "unreadable" }, ZONE, READ_AT), null);
+  is("an unknown time zone gives no file", saleFeesCsv(report, "Mars/Olympus", READ_AT), null);
+  is("nothing sold: the header alone", saleFeesCsv(saleFees([], { complete: true }), ZONE, READ_AT), SALE_FEES_CSV_HEADER.map((h) => `"${h}"`).join(","));
 
   part("A month's sums past what a number holds exactly are unavailable, never rounded (Codex Cloud 1 on #3637)");
   const huge = [sale("ch_h1", Number.MAX_SAFE_INTEGER, 0, NOV_5), sale("ch_h2", 2, 0, NOV_5)];

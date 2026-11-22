@@ -72,13 +72,13 @@ export function downloadRefusal(kept: { since: number; stored?: boolean; tooLarg
     // Said as it is: past the copy's size, or the copy could not be written (audit 2fb6).
     return kept.tooLarge
       ? "This reading was too large to keep, so no file is made from it. The figures on this page are the whole reading."
-      : "This reading could not be kept, so no file is made from it now. The figures on this page are the whole reading. Try the download again later.";
+      : "This reading could not be kept, so no file is made from it now. The figures on this page are the whole reading. Reload this page later.";
   }
   return null;
 }
 
 /** Why the download sends no file when it would be larger than it is priced to send (SALE_FEES_FILE_MAX_BYTES; audit 2fb6). */
-export const FILE_TOO_LARGE_WORDS = "This file would be larger than a download can send, so no file is made. The figures on the page are the whole reading. Nothing here is a zero.";
+export const FILE_TOO_LARGE_WORDS = "This file would be larger than a download can send, so no file is made. The figures on this page are the whole reading. Nothing here is a zero.";
 
 /** Why a report is not shown. */
 export function unavailableWords(why: SaleFeesUnavailable | "zone" | "late"): string {

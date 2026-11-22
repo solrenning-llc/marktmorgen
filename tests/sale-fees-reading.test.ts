@@ -33,6 +33,8 @@ import {
   keptSaleFees,
 } from "@/lib/sale-fees-reading";
 import { STRIPE_LIST_VERSION } from "@/lib/stripe-list";
+import { parseCsv } from "@/lib/csv";
+import { readAtCell } from "@/lib/sale-fees-months";
 import { COST_LINES, DAY_WINDOWS, nonPayingWorst, readShapeCost } from "./plan-cost-registry";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { exportReachRefusal } from "@/lib/sale-fees-view";
@@ -389,7 +391,8 @@ async function main(): Promise<void> {
   pages = [page([line("charge", 5000, nowSeconds - 3600, charge("ch_whole"), 175)], false)];
   const wholeFile = await exportFees(new NextRequest("https://marktmorgen.com/api/store/fees/export", { method: "GET", headers: { host: "marktmorgen.com", "sec-fetch-site": "same-origin", cookie: `${SESSION_COOKIE}=${wholeSession}` } }));
   is("a whole reading gives the file", [wholeFile.status, wholeFile.headers.get("Content-Type")], [200, "text/csv; charset=utf-8"]);
-  is("a fresh reading's file starts with its header, no note", (await wholeFile.text()).replace(/^\uFEFF/, "").startsWith('"Date",'), true);
+  const wholeParsed = parseCsv(await wholeFile.text());
+  is("a fresh reading's file: the header first, every row as wide, each with when it was read", [wholeParsed.header[0], wholeParsed.header.at(-1), wholeParsed.rows.length > 0 && wholeParsed.rows.every((r) => r.length === wholeParsed.header.length && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$/.test(r.at(-1) ?? ""))], ["Date", "Read at", true]);
   // The copy two hours old and the day's readings used: the file is the copy, and says when it was read (audit 2fb6).
   const wholeStore = await storeForEmail(OWNER);
   const copyName = `nl:salefees:copy:${wholeStore!.statsId}`;
@@ -397,8 +400,9 @@ async function main(): Promise<void> {
   copied.at = Date.now() - 2 * HOUR;
   await redis.pipeline([["SET", copyName, JSON.stringify(copied)], ["SET", `nl:salefees:day:${wholeStore!.statsId}:${new Date().toISOString().slice(0, 10)}`, String(SALE_FEES_READINGS_PER_DAY)]]);
   const staleFile = await exportFees(new NextRequest("https://marktmorgen.com/api/store/fees/export", { method: "GET", headers: { host: "marktmorgen.com", "sec-fetch-site": "same-origin", cookie: `${SESSION_COOKIE}=${wholeSession}` } }));
-  const staleText = (await staleFile.text()).replace(/^\uFEFF/, "");
-  is("a file from the kept copy, past the day's readings, says when it was read inside it", [staleFile.status, staleText.split("\n")[0].includes("Read from your Stripe account on"), staleText.split("\n")[1].startsWith('"Date",')], [200, true, true]);
+  const staleParsed = parseCsv(await staleFile.text());
+  const staleAt = readAtCell(copied.at, "UTC");
+  is("a file from the kept copy, past the day's readings: the same table, every row saying when it was read (audit 0861)", [staleFile.status, staleParsed.header[0], staleParsed.rows.length > 0 && staleParsed.rows.every((r) => r.length === staleParsed.header.length && r.at(-1) === staleAt)], [200, "Date", true]);
 
   done();
 }

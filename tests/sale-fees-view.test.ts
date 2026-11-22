@@ -55,7 +55,7 @@ function main(): void {
   is("a copy read back (kept): the download", downloadRefusal({ since: 1000 }, 1000), null);
   is("a reading short of the year: the reason, never a link", downloadRefusal({ since: Date.UTC(2026, 6, 2, 0, 0, 1), stored: true }, 1000), exportReachRefusal(Date.UTC(2026, 6, 2, 0, 0, 1), 1000));
   is("a reading too large to keep: the reason, never a link", downloadRefusal({ since: 1000, stored: false, tooLarge: true }, 1000), "This reading was too large to keep, so no file is made from it. The figures on this page are the whole reading.");
-  is("a copy that could not be written: said as that, never 'too large' (audit 2fb6)", downloadRefusal({ since: 1000, stored: false }, 1000), "This reading could not be kept, so no file is made from it now. The figures on this page are the whole reading. Try the download again later.");
+  is("a copy that could not be written: said as that, never 'too large' (audit 2fb6)", downloadRefusal({ since: 1000, stored: false }, 1000), "This reading could not be kept, so no file is made from it now. The figures on this page are the whole reading. Reload this page later.");
   is("the page asks it of the reading it shows", page.includes('const noFile = kept ? downloadRefusal(kept, readingSince(kept.at, "UTC")) : null;'), true);
   is("the link and 'The download has every one.' only when there is a file", [/noFile === null \? \(\s*<p className="mt-4">\s*<a className="btn btn-secondary btn-sm" href=\{download\} download>/.test(page), page.includes('${noFile === null ? " The download has every one." : ""}')], [true, true]);
   is("and the reason in its place", page.includes('role="status">{noFile}</p>'), true);
@@ -89,14 +89,14 @@ function main(): void {
   is("the kept shape prices the file sent at its largest", SALE_FEES_KEPT_SHAPE.outBytes, SALE_FEES_FILE_MAX_BYTES);
   is("the route refuses a larger file before sending it", route.indexOf("Buffer.byteLength(csv, \"utf8\") + 4 > SALE_FEES_FILE_MAX_BYTES") > route.indexOf("saleFeesCsv(report") && route.indexOf("Buffer.byteLength(csv") < route.indexOf("new Response(`"), true);
   {
-    // Every sale one reading can hold, each at its longest fields, with a note: well inside the ceiling.
+    // Every sale one reading can hold, each at its longest fields and with when it was read: well inside the ceiling.
     const created = Math.floor(Date.UTC(2026, 10, 11) / 1000);
     const worst = Array.from({ length: SALE_FEES_PAGES * SALE_FEES_PAGE_SIZE }, (_, i) => ({
       id: `txn_${"9".repeat(24)}${i}`, object: "balance_transaction", amount: 99_999_999, currency: "usd", fee: 9_999_999,
       fee_details: [{ amount: 9_999_999, currency: "usd", type: "stripe_fee" }], net: 90_000_000, type: "charge", reporting_category: "charge",
       created: created - i, source: { id: `ch_${"9".repeat(24)}${i}`, charge: null },
     }));
-    const csv = saleFeesCsv(saleFees(worst, { complete: true }), "UTC", readWords({ at: AT, stale: true, failed: true }));
+    const csv = saleFeesCsv(saleFees(worst, { complete: true }), "UTC", AT);
     is("the largest file one reading can make is under the ceiling", csv === null ? "no file" : Buffer.byteLength(csv, "utf8") + 4 < SALE_FEES_FILE_MAX_BYTES ? "under" : Buffer.byteLength(csv, "utf8"), "under");
   }
 

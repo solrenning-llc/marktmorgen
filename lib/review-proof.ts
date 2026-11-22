@@ -40,10 +40,11 @@ import { isSettled } from "@/lib/instant-pay";
 import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundRowKnown, refundedInFull, rowGivesBack } from "@/lib/refunds";
 import { ordersGrant } from "@/lib/buyer-orders";
 import { DOWNLOAD_WINDOW_SECONDS } from "@/lib/store-checkout";
-import { REVIEW_STORES_KEY, ReviewStoreGoneError, markRefunded } from "@/lib/reviews";
+import { PaymentsSpentError, REVIEW_STORES_KEY, ReviewStoreGoneError, markRefunded } from "@/lib/reviews";
 import { storeLiveFence } from "@/lib/store-live-cache";
-import { type FencedCommand, writeIfStoreLive } from "@/lib/live-fence";
+import { type FencedCommand, countIfStoreLive, writeIfStoreLive } from "@/lib/live-fence";
 import { refreshStoreQuotes } from "@/lib/store-quotes";
+import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import type { Tier } from "@/lib/plan";
 import type { Listing, Store } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
@@ -347,6 +348,13 @@ const REFUND_LOOKBACK_SECONDS = 30 * 86_400;
  * healthy pass over several runs is never held. A store whose plan reads in no known way is held to the smallest.
  */
 export const REVIEW_REFUND_ROWS_PER_MONTH: Readonly<Record<Tier, number>> = { creator: 1_000, pro: 2_000, scale: 5_000 };
+/**
+ * Payments whose reviews a store's passes may mark in a calendar month, by its plan: the plan's orders
+ * (ORDERS_INCLUDED), which is what the line prices at a mark's full cost (10th triple audit on #5100: the rows'
+ * ceiling alone let up to a thousand older payments be marked at full cost in one month). Counted with the same exact
+ * INCRBY before markRefunded; past it the row stays unhandled, the place keeps and the pass stops until next month.
+ */
+export const REVIEW_REFUND_PAYMENTS_PER_MONTH: Readonly<Record<Tier, number>> = ORDERS_INCLUDED;
 /** Pages of refunds (100 each) one pass reads from the creator's account, at the most. */
 export const REVIEW_REFUND_PAGES = 3;
 const REFUND_PAGES = REVIEW_REFUND_PAGES;
@@ -354,26 +362,46 @@ const anchorKey = (statsId: string) => `nl:rev:refunds:since:${statsId}`;
 /**
  * The refund rows handled and the payments marked, a sorted set scored by the row's time: trimmed each run below the
  * window read (ZREMRANGEBYSCORE), so it holds at most the window's rows and their payments, never the store's whole
- * history (Claude 2 lpgvy's MEDIUM 2 on #5100: a set whose expiry every write renewed had no bound).
+ * history (Claude 2 lpgvy's MEDIUM 2 on #5100: a set whose expiry every write renewed had no bound). Under a name of
+ * its own: nl:rev:refunds:seen: was a plain set until 22 November 2026, and a sorted-set command against it answers
+ * WRONGTYPE on a real Redis (lpgvy's MEDIUM on #5100); nothing reads or writes that name any more, and its last keys
+ * expire sixty-one days after their last write (tests/store-data-registry.ts keeps its family until then).
  */
-const seenKey = (statsId: string) => `nl:rev:refunds:seen:${statsId}`;
+const seenKey = (statsId: string) => `nl:rev:refunds:seenat:${statsId}`;
+/**
+ * The set the pass kept its handled rows in until 22 November 2026: written by no code since, read by none; a
+ * closing store still deletes its keys (lib/data-families.ts), and the rest expire. Named here so the data registry
+ * keeps the family until the last key is gone (tests/store-data-registry.ts).
+ */
+export const SEEN_SET_UNTIL_20261122 = "nl:rev:refunds:seen:";
 /** The rows handled in a calendar month (REVIEW_REFUND_ROWS_PER_MONTH), kept forty days. */
 const rowsKey = (statsId: string, month: string) => `nl:rev:refunds:rows:${statsId}:${month}`;
+/** The payments marked in a calendar month (REVIEW_REFUND_PAYMENTS_PER_MONTH), kept forty days. */
+const marksKey = (statsId: string, month: string) => `nl:rev:refunds:marks:${statsId}:${month}`;
 const monthOf = () => new Date(Date.now()).toISOString().slice(0, 7);
-/** The store's rows of the month by its plan; the smallest for a plan read in no known way. */
-function rowsCeiling(store: Store): number {
+/** The store's figure of the month by its plan; the smallest for a plan read in no known way. */
+function ofPlan(store: Store, figures: Readonly<Record<Tier, number>>): number {
   const tier = store.tier as unknown;
-  return tier === "pro" || tier === "scale" ? REVIEW_REFUND_ROWS_PER_MONTH[tier] : REVIEW_REFUND_ROWS_PER_MONTH.creator;
+  return tier === "pro" || tier === "scale" ? figures[tier] : figures.creator;
 }
 /**
- * Adds `n` rows to the month's count, kept forty days, each reply read exactly: the count after it. Anything else is
- * unknown (UnknownReplyError): the page is not handled this run, and its place keeps.
+ * Adds `n` to a count of the month, kept forty days, each reply read exactly: the count after it. Anything else is
+ * unknown (UnknownReplyError): what it guarded is not handled this run, and the place keeps. The key is one, computed
+ * once, so the count and its expiry never fall on two months at the month's turn (10th audit on #5100, LEVE 6).
  */
-async function countRows(statsId: string, n: number): Promise<number> {
-  const replies = repliesFor(await redisPipeline([["INCRBY", rowsKey(statsId, monthOf()), n], ["EXPIRE", rowsKey(statsId, monthOf()), 40 * 86_400]]), 2);
+async function countUp(key: string, n: number): Promise<number> {
+  const replies = repliesFor(await redisPipeline([["INCRBY", key, n], ["EXPIRE", key, 40 * 86_400]]), 2);
   const count = replies ? countOf(replies[0]) : null;
-  if (count === null || countOf(replies?.[1]) !== 1) throw new UnknownReplyError("the refund rows handled this month");
+  if (count === null || countOf(replies?.[1]) !== 1) throw new UnknownReplyError("a count of the month");
   return count;
+}
+/**
+ * Gives `n` back to a count of the month: what was taken for rows or payments that were not handled after all (a
+ * busy review, the run's time, the ceiling), so a retry never spends the month's figure twice (10th audit on #5100,
+ * MÉDIO 3). A reply in another shape only leaves the count a little high.
+ */
+async function giveBack(key: string, n: number): Promise<void> {
+  if (n > 0) await redisPipeline([["DECRBY", key, n]]);
 }
 /**
  * How often a store's pass runs, at the most: its turn is taken with one SET NX EX held this long (takeReviewPass), as
@@ -450,6 +478,20 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
     if (written === "unknown") throw new UnknownReplyError("the refund pass's keys, written while the store is live");
     return written === "kept";
   };
+  /**
+   * Adds `n` to a count of the month through the fence (COUNT_IF_STORE_LIVE: INCRBY and EXPIRE forty days in one step
+   * with the fence's reads): the count after it, or "gone" for a store erasing or gone (nothing written); an answer in
+   * another shape throws (rule 24), so nothing it guarded is handled this run.
+   */
+  const countWhileLive = async (key: string, n: number): Promise<number | "gone"> => {
+    const answer = await countIfStoreLive(fence, key, n, 40 * 86_400);
+    if (answer === "unknown") throw new UnknownReplyError("a count of the month");
+    return answer;
+  };
+  /** Gives `n` back to a count of the month, through the fence (a store gone gets nothing written). */
+  const giveBackWhileLive = async (key: string, n: number): Promise<void> => {
+    if (n > 0) await writeWhileLive([["DECRBY", key, n]]);
+  };
   const now = Math.floor(Date.now() / 1000);
   const [anchorRaw] = await redisPipeline([["GET", anchorKey(statsId)]]);
   const anchor = Number(anchorRaw) > 0 ? Number(anchorRaw) : now - REFUND_LOOKBACK_SECONDS;
@@ -517,12 +559,20 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       const unseen = full.filter((_, i) => !seen[i]);
       // The month's rows (REVIEW_REFUND_ROWS_PER_MONTH), taken for the page's rows not handled yet before any is:
       // past the ceiling only what was left of it is handled, oldest first, the place keeps (unsure) and the pass
-      // ends here; the rest waits for next month. Nothing is skipped.
+      // ends here; the rest waits for next month. Nothing is skipped. What is taken and not handled after all is
+      // given back when the page ends, however it ends.
+      const month = monthOf();
       let allowed = unseen.length;
       let spent = false;
       if (unseen.length > 0) {
-        const ceiling = rowsCeiling(store);
-        const after = await countRows(statsId, unseen.length);
+        const ceiling = ofPlan(store, REVIEW_REFUND_ROWS_PER_MONTH);
+        // Counted through the store's fence (lib/live-fence.ts COUNT_IF_STORE_LIVE): a store erasing meanwhile gets
+        // no count of the month written back (10th audit on #5092, LEVE 5), and the pass stops here.
+        const after = await countWhileLive(rowsKey(statsId, month), unseen.length);
+        if (after === "gone") {
+          gone = true;
+          break;
+        }
         if (after > ceiling) {
           allowed = Math.max(0, ceiling - (after - unseen.length));
           spent = true;
@@ -533,33 +583,69 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       // reads newest first) up to what was left.
       const kept = allowed >= unseen.length ? unseen : allowed > 0 ? unseen.slice(unseen.length - allowed) : [];
       const handled = new Set(kept.map((refund) => refund.id));
-      for (const [i, refund] of full.entries()) {
-        if (seen[i]) {
-          newest = Math.max(newest, refund.created);
-          continue;
-        }
-        if (!handled.has(refund.id)) continue;
-        const payment = INTENT_ID.test(refund.pi) && !paymentSeen.has(refund.pi);
-        if (payment) {
-          try {
-            marked += await markRefunded(statsId, refund.pi, fence);
-          } catch (error) {
-            if (!(error instanceof ReviewStoreGoneError)) throw error;
+      let done = 0;
+      try {
+        for (const [i, refund] of full.entries()) {
+          if (seen[i]) {
+            newest = Math.max(newest, refund.created);
+            continue;
+          }
+          if (!handled.has(refund.id)) continue;
+          const payment = INTENT_ID.test(refund.pi) && !paymentSeen.has(refund.pi);
+          if (payment) {
+            // One of the month's payments (REVIEW_REFUND_PAYMENTS_PER_MONTH), taken inside the mark once the payment
+            // is known to have reviews (a payment with none is a row, not a payment): past the ceiling the row stays
+            // unhandled (its take given back), the place keeps and the pass ends here; a mark that fails after the
+            // take (a busy review) gives it back too. Through the fence: a store gone meanwhile is not counted.
+            const payments = ofPlan(store, REVIEW_REFUND_PAYMENTS_PER_MONTH);
+            let taken = false;
+            const take = async (): Promise<"ok" | "spent"> => {
+              const count = await countWhileLive(marksKey(statsId, month), 1);
+              if (count === "gone") throw new ReviewStoreGoneError();
+              if (count > payments) {
+                await giveBackWhileLive(marksKey(statsId, month), 1);
+                return "spent";
+              }
+              taken = true;
+              return "ok";
+            };
+            try {
+              marked += await markRefunded(statsId, refund.pi, fence, take);
+            } catch (error) {
+              if (error instanceof PaymentsSpentError) {
+                spent = true;
+                console.error(`reviews' refund pass: a store's payments of the month are spent (${payments}); the rest waits for next month`, store.handle);
+                break;
+              }
+              if (error instanceof ReviewStoreGoneError) {
+                gone = true;
+                break;
+              }
+              if (taken) await giveBackWhileLive(marksKey(statsId, month), 1);
+              throw error;
+            }
+            paymentSeen.add(refund.pi);
+          }
+          // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
+          // Written only while the store is live: gone meanwhile, the pass stops here.
+          if (!(await writeWhileLive([
+            ["ZADD", seenKey(statsId), refund.created, refund.id, ...(payment ? [refund.created, refund.pi] : [])],
+            ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
+          ]))) {
             gone = true;
             break;
           }
-          paymentSeen.add(refund.pi);
+          done += 1;
+          newest = Math.max(newest, refund.created);
         }
-        // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
-        // Written only while the store is live: gone meanwhile, the pass stops here.
-        if (!(await writeWhileLive([
-          ["ZADD", seenKey(statsId), refund.created, refund.id, ...(payment ? [refund.created, refund.pi] : [])],
-          ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
-        ]))) {
-          gone = true;
-          break;
-        }
-        newest = Math.max(newest, refund.created);
+      } finally {
+        // What the page took and did not handle goes back, through the fence too (nothing for a store gone).
+        if (!gone) await giveBackWhileLive(rowsKey(statsId, month), unseen.length - done);
+      }
+      if (gone) break;
+      if (spent) {
+        unsure = true;
+        break;
       }
       if (gone) break;
       if (spent) {

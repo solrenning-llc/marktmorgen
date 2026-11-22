@@ -38,6 +38,25 @@ end
 redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
 return 1`;
 
+// The same identity rule, for a count of the month (lib/review-proof.ts, the rows handled and the payments marked):
+// INCRBY by ARGV[2] and EXPIRE ARGV[3], only while the store is live, the count after it answered. 0: gone or erasing,
+// nothing written (a count is never 0 after an INCRBY of at least one on a count never below zero); -1: the owner's
+// record could not be read (10th triple audit on #5092, LEVE 5).
+export const COUNT_IF_STORE_LIVE = `-- marktmorgen:store-count-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[4] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[5] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[4] then return 0 end
+end
+local count = redis.call("INCRBY", KEYS[3], tonumber(ARGV[2]))
+redis.call("EXPIRE", KEYS[3], ARGV[3])
+return count`;
+
 /**
  * Keeps `value` under `key` for `seconds` while the fenced store is live: "kept"; "gone" when its erasure has begun or
  * its record is gone, and then nothing is written; "unknown" for any other answer (nothing known to be written).
@@ -100,4 +119,20 @@ export async function writeIfStoreLive(fence: StoreLiveFence, commands: FencedCo
   );
   const answer = replies?.[0];
   return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
+}
+
+/**
+ * Adds `n` (at least one) to the count under `key`, kept `seconds`, while the fenced store is live: the count after it;
+ * "gone" when its erasure has begun or its record is gone, and then nothing is written; "unknown" for any other
+ * answer (nothing known to be written).
+ */
+export async function countIfStoreLive(fence: StoreLiveFence, key: string, n: number, seconds: number): Promise<number | "gone" | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  if (fence.statsId === null) return "unknown";
+  if (!Number.isSafeInteger(n) || n < 1) return "unknown";
+  const replies = repliesFor(await redisPipeline([["EVAL", COUNT_IF_STORE_LIVE, 3, fence.live, fence.erasing, key, fence.field, n, seconds, fence.statsId, fence.ref]]), 1);
+  const answer = replies?.[0];
+  const count = typeof answer === "number" ? answer : typeof answer === "string" && /^-?\d+$/.test(answer) ? Number(answer) : null;
+  if (count === null || !Number.isSafeInteger(count)) return "unknown";
+  return count === 0 ? "gone" : count < 0 ? "unknown" : count;
 }

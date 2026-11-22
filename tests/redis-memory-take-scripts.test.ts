@@ -82,6 +82,15 @@ const CASES: Record<string, Case[]> = {
     { what: "an owner's record of another store", setup: [["SET", "k:live", record("st2")]], keys: ["k:live", "k:erasing", "k:mark"], argv: ["f1", "v", 60, "st1", ""] },
     { what: "an erasing store", setup: [["SET", "k:live", "ref1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:live", "k:erasing", "k:mark"], argv: ["f1", "v", 60, "", "ref1"] },
   ],
+  "store-count-live:v1": [
+    { what: "an id key holding its ref: counted, and counted again", setup: [["SET", "k:live", "ref1"]], keys: ["k:live", "k:erasing", "k:n"], argv: ["f1", 3, 3600, "", "ref1"] },
+    { what: "an id key holding another ref", setup: [["SET", "k:live", "ref2"]], keys: ["k:live", "k:erasing", "k:n"], argv: ["f1", 1, 3600, "", "ref1"] },
+    { what: "the erasing mark on", setup: [["SET", "k:live", "ref1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:live", "k:erasing", "k:n"], argv: ["f1", 1, 3600, "", "ref1"] },
+    { what: "an owner's record carrying its statsId", setup: [["SET", "k:live", record("st1")], ["SET", "k:n", "4"]], keys: ["k:live", "k:erasing", "k:n"], argv: ["f1", 2, 3600, "st1", ""] },
+    { what: "an owner's record of another store", setup: [["SET", "k:live", record("st2")]], keys: ["k:live", "k:erasing", "k:n"], argv: ["f1", 1, 3600, "st1", ""] },
+    { what: "an owner's record that does not parse", setup: [["SET", "k:live", "{not json"]], keys: ["k:live", "k:erasing", "k:n"], argv: ["f1", 1, 3600, "st1", ""] },
+    { what: "no record", setup: [], keys: ["k:live", "k:erasing", "k:n"], argv: ["f1", 1, 3600, "st1", ""] },
+  ],
   "store-write-live:v1": [
     { what: "an id key holding its ref, a hash field and a sorted set written", setup: [["SET", "k:live", "ref1"]], keys: ["k:live", "k:erasing", "k:h", "k:z"], argv: ["f1", "", "ref1", JSON.stringify([["HSET", { k: 3 }, "id1", "{\"a\":1}"], ["ZADD", { k: 4 }, 5, "m1"]])] },
     { what: "an id key holding another ref", setup: [["SET", "k:live", "ref2"]], keys: ["k:live", "k:erasing", "k:h"], argv: ["f1", "", "ref1", JSON.stringify([["HSET", { k: 3 }, "id1", "v"]])] },

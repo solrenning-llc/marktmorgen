@@ -111,6 +111,29 @@ export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
     }
     return run(["SET", key, value, "NX", "EX", seconds]) === "OK" ? 1 : 0;
   },
+  // lib/live-fence.ts COUNT_IF_STORE_LIVE: a count of the month added to (INCRBY argv[2], EXPIRE argv[3]) only while the
+  // store is its own and not erasing, by the same identity rule; the count after it (10th audit on #5092, LEVE 5).
+  "store-count-live:v1": (run, keys, [field, n, seconds, statsId, ref]) => {
+    const [live, erasing, count] = keys;
+    if (run(["HGET", erasing, field]) !== null) return 0;
+    if (statsId === "") {
+      if (run(["GET", live]) !== ref) return 0;
+    } else {
+      const raw = run(["GET", live]);
+      if (raw === null) return 0;
+      let record: unknown;
+      try {
+        record = JSON.parse(String(raw));
+      } catch {
+        return -1;
+      }
+      if (!record || typeof record !== "object") return -1;
+      if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+    }
+    const after = run(["INCRBY", count, Number(n)]);
+    run(["EXPIRE", count, seconds]);
+    return Number(after);
+  },
   // lib/live-fence.ts WRITE_IF_STORE_LIVE: several writes made together only while the store is its own and not
   // erasing, by the same identity rule; argv[4] lists them as JSON, {"k": n} standing for KEYS[n] (Codex L-20261120-0838).
   "store-write-live:v1": (run, keys, [field, statsId, ref, commands]) => {

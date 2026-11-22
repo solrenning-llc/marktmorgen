@@ -116,7 +116,7 @@ test("without a fence (the creator's own actions), the writes are as before", as
 
 // Claude 1 c1-revisoes-f's MÉDIO on #5092: the whole pass, with the store closed in the middle. The sweep used to take
 // the refund as seen (SADD + EXPIRE), confirm the lost disputes' place and set its anchor after the mark came back
-// "gone", so nl:rev:refunds:seen:<statsId> (with the refund's id) and nl:rev:refunds:since:<statsId> came back after
+// "gone", so nl:rev:refunds:seenat:<statsId> (with the refund's id) and nl:rev:refunds:since:<statsId> came back after
 // the closing walk passed them. Now a gone store stops the pass before any of those writes.
 process.env.STRIPE_SECRET_KEY = "sk_test_review_refund_row_sweep";
 const refundsAt: { id: string; object: "refund"; created: number; status: string; amount: number; payment_intent: string; charge: Record<string, unknown> }[] = [];
@@ -145,7 +145,7 @@ test("the whole pass, with the store closed after its read: the read refunds and
   await setStripeAccount(store.email, "acct_1RowSweep1", true);
   const swept = (await storeForEmail(store.email))!;
   refundsAt.push(refundOf(pi, 1));
-  const seen = `nl:rev:refunds:seen:${statsId}`;
+  const seen = `nl:rev:refunds:seenat:${statsId}`;
   const since = `nl:rev:refunds:since:${statsId}`;
   const closed = await racing(
     async () => {
@@ -167,7 +167,21 @@ test("control: a live store's pass takes the refund as seen and keeps its anchor
   refundsAt.push(refundOf(pi, 2));
   const live = await racing(async () => undefined, () => markRefundedReviews(swept, Date.now() + 60_000));
   assert.deepEqual([live.marked, live.plainWrites, live.answers], [1, 0, [1, 1, 1, 1]], "the review, the product's numbers, the read refund and the anchor, each through the fence");
-  assert.deepEqual(await exists([`nl:rev:refunds:seen:${statsId}`, `nl:rev:refunds:since:${statsId}`]), [1, 1], "the read refund and the anchor are kept");
+  assert.deepEqual(await exists([`nl:rev:refunds:seenat:${statsId}`, `nl:rev:refunds:since:${statsId}`]), [1, 1], "the read refund and the anchor are kept");
+});
+
+test("a store erasing before the page's rows are counted gets no count of the month written, and the pass stops (10th audit, LEVE 5)", async () => {
+  const { store, statsId, pi, field } = await shop();
+  await setStripeAccount(store.email, "acct_1RowSweep4", true);
+  const swept = (await storeForEmail(store.email))!;
+  refundsAt.length = 0;
+  refundsAt.push(refundOf(pi, 4));
+  await original([["HSET", ERASING_KEY, field, String(NOW)]]);
+  const month = new Date().toISOString().slice(0, 7);
+  const erasing = await racing(async () => undefined, () => markRefundedReviews(swept, Date.now() + 60_000));
+  await original([["HDEL", ERASING_KEY, field]]);
+  assert.deepEqual([erasing.marked, erasing.plainWrites], [0, 0], "nothing marked, no plain write");
+  assert.deepEqual(await exists([`nl:rev:refunds:rows:${statsId}:${month}`, `nl:rev:refunds:marks:${statsId}:${month}`, `nl:rev:refunds:seenat:${statsId}`]), [0, 0, 0], "no count of the month, no payment taken, no seen row: the count went through the fence and answered gone");
 });
 
 test("the store closed during the Stripe read, before any review was read: the read refunds and the anchor stay gone (Claude 1 E on #5092)", async () => {
@@ -176,7 +190,7 @@ test("the store closed during the Stripe read, before any review was read: the r
   const swept = (await storeForEmail(store.email))!;
   refundsAt.length = 0;
   refundsAt.push(refundOf(pi, 3));
-  const seen = `nl:rev:refunds:seen:${statsId}`;
+  const seen = `nl:rev:refunds:seenat:${statsId}`;
   const since = `nl:rev:refunds:since:${statsId}`;
   duringRefunds = async () => {
     const done = await closeStoreRecord(swept, [...keys, seen, since]);

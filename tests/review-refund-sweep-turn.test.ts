@@ -6,7 +6,6 @@
  * Redis stand-in's pipeline watched.
  */
 import { sweepCheckouts } from "@/lib/checkout-sweep";
-import { readFileSync } from "node:fs";
 import { saveReview } from "@/lib/reviews";
 import { REVIEW_REFUND_PASS_EVERY_SECONDS } from "@/lib/review-proof";
 import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
@@ -78,14 +77,34 @@ async function main(): Promise<void> {
   const again = await sweepCheckouts(Date.now() + 20_000);
   is("the run after: the store swept, the turn held, no take and no read", [again.stores, turnTakes(statsId), refundReads.length], [1, 0, 0]);
 
-  part("The pass's turn is never taken past the run's time (9th audit, point 4)");
+  part("The pass's turn is never taken past the run's time (9th audit, point 4; a behaviour, 10th audit LEVE 4)");
   await healthy([["DEL", turn]]);
   sent.length = 0;
   refundReads.length = 0;
-  // The run's time already over when the store is reached: the sweep's own loop stops before the store, so the
-  // guard is read in the source, as the certificates' pass has it.
-  const sweep = readFileSync("lib/checkout-sweep.ts", "utf8");
-  is("takeReviewPass is reached only while Date.now() < deadline", /Date\.now\(\) < deadline && \(await takeReviewPass\(store\)\)/.test(sweep), true);
+  // The run's time runs out while the store's own sweep is under way (after the sweep's loop looked at the clock,
+  // when it asks whether the store has a review, and before the review pass): the clock jumps ten minutes there.
+  const realNow = Date.now;
+  let skew = 0;
+  Date.now = () => realNow() + skew;
+  const deadline = realNow() + 20_000;
+  let jumped = false;
+  redis.pipeline = (async (batch: Batch) => {
+    if (!jumped && batch.some((c) => c[0] === "SISMEMBER" && c[1] === "nl:rev:stores")) {
+      jumped = true;
+      skew = 600_000;
+    }
+    sent.push(...batch);
+    return healthy(batch);
+  }) as typeof redis.pipeline;
+  try {
+    const late = await sweepCheckouts(deadline);
+    is("the store was reached (its own sweep ran)", late.stores, 1);
+    is("the clock ran out during it", jumped, true);
+    is("and the turn was not taken: no SET NX", turnTakes(statsId), 0);
+    is("and no read of Stripe's refunds", refundReads.length, 0);
+  } finally {
+    Date.now = realNow;
+  }
   done();
 }
 

@@ -3565,19 +3565,37 @@ export class MemoryRedis {
           this.run(["HINCRBY", keys[0], "#sold", sold]);
           return sold;
         }
-        if (key.startsWith("-- marktmorgen:stock-bind:v1\n")) {
+        // v2 (Codex L-20261120-0655): fenced on the store being live as lib/live-fence.ts's SET_IF_STORE_LIVE is, the
+        // checkout's hold written and the provisional one let go in the same step. Its calls are billed beside the EVAL.
+        if (key.startsWith("-- marktmorgen:stock-bind:v2\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count), argv = args.slice(1 + count);
           const n = Number(argv[0]);
-          if (!Number.isInteger(n) || n < 1 || n > 8 || count !== n || argv.length !== 3) return -1;
-          for (const k of keys) this.live(k);
-          for (const k of keys) {
-            const hold = this.data.get(k);
-            if (hold !== undefined && !(hold instanceof Map)) throw new Error("WRONGTYPE");
-            if (!(hold instanceof Map) || !hold.has(argv[1]) || !hold.has(argv[2])) return 0;
+          if (!Number.isInteger(n) || n < 1 || n > 8 || count !== n + 2 || argv.length !== 7) return -1;
+          const [, pending, checkout, hold, field, statsId, ref] = argv;
+          const live = keys[n], erasing = keys[n + 1];
+          this.scriptCalls += 1;
+          if (this.run(["HGET", erasing, field]) !== null) return -2;
+          this.scriptCalls += 1;
+          const held = this.run(["GET", live]);
+          if (statsId === "") {
+            if (held !== ref) return -2;
+          } else {
+            if (held === null) return -2;
+            if (typeof held !== "string") throw new Error("WRONGTYPE stock-bind: the store's record");
+            let record: unknown;
+            try { record = JSON.parse(held); } catch { return -1; }
+            // As the Lua: cjson decodes an array to a table too, whose statsId is nil, so it answers -2, not -1 (#5093 review).
+            if (!record || typeof record !== "object") return -1;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return -2;
           }
-          for (const k of keys) this.run(["HDEL", k, argv[1]]);
-          return 1;
+          let all = 1;
+          for (const k of keys.slice(0, n)) {
+            this.scriptCalls += 2;
+            this.run(["HSET", k, checkout, hold]);
+            if (this.run(["HDEL", k, pending]) !== 1) all = 0;
+          }
+          return all;
         }
         // lib/discount-schedule.ts: keep the decision and queue the warning before removing the due entry.
         if (key.startsWith("-- marktmorgen:dsched-fail-and-tell:v2\n") && args[0] === "3" && args.length === 10) {

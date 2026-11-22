@@ -480,6 +480,18 @@ Como se aplica:
 - **Item 2:** substitui, nesse ponto, o "Depende do dono" do #5024. A taxa de processamento sobre a parte do IVA nunca entra em `application_fee_amount`, como o #5024 já faz, e o pior caso do Marktmorgen continua contando esse custo (`worstCaseCents`) até (a) a (d) estarem construídos, testados e publicados.
 - **Item 3:** complementa o item (i) desta seção, que já guarda o endereço de cobrança por 10 anos nas vendas da UE; o prazo do Reino Unido e o dos outros países seguem este item.
 
+(k) **Quem paga os custos de receber o IVA, e #5045 e #5048 na exceção do Codex ausente** (OWNER-20261122-0022-CODEX-LIST-VAT-COSTS, 22/11/2026, 00h22 Fortaleza; texto preparado pelo Claude 4, sessão 01S9eVA5BC, e encaminhado pelo Claude 5 iZUmuf ao coordenador; item 793 [IV3]). O dono decidiu a divergência entre o item (b) desta seção e a frase "O Marktmorgen recolhe o IVA sem cobrar nada a mais do criador", do item 2 de OWNER-20261121-1529 (item (j)). Texto do dono, sem alteração, nos pontos decididos:
+
+> Opção A: vale IV (b) neste ponto. O criador paga os custos reais de receber o IVA, sem lucro para o Marktmorgen, e também a taxa da Stripe sobre o IVA (item 2). "Sem cobrar nada a mais" quer dizer nenhuma sobretaxa, margem ou valor além desses custos reais. É o mesmo raciocínio do item 2: absorver seria pagar, a cada venda, um custo sem receita, o que a regra de margem proíbe.
+> Decisão do dono: opção A
+>
+> Decisão do dono: confirmo a inclusão do #5045 (tabela de alíquotas do IVA britânico por produto, gov.uk) e do #5048 (linhas do IVA e da taxa da Stripe sobre o IVA no extrato do criador) na exceção OWNER-20261121-1437-CODEX-ABSENT-MONEY-REVIEW.
+
+Como se aplica:
+- **Custos de receber o IVA:** vale o item (b): `application_fee_amount` = parte do plano + imposto + custos reais de receber esse imposto (câmbio, variação do câmbio até o pagamento da declaração, remessa e reservas de reembolso e de contestação sobre o IVA), como o main já faz em `lib/eu-vat-collection-cost.ts` (#5024). A taxa da Stripe sobre a parte do IVA fica fora da taxa da plataforma, porque a Stripe já a tira da conta do criador (item (j), 2). Nenhuma sobretaxa, margem ou valor além desses custos reais. A frase do item 2 de OWNER-20261121-1529 fica lida assim, e a divergência está encerrada.
+- **Termos e página de preços e taxas:** o texto em inglês americano simples, com exemplo em números e teste que falha antes, é a unidade 2, item (a), do 793 [IV3], do Claude 4 (sessão 01S9eVA5BC).
+- **#5045 e #5048:** entram em `OWNER_NAMED_PRS` e ganham uma linha "pendente" em `CODEX_ABSENT_AUDIT` (`lib/codex-absent-audit.ts`), com este identificador em `OWNER_CONFIRMED_LATER`, antes do pedido de fila de cada um (item 2 de OWNER-20261121-1944). Quem pede a fila confere na hora as 9 verificações no head exato; quem enfileira é de fora da família Claude 4 e de quem revisou aquele head.
+
 Continuam TX, MR, LC, SR5, 495 [SR6] e VR. Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo além do que diz (f).
 
 ## TX — Política tributária vigente (dono,27/10/2026 12h34 Fortaleza)

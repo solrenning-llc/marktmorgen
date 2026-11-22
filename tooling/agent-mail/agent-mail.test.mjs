@@ -830,6 +830,11 @@ console.log("a session's own box: an ack under the family name does not hide it 
   r = run(["send", "--from", "Claude 2 X", "--to", "Claude 6", "--subject", "for the family", "--text", "familia"], as("c2"));
   const idF = /enviada: (\S+)/.exec(r.out)?.[1];
   run(["ack", "--as", "Claude 6", idF], irma);
+  r = run(["send", "--from", "Claude 2 X", "--to", "Claude 6 UoHAG, Claude 6 z5v4", "--subject", "to two sessions", "--text", "duas"], as("c2"));
+  const idDuas = /enviada: (\S+)/.exec(r.out)?.[1];
+  run(["ack", "--as", "Claude 6 UoHAG", idDuas], as("c6"));
+  is("a message to two sessions of a family, acknowledged by one, still shows to the other (the 7f0a of 22/11/2026)",
+    Boolean(idDuas) && run(["read", "--as", "Claude 6 z5v4"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_018ZjhHhz5v4kPZ3osC8Cr6g" }).out.includes(idDuas), r.out);
   is("a message to the family, acknowledged by the family, does not show to a session (unchanged)", !run(["read", "--as", "Claude 6 UoHAG"], as("c6")).out.includes(idF));
 }
 

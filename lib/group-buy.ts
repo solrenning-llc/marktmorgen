@@ -45,7 +45,7 @@ import { countOrder } from "@/lib/orders";
 import { ADMITTED_FIELD, OPEN_HOURS, admitOrders, settleAdmitted } from "@/lib/order-admission";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { allowanceUsedExact } from "@/lib/store-allowance";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -94,6 +94,11 @@ export type Group = {
   revoked?: number;
   /** The hour its checkout held room for every place in (lib/order-admission.ts), when it was counted there. */
   h?: number;
+  /**
+   * Once paid (or given back before it settled): who bought it, as the SHA-256 of their address in lower case
+   * (buyerField), so the copy of their data finds it in their index (buyerGroupsKey) without Stripe (#5125).
+   */
+  b?: string;
 };
 
 /** The shape of a charge's id, read before a purchase for several hands out places (PAYMENT_ID is below). */
@@ -282,7 +287,39 @@ async function readGroupExactly(id: string): Promise<Group | null> {
 
 /** Writes a purchase down; true only when Redis answered the write in its exact shape ("OK"). */
 async function saveGroup(group: Group, seconds: number): Promise<boolean> {
-  return repliesFor(await redisPipeline([["SET", groupKey(group.id), JSON.stringify(group), "EX", seconds]]), 1)?.[0] === "OK";
+  const index = group.b ? buyerGroupsKey(group.s, group.b) : "";
+  const commands: (string | number)[][] = [
+    ["SET", groupKey(group.id), JSON.stringify(group), "EX", seconds],
+    ...(index ? [["SADD", index, group.id], ["EXPIRE", index, seconds]] : []),
+  ];
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  if (!replies || replies[0] !== "OK") return false;
+  return !index || ((replies[1] === 0 || replies[1] === 1) && replies[2] === 1);
+}
+
+/**
+ * The purchases for several a buyer paid in a store, by the SHA-256 of their address in lower case: a set of purchase
+ * ids, written and given its expiry in the same pipeline as every write of a paid purchase (saveGroup), so it never
+ * runs out before one it leads to. Purchase ids are grp_ and hex, never "<store>:by:", so it is never a purchase's key.
+ */
+export const buyerGroupsKey = (sid: string, field: string) => `nl:grp:${sid}:by:${field}`;
+export const buyerField = (email: string) => createHash("sha256").update(email.trim().toLowerCase()).digest("hex");
+/** A paid purchase's buyer, as kept on it (b): from the checkout that paid for it; none when it names no address. */
+function buyerOf(session: { customer_details?: { email?: unknown } | null }): { b?: string } {
+  const typed = typeof session.customer_details?.email === "string" ? session.customer_details.email.trim() : "";
+  return typed ? { b: buyerField(typed) } : {};
+}
+
+/**
+ * The purchases for several a person paid in a store, for the copy of their data (#5125): their index, read exactly.
+ * A reply that is not a set of purchase ids throws UnknownReplyError, so the copy is not made without them.
+ */
+export async function groupsBoughtBy(sid: string, email: string): Promise<string[]> {
+  if (!isRedisConfigured()) return [];
+  const read = repliesFor(await redisPipeline([["SMEMBERS", buyerGroupsKey(sid, buyerField(email))]]), 1);
+  const ids = read && Array.isArray(read[0]) ? (read[0] as unknown[]) : null;
+  if (!ids || ids.some((id) => typeof id !== "string" || !GROUP_ID.test(id))) throw new UnknownReplyError("a person's purchases for several");
+  return ids as string[];
 }
 
 /** A paid purchase of this store's that still hands out places; null for anything else. */
@@ -428,7 +465,7 @@ export async function settleGroup(input: {
         throw new UnknownReplyError("a purchase for several's payment");
       }
       if (await givenBack(account, payment)) {
-        if (!(await saveGroup({ ...group, session: sessionId, pi, revoked: now() }, GROUP_KEPT_SECONDS))) {
+        if (!(await saveGroup({ ...group, session: sessionId, pi, revoked: now(), ...buyerOf(session) }, GROUP_KEPT_SECONDS))) {
           throw new UnknownReplyError("a revoked purchase for several's record");
         }
         await releaseMark(settling, mark);
@@ -443,7 +480,7 @@ export async function settleGroup(input: {
   const items = bundleFromMeta(session.metadata ?? null, "bundle");
   // The hour its checkout was admitted in, which held room for every place for a day (takePlace).
   const admittedHour = Number(session.metadata?.[ADMITTED_FIELD] ?? "");
-  const paid: Group = { ...group, session: sessionId, pi, paid: now(), items: items.length ? items : null, ...(Number.isSafeInteger(admittedHour) && admittedHour > 0 ? { h: admittedHour } : {}) };
+  const paid: Group = { ...group, session: sessionId, pi, paid: now(), items: items.length ? items : null, ...(Number.isSafeInteger(admittedHour) && admittedHour > 0 ? { h: admittedHour } : {}), ...buyerOf(session) };
   // What a refund looks up (the payment's purchase, and that this store sold one) is written first and the purchase
   // marked paid last, each answered exactly "OK" (sweep A3; CX-123 rules 24 and 30): a write left unknown lets go of
   // the settling mark and throws, so confirmGroup keeps no "sent" mark and the next run does it again, never
@@ -1309,8 +1346,8 @@ export async function revokeRefundedGroups(
       if (group && group.s === sid) {
         if (!group.revoked) {
           // Closed first, so nobody takes a place while the others are taken back.
-          const closed = repliesFor(await redisPipeline([["SET", groupKey(group.id), JSON.stringify({ ...group, revoked: now() }), "EX", GROUP_KEPT_SECONDS]]), 1);
-          if (closed?.[0] !== "OK") return false;
+          // Through saveGroup, so the buyer's index is given its expiry with it (#5125).
+          if (!(await saveGroup({ ...group, revoked: now() }, GROUP_KEPT_SECONDS))) return false;
         }
         // Closed already (a run that stopped halfway): the places still held are taken back now.
         // Every place taken, read exactly: a list in another shape, or one place that does not read, is unknown, and

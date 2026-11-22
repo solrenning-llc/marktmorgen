@@ -8,6 +8,7 @@
  */
 import { importedKey } from "@/lib/imported-purchases";
 import { buyerField, buyerGiftsKey } from "@/lib/gifts";
+import { buyerGroupsKey } from "@/lib/group-buy";
 import { claimHandle, ensureListId, ensureStatsId, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { packagesKey } from "@/lib/call-packages";
 import { paidKey } from "@/lib/closing-holds";
@@ -56,7 +57,9 @@ async function main(): Promise<void> {
   redis.run(["SADD", buyerGiftsKey(statsId, buyerField(PERSON)), GIFT_BOUGHT]);
   redis.run(["SET", `nl:gift:${GIFT_GOT}`, JSON.stringify({ id: GIFT_GOT, s: statsId, p: "prod000002", to: PERSON, from: "Sam", message: "For you", at: 1_790_000_000 })]);
   redis.run(["HSET", importedKey(statsId, PERSON), "prod000002", JSON.stringify({ at: 1_790_000_000, job: `gift:${GIFT_GOT}`, items: null })]);
-  redis.run(["SET", `nl:grp:${GROUP}`, JSON.stringify({ id: GROUP, s: statsId, p: "prod000001", people: 5, at: 1_790_000_000 })]);
+  // A paid purchase for several names its buyer and is in their index (#5125), as lib/group-buy.ts saveGroup writes it.
+  redis.run(["SET", `nl:grp:${GROUP}`, JSON.stringify({ id: GROUP, s: statsId, p: "prod000001", people: 5, at: 1_790_000_000, b: buyerField(PERSON) })]);
+  redis.run(["SADD", buyerGroupsKey(statsId, buyerField(PERSON)), GROUP]);
   redis.run(["SET", `nl:ship:done:${SESSION}`, JSON.stringify({ at: 1_790_000_000, tracking: "https://track.example.com/1" })]);
   redis.run(["SADD", packagesKey(statsId), "cs_test_" + "p".repeat(24), "cs_test_" + "q".repeat(24)]);
   redis.run(["SET", "nl:pkg:cs_test_" + "p".repeat(24), JSON.stringify({ s: statsId, h: store.handle, p: "call000001", e: PERSON, total: 4, at: 1_790_000_000, until: 0, token: PACKAGE_TOKENS[0], holds: [] })]);

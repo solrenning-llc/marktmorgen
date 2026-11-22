@@ -78,7 +78,7 @@ import { preordersOf } from "@/lib/preorders";
 import { toldOf } from "@/lib/closing-buyers";
 import { MAX_PAID_CHECKOUTS, paidCheckoutsOf } from "@/lib/person-copy-stripe";
 import { buyerField, giftsBoughtBy, readGift } from "@/lib/gifts";
-import { isGroupJob, readGroup } from "@/lib/group-buy";
+import { isGroupJob, readGroup, buyerField as groupBuyerField, groupsBoughtBy } from "@/lib/group-buy";
 import { type Bought, packageKeys } from "@/lib/call-packages";
 import { readShipped } from "@/lib/shipments";
 import { callScope, readRecords } from "@/lib/meet-records";
@@ -586,13 +586,14 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return out;
   },
   "lib/group-buy.ts": async (s) => {
-    const bought = (await checkoutsOf(s)).map((c) => c.meta.group).filter((id): id is string => Boolean(id));
+    // The purchases they paid, from their own index (#5125: never through the store's current Stripe account).
+    const bought = await groupsBoughtBy(s.statsId, s.email);
     const taken = (await grantsOf(s)).map((g) => g.job).filter(isGroupJob).map((job) => job.slice(6));
     const out: unknown[] = [];
     // Who took the places they bought are those people's addresses, not theirs: the number is given.
     for (const id of [...new Set(bought)]) {
       const group = await readGroup(id);
-      if (group) out.push({ youBought: true, product: group.p, places: group.people, at: iso(group.at), ...(group.paid ? { paid: iso(group.paid) } : {}) });
+      if (group && group.b === groupBuyerField(s.email)) out.push({ youBought: true, product: group.p, places: group.people, at: iso(group.at), ...(group.paid ? { paid: iso(group.paid) } : {}) });
     }
     for (const id of [...new Set(taken)]) {
       const group = await readGroup(id);

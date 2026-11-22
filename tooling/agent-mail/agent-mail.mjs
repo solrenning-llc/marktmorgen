@@ -384,16 +384,18 @@ export function naoLidas(eu, commit = buscar()) {
   const todasLidas = arquivos(commit, "lidas");
   const lidas = new Set(todasLidas.filter((l) => l.split("/")[1] === me).map(idDe));
   const daFamilia = new Set(todasLidas.filter((l) => familia(l.split("/")[1]) === fam).map(idDe));
-  // Na própria caixa de uma sessão, a confirmação feita pela família (com o nome dela) também vale.
+  // Na própria caixa de uma sessão, só a confirmação da própria sessão a esconde (22/11/2026, 88a1): a feita com o nome da
+  // família, por outra sessão que lê as caixas das sessões, não apaga da sessão ativa o que é só dela; a mensagem continua
+  // aparecendo para ela, marcada como já confirmada com o nome da família, até ela mesma confirmar.
+  const pelaFamilia = new Set(todasLidas.filter((l) => l.split("/")[1] === fam).map(idDe));
   const proprias = [...arquivos(commit, `caixas/${me}`), ...arquivos(commit, "caixas/todos")]
-    .filter((c) => !lidas.has(idDe(c)) && !(me !== fam && c.startsWith(`caixas/${me}/`) && daFamilia.has(idDe(c)))
-      && !(c.startsWith("caixas/todos/") && remetenteDe(idDe(c)) === me));
+    .filter((c) => !lidas.has(idDe(c)) && !(c.startsWith("caixas/todos/") && remetenteDe(idDe(c)) === me));
   const familiares = me === fam
     ? arquivos(commit, "caixas").filter((c) => { const d = c.split("/")[1]; return d !== fam && d !== "todos" && familia(d) === fam && !daFamilia.has(idDe(c)); })
     : arquivos(commit, `caixas/${fam}`).filter((c) => !daFamilia.has(idDe(c)));
   return [...proprias, ...familiares]
     .filter((c) => c.endsWith(".md"))
-    .map((c) => ({ id: idDe(c), caminho: c, texto: conteudo(commit, c) }))
+    .map((c) => ({ id: idDe(c), caminho: c, texto: conteudo(commit, c), pelaFamilia: me !== fam && c.startsWith(`caixas/${me}/`) && pelaFamilia.has(idDe(c)) }))
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
@@ -644,7 +646,23 @@ export function ramoDoHead(sha, pr) {
     const ramos = git(["ls-remote", REPO_PRS, "refs/heads/*"]).split("\n").filter(Boolean).map((l) => l.split("\t"))
       .filter(([h, ref]) => h.startsWith(String(sha)) && !ref.startsWith("refs/heads/gh-readonly-queue/")).map(([, ref]) => ref.slice("refs/heads/".length))
       .filter((ramo) => ramoDoPr(pr, ramo));
-    return ramos.length === 1 ? ramos[0] : null;
+    if (ramos.length === 1) return ramos[0];
+    // Dois ou mais ramos na mesma ponta (um ramo auxiliar usado para preparar uma junção por avanço simples, caso do
+    // #5080): vale o ramo que o próprio GitHub diz ser o do PR (head.ref), se for um deles. Sem o GitHub, não adivinha
+    // (LEVE do Claude 6 z5v4, 22/11/2026): um ramo auxiliar parado num commit velho leria o head errado depois.
+    if (ramos.length > 1) { const doPr = ramoNoGitHub(pr); return doPr && ramos.includes(doPr) ? doPr : null; }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** O ramo do PR segundo o GitHub (head.ref), ou null se não deu para ler. */
+export function ramoNoGitHub(pr) {
+  if (testeLigado("CORREIO_SEM_GH") || !/^\d+$/.test(String(pr ?? ""))) return null;
+  try {
+    const ref = execFileSync("gh", ["api", `repos/solrenning-llc/marktmorgen/pulls/${pr}`, "--jq", ".head.ref"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 }).trim();
+    return /^[A-Za-z0-9._\/-]+$/.test(ref) ? ref : null;
   } catch {
     return null;
   }
@@ -1308,7 +1326,12 @@ function avisarVersao() {
   if (testeLigado("CORREIO_SEM_VERSAO")) return true;
   const publicado = hashPublicado();
   if (!publicado) {
-    console.error("ATENÇÃO: não consegui ler o SHA-256 da versão revisada (main do Marktmorgen); a versão desta cópia NÃO FOI CONFERIDA.");
+    // A busca do main roda no clone onde a ferramenta está (README, "Instalar e vigiar"): fora de um clone git, diz isso.
+    let noClone = true;
+    try { git(["rev-parse", "--git-dir"]); } catch { noClone = false; }
+    console.error(noClone
+      ? "ATENÇÃO: não consegui ler o SHA-256 da versão revisada (main do Marktmorgen); a versão desta cópia NÃO FOI CONFERIDA."
+      : "ATENÇÃO: esta pasta não é um clone git, e a conferência da versão roda dentro de um; rode a ferramenta de dentro de qualquer clone git (o do Marktmorgen serve). A versão desta cópia NÃO FOI CONFERIDA.");
     return false;
   }
   if (publicado !== hashProprio()) {
@@ -1736,6 +1759,7 @@ function mostrar(lista, agora = new Date()) {
     const quando = dataDe(m.id);
     const idade = quando ? Math.floor((agora - quando) / 60000) : null;
     console.log(`===== ${m.id}${idade !== null && idade >= ATRASO_MIN ? `  (ATRASADA: ${idade} min sem confirmar)` : ""}`);
+    if (m.pelaFamilia) console.log("(já confirmada com o nome da família por outra sessão; é para você: leia e confirme com o seu nome)");
     const s = sessaoDe(m.texto), de = campo(m.texto, "De");
     if (!s?.identificada) console.log("ATENÇÃO: escrita não identificada (fora da nuvem do Claude Code, ou gravada sem a ferramenta): confira com o remetente antes de uma ação que dependa de quem a escreveu.");
     else if (s?.familia && de && familia(de) !== s.familia) console.log(`ATENÇÃO, IDENTIDADE: a mensagem diz ser de "${de}" (${familia(de)}), mas foi gravada por uma sessão da família ${s.familia}. Confira com o remetente antes de agir.`);

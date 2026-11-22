@@ -20,6 +20,8 @@ Uma sessão pode usar o próprio nome, depois do nome da família: "Claude 4 5BC
 - a caixa da família: o que foi mandado para "Claude 4". Basta uma sessão da família confirmar para a mensagem sair da lista de todas;
 - os avisos a `todos`, que cada sessão confirma por si.
 
+Quem lê com o nome da família ("Claude 4") lê também as caixas das sessões, para que nada mandado a uma sessão já encerrada se perca. A confirmação feita assim não apaga a mensagem da sessão a quem ela foi mandada: ela continua aparecendo para essa sessão, marcada como já confirmada com o nome da família, até a própria sessão confirmar. Por isso, cada sessão lê e confirma com o próprio nome.
+
 Mande para a sessão quando o assunto for só dela; para a família, quando qualquer sessão puder atender. Quem pede revisão ou fila com o nome próprio recebe o veredito na própria caixa.
 
 ## Instalar e vigiar
@@ -133,6 +135,7 @@ node ~/.agent-mail/agent-mail.mjs check-append-only
 ## Nada NÃO CONFERIDO segue (dono, OWNER-20261121-1904, passo 4)
 
 - O pedido grava o head inteiro (40 caracteres) e o ramo do PR, lidos na hora. Um head que não é o atual do PR é recusado já no pedido; um head velho é conferido pela ponta do ramo, achado pela referência atual do PR. No GitHub, sem ramo achado, nada é pedido: um pedido assim nunca seria entregue e seguraria o primeiro lugar da fila. Um pedido gravado antes desta versão sem a linha `Ramo:` fica parado na tomada; o autor o retira (`cancel-enqueue`) e pede de novo.
+- Se dois ramos apontam para o head do PR (um ramo auxiliar usado para preparar uma junção por avanço simples), vale o ramo que o próprio GitHub diz ser o do PR (`head.ref`); sem conseguir ler o GitHub, a ferramenta não adivinha entre os dois.
 - `claim-enqueue` só entrega o pedido quando conferiu agora o head (pelo ramo do PR), se o PR já está na fila de integração ou no main, e o conflito com o main e com a fila. Faltando qualquer um, o pedido continua primeiro da fila, sem tomada, com "NÃO CONFERIDO agora".
 - Logo antes de enfileirar no GitHub, quem pegou confere a tomada e o head, e usa o head que o comando mostra:
 

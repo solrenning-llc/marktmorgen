@@ -225,7 +225,9 @@ async function main(): Promise<void> {
     if (pass.some((c) => c[0] === "HGET" && keyOf(c).startsWith("nl:erased:"))) tries += 1;
     const lineAt = pass.findIndex((c) => c[0] === "SET" && keyOf(c).startsWith("nl:hooks:evt:") && pass.some((d) => d[0] === "SET" && keyOf(d).startsWith("nl:hooks:d:") && d.includes("NX")));
     own.push(pass.reduce((sum, c) => sum + (keyOf(c).startsWith("nl:ppsell:tell:") ? 1 : fencedPutBack(c, lost.order) ? billed(c) : 0), 0));
-    looks.push(pass.filter((c) => (c[0] === "GET" && keyOf(c) === `nl:ppsell:paid:${lost.order}`) || ((c[0] === "ZADD" || c[0] === "EXPIRE") && keyOf(c) === `nl:ppsell:refunded:${statsId}`)).length);
+    // The refund mark is one EVAL behind the store's fence since Codex G-20261120-1631 (PAYPAL_MARK_IF_LIVE), billed as
+    // the EVAL and its four calls; its set is the script's third key.
+    looks.push(pass.reduce((sum, c) => sum + (c[0] === "GET" && keyOf(c) === `nl:ppsell:paid:${lost.order}` ? 1 : c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:paypal-mark-if-live:v1") && c[5] === `nl:ppsell:refunded:${statsId}` ? 5 : 0), 0));
     // The last pass: what the "Not sent" lines took, from the event's mark taken for them to the log's LTRIM.
     const lastEvt = pass.map((c, at) => (c[0] === "SET" && keyOf(c).startsWith("nl:hooks:evt:") ? at : -1)).filter((at) => at >= 0).pop();
     const trim = pass.findIndex((c) => c[0] === "LTRIM" && keyOf(c).startsWith("nl:hooks:log:"));

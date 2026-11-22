@@ -98,7 +98,8 @@ test("what an order keeps for good is written where it is measured, and charged 
     if ((family.parts ?? []).some((part) => "kept" in part || "item" in part)) files.add(name.slice(name.indexOf("@") + 1));
   }
   assert.ok(files.size >= 20, `only ${files.size} files keep what an order leaves`);
-  for (const file of files) assert.match(read(file), /\borderWrite(Charged|IfSame)?\(/, `${file} keeps what an order leaves and does not write it through lib/order-data.ts`);
+  // orderWriteIfStoreLive, the same write behind the closing walk's store fence, counts too (Codex G-20261120-1631: lib/paypal-sales.ts keeps a refund for good only while its store is live).
+  for (const file of files) assert.match(read(file), /\borderWrite(Charged|IfSame|IfStoreLive)?\(/, `${file} keeps what an order leaves and does not write it through lib/order-data.ts`);
   assert.doesNotMatch(read("lib/orders.ts"), /chargeOrderData|ORDER_DATA_BYTES/, "an order is charged a fixed ceiling again");
 });
 

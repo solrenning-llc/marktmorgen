@@ -49,7 +49,7 @@ import { fairOff } from "@/lib/fair-price";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { randomBytes } from "node:crypto";
-import { orderWrite } from "@/lib/order-data";
+import { orderWriteIfStoreLive } from "@/lib/order-data";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { releaseLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -181,6 +181,21 @@ const watchKey = (statsId: string) => `nl:ppsell:watch:${statsId}`;
 const PAYPAL_WATCH_IF_LIVE = `-- marktmorgen:paypal-watch-if-live:v1
 if redis.call("EXISTS", KEYS[1]) == 0 or redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return -1 end
 return redis.call("ZADD", KEYS[3], ARGV[2], ARGV[3])`;
+/**
+ * A taken-back payment's mark (the refund set, or the reversed set) written only while the store is live, in one step
+ * with the same fence as PAYPAL_WATCH_IF_LIVE (Codex G-20261120-1631): the watch writes it after waiting for PayPal's
+ * answer about the capture, and a store erasure that began and ended in that wait must not see its erased families made
+ * again. KEYS: the store's id key, the erasing hash, the set. ARGV: the store's erasing field, the score, the order,
+ * "NX" or "" (the refund set keeps the day it was first seen), the set's expiry. Answers -1 when the store is gone or
+ * being erased (nothing written), otherwise { ZADD's answer, EXPIRE's answer }, read as markWritten reads the two
+ * plain replies it replaces. Billed 1 + 4, three more than the plain ZADD and EXPIRE (tests/plan-cost-registry.ts,
+ * PAYPAL_REFUND_KEPT.markCommandsPerRefundLookAtMost).
+ */
+const PAYPAL_MARK_IF_LIVE = `-- marktmorgen:paypal-mark-if-live:v1
+if redis.call("EXISTS", KEYS[1]) == 0 or redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return -1 end
+local added
+if ARGV[4] == "NX" then added = redis.call("ZADD", KEYS[3], "NX", ARGV[2], ARGV[3]) else added = redis.call("ZADD", KEYS[3], ARGV[2], ARGV[3]) end
+return {added, redis.call("EXPIRE", KEYS[3], ARGV[5])}`;
 /** Orders whose payment PayPal holds as pending, scored by when they were taken. */
 const pendingKey = (statsId: string) => `nl:ppsell:pending:${statsId}`;
 /** An order canceled because PayPal never confirmed its payment (cancelOrder): what its notices and its page say. */
@@ -1697,6 +1712,16 @@ export async function watchPayPal(
   const erasing = await erasingField(storeRef(store));
   const watchAt = (score: number, order: string) =>
     redisPipeline([["EVAL", PAYPAL_WATCH_IF_LIVE, 3, storeIdKey, ERASING_KEY, watchKey(statsId), erasing, String(score), order]]);
+  // The take-back marks, fenced the same way (PAYPAL_MARK_IF_LIVE, Codex G-20261120-1631): "gone" when the store's
+  // erasure has begun or its id key is gone, nothing written; otherwise both replies, read by markWritten.
+  const markIfLive = async (key: string, nx: boolean, order: string): Promise<"gone" | unknown[] | null> => {
+    const reply = repliesFor(
+      await redisPipeline([["EVAL", PAYPAL_MARK_IF_LIVE, 3, storeIdKey, ERASING_KEY, key, erasing, String(now), order, nx ? "NX" : "", SALES_KEPT_SECONDS]]),
+      1,
+    )?.[0];
+    if (reply === -1) return "gone";
+    return Array.isArray(reply) && reply.length === 2 ? reply : null;
+  };
   const [due] = await redisPipeline([["ZRANGEBYSCORE", watchKey(statsId), "0", String(now), "LIMIT", "0", String(REFUND_WATCH_BATCH)]]);
   let revoked = 0;
   for (const order of Array.isArray(due) ? (due as string[]) : []) {
@@ -1757,14 +1782,14 @@ export async function watchPayPal(
     // Not a refund (reversed, failed, declined): its own mark first, read exactly as the refund mark is, so the refund
     // mark is never there without it and the buyer is never told "refunded" of it (pre-review MEDIUM on C4-13). Not
     // written: nothing marked, nothing taken back; looked at again in an hour.
+    // Each of the writes below waits on PayPal's answer above: written only while the store is live (Codex G-1631). A
+    // store whose erasure began meanwhile has nothing marked, nothing put back on its watch and nobody told.
     if (status !== "REFUNDED") {
-      const reversed = repliesFor(
-        await redisPipeline([
-          ["ZADD", reversedKey(statsId), String(now), order],
-          ["EXPIRE", reversedKey(statsId), SALES_KEPT_SECONDS],
-        ]),
-        2,
-      );
+      const reversed = await markIfLive(reversedKey(statsId), false, order);
+      if (reversed === "gone") {
+        console.error("a PayPal payment taken back for a store being erased; nothing marked", order);
+        continue;
+      }
       if (!markWritten(reversed)) {
         console.error("a PayPal payment taken back could not be marked; looked at again in an hour", order);
         await watchAt(now + 3600, order);
@@ -1774,13 +1799,11 @@ export async function watchPayPal(
     // NX: the store's figures read this score as the day the refund was first seen (lib/stats.ts), so a retry of the
     // steps below (the affiliate book's lasting mark, the hand-back) never moves it to a later day; a mark already
     // there answers 0, read below as written (Codex X5, X5-20261118-0532).
-    const marked = repliesFor(
-      await redisPipeline([
-        ["ZADD", refundedKey(statsId), "NX", String(now), order],
-        ["EXPIRE", refundedKey(statsId), SALES_KEPT_SECONDS],
-      ]),
-      2,
-    );
+    const marked = await markIfLive(refundedKey(statsId), true, order);
+    if (marked === "gone") {
+      console.error("a PayPal refund for a store being erased; nothing marked", order);
+      continue;
+    }
     if (!markWritten(marked)) {
       console.error("a PayPal refund could not be marked; looked at again in an hour", order);
       await watchAt(now + 3600, order);
@@ -1794,11 +1817,19 @@ export async function watchPayPal(
     // before anything is told (rule 24). The set's mark above still takes the sale back in the meantime, and the
     // affiliate book asks the set about its own orders as well as this record. No count of tries: a refund never
     // kept for good is never let go, so a failure that lasts costs one look an hour, inside the run's 25 orders.
+    // Behind the same fence (orderWriteIfStoreLive, lib/order-data.ts): its record and the room's charge are written
+    // only while the store is live; null is the fence refusing, and nothing more is done for an erased store.
     let lasting: unknown[] | null = null;
+    let gone = false;
     try {
-      lasting = await orderWrite(store, [["HSETNX", backKey(statsId), paypalPaymentId(paid.capture), String(now)]]);
+      lasting = await orderWriteIfStoreLive(store, [["HSETNX", backKey(statsId), paypalPaymentId(paid.capture), String(now)]], storeIdKey, ERASING_KEY, erasing);
+      gone = lasting === null;
     } catch (error) {
       console.error("a PayPal refund could not be kept for the affiliate book", error);
+    }
+    if (gone) {
+      console.error("a PayPal refund for a store being erased; not kept, nobody told", order);
+      continue;
     }
     if (!lasting || lasting.length !== 1 || !(lasting[0] === 0 || lasting[0] === 1)) {
       console.error("a PayPal refund could not be kept for good; looked at again in an hour", order);

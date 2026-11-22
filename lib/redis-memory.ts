@@ -1944,6 +1944,13 @@ export class MemoryRedis {
           for (const target of targets) this.run(["DEL", target]);
           return 1;
         }
+        // lib/paypal-sales.ts PAYPAL_MARK_IF_LIVE: a taken-back payment's mark written only while the store is live.
+        if (key.startsWith("-- marktmorgen:paypal-mark-if-live:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, storeId, erasing, set, field, score, order, nx, seconds] = args;
+          if (this.run(["EXISTS", storeId]) === 0 || this.run(["HEXISTS", erasing, field]) === 1) return -1;
+          const added = nx === "NX" ? this.run(["ZADD", set, "NX", score, order]) : this.run(["ZADD", set, score, order]);
+          return [added, this.run(["EXPIRE", set, seconds])];
+        }
         // lib/paypal-sales.ts PAYPAL_WATCH_IF_LIVE: an order put back on a store's refund watch only while the store is live.
         if (key.startsWith("-- marktmorgen:paypal-watch-if-live:v1\n") && args[0] === "3" && args.length === 7) {
           const [, storeId, erasing, watch, field, score, order] = args;

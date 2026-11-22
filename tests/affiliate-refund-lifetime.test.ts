@@ -38,7 +38,7 @@ import { UnknownReplyError } from "@/lib/redis-reply";
 import { storeIdCommand } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { PAYPAL_PENDING_SWEEP, PAYPAL_REFUND_KEPT, PAYPAL_REFUND_WATCH } from "./plan-cost-registry";
-import { ORDER_WRITE } from "@/lib/order-data";
+import { ORDER_WRITE_IF_STORE_LIVE } from "@/lib/order-data";
 import { done, is, part } from "./check";
 
 const NOW = Math.floor(Date.now() / 1000);
@@ -329,7 +329,8 @@ async function main(): Promise<void> {
       } finally {
         redis.pipeline = original;
       }
-      const kept = sent.filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:order-write:v1") && c.some((a) => String(a).startsWith(`nl:ppsell:back:${SID}`)));
+      // The lasting write goes through the store's fence since Codex G-20261120-1631 (orderWriteIfStoreLive).
+      const kept = sent.filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:order-write-if-store-live:v1") && c.some((a) => String(a).startsWith(`nl:ppsell:back:${SID}`)));
       return { kept, sent };
     };
     await setup();
@@ -337,10 +338,11 @@ async function main(): Promise<void> {
     const ok = await scripts(() => watch());
     is("one ORDER_WRITE script a refund look", ok.kept.length, PAYPAL_REFUND_KEPT.scriptsPerRefundLook);
     is("carrying one write, the HSETNX", ok.kept.map((c) => [Number(c[2 + Number(c[2]) + 1]), c[2 + Number(c[2]) + 2]]), [[PAYPAL_REFUND_KEPT.writesPerScript, "HSETNX"]]);
-    // The script's own calls for one HSETNX field at its dearest (lib/order-data.ts, ORDER_WRITE): EXISTS, TYPE,
-    // HEXISTS and HSTRLEN before, the HSETNX, HEXISTS and HSTRLEN after, the room's two HGETs and its HSET; with EVAL.
-    const calls = ["EXISTS", "TYPE", "HEXISTS", "HSTRLEN", "HSETNX", "HEXISTS", "HSTRLEN", "HGET", "HGET", "HSET"];
-    is("every call counted is one the script makes", calls.every((name) => name === "HSETNX" || ORDER_WRITE.includes(`redis.call('${name}'`)), true);
+    // The script's own calls for one HSETNX field at its dearest (lib/order-data.ts, ORDER_WRITE_IF_STORE_LIVE): the
+    // fence's EXISTS and HEXISTS, then EXISTS, TYPE, HEXISTS and HSTRLEN before, the HSETNX, HEXISTS and HSTRLEN after,
+    // the room's two HGETs and its HSET; with EVAL.
+    const calls = ["EXISTS", "HEXISTS", "EXISTS", "TYPE", "HEXISTS", "HSTRLEN", "HSETNX", "HEXISTS", "HSTRLEN", "HGET", "HGET", "HSET"];
+    is("every call counted is one the script makes", calls.every((name) => name === "HSETNX" || ORDER_WRITE_IF_STORE_LIVE.includes(`redis.call('${name}'`)), true);
     is("the line counts the script and each of its calls", PAYPAL_REFUND_KEPT.commandsPerScriptAtMost >= 1 + calls.length, true);
     await setup();
     captures.set(CAPTURE, "REFUNDED");
@@ -384,11 +386,14 @@ async function main(): Promise<void> {
         if (at >= 0) rest.splice(at, 1);
       }
       const marks = new Set([`nl:ppsell:refunded:${SID}`, `nl:ppsell:reversed:${SID}`]);
-      is(`${label}: every other command of a failed look is a take-back mark (ZADD or EXPIRE of its set)`, rest.every((c) => (c[0] === "ZADD" || c[0] === "EXPIRE") && marks.has(String(c[1]))), true);
-      is(`${label}: the marks of a failed look are within the line`, rest.length <= PAYPAL_REFUND_KEPT.markCommandsPerRefundLookAtMost, true);
+      // Each take-back mark is one EVAL behind the store's fence (PAYPAL_MARK_IF_LIVE, Codex G-20261120-1631), its set the
+      // third key, billed as the EVAL and its four calls (EXISTS, HEXISTS, one ZADD, EXPIRE).
+      const isMark = (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:paypal-mark-if-live:v1") && marks.has(String(c[5]));
+      is(`${label}: every other command of a failed look is a fenced take-back mark of its set`, rest.length > 0 && rest.every(isMark), true);
+      is(`${label}: the marks of a failed look are within the line`, rest.length * 5 <= PAYPAL_REFUND_KEPT.markCommandsPerRefundLookAtMost, true);
       is(
         `${label}: the whole failed look is within the lines' sum`,
-        look.sent.length - (failure.command === "HGET" ? 1 : 0) <=
+        look.sent.length + 4 * rest.length - (failure.command === "HGET" ? 1 : 0) <=
           PAYPAL_PENDING_SWEEP.listReadsPerStoreRun +
             PAYPAL_REFUND_WATCH.listReadsPerStoreRun +
             PAYPAL_REFUND_WATCH.ownCommandsPerOrderLook +

@@ -140,6 +140,45 @@ node ~/.agent-mail/agent-mail.mjs verify-enqueue --as "Claude N" <id do pedido>
 - Cada comando do git tem um limite de tempo (2 minutos): um comando que trava é parado e falha com o motivo.
 - As variáveis de teste (`CORREIO_SEM_COMMITS`, `CORREIO_SEM_GH` e `CORREIO_SEM_VERSAO`) só valem com a marca `AGENT_MAIL_TEST=1` e com os repositórios do correio e dos PRs locais: um caminho absoluto ou `file://`, nunca outra forma de endereço (scp, `ext::`, caminho relativo). Fora disso, cada uma é ignorada com um aviso, uma vez só, e a ferramenta faz a conferência de verdade: uma variável esquecida no ambiente não pula nenhuma conferência.
 
+## Cada caso da auditoria tem um teste que reprova antes (dono, OWNER-20261121-1904, passo 7)
+
+`audit-cases.mjs` roda `agent-mail.test.mjs` contra uma cópia da ferramenta e mostra, para cada caso da auditoria independente (A1 a A15, as provas de conceito e a API fora do ar), quantas verificações o cobrem e quantas falham. O teste do repositório (`tests/agent-mail-tool.test.ts`) exige, na versão atual, pelo menos uma verificação por caso e nenhuma falha.
+
+```bash
+node tooling/agent-mail/audit-cases.mjs
+```
+
+O "reprova antes" é a mesma corrida contra a versão auditada (aff69c9, do ramo `correio`): cada caso precisa ter pelo menos uma verificação que falha.
+
+```bash
+mkdir -p ~/.agent-mail/auditada && git --git-dir ~/.agent-mail/correio.git show aff69c95:agent-mail.mjs > ~/.agent-mail/auditada/agent-mail.mjs && node tooling/agent-mail/audit-cases.mjs ~/.agent-mail/auditada/agent-mail.mjs --expect fail
+```
+
+Resultado em 22/11/2026, com 150 verificações:
+
+| Caso | Gravidade | Verificações | Falham na aff69c9 | Falham agora |
+| --- | --- | --- | --- | --- |
+| A1 | GRAVE | 10 | 6 | 0 |
+| A2 | ALTO | 31 | 29 | 0 |
+| A3 | ALTO | 3 | 3 | 0 |
+| A4 | ALTO | 9 | 8 | 0 |
+| A5 | ALTO | 6 | 6 | 0 |
+| A6 | MÉDIO | 5 | 4 | 0 |
+| A7 | MÉDIO | 7 | 5 | 0 |
+| A8 | MÉDIO | 3 | 3 | 0 |
+| A9 | MÉDIO | 15 | 15 | 0 |
+| A10 | MÉDIO | 15 | 13 | 0 |
+| A11 | LEVE | 4 | 2 | 0 |
+| A12 | LEVE | 1 | 1 | 0 |
+| A13 | LEVE | 2 | 2 | 0 |
+| A14 | LEVE | 3 | 2 | 0 |
+| A15 | LEVE | 2 | 2 | 0 |
+| Prova de conceito 1 | prova | 1 | 1 | 0 |
+| Prova de conceito 3 | prova | 2 | 2 | 0 |
+| API fora do ar | prova | 4 | 3 | 0 |
+
+Ficam de fora, declarados, os dois limites que só a identidade autenticada resolve: a prova de conceito 2 (pôr HOLD como outra família com a variável de sessão forjada) e o resto do A2 (a sessão vem de uma variável de ambiente, copiável e herdada por subagente; a linha `Sessão:` pode ser escrita à mão no git). Eles vão na proposta de identidade autenticada, ao dono, antes do passo 8. Nenhum teste finge resolvê-los.
+
 ## Recados
 
 ```bash

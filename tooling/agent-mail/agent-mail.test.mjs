@@ -337,7 +337,8 @@ console.log("order by the commit sequence; instants in the future refused; off p
   const mail = join(T, "mail.git");
   const ons = g(["ls-tree", "-r", "--name-only", "refs/heads/correio", "chaves/record-review"], mail).split("\n")
     .map((c) => ({ c, t: g(["show", `refs/heads/correio:${c}`], mail) })).filter((x) => /^ON\nClaude 5 ibqho\n/.test(x.t) && /^Pedido: /m.test(x.t));
-  const valido = ons[ons.length - 1].t;
+  // Run against the audited version (step 7), no valid ON was ever written: a fixed one stands in, so the run goes on.
+  const valido = ons.length ? ons[ons.length - 1].t : "ON\nClaude 5 ibqho\nteste\nPedido: https://github.com/solrenning-llc/marktmorgen/issues/4932#issuecomment-1\nSessão: session_012ST5ibqhoHCYrphJXU5az3 (claude-5)\n";
   raw("chaves/on-call/4102444800000-claude-5-ibqho-ab12", valido);
   is("an ON whose instant is in the future is ignored", /on-call: DESLIGADO/.test(run(["list-switches"]).out), run(["list-switches"]).out);
   // A valid ON stamped 3 minutes ahead and written first, then an OFF written after it: the OFF, written last, holds.
@@ -587,6 +588,13 @@ console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");
   is("the watch raises the alarm once, and says to tell the coordinator and the owner", /ALERTA: o ramo correio não só acrescentou/.test(r.out) && /coordenador e o dono/.test(r.out), r.out);
   r = run(["watch", "--as", "Claude 3 Z", "--seconds", "1"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
   is("the same change is not raised again on the next watch", !/ALERTA: o ramo correio/.test(r.out), r.out);
+  // The audit's proof of concept 3 (step 7): a request deleted by a plain commit is reported too, by name.
+  const pedidoAlvo = g(["ls-tree", "-r", "--name-only", "refs/heads/correio", "fila/pedidos"], join(T, "mail.git")).split("\n")[0];
+  const cl = join(T, `rm-${Math.random().toString(16).slice(2)}`);
+  g(["clone", "-q", "-b", "correio", join(T, "mail.git"), cl]); g(["rm", "-q", pedidoAlvo], cl);
+  g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "raw delete"], cl); g(["push", "-q", "origin", "HEAD:correio"], cl);
+  r = run(["check-append-only"]);
+  is("a commit that deletes a request is reported, with the file (proof of concept 3)", !r.ok && new RegExp(`APAGOU ${pedidoAlvo.replace(/[.]/g, "[.]")}`).test(r.out), r.out);
 }
 
 console.log("version: the copy's SHA-256 against the reviewed one on main (owner, OWNER-20261121-1904, step 1)");

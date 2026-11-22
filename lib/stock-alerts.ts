@@ -354,19 +354,22 @@ async function readList(sid: string, productId: string): Promise<[string, AlertE
   return out;
 }
 
-/** Every address on one list, each with whether it confirmed. Throws UnknownReplyError rather than answer "nobody". */
-export async function stockAlertAddresses(store: DataStore, productId: string): Promise<{ email: string; confirmed: boolean }[]> {
+/**
+ * Every address on one list, each with whether it is confirmed and has not ended (its `x` not passed: Codex X6 on
+ * #3616). Throws UnknownReplyError rather than answer "nobody".
+ */
+export async function stockAlertAddresses(store: DataStore, productId: string, now = Date.now()): Promise<{ email: string; confirmed: boolean }[]> {
   if (!store.statsId || !isRedisConfigured()) throw new UnknownReplyError("a back-in-stock list");
-  return (await readList(store.statsId, productId)).map(([email, entry]) => ({ email, confirmed: entry.ok > 0 }));
+  return (await readList(store.statsId, productId)).map(([email, entry]) => ({ email, confirmed: entry.ok > 0 && entry.x > nowSeconds(now) }));
 }
 
 /**
- * Whether each of these addresses still has a confirmed place, read exactly
- * just before an email goes: its leave link when it has, null for one that
- * left (an exact nil) or is not confirmed; throws UnknownReplyError when any
+ * Whether each of these addresses still has a confirmed place that has not
+ * ended, read exactly just before an email goes: its leave link when it has,
+ * null for one that left (an exact nil), is not confirmed or has ended; throws UnknownReplyError when any
  * reply is out of shape.
  */
-export async function stillWaiting(store: DataStore, productId: string, emails: string[]): Promise<(string | null)[]> {
+export async function stillWaiting(store: DataStore, productId: string, emails: string[], now = Date.now()): Promise<(string | null)[]> {
   if (!emails.length) return [];
   if (!store.statsId || !isRedisConfigured()) throw new UnknownReplyError("a back-in-stock list");
   const what = "a back-in-stock list";
@@ -377,7 +380,8 @@ export async function stillWaiting(store: DataStore, productId: string, emails: 
     if (row === null) return null;
     const entry = parseEntry(row);
     if (!entry) throw new UnknownReplyError(what);
-    return entry.ok > 0 ? entry.t : null;
+    // A confirmed place whose own end has passed is no longer waiting (Codex X6 on #3616).
+    return entry.ok > 0 && entry.x > nowSeconds(now) ? entry.t : null;
   });
 }
 

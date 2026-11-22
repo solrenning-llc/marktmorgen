@@ -24,6 +24,7 @@
  *     written: only on a product with a PDF to read, an undo, 44 px targets
  *     with centered labels, a polite status, no timer, nothing saved.
  */
+import type { AiStepId, AiStepState } from "@/lib/ai-steps";
 import { readFileSync } from "node:fs";
 import { PDFDocument } from "pdf-lib";
 import { NextRequest } from "next/server";
@@ -70,7 +71,8 @@ const source = (file: string) => {
 };
 const flat = (text: string) => text.replace(/\s+/g, " ");
 
-type Steps = { run: string; onStep: (step: "read" | "write", state: "started" | "done") => void };
+// The library's own step types: a run that writes a file has a step per part too (`section-N`, #3474).
+type Steps = { run: string; onStep: (step: AiStepId, state: AiStepState) => void };
 type Step = { step: string; state: string };
 
 const FACTS = {

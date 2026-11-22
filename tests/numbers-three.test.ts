@@ -20,11 +20,27 @@
  */
 import { POST_PLACES, postLink, postName } from "@/lib/share-links";
 import { postRows, readLive, readStats, recordHit } from "@/lib/stats";
-import { BUSY_FLOOR, isBusy, maybeBusyAlert, setWeeklyOff } from "@/lib/stats-report";
+import { BUSY_CLAIM_SECONDS, BUSY_FLOOR, isBusy, maybeBusyAlert, setWeeklyOff } from "@/lib/stats-report";
 import { makeKey } from "@/lib/api-keys";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { GET as mcpGet, POST as mcp } from "@/app/api/mcp/route";
 import { store as redis } from "./redis-stub";
+import { BUSY } from "./traffic-cost";
+
+/** What a piece of work sent to the database, command by command, and what it answered. */
+async function sent<T>(work: () => Promise<T>): Promise<{ result: T; sent: string[][] }> {
+  const list: string[][] = [];
+  const real = redis.pipeline;
+  (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((commands: (string | number)[][]) => {
+    for (const command of commands) list.push(command.map(String));
+    return real.call(redis, commands);
+  }) as typeof redis.pipeline;
+  try {
+    return { result: await work(), sent: list };
+  } finally {
+    (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = real;
+  }
+}
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -115,16 +131,67 @@ async function main(): Promise<void> {
   store = (await storeForEmail(OWNER))!;
   is("only at 64, 128, 256…", await maybeBusyAlert(store, 65, TODAY), false);
   await setWeeklyOff("harbor", true);
-  is("never after the creator stopped the emails", await maybeBusyAlert(store, 64, TODAY), false);
+  const firstAsk = await sent(() => maybeBusyAlert(store, 64, TODAY));
+  is("never after the creator stopped the emails", firstAsk.result, false);
   await setWeeklyOff("harbor", false);
-  is("written to once the day is busy", await maybeBusyAlert(store, 64, TODAY), true);
+  const sending = await sent(() => maybeBusyAlert(store, 64, TODAY));
+  is("written to once the day is busy", sending.result, true);
   is("to the creator, saying where they came from and how to stop it", [
     emails.length,
     emails[0]?.to,
     /Most of them came from TikTok\./.test(emails[0]?.text ?? ""),
     /To stop these emails/.test(emails[0]?.text ?? ""),
   ], [1, OWNER, true, true]);
-  is("and once a day, however busy it gets", [await maybeBusyAlert(store, 128, TODAY), emails.length], [false, 1]);
+  const after = await sent(() => maybeBusyAlert(store, 128, TODAY));
+  is("and once a day, however busy it gets", [after.result, emails.length], [false, 1]);
+  // What it asks the database (4 November 2026): the fortnight before is read
+  // once a day, by the day's first power of two, under a claim made before
+  // any read; every later one reads it back with its claim. Held to what
+  // tests/traffic-cost.ts prices a store's day of it at (BUSY).
+  const fortnightReads = (list: string[][]) => list.filter((c) => c[0] === "HGET" && c[2] === "v").length;
+  is("the fortnight before is read once a day, after the day is claimed", [fortnightReads(firstAsk.sent), firstAsk.sent[1]?.[0], firstAsk.sent[1]?.[3], fortnightReads(sending.sent), fortnightReads(after.sent)], [14, "SET", "NX", 0, 0]);
+  is("and each ask is inside what a day of it is priced at", [
+    firstAsk.sent.length <= BUSY.first + BUSY.busy,
+    sending.sent.length <= BUSY.later + BUSY.busy + BUSY.send,
+    after.sent.length <= BUSY.later,
+  ], [true, true, true]);
+  console.log(`the busy-day email, commands: the day's first ask ${firstAsk.sent.length}, the one that sends ${sending.sent.length}, a later one ${after.sent.length}`);
+  const quietStore = (await storeForEmail(OWNER))!;
+  redis.run(["DEL", `nl:busy:${new Date(TODAY).toISOString().slice(0, 10)}:harbor:before`]);
+  redis.run(["SET", `nl:busy:${new Date(TODAY).toISOString().slice(0, 10)}:harbor:before`, JSON.stringify(Array(14).fill(500))]);
+  const quiet = await sent(() => maybeBusyAlert(quietStore, 256, TODAY));
+  is("a day that is not busy asks only for the fortnight it kept", [quiet.result, quiet.sent.length <= BUSY.later, fortnightReads(quiet.sent)], [false, true, 0]);
+  // A request whose read of the fortnight fails after it claimed the day:
+  // it lets the claim go at once, and the next power of two reads the days
+  // and sends the email, once (independent review of #1496: before, a failed
+  // read at 64 lost the 128 and 256 emails).
+  const crashDay = new Date(TODAY).toISOString().slice(0, 10);
+  const dayKeys = [`nl:busy:${crashDay}:harbor:before`, `nl:busy:${crashDay}:harbor`];
+  for (const key of dayKeys) redis.run(["DEL", key]);
+  const failedBefore = emails.length;
+  const realPipeline = redis.pipeline;
+  (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "HGET" && c[2] === "v")) throw new Error("the database did not answer");
+    return realPipeline.call(redis, commands);
+  }) as typeof redis.pipeline;
+  const failed = await maybeBusyAlert(store, 64, TODAY);
+  (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = realPipeline;
+  is("a request whose read fails lets the day's claim go", [failed, redis.run(["EXISTS", dayKeys[0]])], [false, 0]);
+  const retried = await sent(() => maybeBusyAlert(store, 128, TODAY));
+  is("and the next power of two reads the days and the email goes", [retried.result, fortnightReads(retried.sent), emails.length, retried.sent.length <= BUSY.first + BUSY.busy + BUSY.send], [true, 14, failedBefore + 1, true]);
+  is("once", [await maybeBusyAlert(store, 256, TODAY), emails.length], [false, failedBefore + 1]);
+  // A request that dies after claiming the day and before writing the days
+  // down (a function's timeout) cannot let go: its claim is short, lapses
+  // after BUSY_CLAIM_SECONDS, and a later power of two still sends, once.
+  for (const key of dayKeys) redis.run(["DEL", key]);
+  const killedBefore = emails.length;
+  redis.run(["SET", dayKeys[0], "", "NX", "EX", String(BUSY_CLAIM_SECONDS)]);
+  is("while a dead request's claim holds, a later power of two waits", [await maybeBusyAlert(store, 128, TODAY), emails.length], [false, killedBefore]);
+  redis.advance((BUSY_CLAIM_SECONDS + 1) * 1000);
+  const recovered = await sent(() => maybeBusyAlert(store, 256, TODAY));
+  is("once it lapses, a later power of two reads the days and the email goes", [recovered.result, fortnightReads(recovered.sent), emails.length], [true, 14, killedBefore + 1]);
+  is("and only once", [await maybeBusyAlert(store, 512, TODAY), emails.length], [false, killedBefore + 1]);
+  is("and the day is then kept for two days", (redis.run(["TTL", dayKeys[0]]) as number) > BUSY_CLAIM_SECONDS, true);
 
   part("The MCP server");
   const rpc = (body: unknown, key?: string) =>

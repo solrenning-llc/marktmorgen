@@ -23,7 +23,7 @@ import { POST as moveRoute } from "@/app/api/store/book/move/route";
 import EmbedCard from "@/app/embed/[handle]/[product]/page";
 import { StoreResting } from "@/components/store-resting";
 import { bookedHere } from "@/lib/book-page-admission";
-import { bookTimesUnits, bookingDiaryKey } from "@/lib/book-page-rules";
+import { BOOK_TIMES_BASE_UNITS, bookTimesUnits, bookingDiaryKey } from "@/lib/book-page-rules";
 import { speech } from "@/lib/buyer-words";
 import { bookingWords } from "@/lib/buyer-words/booking";
 import { readSetup, type CallSetup } from "@/lib/call-setup";
@@ -178,8 +178,9 @@ async function main(): Promise<void> {
   is("and says the times could not be read", html(short.result).includes(bookingWords(embedRest.store.language).timesUnread.replace(/'/g, "&#x27;")), true);
 
   part("(c) What a reading of the times costs in the store's requests");
-  is("a store with one call: 8 requests for its times", bookTimesUnits(1), 8);
-  is("a store with twenty calls: still 8", bookTimesUnits(20), 8);
+  // The base is whatever lib/book-page-rules.ts sizes it at (AC (n): no figure another PR moves is typed here).
+  is("a store with one call: the base requests for its times", bookTimesUnits(1), BOOK_TIMES_BASE_UNITS);
+  is("a store with twenty calls: still the base", bookTimesUnits(20), BOOK_TIMES_BASE_UNITS);
 
   part("Light: room for the page, not for its times");
   const tight = await shop("admittight");

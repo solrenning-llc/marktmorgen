@@ -1,5 +1,6 @@
 "use client";
 
+import { startBrowserCheck } from "@/lib/browser-check-client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { trackingConsentWords } from "@/lib/buyer-words/tracking-consent";
@@ -82,15 +83,11 @@ export function AffiliateClick({
     if (!sent.has(key)) {
       sent.add(key);
       const body = JSON.stringify({ h: handle, k: "a", c: found, ...(fromPaidSearch(location.search) ? { p: "1" } : {}) });
-      let beaconed = false;
-      try {
-        beaconed = Boolean(navigator.sendBeacon && navigator.sendBeacon("/api/store/hit", new Blob([body], { type: "text/plain" })));
-      } catch {
-        beaconed = false;
-      }
-      if (!beaconed) {
-        fetch("/api/store/hit", { method: "POST", body, keepalive: true, headers: { "Content-Type": "text/plain" } }).catch(() => {});
-      }
+      // Sent on load like a visit, through the fetch the host's browser check signs (lib/browser-check-client.ts):
+      // the server counts an arrival only when the check says a person's browser sent it (app/api/store/hit).
+      // startBrowserCheck answers the fetch from before the check wrapped it; the global fetch is the signed one.
+      startBrowserCheck();
+      fetch("/api/store/hit", { method: "POST", body, keepalive: true, headers: { "Content-Type": "text/plain" } }).catch(() => {});
     }
     if (!askFirst) return;
     const choice = readChoice(handle);

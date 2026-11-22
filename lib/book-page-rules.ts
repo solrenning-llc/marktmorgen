@@ -35,7 +35,7 @@ export const BOOK_STRIPE_READS = 5 + 5;
  * bookings caught up after the page is sent (tests/plan-cost-registry.ts,
  * bookTimesRead).
  */
-export const BOOK_TIMES_BASE_UNITS = 8;
+export const BOOK_TIMES_BASE_UNITS = 5;
 
 /** Call listings the base already pays for. */
 export const BOOK_LISTINGS_IN_BASE = 20;

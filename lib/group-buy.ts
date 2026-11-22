@@ -302,6 +302,12 @@ async function saveGroup(group: Group, seconds: number): Promise<boolean> {
  * ids, written and given its expiry in the same pipeline as every write of a paid purchase (saveGroup), so it never
  * runs out before one it leads to. Purchase ids are grp_ and hex, never "<store>:by:", so it is never a purchase's key.
  */
+/**
+ * What a purchase's buyer index costs over its life, in commands (#5125; line order-buyer-index): the SADD and EXPIRE
+ * on each write of a purchase that names its buyer, at most two (settled or given back before it settled, then given
+ * back by the refund pass). Held in tests/group-person-index.test.ts.
+ */
+export const GROUP_INDEX_COMMANDS = 2 * 2;
 export const buyerGroupsKey = (sid: string, field: string) => `nl:grp:${sid}:by:${field}`;
 export const buyerField = (email: string) => createHash("sha256").update(email.trim().toLowerCase()).digest("hex");
 /** A paid purchase's buyer, as kept on it (b): from the checkout that paid for it; none when it names no address. */

@@ -72,6 +72,13 @@ const anyKey = (sid: string) => `nl:gift:${sid}:any`;
  * given its expiry in the same pipeline as every write of a handed-over gift (saveGift), so it never runs out before
  * a gift it leads to. Gift ids are gft_ and hex, never "<store>:by:", so it can never be a gift's own key.
  */
+/**
+ * What a gift's buyer index costs over its life, in commands (#5125; priced in the line order-buyer-index of
+ * tests/plan-cost-registry.ts): the SADD and EXPIRE that ride on each write of a gift that names its buyer, at most
+ * two such writes (handed over or given back before it was, then given back by the refund pass). Held in
+ * tests/gift-person-index.test.ts.
+ */
+export const GIFT_INDEX_COMMANDS = 2 * 2;
 export const buyerGiftsKey = (sid: string, field: string) => `nl:gift:${sid}:by:${field}`;
 export const buyerField = (email: string) => createHash("sha256").update(email.trim().toLowerCase()).digest("hex");
 /**

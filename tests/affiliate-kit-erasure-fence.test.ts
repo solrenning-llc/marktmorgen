@@ -8,7 +8,8 @@
  */
 import { ERASING_KEY, addProduct, claimHandle, ensureStatsId, ensureStoreId, erasingField, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
-import { draftKit } from "@/lib/affiliate-kit";
+import { KIT_COUNTS, draftKit } from "@/lib/affiliate-kit";
+import { KIT_COMMANDS_MOST } from "@/lib/affiliate-kit-rules";
 import type { Affiliate } from "@/lib/affiliates";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -91,6 +92,20 @@ async function main(): Promise<void> {
     redis.pipeline = real;
     is("refused as unavailable", result.ok ? "drafted" : result.reason, "unavailable");
     is("no counter made again as -1", counters(store.statsId!), []);
+  }
+
+  part("MEDIUM (Claude 1 2as on #5101): KIT_COMMANDS_MOST covers the fence on both the take and the give-back");
+  {
+    // Counted from KIT_COUNTS itself: each path is the EVAL, the fence's calls (HGET, then one GET either way) and its
+    // own calls; the kit's worst is a take, a give-back and the three content reads.
+    const [fence, rest] = KIT_COUNTS.split('if ARGV[2] == "take" then');
+    const [take, back] = rest.split("return {1, day, window, jobs}");
+    const calls = (lua: string) => (lua.match(/redis\.call\(/g) ?? []).length;
+    const fenceCalls = calls(fence) - 1; // the record's GET and the id key's GET are the two arms of one branch
+    const worst = (1 + fenceCalls + calls(take)) + (1 + fenceCalls + calls(back)) + 3;
+    is("the fence is HGET and one GET", fenceCalls, 2);
+    is("the kit's worst, counted from the script, is within KIT_COMMANDS_MOST", KIT_COMMANDS_MOST >= worst, true);
+    is("and is 19", worst, 19);
   }
 
   done();

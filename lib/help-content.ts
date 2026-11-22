@@ -948,6 +948,10 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        q: "Can buyers apply before they can buy a product?",
+        a: ["Not yet. A product cannot ask a buyer to apply first, and nothing is sent or charged for it today. This page will say so on the day it works."],
+      },
+      {
         q: "Can I add a form, a survey or a quiz?",
         a: [
           "Yes, on every plan. Make one under Forms in your studio: up to 12 questions, each a short or long answer, an email address, one choice or several from up to 8 options, or a scale of 1 to 10, marked required or not. Then add a Form block to one of your own pages under Your pages and choose it there. A store can have 20 forms.",

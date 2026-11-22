@@ -34,7 +34,7 @@ export const SCREEN_HELP: Readonly<Record<string, readonly string[]>> = {
   affiliates: ["Can I run an affiliate program?"],
   agent: ["Can I connect Zapier, Make or my own server?"],
   agreements: ["How do I send a proposal or an agreement to sign?"],
-  applications: [],
+  applications: ["Can buyers apply before they can buy a product?"],
   blog: ["Can my store have a blog?", "Will search engines find my store?"],
   bundles: ["Can I sell a bundle of products?"],
   calendar: ["Can I sell paid calls?", "Can I sell a package of sessions, like 5 calls booked one at a time?"],

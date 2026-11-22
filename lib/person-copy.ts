@@ -555,7 +555,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/licence-keys.ts": async (s) => (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key, sale: k.reference, given: iso(k.at), revoked: iso(k.revokedAt), revokedBy: k.revokedBy })),
   "lib/licence-activations.ts": async (s) => activationsOf(s.store, (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key }))),
   "lib/paypal-sales.ts": async (s) => paypalOrdersOf(s.statsId, s.productIds, s.email),
-  "lib/preorders.ts": async (s) => (await preordersOf(s.store, s.productIds, s.email)).map((p) => ({ ...p, at: iso(p.at), ...(p.given ? { given: iso(p.given) } : {}), ...(p.revoked ? { revoked: iso(p.revoked) } : {}) })),
+  "lib/preorders.ts": async (s) => (await preordersOf(s.store, await checkoutsOf(s), s.email)).map((p) => ({ ...p, at: iso(p.at), ...(p.given ? { given: iso(p.given) } : {}), ...(p.revoked ? { revoked: iso(p.revoked) } : {}) })),
   "lib/closing-buyers.ts": async (s) => {
     const told = await toldOf(s.store, s.email);
     return told ? [{ toldTheStoreCloses: told.toldAt ? iso(told.toldAt) : "not yet" }] : [];

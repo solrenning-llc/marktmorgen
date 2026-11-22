@@ -454,23 +454,30 @@ async function givenExactly(sid: string, productId: string, sessionId: string): 
   throw new UnknownReplyError("a pre-order's entry");
 }
 
-/** A person's pre-orders of these products and what became of them, for the copy of their data (619 [SZ3]). Only reads. */
-export async function preordersOf(store: Store, productIds: string[], email: string): Promise<(Preorder & { product: string; checkout: string })[]> {
-  if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
+/**
+ * A person's pre-orders and what became of them, for the copy of their data (619 [SZ3]). Only reads. A pre-order is
+ * written only by recordPreorder, for a paid checkout of the store's own Stripe account whose metadata names it a
+ * pre-order and its product (readSession), under that checkout's id; so the person's own paid checkouts (lib/person-copy.ts
+ * checkoutsOf, which reads them whole or fails) name every pre-order of theirs, and only those entries are read, one
+ * HGET each, never every product's whole hash (#5125, coordinator 6e01). tests/preorders-person-read.test.ts holds the
+ * paths that make a pre-order to that one.
+ */
+export async function preordersOf(store: Store, checkouts: readonly { id: string; meta: Record<string, string> }[], email: string): Promise<(Preorder & { product: string; checkout: string })[]> {
+  if (!store.statsId || !isRedisConfigured()) return [];
+  const sid = store.statsId;
   const address = email.trim().toLowerCase();
+  const asked = checkouts.filter((c) => c.meta.preorder === "yes" && Boolean(c.meta.product));
+  if (!asked.length) return [];
   // Read exactly (CX-123 rule 24): an unknown reply throws, so the copy is not handed over without their pre-orders.
-  const replies = repliesFor(await redisPipeline(productIds.map((p) => ["HGETALL", entriesKey(store.statsId as string, p)])), productIds.length);
+  const replies = repliesFor(await redisPipeline(asked.map((c) => ["HGET", entriesKey(sid, c.meta.product), c.id])), asked.length);
   if (!replies) throw new UnknownReplyError("a person's pre-orders");
-  return productIds.flatMap((product, i) => {
-    const flat = stringList(replies[i]);
-    if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a person's pre-orders");
-    const out: (Preorder & { product: string; checkout: string })[] = [];
-    for (let k = 0; k < flat.length; k += 2) {
-      const entry = parsePreorder(flat[k + 1]);
-      if (!entry) throw new UnknownReplyError("a person's pre-orders");
-      if (entry.to.trim().toLowerCase() === address) out.push({ ...entry, product, checkout: flat[k] });
-    }
-    return out;
+  return asked.flatMap((c, i) => {
+    const raw = replies[i];
+    // No entry for a paid pre-order checkout: never written down, or kept past KEPT_SECONDS. Nothing of theirs is kept.
+    if (raw === null) return [];
+    const entry = typeof raw === "string" ? parsePreorder(raw) : null;
+    if (!entry) throw new UnknownReplyError("a person's pre-orders");
+    return entry.to.trim().toLowerCase() === address ? [{ ...entry, product: c.meta.product, checkout: c.id }] : [];
   });
 }
 

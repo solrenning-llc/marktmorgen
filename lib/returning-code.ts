@@ -66,6 +66,14 @@ const claimKey = (token: string) => `${linkKey(token)}:claim`;
 export const RETURNING_CLAIM_SECONDS = 120;
 /** What a spent link's claim holds: later uses are told the link is spent ("link"), not to wait ("busy"). */
 const SPENT = "spent";
+/**
+ * While a use holds the claim, the link itself is cut to end before the claim does, in the same request that takes
+ * the claim: if spending it later fails entirely (the spent mark and the delete both lost), the link is gone before
+ * the claim lets anyone in again, so it never opens a second checkout (Codex N1 LOW on #3690). A use that opens no
+ * checkout gives the link back the rest of its half hour (releaseReturningLink). The second less covers the moment
+ * between the two commands of that request.
+ */
+const LINK_WHILE_CLAIMED_MS = RETURNING_CLAIM_SECONDS * 1000 - 1000;
 
 /** What a link holds: the store, the product, the code and the address it was sent to. Exactly this shape. */
 type LinkRecord = { s: string; p: string; c: string; e: string };
@@ -151,20 +159,31 @@ export async function sendReturningLink(store: Store, productId: string, product
  * product; refused ("code") when its code has since been stopped or ended.
  * Whoever holds it can only open a checkout for the address it was sent to.
  */
-export async function redeemReturningLink(store: Store, productId: string, rawToken: string, now = Date.now()): Promise<{ ok: true; code: ReturningCode; email: string } | { ok: false; reason: "link" | "code" | "unknown" | "busy" }> {
+export async function redeemReturningLink(store: Store, productId: string, rawToken: string, now = Date.now()): Promise<{ ok: true; code: ReturningCode; email: string; until: number } | { ok: false; reason: "link" | "code" | "unknown" | "busy" }> {
   const token = readLinkToken(rawToken);
   if (!token) return { ok: false, reason: "link" };
   if (!isRedisConfigured()) return { ok: false, reason: "unknown" };
   // Claimed first, in one step on the database's side (SET NX): of two uses at once, one opens the checkout and the
   // other is refused, so the link works once (review 6803880536). Only an exact "OK" is the claim (CX-123 rule 24).
-  let claim: unknown;
+  // In the same request, the link's time left is read and the link cut to end before the claim (LINK_WHILE_CLAIMED_MS,
+  // "LT": never made longer), so nothing that fails after this can leave it working once the claim runs out.
+  const asked = Date.now();
+  let replies: unknown[] | null;
   try {
-    const replies = repliesFor(await redisPipeline([["SET", claimKey(token), "1", "NX", "EX", RETURNING_CLAIM_SECONDS]]), 1);
-    if (!replies) return { ok: false, reason: "unknown" };
-    claim = replies[0];
+    replies = repliesFor(
+      await redisPipeline([
+        ["SET", claimKey(token), "1", "NX", "EX", RETURNING_CLAIM_SECONDS],
+        ["PTTL", linkKey(token)],
+        ["GET", linkKey(token)],
+        ["PEXPIRE", linkKey(token), LINK_WHILE_CLAIMED_MS, "LT"],
+      ]),
+      4,
+    );
   } catch {
     return { ok: false, reason: "unknown" };
   }
+  if (!replies) return { ok: false, reason: "unknown" };
+  const [claim, left, raw, cut] = replies;
   if (claim === null) {
     // Held: by a use opening its checkout now ("busy"), or by a link already spent ("link"), whose claim outlives it.
     const held = repliesFor(await redisPipeline([["GET", claimKey(token)]]).catch(() => null), 1);
@@ -172,34 +191,40 @@ export async function redeemReturningLink(store: Store, productId: string, rawTo
     return { ok: false, reason: held[0] === SPENT ? "link" : "busy" };
   }
   if (claim !== "OK") return { ok: false, reason: "unknown" };
+  // When the link would have ended, on this server's clock: read after asking, so never later than it really ends.
+  const until = typeof left === "number" && Number.isSafeInteger(left) && left > 0 ? asked + left : null;
   const refused = async (reason: "link" | "code" | "unknown") => {
-    await releaseReturningLink(token);
+    await releaseReturningLink(token, until);
     return { ok: false as const, reason };
   };
-  let raw: unknown;
-  try {
-    const replies = repliesFor(await redisPipeline([["GET", linkKey(token)]]), 1);
-    if (!replies) return refused("unknown");
-    raw = replies[0];
-  } catch {
-    return refused("unknown");
-  }
   if (raw === null) return refused("link");
+  // The cut must be known to have been asked of a link that ends: otherwise the claim alone would hold it.
+  if (until === null || (cut !== 0 && cut !== 1)) return refused("unknown");
   const record = readRecord(raw);
   if (!record || record.s !== store.handle || record.p !== productId) return refused("link");
   const code = returningCodeFor(store.returningCodes, record.c, Math.floor(now / 1000));
   if (!code) return refused("code");
-  return { ok: true, code, email: record.e };
+  return { ok: true, code, email: record.e, until };
 }
 
-/** Lets a claimed link go again when its checkout did not open: a failure only waits for the claim to run out. */
-export async function releaseReturningLink(rawToken: string): Promise<void> {
+/**
+ * Lets a claimed link go again when its checkout did not open: the link first gets back the time it had left
+ * (until, from redeemReturningLink; "GT": never made shorter), then the claim goes. A failure only costs the buyer:
+ * the link then ends with the claim, and a new one can be asked for.
+ */
+export async function releaseReturningLink(rawToken: string, until?: number | null): Promise<void> {
   const token = readLinkToken(rawToken);
   if (!token) return;
-  await redisPipeline([["DEL", claimKey(token)]]).catch((error) => console.error("letting a returning-buyer code link go failed; its claim runs out by itself", error));
+  const left = typeof until === "number" ? Math.floor(until - Date.now()) : 0;
+  const commands: (string | number)[][] = left > LINK_WHILE_CLAIMED_MS ? [["PEXPIRE", linkKey(token), left, "GT"]] : [];
+  commands.push(["DEL", claimKey(token)]);
+  await redisPipeline(commands).catch((error) => console.error("letting a returning-buyer code link go failed; it ends with its claim", error));
 }
 
-/** Spends a link once its checkout is open; a failure is only logged, the link then runs out by itself within half an hour. */
+/**
+ * Spends a link once its checkout is open. A failure is only logged: the link was already cut to end before its
+ * claim (redeemReturningLink), so even with both writes below lost it never works again.
+ */
 export async function spendReturningLink(rawToken: string): Promise<void> {
   const token = readLinkToken(rawToken);
   if (!token) return;

@@ -15,7 +15,7 @@ const MESSAGES: Record<string, string> = {
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
   invalid: "That could not be read. Nothing was changed.",
-  changed: "Nothing was changed. These settings were changed in another tab or by someone else after this page loaded. Reload this page to see them before trying again.",
+  changed: "Nothing was changed. These settings were changed after this page loaded: elsewhere on this page, in another tab or by someone else. Reload this page to see them before trying again.",
   server_error: "We could not confirm whether your checkout reminder settings were saved. Reload this page to check before trying again.",
 };
 

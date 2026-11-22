@@ -2771,6 +2771,15 @@ export async function setRecovery(
   let changed = false;
   const next = await patchStore(email, (store) => {
     // Compared with the lock held: a setting changed since the page read it is never written over (lib/setting-expect.ts).
+    // Off always works when the page read the reminders on: it stops them and keeps the saved
+    // address and consent box, never the page's older address (Codex X6, 7034411888).
+    if (expect && !recovery.enabled) {
+      if (store.recovery.enabled !== expect.enabled) {
+        changed = true;
+        return null;
+      }
+      return { recovery: parseRecovery({ ...store.recovery, enabled: false }), statsId: store.statsId ?? newListId() };
+    }
     if (expect && (store.recovery.enabled !== expect.enabled || store.recovery.address !== expect.address)) {
       changed = true;
       return null;

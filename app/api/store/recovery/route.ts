@@ -17,7 +17,9 @@ import { readRecoveryExpect } from "@/lib/setting-expect";
  *
  * `expect`, the setting as the page read it, is compared with what is saved
  * with the store's lock held: changed since, it is refused ("changed", 409)
- * and nothing is written (lib/setting-expect.ts).
+ * and nothing is written (lib/setting-expect.ts). Off compares only whether
+ * the reminders were on: it stops them and keeps the saved address, so a
+ * page that read an older address can still switch them off.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "settings");

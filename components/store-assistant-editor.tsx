@@ -20,7 +20,7 @@ import { assistReminderWords } from "@/lib/buyer-words/assistant-reminder";
 const DATE = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
 const FAILED = "It could not be saved just now. Try again in a moment.";
 /** The route compared what this page read with what is saved (lib/setting-expect.ts). */
-const CHANGED = "Nothing was changed. This was changed in another tab or by someone else after this page loaded. Reload this page to see it before trying again.";
+const CHANGED = "Nothing was changed. This was changed after this page loaded: elsewhere on this page, in another tab or by someone else. Reload this page to see it before trying again.";
 
 /** What the way back from Stripe, or a refusal, says (app/api/billing/assistant). */
 const NOTICES: Record<string, string> = {

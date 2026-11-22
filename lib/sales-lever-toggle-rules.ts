@@ -329,7 +329,7 @@ const REFUSED: Record<string, string> = {
   store_gone: "This store is no longer open in your studio.",
   none: "The store could not be found.",
   invalid: "The request was not understood.",
-  changed: "It was changed in another tab or by someone else after this page loaded. Reload the page to see the saved setting.",
+  changed: "It was changed after this page loaded: elsewhere on this page, in another tab or by someone else. Reload the page to see the saved setting.",
 };
 
 const UNSURE = "We could not confirm the change. Reload the page to see the saved setting before you try again.";

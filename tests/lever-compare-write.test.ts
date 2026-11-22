@@ -137,7 +137,7 @@ test("the comparison is made with the store's write lock held, and a record that
   assert.deepEqual(await redis.pipeline([["GET", key]]), ["{not a store"]);
 });
 
-test("another tab's change is never lost to the card's switch, and the card asks for a reload", async () => {
+test("another tab's change is never lost to the card's switch, off still stops reminders, and a refusal asks for a reload", async () => {
   const { send, read } = await world();
   assert.ok((await setRecovery(OWNER, { enabled: true, address: A, asks: true })).ok);
   assert.ok(await setNextOffer(OWNER, { on: false, email: false }));
@@ -150,16 +150,29 @@ test("another tab's change is never lost to the card's switch, and the card asks
   assert.equal((await send("/api/store/assistant-settings", { next: { on: true, email: true }, expect: { on: false, email: false } })).status, 200);
 
   const post = async (route: LeverRoute, body: Record<string, unknown>) => (await send(route, body)).body;
-  for (const control of [recovery, next]) {
+  // Off always works (Codex X6, 7034411888): the card's off stops the reminders and keeps the
+  // other tab's newer address; only whether they were on is compared.
+  const stopped = await pressLever(recovery, SWITCH_START, "switch", post);
+  assert.equal(stopped.outcome?.state, "saved", "recovery");
+  const off = await read();
+  assert.deepEqual([off.recovery.enabled, off.recovery.address], [false, C]);
+  // Its Undo carries the older address it read: refused, never written over the newer one.
+  assert.ok(recovery.undoBody);
+  const undo = await send("/api/store/recovery", recovery.undoBody!);
+  assert.notEqual(undo.status, 200);
+  // The same Undo past the route's sender check: setRecovery refuses it on the address.
+  assert.deepEqual(await setRecovery(OWNER, { enabled: true, address: A, asks: true }, { enabled: false, address: A }), { ok: false, reason: "changed" });
+  assert.deepEqual([(await read()).recovery.enabled, (await read()).recovery.address], [false, C]);
+  for (const control of [next]) {
     const view = await pressLever(control, SWITCH_START, "switch", post);
     assert.equal(view.outcome?.state, "refused", control.key);
-    assert.match(view.outcome!.text, /^Nothing was changed\. It was changed in another tab or by someone else/);
+    assert.match(view.outcome!.text, /^Nothing was changed\. It was changed after this page loaded: elsewhere on this page, in another tab or by someone else/);
     assert.match(view.outcome!.text, /Reload/);
     assert.equal(view.saved, "unknown", control.key);
     assert.equal(view.undo, false);
   }
   const now = await read();
-  assert.deepEqual([now.recovery.enabled, now.recovery.address], [true, C]);
+  assert.deepEqual([now.recovery.enabled, now.recovery.address], [false, C]);
   assert.deepEqual(now.nextOffer, { on: true, email: true });
 });
 
@@ -182,8 +195,8 @@ test("the card's switch and its Undo carry the state they expect", () => {
 test("both settings forms send what they read, and say a change made elsewhere as such", () => {
   const recovery = readFileSync("components/recovery-editor.tsx", "utf8");
   assert.match(recovery, /JSON\.stringify\(\{ enabled, address, expect: \{ enabled: recovery\.enabled, address: recovery\.address \} \}\)/);
-  assert.match(recovery, /changed: "[^"]*changed in another tab or by someone else[^"]*Reload[^"]*"/);
+  assert.match(recovery, /changed: "[^"]*changed after this page loaded: elsewhere on this page, in another tab or by someone else[^"]*Reload[^"]*"/);
   const assistant = readFileSync("components/store-assistant-editor.tsx", "utf8");
   assert.match(assistant, /next: \{ on: nextOn, email: nextOn && nextEmail \}, expect: \{ on: next\.on, email: next\.email \}/);
-  assert.match(assistant, /changed in another tab or by someone else/);
+  assert.match(assistant, /changed after this page loaded: elsewhere on this page, in another tab or by someone else/);
 });

@@ -128,12 +128,18 @@ export const ERASE_SUBMISSIONS: readonly [number, number] = [301, 70_000];
  * Since Codex L on #4871 the kept paths have no expiry, so their four EXPIREs are no longer sent; 567 stays the bound.
  * And (#4462, 16 November 2026) the count and the read of the store's waitlist marks (lib/waitlist.ts waitlistMarks: two
  * SCARD, two SMEMBERS), whose members are then counted with the rest (ERASE_PER.waitlists), four more: 571.
+ * And (review of #3929) the read of the note of the carts the person was reminded of (lib/checkout-recovery.ts,
+ * forgetRecoveryPerson), one SMEMBERS, the note itself deleted inside the marks' one DEL: one more (576 with #4290's
+ * own count below).
  */
 // 567 before #4290 and #4462; four more cover the own ask count and the atomic ask eraser's fixed work (ZCARD, EVAL,
 // ZRANGEBYSCORE, DEL), and #4462's four for the waitlist marks: 575; and (750 [CD1]) a person's files sent for review,
-// ERASE_SUBMISSIONS: 575 before them; and (#3542, since 12 November 2026) the four on a person's index of kept API
-// answers (lib/api-idempotency.ts: its count, then the erasure's mark, its expiry and the read), whatever it lists: 579.
-export const ERASE_FIXED_COMMANDS = 579 + ERASE_SUBMISSIONS[0];
+// ERASE_SUBMISSIONS: 575 before them.
+// And (review of #3929) the read of the note of the carts the person was reminded of (lib/checkout-recovery.ts,
+// forgetRecoveryPerson), one SMEMBERS, the note deleted inside the marks' one DEL: 576 before ERASE_SUBMISSIONS;
+// and (#3542, since 12 November 2026) the four on a person's index of kept API answers (lib/api-idempotency.ts: its
+// count, then the erasure's mark, its expiry and the read), whatever it lists: 580.
+export const ERASE_FIXED_COMMANDS = 580 + ERASE_SUBMISSIONS[0];
 /**
  * Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read
  * again, and those commands; 310,000 before (Claude 3 on #3473) the memberships whose invitations wait to be deleted

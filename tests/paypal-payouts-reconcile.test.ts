@@ -243,6 +243,42 @@ async function main(): Promise<void> {
   const late = JSON.parse(String((rawLate as string[])[1])) as { m?: unknown };
   is("marked for a manual check and not tried", [late.m, posts - p1, batches], [1, 0, 0]);
 
+  part("A manual mark Redis does not confirm is not counted, and is counted once when it is (Codex G-20261121-0346)");
+  {
+    const real = redis.pipeline.bind(redis);
+    // The mark's own write: the open-batch script carrying m: 1. Answered in another shape, and not applied.
+    const isMark = (c: (string | number)[] | undefined) => c?.[0] === "EVAL" && /paypal-open-live/.test(String(c[1])) && /"m":1/.test(c.slice(3).map(String).join(" "));
+    for (const [what, answer] of [
+      ["no slot", []],
+      ["an empty envelope", [[]]],
+      ["text", ["OK"]],
+      ["one count only", [[0]]],
+      ["three counts", [[0, 0, 0]]],
+      ["a count as text", [["0", 0]]],
+      ["a set entry the mark never adds", [[0, 1]]],
+    ] as const) {
+      await seed(store);
+      next = "drop-before";
+      await payWithPayPal(store);
+      await age("at", 7 * DAY);
+      redis.pipeline = (async (commands: (string | number)[][]) => (isMark(commands[0]) ? answer : real(commands))) as typeof redis.pipeline;
+      try {
+        await settlePayPal(store);
+      } finally {
+        redis.pipeline = real;
+      }
+      const [raw] = await redis.pipeline([["HGETALL", OPEN]]);
+      const kept = JSON.parse(String((raw as string[])[1])) as { m?: unknown };
+      is(`${what}: not marked, not counted, still on its way`, [kept.m ?? null, (await counts()).manual ?? 0, await fields()], [null, 0, ["?"]]);
+    }
+    const p2 = posts;
+    await settlePayPal(store);
+    await settlePayPal(store);
+    const [raw] = await redis.pipeline([["HGETALL", OPEN]]);
+    const kept = JSON.parse(String((raw as string[])[1])) as { m?: unknown };
+    is("the next run marks it and counts it once, and sends nothing", [kept.m, (await counts()).manual, posts - p2, batches], [1, 1, 0, 0]);
+  }
+
   part("The settling gets the batch back and writing its id fails: the evidence stays, nobody is paid twice (review of Codex G on #2681)");
   {
     await seed(store);

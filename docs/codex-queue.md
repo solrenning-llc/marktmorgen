@@ -6319,6 +6319,8 @@ Crie uma seção pública de ferramentas gratuitas, cada uma com página própri
 
 245. [SP2] Página "Grow without switching"
 
+Estado (Claude 1, 12/11/2026 13h44 Fortaleza): **unidade 1 testada num PR** do ramo `claude/modest-faraday-f25rzq-grow`: página /grow-without-switching (no mapa do site) com os três planos e seus preços publicados, o que o Studio acrescenta ao Store e o Scale ao Studio (só as linhas da própria tabela da página de preços que mudam, com os mesmos valores, agrupadas como lá; nenhum número digitado na página), a troca de plano feita pelo próprio criador no cartão do plano, o que continua dele (pagamentos na própria conta Stripe; o arquivo dos dados principais, descrito como o estúdio o descreve) e, enquanto os planos não estão à venda, o mesmo aviso da página de preços; sem promessa de ganho.
+
 Estado: OR: após o Bloco A, na ordem já existente entre 206 [SH3] e 272 [HM1]; 232 [CA1] foi antecipado e não se repete; antes do Bloco B. Registro de posição; os estados e provas históricos abaixo permanecem válidos.
 Crie, em inglês americano, uma página que mostre como o criador começa no plano Store e cresce para o Studio e o Scale sem trocar de ferramenta, usando somente os preços e os limites reais de lib/plan.ts: o que cada plano acrescenta, que a troca de plano é feita pelo próprio criador, que os dados e os compradores continuam com ele (a conta Stripe é dele, e há exportação dos dados) e que não há perda de nada ao subir de plano. Nada de promessa de ganho ou de "marca global". Não altere preços, limites, nomes nem número de planos. Coordene com o item 224 [HL5] e com a página de preços.
 
@@ -7460,6 +7462,8 @@ Head `3afaed2e75b540d150295f1999d3dd6af5e71f7e` reprovado, sem incorporação/pu
 ### Ordem vinculante do Bloco de abertura
 
 **Condição de abertura — termos comerciais guardados, passo 2 (dono, 21/11/2026, 00h00 Fortaleza; OWNER-20261121-0000-COMMERCIAL-TERMS-STORAGE, que completa DONO-20261120-1814-CONTRATO-HASH; repassada pelo Claude 4, sessão 01S9eVA38w, no comentário 7056381951 do #4932, e gravada aqui pelo coordenador, Claude 5 ibqho, porque um PR de produto não edita esta fila, AC (d)):** sem este passo, as vendas não abrem. Num PR próprio e pequeno, aberto só depois que o PR `claude4/contract-terms-digest` estiver no main, sem empilhar (AC (g)), e antes da abertura; só esse PR liga `COMMERCIAL_TERMS_STORED`, e até lá a trava do código continua recusando toda política de custeio de contrato (escolha que o dono deixou ao Claude 4, sessão 01S9eVA38w, em 21/11/2026: "faça o que for mais seguro e correto", comentário 7057394872 do #4932; a gravação anterior, "no PR que liga a admissão de contratos", fica substituída nesse ponto, Pedidos repetidos, passo 3 (b)): (1) cada versão dos termos é gravada uma única vez no Redis pelo seu SHA-256, sem prazo de expiração, na família de dados da empresa, quando o primeiro contrato que a cita é admitido, e nada é gravado sem uso; (2) nunca é alterada nem apagada enquanto um contrato a cita, e fica guardada pelo menos enquanto esse contrato existir; (3) entra no backup diário existente e é conferida na restauração; (4) na leitura, o SHA-256 é recalculado, e uma divergência ou um texto ausente é recusado de forma visível; (5) espaço, leituras e backup entram no registro de custos com teto, e custo desconhecido reprova. O passo 1 (texto de cada versão no código, com teste que falha se o texto publicado mudar sem versão nova, e teste que bloqueia admitir contrato enquanto o passo 2 não existir) fica no PR `claude4/contract-terms-digest`. Os dois PRs: RED antes, revisão do Codex (dinheiro) e de outra família, 9/9 no head exato, `git merge-tree` limpo, CV, MV e AC. Nenhum preço, limite, comissão, imposto, teto, trava, flag ou texto dos termos muda por este registro; PLANS_ON_SALE e OPENING_REQUESTED continuam false.
+
+**Condição de abertura — auditoria do Codex nos PRs de dinheiro revisados sem ele (dono, 21/11/2026, 14h37 Fortaleza; OWNER-20261121-1437-CODEX-ABSENT-MONEY-REVIEW, repassada pelo Claude 4, sessão 01S9eVA38w, no comentário 7066639814 do #4932, e gravada aqui pelo coordenador, Claude 5 ibqho, porque um PR de produto não edita esta fila, AC (d)):** enquanto o Codex estiver sem uso (até 25/11/2026, 11h05 Fortaleza), nada espera por ele e nada chega ao cliente sem a revisão dele. (1) #5016 e #5017: a revisão de dinheiro do Codex é substituída por uma revisão de dinheiro de uma família fora do Claude 4 no head exato, além das demais revisões exigidas, que vale só se leu o diff e rodou, sobre a junção com o main, o conjunto de teto da AC (l) e os testes de margem, com o resultado escrito no PR; depois disso, a fila normal (9/9 no head exato, `git merge-tree` limpo contra um `origin/main` buscado há menos de uma hora, ordem de vez, `fila #N @sha` pedido por outra família). (2) O PR `claude4/contract-terms-digest`: a revisão do Codex é substituída por duas revisões de dinheiro, de duas famílias diferentes fora do Claude 4, no head exato, que conferem o que o dono listou (o contrato prova exatamente o que o cliente aceitou; a reconstrução é idêntica byte a byte ao formato antigo; digest errado ou texto ausente é recusado; o teste que bloqueia a admissão de contrato sem o armazenamento do passo 2; os cinco testes de contrato `contract-admission-ack`, `restart-activation-ack`, `restart-recovery-ack`, `restart-result-ack` e `restart-submission-ack`; o maior contrato cabe em 1.048.576 bytes sobre a junção); um achado é corrigido na causa, com teste, e as revisões valem então para o head novo. (3) **Antes da abertura, quando o Codex voltar, ele revisa os três PRs já incorporados por esta regra; todo achado vira correção com teste antes de qualquer venda.** Sem essa auditoria registrada como feita, as vendas não abrem. Nenhum preço, limite, comissão, imposto, teto, trava, flag ou texto dos termos muda por este registro; PLANS_ON_SALE e OPENING_REQUESTED continuam false.
 
 **Exceção PV8, dono25/10/2026 16h47Fortaleza:** após registrarPV8,permitida execução(a)–(c)de desperdíciosCI semesperarPV e seminterromperAB(a);coberturacompletaantesdeproduçãocontinuaobrigatória. RestantePV8segueposiçãoPV. Não privatizar repositório.
 
@@ -23909,5 +23913,33 @@ Acessibilidade (AX274): rótulo visível na opção de troca, operação por tec
 Custo: o cookie não gera custo de fornecedor. Guardar a escolha no perfil (servidor) entra no pior caso de cada plano, com teto, antes de ser ligado (regra MR); custo desconhecido reprova, nunca é zero.
 
 Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; mudar a hora UTC de qualquer regra que seja de fato em UTC; usar dados reais nos testes.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## IV3 — Decisões do dono sobre as três pendências do art. 9a (21/11/2026)
+
+Etiqueta: [IV3], item 793.
+
+Solicitação do dono (21/11/2026, 15h29, horário de Fortaleza), OWNER-20261121-1529-ART9A-PENDING-DECISIONS, na sessão do Claude 4 (01S9eVA5BC), com o complemento OWNER-20261121-HHMM-HMRC-EXCHANGE-RATES (por volta das 15h35). O texto literal das duas está em AGENTS.md, seção IV, item (j), e o resumo técnico em docs/eu-vat-article-9a.md, seção "Owner's decisions of 21 Nov 2026 on the three open points". Complementa o 789 [IV1] e o 790 [IV2].
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. A busca no main e nos PRs abertos, pelos dois identificadores, pela data e pela etiqueta [IV3] (livre), não achou registro equivalente. O número 793 é o próximo livre (791 está no #4981 e 792 é [FZ1] no main; conferido em 21/11/2026, por volta das 18h45 UTC).
+
+Estado inicial: na fila. Posição: condição do Bloco de abertura, junto do 789 [IV1]. A ordem dos outros itens não muda.
+
+Unidades, uma por PR, nesta ordem (decisão do coordenador, 21/11/2026, 18h38 UTC):
+1. As taxas de câmbio mensais do HMRC para declarar em libras uma venda ao Reino Unido feita em outra moeda: novembro e dezembro de 2026, no #5032.
+2. A taxa de processamento da Stripe sobre a parte do IVA fica com o criador:
+   - a regra nos Termos e na página de preços e taxas, em inglês americano simples, com um exemplo em números;
+   - uma linha própria no extrato de cada venda;
+   - teste de que não há sobretaxa ao comprador;
+   - teste de que nenhuma comissão incide sobre imposto.
+3. O registro fiscal guardado pelo prazo de cada lei (UE 10 anos, Reino Unido pelo menos 6, Noruega, Suíça e Canadá conferidos em fonte oficial), com a política de privacidade e os Termos no mesmo PR, o aviso no checkout e o espaço no registro de custos com teto.
+4. A tabela de alíquotas por produto do Reino Unido, a partir da página "VAT rates on different goods and services", guardada com o endereço, a data da consulta, a data de atualização e o SHA-256.
+
+Cada PR: teste que falha antes; revisão de duas famílias de fora do Claude 4 (imposto, dinheiro e dados pessoais); as 9 verificações verdes no head exato; `git merge-tree` limpo (CV, MV, AC).
+
+REGRA DE MARGEM (MR, 27/10/2026): a receita, a comissão e a margem do Marktmorgen não pagam a taxa de processamento sobre a parte do IVA; até a unidade 2 estar publicada, o pior caso do Marktmorgen continua contando esse custo. Custo desconhecido reprova, nunca é zero.
+
+Proibido: mudar preços, limites visíveis, comissão, tetos, PLANS_ON_SALE, OPENING_REQUESTED, EU_VAT_COLLECT_REVIEWED, UK_VAT_COLLECT_REVIEWED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; usar dados reais nos testes.
 
 Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.

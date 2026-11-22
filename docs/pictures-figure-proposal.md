@@ -36,11 +36,11 @@ The figure kept full every day, at the dearest store a file may be in (`STORAGE_
 | Unit | Pictures' figure, the period | Net without it | Net with it |
 | --- | --- | --- | --- |
 | Store monthly | $0.0446 | $45.16 | $45.12 |
-| Store yearly | $0.5347 | $450.19 | $449.74 |
+| Store yearly | $0.5347 | $450.17 | $449.72 |
 | Studio monthly | $0.1157 | $290.26 | $290.16 |
-| Studio yearly | $1.388 | $2,837.07 | $2,835.89 |
+| Studio yearly | $1.388 | $2,837.05 | $2,835.88 |
 | Scale monthly | $0.347 | $654.98 | $654.68 |
-| Scale yearly | $4.1641 | $6,408.18 | $6,404.65 |
+| Scale yearly | $4.1641 | $6,408.16 | $6,404.63 |
 
 Each keeps a positive net. The new cost line would go into `tests/plan-cost-registry.ts` with the figure, in the unit that builds it.
 

@@ -42,6 +42,12 @@ for (const [what, ch] of [["a three-byte character", "€"], ["a quote", '"'], [
 // (lib/order-data.ts: the field, the value and an entry, a quarter more, rounded up), not at contactBytes.
 part("A contact an order writes");
 is("the largest counts the order's charge too", rows[0].largestBytes >= orderContactBytes(largestContact()), true);
+// A stored contact carries where its room is counted (r, lib/contacts.ts placed()): "o" when an order wrote it, "c"
+// otherwise. The largest is measured as stored, with it (Claude 5 icEJ's LEVE on #3864, 7074425508).
+is("the largest covers a contact stored with its r, either way", [
+  rows[0].largestBytes >= contactBytes({ ...largestContact(), r: "c" }),
+  rows[0].largestBytes >= orderContactBytes({ ...largestContact(), r: "o" }),
+], [true, true]);
 is("the order's charge of the largest is above its contacts' charge", orderContactBytes(largestContact()) > contactBytes(largestContact()), true);
 is("the record names the order's charge", renderContactsCost().includes("orderGrowth"), true);
 

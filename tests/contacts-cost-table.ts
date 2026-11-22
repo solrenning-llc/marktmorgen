@@ -47,8 +47,9 @@ export type ContactRow = { tier: Tier; roomBytes: number; smallestBytes: number;
 
 export function contactRows(): ContactRow[] {
   const smallestBytes = contactBytes(smallestContact());
-  // The largest is the dearer of the two ways a contact is counted (Codex X6, 7059427028).
-  const largestBytes = Math.max(contactBytes(largestContact()), orderContactBytes(largestContact()));
+  // The largest is the dearer of the two ways a contact is counted (Codex X6, 7059427028), each as it is stored, with
+  // where its room is counted (r: "c" outside an order, "o" by an order; Claude 5 icEJ on #3864).
+  const largestBytes = Math.max(contactBytes({ ...largestContact(), r: "c" }), orderContactBytes({ ...largestContact(), r: "o" }));
   return TIERS.map((tier) => {
     const roomBytes = DATA_ROOM_BYTES[tier];
     const fitSmallest = Math.floor(roomBytes / smallestBytes);
@@ -72,7 +73,7 @@ Queue item 457 [EL1] asks for the worst-case cost of keeping contacts on each pl
 ## Where a contact is kept, and what it costs
 
 - **Every contact is taken from the plan's data room.** That holds for a sign-up, an import, the API and labels (\`needContacts\`, \`lib/contacts.ts\`), and for a buyer an order puts on the list (\`lib/order-data.ts\`). A contact written outside an order takes its record plus its future unsubscribe link (\`contactBytes\`). When the room is full, the write is refused.
-- **A contact an order writes is counted differently,** in the orders' part: its address, its whole record and an entry, a quarter more, rounded up (\`lib/order-data.ts\`), and each later change by what it grew, a quarter more, rounded up each time (\`orderGrowth\`, \`lib/contacts.ts\`). The largest such contact written whole takes **${n(orderContactBytes(largestContact()))} bytes**, more than the same contact counted outside an order. A contact an order wrote and that then grew in many small writes can take a little more again: each write rounds up to ${n(DATA_STEP_BYTES)} bytes, which this table does not add.
+- **A contact an order writes is counted differently,** in the orders' part: its address, its whole record and an entry, a quarter more, rounded up (\`lib/order-data.ts\`), and each later change by what it grew, a quarter more, rounded up each time (\`orderGrowth\`, \`lib/contacts.ts\`). The largest such contact written whole takes **${n(orderContactBytes({ ...largestContact(), r: "o" }))} bytes**, more than the same contact counted outside an order. A contact an order wrote and that then grew in many small writes can take a little more again: each write rounds up to ${n(DATA_STEP_BYTES)} bytes, which this table does not add.
 - **The room is already priced full, every day of the month,** in the \`database-storage\` line of \`tests/plan-cost-registry.ts\`. Keeping contacts therefore adds no storage cost of its own, on any plan, monthly or yearly. What a plan keeps after it ends is priced in \`retained-data\`. Sending to contacts is priced by the plan's monthly emails, and reading them for an export by the \`export\` reads, which count up to \`MAX_LEADS\`.
 
 ## How many fit

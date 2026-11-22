@@ -92,6 +92,35 @@ async function main(): Promise<void> {
     is("after the try their room is given back once, exactly", notesRoom(), 0);
   }
 
+  part("A webhooks failure does not hold back an independent erasure");
+  {
+    const owner = "notes-webhooks-retry@example.com";
+    const { sid, statsId, store } = await extraWithNotes(owner, "hooknotesfirst", "hooknotesextra");
+    const field = `${statsId}|${sid}`;
+    const room = dataKey(store)!;
+    redis.pipeline = async (commands: Command[]) => {
+      if (commands.some(([name, key]) => name === "LRANGE" && key === `nl:hooks:log:${statsId}`)) {
+        throw new Error("synthetic webhook log read failure");
+      }
+      return real(commands);
+    };
+    try {
+      const response = await deleteFromStudio(owner, "hooknotesextra", sid);
+      is("the deleted store stays queued for cleanup", [response.status, redis.run(["HEXISTS", "nl:forget:q", field])], [303, 1]);
+      const tried = await retryStoreForgets(Date.now() + 30_000);
+      is("webhooks still need retry and the attempt is not reported as done", [tried.done, tried.failed, redis.run(["HEXISTS", "nl:forget:q", field])], [0, 1, 1]);
+      is("the retry removes the assistant notes and returns their room while webhooks are unavailable", [
+        redis.run(["EXISTS", notesKey(statsId)]), Number(redis.run(["HGET", room, "amem"]) ?? 0),
+      ], [0, 0]);
+    } finally {
+      redis.pipeline = real;
+    }
+    const finished = await retryStoreForgets(Date.now() + 30_000);
+    is("once webhooks read again, cleanup finishes without returning room twice", [
+      finished.done, redis.run(["HEXISTS", "nl:forget:q", field]), Number(redis.run(["HGET", room, "amem"]) ?? 0),
+    ], [1, 0, 0]);
+  }
+
   done();
 }
 

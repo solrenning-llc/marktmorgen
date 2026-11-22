@@ -117,6 +117,9 @@ const SCRIPTS: Record<string, Script> = {
   },
 };
 
+/** The names of the scripts above, for tests/redis-memory-take-scripts.test.ts. */
+export const TAKE_SCRIPT_NAMES: readonly string[] = Object.keys(SCRIPTS);
+
 /** Makes `store` run the named scripts above, and everything else as before. */
 export function withTakeScripts(store: MemoryRedis): MemoryRedis {
   const base = store.run.bind(store);

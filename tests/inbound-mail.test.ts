@@ -280,6 +280,44 @@ async function main(): Promise<void> {
   is("a possibly accepted message remains an explicit failure without another POST", [unknown.status, unknownAgain.status, outboundPosts - postsBefore, sent.length - sentBefore], [500, 500, 1, 0]);
   is("the original provider source remains available for reconciliation", (MAILS[uncertainId] as Record<string, unknown>).text, (MAILS[A] as Record<string, unknown>).text);
 
+  part("A creator's hourly count that cannot be read: a failure, and the retry is heard (Claude 2's and Claude 1's LOW on #3067)");
+  // withinLimit throws for a count it cannot read; the route used to answer 500 with the message still marked seen,
+  // so Resend's retry was dropped as a repeat.
+  process.env.MARKETING_FROM_DOMAIN = "mail.marktmorgen.com";
+  // The next hour: the flood above spent this store's hourly count.
+  for (const key of redis.keys().filter((k) => k.startsWith("nl:rl:creator-inbound:"))) redis.run(["DEL", key]);
+  const realPipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const first = commands[0] ?? [];
+    if (first[0] === "INCR" && String(first[1]).startsWith("nl:rl:creator-inbound:")) return [];
+    return realPipe(commands);
+  }) as typeof redis.pipeline;
+  const countUnread = newMailLike(E);
+  const sentBeforeCount = sent.length;
+  const unreadCount = await POST(announce(countUnread, { id: "msg_count_unread" }));
+  redis.pipeline = realPipe;
+  is("answered with a failure, nothing sent", [unreadCount.status, sent.length - sentBeforeCount], [500, 0]);
+  const countRetry = await POST(announce(countUnread, { id: "msg_count_unread" }));
+  is("and the retry is heard and sent", [countRetry.status, ((await countRetry.json()) as { result?: string }).result, sent.length - sentBeforeCount], [200, "sent", 1]);
+  is("to the creator", sent.at(-1)?.body.to, ["ana@example.org"]);
+  // Only this pass's own undecided mark is let go: a mark another pass holds by now (another value) stays.
+  for (const key of redis.keys().filter((k) => k.startsWith("nl:rl:creator-inbound:"))) redis.run(["DEL", key]);
+  const otherPass = newMailLike(E);
+  const otherMark = `nl:inbound:counted:${otherPass}`;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const first = commands[0] ?? [];
+    if (first[0] === "INCR" && String(first[1]).startsWith("nl:rl:creator-inbound:")) {
+      // While this pass counts, its mark ran out and another pass claimed it, with its own value.
+      redis.run(["SET", otherMark, "1700000000000.000000001", "EX", 3_600]);
+      return [];
+    }
+    return realPipe(commands);
+  }) as typeof redis.pipeline;
+  const raced = await POST(announce(otherPass, { id: "msg_count_raced" }));
+  redis.pipeline = realPipe;
+  is("a count that cannot be read with another pass's mark there: a failure, and that pass's mark is kept", [raced.status, redis.run(["GET", otherMark])], [500, "1700000000000.000000001"]);
+  delete process.env.MARKETING_FROM_DOMAIN;
+
   part("Names and addresses");
   is("a name and an address", parseSender('"Doe, Jane" <jane@example.com>'), { name: "Doe, Jane", address: "jane@example.com" });
   is("a bare address", parseSender("jane@example.com"), { name: "", address: "jane@example.com" });

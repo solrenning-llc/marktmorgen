@@ -183,7 +183,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "layout", title: "Collections, each with its own page", body: "Group products under a name of your own, like \u201cBeginner guides\u201d: up to 12 collections of up to 24 products each, and a product can be in more than one. Each gets its own page at /@you/shop/<name> to link to from a bio, an email or an ad, and a link above your products on your store page. On it, the products that can go in a cart can be added together, up to four at a time." },
           { icon: "plus", title: "Goes well with", body: "On each product, pick up to three of your other products that go with it. Its page shows them under \u201cGoes well with\u201d, said as your pick, with Add to cart where they can go in one, and the open cart offers them while that product is in it. Nothing about it claims anything about other buyers." },
           { icon: "camera", title: "A picture on each product", body: "Shown three ways, product by product: small beside the title, beside the title and the summary, or across the top of the card." },
-          { icon: "sparkle", title: "A cover made in one click", body: "No picture yet? Make a cover in the studio from the product's title, a short line saying what it is (in your store's language) and a line under it, in your store's color and letters. Six designs, each word drawn with enough contrast to read whatever your color. On Stan, by its help center read on October 11, 2026, you select an image of your own, 400 by 400." },
+          { icon: "sparkle", title: "A cover made in one click", body: "No picture yet? Make a cover in the studio from the product's title, a short line saying what it is (in your store's language) and a line under it, in your store's color and letters. Six designs, each word drawn with enough contrast to read whatever your color. On Stan, by its help center read on November 15, 2026, you select an image of your own, 400 by 400, or, for a link, one from its stock library." },
           { icon: "window", title: "Sell from your own website", body: "Copy a card or a button for any product and paste it into your blog or site. The card shows the picture, the price and its buyers' rating, changes when you change the product, and opens Stripe's checkout in a new tab. Sales from it are listed under the name you give the place." },
           { icon: "window", title: "Checkout over your own pages", body: "A link and a short script for WordPress, Webflow, Squarespace, Ghost or your own HTML: pressed, it opens a product's card or your list's sign-up form over the page, on up to 10 sites you list, and a plain link anywhere else. Buyers pay on Stripe's page, on your own Stripe account. Your page hears marktmorgen:checkout, marktmorgen:optin and, back from paying, marktmorgen:purchase; your webhooks get the sale with its utm tags and site. The script sets no cookie and asks for nothing until it is pressed.", href: "/developers/checkout-script" },
           { icon: "music", title: "A private podcast", body: "Sell a show as a product, once or as a membership. Each buyer gets a feed of their own for Apple Podcasts, Overcast, Pocket Casts or most other apps, and new episodes arrive in it like any show's. A refund, or a membership that ends, stops every episode from playing for that buyer within minutes, and podcast directories are told to keep out." },
@@ -232,7 +232,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           "There is one layout, a single column that reads on a phone: you choose the theme, the color, the letters, the background and which part of the page comes first, not where parts sit beside each other.",
           "Each store supports up to 2,000 products and 100 links.",
           "No custom code on the page, and the whole store cannot be put inside another website. One product can, as a card or a button.",
-          "Buyers pay through Stripe, with the ways to pay your own Stripe account has on. Do not count on PayPal: Stripe offers it only to accounts in the EU (except Hungary), the UK, Switzerland, Norway and Liechtenstein, and its documentation, read on September 28, 2026, lists it as not supported for direct charges, which is how every sale here is charged.",
+          "Buyers pay through Stripe, with the ways to pay your own Stripe account has on. Do not count on PayPal: Stripe offers it only to accounts in the EU (except Hungary), the UK, Switzerland, Norway and Liechtenstein, and its documentation, read on November 15, 2026, lists it as not supported for direct charges, which is how every sale here is charged.",
         ],
       },
       {
@@ -278,7 +278,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       },
       {
         kind: "lead",
-        text: `Stan's own help center lists pricing tiers among its most requested features and says there is no native way to offer them under one product — read on September 18, 2026. Here they are on the ${PLAN_AT.creator} plan.`,
+        text: `Stan's own help center lists pricing tiers among its most requested features and says there is no native way to offer them under one product — read on November 15, 2026. Here they are on the ${PLAN_AT.creator} plan.`,
       },
       {
         kind: "uses",
@@ -439,7 +439,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           { icon: "bank", title: "Your customer, not ours", body: "Members sit in your Stripe dashboard. If you ever leave Marktmorgen, the paying members stay with you." },
           { icon: "door", title: "Canceling on their own", body: "On Stripe's page, at the end of the period already paid for. Nobody has to write to you and wait." },
-          { icon: "clock", title: "A pause instead of goodbye", body: "If you choose, a member who would cancel can pause instead, for up to the one, two or three months you allow, from the same page. What they paid for stays open to the last day; then nothing is charged and the membership is closed until the pause ends and starts again by itself. Coming back early takes a payment that day. Monthly memberships only, once a year each, and the member is emailed the dates in your store's language. Read on September 30, 2026: Kajabi lets a creator pause a member by hand." },
+          { icon: "clock", title: "A pause instead of goodbye", body: "If you choose, a member who would cancel can pause instead, for up to the one, two or three months you allow, from the same page. What they paid for stays open to the last day; then nothing is charged and the membership is closed until the pause ends and starts again by itself. Coming back early takes a payment that day. Monthly memberships only, once a year each, and the member is emailed the dates in your store's language. Read on November 15, 2026: Kajabi lets a creator pause a member by hand, and, for subscriptions paid through Kajabi Payments, lets members pause their own subscription from their billing page." },
           { icon: "gift", title: "An offer before they go", body: "If you choose, a member who presses Cancel is offered a discount you set — 10% to 50% off one to three payments — once per membership, on Stripe's own page, and declines it in one press. An offer of more than one payment is made only on monthly memberships." },
           { icon: "card", title: "When a card fails", body: "The member gets one email with a link that pays that renewal and makes the card that worked the one used next time. It says when the card on file is tried again, or that it will not be." },
           { icon: "chart", title: "Membership numbers", body: "Monthly recurring revenue, paying members and trials, churn over 30 days and the share of trials that became paying, overall and by membership, read from your own Stripe account, with how each is worked out written beside it." },
@@ -592,7 +592,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       {
         kind: "features",
         title: "Every tool on your own account",
-        intro: "Stan's pricing page, read on September 20, 2026, puts discount codes, order bumps, upsells and payment plans on its $99 plan.",
+        intro: "Stan's pricing page, read on November 15, 2026, puts discount codes, order bumps, upsells and payment plans on its $99 plan.",
         items: [
           { icon: "clock", title: "A sale with a real end", body: "Pick a percentage and when it starts and ends, for every product or only some. While it runs the old price is crossed out on your store and on each product's page, with when it ends, and Stripe takes it off with no code to type. At the end it stops by itself, and the discount stops working at Stripe too." },
           { icon: "percent", title: "Discount codes", body: "A word you choose, a percentage or an amount off, and a cap on uses if you want one. Up to twenty codes, kept as coupons on your own Stripe. Shared as a link (?code=SPRING), a code applies itself at checkout." },
@@ -875,7 +875,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 30: what someone starting out asks, answered by the code (lib/email-faq.ts).
           ...emailBeginnerQuestions(),
-          { q: `Why is email on Studio and not on the ${PLAN_AT.creator} plan?`, a: `Because every email sent costs us money, and the ${PLAN_AT.creator} plan is priced to cover a store, not a mailing list. Stan puts email on its $99 plan as well — read on its pricing page on September 20, 2026.` },
+          { q: `Why is email on Studio and not on the ${PLAN_AT.creator} plan?`, a: `Because every email sent costs us money, and the ${PLAN_AT.creator} plan is priced to cover a store, not a mailing list. Stan puts email on its $99 plan as well — read on its pricing page on November 15, 2026.` },
           { q: "Can I import the list I already have?", a: "Yes, on every plan, from a CSV file of up to 50,000 rows, as long as those people agreed to hear from you. Each billing month your imports bring in up to " + IMPORT_ALLOWANCES.creator.rows.toLocaleString("en-US") + " rows on Store, " + IMPORT_ALLOWANCES.pro.rows.toLocaleString("en-US") + " on Studio and " + IMPORT_ALLOWANCES.scale.rows.toLocaleString("en-US") + " on Scale. You confirm that each time, a consent column in the file narrows it further, and anyone who unsubscribed here stays unsubscribed. Nobody is emailed because of the import." },
           { q: `What if my list needs more than ${PRO_EMAILS} emails a month?`, a: PLANS_ON_SALE ? `Move up to Scale from your studio: the same plan with up to ${SCALE_MONTHLY_EMAILS.toLocaleString("en-US")} emails a month, at $${PLAN_PRICES.scale.month / 100} a month or $${(PLAN_PRICES.scale.year / 100).toLocaleString("en-US")} a year. You are charged the difference for the rest of the period you already paid for, and you can go back to Studio whenever you like. Without it, an email that passes the month's number waits and goes out by itself when the month turns.` : `Scale is the same plan with up to ${SCALE_MONTHLY_EMAILS.toLocaleString("en-US")} emails a month, at $${PLAN_PRICES.scale.month / 100} a month or $${(PLAN_PRICES.scale.year / 100).toLocaleString("en-US")} a year, but plans are not on sale yet, so no store can move to it today. An email that passes the month's number waits and goes out by itself when the month turns.` },
           { q: `Can I email people on the ${PLAN_AT.creator} plan at all?`, a: `Your list downloads as a CSV on every plan, and on the ${PLAN_AT.creator} plan your store can send the people who agree straight to your own Mailchimp, Kit, beehiiv or MailerLite. Writing to them from Marktmorgen is what Studio adds.` },
@@ -934,7 +934,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 22: what someone starting out asks, answered by the code (lib/domain-faq.ts).
           ...domainBeginnerQuestions(DOMAINS),
-          { q: "Does Stan offer your own domain?", a: "No. Our comparison with Stan, checked against their own help center and pricing in September 2026, lists a custom domain as not available." },
+          { q: "Does Stan offer your own domain?", a: "Only on a new $299-a-month Creator Max plan that it says is not yet open to every creator, according to its help center, read on November 15, 2026. On its $29 and $99 plans the address is stan.store/yourusername." },
           { q: "Who owns the domain?", a: "You do, and you keep access to its settings. If you ever leave, remove the record and point it wherever you like." },
           ...(DOMAINS ? [{ q: "How long does a domain take to start working?", a: "Usually a few minutes after you add the records your studio shows where you bought the domain, and up to 48 hours. Press “Check again” until it says “Live”. The domain is held for your store for three days while you do this." }] : []),
         ],
@@ -969,7 +969,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       {
         kind: "features",
         title: `Your ad pixels, on the ${PLAN_AT.creator} plan`,
-        intro: "Stan puts advertising pixels on its $99 plan, according to its pricing page, read on September 20, 2026.",
+        intro: "Stan puts advertising pixels on its $99 plan, according to its pricing page, read on November 15, 2026.",
         items: [
           { icon: "target", title: "Meta, Google, TikTok and Pinterest", body: "Paste the pixel's ID. Your pages report every view, every checkout started, every lead and every purchase with its amount." },
           { icon: "shield", title: "Asked first, where the law says so", body: "Visitors in the European Economic Area, the UK, Switzerland and Brazil are asked in plain words, and nothing loads unless they say yes." },
@@ -1149,7 +1149,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { q: "Can members see each other's email addresses?", a: "No. Other members see only the name someone chose, and the directory lists only those who asked to be listed. You see members' addresses in your studio, because they are your buyers." },
           { q: "What happens after a refund?", a: "A payment you refund in full on your Stripe account stops opening the community, within five minutes." },
           { q: "Can buyers I bring over from another platform get in?", a: "Yes. A buyer you import for a product that opens the community is let in, like anyone who bought it here." },
-          { q: "Does Stan have live events?", a: `Yes. Stan has a community, and its help center, read on September 27, 2026, adds webinars to it as a product members sign up for, with Zoom or Google Meet links made automatically. Ours holds live events members RSVP to, in a private video room, at your own link or in a Google Meet made on your Google Calendar, with no Zoom link made for you yet. Ours is on the ${PLAN_AT.creator} plan; emailing announcements needs Studio.` },
+          { q: "Does Stan have live events?", a: `Yes. Stan has a community, and its help center, read on November 15, 2026, adds webinars to it as a product members sign up for, with Zoom or Google Meet links made automatically. Ours holds live events members RSVP to, in a private video room, at your own link or in a Google Meet made on your Google Calendar, with no Zoom link made for you yet. Ours is on the ${PLAN_AT.creator} plan; emailing announcements needs Studio.` },
         ],
       },
     ],
@@ -1227,7 +1227,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           ...liveEventsBeginnerQuestions(),
           { q: "Which plan are live events on?", a: `Every plan, the ${PLAN_AT.creator} one included, with the community. The reminders and the emails about a move or a cancellation are sent on every plan and are not counted in Studio's monthly emails.` },
           { q: "Can someone who is not a member get the link?", a: "Not from us. Emails, calendar files and the feed point to the event's page, and the page shows the way in only from 15 minutes before, only to a member who may come, checked again on every visit. A member whose membership lapsed, or who was refunded or taken out, loses it with the rest of the community." },
-          { q: "How does this compare with Stan?", a: "Stan adds webinars to its community as a product members sign up for on its landing page, with Zoom or Google Meet links made automatically, according to its help center, read on September 27, 2026. Ours are events members RSVP to, with reminders, a cap, a room in the page or a Google Meet made on your Google Calendar, and replays, with no Zoom link made for you yet." },
+          { q: "How does this compare with Stan?", a: "Stan adds webinars to its community as a product members sign up for on its landing page, with Zoom or Google Meet links made automatically, according to its help center, read on November 15, 2026. Ours are events members RSVP to, with reminders, a cap, a room in the page or a Google Meet made on your Google Calendar, and replays, with no Zoom link made for you yet." },
         ],
       },
     ],
@@ -1383,7 +1383,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           // 534 [FQ1], unit 11: what someone starting out asks, answered by the code (lib/bundle-faq.ts).
           ...bundleBeginnerQuestions(),
           { q: "What happens when I change a product in a bundle?", a: "Its buyers get the product as it is now, its current file, link or lessons, exactly as the product's own buyers do. Which products they get is fixed when they pay." },
-          { q: "Does Stan have bundles?", a: "Its help center, read on September 28, 2026, lists bundles among the files you can sell as one digital download, and we found no product type there that hands over other products. Here a bundle is its own product, and each product in it is delivered as itself." },
+          { q: "Does Stan have bundles?", a: "Its help center, read on November 15, 2026, lists bundles among the files you can sell as one digital download, and we found no product type there that hands over other products. Here a bundle is its own product, and each product in it is delivered as itself." },
         ],
       },
     ],
@@ -1517,7 +1517,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 15: what someone starting out asks, answered by the code (lib/calendar-faq.ts).
           ...calendarBeginnerQuestions(),
-          { q: "Does Stan sync calendars?", a: "Stan's help center, read on September 26, 2026, lists Google Calendar for its calls. Ours reads Google, Outlook and iCloud calendars by their private address, and writes events only for calls set to Google Meet, on a Google Calendar you connect." },
+          { q: "Does Stan sync calendars?", a: "Stan's help center, read on November 15, 2026, lists Google Calendar for its calls. Ours reads Google, Outlook and iCloud calendars by their private address, and writes events only for calls set to Google Meet, on a Google Calendar you connect." },
           { q: "What happens to my calendar's address?", a: "It is stored with your store and used only to read your busy times. Once saved it is never shown again, not even to you. If you are ever unsure, reset it in your calendar app and the old one stops working." },
           { q: "Does it block group calls and live sessions too?", a: "It hides call times you are busy for. Live sessions are on the dates you set yourself, so they are yours to place around your calendar." },
         ],
@@ -1585,7 +1585,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { q: "How do I know a message came from you?", a: "Check its Marktmorgen-Signature header against the secret you were shown when you added the address, and check that its time is recent. When you make a new secret, the old one keeps signing beside it for a day, as a second v1 in the same header: accept a message when any v1 matches." },
           { q: "What if a message did not arrive?", a: "It is tried again by itself for about forty hours. If it still failed, press Send again beside it in your studio's log: the same message, with the same event id, is sent once more, so a receiver that already has it can ignore the repeat." },
           { q: "What if the same event arrives twice?", a: "Every event has an ID made from what it is about, and it is sent once however often it is noticed. Keep the IDs you have seen and ignore a repeat, in case a retry crosses a slow answer." },
-          { q: "Does Stan have webhooks?", a: "Not according to its help center, read on September 17, 2026." },
+          { q: "Does Stan have webhooks?", a: "Not according to its help center, read on November 15, 2026." },
         ],
       },
     ],
@@ -1652,8 +1652,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { q: "Does passing a quiz count as finishing the lesson?", a: "Yes. Passing marks the lesson done, which is what a certificate counts." },
           { q: "When is a lesson with an assignment done?", a: "When the student hands it in, or, if you read each one, when you approve it. Either way it counts toward the certificate, and you choose whether the lessons after it wait." },
           { q: "Where are the files students hand in kept?", a: "Privately, with your store's files, where only the student who handed one in and you and your team can download it. Removing the assignment or the lesson deletes them." },
-          { q: "Does Kajabi take written work and files?", a: "Its assessments take a paragraph or a file upload of up to 10 MB, according to its help center, read on October 11, 2026." },
-          { q: "Does Stan have quizzes and certificates?", a: "Not according to its help center, read on September 17, 2026." },
+          { q: "Does Kajabi take written work and files?", a: "Its assessments take a paragraph or a file upload of up to 10 MB, according to its help center, read on November 15, 2026." },
+          { q: "Does Stan have quizzes and certificates?", a: "Not according to its help center, read on November 15, 2026." },
         ],
       },
     ],
@@ -1924,7 +1924,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 9: what someone starting out asks, answered by the code (lib/sales-page-faq.ts).
           ...salesPageBeginnerQuestions(),
-          { q: "Which plan are sales pages on, here and on Stan?", a: `Every plan, the ${PLAN_AT.creator} one included. On Stan, by its help center read on September 28, 2026, each product has a checkout page with a description and a video that can be made a private landing page on every plan, and funnels of several pages are on its $99 plan.` },
+          { q: "Which plan are sales pages on, here and on Stan?", a: `Every plan, the ${PLAN_AT.creator} one included. On Stan, by its help center read on November 15, 2026, each product has a checkout page with a description and a video that can be made a private landing page on every plan, and funnels of several pages are on its $99 plan.` },
           { q: "Who on my team can edit sales pages?", a: "You, an Admin and an Editor. Support cannot." },
           { q: "Can I put a testimonial I collected on the page?", a: "Yes, in the Said elsewhere block, if it was said in public: their words as they said them, who said them, and the address of the post, video or comment, shown as a link so visitors can check it. The Reviews block shows only reviews written by people who paid, with their stars, and nothing you type can appear as one." },
         ],
@@ -2031,7 +2031,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       },
       {
         kind: "lead",
-        text: "On Stan, reviews are added by the creator: its help center, read on September 27, 2026, says there is no way for customers to write one on a Stan store. Here, only customers can.",
+        text: "On Stan, reviews are added by the creator: its help center, read on November 15, 2026, says there is no way for customers to write one on a Stan store. Here, only customers can.",
       },
       {
         kind: "features",
@@ -2113,7 +2113,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         intro: "Said here so nobody signs up expecting it.",
         items: [
           "One language per store. A page does not change language with each visitor's browser, and what you write yourself, such as product names, descriptions and lessons, is shown as you wrote it, not translated.",
-          `Do not count on Stripe's own PayPal here. Stripe offers PayPal only to accounts in the EU (except Hungary), the UK, Switzerland, Norway and Liechtenstein, and its documentation, read on September 28, 2026, lists it as not supported for direct charges, which is how every sale here is charged. ${paypalConnectionWords()}${paypalAtCheckout() ? "" : " Stan lets creators connect a PayPal Business account, so on PayPal Stan is ahead for now."}`,
+          `Do not count on Stripe's own PayPal here. Stripe offers PayPal only to accounts in the EU (except Hungary), the UK, Switzerland, Norway and Liechtenstein, and its documentation, read on November 15, 2026, lists it as not supported for direct charges, which is how every sale here is charged. ${paypalConnectionWords()}${paypalAtCheckout() ? "" : " Stan lets creators connect a PayPal Business account, so on PayPal Stan is ahead for now."}`,
           "Slow bank debits and vouchers — ACH, SEPA and Bacs Direct Debit, bank transfers, Boleto, OXXO, Konbini, Multibanco — and stablecoins are left out on purpose, because they are not confirmed while the buyer waits.",
           "One-click offers after paying are shown only to buyers who paid by card, Apple Pay or Google Pay.",
           "One currency per store at a time. Changing it keeps every price's number — 49 dollars becomes 49 euros — so check your prices; it waits while a membership or payment plan is still running, and moving between the yen and a currency with cents is refused while the store has prices.",
@@ -2127,7 +2127,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           // 534 [FQ1], unit 25: what someone starting out asks, answered by the code (lib/currency-faq.ts).
           ...currencyBeginnerQuestions(),
           { q: "Does Marktmorgen take a cut of Klarna or other methods?", a: feeWords().fromAMethod },
-          { q: "What does Stan offer?", a: "Stan offers Stripe and PayPal, and one currency per store chosen from ten, according to its help center, read on September 28, 2026. We offer 15, so we are ahead on currencies, and behind on PayPal." },
+          { q: "What does Stan offer?", a: "Stan offers Stripe and PayPal, and one currency per store chosen from ten, and shows buyers in more than 150 countries the price in their own currency as well, with a conversion fee of 2% to 4% included in it, according to its help center, read on November 15, 2026. Here a store charges in any one of 15, and buyers pay in it, never converted. Stan is ahead on PayPal and on showing a buyer's own currency." },
           { q: "Who can change the currency?", a: "You and an Admin. You are emailed whenever it changes." },
         ],
       },
@@ -2160,7 +2160,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       },
       {
         kind: "lead",
-        text: `Stan's help center, read on September 28, 2026, connects Mailchimp and other email tools through Zapier. Here all four are built in, on the ${PLAN_AT.creator} plan.`,
+        text: `Stan's help center, read on November 15, 2026, connects Mailchimp and other email tools through Zapier. Here all four are built in, on the ${PLAN_AT.creator} plan.`,
       },
       {
         kind: "features",
@@ -2223,7 +2223,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       },
       {
         kind: "lead",
-        text: "Stan has no tool for writing to a sponsor, and Beacons writes a pitch without finding who to send it to or checking where it may be sent (both read on October 5, 2026). Here the contact, the rules of each country and the email are one tool, inside the plan you already pay for.",
+        text: "Stan has no tool for writing to a sponsor, and Beacons writes a pitch without finding who to send it to or checking where it may be sent (both read on November 15, 2026). Here the contact, the rules of each country and the email are one tool, inside the plan you already pay for.",
       },
       {
         kind: "features",
@@ -2301,7 +2301,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       },
       {
         kind: "lead",
-        text: "Stan's help center, read on September 28, 2026, says there is no way to give a team member admin access to your store without sharing your login. Here each person has their own.",
+        text: `Stan's help center, read on November 15, 2026, puts admin seats, as Manager or Support, only on a new $299-a-month Creator Max plan that it says is not yet open to every creator. Here each person has their own sign-in, on the ${PLAN_AT.creator} plan.`,
       },
       {
         kind: "features",
@@ -2481,7 +2481,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { q: "Which plan does a move need, and who can run it?", a: "Every plan. You and your Admins can import; Editors and Support cannot. The one email to past buyers, and the emails to members, are sent only while your plan or its trial is running." },
           { q: "How do my members move without paying twice?", a: "Make the membership here first, at the same price. Export your members with the date each would next renew, import them under Your members, and stop the renewals where they are now. Each member keeps theirs with their own link: the card is taken then and first charged on that date. A date less than two days away is charged when they keep it, and their page says so before they press." },
           { q: "Is my file kept?", a: "The file itself never reaches us: your browser reads it and sends the columns you matched. Rows not brought in yet are deleted " + IMPORT_ROWS_KEPT_DAYS + " days after their upload. The report of what was left out and the import's counts are deleted two weeks after the import began, so download the report before then. What the import added (contacts, drafts and purchases) stays." },
-          { q: "What does Stan offer here?", a: "According to its help center, read on September 27, 2026, Stan imports up to 5,000 contacts per store in all, and has you send them an email to opt in again; it gives a customer a download, a course or the community one customer at a time, with no way to undo that in bulk. We found no import for products there. Here you confirm your contacts agreed instead of us emailing them, and buyers come in from a file." },
+          { q: "What does Stan offer here?", a: "According to its help center, read on November 15, 2026, Stan imports up to 5,000 contacts per store in all, and has you send them an email to opt in again; it gives a customer a download, a course or the community one customer at a time, with no way to undo that in bulk. We found no import for products there. Here you confirm your contacts agreed instead of us emailing them, and buyers come in from a file." },
         ],
       },
     ],

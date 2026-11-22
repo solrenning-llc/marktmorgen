@@ -570,7 +570,7 @@ async function takeBackReset(email: string, until: number): Promise<void> {
     });
     if (!undone) console.error("taking back the reset day of a login without two-step that never opened failed");
   } catch (error) {
-    console.error("taking back the reset day of a login without two-step that never opened failed", error);
+    console.error("taking back the reset day of a login without two-step that never opened failed");
   }
 }
 
@@ -638,7 +638,7 @@ async function endLocked(email: string, now = Date.now()): Promise<boolean> {
   const [members] = await redisPipeline([["SMEMBERS", lockedSetKey(email)]]);
   const sessions = stringList(members);
   if (!sessions) {
-    console.error("logging out the sessions let in without a second step failed", new UnknownReplyError("the locked sessions"));
+    console.error("logging out the sessions let in without a second step failed");
     await keepLocked(email, now);
     return false;
   }
@@ -677,7 +677,7 @@ async function keepLocked(email: string, now: number): Promise<void> {
   // pays LOCKED_UNTIL_STAR_EXTRA (tests/plan-cost-registry.ts) on each lockedUntil. Said, and counted for the
   // owner's report (keptStarMonth, keptStarLine; review of #2556 at 4d8ac350e), never only kept.
   if (listed !== 1) {
-    console.error(`more than ${KEPT_ANY_MAX} accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until ${SESSION_TTL_SECONDS / 86_400 + 1} days after the last`);
+    console.error("too many accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until the sessions' last day");
     const month = new Date(now).toISOString().slice(0, 7);
     await redisPipeline([["INCR", keptStarKey(month)], ["EXPIRE", keptStarKey(month), 400 * 86_400]]);
   }
@@ -729,7 +729,7 @@ export async function resetIfDue(email: string, now = Date.now()): Promise<boole
     // answers, so the turn-off is never told only to the sign-in inbox (MM-SA-19; VR2 audit).
     const kept = await backupOf(email, record).catch((error: unknown) => {
       if (!(error instanceof UnknownReplyError)) throw error;
-      console.error("reading the recovery address before turning two-step login off failed", error);
+      console.error("reading the recovery address before turning two-step login off failed");
       return null;
     });
     if (kept === null) return null;
@@ -755,7 +755,7 @@ async function dropAppSessions(email: string): Promise<void> {
     await dropSecondStep(email, (mark) => mark === "app" || mark === "recovery");
   } catch (error) {
     if (!(error instanceof SessionsUnknownError)) throw error;
-    console.error("logging out what the app opened failed", error);
+    console.error("logging out what the app opened failed");
   }
 }
 
@@ -846,7 +846,7 @@ export async function finishSetup(
       await dropSecondStep(email, (mark) => mark === "app" || mark === "recovery", session);
     } catch (error) {
       if (!(error instanceof SessionsUnknownError)) throw error;
-      console.error("logging out what an earlier app opened failed", error);
+      console.error("logging out what an earlier app opened failed");
       return "sessions" as const;
     }
     return (await writeHeld(held, email, { s: pending.s as string, since: now, codes: codes.map((c) => codeHash(c)), last: step, reset: 0, backup: "" }, { absent: true })) ? ("made" as const) : ("already" as const);

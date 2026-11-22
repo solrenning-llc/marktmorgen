@@ -7,7 +7,7 @@
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { CURRENT_AI_SPEND_POLICY as policy } from './commercial-store-no-ai-policy';
-import { commercialMarginReady, commercialPlansMayOpen, CURRENT_COMMERCIAL_MARGIN_REVIEW, CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, REQUIRED_MARGIN_SCENARIOS, BASE_PLAN_REVENUE_CEILINGS, type CommercialMarginReview } from '@/lib/commercial-margin';
+import { commercialMarginReady, commercialPlansMayOpen, CURRENT_COMMERCIAL_MARGIN_REVIEW, CURRENT_TERMS_DIGEST, REQUIRED_MARGIN_SCENARIOS, BASE_PLAN_REVENUE_CEILINGS, type CommercialMarginReview } from '@/lib/commercial-margin';
 import { AUTOMATIC_AI_STORE_MICRO_USD } from '@/lib/ai-spend-policy';
 import { AI_MONTHLY } from '@/lib/ai-rules';
 import { requiredAiStoreMicroUsd } from '@/lib/ai-entitlement-rules';
@@ -17,7 +17,7 @@ import { fundedCustomerWithAi, planPaymentDisputeFixture, zeroExposureFixture, z
 // last day cannot split the review's month from the policy's.
 mock.timers.enable({ apis: ['Date'], now: Date.now() });
 function review(): CommercialMarginReview {
-  return { companyBase: zeroFixedCompanyFixture, planPaymentDisputes: planPaymentDisputeFixture(), priceAndRightsSnapshot: CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, taxEvidence: 'TEST ONLY', costAndLimitEvidence: 'TEST ONLY', allocatedFixedCostsVerified: true, fundedExposure: zeroExposureFixture(), prepaidUsageEnforced: true,
+  return { companyBase: zeroFixedCompanyFixture, planPaymentDisputes: planPaymentDisputeFixture(), priceAndRightsDigest: CURRENT_TERMS_DIGEST!, taxEvidence: 'TEST ONLY', costAndLimitEvidence: 'TEST ONLY', allocatedFixedCostsVerified: true, fundedExposure: zeroExposureFixture(), prepaidUsageEnforced: true,
     scenarios: Object.fromEntries(REQUIRED_MARGIN_SCENARIOS.map(key => { const gross = BASE_PLAN_REVENUE_CEILINGS[key] ?? 10000; return [key, fundedCustomerWithAi(gross, Math.floor(gross * .65), 12, key)]; })) };
 }
 

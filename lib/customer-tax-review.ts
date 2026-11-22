@@ -1,4 +1,5 @@
 import { mostCorrectTaxesOf } from './receiving-costs';
+import { isCommercialTermsDigest, termsMatchDigest } from '@/lib/commercial-terms-digest';
 
 /** A reviewed ceiling, not proof of legal facts or permission to sell. No real
  * review is supplied here. Legacy callers retain their historical protection. */
@@ -12,7 +13,8 @@ export const CUSTOMER_TAX_REVIEW_POLICY = Object.freeze({
 } as const);
 export type TaxEvidence = { date: string; source: string; facts: string };
 export type ContractTaxCoverage = {
-  reviewId: string; termsSnapshot: string;
+  /** The digest of the terms (lib/commercial-terms-digest.ts); the contract's context holds their one full text. */
+  reviewId: string; termsDigest: string;
   admissionsFrom: string; admissionsUntil: string; liabilitiesThrough: string;
   evidence: TaxEvidence;
 };
@@ -168,7 +170,7 @@ function context(v: TaxContext): boolean {
   if (!v || !text(v.scenario) || v.scenario.length > 128 || !day(v.from) || !day(v.through) || (v.months !== 1 && v.months !== 12) || v.from >= v.through) return false;
   if (Object.hasOwn(v, 'contract')) {
     const c = v.contract;
-    if (!c || !text(c.reviewId) || !/^[A-Za-z0-9_-]{1,128}$/.test(c.reviewId) || !text(c.termsSnapshot) || !evidence(c.evidence)) return false;
+    if (!c || !text(c.reviewId) || !/^[A-Za-z0-9_-]{1,128}$/.test(c.reviewId) || !isCommercialTermsDigest(c.termsDigest) || !evidence(c.evidence)) return false;
     const from = timestamp(c.admissionsFrom), until = timestamp(c.admissionsUntil), through = timestamp(c.liabilitiesThrough);
     if (from === null || until === null || through === null || from > until || until >= through) return false;
     return v.from === c.admissionsFrom.slice(0, 10) &&
@@ -184,7 +186,7 @@ function sameContext(a: TaxContext, b: TaxContext): boolean {
   if (a.scenario !== b.scenario || a.from !== b.from || a.through !== b.through || a.months !== b.months) return false;
   if (!Object.hasOwn(a, 'contract') && !Object.hasOwn(b, 'contract')) return true;
   const x = a.contract, y = b.contract;
-  return !!x && !!y && x.reviewId === y.reviewId && x.termsSnapshot === y.termsSnapshot &&
+  return !!x && !!y && x.reviewId === y.reviewId && x.termsDigest === y.termsDigest &&
     x.admissionsFrom === y.admissionsFrom && x.admissionsUntil === y.admissionsUntil && x.liabilitiesThrough === y.liabilitiesThrough &&
     x.evidence.date === y.evidence.date && x.evidence.source === y.evidence.source && x.evidence.facts === y.evidence.facts;
 }
@@ -298,7 +300,7 @@ export function customerTaxContractContextSupported(context: unknown, policy: un
       const c = detached(fields.taxContext) as TaxContext, r = detached(fields.taxReview) as CustomerTaxReview;
       const bound = c?.contract;
       if (!c || !r || !contextValidForContract(c, String(key)) || !sameContext(c, r.scope) || !bound ||
-          bound.reviewId !== own(policy, 'reviewId') || bound.termsSnapshot !== own(context, 'termsSnapshot') ||
+          bound.reviewId !== own(policy, 'reviewId') || !termsMatchDigest(bound.termsDigest, own(context, 'termsSnapshot')) ||
           bound.admissionsUntil !== own(policy, 'admissionsUntil') || bound.liabilitiesThrough !== own(policy, 'liabilitiesThrough')) return false;
       const from = timestamp(bound.admissionsFrom), until = timestamp(bound.admissionsUntil);
       if (from === null || until === null || at < from || at > until) return false;

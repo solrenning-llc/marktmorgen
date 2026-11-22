@@ -26,7 +26,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
   "nl:pfunnel:done:", "nl:pfunnel:seen:", "nl:pfunnels:", "nl:pkg:", "nl:pkg:s:", "nl:pkg:t:", "nl:pod:", "nl:pod:by:", "nl:pod:pids:",
   "nl:pod:t:", "nl:ppsell:back:", "nl:preview:", "nl:product:about:", "nl:product:landing:", "nl:product:note:", "nl:product:page:",
   "nl:product:pages:", "nl:product:pics:", "nl:rcpt:n:", "nl:rcpt:seq:", "nl:recover:off:", "nl:rev:", "nl:rev:all:", "nl:rev:new:",
-  "nl:rev:hid:", "nl:rev:off:", "nl:rev:pay:", "nl:rev:stop:", "nl:rev:sum:", "nl:rev:vis:", "nl:save:", "nl:sblock:uses:",
+  "nl:rev:hid:", "nl:rev:off:", "nl:rev:pay:", "nl:rev:stop:", "nl:rev:sum:", "nl:rev:vis:", "nl:sa:", "nl:sa:t:", "nl:save:", "nl:sblock:uses:",
   "nl:sold:", "nl:stamp:copy:", "nl:stock:", "nl:store:leads:", "nl:stream:cap:", "nl:stream:v:", "nl:sub:door:", "nl:sub:list:", "nl:sub:live:", "nl:sub:rec:", "nl:sub:setup:", "nl:sub:slots:", "nl:sub:who:",
   "nl:taxobs:v1:", "nl:tben:given:", "nl:tben:who:", "nl:tier:price:", "nl:upd:last:", "nl:upd:latest:", "nl:upd:off:", "nl:upd:stop:", "nl:vcard:", "nl:watch:last:",
   "nl:wf:held:", "nl:wf:log:", "nl:wf:run:", "nl:wf:runs:", "nl:wf:ver:", "nl:wf:ver:idx:", "nl:wl:", "nl:wl:t:", "nl:yearask:",
@@ -450,6 +450,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // A store's receipt numbers (601 [KB22] U2, lib/receipt-number.ts): by its id, gone with it.
   "nl:rcpt:n:": E, "nl:rcpt:seq:": E,
   "nl:sale:told:": X(40),
+  "nl:sa:": E, "nl:sa:t:": T("nl:erase:ix:", 7),
   "nl:save:": E,
   "nl:sblock:uses:": E, "nl:sblocks:": E,
   "nl:sender:": C,

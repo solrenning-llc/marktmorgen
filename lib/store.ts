@@ -2021,7 +2021,7 @@ type ProductChange = {
    * `fence` is the store's erasure fence of lib/product-about-live.ts (its id key, the erasing mark's field, its ref):
    * the two are written only while the store is live, never after its erasure began or its account moved (#4969).
    */
-  about?: { product: string; key: string; text: string; fence: { idKey: string; field: string; ref: string } };
+  about?: { product: string; key: string; text: string; fence: { idKey: string; field: string; ref: string }; room: Store };
 };
 
 /**
@@ -2192,6 +2192,8 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
   // its lock is refused rather than landed over whatever came after it.
   if (!(await holdLock(held))) throw new StoreBusyError();
   if (fenced) {
+    // The description's room, taken as writeAbout takes it, only now: a save stopped before this point changes no room.
+    await takeAboutRoom(change.about!.room, change.about!.product, change.about!.text);
     const reply = repliesFor(await redisPipeline([fenced]), 1)?.[0];
     if (reply === -1) throw new ProductStoreGoneError();
     if (reply !== 1) throw new UnknownReplyError("a product's record and description");
@@ -4199,7 +4201,7 @@ export type StudioProductParts = { intro?: Intro | null; yearly?: Yearly | null;
 
 export type ProductEditResult =
   | Extract<ProductResult, { ok: true }>
-  | { ok: false; reason: Extract<ProductResult, { ok: false }>["reason"] | "stale" | `intro_${IntroProblem}` | `yearly_${YearlyProblem}`; limit?: number; pwyw?: PwywProblem };
+  | { ok: false; reason: Extract<ProductResult, { ok: false }>["reason"] | "stale" | `intro_${IntroProblem}` | `yearly_${YearlyProblem}`; limit?: number; pwyw?: PwywProblem; current?: Listing; statsId?: string | null };
 
 /** Changes something already on the store, keeping its place in the list. */
 export async function editProduct(
@@ -4220,6 +4222,7 @@ export async function editProduct(
   let freeNow = false;
   let descriptionId: string | null = null;
   let namedSid: string | null = null;
+  let stale: { current: Listing; statsId: string | null } | null = null;
   // The description, written with the product's record in the catalog commit (PRODUCT_WITH_ABOUT, Codex N1 on #4238).
   let aboutWrite: ProductChange["about"];
   const result = await onProduct<"free" | "call" | "course" | "pwyw" | "title" | "price" | "bundle" | "shipped" | "stale" | `intro_${IntroProblem}` | `yearly_${YearlyProblem}`>(
@@ -4228,7 +4231,12 @@ export async function editProduct(
     async (product, store, _held, save) => {
       // A form opened before another save of this product would put the older words back over the newer ones: refused,
       // here under the store's lock, so two saves from the same revision can never both be taken.
-      if (baseRev !== undefined && (product.rev ?? 0) !== baseRev) return { ok: false, reason: "stale" };
+      if (baseRev !== undefined && (product.rev ?? 0) !== baseRev) {
+        // What is saved now, as read here under the lock, goes back with the refusal: never the store record the request
+        // read before it waited for the lock, which may predate the save that won (31st triple audit, MEDIUM 1; VR 2).
+        stale = { current: listingOf(product), statsId: store.statsId ?? null };
+        return { ok: false, reason: "stale" };
+      }
       // Read in the store's own currency, as the store is under the lock.
       const fields = readFields(rawTitle, rawPrice, store.currency);
       if (typeof fields === "string") {
@@ -4300,12 +4308,12 @@ export async function editProduct(
           await redisPipeline([["SET", storeIdKey(room.sid), storeRef(room)]]);
           namedSid = room.sid;
         }
-        // Its room first, as writeAbout takes it; the text itself goes with the product's record and its `rev` in the
-        // catalog commit, so a commit that fails keeps neither (Codex N1 on #4238).
-        await takeAboutRoom(room, id, parts.about);
+        // Its room is taken in the catalog commit, once the save holds its lock and just before the fenced write (31st
+        // triple audit, MEDIUM 2: taken here, a commit that failed before writing left the room counting the new text
+        // while the old one stayed kept). The text goes with the product's record and its `rev` (Codex N1 on #4238).
         const ref = storeRef(room);
         const fence = { idKey: storeIdKey(room.sid), field: await erasingField(ref), ref };
-        aboutWrite = { product: id, key: aboutKeyOf(descriptionId, id), text: parts.about, fence };
+        aboutWrite = { product: id, key: aboutKeyOf(descriptionId, id), text: parts.about, fence, room };
         next.about = parts.about !== "";
       }
       return next;
@@ -4317,6 +4325,9 @@ export async function editProduct(
   if (!result.ok) {
     if (result.reason === "pwyw") return { ok: false, reason: "pwyw", pwyw: pwywWhy };
     if (refusal) return { ok: false, reason: refusal };
+    // Set in the callback above, which TypeScript does not follow.
+    const lockRead = stale as { current: Listing; statsId: string | null } | null;
+    if (result.reason === "stale" && lockRead) return { ok: false, reason: "stale", current: lockRead.current, statsId: lockRead.statsId };
     return result;
   }
   return { ok: true, store: result.store, product: result.product };
@@ -4333,7 +4344,7 @@ export async function setProductTitle(email: string, id: string, rawTitle: strin
   // `only.expected`: written only while the title is still that, checked under the store's lock (an agent's
   // proposal confirmed or undone, lib/agent-kinds.ts); "changed" when it is not, and nothing is written.
   const result = await onProduct<"title" | "changed">(email, id, (product) =>
-    only && product.title !== only.expected ? { ok: false, reason: "changed" } : title ? { ...product, title } : { ok: false, reason: "title" },
+    only && product.title !== only.expected ? { ok: false, reason: "changed" } : title ? { ...product, title, rev: (product.rev ?? 0) + 1 } : { ok: false, reason: "title" },
   );
   return result.ok ? { ok: true, store: result.store, product: result.product } : result;
 }
@@ -4342,7 +4353,7 @@ export async function setProductTitle(email: string, id: string, rawTitle: strin
 export async function setProductSummary(email: string, id: string, rawSummary: string, only?: { expected: string }): Promise<ProductResult | { ok: false; reason: "changed" }> {
   const summary = rawSummary.trim().slice(0, MAX_SUMMARY_LENGTH);
   // `only.expected`, as setProductTitle: written only while the summary is still that.
-  const result = await onProduct<"changed">(email, id, (product) => (only && (product.summary ?? "") !== only.expected ? { ok: false, reason: "changed" } : { ...product, summary }));
+  const result = await onProduct<"changed">(email, id, (product) => (only && (product.summary ?? "") !== only.expected ? { ok: false, reason: "changed" } : { ...product, summary, rev: (product.rev ?? 0) + 1 }));
   return result.ok ? { ok: true, store: result.store, product: result.product } : result;
 }
 
@@ -5118,7 +5129,9 @@ export async function setProductAbout(email: string, id: string, has: boolean): 
   return changeProduct(
     email,
     id,
-    (product) => ({ ...product, about: has }),
+    // The revision moves on, as with every write of a field the studio's form saves (31st triple audit, auditor 1's
+    // MEDIUM): a tab opened before an agent's description is refused, never undoing it in silence.
+    (product) => ({ ...product, about: has, rev: (product.rev ?? 0) + 1 }),
     (store) => ({ statsId: store.statsId ?? newListId() }),
   );
 }

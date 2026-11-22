@@ -192,7 +192,9 @@ async function main() {
   is("bounded by a product's records and the longest description", PRODUCT_STALE_READ.bytes, MAX_PRODUCT_BYTES + MAX_ABOUT_LENGTH * 4);
   const route = readFileSync("app/api/store/product/route.ts", "utf8");
   const refusal = /done\.reason === "stale"\) \{([\s\S]*?)\n      \}/.exec(route)?.[1] ?? "";
-  is("the refusal reads only those two, and writes nothing", [(refusal.match(/await /g) ?? []).length, /readListing\(/.test(refusal), /readAbout\(/.test(refusal), /set|write|save/i.test(refusal.replace(/\/\/.*$/gm, ""))], [2, true, true, false]);
+  // The listing is the product editProduct read under the store's lock (31st triple audit, MEDIUM 1), so the refusal
+  // itself reads only the description: within the two reads PRODUCT_STALE_READ prices, never more.
+  is("the refusal reads only the description, takes the listing read under the lock, and writes nothing", [(refusal.match(/await /g) ?? []).length, /readListing\(/.test(refusal), /done\.current/.test(refusal), /readAbout\(/.test(refusal), /set|write|save/i.test(refusal.replace(/\/\/.*$/gm, ""))], [1, false, true, true, false]);
 
   done();
 }

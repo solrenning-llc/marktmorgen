@@ -323,9 +323,10 @@ export async function POST(request: NextRequest) {
       if (!done.ok && done.reason === "stale") {
         // Nothing was written. What is saved now goes back with the refusal, so the studio can show it beside the
         // creator's unsaved words and let them choose: one read of the product and, when it has one, its description.
-        const now = await readListing(guarded.store, id);
+        // The product as editProduct read it under the store's lock, never the store record read before it (VR 2).
+        const now = done.current;
         if (!now) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
-        const words = now.about && guarded.store.statsId ? await readAbout(guarded.store.statsId, now.id) : "";
+        const words = now.about && done.statsId ? await readAbout(done.statsId, now.id) : "";
         return Response.json(
           { ok: false, error: "stale", current: { ...now, about: words, hasAbout: now.about } },
           { status: 409, headers: { "Cache-Control": "private, no-store" } },

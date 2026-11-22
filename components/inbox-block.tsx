@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 /** What the inbox route answers (app/api/store/inbox): the same shape the studio's other calls get. */
 type Post = (body: Record<string, unknown>) => Promise<Record<string, unknown> & { ok?: boolean; error?: string }>;
@@ -19,8 +19,9 @@ const REFUSED: Record<string, string> = {
  * Block the person of an inbox conversation in the store's messages
  * (567 [GD1] (f), unit 2; the rules are lib/buyer-block.ts). It first checks
  * whether they are blocked; what cannot be read is said as not known, with
- * "Check again", never as "not blocked". The note is seen only by the creator
- * and whoever on their team may answer buyers.
+ * "Check again", never as "not blocked". The note is seen by the creator and
+ * whoever on their team may answer buyers, and by the person in a copy of their
+ * data; deleting the person deletes the note and keeps the block (lib/buyer-block.ts).
  * Reports about an order the person paid for, and a withdrawal, still reach
  * the creator, and the box says so before anything is done. Every result is
  * said in a live region; blocking can be undone at once.
@@ -28,6 +29,7 @@ const REFUSED: Record<string, string> = {
 export function InboxBlock({ id, post }: { id: string; post: Post }) {
   const [state, setState] = useState<State>({ phase: "checking" });
   const [note, setNote] = useState("");
+  const noteHint = useId();
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState("");
 
@@ -149,9 +151,12 @@ export function InboxBlock({ id, post }: { id: string; post: Post }) {
               They can no longer write to you in your store&apos;s chat or contact form. A report about an order they paid for, and a withdrawal from an order, still reach you.
             </p>
             <label className="block">
-              <span className="field-label">Your note (only you and your team see it, optional)</span>
-              <input className="field" maxLength={NOTE_MAX} value={note} onChange={(event) => setNote(event.target.value)} />
+              <span className="field-label">Your note (optional)</span>
+              <input className="field" maxLength={NOTE_MAX} value={note} aria-describedby={noteHint} onChange={(event) => setNote(event.target.value)} />
             </label>
+            <p id={noteHint} className="text-sm text-ink-soft">
+              You and your team see it. This person sees it too if they ask for a copy of their data. If they ask us to delete their data, the note is deleted and the block stays.
+            </p>
             <button type="submit" className={control} aria-disabled={busy} aria-busy={busy}>
               Block
             </button>

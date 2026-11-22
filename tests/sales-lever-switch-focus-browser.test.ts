@@ -31,6 +31,11 @@ passed("the person moved the focus while it was saved: it stays where they put i
 passed("a refresh with nothing pressed draws the saved state");
 passed("a refresh that confirms the card's own save keeps the card's state and its Undo");
 passed("a refresh with another tab's saved state: the card shows it, says it, and offers no Undo of the old one");
+passed("another tab's change removes the focused Undo: the focus is on the switch, and the change is said (2.4.3, 4.1.3)");
+passed("another tab's change with the focus elsewhere: the focus stays, the change is said");
+passed("after the card's change and a refresh, the untouched editor shows the saved setting");
+passed("and saving it sends the saved setting, not a stale one");
+passed("an edit made before the refresh is kept, the new saved state is taken, and the person is told");
 passed("no page error");
-is("the browser check ran to its end with nothing failed", [run.status, lines.some((line) => line.startsWith("FAIL")), lines.at(-1)], [0, false, "9/9 passed"]);
+is("the browser check ran to its end with nothing failed", [run.status, lines.some((line) => line.startsWith("FAIL")), lines.at(-1)], [0, false, "14/14 passed"]);
 done();

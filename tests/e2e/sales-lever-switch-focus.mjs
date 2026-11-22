@@ -32,7 +32,7 @@ const bundle = await build({
   format: "iife",
   jsx: "automatic",
   logLevel: "error",
-  alias: { "@": root },
+  alias: { "@": root, "next/navigation": join(root, "tests/e2e/next-navigation-stub.ts") },
   define: { "process.env.NODE_ENV": '"production"' },
 });
 const script = bundle.outputFiles[0].text;
@@ -131,6 +131,55 @@ try {
   is("a refresh that confirms the card's own save keeps the card's state and its Undo", [await page.getByRole("switch").getAttribute("aria-checked"), await undo.count()], ["true", 1]);
   await page.evaluate(() => window.harness.render(false));
   is("a refresh with another tab's saved state: the card shows it, says it, and offers no Undo of the old one", [await page.getByRole("switch").getAttribute("aria-checked"), await page.locator("p").first().textContent(), await undo.count()], ["false", "Reminders are off", 0]);
+
+  // Codex X6's LOW on #3563: another tab's change removes the Undo that held the focus. The focus goes to the switch,
+  // never to the page's body (2.4.3), and the status region says why the Undo went (4.1.3).
+  await fresh(false);
+  await page.getByRole("switch").focus();
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => document.querySelector("[role=status]")?.textContent === "Checkout recovery is on.");
+  // The page's refresh after the card's own save draws it on; then another tab turns it off.
+  await page.evaluate(() => window.harness.render(true));
+  await undo.focus();
+  await page.evaluate(() => window.harness.render(false));
+  await page.waitForFunction(() => !Array.from(document.querySelectorAll("button")).some((b) => b.textContent?.startsWith("Undo")));
+  is("another tab's change removes the focused Undo: the focus is on the switch, and the change is said (2.4.3, 4.1.3)", [await active(), await status(), await page.getByRole("switch").getAttribute("aria-checked")], ["switch", "This setting was changed elsewhere, so Undo is gone. Reminders are off.", "false"]);
+  // An Undo that did not hold the focus: nothing is moved, and the change is still said.
+  await fresh(false);
+  await page.evaluate(() => {
+    const away = document.createElement("button");
+    away.textContent = "Elsewhere";
+    document.body.append(away);
+  });
+  await page.getByRole("switch").focus();
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => document.querySelector("[role=status]")?.textContent === "Checkout recovery is on.");
+  await page.evaluate(() => window.harness.render(true));
+  await page.getByRole("button", { name: "Elsewhere" }).focus();
+  await page.evaluate(() => window.harness.render(false));
+  is("another tab's change with the focus elsewhere: the focus stays, the change is said", [await active(), await status()], ["Elsewhere", "This setting was changed elsewhere, so Undo is gone. Reminders are off."]);
+
+  // Codex X6's LOW on #3563: the card turns reminders on and the page refreshes; the reminder's own editor, untouched,
+  // must save what is saved now, never the value it was first drawn with.
+  await page.goto("http://switch.test/");
+  await page.evaluate(() => window.harness.studio(false));
+  await page.getByRole("switch").waitFor();
+  await page.getByRole("switch").focus();
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => document.querySelector("[role=status]")?.textContent === "Checkout recovery is on.");
+  await page.evaluate(() => window.harness.studio(true));
+  is("after the card's change and a refresh, the untouched editor shows the saved setting", await page.getByRole("checkbox").isChecked(), true);
+  const sent = await page.evaluate(() => window.harness.writes.length);
+  await page.getByRole("button", { name: "Save" }).click();
+  await page.waitForFunction((sent) => window.harness.writes.length > sent, sent);
+  is("and saving it sends the saved setting, not a stale one", await page.evaluate(() => window.harness.writes.at(-1).enabled), true);
+  // A change the person made in the editor before the refresh is kept, and they are told the setting moved under it.
+  await page.goto("http://switch.test/");
+  await page.evaluate(() => window.harness.studio(false));
+  await page.getByRole("switch").waitFor();
+  await page.getByRole("textbox", { name: "Your postal address" }).fill("200 Edited Road, Testville, CA 90000");
+  await page.evaluate(() => window.harness.studio(true));
+  is("an edit made before the refresh is kept, the new saved state is taken, and the person is told", [await page.getByRole("textbox", { name: "Your postal address" }).inputValue(), await page.getByRole("checkbox").isChecked(), await page.evaluate(() => document.querySelector("#checkout-reminders [role=status]")?.textContent ?? null)], ["200 Edited Road, Testville, CA 90000", true, "This setting was changed elsewhere: reminders are now on. Your edits are kept; check them before you save."]);
 
   is("no page error", errors, []);
   await context.close();

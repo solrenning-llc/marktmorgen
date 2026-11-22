@@ -7,18 +7,28 @@
  * no store, no real person.
  */
 import { createRoot } from "react-dom/client";
+import { RecoveryEditor } from "@/components/recovery-editor";
 import { SalesLeverSwitch } from "@/components/sales-lever-switch";
 import { leverToggle, type LeverSwitch } from "@/lib/sales-lever-toggle-rules";
 
-type Harness = { writes: Record<string, unknown>[]; next: unknown[]; delay: number; render: (on: boolean) => void };
+type Harness = {
+  writes: Record<string, unknown>[];
+  next: unknown[];
+  delay: number;
+  refreshes: number;
+  render: (on: boolean) => void;
+  studio: (on: boolean) => void;
+};
 
 /** The page's own handle on the harness, read by tests/e2e/sales-lever-switch-focus.mjs as window.harness. */
 const page = window as unknown as Window & { harness: Harness };
 
+const ADDRESS = "100 Synthetic Way, Testville, CA 90000";
+
 /** The recovery switch as the studio builds it for a synthetic store whose reminders are `on`. */
 function control(on: boolean): LeverSwitch {
   const made = leverToggle("recovery", {
-    store: { name: "Synthetic Shop", stripeAccountId: "acct_synthetic", recovery: { enabled: on, address: "100 Synthetic Way, Testville, CA 90000" } },
+    store: { name: "Synthetic Shop", stripeAccountId: "acct_synthetic", recovery: { enabled: on, address: ADDRESS } },
     role: "owner",
     addOn: true,
   });
@@ -46,5 +56,16 @@ page.harness = {
   /** Draws the card from the saved store, as the studio does on every refresh; the switch keeps its own view. */
   render(on: boolean) {
     root.render(<SalesLeverSwitch control={control(on)} states={{ on: "Reminders are on", off: "Reminders are off" }} />);
+  },
+  refreshes: 0,
+  /** The studio's two places for the same setting, the card's switch and the reminder's own editor, drawn together
+   * from the saved store as on every refresh (Codex X6's LOW on #3563: the editor must not save back a stale value). */
+  studio(on: boolean) {
+    root.render(
+      <>
+        <SalesLeverSwitch control={control(on)} states={{ on: "Reminders are on", off: "Reminders are off" }} />
+        <RecoveryEditor recovery={{ enabled: on, address: ADDRESS }} suggestedAddress="" connected />
+      </>,
+    );
   },
 };

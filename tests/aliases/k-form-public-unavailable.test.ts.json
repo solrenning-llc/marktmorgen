@@ -1,0 +1,16 @@
+{
+  "next/headers": "k-form-public-world.tsx",
+  "next/navigation": "k-form-public-world.tsx",
+  "next/link": "k-form-public-world.tsx",
+  "@/lib/store": "k-form-public-world.tsx",
+  "@/lib/sales-page-store": "k-form-public-world.tsx",
+  "@/lib/catalog": "k-form-public-world.tsx",
+  "@/lib/store-join": "k-form-public-world.tsx",
+  "@/lib/page-funnel-store": "k-form-public-world.tsx",
+  "@/components/sales-blocks": "k-form-public-world.tsx",
+  "@/components/store-product": "k-form-public-world.tsx",
+  "@/components/picture-viewer": "k-form-public-world.tsx",
+  "@/components/store-tracking": "k-form-public-world.tsx",
+  "@/components/store-pages-nav": "k-form-public-world.tsx",
+  "@/components/store-beacon": "k-form-public-world.tsx"
+}

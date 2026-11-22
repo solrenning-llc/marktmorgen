@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import type { Store } from "@/lib/store";
 import { fromBase64, giveBenefit } from "@/lib/tier-benefits";
@@ -97,6 +97,16 @@ async function main() {
     const readers = source.match(/redisPipeline\w*\(slice\.map\(\(p\) => \["(HGETALL|HMGET)", marksKey/g) ?? [];
     assert.equal(readers.length, 2, "two readers of a person's marks");
     for (const reader of readers) assert.ok(reader.startsWith("redisPipelineBase64("), reader);
+  });
+  // The person's copy (lib/person-copy.ts, benefitMarksOf) reads a person's marks too, now in base64: at most
+  // MAX_BENEFITS_KEPT fields and values, about 4/3 of what is kept. No route hands the copy to anybody yet, so no
+  // request pays for that read today; tests/plan-cost-registry.ts has no line for it (coordinator 87e4). The door
+  // that first serves the copy brings that line with it: until then this check fails it.
+  await check("no route serves the person's copy without a cost line for it", () => {
+    const files = readdirSync("app", { recursive: true, encoding: "utf8" }).filter((f) => /\.(ts|tsx)$/.test(f));
+    const doors = files.filter((f) => /@\/lib\/person-copy["']/.test(readFileSync(`app/${f}`, "utf8")));
+    const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
+    assert.ok(doors.length === 0 || /lib\/person-copy\.ts/.test(registry), `routes serve the copy without a cost line: ${doors.join(", ")}`);
   });
   await check("a reply that is not base64 text fails closed", () => {
     for (const bad of ["not base64!", "abc", 12, null, ["YQ=="]]) assert.equal(fromBase64(bad), null, String(bad));

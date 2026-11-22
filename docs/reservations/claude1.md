@@ -7,4 +7,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Claude 1 | Opening readiness, locks 2 and 3 (Claude 1 cloud A, coordinator 14/11/2026) | claude1/opening-readiness | `docs/opening-readiness/stripe-platform.md`, `docs/opening-readiness/deemed-supplier.md` | 14/11/2026 21h30 |
-| Claude 1 | Fixes #4271: a hand-in read before a student's erasure is never written after it (lesson count of erasures) | claude/great-allen-xski78 | `lib/assignment.ts` (handIn, forgetTasksPerson only), `tests/hand-in-after-erasure.test.ts`, `tests/assignment-reads-exact.test.ts` | 22/11/2026 01h07 |
+| Claude 1 | Fixes #4271: a hand-in never writes an erased student's work back (write fenced by the erasure print) | claude/great-allen-xski78 | `lib/assignment.ts` (handIn only), `app/api/store/course/task/route.ts` (the handIn call only), `tests/hand-in-after-erasure.test.ts` | 22/11/2026 03h10 |

@@ -83,9 +83,7 @@ test("erasure: a person who handed nothing in is confirmed absent, nothing delet
   redis.clear();
   const result = await withReplies((_b, a) => a, () => forgetTasksPerson(COURSE, [LESSON, OTHER_LESSON], WHO, ROOM_KEY));
   assert.deepEqual(result.value, { records: 0, files: [] });
-  // The lessons' counts of erasures go first and last, even with nothing handed in (#4271), with only the reading between.
-  assert.equal(result.sent.length, 3, "only the counts of erasures around the reading");
-  assert.equal([result.sent[0], result.sent[2]].every((b) => b.every((c) => c[0] === "INCR" || c[0] === "EXPIRE")), true, "the counts first and last");
+  assert.equal(result.sent.length, 1, "only the reading");
 });
 
 for (const [label, alter] of [
@@ -99,7 +97,7 @@ for (const [label, alter] of [
     seed(LESSON, JSON.stringify(work(LESSON)));
     const result = await withReplies((b, a) => (isGets(b) ? alter(b, a) : a), () => forgetTasksPerson(COURSE, [LESSON, OTHER_LESSON], WHO, ROOM_KEY));
     assert.ok(result.error, `rejected, not ${JSON.stringify(result.value)}`);
-    assert.equal(result.sent.length, 2, "nothing sent after the reading (the counts of erasures go before it, #4271)");
+    assert.equal(result.sent.length, 1, "nothing sent after the reading");
     assert.equal(typeof redis.run(["GET", sub(LESSON)]), "string", "the record is still there to erase on the retry");
   });
 }
@@ -225,7 +223,7 @@ test("handIn: approved work that does not read is not handed in over", async () 
   const kept = '{"state":"approved","tries":3';
   redis.run(["SET", sub(LESSON), kept]);
   const task: Task = { prompt: "Synthetic prompt.", review: true, gate: false, file: false };
-  const result = await withReplies((_b, a) => a, () => handIn({ courseId: COURSE, lessonId: LESSON, who: WHO, email: "", task, text: "Again.", file: null, data: ROOM }));
+  const result = await withReplies((_b, a) => a, () => handIn({ erasure: { listId: "list_synthetic", email: "student@example.com" }, courseId: COURSE, lessonId: LESSON, who: WHO, email: "", task, text: "Again.", file: null, data: ROOM }));
   assert.ok(result.error, `rejected, not ${JSON.stringify(result.value)}`);
   assert.equal(redis.run(["GET", sub(LESSON)]), kept, "the record is untouched");
 });

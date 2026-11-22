@@ -148,10 +148,7 @@ export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   // Since #4808 a course's handed-in files are kept for a repeat before their records go: each lesson's submission
   // read once more (one command, its record's bytes again) and each course's SADD and EXPIRE.
   courses: [16, 70_000],
-  // Since #4271 each lesson's count of erasures is taken twice, before the read and after the deletion (INCR and
-  // EXPIRE each time, lib/assignment.ts countErasure): four commands more, their key names (at most 70 bytes) and
-  // replies, counted at 400 bytes.
-  lessons: [6, 2_000],
+  lessons: [2, 1_600],
   deals: [0, 1_000],
   conversations: [0, 700],
   dmConversations: [3, 300],

@@ -41,6 +41,7 @@ import { exactReplies, replyCount } from "@/lib/redis-exact";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
+import type { ReadBudget } from "@/lib/copy-pages";
 
 /** One product one address was given. */
 export type ImportedPurchase = {
@@ -262,6 +263,53 @@ export function importedFrom(raw: unknown, options: { complete?: boolean } = {})
   if (found.length && !(options.complete && unknown)) return found;
   if (unknown) throw new UnknownReplyError("imported purchases");
   return [];
+}
+
+/** What one HSCAN of an address's imported purchases asks for; COUNT is only a hint to Redis. */
+export const IMPORTED_SCAN_COUNT = 100;
+/**
+ * The most purchases one HSCAN reply may hold before it is taken as unknown: what a page reserves for each reply.
+ * Redis answers a small hash (listpack, at most 128 fields by default) whole, whatever COUNT says.
+ */
+export const IMPORTED_SCAN_MOST = 1_000;
+
+/** One page of an address's imported purchases: what it read, and the HSCAN cursor to go on from (absent: all read). */
+export type ImportedPage = { rows: ImportedPurchase[]; resume?: string };
+
+/** An HSCAN cursor, as a page carries it on (lib/copy-pages.ts); "0" is the start. */
+const SCAN_CURSOR = /^[0-9]{1,20}$/;
+
+/**
+ * An address's imported purchases for a person's data copy, HSCAN by HSCAN inside a request's budget (issue #5125,
+ * row (1) imported-purchases; lib/copy-pages.ts). Each HSCAN takes 1 + (1 + perRow) x IMPORTED_SCAN_MOST from the
+ * budget before it is sent, and gives back what its reply did not use: `perRow` is what the caller then reads for
+ * each purchase (the copy reads one gift or group record for some). A reply larger than that, a row that does not
+ * read, or a cursor that is not one, is unknown and throws: the copy fails, never stops short. With no room for the
+ * next HSCAN, the page ends with where it goes on, even before reading anything. Only reads.
+ *
+ * A purchase kept from the first page to the last is on exactly one page or more (HSCAN's guarantee); one given or
+ * taken back meanwhile may or may not be. The same product twice on one page is shown once.
+ */
+export async function importedPage(statsId: string, email: string, budget: ReadBudget, resume = "0", perRow = 0): Promise<ImportedPage> {
+  if (!SCAN_CURSOR.test(resume)) throw new UnknownReplyError("where a copy of imported purchases goes on");
+  if (!Number.isSafeInteger(perRow) || perRow < 0) throw new Error("a page reads a whole number of commands a purchase");
+  const rows = new Map<string, ImportedPurchase>();
+  if (!isRedisConfigured()) return { rows: [] };
+  const most = 1 + (1 + perRow) * IMPORTED_SCAN_MOST;
+  let cursor = resume;
+  for (;;) {
+    if (!budget.take(most)) return { rows: [...rows.values()], resume: cursor };
+    const reply = repliesFor(await redisPipeline([["HSCAN", importedKey(statsId, email), cursor, "COUNT", IMPORTED_SCAN_COUNT]]), 1)?.[0];
+    const next = Array.isArray(reply) && reply.length === 2 && typeof reply[0] === "string" ? reply[0] : "";
+    const flat = Array.isArray(reply) && reply.length === 2 && Array.isArray(reply[1]) ? reply[1] : null;
+    if (!SCAN_CURSOR.test(next) || !flat || flat.length % 2 !== 0 || flat.length / 2 > IMPORTED_SCAN_MOST) throw new UnknownReplyError("an HSCAN of an address's imported purchases");
+    const { found, unknown } = importedRows(flat);
+    if (unknown) throw new UnknownReplyError("an address's imported purchases");
+    budget.give(most - 1 - (1 + perRow) * (flat.length / 2));
+    for (const purchase of found) rows.set(purchase.productId, purchase);
+    if (next === "0") return { rows: [...rows.values()] };
+    cursor = next;
+  }
 }
 
 async function readImported(store: Store, email: string): Promise<{ found: ImportedPurchase[]; unknown: boolean } | null> {

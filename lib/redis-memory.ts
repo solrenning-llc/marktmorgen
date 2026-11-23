@@ -394,6 +394,33 @@ export class MemoryRedis {
           }
           return this.run(["SET", keys[2], argv[1]]);
         }
+        // lib/stats-notes.ts ADD_NOTE_IF_LIVE: a chart note and its list's expiry, only while the store is live and not
+        // being erased (Codex L-20261119-1516, #5010 row 128); each inner call counted as Upstash bills it.
+        if (key.startsWith("-- marktmorgen:stats-note-add-live:v1\n") && args[0] === "3" && args.length === 10) {
+          const [, live, erasing, notes, field, statsId, ref, id, value, seconds] = args;
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          if (call(["HGET", erasing, field]) !== null) return 0;
+          if (statsId === "") {
+            if (call(["GET", live]) !== ref) return 0;
+          } else {
+            const raw = call(["GET", live]);
+            if (raw === null) return 0;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -1;
+            }
+            if (!record || typeof record !== "object") return -1;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+          }
+          call(["HSET", notes, id, value]);
+          call(["EXPIRE", notes, seconds]);
+          return 1;
+        }
         // lib/discord-store.ts SAVE_SERVER_IF_LIVE: the connected server written only while its store is live and not
         // being erased, by the rule above; each inner call counted as Upstash bills it.
         if (key.startsWith("-- marktmorgen:discord-server-live:v1\n") && args[0] === "3" && args.length === 8) {

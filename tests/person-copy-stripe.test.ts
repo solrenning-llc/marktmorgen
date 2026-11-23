@@ -10,7 +10,7 @@ import { importedKey } from "@/lib/imported-purchases";
 import { buyerField, buyerGiftsKey } from "@/lib/gifts";
 import { buyerGroupsKey } from "@/lib/group-buy";
 import { claimHandle, ensureListId, ensureStatsId, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
-import { packagesKey } from "@/lib/call-packages";
+import { buyerField as packageBuyerField, buyerPackagesKey, packagesKey } from "@/lib/call-packages";
 import { paidKey } from "@/lib/closing-holds";
 import { erasureScope } from "@/lib/person-erasure";
 import { COPY_COMPLETE, copyPerson } from "@/lib/person-copy";
@@ -64,6 +64,9 @@ async function main(): Promise<void> {
   redis.run(["SADD", packagesKey(statsId), "cs_test_" + "p".repeat(24), "cs_test_" + "q".repeat(24)]);
   redis.run(["SET", "nl:pkg:cs_test_" + "p".repeat(24), JSON.stringify({ s: statsId, h: store.handle, p: "call000001", e: PERSON, total: 4, at: 1_790_000_000, until: 0, token: PACKAGE_TOKENS[0], holds: [] })]);
   redis.run(["SET", "nl:pkg:cs_test_" + "q".repeat(24), JSON.stringify({ s: statsId, h: store.handle, p: "call000001", e: OTHER, total: 4, at: 1_790_000_000, until: 0, token: PACKAGE_TOKENS[1], holds: [] })]);
+  // Each package in its buyer's index, as finishPackage writes it (#5125): no last day, so the set kept for good.
+  redis.run(["SADD", buyerPackagesKey(statsId, packageBuyerField(PERSON), true), "cs_test_" + "p".repeat(24)]);
+  redis.run(["SADD", buyerPackagesKey(statsId, packageBuyerField(OTHER), true), "cs_test_" + "q".repeat(24)]);
   redis.run(["HSET", paidKey(await storeFolder(storeRef(store))), "sub_1", JSON.stringify({ inv: "in_1", amt: 900, cur: "usd", ps: 1, pe: 2, e: PERSON }), "sub_2", JSON.stringify({ inv: "in_2", amt: 900, cur: "usd", ps: 1, pe: 2, e: OTHER })]);
   const scope = (await erasureScope(store, PERSON))!;
 

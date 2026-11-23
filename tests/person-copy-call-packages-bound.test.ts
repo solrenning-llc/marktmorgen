@@ -1,8 +1,8 @@
 /**
- * #5125 (1), call-packages: the person's data copy reads only their own call packages, found through their own paid
- * checkouts on the creator's Stripe account (lib/person-copy-stripe.ts), never the store's whole set of packages
- * (packagesKey), which never shrinks and holds every buyer's. One GET a package checkout of theirs, at most
- * CALL_PACKAGE_COPY_READS_MAX. Nothing the person sees is cut: their packages are copied as before, a package whose
+ * #5125 (1), call-packages: the person's data copy reads only their own call packages, never the store's whole set of
+ * packages (packagesKey), which never shrinks and holds every buyer's. Since the Stripe-read copiers row (#5125, 22
+ * November 2026) they are found through their own index (buyerPackagesKey), not their paid checkouts on the creator's
+ * Stripe account: two SMEMBERS, then one GET a package of theirs, inside CALL_PACKAGE_COPY_READS_MAX. Nothing the person sees is cut: their packages are copied as before, a package whose
  * record cannot be read still fails the copy, and the record's own buyer still decides whose it is.
  *
  * Synthetic only: the in-memory Redis stub and a stand-in for Stripe; nothing real is reached.
@@ -10,7 +10,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { claimHandle, ensureListId, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { packagesKey } from "@/lib/call-packages";
+import { buyerField, buyerPackagesKey, packagesKey } from "@/lib/call-packages";
 import { erasureScope } from "@/lib/person-erasure";
 import * as personCopy from "@/lib/person-copy";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -69,6 +69,10 @@ async function main(): Promise<void> {
   redis.run(["SADD", packagesKey(statsId), THEIRS, ...OTHERS]);
   redis.run(["SET", `nl:pkg:${THEIRS}`, record(PERSON, 1)]);
   OTHERS.forEach((id, i) => redis.run(["SET", `nl:pkg:${id}`, record(OTHER, 100 + i)]));
+  // Each package in its buyer's index, as finishPackage writes it (#5125): no last day, so the set kept for good.
+  const theirIndex = buyerPackagesKey(statsId, buyerField(PERSON), true);
+  redis.run(["SADD", theirIndex, THEIRS]);
+  redis.run(["SADD", buyerPackagesKey(statsId, buyerField(OTHER), true), ...OTHERS]);
   sessions = [paid(THEIRS, store.handle, "package"), paid(NOT_A_PACKAGE, store.handle)];
   const scope = (await erasureScope(store, PERSON))!;
   const copier = personCopy.COPIERS["lib/call-packages.ts"];
@@ -77,7 +81,7 @@ async function main(): Promise<void> {
   const first = await watched(() => copier(scope));
   is("their package is copied, as before", (first.records as { product: string; sessions: number }[] | null)?.map((c) => [c.product, c.sessions]), [["call000001", 4]]);
   is("RED: the store's whole set of packages is not read", first.commands.some((c) => c[1] === packagesKey(statsId)), false);
-  is("RED: one GET, their package's record, and nothing of the 60 other buyers", first.commands, [["GET", `nl:pkg:${THEIRS}`]]);
+  is("RED: their own index, then one GET, their package's record, and nothing of the 60 other buyers", first.commands, [["SMEMBERS", buyerPackagesKey(statsId, buyerField(PERSON), false)], ["SMEMBERS", theirIndex], ["GET", `nl:pkg:${THEIRS}`]]);
   is("RED: the bound is exported and is the most checkouts a copy lists", (personCopy as Record<string, unknown>).CALL_PACKAGE_COPY_READS_MAX, 200);
 
   part("The record still decides whose a package is");
@@ -107,11 +111,39 @@ async function main(): Promise<void> {
   part("At the most checkouts a copy lists, the reads stay inside the bound");
   const many = Array.from({ length: 100 }, (_, i) => checkoutId(5000 + i));
   many.forEach((id, i) => redis.run(["SET", `nl:pkg:${id}`, record(PERSON, 5000 + i)]));
+  redis.run(["DEL", theirIndex]);
+  redis.run(["SADD", theirIndex, ...many]);
   sessions = many.map((id) => paid(id, store.handle, "package"));
   const fresh = (await erasureScope(store, PERSON))!;
   const full = await watched(() => copier(fresh));
   is("a hundred packages of theirs, all copied", full.records?.length, 100);
-  is("one GET each, within CALL_PACKAGE_COPY_READS_MAX", [full.commands.length, full.commands.length <= Number((personCopy as Record<string, unknown>).CALL_PACKAGE_COPY_READS_MAX)], [100, true]);
+  is("their index, then one GET each, within CALL_PACKAGE_COPY_READS_MAX", [full.commands.length, full.commands.length <= Number((personCopy as Record<string, unknown>).CALL_PACKAGE_COPY_READS_MAX)], [102, true]);
+
+  // Claude 6 z5v4's LEVE on #5149 @1ec3e5f232 (7087869135), closed under the owner's zero-open-finding rule: the index
+  // is read whole, so a person with more packages than the bound allows would have made the copier read past it. Past
+  // CALL_PACKAGE_COPY_READS_MAX - 2 packages (the two SMEMBERS come first), the copy fails, as an address with more
+  // checkouts than the Stripe listing could read did before: no package is read and none is left out in silence.
+  part("Past the bound, the copy fails before reading any package");
+  {
+    const bound = Number((personCopy as Record<string, unknown>).CALL_PACKAGE_COPY_READS_MAX);
+    const past = Array.from({ length: bound - 1 }, (_, i) => checkoutId(9000 + i));
+    redis.run(["DEL", theirIndex]);
+    redis.run(["SADD", theirIndex, ...past]);
+    const overScope = (await erasureScope(store, PERSON))!;
+    const over = await watched(() => copier(overScope));
+    is("RED: the copy fails as not read in full", over.error instanceof UnknownReplyError, true);
+    is("RED: no package is read past the bound", over.commands.filter((c) => c[0] === "GET").length, 0);
+    is("and the reads stay inside the bound", over.commands.length <= bound, true);
+    const at = past.slice(0, bound - 2);
+    at.forEach((id, i) => redis.run(["SET", `nl:pkg:${id}`, record(PERSON, 9000 + i)]));
+    redis.run(["DEL", theirIndex]);
+    redis.run(["SADD", theirIndex, ...at]);
+    const edgeScope = (await erasureScope(store, PERSON))!;
+    const edge = await watched(() => copier(edgeScope));
+    is("at the bound exactly, every package is copied", [edge.records?.length, edge.commands.length], [bound - 2, bound]);
+    redis.run(["DEL", theirIndex]);
+    redis.run(["SADD", theirIndex, ...many]);
+  }
 
   part("A call package is bought only through a Stripe checkout on the creator's account (coord 2e8a)");
   // Reading the person's checkouts finds every package only if no other path writes one. Each fact below is read from

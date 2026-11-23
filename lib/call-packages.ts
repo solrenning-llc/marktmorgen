@@ -32,6 +32,7 @@
  */
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
+import { buyerField } from "@/lib/buyer-field";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { normaliseEmail } from "@/lib/auth";
@@ -50,6 +51,7 @@ import type { Listing, Store } from "@/lib/store";
 import { applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
 import { codesMayTakeOff } from "@/lib/discount";
 import { askBillingAddress } from "@/lib/billing-address";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 export const PACKAGE_TOKEN = /^[0-9a-f]{48}$/;
 const SESSION_ID = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
@@ -89,6 +91,23 @@ const USED_MEMBER = /^u[0-9a-f]{15}$/;
  * (lib/closed-store-data.ts). Kept with the store: a checkout's id a package.
  */
 export const packagesKey = (statsId: string) => `nl:pkg:s:${statsId}`;
+/**
+ * A buyer's packages in a store (#5125, the Stripe-read copiers row; coordinator b3f6's pattern, 22 November 2026): the
+ * checkouts of the packages they bought, under the SHA-256 of their address in lower case, so the copy of their data
+ * finds them without reading the store's current Stripe account, which the creator may disconnect or replace. Two
+ * sets, because a package with a last day runs out and one without is kept as long as it can be used: `lasting` holds
+ * the ones with no last day and has no expiry, like them; the other is never left to run out before the latest package
+ * in it (EXPIRE NX, then GT, at the package's own expiry, which is a fixed day). Named under the store's set of
+ * packages (packagesKey) and by its id, so a store that closes deletes both with it (lib/closed-store-data.ts).
+ */
+export const buyerPackagesKey = (statsId: string, field: string, lasting: boolean) => `nl:pkg:s:${statsId}:${lasting ? "byk" : "by"}:${field}`;
+/**
+ * Whose a package is, as its index names them: the SHA-256 of the address, trimmed and in lower case, never the
+ * address. The same helper as the gift and group-buy indexes (lib/buyer-field.ts), so the three never differ.
+ */
+export { buyerField };
+/** The commands a package's line in its buyer's index adds to the write that keeps its token: SADD, EXPIRE NX, EXPIRE GT. */
+export const PACKAGE_INDEX_COMMANDS = 3;
 /** The confirmation email's own mark, separate from the token: claimed (SET NX) right before the one send. */
 const sentKey = (checkout: string) => `${pkgKey(checkout)}:sent`;
 export const packageKeys = (checkout: string, token: string): string[] => [pkgKey(checkout), `${pkgKey(checkout)}:lock`, ...(token ? [tokenKey(token), usedKey(token)] : []), sentKey(checkout)];
@@ -403,6 +422,33 @@ export async function recordPackage(input: { store: Store; session: Session; pro
   return finishPackage({ ...input, session }, checkout, bought, true);
 }
 
+/**
+ * A package's line in its buyer's index (buyerPackagesKey), in the same write as its token: a package with a last day
+ * goes in the set that runs out, given the package's own expiry when it has none yet (NX) and kept to the latest
+ * package's otherwise (GT), so it never runs out before a package it leads to; one without goes in the set kept for
+ * good. Each reply is held to its exact shape by orderWrite.
+ */
+function indexCommands(bought: Bought, checkout: string, kept: string[]): string[][] {
+  const field = buyerField(bought.e);
+  if (!kept.length) return [["SADD", buyerPackagesKey(bought.s, field, true), checkout]];
+  const key = buyerPackagesKey(bought.s, field, false);
+  return [["SADD", key, checkout], ["EXPIRE", key, kept[1], "NX"], ["EXPIRE", key, kept[1], "GT"]];
+}
+
+/** The checkouts of the packages a person bought in a store, from their index; a reply not exactly a list of checkout ids is unknown. */
+export async function packagesBoughtBy(statsId: string, email: string): Promise<string[]> {
+  if (!isRedisConfigured()) return [];
+  const field = buyerField(email);
+  const read = await redisPipeline([["SMEMBERS", buyerPackagesKey(statsId, field, false)], ["SMEMBERS", buyerPackagesKey(statsId, field, true)]]);
+  if (!Array.isArray(read) || read.length !== 2) throw new UnknownReplyError("a person's call packages");
+  const out: string[] = [];
+  for (const reply of read) {
+    if (!Array.isArray(reply) || reply.some((id) => typeof id !== "string" || !SESSION_ID.test(id))) throw new UnknownReplyError("a person's call packages");
+    out.push(...(reply as string[]));
+  }
+  return [...new Set(out)];
+}
+
 /** Is the booking link's token written, for this checkout? Unknown throws. */
 async function tokenWritten(token: string, checkout: string): Promise<boolean> {
   const value = packageReply(await redisPipeline([["GET", tokenKey(token)]]));
@@ -421,8 +467,9 @@ async function finishPackage(input: { store: Store; session: Session; product: L
   if (typeof session.amount_total !== "number" || !Number.isSafeInteger(session.amount_total) || session.amount_total < 0 ||
     typeof session.currency !== "string" || !/^[a-zA-Z]{3}$/.test(session.currency)) throw unconfirmedPackage();
   if (made || !(await tokenWritten(bought.token, checkout))) {
-    // One write, so the store's list never has a package its token is missing from.
-    const [, set] = await orderWrite(store, [["SADD", packagesKey(bought.s), checkout], ["SET", tokenKey(bought.token), checkout, "NX", ...keep(bought)]]);
+    // One write, so the store's list never has a package its token is missing from, nor its buyer's index (#5125).
+    const kept = keep(bought);
+    const [, set] = await orderWrite(store, [["SADD", packagesKey(bought.s), checkout], ["SET", tokenKey(bought.token), checkout, "NX", ...kept], ...indexCommands(bought, checkout, kept)]);
     // Another call made the token first, and sends the email.
     if (set === null) return bought;
     if (set !== "OK") throw new Error("writing a package's token gave no clear answer; finished on a later call");

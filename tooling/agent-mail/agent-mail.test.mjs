@@ -1351,6 +1351,10 @@ console.log("ZA: what a READY's text may say (owner, 23/11/2026 12h29 Fortaleza:
   // Claude 5 iaqyQ's MÉDIO on #5404 (7108552494): a zero count never reaches across a line break to hide a finding.
   for (const t of ["sem achados.\nLEVE: the name", "0 achados.\nMÉDIO: a cap", "Nenhum achado.\nGRAVE: money", "sem achados\nLEVE: x"])
     is(`ZA: '${t.replace(/\n/g, " / ")}' is refused`, !aceito(t), za(t).join("; "));
+  // Claude 5 ibuF's LEVE on #5404 (7114134035): more names of a finding.
+  for (const t of ["0 findings\nNitpick: the name", "0 findings\nOne nitpick: the name", "0 findings\nMinor: the copy", "0 findings\nMajor: the cap", "sem achados\nMínimo: o texto", "sem achados; 1 BAIXO no log", "0 findings; BLOCKER: the lock"])
+    is(`ZA: '${t.replace(/\n/g, " / ")}' is refused`, !aceito(t), za(t).join("; "));
+  is("ZA: 'no mínimo 48 horas' in plain words is not a finding", aceito("sem achados; o reembolso vem no mínimo 48 horas depois"), za("sem achados; o reembolso vem no mínimo 48 horas depois").join("; "));
   is("ZA: yUZf's control 'READY, 0 findings, 1 LEVE: the log line is noisy.' is refused", !aceito("READY, 0 findings, 1 LEVE: the log line is noisy."), "");
   for (const t of ["0 findings; the LOW is not addressed", "sem achados; o LEVE não foi resolvido", "0 findings; the MEDIUM is unresolved", "0 findings; a follow-up PR for the name"])
     is(`ZA (d): '${t}' is refused`, !aceito(t), za(t).join("; "));

@@ -1708,7 +1708,9 @@ export function motivosContraReady(texto) {
   const motivos = [];
   const todo = String(texto ?? "");
   if (!/\b(sem achados?|0 achados?|zero achados?|nenhum achado|no findings?|0 findings?|zero findings?)\b/i.test(todo)) motivos.push('falta dizer "sem achados" (ou "0 achados", "no findings")');
-  const SEV = "GRAVE|ALTO|M[ÉE]DIO|LEVE|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE";
+  // Claude 5 ibuF's LEVE on #5404 (7114134035): "Nitpick:", "Minor:" and "Major:" are findings too, and so is the owner's
+  // own word, "mínimo" (ZA: "nem leve nem mínimo"), with "baixo" and "blocker".
+  const SEV = "GRAVE|ALTO|M[ÉE]DIO|LEVE|M[ÍI]NIMO|BAIXO|NITPICKS?|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE|MAJOR|MINOR|BLOCKER";
   const notas = /n[ãa]o [ée] defeito|not a defect|not a finding|n[ãa]o [ée] achado/i;
   // A oração que descreve um achado ("LEVE: o stream nunca é fechado") nunca é resolvida (Claude 5 icFoe, 7107286507).
   const descreve = new RegExp(`\\b(${SEV})S?\\b\\s*(\\d+\\s*)?(\\([^)]*\\)\\s*)?([:—–]|-\\s)`);

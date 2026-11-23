@@ -88,6 +88,8 @@ function vault(overrides: Partial<DoorSteps> = {}) {
 const ask = (who: string, lessonId = LESSON, nowSeconds = NOW) => ({
   store: SHOP,
   data: SHOP as DataStore,
+  /** The store's list id, under which its deleted people are kept (DoorAsk.listId, #5065). */
+  listId: "list_submission_buyer",
   folder: FOLDER,
   courseId: COURSE,
   lessonId,

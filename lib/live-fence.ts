@@ -38,6 +38,26 @@ end
 redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
 return 1`;
 
+// The same identity rule as SET_IF_STORE_LIVE, for a line pushed onto a bounded list that is renewed as a whole
+// (lib/store-assistant.ts, the questions the assistant could not answer): LPUSH, LTRIM to ARGV[6] lines and EXPIRE,
+// only while the store is live (Codex L-20261120-2338). 0: gone or erasing, nothing written; -1: the owner's record
+// could not be read; 1: written.
+export const PUSH_IF_STORE_LIVE = `-- marktmorgen:store-push-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[4] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[5] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[4] then return 0 end
+end
+redis.call("LPUSH", KEYS[3], ARGV[2])
+redis.call("LTRIM", KEYS[3], 0, tonumber(ARGV[6]) - 1)
+redis.call("EXPIRE", KEYS[3], ARGV[3])
+return 1`;
+
 /**
  * Keeps `value` under `key` for `seconds` while the fenced store is live: "kept"; "gone" when its erasure has begun or
  * its record is gone, and then nothing is written; "unknown" for any other answer (nothing known to be written).
@@ -78,6 +98,19 @@ export async function keepIfStoreLive(fence: StoreLiveFence, key: string, value:
   if (!isRedisConfigured()) return "unknown";
   if (fence.statsId === null) return "unknown";
   const replies = repliesFor(await redisPipeline([["EVAL", KEEP_IF_STORE_LIVE, 3, fence.live, fence.erasing, key, fence.field, value, fence.statsId, fence.ref]]), 1);
+  const answer = replies?.[0];
+  return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
+}
+
+/**
+ * Pushes `value` onto the list under `key`, kept to its newest `most` lines for `seconds`, while the fenced store is
+ * live: "kept"; "gone" when its erasure has begun or its record is gone, and then nothing is written; "unknown" for any
+ * other answer (nothing known to be written).
+ */
+export async function pushIfStoreLive(fence: StoreLiveFence, key: string, value: string, most: number, seconds: number): Promise<"kept" | "gone" | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  if (fence.statsId === null) return "unknown";
+  const replies = repliesFor(await redisPipeline([["EVAL", PUSH_IF_STORE_LIVE, 3, fence.live, fence.erasing, key, fence.field, value, seconds, fence.statsId, fence.ref, most]]), 1);
   const answer = replies?.[0];
   return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
 }

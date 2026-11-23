@@ -175,6 +175,35 @@ async function main() {
   is("the tab opened before it is refused", [tab.status, tab.body.error], [409, "stale"]);
   is("the agent's words are kept", await readAbout((await storeForEmail(owner))!.statsId, id), "The agent's accepted words.");
   is("and their room counts them", Number((await plain([["HGET", room, slot]]))[0]) >= dataBytes(["The agent's accepted words."], 1), true);
+
+  part("7. The description's slot is read in its exact shape (Claude 4 3rC's LOW 1 on 5bb7b1a78e, rule 24)");
+  // Only nil or a string of digits is a count; String() would read ["12"] and the number 12 as "12".
+  for (const odd of [["12"], 12, "", "12x", true]) {
+    const aboutNow = await readAbout((await storeForEmail(owner))!.statsId, id);
+    redis.pipeline = async (commands) => (commands.length === 1 && commands[0][0] === "HGET" && commands[0][1] === room && commands[0][2] === slot ? [odd] : plain(commands));
+    let answer: Answer;
+    try { answer = await save({ ...form, rev: await revNow(), title: "Agent title", about: "words after an odd count" }); } finally { redis.pipeline = plain; }
+    is(`a count read as ${JSON.stringify(odd)} saves nothing`, [answer.body.ok === true, await readAbout((await storeForEmail(owner))!.statsId, id)], [false, aboutNow]);
+  }
+
+  part("8. The description's slot is read before anything moves to the beside pool (Claude 4 3rC's LOW 2 on 5bb7b1a78e)");
+  const order: string[] = [];
+  let hgetFails = true;
+  redis.pipeline = async (commands) => {
+    for (const c of commands) {
+      if (c[0] === "HGET" && c[1] === room && c[2] === slot) order.push("about-slot");
+      else if (c.some((part) => part === `${room}:b`)) order.push("beside");
+    }
+    if (hgetFails && commands.length === 1 && commands[0][0] === "HGET" && commands[0][1] === room && commands[0][2] === slot) {
+      hgetFails = false;
+      throw Error("synthetic lost read of the description's slot");
+    }
+    return plain(commands);
+  };
+  let lostRead: Answer;
+  try { lostRead = await save({ ...form, rev: await revNow(), title: "Agent title", about: "words after a lost read" }); } finally { redis.pipeline = plain; }
+  is("a lost read of the slot saves nothing", lostRead.body.ok === true, false);
+  is("the slot was read, and the beside pool was not touched at all", [order.includes("about-slot"), order.includes("beside")], [true, false]);
   done();
 }
 

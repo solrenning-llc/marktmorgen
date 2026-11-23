@@ -2165,6 +2165,20 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
   // in its beside pool (lib/store-data-rules.ts, BESIDE_POOL_BYTES) and not in its room, so the room counts the
   // product at its real size; a product whose share the pool holds keeps it there once deleted, and one the pool
   // has no room for is counted in the room as before. A product saved before the pool moves to it here.
+  // What the description's slot counts now (36th triple audit on #4238, MEDIUM 1): the take reserves the larger of it and
+  // the new text, and only once the fenced script has written is it set to the new text exactly, so no failure after the
+  // take (a lost lock, an unknown answer, a store gone) ever leaves it counting less than is kept. Read before anything
+  // is moved to the beside pool, so a read that fails moves nothing (Claude 4 3rC's LOW 2 on #4238 @5bb7b1a78e); and read
+  // exactly: nil, or a string of digits, nothing else (rule 24, LOW 1: String() would take ["12"] or 12 for "12").
+  const aboutBytes = change.about?.text ? dataBytes([change.about.text], 1) : 0;
+  let aboutCounted = 0;
+  if (change.about) {
+    const roomKey = dataKey(before);
+    const read = roomKey ? repliesFor(await redisPipeline([["HGET", roomKey, `ab:${change.about.product}`]]), 1) : [null];
+    const raw = read?.[0];
+    if (!read || (raw !== null && (typeof raw !== "string" || !/^\d{1,15}$/.test(raw)))) throw new StoreBusyError();
+    aboutCounted = raw === null ? 0 : Number(raw);
+  }
   const gone = [...drop].filter((id) => !put.some((product) => product.id === id));
   const pooled = await besideHeld(before, [...put.map((product) => product.id), ...gone]);
   if (!pooled) throw new StoreBusyError();
@@ -2172,18 +2186,6 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
   const moved = toPool.length > 0 && (await takeBeside(before, toPool, BESIDE_PRODUCT)) ? toPool : [];
   for (const id of moved) pooled.add(id);
   const goneInRoom = gone.filter((id) => !pooled.has(id));
-  // What the description's slot counts now (36th triple audit on #4238, MEDIUM 1): the take reserves the larger of it and
-  // the new text, and only once the fenced script has written is it set to the new text exactly, so no failure after the
-  // take (a lost lock, an unknown answer, a store gone) ever leaves it counting less than is kept.
-  const aboutBytes = change.about?.text ? dataBytes([change.about.text], 1) : 0;
-  let aboutCounted = 0;
-  if (change.about) {
-    const roomKey = dataKey(before);
-    const read = roomKey ? repliesFor(await redisPipeline([["HGET", roomKey, `ab:${change.about.product}`]]), 1) : [null];
-    const raw = read?.[0];
-    if (!read || (raw !== null && raw !== undefined && !/^\d{1,15}$/.test(String(raw)))) throw new StoreBusyError();
-    aboutCounted = raw === null || raw === undefined ? 0 : Number(raw);
-  }
   const room = [
     ...put.map((product) => ({ slot: `p:${product.id}`, bytes: productBytes(product) + (pooled.has(product.id) ? 0 : BESIDE_PRODUCT), set: true })),
     ...gone.map((id) => ({ slot: `p:${id}`, bytes: 0, set: true })),

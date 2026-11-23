@@ -14,11 +14,18 @@
  * that lost its lock, or a flow that expired while its code was traded, gave back the new one. Each now counts the
  * unlisted host calendars too, before it gives a store's Google grant back.
  *
+ * Claude 5 zr's LEVE on #5476 @d882bc7424: a team host's own Google grant still decided on the index only, and every
+ * host calendar kept before hosts were listed is unlisted. Hosts A and B on the same Google account X, both unlisted:
+ * A's disconnect, or A reconnecting with another account, gave X back and B's calendar lost its access. A host's own
+ * grant now counts the store's other possible hosts too (its owner and team, the host itself left out), on every path
+ * that gives it back: the disconnect (healthy and damaged), the account change, a lost keep.
+ *
  * Synthetic only: fetch is mocked, no provider is called, every token and address is made up here.
  */
 import { createHash } from "node:crypto";
 import * as connect from "@/lib/meet-connect";
 import { hostId } from "@/lib/host-claims";
+import { disconnectHostGoogleFor as disconnectHostFor } from "@/lib/host-calendar";
 import { seal } from "@/lib/secret-box";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -37,6 +44,11 @@ const disconnectFor = connect.disconnectFor as (
   store?: { sid: string; email: string },
 ) => Promise<Outcome>;
 const STORE = { sid: SID, email: OWNER };
+/** The host calendar route's disconnect, with the store it has (its team id and owner) passed along. */
+const disconnectHostGoogleFor = disconnectHostFor as (
+  store: { statsId: string; sid: string; email: string },
+  email: string,
+) => Promise<{ providerAccessRemoved: boolean; sharedGrantKept: boolean }>;
 
 process.env.GOOGLE_OAUTH_CLIENT_ID = "client-id.apps.googleusercontent.com";
 process.env.GOOGLE_OAUTH_CLIENT_SECRET = "secret-for-tests";
@@ -69,7 +81,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   return new Response("{}", { status: 200 });
 }) as typeof fetch;
 
-type Consent = { statsId: string; sid?: string; code: string; verifier: string; by: string; owner: { email: string; handle: string }; startedAt: number };
+type Consent = { statsId: string; sid?: string; host?: string; code: string; verifier: string; by: string; owner: { email: string; handle: string }; startedAt: number };
 const finishConsent = connect.finishConsent as unknown as (provider: "google", input: Consent) => Promise<connect.ConnectResult>;
 /** Store A's owner connecting Google from the store's settings, the consent's store id passed along (beginConsent's sid). */
 async function reconnect(): Promise<string> {
@@ -111,6 +123,39 @@ async function seed(hostEmail: string, hostAccount: string, storeRecord = connec
     ["SADD", userKey(ACCOUNT), A],
     ["SET", hostKey(hostEmail), connection(hostAccount, hostId(hostEmail))],
     ["SET", `nl:team:${SID}`, JSON.stringify({ members: [{ email: MEMBER, role: "editor", joinedAt: "" }], invites: [] })],
+  ]);
+}
+
+/** Team host A's own consent: its calendar reconnecting Google, the consent's store id passed along. */
+async function reconnectHost(email: string): Promise<string> {
+  try {
+    const result = await finishConsent("google", {
+      statsId: A,
+      sid: SID,
+      host: hostId(email),
+      code: "code",
+      verifier: "v".repeat(43),
+      by: email,
+      owner: { email: OWNER, handle: "fixture" },
+      startedAt: Date.now(),
+    });
+    return result.ok ? `kept ${result.view.account}` : `refused ${result.error}`;
+  } catch (error) {
+    return (error as Error).name;
+  }
+}
+
+const MEMBER2 = "member-two-unlisted@example.test";
+/** Two team hosts' own calendars (A, and B when given) kept before hosts were listed: no store, nothing in any index. */
+async function seedHosts(aEmail: string, aAccount: string, bEmail = "", bAccount = ACCOUNT, aRecord = connection(aAccount, hostId(aEmail))) {
+  redis.clear();
+  revokes = 0;
+  revoked.length = 0;
+  const team = { members: [MEMBER, MEMBER2].map((email) => ({ email, role: "editor", joinedAt: "" })), invites: [] };
+  await redis.pipeline([
+    ["SET", hostKey(aEmail), aRecord],
+    ...(bEmail ? [["SET", hostKey(bEmail), connection(bAccount, hostId(bEmail))]] : []),
+    ["SET", `nl:team:${SID}`, JSON.stringify(team)],
   ]);
 }
 
@@ -271,6 +316,76 @@ async function main() {
   afterTrade = () => {};
   is("the flow keeps nothing", expiredAlone, "refused expired");
   is("and the new grant goes back", revoked, ["rt-new"]);
+
+  // Claude 5 zr, #5476 @d882bc7424: the same, between two team hosts.
+  for (const [who, b] of [["another team member", MEMBER2], ["the store's owner", OWNER]] as const) {
+    part(`Team host A disconnects, ${who}'s unlisted calendar (host B) on the same Google account`);
+    await seedHosts(MEMBER, ACCOUNT, b);
+    const bText = await get(hostKey(b));
+    const kept = await disconnectFor(A, "google", hostId(MEMBER), STORE);
+    is("A's disconnect keeps the grant B's calendar uses", revoked, []);
+    is("and says it was kept for another connection", [kept.providerAccessRemoved, kept.sharedGrantKept ?? false], [false, true]);
+    is("A's calendar is disconnected here", await get(hostKey(MEMBER)), null);
+    is("B's calendar connection is untouched", await get(hostKey(b)), bText);
+    is("B is now listed under the account", await listed(ACCOUNT, `h:${hostId(b)}`), 1);
+    is("and A is not", await listed(ACCOUNT, `h:${hostId(MEMBER)}`), 0);
+
+    part(`Team host A reconnects with another account, ${who}'s unlisted calendar (host B) on the old one`);
+    await seedHosts(MEMBER, ACCOUNT, b);
+    is("A's new account is connected", await reconnectHost(MEMBER), `kept ${NEW_EMAIL}`);
+    is("the old grant B's calendar uses is not given back", revoked, []);
+    is("B is now listed under the old account", await listed(ACCOUNT, `h:${hostId(b)}`), 1);
+    is("and A left the old account's index", await listed(ACCOUNT, `h:${hostId(MEMBER)}`), 0);
+  }
+
+  part("Team host A's disconnect from the host calendar route, host B (the owner) unlisted on the same account");
+  await seedHosts(MEMBER, ACCOUNT, OWNER);
+  const routed = await disconnectHostGoogleFor({ statsId: A, sid: SID, email: OWNER }, MEMBER);
+  is("the grant B's calendar uses is kept, and said so", [revoked, routed.providerAccessRemoved, routed.sharedGrantKept], [[], false, true]);
+
+  part("Team host A's damaged connection, host B unlisted on the same account");
+  const damagedHost = JSON.parse(connection(ACCOUNT, hostId(MEMBER))) as Record<string, unknown>;
+  damagedHost.provider = "something-else";
+  await seedHosts(MEMBER, ACCOUNT, MEMBER2, ACCOUNT, JSON.stringify(damagedHost));
+  const salvagedHost = await disconnectFor(A, "google", hostId(MEMBER), STORE);
+  is("the grant B's calendar uses is kept", [revoked, salvagedHost.sharedGrantKept ?? false], [[], true]);
+  is("A's damaged text is deleted", await get(hostKey(MEMBER)), null);
+  is("and B is listed", await listed(ACCOUNT, `h:${hostId(MEMBER2)}`), 1);
+
+  part("Team host A's keep that loses its lock, host B unlisted on the account it came back with");
+  await seedHosts(MEMBER, OTHER, MEMBER2, NEW_ACCOUNT);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const keep = commands.find((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:meet-keep-host:"));
+    if (keep) await real([["DEL", String(keep[3])]]);
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const hostLost = await reconnectHost(MEMBER);
+  redis.pipeline = real;
+  is("the keep fails as a lost lock", hostLost, "LockBusyError");
+  is("the new grant B's calendar uses is not given back", revoked, []);
+  is("and B is listed under that account", await listed(NEW_ACCOUNT, `h:${hostId(MEMBER2)}`), 1);
+
+  part("Team host A's keep that loses its lock, A's own earlier unlisted calendar already on that account");
+  await seedHosts(MEMBER, NEW_ACCOUNT);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const keep = commands.find((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:meet-keep-host:"));
+    if (keep) await real([["DEL", String(keep[3])]]);
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const ownLost = await reconnectHost(MEMBER);
+  redis.pipeline = real;
+  is("the keep fails as a lost lock", ownLost, "LockBusyError");
+  is("the grant A's own kept calendar still uses is not given back", revoked, []);
+
+  part("Control: team host A alone on its Google account, no other host on it");
+  await seedHosts(MEMBER, ACCOUNT, MEMBER2, OTHER);
+  const alone = await disconnectFor(A, "google", hostId(MEMBER), STORE);
+  is("A's own connection does not count: the grant is given back once", revoked, ["synthetic-grant"]);
+  is("and said so", [alone.providerAccessRemoved, alone.sharedGrantKept ?? false], [true, false]);
+  is("nothing is listed under the account", (await redis.pipeline([["SCARD", userKey(ACCOUNT)]]))[0], 0);
+  await seedHosts(MEMBER, ACCOUNT, MEMBER2, OTHER);
+  is("A's new account is connected", await reconnectHost(MEMBER), `kept ${NEW_EMAIL}`);
+  is("A's own new connection does not count: the old grant is given back once", revoked, ["synthetic-grant"]);
 
   done();
 }

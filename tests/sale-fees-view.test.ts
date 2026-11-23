@@ -54,8 +54,8 @@ function main(): void {
   is("a whole reading kept: the download", downloadRefusal({ since: 1000, stored: true }, 1000), null);
   is("a copy read back (kept): the download", downloadRefusal({ since: 1000 }, 1000), null);
   is("a reading short of the year: the reason, never a link", downloadRefusal({ since: Date.UTC(2026, 6, 2, 0, 0, 1), stored: true }, 1000), exportReachRefusal(Date.UTC(2026, 6, 2, 0, 0, 1), 1000));
-  is("a reading too large to keep: the reason, never a link", downloadRefusal({ since: 1000, stored: false, tooLarge: true }, 1000), "This reading was too large to keep, so no file is made from it. The figures on this page are the whole reading.");
-  is("a copy that could not be written: said as that, never 'too large' (audit 2fb6)", downloadRefusal({ since: 1000, stored: false }, 1000), "This reading could not be kept, so no file is made from it now. The figures on this page are the whole reading. Reload this page later.");
+  is("a reading too large to keep: the reason, never a link", downloadRefusal({ since: 1000, stored: false, tooLarge: true }, 1000), "This reading was too large to keep, so no file is made from it. The figures on this page are complete.");
+  is("a copy that could not be written: said as that, never 'too large' (audit 2fb6)", downloadRefusal({ since: 1000, stored: false }, 1000), "This reading could not be kept, so no file is made from it now. The figures on this page are complete. Reload this page later.");
   is("the page asks it of the reading it shows", page.includes('const noFile = kept ? downloadRefusal(kept, readingSince(kept.at, "UTC")) : null;'), true);
   is("the link and 'The download has every one.' only when there is a file", [/noFile === null \? \(\s*<p className="mt-4">\s*<a className="btn btn-secondary btn-sm" href=\{download\} download>/.test(page), page.includes('${noFile === null ? " The download has every one." : ""}')], [true, true]);
   is("and the reason in its place", page.includes('role="status">{noFile}</p>'), true);

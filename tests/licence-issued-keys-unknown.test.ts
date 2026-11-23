@@ -59,6 +59,33 @@ async function main(): Promise<void> {
   }
   is("read again in its shape, the list is as before", (await issuedKeys(store, product, "", 50)).total, 2);
 
+  part("A list with a broken pair or a record that does not read is unknown, never a shorter count (Claude 1's LEVE 2 on #5318)");
+  const [whole] = (await realPipeline([["HGETALL", `nl:keys:${store.statsId}:${app.product.id}:info`]])) as [string[]];
+  for (const [label, shape] of [
+    ["one field more, with no value (an odd list)", [...whole, "KEY-ODD"]],
+    ["a record that is not JSON", [whole[0], "not json", ...whole.slice(2)]],
+    ["a record that is not text", [whole[0], 7, ...whole.slice(2)]],
+    ["only unreadable records", ["KEY-1", "{", "KEY-2", "{"]],
+  ] as const) {
+    infoReply = shape;
+    const listed = await issuedKeys(store, product, "", 50).then((list) => list.total, () => "unknown");
+    const counted = await keyCounts(store, product).then((counts) => counts.issued, () => "unknown");
+    infoReply = "real";
+    is(`${label}: the list is unknown`, listed, "unknown");
+    is(`${label}: the count is unknown`, counted, "unknown");
+  }
+
+  part("An envelope with one reply more than asked is unknown (Claude 1's LEVE 1 on #5318)");
+  const plain = redis.pipeline;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await plain(commands);
+    return commands.length === 1 && commands[0][0] === "HGETALL" ? [...replies, "extra"] : replies;
+  }) as typeof redis.pipeline;
+  const extra = await issuedKeys(store, product, "", 50).then((list) => list.total, () => "unknown");
+  redis.pipeline = plain;
+  is("the list read from an envelope of two replies is unknown, never its first item", extra, "unknown");
+  is("and in its shape again, as before", (await issuedKeys(store, product, "", 50)).total, 2);
+
   part("A product that has given no key yet still reads as none");
   const other = await addProduct(owner, "Plugin", "", "9", null);
   if (!other.ok) throw new Error("no product");

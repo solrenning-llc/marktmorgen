@@ -95,6 +95,35 @@ async function main(): Promise<void> {
   const free = (await readProduct((await storeForEmail(OWNER))!, id))!;
   is("the product is still free and one-time", [free.priceCents, free.recurring], [0, null]);
 
+  part("The introductory and yearly prices set in one tab are kept by a stale tab that left them as it opened them (Claude 5 iYzLs's LEVE on #5468)");
+  const club = await addProduct(OWNER, "Sketching club", "A page a day.", "20", null);
+  if (!club.ok) throw new Error("no second product");
+  const clubId = club.product.id;
+  const saveClub = async (body: Record<string, unknown>) => {
+    const response = await saveProduct(new NextRequest("https://marktmorgen.com/api/store/product", { method: "POST", headers: { "content-type": "application/json", "x-nimbus-store": store.sid, cookie }, body: JSON.stringify({ action: "edit", id: clubId, ...body }) }));
+    return (await response.json()) as { ok: boolean; error?: string };
+  };
+  const readClub = async () => (await readProduct((await storeForEmail(OWNER))!, clubId))!;
+  type Offers = { intro?: { price: string; count: number } | null; yearly?: { price: string } | null };
+  /** The studio's payloadOf for a monthly membership, with its introductory or yearly price. */
+  const member = (f: Fields, offers: Offers = {}) => ({ ...payload({ ...f, every: "month" }), intro: offers.intro ?? null, yearly: offers.yearly ?? null });
+  const clubOpened: Fields = { title: "Sketching club", summary: "A page a day.", price: "20.00", pwyw: null, about: "" };
+  is("made a monthly membership", (await saveClub({ ...member(clubOpened), base: payload(clubOpened) })).ok, true);
+  is("tab Y sets a yearly price", (await saveClub({ ...member(clubOpened, { yearly: { price: "200" } }), base: member(clubOpened) })).ok, true);
+  is("tab Z, opened before Y saved, changes only the title", (await saveClub({ ...member({ ...clubOpened, title: "Sketch club" }), base: member(clubOpened) })).ok, true);
+  const yearlyKept = await readClub();
+  is("Z's title is written and Y's yearly price is kept", [yearlyKept.title, yearlyKept.yearly?.cents ?? null], ["Sketch club", 20000]);
+  const withYearly: Fields = { ...clubOpened, title: "Sketch club" };
+  is("a tab that opened it with the yearly price and empties it clears it", (await saveClub({ ...member(withYearly), base: member(withYearly, { yearly: { price: "200.00" } }) })).ok, true);
+  is("the yearly price is cleared", (await readClub()).yearly ?? null, null);
+  is("tab I sets an introductory price", (await saveClub({ ...member(withYearly, { intro: { price: "10", count: 2 } }), base: member(withYearly) })).ok, true);
+  is("tab J, opened before I saved, changes only the summary", (await saveClub({ ...member({ ...withYearly, summary: "Two pages a day." }), base: member(withYearly) })).ok, true);
+  const introKept = await readClub();
+  is("J's summary is written and I's introductory price is kept", [introKept.summary, introKept.intro?.cents ?? null], ["Two pages a day.", 1000]);
+  const withIntro: Fields = { ...withYearly, summary: "Two pages a day." };
+  is("a tab that opened it with the introductory price and empties it clears it", (await saveClub({ ...member(withIntro), base: member(withIntro, { intro: { price: "10.00", count: 2 } }) })).ok, true);
+  is("the introductory price is cleared", (await readClub()).intro ?? null, null);
+
   done();
 }
 

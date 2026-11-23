@@ -2,7 +2,7 @@
 import { done, is, part } from "./check";
 import { store as redis } from "./redis-stub";
 import { claimHandle, closeStoreRecord, createStore, ensureStatsId, ERASING_KEY, erasingField, storeForEmail, storeForId, storeIdCommand, storeRef } from "@/lib/store";
-import { assignReceiptNumber, receiptCounterKey, receiptNumbersKey } from "@/lib/receipt-number";
+import { RECEIPT_NUMBER, assignReceiptNumber, receiptCounterKey, receiptNumbersKey } from "@/lib/receipt-number";
 import { dataKey } from "@/lib/store-data";
 
 async function main(): Promise<void> {
@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   const field = await erasingField(storeRef(closing));
   let marked = false;
   redis.pipeline = async (commands) => {
-    if (!marked && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:receipt-number:v1\n"))) {
+    if (!marked && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:receipt-number:v"))) {
       marked = true;
       await pipeline([["HSET", ERASING_KEY, field, String(Date.now())], ["DEL", ...keys(closing)]]);
     }
@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   await assignReceiptNumber(gone, reference);
   let closed = false;
   redis.pipeline = async (commands) => {
-    if (!closed && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:receipt-number:v1\n"))) {
+    if (!closed && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:receipt-number:v"))) {
       redis.pipeline = pipeline;
       closed = await closeStoreRecord(gone, keys(gone));
     }
@@ -58,6 +58,22 @@ async function main(): Promise<void> {
   is("the store record is actually gone", await storeForId(gone.sid), null);
   is("a stale store snapshot gets no new number", after, { ok: false, reason: "unknown" });
   is("no receipt, counter or room returns after closure", await missing(keys(gone)), [0, 0, 0]);
+
+  part("The store's id moved to another ref whose erasure began: the fence reads the ref, not only that the id exists");
+  // Claude 5 icEJ's MEDIUM on #5224 (store-cache-live:v3, Codex L-20261121-0043): a numbering read under the old ref,
+  // after the id was pointed to the new ref and that ref's erasure began, must not number nor recreate anything.
+  const moved = await make("receiptmovedproof");
+  const movedTo = "receipt-moved-to@example.test";
+  await pipeline([["SET", storeIdCommand(moved.sid)[1], movedTo], ["HSET", ERASING_KEY, await erasingField(movedTo), String(Date.now())]]);
+  is("the id key now names another ref", (await pipeline([["GET", storeIdCommand(moved.sid)[1]]]))[0], movedTo);
+  is("a number under the old ref is refused", await assignReceiptNumber(moved, "cs_test_movedReceipt000001"), { ok: false, reason: "unknown" });
+  is("no receipt, counter or room is created under the moved id", await missing(keys(moved)), [0, 0, 0]);
+  await pipeline([["HDEL", ERASING_KEY, await erasingField(movedTo)]]);
+  is("even with no erasure on the new ref, the old ref's snapshot gets no number", await assignReceiptNumber(moved, "cs_test_movedReceipt000002"), { ok: false, reason: "unknown" });
+  is("still nothing created under the moved id", await missing(keys(moved)), [0, 0, 0]);
+
+  // Claude 5 icEJ's LOW on #5224: the script's keys and arguments changed shape, so its name moves to v2.
+  is("the script's new shape carries a new name", RECEIPT_NUMBER.startsWith("-- marktmorgen:receipt-number:v2\n"), true);
 
   part("An extra store uses its own erasing field, independently of its owner's first store");
   const created = await createStore(live.email, "receiptextraproof", "Synthetic extra store", "");

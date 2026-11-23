@@ -49,3 +49,35 @@ export async function setIfStoreLive(fence: StoreLiveFence, key: string, value: 
   const answer = replies?.[0];
   return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
 }
+
+// The same fence, for a value kept with no expiry (a creator's own record, not a cache): KEYS the live key, the erasing
+// hash and the target; ARGV the store's field, the value, its statsId ("" for a store with an id) and its ref.
+export const KEEP_IF_STORE_LIVE = `-- marktmorgen:store-keep-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[3] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[4] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[3] then return 0 end
+end
+redis.call("SET", KEYS[3], ARGV[2])
+return 1`;
+
+/** Billed for one keepIfStoreLive: the EVAL and its HGET, GET and SET (lib/capped-count.ts's count). */
+export const STORE_KEEP_LIVE_COMMANDS = 4;
+
+/**
+ * Keeps `value` under `key`, with no expiry, while the fenced store is live (Codex X4-20261119-1743): "kept"; "gone"
+ * when its erasure has begun, its record is gone or another store holds its key, and then nothing is written;
+ * "unknown" for a store from before ids with no statsId or any other answer (nothing known to be written).
+ */
+export async function keepIfStoreLive(fence: StoreLiveFence, key: string, value: string): Promise<"kept" | "gone" | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  if (fence.statsId === null) return "unknown";
+  const replies = repliesFor(await redisPipeline([["EVAL", KEEP_IF_STORE_LIVE, 3, fence.live, fence.erasing, key, fence.field, value, fence.statsId, fence.ref]]), 1);
+  const answer = replies?.[0];
+  return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
+}

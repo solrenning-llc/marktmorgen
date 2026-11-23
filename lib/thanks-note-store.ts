@@ -4,10 +4,13 @@
  * a product marked as having one, as a long description is
  * (lib/product-about.ts).
  */
+import { keepIfStoreLive } from "@/lib/live-fence";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import type { Store } from "@/lib/store";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { type ThanksNote, parseNote } from "@/lib/thanks-note";
 
 const noteKey = (statsId: string, productId: string) => `nl:product:note:${statsId}:${productId}`;
@@ -93,17 +96,21 @@ export async function readThanksNotes(statsId: string | null, productIds: string
 
 /**
  * Writes a note after taking its room in the store's data room (DataRoomError
- * when it does not fit), or forgets it (null) as dropThanksNote does. Done only
- * when Redis answers the SET exactly "OK"; any other reply throws
- * UnknownReplyError (CX-123 rule 24), so the studio never says saved, nor marks
- * the product, for a note that may not be kept.
+ * when it does not fit), or forgets it (null) as dropThanksNote does. The note
+ * is kept only while the store is live, in one step with the store's fence
+ * (lib/live-fence.ts, keepIfStoreLive): a store erased while the studio's save
+ * was under way gets no note written back after the erasure's walk (Codex
+ * X4-20261119-1743). Done only when the fenced write answers "kept"; a store
+ * gone or being erased, or any other answer, throws UnknownReplyError (CX-123
+ * rule 24), so the studio never says saved, nor marks the product, for a note
+ * that may not be kept, and nothing falls back to an unfenced SET.
  */
-export async function writeThanksNote(statsId: string, productId: string, note: ThanksNote | null, room: DataStore): Promise<void> {
+export async function writeThanksNote(statsId: string, productId: string, note: ThanksNote | null, room: DataStore & Pick<Store, "email" | "sid" | "extra" | "statsId">): Promise<void> {
   if (!note) return forgetNote(statsId, productId, room);
   const json = JSON.stringify(note);
   await needData(room, [{ slot: `tn:${productId}`, bytes: dataBytes([json], 1), set: true }]);
-  const replies = repliesFor(await redisPipeline([["SET", noteKey(statsId, productId), json]]), 1);
-  if (!replies || replies[0] !== "OK") throw new UnknownReplyError("a note saved");
+  const kept = await keepIfStoreLive(await storeLiveFence(room), noteKey(statsId, productId), json);
+  if (kept !== "kept") throw new UnknownReplyError("a note saved");
 }
 
 /** Forgets the note of a product that is gone, and gives back its room. */

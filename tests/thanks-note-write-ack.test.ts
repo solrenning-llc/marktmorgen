@@ -82,7 +82,10 @@ const UNKNOWN: [string, Mode][] = [
   ["a list", { slot: ["OK"] }],
   ["no reply for it", "short"],
 ];
-const SET_UNKNOWN: [string, Mode][] = [...UNKNOWN, ["null", { slot: null }], ["lowercase ok", { slot: "ok" }], ["a count", { slot: 1 }]];
+// The note is written by the store's fenced script (lib/live-fence.ts KEEP_IF_STORE_LIVE, Codex X4-20261119-1743): only
+// the exact 1 is a keep; 0 (the store gone or being erased), -1 and anything else are not.
+const FENCED_UNKNOWN: [string, Mode][] = [...UNKNOWN, ["null", { slot: null }], ["OK", { slot: "OK" }], ["a count as text", { slot: "1" }], ["the store gone", { slot: 0 }], ["a record that does not parse", { slot: -1 }], ["two", { slot: 2 }]];
+const isFencedWrite = (key: string) => (c: Cmd) => c[0] === "EVAL" && c[5] === key;
 const DEL_UNKNOWN: [string, Mode][] = [...UNKNOWN, ["null", { slot: null }], ["a count as text", { slot: "1" }], ["more than one key", { slot: 2 }], ["a negative count", { slot: -1 }]];
 
 test("healthy: saved, marked and readable; taken off, forgotten and its space given back", async () => {
@@ -113,13 +116,13 @@ test("healthy drop of a gone product's note: forgotten and its space given back;
   assert.equal(await used(), before);
 });
 
-for (const [name, mode] of SET_UNKNOWN) {
-  test(`SET answers ${name}: not said as saved, the product not marked`, async () => {
+for (const [name, mode] of FENCED_UNKNOWN) {
+  test(`the fenced write answers ${name}: not said as saved, the product not marked`, async () => {
     const { store, statsId, call } = await fixture;
     const id = await product();
     const key = await noteKey(id);
-    await assert.rejects(tampered(isCmd("SET", key), mode, () => writeThanksNote(statsId, id, NOTE, store)), UnknownReplyError);
-    const { out: r, hits } = await tampered(isCmd("SET", key), mode, () => call({ id, note: NOTE }));
+    await assert.rejects(tampered(isFencedWrite(key), mode, () => writeThanksNote(statsId, id, NOTE, store)), UnknownReplyError);
+    const { out: r, hits } = await tampered(isFencedWrite(key), mode, () => call({ id, note: NOTE }));
     assert.equal(hits, 1);
     assert.notEqual(r.body.ok, true);
     assert.equal(r.status, 500);

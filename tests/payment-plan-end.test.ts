@@ -301,6 +301,42 @@ async function main(): Promise<void> {
     Date.now = trueNow;
   }
 
+  part("A put-back that Stripe did not confirm is written again on the next pass, never settled at the sold end (Claude 2's LEVE on #5367)");
+  {
+    // The same race, but the write of the member's end back is not confirmed (an answer for another object), and
+    // Stripe is left holding the end that was sold with the member's request. The first pass cannot settle it; the
+    // next one reads cancel_at at the sold end with a request already there, which alone it leaves alone (the control
+    // above), so the put-back still owed must be remembered where that pass reads it.
+    beforeEnds();
+    const periodEnd = ANCHOR + 30 * DAY;
+    const soldEnd = addPeriods(ANCHOR, "month", 12);
+    const asked = String(ANCHOR + DAY - 60);
+    const base = { id: "sub_race00000003", status: "active", billing_cycle_anchor: ANCHOR, trial_end: null, metadata: { store: "harbor", ends_after: "12", ends_interval: "month" }, items: { data: [{ current_period_end: periodEnd }] } };
+    const heldAtSoldEnd = { ...base, cancel_at: soldEnd, metadata: { ...base.metadata, cancel_requested_at: asked } };
+    sessions.cs_test_race00000003 = checkout("cs_test_race00000003", { ends_after: "12", ends_interval: "month" });
+    subscriptions.sub_race00000003 = { ...base };
+    const before = updates.length;
+    Object.defineProperty(updateReplies, "sub_race00000003", {
+      configurable: true,
+      // The first write (the sold end) answers with the member's request; the put-back answers for another object.
+      get: () => (updates.length - before === 1 ? heldAtSoldEnd : { id: "sub_other" }),
+    });
+    const first = await finishPlan(ACCOUNT, "cs_test_race00000003");
+    is("first pass: the put-back is not confirmed, so nothing is settled", first, "unread");
+    is("first pass: the sold end, then the member's end, were written", updates.slice(before).map((u) => u.body.get("cancel_at")), [String(soldEnd), String(periodEnd)]);
+    delete (updateReplies as Record<string, unknown>).sub_race00000003;
+    subscriptions.sub_race00000003 = { ...heldAtSoldEnd };
+    const again = updates.length;
+    const second = await finishPlan(ACCOUNT, "cs_test_race00000003");
+    is("next pass: the member's end is written back first", updates.slice(again).map((u) => u.body.get("cancel_at")), [String(periodEnd)]);
+    is("next pass: Stripe now holds the member's end, not the sold end", subscriptions.sub_race00000003.cancel_at, periodEnd);
+    is("next pass: watched as stopped early, never settled as done at the sold end", second, "early");
+    const third = updates.length;
+    const settled = await finishPlan(ACCOUNT, "cs_test_race00000003");
+    is("a pass after the confirmed put-back writes nothing more and keeps watching", [updates.length - third, settled], [0, "early"]);
+    Date.now = trueNow;
+  }
+
   done();
 }
 

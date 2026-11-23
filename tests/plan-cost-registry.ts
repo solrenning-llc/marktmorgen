@@ -1601,11 +1601,19 @@ export const REVIEW_DOOR_MONTHS = 6;
  * deleting it as often, and having its refund marked, plus one refresh of the quotes an hour for a 31-day month.
  */
 export function reviewWritesMonthlyUsd(tier: Tier): number {
+  const refreshes = Math.ceil((31 * 86_400) / QUOTES_REFRESH_SECONDS) * request("light", REVIEW_WRITE_WORST.refresh.commands, REVIEW_WRITE_WORST.refresh.bytes);
+  return reviewWritesOrdersUsd(tier) + refreshes;
+}
+
+/**
+ * The part of "review-writes" that follows the plan's included orders (ORDERS_INCLUDED, linearly): the writes. A plan
+ * that includes fewer orders has fewer buyers who can write, so tests/limits-proposal-table.ts usageCents scales this
+ * part with the orders figure, as it scales the orders line itself; the hourly refresh does not depend on orders.
+ */
+export function reviewWritesOrdersUsd(tier: Tier): number {
   const orders = REVIEW_DOOR_MONTHS * ORDERS_INCLUDED[tier];
   const per = (w: { commands: number; bytes: number }) => request("heavy", w.commands, w.bytes);
-  const writes = orders * (REVIEW_SAVES_PER_ORDER_MONTH * (per(REVIEW_WRITE_WORST.save) + per(REVIEW_WRITE_WORST.remove)) + per(REVIEW_WRITE_WORST.mark));
-  const refreshes = Math.ceil((31 * 86_400) / QUOTES_REFRESH_SECONDS) * request("light", REVIEW_WRITE_WORST.refresh.commands, REVIEW_WRITE_WORST.refresh.bytes);
-  return writes + refreshes;
+  return orders * (REVIEW_SAVES_PER_ORDER_MONTH * (per(REVIEW_WRITE_WORST.save) + per(REVIEW_WRITE_WORST.remove)) + per(REVIEW_WRITE_WORST.mark));
 }
 
 /** What one request costs: its call, CPU, memory, database commands and the bytes it moves through the database. */

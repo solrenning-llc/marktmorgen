@@ -30,7 +30,7 @@ import {
 } from "@/lib/store-assistant-rules";
 import { CENTS_PER_MINUTE, MAX_AUTO_LANGUAGES, MAX_AUTO_MINUTES, MIN_CENTS } from "@/lib/auto-captions-rules";
 import { SIZING_READING, unitUnder } from "./historical-margin-model";
-import { COST_LINES, GB, STORAGE_PER_GB, perPaymentCost } from "./plan-cost-registry";
+import { COST_LINES, GB, STORAGE_PER_GB, perPaymentCost, reviewWritesOrdersUsd } from "./plan-cost-registry";
 
 /** The printed lines, in the order cuts are proposed: least likely to be reached, and least generous at competitors, first. */
 export const ORDER = ["ai", "video", "storage", "orders", "store-email", "transactional-email", "list-email", "visits"] as const;
@@ -73,6 +73,8 @@ const centsUp = (usd: number) => Math.ceil(Math.round(usd * 1e7) / 1e5);
 export function usageCents(tier: Tier, cycle: Cycle, share: Partial<Record<Printed, number>>): number {
   let monthly = COST_LINES.reduce((sum, line) => sum + line.monthlyUsd(tier), 0);
   for (const id of ORDER) monthly -= lineUsd(tier, id) * (1 - (share[id] ?? 1));
+  // A line worked out from the included orders follows them (#5400): fewer orders, fewer buyers who can write a review.
+  monthly -= reviewWritesOrdersUsd(tier) * (1 - (share.orders ?? 1));
   // Only the plan's storage is taken off what is kept after the end; anything else a cut might save there is left in, so a proposal never counts on it.
   const after = perPaymentCost(tier) - retainedStorageUsd(tier) * (1 - (share.storage ?? 1));
   return centsUp(months(cycle) * monthly + after);

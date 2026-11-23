@@ -403,10 +403,14 @@ async function main(): Promise<void> {
     is("a lapsed attempt dropped by any later save leaves its id, not its address", [after?.stripeConnecting ?? null, (after?.stripeConnectReplaced ?? []).map((r) => r.id), JSON.stringify(after?.stripeConnectReplaced ?? []).includes("connect-replaced-lapsed@")], [null, [gone && "id" in gone ? gone.id : "none"], false]);
 
     const many = await extraStore("connect-replaced-many@example.com", "crepmfirst", "crepmextra");
+    const begun: string[] = [];
     for (let i = 0; i < STRIPE_CONNECT_REPLACED_KEPT + 2; i += 1) {
-      await beginStripeConnect(storeRef(many), many.sid, { country: "us", email: "connect-replaced-many@example.com", name: "Many" }, Date.now() - (STRIPE_CONNECT_REUSE_SECONDS + 60 + (STRIPE_CONNECT_REPLACED_KEPT + 2 - i) * 60) * 1000);
+      const made = await beginStripeConnect(storeRef(many), many.sid, { country: "us", email: "connect-replaced-many@example.com", name: "Many" }, Date.now() - (STRIPE_CONNECT_REUSE_SECONDS + 60 + (STRIPE_CONNECT_REPLACED_KEPT + 2 - i) * 60) * 1000);
+      begun.push(made && "id" in made ? made.id : "none");
     }
-    is(`at most ${STRIPE_CONNECT_REPLACED_KEPT} kept, the newest`, ((await storeForId(many.sid))?.stripeConnectReplaced ?? []).length, STRIPE_CONNECT_REPLACED_KEPT);
+    // Each attempt is replaced by the next, and the last one, past its 29 days too, lapses when the record is read: the
+    // newest STRIPE_CONNECT_REPLACED_KEPT of them stay, oldest first (Claude 6 i51q's NIT on #5095 @29adbe0bd7: a count alone also passes when the oldest are kept).
+    is(`at most ${STRIPE_CONNECT_REPLACED_KEPT} kept, the newest, in order`, ((await storeForId(many.sid))?.stripeConnectReplaced ?? []).map((r) => r.id), begun.slice(-STRIPE_CONNECT_REPLACED_KEPT));
   }
 
   part("A cross-border refusal closes the attempt even after an earlier send (coordinator's df44 on #5095, optional)");

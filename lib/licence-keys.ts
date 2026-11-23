@@ -626,7 +626,9 @@ const REFUND_PASS_SECONDS = 7 * 86_400;
  * nl:keys: keys (erased with it), as lib/gifts.ts keeps them: read again from Stripe and tried again first on every run,
  * and let go only once handled or once Stripe says there is nothing to take back, so one row that can never be handled
  * does not hold the place forever (#5285 row #2868, Codex X6's LOW 2). At most REFUND_RETRY_CAP; with the list full, the
- * row holds the place at its time instead. Kept as long as the refunds read (renewed with every row put on it).
+ * row holds the place at its time instead. Kept as long as the refunds read, renewed with every row put on it and by
+ * every run that reads it, so a row that keeps failing never lapses with it while the job still runs (Claude 2 lpgvy's
+ * LEVE on #5321): its key record has no expiry, and a row past the place is read from nowhere else.
  */
 const refundRetryKey = (store: Store) => `nl:keys:${store.statsId}:refunds:retry`;
 /** The last refund on the list a run read again: the next run reads on from the one after it, in the order of their ids. */
@@ -1230,11 +1232,16 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
       const gone = repliesFor(await redisPipeline([["HDEL", refundRetryKey(store), id]]), 1);
       if (countOf(gone?.[0]) === null) console.error("reading refunds for license keys: letting go of a row was left unknown; read again next run", store.handle);
     }
-    // The place moves past every row read this run; a write left unknown reads the same rows again next run.
-    if (last) {
-      const moved = repliesFor(await redisPipeline([["SET", refundRetryFromKey(store), last, "EX", REFUND_RETRY_KEEP_SECONDS]]), 1);
-      if (moved?.[0] !== "OK") console.error("reading refunds for license keys: the place on the list to try again was left unknown", store.handle);
-    }
+    // The list is kept as long again by every run that reads it (Claude 2 lpgvy's LEVE on #5321): kept only from the
+    // last row put on it, a row that kept failing lapsed with it, past the place, and the key of a sale refunded in full
+    // stayed valid for good (its record has no expiry). So it lapses only once the store's job stops reading it. The
+    // place moves past every row read this run; a write left unknown reads the same rows again next run.
+    const writes: (string | number)[][] = [["EXPIRE", refundRetryKey(store), REFUND_RETRY_KEEP_SECONDS]];
+    if (last) writes.push(["SET", refundRetryFromKey(store), last, "EX", REFUND_RETRY_KEEP_SECONDS]);
+    const kept = repliesFor(await redisPipeline(writes), writes.length);
+    // 0 is a list whose last row this run let go (nothing left to keep); anything but 0 or 1 is unknown.
+    if (kept?.[0] !== 0 && kept?.[0] !== 1) console.error("reading refunds for license keys: keeping the list to try again was left unknown; renewed next run", store.handle);
+    if (last && kept?.[1] !== "OK") console.error("reading refunds for license keys: the place on the list to try again was left unknown", store.handle);
   }
 
   // Lost disputes, read once a run from the pass's start, as before: with the first page of refunds the run reads and

@@ -6,6 +6,10 @@
  * file is not what the records say. Run it after a change to docs/accessibility-inventory.json or to
  * ACCESSIBILITY_CHECKS, as the other generated files are run (AC (b)).
  *
+ * Running it is the review of each new or changed record: the date it writes says a person looked at that record,
+ * so check each such record against what /accessibility shows before running it (Claude 3's LOW on #4856). Never run
+ * it only to make a test pass (AC (x)); a record not checked stays as it was until it is.
+ *
  *   node scripts/accessibility-statement-reviews.mjs
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";

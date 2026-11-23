@@ -130,9 +130,11 @@ const heldKey = (community: string) => `nl:cm:mailq:held:${community}`;
 /**
  * A held send: looked at again in an hour, or ended once it has waited ANNOUNCEMENT_HELD_DAYS. A send's first hold
  * takes a place among its community's held sends, read exactly: past ANNOUNCEMENTS_HELD_MOST it ends at once with
- * `full`; a reply that does not read leaves it waiting without a place, and its next look asks again.
+ * `full`. It never waits without its place (Claude 2 upbeat's LEVE on #5341): a read of the others that does not
+ * answer only skips giving back places of sends that ended, the place is still asked of the atomic step, and when that
+ * step's own answer does not read the send ends at once with `unheld`, so the held sends never pass the ceiling.
  */
-async function hold(job: AnnouncementJob, note: string, ended: string, full: string): Promise<AnnouncementJob> {
+async function hold(job: AnnouncementJob, note: string, ended: string, full: string, unheld: string): Promise<AnnouncementJob> {
   const now = Date.now();
   // Its 60 days start on its first hold, whether or not its place could be taken then (Claude 7 xAF's LEVE on #5341).
   const heldSince = job.heldSince ?? now;
@@ -140,20 +142,18 @@ async function hold(job: AnnouncementJob, note: string, ended: string, full: str
     if (job.heldPlaced) await redisPipeline([["SREM", heldKey(job.community), job.id]]);
     return { ...job, status: "failed", note: ended, retryAt: undefined, heldPlaced: undefined };
   }
-  const waiting = (placed: boolean): AnnouncementJob => ({ ...job, status: "waiting", note, retryAt: now + ANNOUNCEMENT_RETRY_SECONDS * 1000, heldSince, heldPlaced: placed || undefined });
-  if (job.heldPlaced) return waiting(true);
+  const waiting = (): AnnouncementJob => ({ ...job, status: "waiting", note, retryAt: now + ANNOUNCEMENT_RETRY_SECONDS * 1000, heldSince, heldPlaced: true });
+  if (job.heldPlaced) return waiting();
   const key = heldKey(job.community);
   // Places held by sends that ended or are gone are given back first. A send still under way is never taken out on a
   // read: it may be entering the hold at this moment.
   const listed = repliesFor(await redisPipeline([["SMEMBERS", key]]), 1);
   const ids = listed ? stringList(listed[0]) : null;
-  if (!ids) return waiting(false);
-  const others = ids.filter((other) => other !== job.id);
+  const others = (ids ?? []).filter((other) => other !== job.id);
   if (others.length) {
     const read = repliesFor(await redisPipeline([["MGET", ...others.map(jobKey)]]), 1);
     const values = read ? repliesFor(read[0], others.length) : null;
-    if (!values) return waiting(false);
-    const gone = others.filter((_, i) => {
+    const gone = !values ? [] : others.filter((_, i) => {
       if (values[i] === null) return true;
       const other = parse(values[i]);
       return other !== null && (other.status === "sent" || other.status === "failed");
@@ -163,10 +163,8 @@ async function hold(job: AnnouncementJob, note: string, ended: string, full: str
   // The place itself in one atomic step (Claude 7 xAF's MEDIUM on #5341): sends held at the same moment never pass the
   // ceiling together. Kept a day past the longest hold, from the last send held.
   const taken = repliesFor(await redisPipeline([["EVAL", HOLD_PLACE, 1, key, job.id, ANNOUNCEMENTS_HELD_MOST, (ANNOUNCEMENT_HELD_DAYS + 1) * 86_400]]), 1)?.[0];
-  if (taken === 0) {
-    return { ...job, status: "failed", note: full, retryAt: undefined, heldSince: undefined, heldPlaced: undefined };
-  }
-  return waiting(taken === 1);
+  if (taken === 1) return waiting();
+  return { ...job, status: "failed", note: taken === 0 ? full : unheld, retryAt: undefined, heldSince: undefined, heldPlaced: undefined };
 }
 
 /**
@@ -515,6 +513,7 @@ export async function advanceAnnouncement(
         job.done > 0 ? "Your store is switched off after notices about its content, so nothing more was sent. The rest go out by themselves once your store is back on." : "Your store is switched off after notices about its content, so nothing was sent. It goes out by itself once your store is back on.",
         `Your store was switched off after notices about its content for ${ANNOUNCEMENT_HELD_DAYS} days, so ${job.done > 0 ? "the rest of this announcement was" : "this announcement was"} not sent. Post it again once your store is back on.`,
         `Only ${ANNOUNCEMENTS_HELD_MOST} announcements wait at a time while your store is switched off, so ${job.done > 0 ? "the rest of this one was" : "this one was"} not sent. Post it again once your store is back on.`,
+        `Your store is switched off after notices about its content, and ${job.done > 0 ? "the rest of this announcement" : "this announcement"} could not be held to wait for it, so it was not sent. Post it again once your store is back on.`,
       );
       await save(job);
       if (job.status === "failed") await redisPipeline([["SREM", QUEUE, id]]);
@@ -526,6 +525,7 @@ export async function advanceAnnouncement(
         "Your plan does not include email right now. It goes out once Pro is on again.",
         `Your plan did not include email for ${ANNOUNCEMENT_HELD_DAYS} days, so ${job.done > 0 ? "the rest of this announcement was" : "this announcement was"} not sent. Post it again once Pro is on.`,
         `Only ${ANNOUNCEMENTS_HELD_MOST} announcements wait at a time while your plan does not include email, so ${job.done > 0 ? "the rest of this one was" : "this one was"} not sent. Post it again once Pro is on.`,
+        `Your plan does not include email right now, and ${job.done > 0 ? "the rest of this announcement" : "this announcement"} could not be held to wait for it, so it was not sent. Post it again once Pro is on.`,
       );
       await save(job);
       if (job.status === "failed") await redisPipeline([["SREM", QUEUE, id]]);

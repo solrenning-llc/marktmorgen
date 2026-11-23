@@ -219,13 +219,6 @@ else
 end
 return 1`;
 
-/**
- * Billed at most for one fenced settings write: the EVAL and its worst branch, HGET, GET, SET, SET and DEL. It takes
- * the place of the plain writes it was (addHostIcs's SET of the settings, SET of the reading and DEL of the failure;
- * setHostCalendars's SET and DEL; removeHostIcs's SET and DEL), so each change costs at most this many beyond them.
- */
-export const HOST_CONFIG_FENCE_COMMANDS = 6;
-
 type FencedWrite = { kind: "ics"; reading: string } | { kind: "choices" } | { kind: "remove" };
 
 /** Writes `config` for `host`, fenced on `store` (HOST_CONFIG_IF_STORE_LIVE): "kept", "gone", or throws when unknown. */

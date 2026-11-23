@@ -318,6 +318,18 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
  */
 export const PAYDAY_CATCH_UP_DAYS = 3;
 
+/** The runs of a month that can find a store due: its payday and PAYDAY_CATCH_UP_DAYS after it, the job once a day. */
+export const PAYDAY_RUNS_DUE = PAYDAY_CATCH_UP_DAYS + 1;
+/**
+ * What the two fenced steps cost over the plain SETs they replaced (Codex L-20261119-1144): the month's claim
+ * (claimWhileStoreLive, store-claim-live:v1) and keepMonth's write-again (setWhileStoreLive, store-cache-live:v3) are
+ * each billed as the EVAL and the HGET, GET and SET it runs, four commands in place of one: three more a step, at most
+ * one of each in a run on a store that is due. Each fenced request is under 2 KiB, script, keys and ref included
+ * (tests/affiliate-payday-fence-cost.test.ts); the bytes counted are its whole size, above the plain SET's own.
+ */
+export const PAYDAY_FENCE_EXTRA_COMMANDS = 2 * 3;
+export const PAYDAY_FENCE_EXTRA_BYTES = 2 * 2_048;
+
 /** Whether a store's payday is today or was at most PAYDAY_CATCH_UP_DAYS days ago in this month. */
 export function paydayDue(payday: number, dayOfMonth: number): boolean {
   return payday >= 1 && dayOfMonth >= payday && dayOfMonth - payday <= PAYDAY_CATCH_UP_DAYS;

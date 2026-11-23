@@ -1,0 +1,77 @@
+/**
+ * Issue #4134 (Codex T, email safety; Claude 6 block of the coordinator's split, 5437): rampRoom (lib/mail-health.ts)
+ * read a store's open portion with a GET and wrote what was left with a plain SET. Two senders at once (the mail job's
+ * list email and the imports job's welcome mail run under different locks) could both read the same `left` and each be
+ * granted it, so an imported list's first portion of 100 went out as 200. A give-back (rampBack) racing a take wrote
+ * over it the same way, putting back capacity already handed out.
+ *
+ * Now both write only over the very record they read (mail-ramp-swap), reading again when it changed; a write that
+ * keeps losing grants nothing. Checked with both reads held until each has read: the grants never pass the portion,
+ * and a give-back racing a take keeps the take. Synthetic store id; the in-memory Redis.
+ */
+import { rampBack, rampRoom, startRamp } from "@/lib/mail-health";
+import { RAMP_FIRST, RAMP_TRIGGER } from "@/lib/mail-health-rules";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+
+process.env.UPSTASH_REDIS_REST_URL ||= "https://redis.example.invalid";
+process.env.UPSTASH_REDIS_REST_TOKEN ||= "test-token";
+
+const ID = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
+const KEY = `nl:mail:ramp:${ID}`;
+const real = redis.pipeline.bind(redis);
+/** While set, every GET of the ramp waits until this many have read: two senders reading the same record. */
+let gather = 0;
+let reads = 0;
+let wake: () => void = () => {};
+let allRead = Promise.resolve();
+redis.pipeline = (async (commands: (string | number)[][]) => {
+  const answer = await real(commands);
+  if (gather && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === KEY) {
+    reads += 1;
+    if (reads >= gather) wake();
+    else await allRead;
+  }
+  return answer;
+}) as typeof redis.pipeline;
+function holdReads(n: number) {
+  gather = n;
+  reads = 0;
+  allRead = new Promise<void>((resolve) => (wake = resolve));
+}
+const left = () => (JSON.parse(String(redis.run(["GET", KEY]))) as { left: number }).left;
+
+async function main(): Promise<void> {
+  part("Two senders take from the same open portion at once: never more than it holds");
+  redis.clear();
+  await startRamp(ID, RAMP_TRIGGER);
+  is("setup: the first portion is open", left(), RAMP_FIRST);
+  holdReads(2);
+  const both = await Promise.all([rampRoom(ID, RAMP_FIRST), rampRoom(ID, RAMP_FIRST)]);
+  gather = 0;
+  is(`granted ${both.join(" + ")}, never more than the ${RAMP_FIRST} the portion holds`, both[0] + both[1] <= RAMP_FIRST, true);
+  is("and the whole portion is taken once", both[0] + both[1], RAMP_FIRST);
+  is("nothing is left", left(), 0);
+
+  part("A give-back racing a take keeps the take");
+  redis.clear();
+  await startRamp(ID, RAMP_TRIGGER);
+  is("setup: 60 taken", await rampRoom(ID, 60), 60);
+  holdReads(2);
+  const [taken] = await Promise.all([rampRoom(ID, 40), rampBack(ID, 60)]);
+  gather = 0;
+  is("the take is granted", taken, 40);
+  is("what is left is the portion less what is still out: 100 - 40, never the whole portion again", left(), RAMP_FIRST - 40);
+
+  part("Control: one sender alone, as before");
+  redis.clear();
+  await startRamp(ID, RAMP_TRIGGER);
+  is("a hundred first", await rampRoom(ID, 5_000), RAMP_FIRST);
+  is("then nobody until the next portion opens", await rampRoom(ID, 5_000), 0);
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

@@ -26,6 +26,12 @@ const links = [...html.matchAll(/<a [^>]*>([\s\S]*?)<\/a>/g)].map((m) => m[1].re
 is("each Do it says which step it does", links, ["Do it: Add a second product", "Do it: Build a sales page"]);
 is("the step's name is for screen readers; the button still shows Do it", /Do it<span class="sr-only">: Add a second product<\/span>/.test(html), true);
 
+// CodeQL js/incomplete-multi-character-sanitization (code-scanning #240, Claude 1's LEVE 6872826530 on #3782): this test
+// read each link's words with a one-pass tag strip. It reads them without one (the pattern is built so that this
+// line does not hold it either).
+const ONE_PASS_STRIP = ".replace(/<" + "[^>]+>/g";
+is("the link words are read without a one-pass tag strip", readFileSync("tests/studio-home-link-purpose.test.ts", "utf8").includes(ONE_PASS_STRIP), false);
+
 const editor = readFileSync("components/product-editor.tsx", "utf8");
 const at = editor.indexOf("Its page\n");
 const link = editor.slice(editor.lastIndexOf("<a ", at), editor.indexOf("</a>", at));

@@ -11,11 +11,16 @@ import { done, is, part } from "./check";
 
 type Command = (string | number)[];
 let failing: RegExp | null = null;
+/** "throw": the database does not answer; "shape": it answers the inventory in another shape (Claude 3 ykH on #5466). */
+let how: "throw" | "shape" = "throw";
 const sent: Command[][] = [];
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: Command[]) => {
   sent.push(commands);
-  if (failing && commands.some((c) => c[0] === "SMEMBERS" && failing!.test(String(c[1])))) throw new Error("the database did not answer");
+  if (failing && commands.some((c) => c[0] === "SMEMBERS" && failing!.test(String(c[1])))) {
+    if (how === "throw") throw new Error("the database did not answer");
+    return commands.map((c) => (c[0] === "SMEMBERS" && failing!.test(String(c[1])) ? 7 : null));
+  }
   return pipeline(commands);
 }) as typeof redis.pipeline;
 
@@ -34,13 +39,14 @@ async function main(): Promise<void> {
   const quiet = console.error;
   console.error = () => {};
 
-  for (const [name, pattern, others] of [
+  for (const [name, pattern, others, mode] of ([
     ["video", /watch/, [/^nl:traffic:folders:/, /^nl:orders:folders:/]],
     ["visits", /^nl:traffic:folders:/, [/watch/, /^nl:orders:folders:/]],
     ["orders", /^nl:orders:folders:/, [/watch/, /^nl:traffic:folders:/]],
-  ] as [string, RegExp, RegExp[]][]) {
-    part(`The ${name} inventory cannot be read: said as unread, never as zero`);
+  ] as [string, RegExp, RegExp[]][]).flatMap(([n, p, o]) => (["throw", "shape"] as const).map((m) => [n, p, o, m] as const))) {
+    part(`The ${name} inventory ${mode === "throw" ? "cannot be read" : "is answered in another shape"}: said as unread, never as zero`);
     failing = pattern;
+    how = mode;
     const got = await run();
     failing = null;
     is("the run answers an error, not ok", [got.status >= 500, got.body.ok], [true, false]);

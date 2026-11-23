@@ -12,6 +12,8 @@
  *
  * Synthetic data, Stripe and PayPal stand-ins.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import * as rules from "@/lib/api-read-rules";
 import { BOOK_INVOICES_KEPT_BYTES, bookWork } from "@/lib/api-read-rules";
 import { readBook } from "@/lib/affiliates";
@@ -125,6 +127,11 @@ async function main(): Promise<void> {
   const sizesWith = { kept: true, entries: 0, people: 1, leads: 0, paypalRefunds: 0, stripe: true, products: 0 };
   const keptPart = bookWork(sizesWith, 0).commands - bookWork({ ...sizesWith, stripe: false }, 0).commands;
   is("the API and MCP readers count the kept invoices' path as nine commands, as the studio does", keptPart, 9);
+  // And the affiliate's own page (affiliatePageRead, the model its units are held to in tests/plan-cost-registry.test.ts)
+  // counts the same path the same way (Claude 3's LOW on #5384, 7113942268): never the two commands it counted before.
+  const registry = readFileSync(join(process.cwd(), "tests/plan-cost-registry.ts"), "utf8");
+  const pageModel = registry.slice(registry.indexOf("export function affiliatePageRead("), registry.indexOf("export function affiliateLoadRead("));
+  is("the affiliate's page counts the kept invoices' path as BOOK_KEPT_INVOICES_COMMANDS too", [pageModel.includes("(invoices ? BOOK_KEPT_INVOICES_COMMANDS : 0)"), /\(invoices \? 2 : 0\)/.test(pageModel)], [true, false]);
 
   part("A studio or payout reading takes them before it reads, and reads whole");
   const before = await left(store);

@@ -3589,6 +3589,26 @@ export const FENCED_PREPARE_COMMANDS = (1 + MAX_TEAM) * 3 + 2 * 3 + 2 * ((1 + MA
  */
 export const SERVED_COMMANDS = 1 + 3 * MEMBER_STORES_READ + 1 + 2 + MAX_STORES_PER_ACCOUNT + MEMBER_STORES_READ + 1;
 /**
+ * What decides whether a host serves another store, read before servesAnother to be compared again where their calendar
+ * is deleted (lib/closed-store-data.ts servingRead; #5010 row 105, Codex L-20261119-0659): their team index (SMEMBERS),
+ * each of its stores' teams (a GET each, MEMBER_STORES_READ at the most, past which it reads nothing more), whether
+ * their first store has a record (EXISTS), their account's set (SMEMBERS) and whether each of its stores has a record
+ * (an EXISTS each, MAX_STORES_PER_ACCOUNT at the most).
+ */
+export const SERVING_READ_COMMANDS = 1 + MEMBER_STORES_READ + 1 + 1 + MAX_STORES_PER_ACCOUNT;
+/**
+ * The host's calendar deleted only if none of that changed (HOST_CALENDAR_DEL_IF_UNCHANGED): its EVAL and each call
+ * inside it, as Upstash bills them: the same GETs, EXISTS and two SMEMBERS again, and the DEL of the calendar's keys.
+ */
+export const SERVING_RECHECK_COMMANDS = 1 + (MEMBER_STORES_READ + 1 + MAX_STORES_PER_ACCOUNT) + 2 + 1;
+/**
+ * The bytes that adds on the wire for one host, at the most: each team read (MEMBER_STORES_READ of them, each at most
+ * the (MAX_TEAM + 10) KB tests/store-data-registry.ts caps nl:team: at) comes back to servingRead, and goes again to
+ * the recheck byte for byte, never digested (redis.sha1hex is not confirmed on Upstash; Claude 5 ibuF on #5175).
+ * Carried by the closing store for each of its hosts (1 + MAX_TEAM), in its preparation (closureCost).
+ */
+export const SERVING_WIRE_BYTES = 2 * MEMBER_STORES_READ * (MAX_TEAM + 10) * 1024;
+/**
  * Where a walk's preparation stopped in its hosts' claims (lib/closed-store-data.ts, clearClaims; Claude 4 on #3660):
  * read once (GET), and written when the claims are more than a walk reads (the lock made to last, then the SET in one
  * fenced step), deleted with the store's other keys (in a DEL already counted). A store whose hosts' claims are more
@@ -3597,16 +3617,17 @@ export const SERVED_COMMANDS = 1 + 3 * MEMBER_STORES_READ + 1 + 2 + MAX_STORES_P
  */
 export const CLAIMS_LEFT_COMMANDS = 3;
 /**
- * A host whose serving another store could not be known at the preparation (lib/closed-store-data.ts, servesAnother;
- * Claude 4's MEDIUM on #3660) is kept in the store's batch entry and read again before the store is finished
- * (decideCalendars), each run until it is known: for each such host (its owner and its team, 1 + MAX_TEAM at the most)
- * the same read of the stores it serves (SERVED_COMMANDS) and one DEL of its calendar, and the entry written once
- * (HSET). Fewer commands than one preparation (PREPARE_COMMANDS, tests/closed-store.test.ts), and, as a walk that
+ * Every host of a closing store (its owner and its team, 1 + MAX_TEAM at the most) is decided before the store is
+ * finished (lib/closed-store-data.ts, decideCalendars; since #5010 row 105 never at the preparation, which read every
+ * host as well), and one not known (Claude 4's MEDIUM on #3660) is kept in the store's batch entry and read again,
+ * each run until it is known: for each host what decides it read first (SERVING_READ_COMMANDS), the read of the stores
+ * it serves (SERVED_COMMANDS) and the calendar deleted only if none of it changed (SERVING_RECHECK_COMMANDS), and the
+ * entry written once (HSET). The first decision is part of every closing store's walk (PREPARE_COMMANDS). Fewer commands than one preparation (PREPARE_COMMANDS, tests/closed-store.test.ts), and, as a walk that
  * stopped in its hosts' claims, each run it takes again is one more preparation at that count; it lasts only while a
  * reply does not read (rule 24), never as a plan's allowance, or while a longer index than is read is read past, at
  * most decideCalendarRuns reads, each stale id's share carried by STALE_ID_COMMANDS (Codex G on #3660).
  */
-export const DECIDE_CALENDARS_COMMANDS = (1 + MAX_TEAM) * (SERVED_COMMANDS + 1) + 1;
+export const DECIDE_CALENDARS_COMMANDS = (1 + MAX_TEAM) * (SERVING_READ_COMMANDS + SERVED_COMMANDS + SERVING_RECHECK_COMMANDS) + 1;
 /**
  * How many reads of a host's team index (a preparation, then each run's decideCalendars) decide whether they serve
  * another store at the most, for an index of `ids` ids, every reply reading (Codex G's MEDIUM on #3660): an index of
@@ -3627,8 +3648,11 @@ export function decideCalendarRuns(ids: number): number {
  * then said not finished and repeated (KeysNotSwept), a reply that did not read (rule 24), never a plan's allowance.
  * Each id is read past once: it is out of the index after.
  */
-export const STALE_ID_COMMANDS = Math.ceil((SERVED_COMMANDS + 2) / (MEMBER_STORES_READ - 1));
-export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * CLAIM_PAGES + SERVED_COMMANDS) + CLAIMS_LEFT_COMMANDS + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS + PLAN_RUNS_READ_COMMANDS + DUE_READ_COMMANDS + ERASING_MARK_COMMANDS + FENCED_PREPARE_COMMANDS + MAX_TEAM * STALE_ID_COMMANDS;
+// Since #5010 row 105 a host's read is the whole of its decision (DECIDE_CALENDARS_COMMANDS' share of one host): what
+// decides it read first, the read of the stores they serve and the recheck with its DEL, and the entry's HSET. A read
+// past reads only the first of what decides it, but its share is priced at the whole, the dearer bound.
+export const STALE_ID_COMMANDS = Math.ceil((SERVING_READ_COMMANDS + SERVED_COMMANDS + SERVING_RECHECK_COMMANDS + 1) / (MEMBER_STORES_READ - 1));
+export const PREPARE_COMMANDS = (1 + MAX_TEAM) * 2 * CLAIM_PAGES + DECIDE_CALENDARS_COMMANDS + CLAIMS_LEFT_COMMANDS + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS + PLAN_RUNS_READ_COMMANDS + DUE_READ_COMMANDS + ERASING_MARK_COMMANDS + FENCED_PREPARE_COMMANDS + MAX_TEAM * STALE_ID_COMMANDS;
 
 /**
  * Commands one daily visit of a closing store sends at the most (lib/plan-closing.ts, closeOne), outside what a
@@ -3727,7 +3751,7 @@ export function closureCost(tier: Tier, trial = false): { deletes: number; follo
     follows: (kept + outside) * DB_BYTE + (Math.ceil((roomKeys + outside / MARK) / FOLLOW_BATCH) + FOLLOWED_FAMILIES.length * 4) * COMMAND,
     exports: ENDED_STORE_EXPORTS * exportCost(room + MAX_STORE_BYTES),
     lists: ENDED_LIST_DOWNLOADS * endedListDownloadCost(room + MAX_STORE_BYTES),
-    prepare: PREPARE_COMMANDS * COMMAND,
+    prepare: PREPARE_COMMANDS * COMMAND + (1 + MAX_TEAM) * SERVING_WIRE_BYTES * DB_BYTE,
     visits: CLOSING_VISIT_DAYS * closingVisitCost(),
     total: 0,
   };

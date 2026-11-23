@@ -76,7 +76,7 @@ import { readFlows } from "@/lib/flows";
 import { FINAL_INDEX, finalScoreOf } from "@/lib/closing-holds";
 import { MAX_STORES_PER_ACCOUNT, STORE_ID_PATTERN, STRIPE_ACCOUNT_PATTERN, type Store, accountStores, closeStoreRecord, ERASING_KEY, erasingField, erasingSince, handleLeadsToStore, saleHandles, settleDeletedStore, storeExactly, storeFolder, storeForEmailSeen, storeForRefExact, storeHandleKey, storeRecordAt, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
-import { dropTeam, memberStoresExact, readTeam } from "@/lib/team";
+import { MEMBER_STORES_READ, dropTeam, memberStoresExact, readTeam, servingKeys } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
 import { revokeAllKeys } from "@/lib/api-keys";
 import { forgetBoth, queueStoreForget, queueUnseenFiles } from "@/lib/store-forget-retry";
@@ -459,18 +459,18 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // (MEMBER_STORES_READ), which nothing bounds, made every closing store they host unerasable (Claude 4 on #3660).
   // One not known is read again before the store is finished (decideCalendars), so a reply that did not read once
   // never keeps a host's calendar, with their private calendar link, for good (Claude 4 on #3660 at af59d74bde).
-  const calendars: string[] = [];
-  for (const email of hosts) {
-    const serves = await servesAnother(email, store.sid);
-    if (serves === false) extra.push(...hostCalendarKeys(hostId(email)));
-    else if (serves === null) calendars.push(email);
-  }
+  // Every host is decided there, never here (#5010 row 105, Codex L-20261119-0659): a calendar put in this store's own
+  // deletes went much later than the read that found its host on no other store, so a host who joined a live store in
+  // between lost it. decideCalendars deletes it in one Redis step, only if nothing that read changed since; reading
+  // here as well would only read every host twice.
+  const calendars: string[] = [...hosts];
   if (store.domain?.name) extra.push(domainKey(store.domain.name));
   // What the live store holds (its hosts' claims for it, its team, API keys, webhooks, email sync, mail outboxes, phones,
-  // its owner's path, its hosts' calendars and its domain) is deleted only under the store's lock, once the record read
-  // there again says its plan does not run (below). Deleted here, before that read, a plan started in between kept the
-  // record but left the store partly wiped (Codex X4's MEDIUM on #3643). Any of these that fails throws there, before
-  // the record goes: the record stays, its entry stays pending, and the walk tries the store again later.
+  // its owner's path and its domain; its hosts' own calendars are decided after it, in decideCalendars) is deleted only
+  // under the store's lock, once the record read there again says its plan does not run (below). Deleted here, before
+  // that read, a plan started in between kept the record but left the store partly wiped (Codex X4's MEDIUM on #3643).
+  // Any of these that fails throws there, before the record goes: the record stays, its entry stays pending, and the
+  // walk tries the store again later.
   const forgetLive = async (held: LockHeld) => {
     // Every delete made only while the store's lock closeStoreRecord holds is still held, read in the same step
     // (fencedBy, CLOSING_FENCED), and the lock made to last again before each step: a lock that ran out (a paused
@@ -1744,23 +1744,110 @@ async function finishStores(entries: Iterable<[string, Batched]>, finish: Finish
 }
 
 /**
- * The hosts of a walked store whose own calendar was kept because whether they serve another store was not known
- * (prepareStore), read again: one known to serve no other store loses their calendar now, one known to serve another
- * keeps it, and one still not known is answered back, to be read again on the next run. A delete not confirmed is not
- * known either (rule 24). The store's record is gone by then, so the store itself is never counted as another.
+ * A host's own calendar deleted only if nothing a decision read changed since (#5010 row 105, Codex
+ * L-20261119-0659). KEYS: the calendar's keys, then the teams read (GET), then the store records read (EXISTS), then
+ * the sets read (SMEMBERS). ARGV: their four counts, the closing store's id, then each team as read ("v" and the record
+ * byte for byte, or "n" for none), each record's presence ("1" or "0"), then each set's members but the closing store's
+ * id, sorted and joined by a newline (the decision never counts the closing store, and its id leaves its owner's set
+ * as it closes). Nothing is digested in Lua (redis.sha1hex is not confirmed on Upstash; Claude 5 ibuF's MEDIUM on
+ * #5175). Any of them changed answers -1 and deletes nothing, so the host is decided again on the next run; otherwise
+ * the DEL's own count. Every inner call is one Upstash bills (DECIDE_CALENDARS_COMMANDS, tests/plan-cost-registry.ts).
+ */
+export const HOST_CALENDAR_DEL_IF_UNCHANGED = `-- marktmorgen:host-calendar-del-if-unchanged:v1
+local c, g, e, m, own = tonumber(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3]), tonumber(ARGV[4]), ARGV[5]
+for i = 1, g do
+  local v = redis.call('GET', KEYS[c + i])
+  local seen = 'n'
+  if v then seen = 'v' .. v end
+  if seen ~= ARGV[5 + i] then return -1 end
+end
+for i = 1, e do
+  if tostring(redis.call('EXISTS', KEYS[c + g + i])) ~= ARGV[5 + g + i] then return -1 end
+end
+for i = 1, m do
+  local members = {}
+  for _, id in ipairs(redis.call('SMEMBERS', KEYS[c + g + e + i])) do
+    if id ~= own then members[#members + 1] = id end
+  end
+  table.sort(members)
+  if table.concat(members, '\\n') ~= ARGV[5 + g + e + i] then return -1 end
+end
+return redis.call('DEL', unpack(KEYS, 1, c))`;
+
+/**
+ * What decides whether a host serves another store (servesAnother), read before it, to be compared again where their
+ * calendar is deleted: their team index and each of its stores' teams as written (memberStoresExact), and whether
+ * their first store and each store of their account's set has a record, with the set itself (ownsAnother). Null when
+ * it cannot be read whole, or when the host is on more stores than are read (servesAnother never answers "no other
+ * store" then); the host is then decided again on the next run. A join writes the index before the team (lib/team.ts
+ * spendInvite), and a new store goes into its account's set before its record (lib/store.ts createStore), so whatever
+ * a join or a new store has written by the time servesAnother reads is in what changed. A record that is there but of
+ * another owner (a move half done) is compared by its presence only.
+ */
+type ServingRead = { teams: { key: string; raw: string | null }[]; records: { key: string; present: boolean }[]; sets: { key: string; members: string }[] };
+async function servingRead(email: string, own: string): Promise<ServingRead | null> {
+  try {
+    const read: ServingRead = { teams: [], records: [], sets: [] };
+    const members = async (key: string, most: number): Promise<string[] | null> => {
+      const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", key]]), 1)?.[0]);
+      if (!ids || ids.length > most || ids.some((id) => !STORE_ID_PATTERN.test(id))) return null;
+      read.sets.push({ key, members: ids.filter((id) => id !== own).sort().join("\n") });
+      return ids;
+    };
+    const team = async (key: string): Promise<boolean> => {
+      const reply = repliesFor(await redisPipeline([["GET", key]]), 1);
+      if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) return false;
+      read.teams.push({ key, raw: reply[0] as string | null });
+      return true;
+    };
+    const record = async (key: string): Promise<boolean> => {
+      const count = countOf(repliesFor(await redisPipeline([["EXISTS", key]]), 1)?.[0]);
+      if (count !== 0 && count !== 1) return false;
+      read.records.push({ key, present: count === 1 });
+      return true;
+    };
+    const keys = servingKeys(email);
+    const index = await members(keys.index, MEMBER_STORES_READ);
+    if (!index) return null;
+    for (const sid of index) if (sid !== own && !(await team(keys.team(sid)))) return null;
+    if (!(await record(ownerKeyOf(email)))) return null;
+    // As ownsAnother reads it: the closing store itself may still be among them.
+    const account = await members(accountStoresKey(email), MAX_STORES_PER_ACCOUNT);
+    if (!account) return null;
+    for (const id of account) if (id !== own && !(await record(ownerKeyOf(`#${id}`)))) return null;
+    return read;
+  } catch (error) {
+    console.error("what decides whether a closed store's host serves another store could not be read; their calendar is decided again on the next run", error);
+    return null;
+  }
+}
+
+/**
+ * The hosts of a walked store, each decided before the store is finished (prepareStore leaves them all here; #5010 row
+ * 105): one known to serve no other store loses their calendar now, one known to serve another keeps it, and one not
+ * known is answered back, to be read again on the next run. What decides it is read first (servingRead), and the
+ * calendar is deleted in one Redis step only if none of it changed since (HOST_CALENDAR_DEL_IF_UNCHANGED): a host who
+ * joined a live store, or made one, while this was read keeps their calendar and is decided again. A delete not
+ * confirmed is not known either (rule 24). The store's record is gone by then, so the store itself is never counted as
+ * another.
  */
 async function decideCalendars(entry: Batched): Promise<string[]> {
   const undecided: string[] = [];
   for (const email of entry.calendars ?? []) {
+    const read = typeof email === "string" ? await servingRead(email, entry.sid) : null;
     const serves = typeof email === "string" ? await servesAnother(email, entry.sid) : null;
     if (serves === true) continue;
-    if (serves === false) {
-      // One DEL of the calendar's keys answers how many it removed: only 0 to that many is a count; anything above it
-      // proves nothing, and the host is decided again on the next run (Codex U, U-20261119-0633).
+    if (serves === false && read) {
+      // The DEL inside answers how many it removed: only 0 to that many is a count; anything above it proves nothing,
+      // and the host is decided again on the next run (Codex U, U-20261119-0633). -1 is "changed since".
       const keys = hostCalendarKeys(hostId(email));
-      const reply = repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0];
+      const checked = [...read.teams.map((t) => t.key), ...read.records.map((r) => r.key), ...read.sets.map((s) => s.key)];
+      const expected = [...read.teams.map((t) => (t.raw === null ? "n" : `v${t.raw}`)), ...read.records.map((r) => (r.present ? "1" : "0")), ...read.sets.map((s) => s.members)];
+      const counts = [keys.length, read.teams.length, read.records.length, read.sets.length];
+      const reply = repliesFor(await redisPipeline([["EVAL", HOST_CALENDAR_DEL_IF_UNCHANGED, keys.length + checked.length, ...keys, ...checked, ...counts, entry.sid, ...expected]]), 1)?.[0];
       if (Number.isSafeInteger(reply) && (reply as number) >= 0 && (reply as number) <= keys.length) continue;
-      console.error("deleting a closed store's host's calendar was not confirmed; it is decided again on the next run", reply);
+      if (reply === -1) console.warn("a closed store's host's stores changed while their calendar was decided; it is decided again on the next run");
+      else console.error("deleting a closed store's host's calendar was not confirmed; it is decided again on the next run", reply);
     }
     undecided.push(email);
   }

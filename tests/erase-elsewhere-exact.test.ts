@@ -20,7 +20,7 @@
  * In-memory Redis; nothing real is sent.
  */
 import { createHash } from "node:crypto";
-import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, WALK_KEY, eraseClosed, markDue } from "@/lib/closed-store-data";
+import { BATCH_KEY, DUE_KEY, HOST_CALENDAR_DEL_IF_UNCHANGED, WALK_GAP_MS, WALK_KEY, eraseClosed, markDue } from "@/lib/closed-store-data";
 import { claimHandle, createStore, ensureStoreId, storeForEmail } from "@/lib/store";
 import { putMember } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
@@ -235,14 +235,15 @@ async function main(): Promise<void> {
     is("a later run reads it: the host serves no other store, so their calendar goes, and the store leaves the batch", [calendarKept(OWNER), batchLeft()], [[0, 0, 0, 0], 0]);
   }
   {
-    // Codex U (U-20261119-0633): the host's calendar DEL answers a count above the four keys it names, not run. That
-    // proves nothing: the calendar stays, the store stays in the batch, and the next run deletes it exactly.
+    // Codex U (U-20261119-0633): the host's calendar delete answers a count above the four keys it names, not run. That
+    // proves nothing: the calendar stays, the store stays in the batch, and the next run deletes it exactly. Since #5010
+    // row 105 the delete is one script (HOST_CALENDAR_DEL_IF_UNCHANGED), answered here in its place.
     fresh();
     const at = await closing(OWNER, "bad-calendar-count");
     replaced = [{ word: "SMEMBERS", key: teamIndexKey(OWNER), reply: "ERR synthetic transient" }];
     await walkAt(walkTime(at, 0));
     replaced = [];
-    answerBefore = { word: "DEL", key: calendarOf(OWNER)[0], reply: calendarOf(OWNER).length + 1 };
+    answerBefore = { word: "EVAL", key: HOST_CALENDAR_DEL_IF_UNCHANGED, reply: calendarOf(OWNER).length + 1 };
     await walkAt(walkTime(at, 1));
     is("an impossible DEL count does not certify the host calendar erased or finish the store", [calendarKept(OWNER), batchLeft()], [[1, 1, 1, 1], 1]);
     await walkAt(walkTime(at, 2));
@@ -339,9 +340,10 @@ async function main(): Promise<void> {
     for (const [what, list] of [["a healthy empty list", []], ["a list of stale ids (no team, nil)", [staleId]]] as const) {
       fresh();
       const at = await closing(OWNER, "goodindex");
-      replaced = [{ word: "SMEMBERS", key: teamIndexKey(OWNER), reply: [...list] }];
+      // Written for real, not answered in place: since #5010 row 105 the calendar's delete reads the index again in
+      // Redis itself, so a reply changed only on the way back would be another database to it.
+      for (const id of list) redis.run(["SADD", teamIndexKey(OWNER), id]);
       await walkAt(walkTime(at, 0));
-      replaced = [];
       is(`control, ${what}: decided, the calendar gone`, [calendarKept(OWNER), batchLeft()], [[0, 0, 0, 0], 0]);
     }
   }

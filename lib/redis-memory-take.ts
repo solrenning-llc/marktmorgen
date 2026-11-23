@@ -142,7 +142,8 @@ export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
       if (!record || typeof record !== "object") return -2;
       if ((record as { statsId?: unknown }).statsId !== statsId) return -1;
     }
-    return run(["SET", key, value, "NX", "EX", seconds]) === "OK" ? 1 : 0;
+    // An empty `seconds` keeps the mark for good (claimWhileStoreLive with null; Codex L-20261120-1745).
+    return run(seconds === "" ? ["SET", key, value, "NX"] : ["SET", key, value, "NX", "EX", seconds]) === "OK" ? 1 : 0;
   },
   // lib/store-forget-retry.ts COMPLETE_FORGET: a deleted store's forgetting leaves the daily line and is counted done
   // for its month, only while it is still in line: {1, done} taken out, {0, 0} not there (#4348).

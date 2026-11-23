@@ -126,7 +126,8 @@ const SCRIPTS: Record<string, Script> = {
       if (!record || typeof record !== "object") return -2;
       if ((record as { statsId?: unknown }).statsId !== statsId) return -1;
     }
-    return run(["SET", key, value, "NX", "EX", seconds]) === "OK" ? 1 : 0;
+    // An empty `seconds` keeps the mark for good (claimWhileStoreLive with null; Codex L-20261120-1745).
+    return run(seconds === "" ? ["SET", key, value, "NX"] : ["SET", key, value, "NX", "EX", seconds]) === "OK" ? 1 : 0;
   },
   "zset-take-count:v1": (run, [zset]) => {
     const n = Number(run(["ZCARD", zset])) || 0;

@@ -1713,7 +1713,7 @@ export function motivosContraReady(texto) {
   const SEV = "GRAVE|ALTO|M[ÉE]DIO|LEVE|M[ÍI]NIMO|BAIXO|NITPICKS?|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE|MAJOR|MINOR|BLOCKER";
   const notas = /n[ãa]o [ée] defeito|not a defect|not a finding|n[ãa]o [ée] achado/i;
   // A oração que descreve um achado ("LEVE: o stream nunca é fechado") nunca é resolvida (Claude 5 icFoe, 7107286507).
-  const descreve = new RegExp(`\\b(${SEV})S?\\b\\s*(\\d+\\s*)?(\\([^)]*\\)\\s*)?([:—–]|-\\s)`);
+  const descreve = new RegExp(`\\b(${SEV})(?:S|s)?\\b\\s*(\\d+\\s*)?(\\([^)]*\\)\\s*)?([:—–]|-\\s)`);
   // Futuro, condição, pendência ou modal: a oração promete, não fecha (Claude 3 yUZf 7107553863; Claude 5 iaqyQ 7107846397).
   const promete = /\b(will|shall|to be|should|must|would|might|may|can be|could be|needs? to|later|next|pending|once|after|until|when|unless|if|another|separate|future|eventually|follow-?up (pr|pull request|unit))\b|\b(fica|ficar[áa]|ser[áa]o?|vai|v[ãa]o|pode ser|podem ser|deve|devem|precisa|pr[óo]xim[oa]|quando|assim que|depois|se|caso|outro|outra|futur[oa]|mais tarde|em seguida|pendente)(?![\p{L}\d])/iu;
   const fecha = /\b(fixed|closed|addressed|resolved|corrigid[oa]s?|fechad[oa]s?|atendid[oa]s?|resolvid[oa]s?)\b[^;]{0,40}?(\b(in|by|on|at|em|no|na|pelo|pela|por)\s+(commit\s+)?([0-9a-f]{7,40}\b|this head\b|este head\b)|\s(neste|nesse) head\b)|\b(withdrawn|retirad[oa]s?)\b[^;]{0,30}?\b(by|por)\s+(its author|the reviewer who raised it|quem (o |a )?apontou|o autor do achado)/i;
@@ -1730,7 +1730,8 @@ export function motivosContraReady(texto) {
   // "1 low" (Claude 2 upbeat's MÉDIO on #5404). Each pairing stays inside one clause, "[ \t]", not "\s": the clauses are
   // joined with a line break, so "sem achados. Alto contraste ..." never reads as "achados Alto" (Claude 5 iZByNH's LEVE on
   // #5404, 7114392176).
-  const tamanho = new RegExp(`\\b(${SEV})S?\\b`).exec(resto)
+  // A capital severity's plural in either case, "NITs" and "LEVEs" as well as "NITS" (Claude 3 wSUb3's MÉDIO on #5404).
+  const tamanho = new RegExp(`\\b(${SEV})(?:S|s)?\\b`).exec(resto)
     ?? new RegExp(`\\b(${SEV})S?\\b[ \\t]*(\\d+[ \\t]*)?(\\([^)]*\\)[ \\t]*)?[:—–]|\\b(achados?|findings?|defeitos?|defects?)[ \\t]+(${SEV})S?\\b|\\b(\\d+|one|two|three|um|uma|dois|duas|tr[êe]s)[ \\t]+(${SEV})S?\\b`, "iu").exec(resto);
   if (tamanho) motivos.push(`o texto aponta um achado (${tamanho[0]}); um achado de head anterior só conta como resolvido no formato ${FORMATO_RESOLVIDO}`);
   const adiado = /n[ãa]o bloque(ia|ante)|non-?blocking|follow-?up(?!\s+(commit|push)s?\b)|fica para depois|fica pra depois/i.exec(resto);

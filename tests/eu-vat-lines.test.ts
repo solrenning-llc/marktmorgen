@@ -62,3 +62,74 @@ test("unknown costs, a membership, a broken amount or a fee that is not a whole 
     assert.equal(b.toString(), before, `${label}: nothing written`);
   }
 });
+
+// 793 [IV3], owner's decision OWNER-20261121-1529-ART9A-PENDING-DECISIONS, item 2 (c) and (d).
+const lineTotal = (b: URLSearchParams): number => {
+  let sum = 0;
+  for (const [key, value] of b) {
+    const at = /^line_items\[(\d+)\]\[price_data\]\[unit_amount\]$/.exec(key);
+    if (at) sum += Number(value) * Number(b.get(`line_items[${at[1]}][quantity]`));
+  }
+  return sum;
+};
+
+test("(d) no commission on tax: the share's base is written as the goods before the VAT line", () => {
+  const b = body();
+  assert.equal(applyEuVatLines(b, { vat, recurring: false, vatCostsCents: 12, currency: "eur" }), "ok");
+  // The settlement reads the base from the payment (lib/share-settle.ts); without it, it would take the checkout's total
+  // less Stripe's own tax, and the VAT line is not Stripe's tax, so the share would be worked out on the VAT too.
+  assert.equal(b.get("payment_intent_data[metadata][share_base]"), "1000");
+});
+
+test("(d) a cart: the base is every line before the VAT, quantity included", () => {
+  const b = body();
+  b.set("line_items[1][price_data][unit_amount]", "250");
+  b.set("line_items[1][price_data][currency]", "eur");
+  b.set("line_items[1][quantity]", "2");
+  const cart = { ...vat, priceCents: 1500, vatCents: 285, totalCents: 1785 };
+  assert.equal(applyEuVatLines(b, { vat: cart, recurring: false, vatCostsCents: 12, currency: "eur" }), "ok");
+  assert.equal(b.get("payment_intent_data[metadata][share_base]"), "1500");
+  assert.equal(b.get("line_items[2][price_data][unit_amount]"), "285");
+});
+
+test("(d) the share part of the fee is never raised: the fee grows by exactly the VAT and its costs", () => {
+  for (const share of ["0", "50", "625"]) {
+    const b = body();
+    b.set("payment_intent_data[application_fee_amount]", share);
+    assert.equal(applyEuVatLines(b, { vat, recurring: false, vatCostsCents: 12, currency: "eur" }), "ok");
+    assert.equal(Number(b.get("payment_intent_data[application_fee_amount]")) - Number(share), 190 + 12);
+  }
+});
+
+test("(c) no card surcharge: the buyer pays the price and the VAT, never the costs of receiving it", () => {
+  const b = body();
+  const before = lineTotal(b);
+  const linesBefore = [...b.keys()].filter((key) => key.endsWith("[quantity]")).length;
+  assert.equal(applyEuVatLines(b, { vat, recurring: false, vatCostsCents: 12, currency: "eur" }), "ok");
+  assert.equal(lineTotal(b), before + vat.vatCents);
+  assert.equal([...b.keys()].filter((key) => key.endsWith("[quantity]")).length, linesBefore + 1);
+  for (const [key, value] of b) {
+    if (/\[product_data\]\[name\]$/.test(key)) assert.doesNotMatch(value, /fee|surcharge|card|processing|cost/i, key);
+  }
+});
+
+test("a line whose amount or quantity cannot be read refuses: the base would be unknown", () => {
+  for (const [key, value] of [["line_items[0][price_data][unit_amount]", "x"], ["line_items[0][quantity]", "0"], ["line_items[0][quantity]", ""]] as const) {
+    const b = body();
+    b.set(key, value);
+    const before = b.toString();
+    assert.equal(applyEuVatLines(b, { vat, recurring: false, vatCostsCents: 12, currency: "eur" }), "refuse", `${key}=${value}`);
+    assert.equal(b.toString(), before);
+  }
+});
+
+test("a body with a discount or a promotion box refuses: the share's base would be the price before the discount (Claude 5's MEDIUM on #5048)", () => {
+  for (const [key, value] of [["discounts[0][coupon]", "co_X"], ["discounts[0][promotion_code]", "promo_X"], ["allow_promotion_codes", "true"]] as const) {
+    const b = body();
+    b.set(key, value);
+    const before = b.toString();
+    assert.equal(applyEuVatLines(b, { vat, recurring: false, vatCostsCents: 12, currency: "eur" }), "refuse", key);
+    assert.equal(b.toString(), before, `${key}: nothing written`);
+    assert.equal(b.get("payment_intent_data[metadata][share_base]"), null);
+  }
+});

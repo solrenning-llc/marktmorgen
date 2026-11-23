@@ -1771,6 +1771,7 @@
     "components/review-themes.tsx",
     "components/said-line.tsx",
     "components/sale-editor.tsx",
+    "components/sale-vat-lines.tsx",
     "components/sales-blocks.tsx",
     "components/sales-bulk-actions.tsx",
     "components/sales-goal-card.tsx",

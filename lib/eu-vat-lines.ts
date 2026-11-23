@@ -8,7 +8,11 @@
  *   - The VAT is its own line on top of the price, named with its country and rate, so the buyer sees it before paying.
  *   - The VAT reaches the LLC only through the platform's fee on the direct charge (the money lands on the creator's
  *     account), so the fee becomes share + VAT + the VAT money's own costs (conversion, remittance), never taken from
- *     the share. Those costs must be given by the caller: unknown is never zero, so without them nothing is written and
+ *     the share. The share's base, the goods before the VAT, is written on the payment (share_base), so no share is
+ *     ever worked out on the VAT (793 [IV3], item 2 (d)); a line whose amount or quantity cannot be read refuses, and
+ *     so does a discount or a promotion box, which would make that base the price before the discount.
+ *   - The buyer pays the price and the VAT, nothing else: the costs of receiving the VAT are never a line, so there is
+ *     no card surcharge (item 2 (c)). Those costs must be given by the caller: unknown is never zero, so without them nothing is written and
  *     the sale is refused.
  *   - A membership's fee is a percent of each payment (lib/platform-share.ts, applyShare), which cannot carry an exact
  *     VAT amount: a membership for an EU consumer is refused until its own design is built.
@@ -41,16 +45,28 @@ export function applyEuVatLines(
   if (input.vatCostsCents === null || !Number.isSafeInteger(input.vatCostsCents) || input.vatCostsCents < 0) return "refuse";
   if (!vat || !Number.isSafeInteger(vat.vatCents) || vat.vatCents < 0 || !Number.isSafeInteger(vat.basisPoints) || !/^[A-Z]{2}$/.test(vat.country)) return "refuse";
   if (typeof input.currency !== "string" || !/^[a-z]{3}$/i.test(input.currency)) return "refuse";
+  // The share's base written below is the lines' total: with a discount or a promotion box it would be the price
+  // before the discount, so such a body is refused here too, as its only caller already does (Claude 5's MEDIUM on
+  // #5048).
+  if ([...body.keys()].some((key) => key.startsWith("discounts[") || key === "allow_promotion_codes")) return "refuse";
   const feeNow = body.get(FEE);
   if (feeNow !== null && !WHOLE.test(feeNow)) return "refuse";
   const fee = (feeNow === null ? 0 : Number(feeNow)) + vat.vatCents + input.vatCostsCents;
   if (!Number.isSafeInteger(fee)) return "refuse";
-  // The next free line index.
+  // The next free line index, and the goods the buyer pays for before the VAT: the share's base.
   let next = 0;
   for (const key of body.keys()) {
     const line = /^line_items\[(\d+)\]/.exec(key);
     if (line) next = Math.max(next, Number(line[1]) + 1);
   }
+  let goods = 0;
+  for (let i = 0; i < next; i += 1) {
+    const amount = body.get(`line_items[${i}][price_data][unit_amount]`) ?? "";
+    const quantity = body.get(`line_items[${i}][quantity]`) ?? "";
+    if (!WHOLE.test(amount) || !/^[1-9]\d{0,5}$/.test(quantity)) return "refuse";
+    goods += Number(amount) * Number(quantity);
+  }
+  if (!Number.isSafeInteger(goods)) return "refuse";
   // Checked everything; now write.
   body.delete("automatic_tax[enabled]");
   for (const key of [...body.keys()]) if (/^line_items\[\d+\]\[price_data\]\[tax_behavior\]$/.test(key)) body.delete(key);
@@ -59,6 +75,9 @@ export function applyEuVatLines(
   body.set(`line_items[${next}][price_data][product_data][name]`, `VAT (${countryName(vat.country)}, ${percent(vat.basisPoints)}%)`);
   body.set(`line_items[${next}][quantity]`, "1");
   body.set(FEE, String(fee));
+  // No commission on tax (793 [IV3], owner's decision of 21/11/2026, item 2 (d)): the VAT is a line here, not Stripe's
+  // own tax, so the settlement (lib/share-settle.ts) could not take it out of the checkout's total. The base is written.
+  body.set("payment_intent_data[metadata][share_base]", String(goods));
   // The sale's mark, so the EU OSS return and the UK VAT Return each read only their own (UK VAT, 789 [IV1] step 3, unit 2).
   body.set(`payment_intent_data[metadata][${input.mark === "uk_vat" ? "uk_vat" : "eu_vat"}]`, `${vat.country}:${vat.basisPoints}:${vat.vatCents}`);
   return "ok";

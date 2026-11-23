@@ -27,6 +27,7 @@ import * as codec from "@/lib/backup-codec";
 import { backupPeakSets, runBackup, type BackupCostReview } from "@/lib/backup-run";
 import { backupAlarmSignal } from "@/lib/backup-alarm";
 import type { BackupBucket, BackupObjectStore } from "@/lib/backup-roundtrip";
+import { BACKUP_MONTH_MARK } from "@/lib/backup-store";
 import { redisPipelineBase64 } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -231,6 +232,63 @@ async function main(): Promise<void> {
     const fail = JSON.parse(String(redis.run(["GET", "nl:backup:last-fail"]) ?? "{}")) as { reason?: string; missing?: number };
     is("the owner's report: the state and how many keys", [fail.reason, fail.missing], ["export_key_over_ceiling", 1]);
     is("the alarm: a failure with that state, never a sign of life", backupAlarmSignal(second as never), { kind: "fail", reason: "export_key_over_ceiling" });
+
+    // A month's copy (lib/backup-run.ts) with a key over the ceiling: its set is in the month's folder, and the month
+    // is never marked verified, so the next run writes the month's copy again.
+    const marks = () => [...runStore.objects.keys()].filter((id) => BACKUP_MONTH_MARK.test(id)).length;
+    const before = marks();
+    clock = Date.parse("2026-12-01T03:00:00Z");
+    const month = (await runBackup({ now: clock, review, store: bucket, key, previousKeys: [] })) as unknown as { ok: boolean; reason?: string; id?: string };
+    is("a month's copy with a key over the ceiling: the state, its set in the month's folder, no month mark", [month.reason, month.id?.startsWith("monthly/2026-12/"), marks()], ["export_key_over_ceiling", true, before]);
+    is("the last good copy's mark is still unmoved", redis.run(["GET", "nl:backup:last-ok"]), mark);
+  }
+
+  // Claude 7's two MÉDIOs on #3293 (6893196203, kept by Claude 6 6901316946): the check before the prune.
+  part("The prune's check: an unreadable mark is never rewritten, and a chunked key is compared row for row");
+  {
+    redis.clear();
+    let clock = T0;
+    redis.now = () => clock;
+    // Only the 8 MB book and the run's own keys: few keys, the book in several chunks, so keys and rows differ most.
+    const book = seed().get(BIG)!;
+    for (let i = 0; i < 20; i += 1) redis.run(["DEL", `nl:bk:chunk:${String(i).padStart(2, "0")}`]);
+    // Three books, each in two chunks: six rows for three keys.
+    redis.run(["SET", `${BIG}:2`, book]);
+    redis.run(["SET", `${BIG}:3`, book]);
+    const runStore = memoryStore();
+    const writtenAt = new Map<string, number>();
+    const bucket: BackupBucket = {
+      putNew: async (id, bytes) => {
+        await runStore.putNew(id, bytes);
+        writtenAt.set(id, clock);
+      },
+      read: runStore.read,
+      list: async () => ({ objects: [...runStore.objects.keys()].sort().map((id) => ({ id, writtenAt: writtenAt.get(id)!, bytes: runStore.objects.get(id)!.byteLength })), next: null }),
+      delete: async (id) => {
+        runStore.objects.delete(id);
+        writtenAt.delete(id);
+      },
+    };
+    const maxParts = 20;
+    const maxRunBytes = 64 * 1024 * 1024;
+    const review: BackupCostReview = { maxRows: 1_000, maxCommands: 10_000, maxBytes: 1_000_000, retentionDays: 30, maxParts, maxRunBytes, maxStoredBytes: backupPeakSets(30) * parts.runStoredBound({ maxParts, maxRunBytes }), reviewedAt: "2026-11-09", source: "synthetic test review, not a real one" };
+    const first = (await runBackup({ now: clock, review, store: bucket, key, previousKeys: [] })) as unknown as { ok: boolean; keys?: number; prune?: string };
+    is("day one: copied and verified", first.ok, true);
+
+    // MÉDIO 2: the marks went (a wiped database's) while the data is the same: the copy is compared with the set the
+    // bucket holds, rows with rows. Its keys (the book once) against the set's rows (the book's chunks each) would read
+    // as a database that shrank, and hold the prune for good.
+    redis.run(["DEL", "nl:backup:last-ok"]);
+    clock = T0 + DAY;
+    const second = (await runBackup({ now: clock, review, store: bucket, key, previousKeys: [] })) as unknown as { ok: boolean; prune?: string };
+    const kept = JSON.parse(String(redis.run(["GET", "nl:backup:last-ok"]) ?? "{}")) as { heldSince?: number };
+    is("no mark, the same data: not taken as shrunk, and the prune is not held", [second.ok, second.prune === "prune_shrunk", kept.heldSince ?? null], [true, false, null]);
+
+    // MÉDIO 1: a mark that is there but does not read (bad JSON) is unknown: left as it is, never rewritten without its base.
+    redis.run(["SET", "nl:backup:last-ok", "{not a mark"]);
+    clock = T0 + 2 * DAY;
+    const third = (await runBackup({ now: clock, review, store: bucket, key, previousKeys: [] })) as unknown as { ok: boolean; prune?: string };
+    is("an unreadable mark: nothing deleted, and the mark left as it was", [third.ok, third.prune, redis.run(["GET", "nl:backup:last-ok"])], [true, "prune_unverified", "{not a mark"]);
   }
   done();
 }

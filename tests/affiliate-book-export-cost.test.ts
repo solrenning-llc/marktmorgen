@@ -17,7 +17,9 @@ import { UnknownReplyError } from "@/lib/redis-reply";
 import { GET as exportRoute } from "@/app/api/store/affiliates/export/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { putMember } from "@/lib/team";
-import { bookSizes } from "@/lib/affiliates";
+import { BOOK_STRIPE_PAGES, bookSizes } from "@/lib/affiliates";
+import { BOOK_BUSY_SECONDS } from "@/lib/affiliate-book-export-rules";
+import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { BOOK_CSV_HEADER_BYTES, BOOK_RECORDS_MAX_BYTES, bookExportSettled, bookExportUnits, bookExportWork } from "@/lib/affiliate-book-export";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
 import { BOOK_PAYPAL_REFUNDS, type BookSizes } from "@/lib/api-read-rules";
@@ -51,18 +53,28 @@ let bytes = 0;
 /** While counting: the book's records read whole (HGETALL of an nl:aff: key), which a refusal must not reach. */
 let bookReads = 0;
 /**
- * While set, reading the book's sales fails: "unreadable", a record in a shape no reading accepts (UnknownReplyError,
- * the same every time); "passing", the database failing once on our side (#5256 audit, focal 3634).
+ * While set, reading the book's sales fails: "unreadable", a record in a shape no reading accepts (the same every
+ * time); "passing", the database failing once on our side (#5256 audit, focal 3634); "envelope", a reply that comes
+ * back without its slots (lib/redis.ts pipelineResults, UnknownReplyError), a glitch of the answer, not of the record
+ * (Claude 7 xAF's LEVE 1 on #5256, 7095887618).
  */
-let breakBook: false | "unreadable" | "passing" = false;
+let breakBook: false | "unreadable" | "passing" | "envelope" = false;
+/** While set, the studio count that settles the file's size fails (Claude 7 xAF's LEVE 2 on #5256). */
+let breakSettle = false;
 /** While set, reading the book's sales waits this long, so two downloads overlap (focal 3634, 1). */
 let slowBook = 0;
 redis.pipeline = (async (batch: Commands) => {
   const sales = batch.some((c) => String(c[0]).toUpperCase() === "HGETALL" && /^nl:aff:[^:]+:sales$/.test(String(c[1])));
-  if (sales && breakBook === "unreadable") throw new UnknownReplyError("synthetic: the book does not read");
   if (sales && breakBook === "passing") throw new Error("synthetic: the database did not answer");
+  if (sales && breakBook === "envelope") return [] as never;
+  if (breakSettle && batch.some((c) => String(c[0]).toUpperCase() === "INCRBY" && String(c[1]).startsWith("nl:allow:studio:"))) throw new Error("synthetic: the count did not answer");
   if (sales && slowBook) await new Promise((resolve) => setTimeout(resolve, slowBook));
   const replies = await real(batch);
+  // A sales record in a shape no reading accepts: the book's own record, the same on every reading.
+  if (sales && breakBook === "unreadable") {
+    const at = batch.findIndex((c) => String(c[0]).toUpperCase() === "HGETALL" && /^nl:aff:[^:]+:sales$/.test(String(c[1])));
+    (replies as unknown[])[at] = ["synthetic-sale", "not a record"];
+  }
   if (counting) {
     for (const c of batch) {
       commands += 1;
@@ -165,6 +177,31 @@ async function main(): Promise<void> {
   }
   // A new month opens its failed try again (the count is the month's own): the next parts start from it.
   await redis.pipeline(redis.keys().filter((key) => key.includes(":book-failed:")).map((key) => ["DEL", key]));
+
+  part("A reply that comes back without its slots is a passing failure, never the month's failed try (Claude 7 xAF's LEVE 1)");
+  {
+    breakBook = "envelope";
+    const one = await get(session);
+    breakBook = false;
+    const words = await one.text();
+    is("a failure that says to try again, not that the book is not read again", [one.status, words.includes("Try again in a moment."), words.includes("It is not read again")], [500, true, false]);
+    is("the next try is made at once", (await get(session)).status, 200);
+  }
+
+  part("A count of the file's size that fails: the file is not sent (Claude 7 xAF's LEVE 2)");
+  {
+    const before = await allowanceUsed(store, "studio");
+    breakSettle = true;
+    const one = await get(session);
+    breakSettle = false;
+    const body = await one.text();
+    is("no file: a passing failure that says the reading counted and to try again", [one.status, (one.headers.get("content-type") ?? "").startsWith("text/csv"), body.includes("Try again in a moment.")], [500, false, true]);
+    is("only the reading's units were kept, nothing of a file that was not sent", (await allowanceUsed(store, "studio")) - before, reading);
+    is("and the next try is made at once", (await get(session)).status, 200);
+  }
+
+  part("A store's turn outlasts the slowest reading (Claude 7 xAF's LEVE 3)");
+  is(`its turn (${BOOK_BUSY_SECONDS} s) covers every Stripe page of the book (${BOOK_STRIPE_PAGES}) at its request timeout (${STRIPE_TIMEOUT_MS / 1000} s), with a minute to make the file`, BOOK_BUSY_SECONDS >= (BOOK_STRIPE_PAGES * STRIPE_TIMEOUT_MS) / 1000 + 60, true);
 
   part("A passing failure on our side counts its reading, but never stops the next try (focal 3634, 2)");
   {

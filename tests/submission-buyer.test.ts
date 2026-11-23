@@ -85,11 +85,14 @@ function vault(overrides: Partial<DoorSteps> = {}) {
   };
   return { steps, calls };
 }
+/** The store's identity, carried to the vault (DoorAsk.fence, lib/store-live-cache.ts storeLiveFence; #5066), as main's submission tests write it. */
+const FENCE = { live: "nl:store:id:fenced", erasing: "nl:closed:erasing", field: "store-field", statsId: "", ref: "store@example.test" };
 const ask = (who: string, lessonId = LESSON, nowSeconds = NOW) => ({
   store: SHOP,
   data: SHOP as DataStore,
   /** The store's list id, under which its deleted people are kept (DoorAsk.listId, #5065). */
   listId: "list_submission_buyer",
+  fence: FENCE,
   folder: FOLDER,
   courseId: COURSE,
   lessonId,

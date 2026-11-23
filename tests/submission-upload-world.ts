@@ -23,6 +23,8 @@ export const state = {
   budget: true,
   control: true,
   measuredType: "video/mp4",
+  /** What the vault received as the store's fence on the last open (Codex G-20261121-0801). */
+  vaultFence: undefined as unknown,
   events: [] as string[],
 };
 export function resetWorld(): void {
@@ -30,6 +32,7 @@ export function resetWorld(): void {
   state.learner = { email: "ana@example.com", scope: "all", owner: false };
   state.store.subscriptionActive = true;
   state.store.trialEnds = 0;
+  state.vaultFence = undefined;
   state.events.length = 0;
 }
 
@@ -43,6 +46,12 @@ export const storeRef = () => "owner@example.test";
 /** lib/store.ts ensureListId: a store from before list ids is given one, written to the record (noted as an event). */
 export const ensureListId = async () => (state.events.push("list-id"), { ...state.store, listId: "list_made_now" });
 export const storeFolder = async () => FOLDER;
+// lib/store.ts, as lib/store-live-cache.ts storeLiveFence reads it (Codex G-20261121-0801).
+export const ERASING_KEY = "nl:closed:erasing";
+export const STORE_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+export const erasingField = async () => "store-field";
+export const ownerKey = async () => "nl:store:owner:owner@example.test";
+export const storeIdCommand = (sid: string) => ["GET", `nl:store:id:${sid}`];
 /** lib/auth.ts normaliseEmail, which lib/suppression.ts (the open's ask whether the buyer was deleted) reads. */
 export const normaliseEmail = (email: string) => email.trim().toLowerCase();
 // lib/store-exact.ts
@@ -72,8 +81,9 @@ export const reserveStoreUpload = async () => (state.events.push("budget"), stat
 export const reserveUploadControl = async () => (state.events.push("control"), state.control);
 // lib/vault-storage.ts and lib/vault.ts
 let opened = 0;
-export const openReservedVault = async (input: { folder: string; ownerId: string; name: string }) => {
+export const openReservedVault = async (input: { folder: string; ownerId: string; name: string; fence?: unknown }) => {
   state.events.push("vault:open");
+  state.vaultFence = input.fence;
   opened += 1;
   return { ok: true as const, sessionId: "s", upload: { pathname: `vault/${input.folder}/${input.ownerId}/${String(opened).padStart(16, "0")}-${input.name}`, pieces: 1, pieceBytes: 16 * MiB, multipart: true as const } };
 };

@@ -59,7 +59,9 @@ const steps: DoorSteps = {
 };
 /** One kept file from a buyer on a lesson, sent at `at`; answers its id. */
 async function sent(who: string, lessonId: string, at: number): Promise<string> {
-  const ask = { store: STORE, data: STORE as DataStore, listId: "list_submission_studio", folder: FOLDER, courseId: COURSE, lessonId, who, email: `${who.slice(0, 3)}@example.com`, setup: SETUP, file: { bytes: 5 * MiB, type: "video/mp4", name: "set.mp4", limitBytes: 5 * 1024 * MiB }, nowSeconds: at };
+  /** The store's identity, carried to the vault (lib/store-live-cache.ts storeLiveFence; Codex G-20261121-0801). */
+  const FENCE = { live: "nl:store:id:fenced", erasing: "nl:closed:erasing", field: "store-field", statsId: "", ref: "store@example.test" };
+  const ask = { store: STORE, data: STORE as DataStore, listId: "list_submission_studio", fence: FENCE, folder: FOLDER, courseId: COURSE, lessonId, who, email: `${who.slice(0, 3)}@example.com`, setup: SETUP, file: { bytes: 5 * MiB, type: "video/mp4", name: "set.mp4", limitBytes: 5 * 1024 * MiB }, nowSeconds: at };
   const door = await openSubmissionDoor(ask, steps);
   if (!door.ok) throw new Error(`open: ${door.reason}`);
   const closed = await closeSubmissionDoor({ store: STORE, folder: FOLDER, courseId: COURSE, lessonId, who, data: STORE as DataStore, note: "My first try." }, door.upload.pathname, ["e"], at, steps);

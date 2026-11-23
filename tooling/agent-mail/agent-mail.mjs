@@ -1277,6 +1277,22 @@ export function aprovadoresNoPr(pr, sha) {
   return new Set([...f].filter((fam) => (corpos.get(fam) ?? []).some((c) => c.veredito === "READY")));
 }
 
+/** Revisões READY exigidas para enfileirar qualquer PR (dono, OWNER-20261123-1442-THREE-REVIEWS, 23/11/2026, 14h42 Fortaleza: "agora são 3 revisões para qualquer tipo de pr"). */
+export const READY_EXIGIDAS = 3;
+
+/**
+ * As famílias cujo READY conta para enfileirar este head: READY escrito no PR neste head exato, de família que não é a
+ * do autor (quem pediu e a do prefixo do ramo) nem tem commit no PR (CO (e), FQ (1)). null = NÃO CONFERIDO: o PR ou os
+ * seus commits não puderam ser lidos agora.
+ */
+export function readyQueContam(pr, sha, autores, ramo = null) {
+  const a = aprovadoresNoPr(pr, sha);
+  if (a === null) return null;
+  const cm = commitsDoPr(pr, ramo);
+  if (!cm) return null;
+  return new Set([...a].filter((f) => !autores.includes(f) && !cm.familias.has(f)));
+}
+
 export function registrarRevisao({ eu, pr, sha, resultado, link, agora = new Date() }) {
   if (!chave("record-review").ligada) throw new Error("o registro de revisão está DESLIGADO (interruptor record-review); só o coordenador o liga");
   if (!/^\d+$/.test(String(pr ?? ""))) throw new Error("--pr é obrigatório (o número do PR)");
@@ -1573,7 +1589,7 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     }
     if (!cf) naoConferido.push("o conflito com o main e com a fila de integração");
     const feito = [atual && !diferente && fonte !== "ref" ? `head ${atual.slice(0, 10)} igual ao do pedido (${fonte === "ramo" ? `pelo ramo ${ramoPedido}` : "pela referência"})` : null, cf ? `sem conflito com o main e com os ${cf.grupos} grupo(s) da fila de integração` : null].filter(Boolean);
-    return { pedido: alvo, aviso: `${feito.join("; ") || "nada conferido"}${naoConferido.length ? `. NÃO CONFERIDO (confira à mão): ${naoConferido.join("; ")}` : ""}. A ferramenta não confere as 9 verificações, as revisões, os achados, o SIM de workflow nem a vez de custo: isso é de quem enfileira (FQ (1))` };
+    return { pedido: alvo, aviso: `${feito.join("; ") || "nada conferido"}${naoConferido.length ? `. NÃO CONFERIDO (confira à mão): ${naoConferido.join("; ")}` : ""}. A ferramenta confere os ${READY_EXIGIDAS} READY de fora no verify-enqueue e no complete-enqueue; não confere as 9 verificações, os CHANGES e achados ainda abertos, o SIM de workflow nem a vez de custo: isso é de quem enfileira (FQ (1))` };
   }
   return { pedido: alvo };
 }
@@ -1731,6 +1747,11 @@ export function conferirTomada({ eu, id, agora = new Date() }) {
   const { sha, fonte } = headDoPr(p.pr, campoCabecalho(p.texto, "Ramo") || null);
   if (!sha || fonte === "ref") throw new Error(`o head atual de #${p.pr} NÃO FOI CONFERIDO agora; não enfileire (passo 4: nada NÃO CONFERIDO segue)`);
   if (!(sha.startsWith(p.sha) || p.sha.startsWith(sha))) throw new Error(`o head de #${p.pr} mudou de ${p.sha.slice(0, 10)} (o do pedido) para ${sha.slice(0, 10)}; não enfileire; conclua como recusado (--result declined) para o autor pedir de novo`);
+  // OWNER-20261123-1442-THREE-REVIEWS: 3 READY de 3 famílias de fora no head exato, lidos agora no PR; sem lê-los, nada segue.
+  const ramo = campoCabecalho(p.texto, "Ramo") || null;
+  const valem = readyQueContam(p.pr, sha, [p.familia, familiaDoRamo(ramo)].filter(Boolean), ramo);
+  if (valem === null) throw new Error(`as revisões READY de #${p.pr} @${sha.slice(0, 10)} NÃO FORAM CONFERIDAS agora (o PR ou os seus commits não puderam ser lidos); não enfileire (passo 4: nada NÃO CONFERIDO segue); tente de novo`);
+  if (valem.size < READY_EXIGIDAS) throw new Error(`#${p.pr} @${sha.slice(0, 10)} tem ${valem.size} READY de família de fora no head exato (${[...valem].sort().join(", ") || "nenhum"}); são ${READY_EXIGIDAS}, de ${READY_EXIGIDAS} famílias diferentes, sem a do autor e sem as que têm commit (OWNER-20261123-1442-THREE-REVIEWS); não enfileire; conclua como recusado (--result declined) para o autor pedir de novo com as ${READY_EXIGIDAS}`);
   return { p, head: sha };
 }
 

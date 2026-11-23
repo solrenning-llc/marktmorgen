@@ -34,7 +34,14 @@ case "$FAKE_GH" in
 esac
 # The PR's own comments and reviews (ce2d): one JSON line [body, association] per comment, from FAKE_COMMENTS.
 for a in "$@"; do case "$a" in
-  repos/*/issues/[0-9]*/comments) [ "$FAKE_COMMENTS_DOWN" = 1 ] && { echo "gh: 502" >&2; exit 1; }; printf '%s' "\${FAKE_COMMENTS:-}"; exit 0 ;;
+  repos/*/issues/[0-9]*/comments) [ "$FAKE_COMMENTS_DOWN" = 1 ] && { echo "gh: 502" >&2; exit 1; }
+    # FAKE_READY_ALL=1 (OWNER-20261123-1442): a READY from every family on every head of this PR's repository, so a test
+    # that only needs the PR enqueued meets the three READY; the tool still leaves out the author and commit families.
+    if [ "$FAKE_READY_ALL" = 1 ]; then n=\${a#*issues/}; n=\${n%%/*}
+      for h in $(git --git-dir="$CORREIO_PR_REPO" for-each-ref --format='%(objectname:short=10)' refs/heads refs/pull); do
+        for f in "Claude 1 R" "Claude 2 R" "Claude 3 R" "Claude 4 R" "Claude 5 R" "Claude 6 R" "Claude 7 R" "Codex R"; do
+          printf '["%s review #%s @%s: READY\\\\n\\\\nbody","COLLABORATOR"]\\n' "$f" "$n" "$h"; done; done; exit 0; fi
+    printf '%s' "\${FAKE_COMMENTS:-}"; exit 0 ;;
   repos/*/pulls/[0-9]*/reviews) exit 0 ;;
   repos/*/issues?labels=canal-ativo*) [ "$FAKE_CANAL_DOWN" = 1 ] && { echo "gh: 502" >&2; exit 1; }
     printf '%s\\n' "\${FAKE_CANAL:-[5104,\\"Agent coordination — part 8 (continues #4932)\\"]}"; exit 0 ;;
@@ -195,7 +202,7 @@ is("the family that recorded a review of this head cannot claim the enqueue", /e
 r = run(["claim-enqueue", "--as", "Claude 6 X"], as("c6"));
 is("another family claims it, and the head matches the request", /pegou/.test(r.out) && /igual ao do pedido/.test(r.out), r.out);
 const idf = /pegou: (\S+)/.exec(r.out)?.[1];
-run(["complete-enqueue", "--as", "Claude 6 X", idf, "--result", "enqueued", "--text", "t"], as("c6"));
+run(["complete-enqueue", "--as", "Claude 6 X", idf, "--result", "enqueued", "--text", "t"], { ...as("c6"), FAKE_READY_ALL: "1" });
 
 r = rec("Claude 7 X", 2, H2, { FAKE_GH: "ok", FAKE_PR: "2", FAKE_SHA: H2.slice(0, 10) });
 is("an unidentified record is accepted but NOT CHECKED and does not take anyone out (R3)", r.ok && /NÃO CONFERIDO: sessão não identificada/.test(r.out) && /NÃO tira a sua família da fila/.test(r.out), r.out);
@@ -265,7 +272,7 @@ run(["release-enqueue", "--as", "Claude 4 X", /pegou: (\S+)/.exec(r.out)?.[1] ??
 console.log("head changed between request and claim (0.2)");
 r = run(["claim-enqueue", "--as", "Claude 6 X"], as("c6"));
 const idb = /pegou: (\S+)/.exec(r.out)?.[1];
-run(["complete-enqueue", "--as", "Claude 6 X", idb ?? "x", "--result", "enqueued", "--text", "t"], as("c6"));
+run(["complete-enqueue", "--as", "Claude 6 X", idb ?? "x", "--result", "enqueued", "--text", "t"], { ...as("c6"), FAKE_READY_ALL: "1" });
 const H3req = H3.slice(0, 10);
 run(["request-enqueue", "--from", "Claude 2", "--pr", "3", "--sha", H3req, "--text", "fila #3"], { ...as("c2"), CORREIO_SEM_COMMITS: "1" });
 g(["checkout", "-q", "pr3"], P); commit("a.txt", "um b\n", "pr3 b"); g(["push", "-q", "../prs.git", "HEAD:refs/pull/3/head"], P);
@@ -280,7 +287,7 @@ r = run(["request-enqueue", "--from", "Claude 2", "--pr", "4", "--sha", H4b.slic
 is("request-enqueue records the PR's branch from the head", r.ok && new RegExp("Ramo: feature-4").test(g(["show", `refs/heads/correio:fila/pedidos/${/registrado: (\S+)/.exec(r.out)?.[1]}.md`], join(T, "mail.git"))), r.out);
 r = run(["claim-enqueue", "--as", "Claude 6 X"], as("c6"));
 is("a request at the branch head is not declined while refs/pull/N/head lags", /pegou/.test(r.out) && /igual ao do pedido \(pelo ramo feature-4\)/.test(r.out), r.out);
-run(["complete-enqueue", "--as", "Claude 6 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], as("c6"));
+run(["complete-enqueue", "--as", "Claude 6 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], { ...as("c6"), FAKE_READY_ALL: "1" });
 g(["checkout", "-q", "pr4"], P); const H4c = commit("f4.txt", "4c\n", "pr4 c");
 // H4c is not pushed yet, so the request finds no branch, and the local refs/pull/4/head (still H4a) is authoritative:
 // since step 4 the request itself is refused, instead of being recorded and declined at the take.
@@ -456,7 +463,7 @@ console.log("step 4: a full head, nothing NOT CHECKED goes on, the take checked 
   is("a request for a head that is not the PR's current one is refused", !r.ok && /não é o head atual/.test(r.out), r.out);
   r = run(["claim-enqueue", "--as", "Claude 6 X"], { ...as("c6"), ...m4 });
   is("the request is delivered", /pegou/.test(r.out), r.out);
-  r = run(["verify-enqueue", "--as", "Claude 6 X", id17], { ...as("c6"), ...m4 });
+  r = run(["verify-enqueue", "--as", "Claude 6 X", id17], { ...as("c6"), ...m4, FAKE_READY_ALL: "1" });
   is("verify-enqueue right before enqueueing: the take is this session's and the head is unchanged", r.ok && new RegExp(`enfileire ${H17}`).test(r.out), r.out);
   r = run(["verify-enqueue", "--as", "Claude 6 Y", id17], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_018ZjhHYYYYYYYYYYYYYYYYYY", ...m4 });
   is("another session of the same family does not hold that take", !r.ok && /não é desta sessão/.test(r.out), r.out);
@@ -469,7 +476,7 @@ console.log("step 4: a full head, nothing NOT CHECKED goes on, the take checked 
   r = run(["request-enqueue", "--from", "Claude 2", "--pr", "17", "--sha", H17b.slice(0, 10), "--text", "fila #17 b"], { ...as("c2"), ...m4 });
   const id17b = /registrado: (\S+)/.exec(r.out)?.[1];
   run(["claim-enqueue", "--as", "Claude 6 X"], { ...as("c6"), ...m4 });
-  r = run(["complete-enqueue", "--as", "Claude 6 X", id17b, "--result", "enqueued", "--text", "fila #17 b"], { ...as("c6"), ...m4 });
+  r = run(["complete-enqueue", "--as", "Claude 6 X", id17b, "--result", "enqueued", "--text", "fila #17 b"], { ...as("c6"), ...m4, FAKE_READY_ALL: "1" });
   is("the completion records the head that was enqueued", r.ok && new RegExp(`^Head enfileirado: ${H17b}$`, "m").test(g(["show", `refs/heads/correio:fila/feitas/${id17b}.md`], join(T, "mail4.git"))), r.out);
   // A git command that hangs is stopped by the time limit.
   const mod = await import(TOOL);
@@ -1170,7 +1177,7 @@ console.log("queue: only the author's family and the head's reviewers are left o
   is("the author's own family still does not take it", !/pegou/.test(r.out) && /é da sua família/.test(r.out), r.out);
   r = run(["claim-enqueue", "--as", "Claude 4 X"], { ...m63, ...as("c4") });
   is("a family with commits on the PR, not the author's nor a reviewer, takes its queue request", /pegou/.test(r.out) && !/EXCEÇÃO 4acb/.test(r.out) && !/tem commits da sua família/.test(r.out), r.out);
-  run(["complete-enqueue", "--as", "Claude 4 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], { ...m63, ...as("c4") });
+  run(["complete-enqueue", "--as", "Claude 4 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], { ...m63, ...as("c4"), FAKE_READY_ALL: "1" });
   // The branch prefix names the author too: a PR on claude7/... asked by an adopting Claude 2 leaves both families out.
   g(["checkout", "-q", "-B", "pr64", M], P); const H64 = commit("f64.txt", "64\n", `pr64 by Claude 4${c4trailer}`);
   g(["push", "-q", "../prs.git", "HEAD:refs/heads/claude7/adopted-64", "HEAD:refs/pull/64/head"], P);
@@ -1180,7 +1187,7 @@ console.log("queue: only the author's family and the head's reviewers are left o
   is("the family of the PR's branch does not take it", !/pegou/.test(r.out) && /ramo da sua família \(claude7\/adopted-64\)/.test(r.out), r.out);
   r = run(["claim-enqueue", "--as", "Claude 4 X"], { ...m63, ...as("c4") });
   is("and a family with commits, outside both, takes it", /pegou/.test(r.out), r.out);
-  run(["complete-enqueue", "--as", "Claude 4 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], { ...m63, ...as("c4") });
+  run(["complete-enqueue", "--as", "Claude 4 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], { ...m63, ...as("c4"), FAKE_READY_ALL: "1" });
   // A branch with no family prefix (claude/...): the family with most commits is the author (coordinator, dd03).
   g(["checkout", "-q", "-B", "pr65", M], P); commit("f65a.txt", "65\n", `pr65 by Claude 4${c4trailer}`); const H65 = commit("f65b.txt", "65\n", `pr65 again by Claude 4${c4trailer}`);
   g(["push", "-q", "../prs.git", "HEAD:refs/heads/claude/no-family-65", "HEAD:refs/pull/65/head"], P);
@@ -1190,7 +1197,7 @@ console.log("queue: only the author's family and the head's reviewers are left o
   is("and claim-enqueue does not hand it to that family", !/pegou/.test(r.out) && /maior parte dos commits da sua família/.test(r.out), r.out);
   r = run(["claim-enqueue", "--as", "Claude 7 X"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" });
   is("but another family takes it", /pegou/.test(r.out), r.out);
-  run(["complete-enqueue", "--as", "Claude 7 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" });
+  run(["complete-enqueue", "--as", "Claude 7 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", FAKE_READY_ALL: "1" });
   // LEVE of Claude 4 AC on #5284: merges do not count for the dominant family. Two author commits (Claude 4), then an
   // adopter (Claude 2) merges main three times and asks for the queue: the author is still Claude 4, and is refused.
   const c2trailer = "\n\nClaude-Session: https://claude.ai/code/session_01FR6Z1Q87JZvTFBRpZ8SNo8";
@@ -1377,6 +1384,32 @@ console.log("e0bc: complete-review knows its own verdict on the PR, also for a n
     mod.comentarioDaSessao("Claude 6 review #5425 @8fcb16aaa8: READY\n\nReviewer: Claude 6, session 018ZjhHhUo\n\nSession 018ZjhHi51 raised the LEVE; it is fixed.", "Claude 6", S6) === false);
   is("e0bc: a name word in a Claude 2 sibling's label only as part of a longer word is not the session's",
     mod.comentarioDaSessao("Claude 2 mainline review #979 @abc: READY", "Claude 2 (main, 01FR6Z1)", null) === false);
+}
+
+console.log("three READY from three outside families on the exact head before a PR is enqueued (owner, OWNER-20261123-1442-THREE-REVIEWS)");
+{
+  g(["init", "-q", "--bare", "mail1442.git"]); g(["push", "-q", "../mail1442.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const mq = { CORREIO_REPO: join(T, "mail1442.git") };
+  const H = pr(1442, "f1442.txt", "1442\n"), h = H.slice(0, 10);
+  const ready = (...quem) => quem.map(([nome, sha]) => JSON.stringify([`${nome} review #1442 @${sha ?? h}: READY\n\nbody`, "COLLABORATOR"])).join("\n") + "\n";
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "1442", "--sha", h, "--text", "fila #1442"], { ...as("c2"), ...mq });
+  const id = /registrado: (\S+)/.exec(r.out)?.[1];
+  r = run(["claim-enqueue", "--as", "Claude 6 X"], { ...as("c6"), ...mq });
+  is("1442: the request is delivered", /pegou/.test(r.out), r.out);
+  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"]) });
+  is("1442: two READY on the head are not enough: verify-enqueue refuses and says 3", !r.ok && /2 READY/.test(r.out) && /\b3\b/.test(r.out) && /1442/.test(r.out), r.out);
+  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Claude 2 Q"]) });
+  is("1442: a READY from the author's family does not count", !r.ok && /2 READY/.test(r.out), r.out);
+  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Claude 4 Q", "0000000000"]) });
+  is("1442: a READY on another head does not count", !r.ok && /2 READY/.test(r.out), r.out);
+  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS_DOWN: "1" });
+  is("1442: the PR's reviews unread: NOT CHECKED, nothing is enqueued", !r.ok && /NÃO FORAM CONFERIDAS/.test(r.out), r.out);
+  r = run(["complete-enqueue", "--as", "Claude 6 X", id, "--result", "enqueued", "--text", "t"], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"]) });
+  is("1442: complete-enqueue as enqueued is refused with two", !r.ok && /2 READY/.test(r.out), r.out);
+  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Claude 4 Q"]) });
+  is("1442: three READY from three outside families on the head: verify-enqueue says enqueue", r.ok && new RegExp(`enfileire ${H}`).test(r.out), r.out);
+  r = run(["complete-enqueue", "--as", "Claude 6 X", id, "--result", "enqueued", "--text", "t"], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Claude 4 Q"]) });
+  is("1442: and complete-enqueue records it", r.ok, r.out);
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

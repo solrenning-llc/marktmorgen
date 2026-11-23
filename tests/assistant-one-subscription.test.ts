@@ -320,6 +320,19 @@ async function main(): Promise<void> {
   is("an expiry Stripe does not confirm opens nothing", [await outcome(store), posts.length], ["refused", 0]);
   expireFails = false;
 
+  // Claude 1's LEVE 1 on #5349 @30b8c0d1ea: two of this store's open pages, both at another price, are never both
+  // expired nor followed by a third: the start says it could not, and nothing is expired or opened.
+  part("Two open pages at another price: nothing expired, nothing opened, the start says it could not");
+  store = await freshStore();
+  const firstOld = await outcome(store);
+  const twin = sessions.find((s) => s.url === firstOld.slice("checkout ".length))!;
+  twin.amount_subtotal = 4900;
+  sessions.push({ ...twin, id: `${twin.id}b`, url: `${twin.url}b`, metadata: { ...twin.metadata } });
+  keys.clear();
+  posts.length = 0;
+  expired.length = 0;
+  is("refused, with no expiry asked and no page opened", [await outcome(store), expired.length, posts.length, sessions.filter((s) => s.status === "open").length], ["refused", 0, 0, 2]);
+
   part("A page Stripe answers without its status is never given (Claude 3 yUZf's NIT on #5349)");
   store = await freshStore();
   keys.clear();

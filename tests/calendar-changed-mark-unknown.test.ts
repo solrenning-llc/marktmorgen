@@ -55,9 +55,17 @@ async function main(): Promise<void> {
   is("with a making left, the feed is made again, never the old copy answered", remade.state === "made" && remade.ics === feed("after-booking"), true);
 
   part("an unreadable mark with no making left answers nothing, never a copy as if it were current");
+  // Two of the day's makings are spent above; spend the rest from the constant, so the case does not lean on its value
+  // (Claude 7 HHH's LEVE on #5417, AC (n)).
+  let at = t0 + 2 * step;
+  for (let left = CALENDAR_BUILDS_PER_DAY - 2; left > 0; left -= 1) {
+    at += step;
+    await setMark("not-a-count");
+    is(`(setup) a remaining making is spent (${left} left before it)`, (await bookedCalendarFeed(owner, make(`spend-${left}`), at)).state, "made");
+  }
   await setMark("not-a-count");
   const madeBefore = made;
-  const spent = await bookedCalendarFeed(owner, make("none-left"), t0 + 3 * step);
+  const spent = await bookedCalendarFeed(owner, make("none-left"), at + step);
   is("no copy is answered on a mark that cannot be read", spent.state, "none");
   is("and nothing is made past the day's makings", made - madeBefore, 0);
 

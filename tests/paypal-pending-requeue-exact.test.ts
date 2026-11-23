@@ -229,6 +229,82 @@ async function main(): Promise<void> {
     }
   }
 
+  // Claude 2's LEVE on #5335 (row #3404 of #5285): with the try counted in one step and the order put in pending in a
+  // second, a try B could count before a try A while A put the order in pending first; A, declined last, then read its
+  // own count as the latest and let go of the entry B was taking the payment under. Forced here on the steps as they
+  // were sent: the first count held until the second is counted, the second's pending write held until the first's is
+  // in, and its answer held until the first try has let go. One step, as now, leaves nothing to interleave.
+  part("Two tries of one order, B counted before A, A put in pending first and declined last: B's entry stays");
+  {
+    const order = await open();
+    captureWith = () => declined();
+    console.error = () => undefined;
+    try {
+      const lone = await captureOrder(store, order);
+      is("a first try is declined alone, counted, and let go of pending", [lone.ok ? "paid" : lone.reason, await stillPending(store, order)], ["declined", false]);
+    } finally {
+      console.error = logged;
+    }
+    const counts = (commands: Commands) => commands.some((c) => c[0] === "INCR" && String(c[1]) === `nl:ppsell:try:${order}`);
+    const adds = (commands: Commands) => commands.some((c) => c[0] === "ZADD" && String(c[1]) === pendingKey && !c.map(String).includes("XX") && c.map(String).includes(order));
+    const letsGo = (commands: Commands) => commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("marktmorgen:paypal-let-go-declined") && c.map(String).includes(order));
+    const secondCounted = signal();
+    const firstAdded = signal();
+    const firstLetGo = signal();
+    const answerTaking = signal<Answer>();
+    let counted = 0;
+    let added = 0;
+    let asked = 0;
+    captureWith = async () => {
+      asked += 1;
+      return asked === 1 ? declined() : answerTaking.wait;
+    };
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: Commands) => {
+      if (counts(commands)) {
+        counted += 1;
+        if (counted === 1) {
+          await secondCounted.wait;
+          return real(commands);
+        }
+        const replies = await real(commands);
+        secondCounted.fire();
+        return replies;
+      }
+      if (adds(commands)) {
+        added += 1;
+        if (added === 1) {
+          await firstAdded.wait;
+          const replies = await real(commands);
+          await firstLetGo.wait;
+          return replies;
+        }
+        const replies = await real(commands);
+        firstAdded.fire();
+        return replies;
+      }
+      if (letsGo(commands)) {
+        const replies = await real(commands);
+        firstLetGo.fire();
+        return replies;
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    console.error = () => undefined;
+    try {
+      const tries = [captureOrder(store, order), captureOrder(store, order)];
+      const first = await Promise.race(tries);
+      is("the try PayPal answers first is declined", first.ok ? "paid" : first.reason, "declined");
+      is("the order stays in pending, under the other try's watch", await stillPending(store, order), true);
+      answerTaking.fire({ status: 201, body: completed(order, "49.00", "COMPLETED", "interleaved@example.com") });
+      const both = await Promise.all(tries);
+      is("the other try's payment is taken and written down", [both.filter((r) => r.ok).length, (await readPaid(order))?.order ?? null], [1, order]);
+    } finally {
+      redis.pipeline = real;
+      console.error = logged;
+    }
+  }
+
   part("A declined try's letting go stays inside the order's own work");
   {
     const perOrder = PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * (PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked + PAYPAL_CAPTURE_WATCH.letGoCommandsPerDeclinedTry);

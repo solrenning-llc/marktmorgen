@@ -54,7 +54,10 @@ jobs:
   # (about 39 minutes in the merge queue). The same steps now run in parallel jobs: verify keeps lint, the build,
   # the runtime dependency check and the agreements file; behavior-regressions runs every tests/*.test.ts, dealt
   # out by sorted position into four shares (tests/test-runner.mjs shardFiles); store-copy runs tests/e2e/store-copy.mjs
-  # in three contiguous parts (tests/e2e/store-copy-parts.mjs). Nothing was removed; all-checks reads every job.
+  # in three contiguous parts (tests/e2e/store-copy-parts.mjs), and its part 2, the shortest, also runs the whole-site
+  # sweep tests/e2e/site-links.mjs once, on the build that part already made (the sweep does not read
+  # STORE_COPY_PART, so running it in every part would repeat the same crawl three times). Nothing was removed;
+  # all-checks reads every job.
   verify:
     needs: documentation-scope
     if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
@@ -144,8 +147,9 @@ jobs:
       # every step this part ran.
       - name: Copying a whole store, in a browser
         run: node tests/e2e/store-copy.mjs --no-build
-      # VR Part A item 2: every public and studio page answers, and no link on it leads nowhere.
+      # VR Part A item 2: every public and studio page answers, and no link on it leads nowhere. Once, in part 2 only.
       - name: Every page answers and every link leads somewhere, in a browser
+        if: matrix.part == 2
         run: node tests/e2e/site-links.mjs --no-build
 
   form-opportunity-redis:

@@ -21,6 +21,7 @@ const en = {
   backToStore: (store: string) => `Back to ${store}`,
   notices: {
     declined: { title: "Nothing was changed", body: "You said no on Discord's page. Press the button again whenever you want to join." },
+    link: { title: "This order link has expired", body: "A link to your purchases works for 24 hours. Ask for a new one on the store's orders page, then use the Discord button there." },
     none: { title: "No purchase with Discord access", body: "Nothing bought with this address comes with the Discord server now. If you have an order link for the address you paid with, open it and use the Discord button there." },
     failed: { title: "Discord did not let you in just now", body: "Nothing was changed. Try again in a few minutes. If it keeps happening, the store's owner may need to check the server's settings." },
     off: { title: "This store has no Discord server connected", body: "Nothing was changed. The store's owner can tell you where its community is." },
@@ -47,6 +48,7 @@ const es: DiscordWords = {
   backToStore: (store) => `Volver a ${store}`,
   notices: {
     declined: { title: "No se cambió nada", body: "Dijiste que no en la página de Discord. Pulsa el botón de nuevo cuando quieras unirte." },
+    link: { title: "Este enlace de pedido ha caducado", body: "Un enlace a tus compras funciona durante 24 horas. Pide uno nuevo en la página de pedidos de la tienda y usa allí el botón de Discord." },
     none: { title: "Ninguna compra con acceso a Discord", body: "Nada comprado con esta dirección incluye ahora el servidor de Discord. Si tienes un enlace de pedido para la dirección con la que pagaste, ábrelo y usa allí el botón de Discord." },
     failed: { title: "Discord no te dejó entrar ahora", body: "No se cambió nada. Inténtalo de nuevo en unos minutos. Si sigue pasando, puede que el dueño de la tienda tenga que revisar la configuración del servidor." },
     off: { title: "Esta tienda no tiene un servidor de Discord conectado", body: "No se cambió nada. El dueño de la tienda puede decirte dónde está su comunidad." },
@@ -66,6 +68,7 @@ const fr: DiscordWords = {
   backToStore: (store) => `Retour à ${store}`,
   notices: {
     declined: { title: "Rien n'a été modifié", body: "Vous avez refusé sur la page de Discord. Appuyez de nouveau sur le bouton quand vous voulez rejoindre le serveur." },
+    link: { title: "Ce lien de commande a expiré", body: "Un lien vers vos achats fonctionne pendant 24 heures. Demandez-en un nouveau sur la page des commandes de la boutique, puis utilisez le bouton Discord qui s'y trouve." },
     none: { title: "Aucun achat avec accès à Discord", body: `Rien de ce qui a été acheté avec cette adresse ne donne accès au serveur Discord en ce moment. Si vous avez un lien de commande pour l'adresse utilisée pour payer, ouvrez-le et utilisez le bouton Discord qui s'y trouve.` },
     failed: { title: "Discord ne vous a pas laissé entrer pour l'instant", body: "Rien n'a été modifié. Réessayez dans quelques minutes. Si cela se reproduit, le propriétaire de la boutique devra peut-être vérifier les réglages du serveur." },
     off: { title: "Aucun serveur Discord n'est relié à cette boutique", body: "Rien n'a été modifié. Le propriétaire de la boutique peut vous dire où se trouve sa communauté." },
@@ -85,6 +88,7 @@ const de: DiscordWords = {
   backToStore: (store) => `Zurück zu ${store}`,
   notices: {
     declined: { title: "Nichts wurde geändert", body: "Sie haben auf der Seite von Discord abgelehnt. Tippen Sie erneut auf die Schaltfläche, wann immer Sie beitreten möchten." },
+    link: { title: "Dieser Bestelllink ist abgelaufen", body: "Ein Link zu Ihren Käufen funktioniert 24 Stunden lang. Fordern Sie auf der Bestellseite des Shops einen neuen an und nutzen Sie dort die Discord-Schaltfläche." },
     none: { title: "Kein Kauf mit Discord-Zugang", body: "Nichts, was mit dieser Adresse gekauft wurde, gehört derzeit zum Discord-Server. Wenn Sie einen Bestelllink für die beim Bezahlen verwendete Adresse haben, öffnen Sie ihn und nutzen Sie dort die Discord-Schaltfläche." },
     failed: { title: "Discord hat Sie gerade nicht hineingelassen", body: "Nichts wurde geändert. Versuchen Sie es in ein paar Minuten erneut. Passiert es wieder, muss die Inhaberin oder der Inhaber des Shops vielleicht die Einstellungen des Servers prüfen." },
     off: { title: "Mit diesem Shop ist kein Discord-Server verbunden", body: "Nichts wurde geändert. Die Inhaberin oder der Inhaber des Shops kann Ihnen sagen, wo die Community ist." },
@@ -104,6 +108,7 @@ const it: DiscordWords = {
   backToStore: (store) => `Torna a ${store}`,
   notices: {
     declined: { title: "Non è cambiato nulla", body: "Hai rifiutato sulla pagina di Discord. Premi di nuovo il pulsante quando vuoi entrare." },
+    link: { title: "Questo link dell'ordine è scaduto", body: "Un link ai tuoi acquisti funziona per 24 ore. Chiedine uno nuovo nella pagina degli ordini del negozio e usa lì il pulsante Discord." },
     none: { title: "Nessun acquisto con accesso a Discord", body: "Niente di ciò che è stato acquistato con questo indirizzo include ora il server Discord. Se hai un link dell'ordine per l'indirizzo con cui hai pagato, aprilo e usa lì il pulsante Discord." },
     failed: { title: "Discord non ti ha fatto entrare per ora", body: "Non è cambiato nulla. Riprova tra qualche minuto. Se succede ancora, il titolare del negozio potrebbe dover controllare le impostazioni del server." },
     off: { title: "Questo negozio non ha un server Discord collegato", body: "Non è cambiato nulla. Il titolare del negozio può dirti dov'è la sua community." },
@@ -123,6 +128,7 @@ const nl: DiscordWords = {
   backToStore: (store) => `Terug naar ${store}`,
   notices: {
     declined: { title: "Er is niets veranderd", body: "Je zei nee op de pagina van Discord. Druk opnieuw op de knop wanneer je lid wilt worden." },
+    link: { title: "Deze bestellink is verlopen", body: "Een link naar je aankopen werkt 24 uur. Vraag een nieuwe aan op de bestelpagina van de winkel en gebruik daar de Discord-knop." },
     none: { title: "Geen aankoop met toegang tot Discord", body: "Niets wat met dit adres is gekocht, hoort nu bij de Discord-server. Heb je een bestellink voor het adres waarmee je betaalde, open die dan en gebruik daar de Discord-knop." },
     failed: { title: "Discord liet je nu niet binnen", body: "Er is niets veranderd. Probeer het over een paar minuten opnieuw. Gebeurt het weer, dan moet de eigenaar van de winkel misschien de instellingen van de server nakijken." },
     off: { title: "Deze winkel heeft geen Discord-server gekoppeld", body: "Er is niets veranderd. De eigenaar van de winkel kan je vertellen waar de community is." },
@@ -143,6 +149,7 @@ const pt: DiscordWords = {
   backToStore: (store) => `Voltar a ${store}`,
   notices: {
     declined: { title: "Nada foi alterado", body: "Recusou na página do Discord. Carregue de novo no botão quando quiser entrar." },
+    link: { title: "Esta ligação para a encomenda expirou", body: "Uma ligação para as suas compras funciona durante 24 horas. Peça uma nova na página de encomendas da loja e use aí o botão do Discord." },
     none: { title: "Nenhuma compra com acesso ao Discord", body: "Nada do que foi comprado com este endereço dá agora acesso ao servidor de Discord. Se tiver uma ligação para a encomenda associada ao endereço com que pagou, abra-a e use aí o botão do Discord." },
     failed: { title: "O Discord não o deixou entrar de momento", body: "Nada foi alterado. Tente de novo dentro de alguns minutos. Se voltar a acontecer, o dono da loja poderá ter de verificar as definições do servidor." },
     off: { title: "Esta loja não tem um servidor de Discord ligado", body: "Nada foi alterado. O dono da loja pode dizer-lhe onde está a comunidade." },

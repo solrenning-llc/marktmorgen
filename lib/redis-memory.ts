@@ -5330,13 +5330,9 @@ export class MemoryRedis {
    * (tests/meet-redis-scripts.test.ts holds it to Redis).
    */
   private meetKeep(args: string[]): unknown {
-    const raw = args[0] ?? "";
-    if (!/^(0|-?[1-9][0-9]*)$/.test(raw)) throw new Error("ERR value is not an integer or out of range");
-    const count = Number(raw);
-    if (count < 0) throw new Error("ERR Number of keys can't be negative");
-    if (count > args.length - 1) throw new Error("ERR Number of keys can't be greater than number of args");
-    const keys = args.slice(1, 1 + count);
-    const argv = args.slice(1 + count);
+    // The key count as Redis reads it (evalShape): a count past 64 bits is out of range, never more keys than
+    // arguments (Codex X6 on #3333, LOW).
+    const { keys, argv } = evalShape(args);
     if (keys.length !== 4 || argv.length !== 4 || argv[0] === "" || argv[1] === "" || !/^[1-9][0-9]{0,15}$/.test(argv[2]) || argv[3] === "") return -1;
     const [lock, conn, index, goneMark] = keys;
     const [token, connection, cutoff, statsId] = argv;

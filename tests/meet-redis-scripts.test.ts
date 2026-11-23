@@ -32,14 +32,16 @@ test("lib/meet-connect.ts defines the script", () => {
 });
 
 type Arg = string | number;
-type Case = { name: string; setup: Arg[][]; run: Arg[]; reply: number | "error"; after: Arg[][]; state: unknown[] };
+/** A reply, "error" for any error of Redis's, or the error's exact text where the text is what the case holds. */
+type Reply = number | "error" | { error: string };
+type Case = { name: string; setup: Arg[][]; run: Arg[]; reply: Reply; after: Arg[][]; state: unknown[] };
 
 const KEYS = ["lock", "conn", "idx", "gone"];
 // The connection, the index's type (a set only once the store was added to it), and the lock (never touched by the script).
 const STATE: Arg[][] = [["GET", "conn"], ["TYPE", "idx"], ["GET", "lock"]];
 const nothing = [null, "none", "T"];
 const kept = ["J", "set", "T"];
-const keep = (name: string, setup: Arg[][], run: Arg[], reply: number | "error", state: unknown[] = nothing): Case => ({
+const keep = (name: string, setup: Arg[][], run: Arg[], reply: Reply, state: unknown[] = nothing): Case => ({
   name,
   setup: [["SET", "lock", "T"], ...setup],
   run: ["EVAL", K, ...run],
@@ -48,6 +50,9 @@ const keep = (name: string, setup: Arg[][], run: Arg[], reply: number | "error",
   state,
 });
 const call = (cutoff: Arg = 1001, store: Arg = "s1", token: Arg = "T", connection: Arg = "J"): Arg[] => [4, ...KEYS, token, connection, cutoff, store];
+
+const OUT_OF_RANGE = "ERR value is not an integer or out of range";
+const TOO_MANY = "ERR Number of keys can't be greater than number of args";
 
 const CASES: Case[] = [
   keep("keeps and indexes the connection while the lock is ours and no deletion was confirmed", [], call(), 1, kept),
@@ -72,9 +77,15 @@ const CASES: Case[] = [
   keep("a key too many is refused", [], [5, ...KEYS, "more", "T", "J", 1001, "s1"], -1),
   keep("an argument too many is refused", [], [...call(), "extra"], -1),
   keep("an argument too few is refused", [], call().slice(0, -1), -1),
-  keep("a key count with a leading zero is Redis's own error", [], ["04", ...KEYS, "T", "J", 1001, "s1"], "error"),
-  keep("a negative key count is Redis's own error", [], [-1, ...KEYS, "T", "J", 1001, "s1"], "error"),
-  keep("more keys than arguments is Redis's own error", [], [9, ...KEYS, "T"], "error"),
+  keep("a key count with a leading zero is Redis's own error", [], ["04", ...KEYS, "T", "J", 1001, "s1"], { error: OUT_OF_RANGE }),
+  keep("a negative key count is Redis's own error", [], [-1, ...KEYS, "T", "J", 1001, "s1"], { error: "ERR Number of keys can't be negative" }),
+  keep("more keys than arguments is Redis's own error", [], [9, ...KEYS, "T"], { error: TOO_MANY }),
+  // A count past 64 bits is not read as a number at all (Codex X6 on #3333, LOW): Redis answers out of range, not
+  // more keys than arguments, however many digits it has. The largest count within 64 bits is still read.
+  keep("a twenty-digit key count is out of range, as Redis says", [], ["99999999999999999999", ...KEYS, "T", "J", 1001, "s1"], { error: OUT_OF_RANGE }),
+  keep("a key count one past 64 bits is out of range", [], ["9223372036854775808", ...KEYS, "T", "J", 1001, "s1"], { error: OUT_OF_RANGE }),
+  keep("a negative key count one past 64 bits is out of range", [], ["-9223372036854775809", ...KEYS, "T", "J", 1001, "s1"], { error: OUT_OF_RANGE }),
+  keep("the largest key count within 64 bits is more keys than arguments", [], ["9223372036854775807", ...KEYS, "T", "J", 1001, "s1"], { error: TOO_MANY }),
 ];
 
 function onStandIn(c: Case): { reply: unknown; state: unknown[] } {
@@ -83,8 +94,8 @@ function onStandIn(c: Case): { reply: unknown; state: unknown[] } {
   let reply: unknown;
   try {
     reply = store.run(c.run);
-  } catch {
-    reply = "error";
+  } catch (error) {
+    reply = typeof c.reply === "object" ? { error: (error as Error).message } : "error";
   }
   const state = c.after.map((command) => store.run(command));
   return { reply, state: state.map((v, i) => (c.after[i][0] === "TTL" && typeof v === "number" && v > 0 ? "ttl" : v)) };
@@ -93,7 +104,7 @@ function onStandIn(c: Case): { reply: unknown; state: unknown[] } {
 for (const c of CASES) {
   test(`stand-in: ${c.name}`, () => {
     const got = onStandIn(c);
-    assert.equal(got.reply, c.reply);
+    assert.deepEqual(got.reply, c.reply);
     assert.deepEqual(got.state, c.state);
   });
 }
@@ -171,7 +182,7 @@ test("Redis 7 answers every case exactly as the stand-in does", { skip: !process
         assert.equal(await send(["FLUSHALL"]), "OK");
         for (const command of c.setup) await send(command);
         const raw = await send(c.run);
-        const reply = raw && typeof raw === "object" && "error" in raw ? "error" : raw;
+        const reply = raw && typeof raw === "object" && "error" in raw ? (typeof c.reply === "object" ? { error: (raw as { error: string }).error } : "error") : raw;
         const state: unknown[] = [];
         for (const command of c.after) {
           const v = await send(command);

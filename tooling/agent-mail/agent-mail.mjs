@@ -1236,10 +1236,14 @@ export function marcasDaSessao(eu, sessao = sessaoAtual()) {
  */
 export function comentarioDaSessao(corpo, eu, sessao = sessaoAtual()) {
   const { palavras, id } = marcasDaSessao(eu, sessao);
-  const cabecalho = (String(corpo ?? "").split(/\r?\n/).find((l) => l.trim()) ?? "").replace(/[*`]/g, "");
-  // O id da sessão só conta na primeira linha, onde o revisor se nomeia; no corpo, uma irmã o cita ao conferir o achado
-  // ou a correção desta sessão (LEVE do Claude 3 yaQt no #5408 @1139d5d034).
-  if (id !== "" && cabecalho.includes(id)) return true;
+  const linhas = String(corpo ?? "").split(/\r?\n/).map((l) => l.replace(/[*`]/g, ""));
+  const cabecalho = linhas.find((l) => l.trim()) ?? "";
+  // O id da sessão só conta onde o revisor se nomeia: a primeira linha, ou uma linha de assinatura ("Reviewer:",
+  // "Revisor:", "Por:", "By:", "Session:", "Sessão:"). No resto do corpo, uma irmã o cita ao conferir o achado ou a
+  // correção desta sessão (LEVE do Claude 3 yaQt no #5408 @1139d5d034); uma sessão sem palavra no nome que assina numa
+  // linha posterior continua reconhecendo o próprio veredito (LEVE do Claude 5 ibqho no #5408 @fe7b3613dd).
+  const assinaturas = linhas.filter((l) => /^\s*(reviewer|revisor|por|by|session|sess[aã]o)\s*:/i.test(l));
+  if (id !== "" && [cabecalho, ...assinaturas].some((l) => l.includes(id))) return true;
   const m = /^\s*(claude|codex)(?:\s*(\d+))?/i.exec(String(eu ?? ""));
   if (!m || !palavras.length) return false;
   const nome = m[2] ? `${m[1]}\\s*${m[2]}` : m[1];

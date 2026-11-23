@@ -186,6 +186,10 @@ export function channelsTool(data: StatsData, w: Window) {
     ad_records_complete: known && data.ads?.[w] != null,
     ads_total: known && data.ads?.[w] != null ? data.ads[w].length : null,
     ads: known ? (data.ads?.[w] ?? []).slice(0, 25).map((r) => ({ ad: r.content, channel: r.source, campaign: r.campaign, sales: r.sales, revenue: r.cents })) : [],
+    // Posts are cut at 25 like the ads, and say so with their total (#4481): 25 rows are never taken for all of them.
+    post_records_note: "Posts are grouped by campaign tag; visits are not split by payment channel. Amounts are gross before refunds and fees. At most 25 posts are returned, the most money first, and posts_total says how many there are; empty with post_records_complete false means unavailable, not zero.",
+    post_records_complete: known && data.posts?.[w] != null,
+    posts_total: known && data.posts?.[w] != null ? data.posts[w].length : null,
     posts: known ? (data.posts?.[w] ?? []).slice(0, 25).map((r) => ({ post: r.campaign, channel: r.sources?.length === 1 ? r.sources[0] : "", payment_channels: r.sources ?? null, visits: r.visits, sales: r.sales, revenue: r.cents })) : [],
   };
 }

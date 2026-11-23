@@ -283,8 +283,28 @@ async function writeConfig(store: Store, config: Config | null): Promise<"saved"
   }
   const live = await setEmailSyncRef(storeRef(store), refFor(config));
   if (!live) return "gone";
-  const kept = await setPersistentWhileStoreLive(live, cfgKey(statsId), JSON.stringify({ ...config, handle: store.handle }));
-  return kept === "kept" ? "saved" : kept;
+  const value = JSON.stringify({ ...config, handle: store.handle });
+  const kept = await setPersistentWhileStoreLive(live, cfgKey(statsId), value);
+  if (kept === "kept") return "saved";
+  if (kept === "unknown") return settleUnknownConfig(store, value);
+  return kept;
+}
+
+/**
+ * After a fenced write whose answer did not read (Claude 1 E's LEVE on #5185): the store's reference was already
+ * changed to the new settings, and the key may or may not have been written. The key is read back. If it holds what was
+ * written, the save worked; otherwise the reference is put back to the settings that are kept, so the two never
+ * disagree, and the save is said as not done. A read-back that does not read leaves it unknown.
+ */
+async function settleUnknownConfig(store: Store, value: string): Promise<"saved" | "unknown"> {
+  const statsId = store.statsId as string;
+  const read = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1)?.[0];
+  if (read === value) return "saved";
+  if (read !== null && typeof read !== "string") return "unknown";
+  const held = read === null ? null : parseConfig(read);
+  if (read !== null && !held) return "unknown";
+  await setEmailSyncRef(storeRef(store), refFor(held));
+  return "unknown";
 }
 
 /** What the creator is told when the store changed, or was erased, while the provider answered: nothing was saved. */

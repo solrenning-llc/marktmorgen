@@ -119,3 +119,27 @@ test("a connect and a settings save stay inside a call out's priced commands, th
     redis.pipeline = plain;
   }
 });
+
+test("a fenced answer that does not read never leaves the store's reference on settings that were not kept", async () => {
+  // Claude 1 E's LEVE on #5185: the reference is changed before the key; when the key's answer does not read, it is read
+  // back, and the reference follows what is kept.
+  type Batch = (string | number)[][];
+  const store = await liveStore();
+  answerWith([ACCOUNT, TWO_FORMS]);
+  assert.equal((await connect(store, "kit", KEY)).ok, true, "(connected, no form picked, so no reference)");
+  const before = (await storeForEmail(OWNER))!.emailSync ?? null;
+  const connected = (await storeForEmail(OWNER))!;
+  const plain = redis.pipeline;
+  redis.pipeline = (async (batch: Batch) => {
+    if (batch.length === 1 && batch[0]?.[0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:store-cache-persistent-live:v1")) return ["?"];
+    return plain(batch);
+  }) as typeof redis.pipeline;
+  try {
+    answerWith([TWO_FORMS]);
+    const saved = await saveSettings(connected, { target: "chosen", free: true, buyers: "all", products: [], tags: {} } as never);
+    assert.equal(saved.ok, false, "not said to be saved");
+  } finally {
+    redis.pipeline = plain;
+  }
+  assert.deepEqual((await storeForEmail(OWNER))!.emailSync ?? null, before, "the reference follows the settings that are kept");
+});

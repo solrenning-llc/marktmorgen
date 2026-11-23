@@ -10,7 +10,7 @@ import { StoreResting } from "@/components/store-resting";
 import { photoUrl } from "@/lib/photo-limits";
 import { imageUrl } from "@/lib/product-image";
 import { canRecover } from "@/lib/buyer-orders";
-import { doorFields, openDoor, readDoor } from "@/lib/review-proof";
+import { REVIEW_SAVE_SECONDS, doorFields, openDoor, readDoor } from "@/lib/review-proof";
 import { type Review, readReview, reviewId } from "@/lib/reviews";
 import { REVIEW_NOTICES, ReviewForm } from "@/components/review-form";
 import { productPath } from "@/components/store-product";
@@ -85,6 +85,8 @@ export default async function ReviewPage({ params, searchParams }: Params) {
 
   const said = speech(store);
   const g = givingWords(store.language);
+  // Read once for the page: a review of an order older than REVIEW_SAVE_SECONDS cannot be saved (#5400).
+  const nowSeconds = Date.now() / 1000;
   const problem =
     opened.state === "ok"
       ? opened.proof.refunded
@@ -168,6 +170,7 @@ export default async function ReviewPage({ params, searchParams }: Params) {
                         back="review"
                         notice={statusProduct === product.id && REVIEW_NOTICES[status] ? status : null}
                         lang={said.lang.code}
+                        closed={nowSeconds - opened.proof.paidAt > REVIEW_SAVE_SECONDS}
                       />
                     )}
                   </section>

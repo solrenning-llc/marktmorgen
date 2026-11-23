@@ -7,6 +7,8 @@
  *
  * Synthetic store, buyers and orders; in-memory Redis; Stripe stood in; no network.
  */
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
 import { afterTasks } from "./next-server-after-world";
 import { POST } from "@/app/api/store/review/route";
@@ -16,6 +18,7 @@ import { ordersLinkFor } from "@/lib/buyer-orders";
 import { MAX_ASK_DAYS } from "@/lib/review-ask";
 import { REVIEW_LINK_SECONDS, REVIEW_SAVE_SECONDS } from "@/lib/review-proof";
 import { GIVING_WORDS } from "@/lib/buyer-words/giving";
+import { ReviewForm } from "@/components/review-form";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
 import { store as redis } from "./redis-stub";
@@ -98,6 +101,18 @@ async function main(): Promise<void> {
   part("The edges: 89 days saves, 91 days does not");
   is("an order paid 89 days ago saves its review", await send({ token: await tokenFor(recent.buyer), ref: recent.session, rating: "5", text: "Still fresh.", name: "Recent Buyer" }), "saved");
   is("an order paid 91 days ago does not", await send({ token: await tokenFor(late.buyer), ref: late.session, rating: "5", text: "A bit late.", name: "Late Buyer" }), "late");
+
+  part("The review page draws no fields it could not save: a closed order says why, and deleting stays");
+  const draw = (closed: boolean, existing: Awaited<ReturnType<typeof readReview>>) =>
+    renderToStaticMarkup(createElement(ReviewForm, { handle: HANDLE, door: { token: oldToken, ref: old.session }, product: { id: productId, title: "Sourdough course" }, existing, storeName: "Review Save Window", back: "review", notice: null, closed }));
+  const saved = await saveReview(statsId, { productId, email: old.buyer, reference: old.session, pi: old.pi, rating: 4, text: "Saved back then.", name: "Old Buyer" }, ROOM);
+  const review = saved.state === "created" ? saved.review : null;
+  const closedPage = draw(true, review);
+  is("closed: no field to save", [closedPage.includes('value="save"'), closedPage.includes('name="rating"'), closedPage.includes("<textarea")], [false, false, false]);
+  is("closed: it says why, in plain words", closedPage.includes(GIVING_WORDS.en.reviewNotices.late.replace(/'/g, "&#x27;")), true);
+  is("closed: the review saved back then can still be deleted", closedPage.includes('value="delete"'), true);
+  const openPage = draw(false, review);
+  is("open: the fields are there, as before", [openPage.includes('value="save"'), openPage.includes("<textarea")], [true, true]);
 
   part("The words, in every language the site speaks");
   for (const [language, words] of Object.entries(GIVING_WORDS)) {

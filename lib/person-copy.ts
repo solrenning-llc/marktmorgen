@@ -277,7 +277,9 @@ async function giftForCopy(statsId: string, id: string, recipient?: string): Pro
   try { value = JSON.parse(replies[0]); } catch { throw new UnknownReplyError("a gift's contents for the copy"); }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new UnknownReplyError("a gift's contents for the copy");
   const gift = value as Record<string, unknown>;
-  const seconds = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  // Bounded as groupForCopy's are, so iso() below never throws a RangeError on a far date (Claude 5 ibuF's LOW on #5198):
+  // a time out of range is an unknown copy, like every other field out of shape.
+  const seconds = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 && v <= 8_640_000_000_000;
   if (gift.id !== id || gift.s !== statsId || typeof gift.p !== "string" || !gift.p ||
       typeof gift.to !== "string" || !gift.to.trim() || typeof gift.from !== "string" || typeof gift.message !== "string" ||
       !seconds(gift.at) || (gift.given !== undefined && !seconds(gift.given)) || (gift.revoked !== undefined && !seconds(gift.revoked)) ||

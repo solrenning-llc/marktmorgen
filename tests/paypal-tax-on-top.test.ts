@@ -79,6 +79,7 @@ async function main(): Promise<void> {
   // The coordinator's triple audit on #5243: "turn off tax on top" cannot be done in the studio without Stripe, so it is not offered.
   is("without card payments, only a step the creator can take", /store\.stripeAccountId \? " Buyers cannot pay until your Stripe account can take card payments\." : " Buyers cannot pay until you connect Stripe\."/.test(page), true);
   is("never \"turn off tax on top\" as the way out", page.includes("or turn off tax on top"), false);
+  is("card payments off for the platform: the tax page says so, never \"connect Stripe\"", /!isSellingConfigured\(\) \? " Card payments are not available on Marktmorgen right now, so buyers cannot pay\."/.test(page), true);
   const editor = readFileSync(join(process.cwd(), "components/tax-editor.tsx"), "utf8");
   is("the tax editor says PayPal goes away as tax on top is chosen", /paypal && enabled && !included\s*\? "With tax added on top, PayPal is not offered at checkout, because a PayPal payment would not include the tax\."/.test(editor), true);
   const studio = readFileSync(join(process.cwd(), "app/studio/page.tsx"), "utf8");
@@ -93,6 +94,11 @@ async function main(): Promise<void> {
 
   part("The funnel review names the real cause (a store selling by PayPal alone, with tax on top)");
   const paypalOnly = { ...withTax(true, false), stripeAccountId: null, stripeChargesEnabled: false } as typeof base;
+  // Claude 1 A's note on #5243: with card payments off for the whole platform, "connect Stripe" is no step at all.
+  delete process.env.STRIPE_SECRET_KEY;
+  const platformOff = savedOfferIssues(paypalOnly, product, [product]);
+  is("card payments off for the platform: said so, never \"Connect Stripe\"", platformOff.some((issue) => issue.endsWith("Card payments are not available on Marktmorgen right now.")) && !platformOff.some((issue) => issue.includes("Connect Stripe")), true);
+  process.env.STRIPE_SECRET_KEY = "sk_test_paypal_tax_on_top_stand_in";
   const issues = savedOfferIssues(paypalOnly, product, [product]);
   is("the review says tax on top is why PayPal is not offered", issues.some((issue) => issue.startsWith("Store payments are unavailable: PayPal is not offered while tax is added on top of your prices")), true);
   is("not the generic plan and connection words", issues.includes("Store payments are unavailable. Review the store plan and payment connection."), false);

@@ -173,8 +173,11 @@ async function main(): Promise<void> {
 
   part("A mark that cannot be written is a checkout not handed out");
   const original = redis.pipeline.bind(redis);
-  for (const [label, reply] of [["a reply that is not OK", [null]], ["no reply", []], ["a number", [1]]] as [string, unknown[]][]) {
-    redis.pipeline = async (list) => (list.length === 1 && list[0][0] === "SET" && String(list[0][1]).startsWith("nl:tip:co:") ? reply : original(list));
+  // The mark is written by the store-live fence (lib/live-fence.ts SET_IF_STORE_LIVE, Codex L-20261119-1636): one EVAL
+  // whose third key is the mark. Only its exact 1 is a kept mark; the fence's own "gone" (0) is refused too.
+  const markWrite = (list: (string | number)[][]) => list.length === 1 && list[0][0] === "EVAL" && String(list[0][1]).startsWith("-- marktmorgen:store-cache-live:") && String(list[0][5]).startsWith("nl:tip:co:");
+  for (const [label, reply] of [["a reply that is not 1", [null]], ["no reply", []], ["a text where the count is due", ["OK"]], ["the store gone", [0]]] as [string, unknown[]][]) {
+    redis.pipeline = async (list) => (markWrite(list) ? reply : original(list));
     let refused = "";
     try {
       await createTipCheckout(store, "https://marktmorgen.com", 500);

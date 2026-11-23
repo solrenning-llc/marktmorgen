@@ -24,6 +24,7 @@ import { isHouseStore } from "@/lib/house-store";
 import { tipsWords } from "@/lib/buyer-words/tips";
 import { MAX_TIP_MESSAGE, tipInRange } from "@/lib/store-tips";
 import { applyShare } from "@/lib/platform-share";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 
 /** What the creator's list of sales calls it, in the studio's English. */
 export const TIP_TITLE = "Support";
@@ -133,11 +134,14 @@ export async function createTipCheckout(
   // Recorded before the visitor is sent, so the page they come back to asks
   // Stripe about this session and no other (readTip). A mark Redis does not
   // confirm is a checkout not handed out: the visitor is told it failed and
-  // may try again, and the unpaid session expires on Stripe's side.
+  // may try again, and the unpaid session expires on Stripe's side. Written
+  // only while the store is still live, in one step (Codex L-20261119-1636):
+  // a store whose erasure began while Stripe was answering gets no mark back
+  // and hands out no payment page.
   const marked = SESSION_ID_PATTERN.test(session.id) && isRedisConfigured()
-    ? repliesFor(await redisPipeline([["SET", tipMarkKey(store, session.id), "1", "EX", TIP_MARK_SECONDS]]), 1)
+    ? await setWhileStoreLive(store, tipMarkKey(store, session.id), "1", TIP_MARK_SECONDS).catch(() => "unknown" as const)
     : null;
-  if (!marked || marked[0] !== "OK") throw new Error("The gift's checkout could not be recorded");
+  if (marked !== "kept") throw new Error("The gift's checkout could not be recorded");
   return { url: session.url, id: session.id };
 }
 

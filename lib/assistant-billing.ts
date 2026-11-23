@@ -121,7 +121,7 @@ export async function ensureAssistantPrice(): Promise<string> {
  * Opens the page where a creator starts paying for the add-on, on the customer their plan is paid by. Called only by
  * startAssistant, which first makes sure the store has no add-on live, still charged or open at Stripe.
  */
-export async function createAssistantCheckout(store: Store, origin: string, after = ""): Promise<string> {
+export async function createAssistantCheckout(store: Store, origin: string): Promise<string> {
   if (assistantRefusal(store)) throw new Error("the add-on cannot be sold to this store now");
   const body = new URLSearchParams({
     mode: "subscription",
@@ -146,9 +146,11 @@ export async function createAssistantCheckout(store: Store, origin: string, afte
   // price is in the key: a request with other values under a used key is refused by Stripe. The store is named by its
   // id, which a rename does not change; a store with none is its owner's first, the only one without.
   const slot = Math.floor(Date.now() / 1000 / CHECKOUT_KEY_SECONDS);
-  // A page opened after one at another price was expired names that page in its key (#5285 row #3334), so Stripe never
-  // answers it with the expired page again; a page that is not open is never given.
-  const idempotencyKey = `assistant-checkout:${store.stripeCustomerId}:${store.sid || "first"}:${body.get("line_items[0][price]")}:${slot}${after ? `:after:${after}` : ""}`;
+  // A page at another price is at another price id, so under another key (#5285 row #3334). A key that Stripe answers
+  // with a page that is no longer open (one this start expired, at the same price id) is never given: the start says it
+  // could not, and the next key window opens a page; two tabs at the same moment still share one key (Claude 5 ibuF's
+  // LEVE on #5349).
+  const idempotencyKey = `assistant-checkout:${store.stripeCustomerId}:${store.sid || "first"}:${body.get("line_items[0][price]")}:${slot}`;
   const session = await onPlatform("POST", "/checkout/sessions", body, { version: CHECKOUT_VERSION, idempotencyKey });
   if (typeof session.url !== "string" || !session.url) throw new Error("Stripe did not return a checkout URL");
   if (session.status !== undefined && session.status !== "open") throw new Error("Stripe returned a checkout page that is not open");
@@ -247,8 +249,6 @@ async function startWithinCutoff(store: Store, origin: string): Promise<Assistan
   if (charged.length) return { waiting: charged.some((row) => PAYMENT_FAILED.has(ownField(row, "status") as string)) ? "failed" : "pending" };
   if (!subscriptions.complete) throw new StripeListUnreadable("the store's add-on subscriptions are not all known");
 
-  // The open page at another price expired by this start, named in the new page's key.
-  let expiredPage = "";
   const openPage = async (): Promise<string | null> => {
     const pages = await readCustomerList("/checkout/sessions", new URLSearchParams({ customer, status: "open", limit: "100" }), (row) => {
       const meta = ownField(row, "metadata");
@@ -269,14 +269,13 @@ async function startWithinCutoff(store: Store, origin: string): Promise<Assistan
       const id = String(mine[0].id);
       const ended = await onPlatform("POST", `/checkout/sessions/${encodeURIComponent(id)}/expire`, new URLSearchParams(), { version: CHECKOUT_VERSION });
       if (ownField(ended, "id") !== id || ownField(ended, "status") !== "expired") throw new Error("an open add-on page at another price was not confirmed expired");
-      expiredPage = id;
     }
     return null;
   };
   const open = await openPage();
   if (open) return { checkout: open };
   try {
-    return { checkout: await createAssistantCheckout(store, origin, expiredPage) };
+    return { checkout: await createAssistantCheckout(store, origin) };
   } catch (error) {
     // Stripe answers 409 while another tab's request under the same key is still running: that tab's page is read
     // from the open pages once, after a moment. Not there yet, the error stands and nothing more is opened.

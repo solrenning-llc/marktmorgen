@@ -4332,6 +4332,8 @@ export const SCOPES: Record<string, ScopeClass> = {
   "manage-leave": PUBLIC, "manage-open": PUBLIC, "move-open": PUBLIC, "podcast-link-ip": PUBLIC, review: PUBLIC, "review-view": PUBLIC,
   "store-search": PUBLIC, "thanks-view": PUBLIC, "tier-switch": PUBLIC, tip: PUBLIC, "pay-request": PUBLIC, "pay-request-view": PUBLIC, "agreement-sign": PUBLIC, "agreement-view": PUBLIC, "waitlist-ip": PUBLIC, "welcome-open": PUBLIC,
   "course-start-order": BURST("public-requests"), "review-order": BURST("public-requests"), "join-address": BURST("public-requests"),
+  // A buyer's review writes (#5010 row 180): the saves an order makes in the store's month and the quotes' hourly refresh, priced in line review-writes.
+  "quotes-refresh": line("review-writes"), "review-saves": line("review-writes"),
   "waitlist-address": BURST("public-requests"), "numbers-link": BURST("public-requests"), preview: BURST("public-requests"),
   // "Email me when it's back" (623 [SZ7]): asking and confirming are public requests; its confirmation and restock emails are the store's own, taken before they go.
   "stock-alert-ip": PUBLIC, "stock-alert-link": PUBLIC, "stock-alert-address": BURST("public-requests"),

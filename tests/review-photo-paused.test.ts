@@ -16,6 +16,7 @@ import { REVIEW_NOTICES } from "@/components/review-form";
 import { GIVING_WORDS } from "@/lib/buyer-words/giving";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
+import { nextReviewMonth } from "./review-saves-world";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_review_photo_paused_only";
@@ -52,6 +53,8 @@ function jpeg(width: number, height: number): string {
 }
 
 function send(fields: Record<string, string>) {
+  // Each save as in its own month: the cap on an order's saves (#5010 row 180) is not what this test is about.
+  if (fields.action !== "delete") nextReviewMonth();
   const form = new FormData();
   for (const [k, v] of Object.entries({ handle: HANDLE, product: productId, session_id: SESSION, back: "review", rating: "5", text: "Great recipes.", ...fields })) form.set(k, v);
   return POST(new NextRequest("https://marktmorgen.com/api/store/review", { method: "POST", body: form, headers: { origin: "https://marktmorgen.com", host: "marktmorgen.com" } }));

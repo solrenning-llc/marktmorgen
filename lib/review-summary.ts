@@ -184,4 +184,4 @@ export function hiddenLine(summary: Summary): string {
  * month's review writes, which the cost line "review-writes" of tests/plan-cost-registry.ts prices at their worst
  * (REVIEW_DOOR_MONTHS store months of orders).
  */
-export const REVIEW_SAVES_PER_ORDER_MONTH = 2;
+export const REVIEW_SAVES_PER_ORDER_MONTH = 1;

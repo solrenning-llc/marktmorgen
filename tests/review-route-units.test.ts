@@ -32,6 +32,7 @@ import { REVIEW_DOOR_MONTHS, REVIEW_WRITE_WORST, request, reviewWritesMonthlyUsd
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
 import { store as redis } from "./redis-stub";
+import { nextReviewMonth } from "./review-saves-world";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_review_route_units_only";
@@ -146,7 +147,8 @@ async function main(): Promise<void> {
   is("saved with its photo", [first.status, Boolean((await readReview(statsId, productId, id))?.photo)], ["saved", true]);
   within("the first review", first, REVIEW_WRITE_WORST.save);
 
-  part("A rewrite of the words and the photo while the studio's summary is being read");
+  part("A rewrite of the words and the photo, in a later month, while the studio's summary is being read");
+  nextReviewMonth();
   const now = Date.now();
   const summary = (month: string) => JSON.stringify({ at: Math.floor(now / 1000), month, read: { review: 1 }, themes: [{ title: "t", count: 1, sources: { review: 1 }, examples: [{ source: "review", text: words(900), n: 1, stars: 4 }] }], other: 0 });
   await real([["SET", `nl:voice:lock:${statsId}`, "11111111-2222-3333-4444-555555555555", "EX", 120], ...keptMonths(now).map((month) => ["SET", `nl:voice:${statsId}:${month}`, summary(month), "EX", 3600])]);
@@ -154,7 +156,7 @@ async function main(): Promise<void> {
   is("rewritten, the photo replaced", [rewrite.status, (await readReview(statsId, productId, id))?.text === words(901).trim()], ["updated", true]);
   within("the rewrite", rewrite, REVIEW_WRITE_WORST.save);
 
-  part(`A third save in the store's month is refused in plain words: ${REVIEW_SAVES_PER_ORDER_MONTH} a month an order`);
+  part(`Another save in the same store month is refused in plain words: ${REVIEW_SAVES_PER_ORDER_MONTH} a month an order`);
   const third = await measured({ rating: "2", text: words(903) });
   is("refused, and the page has words for it", [third.status, typeof GIVING_WORDS.en.reviewNotices.savedEnough], ["savedEnough", "string"]);
   is("nothing changed", (await readReview(statsId, productId, id))?.text === words(901).trim(), true);

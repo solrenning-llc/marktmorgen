@@ -123,6 +123,15 @@ async function main(): Promise<void> {
   await person(listId, "hal", "cus_HalOld000001");
   customerEmail.set("cus_HalNew000001", "hal@example.com");
   subsBody.set("cus_HalNew000001", live("sub_HalLive00001"));
+  // Ina came back too, but her new membership is still taking its first payment ("incomplete"), as it is while a bank
+  // asks the buyer to confirm (Claude 2's LOW on #3371, board #5285): she is back, and the come-back link would only be
+  // refused as a member's (runningFor), so no offer is sent. Paused and unpaid memberships have not ended either.
+  await person(listId, "ina", "cus_InaOld000001");
+  customerEmail.set("cus_InaNew000001", "ina@example.com");
+  subsBody.set("cus_InaNew000001", list([{ id: "sub_InaFirst00001", status: "incomplete", metadata: { store: HANDLE, product } }]));
+  await person(listId, "pat", "cus_PatOld000001");
+  customerEmail.set("cus_PatNew000001", "pat@example.com");
+  subsBody.set("cus_PatNew000001", list([{ id: "sub_PatPaused0001", status: "paused", metadata: { store: HANDLE, product } }]));
   // Joy has a second customer too, with no live membership: still not back. Control.
   await person(listId, "joy", "cus_JoyOld000001");
   customerEmail.set("cus_JoyNew000001", "joy@example.com");
@@ -181,6 +190,8 @@ async function main(): Promise<void> {
   is("control: Pia, with a whole and empty list of other customers, gets the offer", first.includes("pia@example.com"), true);
   is("control: Wren, whose other customer in other letters has nothing live, gets the offer", first.includes("wren@example.com"), true);
   is("Hal, back as a newer customer of the same address, gets no come-back email", first.includes("hal@example.com"), false);
+  is("Ina, back with a membership still taking its first payment, gets no come-back email", first.includes("ina@example.com"), false);
+  is("Pat, back with a paused membership, gets no come-back email", first.includes("pat@example.com"), false);
   is("Quinn, back under the same address in small letters, gets no come-back email", first.includes("quinn@example.com"), false);
   is("Sam, back under the same address in mixed letters, gets no come-back email", first.includes("sam@example.com"), false);
   is("Tess, back under the same address in other mixed letters, gets no come-back email", first.includes("tess@example.com"), false);

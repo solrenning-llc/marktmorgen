@@ -298,14 +298,17 @@ async function customersOf(account: string, email: string): Promise<string[] | n
  */
 async function cameBackUnder(account: string, customer: string, email: string, product: string): Promise<boolean | null> {
   const budget = { pages: CAME_BACK_OFFER_PAGES };
-  const own = await cameBack(account, customer, product, budget);
+  // A membership that has not ended counts as back, as it does before a come-back checkout is opened (runningFor): one
+  // still taking its first payment ("incomplete"), paused or unpaid gets no offer the link would then refuse (Claude
+  // 2's LOW on #3371, board #5285).
+  const own = await cameBack(account, customer, product, budget, NOT_ENDED);
   if (own !== false) return own;
   try {
     const customers = await customersOf(account, email);
     if (!customers) return null;
     for (const other of customers) {
       if (other === customer) continue;
-      const back = await cameBack(account, other, product, budget);
+      const back = await cameBack(account, other, product, budget, NOT_ENDED);
       if (back !== false) return back;
     }
     return false;

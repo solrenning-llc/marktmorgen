@@ -104,11 +104,15 @@ export type TeamPrice = {
 /**
  * What a team of `people` pays: the product's price, less the better of its
  * tier and the store's sale (`salePercent`, 0 for none), never both. Null when
- * it cannot be charged: fewer than two people, a place below `minCents` (the
- * least the currency may charge), or a total past what one payment may be.
+ * it cannot be charged: fewer than two people, a price that is not a whole
+ * number of cents, a place below `minCents` (the least the currency may charge,
+ * its `currencyRule(currency).minCharge`: required, so no caller can forget it
+ * and fall back to one cent), or a total past what one payment may be (#5285,
+ * row #3547: Claude 4's LEVE 2 and the first review's LEVE on `minCents = 1`).
  */
-export function teamPrice(priceCents: number, people: number, tiers: readonly VolumeTier[], salePercent = 0, minCents = 1): TeamPrice | null {
-  if (!Number.isInteger(people) || people < MIN_PEOPLE || people > MAX_PEOPLE || !(priceCents > 0)) return null;
+export function teamPrice(priceCents: number, people: number, tiers: readonly VolumeTier[], salePercent: number, minCents: number): TeamPrice | null {
+  if (!Number.isInteger(people) || people < MIN_PEOPLE || people > MAX_PEOPLE || !Number.isInteger(priceCents) || priceCents <= 0) return null;
+  if (!Number.isInteger(minCents) || minCents < 1) return null;
   const tier = tierFor(tiers, people)?.percent ?? 0;
   const sale = salePercent > 0 ? salePercent : 0;
   const by = tier === 0 && sale === 0 ? "none" : tier >= sale ? "tier" : "sale";

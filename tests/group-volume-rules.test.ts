@@ -48,17 +48,27 @@ part("Which tier applies");
 is("the highest one reached", [tierFor(tiers, 9), tierFor(tiers, 10), tierFor(tiers, 24), tierFor(tiers, 25), tierFor(tiers, 200)], [null, tiers[0], tiers[0], tiers[1], tiers[1]]);
 
 part("What a team pays");
-is("below the first tier: the product's own price", teamPrice(4900, 5, tiers), { eachCents: 4900, totalCents: 24500, percent: 0, by: "none" });
-is("from 10: 10% off each place", teamPrice(4900, 10, tiers), { eachCents: 4410, totalCents: 44100, percent: 10, by: "tier" });
-is("from 25: 20% off", teamPrice(4900, 25, tiers), { eachCents: 3920, totalCents: 98000, percent: 20, by: "tier" });
-is("rounded to the cent as a store-wide sale rounds it", [teamPrice(999, 10, tiers)?.eachCents, salePrice(999, 10)], [salePrice(999, 10), 899]);
-is("more people never pay more per place", [5, 9, 10, 24, 25, 100].map((n) => teamPrice(4900, n, tiers)!.eachCents).every((each, at, all) => at === 0 || each <= all[at - 1]), true);
-is("never added to a store-wide sale: the better of the two", [teamPrice(4900, 10, tiers, 15), teamPrice(4900, 25, tiers, 15), teamPrice(4900, 3, tiers, 15)], [
+is("below the first tier: the product's own price", teamPrice(4900, 5, tiers, 0, 50), { eachCents: 4900, totalCents: 24500, percent: 0, by: "none" });
+is("from 10: 10% off each place", teamPrice(4900, 10, tiers, 0, 50), { eachCents: 4410, totalCents: 44100, percent: 10, by: "tier" });
+is("from 25: 20% off", teamPrice(4900, 25, tiers, 0, 50), { eachCents: 3920, totalCents: 98000, percent: 20, by: "tier" });
+is("rounded to the cent as a store-wide sale rounds it", [teamPrice(999, 10, tiers, 0, 50)?.eachCents, salePrice(999, 10)], [salePrice(999, 10), 899]);
+is("more people never pay more per place", [5, 9, 10, 24, 25, 100].map((n) => teamPrice(4900, n, tiers, 0, 50)!.eachCents).every((each, at, all) => at === 0 || each <= all[at - 1]), true);
+is("never added to a store-wide sale: the better of the two", [teamPrice(4900, 10, tiers, 15, 50), teamPrice(4900, 25, tiers, 15, 50), teamPrice(4900, 3, tiers, 15, 50)], [
   { eachCents: 4165, totalCents: 41650, percent: 15, by: "sale" },
   { eachCents: 3920, totalCents: 98000, percent: 20, by: "tier" },
   { eachCents: 4165, totalCents: 12495, percent: 15, by: "sale" },
 ]);
-is("refused: one person, past the most, a free product, below the currency's least, a total past one payment", [teamPrice(4900, 1, tiers), teamPrice(4900, MAX_PEOPLE + 1, tiers), teamPrice(0, 10, tiers), teamPrice(60, 10, [{ from: 10, percent: 75 }], 0, 50), teamPrice(50_000_000, 2, [])], [null, null, null, null, null]);
+is("refused: one person, past the most, a free product, below the currency's least, a total past one payment", [teamPrice(4900, 1, tiers, 0, 50), teamPrice(4900, MAX_PEOPLE + 1, tiers, 0, 50), teamPrice(0, 10, tiers, 0, 50), teamPrice(60, 10, [{ from: 10, percent: 75 }], 0, 50), teamPrice(50_000_000, 2, [], 0, 50)], [null, null, null, null, null]);
+
+// #5285, row #3547 (Claude 4's LEVE 2 and the first review's LEVE on minCents = 1): a price that is not a whole number of
+// cents is refused, not turned into a fractional place Stripe would refuse; and the currency's least is required, so a
+// caller that leaves it out is refused instead of charging a 30-cent place in a currency whose least is 50.
+is("refused: a price that is not whole cents", teamPrice(4900.5, 10, tiers, 0, 50), null);
+is("refused: no currency minimum given, or one below a cent", [
+  (teamPrice as unknown as (...args: unknown[]) => unknown)(30, 10, [], 0),
+  teamPrice(30, 10, [], 0, 0),
+  teamPrice(4900, 10, tiers, 0, 0.5),
+], [null, null, null]);
 
 part("The studio's words");
 is("plain English, the first step in full", [tiersLine(tiers), tiersLine([]), tiersLine([{ from: 5, percent: 5 }])], ["10% off each place from 10 people, 20% off from 25", "", "5% off each place from 5 people"]);

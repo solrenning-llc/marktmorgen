@@ -35,7 +35,7 @@ import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
-import { fieldReleaseBytes, orderWrite, releaseOrderData } from "@/lib/order-data";
+import { fieldReleaseBytes, orderWrite, orderWriteIfKey, releaseOrderData } from "@/lib/order-data";
 import { HASH_DEL_IF, HASH_TAKE_ALL, takenPairs } from "@/lib/redis-take";
 import { exactReplies, replyCount } from "@/lib/redis-exact";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
@@ -272,11 +272,16 @@ async function readImported(store: Store, email: string): Promise<{ found: Impor
   return importedRows(replies[0]);
 }
 
-/** Brought over before the list of who was brought existed: noted the first time they are read. */
+/**
+ * Brought over before the list of who was brought existed: noted the first time they are read, and only while their
+ * grants are still kept (ORDER_WRITE_IF_KEY). A read begun before the person's deletion (forgetImportedPerson takes
+ * the grants, then the note) never puts their address back after it (#3945).
+ */
 async function noteBrought(store: Store, email: string, found: ImportedPurchase[]): Promise<void> {
   const brought = found.filter((p) => IMPORT_JOB.test(p.job));
   if (brought.length && store.statsId) {
-    await orderWrite(store, [["HSETNX", importedWhoKey(store.statsId), normaliseEmail(email), String(Math.min(...brought.map((p) => p.at)))]]).catch(() => {});
+    const note: (string | number)[] = ["HSETNX", importedWhoKey(store.statsId), normaliseEmail(email), String(Math.min(...brought.map((p) => p.at)))];
+    await orderWriteIfKey(store, [note], importedKey(store.statsId, email)).catch(() => {});
   }
 }
 

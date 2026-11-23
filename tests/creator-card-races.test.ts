@@ -1,3 +1,4 @@
+import { storeLiveFence } from "@/lib/store-live-cache";
 /**
  * The creator's card and its slot in the store's data room never part (Codex
  * L on #1961, confirmed by Revisor 2, C3-134): the card is written and its
@@ -63,9 +64,9 @@ async function main(): Promise<void> {
     const writesCard = (c: (string | number)[]) => (c[0] === "SET" && c[1] === key) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:card-save"));
     const { entered, resume } = hold(writesCard);
     try {
-      const first = saveCreatorCard(store.statsId!, long, store);
+      const first = saveCreatorCard(store.statsId!, long, store, await storeLiveFence(store));
       await entered.promise;
-      const second = await saveCreatorCard(store.statsId!, short, store);
+      const second = await saveCreatorCard(store.statsId!, short, store, await storeLiveFence(store));
       resume.release();
       const a = await first;
       is("both saves went through", [a.ok, second.ok], [true, true]);
@@ -77,15 +78,15 @@ async function main(): Promise<void> {
   }
 
   part("A removal held while a save lands, then let go (Codex L 2)");
-  await saveCreatorCard(store.statsId!, long, store);
+  await saveCreatorCard(store.statsId!, long, store, await storeLiveFence(store));
   {
     // The removal's own script, or (before it) the step that gave the slot back after the card was deleted.
     const removes = (c: (string | number)[]) => c[0] === "EVAL" && (String(c[1]).startsWith("-- marktmorgen:card-drop") || (c[8] === "card" && Number(c[9]) === 0));
     const { entered, resume } = hold(removes);
     try {
-      const removal = dropCreatorCard(store.statsId!, store);
+      const removal = dropCreatorCard(store.statsId!, store, await storeLiveFence(store));
       await entered.promise;
-      const saved = await saveCreatorCard(store.statsId!, short, store);
+      const saved = await saveCreatorCard(store.statsId!, short, store, await storeLiveFence(store));
       resume.release();
       await removal;
       is("the save that raced the removal went through", saved.ok, true);
@@ -97,7 +98,7 @@ async function main(): Promise<void> {
   }
 
   part("A removal on its own takes the card and its whole slot");
-  await dropCreatorCard(store.statsId!, store);
+  await dropCreatorCard(store.statsId!, store, await storeLiveFence(store));
   const [gone, slot] = await original.call(redis, [["GET", key], ["HGET", dataKey(store)!, "card"]]);
   is("nothing kept, nothing held", [gone, Number(slot ?? 0)], [null, 0]);
   done();

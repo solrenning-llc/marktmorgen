@@ -111,8 +111,9 @@ export const ERASE_SUBMISSIONS: readonly [number, number] = [301, 70_000];
  * 24 characters, twice MAX_SENDS_UNDER_WAY), then one script (BLANK_IN_LISTS, lib/erasure-lists.ts) that reads each send's list on the Redis side and
  * writes the mark over the person's place: its EVAL, an LRANGE a send and an LSET a send at the most (a member is
  * in a send's list once), as Upstash bills them, and one SREM of any member that is not a send's id (Claude 7 xAF on
- * #5072); and, past the cap, one EXISTS for each id read, at most twice the cap (ERASE_SENDS_READ_MOST, Claude 2 lpgvy
- * on #5072, LOW 2), so the places whose send is gone are let go in the same SREM; and, first, the community's count of
+ * #5072); and, past the cap, one EXISTS for each id read (of its record and its held mark, Claude 4 AC on #5072), at
+ * most twice the cap (ERASE_SENDS_READ_MOST, Claude 2 lpgvy on #5072, LOW 2), so the places whose send is gone are let
+ * go in the same SREM; and, first, the community's count of
  * erasures moved on (an INCR and its EXPIRE, Claude 2 lpgvy on #5072, LOW 1), so a send that read the members while
  * this person was erased lets its list go. Bytes: the script's text, the keys and the replies, under 5,000, counted at
  * 8,000; the lists themselves stay inside Redis. Held by tests/community-mail-recipient-erasure.test.ts.

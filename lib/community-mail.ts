@@ -57,6 +57,15 @@ export const COMMUNITY_UNSUB = /^[0-9a-f]{40}$/;
 const QUEUE = "nl:cm:mailq";
 const jobKey = (id: string) => `nl:cm:mail:${id}`;
 const toKey = (id: string) => `nl:cm:mail:${id}:to`;
+/**
+ * A send's place marked as live from the moment it is taken until its record is saved (Claude 4 AC on #5072, LEVE):
+ * the members read and the list write come in between, and a sweep past the cap (holdSendPlace of another send,
+ * forgetAnnouncementRecipient) lets go only a place with neither this mark nor a record. It holds nothing about a
+ * person (the value is "1") and lasts SEND_HELD_SECONDS, longer than the one request that reads the members and writes
+ * the list, so a send whose request died lets its place go within the hour.
+ */
+const heldKey = (id: string) => `nl:cm:mail:${id}:held`;
+const SEND_HELD_SECONDS = 60 * 60;
 const lockKey = (id: string) => `nl:cm:mail:${id}:lock`;
 /** A community's sends waiting or under way, kept as long as a send's record (SENDS_SECONDS). */
 const sendsKey = (community: string) => `nl:cm:${community}:sends`;
@@ -158,14 +167,16 @@ async function holdSendPlace(community: string, id: string): Promise<boolean> {
     if (n === null) throw new UnknownReplyError("a community's announcements under way");
     return n;
   };
-  const added = repliesFor(await redisPipeline([["SADD", key, id], ["EXPIRE", key, SENDS_SECONDS]]), 2);
-  if (!added || countOf(added[0]) === null) throw new UnknownReplyError("a community's announcements under way");
+  const added = repliesFor(await redisPipeline([["SET", heldKey(id), "1", "EX", SEND_HELD_SECONDS], ["SADD", key, id], ["EXPIRE", key, SENDS_SECONDS]]), 3);
+  if (!added || added[0] !== "OK" || countOf(added[1]) === null) throw new UnknownReplyError("a community's announcements under way");
   if ((await count()) <= MAX_SENDS_UNDER_WAY) return true;
   const listed = repliesFor(await redisPipeline([["SMEMBERS", key]]), 1)?.[0];
   if (!Array.isArray(listed) || listed.some((other) => typeof other !== "string")) throw new UnknownReplyError("a community's announcements under way");
   const others = (listed as string[]).filter((other) => other !== id && JOB_ID.test(other));
-  const there = others.length ? repliesFor(await redisPipeline(others.map((other) => ["EXISTS", jobKey(other)])), others.length) : [];
-  if (!there) throw new UnknownReplyError("a community's announcements under way");
+  // A place is live while its record or its held mark is there (Claude 4 AC on #5072, LEVE): EXISTS of both answers 0
+  // only for a place neither of them holds.
+  const there = others.length ? repliesFor(await redisPipeline(others.map((other) => ["EXISTS", jobKey(other), heldKey(other)])), others.length) : [];
+  if (!there || there.some((n) => n !== 0 && n !== 1 && n !== 2)) throw new UnknownReplyError("a community's announcements under way");
   // A member that is not a send's id holds no place either (Claude 7 xAF on #5072, NIT).
   const stale = [...others.filter((_, i) => there[i] === 0), ...(listed as string[]).filter((other) => !JOB_ID.test(other))];
   if (stale.length) await redisPipeline([["SREM", key, ...stale]]);
@@ -218,10 +229,11 @@ export async function forgetAnnouncementRecipient(community: string, who: string
   // record is gone are let go too, read exactly; only real sends past the cap refuse the erasure, for its retry.
   let stale: string[] = [];
   if (sends.length > MAX_SENDS_UNDER_WAY) {
-    const there = repliesFor(await redisPipeline(sends.map((id) => ["EXISTS", jobKey(id)])), sends.length);
-    if (!there || there.some((n) => n !== 0 && n !== 1)) throw new UnknownReplyError("a community's announcements under way");
+    // A send still reading its members has no record yet, only its held mark (Claude 4 AC on #5072, LEVE).
+    const there = repliesFor(await redisPipeline(sends.map((id) => ["EXISTS", jobKey(id), heldKey(id)])), sends.length);
+    if (!there || there.some((n) => n !== 0 && n !== 1 && n !== 2)) throw new UnknownReplyError("a community's announcements under way");
     stale = sends.filter((_, i) => there[i] === 0);
-    sends = sends.filter((_, i) => there[i] === 1);
+    sends = sends.filter((_, i) => there[i] !== 0);
   }
   if (odd.length || stale.length) await redisPipeline([["SREM", sendsKey(community), ...odd, ...stale]]);
   if (sends.length > MAX_SENDS_UNDER_WAY) throw new UnknownReplyError("a community's announcements under way");

@@ -136,7 +136,7 @@ async function main() {
     written = [];
     try {
       is(`queueAnnouncement, ${label}: unknown`, await rejectsUnknown(() => queueAnnouncement(mailing, freshConfig(store.name), post)), "unknown");
-      is(`queueAnnouncement, ${label}: no job written, nothing queued`, written.filter((c) => c[0] === "RPUSH" || c[0] === "SET" || (c[0] === "SADD" && !String(c[1]).endsWith(":sends"))).length, 0);
+      is(`queueAnnouncement, ${label}: no job written, nothing queued`, written.filter((c) => c[0] === "RPUSH" || (c[0] === "SET" && !String(c[1]).endsWith(":held")) || (c[0] === "SADD" && !String(c[1]).endsWith(":sends"))).length, 0);
     } finally {
       injected = null;
     }
@@ -155,7 +155,7 @@ async function main() {
   written = [];
   try {
     is("queueAnnouncement, the member read fails in transport: said as the recipients not read", await failure(() => queueAnnouncement(mailing, freshConfig(store.name), post)), "RecipientsUnreadError");
-    is("queueAnnouncement, the member read fails in transport: no job written, nothing queued", written.filter((c) => c[0] === "RPUSH" || c[0] === "SET" || (c[0] === "SADD" && !String(c[1]).endsWith(":sends"))).length, 0);
+    is("queueAnnouncement, the member read fails in transport: no job written, nothing queued", written.filter((c) => c[0] === "RPUSH" || (c[0] === "SET" && !String(c[1]).endsWith(":held")) || (c[0] === "SADD" && !String(c[1]).endsWith(":sends"))).length, 0);
   } finally {
     membersDown = false;
   }

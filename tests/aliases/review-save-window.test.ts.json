@@ -1,0 +1,4 @@
+{
+  "next/server": "next-server-after-world.ts",
+  "@/lib/blob": "review-photo-limit-blob.ts"
+}

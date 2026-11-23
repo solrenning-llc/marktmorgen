@@ -5,7 +5,7 @@ import { dropReviewQuote, refreshStoreQuotesHourly } from "@/lib/store-quotes";
 import { ensureStatsId, normaliseHandle, setReviewed, storeForHandle, storeRef } from "@/lib/store";
 import { clientAddress, fromAnotherSite, limited, withinLimit, giveBackMonth, monthCountWhy, withinMonthWhy, unknownLimit } from "@/lib/request-guard";
 import { windowId, windowKeySeconds } from "@/lib/allowance-window";
-import { type Door, doorFields, openDoor, readDoor, reviewPagePath } from "@/lib/review-proof";
+import { type Door, REVIEW_SAVE_SECONDS, doorFields, openDoor, readDoor, reviewPagePath } from "@/lib/review-proof";
 import { MAX_REVIEW_PHOTO_BYTES, REVIEW_SAVES_PER_ORDER_MONTH, type ReviewPhoto, deleteReview, markOneRefunded, readRating, readReview, reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
 import { checkReviewPhoto, dropReviewPhoto, putReviewPhoto } from "@/lib/review-photo";
 import { newCostCode } from "@/lib/plan-standing";
@@ -124,6 +124,10 @@ export async function POST(request: NextRequest) {
       }
       return answer("refunded");
     }
+    // Saved or changed only within REVIEW_SAVE_SECONDS of the order, through every door: the orders page's link never
+    // expires, so without it every order a store ever took could write once a month and the line "review-writes" would
+    // grow with the store's age (Claude 5 iZByNH's MEDIUM on #5400). Deleting, above, is never refused.
+    if (Date.now() / 1000 - proof.paidAt > REVIEW_SAVE_SECONDS) return answer("late");
     const rating = readRating(read("rating"));
     if (rating === null) return answer("rating");
     // A photo is checked first, with no network, so a photo that cannot be used changes nothing.

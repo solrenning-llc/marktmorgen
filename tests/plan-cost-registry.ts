@@ -1591,9 +1591,10 @@ export const REVIEW_WRITE_WORST = {
 } as const;
 
 /**
- * Store months of orders whose buyers may write a review in one month: a review request is sent up to MAX_ASK_DAYS
- * (lib/review-ask.ts) after the order and its link is open 60 days (lib/review-proof.ts), so a month's writes come from
- * orders bought over about 121 days, which touch at most this many store months of ORDERS_INCLUDED each.
+ * Store months of orders whose buyers may write a review in one month: every door refuses a save or rewrite of an order
+ * paid more than REVIEW_SAVE_SECONDS ago (lib/review-proof.ts: MAX_ASK_DAYS + the link's 60 days, 90 days; the orders
+ * page's door too, Claude 5 iZByNH on #5400), so a month's writes come from orders bought over about 121 days, which
+ * touch at most this many store months of ORDERS_INCLUDED each.
  */
 export const REVIEW_DOOR_MONTHS = 6;
 /**
@@ -3111,7 +3112,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/review-ask.ts", names: ["MAX_ASK_DAYS"] },
       { file: "app/api/store/review/route.ts", names: ['withinMonthWhy("review-saves", proof.reference, REVIEW_SAVES_PER_ORDER_MONTH', "refreshStoreQuotesHourly(store)"] },
     ],
-    basis: "Each part of a review write measured at its worst in tests/review-route-units.test.ts (REVIEW_WRITE_WORST, Upstash billing of a script: 1 and each redis.call in its text). One order saves its review at most REVIEW_SAVES_PER_ORDER_MONTH times in the store's month (the route reads the count first and answers savedEnough past it; the save is counted only under the product's lock, just before it writes, so a busy or full save never uses it, and one that then finds no room gives it back), deletes at most REVIEW_DELETES_PER_ORDER_MONTH reviews in a month (every review it saved through its link, which is open REVIEW_LINK_SECONDS and so touches at most REVIEW_LINK_MONTHS store months; deleting is never refused; Claude 5 ia5d on #5400), and has its refund marked once; the month's save is counted per order whatever the product, since one order can hand over up to MAX_DELIVERED products (the buyer is told a review from this order was already saved); the orders whose buyers can write in a month are REVIEW_DOOR_MONTHS store months of ORDERS_INCLUDED (a request sent up to MAX_ASK_DAYS after the order, its link open 60 days). The quotes' refresh runs at most once an hour a store, 744 in a 31-day month. The request each write takes is still counted in public-requests too, and a press that writes nothing (refused past the month's save, busy, a deletion with nothing to delete, a refund already marked) stays inside that one request (COMMANDS.laterPage + COMMANDS.laterCount and PAGE_BYTES, held in the same test).",
+    basis: "Each part of a review write measured at its worst in tests/review-route-units.test.ts (REVIEW_WRITE_WORST, Upstash billing of a script: 1 and each redis.call in its text). One order saves its review at most REVIEW_SAVES_PER_ORDER_MONTH times in the store's month (the route reads the count first and answers savedEnough past it; the save is counted only under the product's lock, just before it writes, so a busy or full save never uses it, and one that then finds no room gives it back), deletes at most REVIEW_DELETES_PER_ORDER_MONTH reviews in a month (every review it saved through its link, which is open REVIEW_LINK_SECONDS and so touches at most REVIEW_LINK_MONTHS store months; deleting is never refused; Claude 5 ia5d on #5400), and has its refund marked once; the month's save is counted per order whatever the product, since one order can hand over up to MAX_DELIVERED products (the buyer is told a review from this order was already saved); the orders whose buyers can write in a month are REVIEW_DOOR_MONTHS store months of ORDERS_INCLUDED, because every door (the checkout session, the ask link and the orders page) refuses a save or rewrite of an order paid more than REVIEW_SAVE_SECONDS ago (MAX_ASK_DAYS + the link's 60 days; tests/review-save-window.test.ts). The quotes' refresh runs at most once an hour a store, 744 in a 31-day month. The request each write takes is still counted in public-requests too, and a press that writes nothing (refused past the month's save, busy, a deletion with nothing to delete, a refund already marked) stays inside that one request (COMMANDS.laterPage + COMMANDS.laterCount and PAGE_BYTES, held in the same test).",
   },
   {
     id: "page-readings",

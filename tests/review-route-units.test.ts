@@ -29,7 +29,7 @@ import { GIVING_WORDS } from "@/lib/buyer-words/giving";
 import { MAX_ASK_DAYS } from "@/lib/review-ask";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { REVIEW_DELETES_PER_ORDER_MONTH, REVIEW_DOOR_MONTHS, REVIEW_LINK_MONTHS, REVIEW_WRITE_WORST, request, reviewWritesMonthlyUsd } from "./plan-cost-registry";
-import { REVIEW_LINK_SECONDS } from "@/lib/review-proof";
+import { REVIEW_LINK_SECONDS, REVIEW_SAVE_SECONDS } from "@/lib/review-proof";
 import { COMMANDS, PAGE_BYTES } from "./traffic-cost";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM, roomOnly } from "./data-room";
@@ -256,9 +256,11 @@ async function main(): Promise<void> {
     const refreshes = Math.ceil((31 * 86_400) / QUOTES_REFRESH_SECONDS) * request("light", REVIEW_WRITE_WORST.refresh.commands, REVIEW_WRITE_WORST.refresh.bytes);
     is(`${tier}: ${orders} orders' writes and a month of hourly refreshes, $${(writes + refreshes).toFixed(4)}`, Math.abs(reviewWritesMonthlyUsd(tier) - (writes + refreshes)) < 1e-12, true);
   }
-  // A month's writes come from orders bought up to MAX_ASK_DAYS + 60 days before it ends (the request is sent up to
-  // MAX_ASK_DAYS after the order and its link is open 60 days), a span that touches this many store months.
-  is(`the doors bound it: ${REVIEW_DOOR_MONTHS} store months of orders`, REVIEW_DOOR_MONTHS >= Math.ceil((MAX_ASK_DAYS + 60 + 31) / 28) + 1, true);
+  // A month's writes come from orders bought up to REVIEW_SAVE_SECONDS before it ends: every door, the orders page's
+  // too, refuses a save of an older order (Claude 5 iZByNH's MEDIUM on #5400; tests/review-save-window.test.ts). That
+  // span and the month itself touch this many store months.
+  is(`the doors bound it: ${REVIEW_DOOR_MONTHS} store months of orders`, REVIEW_DOOR_MONTHS >= Math.ceil((REVIEW_SAVE_SECONDS / 86_400 + 31) / 28) + 1, true);
+  is("the window is the ask's and the link's", REVIEW_SAVE_SECONDS, MAX_ASK_DAYS * 86_400 + REVIEW_LINK_SECONDS);
   done();
 }
 

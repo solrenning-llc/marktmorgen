@@ -150,6 +150,26 @@ async function main(): Promise<void> {
   is("the place waits at or before it", Number(await place()) <= NOW - 3_000, true);
   await run();
   is("the next run reads it again from the place and revokes its key", await checkKey(store, app, full), "revoked");
+
+  // Claude 2 lpgvy's LEVE on #5321: the list was kept 61 days from the last row put on it, whatever the runs read, so
+  // a row that kept failing lapsed with it, past the place, and its key stayed valid for good. Each run that reads the
+  // list now keeps it as long again.
+  part("(e) A row that keeps failing never lapses with its list while the job still reads it");
+  await fresh();
+  const lasting = await sale("cs_test_starve000000005", "pi_StarveLast0001");
+  refunds = [refundRow("re_StarveLast0001", "pi_StarveLast0001", NOW - 2_000), ...others(20, NOW - 100)];
+  garbledReference = "cs_test_starve000000005";
+  await run();
+  is("(setup) on the list to try again, the place past it", [await retried(), Number(await place()) > NOW - 2_000], [["re_StarveLast0001", "pi_StarveLast0001"], true]);
+  // Sixty days on, no other refund of this store put on the list: a minute left of its life.
+  await memory([["EXPIRE", `nl:keys:${store.statsId}:refunds:retry`, 60]]);
+  await run();
+  const left = (await memory([["TTL", `nl:keys:${store.statsId}:refunds:retry`]]))[0] as number;
+  is("a run that read it again keeps the list as long again", left > 60 * 86_400, true);
+  is("with the row still on it", await retried(), ["re_StarveLast0001", "pi_StarveLast0001"]);
+  garbledReference = "";
+  await run();
+  is("and once its key can be told, it is revoked", await checkKey(store, app, lasting), "revoked");
   done();
 }
 

@@ -13,7 +13,7 @@
  */
 import { NextRequest } from "next/server";
 import { readFileSync } from "node:fs";
-import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setCurrency, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { POST as cartRoute } from "@/app/api/store/cart/route";
 import { createCartCheckout } from "@/lib/cart-checkout";
@@ -240,6 +240,35 @@ async function main(): Promise<void> {
   is("handed euVat with a cost: Stripe asked once", sessions.length - before, 1);
   is("the VAT line on top of the two products' own amounts", [collected.get("line_items[0][price_data][unit_amount]"), collected.get("line_items[1][price_data][unit_amount]"), collected.get("line_items[2][price_data][unit_amount]")], ["2900", "1500", "836"]);
   is("the fee of the VAT and its cost, and no automatic tax from the creator's account", [collected.get("payment_intent_data[application_fee_amount]"), collected.has("automatic_tax[enabled]")], [String(836 + 12), false]);
+
+  part("A UK cart in euros: the expiry sent is the one the sterling month was checked for (B1, Claude 1 A's note 1 on #5032)");
+  // The clock is fixed on the month's last day at noon UTC; the November row of HMRC_PERIOD_RATES is the real one.
+  const realNow = Date.now;
+  let clock = Date.parse("2026-11-30T12:00:00Z");
+  Date.now = () => clock;
+  try {
+    await setCurrency(owner, "eur");
+    const euroStore = (await storeForEmail(owner))!;
+    const euroProducts = await Promise.all(products.map(async (p) => (await readProduct(euroStore, p.id))!));
+    const open = (extras: Record<string, unknown>, costsCents: () => number = () => 12) =>
+      createCartCheckout(euroStore, euroProducts, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT, euVat: { country: "GB", now: new Date(clock), costsCents }, ...extras })
+        .then(() => "opened", (error: unknown) => (error instanceof EuVatCollectRefused ? "refused" : String(error)));
+    const checkedAt = Math.floor(clock / 1000);
+    before = sessions.length;
+    is("RED: a held cart on the month's last day at noon: opened", [await open({ held: true }), sessions.length - before], ["opened", 1]);
+    const held = sessions.at(-1)!;
+    is("collected at November's rate, closing in its own 31 minutes, inside the window checked", [held.get("payment_intent_data[metadata][uk_vat_gbp]")?.endsWith(":2026-11"), Number(held.get("expires_at")) - checkedAt <= 31 * 60 + 300], [true, true]);
+    before = sessions.length;
+    is("without a held unit, on the same day: Stripe's day reaches December, refused, Stripe not asked", [await open({}), sessions.length - before], ["refused", 0]);
+    before = sessions.length;
+    const slow = () => {
+      clock += 6 * 60 * 1000;
+      return 12;
+    };
+    is("a held cart whose expiry would pass the window checked: refused before Stripe is asked", [await open({ held: true }, slow), sessions.length - before], ["refused", 0]);
+  } finally {
+    Date.now = realNow;
+  }
 
   done();
 }

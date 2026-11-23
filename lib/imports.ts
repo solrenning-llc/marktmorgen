@@ -1982,8 +1982,10 @@ export async function importTracesOf(store: Store, email: string, now = Date.now
     // which its own expiry and reportCsv still remove.
     const reportRead: Command = reportExpired ? (prune ? ["DEL", errorsKey(job.id)] : ["EXISTS", errorsKey(job.id)]) : ["LRANGE", errorsKey(job.id), 0, MAX_REPORT_ROWS - 1];
     const replies = repliesFor(await redisPipeline([reportRead, ["LLEN", rowsKey(job.id)], ["SMEMBERS", mailKey(job.id)]]), 3);
-    const deletedReport = reportExpired ? countOf(replies?.[0]) : 0;
-    if (deletedReport !== 0 && deletedReport !== 1) throw new UnknownReplyError("an expired import report, deleted or checked for a copy");
+    // The report past its keeping: the DEL's count, or, for a copy (prune false), the EXISTS answer; 0 or 1 either way
+    // (Claude 5 iYwjc's NIT on #5127: a copy deletes nothing, so the name says expired, not deleted).
+    const expiredReport = reportExpired ? countOf(replies?.[0]) : 0;
+    if (expiredReport !== 0 && expiredReport !== 1) throw new UnknownReplyError("an expired import report, deleted or checked for a copy");
     const errors = reportExpired ? [] : stringList(replies?.[0]);
     const batches = countOf(replies?.[1]);
     const mail = stringList(replies?.[2]);

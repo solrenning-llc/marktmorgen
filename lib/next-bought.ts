@@ -120,7 +120,7 @@ const nextKey = (statsId: string) => `nl:next:${statsId}`;
 /** A plain object (not a list or null), as JSON.stringify writes Object.fromEntries. */
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-/** A step as buildPaths keeps it: a product, at least MIN_NEXT buyers, whole days from 0. */
+/** A step as pathsFrom keeps it: a product, at least MIN_NEXT buyers, whole days from 0. */
 const isStep = (value: unknown): value is NextStep => {
   if (!isRecord(value)) return false;
   const { id, buyers, days } = value;

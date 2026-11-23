@@ -30,14 +30,26 @@ async function main(): Promise<void> {
   is("and emails_more says older ones were left out", more.emails_more, true);
 
   part("The email past the newest has expired (Claude 6's LEVE on #5431): no older one can be shown, so emails_more is false");
-  // The index is never trimmed and each record lives RECORD_DAYS: the id just older than the newest shown is still
-  // listed after its record is gone. Every older one is gone too (they were kept the same days), so nothing more exists.
+  // The index is never trimmed and each record lives RECORD_DAYS from its last write: the id just older than the newest
+  // shown is still listed after its record is gone. emails_more says only what that one id shows.
   const listed = idsFor(EMAILS_BROADCASTS + 1);
   await writeEmails(store, listed, () => SMALL);
   await redis.pipeline([["DEL", emailKey(listed[EMAILS_BROADCASTS])]]);
   const gone = await read(store);
   is(`the newest ${EMAILS_BROADCASTS} are shown`, gone.emails?.length, EMAILS_BROADCASTS);
   is("and emails_more is false: never a promise of older emails no page or tool can show", gone.emails_more, false);
+
+  part("An older email kept past the expired one (Claude 6 hsz3's LEVE on #5431): false is not 'none left', and the tool says so");
+  // A record's 400 days restart at every write (a send step, a cancel; a send scheduled up to a year ahead), so an email
+  // listed before the expired one can still be kept. One id is looked at, never more: the answer says only that.
+  const longer = idsFor(EMAILS_BROADCASTS + 2);
+  await writeEmails(store, longer, () => SMALL);
+  await redis.pipeline([["DEL", emailKey(longer[EMAILS_BROADCASTS])]]);
+  const kept = await read(store);
+  is("the 32nd is still kept, and emails_more is false: only the 31st was looked at", [kept.emails?.length, kept.emails_more], [EMAILS_BROADCASTS, false]);
+  const told = MCP_TOOLS.find((t) => t.name === "get_emails")?.description ?? "";
+  is("so the description never says false means none is left: false says the one just older is gone, not every older one", /not that every older one is/.test(told) && !/one older than that is gone/.test(told), true);
+  is("and why: each email is kept 400 days after its last change", /400 days after its last change/.test(told), true);
 
   part("Exactly as many as the tool shows: nothing left out");
   await writeEmails(store, idsFor(EMAILS_BROADCASTS), () => SMALL);
@@ -53,7 +65,7 @@ async function main(): Promise<void> {
   part("The tool's description says the answer is the newest emails and what emails_more means");
   const described = MCP_TOOLS.find((t) => t.name === "get_emails")?.description ?? "";
   is("it names emails_more", /emails_more/.test(described), true);
-  is("and says an email is kept 400 days, so one older than that is gone", /400 days/.test(described), true);
+  is("and says an email is kept 400 days after its last change", /400 days after its last change/.test(described), true);
   is(`it says the newest ${EMAILS_BROADCASTS}`, new RegExp(`newest ${EMAILS_BROADCASTS}`).test(described), true);
 
   done();

@@ -93,8 +93,11 @@ async function main(): Promise<void> {
   is("a package bought for call A opens no free checkout for call B", { checkoutForB: Boolean(free), toStripe: location.startsWith("https://checkout.stripe.com/") }, { checkoutForB: false, toStripe: false });
   is("refused as a package this call does not have", location.includes(`/book/${b.product.id}?status=pkg-gone`), true);
 
-  // The same package, sent with call A's id: its free session still opens.
-  const own = new URLSearchParams({ handle, product: a.product.id, start: String(weekdayAt(3, 600)), tz: NY, pkg: bought.token });
+  // The same package, sent with call A's id: its free session still opens. Its own slot (another weekday) and only the
+  // checkouts opened from here on, with any coupon, so this check holds whether or not call B's booking above was refused
+  // (Claude 1's LEVE on #3892: it shared B's slot and coupon id).
+  const before = opened.length;
+  const own = new URLSearchParams({ handle, product: a.product.id, start: String(weekdayAt(4, 600)), tz: NY, pkg: bought.token });
   let ownLocation = "";
   try {
     const response = await POST(new NextRequest("https://marktmorgen.com/api/store/book", { method: "POST", headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com", "content-type": "application/x-www-form-urlencoded" }, body: own.toString() }));
@@ -103,7 +106,7 @@ async function main(): Promise<void> {
     if (!/outside a request scope/.test(String(error))) throw error;
     ownLocation = "https://checkout.stripe.com/(reached after())";
   }
-  const freeA = opened.find((body) => body.get("metadata[product]") === a.product.id && body.get("discounts[0][coupon]") === "co_Session1");
+  const freeA = opened.slice(before).find((body) => body.get("metadata[product]") === a.product.id && Boolean(body.get("discounts[0][coupon]")));
   is("the package still pays for a session of its own call", { checkoutForA: Boolean(freeA), toStripe: ownLocation.startsWith("https://checkout.stripe.com/") }, { checkoutForA: true, toStripe: true });
   done();
 }

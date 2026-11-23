@@ -98,6 +98,14 @@ async function main() {
     ].sort());
     is("Bob's one", ((await COPIERS["lib/preorders.ts"](await scope(BOB))) as { checkout: string }[]).map((p) => p.checkout), [checkout("bob1")]);
     is("a person with no pre-order: nothing", await COPIERS["lib/preorders.ts"](await scope("nobody@example.com")), []);
+    // Claude 6 hsz3's LEVE on #5137 @62aea1f652: the address check on each entry is the last guard. An index line that
+    // names another buyer's checkout (a later backfill, a change in whoField, anything but PREORDER_RECORD) never hands
+    // that buyer's pre-order to this person.
+    const adaLine = redis.run(["HGET", whoKey(sid, A), whoField(ADA)]);
+    redis.run(["HSET", whoKey(sid, A), whoField(ADA), `${String(adaLine)}\n${checkout("bob1")}`]);
+    const misfiled = ((await COPIERS["lib/preorders.ts"](await scope(ADA))) as { checkout: string }[]).map((p) => p.checkout).sort();
+    redis.run(["HSET", whoKey(sid, A), whoField(ADA), String(adaLine)]);
+    is("a line naming Bob's checkout in Ada's place: Ada's copy still holds only hers, never Bob's", misfiled, [checkout("ada1"), checkout("ada2")]);
   }
 
   part("The creator disconnects Stripe, or connects another account: the copy still holds them (Claude 2 on #5137)");

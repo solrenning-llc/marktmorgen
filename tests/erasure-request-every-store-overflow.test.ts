@@ -60,6 +60,29 @@ async function grantsWhile(run: () => Promise<unknown>): Promise<{ grants: strin
   return { grants, logged };
 }
 
+/** Every command the ask sends while `run` runs, in order, with the deferred part after the answer waited for. */
+async function commandsWhile(run: () => Promise<unknown>): Promise<string[]> {
+  const sent: string[] = [];
+  const original = redis.pipeline;
+  const error = console.error;
+  const warn = console.warn;
+  console.error = () => {};
+  console.warn = () => {};
+  redis.pipeline = async (commands: (string | number)[][]) => {
+    for (const command of commands) sent.push(String(command[0]));
+    return original.call(redis, commands);
+  };
+  try {
+    await run();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  } finally {
+    redis.pipeline = original;
+    console.error = error;
+    console.warn = warn;
+  }
+  return sent;
+}
+
 let ip = 0;
 const ask = (email: string) => askErasureLink({ email, ip: `198.51.100.${++ip}`, origin: "https://marktmorgen.com" });
 
@@ -91,4 +114,27 @@ test("the buyer library keeps its own limit", async () => {
   const email = "library-limit@example.com";
   for (let n = 1; n <= MAX_LIBRARY_STORES + 2; n += 1) await rememberBuyers(n.toString(16).padStart(32, "0"), [email]);
   assert.equal((await storesKnownFor(email)).length, MAX_LIBRARY_STORES);
+});
+
+test("the route's worst case is unchanged and the refused ask stops at the union (rule 964c, the whole route measured)", async () => {
+  // The coordinator's rule 964c: a fix measures its route in the worst case against what it costs. This one adds no
+  // command: the same SUNION, cut one store later. The most the ask reads is still MAX_ERASE_STORES stores, at the
+  // same reads per store, and an address past it now stops right after the union, before any store read or grant.
+  const known = async (count: number) => {
+    redis.clear();
+    const email = `measured-${count}@example.com`;
+    for (let n = 1; n <= count; n += 1) await rememberBuyers((await paidStore(n)).sid, [email]);
+    return commandsWhile(() => ask(email));
+  };
+  const one = await known(1);
+  const two = await known(2);
+  const most = await known(MAX_ERASE_STORES);
+  const over = await known(MAX_ERASE_STORES + 1);
+  const perStore = two.length - one.length;
+  assert.ok(perStore > 0, "each store known costs its reads");
+  assert.equal(most.length, one.length + (MAX_ERASE_STORES - 1) * perStore, "every store past the first costs the same reads, and nothing else is sent");
+  assert.equal(over.lastIndexOf("SUNION"), over.length - 1, "past the most, nothing is sent after the union");
+  assert.equal(over.filter((name) => name === "SUNION").length, 1, "the stores are read once");
+  assert.ok(over.length < most.length, "the refused ask costs less than the most an ask can cost");
+  console.log(`every-store ask: ${one.length} commands for 1 store, +${perStore} a store, ${most.length} at ${MAX_ERASE_STORES} stores (the worst), ${over.length} refused past it`);
 });

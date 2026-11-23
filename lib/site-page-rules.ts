@@ -70,6 +70,8 @@ export const RESERVED_SLUGS = new Set([
   "form",
   "affiliates",
   "app-icon",
+  // "Email me when it's back" (623 [SZ7], app/[handle]/back-in-stock).
+  "back-in-stock",
   "blog",
   "book",
   "certificate",

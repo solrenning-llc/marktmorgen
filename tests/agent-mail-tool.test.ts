@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { done, is, part } from "./check";
+import { relatorio } from "../tooling/agent-mail/audit-cases.mjs";
 
 const tool = readFileSync("tooling/agent-mail/agent-mail.mjs");
 const hash = createHash("sha256").update(tool).digest("hex");
@@ -24,7 +25,21 @@ part("the tool's own tests");
 const r = spawnSync(process.execPath, ["tooling/agent-mail/agent-mail.test.mjs", "tooling/agent-mail/agent-mail.mjs"], { encoding: "utf8", timeout: 540_000 });
 const total = /(\d+) checks, all passing\./.exec(r.stdout ?? "")?.[1];
 is("agent-mail.test.mjs passes", r.status === 0 && Boolean(total), true);
+// On a failure, the CI log shows which of the tool's checks failed and why, not only that the suite did (the queue run
+// of #5147 on 23/11/2026 said "259 checks, 1 failing" with no name).
+if (!(r.status === 0 && total)) {
+  const linhas = String(r.stdout ?? "").split("\n");
+  const falhas = linhas.flatMap((l, i) => (/^\s+FAIL\s/.test(l) ? linhas.slice(i, i + 4) : []));
+  console.log(["the tool's failing checks:", ...falhas.slice(0, 60), String(r.stderr ?? "").slice(0, 2000)].join("\n"));
+}
 if (r.status !== 0) console.log(`${r.stdout ?? ""}${r.stderr ?? ""}`.slice(-4000));
 is("and runs at least 45 checks", Number(total ?? 0) >= 45, true);
+
+part("every case of the independent audit is covered and passing (owner, OWNER-20261121-1904, step 7)");
+// The same run, read case by case (tooling/agent-mail/audit-cases.mjs). Against the audited version aff69c9, every case
+// fails at least one of its checks: that is the RED before each fix, recorded in tooling/agent-mail/README.md.
+const casos = relatorio(r.stdout ?? "");
+is("A1 to A15, the proofs of concept 1 and 3 and the API-down case are all listed", casos.map((c) => c.id), ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10", "A11", "A12", "A13", "A14", "A15", "PoC1", "PoC3", "API"]);
+for (const c of casos) is(`${c.id}: at least one check, none failing`, [c.total > 0, c.falham], [true, 0]);
 
 done();

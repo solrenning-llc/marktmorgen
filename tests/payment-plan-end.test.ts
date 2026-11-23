@@ -267,6 +267,40 @@ async function main(): Promise<void> {
   raw.clear();
 
   Date.now = trueNow;
+  part("A member's own cancel that lands between the read and the end being written is put back (Codex X5's MEDIUM on #3488)");
+  {
+    // finishPlan read the membership with no cancel_at, then the member pressed Cancel (lib/membership-manage.ts,
+    // cancelSoldEnd: cancel_at to the period's end, metadata cancel_requested_at), then finishPlan wrote the end that
+    // was sold over it. Stripe's answer carries the member's request it did not have when it read: the member's end
+    // is written back, and the plan is watched as one stopped early.
+    beforeEnds();
+    const periodEnd = ANCHOR + 30 * DAY;
+    const base = { id: "sub_race00000001", status: "active", billing_cycle_anchor: ANCHOR, trial_end: null, metadata: { store: "harbor", ends_after: "12", ends_interval: "month" }, items: { data: [{ current_period_end: periodEnd }] } };
+    sessions.cs_test_race00000001 = checkout("cs_test_race00000001", { ends_after: "12", ends_interval: "month" });
+    subscriptions.sub_race00000001 = { ...base };
+    const asked = String(ANCHOR + DAY - 60);
+    const before = updates.length;
+    Object.defineProperty(updateReplies, "sub_race00000001", {
+      configurable: true,
+      get: () => {
+        const last = updates[updates.length - 1]?.body.get("cancel_at");
+        return { ...base, cancel_at: Number(last), metadata: { ...base.metadata, cancel_requested_at: asked } };
+      },
+    });
+    const state = await finishPlan(ACCOUNT, "cs_test_race00000001");
+    const written = updates.slice(before).map((u) => u.body.get("cancel_at"));
+    const soldEnd = String(addPeriods(ANCHOR, "month", 12));
+    is("the end that was sold was written first, then the member's own end put back", written, [soldEnd, String(periodEnd)]);
+    is("watched as stopped early, not settled at the sold end", state, "early");
+    delete (updateReplies as Record<string, unknown>).sub_race00000001;
+    const asBefore = updates.length;
+    sessions.cs_test_race00000002 = checkout("cs_test_race00000002", { ends_after: "12", ends_interval: "month" });
+    subscriptions.sub_race00000002 = { ...base, id: "sub_race00000002", metadata: { ...base.metadata, cancel_requested_at: asked } };
+    await finishPlan(ACCOUNT, "cs_test_race00000002");
+    is("control: a request already there when it read (and taken back since) is not put back", updates.slice(asBefore).map((u) => u.body.get("cancel_at")), [soldEnd]);
+    Date.now = trueNow;
+  }
+
   done();
 }
 

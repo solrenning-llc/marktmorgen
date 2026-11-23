@@ -276,11 +276,22 @@ async function main(): Promise<void> {
   part("No time left before the next page: what was read is kept, and the next page is never asked (audit f89b)");
   reset();
   const edgeOldest = created - 3000;
-  // The first page answers just inside the reading's time, so less than a page's least wait is left before the second.
+  // The first page answers, and the clock then stands just inside the reading's time, so less than a page's least wait
+  // is left before the second: a controlled clock, never a real wait timed to the millisecond.
   pages = [page([line("charge", 100, created, charge("ch_e1"), 3), line("charge", 100, edgeOldest, charge("ch_e2"), 3)], true), page([sale], false)];
-  slowMs = SALE_FEES_READ_MS - 30;
-  const edge = await keptSaleFees(STORE, NOW);
-  slowMs = 0;
+  const realNow = Date.now;
+  const started = realNow();
+  const firstPage = pages[0];
+  pages[0] = () => {
+    Date.now = () => started + SALE_FEES_READ_MS - 10;
+    return firstPage();
+  };
+  let edge: Awaited<ReturnType<typeof keptSaleFees>>;
+  try {
+    edge = await keptSaleFees(STORE, NOW);
+  } finally {
+    Date.now = realNow;
+  }
   is("one page asked, the reading kept to the second after its oldest line", [edge.kind, asked.length, edge.kind === "read" ? edge.kept.since : null], ["read", 1, (edgeOldest + 1) * 1000]);
 
   part("A visit that takes no reading reads only what SALE_FEES_KEPT_SHAPE prices (audit f89b)");

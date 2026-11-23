@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { addRows, finishUpload, readBatch, readJob, runImport, startImport, takeImportRows } from "@/lib/imports";
-import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
+import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
 import { MAX_ABOUT_LENGTH } from "@/lib/product-about";
 import { MAX_TITLE_LENGTH } from "@/lib/catalog";
 import { paidPeriod } from "./billing-period-fixture";
@@ -81,3 +81,14 @@ for (const [name, about] of [
     assert.ok(commands <= counted * IMPORT_WORST_COMMANDS_PER_ROW, `${commands} commands for ${counted} counted rows, over IMPORT_WORST_COMMANDS_PER_ROW ${IMPORT_WORST_COMMANDS_PER_ROW}`);
   });
 }
+
+test("the rows each plan prints are the same: only the price of a counted row changed", () => {
+  // Claude 1 coord (bf13): IMPORT_WORST_BYTES_PER_ROW prices the imports line and never decides how many rows a creator
+  // may bring in. The printed figures, as on main before this change.
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(IMPORT_ALLOWANCES).map(([tier, a]) => [tier, a.rows])),
+    { creator: 1_000, pro: 8_000, scale: 20_000 },
+  );
+  assert.equal(IMPORT_ROW_BYTES, 2_000, "an upload still counts a row for every 2,000 bytes it carries");
+  assert.equal(IMPORT_MIN_ROWS_PER_UPLOAD, 50);
+});

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
 import { ensureStatsId } from "@/lib/store";
-import { addNote, removeNote } from "@/lib/stats-notes";
+import { NoteStoreGoneError, addNote, removeNote } from "@/lib/stats-notes";
 
 /**
  * Notes on the numbers (lib/stats-notes.ts): `{ action: "add", day, text }`
@@ -25,6 +25,11 @@ export async function POST(request: NextRequest) {
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {
+    // The store went away or began its erasure while the note was in flight: an expected refusal, nothing written
+    // (lib/stats-notes.ts ADD_NOTE_IF_LIVE), answered as the other erasure fences answer it, with no server error logged.
+    if (error instanceof NoteStoreGoneError) {
+      return Response.json({ ok: false, error: "gone", message: error.message }, { status: 410, headers: { "Cache-Control": "no-store" } });
+    }
     console.error("changing a note on the numbers failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

@@ -60,6 +60,18 @@ return 1`;
 /** Billed for one note added: the EVAL and its HGET, GET, HSET and EXPIRE, where the plain write was two commands. */
 export const ADD_NOTE_COMMANDS = 5;
 
+/**
+ * The store is gone, moved or being erased (ADD_NOTE_IF_LIVE answered 0): an expected refusal, nothing written. The
+ * studio route answers it 410 "gone", with this message for the creator, without logging a server failure, as the other
+ * erasure fences do (Claude 4 AC on #5251, comment 7090663224).
+ */
+export class NoteStoreGoneError extends Error {
+  constructor() {
+    super("This store is closed or moved, so your note was not saved.");
+    this.name = "NoteStoreGoneError";
+  }
+}
+
 /** A note's words as they are kept: one line, trimmed, at most MAX_NOTE_LENGTH characters. */
 export function noteText(raw: unknown): string {
   return typeof raw === "string" ? raw.replace(/\s+/g, " ").trim().slice(0, MAX_NOTE_LENGTH).trimEnd() : "";
@@ -152,7 +164,7 @@ export async function addNote(store: NoteStore, dayRaw: unknown, textRaw: unknow
     "EVAL", ADD_NOTE_IF_LIVE, 3, fence.live, fence.erasing, key(statsId),
     fence.field, fence.statsId, fence.ref, id, JSON.stringify({ day, text }), KEEP_SECONDS,
   ]]), 1)?.[0];
-  if (reply === 0) throw new Error("the store is gone or being erased: no note kept");
+  if (reply === 0) throw new NoteStoreGoneError();
   if (reply !== 1) throw new UnknownReplyError("a chart note kept");
   const complete = await readAllNotes(statsId);
   const notes = complete.slice(-MAX_NOTES);

@@ -1198,8 +1198,11 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   // down a payment PayPal completes; one every try was refused for, or the sweep let go of, has nothing under watch,
   // so the buyer is shown the store's notice rather than told PayPal is still taking it (Codex X2's MEDIUM 1, Claude
   // 5's LEVE on #3411); one paid since it was read is shown as paid.
-  // A reply that does not read here, or in watchFirst below, takes nothing and writes nothing: the buyer is told it did
-  // not go through (the store's notice), never shown a server error (Claude 1's LOW 1 on #3411; CX-123 rule 24).
+  // A reply that does not read here, or in watchFirst below, asks PayPal for nothing: the buyer is told it did not go
+  // through (the store's notice), never shown a server error (Claude 1's LOW 1 on #3411; CX-123 rule 24). Here nothing
+  // is written; in watchFirst a try may already have been counted (INCR) or the order put under watch (ZADD) before its
+  // reply failed to read: the try ends with its key's expiry, and the watched order with the pending sweep, which
+  // writes it down if PayPal completes it or lets it go (Claude 3's LOW on #4853).
   const unread = (error: unknown, what: string): CaptureResult => {
     if (!(error instanceof UnknownReplyError)) throw error;
     console.error(`a PayPal order's ${what} could not be read`, order, error);

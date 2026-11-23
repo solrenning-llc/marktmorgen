@@ -638,16 +638,20 @@ const ERASE_LOCK_WAIT_MS = 5_000;
  * shape to the set, or to any delete, throws UnknownReplyError (the erasure is
  * then not finished and can be pressed again); the set goes only once every
  * agreement's delete has answered with a count, so a retry still finds every
- * one. Only an exact empty set is "nothing to erase".
+ * one. A member that is not an agreement id throws too, before anything is
+ * deleted (#4804). Only an exact empty set is "nothing to erase".
  */
 export async function forgetAgreementsPerson(sid: string, email: string): Promise<number> {
   if (!isRedisConfigured() || !sid) return 0;
   const person = personSet(sid, email);
   const listed = repliesFor(await redisPipeline([["SMEMBERS", person]]), 1);
   const members = listed ? stringList(listed[0]) : null;
-  if (!members) throw new UnknownReplyError("listing a person's agreements");
+  // A member that is not an agreement id makes the scope unknown, never "not theirs": the set is the only way to find
+  // their agreements, so dropping it would lose a record still stored under it for good (#4804). Nothing is deleted,
+  // the set is kept, and the erasure is not finished.
+  if (!members || !members.every((id) => ID_PATTERN.test(id))) throw new UnknownReplyError("listing a person's agreements");
   // Sorted, so two erasures of the same person take the locks in the same order.
-  const ids = [...new Set(members.filter((id) => ID_PATTERN.test(id)))].sort();
+  const ids = [...new Set(members)].sort();
   for (let at = 0; at < ids.length; at += FORGET_BATCH) {
     const batch = ids.slice(at, at + FORGET_BATCH);
     // One agreement at a time: its lock (the one a signature, a new version or a change holds while it reads the record

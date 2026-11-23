@@ -23,7 +23,7 @@ import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 import {
   COST_LINES, PAYPAL_PRESS, PAYPAL_PRESS_BOOK_COMMANDS, PAYPAL_PRESS_COMMANDS, PAYPAL_PRESS_LOCK_TRIES, PAYPAL_PRESS_SECONDS,
-  PAYPAL_PRESSES_UNTAKEN, COMMAND, TAKE_COMMANDS, UNIT_COST, figureCost, paypalPressCost, request, lockTriesAtMost,
+  PAYPAL_PRESSES_UNTAKEN, VAULT_REFUSED_PASS, COMMAND, TAKE_COMMANDS, UNIT_COST, figureCost, paypalPressCost, request, lockTriesAtMost,
 } from "./plan-cost-registry";
 
 const STATS = "statspress1";
@@ -186,7 +186,7 @@ async function main(): Promise<void> {
   is("a book not kept costs the base", paypalPressUnits({ kept: false, entries: 0, people: 0, leads: 0, paypalRefunds: 0, stripe: true, products: 9 }), PAYPAL_PRESS_BASE_UNITS);
   const line = COST_LINES.find((l) => l.id === "integrations")!;
   for (const tier of ["creator", "pro", "scale"] as const) {
-    is(`${tier}: the integrations line pays the figure and payday's auto-pay at its most`, Math.abs(line.monthlyUsd(tier) - (figureCost(STORE_ALLOWANCES[tier], "integration") + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS)) < 1e-12, true);
+    is(`${tier}: the integrations line pays the figure and payday's auto-pay at its most`, Math.abs(line.monthlyUsd(tier) - (figureCost(STORE_ALLOWANCES[tier], "integration") + STORE_ALLOWANCES[tier].integration * VAULT_REFUSED_PASS + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS)) < 1e-12, true);
   }
   is("payday's auto-pay: one a store a month (claimMonth)", PAYPAL_PRESSES_UNTAKEN, 1);
   const payday = readFileSync(join(process.cwd(), "lib/affiliate-payday.ts"), "utf8");

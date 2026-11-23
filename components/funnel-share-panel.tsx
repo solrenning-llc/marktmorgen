@@ -16,7 +16,7 @@ export type ShareRow = { id: string; name: string; funnelId: string; createdAt: 
 const MESSAGES: Record<string, string> = {
   code: "That does not look like a share code. It starts with mmf_.",
   code_gone: "That link has been revoked, has run out, or was never made. Ask for a new one.",
-  gone: "This store is being deleted, so no share link was made.",
+  gone: "This store changed or is being deleted, so no share link was made. Reload the page before trying again.",
   share_busy: "That link has been used as often as it can be this month. Ask the creator for the file instead.",
   shares_month: "Your store has made as many share links as its figure allows for now. More can be made when the figure opens again.",
   previews_month: "Your store has looked at as many funnels as its figure allows for now. More can be looked at when the figure opens again.",

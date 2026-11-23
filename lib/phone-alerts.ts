@@ -482,13 +482,15 @@ async function forgetGone(store: Store, device: Device): Promise<void> {
  * thing happened: a device turned on more than an hour after it is not told
  * about it. Returns
  * how many devices it is sending to; the sending itself happens after the
- * answer to the request that noticed it.
+ * answer to the request that noticed it. With `wait` (a job that must know
+ * whether anyone was reached), it sends now and returns how many devices
+ * answered well.
  */
 export async function alertCreator(
   store: Store,
   event: PhoneEvent,
   alert: Alert,
-  options: { seed: string; at?: number; pathTimeZone?: string },
+  options: { seed: string; at?: number; pathTimeZone?: string; wait?: boolean },
 ): Promise<number> {
   if (event === "path" && !maySendPathReminder(options.pathTimeZone || "", Date.now())) return 0;
   if (!store.statsId || !isRedisConfigured()) return 0;
@@ -518,7 +520,7 @@ export async function alertCreator(
     if (count === null || count > QUIET_PER_HOUR) return 0;
   }
   // Every device is told at once; their states are then written in one script (keepStates; Claude 4's M1 on #5001).
-  await soon(async () => {
+  const tell = async () => {
     const told = await Promise.all(listening.map(async (device) => {
       if (event === "path" && !maySendPathReminder(options.pathTimeZone || "", Date.now())) return null;
       return { device, ...(await pushTo(store, device, event, alert)) };
@@ -527,11 +529,23 @@ export async function alertCreator(
     // Every device's state first, as each device's own write did before (Claude 6's LEVE 1 on #5001): a gone
     // device's removal that fails afterwards takes nobody else's state with it.
     await keepStates(statsId, sent.map((one) => ({ id: one.device.id, state: one.state })));
-    // Each removal settles on its own; the first failure is still raised, so it is logged as before.
+    return sent;
+  };
+  // Each removal settles on its own; the first failure is still raised, so it is logged as before.
+  const forget = async (sent: { device: Device; gone: boolean }[]) => {
     const removed = await Promise.allSettled(sent.filter((one) => one.gone).map((one) => forgetGone(store, one.device)));
     const failed = removed.find((one): one is PromiseRejectedResult => one.status === "rejected");
     if (failed) throw failed.reason;
-  });
+  };
+  // A job that must know whether anyone was reached waits for the answers (#3725): then only the devices that answered
+  // well, and whose states were written, count. Gone devices are taken off afterwards, in the background, so a removal
+  // that fails never makes a device that was reached count as not reached.
+  if (options.wait) {
+    const sent = await tell().catch(() => [] as { device: Device; state: DeviceState; gone: boolean }[]);
+    await soon(() => forget(sent));
+    return sent.filter((one) => one.state.ok === true).length;
+  }
+  await soon(async () => forget(await tell()));
   return listening.length;
 }
 

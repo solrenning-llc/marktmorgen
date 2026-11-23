@@ -159,7 +159,9 @@ export async function POST(request: NextRequest) {
     if (action.startsWith("cm-")) {
       const courseId = product.course.id;
       if (action === "cm-on") {
-        await setCommentsOn(courseId, body.on === true);
+        // Success only once the write is confirmed; otherwise the studio keeps the switch as it was.
+        const switched = await setCommentsOn(courseId, body.on === true).then(() => true, () => false);
+        if (!switched) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
         return Response.json({ ok: true });
       }
       const commentId = text(body.comment, 20);

@@ -19,7 +19,7 @@ import { CLOSING_DAYS, ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, KEEP_NOTHING_FROM
 import { RELEASE_QUARANTINE_DAYS } from "@/lib/store";
 import { CALL_ORDER_UNITS, ORDERS_INCLUDED, TRIAL_ORDERS } from "@/lib/order-rules";
 import { API_SALES_UNITS, API_WRITE_UNITS, allowanceListWords } from "@/lib/store-allowance-rules";
-import { STUDIO_PAGE_UNITS, STUDIO_SEARCH_UNITS } from "@/lib/studio-allowance-rules";
+import { SALES_FILES_PER_MONTH, STUDIO_PAGE_UNITS, STUDIO_SEARCH_UNITS } from "@/lib/studio-allowance-rules";
 import { FREE_POOL_BASE_STORES, PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { BUYER_RESERVE_BPS, EXTRA_REQUESTS, REQUESTS_PER_VISIT, ROOM_IDLE_PARTS, ROOM_LIVE_PARTS, SETUP_VISITS, TRIAL_VISITS, VISITS_INCLUDED, countWords, partsWords } from "@/lib/traffic-rules";
 import { ROOM_GRANT_MINUTES } from "@/lib/chat-pace";
@@ -500,7 +500,9 @@ export default function TermsPage() {
           is disputed. When one is used, that use is refused with a plain
           message until your next billing month or a larger plan; nothing is
           billed past it. Changing your plan, canceling it, deleting your
-          store and downloading your sales are never refused for it. Your
+          store and downloading your sales are never refused for it; your
+          sales download as up to {SALES_FILES_PER_MONTH} files a month, a
+          count of their own that never comes out of these. Your
           store&apos;s public side also answers up to{" "}
           {countWords(REQUESTS_PER_VISIT)} requests for each visit its plan
           covers and a number more ({countWords(EXTRA_REQUESTS.creator)} on{" "}

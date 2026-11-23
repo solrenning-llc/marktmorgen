@@ -53,7 +53,7 @@ import { MAX_ADDRESSES } from "@/lib/store-field-rules";
 import { LANDINGS_FENCE_COMMANDS } from "@/lib/campaign-landing-store";
 import { CARD_FENCE_COMMANDS } from "@/lib/creator-card";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
-import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
+import { ESSENTIAL_PER_DAY, SALES_FILES_PER_MONTH, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { MAX_BENEFITS_KEPT, MAX_BENEFIT_TEXT } from "@/lib/tier-benefit-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS, publicVisitLimit } from "@/lib/traffic-rules";
 import { READ_SAMPLE } from "@/lib/page-read-sample";
@@ -151,7 +151,7 @@ import { MAX_FORMS } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
 import { SNS_RECEIPT_COMMANDS_MOST, SNS_RECEIPT_VALUE_BYTES_MOST } from "@/lib/sns-receipt-rules";
-import { ALL_TIME_PAGES } from "@/lib/stats";
+import { ALL_TIME_PAGES, EXPORT_PAGES } from "@/lib/stats";
 import { BOOK_KEPT_SLICE, MAX_PAID_BYTES, PAYPAL_REFUNDS_READ, REFUND_TELL_TRIES_AT_MOST } from "@/lib/paypal-sales";
 import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
@@ -3285,6 +3285,19 @@ export const COST_LINES: CostLine[] = [
     basis: "In addition to the existing studio request, every studio unit funds the card fence's two inner commands (HGET of the erasing field, GET of the store's id key or, for a store from before ids, its record) and 2048 wire bytes for the keys, ref and longer script. No extra round trip: the fence is inside the card's own script (Codex L-20261121-0150). The trial uses the same per-unit surcharge in nonPayingWorst; free-share carries its share. Prices and visible allowances do not change.",
   },
   {
+    id: "sales-files",
+    feature: "Downloading the store's sales as a file: up to SALES_FILES_PER_MONTH a month, a count of its own (#5010 row 150)",
+    // Every file the month allows, each at its most.
+    monthlyUsd: () => SALES_FILES_PER_MONTH * SALES_FILE_COST,
+    sources: [
+      { file: "lib/studio-allowance-rules.ts", names: ["SALES_FILES_PER_MONTH"] },
+      { file: "lib/sales-files.ts", names: ["takeSalesFile", "count > SALES_FILES_PER_MONTH", ":sales:"] },
+      { file: "app/api/store/export/route.ts", names: ["takeSalesFile(store)"] },
+      { file: "lib/stats.ts", names: ["EXPORT_PAGES", "salesCsv"] },
+    ],
+    basis: "A sales file reads every sale again (lib/stats.ts salesCsv): up to EXPORT_PAGES pages of each of the creator's two Stripe lists, side by side, each page waited on at a whole export's EXPORT_PAGE_SECONDS, and up to EXPORT_PAGES hundred PayPal sales, each record at MAX_PAID_BYTES (SALES_FILE_COST, at exportCost). Before, it took one of the store's ESSENTIAL_PER_DAY requests a day, priced as a heavy request, which a whole file can cost many times over: at ten a day it could cost more than a Store plan carries. It now takes one of SALES_FILES_PER_MONTH files a month, counted on its own before anything is read (lib/sales-files.ts) and never from a figure, so the terms' promise that downloading one's sales is never refused for the figures still holds; a file that could not be made gives its place back. A store that pays nothing has the same count (nonPayingWorst).",
+  },
+  {
     id: "rest-api",
     feature: "The REST API: every request with one of the store's keys, a contact added or a product given as API_WRITE_UNITS of them (17 October 2026)",
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "api"),
@@ -3735,6 +3748,14 @@ export function exportCost(bytes: number, commands = exportCommands(bytes)): num
 }
 
 /**
+ * One sales file at the most (app/api/store/export, what=sales; lib/sales-files.ts; #5010 row 150): a whole export's
+ * wait on both of the creator's Stripe lists (EXPORT_STRIPE_PAGES), and every PayPal sale it reads (EXPORT_PAGES of a
+ * hundred) at its largest record (MAX_PAID_BYTES), read through the database. The strict worst case: a store that moved
+ * down from a larger plan keeps up to that many PayPal sales.
+ */
+export const SALES_FILE_COST = exportCost(EXPORT_PAGES * 100 * MAX_PAID_BYTES, 40);
+
+/**
  * What one list download costs at the most once a plan has ended
  * (lib/list-download.ts, holdEndedListDownload), its list as large as a store
  * of `bytes` can hold: every page the walk may take (lib/free.ts, listAsCsv,
@@ -3855,6 +3876,8 @@ export function nonPayingWorst(): number {
     + allowances.integration * VAULT_REFUSED_PASS
     // Each API request may be one of the three API writes that send more than their unit (line api-hook-access-writes).
     + allowances.api * API_HOOK_ACCESS_EXTRA_COMMANDS * COMMAND
+    // Its sales files, the same count a month as a paying store's (line sales-files).
+    + SALES_FILES_PER_MONTH * SALES_FILE_COST
     + campaignLandingFenceCost(allowances)
     // Its payday's auto-pay takes no integration unit (a press from the studio takes its own, paypalPressUnits).
     + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS

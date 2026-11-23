@@ -22,3 +22,8 @@ export const STUDIO_PAGE_UNITS = 4;
 export const STUDIO_SEARCH_UNITS = 2;
 export const ESSENTIAL_NEEDS: readonly Need[] = ["billing", "delete", "export", "member"];
 export const ESSENTIAL_PER_DAY = 10;
+/**
+ * Sales files a store may download in each of its months (lib/sales-files.ts; #5010 row 150): counted on their own,
+ * never from the studio's requests or any other figure, and priced in tests/plan-cost-registry.ts ("sales-files").
+ */
+export const SALES_FILES_PER_MONTH: number = 3;

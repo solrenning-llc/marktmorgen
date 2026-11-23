@@ -4,6 +4,7 @@ import { creatorFrom } from "@/lib/studio-route";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { readStats, salesCsv, sourcesCsv, studioStats, visitsCsv, readsSales } from "@/lib/stats";
 import { exportShape, exportUnits, storeExport } from "@/lib/store-export";
+import { takeSalesFile } from "@/lib/sales-files";
 import { standingOf } from "@/lib/plan-standing";
 import { ENDED_STORE_EXPORTS } from "@/lib/plan-closing-rules";
 
@@ -121,7 +122,13 @@ export async function GET(request: NextRequest) {
       const days = range === "30" ? 30 : range === "90" ? 90 : range === "all" ? 0 : -1;
       if (days < 0) return plain(400, "Choose 30 days, 90 days or all time.");
       const since = days ? Math.floor(Date.now() / 1000) - days * 86400 : 0;
-      const { csv, partial } = await salesCsv(store, since);
+      // One of the month's sales files, counted on its own before anything is read (lib/sales-files.ts).
+      const taken = await takeSalesFile(store);
+      if (!taken.ok) return plain(taken.status, taken.message);
+      const { csv, partial } = await salesCsv(store, since).catch(async (error: unknown) => {
+        await taken.giveBack();
+        throw error;
+      });
       return file(csv, `${store.handle}-sales-${days ? `${days}-days` : "all"}-${day}${partial ? "-partial" : ""}.csv`);
     }
     if (what === "visits") {

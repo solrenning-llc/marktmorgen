@@ -270,6 +270,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:crefund:told:@lib/creator-refund.ts": short("A refund given from a buyer's record, marked once it is written into the team's log, so a repeat of the same form never writes it twice (649 [WG9])", "studio", 2, MARK),
   "nl:rl:export:@app/api/store/export/route.ts": { what: "Downloads of a store's files: counted ten minutes at a time, and its whole exports since its plan ended", parts: [per("studio", 1, KEY, "Downloads counted ten minutes at a time."), capped(() => KEY, "One count of whole exports since the plan ended, sixty days.")] },
   "nl:rl:export:@lib/list-download.ts": { what: "A store's list downloads since its plan ended", parts: [capped(() => KEY, "One count of list downloads since the plan ended, sixty days.")] },
+  "nl:rl:export:@lib/sales-files.ts": { what: "A store's sales files this month", parts: [capped(() => KEY, "One count of sales files a store month, kept the month's length.")] },
   "nl:rl:licence:@app/api/store/licence/route.ts": short("A license check's count per connection", "request", 1, KEY, REQ("license")),
   "nl:pod:@app/api/store/podcast/route.ts": short("A podcast's lock while the studio changes it", "studio", 1),
   "nl:pod:@app/api/store/podcast/public-settings/route.ts": short("A podcast's lock while the studio changes its public feed (33 [F2] part 3)", "studio", 1),

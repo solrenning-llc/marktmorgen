@@ -739,7 +739,7 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
         idempotencyKey: `restart:${record.subscription}:${record.until}`,
         // Read live right before each charge (Codex L-20261120-1741): a store whose erasure began after it was read
         // above gets no new plan; its break and due entry stay for the erasure to delete with it.
-        beforePost: async () => (await storeIsLive(store)) === true,
+        beforePost: () => storeIsLive(store),
         ...(record.funding ? { funding: { statsId: store.statsId ?? "", sourceSubscriptionId: record.subscription, sourceGrantId: record.funding.grantId, ref, paused: stored.raw ?? "" } } : {}),
       });
       if(started.fundedPublication===true){
@@ -763,9 +763,10 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
       await tell(store, "restarted", record).catch(() => false);
       counts.restarted += 1;
     } catch (error) {
-      // Not read live right before the charge: nothing was sent. Kept as it is, untold: a store being erased is
-      // deleted with its break; one whose read was only unknown is tried again on the next run.
-      if (error instanceof RestartStoreNotLive) { counts.failed += 1; continue; }
+      // Read as being erased right before the charge: nothing was sent, and nothing is told; the erasure deletes the
+      // break with the store. A read that could not tell is not that: it goes on below like any failure that is not the
+      // card's, tried again within RETRY_DAYS and then told as unconfirmed, never skipped untold for good.
+      if (error instanceof RestartStoreNotLive && error.reason === "erasing") { counts.failed += 1; continue; }
       console.error("starting a plan again after a break failed", store.handle, error);
       // The funded protocol retains every uncertain source/intent. It must not
       // enter the legacy retry window, forget its evidence, or announce success.

@@ -11,7 +11,7 @@
  * Synthetic store, Stripe and Redis stand-in only.
  */
 import { ERASING_KEY, claimHandle, ensureStatsId, ensureStoreId, erasingField, setSubscription, storeForEmail, storeRef } from "@/lib/store";
-import { pauseOf, pausePlan, runBreaks } from "@/lib/plan-pause";
+import { pauseEmail, pauseOf, pausePlan, runBreaks } from "@/lib/plan-pause";
 import { PLAN_PRICES } from "@/lib/plan";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -26,6 +26,13 @@ const subs: Record<string, Record<string, unknown>> = {};
 let created = 0;
 /** Run once, on the price lookup that comes after the store was read and before the POST. */
 let onPriceRead: (() => Promise<void>) | null = null;
+/** The store ref whose one-step live read (lib/live-fence.ts STORE_LIVE_READ) answers something unreadable: "unknown". */
+let liveReadUnknown: string | null = null;
+const pipeline = redis.pipeline.bind(redis);
+redis.pipeline = (async (commands: (string | number)[][]) => {
+  if (liveReadUnknown && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-live-read:") && c.at(-1) === liveReadUnknown)) return commands.map(() => "unreadable");
+  return pipeline(commands);
+}) as typeof redis.pipeline;
 
 function subscription(id: string, over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -106,6 +113,28 @@ async function main() {
     is("nothing restarted", counts.restarted, 0);
     is("the break is kept for the erasure to delete with the store", (await pauseOf(store)) !== null, true);
     is("and the creator of a store being erased is told nothing", emails, []);
+  }
+  part("A store whose live read cannot tell is not skipped for good: kept and retried, then told as unconfirmed");
+  {
+    // Claude 1's LEVE on #5174: only a read that says erasing may be skipped untold. One that only could not tell goes
+    // the way of any failure that is not the card's: nothing is sent, tried again within RETRY_DAYS (3), then the creator
+    // is told the plan could not be confirmed, so the store is never left on a break that silently never ends.
+    const { store, until } = await onBreakDue("restart-unknown@example.com", "restartunknown", "sub_RestartUnkn01");
+    created = 0;
+    emails.length = 0;
+    const record = (await pauseOf(store))!;
+    liveReadUnknown = storeRef(store);
+    try {
+      const first = await runBreaks(until + 60);
+      is("within the retry days: no POST, nothing restarted", [created, first.restarted], [0, 0]);
+      is("the break is kept to be tried again", (await pauseOf(store)) !== null, true);
+      is("and nothing is told yet", emails, []);
+      const later = await runBreaks(until + 4 * DAY);
+      is("after the retry days: still no POST", [created, later.restarted], [0, 0]);
+      is("the creator is told the restart could not be confirmed", emails, [pauseEmail("unconfirmed", record).subject]);
+    } finally {
+      liveReadUnknown = null;
+    }
   }
   part("Control: a live store's plan starts again on the day");
   {

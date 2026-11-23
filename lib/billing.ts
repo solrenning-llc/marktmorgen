@@ -953,11 +953,17 @@ export function fundedRestartSourceMatches(intent: OwnedRestartIntent, current: 
   } catch { return false; }
 }
 
-/** A break's restart refused before its POST: the store was not read live (erasing, gone, or not confirmed). */
+/**
+ * A break's restart refused before its POST: the store was not read live. `erasing` is a read that answered the store
+ * is being erased or is no longer its own; `unknown` is a read that could not tell (Claude 1's LOWs on #5174: only the
+ * first may be skipped untold; the second goes the way of any other failure that is not the card's).
+ */
 export class RestartStoreNotLive extends Error {
-  constructor() {
-    super("The store was not read live right before its plan's restart; nothing was sent");
+  readonly reason: "erasing" | "unknown";
+  constructor(reason: "erasing" | "unknown") {
+    super(`The store was not read live right before its plan's restart (${reason}); nothing was sent`);
     this.name = "RestartStoreNotLive";
+    this.reason = reason;
   }
 }
 
@@ -970,14 +976,19 @@ export async function restartPlan(input: {
   funding?: { statsId: string; sourceSubscriptionId: string; sourceGrantId: string | null; ref: string; paused: string };
   /**
    * Asked right before each POST /subscriptions (Codex L-20261120-1741): true only when the store is still live (its
-   * erasing mark absent, its id key its own, read in one step). Anything else sends nothing: RestartStoreNotLive.
+   * erasing mark absent, its id key its own, read in one step). false (erasing or gone) or "unknown", or a throw,
+   * sends nothing: RestartStoreNotLive with that reason. The read and the POST are two steps, not one: an erasure that
+   * begins in the round trip between them is still charged; the window is that round trip, no longer the whole run.
    */
-  beforePost?: () => Promise<boolean>;
+  beforePost?: () => Promise<boolean | "unknown">;
 }): Promise<StartedSubscription> {
   if (!CUSTOMER_PATTERN.test(input.customerId)) throw new Error("not a customer of ours");
   // Fail closed: a store not read live right before the charge gets no new plan and no charge.
   const admit = async () => {
-    if (input.beforePost && !(await input.beforePost().catch(() => false))) throw new RestartStoreNotLive();
+    if (!input.beforePost) return;
+    const live = await input.beforePost().catch((): "unknown" => "unknown");
+    if (live === true) return;
+    throw new RestartStoreNotLive(live === false ? "erasing" : "unknown");
   };
   if (!/^(pm|card|src)_[A-Za-z0-9]{6,64}$/.test(input.paymentMethod)) throw new Error("no card to charge");
   if (input.funding) {

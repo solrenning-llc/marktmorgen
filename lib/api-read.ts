@@ -24,7 +24,7 @@ import { productIds, readListing, readListings } from "@/lib/catalog";
 import { listingsToRead } from "@/lib/catalog-read-count";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { memberPage } from "@/lib/community";
-import { readCourse } from "@/lib/course";
+import { readCourseExact } from "@/lib/course";
 import { studentPage } from "@/lib/learn";
 import { BOOK_STRIPE_PAGES, type Book, bookSizes, readBook } from "@/lib/affiliates";
 import { paidCalls } from "@/lib/calls";
@@ -299,7 +299,9 @@ export async function students(
   // One product by id, which is one read — not every product in the store.
   const product = await readListing(store, productId);
   if (!product?.course) return null;
-  const course = await readCourse(product.course.id);
+  // Read exactly (issue #4068): only a confirmed absence is "not a course"; a reply that does not read (not JSON, not a
+  // course, or a course under another id) throws, so the route answers 502 unavailable, never 404 not_a_course.
+  const course = await readCourseExact(product.course.id, "a course's outline for its students");
   if (!course) return null;
   const lessons = course.modules.reduce((n, m) => n + m.lessons.length, 0);
   const start = cursor && /^\d{1,20}$/.test(cursor) ? cursor : "0";

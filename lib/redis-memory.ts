@@ -394,6 +394,33 @@ export class MemoryRedis {
           }
           return this.run(["SET", keys[2], argv[1]]);
         }
+        // lib/stats-notes.ts ADD_NOTE_IF_LIVE: a chart note and its list's expiry, only while the store is live and not
+        // being erased (Codex L-20261119-1516, #5010 row 128); each inner call counted as Upstash bills it.
+        if (key.startsWith("-- marktmorgen:stats-note-add-live:v1\n") && args[0] === "3" && args.length === 10) {
+          const [, live, erasing, notes, field, statsId, ref, id, value, seconds] = args;
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          if (call(["HGET", erasing, field]) !== null) return 0;
+          if (statsId === "") {
+            if (call(["GET", live]) !== ref) return 0;
+          } else {
+            const raw = call(["GET", live]);
+            if (raw === null) return 0;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -1;
+            }
+            if (!record || typeof record !== "object") return -1;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+          }
+          call(["HSET", notes, id, value]);
+          call(["EXPIRE", notes, seconds]);
+          return 1;
+        }
         // lib/discord-store.ts SAVE_SERVER_IF_LIVE: the connected server written only while its store is live and not
         // being erased, by the rule above; each inner call counted as Upstash bills it.
         if (key.startsWith("-- marktmorgen:discord-server-live:v1\n") && args[0] === "3" && args.length === 8) {
@@ -1795,16 +1822,34 @@ export class MemoryRedis {
           this.data.set(record, next);
           return 1;
         }
-        // lib/mail-drafts.ts DRAFT_SET_HELD and DRAFT_DEL_HELD: a draft set or deleted only while its lease holds the writer's value.
-        if (key.startsWith("-- marktmorgen:draft-set-held:v1\n") && args[0] === "2" && args.length === 6) {
-          const [, drafts, lease, value, field, json] = args;
-          if (this.run(["GET", lease]) !== value) return -1;
-          return this.run(["HSET", drafts, field, json]);
-        }
+        // lib/mail-drafts.ts DRAFT_DEL_HELD: a draft deleted only while its lease holds the writer's value.
         if (key.startsWith("-- marktmorgen:draft-del-held:v1\n") && args[0] === "2" && args.length === 5) {
           const [, drafts, lease, value, field] = args;
           if (this.run(["GET", lease]) !== value) return -1;
           return this.run(["HDEL", drafts, field]);
+        }
+        // lib/mail-drafts.ts DRAFT_SET_LIVE: a draft written only while its store is live (the rule of store-cache-live:v3)
+        // and, for an edit, its lease still holds the writer's value (#5010 row 111). "gone" gone or erasing, -3 an owner's
+        // record that does not parse, -1 the lease not ours; otherwise HSET's reply.
+        if (key.startsWith("-- marktmorgen:draft-set-live:v1\n") && args[0] === "4" && args.length === 11) {
+          const [, drafts, lease, live, erasing, value, field, json, erasingField, statsId, ref] = args;
+          if (this.run(["HGET", erasing, erasingField]) !== null) return "gone";
+          if (statsId === "") {
+            if (this.run(["GET", live]) !== ref) return "gone";
+          } else {
+            const raw = this.run(["GET", live]);
+            if (raw === null) return "gone";
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -3;
+            }
+            if (!record || typeof record !== "object") return -3;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return "gone";
+          }
+          if (value !== "" && this.run(["GET", lease]) !== value) return -1;
+          return this.run(["HSET", drafts, field, json]);
         }
         // lib/calls.ts: a call lock's value swapped (take-over, renewal), and a hold written, only while the lock holds the value given.
         if (key.startsWith("-- marktmorgen:call-lock-swap:v1\n") && args[0] === "1" && args.length === 5) {
@@ -4058,6 +4103,23 @@ export class MemoryRedis {
             }
           });
           return removed;
+        }
+        // lib/team-booking.ts WRITE_TEAM_IF_LIVE: every inner call is billed, including short refusals.
+        if (key.startsWith("-- marktmorgen:team-setup-live:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, identity, erasing, teams, field, product, value, ref, legacyCallsId] = args;
+          this.scriptCalls += 1;
+          const raw = this.run(["GET", identity]);
+          if (typeof raw !== "string") return 0;
+          if (legacyCallsId !== "") {
+            let record: unknown;
+            try { record = JSON.parse(raw); } catch { return 0; }
+            if (!record || typeof record !== "object" || (record as { callsId?: unknown }).callsId !== legacyCallsId) return 0;
+          } else if (raw.toLowerCase() !== ref) return 0;
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) === 1) return 0;
+          this.scriptCalls += 1;
+          this.run(["HSET", teams, product, value]);
+          return 1;
         }
         if (key.startsWith("-- marktmorgen:meet-keep:v1\n")) return this.meetKeep(args);
         // The take scripts and their kin, mirrored from the tests' stand-in (lib/redis-memory-take.ts), by the name on the

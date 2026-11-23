@@ -161,7 +161,9 @@ export async function readTaxRegistrations(store: Pick<Store, "stripeAccountId" 
         const json = JSON.stringify(list);
         // Kept only while the store is live, in one step with the store's fence (lib/store-live-cache.ts): a store
         // erased while Stripe was read gets no tax registrations written back, and the late read is not shown
-        // (Codex L-20261119-1643). "unknown" is not a confirmed keep either, so it is not shown as the list.
+        // (Codex L-20261119-1643). "unknown" is not a confirmed keep either, so it is not shown as the list. A list
+        // past TAX_REGISTRATIONS_MAX_BYTES is never kept, so it skips the fence: nothing is written for it, and it is
+        // shown as read, to the creator whose own Stripe account it came from (triple audit 7090325633, LEVE 2).
         if (cache && json.length <= TAX_REGISTRATIONS_MAX_BYTES) {
           const kept = await setWhileStoreLive(store, keptKey(account), json, TAX_REGISTRATIONS_SECONDS).catch(() => "unknown" as const);
           if (kept !== "kept") return { state: "unknown", dashboard };

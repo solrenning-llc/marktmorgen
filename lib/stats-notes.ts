@@ -18,7 +18,7 @@
 import { randomBytes } from "node:crypto";
 import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 import { storeLiveFence } from "@/lib/store-live-cache";
 
@@ -147,10 +147,11 @@ export async function addNote(store: NoteStore, dayRaw: unknown, textRaw: unknow
   // erased refuses the note; any other answer is unknown (CX-123 rule 24); neither falls back to a plain HSET.
   const fence = await storeLiveFence(store);
   if (fence.statsId === null) throw new UnknownReplyError("a chart note kept");
-  const [reply] = (await redisPipeline([[
+  // One command answers once (rule 24; Claude 1's NIT on #5251): any other count of replies is unknown, never "kept".
+  const reply = repliesFor(await redisPipeline([[
     "EVAL", ADD_NOTE_IF_LIVE, 3, fence.live, fence.erasing, key(statsId),
     fence.field, fence.statsId, fence.ref, id, JSON.stringify({ day, text }), KEEP_SECONDS,
-  ]])) ?? [];
+  ]]), 1)?.[0];
   if (reply === 0) throw new Error("the store is gone or being erased: no note kept");
   if (reply !== 1) throw new UnknownReplyError("a chart note kept");
   const complete = await readAllNotes(statsId);

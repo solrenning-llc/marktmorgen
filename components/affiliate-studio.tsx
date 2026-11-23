@@ -5,7 +5,8 @@ import { AffiliateCommissionHistory, INVOICES_CEILING_TEXT, INVOICES_UNLINKED_TE
 import { AffiliateUnconfirmed, type WaitingLine } from "@/components/affiliate-unconfirmed";
 import type { AffiliateCommissionLine as LineView } from "@/lib/affiliate-commission-view";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { browserZone } from "@/lib/local-clock";
 import { EmailInput } from "@/components/email-input";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
@@ -201,6 +202,22 @@ function unrecordedMessage(inBook: number, unrecorded: number, cents: number, cu
  * shown in the file's own currency, never the store's current one (Codex X6 on
  * #3906, MEDIUM: a USD file after a switch to JPY read as ¥3,000, not $30.00).
  */
+/**
+ * When a payout file was downloaded, as the creator's own clock says it, with the zone named (FZ): in UTC on the
+ * server's first drawing (no zone known there), then redrawn in the browser's zone once the page is open. Pure.
+ */
+export function downloadedWords(at: number, zone?: string): string {
+  const parts = { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" } as const;
+  if (zone && zone !== "UTC" && zone !== "Etc/UTC") {
+    try {
+      return new Date(at).toLocaleString("en-US", { ...parts, timeZone: zone, timeZoneName: "short" });
+    } catch {
+      // A zone the browser names but cannot use: UTC, said as UTC, as on the server.
+    }
+  }
+  return `${new Date(at).toLocaleString("en-US", { ...parts, timeZone: "UTC" })} UTC`;
+}
+
 export async function postBatch(batch: { date: string; reference: string }, file: { id: string; currency: string }): Promise<{ written: number; held: number; left: number | null } | { error: string }> {
   try {
     const response = await fetch("/api/store/affiliates/payout-batch", {
@@ -359,6 +376,9 @@ export function AffiliateStudio({
   const [batchDate, setBatchDate] = useState(today);
   const [batchReference, setBatchReference] = useState("");
   const [batchFileId, setBatchFileId] = useState("");
+  // The reader's zone, known only in the browser: the file times are drawn in UTC first and redrawn in it after mount.
+  const [zone, setZone] = useState<string | undefined>(undefined);
+  useEffect(() => setZone(browserZone()), []);
   // The file being written down: the one picked; a lone file needs no pick, but of several none is taken by default,
   // so a hurried click never writes down the newest instead of the one paid (Codex N1 on #3906, LOW 1).
   const files = payFiles ?? [];
@@ -531,7 +551,7 @@ export function AffiliateStudio({
                         ) : null}
                         {files.map((file) => (
                           <option key={file.id} value={file.id}>
-                            {`Downloaded ${new Date(file.at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" })} UTC: ${file.people} ${file.people === 1 ? "affiliate" : "affiliates"}, ${money(file.cents, file.currency)}`}
+                            {`Downloaded ${downloadedWords(file.at, zone)}: ${file.people} ${file.people === 1 ? "affiliate" : "affiliates"}, ${money(file.cents, file.currency)}`}
                           </option>
                         ))}
                       </select>

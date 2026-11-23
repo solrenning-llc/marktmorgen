@@ -19,7 +19,7 @@ import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { claimHandle, ensureStatsId, ensureStoreId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { GET, POST } from "@/app/api/store/affiliates/payout-batch/route";
-import { postBatch } from "@/components/affiliate-studio";
+import { downloadedWords, postBatch } from "@/components/affiliate-studio";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -151,6 +151,14 @@ async function main(): Promise<void> {
     globalThis.fetch = realFetch;
   }
   is("the studio confirms with the chosen file itself, never with the store's currency", [studio.includes("postBatch({ date: batchDate, reference: batchReference }, chosenFile)"), /postBatch\([^)]*\),\s*currency\)/.test(studio)], [true, false]);
+
+  part("A file's download time is said in the creator's own zone, named (FZ; Claude 2 gallant's LEVE on #3906)");
+  const at = Date.UTC(2026, 10, 24, 0, 30); // 21h30 on 23 November in Fortaleza
+  is("in Fortaleza: the day and hour there, with the zone", downloadedWords(at, "America/Fortaleza"), "Nov 23, 2026, 9:30 PM GMT-3");
+  is("in New York: the day and hour there, with the zone", downloadedWords(at, "America/New_York"), "Nov 23, 2026, 7:30 PM EST");
+  is("no zone known (the server's first drawing): UTC, said as UTC", downloadedWords(at), "Nov 24, 2026, 12:30 AM UTC");
+  is("a zone that does not exist: UTC, never a wrong hour", downloadedWords(at, "Mars/Olympus"), "Nov 24, 2026, 12:30 AM UTC");
+  is("the picker draws each file with the browser's zone, read after mount", [studio.includes("Downloaded ${downloadedWords(file.at, zone)}"), studio.includes("useEffect(() => setZone(browserZone()), [])"), /timeZone: "UTC" \}\)\} UTC: \$\{file\.people/.test(studio)], [true, true, false]);
   done();
 }
 

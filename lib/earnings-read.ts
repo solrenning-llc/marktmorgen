@@ -117,11 +117,15 @@ function invoiceMetadata(row: Record<string, unknown>): Record<string, unknown> 
 function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: Record<string, unknown>, created: number) => Taken> {
   const handles = saleHandles(store);
   // Whose money a row is, as the refunds below read it (Codex G-20261121-0428): true for a handle this store owns, its
-  // old ones included; false only for a well-formed handle, another store's; null (unknown, the month and every older
-  // one not reached) for a name no handle has, or none: it cannot prove the money is another store's, and leaving it
-  // out would show the month with less than the store took, zero included.
-  const ours = (meta: Record<string, unknown>): boolean | null => {
+  // old ones included; false for a well-formed handle, another store's; null (unknown, the month and every older one
+  // not reached) for a name present but in a shape no handle has: it cannot prove the money is another store's, and
+  // leaving it out would show the month with less than the store took, zero included. A row naming no store at all is
+  // `absent`: every checkout and subscription Marktmorgen makes writes metadata[store], so a checkout or an invoice
+  // without it is a sale made outside it on the creator's account (a Payment Link, a renewal of the platform the
+  // creator moved from), skipped, never hiding its month and every older one (#5196 triple audit, coordinator 090d).
+  const ours = (meta: Record<string, unknown>, absent: false | null): boolean | null => {
     const owner = ownField(meta, "store");
+    if (owner === undefined) return absent;
     if (typeof owner !== "string") return null;
     if (handles.has(owner)) return true;
     return HANDLE_PATTERN.test(owner) ? false : null;
@@ -139,7 +143,7 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
       const paid = text(row, "payment_status");
       if (!meta || status === null || paid === null || !CHECKOUT_STATUSES.has(status) || !CHECKOUT_PAYMENT_STATUSES.has(paid)) return null;
       if (status !== "complete" || paid !== "paid") return "skip";
-      const owned = ours(meta);
+      const owned = ours(meta, false);
       if (owned === null) return null;
       if (!owned) return "skip";
       return money(row, "amount_total", created);
@@ -151,7 +155,8 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
       const status = text(row, "status");
       if (!meta || status === null || !INTENT_STATUSES.has(status)) return null;
       if (ownField(meta, "kind") !== "upsell" || status !== "succeeded") return "skip";
-      const owned = ours(meta);
+      // A one-click extra naming no store stays unknown: it is a payment the store's own flow makes.
+      const owned = ours(meta, null);
       if (owned === null) return null;
       if (!owned) return "skip";
       return money(row, "amount", created);
@@ -169,7 +174,7 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
       if (parent === null || (plainObject(parent) && typeof ownField(parent, "type") === "string" && ownField(parent, "type") !== "subscription_details")) return "skip";
       const meta = invoiceMetadata(row);
       if (!meta) return null;
-      const owned = ours(meta);
+      const owned = ours(meta, false);
       if (owned === null) return null;
       if (!owned) return "skip";
       // Dated by its invoice, as readRenewals (Claude 3 on #3022): when it was paid has no proved bound.

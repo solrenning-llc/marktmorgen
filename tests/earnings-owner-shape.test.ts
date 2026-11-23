@@ -18,14 +18,15 @@ const paths = ["/checkout/sessions", "/payment_intents", "/invoices", "/refunds"
 type Path = (typeof paths)[number];
 const page = (data: unknown[]) => ({ object: "list", data, has_more: false });
 
-/** One paid row of the list at `path`, its metadata naming `owner` as the store. */
-function row(path: Path, owner: string): unknown {
-  if (path === "/checkout/sessions") return { id: "cs_g0428", object: "checkout.session", created: APRIL, status: "complete", payment_status: "paid", amount_total: 3000, currency: "usd", metadata: { store: owner } };
-  if (path === "/payment_intents") return { id: "pi_g0428", object: "payment_intent", created: APRIL, status: "succeeded", amount: 3000, currency: "usd", metadata: { kind: "upsell", store: owner } };
-  return { id: "in_g0428", object: "invoice", created: APRIL, status: "paid", billing_reason: "subscription_cycle", amount_paid: 3000, currency: "usd", parent: { type: "subscription_details", subscription_details: { metadata: { store: owner } } } };
+/** One paid row of the list at `path`, its metadata naming `owner` as the store, or naming none (undefined). */
+function row(path: Path, owner: string | undefined): unknown {
+  const store = owner === undefined ? {} : { store: owner };
+  if (path === "/checkout/sessions") return { id: "cs_g0428", object: "checkout.session", created: APRIL, status: "complete", payment_status: "paid", amount_total: 3000, currency: "usd", metadata: store };
+  if (path === "/payment_intents") return { id: "pi_g0428", object: "payment_intent", created: APRIL, status: "succeeded", amount: 3000, currency: "usd", metadata: { kind: "upsell", ...store } };
+  return { id: "in_g0428", object: "invoice", created: APRIL, status: "paid", billing_reason: "subscription_cycle", amount_paid: 3000, currency: "usd", parent: { type: "subscription_details", subscription_details: { metadata: store } } };
 }
 
-function setup(path: Path, owner: string): Store {
+function setup(path: Path, owner: string | undefined): Store {
   redis.clear();
   globalThis.fetch = async (input) => {
     const url = new URL(String(input));
@@ -62,6 +63,20 @@ for (const path of ["/checkout/sessions", "/payment_intents", "/invoices"] as co
     const read = await states(setup(path, "othershop"));
     assert.deepEqual(read.states, ["read", "read", "read", "read"]);
     assert.equal(JSON.stringify(read.april).includes("3000"), false, JSON.stringify(read.april));
+  });
+
+  // #5196 triple audit (coordinator 090d): a checkout or an invoice naming no store at all is a sale made outside
+  // Marktmorgen on the creator's account (every checkout and subscription it makes writes metadata[store]): skipped,
+  // never hiding its month and every older one. A one-click extra naming none stays unknown.
+  test(`${path}: a row naming no store (metadata {}) is ${path === "/payment_intents" ? "unknown" : "skipped, and the months are read"}`, async () => {
+    const read = await states(setup(path, undefined));
+    if (path === "/payment_intents") {
+      assert.deepEqual(read.states, ["read", "read", "not_reached", "not_reached"]);
+      assert.equal(read.april, null);
+    } else {
+      assert.deepEqual(read.states, ["read", "read", "read", "read"]);
+      assert.equal(JSON.stringify(read.april).includes("3000"), false, JSON.stringify(read.april));
+    }
   });
 
   test(`${path}: control, this store's old handle is still counted`, async () => {

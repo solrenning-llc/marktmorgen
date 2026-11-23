@@ -102,6 +102,7 @@ async function main(): Promise<void> {
   is("numbered in turn", pages.map((p) => p.page), pages.map((_, i) => i + 1));
   is(`no later page sent more than ${COPY_PAGE_MAX_COMMANDS} commands (largest ${largest})`, largest <= COPY_PAGE_MAX_COMMANDS, true);
   is("the last has no cursor", last.next, undefined);
+  is("every page is complete exactly when it says nothing is missing", pages.map((p) => p.complete === (p.notComplete.length === 0)), pages.map(() => true));
   is("and says the copy is complete, as the first page read everything else", [last.complete, last.notComplete], [first.notComplete.length === 1, []]);
   const posts = pages.flatMap(community).flatMap((r) => r.posts.map((p) => p.post)).sort();
   const comments = pages.flatMap(community).flatMap((r) => r.comments.map((c) => c.comment)).sort();
@@ -119,6 +120,8 @@ async function main(): Promise<void> {
   }
   is("after a first page that left something unread, the last page is not complete", end?.complete, false);
   is("and it is still the last page", end?.next, undefined);
+  is("and it says in words why it is not complete, never an empty list (PersonCopy.complete)", (end?.notComplete.length ?? 0) > 0, true);
+  is("pointing back to page 1, which lists what was not read", end?.notComplete.some((line) => /\bpage 1\b/i.test(line)), true);
 
   part("The community's copier read alone, outside copyPerson, refuses more than one page rather than stop short");
   let alone = "";

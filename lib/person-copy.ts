@@ -298,6 +298,8 @@ const hasWrote = (traces: MemberTracesPage["traces"], votes: MemberTracesPage["v
   votes.length > 0 || traces.posts.length > 0 || traces.comments.length > 0 || traces.likedPosts.length > 0 || traces.likedComments.length > 0 || traces.reported.length > 0;
 
 /** What the copy says while it has another page, in words, with the page to ask for. */
+/** On the last page, when an earlier page could not read everything: never `complete: false` with nothing said. */
+export const EARLIER_PAGE_UNREAD_LINE = "Page 1 of this copy could not read everything; it lists what was not read.";
 export const morePagesLine = (page: number) => `This copy continues on page ${page}. Ask for it with the cursor in "next" to read the rest of your community activity.`;
 
 /** What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts). */
@@ -751,7 +753,8 @@ async function communityPage(scope: ErasureScope, now: number, at: PageCursor): 
     passing: [],
     // The last page says whether the whole copy is complete: every earlier page read everything it reached.
     complete: next === undefined && at.complete,
-    notComplete: next === undefined ? [] : [morePagesLine(at.page + 1)],
+    // Never `complete: false` with nothing said (PersonCopy.complete): the last page points back to page 1's list.
+    notComplete: next !== undefined ? [morePagesLine(at.page + 1)] : at.complete ? [] : [EARLIER_PAGE_UNREAD_LINE],
     page: at.page,
     ...(next === undefined ? {} : { next }),
   };

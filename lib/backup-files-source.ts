@@ -420,7 +420,11 @@ export async function backupFilesPage(
       reason,
     });
 
-  if (now() >= options.stopAt) return answer([], "cutoff", state);
+  // No cutoff before the listing (Codex X6's re-check on #3313, Board #5285 row #3313): a request already past it
+  // (its count or the store's read slow) answered an empty page with the cursor it was given, and a Worker repeating it
+  // never moved. The loop below cuts off only once this call has looked at one object, so every call moves the walk on;
+  // one that runs past the request's own limit (BACKUP_FILES_REQUEST_MS) still ends there, unanswered, and its page is
+  // counted, as before.
   const listed = await source.list(prefix, state.provider);
   let objects = listed.objects;
   if (state.after !== null) {

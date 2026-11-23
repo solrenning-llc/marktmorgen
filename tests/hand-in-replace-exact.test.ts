@@ -130,6 +130,10 @@ for (const review of [true, false]) {
     assert.ok(files.has(first), "the earlier file is still in the file store (its delete failed)");
     assert.ok(!deleted.includes(first), "the earlier file is not reported deleted");
     assert.equal(await counted(w), keptFiles(w).length * 1000, `both files kept in storage stay counted: ${keptFiles(w).length} kept, ${await counted(w)} bytes counted`);
+    // #5285 row #4531 (Codex X6's LOW): a replaced file whose delete failed is no longer anybody's work, so nothing
+    // else would ever delete it. It goes to the daily job that deletes uploads nobody keeps (lib/file-drop.ts).
+    const [doors] = await realPipeline([["ZSCORE", "nl:tasks:doors", first]]);
+    assert.notEqual(doors, null, "RED: the earlier file is handed to the daily job that deletes uploads nobody keeps");
   });
 
   test(`two hand-ins at once over an earlier file (${how}): its room is given back once, and one current file is kept`, async () => {

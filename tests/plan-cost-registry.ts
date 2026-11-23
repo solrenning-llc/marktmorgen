@@ -3326,8 +3326,10 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/community/push/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/community/upload/route.ts", names: ["takeBuyerAction", "head(pathname)", "takePicturePlace"] },
       { file: "app/api/store/course/comment/route.ts", names: ["takeBuyerAction"] },
-      // The hand-in's head of its file and its deletes are priced with the door the file came through (TASK_DOOR_COST).
-      { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)", "headFile(path)", "deleteFile(path, \"site_cleanup\")", "releaseTaskHold(file.path)"] },
+      // The hand-in's head of its file and its deletes are priced with the door the file came through (TASK_DOOR_COST); a
+      // replaced file whose delete failed is handed to the daily sweep with one ZADD (noteTaskUpload), inside the same
+      // buyer action's commands (#5285 row #4531).
+      { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)", "headFile(path)", "deleteFile(path, \"site_cleanup\")", "releaseTaskHold(file.path)", "noteTaskUpload(replaced, 0)"] },
       // The assignment door also asks the file store once whether the browser's name is already a file (one head, and
       // a listing it may take back), after its buyer action is taken (9 November 2026).
       { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)", "head(pathname)", "dropTaskDoor(pathname)"] },

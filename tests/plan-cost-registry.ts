@@ -101,7 +101,7 @@ import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { TEAM_LIMITS } from "@/lib/team-scheduling-rules";
 import { HOST_LOCK_OWNER_COMMANDS, HOST_READING_FENCE_BYTES, HOST_READING_FENCE_COMMANDS, SYNC_SECONDS } from "@/lib/host-calendar";
 import { MAX_TEAM, MEMBER_STORES_READ, TEAM_LOG_FENCE_COMMANDS } from "@/lib/team";
-import { PIPELINE_ACCESS_FENCE_COMMANDS } from "@/lib/pipeline-access";
+import { PIPELINE_ACCESS_FENCE_COMMANDS, PIPELINE_ACCESS_GIVE_BACK_BYTES, PIPELINE_ACCESS_GIVE_BACK_COMMANDS } from "@/lib/pipeline-access";
 import { MAX_ANSWER_TEXT, MAX_FEEDBACK, MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
 import { MAX_IMAGE_BYTES } from "@/lib/product-image";
@@ -1539,9 +1539,13 @@ export function apiReadCost(w: ReadWork): number {
 export function figureCost(allowances: Record<AllowanceKind, number>, kind: AllowanceKind): number {
   return allowances[kind] * UNIT_COST[kind];
 }
-/** Every studio unit may be a teammate's pipeline-access write: its team-lease fence's inner commands, with wire headroom. */
+/**
+ * Every studio unit may be a teammate's pipeline-access write: its team-lease fence's inner commands, with wire headroom,
+ * and, when the lease refused it, the give-back of the room it took (Claude 5 iYzLs on #5111), both on every unit.
+ */
 export function pipelineAccessFenceCost(allowances: Record<AllowanceKind, number>): number {
-  return allowances.studio * (PIPELINE_ACCESS_FENCE_COMMANDS * COMMAND + 1_024 * DB_BYTE);
+  return allowances.studio * ((PIPELINE_ACCESS_FENCE_COMMANDS + PIPELINE_ACCESS_GIVE_BACK_COMMANDS) * COMMAND
+    + (1_024 + PIPELINE_ACCESS_GIVE_BACK_BYTES) * DB_BYTE);
 }
 /** Every studio unit may be a campaign mutation: two fence commands on each of three attempts, with wire headroom. */
 export function campaignLandingFenceCost(allowances: Record<AllowanceKind, number>): number {
@@ -2808,11 +2812,11 @@ export const COST_LINES: CostLine[] = [
     feature: "A teammate's pipeline access is written only while the route still holds the team lease it read the team under",
     monthlyUsd: (tier) => pipelineAccessFenceCost(STORE_ALLOWANCES[tier]),
     sources: [
-      { file: "lib/pipeline-access.ts", names: ["PIPELINE_ACCESS_FENCE_COMMANDS", "applyIfHeld(teamLease"] },
+      { file: "lib/pipeline-access.ts", names: ["PIPELINE_ACCESS_FENCE_COMMANDS", "PIPELINE_ACCESS_GIVE_BACK_COMMANDS", "PIPELINE_ACCESS_GIVE_BACK_BYTES", "applyIfHeld(teamLease", "if (grown > 0) await giveData(room"] },
       { file: "app/api/store/pipeline-access/route.ts", names: ["withTeamLocked(store.sid, async (teamLease)", "teamLease)) };"] },
       { file: "lib/redis-lock.ts", names: ["applyIfHeld", "CLOSING_FENCED"] },
     ],
-    basis: "In addition to the existing studio request, every studio unit funds the team-lease fence on the access write: EVAL and the lock's GET beside the HSET or HDEL it replaces, two more billed commands (Codex L-20261120-0128), and 1024 wire bytes for the lock key, token and script. A refused write is EVAL and GET, no access change. No new key or retention. The trial uses the same per-unit surcharge in nonPayingWorst; free-share carries its share. Prices and visible allowances do not change.",
+    basis: "In addition to the existing studio request, every studio unit funds the team-lease fence on the access write: EVAL and the lock's GET beside the HSET or HDEL it replaces, two more billed commands (Codex L-20261120-0128), and 1024 wire bytes for the lock key, token and script. A write the lease refused is EVAL and GET with no access change, and gives back the room it took: one more TAKE_DATA of one slot at its dearest (PIPELINE_ACCESS_GIVE_BACK_COMMANDS, takeDataCommands(1)) with the whole script on the wire (PIPELINE_ACCESS_GIVE_BACK_BYTES); every unit pays both, the HSET or HDEL the refused write skips not counted off (Claude 5 iYzLs on #5111; the refused path's billed commands held in tests/pipeline-access-expired-team-lease.test.ts). No new key or retention. The trial uses the same per-unit surcharge in nonPayingWorst; free-share carries its share. Prices and visible allowances do not change.",
   },
   {
     id: "chat-address-fence",

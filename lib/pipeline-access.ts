@@ -22,7 +22,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { type AccessMap, type PipelineAccess, parseAccessMap } from "@/lib/pipeline-access-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, applyIfHeld } from "@/lib/redis-lock";
-import { DataRoomError, type DataStore, forceData, giveData, needData } from "@/lib/store-data";
+import { DataRoomError, type DataStore, TAKE_DATA, forceData, giveData, needData, takeDataCommands } from "@/lib/store-data";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 
@@ -107,6 +107,15 @@ export async function readAllPipelineAccess(statsId: string | null): Promise<Rec
  * Priced on every studio request (tests/plan-cost-registry.ts, line pipeline-access-team-fence).
  */
 export const PIPELINE_ACCESS_FENCE_COMMANDS = 2;
+
+/**
+ * What a write the team lease refused adds on top (Claude 5 iYzLs on #5111): the room it took given back, one TAKE_DATA
+ * of one slot at its dearest, as Upstash bills a script's inner calls, never less. Priced with the fence on every studio
+ * request (line pipeline-access-team-fence), without counting off the HSET or HDEL the refused write skips.
+ */
+export const PIPELINE_ACCESS_GIVE_BACK_COMMANDS = takeDataCommands(1);
+/** The give-back's EVAL on the wire: the whole TAKE_DATA script, with 1024 bytes for its key and arguments. */
+export const PIPELINE_ACCESS_GIVE_BACK_BYTES = Buffer.byteLength(TAKE_DATA) + 1_024;
 
 /**
  * Sets a teammate's restrictions; none deletes their field. Room is taken (or given back) first. What was there is

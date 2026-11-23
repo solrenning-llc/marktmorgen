@@ -6,6 +6,10 @@
 import { claimHandle, closeStoreRecord, ensureStatsId, ERASING_KEY, erasingField, storeRef, type Store } from "@/lib/store";
 import { finishConsent, testKey } from "@/lib/meet-connect";
 import { makeTest, moveTest, readTests, removeTest, TestMeetingUnavailable } from "@/lib/meet-test";
+import { NextRequest } from "next/server";
+import { POST } from "@/app/api/integrations/meetings/route";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { LOCKED_UNTIL_STAR_COMMANDS, TAKE_COMMANDS, UNIT_COST, request } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 process.env.NIMBUS_DATA_KEY = "synthetic-meeting-test-erasure-key-not-for-production";
@@ -19,6 +23,7 @@ let providerBoundary: (() => Promise<void>) | null = null;
 let commitBoundary: (() => Promise<void>) | null = null;
 let crossed = 0, number = 86_000_000_000;
 let distortReply = false;
+let atProvider: (() => void) | null = null;
 redis.pipeline = (async (commands: Command[]) => {
   const writing = commands.some((c) => (c[0] === "SET" && c[1] === target) || (c[0] === "EVAL" && c[5] === target));
   if (writing && commitBoundary) {
@@ -41,6 +46,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (url.hostname === "api.zoom.us" &&
       ((url.pathname === "/v2/users/me/meetings" && method === "POST") || (/^\/v2\/meetings\/\d+$/.test(url.pathname) && method === "PATCH"))) {
+    if (atProvider) atProvider();
     if (providerBoundary) { const hook = providerBoundary; providerBoundary = null; crossed += 1; await hook(); }
     if (method === "PATCH") return json(204, null);
     number += 1;
@@ -110,6 +116,39 @@ async function main(): Promise<void> {
     // A timeout can follow a live write. Do not delete a legitimate live record by guessing it did not happen.
     is("the live write may have landed", (await readTests(store.statsId, ["zoom"])).zoom !== undefined, true);
   }
+  // The whole route, as a creator presses it, against the units it takes before the provider is called (coordinator's
+  // rules 964c and e931): a studio request ("settings") and an integration unit ("meet-manage"), both taken before the
+  // create or move, checked at the provider's call. Every command sent counts, and the commands the stand-in's
+  // scripts run inside an EVAL (the store-live keep's HGET, GET and SET among them), plus the take and lockedUntil
+  // allowances the studio unit carries.
+  part("The real test and move-test routes stay within the studio and integration units they take first");
+  const allowed = (kind: string) => redis.keys().filter((k) => k.startsWith(`nl:allow:${kind}:`)).reduce((n, k) => n + Number(redis.run(["GET", k]) ?? 0), 0);
+  for (const action of ["test", "movetest"] as const) {
+    const store = await fixture();
+    if (action === "movetest") await makeTest(store, "zoom");
+    const cookie = `${SESSION_COOKIE}=${await openSession(OWNER)}`;
+    let external = 0, keeps = 0;
+    const counting = redis.pipeline;
+    const before = redis.scriptCalls;
+    const studioBefore = allowed("studio"), integrationBefore = allowed("integration");
+    let takenFirst: [boolean, boolean] | null = null;
+    atProvider = () => { takenFirst = [allowed("studio") > studioBefore, allowed("integration") > integrationBefore]; };
+    redis.pipeline = (async (commands: Command[]) => {
+      external += commands.length;
+      keeps += commands.filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-keep-live:v1\n")).length;
+      return counting(commands);
+    }) as typeof redis.pipeline;
+    try {
+      const response = await POST(new NextRequest("https://marktmorgen.com/api/integrations/meetings", { method: "POST", headers: { host: "marktmorgen.com", cookie, "content-type": "application/json", origin: "https://marktmorgen.com" }, body: JSON.stringify({ action, provider: "zoom" }) }));
+      is(`${action}: the route answers`, response.status, 200);
+      const measured = external + (redis.scriptCalls - before) + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS;
+      console.log("TEST_MEETING_ROUTE_COST", action, JSON.stringify({ external, scriptCalls: redis.scriptCalls - before, keeps, measured }));
+      is(`${action}: kept once, through the fence`, keeps, 1);
+      is(`${action}: the studio and integration units are both taken before the provider is called`, takenFirst, [true, true]);
+      is(`${action}: inside those two units (${measured} commands)`, request("studio", measured, 50_000) <= UNIT_COST.studio + UNIT_COST.integration, true);
+    } finally { redis.pipeline = counting; atProvider = null; }
+  }
+
   redis.pipeline = real;
   done();
 }

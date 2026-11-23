@@ -54,6 +54,8 @@ let resendUncertain = false;
 let resendPosts = 0;
 let balance = 1_000_000;
 let stripeCalls = 0;
+/** Subscriptions whose late invoices Stripe lists with more than one page (has_more). */
+const moreThanAPage = new Set<string>();
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -82,7 +84,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (path === "/invoices" && method === "GET") {
     const rows = (invoices[url.searchParams.get("subscription") ?? ""] ?? []).filter((row) => row.status === "paid");
-    return answer({ object: "list", data: rows, has_more: false, url: "/v1/invoices" });
+    return answer({ object: "list", data: rows, has_more: moreThanAPage.has(url.searchParams.get("subscription") ?? ""), url: "/v1/invoices" });
   }
   if (path === "/balance" && method === "GET") return answer({ object: "balance", available: [{ amount: balance, currency: "usd" }], pending: [] });
   if (path === "/refunds" && method === "GET") {
@@ -319,6 +321,36 @@ async function main(): Promise<void> {
     /only while your Stripe account still lets us act on it/.test(termsPart),
     /you must refund it yourself/.test(termsPart),
   ], [true, true, true, true]);
+
+  part("Late invoices Stripe cannot list whole: tried once a day, the creator told once (#3367, LOW 2 of 6938631896)");
+  {
+    // More late invoices than one page (has_more) or a list that does not read: nothing is refunded on a part of it.
+    // It was a plain failure, tried again at every run with nobody told; now the plan is owed, read again the next day,
+    // and its creator is told once, PLAN_OWED_TELL_DAYS after, what to refund by hand.
+    const many = plan(2, 130, 5, "late-buyer-many@example.com");
+    moreThanAPage.add(many.sub);
+    await remember(ACCOUNT, many.session, about);
+    const ownerBefore = to(OWNER).length;
+    const toldOn: number[] = [];
+    const runs: { owed: number; failed: number }[] = [];
+    for (let day = 0; day <= 6; day += 1) {
+      const before = to(OWNER).length;
+      const run = await settlePlans();
+      runs.push({ owed: run.owed, failed: run.failed });
+      if (to(OWNER).length > before) toldOn.push(day);
+      tick(1);
+    }
+    is("counted owed, not a failure", runs.every((one) => one.owed >= 1 && one.failed === 0), true);
+    is("the creator told once, PLAN_OWED_TELL_DAYS after", [toldOn, to(OWNER).length - ownerBefore], [[3], 1]);
+    const note = to(OWNER).at(-1)?.text ?? "";
+    is("naming the checkout, saying the payments could not be read whole, and what to do", [note.includes(many.session), /could not read/i.test(note), /Stripe dashboard/i.test(note)], [true, true, true]);
+    is("nothing refunded on a part of the list, the buyer not told", [many.invoices.map((row) => (refunds[row.charge.payment_intent] ?? []).length), to("late-buyer-many@example.com").length], [[0, 0, 0, 0, 0], 0]);
+    const [due] = await redis.pipeline([["ZRANGEBYSCORE", "nl:plans:retry", "-inf", String(Math.floor(Date.now() / 1000))]]);
+    is("not due again within the same day", (due as string[]).some((m) => m.startsWith(`${ACCOUNT}|${many.session}|`)), false);
+    moreThanAPage.clear();
+    const [lined] = await redis.pipeline([["ZRANGEBYSCORE", "nl:plans:retry", "-inf", "+inf"]]);
+    for (const member of lined as string[]) if (member.startsWith(`${ACCOUNT}|${many.session}|`)) await redis.pipeline([["ZREM", "nl:plans:retry", member]]);
+  }
 
   part("A try stays within the registry's figures");
   const declared = (registry as Record<string, unknown>).PLAN_SETTLE_RUN as Record<string, number>;

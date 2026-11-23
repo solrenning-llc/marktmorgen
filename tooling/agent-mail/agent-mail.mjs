@@ -1732,14 +1732,16 @@ export function motivosContraReady(texto) {
   // #5404, 7114392176).
   // A capital severity's plural in either case, "NITs" and "LEVEs" as well as "NITS" (Claude 3 wSUb3's MÉDIO on #5404).
   const tamanho = new RegExp(`\\b(${SEV})(?:S|s)?\\b`).exec(resto)
-    ?? new RegExp(`\\b(${SEV})S?\\b[ \\t]*(\\d+[ \\t]*)?(\\([^)]*\\)[ \\t]*)?[:—–]|\\b(achados?|findings?|defeitos?|defects?)[ \\t]+(${SEV})S?\\b|\\b(\\d+|one|two|three|um|uma|dois|duas|tr[êe]s)[ \\t]+(${SEV})S?\\b`, "iu").exec(resto);
+    ?? new RegExp(`\\b(${SEV})S?\\b[ \\t]*(\\d+[ \\t]*)?(\\([^)]*\\)[ \\t]*)?[:—–]|\\b(achados?|findings?|defeitos?|defects?)[ \\t]+(${SEV})S?\\b|\\b(\\d+|one|two|three|um|uma|dois|duas|tr[êe]s)[ \\t]+(${SEV})S?\\b(?![-‐\\p{L}])(?![ \\t]+de\\b)`, "iu").exec(resto);
   // Claude 5 ichw's two LEVE on #5404 (7116035718): a severity or a small-size word in any case right before a finding
   // noun ("a minor nit in ...", "um pequeno problema"), the common finding nouns before a colon or a dash ("Issue:",
   // "Cosmetic:", "Suggestion:", "Observação:") and a clause that opens with "Typo" are findings too. A net, not a proof:
-  // the reviewer still writes "sem achados" only when there are none (README).
+  // the reviewer still writes "sem achados" only when there are none (README). The noun with a colon or dash counts only
+  // at the start of a clause, and a count never pairs with the first half of a hyphenated word ("3 high-traffic") or with
+  // "mínimo de" ("um mínimo de 2 READY"): ordinary wording is not a finding (Claude 5 id8Ws's LEVE on #5404, 7116503145).
   const RUIDO = "nits?|nitpicks?|issues?|problems?|problemas?|pontos?|findings?|achados?|defects?|defeitos?|typos?|bugs?";
   const nome = tamanho ? null
-    : new RegExp(`\\b(${SEV}|small|tiny|slight|pequen[oa]s?)S?[ \\t]+(${RUIDO})\\b|\\b(issues?|problems?|problemas?|pontos?|bugs?|typos?|cosmetic|cosm[ée]tic[oa]s?|suggestions?|sugest[ãa]o|sugest[õo]es|observa[çc][ãa]o|observa[çc][õo]es)[ \\t]*[:—–]|(^|\\n)[ \\t]*typos?\\b`, "iu").exec(resto);
+    : new RegExp(`\\b(${SEV}|small|tiny|slight|pequen[oa]s?)S?[ \\t]+(${RUIDO})\\b|(^|\\n)[ \\t]*(issues?|problems?|problemas?|pontos?|bugs?|typos?|cosmetic|cosm[ée]tic[oa]s?|suggestions?|sugest[ãa]o|sugest[õo]es|observa[çc][ãa]o|observa[çc][õo]es)[ \\t]*[:—–]|(^|\\n)[ \\t]*typos?\\b`, "iu").exec(resto);
   if (nome) motivos.push(`o texto aponta um achado (${nome[0].trim()}); um achado de head anterior só conta como resolvido no formato ${FORMATO_RESOLVIDO}`);
   if (tamanho) motivos.push(`o texto aponta um achado (${tamanho[0]}); um achado de head anterior só conta como resolvido no formato ${FORMATO_RESOLVIDO}`);
   const adiado = /n[ãa]o bloque(ia|ante)|non-?blocking|follow-?up(?!\s+(commit|push)s?\b)|fica para depois|fica pra depois/i.exec(resto);

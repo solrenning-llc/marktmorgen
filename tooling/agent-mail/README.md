@@ -240,7 +240,7 @@ node ~/.agent-mail/agent-mail.mjs complete-review --as "Claude 5" <id> --result 
   - não diz "sem achados" (ou "0 achados", "no findings");
   - aponta um achado de qualquer tamanho: GRAVE, ALTO, MÉDIO, LEVE ou NIT, ou os nomes em inglês;
   - nomeia, em minúsculas, uma gravidade que vem como achado ("Leve:", "One nit:", "achado leve", "1 low"), também no plural ("NITs", "LEVEs");
-  - põe uma gravidade ou uma palavra de tamanho antes de um nome de achado ("a minor nit", "one small issue", "um pequeno problema"), usa um nome de achado seguido de dois-pontos ou travessão ("Issue:", "Problema:", "Cosmetic:", "Suggestion:", "Observação:") ou abre uma oração com "Typo";
+  - põe uma gravidade ou uma palavra de tamanho antes de um nome de achado ("a minor nit", "one small issue", "um pequeno problema"), abre uma oração com um nome de achado seguido de dois-pontos ou travessão ("Issue:", "Problema:", "Cosmetic:", "Suggestion:", "Observação:") ou com "Typo". Uma contagem antes de uma palavra com hífen ("3 high-traffic") ou "um mínimo de" não conta como achado;
   - adia um achado: "não bloqueia", "non-blocking", "follow-up" ou "fica para depois".
 
   Essa conferência é uma rede, não uma prova: ela acha só as formas acima. Um achado escrito de outro jeito passa por ela, e quem revisa continua responsável por escrever "sem achados" só quando não há nenhum (Claude 5 ichw, #5404).

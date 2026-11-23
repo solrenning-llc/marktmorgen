@@ -115,10 +115,14 @@ export const ERASE_SUBMISSIONS: readonly [number, number] = [301, 70_000];
  * most twice the cap (ERASE_SENDS_READ_MOST, Claude 2 lpgvy on #5072, LOW 2), so the places whose send is gone are let
  * go in the same SREM; and, first, the community's count of
  * erasures moved on (an INCR and its EXPIRE, Claude 2 lpgvy on #5072, LOW 1), so a send that read the members while
- * this person was erased lets its list go. Bytes: the script's text, the keys and the replies, under 5,000, counted at
- * 8,000; the lists themselves stay inside Redis. Held by tests/community-mail-recipient-erasure.test.ts.
+ * this person was erased lets its list go; and one DEL for each stale place's recipient list, let go before its SREM
+ * (Claude 3 yaQt on #5072, LEVE), at most MAX_SENDS_UNDER_WAY where they count most: with s stale places and l live
+ * sends, s + l at most ERASE_SENDS_READ_MOST and l at most the cap, 5 + (s + l) + s + 2l is largest at s = l = the
+ * cap (Claude 3 on #5072, MEDIO: 105 sent against the 85 counted before). Bytes: the script's text, the keys and the
+ * replies, under 5,000 with the DELs' keys, counted at 8,000; the lists themselves stay inside Redis. Held, commands
+ * sent against this figure at that worst, by tests/community-mail-recipient-erasure.test.ts.
  */
-export const ERASE_ANNOUNCEMENT_LISTS: readonly [number, number] = [2 + 3 + 2 * MAX_SENDS_UNDER_WAY + 2 * MAX_SENDS_UNDER_WAY, 8_000];
+export const ERASE_ANNOUNCEMENT_LISTS: readonly [number, number] = [2 + 3 + 2 * MAX_SENDS_UNDER_WAY + 2 * MAX_SENDS_UNDER_WAY + MAX_SENDS_UNDER_WAY, 8_000];
 
 /**
  * Commands every erasure sends whatever the store: each module's own, workflows at their cap, a sync log at its length,

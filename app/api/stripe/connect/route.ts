@@ -8,7 +8,7 @@ import {
   isConnectConfigured,
   normaliseCountry,
 } from "@/lib/stripe-connect";
-import { setStripeAccount } from "@/lib/store";
+import { setStripeAccount, storeForRefExact } from "@/lib/store";
 import { limited } from "@/lib/request-guard";
 
 /**
@@ -51,7 +51,15 @@ export async function POST(request: NextRequest) {
       // Written only while the store still has none: when two tabs connect at once, the first account written
       // stays the store's, and the late tab is not sent to onboard one the store does not keep.
       const saved = await setStripeAccount(ref, accountId, false, { expected: null });
-      if (!saved.ok) return away(origin, studio("stripe=error"));
+      if (!saved.ok) {
+        // The late tab of that race is sent to onboard the account the store does keep, rather than to a dead end
+        // (#5285 row #4335); the first tab already told the creator it was connected. Its own account, opened at
+        // Stripe a moment ago, stays an orphan there, as before. Any other refusal, or no account kept, is an error.
+        const kept = saved.reason === "moved" ? await keptAccount(ref, store.sid) : null;
+        if (!kept) return away(origin, studio("stripe=error"));
+        const link = await createOnboardingLink(kept, origin, store.sid);
+        return new Response(null, { status: 303, headers: { Location: link } });
+      }
       // Where sales are paid is the setting worth stealing a session for, so
       // the creator is told at their sign-in address (lib/account-notice.ts).
       after(() => noticeCreator(store, { kind: "stripe-connected" }));
@@ -67,5 +75,18 @@ export async function POST(request: NextRequest) {
       return away(origin, studio("stripe=country-unsupported"));
     }
     return away(origin, studio("stripe=error"));
+  }
+}
+
+/**
+ * The account the store keeps now, read again by its exact ref after a connect lost the race to another tab; null
+ * when it keeps none, when the record is another store's (another sid) or when the read cannot be told.
+ */
+async function keptAccount(ref: string, sid: string): Promise<string | null> {
+  try {
+    const current = await storeForRefExact(ref);
+    return current && current.sid === sid ? current.stripeAccountId || null : null;
+  } catch {
+    return null;
   }
 }

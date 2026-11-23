@@ -45,7 +45,7 @@ No refund completion, loss elimination or automatic recovery is claimed from thi
 Updated 11 November 2026 (Claude 1, complement C1-20261105-1919-C4-1 of 232 [CA1]). Account configuration and the listed checkout transport journeys have regression evidence. These were delivered by later units of 232 [CA1], merged and off until opening:
 
 - the inventory of every charge to a creator, paid before or after use: unit 2 (PR #1376);
-- no charge after use (the usage cron puts nothing on an invoice): unit 3 (PR #1385);
+- no charge after use (the usage cron puts nothing on an invoice, because no meter owes anything: `owed` is 0 on every meter; the `carryOut` → `addToNextInvoice` path in `lib/usage-billing.ts` and `lib/billing.ts` is still in the code, so a meter that owed again would reopen a charge after use): unit 3 (PR #1385);
 - the stop of every costly feature on the first day a renewal is declined (past_due): unit 4a (PR #1392);
 - a creator's dispute suspends the covered features and the disputed add-on is never sold again: unit 5 (PR #1403);
 - a refund never above what was paid (guarantee and unstarted yearly months): unit 6 (PR #1408).

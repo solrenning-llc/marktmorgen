@@ -245,11 +245,17 @@ export function parseStages(raw: unknown): Stage[] | null {
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 
 /**
- * Whether an address sent for a deal is kept whole: at most 254 characters as one line once lowercased, as parseDeal
- * keeps it. The board refuses a longer one as the address (app/api/store/crm, "email"), so parseDeal never cuts it or
+ * Whether an address sent for a deal is kept whole: none, or a full address (EMAIL) of at most 254 characters as one
+ * line once lowercased, as parseDeal keeps it. The board refuses a longer one as the address (app/api/store/crm, "email"), so parseDeal never cuts it or
  * keeps it empty without a word (coordinator's LOW 3 on #2048, 29th batch).
  */
-export const dealEmailFits = (value: unknown) => typeof value !== "string" || oneLine(value, Number.MAX_SAFE_INTEGER).toLowerCase().length <= 254;
+export const dealEmailFits = (value: unknown) => {
+  if (typeof value !== "string") return true;
+  const lowered = oneLine(value, Number.MAX_SAFE_INTEGER).toLowerCase();
+  // An address that is not a full one (jane@x, a@b@c.com) is refused as the address too, never kept empty without a
+  // word, as the form-opportunity route already does (coordinator's triple audit of #2048 @bbd4481d5d, LOW 4).
+  return lowered === "" || (lowered.length <= 254 && EMAIL.test(lowered));
+};
 
 /** A deal as sent or stored, made safe; null without a title or a stage the store has. */
 export function parseDeal(raw: unknown, stages: readonly Stage[]): Deal | null {

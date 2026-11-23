@@ -10,6 +10,10 @@ for (const [name, patch] of [
   ["non-leap February 29", { checkedOn: "2025-02-29" }],
   ["HTTPS prefix without a host", { source: "https://" }],
   ["HTTPS fragment without a host", { source: "https://#source" }],
+  // Claude 2's NIT on #5024 (7061724274): `new URL` reads these as host "x"; a source names its page as https://host/...
+  ["HTTPS scheme with no slashes", { source: "https:x" }],
+  ["HTTPS with an empty authority", { source: "https:///x" }],
+  ["a host with no domain", { source: "https://x/fx" }],
 ] as const) test(`unreadable allowance evidence stays unknown: ${name}`, () => {
   assert.equal(vatCollectionCostOf(10000, "eur", [{ ...valid, ...patch }], now), null);
 });

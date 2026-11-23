@@ -42,7 +42,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_STAMP_BYTES, type ProductFile, isPdf } from "@/lib/product-file";
 import { copyFolder, dropWrittenCopy, problemKey, roomNotedOut, writeWithinStorage } from "@/lib/pdf-stamp";
 import { releaseMark } from "@/lib/claim-mark";
-import type { CopyMeter } from "@/lib/stamp-cost-rules";
+import { type CopyMeter, PROBLEM_NOTE_SECONDS } from "@/lib/stamp-cost-rules";
 import { type DataStore, dataUsed, keepFor } from "@/lib/store-data";
 import { contentRoomFor } from "@/lib/store-data-rules";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
@@ -65,7 +65,7 @@ export const PREVIEW_RECORD_BYTES = 1_024;
 /** The room's own field for the month a record expires in (lib/store-data.ts, TAKE_DATA). */
 const MONTH_FIELD_BYTES = 64;
 /** As long as lib/pdf-stamp.ts keeps its note about a file that could not be stamped. */
-const UNREADABLE_SECONDS = 60 * 24 * 60 * 60;
+const UNREADABLE_SECONDS = PROBLEM_NOTE_SECONDS;
 /**
  * A first failure to cut a preview is noted only "unreadable-once:<ms>", kept as long as an unreadable note (so a
  * failure asked hours later is still its second; Claude 2 lpgvy's LEVE on #5360), and no new parse is tried for an hour

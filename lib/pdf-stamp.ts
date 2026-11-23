@@ -55,7 +55,7 @@ import { type DataStore, keepFor } from "@/lib/store-data";
 import { standingOf } from "@/lib/plan-standing";
 import { storageBrakeFor, storageUsed } from "@/lib/storage-quota";
 import { releaseStorage, reserveStorage } from "@/lib/storage-reservations";
-import { type CopyMeter, FLY_MAX_BYTES, NO_ROOM_NOTE_SECONDS, STORAGE_MEASURE_UNITS, flyHoldUnits, flyUnits } from "@/lib/stamp-cost-rules";
+import { type CopyMeter, FLY_MAX_BYTES, NO_ROOM_NOTE_SECONDS, PROBLEM_NOTE_SECONDS, STORAGE_MEASURE_UNITS, flyHoldUnits, flyUnits } from "@/lib/stamp-cost-rules";
 import type { LanguageCode } from "@/lib/store-language";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -65,7 +65,7 @@ const COPY_RECORD_SECONDS = 400 * 24 * 60 * 60;
 /** What a stamped copy's record takes in the store's data room for the time it is kept. */
 export const COPY_RECORD_BYTES = 768;
 /** How long a note about a PDF that could not be stamped stays in the studio. */
-const PROBLEM_SECONDS = 60 * 24 * 60 * 60;
+const PROBLEM_SECONDS = PROBLEM_NOTE_SECONDS;
 
 export const copyKey = (reference: string, file: Pick<ProductFile, "pathname" | "addedAt">) => `nl:stamp:copy:${sha(`${reference}|${file.pathname}|${file.addedAt}`).slice(0, 40)}`;
 export const problemKey = (pathname: string) => `nl:stamp:problem:${sha(pathname).slice(0, 40)}`;

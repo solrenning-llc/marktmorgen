@@ -482,7 +482,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:sold:": E, "nl:sold:lock:": E,
   // A store whose earlier sales were not all read: one mark, erased with it (lib/yearly-offer.ts, soldBeforeUnknownKey).
   "nl:soldbefore:": E,
-  "nl:stamp:copy:": T("prepare", 400), "nl:stamp:problem:": X(31),
+  "nl:stamp:copy:": T("prepare", 400), "nl:stamp:problem:": X(120),
   "nl:stamp:drop": C,
   // A store found without room for a new stamped copy or preview: one mark a store, kept NO_ROOM_NOTE_SECONDS (an hour), erased with it.
   "nl:stamp:noroom:": E,

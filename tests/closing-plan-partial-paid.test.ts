@@ -186,6 +186,33 @@ async function main() {
     is("the creator is told once, honestly", [told.length, told[0]?.text.includes("$20 in full"), told[0]?.text.includes("No payment was taken")], [1, true, false]);
   }
 
+  // Board #5285, row #3274 (the LEVE of 6727386237): Stripe keeps a default InvoicePayment on an invoice once it is
+  // finalized, open and synchronized with its amount_remaining; with the plan ended it never resolves. It no longer
+  // holds the plan in line: the money taken is given back and the creator is told. Any other open payment still holds.
+  part("Money on an open invoice, with Stripe's own default payment open for the rest: settled, and the creator told");
+  {
+    const one = await inLine("openpart02", [invoiceRow("in_openpart02", "open", 2_000, { amount_remaining: 4_900 })]);
+    const rest = { id: "inpay_openpart02d", object: "invoice_payment", invoice: "in_openpart02", status: "open", is_default: true, amount_paid: 0, amount_requested: 4_900, payment: { type: "payment_intent", payment_intent: "pi_openpart02d" }, status_transitions: { paid_at: null, canceled_at: null } };
+    world.payments.set("in_openpart02", [paidPart("in_openpart02", "pi_openpart02", 2_000, S(day) + 120), rest]);
+    world.charges.set("pi_openpart02", 2_000);
+    is("settled", await settleOne(one.id), true);
+    is("the $20 taken is given back in full, once", refundsOf("pi_openpart02"), [2_000]);
+    const told = lettersTo(one.to);
+    is("the creator is told once, honestly", [told.length, told[0]?.text.includes("$20 in full")], [1, true]);
+    is("a recheck asks for no second refund and writes no second letter", [await settleOne(one.id, true), refundsOf("pi_openpart02"), lettersTo(one.to).length], [true, [2_000], 1]);
+  }
+  for (const [name, label, rest] of [
+    ["openpart03", "an open payment that is not the default", { is_default: false, amount_requested: 4_900 }],
+    ["openpart04", "a default payment for another amount than what remains", { is_default: true, amount_requested: 2_000 }],
+    ["openpart05", "a default payment with no amount requested", { is_default: true }],
+  ] as [string, string, Record<string, unknown>][]) {
+    const invoice = `in_${name}`;
+    const one = await inLine(name, [invoiceRow(invoice, "open", 2_000, { amount_remaining: 4_900 })]);
+    world.payments.set(invoice, [paidPart(invoice, `pi_${name}`, 2_000, S(day) + 120), { id: `inpay_${name}o`, object: "invoice_payment", invoice, status: "open", amount_paid: 0, ...rest }]);
+    world.charges.set(`pi_${name}`, 2_000);
+    is(`${label}: still held, more may yet be taken`, [await settleOne(one.id), lettersTo(one.to).length], [false, 0]);
+  }
+
   part("A paid invoice paid in two payments: both are given back");
   for (const [name, direct] of [["twopart01", "pi_twopart01a"], ["twopart02", null]] as [string, string | null][]) {
     const invoice = `in_${name}`;

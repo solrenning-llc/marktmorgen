@@ -1,7 +1,7 @@
 import { PAID_STORAGE_BYTES } from "@/lib/storage-rules";
 import { BUYER_CAP_MONTHS, BUYER_NOTICE_DAYS } from "@/lib/closing-buyers-rules";
 import { CLOSING_CHECKOUT_SECONDS } from "@/lib/closing-plan-guard";
-import { CENTS_PER_MINUTE, GIVE_UP_HOURS, MIN_CENTS, dollars } from "@/lib/auto-captions-rules";
+import { CENTS_PER_MINUTE, DELIVERY_LOOK_DAYS, GIVE_UP_HOURS, MIN_CENTS, dollars } from "@/lib/auto-captions-rules";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
@@ -41,7 +41,7 @@ export const metadata: Metadata = {
 export default function TermsPage() {
   const domains = isDomainsConfigured();
   return (
-    <LegalPage title="Terms of Service" lastUpdated="November 10, 2026">
+    <LegalPage title="Terms of Service" lastUpdated="November 23, 2026">
       <p>
         These Terms of Service (“Terms”) govern your access to and use of the
         websites, products, and subscription services operated by Solrenning
@@ -553,9 +553,13 @@ export default function TermsPage() {
           minute of the video, the minutes rounded up, for each language
           asked, and never less than {dollars(MIN_CENTS)} for one request. The
           price is shown before you confirm and is charged at once to the card
-          your plan is paid with, on an invoice of its own. If the captions in
-          a language are not delivered within {GIVE_UP_HOURS} hours, what was
-          paid for that language is refunded automatically. A refund counts as
+          your plan is paid with, on an invoice of its own. What was paid for a
+          language whose captions are not delivered is refunded automatically
+          once our video provider confirms what it delivered, no sooner than{" "}
+          {GIVE_UP_HOURS} hours after the order. If our video provider does not
+          confirm it, we keep asking on our own for {DELIVERY_LOOK_DAYS} more
+          days; after that, the course&apos;s page in your studio says so and
+          gives the address to write to, and we look into it with you. A refund counts as
           made only once Stripe confirms it. Until then we check it again on
           our own for about ten days, and the course&apos;s page in your studio
           shows the refund as not confirmed yet; if it is still not confirmed

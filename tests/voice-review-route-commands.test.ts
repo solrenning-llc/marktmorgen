@@ -29,7 +29,7 @@ process.env.STRIPE_SECRET_KEY = "sk_test_voice_route_commands_only";
 
 const OWNER = "voice-route-commands@example.com";
 const HANDLE = "voice-route-commands";
-const ACCOUNT = "acct_1TestVoiceCmds01";
+const ACCOUNT = "acct_1TestVoiceCmd1";
 const SESSION = "cs_test_voiceroutecommands001";
 const BUYER = "buyer-voice-commands@example.com";
 

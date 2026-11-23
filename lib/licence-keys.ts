@@ -1057,7 +1057,9 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
               continue;
             }
             const dropped = countOf(repliesFor(await redisPipeline([["HDEL", waitingKey(store, product), sale.reference]]), 1)?.[0]);
-            if (dropped === null) throw new UnknownReplyError("HDEL of a buyer waiting for a license key");
+            // One field is named, so only 0 or 1 can come back: any other count is an unknown shape (rule 24), and the
+            // refund stays unread until the place is confirmed gone (Codex G-20261119-2127, #5010 row 91).
+            if (dropped !== 0 && dropped !== 1) throw new UnknownReplyError("HDEL of a buyer waiting for a license key");
           }
         }
       } catch (error) {

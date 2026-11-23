@@ -138,3 +138,16 @@ test("the route's worst case is unchanged and the refused ask stops at the union
   assert.ok(over.length < most.length, "the refused ask costs less than the most an ask can cost");
   console.log(`every-store ask: ${one.length} commands for 1 store, +${perStore} a store, ${most.length} at ${MAX_ERASE_STORES} stores (the worst), ${over.length} refused past it`);
 });
+
+test("a store past the library's cut, asked for itself, still sends its own link (Claude 5 ia5d on #5226)", async () => {
+  redis.clear();
+  const email = "one-at-a-time@example.com";
+  const stores: Store[] = [];
+  for (let n = 1; n <= MAX_ERASE_STORES + 1; n += 1) stores.push(await paidStore(n));
+  for (const store of stores) await rememberBuyers(store.sid, [email]);
+  const seen = new Set(await storesKnownFor(email));
+  const past = stores.filter((s) => !seen.has(s.sid));
+  assert.ok(past.length > 0, "the library's cut leaves a store out");
+  const asked = await grantsWhile(() => askErasureLink({ email, ip: `198.51.100.${++ip}`, origin: "https://marktmorgen.com", handle: past[0].handle }));
+  assert.deepEqual(asked.grants, [[past[0].sid]], "its own ask sends a link to it, never nothing");
+});

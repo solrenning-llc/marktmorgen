@@ -139,7 +139,9 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
       // C4-15 (3)(a)): their time, and a send that fails or finds the room just taken, would only ever come to
       // an address the store knows. They go to the server's log; the page always gives the privacy contact.
       afterAnswer(async () => {
-        const known = new Set(await storesKnownFor(email));
+        // Every store that knows the address, not the library's first MAX_LIBRARY_STORES: a store past that cut is asked
+        // here for itself, and its own link must not be lost (Claude 5 ia5d on #5226). The union is read whole either way.
+        const known = new Set(await storesKnownFor(email, Number.MAX_SAFE_INTEGER));
         if (!(await knows(store, email, known))) return;
         const answer = await emailLink([store], email, input.origin);
         if (answer.status !== "sent") console.warn(`a deletion link asked from one store was not emailed: ${answer.status} (store ${store.sid})`);

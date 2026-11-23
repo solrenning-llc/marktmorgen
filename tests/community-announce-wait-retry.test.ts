@@ -81,6 +81,42 @@ async function main(): Promise<void> {
     is("past 60 days it ends, out of line, nothing sent", [ended?.status, db.run(["SISMEMBER", "nl:cm:mailq", id]), sent.length], ["failed", 0, 0]);
     is("saying why and that it waited 60 days", [why.test(ended?.note ?? ""), /60 days/.test(ended?.note ?? "")], [true, true]);
   }
+
+  // The coordinator's cost line (ibqho c2c2): how many sends a community can have held at once has a ceiling, and the
+  // commands of each run and each hourly look are held to the constants the company exposure line counts.
+  const MOST: unknown = (communityMail as Record<string, unknown>).ANNOUNCEMENTS_HELD_MOST;
+  const RUN: unknown = (communityMail as Record<string, unknown>).ANNOUNCEMENT_HELD_RUN_COMMANDS;
+  const LOOK_OWN: unknown = (communityMail as Record<string, unknown>).ANNOUNCEMENT_HELD_LOOK_OWN_COMMANDS;
+  is("at most 3 sends of a community are held at once", MOST, 3);
+  part("A fourth send held for the same community ends at once, saying why");
+  {
+    reset();
+    shift = 0;
+    const off = { ...store, suspended: "2026-11-09T12:00:00.000Z" } as Store;
+    const ids = ["1", "2", "3", "4"].map((d) => d.repeat(24));
+    for (const one of ids) {
+      db.run(["SET", `nl:cm:mail:${one}`, JSON.stringify({ ...job, id: one })]);
+      db.run(["RPUSH", `nl:cm:mail:${one}:to`, ...members.map((m) => m.k)]);
+      db.run(["SADD", "nl:cm:mailq", one]);
+    }
+    const answers = [];
+    for (const one of ids) answers.push(await advanceAnnouncement(one, async () => off, Date.now() + 10_000));
+    is("the first three wait", answers.slice(0, 3).map((a) => a?.status), ["waiting", "waiting", "waiting"]);
+    is("the fourth ends, out of line, nothing sent", [answers[3]?.status, db.run(["SISMEMBER", "nl:cm:mailq", ids[3]]), sent.length], ["failed", 0, 0]);
+    is("saying that only 3 wait at a time", /3 announcements/.test(answers[3]?.note ?? ""), true);
+    commandsSeen.length = 0;
+    await advanceAnnouncement(ids[0], async () => off, Date.now() + 10_000);
+    is(`a run while held sends at most ANNOUNCEMENT_HELD_RUN_COMMANDS (${String(RUN)}) commands`, typeof RUN === "number" && commandsSeen.length <= RUN, true);
+    shift = 3_600_000 + 1_000;
+    commandsSeen.length = 0;
+    await advanceAnnouncement(ids[0], async () => off, Date.now() + 10_000);
+    is(`an hourly look sends at most ANNOUNCEMENT_HELD_LOOK_OWN_COMMANDS (${String(LOOK_OWN)}) of its own, besides the store's and the settings' reads`, typeof LOOK_OWN === "number" && commandsSeen.length <= LOOK_OWN, true);
+    shift = 0;
+    // Back on, the first goes out, and a new send can be held again in its place.
+    shift = 2 * 3_600_000;
+    const resumed = await advanceAnnouncement(ids[1], async () => store, Date.now() + 10_000);
+    is("back on, a held send goes out", resumed?.status, "sent");
+  }
   Date.now = realNow;
   done();
 }

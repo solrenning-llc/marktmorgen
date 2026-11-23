@@ -13,7 +13,7 @@
  * Synthetic data, Stripe and PayPal stand-ins.
  */
 import * as rules from "@/lib/api-read-rules";
-import { BOOK_INVOICES_KEPT_BYTES } from "@/lib/api-read-rules";
+import { BOOK_INVOICES_KEPT_BYTES, bookWork } from "@/lib/api-read-rules";
 import { readBook } from "@/lib/affiliates";
 import { affiliates as apiAffiliates } from "@/lib/api-read";
 import { affiliatesTool } from "@/lib/mcp-tools";
@@ -119,6 +119,12 @@ async function main(): Promise<void> {
   const MARK_BYTES = MAX_STORE_BYTES + 512;
   const ceilingCost = request("heavy", 9, BOOK_INVOICES_KEPT_BYTES + 2 * MARK_BYTES) + perMegabyte(BOOK_INVOICES_KEPT_BYTES + 2 * MARK_BYTES);
   is("past the ceiling, worth at least the nine commands, the kept invoices read and two marks written", units * UNIT_COST.studio >= ceilingCost, true);
+  // The API and MCP readers count the same path the same way (Claude 7 HHH's MEDIO on #5384, 7110143161): the GET and
+  // the mark's script of four, sent twice, are nine commands in bookWork too, never one a script. Only the kept
+  // invoices differ between these two sizes (no entries, so no PayPal slices and no refund marks; no products).
+  const sizesWith = { kept: true, entries: 0, people: 1, leads: 0, paypalRefunds: 0, stripe: true, products: 0 };
+  const keptPart = bookWork(sizesWith, 0).commands - bookWork({ ...sizesWith, stripe: false }, 0).commands;
+  is("the API and MCP readers count the kept invoices' path as nine commands, as the studio does", keptPart, 9);
 
   part("A studio or payout reading takes them before it reads, and reads whole");
   const before = await left(store);

@@ -1367,6 +1367,11 @@ console.log("ZA: what a READY's text may say (owner, 23/11/2026 12h29 Fortaleza:
     is(`ZA: iZByNH's '${t}' is accepted`, aceito(t), za(t).join("; "));
   for (const t of ["sem achados; achado leve no nome", "0 findings; finding low in the log", "0 findings; 1 low in the log", "sem achados. Alto: o contraste caiu"])
     is(`ZA: iZByNH's control '${t}' is refused`, !aceito(t), za(t).join("; "));
+  // Claude 3 wSUb3's MÉDIO on #5404 (7114133670), still open per Claude 5 iao9Ep (7115458030): a capitalised severity's
+  // lowercase plural ("NITs", "LOWs", "LEVEs") is a finding too.
+  for (const t of ["READY, no findings except the NITs on wording", "READY, sem achados; ficaram os NITs de texto", "READY, no findings. The NITs in the comments remain", "READY, no findings; the LOWs in tests are open", "READY, sem achados; os LEVEs do teste continuam", "READY, no findings; the HIGHs are open", "READY, no findings\nNITs: the wording"])
+    is(`ZA: wSUb3's plural '${t.replace(/\n/g, " / ")}' is refused`, !aceito(t), za(t).join("; "));
+  is("ZA: the plain zero declaration is still accepted", aceito("READY, sem achados."), za("READY, sem achados.").join("; "));
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

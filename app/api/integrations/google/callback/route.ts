@@ -7,6 +7,7 @@ import { GOOGLE_STATE_COOKIE, clearGoogleStateCookie, finishGoogleSignIn, isGoog
 import { finishProvenSignIn } from "@/lib/signin-finish";
 import { clientAddress, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { withPrefill } from "@/lib/handle-prefill";
+import { lockedUntil } from "@/lib/two-step";
 
 /**
  * Where Google sends the person back after its consent page: the redirect
@@ -20,9 +21,14 @@ export async function GET(request: NextRequest) {
   const state = request.nextUrl.searchParams.get("state") ?? "";
   if (isGoogleSignInState(state)) return googleSignIn(request, state);
   if (isSearchConsoleState(state)) {
-    const email = await emailForSession(request.cookies.get(SESSION_COOKIE)?.value ?? "").catch(() => null);
+    const session = request.cookies.get(SESSION_COOKIE)?.value ?? "";
+    const email = await emailForSession(session).catch(() => null);
     const error = request.nextUrl.searchParams.get("error");
-    const result = await finishSearchConsole(state, error ? "" : request.nextUrl.searchParams.get("code") ?? "", email);
+    // A session let in without its second step changes no setting (lib/two-step.ts LOCKED_NEEDS has "settings"), as
+    // the operator's form refuses it (app/api/operator/search-console/route.ts): it finishes no connection either, and
+    // Google is not asked to exchange the code (#5285 row #3930, Codex X6). A lock that cannot be read counts as one.
+    const locked = await lockedUntil(session).then((until) => until > 0, () => true);
+    const result = locked ? "expired" : await finishSearchConsole(state, error ? "" : request.nextUrl.searchParams.get("code") ?? "", email);
     return new Response(null, { status: 303, headers: { Location: `${originFrom(request)}/studio?gsc=${result}#numbers`, "Cache-Control": "no-store" } });
   }
   return finishConnect(request, "google");

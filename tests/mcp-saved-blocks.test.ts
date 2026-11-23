@@ -44,8 +44,8 @@ async function main(): Promise<void> {
     is("an empty list", (await list()).value.sections, []);
 
     part("Saved sections, newest change first, testimonials counted");
-    const older = await writeSection(store.statsId!, { id: newSectionId(), name: "Guarantee", updatedAt: 1_000, blocks: [{ id: newBlockId(), kind: "faq", heading: "Questions", items: [{ q: "Refunds?", a: "Thirty days." }] }] }, true, 10);
-    const newer = await writeSection(store.statsId!, { id: newSectionId(), name: "Praise", updatedAt: 2_000, blocks: [{ id: newBlockId(), kind: "quotes", heading: "Bakers say", items: [{ text: "My loaf rose!", name: "Ana", url: "https://example.com/ana" }] }] }, true, 10);
+    const older = await writeSection(store, { id: newSectionId(), name: "Guarantee", updatedAt: 1_000, blocks: [{ id: newBlockId(), kind: "faq", heading: "Questions", items: [{ q: "Refunds?", a: "Thirty days." }] }] }, true, 10);
+    const newer = await writeSection(store, { id: newSectionId(), name: "Praise", updatedAt: 2_000, blocks: [{ id: newBlockId(), kind: "quotes", heading: "Bakers say", items: [{ text: "My loaf rose!", name: "Ana", url: "https://example.com/ana" }] }] }, true, 10);
     is("both saved", [older, newer], ["ok", "ok"]);
     const read = await list();
     is("newest change first", read.value.sections.map((s) => s.name), ["Praise", "Guarantee"]);

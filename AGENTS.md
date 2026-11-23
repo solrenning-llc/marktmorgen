@@ -226,6 +226,18 @@ Complemento do dono, às 14h46, nas palavras dele: "alem das outras verificaçõ
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
+## SD — "Sem defeito" dito por inteiro (dono, 23/11/2026, por volta das 14h52 Fortaleza)
+
+Pedido do dono ao Claude 5 (sessão `012ST5iYrdX`), nas palavras dele: "regra: sempre que falar sem defeito, acrescenta que é sem defeito nenhum, mesmo que leve ou mínimo". Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão.
+
+(a) **Sempre por inteiro.** Todo texto que diga que um PR, um head, uma revisão, uma correção ou uma parte do site está sem defeito ("sem defeito", "sem achados", "0 achados", "nenhum achado", "READY", "no findings" e afins) diz junto, por extenso, que é **sem defeito nenhum, mesmo que leve ou mínimo**. Vale para o texto ao dono, o veredito no PR, o correio, os comentários, os resumos e os relatórios.
+
+(b) **A frase é fixa, em letras minúsculas.** Em português: "sem defeito nenhum, mesmo que leve ou mínimo". Num texto em inglês (PR, commit, comentário no código): "no defects at all, not even minor or trivial ones". Num veredito READY, ela vem junto de "sem achados" (ZA (a)), por exemplo: "READY #N @sha: sem achados, sem defeito nenhum, mesmo que leve ou mínimo". As palavras "leve" e "mínimo" ficam em minúsculas: em maiúsculas, "LEVE" é o nome de um achado, e a conferência do correio (ZA (f)) leria a frase como um achado apontado.
+
+(c) **Só quando é verdade.** A frase só se escreve quando quem a escreve conferiu e não achou defeito de nenhum tamanho (RS (a-1), ZA). Havendo qualquer defeito, mesmo leve ou mínimo, o texto diz o defeito e o veredito é CHANGES (ZA (a)). O que não foi conferido é dito como não conferido (RV (f), VR, item 5); a frase nunca cobre o que não foi olhado.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
 ## CN — Um canal só, conferido e confirmado (dono, 20/11/2026, por volta das 23h Fortaleza)
 
 Pedido do dono, nas palavras dele: "precisa corrigir de vez o canal. estou suspeitando de problema no canal, de agente nao saber por o canal ja ter mudado ou de o agente nao conferir frequentemente o canal". Aprovação da proposta do coordenador (Claude 5): "faça o correto". Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão.

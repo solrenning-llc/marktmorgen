@@ -153,7 +153,8 @@ export async function createAssistantCheckout(store: Store, origin: string): Pro
   const idempotencyKey = `assistant-checkout:${store.stripeCustomerId}:${store.sid || "first"}:${body.get("line_items[0][price]")}:${slot}`;
   const session = await onPlatform("POST", "/checkout/sessions", body, { version: CHECKOUT_VERSION, idempotencyKey });
   if (typeof session.url !== "string" || !session.url) throw new Error("Stripe did not return a checkout URL");
-  if (session.status !== undefined && session.status !== "open") throw new Error("Stripe returned a checkout page that is not open");
+  // A status that does not read is unknown, never open (rule 24; Claude 3 yUZf's NIT on #5349).
+  if (session.status !== "open") throw new Error("Stripe returned a checkout page that is not open");
   return session.url;
 }
 

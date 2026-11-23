@@ -7,7 +7,6 @@ import {
   endSession,
   normaliseEmail,
   noteSignIn,
-  openSession,
   sessionCookie,
 } from "@/lib/auth";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
@@ -16,6 +15,7 @@ import { ROLE_NAMES } from "@/lib/team-roles";
 import { noticeCreator } from "@/lib/account-notice";
 import { storeCookie, studioPath } from "@/lib/studio-route";
 import { hasAccount } from "@/lib/account-exists";
+import { openSessionWhile } from "@/lib/session-while";
 
 /** Taps one connection may make in an hour. */
 const TRIES_PER_HOUR = 20;
@@ -104,14 +104,19 @@ export async function POST(request: NextRequest) {
   // An existing account logs in the way it always does.
   if (existing) return away("/signin?status=invite-joined");
 
-  let sessionId: string;
+  let sessionId: string | null;
   try {
     if (previous) await endSession(previous);
-    sessionId = await openSession(member.email);
+    // The address had no account when it was read above; an app turned on, or an account made, since then (another
+    // browser, another invitation) makes it one, and the session just opened is taken back (#3947). This store's own
+    // place, just taken, does not count.
+    sessionId = await openSessionWhile(member.email, async () => !(await hasAccount(member.email, store.sid)));
   } catch {
     console.error("logging in after an invitation failed");
     return away("/signin?status=invite-error");
   }
+  // It became an account while the invitation was being taken: on the team, and it logs in the usual way.
+  if (sessionId === null) return away("/signin?status=invite-joined");
 
   const response = away(studioPath(store, "team=joined"));
   response.headers.append("Set-Cookie", sessionCookie(sessionId));

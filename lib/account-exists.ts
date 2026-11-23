@@ -42,8 +42,10 @@ async function ownsStore(email: string): Promise<boolean> {
  * A store of its own, a place on another store's team, a passkey, or two-step
  * login turned on: an address with an authenticator app is an account whose
  * login asks for its code, so an invitation must not open it without one.
+ * `joined`: the store whose invitation was just taken, whose place does not
+ * count (read again once its session is open, #3947).
  */
-export async function hasAccount(email: string): Promise<boolean> {
+export async function hasAccount(email: string, joined?: string): Promise<boolean> {
   const [owned, member, passkeys, twoStep] = await Promise.all([ownsStore(email), memberStores(email), listPasskeys(email), twoStepOn(email)]);
-  return owned || member.length > 0 || passkeys.length > 0 || twoStep;
+  return owned || member.some((place) => place.store.sid !== joined) || passkeys.length > 0 || twoStep;
 }

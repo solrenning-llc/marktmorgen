@@ -35,7 +35,8 @@ import { everyProblem } from "@/lib/recurring-every-rules";
 import { type Intro, introProblem } from "@/lib/intro-price";
 import { type Yearly, yearlyProblem } from "@/lib/yearly-price";
 import { priceBounds, readMoney } from "@/lib/money";
-import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout, writeAbout } from "@/lib/product-about";
+import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout } from "@/lib/product-about";
+import { writeStoreAbout } from "@/lib/product-about-live";
 import { countStudio, jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { lockRead } from "@/lib/two-step-unknown";
@@ -332,7 +333,7 @@ export async function POST(request: NextRequest) {
         if (about !== "" || saved.about) {
           const marked = await setProductAbout(ref, saved.id, about !== "");
           if (marked.ok && marked.store.statsId) {
-            await writeAbout(marked.store.statsId, saved.id, about, marked.store);
+            await writeStoreAbout(marked.store, saved.id, about);
             result = { ok: true, product: marked.product };
           }
         }

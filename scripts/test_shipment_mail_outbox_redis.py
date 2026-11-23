@@ -629,29 +629,43 @@ def main():
         made.update(keys)
         return row, keys
 
-    def run(op, row, keys, expected="", at=now, owner="owner", p=policy, client=redis):
-        return client.command("EVAL", script, 10, *keys, op, expected, json.dumps(row), at,
-                              131_072, json.dumps(p), owner)
+    def eval_args(op, row, keys, expected="", at=now, owner="owner", p=policy):
+        return [script, 10, *keys, op, expected, json.dumps(row), at, 131_072, json.dumps(p), owner]
 
-    def stats():
+    def run(op, row, keys, expected="", at=now, owner="owner", p=policy, client=redis):
+        return client.command("EVAL", *eval_args(op, row, keys, expected, at, owner, p))
+
+    def stats_of(text):
         out = {}
-        for line in redis.command("INFO", "COMMANDSTATS").splitlines():
+        for line in text.splitlines():
             m = re.match(r"cmdstat_([^:]+):calls=(\d+),", line)
             if m and m[1] != "info":
                 out[m[1]] = int(m[2])
         return out
 
-    def measured(fn, ceiling):
-        # INFO COMMANDSTATS counts every client of the server, and the Lua redis.call()s inside the EVAL, so a count
-        # above the ceiling can be the script (a command added to it) or another client's traffic landing between the
-        # two readings. On a failure the message names each command that moved and the server's client list, so the run
-        # log tells the two apart (#5076: 17 > 16 once, green on rerun, with no diff of the script); the ceiling itself
-        # does not change here.
-        before = stats()
-        result = fn()
-        after = stats()
+    def measured(args, ceiling, between=None, delta_out=None):
+        # INFO COMMANDSTATS counts every client of the server, and the Lua redis.call()s inside the EVAL. The two
+        # readings and the EVAL go in one MULTI/EXEC, so they execute as one block and no other client's command can
+        # land between them (#5076: 17 > 16 once, green on rerun, with no diff of the script; the two readings were
+        # separate round trips then): the count is this EVAL's alone, as the other measurement of this script already
+        # does (run, above). MULTI is counted before the first reading and EXEC after the second, so neither is in
+        # the difference; the first reading's own INFO is filtered out (stats_of). `between` runs once the first
+        # reading is queued and before the EVAL is, for the isolation check below; nothing it does can be counted;
+        # `delta_out`, a dict, receives the difference per command, for that check.
+        # Above the ceiling, the message names each command that moved and the server's client list; the ceiling
+        # itself does not change here.
+        redis.command("MULTI")
+        redis.command("INFO", "COMMANDSTATS")
+        if between is not None:
+            between()
+        redis.command("EVAL", *args)
+        redis.command("INFO", "COMMANDSTATS")
+        before_text, result, after_text = redis.command("EXEC")
+        before, after = stats_of(before_text), stats_of(after_text)
         delta = {cmd: n - before.get(cmd, 0) for cmd, n in after.items() if n != before.get(cmd, 0)}
         count = sum(delta.values())
+        if delta_out is not None:
+            delta_out.update(delta)
         if count > ceiling:
             clients = redis.command("CLIENT", "LIST")
             raise AssertionError(
@@ -660,8 +674,25 @@ def main():
         return result, count
 
     try:
+        # The measurement is isolated from other clients: another connection sends five PINGs while the first reading
+        # is already queued, and none of them is in the step's difference. Before the MULTI/EXEC those five landed
+        # between the two readings and were billed to the step (#5076).
+        other = LocalRedis()
+        # Its own namespace under the run's prefix, so the check leaves the pool and the counts below as they were.
+        iso = prefix + "isolation:"
+        isolation_row, _ = fixture("isolation")
+        isolation_keys = [iso + "row", iso + "source", iso + "due", iso + "store", iso + "person", iso + "pool",
+                          iso + "pool:one", iso + "all", iso + "closed", iso + "erased"]
+        made.update(isolation_keys)
+        billed = {}
+        reply, count = measured(eval_args("enqueue", isolation_row, isolation_keys), 27,
+                                between=lambda: [other.command("PING") for _ in range(5)], delta_out=billed)
+        assert reply[0] == "queued", reply
+        assert "ping" not in billed, ("another client's commands were billed to the step", billed)
+        print("PASS: the billing of a step counts this connection's EVAL alone; billed commands", count)
+
         row, keys = fixture("first")
-        reply, count = measured(lambda: run("enqueue", row, keys), 27)
+        reply, count = measured(eval_args("enqueue", row, keys), 27)
         assert reply == ["queued", json.dumps(row)]
         assert redis.command("TTL", keys[0]) == -1
         assert redis.command("TTL", keys[1]) == -1
@@ -679,7 +710,7 @@ def main():
         assert run("enqueue", blocked, blocked_keys, p={**policy, "globalBytes": 12_001}) == ["full"]
         print("PASS: duplicate/lost enqueue ACK cannot spend another slot; full budgets create no shipment mark")
 
-        claim, count = measured(lambda: run("claim", row, keys, duplicate[1], owner="a" * 48), 16)
+        claim, count = measured(eval_args("claim", row, keys, duplicate[1], owner="a" * 48), 16)
         assert claim[0] == "preparing"
         claimed = json.loads(claim[1])
         later = now + 2 * 60_000
@@ -687,7 +718,7 @@ def main():
         assert second[0] == "preparing"
         assert run("dispatch", claimed, keys, claim[1], at=later, owner="a" * 48)[0] == "changed"
         current = json.loads(second[1])
-        barrier, count = measured(lambda: run("dispatch", current, keys, second[1], at=later, owner="b" * 48), 16)
+        barrier, count = measured(eval_args("dispatch", current, keys, second[1], at=later, owner="b" * 48), 16)
         assert barrier[0] == "dispatching"
         held = json.loads(barrier[1])
         assert run("claim", held, keys, barrier[1], at=later + 73 * 3_600_000)[0] == "held"
@@ -695,7 +726,7 @@ def main():
         assert redis.command("EXISTS", keys[0]) == 1
         print("PASS: lease recovers only pre-dispatch preparation; a lost dispatch ACK stays held beyond 72h")
 
-        accepted, count = measured(lambda: run("accepted", held, keys, barrier[1], at=later, owner="b" * 48), 27)
+        accepted, count = measured(eval_args("accepted", held, keys, barrier[1], at=later, owner="b" * 48), 27)
         assert accepted == ["accepted"]
         assert redis.command("EXISTS", keys[0]) == 0 and redis.command("EXISTS", keys[1]) == 1
         assert 34_559_900 <= redis.command("TTL", keys[1]) <= 34_560_000

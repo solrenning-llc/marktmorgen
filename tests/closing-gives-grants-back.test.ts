@@ -28,8 +28,11 @@ const meetUser = `nl:meet:user:google:${hash(`meet-user:google:${ACCOUNT}`)}`;
 const metaUser = `nl:metaads:user:${hash(`metaads-user:${META_USER}`)}`;
 
 const calls = { google: 0, meta: 0 };
+/** How long each provider takes to answer, on the test clock (the store lock's time runs with it). */
+let answerMs = 0;
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const u = new URL(String(input));
+  if (answerMs) redis.advance(answerMs);
   if (init?.method === "POST" && u.pathname.endsWith("/revoke")) {
     calls.google++;
     return new Response("{}", { status: 200 });
@@ -120,6 +123,18 @@ async function main(): Promise<void> {
     is("the other store is still connected", [typeof redis.run(["GET", `nl:meet:conn:${OTHER}:google`]), typeof redis.run(["GET", `nl:metaads:conn:${OTHER}`])], ["string", "string"]);
     is("the closing store is out of both indexes, the other store still in them",
       [redis.run(["SISMEMBER", meetUser, statsId]), redis.run(["SISMEMBER", metaUser, statsId]), redis.run(["SISMEMBER", meetUser, OTHER]), redis.run(["SISMEMBER", metaUser, OTHER])], [0, 0, 1, 1]);
+  }
+
+  part("Slow providers, each within its own limit: the store's lock is made to last after each give-back (Claude 5 icRk's LEVE on #5477)");
+  // The store lock lasts 15 s; Google and Meta each answering after 9 s (under their 8 s and 10 s limits once a retry
+  // is counted) took 18 s in a row, so the lock ran out before the deletes and the store waited a walk.
+  {
+    const { at } = await closing(false);
+    answerMs = 9_000;
+    const run = await eraseClosed(Date.now() + 120_000, async () => {}, at).catch((error: unknown) => error);
+    answerMs = 0;
+    is("both grants are given back", [calls.google, calls.meta], [1, 1]);
+    is("and the store is still erased on this walk", [(run as { stores?: number }).stores, (await storeForEmail(X)) === null], [1, true]);
   }
 
   part("An account index that cannot be read keeps the grant: never given back on an unread answer");

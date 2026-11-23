@@ -14,6 +14,7 @@ import { NextRequest } from "next/server";
 import { GET as mailCheck } from "@/app/api/cron/mail-check/route";
 import { GET as stripeCheck } from "@/app/api/cron/stripe-check/route";
 import { STATUS_CHECKS } from "@/lib/status-page";
+import { failedNames } from "@/lib/health-check-status";
 import { world } from "./cron-checks-exact-world";
 import { store as redis } from "./redis-stub";
 
@@ -70,3 +71,11 @@ for (const route of routes) {
     assert.deepEqual(await response.json(), { ok: true, busy: true });
   });
 }
+
+// Claude 3 wtXk's NIT on #5472: the names said beside the error status, for a mixed run and for a run with no check.
+test("failedNames names only the checks that failed, in order", () => {
+  assert.deepEqual(failedNames([{ check: "a", ok: true }, { check: "b", ok: false }, { check: "c", ok: true }, { check: "d", ok: false }]), ["b", "d"]);
+});
+test("a run with no check at all is named as such, never an empty list beside the error", () => {
+  assert.deepEqual(failedNames([]), ["no check ran"]);
+});

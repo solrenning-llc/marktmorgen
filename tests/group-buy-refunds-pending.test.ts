@@ -317,6 +317,30 @@ async function main(): Promise<void> {
     Date.now = clock;
   }
   is("starved: it is asked again once the recheck time passed", askedOf(busyCharge) > before, true);
+
+  part("a refund whose id starts pyr_ is kept on the retry list like a re_ one when its work is left unknown");
+  // Stripe names a refund re_ for a card and pyr_ for some other payment methods (#5285 row #4458, #5010 row 177): a
+  // full refund read through whose handled mark does not read is kept to be tried again, whatever its prefix.
+  const otherWay = await make(40);
+  const pyrId = "pyr_GrpOtherWay00001";
+  const retryOf = `nl:grp:${sid}:refunds:retry`;
+  refunds = [row(pyrId, base + 40_000, "succeeded", otherWay.pi, true)];
+  const plainPipeline = redis.pipeline.bind(redis);
+  // The handled mark answers in another shape for this run only: the refund is read through, its work left unknown.
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await plainPipeline(commands);
+    return commands.map((c, i) => (c[0] === "SISMEMBER" ? "garbled" : replies[i]));
+  }) as typeof redis.pipeline;
+  try {
+    is("pyr_: nothing taken back while its work is unknown", await run(), 0);
+  } finally {
+    redis.pipeline = plainPipeline;
+  }
+  is("pyr_: kept on the retry list with its payment", (await redis.pipeline([["HGET", retryOf, pyrId]]))[0], otherWay.pi);
+  refunds = [];
+  is("pyr_: tried again from the retry list, both places taken back", await run(), 2);
+  is("pyr_: no place still holds it", await otherWay.held(), 0);
+  is("pyr_: let go from the retry list once handled", (await redis.pipeline([["HLEN", retryOf]]))[0], 0);
   is("every created[gte] asked is a whole second", asked.every((s) => Number.isSafeInteger(s)), true);
   done();
 }

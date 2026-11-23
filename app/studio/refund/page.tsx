@@ -36,12 +36,12 @@ const SHOWN_PER_DAY = 20;
 /** A payment's date, as the receipt shows it. */
 const paidOn = (seconds: number) => new Date(seconds * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 
-/** The answer of the withdrawal route (app/api/billing/withdraw), when the address carries a known one. */
 /** A refund outcome only by a key the table owns: "constructor" and the like are no notice (Claude 5's LEVE D on #2849). */
 function refundDoneOf(value: unknown) {
   return typeof value === "string" && Object.hasOwn(REFUND_DONE, value) ? REFUND_DONE[value] : undefined;
 }
 
+/** The answer of the withdrawal route (app/api/billing/withdraw), when the address carries a known one. */
 function withdrawNoticeOf(value: unknown) {
   return typeof value === "string" && Object.hasOwn(W.notices, value) ? W.notices[value] : undefined;
 }

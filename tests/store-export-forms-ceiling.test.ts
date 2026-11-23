@@ -13,7 +13,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { emptyCatalog } from "@/lib/catalog";
-import { MAX_FORMS } from "@/lib/forms";
+import { MAX_FORMS, parseForm } from "@/lib/forms";
+import { writeForm } from "@/lib/form-store";
 import { EXPORT_COMMANDS, exportShape, storeExport } from "@/lib/store-export";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -34,7 +35,7 @@ test("a form record that does not read is priced at MAX_FORMS, never a refusal o
   console.error = () => {};
   redis.clear();
   const empty = await exportShape(shop);
-  redis.run(["HSET", `nl:forms:${statsId}`, "f1", "{not a form"]);
+  redis.run(["HSET", `nl:forms:${statsId}`, "brokenfm01", "{not a form"]);
   const shape = await exportShape(shop).then(
     (measured) => measured,
     (error: unknown) => (error instanceof Error ? error.message : String(error)),
@@ -48,11 +49,13 @@ test("a form record that does not read is priced at MAX_FORMS, never a refusal o
 test("the file is made, the forms are said not read, and no answer is read for them", async () => {
   console.error = () => {};
   redis.clear();
-  redis.run(["HSET", `nl:forms:${statsId}`, "f1", "{not a form"]);
+  redis.run(["HSET", `nl:forms:${statsId}`, "brokenfm01", "{not a form"]);
   const pipeline = redis.pipeline.bind(redis);
   let answerReads = 0;
   redis.pipeline = async (commands) => {
-    if (commands.some((c) => String(c[1] ?? "").startsWith("nl:form:resp") || String(c[1] ?? "").startsWith("nl:formresp"))) answerReads += 1;
+    // The answers' key is nl:form:r:<statsId>:<form id> (lib/form-store.ts); Claude 6's LEVE on #5479: the earlier
+    // prefixes matched nothing, so this check could not fail.
+    if (commands.some((c) => String(c[1] ?? "").startsWith(`nl:form:r:${statsId}:`))) answerReads += 1;
     return pipeline(commands);
   };
   try {
@@ -67,8 +70,12 @@ test("the file is made, the forms are said not read, and no answer is read for t
   }
 });
 
-test("control: readable forms are counted as they are", async () => {
+test("control: a readable form is counted as it is, never at the ceiling", async () => {
   redis.clear();
   const empty = await exportShape(shop);
-  assert.equal(empty.commands, (await exportShape(shop)).commands);
+  // One real form (Claude 6's LEVE on #5479: the control compared an empty store with itself).
+  const form = parseForm({ id: "readable01", name: "Readable", fields: [{ id: "q1mail", type: "email", label: "Email", required: true }] });
+  if (!form) throw new Error("no form (set-up)");
+  assert.equal(await writeForm(statsId, form), true, "(set-up) the form is written");
+  assert.equal((await exportShape(shop)).commands, empty.commands + EXPORT_COMMANDS.form);
 });

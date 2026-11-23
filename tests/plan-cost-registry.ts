@@ -144,6 +144,7 @@ import { REFUND_CHECK_WAITS, TICKET_CUSTOMERS, TICKET_PAYMENT_PAGES, TICKET_PAYM
 import { DEVICE_SENT_BYTES, MAX_MEMBER_DEVICES } from "@/lib/community-push";
 import { MAX_MENTIONS } from "@/lib/community-mentions";
 import { MAX_CHAT_KEPT } from "@/lib/community-chat-rules";
+import { ANNOUNCEMENTS_HELD_MOST, ANNOUNCEMENT_HELD_DAYS, ANNOUNCEMENT_HELD_ENTER_COMMANDS, ANNOUNCEMENT_HELD_LOOK_OWN_COMMANDS, ANNOUNCEMENT_HELD_RUN_COMMANDS, ANNOUNCEMENT_RETRY_SECONDS } from "@/lib/community-mail";
 import { MAX_QUESTIONS, MAX_SPACES, MAX_WELCOME } from "@/lib/community-text";
 import { SEARCH_MESSAGES } from "@/lib/community-dm";
 import { MAX_FORMS } from "@/lib/forms";
@@ -2190,6 +2191,33 @@ export function heldCompanyMonthlyExposure(caseCap: number | null, observed: num
   return { modeledUsd: caseCap * retention + HELD_EXPOSURE.monthlyAttempts * retry + HELD_EXPOSURE.globalCounterBytes * DB_BYTE_MONTH, completeUsd: null };
 }
 
+/**
+ * Board #5285, row #3406 (the coordinator's cost line, ibqho c2c2): community announcements held for a store switched
+ * off after notices, or for a plan without email, are a company exposure (that store pays for no email), outside
+ * paid-unit COST_LINES. At most ANNOUNCEMENTS_HELD_MOST sends of a community are held at once, each kept at most
+ * ANNOUNCEMENT_HELD_DAYS: every five-minute run of the mail job sends ANNOUNCEMENT_HELD_RUN_COMMANDS for it, and each
+ * hourly look (ANNOUNCEMENT_RETRY_SECONDS) ANNOUNCEMENT_HELD_LOOK_OWN_COMMANDS of its own plus its store's and its
+ * settings' reads (at most 4 more), held by tests/community-announce-wait-retry.test.ts; its first hold adds
+ * ANNOUNCEMENT_HELD_ENTER_COMMANDS once. A look's run is counted twice, on the safe side. Upstash bills commands; the
+ * bytes are a few hundred a command. Not a complete tariff certification.
+ */
+export const ANNOUNCEMENT_HELD_EXPOSURE = {
+  heldMost: ANNOUNCEMENTS_HELD_MOST,
+  days: ANNOUNCEMENT_HELD_DAYS,
+  runsPerDay: 288,
+  looksPerDay: 86_400 / ANNOUNCEMENT_RETRY_SECONDS,
+  runCommands: ANNOUNCEMENT_HELD_RUN_COMMANDS,
+  lookCommands: ANNOUNCEMENT_HELD_LOOK_OWN_COMMANDS + 4,
+  enterCommands: ANNOUNCEMENT_HELD_ENTER_COMMANDS,
+  bytesPerCommand: 1_024,
+} as const;
+/** The worst case one store's held announcements cost the company, over the longest hold: commands and US dollars. */
+export function announcementHeldStoreExposure(): { commands: number; usd: number } {
+  const e = ANNOUNCEMENT_HELD_EXPOSURE;
+  const commands = e.heldMost * (e.days * (e.runsPerDay * e.runCommands + e.looksPerDay * e.lookCommands) + e.enterCommands);
+  return { commands, usd: commands * (COMMAND + e.bytesPerCommand * DB_BYTE) };
+}
+
 
 /**
  * ALTO 1 of Claude 5's email audit (9 November 2026) and its pre-review: mail
@@ -4192,8 +4220,6 @@ export const NOT_A_COST: Record<string, string> = {
   DISPUTE_READS_PER_READING: "Questions about a dispute (GET /disputes?charge=) one reading of a store's booked calls may ask Stripe, only for a charge Stripe marks as disputed (lib/calls.ts, callOrLost; lib/refunds.ts, keptUnlessLost); one for a booking read alone (paidCall). Past it, or when Stripe cannot be asked, the booking keeps its time. No store command and no other call; Stripe bills no API call: bounded by the readings the store's own pages and jobs already make, whose costs are their own lines.",
   REVIEWED_VAT_FX_ALLOWANCES: "The reviewed allowances for the exchange-rate movement between a store sale with EU or UK VAT and the payment of its OSS or HMRC return (lib/eu-vat-collection-cost.ts, 789 [IV1] step 3, unit 6): not an allowance of a plan and not metered. Each, with its https source and the days it holds, sets one part of what the platform's fee carries beside the VAT, taken from the creator's charge, never from Marktmorgen's revenue or a plan. Empty on purpose: with none reviewed the cost of receiving the VAT is unknown (null), so every collection is refused, never collected at zero. The OSS, IOSS and UK VAT registrations and filings are LLC fixed costs (FX275), not this.",
   TAX_OBSERVATION_LIMITS: "Inactive diagnostic processing bounds: CURRENT_TAX_OBSERVATION_POLICY is null, so no production journal IO is enabled. Activation requires explicit scope, absolute retention, atomic data-room reservation and full-lifetime paid storage/work cost evidence; these limits are not a zero cost or a funded allowance.",
-  ANNOUNCEMENT_HELD_DAYS: "How long a community announcement held for a store switched off after notices, or for a plan without email, is kept (lib/community-mail.ts, advanceAnnouncement; Claude 4 AC, mail 2aab): 60 days, as a product update held on a switched-off store (UPDATE_HELD_LOOK_SECONDS), then it ends out of line, saying so. While held it stays in the mail job's five-minute queue: each run takes the lock's claim and release and the send's GET, and once an hour (ANNOUNCEMENT_RETRY_SECONDS) also the store's read, the community settings' read and one SET of the send, where before every run did all of them for as long as the hold lasted (Claude 1's MEDIUM 1 on #3406). So at most 288 x 60 runs and 24 x 60 looks a held send. A scheduled job, bounded by its schedule and this end (a company fixed cost), not a plan's allowance; its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
-  ANNOUNCEMENT_RETRY_SECONDS: "How long a community announcement held for a store switched off, or for a plan without email, rests between looks (lib/community-mail.ts, advanceAnnouncement; Claude 1's MEDIUM 1 and LOW on #3406): an hour, as a broadcast's LIST_RETRY_SECONDS, checked right after the send's record is read and before its store is loaded. Its cost and its end are ANNOUNCEMENT_HELD_DAYS's.",
   BACKUP_FILES_PAGES_PER_STORE: "The provider pages one complete listing of one source of one store may take in the backup files route (273 [BK1] files part 1, lib/backup-files-contract.ts, lib/backup-files-source.ts): a bound that only refuses (a store past it is answered over_bound, never complete), not a figure of its own. What the route spends is a company cost (the company's backup, 100% Marktmorgen under FX275), priced by backupFilesRouteWorstMonth (lib/backup-files-source.ts, held by tests/backup-files-cost.test.ts; Claude 7's MÉDIO on #3313): each admitted page, counted by takeDayPage against the review's maxPagesPerDay a source a UTC day before any provider call, at BACKUP_FILES_PAGE_MICRO_USD (1,548, the dated review's ceiling per call of docs/backup-costs-2026-11-08.md section 5b: the function held its whole maxDuration at 2 GB on CPU in the dearest region, a full page of answer as Fast Origin Transfer and Fast Data Transfer with its CDN Request, the two Upstash commands of the count and a page of Upstash bandwidth, one listing and one Blob signing token as Advanced Operations, no free quota), for each source on, and the one call a source a day the Worker may be refused past it (BACKUP_FILES_DAY_CEILING_REFUSALS, lib/backup-files-contract.ts: the Worker stops that source for the rest of the UTC day; priced at a whole page; Codex N1's LOW 1 on #3313), 32 UTC days a month, plus R2's rounding block and 10% room; 0 while BACKUP_FILES_ROUTE_REVIEW (lib/backup-files-review.ts) is null, since the route answers 404 before any command; unknown (null), never zero, if Bunny Stream, whose listing price is not read, is turned on. At a review of 40 pages a day that is 9,418,148 micro-dollars, $9.42 a month. It joins LLC_FIXED_COST_IDS (lib/llc-fixed-costs.ts) once #3481, which changes that same line, is in (rule 3: one pull request at a time on it); until then the owner's review of the route is what admits any of it, and nothing calls the route.",
   BACKUP_FILES_OBJECTS_PER_MONTH: "The objects the backup Worker may copy for one store in a month, all sources together (273 [BK1] files part 1, item 8, lib/backup-files-contract.ts): the Worker's own ceiling before each copy, at the 10,000 its R2 operations are priced at in docs/backup-costs-2026-11-08.md, section 5b. Nothing in this code spends them: the Worker that copies is not built (only its contract is), and its per-plan line comes with it, from that section; the route that lists for it is priced by backupFilesRouteWorstMonth (BACKUP_FILES_PAGES_PER_STORE).",
   BACKUP_DELETION_RECORDS_PER_MONTH: "The deletion records one store may have written in a UTC month for the backup (273 [BK1] files part 3, lib/backup-deletions.ts): a ceiling counted before each record (SET NX EX and INCRBY), past which a deletion is still done with no record, never a figure of its own. Each record is one RPUSH entry of at most RECORD_BYTES_MOST bytes (enforced before it is written), kept at most 15 days and read once by the route; 4 commands a deleteFile call for each store it names, 2 past the ceiling. Off behind its own review, not the route's: nothing is written while BACKUP_FILES_ROUTE_REVIEW or BACKUP_DELETION_RECORDS_REVIEW (lib/backup-files-review.ts) is null, so turning the route on never turns these writes on. Their per-store line (these commands and bytes, and the calls past the ceiling, bounded only by the deletions a plan lets a store make, docs/backup-costs-2026-11-08.md 5b) must become a line of each plan's worst month before the owner fills that review; until then it is unknown, never zero.",

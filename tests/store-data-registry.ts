@@ -580,6 +580,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cimg:n:@lib/community-files.ts": { what: "A community's pictures counted", parts: [capped(KEY, "One count a store.")] },
   "nl:cm:mail:@lib/community-mail.ts": { what: "An announcement's emails, and who they go to", parts: [per("monthly", 30, 512, "Each reader's place in a send, thirty days.", MAIL("announcement"))] },
   "nl:cm:mailq@lib/community-mail.ts": company("Announcements under way", "One set, members gone when sent."),
+  "nl:cm:mailq:held:@lib/community-mail.ts": { what: "The announcements of a community held at once, for a store switched off or a plan without email", parts: [capped(256, "One set a community: the ids of its held sends, at most ANNOUNCEMENTS_HELD_MOST waiting (one no longer held is taken out at the next hold), kept ANNOUNCEMENT_HELD_DAYS and a day from the last one held.", src("lib/community-mail.ts", "ANNOUNCEMENTS_HELD_MOST", "ANNOUNCEMENT_HELD_DAYS"))] },
   "nl:cm:unsub:@lib/community-mail.ts": { what: "A member's stop link, made once and kept", parts: [item(KEY, "One a member.", "membership")] },
   "nl:cm:@lib/community-mentions.ts": { what: "Members' handles", room: ["lib/community.ts"] },
   "nl:cm:@lib/community-notify.ts": { what: "What happened to each member, and when they last looked", room: ["lib/community-notify.ts"], parts: [item(MARK, "A member's last look.", "membership")] },

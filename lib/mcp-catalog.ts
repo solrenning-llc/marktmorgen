@@ -107,19 +107,19 @@ const DRAFTS: readonly ToolDraft[] = [
   {
     name: "get_product_description",
     description: "One product's long description, exactly as the creator wrote it, with its title. Use list_products for the ids. It counts as a few of the store's API requests, set by the most it could read.",
-    inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
+    inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, required: ["product"], additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_sales_page",
     description: "One product's sales page as saved, block by block in page order (hero, benefits, FAQ, guarantee and the rest), with its search title and description. Testimonials are counted, never quoted. It counts as a few of the store's API requests, set by the most it could read.",
-    inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
+    inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, required: ["product"], additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_course_outline",
     description: "A course's modules and lessons in order, with each lesson's title, whether it is a free preview, whether it has text, its video and files by name, and when each module opens. It counts as a few of the store's API requests, set by the most it could read.",
-    inputSchema: { type: "object", properties: { product: { type: "string", description: "The course's product id, from list_products." } }, additionalProperties: false },
+    inputSchema: { type: "object", properties: { product: { type: "string", description: "The course's product id, from list_products." } }, required: ["product"], additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
@@ -131,6 +131,8 @@ const DRAFTS: readonly ToolDraft[] = [
         product: { type: "string", description: "The course's product id, from list_products." },
         lesson: { type: "string", description: "The lesson's id, from get_course_outline." },
       },
+      // Both are needed to find a lesson (issue #3931): `{}` is Invalid params before the key, never a request taken.
+      required: ["product", "lesson"],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: true },
@@ -138,13 +140,13 @@ const DRAFTS: readonly ToolDraft[] = [
   {
     name: "get_page_test",
     description: "How a product's page test is going (a second headline or a second version of the whole page): views, checkouts, sales and money of each version, and whether it has been won by the studio's own rule. It counts as a few of the store's API requests, set by the most it could read.",
-    inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
+    inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, required: ["product"], additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_page_reading",
     description: "How far down a product's sales page visitors read, block by block, the reasons visitors picked for not buying, and how far each video was watched. It counts as a few of the store's API requests, set by the most it could read.",
-    inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
+    inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, required: ["product"], additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
@@ -156,6 +158,7 @@ const DRAFTS: readonly ToolDraft[] = [
         product: { type: "string", description: "The product's id, from list_products." },
         version: { type: "number", description: "Which earlier version, from the list (0 is the newest); left out, the list." },
       },
+      required: ["product"],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: true },

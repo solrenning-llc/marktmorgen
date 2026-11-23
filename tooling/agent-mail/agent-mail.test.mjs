@@ -4,7 +4,7 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdtempSync, writeFileSync, chmodSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -31,7 +31,17 @@ const BIN = join(T, "bin"); mkdirSync(BIN);
 writeFileSync(join(BIN, "gh"), `#!/bin/sh
 case "$FAKE_GH" in
   down) echo "gh: connection refused" >&2; exit 1 ;;
+esac
+# The PR's own comments and reviews (ce2d): one JSON line [body, association] per comment, from FAKE_COMMENTS.
+for a in "$@"; do case "$a" in
+  repos/*/issues/[0-9]*/comments) [ "$FAKE_COMMENTS_DOWN" = 1 ] && { echo "gh: 502" >&2; exit 1; }; printf '%s' "\${FAKE_COMMENTS:-}"; exit 0 ;;
+  repos/*/pulls/[0-9]*/reviews) exit 0 ;;
+  repos/*/issues?labels=canal-ativo*) [ "$FAKE_CANAL_DOWN" = 1 ] && { echo "gh: 502" >&2; exit 1; }
+    printf '%s\\n' "\${FAKE_CANAL:-[5104,\\"Agent coordination — part 8 (continues #4932)\\"]}"; exit 0 ;;
+esac; done
+case "$FAKE_GH" in
   req) printf '%s\\n' '["https://github.com/solrenning-llc/marktmorgen/issues/'"\${FAKE_ISSUE:-4932}"'#issuecomment-'"$FAKE_ID"'","'"$FAKE_BODY"'","'"\${FAKE_CREATED:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"'"]' ;;
+  headref) echo "$FAKE_REF" ;;
   nohead) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","READY, no head here","","COLLABORATOR"]' ;;
   rev) printf '%s\\n' '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","'"$FAKE_BODY"'","","'"\${FAKE_ASSOC:-COLLABORATOR}"'"]' ;;
   *) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","Review @'"$FAKE_SHA"' READY","","COLLABORATOR"]' ;;
@@ -82,7 +92,7 @@ is("another Claude 5 session (not the named one) cannot turn a switch on", !r.ok
 r = ligar("Claude 5 ibqho", "ibq");
 is("the named session needs --request (condition 4)", !r.ok && /--request é obrigatório/.test(r.out), r.out);
 r = ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "record-review"), { FAKE_ISSUE: "4933" }));
-is("a request comment that is not on #4932 is refused", !r.ok && /não é da #4932/.test(r.out), r.out);
+is("a request comment that is not on the coordination channel in force is refused", !r.ok && /não é do canal em vigor \(#5104 ou da #4932/.test(r.out), r.out);
 r = ligar("Claude 5 ibqho", "ibq", pedidoDe("please turn record-review on"));
 is("a comment that only mentions the switch, without the marker line, is refused (review of Claude 4 3Kc)", !r.ok && /não traz a linha "AGENT-MAIL-REQUEST/.test(r.out), r.out);
 r = ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "ready-check")));
@@ -93,9 +103,21 @@ r = ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "record-review")
 is("an old request is refused (at most 2 hours)", !r.ok && /não é um pedido recente/.test(r.out), r.out);
 r = ligar("Claude 5 ibqho", "ibq", { args: ["--request", "77"], env: { FAKE_GH: "down" } });
 is("a request that cannot be checked now is refused (nothing NOT CHECKED goes on)", !r.ok && /NÃO FOI CONFERIDO/.test(r.out), r.out);
+// The channel changes part at 2,250 comments (AC (p)); on 22/11/2026 #5104 took over from #4932 (channel-ativo label).
+r = ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "record-review"), { FAKE_CANAL_DOWN: "1" }));
+is("with the channel in force unreadable, the request is not used (NOT CHECKED)", !r.ok && /canal em vigor .*NÃO FOI CONFERIDO/.test(r.out), r.out);
+r = ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "record-review"), { FAKE_CANAL: '[5104,"part 8 (continues #4932)"]\n[5200,"part 9 (continues #5104)"]' }));
+is("with two open issues labeled canal-ativo, the channel is NOT CHECKED and nothing is done", !r.ok && /canal em vigor .*NÃO FOI CONFERIDO/.test(r.out), r.out);
+r = ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "record-review"), { FAKE_CANAL: '[5200,"Agent coordination — part 9 (continues #5104)"]' }));
+is("two parts later, a request on #4932 is refused: only the part in force and the one it continues count", !r.ok && /não é do canal em vigor \(#5200 ou da #5104/.test(r.out), r.out);
 is("nothing was turned on by the refused attempts", /record-review: DESLIGADO/.test(run(["list-switches"]).out), run(["list-switches"]).out);
-r = ligar("Claude 1 A", "c1a", pedidoDe(marca("set-switch", "ready-check")), [], "ready-check");
+{
+  // A request written on the part in force (#5104), given by its bare id: accepted (it was refused while only #4932 counted).
+  const q5104 = pedidoDe(marca("set-switch", "ready-check"), { FAKE_ISSUE: "5104" });
+  r = ligar("Claude 1 A", "c1a", { args: ["--request", String(q5104.id)], env: q5104.env }, [], "ready-check");
+}
 is("with no sign from the named session in 60 minutes, the backup acts, and the record says why", r.ok && /ready-check: LIGADO/.test(run(["list-switches"]).out), r.out);
+is("a request on #5104, the channel in force, is accepted and recorded with its own address", r.ok && /Pedido: https:\/\/github\.com\/solrenning-llc\/marktmorgen\/issues\/5104#issuecomment-/.test(run(["list-switches"]).out + run(["read", "--as", "Claude 2 Z"], as("c2")).out), r.out);
 run(["set-switch", "--as", "Claude 2 X", "--name", "ready-check", "--off", "--reason", "fim do teste"], as("c2"));
 const q1 = pedidoDe(`Coordinator decision.\\n${marca("set-switch", "record-review")}`);
 r = ligar("Claude 5 ibqho", "ibq", q1);
@@ -545,6 +567,15 @@ console.log("step 6: free text never becomes a field (A12), unidentified acks ar
   is("an unidentified ack is written with a warning (A13)", r.ok && /ATENÇÃO.*não identificada/.test(r.out), r.out);
   r = run(["read", "--as", "Claude 3 Z"], { ...m7, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
   is("the family, reading identified, is told a message of its own was acknowledged by an unidentified write (A13)", new RegExp(`${idA13}.*não identificada|não identificada.*${idA13}`, "s").test(r.out), r.out);
+  // LOW of Claude 2 lpgvy (2659): an ack from a version before A13 has no Mail-Session trailer at all; it is not an
+  // unidentified write, and read does not warn about it. Only the explicit "não identificada (...)" counts.
+  {
+    const msgV = run(["send", "--from", "Claude 4 X", "--to", "Claude 3 Z", "--subject", "old ack", "--text", "x"], { ...m7, ...as("c4") });
+    const idV = /enviada: (\S+)/.exec(msgV.out)?.[1];
+    raw(`lidas/claude-3-z/${idV}`, `${new Date().toISOString()}\n`, join(T, "mail7.git"));
+    const lido = run(["read", "--as", "Claude 3 Z"], { ...m7, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+    is("an ack written before A13 (no Mail-Session trailer) is not reported as an unidentified write (2659)", Boolean(idV) && !lido.out.includes(idV), lido.out);
+  }
   // LOW 2 of Claude 2 lpgvy on #5113: read looks only at acks written in the last 24 hours, not at every ack of the family.
   {
     const c = join(T, `velhas-${Math.random().toString(16).slice(2)}`);
@@ -630,6 +661,20 @@ console.log("step 6: the private mailbox never lands in the public clone (A14)")
     const x = spawnSync("node", [join(d, "agent-mail.mjs"), "list-switches"], { cwd: W, env: { ...base, AGENT_MAIL_TEST: "", CORREIO_SEM_VERSAO: "" }, encoding: "utf8" });
     is(`a copy in a folder with mode ${modo.toString(8)} ${aviso ? "is" : "is not"} warned about a folder anyone can write (NIT 2 on #5113)`, /pasta que todos podem escrever/.test(`${x.stdout}${x.stderr}`) === aviso, `${x.stdout}${x.stderr}`.slice(0, 300));
   }
+}
+
+console.log("two branches at the PR's head: the PR's own branch, from GitHub's head.ref (LOW of Claude 6 z5v4, #5080)");
+{
+  g(["init", "-q", "--bare", "mail11.git"]); g(["push", "-q", "../mail11.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m11 = { CORREIO_REPO: join(T, "mail11.git") };
+  g(["checkout", "-q", "-B", "pr41", M], P); const H41 = commit("f41.txt", "41\n", "pr41");
+  for (const ref of ["refs/pull/41/head", "refs/heads/feature-41", "refs/heads/helper-41"]) g(["push", "-q", "../prs.git", `HEAD:${ref}`], P);
+  const ramoDo = (out) => /registrado: (\S+)/.exec(out)?.[1] ? (/^Ramo: (.*)$/m.exec(g(["show", `refs/heads/correio:fila/pedidos/${/registrado: (\S+)/.exec(out)[1]}.md`], join(T, "mail11.git")))?.[1] ?? "") : null;
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "41", "--sha", H41.slice(0, 10), "--text", "fila #41"], { ...m11, ...as("c2"), CORREIO_SEM_COMMITS: "", FAKE_GH: "headref", FAKE_REF: "feature-41" });
+  is("with two branches at the head, the request records the PR's own branch, named by GitHub (LOW on #5080)", ramoDo(r.out) === "feature-41", r.out);
+  run(["cancel-enqueue", "--as", "Claude 2", /registrado: (\S+)/.exec(r.out)?.[1] ?? "x", "--reason", "t"], { ...m11, ...as("c2") });
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "41", "--sha", H41.slice(0, 10), "--text", "fila #41"], { ...m11, ...as("c2"), CORREIO_SEM_COMMITS: "", FAKE_GH: "down" });
+  is("with GitHub unreachable, no branch is guessed among the two", ramoDo(r.out) === "" || ramoDo(r.out) === null, r.out);
 }
 
 console.log("append-only check (OWNER-20261121-1904 step 3, part 3)");
@@ -762,6 +807,37 @@ exit 0
   writeFileSync(join(M3, "race-left"), "0\n");
 }
 
+console.log("a passing git failure while building a write is tried again, and git's upkeep runs in the foreground (CI, 22/11/2026)");
+{
+  // A git that fails write-tree once, as when a detached gc removed an empty objects/ folder in the middle of the write.
+  const BINF = join(T, "bin-flaky"); mkdirSync(BINF);
+  const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  writeFileSync(join(BINF, "git"), `#!/bin/sh
+for a in "$@"; do if [ "$a" = "write-tree" ] && [ -f "$FAKE_GIT_FAIL" ]; then rm -f "$FAKE_GIT_FAIL"; echo "error: unable to create temporary file: No such file or directory" >&2; echo "fatal: git-write-tree: error building trees" >&2; exit 128; fi; done
+exec ${realGit} "$@"
+`); chmodSync(join(BINF, "git"), 0o755);
+  const marcaF = join(T, "flaky-once"); writeFileSync(marcaF, "1\n");
+  r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "flaky", "--text", "x"], { ...as("c2"), PATH: `${BINF}:${base.PATH}`, FAKE_GIT_FAIL: marcaF });
+  is("a write-tree that fails once with 'unable to create temporary file' is tried again and the message goes through", r.ok && /enviada/.test(r.out) && !existsSync(marcaF), r.out);
+  // The same for the blob written before the loop (LEVE of Claude 4 3Kc on #5147).
+  writeFileSync(join(BINF, "git"), `#!/bin/sh
+for a in "$@"; do if [ "$a" = "hash-object" ] && [ -f "$FAKE_GIT_FAIL" ]; then rm -f "$FAKE_GIT_FAIL"; echo "error: unable to create temporary file: No such file or directory" >&2; echo "fatal: unable to write loose object file" >&2; exit 128; fi; done
+exec ${realGit} "$@"
+`);
+  writeFileSync(marcaF, "1\n");
+  r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "flaky blob", "--text", "y"], { ...as("c2"), PATH: `${BINF}:${base.PATH}`, FAKE_GIT_FAIL: marcaF });
+  is("a hash-object that fails once with 'unable to create temporary file' is tried again too (LEVE of Claude 4 3Kc)", r.ok && /enviada/.test(r.out) && !existsSync(marcaF), r.out);
+  const cfg = (k) => { try { return g(["--git-dir", base.CORREIO_GIT_DIR, "config", k]); } catch { return ""; } };
+  is("the mailbox's git runs gc and maintenance in the foreground (no detached upkeep under a write)", cfg("gc.autoDetach") === "false" && cfg("maintenance.autoDetach") === "false", `${cfg("gc.autoDetach")} ${cfg("maintenance.autoDetach")}`);
+}
+
+console.log("outside a git clone: the version check says to run from inside one (22/11/2026)");
+{
+  const fora = mkdtempSync(join(tmpdir(), "fora-de-clone-"));
+  const x = spawnSync("node", [TOOL, "list-switches"], { cwd: fora, env: { ...base, CORREIO_SEM_VERSAO: "", GIT_CEILING_DIRECTORIES: tmpdir() }, encoding: "utf8" });
+  is("run outside a git clone, the tool says the folder is not a git clone and to run from inside one", /não é um clone git/.test(`${x.stdout}${x.stderr}`), `${x.stdout}${x.stderr}`.slice(0, 300));
+}
+
 console.log("version: the copy's SHA-256 against the reviewed one on main (owner, OWNER-20261121-1904, step 1)");
 const meu = createHash("sha256").update(readFileSync(TOOL)).digest("hex");
 const comHash = (h) => { g(["checkout", "-q", "-B", "mainh", M], P); mkdirSync(join(P, "tooling", "agent-mail"), { recursive: true });
@@ -816,6 +892,9 @@ console.log("secrets never printed: a credential in the mailbox address stays ou
     { status: 128, stderr: "fatal: unable to access 'https://github.com/o/correio.git/': 403\n", message: `Command failed: git fetch -q https://x-access-token:${TOKEN}@github.com/o/correio.git` });
   is("a failed git becomes an error without the command line: subcommand, exit code and git's own last line only (CodeQL 257 at line 2013)",
     eg && eg.message === "git fetch falhou (código 128): fatal: unable to access 'https://github.com/o/correio.git/': 403" && eg.status === 128 && !eg.message.includes(TOKEN) && !/Command failed|refs\/heads/.test(eg.message), eg?.message);
+  const egs = mod.erroDoGit?.(["push"], { status: 1, stderr: `remote: denied to https://u:${TOKEN}@github.com/o/c.git\n` });
+  is("the stderr kept on a git error has its credential masked too (NIT of Claude 5 iacVn3r on #5080)",
+    Boolean(egs) && !egs.stderr.includes(TOKEN) && !egs.message.includes(TOKEN) && /https:\/\/\*\*\*@github\.com/.test(egs.stderr), egs?.stderr);
   is("a subcommand outside the tool's list is named 'comando', never taken from the arguments (CodeQL 257)", mod.erroDoGit?.([`https://${TOKEN}@x`], { status: 1 })?.message === "git comando falhou (código 1)");
   // CodeQL 257 at line 2028: the session comes from CLAUDE_CODE_REMOTE_SESSION_ID, a sensitive name for CodeQL; no error
   // message carries it, and the family named comes from the fixed list.
@@ -851,6 +930,164 @@ console.log("a session's own box: an ack under the family name does not hide it 
   is("a message to two sessions of a family, acknowledged by one, still shows to the other (the 7f0a of 22/11/2026)",
     Boolean(idDuas) && run(["read", "--as", "Claude 6 z5v4"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_018ZjhHhz5v4kPZ3osC8Cr6g" }).out.includes(idDuas), r.out);
   is("a message to the family, acknowledged by the family, does not show to a session (unchanged)", !run(["read", "--as", "Claude 6 UoHAG"], as("c6")).out.includes(idF));
+}
+
+console.log("a family with a verdict on the head written only on the PR does not take it (coordinator ce2d, #5118)");
+{
+  const g5 = (args) => g(args, join(T, "p"));
+  g5(["checkout", "-q", "-B", "ce2d", M]); writeFileSync(join(T, "p", "ce2d.txt"), "x\n"); g5(["add", "."]); g5(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "ce2d\n\nClaude-Session: https://claude.ai/code/session_01S9eVA3KcXUkc6qPJmpNg4a"]);
+  g5(["push", "-q", "-f", "../prs.git", "HEAD:refs/heads/ce2d", "HEAD:refs/pull/60/head"]);
+  const H60 = g5(["rev-parse", "HEAD"]);
+  g(["init", "-q", "--bare", "mail60.git"]); g(["push", "-q", "../mail60.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m60 = { CORREIO_REPO: join(T, "mail60.git"), CORREIO_GIT_DIR: join(T, "dir60.git") };
+  const veredito = (familiaTxt, v) => JSON.stringify([`${familiaTxt} review #60 @${H60.slice(0, 10)}: ${v}\n\nbody`, "COLLABORATOR"]);
+  const fora = JSON.stringify([`re-review needed #60 @${H60.slice(0, 10)} — revisores: Claude 7 X e Claude 3 X`, "COLLABORATOR"]);
+  const comentarios = [veredito("Claude 2 X", "READY"), fora, JSON.stringify([`Claude 3 X review #60 @0000000000: READY`, "COLLABORATOR"]), JSON.stringify([`Claude 7 X review #60 @${H60.slice(0, 10)}: CHANGES`, "NONE"])].join("\n") + "\n";
+  r = run(["request-review", "--from", "Claude 4 X", "--pr", "60", "--sha", H60, "--text", "t"], { ...m60, ...as("c4"), FAKE_COMMENTS: comentarios });
+  is("ce2d: the review request is written", r.ok, r.out);
+  r = run(["claim-review", "--as", "Claude 2 X"], { ...m60, ...as("c2"), FAKE_COMMENTS: comentarios });
+  is("ce2d: a family that gave READY on this head only in a PR comment does not take the review; it is returned with the reason", !/pegou:/.test(r.out) && /nenhum pedido/.test(r.out), r.out);
+  const id60 = /^(\S+)\s+#60\b/m.exec(run(["list-reviews"], m60).out)?.[1] ?? "";
+  const devolucao = (() => { try { return g(["show", `refs/heads/correio:revisao/tomadas/${id60}/0`], join(T, "mail60.git")); } catch { return ""; } })();
+  is("ce2d: and the request records why, so the watch stops offering it to that family", /DEVOLVIDO/.test(devolucao) && /veredito neste head no PR/.test(devolucao), `${id60}\n${devolucao}`);
+  r = run(["claim-review", "--as", "Claude 7 X"], { ...m60, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", FAKE_COMMENTS: comentarios });
+  is("ce2d: a verdict from outside the repository (author_association NONE) does not exclude anyone", /pegou:/.test(r.out), r.out);
+  r = run(["claim-review", "--as", "Claude 3 X"], { ...m60, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA", FAKE_COMMENTS: comentarios });
+  is("ce2d: a verdict on another head, or a family only named in a line that is not a review, does not exclude", /nenhum pedido|já/.test(r.out) || /pegou:/.test(r.out), r.out);
+  r = run(["request-enqueue", "--from", "Claude 4 X", "--pr", "60", "--sha", H60, "--text", "t"], { ...m60, ...as("c4"), FAKE_COMMENTS: comentarios });
+  const fila60 = r;
+  r = run(["claim-enqueue", "--as", "Claude 2 X"], { ...m60, ...as("c2"), FAKE_COMMENTS: comentarios });
+  is("ce2d: the queue is not delivered to a family with a verdict on this head only in the PR (FQ (1))", fila60.ok && !/pegou:/.test(r.out) && /veredito da sua família neste head no PR/.test(r.out), fila60.out + r.out);
+  r = run(["claim-enqueue", "--as", "Claude 3 X"], { ...m60, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA", FAKE_COMMENTS_DOWN: "1" });
+  is("ce2d: with the PR's comments unreadable, the queue waits (NOT CHECKED)", !/pegou:/.test(r.out) && /NÃO CONFERIDO/.test(r.out), r.out);
+  r = run(["claim-review", "--as", "Claude 2 X"], { ...m60, ...as("c2"), FAKE_COMMENTS_DOWN: "1" });
+  is("ce2d: when the PR's comments cannot be read, nothing is taken (NOT CHECKED)", !/pegou:/.test(r.out), r.out);
+}
+
+console.log("ce2d: the reviewer of a comment, on the real formats of today (Claude 5 ibuF and Claude 1 E on #5141)");
+{
+  const mod = await import(TOOL);
+  const h = "065afee703";
+  const casos = [
+    // [comment, expected family or null, why]
+    [`Claude 1 review #5135 ＠${h}a87a81f9bc0b94d60a60900c5098: **CHANGES (1 MEDIUM, privacy/erasure; 1 LOW)**\nReviewer: Claude 1 DKvY (cloud)`, "claude-1", "family before 'review', fullwidth at sign"],
+    [`**Cost review #5135 @${h}788aae9928a25a7a9d55a3d3f4b4a5 — READY, 0 new findings** — Claude 2 lpgvy (cloud, session 01FR6Z1LpGvy).`, "claude-2", "family after 'review', in the signature"],
+    [`Focal cost review (Claude 1 cloud, money-reviewer lane, session f9afa7) ＠${h}: **READY** on \`5f33642e2e..${h}\``, "claude-1", "family in parentheses after 'review'"],
+    [`Independent review (Codex G) of head ${h}b0bf0b8bb6600b1da30117701de865b03.\nVerdict: CHANGES.`, "codex", "Codex, with the verdict on the second line"],
+    [`Codex N1 CHANGES (transcrito por Claude 5, cloud iacVn3r) @${h}: **MEDIUM, scope (commission).**`, "codex", "the transcriber does not count"],
+    [`**Focal MONEY review #3651 @${h} — CHANGES (2 LEVE)** (Claude 5 iacVn3r, session_012ST5iacVn3rzNGmvRWy4Up). Families with commits on the branch: Claude 4 and Claude 1.`, "claude-5", "the families with commits do not count"],
+    [`**READY #3651 @${h}** (focal on the main merge only). This is a focal review from the Claude 2 family (cloud C).`, "claude-2", "verdict first, family later on the line"],
+    [`Focal review #5141 @${h} — READY (tests pass, audit 18/18) — Claude 5 ibuF`, "claude-5", "the format of Claude 5 ibuF's finding"],
+    [`re-review needed #5135 @${h}, pushed by Claude 4 AC at 19:49 UTC.\nThis answers Claude 1 DKvY's CHANGES (7084720841).`, null, "a re-review request is not a review (Claude 1 E's finding)"],
+    [`CLAIMED — Claude 1 E (nuvem c1-revisoes-e), revisão focal de #5135 @${h}. Confiro a correção do CHANGES 4534 do Claude 1 DKvY.`, null, "a CLAIMED is not a verdict"],
+    [`fila #5135 @${h}: 2 READY (Claude 2 lpgvy, Claude 1 E) — Claude 5 ibuF`, null, "a queue record is not a review"],
+    [`Claude 2 X review #61\nnotes on the diff\nREADY on @${h}, in the third line`, null, "head and verdict only from the third line on"],
+    [`Claude 6 review #2048 @0123456789: CHANGES`, null, "a verdict on another head"],
+    [`Claude 3 X review #61 @${h}: looks fine`, null, "no verdict word"],
+    [`Fixed the MEDIUM from Claude 5 ibuF (https://github.com/solrenning-llc/marktmorgen/pull/5141#issuecomment-7085207019) in ${h}.\n- \`revisoresNoPr\` now reads the first two lines. When they hold this head and a verdict (READY or CHANGES), every family named on them is excluded.`, null, "the author's fix note of #5141 (7085420176) is not Claude 5's review (Claude 5 ibqho's finding)"],
+    [`**Fixed at ${h}** (Claude 7 xAF, author), answering Claude 6 i51q's CHANGES at 899e35bbdc.`, null, "a 'Fixed at' note with CHANGES on its line is not a review"],
+    [`Note on my review above (7081962031): Claude 1 E had already given a focal money READY on ${h} (7081897226)`, null, "a note on another review is not a review"],
+    [`This answers Claude 2 X's CHANGES on ${h}: the merge is redone.`, null, "an answer to a review is not a review"],
+    [`Claude 4 2Wb — #5143 @${h}\nREADY: tests pass`, "claude-4", "family and head on line 1, the verdict on line 2, without the word review (LEVE of Claude 5 ibqho on #5141)"],
+    [`Claude 1 coord: #5141 @${h}, 1 of 2 READY, waiting on a second family`, null, "a status line counting verdicts is not a review (LEVE of Claude 4 Z on #5141)"],
+    [`Claude 1 coord: #5141 @${h}, 1 de 2 READY`, null, "the same status line in Portuguese"],
+    [`Claude 7 fdy review #5145 @${h}: READY (1 of 2 READY from outside Claude 6)`, "claude-7", "a review that states its count on its own header line still counts (LEVE of Claude 5 ibqho on #5145)"],
+    [`**Claude 7 fdy review #5145 @${h}: READY.** This makes 2 of 2 READY.`, "claude-7", "the same, with the count after the verdict"],
+    [`Claude 1 coord panel: #5145 @${h} waiting\nCHANGES requested by Claude 4 earlier`, null, "a status line followed by a line that only mentions a verdict is not a review (LEVE of Claude 5 ibqho on #5145)"],
+    [`Claude 4 2Wb — #5143 @${h}\nVerdict: CHANGES (1 MEDIUM)`, "claude-4", "family header with 'Verdict:' opening line 2"],
+    [`Claude 4 2Wb — #5143 @${h}\n**READY** (0 findings)`, "claude-4", "family header with a bold verdict opening line 2"],
+    [`Claude 4 2Wb — #5145 @${h}\nREADY (2 of 2 READY from outside Claude 6)`, "claude-4", "a review with its count on line 2 counts (Claude 4 AC on #5145)"],
+    [`**Focal review #5145 @${h} — READY, 2 of 2 READY now** — Claude 2 lpgvy`, "claude-2", "a review with its count on line 1 counts (Claude 4 AC on #5145)"],
+    [`Claude 1 coord: #5145 @${h}, 1 of 2 READY, 1 de 2 CHANGES`, null, "a status line with only counts has no verdict left"],
+  ];
+  for (const [corpo, esperado, porque] of casos) {
+    const achou = typeof mod.revisoraDoComentario === "function" ? mod.revisoraDoComentario(corpo, h) : "(missing)";
+    is(`ce2d reviewer: ${porque} -> ${esperado ?? "nobody"}`, achou === esperado, `got ${achou}: ${corpo.slice(0, 120)}`);
+  }
+}
+
+console.log("ce2d: claim-review and claim-enqueue on those formats");
+{
+  const g6 = (args) => g(args, join(T, "p"));
+  g6(["checkout", "-q", "-B", "ce2d61", M]); writeFileSync(join(T, "p", "ce2d61.txt"), "y\n"); g6(["add", "."]); g6(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "ce2d61\n\nClaude-Session: https://claude.ai/code/session_01S9eVA3KcXUkc6qPJmpNg4a"]);
+  g6(["push", "-q", "-f", "../prs.git", "HEAD:refs/heads/ce2d61", "HEAD:refs/pull/61/head"]);
+  const H61 = g6(["rev-parse", "HEAD"]), c61 = H61.slice(0, 10);
+  g(["init", "-q", "--bare", "mail61.git"]); g(["push", "-q", "../mail61.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m61 = { CORREIO_REPO: join(T, "mail61.git"), CORREIO_GIT_DIR: join(T, "dir61.git") };
+  const comentarios = [
+    JSON.stringify([`Focal cost review (Claude 1 cloud, money-reviewer lane)\n#61 @${c61}: CHANGES, 1 MEDIUM\n\nbody`, "COLLABORATOR"]),
+    JSON.stringify([`re-review needed #61 @${c61}, pushed by Claude 4 X\nThis answers Claude 2 X's CHANGES`, "COLLABORATOR"]),
+    JSON.stringify([`Codex N1 CHANGES (transcrito por Claude 5, cloud X) @${c61}: MEDIUM`, "COLLABORATOR"]),
+  ].join("\n") + "\n";
+  const env = (k) => ({ ...m61, ...as(k), FAKE_COMMENTS: comentarios });
+  r = run(["request-review", "--from", "Claude 4 X", "--pr", "61", "--sha", H61, "--text", "t"], env("c4"));
+  is("ce2d61: the review request is written", r.ok, r.out);
+  r = run(["claim-review", "--as", "Claude 1 A"], env("c1a"));
+  is("ce2d61: 'Focal cost review (Claude 1 cloud, ...)' with the head and the verdict on the second line keeps Claude 1 out", !/pegou:/.test(r.out) && /nenhum pedido/.test(r.out), r.out);
+  r = run(["claim-review", "--as", "Claude 5 X"], env("c5"));
+  is("ce2d61: the family that only transcribed a verdict (Claude 5) takes the review", /pegou:/.test(r.out), r.out);
+  r = run(["request-enqueue", "--from", "Claude 4 X", "--pr", "61", "--sha", H61, "--text", "t"], env("c4"));
+  const fila61 = r;
+  r = run(["claim-enqueue", "--as", "Claude 1 A"], env("c1a"));
+  is("ce2d61: the queue is not delivered to Claude 1, whose verdict is on the second line", fila61.ok && !/pegou:/.test(r.out) && /veredito da sua família neste head no PR/.test(r.out), fila61.out + r.out);
+  r = run(["claim-enqueue", "--as", "Claude 2 X"], env("c2"));
+  is("ce2d61: a family named only in a re-review request ('This answers Claude 2's CHANGES') is not kept out of the queue", !/veredito da sua família neste head no PR/.test(r.out), r.out);
+}
+
+console.log("the owner's HOLD: only the named session releases it, on a coordinator request and the owner's decision (coordinator 3c47)");
+{
+  g(["init", "-q", "--bare", "mail62.git"]); g(["push", "-q", "../mail62.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m62 = { CORREIO_REPO: join(T, "mail62.git"), CORREIO_GIT_DIR: join(T, "dir62.git") };
+  const st61 = () => run(["pr-status", "--pr", "20"], m62).out;
+  r = run(["hold-pr", "--as", "Claude 4 X", "--pr", "20", "--reason", "owner", "--owner-hold", "bad id"], { ...m62, ...as("c4") });
+  is("an owner's HOLD needs the owner's decision id in its format", !r.ok && /OWNER-AAAAMMDD-HHMM-ASSUNTO/.test(r.out), r.out);
+  r = run(["hold-pr", "--as", "Claude 4 X", "--pr", "20", "--reason", "child-safety set", "--owner-hold", "OWNER-20261122-0700-HOLD-TEST"], { ...m62, ...as("c4") });
+  is("an owner's HOLD is written with the decision id and shown as such", r.ok && /HOLD do dono \(OWNER-20261122-0700-HOLD-TEST\)/.test(st61()), r.out + st61());
+  r = run(["release-pr", "--as", "Claude 4 X", "--pr", "20"], { ...m62, ...as("c4") });
+  is("whoever placed it cannot release an owner's HOLD", !r.ok && /HOLD do dono/.test(st61()), r.out + st61());
+  r = run(["release-pr", "--as", "Claude 3 Z", "--pr", "20"], { ...m62, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA" });
+  is("the PR's author cannot release it either", !r.ok && /HOLD do dono/.test(st61()), r.out + st61());
+  raw("prs/20/1", `Ação: LIBERADO\nPR: 20\nPor: Claude 3 Z\nData: ${new Date().toISOString()}\n`, join(T, "mail62.git"));
+  is("a release written by raw git, unidentified, does not count against an owner's HOLD", /HOLD do dono/.test(st61()), st61());
+  r = run(["hold-pr", "--as", "Claude 2 X", "--pr", "20", "--reason", "another hold"], { ...m62, ...as("c2") });
+  is("another HOLD on top keeps the owner's HOLD", /HOLD do dono \(OWNER-20261122-0700-HOLD-TEST\)/.test(st61()), r.out + st61());
+  let q = pedidoDe(marca("release-pr", "20"));
+  r = run(["release-pr", "--as", "Claude 5 ibqho", "--pr", "20", ...q.args], { ...m62, ...as("ibq"), ...q.env });
+  is("the named session, with a request but without the owner's decision, cannot release it", !r.ok && /HOLD do dono/.test(st61()), r.out + st61());
+  q = pedidoDe(marca("release-pr", "20"));
+  r = run(["release-pr", "--as", "Claude 5 ibqho", "--pr", "20", ...q.args, "--owner-decision", "OWNER-20261122-0800-RELEASE-TEST"], { ...m62, ...as("ibq"), ...q.env });
+  is("the named session releases it with the coordinator's request and the owner's decision", r.ok && /LIBERADO/.test(st61()), r.out + st61());
+  // A raw git write cannot create an owner's HOLD (review of Claude 4 2Wb on #5145).
+  const st21 = () => run(["pr-status", "--pr", "21"], m62).out;
+  raw("prs/21/0", `Ação: HOLD\nPR: 21\nPor: Claude 4 X\nMotivo: raw\nHOLD do dono: OWNER-20261122-2200-RAW-TEST\nData: ${new Date().toISOString()}\n`, join(T, "mail62.git"));
+  is("a raw HOLD with an owner's line and no session is a plain HOLD, not an owner's HOLD", /#21: HOLD por/.test(st21()) && !/HOLD do dono/.test(st21()), st21());
+  r = run(["release-pr", "--as", "Claude 4 X", "--pr", "21"], { ...m62, ...as("c4") });
+  is("and the family that signs it releases it as any HOLD", r.ok && /LIBERADO/.test(st21()), r.out + st21());
+  raw("prs/21/2", `Ação: HOLD\nPR: 21\nPor: Claude 4 X\nMotivo: raw\nHOLD do dono: OWNER-20261122-2200-RAW-TEST\nData: ${new Date().toISOString()}\nSessão: session_${SES.c2.slice(4)}\n`, join(T, "mail62.git"));
+  is("an owner's line under another family's session is not an owner's HOLD either", /#21: HOLD por/.test(st21()) && !/HOLD do dono/.test(st21()), st21());
+}
+
+console.log("a family with commits on the PR neither takes nor declines its queue request (coordinator 605b and 49de), save the 4acb exception");
+{
+  g(["init", "-q", "--bare", "mail63.git"]); g(["push", "-q", "../mail63.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m63 = { CORREIO_REPO: join(T, "mail63.git"), CORREIO_GIT_DIR: join(T, "dir63.git"), CORREIO_SEM_COMMITS: "" };
+  const c4trailer = "\n\nClaude-Session: https://claude.ai/code/session_01S9eVA3KcXUkc6qPJmpNg4a";
+  g(["checkout", "-q", "-B", "pr63", M], P); const H63 = commit("f63.txt", "63\n", `pr63 by Claude 4${c4trailer}`);
+  g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-63", "HEAD:refs/pull/63/head"], P);
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "63", "--sha", H63, "--text", "fila #63"], { ...m63, ...as("c2") });
+  is("request-enqueue lists the families with commits as left out of the queue", r.ok && /famílias com commits no PR \(ficam de fora, coordenador 605b e 49de\): claude-4/.test(r.out) && /podem enfileirar[^\n]*: (?![^\n]*claude-4)/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 4 X"], { ...m63, ...as("c4") });
+  is("a family with commits on the PR does not take its queue request, and is told who can", !/pegou/.test(r.out) && /tem commits da sua família/.test(r.out) && /podem: [^\n]*claude-7/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 7 X"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" });
+  is("a family with no commit takes it", /pegou/.test(r.out) && !/EXCEÇÃO 4acb/.test(r.out), r.out);
+  run(["complete-enqueue", "--as", "Claude 7 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" });
+  // The 4acb exception: every family outside the author has commits or reviewed the head (here, left out with --exclude).
+  g(["checkout", "-q", "-B", "pr64", M], P); const H64 = commit("f64.txt", "64\n", `pr64 by Claude 4${c4trailer}`);
+  g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-64", "HEAD:refs/pull/64/head"], P);
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "64", "--sha", H64, "--exclude", "Claude 1,Claude 3,Claude 5,Claude 6,Claude 7,Codex", "--text", "fila #64"], { ...m63, ...as("c2") });
+  is("with no family left, request-enqueue names the 4acb exception's families", r.ok && /exceção 4acb do coordenador \(só na vez de custo, com nota no PR\): claude-4/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 4 X"], { ...m63, ...as("c4") });
+  is("then the family with commits takes it, warned that it is the 4acb exception (cost turn, note on the PR)", /pegou/.test(r.out) && /EXCEÇÃO 4acb/.test(r.out) && /escreva no próprio PR/.test(r.out), r.out);
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

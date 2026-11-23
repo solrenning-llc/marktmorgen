@@ -24,6 +24,7 @@ export async function redisPipeline(commands: (string | number)[][]): Promise<un
 export const normaliseHandle = (value: string) => value;
 export async function storeForHandle() { state.lookups += 1; return state.storeFound ? store : null; }
 export async function takePublicRequest() { state.publicCalls += 1; return state.publicAllowed; }
+export const takePublicRequestExact = takePublicRequest;
 /** The meter a new preview's storage measurement is paid from (lib/stamp-cost-rules.ts): handed to previewCopy, never called by the route itself. */
 export async function setWhileStoreLiveTelling() { throw new Error("The preview stand-in must not invoke its keeper"); }
 export async function holdPublicRequests() { throw new Error("The route must not hold requests itself; previewCopy does, before it measures"); }

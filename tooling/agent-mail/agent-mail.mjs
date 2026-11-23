@@ -1753,9 +1753,11 @@ export function conferirTomada({ eu, id, agora = new Date() }) {
   // abriu o PR, que a ferramenta não vê de outro modo). Um revisor de outra família que pede a fila mantém o seu READY
   // (MÉDIO do Claude 5 id8Ws no #5408 @dcee6a68d5: #5405, claude3/..., pedido pelo Claude 5, READY de 2, 5 e 6).
   const doRamo = familiaDoRamo(ramo);
-  const valem = readyQueContam(p.pr, sha, doRamo ? [doRamo] : [p.familia].filter(Boolean), ramo);
+  const autor = doRamo || p.familia;
+  const comoAutor = doRamo ? "a do prefixo do ramo" : "quem pediu, num ramo sem prefixo de família";
+  const valem = readyQueContam(p.pr, sha, autor ? [autor] : [], ramo);
   if (valem === null) throw new Error(`as revisões READY de #${p.pr} @${sha.slice(0, 10)} NÃO FORAM CONFERIDAS agora (o PR ou os seus commits não puderam ser lidos); não enfileire (passo 4: nada NÃO CONFERIDO segue); tente de novo`);
-  if (valem.size < READY_EXIGIDAS) throw new Error(`#${p.pr} @${sha.slice(0, 10)} tem ${valem.size} READY de família de fora no head exato (${[...valem].sort().join(", ") || "nenhum"}); são ${READY_EXIGIDAS}, de ${READY_EXIGIDAS} famílias diferentes, sem a do autor e sem as que têm commit (OWNER-20261123-1442-THREE-REVIEWS); não enfileire; conclua como recusado (--result declined) para o autor pedir de novo com as ${READY_EXIGIDAS}`);
+  if (valem.size < READY_EXIGIDAS) throw new Error(`#${p.pr} @${sha.slice(0, 10)} tem ${valem.size} READY de família de fora no head exato (${[...valem].sort().join(", ") || "nenhum"}); são ${READY_EXIGIDAS}, de ${READY_EXIGIDAS} famílias diferentes, sem a família ${autor || "(desconhecida)"} (${comoAutor}) e sem as que têm commit (OWNER-20261123-1442-THREE-REVIEWS); não enfileire; conclua como recusado (--result declined) para o autor pedir de novo com as ${READY_EXIGIDAS}`);
   return { p, head: sha };
 }
 

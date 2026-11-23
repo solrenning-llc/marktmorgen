@@ -11,7 +11,7 @@
  *     and the buyer, Marktmorgen is not the merchant of record, and payments
  *     go into the creator's own accounts: Stripe by direct charges (app/terms,
  *     section 3) only when the store sells through it (canSell), PayPal only
- *     when it sells through PayPal (sellsThroughPayPal); with neither, no
+ *     when it offers PayPal (paypalOffered); with neither, no
  *     account is named (Codex N1's MEDIUM on #1824).
  *   - Canceling within 14 days: for digital content and for memberships, the
  *     two rules the checkout asks by (lib/digital-consent.ts), with the same
@@ -45,7 +45,7 @@ export type PolicyFactsInput = {
    * decide it). Never assumed: a store can take payments by PayPal alone (Codex N1's MEDIUM on #1824).
    */
   stripe: boolean;
-  /** Whether the store takes money into its own PayPal account right now (sellsThroughPayPal). */
+  /** Whether the store takes money into its own PayPal account right now (paypalOffered). */
   paypal: boolean;
   /** The ad pixels switched on, by their platform names ("Meta", "Google"…). */
   pixels: readonly string[];

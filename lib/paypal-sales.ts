@@ -627,10 +627,25 @@ export function takenBy(stripe: boolean, paypal: boolean): string {
   return stripe && paypal ? "Stripe or PayPal" : paypal ? "PayPal" : "Stripe";
 }
 
+/** Whether this store adds its tax on top of its prices (Stripe Checkout's exclusive tax). */
+export function taxOnTop(store: Pick<Store, "tax">): boolean {
+  return store.tax.enabled && !store.tax.included;
+}
+
+/**
+ * Whether PayPal is offered to buyers of this store right now (#3971, coordinator's decision 6df4): never while the
+ * store adds its tax on top of its prices, since a PayPal order asks for the price alone and the buyer would pay
+ * without the tax (IV (h): never sold without its tax). How PayPal could charge it is the owner's decision. What was
+ * already bought by PayPal is still read through sellsThroughPayPal, which this does not change.
+ */
+export function paypalOffered(store: Store): boolean {
+  return sellsThroughPayPal(store) && !taxOnTop(store);
+}
+
 /** Whether this store takes PayPal for this product right now. */
 export function paypalReady(store: Store, product: Listing): boolean {
   // The same plan that opens the Stripe till opens this one.
-  return sellsThroughPayPal(store) && sellsWithPayPal(product);
+  return paypalOffered(store) && sellsWithPayPal(product);
 }
 
 /**

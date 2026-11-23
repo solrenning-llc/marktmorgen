@@ -7,14 +7,14 @@
  *     counting only what is paid for: digital content sold once
  *     (deliversDigitally, not a membership) and memberships;
  *   - which accounts it takes money into right now: Stripe (canSell) and PayPal
- *     (sellsThroughPayPal), the same checks its store and product pages make;
+ *     (paypalOffered), the same checks its store and product pages make;
  *   - the ad pixels switched on, by their platforms' own names (PIXEL_INFO);
  *   - the postal address on its emails, when set and the creator chose to show it there too.
  */
 import type { Store } from "@/lib/store";
 import { type Listing, readListingsAll, visibleIds } from "@/lib/catalog";
 import { deliversDigitally } from "@/lib/digital-consent";
-import { sellsThroughPayPal } from "@/lib/paypal-sales";
+import { paypalOffered } from "@/lib/paypal-sales";
 import { canSell } from "@/lib/store-checkout";
 import { PIXEL_INFO, PIXEL_KINDS } from "@/lib/pixels";
 import type { PolicyFactsInput } from "@/lib/store-policy-facts";
@@ -61,7 +61,7 @@ export async function policyInput(store: Store): Promise<PolicyFactsInput> {
   const products = await readListingsAll(store, visibleIds(store));
   // The same check the purchase email makes before it sends the /manage link (lib/purchase-email.ts).
   // The accounts the money goes into, by the same checks the store and product pages make (takenBy).
-  return policyInputFrom(store, products, { stripe: canSell(store), paypal: sellsThroughPayPal(store) }, canManage(store));
+  return policyInputFrom(store, products, { stripe: canSell(store), paypal: paypalOffered(store) }, canManage(store));
 }
 
 /**

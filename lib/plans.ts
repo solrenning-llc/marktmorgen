@@ -41,6 +41,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { type Interval, isInterval } from "@/lib/product-recurring";
 import { addPeriods } from "@/lib/plan-periods";
+import { currentPeriodEnd } from "@/lib/fixed-end-rules";
 import { withCutoff } from "@/lib/fetch-timeout";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { tellPlanOwed, tellPlanStuck } from "@/lib/plan-stuck-notice";
@@ -213,9 +214,35 @@ async function tryPlan(account: string, session: string, about?: { sid: string; 
     `/subscriptions/${encodeURIComponent(view.subscription)}`,
     new URLSearchParams({ cancel_at: String(end), proration_behavior: "none" }),
   );
+  // A member's own cancel that landed between the read above and this write (lib/membership-manage.ts, cancelSoldEnd:
+  // cancel_at to the period's end, with metadata cancel_requested_at) was just written over: Stripe has no conditional
+  // update. Its answer carries a request the read did not have, so the member's end is written back and the plan is
+  // watched as one stopped early (Codex X5's MEDIUM on #3488). A request already there when it was read (since taken
+  // back by the creator) is not put back.
+  if (isOwnReply(updated, view.subscription) && requestedAt(updated) !== "" && requestedAt(updated) !== requestedAt(subscription)) {
+    const stopAt = currentPeriodEnd(updated as Parameters<typeof currentPeriodEnd>[0]);
+    if (stopAt > now && stopAt < end) {
+      const back = await onAccount(
+        "POST",
+        account,
+        `/subscriptions/${encodeURIComponent(view.subscription)}`,
+        new URLSearchParams({ cancel_at: String(stopAt), proration_behavior: "none" }),
+      );
+      if (!(isOwnReply(back, view.subscription) && back.cancel_at === stopAt)) return { state: "unread" };
+      return { state: "early", again: Math.min(stopAt, end - 2 * DAY) };
+    }
+  }
   // Settled only on the subscription's own answer carrying the end just set (Codex S on #3086: the id alone does
   // not prove the end was written); otherwise the next try reads it again and finds the end in place, or sets it.
   return { state: isOwnReply(updated, view.subscription) && updated.cancel_at === end ? "done" : "unread" };
+}
+
+/** When the member asked to cancel (metadata cancel_requested_at, written by cancelSoldEnd), as written; "" when not. */
+function requestedAt(subscription: Record<string, unknown>): string {
+  const meta = subscription.metadata;
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return "";
+  const at = (meta as Record<string, unknown>).cancel_requested_at;
+  return typeof at === "string" ? at : "";
 }
 
 /** Whether a write of one member (ZADD) answered 0 or 1 exactly: anything else, or a refusal, is unknown. */

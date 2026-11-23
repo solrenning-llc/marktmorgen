@@ -42,6 +42,7 @@ import { essentialLimitState, withinLimit } from "@/lib/request-guard";
 import { FEED_TOKEN } from "@/lib/podcast-rules";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { type Listing, MAX_STORE_BYTES, type Store, storeForHandle } from "@/lib/store";
+import { orderWriteIfKey } from "@/lib/order-data";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const addressKey = (email: string) => sha(`nimbus-podcast:${normaliseEmail(email)}`).slice(0, 32);
@@ -108,7 +109,12 @@ async function withGrant(store: Store, token: string, grant: FeedGrant): Promise
   const held = await grantOf(token);
   if (held === undefined) return null;
   if (held !== null) return sameGrant(held, grant) ? token : null;
-  const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant), "NX"]]);
+  // Written again only while its index is still there (ORDER_WRITE_IF_KEY, #3968): the index was read before this
+  // write, and a person's deletion in between takes the index and the grant in one DEL. A grant written after it would
+  // hold their address with no index leading to it, out of reach of any later deletion. An index gone hands out nothing.
+  const wrote = await orderWriteIfKey(store, [["SET", tokenKey(token), JSON.stringify(grant), "NX"]], byKey(grant.s, grant.p, grant.e));
+  if (!wrote) return null;
+  const [made] = wrote;
   if (made === "OK") return token;
   if (made !== null) return null;
   // null: another call wrote it first; hand it out only if it is this address's grant.

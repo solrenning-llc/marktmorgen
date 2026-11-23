@@ -130,8 +130,12 @@ const PENDING_WATCH_MS = 2 * 24 * 60 * 60 * 1000;
  */
 const PROCESSING_WATCH_MS = 7 * 24 * 60 * 60 * 1000;
 const PROCESSING_RECHECK_MS = 24 * 60 * 60 * 1000;
-/** How long after a look whose offer record did not read the job looks again (#4624): an hour, never at every run. */
-const UNKNOWN_RECORD_LOOK_MS = 60 * 60 * 1000;
+/**
+ * How long after a look whose offer record did not read the job looks again (#4624): a day, as a payment still
+ * clearing is looked at (Claude 5 iYwjc's LEVE on #5482: hourly gave ~192 looks before the record lapsed). Over the
+ * record's RECORD_SECONDS that is at most nine looks, inside OFFER_WATCH_LOOKS_MOST (tests/upsell-pending-thrown-behind).
+ */
+const UNKNOWN_RECORD_LOOK_MS = PROCESSING_RECHECK_MS;
 /**
  * When the job looks at a waiting offer again, by how long after it began: its first look comes a minute after it
  * began (settlePendingOffers' grace), then once its lost answer can be told apart (LOST_ANSWER_MS), after an hour,
@@ -961,7 +965,7 @@ export async function settlePendingOffers(
       // run and the healthy offers behind waited their whole watch. Looked at again on the schedule of an offer still
       // pending (WATCH_AFTER_MS), then once a day while a payment could still be clearing, then let go, as the branches
       // above, so its looks stay inside OFFER_WATCH_LOOKS_MOST. One whose record did not read has no known time: looked
-      // at again in an hour (before, at every run), until the record reads, or is gone and is let go above.
+      // at again a day later (before, at every run), until the record reads, or is gone and is let go above.
       const now = Date.now();
       const next = at === null ? now + UNKNOWN_RECORD_LOOK_MS : nextLook(at, now) ?? (now - at <= PROCESSING_WATCH_MS ? now + PROCESSING_RECHECK_MS : null);
       if (next === null) await drop().catch(() => undefined);

@@ -73,7 +73,7 @@ async function main(): Promise<void> {
       lookup = () => json({ ...live, active });
       is(`${label}: not known, never a code found`, await findCode(ACCOUNT, live.id), { state: "error" });
     }
-    lookup = () => json((({ active: _active, ...rest }) => rest)(live));
+    lookup = () => json(Object.fromEntries(Object.entries(live).filter(([field]) => field !== "active")));
     is("no active at all: not known", await findCode(ACCOUNT, live.id), { state: "error" });
     lookup = () => json({ ...live, active: false });
     is("control: a stopped code is found, not live", await findCode(ACCOUNT, live.id), { state: "found", active: false });

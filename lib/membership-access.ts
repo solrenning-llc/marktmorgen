@@ -36,7 +36,8 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { onAccount } from "@/lib/stripe-account";
-import type { Listing, Store } from "@/lib/store";
+import { STORE_ID_PATTERN, erasingSince, storeRef, type Listing, type Store } from "@/lib/store";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { type PauseSub, pausedNow } from "@/lib/membership-pause-rules";
 
 /** The states in which a membership still hands over what it sells. */
@@ -165,8 +166,17 @@ export async function membershipStatus(store: Store, subscription: unknown): Pro
   // access or populate the cache for the subscription that was requested.
   if (!sub || !Object.hasOwn(sub, "id") || sub.id !== subscription) throw new UnknownReplyError("a membership provider identity");
   const status = memberState(sub);
+  // Kept only while the store is live, in one step with its fence (Codex L-20261119-1248, #5010 row 115): a store erased while Stripe was read
+  // gets no membership status back, and the late answer is not live access evidence. A store gone or being erased
+  // answers no membership (null, never live); any other answer is unknown, as a cache reply of another shape is.
   if (status && isRedisConfigured()) {
-    await redisPipeline([["SET", statusKey(account, subscription), status, "EX", STATUS_SECONDS]]);
+    // A store kept from before ids with no statsId cannot be told from its owner's next store, so no fence can hold
+    // the write (lib/live-fence.ts): nothing is kept for it, and its erasure is still read, so a store being erased
+    // gets no membership back (review of #5272, Claude 1 and Claude 2). Any other store goes through the fence.
+    if (!STORE_ID_PATTERN.test(store.sid) && !store.statsId) return (await erasingSince(storeRef(store))) === null ? status : null;
+    const kept = await setWhileStoreLive(store, statusKey(account, subscription), status, STATUS_SECONDS).catch(() => "unknown" as const);
+    if (kept === "gone") return null;
+    if (kept !== "kept") throw new UnknownReplyError("a membership status kept");
   }
   return status;
 }

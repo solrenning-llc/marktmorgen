@@ -348,12 +348,16 @@ function acrescentar(novos, mensagem) {
   }
 }
 
+/** A opção repetida é recusada: antes, valia só a última, e um --to repetido perdia destinatários em silêncio (33d5). */
+const repetida = (chave) => new Error(`a opção --${chave} foi dada mais de uma vez; nada foi feito. Para vários nomes, use uma só, separados por vírgula: --${chave} "A, B"`);
+
 function opcoes(args) {
   const o = { _: [] };
   for (let i = 0; i < args.length; i += 1) {
     if (args[i].startsWith("--")) {
       const chave = args[i].slice(2);
       const valor = args[i + 1] && !args[i + 1].startsWith("--") ? args[++i] : true;
+      if (Object.hasOwn(o, chave)) throw repetida(chave);
       o[chave] = valor;
     } else o._.push(args[i]);
   }
@@ -2024,6 +2028,12 @@ export const OPCOES = {
   result: "resultado", reason: "motivo", name: "nome", on: "ligar", off: "desligar", link: "link", request: "pedido", "owner-message": "dono",
   "owner-hold": "holdDono", "owner-decision": "liberacaoDono",
 };
+/**
+ * Os nomes internos que algum comando lê (o.<nome>), além dos de OPCOES. Uma opção fora dos dois é recusada: antes, ela
+ * era guardada e ninguém a lia, e um send --to A --cc B gravava só para A, sem aviso (LEVE do Claude 2 lpgvy no #5279).
+ */
+const INTERNAS = new Set([...Object.values(OPCOES).flat(), "pr", "sha"]);
+const desconhecida = (chave) => new Error(`a opção --${chave} não existe; nada foi feito. Opções: ${Object.keys(OPCOES).map((k) => `--${k}`).join(", ")}, --pr, --sha (vários destinatários: --to "A, B")`);
 const RESULTADOS = { enqueued: "enfileirado", declined: "recusado", READY: "READY", CHANGES: "CHANGES" };
 const TIPOS_EN = { review: "revisao", enqueue: "fila" };
 
@@ -2036,11 +2046,17 @@ export function traduzir(comandoDado, o) {
     comando = COMANDOS[NOMES_ANTIGOS[comandoDado]];
   }
   const traduzidas = { _: o._ };
+  const deOnde = {};
   for (const [chave, valor] of Object.entries(o)) {
     if (chave === "_") continue;
     const alvo = OPCOES[chave];
-    if (alvo) for (const k of [alvo].flat()) traduzidas[k] = valor;
-    else traduzidas[chave] = valor;
+    if (!alvo && !INTERNAS.has(chave)) throw desconhecida(chave);
+    // A mesma opção dada pelo nome atual e pelo antigo (--to e --para) também é repetida, e é recusada do mesmo jeito.
+    for (const k of alvo ? [alvo].flat() : [chave]) {
+      if (Object.hasOwn(traduzidas, k)) throw repetida(`${deOnde[k]} (e --${chave})`);
+      traduzidas[k] = valor;
+      deOnde[k] = chave;
+    }
   }
   if (typeof traduzidas.resultado === "string") {
     const r = traduzidas.resultado;
@@ -2087,8 +2103,10 @@ async function main(argv) {
   if (comando === "enviar") {
     const texto = o.arquivo ? readFileSync(o.arquivo === "-" ? 0 : o.arquivo, "utf8") : o.texto;
     const id = enviar({ de: o.de, para: o.para, assunto: o.assunto, texto, responde: o.responde || null });
-    console.log(`enviada: ${id}`);
-    const { sem, com } = avisoCota(String(o.para).split(",").map((d) => d.trim()).filter(Boolean), o.de);
+    // A lista final de destinatários, para quem enviou conferir na hora (33d5).
+    const destinos = String(o.para).split(",").map((d) => d.trim()).filter(Boolean);
+    console.log(`enviada: ${id} (para: ${destinos.join(", ")})`);
+    const { sem, com } = avisoCota(destinos, o.de);
     for (const s of sem) console.log(`ATENÇÃO: ${s.nome} está sem cota${s.ate ? ` até ${s.ate.toISOString()}` : ""}: pode não ler tão cedo. Com cota: ${com.join(", ") || "nenhuma outra declarada"}.`);
   } else if (comando === "ler") {
     if (!o.eu) throw new Error("--as é obrigatório");

@@ -47,6 +47,11 @@ async function main(): Promise<void> {
   const store = (await ensureStatsId(owner))!;
   const cfg = `nl:phone:cfg:${store.statsId}`;
   const st = `nl:phone:st:${store.statsId}`;
+  /** A command that deletes device states: a plain HDEL, or the script that unlists and forgets in one step. */
+  const forgets = (c: Commands) => (c[0]?.[0] === "HDEL" && c[0]?.[1] === st) || (c[0]?.[0] === "EVAL" && String(c[0]?.[1]).startsWith("-- marktmorgen:phone-unlist-forget:v1\n"));
+  /** A command that takes devices off the list: any script on the list other than an alert's own state write. */
+  const unlists = (c: Commands) => c[0]?.[0] === "EVAL" && c[0].includes(cfg) && !String(c[0]?.[1]).startsWith("-- marktmorgen:phone-state-if-listed:v1\n");
+  const listed = async (id: string) => String((await real([["GET", cfg]]))[0]).includes(id);
 
   part("A removed teammate's state HDEL that proves nothing keeps the device reachable");
   const added = await addDevice(store, mate, "admin", sub(1), ["sale"], "Mate phone");
@@ -54,7 +59,7 @@ async function main(): Promise<void> {
   const id = (JSON.parse(String((await real([["GET", cfg]]))[0])) as { devices: { id: string }[] }).devices[0].id;
   await real([["HSET", st, id, JSON.stringify({ at: 1, status: 201 })]]);
   for (const [label, reply] of [["no reply", []], ["undefined", [undefined]], ["more than named", [2]], ["a string", ["1"]]] as [string, unknown[]][]) {
-    redis.pipeline = (async (c: Commands) => (c[0]?.[0] === "HDEL" && c[0]?.[1] === st ? [...reply] : real(c))) as typeof redis.pipeline;
+    redis.pipeline = (async (c: Commands) => (forgets(c) ? [...reply] : real(c))) as typeof redis.pipeline;
     is(`${label}: the removal is not reported done`, await outcome(() => forgetPerson(store, mate)), "threw");
     is(`${label}: the device is still in the list, so a repeat can find its id`, String((await real([["GET", cfg]]))[0]).includes(id), true);
   }
@@ -71,15 +76,14 @@ async function main(): Promise<void> {
   const lateId = "pd_0123456789abcdef";
   let hdels = 0;
   redis.pipeline = (async (c: Commands) => {
-    if (c[0]?.[0] === "HDEL" && c[0]?.[1] === st) {
+    if (forgets(c)) {
       hdels += 1;
       if (hdels === 1) {
-        // The first state goes, and the mate adds a device before the list changes.
-        const reply = await real(c);
+        // The mate adds a device just before the first forgetting command lands.
         const config = JSON.parse(String((await real([["GET", cfg]]))[0])) as { devices: { id: string }[] };
         const copy = { ...config.devices.find((d) => d.id === firstId)!, id: lateId };
         await real([["SET", cfg, JSON.stringify({ ...config, devices: [...config.devices, copy] })], ["HSET", st, lateId, JSON.stringify({ at: 2, status: 201 })]]);
-        return reply;
+        return real(c);
       }
       return [];
     }
@@ -97,18 +101,47 @@ async function main(): Promise<void> {
   const inFlight = (JSON.parse(String((await real([["GET", cfg]]))[0])) as { devices: { id: string; who?: string }[] }).devices.find((d) => d.who === mate)!.id;
   let fired = false;
   redis.pipeline = (async (c: Commands) => {
-    const replies = await real(c);
-    if (!fired && c[0]?.[0] === "HDEL" && c[0]?.[1] === st) {
+    if (!fired && unlists(c)) {
       fired = true;
       // keepStates of an alert sent just before the removal: the device is still listed, so the fence lets it in.
       await real([["EVAL", PHONE_STATE_IF_LISTED, 2, cfg, st, inFlight, JSON.stringify({ at: 3, ok: true, status: 201, error: "" })]]);
     }
-    return replies;
+    return real(c);
   }) as typeof redis.pipeline;
   is("the removal resolves", await outcome(() => forgetPerson(store, mate)), "resolved");
   is("the in-flight write happened", fired, true);
   is("the device left the list", String((await real([["GET", cfg]]))[0]).includes(inFlight), false);
   is("and its state is gone too", Number((await real([["HEXISTS", st, inFlight]]))[0]), 0);
+
+  part("An alert's state written just before the unlisting, with any one command of the removal lost (Claude 7 xAF's LEVE on #5105)");
+  // xAF (7076320256): an alert's keepStates lands between the state HDEL and the unlisting, and the final HDEL's reply
+  // proves nothing: the state stayed under an id already off the list, and a repeat found nothing to do. Here every
+  // command of the removal in turn is lost, either never run ("dropped") or run with its reply lost ("unanswered");
+  // after one repeat with Redis healthy, the device is never listed and its state is never kept.
+  for (const mode of ["dropped", "unanswered"] as const) {
+    for (let k = 1; k <= 8; k += 1) {
+      const device = await addDevice(store, mate, "admin", sub(100 + k + (mode === "dropped" ? 0 : 50)), ["sale"], `Mate ${mode} ${k}`);
+      if (!device.ok) throw new Error(`synthetic device: ${JSON.stringify(device)}`);
+      const lostId = (JSON.parse(String((await real([["GET", cfg]]))[0])) as { devices: { id: string; who?: string }[] }).devices.find((d) => d.who === mate)!.id;
+      await real([["HSET", st, lostId, JSON.stringify({ at: 1, status: 201 })]]);
+      let calls = 0;
+      let alerted = false;
+      redis.pipeline = (async (c: Commands) => {
+        if (!alerted && unlists(c)) {
+          alerted = true;
+          await real([["EVAL", PHONE_STATE_IF_LISTED, 2, cfg, st, lostId, JSON.stringify({ at: 4, ok: true, status: 201, error: "" })]]);
+        }
+        calls += 1;
+        if (calls !== k) return real(c);
+        if (mode === "unanswered") await real(c);
+        return [];
+      }) as typeof redis.pipeline;
+      await outcome(() => forgetPerson(store, mate));
+      await outcome(() => forgetPerson(store, mate));
+      const kept = Number((await real([["HEXISTS", st, lostId]]))[0]);
+      is(`${mode} command ${k}: after a repeat the device is off the list and its state is gone`, [await listed(lostId), kept], [false, 0]);
+    }
+  }
 
   part("The team route never swallows a device erasure that failed");
   const route = readFileSync("app/api/store/team/route.ts", "utf8");

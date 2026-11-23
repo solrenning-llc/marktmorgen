@@ -491,10 +491,10 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  * A paid checkout whose ordinary count stays unknown for a reason that never
  * clears is counted once more an hour after its creation, at its worst case
  * (lib/orders.ts COUNT_STUCK_LEGACY_CHECKOUT; Codex's MEDIUM on #3667, the
- * coordinator's decision 4c5c): that path's first application is the ordinary
- * script's worst refusal (14 billed commands) plus the stuck count's worst
- * (13), measured on real Redis in scripts/test_legacy_order_accounting_redis.py,
- * so the line prices 27 commands, and the two EVALs' serialized requests with
+ * coordinator's decision 4c5c): that path's dearest first application, measured
+ * on real Redis in scripts/test_legacy_order_accounting_redis.py, is 14 + 13
+ * billed commands with no seen key and 9 + 14 with a partial intent (oci:), the
+ * two worsts never meeting, so the line prices 27 commands, and the two EVALs' serialized requests with
  * the owner fully escaped plus their scalar replies inside 10,240 bytes
  * (tests/legacy-order-accounting-cost.test.ts). Its mark is the same per-order
  * seen key with the same checkout-created +45-day horizon: no new storage.

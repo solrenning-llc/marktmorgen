@@ -58,7 +58,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "advalue", "Ad Value Kitchen", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestAdValue0001", true);
+  await setStripeAccount(OWNER, "acct_1TestHarbor0001", true);
   const statsId = (await storeForEmail(OWNER))!.statsId!;
   await setServerToken(statsId, "meta", META_TOKEN);
   await setAdsServer(OWNER, ["meta"]);

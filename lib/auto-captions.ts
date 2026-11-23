@@ -7,7 +7,8 @@
  * time, a few minutes for most lessons; it is asked again until every
  * language asked for is there (and told by its announcement too,
  * app/api/stream/hook), and each language is listed for the lesson as it
- * arrives. What has not arrived after GIVE_UP_HOURS is refunded.
+ * arrives. What has not arrived is refunded after GIVE_UP_HOURS, once the service says what it delivered
+ * (an answer that stays unknown is kept for a person, never refunded on it).
  *
  *   nl:stream:auto:<video>   what is being written, and the charge for it
  *   nl:stream:autoq          which videos to ask about, and when

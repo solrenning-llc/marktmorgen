@@ -84,11 +84,14 @@ export function studyPlan(course: PlanCourse, setup: PlanSetup, answers: PlanAns
   for (const id of goal.first) if (!basics.has(id)) order.push(id);
   for (const m of course.modules) if (!order.includes(m.id) && !basics.has(m.id)) order.push(m.id);
   const reviewModules = course.modules.filter((m) => basics.has(m.id)).map((m) => m.id);
-  // A lesson id in two modules is planned once, where it first comes.
+  // A lesson id in two modules is planned once, where it first comes; it is a review only when that first place is in
+  // a basics module at the end (Claude 5's LOW on #3675), never in its normal week.
   const seen = new Set<string>();
-  const lessons = [...order, ...reviewModules]
-    .flatMap((id) => byId.get(id)?.lessons ?? [])
-    .filter((l) => has.has(l.id) && !seen.has(l.id) && Boolean(seen.add(l.id)));
+  const placed = (ids: string[]) =>
+    ids.flatMap((id) => byId.get(id)?.lessons ?? []).filter((l) => has.has(l.id) && !seen.has(l.id) && Boolean(seen.add(l.id)));
+  const planned = placed(order);
+  const reviewed = placed(reviewModules);
+  const lessons = [...planned, ...reviewed];
   if (lessons.some((l) => typeof l.minutes !== "number" || !Number.isFinite(l.minutes) || l.minutes <= 0)) return { known: false };
   const weeks: string[][] = [];
   let week: string[] = [];
@@ -104,8 +107,7 @@ export function studyPlan(course: PlanCourse, setup: PlanSetup, answers: PlanAns
     used += minutes;
   }
   if (week.length) weeks.push(week);
-  const reviewIds = new Set(reviewModules.flatMap((id) => byId.get(id)?.lessons ?? []).map((l) => l.id));
-  const review = lessons.filter((l) => reviewIds.has(l.id)).map((l) => l.id);
+  const review = reviewed.map((l) => l.id);
   return { known: true, weeks, review, lessons: lessons.length };
 }
 

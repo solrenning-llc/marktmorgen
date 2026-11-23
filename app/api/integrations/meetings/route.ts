@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
     }
   }
   try {
-    const { view: was, providerAccessRemoved, sharedGrantKept } = await disconnectFor(store.statsId, provider);
+    const { view: was, providerAccessRemoved, sharedGrantKept } = await disconnectFor(store.statsId, provider, "", store);
     // Forgotten here either way; when the provider did not confirm it took the access back in this request, the page
     // and the email say so. Nothing there counts as not confirmed: an earlier try may have stopped after forgetting it,
     // its answer lost, and the retry has nothing to ask the provider (G review 5815599962).

@@ -4255,6 +4255,14 @@ export class MemoryRedis {
           this.run(["SREM", args[1], args[2]]);
           return this.run(["SCARD", args[1]]);
         }
+        // lib/meet-connect.ts LIST_HOST: a team host's calendar listed under its account only while it is the text read.
+        if (key.startsWith("-- marktmorgen:meet-list-host:v1\n") && args[0] === "2" && args.length === 5) {
+          this.scriptCalls += 1;
+          if (this.run(["GET", args[1]]) !== args[3]) return 0;
+          this.scriptCalls += 1;
+          this.run(["SADD", args[2], args[4]]);
+          return 1;
+        }
         // The take scripts and their kin, mirrored from the tests' stand-in (lib/redis-memory-take.ts), by the name on the
         // script's first line, so `next dev` and the demo store run them too (#4969's Mobile render). Last, before the
         // refusal: a script the chain above already runs is never taken here.

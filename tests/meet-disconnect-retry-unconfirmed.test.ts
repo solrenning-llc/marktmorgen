@@ -128,7 +128,7 @@ async function main() {
 
   part("The routes say it from the outcome");
   const meetRoute = readFileSync("app/api/integrations/meetings/route.ts", "utf8");
-  is("the store route reads the outcome", /disconnectFor\(store\.statsId, provider\)/.test(meetRoute), true);
+  is("the store route reads the outcome", /disconnectFor\(store\.statsId, provider, "", store\)/.test(meetRoute), true);
   is("the store route's email says not confirmed from the same outcome", /const unconfirmed = providerAccessRemoved === false && !sharedGrantKept;/.test(meetRoute), true);
   const host = readFileSync("lib/host-calendar.ts", "utf8");
   is("the host wrapper answers the outcome", /return \(await disconnectHostGoogleFor\(store, email\)\)\.providerAccessRemoved;/.test(host), true);

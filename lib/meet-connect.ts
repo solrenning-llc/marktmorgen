@@ -57,7 +57,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, listSlots, repliesFor, stringList } from "@/lib/redis-reply";
 import * as exactReply from "@/lib/redis-reply";
 import { type Held, LockBusyError, setIfHeld, withLock } from "@/lib/redis-lock";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
@@ -175,6 +175,67 @@ async function leaveAccount(provider: MeetProvider, accountId: string, member: s
   } catch {
     return null;
   }
+}
+
+/**
+ * A team host's own calendar listed under its account only while its connection is still the text read
+ * (unlistedHostUses): KEYS[1] the host's connection, KEYS[2] the account's index, ARGV[1] the text read, ARGV[2] the
+ * member. A host whose connection changed or went since is not listed back, so its own disconnect leaves no member
+ * with nothing behind it.
+ */
+export const LIST_HOST = `-- marktmorgen:meet-list-host:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("SADD", KEYS[2], ARGV[2])
+return 1`;
+
+/**
+ * Whether a team host's own Google Calendar connected before the account's index listed hosts (h:<host>) uses this
+ * account (Claude 3 wSUb3's MEDIUM on #5476): such a host is not in the index, so a store's disconnect that counted
+ * nobody else would end the grant that calendar still uses (issue #4011). The hosts read are the ones the store may
+ * have, as lib/team-booking.ts possibleHosts counts them: its owner now, the owner it was connected for, and its team
+ * now (MAX_TEAM at most). Each one found on this account is listed in the index (LIST_HOST, a repair, kept or not:
+ * the grant is kept either way). Read exactly: an unknown team or connection reply throws UnknownReplyError, before
+ * anything is deleted or given back. Commands, only on a store's Google disconnect that finds nobody else listed: the
+ * team's GET (readTeamMembers, for a store with a team id), one MGET of at most MAX_TEAM + 2 host connections, and, in
+ * one more round trip, one EVAL a host found.
+ */
+async function unlistedHostUses(accountId: string, store: Pick<Store, "sid" | "email"> | undefined, ownerThen: string): Promise<boolean> {
+  const team = store?.sid ? await readTeamMembers(store.sid) : [];
+  const hosts = [...new Set([store?.email ?? "", ownerThen, ...team.map((m) => m.email)].filter((e) => e.trim()).map(hostId))];
+  if (!accountId || !hosts.length) return false;
+  const keys = hosts.map((h) => connKey("", "google", h));
+  const read = repliesFor(await redisPipeline([["MGET", ...keys]]), 1);
+  const texts = read ? listSlots(read[0]) : null;
+  if (!texts || texts.length !== keys.length || texts.some((t) => t !== null && typeof t !== "string")) {
+    throw new UnknownReplyError("the team hosts' meeting connections");
+  }
+  const found = hosts.flatMap((h, i) => {
+    const text = texts[i];
+    return typeof text === "string" && recordedIn(text).accountId === accountId
+      ? [["EVAL", LIST_HOST, 2, keys[i], userKey("google", accountId), text, memberOf("", h)]]
+      : [];
+  });
+  if (!found.length) return false;
+  await redisPipeline(found).catch((error) => console.error("listing a team host's meeting connection under its account failed", error));
+  return true;
+}
+
+/**
+ * How many connections are left on the account once this one left its index (leaveAccount), with a store's Google
+ * connection also counting a team host's calendar on that account that the index does not list (unlistedHostUses);
+ * null when the count does not read.
+ */
+async function leftOnAccount(
+  statsId: string,
+  provider: MeetProvider,
+  accountId: string,
+  host: string,
+  store: Pick<Store, "sid" | "email"> | undefined,
+  ownerThen: string,
+): Promise<number | null> {
+  const others = await leaveAccount(provider, accountId, memberOf(statsId, host));
+  if (others !== 0 || host || provider !== "google") return others;
+  return (await unlistedHostUses(accountId, store, ownerThen)) ? 1 : 0;
 }
 
 /**
@@ -634,17 +695,31 @@ async function giveBack(statsId: string, c: Connection, host = ""): Promise<bool
  * in this connection's own context, and the account id it was listed under,
  * if one is still there.
  */
-function salvage(raw: string, statsId: string, provider: MeetProvider, host: string): { token: string; accountId: string } {
+function salvage(raw: string, statsId: string, provider: MeetProvider, host: string): { token: string; accountId: string; owner: string } {
+  const { accountId, owner, sealed } = recordedIn(raw);
+  return { token: sealed ? grantToken(statsId, provider, sealed, host) : "", accountId, owner };
+}
+
+/**
+ * What a connection's text still says, whether or not it reads as one (a damaged one included): the account id and
+ * the owner's address it was kept with ("" when either does not read), and its sealed texts (null when it is no object).
+ */
+function recordedIn(raw: string): { accountId: string; owner: string; sealed: { refresh: unknown; access: unknown } | null } {
   let value: unknown;
   try {
     value = JSON.parse(raw);
   } catch {
-    return { token: "", accountId: "" };
+    return { accountId: "", owner: "", sealed: null };
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) return { token: "", accountId: "" };
-  const v = value as { refresh?: unknown; access?: unknown; account?: unknown };
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { accountId: "", owner: "", sealed: null };
+  const v = value as { refresh?: unknown; access?: unknown; account?: unknown; owner?: unknown };
   const account = v.account && typeof v.account === "object" ? (v.account as { id?: unknown }).id : undefined;
-  return { token: grantToken(statsId, provider, { refresh: v.refresh, access: v.access }, host), accountId: typeof account === "string" ? account : "" };
+  const owner = v.owner && typeof v.owner === "object" ? (v.owner as { email?: unknown }).email : undefined;
+  return {
+    accountId: typeof account === "string" ? account : "",
+    owner: typeof owner === "string" ? owner : "",
+    sealed: { refresh: v.refresh, access: v.access },
+  };
 }
 
 /** Each reply of a pipeline that deletes, confirmed by its own count (DEL, SREM), or UnknownReplyError: never taken as done unseen. */
@@ -675,12 +750,17 @@ function confirmCounts(replies: unknown, commands: number, what: string): void {
  * for the studio and the email to tell the creator how to remove it at the
  * provider, never that it was removed (G review 5815300198, disposition A).
  */
-export async function disconnect(statsId: string, provider: MeetProvider, host = ""): Promise<DisconnectedView | null> {
-  return (await disconnectFor(statsId, provider, host)).view;
+export async function disconnect(statsId: string, provider: MeetProvider, host = "", store?: Pick<Store, "sid" | "email">): Promise<DisconnectedView | null> {
+  return (await disconnectFor(statsId, provider, host, store)).view;
 }
 
-/** Disconnects as `disconnect` does, and says whether the provider confirmed the give-back in this request. */
-export async function disconnectFor(statsId: string, provider: MeetProvider, host = ""): Promise<DisconnectOutcome> {
+/**
+ * Disconnects as `disconnect` does, and says whether the provider confirmed the give-back in this request. `store`, for
+ * a store's own connection, is the store it is disconnected from: its owner and team are the team hosts whose calendar
+ * may use the same Google account without being listed (unlistedHostUses); without it, only the owner the connection
+ * was kept for is read.
+ */
+export async function disconnectFor(statsId: string, provider: MeetProvider, host = "", store?: Pick<Store, "sid" | "email">): Promise<DisconnectOutcome> {
   // Under the renewal lock: a renewal under way finishes first, and none can
   // write the connection back after it is gone.
   return withLock(refreshLockKey(statsId, provider, host), 20, 9_000, async (): Promise<DisconnectOutcome> => {
@@ -693,7 +773,12 @@ export async function disconnectFor(statsId: string, provider: MeetProvider, hos
       // A grant another store or team host still uses is kept at the provider (issue #4011); an index that cannot be
       // read keeps the text and throws, so a retry decides once it reads.
       // Left in the same step as the count, so of two disconnects at once exactly one sees nobody left (#5476 LOW).
-      const others = left.accountId ? await leaveAccount(provider, left.accountId, memberOf(statsId, host)) : 0;
+      // A team host's calendar the index does not list counts too, when there is a grant to give back (unlistedHostUses).
+      const others = !left.accountId
+        ? 0
+        : left.token
+          ? await leftOnAccount(statsId, provider, left.accountId, host, store, left.owner)
+          : await leaveAccount(provider, left.accountId, memberOf(statsId, host));
       if (others === null) throw new UnknownReplyError("the stores still connected to a damaged meeting connection's account");
       const shared = Boolean(left.token) && others > 0;
       if (left.token && !shared) {
@@ -722,7 +807,8 @@ export async function disconnectFor(statsId: string, provider: MeetProvider, hos
     // A grant another store or team host still uses is kept at the provider (issue #4011), and said so.
     // The connection leaves its account's index first, in the same step as counting who is left (Claude 3 xy6b's LOW on
     // #5476): of two disconnects of one account at once, exactly one sees nobody left and gives the grant back.
-    const others = await leaveAccount(provider, c.account.id, memberOf(statsId, host));
+    // A team host's calendar on the account that the index does not list counts too (unlistedHostUses).
+    const others = await leftOnAccount(statsId, provider, c.account.id, host, store, c.owner.email);
     // Unknown whether another store or host still uses the grant: nothing is deleted and nothing is said, so the creator
     // is never told to remove at the provider what another connection may use; a retry decides once it reads, as on the
     // damaged path (Claude 5 iZByNH's LEVE 2 on #5476). The leave is idempotent: a retry's SREM finds nothing to do.

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import type { Store } from "@/lib/store";
 import { fromBase64, giveBenefit } from "@/lib/tier-benefits";
@@ -49,6 +50,54 @@ function fill(ch: string): string {
   const units = Math.floor((MARK_BY_MAX - 2) / ch.length);
   const head = Math.max(1, units - 2);
   return `${ch.repeat(head)}@${ch}.${ch.repeat(Math.max(1, units - head - 1))}`;
+}
+
+/** Every source file (.ts/.tsx) under app/, lib/ and components/, with its text. */
+function sources(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const root of ["app", "lib", "components"]) {
+    for (const f of readdirSync(root, { recursive: true, encoding: "utf8" })) {
+      if (/\.(ts|tsx)$/.test(f)) out[`${root}/${f}`] = readFileSync(`${root}/${f}`, "utf8");
+    }
+  }
+  return out;
+}
+
+/** The module a file is imported as ("lib/x" for lib/x.ts or lib/x/index.ts). */
+const moduleOf = (file: string) => file.replace(/\.(ts|tsx)$/, "").replace(/\/index$/, "");
+
+/** The modules a file's text imports: "@/..." paths and paths relative to the file, static or dynamic. */
+function importsOf(file: string, text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/(?:from\s*|import\s*\(\s*|import\s+)["']([^"']+)["']/g)) {
+    const spec = m[1];
+    if (spec.startsWith("@/")) out.push(spec.slice(2));
+    else if (spec.startsWith(".")) out.push(join(dirname(file), spec).replace(/\\/g, "/"));
+  }
+  return out;
+}
+
+/** Every file that imports `target`, directly or through other modules of `tree`. */
+function importersOf(target: string, tree: Record<string, string>): string[] {
+  const reached = new Set([target]);
+  const files = new Set<string>();
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [file, text] of Object.entries(tree)) {
+      if (files.has(file) || moduleOf(file) === target) continue;
+      if (importsOf(file, text).some((spec) => reached.has(spec))) {
+        files.add(file);
+        reached.add(moduleOf(file));
+        grew = true;
+      }
+    }
+  }
+  return [...files].sort();
+}
+
+/** The routes and pages under app/ that reach lib/person-copy, directly or through another module. */
+function copyDoors(): string[] {
+  return importersOf("lib/person-copy", sources()).filter((f) => f.startsWith("app/"));
 }
 
 async function main() {
@@ -102,11 +151,23 @@ async function main() {
   // MAX_BENEFITS_KEPT fields and values, about 4/3 of what is kept. No route hands the copy to anybody yet, so no
   // request pays for that read today; tests/plan-cost-registry.ts has no line for it (coordinator 87e4). The door
   // that first serves the copy brings that line with it: until then this check fails it.
+  // Followed through every module that imports it, not only a route's own import (Claude 6 hsz3's LEVE on #5123): a
+  // lib or component module that imports lib/person-copy, imported by a route, serves the copy just the same.
   await check("no route serves the person's copy without a cost line for it", () => {
-    const files = readdirSync("app", { recursive: true, encoding: "utf8" }).filter((f) => /\.(ts|tsx)$/.test(f));
-    const doors = files.filter((f) => /@\/lib\/person-copy["']/.test(readFileSync(`app/${f}`, "utf8")));
+    const doors = copyDoors();
     const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
     assert.ok(doors.length === 0 || /lib\/person-copy\.ts/.test(registry), `routes serve the copy without a cost line: ${doors.join(", ")}`);
+  });
+  await check("the walk finds a route that reaches the copy through another module", () => {
+    // A stand-in tree: a route imports a lib module that imports lib/person-copy.
+    const tree: Record<string, string> = {
+      "lib/person-copy.ts": "export const COPIERS = [];",
+      "lib/export-helper.ts": 'import { COPIERS } from "@/lib/person-copy";',
+      "lib/relative-helper.ts": 'import { thing } from "./export-helper";',
+      "app/api/probe/route.ts": 'import { thing } from "@/lib/relative-helper";',
+      "app/api/plain/route.ts": 'import { x } from "@/lib/other";',
+    };
+    assert.deepEqual(importersOf("lib/person-copy", tree).filter((f) => f.startsWith("app/")), ["app/api/probe/route.ts"]);
   });
   await check("a reply that is not base64 text fails closed", () => {
     for (const bad of ["not base64!", "abc", 12, null, ["YQ=="]]) assert.equal(fromBase64(bad), null, String(bad));

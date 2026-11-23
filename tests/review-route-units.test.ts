@@ -31,7 +31,7 @@ import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { REVIEW_DOOR_MONTHS, REVIEW_WRITE_WORST, request, reviewWritesMonthlyUsd } from "./plan-cost-registry";
 import { COMMANDS, PAGE_BYTES } from "./traffic-cost";
 import { paidPeriod } from "./billing-period-fixture";
-import { ROOM } from "./data-room";
+import { ROOM, roomOnly } from "./data-room";
 import { store as redis } from "./redis-stub";
 import { nextReviewMonth } from "./review-saves-world";
 import { done, is, part } from "./check";
@@ -46,6 +46,7 @@ const ORDERS = [
   { session: "cs_test_reviewrouteunits0001", buyer: "buyer-review-units@example.com", pi: "pi_ReviewRouteUnits1" },
   { session: "cs_test_reviewrouteunits0002", buyer: "buyer-review-units-2@example.com", pi: "pi_ReviewRouteUnits2" },
   { session: "cs_test_reviewrouteunits0003", buyer: "buyer-review-units-3@example.com", pi: "pi_ReviewRouteUnits3" },
+  { session: "cs_test_reviewrouteunits0004", buyer: "buyer-review-units-4@example.com", pi: "pi_ReviewRouteUnits4" },
 ];
 /** More reviews than the store page's quotes look at (lib/store-quotes.ts, LOOK_AT 40). */
 const OTHERS = 45;
@@ -201,6 +202,18 @@ async function main(): Promise<void> {
   await real([["DEL", lock]]);
   is("sent again once the other save is done: saved", statusOf(await send({ rating: "4", text: words(904) })), "saved");
   is("and the review is there", (await readReview(statsId, productId, reviewId(statsId, productId, ORDERS[2].buyer)))?.text === words(904).trim(), true);
+
+  part("Claude 2 lpgvy's LOW on #5400 @bd2b1a012d: a save admitted that finds no room gives the month's save back, through the route");
+  order = ORDERS[3];
+  // The store's data room refuses the growth: its script answers nothing a take reads as room.
+  let full = true;
+  const roomless = redis.pipeline;
+  redis.pipeline = (async (batch: (string | number)[][]) => (full && roomOnly(batch) ? batch.map(() => null) : roomless(batch))) as typeof redis.pipeline;
+  const noRoom = await measured({ rating: "5", text: words(905) });
+  is("no room: noroom, nothing written", [noRoom.status, await readReview(statsId, productId, reviewId(statsId, productId, ORDERS[3].buyer))], ["noroom", null]);
+  full = false;
+  redis.pipeline = roomless;
+  is("sent again once there is room: saved, not 'already saved this month'", statusOf(await send({ rating: "5", text: words(905) })), "saved");
 
   part("The cost line, recomputed from the model (AC (n))");
   const per = (w: { commands: number; bytes: number }) => request("heavy", w.commands, w.bytes);

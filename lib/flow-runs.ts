@@ -407,7 +407,8 @@ export async function countWaits(
  * run's generation or ANY_GEN, the field counted ("waits", or "offLooks" for a look while the store is switched off)
  * and the other field): {counted, other, since, offSince}, the other field's raw value ("" when it is missing), the
  * step's clock, started now on its first wait, and, for a look while the store is switched off, the second this step
- * was first looked at so (offAt, started now on its first such look; 0 for a whole wait); {-1} when the run is gone or is another run (another generation), so a wait
+ * was first looked at so (offAt, started now on its first such look and let go by a whole wait, so the step's next
+ * switch-off starts its own; 0 for a whole wait); {-1} when the run is gone or is another run (another generation), so a wait
  * counted after an erasure makes no record again (Defect 4083) and never counts on the run the person started again
  * (Codex L on #4234). Modelled by lib/redis-memory.ts.
  */
@@ -417,6 +418,7 @@ if ARGV[3] ~= "*" and (redis.call("HGET", KEYS[1], "gen") or "") ~= ARGV[3] then
 local counted = redis.call("HINCRBY", KEYS[1], ARGV[4], 1)
 local other = redis.call("HGET", KEYS[1], ARGV[5]) or ""
 local off = 0
+if ARGV[4] ~= "offLooks" then redis.call("HDEL", KEYS[1], "offAt") end
 if ARGV[4] == "offLooks" then
   local oat = redis.call("HGET", KEYS[1], "offAt") or ""
   local ostep, osince = string.match(oat, "^(%-?%d+):(%d+)$")

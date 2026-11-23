@@ -619,6 +619,7 @@ export class MemoryRedis {
           const n = this.run(["HINCRBY", runK, counted, 1]);
           const kept = (this.run(["HGET", runK, other]) as string | null) ?? "";
           let off = 0;
+          if (counted !== "offLooks") this.run(["HDEL", runK, "offAt"]);
           if (counted === "offLooks") {
             const oat = this.run(["HGET", runK, "offAt"]);
             const ofound = typeof oat === "string" ? /^(-?\d+):(\d+)$/.exec(oat) : null;

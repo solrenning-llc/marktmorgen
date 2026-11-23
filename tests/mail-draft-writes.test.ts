@@ -4,11 +4,12 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 const listId = "draft-write-tests";
 const key = "nl:mail:drafts:" + listId;
-const store = { listId, catalog: { items: [] } } as unknown as Store;
+const store = { listId, email: "drafts-owner@example.test", sid: "dd".repeat(16), extra: false, catalog: { items: [] } } as unknown as Store;
 const first = { id: "1111111111111111", subject: "First", body: "Original", productId: null, by: "owner@example.com", savedAt: "2026-10-15T00:00:00.000Z" };
 const second = { ...first, id: "2222222222222222", subject: "Second" };
 async function main() {
   part("Draft write acknowledgement");
+  redis.run(["SET", "nl:store:id:" + "dd".repeat(16), "drafts-owner@example.test"]); // a live store with an id (#5010 row 111)
   const original = redis.pipeline;
   const normal = Symbol("normal");
   let reply: unknown = normal;
@@ -18,7 +19,7 @@ async function main() {
   let deleteReply: unknown = normal;
   let applyDelete = false;
   // A draft's save and delete: a plain HSET (a new draft) or, under the lease since #3343's follow-up, one script naming the hash.
-  const held = (command: (string | number)[], kind: "set" | "del") => command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:draft-" + kind + "-held:") && command.includes(key);
+  const held = (command: (string | number)[], kind: "set" | "del") => command[0] === "EVAL" && String(command[1]).startsWith((kind === "set" ? "-- marktmorgen:draft-set-live:" : "-- marktmorgen:draft-del-held:")) && command.includes(key);
   const sets = (command: (string | number)[]) => (command[0] === "HSET" && command[1] === key) || held(command, "set");
   const deletes = (command: (string | number)[]) => (command[0] === "HDEL" && command[1] === key) || held(command, "del");
   redis.pipeline = async commands => {

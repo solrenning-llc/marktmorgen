@@ -130,6 +130,8 @@ const PENDING_WATCH_MS = 2 * 24 * 60 * 60 * 1000;
  */
 const PROCESSING_WATCH_MS = 7 * 24 * 60 * 60 * 1000;
 const PROCESSING_RECHECK_MS = 24 * 60 * 60 * 1000;
+/** How long after a look whose offer record did not read the job looks again (#4624): an hour, never at every run. */
+const UNKNOWN_RECORD_LOOK_MS = 60 * 60 * 1000;
 /**
  * When the job looks at a waiting offer again, by how long after it began: its first look comes a minute after it
  * began (settlePendingOffers' grace), then once its lost answer can be told apart (LOST_ANSWER_MS), after an hour,
@@ -919,12 +921,14 @@ export async function settlePendingOffers(
       continue;
     }
     counts.checked += 1;
+    let at: number | null = null;
     try {
       const record = await readUpsell(session, slot);
       if (!record || record.state !== "pending") {
         await drop();
         continue;
       }
+      at = record.at;
       const store = await storeFor(handle);
       if (!store || !store.stripeAccountId) {
         const next = nextLook(record.at, Date.now());
@@ -953,6 +957,15 @@ export async function settlePendingOffers(
       }
     } catch (error) {
       console.error("settling a waiting offer failed", error);
+      // Moved behind the others (#4624): an offer whose look threw kept its score, so 50 of them held the front of every
+      // run and the healthy offers behind waited their whole watch. Looked at again on the schedule of an offer still
+      // pending (WATCH_AFTER_MS), then once a day while a payment could still be clearing, then let go, as the branches
+      // above, so its looks stay inside OFFER_WATCH_LOOKS_MOST. One whose record did not read has no known time: looked
+      // at again in an hour (before, at every run), until the record reads, or is gone and is let go above.
+      const now = Date.now();
+      const next = at === null ? now + UNKNOWN_RECORD_LOOK_MS : nextLook(at, now) ?? (now - at <= PROCESSING_WATCH_MS ? now + PROCESSING_RECHECK_MS : null);
+      if (next === null) await drop().catch(() => undefined);
+      else await redisPipeline([["ZADD", PENDING_KEY, next, pendingMember(handle, session, slot)]]).catch(() => undefined);
     }
   }
   return counts;

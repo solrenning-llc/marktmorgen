@@ -135,13 +135,16 @@ export async function readNotes(statsId: string | null): Promise<StatsNote[]> {
  * days of visits are, from the last note added. Null when the day or the
  * words are not ones a note can have.
  */
-export async function addNote(store: NoteStore, dayRaw: unknown, textRaw: unknown, now = Date.now()): Promise<StatsNote[] | null> {
+export async function addNote(store: NoteStore, dayRaw: unknown, textRaw: unknown, now = Date.now(), opRaw?: unknown): Promise<StatsNote[] | null> {
   const day = noteDay(dayRaw, now);
   const text = noteText(textRaw);
   if (!day || !text || !isRedisConfigured()) return null;
   const statsId = store.statsId;
   if (!statsId) return null;
-  const id = randomBytes(4).toString("hex");
+  // The studio sends one operation id per note it means to add, kept across its tries until one is confirmed: it is the
+  // note's field, so a try sent again after a write that landed but whose reading failed writes the same field again,
+  // never a second note (Claude 3's LOW on #2689, board #5285). Without one, a new random id, as before.
+  const id = typeof opRaw === "string" && ID.test(opRaw) ? opRaw : randomBytes(4).toString("hex");
   // Written only while the store is live, in one step with its fence (Codex L-20261119-1516, #5010 row 128): a note in
   // flight while the store is erased never puts its private notes back with a 400-day expiry. A store gone or being
   // erased refuses the note; any other answer is unknown (CX-123 rule 24); neither falls back to a plain HSET.
@@ -154,6 +157,9 @@ export async function addNote(store: NoteStore, dayRaw: unknown, textRaw: unknow
   ]]), 1)?.[0];
   if (reply === 0) throw new Error("the store is gone or being erased: no note kept");
   if (reply !== 1) throw new UnknownReplyError("a chart note kept");
+  // A reading that fails here leaves the note written and untrimmed (an incomplete read never authorizes deleting
+  // notes): the studio's next try of the same note carries the same operation id and writes the same field, so tries
+  // never grow the list (Claude 3's LOW on #2689, board #5285), and the trim runs on the next reading that works.
   const complete = await readAllNotes(statsId);
   const notes = complete.slice(-MAX_NOTES);
   const [raw] = exactArray(await redisPipeline([["HLEN", key(statsId)]]), 1);

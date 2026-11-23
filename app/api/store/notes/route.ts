@@ -4,7 +4,7 @@ import { ensureStatsId } from "@/lib/store";
 import { addNote, removeNote } from "@/lib/stats-notes";
 
 /**
- * Notes on the numbers (lib/stats-notes.ts): `{ action: "add", day, text }`
+ * Notes on the numbers (lib/stats-notes.ts): `{ action: "add", day, text, op }`
  * puts one on a day, `{ action: "remove", id }` takes one away. For whoever
  * may see the numbers. Answers the list as it is after.
  */
@@ -16,7 +16,8 @@ export async function POST(request: NextRequest) {
     const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.ref);
     if (!store?.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     if (body.action === "add") {
-      const notes = await addNote(store, body.day, body.text);
+      // `op`: the studio's id for this note, the same on each of its tries (lib/stats-notes.ts, addNote).
+      const notes = await addNote(store, body.day, body.text, Date.now(), body.op);
       if (!notes) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       return Response.json({ ok: true, notes }, { headers: { "Cache-Control": "no-store" } });
     }

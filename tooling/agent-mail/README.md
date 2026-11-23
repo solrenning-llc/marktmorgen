@@ -137,13 +137,13 @@ node ~/.agent-mail/agent-mail.mjs check-append-only
 - O pedido grava o head inteiro (40 caracteres) e o ramo do PR, lidos na hora. Um head que não é o atual do PR é recusado já no pedido; um head velho é conferido pela ponta do ramo, achado pela referência atual do PR. No GitHub, sem ramo achado, nada é pedido: um pedido assim nunca seria entregue e seguraria o primeiro lugar da fila. Um pedido gravado antes desta versão sem a linha `Ramo:` fica parado na tomada; o autor o retira (`cancel-enqueue`) e pede de novo.
 - Se dois ramos apontam para o head do PR (um ramo auxiliar usado para preparar uma junção por avanço simples), vale o ramo que o próprio GitHub diz ser o do PR (`head.ref`); sem conseguir ler o GitHub, a ferramenta não adivinha entre os dois.
 - `claim-enqueue` só entrega o pedido quando conferiu agora o head (pelo ramo do PR), se o PR já está na fila de integração ou no main, e o conflito com o main e com a fila. Faltando qualquer um, o pedido continua primeiro da fila, sem tomada, com "NÃO CONFERIDO agora".
-- Logo antes de enfileirar no GitHub, quem pegou confere a tomada e o head, e usa o head que o comando mostra:
+- Logo antes de enfileirar no GitHub, quem pegou confere a tomada, o head e os 3 READY de 3 famílias de fora no head exato (dono, OWNER-20261123-1442-THREE-REVIEWS), e usa o head que o comando mostra. Contam só revisões (a primeira linha com "review", "revisão", "verdict" ou "veredito", ou começando por READY ou CHANGES), com o último veredito da família READY, sem a família autora (a do prefixo do ramo, ou, num ramo sem prefixo, a de mais commits) e sem as que têm commit; o PR ou os commits sem leitura, ou um commit de família desconhecida, dão NÃO CONFERIDO, e nada é enfileirado:
 
 ```
 node ~/.agent-mail/agent-mail.mjs verify-enqueue --as "Claude N" <id do pedido>
 ```
 
-- `complete-enqueue --result enqueued` faz a mesma conferência e grava o head enfileirado ("Head enfileirado:"); com a tomada de outra sessão ou com o head mudado, é recusado.
+- `complete-enqueue --result enqueued` faz a mesma conferência, inclusive a dos 3 READY, e grava o head enfileirado ("Head enfileirado:"); com a tomada de outra sessão, com o head mudado ou com menos de 3 READY, é recusado.
 - Cada comando do git tem um limite de tempo (2 minutos): um comando que trava é parado e falha com o motivo.
 - As variáveis de teste (`CORREIO_SEM_COMMITS`, `CORREIO_SEM_GH` e `CORREIO_SEM_VERSAO`) só valem com a marca `AGENT_MAIL_TEST=1` e com os repositórios do correio e dos PRs locais: um caminho absoluto ou `file://`, nunca outra forma de endereço (scp, `ext::`, caminho relativo). Fora disso, cada uma é ignorada com um aviso, uma vez só, e a ferramenta faz a conferência de verdade: uma variável esquecida no ambiente não pula nenhuma conferência.
 
@@ -247,7 +247,7 @@ node ~/.agent-mail/agent-mail.mjs complete-review --as "Claude 5" <id> --result 
 ## Fila
 
 ```bash
-node ~/.agent-mail/agent-mail.mjs request-enqueue --from "Claude 6" --pr 4941 --sha 2e31152be3 --text "9/9, READY de X (link), merge-tree limpo, SIM do dono (se for workflow)"
+node ~/.agent-mail/agent-mail.mjs request-enqueue --from "Claude 6" --pr 4941 --sha 2e31152be3 --text "9/9, 3 READY de X, Y e Z (links), merge-tree limpo, SIM do dono (se for workflow)"
 node ~/.agent-mail/agent-mail.mjs list-queue
 node ~/.agent-mail/agent-mail.mjs claim-enqueue --as "Claude 3"
 node ~/.agent-mail/agent-mail.mjs complete-enqueue --as "Claude 3" <id> --result enqueued --text "fila #4941 @2e31152be3"

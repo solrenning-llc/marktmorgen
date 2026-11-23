@@ -1216,9 +1216,9 @@ export function revisoresNoPr(pr, sha) {
  * pontuação e tudo ("(main,"), que nenhum comentário escreve, e o próprio veredito contava como de uma irmã (e0bc do
  * Claude 2 main, 23/11/2026; coordenador ee5e).
  */
-const PALAVRAS_GENERICAS = new Set(["nuvem", "cloud", "local", "cse", "session", "sessao", "sessão", "review", "revisao", "revisão"]);
+const PALAVRAS_GENERICAS = new Set(["nuvem", "cloud", "cse", "session", "sessao", "sessão", "review", "revisao", "revisão"]);
 const pedacosDoNome = (texto) => String(texto ?? "").split(/[\s,();:]+/)
-  .map((t) => t.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, "")).filter((t) => /^[A-Za-z0-9][A-Za-z0-9_-]{2,}$/.test(t));
+  .map((t) => t.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, "")).filter((t) => /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(t));
 export function marcasDaSessao(eu, sessao = sessaoAtual()) {
   const resto = String(eu ?? "").replace(/^\s*(?:claude|codex)(?:\s*\d+)?/i, "");
   const palavras = [...new Set(pedacosDoNome(resto).filter((p) => !PALAVRAS_GENERICAS.has(p.toLowerCase())))];
@@ -1243,12 +1243,21 @@ export function comentarioDaSessao(corpo, eu, sessao = sessaoAtual()) {
   // correção desta sessão (LEVE do Claude 3 yaQt no #5408 @1139d5d034); uma sessão sem palavra no nome que assina numa
   // linha posterior continua reconhecendo o próprio veredito (LEVE do Claude 5 ibqho no #5408 @fe7b3613dd).
   const assinaturas = linhas.filter((l) => /^\s*(reviewer|revisor|por|by|session|sess[aã]o)\s*:/i.test(l));
-  if (id !== "" && [cabecalho, ...assinaturas].some((l) => l.includes(id))) return true;
+  // Um id escrito com mais de 10 caracteres só é desta sessão se for o começo do id inteiro dela: duas sessões podem ter
+  // os mesmos 10 primeiros (01DKvYQc2q..., LEVE 3 do Claude 5 hed9 no #5408).
+  const inteiro = sessao?.id ? String(sessao.id).replace(/^session_/, "") : "";
+  const doId = (l) => [...l.matchAll(new RegExp(`${id}[0-9A-Za-z]*`, "g"))].some((x) => inteiro.startsWith(x[0]));
+  if (id !== "" && [cabecalho, ...assinaturas].some(doId)) return true;
   const m = /^\s*(claude|codex)(?:\s*(\d+))?/i.exec(String(eu ?? ""));
   if (!m || !palavras.length) return false;
   const nome = m[2] ? `${m[1]}\\s*${m[2]}` : m[1];
-  const rotulos = [...cabecalho.matchAll(new RegExp(`(?:^|[^A-Za-z0-9])${nome}(?![0-9])(?:\\s*\\(([^)\\n]*)\\)|\\s+([^\\s:,()]+))?`, "gi"))]
-    .flatMap((x) => pedacosDoNome(x[1] ?? x[2] ?? "")).map((t) => t.toLowerCase());
+  // Só o rótulo de quem assina: o primeiro "Claude N" do cabeçalho, ou um precedido de "by", "por", "—" ou "Reviewer:".
+  // Um "Claude N X" citado no meio ("confirms the fix of Claude 5 hed9") é de quem foi conferido, não de quem revisou.
+  const achados = [...cabecalho.matchAll(new RegExp(`(?:^|[^A-Za-z0-9])${nome}(?![0-9])(?:\\s*\\(([^)\\n]*)\\)|\\s+([^\\s:,()]+))?`, "gi"))];
+  const rotulos = achados.filter((x, k) => {
+    const antes = cabecalho.slice(0, x.index + (/^[^A-Za-z0-9]/.test(x[0]) ? 1 : 0));
+    return k === 0 || /(?:\bby|\bpor|\breviewer|\brevisor|[—–])\s*:?\s*$/i.test(antes);
+  }).flatMap((x) => pedacosDoNome(x[1] ?? x[2] ?? "")).map((t) => t.toLowerCase());
   return palavras.some((p) => rotulos.includes(p.toLowerCase()));
 }
 
@@ -1281,16 +1290,38 @@ export function aprovadoresNoPr(pr, sha) {
 export const READY_EXIGIDAS = 3;
 
 /**
- * As famílias cujo READY conta para enfileirar este head: READY escrito no PR neste head exato, de família que não é a
- * do autor (a do prefixo do ramo; num ramo sem prefixo, a de quem pediu) nem tem commit no PR (CO (e), FQ (1)).
- * null = NÃO CONFERIDO: o PR ou os seus commits não puderam ser lidos agora.
+ * Um comentário que é uma revisão, e não uma linha de situação ou de pedido: a primeira linha traz a palavra "review",
+ * "revisão", "verdict" ou "veredito", ou começa pelo veredito (READY ou CHANGES). "Claude 1 coord: #N @head — 2 READY",
+ * "Claude 7: #N @head is READY for the queue" e "needs READY from 3 families" não são revisão (MÉDIO 1 do Claude 5
+ * hed9 no #5408 @d2e20e0a4b: elas faziam a trava de 3 READY passar com 2 revisões de verdade).
  */
-export function readyQueContam(pr, sha, autores, ramo = null) {
-  const a = aprovadoresNoPr(pr, sha);
-  if (a === null) return null;
+export function ehRevisao(corpo) {
+  const cabecalho = (String(corpo ?? "").split(/\r?\n/).find((l) => l.trim()) ?? "").replace(/[*_`>#]/g, "").trim();
+  return /\b(?:review|revis[aã]o|verdict|veredito)\b/i.test(cabecalho) || /^(?:READY|CHANGES)\b/.test(cabecalho);
+}
+
+/**
+ * As famílias cujo READY conta para enfileirar este head (OWNER-20261123-1442-THREE-REVIEWS): uma revisão (ehRevisao)
+ * escrita no PR neste head exato, cujo último veredito da família ali é READY (um CHANGES depois do READY tira a família:
+ * LEVE 2 do Claude 5 hed9 no #5408), de família que não é a autora nem tem commit no PR (CO (e), FQ (1)). A autora é a
+ * do prefixo do ramo; num ramo sem prefixo de família, a de mais commits (dd03, como filaVedadaPara; LEVE 1 do hed9).
+ * NÃO CONFERIDO (naoConferido) quando o PR ou os commits não puderam ser lidos agora, ou quando há commit de família
+ * desconhecida, que poderia ser a de um dos revisores (MÉDIO 2 do hed9; passo 4: nada NÃO CONFERIDO segue).
+ */
+export function readyQueContam(pr, sha, ramo = null) {
+  const f = revisoresNoPr(pr, sha);
+  if (f === null) return { naoConferido: "o PR não pôde ser lido agora" };
   const cm = commitsDoPr(pr, ramo);
-  if (!cm) return null;
-  return new Set([...a].filter((f) => !autores.includes(f) && !cm.familias.has(f)));
+  if (!cm) return { naoConferido: "os commits do PR não puderam ser lidos agora" };
+  if (cm.desconhecidas.size) return { naoConferido: `o PR tem commit de família desconhecida (${[...cm.desconhecidas].join(", ")}), que pode ser a de um dos revisores` };
+  const doRamo = familiaDoRamo(ramo);
+  const autores = doRamo ? [doRamo] : cm.dominantes;
+  const corpos = corposNoPr.get(`${pr}@${String(sha).slice(0, 10)}`) ?? new Map();
+  const valem = new Set([...f].filter((fam) => {
+    const vereditos = (corpos.get(fam) ?? []).filter((c) => c.veredito && ehRevisao(c.corpo));
+    return vereditos.length > 0 && vereditos[vereditos.length - 1].veredito === "READY" && !autores.includes(fam) && !cm.familias.has(fam);
+  }));
+  return { valem, autor: autores.join(", ") || "(nenhuma)", comoAutor: doRamo ? "a do prefixo do ramo" : "a dominante nos commits, num ramo sem prefixo de família" };
 }
 
 export function registrarRevisao({ eu, pr, sha, resultado, link, agora = new Date() }) {
@@ -1589,7 +1620,7 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     }
     if (!cf) naoConferido.push("o conflito com o main e com a fila de integração");
     const feito = [atual && !diferente && fonte !== "ref" ? `head ${atual.slice(0, 10)} igual ao do pedido (${fonte === "ramo" ? `pelo ramo ${ramoPedido}` : "pela referência"})` : null, cf ? `sem conflito com o main e com os ${cf.grupos} grupo(s) da fila de integração` : null].filter(Boolean);
-    return { pedido: alvo, aviso: `${feito.join("; ") || "nada conferido"}${naoConferido.length ? `. NÃO CONFERIDO (confira à mão): ${naoConferido.join("; ")}` : ""}. A ferramenta confere os ${READY_EXIGIDAS} READY de fora no verify-enqueue e no complete-enqueue (sem a família do prefixo do ramo, ou, num ramo sem prefixo, a de quem pediu, e sem as com commit no PR); não confere a família de quem abriu o PR num ramo sem prefixo de família e sem commit dela, as 9 verificações, os CHANGES e achados ainda abertos, o SIM de workflow nem a vez de custo: isso é de quem enfileira (FQ (1), OWNER-20261123-1442)` };
+    return { pedido: alvo, aviso: `${feito.join("; ") || "nada conferido"}${naoConferido.length ? `. NÃO CONFERIDO (confira à mão): ${naoConferido.join("; ")}` : ""}. A ferramenta confere os ${READY_EXIGIDAS} READY de fora no verify-enqueue e no complete-enqueue (só revisões, com o último veredito da família READY; sem a família do prefixo do ramo, ou, num ramo sem prefixo, a de mais commits, e sem as com commit no PR; commit de família desconhecida não segue); não confere a família de quem abriu o PR num ramo sem prefixo de família e sem commit dela, as 9 verificações, os CHANGES e achados ainda abertos, o SIM de workflow nem a vez de custo: isso é de quem enfileira (FQ (1), OWNER-20261123-1442)` };
   }
   return { pedido: alvo };
 }
@@ -1749,14 +1780,11 @@ export function conferirTomada({ eu, id, agora = new Date() }) {
   if (!(sha.startsWith(p.sha) || p.sha.startsWith(sha))) throw new Error(`o head de #${p.pr} mudou de ${p.sha.slice(0, 10)} (o do pedido) para ${sha.slice(0, 10)}; não enfileire; conclua como recusado (--result declined) para o autor pedir de novo`);
   // OWNER-20261123-1442-THREE-REVIEWS: 3 READY de 3 famílias de fora no head exato, lidos agora no PR; sem lê-los, nada segue.
   const ramo = campoCabecalho(p.texto, "Ramo") || null;
-  // O autor é a família do prefixo do ramo; só num ramo sem prefixo de família a de quem pediu conta como autora (quem
-  // abriu o PR, que a ferramenta não vê de outro modo). Um revisor de outra família que pede a fila mantém o seu READY
-  // (MÉDIO do Claude 5 id8Ws no #5408 @dcee6a68d5: #5405, claude3/..., pedido pelo Claude 5, READY de 2, 5 e 6).
-  const doRamo = familiaDoRamo(ramo);
-  const autor = doRamo || p.familia;
-  const comoAutor = doRamo ? "a do prefixo do ramo" : "quem pediu, num ramo sem prefixo de família";
-  const valem = readyQueContam(p.pr, sha, autor ? [autor] : [], ramo);
-  if (valem === null) throw new Error(`as revisões READY de #${p.pr} @${sha.slice(0, 10)} NÃO FORAM CONFERIDAS agora (o PR ou os seus commits não puderam ser lidos); não enfileire (passo 4: nada NÃO CONFERIDO segue); tente de novo`);
+  // A autora é a família do prefixo do ramo, ou, num ramo sem prefixo, a de mais commits (readyQueContam): um revisor de
+  // outra família que pede a fila mantém o seu READY (MÉDIO do Claude 5 id8Ws no #5408 @dcee6a68d5; LEVE 1 do hed9).
+  const conta = readyQueContam(p.pr, sha, ramo);
+  if (conta.naoConferido) throw new Error(`as revisões READY de #${p.pr} @${sha.slice(0, 10)} NÃO FORAM CONFERIDAS agora: ${conta.naoConferido}; não enfileire (passo 4: nada NÃO CONFERIDO segue)`);
+  const { valem, autor, comoAutor } = conta;
   if (valem.size < READY_EXIGIDAS) throw new Error(`#${p.pr} @${sha.slice(0, 10)} tem ${valem.size} READY de família de fora no head exato (${[...valem].sort().join(", ") || "nenhum"}); são ${READY_EXIGIDAS}, de ${READY_EXIGIDAS} famílias diferentes, sem a família ${autor || "(desconhecida)"} (${comoAutor}) e sem as que têm commit (OWNER-20261123-1442-THREE-REVIEWS); não enfileire; conclua como recusado (--result declined) para o autor pedir de novo com as ${READY_EXIGIDAS}`);
   return { p, head: sha };
 }

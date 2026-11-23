@@ -1462,6 +1462,7 @@ console.log("three READY from three outside families on the exact head before a 
   is("1443: the branch prefix's family's READY still does not count", !r.ok && /2 READY/.test(r.out), r.out);
   is("1443: and the refusal names the branch prefix's family as the author", /sem a família claude-3 \(a do prefixo do ramo\)/.test(r.out), r.out);
   // MEDIUM 2 of Claude 5 hed9 on #5408: a commit of an unknown family (a "Claude" author with no trailer) is NOT CHECKED.
+  run(["complete-enqueue", "--as", "Claude 7 X", id3, "--result", "declined", "--text", "test done"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", ...mq });
   g3(["checkout", "-q", "-B", "claude3/fix-1444", M]);
   writeFileSync(join(P, "f1444.txt"), "1444\n"); g3(["add", "."]); g3(["-c", "user.name=Claude", "-c", "user.email=c@c", "commit", "-q", "-m", "pr1444 no trailer"]);
   g3(["push", "-q", "../prs.git", "HEAD:refs/heads/claude3/fix-1444", "HEAD:refs/pull/1444/head"]);

@@ -7,6 +7,10 @@
  */
 import { ADD_NOTE_COMMANDS, addNote, readNotes } from "@/lib/stats-notes";
 import { ERASING_KEY, claimHandle, ensureStatsId, erasingField, storeForEmail, storeRef, type Store } from "@/lib/store";
+import { NextRequest } from "next/server";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { POST as notesRoute } from "@/app/api/store/notes/route";
+import { LOCKED_UNTIL_STAR_COMMANDS, TAKE_COMMANDS } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -71,6 +75,38 @@ async function main(): Promise<void> {
     const removed = Number(redis.run(["DEL", `nl:store:id:${store.sid}`]));
     is("the id key was there (the case is real)", removed, 1);
     is("the note is refused and nothing is kept", [await refused(() => addNote(store, DAY, "After the walk", NOW)), Number(redis.run(["EXISTS", key]))], [true, 0]);
+  }
+
+  part("The studio's whole request that adds a note stays inside the studio unit's envelope (coord 35ee)");
+  {
+    const store = await liveStore();
+    const session = await openSession(OWNER);
+    const real = redis.pipeline.bind(redis);
+    const sent: (string | number)[][] = [];
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      sent.push(...commands);
+      return real(commands);
+    }) as typeof redis.pipeline;
+    let status = 0;
+    try {
+      const response = await notesRoute(new NextRequest("https://marktmorgen.com/api/store/notes", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` },
+        body: JSON.stringify({ action: "add", day: new Date().toISOString().slice(0, 10), text: "Posted the reel" }),
+      }));
+      status = response.status;
+    } finally {
+      redis.pipeline = real;
+    }
+    // Billed as Upstash bills a script: one, plus every redis.call inside it (an upper bound: every branch counted).
+    // Padded with the whole take allowance and lockedUntil's worst case even where this fixture used less, as
+    // tests/outreach-sender-erasure-fence.test.ts does.
+    const billed = sent.reduce((sum, c) => sum + (c[0] === "EVAL" ? 1 + (String(c[1]).match(/redis\.call\(/g) ?? []).length : 1), 0);
+    const measured = billed + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS;
+    const envelope = 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS;
+    console.log("STATS_NOTE_ROUTE", JSON.stringify({ billed, takeWorst: TAKE_COMMANDS, lockedUntilWorst: LOCKED_UNTIL_STAR_COMMANDS, measured, envelope }));
+    is("the note is added (200)", [status, (await readNotes(store.statsId)).length], [200, 1]);
+    is(`its billed commands, padded (${measured}), stay within the studio unit's ${envelope}`, measured <= envelope, true);
   }
 
   done();

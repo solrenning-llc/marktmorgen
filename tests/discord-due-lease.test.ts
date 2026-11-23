@@ -213,11 +213,18 @@ async function main(): Promise<void> {
       commands = [];
       const swept = await sweepDiscord(Date.now() + 30_000, clock + DUE_LEASE_SECONDS * 1_000 + 120_000);
       const people = Object.values(swept).reduce((sum, n) => sum + n, 0);
-      const onLine = commands.filter((c) => c[1] === "nl:dc:due").length;
-      const memberReads = commands.filter((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:dc:mem:")).length;
       is("the sweep checked the people handed out", people >= 3, true);
-      is("on the line: its read and lease, then at most a ZREM and a ZADD a person", onLine <= 3 + 2 * people, true);
-      is("at most two member reads a person (the check's and a rejoin's)", memberReads <= 2 * people, true);
+      // Counted for each person, never summed (Claude 4 3Kc's LEVE on #5306): a person who reaches the member read
+      // (Bea, a real member) must not hide extra reads behind the people who leave at the store read.
+      const lease = commands.findIndex((c) => c[0] === "ZADD" && c[1] === "nl:dc:due" && c[2] === "XX");
+      const after = commands.slice(lease + 1);
+      const entries = new Set(after.filter((c) => c[1] === "nl:dc:due").map((c) => String(c[c.length - 1])));
+      const reads = new Map<string, number>();
+      for (const c of after) if (c[0] === "HGET" && String(c[1]).startsWith("nl:dc:mem:")) reads.set(String(c[2]), (reads.get(String(c[2])) ?? 0) + 1);
+      const onLineEach = [...entries].map((entry) => after.filter((c) => c[1] === "nl:dc:due" && c.slice(2).map(String).includes(entry)).length);
+      is("someone in the run reached the member read", reads.size >= 1, true);
+      is("on the line, at most three commands a person: the check's own, a dropDue ZREM and a checkSoon ZADD", onLineEach.every((n) => n <= 3), true);
+      is("at most two member reads a person (the check's and a rejoin's)", [...reads.values()].every((n) => n <= 2), true);
     } finally {
       redis.pipeline = real as typeof redis.pipeline;
     }

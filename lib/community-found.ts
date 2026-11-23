@@ -38,6 +38,12 @@ import { type CommunityEvent, isOver, mayAttend, readEvents } from "@/lib/commun
 import { type Holdings, courseDoorKey, doorAnswer, holdingsOf, unknownForGood } from "@/lib/community-access";
 import { readLessonRef } from "@/lib/community-index";
 
+/**
+ * What a failure is logged as: its kind, never the error itself, whose message or cause may hold a member's address
+ * or another personal detail (Codex on #3734, Board #5285 row #3734).
+ */
+const kindOf = (error: unknown): string => (error instanceof Error ? error.name : typeof error);
+
 export type FoundLesson = {
   product: Listing;
   lessonId: string;
@@ -111,7 +117,7 @@ export async function lessonsFound(
   const courses = new Map<string, Course>();
   await Promise.all(
     courseIds.map(async ([productId, courseId]) => {
-      const course = await readCourse(courseId).catch((error) => { console.error("reading a course for community search failed", error); return null; });
+      const course = await readCourse(courseId).catch((error: unknown) => { console.error("reading a course for community search failed", kindOf(error)); return null; });
       if (course) courses.set(productId, course);
     }),
   );
@@ -150,7 +156,9 @@ export async function eventsFound(
 ): Promise<Found<FoundEvent>> {
   const communityId = store.community?.id;
   if (!communityId || !ids.length) return { found: [], unchecked: 0, lasting: false };
-  const events: CommunityEvent[] = await readEvents(communityId, ids).catch((error) => { console.error("reading events for community search failed", error); return []; });
+  // Not read is not "none" (rule 24; Codex on #3734): every match of the page is counted as not checked, and none shown.
+  const events: CommunityEvent[] | null = await readEvents(communityId, ids).catch((error: unknown) => { console.error("reading events for community search failed", kindOf(error)); return null; });
+  if (events === null) return { found: [], unchecked: ids.length, lasting: false };
   const byId = new Map(events.map((e) => [e.id, e]));
   const kept: FoundEvent[] = [];
   let unchecked = 0;
@@ -160,7 +168,7 @@ export async function eventsFound(
   for (const id of ids) {
     const event = byId.get(id);
     if (!event) continue;
-    const answer = await mayAttend(store, config, event, { owner: viewer.owner, email: viewer.email, holdings, pay: viewer.pay }).catch((error): "unknown" => { console.error("checking event access in community search failed", error); return "unknown"; });
+    const answer = await mayAttend(store, config, event, { owner: viewer.owner, email: viewer.email, holdings, pay: viewer.pay }).catch((error: unknown): "unknown" => { console.error("checking event access in community search failed", kindOf(error)); return "unknown"; });
     if (answer === "unknown") unchecked += 1;
     if (answer !== true) continue;
     kept.push({ event, state: event.cancelled ? "cancelled" : isOver(event, now) ? "over" : "upcoming" });
@@ -168,10 +176,14 @@ export async function eventsFound(
   return { found: kept, unchecked, lasting: unchecked > 0 && unknownForGood(holdings) };
 }
 
-/** The members among these keys who are still listed, in the index's order. */
-export async function membersFound(communityId: string, keys: string[]): Promise<Member[]> {
+/**
+ * The members among these keys who are still listed, in the index's order; null when they could not be read, which
+ * the page says, never as no match (rule 24; Codex on #3734).
+ */
+export async function membersFound(communityId: string, keys: string[]): Promise<Member[] | null> {
   if (!keys.length) return [];
-  const found = await readMembers(communityId, keys).catch((error) => { console.error("reading members for community search failed", error); return new Map<string, Member>(); });
+  const found = await readMembers(communityId, keys).catch((error: unknown) => { console.error("reading members for community search failed", kindOf(error)); return null; });
+  if (found === null) return null;
   return keys
     .map((k) => found.get(k))
     .filter((m): m is Member => Boolean(m && m.dir && m.n && !m.removed));

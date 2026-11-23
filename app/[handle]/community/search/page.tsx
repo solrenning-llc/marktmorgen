@@ -178,12 +178,14 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   const unchecked = lessonsRead.unchecked + eventsRead.unchecked;
   // Not known for good (more purchases than are read): said with a way to the creator, never "reload the page".
   const uncheckedForGood = lessonsRead.lasting || eventsRead.lasting;
-  const people = tab === "member" ? await membersFound(id, page.posts) : [];
+  // Members that could not be read are said to be unread, never "No match" (rule 24; Codex on #3734).
+  const peopleRead = tab === "member" ? await membersFound(id, page.posts) : [];
+  const people = peopleRead ?? [];
 
   const talk = tab === "room" ? (roomHits ?? []).slice(0, SHOWN_TALK) : [];
   const mine = tab === "dm" ? (dmHits ?? []).slice(0, SHOWN_TALK) : [];
   // The tab being read could not be searched: said, never "No match".
-  const unsearched: "room" | "dm" | null = tab === "room" && roomHits === null ? "room" : tab === "dm" && dmHits === null ? "dm" : null;
+  const unsearched: "room" | "dm" | "member" | null = tab === "room" && roomHits === null ? "room" : tab === "dm" && dmHits === null ? "dm" : peopleRead === null ? "member" : null;
   // Names for whoever wrote what is listed, never their addresses.
   const talkers = [...talk.map((m) => m.a), ...mine.map((h) => h.other)].filter((a) => a !== CREATOR);
   const [members, numbers, polls] = await Promise.all([

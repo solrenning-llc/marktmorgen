@@ -10,7 +10,7 @@ process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
 process.env.UPSTASH_REDIS_REST_TOKEN ??= "synthetic";
 const actual = redis.pipeline.bind(redis);
 
-test("unknown event and member reads return no records and log the failure", async () => {
+test("unknown event and member reads show no records, say they are unread, and log the failure", async () => {
   const store = { community: { id: "0123456789abcdef0123456789abcdef" } } as Store;
   const config = {} as CommunityConfig;
   const viewer = { owner: false, email: "member@example.com", key: "synthetic" };
@@ -19,10 +19,10 @@ test("unknown event and member reads return no records and log the failure", asy
   redis.pipeline = (async () => { throw new Error("synthetic Redis read failure"); }) as typeof redis.pipeline;
   console.error = (...args: unknown[]) => { logged.push(args); };
   try {
-    // Merge with #3395: eventsFound now answers { found, unchecked, lasting }; a failed event read is no event,
-    // not an unknown one (nothing was there to check), so found is empty and unchecked 0.
-    assert.deepEqual(await eventsFound(store, config, ["0123456789ab"], viewer), { found: [], unchecked: 0, lasting: false });
-    assert.deepEqual(await membersFound(store.community!.id, ["member@example.com"]), []);
+    // Board #5285 row #3734 (Codex on #3734, rule 24): a failed event read is not "no event": its matches are counted
+    // as not checked; a failed member read is null (unread), never an empty list.
+    assert.deepEqual(await eventsFound(store, config, ["0123456789ab"], viewer), { found: [], unchecked: 1, lasting: false });
+    assert.deepEqual(await membersFound(store.community!.id, ["member@example.com"]), null);
     assert.deepEqual(logged.map(([message]) => message), [
       "reading events for community search failed",
       "reading members for community search failed",

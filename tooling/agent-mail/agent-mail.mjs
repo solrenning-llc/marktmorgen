@@ -541,6 +541,13 @@ export function familia(nome) {
   return /^claude-\d+/.exec(s)?.[0] ?? (s.startsWith("codex") ? "codex" : s);
 }
 
+/** A família do prefixo de um ramo: "claude4/x" -> "claude-4"; "codex/x" -> "codex"; sem prefixo de família, null. */
+export function familiaDoRamo(ramo) {
+  const s = String(ramo ?? "").trim().toLowerCase();
+  const n = /^claude-?(\d+)\//.exec(s);
+  return n ? `claude-${n[1]}` : s.startsWith("codex/") ? "codex" : null;
+}
+
 /** Um campo do cabeçalho de um registro (as linhas antes da primeira linha vazia), nunca do texto livre. */
 function campoCabecalho(texto, nome) {
   const cabecalho = String(texto).split(/\n\s*\n/)[0];
@@ -1316,7 +1323,7 @@ function revisaoParaMim(p, eu, agora, c) {
  */
 export function pegar({ tipo, eu, agora = new Date() }) {
   const lista = pedidos(tipo, agora);
-  let alvo, excecao4acb = false;
+  let alvo;
   if (tipo === "fila") {
     if (lista.some((p) => p.estado === "tomado")) {
       const t = lista.find((p) => p.estado === "tomado");
@@ -1326,26 +1333,19 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     if (alvo && alvo.familia === familia(eu)) return { espera: `o primeiro da fila, #${alvo.pr}, é da sua família; outra família o enfileira` };
     // Quem devolveu o primeiro da fila, ou foi excluído no pedido, não o pega de volta; ele continua primeiro (achado do Claude 4 3rC).
     if (alvo && (alvo.devolveram.has(familia(eu)) || campo(alvo.texto, "Exclui").split(", ").includes(familia(eu)) || revisoresDoHead(alvo.pr, alvo.sha).has(familia(eu)))) return { espera: `o primeiro da fila, #${alvo.pr}, foi devolvido ou excluído para a sua família; outra família o enfileira` };
-    // Família com commit no PR não enfileira nem recusa o pedido de fila dele, como na revisão (CO (e)): decisão do
-    // coordenador 605b, confirmada em 22/11/2026 08:13 UTC (49de) e na ordem de custo v3 (7ea5), que substitui a correção
-    // de 21/11/2026 19h41 UTC. Exceção estreita 4acb: quando todas as famílias de fora do autor têm commit no PR ou
-    // revisaram o head, uma família com commit que não seja a do autor nem revisora pode enfileirar, só na vez de custo do
-    // PR, conferindo tudo e escrevendo no PR que enfileira pela exceção.
+    // Fila (dono, OWNER-20261123-0410, item 3 (b), posterior à regra 605b/49de do coordenador, que ela substitui; aplicação
+    // do coordenador interino, ca32): ficam de fora só a família do autor e quem revisou aquele head. Uma família com commit
+    // no PR que não seja a do autor nem revisora enfileira, como qualquer outra (FQ (1)); a exceção 4acb deixa de existir.
+    // O autor é a família de quem pediu e a do prefixo do ramo do PR (claudeN/, codex/): num PR adotado, as duas ficam de
+    // fora. Na revisão, toda família com commit continua de fora (CO (e)).
     // HOLD de qualquer um, ou CLAIMED de outra família, segura o primeiro da fila; os mais novos esperam atrás dele.
     // ce2d: quem deu veredito neste head só no PR também não o enfileira; sem ler o PR, ele não é entregue.
     if (alvo) {
+      const doRamo = familiaDoRamo(campoCabecalho(alvo.texto, "Ramo"));
+      if (doRamo === familia(eu)) return { espera: `o primeiro da fila, #${alvo.pr}, é de um ramo da sua família (${campoCabecalho(alvo.texto, "Ramo")}); outra família o enfileira (0410, 3 (b))` };
       const noPr = revisoresNoPr(alvo.pr, alvo.sha);
       if (noPr === null) return { espera: `as revisões escritas no #${alvo.pr} não puderam ser conferidas agora (NÃO CONFERIDO); a fila espera; tente de novo` };
       if (noPr.has(familia(eu))) return { espera: `o primeiro da fila, #${alvo.pr}, tem veredito da sua família neste head no PR; outra família o enfileira (FQ (1), ce2d)` };
-      const cm = commitsDoPr(alvo.pr, campoCabecalho(alvo.texto, "Ramo") || null);
-      if (!cm) return { espera: `os commits do #${alvo.pr} não puderam ser lidos agora (NÃO CONFERIDO); a fila espera; tente de novo` };
-      if (cm.familias.has(familia(eu))) {
-        const fora = new Set([alvo.familia, ...cm.familias, ...revisoresDoHead(alvo.pr, alvo.sha), ...noPr, ...alvo.devolveram,
-          ...campo(alvo.texto, "Exclui").split(", ").filter(Boolean)]);
-        const outras = FAMILIAS.filter((f) => !fora.has(f));
-        if (outras.length) return { espera: `o primeiro da fila, #${alvo.pr}, tem commits da sua família; família com commit no PR não enfileira nem recusa o pedido dele (coordenador, 605b e 49de); podem: ${outras.join(", ")}` };
-        excecao4acb = true;
-      }
     }
     const marca = alvo ? estadoPr(alvo.pr, agora) : null;
     if (marca?.ativo && (marca.acao === "HOLD" || familia(marca.por) !== familia(eu))) {
@@ -1444,7 +1444,7 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     }
     if (!cf) naoConferido.push("o conflito com o main e com a fila de integração");
     const feito = [atual && !diferente && fonte !== "ref" ? `head ${atual.slice(0, 10)} igual ao do pedido (${fonte === "ramo" ? `pelo ramo ${ramoPedido}` : "pela referência"})` : null, cf ? `sem conflito com o main e com os ${cf.grupos} grupo(s) da fila de integração` : null].filter(Boolean);
-    return { pedido: alvo, aviso: `${excecao4acb ? `EXCEÇÃO 4acb do coordenador: sua família tem commits no #${alvo.pr}, mas todas as famílias de fora do autor têm commit nele ou revisaram este head. Enfileire só se for a vez de custo dele, conferindo FQ (1), AC (l) e AC (s), e escreva no próprio PR que enfileira pela exceção 4acb; senão, devolva com release-take. ` : ""}${feito.join("; ") || "nada conferido"}${naoConferido.length ? `. NÃO CONFERIDO (confira à mão): ${naoConferido.join("; ")}` : ""}. A ferramenta não confere as 9 verificações, as revisões, os achados, o SIM de workflow nem a vez de custo: isso é de quem enfileira (FQ (1))` };
+    return { pedido: alvo, aviso: `${feito.join("; ") || "nada conferido"}${naoConferido.length ? `. NÃO CONFERIDO (confira à mão): ${naoConferido.join("; ")}` : ""}. A ferramenta não confere as 9 verificações, as revisões, os achados, o SIM de workflow nem a vez de custo: isso é de quem enfileira (FQ (1))` };
   }
   return { pedido: alvo };
 }
@@ -2225,21 +2225,21 @@ async function main(argv) {
     {
       if (!commits) console.log("ATENÇÃO: não consegui ler os commits do PR; diga com --exclude as famílias que têm commits nele.");
       else {
-        // Na fila, quem revisou este head pelo correio também fica de fora (o pedido já o grava em Exclui).
-        // Na fila, as famílias com commit também ficam de fora (coordenador, 605b e 49de), salvo a exceção 4acb.
+        // Na fila, quem revisou este head pelo correio também fica de fora (o pedido já o grava em Exclui), além da família
+        // do autor: a de quem pede e a do prefixo do ramo (0410, 3 (b)). As famílias com commit podem enfileirar.
         const excluidas = String(o.exclui === true ? "" : o.exclui ?? "").split(",").map((n) => n.trim()).filter(Boolean).map(familia);
         const revisoresFila = tipo === "fila" ? [...revisoresDoHead(o.pr, o.sha)] : [];
+        const doRamo = tipo === "fila" ? familiaDoRamo(ramoDoHead(o.sha, o.pr)) : null;
         // c944: na revisão, quem já deu READY neste head (correio ou PR) não aparece entre os que podem revisar.
         const jaRevisaram = tipo === "revisao" ? [...revisoresDoHead(o.pr, o.sha, undefined, { soReady: true }), ...(vereditos ?? [])] : [];
-        const fora = new Set([...commits.familias, ...revisoresFila, ...jaRevisaram, familia(o.de), ...excluidas]);
-        console.log(`famílias com commits no PR (ficam de fora${tipo === "fila" ? ", coordenador 605b e 49de" : ""}): ${[...commits.familias].sort().join(", ") || "nenhuma além do autor"}`);
+        const fora = new Set([...(tipo === "revisao" ? commits.familias : []), ...revisoresFila, ...jaRevisaram, familia(o.de), ...(doRamo ? [doRamo] : []), ...excluidas]);
+        console.log(tipo === "fila"
+          ? `famílias com commits no PR (podem enfileirar se não forem a do autor nem revisoras, 0410 3 (b)): ${[...commits.familias].sort().join(", ") || "nenhuma além do autor"}`
+          : `famílias com commits no PR (ficam de fora): ${[...commits.familias].sort().join(", ") || "nenhuma além do autor"}`);
+        if (doRamo && doRamo !== familia(o.de)) console.log(`a família do ramo do PR (${doRamo}) também fica de fora, como autora`);
         if (jaRevisaram.length) console.log(`famílias com READY neste head (ficam de fora, c944): ${[...new Set(jaRevisaram)].sort().join(", ")}`);
         const podem = [...FAMILIAS].filter((f) => !fora.has(f));
-        console.log(`${tipo === "fila" ? "podem enfileirar (sem o autor, as famílias com commits, quem revisou este head pelo correio e os excluídos; confira revisões feitas fora do correio)" : "podem revisar"}: ${podem.join(", ") || "NENHUMA família; peça ao coordenador"}`);
-        if (tipo === "fila" && !podem.length) {
-          const excecao = [...commits.familias].filter((f) => f !== familia(o.de) && !revisoresFila.includes(f) && !excluidas.includes(f)).sort();
-          console.log(`exceção 4acb do coordenador (só na vez de custo, com nota no PR): ${excecao.join(", ") || "nenhuma família; peça ao coordenador"}`);
-        }
+        console.log(`${tipo === "fila" ? "podem enfileirar (sem o autor, quem revisou este head pelo correio e os excluídos; confira revisões feitas fora do correio)" : "podem revisar"}: ${podem.join(", ") || "NENHUMA família; peça ao coordenador"}`);
         if (commits.desconhecidas.size) console.log(`sem família conhecida (confira à mão e use --exclude): ${[...commits.desconhecidas].join(", ")}`);
       }
     }

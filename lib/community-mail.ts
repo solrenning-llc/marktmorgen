@@ -89,6 +89,8 @@ export type AnnouncementJob = {
    * held send costs a read of its record a run, never the store's and a write (#5285 row #3406). Absent otherwise.
    */
   retryAt?: number;
+  /** When it began to wait on a store switched off or a plan without email (ms): it ends ANNOUNCEMENT_HELD_DAYS later. */
+  heldSince?: number;
 };
 
 /**
@@ -96,6 +98,21 @@ export type AnnouncementJob = {
  * broadcast's LIST_RETRY_SECONDS (lib/broadcasts.ts), never every run of the mail job (Claude 1's MEDIUM 1 on #3406).
  */
 export const ANNOUNCEMENT_RETRY_SECONDS = 3_600;
+
+/**
+ * How long a send held for a store switched off, or for a plan without email, is kept: 60 days, as a product update
+ * held on a switched-off store (lib/product-updates.ts). Then it ends, out of line, saying so (Claude 4 AC, mail 2aab),
+ * so its looks have an end: at most 60 x 24 hourly looks and the five-minute runs between them.
+ */
+export const ANNOUNCEMENT_HELD_DAYS = 60;
+
+/** A held send: looked at again in an hour, or ended once it has waited ANNOUNCEMENT_HELD_DAYS. */
+function held(job: AnnouncementJob, note: string, ended: string): AnnouncementJob {
+  const now = Date.now();
+  const heldSince = job.heldSince ?? now;
+  if (now - heldSince >= ANNOUNCEMENT_HELD_DAYS * 86_400_000) return { ...job, status: "failed", note: ended, retryAt: undefined };
+  return { ...job, status: "waiting", note, retryAt: now + ANNOUNCEMENT_RETRY_SECONDS * 1000, heldSince };
+}
 
 function parse(raw: unknown): AnnouncementJob | null {
   if (typeof raw !== "string") return null;
@@ -426,16 +443,26 @@ export async function advanceAnnouncement(
     // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule 24):
     // nobody is read, reserved or emailed. It waits in line, saying so, and goes on by itself once the store is back on.
     if (store.suspended) {
-      job = { ...job, status: "waiting", note: job.done > 0 ? "Your store is switched off after notices about its content, so nothing more was sent. The rest go out by themselves once your store is back on." : "Your store is switched off after notices about its content, so nothing was sent. It goes out by itself once your store is back on.", retryAt: Date.now() + ANNOUNCEMENT_RETRY_SECONDS * 1000 };
+      job = held(
+        job,
+        job.done > 0 ? "Your store is switched off after notices about its content, so nothing more was sent. The rest go out by themselves once your store is back on." : "Your store is switched off after notices about its content, so nothing was sent. It goes out by itself once your store is back on.",
+        `Your store was switched off after notices about its content for ${ANNOUNCEMENT_HELD_DAYS} days, so ${job.done > 0 ? "the rest of this announcement was" : "this announcement was"} not sent. Post it again once your store is back on.`,
+      );
       await save(job);
+      if (job.status === "failed") await redisPipeline([["SREM", QUEUE, id]]);
       return job;
     }
     if (monthlyAllowance(store) === 0 || !store.mail) {
-      job = { ...job, status: "waiting", note: "Your plan does not include email right now. It goes out once Pro is on again.", retryAt: Date.now() + ANNOUNCEMENT_RETRY_SECONDS * 1000 };
+      job = held(
+        job,
+        "Your plan does not include email right now. It goes out once Pro is on again.",
+        `Your plan did not include email for ${ANNOUNCEMENT_HELD_DAYS} days, so ${job.done > 0 ? "the rest of this announcement was" : "this announcement was"} not sent. Post it again once Pro is on.`,
+      );
       await save(job);
+      if (job.status === "failed") await redisPipeline([["SREM", QUEUE, id]]);
       return job;
     }
-    job = { ...job, status: "sending", note: "", retryAt: undefined };
+    job = { ...job, status: "sending", note: "", retryAt: undefined, heldSince: undefined };
     const community = job.community;
 
     while (job.done < job.total && Date.now() < deadline) {

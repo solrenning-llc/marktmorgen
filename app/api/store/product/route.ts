@@ -267,7 +267,9 @@ export async function POST(request: NextRequest) {
   let yearly: Yearly | null | undefined;
   const introSent = "intro" in body && !untouched("intro");
   const yearlySent = "yearly" in body && !untouched("yearly");
-  if ((action === "add" || action === "edit") && (introSent || yearlySent)) {
+  // The product as saved now, read once for both checks below (an edit only).
+  const current = action === "edit" ? await readListing(guarded.store, id) : null;
+  if (action === "add" || action === "edit") {
     const store = guarded.store;
     const typedOf = (raw: unknown) => (raw && typeof raw === "object" ? text((raw as Record<string, unknown>).price, 20).trim() : "");
     if (introSent) {
@@ -289,13 +291,18 @@ export async function POST(request: NextRequest) {
         yearly = { cents };
       }
     }
-    const current = action === "edit" ? await readListing(store, id) : null;
+    // Checked on every save, not only one that changed them (Claude 3 K9t's MEDIUM on #5468): a tab that lowers the
+    // price under a saved introductory price, or under a saved yearly one, is refused as before, never saved with an
+    // offer that then silently stops. Each field is the one this save leaves, by editProduct's rule (lib/store.ts):
+    // one this tab sent exactly as it opened it keeps what is saved now.
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+    const typedCents = readMoney(price, store.currency) ?? 0;
     const after = {
       id: current?.id ?? "",
-      priceCents: readMoney(price, store.currency) ?? 0,
-      recurring,
+      priceCents: base && current && readMoney(base.price, store.currency) === typedCents ? current.priceCents : typedCents,
+      recurring: base && current && same(recurring, base.recurring) ? (current.recurring ?? null) : recurring,
       options: current?.options ?? [],
-      pwyw: suggested,
+      pwyw: base && current && suggested === base.suggested ? (current.pwyw ?? null) : suggested,
       intro: intro === undefined ? (current?.intro ?? null) : intro,
       yearly: yearly === undefined ? (current?.yearly ?? null) : yearly,
     };
@@ -313,7 +320,6 @@ export async function POST(request: NextRequest) {
   // Charged every N (609 [WP8]): what is still counted in single weeks or months is refused with its reason, against
   // the product as this save leaves it, so nothing is ever charged on a schedule its page does not say.
   if ((action === "add" || action === "edit") && recurring && everyOf(recurring) > 1) {
-    const current = action === "edit" ? await readListing(guarded.store, id) : null;
     const problem = everyProblem(everyOf(recurring), {
       intro: intro === undefined ? current?.intro : intro,
       yearly: yearly === undefined ? current?.yearly : yearly,

@@ -124,6 +124,25 @@ async function main(): Promise<void> {
   is("a tab that opened it with the introductory price and empties it clears it", (await saveClub({ ...member(withIntro), base: member(withIntro, { intro: { price: "10.00", count: 2 } }) })).ok, true);
   is("the introductory price is cleared", (await readClub()).intro ?? null, null);
 
+  part("One tab that lowers the price under a saved introductory or yearly price is refused, as before (Claude 3 K9t's MEDIUM on #5468)");
+  const at10: Fields = { ...withIntro, price: "10.00" };
+  is("(the price set to $10)", (await saveClub({ ...member(at10), base: member(withIntro) })).ok, true);
+  is("(an introductory price of $5 set)", (await saveClub({ ...member(at10, { intro: { price: "5", count: 1 } }), base: member(at10) })).ok, true);
+  const opened5 = member(at10, { intro: { price: "5.00", count: 1 } });
+  const lowered = await saveClub({ ...member({ ...at10, price: "4" }, { intro: { price: "5.00", count: 1 } }), base: opened5 });
+  is("a tab that opened it with the $5 introductory price and lowers the price to $4 is told why", [lowered.ok, lowered.error], [false, "intro_price"]);
+  is("and nothing was saved: still $10 with its $5 introductory price", [(await readClub()).priceCents, (await readClub()).intro?.cents ?? null], [1000, 500]);
+  is("(the introductory price cleared)", (await saveClub({ ...member(at10), base: opened5 })).ok, true);
+  const at20: Fields = { ...at10, price: "20.00" };
+  is("(the price set back to $20)", (await saveClub({ ...member(at20), base: member(at10) })).ok, true);
+  is("(a yearly price of $200 set)", (await saveClub({ ...member(at20, { yearly: { price: "200" } }), base: member(at20) })).ok, true);
+  const openedYear = member(at20, { yearly: { price: "200.00" } });
+  const under = await saveClub({ ...member({ ...at20, price: "15" }, { yearly: { price: "200.00" } }), base: openedYear });
+  is("a tab that opened it with the $200 yearly price and lowers the price to $15 is told why", [under.ok, under.error], [false, "yearly_price"]);
+  is("and nothing was saved: still $20 with its $200 yearly price", [(await readClub()).priceCents, (await readClub()).yearly?.cents ?? null], [2000, 20000]);
+  const keepsPrice = await saveClub({ ...member({ ...at20, title: "Sketching club" }, { yearly: { price: "200.00" } }), base: openedYear });
+  is("a tab that leaves the price as it opened it still saves its title beside the yearly price", keepsPrice.ok, true);
+
   done();
 }
 

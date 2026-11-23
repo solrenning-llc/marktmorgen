@@ -393,6 +393,9 @@ export async function forgetChatPerson(id: string, who: string): Promise<number>
   // unknown: nothing is deleted, the cooldown included, and the erasure stays pending to be retried.
   const theirs = rows.filter((row) => {
     let kept: unknown;
+    // JSON.parse keeps only the last of a repeated key: a row naming this member first and someone else last would
+    // read as someone else's and keep the member's text (Claude 2 main's LEVE on #5199). Unknown, as copyMessage reads it.
+    if (hasRepeatedTopLevelKey(row)) throw new UnknownReplyError(what);
     try {
       kept = JSON.parse(row);
     } catch {

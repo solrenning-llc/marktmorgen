@@ -20,7 +20,7 @@ import { ADD_ON_MARK, BillingError, onPlatform, onPlatformAt, setCancelAtPeriodE
 export { ADD_ON_MARK, isAddOn } from "@/lib/billing";
 import { standingOf } from "@/lib/plan-standing";
 import { askBillingAddress } from "@/lib/billing-address";
-import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, setAssistantPlan, storeForHandle, storeRef } from "@/lib/store";
+import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, setAssistantPlan, storeForHandle, storeForId, storeRef } from "@/lib/store";
 import { ASSISTANT_NAME, ASSISTANT_PRICE_CENTS, ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_CUTOFF_MS, ASSISTANT_START_LIST_PAGES, type AssistantPlan } from "@/lib/store-assistant-rules";
 import { timeLeft, withCutoff } from "@/lib/fetch-timeout";
 import { StripeListUnreadable, type StripeRow, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
@@ -132,6 +132,9 @@ export async function createAssistantCheckout(store: Store, origin: string): Pro
     "line_items[0][quantity]": "1",
     "metadata[addon]": ADD_ON_MARK,
     "metadata[assistant_for]": store.handle,
+    // The store by its id too, which no other store ever takes (#5285 row #3334, LOW 2); a store with none is its
+    // owner's first, named by its handle as before.
+    ...(store.sid ? { "metadata[assistant_sid]": store.sid, "subscription_data[metadata][assistant_sid]": store.sid } : {}),
     "subscription_data[metadata][addon]": ADD_ON_MARK,
     "subscription_data[metadata][assistant_for]": store.handle,
     // The bank is asked to authenticate the card: a fraud dispute then lands on the bank, not on us.
@@ -177,10 +180,22 @@ const CHECKOUT_PAGE = /^https:\/\/checkout\.stripe\.com\//;
 const namesStore = (named: unknown, store: Store): boolean =>
   typeof named === "string" && named !== "" && (named === store.handle || store.previousHandles.includes(named));
 
+/**
+ * Whether an add-on's metadata names this store. One that names a store id (assistant_sid, written since #5285 row
+ * #3334's LOW 2) is this store's only when the id is its own: a handle let go and taken by another store of the same
+ * owner and customer never brings it over. One made before, with no id, is read by its handle as before.
+ */
+const metaNamesStore = (meta: unknown, store: Store): boolean => {
+  if (!plainObject(meta)) return false;
+  const sid = ownField(meta, "assistant_sid");
+  if (sid !== undefined) return typeof sid === "string" && sid !== "" && sid === store.sid;
+  return namesStore(ownField(meta, "assistant_for"), store);
+};
+
 /** A row that names this store's add-on in its own metadata. */
 const isStoreAddOn = (row: Record<string, unknown>, store: Store): boolean => {
   const meta = ownField(row, "metadata");
-  return plainObject(meta) && ownField(meta, "addon") === ADD_ON_MARK && namesStore(ownField(meta, "assistant_for"), store);
+  return plainObject(meta) && ownField(meta, "addon") === ADD_ON_MARK && metaNamesStore(meta, store);
 };
 
 /**
@@ -320,7 +335,7 @@ export async function readAssistantReturn(store: Store, sessionId: string | unde
   if (!isOwnReply(session, sessionId)) throw new NotOwnReply(sessionId);
   // A store renamed since it paid is still the one the session names (namesStore): the return is not "nothing was started".
   const meta = ownField(session, "metadata");
-  if (session.mode !== "subscription" || !plainObject(meta) || ownField(meta, "addon") !== ADD_ON_MARK || !namesStore(ownField(meta, "assistant_for"), store)) return null;
+  if (session.mode !== "subscription" || !plainObject(meta) || ownField(meta, "addon") !== ADD_ON_MARK || !metaNamesStore(meta, store)) return null;
   if (typeof session.customer !== "string" || session.customer !== store.stripeCustomerId) return null;
   const subscriptionId = typeof session.subscription === "string" ? session.subscription : "";
   if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) return null;
@@ -423,14 +438,18 @@ export async function syncAssistant(store: Store, subscription?: Record<string, 
   }
 }
 
-/** One add-on subscription met in Stripe's list (lib/billing-sync.ts): its store, by `assistant_for`, brought in line when it is that store's. */
+/**
+ * One add-on subscription met in Stripe's list (lib/billing-sync.ts): its store, by `assistant_sid` when it names one
+ * (#5285 row #3334, LOW 2), otherwise by `assistant_for`, brought in line when it is that store's.
+ */
 export async function applyListedAssistant(subscription: Record<string, unknown>): Promise<boolean> {
   const meta = subscription.metadata as Record<string, string> | null | undefined;
   const handle = meta?.assistant_for;
+  const sid = meta?.assistant_sid;
   const id = typeof subscription.id === "string" ? subscription.id : "";
-  if (!handle || !SUBSCRIPTION_PATTERN.test(id)) return false;
-  const store = await storeForHandle(handle);
-  if (!store) return false;
+  if ((sid === undefined ? !handle : typeof sid !== "string" || !sid) || !SUBSCRIPTION_PATTERN.test(id)) return false;
+  const store = sid !== undefined ? await storeForId(sid) : await storeForHandle(handle!);
+  if (!store || !metaNamesStore(meta, store)) return false;
   const customer = typeof subscription.customer === "string" ? subscription.customer : (subscription.customer as { id?: unknown } | null)?.id;
   // Only on this store's own customer: an address let go may be another store's now.
   if (!store.stripeCustomerId || customer !== store.stripeCustomerId) return false;

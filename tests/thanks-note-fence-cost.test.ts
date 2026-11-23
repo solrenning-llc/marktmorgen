@@ -6,11 +6,12 @@
  * extra commands on every studio request of the month (thanksNoteFenceUsd), since a note can be saved again and again.
  * This holds the measured count of one fenced save and the line that prices it. Synthetic store; in-memory Redis.
  */
+import { readFileSync } from "node:fs";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
-import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { STORE_KEEP_LIVE_COMMANDS, keepIfStoreLive } from "@/lib/live-fence";
 import { storeLiveFence } from "@/lib/store-live-cache";
-import { COMMAND, thanksNoteFenceUsd } from "./plan-cost-registry";
+import { COMMAND, nonPayingWorst, thanksNoteFenceCost, thanksNoteFenceUsd } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -39,6 +40,21 @@ async function main(): Promise<void> {
   for (const tier of Object.keys(STORE_ALLOWANCES) as (keyof typeof STORE_ALLOWANCES)[]) {
     const floor = STORE_ALLOWANCES[tier].studio * (STORE_KEEP_LIVE_COMMANDS - 1) * COMMAND;
     is(`${tier}: the extra commands of a save are priced on the whole studio figure`, thanksNoteFenceUsd(tier) >= floor - 1e-12 && floor > 0, true);
+    is(`${tier}: the studio line uses the same per-figure helper`, thanksNoteFenceUsd(tier), thanksNoteFenceCost(STORE_ALLOWANCES[tier]));
+  }
+
+  // Claude 4 3Kc on #5164 @587c97e836 (MEDIUM): the thanks-note route is open to a store in its trial, so its
+  // NON_PAYING_ALLOWANCES.trial.studio fenced saves must be priced in nonPayingWorst, as the card fence's are.
+  part("A store in its trial: its fenced note saves are priced in nonPayingWorst, at its own studio figure");
+  {
+    const trial = NON_PAYING_ALLOWANCES.trial;
+    const trialFence = thanksNoteFenceCost(trial);
+    is("the trial's fenced saves cost something", trialFence > 0 && trialFence === trial.studio * (STORE_KEEP_LIVE_COMMANDS - 1) * COMMAND, true);
+    const source = readFileSync("tests/plan-cost-registry.ts", "utf8");
+    const start = source.indexOf("export function nonPayingWorst");
+    const body = source.slice(start, source.indexOf("\n}\n", start));
+    is("nonPayingWorst adds the note fence at the trial's own studio figure", body.includes("thanksNoteFenceCost(allowances)"), true);
+    is("and the worst case is at least that cost", nonPayingWorst() >= trialFence, true);
   }
 
   done();

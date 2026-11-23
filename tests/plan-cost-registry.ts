@@ -1379,10 +1379,14 @@ export function teamLogFenceUsd(tier: Tier): number {
  * plain SET's one, so STORE_KEEP_LIVE_COMMANDS - 1 more, which take a note save past the studio request's priced
  * commands (28 against 27, Claude 7 fdy on #5164; tests/thanks-note-fence-cost.test.ts holds the count and this line). A note can be saved again and again,
  * so saves are bounded only by the studio figure: priced on every studio request of the month (coordinator 00:53 on
- * #5164). The trial's are in nonPayingWorst, which prices this line at the trial's figure.
+ * #5164). A store in its trial can save notes too (the route is open to it): nonPayingWorst prices its saves with the
+ * same helper at the trial's own studio figure (Claude 4 3Kc on #5164 @587c97e836).
  */
+export function thanksNoteFenceCost(allowances: Record<AllowanceKind, number>): number {
+  return allowances.studio * (STORE_KEEP_LIVE_COMMANDS - 1) * COMMAND;
+}
 export function thanksNoteFenceUsd(tier: Tier): number {
-  return STORE_ALLOWANCES[tier].studio * (STORE_KEEP_LIVE_COMMANDS - 1) * COMMAND;
+  return thanksNoteFenceCost(STORE_ALLOWANCES[tier]);
 }
 
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
@@ -3833,6 +3837,8 @@ export function nonPayingWorst(): number {
     + studioBlobMonthly(allowances.studio)
     // Its business-card saves and removals' store fence, at its own studio figure (line creator-card-erasure-fence).
     + creatorCardFenceCost(allowances)
+    // Its after-payment thanks-note saves' store fence, at its own studio figure (thanksNoteFenceCost, Claude 4 3Kc on #5164).
+    + thanksNoteFenceCost(allowances)
     + ["imports", "clickfunnels", "funnel-share", "team-scheduling", "quizzes"].reduce((sum, id) => sum + creator(id), 0)
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
     // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.

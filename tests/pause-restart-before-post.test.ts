@@ -82,7 +82,8 @@ async function main(): Promise<void> {
   await claimHandle(badEmail, "badpriceidstore", "A store", "");
   await setSubscription(badEmail, { customerId: "cus_TestPause0001", subscriptionId: "sub_BadPriceId0001", active: true, tier: "creator", cycle: "month" });
   const badStore = (await storeForEmail(badEmail))!;
-  const badSet = await pausePlan(badStore, 1, NOW);
+  // A two-month break, so it comes due only after the part below, which keeps its own one-month break.
+  const badSet = await pausePlan(badStore, 2, NOW);
   is("(setup) the break is taken", badSet.kind, "paused");
   const badUntil = badSet.kind === "paused" ? badSet.record.until : 0;
   await setSubscription(badEmail, { active: false });
@@ -95,10 +96,6 @@ async function main(): Promise<void> {
   is("no restart attempt is written into the break", badRaw.includes('"attempt"'), false);
   is("the creator is not told to check a charge that cannot exist", emails.filter((s) => s.includes("needs a check")), []);
   servedPriceId = "price_creator_month";
-  const fixed = await runBreaks(badUntil + DAY);
-  is("the next day the price is read again (not the remembered bad id) and the plan starts", [fixed.restarted, posts], [1, 1]);
-  is("and the break is gone", await pauseOf((await storeForEmail(badEmail))!), null);
-  posts = 0;
 
   part("A price lookup that fails before the only POST writes no attempt and is tried again the next day");
   subs.sub_BeforePost0001 = subscription("sub_BeforePost0001");
@@ -125,6 +122,14 @@ async function main(): Promise<void> {
   is("the next day the plan starts again", next.restarted, 1);
   is("with exactly one POST", posts, 1);
   is("and the break is gone", await pauseOf((await storeForEmail(email))!), null);
+
+  part("The break refused for a bad price id starts on a later run, from the price read again");
+  // The bad id was forgotten when it was refused: the part above read /v1/prices again (its first read failed and
+  // its second posted with price_creator_month), and the two-month break now starts with it.
+  const later = await runBreaks(badUntil + DAY);
+  is("the plan starts again", later.restarted, 1);
+  is("with one more POST, at the price read again", [posts, subs.sub_Restarted00002 ? "posted" : "none"], [2, "posted"]);
+  is("and the break is gone", await pauseOf((await storeForEmail(badEmail))!), null);
   done();
 }
 

@@ -953,6 +953,9 @@ export function fundedRestartSourceMatches(intent: OwnedRestartIntent, current: 
   } catch { return false; }
 }
 
+/** The price ids a legacy restart may post (legacyRestartPrice reads one, restartPlan takes it). */
+const RESTART_PRICE_PATTERN = /^price_[A-Za-z0-9_]{1,100}$/;
+
 /**
  * Everything a legacy restart needs before its only POST: the customer and card it will charge, and the monthly
  * price, read (or made) by ensurePrice. Nothing here can charge; a throw means nothing was posted, so the caller
@@ -962,7 +965,14 @@ export function fundedRestartSourceMatches(intent: OwnedRestartIntent, current: 
 export async function legacyRestartPrice(input: { customerId: string; paymentMethod: string; tier: Tier }): Promise<string> {
   if (!CUSTOMER_PATTERN.test(input.customerId)) throw new Error("not a customer of ours");
   if (!/^(pm|card|src)_[A-Za-z0-9]{6,64}$/.test(input.paymentMethod)) throw new Error("no card to charge");
-  return ensurePrice(input.tier, "month");
+  const priceId = await ensurePrice(input.tier, "month");
+  // Checked here, before runBreaks writes the attempt, with the same pattern restartPlan checks (Claude 3 yUZf's NIT
+  // on #3671): an id that is not one of ours writes nothing and is forgotten, so the next run reads the price again.
+  if (!RESTART_PRICE_PATTERN.test(priceId)) {
+    priceIds.clear();
+    throw new Error("not a price of ours");
+  }
+  return priceId;
 }
 
 export async function restartPlan(input: {
@@ -1075,7 +1085,7 @@ export async function restartPlan(input: {
       if(!published)throw new Error("The funded Store/index/generation publication remains unacknowledged");
       return published;
   }
-  if (input.priceId !== undefined && !/^price_[A-Za-z0-9_]{1,100}$/.test(input.priceId)) throw new Error("not a price of ours");
+  if (input.priceId !== undefined && !RESTART_PRICE_PATTERN.test(input.priceId)) throw new Error("not a price of ours");
   const priceId = input.priceId ?? await ensurePrice(input.tier, "month");
   const body = new URLSearchParams({
     customer: input.customerId,

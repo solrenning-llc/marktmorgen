@@ -1,0 +1,4 @@
+{
+  "@/lib/plan": "cron-shares-failed-world.ts",
+  "@/lib/share-settle": "cron-shares-failed-world.ts"
+}

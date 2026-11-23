@@ -50,7 +50,7 @@ async function main(): Promise<void> {
     is("and the buyer page reads no address from it", await addressForToken(STORE, token), null);
     is("on another store: nothing", await findTokenState(OTHER, token), { kind: "none" });
     const [ttl] = await real([["TTL", key(token)]]);
-    is("kept no longer than the token could open the page", typeof ttl === "number" && ttl > 0 && ttl <= FIND_SECONDS, true);
+    is("kept FIND_SECONDS at the most from when the answer is written (a SET with EX, never without an expiry)", typeof ttl === "number" && ttl > 0 && ttl <= FIND_SECONDS, true);
   }
 
   part("The answer is written exactly, or the erasure is said not finished");

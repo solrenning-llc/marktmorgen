@@ -128,8 +128,10 @@ export async function findTokenState(store: Pick<Store, "sid">, token: string): 
 
 /**
  * After an erasure whose token's delete did not answer (Claude 3's two LOWs on #4868): the token's value is replaced by
- * the erasure's answer, without the address, for the rest of the hour the token could open the page. The address is
- * gone from it either way, a press again answers what the erasure answered, and the erasure is never run twice for it.
+ * the erasure's answer, without the address, kept FIND_SECONDS (an hour) from when it is written, so up to about two
+ * hours from the token's making. It is a SET with EX, never KEEPTTL: the lost DEL may have removed the key already, and
+ * KEEPTTL on a key written new would keep it with no expiry (Claude 5 iacVn3r's NIT on #5451). The address is gone
+ * from it either way, a press again answers what the erasure answered, and the erasure is never run twice for it.
  * Read exactly: anything but OK throws UnknownReplyError, and the erasure is said not finished, as before.
  */
 export async function keepErasedAnswer(store: Pick<Store, "sid">, token: string, answer: { records: number; notes: ErasureNote[] }): Promise<void> {

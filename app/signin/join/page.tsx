@@ -28,7 +28,7 @@ export default async function JoinPage({
   if (!/^[0-9a-f]{64}$/.test(token)) redirect("/signin?status=invite-expired");
   // An invitation that could not be read just now is said so, never "expired": it may still be good.
   const invite = await peekInvite(token).catch((error: unknown) => {
-    console.error("a team invitation could not be read", error);
+    console.error("a team invitation could not be read");
     return undefined;
   });
   if (invite === undefined) {

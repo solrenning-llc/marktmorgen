@@ -3,7 +3,7 @@ import { isPlatformHost, originFrom, requestHost } from "@/lib/request-origin";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 import { normaliseHandle } from "@/lib/store";
-import { COURSE_ID_PATTERN } from "@/lib/course";
+import { COURSE_ID_PATTERN, ITEM_ID_PATTERN } from "@/lib/course";
 import { NEXT_STEP_NO_SECONDS, nextStepCookie } from "@/lib/course-next-step";
 
 /** A product id as a course's address carries it (lib/catalog.ts ids). */
@@ -24,26 +24,31 @@ const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
  * checked for their shape, so the answer costs one call and no database
  * command, and a wrong one sets nothing a page reads. A plain form, no script
  * needed: without one the answer goes back to the course's page, at the
- * address the browser is on (its own domain's /course/..., or ours).
+ * address the browser is on (its own domain's /course/..., or ours), or to the
+ * lesson it was given on when the form names one (the last lesson, #3534), so
+ * the student is not moved to another page they did not ask for (3.2.5).
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return new Response("forbidden", { status: 403 });
   let handle = "";
   let course = "";
   let product = "";
+  let lesson = "";
   try {
     const form = await (await limited(request, 2_000)).formData();
     handle = normaliseHandle(String(form.get("handle") ?? "")).slice(0, 40);
     course = String(form.get("course") ?? "").slice(0, 40);
     product = String(form.get("product") ?? "").slice(0, 40);
+    lesson = String(form.get("lesson") ?? "").slice(0, 40);
   } catch {
     return new Response("Bad request", { status: 400 });
   }
-  if (!HANDLE_PATTERN.test(handle) || !COURSE_ID_PATTERN.test(course) || !PRODUCT_ID.test(product)) return new Response("Bad request", { status: 400 });
+  if (!HANDLE_PATTERN.test(handle) || !COURSE_ID_PATTERN.test(course) || !PRODUCT_ID.test(product) || (lesson !== "" && !ITEM_ID_PATTERN.test(lesson))) return new Response("Bad request", { status: 400 });
   const secure = originFrom(request).startsWith("https:") ? "; Secure" : "";
   const cookie = `${nextStepCookie(course)}=1; Path=/; Max-Age=${NEXT_STEP_NO_SECONDS}; SameSite=Lax; HttpOnly${secure}`;
   // Back to the course where the browser is: our address names the store, the store's own domain does not (proxy.ts).
-  const back = isPlatformHost(requestHost(request)) ? `/@${handle}/course/${product}` : `/course/${product}`;
+  const home = isPlatformHost(requestHost(request)) ? `/@${handle}/course/${product}` : `/course/${product}`;
+  const back = lesson ? `${home}/${lesson}` : home;
   const wantsJson = (request.headers.get("accept") ?? "").includes("application/json");
   if (wantsJson) return new Response(null, { status: 204, headers: { "Set-Cookie": cookie, "Cache-Control": "no-store" } });
   return new Response(null, { status: 303, headers: { "Set-Cookie": cookie, Location: `${originFrom(request)}${back}`, "Cache-Control": "no-store" } });

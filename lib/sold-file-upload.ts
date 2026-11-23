@@ -13,52 +13,15 @@
  * refuses the door: `uploadReason` reads every kind, and `uploadWords` gives
  * the studio's own sentence for a refusal when the route sent one.
  */
-import type { PresignedUrlPayload } from "@vercel/blob";
-import { uploadPresigned } from "@vercel/blob/client";
 import { MULTIPART_ABOVE_BYTES, fileFolder, safeFileName } from "@/lib/product-file";
-import { DOOR_ECHO_HEADER, doorFrom } from "@/lib/upload-door";
+import { UploadRefused, uploadThroughDoor } from "@/lib/upload-through-door";
 import { VaultUploadError, vaultUpload } from "@/lib/vault-upload";
+
+// The route refused the door: kept here too for the places that read it from this file (lib/upload-through-door.ts).
+export { UploadRefused };
 
 /** The host's route that hands out doors into its file store. */
 const UPLOAD_ROUTE = "/api/store/file";
-
-/** The longest sentence of the studio's own that a refusal may carry. */
-const MAX_WORDS = 1_000;
-
-/** A reason is one lower-case word with underscores, as the route sends it. */
-const REASON = /^[a-z][a-z_]{0,39}$/;
-
-/** The host's route refused the door: its reason and, when it sent them, the studio's words. */
-export class UploadRefused extends Error {
-  constructor(readonly reason: string, readonly words: string | undefined) {
-    super(reason);
-    this.name = "UploadRefused";
-  }
-}
-
-/**
- * Asks the host's route for a door, once, exactly as the client would
- * (lib/upload-door.ts says why the studio asks itself). A refusal comes back
- * as `UploadRefused` with the route's reason and words; an answer that is not
- * a refusal body is a server error, never words from elsewhere.
- */
-async function askForDoor(pathname: string, clientPayload: string, multipart: boolean): Promise<PresignedUrlPayload> {
-  const response = await fetch(UPLOAD_ROUTE, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ type: "blob.generate-presigned-url", payload: { pathname, clientPayload, multipart } }),
-  });
-  const body: unknown = await response.json().catch(() => null);
-  const answer = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
-  if (!response.ok) {
-    const reason = typeof answer.error === "string" && REASON.test(answer.error) ? answer.error : "server_error";
-    const words = reason !== "server_error" && typeof answer.message === "string" && answer.message.trim() && answer.message.length <= MAX_WORDS ? answer.message : undefined;
-    throw new UploadRefused(reason, words);
-  }
-  const door = doorFrom(answer.presignedUrlPayload);
-  if (!door) throw new UploadRefused("server_error", undefined);
-  return door;
-}
 
 export async function uploadSoldFile(
   file: File,
@@ -73,12 +36,9 @@ export async function uploadSoldFile(
   // In parts once it is worth it, so a dropped connection costs one part
   // rather than the whole upload.
   const multipart = file.size > MULTIPART_ABOVE_BYTES;
-  const door = await askForDoor(pathname, clientPayload, multipart);
-  const result = await uploadPresigned(pathname, file, {
+  // Asked first, so a refusal says why, then sent with the door carried back (lib/upload-through-door.ts).
+  const result = await uploadThroughDoor(UPLOAD_ROUTE, pathname, file, {
     access: "private",
-    handleUploadUrl: UPLOAD_ROUTE,
-    // The client asks the route again; this door is what it hands back.
-    headers: { [DOOR_ECHO_HEADER]: JSON.stringify(door) },
     clientPayload,
     multipart,
     onUploadProgress: (progress) => onProgress(progress.percentage),

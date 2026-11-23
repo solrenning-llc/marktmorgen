@@ -28,7 +28,9 @@ import { claimsKey, hostId } from "@/lib/host-claims";
 import { store as redis } from "./redis-stub";
 import { closeForErasure } from "./closed-for-erasure";
 import { done, is, part } from "./check";
-import { DECIDE_CALENDARS_COMMANDS, PREPARE_COMMANDS, STALE_ID_COMMANDS, decideCalendarRuns } from "./plan-cost-registry";
+import { DECIDE_CALENDARS_COMMANDS, PREPARE_COMMANDS, STALE_ID_COMMANDS, STALE_ID_WIRE_BYTES, decideCalendarRuns } from "./plan-cost-registry";
+import { FAMILIES } from "./store-data-registry";
+import { TIERS } from "@/lib/plan";
 import { MAX_TEAM, MEMBER_STORES_READ, memberStoresExact, readTeam } from "@/lib/team";
 
 globalThis.fetch = (async () => new Response("{}", { status: 500 })) as typeof fetch;
@@ -581,6 +583,53 @@ async function main(): Promise<void> {
     is("and S is still in X's index", redis.run(["SISMEMBER", teamIndexKey(X), s.sid]), 1);
   }
 
+  part("MEDIUM (Codex L-20261119-0634, #5010 row 133): a team record changed between the read past's read and its removal keeps the id, whatever shape it has now");
+  for (const [label, swapped] of [
+    // parseTeam refuses lists that are objects; cjson made them tables the v1 script took for a team without X.
+    ["members and invites now JSON objects", JSON.stringify({ members: { 0: { email: X, role: "admin", joinedAt: "" } }, invites: {} })],
+    // A valid record that changed (another member added) is not the record read: no progress this time, never a guess.
+    ["a valid record that changed, still without X", JSON.stringify({ members: [{ email: "other@example.com", role: "admin", joinedAt: "" }], invites: [] })],
+  ] as [string, string][]) {
+    fresh();
+    const S_OWNER = "owner-shape@example.com";
+    await claimHandle(S_OWNER, "ownershape", "Owner Shape", "");
+    const s = (await ensureStoreId(S_OWNER))!;
+    redis.run(["SET", teamKey(s.sid), JSON.stringify({ members: [], invites: [] })]);
+    redis.run(["SADD", teamIndexKey(X), s.sid]);
+    for (let i = 0; i < MEMBER_STORES_READ + 1; i += 1) redis.run(["SADD", teamIndexKey(X), createHash("md5").update(`shape${i}`).digest("hex")]);
+    let swappedIn = false;
+    replaced = [{
+      word: "GET",
+      key: teamKey(s.sid),
+      reply: () => {
+        // The read past reads S's team without X; right after, the record changes before the removal's step.
+        const read = redis.run(["GET", teamKey(s.sid)]);
+        if (!swappedIn) {
+          swappedIn = true;
+          redis.run(["SET", teamKey(s.sid), swapped]);
+        }
+        return read;
+      },
+    }];
+    const read = await memberStoresExact(X, "f".repeat(32)).then(() => "read", (error: unknown) => (error as Error).name);
+    replaced = [];
+    is(`${label}: the read past read S's team and stayed unknown`, [swappedIn, read], [true, "UnknownReplyError"]);
+    is(`${label}: S is still in X's index`, redis.run(["SISMEMBER", teamIndexKey(X), s.sid]), 1);
+  }
+  {
+    // Control: the record unchanged since the read is still taken out, as before (the read past makes progress).
+    fresh();
+    const S_OWNER = "owner-same@example.com";
+    await claimHandle(S_OWNER, "ownersame", "Owner Same", "");
+    const s = (await ensureStoreId(S_OWNER))!;
+    redis.run(["SET", teamKey(s.sid), JSON.stringify({ members: [], invites: [] })]);
+    redis.run(["SADD", teamIndexKey(X), s.sid]);
+    for (let i = 0; i < MEMBER_STORES_READ + 1; i += 1) redis.run(["SADD", teamIndexKey(X), createHash("md5").update(`same${i}`).digest("hex")]);
+    const read = await memberStoresExact(X, "f".repeat(32)).then(() => "read", (error: unknown) => (error as Error).name);
+    is("control: an unchanged team without X stays unknown this time", read, "UnknownReplyError");
+    is("control: and S leaves X's index, so the next read gets further", redis.run(["SISMEMBER", teamIndexKey(X), s.sid]), 0);
+  }
+
   part("LEVE (Claude 4 on #3660 at 89d44aba5a): an id read past as no store (nil), whose team still lists the person, leaves the index for good");
   {
     fresh();
@@ -616,6 +665,17 @@ async function main(): Promise<void> {
   part("Its cost: each run that reads an undecided host again is counted (tests/plan-cost-registry.ts)");
   is("a run deciding the hosts again costs less than one preparation", DECIDE_CALENDARS_COMMANDS > 0 && DECIDE_CALENDARS_COMMANDS < PREPARE_COMMANDS, true);
   is("each read past drops at least all it read but the closing store, so an index is decided in a bounded number of reads", [decideCalendarRuns(MEMBER_STORES_READ), decideCalendarRuns(MEMBER_STORES_READ + 1), decideCalendarRuns(2 * MEMBER_STORES_READ - 1), decideCalendarRuns(2 * MEMBER_STORES_READ)], [1, 2, 2, 3]);
+  {
+    // #5010 row 133: the read past sends back each team record it read, so the wire bytes a stale id adds are its team
+    // record at its largest, the registry's cap for nl:team:, never less.
+    const parts = FAMILIES["nl:team:@lib/team.ts"].parts ?? [];
+    const cap = Math.max(...TIERS.flatMap((tier) => parts.map((part) => ("capped" in part ? part.capped(tier) : 0))));
+    is("a stale id's wire bytes are its team record at the registry's cap", [cap > 0, STALE_ID_WIRE_BYTES >= cap], [true, true]);
+    // The read past sends every team record it read back in one EVAL (TEAM_INDEX_OFF_TEAM v2): at MEMBER_STORES_READ
+    // records at the cap it stays under Upstash's 1 MB a request, the bound STRICT_FENCED_CAS_MAX_BYTES keeps too
+    // (Claude 1's NIT on #5175), so a larger team or read is seen here before an EVAL past it fails out of sight.
+    is("the read past's one EVAL, every record at its cap, stays under 1 MB a request", MEMBER_STORES_READ * STALE_ID_WIRE_BYTES < 1_000_000, true);
+  }
   is("a stale id's share of a read past is counted, for each of a closing store's team places", STALE_ID_COMMANDS > 0 && STALE_ID_COMMANDS * (MEMBER_STORES_READ - 1) >= DECIDE_CALENDARS_COMMANDS / (1 + MAX_TEAM), true);
 
   done();

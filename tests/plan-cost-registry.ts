@@ -3663,6 +3663,14 @@ export function decideCalendarRuns(ids: number): number {
  * Each id is read past once: it is out of the index after.
  */
 export const STALE_ID_COMMANDS = Math.ceil((SERVED_COMMANDS + 2) / (MEMBER_STORES_READ - 1));
+/**
+ * What one stale id adds on the wire to the read past's removal, at the most (lib/team.ts TEAM_INDEX_OFF_TEAM v2, #5010
+ * row 133): the team record exactly as it was read, sent back so the same step compares it byte for byte with what is
+ * stored (no digest: redis.sha1hex is not confirmed on Upstash, Claude 5 ibuF's MEDIUM on #5175). A team record is at
+ * most its capped size in tests/store-data-registry.ts, (MAX_TEAM + 10) KB; an id whose team is gone sends nothing.
+ * Carried, as STALE_ID_COMMANDS is, by the closing store for each of its team places (PREPARE in closureCost).
+ */
+export const STALE_ID_WIRE_BYTES = (MAX_TEAM + 10) * 1024;
 export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * CLAIM_PAGES + SERVED_COMMANDS) + CLAIMS_LEFT_COMMANDS + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS + PLAN_RUNS_READ_COMMANDS + DUE_READ_COMMANDS + ERASING_MARK_COMMANDS + FENCED_PREPARE_COMMANDS + MAX_TEAM * STALE_ID_COMMANDS;
 
 /**
@@ -3762,7 +3770,7 @@ export function closureCost(tier: Tier, trial = false): { deletes: number; follo
     follows: (kept + outside) * DB_BYTE + (Math.ceil((roomKeys + outside / MARK) / FOLLOW_BATCH) + FOLLOWED_FAMILIES.length * 4) * COMMAND,
     exports: ENDED_STORE_EXPORTS * exportCost(room + MAX_STORE_BYTES),
     lists: ENDED_LIST_DOWNLOADS * endedListDownloadCost(room + MAX_STORE_BYTES),
-    prepare: PREPARE_COMMANDS * COMMAND,
+    prepare: PREPARE_COMMANDS * COMMAND + MAX_TEAM * STALE_ID_WIRE_BYTES * DB_BYTE,
     visits: CLOSING_VISIT_DAYS * closingVisitCost(),
     total: 0,
   };

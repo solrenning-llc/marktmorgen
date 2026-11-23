@@ -165,6 +165,7 @@ import {
 } from "@/lib/spend-cost-table";
 import { CDN_PER_REQUEST, PAGES_PER_VISIT, laterPageCost, readBeaconCost, readCeilingMarksCost, visitCost } from "./traffic-cost";
 import { SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_MISSES_PER_ADDRESS, SHORT_LINK_MISS_WINDOW_MS, SHORT_LINK_OFF_AFTER_MS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_REST_COMMANDS, SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_RESTING_OWNER_MS, SHORT_LINK_PAID_BURST_COMMANDS, SHORT_LINK_PAID_FLIGHT_PER_STORE, SHORT_LINK_PAID_REFUSALS_PER_HOUR, SHORT_LINK_STORE_COUNT_COMMANDS, SHORT_LINK_STORE_READS_PER_HOUR, SHORT_LINK_STORE_REFUND_COMMANDS, SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_PER_HOUR, SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_USED_UP_PAUSE_MS } from "@/lib/short-link-open-rules";
+import { MAX_OPTIONS as MAX_PRODUCT_OPTIONS } from "@/lib/product-option";
 import { MAX_LINKS } from "@/lib/short-link-rules";
 import { COPY_NOTE_BYTES, FLY_HOLD_SECONDS, FLY_SHARE_COMMANDS, MEASURE_LIST_PAGES } from "@/lib/stamp-cost-rules";
 import { ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_CUTOFF_MS, ASSISTANT_START_LIST_PAGES, ASSISTANT_START_STRIPE_CALLS, assistantMonthWorst } from "@/lib/store-assistant-rules";
@@ -1207,18 +1208,32 @@ export const MEASURE_DB_BYTES = 4 * 64 * 256;
  * A buyer's copy is also noted under the buyer before it is written (board #5427, row #3312; lib/pdf-stamp.ts noteCopy
  * and stillNoted): COPY_NOTE_COMMANDS, and, when the buyer's deletion read the note between the note and the write,
  * the copy deleted again (lib/pdf-stamp.ts dropWrittenCopy: COPY_DROP_COMMANDS and one Blob operation, priced as a
- * listing page, the dearer of the two stores), with the bytes of two notes and a deletion record.
+ * listing page, the dearer of the two stores), with the bytes of two notes and a deletion record. Each note also pays
+ * ahead, at its worst, for being taken out again when its file is removed (UNNOTE_COMMANDS, UNNOTE_BYTES; Claude 5
+ * iYwjc's MÉDIO on #5475), and a kept copy reads the list of removed files whose notes are still to be taken out
+ * (UNNOTE_QUEUE_READ_COMMANDS), whose pages are those notes' own, paid ahead the same way.
  */
-/** noteCopy's room taken and given back (two TAKE_DATA), its SADD, SCARD and SREM, and stillNoted's SISMEMBER. */
-export const COPY_NOTE_COMMANDS = 2 * takeDataCommands(1) + 4;
+/** noteCopy's room taken and given back (two TAKE_DATA), its two SADD, SCARD and two SREM, and stillNoted's SISMEMBER. */
+export const COPY_NOTE_COMMANDS = 2 * takeDataCommands(1) + 6;
 /** A copy deleted again: the deletion record kept (INCRBY, EXPIRE, RPUSH and EXPIRE, lib/backup-deletions.ts) and, failing, its folder listed for a retry (SADD). */
 export const COPY_DROP_COMMANDS = 5;
+/**
+ * One note taken out when its file is removed (lib/pdf-stamp.ts unnoteDropped, unnoteFile), at its worst, a file with
+ * that note alone: its file's list read (SRANDMEMBER), its SREM from the buyer's note, its SREM from the list, its room
+ * given back (one TAKE_DATA), the list read again empty, and the file put on UNNOTE_QUEUE and taken off it (SADD, SREM).
+ * A page of UNNOTE_PAGE notes shares one read, one list SREM and one TAKE_DATA, so it costs less a note.
+ */
+export const UNNOTE_COMMANDS = 6 + takeDataCommands(1);
+/** Its bytes: the entry read and sent back twice (a person's key, a space and a note, 388 at most), the two keys and the room's script arguments, rounded up. */
+export const UNNOTE_BYTES = 2_048;
+/** A kept copy's read of UNNOTE_QUEUE (lib/pdf-stamp.ts retryUnnotes: SRANDMEMBER). */
+export const UNNOTE_QUEUE_READ_COMMANDS = 1;
 export const STORAGE_MEASURE_READ =
   MEASURE_LIST_PAGES * (BLOB_LIST_PAGE + R2_LIST_PAGE)
   + FLY_HOLD_SECONDS * MEMORY_SECOND
   + FLY_HOLD_SECONDS * (SHAPES.wait.cpu / SHAPES.wait.seconds) * CPU_SECOND
-  + (MEASURE_COMMANDS + 3 + COPY_NOTE_COMMANDS + COPY_DROP_COMMANDS) * COMMAND
-  + (MEASURE_DB_BYTES + 2_048 + 2 * COPY_NOTE_BYTES + 1_200) * DB_BYTE
+  + (MEASURE_COMMANDS + 3 + COPY_NOTE_COMMANDS + COPY_DROP_COMMANDS + UNNOTE_COMMANDS + UNNOTE_QUEUE_READ_COMMANDS) * COMMAND
+  + (MEASURE_DB_BYTES + 2_048 + 2 * COPY_NOTE_BYTES + 1_200 + UNNOTE_BYTES + 256) * DB_BYTE
   + BLOB_LIST_PAGE
   + Math.max(micro(R2_CLASS_B_MICRO_USD_PER_MILLION) / 1e6, 0.8 / 1e6);
 /**
@@ -1570,6 +1585,18 @@ export function campaignLandingFenceCost(allowances: Record<AllowanceKind, numbe
 /** Every studio unit may be a business-card save or removal: its fence's two inner commands, with wire headroom. */
 export function creatorCardFenceCost(allowances: Record<AllowanceKind, number>): number {
   return allowances.studio * (CARD_FENCE_COMMANDS * COMMAND + 2_048 * DB_BYTE);
+}
+/**
+ * A product file removed or replaced counts its list of stamped copies' notes (lib/pdf-stamp.ts unnoteDropped: SCARD;
+ * Claude 5 iYwjc's MÉDIO on #5475) before anything else: one command a file, for every file one studio request can
+ * remove, the product's own and one an option (1 + MAX_PRODUCT_OPTIONS). What it then takes out is paid ahead with each
+ * note (UNNOTE_COMMANDS, in STORAGE_MEASURE_READ).
+ */
+export const UNNOTE_DROP_COMMANDS = 1;
+export const UNNOTE_DROP_FILES = 1 + MAX_PRODUCT_OPTIONS;
+/** Every studio unit may be a removal of a product with every option's file: their counts, with wire headroom. */
+export function stampedDropNotesCost(allowances: Record<AllowanceKind, number>): number {
+  return allowances.studio * UNNOTE_DROP_FILES * (UNNOTE_DROP_COMMANDS * COMMAND + 256 * DB_BYTE);
 }
 /**
  * Commands each counted public request adds for a paying store: its count
@@ -3027,7 +3054,7 @@ export const COST_LINES: CostLine[] = [
       // the original is read and settled at its measured work (C3-136, 12 November 2026; STORAGE_MEASURE_READ and
       // FLY_BASE, FLY_CPU_MS, FLY_BYTE held in tests/plan-cost-registry.test.ts).
       { file: "lib/stamp-cost-rules.ts", names: ["MEASURE_LIST_PAGES", "STORAGE_MEASURE_UNITS", "NO_ROOM_NOTE_SECONDS", "FLY_HOLD_SECONDS", "FLY_BASE_UNITS", "FLY_SHARE_COMMANDS", "FLY_CPU_MS_PER_UNIT", "FLY_CPU_PER_WALL_MS", "FLY_BYTES_PER_UNIT", "FLY_MAX_BYTES", "flyUnits", "flyHoldUnits"] },
-      { file: "lib/pdf-stamp.ts", names: ["meter.take(STORAGE_MEASURE_UNITS)", "() => noteCopy(store, sale.email, member)", "if (noteFirst && !(await noteFirst())) return \"not_noted\";", "noRoomKey(folder)", "NO_ROOM_NOTE_SECONDS", "if (!(await roomNotedOut(file)))", "const held = flyHoldUnits(file.bytes);", "await meter.take(held)", "meter.give(held - used)", "meter.take(used - held)", "meter.take(flyUnits(0, stamped.bytes.byteLength))"] },
+      { file: "lib/pdf-stamp.ts", names: ["meter.take(STORAGE_MEASURE_UNITS)", "() => noteCopy(store, sale.email, member)", "await retryUnnotes(RETRY_PER_CALL)", "if (noteFirst && !(await noteFirst())) return \"not_noted\";", "noRoomKey(folder)", "NO_ROOM_NOTE_SECONDS", "if (!(await roomNotedOut(file)))", "const held = flyHoldUnits(file.bytes);", "await meter.take(held)", "meter.give(held - used)", "meter.take(used - held)", "meter.take(flyUnits(0, stamped.bytes.byteLength))"] },
       { file: "lib/pdf-preview.ts", names: ["if (await roomNotedOut(file)) return null;", "writeWithinStorage(file, pathname, bytes, \"application/pdf\", store, meter)"] },
       { file: "app/api/store/download/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now, \"buyer\", { shared: true })", "givePublicRequests(store, units, now, { shared: true })", "copyMeter(store)"] },
       { file: "app/api/store/preview/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now)", "givePublicRequests(store, units, now)"] },
@@ -3292,6 +3319,19 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/creator-card/route.ts", names: ["guardStoreWrite", "await storeLiveFence(store)"] },
     ],
     basis: "In addition to the existing studio request, every studio unit funds the card fence's two inner commands (HGET of the erasing field, GET of the store's id key or, for a store from before ids, its record) and 2048 wire bytes for the keys, ref and longer script. No extra round trip: the fence is inside the card's own script (Codex L-20261121-0150). The trial uses the same per-unit surcharge in nonPayingWorst; free-share carries its share. Prices and visible allowances do not change.",
+  },
+  {
+    id: "stamped-drop-notes",
+    feature: "Removing or replacing a product file takes its stamped copies out of every buyer's note (Claude 5 iYwjc's MÉDIO on #5475)",
+    monthlyUsd: (tier) => stampedDropNotesCost(STORE_ALLOWANCES[tier]),
+    sources: [
+      { file: "lib/pdf-stamp.ts", names: ["if (store?.sid) await unnoteDropped(store.sid, fileIdOf(file));", "[\"SCARD\", byFileKey(sid, fileId)]", "UNNOTE_QUEUE"] },
+      { file: "lib/product-option.ts", names: ["MAX_OPTIONS"] },
+      { file: "app/api/store/product/route.ts", names: ["dropStamped(file, removed.store)", "dropStamped(linked.removed, guarded.store)"] },
+      { file: "app/api/store/option/route.ts", names: ["dropStamped(file, result.store)"] },
+      { file: "app/api/store/file/attach/route.ts", names: ["dropStamped(removed, result.store)"] },
+    ],
+    basis: "In addition to the existing studio request, every studio unit funds, for each file one request can remove (the product's own and one for each of MAX_OPTIONS options), the count of that file's list of stamped copies' notes (one SCARD, UNNOTE_DROP_COMMANDS) and 256 wire bytes. A list that holds anything is then worked through and put on and taken off UNNOTE_QUEUE at the notes' own cost, paid ahead with each note when its copy was kept (UNNOTE_COMMANDS and UNNOTE_BYTES in STORAGE_MEASURE_READ, a file with that note alone, its dearest case); what one call leaves is finished by the next kept copy, whose read of the queue is in the same line. The trial uses the same per-unit surcharge in nonPayingWorst; free-share carries its share. Prices and visible allowances do not change.",
   },
   {
     id: "rest-api",
@@ -3871,6 +3911,8 @@ export function nonPayingWorst(): number {
     + studioBlobMonthly(allowances.studio)
     // Its business-card saves and removals' store fence, at its own studio figure (line creator-card-erasure-fence).
     + creatorCardFenceCost(allowances)
+    // Its product files' removals, each counting its list of stamped copies' notes (line stamped-drop-notes).
+    + stampedDropNotesCost(allowances)
     + ["imports", "clickfunnels", "funnel-share", "team-scheduling", "quizzes"].reduce((sum, id) => sum + creator(id), 0)
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
     // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.

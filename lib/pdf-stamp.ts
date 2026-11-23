@@ -58,7 +58,7 @@ import { personKey } from "@/lib/person-key";
 import { standingOf } from "@/lib/plan-standing";
 import { storageBrakeFor, storageUsed } from "@/lib/storage-quota";
 import { releaseStorage, reserveStorage } from "@/lib/storage-reservations";
-import { COPIES_PER_PERSON, COPY_NOTE_BYTES, COPY_PATH_MOST, type CopyMeter, FLY_MAX_BYTES, NO_ROOM_NOTE_SECONDS, STORAGE_MEASURE_UNITS, flyHoldUnits, flyUnits } from "@/lib/stamp-cost-rules";
+import { COPIES_PER_PERSON, COPY_NOTE_BYTES, COPY_PATH_MOST, type CopyMeter, FLY_MAX_BYTES, NO_ROOM_NOTE_SECONDS, STORAGE_MEASURE_UNITS, UNNOTE_PAGE, UNNOTE_PAGES_PER_CALL, flyHoldUnits, flyUnits } from "@/lib/stamp-cost-rules";
 import type { LanguageCode } from "@/lib/store-language";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -303,42 +303,60 @@ export function copyFolder(file: Pick<ProductFile, "pathname">): string {
  * The stamped copies kept for one person in one store (board #5427, row #3312): a set of "<record key> <copy's path>",
  * under the store's id and a one-way key of the address, never the address. A copy carries the address on its pages,
  * so it is noted here before it is written (noteCopy), and deleting the person (forgetStampedPerson) deletes each copy
- * and its record. No expiry: a copy lives as long as the file it was made from, so the note that finds it must too.
- * At most COPIES_PER_PERSON members, each counted in the store's data room at COPY_NOTE_BYTES while it is there;
- * closing the store deletes it with the store's other keys.
+ * and its record. No expiry: a copy lives as long as the file it was made from, so the note that finds it must too,
+ * and removing that file takes the note out (dropStamped, through the file's own list, stampedFileKey). At most
+ * COPIES_PER_PERSON members; closing the store deletes it with the store's other keys.
  */
-export const stampedCopiesKey = (sid: string, email: string) => `nl:stamp:who:${sid}:${personKey(sid, email)}`;
+export const stampedCopiesKey = (sid: string, email: string) => whoKey(sid, personKey(sid, email));
+const whoKey = (sid: string, person: string) => `nl:stamp:who:${sid}:${person}`;
+/**
+ * The same notes, listed by the file the copies were made from (Claude 5 iYwjc's MÉDIO on #5475): a set of
+ * "<the person's one-way key> <note>", under the store's id and the file's id in its copies' paths (copyFolder), so
+ * removing the file finds every buyer's note of its copies and takes it out (dropStamped). Each note is counted once in
+ * the store's data room, at COPY_NOTE_BYTES for both its places, while its entry here is there: the room is taken
+ * before the entry is written and given back only when its removal from this list is confirmed, by whichever of the
+ * file's removal or the person's deletion takes it out. Closing the store deletes it with the store's other keys.
+ */
+export const stampedFileKey = (sid: string, file: Pick<ProductFile, "pathname">) => byFileKey(sid, fileIdOf(file));
+const byFileKey = (sid: string, fileId: string) => `nl:stamp:byfile:${sid}:${fileId}`;
+/** A file's id in its copies' paths (copyFolder). */
+const fileIdOf = (file: Pick<ProductFile, "pathname">) => sha(file.pathname).slice(0, 24);
 /** The slot of the store's data room the notes are counted in. */
 const COPY_NOTE_SLOT = "stamp:who";
-/** One note: the copy's record key (copyKey), a space, its path. */
-const NOTED_COPY = new RegExp(`^(nl:stamp:copy:[0-9a-f]{40}) ((?:${VAULT_PREFIX}|stores)/[^/]+/stamped/[0-9a-f]{24}/[0-9a-f]{24}/[^/]+)$`);
+/** One note: the copy's record key (copyKey), a space, its path, whose fourth part is its file's id. */
+const NOTED_COPY = new RegExp(`^(nl:stamp:copy:[0-9a-f]{40}) ((?:${VAULT_PREFIX}|stores)/[^/]+/stamped/([0-9a-f]{24})/[0-9a-f]{24}/[^/]+)$`);
+/** One entry of a file's list: the person's one-way key (lib/person-key.ts, 32 hex), a space, the note. */
+const FILE_ENTRY = /^([0-9a-f]{32}) (.+)$/;
 
 /**
- * Notes a copy about to be kept under its buyer (stampedCopiesKey), its room taken in the store's data room first.
- * True only when the note is confirmed there: SADD 0 or 1 and SCARD a count, read exactly (CX-123 rule 24). A copy
- * past COPIES_PER_PERSON is taken out again and refused, and so is a path past COPY_PATH_MOST bytes, a store without an
- * id or a room that does not take it. Unknown is false, and the room it took stays counted (the room looks fuller,
- * never emptier). Never throws. Commands at the most: the room taken and given back (two TAKE_DATA), SADD, SCARD and
- * SREM (tests/plan-cost-registry.ts COPY_NOTE_COMMANDS).
+ * Notes a copy about to be kept under its buyer (stampedCopiesKey) and on its file's list (stampedFileKey), its room
+ * taken in the store's data room first. True only when the note is confirmed there: each SADD 0 or 1 and SCARD a count,
+ * read exactly (CX-123 rule 24). A copy past COPIES_PER_PERSON is taken out of both again and refused, and so is a
+ * path past COPY_PATH_MOST bytes, a store without an id or a room that does not take it. Unknown is false, and the
+ * room it took stays counted (the room looks fuller, never emptier). Never throws. Commands at the most: the room
+ * taken and given back (two TAKE_DATA), two SADD, SCARD and two SREM (tests/plan-cost-registry.ts COPY_NOTE_COMMANDS).
  */
 async function noteCopy(store: DataStore, email: string, member: string): Promise<boolean> {
-  if (!isRedisConfigured() || !store.sid || !email || !NOTED_COPY.test(member)) return false;
+  const fileId = NOTED_COPY.exec(member)?.[3];
+  if (!isRedisConfigured() || !store.sid || !email || !fileId) return false;
   if (Buffer.byteLength(member.slice(member.indexOf(" ") + 1), "utf8") > COPY_PATH_MOST) return false;
-  const key = stampedCopiesKey(store.sid, email);
+  const person = personKey(store.sid, email);
+  const key = whoKey(store.sid, person);
+  const list = byFileKey(store.sid, fileId);
+  const entry = `${person} ${member}`;
   const room = [{ slot: COPY_NOTE_SLOT, bytes: COPY_NOTE_BYTES }];
   if (!(await takeData(store, room).then((taken) => taken.ok, () => false))) return false;
-  const replies = await redisPipeline([["SADD", key, member], ["SCARD", key]]).then((r) => repliesFor(r, 2), () => null);
+  const replies = await redisPipeline([["SADD", key, member], ["SADD", list, entry], ["SCARD", key]]).then((r) => repliesFor(r, 3), () => null);
   const added = replies ? countOf(replies[0]) : null;
-  const held = replies ? countOf(replies[1]) : null;
-  if (added === null || added > 1 || held === null) return false;
-  if (added === 0) {
-    // Noted already (a copy written over in place): its room was counted then.
-    await giveData(store, room);
-    return true;
-  }
-  if (held <= COPIES_PER_PERSON) return true;
-  // One too many: taken out again, its room given back only once that is confirmed.
-  const gone = await redisPipeline([["SREM", key, member]]).then((r) => countOf(repliesFor(r, 1)?.[0]), () => null);
+  const listed = replies ? countOf(replies[1]) : null;
+  const held = replies ? countOf(replies[2]) : null;
+  if (added === null || added > 1 || listed === null || listed > 1 || held === null) return false;
+  // The room is held while the file's entry is there: an entry already there (a copy written over in place) was
+  // counted when it was made.
+  if (listed === 0) await giveData(store, room);
+  if (added === 0 || held <= COPIES_PER_PERSON) return true;
+  // One too many: taken out of both again, its room given back only once the entry's removal is confirmed.
+  const gone = await redisPipeline([["SREM", key, member], ["SREM", list, entry]]).then((r) => countOf(repliesFor(r, 2)?.[1]), () => null);
   if (gone === 1) await giveData(store, room);
   return false;
 }
@@ -374,21 +392,31 @@ export async function stampedCopiesOf(sid: string, email: string): Promise<{ pat
 
 /**
  * Deletes, once their files are in the erasure's hands (lib/person-erasure.ts keeps their paths and deletes them),
- * the records of these copies and takes exactly these members out of the person's note, giving back their room.
- * Answers how many copies were noted. Replies read exactly: DEL at most the records named, SREM at most the members
- * named; any other answer throws UnknownReplyError, and the erasure is not done (pressed again, it finds them again).
+ * the records of these copies, takes exactly these members out of the person's note and their entries off each file's
+ * list (stampedFileKey, one SREM a file, at most COPIES_PER_PERSON), giving back the room of each entry whose removal
+ * is confirmed. Answers how many copies were noted. Replies read exactly: DEL at most the records named, each SREM at
+ * most the members it names; any other answer throws UnknownReplyError, and the erasure is not done (pressed again, it
+ * finds them again; an entry a failed try left on a file's list goes with the file's removal or the store's closing).
  */
 export async function forgetStampedPerson(store: DataStore, email: string, found: { records: string[]; members: string[] }): Promise<number> {
   if (!store.sid || !found.members.length) return 0;
-  const commands: (string | number)[][] = [["SREM", stampedCopiesKey(store.sid, email), ...found.members]];
+  const sid = store.sid;
+  const person = personKey(sid, email);
+  const lists = new Map<string, string[]>();
+  for (const member of found.members) {
+    const fileId = NOTED_COPY.exec(member)?.[3];
+    if (fileId) lists.set(fileId, [...(lists.get(fileId) ?? []), `${person} ${member}`]);
+  }
+  const commands: (string | number)[][] = [["SREM", whoKey(sid, person), ...found.members]];
+  for (const [fileId, entries] of lists) commands.push(["SREM", byFileKey(sid, fileId), ...entries]);
   if (found.records.length) commands.unshift(["DEL", ...found.records]);
   const replies = repliesFor(await redisPipeline(commands), commands.length);
   const counts = replies?.map(countOf);
-  const removed = counts?.[counts.length - 1];
-  if (!counts || counts.some((n) => n === null) || (found.records.length && (counts[0] as number) > found.records.length) || removed === null || removed === undefined || removed > found.members.length) {
-    throw new UnknownReplyError("the deletion of a person's stamped copies' notes");
-  }
-  if (removed > 0) await giveData(store, [{ slot: COPY_NOTE_SLOT, bytes: removed * COPY_NOTE_BYTES }]);
+  // The most each command may answer: the records, the members, then each file's entries.
+  const most = [...(found.records.length ? [found.records.length] : []), found.members.length, ...[...lists.values()].map((e) => e.length)];
+  if (!counts || counts.some((n, i) => n === null || n > most[i])) throw new UnknownReplyError("the deletion of a person's stamped copies' notes");
+  const unlisted = (counts as number[]).slice(counts.length - lists.size).reduce((sum, n) => sum + n, 0);
+  if (unlisted > 0) await giveData(store, [{ slot: COPY_NOTE_SLOT, bytes: unlisted * COPY_NOTE_BYTES }]);
   return found.records.length;
 }
 
@@ -600,6 +628,8 @@ export async function stampedDelivery(
     // copy is already made, and a failure leaves them on the list for the next try. This file's own folder is kept
     // for a later try: emptying it now would delete the copy handed over below.
     await retryStampDrops(RETRY_PER_CALL, copyFolder(file)).catch((error: unknown) => console.error("stamped copies left from before could not be deleted yet; they stay on the list", error));
+    // And so are the notes of removed files' copies not yet all taken out (UNNOTE_QUEUE), paid ahead with each note.
+    await retryUnnotes(RETRY_PER_CALL).catch((error: unknown) => console.error("notes of removed files' copies left from before could not be taken out yet; they stay on the list", error));
     return { kind: "kept", copy };
   } catch (error) {
     console.error("keeping a stamped copy failed; it is sent without being kept", error);
@@ -677,11 +707,13 @@ export async function dropWrittenCopy(file: Pick<ProductFile, "pathname" | "name
 }
 
 /**
- * Deletes every stamped copy made from a file, once the file itself is gone. It never fails the removal that
- * called it (the file is already off the product): a folder the file store could not list whole or empty is put
- * down in DROP_QUEUE and tried again by the next removal or new copy, and the log says so when even that cannot be.
+ * Deletes every stamped copy made from a file, once the file itself is gone, and, given the store, takes them out of
+ * their buyers' notes (unnoteDropped). It never fails the removal that called it (the file is already off the
+ * product): a folder the file store could not list whole or empty is put down in DROP_QUEUE and tried again by the
+ * next removal or new copy, notes not all taken out stay on UNNOTE_QUEUE for the next kept copy, and the log says so when even
+ * that cannot be.
  */
-export async function dropStamped(file: Pick<ProductFile, "pathname" | "name" | "contentType">): Promise<void> {
+export async function dropStamped(file: Pick<ProductFile, "pathname" | "name" | "contentType">, store?: Pick<DataStore, "sid">): Promise<void> {
   if (!isStampable(file)) return;
   await retryStampDrops(RETRY_PER_CALL).catch((error: unknown) => console.error("stamped copies left from before could not be deleted yet; they stay on the list", error));
   const folder = copyFolder(file);
@@ -691,4 +723,115 @@ export async function dropStamped(file: Pick<ProductFile, "pathname" | "name" | 
     if (await noteDrop(folder)) console.error("could not delete stamped copies; put down to be tried again", error);
     else console.error(`could not delete stamped copies in ${folder}, and nothing will try again: the list could not be written`, error);
   }
+  if (store?.sid) await unnoteDropped(store.sid, fileIdOf(file));
+}
+
+/**
+ * Removed files whose copies are not yet all out of their buyers' notes: a set of "<store id> <file id>", each taken
+ * off only once its file's list (stampedFileKey) is read empty, tried again UNNOTE_PAGES_PER_CALL pages at a time by
+ * the next kept copy of any store (retryUnnotes). A store closed meanwhile erased its lists, so its items come off at the
+ * next try.
+ */
+export const UNNOTE_QUEUE = "nl:stamp:unnote";
+const UNNOTE_ITEM = /^(\S+) ([0-9a-f]{24})$/;
+
+/**
+ * Takes up to `pages` pages of UNNOTE_PAGE entries off a removed file's list, each out of its buyer's note in the same
+ * pipeline, and gives back the room of the entries whose removal from the list is confirmed (to the store's data key,
+ * by its id: a give-back only shrinks). True only when the list was read empty. A reply not read exactly throws
+ * UnknownReplyError, with nothing given back for that page: its entries stay to be tried again. Commands a page:
+ * SRANDMEMBER, one SREM a note, one SREM of the list's entries and one TAKE_DATA, paid ahead with each note
+ * (tests/plan-cost-registry.ts UNNOTE_COMMANDS).
+ */
+async function unnoteFile(sid: string, fileId: string, pages: number): Promise<boolean> {
+  const list = byFileKey(sid, fileId);
+  for (let page = 0; page < pages; page += 1) {
+    const read = repliesFor(await redisPipeline([["SRANDMEMBER", list, UNNOTE_PAGE]]), 1);
+    const entries = read ? stringList(read[0]) : null;
+    if (!entries || entries.length > UNNOTE_PAGE) throw new UnknownReplyError("the notes of a removed file's stamped copies");
+    if (!entries.length) return true;
+    const parsed = entries.map((entry) => {
+      const match = FILE_ENTRY.exec(entry);
+      return match && NOTED_COPY.exec(match[2])?.[3] === fileId ? { entry, person: match[1], note: match[2] } : null;
+    });
+    const noted = parsed.flatMap((p) => (p ? [p] : []));
+    const stray = entries.filter((_, i) => !parsed[i]);
+    const commands: (string | number)[][] = noted.map((p) => ["SREM", whoKey(sid, p.person), p.note]);
+    // Only the entries noteCopy writes were counted: anything else on the list is taken off without giving room back.
+    if (noted.length) commands.push(["SREM", list, ...noted.map((p) => p.entry)]);
+    if (stray.length) commands.push(["SREM", list, ...stray]);
+    const counts = repliesFor(await redisPipeline(commands), commands.length)?.map(countOf);
+    const most = [...noted.map(() => 1), ...(noted.length ? [noted.length] : []), ...(stray.length ? [stray.length] : [])];
+    if (!counts || counts.some((n, i) => n === null || n > most[i])) throw new UnknownReplyError("the notes of a removed file's stamped copies taken out");
+    const unlisted = noted.length ? (counts[noted.length] as number) : 0;
+    if (unlisted > 0) await giveData(storeById(sid), [{ slot: COPY_NOTE_SLOT, bytes: unlisted * COPY_NOTE_BYTES }]);
+  }
+  return false;
+}
+
+/**
+ * A store named only by its id, for a give-back of its data room (lib/store-data.ts giveData): a give-back only
+ * shrinks and goes to the room's key, named by the id, so the plan's fields are never read for it.
+ */
+function storeById(sid: string): DataStore {
+  return { sid, subscriptionActive: false, subscriptionId: null, trialEnds: 0, planEndedAt: "" };
+}
+
+/**
+ * Takes a removed file's copies out of their buyers' notes. The file's list is counted first, and only when it holds
+ * anything is the file put down on UNNOTE_QUEUE before it is worked through, so a call cut short is finished by a later
+ * one; it comes off the queue once the list is read empty. Never throws.
+ */
+async function unnoteDropped(sid: string, fileId: string): Promise<void> {
+  if (!isRedisConfigured()) return;
+  const item = `${sid} ${fileId}`;
+  try {
+    const counted = repliesFor(await redisPipeline([["SCARD", byFileKey(sid, fileId)]]), 1);
+    if (counted && countOf(counted[0]) === 0) return;
+    if (!(await putDown(UNNOTE_QUEUE, item))) console.error("could not put a removed file's notes down to be taken out later; taking them out now");
+    if (await unnoteFile(sid, fileId, UNNOTE_PAGES_PER_CALL)) await takeOff(UNNOTE_QUEUE, item);
+  } catch (error) {
+    if (await putDown(UNNOTE_QUEUE, item)) console.error("could not take a removed file's copies out of their buyers' notes yet; put down to be tried again", error);
+    else console.error(`could not take the notes of ${item} out, and nothing will try again: the list could not be written`, error);
+  }
+}
+
+/** Puts an item down on a list to be tried again. False when that could not be confirmed (rule 24: SADD answers 0 or 1). */
+async function putDown(queue: string, item: string): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  try {
+    const replies = repliesFor(await redisPipeline([["SADD", queue, item]]), 1);
+    const added = replies ? countOf(replies[0]) : null;
+    return added === 0 || added === 1;
+  } catch {
+    return false;
+  }
+}
+
+/** Takes an item off a list once its work is confirmed done. Throws when the answer is not 0 or 1. */
+async function takeOff(queue: string, item: string): Promise<void> {
+  const gone = repliesFor(await redisPipeline([["SREM", queue, item]]), 1);
+  const count = gone ? countOf(gone[0]) : null;
+  if (count === null || count > 1) throw new UnknownReplyError("a finished item taken off its list");
+}
+
+/**
+ * Tries again up to `limit` removed files whose notes are not all out (UNNOTE_QUEUE), UNNOTE_PAGES_PER_CALL pages each,
+ * and answers how many were finished. A file leaves the queue only once its list is read empty; an item not in the
+ * shape unnoteDropped writes is taken off. A queue read in any shape but an exact list of text throws
+ * (UnknownReplyError), and nothing is taken out on it.
+ */
+export async function retryUnnotes(limit: number): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const replies = repliesFor(await redisPipeline([["SRANDMEMBER", UNNOTE_QUEUE, limit]]), 1);
+  const items = replies ? stringList(replies[0]) : null;
+  if (!items || items.length > limit) throw new UnknownReplyError("the removed files whose notes are to be taken out");
+  let finished = 0;
+  for (const item of items) {
+    const match = UNNOTE_ITEM.exec(item);
+    if (match && !(await unnoteFile(match[1], match[2], UNNOTE_PAGES_PER_CALL))) continue;
+    await takeOff(UNNOTE_QUEUE, item);
+    finished += 1;
+  }
+  return finished;
 }

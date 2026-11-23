@@ -109,12 +109,14 @@ export const ERASE_SUBMISSIONS: readonly [number, number] = [301, 70_000];
  * COPIES_PER_PERSON (lib/stamp-cost-rules.ts): their note read (SMEMBERS), their paths kept for a repeat (SADD), their
  * records and members deleted (DEL and SREM) and their room given back (one TAKE_DATA, at most 10 commands); then, with
  * the person's other files, their kept paths read and let go (SMEMBERS and SREM) and their deletion records kept
- * (INCRBY, EXPIRE, RPUSH and EXPIRE): 20. Bytes, per copy: its member twice (a record key and a path, 355 bytes at
- * most, COPY_PATH_MOST), its path four times more, its record key and its deletion record (1,200 bytes at most,
- * lib/backup-deletions.ts RECORD_BYTES_MOST), 3,200 counted, so 160,000 for 50 copies. [commands, bytes], held by
- * tests/stamped-copy-erasure.test.ts against COPIES_PER_PERSON and COPY_PATH_MOST.
+ * (INCRBY, EXPIRE, RPUSH and EXPIRE): 20; and (Claude 5 iYwjc's MÉDIO on #5475) their entries taken off each file's
+ * list (lib/pdf-stamp.ts stampedFileKey), one SREM a file, at most one a copy: 20 + 50 = 70. Bytes, per copy: its
+ * member twice (a record key and a path, 355 bytes at most, COPY_PATH_MOST), its path four times more, its record key
+ * and its deletion record (1,200 bytes at most, lib/backup-deletions.ts RECORD_BYTES_MOST), and its file's entry (the
+ * person's 32-byte key, a space and the member) with that list's key (73 bytes), 3,700 counted, so 185,000 for 50
+ * copies. [commands, bytes], held by tests/stamped-copy-erasure.test.ts against COPIES_PER_PERSON and COPY_PATH_MOST.
  */
-export const ERASE_STAMPED: readonly [number, number] = [20, 160_000];
+export const ERASE_STAMPED: readonly [number, number] = [70, 185_000];
 
 /**
  * Commands every erasure sends whatever the store: each module's own, workflows at their cap, a sync log at its length,

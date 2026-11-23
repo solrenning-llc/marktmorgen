@@ -85,7 +85,15 @@ export const COPIES_PER_PERSON = 50;
 export const COPY_PATH_MOST = 300;
 /**
  * What one noted copy takes of the store's data room for as long as it is noted (a slot of its own, never expiring):
- * its member, the copy's record key (54 bytes), a space and a path of at most COPY_PATH_MOST bytes, with the set's
- * own overhead for the member, rounded up.
+ * its member in the buyer's note, the copy's record key (54 bytes), a space and a path of at most COPY_PATH_MOST
+ * bytes, and the same member again on its file's list (lib/pdf-stamp.ts stampedFileKey) after the buyer's one-way key
+ * (32 bytes) and a space, each with its set's own overhead, rounded up.
  */
-export const COPY_NOTE_BYTES = 512;
+export const COPY_NOTE_BYTES = 1_024;
+/**
+ * Removing a file takes its copies out of their buyers' notes (lib/pdf-stamp.ts dropStamped; Claude 5 iYwjc's MÉDIO on
+ * #5475): UNNOTE_PAGE notes at a time, at most UNNOTE_PAGES_PER_CALL pages a call, the rest left on a list for the
+ * next kept copy, which takes UNNOTE_PAGES_PER_CALL pages of it.
+ */
+export const UNNOTE_PAGE = 250;
+export const UNNOTE_PAGES_PER_CALL = 4;

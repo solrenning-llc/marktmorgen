@@ -17,7 +17,7 @@ import * as stamp from "@/lib/pdf-stamp";
 import { erasePerson, erasureScope } from "@/lib/person-erasure";
 import { copyPerson } from "@/lib/person-copy";
 import { PERSON_DATA } from "@/lib/person-data";
-import { COPIES_PER_PERSON, COPY_NOTE_BYTES, COPY_PATH_MOST } from "@/lib/stamp-cost-rules";
+import { COPIES_PER_PERSON, COPY_NOTE_BYTES, COPY_PATH_MOST, UNNOTE_PAGE, UNNOTE_PAGES_PER_CALL } from "@/lib/stamp-cost-rules";
 import { ERASE_STAMPED } from "@/lib/erasure-rules";
 import { RECORD_BYTES_MOST } from "@/lib/backup-deletions";
 import { takeDataCommands } from "@/lib/store-data";
@@ -129,9 +129,12 @@ async function main(): Promise<void> {
 
   part("What the note and its deletion cost stays inside what is counted for them");
   const member = 54 + 1 + COPY_PATH_MOST;
-  is("a note's room covers its member and the set's own overhead", COPY_NOTE_BYTES >= member + 64, true);
-  is("an erasure's bytes cover every copy at its longest", COPIES_PER_PERSON * (2 * member + 4 * COPY_PATH_MOST + 54 + RECORD_BYTES_MOST) <= ERASE_STAMPED[1], true);
-  is("and its commands", 1 + 1 + 2 + takeDataCommands(1) + 2 + 4 <= ERASE_STAMPED[0], true);
+  // A note is in two places: the buyer's note, and its file's list after the buyer's 32-byte key and a space.
+  const entry = 32 + 1 + member;
+  const listKey = stamp.stampedFileKey(shop.sid, book).length;
+  is("a note's room covers its member, its file's entry and both sets' own overhead", COPY_NOTE_BYTES >= member + entry + 2 * 64, true);
+  is("an erasure's bytes cover every copy at its longest, its file's entry and list's key too", COPIES_PER_PERSON * (2 * member + 4 * COPY_PATH_MOST + 54 + RECORD_BYTES_MOST + entry + listKey) <= ERASE_STAMPED[1], true);
+  is("and its commands, one SREM a file's list at most one a copy", 1 + 1 + 2 + takeDataCommands(1) + 2 + 4 + COPIES_PER_PERSON <= ERASE_STAMPED[0], true);
   const sent: string[] = [];
   redis.pipeline = (async (commands: (string | number)[][]) => {
     sent.push(...commands.map((c) => String(c[0])));
@@ -143,7 +146,76 @@ async function main(): Promise<void> {
   } finally {
     redis.pipeline = real as typeof redis.pipeline;
   }
-  is("measured: the note read, its records and members deleted, its room given back", sent.length <= 4 + takeDataCommands(1) && sent.includes("SMEMBERS") && sent.includes("SREM"), true);
+  // Pat's fifty notes name one file, so one list's SREM.
+  is("measured: the note read, its records and members deleted, its file's entries taken off, its room given back", sent.length <= 5 + takeDataCommands(1) && sent.includes("SMEMBERS") && sent.includes("SREM"), true);
+
+  // Claude 5 iYwjc's MÉDIO on #5475 @4f980f9bee: removing or replacing a file deleted its copies but left every buyer's
+  // note of them, for good: each kept its room in the store's data room and one of the buyer's places, and the buyer's
+  // copy of their data still named the deleted file.
+  part("Removing a file takes its copies out of every buyer's note, frees their places and gives their room back");
+  const slot = async () => Number((await redis.pipeline([["HGET", `nl:data:${shop.sid}`, "stamp:who"]]))[0] ?? 0);
+  const sam = { reference: "cs_test_s9A8m7Q6r5T4", email: "sam@example.com", paidAt: Date.UTC(2026, 10, 23) / 1000 };
+  const kim = { reference: "cs_test_k1I2m3Q4r5T6", email: "kim@example.com", paidAt: Date.UTC(2026, 10, 23) / 1000 };
+  const samWho = stamp.stampedCopiesKey(shop.sid, sam.email);
+  const notes = await pdfFile("Notes.pdf", "2026-11-20T12:00:05.000Z");
+  const map = await pdfFile("Map.pdf", "2026-11-20T12:00:06.000Z");
+  const before = await slot();
+  const handed = await Promise.all([stamp.stampedDelivery(notes, sam, shop, meter), stamp.stampedDelivery(map, sam, shop, meter), stamp.stampedDelivery(notes, kim, shop, meter)]);
+  is("control: three copies kept and noted, their room counted", [handed.map((a) => a.kind), Number((await redis.pipeline([["SCARD", samWho]]))[0]), (await slot()) - before], [["kept", "kept", "kept"], 2, 3 * COPY_NOTE_BYTES]);
+  await stamp.dropStamped(notes, shop);
+  const left = await stamp.stampedCopiesOf(shop.sid, sam.email);
+  is("Sam's note keeps only the copy of the file still on sale: one of his places is free again", left.paths.map((p) => p.slice(p.lastIndexOf("/") + 1)), ["Map.pdf"]);
+  is("Kim's note is empty", (await stamp.stampedCopiesOf(shop.sid, kim.email)).members, []);
+  is("the room of the two removed notes is given back", (await slot()) - before, COPY_NOTE_BYTES);
+  is("the file's own list of notes is gone, and nothing waits on the queue", [Number((await redis.pipeline([["EXISTS", stamp.stampedFileKey(shop.sid, notes)]]))[0]), (await redis.pipeline([["SMEMBERS", stamp.UNNOTE_QUEUE]]))[0]], [0, []]);
+  const samCopy = await copyPerson((await erasureScope(shop, sam.email))!);
+  const samListed = samCopy.sections.find((s) => s.module === "lib/pdf-stamp.ts")?.records as { stampedCopyOf: string }[] | undefined;
+  is("Sam's copy of his data no longer names the removed file", samListed?.map((r) => r.stampedCopyOf), ["Map.pdf"]);
+
+  part("Deleting a buyer also takes their copies off each file's list of notes, and gives their room back");
+  is("control: the map's list holds Sam's copy", Number((await redis.pipeline([["SCARD", stamp.stampedFileKey(shop.sid, map)]]))[0]), 1);
+  is("the notes are forgotten", await stamp.forgetStampedPerson(shop, sam.email, left), 1);
+  is("no entry is left on the map's list, and the room is back", [Number((await redis.pipeline([["EXISTS", stamp.stampedFileKey(shop.sid, map)]]))[0]), (await slot()) - before], [0, 0]);
+
+  part("A removed file with more notes than one call takes is finished by the next calls, never reported done early");
+  const big = await pdfFile("Big.pdf", "2026-11-20T12:00:03.000Z");
+  const bigList = stamp.stampedFileKey(shop.sid, big);
+  const bigFolder = stamp.copyFolder(big);
+  const many = UNNOTE_PAGE * UNNOTE_PAGES_PER_CALL + 1;
+  const people = Array.from({ length: many }, (_, i) => `${i.toString(16).padStart(32, "0")}`);
+  const members = people.map((_, i) => `nl:stamp:copy:${i.toString(16).padStart(40, "0")} ${bigFolder}${i.toString(16).padStart(24, "0")}/Big.pdf`);
+  await redis.pipeline([
+    ["SADD", bigList, ...people.map((p, i) => `${p} ${members[i]}`)],
+    ...people.map((p, i) => ["SADD", `nl:stamp:who:${shop.sid}:${p}`, members[i]]),
+    ["HINCRBY", `nl:data:${shop.sid}`, "stamp:who", many * COPY_NOTE_BYTES],
+    ["HINCRBY", `nl:data:${shop.sid}`, "#", many * COPY_NOTE_BYTES],
+  ]);
+  const roomBefore = await slot();
+  await stamp.dropStamped(big, shop);
+  is("one call takes out at most its pages, and puts the rest down to finish", [Number((await redis.pipeline([["SCARD", bigList]]))[0]), (await redis.pipeline([["SMEMBERS", stamp.UNNOTE_QUEUE]]))[0]], [1, [`${shop.sid} ${bigFolder.split("/")[3]}`]]);
+  is("the room of every note taken out is back", roomBefore - (await slot()), (many - 1) * COPY_NOTE_BYTES);
+  const next = await stamp.stampedDelivery(guide, kim, shop, meter);
+  is("control: the next kept copy is kept", next.kind, "kept");
+  is("and it finishes the rest: the list is gone, the queue empty, every note out", [Number((await redis.pipeline([["EXISTS", bigList]]))[0]), (await redis.pipeline([["SMEMBERS", stamp.UNNOTE_QUEUE]]))[0], Number((await redis.pipeline([["SCARD", `nl:stamp:who:${shop.sid}:${people[many - 1]}`]]))[0])], [0, [], 0]);
+  is("and the last note's room is back (Kim's new note counted instead)", roomBefore + COPY_NOTE_BYTES - (await slot()), many * COPY_NOTE_BYTES);
+
+  part("An answer about the file's list that is not read exactly: the notes stay, the work stays on the queue, nothing is given back early");
+  const odd = await pdfFile("Odd.pdf", "2026-11-20T12:00:04.000Z");
+  const oddCopy = await stamp.stampedDelivery(odd, kim, shop, meter);
+  is("control: kept and noted", [oddCopy.kind, Number((await redis.pipeline([["SCARD", stamp.stampedFileKey(shop.sid, odd)]]))[0])], ["kept", 1]);
+  const oddRoom = await slot();
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands.some((c) => c[0] === "SREM" && c[1] === stamp.stampedFileKey(shop.sid, odd)) ? commands.map(() => "OK") : real(commands)) as typeof redis.pipeline;
+  try {
+    await stamp.dropStamped(odd, shop);
+  } finally {
+    redis.pipeline = real as typeof redis.pipeline;
+  }
+  is("the room is not given back on an unknown answer", await slot(), oddRoom);
+  is("the file stays on the queue to be finished", ((await redis.pipeline([["SMEMBERS", stamp.UNNOTE_QUEUE]]))[0] as string[]).length, 1);
+  const later = await stamp.stampedDelivery(map, kim, shop, meter);
+  is("control: the next copy is kept (its own note counted)", later.kind, "kept");
+  is("and it finishes the removed file's notes", [(await redis.pipeline([["SMEMBERS", stamp.UNNOTE_QUEUE]]))[0], Number((await redis.pipeline([["EXISTS", stamp.stampedFileKey(shop.sid, odd)]]))[0]), oddRoom + COPY_NOTE_BYTES - (await slot())], [[], 0, COPY_NOTE_BYTES]);
   done();
 }
 

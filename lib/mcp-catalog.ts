@@ -94,7 +94,7 @@ const DRAFTS: readonly ToolDraft[] = [
   },
   {
     name: "get_emails",
-    description: "The store's list (how many people, how many agreed to hear) and what each email and each sequence did: how many it went to, and the sales and revenue its links brought, in the store's currency, with sales_in_another_currency counted apart and never added to revenue. A sequence's started, emails_sent and reached_the_end are null, with counts_unavailable true, when they could not be read just now; null is not zero.",
+    description: "The store's list (how many people, how many agreed to hear) and what each email and each sequence did: how many it went to, and the sales and revenue its links brought, in the store's currency, with sales_in_another_currency counted apart and never added to revenue. Emails are the newest 30 sent or scheduled; emails_more is true when the store has older ones that are not shown, so they are never taken for none. A sequence's started, emails_sent and reached_the_end are null, with counts_unavailable true, when they could not be read just now; null is not zero.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },

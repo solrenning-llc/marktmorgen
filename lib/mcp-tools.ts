@@ -400,7 +400,7 @@ export async function emailsTool(store: Store, meter: { charge: Charge; hold: Ho
   };
   const [measured, flowBytes, revenueBytes, paypal] = await Promise.all([
     // An email whose record expired is gone, left out (as main's listBroadcasts read it), not a refused reading.
-    measureBroadcastHeads(store.listId, EMAILS_BROADCASTS, paySizes, { expired: "skip" }).catch(() => null),
+    measureBroadcastHeads(store.listId, EMAILS_BROADCASTS, paySizes, { expired: "skip", more: true }).catch(() => null),
     flowsBytes(store.listId),
     keptMailRevenueBytes(store),
     paypalCounts(store.statsId),
@@ -463,6 +463,9 @@ export async function emailsTool(store: Store, meter: { charge: Charge; hold: Ho
   return {
     currency: store.currency,
     list: { people: counts.total, agreed_to_hear: counts.agreed, left: counts.left, can_be_emailed: counts.mailable },
+    // The newest EMAILS_BROADCASTS only: emails_more says older ones exist and are not shown, so they are never taken
+    // for none (issue #4062).
+    emails_more: sizes.more === true,
     emails: broadcasts.map((b) => {
       const money = broadcastMoney(revenue, b.id);
       return {

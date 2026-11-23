@@ -1,10 +1,11 @@
 /**
  * Two daily sweeps read their Redis answers exactly (CX-123 rule 24).
  *
- * 1. The quiet-sales pass (app/api/cron/quiet): where today's walk over the
- *    stores goes on from is read exactly. Nil is the start; a whole number is
- *    the place; anything else is unknown, and the pass reads nothing on it
- *    and leaves the place as it was. A store that cannot be read is tried
+ * 1. The quiet-sales pass (app/api/cron/quiet): the stores today's walk has
+ *    reached are read exactly. A list of folders is what it says (empty at the
+ *    start); anything else is unknown, and the pass reads nothing on it and
+ *    writes nothing. A store first visited later in the day is reached that day
+ *    wherever it sorts (issue #4005). A store that cannot be read is tried
  *    again at once; if it still cannot be, it is counted as failed and said in
  *    the log, never passed over as "no store", and the stores after it are
  *    still looked at in the same pass. The next day's walk tries it again.
@@ -16,9 +17,6 @@
  *    is the same. A list of pictures answered in another shape is unknown,
  *    never "none to sweep", and the courses job says so in its log and
  *    answer rather than "0 swept".
- *
- * The quiet pass's place past the end of the day's list is unknown too: the
- * list only grows within a day, so this pass never wrote it.
  *
  * Synthetic data only; the healthy and confirmed answers work as before.
  */
@@ -73,38 +71,32 @@ async function quietPass(): Promise<void> {
     stores.push({ email, folder, ownerKey });
   }
   stores.sort((a, b) => (a.folder < b.folder ? -1 : 1));
-  const at = `nl:quiet:at:${new Date().toISOString().slice(0, 10)}`;
+  const doneKey = `nl:quiet:done:${new Date().toISOString().slice(0, 10)}`;
   const run = async () => {
     seen = [];
     const response = await quiet({ headers: new Headers(), nextUrl: new URL("https://marktmorgen.com/api/cron/quiet") } as unknown as Parameters<typeof quiet>[0]).catch(() => null);
-    // A store looked at is one whose record was read.
+    // A store looked at is one whose record was read; one walked is kept in the day's set.
     const looked = stores.map((s, i) => (seen.some((c) => c[0] === "GET" && c[1] === s.ownerKey) ? i : -1)).filter((i) => i >= 0);
-    const [place] = await pipeline([["GET", at]]);
+    const [members] = await pipeline([["SMEMBERS", doneKey]]);
+    const walked = stores.map((s, i) => ((members as string[]).includes(s.folder) ? i : -1)).filter((i) => i >= 0);
     const body = response ? ((await response.json()) as { failed?: number }) : {};
-    return { status: response?.status ?? -1, looked, place, failed: body.failed ?? null };
+    return { status: response?.status ?? -1, looked, walked, failed: body.failed ?? null };
   };
 
-  part("Quiet pass: where the walk goes on from, read exactly");
-  is("nothing kept yet (nil): every store looked at, the place kept at the end", await run(), { status: 200, looked: [0, 1, 2], place: "3", failed: 0 });
-  await pipeline([["SET", at, "1"]]);
-  is("a place kept (1): goes on from there", await run(), { status: 200, looked: [1, 2], place: "3", failed: 0 });
-  for (const [label, reply] of [...MALFORMED, ["not a number", () => ["abc"]], ["1e9", () => ["1e9"]], ["-1", () => ["-1"]], ["1.5", () => ["1.5"]]] as [string, () => unknown[]][]) {
-    await pipeline([["SET", at, "1"]]);
-    inject = (commands) => (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === at ? Promise.resolve(reply()) : null);
-    is(`the place answered ${label}: nothing read, the place left as it was`, await run(), { status: 503, looked: [], place: "1", failed: null });
+  part("Quiet pass: the stores today's walk has reached, read exactly");
+  is("nothing kept yet: every store looked at, each kept as reached", await run(), { status: 200, looked: [0, 1, 2], walked: [0, 1, 2], failed: 0 });
+  await pipeline([["DEL", doneKey], ["SADD", doneKey, stores[0].folder]]);
+  is("one kept as reached: the walk goes on with the others", await run(), { status: 200, looked: [1, 2], walked: [0, 1, 2], failed: 0 });
+  for (const [label, reply] of [...MALFORMED, ["a number", () => [7]], ["a list holding a number", () => [[stores[0].folder, 7]]]] as [string, () => unknown[]][]) {
+    await pipeline([["DEL", doneKey], ["SADD", doneKey, stores[0].folder]]);
+    inject = (commands) => (commands.length === 1 && commands[0][0] === "SMEMBERS" && commands[0][1] === doneKey ? Promise.resolve(reply()) : null);
+    is(`the stores reached answered ${label}: nothing read, nothing written`, await run(), { status: 503, looked: [], walked: [0], failed: null });
     inject = null;
   }
 
-  part("Quiet pass: a place past the day's list was not written by this pass");
-  // Within one UTC day the list only grows (SADD only, kept 400 days), so a place past its end is unknown (V-2902).
-  is("the place at the end (3 of 3): the day's walk is done, nothing read", await (async () => {
-    await pipeline([["SET", at, "3"]]);
-    return run();
-  })(), { status: 200, looked: [], place: "3", failed: 0 });
-  for (const past of ["4", "999999999"]) {
-    await pipeline([["SET", at, past]]);
-    is(`the place ${past} with 3 stores: nothing read, the place left as it was`, await run(), { status: 503, looked: [], place: past, failed: null });
-  }
+  part("Quiet pass: a day whose walk is done reads nothing");
+  await pipeline([["SADD", doneKey, stores[1].folder, stores[2].folder]]);
+  is("every store kept as reached: nothing read", await run(), { status: 200, looked: [], walked: [0, 1, 2], failed: 0 });
 
   part("Quiet pass: a store that cannot be read is never passed over");
   const middle = stores[1].ownerKey;
@@ -116,27 +108,27 @@ async function quietPass(): Promise<void> {
     }
     return null;
   };
-  await pipeline([["DEL", at]]);
+  await pipeline([["DEL", doneKey]]);
   failures = 1;
-  is("it fails once: tried again at once, and every store looked at", await run(), { status: 200, looked: [0, 1, 2], place: "3", failed: 0 });
-  await pipeline([["DEL", at]]);
+  is("it fails once: tried again at once, and every store looked at", await run(), { status: 200, looked: [0, 1, 2], walked: [0, 1, 2], failed: 0 });
+  await pipeline([["DEL", doneKey]]);
   failures = Infinity;
   const errors: string[] = [];
   const log = console.error;
   console.error = (...args: unknown[]) => { errors.push(args.map(String).join(" ")); };
   const failing = await run().finally(() => { console.error = log; });
-  is("it cannot be read at all: tried twice, counted as failed, the stores after it still looked at", failing, { status: 200, looked: [0, 2], place: "3", failed: 1 });
+  is("it cannot be read at all: tried twice, counted as failed, the stores after it still looked at", failing, { status: 200, looked: [0, 2], walked: [0, 1, 2], failed: 1 });
   is("and it is said in the log, by its folder", errors.some((e) => e.includes(stores[1].folder)), true);
   failures = 0;
-  await pipeline([["DEL", at]]);
-  is("the next day's walk reads it again", await run(), { status: 200, looked: [0, 1, 2], place: "3", failed: 0 });
+  await pipeline([["DEL", doneKey]]);
+  is("the next day's walk reads it again", await run(), { status: 200, looked: [0, 1, 2], walked: [0, 1, 2], failed: 0 });
   inject = null;
 
   // Issue #4005 (Codex U): a store first visited later in the day can sort anywhere in the day's list, before the
   // stores already walked too; it is still looked at that day, and the stores already looked at are not read again.
   part("Quiet pass: a store visited for the first time later in the day is looked at that day");
   const folders = `nl:traffic:folders:${month}`;
-  await pipeline([["DEL", at, `nl:quiet:done:${new Date().toISOString().slice(0, 10)}`, folders], ["SADD", folders, stores[1].folder, stores[2].folder]]);
+  await pipeline([["DEL", doneKey, folders], ["SADD", folders, stores[1].folder, stores[2].folder]]);
   is("the first run of the day looks at the two stores there", (await run()).looked, [1, 2]);
   await pipeline([["SADD", folders, stores[0].folder]]);
   is("a store added before them is looked at by the next run, and only it", (await run()).looked, [0]);

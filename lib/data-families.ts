@@ -93,7 +93,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:pm:c:", "nl:pm:day:", "nl:pm:done:", "nl:pm:r:", "nl:pm:t:",
   "nl:pod:by:*", "nl:pod:n:", "nl:pod:ok:", "nl:podnote:walk", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:pace:", "nl:pp:press:", "nl:pp:settle:after", "nl:pp:stores", "nl:pp:unk:month:", "nl:ppsell:o:",
   "nl:ppsell:canceled:", "nl:ppsell:handover:", "nl:ppsell:own:", "nl:ppsell:paid:", "nl:ppsell:pending:", "nl:ppsell:refunded:", "nl:ppsell:reversed:", "nl:ppsell:sales:", "nl:ppsell:tell",
-  "nl:ppsell:tell:", "nl:ppsell:watch:", "nl:pre:", "nl:pre:give:", "nl:pre:jobs", "nl:pre:pi:", "nl:pwyw:", "nl:quiet:at:",
+  "nl:ppsell:tell:", "nl:ppsell:watch:", "nl:pre:", "nl:pre:give:", "nl:pre:jobs", "nl:pre:pi:", "nl:pwyw:", "nl:quiet:done:",
   "nl:quiet:lock", "nl:quiet:seen:", "nl:quiet:sent:", "nl:quiz:usage:", "nl:read:once:", "nl:recent:", "nl:recent:feed:",
   "nl:recount:", "nl:recount:ids", "nl:recount:lock", "nl:recount:state", "nl:recount:sum",
   "nl:recover:asks", "nl:recover:asks:s:", "nl:recover:carts:", "nl:recover:link:", "nl:recover:once:", "nl:recover:sent:", "nl:recover:tries:", "nl:ref:all", "nl:ref:by:",
@@ -437,7 +437,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:product:about:": E, "nl:product:landing:": E, "nl:product:note:": E, "nl:product:page:": E, "nl:product:pages:": E, "nl:product:pics:": E,
   "nl:pwyw:": E,
   // ---------------------------------------------------------------- q-s
-  "nl:quiet:at:": C, "nl:quiet:lock": C, "nl:quiet:seen:": Cr(2), "nl:quiet:sent:": Cr(30),
+  "nl:quiet:done:": C, "nl:quiet:lock": C, "nl:quiet:seen:": Cr(2), "nl:quiet:sent:": Cr(30),
   "nl:quiz:usage:": E,
   // A page's reading token used (lib/page-read.ts, 639 [GL7](25)): gone with the token, two hours after its page was drawn.
   "nl:read:once:": X(1),

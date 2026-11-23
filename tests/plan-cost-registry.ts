@@ -2855,6 +2855,8 @@ export const COST_LINES: CostLine[] = [
       // The studio's "View as a member" reads them the same way, paid in studio requests before it reads.
       { file: "app/studio/community/page.tsx", names: ["unlocksOf(store, config, (units) => countStudio(store, null, units)"] },
       { file: "lib/traffic.ts", names: ["countRequest", "takePublicRequest", "requestsKey"] },
+      // A draft's private preview: each opening is counted as one, before the link is read (754 [STN1], 9 November 2026).
+      { file: "app/[handle]/preview/[code]/page.tsx", names: ["isResting(store)"] },
       { file: "lib/metered-limits.ts", names: ["withinStore"] },
       // A sign-up credited to an affiliate takes one of these before its lead is written (18 October 2026).
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },

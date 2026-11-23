@@ -607,6 +607,21 @@
       ]
     },
     {
+      "source": "app/[handle]/preview/[code]/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/preview/[code]",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        },
+        {
+          "name": "code",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/renew/[product]/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/renew/[product]",
@@ -1551,6 +1566,7 @@
     "components/discount-impact.tsx",
     "components/dispute-purchase-review.tsx",
     "components/domain-editor.tsx",
+    "components/draft-preview-link.tsx",
     "components/dunning-editor.tsx",
     "components/email-code-form.tsx",
     "components/email-field.tsx",
@@ -2348,6 +2364,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 161
+    "pageTemplates": 162
   }
 }

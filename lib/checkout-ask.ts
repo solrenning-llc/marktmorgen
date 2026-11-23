@@ -221,10 +221,16 @@ async function askMembersOf(statsId: string | null, rawEmail: string): Promise<s
   if (!statsId || !email || !isRedisConfigured()) return [];
   const members = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", askIndexKey(statsId, email), "-inf", "+inf"]]), 1)?.[0]);
   if (members === null) throw new UnknownReplyError("a store's checkout reminder asks");
-  return [...new Set(members)].filter((member) => {
+  // Every row of the person's own index is read whole, as ASK_FORGET does before it removes any (Codex
+  // L-20261120-1005): a row that cannot be read, or that names another person or store, makes the copy unknown,
+  // never shorter, so a copy is said complete only when it holds every ask this index keeps for them.
+  const own: string[] = [];
+  for (const member of new Set(members)) {
     const ask = parseAsk(member);
-    return ask !== null && ask.statsId === statsId && normaliseEmail(ask.email) === email;
-  });
+    if (!ask || ask.statsId !== statsId || normaliseEmail(ask.email) !== email) throw new UnknownReplyError("a store's checkout reminder asks");
+    own.push(member);
+  }
+  return own;
 }
 
 /** Keeps an ask for a reminder. Says what happened; never throws at the buyer. */

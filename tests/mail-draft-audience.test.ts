@@ -6,7 +6,8 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 async function main() {
   redis.clear();
-  const store = { listId: "draft-audience", catalog: { items: [{ id: "included" }, { id: "excluded" }] } } as unknown as Store;
+  redis.run(["SET", "nl:store:id:" + "dd".repeat(16), "drafts-owner@example.test"]); // a live store with an id (#5010 row 111)
+  const store = { listId: "draft-audience", email: "drafts-owner@example.test", sid: "dd".repeat(16), extra: false, catalog: { items: [{ id: "included" }, { id: "excluded" }] } } as unknown as Store;
   const key = "nl:mail:drafts:" + store.listId;
   const content = { subject: "Subject", body: "Content", productId: "included" };
   const filters = [null, { minSpent: 2550, channel: "newsletter", quietDays: 30 }, { minSpent: 100000000, channel: "", quietDays: 365 }];
@@ -52,7 +53,7 @@ async function main() {
   const original = redis.pipeline;
   let writes = 0;
   redis.pipeline = async commands => {
-    writes += commands.filter(c => c[0] === "HSET" || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:draft-set-held:"))).length;
+    writes += commands.filter(c => c[0] === "HSET" || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:draft-set-live:"))).length;
     if (commands.some(c => c[0] === "HGET")) return [];
     return original.call(redis, commands);
   };

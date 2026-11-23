@@ -1997,7 +1997,10 @@ export async function importTracesOf(store: Store, email: string, now = Date.now
         continue;
       }
       const [row, column, problem, value] = line as [number, string, string, string];
-      if (names([value])) notBroughtIn.push({ row, column, problem, value });
+      // The cell's text only when it is their address and nothing else (#5285 row #5070): a cell that names them among
+      // other text ("nina@example.com, otto@example.com", a product or a note) may hold another person's address or
+      // data, which their copy never carries (GDPR art. 15(4)); the line still says the row named them.
+      if (names([value])) notBroughtIn.push({ row, column, problem, value: value.trim().normalize("NFC").toLowerCase() === subject.toLowerCase() ? value : "" });
     }
     const rowsWaiting: string[][] = [];
     let mentionsWithoutOwnership = false;

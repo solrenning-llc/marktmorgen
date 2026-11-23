@@ -91,7 +91,7 @@ async function main(): Promise<void> {
   // Addresses that only contain theirs (Codex G on #4321): a longer domain, and a longer local part.
   const LONGER = `${PERSON}.au`, PREFIXED = `x${PERSON}`;
   redis.run(["RPUSH", `nl:import:${importId}:rows`, JSON.stringify([["2", "Nina@Example.com", "Nina", "prod1"], ["3", OTHER, "Otto", "prod1"], ["7", LONGER, "Nia", "prod1"], ["8", PREFIXED, "Xenia", "prod1"]])]);
-  redis.run(["RPUSH", `nl:import:${importId}:errors`, JSON.stringify([4, "email", "Not a product here", PERSON]), JSON.stringify([5, "email", "Not a product here", OTHER]), JSON.stringify([9, "email", "Not a product here", LONGER])]);
+  redis.run(["RPUSH", `nl:import:${importId}:errors`, JSON.stringify([4, "email", "Not a product here", PERSON]), JSON.stringify([5, "email", "Not a product here", OTHER]), JSON.stringify([9, "email", "Not a product here", LONGER]), JSON.stringify([11, "email", "Not an email address", `${PERSON}, ${OTHER}`])]);
   redis.run(["HSET", `nl:import:${importId}:seen`, `p:${PERSON}|prod1`, "2", `p:${OTHER}|prod1`, "3", `p:${PERSON}.au|prod1`, "6"]);
   redis.run(["SADD", `nl:import:${importId}:mail`, PERSON, OTHER]);
   // A second import whose only email waiting is to a longer address than theirs: nothing of it is about them.
@@ -118,7 +118,12 @@ async function main(): Promise<void> {
   ]);
   const imported = section("lib/imports.ts").find((r) => r.import === "buyers.csv") as Record<string, unknown> | undefined;
   is("the imported file's row waiting that names them, and only theirs", imported?.rowsWaiting, [["2", "Nina@Example.com", "Nina", "prod1"]]);
-  is("the row not brought in that names them", imported?.notBroughtIn, [{ row: 4, column: "email", problem: "Not a product here", value: PERSON }]);
+  // #5285 row #5070: a report cell that names them among other text (here, two addresses in one email cell) is theirs
+  // to know about, but its text is not: the line comes without the cell, and the copy says so.
+  is("the rows not brought in that name them; a cell with more than their address comes without its text", imported?.notBroughtIn, [
+    { row: 4, column: "email", problem: "Not a product here", value: PERSON },
+    { row: 11, column: "email", problem: "Not an email address", value: "" },
+  ]);
   is("the note of which row they were seen on, not a longer address that starts with theirs", imported?.rowsSeen, [{ key: `${PERSON}|prod1`, row: "2" }]);
   is("and that an email to them from the import waits", imported?.toBeEmailed, true);
   const hooked = section("lib/webhooks.ts");

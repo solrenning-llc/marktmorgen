@@ -9,6 +9,7 @@
  *
  * Synthetic run records; Redis is lib/redis-memory.ts.
  */
+import { MAX_WAIT_DAYS_PER_STEP } from "@/lib/flow-limits";
 import { SWITCHED_OFF_FIRST_LOOK_SECONDS, nextTry } from "@/lib/flow-retry";
 import { countWaits, openRuns } from "@/lib/flow-runs";
 import { store as redis } from "./redis-stub";
@@ -27,6 +28,10 @@ async function main(): Promise<void> {
   const later = nextTry("switched_off", 4, now, known(now - 3 * DAY, now - DAY - 60));
   is("control: past its early look, the looks left share the step's own days, counted from since, as before", later, nextTry("switched_off", 4, now, known(now - 3 * DAY)));
 
+  // Claude 1's LEVE 1 and Claude 2 upbeat's LEVE on #5347: the early look never goes past the step's own days.
+  const lateSince = now - Math.round((MAX_WAIT_DAYS_PER_STEP - 0.5) * DAY);
+  is("a step half a day from the end of its days, first looked at switched off now: looked at by its end, not a day on", nextTry("switched_off", 1, now, known(lateSince, now)) <= lateSince + MAX_WAIT_DAYS_PER_STEP * DAY, true);
+
   part("countWaits: the run's record keeps when this step was first looked at switched off");
   redis.clear();
   const email = "off-look@example.com";
@@ -39,6 +44,14 @@ async function main(): Promise<void> {
   is("the next look keeps both", [second?.since, (second as { offSince?: number } | null)?.offSince], [now - 2 * DAY, now]);
   const next = (await countWaits(FLOW, [email], 1, now + 2 * DAY, true)).get(email);
   is("a later step's first switched-off look starts its own", (next as { offSince?: number } | null)?.offSince, now + 2 * DAY);
+  // Claude 1's NIT on #5347: switched off, back on (a whole wait of the same step counted), then off again: the second
+  // switch-off gets its own early look, from its own first look.
+  const again = "off-again@example.com";
+  await openRuns(FLOW, [again], now);
+  await countWaits(FLOW, [again], 0, now, true);
+  await countWaits(FLOW, [again], 0, now + DAY);
+  const offAgain = (await countWaits(FLOW, [again], 0, now + 3 * DAY, true)).get(again);
+  is("a second switch-off on the same step, after a whole wait, starts its own clock", (offAgain as { offSince?: number } | null)?.offSince, now + 3 * DAY);
   done();
 }
 

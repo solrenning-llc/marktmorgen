@@ -205,6 +205,12 @@ redis.call("SET", KEYS[1], held .. add, "KEEPTTL")
 return 1`;
 
 /**
+ * VOICE_FORGET as Upstash bills it, an upper bound: the EVAL and the 3 redis.call in its text (GET, then DEL or SET).
+ * It replaced one DEL, so a review's deletion or rewrite pays 3 more (tests/voice-review-route-commands.test.ts).
+ */
+export const VOICE_FORGET_COMMANDS = 4;
+
+/**
  * The summary written only while the reading's lock is still its own, and the lock let go with it, in one step (a
  * person's erasure deletes the lock): KEYS[1] the lock, KEYS[2] the summary; ARGV[1] the token, ARGV[2] the summary,
  * ARGV[3] its seconds, ARGV[4..] the marks of the review words it quotes (voiceMark). A lock still the reading's but

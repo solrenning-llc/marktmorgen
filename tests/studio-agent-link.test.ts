@@ -9,15 +9,17 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ApiKeyEditor } from "@/components/api-key-editor";
+import type { ShownKey } from "@/lib/api-key-rules";
 import { HELP_SECTIONS } from "@/lib/help-content";
 import { done, is, part } from "./check";
 
 async function main(): Promise<void> {
   part("The API keys card links to the proposals page");
-  for (const keys of [[], null]) {
+  const variants: (ShownKey[] | "unread")[] = [[], "unread"];
+  for (const keys of variants) {
     const html = renderToStaticMarkup(createElement(ApiKeyEditor, { keys }));
     const link = /<a[^>]*href="\/studio\/agent"[^>]*>([^<]*)<\/a>/.exec(html);
-    is(`${keys === null ? "keys unread" : "no keys yet"}: a link to /studio/agent`, link !== null, true);
+    is(`${keys === "unread" ? "keys unread" : "no keys yet"}: a link to /studio/agent`, link !== null, true);
     is("its text names the page (WCAG 2.4.9)", link?.[1].trim(), "What the AI proposes");
   }
 

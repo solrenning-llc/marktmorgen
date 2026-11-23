@@ -118,8 +118,10 @@ export const PIPELINE_ACCESS_GIVE_BACK_COMMANDS = takeDataCommands(1);
 export const PIPELINE_ACCESS_GIVE_BACK_BYTES = Buffer.byteLength(TAKE_DATA) + 1_024;
 
 /**
- * Sets a teammate's restrictions; none deletes their field. Room is taken (or given back) first. What was there is
- * read exactly; an unknown reply throws before any room is taken or anything is written.
+ * Sets a teammate's restrictions; none deletes their field. Room a larger field needs is taken first; room a smaller
+ * field frees is given back once the write is confirmed, and room taken for a write known not to have landed is given
+ * back before it is refused. What was there is read exactly; an unknown reply throws before any room is taken or
+ * anything is written.
  */
 export async function writePipelineAccess(statsId: string, email: string, map: AccessMap, room: DataStore, teamLease?: Held): Promise<AccessMap> {
   const who = normaliseEmail(email);
@@ -143,18 +145,20 @@ export async function writePipelineAccess(statsId: string, email: string, map: A
       held = null;
     }
     // false: the lease was not the route's any more, so the script wrote nothing, for certain (applyIfHeld). The room
-    // this write took goes back before it is refused (Claude 3's LEVE on #5111); only an unknown answer keeps it, below.
+    // this write took goes back before it is refused (Claude 3's LEVE on #5111), and the creator is told it was not
+    // saved, never "could not confirm" (Claude 5 ichw on #5111); only an unknown answer keeps the room, below.
     if (held === false) {
       if (grown > 0) await giveData(room, [{ slot: ACCESS_SLOT, bytes: grown }]);
-      throw new PipelineAccessWriteUnconfirmed();
+      throw new PipelineAccessWriteUnconfirmed(true);
     }
     written = held ? 1 : null;
   } else {
     written = oneAnswer(await redisPipeline([value ? ["HSET", accessKey(statsId), who, value] : ["HDEL", accessKey(statsId), who]]));
   }
   // Saved only on an exact HSET/HDEL reply, or the shared script's confirmed fenced write.
-  // A lost lease or an unknown answer never reports the restriction saved (Codex D, #2036).
-  // Keep any room already reserved, as for every unconfirmed write.
+  // An unknown answer never reports the restriction saved (Codex D, #2036), and keeps any room
+  // already reserved, as for every unconfirmed write: the write may have landed. A lost lease
+  // was answered above.
   if (written === null) throw new PipelineAccessWriteUnconfirmed();
   if (grown < 0) await giveData(room, [{ slot: ACCESS_SLOT, bytes: -grown }]);
   return clean;
@@ -162,8 +166,11 @@ export async function writePipelineAccess(statsId: string, email: string, map: A
 
 /** A restriction whose write did not answer as written: nothing may be taken as saved. */
 export class PipelineAccessWriteUnconfirmed extends Error {
-  constructor() {
-    super("We could not confirm this person's access was saved. Reload the page to see what it is now, then choose again if it is not what you chose.");
+  /** `notSaved`: the write is known not to have landed (the team lease was lost), so the creator is told so. */
+  constructor(readonly notSaved = false) {
+    super(notSaved
+      ? "This person's access was not saved. Reload the page to see your team now, then choose again."
+      : "We could not confirm this person's access was saved. Reload the page to see what it is now, then choose again if it is not what you chose.");
   }
 }
 

@@ -270,6 +270,8 @@ async function main() {
     // Changed (rule 23): the page says how many reads a day and that canceling keeps the rest (review 1).
     // Changed (rule 23, review 2): one counter, read only below its reserve.
     is("the page says what reading them counts", shown.includes(`only while fewer than ${PLAN_INVOICES_PER_DAY} of them have been used`) && shown.includes("canceling your plan always keeps the rest"), true);
+    // Claude 5 icEJ on #5268: beside the essential requests, a form's answers as a file takes studio requests by its size.
+    is("the page says a form's answers file takes studio requests by its size", [none, shown].every((page) => page.includes("Downloading a form&#x27;s answers as a file also takes your studio&#x27;s monthly requests by its size")), true);
 
     // Changed (rule 23, review 1): invoices may use at most PLAN_INVOICES_PER_DAY of the essential requests, never all of them,
     // so canceling the plan is never shut out by reading invoices.

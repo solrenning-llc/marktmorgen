@@ -156,6 +156,26 @@ async function main(): Promise<void> {
     is("it says how many the file needs and how many are left, never that the figure is used", [/^This download needs [0-9,]+ of your studio requests this month, and only 3 are left\./.test(short.text), /are used/.test(short.text)], [true, false]);
   }
 
+  part("A file longer than what was held for its read: counted past the figure, never refused after its answers were read");
+  {
+    redis.clear();
+    const { store, session } = await storeWith("fx-past@example.com", "fxpastform");
+    // Each < is kept as one byte and answered in six, so the read held at its widest covers it, and the file comes on top.
+    await answers(store, 100, MAX_LONG_ANSWER, "<");
+    const probe = await exportOf(store, session);
+    is("(setup) the file takes more than its read was held at", probe.status === 200 && probe.taken > 1, true);
+    redis.clear();
+    const again = await storeWith("fx-past2@example.com", "fxpastformtwo");
+    await answers(again.store, 100, MAX_LONG_ANSWER, "<");
+    // Room for the read held at its widest (16 units here), and not for the file's two more.
+    const left = probe.taken - 2;
+    await forceAllowance(again.store, "studio", STORE_ALLOWANCES.creator.studio - left);
+    const past = await exportOf(again.store, again.session);
+    console.log(`left ${left}; answered ${past.status}; taken ${past.taken}`);
+    is("it answers with the whole file", [past.status, past.text.split("\r\n").length - 2], [200, 100]);
+    is("what it read and sent is counted, past the figure", past.taken, probe.taken);
+  }
+
   part("An export whose size of the answers comes back in a shape Redis does not give");
   {
     redis.clear();

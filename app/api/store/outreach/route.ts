@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
       const refused = await withinServiceWhy("outreach-find", who, FINDS_PER_MINUTE, 60, store);
       if (refused) return serviceRefusedJson(refused, "slow");
       const read = await readStoreSite(store, text(body.site, 300));
-      if (!read.ok) return fail(read.reason, read.reason === "unavailable" ? 503 : 400);
+      if (!read.ok) return fail(read.reason, read.reason === "unavailable" ? 503 : read.reason === "timeout" ? 504 : 400);
       return Response.json({ ok: true, site: read.site });
     }
     if (action === "draft") {
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
         about: text(body.about, 500),
         notes: text(body.notes, MAX_AI_NOTES + 100),
       });
-      if (!done.ok) return fail(done.reason, done.reason === "unavailable" ? 503 : done.reason === "failed" ? 502 : 400);
+      if (!done.ok) return fail(done.reason, done.reason === "unavailable" ? 503 : done.reason === "failed" ? 502 : done.reason === "timeout" ? 504 : 400);
       return Response.json({ ok: true, pitch: done.pitch, left: done.left, replaced: done.replaced });
     }
     if (action === "edit") {

@@ -82,7 +82,9 @@ export function importRowsFor(store: PlanFields & { tier: Tier }, nowSeconds = D
  * bytes it moves (stored as it arrives, read back by the step that applies
  * it, written where it lands).
  */
-export const IMPORT_WORST_COMMANDS_PER_ROW = 6;
+// A product row's long description is written fenced by the store's erasure since 20 November 2026 (lib/product-about-live.ts,
+// ABOUT_FENCE_EXTRA_COMMANDS: an EVAL with HGET, EXISTS and SET inside, three more than the plain SET): priced on every row.
+export const IMPORT_WORST_COMMANDS_PER_ROW = 9;
 /** The fewest rows an upload counts as, so the requests an allowance can start are bounded by it. */
 export const IMPORT_MIN_ROWS_PER_UPLOAD = 50;
 /**

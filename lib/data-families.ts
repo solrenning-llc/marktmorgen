@@ -502,7 +502,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // The once-only mark of a buyer's reply email (unit 6): no content, gone by itself within two days (SUBMISSION_TOLD_SECONDS).
   "nl:sub:told:": X(2),
   "nl:store:before-catalog:": T("prepare"), "nl:store:delivery:": E, "nl:store:delivery:over:": I, "nl:store:folder-owner:": E,
-  "nl:store:handle:": Cr(30), "nl:store:id:": E, "nl:store:leads:": E, "nl:store:lock:": E, "nl:store:owner:*": C,
+  "nl:store:handle:": Cr(90), "nl:store:id:": E, "nl:store:leads:": E, "nl:store:lock:": E, "nl:store:owner:*": C,
   "nl:store:owner:": T("prepare"), "nl:store:photo:": E,
   "nl:stream:auto:": E, "nl:stream:autokept:month:": Cr(400), "nl:stream:autokeptcase:": Cr(400), "nl:stream:autoowed:": E, "nl:stream:autoq": I, "nl:stream:cap:": E, "nl:stream:col:": E, "nl:stream:due": I, "nl:stream:gone": C,
   "nl:stream:lock": C, "nl:stream:peek:": E, "nl:stream:v:": E,

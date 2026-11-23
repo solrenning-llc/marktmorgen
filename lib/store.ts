@@ -192,6 +192,7 @@ export type { CourseRef, Listing, Product };
  * inventing a different one for this store alone.
  */
 import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
+import { type ExitNotice, exitHoldSeconds, readExitNotice, releasedValue } from "@/lib/exit-redirect-rules";
 export { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 
 
@@ -376,6 +377,13 @@ export type Store = {
   firstOfferPublishedAt?: string;
   /** True only for stores registered after activation tracking was installed. */
   activationTracked?: boolean;
+  /**
+   * The new address its owner chose before the store's closing day, shown
+   * for EXIT_NOTICE_DAYS at its old addresses once the store is closed
+   * (queue item 97 [D2-OPEN-EXIT]; lib/exit-redirect-rules.ts). Read whole
+   * or dropped.
+   */
+  exitNotice?: ExitNotice;
   /** Addresses this store used before. They lead here until it lets them go. */
   previousHandles: string[];
   /**
@@ -1063,6 +1071,7 @@ function parseStore(raw: unknown): Store | null {
       createdAt: value.createdAt ?? "",
       activationTracked: value.activationTracked === true,
       ...(typeof value.firstOfferPublishedAt === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value.firstOfferPublishedAt) && Number.isFinite(Date.parse(value.firstOfferPublishedAt)) ? { firstOfferPublishedAt: value.firstOfferPublishedAt.slice(0, 30) } : {}),
+      ...((notice) => (notice ? { exitNotice: notice } : {}))(readExitNotice(value.exitNotice)),
       previousHandles: Array.isArray(value.previousHandles)
         ? value.previousHandles.filter((h) => typeof h === "string")
         : [],
@@ -2558,7 +2567,6 @@ export async function closeStoreRecord(
   extraKeys: string[] = [],
   beforeDelete?: (fresh: Store | null, held: Held) => Promise<void>,
 ): Promise<boolean> {
-  const released = `${RELEASED_PREFIX}${new Date().toISOString()}`;
   const owner = await ownerKey(storeRef(store));
   let held: Held;
   try {
@@ -2591,12 +2599,20 @@ export async function closeStoreRecord(
     // leaves its account's list at both addresses read, as one moved since is the account's now (Claude 6 on #3643). An
     // answer that is not "done" or "not ours" throws before anything is said closed (rule 24): the closing walk reads the
     // record before it walks the store, and prepares it again while it is there.
+    // With a moved notice chosen, the notice goes into the same value and the addresses are held until it ends, never
+    // less than the quarantine (lib/exit-redirect-rules.ts); with none, exactly as before. Read from the record as it
+    // is under the lock, never from the caller's copy: a notice chosen or taken off since the caller's read is the one
+    // published (Codex X6's MEDIUM on #3648). With the record already gone, the caller's copy is the last known.
+    const exitNotice = (fresh ?? store).exitNotice ?? null;
+    const now = Date.now();
+    const released = releasedValue(new Date(now), exitNotice);
+    const hold = exitNotice ? exitHoldSeconds(exitNotice.closedAt, now, RELEASE_QUARANTINE_DAYS) : RELEASE_QUARANTINE_DAYS * 24 * 60 * 60;
     const handles = new Set([store.handle, ...store.previousHandles, ...(fresh ? [fresh.handle, ...fresh.previousHandles] : [])]);
     const accounts = new Set(await Promise.all([store.email, ...(fresh ? [fresh.email] : [])].map((email) => accountKey(email))));
     // The id this record holds now: a store from before ids given one since (sameLegacy) releases that one.
     const sid = sameLegacy && fresh ? fresh.sid : store.sid;
     const changes: FencedChange[] = [
-      ...[...handles].map((handle) => ({ op: "SETEX", key: handleKey(handle), words: [released, String(RELEASE_QUARANTINE_DAYS * 24 * 60 * 60)] })),
+      ...[...handles].map((handle) => ({ op: "SETEX", key: handleKey(handle), words: [released, String(hold)] })),
       ...(STORE_ID_PATTERN.test(sid) ? [{ op: "DEL", key: storeIdKey(sid), words: [] }, ...[...accounts].map((account) => ({ op: "SREM", key: account, words: [sid] }))] : []),
       { op: "ZREM", key: ENDED_INDEX, words: [storeRef(store)] },
       { op: "SREM", key: SHARING_INDEX, words: [storeRef(store)] },

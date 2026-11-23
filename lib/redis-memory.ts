@@ -2234,17 +2234,40 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:saved-section:v1\n") && args[0] === "1" && args.length === 6) {
+        // lib/saved-block-store.ts SAVE_SECTION, and SAVE_STORE_SECTION: the same write behind the store's fence (the rule
+        // of store-cache-live:v3; #5010 row 126). -4 gone, erasing or moved, -5 an owner's record that does not parse.
+        if ((key.startsWith("-- marktmorgen:saved-section:v1\n") && args[0] === "1" && args.length === 6) ||
+          (key.startsWith("-- marktmorgen:saved-store-section:v1\n") && args[0] === "3" && args.length === 11)) {
+          const fenced = args[0] === "3";
+          if (fenced) {
+            const [, , live, erasing, , , , , erasingField, statsId, ref] = args;
+            if (this.run(["HGET", erasing, erasingField]) !== null) return -4;
+            if (statsId === "") {
+              if (this.run(["GET", live]) !== ref) return -4;
+            } else {
+              const raw = this.run(["GET", live]);
+              if (raw === null) return -4;
+              let record: unknown;
+              try {
+                record = JSON.parse(String(raw));
+              } catch {
+                return -5;
+              }
+              if (!record || typeof record !== "object") return -5;
+              if ((record as { statsId?: unknown }).statsId !== statsId) return -4;
+            }
+          }
           const target = args[1];
+          const [id, json, limit, mode] = args.slice(fenced ? 4 : 2);
           this.live(target);
           const held = this.data.get(target);
           if (held !== undefined && !(held instanceof Map)) return -3;
-          const exists = held instanceof Map && held.has(args[2]);
-          if (args[5] === "new") {
+          const exists = held instanceof Map && held.has(id);
+          if (mode === "new") {
             if (exists) return -2;
-            if (held instanceof Map && held.size >= Number(args[4])) return 0;
-          } else if (args[5] !== "edit" || !exists) return -2;
-          this.hash(target).set(args[2], args[3]);
+            if (held instanceof Map && held.size >= Number(limit)) return 0;
+          } else if (mode !== "edit" || !exists) return -2;
+          this.hash(target).set(id, json);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:esync-enqueue:v1\n")) {

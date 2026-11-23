@@ -60,6 +60,16 @@ test("a store whose handle another store now holds leaves that store's list alon
   assert.deepEqual(await weeklyTeam(HANDLE), ["someone-else@example.test"], "the other store's list is untouched");
 });
 
+test("a store whose handle was taken by another store after a rename leaves that store's list alone (Claude 1's NIT on #5237)", async () => {
+  const store = await liveStore();
+  // The store is still live under its id, but its old handle now leads to another store: renamed, and the old name
+  // claimed again by someone else in the same window. Its list under the old handle is that other store's.
+  redis.run(["SET", `nl:store:handle:${HANDLE}`, "another-store-ref"]);
+  redis.run(["SADD", listKey, "someone-else@example.test"]);
+  assert.equal(await setWeeklyTeam(store, [MEMBER]), "gone");
+  assert.deepEqual(await weeklyTeam(HANDLE), ["someone-else@example.test"], "the other store's list is untouched");
+});
+
 test("the route: an erasure that begins while it reads the team keeps no addresses and is never said saved", async () => {
   const store = await liveStore();
   const cookie = `${SESSION_COOKIE}=${await openSession(OWNER)}`;

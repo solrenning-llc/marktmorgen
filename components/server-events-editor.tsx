@@ -68,7 +68,9 @@ export function ServerEventsEditor({ setup, pixels, googleId }: { setup: ServerS
               ? "A test code looks like TEST12345."
               : answer.error === "saved_unread"
                 ? "Saved. The setup could not be read back just now; reload the page."
-                : "That did not save. Try again.",
+                : answer.error === "unconfirmed"
+                  ? "We could not check whether that saved. Reload the page to see your setup."
+                  : "That did not save. Try again.",
       );
     } catch {
       toast("That did not save. Check your connection and try again.");

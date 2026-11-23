@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
 import { ensureStatsId, setAdsServer } from "@/lib/store";
-import { type ServerPlatform, SERVER_PLATFORMS, platformsOn, serverSetup, setServerToken, setTestCode } from "@/lib/ad-events";
+import { type ServerPlatform, SERVER_PLATFORMS, SetupWriteUnconfirmed, platformsOn, serverSetup, setServerToken, setTestCode } from "@/lib/ad-events";
 import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
@@ -16,7 +16,10 @@ import { UnknownReplyError } from "@/lib/redis-reply";
  * was written and reading it back or writing the store's list then fails
  * (an unknown reply or a transport error), it answers 503 "saved_unread":
  * the change is kept, the store's list is left as it was (the studio writes
- * it at its next reading), and the editor says it was saved.
+ * it at its next reading), and the editor says it was saved. The write's own
+ * reply lost (#4457): the setup is read back, and the change found kept goes
+ * on as if Redis had said OK; not found, 503 "unavailable"; the read back
+ * failing too, 503 "unconfirmed", said neither saved nor not.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "settings", 2_000);
@@ -46,6 +49,7 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: false, error: "saved_unread" }, { status: 503 });
     }
   } catch (error) {
+    if (error instanceof SetupWriteUnconfirmed) return Response.json({ ok: false, error: "unconfirmed" }, { status: 503 });
     if (error instanceof UnknownReplyError) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     console.error("changing server-sent conversions failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

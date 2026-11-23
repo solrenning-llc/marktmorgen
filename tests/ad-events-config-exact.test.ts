@@ -57,7 +57,25 @@ let configKey = "";
 let fail: "before" | "setup" | "after" | null = null;
 let setupRead = false;
 const pipeline = redis.pipeline.bind(redis);
+/**
+ * The setup's own write (#4457): "applied" makes the SET, then loses its reply (the transport throws), "not-applied"
+ * throws before making it, "dark" makes it, loses its reply and then fails the read back too, "odd" makes it and
+ * answers something other than OK.
+ */
+let lost: "applied" | "not-applied" | "dark" | "odd" | null = null;
+let darkReads = false;
 redis.pipeline = (async (commands: (string | number)[][]) => {
+  if (darkReads && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === configKey) throw new Error("Redis answered 500");
+  if (lost && commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === configKey) {
+    const how = lost;
+    lost = null;
+    if (how === "not-applied") throw new Error("Redis answered 500");
+    const applied = await pipeline(commands);
+    if (how === "odd") return [null];
+    if (how === "dark") darkReads = true;
+    void applied;
+    throw new Error("the reply was lost");
+  }
   const isSetupRead = commands.length === 2 && commands[0][0] === "GET" && commands[0][1] === configKey;
   if (fail === "setup" && isSetupRead) throw new Error("Redis answered 500");
   if (fail === "before" && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === configKey) throw new Error("Redis answered 500");
@@ -189,6 +207,28 @@ async function main(): Promise<void> {
   fail = null;
   is("and nothing was written then", JSON.parse(String(await kept())).testCode, "TEST337");
   is("healthy: the route answers ok and keeps the tokens", [await post({ testCode: "TEST444" }), (await serverSetup(statsId)).on], [[200, "ok"], { meta: true, tiktok: true, google: true, pinterest: true }]);
+
+  part("the setup's write kept, its reply lost (#4457): said as it is, the store's list written from it");
+  await setAdsServer(OWNER, ["meta", "tiktok", "google", "pinterest"]);
+  lost = "applied";
+  is("a test code written, its reply lost: answered ok", await post({ testCode: "TEST601" }), [200, "ok"]);
+  is("and the code is kept", JSON.parse(String(await kept())).testCode, "TEST601");
+  lost = "applied";
+  is("a removal written, its reply lost: answered ok", await post({ platform: "tiktok", token: "" }), [200, "ok"]);
+  is("and the store's list follows the setup", await adsServer(), ["meta", "google", "pinterest"]);
+  lost = "applied";
+  is("a token written, its reply lost: answered ok", await post({ platform: "tiktok", token: TOKENS.tiktok }), [200, "ok"]);
+  is("and the store's list has it again", await adsServer(), ["meta", "tiktok", "google", "pinterest"]);
+  lost = "odd";
+  is("a write answered with something other than OK, yet made: answered ok", await post({ testCode: "TEST602" }), [200, "ok"]);
+  is("and that code is kept", JSON.parse(String(await kept())).testCode, "TEST602");
+  lost = "not-applied";
+  is("a write that failed before it was made: 503 unavailable, never saved", await post({ testCode: "TEST603" }), [503, "unavailable"]);
+  is("and the code kept is the one before", JSON.parse(String(await kept())).testCode, "TEST602");
+  lost = "dark";
+  is("a write whose reply and read back are both lost: 503 unconfirmed, neither saved nor not", await post({ testCode: "TEST604" }), [503, "unconfirmed"]);
+  darkReads = false;
+  is("the editor says it could not confirm", readFileSync("components/server-events-editor.tsx", "utf8").includes('answer.error === "unconfirmed"'), true);
 
   part("confirmed absence: nothing kept yet is an empty setup");
   const fresh = "freshstatsid0001";

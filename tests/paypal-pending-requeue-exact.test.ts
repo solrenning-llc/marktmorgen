@@ -235,6 +235,39 @@ async function main(): Promise<void> {
     is("every admitted try declined: the watch and the letting go together inside a fifth of ORDER_COMPUTE", perOrder * COMMAND < ORDER_COMPUTE / 5, true);
   }
 
+  // 3. NIT: an error captureOrder does not turn into an answer sends the buyer to the store's notice, never a 500.
+  part("The return page never answers a Redis failure with a bare server error");
+  for (const where of ["putting the order in pending", "writing the payment down"] as const) {
+    const order = await open();
+    captureWith = (o) => ({ status: 201, body: completed(o, "49.00", "COMPLETED", "routed@example.com") });
+    const lines: string[] = [];
+    console.error = (...args: unknown[]) => void lines.push(args.map((a) => (a instanceof Error ? `${a.name}: ${a.message}` : String(a))).join(" "));
+    let shown: { status: number; location: string };
+    try {
+      shown = await withRedis(
+        (commands) => {
+          if (where === "putting the order in pending" ? pendingWrite(commands) : settleOf(commands, order)) throw new Error("Synthetic: Redis connection reset");
+          return null;
+        },
+        async () => {
+          const response = await paypalReturn(
+            new NextRequest(`https://marktmorgen.com/api/store/paypal/return?store=${store.handle}&token=${order}`, { headers: { host: "marktmorgen.com", "x-forwarded-for": `198.51.100.${made}` } }),
+          );
+          return { status: response.status, location: response.headers.get("location") ?? "" };
+        },
+      ).catch(() => ({ status: 500, location: "" }));
+    } finally {
+      console.error = logged;
+    }
+    is(`Redis failing while ${where}: the buyer is sent to the store's notice, as for an answer not known`, [shown.status, shown.location.includes(`/@${store.handle}?status=paypal-error`)], [303, true]);
+    is(`Redis failing while ${where}: the failure is logged without the buyer's address`, [lines.length > 0, lines.some((line) => /@[a-z0-9-]+\.[a-z]/i.test(line) && /example\.com/i.test(line))], [true, false]);
+    if (where === "writing the payment down") {
+      handed = [];
+      await watchPayPal(store, Date.now() + 10_000, on);
+      is("the payment PayPal took is still found by the sweep and handed over once", handed.filter((o) => o === order).length, 1);
+    }
+  }
+
   done();
 }
 

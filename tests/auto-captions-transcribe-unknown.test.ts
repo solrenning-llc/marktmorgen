@@ -319,6 +319,11 @@ async function main(): Promise<void> {
     const editor = readFileSync("components/course-editor.tsx", "utf8");
     is("no 'a few minutes' or 'already being written' promise on the page, its notice or a retry", [/Most lessons take a few minutes/.test(editor), /already being written/.test(editor)], [false, false]);
     is("an order the service did not confirm has its own notice, with the 48 hours", /could not confirm that the video service started/.test(editor) && /\$\{GIVE_UP_HOURS\} hours/.test(editor), true);
+    // Claude 5 icFoe's MÉDIO on #3427 @9b307b49d9: a refund past GIVE_UP_HOURS is made only on an answer that says what
+    // was delivered (lib/auto-captions.ts syncAutoCaptions); an unknown one is kept for a person, never refunded. So no
+    // line promises the charge back "within" the hours: each says it comes once the service confirms, no sooner.
+    is("no line promises a refund within the hours", /within \$\{GIVE_UP_HOURS\} hours/.test(editor), false);
+    is("each says it comes once the service confirms what it delivered, no sooner than the hours", (editor.match(/once the video service confirms it, no sooner than \$\{GIVE_UP_HOURS\} hours after the order/g) ?? []).length, 4);
   }
 
   part("Control: an answer that accepts is used as before");

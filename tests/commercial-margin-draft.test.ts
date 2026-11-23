@@ -1,5 +1,6 @@
 /** The two-bundle JSON handoff must not turn unknown costs into a positive profit. Synthetic only. */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { COST_LINES } from "./plan-cost-registry";
 import { commercialMarginUsage, renderCommercialMarginDraft, SES_PER_EMAIL_USD } from "./commercial-margin-draft";
@@ -43,3 +44,10 @@ for (const field of ["plan-usage", "per-payment", "cost-line"] as const) {
     assert.throws(() => renderCommercialMarginDraft({ lcUsage }), /Unknown commercial margin usage/);
   });
 }
+
+test("the draft never says an overage scenario is still required, generated or stored (Claude 2's LEVE on #5017)", () => {
+  // REQUIRED_MARGIN_SCENARIOS holds only the 6 plan scenarios since the owner's decision 3 (b) of 20 November 2026.
+  const stale = /including the overage ones|_overage(, \w+_overage)* are still required|\s+are still required/;
+  assert.doesNotMatch(renderCommercialMarginDraft({ lcUsage: wireUsage() }), stale);
+  assert.doesNotMatch(readFileSync("docs/opening-readiness/commercial-margin-figures.md", "utf8"), stale);
+});

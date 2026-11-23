@@ -284,6 +284,15 @@ export const CART_STOCK_COMMANDS_MOST = 71;
 export const CART_STOCK_SHARE_OF_ORDER_COMPUTE = 0.5;
 export const CART_STOCK_STRIPE_WAIT_MS = 5 * 2_000;
 /**
+ * An order's shipment mark (lib/shipments.ts, markNeverActivated and markWithoutQueuedMail; #5258, #5010 row 127, Codex
+ * X4-20261119-2249): taken once an order through the store's claim fence (claimOnceWhileStoreLive, one EVAL of
+ * CLAIM_IF_STORE_LIVE), billed as SHIPMENT_MARK_COMMANDS, the EVAL and its HGET, GET and SET (one plain SET before).
+ * At Upstash's $2 a million that is $0.000008, 2.7% of ORDER_COMPUTE, held to this declared share with the order's
+ * other shares inside one ORDER_COMPUTE (tests/order-compute-shares.test.ts). A creator's press again on a marked order
+ * is a studio request of its own, held inside UNIT_COST.studio (tests/shipment-done-mark-after-erasure.test.ts).
+ */
+export const SHIPMENT_MARK_SHARE_OF_ORDER_COMPUTE = 0.03;
+/**
  * A limited product's units counted as sold (lib/stock.ts, STOCK_SELL; Claude 3's performance audit, 13 November 2026, and
  * Claude 7's MÉDIO on #4472, 14 and 15 November 2026): one script that lets go of the checkouts' own fields (1 to
  * MAX_CHECKS of them, one HDEL; Claude 5's MÉDIO on #4472, 16 November 2026) and raises the product's sold count by the
@@ -2479,6 +2488,8 @@ export const COST_LINES: CostLine[] = [
       // A cart's checkout reads the offers of each of its products, and what each bundle in it hands over, at most MAX_CART of each, to know whose offers follow it (556 [CT1], 1 and 2 November 2026): reads only, inside that order.
       { file: "lib/cart-offers.ts", names: ["cartOfferOwner", "liveFunnel"] },
       { file: "lib/cart-rules.ts", names: ["MAX_CART = 4"] },
+      // An order's shipment mark is taken through the store's claim fence (#5258): SHIPMENT_MARK_COMMANDS, inside SHIPMENT_MARK_SHARE_OF_ORDER_COMPUTE (tests/order-compute-shares.test.ts).
+      { file: "lib/shipments.ts", names: ["SHIPMENT_MARK_COMMANDS = 4", "claimOnceWhileStoreLive(store, doneKey(session), KEEP_SECONDS"] },
       // A cart's checkout holds a unit of each limited product in it (513 [PF1], unit 3, 2 November 2026): a lock, a count, a provisional hold and its own for each, at most MAX_CART.
       // Since Codex G2's review (5 November 2026) the admission and the hand-over are one script each (STOCK_ADMIT, which also lets the locks go,
       // and STOCK_BIND: 1 + 3 commands a product each); Stripe is never asked under a lock and a lock waits LOCK_WAIT_MS at most. The whole of it,

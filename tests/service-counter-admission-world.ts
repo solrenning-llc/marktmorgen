@@ -34,4 +34,5 @@ export async function takeAllowance(_store: AllowanceStore, kind: AllowanceKind)
   return state.quota;
 }
 export async function takePublicRequest() { state.publicCalls += 1; return true; }
+export const takePublicRequestExact = takePublicRequest;
 export async function takePublicRequestWhy(): Promise<"ok"> { state.publicCalls += 1; return "ok"; }

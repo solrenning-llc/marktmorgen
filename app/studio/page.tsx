@@ -245,6 +245,8 @@ import { LOCKED_LIST } from "@/lib/locked-words";
 import { RecoveryAddressManager, RecoveryAddressUnread } from "@/components/recovery-address-manager";
 import { hideAddress, recoveryAddress } from "@/lib/recovery-address";
 import { ResendPurchase } from "@/components/resend-purchase";
+import { SalesBulkActions } from "@/components/sales-bulk-actions";
+import { bulkRowOf } from "@/lib/sales-bulk-rules";
 import { LeaveTeam } from "@/components/team-manager";
 import { productSegment } from "@/lib/product-slug";
 import { SharePanel } from "@/components/share-panel";
@@ -820,12 +822,15 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
   },
 };
 
-/** Comments under each course's lessons since the creator last opened that course's studio page. */
-async function newCommentsFor(products: { id: string; course?: { id: string } | null }[]): Promise<Record<string, number>> {
+/**
+ * Comments under each course's lessons since the creator last opened that course's studio page; null for every
+ * course when they could not be counted (rule 24), so the list says so instead of showing none.
+ */
+async function newCommentsFor(products: { id: string; course?: { id: string } | null }[]): Promise<Record<string, number | null>> {
   const courses = products.filter((p) => p.course).map((p) => [p.id, p.course!.id] as const);
   if (!courses.length) return {};
-  const counts = await freshCounts(courses.map(([, c]) => c)).catch(() => new Map<string, number>());
-  return Object.fromEntries(courses.map(([product, c]) => [product, counts.get(c) ?? 0]));
+  const counts = await freshCounts(courses.map(([, c]) => c)).catch(() => null);
+  return Object.fromEntries(courses.map(([product, c]) => [product, counts ? (counts.get(c) ?? null) : null]));
 }
 
 /** The products a store-wide sale can cover (lib/store-sale.ts), by title, for the sale's picker. */
@@ -3640,6 +3645,8 @@ export default async function StudioPage({
                         </li>
                       ))}
                     </ul>
+                    {/* 767 [STN14] unit 4: the same orders, chosen in a table, with what may be done to many at once. */}
+                    <SalesBulkActions sales={sold.sales.map(bulkRowOf)} canLabel={may("send")} canExport={may("export")} />
                     <p className="mt-4 text-sm text-ink-soft">
                       Up to {ORDERS_PAGE_SIZE} matching recent orders. For the full
                       history, open your Stripe dashboard.

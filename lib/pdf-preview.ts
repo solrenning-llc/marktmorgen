@@ -65,6 +65,14 @@ export const PREVIEW_RECORD_BYTES = 1_024;
 const MONTH_FIELD_BYTES = 64;
 /** As long as lib/pdf-stamp.ts keeps its note about a file that could not be stamped. */
 const UNREADABLE_SECONDS = 60 * 24 * 60 * 60;
+/**
+ * A first failure to cut a preview is noted only "unreadable-once:<ms>", kept two hours, and no new parse is tried for
+ * an hour after it: a passing failure (the function short of memory or time) never turns a good PDF's preview off for
+ * 60 days. A failure past that hour notes "unreadable" for UNREADABLE_SECONDS, as before, so a file pdf-lib cannot open
+ * is parsed twice at most (#5285 row #3351, the LOW of 6735389647). The stamp reads only its own exact notes.
+ */
+export const PREVIEW_RETRY_SECONDS = 3_600;
+const ONCE = "unreadable-once:";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 export const previewKey = (file: Pick<ProductFile, "pathname" | "addedAt">, pages: number) => `nl:preview:${sha(`${file.pathname}|${file.addedAt}|${pages}`).slice(0, 40)}`;
@@ -100,6 +108,8 @@ export async function firstPages(bytes: Uint8Array, pages: number): Promise<Uint
 export async function previewCopy(file: ProductFile, pages: number, store: DataStore, meter: CopyMeter, keep: PreviewKeeper): Promise<ProductFile | null> {
   if (!previewable(file) || pages < 1) return null;
   const key = previewKey(file, pages);
+  // Whether this path failed once already, more than an hour ago (PREVIEW_RETRY_SECONDS).
+  let failedOnce = false;
   try {
     if (isRedisConfigured()) {
       const replies = repliesFor(await redisPipeline([["GET", key], ["GET", problemKey(file.pathname)]]), 2);
@@ -117,6 +127,12 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
       // a new file is a new path. Only "unreadable" is trusted: a size note is
       // written for a failed read too, and the others are an EPUB's.
       if (noted === "unreadable") return null;
+      // Failed once: not parsed again until its hour is past; a note in no known shape after the mark is unknown.
+      if (typeof noted === "string" && noted.startsWith(ONCE)) {
+        const at = Number(noted.slice(ONCE.length));
+        if (!Number.isSafeInteger(at) || Date.now() < at + PREVIEW_RETRY_SECONDS * 1000) return null;
+        failedOnce = true;
+      }
       // A store whose room is full makes no new preview: the file is not read
       // for one that could not be kept. Unknown is refused the same way.
       const room = await dataUsed(store);
@@ -130,8 +146,14 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
     try {
       bytes = await firstPages(original, pages);
     } catch (error) {
-      // What it answers decides nothing: there is no preview either way.
-      if (isRedisConfigured()) await redisPipeline([["SET", problemKey(file.pathname), "unreadable", "EX", UNREADABLE_SECONDS]]).catch(() => {});
+      // What it answers decides nothing: there is no preview either way. A first failure is noted once, for two hours;
+      // one past its hour is noted unreadable for 60 days.
+      if (isRedisConfigured()) {
+        const command = failedOnce
+          ? ["SET", problemKey(file.pathname), "unreadable", "EX", UNREADABLE_SECONDS]
+          : ["SET", problemKey(file.pathname), `${ONCE}${Date.now()}`, "EX", 2 * PREVIEW_RETRY_SECONDS];
+        await redisPipeline([command]).catch(() => {});
+      }
       throw error;
     }
     // Room for its record only once there is a preview to keep: a failure takes none.

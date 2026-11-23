@@ -116,6 +116,10 @@ async function main(): Promise<void> {
   is("every request answered 'no preview right now'", statuses.get(404), N);
   is("a failed preview takes nothing from the store's data room", grown, 0);
   is("the same unreadable PDF is read and parsed once, not on every request", reads, 1);
+  // A first failure is noted once, for its hour (#5285 row #3351): the failure after that hour notes it unreadable.
+  is("within the first hour the file is noted as failed once", String((await redis.pipeline([["GET", problemKey(locked.file.pathname)]]))[0]).startsWith("unreadable-once:"), true);
+  await redis.pipeline([["SET", problemKey(locked.file.pathname), `unreadable-once:${Date.now() - 3_601_000}`, "EX", 3_600]]);
+  is("an hour on, it is parsed once more and still answers no preview", [await ask(locked.id), blobReads.get(locked.file.pathname)], [404, 2]);
   is("the file is noted as unreadable in the stamp's note, which costs no data room", await redis.pipeline([["GET", problemKey(locked.file.pathname)]]), ["unreadable"]);
   is("the studio's stamp notes say why (lib/pdf-stamp.ts stampProblems)", (await stampProblems([locked.file])).get(locked.file.pathname), "unreadable");
 

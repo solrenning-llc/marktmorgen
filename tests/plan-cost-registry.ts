@@ -3049,6 +3049,8 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/sales-bulk/route.ts", names: ["countStudio(store, null, extra)", "asked.references.length - 1"] },
       // Contact paste admits its complete command/transfer work before any contact read or atomic import write; same studio figure, no extra allowance.
       { file: "lib/contact-import-rules.ts", names: ["CONTACT_IMPORT_WORK", "pastedContactWork"] },
+      // A team's host addresses/hours: EVAL + GET + HEXISTS + HSET, before any successful save response.
+      { file: "lib/team-booking.ts", names: ["TEAM_WRITE_MAX_COMMANDS", "WRITE_TEAM_IF_LIVE", "writeTeam"] },
       // The activity log's fence, priced on every studio request (teamLogFenceUsd).
       { file: "lib/team.ts", names: ["TEAM_LOG_COMMANDS", "TEAM_LOG_FENCE_COMMANDS", "KEEP_LOG_IF_LIVE"] },
       { file: "lib/studio-route.ts", names: ["logTeam(access.store.sid"] },

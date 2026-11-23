@@ -36,6 +36,7 @@ import {
   stageKindOf,
   type HubSpotDealsPlan,
 } from "@/lib/hubspot-csv";
+import { importAllowanceWords } from "@/lib/import-limits";
 import { done, is, part } from "./check";
 
 const CONTACTS = "Record ID,Create date,Email,First name,Last name,Phone number,Lifecycle stage\r\n101,2026-01-02,ada@example.com,Ada,Lovelace,+1 555 0100,Customer\r\n102,2026-01-03,grace@example.com,Grace,,,Lead\r\n";
@@ -263,6 +264,12 @@ part("Coordinator's triple audit of #2048 @bbd4481d5d: an apostrophe is part of 
   is("control: a lone @ between words is not an address", kept("Ada @ Example").deals[0]?.email, "");
   is("control: a domain with other letters before its last part is an address a deal keeps", kept("jane@exämple.com").deals[0]?.email, "jane@exämple.com");
 }
+
+part("Coordinator's triple audit of #2048 @bbd4481d5d, MEDIUM 2: the public help names no HubSpot import while no screen offers one");
+// The help page can-i-move-from-clickfunnels prints importAllowanceWords (lib/help-content.ts); a sentence about a HubSpot
+// deals file there described an import no page of the studio offers yet (VR 2). It comes back with the screen.
+is("the import figures in the public help do not mention a HubSpot file", /HubSpot/i.test(importAllowanceWords()), false);
+is("control: the sentence still gives the rows of each plan", /Rows an import brings in, a billing month: .* on Store, .* on Studio, .* on Scale/.test(importAllowanceWords()), true);
 
 part("Coordinator's MEDIUM on #2048 (29th batch): a refusal names its column as HubSpot labels it, never the file's long spelling");
 {

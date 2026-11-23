@@ -74,6 +74,9 @@ async function main(): Promise<void> {
   part("A swap that keeps losing (Claude 3 xvBY8's LEVE on #5463): nothing granted or given back, and never past RAMP_TRIES rounds");
   redis.clear();
   await startRamp(ID, RAMP_TRIGGER);
+  // 60 taken first, so what is left (40) is below the portion and a give-back that wrote anything would show
+  // (Claude 3's LEVE on 34f9536a1a: with the portion full, min(size, left + n) hid any write).
+  is("setup: 60 taken", await rampRoom(ID, 60), 60);
   const record = redis.run(["GET", KEY]);
   losing = true;
   rounds = { gets: 0, swaps: 0 };
@@ -84,7 +87,8 @@ async function main(): Promise<void> {
   await rampBack(ID, 40);
   is(`a give-back whose every swap answers 0 stops after RAMP_TRIES (${RAMP_TRIES}) rounds`, rounds, { gets: RAMP_TRIES, swaps: RAMP_TRIES });
   losing = false;
-  is("and leaves what is left as it was (the capacity stays taken, the safe way)", left(), RAMP_FIRST);
+  is("and leaves what is left as it was, 40 (the capacity stays taken, the safe way)", left(), RAMP_FIRST - 60);
+  is("and the record is still as it was", redis.run(["GET", KEY]), record);
 
   part("Control: one sender alone, as before");
   redis.clear();

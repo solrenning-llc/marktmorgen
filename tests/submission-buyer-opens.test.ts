@@ -48,11 +48,14 @@ function world(storeSays = true) {
   };
   return { steps, asked: () => asked };
 }
+/** The store's identity, carried to the vault (DoorAsk.fence, lib/store-live-cache.ts storeLiveFence; #5066), as main's submission tests write it. */
+const FENCE = { live: "nl:store:id:fenced", erasing: "nl:closed:erasing", field: "store-field", statsId: "", ref: "store@example.test" };
 const ask = (who: string, lessonId: string) => ({
   store: SHOP,
   data: SHOP as DataStore,
   /** The store's list id, under which its deleted people are kept (DoorAsk.listId, #5065). */
   listId: "list_submission_buyer_opens",
+  fence: FENCE,
   folder: FOLDER,
   courseId: COURSE,
   lessonId,

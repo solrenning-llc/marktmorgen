@@ -130,6 +130,11 @@ async function main() {
         ["GET", `nl:call:creator-reminded:${store.callsId}:${product.id}:${start}:24`],
       ]);
       is(mode + ": failed room leaves both reminder marks free and queue intact", [failed.reminded, marks, await queued(), emails.length], [0, [null, null], true, 2]);
+      // A failed send is put off RETRY_MS, never kept at the head of the next run (Claude 4 AC's LEVE on #5103): the
+      // retry comes once that time has passed.
+      const [putOff] = await pipeline([["ZSCORE", REMINDER_QUEUE, member]]);
+      is(mode + ": the failed reminder is put off about fifteen minutes, still queued", Number(putOff) > clock + 14 * 60_000, true);
+      clock += 16 * 60_000;
       const retried = await job();
       is(mode + ": healthy reminder retry sends each side once and consumes queue", [retried.reminded, await queued(), emails.length], [1, false, 4]);
       is(mode + ": both recipient counts are exactly two", [emails.filter(email => email === buyer).length, emails.filter(email => email === owner).length], [2, 2]);

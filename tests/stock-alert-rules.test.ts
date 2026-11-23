@@ -75,6 +75,12 @@ test("the creator is told once each time the count crosses the low-stock number,
   for (const [before, after, low] of [[Number.NaN, 5, 5], [6, 5, Number.NaN], [6, -1, 5], [6, 5, -1]] as const) {
     assert.equal(crossedLow(before as number, after as number, low as number), "unknown", `${before} → ${after} (${low})`);
   }
+  // Codex G's LOW on #3607: a low-stock number past what readLowStock keeps (MAX_LOW_STOCK) is not one the creator
+  // set, so it is unknown, never a "yes" that tells them. MAX_LOW_STOCK itself still counts.
+  assert.equal(crossedLow(MAX_LOW_STOCK + 5, MAX_LOW_STOCK + 1, MAX_LOW_STOCK + 1), "unknown", "low past the most");
+  assert.equal(crossedLow(MAX_LOW_STOCK, MAX_LOW_STOCK - 1, MAX_LOW_STOCK + 1), "unknown", "low past the most, even below it");
+  assert.equal(crossedLow(MAX_LOW_STOCK, MAX_LOW_STOCK - 1, MAX_LOW_STOCK - 1), "yes", "a number up to the most still counts");
+  assert.equal(crossedLow(MAX_LOW_STOCK, MAX_LOW_STOCK - 1, MAX_LOW_STOCK), "no", "at the most: the count never was above it");
 });
 
 test("the per-buyer limit is off, or 1 to 100 units", () => {

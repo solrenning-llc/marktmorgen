@@ -214,6 +214,23 @@ export async function readCreatorCardHeld(statsId: string | null): Promise<{ car
 /** The text fields a kept card always has (CreatorCard, besides `on`). */
 const CARD_TEXT_FIELDS = ["name", "title", "email", "phone", "website", "note"] as const;
 
+/**
+ * The store's fence (lib/live-fence.ts StoreLiveFence, built on the server by lib/store-live-cache.ts storeLiveFence):
+ * its id key, or its record for a store from before ids; the erasing hash and field; the statsId the record must
+ * carry ("" for a store with an id, whose id key must hold `ref`; null when it cannot be told, then nothing is
+ * written); the ref it was built under. Declared here, not imported, because the browser reads this module and it
+ * must not load lib/store (Codex L-20261121-0150).
+ */
+export type CreatorCardFence = { live: string; erasing: string; field: string; statsId: string | null; ref: string };
+
+export class CardStoreGone extends Error {
+  constructor() {
+    super("This store changed or is being deleted. Reload the page before changing its contact details.");
+    this.name = "CardStoreGone";
+  }
+}
+const isStoreGone = (reply: unknown): boolean => Array.isArray(reply) && reply.length === 2 && reply[0] === -4 && reply[1] === 0;
+
 /** A card save whose answer could not be confirmed: it may or may not have been written. */
 export class CardSaveUnconfirmed extends Error {
   constructor() {
@@ -223,18 +240,20 @@ export class CardSaveUnconfirmed extends Error {
 }
 
 /** Keeps a card as sent, after its room is taken; refused with the rule's reason, and then nothing is written. */
-export async function saveCreatorCard(statsId: string, raw: Record<string, unknown>, room: DataStore): Promise<{ ok: true; card: CreatorCard } | { ok: false; error: CardRefusal }> {
+export async function saveCreatorCard(statsId: string, raw: Record<string, unknown>, room: DataStore, fence: CreatorCardFence | null): Promise<{ ok: true; card: CreatorCard } | { ok: false; error: CardRefusal }> {
   const read = readCard(raw);
   if (!read.ok) return read;
+  if (!fence || fence.statsId === null) throw new CardSaveUnconfirmed();
   const json = JSON.stringify(read.card);
   // The card and its slot in one script (SAVE_CARD): the slot is set to the card written, so a save that does not fit
   // writes nothing (DataRoomError), and two saves at once never leave a card larger than its slot (Codex L, #1961).
   const key = dataKey(room);
   if (!key || !isRedisConfigured()) throw new Error("the store's data room could not be counted");
   const now = Date.now();
-  const replies: unknown = await redisPipeline([["EVAL", SAVE_CARD, 2, key, cardKey(statsId), contentRoomFor(room, now / 1000), monthOf(now), dataBytes([json], 1), json]]);
+  const replies: unknown = await redisPipeline([["EVAL", SAVE_CARD, 4, key, cardKey(statsId), fence.live, fence.erasing, contentRoomFor(room, now / 1000), monthOf(now), dataBytes([json], 1), json, fence.field, fence.ref, fence.statsId]]);
   // The one script's answer, exactly: anything else does not show the card and its room were written, nor that they
   // were not; it is said as not confirmed, and what was counted stays (Codex G2, #1961).
+  if (Array.isArray(replies) && replies.length === 1 && isStoreGone(replies[0])) throw new CardStoreGone();
   const taken = Array.isArray(replies) && replies.length === 1 ? dataTakenOf(room, replies[0], now / 1000) : null;
   if (taken?.ok) return read;
   if (taken?.reason === "full") throw new DataRoomError(taken);
@@ -246,12 +265,17 @@ export async function saveCreatorCard(statsId: string, raw: Record<string, unkno
  * the card read here is deleted and its slot set to nothing, and a card saved
  * since (another version) is left with its own slot (Codex L, #1961).
  */
-export async function dropCreatorCard(statsId: string | null, room: DataStore): Promise<void> {
+export async function dropCreatorCard(statsId: string | null, room: DataStore, fence: CreatorCardFence | null): Promise<void> {
   const key = dataKey(room);
   if (!statsId || !key || !isRedisConfigured()) return;
+  if (!fence || fence.statsId === null) throw new CardSaveUnconfirmed();
   const [held] = await redisPipeline([["GET", cardKey(statsId)]]);
   const now = Date.now();
-  await redisPipeline([["EVAL", DROP_CARD, 2, key, cardKey(statsId), contentRoomFor(room, now / 1000), monthOf(now), typeof held === "string" ? held : ""]]);
+  const replies = await redisPipeline([["EVAL", DROP_CARD, 4, key, cardKey(statsId), fence.live, fence.erasing, contentRoomFor(room, now / 1000), monthOf(now), typeof held === "string" ? held : "", "", fence.field, fence.ref, fence.statsId]]);
+  const reply = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
+  if (isStoreGone(reply)) throw new CardStoreGone();
+  if (Array.isArray(reply) && reply.length === 2 && reply[0] === 2 && reply[1] === 0) return;
+  if (!dataTakenOf(room, reply, now / 1000)?.ok) throw new CardSaveUnconfirmed();
 }
 
 /** The data room's own steps (TAKE_DATA) for the card's slot, set to `size`, inside a script whose KEYS[1] is the room. */
@@ -261,8 +285,28 @@ const CARD_ROOM = `local function cardRoom(limit, always, month, size)
 ${TAKE_DATA}
 end`;
 
+/**
+ * What the store's fence (CARD_LIVE) adds to a card save or removal, as Upstash bills a script's inner commands: the
+ * HGET of the erasing field and the GET of the store's id key (or its record, for a store from before ids). Priced on
+ * every studio request (tests/plan-cost-registry.ts, line creator-card-erasure-fence; Codex L-20261121-0150).
+ */
+export const CARD_FENCE_COMMANDS = 2;
+
+/** Same store scope in the same operation, before the card or its data room can be recreated. */
+const CARD_LIVE = `if redis.call('HGET', KEYS[4], ARGV[5]) then return {-4, 0} end
+local live = redis.call('GET', KEYS[3])
+if not live then return {-4, 0} end
+if ARGV[7] == '' then
+  if live ~= ARGV[6] then return {-4, 0} end
+else
+  local ok, record = pcall(cjson.decode, live)
+  if not ok or type(record) ~= 'table' then return {-5, 0} end
+  if record['statsId'] ~= ARGV[7] then return {-4, 0} end
+end`;
+
 /** Writes the card (KEYS[2]) and sets its slot to its size in the same step; nothing when it does not fit. Modelled by lib/redis-memory.ts. */
-export const SAVE_CARD = `-- marktmorgen:card-save:v1
+export const SAVE_CARD = `-- marktmorgen:card-save:v2
+${CARD_LIVE}
 ${CARD_ROOM}
 local taken = cardRoom(ARGV[1], '0', ARGV[2], ARGV[3])
 if taken[1] ~= 1 then return taken end
@@ -270,7 +314,8 @@ redis.call('SET', KEYS[2], ARGV[4])
 return taken`;
 
 /** Deletes the card (KEYS[2]) only while it is the one read (ARGV[3], "" for none) and sets its slot to nothing; a card saved since keeps its slot. Modelled by lib/redis-memory.ts. */
-export const DROP_CARD = `-- marktmorgen:card-drop:v1
+export const DROP_CARD = `-- marktmorgen:card-drop:v2
+${CARD_LIVE}
 ${CARD_ROOM}
 local held = redis.call('GET', KEYS[2])
 if (held or '') ~= ARGV[3] then return {2, 0} end

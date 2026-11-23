@@ -5,7 +5,7 @@
 // row sent a module that opens after the student's access had ended (Claude 6's LEVE on #3369).
 // Synthetic: the Redis stand-in, a Stripe world and a mail world only.
 import type { Course } from "@/lib/course";
-import { emailKey, noteBoughtAgain, recordEnrollment, registerDrip, sendDripEmails } from "@/lib/learn";
+import { emailKey, noteBoughtAgain, recordEnrollment, redateStudent, registerDrip, sendDripEmails } from "@/lib/learn";
 import type { Listing, Store } from "@/lib/store";
 import { catalog } from "./course-repurchase-catalog-world";
 import { stripe } from "./course-repurchase-stripe-world";
@@ -110,6 +110,21 @@ async function main() {
     is("the row takes the day", row?.s, second);
     is("no stamp written without its bytes taken", row && "x" in row, false);
     current = base;
+  }
+  part("A start read with an end that did not read: the re-dated row keeps the end it had (redateStudent, called directly)");
+  {
+    // The drip job's strict ledger throws rather than return an end it cannot read, so this branch is reached only by
+    // a direct call; it is held here so the row never loses a known end on a guess (Claude 1's NIT on #5039).
+    const endOld = second + 400 * DAY;
+    redis.clear();
+    await redis.pipeline([["HSET", rowKey, emailKey(buyer), JSON.stringify({ e: buyer, s: first, l: first, x: endOld })]]);
+    await redateStudent(base, buyer, second, second + DAY, "unknown");
+    const kept = await rowOf();
+    is("the row takes the new day and keeps its end", [kept?.s, kept?.x, kept?.l], [second, endOld, first]);
+    await redis.pipeline([["HSET", rowKey, emailKey(buyer), JSON.stringify({ e: buyer, s: first, l: first, x: endOld })]]);
+    await redateStudent(base, buyer, second, second + DAY, null);
+    const cleared = await rowOf();
+    is("while a start with no end clears it", [cleared?.s, cleared && "x" in cleared], [second, false]);
   }
   done();
 }

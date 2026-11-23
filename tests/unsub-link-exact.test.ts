@@ -67,7 +67,7 @@ const isRowRead = (c: Commands) => c.length === 1 && c[0]?.[0] === "HGET" && Str
 // the count of those who left, in one script (lib/contacts.ts unsubscribe, CONTACT_WRITE_IF); the pipeline found here
 // is that write. Every answer injected below, and what each case proves, is as it was.
 const isUnsubWrite = (c: Commands) =>
-  c.length === 1 && c[0]?.[0] === "EVAL" && String(c[0][1]).startsWith("-- marktmorgen:contact-write-if:v1\n") && String(c[0][3]).startsWith("nl:store:leads:");
+  c.length === 1 && c[0]?.[0] === "EVAL" && String(c[0][1]).startsWith("-- marktmorgen:contact-write-if:v2\n") && String(c[0][3]).startsWith("nl:store:leads:");
 
 let listId = "";
 let handle = "";

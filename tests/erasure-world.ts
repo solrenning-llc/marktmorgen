@@ -147,7 +147,7 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   await upsertContact(listId, email, { agreed: true, explicit: true, source: "free", sid, clicks: true, productId: w.plain, title: "The Guide" }, ROOM);
   const token = (await tokensFor(listId, [email], store.handle)).get(email);
   if (!token) throw new Error("no unsubscribe token");
-  const keys = await rememberLinkKeys([token]);
+  const keys = await rememberLinkKeys(listId, [{ email, token }]);
   await noteClick(keys.get(token) as string, `s-${hex(8)}-${hex(8)}`);
   // This week's delivery check (lib/mail-health.ts).
   await redisPipeline([["SET", `nl:mail:health:${sid}:seen:${sha(email).slice(0, 32)}`, "1", "EX", 86_400]]);
@@ -192,7 +192,7 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   ]);
   await markPassed(w.courseId, learner, w.lessons[0], ROOM);
   await takeRoom(storeKey(store), 1_000);
-  await handIn({ data: ROOM, courseId: w.courseId, lessonId: w.lessons[1], who: learner, email, task: { prompt: "Write it", review: true, file: true } as never, text: "My work", file: { path: `tasks/${hex(4)}.pdf`, name: "work.pdf", bytes: 1_000, type: "application/pdf" } });
+  await handIn({ erasure: { listId: "list_synthetic", email: "student@example.com" }, data: ROOM, courseId: w.courseId, lessonId: w.lessons[1], who: learner, email, task: { prompt: "Write it", review: true, file: true } as never, text: "My work", file: { path: `tasks/${hex(4)}.pdf`, name: "work.pdf", bytes: 1_000, type: "application/pdf" } });
   // A file they sent for review on a lesson (lib/submission-store.ts, 750 [CD1]): its record, their entry and the sweep's list.
   {
     const folder = await storeFolder(storeRef(store));

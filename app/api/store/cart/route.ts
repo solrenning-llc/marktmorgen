@@ -4,7 +4,7 @@ import { withinStore } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
 import { OrdersPausedError } from "@/lib/order-admission";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
-import { normaliseHandle, storeForHandle } from "@/lib/store";
+import { normaliseHandle, storeForHandle, storeForHandleExact } from "@/lib/store";
 import { readAsking, readListings, readProduct } from "@/lib/catalog";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { cartPrice, createCartCheckout } from "@/lib/cart-checkout";
@@ -59,7 +59,14 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const handle = normaliseHandle((params.get("handle") ?? "").slice(0, 40));
   const ids = readCartIds((params.get("ids") ?? "").split(","));
-  const store = handle ? await storeForHandle(handle) : null;
+  // A store that could not be read is not a store that does not exist (rule 24; Claude 4's LEVE on #2978): it answers
+  // 503 "unavailable", which the cart shows as an ordinary failure with "Try again", never as "not taking orders".
+  let store: Store | null;
+  try {
+    store = handle ? await storeForHandleExact(handle) : null;
+  } catch {
+    return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  }
   if (!store) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
   const room = await withinStore("cart-read", `${clientAddress(request)}|${store.handle}`, 120, 600, store).catch(unknownLimit);
   // A count that could not be read is never "slow" (rule 24).

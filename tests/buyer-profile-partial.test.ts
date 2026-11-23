@@ -273,11 +273,13 @@ async function main(): Promise<void> {
 
   part("Adding or removing a note when the notes cannot be read");
   const added = await notesAnswer([["notes"]], () => addPersonNote(STATS, person, "owner@example.com", "Prefers email.", ROOM, (NOW + 5) * 1000).then(() => "read", (error) => (error instanceof UnknownReplyError ? "unknown" : String(error))));
-  is("adding: the note is written, and the notes as they are after are said not read, never a short list", added, "unknown");
+  // Since Codex X6's LOW on #3159: when the notes do not read back, the note just written is taken back with its room,
+  // so a press again never adds a note the studio cannot show.
+  is("adding: the notes do not read, so it is said not read, never a short list", added, "unknown");
   const kept = await readPersonNotes(STATS, person);
-  is("the note added is kept beside the one before", kept.map((n) => n.text), ["Prefers email.", "Asked about the advanced course."]);
+  is("and the note was taken back: the note before is the only one", kept.map((n) => n.text), ["Asked about the advanced course."]);
   const removed = await notesAnswer([["notes"]], () => removePersonNote(STATS, person, NOTE_ID, ROOM).then(() => "read", (error) => (error instanceof UnknownReplyError ? "unknown" : String(error))));
-  is("removing: said not read, and nothing is taken away", [removed, (await readPersonNotes(STATS, person)).length], ["unknown", 2]);
+  is("removing: said not read, and nothing is taken away", [removed, (await readPersonNotes(STATS, person)).length], ["unknown", 1]);
 
   part("What the page says");
   const words = (profiles as unknown as { profileUnreadWords?: (parts: string[]) => string }).profileUnreadWords;

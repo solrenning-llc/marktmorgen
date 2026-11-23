@@ -40,7 +40,7 @@ import { carryTags } from "@/lib/pdf-preview-tags";
 import { readFileWhole } from "@/lib/file-store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_STAMP_BYTES, type ProductFile, isPdf } from "@/lib/product-file";
-import { copyFolder, problemKey, roomNotedOut, writeWithinStorage } from "@/lib/pdf-stamp";
+import { copyFolder, dropWrittenCopy, problemKey, roomNotedOut, writeWithinStorage } from "@/lib/pdf-stamp";
 import type { CopyMeter } from "@/lib/stamp-cost-rules";
 import { type DataStore, dataUsed, keepFor } from "@/lib/store-data";
 import { contentRoomFor } from "@/lib/store-data-rules";
@@ -145,7 +145,12 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
     if (isRedisConfigured()) {
       // This is after the file write: deletion may have passed this key while the preview was being made.
       const saved = await keep(key, JSON.stringify(copy), PREVIEW_SECONDS);
-      if (saved === "gone") return null;
+      // The store is gone or being erased: the file just written would stay in its folder with nothing pointing to
+      // it, since the erasure's walk may already have passed (Claude 4 Z's LOW on #5068). It is deleted now.
+      if (saved === "gone") {
+        await dropWrittenCopy(file, pathname);
+        return null;
+      }
       if (saved !== "kept") throw new UnknownReplyError("keeping a preview's record");
     }
     return copy;

@@ -331,7 +331,10 @@ async function main(): Promise<void> {
   store = await freshStore();
   lastBody = null;
   await outcome(store);
-  is("a new page names the store by id, on the page and on the subscription", [lastBody?.get("metadata[assistant_sid]"), lastBody?.get("subscription_data[metadata][assistant_sid]")], [store.sid, store.sid]);
+  // Read through its declared type: the stand-in writes lastBody inside outcome(), which TypeScript's narrowing
+  // after "lastBody = null" cannot see.
+  const pageBody = lastBody as URLSearchParams | null;
+  is("a new page names the store by id, on the page and on the subscription", [pageBody?.get("metadata[assistant_sid]"), pageBody?.get("subscription_data[metadata][assistant_sid]")], [store.sid, store.sid]);
   store = await freshStore();
   subs.push(addOn(1, "active", { metadata: { addon: "assistant", assistant_for: HANDLE, assistant_sid: "s".repeat(32) } }));
   posts.length = 0;

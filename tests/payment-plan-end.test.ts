@@ -355,6 +355,42 @@ async function main(): Promise<void> {
     Date.now = trueNow;
   }
 
+  part("A put-back mark outliving its put-back never overrides the creator's later restore of the sold end (Claude 3's LEVE on #5367)");
+  {
+    // The put-back lands at Stripe but its answer is not confirmed, so its mark stays. The next pass finds the member's
+    // end in place (the confirmation the mark waits for) and takes the mark out. The creator then takes the member's
+    // cancel back in their own dashboard (the sold end again, the request metadata still there): with no mark left,
+    // the plan is settled at the sold end and left alone, as one whose request was already there (the control above).
+    beforeEnds();
+    const periodEnd = ANCHOR + 30 * DAY;
+    const soldEnd = addPeriods(ANCHOR, "month", 12);
+    const asked = String(ANCHOR + DAY - 60);
+    const base = { id: "sub_race00000004", status: "active", billing_cycle_anchor: ANCHOR, trial_end: null, metadata: { store: "harbor", ends_after: "12", ends_interval: "month" }, items: { data: [{ current_period_end: periodEnd }] } };
+    const withRequest = { ...base, metadata: { ...base.metadata, cancel_requested_at: asked } };
+    sessions.cs_test_race00000004 = checkout("cs_test_race00000004", { ends_after: "12", ends_interval: "month" });
+    subscriptions.sub_race00000004 = { ...base };
+    const before = updates.length;
+    Object.defineProperty(updateReplies, "sub_race00000004", {
+      configurable: true,
+      get: () => (updates.length - before === 1 ? { ...withRequest, cancel_at: soldEnd } : { id: "sub_other" }),
+    });
+    const first = await finishPlan(ACCOUNT, "cs_test_race00000004");
+    is("first pass: the put-back answer is not confirmed", first, "unread");
+    delete (updateReplies as Record<string, unknown>).sub_race00000004;
+    // The put-back did land: Stripe holds the member's end with the request.
+    subscriptions.sub_race00000004 = { ...withRequest, cancel_at: periodEnd };
+    const mark = "nl:plans:put-back:" + ACCOUNT + ":sub_race00000004";
+    const second = await finishPlan(ACCOUNT, "cs_test_race00000004");
+    is("next pass: the member's end in place, watched as stopped early", second, "early");
+    is("next pass: the member's end in place confirms the put-back, so its mark is taken out", (await redis.pipeline([["EXISTS", mark]]))[0], 0);
+    // The creator takes the member's cancel back: the sold end again, the request metadata still there.
+    subscriptions.sub_race00000004 = { ...withRequest, cancel_at: soldEnd };
+    const restored = updates.length;
+    const third = await finishPlan(ACCOUNT, "cs_test_race00000004");
+    is("after the creator restores the sold end: nothing written over it, settled", [updates.slice(restored).map((u) => u.body.get("cancel_at")), third], [[], "done"]);
+    Date.now = trueNow;
+  }
+
   done();
 }
 

@@ -22,6 +22,7 @@ import { addProduct, claimHandle, ensureStatsId, setPostCount, storeForEmail } f
 import { blogReadArray } from "@/lib/blog-read-replies";
 import { deletePost, readPost, savePost } from "@/lib/store-blog";
 import { storeSitemap } from "@/lib/store-sitemap";
+import { GET as sitemapRoute } from "@/app/[handle]/store-sitemap/route";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { done, is, part } from "./check";
@@ -46,6 +47,10 @@ async function main(): Promise<void> {
   part("Claude 4's LEVE 1: a blog that does not read leaves only the blog out of the store's map");
   const healthy = await storeSitemap((await storeForEmail(email))!);
   is("set-up: the healthy map has the product and the blog", [healthy.some((e) => e.url.includes("/p/")), healthy.some((e) => e.url.endsWith("/blog"))], [true, true]);
+  is("a whole map is not marked partial", healthy.partial, undefined);
+  const mapRequest = () => sitemapRoute(new Request("https://local.example/@blogrow/sitemap.xml"), { params: Promise.resolve({ handle: "@blogrow" }) });
+  const whole = await mapRequest();
+  is("set-up: the whole map is served and kept by caches for an hour", [whole.status, whole.headers.get("cache-control")], [200, "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400"]);
   // A partial pipeline left the published index without the post's record: the blog cannot be read.
   await redis.pipeline([["HDEL", `nl:blog:meta:${statsId}`, id]]);
   const map = await storeSitemap((await storeForEmail(email))!).catch(() => null);
@@ -53,6 +58,12 @@ async function main(): Promise<void> {
   is("with the store's product page in it", Boolean(map?.some((e) => e.url.includes("/p/"))), true);
   is("and no blog address, none invented", Boolean(map?.some((e) => e.url.includes("/blog"))), false);
   is("the cause is logged", loggedNow().some((line) => /blog could not be read for its map/.test(line)), true);
+  is("the map is marked partial", map?.partial, true);
+  // Claude 3 yUZf's LEVE on #5387: a map with its blog left out is served but never kept by a cache.
+  const partial = await mapRequest();
+  is("the partial map is served (200), not kept by any cache", [partial.status, partial.headers.get("cache-control")], [200, "no-store"]);
+  is("and it has no blog address", (await partial.text()).includes("/blog"), false);
+  loggedNow();
   is("the inconsistent index is never removed by reading it", await redis.pipeline([["ZCARD", `nl:blog:pub:${statsId}`]]), [1]);
   is("set-up: the product is the one added", Boolean(shown), true);
 

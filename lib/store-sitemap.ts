@@ -66,7 +66,7 @@ export async function sitemapSize(store: Store): Promise<SitemapSize | null> {
  * than were paid for. Null when the window has no room for it (or it cannot
  * be counted), and then nothing more is read.
  */
-export async function paidStoreSitemap(store: Store, now = Date.now()): Promise<SitemapEntry[] | null> {
+export async function paidStoreSitemap(store: Store, now = Date.now()): Promise<StoreSitemap | null> {
   if (store.suspended) return [];
   const size = await sitemapSize(store);
   if (!size) return null;
@@ -75,6 +75,12 @@ export async function paidStoreSitemap(store: Store, now = Date.now()): Promise<
 }
 
 export type SitemapEntry = { url: string; lastModified?: string };
+/**
+ * A drawing of the map: its entries, and `partial` when a part could not be read and was left out (the blog, row #2695
+ * of #5285). A partial map is served but never kept by a cache (app/[handle]/store-sitemap/route.ts), so the next
+ * crawl reads it again (Claude 3 yUZf's LEVE on #5387).
+ */
+export type StoreSitemap = SitemapEntry[] & { partial?: true };
 
 /** The store's own address, with no slash at its end: its live domain, or its address here. */
 export function storeRoot(store: Store): string {
@@ -95,11 +101,11 @@ export function storeAddress(store: Store, path = ""): string {
 }
 
 /** Every address of a store a search engine is asked to keep, in the order a visitor meets them. */
-export async function storeSitemap(store: Store, nowSeconds = Math.floor(Date.now() / 1000), postPages = MAX_POST_PAGES): Promise<SitemapEntry[]> {
+export async function storeSitemap(store: Store, nowSeconds = Math.floor(Date.now() / 1000), postPages = MAX_POST_PAGES): Promise<StoreSitemap> {
   if (store.suspended) return [];
   const root = storeRoot(store);
   const own = root !== `${SITE_URL}/@${store.handle}`;
-  const out: SitemapEntry[] = [];
+  const out: StoreSitemap = [];
   // The front page asks to be kept once it has something on it (app/[handle]/page.tsx).
   if (visibleCount(store) > 0 || store.links.length > 0) out.push({ url: own ? `${root}/` : root });
   // Only the products a visitor can see are read; the hidden ones are known from the record.
@@ -129,6 +135,7 @@ export async function storeSitemap(store: Store, nowSeconds = Math.floor(Date.no
   } catch (error) {
     console.error("a store's blog could not be read for its map; its addresses are left out this time", error);
     posts = [];
+    out.partial = true;
   }
   if (posts.length) {
     out.push({ url: `${root}/blog`, lastModified: new Date(Math.max(...posts.map((p) => p.updatedAt)) * 1000).toISOString() });

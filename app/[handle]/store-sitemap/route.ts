@@ -29,8 +29,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ han
   // With no room this month, a crawler is told to come back later and nothing is read.
   const entries = await paidStoreSitemap(store);
   if (!entries) return tryLater();
+  // A map with a part left out (its blog could not be read) is served, never kept: the next crawl reads it again.
   return new Response(sitemapXml(entries), {
-    headers: { "Content-Type": "application/xml; charset=utf-8", "Cache-Control": "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400" },
+    headers: { "Content-Type": "application/xml; charset=utf-8", "Cache-Control": entries.partial ? "no-store" : "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400" },
   });
 }
 

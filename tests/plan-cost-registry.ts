@@ -1570,7 +1570,7 @@ export const REQUEST_COMMANDS = 1 + SHARE_COMMANDS_PER_REQUEST;
  * (LOOK_AT reviews of the longest words), which runs at most once an hour a store (QUOTES_REFRESH_SECONDS).
  */
 export const REVIEW_WRITE_WORST = {
-  save: { commands: 85, bytes: 144_000 },
+  save: { commands: 86, bytes: 144_000 },
   remove: { commands: 43, bytes: 76_000 },
   mark: { commands: 27, bytes: 77_000 },
   refresh: { commands: 56, bytes: 60_000 },
@@ -3065,7 +3065,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/review-ask.ts", names: ["MAX_ASK_DAYS"] },
       { file: "app/api/store/review/route.ts", names: ['withinMonthWhy("review-saves", proof.reference, REVIEW_SAVES_PER_ORDER_MONTH', "refreshStoreQuotesHourly(store)"] },
     ],
-    basis: "Each part of a review write measured at its worst in tests/review-route-units.test.ts (REVIEW_WRITE_WORST, Upstash billing of a script: 1 and each redis.call in its text). One order saves its review at most REVIEW_SAVES_PER_ORDER_MONTH times in the store's month (the route answers savedEnough past it), deletes it at most as often as it saved it, and has its refund marked once; the orders whose buyers can write in a month are REVIEW_DOOR_MONTHS store months of ORDERS_INCLUDED (a request sent up to MAX_ASK_DAYS after the order, its link open 60 days). The quotes' refresh runs at most once an hour a store, 744 in a 31-day month. The request each write takes is still counted in public-requests too.",
+    basis: "Each part of a review write measured at its worst in tests/review-route-units.test.ts (REVIEW_WRITE_WORST, Upstash billing of a script: 1 and each redis.call in its text). One order saves its review at most REVIEW_SAVES_PER_ORDER_MONTH times in the store's month (the route reads the count first and answers savedEnough past it; the save is counted only under the product's lock, just before it writes, so a busy or full save never uses it, and one that then finds no room gives it back), deletes it at most as often as it saved it, and has its refund marked once; the orders whose buyers can write in a month are REVIEW_DOOR_MONTHS store months of ORDERS_INCLUDED (a request sent up to MAX_ASK_DAYS after the order, its link open 60 days). The quotes' refresh runs at most once an hour a store, 744 in a 31-day month. The request each write takes is still counted in public-requests too, and a press that writes nothing (refused past the month's save, busy, a deletion with nothing to delete, a refund already marked) stays inside that one request (COMMANDS.laterPage + COMMANDS.laterCount and PAGE_BYTES, held in the same test).",
   },
   {
     id: "page-readings",

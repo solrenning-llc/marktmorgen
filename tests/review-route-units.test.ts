@@ -29,6 +29,7 @@ import { GIVING_WORDS } from "@/lib/buyer-words/giving";
 import { MAX_ASK_DAYS } from "@/lib/review-ask";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { REVIEW_DOOR_MONTHS, REVIEW_WRITE_WORST, request, reviewWritesMonthlyUsd } from "./plan-cost-registry";
+import { COMMANDS, PAGE_BYTES } from "./traffic-cost";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
 import { store as redis } from "./redis-stub";
@@ -44,6 +45,7 @@ const ACCOUNT = "acct_1TestRevUnits001";
 const ORDERS = [
   { session: "cs_test_reviewrouteunits0001", buyer: "buyer-review-units@example.com", pi: "pi_ReviewRouteUnits1" },
   { session: "cs_test_reviewrouteunits0002", buyer: "buyer-review-units-2@example.com", pi: "pi_ReviewRouteUnits2" },
+  { session: "cs_test_reviewrouteunits0003", buyer: "buyer-review-units-3@example.com", pi: "pi_ReviewRouteUnits3" },
 ];
 /** More reviews than the store page's quotes look at (lib/store-quotes.ts, LOOK_AT 40). */
 const OTHERS = 45;
@@ -161,11 +163,21 @@ async function main(): Promise<void> {
   is("refused, and the page has words for it", [third.status, typeof GIVING_WORDS.en.reviewNotices.savedEnough], ["savedEnough", "string"]);
   is("nothing changed", (await readReview(statsId, productId, id))?.text === words(901).trim(), true);
   is("every buyer language says it", Object.values(GIVING_WORDS).every((w) => typeof w.reviewNotices.savedEnough === "string" && w.reviewNotices.savedEnough.length > 40), true);
+  // Claude 2 lpgvy's MEDIUM 1 on #5400: the words name the bound the code keeps, never a count it does not.
+  const twice = /\b(twice|dos veces|deux fois|zweimal|due volte|twee keer|duas vezes)\b/i;
+  is(`with ${REVIEW_SAVES_PER_ORDER_MONTH} save a month, no language says it was saved twice`, Object.entries(GIVING_WORDS).filter(([, w]) => REVIEW_SAVES_PER_ORDER_MONTH === 1 && twice.test(w.reviewNotices.savedEnough)).map(([lang]) => lang), []);
+  is("and English says it was already saved this month", GIVING_WORDS.en.reviewNotices.savedEnough.startsWith("This review was already saved this month"), true);
+  // Claude 2 lpgvy's LOW 4 on #5400: a refused press stays inside the one public request it takes.
+  const onePublicRequest = { commands: COMMANDS.laterPage + COMMANDS.laterCount, bytes: PAGE_BYTES };
+  within("a refused save", third, onePublicRequest);
 
   part("Deleting is never refused by it, at its worst");
   const removal = await measured({ action: "delete", confirm: "yes" });
   is("deleted", [removal.status, await readReview(statsId, productId, id)], ["deleted", null]);
   within("the deletion", removal, REVIEW_WRITE_WORST.remove);
+  const nothingToDelete = await measured({ action: "delete", confirm: "yes" });
+  is("a deletion with nothing left to delete changes nothing", [nothingToDelete.status === "deleted" || nothingToDelete.status === "none", await readReview(statsId, productId, id)], [true, null]);
+  within("a deletion with nothing to delete", nothingToDelete, onePublicRequest);
 
   part("The refund's mark, on another order's review");
   order = ORDERS[1];
@@ -174,7 +186,21 @@ async function main(): Promise<void> {
   const marked = await measured({ rating: "3", text: words(902) });
   is("marked refunded", marked.status, "refunded");
   within("the refund's mark", marked, REVIEW_WRITE_WORST.mark);
+  const markedAgain = await measured({ rating: "3", text: words(902) });
+  is("pressed again: still refunded", markedAgain.status, "refunded");
+  within("a second press on a refunded order", markedAgain, onePublicRequest);
   refunded = false;
+
+  part("Claude 2 lpgvy's MEDIUM 2 on #5400: a save that wrote nothing gives the month's save back");
+  order = ORDERS[2];
+  const lock = `nl:rev:lock:${statsId}:${productId}`;
+  await real([["SET", lock, "another-save-holds-it", "EX", 60]]);
+  const busy = await measured({ rating: "4", text: words(904) });
+  is("another save holds the product: busy, nothing written", [busy.status, await readReview(statsId, productId, reviewId(statsId, productId, ORDERS[2].buyer))], ["busy", null]);
+  within("a busy press", busy, onePublicRequest);
+  await real([["DEL", lock]]);
+  is("sent again once the other save is done: saved", statusOf(await send({ rating: "4", text: words(904) })), "saved");
+  is("and the review is there", (await readReview(statsId, productId, reviewId(statsId, productId, ORDERS[2].buyer)))?.text === words(904).trim(), true);
 
   part("The cost line, recomputed from the model (AC (n))");
   const per = (w: { commands: number; bytes: number }) => request("heavy", w.commands, w.bytes);

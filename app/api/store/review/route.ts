@@ -3,7 +3,7 @@ import { type NextRequest, after } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { dropReviewQuote, refreshStoreQuotesHourly } from "@/lib/store-quotes";
 import { ensureStatsId, normaliseHandle, setReviewed, storeForHandle, storeRef } from "@/lib/store";
-import { clientAddress, fromAnotherSite, limited, withinLimit, withinMonthWhy, unknownLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, giveBackMonth, monthCountWhy, withinMonthWhy, unknownLimit } from "@/lib/request-guard";
 import { windowId, windowKeySeconds } from "@/lib/allowance-window";
 import { type Door, doorFields, openDoor, readDoor, reviewPagePath } from "@/lib/review-proof";
 import { MAX_REVIEW_PHOTO_BYTES, REVIEW_SAVES_PER_ORDER_MONTH, type ReviewPhoto, deleteReview, markOneRefunded, readRating, readReview, reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
@@ -136,12 +136,23 @@ export async function POST(request: NextRequest) {
     const sentPhoto = photoPaused ? "" : read("photo");
     const checked = sentPhoto ? checkReviewPhoto(sentPhoto) : null;
     if (checked === "photo") return answer("photo");
-    // One order saves its review at most REVIEW_SAVES_PER_ORDER_MONTH times in the store's month: the first review and
-    // each rewrite (#5010 row 180), so a month's review writes have the bound the cost line "review-writes" prices.
-    // Deleting is never counted against it. Past it, the page says so plainly; a count that cannot be read saves nothing.
-    const saves = await withinMonthWhy("review-saves", proof.reference, REVIEW_SAVES_PER_ORDER_MONTH, windowId(store), windowKeySeconds(store, 32 * 86_400));
-    if (saves === "over") return answer("savedEnough");
-    if (saves === "unknown") return answer("error");
+    // One order saves its review at most REVIEW_SAVES_PER_ORDER_MONTH times in the store's month (#5010 row 180), so a
+    // month's review writes have the bound the cost line "review-writes" prices. Deleting is never counted against it.
+    // The count is read first (one GET), so a press past it is refused at once, in plain words; it is taken only under
+    // the product's lock, just before the write (saveReview's admit), so a save that was busy or full never uses the
+    // month's save, and one that then found no room gives it back (Claude 2 lpgvy's MEDIUM 2 on #5400). A count that
+    // cannot be read saves nothing.
+    const month = windowId(store);
+    const monthKeep = windowKeySeconds(store, 32 * 86_400);
+    const seen = await monthCountWhy("review-saves", proof.reference, REVIEW_SAVES_PER_ORDER_MONTH, month);
+    if (seen === "over") return answer("savedEnough");
+    if (seen === "unknown") return answer("error");
+    let admitted = false;
+    const admit = async () => {
+      const taken = await withinMonthWhy("review-saves", proof.reference, REVIEW_SAVES_PER_ORDER_MONTH, month, monthKeep);
+      admitted = taken === "ok";
+      return taken;
+    };
     // The words are written first, and that same write grants the photo one of the review's MAX_REVIEW_PHOTOS
     // slots (C4-20261106-2720-C5-160): the put, a paid operation, is made only after a write that granted it.
     // A write that failed, was busy or had no room never puts.
@@ -158,7 +169,10 @@ export async function POST(request: NextRequest) {
       name: read("name"),
       paidAt: proof.paidAt,
       photo: checked !== null,
+      admit,
     }, store);
+    if (saved.state === "over") return answer("savedEnough");
+    if (saved.state === "noroom" && admitted) await giveBackMonth("review-saves", proof.reference, month, monthKeep);
     const written = saved.state === "created" || saved.state === "updated";
     const granted = written && saved.photoGranted;
     let photo: ReviewPhoto | null = null;

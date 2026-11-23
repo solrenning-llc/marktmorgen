@@ -29,7 +29,7 @@
  */
 import { windowCount, windowCountOf } from "@/lib/window-count";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 
 type HeaderSource = { headers: Headers };
 
@@ -386,9 +386,7 @@ export async function withinMonthWhy(scope: string, who: string, limit: number, 
   if (!Number.isSafeInteger(keepSeconds) || keepSeconds < MONTH_KEEP_SECONDS) return "unknown";
   let reply: unknown;
   try {
-    const month = window;
-    const key = `nl:rlm:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}:${month}`;
-    reply = await redisPipeline(windowCount(key, keepSeconds));
+    reply = await redisPipeline(windowCount(await monthKey(scope, who, window), keepSeconds));
   } catch (error) {
     // An answer out of shape is an unknown count, never room; only Redis out of reach opens, as withinLimit.
     return error instanceof UnknownReplyError ? "unknown" : "ok";
@@ -401,6 +399,51 @@ export async function withinMonthWhy(scope: string, who: string, limit: number, 
   }
   if (count === null) return "unknown";
   return count <= limit ? "ok" : "over";
+}
+
+/** The key withinMonthWhy counts `who` under for `window`. */
+async function monthKey(scope: string, who: string, window: string): Promise<string> {
+  return `nl:rlm:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}:${window}`;
+}
+
+/**
+ * withinMonthWhy's count read without taking one, in one GET (app/api/store/review, Claude 2 lpgvy's MEDIUM 2 on
+ * #5400): "over" when `limit` are already taken in `window`, so a press past it is refused before anything heavier
+ * runs; "ok" when fewer are, or when Redis cannot be asked, as withinMonth; "unknown" for a window that is not one or
+ * a reply of another shape. It never admits by itself: the count is taken with withinMonthWhy where the work is sure
+ * to run.
+ */
+export async function monthCountWhy(scope: string, who: string, limit: number, window: string | null): Promise<"ok" | "over" | "unknown"> {
+  if (!window || !/^\d{4}-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?$/.test(window)) return "unknown";
+  if (!isRedisConfigured()) return "ok";
+  if (!Number.isSafeInteger(limit) || limit <= 0) return "unknown";
+  let reply: unknown;
+  try {
+    reply = repliesFor(await redisPipeline([["GET", await monthKey(scope, who, window)]]), 1)?.[0];
+  } catch (error) {
+    return error instanceof UnknownReplyError ? "unknown" : "ok";
+  }
+  if (reply === null) return "ok";
+  if (typeof reply !== "string" || !/^-?\d{1,15}$/.test(reply)) return "unknown";
+  return Number(reply) >= limit ? "over" : "ok";
+}
+
+/**
+ * Gives back one count withinMonthWhy took in `window` when the work it admitted wrote nothing (a review save with no
+ * room left, app/api/store/review). Best effort, as giveBackLimit: a failed give-back leaves the count as taken, the
+ * safe way to be wrong; a key gone in between starts again at -1 with the window's own keep, never one without expiry.
+ */
+export async function giveBackMonth(scope: string, who: string, window: string | null, keepSeconds: number): Promise<void> {
+  if (!window || !isRedisConfigured() || !Number.isSafeInteger(keepSeconds) || keepSeconds < MONTH_KEEP_SECONDS) return;
+  try {
+    const key = await monthKey(scope, who, window);
+    await redisPipeline([
+      ["SET", key, "0", "EX", keepSeconds, "NX"],
+      ["DECR", key],
+    ]);
+  } catch {
+    // Kept as taken.
+  }
 }
 
 /**

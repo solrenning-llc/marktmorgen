@@ -94,11 +94,13 @@ export async function forgetCommunityPerson(id: string, who: string, email: stri
   const unsub = named?.read?.member?.t;
   if (handle) await step(() => forgetHandle(id, handle, who));
   if (unsub) await step(() => forgetCommunityUnsub(unsub));
+  await step(() => unindexMember(id, who));
   // Their key, derived from their address, in the sends still going out: written over where it stands, so nobody after
-  // it moves (Codex L-20261121-0758). Read whole or not at all; unknown refuses and the retry comes back here.
+  // it moves (Codex L-20261121-0758). Read whole or not at all; unknown refuses and the retry comes back here. After
+  // they leave the index, so a send that read them holds its place by now and either sees this erasure counted or is
+  // found here with its list written (Claude 2 lpgvy on #5072, LOW 1).
   await step(() => forgetAnnouncementRecipient(id, who));
   const namedGone = named !== null && failures.length === beforeNamed;
-  await step(() => unindexMember(id, who));
   // Their trace (lib/community-trace.ts): what they wrote and did, by
   // reference; counted and deleted in one step, each entry's room given back once.
   // Read exactly (Claude 6's note on #2576): a reply that is not one whole count is unknown, never "nothing was

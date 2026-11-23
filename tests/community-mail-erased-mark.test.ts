@@ -11,7 +11,7 @@
  *
  * Synthetic data only (tests/community-mail-read-world.ts).
  */
-import { advanceAnnouncement, queueAnnouncement, type AnnouncementJob } from "@/lib/community-mail";
+import { RecipientsUnreadError, advanceAnnouncement, forgetAnnouncementRecipient, queueAnnouncement, type AnnouncementJob } from "@/lib/community-mail";
 import { MAX_SENDS_UNDER_WAY } from "@/lib/community-text";
 import { ERASED_MARK } from "@/lib/erasure-lists";
 import type { Post } from "@/lib/community";
@@ -68,6 +68,39 @@ async function main(): Promise<void> {
   db.run(["DEL", `nl:cm:mail:${live[0]}`]);
   const room = await queueAnnouncement(store, config, post);
   is("a place whose send is gone is let go, and the new send takes it", [room.ok, db.run(["SISMEMBER", sends, live[0]]), db.run(["SCARD", sends])], [true, 0, MAX_SENDS_UNDER_WAY]);
+
+  // Claude 2 lpgvy on #5072, LOW 1: a person erased in full after the members were read and before the send's list is
+  // written. Their erasure finds no list to write over, so the list would keep their key until the send ends.
+  part("a person erased while the members were read: the list is let go and nothing is sent");
+  reset();
+  const erased = members[0].k;
+  const real = db.pipeline.bind(db);
+  let fired = false;
+  let list = "";
+  db.pipeline = (async (commands: (string | number)[][]) => {
+    const push = commands.find((c) => c[0] === "RPUSH" && /^nl:cm:mail:[0-9a-f]{24}:to$/.test(String(c[1])));
+    if (!fired && push) {
+      fired = true;
+      list = String(push[1]);
+      await forgetAnnouncementRecipient(community, erased);
+    }
+    return real(commands);
+  }) as typeof db.pipeline;
+  let raced: unknown = null;
+  try {
+    await queueAnnouncement(store, config, post);
+  } catch (error) {
+    raced = error;
+  } finally {
+    db.pipeline = real;
+  }
+  const kept = db.run(["LRANGE", list, 0, -1]) as string[];
+  is("the erasure landed between the read and the list", fired, true);
+  is("the post is said as not emailed", raced instanceof RecipientsUnreadError, true);
+  is("the send's list is gone, the erased key with it", [db.run(["EXISTS", list]), kept.includes(erased)], [0, false]);
+  is("nothing in line, no place held, nothing sent", [db.run(["SCARD", "nl:cm:mailq"]), db.run(["SCARD", sends]), sent.length], [0, 0, 0]);
+  const again = await queueAnnouncement(store, config, post);
+  is("the next announcement, with nobody erased while it reads, is queued", again.ok, true);
   done();
 }
 

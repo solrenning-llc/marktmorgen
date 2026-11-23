@@ -62,6 +62,13 @@ const lockKey = (id: string) => `nl:cm:mail:${id}:lock`;
 const sendsKey = (community: string) => `nl:cm:${community}:sends`;
 const SENDS_SECONDS = 60 * 86_400;
 /**
+ * A community's count of erasures begun (Claude 2 lpgvy on #5072, LOW 1): a person's erasure adds one after they
+ * leave the members' index and before their key is written over in the sends under way. A send reads it before it
+ * reads the members and again once its list is written, and a change means someone was erased while it read: the
+ * list is let go and nothing is sent. One number a community, kept as long as a send's record.
+ */
+const erasuresKey = (community: string) => `nl:cm:${community}:erasures`;
+/**
  * The most ids an erasure reads from a community's sends and looks up (ERASE_ANNOUNCEMENT_LISTS): twice the cap, room
  * for places whose send is gone (a refused send's lost SREM). More than that refuses the erasure for its retry.
  */
@@ -167,6 +174,13 @@ async function holdSendPlace(community: string, id: string): Promise<boolean> {
   return false;
 }
 
+/** The community's count of erasures as kept (null when none has been counted), read exactly. */
+async function erasuresCount(community: string): Promise<string | null> {
+  const read = repliesFor(await redisPipeline([["GET", erasuresKey(community)]]), 1);
+  if (!read || (read[0] !== null && (typeof read[0] !== "string" || !/^\d{1,16}$/.test(read[0])))) throw new UnknownReplyError("a community's count of erasures");
+  return read[0] as string | null;
+}
+
 /**
  * Takes a send that is over (sent, failed, stopped, or its record gone) out of line and out of its community's sends.
  * Its recipient list goes first, confirmed (Claude 7 xAF on #5072, LEVE): a failed send no longer in the community's
@@ -188,6 +202,10 @@ async function letGo(id: string, community?: string): Promise<void> {
  */
 export async function forgetAnnouncementRecipient(community: string, who: string): Promise<number> {
   if (!who || !isRedisConfigured()) return 0;
+  // The community's count of erasures first, read exactly, so a send that read the members before this person left
+  // the index sees it changed once its list is written, and lets its list go (Claude 2 lpgvy on #5072, LOW 1).
+  const counted = repliesFor(await redisPipeline([["INCR", erasuresKey(community)], ["EXPIRE", erasuresKey(community), SENDS_SECONDS]]), 2);
+  if (!counted || countOf(counted[0]) === null || countOf(counted[1]) === null) throw new UnknownReplyError("a community's count of erasures");
   const listed = repliesFor(await redisPipeline([["SMEMBERS", sendsKey(community)]]), 1)?.[0];
   if (!Array.isArray(listed) || listed.length > ERASE_SENDS_READ_MOST || listed.some((id) => typeof id !== "string")) {
     throw new UnknownReplyError("a community's announcements under way");
@@ -231,16 +249,24 @@ export class RecipientsUnreadError extends UnknownReplyError {
 export async function queueAnnouncement(store: Store, config: CommunityConfig, post: Post): Promise<QueueResult> {
   const communityId = store.community?.id;
   if (!communityId || !canAnnounceByEmail(store)) return { ok: false, reason: "plan" };
+  const id = randomBytes(12).toString("hex");
+  // Its place among the community's sends first, before the members are read, so a person's erasure that takes them
+  // out of the index after that read finds this send (Claude 2 lpgvy on #5072, LOW 1).
+  if (!(await holdSendPlace(communityId, id))) return { ok: false, reason: "busy" };
+  const release = () => redisPipeline([["SREM", sendsKey(communityId), id]]).catch((error: unknown) => console.error("letting go of an announcement's place failed", error));
   let members: Awaited<ReturnType<typeof mailableMembers>>;
+  let before: string | null;
   try {
+    before = await erasuresCount(communityId);
     members = await mailableMembers(communityId);
   } catch (error) {
+    await release();
     throw new RecipientsUnreadError(error);
   }
-  if (members.length === 0) return { ok: false, reason: "empty" };
-  const id = randomBytes(12).toString("hex");
-  // Its place among the community's sends first, so a person's erasure that starts from here on finds it.
-  if (!(await holdSendPlace(communityId, id))) return { ok: false, reason: "busy" };
+  if (members.length === 0) {
+    await release();
+    return { ok: false, reason: "empty" };
+  }
   const w = communityWords(store.language);
   const subject = (post.title || w.announceSubject(config.name)).slice(0, 150);
   const body = [post.text, "", w.announceReadIt(config.name), postAddress(store, post.id)].join("\n").trim();
@@ -264,6 +290,19 @@ export async function queueAnnouncement(store: Store, config: CommunityConfig, p
   for (let i = 0; i < keys.length; i += 500) commands.push(["RPUSH", toKey(job.id), ...keys.slice(i, i + 500)]);
   commands.push(["EXPIRE", toKey(job.id), 60 * 86_400]);
   await redisPipeline(commands);
+  // Someone erased while the members were read (the count moved, or cannot be read): their key may be in the list and
+  // their erasure may have looked before it was written. The list is let go and nothing is sent; the post says it was
+  // not emailed, as for a read that failed (Claude 2 lpgvy on #5072, LOW 1).
+  let after: string | null | undefined;
+  try {
+    after = await erasuresCount(communityId);
+  } catch {
+    after = undefined;
+  }
+  if (after !== before) {
+    await letGo(job.id, communityId);
+    throw new RecipientsUnreadError(new UnknownReplyError("a person erased while the community's members were read"));
+  }
   await save(job);
   await redisPipeline([["SADD", QUEUE, job.id]]);
   return { ok: true, job };

@@ -112,10 +112,12 @@ export const ERASE_SUBMISSIONS: readonly [number, number] = [301, 70_000];
  * writes the mark over the person's place: its EVAL, an LRANGE a send and an LSET a send at the most (a member is
  * in a send's list once), as Upstash bills them, and one SREM of any member that is not a send's id (Claude 7 xAF on
  * #5072); and, past the cap, one EXISTS for each id read, at most twice the cap (ERASE_SENDS_READ_MOST, Claude 2 lpgvy
- * on #5072, LOW 2), so the places whose send is gone are let go in the same SREM. Bytes: the script's text, the keys and
- * the replies, under 5,000, counted at 8,000; the lists themselves stay inside Redis. Held by tests/community-mail-recipient-erasure.test.ts.
+ * on #5072, LOW 2), so the places whose send is gone are let go in the same SREM; and, first, the community's count of
+ * erasures moved on (an INCR and its EXPIRE, Claude 2 lpgvy on #5072, LOW 1), so a send that read the members while
+ * this person was erased lets its list go. Bytes: the script's text, the keys and the replies, under 5,000, counted at
+ * 8,000; the lists themselves stay inside Redis. Held by tests/community-mail-recipient-erasure.test.ts.
  */
-export const ERASE_ANNOUNCEMENT_LISTS: readonly [number, number] = [3 + 2 * MAX_SENDS_UNDER_WAY + 2 * MAX_SENDS_UNDER_WAY, 8_000];
+export const ERASE_ANNOUNCEMENT_LISTS: readonly [number, number] = [2 + 3 + 2 * MAX_SENDS_UNDER_WAY + 2 * MAX_SENDS_UNDER_WAY, 8_000];
 
 /**
  * Commands every erasure sends whatever the store: each module's own, workflows at their cap, a sync log at its length,

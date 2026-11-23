@@ -31,7 +31,7 @@ const F = script("FINISH_UNLESS_GONE");
 
 test("lib/meta-ads.ts defines both scripts", () => {
   assert.match(W, /^-- marktmorgen:meta-if-connected:v1\n/);
-  assert.match(F, /^-- marktmorgen:meta-finish:v1\n/);
+  assert.match(F, /^-- marktmorgen:meta-finish:v2\n/);
 });
 
 type Arg = string | number;
@@ -43,10 +43,13 @@ const IF_STATE: Arg[][] = [["GET", "c"], ["GET", "r"], ["GET", "l"], ["TTL", "r"
 const untouched = ["S", "old", "old", -1];
 const ifCase = (name: string, run: Arg[], reply: number | "error", state: unknown[] = untouched): Case => ({ name, setup: IF_SETUP, run: ["EVAL", W, ...run], reply, after: IF_STATE, state });
 
-const FIN_SETUP: Arg[][] = [["SET", "read", "r"]];
+// The store's id key holds its ref (lib/live-fence.ts): the store is live (#5010 row 117).
+const FIN_SETUP: Arg[][] = [["SET", "read", "r"], ["SET", "live", "ref"]];
 // The connection, the read's record, the store in the connected stores, the store in the person's index.
 const FIN_STATE: Arg[][] = [["GET", "conn"], ["EXISTS", "read"], ["SISMEMBER", "stores", "s1"], ["SISMEMBER", "user", "s1"]];
-const FIN_KEYS = ["conn", "read", "stores", "user", "gone"];
+const FIN_KEYS = ["conn", "read", "stores", "user", "gone", "live", "erasing"];
+// The store's fence: its erasing field, "" for a store with an id (a store from before ids passes its statsId), its ref.
+const FENCE = ["fld", "", "ref"];
 const kept = [null, 1, 0, 0];
 // The same, with each set read by its kind (TYPE), for a key that holds another kind of value.
 const FIN_TYPED: Arg[][] = [["GET", "conn"], ["EXISTS", "read"], ["TYPE", "stores"], ["TYPE", "user"]];
@@ -79,26 +82,37 @@ const CASES: Case[] = [
   ifCase("a key count with a leading zero is Redis's own error", ["02", "c", "r", "S", "new", 60], "error"),
   ifCase("a key count of -0 is Redis's own error", ["-0", "c", "r", "S", "new", 60], "error"),
   ifCase("a key count with a plus sign is Redis's own error", ["+2", "c", "r", "S", "new", 60], "error"),
-  finCase("keeps the connection when no deletion was confirmed", null, [5, ...FIN_KEYS, "J", 1001, "s1"], 1, ["J", 0, 1, 1]),
-  finCase("keeps it when the deletion is older than the flow", "1000", [5, ...FIN_KEYS, "J", 1001, "s1"], 1, ["J", 0, 1, 1]),
-  finCase("keeps nothing when the deletion is at the flow's start", "1001", [5, ...FIN_KEYS, "J", 1001, "s1"], 0),
-  finCase("keeps nothing when the deletion is after the flow's start", "2000", [5, ...FIN_KEYS, "J", 1001, "s1"], 0),
-  finCase("keeps nothing when the mark does not read as a time", "soon", [5, ...FIN_KEYS, "J", 1001, "s1"], 0),
-  finCase("a start of 0 is refused", null, [5, ...FIN_KEYS, "J", 0, "s1"], -1),
-  finCase("a negative start is refused", null, [5, ...FIN_KEYS, "J", -5, "s1"], -1),
-  finCase("a start that is not a whole number is refused", null, [5, ...FIN_KEYS, "J", "1.5", "s1"], -1),
-  finCase("a start longer than sixteen digits is refused", null, [5, ...FIN_KEYS, "J", "12345678901234567", "s1"], -1),
-  finCase("an empty store is refused", null, [5, ...FIN_KEYS, "J", 1001, ""], -1),
-  finCase("a key too few is refused", null, [4, ...FIN_KEYS.slice(0, 4), "J", 1001, "s1"], -1),
-  finCase("an argument too many is refused", null, [5, ...FIN_KEYS, "J", 1001, "s1", "extra"], -1),
-  finCase("an argument too few is refused", null, [5, ...FIN_KEYS, "J", 1001], -1),
-  finCase("a key count with a leading zero is Redis's own error", null, ["05", ...FIN_KEYS, "J", 1001, "s1"], "error"),
-  finCase("keeps it when both sets already hold another store", null, [5, ...FIN_KEYS, "J", 1001, "s1"], 1, ["J", 0, 1, 1], [["SADD", "stores", "s0"], ["SADD", "user", "s0"]]),
+  finCase("keeps the connection when no deletion was confirmed", null, [7, ...FIN_KEYS, "J", 1001, "s1", ...FENCE], 1, ["J", 0, 1, 1]),
+  finCase("keeps it when the deletion is older than the flow", "1000", [7, ...FIN_KEYS, "J", 1001, "s1", ...FENCE], 1, ["J", 0, 1, 1]),
+  finCase("keeps nothing when the deletion is at the flow's start", "1001", [7, ...FIN_KEYS, "J", 1001, "s1", ...FENCE], 0),
+  finCase("keeps nothing when the deletion is after the flow's start", "2000", [7, ...FIN_KEYS, "J", 1001, "s1", ...FENCE], 0),
+  finCase("keeps nothing when the mark does not read as a time", "soon", [7, ...FIN_KEYS, "J", 1001, "s1", ...FENCE], 0),
+  finCase("a start of 0 is refused", null, [7, ...FIN_KEYS, "J", 0, "s1", ...FENCE], -1),
+  finCase("a negative start is refused", null, [7, ...FIN_KEYS, "J", -5, "s1", ...FENCE], -1),
+  finCase("a start that is not a whole number is refused", null, [7, ...FIN_KEYS, "J", "1.5", "s1", ...FENCE], -1),
+  finCase("a start longer than sixteen digits is refused", null, [7, ...FIN_KEYS, "J", "12345678901234567", "s1", ...FENCE], -1),
+  finCase("an empty store is refused", null, [7, ...FIN_KEYS, "J", 1001, "", ...FENCE], -1),
+  finCase("a key too few is refused", null, [6, ...FIN_KEYS.slice(0, 6), "J", 1001, "s1", ...FENCE], -1),
+  finCase("an argument too many is refused", null, [7, ...FIN_KEYS, "J", 1001, "s1", ...FENCE, "extra"], -1),
+  finCase("an argument too few is refused", null, [7, ...FIN_KEYS, "J", 1001, "s1", "fld", ""], -1),
+  finCase("a key count with a leading zero is Redis's own error", null, ["07", ...FIN_KEYS, "J", 1001, "s1", ...FENCE], "error"),
+  finCase("keeps it when both sets already hold another store", null, [7, ...FIN_KEYS, "J", 1001, "s1", ...FENCE], 1, ["J", 0, 1, 1], [["SADD", "stores", "s0"], ["SADD", "user", "s0"]]),
+  // The store's fence (#5010 row 117, Codex L-20261119-2124): an OAuth answer that comes back after the store's erasure
+  // began, or after it is gone or moved, keeps nothing, before the Meta user's mark is even read.
+  finCase("keeps nothing when the store's erasure has begun", null, [7, ...FIN_KEYS, "J", 1001, "s1", ...FENCE], 2, [null, 1, 0, 0], [["HSET", "erasing", "fld", "1700000000000"]]),
+  finCase("keeps nothing when the store is gone", null, [7, ...FIN_KEYS, "J", 1001, "s1", ...FENCE], 2, [null, 1, 0, 0], [["DEL", "live"]]),
+  finCase("keeps nothing when the store's id key moved to another ref", null, [7, ...FIN_KEYS, "J", 1001, "s1", ...FENCE], 2, [null, 1, 0, 0], [["SET", "live", "other"]]),
+  finCase("the store's fence comes before the Meta user's mark", "2000", [7, ...FIN_KEYS, "J", 1001, "s1", ...FENCE], 2, [null, 1, 0, 0], [["DEL", "live"]]),
+  finCase("a store from before ids: kept while its record carries its statsId", null, [7, ...FIN_KEYS, "J", 1001, "s1", "fld", "st1", "owner@example.com"], 1, ["J", 0, 1, 1], [["SET", "live", JSON.stringify({ statsId: "st1" })]]),
+  finCase("a store from before ids: nothing when its record is another store's", null, [7, ...FIN_KEYS, "J", 1001, "s1", "fld", "st1", "owner@example.com"], 2, [null, 1, 0, 0], [["SET", "live", JSON.stringify({ statsId: "st2" })]]),
+  finCase("a store from before ids: a record that does not read is unknown", null, [7, ...FIN_KEYS, "J", 1001, "s1", "fld", "st1", "owner@example.com"], -2, [null, 1, 0, 0], [["SET", "live", "{not json"]]),
+  finCase("an empty erasing field is refused", null, [7, ...FIN_KEYS, "J", 1001, "s1", "", "", "ref"], -1),
+  finCase("an empty ref is refused", null, [7, ...FIN_KEYS, "J", 1001, "s1", "fld", "", ""], -1),
   // A set key holding another kind of value (Claude 2 on #3322): Redis does not undo a script that stops half-way, so
   // the connection must not be written before a SADD that would fail; nothing is written, and the error is Redis's.
   // Read with TYPE, since SISMEMBER on such a key is an error itself.
-  finCase("keeps nothing when the person's index holds another kind of value", null, [5, ...FIN_KEYS, "J", 1001, "s1"], "error", [null, 1, "none", "string"], [["SET", "user", "x"]], FIN_TYPED),
-  finCase("keeps nothing when the connected stores hold another kind of value", null, [5, ...FIN_KEYS, "J", 1001, "s1"], "error", [null, 1, "string", "none"], [["SET", "stores", "x"]], FIN_TYPED),
+  finCase("keeps nothing when the person's index holds another kind of value", null, [7, ...FIN_KEYS, "J", 1001, "s1", ...FENCE], "error", [null, 1, "none", "string"], [["SET", "user", "x"]], FIN_TYPED),
+  finCase("keeps nothing when the connected stores hold another kind of value", null, [7, ...FIN_KEYS, "J", 1001, "s1", ...FENCE], "error", [null, 1, "string", "none"], [["SET", "stores", "x"]], FIN_TYPED),
 ];
 
 function onStandIn(c: Case): { reply: unknown; state: unknown[] } {

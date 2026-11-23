@@ -164,7 +164,8 @@ async function readState(): Promise<State> {
   return { phase, cursor, version };
 }
 
-export type RecountReport = { phase: string; stores: number; pages: number; measured: number; applied: number; done: boolean };
+/** `unconfirmed`: stores whose accounting receipt was not confirmed this run; their sums are kept for the next run. */
+export type RecountReport = { phase: string; stores: number; pages: number; measured: number; applied: number; unconfirmed: number; done: boolean };
 
 /** What one key weighs, measured the way an order's write is charged (lib/order-data.ts). Null when it is gone. */
 export async function measureKey(key: string): Promise<number | null> {
@@ -269,16 +270,21 @@ async function ownersOf(keys: string[]): Promise<Map<string, string>> {
   return out;
 }
 
-/** Sets each measured store's "legacy" slot, a page of stores at a time; true once every one is set. */
-async function applySums(deadline: number): Promise<{ applied: number; done: boolean }> {
+/**
+ * Sets each measured store's "legacy" slot, a page of stores at a time; done once every one is set. The HSCAN follows
+ * its cursor through the run (a sum let go while it scans is fine: HSCAN still returns every field there the whole
+ * time), so a store whose receipt is not confirmed keeps its sum for the next run and the stores after it are still
+ * set (#5285 row #2501, Claude 2's NIT on #2501): it is counted as `unconfirmed`, and the recount is not done.
+ */
+async function applySums(deadline: number): Promise<{ applied: number; unconfirmed: number; done: boolean }> {
   let applied = 0;
+  let unconfirmed = 0;
+  let at = "0";
   for (let round = 0; round < 1_000; round += 1) {
-    if (Date.now() > deadline) return { applied, done: false };
-    const { cursor, flat } = pageOf(await read(["HSCAN", SUM_KEY, "0", "COUNT", 100]), true);
-    if (!flat.length) {
-      if (cursor !== "0") throw new Error("Recount sums are incomplete");
-      return { applied, done: true };
-    }
+    if (Date.now() > deadline) return { applied, unconfirmed, done: false };
+    const { cursor, flat } = pageOf(await read(["HSCAN", SUM_KEY, at, "COUNT", 100]), true);
+    // An empty page that is not the last is read as incomplete, as before: nothing is let go on it.
+    if (!flat.length && cursor !== "0") throw new Error("Recount sums are incomplete");
     // Validate the complete page before mutating any of its stores or sums.
     for (let i = 1; i < flat.length; i += 2) count(flat[i]);
     for (let i = 0; i + 1 < flat.length; i += 2) {
@@ -292,17 +298,21 @@ async function applySums(deadline: number): Promise<{ applied: number; done: boo
         const [total, legacy] = room.map((v) => v === null ? 0 : count(v));
         // What the room counts without this slot, its own field included.
         const counted = Math.max(0, total - legacy - (legacy > 0 ? 64 : 0));
-        // The sum goes only once the room confirms it counted it: an unconfirmed receipt keeps the sum and this run's
-        // checkpoint, so the next run applies it again (Codex Y's HOLD on #2501; "set" makes a repeat exact).
+        // The sum goes only once the room confirms it counted it: an unconfirmed receipt keeps the sum, so the next run
+        // applies it again (Codex Y's HOLD on #2501; "set" makes a repeat exact), and the stores after it go on.
         if (!(await noteDataConfirmed(store, [{ slot: LEGACY_SLOT, bytes: Math.max(0, measured - counted), set: true }]))) {
-          throw new Error("Recount accounting is unconfirmed");
+          console.error("a store's recount accounting is unconfirmed; its sum is kept for the next run");
+          unconfirmed += 1;
+          continue;
         }
         applied += 1;
       }
       await write([["HDEL", SUM_KEY, ref]]);
     }
+    if (cursor === "0") return { applied, unconfirmed, done: unconfirmed === 0 };
+    at = cursor;
   }
-  return { applied, done: false };
+  return { applied, unconfirmed, done: false };
 }
 
 /**
@@ -311,7 +321,7 @@ async function applySums(deadline: number): Promise<{ applied: number; done: boo
  * it did; `done` once every store is counted.
  */
 export async function recountStep(deadline: number, now = Date.now()): Promise<RecountReport> {
-  const report: RecountReport = { phase: "", stores: 0, pages: 0, measured: 0, applied: 0, done: false };
+  const report: RecountReport = { phase: "", stores: 0, pages: 0, measured: 0, applied: 0, unconfirmed: 0, done: false };
   if (!isRedisConfigured()) return report;
   let state = await readState();
   if (state.version !== RECOUNT_VERSION) {
@@ -347,8 +357,9 @@ export async function recountStep(deadline: number, now = Date.now()): Promise<R
   }
 
   if (state.phase === "apply" && Date.now() < deadline) {
-    const { applied, done } = await applySums(deadline);
+    const { applied, unconfirmed, done } = await applySums(deadline);
     report.applied += applied;
+    report.unconfirmed += unconfirmed;
     if (done) {
       await write([["HSET", STATE_KEY, "phase", "done", "finished", Date.now()], ["DEL", IDS_KEY, SUM_KEY]]);
       state = { ...state, phase: "done" };

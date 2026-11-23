@@ -77,6 +77,17 @@ export const PLAN_STUCK_RETRY_DAYS = 7;
  */
 export const PLAN_OWED_TELL_DAYS = 3;
 const DAY = 86_400;
+/**
+ * A put-back of a member's own end still owed (Claude 2's LEVE on #5367): finishPlan wrote the end that was sold over
+ * a member's cancel and the write of the member's end back was not confirmed, so Stripe may hold the sold end with
+ * the member's request, which the next pass alone would settle as done. Named by the account and the subscription, it
+ * holds the member's end (seconds); written before the put-back, taken out only on its confirmed answer, read by the
+ * next pass that finds the sold end with a request. Kept through the member's end and PLAN_GIVE_UP_DAYS more (an
+ * unsettled plan is tried again within PLAN_GIVE_UP_DAYS, then weekly), and never more than PUT_BACK_KEEP_DAYS.
+ */
+const putBackKey = (account: string, subscription: string): string => `nl:plans:put-back:${account}:${subscription}`;
+/** Days a put-back still owed is kept at the most (nl:plans:put-back: in tests/store-data-registry.ts). */
+export const PUT_BACK_KEEP_DAYS = 400;
 
 /**
  * Whether Stripe refused a call because of the creator's own account: our access to it revoked, or the account
@@ -191,6 +202,24 @@ async function tryPlan(account: string, session: string, about?: { sid: string; 
   // before its own, whichever comes first, and is settled once Stripe has canceled
   // it, or once its own end has come with the earlier one still in place.
   const cancelAt = typeof subscription.cancel_at === "number" && subscription.cancel_at > 0 ? subscription.cancel_at : 0;
+  // The sold end with a member's request is settled, unless an earlier pass owes that member's end back (its write
+  // not confirmed, putBack): then it is written back first. Only read in that case, so no other plan pays the read.
+  if (cancelAt === end && requestedAt(subscription) !== "") {
+    let owed: number | null;
+    try {
+      owed = await putBackOwed(account, view.subscription);
+    } catch (error) {
+      // Not known whether a member's end is owed back: never settled at the sold end on that; tried again.
+      console.error("reading a payment plan's put-back still owed failed", error);
+      return { state: "unread" };
+    }
+    if (owed !== null) {
+      // The member's end if it is still to come; after it, the period Stripe is in now, which is where the member's
+      // cancel (cancelSoldEnd) would stop it.
+      const stopAt = owed > now ? owed : currentPeriodEnd(subscription as Parameters<typeof currentPeriodEnd>[0]);
+      if (stopAt > now && stopAt < end) return putBack(account, view.subscription, stopAt, end, now, stopAt === owed);
+    }
+  }
   if (cancelAt === end) return { state: "done" };
   // Two days before its own end, so two daily runs come before it, never only one that may fall minutes before.
   if (cancelAt && cancelAt < end) {
@@ -221,20 +250,49 @@ async function tryPlan(account: string, session: string, about?: { sid: string; 
   // back by the creator) is not put back.
   if (isOwnReply(updated, view.subscription) && requestedAt(updated) !== "" && requestedAt(updated) !== requestedAt(subscription)) {
     const stopAt = currentPeriodEnd(updated as Parameters<typeof currentPeriodEnd>[0]);
-    if (stopAt > now && stopAt < end) {
-      const back = await onAccount(
-        "POST",
-        account,
-        `/subscriptions/${encodeURIComponent(view.subscription)}`,
-        new URLSearchParams({ cancel_at: String(stopAt), proration_behavior: "none" }),
-      );
-      if (!(isOwnReply(back, view.subscription) && back.cancel_at === stopAt)) return { state: "unread" };
-      return { state: "early", again: Math.min(stopAt, end - 2 * DAY) };
-    }
+    if (stopAt > now && stopAt < end) return putBack(account, view.subscription, stopAt, end, now, false);
   }
   // Settled only on the subscription's own answer carrying the end just set (Codex S on #3086: the id alone does
   // not prove the end was written); otherwise the next try reads it again and finds the end in place, or sets it.
   return { state: isOwnReply(updated, view.subscription) && updated.cancel_at === end ? "done" : "unread" };
+}
+
+/**
+ * Writes a member's own end (`stopAt`) back over the end that was sold, and watches the plan as one stopped early.
+ * The put-back still owed is written down first (putBackKey), unless it already holds `stopAt` (`noted`), and taken
+ * out only on the subscription's own answer carrying `stopAt`: a write not confirmed (another object's answer, a
+ * refusal, no answer) leaves it, so the next pass, finding the sold end with the member's request, writes it back
+ * again instead of settling the plan (Claude 2's LEVE on #5367). A mark that could not be written does not stop the
+ * put-back: written now, the member's cancel is kept either way.
+ */
+async function putBack(account: string, subscription: string, stopAt: number, end: number, now: number, noted: boolean): Promise<Outcome> {
+  const key = putBackKey(account, subscription);
+  if (!noted) {
+    const keep = Math.min(stopAt - now + PLAN_GIVE_UP_DAYS * DAY, PUT_BACK_KEEP_DAYS * DAY);
+    await redisPipeline([["SET", key, String(stopAt), "EX", keep]]).catch((error: unknown) =>
+      console.error("writing down a payment plan's put-back still owed failed", error),
+    );
+  }
+  const back = await onAccount(
+    "POST",
+    account,
+    `/subscriptions/${encodeURIComponent(subscription)}`,
+    new URLSearchParams({ cancel_at: String(stopAt), proration_behavior: "none" }),
+  );
+  if (!(isOwnReply(back, subscription) && back.cancel_at === stopAt)) return { state: "unread" };
+  // Confirmed: nothing is owed any more. A mark left by a failed DEL is only read while Stripe holds the sold end.
+  await redisPipeline([["DEL", key]]).catch((error: unknown) => console.error("taking out a payment plan's put-back failed", error));
+  return { state: "early", again: Math.min(stopAt, end - 2 * DAY) };
+}
+
+/** The member's end a put-back still owes (seconds), or null when none is owed; an unreadable reply throws. */
+async function putBackOwed(account: string, subscription: string): Promise<number | null> {
+  const reply = repliesFor(await redisPipeline([["GET", putBackKey(account, subscription)]]), 1);
+  if (!reply) throw new UnknownReplyError("a payment plan's put-back still owed");
+  const value = reply[0];
+  if (value === null) return null;
+  if (typeof value !== "string" || !/^[0-9]{1,12}$/.test(value)) throw new UnknownReplyError("a payment plan's put-back still owed");
+  return Number(value);
 }
 
 /** When the member asked to cancel (metadata cancel_requested_at, written by cancelSoldEnd), as written; "" when not. */

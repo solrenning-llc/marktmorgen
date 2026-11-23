@@ -23,7 +23,8 @@
  *     or none) decides nothing: it is never settled, so the job keeps the plan
  *     in its line of plans tried and asks again on its next pass.
  */
-import { addPeriods, finishPlan, rememberPlan, settlePlans } from "@/lib/plans";
+import { PUT_BACK_KEEP_DAYS, addPeriods, finishPlan, rememberPlan, settlePlans } from "@/lib/plans";
+import { PLAN_SETTLE_RUN } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -321,16 +322,33 @@ async function main(): Promise<void> {
       // The first write (the sold end) answers with the member's request; the put-back answers for another object.
       get: () => (updates.length - before === 1 ? heldAtSoldEnd : { id: "sub_other" }),
     });
+    // Every Redis command a pass sends, to hold it to the registry (PLAN_SETTLE_RUN.putBackCommandsPerPlanTried).
+    const real = redis.pipeline.bind(redis);
+    let commands = 0;
+    redis.pipeline = (async (sent: (string | number)[][]) => {
+      commands += sent.length;
+      return real(sent);
+    }) as typeof redis.pipeline;
     const first = await finishPlan(ACCOUNT, "cs_test_race00000003");
+    const firstCommands = commands;
     is("first pass: the put-back is not confirmed, so nothing is settled", first, "unread");
+    const mark = "nl:plans:put-back:" + ACCOUNT + ":sub_race00000003";
+    const kept = Number(await real([["TTL", mark]]).then((r) => r[0]));
+    is("first pass: the member's end still owed is written down where the next pass reads it", (await real([["GET", mark]]))[0], String(periodEnd));
+    is("first pass: kept for a bounded time, through the member's end", kept > periodEnd - (ANCHOR + DAY) && kept <= PUT_BACK_KEEP_DAYS * DAY, true);
     is("first pass: the sold end, then the member's end, were written", updates.slice(before).map((u) => u.body.get("cancel_at")), [String(soldEnd), String(periodEnd)]);
     delete (updateReplies as Record<string, unknown>).sub_race00000003;
     subscriptions.sub_race00000003 = { ...heldAtSoldEnd };
     const again = updates.length;
+    commands = 0;
     const second = await finishPlan(ACCOUNT, "cs_test_race00000003");
+    const secondCommands = commands;
+    redis.pipeline = real;
     is("next pass: the member's end is written back first", updates.slice(again).map((u) => u.body.get("cancel_at")), [String(periodEnd)]);
     is("next pass: Stripe now holds the member's end, not the sold end", subscriptions.sub_race00000003.cancel_at, periodEnd);
     is("next pass: watched as stopped early, never settled as done at the sold end", second, "early");
+    is("next pass: the put-back confirmed, nothing is owed any more", (await real([["EXISTS", mark]]))[0], 0);
+    is("each pass's own Redis commands within the registry (PLAN_SETTLE_RUN.putBackCommandsPerPlanTried)", [firstCommands, secondCommands].every((n) => n <= PLAN_SETTLE_RUN.putBackCommandsPerPlanTried), true);
     const third = updates.length;
     const settled = await finishPlan(ACCOUNT, "cs_test_race00000003");
     is("a pass after the confirmed put-back writes nothing more and keeps watching", [updates.length - third, settled], [0, "early"]);

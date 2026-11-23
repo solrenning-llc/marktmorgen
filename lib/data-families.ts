@@ -89,7 +89,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:held:stores", "nl:held:retry:", "nl:held:month:", "nl:held:walk", "nl:held:refused:", "nl:held:silent:", "nl:held:answered:",
   "nl:forget:q", "nl:forget:kept", "nl:forget:month:", "nl:forget:files",
   "nl:phone:st:", "nl:picture-r2:drop", "nl:pictures:doors:", "nl:pinv:", "nl:pathlead:", "nl:pk:", "nl:pk:auth:", "nl:pk:cred:", "nl:pk:drop:", "nl:pk:lock:", "nl:pk:reg:", "nl:plan-disputes:seen", "nl:plan-refund:", "nl:plan-refund:ending", "nl:plan-refund:next", "nl:plan-withdraw:", "nl:plan:closing:",
-  "nl:plan:closing:after", "nl:plan:ended", "nl:plan:paying", "nl:plans:late-told:", "nl:plans:lock", "nl:plans:pending", "nl:plans:retry",
+  "nl:plan:closing:after", "nl:plan:ended", "nl:plan:paying", "nl:plans:late-told:", "nl:plans:lock", "nl:plans:pending", "nl:plans:put-back:", "nl:plans:retry",
   "nl:pm:c:", "nl:pm:day:", "nl:pm:done:", "nl:pm:r:", "nl:pm:t:",
   "nl:pod:by:*", "nl:pod:n:", "nl:pod:ok:", "nl:podnote:walk", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:pace:", "nl:pp:press:", "nl:pp:settle:after", "nl:pp:stores", "nl:pp:unk:month:", "nl:ppsell:o:",
   "nl:ppsell:canceled:", "nl:ppsell:handover:", "nl:ppsell:own:", "nl:ppsell:paid:", "nl:ppsell:pending:", "nl:ppsell:refunded:", "nl:ppsell:reversed:", "nl:ppsell:sales:", "nl:ppsell:tell",
@@ -406,7 +406,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // nl:forget:files: deleted stores whose files were seen to, one field a store, taken out by the walk with the store.
   "nl:forget:q": C, "nl:forget:kept": C, "nl:forget:month:": Cr(400), "nl:forget:files": I,
   "nl:plan-disputes:seen": C, "nl:plan-refund:": C, "nl:plan-refund:ending": C, "nl:plan-refund:next": C, "nl:plan-withdraw:": Cr(400), "nl:plan:closing:": Cr(400), "nl:plan:closing:after": C, "nl:plan:ended": I, "nl:plan:paying": I, "nl:plans:late-told:": Cr(400),
-  "nl:plans:lock": C, "nl:plans:pending": I, "nl:plans:retry": I,
+  "nl:plans:lock": C, "nl:plans:pending": I, "nl:plans:put-back:": Cr(400), "nl:plans:retry": I,
   "nl:pod:": E, "nl:pod:by:": E, "nl:pod:pids:": E, "nl:pod:n:": X(2), "nl:pod:ok:": E, "nl:pod:t:": T("nl:pod:by:"),
   // The one-time walk that notes the products of feeds granted before nl:pod:pids: (lib/podcast-access.ts): its pattern, and its one company key.
   "nl:pod:by:*": C, "nl:podnote:walk": C,

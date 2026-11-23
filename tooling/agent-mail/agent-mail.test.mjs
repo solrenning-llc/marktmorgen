@@ -1215,5 +1215,26 @@ console.log("queue: only the author's family and the head's reviewers are left o
   is("and that family is refused the queue request", !/pegou/.test(r.out) && /maior parte dos commits da sua família/.test(r.out), r.out);
 }
 
+console.log("the watch fetches again before it says 'rewritten': a mark set by another watch on the same repository is not a rewrite");
+{
+  // Two commits X1 <- X2 in a mailbox repository of the tool's own: a watch that read X1 while another one already set the
+  // mark at X2 fetches again (here, it then sees X2); only a mark still outside the fresh history is a rewrite.
+  const d = join(T, "dir-conferir.git"); g(["init", "-q", "--bare", d]);
+  const w = join(T, "w-conferir"); g(["init", "-q", w]);
+  const c1 = (() => { writeFileSync(join(w, "a"), "1\n"); g(["add", "a"], w); g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x1"], w); return g(["rev-parse", "HEAD"], w); })();
+  const c2 = (() => { writeFileSync(join(w, "b"), "2\n"); g(["add", "b"], w); g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x2"], w); return g(["rev-parse", "HEAD"], w); })();
+  g(["push", "-q", d, "HEAD:refs/heads/x"], w);
+  const conferir = (primeira, segunda, desde) => spawnSync("node", ["--input-type=module", "-e",
+    `const m = await import(${JSON.stringify(TOOL)}); const r = m.conferirDesde(${JSON.stringify(desde)}, () => ${JSON.stringify(primeira)}, () => ${JSON.stringify(segunda)}); console.log(JSON.stringify({ c: r.c, reescrito: r.r.reescrito }));`],
+    { env: { ...base, CORREIO_GIT_DIR: d }, encoding: "utf8" }).stdout.trim().split("\n").pop();
+  const lido = (x) => { try { return JSON.parse(x); } catch { return {}; } };
+  let v = lido(conferir(c1, c2, c2));
+  is("a read older than the mark, fetched again and holding it, is not a rewrite", v.reescrito === false && v.c === c2, JSON.stringify(v));
+  v = lido(conferir(c1, c1, c2));
+  is("a mark still outside the fresh history (the branch went back) is a rewrite", v.reescrito === true, JSON.stringify(v));
+  v = lido(conferir(c2, c2, c1));
+  is("an ordinary forward read is not a rewrite and needs no second fetch", v.reescrito === false && v.c === c2, JSON.stringify(v));
+}
+
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);
 process.exitCode = falhas ? 1 : 0;

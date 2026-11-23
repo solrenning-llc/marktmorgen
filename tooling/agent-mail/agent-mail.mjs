@@ -1583,6 +1583,20 @@ export const RAIZ_HISTORICA = new Set(["LEIA-ME.md", "agent-mail.mjs", "agent-ma
 export const REF_VERIFICADO = "refs/agent-mail/append-only-checked";
 
 /** { reescrito, problemas }: o que, desde `desde` (ou desde o começo), alterou ou apagou um arquivo de dados. */
+/**
+ * A conferência da vigia, com uma busca nova antes de dizer "reescrito" (alarme falso de 23/11/2026, 07h56 UTC): duas
+ * vigias no mesmo repositório buscam o ramo em momentos diferentes, e a marca que uma gravou pode ser mais nova que a
+ * ponta que a outra acabou de ler. Então, quando a última conferência não está no histórico lido, o ramo é buscado de
+ * novo; só se ela continuar fora do histórico novo (uma reescrita, ou um ramo que voltou atrás) é "reescrito".
+ */
+export function conferirDesde(desde, busca = buscar, denovo = () => { esquecerRetrato(); return buscar(); }) {
+  const c = busca();
+  const r = conferirSoAcrescentar(c, desde);
+  if (!r.reescrito || !desde) return { c, r };
+  const c2 = denovo();
+  return { c: c2, r: conferirSoAcrescentar(c2, desde) };
+}
+
 export function conferirSoAcrescentar(commit, desde = null) {
   if (!commit) return { reescrito: false, problemas: [] };
   let reescrito = false;
@@ -2177,15 +2191,17 @@ async function main(argv) {
       // Passo 3: o que chegou ao correio desde a última conferência só acrescentou arquivos? Avisa uma vez por alteração.
       let alarme = "";
       try {
-        const c = buscar();
-        let antes = null;
-        try { antes = gitC(["rev-parse", "--verify", "-q", REF_VERIFICADO]); } catch { /* primeira conferência */ }
+        let doRef = null, antes = null;
+        try { doRef = gitC(["rev-parse", "--verify", "-q", REF_VERIFICADO]); } catch { /* primeira conferência */ }
+        antes = doRef;
         // NIT 1 do Claude 1 no #5113: na primeira vez do repositório próprio, vale a marca antiga do clone, se houver;
         // assim uma reescrita feita antes da troca de versão ainda é denunciada.
         if (!antes) { try { antes = /^[0-9a-f]{40}/.exec(readFileSync(ARQUIVO_ANCORA(), "utf8"))?.[0] ?? null; } catch { /* nenhuma guardada */ } }
         if (!antes) { try { antes = git(["rev-parse", "--verify", "-q", REF_VERIFICADO]); } catch { /* o clone não tem marca antiga */ } }
-        const r = conferirSoAcrescentar(c, antes || null);
-        if (c) gitC(["update-ref", REF_VERIFICADO, c]);
+        const { c, r } = conferirDesde(antes || null);
+        // A marca só avança, e só de onde esta volta a leu (compare-and-swap): outra vigia no mesmo repositório que já a
+        // levou mais adiante não é desfeita (alarme falso de 23/11/2026, 07h56 UTC, com duas vigias juntas).
+        if (c) { try { gitC(["update-ref", REF_VERIFICADO, c, doRef ?? "0".repeat(40)]); } catch { /* outra vigia gravou antes */ } }
         if (r.reescrito || r.problemas.length) alarme = [r.reescrito ? "o ramo foi reescrito (a última conferência não está mais no histórico)" : "", ...r.problemas].filter(Boolean).join("; ");
       } catch {}
       if (alarme) { console.log(`ALERTA: o ramo correio não só acrescentou: ${alarme}. Avise o coordenador e o dono pelo correio agora; não apague nem reescreva nada.`); return; }

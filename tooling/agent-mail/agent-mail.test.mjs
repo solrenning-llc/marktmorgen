@@ -1340,10 +1340,25 @@ console.log("e0bc: complete-review knows its own verdict on the PR, also for a n
   is("e0bc: a verdict that names only the session's id (its first 10 characters) is the session's own", r.ok && !AVISO.test(r.out), r.out);
   r = conclui(974, "Claude 2 (main, 01FR6Z1)", SES.c2, (h) => linha(`Claude 2 Pfn2k review #974 @${h}: READY\n\nbody`));
   is("e0bc: another Claude 2 session (Pfn2k), with no word of the name and no id of the session, is a sibling", r.ok && AVISO.test(r.out), r.out);
+  // LEVE of Claude 5 icEJ on #5408 @51f5c361af: a name word counts only inside the reviewer's own label ("Claude N
+  // <word>" or "Claude N (...)"), so "merge of main" in a sibling's header no longer reads as Claude 2 main's own verdict.
+  r = conclui(975, "Claude 2 (main, 01FR6Z1)", SES.c2, (h) => linha(`**Claude 2 review #975 @${h}: READY (focal, merge of main), 0 findings** — Claude 2 lpgvy …\n\nbody`));
+  is("e0bc: a sibling's header with 'merge of main' outside its label is still a sibling's verdict for Claude 2 main", r.ok && AVISO.test(r.out), r.out);
   const mod = await import(TOOL);
-  is("e0bc: the marks of 'Claude 2 (main, 01FR6Z1)' and 'Claude 6 UoHAG' are their name words and the session id's first 10",
-    JSON.stringify([mod.marcasDaSessao("Claude 2 (main, 01FR6Z1)", { id: "session_01FR6Z1MtkLEMTRT4AviXXzK" }), mod.marcasDaSessao("Claude 6 UoHAG", null)]),
-    JSON.stringify([{ palavras: ["main", "01FR6Z1"], id: "01FR6Z1Mtk" }, { palavras: ["UoHAG"], id: "" }]));
+  is("e0bc: the marks of 'Claude 2 (main, 01FR6Z1)', 'Claude 6 UoHAG' and a Claude 1 cloud name are their own words, without generic ones, and the session id's first 10",
+    JSON.stringify([mod.marcasDaSessao("Claude 2 (main, 01FR6Z1)", { id: "session_01FR6Z1MtkLEMTRT4AviXXzK" }), mod.marcasDaSessao("Claude 6 UoHAG", null),
+      mod.marcasDaSessao("Claude 1 (nuvem c1-revisoes-f, cse_01DKvYQbspYs)", null)])
+    === JSON.stringify([{ palavras: ["main", "01FR6Z1"], id: "01FR6Z1Mtk" }, { palavras: ["UoHAG"], id: "" }, { palavras: ["c1-revisoes-f", "cse_01DKvYQbspYs"], id: "" }]),
+    JSON.stringify([mod.marcasDaSessao("Claude 2 (main, 01FR6Z1)", { id: "session_01FR6Z1MtkLEMTRT4AviXXzK" }), mod.marcasDaSessao("Claude 1 (nuvem c1-revisoes-f, cse_01DKvYQbspYs)", null)]));
+  const C1 = "Claude 1 (nuvem c1-revisoes-f, cse_01DKvYQbspYs)";
+  is("e0bc: a Claude 1 cloud sibling's label sharing only 'nuvem' is a sibling's",
+    mod.comentarioDaSessao("Claude 1 (nuvem c1-revisoes-g, cse_01ZqWx8Kp2Lm) review #976 @abc: READY", C1, null) === false);
+  is("e0bc: the Claude 1 cloud session's own label is its own",
+    mod.comentarioDaSessao("**Claude 1 (nuvem c1-revisoes-f, cse_01DKvYQbspYs) review #977 @abc: READY**", C1, null) === true);
+  is("e0bc: 'Claude 6 review ... by Claude 6 UoHAG' names the session in its second label",
+    mod.comentarioDaSessao("Claude 6 review #978 @abc: READY, by Claude 6 UoHAG", "Claude 6 UoHAG", null) === true);
+  is("e0bc: a name word in a Claude 2 sibling's label only as part of a longer word is not the session's",
+    mod.comentarioDaSessao("Claude 2 mainline review #979 @abc: READY", "Claude 2 (main, 01FR6Z1)", null) === false);
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

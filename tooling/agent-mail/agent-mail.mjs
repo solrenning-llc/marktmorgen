@@ -1208,37 +1208,54 @@ export function revisoresNoPr(pr, sha) {
 }
 
 /**
- * As marcas que separam a sessão de `eu` das irmãs num comentário: cada palavra do nome depois de "Claude N" (letras e
- * dígitos, 3 ou mais, como "UoHAG" em "Claude 6 UoHAG", ou "main" e "01FR6Z1" em "Claude 2 (main, 01FR6Z1)") e os 10
- * primeiros caracteres da sessão da nuvem que roda a ferramenta. Antes, a marca era o primeiro pedaço depois do número,
- * com pontuação e tudo ("(main,"), que nenhum comentário escreve, e o próprio veredito contava como de uma irmã (e0bc do
+ * As marcas que separam a sessão de `eu` das irmãs num comentário: cada pedaço do nome depois de "Claude N" (separado por
+ * espaço, vírgula, parênteses ou dois-pontos, com 3 ou mais caracteres, como "UoHAG" em "Claude 6 UoHAG", "main" e
+ * "01FR6Z1" em "Claude 2 (main, 01FR6Z1)", ou "c1-revisoes-f" e "cse_01DKvYQbspYs" numa nuvem do Claude 1), sem as
+ * palavras genéricas que várias sessões da mesma família escrevem ("nuvem", "cloud", "cse"...), e os 10 primeiros
+ * caracteres da sessão da nuvem que roda a ferramenta. Antes, a marca era o primeiro pedaço depois do número, com
+ * pontuação e tudo ("(main,"), que nenhum comentário escreve, e o próprio veredito contava como de uma irmã (e0bc do
  * Claude 2 main, 23/11/2026; coordenador ee5e).
  */
+const PALAVRAS_GENERICAS = new Set(["nuvem", "cloud", "local", "cse", "session", "sessao", "sessão", "review", "revisao", "revisão"]);
+const pedacosDoNome = (texto) => String(texto ?? "").split(/[\s,();:]+/)
+  .map((t) => t.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, "")).filter((t) => /^[A-Za-z0-9][A-Za-z0-9_-]{2,}$/.test(t));
 export function marcasDaSessao(eu, sessao = sessaoAtual()) {
   const resto = String(eu ?? "").replace(/^\s*(?:claude|codex)(?:\s*\d+)?/i, "");
-  const palavras = [...new Set(resto.match(/[A-Za-z0-9]{3,}/g) ?? [])];
+  const palavras = [...new Set(pedacosDoNome(resto).filter((p) => !PALAVRAS_GENERICAS.has(p.toLowerCase())))];
   const id = sessao?.id ? sessao.id.replace(/^session_/, "").slice(0, 10) : "";
   return { palavras, id: /^[0-9A-Za-z]{10}$/.test(id) ? id : "" };
 }
 
 /**
+ * O comentário é da própria sessão de `eu`? É quando a primeira linha com texto (onde o revisor se nomeia) traz, no
+ * rótulo de um "Claude N" da família de `eu` (o pedaço logo depois dele, ou o que está entre os parênteses logo depois
+ * dele), um pedaço igual a uma marca do nome; ou quando o texto traz os 10 primeiros caracteres da sessão. Fora do
+ * rótulo a palavra não conta: "merge of main" no cabeçalho de uma irmã não é do Claude 2 main, e "main" aparece em
+ * "origin/main" no corpo de qualquer revisão (LEVE do Claude 5 icEJ no #5408 @51f5c361af).
+ */
+export function comentarioDaSessao(corpo, eu, sessao = sessaoAtual()) {
+  const { palavras, id } = marcasDaSessao(eu, sessao);
+  if (id !== "" && String(corpo ?? "").includes(id)) return true;
+  const m = /^\s*(claude|codex)(?:\s*(\d+))?/i.exec(String(eu ?? ""));
+  if (!m || !palavras.length) return false;
+  const cabecalho = (String(corpo ?? "").split(/\r?\n/).find((l) => l.trim()) ?? "").replace(/[*`]/g, "");
+  const nome = m[2] ? `${m[1]}\\s*${m[2]}` : m[1];
+  const rotulos = [...cabecalho.matchAll(new RegExp(`(?:^|[^A-Za-z0-9])${nome}(?![0-9])(?:\\s*\\(([^)\\n]*)\\)|\\s+([^\\s:,()]+))?`, "gi"))]
+    .flatMap((x) => pedacosDoNome(x[1] ?? x[2] ?? "")).map((t) => t.toLowerCase());
+  return palavras.some((p) => rotulos.includes(p.toLowerCase()));
+}
+
+/**
  * c944 (Claude 1 yatz, coordenador 999b): outra sessão da família de `eu` já deu veredito neste head no PR? Vale o
- * veredito que não é da própria sessão: um comentário é dela quando a primeira linha com texto (onde o revisor se nomeia)
- * traz uma palavra do nome de `eu`, ou quando o texto traz os 10 primeiros caracteres da sessão (marcasDaSessao). Uma
- * palavra do nome mais abaixo não conta: "main" aparece em "origin/main" no corpo de qualquer revisão. Sem marca nenhuma, não há como separar a própria sessão das irmãs, e a
- * resposta é false. null = NÃO CONFERIDO.
+ * veredito que não é da própria sessão (comentarioDaSessao). Sem marca nenhuma, não há como separar a própria sessão das
+ * irmãs, e a resposta é false. null = NÃO CONFERIDO.
  */
 export function vereditoDeIrmaNoPr(pr, sha, eu, sessao = sessaoAtual()) {
   const f = revisoresNoPr(pr, sha);
   if (f === null) return null;
   const { palavras, id } = marcasDaSessao(eu, sessao);
   if (!palavras.length && !id) return false;
-  const nomeada = (texto) => palavras.some((p) => new RegExp(`(?:^|[^A-Za-z0-9])${p}(?![A-Za-z0-9])`).test(texto));
-  const proprio = (corpo) => {
-    const cabecalho = String(corpo).split(/\r?\n/).find((l) => l.trim()) ?? "";
-    return nomeada(cabecalho) || (id !== "" && String(corpo).includes(id));
-  };
-  return (corposNoPr.get(`${pr}@${String(sha).slice(0, 10)}`)?.get(familia(eu)) ?? []).some(({ corpo }) => !proprio(corpo));
+  return (corposNoPr.get(`${pr}@${String(sha).slice(0, 10)}`)?.get(familia(eu)) ?? []).some(({ corpo }) => !comentarioDaSessao(corpo, eu, sessao));
 }
 
 /**

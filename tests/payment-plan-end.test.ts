@@ -380,8 +380,16 @@ async function main(): Promise<void> {
     // The put-back did land: Stripe holds the member's end with the request.
     subscriptions.sub_race00000004 = { ...withRequest, cancel_at: periodEnd };
     const mark = "nl:plans:put-back:" + ACCOUNT + ":sub_race00000004";
+    const real = redis.pipeline.bind(redis);
+    let commands = 0;
+    redis.pipeline = (async (sent: (string | number)[][]) => {
+      commands += sent.length;
+      return real(sent);
+    }) as typeof redis.pipeline;
     const second = await finishPlan(ACCOUNT, "cs_test_race00000004");
+    redis.pipeline = real;
     is("next pass: the member's end in place, watched as stopped early", second, "early");
+    is("next pass: its one DEL within the registry (PLAN_SETTLE_RUN.putBackCommandsPerPlanTried)", commands <= PLAN_SETTLE_RUN.putBackCommandsPerPlanTried, true);
     is("next pass: the member's end in place confirms the put-back, so its mark is taken out", (await redis.pipeline([["EXISTS", mark]]))[0], 0);
     // The creator takes the member's cancel back: the sold end again, the request metadata still there.
     subscriptions.sub_race00000004 = { ...withRequest, cancel_at: soldEnd };

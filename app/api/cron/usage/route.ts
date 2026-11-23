@@ -92,7 +92,8 @@ const LEGACY_TOLD = "nl:usage-watch:told";
 const LOCK = "nl:usage-watch:lock";
 const LOCK_SECONDS = 120;
 
-type VideoRun = { stores: number; billed: number; cents: number; paused: number; failed: number; told: number };
+/** `unread`: an inventory of this part could not be read; never said as zero stores (issue #4145). */
+type VideoRun = { stores: number; billed: number; cents: number; paused: number; failed: number; told: number; unread?: true };
 
 /** Bills video past the plan's hours, and writes to each creator the first time a month passes them. */
 async function videoRun(): Promise<VideoRun> {
@@ -101,8 +102,9 @@ async function videoRun(): Promise<VideoRun> {
   try {
     settled = await settleAll();
   } catch (error) {
+    // Unknown, never "nothing to settle" (issue #4145); the notices below are their own part and still run.
     console.error("settling video hours failed", error);
-    return out;
+    out.unread = true;
   }
   for (const row of settled) {
     out.stores += 1;
@@ -126,6 +128,7 @@ async function videoRun(): Promise<VideoRun> {
     watchedStores = await foldersOfTwoMonths(watchedFolders);
   } catch (error) {
     console.error("could not read the stores whose video was watched", error);
+    out.unread = true;
   }
   for (const folder of watchedStores) {
     try {
@@ -170,7 +173,7 @@ async function videoRun(): Promise<VideoRun> {
   return out;
 }
 
-type VisitsRun = { stores: number; resting: number; failed: number; told: number };
+type VisitsRun = { stores: number; resting: number; failed: number; told: number; unread?: true };
 
 /**
  * Writes to each creator the first time a month's visits rest their public
@@ -185,6 +188,7 @@ async function visitsRun(): Promise<VisitsRun> {
     visited = await foldersOfTwoMonths(visitedFolders);
   } catch (error) {
     console.error("could not read the stores that were visited", error);
+    out.unread = true;
   }
   for (const folder of visited) {
     try {
@@ -277,6 +281,13 @@ async function watchUsage(): Promise<Response> {
   const video = await videoRun();
   const visits = await visitsRun();
   const orders = await ordersRun();
+  // The parts whose inventory could not be read (issue #4145): the run still does everything else, then answers an
+  // error that names them, never ok over a zero it did not read.
+  const unreadParts = (["video", "visits", "orders"] as const).filter((name) => ({ video, visits, orders })[name].unread);
+  const answer = (body: Record<string, unknown>) =>
+    unreadParts.length
+      ? Response.json({ ...body, ok: false, unread: unreadParts }, { status: 503, headers: { "Cache-Control": "no-store" } })
+      : Response.json(body, { headers: { "Cache-Control": "no-store" } });
 
   // The delivery part on its own: a list or total Redis answered in an unknown shape (CX-123 rule 24) is never
   // "nobody is over". It is said as unknown, nobody is written to on it and its told list is left as it was; the
@@ -290,7 +301,7 @@ async function watchUsage(): Promise<Response> {
   } catch (error) {
     console.error("usage-watch: the stores over the delivery allowance are unknown today; nobody was written to about it", error);
     return Response.json(
-      { ok: false, unread: ["delivery"], video, visits, orders },
+      { ok: false, unread: ["delivery", ...unreadParts], video, visits, orders },
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
@@ -311,16 +322,13 @@ async function watchUsage(): Promise<Response> {
   } catch (error) {
     console.error("usage-watch: who was already told about the delivery allowance is unknown today; nobody was written to about it", error);
     return Response.json(
-      { ok: false, unread: ["delivery"], video, visits, orders },
+      { ok: false, unread: ["delivery", ...unreadParts], video, visits, orders },
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
   const fresh = over.filter((s) => !seen.has(s.folder));
   if (fresh.length === 0) {
-    return Response.json(
-      { ok: true, over: over.length, told: 0, video, visits, orders },
-      { headers: { "Cache-Control": "no-store" } },
-    );
+    return answer({ ok: true, over: over.length, told: 0, video, visits, orders });
   }
 
   // Whose these stores are, read exactly (lib/delivery.ts): unknown is never "no address on file". A read unknown as
@@ -332,7 +340,7 @@ async function watchUsage(): Promise<Response> {
   } catch (error) {
     console.error("usage-watch: who the stores over the delivery allowance belong to is unknown today; nobody was written to about it", error);
     return Response.json(
-      { ok: false, unread: ["delivery"], video, visits, orders },
+      { ok: false, unread: ["delivery", ...unreadParts], video, visits, orders },
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
@@ -455,10 +463,7 @@ async function watchUsage(): Promise<Response> {
     console.error(`usage-watch: ${unreadOwners} store(s) over the delivery allowance have an owner that could not be read today; they were not written to and are tried again next run`);
   }
 
-  return Response.json(
-    { ok: true, over: over.length, told, unknown: unknown.length, unreadOwners, unrecorded, video, visits, orders },
-    { headers: { "Cache-Control": "no-store" } },
-  );
+  return answer({ ok: true, over: over.length, told, unknown: unknown.length, unreadOwners, unrecorded, video, visits, orders });
 }
 
 /**
@@ -499,7 +504,7 @@ function toldNames(raw: unknown): Set<string> {
   return new Set(names);
 }
 
-type OrdersRun = { stores: number; failed: number; told: number };
+type OrdersRun = { stores: number; failed: number; told: number; unread?: true };
 
 /**
  * Writes to each creator the first time a month's orders reach their plan's
@@ -513,6 +518,7 @@ async function ordersRun(): Promise<OrdersRun> {
     ordered = await foldersOfTwoMonths(orderedFolders);
   } catch (error) {
     console.error("could not read the stores with orders", error);
+    out.unread = true;
     return out;
   }
   for (const folder of ordered) {

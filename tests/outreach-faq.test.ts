@@ -40,7 +40,7 @@ const now = outreachBeginnerQuestions(false);
 const later = outreachBeginnerQuestions(true);
 is("two questions", now.map((x) => x.q), ["How do I write my first pitch?", "Can I try outreach before paying?"]);
 const how = answer(now, "How do I write my first pitch?");
-is("writing: paid-up Studio or Scale, labeled Pro, switched on, who, the studio's words in order, sent by you", [how.startsWith(`On a paid-up ${PLAN_TITLES.pro} or ${PLAN_TITLES.scale} plan (your studio calls the ${PLAN_TITLES.pro} plan “Pro”), while the writing help is available for your store`), (() => { const k = [w.tool, w.who, w.name, w.address, w.save, w.write, w.goal, w.site, w.country, w.notHere, w.find, w.addresses, w.draft, w.pitches, w.gmail, w.mailApp, w.copy].map((x) => how.indexOf(`“${x}”`)); return k.every((x, i) => x >= 0 && (i === 0 || x > k[i - 1])); })(), how.endsWith("you send it yourself, from your own mailbox.")], [true, true, true]);
+is("writing: paid-up Studio or Scale, switched on, who, the studio's words in order, sent by you", [how.startsWith(`On a paid-up ${PLAN_TITLES.pro} or ${PLAN_TITLES.scale} plan, while the writing help is available for your store`), (() => { const k = [w.tool, w.who, w.name, w.address, w.save, w.write, w.goal, w.site, w.country, w.notHere, w.find, w.addresses, w.draft, w.pitches, w.gmail, w.mailApp, w.copy].map((x) => how.indexOf(`“${x}”`)); return k.every((x, i) => x >= 0 && (i === 0 || x > k[i - 1])); })(), how.endsWith("you send it yourself, from your own mailbox.")], [true, true, true]);
 is("trying: not yet today; not in the trial later, and no promise past a paid-up plan", [answer(now, "Can I try outreach before paying?").startsWith("Not yet."), answer(later, "Can I try outreach before paying?").startsWith("Not in the free trial: the trial leaves out paid AI writing"), answer(later, "Can I try outreach before paying?").endsWith("plan that is paid up."), /It opens once/.test(answer(later, "Can I try outreach before paying?"))], [true, true, true, false]);
 const all = [...now, ...later].map((x) => x.a).join(" ");
 is("one space between sentences, never two", /\s{2}/.test(all), false);
@@ -55,4 +55,5 @@ const sentences = (text: string) => text.split(/(?<=[.!?])\s+/).map((x) => x.tri
 const rest = JSON.stringify({ ...topic, blocks: (topic?.blocks ?? []).map((b) => ((b as { kind?: string }).kind === "faq" ? { ...b, items: faq?.items.slice(2) } : b)) });
 is("no sentence of the answers said elsewhere on the page, or twice among them", [now, later].map((l) => { const mine = l.flatMap((x) => sentences(x.a)); return mine.some((x) => rest.includes(x)) || new Set(mine).size !== mine.length; }), [false, false]);
 
+is("never says the studio calls a plan \"Pro\": the studio and the pricing page use PLAN_TITLES only (#4499, Codex X5)", [JSON.stringify([...outreachBeginnerQuestions(false), ...outreachBeginnerQuestions(true)]).includes("Pro"), "studioPlan" in OUTREACH_WORDS], [false, false]);
 done();

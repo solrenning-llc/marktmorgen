@@ -76,6 +76,18 @@ export function sameNarrow(raw: Record<string, unknown>, narrow: Narrow): boolea
   return raw.minSpent === narrow.minSpent && raw.channel === narrow.channel && raw.quietDays === narrow.quietDays && (raw.group ?? undefined) === narrow.group && (raw.activeDays ?? undefined) === narrow.activeDays;
 }
 
+/**
+ * Whether a narrowing a request sent asks exactly for the one read from it: a
+ * field left out is "none" for that field (as readNarrow reads it), while every
+ * field sent must be read unchanged, and an unknown field refuses it. So
+ * `{ minSpent: 5000 }` is that spend alone, and `{ quietDays: 45 }` is refused,
+ * never read as the whole list.
+ */
+export function sameAskedNarrow(raw: Record<string, unknown>, narrow: Narrow): boolean {
+  if (!Object.keys(raw).every((key) => NARROW_KEYS.has(key))) return false;
+  return sameNarrow({ minSpent: NO_NARROW.minSpent, channel: NO_NARROW.channel, quietDays: NO_NARROW.quietDays, ...raw }, narrow);
+}
+
 /** Empty/zero means no minimum; malformed or out-of-range text must not broaden an audience. */
 export function readSegmentSpend(raw: string, currency: Currency): number | null {
   if (!raw.trim()) return 0;

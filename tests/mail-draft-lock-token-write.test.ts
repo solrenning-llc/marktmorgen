@@ -16,7 +16,8 @@ type Commands = (string | number)[][];
 
 async function main() {
   redis.clear();
-  const store = { listId: "lock-token-write", catalog: { items: [] } } as unknown as Store;
+  redis.run(["SET", "nl:store:id:" + "dd".repeat(16), "drafts-owner@example.test"]); // a live store with an id (#5010 row 111)
+  const store = { listId: "lock-token-write", email: "drafts-owner@example.test", sid: "dd".repeat(16), extra: false, catalog: { items: [] } } as unknown as Store;
   const key = "nl:mail:drafts:" + store.listId;
   const input = { subject: "Draft", body: "v1", productId: "" };
   const original = redis.pipeline;

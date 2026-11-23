@@ -187,7 +187,10 @@ async function main(): Promise<void> {
     const real = redis.pipeline.bind(redis);
     // The mark's writes answer out of their shape, as a reply that cannot be read does: never "written".
     redis.pipeline = (async (commands: (string | number)[][]) =>
-      commands.some((c) => c[1] === reversedKey && c[0] !== "ZSCORE") ? commands.map(() => "OK") : real(commands)) as typeof redis.pipeline;
+      // The taken-back mark is one fenced script since #5242 (PAYPAL_TAKEN_BACK_MARK_IF_LIVE, its set the third key).
+      commands.some((c) => (c[1] === reversedKey && c[0] !== "ZSCORE") || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:paypal-taken-back-mark-if-live:v1") && c[5] === reversedKey))
+        ? commands.map(() => "OK")
+        : real(commands)) as typeof redis.pipeline;
     const logged = console.error;
     console.error = () => undefined;
     let run: Awaited<ReturnType<typeof watchPayPal>>;

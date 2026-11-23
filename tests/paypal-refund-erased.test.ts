@@ -173,7 +173,10 @@ async function main(): Promise<void> {
     is("the next look tells the refund to the endpoint, once", told.length, 1);
     is("named, never having been deleted", (told[0]?.data as Record<string, unknown> | undefined)?.buyer, { email: UNREAD, name: null });
     is("told, the order leaves the watch", (await realPipeline([["ZSCORE", watch, openedU.order]]))[0], null);
-    const marks = seen.filter((c) => c[1] === refundedKey(statsId) && (c[0] === "ZADD" || c[0] === "EXPIRE")).length;
+    // One fenced script since #5242 (PAYPAL_TAKEN_BACK_MARK_IF_LIVE), billed as its EVAL and every call in it.
+    const marks = seen
+      .filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:paypal-taken-back-mark-if-live:v1") && c[5] === refundedKey(statsId))
+      .reduce((sum, c) => sum + 1 + (String(c[1]).match(/redis\.call\(/g) ?? []).length, 0);
     is("the owed look writes the refund mark again as the cost line says", marks, PAYPAL_REFUND_TOLD.markCommandsPerOwedLook);
     is("and reads the purchase again as the cost line says", seen.filter((c) => c[0] === "HGET" && c[1] === importedKey(statsId, UNREAD)).length, PAYPAL_REFUND_TOLD.recordReadsPerOwedLook);
     const rewrites = seen.filter((c) => (c[0] === "SREM" || c[0] === "HSET") && (c[1] === importedKey(statsId, UNREAD) || c[1] === ownKey(statsId, UNREAD, product.id))).length;

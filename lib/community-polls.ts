@@ -127,15 +127,19 @@ const VOTE_TRIES = 5;
 /**
  * A member's vote record (KEYS[1], field ARGV[1]) set to ARGV[3] ("" deletes it) only while it still holds ARGV[2]
  * ("" for none), with the tally (KEYS[2]) moved by each option and delta pair from ARGV[6] and the member's trace entry
- * ARGV[4] (KEYS[3]) added ("1") or removed ("-1") in the same step. 1 when written, 2 when written and the SREM took
- * the trace entry out (it comes back to the room only then: a deletion of the member takes the whole trace), 0 when the
- * record had changed.
+ * ARGV[4] (KEYS[3]) added ("1") or removed ("-1") in the same step, and only while Redis's own clock (TIME) is before
+ * the poll's close, ARGV[6] in seconds ("0" for never). 1 when written, 2 when written and the SREM took the trace
+ * entry out (it comes back to the room only then: a deletion of the member takes the whole trace), 0 when the record
+ * had changed, 3 when the poll had closed (nothing written). The close is checked here, at the swap itself, and on
+ * every try: a vote that waited on the member's lock, or read again, past the close never moves the count people
+ * have already read (Codex L's LEVE on #4006).
  */
-export const POLL_VOTE_SWAP = `-- marktmorgen:community-poll-vote:v1
+export const POLL_VOTE_SWAP = `-- marktmorgen:community-poll-vote:v2
+if ARGV[6] ~= '0' and tonumber(redis.call('TIME')[1]) >= tonumber(ARGV[6]) then return 3 end
 local held = redis.call('HGET', KEYS[1], ARGV[1])
 if not held then held = '' end
 if held ~= ARGV[2] then return 0 end
-for i = 6, #ARGV, 2 do redis.call('HINCRBY', KEYS[2], ARGV[i], ARGV[i + 1]) end
+for i = 7, #ARGV, 2 do redis.call('HINCRBY', KEYS[2], ARGV[i], ARGV[i + 1]) end
 if ARGV[3] == '' then redis.call('HDEL', KEYS[1], ARGV[1]) else redis.call('HSET', KEYS[1], ARGV[1], ARGV[3]) end
 if ARGV[5] == '1' then redis.call('SADD', KEYS[3], ARGV[4]) elseif ARGV[5] == '-1' and redis.call('SREM', KEYS[3], ARGV[4]) == 1 then return 2 end
 return 1`;
@@ -161,10 +165,10 @@ export async function vote(
   // One member's vote on one post at a time (Claude 1 cloud on #3820), and inside the lock each write only over the
   // record as read (#3955): a lock that stays taken, or whose answer is unproven, throws LockBusyError before anything
   // is read or written, and a change that still lands between the read and the write (a lock that ran out) is read again.
-  return withLock(voteLockKey(id, post, who), 10, 3_000, () => castVote(id, post, who, picked, room));
+  return withLock(voteLockKey(id, post, who), 10, 3_000, () => castVote(id, post, poll, who, picked, room));
 }
 
-async function castVote(id: string, post: string, who: string, picked: string[], room: DataStore): Promise<boolean> {
+async function castVote(id: string, post: string, poll: Poll, who: string, picked: string[], room: DataStore): Promise<boolean> {
   const what = "a poll vote";
   for (let i = 0; i < VOTE_TRIES; i += 1) {
     // Rule 24: no earlier vote only for Redis's null or the empty string; any
@@ -202,6 +206,7 @@ async function castVote(id: string, post: string, who: string, picked: string[],
           picked.join(","),
           `v:${post}`,
           traceIn ? "1" : traceOut ? "-1" : "0",
+          String(poll.ends > 0 ? poll.ends : 0),
           ...gone.flatMap((one) => [one, -1]),
           ...added.flatMap((one) => [one, 1]),
         ],
@@ -209,6 +214,11 @@ async function castVote(id: string, post: string, who: string, picked: string[],
       1,
       what,
     );
+    if (swapped === 3) {
+      // The poll closed while this vote waited or read again: nothing was written, so what it took goes back.
+      if (taken.length) await giveData(room, taken);
+      return false;
+    }
     if (swapped === 0) {
       // Another request changed this member's vote between the read and the write: what this one took goes back, and it reads again.
       if (taken.length) await giveData(room, taken);

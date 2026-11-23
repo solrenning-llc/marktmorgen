@@ -1482,8 +1482,10 @@ export class MemoryRedis {
           return 1;
         }
         // lib/community-polls.ts POLL_VOTE_SWAP: a member's vote swapped, and the tally and trace moved with it, only while it holds what was read.
-        if (key.startsWith("-- marktmorgen:community-poll-vote:v1\n") && args[0] === "3" && args.length >= 9 && (args.length - 9) % 2 === 0) {
-          const [, votes, tally, trace, who, expected, next, entry, traceMove, ...deltas] = args;
+        // Redis's TIME is this stand-in's clock; 3 when the poll's close (ARGV[6], "0" for never) has come, nothing written.
+        if (key.startsWith("-- marktmorgen:community-poll-vote:v2\n") && args[0] === "3" && args.length >= 10 && (args.length - 10) % 2 === 0) {
+          const [, votes, tally, trace, who, expected, next, entry, traceMove, ends, ...deltas] = args;
+          if (ends !== "0" && Math.floor(this.now() / 1000) >= Number(ends)) return 3;
           const now = this.run(["HGET", votes, who]);
           if ((typeof now === "string" ? now : "") !== expected) return 0;
           for (let i = 0; i < deltas.length; i += 2) this.run(["HINCRBY", tally, deltas[i], deltas[i + 1]]);

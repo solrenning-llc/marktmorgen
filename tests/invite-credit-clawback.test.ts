@@ -297,7 +297,8 @@ async function main(): Promise<void> {
   unreadable.add("cus_AnaClaw01");
   disputes = list([dispute("lost")]);
   const failing = await quiet(() => syncPlanDisputes(Date.now() + 60_000, nowS));
-  is("not taken back, the run not clean, the dispute still open", [clawed(INVOICE), failing.failed > 0, String(redis.run(["HGET", SEEN_KEY, "du_BeaClaw01"])).startsWith("open:")], [undefined, true, true]);
+  // Kept to try again as lost (lib/plan-disputes.ts: a failed clawback takes a retry place next time; iacVn3r's LOW).
+  is("not taken back, the run not clean, the dispute kept to try again", [clawed(INVOICE), failing.failed > 0, String(redis.run(["HGET", SEEN_KEY, "du_BeaClaw01"])).startsWith("lost:")], [undefined, true, true]);
   unreadable.clear();
   await quiet(() => syncPlanDisputes(Date.now() + 60_000, nowS));
   is("the next run takes it back", [clawed(INVOICE), balances.get("cus_AnaClaw01")], [share, 0]);
@@ -308,7 +309,7 @@ async function main(): Promise<void> {
   history.set("cus_AnaClaw01", (history.get("cus_AnaClaw01") ?? []).filter((r) => r.metadata.nimbus_invite_credit !== INVOICE));
   disputes = list([dispute("lost")]);
   const unseen = await quiet(() => syncPlanDisputes(Date.now() + 60_000, nowS));
-  is("nothing debited, not marked, the run not clean, the dispute still open", [posts.get("cus_AnaClaw01")?.length, clawed(INVOICE), unseen.failed > 0, String(redis.run(["HGET", SEEN_KEY, "du_BeaClaw01"])).startsWith("open:")], [1, undefined, true, true]);
+  is("nothing debited, not marked, the run not clean, the dispute kept to try again", [posts.get("cus_AnaClaw01")?.length, clawed(INVOICE), unseen.failed > 0, String(redis.run(["HGET", SEEN_KEY, "du_BeaClaw01"])).startsWith("lost:")], [1, undefined, true, true]);
 
   part("At most CLAWBACKS_PER_RUN lost disputes are taken back in one run; the rest stay open for the next");
   await sent();

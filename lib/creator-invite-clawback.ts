@@ -39,6 +39,13 @@ const HISTORY_PAGES = 10;
  * with the invite-credit job's fixed cost (tests/plan-cost-registry.ts INVITE_CREDIT_JOB).
  */
 export const CLAWBACKS_PER_RUN = 10;
+/**
+ * Of those places, the most a run gives to lost disputes whose clawback already failed (remembered as `lost:<store id>`
+ * by lib/plan-disputes.ts): a lost dispute met for the first time always finds CLAWBACKS_PER_RUN - CLAWBACK_RETRIES_PER_RUN
+ * places, however many keep failing (Claude 5 iacVn3r's LOW on #4514 @5d19d66824). Inside CLAWBACKS_PER_RUN, so the
+ * run's ceiling and its cost do not move; a retry past it waits for the next day, never dropped.
+ */
+export const CLAWBACK_RETRIES_PER_RUN = 2;
 export const CLAWBACK_COMMANDS = 24;
 export const CLAWBACK_STRIPE_CALLS = 2 * (HISTORY_PAGES + 4);
 const DEBIT_MARK = "nimbus_invite_clawback";

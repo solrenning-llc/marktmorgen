@@ -73,7 +73,8 @@ for (const source of ["listed", "reread"] as const) for (const [label, unknownIn
       const saved = typeof raw === "string" ? JSON.parse(raw) as { clawed?: number } : {};
       assert.deepEqual({ before, after: { failed: recovered.failed, seen: redis.run(["HGET", SEEN_KEY, DISPUTE]),
         writes, balance, clawed: saved.clawed, rereads } }, {
-        before: { failed: 1, seen: `open:${invited.store.sid}`, writes: 0, balance: -1000 },
+        // Lost, its clawback not done: remembered as lost, so a later run tries it again inside its retry places.
+        before: { failed: 1, seen: `lost:${invited.store.sid}`, writes: 0, balance: -1000 },
         after: { failed: 0, seen: "final", writes: 1, balance: 0, clawed: 1000, rereads: source === "reread" ? 2 : 1 },
       });
     } finally {

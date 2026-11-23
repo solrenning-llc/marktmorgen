@@ -27,7 +27,7 @@ import { isAddOn, isBillingConfigured, onPlatformAt } from "@/lib/billing";
 import { type PlanDisputeStatus, coveredUntil, disputeStatusOf } from "@/lib/plan-dispute-rules";
 import { recordPlanDispute, storeForHandle, storeForId, storeRef } from "@/lib/store";
 import { type StripePage, readStripePage } from "@/lib/stripe-list";
-import { CLAWBACKS_PER_RUN, clawBackInviteCredits } from "@/lib/creator-invite-clawback";
+import { CLAWBACKS_PER_RUN, CLAWBACK_RETRIES_PER_RUN, clawBackInviteCredits } from "@/lib/creator-invite-clawback";
 
 /** The version whose charge still names its invoice and whose invoice names its subscription. */
 const DISPUTE_VERSION = "2024-06-20";
@@ -40,7 +40,8 @@ export const UNMATCHED_RETRY_DAYS = 7;
 /**
  * What each dispute already read turned out to be, by id: "final" (decided,
  * written), "unmatched:<seconds>" (not a plan payment, asked again for a
- * week), or "open:<store id>" (the store's id, never an address). A known
+ * week), "open:<store id>" (the store's id, never an address), or
+ * "lost:<store id>" (lost, its invite credit not taken back yet). A known
  * one costs no Stripe read when it is listed again, so the newest page is
  * always reached first and a run never spends its time on settled ones.
  */
@@ -65,27 +66,46 @@ async function remember(id: string, what: string): Promise<void> {
   await redisPipeline([["HSET", SEEN_KEY, id, what], ["EXPIRE", SEEN_KEY, SEEN_SECONDS]]);
 }
 
+/** A run's clawback places: `left` of CLAWBACKS_PER_RUN in all, `retries` of them for lost disputes tried before. */
+type Room = { left: number; retries: number };
+/**
+ * A dispute still to be decided or taken back, on a store already known: `open:<store id>` while open, `lost:<store
+ * id>` once lost with its clawback not done (it failed, or the run had no place left). Both are five characters before
+ * the store id, and both are read again by id once the list no longer reaches them.
+ */
+const pending = (what: string | undefined): boolean => what !== undefined && (what.startsWith("open:") || what.startsWith("lost:"));
+
 /**
  * A lost dispute on a plan invoice gives back the invite credit earned on it that is still unused (the owner's decision
- * of 19 November 2026 on #4514, part (b); lib/creator-invite-clawback.ts). Not done (a reply that does not read): the
- * dispute is still written on the store, but remembered as open, so the next run asks about it again by id.
+ * of 19 November 2026 on #4514, part (b); lib/creator-invite-clawback.ts). "done" when taken back, or nothing to take
+ * (any status but lost); "later" when the run had no place left for it (never tried, kept as it was); "failed" when it
+ * was tried and a reply did not read. Not done, the dispute is still written on the store but kept to be asked again by
+ * id: as `lost:` once a try failed, so it then takes one of the retry places.
  */
-async function clawBack(status: PlanDisputeStatus, invoiceId: string, nowSeconds: number, room: { left: number }): Promise<boolean> {
-  if (status !== "lost") return true;
-  // Past this run's ceiling (CLAWBACKS_PER_RUN): kept open and handled the next day, never skipped.
-  if (room.left <= 0) return false;
+type Claw = "done" | "later" | "failed";
+async function clawBack(status: PlanDisputeStatus, invoiceId: string, nowSeconds: number, room: Room, retry: boolean): Promise<Claw> {
+  if (status !== "lost") return "done";
+  // Past this run's ceiling (CLAWBACKS_PER_RUN): kept and handled the next day, never skipped. A lost dispute whose
+  // clawback already failed takes one of CLAWBACK_RETRIES_PER_RUN places at most, so disputes that keep failing never
+  // take every place from one met for the first time (Claude 5 iacVn3r's LOW on #4514).
+  if (room.left <= 0 || (retry && room.retries <= 0)) return "later";
   room.left -= 1;
+  if (retry) room.retries -= 1;
   try {
     await clawBackInviteCredits(invoiceId, nowSeconds);
-    return true;
+    return "done";
   } catch (error) {
     console.error(`taking back the invite credit of ${invoiceId} failed`, error);
-    return false;
+    return "failed";
   }
 }
 
+/** The mark a dispute is kept under after this run: open while open, lost once a clawback failed, final once done. */
+const markAfter = (status: PlanDisputeStatus, claw: Claw, retry: boolean): "open" | "lost" | "final" =>
+  status === "open" ? "open" : claw === "done" ? "final" : claw === "failed" || retry ? "lost" : "open";
+
 /** Writes a dispute's status on a store already known. Answers whether it changed. */
-async function writeStatus(sid: string, id: string, status: PlanDisputeStatus, at: number, coversUntil: number, nowSeconds: number, clawed = true): Promise<boolean> {
+async function writeStatus(sid: string, id: string, status: PlanDisputeStatus, at: number, coversUntil: number, nowSeconds: number, mark: "open" | "lost" | "final"): Promise<boolean> {
   const store = await storeForId(sid);
   if (!store) {
     await remember(id, `unmatched:${nowSeconds}`);
@@ -94,13 +114,13 @@ async function writeStatus(sid: string, id: string, status: PlanDisputeStatus, a
   const before = JSON.stringify(store.planDisputes ?? []);
   const after = await recordPlanDispute(storeRef(store), { id, status, at, coversUntil }, nowSeconds);
   if (!after) throw new Error("the dispute could not be written down");
-  await remember(id, status === "open" || !clawed ? `open:${sid}` : "final");
-  if (!clawed) throw new Error("the invite credit of a lost dispute is not taken back yet");
+  await remember(id, mark === "final" ? "final" : `${mark}:${sid}`);
+  if (status !== "open" && mark !== "final") throw new Error("the invite credit of a lost dispute is not taken back yet");
   return JSON.stringify(after.planDisputes ?? []) !== before;
 }
 
 /** Writes one listed dispute on its store. Answers what came of it. */
-async function applyDispute(dispute: Record<string, unknown>, known: string | undefined, nowSeconds: number, room: { left: number }): Promise<"recorded" | "unchanged" | "unmatched"> {
+async function applyDispute(dispute: Record<string, unknown>, known: string | undefined, nowSeconds: number, room: Room): Promise<"recorded" | "unchanged" | "unmatched"> {
   const id = typeof dispute.id === "string" ? dispute.id : "";
   const created = Number.isSafeInteger(dispute.created) ? (dispute.created as number) : 0;
   if (!DISPUTE_ID.test(id) || created <= 0) return "unmatched";
@@ -109,9 +129,10 @@ async function applyDispute(dispute: Record<string, unknown>, known: string | un
   if (known?.startsWith("unmatched:") && nowSeconds - Number(known.slice(10)) > UNMATCHED_RETRY_DAYS * 24 * 60 * 60) return "unmatched";
   const invoice = objectOf(objectOf(dispute.charge)?.invoice);
   const status = disputeStatusOf(dispute.status);
-  if (known?.startsWith("open:")) {
-    const clawed = await clawBack(status, idOf(invoice), nowSeconds, room);
-    return (await writeStatus(known.slice(5), id, status, created, coveredUntil(invoice), nowSeconds, clawed)) ? "recorded" : "unchanged";
+  if (pending(known)) {
+    const retry = known!.startsWith("lost:");
+    const claw = await clawBack(status, idOf(invoice), nowSeconds, room, retry);
+    return (await writeStatus(known!.slice(5), id, status, created, coveredUntil(invoice), nowSeconds, markAfter(status, claw, retry))) ? "recorded" : "unchanged";
   }
   const subscriptionId = idOf(invoice?.subscription);
   if (!invoice || !SUBSCRIPTION_ID.test(subscriptionId)) {
@@ -129,8 +150,8 @@ async function applyDispute(dispute: Record<string, unknown>, known: string | un
     await remember(id, known?.startsWith("unmatched:") ? known : `unmatched:${nowSeconds}`);
     return "unmatched";
   }
-  const clawed = await clawBack(status, idOf(invoice), nowSeconds, room);
-  return (await writeStatus(store.sid, id, status, created, coveredUntil(invoice), nowSeconds, clawed)) ? "recorded" : "unchanged";
+  const claw = await clawBack(status, idOf(invoice), nowSeconds, room, false);
+  return (await writeStatus(store.sid, id, status, created, coveredUntil(invoice), nowSeconds, markAfter(status, claw, false))) ? "recorded" : "unchanged";
 }
 
 function sameCustomer(customerId: string | null | undefined, subscription: Record<string, unknown>): boolean {
@@ -145,7 +166,7 @@ function sameCustomer(customerId: string | null | undefined, subscription: Recor
  */
 export async function syncPlanDisputes(deadline: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<DisputeCounts> {
   const counts: DisputeCounts = { seen: 0, recorded: 0, unmatched: 0, reread: 0, failed: 0, complete: false };
-  const room = { left: CLAWBACKS_PER_RUN };
+  const room: Room = { left: CLAWBACKS_PER_RUN, retries: CLAWBACK_RETRIES_PER_RUN };
   if (!isRedisConfigured() || !isBillingConfigured()) return counts;
   const [raw] = await redisPipeline([["HGETALL", SEEN_KEY]]);
   const seen = new Map<string, string>();
@@ -201,7 +222,7 @@ export async function syncPlanDisputes(deadline: number, nowSeconds = Math.floor
   }
   if (!listDone) console.error("plan disputes: more than one run's pages; the oldest wait for the next run");
   // Still open, and no longer in the list: asked by id.
-  const stale = [...seen].filter(([id, what]) => what.startsWith("open:") && !listed.has(id)).slice(0, MAX_REREADS);
+  const stale = [...seen].filter(([id, what]) => pending(what) && !listed.has(id)).slice(0, MAX_REREADS);
   for (const [id, what] of stale) {
     if (Date.now() > deadline) return counts;
     try {
@@ -211,8 +232,9 @@ export async function syncPlanDisputes(deadline: number, nowSeconds = Math.floor
       counts.reread += 1;
       const created = Number.isSafeInteger(dispute.created) ? (dispute.created as number) : 0;
       const status = disputeStatusOf(dispute.status);
-      const clawed = await clawBack(status, idOf(objectOf(objectOf(dispute.charge)?.invoice)), nowSeconds, room);
-      if (await writeStatus(what.slice(5), id, status, created, 0, nowSeconds, clawed)) counts.recorded += 1;
+      const retry = what.startsWith("lost:");
+      const claw = await clawBack(status, idOf(objectOf(objectOf(dispute.charge)?.invoice)), nowSeconds, room, retry);
+      if (await writeStatus(what.slice(5), id, status, created, 0, nowSeconds, markAfter(status, claw, retry))) counts.recorded += 1;
     } catch (error) {
       counts.failed += 1;
       console.error(`re-reading plan dispute ${id} failed`, error);

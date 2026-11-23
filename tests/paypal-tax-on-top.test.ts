@@ -131,7 +131,10 @@ async function main(): Promise<void> {
   const tried = await openOrder({ ...late, tax: { ...late.tax, enabled: false } }, (await readListing(late, added.product.id))!, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT });
   if (!tried.ok) throw new Error("no tried order");
   await redis.pipeline([["INCR", `nl:ppsell:try:${tried.order}`]]);
-  is("an order already tried is sent to the thanks page, as a pending one", await captureOrder(late, tried.order), { ok: false, reason: "pending" });
+  // Claude 6 UoHAG's LEVE on #5243: tried and let go (a declined try takes it out of pending) is "tax", not the thanks page.
+  is("an order tried and let go (not under watch) is said as \"tax\"", await captureOrder(late, tried.order), { ok: false, reason: "tax" });
+  await redis.pipeline([["ZADD", `nl:ppsell:pending:${late.statsId}`, Math.floor(Date.now() / 1000), tried.order]]);
+  is("an order tried and still under watch goes to the thanks page, as a pending one", await captureOrder(late, tried.order), { ok: false, reason: "pending" });
   is("PayPal is still not asked", captures, asked);
 
   part("The buyer is told nothing was charged, in every buyer language");

@@ -1209,11 +1209,6 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   if (already) return { ok: true, paid: already, fresh: false };
   const { opened, tries } = await readOpenedAndTries(order);
   if (!opened || opened === "unknown" || opened.s !== store.statsId || tries === "unknown") return { ok: false, reason: "unknown" };
-  // An order opened before the creator added tax on top of the prices, approved after: PayPal would take the price
-  // alone, without the tax (Claude 7's LEVE on #5243). Nothing is asked of PayPal and nothing is written. One a capture
-  // was already asked for stays with the sweep, which reads PayPal's own order, so its buyer goes to the thanks page as
-  // for a pending one; one never tried is "tax": the buyer is told nothing was charged (the coordinator's triple audit).
-  if (taxOnTop(store)) return { ok: false, reason: tries > 0 ? "pending" : "tax" };
   // Asked for as many times as an order may be (CAPTURE_TRIES_PER_ORDER; Claude 7's cost MEDIUM on #3411): PayPal is not
   // asked again and nothing is written. Only an order still in pending goes to the thanks page, where the sweep writes
   // down a payment PayPal completes; one every try was refused for, or the sweep let go of, has nothing under watch,
@@ -1226,6 +1221,22 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
     console.error(`a PayPal order's ${what} could not be read`, order, error);
     return { ok: false, reason: "unknown" };
   };
+  // An order opened before the creator added tax on top of the prices, approved after: PayPal would take the price
+  // alone, without the tax (Claude 7's LEVE on #5243). Nothing is asked of PayPal and nothing is written. One never
+  // tried is "tax": the buyer is told nothing was charged (the coordinator's triple audit). One tried before is read
+  // where it stands, as a spent one is (Claude 6 UoHAG's LEVE): paid is shown as paid; still under watch, the sweep
+  // reads PayPal's own order and the buyer goes to the thanks page; let go (a declined try), it is "tax" too.
+  if (taxOnTop(store)) {
+    if (tries === 0) return { ok: false, reason: "tax" };
+    let stands: CaptureResult;
+    try {
+      stands = await standing(order, opened);
+    } catch (error) {
+      // A read that does not answer is not "let go": the buyer is told it did not go through, as on every other path.
+      return unread(error, "standing");
+    }
+    return stands.ok || stands.reason === "pending" ? stands : { ok: false, reason: "tax" };
+  }
   if (tries >= CAPTURE_TRIES_PER_ORDER) return standing(order, opened).catch((error) => unread(error, "standing"));
   // Watched first: no capture is asked for an order the sweep could not find (watchFirst throws on anything unknown,
   // and a record ended since it was read, or less than a day from thirty past its opening, is no order to take a payment

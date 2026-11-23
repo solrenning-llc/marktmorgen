@@ -9,7 +9,7 @@ import { makeTest, moveTest, readTests, removeTest, TestMeetingUnavailable } fro
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/integrations/meetings/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { LOCKED_UNTIL_STAR_COMMANDS, TAKE_COMMANDS, UNIT_COST, request } from "./plan-cost-registry";
+import { INTEGRATION_UNIT_COMMANDS, LOCKED_UNTIL_STAR_COMMANDS, TAKE_COMMANDS, UNIT_COST, request } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 process.env.NIMBUS_DATA_KEY = "synthetic-meeting-test-erasure-key-not-for-production";
@@ -124,7 +124,7 @@ async function main(): Promise<void> {
   part("The real test and move-test routes stay within the studio and integration units they take first");
   const allowed = (kind: string) => redis.keys().filter((k) => k.startsWith(`nl:allow:${kind}:`)).reduce((n, k) => n + Number(redis.run(["GET", k]) ?? 0), 0);
   // The commands the studio and integration units price (tests/plan-cost-registry.ts UNIT_COST), tied to the registry.
-  const STUDIO_COMMANDS = 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, INTEGRATION_COMMANDS = 10 + TAKE_COMMANDS;
+  const STUDIO_COMMANDS = 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, INTEGRATION_COMMANDS = INTEGRATION_UNIT_COMMANDS; // the registry's own term, never typed again (AC (n), #5101)
   const UNIT_COMMANDS = STUDIO_COMMANDS + INTEGRATION_COMMANDS;
   is("the studio unit is priced at these commands", request("studio", STUDIO_COMMANDS, 50_000), UNIT_COST.studio);
   is("the integration unit is priced at these commands", request("wait", INTEGRATION_COMMANDS, 21_024), UNIT_COST.integration);

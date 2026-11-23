@@ -785,6 +785,20 @@ function importValues(value: unknown, length: number): (string | null)[] {
   return value as (string | null)[];
 }
 
+/**
+ * Each address's kept row read as a contact, null where none is kept. A row kept but not readable as a contact (a
+ * truncated write, say) is unknown, never an address not on the list (#4205): it throws, before anything is decided
+ * or written, so an unsubscribe, a bounce, a token or a purchase history it may hold is never written over as a new yes.
+ */
+function importedContacts(values: (string | null)[]): (Contact | null)[] {
+  return values.map((raw) => {
+    if (raw === null) return null;
+    const contact = parseContact(raw);
+    if (!contact) throw new Error(CONTACT_IMPORT_UNKNOWN);
+    return contact;
+  });
+}
+
 /** Atomic import only: a completed erasure always wins over a stale import read. */
 export const IMPORT_CONTACTS_WRITE = `-- marktmorgen:contact-import:v1
 if #KEYS ~= 4 or #ARGV == 0 or #ARGV % 6 ~= 0 then return redis.error_reply("invalid contact import") end
@@ -1088,10 +1102,10 @@ export async function previewContactRows(
   ]);
   exactImportReply(reply, 3);
   const size = importCount(reply[0]);
-  const existing = importValues(reply[1], rows.length);
+  const existing = importedContacts(importValues(reply[1], rows.length));
   const deleted = importValues(reply[2], rows.length);
   return {
-    outcomes: rows.map((row, i) => decide(parseContact(existing[i]), row, deleted[i] !== null && deleted[i] !== undefined)),
+    outcomes: rows.map((row, i) => decide(existing[i], row, deleted[i] !== null && deleted[i] !== undefined)),
     room: Math.max(0, MAX_LEADS - size),
   };
 }
@@ -1144,6 +1158,7 @@ export async function importContactRows(listId: string, rows: ImportedContact[],
   exactImportReply(reply, 3);
   const size = importCount(reply[0]);
   const existing = importValues(reply[1], rows.length);
+  const kept = importedContacts(existing);
   const deleted = importValues(reply[2], rows.length);
   let room = MAX_LEADS - size;
   const now = new Date().toISOString();
@@ -1151,7 +1166,7 @@ export async function importContactRows(listId: string, rows: ImportedContact[],
   const writes: (ImportWrite & { row: number })[] = [];
   const sizes: ContactPair[] = [];
   const outcomes = rows.map((row, i): ContactOutcome => {
-    const before = parseContact(existing[i]);
+    const before = kept[i];
     const decided = decideContact(before, row, now, deleted[i] !== null && deleted[i] !== undefined);
     if (decided.fresh) {
       if (room <= 0) return "full";

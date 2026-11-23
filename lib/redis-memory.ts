@@ -570,13 +570,13 @@ export class MemoryRedis {
           this.run(["ZREM", lease, member]);
           return 1;
         }
-        // lib/buyer-profile.ts ADD_RUN_NOTE: a run's note, only while the run holds its take at its exact score.
         // lib/learning-paths.ts PATHS_SLOT_IF_HELD: the paths' slot set only while the save's lock is still its own.
         if (key.startsWith("-- marktmorgen:paths-slot-if-held:v1\n") && args[0] === "2" && args.length === 7) {
           const [, room, lock, limit, month, size, token] = args;
           if (this.run(["GET", lock]) !== token) return [2, 0];
           return this.storeData([room, limit, "2", month, "s", "paths", size]);
         }
+        // lib/buyer-profile.ts ADD_RUN_NOTE: a run's note, only while the run holds its take at its exact score.
         if (key.startsWith("-- marktmorgen:person-run-note:v1\n") && args[0] === "3" && args.length === 10) {
           const [, notes, who, lease, id, json, seconds, member, score, person] = args;
           const held = this.run(["ZSCORE", lease, member]);

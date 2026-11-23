@@ -491,7 +491,7 @@ function without(record: DropRecord, gone: (id: string) => boolean): DropRecord 
 async function recoveryToTell(address: string): Promise<string> {
   return recoveryAddressOf(address).catch((error: unknown) => {
     if (error instanceof UnknownReplyError) throw error;
-    console.error("reading the recovery address to tell of a passkey change failed", error);
+    console.error("reading the recovery address to tell of a passkey change failed");
     return "";
   });
 }
@@ -699,7 +699,7 @@ async function dropPasskeySessions(address: string, gone: (mark: string) => bool
     return true;
   } catch (error) {
     if (!(error instanceof SessionsUnknownError)) throw error;
-    console.error("logging out what a removed passkey opened failed", error);
+    console.error("logging out what a removed passkey opened failed");
     return false;
   }
 }
@@ -989,12 +989,12 @@ export async function movePasskeys(from: string, to: string, now = Date.now()): 
         await fencedDel(heldTo, [listKey(address), dropKey(address)])
           .catch(() => withPasskeys(address, (again) => fencedDel(again, [listKey(address), dropKey(address)])))
           .catch((undo) => {
-            console.error("taking passkeys off the new address failed", undo);
+            console.error("taking passkeys off the new address failed");
             undone = false;
           });
         for (const id of tried) {
           await fencedSet(heldFrom, credKey(id), source).catch((undo) => {
-            console.error("putting a passkey's index back failed", undo);
+            console.error("putting a passkey's index back failed");
             undone = false;
           });
         }

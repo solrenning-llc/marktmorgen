@@ -24,16 +24,41 @@
  *   goes, each row at the bytes it adds to its part's JSON: a database larger
  *   than the run may copy is refused, never written as a whole set.
  *
+ * - A key larger than a part (9 November 2026: the affiliate book's snapshot
+ *   under nl:aff: may take 8,000,000 bytes) is copied in chunks over
+ *   consecutive parts, each chunk with the key's whole DUMP length and SHA-256
+ *   (lib/backup-codec.ts, BackupChunk): the chunk that begins it is the first
+ *   row of its part, every chunk but the last the only one, and the last the
+ *   first row of its part. readBackupSet joins them and checks the length, the
+ *   sum and the order before it hands the whole row on; a chunk missing, moved
+ *   or changed stops the read. A key whose DUMP is over BACKUP_KEY_MAX_BYTES is
+ *   never cut short: it is left out, the rest is still written and verified,
+ *   and the manifest says how many were left out (version 2, "missing"), so the
+ *   copy is "key_over_ceiling", never a whole set, and readBackupSet refuses it
+ *   unless asked to read it knowingly as incomplete. Its bytes, read by DUMP,
+ *   still count against the run's maxRunBytes.
+ *
+ * - A copy may stop at a deadline and go on in a later run (C1-20261109-1525-C4-68 item 3): with `stopAt`, no key is
+ *   begun at or after it; the open part is closed (written and read back) and the copy comes back "paused" with its
+ *   progress: the last key name handled (`after`), the parts written so far and the counts. Given that progress as
+ *   `resume`, the next copy walks the database again and copies only the names after `after`, in the same order, into
+ *   new parts sealed with the same moment (`now`, the copy's start), then the manifest names every part. A pause
+ *   needs a part left for the rest of the copy: with none, the copy is "too_many_parts" at once, never a progress that
+ *   could not close. A key in chunks is never cut by a pause: when its chunks could not be closed before `stopAt`
+ *   (`partMs` each), the copy pauses before it.
+ *
  * Server-only. Built and off: nothing schedules it (lib/backup-run.ts).
  */
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { gunzipSync, gzipSync } from "node:zlib";
-import { openBackup, sealBackup, type BackupRow, type BackupSnapshot } from "@/lib/backup-codec";
+import { BACKUP_KEY_MAX_BYTES, openPart, openSealed, sealPart, sealWithKid, type BackupChunkRow, type BackupKeys, type BackupPart, type BackupRow, type BackupSnapshot, type SealFormat } from "@/lib/backup-codec";
 import { BACKUP_MAX_BYTES, BACKUP_MAX_ROWS, BACKUP_PREFIX } from "@/lib/backup-export";
 import type { BackupObjectStore } from "@/lib/backup-roundtrip";
 import { timeLeft } from "@/lib/fetch-timeout";
 import { redisPipeline, redisPipelineBase64 } from "@/lib/redis";
+
+export { BACKUP_KEY_MAX_BYTES };
 
 /** The most one part holds, as the backup format seals it (JSON), and its rows. */
 export const PART_MAX_BYTES = BACKUP_MAX_BYTES;
@@ -57,9 +82,26 @@ const SCAN_COUNT = 500;
 export const BACKUP_SCAN_PAGES = 200;
 /** The longest key the backup format keeps (lib/backup-codec.ts), in bytes. */
 const KEY_MAX_BYTES = 1_024;
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
-const MANIFEST_MAGIC = Buffer.from("MMBM1");
-const MANIFEST_AAD = Buffer.from("marktmorgen/backup-manifest/v1");
+// Linear (9 November 2026): the quad-grouped pattern overflows V8's regexp stack past about 5 million characters,
+// which a key in chunks reaches (a DUMP of 8 MB is 10.7 million); the length and the round trip do the rest.
+const BASE64_CHARS = /^[A-Za-z0-9+/]*={0,2}$/;
+const BASE64 = { test: (text: string) => text.length % 4 === 0 && BASE64_CHARS.test(text) };
+/** The manifest's two formats (lib/backup-codec.ts): the older one, and the one with the key id after the magic. */
+const MANIFEST_FORMAT: SealFormat = {
+  magicV1: Buffer.from("MMBM1"),
+  aadV1: Buffer.from("marktmorgen/backup-manifest/v1"),
+  magic: Buffer.from("MMBM2"),
+  aad: Buffer.from("marktmorgen/backup-manifest/v2"),
+};
+
+/**
+ * True when `bytes` begin as a manifest does, in either format: such an object that does not open is a manifest under
+ * a key the reader lacks, or a damaged one, and never "not a manifest" (inbox C4-36 item 3).
+ */
+export function isManifestEnvelope(bytes: Uint8Array): boolean {
+  const head = Buffer.from(bytes.subarray(0, 5));
+  return head.equals(MANIFEST_FORMAT.magicV1) || head.equals(MANIFEST_FORMAT.magic);
+}
 
 /** The caps of one run in parts, decided by the reviewed cost ceiling (lib/backup-run.ts). */
 export type PartsLimits = {
@@ -77,14 +119,48 @@ export type PartsLimits = {
   now: number;
   /** The most one part holds as sealed JSON: PART_MAX_BYTES, or less (the tests make several parts of a small set). */
   partBytes?: number;
+  /** The moment (Date.now()) at and after which no key is begun: the copy pauses. Absent: it never pauses. */
+  stopAt?: number;
+  /** How long one part may take to close (written and read back), for a key in chunks begun before stopAt. */
+  partMs?: number;
+  /** Where an earlier, paused copy stopped (validProgress): the copy goes on from there. */
+  resume?: CopyProgress;
+  /** The moment a key's end is compared with, when it is not `now` (a resumed copy keeps its start as `now`). */
+  readAt?: number;
 };
 
-export type PartEntry = { id: string; rows: number; bytes: number; sha256: string };
-export type BackupManifest = { version: 1; capturedAt: number; parts: PartEntry[]; rows: number };
+/**
+ * Where a paused copy stopped: the last key name it handled (null before the first), every part it wrote and read
+ * back, and its counts so far (rows in those parts, keys copied, keys left out over the ceiling, bytes counted
+ * against maxRunBytes).
+ */
+export type CopyProgress = { after: string | null; parts: PartEntry[]; rows: number; keys: number; missing: number; bytes: number };
 
+export type PartEntry = { id: string; rows: number; bytes: number; sha256: string };
+/**
+ * A set's manifest: `rows` counts the rows of its parts (a chunked key's chunks each). Version 2 is a set with keys
+ * left out over BACKUP_KEY_MAX_BYTES, `missing` how many: a reader that knows only version 1 refuses it, never taking
+ * it for a whole set.
+ */
+export type BackupManifest = { version: 1; capturedAt: number; parts: PartEntry[]; rows: number } | { version: 2; capturedAt: number; parts: PartEntry[]; rows: number; missing: number };
+
+type PartsFailure = "limits" | "budget" | "cutoff" | "scan_pages" | "too_many" | "too_big" | "too_many_parts" | "unreadable" | "error" | "verify";
 export type PartsResult =
-  | { ok: true; id: string; keys: number; bytes: number; parts: number; commands: number }
-  | { ok: false; reason: "limits" | "budget" | "cutoff" | "scan_pages" | "too_many" | "too_big" | "too_many_parts" | "unreadable" | "error" | "verify"; commands: number; parts: number };
+  /** `keys` counts a chunked key once; `rows` as the manifest does, each chunk (the prune compares sets by rows). */
+  | { ok: true; id: string; keys: number; rows: number; bytes: number; parts: number; commands: number }
+  /** Stopped at `stopAt`: never a set (no manifest), its parts verified, the progress to go on from. */
+  | { ok: false; reason: "paused"; progress: CopyProgress; commands: number; parts: number }
+  /** Every other key copied and the set verified, with `missing` keys over BACKUP_KEY_MAX_BYTES left out: never whole. */
+  | { ok: false; reason: "key_over_ceiling"; id: string; missing: number; keys: number; bytes: number; parts: number; commands: number }
+  | { ok: false; reason: PartsFailure; commands: number; parts: number };
+
+/** A set read back that left keys out (manifest version 2), refused unless read knowingly as incomplete. */
+export class BackupSetIncompleteError extends Error {
+  constructor(readonly missing: number) {
+    super(`Backup set is incomplete: ${missing} key(s) over the ceiling were left out`);
+    this.name = "BackupSetIncompleteError";
+  }
+}
 
 const whole = (n: unknown, most = Number.MAX_SAFE_INTEGER) => typeof n === "number" && Number.isSafeInteger(n) && n > 0 && n <= most;
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -96,57 +172,75 @@ export const runStoredBound = (limits: Pick<PartsLimits, "maxParts" | "maxRunByt
 
 function validManifest(raw: unknown): BackupManifest {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid manifest");
-  const m = raw as Partial<BackupManifest>;
-  if (m.version !== 1 || !Number.isSafeInteger(m.capturedAt) || Number(m.capturedAt) < 0 || !Array.isArray(m.parts) || m.parts.length > MAX_PARTS || !Number.isSafeInteger(m.rows)) {
+  const m = raw as Partial<BackupManifest> & { missing?: unknown };
+  // Version 2 only with keys left out, version 1 only without: the count is never absent from an incomplete set.
+  const missingFine = m.version === 1 ? !("missing" in m) : m.version === 2 && Number.isSafeInteger(m.missing) && Number(m.missing) >= 1 && Number(m.missing) <= 1_000_000;
+  if (!missingFine || !Number.isSafeInteger(m.capturedAt) || Number(m.capturedAt) < 0 || !Array.isArray(m.parts) || m.parts.length > MAX_PARTS || !Number.isSafeInteger(m.rows)) {
     throw new Error("Invalid manifest");
   }
-  const ids = new Set<string>();
-  let rows = 0;
-  for (const part of m.parts) {
-    if (!part || typeof part !== "object" || typeof part.id !== "string" || !/^[0-9a-f-]{36}$/.test(part.id) || ids.has(part.id) ||
-        !Number.isSafeInteger(part.rows) || part.rows < 0 || part.rows > PART_MAX_ROWS ||
-        !Number.isSafeInteger(part.bytes) || part.bytes < 34 || part.bytes > PART_MAX_BYTES + PART_SEAL_ROOM ||
-        typeof part.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(part.sha256)) throw new Error("Invalid manifest part");
-    ids.add(part.id);
-    rows += part.rows;
-  }
-  if (rows !== m.rows) throw new Error("Invalid manifest rows");
+  if (rowsOfParts(m.parts) !== m.rows) throw new Error("Invalid manifest rows");
   return m as BackupManifest;
 }
 
-/** The manifest, sealed as the parts are (AES-256-GCM over gzip), under its own magic and associated data. */
-export function sealManifest(manifest: BackupManifest, key: Uint8Array): Buffer {
-  if (key.byteLength !== 32) throw new Error("Invalid backup key");
-  const plain = Buffer.from(JSON.stringify(validManifest(manifest)));
-  if (plain.length > manifestBound(manifest.parts.length)) throw new Error("Manifest exceeds its bound");
-  const nonce = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", key, nonce);
-  cipher.setAAD(MANIFEST_AAD);
-  const encrypted = Buffer.concat([cipher.update(gzipSync(plain)), cipher.final()]);
-  return Buffer.concat([MANIFEST_MAGIC, nonce, cipher.getAuthTag(), encrypted]);
+/** The rows of a list of part entries, each checked in its shape and none twice; throws on any other. */
+function rowsOfParts(parts: readonly unknown[]): number {
+  const ids = new Set<string>();
+  let rows = 0;
+  for (const raw of parts) {
+    const part = raw as Partial<PartEntry> | null;
+    if (!part || typeof part !== "object" || typeof part.id !== "string" || !/^[0-9a-f-]{36}$/.test(part.id) || ids.has(part.id) ||
+        !Number.isSafeInteger(part.rows) || Number(part.rows) < 0 || Number(part.rows) > PART_MAX_ROWS ||
+        !Number.isSafeInteger(part.bytes) || Number(part.bytes) < 34 || Number(part.bytes) > PART_MAX_BYTES + PART_SEAL_ROOM ||
+        typeof part.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(part.sha256)) throw new Error("Invalid manifest part");
+    ids.add(part.id);
+    rows += Number(part.rows);
+  }
+  return rows;
 }
 
-export function openManifest(sealed: Uint8Array, key: Uint8Array): BackupManifest {
-  if (key.byteLength !== 32) throw new Error("Invalid backup key");
+const count = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+
+/**
+ * A paused copy's progress read back exactly (rule 24): every field in its shape, the parts as a manifest names them,
+ * their rows the count; anything else throws, never "no progress".
+ */
+export function validProgress(raw: unknown): CopyProgress {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid progress");
+  const p = raw as Partial<CopyProgress>;
+  const fields = Object.keys(p).sort().join(",");
+  if (fields !== "after,bytes,keys,missing,parts,rows") throw new Error("Invalid progress");
+  if (p.after !== null && (typeof p.after !== "string" || !p.after.startsWith(BACKUP_PREFIX) || Buffer.byteLength(p.after, "utf8") > KEY_MAX_BYTES)) throw new Error("Invalid progress");
+  if (!Array.isArray(p.parts) || p.parts.length > MAX_PARTS || ![p.rows, p.keys, p.missing, p.bytes].every(count)) throw new Error("Invalid progress");
+  if (rowsOfParts(p.parts) !== p.rows) throw new Error("Invalid progress rows");
+  return { after: p.after, parts: p.parts.map(({ id, rows, bytes, sha256 }) => ({ id, rows, bytes, sha256 })), rows: p.rows!, keys: p.keys!, missing: p.missing!, bytes: p.bytes! };
+}
+
+/** The manifest, sealed as the parts are (AES-256-GCM over gzip, with the key id), under its own magic and associated data. */
+export function sealManifest(manifest: BackupManifest, key: Uint8Array): Buffer {
+  if (!(key instanceof Uint8Array) || key.byteLength !== 32) throw new Error("Invalid backup key");
+  const plain = Buffer.from(JSON.stringify(validManifest(manifest)));
+  if (plain.length > manifestBound(manifest.parts.length)) throw new Error("Manifest exceeds its bound");
+  return sealWithKid(MANIFEST_FORMAT, key, gzipSync(plain));
+}
+
+/** A manifest opened with the key whose id its header names, from one key or a keyring (lib/backup-codec.ts). */
+export function openManifest(sealed: Uint8Array, keys: BackupKeys): BackupManifest {
   const blob = Buffer.from(sealed);
-  if (blob.length < 34 || blob.length > manifestBound(MAX_PARTS) || !blob.subarray(0, 5).equals(MANIFEST_MAGIC)) throw new Error("Invalid manifest envelope");
-  const decipher = createDecipheriv("aes-256-gcm", key, blob.subarray(5, 17));
-  decipher.setAAD(MANIFEST_AAD);
-  decipher.setAuthTag(blob.subarray(17, 33));
+  if (blob.length < 34 || blob.length > manifestBound(MAX_PARTS)) throw new Error("Invalid manifest envelope");
   // Authenticated before it is unpacked or read.
-  const packed = Buffer.concat([decipher.update(blob.subarray(33)), decipher.final()]);
+  const packed = openSealed(MANIFEST_FORMAT, keys, blob);
   return validManifest(JSON.parse(gunzipSync(packed, { maxOutputLength: manifestBound(MAX_PARTS) }).toString("utf8")));
 }
 
 /** One part sealed, written create-only and read back the same; its entry for the manifest. */
-async function putPart(snapshot: BackupSnapshot, key: Uint8Array, store: BackupObjectStore): Promise<PartEntry> {
-  const sealed = sealBackup(snapshot, key);
+async function putPart(snapshot: BackupPart, key: Uint8Array, store: BackupObjectStore): Promise<PartEntry> {
+  const sealed = sealPart(snapshot, key);
   if (sealed.length > PART_MAX_BYTES + PART_SEAL_ROOM) throw new Error("Part exceeds its bound");
   const id = randomUUID();
   await store.putNew(id, sealed);
   const read = await store.read(id, PART_MAX_BYTES + PART_SEAL_ROOM);
   if (read.byteLength !== sealed.length || sha256(read) !== sha256(sealed)) throw new Error("Part read-back differs");
-  if (!isDeepStrictEqual(openBackup(read, key), snapshot)) throw new Error("Part read-back mismatch");
+  if (!isDeepStrictEqual(openPart(read, key), snapshot)) throw new Error("Part read-back mismatch");
   return { id, rows: snapshot.rows.length, bytes: read.byteLength, sha256: sha256(read) };
 }
 
@@ -156,13 +250,22 @@ async function putPart(snapshot: BackupSnapshot, key: Uint8Array, store: BackupO
  * parts written. Never throws.
  */
 export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: BackupObjectStore): Promise<PartsResult> {
-  const { maxRows, maxCommands, maxParts, maxRunBytes, batch, now, partBytes = PART_MAX_BYTES } = limits;
+  const { maxRows, maxCommands, maxParts, maxRunBytes, batch, now, partBytes = PART_MAX_BYTES, stopAt, partMs = 0, readAt = now } = limits;
   if (!whole(maxRows) || !whole(maxCommands) || !whole(maxParts, MAX_PARTS) || !whole(maxRunBytes) || !whole(batch, 500) || !whole(now) || !whole(partBytes, PART_MAX_BYTES) || partBytes <= 1_024 || key.byteLength !== 32) {
     return { ok: false, reason: "limits", commands: 0, parts: 0 };
   }
+  if ((stopAt !== undefined && !whole(stopAt)) || !count(partMs) || !whole(readAt)) return { ok: false, reason: "limits", commands: 0, parts: 0 };
+  let resume: CopyProgress | null;
+  try {
+    resume = limits.resume === undefined ? null : validProgress(limits.resume);
+  } catch {
+    return { ok: false, reason: "limits", commands: 0, parts: 0 };
+  }
   let commands = 0;
-  const entries: PartEntry[] = [];
-  const fail = (reason: Exclude<PartsResult, { ok: true }>["reason"]): PartsResult => ({ ok: false, reason, commands, parts: entries.length });
+  // A resumed copy's parts first: the manifest names them before this run's.
+  const entries: PartEntry[] = resume ? [...resume.parts] : [];
+  if (entries.length > maxParts) return { ok: false, reason: "too_many_parts", commands: 0, parts: entries.length };
+  const fail = (reason: PartsFailure): PartsResult => ({ ok: false, reason, commands, parts: entries.length });
   // Which side a throw came from: the database while reading ("error"), or a part or the manifest being sealed,
   // written or read back ("verify").
   let writing = false;
@@ -191,14 +294,21 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
       cursor = reply[0];
     } while (cursor !== "0");
 
-    const sorted = [...keys].sort();
-    // Decided before any DUMP: the whole copy fits the run's commands, or nothing is copied.
+    // A resumed copy goes on after the last name the paused one handled, in the same order.
+    const after = resume?.after ?? null;
+    const sorted = [...keys].sort().filter((name) => after === null || name > after);
+    // Decided before any DUMP: the whole rest of the copy fits the run's commands, or nothing is copied.
     if (commands + 2 * sorted.length > maxCommands) return fail("budget");
 
-    let rows: BackupRow[] = [];
+    let rows: BackupPart["rows"] = [];
     let filled = 0;
-    let runBytes = 0;
-    let copied = 0;
+    let runBytes = resume?.bytes ?? 0;
+    let copied = resume?.rows ?? 0;
+    // Keys copied (a chunked key once), and keys left out over BACKUP_KEY_MAX_BYTES.
+    let keysCopied = resume?.keys ?? 0;
+    let missing = resume?.missing ?? 0;
+    // The last name handled (copied, gone, ended or left out): where a pause says the next copy goes on from.
+    let last = after;
     const close = async () => {
       if (rows.length === 0) return;
       if (entries.length + 1 > maxParts) throw new RangeError("too_many_parts");
@@ -210,8 +320,16 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
       rows = [];
       filled = 0;
     };
+    // At the deadline: the open part closed, and the progress handed back. A pause needs the part it closes and one
+    // more for the rest of the copy, or the copy could never close: "too_many_parts" at once.
+    const pause = async (): Promise<PartsResult> => {
+      if (entries.length + (rows.length > 0 ? 1 : 0) + 1 > maxParts) return fail("too_many_parts");
+      await close();
+      return { ok: false, reason: "paused", progress: { after: last, parts: [...entries], rows: copied, keys: keysCopied, missing, bytes: runBytes }, commands, parts: entries.length };
+    };
     for (let at = 0; at < sorted.length; at += batch) {
       if (timeLeft() <= 0) return fail("cutoff");
+      if (stopAt !== undefined && Date.now() >= stopAt) return await pause();
       const names = sorted.slice(at, at + batch);
       const replies = await redisPipelineBase64(names.flatMap((name) => [["DUMP", name], ["PEXPIRETIME", name]]));
       commands += 2 * names.length;
@@ -223,23 +341,67 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
         const reply = replies[2 * i + 1];
         const ends = typeof reply === "number" ? reply : Number.NaN;
         // Gone between the walk and its copy (DUMP answered nil): left out, never copied empty.
-        if (dump === null) continue;
+        if (dump === null) {
+          last = names[i];
+          continue;
+        }
         // The ending is checked in its shape before it can leave a key out (Codex G on #2734): a safe integer, either
         // -1 (no ending), -2 (gone) or a time; -3, a fraction, -Infinity or an unsafe integer is unknown and refused.
         if (!Number.isSafeInteger(ends) || ends < -2) return fail("unreadable");
         // Gone, or ended by the time of the copy: left out.
-        if (ends === -2 || (ends !== -1 && ends <= now)) continue;
-        if (typeof dump !== "string" || !dump || !BASE64.test(dump) || Buffer.from(dump, "base64").toString("base64") !== dump) return fail("unreadable");
+        if (ends === -2 || (ends !== -1 && ends <= readAt)) {
+          last = names[i];
+          continue;
+        }
+        if (typeof dump !== "string" || !dump || !BASE64.test(dump)) return fail("unreadable");
+        const raw = Buffer.from(dump, "base64");
+        if (raw.toString("base64") !== dump) return fail("unreadable");
         const row: BackupRow = { key: names[i], dump, expiresAt: ends === -1 ? null : ends };
         // The bytes it adds to its part's JSON, escapes and UTF-8 included, and its comma.
         const size = Buffer.byteLength(JSON.stringify(row), "utf8") + 1;
-        // One key larger than a part holds cannot be split: refused whole.
-        if (size > partBytes - 1_024) return fail("too_big");
+        // Read by DUMP whatever becomes of it: its bytes count against the run's cap (lib/backup-cost.ts prices them).
         if (runBytes + size > maxRunBytes) return fail("too_big");
+        // Over the ceiling: left out whole, never cut short, and counted, so the set is never taken for a whole one.
+        if (raw.length > BACKUP_KEY_MAX_BYTES) {
+          missing += 1;
+          runBytes += size;
+          last = names[i];
+          continue;
+        }
+        if (size > partBytes - 1_024) {
+          // Larger than a part: chunks over consecutive parts, the first beginning a part, each but the last alone in
+          // its part, each with the key's whole length and sum.
+          await close();
+          const base = { key: names[i], expiresAt: row.expiresAt };
+          const room = partBytes - 1_024 - (Buffer.byteLength(JSON.stringify({ ...base, chunk: { at: MAX_PARTS, of: MAX_PARTS, bytes: raw.length, sha256: "0".repeat(64), data: "" } }), "utf8") + 1);
+          const piece = Math.floor(room / 4) * 4;
+          if (piece < 4) return fail("too_big");
+          const of = Math.ceil(dump.length / piece);
+          if (of < 2 || of > MAX_PARTS) return fail("too_big");
+          // Its chunks close of - 1 parts before the last one stays open: begun only when they can close before the
+          // deadline, so a pause never cuts a key; otherwise the copy pauses before it.
+          if (stopAt !== undefined && Date.now() + (of - 1) * partMs >= stopAt) return await pause();
+          const sum = sha256(raw);
+          for (let at = 0; at < of; at += 1) {
+            const chunk: BackupChunkRow = { ...base, chunk: { at, of, bytes: raw.length, sha256: sum, data: dump.slice(at * piece, (at + 1) * piece) } };
+            rows.push(chunk);
+            filled += Buffer.byteLength(JSON.stringify(chunk), "utf8") + 1;
+            // The last chunk leaves its part open for the rows after it.
+            if (at < of - 1) await close();
+          }
+          // Its chunks' framing beyond the row's own bytes, counted too.
+          runBytes += size + of * (Buffer.byteLength(JSON.stringify({ ...base, chunk: { at: 0, of, bytes: raw.length, sha256: sum, data: "" } }), "utf8") + 1);
+          if (runBytes > maxRunBytes) return fail("too_big");
+          keysCopied += 1;
+          last = names[i];
+          continue;
+        }
         if (filled + size > partBytes - 1_024 || rows.length + 1 > PART_MAX_ROWS) await close();
         rows.push(row);
         filled += size;
         runBytes += size;
+        keysCopied += 1;
+        last = names[i];
       }
     }
     await close();
@@ -248,14 +410,16 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
     // run's cutoff (lib/backup-run.ts), so a run's writes all land before it.
     if (timeLeft() <= 0) return fail("cutoff");
     writing = true;
-    const manifest: BackupManifest = { version: 1, capturedAt: now, parts: entries, rows: copied };
+    const manifest: BackupManifest = missing > 0 ? { version: 2, capturedAt: now, parts: entries, rows: copied, missing } : { version: 1, capturedAt: now, parts: entries, rows: copied };
     const sealed = sealManifest(manifest, key);
     const id = randomUUID();
     await store.putNew(id, sealed);
     const read = await store.read(id, manifestBound(entries.length));
     if (!isDeepStrictEqual(openManifest(read, key), manifest)) return fail("verify");
     const bytes = entries.reduce((n, part) => n + part.bytes, 0) + read.byteLength;
-    return { ok: true, id, keys: copied, bytes, parts: entries.length, commands };
+    // A key left out: the rest is a verified set, but never a whole one (rule 24).
+    if (missing > 0) return { ok: false, reason: "key_over_ceiling", id, missing, keys: keysCopied, bytes, parts: entries.length, commands };
+    return { ok: true, id, keys: keysCopied, rows: copied, bytes, parts: entries.length, commands };
   } catch (error) {
     if (error instanceof RangeError && error.message === "too_many_parts") return fail("too_many_parts");
     // The run's cutoff passed, here or inside a request given up at it: said as such.
@@ -271,27 +435,69 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
  * A verified set read back for a restore, one part at a time: the manifest
  * first, its parts' bytes added up and refused past `maxBytes` before any
  * part is read; then each part checked against the manifest's size and sum
- * before it is opened and handed to `onPart`, and let go before the next.
- * Throws on the first part missing or different, after the parts before it
+ * before it is opened and handed to `onPart` with whole rows only, and let go
+ * before the next. A key in chunks is joined from consecutive parts and handed
+ * on with the part of its last chunk, only once its length, SHA-256 and
+ * base64 are the ones its chunks name; a part holding only a middle chunk is
+ * handed on with no rows. Throws on the first part missing or different, a
+ * chunk out of place, or a key whose sum differs, after the parts before it
  * were handed on: a restore that must write all or nothing reads the set
- * twice, first checking every key of every part, then writing.
+ * twice, first checking every key of every part, then writing. A manifest
+ * whose id has a folder (a month's copy, monthly/<YYYY-MM>/<run>/<uuid>,
+ * lib/backup-store.ts) names parts in that same folder. A set that left keys
+ * out (manifest version 2) is refused (BackupSetIncompleteError) unless
+ * `options.allowIncomplete` asks to read it knowingly as incomplete.
  */
 export async function readBackupSet(
   manifestId: string,
-  key: Uint8Array,
+  key: BackupKeys,
   store: BackupObjectStore,
   maxBytes: number,
   onPart: (snapshot: BackupSnapshot, index: number) => Promise<void>,
+  options: { allowIncomplete?: boolean } = {},
 ): Promise<BackupManifest> {
   const manifest = openManifest(await store.read(manifestId, manifestBound(MAX_PARTS)), key);
+  if (manifest.version === 2 && options.allowIncomplete !== true) throw new BackupSetIncompleteError(manifest.missing);
   const total = manifest.parts.reduce((n, part) => n + part.bytes, 0);
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || total > maxBytes) throw new Error("Backup set exceeds the bytes a restore may read");
+  const folder = manifestId.slice(0, manifestId.lastIndexOf("/") + 1);
+  // The key whose chunks are being joined, if any.
+  let open: { key: string; expiresAt: number | null; of: number; bytes: number; sha256: string; pieces: string[] } | null = null;
   for (const [index, part] of manifest.parts.entries()) {
-    const read = await store.read(part.id, PART_MAX_BYTES + PART_SEAL_ROOM);
+    const read = await store.read(folder + part.id, PART_MAX_BYTES + PART_SEAL_ROOM);
     if (read.byteLength !== part.bytes || sha256(read) !== part.sha256) throw new Error("Backup part differs from its manifest");
-    const snapshot = openBackup(read, key);
+    const snapshot = openPart(read, key);
     if (snapshot.capturedAt !== manifest.capturedAt || snapshot.rows.length !== part.rows) throw new Error("Backup part does not match its manifest");
-    await onPart(snapshot, index);
+    const rows: BackupRow[] = [];
+    for (const [at, row] of snapshot.rows.entries()) {
+      if (!("chunk" in row)) {
+        if (open) throw new Error("Backup chunk interrupted");
+        rows.push(row);
+        continue;
+      }
+      const chunk = row.chunk;
+      // Every chunk is the first row of its part: the first begins a key, each one after continues it in the next part.
+      if (at !== 0) throw new Error("Backup chunk out of place");
+      if (chunk.at === 0) {
+        if (open) throw new Error("Backup chunk interrupted");
+        open = { key: row.key, expiresAt: row.expiresAt, of: chunk.of, bytes: chunk.bytes, sha256: chunk.sha256, pieces: [] };
+      } else if (!open || open.key !== row.key || open.expiresAt !== row.expiresAt || open.of !== chunk.of || open.bytes !== chunk.bytes || open.sha256 !== chunk.sha256 || open.pieces.length !== chunk.at) {
+        throw new Error("Backup chunk out of order");
+      }
+      open.pieces.push(chunk.data);
+      if (chunk.at < chunk.of - 1) {
+        // Every chunk but the last is alone in its part.
+        if (snapshot.rows.length !== 1) throw new Error("Backup chunk out of place");
+        continue;
+      }
+      const dump = open.pieces.join("");
+      const bytes = Buffer.from(dump, "base64");
+      if (bytes.length !== open.bytes || sha256(bytes) !== open.sha256 || bytes.toString("base64") !== dump) throw new Error("Backup chunked key differs from its sum");
+      rows.push({ key: open.key, dump, expiresAt: open.expiresAt });
+      open = null;
+    }
+    await onPart({ version: 1, capturedAt: snapshot.capturedAt, rows }, index);
   }
+  if (open) throw new Error("Backup chunked key cut short");
   return manifest;
 }

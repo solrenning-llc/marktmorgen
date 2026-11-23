@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { LINK_KEY, STEP_CAMPAIGN, noteClick } from "@/lib/mail-clicks";
 
 /**
@@ -20,7 +20,8 @@ export async function POST(request: NextRequest) {
     return done();
   }
   if (!LINK_KEY.test(key) || !STEP_CAMPAIGN.test(campaign)) return done();
-  if (!(await withinLimit("mail-clicked", clientAddress(request), 60, 3_600).catch(() => false))) return done();
+  // Past the limit, or a count that could not be read (unknown, rule 24): the click is not noted, and the answer is the same.
+  if ((await withinLimit("mail-clicked", clientAddress(request), 60, 3_600).catch(unknownLimit)) !== true) return done();
   await noteClick(key, campaign).catch((error) => console.error("noting a used link failed", error));
   return done();
 }

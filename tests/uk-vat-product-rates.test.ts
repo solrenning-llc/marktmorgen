@@ -86,7 +86,7 @@ const day = "2026-11-21";
 test("a rate only where the page writes one", () => {
   assert.equal(ukProductRateBps("Printing, postage, publications — books, magazines and newspapers", "Books", day), 0);
   assert.equal(ukProductRateBps("Printing, postage, publications — books, magazines and newspapers", "Other postal services that are not subject to a universal service obligation", day), 2000);
-  const fivePercent = UK_VAT_PRODUCT_RATES.find((row) => row.rate === "5%");
+  const fivePercent = UK_VAT_PRODUCT_RATES.find((row) => row.rate === "5%" && !/rated|exempt|%/i.test(row.more));
   assert.ok(fivePercent);
   assert.equal(ukProductRateBps(fivePercent.section, fivePercent.item, day), 500);
 });
@@ -100,10 +100,21 @@ test("a row whose own note says some of its items are at another rate: refused, 
   assert.equal(ukProductRateBps("Transport, freight, travel and vehicles", "Houseboats — sale or let out on hire", day), null);
   // Rows whose note only cites the notice keep their rate.
   for (const item of ["Books", "Magazines", "Newspapers"]) assert.equal(ukProductRateBps(PRINT, item, day), 0, item);
-  // A note about other goods than the row's own (industrial water) leaves the row's rate as the page writes it.
-  const water = UK_VAT_PRODUCT_RATES.find((row) => row.item === "Water supplied to households");
-  assert.ok(water);
-  assert.equal(ukProductRateBps(water.section, water.item, day), 0);
+});
+
+test("a row whose note names another rate at all: refused, never read for its meaning (Claude 1 NIT, 7094619715)", () => {
+  // "Sewer and drain cleaning, unblocking or maintenance is standard-rated" may be part of the sewerage row's own
+  // services; the note's form does not tell. Any note that names another rate leaves the row without a rate until a
+  // person reads it with the product it is linked to.
+  const named = /standard-rated|zero-rated|reduced-rated|\bexempt\b|\b\d+%/i;
+  const rows = UK_VAT_PRODUCT_RATES.filter((row) => ["0%", "5%", "Standard-rated"].includes(row.rate) && named.test(row.more));
+  assert.ok(rows.length >= 13, `${rows.length} rows`);
+  for (const row of rows) assert.equal(ukProductRateBps(row.section, row.item, day), null, row.item);
+  const sewerage = UK_VAT_PRODUCT_RATES.find((row) => row.item.startsWith("Sewerage services supplied to domestic"));
+  assert.ok(sewerage);
+  assert.equal(ukProductRateBps(sewerage.section, sewerage.item, day), null);
+  // A note that only cites the notice keeps the page's rate.
+  for (const item of ["Books", "Magazines", "Newspapers"]) assert.equal(ukProductRateBps(PRINT, item, day), 0, item);
 });
 
 test("a row that covers only \"certain\" items, which the table does not name: refused, never 0% (Claude 2 lpgvy)", () => {

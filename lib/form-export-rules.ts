@@ -17,3 +17,9 @@ export const FORM_EXPORT_ANSWER_BYTES = 64;
 export function formExportReadMost(size: { count: number; bytes: number }): number {
   return size.bytes * FORM_EXPORT_WIDEST + size.count * FORM_EXPORT_FRAME_BYTES + FORM_EXPORT_ANSWER_BYTES;
 }
+
+/**
+ * What the studio's invoices page says of it, beside the essential requests a download of the store's data takes
+ * (Claude 5 icEJ on #5268): a form's answers as a file also takes studio requests by its size.
+ */
+export const FORM_FILE_WORDS = "Downloading a form's answers as a file also takes your studio's monthly requests by its size, about one for each megabyte it reads and sends, so a large file is counted there too.";

@@ -17,9 +17,10 @@ import { shortWords } from "@/lib/download-words";
  * download (lib/export-unit-rules.ts), before any answer is read (#5010 row
  * 145): their count and length are measured in Redis first, with nothing read
  * out (responsesSize), and held at their widest, every byte of an answer sent
- * back escaped in six (lib/form-export-rules.ts); the file is held before it
- * is sent, and what was
- * held and not used is given back. A size that does not read, or a figure
+ * back escaped in six (lib/form-export-rules.ts); the file is counted after
+ * it is made, past the figure if it must, so a file whose answers could be
+ * read is never refused for its own size, and what was held and not used is
+ * given back. A size that does not read, or a figure
  * without the units, refuses with no answer read. Measured in
  * tests/forms-export-held.test.ts.
  */
@@ -74,16 +75,15 @@ export async function GET(request: NextRequest) {
   const body = `﻿${responsesCsv(form, responses)}`;
   const sent = Buffer.byteLength(body, "utf8");
   const used = responses.length === 0 ? 0 : exportUnitsPast(FORM_EXPORT_COMMANDS, read.bytes + sent);
-  if (used > holding) {
-    // The file is held before it is sent; read already, its answers are counted whatever the figure says.
-    const top = await holdStudio(store, used - holding);
-    if (!top.ok) {
-      await settle(exportUnitsPast(FORM_EXPORT_COMMANDS, read.bytes));
-      return plain(top.reason === "unknown" ? 503 : 429, top.reason === "unknown" ? "unavailable" : top.reason === "used" ? shortWords(store, used, { limit: top.limit, left: top.left === undefined ? undefined : top.left + holding, reset: top.reset }, true) : top.message);
-    }
-    holds.push({ units: used - holding, give: top.give, force: top.force });
+  if (used > holding && holds.length === 0) {
+    // Measured empty, read with answers (kept meanwhile): nothing was held to count them past, so they are held now.
+    const late = await holdStudio(store, used);
+    if (!late.ok) return plain(late.reason === "unknown" ? 503 : 429, late.reason === "unknown" ? "unavailable" : late.reason === "used" ? shortWords(store, used, late) : late.message);
+    holds.push({ units: used, give: late.give, force: late.force });
     holding = used;
   }
+  // A file longer than what was held is counted past the figure, never refused: its answers were read and paid for
+  // already (Claude 5 icEJ's LOW on #5268, as the coordinator's audit of #5256 asked, 7bab 7).
   await settle(used);
   return new Response(body, {
     headers: {

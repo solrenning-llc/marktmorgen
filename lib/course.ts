@@ -350,8 +350,13 @@ export function parseCourse(raw: unknown): Course | null {
     const modules = Array.isArray(value.modules)
       ? value.modules.map(parseModule).filter((m): m is CourseModule => m !== null).slice(0, MAX_MODULES)
       : [];
+    // A cohort date reads only as the studio keeps one (editCourse "start"): a whole number of seconds from
+    // EARLIEST_START to latestStart (Claude 5's LEVE on #3653). A damaged one reads as no date, the shape every course
+    // had before cohorts, never a start in 1969 that opens every module at once nor one so far off that none opens.
     const startsAt =
-      typeof value.startsAt === "number" && Number.isFinite(value.startsAt) ? Math.floor(value.startsAt) : null;
+      Number.isSafeInteger(value.startsAt) && (value.startsAt as number) >= EARLIEST_START && (value.startsAt as number) <= latestStart()
+        ? (value.startsAt as number)
+        : null;
     const shelf = readShelf(value.shelf);
     const months = readCertificateMonths(value.certificateMonths);
     const nextStep = keptNextStep(value.nextStep);

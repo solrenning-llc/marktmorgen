@@ -1730,7 +1730,8 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:mail-ramp-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, ramp, read, next, seconds] = args;
           if (this.run(["GET", ramp]) !== read) return 0;
-          this.run(["SET", ramp, next, "EX", seconds]);
+          if (next === "") this.run(["DEL", ramp]);
+          else this.run(["SET", ramp, next, "EX", seconds]);
           return 1;
         }
         // DR1: one provider receipt and its campaign counter, atomically.

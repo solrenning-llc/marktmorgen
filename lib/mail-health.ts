@@ -309,15 +309,16 @@ async function pauseIfOver(id: string, now: number): Promise<Pause | null> {
 type Ramp = { size: number; left: number; opens: number };
 const rampKey = (id: string) => `nl:mail:ramp:${id}`;
 const RAMP_KEPT_SECONDS = 180 * 86_400;
-/** How many times rampRoom and rampBack read again when another sender changed the record in between. */
+/** How many rounds (a read and a swap) rampRoom and rampBack try before giving up, when another sender keeps changing the record. */
 export const RAMP_TRIES = 3;
 /**
  * A store's portion record written only while it still holds the very text read (issue #4134): 1 written, with its
- * expiry; 0 another sender changed it first, and nothing was written. Modelled by lib/redis-memory.ts.
+ * expiry, or deleted when the new text is "" (the finished final portion); 0 another sender changed it first, and
+ * nothing was written. Modelled by lib/redis-memory.ts.
  */
 export const RAMP_SWAP = `-- marktmorgen:mail-ramp-swap:v1
 if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
-redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3])
+if ARGV[2] == "" then redis.call("DEL", KEYS[1]) else redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3]) end
 return 1`;
 
 /** A single, explicit own response to one existing ramp command. */
@@ -388,10 +389,13 @@ export async function rampRoom(id: string, want: number, now = Date.now()): Prom
         if (seconds < ramp.opens) return 0;
         const next = ramp.size * 2;
         if (next > RAMP_LAST) {
-          // The confirmed final portion has finished; this only cleans up
-          // its existing checkpoint, without changing the progression.
-          await redisPipeline([["DEL", key]]);
-          return want;
+          // The confirmed final portion has finished; this only cleans up its existing checkpoint, and only while it
+          // still holds the text read (Claude 3 xvBY8's LEVE on #5463): a fresh import's startRamp written in between
+          // is kept, and its portions are read on the next round.
+          const cleared = rampReply(await redisPipeline([["EVAL", RAMP_SWAP, 1, key, found.value as string, "", RAMP_KEPT_SECONDS]]));
+          if (cleared?.value === 1) return want;
+          if (cleared?.value === 0) continue;
+          return 0;
         }
         ramp = { size: next, left: next, opens: 0 };
       }
@@ -414,7 +418,8 @@ export async function rampRoom(id: string, want: number, now = Date.now()): Prom
 /**
  * Gives back what rampRoom took, for a batch that did not go out, written only over the record read (RAMP_SWAP): a
  * give-back racing a take never writes over it and hands its capacity out again (issue #4134). Best effort: one that
- * keeps losing, or is not confirmed, leaves the capacity taken, the safe way to be wrong.
+ * keeps losing leaves the capacity taken, the safe way to be wrong; one whose answer is not confirmed may have given
+ * it back or not.
  */
 export async function rampBack(id: string, n: number): Promise<void> {
   if (!id || n <= 0 || !isRedisConfigured()) return;

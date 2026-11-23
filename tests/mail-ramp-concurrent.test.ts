@@ -10,7 +10,7 @@
  * and a give-back racing a take keeps the take. Synthetic store id; the in-memory Redis.
  */
 import { RAMP_TRIES, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
-import { RAMP_FIRST, RAMP_TRIGGER } from "@/lib/mail-health-rules";
+import { RAMP_FIRST, RAMP_LAST, RAMP_TRIGGER } from "@/lib/mail-health-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -89,6 +89,32 @@ async function main(): Promise<void> {
   losing = false;
   is("and leaves what is left as it was, 40 (the capacity stays taken, the safe way)", left(), RAMP_FIRST - 60);
   is("and the record is still as it was", redis.run(["GET", KEY]), record);
+
+  part("A finished final portion is cleared only while it is the record read (Claude 3 xvBY8's LEVE on #5463)");
+  redis.clear();
+  const finished = JSON.stringify({ size: RAMP_LAST, left: 0, opens: 0 });
+  redis.run(["SET", KEY, finished]);
+  let importedMeanwhile = false;
+  const plain = redis.pipeline;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // The clean-up, as a plain DEL (before) or as the swap to "" (now).
+    const cleanUp = commands.length === 1 && ((commands[0][0] === "DEL" && commands[0][1] === KEY) || (commands[0][0] === "EVAL" && commands[0][3] === KEY && commands[0][5] === ""));
+    if (!importedMeanwhile && cleanUp) {
+      importedMeanwhile = true;
+      // An import's startRamp, between the read of the finished portion and its clean-up.
+      await startRamp(ID, RAMP_TRIGGER);
+    }
+    return plain(commands);
+  }) as typeof redis.pipeline;
+  const afterImport = await rampRoom(ID, 5_000);
+  redis.pipeline = plain;
+  is("(the import came in between the read and the clean-up)", importedMeanwhile, true);
+  is("the send is held to the new import's first portion, never the whole list", afterImport, RAMP_FIRST);
+  const keptRamp = JSON.parse(String(redis.run(["GET", KEY]))) as { size: number; left: number };
+  is("and the new portions are kept, the first one taken", [keptRamp.size, keptRamp.left], [RAMP_FIRST, 0]);
+  redis.clear();
+  redis.run(["SET", KEY, finished]);
+  is("control: a finished final portion alone is cleared and the send goes whole", [await rampRoom(ID, 5_000), redis.run(["GET", KEY])], [5_000, null]);
 
   part("Control: one sender alone, as before");
   redis.clear();

@@ -13,6 +13,9 @@
  *   - productsTool and membershipsTool (titlesFor): products named by their id
  *     because their listings could not be read say so (names_note,
  *     by_product_named false), never that their names were read;
+ *   - productsTool: a kept buyer path measured above zero bytes that does not
+ *     read back as paths says so in bought_next_note, never the no-data shape
+ *     (#4133);
  *   - membershipsTool: recurring revenue by month whose invoices could not be
  *     read (a reading kept without movements) is null, never an empty list,
  *     and so is a by_channel the reading does not hold;
@@ -115,6 +118,29 @@ async function main(): Promise<void> {
   is("the names' read is really made to fail", byId.twisted > 0, true);
   is("named by its id when its name could not be read", byId.value?.bought_next?.bought_first_most[0]?.product, product);
   is("and the answer says the names were not read", typeof byId.value?.bought_next?.names_note, "string");
+
+  part("productsTool: a kept buyer path that could not be read is not \"no path data\" (#4133)");
+  {
+    // Metered as get_product_numbers is (app/api/mcp/route.ts): measured (STRLEN), set aside, read, settled.
+    const meter = { hold: async () => async () => null, charge };
+    type Answer = { bought_next: unknown; bought_next_note?: string };
+    const path = `nl:next:${store.statsId}`;
+    await redisPipeline([["DEL", path]]);
+    const none = (await productsTool(far, unnamed, "d30", meter)) as Answer;
+    is("control: nothing kept is no path data, without a note", [none.bought_next, none.bought_next_note], [null, undefined]);
+    for (const [shape, raw] of [
+      ["malformed JSON", "{\"at\":"],
+      ["a shape parsePaths refuses", JSON.stringify({ starts: { [product]: 3 }, next: {} })],
+    ] as const) {
+      await redisPipeline([["SET", path, raw, "EX", 600]]);
+      const answer = (await productsTool(far, unnamed, "d30", meter)) as Answer;
+      is(`${shape}: bought_next is null`, answer.bought_next, null);
+      is(`${shape}: and the answer says it could not be read, never the no-data shape`, /could not be read/.test(answer.bought_next_note ?? ""), true);
+    }
+    const failedRead = await twisted_("throw", path, () => productsTool(far, unnamed, "d30", meter) as Promise<Answer>);
+    is("a read that fails after the size was measured fails or says so", failedRead.failed || /could not be read/.test(failedRead.value?.bought_next_note ?? ""), true);
+    await redisPipeline([["DEL", path]]);
+  }
 
   part("membershipsTool: what was not read is null, never an empty list");
   const members: Store = { ...far, stripeAccountId: "acct_McpSweep01" };

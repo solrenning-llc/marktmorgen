@@ -17,6 +17,19 @@ export const LOCK_UNREAD_RETRY_SECONDS = 60;
 /** The sentence, the same in every answer. */
 export const LOCK_UNREAD_MESSAGE = "We couldn't check your sign-in right now. Nothing was changed. Try again in a minute.";
 
+/**
+ * A studio page behind a locked permission whose lock could not be read sends the browser to the studio's home with
+ * this marker (`/studio?two-step=unread`, lib/studio-route.ts studioView). The home's own read of the lock may answer
+ * on that next request, so the marker is what lets the home tell the person why the page they asked for was not opened.
+ */
+export const LOCK_UNREAD_MARK = "unread";
+
+/** What the studio's home says when it has the marker: the page asked for stayed closed, why, and what to do. */
+export const LOCK_UNREAD_PAGE_NOTICE = {
+  title: "That page was not opened",
+  body: `${LOCK_UNREAD_MESSAGE} The page you asked for stays closed until your sign-in can be checked.`,
+} as const;
+
 /** What a read of the lock answers when it failed. */
 export const LOCK_UNREAD: unique symbol = Symbol("two-step lock unread");
 

@@ -241,6 +241,7 @@ import { TwoStepAsk } from "@/components/two-step-ask";
 import { noSecondStep, showTwoStepAsk } from "@/lib/two-step-ask-rules";
 import { firstSaleKnown, lockKnown } from "@/lib/two-step-ask";
 import { twoStepStatus } from "@/lib/two-step";
+import { LOCK_UNREAD_MARK, LOCK_UNREAD_PAGE_NOTICE } from "@/lib/two-step-unknown";
 import { LOCKED_LIST } from "@/lib/locked-words";
 import { RecoveryAddressManager, RecoveryAddressUnread } from "@/components/recovery-address-manager";
 import { hideAddress, recoveryAddress } from "@/lib/recovery-address";
@@ -1468,6 +1469,14 @@ export default async function StudioPage({
           </p>
         )}
 
+        {/* A studio page sent this browser here because its two-step lock could not be read (lib/studio-route.ts
+            studioView, #3973): said from the marker, since this page's own read of the lock may have answered. */}
+        {params["two-step"] === LOCK_UNREAD_MARK ? (
+          <div className="notice notice-warn mt-6" role="status" aria-labelledby="lock-page-unread-title">
+            <h2 id="lock-page-unread-title" className="font-bold text-ink">{LOCK_UNREAD_PAGE_NOTICE.title}</h2>
+            <p className="mt-1 max-w-[80ch] text-sm text-ink-soft">{LOCK_UNREAD_PAGE_NOTICE.body}</p>
+          </div>
+        ) : null}
         {/* A request to turn two-step login off without a code (lib/two-step.ts askReset), shown to every logged-in browser. */}
         {lockUnread ? (
           <div className="notice notice-warn mt-6" role="status">

@@ -35,7 +35,7 @@ import { fromAnotherSite as crossSite } from "@/lib/request-guard";
 import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { LOCKED_MESSAGE } from "@/lib/locked-words";
 import { lockedOut, lockedUntil } from "@/lib/two-step";
-import { LOCK_UNREAD, lockOrUnread, lockUnreadJson, lockUnreadPage } from "@/lib/two-step-unknown";
+import { LOCK_UNREAD, LOCK_UNREAD_MARK, lockOrUnread, lockUnreadJson, lockUnreadPage } from "@/lib/two-step-unknown";
 import { type Store, STORE_ID_PATTERN, accountStores, ensureStoreId, storeForEmail, storeForId, storeRef } from "@/lib/store";
 import { type Permission, type Role, PERMISSION_WORDS, can } from "@/lib/team-roles";
 import { logTeam, memberStores, roleIn, teamTwoStepBlocks } from "@/lib/team";
@@ -387,10 +387,12 @@ export async function studioView(
   if (!email) return { ok: false, reason: "signed_out", email: null };
   // The same question studioAccess asks, before anything of the store is read (#3973): a page behind a permission a
   // session let in without the second step may not use shows nothing to it. Locked, it goes where creatorFrom sends
-  // it; a lock that could not be read is never read as free (rule 24), and the studio's top says it was not checked.
+  // it; a lock that could not be read is never read as free (rule 24): it goes to the studio's home with the unread
+  // marker, and the home says from that marker, in plain words, that the page asked for was not opened and why
+  // (LOCK_UNREAD_PAGE_NOTICE, lib/two-step-unknown.ts), whatever the home's own read of the lock answers next.
   if (need && lockedOut(need)) {
     const until = await lockOrUnread(lockedUntil(session));
-    if (until === LOCK_UNREAD) redirect("/studio");
+    if (until === LOCK_UNREAD) redirect(`/studio?two-step=${LOCK_UNREAD_MARK}`);
     if (until > 0) redirect("/studio?two-step=locked");
   }
 

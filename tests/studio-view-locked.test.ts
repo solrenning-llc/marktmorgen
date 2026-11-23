@@ -6,7 +6,8 @@
  * plan's Stripe invoices) and every other page behind a locked permission, and the page read it all. Now studioView
  * asks the same question as studioAccess, before anything of the store is read: a locked session is sent to
  * /studio?two-step=locked (as creatorFrom already sends it), and a lock that could not be read is never read as
- * free: it is sent to /studio, whose top says the lock could not be checked. What a locked session keeps (orders,
+ * free: it is sent to /studio?two-step=unread, whose top says in plain words that the page asked for was not opened
+ * because the sign-in could not be checked (tests/studio-lock-unread.test.ts). What a locked session keeps (orders,
  * products, a page with no permission) still opens.
  *
  * Synthetic only: the in-memory Redis, a synthetic store and sessions.
@@ -76,8 +77,9 @@ async function main(): Promise<void> {
 
   part("The lock could not be read: never read as free");
   lockFails = true;
-  is("team: sent to the studio, whose top says the lock was not checked", await view(locked, "team"), "sent to /studio");
-  is("billing: the same", await view(full, "billing"), "sent to /studio");
+  // The studio's home reads the marker and says why the page asked for was not opened (tests/studio-lock-unread.test.ts).
+  is("team: sent to the studio with the unread marker, so its top says why", await view(locked, "team"), "sent to /studio?two-step=unread");
+  is("billing: the same", await view(full, "billing"), "sent to /studio?two-step=unread");
   is("orders: not locked, so the lock is not asked", await view(locked, "orders"), "opened");
   lockFails = false;
 

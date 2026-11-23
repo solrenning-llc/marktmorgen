@@ -913,18 +913,26 @@ export class MemoryRedis {
         }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         // lib/checkout-ask.ts ASK_AGAIN: a retried ask put back only while the entry it was taken with waits in its index.
-        if (key.startsWith("-- marktmorgen:ask-again:v2\n") && args[0] === "2" && args.length === 6) {
-          const [, queue, index, was, at, member] = args;
+        if (key.startsWith("-- marktmorgen:ask-again:v3\n") && args[0] === "3" && args.length === 8) {
+          const [, queue, index, done, was, at, member, flight] = args;
           if (this.run(["ZSCORE", index, was]) === null) return -1;
           const added = this.run(["ZADD", queue, at, member]);
           this.run(["ZREM", index, was]);
           this.run(["ZADD", index, at, member]);
           this.run(["PERSIST", index]);
+          this.run(["ZREM", done, flight]);
           return added;
         }
+        // lib/checkout-ask.ts ASK_DONE: an ask finished, out of its person's index and out of the in-flight records.
+        if (key.startsWith("-- marktmorgen:ask-done:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, index, done, member, flight] = args;
+          this.run(["ZREM", index, member]);
+          this.run(["ZREM", done, flight]);
+          return 1;
+        }
         // lib/checkout-ask.ts ASK_FORGET: validate, then remove the current own index and its global members atomically.
-        if (key.startsWith("-- marktmorgen:ask-forget:v1\n") && args[0] === "2" && args.length === 6) {
-          const [, queue, index, statsId, email, rawMost] = args;
+        if (key.startsWith("-- marktmorgen:ask-forget:v2\n") && args[0] === "3" && args.length === 7) {
+          const [, queue, index, done, statsId, email, rawMost] = args;
           const most = Number(rawMost);
           if (!Number.isSafeInteger(most) || most < 0) return [-1, -1];
           const members = this.run(["ZRANGEBYSCORE", index, "-inf", "+inf"]) as string[];
@@ -937,7 +945,11 @@ export class MemoryRedis {
           }
           if (!members.length) return [0, 0];
           let taken = 0;
-          for (let i = 0; i < members.length; i += ASK_ERASE_BATCH) taken += Number(this.run(["ZREM", queue, ...members.slice(i, i + ASK_ERASE_BATCH)]));
+          for (let i = 0; i < members.length; i += ASK_ERASE_BATCH) {
+            const batch = members.slice(i, i + ASK_ERASE_BATCH);
+            taken += Number(this.run(["ZREM", queue, ...batch]));
+            this.run(["ZREM", done, ...batch.map((member) => `${index}\n${member}`)]);
+          }
           this.run(["DEL", index]);
           return [taken, members.length];
         }
@@ -948,6 +960,13 @@ export class MemoryRedis {
           this.run(["ZADD", queue, at, member]);
           this.run(["ZADD", index, at, member]);
           this.run(["PERSIST", index]);
+          return 1;
+        }
+        // lib/checkout-ask.ts ASK_TAKE: an ask taken off the queue and, in the same step, recorded as in flight.
+        if (key.startsWith("-- marktmorgen:ask-take:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, queue, done, member, now, flight] = args;
+          if (Number(this.run(["ZREM", queue, member])) !== 1) return 0;
+          this.run(["ZADD", done, now, flight]);
           return 1;
         }
         // lib/outreach.ts PITCH_IF_READ: a pitch written only over the exact record read.

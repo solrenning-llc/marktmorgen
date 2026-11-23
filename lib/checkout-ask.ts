@@ -83,6 +83,21 @@ export const ASK_STALE_SECONDS = STALE_SECONDS;
 
 const QUEUE = "nl:recover:asks";
 /**
+ * The asks taken off QUEUE and not yet finished (#5285, row #4290: Codex X6's LOW on #4290). sendAsked takes an ask
+ * off the queue and records it here in one step (ASK_TAKE); finishing it takes it out of the person's index and out
+ * of here in one step (ASK_DONE). A finish whose reply was lost leaves its record here, and the next run finishes it
+ * again (sweepAsked) once it is older than ASK_FLIGHT_SECONDS, so the person's index never keeps an address after
+ * the ask has ended. A person's erasure takes their records out of here too (ASK_FORGET). Each member is the
+ * person's index key and the ask, joined by a newline, so a finish needs nothing else.
+ */
+const DONE = "nl:recover:asks:done";
+/** How long an ask taken off the queue may still be in flight: a run's deadline is minutes, so an hour is past any. */
+export const ASK_FLIGHT_SECONDS = 60 * 60;
+/** The finishes a run retries at the most before it sends anything (sweepAsked). */
+const SWEEP_MOST = 200;
+/** Commands an asked reminder adds for its record of being in flight: ASK_TAKE's EVAL and ZADD, ASK_DONE's EVAL and ZREM. */
+export const ASK_FLIGHT_COMMANDS = 4;
+/**
  * One person's asks at one store, the same members at the same times as in QUEUE, written and taken out with it: what
  * that person's erasure and copy read (Claude 2 nuvem B on #4290), so they never scan every store's asks, nor every
  * buyer's asks at the store (Claude 7 on #4290: a store's whole index is about 330 KB at its ceiling). Named by a
@@ -164,9 +179,10 @@ export async function checkoutAskCount(statsId: string | null, rawEmail: string)
  * The read and both removals are one operation: ASK_AGAIN either finishes before it and its new member is removed,
  * or runs after it and finds no original member. All members are checked before any write. More than the paid count
  * is unknown, never a larger unpaid erasure. Only the own index is read; no scan of the global queue.
- * Billed: EVAL + ZRANGEBYSCORE + DEL, and one ZREM per ASK_ERASE_BATCH members (lib/erasure-rules.ts).
+ * Billed: EVAL + ZRANGEBYSCORE + DEL, and two ZREM per ASK_ERASE_BATCH members (lib/erasure-rules.ts): the queue's, and
+ * the in-flight records' (DONE, #5285 row #4290), so an erasure leaves no record of an ask in flight either.
  */
-export const ASK_FORGET = `-- marktmorgen:ask-forget:v1
+export const ASK_FORGET = `-- marktmorgen:ask-forget:v2
 local most = tonumber(ARGV[3])
 if not most or most < 0 or most > 9007199254740991 or most % 1 ~= 0 then return {-1, -1} end
 local members = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', '+inf')
@@ -182,6 +198,9 @@ if #members == 0 then return {0, 0} end
 local taken = 0
 for first = 1, #members, ${ASK_ERASE_BATCH} do
   taken = taken + redis.call('ZREM', KEYS[1], unpack(members, first, math.min(first + ${ASK_ERASE_BATCH} - 1, #members)))
+  local flying = {}
+  for at = first, math.min(first + ${ASK_ERASE_BATCH} - 1, #members) do flying[#flying + 1] = KEYS[2] .. '\\n' .. members[at] end
+  redis.call('ZREM', KEYS[3], unpack(flying))
 end
 redis.call('DEL', KEYS[2])
 return {taken, #members}`;
@@ -200,7 +219,7 @@ export async function forgetAskPerson(statsId: string | null, rawEmail: string, 
   if (!statsId || !email || !isRedisConfigured()) return 0;
   const most = paidCount === undefined ? await checkoutAskCount(statsId, email) : paidCount;
   if (!Number.isSafeInteger(most) || most < 0) throw new UnknownReplyError("a person's checkout reminder ask count");
-  const reply = repliesFor(await redisPipeline([["EVAL", ASK_FORGET, 2, QUEUE, askIndexKey(statsId, email), statsId, email, most]]), 1);
+  const reply = repliesFor(await redisPipeline([["EVAL", ASK_FORGET, 3, QUEUE, askIndexKey(statsId, email), DONE, statsId, email, most]]), 1);
   const pair = repliesFor(reply?.[0], 2);
   const taken = countOf(pair?.[0]), indexed = countOf(pair?.[1]);
   if (taken === null || indexed === null || taken > indexed || indexed > most) throw new UnknownReplyError("the removal of a person's checkout reminder asks");
@@ -289,16 +308,38 @@ return 1`;
  * Puts a retried ask back, in one step, only while the entry it was taken with still waits in its person's index
  * (KEYS[2], ARGV[1]): sendAsked leaves that entry there while the ask is in flight, and a person's erasure takes it out
  * (forgetAskPerson), so an ask whose person was erased meanwhile is never written back (Codex L on #4290). Swaps the
- * old entry for the new one in the index; answers ZADD's reply on the queue, or -1. Billed 1 + 5; lib/redis-memory.ts
- * runs it the same way.
+ * old entry for the new one in the index; answers ZADD's reply on the queue, or -1. Billed 1 + 6 (with the in-flight
+ * record's ZREM, DONE, #5285 row #4290); lib/redis-memory.ts runs it the same way.
  */
-const ASK_AGAIN = `-- marktmorgen:ask-again:v2
+const ASK_AGAIN = `-- marktmorgen:ask-again:v3
 if not redis.call("ZSCORE", KEYS[2], ARGV[1]) then return -1 end
 local added = redis.call("ZADD", KEYS[1], ARGV[2], ARGV[3])
 redis.call("ZREM", KEYS[2], ARGV[1])
 redis.call("ZADD", KEYS[2], ARGV[2], ARGV[3])
 redis.call("PERSIST", KEYS[2])
+redis.call("ZREM", KEYS[3], ARGV[4])
 return added`;
+
+/**
+ * Takes an ask off the queue (KEYS[1]) and, in the same step, records it as in flight (KEYS[2], DONE) at ARGV[2] as
+ * ARGV[3]: 1 taken, 0 another run took it. Billed 1 + 2; lib/redis-memory.ts runs it the same way.
+ */
+const ASK_TAKE = `-- marktmorgen:ask-take:v1
+if redis.call("ZREM", KEYS[1], ARGV[1]) ~= 1 then return 0 end
+redis.call("ZADD", KEYS[2], ARGV[2], ARGV[3])
+return 1`;
+
+/**
+ * Finishes an ask in one step: its entry leaves the person's index (KEYS[1], ARGV[1]) and its in-flight record leaves
+ * DONE (KEYS[2], ARGV[2]). Billed 1 + 2; lib/redis-memory.ts runs it the same way.
+ */
+const ASK_DONE = `-- marktmorgen:ask-done:v1
+redis.call("ZREM", KEYS[1], ARGV[1])
+redis.call("ZREM", KEYS[2], ARGV[2])
+return 1`;
+
+/** An ask's in-flight record: the person's index key and the ask, so finishing it again needs nothing else. */
+const flightOf = (ask: Ask, member: string) => `${askIndexKey(ask.statsId, ask.email)}\n${member}`;
 
 /**
  * Puts an ask whose send failed back in the queue, for a later try
@@ -313,7 +354,7 @@ async function again(ask: Ask, was: string, now: number): Promise<boolean> {
   if (tries >= REMINDER_RETRIES || at - (ask.askedAt + ask.after) > STALE_SECONDS) return false;
   try {
     const member = askMember({ ...ask, tries: tries + 1 });
-    const [added] = await redisPipeline([["EVAL", ASK_AGAIN, 2, QUEUE, askIndexKey(ask.statsId, ask.email), was, at, member]]);
+    const [added] = await redisPipeline([["EVAL", ASK_AGAIN, 3, QUEUE, askIndexKey(ask.statsId, ask.email), DONE, was, at, member, flightOf(ask, was)]]);
     // 1 put back; 0 one just like it already waits; -1 its person was erased while it was in flight (its entry in their
     // index is gone), so it stays out. Anything else is unknown: not counted as put back.
     if (added === 1 || added === 0) return true;
@@ -323,6 +364,29 @@ async function again(ask: Ask, was: string, now: number): Promise<boolean> {
     console.error("putting an asked-for reminder back failed", ask.handle, error);
   }
   return false;
+}
+
+/**
+ * Finishes again, at the start of a run, the asks recorded as in flight for longer than ASK_FLIGHT_SECONDS: their
+ * finish's reply was lost (or the run that took them stopped), so their entry may still wait in the person's index
+ * with the address (Codex X6's LOW on #4290, #5285). Each is finished as a finished ask is (ASK_DONE): out of the index
+ * and out of DONE in one step. One that does not read is only taken out of DONE. A failure here is left for the next
+ * run and never stops the sends. At most SWEEP_MOST a run: one ZRANGEBYSCORE, then one ASK_DONE each.
+ */
+async function sweepAsked(now: number): Promise<void> {
+  try {
+    const old = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", DONE, "-inf", now - ASK_FLIGHT_SECONDS, "LIMIT", 0, SWEEP_MOST]]), 1)?.[0]);
+    for (const entry of old ?? []) {
+      const at = entry.indexOf("\n");
+      const index = at > 0 ? entry.slice(0, at) : "";
+      const member = at > 0 ? entry.slice(at + 1) : "";
+      await redisPipeline([index.startsWith("nl:recover:asks:s:") && member
+        ? ["EVAL", ASK_DONE, 2, index, DONE, member, entry]
+        : ["ZREM", DONE, entry]]);
+    }
+  } catch (error) {
+    console.error("finishing asked-for reminders left in flight failed; the next run tries again", error);
+  }
 }
 
 /**
@@ -341,17 +405,21 @@ export async function sendAsked(
   const counts = { sent: 0, skipped: 0, retried: 0 };
   if (!isRedisConfigured()) return counts;
   const now = Math.floor(Date.now() / 1000);
+  await sweepAsked(now);
   const [due] = await redisPipeline([["ZRANGEBYSCORE", QUEUE, 0, now, "LIMIT", 0, 200]]);
   const members = Array.isArray(due) ? (due as string[]) : [];
   for (const member of members) {
     if (Date.now() >= deadline) break;
     const ask = parseAsk(member);
-    const [taken] = await redisPipeline([["ZREM", QUEUE, member]]);
+    // Taken off the queue and, in the same step, recorded as in flight (ASK_TAKE), so a finish whose reply is lost is
+    // done again by a later run (sweepAsked; #5285 row #4290). An ask that does not read has no index to finish.
+    const [taken] = await redisPipeline([ask ? ["EVAL", ASK_TAKE, 2, QUEUE, DONE, member, now, flightOf(ask, member)] : ["ZREM", QUEUE, member]]);
     if (Number(taken) !== 1) continue;
     // Its entry in the person's index stays while it is in flight, so a person's erasure meanwhile still finds it and
-    // takes it out, and a retry is then refused (again; Codex L on #4290). It leaves the index once the ask is done.
+    // takes it out, and a retry is then refused (again; Codex L on #4290). It leaves the index, and its in-flight
+    // record leaves DONE, in one step once the ask is done (ASK_DONE).
     const done = async () => {
-      if (ask) await redisPipeline([["ZREM", askIndexKey(ask.statsId, ask.email), member]]);
+      if (ask) await redisPipeline([["EVAL", ASK_DONE, 2, askIndexKey(ask.statsId, ask.email), DONE, member, flightOf(ask, member)]]);
     };
     if (!ask || now - (ask.askedAt + ask.after) > STALE_SECONDS) {
       await done();

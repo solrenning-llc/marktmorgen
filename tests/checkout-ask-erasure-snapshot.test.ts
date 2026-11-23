@@ -124,7 +124,7 @@ test('unknown count and operation replies never report a completed empty erasure
 test('the paid cost adds the count, fixed Lua work and every removal batch without transferring members',()=>{
  for(const n of [0,1,512,513,1025,100000]){
   const work=erasureWork({checkoutAsks:n});
-  assert.equal(work.commands,ERASE_FIXED_COMMANDS+Math.ceil(n/ASK_ERASE_BATCH));
+  assert.equal(work.commands,ERASE_FIXED_COMMANDS+2*Math.ceil(n/ASK_ERASE_BATCH));
   assert.equal(work.bytes,ERASE_FIXED_BYTES);
  }
  for(const n of [-1,0.5,Infinity,Number.MAX_SAFE_INTEGER+1])assert.throws(()=>erasureWork({checkoutAsks:n}),RangeError);

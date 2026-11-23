@@ -87,7 +87,12 @@ export async function takeSnsReceipt(key: string, now = Date.now()): Promise<Sns
   }
   if (value === SNS_RECEIPT_DONE) return { state: "done" };
   const pending = PENDING.exec(value);
-  if (pending && Math.abs(now - Number(pending[1])) < SNS_RECEIPT_LEASE_MS) return { state: "busy" };
+  // Another run's pending value is busy until SNS_RECEIPT_LEASE_MS after its own time, also when that time is ahead
+  // of ours (another server's clock running fast): Math.abs took a time more than the lease ahead as past its lease
+  // and took it over while its run could still be acting (Codex X5's LOW on #2612, board #5285). A time more than the
+  // key's own life ahead cannot be a live run's, and is taken over like any other value that is not a finished notice.
+  const at = pending ? Number(pending[1]) : NaN;
+  if (pending && now - at < SNS_RECEIPT_LEASE_MS && at - now <= SNS_RECEIPT_SECONDS * 1000) return { state: "busy" };
   // A pending value past its lease, the route's old "1" or anything else that is not a finished notice: taken over
   // only while it still holds what was read, so two late deliveries never both act on the same take-over.
   return (await swap(key, value, token)) ? { state: "ours", key, token } : { state: "busy" };

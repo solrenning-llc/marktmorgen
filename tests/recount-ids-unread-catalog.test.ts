@@ -1,9 +1,12 @@
 /**
  * #4185: while the one-time recount learns which ids name each store's keys (lib/data-recount.ts noteIds), a store's
- * workflows or products that do not read must stop the page: the ids cursor stays where it was and the same page of
- * stores is read again on a later run, never learned from an empty list in their place (rule 24). Main already does
- * this since #2501 (readFlows and readAllListings throw UnknownReplyError, and nothing in noteIds catches it); this
- * holds it. RED by mutation: a `.catch(() => [])` on either read in noteIds fails it.
+ * workflows that do not read must stop the page: the ids cursor stays where it was and the same page of stores is read
+ * again on a later run, never learned from an empty list in their place (rule 24). Main already does this since #2501
+ * (readFlows throws UnknownReplyError, and nothing in noteIds catches it); this holds it. RED by mutation: a
+ * `.catch(() => [])` on the workflows read in noteIds fails it. Not held here (Claude 5 id8Ws on #5483): the products
+ * read, readAllListings, which reads nothing from Redis for a store whose products are all in its record's head (as
+ * this one's are), so a `.catch` on it passes this test; a store with more products reads them through
+ * readListingsMeasured, which throws the same way, with no catch in noteIds.
  * Synthetic data only, against the in-memory Redis.
  */
 import { IDS_KEY, RECOUNT_VERSION, STATE_KEY, recountStep } from "@/lib/data-recount";

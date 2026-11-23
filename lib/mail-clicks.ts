@@ -167,11 +167,21 @@ export async function stopCounting(token: string): Promise<boolean> {
   // key in between (rememberLinkKeys) writes it only while the row still allows it, so this deletion comes after it
   // (Codex G-20261121-0033). Written only over the row as read (lib/contacts.ts): an unsubscribe or a deletion in
   // between is never undone.
-  if (contact.clicks) await takeBackClicks(listId, email);
-  await redisPipeline([
-    ["DEL", usedKey(listId, email)],
-    ["DEL", keyIndex(linkKeyOf(token))],
-  ]);
+  const forget = () =>
+    redisPipeline([
+      ["DEL", usedKey(listId, email)],
+      ["DEL", keyIndex(linkKeyOf(token))],
+    ]);
+  // When the permission cannot be taken back (the row kept changing, or did not read), what was counted and the key
+  // are still deleted before the error goes on, as before this order (Claude 4 AC's LEVE on #5273): a reader who
+  // pressed stop never keeps them until a retry.
+  try {
+    if (contact.clicks) await takeBackClicks(listId, email);
+  } catch (error) {
+    await forget().catch(() => {});
+    throw error;
+  }
+  await forget();
   return true;
 }
 

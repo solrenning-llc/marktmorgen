@@ -121,6 +121,27 @@ async function main(): Promise<void> {
     void store;
   }
 
+  part("Stop counting whose permission cannot be taken back still deletes the key (Claude 4 AC's LEVE on #5273)");
+  {
+    const { listId, token } = await setUp();
+    await rememberLinkKeys(listId, [{ email: READER, token }]);
+    const before = keyKept(token);
+    // The row keeps changing: every checked write of the contact answers "changed meanwhile", so takeBackClicks gives up.
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: Commands) =>
+      commands[0]?.[0] === "EVAL" && String(commands[0]?.[1] ?? "").startsWith("-- marktmorgen:contact-cas-hset:v1") ? [[0]] : real(commands)) as typeof redis.pipeline;
+    let threw = false;
+    try {
+      await stopCounting(token);
+    } catch {
+      threw = true;
+    } finally {
+      redis.pipeline = real;
+    }
+    is("control: the key was there, and taking the permission back failed", [before, threw], [true, true]);
+    is("the key is deleted all the same", keyKept(token), false);
+  }
+
   await everyInterleaving("Stop counting", ({ token }) => stopCounting(token));
   await everyInterleaving("Unsubscribe", async ({ token }) => {
     const left = await unsubscribe(token);

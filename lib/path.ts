@@ -180,7 +180,8 @@ async function writePath(store: Store, record: PathRecord, now: number, expected
   if (!SID.test(store.sid) || !room || !isRedisConfigured()) return { ok: false, reason: "unavailable" };
   const next: PathRecord = { ...record, revision: randomBytes(16).toString("hex") };
   const json = pathJson(next);
-  const [reply] = await redisPipeline([["EVAL", WRITE_PATH, 4, room, key(store.sid), PATH_BOARD_KEY, PATH_BOARD_OWNERS_KEY, contentRoomFor(store, now / 1000), monthOf(now), dataBytes(json), expected ?? "", expected === null ? "1" : "0", json, store.sid]]);
+  // The envelope is read exactly, as readPath does (Claude 5's LEVE on #2885): one reply too many is unknown.
+  const reply = repliesFor(await redisPipeline([["EVAL", WRITE_PATH, 4, room, key(store.sid), PATH_BOARD_KEY, PATH_BOARD_OWNERS_KEY, contentRoomFor(store, now / 1000), monthOf(now), dataBytes(json), expected ?? "", expected === null ? "1" : "0", json, store.sid]]), 1)?.[0];
   const state = Array.isArray(reply) ? Number(reply[0]) : NaN;
   if (state === 1) return { ok: true, record: next };
   return { ok: false, reason: state === 0 ? "full" : state === -2 ? "conflict" : "unavailable" };
@@ -260,7 +261,8 @@ export async function forgetPath(store: Store, held?: { key: string; token: stri
   if (!room) return;
   const keys = [room, key(store.sid), PATH_BOARD_KEY, PATH_BOARD_OWNERS_KEY];
   const args = [monthOf(Date.now()), store.sid];
-  const [reply] = await redisPipeline([held ? ["EVAL", FORGET_PATH_HELD, 5, ...keys, held.key, ...args, held.token] : ["EVAL", FORGET_PATH, 4, ...keys, ...args]]);
+  // The envelope is read exactly (Claude 5's LEVE on #2885): one reply too many is not a removal.
+  const reply = repliesFor(await redisPipeline([held ? ["EVAL", FORGET_PATH_HELD, 5, ...keys, held.key, ...args, held.token] : ["EVAL", FORGET_PATH, 4, ...keys, ...args]]), 1)?.[0];
   if (held && Array.isArray(reply) && Number(reply[0]) === -9) throw new LockBusyError("a closing store's lock ran out before its Path was forgotten");
   if (!Array.isArray(reply) || Number(reply[0]) !== 1) throw new Error("the Path could not be forgotten");
 }

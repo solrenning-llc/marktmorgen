@@ -97,5 +97,16 @@ const notice: ExitNotice = { to: "https://example.com/shop", host: "example.com"
   is("a notice taken off since is not published", exitFromReleased(undone), null);
   is("the address is released as a store with no notice", /^released:\d{4}-\d{2}-\d{2}T[^ ]+$/.test(String(undone)), true);
   is("and held for the quarantine only", await ttl(storeHandleKey("undo-shop")), RELEASE_QUARANTINE_DAYS * 86_400);
+
+  // The same for a suspension (Codex X6 on #3730, 7059362180): a store suspended since the caller's read carries no
+  // notice, as a suspended store never does (review of #3730).
+  is("a store with a notice, not suspended, is made", (await claimHandle("paused@example.com", "paused-shop", "Paused", "")).ok, true);
+  await withRecord("paused@example.com", (value) => { value.exitNotice = notice; });
+  const notSuspended = await storeForEmail("paused@example.com");
+  is("the caller's copy is not suspended", Boolean(notSuspended?.suspended), false);
+  await withRecord("paused@example.com", (value) => { value.suspended = new Date(now).toISOString(); });
+  await closeStoreRecord(notSuspended!);
+  is("suspended since: its old address carries no notice", exitFromReleased(await get(storeHandleKey("paused-shop"))), null);
+  is("and is held for the quarantine only", await ttl(storeHandleKey("paused-shop")), RELEASE_QUARANTINE_DAYS * 86_400);
   done();
 })();

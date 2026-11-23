@@ -132,6 +132,6 @@ export const HELP_DATES: Readonly<Record<string, HelpDates>> = {
   "what-do-you-store-about-me": { created: "2026-09-18", updated: "2026-10-10", digest: "5143228bda99" },
   "how-are-my-store-and-my-buyers-protected": { created: "2026-09-27", updated: "2026-11-04", digest: "6f7d3e90ba31" },
   "can-i-have-it-deleted": { created: "2026-09-18", updated: "2026-10-17", digest: "f05eb722f19e" },
-  "someone-asked-me-to-delete-their-data-what-do-i-do": { created: "2026-10-17", updated: "2026-11-16", digest: "acf3391c286f" },
+  "someone-asked-me-to-delete-their-data-what-do-i-do": { created: "2026-10-17", updated: "2026-11-23", digest: "e83dcd9a07c9" },
   "do-you-sell-or-share-it": { created: "2026-09-18", updated: "2026-09-28", digest: "94d418e55fb5" },
 };

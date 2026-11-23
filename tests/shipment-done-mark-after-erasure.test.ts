@@ -46,7 +46,7 @@ async function shop(withId: boolean): Promise<Store> {
   if (!(await claimHandle(OWNER, "shiperase", "Fictional Ships", "")).ok) throw new Error("no store");
   await ensureStatsId(OWNER);
   await ensureStoreId(OWNER);
-  await setStripeAccount(OWNER, "acct_1ShipErase000001", true);
+  await setStripeAccount(OWNER, "acct_1ShipErase0001", true);
   await setSubscription(OWNER, { customerId: "cus_shiperase01", subscriptionId: "sub_shiperase01", active: true, tier: "pro", period: paidPeriod() });
   const made = (await storeForEmail(OWNER))!;
   if (!made.sid || !made.statsId) throw new Error("unexpected store shape");

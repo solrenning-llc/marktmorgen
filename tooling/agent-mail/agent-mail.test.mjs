@@ -201,6 +201,8 @@ r = run(["claim-enqueue", "--as", "Claude 4 X"], as("c4"));
 is("the family that recorded a review of this head cannot claim the enqueue", /excluído|nenhum pedido/.test(r.out) && !/pegou/.test(r.out), r.out);
 r = run(["claim-enqueue", "--as", "Claude 6 X"], as("c6"));
 is("another family claims it, and the head matches the request", /pegou/.test(r.out) && /igual ao do pedido/.test(r.out), r.out);
+is("1442: the claim says which READY the tool checks and that the opener's family on an unprefixed branch is the enqueuer's to check (NIT of Claude 3 yaQt on #5408)",
+  /READY de fora no verify-enqueue/.test(r.out) && /não confere a família de quem abriu o PR num ramo sem prefixo de família/.test(r.out), r.out);
 const idf = /pegou: (\S+)/.exec(r.out)?.[1];
 run(["complete-enqueue", "--as", "Claude 6 X", idf, "--result", "enqueued", "--text", "t"], { ...as("c6"), FAKE_READY_ALL: "1" });
 

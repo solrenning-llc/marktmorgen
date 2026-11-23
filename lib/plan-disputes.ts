@@ -26,7 +26,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { isAddOn, isBillingConfigured, onPlatformAt } from "@/lib/billing";
 import { type PlanDisputeStatus, coveredUntil, disputeStatusOf } from "@/lib/plan-dispute-rules";
-import { recordPlanDispute, storeForHandle, storeForId, storeRef } from "@/lib/store";
+import { recordPlanDispute, storeForId, storeRef } from "@/lib/store";
+import { storeForHandleExactly } from "@/lib/store-exact";
 import { type StripePage, readStripePage } from "@/lib/stripe-list";
 
 /** The version whose charge still names its invoice and whose invoice names its subscription. */
@@ -120,7 +121,11 @@ async function applyDispute(dispute: Record<string, unknown>, known: string | un
   // failed, and the dispute is read again whole on the next run.
   if (!isOwnReply(subscription, subscriptionId)) throw new Error("Stripe answered for another subscription");
   const handle = objectOf(subscription.metadata)?.store;
-  const store = isAddOn(subscription) || typeof handle !== "string" || !handle ? null : await storeForHandle(handle);
+  // Read exactly: storeForHandle answers null for a reply it could not read, too, which marked a new dispute unmatched
+  // and let the run say it was complete. Unknown throws: counted as failed, not remembered, read again on the next run.
+  const exact = isAddOn(subscription) || typeof handle !== "string" || !handle ? "none" : await storeForHandleExactly(handle);
+  if (exact === "unknown") throw new UnknownReplyError("the disputed plan's store");
+  const store = exact === "none" ? null : exact;
   // Only a subscription this store wrote down as its plan, or one of the same Stripe customer.
   if (!store || (store.subscriptionId !== subscriptionId && !sameCustomer(store.stripeCustomerId, subscription))) {
     await remember(id, known?.startsWith("unmatched:") ? known : `unmatched:${nowSeconds}`);

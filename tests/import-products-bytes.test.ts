@@ -10,7 +10,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
-import { addRows, finishUpload, readBatch, readJob, runImport, startImport, takeImportRows } from "@/lib/imports";
+import { IMPORT_LIMITS, addRows, finishUpload, readBatch, readJob, runImport, startImport, takeImportRows } from "@/lib/imports";
+import { BATCH_BYTES } from "@/lib/import-batches";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
 import { MAX_ABOUT_LENGTH } from "@/lib/product-about";
 import { MAX_TITLE_LENGTH } from "@/lib/catalog";
@@ -18,11 +19,34 @@ import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 
 type Batch = (string | number)[][];
-const ROWS = 100;
-const UPLOAD = 100;
+/** The most rows one upload request may carry for products (IMPORT_LIMITS.products), all in one batch. */
+const ROWS = IMPORT_LIMITS.products;
+const UPLOAD = IMPORT_LIMITS.products;
+
+/** The cells of one upload: titles of `titleChar` at MAX_TITLE_LENGTH, and `about` as each description. */
+function cellsOf(first: number, count: number, titleChar: string, about: string): (string | number)[][] {
+  return Array.from({ length: count }, (_, i) => [first + i + 2, `${titleChar.repeat(MAX_TITLE_LENGTH - 6)}${String(first + i).padStart(6, "0")}`, "19", about, "", ""]);
+}
+
+/**
+ * The longest description of `ch` that lets ROWS rows still go in one upload request (BATCH_BYTES, the route's body
+ * cap): the batch is read back whole once for every CHUNK of its rows, so the fullest batch is the dearest per row
+ * (Claude 1's MEDIUM on #5259, 7090896192).
+ */
+function fullestAbout(ch: string, titleChar: string): string {
+  let low = 0;
+  let high = MAX_ABOUT_LENGTH;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    const body = Buffer.byteLength(JSON.stringify({ rows: cellsOf(0, ROWS, titleChar, ch.repeat(mid)) }));
+    if (body <= BATCH_BYTES - 4_096) low = mid;
+    else high = mid - 1;
+  }
+  return ch.repeat(low);
+}
 
 /** One products import of ROWS rows with `about` as each description, from its first upload to done. */
-async function measure(about: string): Promise<{ counted: number; commands: number; bytes: number; added: number }> {
+async function measure(about: string, titleChar = "T"): Promise<{ counted: number; commands: number; bytes: number; added: number }> {
   redis.clear();
   const owner = "import-bytes@example.test";
   await claimHandle(owner, "importbytes", "Import bytes", "");
@@ -47,7 +71,7 @@ async function measure(about: string): Promise<{ counted: number; commands: numb
   }) as typeof redis.pipeline;
   try {
     for (let first = 0; first < ROWS; first += UPLOAD) {
-      const cells = Array.from({ length: Math.min(UPLOAD, ROWS - first) }, (_, i) => [first + i + 2, `${"T".repeat(MAX_TITLE_LENGTH - 6)}${String(first + i).padStart(6, "0")}`, "19", about, "", ""]);
+      const cells = cellsOf(first, Math.min(UPLOAD, ROWS - first), titleChar, about);
       const rows = readBatch("products", cells as never)!;
       const size = Buffer.byteLength(JSON.stringify(rows));
       // As the route counts an upload (app/api/store/import/route.ts), and as takeImportRows rounds it up.
@@ -68,15 +92,17 @@ async function measure(about: string): Promise<{ counted: number; commands: numb
   return { counted, commands, bytes, added: job?.counts.added ?? 0 };
 }
 
-for (const [name, about] of [
-  ["descriptions of quotes, escaped to two bytes each (the worst found)", "\"".repeat(MAX_ABOUT_LENGTH)],
-  ["descriptions of backslashes", "\\".repeat(MAX_ABOUT_LENGTH)],
-  ["descriptions of ampersands", "&".repeat(MAX_ABOUT_LENGTH)],
-  ["no descriptions", ""],
+for (const [name, about, titleChar] of [
+  ["the fullest upload of quotes, titles and descriptions both (the worst found)", fullestAbout("\"", "\""), "\""],
+  ["the fullest upload of quote descriptions", fullestAbout("\"", "T"), "T"],
+  ["the fullest upload of backslash descriptions", fullestAbout("\\", "T"), "T"],
+  ["the fullest upload of ampersand descriptions", fullestAbout("&", "T"), "T"],
+  ["no descriptions", "", "T"],
 ] as const) {
   test(`a products import with ${name} stays inside the imports line's per-row figures`, async () => {
-    const { counted, commands, bytes, added } = await measure(about);
+    const { counted, commands, bytes, added } = await measure(about, titleChar);
     assert.equal(added, ROWS, "every row became a product, so the whole write is counted");
+    console.log(`IMPORT_BYTES ${name}: ${Math.round(bytes / counted)} bytes and ${(commands / counted).toFixed(2)} commands a counted row (${counted} counted)`);
     assert.ok(bytes <= counted * IMPORT_WORST_BYTES_PER_ROW, `${bytes} bytes for ${counted} counted rows: ${Math.round(bytes / counted)} a row, over IMPORT_WORST_BYTES_PER_ROW ${IMPORT_WORST_BYTES_PER_ROW}`);
     assert.ok(commands <= counted * IMPORT_WORST_COMMANDS_PER_ROW, `${commands} commands for ${counted} counted rows, over IMPORT_WORST_COMMANDS_PER_ROW ${IMPORT_WORST_COMMANDS_PER_ROW}`);
   });

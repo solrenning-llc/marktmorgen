@@ -95,11 +95,12 @@ export const IMPORT_MIN_ROWS_PER_UPLOAD = 50;
  */
 export const IMPORT_ROW_BYTES = 2_000;
 // Since 23 November 2026 (#5010 row 150, Claude 6 z5v4's route sweep 2f36): 3,000 until then, below what a products
-// import moves. A description of MAX_ABOUT_LENGTH characters JSON escapes to two bytes each (quotes, backslashes) is
-// kept in its batch, read back once for each chunk, charged to the data room and written as the product's long
-// description, while the upload counts one row for every IMPORT_ROW_BYTES: measured 15,537 bytes a counted row end to
-// end (tests/import-products-bytes.test.ts holds every row kind's worst under this).
-export const IMPORT_WORST_BYTES_PER_ROW = 16_000;
+// import moves. The job reads its batch back whole once for every CHUNK of the batch's rows, so the fullest batch one
+// upload request may carry (IMPORT_LIMITS.products rows in BATCH_BYTES) is the dearest per row; characters JSON
+// escapes (quotes, backslashes) weigh twice in the request that keeps the batch and once where the upload is counted.
+// Measured 55,814 bytes a counted row at the worst found (500 rows of quotes, titles and descriptions, in one request;
+// Claude 1's MEDIUM on #5259), with about 11% room; tests/import-products-bytes.test.ts holds every shape under it.
+export const IMPORT_WORST_BYTES_PER_ROW = 62_000;
 
 /**
  * How long rows not brought in yet are kept from their upload (lib/imports.ts

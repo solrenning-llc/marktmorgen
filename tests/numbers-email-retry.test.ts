@@ -85,6 +85,24 @@ async function main(): Promise<void> {
   is("both tries of the owner's email go under one key for the week, so one the sender could not confirm is not sent twice",
     [ownerKeys.length, typeof ownerKeys[0] === "string" && ownerKeys[0].startsWith("numbers-summary:nl:weekly:sent:"), ownerKeys[0] === ownerKeys[1]], [2, true, true]);
 
+  // Codex X6's MEDIUM on #3297 @183f514a28 (Board #5285, row #3297): a team copy's outcome was discarded once the
+  // owner's email went (sendEmail(...).catch(() => false)), so a copy the provider refused was never sent, and a week
+  // tried again never reached the copies (the owner's part was "earlier"). Each copy is now a part of its own.
+  part("Weekly: a team copy refused lets the week go; the next run sends that copy, and not the owner's email again");
+  reset();
+  chooseMember();
+  retry.sendOk = (to) => to !== "member@example.test";
+  body = await run(weekly, "/api/cron/weekly");
+  is("the owner's email went, the copy was refused, the week counted as failed", [body.sent, body.failed, owner(), member(), retry.delivered.includes("member@example.test")], [1, 1, 1, 1, false]);
+  is("the week's claim is let go, so a later run tries the copy again", held("nl:weekly:sent:"), false);
+  retry.sendOk = () => true;
+  commands.length = 0;
+  body = await run(weekly, "/api/cron/weekly");
+  is("the next run sends the copy, and the owner's email is not sent again", [owner(), member(), retry.delivered.filter((to) => to === "member@example.test").length], [1, 2, 1]);
+  is("the week is claimed now", held("nl:weekly:sent:"), true);
+  const copyKeys = retry.keys.filter((_, i) => retry.mails[i] === "member@example.test");
+  is("both tries of the copy go under one key of its own, never the owner's", [copyKeys.length, copyKeys[0] === copyKeys[1], typeof copyKeys[0] === "string" && copyKeys[0] !== ownerKeys[0]], [2, true, true]);
+
   part(`Weekly: an email refused every time is tried by ${TRIES} runs, never more`);
   reset();
   retry.sendOk = () => false;

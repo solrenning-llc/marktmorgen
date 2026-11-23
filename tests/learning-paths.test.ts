@@ -180,6 +180,29 @@ async function main(): Promise<void> {
   redis.pipeline = before4;
   is("the slot still counts B's stored list, never A's smaller one", (await slotNow()) >= (await storedSize()), true);
 
+  part("Claude 1's note on #3722 (#5285 row): a stall between the write and the slot's set never sets back another save's count");
+  // A writes its smaller list while it holds the lock; then, before its slot is set to that size, it stalls longer
+  // than the lock's life; B takes the lock, saves a larger list and sets the slot to it. A's set must not then bring
+  // the slot down to A's smaller size: the lock's check and the slot's set are one step.
+  let beforeSet = true;
+  const before5 = redis.pipeline;
+  redis.pipeline = (async (batch: Command[]) => {
+    const setsSlot = batch.some((c) =>
+      c[0] === "EVAL" && (String(c[1]).startsWith("-- marktmorgen:paths-slot-if-held:") || (String(c[1]).startsWith("-- marktmorgen:store-data:v1") && c.includes("s"))),
+    );
+    if (beforeSet && setsSlot) {
+      beforeSet = false;
+      await real([["DEL", `nl:paths:lock:${statsId}`]]);
+      const b = await savePaths(STORE, Array.from({ length: MAX_PATHS }, (_, i) => two(`B's path ${i}, saved while A stalled`)), COURSES, NOW + 20);
+      if (b.state !== "saved") throw new Error(`fixture: B ${b.state}`);
+    }
+    return before5(batch);
+  }) as typeof redis.pipeline;
+  await savePaths(STORE, [two("A3")], COURSES, NOW + 19);
+  redis.pipeline = before5;
+  is("(setup) A stalled after its write, before its slot was set", beforeSet, false);
+  is("the slot still counts B's stored list, never A's smaller one", (await slotNow()) >= (await storedSize()), true);
+
   part("Review (LEVE 2): an id that would not read back is never given");
   const odd = readPathsInput([two("X")], [], COURSES, () => Number.NaN);
   is("a random that gives no letter refuses rather than writing a bad id", odd.ok ? /^[a-z0-9]{8}$/.test(odd.paths[0].id) : odd.problem, "list");

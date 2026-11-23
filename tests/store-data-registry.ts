@@ -447,7 +447,12 @@ export const FAMILIES: Record<string, Family> = {
     // again (a late confirmation of a hold that had already let its slot go), kept exactly as long as the package.
     item(768, "Its paid sessions: one id of 16 characters each, at most 20 with as many again in room, kept as long as the package.", "call"),
   ] },
-  "nl:pkg:s:@lib/call-packages.ts": { what: "The packages a store sold, so a closed store finds them (18 October 2026)", parts: [item(160, "A checkout's id in the store's set, one per package.", "call")] },
+  "nl:pkg:s:@lib/call-packages.ts": { what: "The packages a store sold, so a closed store finds them (18 October 2026), and each buyer's (#5125)", parts: [
+    item(160, "A checkout's id in the store's set, one per package.", "call"),
+    // #5125, the Stripe-read copiers row (22 November 2026): buyerPackagesKey, nl:pkg:s:<store>:by:<sha> or :byk:<sha>, one checkout id per
+    // package in its buyer's set, and at worst a set of its own per package (every buyer a different person), kept as long as the package.
+    item(KEY + 160, "A checkout's id in its buyer's index, one per package, at worst in a set of its own, kept as long as the package.", "call"),
+  ] },
   "nl:call:moved:@lib/call-records.ts": short("A call moved: its record, kept until 200 days after the call it moved to, two years at most", "call", 730, KB),
   "nl:closed:claims:@lib/closed-store-data.ts": company("Where a closing store's preparation stopped in its hosts' claims, until it reaches their end", "The company's job: one key a closing store with more claims than a walk reads, deleted with the store and expiring by itself CLAIMS_LEFT_DAYS (14) after the last walk that wrote it (lib/closed-store-data.ts, clearClaims)."),
   "nl:closed:batch@lib/closed-store-data.ts": company("What the walk needs of each store it deletes, while it runs", "The company's job: a field a closing store, deleted when its walk is done (lib/closed-store-data.ts); one whose hosts' own calendars are not decided yet stays after its walk, set aside with only its ref, its id and those hosts, until each is known (decideCalendars)."),

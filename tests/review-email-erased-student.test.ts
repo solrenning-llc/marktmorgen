@@ -5,11 +5,13 @@
  * wait. tellStudentOfReview reads the store again by its handle and the student's deletion print just before the send.
  * Synthetic stores, the in-memory Redis and a stand-in Resend only.
  */
-import { tellStudentOfReview } from "@/lib/assignment-notify";
-import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, storeForEmail, storeHandleKey as handleKey, type Listing, type Store } from "@/lib/store";
+import { REVIEW_MAIL_CHECK_COMMANDS, studentStillThere, tellStudentOfReview } from "@/lib/assignment-notify";
+import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { MAX_STORE_BYTES, claimHandle, ensureListId, ensureStatsId, ensureStoreId, storeForEmail, storeHandleKey as handleKey, type Listing, type Store } from "@/lib/store";
 import { suppressCommand } from "@/lib/suppression";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { COMMAND, DB_BYTE, reviewMailCheckUsd } from "./plan-cost-registry";
 
 process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
 
@@ -90,6 +92,31 @@ async function main(): Promise<void> {
     is("no email, and the send is not called done", [result.answer === true, result.emails], [false, 0]);
   } finally {
     redis.pipeline = real;
+  }
+  part("What the check costs, and where it is priced");
+  for (const [what, shopEmail, handle, erased] of [["a student still there", "review-cost-live@example.com", "reviewcostlive", false], ["an erased student", "review-cost-gone@example.com", "reviewcostgone", true]] as const) {
+    const store = await shop(shopEmail, handle);
+    if (erased) redis.run(suppressCommand(store.listId!, STUDENT));
+    const seen: Command[] = [];
+    redis.pipeline = (async (commands: Command[]) => {
+      seen.push(...commands);
+      return real(commands);
+    }) as typeof redis.pipeline;
+    try {
+      await studentStillThere(store, STUDENT);
+    } finally {
+      redis.pipeline = real;
+    }
+    is(`${what}: the check sends at most REVIEW_MAIL_CHECK_COMMANDS (${REVIEW_MAIL_CHECK_COMMANDS}) commands`, seen.length <= REVIEW_MAIL_CHECK_COMMANDS, true);
+    is(`${what}: a GET of the handle, a GET of the store's record and the print's HEXISTS`, seen.map((c) => c[0]).join(" "), "GET GET HEXISTS");
+  }
+  // Fits in the room: priced on every studio request of the month, since each review is one and the check runs before
+  // the email is taken. For each plan: studio requests × (3 commands × $0.000002 + (1,000,000 + 4,096) bytes × $3e-11).
+  for (const tier of Object.keys(STORE_ALLOWANCES) as (keyof typeof STORE_ALLOWANCES)[]) {
+    const studio = STORE_ALLOWANCES[tier].studio;
+    const each = REVIEW_MAIL_CHECK_COMMANDS * COMMAND + (MAX_STORE_BYTES + 4_096) * DB_BYTE;
+    const usd = studio * each;
+    is(`${tier}: ${studio} studio requests × $${each.toFixed(8)} = $${usd.toFixed(4)} a month, priced in the store-email line`, reviewMailCheckUsd(tier) >= usd - 1e-12 && usd > 0, true);
   }
   done();
 }

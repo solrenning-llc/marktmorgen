@@ -46,6 +46,14 @@ export async function tellCreatorOfWork(input: { store: Store; product: Listing;
 }
 
 /**
+ * What studentStillThere sends at the most: the handle's GET, the owner record's GET and the deletion print's HEXISTS,
+ * reading at the most one store record (MAX_STORE_BYTES) and the handle's value. Priced in tests/plan-cost-registry.ts
+ * (store-email, reviewMailCheckUsd) on every studio request, since each review is one and the check runs before the
+ * email is taken; held by tests/review-email-erased-student.test.ts.
+ */
+export const REVIEW_MAIL_CHECK_COMMANDS = 3;
+
+/**
  * Whether the student can still be emailed about this review, read just before the send (#5010 row 98): the review is
  * saved and the course's end noted first, and the student's erasure can pass in that wait. The store is read again by
  * its handle, so a list id the erasure itself made for a store with none (lib/person-erasure.ts erasureScope) is seen;
@@ -53,7 +61,7 @@ export async function tellCreatorOfWork(input: { store: Store; product: Listing;
  * gone. A store no longer behind its handle, or another store there now, sends nothing. An answer that cannot be read
  * throws (rule 24), and nothing is sent.
  */
-async function studentStillThere(store: Store, to: string): Promise<boolean> {
+export async function studentStillThere(store: Store, to: string): Promise<boolean> {
   const now = await storeForHandleExact(store.handle);
   if (!now || storeRef(now) !== storeRef(store)) return false;
   return !(await isSuppressed(now.listId, to));

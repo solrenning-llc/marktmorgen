@@ -20,7 +20,7 @@
  */
 import { itemsHandedOver } from "@/lib/store-data-rules";
 import { askBillingAddress } from "@/lib/billing-address";
-import { ADMITTED_FIELD, OrdersPausedError, admitOrders, holdCheckout } from "@/lib/order-admission";
+import { ADMITTED_FIELD, OrdersPausedError, admitOrders, holdCheckout, settleAdmitted } from "@/lib/order-admission";
 import type { Product, Store } from "@/lib/store";
 import { KIND, readListings } from "@/lib/catalog";
 import { BUMP_KEYS, MIN_BUNDLE_ITEMS, bundleMeta, deliverableItems } from "@/lib/bundle-rules";
@@ -39,7 +39,7 @@ import { applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-shar
 import { codesMayTakeOff, livePromotionId } from "@/lib/discount";
 import { CONSENT_META, type DigitalConsent, consentMetaValue, deliversDigitally, keepConsentOn, requireDigitalConsent } from "@/lib/digital-consent";
 import { applyCartShipping, cartItemOf, cartShipping, shippedFirst, shipsWithOnline } from "@/lib/cart-shipping";
-import { applyEuCollectCart } from "@/lib/eu-vat-collect";
+import { EuVatCollectRefused, applyEuCollectCart } from "@/lib/eu-vat-collect";
 import type { EuVatRate } from "@/lib/eu-vat-amount";
 import { BUYER_CURRENCY_LIVE } from "@/lib/buyer-currency";
 
@@ -254,7 +254,15 @@ export async function createCartCheckout(
   inTheCurrencyShown(body);
   // 789 [IV1] step 3, unit 3: the VAT on top, after the creator's own tax settings and the currency are set, so it is
   // worked out on what the buyer pays and the creator's automatic tax is off for this sale (lib/eu-vat-collect.ts).
-  if (extras.euVat) applyEuCollectCart(body, { ...extras.euVat, buyerCurrencyLive: BUYER_CURRENCY_LIVE });
+  // A refusal comes before Stripe (Codex G-20261121-0040), so the place admitted above is given back here.
+  try {
+    if (extras.euVat) applyEuCollectCart(body, { ...extras.euVat, buyerCurrencyLive: BUYER_CURRENCY_LIVE });
+  } catch (error) {
+    // With no Stripe session, holdCheckout cannot let the unpaid-checkout sweep hand this admission back. Release
+    // the exact place and data-room hold taken above; an unknown release stays held.
+    if (error instanceof EuVatCollectRefused) await settleAdmitted(store, admitted.hour, 1, itemsHandedOver(products));
+    throw error;
+  }
   // A store with reminders on (lib/checkout-recovery.ts): Stripe asks for
   // consent where it offers to, and the way back leads to a page that offers
   // one reminder of the whole cart, which the buyer asks for themselves.

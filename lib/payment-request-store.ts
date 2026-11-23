@@ -37,7 +37,7 @@ import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
-import { type Store } from "@/lib/store";
+import { ERASING_KEY, erasingField, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { dataBytes } from "@/lib/store-data-rules";
 import { takeData } from "@/lib/store-data";
 import { sendEmail } from "@/lib/email";
@@ -93,14 +93,19 @@ const unavailable = (): Created => ({ ok: false, reason: "unavailable", message:
  * A request's record written in one step on the Redis side, only while its
  * write lock still holds the writer's token: "new" only when no record is
  * there yet, "edit" only over the record still there, with its open entry
- * and its reminder kept in step (an empty score takes the entry off). 1
- * written; 0 the lock is no longer the writer's; 2 the record is not as the
- * mode needs (already made, or gone: erased or deleted). The first line names
+ * and its reminder kept in step (an empty score takes the entry off), and
+ * only while its store is live: its id key still there and no erasing mark
+ * on its reference (Codex T-20261119-1230, row 93 of #5010), so a request
+ * held up while its store's erasure began never writes a buyer's email,
+ * name, amount or note back. 1 written; 0 the lock is no longer the
+ * writer's; 2 the record is not as the mode needs (already made, or gone:
+ * erased or deleted); 3 the store is gone or being erased. The first line names
  * it for the local stand-in (lib/redis-memory.ts).
  */
 const SAVE =
   '-- marktmorgen:payreq-save:v1\n' +
   'if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end\n' +
+  'if redis.call("EXISTS", KEYS[5]) ~= 1 or redis.call("HEXISTS", KEYS[6], ARGV[9]) == 1 then return 3 end\n' +
   'local there = redis.call("EXISTS", KEYS[2])\n' +
   'if (ARGV[2] == "new" and there ~= 0) or (ARGV[2] ~= "new" and there ~= 1) then return 2 end\n' +
   'redis.call("SET", KEYS[2], ARGV[3], "EX", ARGV[4])\n' +
@@ -116,21 +121,22 @@ const SAVE =
  * when the record is not as `mode` needs, so nothing was written either. A
  * reply of another shape throws UnknownReplyError (rule 24): never "saved".
  */
-async function writeRecord(held: fencedLock.Held, request: PaymentRequest, mode: "new" | "edit", now: number): Promise<"saved" | "lost" | "gone"> {
+async function writeRecord(held: fencedLock.Held, store: Pick<Store, "email" | "sid" | "extra">, request: PaymentRequest, mode: "new" | "edit", now: number): Promise<"saved" | "lost" | "gone"> {
   const member = `${request.sid}|${request.id}`;
   const open = mode === "edit" && statusOf(request, now) === "open" ? String(request.expiresAt) : "";
   const next = mode === "edit" ? nextReminderAt(request, now) : null;
   const reply = exactReply.repliesFor(
     await redisPipeline([[
-      "EVAL", SAVE, 4, held.key, recordKey(request.id), openKey(request.sid), DUE,
+      "EVAL", SAVE, 6, held.key, recordKey(request.id), openKey(request.sid), DUE, storeIdCommand(request.sid)[1], ERASING_KEY,
       held.token, mode, JSON.stringify(request), keepSeconds(request, now), request.id, open, member, next === null ? "" : String(next),
+      await erasingField(storeRef(store)),
     ]]),
     1,
   );
   const answer = reply?.[0];
   if (answer === 1) return "saved";
   if (answer === 0) return "lost";
-  if (answer === 2) return "gone";
+  if (answer === 2 || answer === 3) return "gone";
   throw new exactReply.UnknownReplyError("writing a payment request");
 }
 
@@ -217,7 +223,7 @@ export async function createRequest(store: Store, draft: RequestDraft, now = Dat
       await undo();
       return room.reason === "full" ? { ok: false, reason: "full", message: room.message } : unavailable();
     }
-    if ((await writeRecord(held, request, "new", now)) !== "saved") {
+    if ((await writeRecord(held, store, request, "new", now)) !== "saved") {
       await undo();
       return unavailable();
     }
@@ -300,7 +306,7 @@ export async function requestOf(store: Pick<Store, "sid">, id: string): Promise<
  * written. A write that does not answer exactly throws UnknownReplyError.
  */
 export async function changeRequest<T>(
-  store: Pick<Store, "sid">,
+  store: Pick<Store, "email" | "sid" | "extra">,
   id: string,
   change: (current: PaymentRequest) => { next: PaymentRequest | null; answer: T },
   now = Date.now(),
@@ -312,7 +318,7 @@ export async function changeRequest<T>(
     const { next, answer } = change(current);
     if (next) {
       // Written back as it now is, for the rest of the days it is kept, its open entry and reminder in step.
-      const written = await writeRecord(held, next, "edit", now);
+      const written = await writeRecord(held, store, next, "edit", now);
       if (written === "gone") return null;
       if (written === "lost") throw new fencedLock.LockBusyError("a payment request's lock ran out before its change was written");
     }

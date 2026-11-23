@@ -397,7 +397,7 @@ export function AffiliateStudio({
             <span className="text-sm text-ink-soft">{`Owed now, in all: ${money(owedTotal, currency)}`}</span>
           </div>
           {exportNote ? <p id="affiliate-export-note" className="mt-2 text-sm text-ink-soft">{exportNote}</p> : null}
-          {pendingPayoutsChecked ? payPanel : <p className="notice notice-warn mt-5" role="alert">Pending payments could not be checked. New payment batches and batch files are unavailable until you reload and this check succeeds. Your saved records and full export (counted from your studio&apos;s requests by its size) remain available.</p>}
+          {pendingPayoutsChecked ? payPanel : <p className="notice notice-warn mt-5" role="alert">Pending payments could not be checked. New payment batches and batch files are unavailable until you reload and this check succeeds. {exportNote ? "Your saved records and the full export above remain available." : "Your saved records remain available."}</p>}
           {pendingPayoutsChecked && !settled ? (
             <p className="notice notice-warn mt-5" role="status">
               {!refundsChecked

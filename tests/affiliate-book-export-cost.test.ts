@@ -13,6 +13,7 @@
  * Synthetic: the in-memory Redis, a Stripe stand-in with empty lists, no email.
  */
 import { NextRequest } from "next/server";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { GET as exportRoute } from "@/app/api/store/affiliates/export/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { putMember } from "@/lib/team";
@@ -49,10 +50,18 @@ let commands = 0;
 let bytes = 0;
 /** While counting: the book's records read whole (HGETALL of an nl:aff: key), which a refusal must not reach. */
 let bookReads = 0;
-/** While set, the book's records answer in a shape no reading accepts (a failed reading, #5256 audit). */
-let breakBook = false;
+/**
+ * While set, reading the book's sales fails: "unreadable", a record in a shape no reading accepts (UnknownReplyError,
+ * the same every time); "passing", the database failing once on our side (#5256 audit, focal 3634).
+ */
+let breakBook: false | "unreadable" | "passing" = false;
+/** While set, reading the book's sales waits this long, so two downloads overlap (focal 3634, 1). */
+let slowBook = 0;
 redis.pipeline = (async (batch: Commands) => {
-  if (breakBook && batch.some((c) => String(c[0]).toUpperCase() === "HGETALL" && /^nl:aff:[^:]+:sales$/.test(String(c[1])))) throw new Error("synthetic: the book does not read");
+  const sales = batch.some((c) => String(c[0]).toUpperCase() === "HGETALL" && /^nl:aff:[^:]+:sales$/.test(String(c[1])));
+  if (sales && breakBook === "unreadable") throw new UnknownReplyError("synthetic: the book does not read");
+  if (sales && breakBook === "passing") throw new Error("synthetic: the database did not answer");
+  if (sales && slowBook) await new Promise((resolve) => setTimeout(resolve, slowBook));
   const replies = await real(batch);
   if (counting) {
     for (const c of batch) {
@@ -141,7 +150,7 @@ async function main(): Promise<void> {
   part("A reading that fails keeps only what its reading took, and the book is not read again that month (#5256 audit 7bab 1, 3c4a; coordinator ea4f 2)");
   {
     const failedBefore = await allowanceUsed(store, "studio");
-    breakBook = true;
+    breakBook = "unreadable";
     const one = await get(session);
     const oneWords = await one.text();
     counting = true;
@@ -156,6 +165,31 @@ async function main(): Promise<void> {
   }
   // A new month opens its failed try again (the count is the month's own): the next parts start from it.
   await redis.pipeline(redis.keys().filter((key) => key.includes(":book-failed:")).map((key) => ["DEL", key]));
+
+  part("A passing failure on our side counts its reading, but never stops the next try (focal 3634, 2)");
+  {
+    const before = await allowanceUsed(store, "studio");
+    breakBook = "passing";
+    const one = await get(session);
+    breakBook = false;
+    is("a failure that says the reading counted and to try again", [one.status, (await one.text()).includes("Try again in a moment.")], [500, true]);
+    is("its reading's units kept", (await allowanceUsed(store, "studio")) - before, reading);
+    is("the next try is made at once", (await get(session)).status, 200);
+  }
+
+  part("Two clicks at once: the second waits for the first, with nothing counted (focal 3634, 1)");
+  {
+    const before = await allowanceUsed(store, "studio");
+    slowBook = 60;
+    const [one, two] = await Promise.all([get(session), get(session)]);
+    slowBook = 0;
+    const statuses = [one.status, two.status].sort();
+    const second = one.status === 429 ? one : two;
+    is("one file, one refusal", statuses, [200, 429]);
+    is("the refusal says it is being made, not that it failed", (await second.text()).startsWith("Your affiliate spreadsheet is already being made."), true);
+    const kept = (await allowanceUsed(store, "studio")) - before;
+    is("only the file made was counted", kept > 0 && kept <= units, true);
+  }
 
   part("With the figure short of its reading, nothing of the book is read, and the answer says what it needs");
   const used = await allowanceUsed(store, "studio");
@@ -184,12 +218,15 @@ async function main(): Promise<void> {
   const adminSession = await openSession(admin);
   is("a teammate with export is refused, before anything is counted", (await get(adminSession)).status, 403);
   const answers: number[] = [];
-  for (let i = 0; i < ENDED_BOOK_EXPORTS - 1; i += 1) answers.push((await get(endedSession)).status);
-  breakBook = true;
+  for (let i = 0; i < ENDED_BOOK_EXPORTS - 2; i += 1) answers.push((await get(endedSession)).status);
+  breakBook = "passing";
+  const passing = await get(endedSession);
+  breakBook = "unreadable";
   const failed = await get(endedSession);
   breakBook = false;
-  is(`${ENDED_BOOK_EXPORTS - 1} downloaded`, answers, Array.from({ length: ENDED_BOOK_EXPORTS - 1 }, () => 200));
-  is("a reading that failed is counted as one of them, and says so", [failed.status, (await failed.text()).includes(`one of the ${ENDED_BOOK_EXPORTS} downloads`)], [500, true]);
+  is(`${ENDED_BOOK_EXPORTS - 2} downloaded before them`, answers, Array.from({ length: ENDED_BOOK_EXPORTS - 2 }, () => 200));
+  is("a passing failure after the reading is counted as one of them, and says so", [passing.status, (await passing.text()).includes(`one of the ${ENDED_BOOK_EXPORTS} downloads`)], [500, true]);
+  is("so is a record that could not be read", [failed.status, (await failed.text()).includes(`one of the ${ENDED_BOOK_EXPORTS} downloads`)], [500, true]);
   is("then refused, with nothing read", (await get(endedSession)).status, 429);
   is("nothing taken from the ended store's figure", (await allowanceUsed(endedStore, "studio")) - endedBefore, 0);
   is("the refusal says so", (await (await get(endedSession)).text()).includes("since your plan ended"), true);

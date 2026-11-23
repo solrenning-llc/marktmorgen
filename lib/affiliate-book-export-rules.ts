@@ -16,11 +16,17 @@ export const BOOK_FAILED_TRIES: number = 1;
 
 const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
 
-/** Beside the button while a plan runs: what the download takes. */
-export const BOOK_EXPORT_NOTE = "The file is counted from your studio's requests by its size.";
+/** How long one store's spreadsheet holds its turn (a second click waits for the first; focal 3634, 1). */
+export const BOOK_BUSY_SECONDS = 120;
+
+/** Said to a second click while the first is being made: nothing was counted. */
+export const BOOK_BUSY_WORDS = "Your affiliate spreadsheet is already being made. It downloads in a moment. Nothing more was counted.";
+
+/** Beside the button while a plan runs: what the download takes, and what a failure counts, before the click. */
+export const BOOK_EXPORT_NOTE = "The file is counted from your studio's requests by its size. If it can't be made after your records were read, that reading still counts.";
 
 /** Beside the button once the plan has ended (shown only to the store's owner, the only one who can download it then). */
-export const BOOK_EXPORT_ENDED_NOTE = `Since your plan ended, you can download this file ${times(ENDED_BOOK_EXPORTS)} in all.`;
+export const BOOK_EXPORT_ENDED_NOTE = `Since your plan ended, you can download this file ${times(ENDED_BOOK_EXPORTS)} in all. A try that read your records counts, even if the file could not be made.`;
 
 /**
  * Said when a try that read the book could not make the file: what it counted and, while a plan runs, that it is not
@@ -32,6 +38,14 @@ export function bookFailedWords(ended: boolean, span: string | null): string {
     : "Reading the book was counted from your studio's requests.";
   const again = span ? ` It is not read again ${span}, so a record we cannot read does not use them up.` : "";
   return `We could not make your affiliate spreadsheet. ${counted}${again} Your records are unchanged. Write to us and we will look at it.`;
+}
+
+/** Said when the book was read and a passing failure on our side stopped the file: what counted, and to try again. */
+export function bookPassingWords(ended: boolean): string {
+  const counted = ended
+    ? `It counted as one of the ${ENDED_BOOK_EXPORTS} downloads your store keeps after its plan ended, because your records were read.`
+    : "Reading your records was counted from your studio's requests.";
+  return `Something went wrong on our side while your affiliate spreadsheet was being made. ${counted} Try again in a moment.`;
 }
 
 /** Said when the failed tries are used: nothing was read or counted. `reset` says when it opens again, if it does. */

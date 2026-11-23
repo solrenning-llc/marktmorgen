@@ -25,7 +25,7 @@ test("while a plan runs: the button, and the sentence it is described by", () =>
   const html = render(BOOK_EXPORT_NOTE);
   assert.match(html, /Download everything \(CSV\)/);
   assert.match(html, /aria-describedby="affiliate-export-note"/);
-  assert.match(html, /id="affiliate-export-note"[^>]*>The file is counted from your studio(&#x27;|')s requests by its size\.</);
+  assert.match(html, /id="affiliate-export-note"[^>]*>The file is counted from your studio(&#x27;|')s requests by its size\. If it can(&#x27;|')t be made after your records were read, that reading still counts\.</);
 });
 
 test("by default, the running plan's sentence", () => {
@@ -35,7 +35,7 @@ test("by default, the running plan's sentence", () => {
 test("once the plan has ended, for its owner: the downloads it keeps", () => {
   const html = render(BOOK_EXPORT_ENDED_NOTE);
   assert.match(html, /Download everything \(CSV\)/);
-  assert.match(html, /Since your plan ended, you can download this file twice in all\./);
+  assert.match(html, /Since your plan ended, you can download this file twice in all\. A try that read your records counts, even if the file could not be made\./);
   assert.doesNotMatch(html, /counted from your studio/);
 });
 

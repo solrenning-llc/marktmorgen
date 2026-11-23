@@ -115,32 +115,34 @@ async function main(): Promise<void> {
     is("no come-back key keeps their subscription's id", winbackKeys().filter((k) => k.includes("sub_AnnErased00001")), []);
   }
 
-  // Codex L on #4877 (MEDIUM, privacy): the release of the membership's mark on "erased" was awaited and its answer
-  // ignored. A release that fails is tried once more at once; still not confirmed, the store's run stops there.
-  part("The membership's mark after an erased claim: a failed release is tried again, never taken as done");
+  // Codex L and X7 on #4877 (MEDIUM, privacy), C5-20261119-1050-wb: the membership's mark used to be let go on
+  // "erased", and a release Redis refused left it for 90 days. It is now noted for erasure as it is taken (WINBACK_MARK),
+  // so the erasure that wrote the print deletes it, and no release of it is sent at all.
+  const releasesOf = (commands: Commands, sub: string) =>
+    commands.length === 1 && commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:release:") && commands[0].some((x) => String(x).includes(sub));
+  part("The membership's mark after an erased offer claim: deleted by the erasure from the address's notes, never released");
   {
     const email = "ivy@example.com";
-    const { erase } = await world("release fails once", email, "sub_IvyErased00001", "cus_IvyErased01");
+    const { erase } = await world("left to the erasure", email, "sub_IvyErased00001", "cus_IvyErased01");
     let fired = false;
-    let failedReleases = 0;
+    let releases = 0;
     redis.pipeline = (async (commands: Commands) => {
       const marking = commands.some((c) => c[0] === "EVAL" && c.some((x) => String(x).startsWith("nl:wb:once:")));
       if (!fired && marking) { fired = true; await erase(); }
-      const releasing = commands.length === 1 && commands[0]?.[0] === "EVAL" && commands[0].some((x) => String(x).includes("sub_IvyErased00001"));
-      if (releasing && failedReleases === 0) { failedReleases += 1; throw new Error("synthetic redis failure on the mark's release"); }
+      if (releasesOf(commands, "sub_IvyErased00001")) releases += 1;
       return real(commands);
     }) as typeof redis.pipeline;
     await sendWinBacks(Date.now() + 30_000, now);
     redis.pipeline = real;
-    is("the erasure landed before the claim, and the first release failed", [fired, failedReleases], [true, 1]);
-    is("the release was tried again: no come-back key keeps their subscription's id", winbackKeys().filter((k) => k.includes("sub_IvyErased00001")), []);
+    is("the erasure landed at the offer's claim, and no release of the mark was sent", [fired, releases], [true, 0]);
+    is("no come-back key keeps their subscription's id", winbackKeys().filter((k) => k.includes("sub_IvyErased00001")), []);
   }
 
-  part("Both releases fail: the store's run stops there, and the next membership waits for the next run");
+  part("Redis refusing every release changes nothing: the erased person's mark is gone, and the run goes on to the next membership");
   {
     const jon = "jon@example.com";
     const kit = "kit@example.com";
-    const { store } = await world("release never confirmed", jon, "sub_JonLater00001", "cus_JonLater0001");
+    const { store } = await world("releases refused", jon, "sub_JonLater00001", "cus_JonLater0001");
     const product = String((events[0] as { data?: { object?: { metadata?: Record<string, string> } } } | undefined)?.data?.object?.metadata?.product);
     customers.set("cus_KitErased001", kit);
     await upsertContact(store.listId as string, kit, { agreed: true, explicit: true, source: "buyer" }, ROOM);
@@ -151,20 +153,19 @@ async function main(): Promise<void> {
       await forgetNoted(store.statsId as string, kit);
     };
     let fired = false;
-    let tries = 0;
     redis.pipeline = (async (commands: Commands) => {
       const marking = commands.some((c) => c[0] === "EVAL" && c.some((x) => String(x).startsWith("nl:wb:once:")));
       if (!fired && marking) { fired = true; await eraseKit(); }
-      const releasing = commands.length === 1 && commands[0]?.[0] === "EVAL" && commands[0].some((x) => String(x).includes("sub_KitErased00001"));
-      if (releasing) { tries += 1; throw new Error("synthetic redis failure on every release of the mark"); }
+      if (releasesOf(commands, "sub_KitErased00001")) throw new Error("synthetic redis failure on every release of the mark");
       return real(commands);
     }) as typeof redis.pipeline;
     const first = await sendWinBacks(Date.now() + 30_000, now);
     redis.pipeline = real;
-    is("kit was erased before her claim, and her mark's release was tried twice", [fired, tries], [true, 2]);
-    is("nothing was sent on that run, to kit or to jon after her", [first.sent, handed.filter((m) => m.to.includes(kit)).length, handed.filter((m) => m.to.includes(jon)).length], [0, 0, 0]);
+    is("kit was erased at her offer's claim", fired, true);
+    is("the same run sent jon's offer, and nothing to kit", [first.sent, handed.filter((m) => m.to.includes(jon)).length, handed.filter((m) => m.to.includes(kit)).length], [1, 1, 0]);
     const second = await sendWinBacks(Date.now() + 30_000, now);
-    is("the next run sends jon's offer once, and never kit's", [second.sent, handed.filter((m) => m.to.includes(jon)).length, handed.filter((m) => m.to.includes(kit)).length], [1, 1, 0]);
+    is("the next run sends nothing more", [second.sent, handed.length], [0, 1]);
+    is("no come-back key keeps kit's subscription's id", winbackKeys().filter((k) => k.includes("sub_KitErased00001")), []);
   }
 
   part("The erasure completes after the once-mark and grant, before the email");
@@ -278,7 +279,7 @@ async function main(): Promise<void> {
         }
       }
       // The membership's claim and the offer's claim each answered in another shape after landing: read back.
-      if (!sentClaim && c[0] === "SET" && String(c[1]).startsWith("nl:wb:acct_")) { sentClaim = true; run(c); return "QUEUED"; }
+      if (!sentClaim && c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:winback-mark:")) { sentClaim = true; run(c); return "QUEUED"; }
       if (!offerClaim && c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:winback-claim:")) { offerClaim = true; run(c); return "QUEUED"; }
       return run(c);
     }) as typeof redis.run;

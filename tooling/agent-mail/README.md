@@ -135,6 +135,7 @@ node ~/.agent-mail/agent-mail.mjs check-append-only
 ## Nada NÃO CONFERIDO segue (dono, OWNER-20261121-1904, passo 4)
 
 - O pedido grava o head inteiro (40 caracteres) e o ramo do PR, lidos na hora. Um head que não é o atual do PR é recusado já no pedido; um head velho é conferido pela ponta do ramo, achado pela referência atual do PR. No GitHub, sem ramo achado, nada é pedido: um pedido assim nunca seria entregue e seguraria o primeiro lugar da fila. Um pedido gravado antes desta versão sem a linha `Ramo:` fica parado na tomada; o autor o retira (`cancel-enqueue`) e pede de novo.
+- Se dois ramos apontam para o head do PR (um ramo auxiliar usado para preparar uma junção por avanço simples), vale o ramo que o próprio GitHub diz ser o do PR (`head.ref`); sem conseguir ler o GitHub, a ferramenta não adivinha entre os dois.
 - `claim-enqueue` só entrega o pedido quando conferiu agora o head (pelo ramo do PR), se o PR já está na fila de integração ou no main, e o conflito com o main e com a fila. Faltando qualquer um, o pedido continua primeiro da fila, sem tomada, com "NÃO CONFERIDO agora".
 - Logo antes de enfileirar no GitHub, quem pegou confere a tomada e o head, e usa o head que o comando mostra:
 
@@ -251,7 +252,7 @@ node ~/.agent-mail/agent-mail.mjs complete-enqueue --as "Claude 3" <id> --result
 ```
 
 - **Commit no PR não impede enfileirar** (FQ (1); coordenador, 21/11/2026, 19h41 UTC): na fila ficam de fora só a família do autor e quem revisou o head. A regra de não ter commits no PR vale só para a revisão (CO (e)). O `request-enqueue` mostra as famílias com commits apenas como informação. Pedidos feitos antes desta versão mantêm a lista "Exclui" com que foram gravados.
-- **Quem revisou o head não enfileira** (FQ (1)): o `request-enqueue` deixa de fora, sozinho, toda família que concluiu pelo correio uma revisão daquele PR naquele head, e o `claim-enqueue` confere de novo. Uma revisão feita fora do correio, o autor acrescenta com `--exclude "Claude N"`.
+- **Quem revisou o head não enfileira** (FQ (1)): o `request-enqueue` deixa de fora, sozinho, toda família que concluiu pelo correio uma revisão daquele PR naquele head, e o `claim-enqueue` confere de novo. Uma revisão feita fora do correio, o autor acrescenta com `--exclude "Claude N"`. Além disso (coordenador, ce2d, 22/11/2026), o `claim-enqueue` e o `claim-review` leem os comentários e as revisões do próprio PR: uma família com veredito (READY ou CHANGES) naquele head, num comentário de quem trabalha no repositório cuja primeira linha é a revisão ("Claude N ... review #N @head: READY"), não enfileira nem revisa de novo; na revisão, o pedido é devolvido sozinho, com o motivo. Sem conseguir ler o PR, nada é entregue (NÃO CONFERIDO).
 - **Os enfileiramentos respeitam a ordem.** `claim-enqueue` só entrega o pedido mais antigo ainda aberto, e um de cada vez; nenhum pedido mais novo passa na frente.
 - Se o primeiro da fila for da sua família, você não o pega: outra família o enfileira.
 - Se o primeiro da fila tiver HOLD de qualquer agente, ou CLAIMED de outra família, no correio (`pr-status`), `claim-enqueue` não o entrega: a fila espera até alguém liberar. Para um HOLD longo não parar a fila inteira, o autor, ou quem pôs o HOLD, retira o pedido (`cancel-enqueue <id> --reason "..."`); ele sai da fila sem que ninguém passe na frente, e o autor pede de novo quando o PR estiver pronto.
@@ -268,6 +269,7 @@ node ~/.agent-mail/agent-mail.mjs complete-enqueue --as "Claude 3" <id> --result
 ```bash
 node ~/.agent-mail/agent-mail.mjs claim-pr --as "Claude 3" --pr 4941          # CLAIMED por 2 horas (AC (m))
 node ~/.agent-mail/agent-mail.mjs hold-pr --as "Claude 5" --pr 4941 --reason "por quê"   # HOLD, até alguém liberar
+node ~/.agent-mail/agent-mail.mjs hold-pr --as "Claude 5" --pr 3471 --reason "por quê" --owner-hold OWNER-20261122-0700-ASSUNTO   # HOLD do dono
 node ~/.agent-mail/agent-mail.mjs release-pr --as "Claude 3" --pr 4941
 node ~/.agent-mail/agent-mail.mjs pr-status --pr 4941
 ```
@@ -279,6 +281,7 @@ node ~/.agent-mail/agent-mail.mjs pr-status --pr 4941
   - um CLAIMED não passa por cima de um HOLD ativo: o HOLD sai primeiro;
   - sem conseguir ler os commits do PR agora, quem não pôs o HOLD não o libera (NÃO CONFERIDO);
   - ao ler, uma marca gravada nesta versão sem esse direito (à mão ou por cópia antiga) é ignorada; as marcas antigas, sem a linha `Sessão:`, valem como antes.
+- **HOLD do dono (coordenador, 3c47, 22/11/2026):** `hold-pr --owner-hold OWNER-AAAAMMDD-HHMM-ASSUNTO` grava um HOLD com o identificador da decisão do dono, que o `pr-status` mostra como `HOLD do dono (...)`. Ele só sai pela sessão nomeada, com o pedido do coordenador na #4932 (`--request`) e a decisão do dono que manda liberar (`release-pr ... --owner-decision OWNER-...`); nunca por quem o pôs nem pelo autor. Nada mais o tira: um CLAIMED, uma liberação sem esses dois itens ou uma escrita à mão no git, mesmo não identificada, são ignorados; um HOLD comum por cima o mantém. A linha "HOLD do dono" só vale numa marca gravada por uma sessão identificada da família que a assina; uma escrita direta pelo git, ou com a sessão de outra família, vale como HOLD comum. Cuidado: um HOLD do dono posto por engano (no PR errado, por exemplo) também só sai com a decisão do dono; confira o número do PR antes.
 - Quem marca um PR no correio escreve também a mesma marca, numa linha, no próprio PR (CLAIMED, UNCLAIMED ou HOLD), porque é lá que a FQ (1) e a AC (m) e (p) a leem.
 
 ## Quando pedir ao dono

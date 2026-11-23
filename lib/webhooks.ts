@@ -2281,11 +2281,15 @@ function subscriptionEmits(event: StripeEvent): { changed: { seed: string; from:
   let changed = null;
   // A move to another price or quantity (an upgrade, a downgrade, another
   // interval) is its own event, said once per change; the same update may
-  // also set an end, which is a cancellation too.
+  // also set an end, which is a cancellation too. Each change is one Stripe
+  // event, so the seed carries that event's id (issue #4004, Codex P): Stripe's
+  // `created` is in whole seconds, and A -> B, B -> A, A -> B in one second gave
+  // the first and the third the same seed, the third taken as already sent. A
+  // retry of the same Stripe event keeps its id, so it is still sent once.
   if (!ended && "items" in previous) {
     const from = planOf(previous.items);
     const to = planOf(object.items);
-    if (from && to && (from.price !== to.price || from.quantity !== to.quantity)) changed = { seed: `${id}|${num(event.created)}|${to.price}|${to.quantity}`, from, to };
+    if (from && to && (from.price !== to.price || from.quantity !== to.quantity)) changed = { seed: `${id}|${num(event.created)}|${to.price}|${to.quantity}|${str(event.id) ?? ""}`, from, to };
   }
   let cancels = ended;
   if (!ended) {

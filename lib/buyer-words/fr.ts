@@ -221,6 +221,10 @@ export const fr: BuyerWords = {
       title: "Ce paiement PayPal est en cours de confirmation",
       body: "Un autre onglet ou un deuxième clic est en train de le terminer. Vérifiez vos e-mails pour le reçu avant de payer à nouveau. Si PayPal indique un prélèvement et qu'aucun reçu n'arrive, écrivez à la boutique en répondant au reçu de PayPal.",
     },
+    "paypal-tax": {
+      title: "PayPal ne peut pas accepter ce paiement",
+      body: "Cette boutique ajoute désormais la taxe au paiement, et un paiement PayPal ne l'inclurait pas. Rien n'a été prélevé. Commandez à nouveau depuis la page du produit, qui indique comment vous pouvez payer.",
+    },
     "paypal-error": {
       title: "Ce paiement PayPal n'a pas pu être associé à cette boutique",
       body: "Rien n'a été remis en échange. Si PayPal indique un débit, écrivez à la boutique en répondant au reçu de PayPal.",

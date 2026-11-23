@@ -12,6 +12,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { captureOrder, openOrder, paypalReady, sellsThroughPayPal } from "@/lib/paypal-sales";
+import { savedOfferIssues } from "@/lib/funnel-offer-review";
+import { wordsIn } from "@/lib/buyer-words";
+import { LANGUAGES } from "@/lib/store-language";
 import { readListing } from "@/lib/catalog";
 import { addProduct, claimHandle, ensureStatsId, setPayPalSeller, setProductLink, setSubscription, setTax, storeForEmail, type Listing } from "@/lib/store";
 import { TEST_CONSENT } from "./digital-consent-fixture";
@@ -55,7 +58,7 @@ async function main(): Promise<void> {
   await ensureStatsId(owner);
   await setSubscription(owner, { customerId: "cus_PayPalTax01", subscriptionId: "sub_PayPalTax01", active: true, tier: "creator", period: paidPeriod() });
   const base = { ...(await storeForEmail(owner))!, currency: "usd", paypalSeller: { merchant: "SYNTHETICMERCH1", at: Date.now() } } as NonNullable<Awaited<ReturnType<typeof storeForEmail>>>;
-  const product = { id: "prod000001", title: "A guide", priceCents: 10_000, hidden: false, recurring: null, call: null, pwyw: null, keys: null, options: [], stock: null, shipping: null, bundle: null, course: null, podcast: null, file: { name: "guide.pdf" }, link: null } as unknown as Listing;
+  const product = { id: "prod000001", title: "A guide", priceCents: 10_000, hidden: false, recurring: null, call: null, pwyw: null, keys: null, options: [], bumps: [], stock: null, shipping: null, bundle: null, course: null, podcast: null, file: { name: "guide.pdf" }, link: null } as unknown as Listing;
   const withTax = (enabled: boolean, included: boolean) => ({ ...base, tax: { ...base.tax, enabled, included } });
 
   part("Controls: no tax, or tax included in the price: PayPal as before");
@@ -72,7 +75,23 @@ async function main(): Promise<void> {
   is("the tax page says PayPal is not offered while tax is added on top", page.includes("PayPal is not offered at checkout while tax is added on top of your prices"), true);
   // Claude 1's LEVE on #5243: the sentence only where PayPal would otherwise be offered, and "by card" only where the card checkout sells.
   is("the sentence only where PayPal would otherwise be offered", /sellsThroughPayPal\(store\) && taxOnTop\(store\)/.test(page), true);
-  is("\"by card\" only where the store sells by card", /canSell\(store\) \? " Buyers pay by card through Stripe\." : " Buyers cannot pay until you connect Stripe or turn off tax on top\."/.test(page), true);
+  is("\"by card\" only where the store sells by card", /canSell\(store\) \? " Buyers pay by card through Stripe\."/.test(page), true);
+  // The coordinator's triple audit on #5243: "turn off tax on top" cannot be done in the studio without Stripe, so it is not offered.
+  is("without card payments, only a step the creator can take", /store\.stripeAccountId \? " Buyers cannot pay until your Stripe account can take card payments\." : " Buyers cannot pay until you connect Stripe\."/.test(page), true);
+  is("never \"turn off tax on top\" as the way out", page.includes("or turn off tax on top"), false);
+  const editor = readFileSync(join(process.cwd(), "components/tax-editor.tsx"), "utf8");
+  is("the tax editor says PayPal goes away as tax on top is chosen", /paypal && enabled && !included\s*\? "With tax added on top, PayPal is not offered at checkout, because a PayPal payment would not include the tax\."/.test(editor), true);
+  const studio = readFileSync(join(process.cwd(), "app/studio/page.tsx"), "utf8");
+  is("the studio tells the tax editor whether the store sells through PayPal", studio.includes("paypal={sellsThroughPayPal(store)}"), true);
+  is("after connecting PayPal, a store with tax on top is not told a PayPal button now shows", /params\.paypal === "ready" && taxOnTop\(store\) \? PAYPAL_READY_TAX_ON_TOP/.test(studio), true);
+  is("the connected PayPal box says it is not offered while tax is on top", /\{taxOnTop\(store\) \? \(\s*<p className="mt-2 text-sm text-ink">\s*Not offered at checkout while tax is added on top of your prices/.test(studio), true);
+
+  part("The funnel review names the real cause (a store selling by PayPal alone, with tax on top)");
+  const paypalOnly = { ...withTax(true, false), stripeAccountId: null, stripeChargesEnabled: false } as typeof base;
+  const issues = savedOfferIssues(paypalOnly, product, [product]);
+  is("the review says tax on top is why PayPal is not offered", issues.some((issue) => issue.startsWith("Store payments are unavailable: PayPal is not offered while tax is added on top of your prices")), true);
+  is("not the generic plan and connection words", issues.includes("Store payments are unavailable. Review the store plan and payment connection."), false);
+  is("control: the same store with tax included has no payment issue", savedOfferIssues({ ...paypalOnly, tax: { ...paypalOnly.tax, included: true } }, product, [product]).some((issue) => issue.startsWith("Store payments are unavailable")), false);
   is("the PayPal checkout route asks paypalReady", readFileSync(join(process.cwd(), "app/api/store/paypal/checkout/route.ts"), "utf8").includes("paypalReady(store, product)"), true);
 
   part("An order opened before tax went on top and approved after is not taken without its tax (Claude 7's LEVE on #5243)");
@@ -97,8 +116,20 @@ async function main(): Promise<void> {
   late = (await storeForEmail(seller))!;
   is("the store now adds tax on top", late.tax.enabled && !late.tax.included, true);
   const after = await captureOrder(late, sold.order);
-  is("the order approved after tax went on top is not taken", after, { ok: false, reason: "unknown" });
+  is("the order approved after tax went on top is not taken, said as \"tax\"", after, { ok: false, reason: "tax" });
   is("PayPal is not asked to take it", captures, asked);
+  // One a capture was already asked for (its answer lost) stays with the sweep: its buyer goes to the thanks page.
+  const tried = await openOrder({ ...late, tax: { ...late.tax, enabled: false } }, (await readListing(late, added.product.id))!, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT });
+  if (!tried.ok) throw new Error("no tried order");
+  await redis.pipeline([["INCR", `nl:ppsell:try:${tried.order}`]]);
+  is("an order already tried is sent to the thanks page, as a pending one", await captureOrder(late, tried.order), { ok: false, reason: "pending" });
+  is("PayPal is still not asked", captures, asked);
+
+  part("The buyer is told nothing was charged, in every buyer language");
+  const ret = readFileSync(join(process.cwd(), "app/api/store/paypal/return/route.ts"), "utf8");
+  is("the return route sends a \"tax\" refusal to its own words", ret.includes('if (result.reason === "tax") return away(`/@${store.handle}?status=paypal-tax`);'), true);
+  is("English: nothing was charged, and how to pay", wordsIn("en").notices["paypal-tax"]?.body.includes("Nothing was charged."), true);
+  is("every buyer language has the words", Object.values(LANGUAGES).every((lang) => Boolean(wordsIn(lang.code).notices["paypal-tax"]?.title && wordsIn(lang.code).notices["paypal-tax"]?.body)), true);
   const again = await captureOrder(late, control.order);
   is("one already paid is still shown as paid", again.ok && !again.fresh, true);
 

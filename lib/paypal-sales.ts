@@ -808,7 +808,8 @@ export type Paid = {
 export type CaptureResult =
   | { ok: true; paid: Paid; fresh: boolean }
   /** "confirming": another return of the same order holds its last try right now (captureOrder's "spent"). */
-  | { ok: false; reason: "unknown" | "pending" | "declined" | "mismatch" | "error" | "confirming" };
+  /** "tax": the store adds tax on top now, which a PayPal payment would not include; nothing was asked of PayPal. */
+  | { ok: false; reason: "unknown" | "pending" | "declined" | "mismatch" | "error" | "confirming" | "tax" };
 
 /** Whether PayPal is still being waited on for an order this store opened. */
 export async function stillPending(store: Store, order: string): Promise<boolean> {
@@ -1206,12 +1207,13 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
     return { ok: false, reason: "unknown" };
   }
   if (already) return { ok: true, paid: already, fresh: false };
-  // An order opened before the creator added tax on top of the prices, approved after: PayPal would take the price
-  // alone, without the tax (Claude 7's LEVE on #5243). Nothing is asked of PayPal and nothing is written; the buyer is
-  // told it did not go through. One a capture was already asked for stays with the sweep, which reads PayPal's order.
-  if (taxOnTop(store)) return { ok: false, reason: "unknown" };
   const { opened, tries } = await readOpenedAndTries(order);
   if (!opened || opened === "unknown" || opened.s !== store.statsId || tries === "unknown") return { ok: false, reason: "unknown" };
+  // An order opened before the creator added tax on top of the prices, approved after: PayPal would take the price
+  // alone, without the tax (Claude 7's LEVE on #5243). Nothing is asked of PayPal and nothing is written. One a capture
+  // was already asked for stays with the sweep, which reads PayPal's own order, so its buyer goes to the thanks page as
+  // for a pending one; one never tried is "tax": the buyer is told nothing was charged (the coordinator's triple audit).
+  if (taxOnTop(store)) return { ok: false, reason: tries > 0 ? "pending" : "tax" };
   // Asked for as many times as an order may be (CAPTURE_TRIES_PER_ORDER; Claude 7's cost MEDIUM on #3411): PayPal is not
   // asked again and nothing is written. Only an order still in pending goes to the thanks page, where the sweep writes
   // down a payment PayPal completes; one every try was refused for, or the sweep let go of, has nothing under watch,

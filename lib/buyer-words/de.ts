@@ -215,6 +215,10 @@ export const de: BuyerWords = {
       title: "Diese PayPal-Zahlung wird gerade bestätigt",
       body: "Ein anderer Tab oder ein zweiter Klick schließt sie gerade ab. Sieh in deinen E-Mails nach der Quittung, bevor du noch einmal zahlst. Wenn PayPal eine Abbuchung zeigt und keine Quittung kommt, schreib dem Shop, indem du auf die Quittung von PayPal antwortest.",
     },
+    "paypal-tax": {
+      title: "PayPal kann diese Zahlung nicht annehmen",
+      body: "Dieser Shop rechnet die Steuer jetzt an der Kasse dazu, und eine PayPal-Zahlung würde sie nicht enthalten. Es wurde nichts abgebucht. Bestell noch einmal über die Produktseite; dort steht, wie du zahlen kannst.",
+    },
     "paypal-error": {
       title: "Diese PayPal-Zahlung konnte diesem Shop nicht zugeordnet werden",
       body: "Dafür wurde nichts ausgeliefert. Falls PayPal eine Abbuchung zeigt, schreiben Sie dem Shop, indem Sie auf die Quittung von PayPal antworten.",

@@ -88,9 +88,10 @@ export default async function StudioTaxPage({ searchParams }: Params) {
             {/* Revisor 1 on #2735: a sale paid with PayPal adds no tax (lib/paypal-sales.ts reads no store.tax). With tax on
                 top, PayPal is not offered at all, so no sale goes without its tax (#3971, lib/paypal-sales.ts paypalOffered). */}
             {/* Only where PayPal would otherwise be offered, and the card checkout named only where it sells (Claude 1's
-                LEVE on #5243, VR item 2): a store that sells by PayPal alone is told nobody can pay, never "by card". */}
+                LEVE on #5243, VR item 2): a store that sells by PayPal alone is told nobody can pay, never "by card", and only a step
+                it can take: tax on top cannot be turned off here without Stripe (the coordinator's triple audit). */}
             {sellsThroughPayPal(store) && taxOnTop(store)
-              ? ` PayPal is not offered at checkout while tax is added on top of your prices, because a PayPal payment would not include the tax.${canSell(store) ? " Buyers pay by card through Stripe." : " Buyers cannot pay until you connect Stripe or turn off tax on top."}`
+              ? ` PayPal is not offered at checkout while tax is added on top of your prices, because a PayPal payment would not include the tax.${canSell(store) ? " Buyers pay by card through Stripe." : store.stripeAccountId ? " Buyers cannot pay until your Stripe account can take card payments." : " Buyers cannot pay until you connect Stripe."}`
               : paypalOffered(store)
                 ? " Sales paid with PayPal have no tax added."
                 : null}

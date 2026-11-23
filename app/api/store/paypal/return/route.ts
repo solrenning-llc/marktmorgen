@@ -34,5 +34,7 @@ export async function GET(request: NextRequest) {
   // Another load of the same order is taking the payment right now: neither the thanks page (nothing is under watch
   // for this one) nor "could not be matched" (it may be handed over a moment later).
   if (result.reason === "confirming") return away(`/@${store.handle}?status=paypal-confirming`);
+  // The store added tax on top after the order was opened: nothing was charged, and the buyer is told so (#5243).
+  if (result.reason === "tax") return away(`/@${store.handle}?status=paypal-tax`);
   return away(`/@${store.handle}?status=paypal-error`);
 }

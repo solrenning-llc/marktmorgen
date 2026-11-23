@@ -38,6 +38,14 @@ async function main(): Promise<void> {
   delete process.env.CRON_SECRET;
   const quiet = console.error;
   console.error = () => {};
+  // What the run says in its log (Claude 3 ivvh on #5466): an unread part is never logged as "every store inside".
+  const loud = console.log;
+  const logged: string[] = [];
+  console.log = (...parts: unknown[]) => {
+    const line = parts.map(String).join(" ");
+    if (/^[a-z]+-watch: /.test(line)) logged.push(line);
+    else loud(...parts);
+  };
 
   for (const [name, pattern, others, mode] of ([
     ["video", /watch/, [/^nl:traffic:folders:/, /^nl:orders:folders:/]],
@@ -47,12 +55,14 @@ async function main(): Promise<void> {
     part(`The ${name} inventory ${mode === "throw" ? "cannot be read" : "is answered in another shape"}: said as unread, never as zero`);
     failing = pattern;
     how = mode;
+    logged.length = 0;
     const got = await run();
     failing = null;
     is("the run answers an error, not ok", [got.status >= 500, got.body.ok], [true, false]);
     is(`and names the ${name} part as unread`, Array.isArray(got.body.unread) && (got.body.unread as string[]).includes(name), true);
     is("its own result says unread, never a count of zero stores", (got.body[name] as { unread?: boolean } | undefined)?.unread, true);
     is("the other parts still ran", others.every((other) => askedFor(got.from, other)), true);
+    is(`the log never says every store is inside for the ${name} part`, logged.some((line) => line.startsWith(`${name === "video" ? "video" : name}-watch: every store inside`)), false);
   }
 
   part("Control: every inventory read: ok, as before");
@@ -60,6 +70,7 @@ async function main(): Promise<void> {
   is("ok, nothing unread", [fine.status, fine.body.ok, fine.body.unread ?? []], [200, true, []]);
 
   console.error = quiet;
+  console.log = loud;
   done();
 }
 

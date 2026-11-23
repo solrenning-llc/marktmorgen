@@ -2,11 +2,18 @@ import { type NextRequest, after } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
 import { isFree, storeForHandle } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { launch, setSoon, waitlistViews } from "@/lib/waitlist";
+import { launch, launchReadMostBytes, setSoon, waitlistViews } from "@/lib/waitlist";
 import { queueRelease, runPreorderReleases, waitingCount } from "@/lib/preorders";
 import { preorderDeps } from "@/lib/purchase-email";
 import { hasContent } from "@/lib/preorder-rules";
 import { UnknownReplyError } from "@/lib/redis-reply";
+import { IncludedBytes, PAGE_INCLUDED_BYTES } from "@/lib/sent-bytes";
+import { holdStudio, refusedJson } from "@/lib/studio-route";
+import { forceAllowance } from "@/lib/store-allowance";
+import { refreshPeriod } from "@/lib/billing-sync";
+
+/** Studio requests a launch's read of `bytes` costs beyond the request's own (lib/sent-bytes.ts, IncludedBytes). */
+const unitsFor = (bytes: number) => new IncludedBytes().take(bytes, PAGE_INCLUDED_BYTES).units;
 
 /**
  * The studio's waitlist switches.
@@ -53,7 +60,19 @@ export async function POST(request: NextRequest) {
       await setSoon(store, product.id, body.on === true);
       if (body.on !== true) await queueRelease(store, product.id);
     } else if (body.action === "launch") {
-      const result = await launch(store, product, { note: body.note, address: body.address });
+      // The launch reads the whole list once, to start its email with every confirmed address (#5010 row 149): the
+      // studio requests for its most bytes are taken before it reads, refused before anything is read without them,
+      // and what it did not move is given back; a list that grew in between is counted past the figure, never free.
+      const most = unitsFor(await launchReadMostBytes(store, product.id));
+      const held = most > 0 ? await holdStudio(store, most) : null;
+      if (held && !held.ok) return refusedJson("used", held.message);
+      const moved = { bytes: 0 };
+      const result = await launch(store, product, { note: body.note, address: body.address }, moved);
+      const used = unitsFor(moved.bytes);
+      if (held?.ok) {
+        if (used < most) await held.give(most - used);
+        else if (used > most) await held.force(used - most);
+      } else if (used > 0) await forceAllowance(await refreshPeriod(store), "studio", used);
       if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
       await queueRelease(store, product.id);
     } else {

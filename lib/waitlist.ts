@@ -574,20 +574,51 @@ export async function waitlistViews(store: Store, productIds: string[]): Promise
   if (!store.statsId || !isRedisConfigured() || !productIds.length) return out;
   const sid = store.statsId;
   const soon = await soonProducts(store);
-  const rows = await redisPipeline(productIds.flatMap((p) => [["HGETALL", listKey(sid, p)], ["GET", jobKey(sid, p)]]));
+  // Counted inside the database (WAITLIST_COUNT, #5010 row 149): the view shows two numbers, and the whole list at
+  // MAX_WAITLIST places is megabytes that one studio request does not pay for.
+  const rows = await redisPipeline(productIds.flatMap((p) => [["EVAL", WAITLIST_COUNT, 1, listKey(sid, p)], ["GET", jobKey(sid, p)]]));
   productIds.forEach((p, i) => {
-    const entries = entriesOf(rows[i * 2]);
+    const counts = countsOf(rows[i * 2]);
     const launch = parseJob(rows[i * 2 + 1]);
-    if (!soon.has(p) && !launch && entries.length === 0) return;
-    out[p] = {
-      soon: soon.has(p),
-      confirmed: entries.filter(([, e]) => e.ok > 0).length,
-      waiting: entries.filter(([, e]) => e.ok === 0).length,
-      launch,
-      switchedOff: Boolean(store.suspended),
-    };
+    if (!soon.has(p) && !launch && counts.confirmed + counts.waiting === 0) return;
+    out[p] = { soon: soon.has(p), ...counts, launch, switchedOff: Boolean(store.suspended) };
   });
   return out;
+}
+
+/**
+ * A waitlist's places counted where they are kept (#5010 row 149): KEYS[1] the product's waitlist. Answers
+ * {confirmed, waiting}, each place read as parseEntry reads it (lib/waitlist-rules.ts): a value that is not an
+ * object with a text `t` is not a place and is counted in neither; `ok` is read as Number(ok) || 0, so above zero is
+ * confirmed, zero (or not a number) is waiting and below zero is neither, as the view counted them (checked on a real
+ * Redis against parseEntry; the one difference is an `ok` kept as a list, which no writer makes: waiting here, while
+ * Number([5]) is 5). Billed as one EVAL and the WAITLIST_COUNT_CALLS call inside it, in place of the HGETALL whose
+ * whole reply the view used to read.
+ */
+export const WAITLIST_COUNT = [
+  "-- marktmorgen:waitlist-count:v1",
+  'local all = redis.call("HGETALL", KEYS[1])',
+  "local confirmed, waiting = 0, 0",
+  "for i = 2, #all, 2 do",
+  "  local decoded, place = pcall(cjson.decode, all[i])",
+  '  if decoded and type(place) == "table" and type(place.t) == "string" then',
+  "    local ok = place.ok",
+  '    if ok == true then ok = 1 elseif type(ok) == "string" then ok = tonumber(ok) elseif type(ok) ~= "number" then ok = 0 end',
+  "    if ok == nil or ok ~= ok then ok = 0 end",
+  "    if ok > 0 then confirmed = confirmed + 1 elseif ok == 0 then waiting = waiting + 1 end",
+  "  end",
+  "end",
+  "return {confirmed, waiting}",
+].join("\n");
+
+/** The most redis.call one run of WAITLIST_COUNT makes: its HGETALL. */
+export const WAITLIST_COUNT_CALLS = 1;
+
+/** WAITLIST_COUNT's reply, read exactly: two whole counts; any other shape is unknown, never an empty list (rule 24). */
+function countsOf(raw: unknown): { confirmed: number; waiting: number } {
+  const whole = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  if (!Array.isArray(raw) || raw.length !== 2 || !whole(raw[0]) || !whole(raw[1])) throw new UnknownReply("a waitlist's counts");
+  return { confirmed: raw[0] as number, waiting: raw[1] as number };
 }
 
 function entriesOf(raw: unknown): [string, WaitEntry][] {
@@ -603,11 +634,32 @@ function entriesOf(raw: unknown): [string, WaitEntry][] {
 export type LaunchResult = { ok: true; total: number } | { ok: false; reason: "address" | "busy" | "switched_off" };
 
 /**
+ * The most bytes one place moves when a launch reads the list (#5010 row 149): the longest address a place may be
+ * kept under (MAX_EMAIL_LENGTH), its value (two times in seconds, the consent marks and its 48-character link, about
+ * 90 bytes), every quote escaped as the reply carries it, and the separators, with room. Held in
+ * tests/waitlist-route-reads.test.ts against a list of MAX_WAITLIST of the longest places.
+ */
+export const LAUNCH_PLACE_MOST_BYTES = 512;
+
+/**
+ * The most bytes a launch's one read moves, for the studio requests taken before it reads (lib/sent-bytes.ts): the
+ * job (its note and address at their longest, with room) and every place the list holds now at
+ * LAUNCH_PLACE_MOST_BYTES. Counted with one HLEN; a count Redis answered in another shape is unknown, never none.
+ * A list that grew between this count and the read is paid for as well, from what the read moved (`moved`).
+ */
+export async function launchReadMostBytes(store: Store, productId: string): Promise<number> {
+  if (!store.statsId) throw new UnknownReply("a launch's waitlist size");
+  const places = countOf(repliesFor(await redisPipeline([["HLEN", listKey(store.statsId, productId)]]), 1)?.[0]);
+  if (places === null) throw new UnknownReply("a launch's waitlist size");
+  return 2 * (MAX_LAUNCH_NOTE + MAX_LAUNCH_ADDRESS) + 1_024 + places * LAUNCH_PLACE_MOST_BYTES;
+}
+
+/**
  * Puts the product on sale and starts the one email to everyone who
  * confirmed. The five-minute job sends it (runLaunches). Refused, with
  * nothing written, while the store is switched off after notices.
  */
-export async function launch(store: Store, product: Listing, input: { note: unknown; address: unknown }): Promise<LaunchResult> {
+export async function launch(store: Store, product: Listing, input: { note: unknown; address: unknown }, moved?: { bytes: number }): Promise<LaunchResult> {
   if (store.suspended) return { ok: false, reason: "switched_off" };
   const address = cleanLine(input.address, MAX_LAUNCH_ADDRESS);
   const note = cleanText(input.note, MAX_LAUNCH_NOTE);
@@ -621,6 +673,8 @@ export async function launch(store: Store, product: Listing, input: { note: unkn
     2,
     "a launch's job and waitlist",
   );
+  // What this read moved, for the studio requests it is paid with (launchReadMostBytes; #5010 row 149).
+  if (moved) moved.bytes += Buffer.byteLength(JSON.stringify([rawJob, rawList]), "utf8");
   // Unknown is never "no launch running" or "nobody waiting" (Claude 4's sweep, C4-2910, sweepA7 P4): read as
   // nobody, the list would be deleted with its room and nobody emailed; read as no launch, a second one could
   // start over one still sending. Either throws before anything is written.

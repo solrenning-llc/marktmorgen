@@ -11,11 +11,14 @@
  * The results stay exactly what they were: the counts, the launch's total and its send list, sorted.
  * Synthetic store; in-memory Redis; no network.
  */
-import { NextRequest, afterTasks } from "next/server";
+import { NextRequest } from "next/server";
+import { afterTasks } from "./next-server-after-world";
 import { MAX_EMAIL_LENGTH, SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { setSoon, waitlistViews } from "@/lib/waitlist";
+import { LAUNCH_PLACE_MOST_BYTES, WAITLIST_COUNT, WAITLIST_COUNT_CALLS, launchReadMostBytes, setSoon, waitlistViews } from "@/lib/waitlist";
+import { allowanceUsed, forceAllowance, giveAllowance } from "@/lib/store-allowance";
+import { allowanceFor } from "@/lib/store-allowance-rules";
 import { MAX_WAITLIST } from "@/lib/waitlist-rules";
 import { PAGE_INCLUDED_BYTES } from "@/lib/sent-bytes";
 import { POST as waitlistRoute } from "@/app/api/store/waitlist/route";
@@ -99,12 +102,35 @@ async function main(): Promise<void> {
   is("the view counts the confirmed and the waiting exactly", [off.answer.view?.confirmed, off.answer.view?.waiting], [MAX_WAITLIST / 2, MAX_WAITLIST / 2]);
   is(`read within ${PAGE_INCLUDED_BYTES} bytes (read ${off.bytes})`, off.bytes <= PAGE_INCLUDED_BYTES, true);
 
-  part("Launch: the send list holds every confirmed address, sorted, without the list leaving the database");
+  part("Launch without the studio requests its read takes: refused before anything is read or written");
   await setSoon(store, product.id, true);
-  const launched = await post({ action: "launch", note: "It is here.", address: "1 Main St, Springfield, IL 62701" });
+  const NOTE = { action: "launch", note: "It is here.", address: "1 Main St, Springfield, IL 62701" };
+  const fresh = async () => (await storeForEmail(owner))!;
+  const most = Math.ceil((await launchReadMostBytes(store, product.id)) / PAGE_INCLUDED_BYTES);
+  is("the worst list's launch takes studio requests for its read", most > 1, true);
+  // Leave the guard's own request and one fewer than the launch's read takes.
+  const limit = allowanceFor(await fresh(), "studio");
+  const spent = limit - (await allowanceUsed(await fresh(), "studio")) - 1 - (most - 1);
+  if (spent > 0) await forceAllowance(await fresh(), "studio", spent);
+  const short = await post(NOTE);
+  is("refused as the studio's requests used up, with the words that say so", [short.status, short.answer.error, typeof (short.answer as { message?: unknown }).message], [429, "studio_used", "string"]);
+  is("nothing read past the list's size", short.bytes <= PAGE_INCLUDED_BYTES, true);
+  is("still coming soon, no launch, no send list", [(await waitlistViews(store, [product.id]))[product.id]?.soon, (await waitlistViews(store, [product.id]))[product.id]?.launch, await real([["EXISTS", send]]).then((r) => r[0])], [true, null, 0]);
+  if (spent > 0) await giveAllowance(await fresh(), "studio", spent);
+
+  part("Launch: the send list holds every confirmed address, sorted, and its read is paid for");
+  const before = await allowanceUsed(await fresh(), "studio");
+  const launched = await post(NOTE);
+  const paid = (await allowanceUsed(await fresh(), "studio")) - before;
   is("launched, its total the confirmed places", [launched.status, launched.answer.ok, launched.answer.view?.launch?.total], [200, true, MAX_WAITLIST / 2]);
   is("the send list is every confirmed address, sorted", JSON.stringify(await real([["LRANGE", send, 0, -1]]).then((r) => r[0])), JSON.stringify(confirmed));
-  is(`read within ${PAGE_INCLUDED_BYTES} bytes (read ${launched.bytes})`, launched.bytes <= PAGE_INCLUDED_BYTES, true);
+  // The list read once, not twice (the view after it counts in the database), every byte past the request's own paid.
+  is(`the list is read once (read ${launched.bytes}, the list ${listBytes})`, launched.bytes < 1.1 * listBytes, true);
+  is(`every byte past the request's own is paid, one studio request each ${PAGE_INCLUDED_BYTES} (paid ${paid})`, (paid - 1) * PAGE_INCLUDED_BYTES >= launched.bytes - PAGE_INCLUDED_BYTES, true);
+  is(`the bound held before the read covers it: a place at most ${LAUNCH_PLACE_MOST_BYTES} bytes`, listBytes / MAX_WAITLIST <= LAUNCH_PLACE_MOST_BYTES, true);
+
+  part("The count is one script and the calls it is billed for");
+  is("WAITLIST_COUNT makes exactly WAITLIST_COUNT_CALLS redis.call", (WAITLIST_COUNT.match(/redis\.call\(/g) ?? []).length, WAITLIST_COUNT_CALLS);
 
   part("Control: the studio's own read of the views counts the same");
   const views = await waitlistViews(store, [product.id]);

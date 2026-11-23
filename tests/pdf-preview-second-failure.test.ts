@@ -87,6 +87,17 @@ async function main(): Promise<void> {
     is("which the studio's stamp notes show", (await stampProblems([bad.file])).get(bad.file.pathname), "unreadable");
     shift = 2 * 3_600_000;
     is("later requests read it no more: two parses in all", [await ask(bad.id), blobReads.get(bad.file.pathname)], [404, 2]);
+
+    // Claude 2 lpgvy's LEVE on #5360: the once-note outlives the hour, so a PDF asked again hours later is on its second
+    // failure, never a first again (else it would be parsed every few hours for 60 days).
+    part("Asked again three hours after its first failure: the second failure, unreadable");
+    shift = 0;
+    const late = await product("Late ebook", await encryptedPdf());
+    await ask(late.id);
+    shift = 3 * 3_600_000;
+    is("three hours on it fails again: noted unreadable for 60 days", [await ask(late.id), await note(late.file)], [404, "unreadable"]);
+    shift = 9 * 3_600_000;
+    is("and read no more: two parses in all", [await ask(late.id), blobReads.get(late.file.pathname)], [404, 2]);
   } finally {
     console.error = quiet;
     Date.now = realNow;

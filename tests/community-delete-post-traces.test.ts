@@ -86,6 +86,30 @@ async function main(): Promise<void> {
   part("The store's data room");
   is("every byte the two posts and what was done under them took is given back", await used(), before);
 
+  // Claude 1's LEVE on #5096 @02f334aef8 (7075976256): dropTraces gave room back for any positive SREM reply, so a reply
+  // larger than the refs sent (a reply of another shape) gave back more room than the deleted entries had taken. A
+  // count larger than the members asked is not proof of what left (rule 24, countWithin): no room for it.
+  part("An SREM reply larger than the entries sent gives back no more room than they took");
+  {
+    // A post that stays, with a few comments, so the room used is well above zero and an over-return shows.
+    const stays = await createPost(cid, { space: general, author: dan, title: "", text: "Stays", img: null, kind: "post", poll: null }, club);
+    if (!stays.ok) throw new Error("no post");
+    for (const text of ["a", "b", "c", "d", "e", "f"]) if (!(await addComment(cid, stays.post.id, { parent: "", author: cleo, text }, club)).ok) throw new Error("no comment");
+    const atStart = await used();
+    const odd = await createPost(cid, { space: general, author: ana, title: "", text: "Odd reply", img: null, kind: "post", poll: null }, club);
+    if (!odd.ok) throw new Error("no post");
+    const said = await addComment(cid, odd.post.id, { parent: "", author: ben, text: "One" }, club);
+    if (!said.ok) throw new Error("no comment");
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (batch: (string | number)[][]) => {
+      const answers = await real(batch);
+      return batch.map((c, i) => (c[0] === "SREM" && String(c[1]) === traceKey(cid, ben) ? 999 : answers[i]));
+    }) as typeof redis.pipeline;
+    await deletePost(cid, odd.post, club);
+    redis.pipeline = real;
+    is("the room used is never below what it was before the post (nothing given back twice)", (await used()) >= atStart, true);
+  }
+
   part("A comment that does not read never keeps a post from being deleted");
   {
     const kept = await createPost(cid, { space: general, author: ana, title: "", text: "Something to take down", img: null, kind: "post", poll: null }, club);

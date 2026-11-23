@@ -46,7 +46,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, countWithin, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataOwner, ORDER_WRITE, fieldReleaseBytes, orderScriptWith, orderWrite, releaseOrderData } from "@/lib/order-data";
 import { HASH_DEL_IF } from "@/lib/redis-take";
 import { UnknownReply, exactReplies, replyCount } from "@/lib/redis-exact";
@@ -1848,8 +1848,14 @@ async function dropTraces(id: string, entries: [string, string][]): Promise<numb
   const members = [...byMember];
   let left = 0;
   for (let i = 0; i < members.length; i += TRACE_BATCH) {
-    const gone = await redisPipeline(members.slice(i, i + TRACE_BATCH).map(([who, refs]) => ["SREM", traceKey(id, who), ...refs]));
-    for (const one of gone) if (Number.isSafeInteger(Number(one)) && Number(one) > 0) left += Number(one);
+    const commands = members.slice(i, i + TRACE_BATCH).map(([who, refs]): (string | number)[] => ["SREM", traceKey(id, who), ...refs]);
+    const gone = await redisPipeline(commands);
+    // Only a count the SREM sent could give (at most its distinct refs) proves what left; any other reply gives no room
+    // back, so room is never returned for more than the entries took (Claude 1 on #5096; rule 24, countWithin).
+    gone.forEach((one, j) => {
+      const count = countWithin(one, commands[j]);
+      if (count) left += count;
+    });
   }
   return left;
 }

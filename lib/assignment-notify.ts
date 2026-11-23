@@ -13,7 +13,8 @@ import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { courseSender } from "@/lib/learn";
 import { tellCreatorNow } from "@/lib/assignment";
 import type { Submission } from "@/lib/assignment-rules";
-import type { Listing, Store } from "@/lib/store";
+import { storeForHandleExact, storeRef, type Listing, type Store } from "@/lib/store";
+import { isSuppressed } from "@/lib/suppression";
 import { SITE_URL } from "@/lib/site-url";
 import { coursesWords } from "@/lib/buyer-words/courses";
 
@@ -44,6 +45,20 @@ export async function tellCreatorOfWork(input: { store: Store; product: Listing;
   });
 }
 
+/**
+ * Whether the student can still be emailed about this review, read just before the send (#5010 row 98): the review is
+ * saved and the course's end noted first, and the student's erasure can pass in that wait. The store is read again by
+ * its handle, so a list id the erasure itself made for a store with none (lib/person-erasure.ts erasureScope) is seen;
+ * the erasure writes the student's deletion print before it deletes anything, so a print found means the student is
+ * gone. A store no longer behind its handle, or another store there now, sends nothing. An answer that cannot be read
+ * throws (rule 24), and nothing is sent.
+ */
+async function studentStillThere(store: Store, to: string): Promise<boolean> {
+  const now = await storeForHandleExact(store.handle);
+  if (!now || storeRef(now) !== storeRef(store)) return false;
+  return !(await isSuppressed(now.listId, to));
+}
+
 /** Emails the student what the creator made of their work. Returns whether an email went. */
 export async function tellStudentOfReview(input: {
   store: Store;
@@ -56,6 +71,7 @@ export async function tellStudentOfReview(input: {
 }): Promise<boolean> {
   const { store, product, lessonId, lessonTitle, to, submission, origin } = input;
   if (submission.state === "waiting") return false;
+  if (!(await studentStillThere(store, to))) return false;
   const w = coursesWords(store.language);
   const link = `${origin}/@${store.handle}/course/${product.id}/${lessonId}#task`;
   const lead = submission.state === "approved" ? w.taskMailApproved(store.name, lessonTitle, product.title) : w.taskMailAgain(store.name, lessonTitle, product.title);

@@ -12,6 +12,8 @@ import { test } from "node:test";
 import { forgetCommunityPerson } from "@/lib/community-erasure";
 import { ERASED_MARK } from "@/lib/erasure-lists";
 import { MAX_SENDS_UNDER_WAY } from "@/lib/community-text";
+import { forgetAnnouncementRecipient } from "@/lib/community-mail";
+import { ERASE_ANNOUNCEMENT_LISTS } from "@/lib/erasure-rules";
 import { store as redis } from "./redis-stub";
 
 type Command = (string | number)[];
@@ -100,4 +102,28 @@ test("a member of the sends that is not a send's id is let go and never blocks t
   const [left, odd] = await call([["LRANGE", recipients(job), 0, -1], ["SISMEMBER", sends(community), "not-a-send-id"]]);
   assert.deepEqual(left, [ERASED_MARK, next]);
   assert.equal(odd, 0);
+});
+
+test("the commands sent stay inside ERASE_ANNOUNCEMENT_LISTS at its worst: the cap of live sends and as many stale places (Claude 3 on #5072, MEDIO)", async () => {
+  redis.clear();
+  const send = (id: string) => JSON.stringify({ id, community, handle: "fictional", post: "f".repeat(12), subject: "Synthetic", body: "Synthetic", total: 1, done: 0, sent: 0, status: "sending", note: "", failures: 0 });
+  // MAX_SENDS_UNDER_WAY live sends, each listing the person, and as many stale places (no record, no held mark) whose
+  // recipient lists were left: the most ids an erasure reads, with the most it then sends.
+  const live = Array.from({ length: MAX_SENDS_UNDER_WAY }, (_, i) => i.toString(16).padStart(24, "a"));
+  const stale = Array.from({ length: MAX_SENDS_UNDER_WAY }, (_, i) => i.toString(16).padStart(24, "d"));
+  await call([
+    ["SADD", sends(community), ...live, ...stale],
+    ...live.map((id): Command => ["SET", `nl:cm:mail:${id}`, send(id)]),
+    ...[...live, ...stale].map((id): Command => ["RPUSH", recipients(id), who]),
+  ]);
+  let sent = 0;
+  await answering((c) => {
+    // As Upstash bills them: each command, and inside the script an LRANGE and an LSET for each list it walks.
+    for (const command of c) sent += 1 + (command[0] === "EVAL" ? 2 * Number(command[2]) : 0);
+    return undefined;
+  }, () => forgetAnnouncementRecipient(community, who));
+  const [first, staleLeft] = await call([["LRANGE", recipients(live[0]), 0, -1], ["EXISTS", recipients(stale[0])]]);
+  assert.deepEqual(first, [ERASED_MARK], "(setup) the live sends were walked");
+  assert.equal(staleLeft, 0, "(setup) the stale places' lists were let go");
+  assert.ok(sent <= ERASE_ANNOUNCEMENT_LISTS[0], `sent ${sent} commands, counted ${ERASE_ANNOUNCEMENT_LISTS[0]}`);
 });

@@ -50,12 +50,13 @@ async function main(): Promise<void> {
   const certId = "abcdefgh12345678";
   redis.run(["SET", `nl:cert:${certId}`, JSON.stringify({ id: certId, name: "Ana", title: "Start", store: "harbor", productId: "p1", courseId: course.id, issuedAt: 1_760_000_600, withdrawnAt: 0 })]);
   redis.run(["SADD", `nl:course:${course.id}:certs:all`, certId]);
+  redis.run(["ZADD", `nl:course:${course.id}:certs:at`, 1_760_000_600, certId]);
 
   part("Read whole: the lists as kept, and Redis's own empty answer is none");
   is("the student is listed, with one lesson done", (await studentsOf(course))?.students.map((s) => [s.email, s.done]), [[student, 1]]);
   is("a course nobody opened: an empty list", await studentsOf(emptyCourse), { total: 0, students: [] });
   is("the certificate is listed", (await certificatesFor(course.id))?.list.map((c) => c.id), [certId]);
-  is("a course with no certificate: an empty list", await certificatesFor(emptyCourse.id), { list: [], total: 0 });
+  is("a course with no certificate: an empty list", await certificatesFor(emptyCourse.id), { list: [], total: 0, standing: 0, unlisted: 0, more: false });
 
   part("Students: an unknown reply is unknown (null), never none");
   for (const [name, answer] of [
@@ -76,9 +77,10 @@ async function main(): Promise<void> {
 
   part("Certificates: an unknown reply is unknown (null), never none");
   for (const [name, answer] of [
-    ["the ids answered as a number", replace("SMEMBERS", 7)],
-    ["a certificate answered as a number", replace("GET", 3)],
-    ["no reply to the certificates' read", ((commands, real) => (String(commands[0][0]) === "GET" ? [] : real)) as Answer],
+    ["the count answered as text", replace("SCARD", "1")],
+    ["the ids answered as a number", replace("ZREVRANGE", 7)],
+    ["a certificate answered as a number", replace("MGET", [3])],
+    ["no reply to the certificates' read", ((commands, real) => (String(commands[0][0]) === "MGET" ? [] : real)) as Answer],
   ] as [string, Answer][]) {
     shape = answer;
     is(`${name}: null`, await safely(() => certificatesFor(course.id)), null);
@@ -86,14 +88,16 @@ async function main(): Promise<void> {
   }
   redis.run(["SET", "nl:cert:zzzzzzzz00000000", "{not json"]);
   redis.run(["SADD", `nl:course:${course.id}:certs:all`, "zzzzzzzz00000000"]);
+  redis.run(["ZADD", `nl:course:${course.id}:certs:at`, 1_760_000_700, "zzzzzzzz00000000"]);
   is("a malformed certificate is skipped, as before; the rest still listed", (await certificatesFor(course.id))?.list.map((c) => c.id), [certId]);
   redis.run(["SADD", `nl:course:${course.id}:certs:all`, "0000000000000000"]);
+  redis.run(["ZADD", `nl:course:${course.id}:certs:at`, 1_760_000_800, "0000000000000000"]);
   is("a certificate that is gone (nil) is skipped", (await certificatesFor(course.id))?.list.map((c) => c.id), [certId]);
 
   part("The pages say the list could not be read, instead of the empty state");
   const page = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
   is("the course page keeps an unknown read of the students apart", page.includes("const studentsRead = await studentsOf(course, 500).catch(() => null);"), true);
-  is("and of the certificates", page.includes("const certificates = await certificatesFor(course.id).catch(() => null);"), true);
+  is("and of the certificates", page.includes("const certificates = await certificatesFor(course.id, { room: store, page: certsPage }).catch(() => null);"), true);
   is(
     "students unread: a status note, not the empty state or the counts",
     page.includes('{studentsRead === null ? (\n            <p role="status" className="notice mt-5">\n              The students could not be read just now. Reload this page in a moment; this does not mean nobody has opened the course.\n            </p>\n          ) : students.length === 0 ? ('),

@@ -116,8 +116,10 @@ export default async function StudioCoursePage({
   const selling = canSellProduct(store, product);
   const quizLessons = lessonsInOrder(course).filter(({ lesson }) => lesson.quiz).map(({ lesson }) => lesson.id);
   const passed = quizLessons.length ? await passedFor(course.id, students.map((s) => emailKey(s.email))) : [];
-  const certificates = await certificatesFor(course.id).catch(() => null);
-  const standing = certificates ? certificates.list.filter((c) => !c.withdrawnAt).length : null;
+  // One page of the course's certificates, newest first (#4304): a draw reads a bounded page whatever the course holds.
+  const certsPage = typeof query.certs === "string" && /^[0-9]{1,4}$/.test(query.certs) ? Number(query.certs) : 0;
+  const certificates = await certificatesFor(course.id, { room: store, page: certsPage }).catch(() => null);
+  const standing = certificates ? certificates.standing : null;
   // The newest comments under the lessons, marked new since this page last showed them. Null when they could not be
   // read (rule 24): the page says so instead of "No comments yet", and what it did not show is not marked seen.
   const [talking, recent] = await Promise.all([commentsOn(course.id).catch(() => null), recentComments(course.id, 50).catch(() => null)]);
@@ -330,7 +332,7 @@ export default async function StudioCoursePage({
             ) : null}
           </div>
 
-          <h3 className="mt-7 font-semibold text-ink">{standing === null ? "Completions" : `Completions \u00b7 ${standing} ${standing === 1 ? "certificate" : "certificates"} issued`}</h3>
+          <h3 id="certificates" className="mt-7 scroll-mt-24 font-semibold text-ink">{standing === null ? "Completions" : `Completions \u00b7 ${standing} ${standing === 1 ? "certificate" : "certificates"} issued`}</h3>
           {certificates === null ? (
             <p role="status" className="notice mt-3">
               The certificates could not be read just now. Reload this page in a moment; this does not mean none were issued.
@@ -383,6 +385,25 @@ export default async function StudioCoursePage({
                 </tbody>
               </table>
             </div>
+            {certificates.unlisted > 0 ? (
+              <p className="mt-3 text-sm text-ink-soft" role="status">
+                {`${certificates.unlisted} older ${certificates.unlisted === 1 ? "certificate is" : "certificates are"} not in this list yet. They are added a few at a time each time this page opens.`}
+              </p>
+            ) : null}
+            {certsPage > 0 || certificates.more ? (
+              <nav aria-label="Pages of certificates" className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
+                {certsPage > 0 ? (
+                  <Link href={`${studioPath(store, certsPage > 1 ? `certs=${certsPage - 1}` : "", `course/${product.id}`)}#certificates`} className="inline-flex min-h-11 items-center font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep">
+                    Newer certificates
+                  </Link>
+                ) : null}
+                {certificates.more ? (
+                  <Link href={`${studioPath(store, `certs=${certsPage + 1}`, `course/${product.id}`)}#certificates`} className="inline-flex min-h-11 items-center font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep">
+                    Older certificates
+                  </Link>
+                ) : null}
+              </nav>
+            ) : null}
             </>
           )}
         </section>

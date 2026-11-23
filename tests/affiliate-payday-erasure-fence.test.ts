@@ -115,7 +115,7 @@ async function main(): Promise<void> {
   part("An erasure that ends while the email is sent: the keep never writes the month back");
   const late = await seed("payday-late@example.com", "paydaylate");
   duringEmail = async () => {
-    await beginErasure(late);
+    await beginErasure(late, true);
     // The closing walk deletes the store's family, the month's claim among them.
     await redis.pipeline([["DEL", claimKey(late.statsId)]]);
   };

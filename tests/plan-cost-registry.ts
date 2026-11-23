@@ -3269,7 +3269,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/metered-limits.ts", names: ["withinService", "withinServiceWhy"] },
       { file: "app/api/store/affiliates/paypal/route.ts", names: ['withinServiceWhy("paypal-pay", store.handle, 6, 3600, store, paypalPressUnits(sizes))', "bookSizes(store)", "maxDuration = 60"] },
       { file: "lib/paypal-payouts.ts", names: ["payWithPayPal", "holdLock(lock)", "withLock(`nl:pp:${statsId}:lock`, 120, 5_000", "readBook(store, undefined, { titles: false })", "paypalPressUnits", "PAYPAL_PRESS_BASE_UNITS", "PAYPAL_PRESS_UNIT_COMMANDS"] },
-      { file: "lib/affiliate-payday.ts", names: ["claimMonth", "if (!(await keepMonth(store.statsId, month))) throw", "payWithPayPal(store)"] },
+      { file: "lib/affiliate-payday.ts", names: ["claimMonth", "const kept = await keepMonth(fenced, month);", 'if (kept !== "kept") throw', "payWithPayPal(store)"] },
     ],
     basis: "Every call of the window, held at 2 GB for ten seconds while the other service answers; what the service charges is nothing to us, and AI captions are bought apart. A press of \"Pay with PayPal\" costs more than a call (its own commands with both lock EVALs, its whole book read with no product read for its title, up to sixty seconds), so it takes PAYPAL_PRESS_BASE_UNITS and one more for each PAYPAL_PRESS_UNIT_COMMANDS of its book read at the program's size, counted first, which cover it at every size; payday's auto-pay, one a month, takes no unit and is added once at its most (PAYPAL_PRESS). The bytes the press's book read moves are the open question every reader of the whole book shares, not priced here and never zero.",
   },

@@ -20,7 +20,7 @@
  * taken and does nothing.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { claimMark } from "@/lib/claim-mark";
+import { claimWhileStoreLive, setWhileStoreLive } from "@/lib/store-live-cache";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
@@ -67,35 +67,42 @@ function monthOf(now: Date): string {
  * exactly (lib/claim-mark.ts, CX-123 rule 24): a claim answered in another
  * shape and not read back as ours is never ours, and throws, so the store is
  * counted as failed and nobody is written to or paid on it.
+ * Taken only while the store is live and not erasing (claimWhileStoreLive, Codex L-20261119-1144): the claim comes
+ * after the slow book and PayPal reads on an old Store, and the key is of the store's own family, so a run racing the
+ * erasure never writes it back. False then too: nothing is sent and nobody is paid on an erased store.
  */
-async function claimMonth(statsId: string, month: string): Promise<boolean> {
-  const got = await claimMark(`nl:aff:payday:${statsId}:${month}`, HOLD_SECONDS);
+async function claimMonth(store: Store & { statsId: string }, month: string): Promise<boolean> {
+  const got = await claimWhileStoreLive(store, `nl:aff:payday:${store.statsId}:${month}`, HOLD_SECONDS);
   if (got === "unknown") throw new UnknownReplyError("a store's payday claim");
   return got === "ours";
 }
 
 /**
  * Makes the month's claim the month's own, once its email went or may have, or before a press (payday). The EXPIRE
- * is tried twice; when neither is confirmed, the mark is written again for the month (SET ... EX), so a hold that ran
- * out meanwhile is put back too. True once Redis confirms one of them. A failure of all three is said: then, and only
- * then, the hold runs out and a later run that month may write again (Claude 4 on #4667).
+ * is tried twice; when neither is confirmed, the mark is written again for the month, so a hold that ran out
+ * meanwhile is put back too. "kept" once Redis confirms one of them. A failure of all three is said ("unknown"): then,
+ * and only then, the hold runs out and a later run that month may write again (Claude 4 on #4667).
+ * The write again is made only while the store is live and not erasing (setWhileStoreLive, Codex L-20261119-1144): an
+ * EXPIRE that finds nothing may be an erasure that deleted the claim with the rest of the store's family, and a plain
+ * SET would write it back. "gone" then, with nothing written.
  */
-async function keepMonth(statsId: string, month: string): Promise<boolean> {
-  const key = `nl:aff:payday:${statsId}:${month}`;
+async function keepMonth(store: Store & { statsId: string }, month: string): Promise<"kept" | "gone" | "unknown"> {
+  const key = `nl:aff:payday:${store.statsId}:${month}`;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      if (repliesFor(await redisPipeline([["EXPIRE", key, CLAIM_SECONDS]]), 1)?.[0] === 1) return true;
+      if (repliesFor(await redisPipeline([["EXPIRE", key, CLAIM_SECONDS]]), 1)?.[0] === 1) return "kept";
     } catch {
       // Tried again below.
     }
   }
+  let written: "kept" | "gone" | "unknown" = "unknown";
   try {
-    if (repliesFor(await redisPipeline([["SET", key, "kept", "EX", CLAIM_SECONDS]]), 1)?.[0] === "OK") return true;
+    written = await setWhileStoreLive(store, key, "kept", CLAIM_SECONDS);
   } catch {
     // Said below.
   }
-  console.error("a store's payday claim could not be kept for the month");
-  return false;
+  if (written === "unknown") console.error("a store's payday claim could not be kept for the month");
+  return written;
 }
 
 /**
@@ -104,7 +111,7 @@ async function keepMonth(statsId: string, month: string): Promise<boolean> {
  */
 async function sendAndKeep(store: Store & { statsId: string }, month: string, message: Parameters<typeof sendEmailOutcome>[0]): Promise<boolean> {
   const outcome = await sendEmailOutcome(message);
-  if (outcome !== "refused") await keepMonth(store.statsId, month);
+  if (outcome !== "refused") await keepMonth(store, month);
   return outcome === "sent";
 }
 
@@ -348,7 +355,8 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
   }
   // Claimed last, so that whichever run gets here first is the only one that
   // sends. A second run reads the same book and stops here.
-  if (!(await claimMonth(store.statsId, month))) return false;
+  const fenced = { ...store, statsId: store.statsId };
+  if (!(await claimMonth(fenced, month))) return false;
   // Paying by itself, from the creator's own PayPal (lib/paypal-payouts.ts):
   // the email then says what was sent, or why it could not be.
   // Paid by itself only on a book read whole: refunds and disputes, and every membership and plan payment (audit A1),
@@ -360,7 +368,10 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
     // a run stopped mid-press never lets a later run this month press again. Not confirmed kept, nothing is pressed;
     // the hold runs out and a later run tries again. Whoever a press did not pay stays owed: in the next payday's
     // batch and on the studio's own press, never dropped.
-    if (!(await keepMonth(store.statsId, month))) throw new UnknownReplyError("a store's payday month, kept before its auto-pay");
+    // An erasure that began after the claim: nobody is paid and nothing is sent on the erased store.
+    const kept = await keepMonth(fenced, month);
+    if (kept === "gone") return false;
+    if (kept !== "kept") throw new UnknownReplyError("a store's payday month, kept before its auto-pay");
     const paid = await payWithPayPal(store);
     const { subject, text } = autoPayEmail(paid, book.currency, paypalLeftOut(book, away));
     const outcome = await sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject, text, idempotencyKey: `aff-payday-${store.statsId}-${month}` });

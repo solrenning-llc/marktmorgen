@@ -18,6 +18,7 @@ import { oneAddress, sendEmail, sendQueuedShipmentMail } from "@/lib/email";
 import { CURRENT_SHIPMENT_MAIL_POLICY, enqueueShipmentMail, runShipmentMail, shipmentMailId, shipmentMailPolicy, shipmentMailStatus, type ShipmentMailRuntime, type ShipmentMailView } from "@/lib/shipment-mail-outbox";
 import { fromCreator } from "@/lib/purchase-email";
 import { saleHandles, type Store } from "@/lib/store";
+import { claimOnceWhileStoreLive } from "@/lib/store-live-cache";
 import { isSettled } from "@/lib/instant-pay";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { speech } from "@/lib/buyer-words";
@@ -76,19 +77,30 @@ function shipmentMessage(store: Store, row: Record<string, unknown>, tracking: s
   return { from: fromCreator(store), to: email, subject: sw.shippedSubject(title).slice(0, 200), text, replyTo: store.email };
 }
 
+/**
+ * The done-mark, taken once (SET NX EX, KEEP_SECONDS) only while the store is still live, in the same step as the
+ * write (#5258, #5010 row 127, Codex X4-20261119-2249): the store was read by the route and the order from Stripe
+ * before this, and a request held up meanwhile must not write the tracking back, nor go on to email the buyer, after the
+ * store's erasure began or ended (lib/store-live-cache.ts claimOnceWhileStoreLive, the rule of lib/live-fence.ts). "ours" only on the script's
+ * exact 1; "gone" (erasing, erased, its id key now another ref's, or a store from before ids replaced) and "unknown"
+ * (no statsId on a store from before ids, a record that does not parse, a lost or malformed answer) write nothing
+ * known and authorize nothing. Billed as the EVAL and at most its HGET, GET and SET (SHIPMENT_MARK_COMMANDS).
+ */
+const takeMark = (store: Store, session: string, shipped: Shipped) =>
+  claimOnceWhileStoreLive(store, doneKey(session), KEEP_SECONDS, JSON.stringify(shipped));
+/** The commands one done-mark is billed at the most: the EVAL and its HGET, GET and SET (was one plain SET). */
+export const SHIPMENT_MARK_COMMANDS = 4;
+
 /** The pre-existing one-shot path only. This is not a durable email source. */
 async function markNeverActivated(store: Store, session: string, row: Record<string, unknown>, shipped: Shipped): Promise<MarkResult> {
-  let receipt: unknown;
-  try { receipt = await redisPipeline([["SET", doneKey(session), JSON.stringify(shipped), "NX", "EX", KEEP_SECONDS]]); }
-  catch { return { ok: false, reason: "unknown" }; }
-  if (!Array.isArray(receipt) || receipt.length !== 1) return { ok: false, reason: "unknown" };
-  if (receipt[0] === null) {
+  const taken = await takeMark(store, session, shipped);
+  if (taken === "taken") {
     try {
       const kept = (await readShipped([session])).get(session);
       return kept ? { ok: true, shipped: kept, emailed: false, mail: { state: "not_recorded", delayed: false } } : { ok: false, reason: "unknown" };
     } catch { return { ok: false, reason: "unknown" }; }
   }
-  if (receipt[0] !== "OK") return { ok: false, reason: "unknown" };
+  if (taken !== "ours") return { ok: false, reason: "unknown" };
   const email = (row.customer_details as { email?: unknown } | null | undefined)?.email;
   if (typeof email !== "string" || !oneAddress(email)) return { ok: true, shipped, emailed: false, mail: { state: "not_recorded", delayed: false } };
   const emailed = await sendEmail({ meter: { by: "order", store }, ...shipmentMessage(store, row, shipped.tracking, email), idempotencyKey: `nimbus-shipped:${session}` }).catch(() => false);
@@ -96,12 +108,9 @@ async function markNeverActivated(store: Store, session: string, row: Record<str
 }
 
 /** A known mail refusal must not prevent recording physical fulfillment. */
-async function markWithoutQueuedMail(session: string, shipped: Shipped): Promise<MarkResult> {
-  let receipt: unknown;
-  try { receipt = await redisPipeline([["SET", doneKey(session), JSON.stringify(shipped), "NX", "EX", KEEP_SECONDS]]); }
-  catch { return { ok: false, reason: "unknown" }; }
-  if (!Array.isArray(receipt) || receipt.length !== 1) return { ok: false, reason: "unknown" };
-  if (receipt[0] === null) {
+async function markWithoutQueuedMail(store: Store, session: string, shipped: Shipped): Promise<MarkResult> {
+  const taken = await takeMark(store, session, shipped);
+  if (taken === "taken") {
     try {
       const kept = (await readShipped([session])).get(session);
       // This caller did not win the immutable mark and has no new evidence
@@ -109,7 +118,7 @@ async function markWithoutQueuedMail(session: string, shipped: Shipped): Promise
       return kept ? { ok: true, shipped: kept, emailed: false } : { ok: false, reason: "unknown" };
     } catch { return { ok: false, reason: "unknown" }; }
   }
-  return receipt[0] === "OK"
+  return taken === "ours"
     ? { ok: true, shipped, emailed: false, mail: { state: "not_recorded", delayed: false } }
     : { ok: false, reason: "unknown" };
 }
@@ -141,9 +150,9 @@ export async function markShipped(store: Store, session: string, rawTracking: un
   } catch { return { ok: false, reason: "unknown" }; }
   if (lifecycle !== "active" || !shipmentMailPolicy(runtime.policy === undefined ? CURRENT_SHIPMENT_MAIL_POLICY : runtime.policy, (runtime.now ?? Date.now)())) return { ok: false, reason: "mail_unavailable" };
   const email = (row.customer_details as { email?: unknown } | null | undefined)?.email;
-  if (typeof email !== "string" || !oneAddress(email)) return markWithoutQueuedMail(session, shipped);
+  if (typeof email !== "string" || !oneAddress(email)) return markWithoutQueuedMail(store, session, shipped);
   const queued = await enqueueShipmentMail({ statsId: store.statsId, session, authorizedAt, shipped, message: shipmentMessage(store, row, tracking, email) }, runtime);
-  if (!queued.ok) return queued.reason === "full" ? markWithoutQueuedMail(session, shipped) : { ok: false, reason: "unknown" };
+  if (!queued.ok) return queued.reason === "full" ? markWithoutQueuedMail(store, session, shipped) : { ok: false, reason: "unknown" };
   // A simultaneous creator may have won with different tracking. Return the
   // actual immutable shipment, never this losing caller's proposed values.
   let kept: Shipped | undefined;

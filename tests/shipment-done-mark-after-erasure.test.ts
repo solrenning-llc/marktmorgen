@@ -15,7 +15,8 @@
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { POST as shippedRoute } from "@/app/api/store/shipped/route";
-import { doneKey, markShipped } from "@/lib/shipments";
+import { SHIPMENT_MARK_COMMANDS, doneKey, markShipped } from "@/lib/shipments";
+import { TAKE_SCRIPTS } from "@/lib/redis-memory-take";
 import { ERASING_KEY, claimHandle, ensureStatsId, ensureStoreId, erasingField, ownerKey, setStripeAccount, setSubscription, storeForEmail, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { LOCKED_UNTIL_STAR_COMMANDS, TAKE_COMMANDS } from "./plan-cost-registry";
@@ -76,7 +77,10 @@ async function interleave(store: Store, state: State): Promise<void> {
   if (state === "unparsable") redis.run(["SET", owner, "not json"]);
 }
 
-const PATHS = ["legacy-mail", "legacy-no-mail", "active-no-recipient"] as const;
+// The never-activated one-shot path with and without a usable address (markNeverActivated), and the active path's
+// two calls of markWithoutQueuedMail: no usable address, and a full mail pool (the outbox answers "full").
+const PATHS = ["legacy-mail", "legacy-no-mail", "active-no-recipient", "active-full"] as const;
+const fullPool = async (commands: Command[]) => commands.map((c) => (c[0] === "EVAL" ? ["full"] : null));
 
 async function main(): Promise<void> {
   const real = redis.pipeline.bind(redis);
@@ -96,7 +100,7 @@ async function main(): Promise<void> {
           row = {
             id: session, status: "complete", payment_status: "paid",
             metadata: { store: store.handle, ship: "yes", title: "Fictional Lamp" },
-            customer_details: { email: path === "legacy-mail" ? "buyer@example.test" : "not an address" },
+            customer_details: { email: path === "legacy-mail" || path === "active-full" ? "buyer@example.test" : "not an address" },
           };
           let held = false;
           redis.pipeline = (async (commands: Command[]) => {
@@ -109,7 +113,7 @@ async function main(): Promise<void> {
           const before = sender.sent.length;
           const runtime = path === "active-no-recipient"
             ? { lifecycle: "active" as const, policy: shipmentPolicy(), pipeline: shipmentOutboxFixture().pipeline }
-            : {};
+            : path === "active-full" ? { lifecycle: "active" as const, policy: shipmentPolicy(), pipeline: fullPool } : {};
           let result: Awaited<ReturnType<typeof markShipped>>;
           try {
             result = await markShipped(store, session, "https://example.test/track/synthetic-parcel", undefined, runtime);
@@ -117,7 +121,8 @@ async function main(): Promise<void> {
             redis.pipeline = real;
           }
           const kept = redis.run(["GET", doneKey(session)]);
-          is("the request was held right before the mark's write", held, true);
+          if (state === "no-statsid") is("with no statsId to tell the store by, no write of the mark is even sent", held, false);
+          else is("the request was held right before the mark's write", held, true);
           if (allowed(state)) {
             is("a live store marks the order shipped", [result.ok, result.ok && result.shipped.tracking], [true, "https://example.test/track/synthetic-parcel"]);
             is("its mark and tracking are kept, for 400 days", [kept !== null, Number(redis.run(["TTL", doneKey(session)]))], [true, 400 * 86_400]);
@@ -187,9 +192,12 @@ async function main(): Promise<void> {
         row = { id: session, status: "complete", payment_status: "paid", metadata: { store: store.handle, ship: "yes" }, customer_details: { email } };
         const cookie = await openSession(OWNER);
         const sent: Command[] = [];
+        let bytes = 0;
         redis.pipeline = (async (commands: Command[]) => {
           sent.push(...commands);
-          return real(commands);
+          const replies = await real(commands);
+          bytes += Buffer.byteLength(JSON.stringify(commands)) + Buffer.byteLength(JSON.stringify(replies) ?? "");
+          return replies;
         }) as typeof redis.pipeline;
         let status = 0;
         let body: Record<string, unknown> = {};
@@ -209,7 +217,9 @@ async function main(): Promise<void> {
         const billed = sent.reduce((sum, c) => sum + (c[0] === "EVAL" ? 1 + (String(c[1]).match(/redis\.call\(/g) ?? []).length : 1), 0);
         const measured = billed + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS;
         const marks = sent.filter((c) => (c[0] === "EVAL" && c.slice(3).includes(doneKey(session))) || (c[0] === "SET" && c[1] === doneKey(session)));
-        console.log("SHIPMENT_ROUTE", label, JSON.stringify({ status, billed, measured, envelope, mark: marks.map((c) => c[0]) }));
+        console.log("SHIPMENT_ROUTE", label, JSON.stringify({ status, billed, measured, envelope, bytes, mark: marks.map((c) => c[0]) }));
+        // UNIT_COST.studio's fifty kilobytes through the database (tests/plan-cost-registry.ts).
+        is(`${label}: its bytes through the database (${bytes}) stay within the studio unit's 50,000`, bytes <= 50_000, true);
         return { status, body, measured, marks };
       };
       await shop(true);
@@ -222,7 +232,15 @@ async function main(): Promise<void> {
       const noMail = await measure("cs_test_shipereaseroute0002", "not an address", "first-no-recipient");
       is("an order with no usable address is marked without an email (200)", [noMail.status, noMail.body.ok, noMail.body.emailed], [200, true, false]);
       is(`its billed commands, padded (${noMail.measured}), stay within the studio unit's ${envelope}`, noMail.measured <= envelope, true);
-    } finally {
+      // The mark's own EVAL, replayed on lib/redis-memory.ts's twin of the script with every inner call counted (the
+      // mark is held now, so the replay takes the longest branch and writes nothing): the EVAL and its HGET, GET, SET.
+      const mark = first.marks.find((c) => c[0] === "EVAL")!;
+      const count = Number(mark[2]);
+      const args = mark.slice(3).map(String);
+      let inner = 0;
+      const replay = TAKE_SCRIPTS[/^-- marktmorgen:([a-z-]+:v\d+)\n/.exec(String(mark[1]))?.[1] ?? ""];
+      const answer = replay?.((c) => { inner += 1; return redis.run(c); }, args.slice(0, count), args.slice(count));
+      is("the mark's EVAL is the store's claim fence, billed as SHIPMENT_MARK_COMMANDS (EVAL + HGET + GET + SET)", [answer, 1 + inner, SHIPMENT_MARK_COMMANDS], [0, 4, 4]);    } finally {
       redis.pipeline = real;
     }
   }

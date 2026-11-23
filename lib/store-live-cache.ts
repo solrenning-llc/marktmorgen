@@ -68,6 +68,16 @@ if ARGV[3] == "" then taken = redis.call("SET", KEYS[3], ARGV[2], "NX") else tak
 if taken then return 1 end
 return 0`;
 
+/** The one EVAL of CLAIM_IF_STORE_LIVE for `store`, or null for a store from before ids with no statsId (unknown). */
+async function claimCommand(store: Pick<Store, "email" | "sid" | "extra" | "statsId">, key: string, seconds: number | null, value: string): Promise<(string | number)[] | null> {
+  const ref = storeRef(store);
+  const withId = STORE_ID_PATTERN.test(store.sid);
+  const statsId = store.statsId ?? "";
+  if (!withId && !statsId) return null;
+  const live = withId ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  return ["EVAL", CLAIM_IF_STORE_LIVE, 3, live, ERASING_KEY, key, await erasingField(ref), value, seconds ?? "", withId ? "" : statsId, ref];
+}
+
 /**
  * Takes `key` for `seconds` with a value of its own, as claimMark does, but only while `store` is live: "ours" when it
  * was taken now; "taken" when someone holds it already; "gone" when the store's erasure has begun or its record is gone
@@ -77,15 +87,10 @@ return 0`;
  */
 export async function claimWhileStoreLive(store: Pick<Store, "email" | "sid" | "extra" | "statsId">, key: string, seconds: number | null, value = claimValue()): Promise<"ours" | "taken" | "gone" | "unknown"> {
   if (!isRedisConfigured()) return "unknown";
-  const ref = storeRef(store);
-  const withId = STORE_ID_PATTERN.test(store.sid);
-  const statsId = store.statsId ?? "";
-  if (!withId && !statsId) return "unknown";
-  const live = withId ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  const command = await claimCommand(store, key, seconds, value);
+  if (!command) return "unknown";
   try {
-    const answer = repliesFor(await redisPipeline([
-      ["EVAL", CLAIM_IF_STORE_LIVE, 3, live, ERASING_KEY, key, await erasingField(ref), value, seconds ?? "", withId ? "" : statsId, ref],
-    ]), 1)?.[0];
+    const answer = repliesFor(await redisPipeline([command]), 1)?.[0];
     if (answer === 1) return "ours";
     if (answer === 0) return "taken";
     if (answer === -1) return "gone";
@@ -101,4 +106,24 @@ export async function claimWhileStoreLive(store: Pick<Store, "email" | "sid" | "
     // Unknown below.
   }
   return "unknown";
+}
+
+/**
+ * One take of CLAIM_IF_STORE_LIVE with no read-back, for a mark whose taking authorizes something once (lib/shipments.ts:
+ * the shipment's done-mark, then the buyer's email; #5258, #5010 row 127): "ours" only on the script's exact 1, "taken"
+ * on 0, "gone" on -1 (erasing, its id key gone or naming another ref, or its owner's record gone or another store's:
+ * nothing written). A store from before ids with no statsId, -2, a lost answer or any other shape is "unknown", never
+ * "ours": two callers may carry the same value, so reading it back would not tell whose write it was.
+ */
+export async function claimOnceWhileStoreLive(store: Pick<Store, "email" | "sid" | "extra" | "statsId">, key: string, seconds: number, value: string): Promise<"ours" | "taken" | "gone" | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  const command = await claimCommand(store, key, seconds, value);
+  if (!command) return "unknown";
+  let answer: unknown;
+  try {
+    answer = repliesFor(await redisPipeline([command]), 1)?.[0];
+  } catch {
+    return "unknown";
+  }
+  return answer === 1 ? "ours" : answer === 0 ? "taken" : answer === -1 ? "gone" : "unknown";
 }

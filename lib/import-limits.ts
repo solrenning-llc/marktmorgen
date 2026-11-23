@@ -129,5 +129,5 @@ export function rowsWords(rows: number): string {
 export function importAllowanceWords(): string {
   const { creator, pro, scale } = IMPORT_ALLOWANCES;
   const n = (v: number) => v.toLocaleString("en-US");
-  return `Rows an import brings in, a billing month: ${n(creator.rows)} on Store, ${n(pro.rows)} on Studio, ${n(scale.rows)} on Scale (Store's figures in the free trial and before a plan), each upload counting at least ${IMPORT_MIN_ROWS_PER_UPLOAD} rows, and one row for every ${n(IMPORT_ROW_BYTES)} bytes it carries (a HubSpot deals file counts only the deals that come in, and its bytes in the same share); imports started: ${n(creator.starts)}, ${n(pro.starts)} and ${n(scale.starts)}.`;
+  return `Rows an import brings in, a billing month: ${n(creator.rows)} on Store, ${n(pro.rows)} on Studio, ${n(scale.rows)} on Scale (Store's figures in the free trial and before a plan), each upload counting at least ${IMPORT_MIN_ROWS_PER_UPLOAD} rows, and one row for every ${n(IMPORT_ROW_BYTES)} bytes it carries; imports started: ${n(creator.starts)}, ${n(pro.starts)} and ${n(scale.starts)}.`;
 }

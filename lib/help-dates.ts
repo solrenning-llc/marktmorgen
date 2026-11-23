@@ -20,7 +20,7 @@ export const HELP_DATES: Readonly<Record<string, HelpDates>> = {
   "can-i-run-more-than-one-store-or-have-someone-help-me": { created: "2026-09-27", updated: "2026-11-15", digest: "d43b41510879" },
   "can-i-move-my-store-from-stan-gumroad-or-another-platform": { created: "2026-09-27", updated: "2026-11-15", digest: "855a9b5b48ec" },
   "how-does-marktmorgen-compare-with-stan": { created: "2026-10-31", updated: "2026-11-09", digest: "2d4b052c30b0" },
-  "can-i-move-from-clickfunnels": { created: "2026-10-17", updated: "2026-11-22", digest: "6c13ce282a82" },
+  "can-i-move-from-clickfunnels": { created: "2026-10-17", updated: "2026-11-22", digest: "9ffe95687a6e" },
   "what-is-your-path-and-how-do-i-start-it": { created: "2026-11-12", updated: "2026-11-12", digest: "5946811ef703" },
   "is-it-open-or-is-this-a-waiting-list": { created: "2026-09-20", updated: "2026-09-20", digest: "0c3a908d1928" },
   "how-do-i-try-it": { created: "2026-09-18", updated: "2026-09-28", digest: "4af52c31b839" },

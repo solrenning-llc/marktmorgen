@@ -1721,7 +1721,9 @@ export function motivosContraReady(texto) {
   const resolvida = (o) => fecha.test(o) && !descreve.test(o) && !promete.test(o) && !limita.test(o);
   const orações = todo.split("\n").filter((l) => !notas.test(l)).flatMap((l) => l.split(/;|\.(?=\s|$)/));
   const resto = orações.filter((o) => !resolvida(o)).join("\n")
-    .replace(new RegExp(`\\b(0|zero|nenhum|sem|no)\\s+(achados?\\s+)?(${SEV})S?\\b`, "gi"), " ");
+    // A zero count stays on its own line: "[ \t]", not "\s", so "sem achados.\nLEVE: …" never hides the finding on the
+    // next line (Claude 5 iaqyQ's MÉDIO on #5404).
+    .replace(new RegExp(`\\b(0|zero|nenhum|sem|no)[ \\t]+(achados?[ \\t]+)?(${SEV})S?\\b`, "gi"), " ");
   // Severities as reviews write them, in capitals; in any case when they name a finding: "Leve:", "One nit:", "achado leve",
   // "1 low" (Claude 2 upbeat's MÉDIO on #5404).
   const tamanho = new RegExp(`\\b(${SEV})S?\\b`).exec(resto)

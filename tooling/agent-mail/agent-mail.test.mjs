@@ -1348,6 +1348,9 @@ console.log("ZA: what a READY's text may say (owner, 23/11/2026 12h29 Fortaleza:
   // Claude 2 upbeat's MÉDIO on #5404: a negated or partial closure, and a severity not in capitals, are findings.
   for (const t of ["0 findings; the NIT is not fixed in 1234abcd", "sem achados; o LEVE não foi corrigido em 1234abcd", "0 findings; the LEVE is only partly fixed in 1234abcd", "0 findings; the LEVE was fixed in 1234abcd except the copy", "0 findings; the LEVE was fixed in 1234abcd, but a new LOW appears", "0 findings\nLeve: the name", "0 findings\nOne nit: the name", "sem achados\nachado leve no nome", "0 findings; 1 low in the log"])
     is(`ZA: upbeat's case '${t.replace(/\n/g, " / ")}' is refused`, !aceito(t), za(t).join("; "));
+  // Claude 5 iaqyQ's MÉDIO on #5404 (7108552494): a zero count never reaches across a line break to hide a finding.
+  for (const t of ["sem achados.\nLEVE: the name", "0 achados.\nMÉDIO: a cap", "Nenhum achado.\nGRAVE: money", "sem achados\nLEVE: x"])
+    is(`ZA: '${t.replace(/\n/g, " / ")}' is refused`, !aceito(t), za(t).join("; "));
   is("ZA: yUZf's control 'READY, 0 findings, 1 LEVE: the log line is noisy.' is refused", !aceito("READY, 0 findings, 1 LEVE: the log line is noisy."), "");
   for (const t of ["0 findings; the LOW is not addressed", "sem achados; o LEVE não foi resolvido", "0 findings; the MEDIUM is unresolved", "0 findings; a follow-up PR for the name"])
     is(`ZA (d): '${t}' is refused`, !aceito(t), za(t).join("; "));

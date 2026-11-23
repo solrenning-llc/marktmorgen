@@ -1,9 +1,10 @@
 import type { NextRequest } from "next/server";
 import { pendingRemoval } from "@/lib/passkeys";
 import { originFrom } from "@/lib/request-origin";
-import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
-import { TWO_STEP_COOKIE, spendRescue } from "@/lib/two-step";
+import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, sessionCookie } from "@/lib/auth";
+import { HOLD_SECONDS, TWO_STEP_COOKIE, holdSignIn, spendRescue, twoStepOn } from "@/lib/two-step";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { openSessionWhile } from "@/lib/session-while";
 
 /**
  * The tap on /signin/rescue: spends the link sent to the recovery address,
@@ -40,7 +41,16 @@ export async function POST(request: NextRequest) {
   try {
     const previous = request.cookies.get(SESSION_COOKIE)?.value;
     if (previous) await endSession(previous);
-    sessionId = await openSession(email);
+    // Two-step login turned on again in another browser after this link turned it off: the session just opened is
+    // taken back and the login waits for the new app's code (#4142, lib/session-while.ts).
+    const address = email;
+    const opened = await openSessionWhile(address, async () => !(await twoStepOn(address)));
+    if (opened === null) {
+      const response = away("/signin/code");
+      response.headers.append("Set-Cookie", `${TWO_STEP_COOKIE}=${await holdSignIn(address)}; Path=/; Max-Age=${HOLD_SECONDS}; HttpOnly; SameSite=Lax${secure}`);
+      return response;
+    }
+    sessionId = opened;
     // A passkey removal whose days are over is applied at every login (lib/passkeys.ts).
     await pendingRemoval(email).catch(() => console.error("applying a passkey removal failed"));
     const response = away("/studio#two-step");

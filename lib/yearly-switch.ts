@@ -37,7 +37,7 @@ import { membershipLine } from "@/lib/buyer-words";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { DEFAULT_LANGUAGE, LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
-import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { forgetPaid } from "@/lib/learn";
 import type { Listing, Store } from "@/lib/store";
@@ -226,7 +226,7 @@ export async function switchYearly(store: Store, token: string, subscription: st
   if (!Number.isInteger(at) || at > now + 60 || now - at > PREVIEW_SECONDS) return { ok: false, reason: "stale" };
   try {
     // The same lock as a switch between plans: one change to a membership at a time.
-    return await withLock(`nl:tier:${subscription}:lock`, 60, 5_000, async (): Promise<YearlyResult> => {
+    return await withLock(`nl:tier:${subscription}:lock`, 60, 5_000, async (held): Promise<YearlyResult> => {
       const found = await find(store, token, subscription);
       if ("reason" in found) return { ok: false, reason: found.reason };
       const digital = deliversDigitally(found.product);
@@ -236,6 +236,9 @@ export async function switchYearly(store: Store, token: string, subscription: st
       const body = switchBody(found.itemId, price, at);
       const kept = digital && validConsent(consent) ? consentMetaValue(consent, consentKind(found.product)) : "";
       if (digital && validConsent(consent)) keepConsentOn(body, consent, consentKind(found.product));
+      // The reads above may have taken most of the lock's term: hold it again right before the charge, or send nothing.
+      // Another switch of this membership may hold it now, with its own key at another second (Claude 2 on #3287).
+      if (!(await holdLock(held))) return { ok: false, reason: "busy" };
       let updated: Record<string, unknown>;
       try {
         // Under the switch's stable key, as a switch between tiers (lib/tier-switch.ts, switchKey).

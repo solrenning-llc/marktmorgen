@@ -73,10 +73,13 @@ function world(overrides: Partial<DoorSteps> = {}) {
   };
   return { steps, calls };
 }
+/** The store's identity, carried to the vault (lib/store-live-cache.ts storeLiveFence; Codex G-20261121-0801). */
+const FENCE = { live: "nl:store:id:fenced", erasing: "nl:closed:erasing", field: "store-field", statsId: "", ref: "store@example.test" };
 const ask = (who = ANA, bytes = 50 * MiB, nowSeconds = NOW) => ({
   store: SHOP,
   data: SHOP as DataStore,
   listId: "list_submission_store",
+  fence: FENCE,
   folder: FOLDER,
   courseId: COURSE,
   lessonId: LESSON,
@@ -194,6 +197,15 @@ async function main(): Promise<void> {
     is("another buyer's places are their own", await liveCount(FOLDER, COURSE, LESSON, BOB, NOW), 0);
     is("an open place lapses with its upload, a day on", await liveCount(FOLDER, COURSE, LESSON, ANA, NOW + 86_401), 0);
     is("an owner id is never a lesson's", submissionOwnerId("0".repeat(32)), "sub_" + "0".repeat(32));
+  }
+  {
+    // Codex G-20261121-0801 (MEDIUM): the store's identity fence the route builds must reach openReservedVault, which
+    // writes the upload's state only while the store is live (lib/vault-storage.ts); without it, a provider reply that
+    // comes back after the store's erasure could write that state again.
+    let carried: Parameters<DoorSteps["openReservedVault"]>[0]["fence"];
+    const fenced = world({ openReservedVault: async (input) => ((carried = input.fence), { ok: false, reason: "unavailable" }) });
+    is("control: the vault was asked", await openSubmissionDoor(ask(BOB), fenced.steps), { ok: false, reason: "unavailable" });
+    is("the vault receives the store's exact fence", carried, FENCE);
   }
   {
     const refused = world({ reserveStoreUpload: async () => false });

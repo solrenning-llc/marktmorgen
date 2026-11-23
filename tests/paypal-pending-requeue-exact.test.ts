@@ -174,6 +174,55 @@ async function main(): Promise<void> {
     await redis.pipeline([["ZREM", pendingKey, ...blockers]]);
   }
 
+  // 2. LOW 2: a declined try lets go of the pending entry only while no other try has been counted since its own.
+  for (const how of ["PayPal refuses the capture", "PayPal's answer says the capture was declined"] as const) {
+    part(`A declined try (${how}) never lets go of the entry another try is taking the payment under`);
+    const lone = await open();
+    captureWith = (o) => (how === "PayPal refuses the capture" ? declined() : { status: 201, body: completed(o, "49.00", "DECLINED", "lone@example.com") });
+    const loneResult = await captureOrder(store, lone);
+    is("alone, it is declined and let go of pending, as before", [loneResult.ok ? "paid" : loneResult.reason, await stillPending(store, lone)], ["declined", false]);
+
+    const order = await open();
+    const reachedA = signal();
+    const reachedB = signal();
+    const answerA = signal();
+    const answerB = signal();
+    let asked = 0;
+    captureWith = async (o) => {
+      asked += 1;
+      if (asked === 1) {
+        reachedA.fire();
+        await answerA.wait;
+        return how === "PayPal refuses the capture" ? declined() : { status: 201, body: completed(o, "49.00", "DECLINED", "raced@example.com") };
+      }
+      reachedB.fire();
+      await answerB.wait;
+      return { status: 201, body: completed(o, "49.00", "COMPLETED", "raced@example.com") };
+    };
+    console.error = () => undefined;
+    try {
+      const a = captureOrder(store, order);
+      await reachedA.wait;
+      const b = withRedis((commands) => (settleOf(commands, order) ? commands.map(() => 2) : null), async () => {
+        const taking = captureOrder(store, order);
+        await reachedB.wait;
+        answerA.fire();
+        const first = await a;
+        is("the first try is declined", first.ok ? "paid" : first.reason, "declined");
+        is("the order stays in pending, under the second try's watch", await stillPending(store, order), true);
+        answerB.fire();
+        return taking;
+      });
+      const second = await b;
+      is("the second try's payment is taken, and writing it down answers in a shape not known", second.ok ? "paid" : second.reason, "error");
+      handed = [];
+      await watchPayPal(store, Date.now() + 10_000, on);
+      is("the sweep finds it and writes it down: the buyer charged is handed what they paid for, once", [handed.filter((o) => o === order).length, (await readPaid(order))?.order ?? null, await stillPending(store, order)], [1, order, false]);
+    } finally {
+      console.error = logged;
+    }
+  }
+
   done();
 }
 

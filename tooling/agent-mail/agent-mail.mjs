@@ -1703,12 +1703,15 @@ export function motivosContraReady(texto) {
   if (!/\b(sem achados?|0 achados?|zero achados?|nenhum achado|no findings?|0 findings?|zero findings?)\b/i.test(todo)) motivos.push('falta dizer "sem achados" (ou "0 achados", "no findings")');
   const notas = /n[ãa]o [ée] defeito|not a defect|not a finding|n[ãa]o [ée] achado/i;
   // ZA (d): o READY de um head novo diz que cada achado antigo foi corrigido ou retirado; essa linha não é achado aberto.
-  const resolvido = (l) => /corrigid|\bfixed\b|retirad|withdrawn/i.test(l) && !/n[ãa]o (foi |est[áa] )?(corrigid|retirad)|not (been |yet )?(fixed|withdrawn)|unfixed|sem corre[çc][ãa]o/i.test(l);
+  // Claude 3 yUZf's LEVE on #5404: "closed", "addressed" and "resolved" (and the Portuguese words) say the same as "fixed".
+  const resolvido = (l) => /corrigid|\bfixe[ds]\b|retirad|withdrawn|\bclosed\b|fechad|\baddressed\b|atendid|\bresolved\b|resolvid/i.test(l)
+    && !/n[ãa]o (foi |est[áa] |foram |est[ãa]o )?(corrigid|retirad|fechad|atendid|resolvid)|not (been |yet )?(fixed|withdrawn|closed|addressed|resolved)|unfixed|unresolved|unaddressed|sem corre[çc][ãa]o/i.test(l);
   const linhas = todo.split("\n").filter((l) => !notas.test(l) && !resolvido(l)).join("\n")
     .replace(/\b(0|zero|nenhum|sem|no)\s+(achados?\s+)?(GRAVE|ALTO|M[ÉE]DIO|LEVE|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE)S?\b/gi, " ");
   const tamanho = /\b(GRAVE|ALTO|M[ÉE]DIO|LEVE|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE)S?\b/.exec(linhas);
   if (tamanho) motivos.push(`o texto aponta um achado (${tamanho[0]})`);
-  const adiado = /n[ãa]o bloque(ia|ante)|non-?blocking|follow-?up|fica para depois|fica pra depois/i.exec(linhas);
+  // "the follow-up commit" (the commit that fixed it) is not a deferral; "follow-up" about anything else is.
+  const adiado = /n[ãa]o bloque(ia|ante)|non-?blocking|follow-?up(?!\s+(commit|push)s?\b)|fica para depois|fica pra depois/i.exec(linhas);
   if (adiado) motivos.push(`o texto adia um achado ("${adiado[0]}")`);
   return motivos;
 }

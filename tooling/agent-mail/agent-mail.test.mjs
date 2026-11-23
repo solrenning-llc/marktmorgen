@@ -1329,6 +1329,15 @@ console.log("ZA: what a READY's text may say (owner, 23/11/2026 12h29 Fortaleza:
   is("ZA (c): a line marked 'não é defeito' is a note, not a finding", aceito("sem achados\nNota (não é defeito): o nome LOW do teste fica"), "");
   is("ZA (d): an earlier finding said to be fixed in this head is not an open one", aceito("sem achados\nO LEVE de 7083359730 foi corrigido neste head"), "");
   is("ZA (d): but one said NOT to be fixed is", !aceito("sem achados\nO LEVE de 7083359730 não foi corrigido"), "");
+  // Claude 3 yUZf's LEVE on #5404: real READYs of 23/11/2026 say an earlier finding was "closed", "addressed" or "resolved".
+  for (const t of ["0 findings. Claude 1's LEVE 1 closed in this head", "no findings; Claude 4's LOW 2 addressed by 1234abcd", "0 findings: the MEDIUM is resolved", "sem achados; o LEVE 2 foi fechado, o LOW 3 atendido e o NIT resolvido", "0 findings; the follow-up commit 1234abcd fixes the earlier LOW"])
+    is(`ZA (d): an earlier finding said '${t}' is not an open one`, aceito(t), za(t).join("; "));
+  // The seven texts of Claude 3 yUZf's review (7106773158): five real or valid READYs accepted, the control refused.
+  for (const t of ["READY #5368 @b160034bb9, 0 findings (focal; my LEVE closed: the reader)", "READY #5367 @4ee6a53fd7, 0 findings (money): Claude 1's and Claude 2's LEVE closed by ff3f952468", "READY #5363 @9e01e874f8, 0 findings (focal money review; my LEVE closed).", "READY, 0 findings. Claude 1's NIT is addressed by this head.", "READY, 0 findings: the follow-up commit only moves a comment.", "READY, 0 findings. Claude 1's NIT is fixed by this head."])
+    is(`ZA: yUZf's case '${t.slice(0, 60)}' is accepted`, aceito(t), za(t).join("; "));
+  is("ZA: yUZf's control 'READY, 0 findings, 1 LEVE: the log line is noisy.' is refused", !aceito("READY, 0 findings, 1 LEVE: the log line is noisy."), "");
+  for (const t of ["0 findings; the LOW is not addressed", "sem achados; o LEVE não foi resolvido", "0 findings; the MEDIUM is unresolved", "0 findings; a follow-up PR for the name"])
+    is(`ZA (d): '${t}' is refused`, !aceito(t), za(t).join("; "));
   for (const t of ["1 LEVE", "sem achados graves; 1 NIT", "READY with 1 LOW", "MEDIUM: a name", "ALTO no fluxo", "sem achados, mas um follow-up no #1", "sem achados (non-blocking: o texto)", "sem achados; não bloqueia: a ordem", "sem achados, fica para depois: o nome"])
     is(`ZA: a READY saying '${t}' is refused`, !aceito(t), za(t).join("; "));
   is("ZA: lowercase words that are not severities ('low-level', 'alto contraste') are not findings", aceito("sem achados; o leitor low-level e o alto contraste ficam"), za("sem achados; o leitor low-level e o alto contraste ficam").join("; "));

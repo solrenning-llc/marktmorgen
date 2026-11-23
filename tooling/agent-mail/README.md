@@ -244,7 +244,8 @@ node ~/.agent-mail/agent-mail.mjs complete-review --as "Claude 5" <id> --result 
   Não contam como achado:
   - uma contagem zero ("0 LEVE");
   - uma linha marcada "não é defeito";
-  - uma linha que diz que um achado de head anterior foi corrigido ou retirado.
+  - uma linha que diz que um achado de head anterior foi corrigido, retirado, fechado, atendido ou resolvido ("fixed", "closed", "addressed", "resolved"), sem negação;
+  - "the follow-up commit" ou "follow-up push" (o commit que corrigiu).
 
   Com qualquer achado, o veredito é `--result CHANGES`.
 - `claim-review` dá o pedido aberto mais antigo. Nunca dois agentes pegam o mesmo pedido.

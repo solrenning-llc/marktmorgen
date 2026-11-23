@@ -16,7 +16,7 @@
 import { createECDH } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { claimHandle, ensureStatsId } from "@/lib/store";
-import { PHONE_STATE_IF_LISTED, addDevice, forgetPerson } from "@/lib/phone-alerts";
+import { PHONE_STATE_IF_LISTED, PHONE_UNLIST_AND_FORGET, PHONE_UNLIST_FORGET_COMMANDS, addDevice, forgetPerson } from "@/lib/phone-alerts";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -150,6 +150,12 @@ async function main(): Promise<void> {
   is("every call to forgetDevices reads its answer, the repeat of a removal included (Claude 1's LOW 1 on #5105)", /^\s*await forgetDevices\(/m.test(route), false);
   is("a repeat whose devices are still to remove says so", /repeat_devices/.test(route) && /repeat_devices:/.test(readFileSync("components/team-manager.tsx", "utf8")), true);
   console.error = quiet;
+  part("The removal script's billed commands are its own count (Claude 2 lpgvy's NIT on #5105)");
+  // Upstash bills a script 1 plus every redis.call written in it; the cost line for forgetPerson prices a round with
+  // PHONE_UNLIST_FORGET_COMMANDS, so a call added to the script without it fails here.
+  is("PHONE_UNLIST_FORGET_COMMANDS is 1 plus the redis.call in PHONE_UNLIST_AND_FORGET",
+    PHONE_UNLIST_FORGET_COMMANDS, 1 + (PHONE_UNLIST_AND_FORGET.match(/redis\.call\(/g) ?? []).length);
+
   done();
 }
 

@@ -29,10 +29,13 @@ async function main(): Promise<void> {
   const store = (await storeForEmail(OWNER))!;
   await ensureFeedToken({ ...store, callsId: CALLS });
   const owner = { statsId: store.statsId!, handle: HANDLE, callsId: CALLS };
-  // Today's 08:00 UTC, then one step past each hour's pace window, all inside the same day's makings.
+  // Today's 00:00 UTC, then one step past each hour's pace window, all inside the same UTC day's makings: the steps
+  // below run to (CALENDAR_BUILDS_PER_DAY + 1) steps past the start, which must stay before the next midnight
+  // (Claude 5 ibuF's LEVE on #5417).
   const today = new Date();
-  const t0 = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 8);
+  const t0 = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0);
   const step = 61 * 60_000;
+  is("(setup) every step of this test falls inside one UTC day", (CALENDAR_BUILDS_PER_DAY + 1) * step < 86_400_000, true);
   let made = 0;
   const make = (name: string) => async () => {
     made += 1;

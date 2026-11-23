@@ -333,11 +333,16 @@ async function main(): Promise<void> {
     const ownerBefore = to(OWNER).length;
     const toldOn: number[] = [];
     const runs: { owed: number; failed: number }[] = [];
+    let sameDay = true;
     for (let day = 0; day <= 6; day += 1) {
       const before = to(OWNER).length;
       const run = await settlePlans();
       runs.push({ owed: run.owed, failed: run.failed });
       if (to(OWNER).length > before) toldOn.push(day);
+      if (day === 0) {
+        const [due] = await redis.pipeline([["ZRANGEBYSCORE", "nl:plans:retry", "-inf", String(Math.floor(Date.now() / 1000) + 3600)]]);
+        sameDay = (due as string[]).some((m) => m.startsWith(`${ACCOUNT}|${many.session}|`));
+      }
       tick(1);
     }
     is("counted owed, not a failure", runs.every((one) => one.owed >= 1 && one.failed === 0), true);
@@ -345,8 +350,7 @@ async function main(): Promise<void> {
     const note = to(OWNER).at(-1)?.text ?? "";
     is("naming the checkout, saying the payments could not be read whole, and what to do", [note.includes(many.session), /could not read/i.test(note), /Stripe dashboard/i.test(note)], [true, true, true]);
     is("nothing refunded on a part of the list, the buyer not told", [many.invoices.map((row) => (refunds[row.charge.payment_intent] ?? []).length), to("late-buyer-many@example.com").length], [[0, 0, 0, 0, 0], 0]);
-    const [due] = await redis.pipeline([["ZRANGEBYSCORE", "nl:plans:retry", "-inf", String(Math.floor(Date.now() / 1000))]]);
-    is("not due again within the same day", (due as string[]).some((m) => m.startsWith(`${ACCOUNT}|${many.session}|`)), false);
+    is("not due again within the same day (read again the next day)", sameDay, false);
     moreThanAPage.clear();
     const [lined] = await redis.pipeline([["ZRANGEBYSCORE", "nl:plans:retry", "-inf", "+inf"]]);
     for (const member of lined as string[]) if (member.startsWith(`${ACCOUNT}|${many.session}|`)) await redis.pipeline([["ZREM", "nl:plans:retry", member]]);

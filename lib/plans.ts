@@ -44,7 +44,7 @@ import { addPeriods } from "@/lib/plan-periods";
 import { withCutoff } from "@/lib/fetch-timeout";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { tellPlanOwed, tellPlanStuck } from "@/lib/plan-stuck-notice";
-import { refundLatePayments } from "@/lib/plan-late-refunds";
+import { LateListUnreadable, refundLatePayments } from "@/lib/plan-late-refunds";
 import { tellLateRefunds } from "@/lib/plan-late-notice";
 import { ACCOUNT_ID, PENDING, SESSION_ID, entryOf, memberOf } from "@/lib/plan-remember";
 import { ERASING_KEY, erasingField, storeIdCommand } from "@/lib/store";
@@ -111,7 +111,7 @@ export type PlanState = "done" | "open" | "gone" | "early" | "unread" | "owed" |
  * What one try found, and for a plan ending sooner, when it is read again (seconds); for a plan owed a refund, the
  * invoices its creator alone can put right (`short`).
  */
-type Outcome = { state: PlanState; again?: number; short?: string[]; watch?: boolean };
+type Outcome = { state: PlanState; again?: number; short?: string[]; watch?: boolean; unlisted?: boolean };
 
 /**
  * A Stripe reply decides only when it is the object asked for (rule 30): it
@@ -147,7 +147,19 @@ export async function finishPlan(account: string, session: string, about?: { sid
  * payment is still to be given back, "untold" while a buyer is still to be told, "done" once both are.
  */
 async function settleLate(account: string, subscription: string, end: number, about?: { sid: string; product: string }): Promise<Outcome> {
-  const late = await refundLatePayments(account, subscription, end);
+  let late: Awaited<ReturnType<typeof refundLatePayments>>;
+  try {
+    late = await refundLatePayments(account, subscription, end);
+  } catch (error) {
+    // Its late invoices could not be read whole (more than a page, or a list that does not read): owed, read again
+    // the next day, its creator told once to refund them by hand, never a failure tried at every run with nobody told
+    // (#3367, LOW 2 of 6938631896).
+    if (error instanceof LateListUnreadable) {
+      console.error("a plan's late invoices could not be read whole; kept owed", subscription);
+      return { state: "owed", short: [], unlisted: true };
+    }
+    throw error;
+  }
   const told = about ? await tellLateRefunds(about, end, late.given) : { told: 0, untold: 0 };
   if (late.state === "owed") return { state: "owed", short: late.short };
   // Settled with payments given back: watched a while, for a refund Stripe fails later (LATE_REFUND_WATCH_DAYS).
@@ -351,8 +363,9 @@ export async function settlePlans(
       const next = memberOf({ ...entry, since: now + DAY, owed });
       // Owed for PLAN_OWED_TELL_DAYS for a reason only the creator can end (their balance, Stripe refusing the
       // refund): the creator is told once, the mark written before the email and given back when it was not sent.
+      // Invoices the creator alone can put right (`short`), or none named when they could not be listed whole.
       const short = outcome?.short ?? [];
-      if (entry.owedTold || !short.length || now - owed < PLAN_OWED_TELL_DAYS * DAY) {
+      if (entry.owedTold || (!short.length && !outcome?.unlisted) || now - owed < PLAN_OWED_TELL_DAYS * DAY) {
         await moveTo(member, now + DAY, next);
         continue;
       }

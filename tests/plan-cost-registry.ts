@@ -3255,14 +3255,15 @@ export const COST_LINES: CostLine[] = [
   },
   {
     id: "payment-request-erasure-fence",
-    feature: "A payment request is written only while its store is live: its id key there and no erasing mark (row 93 of #5010)",
+    feature: "A payment request is written only while its store is live: its id key holds its own ref and no erasing mark is on it (row 93 of #5010)",
     monthlyUsd: (tier) => paymentRequestFenceCost(STORE_ALLOWANCES[tier]),
     sources: [
-      { file: "lib/payment-request-store.ts", names: ["PAYREQ_FENCE_COMMANDS", "storeIdCommand", "erasingField"] },
+      { file: "lib/payment-request-store.ts", names: ["PAYREQ_FENCE_COMMANDS", "storeLiveFence"] },
+      { file: "lib/live-fence.ts", names: ["SET_IF_STORE_LIVE"] },
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "NON_PAYING_ALLOWANCES"] },
       { file: "app/api/store/payment-requests/route.ts", names: ["guardStoreWrite"] },
     ],
-    basis: "The SAVE script that writes a request's record checks its store's id key (EXISTS) and its erasing mark (HEXISTS) before writing: PAYREQ_FENCE_COMMANDS more a SAVE, inside the same EVAL, no extra round trip. Every studio unit may make a request and email it (two SAVEs); every buyer, webhook, email and transactional unit may change one (one SAVE); each SAVE with 512 wire bytes of headroom. Measured on the real work in tests/payment-request-store-erasure-fence.test.ts. The trial uses the same in nonPayingWorst. Prices and visible allowances do not change.",
+    basis: "The SAVE script that writes a request's record checks, by the rule of lib/live-fence.ts (store-cache-live:v3), that its store's id key still holds its own ref (GET) and that no erasing mark is on that ref (HEXISTS) before writing: PAYREQ_FENCE_COMMANDS more a SAVE, inside the same EVAL, no extra round trip. Every studio unit may make a request and email it (two SAVEs); every buyer, webhook, email and transactional unit may change one (one SAVE); each SAVE with 512 wire bytes of headroom. Measured on the real work in tests/payment-request-store-erasure-fence.test.ts. The trial uses the same in nonPayingWorst. Prices and visible allowances do not change.",
   },
   {
     id: "rest-api",

@@ -37,7 +37,8 @@ import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
-import { ERASING_KEY, erasingField, storeIdCommand, storeRef, type Store } from "@/lib/store";
+import { type Store } from "@/lib/store";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { dataBytes } from "@/lib/store-data-rules";
 import { takeData } from "@/lib/store-data";
 import { sendEmail } from "@/lib/email";
@@ -94,8 +95,11 @@ const unavailable = (): Created => ({ ok: false, reason: "unavailable", message:
  * write lock still holds the writer's token: "new" only when no record is
  * there yet, "edit" only over the record still there, with its open entry
  * and its reminder kept in step (an empty score takes the entry off), and
- * only while its store is live: its id key still there and no erasing mark
- * on its reference (Codex T-20261119-1230, row 93 of #5010), so a request
+ * only while its store is live by the rule of lib/live-fence.ts
+ * (store-cache-live:v3): its id key still holds this store's own ref and no
+ * erasing mark is on that ref (Codex T-20261119-1230, row 93 of #5010;
+ * Claude 6 i51q on #5248: after moveAccount the id key still exists, so
+ * EXISTS alone would let a write built on the old ref through). A request
  * held up while its store's erasure began never writes a buyer's email,
  * name, amount or note back. 1 written; 0 the lock is no longer the
  * writer's; 2 the record is not as the mode needs (already made, or gone:
@@ -105,7 +109,7 @@ const unavailable = (): Created => ({ ok: false, reason: "unavailable", message:
 const SAVE =
   '-- marktmorgen:payreq-save:v1\n' +
   'if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end\n' +
-  'if redis.call("EXISTS", KEYS[5]) ~= 1 or redis.call("HEXISTS", KEYS[6], ARGV[9]) == 1 then return 3 end\n' +
+  'if redis.call("GET", KEYS[5]) ~= ARGV[10] or redis.call("HEXISTS", KEYS[6], ARGV[9]) == 1 then return 3 end\n' +
   'local there = redis.call("EXISTS", KEYS[2])\n' +
   'if (ARGV[2] == "new" and there ~= 0) or (ARGV[2] ~= "new" and there ~= 1) then return 2 end\n' +
   'redis.call("SET", KEYS[2], ARGV[3], "EX", ARGV[4])\n' +
@@ -115,7 +119,7 @@ const SAVE =
   'end\n' +
   'return 1';
 
-/** The commands SAVE runs to check that the store is live (its id key's EXISTS and its erasing mark's HEXISTS), priced
+/** The commands SAVE runs to check that the store is live (its id key's GET against its ref, and its erasing mark's HEXISTS), priced
  * in tests/plan-cost-registry.ts, line payment-request-erasure-fence. */
 export const PAYREQ_FENCE_COMMANDS = 2;
 
@@ -125,15 +129,19 @@ export const PAYREQ_FENCE_COMMANDS = 2;
  * when the record is not as `mode` needs, so nothing was written either. A
  * reply of another shape throws UnknownReplyError (rule 24): never "saved".
  */
-async function writeRecord(held: fencedLock.Held, store: Pick<Store, "email" | "sid" | "extra">, request: PaymentRequest, mode: "new" | "edit", now: number): Promise<"saved" | "lost" | "gone"> {
+async function writeRecord(held: fencedLock.Held, store: Pick<Store, "email" | "sid" | "extra" | "statsId">, request: PaymentRequest, mode: "new" | "edit", now: number): Promise<"saved" | "lost" | "gone"> {
+  const fence = await storeLiveFence(store);
+  // A payment request is kept only under a store with an id (createRequest refuses one without), so its fence is the
+  // id key's own ref; a fence for a store from before ids has no ref to hold and writes nothing.
+  if (fence.statsId !== "") return "gone";
   const member = `${request.sid}|${request.id}`;
   const open = mode === "edit" && statusOf(request, now) === "open" ? String(request.expiresAt) : "";
   const next = mode === "edit" ? nextReminderAt(request, now) : null;
   const reply = exactReply.repliesFor(
     await redisPipeline([[
-      "EVAL", SAVE, 6, held.key, recordKey(request.id), openKey(request.sid), DUE, storeIdCommand(request.sid)[1], ERASING_KEY,
+      "EVAL", SAVE, 6, held.key, recordKey(request.id), openKey(request.sid), DUE, fence.live, fence.erasing,
       held.token, mode, JSON.stringify(request), keepSeconds(request, now), request.id, open, member, next === null ? "" : String(next),
-      await erasingField(storeRef(store)),
+      fence.field, fence.ref,
     ]]),
     1,
   );
@@ -310,7 +318,7 @@ export async function requestOf(store: Pick<Store, "sid">, id: string): Promise<
  * written. A write that does not answer exactly throws UnknownReplyError.
  */
 export async function changeRequest<T>(
-  store: Pick<Store, "email" | "sid" | "extra">,
+  store: Pick<Store, "email" | "sid" | "extra" | "statsId">,
   id: string,
   change: (current: PaymentRequest) => { next: PaymentRequest | null; answer: T },
   now = Date.now(),

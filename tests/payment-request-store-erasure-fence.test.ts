@@ -20,7 +20,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { COMMAND, DB_BYTE, ORDER_COMPUTE } from "./plan-cost-registry";
-import { PAYREQ_FENCE_COMMANDS } from "@/lib/payment-request-store";
+import * as payreqStore from "@/lib/payment-request-store";
 
 process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
 globalThis.fetch = (async (input: string | URL | Request) => {
@@ -40,6 +40,8 @@ const OWNER = "payreq-erasure-fence@example.com";
 const CLIENT = "client-fence@example.com";
 const LINE = { text: "Coaching, November (4 sessions)", quantity: 1, amount: "480" };
 const SAVE_HEAD = "-- marktmorgen:payreq-save:v1";
+/** What line payment-request-erasure-fence prices a SAVE's fence at; read without a static import, so the RED runs on main's libs. */
+const PAYREQ_FENCE_COMMANDS = (payreqStore as Record<string, unknown>).PAYREQ_FENCE_COMMANDS as number | undefined;
 
 async function freshStore(): Promise<Store> {
   redis.clear();
@@ -107,6 +109,18 @@ async function main(): Promise<void> {
     const made = await createRequest(store, draftOf(Date.now()));
     is("the creation is refused", made.ok, false);
     is("no record is written", recordKeys(), []);
+  }
+
+  part("A copy of the store from before its owner moved writes nothing (Claude 6 i51q on #5248)");
+  {
+    const store = await freshStore();
+    // moveAccount repoints the id key to the new ref; an erasure begun after the move marks the new ref's field. The
+    // id key still exists, so only its ref says that this copy is no longer the store's own.
+    const newRef = "moved-owner@example.com";
+    await realPipeline([["SET", storeIdCommand(store.sid!)[1], newRef], ["HSET", ERASING_KEY, await erasingField(newRef), String(Date.now())]]);
+    const made = await createRequest(store, draftOf(Date.now()));
+    is("the creation from the copy before the move is refused", made.ok, false);
+    is("no record is written for the store being erased", recordKeys(), []);
   }
 
   part("A change to a request kept before the erasure began writes nothing back");

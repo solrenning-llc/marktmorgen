@@ -1980,10 +1980,10 @@ export class MemoryRedis {
         }
         // lib/payment-request-store.ts SAVE: a request's record written only while its write lock is the writer's,
         // "new" only when absent, "edit" only over the record still there, with its open entry and reminder in step.
-        if (key.startsWith("-- marktmorgen:payreq-save:v1\n") && args[0] === "6" && args.length === 16) {
-          const [, lock, target, open, due, storeId, erasing, token, mode, value, seconds, id, openScore, member, dueScore, erasingField] = args;
+        if (key.startsWith("-- marktmorgen:payreq-save:v1\n") && args[0] === "6" && args.length === 17) {
+          const [, lock, target, open, due, storeId, erasing, token, mode, value, seconds, id, openScore, member, dueScore, erasingField, ref] = args;
           if (this.run(["GET", lock]) !== token) return 0;
-          if (Number(this.run(["EXISTS", storeId])) !== 1 || Number(this.run(["HEXISTS", erasing, erasingField])) === 1) return 3;
+          if (this.run(["GET", storeId]) !== ref || Number(this.run(["HEXISTS", erasing, erasingField])) === 1) return 3;
           const there = Number(this.run(["EXISTS", target]));
           if ((mode === "new" && there !== 0) || (mode !== "new" && there !== 1)) return 2;
           this.run(["SET", target, value, "EX", seconds]);

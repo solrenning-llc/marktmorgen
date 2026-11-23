@@ -279,14 +279,14 @@ async function main(): Promise<void> {
 
   part("The studio shows it, in a status region, and offers no new AI captions for it");
   const writingHtml = draw({ [PATH]: ["en", "es"] }, []);
-  is("control: being written, in a status region", [writingHtml.includes("Being written by AI: English, Español."), /role="status" data-captions-writing/.test(writingHtml)], [true, true]);
+  is("control: ordered, in a status region", [writingHtml.includes("AI captions ordered: English, Español."), /role="status" data-captions-writing/.test(writingHtml)], [true, true]);
   const offeredHtml = draw({}, []);
   is("control: nothing pending, AI captions offered", offeredHtml.includes("data-auto-captions"), true);
   const heldHtml = draw({}, [PATH]);
   const line = /<p[^>]*role="status"[^>]*data-captions-held[^>]*>([^<]*)<\/p>/.exec(heldHtml)?.[1] ?? "";
   is("held: said in a status region", line.startsWith("We could not confirm these AI captions with our video provider"), true);
   is("held: the charge is not final, and nobody is told it is being checked when it is not", [line.includes("charge for them is not final"), /we are checking/i.test(line), line.includes("support@marktmorgen.com")], [true, false, true]);
-  is("held: never being written, no new AI captions offered", [heldHtml.includes("Being written by AI"), heldHtml.includes("data-auto-captions")], [false, false]);
+  is("held: never being written, no new AI captions offered", [heldHtml.includes("AI captions ordered"), heldHtml.includes("data-auto-captions")], [false, false]);
 
   const page = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
   is("the course page reads the lesson videos once, held ones included", /autoCaptionStates\(videoPaths\)/.test(page) && /held=\{held\}/.test(page), true);

@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
       const also = Array.isArray(body.also) ? body.also.slice(0, 5).map((code: unknown) => text(code, 10)) : [];
       const asked = await requestAutoCaptions(store, pathname, text(body.spoken, 10), also);
       if (!asked.ok) return Response.json({ ok: false, error: asked.reason === "off" ? "off" : `auto_${asked.reason}` }, { status: asked.reason === "off" ? 404 : 400 });
-      return Response.json({ ok: true, writing: asked.writing, cents: asked.cents }, { headers: { "Cache-Control": "no-store" } });
+      return Response.json({ ok: true, writing: asked.writing, cents: asked.cents, ...(asked.unconfirmed ? { unconfirmed: true } : {}) }, { headers: { "Cache-Control": "no-store" } });
     }
     const answer = action === "add" ? await addStoreCaption(store, pathname, lang, body.text) : await dropStoreCaption(pathname, lang);
     if (!answer.ok) {

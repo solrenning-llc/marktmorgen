@@ -230,7 +230,7 @@ function parsePending(raw: unknown): Pending | null {
 }
 
 export type AutoAnswer =
-  | { ok: true; writing: string[]; cents: number }
+  | { ok: true; writing: string[]; cents: number; unconfirmed?: true }
   | { ok: false; reason: "off" | "unknown" | "not_ready" | "language" | "long" | "busy" | "held" | "checking" | "owed" | "refund_pending" | "refunded" | "credited" | "plan" | "card" | "declined" | "unavailable" | "changing" };
 
 /** What captions for this video cost, by how many languages: its length as charged. Null when it cannot have them yet. */
@@ -362,7 +362,9 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
     await owe(record.id, pending, null, refundKey, now);
     return { ok: false, reason: "refund_pending" };
   }
-  return { ok: true, writing: asked.languages, cents };
+  // Charged and kept, but the service did not confirm it started them (no plain 200): said as such, never as being
+  // written, while the money is handled exactly as before (Claude 3's LOW 2 on #3427, 6749382893).
+  return { ok: true, writing: asked.languages, cents, ...(answer.status !== 200 ? { unconfirmed: true as const } : {}) };
 }
 
 /**

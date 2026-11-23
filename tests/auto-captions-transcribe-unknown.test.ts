@@ -239,7 +239,7 @@ async function main(): Promise<void> {
   part("Card: an unknown answer, and the service never wrote anything");
   reset();
   reply = "503";
-  is("asked, nothing given back", [await ask(T), refunds.length], ["asked", 0]);
+  is("asked, nothing given back", [await ask(T), refunds.length], ["asked, not confirmed", 0]);
   reply = "ok";
   let last = 0;
   for (const hours of [1, 24, 47]) {
@@ -259,7 +259,7 @@ async function main(): Promise<void> {
   part("Card: an unknown answer, then the service's answers stay unknown past GIVE_UP_HOURS");
   reset();
   reply = "thrown";
-  is("asked, nothing given back", [await ask(T), refunds.length], ["asked", 0]);
+  is("asked, nothing given back", [await ask(T), refunds.length], ["asked, not confirmed", 0]);
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => (new URL(String(input)).hostname === "video.bunnycdn.com" ? new Response("", { status: 503 }) : realFetch(input, init))) as typeof fetch;
   advance(49 * HOUR);
@@ -273,7 +273,7 @@ async function main(): Promise<void> {
   reply = "504";
   const fromCredit = await ask(T);
   reply = "ok";
-  is("paid from the credit, nothing given back on an unknown answer", [fromCredit, customerBalance, credits(), record()?.credit !== undefined, queued()], ["asked", -38_000, 0, true, true]);
+  is("paid from the credit, nothing given back on an unknown answer", [fromCredit, customerBalance, credits(), record()?.credit !== undefined, queued()], ["asked, not confirmed", -38_000, 0, true, true]);
   is("a retry charges nothing more", [await ask(T + 1_000), invoices.length, customerBalance, transcribes.length], ["busy", 1, -38_000, 1]);
   advance(49 * HOUR);
   await syncAutoCaptions(VIDEO, T + 49 * HOUR);

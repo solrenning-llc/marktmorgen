@@ -84,7 +84,7 @@ const MESSAGES: Record<string, string> = {
   auto_not_ready: "The video has to finish uploading and being prepared before captions can be written.",
   auto_language: "Choose languages this video has no captions in yet, the one spoken first, three at most.",
   auto_long: `Captions are written for videos of up to ${MAX_AUTO_MINUTES / 60} hours.`,
-  auto_busy: "Captions for this video are already being written. They appear here when they are done.",
+  auto_busy: `AI captions were already ordered for this video. They appear here when they arrive; anything not delivered within ${GIVE_UP_HOURS} hours is refunded on its own.`,
   auto_checking: "Stripe has not confirmed yet whether this charge went through. Nothing more is charged for this video until it does, in about 15 minutes. If your card was charged and no captions are written, the charge is refunded on its own.",
   auto_plan: "Captions written by AI are charged to the card your plan is paid with, so they need a plan first.",
   auto_card: "There is no card on your plan to charge. Add one under Plan and billing, then try again.",
@@ -1277,7 +1277,7 @@ function Captions({
         </p>
       ) : (streams.writing[pathname] ?? []).length ? (
         <p className="mt-2 text-sm text-ink" role="status" data-captions-writing>
-          {`Being written by AI: ${(streams.writing[pathname] ?? []).map((code) => CAPTION_LANGUAGES.find((l) => l.code === code)?.label ?? code).join(", ")}. Most lessons take a few minutes; they appear here when they are done. Until then, captions in ${(streams.writing[pathname] ?? []).length > 1 ? "these languages" : "this language"} can't be uploaded here.`}
+          {`AI captions ordered: ${(streams.writing[pathname] ?? []).map((code) => CAPTION_LANGUAGES.find((l) => l.code === code)?.label ?? code).join(", ")}. They appear here when they arrive, usually within minutes; anything not delivered within ${GIVE_UP_HOURS} hours is refunded on its own. Until then, captions in ${(streams.writing[pathname] ?? []).length > 1 ? "these languages" : "this language"} can't be uploaded here.`}
         </p>
       ) : streams.auto.can ? (
         <AutoCaptions lessonId={lessonId} pathname={pathname} have={tracks.map((t) => t.lang)} busy={busy || working} onError={onError} />
@@ -1364,7 +1364,12 @@ function AutoCaptions({
     if (data.ok && Array.isArray(data.writing)) {
       streams.wrote(pathname, (data.writing as unknown[]).filter((code): code is string => typeof code === "string"));
       setOpen(false);
-      toast(`Charged ${dollars(Number(data.cents) || 0)}. The captions are being written.`);
+      // The service did not confirm it started them: never said as being written (Claude 3's LOW 2 on #3427).
+      toast(
+        data.unconfirmed === true
+          ? `Charged ${dollars(Number(data.cents) || 0)}. We could not confirm that the video service started these captions. We will check by ourselves; if nothing arrives within ${GIVE_UP_HOURS} hours, the charge is given back.`
+          : `Charged ${dollars(Number(data.cents) || 0)}. The captions are being written.`,
+      );
     } else onError(MESSAGES[String(data.error ?? "")] ?? MESSAGES.server_error);
   }
 

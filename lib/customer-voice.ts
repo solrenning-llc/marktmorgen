@@ -55,6 +55,7 @@
  *   nl:voice:<statsId>:<yyyy-mm>   the month's summary, about two months
  *   nl:voice:lock:<statsId>         one reading at a time, two minutes, holding its own token
  */
+import { createHash } from "node:crypto";
 import { answerModel, askModel, counted, jsonIn } from "@/lib/ai";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
@@ -66,7 +67,7 @@ import { waitlistSizes, WAITLIST_VOICE_PRODUCTS } from "@/lib/waitlist";
 import { studioReviews } from "@/lib/reviews";
 import { readStats, studioStats } from "@/lib/stats";
 import { productIds, readTitles } from "@/lib/catalog";
-import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
+import { LockBusyError, takeLock } from "@/lib/redis-lock";
 import { timeLeft } from "@/lib/fetch-timeout";
 import { cleanReviewText } from "@/lib/review-ai-summary-rules";
 import type { Store } from "@/lib/store";
@@ -170,18 +171,79 @@ export function keptMonths(now: number): string[] {
   return out;
 }
 
+/** The bytes the reader's lock may hold (tests/store-data-registry.ts, nl:voice:lock:): its token and the marks below. */
+export const VOICE_LOCK_MAX_BYTES = 128;
+
 /**
- * The summary written only while the reading's lock is still its own, and the
- * lock let go with it, in one step (a person's erasure deletes the lock):
- * KEYS[1] the lock, KEYS[2] the summary; ARGV[1] the token, ARGV[2] the
- * summary, ARGV[3] its seconds. 1 when written, 0 when not. lib/redis-memory.ts
- * runs it the same way.
+ * A deleted review's words as the reader's lock holds them: the first 16 hex characters of their SHA-256, never the
+ * words. Two different words sharing a mark only refuse a reading that did not need refusing, never keep one.
  */
-export const VOICE_KEEP = `-- marktmorgen:voice-keep:v1
-if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+export function voiceMark(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex").slice(0, 16);
+}
+
+/**
+ * A review's words deleted or rewritten (forgetReviewWords; #5285 row #5087, Claude 1's LOW on #5087): a reading under
+ * way is told which words went, so it is refused only when it quotes them, and its month's AI job is not lost for a
+ * review it does not hold. KEYS[1] the lock; ARGV[1..n-1] the words' marks, ARGV[n] VOICE_LOCK_MAX_BYTES. The marks
+ * are added to the lock, keeping its expiry: 0 when no reading holds it, 1 when marked; with no room left for them the
+ * lock is deleted, as before this rule, and 2 says so. lib/redis-memory.ts runs it the same way.
+ */
+export const VOICE_FORGET = `-- marktmorgen:voice-forget:v1
+local held = redis.call("GET", KEYS[1])
+if not held then return 0 end
+local add = ""
+for i = 1, #ARGV - 1 do
+  if not string.find(held .. add, "|" .. ARGV[i], 1, true) then add = add .. "|" .. ARGV[i] end
+end
+if add == "" then return 1 end
+if #held + #add > tonumber(ARGV[#ARGV]) then
+  redis.call("DEL", KEYS[1])
+  return 2
+end
+redis.call("SET", KEYS[1], held .. add, "KEEPTTL")
+return 1`;
+
+/**
+ * The summary written only while the reading's lock is still its own, and the lock let go with it, in one step (a
+ * person's erasure deletes the lock): KEYS[1] the lock, KEYS[2] the summary; ARGV[1] the token, ARGV[2] the summary,
+ * ARGV[3] its seconds, ARGV[4..] the marks of the review words it quotes (voiceMark). A lock still the reading's but
+ * marked by VOICE_FORGET keeps the summary only when it quotes none of the marked words; when it quotes one, nothing
+ * is written and the lock is let go. 1 when written, 0 when not. lib/redis-memory.ts runs it the same way.
+ */
+export const VOICE_KEEP = `-- marktmorgen:voice-keep:v2
+local held = redis.call("GET", KEYS[1])
+if not held then return 0 end
+if held ~= ARGV[1] then
+  if string.sub(held, 1, #ARGV[1] + 1) ~= ARGV[1] .. "|" then return 0 end
+  for i = 4, #ARGV do
+    if string.find(held, "|" .. ARGV[i], #ARGV[1] + 1, true) then
+      redis.call("DEL", KEYS[1])
+      return 0
+    end
+  end
+end
 redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
 redis.call("DEL", KEYS[1])
 return 1`;
+
+/**
+ * The reading's lock let go, marked or not (VOICE_FORGET): KEYS[1] the lock, ARGV[1] the token. 1 when deleted, 0 when
+ * it is no longer the reading's. lib/redis-memory.ts runs it the same way.
+ */
+export const VOICE_RELEASE = `-- marktmorgen:voice-release:v1
+local held = redis.call("GET", KEYS[1])
+if held == ARGV[1] or (held and string.sub(held, 1, #ARGV[1] + 1) == ARGV[1] .. "|") then return redis.call("DEL", KEYS[1]) end
+return 0`;
+
+/** The marks of every review's words a summary quotes, for VOICE_KEEP. Pure. */
+export function quotedReviewMarks(summary: VoiceSummary): string[] {
+  const marks = new Set<string>();
+  for (const theme of [...summary.themes, ...(summary.reviewThemes ?? [])]) {
+    for (const example of theme.examples) if (example.source === "review") marks.add(voiceMark(example.text));
+  }
+  return [...marks].sort();
+}
 
 const VOICE_FAILURE_MESSAGES: Record<VoiceSource | "save", string> = {
   cancel: "reading cancellation feedback for the customer summary failed",
@@ -402,11 +464,16 @@ export async function forgetReviewWords(statsId: string | null, text: string, no
   if (!statsId || !words || !isRedisConfigured()) return 0;
   const quoted = new Set([words, cleanVoice(words)]);
   const keys = keptMonths(now).map((month) => voiceKey(statsId, month));
-  // The reader's lock goes first, before the summaries are read (Codex L-20261120-0948): a summary still being built
-  // may hold these words while no month's summary is kept yet, and its VOICE_KEEP must then find its token gone.
-  const replies = repliesFor(await redisPipeline([["DEL", lockKey(statsId)], ...keys.map((key) => ["GET", key])]), keys.length + 1);
-  const unlocked = countOf(replies?.[0]);
-  if (unlocked === null || unlocked > 1) throw new UnknownReplyError("letting go of the customer summary's reader before deleting review words");
+  // The reader's lock is marked first, before the summaries are read (Codex L-20261120-0948): a summary still being
+  // built may hold these words while no month's summary is kept yet, and its VOICE_KEEP must then refuse it. Marked,
+  // not deleted, so a reading that does not quote them is still kept (#5285 row #5087); no room, deleted as before.
+  const marks = [...new Set([...quoted].map(voiceMark))];
+  const replies = repliesFor(
+    await redisPipeline([["EVAL", VOICE_FORGET, 1, lockKey(statsId), ...marks, VOICE_LOCK_MAX_BYTES], ...keys.map((key) => ["GET", key])]),
+    keys.length + 1,
+  );
+  const marked = countOf(replies?.[0]);
+  if (marked === null || marked > 2) throw new UnknownReplyError("marking the customer summary's reader before deleting review words");
   const gone = keys.filter((key, i) => {
     const raw = replies ? replies[i + 1] : undefined;
     if (raw === null) return false;
@@ -497,13 +564,14 @@ export async function makeVoice(store: Store, now = Date.now(), pay?: VoicePay):
     if (!done.ok) return { ok: false, reason: done.reason === "notes" ? "failed" : done.reason };
     // Kept, and shown, only when nobody was deleted from the store while it was read (forgetVoicePerson took the lock).
     // The job is counted by now: a write that cannot be made says so with "changed", whose words say it counted.
-    const kept = await redisPipeline([["EVAL", VOICE_KEEP, 2, held.key, voiceKey(store.statsId, month), held.token, JSON.stringify(done.value), KEEP_SECONDS]]).catch((error: unknown) => {
+    const kept = await redisPipeline([["EVAL", VOICE_KEEP, 2, held.key, voiceKey(store.statsId, month), held.token, JSON.stringify(done.value), KEEP_SECONDS, ...quotedReviewMarks(done.value)]]).catch((error: unknown) => {
       logVoiceFailure("save", error);
       return null;
     });
     if (!Array.isArray(kept) || kept[0] !== 1) return { ok: false, reason: "changed" };
     return { ok: true, summary: done.value, fresh: true, left: done.left };
   } finally {
-    await releaseLock(held);
+    // Let go even when a deletion marked it (VOICE_FORGET), so the next reading is not left busy behind it.
+    await redisPipeline([["EVAL", VOICE_RELEASE, 1, held.key, held.token]]).catch(() => undefined);
   }
 }

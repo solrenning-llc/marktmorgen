@@ -147,7 +147,16 @@ async function main(): Promise<void> {
   is("each buyer whose email could be written was asked once; Ivy not at all", bookings.map((b) => buyerAsks(b.email)), [1, 1, 1, 1, 0, 1]);
   is("the creator was asked once for each call time, Ivy's included", [creatorAsks("Coaching Call"), creatorAsks("Portfolio Review")], [5, 1]);
 
-  part("Five minutes on, and again: an answer not known is never sent twice");
+  // Claude 4 AC's LEVE on #5103 @64cf861210: a send that failed for certain (Rex's 422) or before the sender was asked
+  // (Ivy's room) is put off RETRY_MS like a read that failed, never kept at the head of the next run's batch.
+  part("A send that failed is put off fifteen minutes, still queued");
+  const due = async (b: (typeof bookings)[number]) => Number((await pipeline([["ZSCORE", REMINDER_QUEUE, reminderMember(callsId, "harbor", b.session, "24", b.start)]]))[0]);
+  const [rexAt, ivyAt] = [await due(bookings[2]), await due(bookings[4])];
+  is("Rex's refused reminder and Ivy's are both put off, about fifteen minutes", [rexAt > Date.now() + 14 * 60_000, ivyAt > Date.now() + 14 * 60_000], [true, true]);
+  const realNow = Date.now;
+  Date.now = () => realNow() + 16 * 60_000;
+
+  part("Sixteen minutes on, and again: an answer not known is never sent twice");
   senderSays = () => null;
   await run();
   await run();
@@ -159,6 +168,7 @@ async function main(): Promise<void> {
   is("the plain yes: not asked again", buyerAsks("ola@example.com"), 1);
   is("the creator's reminders of the coaching call times: each once", creatorAsks("Coaching Call"), 5);
   redis.pipeline = pipeline;
+  Date.now = realNow;
 
   part("The marks");
   const mark = (session: string, start: number) => redis.run(["EXISTS", `nl:call:reminded:${session}:${start}:24`]);

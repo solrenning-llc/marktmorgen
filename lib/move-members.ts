@@ -22,6 +22,7 @@ import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, listSlots, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
+import { HASH_SWAP_IF } from "@/lib/redis-take";
 import { RECOVER_TRACE_BYTES } from "@/lib/checkout-recovery";
 import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
@@ -372,12 +373,19 @@ export async function pendingInvitesOnOptions(store: Store, productId: string, o
 export async function noteKept(store: Store, email: string, productId: string, now = Date.now()): Promise<void> {
   if (!store.statsId || !store.sid || !isRedisConfigured()) return;
   const field = inviteField(email, productId);
-  const invite = await readInvite(store.statsId, field);
-  if (!invite || invite.kept) return;
-  await redisPipeline([
-    ["HSET", invitesKey(store.statsId), field, JSON.stringify({ ...invite, kept: Math.floor(now / 1000) })],
-    ["ZREM", DUE_KEY, `${store.sid}|${field}`],
-  ]);
+  if (!FIELD_PATTERN.test(field)) return;
+  const replies = repliesFor(await redisPipeline([["HGET", invitesKey(store.statsId), field]]), 1);
+  const raw = replies?.[0];
+  if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a moved member's invitation");
+  const invite = parseInvite(raw);
+  if (!invite || invite.kept || typeof raw !== "string") return;
+  // Written only over the invitation as read (HASH_SWAP_IF, #4668): a person's erasure that deleted it while this
+  // waited (forgetInvitesPerson) leaves it deleted, never written back with their address and link. The reminder
+  // goes only when this marked it kept; an erased invitation's reminder went with it.
+  const swapped = repliesFor(await redisPipeline([["EVAL", HASH_SWAP_IF, 1, invitesKey(store.statsId), field, raw, JSON.stringify({ ...invite, kept: Math.floor(now / 1000) })]]), 1);
+  const wrote = swapped ? countOf(swapped[0]) : null;
+  if (wrote !== 0 && wrote !== 1) throw new UnknownReplyError("marking a moved member's invitation kept");
+  if (wrote === 1) await redisPipeline([["ZREM", DUE_KEY, `${store.sid}|${field}`]]);
 }
 
 /** What a member's page and emails say about the payments: the first one here, and the price as it goes on. */

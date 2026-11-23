@@ -181,7 +181,9 @@ async function main(): Promise<void> {
   const realPipe = redis.pipeline.bind(redis);
   let failedOnce = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (!failedOnce && commands.some((c) => c[0] === "HSET" && c[1] === `nl:mv:${statsId}`)) {
+    // The write that notes it kept: an HSET before #4668, the swap made only over the invitation as read since.
+    const keptWrite = (c: (string | number)[]) => (c[0] === "HSET" && c[1] === `nl:mv:${statsId}`) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:hash-swap-if:") && c[3] === `nl:mv:${statsId}`);
+    if (!failedOnce && commands.some(keptWrite)) {
       failedOnce = true;
       throw new Error("redis: connection reset");
     }

@@ -59,6 +59,8 @@ let sessionList: ((url: URL) => Response) | null = null;
 let lists: string[] = [];
 /** How long a checkout POST stays in progress at the fake Stripe before its session exists. */
 let postDelayMs = 0;
+/** The new page answered without its status (Claude 3 yUZf's NIT on #5349 @7846aec9cc: unknown is not open). */
+let postNoStatus = false;
 const IN_PROGRESS = "in-progress";
 /** When true, every checkout POST answers 409 as for a key still in progress. */
 let answer409 = false;
@@ -127,6 +129,11 @@ function install(): void {
       lastBody = body;
       sessions.push(made);
       if (key) keys.set(key, id);
+      if (postNoStatus) {
+        const { status: _status, ...withoutStatus } = made;
+        void _status;
+        return json(withoutStatus);
+      }
       return json(made);
     }
     const expiring = path.match(/^\/checkout\/sessions\/([^/]+)\/expire$/);
@@ -337,6 +344,13 @@ async function main(): Promise<void> {
   store = await freshStore();
   subs.push(addOn(1, "active"));
   is("control: one made before, with no id, is still read by its handle", [await applyListedAssistant({ ...subs[0] }), (await storeForEmail(OWNER))?.assistantPlan?.subscriptionId], [true, subs[0].id]);
+
+  part("A page Stripe answers without its status is never given (Claude 3 yUZf's NIT on #5349)");
+  store = await freshStore();
+  keys.clear();
+  postNoStatus = true;
+  is("a status that does not read is not open: refused", await outcome(store), "refused");
+  postNoStatus = false;
 
   part("Two tabs at the same moment: both POSTs carry the same Idempotency-Key, so Stripe gives one page");
   store = await freshStore();

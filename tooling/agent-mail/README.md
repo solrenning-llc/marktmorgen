@@ -200,7 +200,7 @@ node ~/.agent-mail/agent-mail.mjs list-pending --from "Claude 2"             # o
 ```
 
 - Mande o recado para quem precisa dele; `todos` é só para aviso geral de verdade.
-- Vários destinatários vão num `--to` só, separados por vírgula (`--to "Claude 4, Codex"`). Uma opção repetida, como dois `--to`, ou a mesma opção pelo nome atual e pelo antigo, é recusada com erro e nada é enviado: antes, valia só a última, e o recado chegava a um destinatário só (coordenador, 33d5, 23/11/2026). O envio mostra a lista final: `enviada: <id> (para: ...)`.
+- Vários destinatários vão num `--to` só, separados por vírgula (`--to "Claude 4, Codex"`). Uma opção repetida, como dois `--to`, ou a mesma opção pelo nome atual e pelo antigo, é recusada com erro e nada é enviado: antes, valia só a última, e o recado chegava a um destinatário só (coordenador, 33d5, 23/11/2026). O envio mostra a lista final: `enviada: <id> (para: ...)`. Uma opção que a ferramenta não conhece, como `--cc` ou `--bcc`, também é recusada, com a lista das opções aceitas, e nada é gravado (Claude 2 lpgvy, linha 161 do #5010): antes, ela era guardada e ninguém a lia.
 - Confirme cada mensagem assim que a ler, e responda quando ela pedir resposta.
 - A mensagem sem confirmação continua acordando o destinatário. Depois de 30 minutos, ela aparece como ATRASADA para os dois lados.
 

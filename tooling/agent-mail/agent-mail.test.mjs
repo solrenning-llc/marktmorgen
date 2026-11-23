@@ -935,6 +935,12 @@ console.log("a session's own box: an ack under the family name does not hide it 
   is("a repeated --to is refused with a clear error, and nothing is sent", !r.ok && /--to.*mais de uma vez/.test(r.out) && !/enviada:/.test(r.out), r.out);
   r = run(["send", "--from", "Claude 2 X", "--to", "Claude 6 UoHAG", "--para", "Claude 6 z5v4", "--subject", "alias", "--text", "duas"], as("c2"));
   is("and so is the same option given under its English and its old name", !r.ok && /mais de uma vez/.test(r.out) && !/enviada:/.test(r.out), r.out);
+  // Claude 2 lpgvy's LOW on #5279 (#5010 row 161): an option the tool does not know was kept and read by no command,
+  // so "send --to A --cc B" went to A only and said nothing.
+  r = run(["send", "--from", "Claude 2 X", "--to", "Claude 6 UoHAG", "--cc", "Claude 6 z5v4", "--subject", "cc", "--text", "duas"], as("c2"));
+  is("an unknown option such as --cc is refused with the right one named, and nothing is sent", !r.ok && /--cc não existe/.test(r.out) && /--to "A, B"/.test(r.out) && !/enviada:/.test(r.out), r.out);
+  r = run(["request-review", "--from", "Claude 4 X", "--pr", "1", "--sha", "0".repeat(40), "--reviewer", "Claude 5", "--text", "t"], as("c4"));
+  is("and so in any command (request-review --reviewer)", !r.ok && /--reviewer não existe/.test(r.out) && !/pedido registrado/.test(r.out), r.out);
   r = run(["send", "--from", "Claude 2 X", "--to", "Claude 6 UoHAG, Claude 6 z5v4", "--subject", "listed", "--text", "duas"], as("c2"));
   is("control: one --to with the names separated by commas still goes to each, and says to whom", r.ok && /enviada: \S+ \(para: Claude 6 UoHAG, Claude 6 z5v4\)/.test(r.out), r.out);
   // 23/11/2026: Claude 6 UoHAG's own "push minute" note to its family woke its own watch and showed as unread to it.

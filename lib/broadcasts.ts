@@ -518,8 +518,11 @@ export type HeadsOptions = {
   /**
    * `more: true` (get_emails, issue #4062): the same LRANGE asks for one id past `limit`, never more, and the same size
    * script asks that id's size too (paid with the others); the measured emails are still the newest `limit`, and
-   * `more` says an older one is still kept. An id whose record expired (-1) is gone, and so is every older one, kept
-   * the same RECORD_DAYS: then `more` is false (Claude 6's LEVE on #5431). Without it, nothing changes.
+   * `more` says that id's record is still kept. An id whose record expired (-1) makes `more` false (Claude 6's LEVE on
+   * #5431), which says only that one id is gone: a record's RECORD_DAYS restart at every write (a send step, a cancel,
+   * a send scheduled up to a year ahead), so an older one can outlive it (Claude 6 hsz3's LEVE on #5431). Looking
+   * further would cost a size per id, unbounded; the tool's description says what false means. Without it, nothing
+   * changes.
    */
   more?: true;
 };
@@ -601,7 +604,7 @@ export async function measureBroadcastHeads(listId: string | null, limit: number
   if (paid.ok !== true) return { ok: false, refused: paid.message };
   const answered = await headsOf(asked.map(bcKey), null);
   const sized = answered.slice(0, ids.length);
-  // Kept, readable or not, is an older email there; -1 is a record gone after RECORD_DAYS, and every older one with it.
+  // Kept, readable or not, is an older email there; -1 is that one record gone, which says nothing of the ones before it.
   const more = options.more ? { more: past !== null && answered[ids.length] !== -1 } : {};
   // With expired: "skip", a record that is not there (-1) is a campaign gone, left out; every other answer is checked.
   const skip = options.expired === "skip";

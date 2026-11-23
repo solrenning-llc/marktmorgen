@@ -12,7 +12,7 @@
  *     `UK_VAT_RATE` in lib/uk-vat.ts, read on gov.uk/vat-rates). Anything else is refused, never 0%: "Exempt", a rate
  *     with a condition ("0% or 5%", "Exempt if ..."), "Outside the scope of VAT" and "The same rate as the goods ...",
  *     whose condition this table does not hold; a row whose own note says some of its items are at another rate
- *     ("Some items are ...", "But ..."); a row the table does not have; two rows that disagree; and any day
+ *     ("Some items are ...", "But ..."); a row that covers only "certain" goods it does not name; a row the table does not have; two rows that disagree; and any day
  *     past `UK_VAT_PRODUCT_RATES_VALID_UNTIL`, before which the page is read again at the source, with the date.
  *
  * Pure. Nothing calls it yet: which row a store's product falls under is the next step, and collecting UK VAT stays off
@@ -56,8 +56,15 @@ const realDay = (value: unknown): value is string => {
  */
 const PART_AT_ANOTHER_RATE = /^(?:some items\b|but\b)/i;
 
-function basisPointsOf(rate: string, more: string): number | null {
+/**
+ * A row that covers only "certain" goods ("Certain goods sold at charitable fundraising events", "... and certain low
+ * vision aids"): which ones is not in this table, so the row gives no rate (Claude 2 lpgvy on #5045).
+ */
+const ONLY_CERTAIN_ITEMS = /\bcertain\b/i;
+
+function basisPointsOf(rate: string, more: string, item: string): number | null {
   if (typeof more !== "string" || PART_AT_ANOTHER_RATE.test(more.trim())) return null;
+  if (typeof item !== "string" || ONLY_CERTAIN_ITEMS.test(item)) return null;
   if (rate === "0%") return 0;
   if (rate === "5%") return 500;
   if (rate === "Standard-rated") return UK_VAT_RATE.basisPoints;
@@ -73,7 +80,7 @@ export function ukProductRateBps(section: string, item: string, day: string, tab
   if (typeof section !== "string" || typeof item !== "string" || !Array.isArray(table)) return null;
   const rows = table.filter((row) => row && row.section === section && row.item === item);
   if (rows.length === 0) return null;
-  const rates = new Set(rows.map((row) => basisPointsOf(row.rate, row.more)));
+  const rates = new Set(rows.map((row) => basisPointsOf(row.rate, row.more, row.item)));
   if (rates.size !== 1) return null;
   const [rate] = rates;
   return rate ?? null;

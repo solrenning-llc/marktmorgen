@@ -2722,8 +2722,8 @@ export function studioStats(
   stats: Stats,
   sales: SalesStats | null,
   salesState: StatsData["sales"],
-  /** The products to list (productsInStats), read by the caller; the store record's own when not given. */
-  listings: Listing[] = recordListings(store),
+  /** The products to list (productsInStats), read by the caller; the store record's own when not given. Only the id and the title are read. */
+  listings: Pick<Listing, "id" | "title">[] = recordListings(store),
 ): StatsData {
   const w: Record<RangeKey, WindowStats> = { ...stats.windows, all: stats.life ?? EMPTY_WINDOW };
   const days = stats.days.map((day) => ({ ...day, sales: sales?.byDay[day.date]?.sales ?? 0 }));

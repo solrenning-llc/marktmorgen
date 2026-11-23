@@ -19,7 +19,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { POST as kitPost } from "@/app/api/store/kit/route";
 import { POST as linksPost } from "@/app/api/store/numbers-links/route";
 import { makeLink } from "@/lib/numbers-links";
-import { addNumbersLink, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { addNumbersLink, addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { STORE_READINGS_PER_DAY, keptSales, keptStats } from "@/lib/store-readings";
 import { readVerified, refreshVerified, sendVerified } from "@/lib/verified-numbers";
 import { paidPeriod } from "./billing-period-fixture";
@@ -155,6 +155,32 @@ async function main(): Promise<void> {
     is("the link is made (200) and the record kept", [run.result.status, recordKept(store)], [200, 1]);
     is("no counts were read past the kept copy", run.counts, 0);
     is(`its billed commands, padded (${measured}), stay within ${envelope} and the line's ${VERIFIED_RECORD_EXTRA_COMMANDS} more`, measured <= envelope + VERIFIED_RECORD_EXTRA_COMMANDS, true);
+  }
+
+  part("A product that sold is in the record, from the studio and from the daily pass (review of #5270)");
+  {
+    // The kept sales copy names one product with sales; the record lists it by its title, with no listing read.
+    const sold = async (): Promise<Store> => {
+      await liveStore();
+      await setStripeAccount(OWNER, "acct_1TestVerKept1", true);
+      const made = await addProduct(OWNER, "Fictional Field Guide", "A synthetic guide.", "50");
+      if (!made.ok) throw new Error("no product");
+      const store = (await storeForEmail(OWNER))!;
+      await refreshVerified(store, NOW);
+      const copyKey = `nl:reading:sales:${store.statsId}`;
+      const copy = JSON.parse(String(redis.run(["GET", copyKey])));
+      const one = { sales: 1, cents: 5000 };
+      copy.value.byProduct = { [made.product.id]: { d7: one, d30: one, d90: one } };
+      copy.value.totals = { d7: one, d30: one, d90: one };
+      redis.run(["SET", copyKey, JSON.stringify(copy)]);
+      return store;
+    };
+    const fromStudio = await refreshVerified(await sold(), NOW);
+    is("from the studio: the product that sold is listed by its title", fromStudio?.products.map((p) => [p.title, p.sales, p.cents]), [["Fictional Field Guide", 1, 5000]]);
+    const store = await sold();
+    redis.run(["DEL", `nl:verified:${store.statsId}`, "nl:verified:cursor"]);
+    await sendVerified(Date.now() + 60_000);
+    is("from the daily pass: the product that sold is listed by its title", (await readVerified(store))?.products.map((p) => [p.title, p.sales, p.cents]), [["Fictional Field Guide", 1, 5000]]);
   }
 
   done();

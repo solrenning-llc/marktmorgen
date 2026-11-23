@@ -24,10 +24,10 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { types } from "node:util";
 import { keptSales, keptStats, salesCopy, statsCopy } from "@/lib/store-readings";
-import { readSales, readStats, readsSales, studioStats } from "@/lib/stats";
+import { productsInStats, readSales, readStats, readsSales, studioStats } from "@/lib/stats";
 import { readTitles } from "@/lib/catalog";
 import { type Store, storesAfter } from "@/lib/store";
-import type { StatsData } from "@/lib/stats";
+import type { SalesStats, Stats, StatsData } from "@/lib/stats";
 import { paidFiguresComplete } from "@/lib/paid-coverage";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 
@@ -138,14 +138,25 @@ export async function readVerified(store: Pick<Store, "statsId">): Promise<Verif
  *   that shows them.
  * The record carries the day its oldest part was read, never a later one. Null when no visits are known.
  */
-async function numbersForRecord(store: Store, now: number, how: "take" | "pass"): Promise<{ data: StatsData; at: number } | null> {
+async function numbersForRecord(store: Store, now: number, how: "take" | "pass"): Promise<NumbersRead | null> {
   const pass = how === "pass";
   const stats = pass ? (await statsCopy(store)) ?? (await passReading(() => readStats(store, now), now)) : await keptStats(store, now).catch(() => null);
   if (!stats?.value) return null;
-  if (!readsSales(store)) return { data: studioStats(store, stats.value, null, "none", []), at: stats.at };
+  if (!readsSales(store)) return { stats: stats.value, sales: null, state: "none", at: stats.at };
   const sales = pass ? (await salesCopy(store)) ?? (await passReading(() => readSales(store, now), now)) : await keptSales(store, now).catch(() => null);
-  if (!sales?.value) return { data: studioStats(store, stats.value, null, "error", []), at: stats.at };
-  return { data: studioStats(store, stats.value, sales.value, "ok", []), at: Math.min(stats.at, sales.at) };
+  if (!sales?.value) return { stats: stats.value, sales: null, state: "error", at: stats.at };
+  return { stats: stats.value, sales: sales.value, state: "ok", at: Math.min(stats.at, sales.at) };
+}
+
+type NumbersRead = { stats: Stats; sales: SalesStats | null; state: StatsData["sales"]; at: number };
+
+/**
+ * The studio's numbers for the record, with the products they name (productsInStats) listed by the titles already
+ * read: no listing is read for them, and a product that sold is never left out of the record (review of #5270).
+ */
+export function recordNumbers(store: Store, read: NumbersRead, titles: Map<string, string>): StatsData {
+  const listed = productsInStats(store, read.stats, read.sales).map((id) => ({ id, title: titles.get(id) ?? "" }));
+  return studioStats(store, read.stats, read.sales, read.state, listed);
 }
 
 /** The daily pass's own reading of the day, when the studio kept no copy (priced in the verified-numbers line). */
@@ -164,7 +175,7 @@ export async function refreshVerified(store: Store, now = Date.now(), how: "take
   const read = await numbersForRecord(store, now, how);
   if (!read) return null;
   const titles = await readTitles(store).catch(() => new Map<string, string>());
-  const record = verifiedFrom(read.data, titles, read.at);
+  const record = verifiedFrom(recordNumbers(store, read, titles), titles, read.at);
   // Kept only when Redis said OK: another reply leaves the record unknown, never counted as kept (CX-123 rule 24).
   const kept = repliesFor(await redisPipeline([["SET", key(store.statsId), JSON.stringify(record), "EX", KEEP_SECONDS]]), 1);
   if (kept?.[0] !== "OK") throw new UnknownReplyError("keeping the shared numbers");

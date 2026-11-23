@@ -6,7 +6,10 @@
  * `amount_refunded` as 0 and a missing `currency` as "usd" and sent it, once
  * and for good (the event's once-only mark): the creator's books, fed by the
  * endpoint, recorded a sale of nothing. Now such an event waits, as one whose
- * shape our code does not know, and the events before it are sent as they were.
+ * shape our code does not know, and the events before it are sent as they were;
+ * once Stripe gives it whole it is sent, so it waited rather than being passed
+ * over. A discount is read only for a store that hears sale.completed, the one
+ * event that sends it (LEVEs 1 and 2 of #5206's triple audit).
  * Synthetic Stripe answers only; the endpoint resolves to a private address.
  */
 import { addEndpoint, recentMessages, setSendHooksForTests, watchStripe } from "@/lib/webhooks";
@@ -81,6 +84,27 @@ async function main() {
     await watchStripe(Date.now() + 10_000);
     const sent = (await recentMessages(store, "sale.completed", 10)).map((m) => m.data as Record<string, unknown>);
     is(`${what}: the whole one before it is sent as it was, and it is not sent at $0 or in dollars`, sent.map((d) => [d.checkout_session, d.amount_cents, d.currency]), [["cs_good01", 4900, "eur"]]);
+    // It waits, not passed over (LEVE 2 of #5206's triple audit): read again once whole, it is sent, and only once.
+    events = [
+      { id: "evt_Bad01", type: "checkout.session.completed", created: 1_790_000_100, data: { object: session("cs_bad01") } },
+      { id: "evt_Good01", type: "checkout.session.completed", created: 1_790_000_000, data: { object: session("cs_good01") } },
+    ];
+    await watchStripe(Date.now() + 10_000);
+    const later = (await recentMessages(store, "sale.completed", 10)).map((m) => String((m.data as Record<string, unknown>).checkout_session)).sort();
+    is(`${what}: it waited, so once Stripe gives it whole it is sent, and the one before it is not sent again`, later, ["cs_bad01", "cs_good01"]);
+  }
+
+  part("A discount nobody hears never holds a membership's start (LEVE 1 of #5206's triple audit)");
+  for (const [what, totals] of [["missing", undefined], ["as text", { amount_discount: "0" }], ["fractional", { amount_discount: 0.5 }]] as [string, unknown][]) {
+    const store = await setup(["membership.started"]);
+    const name = what.replace(" ", "");
+    const object: Record<string, unknown> = { id: `cs_start_${name}`, object: "checkout.session", mode: "subscription", status: "complete", payment_status: "paid", amount_total: 6900, currency: "usd", subscription: `sub_Start${name}`, customer_details: { email: "member@example.com", name: "Member" }, metadata: { store: HANDLE, product: "p_member" } };
+    if (totals !== undefined) object.total_details = totals;
+    events = [{ id: `evt_Start${name}`, type: "checkout.session.completed", created: 1_790_000_200, data: { object } }];
+    await watchStripe(Date.now() + 10_000);
+    const started = (await recentMessages(store, "membership.started", 10)).map((m) => m.data as Record<string, unknown>);
+    is(`a discount ${what}: the membership's start is sent, with its amount`, started.map((d) => [d.subscription, d.amount_cents, d.currency]), [[`sub_Start${name}`, 6900, "usd"]]);
+    is(`a discount ${what}: no sale.completed, which nobody hears`, (await recentMessages(store, "sale.completed", 10)).length, 0);
   }
 
   part("A one-click offer");
@@ -119,6 +143,14 @@ async function main() {
     await watchStripe(Date.now() + 10_000);
     const sent = (await recentMessages(store, "refund.issued", 10)).map((m) => m.data as Record<string, unknown>);
     is(`its previous refunded amount is ${what}: only the whole one is sent`, sent.map((d) => [d.charge, d.amount_refunded_cents]), [["ch_GoodRefund", 1000]]);
+    // It waits, not passed over (LEVE 2 of #5206's triple audit): read again once whole, it is sent, and only once.
+    events = [
+      { id: "evt_BadRefund", type: "charge.refunded", created: 1_790_002_100, data: { object: refund("ch_BadRefund"), previous_attributes: { amount_refunded: 0 } } },
+      { id: "evt_GoodRefund", type: "charge.refunded", created: 1_790_002_000, data: { object: refund("ch_GoodRefund"), previous_attributes: { amount_refunded: 0 } } },
+    ];
+    await watchStripe(Date.now() + 10_000);
+    const later = (await recentMessages(store, "refund.issued", 10)).map((m) => String((m.data as Record<string, unknown>).charge)).sort();
+    is(`its previous refunded amount is ${what}: it waited, so once whole it is sent, and the one before it is not sent again`, later, ["ch_BadRefund", "ch_GoodRefund"]);
   }
 
   part("A dispute");

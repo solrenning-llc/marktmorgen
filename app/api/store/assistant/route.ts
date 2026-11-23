@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
       case "handoff": {
         if (!(await withinStore("assist-handoff", who, 5, 3_600, store))) return slow();
         const result = await handToCreator({ store, token: body.token, email: body.email, name: body.name, text: body.text });
-        if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: result.reason === "limited" ? 429 : 400 });
+        if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: result.reason === "limited" ? 429 : result.reason === "error" ? 503 : 400 });
         return Response.json({ ok: true, thread: result.thread }, noStore);
       }
       default:

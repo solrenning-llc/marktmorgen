@@ -451,7 +451,7 @@ function jsonOf(text: string): Record<string, unknown> | null {
  * typed to be answered (lib/inbox.ts, handOver). No model is asked: this is
  * what the chat becomes when the month's pool is spent, and costs no AI.
  */
-export async function handToCreator(input: { store: Store; token?: unknown; email: unknown; name?: unknown; text: unknown; now?: number }): Promise<{ ok: true; thread: AssistantThread | null } | { ok: false; reason: "off" | "question" | "email" | "limited" | "closed" }> {
+export async function handToCreator(input: { store: Store; token?: unknown; email: unknown; name?: unknown; text: unknown; now?: number }): Promise<{ ok: true; thread: AssistantThread | null } | { ok: false; reason: "off" | "question" | "email" | "limited" | "closed" | "error" }> {
   const { store } = input;
   const now = input.now ?? Date.now();
   if (!assistantShown(store, now) || !store.statsId) return { ok: false, reason: "off" };
@@ -471,7 +471,9 @@ export async function handToCreator(input: { store: Store; token?: unknown; emai
     .join("\n\n")
     .slice(0, 2_000);
   const filed = await handOver({ store, email: input.email, name: input.name ?? "", text, now });
-  if (!filed.ok) return { ok: false, reason: filed.reason === "email" ? "email" : filed.reason === "limited" ? "limited" : filed.reason === "short" ? "question" : "closed" };
+  // An inbox count that could not be read is "error", to try again (rule 24; Claude 3's LEVE on #2674): never "closed",
+  // which tells the buyer the store takes no messages.
+  if (!filed.ok) return { ok: false, reason: filed.reason === "email" ? "email" : filed.reason === "limited" ? "limited" : filed.reason === "short" ? "question" : filed.reason === "error" ? "error" : "closed" };
   if (thread) {
     const turns: AssistantTurn[] = [...thread.turns, ...(question ? [{ at: now, from: "buyer" as const, text: forAi(question, 600) }] : []), { at: now, from: "ai", text: assistantWords(store.language).handoffDone(store.name), status: "sent" }];
     await keepThread(store.statsId, thread.token, turns);

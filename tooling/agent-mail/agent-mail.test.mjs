@@ -1148,27 +1148,71 @@ console.log("the owner's HOLD: only the named session releases it, on a coordina
   is("an owner's line under another family's session is not an owner's HOLD either", /#21: HOLD por/.test(st21()) && !/HOLD do dono/.test(st21()), st21());
 }
 
-console.log("a family with commits on the PR neither takes nor declines its queue request (coordinator 605b and 49de), save the 4acb exception");
+console.log("queue: only the author's family and the head's reviewers are left out; a family with commits takes it (owner 0410, 3 (b))");
 {
   g(["init", "-q", "--bare", "mail63.git"]); g(["push", "-q", "../mail63.git", "HEAD:refs/heads/correio"], join(T, "w"));
   const m63 = { CORREIO_REPO: join(T, "mail63.git"), CORREIO_GIT_DIR: join(T, "dir63.git"), CORREIO_SEM_COMMITS: "" };
   const c4trailer = "\n\nClaude-Session: https://claude.ai/code/session_01S9eVA3KcXUkc6qPJmpNg4a";
   g(["checkout", "-q", "-B", "pr63", M], P); const H63 = commit("f63.txt", "63\n", `pr63 by Claude 4${c4trailer}`);
-  g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-63", "HEAD:refs/pull/63/head"], P);
+  g(["push", "-q", "../prs.git", "HEAD:refs/heads/claude2/feature-63", "HEAD:refs/pull/63/head"], P);
   r = run(["request-enqueue", "--from", "Claude 2", "--pr", "63", "--sha", H63, "--text", "fila #63"], { ...m63, ...as("c2") });
-  is("request-enqueue lists the families with commits as left out of the queue", r.ok && /famílias com commits no PR \(ficam de fora, coordenador 605b e 49de\): claude-4/.test(r.out) && /podem enfileirar[^\n]*: (?![^\n]*claude-4)/.test(r.out), r.out);
+  is("request-enqueue no longer leaves the families with commits out of the queue", r.ok && /podem enfileirar[^\n]*: [^\n]*claude-4/.test(r.out) && !/605b/.test(r.out) && !/4acb/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 2 Y"], { ...m63, ...as("c2") });
+  is("the author's own family still does not take it", !/pegou/.test(r.out) && /é da sua família/.test(r.out), r.out);
   r = run(["claim-enqueue", "--as", "Claude 4 X"], { ...m63, ...as("c4") });
-  is("a family with commits on the PR does not take its queue request, and is told who can", !/pegou/.test(r.out) && /tem commits da sua família/.test(r.out) && /podem: [^\n]*claude-7/.test(r.out), r.out);
-  r = run(["claim-enqueue", "--as", "Claude 7 X"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" });
-  is("a family with no commit takes it", /pegou/.test(r.out) && !/EXCEÇÃO 4acb/.test(r.out), r.out);
-  run(["complete-enqueue", "--as", "Claude 7 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" });
-  // The 4acb exception: every family outside the author has commits or reviewed the head (here, left out with --exclude).
+  is("a family with commits on the PR, not the author's nor a reviewer, takes its queue request", /pegou/.test(r.out) && !/EXCEÇÃO 4acb/.test(r.out) && !/tem commits da sua família/.test(r.out), r.out);
+  run(["complete-enqueue", "--as", "Claude 4 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], { ...m63, ...as("c4") });
+  // The branch prefix names the author too: a PR on claude7/... asked by an adopting Claude 2 leaves both families out.
   g(["checkout", "-q", "-B", "pr64", M], P); const H64 = commit("f64.txt", "64\n", `pr64 by Claude 4${c4trailer}`);
-  g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-64", "HEAD:refs/pull/64/head"], P);
-  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "64", "--sha", H64, "--exclude", "Claude 1,Claude 3,Claude 5,Claude 6,Claude 7,Codex", "--text", "fila #64"], { ...m63, ...as("c2") });
-  is("with no family left, request-enqueue names the 4acb exception's families", r.ok && /exceção 4acb do coordenador \(só na vez de custo, com nota no PR\): claude-4/.test(r.out), r.out);
+  g(["push", "-q", "../prs.git", "HEAD:refs/heads/claude7/adopted-64", "HEAD:refs/pull/64/head"], P);
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "64", "--sha", H64, "--text", "fila #64"], { ...m63, ...as("c2") });
+  is("request-enqueue names the branch's family as the author too", r.ok && /família do ramo do PR \(claude-7\)/.test(r.out) && /podem enfileirar[^\n]*: (?![^\n]*claude-7)[^\n]*claude-4/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 7 X"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" });
+  is("the family of the PR's branch does not take it", !/pegou/.test(r.out) && /ramo da sua família \(claude7\/adopted-64\)/.test(r.out), r.out);
   r = run(["claim-enqueue", "--as", "Claude 4 X"], { ...m63, ...as("c4") });
-  is("then the family with commits takes it, warned that it is the 4acb exception (cost turn, note on the PR)", /pegou/.test(r.out) && /EXCEÇÃO 4acb/.test(r.out) && /escreva no próprio PR/.test(r.out), r.out);
+  is("and a family with commits, outside both, takes it", /pegou/.test(r.out), r.out);
+  run(["complete-enqueue", "--as", "Claude 4 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], { ...m63, ...as("c4") });
+  // A branch with no family prefix (claude/...): the family with most commits is the author (coordinator, dd03).
+  g(["checkout", "-q", "-B", "pr65", M], P); commit("f65a.txt", "65\n", `pr65 by Claude 4${c4trailer}`); const H65 = commit("f65b.txt", "65\n", `pr65 again by Claude 4${c4trailer}`);
+  g(["push", "-q", "../prs.git", "HEAD:refs/heads/claude/no-family-65", "HEAD:refs/pull/65/head"], P);
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "65", "--sha", H65, "--text", "fila #65"], { ...m63, ...as("c2") });
+  is("with no family in the branch, request-enqueue names the family with most commits as the author", r.ok && /mais commits no PR, num ramo sem prefixo de família \(claude-4\)/.test(r.out) && /podem enfileirar[^\n]*: (?![^\n]*claude-4)/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 4 X"], { ...m63, ...as("c4") });
+  is("and claim-enqueue does not hand it to that family", !/pegou/.test(r.out) && /maior parte dos commits da sua família/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 7 X"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" });
+  is("but another family takes it", /pegou/.test(r.out), r.out);
+  run(["complete-enqueue", "--as", "Claude 7 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" });
+  // LEVE of Claude 4 AC on #5284: merges do not count for the dominant family. Two author commits (Claude 4), then an
+  // adopter (Claude 2) merges main three times and asks for the queue: the author is still Claude 4, and is refused.
+  const c2trailer = "\n\nClaude-Session: https://claude.ai/code/session_01FR6Z1Q87JZvTFBRpZ8SNo8";
+  g(["fetch", "-q", "../prs.git", "main"], P); let mainAgora = g(["rev-parse", "FETCH_HEAD"], P);
+  g(["checkout", "-q", "-B", "pr66", mainAgora], P); commit("f66a.txt", "66\n", `pr66 by Claude 4${c4trailer}`); commit("f66b.txt", "66\n", `pr66 again by Claude 4${c4trailer}`);
+  for (const k of [1, 2, 3]) {
+    g(["checkout", "-q", "-B", "main66", mainAgora], P); mainAgora = commit(`main66-${k}.txt`, `${k}\n`, `main ${k}`); g(["push", "-q", "../prs.git", "HEAD:refs/heads/main"], P);
+    g(["checkout", "-q", "pr66"], P); g(["-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-ff", "-m", `Merge main ${k} (adopted by Claude 2)${c2trailer}`, mainAgora], P);
+  }
+  const H66 = g(["rev-parse", "HEAD"], P);
+  g(["push", "-q", "../prs.git", "HEAD:refs/heads/claude/adopted-66", "HEAD:refs/pull/66/head"], P);
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "66", "--sha", H66, "--text", "fila #66"], { ...m63, ...as("c2") });
+  is("an adopter's merges of main do not make it the author: the family with most non-merge commits is", r.ok && /mais commits no PR, num ramo sem prefixo de família \(claude-4\)/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 4 X"], { ...m63, ...as("c4") });
+  is("and the real author's family is refused the queue request of its own PR", !/pegou/.test(r.out) && /maior parte dos commits da sua família/.test(r.out), r.out);
+  for (const id of (run(["list-queue"], m63).out.match(/^\S+/gm) ?? [])) run(["cancel-enqueue", "--as", "Claude 2", id, "--reason", "fim do caso"], { ...m63, ...as("c2") });
+  // LEVE of Claude 2 lpgvy on #5284: a PR made only of merges (no commit of its own) counts them again, so it has an author.
+  g(["fetch", "-q", "../prs.git", "main"], P); let base67 = g(["rev-parse", "FETCH_HEAD"], P);
+  g(["checkout", "-q", "-B", "pr67", base67], P);
+  for (const k of [1, 2]) {
+    g(["checkout", "-q", "-B", "main67", base67], P); base67 = commit(`main67-${k}.txt`, `${k}\n`, `main67 ${k}`); g(["push", "-q", "../prs.git", "HEAD:refs/heads/main"], P);
+    g(["checkout", "-q", "pr67"], P); g(["-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-ff", "-m", `Merge main ${k}${c2trailer}`, base67], P);
+  }
+  g(["checkout", "-q", "-B", "main67", base67], P); base67 = commit("main67-3.txt", "3\n", "main67 3"); g(["push", "-q", "../prs.git", "HEAD:refs/heads/main"], P);
+  g(["checkout", "-q", "pr67"], P);
+  const H67 = g(["rev-parse", "HEAD"], P);
+  g(["push", "-q", "../prs.git", "HEAD:refs/heads/claude/merges-only-67", "HEAD:refs/pull/67/head"], P);
+  r = run(["request-enqueue", "--from", "Claude 5", "--pr", "67", "--sha", H67, "--text", "fila #67"], { ...m63, ...as("c5") });
+  is("a PR made only of merges still has an author: the family of its merges", r.ok && /mais commits no PR, num ramo sem prefixo de família \(claude-2\)/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 2 Y"], { ...m63, ...as("c2") });
+  is("and that family is refused the queue request", !/pegou/.test(r.out) && /maior parte dos commits da sua família/.test(r.out), r.out);
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

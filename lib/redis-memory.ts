@@ -3825,6 +3825,20 @@ export class MemoryRedis {
           this.run(["SET", state, next]);
           return 1;
         }
+        // lib/store-data.ts TAKE_DATA_KEEP: the take, then one slot raised back to the count still kept, in one step.
+        if (key.startsWith("-- marktmorgen:store-data-take-keep:v1\n") && args[0] === "1") {
+          const inner = args.slice(1, -3);
+          const [slot, newRaw, keepRaw] = args.slice(-3);
+          const fresh = Number(newRaw);
+          const keep = Number(keepRaw);
+          const named = (() => { for (let i = 4; i < inner.length; i += 3) if (inner[i] === "s" && inner[i + 1] === slot && Number(inner[i + 2]) === fresh) return true; return false; })();
+          if (!slot || slot === "#" || slot.startsWith("~") || !Number.isSafeInteger(fresh) || !Number.isSafeInteger(keep) || fresh < 0 || keep < fresh || !named) return [-1, 0];
+          const taken = this.storeData(inner) as [number, number];
+          if (!Array.isArray(taken) || taken[0] !== 1 || keep === fresh) return taken;
+          const total = taken[1] + (keep - fresh) + (fresh === 0 ? 64 : 0);
+          this.run(["HSET", inner[0], slot, String(keep), "#", String(total)]);
+          return [1, total];
+        }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:store-for-hit:v1\n") && args[0] === "1" && args.length === 5) return this.storeForHit(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);

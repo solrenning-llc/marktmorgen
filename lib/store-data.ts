@@ -197,6 +197,38 @@ if total < 0 then total = 0 end
 keep()
 return {1, total}`;
 
+/**
+ * TAKE_DATA, then one slot kept at a larger count than the take set it to, in the same step (triple audit on #4238
+ * @5bb7b1a78e, LEVE 3). For a write whose new size is checked against the room now but whose old, larger content is
+ * still kept until the write lands: a product's description made shorter while its title grows. The take sets the slot
+ * to its new size, so the room's check frees what the shorter text frees; then, only when it was taken, the slot and the
+ * total are raised back to the larger count, so the room never counts less than is kept. The caller lowers it to the
+ * new size once the write is confirmed (noteData). ARGV is TAKE_DATA's, then the slot, its new size (which must be a
+ * set of that slot to that size in the take) and the count kept. One command more than TAKE_DATA: one HSET of the slot
+ * and the total.
+ */
+export const TAKE_DATA_KEEP = `-- marktmorgen:store-data-take-keep:v1
+local slot = ARGV[#ARGV - 2]
+local new = tonumber(ARGV[#ARGV - 1])
+local keep = tonumber(ARGV[#ARGV])
+if type(slot) ~= 'string' or slot == '' or slot == '#' or slot == '~' or string.sub(slot, 1, 1) == '~' or not new or not keep or new < 0 or keep < new or new ~= math.floor(new) or keep ~= math.floor(keep) then return {-1, 0} end
+local inner = {}
+for i = 1, #ARGV - 3 do inner[i] = ARGV[i] end
+local named = false
+for i = 4, #inner, 3 do
+  if inner[i] == 's' and inner[i + 1] == slot and tonumber(inner[i + 2]) == new then named = true end
+end
+if not named then return {-1, 0} end
+local function take(ARGV)
+${TAKE_DATA}
+end
+local taken = take(inner)
+if taken[1] ~= 1 or keep == new then return taken end
+local total = taken[2] + (keep - new)
+if new == 0 then total = total + 64 end
+redis.call('HSET', KEYS[1], slot, keep, '#', total)
+return {1, total}`;
+
 /** "2026-10": the UTC month a time falls in, what TAKE_DATA's month slots are named by. */
 export function monthOf(ms: number): string {
   return new Date(ms).toISOString().slice(0, 7);
@@ -248,7 +280,7 @@ export function dataTakenOf(store: DataStore, reply: unknown, nowSeconds = Date.
 type DataMode = "take" | "count" | "give";
 const MODE_ARG: Record<DataMode, string> = { take: "0", count: "1", give: "2" };
 
-async function run(store: DataStore, changes: DataChange[], mode: DataMode, nowSeconds: number, pool = false): Promise<DataTaken> {
+async function run(store: DataStore, changes: DataChange[], mode: DataMode, nowSeconds: number, pool = false, keep?: { slot: string; bytes: number; kept: number }): Promise<DataTaken> {
   const room = dataRoomFor(store, nowSeconds);
   const unknown = (used = 0): DataTaken => ({ ok: false, reason: "unknown", used, room, message: "This can't be saved right now. Try again in a minute." });
   if (changes.length === 0) return { ok: true, used: 0 };
@@ -257,7 +289,11 @@ async function run(store: DataStore, changes: DataChange[], mode: DataMode, nowS
   if (!key || !args || !isRedisConfigured()) return unknown();
   try {
     const limit = pool ? besidePoolFor(store, nowSeconds) : contentRoomFor(store, nowSeconds);
-    const [reply] = await redisPipeline([["EVAL", TAKE_DATA, 1, key, limit, MODE_ARG[mode], monthOf(nowSeconds * 1000), ...args]]);
+    const [reply] = await redisPipeline([
+      keep
+        ? ["EVAL", TAKE_DATA_KEEP, 1, key, limit, MODE_ARG[mode], monthOf(nowSeconds * 1000), ...args, keep.slot, Math.ceil(keep.bytes), Math.ceil(keep.kept)]
+        : ["EVAL", TAKE_DATA, 1, key, limit, MODE_ARG[mode], monthOf(nowSeconds * 1000), ...args],
+    ]);
     return dataTakenOf(store, reply, nowSeconds);
   } catch (error) {
     console.error("could not count a store's data", error);
@@ -283,6 +319,14 @@ export class DataRoomError extends StoreFullError {
  */
 export function takeData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<DataTaken> {
   return run(store, changes, "take", now / 1000);
+}
+
+/**
+ * takeData, with one slot set to `keep.bytes` for the room's check and kept at `keep.kept` (the larger count of what is
+ * still written) once taken, in the same step (TAKE_DATA_KEEP). `changes` must set that slot to `keep.bytes`.
+ */
+export function takeDataKeeping(store: DataStore, changes: DataChange[], keep: { slot: string; bytes: number; kept: number }, now = Date.now()): Promise<DataTaken> {
+  return run(store, changes, "take", now / 1000, false, keep);
 }
 
 /** The same, throwing DataRoomError when it is not taken, for a write that has nothing to say but no. */

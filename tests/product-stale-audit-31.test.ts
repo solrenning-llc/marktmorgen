@@ -14,7 +14,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, editProduct, ensureStatsId, ensureStoreId, setProductAbout, setProductSummary, setProductTitle, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { dataKey } from "@/lib/store-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { contentRoomFor, dataBytes } from "@/lib/store-data-rules";
 import { readAbout } from "@/lib/product-about";
 import { PRODUCT_DESCRIPTION } from "@/lib/agent-kinds";
 import { store as redis } from "./redis-stub";
@@ -226,6 +226,38 @@ async function main() {
   is("and its words are what is kept", [(await readListing((await storeForEmail(owner))!, id))!.title, await readAbout((await storeForEmail(owner))!.statsId, id)], ["The next save's title", "the next save's words"]);
   const late = await save({ ...form, rev: shownRev, title: "A tab opened before both" });
   is("a form opened before a save that went through is still refused as stale", [late.status, late.body.error], [409, "stale"]);
+
+  part("10. At the room's limit, a shorter description frees room for the same save, and the slot never counts less (LEVE 3)");
+  const longText = "L".repeat(4_000);
+  const longSaved = await save({ ...form, rev: await revNow(), title: "Agent title", about: longText });
+  is("a long description is saved", longSaved.status, 200);
+  const longBytes = dataBytes([longText], 1);
+  const limit = contentRoomFor((await storeForEmail(owner))!);
+  // The room filled to 20 bytes short of its limit: the title grows by 50 bytes while the description shrinks by ~4,000.
+  const filler = limit - 20 - Number((await plain([["HGET", room, "#"]]))[0]);
+  await plain([["HSET", room, "filler", String(filler)], ["HINCRBY", room, "#", filler + 64]]);
+  const shorter = await save({ ...form, rev: await revNow(), title: "Agent title" + "t".repeat(50), about: "short now" });
+  is("shortening the description and lengthening the title in one save goes through", [shorter.status, shorter.body.ok], [200, true]);
+  is("the slot counts the new text once written", Number((await plain([["HGET", room, slot]]))[0]), dataBytes(["short now"], 1));
+  // The same, with the store's lock lost after the take: the long text stays, and so does its count.
+  await plain([["HDEL", room, "filler"], ["HINCRBY", room, "#", -(filler + 64)]]);
+  const again = await save({ ...form, rev: await revNow(), title: "Agent title", about: longText });
+  is("the long text is saved again", again.status, 200);
+  const refill = limit - 20 - Number((await plain([["HGET", room, "#"]]))[0]);
+  await plain([["HSET", room, "filler", String(refill)], ["HINCRBY", room, "#", refill + 64]]);
+  let dropAgain = true;
+  redis.pipeline = async (commands) => {
+    const extend = commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:extend:v1") && String(c[3]).startsWith("nl:store:lock:"));
+    if (extend && dropAgain) {
+      dropAgain = false;
+      return commands.map(() => 0);
+    }
+    return plain(commands);
+  };
+  let stopped: Answer;
+  try { stopped = await save({ ...form, rev: await revNow(), title: "Agent title" + "t".repeat(50), about: "short now" }); } finally { redis.pipeline = plain; }
+  is("a shrinking save stopped after its take does not go through", stopped.body.ok === true, false);
+  is("the long text is still kept, and its slot still counts it", [await readAbout((await storeForEmail(owner))!.statsId, id), Number((await plain([["HGET", room, slot]]))[0]) >= longBytes], [longText, true]);
   done();
 }
 

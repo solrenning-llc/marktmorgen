@@ -164,7 +164,7 @@ import {
 } from "@/lib/catalog";
 import { type Announcement, type StoreSection, parseAnnouncement, parseSections, sectionsWithout } from "@/lib/store-sections";
 import { type VisitUs, parseVisitUs, readVisitUs } from "@/lib/visit-us";
-import { besideHeld, besideSwept, dataKey, giveBeside, giveData, markBesideSwept, noteData, poolTakeCommands, roomSlots, takeBeside, takeData, takeDataCommands } from "@/lib/store-data";
+import { besideHeld, besideSwept, dataKey, giveBeside, giveData, markBesideSwept, noteData, poolTakeCommands, roomSlots, takeBeside, takeData, takeDataCommands, takeDataKeeping } from "@/lib/store-data";
 import { BESIDE_PRODUCT_BYTES as BESIDE_PRODUCT, besidePoolFor, dataBytes } from "@/lib/store-data-rules";
 import { standingOf } from "@/lib/plan-standing";
 import { type Collection, type CollectionsProblem, MAX_PAIRS, collectionsWithout, parseCollections, readCollectionsInput, readProductIds } from "@/lib/store-collections";
@@ -2194,10 +2194,15 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
     // The description's room in the same take as the product's own, so the two are taken together or not at all: a
     // description that does not fit changes no slot, the product's record included (Claude 4 2Wb's MEDIUM on #4238
     // @249b11f056); and a save stopped before this point changes no room (31st triple audit, MEDIUM 2). As takeAboutRoom.
-    ...(change.about ? [{ slot: `ab:${change.about.product}`, bytes: Math.max(aboutCounted, aboutBytes), set: true }] : []),
+    // Checked at the new text's size, so a shorter description frees its room for the same save (triple audit on
+    // 5bb7b1a78e, LEVE 3: a store at its limit could not shorten the description and lengthen the title at once); kept,
+    // in the same step, at the larger count while the longer text is still what is written (TAKE_DATA_KEEP), so no
+    // failure after the take leaves the slot counting less than is kept.
+    ...(change.about ? [{ slot: `ab:${change.about.product}`, bytes: aboutBytes, set: true }] : []),
   ];
+  const aboutKeep = change.about && aboutCounted > aboutBytes ? { slot: `ab:${change.about.product}`, bytes: aboutBytes, kept: aboutCounted } : null;
   if (room.length) {
-    const taken = await takeData(before, room);
+    const taken = aboutKeep ? await takeDataKeeping(before, room, aboutKeep) : await takeData(before, room);
     if (!taken.ok) {
       // Only "full" says the room's script wrote nothing. An unreadable answer may come after it ran (a timeout, a
       // reply not read), the product then counted in the room without the share it carries outside the pool, so the
@@ -4221,10 +4226,11 @@ export type StudioProductParts = { intro?: Intro | null; yearly?: Yearly | null;
 
 /**
  * Commands a description write adds to the catalog commit for its room (36th triple audit on #4238, MEDIUM 1): the slot's
- * count read (HGET) before the take, and the take that sets it to the new text exactly once written (one slot). Priced in
- * tests/plan-cost-registry.ts aboutFenceUsd with ABOUT_FENCE_EXTRA_COMMANDS.
+ * count read (HGET) before the take, the one HSET by which a shorter text's take keeps the larger count until it is
+ * written (TAKE_DATA_KEEP, triple audit on 5bb7b1a78e, LEVE 3), and the take that sets it to the new text exactly once
+ * written (one slot). Priced in tests/plan-cost-registry.ts aboutFenceUsd with ABOUT_FENCE_EXTRA_COMMANDS.
  */
-export const ABOUT_ROOM_SETTLE_COMMANDS = 1 + takeDataCommands(1);
+export const ABOUT_ROOM_SETTLE_COMMANDS = 1 + 1 + takeDataCommands(1);
 
 /**
  * Whether a product's record is one revision past what its store lists only because the save that moved it stopped

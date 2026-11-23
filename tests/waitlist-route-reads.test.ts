@@ -30,8 +30,11 @@ const real = redis.pipeline.bind(redis);
 /** Bytes of every reply read from Redis while counting (a reply's JSON, as it crosses the wire). */
 let counting = false;
 let readBytes = 0;
+/** A reply changed in flight, for the unknown-reply checks below; null leaves every reply as Redis gave it. */
+let inject: ((batch: Command[], answers: unknown[]) => unknown[]) | null = null;
 redis.pipeline = (async (batch: Command[]) => {
-  const answers = await real(batch);
+  const real_answers = (await real(batch)) as unknown[];
+  const answers = inject ? inject(batch, real_answers) : real_answers;
   if (counting) readBytes += Buffer.byteLength(JSON.stringify(answers ?? null), "utf8");
   return answers;
 }) as typeof redis.pipeline;
@@ -117,6 +120,25 @@ async function main(): Promise<void> {
   is("nothing read past the list's size", short.bytes <= PAGE_INCLUDED_BYTES, true);
   is("still coming soon, no launch, no send list", [(await waitlistViews(store, [product.id]))[product.id]?.soon, (await waitlistViews(store, [product.id]))[product.id]?.launch, await real([["EXISTS", send]]).then((r) => r[0])], [true, null, 0]);
   if (spent > 0) await giveAllowance(await fresh(), "studio", spent);
+
+  part("Launch whose list size reads in another shape: unavailable (503), nothing taken past the guard's, nothing written");
+  const unknownBefore = await allowanceUsed(await fresh(), "studio");
+  inject = (batch, answers) => batch.map((c, i) => (c[0] === "HLEN" && c[1] === list ? "seven" : answers[i]));
+  const oddSize = await post(NOTE);
+  inject = null;
+  is("answered unavailable, never a 500", [oddSize.status, oddSize.answer.error], [503, "unavailable"]);
+  is("only the guard's own studio request taken", (await allowanceUsed(await fresh(), "studio")) - unknownBefore, 1);
+  is("still coming soon, no launch, no send list", [(await waitlistViews(store, [product.id]))[product.id]?.soon, (await waitlistViews(store, [product.id]))[product.id]?.launch, await real([["EXISTS", send]]).then((r) => r[0])], [true, null, 0]);
+
+  part("Launch that stops after its read (a job in another shape): what the read did not move is given back");
+  const stopBefore = await allowanceUsed(await fresh(), "studio");
+  inject = (batch, answers) => (batch.length === 2 && batch[0][0] === "GET" && batch[1][0] === "HGETALL" && batch[1][1] === list ? ["{not a job", answers[1]] : answers);
+  const stopped = await post(NOTE);
+  inject = null;
+  const stopPaid = (await allowanceUsed(await fresh(), "studio")) - stopBefore - 1;
+  is("the launch is refused, nothing written", [stopped.answer.ok, await real([["EXISTS", send]]).then((r) => r[0])], [false, 0]);
+  is(`fewer studio requests kept than were held (${stopPaid} of ${most})`, stopPaid < most, true);
+  is(`every byte the read moved past the request's own is still paid (${stopPaid})`, stopPaid * PAGE_INCLUDED_BYTES >= stopped.bytes - PAGE_INCLUDED_BYTES, true);
 
   part("Launch: the send list holds every confirmed address, sorted, and its read is paid for");
   const before = await allowanceUsed(await fresh(), "studio");

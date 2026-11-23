@@ -193,9 +193,12 @@ export function PaymentRequestsStudio({
   // One request's refunds read on their own, where the list was cut at its pages (lib/payment-requests.ts,
   // checkRequestRefunds): what each check said, kept on this page; the list itself never reads a payment on its own.
   const [refundChecks, setRefundChecks] = useState<Record<string, RefundCheckReply>>({});
+  // The server row's floor each check was asked over, so a failed check's sentence stands only beside that row.
+  const [checkedOver, setCheckedOver] = useState<Record<string, number>>({});
   async function checkRefunds(id: string) {
     if (busy) return;
     setBusy(`refunds:${id}`);
+    const over = given.find((g) => g.id === id)?.refunded ?? -1;
     let answer: RefundCheckReply;
     try {
       const response = await fetch("/api/store/payment-requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "refunds", id }) });
@@ -205,6 +208,7 @@ export function PaymentRequestsStudio({
     }
     setBusy("");
     setRefundChecks((all) => ({ ...all, [id]: answer }));
+    setCheckedOver((all) => ({ ...all, [id]: over }));
     // Said at once as every action's result is (the toast's live region), and kept beside the request in words.
     toast(answer.checked ? "Refunds checked on Stripe." : answer.message);
   }
@@ -221,6 +225,13 @@ export function PaymentRequestsStudio({
     return seen?.checked && checkHolds(r) ? { ...r, state: seen.state, refunded: seen.refunded, refundsChecked: true, refundsRetry: false, refundsOnDemand: false } : r;
   };
   const checkShown = new Set(given.filter(checkHolds).map((r) => r.id));
+  // A failed check's sentence stands, in the same way, only beside the row it was asked over: still paid, unchecked,
+  // offered on its own and at the same floor. A row whose reason or floor changed since gets the server's words.
+  const failHolds = (r: RequestRow): boolean => {
+    const seen = refundChecks[r.id];
+    return !!seen && !seen.checked && r.state === "paid" && !r.refundsChecked && r.refundsOnDemand && checkedOver[r.id] === r.refunded;
+  };
+  const failShown = new Set(given.filter(failHolds).map((r) => r.id));
   const rows = given.map(asChecked);
 
   // Paid outside Stripe (639 [GL7](30)): which request's form is open, and what it says.
@@ -406,6 +417,10 @@ export function PaymentRequestsStudio({
           {rows.map((r) => {
             const status = statusOf(r, now);
             const refundCheck = refundChecks[r.id];
+            // A check that holds is not dated, and a refund made since past the list's pages never reaches the server
+            // row, so it can be read again (Claude 6's LOW on #3291, 6757581119); not once it found the payment
+            // refunded in full, which has nothing more to read.
+            const checkAgain = !!refundCheck?.checked && refundCheck.state === "paid" && checkShown.has(r.id);
             // Paid on Stripe, but its refunds were not all read: never shown as surely not refunded.
             const unchecked = status === "paid" && !r.refundsChecked;
             const next = nextReminderAt(r, now);
@@ -434,7 +449,7 @@ export function PaymentRequestsStudio({
                   ].filter(Boolean).join(" · ")}
                 </p>
                 {r.failed && status === "open" ? <p className="mt-1 text-xs font-semibold text-danger">{r.failed}</p> : null}
-                {unchecked && refundCheck && !refundCheck.checked ? <p className="mt-1 text-sm text-ink [overflow-wrap:anywhere]">{refundCheck.message}</p> : null}
+                {refundCheck && !refundCheck.checked && failShown.has(r.id) ? <p className="mt-1 text-sm text-ink [overflow-wrap:anywhere]">{refundCheck.message}</p> : null}
                 {refundCheck?.checked && checkShown.has(r.id) && status !== "open" ?<p className="mt-1 text-sm text-ink">{`Refunds checked on Stripe: ${refundCheck.refunded > 0 ? `${its(refundCheck.refunded)} refunded` : "none"}.`}</p> : null}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <button
@@ -451,12 +466,12 @@ export function PaymentRequestsStudio({
                   >
                     <Icon name="copy" size={15} /> Copy link
                   </button>
-                  {unchecked && r.refundsOnDemand ? (
+                  {(unchecked && r.refundsOnDemand) || checkAgain ? (
                     <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== ""} aria-busy={busy === `refunds:${r.id}`} aria-describedby={`refunds-why-${r.id}`} onClick={() => void checkRefunds(r.id)}>
-                      Check refunds for this payment
+                      {checkAgain ? "Check refunds again" : "Check refunds for this payment"}
                     </button>
                   ) : null}
-                  {unchecked && r.refundsOnDemand ? <span id={`refunds-why-${r.id}`} className="sr-only">Reads this one payment&apos;s refunds on your Stripe account.</span> : null}
+                  {(unchecked && r.refundsOnDemand) || checkAgain ? <span id={`refunds-why-${r.id}`} className="sr-only">Reads this one payment&apos;s refunds on your Stripe account.</span> : null}
                   {canSend && status === "open" ? (
                     <button type="button" className="btn btn-secondary btn-sm" disabled={!again.ok || !open || busy !== ""} title={again.ok ? "" : again.why} onClick={() => void act("remind", r.id, "Reminder sent.")}>
                       <Icon name="mail" size={15} /> Send a reminder

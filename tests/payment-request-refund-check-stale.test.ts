@@ -124,6 +124,27 @@ async function main(): Promise<void> {
   is("a server row checked on its own since: the server's words, no older check beside it", [page.now.includes("$100 refunded"), page.now.includes("Refunds checked on Stripe:")], [true, false]);
   is("no refresh was asked by a check", refreshes, 0);
 
+  // Claude 6's LOW on #3291 (6757581119): a check that holds is not dated, so the page must keep a way to read it again
+  // (a refund made since, past the list's cap, never reaches the server row); within REFUND_CHECK_SECONDS the kept
+  // reading answers, and after it Stripe is asked again.
+  part("A check that holds keeps a way to check again");
+  page = await checkThenRefresh(row({}), none, row({}));
+  is("right after the check: \"Check refunds again\" is offered beside it", [page.before.includes("Refunds checked on Stripe: none."), page.before.includes("Check refunds again")], [true, true]);
+  is("refreshed with the same row: still offered", [page.now.includes("Refunds checked on Stripe: none."), page.now.includes("Check refunds again")], [true, true]);
+  page = await checkThenRefresh(row({}), { ok: true, checked: true, state: "refunded", refunded: PAID }, row({}));
+  is("a check that found the payment refunded in full offers nothing more to check", page.now.includes("Check refunds again"), false);
+
+  // Claude 6's nit on #3291 (6757581119): a failed check's sentence stands only beside the row it was made for, as a
+  // check that held does (checkHolds): a row whose reason changed since gets the server's words, not the old sentence.
+  part("A failed check's sentence gives way to a server row that changed");
+  const more = { ok: true, checked: false, state: "paid", refunded: 0, message: "Refunds were not checked: this payment has more refunds than can be read here. Look it up in your Stripe dashboard." };
+  page = await checkThenRefresh(row({}), more, row({}));
+  is("control: the same row keeps the failed check's sentence", [page.before.includes("more refunds than can be read here"), page.now.includes("more refunds than can be read here")], [true, true]);
+  page = await checkThenRefresh(row({}), more, row({ refundsOnDemand: false, refundsRetry: true }));
+  is("a row now only waiting on a reload: the old sentence is gone", page.now.includes("more refunds than can be read here"), false);
+  page = await checkThenRefresh(row({}), more, row({ refunded: 10_000 }));
+  is("a row whose floor moved since: the old sentence is gone", page.now.includes("more refunds than can be read here"), false);
+
   done();
 }
 

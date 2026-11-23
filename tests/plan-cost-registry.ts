@@ -1329,14 +1329,6 @@ export function readShapeCost(shape: ReadShape): number {
 export const RECEIPT_BATCH_COST = readShapeCost(RECEIPT_BATCH_SHAPE);
 
 /**
- * One reading of Marktmorgen Path's money and counts (lib/path.ts, visitPath):
- * the numbers' all-time record at LIFE_WRITE_MAX fields of up to 96 bytes
- * each with the path's own record, the links counted, the record written,
- * and every page of the creator's Stripe account it reads waited on one
- * after another. Counted as PATH_READ_UNITS studio requests, taken before it
- * runs (tests/plan-cost-registry.test.ts holds the units above it).
- */
-/**
  * One payment request's refunds read on their own at the most (lib/payment-requests.ts, checkRequestRefunds;
  * C1-20261108-0315-C4-30): the route's own studio request with its commands (the record, the kept reading, the
  * limiter's two, the studio requests taken, the record written under its lock and the reading kept, inside
@@ -1346,6 +1338,15 @@ export const RECEIPT_BATCH_COST = readShapeCost(RECEIPT_BATCH_SHAPE);
  * reading answers asks Stripe nothing. Stripe bills no read call.
  */
 export const REFUND_CHECK_READ = request("studio", 20 + 2 * TAKE_COMMANDS, 50_000) + (STRIPE_TIMEOUT_MS / 1000) * MEMORY_SECOND + perMegabyte(STRIPE_PAGE_BYTES);
+
+/**
+ * One reading of Marktmorgen Path's money and counts (lib/path.ts, visitPath):
+ * the numbers' all-time record at LIFE_WRITE_MAX fields of up to 96 bytes
+ * each with the path's own record, the links counted, the record written,
+ * and every page of the creator's Stripe account it reads waited on one
+ * after another. Counted as PATH_READ_UNITS studio requests, taken before it
+ * runs (tests/plan-cost-registry.test.ts holds the units above it).
+ */
 /** Path page's own bounded reads, including one actual studio-usage count. Money refreshes are separately reserved as PATH_READ_UNITS. */
 /** Owner-only Path push: up to ten devices in parallel, eight-second timeout, no full-config rewrite for expired devices. Reserved before dispatch. */
 export const PATH_REMINDER_PUSH = request("wait", 45, 500_000);

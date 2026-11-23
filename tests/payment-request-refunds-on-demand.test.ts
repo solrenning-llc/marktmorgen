@@ -13,11 +13,16 @@
  *     the request can be checked on its own; below the cap nothing changes;
  *   - the request checked on its own shows what Stripe says (part, in full),
  *     writes it upward, and is kept a short while per payment, so opening it
- *     again does not ask Stripe; a refund the store's Stripe events show
- *     forgets what was kept (lib/webhooks.ts, charge.refunded);
+ *     again does not ask Stripe; what was kept goes by itself after
+ *     REFUND_CHECK_SECONDS, and the Stripe events job never forgets it (a
+ *     forget per refunded charge would be a Redis command, unpriced); a kept
+ *     reading below what the record already holds is older than the record,
+ *     so Stripe is asked again;
  *   - a read that fails, a list with more than one page, a row of another
  *     payment or in another shape, a refund under way: "not checked", never 0;
  *   - past the store's checks for the minute, Stripe is not asked: "not checked";
+ *   - studio requests that could not be counted are "unavailable" (try again),
+ *     never "used";
  *   - the studio offers the button only where the list was cut at its cap.
  */
 import { readFileSync } from "node:fs";
@@ -197,6 +202,13 @@ async function main(): Promise<void> {
   is("a refund whose amount is not a number: not checked", [d.request?.refundsChecked, d.request?.refunded, d.why], [false, 0, "shape"]);
   d = await check2([list([ours("re_wait", PAID, "pending")], false)]);
   is("a refund still under way: not checked, reading again may help", [d.request?.state, d.request?.refundsChecked, d.request?.refundsRetry, d.why], ["paid", false, true, "under_way"]);
+  // Claude 6's LOW on #3291 (6905238228), Claude 5's LEVE (6907097608): a row that is not a refund, on this one-payment path.
+  // A new minute first, so these checks stay inside the store's checks for the minute (REFUND_CHECKS_PER_MINUTE).
+  advance(61_000);
+  for (const object of ["charge", "dispute", null]) {
+    d = await check2([list([{ ...ours(`re_not_${object}`, 10_000), object }], false)]);
+    is(`a row whose object is ${JSON.stringify(object)}, not a refund: not checked, nothing written`, [d.request?.refundsChecked, d.request?.refunded, d.kept.refunded, d.why], [false, 0, 0, "shape"]);
+  }
   d = await check2([{ body: { object: "list", data: "none", has_more: false } }]);
   is("a page in another shape: not checked", [d.request?.refundsChecked, d.why], [false, "shape"]);
   d = await check2([list([ours("re_eur", 10_000, "succeeded", "eur")], false)]);
@@ -283,6 +295,62 @@ async function main(): Promise<void> {
     ["no answer at all", null, true],
   ] as const) is(`${what}: not checked, never 0 refunded`, refundCheckReply(httpOk, body).checked, false);
   is("(nothing of the reader is on lib/payment-requests)", reply, undefined);
+
+  // Claude 6's LOW on #3291 (6757581119): studio requests that could not be counted (a reply that cannot be read, or a
+  // throw) are not "your studio's requests for this month are used": they are unknown, so "unavailable", try again.
+  part("Studio requests that could not be counted are \"unavailable\", never \"used\"");
+  const fresh = async (n: number) => {
+    redis.clear();
+    store = await paidStore();
+    const m = await createRequest(store, draft, now);
+    if (!m.ok) throw new Error(`request ${n} was not made`);
+    await markPaid(store, m.request.id, { id: `cs_test_refundsondemand000000000${n}`, amount_total: PAID, currency: "usd", payment_intent: INTENT, created: Math.floor(now / 1000) }, now);
+    store = (await storeForEmail(OWNER))!;
+    return m.request.id;
+  };
+  const realPipeline = redis.pipeline.bind(redis);
+  /** The studio count's INCRBY answered by `answer` once (a throw, or a reply in another shape); nothing else touched. */
+  const countAnswers = (answer: () => Promise<unknown>) => {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((command) => command[0] === "INCRBY")) {
+        redis.pipeline = realPipeline;
+        return answer();
+      }
+      return realPipeline(commands);
+    }) as typeof redis.pipeline;
+  };
+  for (const [what, answer] of [
+    ["a count that throws", async () => { throw new Error("no answer"); }],
+    ["a count in another shape", async () => [null, null]],
+  ] as const) {
+    const n4 = await fresh(4);
+    single = [list([], false)];
+    singleReads = 0;
+    countAnswers(answer);
+    const unread = api.checkRequestRefunds ? await api.checkRequestRefunds(store, n4, now) : null;
+    redis.pipeline = realPipeline;
+    is(`${what}: Stripe not asked, not checked, "unavailable" with a reload promised`, [singleReads, unread?.request.refundsChecked, unread?.request.refundsRetry, unread?.why], [0, false, true, "unavailable"]);
+  }
+  const whyOf = (requests as unknown as { refundCheckWhyOfCount?: (reason: string) => string }).refundCheckWhyOfCount;
+  is("each refusal of the studio count has its own why", whyOf ? ["used", "pool", "daily", "unknown", "other"].map(whyOf) : "missing", ["used", "pool", "used", "unavailable", "unavailable"]);
+
+  // Claude 5's LEVE on #3291 (6907097608): a kept reading below what the record already holds was kept before the list
+  // raised the record; it is older than the record, so it is not answered as "Stripe now shows less refunded": Stripe
+  // is asked again, within the store's checks for the minute.
+  part("A kept reading below the record is older than it: Stripe is asked again");
+  const n5 = await fresh(5);
+  single = [list([ours("re_first", 10_000)], false)];
+  singleReads = 0;
+  let first = api.checkRequestRefunds ? await api.checkRequestRefunds(store, n5, now) : null;
+  is("setup: $100 read and kept", [first?.request.refunded, first?.request.refundsChecked, singleReads], [10_000, true, 1]);
+  pages = [list([ours("re_first", 10_000), ours("re_since", 28_000)], false)];
+  listReads = 0;
+  const listed = (await requests.refreshRefunds(store, [(await readRequest(n5))!], now)) as Shown[];
+  is("setup: the list, read whole, raises the record to $380 within the minute", [listed[0].refunded, (await readRequest(n5))!.refunded], [38_000, 38_000]);
+  single = [list([ours("re_first", 10_000), ours("re_since", 28_000)], false)];
+  singleReads = 0;
+  first = api.checkRequestRefunds ? await api.checkRequestRefunds(store, n5, now) : null;
+  is("checked again within the minute: the older kept $100 is not trusted, Stripe is asked, $380 checked", [singleReads, first?.request.refunded, first?.request.refundsChecked, first?.why], [1, 38_000, true, ""]);
 
   done();
 }

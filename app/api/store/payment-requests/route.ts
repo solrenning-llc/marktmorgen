@@ -12,6 +12,7 @@ const REFUND_CHECK_WORDS: Record<RefundCheckWhy, string> = {
   limit: "Refunds were not checked: this store checked several payments in the last minute. Try again in a minute.",
   unavailable: "Refunds were not checked: they could not be looked up just now. Try again in a minute, or look the payment up in your Stripe dashboard.",
   used: "Refunds were not checked: your studio's requests for this month are used. Look the payment up in your Stripe dashboard.",
+  pool: "Refunds were not checked: stores without a paid plan are full for this month. Look the payment up in your Stripe dashboard.",
   stripe: "Refunds were not checked: Stripe could not be read just now. Try again in a minute, or look the payment up in your Stripe dashboard.",
   more: "Refunds were not checked: this payment has more refunds than can be read here. Look it up in your Stripe dashboard.",
   shape: "Refunds were not checked: Stripe answered in a way we could not read. Look the payment up in your Stripe dashboard.",

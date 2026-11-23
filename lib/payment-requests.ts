@@ -571,15 +571,27 @@ export { REFUND_CHECK_SECONDS };
 
 /**
  * Why one request's check left it not checked: "" when it is checked;
- * "limit" past the store's checks for the minute; "unavailable" that count
- * or the kept reading could not be read; "used" past the studio's requests;
- * "stripe" Stripe could not be read; "more" more than one page of refunds
+ * "limit" past the store's checks for the minute; "unavailable" that count,
+ * the studio's requests or the kept reading could not be read; "used" past
+ * the studio's requests; "pool" no place this month for a store without a
+ * paid plan; "stripe" Stripe could not be read; "more" more than one page of refunds
  * on that payment; "shape" a reply or a row in another shape; "under_way" a
  * refund still under way; "unsaved" what was read could not be written; "short"
  * Stripe gives back less than the record holds; "none" no Stripe account or
  * no payment to look up.
  */
-export type RefundCheckWhy = "" | "limit" | "unavailable" | "used" | "stripe" | "more" | "shape" | "under_way" | "unsaved" | "short" | "none";
+export type RefundCheckWhy = "" | "limit" | "unavailable" | "used" | "pool" | "stripe" | "more" | "shape" | "under_way" | "unsaved" | "short" | "none";
+
+/**
+ * Why a check is not made when the studio's requests refused it (countStudio's reason): "used" past the figure (or
+ * the day's), "pool" no place this month, and anything else, a count that could not be read included, "unavailable":
+ * unknown, never said to be used (Claude 6's LOW on #3291, 6757581119).
+ */
+export function refundCheckWhyOfCount(reason: string): RefundCheckWhy {
+  if (reason === "used" || reason === "daily") return "used";
+  if (reason === "pool") return "pool";
+  return "unavailable";
+}
 
 /**
  * One request's refunds, read on their own when the creator opens it in the
@@ -608,12 +620,20 @@ export async function checkRequestRefunds(store: Store, id: string, now = Date.n
     console.error("a payment request's kept refund check could not be read; not checked", error);
     return not("unavailable");
   }
+  // A kept reading below what the record already holds was kept before something raised the record (the list, read
+  // whole, within the minute): older than the record, so not an answer. Stripe is asked again, within the store's checks
+  // for the minute, never "Stripe now shows less refunded" (Claude 5's LEVE on #3291, 6907097608).
+  if (refunded !== null && refunded < r.refunded) refunded = null;
   if (refunded === null) {
     const room = await essentialLimitState("payreq-refunds", store.sid, REFUND_CHECKS_PER_MINUTE, 60);
     // Past the cap, or a count that could not be read: Stripe is not asked (fails closed).
     if (room !== "within") return not(room === "exceeded" ? "limit" : "unavailable");
-    const taken = await countStudio(store, null, REFUND_CHECK_UNITS).catch(() => ({ ok: false as const }));
-    if (!taken.ok) return not("used", r, false);
+    const taken = await countStudio(store, null, REFUND_CHECK_UNITS).catch(() => ({ ok: false as const, reason: "unknown" as const }));
+    if (!taken.ok) {
+      // Only a figure really used is "used"; a count that could not be read may answer next time, so a reload is promised.
+      const why = refundCheckWhyOfCount(taken.reason);
+      return not(why, r, why === "unavailable");
+    }
     let listed: Record<string, unknown>;
     try {
       listed = await onAccount("GET", store.stripeAccountId, `/refunds?payment_intent=${encodeURIComponent(r.payment)}&limit=100`);

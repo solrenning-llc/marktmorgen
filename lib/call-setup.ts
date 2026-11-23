@@ -182,6 +182,31 @@ function readCancel(raw: unknown): number | null | "cancel" {
 
 export const MAX_ROOM_LENGTH = 500;
 
+/**
+ * The longest meeting link a meeting record keeps (lib/meet-records.ts parseRecord). A writer that stored a longer one
+ * made the record unreadable, because every reader requires the stored link to equal the one it parsed (Codex X6's LOW
+ * on #2514, board #5285).
+ */
+export const MEET_LINK_MAX = 600;
+
+/**
+ * Whether a meeting record can hold this link and still be read back: what readRecords (lib/meet-records.ts) and
+ * storedMeetingLink (lib/call-rooms.ts) accept. No link is always kept. Otherwise it is at most MEET_LINK_MAX
+ * characters, cleanRoom takes it (it parses only its first MAX_ROOM_LENGTH, so a host that runs past them fails) and
+ * it is already written the way URL writes it. Every writer of a record's link checks it first.
+ */
+export function keepsMeetingLink(link: string): boolean {
+  if (link === "") return true;
+  if (link.length > MEET_LINK_MAX) return false;
+  const room = cleanRoom(link);
+  if (room === null || room === "bad") return false;
+  try {
+    return new URL(link).toString() === link;
+  } catch {
+    return false;
+  }
+}
+
 /** The two services a meeting can be made on for each booking (lib/meet-links.ts). */
 export type MeetProvider = "google" | "zoom";
 

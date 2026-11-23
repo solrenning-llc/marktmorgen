@@ -49,7 +49,10 @@ import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
  * single month, and closed carries all of it in that payment's own margin.
  */
 import { paidStorageBytes } from "@/lib/storage-rules";
+import { EXIT_NOTICE_DAYS, EXIT_RELEASED_MAX_BYTES } from "@/lib/exit-redirect-rules";
+import { MAX_ADDRESSES } from "@/lib/store-field-rules";
 import { LANDINGS_FENCE_COMMANDS } from "@/lib/campaign-landing-store";
+import { CARD_FENCE_COMMANDS } from "@/lib/creator-card";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
 import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { MAX_BENEFITS_KEPT, MAX_BENEFIT_TEXT } from "@/lib/tier-benefit-rules";
@@ -65,6 +68,7 @@ import { CERTIFICATE_PASS_EVERY_SECONDS, CERTIFICATE_REFUND_CHECKS_PER_MONTH, CE
 import { LOST_DISPUTE_PAGES } from "@/lib/refunds";
 import { RECEIPT_BATCH_SHAPE } from "@/lib/receipt-batch";
 import { monthlyEmails, type Tier } from "@/lib/plan";
+import { MAIL_CLICK_KEY_COMMANDS } from "@/lib/mail-clicks";
 import { MAIL_GAP_COMMANDS_PER_CHECK, MAIL_GAP_TRIAL_CHECKS, mailGapCheckLimit } from "@/lib/mail-frequency";
 /** A gap mark moved: its key (the gate's, the longest, is 92 characters with a 32-character store id: nl:mgap:gate:{32}:{32}:{13}) with a time or a claim value (23), rounded up (tests/store-data-registry.ts, MARK). */
 const MAIL_GAP_MARK_BYTES = 160;
@@ -94,7 +98,7 @@ import { GIVE_BACK_FLOOR_EXTRA_COMMANDS, MAX_MAIL_BODY, MAX_SUBJECT } from "@/li
 import { MAX_POLL_OPTION, MAX_POLL_OPTIONS, MAX_POLL_QUESTION, POLL_VOTE_COMMANDS } from "@/lib/email-poll-rules";
 import { MAX_TRIMMED_PAGE_CHARS } from "@/lib/clickfunnels-page";
 import { IMPORTS_PER_SHARE_MONTH, MAX_APPLY_PAGES, PREVIEWS_PER_SHARE_MONTH, SHARE_LIMITS } from "@/lib/funnel-share-rules";
-import { SHARE_FENCE_EXTRA_COMMANDS } from "@/lib/funnel-share-store";
+import { SHARE_FENCE_EXTRA_BYTES, SHARE_FENCE_EXTRA_COMMANDS } from "@/lib/funnel-share-store";
 import { MAX_SECTION_BYTES } from "@/lib/saved-blocks";
 import { MAX_PAGE_BYTES, MAX_PAGE_PICTURES } from "@/lib/sales-page";
 import { PICTURE_DOOR_MAX } from "@/lib/picture-door";
@@ -535,6 +539,18 @@ export const CART_NOTE_COMMANDS = 2;
  * Priced on every store email with the note's own (UNIT_COST.email).
  */
 export const RECOVERY_ADMIT_EXTRA_COMMANDS = 5;
+/**
+ * What three API writes send beyond the one unit they take (UNIT_COST.api, 20 commands and TAKE_COMMANDS), at the
+ * most, as Upstash bills them (#5010 row 150, sweep 2f36; coordinator cca1): POST /api/v1/hooks (the webhook
+ * settings' compare-and-set script, the endpoint read back), DELETE /api/v1/hooks (the endpoints read, then removed)
+ * and DELETE /api/v1/access (the gift read, taken back). They keep taking one unit, as the terms, the pricing page and
+ * the developers' page say; this extra is priced on every API request of each plan ("api-hook-access-writes"),
+ * measured through the real routes in tests/api-hook-access-writes-cost.test.ts. The webhook settings' write tries
+ * again, up to CONFIG_WRITE_TRIES (lib/webhooks.ts) times, while another write changes them meanwhile, each lost try
+ * billed in full (Claude 4 3Kc's MEDIUM on #5249): the dearest is a hook removed from a full list after
+ * CONFIG_WRITE_TRIES - 1 lost tries, 65 commands, 41 past the unit (8 at the first try).
+ */
+export const API_HOOK_ACCESS_EXTRA_COMMANDS = 41;
 /**
  * What reading back one delivery line adds at the most (lib/webhooks.ts, writeLines and countNotKept; Claude 7 on
  * #3446, 6889869993): a SET answered in a shape it cannot read, or a call that failed, is followed by one GET of the
@@ -1543,6 +1559,10 @@ export function figureCost(allowances: Record<AllowanceKind, number>, kind: Allo
 export function campaignLandingFenceCost(allowances: Record<AllowanceKind, number>): number {
   return allowances.studio * (LANDINGS_FENCE_COMMANDS * COMMAND + 4_096 * DB_BYTE);
 }
+/** Every studio unit may be a business-card save or removal: its fence's two inner commands, with wire headroom. */
+export function creatorCardFenceCost(allowances: Record<AllowanceKind, number>): number {
+  return allowances.studio * (CARD_FENCE_COMMANDS * COMMAND + 2_048 * DB_BYTE);
+}
 /**
  * Commands each counted public request adds for a paying store: its count
  * (lib/traffic.ts, countRequest). A route's own burst limit is part of the
@@ -2513,6 +2533,17 @@ export const COST_LINES: CostLine[] = [
     basis: "Every monthly email sent, at the most an email costs. A review ask whose claim's stretch to SENT_MARK_SECONDS was not confirmed reads the claim again before letting it go (lib/review-requests.ts stretchLanded, 17 November 2026): a GET, a TTL and a GET in one pipeline, three commands for each such claim, about $0.000006 at Upstash's $2 a million, inside what an email is priced at. A plain batch's email that goes by Amazon (sendBatch: product updates, community announcements, review asks, imports; never a list batch) takes at most three commands more for its possibly-taken mark (lib/ses.ts, 13 November 2026): a SET NX before Amazon is asked, a GET when the batch is tried again, a DEL when Amazon says for certain it did not take it, kept two days at most; about $0.000006 at Upstash's $2 a million, inside what an email is priced at. One the email service refuses for good in a list batch (lib/email.ts ListBatchOutcome, 9 November 2026) is taken from the month before it is tried like any other and stays taken: it pays for asking Amazon (nothing for a refusal), for its own did mark read back with the batch (one GET; each accepted one reads its own inside its own email) and, refused as an address, for taking it off the list (lib/contacts.ts stopWriting: at most three rounds of an HGET and the CAS_HSET script with its read-back, then an INCR, about sixteen commands), about $0.00004 at Upstash's $2 a million, inside what an email is priced at. The address is then off the list for good, so it is never paid for twice; nothing more is kept.",
   },
   {
+    id: "mail-click-keys",
+    feature: "The key a sequence email's links carry for a reader who allowed their link use to be seen (lib/mail-clicks.ts), written only while they still allow it (Codex G-20261121-0033)",
+    // Every monthly email of the plan as a sequence email to a reader who allowed it (the dearest way).
+    monthlyUsd: (tier) => monthlyEmails(tier) * MAIL_CLICK_KEY_COMMANDS * COMMAND,
+    sources: [
+      { file: "lib/mail-clicks.ts", names: ["MAIL_CLICK_KEY_COMMANDS", "MAIL_CLICK_KEY_LIVE", "rememberLinkKeys"] },
+      { file: "lib/mail.ts", names: ["rememberLinkKeys(store.listId as string"] },
+    ],
+    basis: "Before 23 November 2026 a reader's key was one plain SET a sequence email, priced nowhere of its own. It is now one script that writes the key only while the address is not deleted from the store and the reader's row still holds the token, the permission and a yes: the EVAL, two HGETs and the SET, MAIL_CLICK_KEY_COMMANDS as Upstash bills a script, held to what the real write sends by tests/mail-click-key-consent-race.test.ts. Only a sequence's emails carry a key, and only to readers who allowed it, so pricing every monthly email of the plan (monthlyEmails: none on Store) is the most it can cost. The key's 400 days of room are the nl:mail:mk: family (tests/store-data-registry.ts), unchanged.",
+  },
+  {
     id: "mail-gap",
     feature: "Nobody gets too many emails (374 [SU7], 11 November 2026): each person checked against the store's gap before a list email or automation",
     monthlyUsd: (tier) => 2 * mailGapCheckLimit(tier, false) * (MAIL_GAP_COMMANDS_PER_CHECK * COMMAND + 2 * MAIL_GAP_MARK_BYTES * DB_BYTE),
@@ -2726,14 +2757,14 @@ export const COST_LINES: CostLine[] = [
       const own = l.importsPerMonth * request("write", 300, l.bundleBytes + 30 * MAX_PAGE_BYTES)
         + l.previewsPerMonth * request("light", 30, 50_000)
         + l.appliesPerMonth * request("write", MAX_APPLY_PAGES * 10, MAX_APPLY_PAGES * 4 * MAX_PAGE_BYTES)
-        // Each link's creation fenced by the store's erasure (CREATE_STORE_SHARE: its HGET and EXISTS more, Codex L-20261120-1836).
-        + l.sharesPerMonth * request("write", 60 + SHARE_FENCE_EXTRA_COMMANDS, 10 * MAX_PAGE_BYTES + 3 * l.bundleBytes)
+        // Each link's creation fenced by the store's erasure (CREATE_STORE_SHARE: its HGET and GET more, Codex L-20261120-1836, and the admitted owner ref it carries, SHARE_FENCE_EXTRA_BYTES, L-20261121-0043).
+        + l.sharesPerMonth * request("write", 60 + SHARE_FENCE_EXTRA_COMMANDS, 10 * MAX_PAGE_BYTES + 3 * l.bundleBytes + SHARE_FENCE_EXTRA_BYTES)
         + l.exportsPerMonth * request("write", 40, 10 * MAX_PAGE_BYTES + l.bundleBytes);
       return kept + linkReads + own;
     },
     sources: [
       { file: "lib/funnel-share-rules.ts", names: ["SHARE_LIMITS", "IMPORTS_PER_SHARE_MONTH", "PREVIEWS_PER_SHARE_MONTH", "PREVIEWS_PER_STORE_HOUR", "MAX_APPLY_PAGES"] },
-      { file: "lib/funnel-share-store.ts", names: ["storeMonthKey", "shareMonthKey", "SHARE_FENCE_EXTRA_COMMANDS", "CREATE_STORE_SHARE"] },
+      { file: "lib/funnel-share-store.ts", names: ["storeMonthKey", "shareMonthKey", "SHARE_FENCE_EXTRA_COMMANDS", "SHARE_FENCE_EXTRA_BYTES", "CREATE_STORE_SHARE"] },
       { file: "lib/saved-blocks.ts", names: ["MAX_SECTION_BYTES"] },
     ],
     basis: "Links and sections kept, every link read by others at its monthly figure in both calendar months a billing month touches, and every import, preview, update from a section, link made and file exported of the store's window, each page read and written with its earlier version.",
@@ -2872,7 +2903,7 @@ export const COST_LINES: CostLine[] = [
       // A person handed to the creator's email platform is read against the store's deletions twice, one HGET before it is marked and one inside the atomic job publication (#3908): HAND_OVER_ERASED_READS commands, held in tests/email-sync-erased-replay.test.ts.
       { file: "lib/email-sync.ts", names: ["HAND_OVER_ERASED_READS"] },
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
-      { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
+      { file: "lib/cart-offers.ts", names: ["takeBuyerReadExact(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
       // A confirmed answer to a poll in a broadcast takes POLL_VOTE_REQUEST_UNITS before it is kept (125 [F2-EMAIL-POLLS], 11 November 2026).
       { file: "lib/email-poll-vote.ts", names: ["takeBuyerRead(store, POLL_VOTE_REQUEST_UNITS)"] },
       // A course's "Next step" reads what the student has through the same door, only when nothing else keeps the card away (560 [AS1], 10 November 2026).
@@ -2935,7 +2966,7 @@ export const COST_LINES: CostLine[] = [
       { file: "app/[handle]/orders/page.tsx", names: ["await askBundle(store, token,", "await askOlder(store, token, asked)", "if (token && (bundleAsked || olderAsked))"] },
       // A certificate's PDF takes one before its record is read and the rest of CERTIFICATE_PDF_UNITS before it is drawn, on the public side; a sample
       // is kept by the CDN five minutes (C3, 4 November 2026; CERTIFICATE_PDF_READ in tests/plan-cost-registry.test.ts).
-      { file: "app/[handle]/certificate/[id]/pdf/route.ts", names: ["takePublicRequest(store, \"public\", now, 1)", "takePublicRequest(store, \"public\", now, CERTIFICATE_PDF_UNITS - 1)", "public, max-age=0, s-maxage=300"] },
+      { file: "app/[handle]/certificate/[id]/pdf/route.ts", names: ["takePublicRequestExact(store, \"public\", now, 1)", "takePublicRequestExact(store, \"public\", now, CERTIFICATE_PDF_UNITS - 1)", "public, max-age=0, s-maxage=300"] },
       { file: "lib/certificate-pdf.ts", names: ["CERTIFICATE_PDF_UNITS = 2", "CERTIFICATE_PDF_MAX_BYTES = 256_000"] },
       // A short link that opens takes one after its link and store are read, and comes off the site's hour of unpaid opens
       // (Claude 5, 7 November 2026; SHORT_LINK_OPEN_READ in tests/plan-cost-registry.test.ts).
@@ -3051,8 +3082,12 @@ export const COST_LINES: CostLine[] = [
       // A new calendar's first reading, fenced on the settings (newFeedFenceUsd).
       { file: "lib/calendar-sync.ts", names: ["NEW_FEED_READING_FENCE_COMMANDS", "KEEP_NEW_FEED_READING"] },
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },
+      // Many sales at once (767 [STN14] unit 4): one studio request for each order asked, taken before any counter or send (review of #3543).
+      { file: "app/api/store/sales-bulk/route.ts", names: ["countStudio(store, null, extra)", "asked.references.length - 1"] },
       // Contact paste admits its complete command/transfer work before any contact read or atomic import write; same studio figure, no extra allowance.
       { file: "lib/contact-import-rules.ts", names: ["CONTACT_IMPORT_WORK", "pastedContactWork"] },
+      // A team's host addresses/hours: EVAL + GET + HEXISTS + HSET, before any successful save response.
+      { file: "lib/team-booking.ts", names: ["TEAM_WRITE_MAX_COMMANDS", "WRITE_TEAM_IF_LIVE", "writeTeam"] },
       // The activity log's fence, priced on every studio request (teamLogFenceUsd).
       { file: "lib/team.ts", names: ["TEAM_LOG_COMMANDS", "TEAM_LOG_FENCE_COMMANDS", "KEEP_LOG_IF_LIVE"] },
       { file: "lib/studio-route.ts", names: ["logTeam(access.store.sid"] },
@@ -3237,6 +3272,28 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/campaign-landing/route.ts", names: ["guardStoreWrite"] },
     ],
     basis: "In addition to the existing studio request, every studio unit funds six internal commands (EXISTS and HEXISTS on each of three compare-and-swap attempts) and 4096 wire bytes. No extra round trip. The trial uses the same per-unit surcharge in nonPayingWorst; free-share carries its share. Prices and visible allowances do not change.",
+  },
+  {
+    id: "api-hook-access-writes",
+    feature: "Adding and removing a webhook endpoint and taking back a product through the API, beyond the one API request each takes (#5010 row 150)",
+    // Every API request of the month as the dearest of the three (the most it can be).
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].api * API_HOOK_ACCESS_EXTRA_COMMANDS * COMMAND,
+    sources: [
+      { file: "app/api/v1/hooks/route.ts", names: ["addEndpoint(writer.store", "removeEndpoint(writer.store, id, false)", "webhooksView(writer.store, { log: false })"] },
+      { file: "app/api/v1/access/route.ts", names: ["takeAccess(writer.store, body)"] },
+    ],
+    basis: "Each of the three takes one unit of the store's API figure, as every API request does, and sends more commands than the unit's 20 and TAKE_COMMANDS: the webhook settings are written by a compare-and-set script and read back, and a gift is read before it is taken back, each script billed as Upstash bills it (one, and every redis.call written in it). The excess of the dearest, API_HOOK_ACCESS_EXTRA_COMMANDS, measured through the real routes at their dearest (the last of MAX_ENDPOINTS endpoints added, one removed from a full list, a gift taken back), with the webhook settings' write losing the race to another write on every try but the last, and on every try (lib/webhooks.ts CONFIG_WRITE_TRIES; Claude 4 3Kc's MEDIUM on #5249), in tests/api-hook-access-writes-cost.test.ts, is priced on every API request of the plan's month, the most it can be. Nothing the customer reads changes: the terms, the pricing page and the developers' page still say only a contact added or a product given counts as API_WRITE_UNITS.",
+  },
+  {
+    id: "creator-card-erasure-fence",
+    feature: "Business-card saves and removals refuse a store that is erasing, moved or gone before changing the card or its room",
+    monthlyUsd: (tier) => creatorCardFenceCost(STORE_ALLOWANCES[tier]),
+    sources: [
+      { file: "lib/creator-card.ts", names: ["CARD_FENCE_COMMANDS", "CARD_LIVE", "SAVE_CARD", "DROP_CARD"] },
+      { file: "lib/store-live-cache.ts", names: ["storeLiveFence"] },
+      { file: "app/api/store/creator-card/route.ts", names: ["guardStoreWrite", "await storeLiveFence(store)"] },
+    ],
+    basis: "In addition to the existing studio request, every studio unit funds the card fence's two inner commands (HGET of the erasing field, GET of the store's id key or, for a store from before ids, its record) and 2048 wire bytes for the keys, ref and longer script. No extra round trip: the fence is inside the card's own script (Codex L-20261121-0150). The trial uses the same per-unit surcharge in nonPayingWorst; free-share carries its share. Prices and visible allowances do not change.",
   },
   {
     id: "rest-api",
@@ -3452,6 +3509,17 @@ export const PER_PAYMENT_LINES: CostLine[] = [
     basis: "The room full, and every record outside it with no expiry of its own (capped), for the closing days and the week a late last notice adds. A record a unit writes, which goes by itself, is not counted here a second time: each window's share of the database line is at least the whole life of what that window writes (tests/closing-cost.test.ts, lifetimeByteMonths), so it is paid for to its end, past the plan's end and the store's closing. Until 18 October 2026 this line counted those records again, at the most they hold at once.",
   },
   {
+    id: "exit-notice",
+    feature: "A closed store's moved notice, kept in its old addresses' values for 90 days after its closing day (97 [D2-OPEN-EXIT])",
+    monthlyUsd: () => MAX_ADDRESSES * (EXIT_RELEASED_MAX_BYTES + KEY_NAME_BYTES) * (EXIT_NOTICE_DAYS / 30) * DB_BYTE_MONTH,
+    sources: [
+      { file: "lib/exit-redirect-rules.ts", names: ["EXIT_NOTICE_DAYS", "EXIT_RELEASED_MAX_BYTES", "exitHoldSeconds", "releasedValue"] },
+      { file: "lib/store.ts", names: ["closeStoreRecord", "releasedValue(new Date(now), exitNotice)"] },
+      { file: "lib/store-field-rules.ts", names: ["MAX_ADDRESSES"] },
+    ],
+    basis: "Once for each store, so against each of its payments, like the closure: every address it can have (MAX_ADDRESSES, its own and the ones it used before) held for the whole EXIT_NOTICE_DAYS at the longest value a notice can make (EXIT_RELEASED_MAX_BYTES) and its name, at Upstash's storage rate. The addresses were already held RELEASE_QUARANTINE_DAYS with a short value; the whole is counted here again, not only the difference. Writing them is the closing's own SETs (closure), with no command more. A visit to an old address already reads its key, so the notice adds no command per visit (lib/exit-redirect-rules.ts).",
+  },
+  {
     id: "closure",
     feature: "Closing the store (18 October 2026): its records deleted, its followers read, its whole exports and list downloads after its plan ended, its last steps",
     monthlyUsd: (tier) => closureCost(tier).total,
@@ -3606,6 +3674,14 @@ export function decideCalendarRuns(ids: number): number {
  * Each id is read past once: it is out of the index after.
  */
 export const STALE_ID_COMMANDS = Math.ceil((SERVED_COMMANDS + 2) / (MEMBER_STORES_READ - 1));
+/**
+ * What one stale id adds on the wire to the read past's removal, at the most (lib/team.ts TEAM_INDEX_OFF_TEAM v2, #5010
+ * row 133): the team record exactly as it was read, sent back so the same step compares it byte for byte with what is
+ * stored (no digest: redis.sha1hex is not confirmed on Upstash, Claude 5 ibuF's MEDIUM on #5175). A team record is at
+ * most its capped size in tests/store-data-registry.ts, (MAX_TEAM + 10) KB; an id whose team is gone sends nothing.
+ * Carried, as STALE_ID_COMMANDS is, by the closing store for each of its team places (PREPARE in closureCost).
+ */
+export const STALE_ID_WIRE_BYTES = (MAX_TEAM + 10) * 1024;
 export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * CLAIM_PAGES + SERVED_COMMANDS) + CLAIMS_LEFT_COMMANDS + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS + PLAN_RUNS_READ_COMMANDS + DUE_READ_COMMANDS + ERASING_MARK_COMMANDS + FENCED_PREPARE_COMMANDS + MAX_TEAM * STALE_ID_COMMANDS;
 
 /**
@@ -3705,7 +3781,7 @@ export function closureCost(tier: Tier, trial = false): { deletes: number; follo
     follows: (kept + outside) * DB_BYTE + (Math.ceil((roomKeys + outside / MARK) / FOLLOW_BATCH) + FOLLOWED_FAMILIES.length * 4) * COMMAND,
     exports: ENDED_STORE_EXPORTS * exportCost(room + MAX_STORE_BYTES),
     lists: ENDED_LIST_DOWNLOADS * endedListDownloadCost(room + MAX_STORE_BYTES),
-    prepare: PREPARE_COMMANDS * COMMAND,
+    prepare: PREPARE_COMMANDS * COMMAND + MAX_TEAM * STALE_ID_WIRE_BYTES * DB_BYTE,
     visits: CLOSING_VISIT_DAYS * closingVisitCost(),
     total: 0,
   };
@@ -3788,6 +3864,8 @@ export function nonPayingWorst(): number {
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)
     // Each integration unit may be a vault open refused for storage, priced on top of its call (VAULT_REFUSED_PASS).
     + allowances.integration * VAULT_REFUSED_PASS
+    // Each API request may be one of the three API writes that send more than their unit (line api-hook-access-writes).
+    + allowances.api * API_HOOK_ACCESS_EXTRA_COMMANDS * COMMAND
     + campaignLandingFenceCost(allowances)
     // Its payday's auto-pay takes no integration unit (a press from the studio takes its own, paypalPressUnits).
     + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS
@@ -3795,6 +3873,8 @@ export function nonPayingWorst(): number {
     + creator("affiliate-payday-fence")
     // Its studio picture doors, checks and page saves, at its own studio figure (line studio-blob; Claude 7 on #2852).
     + studioBlobMonthly(allowances.studio)
+    // Its business-card saves and removals' store fence, at its own studio figure (line creator-card-erasure-fence).
+    + creatorCardFenceCost(allowances)
     + ["imports", "clickfunnels", "funnel-share", "team-scheduling", "quizzes"].reduce((sum, id) => sum + creator(id), 0)
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
     // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.
@@ -4113,6 +4193,8 @@ export const NOT_A_COST: Record<string, string> = {
   MEMBERS_AT_ONCE: "How many members one closing works on at once: a pace inside the daily job's minute, not a figure of its own.",
   REFUND_CALLS_PER_MEMBER: "The part of STRIPE_CALLS_PER_MEMBER set aside for a member's refund (lib/closing-holds.ts): inside the same budget, not added to it.",
   PICTURES_PER_MINUTE: "A pace on the pictures a function answers (lib/picture-pace.ts, MM-SA-04), held in memory with no store command: it only refuses, and what it lets through is the CDN's picture of line visits.",
+  RESEND_PER_SALE_PER_DAY: "A pace on how often one sale's purchase email may be sent again in a day (lib/resend-limits.ts; app/api/store/resend and lib/sales-bulk.ts, 767 [STN14] unit 4): it only refuses, and each email it lets through is taken from the store's own email figure before it goes (lib/email.ts, EmailMeter); its counter is the guard resend-sale (METERED_EMAIL).",
+  RESEND_PER_STORE_PER_HOUR: "The same pace per store in an hour (lib/resend-limits.ts), shared by one email sent again and many at once: it only refuses; each email is taken from the store's email figure before it goes; its counter is the guard resend-store (METERED_EMAIL).",
   PICTURE_READS_PER_MINUTE: "A pace on how often one picture is read by a function (lib/picture-pace.ts, MM-SA-04), held in memory with no store command: it only refuses.",
   PICTURE_DOORS_PER_HOUR: "A pace on the studio's picture doors a store opens in an hour (lib/picture-door.ts, pictureDoorHour; rule 24 inventory A1), counted before the file store is asked or anything is signed: it only refuses, and each door it lets through has already taken a studio request (line studio). What a door writes is not priced by it: a picture never put on anything stays in the file store, at most PICTURE_DOOR_MAX fresh ones a store at a time, each at most MAX_IMAGE_BYTES (lib/product-image.ts), and is not deleted once its note is a day old. That retained storage and the file store's per-write charge have no line yet, so they are not certified, never zero.",
   CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts).",

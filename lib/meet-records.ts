@@ -32,7 +32,7 @@
  * never wait on Google or Zoom.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type MeetProvider, cleanRoom, isMeetProvider } from "@/lib/call-setup";
+import { type MeetProvider, MEET_LINK_MAX, cleanRoom, isMeetProvider, keepsMeetingLink } from "@/lib/call-setup";
 
 /** What is still to be done on the provider's side for a record. */
 export type MeetTodo = "" | "create" | "patch" | "delete" | "guests";
@@ -124,7 +124,7 @@ export function parseRecord(raw: unknown): MeetRecord | null {
       group: v.group === true,
       id: text(v.id, 1100),
       account: text(v.account, 200),
-      link: text(v.link, 600),
+      link: text(v.link, MEET_LINK_MAX),
       made: v.made === true,
       start: num(v.start),
       end: num(v.end),
@@ -196,8 +196,13 @@ export async function readRecord(scope: string): Promise<MeetRecord | null> {
   return (await readRecords([scope]))[0];
 }
 
-/** Writes a record, and puts it in the queue when it has something left to do. */
+/**
+ * Writes a record, and puts it in the queue when it has something left to do. A link the readers would not read back
+ * (keepsMeetingLink) is refused before any command, so a record is never stored that would make every booking's room
+ * unreadable (Codex X6's LOW on #2514).
+ */
 export async function writeRecord(record: MeetRecord): Promise<void> {
+  if (!keepsMeetingLink(record.link)) throw new Error("A meeting record cannot keep this link.");
   const ttl = Math.max(3600, Math.ceil((record.end + KEEP_AFTER_MS - Date.now()) / 1000));
   await redisPipeline([
     ["SET", recordKey(record.scope), JSON.stringify(record), "EX", ttl],

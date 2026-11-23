@@ -29,7 +29,7 @@ const filesKey = `nl:course:${COURSE}:task:${LESSON}:files`;
 
 const used = async () => (await dataUsed(DATA))?.used ?? Number.NaN;
 const hand = (text: string, file: typeof A | null, now: number) =>
-  handIn({ data: DATA, courseId: COURSE, lessonId: LESSON, who: WHO, email: "", task: TASK, text, file, now });
+  handIn({ erasure: { listId: "list_synthetic", email: "student@example.com" }, data: DATA, courseId: COURSE, lessonId: LESSON, who: WHO, email: "", task: TASK, text, file, now });
 
 test("handing in again with the same file charges no second file entry, and a drop gives everything back", async () => {
   redis.clear();

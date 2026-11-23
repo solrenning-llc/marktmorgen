@@ -1443,9 +1443,13 @@ const ceilDiv = (a: bigint, b: bigint) => (a + b - BigInt(1)) / b;
 export const ASSISTANT_REQUEST_SHAPE = { inputBytes: ASSISTANT_INPUT_BYTES, blocks: 1, media: null, maxTokens: ASSISTANT_OUTPUT_TOKENS } as const;
 
 /** Database commands one message makes beyond the twenty the model call is already priced with: burst counts, the pool's reserve and settle, the conversation read and written, the store, its products and pages, the list of unanswered questions. A review ceiling. */
-export const ASSISTANT_MESSAGE_COMMANDS = 40;
+// Since Codex L-20261120-2338 the two private writes (the conversation, the unanswered question) each check the
+// store's identity in the same step: one EVAL with HGET, GET and the write(s) inside (4 billed where the SET was 1;
+// 6 where LPUSH, LTRIM and EXPIRE were 3), 6 more at the most.
+export const ASSISTANT_MESSAGE_COMMANDS = 46;
 /** Bytes one message moves through the database at the most: the store record, its products and pages read, and the conversation read and written twice. */
-export const ASSISTANT_MESSAGE_DB_BYTES = STORE_RECORD_BYTES + ASSISTANT_PRODUCTS * 16_384 + ASSISTANT_PAGES * MAX_STORED_PAGE_BYTES + 4 * (ASSISTANT_HISTORY_BYTES * 4 + 4_096);
+// The two fenced writes' scripts, the identity keys and the arguments add 8 KiB of framing (Codex L-20261120-2338).
+export const ASSISTANT_MESSAGE_DB_BYTES = STORE_RECORD_BYTES + ASSISTANT_PRODUCTS * 16_384 + ASSISTANT_PAGES * MAX_STORED_PAGE_BYTES + 4 * (ASSISTANT_HISTORY_BYTES * 4 + 4_096) + 8_192;
 /** What one conversation keeps at the most, and for how long: the messages kept and the key, for a day after the last. */
 export const ASSISTANT_CONVERSATION_BYTES = ASSISTANT_TURNS_KEPT * (MAX_ASSISTANT_REPLY * 4 + 256) + 1_024;
 

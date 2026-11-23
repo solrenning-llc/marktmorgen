@@ -62,7 +62,7 @@ export function ShippingEditor({ product }: { product: Product }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (!current && shipProblem(product) !== null) return null;
-  const link = "inline-flex min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
+  const link = "inline-flex min-h-11 min-w-11 items-center justify-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
   // The opener stands on a line of its own: the same look, as a full-width row.
   const opener = "flex min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
   const id = `ship-${product.id}`;

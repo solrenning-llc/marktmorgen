@@ -29,7 +29,10 @@ export async function GET(request: NextRequest) {
   try {
     const counts = await settleShares(Date.now() + 270_000);
     console.log(`shares: ${JSON.stringify(counts)}`);
-    return Response.json({ ok: counts.failed === 0, counts }, { headers: { "Cache-Control": "no-store" } });
+    // A failed settlement is a failed run over HTTP too (#4146, Codex U): the counts are kept, and the status is 500,
+    // as the affiliates, weekly and monthly jobs answer, so a scheduler or monitor never takes it for a good run.
+    if (counts.failed > 0) return Response.json({ ok: false, error: "failed", counts }, { status: 500, headers: { "Cache-Control": "no-store" } });
+    return Response.json({ ok: true, counts }, { headers: { "Cache-Control": "no-store" } });
   } finally {
     await releaseMark("nl:share:lock", lock);
   }

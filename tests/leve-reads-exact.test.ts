@@ -134,24 +134,24 @@ async function main(): Promise<void> {
   is("removed answered 0: was not there", await dropSection(statsId, "s1"), false);
   const section = { id: "s1", name: "Questions", blocks: [], updatedAt: 1 };
   redis.pipeline = answering((c) => c[0] === "EVAL", [1]);
-  is("written answered as a list: not called saved", await writeSection(statsId, section, true, 5).then((r) => r, () => "refused"), "refused");
+  is("written answered as a list: not called saved", await writeSection(store, section, true, 5).then((r) => r, () => "refused"), "refused");
   redis.pipeline = answering((c) => c[0] === "EVAL", "1");
-  is("written answered as a string: not called saved", await writeSection(statsId, section, true, 5).then((r) => r, () => "refused"), "refused");
+  is("written answered as a string: not called saved", await writeSection(store, section, true, 5).then((r) => r, () => "refused"), "refused");
   // Claude 5 on #3025: the reply is read from its own slot once (repliesFor), so a getter is never a section kept.
   redis.pipeline = (async () => {
     const replies: unknown[] = [];
     Object.defineProperty(replies, 0, { get: () => 1, enumerable: true });
     return replies;
   }) as unknown as Pipe;
-  is("written answered by a getter: not called saved", await writeSection(statsId, section, true, 5).then((r) => r, () => "refused"), "refused");
+  is("written answered by a getter: not called saved", await writeSection(store, section, true, 5).then((r) => r, () => "refused"), "refused");
   redis.pipeline = (async () => [1, 1]) as unknown as Pipe;
-  is("written answered twice: not called saved", await writeSection(statsId, section, true, 5).then((r) => r, () => "refused"), "refused");
+  is("written answered twice: not called saved", await writeSection(store, section, true, 5).then((r) => r, () => "refused"), "refused");
   redis.pipeline = answering((c) => c[0] === "EVAL", 0);
-  is("written answered 0: full, as before", await writeSection(statsId, section, true, 5), "full");
+  is("written answered 0: full, as before", await writeSection(store, section, true, 5), "full");
   redis.pipeline = answering((c) => c[0] === "EVAL", -2);
-  is("written answered -2: gone, as before", await writeSection(statsId, section, false, 5), "gone");
+  is("written answered -2: gone, as before", await writeSection(store, section, false, 5), "gone");
   redis.pipeline = real;
-  is("a real write still saves", await writeSection(statsId, section, true, 5), "ok");
+  is("a real write still saves", await writeSection(store, section, true, 5), "ok");
 
   part("An order put on the review list, exactly");
   const asking = { statsId, handle: "factshop", reviewAsk: { ...store.reviewAsk, days: 7 } };

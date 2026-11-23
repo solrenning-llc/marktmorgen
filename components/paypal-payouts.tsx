@@ -282,7 +282,8 @@ export function PayPalUnread() {
   const [error, setError] = useState<string | null>(null);
   return (
     <div className="notice notice-warn mt-5">
-      <p role="alert">
+      {/* Plain text: it is drawn with the page, so an alert would interrupt on every load (AX274 2.2.4). */}
+      <p>
         Your PayPal connection could not be read just now, so paying from PayPal is unavailable here. Nothing was changed.
         Reload the page to try again. If this keeps happening, disconnect PayPal and connect it again.
       </p>

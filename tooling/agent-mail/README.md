@@ -244,8 +244,12 @@ node ~/.agent-mail/agent-mail.mjs complete-review --as "Claude 5" <id> --result 
   Não contam como achado:
   - uma contagem zero ("0 LEVE");
   - uma linha marcada "não é defeito";
-  - uma linha que diz que um achado de head anterior foi corrigido, retirado, fechado, atendido ou resolvido ("fixed", "closed", "addressed", "resolved"), sem negação;
-  - "the follow-up commit" ou "follow-up push" (o commit que corrigiu).
+  - numa oração (o texto entre ";" ou "."), um achado de head anterior dado como resolvido **neste formato fixo**:
+    - a palavra de fechamento no passado seguida do commit que o fechou ou do head: "fixed in <sha>", "closed by <sha>", "corrigido em <sha>", "addressed on this head", "corrigido neste head";
+    - ou "withdrawn by its author" / "retirado por quem o apontou";
+    - sem nenhuma marca de futuro, condição ou pendência na oração ("will", "next", "pending", "once", "fica", "será", "próximo", "depois").
+
+  Qualquer outra forma conta como achado, do lado seguro. A leitura livre deixou passar adiamentos em três revisões do #5404, e a mensagem de recusa mostra o formato aceito. "the follow-up commit" e "follow-up push" não são adiamento.
 
   Com qualquer achado, o veredito é `--result CHANGES`.
 - `claim-review` dá o pedido aberto mais antigo. Nunca dois agentes pegam o mesmo pedido.

@@ -1692,32 +1692,36 @@ export function conferirTomada({ eu, id, agora = new Date() }) {
 
 /**
  * ZA (dono, 23/11/2026, 12h29 Fortaleza): READY só com zero achados. Devolve os motivos pelos quais o texto de um READY
- * não pode ser aceito: falta a declaração de zero achados ("sem achados", "0 achados", "no findings"), ou o texto aponta
- * um achado de qualquer tamanho (GRAVE, ALTO, MÉDIO, LEVE, NIT e os nomes em inglês) ou o adia ("não bloqueia",
- * "non-blocking", "follow-up", "fica para depois"). Uma contagem zero ("0 LEVE", "zero NIT") não é achado; uma linha que
- * diz "não é defeito" ou "not a defect" é nota, não achado (ZA (c)). Vazio quando o READY pode ser gravado.
+ * não pode ser aceito; vazio quando pode ser gravado. Recusa o texto que:
+ * - não declara zero achados ("sem achados", "0 achados", "no findings");
+ * - nomeia um achado de qualquer tamanho (GRAVE, ALTO, MÉDIO, LEVE, NIT e os nomes em inglês, em maiúsculas);
+ * - adia um achado ("não bloqueia", "non-blocking", "follow-up", "fica para depois").
+ * Não são achado: uma contagem zero ("0 LEVE"); uma linha marcada "não é defeito" (ZA (c)); e, em cada oração (o texto
+ * entre ";" ou "."), um achado de head anterior dado como resolvido NUM FORMATO FIXO: a palavra de fechamento no passado
+ * seguida do commit que o fechou ou de "this head"/"neste head", ou "withdrawn"/"retirado" por quem o apontou, sem
+ * nenhuma marca de futuro, condição ou pendência na oração (ZA (d)). Depois de três revisões em que a leitura livre deixou
+ * passar adiamentos (Claude 3 yUZf 7107553863, Claude 5 icFoe 7107286507, Claude 5 iaqyQ 7107846397), só esse formato
+ * vale; o resto conta como achado, do lado seguro, e a mensagem de recusa mostra o formato.
  */
+export const FORMATO_RESOLVIDO = '"<achado> fixed in <sha>" / "corrigido em <sha>" / "closed on this head" / "retirado por quem o apontou"';
 export function motivosContraReady(texto) {
   const motivos = [];
   const todo = String(texto ?? "");
   if (!/\b(sem achados?|0 achados?|zero achados?|nenhum achado|no findings?|0 findings?|zero findings?)\b/i.test(todo)) motivos.push('falta dizer "sem achados" (ou "0 achados", "no findings")');
+  const SEV = "GRAVE|ALTO|M[ÉE]DIO|LEVE|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE";
   const notas = /n[ãa]o [ée] defeito|not a defect|not a finding|n[ãa]o [ée] achado/i;
-  // ZA (d): o READY de um head novo diz que cada achado antigo foi corrigido ou retirado; essa linha não é achado aberto.
-  // Claude 3 yUZf's LEVE on #5404: "closed", "addressed" and "resolved" (and the Portuguese words) say the same as "fixed".
-  // Claude 5 icFoe's LEVE on #5404: a line that describes a finding ("LEVE: the stream is never closed") is a finding, even
-  // with one of these words in it; only a line that says them of the finding ("my LEVE closed") is resolved.
-  const descreveAchado = (l) => /\b(GRAVE|ALTO|M[ÉE]DIO|LEVE|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE)S?\b\s*(\d+\s*)?(\([^)]*\)\s*)?[:—–]|\b(GRAVE|ALTO|M[ÉE]DIO|LEVE|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE)S?\b\s+-\s/.test(l);
-  // Claude 3 yUZf's MÉDIO on #5404: "will be fixed", "to be addressed later", "será corrigido depois" are deferrals; a
-  // closure word counts only said in the past, with no future, modal or later marker on the line.
-  const prometido = (l) => /\b(will|shall|to be|can|could|should|may|might|would|must|later|another (pr|pull request|unit)|(a |the )?(next|separate|follow-?up|future) (pr|pull request|unit)|eventually|someday)\b|\b(ser[áa]o?|ficar[áa]|vai|v[ãa]o|pode(m|ria)?|deve(m|ria)?|depois|outro pr|pr[óo]ximo pr|futur[oa]|mais tarde|em seguida)\b/i.test(l);
-  const resolvido = (l) => !descreveAchado(l) && !prometido(l) && /corrigid|\bfixe[ds]\b|retirad|withdrawn|\bclosed\b|fechad|\baddressed\b|atendid|\bresolved\b|resolvid/i.test(l)
-    && !/n[ãa]o (foi |est[áa] |foram |est[ãa]o )?(corrigid|retirad|fechad|atendid|resolvid)|not (been |yet )?(fixed|withdrawn|closed|addressed|resolved)|unfixed|unresolved|unaddressed|sem corre[çc][ãa]o/i.test(l);
-  const linhas = todo.split("\n").filter((l) => !notas.test(l) && !resolvido(l)).join("\n")
-    .replace(/\b(0|zero|nenhum|sem|no)\s+(achados?\s+)?(GRAVE|ALTO|M[ÉE]DIO|LEVE|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE)S?\b/gi, " ");
-  const tamanho = /\b(GRAVE|ALTO|M[ÉE]DIO|LEVE|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE)S?\b/.exec(linhas);
-  if (tamanho) motivos.push(`o texto aponta um achado (${tamanho[0]})`);
-  // "the follow-up commit" (the commit that fixed it) is not a deferral; "follow-up" about anything else is.
-  const adiado = /n[ãa]o bloque(ia|ante)|non-?blocking|follow-?up(?!\s+(commit|push)s?\b)|fica para depois|fica pra depois/i.exec(linhas);
+  // A oração que descreve um achado ("LEVE: o stream nunca é fechado") nunca é resolvida (Claude 5 icFoe, 7107286507).
+  const descreve = new RegExp(`\\b(${SEV})S?\\b\\s*(\\d+\\s*)?(\\([^)]*\\)\\s*)?([:—–]|-\\s)`);
+  // Futuro, condição, pendência ou modal: a oração promete, não fecha (Claude 3 yUZf 7107553863; Claude 5 iaqyQ 7107846397).
+  const promete = /\b(will|shall|to be|should|must|would|might|may|can be|could be|needs? to|later|next|pending|once|after|until|when|unless|if|another|separate|future|eventually|follow-?up (pr|pull request|unit))\b|\b(fica|ficar[áa]|ser[áa]o?|vai|v[ãa]o|pode ser|podem ser|deve|devem|precisa|pr[óo]xim[oa]|quando|assim que|depois|se|caso|outro|outra|futur[oa]|mais tarde|em seguida|pendente)(?![\p{L}\d])/iu;
+  const fecha = /\b(fixed|closed|addressed|resolved|corrigid[oa]s?|fechad[oa]s?|atendid[oa]s?|resolvid[oa]s?)\b[^;]{0,40}?(\b(in|by|on|at|em|no|na|pelo|pela|por)\s+(commit\s+)?([0-9a-f]{7,40}\b|this head\b|este head\b)|\s(neste|nesse) head\b)|\b(withdrawn|retirad[oa]s?)\b[^;]{0,30}?\b(by|por)\s+(its author|the reviewer who raised it|quem (o |a )?apontou|o autor do achado)/i;
+  const resolvida = (o) => fecha.test(o) && !descreve.test(o) && !promete.test(o);
+  const orações = todo.split("\n").filter((l) => !notas.test(l)).flatMap((l) => l.split(/;|\.(?=\s|$)/));
+  const resto = orações.filter((o) => !resolvida(o)).join("\n")
+    .replace(new RegExp(`\\b(0|zero|nenhum|sem|no)\\s+(achados?\\s+)?(${SEV})S?\\b`, "gi"), " ");
+  const tamanho = new RegExp(`\\b(${SEV})S?\\b`).exec(resto);
+  if (tamanho) motivos.push(`o texto aponta um achado (${tamanho[0]}); um achado de head anterior só conta como resolvido no formato ${FORMATO_RESOLVIDO}`);
+  const adiado = /n[ãa]o bloque(ia|ante)|non-?blocking|follow-?up(?!\s+(commit|push)s?\b)|fica para depois|fica pra depois/i.exec(resto);
   if (adiado) motivos.push(`o texto adia um achado ("${adiado[0]}")`);
   return motivos;
 }

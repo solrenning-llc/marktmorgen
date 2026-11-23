@@ -1327,14 +1327,18 @@ console.log("ZA: what a READY's text may say (owner, 23/11/2026 12h29 Fortaleza:
   is("ZA: 'sem achados', '0 achados', 'no findings' and 'zero findings' are accepted", ["sem achados", "READY, 0 achados.", "READY, no findings.", "zero findings"].every(aceito), "");
   is("ZA: zero counts are not findings ('0 GRAVE, 0 ALTO, 0 MÉDIO, 0 LEVE, 0 NIT')", aceito("sem achados: 0 GRAVE, 0 ALTO, 0 MÉDIO, 0 LEVE, 0 NIT"), za("sem achados: 0 GRAVE, 0 ALTO, 0 MÉDIO, 0 LEVE, 0 NIT").join("; "));
   is("ZA (c): a line marked 'não é defeito' is a note, not a finding", aceito("sem achados\nNota (não é defeito): o nome LOW do teste fica"), "");
-  is("ZA (d): an earlier finding said to be fixed in this head is not an open one", aceito("sem achados\nO LEVE de 7083359730 foi corrigido neste head"), "");
-  is("ZA (d): but one said NOT to be fixed is", !aceito("sem achados\nO LEVE de 7083359730 não foi corrigido"), "");
-  // Claude 3 yUZf's LEVE on #5404: real READYs of 23/11/2026 say an earlier finding was "closed", "addressed" or "resolved".
-  for (const t of ["0 findings. Claude 1's LEVE 1 closed in this head", "no findings; Claude 4's LOW 2 addressed by 1234abcd", "0 findings: the MEDIUM is resolved", "sem achados; o LEVE 2 foi fechado, o LOW 3 atendido e o NIT resolvido", "0 findings; the follow-up commit 1234abcd fixes the earlier LOW"])
-    is(`ZA (d): an earlier finding said '${t}' is not an open one`, aceito(t), za(t).join("; "));
-  // The seven texts of Claude 3 yUZf's review (7106773158): five real or valid READYs accepted, the control refused.
-  for (const t of ["READY #5368 @b160034bb9, 0 findings (focal; my LEVE closed: the reader)", "READY #5367 @4ee6a53fd7, 0 findings (money): Claude 1's and Claude 2's LEVE closed by ff3f952468", "READY #5363 @9e01e874f8, 0 findings (focal money review; my LEVE closed).", "READY, 0 findings. Claude 1's NIT is addressed by this head.", "READY, 0 findings: the follow-up commit only moves a comment.", "READY, 0 findings. Claude 1's NIT is fixed by this head."])
-    is(`ZA: yUZf's case '${t.slice(0, 60)}' is accepted`, aceito(t), za(t).join("; "));
+  // ZA (d), fixed format (after three reviews found deferrals passing as closures in free wording): an earlier finding is
+  // resolved only when the clause names the commit that closed it or "this head", or says it was withdrawn by whoever raised it.
+  for (const t of ["sem achados\nO LEVE de 7083359730 foi corrigido neste head", "0 findings. Claude 1's LEVE 1 closed on this head", "no findings; Claude 4's LOW 2 addressed by 1234abcd", "0 findings: the MEDIUM is resolved in 9e01e874f8", "sem achados; o LEVE 2 foi fechado em ab12cd34ef; o NIT foi retirado por quem o apontou", "READY #5367 @4ee6a53fd7, 0 findings (money): Claude 1's and Claude 2's LEVE closed by ff3f952468", "READY, 0 findings. Claude 1's NIT is addressed by this head.", "READY, 0 findings. Claude 1's NIT is fixed by this head.", "READY, 0 findings: the follow-up commit only moves a comment.",
+    // Claude 5 iaqyQ's LEVE (7107846397): "pode entrar" next to the closure does not refuse it.
+    "sem achados\nO LEVE do Claude 3 foi corrigido em e97ec87bbe; pode entrar.", "0 findings\nClaude 3's LEVE was fixed in e97ec87bbe; pode entrar.", "0 findings\nI could not run the Redis test; my earlier LEVE was fixed in e97ec87bbe."])
+    is(`ZA (d): the closure '${t.replace(/\n/g, " / ").slice(0, 70)}' is accepted`, aceito(t), za(t).join("; "));
+  // Free wording without the commit or "this head" is refused, on the safe side, and the refusal shows the format.
+  for (const t of ["READY #5368 @b160034bb9, 0 findings (focal; my LEVE closed: the reader)", "READY #5363 @9e01e874f8, 0 findings (focal money review; my LEVE closed).", "0 findings: the MEDIUM is resolved", "sem achados\nO LEVE de 7083359730 não foi corrigido"])
+    is(`ZA (d): the free closure '${t.slice(0, 60)}' is refused and shows the format`, !aceito(t) && za(t).some((m) => m.includes("fixed in <sha>")), za(t).join("; "));
+  // Claude 5 iaqyQ's MÉDIO (7107846397): a closure placed in a later commit, push or event is a deferral.
+  for (const t of ["0 findings\nThe one LEVE about naming is fixed in the next commit.", "sem achados\nO LEVE do nome fica corrigido no próximo commit.", "sem achados\nO LEVE do nome é corrigido no próximo push.", "0 findings\nThe LEVE is resolved once #5410 lands.", "0 findings\nThe LEVE is addressed by the pending commit.", "0 findings\nThe LEVE will be fixed in 1234abcd.", "sem achados\nO LEVE será corrigido em 1234abcd."])
+    is(`ZA: the deferral '${t.split("\n")[1].slice(0, 55)}' is refused`, !aceito(t), za(t).join("; "));
   // Claude 5 icFoe's LEVE on #5404: a finding described with one of those words is still a finding.
   for (const t of ["0 findings\nLEVE: the stream is never closed when the read throws", "0 findings\nLEVE: a fixed 30-second timeout", "0 findings\nNIT: the error is resolved to a string", "0 findings\nMEDIUM: the address is already addressed to another store", "0 findings\nLOW 2 (copy) — the text is fixed width", "0 findings\n- LEVE - a closed store still answers"])
     is(`ZA: icFoe's case '${t.split("\n")[1].slice(0, 50)}' is refused`, !aceito(t), za(t).join("; "));

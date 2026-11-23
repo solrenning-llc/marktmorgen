@@ -399,6 +399,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:lib:joined:@lib/joined-stores.ts": company("The stores an address joined the list of", "A person's, across stores: one member a store, in the set of the quarter it joined in, kept QUARTERS_KEPT quarters at the most."),
   "nl:lib:link:@lib/buyer-library.ts": short("A library link, a day", "access", 1, LINK_BYTES, MAIL("library")),
   "nl:pm:r:@lib/purchase-moves.ts": short("A buyer's request to move their purchases to another address (611 [WP10]), a day, at most MAX_MOVE_RECORD_BYTES", "access", 1, LINK_BYTES, MAIL("purchase-move")),
+  "nl:pm:retry:@lib/purchase-moves.ts": short("The request a purchase move ask of the day already made, for a same-day retry (its id and a nonce), under a one-way fingerprint, a day", "access", 1, MARK, MAIL("purchase-move")),
   "nl:pm:t:@lib/purchase-moves.ts": short("A purchase move's two links, a day", "access", 1, 2 * LINK_BYTES, MAIL("purchase-move")),
   "nl:pm:c:@lib/purchase-moves.ts": short("A purchase move's two confirmations and the mark that the current address's link went once, a day", "access", 1, 3 * MARK, MAIL("purchase-move")),
   "nl:pm:done:@lib/purchase-moves.ts": short("A purchase move claimed once, two days", "access", 2, MARK, MAIL("purchase-move")),

@@ -60,8 +60,18 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 export const MOVE_ASK_UNITS = 1;
 /** Public requests a link's page, or its Confirm, holds before it reads. */
 export const MOVE_LINK_UNITS = 1;
-/** Commands an ask makes besides the hold and its emails: the purchases link, the deleted people, the day's count (one script, billed 3: lib/purchase-moves.ts MOVE_DAY_COUNT) and the request with the new address's link (2). */
-export const MOVE_ASK_COMMANDS = 7;
+/**
+ * Commands a retry whose answer was lost adds to an ask: the same-day index read back, then the request and the new
+ * address's link it names (lib/purchase-moves.ts askToOnce; a plain retry reads the same two after the script).
+ */
+export const MOVE_ASK_RECHECK_COMMANDS = 3;
+/**
+ * Commands an ask makes besides the hold and its emails, at the most: the purchases link, the deleted people, the
+ * day's count (one script, billed 3: lib/purchase-moves.ts MOVE_DAY_COUNT), the same-day index with the request and
+ * the new address's link (one script, billed 5: the EVAL, a GET and three SETs, MOVE_ASK_TO_ONCE) and, when the
+ * script's answer was lost, MOVE_ASK_RECHECK_COMMANDS more (Codex V's MEDIUM on #3621, redone on #3659).
+ */
+export const MOVE_ASK_COMMANDS = 1 + 1 + 3 + 5 + MOVE_ASK_RECHECK_COMMANDS;
 /** Commands a link's page reads: the link, the request with both confirmations and the claim (4), the deleted people. */
 export const MOVE_LINK_COMMANDS = 6;
 /** Commands a Confirm makes: the page's reads, then the link, the request, the mark (with its read-back) and the request again. */

@@ -397,9 +397,12 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       const full = [...(lost?.rows ?? []), ...refunds]
         .filter((refund) => typeof refund.id === "string" && refund.id && rowGivesBack(refund))
         .map((refund) => ({ id: refund.id as string, created: typeof refund.created === "number" ? refund.created : 0, pi: idOf(refund.payment_intent) }));
-      const seen = full.length ? await redisPipeline(full.map((refund) => ["SISMEMBER", seenKey(statsId), refund.id])) : [];
+      // One answer a refund, each exactly 0 or 1 (#5285, Codex X6's LOW on #3862): a reply cut short or of another
+      // shape is unknown, so no refund is taken again and the place does not move on it.
+      const seen = full.length ? repliesFor(await redisPipeline(full.map((refund) => ["SISMEMBER", seenKey(statsId), refund.id])), full.length) : [];
+      if (!seen || !seen.every((answer) => answer === 0 || answer === 1)) throw new UnknownReplyError("the refunds a pass already took");
       for (const [i, refund] of full.entries()) {
-        if (Number(seen[i]) !== 1) {
+        if (seen[i] !== 1) {
           if (INTENT_ID.test(refund.pi)) marked += await markRefunded(statsId, refund.pi);
           // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
           await redisPipeline([

@@ -17,7 +17,7 @@
  */
 import { PDFDocument } from "pdf-lib";
 import * as stamp from "@/lib/pdf-stamp";
-import { previewCopy } from "@/lib/pdf-preview";
+import { previewCopy, type PreviewKeeper } from "@/lib/pdf-preview";
 import { serveStamped } from "@/lib/serve-file";
 import { PAID_STORAGE_BYTES } from "@/lib/storage-rules";
 import { FLY_BASE_UNITS, NO_ROOM_NOTE_SECONDS, STORAGE_MEASURE_UNITS, type CopyMeter, flyHoldUnits, flyUnits } from "@/lib/stamp-cost-rules";
@@ -31,6 +31,8 @@ const FOLDER = "0123456789abcdef0123456789abcdef";
 const PENDING = `nl:storage:pending:${FOLDER}`;
 const NO_ROOM = `nl:stamp:noroom:${FOLDER}`;
 const BRAKE = PAID_STORAGE_BYTES.creator;
+// This test isolates storage behavior; the route test exercises the real live-store keeper.
+const keepPreview: PreviewKeeper = async (key, value, seconds) => (await redis.pipeline([["SET", key, value, "EX", seconds]]))[0] === "OK" ? "kept" : "unknown";
 const shop = { sid: "stamped-copy-storage", tier: "creator" as const, subscriptionActive: true, subscriptionId: "sub_1", trialEnds: 0, planEndedAt: "" };
 
 /** The store's public requests, in memory: every take and give-back is written down; `left` is what the window has. */
@@ -220,17 +222,17 @@ async function main() {
   const previewed = await original("Preview-me.pdf", 4);
   holding(BRAKE);
   const p1 = meter();
-  is("a full store gets no preview made", await previewCopy(previewed, 2, shop, p1.m), null);
+  is("a full store gets no preview made", await previewCopy(previewed, 2, shop, p1.m, keepPreview), null);
   is("and none is written", copies(previewed), []);
   is("its measurement was paid for first", p1.log, [`take ${STORAGE_MEASURE_UNITS}`]);
   world.pages.length = 0;
   const listedAfterPreview = world.listed.length;
   const p2 = meter();
-  is("asked again within the hour: still no preview", await previewCopy(previewed, 2, shop, p2.m), null);
+  is("asked again within the hour: still no preview", await previewCopy(previewed, 2, shop, p2.m, keepPreview), null);
   is("without listing the store or paying for a measurement", [world.listed.length, p2.log], [listedAfterPreview, []]);
   await forgetNoRoom();
   const p3 = meter();
-  const preview = await previewCopy(previewed, 2, shop, p3.m);
+  const preview = await previewCopy(previewed, 2, shop, p3.m, keepPreview);
   is("control: with room, the preview is made and kept", [Boolean(preview), preview ? world.files.has(preview.pathname) : false], [true, true]);
   is("and nothing stays reserved", [null, "[]"].includes(await pending() as string | null), true);
 

@@ -16,7 +16,7 @@ export function Faq({ questions = HOME_QUESTIONS }: { questions?: typeof HOME_QU
         <div className="pb-6 pr-12">
           <p className="text-ink-soft">{item.a}</p>
           {/* Each link is pressed alone, so it is a 44 px target (2.5.5 AAA, tests/home-faq-targets.test.ts); the rows sit closer to keep the list's height. */}
-          {item.links?.length?<ul className="mt-3 flex flex-wrap gap-x-5">{item.links.map(link=><li key={link.href}><Link href={link.href} prefetch={false} className="link inline-flex min-h-11 items-center">{link.label}</Link></li>)}</ul>:null}
+          {item.links?.length?<ul className="mt-3 flex flex-wrap gap-x-5">{item.links.map(link=><li key={link.href}><Link href={link.href} prefetch={false} className="link inline-flex min-h-11 min-w-11 items-center">{link.label}</Link></li>)}</ul>:null}
         </div>
       </details>
     </li>)}

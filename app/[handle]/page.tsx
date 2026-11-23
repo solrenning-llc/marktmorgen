@@ -1,3 +1,10 @@
+import { MovedNotice } from "@/components/moved-notice";
+import { SiteFooter } from "@/components/site-footer";
+import { SiteNav } from "@/components/site-nav-server";
+import { exitAnswerForStore, exitAnswerForValue } from "@/lib/exit-redirect-rules";
+import { closingDayBegun } from "@/lib/plan-closing";
+import { standingOf } from "@/lib/plan-standing";
+import { cache } from "react";
 import { VisitUsBlock } from "@/components/visit-us-block";
 import { StoreTrustCard } from "@/components/store-trust-card";
 import { assistReminderShown } from "@/lib/assistant-reminder";
@@ -50,7 +57,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound, permanentRedirect, redirect } from "next/navigation";
-import { type Listing, normaliseHandle, storeForPage } from "@/lib/store";
+import { type Listing, type Store, handleForPage, normaliseHandle, storeForPage, storeRef } from "@/lib/store";
 import { KIND, readPage, sellsAny, visibleCount } from "@/lib/catalog";
 import { groupBySection } from "@/lib/store-sections";
 import { offeredItems } from "@/lib/bundles";
@@ -84,6 +91,7 @@ import { readAllTimeSales } from "@/lib/stats";
 import { isResting } from "@/lib/traffic";
 import { StoreResting } from "@/components/store-resting";
 import { NewTab } from "@/components/new-tab";
+import { unknownLimit } from "@/lib/request-guard";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -107,13 +115,53 @@ async function load(raw: string) {
   return store ? { store, asked } : null;
 }
 
+/**
+ * Whether a store's closing day has begun, read once a render for the page and its metadata (React cache, keyed by the
+ * store's ref): two commands (lib/plan-closing.ts closingDayBegun). An unknown read is "unknown", never "not begun".
+ */
+const closingBegun = cache((ref: string) => closingDayBegun(ref).catch(() => "unknown" as const));
+
+/**
+ * The moved notice of a store that has closed but whose record is not yet
+ * deleted: only once its closing day has really begun, its files removed or
+ * not (review of #3730), read only for a store with a notice that is not
+ * suspended and whose plan has ended, since a store that pays never closes,
+ * so its front page reads nothing more. A closing given up, moved later or
+ * not readable shows the store as always.
+ */
+async function closingNotice(store: Store) {
+  if (!store.exitNotice || store.suspended) return null;
+  if (standingOf(store, Date.now() / 1000) !== "ended") return null;
+  const closing = await closingBegun(storeRef(store));
+  const answer = exitAnswerForStore(store, closing, Date.now());
+  return answer.kind === "moved" ? answer : null;
+}
+
+/**
+ * A closed store's moved notice at its old address (97 [D2-OPEN-EXIT]), read
+ * from the same one read of the address the page already made
+ * (handleForPage), never a second one.
+ */
+async function moved(raw: string) {
+  const decoded = decodeURIComponent(raw);
+  if (!decoded.startsWith("@")) return null;
+  const answer = exitAnswerForValue((await handleForPage(normaliseHandle(decoded))).released, Date.now());
+  return answer.kind === "moved" ? answer : null;
+}
+
 export async function generateMetadata({ params, searchParams }: Params): Promise<Metadata> {
   const { handle } = await params;
   // A search's results are not a page of their own for search engines.
   const searched = typeof (searchParams ? await searchParams : {}).q === "string";
   const found = await load(handle);
-  if (!found) return { title: "Not found — Marktmorgen" };
+  if (!found) {
+    if (await moved(handle)) return { title: "This store has moved — Marktmorgen", robots: { index: false, follow: false } };
+    return { title: "Not found — Marktmorgen" };
+  }
   const { store } = found;
+  // A closed store showing its moved notice is never indexed (review of #3730).
+  const closedNotice = await closingNotice(store);
+  if (closedNotice) return { title: "This store has moved — Marktmorgen", robots: { index: false, follow: false } };
 
   return {
     title: `${store.name} — Marktmorgen`,
@@ -154,7 +202,19 @@ export default async function StorePage({ params, searchParams }: Params) {
   const query = searchParams ? await searchParams : {};
   const asking = typeof query.page === "string" && /^\d{1,4}$/.test(query.page) ? Number(query.page) : 1;
   const found = await load(handle);
-  if (!found) notFound();
+  if (!found) {
+    const notice = await moved(handle);
+    if (notice) {
+      return (
+        <div className="flex min-h-screen flex-col bg-paper text-ink">
+          <SiteNav />
+          <MovedNotice to={notice.to} host={notice.host} until={notice.until} />
+          <SiteFooter />
+        </div>
+      );
+    }
+    notFound();
+  }
   const { asked } = found;
   // With the visitor's country, for a fair price for it (lib/fair-price.ts).
   const store = await forVisitor(found.store);
@@ -178,6 +238,20 @@ export default async function StorePage({ params, searchParams }: Params) {
   // On the store's own domain the address in the bar is the domain, so there
   // is nothing to correct.
   if (asked !== store.handle && !reachedOn) permanentRedirect(`/@${store.handle}`);
+
+  // A store whose closing day has come, while its record is not yet deleted:
+  // the moved notice its owner chose, from the record already read
+  // (97 [D2-OPEN-EXIT]). Before that day, or with none, the store as always.
+  const closedNotice = await closingNotice(found.store);
+  if (closedNotice) {
+    return (
+      <div className="flex min-h-screen flex-col bg-paper text-ink">
+        <SiteNav />
+        <MovedNotice to={closedNotice.to} host={closedNotice.host} until={closedNotice.until} />
+        <SiteFooter />
+      </div>
+    );
+  }
 
   // A store rests until its window turns once the visits or the requests its
   // standing covers this window are used, or when they cannot be read
@@ -220,12 +294,12 @@ export default async function StorePage({ params, searchParams }: Params) {
   const searchable = visibleCount(store) > STORE_PAGE_SIZE;
   const searchAllowed =
     wantedSearch !== "" && searchable && searchWords(wantedSearch).length > 0
-      ? await withinStore("store-search", `${(await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"}|${store.handle}`, 30, 600, store)
+      ? await withinStore("store-search", `${(await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"}|${store.handle}`, 30, 600, store).catch(unknownLimit)
       : false;
   // A search pays for what it reads before reading it (lib/store-search-index.ts): the full read of the store's
   // listings once for everybody, as shared work kept ten minutes, then only the matches it shows and their checkout
   // boxes. Refused, it reads nothing and the page says why, as for the per-connection limit (c1-cost-store-search).
-  const answer = searchAllowed ? await searchStorePaid(store, wantedSearch) : null;
+  const answer = searchAllowed === true ? await searchStorePaid(store, wantedSearch) : null;
   // A store whose index is too large to keep offers no search for now, and says so; its products are listed as usual.
   const searchUnavailable = answer === SEARCH_UNAVAILABLE;
   const results = answer === SEARCH_UNAVAILABLE ? null : answer;
@@ -445,7 +519,7 @@ export default async function StorePage({ params, searchParams }: Params) {
                         </button>
                       </div>
                       {searchRefused ? (
-                        <p className="st-note mt-3 text-sm" role="status">{searchUnavailable ? bw.searchUnavailable : bw.searchSlow}</p>
+                        <p className="st-note mt-3 text-sm" role="status">{searchAllowed === "unknown" ? bw.searchUnread : searchUnavailable ? bw.searchUnavailable : bw.searchSlow}</p>
                       ) : null}
                       {results ? (
                         <p className="mt-3 flex flex-wrap items-baseline justify-between gap-2 text-sm" role="status">

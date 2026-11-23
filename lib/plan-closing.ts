@@ -64,6 +64,7 @@ import { type StripeFailure, stripeFailure } from "@/lib/stripe-silence";
  * again for RECHECK_DAYS: measuring is the dear part of a look, and nearly
  * every store whose plan ended fits.
  */
+import { EXIT_NOTICE_DAYS } from "@/lib/exit-redirect-rules";
 import { createHash } from "node:crypto";
 import { type StartedSubscription, type SubscriptionState, observeStoreSubscriptions, isBillingConfigured, readSubscription } from "@/lib/billing";
 import { readAllListings } from "@/lib/catalog";
@@ -84,7 +85,7 @@ import { onBreak, pauseView } from "@/lib/plan-pause";
 import { withLock } from "@/lib/redis-lock";
 import { SITE_URL } from "@/lib/site-url";
 import { storageUsed, storageWords } from "@/lib/storage-quota";
-import { type Store, imageFolder, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
+import { type Store, imageFolder, setExitNoticeDay, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
 import { dropAllStreams, dropStream } from "@/lib/stream";
 import { readStreamPath } from "@/lib/stream-rules";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -420,6 +421,19 @@ export async function closingOf(store: Store, now = Date.now()): Promise<{ ended
   return { endedAt, day: closes, buyers: { by: state.buyersDone ?? closes - BUYER_NOTICE_DAYS * DAY_MS, done: Boolean(state.buyersDone), untold: state.untold ?? 0 } };
 }
 
+/**
+ * For the store page's moved notice (97 [D2-OPEN-EXIT]; Claude 1's review of #3730): whether the store's closing day
+ * has begun, as long as it is in the final line, its files removed by the walk or not, until its records are deleted.
+ * The real closing day kept in its state, or `now` when the walk has not written it yet; null when it is not in the
+ * line. Two commands, read exactly: an unknown reply throws (rule 24), never "not begun".
+ */
+export async function closingDayBegun(ref: string, now = Date.now()): Promise<{ day: number; today: true } | null> {
+  if (!isRedisConfigured()) return null;
+  const [finalScore, raw] = exactly(await redisPipeline([["ZSCORE", FINAL_INDEX, ref], ["GET", stateKey(ref)]]), 2, "a store's closing");
+  if (finalScoreOf(finalScore) === null) return null;
+  return { day: readState(raw).day ?? now, today: true };
+}
+
 /** Which notice is the one for today: the first, the one two weeks before, or the last. */
 export function noticeFor(endedAt: number, now: number): "ended" | "month" | "week" {
   const day = removalDay(endedAt);
@@ -655,7 +669,9 @@ export function closingLetter(kind: "ended" | "month" | "week", name: string, en
       "    and tasks are not in it, and are deleted after your store closes, within the time above;",
       "  - tell your students to download their course certificates: they can until that day,",
       "    and not after;",
-      "  - give your buyers another way to what they bought if you sell elsewhere.",
+      "  - give your buyers another way to what they bought if you sell elsewhere;",
+      `  - if your store is moving somewhere else, give its new address in your studio: for ${EXIT_NOTICE_DAYS} days`,
+      "    after your store closes, its old address here shows a link to it, to anyone who opens it.",
       "",
       studio,
       "",
@@ -1490,6 +1506,12 @@ async function closingSteps(store: Store, key: string, state: State, endedAt: nu
     }
     // From here the closing is seen through (FINAL_INDEX): no release, no "it stays open".
     await redisPipeline([["ZADD", FINAL_INDEX, endedAt, key], ["ZREM", HELD_INDEX, key]]);
+    // A moved notice chosen before carries the day the store really closed, so its released copy counts its 90 days
+    // from it, as the page does (Claude 1's MEDIUM 2 on #3730). Not confirmed written: held, tried again next run.
+    const realDay = next.day ?? day;
+    if (store.exitNotice && store.exitNotice.closedAt !== realDay && !(await setExitNoticeDay(storeRef(store), realDay))) {
+      return { key, state: "held", note: "its moved notice could not be given the real closing day yet" };
+    }
     // No plan can be paid for it from here: its open plan checkouts are
     // expired, and its address is marked for after its records are gone.
     await markShut(store, next.day ?? day, endedAt);

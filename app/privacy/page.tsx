@@ -5,6 +5,7 @@ import {PATH_WORDING_PRIVACY} from "@/lib/path-wording-rules";
 import {RETURN_PRIVACY_LINE} from "@/lib/path-return-rules";
 import { PAST_CALL_DAYS } from "@/lib/store-data-rules";
 import { CLOSING_DAYS, ERASE_WITHIN_DAYS } from "@/lib/plan-closing-rules";
+import { EXIT_NOTICE_DAYS } from "@/lib/exit-redirect-rules";
 import { MAX_SUBMISSION_KEEP_DAYS } from "@/lib/submission-rules";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -30,7 +31,7 @@ export default function PrivacyPage() {
   // Named only while the files creators sell are kept there (lib/vault.ts).
   const cloudflare = isVaultConfigured();
   return (
-    <LegalPage title="Privacy Policy" lastUpdated="November 13, 2026">
+    <LegalPage title="Privacy Policy" lastUpdated="November 22, 2026">
       <p>
         Marktmorgen (“Marktmorgen,” “we,” “us,” or “our”) is operated by
         Solrenning, an independent software studio. This Privacy Policy
@@ -1766,6 +1767,16 @@ export default function PrivacyPage() {
           answers, the date you sent them, and the consent choices you checked.
           To limit abuse, we also keep a one-way hash of your IP address for
           one hour; we do not store the IP address itself with your answers.
+          If you are signed in to a Marktmorgen account when you send the
+          form, we also store a short code made from your account&rsquo;s
+          email address with a secret key only we hold. It is not your email
+          address, and nobody can work it out from your address without that
+          key. We use it to keep a few places in the form for creators with an
+          account, so a flood of fake answers cannot fill it, and to allow
+          only one such answer per account. We keep the code with your answers
+          and delete it with them, after 24 months or when you ask us to delete
+          them. When you ask for a copy or for deletion, we find your answers by
+          this code as well as by the email address you typed.
         </p>
         <p>
           <strong className="text-black">Research outreach.</strong> If we
@@ -2211,7 +2222,13 @@ export default function PrivacyPage() {
           for the store&apos;s plan and any fee we charged, in our billing
           records and on our own Stripe account, and a note of the dates the
           store ended and closed, kept for about a year. The store&apos;s
-          address is held back from anybody else for 30 days.
+          address is held back from anybody else for 30 days. If, before its
+          closing day, the creator gave the store&apos;s new address, that
+          address and the closing day are kept with the old one instead, for
+          {` ${EXIT_NOTICE_DAYS} `}days after the store closes, and shown to
+          anyone who opens the old address: nothing else, and never who the
+          creator is. The old address is held back from anybody else for as
+          long.
         </p>
         <p>
           A creator&apos;s list is kept for as long as their store exists, or
@@ -2366,6 +2383,9 @@ export default function PrivacyPage() {
             What is kept, and why: a one-way fingerprint of your address, under
             that store, so it never emails you again and no import brings you
             back, which only you can lift by joining its list again yourself;
+            a one-way mark of you under that store, so none of its companies
+            (the businesses the creator keeps notes on) takes you again, kept
+            401 days or until you join its list again yourself;
             any stop you pressed on one kind of its emails, also a one-way hash;
             your payments, which are on the creator&apos;s own Stripe account as
             their sales and tax records and are not stored by us; and the few

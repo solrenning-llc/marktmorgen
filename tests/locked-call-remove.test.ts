@@ -48,7 +48,7 @@ async function main(): Promise<void> {
   const callsId = (await storeForEmail(OWNER))!.callsId;
   is("(control) the store has a calls id once the call is set", typeof callsId, "string");
   const teamKey = `nl:callteam:${callsId}`;
-  await writeTeam({ callsId }, id, { synthetic: "team of hosts", createdAt: 1 } as unknown as TeamSetup);
+  await writeTeam((await storeForEmail(OWNER))!, id, { synthetic: "team of hosts", createdAt: 1 } as unknown as TeamSetup);
   const team = () => redis.run(["HGET", teamKey, id]);
   part("A locked session deleting the call's team of hosts");
   is("is refused as locked", await answer(await callTeam(post(locked, { id, team: null }, "call-team"))), [403, "locked"]);

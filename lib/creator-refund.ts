@@ -49,7 +49,9 @@
  * wait is paid for before it is spent; at most REFUND_STRIPE_CALLS (three)
  * Stripe calls on the creator's account (the charge, its refunds, the refund;
  * no fee to Marktmorgen), each waited on for up to STRIPE_TIMEOUT_MS; and
- * three Redis commands (the mark, and the log's LPUSH and LTRIM). The units
+ * the Redis work of the told mark and the team log's fenced write (a GET and
+ * the KEEP_LOG_IF_LIVE EVAL, TEAM_LOG_COMMANDS in lib/team.ts, and a
+ * releaseMark when the line is lost; Claude 5's NIT on #3678). The units
  * past the first pay for the three waits at 2 GB (held in
  * tests/wg9-creator-refund-action.test.ts; Claude 5 on #3678).
  */

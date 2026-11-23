@@ -5,7 +5,10 @@ import { cachedReply } from "./membership-status-redis";
 import { store as memory } from "./redis-stub";
 import { done, is, part } from "./check";
 
-const store = { stripeAccountId: "acct_1TestClub000001" } as Store;
+// The status is kept through the store's fence (Codex L-20261119-1248, #5010 row 115), which reads the store's id key:
+// a store with an id, whose key fresh() writes after each clear, is live.
+const store = { stripeAccountId: "acct_1TestClub000001", sid: "0123456789abcdef0123456789abcdef", email: "club@example.test", extra: false } as Store;
+const fresh = () => { memory.clear(); memory.run(["SET", `nl:store:id:${store.sid}`, store.email]); };
 const sub = "sub_Member000001";
 const savedFetch = globalThis.fetch;
 const savedKey = process.env.STRIPE_SECRET_KEY;
@@ -27,10 +30,10 @@ async function main(): Promise<void> {
     ["object result", [{}]], ["empty status", [""]],
     ["extra active result", ["active", "extra"]], ["extra missing result", [null, "extra"]],
   ] as const) {
-    memory.clear(); cachedReply(reply); reads = 0;
+    fresh(); cachedReply(reply); reads = 0;
     let error: unknown;
     try { await membershipStatus(store, sub); } catch (caught) { error = caught; }
-    is(`${name}: unknown throws, with no provider read or stored status`, [error instanceof UnknownReplyError, reads, memory.keys().length], [true, 0, 0]);
+    is(`${name}: unknown throws, with no provider read or stored status`, [error instanceof UnknownReplyError, reads, memory.keys().filter((k: string) => !k.startsWith("nl:store:id:")).length], [true, 0, 0]);
   }
 
   part("A confirmed hit and an explicit miss keep the paid grace period");
@@ -38,18 +41,18 @@ async function main(): Promise<void> {
     cachedReply([status]); reads = 0;
     is(`${status}: use the one confirmed status`, [await membershipStatus(store, sub), reads], [status, 0]);
   }
-  memory.clear(); cachedReply([null]); reads = 0;
+  fresh(); cachedReply([null]); reads = 0;
   providerBody = { id: sub, status: "active", pause_collection: null };
   is("an explicit missing key permits the existing provider read", [await membershipStatus(store, sub), reads], ["active", 1]);
   cachedReply();
   is("the provider's known answer is kept by the existing cache", [await membershipStatus(store, sub), reads], ["active", 1]);
 
   part("An unidentified provider reply cannot become an ended membership");
-  memory.clear(); cachedReply([null]); reads = 0;
+  fresh(); cachedReply([null]); reads = 0;
   providerBody = { status: "active", pause_collection: null };
   let providerError: unknown;
   try { await membershipStatus(store, sub); } catch (caught) { providerError = caught; }
-  is("missing provider identity throws and fills no cache", [providerError instanceof UnknownReplyError, reads, memory.keys().length], [true, 1, 0]);
+  is("missing provider identity throws and fills no cache", [providerError instanceof UnknownReplyError, reads, memory.keys().filter((k: string) => !k.startsWith("nl:store:id:")).length], [true, 1, 0]);
 }
 
 void main().finally(() => {

@@ -26,6 +26,7 @@ import { withLock } from "@/lib/redis-lock";
 import { signedOf } from "@/lib/redis-count";
 import { UnknownReplyError, countOf, countWithin, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { ENTRY_BYTES, dataBytes } from "@/lib/store-data-rules";
 import { markLesson } from "@/lib/learn";
 import { markPassed } from "@/lib/quiz";
@@ -419,6 +420,18 @@ export class HandInChangedError extends Error {
   }
 }
 
+/**
+ * The student's erasure began before this hand-in's write (#4271): their print is on the store's list of the deleted,
+ * so nothing of this one was written. A HandInChangedError, so the route lets its file go as one never written.
+ */
+export class HandInErasedError extends HandInChangedError {
+  constructor() {
+    super();
+    this.message = "this student's data was deleted meanwhile";
+    this.name = "HandInErasedError";
+  }
+}
+
 /** The creator approved the work before this hand-in reached its final read. */
 export class HandInClosedError extends Error {
   constructor() {
@@ -428,12 +441,17 @@ export class HandInClosedError extends Error {
 }
 
 /**
- * The work written only over the one it was read as (KEYS: the work, the lesson's files, the course's waiting list,
- * its list of all work; ARGV: the work as read or "" for none, the new work, the file's path or "", its bytes, "1"
- * when a person reads it, when, the lists' member). 1 when written, 0 when the work changed since and nothing was
- * written; so the file it replaced is answered, deleted and given back by one hand-in only.
+ * The work written only over the one it was read as, and only while the student's erasure has not begun (KEYS: the
+ * work, the lesson's files, the course's waiting list, its list of all work, the store's list of the deleted; ARGV: the
+ * work as read or "" for none, the new work, the file's path or "", its bytes, "1" when a person reads it, when, the
+ * lists' member, the student's print on that list). 1 when written; 0 when the work changed since; -1 when the print
+ * is there: nothing written in either. So the file it replaced is answered, deleted and given back by one hand-in only,
+ * and a hand-in never writes an erased student's work back (#4271). The erasure puts the print first, before any
+ * eraser runs (lib/person-erasure.ts): a write that lands before the print is deleted by forgetTasksPerson after it,
+ * and one that lands after it is refused here, whenever the hand-in read and whatever it read.
  */
-export const HAND_IN_WRITE_IF = `-- marktmorgen:hand-in-write-if:v1
+export const HAND_IN_WRITE_IF = `-- marktmorgen:hand-in-write-if:v2
+if redis.call('HEXISTS', KEYS[5], ARGV[8]) == 1 then return -1 end
 local now = redis.call('GET', KEYS[1]) or ''
 if now ~= ARGV[1] then return 0 end
 redis.call('SET', KEYS[1], ARGV[2])
@@ -458,6 +476,8 @@ export async function handIn(input: {
   now?: number;
   /** The store whose data room the work takes from (DataRoomError when it does not fit). */
   data: DataStore;
+  /** The store's stable list id and the student's address: the erasure fence of the write (HAND_IN_WRITE_IF). */
+  erasure: { listId: string; email: string };
   /**
    * Called just before the work is written. A failure before it kept nothing; from it on, the work (and the file in
    * it) may be kept even when the call fails, its answer lost or a step after it failing (CX-123 rule 24).
@@ -496,11 +516,12 @@ export async function handIn(input: {
       [
         "EVAL",
         HAND_IN_WRITE_IF,
-        4,
+        5,
         subKey(courseId, lessonId, who),
         filesKey(courseId, lessonId),
         waitingKey(courseId),
         allKey(courseId),
+        suppressedKey(input.erasure.listId),
         read.raw,
         JSON.stringify(kept),
         input.file?.path ?? "",
@@ -508,11 +529,17 @@ export async function handIn(input: {
         task.review ? "1" : "0",
         at,
         member,
+        suppressionPrint(input.erasure.listId, input.erasure.email),
       ],
     ]),
     1,
   )?.[0];
   if (wrote === 0) throw new HandInChangedError();
+  if (wrote === -1) {
+    // Nothing written: what this hand-in took from the room comes back.
+    if (grown > 0) await giveData(input.data, [{ slot: TASKS_SLOT(courseId), bytes: grown }]);
+    throw new HandInErasedError();
+  }
   if (wrote !== 1) throw new UnknownReplyError("whether a hand-in was written");
   if (grown < 0) await giveData(input.data, [{ slot: TASKS_SLOT(courseId), bytes: -grown }]);
   if (!task.review) await finish(courseId, lessonId, who, input.email, input.data);

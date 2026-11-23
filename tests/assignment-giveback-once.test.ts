@@ -145,7 +145,7 @@ test("a hand-in replacing its file says the replaced bytes to give back only whe
   // The new file b.pdf took its 200 bytes of the room (takeRoom) before the hand-in.
   redis.run(["SET", bytesKey, "1300"]);
   const file = { path: "b.pdf", name: "b.pdf", bytes: 200, type: "application/pdf" };
-  const done = await handIn({ data: DATA, courseId: COURSE, lessonId: LESSON, who: WHO, email: "", task: TASK, text: "Again.", file });
+  const done = await handIn({ erasure: { listId: "list_synthetic", email: "student@example.com" }, data: DATA, courseId: COURSE, lessonId: LESSON, who: WHO, email: "", task: TASK, text: "Again.", file });
   assert.equal(done.replaced?.path, "a.pdf", "the old file is handed back to be deleted");
   assert.equal(done.freedBytes, 100, "its bytes are this hand-in's to give back");
 });
@@ -159,7 +159,7 @@ test("a hand-in racing a drop of the same assignment: the replaced file's bytes 
   const isWrite = (batch: Batch) =>
     (batch[0]?.[0] === "SET" && String(batch[0][1]).includes(":sub:")) || (batch[0]?.[0] === "EVAL" && String(batch[0][3]).includes(":sub:"));
   const done = await aheadOf(isWrite, async () => applyTaskDrop(await readTaskDrop(COURSE, LESSON), ROOM, DATA), () =>
-    handIn({ data: DATA, courseId: COURSE, lessonId: LESSON, who: WHO, email: "", task: TASK, text: "Again.", file }),
+    handIn({ erasure: { listId: "list_synthetic", email: "student@example.com" }, data: DATA, courseId: COURSE, lessonId: LESSON, who: WHO, email: "", task: TASK, text: "Again.", file }),
   ).then(
     () => "written",
     (error: unknown) => (error instanceof HandInChangedError ? "changed" : error),

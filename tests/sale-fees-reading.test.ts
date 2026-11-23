@@ -273,6 +273,28 @@ async function main(): Promise<void> {
   const keptPartial = await keptSaleFees(STORE, NOW + 60_000);
   is("the part is kept as the copy, with how far it reached", keptPartial.kind === "read" ? keptPartial.kept.since : null, (partOldest + 1) * 1000);
 
+  part("The database's time is inside the reading's time (8834 follow-up)");
+  reset();
+  // The copy's read takes 2 s, the one page would take all but 1 s of the reading's time: together past it, so the page
+  // is given up at the reading's time and the reading fails, counted, never longer than it is priced.
+  const slowRedis = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands[0]?.[0] === "GET" && String(commands[0][1]).startsWith("nl:salefees:copy:")) await new Promise((r) => setTimeout(r, 2_000));
+    return slowRedis(commands);
+  }) as typeof redis.pipeline;
+  pages = [page([sale], false)];
+  slowMs = SALE_FEES_READ_MS - 1_000;
+  const dbStarted = Date.now();
+  let dbSlow: Awaited<ReturnType<typeof keptSaleFees>>;
+  try {
+    dbSlow = await keptSaleFees(STORE, NOW);
+  } finally {
+    slowMs = 0;
+    redis.pipeline = slowRedis;
+  }
+  is("the page is given up at the reading's time: failed, counted", [dbSlow.kind, (await redis.pipeline([["GET", "nl:salefees:day:stats1:2026-11-11"]]))[0]], ["failed", "1"]);
+  is("and the whole reading lasted no longer than it is priced", Date.now() - dbStarted < SALE_FEES_READ_MS + 250, true);
+
   part("No time left before the next page: what was read is kept, and the next page is never asked (audit f89b)");
   reset();
   const edgeOldest = created - 3000;

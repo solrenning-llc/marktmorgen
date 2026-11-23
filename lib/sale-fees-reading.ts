@@ -89,7 +89,9 @@ export const SALE_FEES_READ_SHAPE: ReadShape = {
 };
 /**
  * The wall time one reading may take: exactly what its shape is priced at (lib/read-ceilings.ts, tests/plan-cost-registry.ts
- * readShapeCost: its seconds and EXPORT_PAGE_SECONDS for each Stripe page), never more (audit f89b).
+ * readShapeCost: its seconds and EXPORT_PAGE_SECONDS for each Stripe page), counted from before the copy and the
+ * day's count are read, so the database's own time is inside it too. Only the copy written after the pages (one SET)
+ * falls outside, within the database client's own time limit (audits f89b, 8834 follow-up).
  */
 export const SALE_FEES_READ_MS = (SALE_FEES_READ_SHAPE.seconds + SALE_FEES_READ_SHAPE.stripePages * EXPORT_PAGE_SECONDS) * 1000;
 
@@ -139,14 +141,14 @@ function moneyFields(line: Record<string, unknown>): Record<string, unknown> {
 class PageRefused extends Error {}
 
 /** The pages of one reading. Throws on a page in any other shape or a Stripe error. */
-async function readPages(account: string, now: number): Promise<{ lines: Record<string, unknown>[]; since: number }> {
+async function readPages(account: string, now: number, deadline: number): Promise<{ lines: Record<string, unknown>[]; since: number }> {
   const sinceMs = readingSince(now, "UTC");
   const sinceSeconds = Math.floor(sinceMs / 1000);
   const lines: Record<string, unknown>[] = [];
   let after = "";
-  // The wall time the reading is priced at (SALE_FEES_READ_MS, every page one after another): each page waits only what
-  // is left of it, and a reading with none left keeps what it read, never runs longer than it is billed (audits 9c68, f89b).
-  const deadline = Date.now() + SALE_FEES_READ_MS;
+  // The wall time the reading is priced at (SALE_FEES_READ_MS, from before the copy and the count were read; every page
+  // one after another): each page waits only what is left of it, and a reading with none left keeps what it read
+  // (audits 9c68, f89b).
   for (let page = 0; page < SALE_FEES_PAGES; page += 1) {
     // Up to the reading's own second: a line made while the pages are read is left for the next reading, never one the
     // months would take for "late" (lib/sale-fees-months.ts) and refuse the whole reading for.
@@ -249,6 +251,8 @@ export async function keptSaleFees(store: Account, now = Date.now(), fresh = fal
   // No database: nothing can be counted or kept, so nothing is read; said as unavailable, never as "connect" (audit 9c68).
   if (!isRedisConfigured()) return { kind: "failed" };
   if (!keyFor(account)) return { kind: "not_configured" };
+  // The reading's time starts before the database is read, so the copy and the count are inside it (8834 follow-up).
+  const deadline = Date.now() + SALE_FEES_READ_MS;
   const copy = await readCopy(statsId, account);
   if (copy && !fresh && now - copy.at >= 0 && now - copy.at < SALE_FEES_FRESH_SECONDS * 1000) return { kind: "read", kept: copy };
   const taken = await takeReading(statsId, now);
@@ -257,7 +261,7 @@ export async function keptSaleFees(store: Account, now = Date.now(), fresh = fal
   if (taken === "used") return copy ? { kind: "read", kept: { ...copy, stale: true } } : { kind: "used", backAt: nextUtcMidnight(now) };
   let read: { lines: Record<string, unknown>[]; since: number };
   try {
-    read = await readPages(account, now);
+    read = await readPages(account, now, deadline);
   } catch {
     // Stripe was called: the reading stays counted.
     return copy ? { kind: "read", kept: { ...copy, stale: true, failed: true } } : { kind: "failed" };

@@ -1384,6 +1384,20 @@ console.log("e0bc: complete-review knows its own verdict on the PR, also for a n
     && mod.comentarioDaSessao("Claude 6 review #5424 @8fcb16aaa8: READY\n\nSessão: 018ZjhHi51", "Claude 6", S6) === true);
   is("e0bc: a sister whose own signature names another session and whose body cites this id is a sister's",
     mod.comentarioDaSessao("Claude 6 review #5425 @8fcb16aaa8: READY\n\nReviewer: Claude 6, session 018ZjhHhUo\n\nSession 018ZjhHi51 raised the LEVE; it is fixed.", "Claude 6", S6) === false);
+  // LEVE 3 of Claude 5 hed9 on #5408: only the reviewer's own label counts (the first, or one signed "by", "por", "—"
+  // or "Reviewer:"), short labels and "local" are marks, and an id written longer must be this session's own.
+  is("e0bc: a sibling's header that cites this session as the one whose fix it checks is a sibling's",
+    mod.comentarioDaSessao("Claude 5 icEJ review #5045 @abc1234567: READY, confirms the fix of Claude 5 hed9", "Claude 5 hed9", null) === false);
+  is("e0bc: a short label is a mark: 'Claude 4 Z' knows its own verdict, and not 'Claude 4 AC''s",
+    mod.comentarioDaSessao("Claude 4 Z review #1 @abc1234567: READY", "Claude 4 Z", null) === true
+    && mod.comentarioDaSessao("Claude 4 AC review #1 @abc1234567: READY", "Claude 4 Z", null) === false);
+  is("e0bc: 'local' is a mark: 'Claude 3 local' knows its own verdict, and a cloud sibling's is not it",
+    mod.comentarioDaSessao("Claude 3 local review #1 @abc1234567: READY", "Claude 3 local", null) === true
+    && mod.comentarioDaSessao("Claude 3 (nuvem R) review #1 @abc1234567: READY", "Claude 3 local", null) === false);
+  const S1 = { id: "session_01DKvYQc2qAAAAAAAAAAAAAA" };
+  is("e0bc: an id written longer than ten characters must be this session's own (two sessions share 01DKvYQc2q)",
+    mod.comentarioDaSessao("Claude 1 review #1 @abc1234567: READY (session 01DKvYQc2qBBBB)", "Claude 1", S1) === false
+    && mod.comentarioDaSessao("Claude 1 review #1 @abc1234567: READY (session 01DKvYQc2qAAAA)", "Claude 1", S1) === true);
   is("e0bc: a name word in a Claude 2 sibling's label only as part of a longer word is not the session's",
     mod.comentarioDaSessao("Claude 2 mainline review #979 @abc: READY", "Claude 2 (main, 01FR6Z1)", null) === false);
 }
@@ -1400,10 +1414,23 @@ console.log("three READY from three outside families on the exact head before a 
   is("1442: the request is delivered", /pegou/.test(r.out), r.out);
   r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"]) });
   is("1442: two READY on the head are not enough: verify-enqueue refuses and says 3", !r.ok && /2 READY/.test(r.out) && /\b3\b/.test(r.out) && /1442/.test(r.out), r.out);
-  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Claude 2 Q"]) });
+  // On a branch with no family prefix the author is the family with most commits (coordinator dd03, as filaVedadaPara):
+  // here the PR's commits carry no trailer and an author "t", so the Codex family (LEVE 1 of Claude 5 hed9 on #5408).
+  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Codex Q"]) });
   is("1442: a READY from the author's family does not count", !r.ok && /2 READY/.test(r.out), r.out);
-  is("1442: on an unprefixed branch the refusal names the requester's family it counted as the author (NIT of Claude 5 id8Ws on #5408)",
-    /sem a família claude-2 \(quem pediu, num ramo sem prefixo de família\)/.test(r.out), r.out);
+  is("1442: on an unprefixed branch the refusal names the family it counted as the author (NIT of Claude 5 id8Ws on #5408)",
+    /sem a família codex \(a dominante nos commits, num ramo sem prefixo de família\)/.test(r.out), r.out);
+  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Claude 2 Q"]) });
+  is("1442: on an unprefixed branch the requester's own READY counts, as on a prefixed one (LEVE 1 of Claude 5 hed9 on #5408)", r.ok && new RegExp(`enfileire ${H}`).test(r.out), r.out);
+  // MEDIUM 1 of Claude 5 hed9 on #5408: a status or request line that names a family, the head and READY is no review.
+  const linha = (t) => JSON.stringify([t, "COLLABORATOR"]);
+  const status = [linha(`Claude 1 coord: #1442 @${h} — 2 READY (Claude 3, Claude 5); needs 1 more`), linha(`Claude 7: #1442 @${h} is READY for the queue`), linha(`Claude 4 B: #1442 @${h} needs READY from 3 families (has 2)`)].join("\n") + "\n";
+  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 3 Q"], ["Claude 5 Q"]) + status });
+  is("1442: status and request lines that say READY are not counted as reviews", !r.ok && /2 READY/.test(r.out), r.out);
+  // LEVE 2 of Claude 5 hed9 on #5408: a family whose last verdict on the head is CHANGES does not count.
+  const changes = JSON.stringify([`Claude 4 W review #1442 @${h}: CHANGES, 1 LEVE\n\nbody`, "COLLABORATOR"]) + "\n";
+  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Claude 4 Q"]) + changes });
+  is("1442: a READY followed by a CHANGES of the same family on the head does not count", !r.ok && /2 READY/.test(r.out), r.out);
   r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Claude 4 Q", "0000000000"]) });
   is("1442: a READY on another head does not count", !r.ok && /2 READY/.test(r.out), r.out);
   r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS_DOWN: "1" });
@@ -1434,6 +1461,17 @@ console.log("three READY from three outside families on the exact head before a 
   r = run(["verify-enqueue", "--as", "Claude 7 X", id3], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", ...mq, FAKE_COMMENTS: ready3("Claude 2 Q", "Claude 3 Q", "Claude 6 Q") });
   is("1443: the branch prefix's family's READY still does not count", !r.ok && /2 READY/.test(r.out), r.out);
   is("1443: and the refusal names the branch prefix's family as the author", /sem a família claude-3 \(a do prefixo do ramo\)/.test(r.out), r.out);
+  // MEDIUM 2 of Claude 5 hed9 on #5408: a commit of an unknown family (a "Claude" author with no trailer) is NOT CHECKED.
+  g3(["checkout", "-q", "-B", "claude3/fix-1444", M]);
+  writeFileSync(join(P, "f1444.txt"), "1444\n"); g3(["add", "."]); g3(["-c", "user.name=Claude", "-c", "user.email=c@c", "commit", "-q", "-m", "pr1444 no trailer"]);
+  g3(["push", "-q", "../prs.git", "HEAD:refs/heads/claude3/fix-1444", "HEAD:refs/pull/1444/head"]);
+  const H4 = g3(["rev-parse", "HEAD"]), h4 = H4.slice(0, 10);
+  r = run(["request-enqueue", "--from", "Claude 5", "--pr", "1444", "--sha", h4, "--text", "fila #1444"], { ...as("c5"), ...mq });
+  const id4 = /registrado: (\S+)/.exec(r.out)?.[1];
+  r = run(["claim-enqueue", "--as", "Claude 7 X"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", ...mq });
+  const ready4 = ["Claude 1 Q", "Claude 2 Q", "Claude 6 Q"].map((nome) => JSON.stringify([`${nome} review #1444 @${h4}: READY\n\nbody`, "COLLABORATOR"])).join("\n") + "\n";
+  r = run(["verify-enqueue", "--as", "Claude 7 X", id4], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", ...mq, FAKE_COMMENTS: ready4 });
+  is("1444: a commit of an unknown family makes the 3 READY NOT CHECKED, and nothing is enqueued", !r.ok && /NÃO FORAM CONFERIDAS/.test(r.out) && /família desconhecida/.test(r.out), r.out);
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

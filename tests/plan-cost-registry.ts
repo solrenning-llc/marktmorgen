@@ -59,6 +59,8 @@ import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
 import { TRIAL_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
+import { GIFT_INDEX_COMMANDS } from "@/lib/gifts";
+import { GROUP_INDEX_COMMANDS } from "@/lib/group-buy";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
 import { CERTIFICATE_PASS_EVERY_SECONDS, CERTIFICATE_REFUND_CHECKS_PER_MONTH, CERTIFICATE_REFUND_PAGES_PER_STORE, CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH } from "@/lib/certificate-refunds";
 import { LOST_DISPUTE_PAGES } from "@/lib/refunds";
@@ -500,6 +502,13 @@ export const ORDER_CONTACT_WRITE_COMMANDS = Math.max(
   MAX_DELIVERED * CONTACT_COMMANDS_MOST.noteProduct,
 );
 export const ORDER_CONTACT_WRITE = ORDER_CONTACT_WRITE_COMMANDS * (COMMAND + CONTACT_READ_BYTES * DB_BYTE);
+/**
+ * A gift's or a purchase for several's line in its buyer's index (lib/gifts.ts, lib/group-buy.ts; #5125, 22 November
+ * 2026): the commands that ride on its writes over its life, the dearer of the two, on every order of the plan's
+ * figure as if each were one. The bytes it keeps are priced with the gift's and the purchase's own
+ * (tests/store-data-registry.ts, nl:gift: and nl:grp:).
+ */
+export const ORDER_BUYER_INDEX = Math.max(GIFT_INDEX_COMMANDS, GROUP_INDEX_COMMANDS) * COMMAND;
 
 /** The shapes requests are costed at: wall seconds held at 2 GB, and CPU seconds. Review ceilings, not measurements. */
 export const SHAPES = {
@@ -2412,6 +2421,17 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/api-read-rules.ts", names: ["STUDENT_ROW_BYTES"] },
     ],
     basis: "Every order of the plan's figure at its worst: every product it hands over a course whose student row for the buyer holds an earlier day, so MAX_DELIVERED HGETs each reading a row of STUDENT_ROW_BYTES, as many SADDs and one DEL, with the GET and SET of the order's note mark and the mark kept 40 days (ORDER_BOUGHT_AGAIN_COMMANDS, held over the real code in tests/note-bought-again-cost.test.ts). Once an order: under the confirmation's claim, and a later pass reads the mark instead (tests/course-repurchase-confirm-note.test.ts). Orders past the plan are not sold, so none is paid past it; the trial's orders pay it in nonPayingWorst. The drip job's SMEMBERS and SREM of the set are its run's, and the person's erasure's SREM is the erasure's.",
+  },
+  {
+    id: "order-buyer-index",
+    feature: "A gift's or a purchase for several's line in its buyer's index, so the copy of their data finds it without Stripe (#5125)",
+    monthlyUsd: (tier) => ORDERS_INCLUDED[tier] * ORDER_BUYER_INDEX,
+    sources: [
+      { file: "lib/gifts.ts", names: ["GIFT_INDEX_COMMANDS", "async function saveGift", "buyerGiftsKey", "giftsBoughtBy"] },
+      { file: "lib/group-buy.ts", names: ["GROUP_INDEX_COMMANDS", "async function saveGroup", "buyerGroupsKey", "groupsBoughtBy"] },
+      { file: "lib/order-rules.ts", names: ["ORDERS_INCLUDED"] },
+    ],
+    basis: "Every order of the plan's figure taken as a gift or a purchase for several, the dearer: an SADD and an EXPIRE on each of at most two writes of it that name its buyer (GIFT_INDEX_COMMANDS, GROUP_INDEX_COMMANDS), held in tests/gift-person-index.test.ts and tests/group-person-index.test.ts. The copy's own reads are the copy's (#5125 row 3).",
   },
   {
     id: "order-contact-write",

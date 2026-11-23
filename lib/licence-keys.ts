@@ -551,16 +551,20 @@ export async function issuedKeys(
 ): Promise<{ keys: IssuedKey[]; total: number; revoked: number }> {
   const byEmail = options.byEmail !== false;
   if (!store.statsId || !isRedisConfigured()) return { keys: [], total: 0, revoked: 0 };
-  const [raw] = await redisPipeline([["HGETALL", infoKey(store, product)]]);
   // Read exactly (unknown is never zero): the studio shows the keys given and keyCounts counts them from this list, so
   // a reply in another shape throws and the keys route answers an error, never "0 keys given" (Codex X6's LOW 1 on
-  // #2868, #5285). An empty hash is the list Redis answers for a product that has given none.
-  if (!Array.isArray(raw)) throw new UnknownReplyError("a product's license key records");
+  // #2868, #5285). An empty hash is the list Redis answers for a product that has given none. The pipeline's envelope
+  // holds exactly this one reply, the list holds whole field/value pairs, and every value is a record the writers made
+  // (HSET of JSON(info) only): one more reply, an odd list or a record that does not read is unknown, never a shorter
+  // count (Claude 1's LEVEs 1 and 2 on #5318).
+  const raw = repliesFor(await redisPipeline([["HGETALL", infoKey(store, product)]]), 1)?.[0];
+  if (!Array.isArray(raw) || raw.length % 2 !== 0) throw new UnknownReplyError("a product's license key records");
   const all: IssuedKey[] = [];
   const flat = raw as unknown[];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    const entry = parseInfo(String(flat[i]), flat[i + 1]);
-    if (entry) all.push(entry);
+  for (let i = 0; i < flat.length; i += 2) {
+    const entry = typeof flat[i] === "string" ? parseInfo(flat[i] as string, flat[i + 1]) : null;
+    if (!entry) throw new UnknownReplyError("a product's license key record");
+    all.push(entry);
   }
   const needle = query.trim().toLowerCase();
   const matching = needle

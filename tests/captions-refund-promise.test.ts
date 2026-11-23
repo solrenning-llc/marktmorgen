@@ -28,6 +28,13 @@ for (const [name, text] of Object.entries(sources)) {
   is(`${name}: a refused request is refunded at once, not after the hours`, /refuses\s+the\s+request[^.]{0,80}refunded\s+at\s+once/.test(text), true);
 }
 
+part("A lesson video deleted before its captions come is refunded without the wait, and every text says so (Claude 5 id8Ws's LEVE on #5456)");
+is("the code refunds what never came when the video is gone (a 404 from the provider settles the order at once)",
+  /answer\.status === 404\)\s*\{\s*\/\/ The video is gone, deleted with its lesson: what was not written is given back\./.test(readFileSync("lib/auto-captions.ts", "utf8")), true);
+for (const [name, text] of Object.entries(sources)) {
+  is(`${name}: a deleted lesson video is refunded without waiting for the hours`, /video\s+is\s+deleted[^.]{0,120}without\s+waiting/.test(text), true);
+}
+
 part("The Terms and the help say what happens when the provider never confirms");
 is("the Terms name the extra days and the studio page that says whom to write to", /\{DELIVERY_LOOK_DAYS\}\s+(more\s+)?days/.test(sources.terms) && /says\s+so\s+and\s+gives\s+the\s+address\s+to\s+write\s+to/.test(sources.terms), true);
 is("the help says so in a sentence", /\$\{DELIVERY_LOOK_DAYS\}\s+(more\s+)?days/.test(sources.help), true);

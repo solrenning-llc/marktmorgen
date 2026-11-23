@@ -73,6 +73,11 @@ for (const minutes of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, MIN_WEEK_MIN
   is(`minutes ${minutes}: no plan, never one lesson a week or all in one`, studyPlan(course, setup, { goal: "g1", level: "new", minutes }, all), { known: false });
 }
 is("a lesson id in two modules is planned once", studyPlan({ modules: [{ id: "m1", lessons: [{ id: "x", minutes: 10 }] }, { id: "m2", lessons: [{ id: "x", minutes: 10 }] }] }, { goals: [{ id: "g", label: "x", first: [] }], basics: [] }, { goal: "g", level: "new", minutes: 60 }, new Set(["x"])), { known: true, weeks: [["x"]], review: [], lessons: 1 });
+is(
+  "a lesson in a planned module and in a basics module is placed in its normal week and never marked a review (Claude 5's LOW on #3675)",
+  studyPlan({ modules: [{ id: "m1", lessons: [{ id: "x", minutes: 10 }] }, { id: "basics", lessons: [{ id: "x", minutes: 10 }, { id: "b", minutes: 10 }] }] }, { goals: [{ id: "g", label: "x", first: [] }], basics: ["basics"] }, { goal: "g", level: "advanced", minutes: 60 }, new Set(["x", "b"])),
+  { known: true, weeks: [["x", "b"]], review: ["b"], lessons: 2 },
+);
 is("no words promise a result", words.join(" ").match(/guarantee|will (?:sell|earn|master)|results? in/i), null);
 
 done();

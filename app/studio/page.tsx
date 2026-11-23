@@ -317,10 +317,12 @@ const NEXT_WHEN_NOT = [
   "The list of what you have sold",
 ];
 
-const PAYPAL_READY_TAX_ON_TOP = {
+// The way back to the PayPal button named only where the creator can take it: the tax choice needs Stripe connected
+// (components/tax-editor.tsx), so without Stripe the first step is connecting it (Claude 6 hsz3's LEVE on #5243).
+const paypalReadyTaxOnTop = (stripe: boolean) => ({
   title: "PayPal says your account can take payments",
-  body: "PayPal is not offered at checkout while tax is added on top of your prices, because a PayPal payment would not include the tax. Under Tax and invoices, choose \u201cMy prices already include it\u201d to show the PayPal button.",
-};
+  body: `PayPal is not offered at checkout while tax is added on top of your prices, because a PayPal payment would not include the tax. ${stripe ? "Under Tax and invoices, choose \u201cMy prices already include it\u201d to show the PayPal button." : "To show the PayPal button, connect Stripe, then under Tax and invoices choose \u201cMy prices already include it\u201d."}`,
+});
 
 const PAYPAL_NOTICES: Record<string, { title: string; body: string }> = {
   ready: {
@@ -999,7 +1001,7 @@ export default async function StudioPage({
     (store && typeof params.paypal === "string" && serviceAllowanceWords(store, params.paypal) ? { title: "PayPal can't be connected just now", body: serviceAllowanceWords(store, params.paypal) ?? "" } : undefined) ??
     (store && typeof params.metaads === "string" && serviceAllowanceWords(store, params.metaads) ? { title: "Meta can't be connected just now", body: serviceAllowanceWords(store, params.metaads) ?? "" } : undefined) ??
     // With tax on top, PayPal is not offered (#5243): "now show a PayPal button" would be false.
-    (store && params.paypal === "ready" && taxOnTop(store) ? PAYPAL_READY_TAX_ON_TOP : undefined) ??
+    (store && params.paypal === "ready" && taxOnTop(store) ? paypalReadyTaxOnTop(Boolean(store.stripeAccountId)) : undefined) ??
     PAYPAL_NOTICES[typeof params.paypal === "string" ? params.paypal : ""] ??
     META_NOTICES[typeof params.metaads === "string" ? params.metaads : ""] ??
     BILLING_NOTICES[BILLING_ALIASES[String(params.billing)] ?? (typeof params.billing === "string" ? params.billing : "")] ??

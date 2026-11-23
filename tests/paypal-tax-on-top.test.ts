@@ -83,10 +83,13 @@ async function main(): Promise<void> {
   is("the tax editor says PayPal goes away as tax on top is chosen", /paypal && enabled && !included\s*\? "With tax added on top, PayPal is not offered at checkout, because a PayPal payment would not include the tax\."/.test(editor), true);
   const studio = readFileSync(join(process.cwd(), "app/studio/page.tsx"), "utf8");
   is("the studio tells the tax editor whether the store sells through PayPal", studio.includes("paypal={sellsThroughPayPal(store)}"), true);
-  is("after connecting PayPal, a store with tax on top is not told a PayPal button now shows", /params\.paypal === "ready" && taxOnTop\(store\) \? PAYPAL_READY_TAX_ON_TOP/.test(studio), true);
+  is("after connecting PayPal, a store with tax on top is not told a PayPal button now shows", /params\.paypal === "ready" && taxOnTop\(store\) \? paypalReadyTaxOnTop\(Boolean\(store\.stripeAccountId\)\)/.test(studio), true);
   // Claude 1 2as's LEVE on #5243: the notice names the section and the choice as the studio prints them.
-  is("that notice names the studio's own section and choice", studio.includes("Under Tax and invoices, choose \\u201cMy prices already include it\\u201d to show the PayPal button.") && editor.includes("Tax and invoices") && editor.includes("My prices already include it"), true);
+  is("that notice names the studio's own section and choice", studio.includes("stripe ? \"Under Tax and invoices, choose \\u201cMy prices already include it\\u201d to show the PayPal button.\"") && editor.includes("Tax and invoices") && editor.includes("My prices already include it"), true);
   is("the connected PayPal box says it is not offered while tax is on top", /\{taxOnTop\(store\) \? \(\s*<p className="mt-2 text-sm text-ink">\s*Not offered at checkout while tax is added on top of your prices/.test(studio), true);
+
+  // Claude 6 hsz3's LEVE on #5243: without Stripe the tax choice cannot be made, so connecting Stripe comes first.
+  is("without Stripe, the PayPal notice says to connect Stripe first", studio.includes(": \"To show the PayPal button, connect Stripe, then under Tax and invoices choose \\u201cMy prices already include it\\u201d.\""), true);
 
   part("The funnel review names the real cause (a store selling by PayPal alone, with tax on top)");
   const paypalOnly = { ...withTax(true, false), stripeAccountId: null, stripeChargesEnabled: false } as typeof base;

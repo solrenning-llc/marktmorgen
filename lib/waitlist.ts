@@ -648,9 +648,10 @@ export const LAUNCH_PLACE_MOST_BYTES = 512;
  * A list that grew between this count and the read is paid for as well, from what the read moved (`moved`).
  */
 export async function launchReadMostBytes(store: Store, productId: string): Promise<number> {
-  if (!store.statsId) throw new UnknownReply("a launch's waitlist size");
+  // UnknownReplyError, which the route answers as 503 "unavailable", never a 500 (Claude 5 ibqho's note on #5281).
+  if (!store.statsId) throw new UnknownReplyError("a launch's waitlist size");
   const places = countOf(repliesFor(await redisPipeline([["HLEN", listKey(store.statsId, productId)]]), 1)?.[0]);
-  if (places === null) throw new UnknownReply("a launch's waitlist size");
+  if (places === null) throw new UnknownReplyError("a launch's waitlist size");
   return 2 * (MAX_LAUNCH_NOTE + MAX_LAUNCH_ADDRESS) + 1_024 + places * LAUNCH_PLACE_MOST_BYTES;
 }
 

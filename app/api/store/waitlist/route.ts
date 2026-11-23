@@ -67,12 +67,21 @@ export async function POST(request: NextRequest) {
       const held = most > 0 ? await holdStudio(store, most) : null;
       if (held && !held.ok) return refusedJson("used", held.message);
       const moved = { bytes: 0 };
-      const result = await launch(store, product, { note: body.note, address: body.address }, moved);
-      const used = unitsFor(moved.bytes);
-      if (held?.ok) {
-        if (used < most) await held.give(most - used);
-        else if (used > most) await held.force(used - most);
-      } else if (used > 0) await forceAllowance(await refreshPeriod(store), "studio", used);
+      // Settled whether the launch returns or throws (Claude 4 2Wb's note on #5281): a launch stopped after its read
+      // keeps the requests for what it read and gives back the rest. A failed settling is logged, never in the answer.
+      const settle = async () => {
+        const used = unitsFor(moved.bytes);
+        if (held?.ok) {
+          if (used < most) await held.give(most - used);
+          else if (used > most) await held.force(used - most);
+        } else if (used > 0) await forceAllowance(await refreshPeriod(store), "studio", used);
+      };
+      let result: Awaited<ReturnType<typeof launch>>;
+      try {
+        result = await launch(store, product, { note: body.note, address: body.address }, moved);
+      } finally {
+        await settle().catch((error: unknown) => console.error("settling a launch's studio requests failed", error));
+      }
       if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
       await queueRelease(store, product.id);
     } else {

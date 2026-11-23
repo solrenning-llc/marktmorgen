@@ -24,10 +24,18 @@ const SWAP_KEEPING_TTL = [
   "return 1",
 ].join("\n");
 
-/** Gives up on a DNS answer after this long, as not found. */
+/** Gives up on a DNS answer after this long: not known, never "not found". */
 const DNS_TIMEOUT_MS = 4_000;
 
-async function txtRecords(host: string): Promise<string[]> {
+/** The DNS answers that say there is no such record: no such name, or no record of that type. */
+const NO_RECORD = new Set(["ENOTFOUND", "ENODATA"]);
+
+/**
+ * The domain's TXT records, or null when the DNS could not say (a timeout, a server failure, a refused query): only
+ * "no such name" or "no record of that type" is an empty list (#5285 row #4248, Codex V), so a passing failure is
+ * never read as the record not being there.
+ */
+async function txtRecords(host: string): Promise<string[] | null> {
   // The race's timer is cleared once DNS answers, so no 4 s timer outlives the check (C4-3000).
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -38,18 +46,19 @@ async function txtRecords(host: string): Promise<string[]> {
       }),
     ]);
     return answer.map((parts) => parts.join(""));
-  } catch {
-    return [];
+  } catch (error) {
+    const code = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
+    return typeof code === "string" && NO_RECORD.has(code) ? [] : null;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
 }
 
-/** Whether the domain carries this store's own TXT record (proofRecord). */
-async function hasProof(store: Pick<Store, "sid">, name: string): Promise<boolean> {
+/** Whether the domain carries this store's own TXT record (proofRecord); null when the DNS could not say. */
+async function hasProof(store: Pick<Store, "sid">, name: string): Promise<boolean | null> {
   const proof = proofRecord(store, name);
   const found = await txtRecords(proof.host);
-  return found.some((value) => value.trim() === proof.value);
+  return found === null ? null : found.some((value) => value.trim() === proof.value);
 }
 
 /**
@@ -81,7 +90,11 @@ export async function proveDomain(store: Pick<Store, "sid" | "handle" | "previou
   if (held && !ours.includes(holder)) {
     // Another store's claim. A proved one is theirs. One not proved serves nothing and keeps nobody out (#4108):
     // the store whose TXT record is there takes it, only while the key still holds that same claim.
-    if (!held.startsWith(UNPROVED) || !(await hasProof(store, name))) return "taken";
+    if (!held.startsWith(UNPROVED)) return "taken";
+    const proof = await hasProof(store, name);
+    // The DNS could not say: the creator checks again, never told it is taken while their record may be there.
+    if (proof === null) return "waiting";
+    if (!proof) return "taken";
     return (await swapped(name, SWAP, held, store.handle)) ? "proved" : "waiting";
   }
   // Held under an older address of this same store: moved to the current one.
@@ -98,7 +111,7 @@ export async function proveDomain(store: Pick<Store, "sid" | "handle" | "previou
     if (claimed === "taken") return "taken";
     if (claimed === "unknown") return "waiting";
   }
-  if (!(await hasProof(store, name))) return "waiting";
+  if ((await hasProof(store, name)) !== true) return "waiting";
   // Only while the claim is still this store's: it may have lapsed and been
   // taken while the DNS was asked.
   return (await swapped(name, SWAP, `${UNPROVED}${store.handle}`, store.handle)) ? "proved" : "waiting";

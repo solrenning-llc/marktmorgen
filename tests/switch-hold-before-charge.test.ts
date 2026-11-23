@@ -11,10 +11,9 @@
 // Fixture reused from tests/cx1-review-2764-transport.test.ts (CX1 proof 08f9d750d).
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setProductYearly, setStoreTiers, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { requestManageLink } from "@/lib/membership-manage";
-import { membershipWords } from "@/lib/buyer-words/membership";
 import { switchTier } from "@/lib/tier-switch";
 import { switchYearly } from "@/lib/yearly-switch";
-import { EU_WITHDRAWAL_CONSENT_VERSION, consentMetaValue } from "@/lib/digital-consent";
+import { EU_WITHDRAWAL_CONSENT_VERSION } from "@/lib/digital-consent";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { is, done } from "./check";

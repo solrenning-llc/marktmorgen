@@ -77,6 +77,32 @@ async function main(): Promise<void> {
     is("a day-before reminder still of use stays queued", unread.left.get(useful), true);
     is("one that is of no use any more is given up on", unread.left.get(spent), false);
     is("the confirmation, six hours late, is given up on as before", unread.left.get(confirm), false);
+
+    // Claude 1 E's LEVE on #5103 (7075689448), agreed by Claude 4 AC: a timed reminder that keeps failing stayed due at
+    // the head of the batch for as long as it was of use, so BATCH of them stuck at once held every other store's
+    // reminder back for up to a day. One that could not be dealt with now waits RETRY before it is tried again (never
+    // past the last minute it is of use), and the next run reaches the others.
+    part("Two hundred stuck reminders no longer hold the head of the queue");
+    outage = "all";
+    redis.clear();
+    const stuck = Array.from({ length: 200 }, (_, i) => `${store.callsId}|${store.handle}|cs_test_stuck${String(i).padStart(19, "0")}|24|${usefulStart + i}`);
+    const healthy = `calls-other|meadow|${SESSION}|24|${now + 20 * HOUR}`;
+    const nearEnd = member("1", now + 5 * 60_000);
+    await redis.pipeline([["ZADD", REMINDER_QUEUE, ...stuck.flatMap((m, i) => [now - 2 * HOUR + i, m]), now - HOUR, healthy]]);
+    await sendCallReminders(async () => { throw new Error("synthetic store read failure"); }, Date.now() + 60_000, "https://local.example");
+    const due = (await redis.pipeline([["ZRANGEBYSCORE", REMINDER_QUEUE, 0, Date.now(), "LIMIT", 0, 200]]))[0] as string[];
+    is("the next run's batch reaches the other store's reminder", due.includes(healthy), true);
+    is("no stuck reminder is due again before the retry", due.filter((m) => stuck.includes(m)).length, 0);
+    const later = Number((await redis.pipeline([["ZSCORE", REMINDER_QUEUE, stuck[0]]]))[0]);
+    is("a stuck reminder waits about fifteen minutes, still queued", later > now + 14 * 60_000 && later <= Date.now() + 15 * 60_000, true);
+
+    part("A stuck reminder is never put off past its use, and the confirmation is not put off");
+    redis.clear();
+    await redis.pipeline([["ZADD", REMINDER_QUEUE, now - 60_000, nearEnd, confirmScore + HOUR, confirm]]);
+    await sendCallReminders(async () => { throw new Error("synthetic store read failure"); }, Date.now() + 60_000, "https://local.example");
+    const nearScore = Number((await redis.pipeline([["ZSCORE", REMINDER_QUEUE, nearEnd]]))[0]);
+    is("one of use for five more minutes is tried again a minute before its end at the latest", nearScore > now && nearScore <= now + 4 * 60_000, true);
+    is("the confirmation keeps its score, so its six hours still run out", Number((await redis.pipeline([["ZSCORE", REMINDER_QUEUE, confirm]]))[0]), confirmScore + HOUR);
   } finally {
     console.error = quiet;
   }

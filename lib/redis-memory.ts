@@ -343,7 +343,10 @@ export class MemoryRedis {
         // one step only while the store is live and not being erased, by the rule of chat-address-live:v3 below.
         if (key.startsWith("-- marktmorgen:assist-reminder-keep-live:v1\n") && args[0] === "5" && args.length === 14) {
           const [, live, erasing, consent, queue, who, field, statsId, ref, value, seconds, due, member, session] = args;
+          // Each redis.call counted as Upstash bills it inside the EVAL (ASSIST_REMIND_KEEP_COMMANDS, lib/assistant-reminder.ts).
+          this.scriptCalls += 1;
           if (this.run(["HGET", erasing, field]) !== null) return 0;
+          this.scriptCalls += 1;
           if (statsId === "") {
             if (this.run(["GET", live]) !== ref) return 0;
           } else {
@@ -358,6 +361,7 @@ export class MemoryRedis {
             if (!record || typeof record !== "object") return -1;
             if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
           }
+          this.scriptCalls += 4;
           this.run(["SET", consent, value, "EX", seconds]);
           this.run(["ZADD", queue, due, member]);
           this.run(["SADD", who, session]);

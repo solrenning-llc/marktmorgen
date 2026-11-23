@@ -13,11 +13,14 @@
  *   - its erasing mark set while the daily limit is read: the same;
  *   - its id key repointed to another ref (an account move) while the daily limit is read: the same;
  *   - an answer of the fenced step that does not read (rule 24): "closed", never "kept", and it never throws;
- *   - control: a live store keeps exactly one consent, one queue member and one index, as before.
+ *   - control: a live store keeps exactly one consent, one queue member and one index, as before;
+ *   - what that keep is billed (the daily limit's count, the EVAL and each call inside it) is exactly
+ *     ASSIST_REMIND_KEEP_COMMANDS, the figure the cost registry names.
  */
 import { claimHandle, ensureListId, ensureStatsId, ERASING_KEY, closeStoreRecord, erasingField, setAssistReminder, setAssistantPlan, setRecovery, setStripeAccount, setSubscription, storeForEmail, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { ASSIST_REMIND_KEEP_SECONDS, ASSIST_REMIND_VERSION } from "@/lib/assistant-reminder-rules";
 import { assistReminderShown, keepAssistReminder } from "@/lib/assistant-reminder";
+import * as reminder from "@/lib/assistant-reminder";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -36,8 +39,18 @@ type Command = (string | number)[];
 
 /** Something to run in place of the next pipeline call keepAssistReminder makes (its daily limit's count), or a reply to put in place of its fenced step. */
 const hook: { before: (() => Promise<void>) | null; reply: unknown[] | null } = { before: null, reply: null };
+/** What the keep is billed, as Upstash bills it: each command of a pipeline, and each call a script makes inside its EVAL. */
+const meter: { on: boolean; commands: number; fenced: number } = { on: false, commands: 0, fenced: 0 };
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = async (batch: Command[]) => {
+  if (meter.on) {
+    const before = redis.scriptCalls;
+    const replies = await pipeline(batch);
+    const billed = batch.length + redis.scriptCalls - before;
+    meter.commands += billed;
+    if (batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).includes("assist-reminder-keep-live")) meter.fenced += billed;
+    return replies;
+  }
   const run = hook.before;
   if (run) {
     hook.before = null;
@@ -85,6 +98,18 @@ async function main(): Promise<void> {
     is("one consent, one index, one queue member", await residue(), { consents: 1, who: 1, queue: 1 });
     const ttl = Number(redis.run(["TTL", `nl:assist:remind:${session}`]));
     is("the consent goes by itself three days after the checkout opened", ttl > ASSIST_REMIND_KEEP_SECONDS - 60 && ttl <= ASSIST_REMIND_KEEP_SECONDS, true);
+  }
+
+  part("What a kept yes is billed: ASSIST_REMIND_KEEP_COMMANDS, named in the cost registry (Claude 2 lpgvy's LOW on #5081)");
+  {
+    const store = await liveStore(now);
+    meter.on = true;
+    const outcome = await keep(store);
+    meter.on = false;
+    is("kept", outcome, "kept");
+    is("the fenced step is billed as its EVAL and its six calls", meter.fenced, 7);
+    // Read by name, so this fails while the figure is missing (RED), not only fails to build.
+    is("the whole keep, the daily limit's count with it, is ASSIST_REMIND_KEEP_COMMANDS", meter.commands, (reminder as Record<string, unknown>).ASSIST_REMIND_KEEP_COMMANDS);
   }
 
   part("Erased while the checkout was opening: nothing comes back");

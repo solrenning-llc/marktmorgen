@@ -11,8 +11,9 @@
  *     ticked, one upsertContact and a noteProduct for every other product; without it, a noteProduct for every product.
  *     Each is counted at CONTACT_COMMANDS_MOST (lib/contacts.ts), which tests/contacts-write-cost.test.ts checks
  *     against the real scripts. Both callers of putOnList hand over at most MAX_DELIVERED products;
- *   - the shares one paid cart order can spend together inside ORDER_COMPUTE (its stock holds, its stock confirmation
- *     and a purchase for several's settling waits) stay inside one ORDER_COMPUTE;
+ *   - the shares one paid cart order can spend together inside ORDER_COMPUTE (its stock holds, its stock confirmation,
+ *     a purchase for several's settling waits and the checkout reminder's keep, ASSIST_REMIND_KEEP_COMMANDS, named in
+ *     the line orders) stay inside one ORDER_COMPUTE;
  *   - an offer after paying is an order of its own: lib/upsell.ts admits it as one more order before anything is
  *     charged and puts nothing on the list or in stock. So OFFER_WATCH_SHARE_OF_ORDER_COMPUTE is a share of that
  *     order's compute, never added to the cart's.
@@ -20,6 +21,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BUMP_KEYS, MAX_AFFILIATE_EXTRAS, MAX_BUNDLE_ITEMS, MAX_DELIVERED, deliveredIds } from "@/lib/bundle-rules";
+import * as reminder from "@/lib/assistant-reminder";
 import { CONTACT_COMMANDS_MOST } from "@/lib/contacts";
 import { done, is, part } from "./check";
 import * as registry from "./plan-cost-registry";
@@ -81,8 +83,20 @@ part("An order's contact write at its worst (lib/buyer-list.ts putOnList, MAX_DE
 
 part("The shares one paid cart order can spend together");
 {
-  const together = CART_STOCK_SHARE_OF_ORDER_COMPUTE + STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE + GROUP_SETTLE_STRIPE_WAIT / ORDER_COMPUTE;
-  is("its stock holds, stock confirmation and a group's settling waits stay inside one ORDER_COMPUTE", together <= 1, true);
+  // The checkout reminder's yes, kept once a checkout (lib/assistant-reminder.ts, keepAssistReminder; Claude 2 lpgvy's
+  // LOW on #5081). Read by name, so this fails while the figure is missing (RED), not only fails to build.
+  const keepCommands = (reminder as Record<string, unknown>).ASSIST_REMIND_KEEP_COMMANDS;
+  is("RED: the reminder's keep has a named command count", typeof keepCommands === "number" && Number.isSafeInteger(keepCommands) && keepCommands > 0, true);
+  const lines = registry.COST_LINES as unknown as readonly { id: string; sources: readonly { file: string; names: readonly string[] }[] }[];
+  const orders = lines.find((l) => l.id === "orders");
+  is(
+    "RED: the line orders names it, so a later change to the keep is held to it",
+    Boolean(orders?.sources.some((source) => source.file === "lib/assistant-reminder.ts" && source.names.includes("ASSIST_REMIND_KEEP_COMMANDS"))),
+    true,
+  );
+  const keepShare = (typeof keepCommands === "number" ? keepCommands : Infinity) * COMMAND / ORDER_COMPUTE;
+  const together = CART_STOCK_SHARE_OF_ORDER_COMPUTE + STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE + GROUP_SETTLE_STRIPE_WAIT / ORDER_COMPUTE + keepShare;
+  is("its stock holds, stock confirmation, a group's settling waits and the reminder's keep stay inside one ORDER_COMPUTE", together <= 1, true);
 }
 
 part("An offer after paying is an order of its own, so its watch is not added to the cart's shares");

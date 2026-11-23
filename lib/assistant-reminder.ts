@@ -116,6 +116,15 @@ function parseConsent(raw: unknown): Consent | null {
 export type KeepOutcome = "kept" | "email" | "version" | "limited" | "closed";
 
 /**
+ * What keeping one buyer's yes is billed, at most once a checkout (Claude 2 lpgvy's LOW on #5081): the daily limit's
+ * count (withinEssentialLimit: INCR and EXPIRE) and the fenced step below, its EVAL and the six calls it makes (HGET,
+ * GET, SET, ZADD, SADD, EXPIRE). A store gone, moved or erasing stops it after fewer. Inside the checkout's own order
+ * (line orders, ORDER_COMPUTE in tests/plan-cost-registry.ts); measured in tests/assist-reminder-after-erasure.test.ts
+ * and held with an order's other shares in tests/order-compute-shares.test.ts.
+ */
+export const ASSIST_REMIND_KEEP_COMMANDS = 2 + 7;
+
+/**
  * The buyer's yes, its queue member and its erasure index, written in one step only while the store is live, by the
  * rule of lib/live-fence.ts (SET_IF_STORE_LIVE): the store's erasing mark absent, and its id key still holding this
  * very store's ref (ARGV[2] ""), or, for a store from before ids, its owner's record still carrying its statsId

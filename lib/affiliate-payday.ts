@@ -20,7 +20,8 @@
  * taken and does nothing.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { claimWhileStoreLive, setWhileStoreLive } from "@/lib/store-live-cache";
+import { CLAIM_IF_STORE_LIVE, claimWhileStoreLive, setWhileStoreLive } from "@/lib/store-live-cache";
+import { SET_IF_STORE_LIVE, fenceCallsAtMost } from "@/lib/live-fence";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
@@ -323,11 +324,13 @@ export const PAYDAY_RUNS_DUE = PAYDAY_CATCH_UP_DAYS + 1;
 /**
  * What the two fenced steps cost over the plain SETs they replaced (Codex L-20261119-1144): the month's claim
  * (claimWhileStoreLive, store-claim-live:v1) and keepMonth's write-again (setWhileStoreLive, store-cache-live:v3) are
- * each billed as the EVAL and the HGET, GET and SET it runs, four commands in place of one: three more a step, at most
- * one of each in a run on a store that is due. Each fenced request is under 2 KiB, script, keys and ref included
+ * each billed as the EVAL and the calls it runs at the most (lib/live-fence.ts fenceCallsAtMost), in place of one
+ * SET: so many more a step, at most one of each in a run on a store that is due. Read from the scripts themselves, so a
+ * call added to either moves the figure with it (Claude 5 iZByNH on #5208: main's claim script gained one after this
+ * line was typed as 2 * 3). Each fenced request is under 2 KiB, script, keys and ref included
  * (tests/affiliate-payday-fence-cost.test.ts); the bytes counted are its whole size, above the plain SET's own.
  */
-export const PAYDAY_FENCE_EXTRA_COMMANDS = 2 * 3;
+export const PAYDAY_FENCE_EXTRA_COMMANDS = fenceCallsAtMost(CLAIM_IF_STORE_LIVE) + fenceCallsAtMost(SET_IF_STORE_LIVE);
 export const PAYDAY_FENCE_EXTRA_BYTES = 2 * 2_048;
 
 /** Whether a store's payday is today or was at most PAYDAY_CATCH_UP_DAYS days ago in this month. */

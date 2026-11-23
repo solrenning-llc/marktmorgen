@@ -24,6 +24,23 @@ export type StoreLiveFence = { live: string; erasing: string; field: string; sta
 
 // ARGV[4] is "" for a store with an id (its id key must hold ARGV[5], the store's ref); for one from before ids it is
 // the store's statsId, compared with the record's own. A record that does not parse is unknown (-1), never this store.
+/**
+ * The redis.call a store-fence script runs at the most (Claude 5 iZByNH on #5208): every call outside its one
+ * `if ARGV[4] == "" then ... else ... end` (a store with an id, or one from before ids), and the larger of its two
+ * branches. A cost line that bills a fenced step reads its figure here, so a call added to a script moves it with the
+ * script, never left typed by hand. Throws on a script of another shape, so nothing is ever counted on a guess.
+ */
+export function fenceCallsAtMost(script: string): number {
+  const calls = (text: string) => (text.match(/redis\.call\(/g) ?? []).length;
+  const head = 'if ARGV[4] == "" then';
+  const at = script.indexOf(head);
+  if (at < 0 || script.indexOf(head, at + 1) >= 0) throw new Error("a fence script of another shape");
+  const elseAt = script.indexOf("\nelse\n", at);
+  const endAt = elseAt < 0 ? -1 : script.indexOf("\nend\n", elseAt);
+  if (elseAt < 0 || endAt < 0) throw new Error("a fence script of another shape");
+  return calls(script.slice(0, at)) + Math.max(calls(script.slice(at, elseAt)), calls(script.slice(elseAt, endAt))) + calls(script.slice(endAt));
+}
+
 export const SET_IF_STORE_LIVE = `-- marktmorgen:store-cache-live:v3
 if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
 if ARGV[4] == "" then

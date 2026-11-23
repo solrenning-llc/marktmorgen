@@ -28,6 +28,7 @@ import {
   setProductYearly,
   storeForEmail,
   type Product,
+  type ProductEditBase,
 } from "@/lib/store";
 import { MAX_LINK_LENGTH, readLink } from "@/lib/product-link";
 import { everyOf, readRecurring } from "@/lib/product-recurring";
@@ -216,7 +217,26 @@ export async function POST(request: NextRequest) {
   const suggested =
     body.pwyw !== undefined && body.pwyw !== null && body.pwyw !== false ? text(body.pwyw, 20) : null;
   // Only written when it was sent, so an older screen never wipes it.
-  const about = typeof body.about === "string" ? cleanAbout(body.about.slice(0, MAX_ABOUT_LENGTH * 2)) : null;
+  let about = typeof body.about === "string" ? cleanAbout(body.about.slice(0, MAX_ABOUT_LENGTH * 2)) : null;
+  // What the studio's form showed when it was opened (issue #4165), in the same shape as the fields: on an edit, a
+  // field sent exactly as it was opened was not changed in this tab, so what is saved now for it is kept, never the
+  // copy the tab opened with (lib/store.ts editProduct, under the store's lock, for the title, summary, price,
+  // membership and suggested price; here, for the introductory and yearly prices and the description, which are then
+  // simply not written). A base that does not read is no base: every field sent is written, as before.
+  const sent = body.base && typeof body.base === "object" && !Array.isArray(body.base) ? (body.base as Record<string, unknown>) : null;
+  const baseRecurring = sent ? readRecurring(text(sent.every, 10), sent.trial, sent.payments, sent.everyCount) : null;
+  const base: ProductEditBase | undefined =
+    action === "edit" && sent && baseRecurring !== "trial" && baseRecurring !== "payments" && baseRecurring !== "every"
+      ? {
+          title: text(sent.title, MAX_TITLE_LENGTH),
+          summary: text(sent.summary, MAX_SUMMARY_LENGTH),
+          price: text(sent.price, 20),
+          recurring: baseRecurring,
+          suggested: sent.pwyw !== undefined && sent.pwyw !== null && sent.pwyw !== false ? text(sent.pwyw, 20) : null,
+        }
+      : undefined;
+  const untouched = (field: "intro" | "yearly" | "about") => base !== undefined && sent !== null && field in body && JSON.stringify(body[field]) === JSON.stringify(sent[field]);
+  if (untouched("about")) about = null;
 
   if (action !== "add" && !id) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
@@ -245,10 +265,12 @@ export async function POST(request: NextRequest) {
   // creator asked for.
   let intro: Intro | null | undefined;
   let yearly: Yearly | null | undefined;
-  if ((action === "add" || action === "edit") && ("intro" in body || "yearly" in body)) {
+  const introSent = "intro" in body && !untouched("intro");
+  const yearlySent = "yearly" in body && !untouched("yearly");
+  if ((action === "add" || action === "edit") && (introSent || yearlySent)) {
     const store = guarded.store;
     const typedOf = (raw: unknown) => (raw && typeof raw === "object" ? text((raw as Record<string, unknown>).price, 20).trim() : "");
-    if ("intro" in body) {
+    if (introSent) {
       const typed = typedOf(body.intro);
       if (!typed) intro = null;
       else {
@@ -258,7 +280,7 @@ export async function POST(request: NextRequest) {
         intro = { cents, count: Number.isInteger(count) ? count : 0 };
       }
     }
-    if ("yearly" in body) {
+    if (yearlySent) {
       const typed = typedOf(body.yearly);
       if (!typed) yearly = null;
       else {
@@ -309,7 +331,7 @@ export async function POST(request: NextRequest) {
       const done =
         action === "add"
           ? await addProduct(ref, title, summary, price, recurring, suggested)
-          : await editProduct(ref, id, title, summary, price, recurring, suggested);
+          : await editProduct(ref, id, title, summary, price, recurring, suggested, base);
       result = done.ok ? { ok: true, product: done.product } : done;
       // What is taken off goes first, so the one put on in its place is never refused for the other.
       const steps: (() => Promise<{ ok: true; product: Product } | { ok: false; reason: string }>)[] = [];

@@ -2601,8 +2601,10 @@ export function ProductEditor({
               const save = () => {
                 const payload = payloadOf(draft);
                 if (aboutUnread && !draft.about) delete payload.about;
+                // What the form showed when it was opened (issue #4165): a field left as it was keeps what is saved
+                // now, so a second tab on this product never undoes what the first one saved.
                 run(
-                  { action: "edit", id: product.id, ...payload },
+                  { action: "edit", id: product.id, ...payload, base: payloadOf(opened) },
                   () => {
                     setEditingId(null);
                     setPriceReview(null);

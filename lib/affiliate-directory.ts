@@ -119,6 +119,13 @@ function pageToKeep(page: DirectoryPage): string {
 /** The most programs read for the page: far past what one page lists. */
 const MAX_ROWS = 2_000;
 
+/**
+ * How many listed stores are read together (each a store read, then its program's numbers): a build of MAX_ROWS
+ * stores runs in batches of this many, never thousands of requests at once (Claude 3 yUZf on #2921, 7106585119).
+ * Batching changes when the reads run, not how many there are: the build's commands are unchanged.
+ */
+export const DIRECTORY_READ_BATCH = 50;
+
 /** Sids asked of the listed set in one SSCAN page. */
 const SCAN_COUNT = 200;
 

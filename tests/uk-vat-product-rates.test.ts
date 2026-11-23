@@ -129,6 +129,62 @@ test("a row that covers only \"certain\" items, which the table does not name: r
   for (const item of ["Books", "Magazines", "Newspapers"]) assert.equal(ukProductRateBps(PRINT, item, day), 0, item);
 });
 
+test("a relief that depends on who buys, who sells or what the goods are used for: refused, never 0% (Claude 6 UoHAG, coordinator re-audit #5045)", () => {
+  // The condition is a fact about the buyer, the seller or the use, not about the product: a product mapped once to
+  // such a row would be sold at the reduced rate to every buyer, and Solrenning LLC would owe the standard rate.
+  const probed: [string, string][] = [
+    ["Health, education, welfare and charities", "Equipment for disabled people"],
+    ["Health, education, welfare and charities", "Mobility aids for the elderly"],
+    ["Health, education, welfare and charities", "Advertising services for charities"],
+    ["Health, education, welfare and charities", "Incontinence products"],
+    ["Clothing and footwear, protective and safety equipment", "Protective boots and helmets for industrial use"],
+    ["Health, education, welfare and charities", "Equipment for blind or partially sighted people"],
+    ["Health, education, welfare and charities", "Low vision aids"],
+    ["Health, education, welfare and charities", "Building services for disabled people"],
+    ["Health, education, welfare and charities", "Charity shops — selling donated goods"],
+    ["Health, education, welfare and charities", "Dispensing of prescriptions by a registered pharmacist"],
+    ["Health, education, welfare and charities", "Construction and sale of new buildings for a relevant charitable purpose"],
+    ["Power, utilities, energy and energy saving, heating", "Solar panels"],
+    ["Power, utilities, energy and energy saving, heating", "Gas-fired boilers"],
+    ["Transport, freight, travel and vehicles", "Freight containers — sale, lease or hire to a place outside the UK and the EU"],
+    ["Transport, freight, travel and vehicles", "International freight transport that takes place in the UK and its territorial waters"],
+    ["Transport, freight, travel and vehicles", "Ship repairs and maintenance"],
+    ["Building and construction, land and property", "Renovating a dwelling that has been empty for at least 2 years"],
+  ];
+  for (const [section, item] of probed) {
+    assert.ok(UK_VAT_PRODUCT_RATES.some((row) => row.section === section && row.item === item), `${item} is a row of the page`);
+    assert.equal(ukProductRateBps(section, item, day), null, item);
+  }
+  // A rate that depends only on the product stays as the page writes it.
+  assert.equal(ukProductRateBps(PRINT, "Books", day), 0);
+  assert.equal(ukProductRateBps("Clothing and footwear, protective and safety equipment", "Children’s clothes and footwear", day), 0);
+  assert.equal(ukProductRateBps("Clothing and footwear, protective and safety equipment", "Cycle helmets — CE marked", day), 0);
+  // Every row that still gives a rate, read one by one: each depends only on what the product is.
+  const rated = UK_VAT_PRODUCT_RATES.filter((row) => ukProductRateBps(row.section, row.item, day) !== null).map((row) => row.item);
+  assert.deepEqual(rated, [
+    "Smoking cessation products — nicotine patches and gum",
+    "Maternity pads",
+    "Sanitary protection products",
+    "Passenger transport in a vehicle, boat or aircraft that carries not less than 10 passengers",
+    "Brochures",
+    "Leaflets",
+    "Pamphlets",
+    "Other postal services that are not subject to a universal service obligation",
+    "Books",
+    "Children’s painting and picture books",
+    "Maps and charts",
+    "Magazines",
+    "Newspapers",
+    "Printed or copied music",
+    "Babywear",
+    "Children’s clothes and footwear",
+    "Carrycots with restraint straps",
+    "Children’s car seats, booster seats and booster cushions",
+    "Cycle helmets — CE marked",
+    "Motorcycle helmets that meet safety standards",
+  ]);
+});
+
 test("exempt, conditional, outside the scope, unknown, disagreeing or out of date: refused, never 0%", () => {
   for (const row of UK_VAT_PRODUCT_RATES.filter((r) => !["0%", "5%", "Standard-rated"].includes(r.rate))) {
     const same = UK_VAT_PRODUCT_RATES.filter((r) => r.section === row.section && r.item === row.item);

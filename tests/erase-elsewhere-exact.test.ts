@@ -671,6 +671,10 @@ async function main(): Promise<void> {
     const parts = FAMILIES["nl:team:@lib/team.ts"].parts ?? [];
     const cap = Math.max(...TIERS.flatMap((tier) => parts.map((part) => ("capped" in part ? part.capped(tier) : 0))));
     is("a stale id's wire bytes are its team record at the registry's cap", [cap > 0, STALE_ID_WIRE_BYTES >= cap], [true, true]);
+    // The read past sends every team record it read back in one EVAL (TEAM_INDEX_OFF_TEAM v2): at MEMBER_STORES_READ
+    // records at the cap it stays under Upstash's 1 MB a request, the bound STRICT_FENCED_CAS_MAX_BYTES keeps too
+    // (Claude 1's NIT on #5175), so a larger team or read is seen here before an EVAL past it fails out of sight.
+    is("the read past's one EVAL, every record at its cap, stays under 1 MB a request", MEMBER_STORES_READ * STALE_ID_WIRE_BYTES < 1_000_000, true);
   }
   is("a stale id's share of a read past is counted, for each of a closing store's team places", STALE_ID_COMMANDS > 0 && STALE_ID_COMMANDS * (MEMBER_STORES_READ - 1) >= DECIDE_CALENDARS_COMMANDS / (1 + MAX_TEAM), true);
 

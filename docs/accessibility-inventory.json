@@ -1770,6 +1770,7 @@
     "components/said-line.tsx",
     "components/sale-editor.tsx",
     "components/sales-blocks.tsx",
+    "components/sales-bulk-actions.tsx",
     "components/sales-goal-card.tsx",
     "components/sales-levers.tsx",
     "components/save-offer-editor.tsx",
@@ -2198,6 +2199,7 @@
     "app/api/store/review/route.ts",
     "app/api/store/reviews/route.ts",
     "app/api/store/sale/route.ts",
+    "app/api/store/sales-bulk/route.ts",
     "app/api/store/sales-filters/route.ts",
     "app/api/store/save-offer/route.ts",
     "app/api/store/saved-blocks/route.ts",
@@ -2355,6 +2357,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 161
+    "pageTemplates": 162
   }
 }

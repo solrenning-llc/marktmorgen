@@ -186,10 +186,14 @@ export async function confirmJoin(token: string, store: Store | null): Promise<C
   const grant = await readJoinToken(token);
   if (!grant || !store || store.statsId !== grant.s || !store.listId) return { ok: false, reason: "expired" };
   // The list's room in the store's data room is its room too: past it, the address is not added, as on a full list.
-  const added = await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: grant.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store, () => takePublicRequest(store, "public")).catch((error) => {
+  // Fenced by its own link (#4268, as lib/waitlist.ts confirmSpot): the person's erasure deletes the link (its erasure
+  // note) and writes the erasure print, so a confirmation whose link was read before the erasure and whose write lands
+  // after it is refused in the same step as the write, never putting the erased address back on the list as agreed.
+  const added = await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: grant.k === true, source: "free", at: new Date().toISOString(), sid: store.sid, fence: { key: tokenKey(token), seconds: JOIN_SECONDS } }, store, () => takePublicRequest(store, "public")).catch((error) => {
     if (error instanceof DataRoomError) return { joined: false, gotProduct: false, full: true };
     throw error;
   });
+  if ("gone" in added && added.gone) return { ok: false, reason: "expired" };
   if (added.full) return { ok: false, reason: "full" };
   await redisPipeline([["DEL", tokenKey(token)]]);
   // A confirmed sign-up: they came back on their own, so the CRM may keep fields about them again (lib/crm.ts, personReturned; C3-125).

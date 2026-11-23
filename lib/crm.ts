@@ -880,13 +880,13 @@ async function settleStageMoves(statsId: string, current: readonly Pipeline[], t
  * each deal is saved there the next time it is saved. Every stage that goes
  * keeps an alias, one shown to hold no deal included, so a deal written while
  * the change is made never stops showing (the coordinator's HIGH on
- * 9c00dab113). With no destination sent, a stage removed from a pipeline that
- * stays shows in that pipeline's first open stage, and no deal is read; a
- * pipeline removed goes only once its deals, read and paid for through
- * `payer` (scanDeals), show it holds none, its stages then shown in the first
- * open stage of the first pipeline left that the person may change
- * (`mayEdit`); one that holds some is refused ("moves"), so a deal is never
- * moved where nobody chose. Past ALIAS_COMPACT_AT aliases they are compacted
+ * 9c00dab113). With no destination sent, a stage or a pipeline removed goes
+ * only once its deals, read and paid for through `payer` (scanDeals), show it
+ * holds none: a stage of a pipeline that stays then shows in that pipeline's
+ * first open stage, a pipeline's stages in the first open stage of the first
+ * pipeline left that the person may change (`mayEdit`); one that holds some is
+ * refused ("moves"), as on main, so a deal is never moved where nobody chose
+ * (coordinator's 6aeb and HIGH on 2e9cc22f25). Past ALIAS_COMPACT_AT aliases they are compacted
  * first
  * (settleStageMoves). A refusal writes no pipeline. Moves made here start
  * no workflow: a stage removed is not a deal entering a stage. A deal whose

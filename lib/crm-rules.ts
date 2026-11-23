@@ -581,14 +581,15 @@ export type PipelineChange =
  * name and stages saved (a new id adds it), or (`remove`) the pipeline taken
  * away. Every stage that goes keeps its id as an alias for where its deals
  * now show (Pipeline.moved), so no deal ever stops showing, one written while
- * the change is made included: the stage `moves` names (a stage kept), or,
- * with none sent, the first open stage kept in its own pipeline (the default
- * the board shows). For a pipeline removed, `moves` may be one stage for all
- * of its deals; with none sent it goes only once its deals are counted
- * (`counts`, how many each stage shows now) and it holds none, and its stages
- * then show in the first open stage of the first pipeline left that the
- * person may change (`mayEdit`), or of the first one; one that holds deals is
- * refused ("moves"), so a deal is never moved where nobody chose. With
+ * the change is made included: the stage `moves` names (a stage kept). With
+ * none sent, a stage goes only once its deals are counted (`counts`, how many
+ * each stage shows now) and it holds none: a stage of a pipeline that stays
+ * then shows in that pipeline's first open stage kept; a pipeline removed,
+ * for which `moves` may also be one stage for all of its deals, shows in the
+ * first open stage of the first pipeline left that the person may change
+ * (`mayEdit`), or of the first one. A stage or a pipeline that holds deals
+ * with none sent is refused ("moves"), as on main, so a deal is never moved
+ * where nobody chose (coordinator's 6aeb and HIGH on 2e9cc22f25). With
  * `counts` null those stages are listed in `unsent`: the caller counts the
  * deals and checks again. A destination sent is always checked. The name saved
  * must differ from every other pipeline's that the saver sees (`sees`, 639
@@ -647,15 +648,18 @@ export function changePipeline(
       if (kept.has(stage.id)) continue;
       const sent = typeof moves === "string" ? (moves === "" ? undefined : moves) : Object.hasOwn(asked, stage.id) ? asked[stage.id] : undefined;
       let target: unknown = sent;
-      if (sent === undefined && stays) target = firstOpen(stays);
-      else if (sent === undefined) {
+      // With no destination sent, the stage's deals are counted first (coordinator's 6aeb and HIGH on 2e9cc22f25): one
+      // that holds any is refused ("moves"), as on main, so a deal is never moved where nobody chose. Only a stage shown
+      // empty goes, its alias the first open stage kept in its own pipeline, or for a pipeline removed the fallback, so
+      // a deal written into it while the change is made still shows (option B, 35th batch).
+      if (sent === undefined) {
         const held = counts === null ? null : (counts.get(stage.id) ?? 0);
         if (held === null) {
           unsent.push(stage.id);
           continue;
         }
         if (held > 0) return { ok: false, error: "moves" };
-        target = fallback;
+        target = stays ? firstOpen(stays) : fallback;
       }
       if (typeof target !== "string" || !kept.has(target)) return { ok: false, error: "moves" };
       out[stage.id] = target;

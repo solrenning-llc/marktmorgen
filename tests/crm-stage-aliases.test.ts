@@ -131,11 +131,13 @@ async function main(): Promise<void> {
   part("A removed stage's id is never a stage again");
   is("refused as a stage removed, nothing written", [await savePipelineChange(statsId, { pipeline: { ...withoutProposal, stages: [...withoutProposal.stages, { id: "ccall0", name: "Call booked", kind: "open" }] } }, {}, 2, ROOM), (await readPipelines(statsId))[1].stages.map((s) => s.id)], [{ ok: false, error: "stage_gone" }, ["cnew00", "cwon00", "clost0"]]);
 
-  part("A stage removed with no destination keeps an alias too: its deals show in the first open stage kept, none read");
+  part("A stage removed with no destination goes only once its deals, read and paid for, show it holds none; it keeps an alias too");
+  // Coordinator's 6aeb and HIGH on 2e9cc22f25: a stage that holds deals and no destination is refused, as on main, so
+  // the deals are counted first; one shown empty keeps an alias to the first open stage kept in its pipeline.
   const withoutOffer = { ...sales, stages: sales.stages.filter((s) => s.id !== "offr00") };
   const unread = paying();
   const goneOffer = await savePipelineChange(statsId, { pipeline: withoutOffer }, {}, 2, ROOM, unread.payer);
-  is("Offer sent goes, shown in New, the first open stage kept in Sales, and no deal is read or paid for", [goneOffer.ok && goneOffer.moves, (await readPipelines(statsId))[0].moved, unread.book.takes], [{ offr00: "lead00" }, { ccall0: "cnew00", cprop0: "cnew00", offr00: "lead00" }, 0]);
+  is("Offer sent, shown empty, goes, shown in New, the first open stage kept in Sales, its deals read and paid for first", [goneOffer.ok && goneOffer.moves, (await readPipelines(statsId))[0].moved, unread.book.takes > 0, unread.book.forced], [{ offr00: "lead00" }, { ccall0: "cnew00", cprop0: "cnew00", offr00: "lead00" }, true, 0]);
 
   part("A pipeline removed with no destination goes only once its deals, read and paid for, show it holds none");
   const recordNow = (await redis.pipeline([["GET", pipesKey]]))[0];

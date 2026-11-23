@@ -77,6 +77,40 @@ async function main(): Promise<void> {
     shift = 3_600_000 + 1_000;
     is("an hour on, the same path parses: the preview is made", [await ask(good.id), blobReads.get(good.file.pathname)], [200, 2]);
 
+    // Claude 3 vyDE's LEVE on #5360: the success proves the PDF good, so it clears its once-note; a later passing failure
+    // on the same path (its preview pages changed, or no preview was kept for room) is a first failure again, never
+    // "unreadable" for 60 days at once.
+    part("A success clears the once-note: a later passing failure is a first one again");
+    is("the success removed the once-note", await note(good.file), null);
+    if (!(await setProductPreview(OWNER, good.id, 4)).ok) throw new Error("preview pages");
+    files.set(good.file.pathname, { bytes: await encryptedPdf(), contentType: "application/pdf" });
+    shift = 10 * 86_400_000;
+    is("ten days on, 4 preview pages, one passing failure: no preview now", await ask(good.id), 404);
+    is("noted once again, not unreadable for 60 days", String(await note(good.file)).startsWith("unreadable-once:"), true);
+    files.set(good.file.pathname, { bytes: await readablePdf(), contentType: "application/pdf" });
+    shift = 10 * 86_400_000 + 3_600_000 + 1_000;
+    is("an hour later the good PDF makes its preview", await ask(good.id), 200);
+
+    part("A note written meanwhile is kept: only the once-note read is cleared");
+    shift = 0;
+    const raced = await product("Raced ebook", await encryptedPdf());
+    await ask(raced.id);
+    files.set(raced.file.pathname, { bytes: await readablePdf(), contentType: "application/pdf" });
+    shift = 3_600_000 + 1_000;
+    const pipe = redis.pipeline.bind(redis);
+    let swapped = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      // Just before the clear, another writer puts a stamp note of its own on the same path.
+      if (!swapped && commands.some((c) => c[0] === "EVAL" && c.includes(problemKey(raced.file.pathname)))) {
+        swapped = true;
+        await pipe([["SET", problemKey(raced.file.pathname), "unreadable"]]);
+      }
+      return pipe(commands);
+    }) as typeof redis.pipeline;
+    await ask(raced.id);
+    redis.pipeline = pipe;
+    is("the clear ran, and the note written meanwhile stays", [swapped, await note(raced.file)], [true, "unreadable"]);
+
     part("Two failures an hour apart: unreadable for 60 days, as before");
     shift = 0;
     const bad = await product("Locked ebook", await encryptedPdf());

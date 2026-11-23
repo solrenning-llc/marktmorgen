@@ -322,16 +322,22 @@ try {
     }
   }
 
-  // Every #place on another page names an element there: from the page as opened above, else from its HTML.
+  // Every #place on another page names an element there: from the page as opened above, else opened now in the browser.
   for (const { kind, from, key, place } of anchored.values()) {
     try {
       let ids = idsOf.get(key);
       if (!ids) {
-        const { status, body } = await answer(kind, key);
-        if (status >= 400 || !body) continue; // the link itself is reported above
-        const html = await body.text();
-        // "&amp;" last, so "&amp;quot;" reads as the text "&quot;", never as a quotation mark (CodeQL, double unescaping).
-        ids = new Set([...html.matchAll(/\s(?:id|name)="([^"]*)"/g)].map((m) => m[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&")));
+        const { status } = await answer(kind, key);
+        if (status >= 400) continue; // the link itself is reported above
+        // The page is opened in the browser, as the visited ones are, so a place drawn on the client counts and an input's
+        // name never passes for one: only [id] and a[name] (review of #4094, Claude 6 UoHAG's NIT and the coordinator's).
+        const page = await contexts[kind].newPage();
+        try {
+          await page.goto(origin + key, { waitUntil: "networkidle", timeout: 60_000 });
+          ids = new Set(await page.evaluate(() => [...[...document.querySelectorAll("[id]")].map((node) => node.id), ...[...document.querySelectorAll("a[name]")].map((node) => node.getAttribute("name") ?? "")]));
+        } finally {
+          await page.close();
+        }
         idsOf.set(key, ids);
       }
       if (!ids.has(place)) fail(`${kind} ${from}`, `links to ${key}#${place}, which is not on that page`);

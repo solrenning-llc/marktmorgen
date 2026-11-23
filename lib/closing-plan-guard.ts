@@ -150,9 +150,13 @@ const invoicePaymentKnown = (invoiceId: string) => (row: Record<string, unknown>
  * The payments that paid an invoice, from Stripe's own list of them (GET /v1/invoice_payments, `invoice` filter: "List
  * all payments for an invoice"), read in full at STRIPE_LIST_VERSION, where the list exists. `paid` adds up to at least
  * the invoice's `amount_paid`, or it throws: money not found is never taken as none. `pending`: a payment of it is
- * still open, so more may yet be taken.
+ * still open, so more may yet be taken. Stripe's own default payment (`is_default` true), which it opens when the
+ * invoice is finalized and keeps for exactly the invoice's `amount_remaining`, is not one: with the plan ended it never
+ * resolves, so it would hold the plan in line for good, the creator never told and the entry kept with their address
+ * (#5285 row #3274, the LEVE of 6727386237). A payment taken on it later is still read and given back while the entry
+ * is looked at again (DONE_KEEP_DAYS). Any other open payment, or a default one for another amount, still holds.
  */
-async function paidParts(invoiceId: string, amountPaid: number): Promise<{ paid: { intent: string; paidAt: number }[]; pending: boolean }> {
+async function paidParts(invoiceId: string, amountPaid: number, amountRemaining: unknown): Promise<{ paid: { intent: string; paidAt: number }[]; pending: boolean }> {
   const rows = await allRows("/invoice_payments", new URLSearchParams({ invoice: invoiceId, limit: "100" }), invoicePaymentKnown(invoiceId), 5, INVOICE_PAYMENT_ID, STRIPE_LIST_VERSION);
   const paid = rows.filter((row) => row.status === "paid");
   const sum = paid.reduce((total, row) => total + (row.amount_paid as number), 0);
@@ -163,7 +167,9 @@ async function paidParts(invoiceId: string, amountPaid: number): Promise<{ paid:
     const intent = (row.payment as { payment_intent: string }).payment_intent;
     byIntent.set(intent, Math.max(byIntent.get(intent) ?? 0, (row.status_transitions as { paid_at: number }).paid_at));
   }
-  return { paid: [...byIntent].map(([intent, paidAt]) => ({ intent, paidAt })), pending: rows.some((row) => row.status === "open") };
+  const stripesOwnRest = (row: Record<string, unknown>) =>
+    ownField(row, "is_default") === true && wholeAtLeast(amountRemaining, 1) && ownField(row, "amount_requested") === amountRemaining;
+  return { paid: [...byIntent].map(([intent, paidAt]) => ({ intent, paidAt })), pending: rows.some((row) => row.status === "open" && !stripesOwnRest(row)) };
 }
 const metadataKnown = (row: Record<string, unknown>) => {
   const meta = ownField(row, "metadata");
@@ -621,7 +627,8 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
       if (first) outcomes.push(first);
       else {
         // Paid in parts, or paid with no payment named: every payment of it, from its own list.
-        const parts = await paidParts(invoiceId, amountPaid);
+        // The plan is ended above, so Stripe's own default payment for what remains is not "more may yet be taken".
+        const parts = await paidParts(invoiceId, amountPaid, invoice.status === "open" ? ownField(invoice, "amount_remaining") : undefined);
         paidAt = Math.max(paidAt, ...parts.paid.map((one) => one.paidAt));
         if (Math.max(paidAt, created) * 1000 < cutoff) continue;
         for (const one of parts.paid) {

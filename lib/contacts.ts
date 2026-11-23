@@ -1604,10 +1604,38 @@ export async function listCounts(listId: string | null): Promise<ListCounts> {
     ["GET", agreedKey(listId)],
     ["GET", unsubKey(listId)],
   ]);
-  const t = Number(total) || 0;
-  const a = Math.min(t, Number(agreed) || 0);
-  const l = Math.min(a, Math.max(0, Number(left) || 0));
-  return { total: t, agreed: a, left: l, mailable: a - l, full: t >= MAX_LEADS };
+  return countsFrom(Number(total) || 0, Number(agreed) || 0, Number(left) || 0);
+}
+
+function countsFrom(total: number, agreed: number, left: number): ListCounts {
+  const a = Math.min(total, agreed);
+  const l = Math.min(a, Math.max(0, left));
+  return { total, agreed: a, left: l, mailable: a - l, full: total >= MAX_LEADS };
+}
+
+/** A counter kept by INCR and DECR, read exactly: nil (never written) is 0, the text of a whole number is it (a DECR can leave it below 0; countsFrom clamps it), anything else is unknown. */
+function counterOf(reply: unknown): number | null {
+  if (reply === null) return 0;
+  return typeof reply === "string" && /^-?\d{1,15}$/.test(reply) ? Number(reply) : null;
+}
+
+/**
+ * The list's counts read exactly (issue #4079, CX-123 rule 24), for an answer that states them as the list's real
+ * figures (the MCP get_emails tool): HLEN a whole number from zero up, each counter nil or the text of a whole number.
+ * A reply missing or of another shape, or a read that fails, is null (not known), never a list of 0.
+ */
+export async function listCountsExact(listId: string | null): Promise<ListCounts | null> {
+  if (!listId || !isRedisConfigured()) return countsFrom(0, 0, 0);
+  try {
+    const replies = repliesFor(await redisPipeline([["HLEN", leadsKey(listId)], ["GET", agreedKey(listId)], ["GET", unsubKey(listId)]]), 3);
+    if (!replies) return null;
+    const total = countOf(replies[0]);
+    const agreed = counterOf(replies[1]);
+    const left = counterOf(replies[2]);
+    return total === null || agreed === null || left === null ? null : countsFrom(total, agreed, left);
+  } catch {
+    return null;
+  }
 }
 
 /**

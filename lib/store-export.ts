@@ -58,8 +58,7 @@ export const EXPORT_COMMANDS = { product: 0.03, course: 0.01, lesson: 0.002, pos
  * what it reads, which costs about half a unit: the bytes moved and the time
  * to write them out (tests/closing-cost.test.ts holds it).
  */
-export const EXPORT_COMMANDS_PER_UNIT = 16;
-export const EXPORT_BYTES_PER_UNIT = 1_000_000;
+export { EXPORT_BYTES_PER_UNIT, EXPORT_COMMANDS_PER_UNIT } from "@/lib/export-unit-rules";
 /** The pages of the store's sales read from its Stripe account at the most: its checkouts' and its one-click extras' (lib/stats.ts, salesCsv), the two read side by side. */
 export const EXPORT_STRIPE_PAGES = 2 * EXPORT_PAGES;
 /** How long one of those pages is waited for at the most, held at 2 GB: a review ceiling. The two lists are read at once, so the wait is for one list's pages. */

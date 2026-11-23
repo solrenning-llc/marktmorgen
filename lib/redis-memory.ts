@@ -752,6 +752,14 @@ export class MemoryRedis {
           this.run(["SET", list, json]);
           return 1;
         }
+        // lib/form-store.ts FORM_RESPONSES_SIZE: a form's kept responses, counted and measured, nothing read out.
+        if (key.startsWith("-- marktmorgen:form-responses-size:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, list, most] = args;
+          const held = this.data.get(list);
+          if (held !== undefined && !Array.isArray(held)) throw new Error("WRONGTYPE");
+          const items = ((held ?? []) as string[]).slice(0, Number(most));
+          return [items.length, items.reduce((sum, item) => sum + Buffer.byteLength(item, "utf8"), 0)];
+        }
         // lib/flow-versions.ts FLOW_HISTORY_SIZE: the workflows' length and the kept versions' total and longest, nothing read out.
         if (key.startsWith("-- marktmorgen:flow-history-size:v1\n") && args[0] === "2" && args.length === 4) {
           const [, flows, list, most] = args;

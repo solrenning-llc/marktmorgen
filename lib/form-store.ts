@@ -19,6 +19,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
+import { jsonBytes } from "@/lib/json-bytes";
 import { type FormDef, type FormResponse, FORM_RESPONSE_ID, FORM_ID, KEPT_RESPONSES, MAX_FORMS, parseForm } from "@/lib/forms";
 
 const formsKey = (statsId: string) => `nl:forms:${statsId}`;
@@ -255,9 +256,33 @@ function parseResponse(raw: unknown): FormResponse | null {
   }
 }
 
-/** A form's responses, newest first, and how many are kept in all. */
-export async function readResponses(statsId: string | null, formId: string, limit = KEPT_RESPONSES): Promise<{ responses: FormResponse[]; total: number }> {
-  if (!statsId || !FORM_ID.test(formId) || !isRedisConfigured()) return { responses: [], total: 0 };
+/**
+ * The count and the length of a form's kept responses, measured in Redis with
+ * nothing read out, so their file (app/api/store/forms/export) takes the
+ * studio units of reading them before any of them is read.
+ */
+export const FORM_RESPONSES_SIZE = `-- marktmorgen:form-responses-size:v1
+local items = redis.call('LRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1)
+local length = 0
+for _, item in ipairs(items) do length = length + string.len(item) end
+return {#items, length}`;
+
+/** How many responses a form keeps and their length in bytes, on Redis's exact answer only: UnknownReply otherwise. */
+export async function responsesSize(statsId: string | null, formId: string): Promise<{ count: number; bytes: number }> {
+  if (!statsId || !FORM_ID.test(formId) || !isRedisConfigured()) return { count: 0, bytes: 0 };
+  const what = "the size of the form responses";
+  const [reply] = exactReplies(await redisPipeline([["EVAL", FORM_RESPONSES_SIZE, 1, responsesKey(statsId, formId), KEPT_RESPONSES]]), 1, what);
+  const whole = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+  if (!Array.isArray(reply) || reply.length !== 2 || !reply.every(whole) || reply[0] > KEPT_RESPONSES || reply[1] < reply[0]) throw new UnknownReply(what);
+  return { count: reply[0], bytes: reply[1] };
+}
+
+/**
+ * A form's responses, newest first, how many are kept in all, and the bytes
+ * the read moved, every character of the answer at its widest JSON (jsonBytes).
+ */
+export async function readResponses(statsId: string | null, formId: string, limit = KEPT_RESPONSES): Promise<{ responses: FormResponse[]; total: number; bytes: number }> {
+  if (!statsId || !FORM_ID.test(formId) || !isRedisConfigured()) return { responses: [], total: 0, bytes: 0 };
   const what = "the form responses";
   const [raw, total] = exactReplies(await redisPipeline([
     ["LRANGE", responsesKey(statsId, formId), 0, Math.max(0, Math.min(limit, KEPT_RESPONSES) - 1)],
@@ -270,6 +295,7 @@ export async function readResponses(statsId: string | null, formId: string, limi
   return {
     responses: responses as FormResponse[],
     total,
+    bytes: jsonBytes([raw, total]),
   };
 }
 

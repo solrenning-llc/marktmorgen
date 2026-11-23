@@ -153,6 +153,7 @@ async function main(): Promise<void> {
     is("refused as too many", short.status, 429);
     is("no answer is read", short.read, false);
     is("nothing taken from the studio figure", short.taken, 0);
+    is("it says how many the file needs and how many are left, never that the figure is used", [/^This download needs [0-9,]+ of your studio requests this month, and only 3 are left\./.test(short.text), /are used/.test(short.text)], [true, false]);
   }
 
   part("An export whose size of the answers comes back in a shape Redis does not give");

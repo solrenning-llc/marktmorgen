@@ -1342,12 +1342,6 @@ function revisaoParaMim(p, eu, agora, c) {
 }
 
 /**
- * Por que a família de `eu` não pega este pedido de fila (o primeiro): a autora (prefixo do ramo, ou a dominante nos
- * commits num ramo sem prefixo; 0410, 3 (b), dd03) ou quem deu veredito neste head no PR (ce2d). null quando pode. Uma
- * leitura que não deu certo volta como "NÃO CONFERIDO". O claim-enqueue e a vigia usam a mesma regra (nota do Claude 4
- * 3Kc, da28: a vigia acordava a cada volta por um pedido que o claim-enqueue recusava).
- */
-/**
  * A mesma regra para a vigia, guardada por pedido e head por VEDADA_MIN minutos: ela confere a cada 30 s e não chama o
  * GitHub a cada volta. Uma leitura NÃO CONFERIDA não é guardada e acorda o agente, que vê o motivo no claim-enqueue.
  */
@@ -1364,6 +1358,12 @@ export function vedadaNaVigia(p, eu, agora = Date.now()) {
   return Boolean(motivo);
 }
 
+/**
+ * Por que a família de `eu` não pega este pedido de fila (o primeiro): a autora (prefixo do ramo, ou a dominante nos
+ * commits num ramo sem prefixo; 0410, 3 (b), dd03) ou quem deu veredito neste head no PR (ce2d). null quando pode. Uma
+ * leitura que não deu certo volta como "NÃO CONFERIDO". O claim-enqueue e a vigia usam a mesma regra (nota do Claude 4
+ * 3Kc, da28: a vigia acordava a cada volta por um pedido que o claim-enqueue recusava).
+ */
 export function filaVedadaPara(alvo, eu) {
   const ramoAlvo = campoCabecalho(alvo.texto, "Ramo");
   const doRamo = familiaDoRamo(ramoAlvo);
@@ -1619,7 +1619,6 @@ function avisarVersao() {
 export const RAIZ_HISTORICA = new Set(["LEIA-ME.md", "agent-mail.mjs", "agent-mail.test.mjs", "correio.mjs"]);
 export const REF_VERIFICADO = "refs/agent-mail/append-only-checked";
 
-/** { reescrito, problemas }: o que, desde `desde` (ou desde o começo), alterou ou apagou um arquivo de dados. */
 /**
  * A conferência da vigia, com uma busca nova antes de dizer "reescrito" (alarme falso de 23/11/2026, 07h56 UTC): duas
  * vigias no mesmo repositório buscam o ramo em momentos diferentes, e a marca que uma gravou pode ser mais nova que a
@@ -1634,6 +1633,7 @@ export function conferirDesde(desde, busca = buscar, denovo = () => { esquecerRe
   return { c: c2, r: conferirSoAcrescentar(c2, desde) };
 }
 
+/** { reescrito, problemas }: o que, desde `desde` (ou desde o começo), alterou ou apagou um arquivo de dados. */
 export function conferirSoAcrescentar(commit, desde = null) {
   if (!commit) return { reescrito: false, problemas: [] };
   let reescrito = false;

@@ -109,6 +109,12 @@ part("Meta: a signature refused only for its base64 padding is refused with a lo
     is("one line says a padded signature was refused, and the other garbled one says nothing", said.filter((line) => /padding/i.test(line)).length, 1);
     is("the line names neither the signature nor the secret", said.some((line) => line.includes(good) || line.includes("fuzz-meta-secret") || line.includes(payload)), false);
     void other;
+    // Claude 1's NIT on #5366 @bfe1f724a4: the line comes only when the signature without its padding is the app's
+    // own, so a forged padded signature sent to the public route never writes it.
+    said.length = 0;
+    const forged = createHmac("sha256", "not-the-secret").update(payload).digest("base64url");
+    is("a forged padded signature is refused", signedUser(`${forged}=.${payload}`), null);
+    is("and writes no line", said.filter((line) => /padding/i.test(line)).length, 0);
   } finally {
     console.warn = warn;
   }

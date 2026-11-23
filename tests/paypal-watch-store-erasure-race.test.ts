@@ -12,6 +12,7 @@ import { claimHandle, ensureStatsId, addProduct, setProductLink, setSubscription
 import { readListing } from "@/lib/catalog";
 import { captureOrder, openOrder, watchPayPal } from "@/lib/paypal-sales";
 import { handOverPayPal } from "@/lib/paypal-delivery";
+import { dataKey } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -22,7 +23,9 @@ let clock = START;
 const realNow = Date.now.bind(Date);
 Date.now = () => clock * 1000;
 
-const captureStatus = "COMPLETED";
+let captureStatus = "COMPLETED";
+/** Runs once, right before the capture's GET answers: a store erasure that lands while PayPal is asked (#5242). */
+let beforeCaptureReply: (() => Promise<void>) | null = null;
 let made = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -51,6 +54,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   const cap = /^\/v2\/payments\/captures\/([A-Z0-9]+)$/.exec(url.pathname)?.[1];
   if (cap && method === "GET") {
+    const before = beforeCaptureReply;
+    beforeCaptureReply = null;
+    if (before) await before();
     return json({ id: cap, status: captureStatus });
   }
   return json({ name: "RESOURCE_NOT_FOUND" }, 404);
@@ -126,6 +132,51 @@ async function main(): Promise<void> {
   part("No path of the watch puts an order back with a plain ZADD");
   const source = readFileSync(join(process.cwd(), "lib/paypal-sales.ts"), "utf8");
   is("no plain ZADD of the watch list in lib/paypal-sales.ts", source.match(/\["ZADD", watchKey\(/g)?.length ?? 0, 0);
+
+  // Codex G (G-20261120-1631, issue #5242, #5010 row 121, MEDIUM): after the awaited capture GET, the watch wrote the
+  // refunded and reversed marks (plain ZADD and EXPIRE) and the affiliate book's lasting record with its data room
+  // (orderWrite), with no store fence. A PayPal answer that lands after the store's erasure made those families again.
+  // Each of those writes now checks, in the same EVAL, that the store's id key is there and it is not being erased.
+  const refundKey = `nl:ppsell:refunded:${store.statsId}`;
+  const reversedKey = `nl:ppsell:reversed:${store.statsId}`;
+  const backKey = `nl:ppsell:back:${store.statsId}`;
+  const roomKey = dataKey(store);
+  if (!roomKey) throw new Error("no data room key");
+  const families = async () => (await real([["EXISTS", refundKey], ["EXISTS", reversedKey], ["EXISTS", backKey], ["EXISTS", roomKey]])) as unknown[];
+
+  part("A REFUNDED answer that lands after the store was erased makes no refund mark, lasting record or room (#5242)");
+  await real([["HDEL", ERASING_KEY, field], ["SET", storeIdKey, "owner@example.com"], ["ZADD", watchKey, String(clock), sale.order]]);
+  captureStatus = "REFUNDED";
+  let told = 0;
+  let erasedMeanwhile = false;
+  beforeCaptureReply = async () => {
+    erasedMeanwhile = true;
+    await real([["HSET", ERASING_KEY, field, String(clock)], ["DEL", storeIdKey], ["DEL", watchKey, refundKey, reversedKey, backKey, roomKey]]);
+  };
+  await watchPayPal(store, Date.now() + 10_000, { ...on, refunded: async () => { told += 1; } });
+  is("the store was erased while PayPal was asked", erasedMeanwhile, true);
+  is("no refund mark, reversed mark, lasting record or data room is made again", await families(), [0, 0, 0, 0]);
+  is("and no refund is told for the erased store", told, 0);
+  is("nor is its watch list made again", (await real([["EXISTS", watchKey]]))[0], 0);
+
+  part("A REVERSED answer while the store is being erased (its id key still there) makes nothing (#5242)");
+  await real([["HDEL", ERASING_KEY, field], ["SET", storeIdKey, "owner@example.com"], ["ZADD", watchKey, String(clock), sale.order]]);
+  captureStatus = "REVERSED";
+  told = 0;
+  beforeCaptureReply = async () => {
+    await real([["HSET", ERASING_KEY, field, String(clock)], ["DEL", watchKey, refundKey, reversedKey, backKey, roomKey]]);
+  };
+  await watchPayPal(store, Date.now() + 10_000, { ...on, refunded: async () => { told += 1; } });
+  is("the store's id key is still there", (await real([["EXISTS", storeIdKey]]))[0], 1);
+  is("no reversed mark, refund mark, lasting record or data room is made", await families(), [0, 0, 0, 0]);
+  is("nothing is told", told, 0);
+
+  part("Control: a REFUNDED answer for a live store still marks it and keeps it for the affiliate book");
+  await real([["HDEL", ERASING_KEY, field], ["SET", storeIdKey, "owner@example.com"], ["ZADD", watchKey, String(clock), sale.order]]);
+  captureStatus = "REFUNDED";
+  await watchPayPal(store, Date.now() + 10_000, on);
+  const live = await families();
+  is("the refund mark and the lasting record are written, the room charged", [live[0], live[2], live[3]], [1, 1, 1]);
   Date.now = realNow;
   done();
 }

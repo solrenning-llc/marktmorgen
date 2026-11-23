@@ -23,6 +23,7 @@ const emails: string[] = [];
 const subs: Record<string, Record<string, unknown>> = {};
 let posts = 0;
 let priceReadsToFail = 0;
+let servedPriceId = "price_creator_month";
 
 function subscription(id: string, over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -39,7 +40,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "api.stripe.com") {
     if (url.pathname === "/v1/prices" && method === "GET") {
       if (priceReadsToFail > 0) { priceReadsToFail -= 1; return new Response(JSON.stringify({ error: { type: "api_error", message: "down" } }), { status: 500 }); }
-      return new Response(JSON.stringify({ data: [{ id: "price_creator_month", lookup_key: "nimbus_labs_creator_month", active: true, currency: "usd", unit_amount: PLAN_PRICES.creator.month, recurring: { interval: "month", interval_count: 1 } }], has_more: false }), { status: 200 });
+      return new Response(JSON.stringify({ data: [{ id: servedPriceId, lookup_key: "nimbus_labs_creator_month", active: true, currency: "usd", unit_amount: PLAN_PRICES.creator.month, recurring: { interval: "month", interval_count: 1 } }], has_more: false }), { status: 200 });
     }
     if (url.pathname === "/v1/subscriptions" && method === "POST") {
       posts += 1;
@@ -72,6 +73,33 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 async function main(): Promise<void> {
   redis.clear();
+  // Claude 3 yUZf's NIT on #3671 @dc2dbfc7e3 (7109235926): restartPlan refuses a price id that is not price_..., but
+  // it ran after the attempt was written, so such an id held the break for good with the unconfirmed email and no
+  // POST. The id is now checked where it is read, before the attempt, and forgotten so the next run reads it again.
+  part("A price id that is not one of ours writes no attempt, and the next run reads the price again");
+  subs.sub_BadPriceId0001 = subscription("sub_BadPriceId0001");
+  const badEmail = "badpriceid@example.com";
+  await claimHandle(badEmail, "badpriceidstore", "A store", "");
+  await setSubscription(badEmail, { customerId: "cus_TestPause0001", subscriptionId: "sub_BadPriceId0001", active: true, tier: "creator", cycle: "month" });
+  const badStore = (await storeForEmail(badEmail))!;
+  const badSet = await pausePlan(badStore, 1, NOW);
+  is("(setup) the break is taken", badSet.kind, "paused");
+  const badUntil = badSet.kind === "paused" ? badSet.record.until : 0;
+  await setSubscription(badEmail, { active: false });
+  servedPriceId = "plan_creator_month";
+  emails.length = 0;
+  const refused = await runBreaks(badUntil + 60);
+  is("nothing is posted to Stripe", posts, 0);
+  is("the run counts it as not done", [refused.restarted, refused.failed], [0, 1]);
+  const badRaw = String(redis.run(["GET", `nl:pause:${storeRef(badStore)}`]) ?? "");
+  is("no restart attempt is written into the break", badRaw.includes('"attempt"'), false);
+  is("the creator is not told to check a charge that cannot exist", emails.filter((s) => s.includes("needs a check")), []);
+  servedPriceId = "price_creator_month";
+  const fixed = await runBreaks(badUntil + DAY);
+  is("the next day the price is read again (not the remembered bad id) and the plan starts", [fixed.restarted, posts], [1, 1]);
+  is("and the break is gone", await pauseOf((await storeForEmail(badEmail))!), null);
+  posts = 0;
+
   part("A price lookup that fails before the only POST writes no attempt and is tried again the next day");
   subs.sub_BeforePost0001 = subscription("sub_BeforePost0001");
   const email = "beforepost@example.com";

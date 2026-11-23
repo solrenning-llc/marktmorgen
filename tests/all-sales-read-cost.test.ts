@@ -10,11 +10,16 @@
  * Synthetic data, a Stripe stand-in.
  */
 import { NextRequest } from "next/server";
-import { ALL_TIME_READ_COMMANDS, readAllTimeSales } from "@/lib/stats";
+import { ALL_TIME_BYTES_PER_UNIT, ALL_TIME_PAGES, ALL_TIME_READ_COMMANDS, ALL_TIME_READ_UNITS, AllTimeNotCounted, readAllTimeSales } from "@/lib/stats";
+import { BUYER_LEDGER_UNITS, LEDGER_BYTES_PER_UNIT } from "@/lib/segments";
+import { IncludedBytes } from "@/lib/sent-bytes";
+import { allowanceFor } from "@/lib/store-allowance-rules";
+import { MAX_PAID_BYTES } from "@/lib/paypal-sales";
+import { readFileSync } from "node:fs";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { GET as statsRoute } from "@/app/api/store/stats/route";
-import { LOCKED_UNTIL_STAR_COMMANDS, TAKE_COMMANDS } from "./plan-cost-registry";
+import { ALL_TIME_READ, LOCKED_UNTIL_STAR_COMMANDS, TAKE_COMMANDS, UNIT_COST } from "./plan-cost-registry";
 import { paidKey, salesKey } from "@/lib/paypal-sales";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -24,7 +29,9 @@ process.env.STRIPE_SECRET_KEY = "sk_test_all_sales_cost";
 
 const S = Date.parse("2026-11-01T12:00:00Z") / 1000;
 const HANDLE = "allsalescost";
+let stripeCalls = 0;
 globalThis.fetch = (async (input: string | URL | Request) => {
+  stripeCalls += 1;
   const path = new URL(String(input instanceof Request ? input.url : input)).pathname;
   const answer = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
   if (path.endsWith("/checkout/sessions")) {
@@ -101,6 +108,71 @@ async function main(): Promise<void> {
     hook = null;
     is("answered with the reading", [response.status, ((await response.json()) as { ok?: boolean }).ok], [200, true]);
     is(`its commands, scripts counted with what they run (${count.commands()}), fit one studio request in commands`, count.commands() <= 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, true);
+  }
+
+  part("Its studio requests pay for the whole reading, counted like a reading of the buyers (7074257093, 7074905617)");
+  {
+    is("ALL_TIME_READ fits ALL_TIME_READ_UNITS studio requests", ALL_TIME_READ <= UNIT_COST.studio * ALL_TIME_READ_UNITS, true);
+    is("the same Stripe part and the same rate by size as a reading of the buyers", [ALL_TIME_READ_UNITS, ALL_TIME_BYTES_PER_UNIT], [BUYER_LEDGER_UNITS, LEDGER_BYTES_PER_UNIT]);
+  }
+
+  part("A studio reading is counted before Stripe or PayPal is read");
+  {
+    const store = await freshStore();
+    // Many PayPal sales kept: counted by their weight, at the most ALL_TIME_PAGES * 100 of them.
+    const members: (string | number)[] = [];
+    for (let i = 0; i < 2_500; i += 1) members.push(String(S + i), `PPSYNTHCOUNT${i}`);
+    await redis.pipeline([["ZADD", salesKey(store.statsId!), ...members]]);
+    const asked: number[] = [];
+    stripeCalls = 0;
+    const refused = await readAllTimeSales(store, async (units) => { asked.push(units); return false; }).then(() => "read", (error: unknown) => (error instanceof AllTimeNotCounted ? "not counted" : String(error)));
+    const expected = ALL_TIME_READ_UNITS + new IncludedBytes().take(Math.min(2_500, ALL_TIME_PAGES * 100) * MAX_PAID_BYTES, ALL_TIME_BYTES_PER_UNIT).units;
+    is("refused, it reads nothing from Stripe and keeps no copy", [refused, stripeCalls, Number(redis.run(["EXISTS", `nl:stats:${store.statsId}:allsales`]))], ["not counted", 0, 0]);
+    is("it asked once, for the Stripe part and the PayPal records by weight", asked, [expected]);
+    const granted: number[] = [];
+    const read = await readAllTimeSales(store, async (units) => { granted.push(units); return true; });
+    is("counted, it reads", [read ? "read" : "none", granted, stripeCalls > 0], ["read", [expected], true]);
+  }
+
+  part("A kept copy is counted by its size, and read no further than counted");
+  {
+    const store = await freshStore();
+    await readAllTimeSales(store);
+    const key = `nl:stats:${store.statsId}:allsales`;
+    const kept = String(redis.run(["GET", key]));
+    // A copy of two megabytes and a half, as one from a store with many products could be.
+    const big = kept.slice(0, -1) + `,"pad":"${"x".repeat(2_500_000)}"}`;
+    redis.run(["SET", key, big]);
+    const asked: number[] = [];
+    stripeCalls = 0;
+    const refused = await readAllTimeSales(store, async (units) => { asked.push(units); return false; }).then(() => "read", (error: unknown) => (error instanceof AllTimeNotCounted ? "not counted" : String(error)));
+    is("refused by its size, nothing more is read", [refused, asked, stripeCalls], ["not counted", [new IncludedBytes().take(big.length, ALL_TIME_BYTES_PER_UNIT).units], 0]);
+    const unknown = await freshStore();
+    hook = async (batch) => (batch[0]?.[0] === "STRLEN" ? ["not a size"] : realPipeline(batch));
+    const strange = await readAllTimeSales(unknown, async () => true).then(() => "read", (error: unknown) => (error instanceof AllTimeNotCounted ? "not counted" : String(error)));
+    hook = null;
+    is("a size in another shape is unknown, never none: nothing is read (rule 24)", [strange, stripeCalls], ["not counted", 0]);
+  }
+
+  part("The route refuses with the sentence when the studio requests are not left, and reads nothing");
+  {
+    const store = await freshStore();
+    const session = await openSession(OWNER);
+    const cookie = { headers: { cookie: `${SESSION_COOKIE}=${session}` } };
+    // Room for the route's own request only (lib/studio-route.ts takes it first): the reading needs ALL_TIME_READ_UNITS.
+    const { countStudio } = await import("@/lib/studio-route");
+    await countStudio(store, null, 1);
+    const studioKey = redis.keys().find((k) => k.startsWith("nl:allow:studio:"))!;
+    await redis.pipeline([["SET", studioKey, String(allowanceFor(store, "studio") - 4)]]);
+    stripeCalls = 0;
+    const response = await statsRoute(new NextRequest("https://marktmorgen.com/api/store/stats", cookie));
+    const body = (await response.json()) as { ok?: boolean; error?: string; message?: string };
+    is("429 studio_used, with how many it needs and how many are left", [response.status, body.ok, body.error, (body.message ?? "").startsWith(`This needs ${ALL_TIME_READ_UNITS} of your studio requests, and only 3 are left.`)], [429, false, "studio_used", true]);
+    is("and Stripe was not read", stripeCalls, 0);
+    const page = readFileSync("app/studio/page.tsx", "utf8");
+    is("the studio page's background reading counts its studio requests too", page.includes("readAllTimeSales(store, countLedger(store).count)"), true);
+    const panel = readFileSync("components/stats-panel.tsx", "utf8");
+    is("the panel says the refusal's sentence, never that Stripe did not answer", panel.includes('body.error === "studio_used"'), true);
   }
 
   part("A kept reading costs one GET");

@@ -533,7 +533,7 @@ export function StatsPanel({
   const [spendsUnread, setSpendsUnread] = useState<SpendUnread>(spendsUnreadGiven);
   // The spend the figures use: none while a part is unread, and those figures are left out (Claude 5 on #2924).
   const spendsKnown = spendsUnread ? null : spends;
-  const [all, setAll] = useState<{ state: "idle" | "loading" | "error" } | { state: "ok"; sales: AllTimeSales }>({ state: "idle" });
+  const [all, setAll] = useState<{ state: "idle" | "loading" } | { state: "error"; message?: string } | { state: "ok"; sales: AllTimeSales }>({ state: "idle" });
   const salesKnown = data.sales === "ok";
 
   async function loadAll() {
@@ -541,8 +541,10 @@ export function StatsPanel({
     setAll({ state: "loading" });
     try {
       const response = await fetch("/api/store/stats?range=all", { cache: "no-store" });
-      const body = (await response.json().catch(() => ({}))) as { ok?: boolean; sales?: AllTimeSales };
-      setAll(body.ok && body.sales ? { state: "ok", sales: body.sales } : { state: "error" });
+      const body = (await response.json().catch(() => ({}))) as { ok?: boolean; sales?: AllTimeSales; error?: string; message?: string };
+      // Studio requests that could not be counted are said as the server says them, never as Stripe not answering.
+      const said = body.error === "studio_used" && typeof body.message === "string" && body.message ? body.message : undefined;
+      setAll(body.ok && body.sales ? { state: "ok", sales: body.sales } : { state: "error", message: said });
     } catch {
       setAll({ state: "error" });
     }
@@ -571,7 +573,7 @@ export function StatsPanel({
       : "Stripe did not answer"
     : range === "all" && !allSales
       ? all.state === "error"
-        ? "Stripe did not answer"
+        ? all.message ?? "Stripe did not answer"
         : "Reading Stripe…"
       : !salesHere
         ? "Incomplete reading; paid totals unavailable"

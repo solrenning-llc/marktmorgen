@@ -26,7 +26,8 @@ import { creativeRowsFrom } from "@/lib/creative-results";
  * Sales are not counted here. They are read from the creator's own Stripe
  * account, which is the only record of money that deserves the name.
  */
-import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, readPayPalSales, sellsThroughPayPal } from "@/lib/paypal-sales";
+import { MAX_PAID_BYTES, type Paid, paypalKept, paypalPaymentId, readPayPalRefundsWithCoverage, readPayPalSales, sellsThroughPayPal } from "@/lib/paypal-sales";
+import { IncludedBytes } from "@/lib/sent-bytes";
 import { disputeTakes, type Entry, type KeptWindow, keptByCurrency } from "@/lib/retained-revenue";
 import { buyerChannelsFrom, type BuyerChannels } from "@/lib/buyer-channel-rules";
 import { type DiscountCodeRow, type DiscountElsewhere, type DiscountRow, discountCodes, discountElsewhere, discountImpact } from "@/lib/discount-impact";
@@ -2407,13 +2408,50 @@ const ALL_SALES_SECONDS = 600;
 export const ALL_TIME_READ_COMMANDS = 11;
 
 /**
+ * Studio requests one all-time reading from Stripe costs at the most, when its ten-minute copy is gone
+ * (tests/plan-cost-registry.ts, ALL_TIME_READ): the same two lists of ALL_TIME_PAGES pages as a reading of the
+ * buyers (lib/segments.ts, BUYER_LEDGER_UNITS), besides the copy and the PayPal records, which are counted by size.
+ */
+export const ALL_TIME_READ_UNITS = 8;
+/** Bytes of the reading's copy, or of its PayPal records, that one studio request covers (as lib/segments.ts LEDGER_BYTES_PER_UNIT). */
+export const ALL_TIME_BYTES_PER_UNIT = 1_000_000;
+
+/** Thrown by readAllTimeSales when what the reading costs could not be counted first: nothing was read. */
+export class AllTimeNotCounted extends Error {
+  constructor() {
+    super("the store's all-time reading could not be counted");
+    this.name = "AllTimeNotCounted";
+  }
+}
+
+/**
  * Every sale the store has made, as far back as ALL_TIME_PAGES pages of
  * checkouts reach, read when the creator asks for it and kept ten minutes.
+ *
+ * `count`, when given (the studio's callers), is asked before anything big is read, with the studio requests it
+ * costs, and answers whether they were counted; when they were not, nothing more is read and AllTimeNotCounted is
+ * thrown, as lib/segments.ts buyerLedger does. The copy is counted by its size (STRLEN first, then read no further
+ * than counted, GETRANGE); a reading from Stripe as ALL_TIME_READ_UNITS, with the PayPal records by how many are
+ * kept at MAX_PAID_BYTES each, before any is read. A size or a count in any other shape is unknown (rule 24): never
+ * none, nothing is read. Without `count` (the public sold-count refresh, priced by its own line) it reads as before.
  */
-export async function readAllTimeSales(store: Store): Promise<AllTimeSales | null> {
+export async function readAllTimeSales(store: Store, count?: (units: number) => Promise<boolean>): Promise<AllTimeSales | null> {
   if (!readsSales(store)) return null;
+  const counted = async (units: number) => !count || units <= 0 || (await count(units).catch(() => false));
+  // The copy and the reading share one request's included bytes, as buyerLedger counts them (C3-112 (2)).
+  const included = new IncludedBytes();
   if (store.statsId && isRedisConfigured()) {
-    const [cached] = await redisPipeline([["GET", allSalesKey(store.statsId)]]);
+    let cached: unknown = null;
+    if (count) {
+      const bytes = countOf(repliesFor(await redisPipeline([["STRLEN", allSalesKey(store.statsId)]]).catch(() => null), 1)?.[0]);
+      if (bytes === null) throw new AllTimeNotCounted();
+      const taken = bytes > 0 ? included.take(bytes, ALL_TIME_BYTES_PER_UNIT) : { units: 0, covers: 0 };
+      if (bytes > 0 && !(await counted(taken.units))) throw new AllTimeNotCounted();
+      // Never more than was counted: a copy grown since is read cut, cannot be parsed, and is read again below, counted.
+      if (bytes > 0) [cached] = await redisPipeline([["GETRANGE", allSalesKey(store.statsId), 0, taken.covers - 1]]);
+    } else {
+      [cached] = await redisPipeline([["GET", allSalesKey(store.statsId)]]);
+    }
     if (typeof cached === "string" && cached) {
       try {
         const kept = JSON.parse(cached) as AllTimeSales;
@@ -2424,6 +2462,14 @@ export async function readAllTimeSales(store: Store): Promise<AllTimeSales | nul
         // Read again below.
       }
     }
+  }
+  if (count) {
+    // Stripe's two lists (when there is a Stripe account) and the PayPal records by how many are kept, at the most
+    // each weighs (readPaidSales asks readPayPalSales for ALL_TIME_PAGES * 100 of them): counted before any is read.
+    const paypal = await paypalKept(store.statsId, false).catch(() => null);
+    if (!paypal) throw new AllTimeNotCounted();
+    const moved = Math.min(paypal.sales, ALL_TIME_PAGES * 100) * MAX_PAID_BYTES;
+    if (!(await counted((store.stripeAccountId ? ALL_TIME_READ_UNITS : 0) + included.take(moved, ALL_TIME_BYTES_PER_UNIT).units))) throw new AllTimeNotCounted();
   }
   const { sales, partial } = await readPaidSales(store, 0, ALL_TIME_PAGES);
   const out: AllTimeSales = { totals: { sales: 0, cents: 0 }, byProduct: Object.create(null), since: "", partial, currency: store.currency, elsewhere: 0 };

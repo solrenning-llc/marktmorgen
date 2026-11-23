@@ -94,7 +94,12 @@ export const IMPORT_MIN_ROWS_PER_UPLOAD = 50;
  * by the rows figure (tests/store-data-registry.ts), however long the cells.
  */
 export const IMPORT_ROW_BYTES = 2_000;
-export const IMPORT_WORST_BYTES_PER_ROW = 3_000;
+// Since 23 November 2026 (#5010 row 150, Claude 6 z5v4's route sweep 2f36): 3,000 until then, below what a products
+// import moves. A description of MAX_ABOUT_LENGTH characters JSON escapes to two bytes each (quotes, backslashes) is
+// kept in its batch, read back once for each chunk, charged to the data room and written as the product's long
+// description, while the upload counts one row for every IMPORT_ROW_BYTES: measured 15,537 bytes a counted row end to
+// end (tests/import-products-bytes.test.ts holds every row kind's worst under this).
+export const IMPORT_WORST_BYTES_PER_ROW = 16_000;
 
 /**
  * How long rows not brought in yet are kept from their upload (lib/imports.ts

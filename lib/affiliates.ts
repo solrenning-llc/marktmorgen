@@ -6146,8 +6146,9 @@ async function writeInvoiceKeep(store: Store, statsId: string, keep: InvoiceKeep
   const value = JSON.stringify({ ...keep, kept, walk: walking, over: kept ? null : keep.over });
   if (!fits(value, [kept, walking])) {
     console.error("the affiliate book's kept invoices are past their ceiling: nothing kept, the book not whole", statsId);
-    // Only the mark of it, in place of what was kept (one command, as the DEL it replaces): the readings that begin
-    // again carry it, so the creator is told reloading will not help, not "try again in a moment".
+    // Only the mark of it, in place of what was kept (the same store-fenced script of four, EVAL, HGET, GET and SET,
+    // sent once more below when not kept: BOOK_KEPT_INVOICES_COMMANDS counts both): the readings that begin again carry
+    // it, so the creator is told reloading will not help, not "try again in a moment".
     const mark = JSON.stringify({ v: 1, account: keep.account, handles: keep.handles, since: keep.since, kept: null, walk: null, over: Math.floor(Date.now() / 1000) });
     // Read, never ignored (Codex X6's LOW on #3378, Board #5285 row #3378): a write that does not say it kept the mark
     // (an answer lost or in another shape) is sent once more, so the readings that begin again carry it; a store whose

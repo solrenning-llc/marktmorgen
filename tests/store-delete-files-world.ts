@@ -1,12 +1,15 @@
 /** A file store in memory for tests/store-delete-files.test.ts: what it keeps, listed and deleted as Vercel Blob does. */
 export const files = new Map<string, number>();
-export const state = { failing: false };
+export const state = { failing: false, listFailing: false, cutOff: false };
 
 export async function del(pathnames: string | string[]): Promise<void> {
   if (state.failing) throw new Error("the file store did not answer");
   for (const pathname of Array.isArray(pathnames) ? pathnames : [pathnames]) files.delete(pathname);
+  // The request cut off right after this delete (its function's time out): it never answers, so nothing after it runs.
+  if (state.cutOff) return new Promise<void>(() => {});
 }
 export async function list(options: { prefix?: string } = {}) {
+  if (state.listFailing) throw new Error("the file store did not answer");
   const prefix = options.prefix ?? "";
   const blobs = [...files.entries()].filter(([pathname]) => pathname.startsWith(prefix)).map(([pathname, size]) => ({ pathname, size, url: "", downloadUrl: "", uploadedAt: new Date(0) }));
   return { blobs, hasMore: false, cursor: undefined };

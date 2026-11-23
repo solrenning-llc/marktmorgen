@@ -573,7 +573,9 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
         continue;
       }
       const flags = repliesFor(await redisPipeline([["SMISMEMBER", seenKey(callsId), id, callMark(id)]]), 1)?.[0];
-      if (!Array.isArray(flags) || flags.length !== 2) throw new UnknownReplyError("the refunds already read");
+      // Each flag exactly 0 or 1 (#5285, Codex X6's LOW on #3866): [null, 0] read as "not read yet" marked a refund
+      // read on a reply that proved nothing.
+      if (!Array.isArray(flags) || flags.length !== 2 || !flags.every((flag) => flag === 0 || flag === 1)) throw new UnknownReplyError("the refunds already read");
       if (Number(flags[0]) === 1) {
         passed();
         continue;

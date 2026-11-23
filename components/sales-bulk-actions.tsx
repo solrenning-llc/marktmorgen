@@ -265,7 +265,7 @@ export function SalesBulkActions({ sales, canLabel, canExport, defaultOpen = fal
             Choose orders, then what to do
           </h3>
           <p className="mt-1 text-sm text-ink-soft">{`Up to ${MAX_BULK_SALES} orders at a time. Nothing happens until you confirm. Refunds and charges are never done here: make them one at a time in Stripe.`}</p>
-          <div className="mt-3 overflow-x-auto">
+          <div className="mt-3 overflow-x-auto" tabIndex={0} role="region" aria-label="Orders you can choose, as a table">
             <table className="w-full border-collapse text-left text-sm">
               <caption className="sr-only">Orders you can choose</caption>
               <thead>

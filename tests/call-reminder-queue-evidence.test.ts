@@ -75,7 +75,10 @@ test("an unknown store lookup preserves due reminders", async () => {
   const counts = await run(async () => { throw new Error("synthetic store read timeout"); });
   assert.deepEqual(counts, { reminded: 0, confirmed: 0, dropped: 0 });
   assert.equal(lookups, 0);
-  assert.equal(mutations, 0, "an unknown store must not ZREM the due reminder");
+  assert.equal(writes.some((c) => c[0] === "ZREM"), false, "an unknown store must not ZREM the due reminder");
+  // Only put off, still queued (Claude 1 E's LEVE on #5103): one ZADD XX of the same member, later than now.
+  assert.deepEqual(writes.map((c) => [c[0], c[1], c[2], c[4]]), [["ZADD", REMINDER_QUEUE, "XX", member]]);
+  assert.ok(Number(writes[0][3]) > now, "an unknown store puts the reminder off, never forward");
 });
 
 test("an unknown single-session payment read preserves due reminders", async () => {
@@ -99,7 +102,10 @@ test("an unknown single-session payment read preserves due reminders", async () 
   const counts = await run(async () => store);
   assert.deepEqual(counts, { reminded: 0, confirmed: 0, dropped: 0 });
   assert.equal(stripeReads, 2, "the list is confirmed empty before the individual read fails");
-  assert.equal(mutations, 0, "an unknown payment read must not ZREM the due reminder");
+  assert.equal(writes.some((c) => c[0] === "ZREM"), false, "an unknown payment read must not ZREM the due reminder");
+  // Only put off, still queued (Claude 1 E's LEVE on #5103): one ZADD XX of the same member, later than now.
+  assert.deepEqual(writes.map((c) => [c[0], c[1], c[2], c[4]]), [["ZADD", REMINDER_QUEUE, "XX", member]]);
+  assert.ok(Number(writes[0][3]) > now, "an unknown payment read puts the reminder off, never forward");
 });
 
 test("a complete due pair is processed, with string and numeric scores", async () => {

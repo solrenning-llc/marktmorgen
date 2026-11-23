@@ -12,6 +12,9 @@
  *     in a button that never wraps from 480 px up (.btn), in a card about
  *     376 px wide: a long name, or a page zoomed to 200%, ran past the
  *     button's edge. Both stop buttons now wrap (.btn-wrap);
+ *   - the API page (app/developers) and every help answer (app/help/[section]/[answer]) the same way
+ *     (23 November 2026, a crawl of every public page at 320 px with axe): the API page's code blocks
+ *     took no focus, and three help answers ran up to 45 px past a 320 px screen on one long word;
  *   - the community leaderboard's rule for points ran about 92 characters a
  *     line under a 768 px column; it is held under 80 (70ch).
  *
@@ -35,6 +38,22 @@ async function main() {
   const names = blocks.map((a) => a.match(/aria-label="([^"]*)"/)?.[1] ?? "");
   is("each has a name", names.every((n) => n.trim().length > 0), true);
   is("no two have the same name", new Set(names).size, names.length);
+
+  part("The API page's code blocks (app/developers/page.tsx), the same way: axe's scrollable-region-focusable failed there");
+  const api = readFileSync("app/developers/page.tsx", "utf8");
+  const apiPre = [...api.matchAll(/<pre\b([^>]*)>/g)].map((m) => m[1]);
+  is("one <pre>, inside Code", apiPre.length, 1);
+  is("it takes the keyboard focus, as a named region", [/tabIndex=\{0\}/.test(apiPre[0] ?? ""), /role="region"/.test(apiPre[0] ?? ""), /aria-label=\{label\}/.test(apiPre[0] ?? "")], [true, true, true]);
+  is("no code sample without a name", /<Code>/.test(api), false);
+  const apiNames = [...api.matchAll(/<Code label="([^"]*)">/g)].map((m) => m[1]);
+  is("fifteen named samples", apiNames.length, 15);
+  is("no two have the same name", new Set(apiNames).size, apiNames.length);
+
+  part("A help answer breaks a long word instead of widening the page at 320 px");
+  // A sitemap address, a utm_ tag and "MarktmorgenOutreach" in a title ran 13 to 45 px past a 320 px screen.
+  const answer = readFileSync("app/help/[section]/[answer]/page.tsx", "utf8");
+  const article = answer.match(/<article className="([^"]*)">/)?.[1].split(/\s+/) ?? [];
+  is("the answer's article breaks long words", article.includes("break-words"), true);
 
   part("The outreach stop buttons wrap");
   const stop = readFileSync("app/outreach/stop/[token]/page.tsx", "utf8");

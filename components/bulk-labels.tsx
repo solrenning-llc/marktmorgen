@@ -181,12 +181,12 @@ export function BulkLabels() {
             {fieldError("label")}
           </span>
         </div>
-        <fieldset className="mt-4" aria-describedby={describedBy(null, "change")}>
+        <fieldset className="mt-4" role="radiogroup" aria-describedby={describedBy(null, "change")} aria-invalid={errorField === "change" || undefined}>
           <legend className="field-label">What to do</legend>
           <div className="mt-1 flex flex-wrap gap-x-6">
             {(["add", "remove"] as const).map((value) => (
               <label key={value} className="flex min-h-11 items-center gap-2 text-sm">
-                <input type="radio" name="bulk-change" className="h-5 w-5" checked={change === value} onChange={() => edit(setChange, "change")(value)} aria-invalid={errorField === "change" || undefined} />
+                <input type="radio" name="bulk-change" className="h-5 w-5" checked={change === value} onChange={() => edit(setChange, "change")(value)} />
                 {value === "add" ? "Add the label" : "Take the label off"}
               </label>
             ))}

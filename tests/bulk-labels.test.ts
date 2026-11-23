@@ -496,6 +496,10 @@ async function main(): Promise<void> {
     [true, true, true, true, true, true, 1],
   );
   is("a refusal is tied to its field: text, label or the choice (3.3.1)", ['none: "text"', 'many: "text"', 'label: "label"', 'change: "change"', 'aria-invalid={errorField === "text" || undefined}', 'aria-invalid={errorField === "label" || undefined}', '`bulk-${field}-error`'].every((piece) => screen.includes(piece)), true);
+  // ARIA 1.2 supports aria-invalid on a radiogroup, not on a radio (oxlint jsx-a11y/role-supports-aria-props): the choice
+  // is marked on its group, whose legend names it, and no radio carries it.
+  const radios = screen.split("\n").filter((line) => line.includes(`<input type="radio"`));
+  is("the choice's refusal marks its group, not each radio (4.1.2)", [radios.length > 0, radios.some((r) => r.includes("aria-invalid")), /<fieldset className="mt-4" role="radiogroup" [^>]*aria-invalid=\{errorField === "change" \|\| undefined\}>/.test(screen)], [true, false, true]);
   is("shown next to the field, the end of the form keeps only the others", [html.includes('id="bulk-text-error" class="field-error mt-1 block" role="alert"'), html.includes('id="bulk-label-error"'), html.includes('id="bulk-change-error"'), screen.includes('{placeError("form")}')], [true, true, true, true]);
   is("a refusal goes once its field is changed (3.3.1)", [screen.includes("const edit = <T,>(set: (value: T) => void, field: Field) => (value: T) => {"), screen.includes("if (errorField === field) {"), ['edit(setText, "text")', 'edit(setLabel, "label")', 'edit(setChange, "change")'].every((piece) => screen.includes(piece))], [true, true, true]);
   is("the live line gets only a short sentence after applying and undoing; every reason stays on the screen", [(screen.match(/setLive\(summary\.short\)/g) ?? []).length, screen.includes("setLive(summary.words)"), screen.includes("setNote(summary.words);")], [2, false, true]);

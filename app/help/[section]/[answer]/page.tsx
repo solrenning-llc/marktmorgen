@@ -59,7 +59,7 @@ export default async function HelpAnswerPage({ params }: Params) {
         </aside>
         <main id="content" className="min-w-0">
         <Breadcrumb path={[{ label: "Help center", href: "/help" }, { label: found.section.title, href: `/help/${found.section.id}` }]} here={found.q} />
-        <article className="mt-4 max-w-3xl">
+        <article className="mt-4 max-w-3xl break-words">
           <h1 className="t-h2">{found.q}</h1>
           {HELP_DATES[found.id] ? (
             <p className="mt-3 text-sm text-ink-soft" data-help-dates>

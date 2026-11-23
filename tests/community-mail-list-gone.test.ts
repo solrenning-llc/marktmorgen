@@ -69,6 +69,15 @@ async function main(): Promise<void> {
     is("RED: nobody is sent to, and the send waits", [to().length, odder?.status], [0, "waiting"]);
   }
 
+  // Claude 1's NIT 2 on #5355: with unsub true, a gone in another shape fell to "still on the list" and was sent to.
+  // gone is written only as one of bounced, complained or refused, or not at all, so another shape is unknown too.
+  for (const odd of ["Bounced", 1, null] as const) {
+    part(`A list row whose gone is ${JSON.stringify(odd)} (not one the list writes) is unknown`);
+    seed(contact({ unsub: true, unsubAt: "2026-11-01T00:00:00.000Z", gone: odd }));
+    const oddGone = await advanceAnnouncement(id, async () => listed, Date.now() + 10_000);
+    is("RED: nobody is sent to, and the send waits", [to().length, oddGone?.status], [0, "waiting"]);
+  }
+
   done();
 }
 

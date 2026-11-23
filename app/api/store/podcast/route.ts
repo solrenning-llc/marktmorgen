@@ -5,7 +5,7 @@ import { setPodcastEpisodes, setProductPodcast, storeFolder, storeForEmail } fro
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsPath } from "@/lib/product-file";
 import { readListing } from "@/lib/catalog";
-import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { LockBusyError, STUDIO_LOCK_WAIT_MS, withLock } from "@/lib/redis-lock";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { dropPodcast, editPodcast, newPodcastId, readPodcast, savePodcast, type PodcastEdit } from "@/lib/podcast";
 
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
     if (!product.podcast) return fail("not_podcast");
     const podcastId = product.podcast.id;
 
-    return await withLock(`nl:pod:${podcastId}:lock`, 60, 15_000, async () => {
+    return await withLock(`nl:pod:${podcastId}:lock`, 60, STUDIO_LOCK_WAIT_MS, async () => {
       // Only Redis's exact "no record" is an empty podcast; an unknown read throws (readPodcast) and nothing is
       // written, because what is written below is the whole podcast as read.
       const podcast = (await readPodcast(podcastId)) ?? { id: podcastId, episodes: [] };

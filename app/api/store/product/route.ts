@@ -1,6 +1,6 @@
 import { runningSubscriptions } from "@/lib/payment-methods";
 import { dropPublicShow } from "@/lib/podcast-public-show";
-import { withLock } from "@/lib/redis-lock";
+import { STUDIO_LOCK_WAIT_MS, withLock } from "@/lib/redis-lock";
 import { applyCourseTaskDrops, noteTaskUpload, readCourseTaskDrops } from "@/lib/assignment";
 import { noteRemovedCourse } from "@/lib/removed-courses";
 import { courseIndexes } from "@/lib/certificate";
@@ -517,7 +517,7 @@ export async function POST(request: NextRequest) {
         // nothing, so no record is left behind with its room counted.
         if (going.podcast) {
           const podcastId = going.podcast.id;
-          await withLock(`nl:pod:${podcastId}:lock`, 60, 15_000, () => dropPublicShow(removed.store, podcastId)).catch((error: unknown) => {
+          await withLock(`nl:pod:${podcastId}:lock`, 60, STUDIO_LOCK_WAIT_MS, () => dropPublicShow(removed.store, podcastId)).catch((error: unknown) => {
             console.error("could not drop a removed podcast's public feed settings", error);
           });
         }

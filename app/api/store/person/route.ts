@@ -4,8 +4,8 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
 import { ensureStatsId } from "@/lib/store";
 import { studioPath } from "@/lib/studio-route";
-import { addPersonNote, addressForToken, findToken, forgetFindToken, readAddress, removePersonNote } from "@/lib/buyer-profile";
-import { erasePerson } from "@/lib/person-erasure";
+import { addPersonNote, findToken, findTokenState, forgetFindToken, keepErasedAnswer, readAddress, removePersonNote } from "@/lib/buyer-profile";
+import { type ErasureNote, erasePerson } from "@/lib/person-erasure";
 import { UnknownReplyError } from "@/lib/redis-reply";
 
 /** How many addresses one store may look up in an hour: each look reads Stripe. */
@@ -42,9 +42,16 @@ export async function POST(request: NextRequest) {
       // Typed by whoever presses, so a slip of the mouse deletes nobody.
       if (body.confirm !== "DELETE") return Response.json({ ok: false, error: "confirm" }, { status: 400 });
       const token = typeof body.token === "string" ? body.token : "";
-      const email = await addressForToken(guarded.store, token);
-      if (!email) return Response.json({ ok: false, error: "expired" }, { status: 410 });
-      const result = await erasePerson(guarded.store, email, { kind: "team", who: guarded.email, role: guarded.role });
+      const state = await findTokenState(guarded.store, token);
+      const erased = (records: number, notes: ErasureNote[]) => {
+        const left = notes.includes("discord-roles") ? "&discord=1" : "";
+        return Response.json({ ok: true, records, notes, href: studioPath(guarded.store, `erased=1${left}`, "people") }, noStore);
+      };
+      // Erased already by this token, its own delete not answered then (Claude 3's two LOWs on #4868): the same answer
+      // again, without running the erasure twice, and the token holds no address any more.
+      if (state.kind === "erased") return erased(state.records, state.notes);
+      if (state.kind !== "address") return Response.json({ ok: false, error: "expired" }, { status: 410 });
+      const result = await erasePerson(guarded.store, state.email, { kind: "team", who: guarded.email, role: guarded.role });
       if (result.ok) {
         // The search token holds the address (#4800): not confirmed deleted, the erasure is not finished. Answered as the
         // erasure's own unfinished parts are, so pressing again (the token still opens the page) deletes it.
@@ -52,10 +59,16 @@ export async function POST(request: NextRequest) {
           await forgetFindToken(token);
         } catch (error) {
           console.error("deleting a buyer page's search token after an erasure was not confirmed", error);
-          return Response.json({ ok: false, error: "incomplete", failed: ["lib/buyer-profile.ts"] }, { status: 503 });
+          // The token's place is written over with the erasure's answer, without the address: once that is kept, the
+          // address is gone from it, so the erasure is complete, and a press again answers the same.
+          try {
+            await keepErasedAnswer(guarded.store, token, { records: result.records, notes: result.notes });
+          } catch (keepError) {
+            console.error("replacing a buyer page's search token after an erasure was not confirmed", keepError);
+            return Response.json({ ok: false, error: "incomplete", failed: ["lib/buyer-profile.ts"] }, { status: 503 });
+          }
         }
-        const left = result.notes.includes("discord-roles") ? "&discord=1" : "";
-        return Response.json({ ok: true, records: result.records, notes: result.notes, href: studioPath(guarded.store, `erased=1${left}`, "people") }, noStore);
+        return erased(result.records, result.notes);
       }
       if (result.reason === "incomplete") return Response.json({ ok: false, error: "incomplete", failed: result.failed }, { status: 503 });
       if (result.reason === "limit") return Response.json({ ok: false, error: "limited", message: result.message }, { status: 429 });

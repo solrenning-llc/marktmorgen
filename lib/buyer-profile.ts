@@ -41,6 +41,7 @@ import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import type { ErasureNote } from "@/lib/person-erasure";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { HASH_TAKE_ALL, takenPairs } from "@/lib/redis-take";
@@ -99,6 +100,43 @@ export async function findToken(store: Pick<Store, "sid">, email: string): Promi
   const token = randomBytes(24).toString("hex");
   await redisPipeline([["SET", findKey(token), JSON.stringify({ s: store.sid, e: normaliseEmail(email) }), "EX", FIND_SECONDS]]);
   return token;
+}
+
+/**
+ * What a search's token stands for on this store, read once (app/api/store/person/route.ts): the address it found; or,
+ * after the person was erased and the token's own delete did not answer, the answer that erasure gave, kept in the
+ * token's place without the address (keepErasedAnswer); or nothing. A reply that does not read is nothing, as before.
+ */
+export type FindTokenState = { kind: "address"; email: string } | { kind: "erased"; records: number; notes: ErasureNote[] } | { kind: "none" };
+const ERASURE_NOTES: readonly ErasureNote[] = ["discord-roles", "email-platform"];
+
+export async function findTokenState(store: Pick<Store, "sid">, token: string): Promise<FindTokenState> {
+  if (!FIND_TOKEN.test(token) || !isRedisConfigured()) return { kind: "none" };
+  const [raw] = await redisPipeline([["GET", findKey(token)]]);
+  if (typeof raw !== "string" || !raw) return { kind: "none" };
+  try {
+    const value = JSON.parse(raw) as { s?: unknown; e?: unknown; erased?: unknown; r?: unknown; n?: unknown };
+    if (value.s !== store.sid) return { kind: "none" };
+    if (value.erased === true && Number.isSafeInteger(value.r) && (value.r as number) >= 0 && Array.isArray(value.n) && value.n.every((n) => ERASURE_NOTES.includes(n as ErasureNote))) {
+      return { kind: "erased", records: value.r as number, notes: value.n as ErasureNote[] };
+    }
+    return typeof value.e === "string" && value.e ? { kind: "address", email: value.e } : { kind: "none" };
+  } catch {
+    return { kind: "none" };
+  }
+}
+
+/**
+ * After an erasure whose token's delete did not answer (Claude 3's two LOWs on #4868): the token's value is replaced by
+ * the erasure's answer, without the address, for the rest of the hour the token could open the page. The address is
+ * gone from it either way, a press again answers what the erasure answered, and the erasure is never run twice for it.
+ * Read exactly: anything but OK throws UnknownReplyError, and the erasure is said not finished, as before.
+ */
+export async function keepErasedAnswer(store: Pick<Store, "sid">, token: string, answer: { records: number; notes: ErasureNote[] }): Promise<void> {
+  if (!FIND_TOKEN.test(token) || !isRedisConfigured() || !store.sid) throw new UnknownReplyError("a buyer page's search token replaced");
+  const value = JSON.stringify({ s: store.sid, erased: true, r: answer.records, n: answer.notes.filter((n) => ERASURE_NOTES.includes(n)) });
+  const set = repliesFor(await redisPipeline([["SET", findKey(token), value, "EX", FIND_SECONDS]]), 1)?.[0];
+  if (set !== "OK") throw new UnknownReplyError("a buyer page's search token replaced");
 }
 
 /** The address a search's token stands for, when it was made on this store and has not run out. */

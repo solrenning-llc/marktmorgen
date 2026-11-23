@@ -190,7 +190,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/creator-invites.ts", how: "account", what: "Which store invited which store" },
   { file: "lib/team.ts", how: "account", what: "A store's team and invitations" },
   { file: "lib/pipeline-access.ts", how: "account", what: "What each teammate may do with each sales pipeline, under the teammate's sign-in address; it goes when they leave the team" },
-  { file: "lib/store.ts", how: "account", what: "Which stores an account owns, and, while a Stripe account is being opened for a store, the email address and name it was asked with, gone once the account is written; 29 days after the first try it is no longer used, and it is dropped the next time the store is saved, or with the store" },
+  { file: "lib/store.ts", how: "account", what: "Which stores an account owns, and, while a Stripe account is being opened for a store, the email address and name it was asked with, gone once the account is written; 29 days after the first try it is no longer used, and it is dropped the next time the store is saved, or with the store; of an attempt replaced or no longer used, only its id, country and dates stay with the store, never the address or the name" },
   { file: "lib/closed-store-data.ts", how: "account", what: "Reads which stores an account owns (lib/store.ts's set), never writes it, before the closing walk deletes what a closing store's Stripe account names" },
   { file: "lib/account-exists.ts", how: "account", what: "Reads, never writes, whether an address already owns a store, from the same records lib/store.ts keeps, when a team invitation is taken" },
   { file: "lib/phone-alerts.ts", how: "account", what: "The creator's own phone, and one-way marks of events already told" },

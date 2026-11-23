@@ -968,6 +968,31 @@ function withAttemptOfAnyAge(store: Store, raw: string): Store {
   }
   return kept ? { ...store, stripeConnecting: kept } : store;
 }
+const REPLACED_DAY = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/;
+/** The replaced or lapsed attempts kept on a record, each read whole (an entry in another shape is not one), newest last. */
+function readReplaced(raw: unknown): StripeConnectReplaced[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((v): v is StripeConnectReplaced => Boolean(v) && typeof v === "object" && !Array.isArray(v) &&
+    typeof v.id === "string" && CONNECT_ATTEMPT_ID.test(v.id) && typeof v.country === "string" && /^[a-z]{2}$/.test(v.country) &&
+    typeof v.at === "string" && REPLACED_DAY.test(v.at) && typeof v.until === "string" && REPLACED_DAY.test(v.until))
+    .map((v) => ({ id: v.id, country: v.country, at: v.at, until: v.until }))
+    .slice(-STRIPE_CONNECT_REPLACED_KEPT);
+}
+/** `list` with `attempt` added as replaced or lapsed at `until` (once per id), the newest STRIPE_CONNECT_REPLACED_KEPT kept. */
+function withReplaced(list: StripeConnectReplaced[], attempt: Pick<StripeConnecting, "id" | "country" | "at">, until: string): StripeConnectReplaced[] {
+  if (list.some((r) => r.id === attempt.id)) return list;
+  return [...list, { id: attempt.id, country: attempt.country, at: attempt.at, until }].slice(-STRIPE_CONNECT_REPLACED_KEPT);
+}
+/**
+ * The replaced attempts a record keeps, with its own attempt added when it has lapsed (past STRIPE_CONNECT_REUSE_SECONDS,
+ * so read as none): the next save drops the attempt's address and name and keeps its id (Claude 1 2as's LOW 2 on #5095).
+ */
+function replacedOf(value: { stripeConnecting?: unknown; stripeConnectReplaced?: unknown }): StripeConnectReplaced[] {
+  const kept = readReplaced(value.stripeConnectReplaced);
+  const any = readConnecting(value.stripeConnecting, Date.now(), true);
+  if (!any || readConnecting(value.stripeConnecting)) return kept;
+  return withReplaced(kept, any, new Date(Date.parse(any.at) + STRIPE_CONNECT_REUSE_SECONDS * 1000).toISOString());
+}
 function sinceOf(when: string | undefined, now: number): number {
   const at = when ? Date.parse(when) : NaN;
   return Number.isFinite(at) ? now - at : Infinity;
@@ -1167,6 +1192,7 @@ function parseStore(raw: unknown): Store | null {
           ? value.stripeAccountId
           : null,
       ...(readConnecting(value.stripeConnecting) ? { stripeConnecting: readConnecting(value.stripeConnecting) } : {}),
+      ...(replacedOf(value).length ? { stripeConnectReplaced: replacedOf(value) } : {}),
       stripeChargesEnabled: value.stripeChargesEnabled === true,
       stripeCheckedAt: value.stripeCheckedAt ?? "",
       stripeCustomerId:
@@ -2812,6 +2838,7 @@ export async function beginStripeConnect(
     if ((await erasingSince(storeRef(store))) !== null) return null;
     const pressed = new Date(now).toISOString();
     const open = store.stripeConnecting;
+    let replaced = store.stripeConnectReplaced ?? [];
     if (open && connectingReusable(store, now)) {
       if (open.country === ask.country) {
         const again: StripeConnecting = { ...open, pressedAt: pressed, sends: open.sends + 1 };
@@ -2820,6 +2847,8 @@ export async function beginStripeConnect(
       }
       if (connectingHolds(store, now)) return { other: open };
       console.error("a Stripe account attempt in another country, pressed over a day ago, is replaced", store.sid);
+      // Its id stays on the record, the only way to its account's idempotency key (Claude 1 2as's LOW 2 on #5095).
+      replaced = withReplaced(store.stripeConnectReplaced ?? [], open, pressed);
     } else if (open) {
       console.error("a Stripe account attempt past Stripe's idempotency window is replaced", store.sid);
     }
@@ -2832,7 +2861,7 @@ export async function beginStripeConnect(
       pressedAt: pressed,
       sends: 1,
     };
-    await save({ ...store, stripeConnecting: attempt });
+    await save({ ...store, stripeConnecting: attempt, ...(replaced.length ? { stripeConnectReplaced: replaced } : {}) });
     return attempt;
   });
 }

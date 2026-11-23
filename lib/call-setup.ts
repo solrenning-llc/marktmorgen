@@ -248,11 +248,11 @@ export const MEET_ACCESS_UNCONFIRMED: Record<MeetProvider, { company: string; le
 export const MEET_ACCESS_SHARED: Record<MeetProvider, { lead: string; rest: string }> = {
   google: {
     lead: "We disconnected your Google account here and kept its access on at Google.",
-    rest: "Another of your stores, or a team calendar on Marktmorgen, still uses the same Google account, and removing the access at Google would disconnect that one too. It is given back when the last one is disconnected.",
+    rest: "Another store or a team calendar on Marktmorgen still uses the same Google account, and removing the access at Google would disconnect that one too. It is given back when the last one is disconnected.",
   },
   zoom: {
     lead: "We disconnected your Zoom account here and kept its access on at Zoom.",
-    rest: "Another of your stores on Marktmorgen still uses the same Zoom account, and removing the access at Zoom would disconnect that one too. It is given back when the last one is disconnected.",
+    rest: "Another store on Marktmorgen still uses the same Zoom account, and removing the access at Zoom would disconnect that one too. It is given back when the last one is disconnected.",
   },
 };
 

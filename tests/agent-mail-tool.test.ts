@@ -25,6 +25,13 @@ part("the tool's own tests");
 const r = spawnSync(process.execPath, ["tooling/agent-mail/agent-mail.test.mjs", "tooling/agent-mail/agent-mail.mjs"], { encoding: "utf8", timeout: 540_000 });
 const total = /(\d+) checks, all passing\./.exec(r.stdout ?? "")?.[1];
 is("agent-mail.test.mjs passes", r.status === 0 && Boolean(total), true);
+// On a failure, the CI log shows which of the tool's checks failed and why, not only that the suite did (the queue run
+// of #5147 on 23/11/2026 said "259 checks, 1 failing" with no name).
+if (!(r.status === 0 && total)) {
+  const linhas = String(r.stdout ?? "").split("\n");
+  const falhas = linhas.flatMap((l, i) => (/^\s+FAIL\s/.test(l) ? linhas.slice(i, i + 4) : []));
+  console.log(["the tool's failing checks:", ...falhas.slice(0, 60), String(r.stderr ?? "").slice(0, 2000)].join("\n"));
+}
 if (r.status !== 0) console.log(`${r.stdout ?? ""}${r.stderr ?? ""}`.slice(-4000));
 is("and runs at least 45 checks", Number(total ?? 0) >= 45, true);
 

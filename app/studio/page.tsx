@@ -245,6 +245,8 @@ import { LOCKED_LIST } from "@/lib/locked-words";
 import { RecoveryAddressManager, RecoveryAddressUnread } from "@/components/recovery-address-manager";
 import { hideAddress, recoveryAddress } from "@/lib/recovery-address";
 import { ResendPurchase } from "@/components/resend-purchase";
+import { SalesBulkActions } from "@/components/sales-bulk-actions";
+import { bulkRowOf } from "@/lib/sales-bulk-rules";
 import { LeaveTeam } from "@/components/team-manager";
 import { productSegment } from "@/lib/product-slug";
 import { SharePanel } from "@/components/share-panel";
@@ -394,6 +396,11 @@ const META_NOTICES: Record<string, { title: string; body: string }> = {
   removed: {
     title: "Nothing was connected",
     body: "While this was connecting, Meta told us to delete this Facebook login's data. So nothing was kept, and the permission was given back to Meta. Connect again if you still want your ads read.",
+  },
+  // The store's closing began while Meta answered (lib/meta-ads.ts finishMeta): nothing of the connection was kept.
+  closed: {
+    title: "Nothing was connected",
+    body: "This store is closing, so Meta was not connected to it. Nothing was kept.",
   },
   refused: {
     title: "Meta did not finish connecting",
@@ -3637,6 +3644,8 @@ export default async function StudioPage({
                         </li>
                       ))}
                     </ul>
+                    {/* 767 [STN14] unit 4: the same orders, chosen in a table, with what may be done to many at once. */}
+                    <SalesBulkActions sales={sold.sales.map(bulkRowOf)} canLabel={may("send")} canExport={may("export")} />
                     <p className="mt-4 text-sm text-ink-soft">
                       Up to {ORDERS_PAGE_SIZE} matching recent orders. For the full
                       history, open your Stripe dashboard.

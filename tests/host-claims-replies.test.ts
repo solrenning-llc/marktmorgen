@@ -160,10 +160,17 @@ async function main(): Promise<void> {
     const claim = newClaimId();
     const both = [host, { ...host, id: HOST2 }];
     await claimHosts({ hosts: both, start, end, claim, until: now + 40 * 60_000, ref: "callsA:p1", now });
-    // The first pipeline (both hosts) is lost and does not land; every HSET for host 1 alone fails too.
-    const sent = scripted(async (commands, run) =>
-      commands[0]?.[0] === "HSET" && (commands.length > 1 || commands[0][1] === claimsKey(HOST)) ? [] : run(),
-    );
+    // The first pipeline (both hosts' writes and lifetimes) is lost and does not land; after it, every HSET for host 1
+    // fails too, whatever pipeline carries it (the retry is one pipeline for every host, #5285 row #3246), while the
+    // others in the same pipeline land and are answered.
+    const sent = scripted(async (commands, run) => {
+      if (commands[0]?.[0] !== "HSET") return run();
+      if (commands.some((c) => c[0] === "PTTL")) return [];
+      const landed = commands.filter((c) => c[1] !== claimsKey(HOST));
+      const replies = landed.length ? await real(landed) : [];
+      let k = 0;
+      return commands.map((c) => (c[1] === claimsKey(HOST) ? "lost" : replies[k++]));
+    });
     const logs = await logged(() => confirmClaim([HOST, HOST2], claim, start, end, "callsA:p1"));
     is("confirmClaim throws UnknownReplyError", logs.error instanceof UnknownReplyError, true);
     is("the 2nd host's write is retried once", sent.filter((v) => v === "HSET").length, 4);
@@ -186,9 +193,20 @@ async function main(): Promise<void> {
   part("(e) a group booking: the 1st host's PEXPIRE and its retry fail; the 2nd host still gets its lifetime, then the call throws");
   {
     redis.clear();
-    scripted(async (commands, run) =>
-      commands[0]?.[0] === "PEXPIRE" && (commands.length > 1 || commands[0][1] === claimsKey(HOST)) ? [] : run(),
-    );
+    // The first PEXPIRE pipeline (both hosts) is lost and does not land; after it, every PEXPIRE for host 1 fails,
+    // whatever pipeline carries it (the retry is one pipeline for every host, #5285 row #3246), while the others land.
+    let firstSet = true;
+    scripted(async (commands, run) => {
+      if (commands[0]?.[0] !== "PEXPIRE") return run();
+      if (firstSet) {
+        firstSet = false;
+        return [];
+      }
+      const landed = commands.filter((c) => c[1] !== claimsKey(HOST));
+      const replies = landed.length ? await real(landed) : [];
+      let k = 0;
+      return commands.map((c) => (c[1] === claimsKey(HOST) ? "lost" : replies[k++]));
+    });
     const logs = await logged(() => confirmClaim([HOST, HOST2], newClaimId(), start, end, "callsA:p1"));
     is("confirmClaim throws UnknownReplyError", logs.error instanceof UnknownReplyError, true);
     const [ttl] = await real([["PTTL", claimsKey(HOST2)]]);

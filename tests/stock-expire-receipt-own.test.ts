@@ -8,7 +8,7 @@
  * Synthetic only: the Redis stub and a mocked Stripe whose expire answer can name another session.
  */
 import { parseProduct } from "@/lib/catalog";
-import { releaseCartStockHolds, releaseStockHold, stockLeft, withCartStockHolds } from "@/lib/stock";
+import { releaseCartStockHolds, releaseStockHold, stockLeft, stockLeftKnown, withCartStockHolds } from "@/lib/stock";
 import type { Listing, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -93,10 +93,13 @@ async function main(): Promise<void> {
   readStatus = "expired";
   is("a read naming another, expired checkout lets none of this one's units go", await stockLeft(creator, e), 2);
   is("and its hold stays", (await field(e, "cs_test_expireownread001")) !== null, true);
+  // Claude 1's NIT on #5363 @9e01e874f8: the count is not known, so no refusal is ever decided on it (stockLeftKnown).
+  is("and the count is said not known", await stockLeftKnown(creator, e), null);
   await lapsed("cs_test_expireownread001");
   readStatus = "complete";
   is("a read naming another, paid checkout does not mark this one sold either: the unit stays held", await stockLeft(creator, e), 2);
   is("and its hold stays, not written as a sale", (await field(e, "cs_test_expireownread001")) !== null, true);
+  is("and the count is said not known either", await stockLeftKnown(creator, e), null);
   readFor = null;
   readStatus = "expired";
   is("control: its own expired checkout lets the unit go", await stockLeft(creator, e), 3);

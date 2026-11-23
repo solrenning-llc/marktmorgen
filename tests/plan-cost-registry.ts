@@ -1386,7 +1386,6 @@ export function teamLogFenceUsd(tier: Tier): number {
   return (STORE_ALLOWANCES[tier].studio + ESSENTIAL_PER_DAY * DAY_WINDOWS) * TEAM_LOG_LINES_PER_STUDIO_REQUEST * TEAM_LOG_FENCE_COMMANDS * COMMAND;
 }
 
-/** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
 /**
  * The commands of one integration (a call out) as UNIT_COST.integration prices them: an affiliate kit's fenced
  * counters and content reads (KIT_COMMANDS_MOST, Codex P-20261120-1412) are the most any integration's own commands
@@ -1395,6 +1394,7 @@ export function teamLogFenceUsd(tier: Tier): number {
  */
 export const INTEGRATION_UNIT_COMMANDS = Math.max(10, KIT_COMMANDS_MOST) + TAKE_COMMANDS;
 
+/** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
 export const UNIT_COST: Record<AllowanceKind, number> = {
   // A studio request at its shape, its twenty commands and fifty kilobytes through the database, and lockedUntil's
   // three commands more in the "*" state, taken as if every load paid them (review of #2556 at 0e308316).

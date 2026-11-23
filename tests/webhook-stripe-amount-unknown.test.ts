@@ -65,6 +65,12 @@ async function main() {
     ["its amount null", { amount_total: null }],
     ["its amount as text", { amount_total: "4900" }],
     ["its money missing", { currency: undefined }],
+    // Codex G-20261119-0600 (#5010 row 97): the discount is sent once and for good, so it is read exactly too.
+    ["its discount details missing", { total_details: undefined }],
+    ["its discount missing", { total_details: {} }],
+    ["its discount as text", { total_details: { amount_discount: "0" } }],
+    ["its discount negative", { total_details: { amount_discount: -1 } }],
+    ["its discount fractional", { total_details: { amount_discount: 0.5 } }],
   ];
   for (const [what, change] of checkoutCases) {
     const store = await setup(["sale.completed"]);
@@ -101,6 +107,18 @@ async function main() {
     await watchStripe(Date.now() + 10_000);
     const sent = (await recentMessages(store, "refund.issued", 10)).map((m) => m.data as Record<string, unknown>);
     is(`${what}: only the whole one is sent`, sent.map((d) => [d.charge, d.amount_refunded_cents, d.amount_cents, d.currency]), [["ch_GoodRefund", 1000, 4900, "eur"]]);
+  }
+  // Codex G-20261119-0604 (#5010 row 96): the previous refunded total, when Stripe gives one, is read exactly and is
+  // never above the new total; an unreadable one waits, never sent as a wrong amount.
+  for (const [what, before] of [["text", "0"], ["negative", -1], ["fractional", 0.5], ["larger than the new total", 1001]] as const) {
+    const store = await setup(["refund.issued"]);
+    events = [
+      { id: "evt_BadRefund", type: "charge.refunded", created: 1_790_002_100, data: { object: refund("ch_BadRefund"), previous_attributes: { amount_refunded: before } } },
+      { id: "evt_GoodRefund", type: "charge.refunded", created: 1_790_002_000, data: { object: refund("ch_GoodRefund"), previous_attributes: { amount_refunded: 0 } } },
+    ];
+    await watchStripe(Date.now() + 10_000);
+    const sent = (await recentMessages(store, "refund.issued", 10)).map((m) => m.data as Record<string, unknown>);
+    is(`its previous refunded amount is ${what}: only the whole one is sent`, sent.map((d) => [d.charge, d.amount_refunded_cents]), [["ch_GoodRefund", 1000]]);
   }
 
   part("A dispute");

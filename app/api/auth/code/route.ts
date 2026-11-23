@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
-import { TWO_STEP_COOKIE, enterLocked, finishSignIn, sendRescue, twoStepOn } from "@/lib/two-step";
+import { TWO_STEP_COOKIE, enterLocked, finishSignIn, sendRescue, twoStepGeneration } from "@/lib/two-step";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { pendingRemoval } from "@/lib/passkeys";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -81,16 +81,17 @@ export async function POST(request: NextRequest) {
   try {
     // Opened with its second step: the app's code or a recovery code (lib/auth.ts SecondStep).
     sessionId = await openSession(answer.email, answer.how);
-    // Turned off between the code's check and this session: turning it off closes what it opened
-    // (lib/auth.ts dropSecondStep), so this one is closed too, and the person logs in again.
-    // Unreadable (CX-123 rule 24): not known still on, so the session is closed too, and the person is told so.
-    const stillOn = await twoStepOn(answer.email).catch(() => {
+    // Turned off or replaced between the code's check and this session (#4179): the code proved the record it was
+    // checked against, and only that one. Turning it off or setting up a new app closes what the old one opened
+    // (lib/auth.ts dropSecondStep), so this one is closed too, and the person logs in again with the app they have now.
+    // Unreadable (CX-123 rule 24): not known still the same, so the session is closed too, and the person is told so.
+    const now = await twoStepGeneration(answer.email).catch(() => {
       console.error("reading two-step login after a right code failed");
-      return null;
+      return undefined;
     });
-    if (stillOn !== true) {
+    if (now !== answer.generation) {
       await endSession(sessionId);
-      return away(stillOn === null ? "/signin?status=login-unknown" : "/signin?status=expired");
+      return away(now === undefined ? "/signin?status=login-unknown" : "/signin?status=expired");
     }
     const previous = request.cookies.get(SESSION_COOKIE)?.value;
     if (previous && previous !== sessionId) await endSession(previous);

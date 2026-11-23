@@ -23,7 +23,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { MAX_PRODUCTS, MAX_PRODUCT_BYTES, type Product, productIds, readProducts } from "@/lib/catalog";
 import { type Store, accountStores, addCopiedProducts, appendSitePages, applyCopiedSetup, storeForId, storeRef } from "@/lib/store";
-import { readAboutExact, writeAbout, MAX_ABOUT_LENGTH } from "@/lib/product-about";
+import { readAboutExact, MAX_ABOUT_LENGTH } from "@/lib/product-about";
+import { writeStoreAbout } from "@/lib/product-about-live";
 import { readPage, writePage } from "@/lib/sales-page-store";
 import { MAX_PAGE_BYTES, type SalesPage } from "@/lib/sales-page";
 import { MAX_SITE_PAGES, type SitePage, siteKey, slugProblem } from "@/lib/site-page-rules";
@@ -334,7 +335,7 @@ export async function copyStep(from: Store, to: Store, copyId: string, setup: bo
       for (const product of read) {
         const id = products(product.id);
         const text = abouts.get(product.id) ?? "";
-        if (text) await writeAbout(to.statsId, id, text, fresh);
+        if (text) await writeStoreAbout(fresh, id, text);
         const page = pages.get(product.id);
         if (page) await writePage(to.statsId, id, copiedPage(page, products, forms, blocksLeft), fresh);
       }

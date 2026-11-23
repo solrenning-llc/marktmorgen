@@ -195,8 +195,10 @@ async function main(): Promise<void> {
   {
     const real = redis.pipeline.bind(redis);
     let sent = 0;
+    let commands: (string | number)[][] = [];
     redis.pipeline = (async (batch: (string | number)[][]) => {
       sent += batch.length;
+      commands.push(...batch);
       return real(batch);
     }) as typeof redis.pipeline;
     try {
@@ -205,8 +207,17 @@ async function main(): Promise<void> {
       const line = await dueMembers(clock + 60_000, DISCORD_DUE_PER_RUN);
       is("the line handed out the three (and whoever else is due)", ["sid-count-0", "sid-count-1", "sid-count-2"].every((sid) => line.some((p) => p.sid === sid)), true);
       is("one read of the line and one lease, whatever its length (a third command only for entries that are nobody)", sent <= 3, true);
-      sent = 0;
-      await sweepDiscord(Date.now() + 30_000, clock + DUE_LEASE_SECONDS * 1_000 + 120_000);
+      // The registry's per-person claim (Claude 3 local's LOW 1 on #4239): besides the line's at most 3, at most three
+      // commands more a person than the check's own work: a ZREM of dropDue and a ZADD of checkSoon on the line, and a
+      // second readMember of a rejoin.
+      commands = [];
+      const swept = await sweepDiscord(Date.now() + 30_000, clock + DUE_LEASE_SECONDS * 1_000 + 120_000);
+      const people = Object.values(swept).reduce((sum, n) => sum + n, 0);
+      const onLine = commands.filter((c) => c[1] === "nl:dc:due").length;
+      const memberReads = commands.filter((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:dc:mem:")).length;
+      is("the sweep checked the people handed out", people >= 3, true);
+      is("on the line: its read and lease, then at most a ZREM and a ZADD a person", onLine <= 3 + 2 * people, true);
+      is("at most two member reads a person (the check's and a rejoin's)", memberReads <= 2 * people, true);
     } finally {
       redis.pipeline = real as typeof redis.pipeline;
     }

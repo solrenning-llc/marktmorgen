@@ -129,6 +129,13 @@ async function main() {
   redis.pipeline = real;
   is("nothing is revoked on an unread index", revokes, 0);
   is("and the disconnect is never told the grant was given back", unread instanceof Error || (unread as Outcome).providerAccessRemoved === false, true);
+  // Claude 5 iZByNH's LEVE 2 on #5476 (7115106748): whether another store or host uses the grant is unknown there, so
+  // the connection is not deleted and the creator is never told to remove at Google what another connection may use;
+  // the disconnect throws, as the damaged path does, and a retry decides once the count reads.
+  is("the disconnect throws unknown, never a remove-it-yourself answer", unread instanceof Error ? unread.name : "answered", "UnknownReplyError");
+  is("and nothing is deleted", typeof (await redis.pipeline([["GET", storeKey("google", A)]]))[0], "string");
+  const retried = await disconnectFor(A, "google");
+  is("a retry that reads gives the grant back once and says so", [revokes, retried.providerAccessRemoved, retried.sharedGrantKept ?? false], [1, true, false]);
 
   done();
 }

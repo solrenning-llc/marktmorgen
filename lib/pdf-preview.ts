@@ -46,6 +46,9 @@ import { type DataStore, dataUsed, keepFor } from "@/lib/store-data";
 import { contentRoomFor } from "@/lib/store-data-rules";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 
+/** The caller keeps a record only while its exact store scope is still live. */
+export type PreviewKeeper = (key: string, value: string, seconds: number) => Promise<"kept" | "gone" | "unknown">;
+
 /** The most pages a preview may hold. */
 export const MAX_PREVIEW_PAGES = 10;
 /** Kept as long as a product page is, in effect: a year, made again if lost. */
@@ -94,7 +97,7 @@ export async function firstPages(bytes: Uint8Array, pages: number): Promise<Uint
  * Every Redis reply is read in its exact shape (rule 24): anything else is
  * unknown and means no preview right now, with no file read and no room taken.
  */
-export async function previewCopy(file: ProductFile, pages: number, store: DataStore, meter: CopyMeter): Promise<ProductFile | null> {
+export async function previewCopy(file: ProductFile, pages: number, store: DataStore, meter: CopyMeter, keep: PreviewKeeper): Promise<ProductFile | null> {
   if (!previewable(file) || pages < 1) return null;
   const key = previewKey(file, pages);
   try {
@@ -140,8 +143,10 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
     if ((await writeWithinStorage(file, pathname, bytes, "application/pdf", store, meter)) !== "kept") return null;
     const copy: ProductFile = { pathname, name, bytes: bytes.byteLength, contentType: "application/pdf", addedAt: new Date().toISOString() };
     if (isRedisConfigured()) {
-      const saved = repliesFor(await redisPipeline([["SET", key, JSON.stringify(copy), "EX", PREVIEW_SECONDS]]), 1);
-      if (!saved || saved[0] !== "OK") throw new UnknownReplyError("keeping a preview's record");
+      // This is after the file write: deletion may have passed this key while the preview was being made.
+      const saved = await keep(key, JSON.stringify(copy), PREVIEW_SECONDS);
+      if (saved === "gone") return null;
+      if (saved !== "kept") throw new UnknownReplyError("keeping a preview's record");
     }
     return copy;
   } catch (error) {

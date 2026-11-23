@@ -23,7 +23,8 @@ import { dataBytes } from "@/lib/store-data-rules";
 /** Room for a proper sales page, and still something a person reads. */
 export const MAX_ABOUT_LENGTH = 5_000;
 
-const aboutKey = (statsId: string, productId: string) => `nl:product:about:${statsId}:${productId}`;
+/** The key a product's description is kept under (lib/product-about-live.ts writes it fenced). */
+export const aboutKey = (statsId: string, productId: string) => `nl:product:about:${statsId}:${productId}`;
 
 /** Normalises what was typed: line endings, trailing space, and the length. */
 export function cleanAbout(raw: string, max = MAX_ABOUT_LENGTH): string {

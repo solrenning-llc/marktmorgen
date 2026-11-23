@@ -86,7 +86,7 @@ async function main(): Promise<void> {
   redis.run(["SET", owner, JSON.stringify({ ...record, statsId: "s_another_store_0001" })]);
   await nothingWritten("another store's record under the same key", legacy, () => noteCheckoutTrouble(legacy, refused(), NOW));
   redis.run(["SET", owner, "not json"]);
-  await nothingWritten("a record that does not parse", legacy, () => noteCheckoutTrouble(legacy, refused(), NOW), "counted");
+  await nothingWritten("a record that does not parse", legacy, () => noteCheckoutTrouble(legacy, refused(), NOW));
 
   part("An answer in another shape never sends the email");
   const lost = await shop("trouble-lost@example.com", "troublelost");

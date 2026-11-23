@@ -91,8 +91,9 @@ export async function noteCheckoutTrouble(store: Store, error: unknown, now = Da
     "EVAL", COUNT_IF_STORE_LIVE, 4, fence.live, fence.erasing, key(store.statsId), mailKey(store.statsId, day),
     fence.field, fence.statsId, fence.ref, day, last, KEEP_SECONDS, claimValue(now), MAIL_MARK_SECONDS, tell ? "1" : "0",
   ]]), 1)?.[0];
-  // Gone, moved or erasing: nothing was written, and nobody is told.
-  if (answer === -1) return "skipped";
+  // Gone, moved or erasing (-1), or an owner's record that does not parse (-2): nothing was written, and nobody is told
+  // (Claude 7 xAF's LEVE on #5188: -2 said "counted" though nothing was counted).
+  if (answer === -1 || answer === -2) return "skipped";
   // Anything but the exact 2 never sends: an answer in another shape may hide a mark taken, and the email goes at
   // most once a day, never twice (rule 24).
   if (answer !== 2) return "counted";

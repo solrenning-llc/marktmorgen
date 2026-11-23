@@ -577,12 +577,18 @@ export async function disconnectHostGoogle(store: Pick<Store, "statsId">, email:
 
 /**
  * As disconnectHostGoogle, and whether the grant was kept at Google because a store or another team calendar here
- * still uses the same Google account (issue #4011, `sharedGrantKept`), for the page to say so.
+ * still uses the same Google account (issue #4011, `sharedGrantKept`), for the page to say so. The store's team id
+ * and owner, when given (the route has them), are the other hosts whose calendar may use that account without being
+ * listed (Claude 5 zr's LEVE on #5476 @d882bc7424); without them, only the owner the connection was kept for is read.
  */
-export async function disconnectHostGoogleFor(store: Pick<Store, "statsId">, email: string): Promise<{ providerAccessRemoved: boolean; sharedGrantKept: boolean }> {
+export async function disconnectHostGoogleFor(
+  store: Pick<Store, "statsId"> & Partial<Pick<Store, "sid" | "email">>,
+  email: string,
+): Promise<{ providerAccessRemoved: boolean; sharedGrantKept: boolean }> {
   if (!store.statsId) return { providerAccessRemoved: true, sharedGrantKept: false };
   const host = hostId(email);
-  const { providerAccessRemoved, sharedGrantKept } = await disconnectFor(store.statsId, "google", host);
+  const hosts = store.sid || store.email ? { sid: store.sid ?? "", email: store.email ?? "" } : undefined;
+  const { providerAccessRemoved, sharedGrantKept } = await disconnectFor(store.statsId, "google", host, hosts);
   const config = await readConfig(host);
   if (config) await writeConfig(host, { ...config, read: [], write: "", source: config.source === "google" ? "none" : config.source });
   await forgetReadings(host);

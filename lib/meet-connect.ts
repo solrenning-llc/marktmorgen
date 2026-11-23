@@ -195,13 +195,17 @@ return 1`;
  * have, as lib/team-booking.ts possibleHosts counts them: its owner now, the owner it was connected for, and its team
  * now (MAX_TEAM at most). Each one found on this account is listed in the index (LIST_HOST, a repair, kept or not:
  * the grant is kept either way). Read exactly: an unknown team or connection reply throws UnknownReplyError, before
- * anything is deleted or given back. Commands, only on a store's Google disconnect that finds nobody else listed: the
- * team's GET (readTeamMembers, for a store with a team id), one MGET of at most MAX_TEAM + 2 host connections, and, in
- * one more round trip, one EVAL a host found.
+ * anything is deleted or given back. A team host's own grant is read the same way (Claude 5 zr's LEVE on #5476
+ * @d882bc7424: hosts A and B on one Google account, both kept before hosts were listed, and A's disconnect or account
+ * change gave back the grant B's calendar uses), with `self`, that host, left out: its own connection is the one
+ * leaving, never another use. Hosts are shared by every store, so only the hosts of the store the host acts from are
+ * read; without that store, only the owner the connection was kept for. Commands, only on a Google grant given back
+ * that the index finds nobody else on: the team's GET (readTeamMembers, for a store with a team id), one MGET of at
+ * most MAX_TEAM + 2 host connections, and, in one more round trip, one EVAL a host found.
  */
-async function unlistedHostUses(accountId: string, store: Pick<Store, "sid" | "email"> | undefined, ownerThen: string): Promise<boolean> {
+async function unlistedHostUses(accountId: string, store: Pick<Store, "sid" | "email"> | undefined, ownerThen: string, self = ""): Promise<boolean> {
   const team = store?.sid ? await readTeamMembers(store.sid) : [];
-  const hosts = [...new Set([store?.email ?? "", ownerThen, ...team.map((m) => m.email)].filter((e) => e.trim()).map(hostId))];
+  const hosts = [...new Set([store?.email ?? "", ownerThen, ...team.map((m) => m.email)].filter((e) => e.trim()).map(hostId))].filter((h) => h !== self);
   if (!accountId || !hosts.length) return false;
   const keys = hosts.map((h) => connKey("", "google", h));
   const read = repliesFor(await redisPipeline([["MGET", ...keys]]), 1);
@@ -221,9 +225,10 @@ async function unlistedHostUses(accountId: string, store: Pick<Store, "sid" | "e
 }
 
 /**
- * How many connections are left on the account once this one left its index (leaveAccount), with a store's Google
- * connection also counting a team host's calendar on that account that the index does not list (unlistedHostUses);
- * null when the count does not read.
+ * How many connections are left on the account once this one left its index (leaveAccount), with a Google connection
+ * also counting a team host's calendar on that account that the index does not list (unlistedHostUses): a store's, and
+ * a team host's own, that host itself left out (Claude 5 zr's LEVE on #5476 @d882bc7424). Null when the count does not
+ * read.
  */
 async function leftOnAccount(
   statsId: string,
@@ -234,16 +239,19 @@ async function leftOnAccount(
   ownerThen: string,
 ): Promise<number | null> {
   const others = await leaveAccount(provider, accountId, memberOf(statsId, host));
-  if (others !== 0 || host || provider !== "google") return others;
-  return (await unlistedHostUses(accountId, store, ownerThen)) ? 1 : 0;
+  if (others !== 0 || provider !== "google") return others;
+  return (await unlistedHostUses(accountId, store, ownerThen, host)) ? 1 : 0;
 }
 
 /**
  * Whether anything here other than `self` still uses this account's grant, before it is given back without a
  * disconnect (a store reconnecting with another account, a keep that lost its lock, a flow that expired): the index
- * (grantStillUsed), and, for a store's Google grant the index finds nobody else on (not a host's own, not Zoom), a team
- * host's calendar the index does not list (unlistedHostUses, which lists the one it finds; Claude 3 wSUb3's MEDIUM on
- * #5476, 7116841447). `store` is the store's team id and its owner now; `ownerThen` the owner the grant was kept for.
+ * (grantStillUsed), and, for a Google grant the index finds nobody else on (not Zoom), a team host's calendar the index
+ * does not list (unlistedHostUses, which lists the one it finds; Claude 3 wSUb3's MEDIUM on #5476, 7116841447). A team
+ * host's own grant counts them too (Claude 5 zr's LEVE on #5476 @d882bc7424): with `self` that host (h:<host>), its own
+ * connection is left out; with `self` empty (a consent that kept nothing), the host's own earlier connection still
+ * counts, since it still uses the grant. `store` is the store's team id and its owner now (for a host, the store it
+ * acts from); `ownerThen` the owner the grant was kept for.
  * Commands, only when the index finds nobody: the team's GET (a store with a team id), one MGET, one EVAL a host
  * found. Null when either cannot be read (logged): the grant is then kept, never given back on an unread answer.
  */
@@ -251,14 +259,13 @@ async function grantUsedElsewhere(
   provider: MeetProvider,
   accountId: string,
   self: string,
-  host: string,
   store: Pick<Store, "sid" | "email"> | undefined,
   ownerThen: string,
 ): Promise<boolean | null> {
   const used = await grantStillUsed(provider, accountId, self);
-  if (used !== false || host || provider !== "google") return used;
+  if (used !== false || provider !== "google") return used;
   try {
-    return await unlistedHostUses(accountId, store, ownerThen);
+    return await unlistedHostUses(accountId, store, ownerThen, self.startsWith("h:") ? self.slice(2) : "");
   } catch (error) {
     console.error("reading the team hosts' meeting connections before giving a grant back failed; the grant is kept", error);
     return null;
@@ -276,7 +283,7 @@ async function giveBackUnlessShared(
   host = "",
   store?: Pick<Store, "sid" | "email">,
 ): Promise<{ removed: boolean; shared: boolean }> {
-  const used = await grantUsedElsewhere(c.provider, c.account.id, memberOf(statsId, host), host, store, c.owner.email);
+  const used = await grantUsedElsewhere(c.provider, c.account.id, memberOf(statsId, host), store, c.owner.email);
   if (used !== false) return { removed: false, shared: used === true };
   return { removed: await giveBack(statsId, c, host), shared: false };
 }
@@ -553,9 +560,9 @@ export async function finishConsent(
     owner: { email: string; handle: string };
     host?: string;
     /**
-     * The store's team id (beginConsent's sid; takeConsent's `sid`): a store's Google grant given back without a
-     * disconnect then also counts its team hosts' calendars the index does not list (grantUsedElsewhere). Without it,
-     * only the owner's are read.
+     * The store's team id (beginConsent's sid; takeConsent's `sid`): a store's or a team host's Google grant given
+     * back without a disconnect then also counts its team hosts' calendars the index does not list
+     * (grantUsedElsewhere). Without it, only the owner's are read.
      */
     sid?: string;
     /** When the consent flow began (beginConsent; takeConsent's `at`), in milliseconds. */
@@ -579,7 +586,7 @@ export async function finishConsent(
     if (error instanceof LockBusyError || error instanceof PriorConnectionUnreadError) {
       // Given back only when nothing here uses that account (issue #4011): a revoke ends the grant every connection
       // to it shares, so another store's or host's would break, a host's calendar the index does not list included.
-      if ((await grantUsedElsewhere(provider, traded.account.id, "", input.host ?? "", storeOf(input), input.owner.email)) === false) {
+      if ((await grantUsedElsewhere(provider, traded.account.id, "", storeOf(input), input.owner.email)) === false) {
         await revoke(provider, provider === "zoom" ? traded.tokens.access : traded.tokens.refresh).catch(() => {});
       }
     }
@@ -669,7 +676,9 @@ async function keepConnection(
     // another store or host still uses it.
     if (before && before.account.id !== traded.account.id) {
       await redisPipeline([["SREM", userKey(provider, before.account.id), memberOf(input.statsId, host)]]).catch(() => {});
-      await giveBackUnlessShared(input.statsId, before, host).catch(() => {});
+      // A team host's calendar on the old account that the index does not list counts too, the host itself left out
+      // (Claude 5 zr's LEVE on #5476 @d882bc7424): the hosts of the store this host connects from.
+      await giveBackUnlessShared(input.statsId, before, host, storeOf(input)).catch(() => {});
     }
     return { ok: true, view: viewOf(connection), replaced: Boolean(before) };
   }
@@ -680,7 +689,7 @@ async function keepConnection(
   if (!flowFresh(input.startedAt)) {
     // Not kept: given back only when nothing here uses that account (issue #4011), since a revoke ends the grant
     // every connection to it shares, a host's calendar the index does not list included.
-    if ((await grantUsedElsewhere(provider, traded.account.id, "", "", storeOf(input), input.owner.email)) === false) {
+    if ((await grantUsedElsewhere(provider, traded.account.id, "", storeOf(input), input.owner.email)) === false) {
       await revoke(provider, access).catch(() => {});
     }
     return { ok: false, error: "expired" };
@@ -799,10 +808,11 @@ export async function disconnect(statsId: string, provider: MeetProvider, host =
 }
 
 /**
- * Disconnects as `disconnect` does, and says whether the provider confirmed the give-back in this request. `store`, for
- * a store's own connection, is the store it is disconnected from: its owner and team are the team hosts whose calendar
- * may use the same Google account without being listed (unlistedHostUses); without it, only the owner the connection
- * was kept for is read.
+ * Disconnects as `disconnect` does, and says whether the provider confirmed the give-back in this request. `store` is
+ * the store it is disconnected from (for a team host's own connection, the store the host acts from): its owner and
+ * team are the team hosts whose calendar may use the same Google account without being listed (unlistedHostUses), the
+ * disconnecting host itself left out (Claude 5 zr's LEVE on #5476 @d882bc7424); without it, only the owner the
+ * connection was kept for is read.
  */
 export async function disconnectFor(statsId: string, provider: MeetProvider, host = "", store?: Pick<Store, "sid" | "email">): Promise<DisconnectOutcome> {
   // Under the renewal lock: a renewal under way finishes first, and none can

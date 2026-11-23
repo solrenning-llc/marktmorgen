@@ -125,6 +125,8 @@ async function finishHostConnect(
       by: email,
       owner: { email: store.email, handle: store.handle },
       host: taken.host,
+      // The store's team: the other hosts whose calendar may use the grant this host's gives back (#5476 LEVE, zr).
+      sid: store.sid,
       startedAt: taken.at,
     });
     if (!result.ok) return back(`cal=${result.error}`);

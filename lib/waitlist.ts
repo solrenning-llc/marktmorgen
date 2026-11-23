@@ -25,6 +25,7 @@ import { NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
 import { withinLimit } from "@/lib/request-guard";
 import { fromLine, mailDay, releaseDay, render, reserveDay } from "@/lib/mail";
 import { upsertContact } from "@/lib/contacts";
+import { takenOffList } from "@/lib/list-taken-off";
 import { SITE_URL } from "@/lib/site-url";
 import { handleLeadsToStore, storeHandleKey, type Listing, type Store } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
@@ -793,9 +794,23 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
         console.error("sending a waitlist launch: its places were read in an unknown shape, so the batch waits", new UnknownReplyError("a launch batch's waitlist places"));
         break;
       }
+      // Never an address the store's list took off for a hard bounce, a spam complaint or a refusal (#4638,
+      // lib/list-taken-off.ts), as community announcements: passed over in this launch, its place left as it is. A plain
+      // list unsubscribe is not read (the waitlist has its own leave link). A list row that does not read: the batch waits.
+      let going = chunk;
+      if (store.listId && chunk.length) {
+        let off: boolean[];
+        try {
+          off = await takenOffList(store.listId, chunk.map(([email]) => email));
+        } catch (error) {
+          console.error("sending a waitlist launch: the store's list rows were read in an unknown shape, so the batch waits", error);
+          break;
+        }
+        going = chunk.filter((_, i) => !off[i]);
+      }
       const day = mailDay();
-      if (!(await reserveDay(chunk.length, day))) break;
-      const messages = chunk.map(([email, entry]) => {
+      if (!(await reserveDay(going.length, day))) break;
+      const messages = going.map(([email, entry]) => {
         const page = `${SITE_URL}/@${store.handle}/waitlist?leave=${entry.t}`;
         const door = {
           page,
@@ -812,13 +827,13 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
       });
       const outcome = await sendBatch(messages, `waitlist:${sid}:${pid}:${job.started}:${job.cursor}`, { by: "store", store, kind: "email" });
       if (outcome === "retry") {
-        await releaseDay(chunk.length, day);
+        await releaseDay(going.length, day);
         break;
       }
-      if (outcome === "refused") await releaseDay(chunk.length, day);
+      if (outcome === "refused") await releaseDay(going.length, day);
       else {
-        job.sent += chunk.length;
-        sent += chunk.length;
+        job.sent += going.length;
+        sent += going.length;
       }
       job.cursor += emails.length;
       // The send list is renewed with the record, so it never lapses while the record lives.

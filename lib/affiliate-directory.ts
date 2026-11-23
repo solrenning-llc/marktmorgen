@@ -94,9 +94,14 @@ const PARTIAL_KEEP_SECONDS = KEEP_SECONDS;
  * out is not a store that is not there: the page says how many, and the next
  * build reads them again.
  */
-export type DirectoryPage = { rows: DirectoryRow[]; omitted: number };
+export type DirectoryPage = {
+  rows: DirectoryRow[];
+  omitted: number;
+  /** More programs are listed than one build reads (MAX_ROWS): the page is not the whole list (Claude 3 yUZf on #2921). */
+  more?: true;
+};
 
-/** A kept page: a bare list of rows (nothing left out), or { rows, omitted }. Any other shape is not a page. */
+/** A kept page: a bare list of rows (nothing left out), or { rows, omitted, more? }. Any other shape is not a page. */
 function keptPage(raw: string): DirectoryPage | null {
   let value: unknown;
   try {
@@ -106,14 +111,15 @@ function keptPage(raw: string): DirectoryPage | null {
   }
   if (Array.isArray(value)) return { rows: value as DirectoryRow[], omitted: 0 };
   if (!value || typeof value !== "object") return null;
-  const { rows, omitted } = value as { rows?: unknown; omitted?: unknown };
+  const { rows, omitted, more } = value as { rows?: unknown; omitted?: unknown; more?: unknown };
   if (!Array.isArray(rows) || typeof omitted !== "number" || !Number.isSafeInteger(omitted) || omitted < 0) return null;
-  return { rows: rows as DirectoryRow[], omitted };
+  if (more !== undefined && more !== true) return null;
+  return more ? { rows: rows as DirectoryRow[], omitted, more } : { rows: rows as DirectoryRow[], omitted };
 }
 
 /** What a page is kept as: a bare list when nothing is left out, as before, so a page kept by an older build still reads. */
 function pageToKeep(page: DirectoryPage): string {
-  return JSON.stringify(page.omitted > 0 ? page : page.rows);
+  return JSON.stringify(page.omitted > 0 || page.more ? page : page.rows);
 }
 
 /** The most programs read for the page: far past what one page lists. */
@@ -357,18 +363,19 @@ export async function readDirectoryPage(): Promise<DirectoryPage> {
     await markFailed(token);
     throw error;
   }
-  const page: DirectoryPage = { rows: built.rows, omitted: built.omitted };
+  const page: DirectoryPage = built.more ? { rows: built.rows, omitted: built.omitted, more: true } : { rows: built.rows, omitted: built.omitted };
   if (built.partial === "failed") {
     await markFailed(token);
     return page;
   }
-  if (built.partial === "unknown" || built.omitted > 0) {
+  if (built.partial === "unknown" || built.omitted > 0 || built.more) {
     // A numbers reply off its exact shape is a bad record in one store, which lasts until
     // someone fixes it: holding the build as failed would show "unavailable" to every
     // other visitor for as long as it lasts (Claude 7 and Claude 1, MEDIUM on #2921).
     // The page is kept, with that row's numbers null (never $0), for PARTIAL_KEEP_SECONDS,
     // at no more builds than a healthy page. A store that could not be read is the same
     // (Codex N1, MEDIUM on #2921): left out, counted on the page, read again next build.
+    // A listed set past MAX_ROWS is the same (Claude 3 yUZf on #2921): the page says it is not the whole list.
     await publishIfOwner(token, page, PARTIAL_KEEP_SECONDS);
     return page;
   }
@@ -429,7 +436,7 @@ async function markFailed(token: string): Promise<void> {
  * listed stores whose read failed, left out of the rows; when it is not zero
  * and no row was read, the build throws the first of those failures.
  */
-async function buildDirectory(): Promise<{ rows: DirectoryRow[]; partial: false | "unknown" | "failed"; omitted: number }> {
+async function buildDirectory(): Promise<{ rows: DirectoryRow[]; partial: false | "unknown" | "failed"; omitted: number; more: boolean }> {
   // SSCAN may return a member more than once, in a page or across pages: each store is one row (Codex T on #2921).
   const sids = new Set<string>();
   let cursor = "0";
@@ -442,27 +449,28 @@ async function buildDirectory(): Promise<{ rows: DirectoryRow[]; partial: false 
     for (const sid of page.sids) sids.add(sid);
     cursor = page.next;
   } while (cursor !== "0" && sids.size < MAX_ROWS);
+  // The walk stopped at MAX_ROWS with the set not read to its end, or more sids came back than one build reads: the
+  // rows are not the whole list, and the page says so (Claude 3 yUZf on #2921), never a subset kept as the whole one.
+  const more = cursor !== "0" || sids.size > MAX_ROWS;
   // A store read that failed is not a program that is not there: that store is
   // left out and counted, and the page says how many could not be read. One store
   // never takes the whole directory down (Codex N1, MEDIUM on #2921). Read exactly
   // (storeForIdExact, the same two GETs): a reply in another shape or a record that
   // cannot be read throws and is counted too, never taken for no store (rvB4 on #2921).
   const failures: unknown[] = [];
-  const stores = await Promise.all(
-    [...sids].slice(0, MAX_ROWS).map((sid) =>
-      storeForIdExact(sid).catch((error: unknown) => {
-        failures.push(error);
-        return null;
-      }),
-    ),
+  // In batches of DIRECTORY_READ_BATCH, never MAX_ROWS reads at once (Claude 3 yUZf on #2921).
+  const stores = await inBatches([...sids].slice(0, MAX_ROWS), (sid) =>
+    storeForIdExact(sid).catch((error: unknown) => {
+      failures.push(error);
+      return null;
+    }),
   );
   // A failed numbers read still shows the row without numbers, but that page is
   // not kept for the next visitors.
   let partial: false | "unknown" | "failed" = false;
   const rows = sortRows(
     (
-      await Promise.all(
-        stores.map(async (store) => {
+      await inBatches(stores, async (store) => {
           const row = store ? directoryRow(store) : null;
           if (!row || !store || !store.affiliates.numbers) return row;
           const numbers = await programNumbers(store).catch((error: unknown) => {
@@ -472,8 +480,7 @@ async function buildDirectory(): Promise<{ rows: DirectoryRow[]; partial: false 
             return null;
           });
           return { ...row, numbers: directoryNumbers(numbers) };
-        }),
-      )
+      })
     ).filter((row): row is DirectoryRow => row !== null),
   );
   if (failures.length) {
@@ -481,5 +488,12 @@ async function buildDirectory(): Promise<{ rows: DirectoryRow[]; partial: false 
     if (!rows.length) throw failures[0];
     console.warn(`affiliate directory: ${failures.length} listed store(s) could not be read and are left out of this build`);
   }
-  return { rows, partial, omitted: failures.length };
+  return { rows, partial, omitted: failures.length, more };
+}
+
+/** Runs `work` over `items` DIRECTORY_READ_BATCH at a time, keeping their order. */
+async function inBatches<T, R>(items: T[], work: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < items.length; i += DIRECTORY_READ_BATCH) out.push(...(await Promise.all(items.slice(i, i + DIRECTORY_READ_BATCH).map(work))));
+  return out;
 }

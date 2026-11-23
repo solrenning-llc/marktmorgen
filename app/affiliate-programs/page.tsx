@@ -52,6 +52,8 @@ export default async function AffiliateProgramsPage() {
   const directoryPage = await directory();
   const rows = directoryPage?.rows ?? null;
   const left = directoryPage && directoryPage.omitted > 0 ? directoryPage.omitted : 0;
+  // More programs are listed than one build reads (lib/affiliate-directory.ts, MAX_ROWS): the page says it is not the whole list.
+  const more = directoryPage?.more === true;
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink">
       <SiteNav />
@@ -98,6 +100,11 @@ export default async function AffiliateProgramsPage() {
               {left > 0 ? (
                 <p role="status" className="mx-auto mb-6 max-w-3xl text-center text-sm text-ink-soft">
                   {left === 1 ? "1 more program" : `${left} more programs`} could not be read just now and {left === 1 ? "is" : "are"} not shown. This does not mean they left the list. Try again in a few minutes.
+                </p>
+              ) : null}
+              {more ? (
+                <p role="status" className="mx-auto mb-6 max-w-3xl text-center text-sm text-ink-soft">
+                  More programs are listed than this page can show at once, so some are not shown here.
                 </p>
               ) : null}
               <AffiliateDirectory rows={rows} />

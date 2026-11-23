@@ -64,7 +64,7 @@ page.harness = {
     root.render(
       <>
         <SalesLeverSwitch control={control(on)} states={{ on: "Reminders are on", off: "Reminders are off" }} />
-        <RecoveryEditor recovery={{ enabled: on, address: ADDRESS }} suggestedAddress="" connected />
+        <RecoveryEditor recovery={{ enabled: on, address: ADDRESS, asks: true }} suggestedAddress="" connected />
       </>,
     );
   },

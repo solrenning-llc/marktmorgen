@@ -23,11 +23,15 @@
  */
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import * as guard from "@/lib/closing-plan-guard";
 import { DONE_KEEP_DAYS, UNDO_KEY, retryPlanUndos, settleOne } from "@/lib/closing-plan-guard";
 import { redisPipeline } from "@/lib/redis";
 
 const S = (ms: number) => Math.floor(ms / 1000);
 const DAY = 86_400_000;
+// Read off the module, so this file still runs where they are not exported yet (its RED).
+const OPEN_RECHECK_DAYS = (guard as Record<string, unknown>).OPEN_RECHECK_DAYS as number;
+const OPEN_KEEP_DAYS = (guard as Record<string, unknown>).OPEN_KEEP_DAYS as number;
 const day = Date.UTC(2026, 11, 2);
 
 /** An invoice as listed, before the stand-in names its subscription. */
@@ -221,6 +225,71 @@ async function main() {
     is("the late payment is given back in full, once", [refundsOf("pi_openpart02late").length - before, refundsOf("pi_openpart02late")[0]], [1, 4_900]);
     await retryPlanUndos(Date.now() + 60_000);
     is("with nothing left open, the entry past DONE_KEEP_DAYS is taken out", (await redisPipeline([["HGET", UNDO_KEY, "sub_openpart02"]]))[0], null);
+  }
+
+  // Claude 2 lpgvy's LEVE on #5344 @6befbf6503: an entry kept for an invoice still open was looked at on every run,
+  // with no end, in the same order as plans not yet settled, inside the job's 20 seconds. It is now looked at once a
+  // week past DONE_KEEP_DAYS, taken out OPEN_KEEP_DAYS after it was settled, and walked after every plan not settled.
+  const openOne = async (name: string) => {
+    const one = await inLine(name, [invoiceRow(`in_${name}`, "open", 2_000, { amount_remaining: 4_900 })]);
+    const rest = { id: `inpay_${name}d`, object: "invoice_payment", invoice: `in_${name}`, status: "open", is_default: true, amount_paid: 0, amount_requested: 4_900, payment: { type: "payment_intent", payment_intent: `pi_${name}d` }, status_transitions: { paid_at: null, canceled_at: null } };
+    world.payments.set(`in_${name}`, [paidPart(`in_${name}`, `pi_${name}`, 2_000, S(day) + 120), rest]);
+    world.charges.set(`pi_${name}`, 2_000);
+    await settleOne(one.id);
+    return one;
+  };
+  const entryOf = async (id: string) => {
+    const [raw] = await redisPipeline([["HGET", UNDO_KEY, id]]);
+    return typeof raw === "string" ? (JSON.parse(raw) as Record<string, unknown>) : null;
+  };
+  const rewrite = async (id: string, change: Record<string, unknown>) => {
+    const entry = (await entryOf(id))!;
+    await redisPipeline([["HSET", UNDO_KEY, id, JSON.stringify({ ...entry, ...change })]]);
+  };
+
+  part("An entry kept for an open invoice: looked at again once a week, and taken out OPEN_KEEP_DAYS after it was settled");
+  {
+    const one = await openOne("openkeep05");
+    const reads = () => world.paymentReads.filter((read) => read === "in_openkeep05").length;
+    is("settled, kept for its open invoice", (await entryOf(one.id))?.o, 1);
+    await rewrite(one.id, { done: Date.now() - (DONE_KEEP_DAYS + 1) * DAY });
+    const r0 = reads();
+    await retryPlanUndos(Date.now() + 60_000);
+    const r1 = reads();
+    const next = (await entryOf(one.id))?.next;
+    is("its first run past DONE_KEEP_DAYS looks at it", r1 > r0, true);
+    is(`and sets its next look ${OPEN_RECHECK_DAYS} days later`, typeof next === "number" && Math.abs(next - (Date.now() + OPEN_RECHECK_DAYS * DAY)) < 60_000, true);
+    await retryPlanUndos(Date.now() + 60_000);
+    is("a run before then does not look at it", reads(), r1);
+    await rewrite(one.id, { next: Date.now() - 1 });
+    await retryPlanUndos(Date.now() + 60_000);
+    is("a run once its week is past looks at it again", reads() > r1, true);
+    await rewrite(one.id, { done: Date.now() - (OPEN_KEEP_DAYS + 1) * DAY, next: Date.now() - 1 });
+    const r2 = reads();
+    await retryPlanUndos(Date.now() + 60_000);
+    is(`past OPEN_KEEP_DAYS (${OPEN_KEEP_DAYS}) it is taken out without another look`, [await entryOf(one.id), reads()], [null, r2]);
+  }
+
+  part("Entries kept for open invoices are walked after every plan not settled yet");
+  {
+    const kept = [await openOne("openkeep06"), await openOne("openkeep07"), await openOne("openkeep08")];
+    for (const one of kept) await rewrite(one.id, { done: Date.now() - (DONE_KEEP_DAYS + 1) * DAY });
+    const waiting = await inLine("waitsfirst01", [invoiceRow("in_waitsfirst01", "paid", 6_900, { amount_remaining: 0 })]);
+    world.payments.set("in_waitsfirst01", [paidPart("in_waitsfirst01", "pi_waitsfirst01", 6_900, S(day) + 120)]);
+    world.charges.set("pi_waitsfirst01", 6_900);
+    const order: string[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input instanceof Request ? input.url : input)).pathname;
+      const sub = path.match(/^\/v1\/subscriptions\/(sub_\w+)$/);
+      if (sub && !order.includes(sub[1])) order.push(sub[1]);
+      return realFetch(input, init);
+    }) as typeof fetch;
+    await retryPlanUndos(Date.now() + 60_000);
+    globalThis.fetch = realFetch;
+    const first = order.indexOf(waiting.id);
+    is("the plan not settled is reached before any entry kept for an open invoice", first >= 0 && kept.every((one) => order.indexOf(one.id) === -1 || order.indexOf(one.id) > first), true);
+    is("and it is settled, its payment given back", [await settledOf(waiting.id), refundsOf("pi_waitsfirst01")], [true, [6_900]]);
   }
 
   for (const [name, label, rest] of [

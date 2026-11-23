@@ -2482,6 +2482,10 @@ export const COST_LINES: CostLine[] = [
       // STOCK_CONFIRM_COMMANDS_MOST for MAX_CART limited products, inside STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE (tests/stock-sell-cost.test.ts).
       { file: "lib/stock.ts", names: ["STOCK_SELL", "confirmCartStock", "heldBy"] },
       { file: "app/api/store/free/download/route.ts", names: ["recordAffiliateLead", "countConfirmedLead"] },
+      // A checkout Stripe would not open is counted, and the day's email mark taken, in one fenced step (row 104 of #5010):
+      // the EVAL counted as 1 plus its calls, the two guard reads (erasing field, id key or owner's record), the three
+      // count writes and the optional SET NX, so 7 where it was 3 writes and a claim; inside the checkout's own work.
+      { file: "lib/checkout-trouble.ts", names: ["COUNT_IF_STORE_LIVE", "noteCheckoutTrouble"] },
       // A course's checkout sent from a page that said its end date reads the course once, exactly (24 [E7], 9 November 2026).
       { file: "app/api/store/checkout/route.ts", names: ["readCourseForSale(product.course.id)"] },
       { file: "lib/course-access-end.ts", names: ["readCourseExact(id)"] },

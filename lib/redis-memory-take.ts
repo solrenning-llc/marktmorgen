@@ -18,6 +18,31 @@ export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
     run(["SET", open, session, "EX", seconds]);
     return 1;
   },
+  // lib/checkout-trouble.ts COUNT_IF_STORE_LIVE: a checkout refusal counted, and the day's email mark taken when asked,
+  // only while the store is its own and not erasing, by the rule of store-cache-live:v3; -1 gone or erasing, -2 an
+  // owner's record that does not parse, 1 counted, 2 counted and the mark ours (row 104 of #5010).
+  "checkout-trouble-live:v1": (run, [live, erasing, trouble, mail], [field, statsId, ref, day, last, keep, mark, markKeep, tell]) => {
+    if (run(["HGET", erasing, field]) !== null) return -1;
+    if (statsId === "") {
+      if (run(["GET", live]) !== ref) return -1;
+    } else {
+      const raw = run(["GET", live]);
+      if (raw === null) return -1;
+      let record: unknown;
+      try {
+        record = JSON.parse(String(raw));
+      } catch {
+        return -2;
+      }
+      if (!record || typeof record !== "object") return -2;
+      if ((record as { statsId?: unknown }).statsId !== statsId) return -1;
+    }
+    run(["HINCRBY", trouble, day, 1]);
+    run(["HSET", trouble, "last", last]);
+    run(["EXPIRE", trouble, keep]);
+    if (tell === "1" && run(["SET", mail, mark, "NX", "EX", markKeep]) === "OK") return 2;
+    return 1;
+  },
   "hash-del-if:v1": (run, [hash], [field, was]) => (run(["HGET", hash, field]) !== was ? 0 : run(["HDEL", hash, field])),
   "hash-swap-if:v1": (run, [hash], [field, was, next]) => {
     if (run(["HGET", hash, field]) !== was) return 0;

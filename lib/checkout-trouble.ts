@@ -26,7 +26,9 @@
 import { type Store } from "@/lib/store";
 import { StripeError } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { claimMark, claimValue } from "@/lib/claim-mark";
+import { repliesFor } from "@/lib/redis-reply";
+import { claimValue } from "@/lib/claim-mark";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 
@@ -34,6 +36,33 @@ const key = (statsId: string) => `nl:cotrouble:${statsId}`;
 const mailKey = (statsId: string, day: string) => `nl:cotrouble:mail:${statsId}:${day}`;
 const KEEP_SECONDS = 35 * 86_400;
 const MESSAGE_LENGTH = 300;
+const MAIL_MARK_SECONDS = 2 * 86_400;
+
+/**
+ * The refusal counted, and the day's email mark taken (SET NX) when asked, in one step and only while the store is
+ * live (Codex G-20261119-1221, row 104 of #5010): Stripe answers after the store was read, and an erasure begun or
+ * ended in between must not get the store's refusal count or its day's mark back. The fence is the rule of
+ * lib/live-fence.ts (store-cache-live:v3): the erasing field absent, and the id key holding this store's own ref, or,
+ * for a store kept from before ids, the owner's record still carrying this store's statsId. -1: gone, moved or
+ * erasing, nothing written; -2: the owner's record does not parse, nothing written; 1: counted; 2: counted and the
+ * day's mark ours.
+ */
+export const COUNT_IF_STORE_LIVE = `-- marktmorgen:checkout-trouble-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return -1 end
+if ARGV[2] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[3] then return -1 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return -1 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -2 end
+  if record["statsId"] ~= ARGV[2] then return -1 end
+end
+redis.call("HINCRBY", KEYS[3], ARGV[4], 1)
+redis.call("HSET", KEYS[3], "last", ARGV[5])
+redis.call("EXPIRE", KEYS[3], ARGV[6])
+if ARGV[9] == "1" and redis.call("SET", KEYS[4], ARGV[7], "NX", "EX", ARGV[8]) then return 2 end
+return 1`;
 
 /** Whether an error is Stripe refusing on purpose, which the creator can put right. */
 export function isRefusal(error: unknown): error is StripeError {
@@ -52,15 +81,21 @@ export async function noteCheckoutTrouble(store: Store, error: unknown, now = Da
   if (!(error instanceof StripeError) || !store.statsId || !isRedisConfigured()) return "skipped";
   const day = new Date(now).toISOString().slice(0, 10);
   const message = (error.stripeMessage || "Stripe gave no reason.").replace(/\s+/g, " ").trim().slice(0, MESSAGE_LENGTH);
-  await redisPipeline([
-    ["HINCRBY", key(store.statsId), day, 1],
-    ["HSET", key(store.statsId), "last", JSON.stringify({ at: now, code: error.code.slice(0, 60), message })],
-    ["EXPIRE", key(store.statsId), KEEP_SECONDS],
-  ]);
-  if (!isRefusal(error) || !isSenderConfigured()) return "counted";
-  // The day's email is ours only on an exact claim (lib/claim-mark.ts).
-  const mark = claimValue(now);
-  if ((await claimMark(mailKey(store.statsId, day), 2 * 86_400, mark)) !== "ours") return "counted";
+  const tell = isRefusal(error) && isSenderConfigured();
+  const fence = await storeLiveFence(store);
+  // A store kept from before ids with no statsId cannot be told from its owner's next one: nothing is written.
+  if (fence.statsId === null) return "skipped";
+  const last = JSON.stringify({ at: now, code: error.code.slice(0, 60), message });
+  // One step, fenced on the store being live; the day's email is ours only on the exact 2 (lib/claim-mark.ts's rule).
+  const answer = repliesFor(await redisPipeline([[
+    "EVAL", COUNT_IF_STORE_LIVE, 4, fence.live, fence.erasing, key(store.statsId), mailKey(store.statsId, day),
+    fence.field, fence.statsId, fence.ref, day, last, KEEP_SECONDS, claimValue(now), MAIL_MARK_SECONDS, tell ? "1" : "0",
+  ]]), 1)?.[0];
+  // Gone, moved or erasing: nothing was written, and nobody is told.
+  if (answer === -1) return "skipped";
+  // Anything but the exact 2 never sends: an answer in another shape may hide a mark taken, and the email goes at
+  // most once a day, never twice (rule 24).
+  if (answer !== 2) return "counted";
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     // One key per store and day: a repeat inside the provider's window is answered without sending again.
     idempotencyKey: `checkout-trouble:${store.statsId}:${day}`,

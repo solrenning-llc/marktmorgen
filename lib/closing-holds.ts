@@ -328,6 +328,10 @@ async function holdOne(account: string, folder: string, sub: Row, endedAt: numbe
     query.append("expand[]", "data.payments");
     paid = ownInvoices(await onAccount("GET", account, `/invoices?${query}`), id, customer, "a paid invoice");
   }
+  // Its paid period read before any write too: an invoice whose money does not read throws here (membershipLineOf),
+  // so nothing is voided, kept or held on it, and the member is tried again the next day (f:).
+  const email = memberEmail(sub);
+  const period = plan ? null : (paid.map((invoice) => paidPeriodOf(invoice, email)).find((p): p is PaidPeriod => p !== null) ?? null);
   // A void each; a draft kept now and let go again on a release.
   if (!(await takeCalls(folder, open.length + 2 * drafts.length))) return "over";
   for (const invoice of open) {
@@ -337,12 +341,8 @@ async function holdOne(account: string, folder: string, sub: Row, endedAt: numbe
     await onAccount("POST", account, `/invoices/${encodeURIComponent(invoice.id as string)}`, new URLSearchParams({ auto_advance: "false", "metadata[closing_draft]": String(endedAt) }), undefined, `closing-draft:${invoice.id}:${endedAt}`);
   }
   if (drafts.length) await redisPipeline([["HSET", workKey(folder), `d:${id}`, drafts.map((d) => d.id).join(",")]]);
-  const email = memberEmail(sub);
-  if (!plan) {
-    const period = paid.map((invoice) => paidPeriodOf(invoice, email)).find((p): p is PaidPeriod => p !== null) ?? null;
-    // The first reading is the one before any hold (HSETNX).
-    if (period) await redisPipeline([["HSETNX", paidKey(folder), id, JSON.stringify(period)]]);
-  }
+  // The first reading is the one before any hold (HSETNX).
+  if (period) await redisPipeline([["HSETNX", paidKey(folder), id, JSON.stringify(period)]]);
   await onAccount("POST", account, `/subscriptions/${encodeURIComponent(id)}`, holdBody(sub, endedAt), undefined, `closing-hold:${id}:${endedAt}`);
   // Set aside only now that it is held: a hold that failed leaves its refund's calls spent, never a second reserve.
   if (!plan) await redisPipeline([["HINCRBY", workKey(folder), "rcalls", REFUND_CALLS_PER_MEMBER]]);

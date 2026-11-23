@@ -261,10 +261,23 @@ export function membershipLineOf(invoice: { lines?: { data?: InvoiceLine[] } | n
     return subscription && !proration && typeof line.amount === "number" && line.amount > 0 && typeof line.period?.end === "number";
   });
   if (!own) return null;
-  const net = (line: InvoiceLine) => (typeof line.amount === "number" ? line.amount : 0) - (line.discount_amounts ?? []).reduce((sum, d) => sum + (typeof d?.amount === "number" ? d.amount : 0), 0);
+  // Every line's money is read as whole smallest units (rule 24): an amount or a discount that is text, a fraction,
+  // past a safe integer, or a negative discount, is money that could not be read, never zero, so the share is not
+  // made up; it throws, and the closing tries the member again (lib/closing-holds.ts, f:). The same for what the
+  // invoice took (Codex G-20261119-0634).
+  const net = (line: InvoiceLine) => {
+    if (!Number.isSafeInteger(line.amount)) throw new Error("a paid invoice line's amount could not be read");
+    const discounts = line.discount_amounts ?? [];
+    if (!Array.isArray(discounts) || discounts.some((discount) => !Number.isSafeInteger(discount?.amount) || (discount.amount as number) < 0)) throw new Error("a paid invoice line's discounts could not be read");
+    const amount = discounts.reduce((sum, discount) => sum - (discount.amount as number), line.amount as number);
+    if (!Number.isSafeInteger(amount)) throw new Error("a paid invoice line's net amount could not be read");
+    return amount;
+  };
   const nets = lines.reduce((sum, line) => sum + net(line), 0);
-  const paid = Number(invoice.amount_paid);
-  const amt = Math.round(nets > 0 && paid > 0 ? (net(own) * paid) / nets : net(own));
+  if (!Number.isSafeInteger(nets)) throw new Error("a paid invoice's line total could not be read");
+  const paid = invoice.amount_paid;
+  if (!Number.isSafeInteger(paid) || (paid as number) < 0) throw new Error("what a paid invoice took could not be read");
+  const amt = Math.round(nets > 0 && (paid as number) > 0 ? (net(own) * (paid as number)) / nets : net(own));
   const ps = Number(own.period?.start), pe = Number(own.period?.end);
   if (!(amt > 0) || !Number.isFinite(ps) || !(pe > ps)) return null;
   return { amt, ps, pe };

@@ -34,8 +34,11 @@ const ROLE = "323456789012345688";
 
 type Command = (string | number)[];
 const original = redis.pipeline.bind(redis);
-/** Run once, right after forgetServer's people's deletes answered: the join under way lands there. */
-let lateJoin: (() => Promise<void>) | null = null;
+/**
+ * Run once, right after forgetServer's people's deletes answered: the join under way lands there. keepMember answers
+ * whether it kept the person (Board #5010 row 187); this test only waits for it (Claude 3 ykH's LEVE on #5419).
+ */
+let lateJoin: (() => Promise<unknown>) | null = null;
 redis.pipeline = (async (commands: Command[]) => {
   const answer = await original(commands);
   const first = commands[0];

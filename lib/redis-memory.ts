@@ -1712,6 +1712,20 @@ export class MemoryRedis {
           this.run(["EXPIRE", used, seconds]);
           return 1;
         }
+        // lib/mail-clicks.ts MAIL_CLICK_KEY_LIVE: a reader's link key, written only while they still allow it.
+        if (key.startsWith("-- marktmorgen:mail-click-key-live:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, prints, contacts, marker, print, email, token, seconds] = args;
+          if (this.run(["HGET", prints, print]) !== null) return 0;
+          const raw = this.run(["HGET", contacts, email]);
+          if (typeof raw !== "string") return 0;
+          let row: unknown;
+          try { row = JSON.parse(raw); } catch { return 0; }
+          if (!row || typeof row !== "object" || Array.isArray(row)) return 0;
+          const r = row as Record<string, unknown>;
+          if (r.t !== token || r.agreed !== true || r.unsub === true || typeof r.clicks !== "string" || r.clicks === "") return 0;
+          this.run(["SET", marker, token, "EX", seconds]);
+          return 1;
+        }
         // DR1: one provider receipt and its campaign counter, atomically.
         if (key.startsWith("-- marktmorgen:mail-report:v1\n") && args[0] === "1" && args.length === 7) {
           const [, daily, receipt, aggregate, count, expiry, limit] = args;
@@ -4061,6 +4075,17 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:store-for-hit:v1\n") && args[0] === "1" && args.length === 5) return this.storeForHit(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
+        // lib/order-data.ts ORDER_WRITE_IF_KEY: the ordinary measured write, only while its last key still exists; the
+        // key is removed before the ordinary write is modelled (Board #5010 row 187).
+        if (key.startsWith("-- marktmorgen:order-write-if-key:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          if (!Number.isSafeInteger(count) || count < 2) return [-1];
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", keys.at(-1) as string]) !== 1) return [-3];
+          return this.orderWrite([String(count - 1), ...keys.slice(0, -1), ...argv]);
+        }
         if (key.startsWith("-- marktmorgen:order-write-if-new:v1\n")) return this.orderWriteIfNew(args);
         // lib/order-data.ts ORDER_WRITE_IF_STORE_LIVE: the ordinary measured write, only while the store id still
         // exists and the closing walk has not installed its erasure field. The final two keys and final argument are
@@ -4194,32 +4219,23 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:studio-demo-seed:v1\n")) return this.studioDemo("seed", args);
         if (key.startsWith("-- marktmorgen:studio-demo-take:v1\n")) return this.studioDemo("take", args);
         // lib/team.ts TEAM_INDEX_OFF_TEAM: an id leaves a person's team index only when its team, read in the same step,
-        // is gone or lists everyone but them; a team record that does not read keeps the id (Codex U on #3660).
-        if (key.startsWith("-- marktmorgen:team-index-off-team:v1\n")) {
+        // is still byte for byte the record the read past accepted without them, or still gone (sent as ""):
+        // never a second reading of the JSON (Codex L-20261119-0634 on #5010 row 133; before it, Codex U on #3660).
+        if (key.startsWith("-- marktmorgen:team-index-off-team:v2\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
           const argv = args.slice(1 + count);
-          if (!Number.isInteger(count) || count < 2 || argv.length !== count) throw new Error("ERR team-index-off-team: wrong number of keys or arguments");
+          if (!Number.isInteger(count) || count < 2 || argv.length !== 2 * (count - 1)) throw new Error("ERR team-index-off-team: wrong number of keys or arguments");
           const [index, ...teams] = keys;
-          const [address, ...sids] = argv;
           let removed = 0;
           teams.forEach((team, i) => {
             this.scriptCalls += 1;
             const raw = this.run(["GET", team]);
-            let off = raw === null;
-            if (typeof raw === "string") {
-              try {
-                const parsed = JSON.parse(raw) as { members?: unknown; invites?: unknown };
-                if (Array.isArray(parsed.members) && Array.isArray(parsed.invites)) {
-                  off = !parsed.members.some((m) => !!m && typeof m === "object" && typeof (m as { email?: unknown }).email === "string" && (m as { email: string }).email.trim().toLowerCase() === address);
-                }
-              } catch {
-                off = false;
-              }
-            }
-            if (off) {
+            const seen = argv[2 * i + 1];
+            const same = seen === "" ? raw === null : raw === seen;
+            if (same) {
               this.scriptCalls += 1;
-              removed += Number(this.run(["SREM", index, sids[i]]));
+              removed += Number(this.run(["SREM", index, argv[2 * i]]));
             }
           });
           return removed;

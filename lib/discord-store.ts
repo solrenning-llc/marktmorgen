@@ -17,7 +17,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { orderWrite } from "@/lib/order-data";
+import { orderWriteIfKey } from "@/lib/order-data";
 import { emailKey, storeKey } from "@/lib/learn";
 import { normaliseEmail } from "@/lib/auth";
 import type { Store } from "@/lib/store";
@@ -333,14 +333,21 @@ export async function accountOf(room: string, email: string): Promise<string | n
   throw new UnknownReplyError("the Discord account an address brought in");
 }
 
-/** Keeps a person, and when they are checked next. */
-export async function keepMember(room: string, sid: string, userId: string, member: Member, now = Date.now()): Promise<void> {
+/**
+ * Keeps a person, and when they are checked next, only while the server is still connected (Board #5010 row 187,
+ * Claude 3 yUZf's LEVE on #5380): the row, the address link and the due entry are written in the same step as the
+ * check that the server's key is there (ORDER_WRITE_IF_KEY). A join or a check reads the server, then waits on
+ * Discord; a Disconnect that ran whole meanwhile would otherwise leave the person and their address link in a room
+ * with no server and nobody to forget them. True when kept; false when the server is gone, and nothing was written.
+ */
+export async function keepMember(room: string, sid: string, userId: string, member: Member, now = Date.now()): Promise<boolean> {
   // A person given roles is kept for good: counted in the store's room at what it adds (lib/order-data.ts).
-  await orderWrite({ sid }, [
+  const written = await orderWriteIfKey({ sid }, [
     ["HSET", membersKey(room), userId, JSON.stringify({ ...member, e: normaliseEmail(member.e) })],
     ["SET", addressKey(room, member.e), userId],
     ["ZADD", DUE_KEY, Math.floor(now / 1000) + CHECK_HOURS * 3_600, `${sid}|${userId}`],
-  ]);
+  ], serverKey(room));
+  return written !== null;
 }
 
 /** Forgets a person: their access ended and their roles were taken back, or they left. */

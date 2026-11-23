@@ -671,12 +671,18 @@ export async function forgetUser(
   removedAt?: number,
 ): Promise<{ statsId: string; owner: { email: string; handle: string }; account: string }[]> {
   if (!isRedisConfigured() || !accountId) return [];
+  const known = typeof removedAt === "number" && Number.isFinite(removedAt) && removedAt > 0;
   // The mark first, in the same pipeline as the read of the stores: a consent flow that kept its connection before
   // the mark is in the stores read here and forgotten with them; one that would keep it after is refused
   // (KEEP_UNLESS_GONE). A mark not confirmed written, or the stores in any shape but a list of text, is unknown.
+  // The mark is when the person removed the app, when the notice says it, never later than now: a notice sent again
+  // marks the same removal, so a grant begun since (connected again in between) is not refused by the resend's own
+  // arrival time (Codex X6 on #3333, LOW); the line is the one the walk below draws for the stores it keeps.
+  const now = Date.now();
+  const markedAt = known ? Math.min(Math.floor(removedAt as number), now) : now;
   const read = repliesFor(
     await redisPipeline([
-      ["SET", goneKey(provider, accountId), String(Date.now()), "EX", GONE_SECONDS],
+      ["SET", goneKey(provider, accountId), String(markedAt), "EX", GONE_SECONDS],
       ["SMEMBERS", userKey(provider, accountId)],
     ]),
     2,
@@ -688,7 +694,6 @@ export async function forgetUser(
   const pass = stores.slice(0, FORGET_PASS);
   // Stores connected again after the removal (a notice sent again by the provider after a first try failed, while
   // the creator connected anew in between; webhooks/cron audit, Claude 1, 12/11/2026): their new connection stays.
-  const known = typeof removedAt === "number" && Number.isFinite(removedAt) && removedAt > 0;
   try {
     for (const statsId of pass) {
       // Each store leaves the index under its renewal lock, with its connection: a store connected again since (a flow

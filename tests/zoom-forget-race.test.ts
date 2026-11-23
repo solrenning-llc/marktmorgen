@@ -77,8 +77,10 @@ let weird: { match: (c: Command) => boolean; reply: unknown } | null = null;
 /** A clock moved back while the deletion begins, until its read of the user's stores has been answered. */
 let shiftedUntilRead = 0;
 
+/** The removal time the next notice carries (Zoom's `deauthorization_time`); undefined for a notice without one. */
+let noticeRemovedAt: number | undefined;
 const forgetNow = async () => {
-  forgotNow = await forgetUser("zoom", USER).catch((error: unknown) => `threw ${error instanceof Error ? error.name : error}`);
+  forgotNow = await forgetUser("zoom", USER, noticeRemovedAt).catch((error: unknown) => `threw ${error instanceof Error ? error.name : error}`);
 };
 
 const pipeline = redis.pipeline.bind(redis);
@@ -133,6 +135,7 @@ async function main(): Promise<void> {
     for (const s of stores) redis.run(["DEL", connKey(s.statsId), `nl:meet:test:${s.statsId}:zoom`]);
     redis.run(["DEL", userIndex, goneMark]);
     forgotNow = null;
+    noticeRemovedAt = undefined;
     duringResult = null;
     revoked.length = 0;
     issued.length = 0;
@@ -211,6 +214,38 @@ async function main(): Promise<void> {
   forgotNow = await forgetUser("zoom", USER, realNow() - 60_000).catch((error: unknown) => `threw ${error instanceof Error ? error.name : error}`);
   is("a notice for a removal a minute before that flow began forgets nothing", forgotNow, []);
   is("and the new grant stays, indexed", kept(one.statsId), [1, 1]);
+
+  part("Codex X6's LOW on #3333: a notice sent again marks the removal's time, not the time it arrived");
+  await reset();
+  // The person removed the app a minute ago, and Zoom's first notice was acted on then.
+  const removal = realNow() - 60_000;
+  noticeRemovedAt = removal;
+  deletionBegunAgo(60_000);
+  await forgetNow();
+  Date.now = realNow;
+  is("the first notice forgot nothing (set-up)", forgotNow, []);
+  // Thirty seconds after the removal the person connects again, a new grant; Zoom sends the same notice again just
+  // before that keep is written. The mark must still say when the removal was, or the new grant is refused.
+  before = connKey(one.statsId);
+  const regranted = await consent(one.statsId, realNow() - 30_000);
+  is("the notice sent again was acted on, with nothing to forget", forgotNow, []);
+  is("the new grant begun after the removal connects", regranted.ok, true);
+  is("kept and indexed, for a later notice to find", kept(one.statsId), [1, 1]);
+  is("the mark holds the removal's time", redis.run(["GET", goneMark]), String(removal));
+  await reset();
+  // Control: a flow begun before the removal is still refused when the notice lands just before its keep.
+  noticeRemovedAt = realNow() - 10_000;
+  before = connKey(one.statsId);
+  is("a flow begun before the removal is refused as removed", await consent(one.statsId, realNow() - 30_000), { ok: false, error: "removed" });
+  is("nothing kept", kept(one.statsId), [0, 0]);
+  await reset();
+  // A removal time later than the notice's own clock is never the mark: the mark is at most when the notice arrived.
+  noticeRemovedAt = realNow() + 60 * 60_000;
+  deletionBegunAgo(60_000);
+  await forgetNow();
+  Date.now = realNow;
+  is("a removal time in the future marks the notice's own time", redis.run(["GET", goneMark]) !== null && Number(redis.run(["GET", goneMark])) <= realNow() - 59_000, true);
+  is("so a flow begun after the notice connects", (await consent(one.statsId, realNow())).ok, true);
 
   part("A consent flow older than any consent can be keeps nothing");
   await reset();

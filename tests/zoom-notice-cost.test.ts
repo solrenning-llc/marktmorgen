@@ -80,7 +80,7 @@ async function main(): Promise<void> {
   const route = source("app/api/integrations/zoom/deauthorize/route.ts");
   is("the stores a pass walks are FORGET_PASS", line.storesPerPass, FORGET_PASS);
   is("the mark is kept GONE_SECONDS", line.markSeconds, numberIn(meet, /const GONE_SECONDS = ([\d_]+);/));
-  is("the mark is written with GONE_SECONDS as its expiry", /\["SET", goneKey\(provider, accountId\), String\(Date\.now\(\)\), "EX", GONE_SECONDS\]/.test(meet), true);
+  is("the mark is written with GONE_SECONDS as its expiry", /\["SET", goneKey\(provider, accountId\), String\(markedAt\), "EX", GONE_SECONDS\]/.test(meet), true);
   is("the notices one address may send in a minute are the route's PER_MINUTE", line.noticesPerAddressMinute, numberIn(route, /const PER_MINUTE = ([\d_]+);/));
   is("the route counts them per address a minute", /withinLimit\("zoom-notice", clientAddress\(request\), PER_MINUTE, 60\)/.test(route), true);
   is("each store's lock waits what forgetUser waits", line.lockWaitMs, numberIn(meet, /withLock\(refreshLockKey\(statsId, provider\), 20, ([\d_]+), async \(\) =>/));

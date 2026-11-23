@@ -372,6 +372,9 @@ async function keptOnList(listId: string, members: Member[]): Promise<Member[]> 
     }
     if (!row || typeof row !== "object" || Array.isArray(row)) throw new UnknownReplyError("a store's list row");
     const { unsub, gone } = row as { unsub?: unknown; gone?: unknown };
+    // Rows are written with unsub as true or false: another shape ("true" as text, 1, null) is unknown, never "still on
+    // the list" (#5285 row #4566, Claude 2's LEVE; as lib/contacts.ts parseContact reads it).
+    if (Object.hasOwn(row, "unsub") && typeof unsub !== "boolean") throw new UnknownReplyError("a store's list row");
     return !(unsub === true && typeof gone === "string" && GONE.has(gone));
   });
 }

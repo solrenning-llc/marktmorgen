@@ -58,6 +58,16 @@ async function main(): Promise<void> {
   const unknown = await advanceAnnouncement(id, async () => listed, Date.now() + 10_000);
   is("nobody is sent to, and the send waits", [to().length, unknown?.status], [0, "waiting"]);
 
+  // #5285 row #4566 (Claude 2's LEVE on the merged head 559812978c): unsub was read only as `=== true`, so a row whose
+  // unsub is in another shape ("true" as text, 1) counted as still on the list and was sent to, even marked gone.
+  // Rows are written with a boolean, so another shape is unknown (rule 24), as parseContact reads it.
+  for (const odd of ["true", 1, null] as const) {
+    part(`A list row whose unsub is ${JSON.stringify(odd)} (not true or false) is unknown`);
+    seed(contact({ unsub: odd, unsubAt: "2026-11-01T00:00:00.000Z", gone: "bounced" }));
+    const odder = await advanceAnnouncement(id, async () => listed, Date.now() + 10_000);
+    is("RED: nobody is sent to, and the send waits", [to().length, odder?.status], [0, "waiting"]);
+  }
+
   done();
 }
 

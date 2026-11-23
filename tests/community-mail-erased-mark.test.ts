@@ -136,6 +136,23 @@ async function main(): Promise<void> {
   is("the send that came meanwhile is refused as busy, not given the slow send's place", other === null ? "none" : (other as { ok: boolean; reason?: string }).ok ? "queued" : (other as { reason: string }).reason, "busy");
   is("the erasure meanwhile lets the dead place go and walks the sends", [erasedDuring, db.run(["SISMEMBER", sends, "d".repeat(24)])], [0, 0]);
   is("the slow send keeps its place and is queued", [slow?.ok, db.run(["SISMEMBER", sends, held[0] ?? ""]), db.run(["SCARD", sends])], [true, 1, MAX_SENDS_UNDER_WAY]);
+
+  // Claude 3 yaQt on #5072 @41d21c4703, LEVE: a list written before its send record, whose record was never saved,
+  // stayed sixty days with the person's key once its stale place was let go, and no later erasure could find it.
+  part("a stale place's recipient list goes with it, in both sweeps (Claude 3 yaQt on #5072, LEVE)");
+  for (const sweep of ["erasure", "send"] as const) {
+    reset();
+    const full = Array.from({ length: MAX_SENDS_UNDER_WAY }, (_, i) => i.toString(16).padStart(24, "b"));
+    for (const send of full) db.run(["SET", `nl:cm:mail:${send}`, "{}"]);
+    const orphan = "e".repeat(23) + "f";
+    db.run(["RPUSH", `nl:cm:mail:${orphan}:to`, members[0].k]);
+    db.run(["EXPIRE", `nl:cm:mail:${orphan}:to`, 60 * 86_400]);
+    db.run(["SADD", sends, ...full, orphan]);
+    if (sweep === "erasure") await forgetAnnouncementRecipient(community, members[0].k);
+    // A new send at the cap sweeps the stale place first (and is still refused: the live sends fill the cap).
+    else await queueAnnouncement(store, config, post);
+    is(`${sweep}: the stale place is let go, and its list with the person's key goes with it`, [db.run(["SISMEMBER", sends, orphan]), db.run(["EXISTS", `nl:cm:mail:${orphan}:to`])], [0, 0]);
+  }
   done();
 }
 

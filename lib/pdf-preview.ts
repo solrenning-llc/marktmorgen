@@ -41,6 +41,7 @@ import { readFileWhole } from "@/lib/file-store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_STAMP_BYTES, type ProductFile, isPdf } from "@/lib/product-file";
 import { copyFolder, problemKey, roomNotedOut, writeWithinStorage } from "@/lib/pdf-stamp";
+import { releaseMark } from "@/lib/claim-mark";
 import type { CopyMeter } from "@/lib/stamp-cost-rules";
 import { type DataStore, dataUsed, keepFor } from "@/lib/store-data";
 import { contentRoomFor } from "@/lib/store-data-rules";
@@ -111,6 +112,8 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
   const key = previewKey(file, pages);
   // Whether this path failed once already, more than an hour ago (PREVIEW_RETRY_SECONDS).
   let failedOnce = false;
+  // The once-note as read, cleared by a success below (Claude 3 vyDE's LEVE on #5360).
+  let onceNote: string | null = null;
   try {
     if (isRedisConfigured()) {
       const replies = repliesFor(await redisPipeline([["GET", key], ["GET", problemKey(file.pathname)]]), 2);
@@ -133,6 +136,7 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
         const at = Number(noted.slice(ONCE.length));
         if (!Number.isSafeInteger(at) || Date.now() < at + PREVIEW_RETRY_SECONDS * 1000) return null;
         failedOnce = true;
+        onceNote = noted;
       }
       // A store whose room is full makes no new preview: the file is not read
       // for one that could not be kept. Unknown is refused the same way.
@@ -157,6 +161,11 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
       }
       throw error;
     }
+    // The PDF is proved good: its once-note goes, so a later passing failure on the same path (its preview pages
+    // changed, or no preview was kept for room) is a first failure again, never "unreadable" for 60 days at once
+    // (Claude 3 vyDE's LEVE on #5360). Only the note as read: a stamp note written meanwhile stays (compare and delete,
+    // lib/claim-mark.ts releaseMark, which never throws; a note it could not clear only makes the next failure the second).
+    if (onceNote !== null) await releaseMark(problemKey(file.pathname), onceNote);
     // Room for its record only once there is a preview to keep: a failure takes none.
     if (isRedisConfigured() && !(await keepFor(store, PREVIEW_RECORD_BYTES, PREVIEW_SECONDS))) return null;
     const base = file.name.replace(/\.pdf$/i, "") || "preview";

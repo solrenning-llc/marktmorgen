@@ -21,6 +21,13 @@ for (const [name, text] of Object.entries(sources)) {
   is(`${name}: says the refund comes once the provider confirms what it delivered`, /once\s+(our|the)\s+video\s+provider\s+confirms\s+what\s+it\s+delivered/.test(text), true);
 }
 
+part("A request the provider refuses is refunded at once, and every text says so (Claude 5 icEJ's LEVE on #5456)");
+is("the code refunds a refused request at once (requestAutoCaptions gives it back before answering)",
+  /would not write captions[\s\S]{0,200}giveBack\(pending, null, refundKey\)/.test(readFileSync("lib/auto-captions.ts", "utf8")), true);
+for (const [name, text] of Object.entries(sources)) {
+  is(`${name}: a refused request is refunded at once, not after the hours`, /refuses\s+the\s+request[^.]{0,80}refunded\s+at\s+once/.test(text), true);
+}
+
 part("The Terms and the help say what happens when the provider never confirms");
 is("the Terms name the extra days and the studio page that says whom to write to", /\{DELIVERY_LOOK_DAYS\}\s+(more\s+)?days/.test(sources.terms) && /says\s+so\s+and\s+gives\s+the\s+address\s+to\s+write\s+to/.test(sources.terms), true);
 is("the help says so in a sentence", /\$\{DELIVERY_LOOK_DAYS\}\s+(more\s+)?days/.test(sources.help), true);

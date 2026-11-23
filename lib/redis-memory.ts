@@ -1726,6 +1726,13 @@ export class MemoryRedis {
           this.run(["SET", marker, token, "EX", seconds]);
           return 1;
         }
+        // lib/mail-health.ts RAMP_SWAP: a store's portion record written only while it still holds the very text read.
+        if (key.startsWith("-- marktmorgen:mail-ramp-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, ramp, read, next, seconds] = args;
+          if (this.run(["GET", ramp]) !== read) return 0;
+          this.run(["SET", ramp, next, "EX", seconds]);
+          return 1;
+        }
         // DR1: one provider receipt and its campaign counter, atomically.
         if (key.startsWith("-- marktmorgen:mail-report:v1\n") && args[0] === "1" && args.length === 7) {
           const [, daily, receipt, aggregate, count, expiry, limit] = args;

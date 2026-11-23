@@ -309,6 +309,16 @@ async function pauseIfOver(id: string, now: number): Promise<Pause | null> {
 type Ramp = { size: number; left: number; opens: number };
 const rampKey = (id: string) => `nl:mail:ramp:${id}`;
 const RAMP_KEPT_SECONDS = 180 * 86_400;
+/** How many times rampRoom and rampBack read again when another sender changed the record in between. */
+export const RAMP_TRIES = 3;
+/**
+ * A store's portion record written only while it still holds the very text read (issue #4134): 1 written, with its
+ * expiry; 0 another sender changed it first, and nothing was written. Modelled by lib/redis-memory.ts.
+ */
+export const RAMP_SWAP = `-- marktmorgen:mail-ramp-swap:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3])
+return 1`;
 
 /** A single, explicit own response to one existing ramp command. */
 function rampReply(reply: unknown): { value: unknown } | null {
@@ -362,46 +372,61 @@ export async function rampRoom(id: string, want: number, now = Date.now()): Prom
   if (!id || !Number.isSafeInteger(want) || want <= 0 || !Number.isFinite(now) || !isRedisConfigured()) return 0;
   const key = rampKey(id);
   try {
-    const found = rampReply(await redisPipeline([["GET", key]]));
-    if (!found) return 0;
-    // Only confirmed absence means no portions are running. An unreadable
-    // checkpoint cannot authorize the whole requested audience.
-    if (found.value === null) return want;
-    let ramp = parseRamp(found.value);
-    if (!ramp) return 0;
-    const seconds = Math.floor(now / 1000);
-    if (ramp.left <= 0) {
-      if (seconds < ramp.opens) return 0;
-      const next = ramp.size * 2;
-      if (next > RAMP_LAST) {
-        // The confirmed final portion has finished; this only cleans up
-        // its existing checkpoint, without changing the progression.
-        await redisPipeline([["DEL", key]]);
-        return want;
+    // Written only over the very record read (RAMP_SWAP, issue #4134): two senders at once (the mail job's list email
+    // and the imports job's welcome mail run under different locks) each read the same `left`, and a plain SET handed
+    // the same capacity to both. The one that loses reads again; a write that keeps losing grants nothing this time.
+    for (let attempt = 0; attempt < RAMP_TRIES; attempt += 1) {
+      const found = rampReply(await redisPipeline([["GET", key]]));
+      if (!found) return 0;
+      // Only confirmed absence means no portions are running. An unreadable
+      // checkpoint cannot authorize the whole requested audience.
+      if (found.value === null) return want;
+      let ramp = parseRamp(found.value);
+      if (!ramp) return 0;
+      const seconds = Math.floor(now / 1000);
+      if (ramp.left <= 0) {
+        if (seconds < ramp.opens) return 0;
+        const next = ramp.size * 2;
+        if (next > RAMP_LAST) {
+          // The confirmed final portion has finished; this only cleans up
+          // its existing checkpoint, without changing the progression.
+          await redisPipeline([["DEL", key]]);
+          return want;
+        }
+        ramp = { size: next, left: next, opens: 0 };
       }
-      ramp = { size: next, left: next, opens: 0 };
+      const take = Math.min(want, ramp.left);
+      const left = ramp.left - take;
+      const after: Ramp = { size: ramp.size, left, opens: left === 0 ? seconds + RAMP_GAP_MINUTES * 60 : 0 };
+      const swapped = rampReply(await redisPipeline([["EVAL", RAMP_SWAP, 1, key, found.value as string, JSON.stringify(after), RAMP_KEPT_SECONDS]]));
+      if (swapped?.value === 1) return take;
+      if (swapped?.value === 0) continue;
+      // A missing or odd acknowledgement may have applied. Keep that capacity
+      // taken and grant no dispatch; do not refund or overwrite an uncertain write.
+      return 0;
     }
-    const take = Math.min(want, ramp.left);
-    const left = ramp.left - take;
-    const after: Ramp = { size: ramp.size, left, opens: left === 0 ? seconds + RAMP_GAP_MINUTES * 60 : 0 };
-    const saved = rampReply(await redisPipeline([["SET", key, JSON.stringify(after), "EX", RAMP_KEPT_SECONDS]]));
-    // A missing acknowledgement may have applied. Keep that capacity taken
-    // and grant no dispatch; do not refund or overwrite an uncertain write.
-    return saved?.value === "OK" ? take : 0;
+    return 0;
   } catch {
     return 0;
   }
 }
 
-/** Gives back what rampRoom took, for a batch that did not go out. */
+/**
+ * Gives back what rampRoom took, for a batch that did not go out, written only over the record read (RAMP_SWAP): a
+ * give-back racing a take never writes over it and hands its capacity out again (issue #4134). Best effort: one that
+ * keeps losing, or is not confirmed, leaves the capacity taken, the safe way to be wrong.
+ */
 export async function rampBack(id: string, n: number): Promise<void> {
   if (!id || n <= 0 || !isRedisConfigured()) return;
   const key = rampKey(id);
-  const [raw] = await redisPipeline([["GET", key]]);
-  const ramp = parseRamp(raw);
-  if (!ramp) return;
-  const after: Ramp = { size: ramp.size, left: Math.min(ramp.size, ramp.left + n), opens: 0 };
-  await redisPipeline([["SET", key, JSON.stringify(after), "EX", RAMP_KEPT_SECONDS]]);
+  for (let attempt = 0; attempt < RAMP_TRIES; attempt += 1) {
+    const [raw] = await redisPipeline([["GET", key]]);
+    const ramp = parseRamp(raw);
+    if (!ramp) return;
+    const after: Ramp = { size: ramp.size, left: Math.min(ramp.size, ramp.left + n), opens: 0 };
+    const swapped = rampReply(await redisPipeline([["EVAL", RAMP_SWAP, 1, key, raw as string, JSON.stringify(after), RAMP_KEPT_SECONDS]]));
+    if (swapped?.value !== 0) return;
+  }
 }
 
 /** What an email waiting for its next portion says in the studio. */

@@ -91,6 +91,21 @@ test("a rate only where the page writes one", () => {
   assert.equal(ukProductRateBps(fivePercent.section, fivePercent.item, day), 500);
 });
 
+const PRINT = "Printing, postage, publications — books, magazines and newspapers";
+test("a row whose own note says some of its items are at another rate: refused, never 0% (Claude 6 hsz3, 7094213497)", () => {
+  // "Publications ... Some items are standard-rated such as exercise books, letterheads, posters": which item is which
+  // is not in this table, so the row gives no rate.
+  assert.equal(ukProductRateBps(PRINT, "Publications", day), null);
+  // "Houseboats — sale or let out on hire ... But holiday accommodation let in a moored houseboat is standard-rated".
+  assert.equal(ukProductRateBps("Transport, freight, travel and vehicles", "Houseboats — sale or let out on hire", day), null);
+  // Rows whose note only cites the notice keep their rate.
+  for (const item of ["Books", "Magazines", "Newspapers"]) assert.equal(ukProductRateBps(PRINT, item, day), 0, item);
+  // A note about other goods than the row's own (industrial water) leaves the row's rate as the page writes it.
+  const water = UK_VAT_PRODUCT_RATES.find((row) => row.item === "Water supplied to households");
+  assert.ok(water);
+  assert.equal(ukProductRateBps(water.section, water.item, day), 0);
+});
+
 test("exempt, conditional, outside the scope, unknown, disagreeing or out of date: refused, never 0%", () => {
   for (const row of UK_VAT_PRODUCT_RATES.filter((r) => !["0%", "5%", "Standard-rated"].includes(r.rate))) {
     const same = UK_VAT_PRODUCT_RATES.filter((r) => r.section === row.section && r.item === row.item);

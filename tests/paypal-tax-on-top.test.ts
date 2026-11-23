@@ -44,6 +44,9 @@ async function main(): Promise<void> {
   part("The creator is told, in plain words");
   const page = readFileSync(join(process.cwd(), "app/studio/tax/page.tsx"), "utf8");
   is("the tax page says PayPal is not offered while tax is added on top", page.includes("PayPal is not offered at checkout while tax is added on top of your prices"), true);
+  // Claude 1's LEVE on #5243: the sentence only where PayPal would otherwise be offered, and "by card" only where the card checkout sells.
+  is("the sentence only where PayPal would otherwise be offered", /sellsThroughPayPal\(store\) && taxOnTop\(store\)/.test(page), true);
+  is("\"by card\" only where the store sells by card", /canSell\(store\) \? " Buyers pay by card through Stripe\." : " Buyers cannot pay until you connect Stripe or turn off tax on top\."/.test(page), true);
   is("the PayPal checkout route asks paypalReady", readFileSync(join(process.cwd(), "app/api/store/paypal/checkout/route.ts"), "utf8").includes("paypalReady(store, product)"), true);
 
   done();

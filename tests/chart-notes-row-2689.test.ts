@@ -19,6 +19,8 @@ import { claimHandle, ensureStatsId, storeForEmail, type Store } from "@/lib/sto
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { POST as notesRoute } from "@/app/api/store/notes/route";
 import { NumbersNotes } from "@/components/numbers-notes";
+import { StatsPanel } from "@/components/stats-panel";
+import { readStats, studioStats, type StatsData } from "@/lib/stats";
 import { store as redis } from "./redis-stub";
 import { mount } from "./client-hooks";
 import { done, is, part } from "./check";
@@ -99,8 +101,15 @@ async function main(): Promise<void> {
   {
     const page = readFileSync("app/studio/page.tsx", "utf8");
     is("the page's reading of the notes answers null on a failure, not []", [/readNotes\(current\.statsId\)\.catch\(\(\) => \[\]\)/.test(page), /readNotes\(current\.statsId\)\.catch\(\(\): null => null\)/.test(page)], [false, true]);
-    const panel = readFileSync("components/stats-panel.tsx", "utf8");
-    is("the panel tells the notes list when they could not be read", panel.includes("unread={notesRead === null}"), true);
+    // The real panel, rendered (Claude 2 upbeat's LEVE on #5401, as tests/ad-spend-unread-shown.test.ts renders it).
+    const store = await liveStore();
+    const stats = await readStats(store, NOW);
+    if (!stats) throw new Error("no stats");
+    const data = studioStats(store, stats, null, "none", []) as StatsData;
+    const unreadPanel = renderToStaticMarkup(createElement(StatsPanel, { data, canExport: false, askHeard: false, spends: [], notes: null }));
+    is("the panel with notes that could not be read says so", unreadPanel.includes("Your notes could not be read just now"), true);
+    const nonePanel = renderToStaticMarkup(createElement(StatsPanel, { data, canExport: false, askHeard: false, spends: [], notes: [] }));
+    is("the panel with no notes says nothing of the kind", nonePanel.includes("could not be read just now"), false);
     const html = renderToStaticMarkup(createElement(NumbersNotes, { notes: [], unread: true, onChange: () => {}, from: "2026-11-01", to: DAY, today: DAY }));
     is("the list says the notes could not be read, in a status region", /role="status"[^>]*>Your notes could not be read just now/.test(html), true);
     is("and that nothing was deleted", html.includes("Nothing was deleted."), true);

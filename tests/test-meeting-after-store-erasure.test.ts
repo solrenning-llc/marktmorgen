@@ -123,6 +123,11 @@ async function main(): Promise<void> {
   // allowances the studio unit carries.
   part("The real test and move-test routes stay within the studio and integration units they take first");
   const allowed = (kind: string) => redis.keys().filter((k) => k.startsWith(`nl:allow:${kind}:`)).reduce((n, k) => n + Number(redis.run(["GET", k]) ?? 0), 0);
+  // The commands the studio and integration units price (tests/plan-cost-registry.ts UNIT_COST), tied to the registry.
+  const STUDIO_COMMANDS = 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, INTEGRATION_COMMANDS = 10 + TAKE_COMMANDS;
+  const UNIT_COMMANDS = STUDIO_COMMANDS + INTEGRATION_COMMANDS;
+  is("the studio unit is priced at these commands", request("studio", STUDIO_COMMANDS, 50_000), UNIT_COST.studio);
+  is("the integration unit is priced at these commands", request("wait", INTEGRATION_COMMANDS, 21_024), UNIT_COST.integration);
   for (const action of ["test", "movetest"] as const) {
     const store = await fixture();
     if (action === "movetest") await makeTest(store, "zoom");
@@ -145,7 +150,10 @@ async function main(): Promise<void> {
       console.log("TEST_MEETING_ROUTE_COST", action, JSON.stringify({ external, scriptCalls: redis.scriptCalls - before, keeps, measured }));
       is(`${action}: kept once, through the fence`, keeps, 1);
       is(`${action}: the studio and integration units are both taken before the provider is called`, takenFirst, [true, true]);
-      is(`${action}: inside those two units (${measured} commands)`, request("studio", measured, 50_000) <= UNIT_COST.studio + UNIT_COST.integration, true);
+      // Held against the commands the two units price, not their dollars: the integration unit's dollars mostly price
+      // its wait, which this route spends on the provider call, so a dollar check would let 74 commands pass where the
+      // two units price 41 (Claude 4 AC's LEVE on #5221). Each figure is tied to UNIT_COST so a change there shows here.
+      is(`${action}: inside those two units' commands (${measured} of ${UNIT_COMMANDS})`, measured <= UNIT_COMMANDS, true);
     } finally { redis.pipeline = counting; atProvider = null; }
   }
 

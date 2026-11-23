@@ -200,6 +200,12 @@ export type Undo = {
   t?: 1;
   /** It was paid before the closing day began: it came too late to stop the closing, not after it began. */
   e?: 1;
+  /**
+   * One of its invoices is still open with an amount remaining (Stripe does not void an invoice with money on it): the
+   * settled entry is looked at again past DONE_KEEP_DAYS until none is, so a payment made on it later is given back
+   * (#5285 row #3274; Claude 7 xAF's LEVE on #5344).
+   */
+  o?: 1;
 };
 
 /** Stripe: a refund can fail up to 30 days after it was asked for (docs.stripe.com/refunds, "Handle failed refunds", read 30/10/2026). A settled one is looked at again until then, and a little after. */
@@ -450,6 +456,7 @@ function readUndo(raw: unknown): Undo | null {
       ...(typeof value.done === "number" ? { done: value.done } : {}),
       ...(value.t === 1 ? { t: 1 as const } : {}),
       ...(value.e === 1 ? { e: 1 as const } : {}),
+      ...(value.o === 1 ? { o: 1 as const } : {}),
     };
   } catch {
     return null;
@@ -597,6 +604,8 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
     // plan is kept in line (catch below), never settled as having had no payment.
     const invoices = await allRows("/invoices", new URLSearchParams({ subscription: id, limit: "100" }), invoiceKnown(id), 10, OBJECT_ID);
     let settled = true;
+    // An invoice still open with an amount remaining, or one whose remaining amount does not read: still payable.
+    let openRest = false;
     let returned = 0;
     let disputed = 0;
     let currency = "usd";
@@ -605,6 +614,7 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
       if (!OBJECT_ID.test(invoiceId)) continue;
       // Read by invoiceKnown: amount_paid is a whole number whatever the status.
       const amountPaid = invoice.amount_paid as number;
+      if (invoice.status === "open" && amountPaid > 0 && ownField(invoice, "amount_remaining") !== 0) openRest = true;
       if (amountPaid === 0) {
         if (invoice.status === "open") {
           await onPlatform("POST", `/invoices/${encodeURIComponent(invoiceId)}/void`, new URLSearchParams(), { version: AT, idempotencyKey: `closing-plan-void:${invoiceId}` });
@@ -646,7 +656,15 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
       }
     }
     if (!settled) return keep("a refund is not made in full yet");
-    if (entry.done) return true;
+    if (entry.done) {
+      // A recheck keeps the mark of an invoice still open in line with what Stripe says now.
+      if (Boolean(entry.o) !== openRest) {
+        const { o: _open, ...rest } = entry;
+        void _open;
+        await redisPipeline([["HSET", UNDO_KEY, id, JSON.stringify({ ...rest, ...(openRest ? { o: 1 } : {}) })]]);
+      }
+      return true;
+    }
     // The store's own plan, started before its last plan ended and never paid since the closing day began: ended
     // so it can charge no more, and no letter (there is no payment to speak of, and it was not started anew).
     const own = before && returned === 0 && disputed === 0;
@@ -657,7 +675,7 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
       await redisPipeline([["HSET", UNDO_KEY, id, JSON.stringify(entry)]]);
     }
     // Settled: only its dates are kept, for a retry or a recheck to find (no address, no customer, no name).
-    await redisPipeline([["HSET", UNDO_KEY, id, JSON.stringify({ h: "", c: "", to: "", name: "", since: entry.since, ...(entry.ended ? { ended: entry.ended } : {}), at: entry.at, n: entry.n, done: Date.now(), t: 1, ...(entry.e ? { e: 1 } : {}) })]]);
+    await redisPipeline([["HSET", UNDO_KEY, id, JSON.stringify({ h: "", c: "", to: "", name: "", since: entry.since, ...(entry.ended ? { ended: entry.ended } : {}), at: entry.at, n: entry.n, done: Date.now(), t: 1, ...(entry.e ? { e: 1 } : {}), ...(openRest ? { o: 1 } : {}) })]]);
     return true;
   } catch (error) {
     return keep("Stripe did not answer", error);
@@ -725,8 +743,9 @@ export async function retryPlanUndos(deadline: number): Promise<{ settled: numbe
     }
     const [raw] = await redisPipeline([["HGET", UNDO_KEY, id]]);
     const entry = readUndo(raw);
-    // Settled long enough ago that no refund can still come back and no retry still come: taken out.
-    if (entry?.done && Date.now() - entry.done > DONE_KEEP_DAYS * 86_400_000) {
+    // Settled long enough ago that no refund can still come back and no retry still come: taken out, unless one of its
+    // invoices is still open with an amount remaining, which can still be paid (o).
+    if (entry?.done && !entry.o && Date.now() - entry.done > DONE_KEEP_DAYS * 86_400_000) {
       await redisPipeline([["HDEL", UNDO_KEY, id]]);
       continue;
     }

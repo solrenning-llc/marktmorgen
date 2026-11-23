@@ -22,6 +22,7 @@
  */
 import { decimalsOf, isCurrency } from "@/lib/money";
 import { DISPUTE_RESERVE_BPS, PROVIDER_FEES, REFUND_RESERVE_BPS, REMITTANCE_BPS } from "@/lib/receiving-costs";
+import { httpsSource } from "@/lib/reviewed-https-source";
 
 /**
  * One reviewed allowance, in basis points. Without `against`: the exchange-rate movement between a sale and the payment
@@ -69,19 +70,6 @@ function up(cents: number, bps: number): number {
 /** A review day is a real UTC calendar day, not only a string with a date's shape. */
 function reviewedDay(day: string): boolean {
   return typeof day === "string" && DAY.test(day) && new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) === day;
-}
-
-/** A source must name a parseable HTTPS location; a bare scheme has no page to review. */
-function httpsSource(source: string): boolean {
-  // The page's own address as written: "https://" and then a domain, so "https:x" and "https:///x", which `new URL`
-  // reads as host "x", name no page (Claude 2's NIT on #5024, 7061724274).
-  if (typeof source !== "string" || !source.startsWith("https://")) return false;
-  try {
-    const url = new URL(source);
-    return url.protocol === "https:" && /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(url.hostname) && source.slice("https://".length).toLowerCase().startsWith(url.hostname);
-  } catch {
-    return false;
-  }
 }
 
 /** The dearer allowance in force today for the currency (and, for a period-rate gap, against the return's), or null. */

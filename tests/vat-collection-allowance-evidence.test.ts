@@ -14,6 +14,8 @@ for (const [name, patch] of [
   ["HTTPS scheme with no slashes", { source: "https:x" }],
   ["HTTPS with an empty authority", { source: "https:///x" }],
   ["a host with no domain", { source: "https://x/fx" }],
+  // Claude 5's NIT on #5334 (7099077097): an IP literal is dotted but names no domain to review.
+  ["an IP literal instead of a domain", { source: "https://1.2.3.4/fx" }],
 ] as const) test(`unreadable allowance evidence stays unknown: ${name}`, () => {
   assert.equal(vatCollectionCostOf(10000, "eur", [{ ...valid, ...patch }], now), null);
 });

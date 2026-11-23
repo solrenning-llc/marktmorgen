@@ -70,7 +70,8 @@ function main(): void {
   // Claude 2's NIT on #5024 (7061724274), the same check here: a source written "https:x" or "https:///x", which `new URL`
   // reads as host "x", is no address of a page, so the row gives no rate.
   const december = HMRC_PERIOD_RATES.filter((row) => row.month === "2026-12");
-  for (const source of ["https:x", "https:///x", "https://x/file.csv"]) {
+  // Claude 5's NIT on #5334 (7099077097): an IP literal such as 1.2.3.4 is dotted but names no domain to review.
+  for (const source of ["https:x", "https:///x", "https://x/file.csv", "https://1.2.3.4/file.csv"]) {
     is(`a source written ${source}: unknown`, hmrcPeriodRate("eur", "2026-12-01", december.map((row) => ({ ...row, source }))), null);
   }
   is("the exact HTTPS address still gives the rate", hmrcPeriodRate("eur", "2026-12-01", december)?.perPound, files.get("2026-12")!.get("EUR")![0].rate);

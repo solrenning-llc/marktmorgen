@@ -14,6 +14,7 @@
  * Pure: no IO.
  */
 import type { UkSterlingRate } from "@/lib/uk-vat";
+import { httpsSource } from "@/lib/reviewed-https-source";
 
 export type HmrcPeriodRate = Readonly<{
   /** The calendar month the rate applies to, YYYY-MM. */
@@ -74,18 +75,6 @@ function realDay(value: unknown): value is string {
   if (typeof value !== "string" || !DAY.test(value)) return false;
   const time = Date.parse(`${value}T00:00:00Z`);
   return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value;
-}
-
-function httpsSource(value: unknown): boolean {
-  // The page's own address as written: "https://" and then a domain, so "https:x" and "https:///x", which `new URL`
-  // reads as host "x", name no page (Claude 2's NIT on #5024, 7061724274).
-  if (typeof value !== "string" || !value.startsWith("https://")) return false;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(url.hostname) && value.slice("https://".length).toLowerCase().startsWith(url.hostname);
-  } catch {
-    return false;
-  }
 }
 
 function positiveRate(value: unknown): value is string {

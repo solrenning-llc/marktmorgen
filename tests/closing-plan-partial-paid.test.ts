@@ -23,7 +23,7 @@
  */
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { UNDO_KEY, settleOne } from "@/lib/closing-plan-guard";
+import { DONE_KEEP_DAYS, UNDO_KEY, retryPlanUndos, settleOne } from "@/lib/closing-plan-guard";
 import { redisPipeline } from "@/lib/redis";
 
 const S = (ms: number) => Math.floor(ms / 1000);
@@ -201,6 +201,28 @@ async function main() {
     is("the creator is told once, honestly", [told.length, told[0]?.text.includes("$20 in full")], [1, true]);
     is("a recheck asks for no second refund and writes no second letter", [await settleOne(one.id, true), refundsOf("pi_openpart02"), lettersTo(one.to).length], [true, [2_000], 1]);
   }
+  // Claude 7 xAF's LEVE on #5344 (the form ibqho chose, 4a1d): the open invoice stays payable, so while it is open
+  // with an amount remaining the settled entry is looked at again past DONE_KEEP_DAYS; a payment made then is given back.
+  part("The rest of that open invoice paid on day 41: still seen and given back");
+  {
+    const before = refundsOf("pi_openpart02late").length;
+    // Settled more than DONE_KEEP_DAYS ago.
+    const [raw] = await redisPipeline([["HGET", UNDO_KEY, "sub_openpart02"]]);
+    const settledEntry = JSON.parse(String(raw)) as Record<string, unknown>;
+    await redisPipeline([["HSET", UNDO_KEY, "sub_openpart02", JSON.stringify({ ...settledEntry, done: Date.now() - (DONE_KEEP_DAYS + 1) * DAY })]]);
+    await retryPlanUndos(Date.now() + 60_000);
+    is("past DONE_KEEP_DAYS, an entry whose invoice is still open with money left is kept", (await redisPipeline([["HGET", UNDO_KEY, "sub_openpart02"]]))[0] !== null, true);
+    // The creator pays the remaining $49 through the hosted invoice page: the invoice is now paid.
+    const invoice = world.invoices.find((row) => row.id === "in_openpart02")!;
+    Object.assign(invoice, { status: "paid", amount_paid: 6_900, amount_remaining: 0 });
+    world.payments.set("in_openpart02", [paidPart("in_openpart02", "pi_openpart02", 2_000, S(day) + 120), paidPart("in_openpart02", "pi_openpart02late", 4_900, S(day) + 41 * 86_400)]);
+    world.charges.set("pi_openpart02late", 4_900);
+    await retryPlanUndos(Date.now() + 60_000);
+    is("the late payment is given back in full, once", [refundsOf("pi_openpart02late").length - before, refundsOf("pi_openpart02late")[0]], [1, 4_900]);
+    await retryPlanUndos(Date.now() + 60_000);
+    is("with nothing left open, the entry past DONE_KEEP_DAYS is taken out", (await redisPipeline([["HGET", UNDO_KEY, "sub_openpart02"]]))[0], null);
+  }
+
   for (const [name, label, rest] of [
     ["openpart03", "an open payment that is not the default", { is_default: false, amount_requested: 4_900 }],
     ["openpart04", "a default payment for another amount than what remains", { is_default: true, amount_requested: 2_000 }],

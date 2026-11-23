@@ -84,7 +84,18 @@ export type AnnouncementJob = {
    * is read for it.
    */
   space?: string;
+  /**
+   * While it waits on a store switched off or a plan without email: not looked at again before this time (ms), so a
+   * held send costs a read of its record a run, never the store's and a write (#5285 row #3406). Absent otherwise.
+   */
+  retryAt?: number;
 };
+
+/**
+ * How long a send held for a store switched off, or for a plan without email, waits between looks: an hour, as a
+ * broadcast's LIST_RETRY_SECONDS (lib/broadcasts.ts), never every run of the mail job (Claude 1's MEDIUM 1 on #3406).
+ */
+export const ANNOUNCEMENT_RETRY_SECONDS = 3_600;
 
 function parse(raw: unknown): AnnouncementJob | null {
   if (typeof raw !== "string") return null;
@@ -402,6 +413,8 @@ export async function advanceAnnouncement(
       await redisPipeline([["SREM", QUEUE, id]]);
       return job;
     }
+    // Held for a store switched off or a plan without email: looked at again only once its hour is past.
+    if (job.status === "waiting" && typeof job.retryAt === "number" && Date.now() < job.retryAt) return job;
     const store = await load(job.handle);
     const config = store?.community?.id === job.community ? await readConfig(job.community) : null;
     if (!store || !config) {
@@ -413,16 +426,16 @@ export async function advanceAnnouncement(
     // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule 24):
     // nobody is read, reserved or emailed. It waits in line, saying so, and goes on by itself once the store is back on.
     if (store.suspended) {
-      job = { ...job, status: "waiting", note: job.done > 0 ? "Your store is switched off after notices about its content, so nothing more was sent. The rest go out by themselves once your store is back on." : "Your store is switched off after notices about its content, so nothing was sent. It goes out by itself once your store is back on." };
+      job = { ...job, status: "waiting", note: job.done > 0 ? "Your store is switched off after notices about its content, so nothing more was sent. The rest go out by themselves once your store is back on." : "Your store is switched off after notices about its content, so nothing was sent. It goes out by itself once your store is back on.", retryAt: Date.now() + ANNOUNCEMENT_RETRY_SECONDS * 1000 };
       await save(job);
       return job;
     }
     if (monthlyAllowance(store) === 0 || !store.mail) {
-      job = { ...job, status: "waiting", note: "Your plan does not include email right now. It goes out once Pro is on again." };
+      job = { ...job, status: "waiting", note: "Your plan does not include email right now. It goes out once Pro is on again.", retryAt: Date.now() + ANNOUNCEMENT_RETRY_SECONDS * 1000 };
       await save(job);
       return job;
     }
-    job = { ...job, status: "sending", note: "" };
+    job = { ...job, status: "sending", note: "", retryAt: undefined };
     const community = job.community;
 
     while (job.done < job.total && Date.now() < deadline) {

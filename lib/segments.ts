@@ -423,6 +423,6 @@ export async function forgetLedgerCopy(statsId: string | null): Promise<number> 
   const gone = countOf(repliesFor(await redisPipeline([["DEL", ledgerKey(statsId)]]), 1)?.[0]);
   // Never 0 removed on a reply of another shape (CX-123 rule 24): thrown, so the erasure says this part did not finish (lib/person-erasure.ts).
   // One key: only 0 or 1 is a possible answer.
-  if (gone === null || gone > 1) throw new UnknownReplyError("the deletion of the buyers' ten-minute copy");
+  if (gone === null || gone > 1) throw new UnknownReplyError("the deletion of the buyers' one-hour copy");
   return gone;
 }

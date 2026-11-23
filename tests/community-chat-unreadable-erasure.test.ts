@@ -27,6 +27,9 @@ for (const [label, row] of [
   ["a row that is an array", `["${MEMBER}"]`],
   ["a row whose author is not text", JSON.stringify({ i: 4, a: 7, text: "x", at: 102 })],
   ["a row with no author", JSON.stringify({ i: 5, text: "x", at: 103 })],
+  // Claude 2 main's LEVE on #5199 (7089084006): JSON.parse keeps only the last of a repeated key, so a damaged row
+  // naming the member first and someone else last would read as someone else's and keep the member's text.
+  ["a row whose author key is repeated", `{"i":6,"a":"${MEMBER}","text":"Private","at":104,"a":"${OTHER}"}`],
 ] as [string, string][]) {
   test(`${label}: the erasure is not done, and nothing is deleted`, async () => {
     redis.clear();

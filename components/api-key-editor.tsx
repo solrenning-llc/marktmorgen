@@ -145,6 +145,13 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] | "unread" }) {
           What each address returns
         </Link>
       </p>
+      <p className="mt-2 text-ink-soft">
+        An AI assistant that uses a key to prepare changes never changes your store by itself: what it prepares waits for
+        you to confirm on{" "}
+        <Link href="/studio/agent" className="font-semibold text-ink underline underline-offset-4">
+          What the AI proposes
+        </Link>
+      </p>
 
       {made ? (
         <div className="notice notice-success mt-5" role="status">

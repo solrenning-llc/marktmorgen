@@ -27,8 +27,15 @@ const source = readFileSync("lib/meet-connect.ts", "utf8");
 /** The script as lib/meet-connect.ts defines it; "" when it does not, which its own test below fails on. */
 const K = source.match(/const KEEP_UNLESS_GONE = `([\s\S]*?)`;/)?.[1] ?? "";
 
+/** forgetUser's mark that never goes down (MARK_GONE, Claude 3's LEVE on #5368); "" when it is not defined. */
+const G = source.match(/const MARK_GONE = `([\s\S]*?)`;/)?.[1] ?? "";
+
 test("lib/meet-connect.ts defines the script", () => {
   assert.match(K, /^-- marktmorgen:meet-keep:v1\n/);
+});
+
+test("lib/meet-connect.ts defines the mark's script", () => {
+  assert.match(G, /^-- marktmorgen:meet-gone:v1\n/);
 });
 
 type Arg = string | number;
@@ -87,6 +94,26 @@ const CASES: Case[] = [
   keep("a negative key count one past 64 bits is out of range", [], ["-9223372036854775809", ...KEYS, "T", "J", 1001, "s1"], { error: OUT_OF_RANGE }),
   keep("the largest key count within 64 bits is more keys than arguments", [], ["9223372036854775807", ...KEYS, "T", "J", 1001, "s1"], { error: TOO_MANY }),
 ];
+
+// MARK_GONE: the mark's value and whether it expires, after the call.
+const MARK_STATE: Arg[][] = [["GET", "gone"], ["TTL", "gone"]];
+const mark = (name: string, setup: Arg[][], run: Arg[], reply: Reply, state: unknown[]): Case => ({ name, setup, run: ["EVAL", G, ...run], reply, after: MARK_STATE, state });
+const marking = (at: Arg = 1500, seconds: Arg = 86400): Arg[] => [1, "gone", at, seconds];
+CASES.push(
+  mark("marks an account with no mark yet", [], marking(), 1, ["1500", "ttl"]),
+  mark("raises an older mark", [["SET", "gone", "1000"]], marking(), 1, ["1500", "ttl"]),
+  mark("never lowers a newer mark, and renews its expiry", [["SET", "gone", "2000"]], marking(), 2, ["2000", "ttl"]),
+  mark("keeps a mark at the same time", [["SET", "gone", "1500"]], marking(), 2, ["1500", "ttl"]),
+  mark("keeps a mark that does not read as a time (gone for every flow)", [["SET", "gone", "soon"]], marking(), 2, ["soon", "ttl"]),
+  mark("keeps a mark longer than sixteen digits", [["SET", "gone", "12345678901234567"]], marking(), 2, ["12345678901234567", "ttl"]),
+  mark("a time of 0 is refused", [], marking(0), -1, [null, -2]),
+  mark("a time with a leading zero is refused", [], marking("01500"), -1, [null, -2]),
+  mark("a time longer than sixteen digits is refused", [], marking("12345678901234567"), -1, [null, -2]),
+  mark("an expiry that is not a whole number is refused", [["SET", "gone", "1000"]], marking(1500, "1.5"), -1, ["1000", -1]),
+  mark("a key too many is refused", [], [2, "gone", "more", 1500, 86400], -1, [null, -2]),
+  mark("an argument too few is refused", [], [1, "gone", 1500], -1, [null, -2]),
+  mark("a twenty-digit key count is Redis's own error", [], ["99999999999999999999", "gone", 1500, 86400], { error: OUT_OF_RANGE }, [null, -2]),
+);
 
 function onStandIn(c: Case): { reply: unknown; state: unknown[] } {
   const store = new MemoryRedis();

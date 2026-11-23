@@ -247,6 +247,22 @@ async function main(): Promise<void> {
   is("a removal time in the future marks the notice's own time", redis.run(["GET", goneMark]) !== null && Number(redis.run(["GET", goneMark])) <= realNow() - 59_000, true);
   is("so a flow begun after the notice connects", (await consent(one.statsId, realNow())).ok, true);
 
+  part("Claude 3's LEVE on #5368: a late retry of an older notice never lowers a newer removal's mark");
+  await reset();
+  // Removed a minute ago (T1), connected again, removed again twenty seconds ago (T2): T2's notice was acted on, then
+  // Zoom retries T1's notice late. A flow begun between the two removals ended with the second: it stays refused.
+  const secondRemoval = realNow() - 20_000;
+  noticeRemovedAt = secondRemoval;
+  await forgetNow();
+  noticeRemovedAt = realNow() - 60_000;
+  await forgetNow();
+  is("the late retry of the older notice forgot nothing", forgotNow, []);
+  is("the mark still holds the newer removal's time", redis.run(["GET", goneMark]), String(secondRemoval));
+  noticeRemovedAt = undefined;
+  is("a flow begun between the two removals is refused as removed", await consent(one.statsId, realNow() - 30_000), { ok: false, error: "removed" });
+  is("nothing kept", kept(one.statsId), [0, 0]);
+  is("a flow begun after the newer removal still connects", (await consent(two.statsId, realNow())).ok, true);
+
   part("A consent flow older than any consent can be keeps nothing");
   await reset();
   const stale = await consent(one.statsId, realNow() - 21 * 60_000);
@@ -267,7 +283,7 @@ async function main(): Promise<void> {
   part("The deletion's own mark not confirmed: unknown, nothing deleted");
   await reset();
   is("connected (set-up)", (await consent(one.statsId)).ok, true);
-  weird = { match: (c) => String(c[0]).toUpperCase() === "SET" && String(c[1]).startsWith("nl:meet:gone:"), reply: "QUEUED" };
+  weird = { match: (c) => String(c[0]).toUpperCase() === "EVAL" && String(c[1]).startsWith("-- marktmorgen:meet-gone:v1\n"), reply: "QUEUED" };
   await forgetNow();
   is("the deletion is not answered as done", typeof forgotNow === "string" && forgotNow.startsWith("threw"), true);
   is("the connection and the index are kept for Zoom's retry", kept(one.statsId), [1, 1]);

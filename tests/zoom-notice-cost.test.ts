@@ -80,7 +80,8 @@ async function main(): Promise<void> {
   const route = source("app/api/integrations/zoom/deauthorize/route.ts");
   is("the stores a pass walks are FORGET_PASS", line.storesPerPass, FORGET_PASS);
   is("the mark is kept GONE_SECONDS", line.markSeconds, numberIn(meet, /const GONE_SECONDS = ([\d_]+);/));
-  is("the mark is written with GONE_SECONDS as its expiry", /\["SET", goneKey\(provider, accountId\), String\(markedAt\), "EX", GONE_SECONDS\]/.test(meet), true);
+  is("the mark is written with GONE_SECONDS as its expiry", /\["EVAL", MARK_GONE, 1, goneKey\(provider, accountId\), String\(markedAt\), GONE_SECONDS\]/.test(meet), true);
+  is("and its script sets it with that expiry, as the line counts it (EVAL, GET, SET)", /const MARK_GONE = `[\s\S]*?redis\.call\("GET", KEYS\[1\]\)[\s\S]*?redis\.call\("SET", KEYS\[1\], ARGV\[1\], "EX", ARGV\[2\]\)/.test(meet), true);
   is("the notices one address may send in a minute are the route's PER_MINUTE", line.noticesPerAddressMinute, numberIn(route, /const PER_MINUTE = ([\d_]+);/));
   is("the route counts them per address a minute", /withinLimit\("zoom-notice", clientAddress\(request\), PER_MINUTE, 60\)/.test(route), true);
   is("each store's lock waits what forgetUser waits", line.lockWaitMs, numberIn(meet, /withLock\(refreshLockKey\(statsId, provider\), 20, ([\d_]+), async \(\) =>/));
@@ -116,8 +117,9 @@ async function main(): Promise<void> {
   is("the pass stops at FORGET_PASS and says the rest wait", outcome instanceof IncompleteForget, true);
   is("it forgot FORGET_PASS stores", outcome instanceof IncompleteForget ? outcome.forgot.length : -1, FORGET_PASS);
   const scripts = sent.filter((c) => String(c[0]).toUpperCase() === "EVAL");
-  is("its only scripts are the locks let go", scripts.every((c) => String(c[1]).startsWith("-- marktmorgen:release:v1\n")), true);
-  // A script is counted as itself and the two commands it runs (GET, DEL), as the line counts it.
+  const named = (c: Command, name: string) => String(c[1]).startsWith(`-- marktmorgen:${name}:v1\n`);
+  is("its only scripts are the locks let go and the one mark", scripts.every((c) => named(c, "release") || named(c, "meet-gone")) && scripts.filter((c) => named(c, "meet-gone")).length === 1, true);
+  // A script is counted as itself and the two commands it runs (the lock's GET and DEL, the mark's GET and SET), as the line counts it.
   const measured = sent.length + 2 * scripts.length;
   const linePerPass = line.forgetFixedCommands + line.storesPerPass * (line.lockTries + line.storeCommandsAfterLock);
   is("the pass sends, each lock taken at its first try, what the line counts with one try a store", measured, line.forgetFixedCommands + line.storesPerPass * (1 + line.storeCommandsAfterLock));

@@ -4053,8 +4053,8 @@ export const PAYPAL_WATCH_LOOKS = { looksPerOrderWatched: 410, lateLookSeconds: 
  * notice at its most:
  * - guardCommands: the route's own guard, withinLimit's INCR and EXPIRE, claimMark's SET NX and its read back, and
  *   releaseMark's script (EVAL, GET, DEL) when the notice is let go for Zoom's retry;
- * - forgetFixedCommands: the deletion's mark (SET ... EX GONE_SECONDS) and the read of the user's stores (SMEMBERS),
- *   one pipeline;
+ * - forgetFixedCommands: the deletion's mark, never lowered (MARK_GONE: EVAL, GET, SET ... EX GONE_SECONDS; Claude 3's
+ *   LEVE on #5368), and the read of the user's stores (SMEMBERS), one pipeline;
  * - for each of at most storesPerPass (FORGET_PASS) stores: its renewal lock tried lockTries times in lockWaitMs
  *   (lib/redis-lock.ts takeLock, waits of 20 ms doubling to 250 ms), then storeCommandsAfterLock: the connection's
  *   GET, its DEL, the test mark's DEL and the store's SREM from the index, and the lock let go (EVAL, GET, DEL);
@@ -4068,7 +4068,7 @@ export const PAYPAL_WATCH_LOOKS = { looksPerOrderWatched: 410, lateLookSeconds: 
 export const ZOOM_NOTICE_FORGET = {
   noticesPerAddressMinute: 120,
   guardCommands: 7,
-  forgetFixedCommands: 2,
+  forgetFixedCommands: 4,
   storesPerPass: 50,
   lockWaitMs: 9_000,
   lockTries: 39,

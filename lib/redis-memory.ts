@@ -4232,6 +4232,7 @@ export class MemoryRedis {
           this.run(["HSET", teams, product, value]);
           return 1;
         }
+        if (key.startsWith("-- marktmorgen:meet-gone:v1\n")) return this.meetGone(args);
         if (key.startsWith("-- marktmorgen:meet-keep:v1\n")) return this.meetKeep(args);
         // The take scripts and their kin, mirrored from the tests' stand-in (lib/redis-memory-take.ts), by the name on the
         // script's first line, so `next dev` and the demo store run them too (#4969's Mobile render). Last, before the
@@ -5322,6 +5323,26 @@ export class MemoryRedis {
    * what a request is billed, not only what it sends (tests/traffic.test.ts).
    */
   scriptCalls = 0;
+
+  /**
+   * lib/meet-connect.ts MARK_GONE, step for step: the mark of an account's deletion that never goes down, 1 when it
+   * now holds the time given, 2 when the mark there is at or after it (or does not read as a time) and is kept with its
+   * expiry renewed, -1 for a call of any other shape (tests/meet-redis-scripts.test.ts holds it to Redis).
+   */
+  private meetGone(args: string[]): unknown {
+    const { keys, argv } = evalShape(args);
+    const time = /^[1-9][0-9]*$/;
+    if (keys.length !== 1 || argv.length !== 2 || argv[0].length > 16 || !time.test(argv[0]) || argv[1].length > 16 || !time.test(argv[1])) return -1;
+    const [mark] = keys;
+    const [at, seconds] = argv;
+    const gone = this.run(["GET", mark]);
+    if (typeof gone === "string" && (gone.length > 16 || !/^[0-9]+$/.test(gone) || Number(gone) >= Number(at))) {
+      this.run(["SET", mark, gone, "EX", seconds]);
+      return 2;
+    }
+    this.run(["SET", mark, at, "EX", seconds]);
+    return 1;
+  }
 
   /**
    * lib/meet-connect.ts KEEP_UNLESS_GONE, step for step: a store's new meeting connection kept, and indexed first,

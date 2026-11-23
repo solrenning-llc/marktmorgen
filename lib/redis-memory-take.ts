@@ -14,7 +14,7 @@ export type TakeScript = (run: (command: Command) => unknown, keys: string[], ar
 export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
   // lib/ad-spend.ts SPEND_IF_STORE_LIVE: an ad spend line written only while its store is its own and not erasing, by
   // the rule of store-cache-live:v3, answered as the write's two-number receipt; {-1} gone or erasing, {-2} an owner's
-  // record that does not parse (row 100 of #5010).
+  // record that does not parse or a mode other than once or fresh, nothing written (row 100 of #5010).
   "ad-spend-live:v1": (run, [live, erasing, spend], [field, statsId, ref, mode, id, value, keep]) => {
     if (run(["HGET", erasing, field]) !== null) return [-1];
     if (statsId === "") {

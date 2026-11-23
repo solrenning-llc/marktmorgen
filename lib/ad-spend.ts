@@ -39,7 +39,8 @@ export type SpendOwner = Pick<Store, "email" | "sid" | "extra" | "statsId">;
  * absent, and the id key holding this store's own ref, or, for a store kept from before ids, the owner's record still
  * carrying its statsId. Then the write, HSETNX ("once", an add with the studio's operation id) or HSET ("fresh", an
  * older page's add under a fresh id), and its EXPIRE, answered as the same two-number receipt as before: {written,
- * expired}. {-1}: gone, moved or erasing, nothing written; {-2}: the owner's record does not parse, nothing written.
+ * expired}. {-1}: gone, moved or erasing, nothing written; {-2}: the owner's record does not parse, or the mode is
+ * neither once nor fresh, nothing written.
  */
 export const SPEND_IF_STORE_LIVE = `-- marktmorgen:ad-spend-live:v1
 if redis.call("HGET", KEYS[2], ARGV[1]) then return {-1} end

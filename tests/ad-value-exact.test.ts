@@ -10,7 +10,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { sendServerPurchase, setServerToken } from "@/lib/ad-events";
+import { sendRenewals, sendServerPurchase, setServerToken, subKey } from "@/lib/ad-events";
 import { claimHandle, ensureStatsId, setAdsServer, setPixels, setStripeAccount, storeForEmail } from "@/lib/store";
 import { NO_PIXELS } from "@/lib/pixels";
 import { store as redis } from "./redis-stub";
@@ -24,6 +24,8 @@ const NOW = Date.now();
 const META_TOKEN = "EAAB" + "v".repeat(60);
 
 let sentValues: unknown[] = [];
+/** The paid invoices the stand-in Stripe lists (renewals). */
+let invoices: Record<string, unknown>[] = [];
 /** How the stand-in Stripe answers the order's amount and currency, while set. */
 let money: { amount_total?: unknown; currency?: unknown } = { amount_total: 5000, currency: "usd" };
 const session = (id: string) => ({
@@ -46,6 +48,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     sentValues.push(...events.map((e) => `${e.custom_data?.value} ${e.custom_data?.currency}`));
     return json({ events_received: 1 });
   }
+  if (url.pathname.replace(/^\/v1/, "") === "/invoices") return json({ object: "list", data: invoices, has_more: false });
   const one = /\/checkout\/sessions\/(cs_[A-Za-z0-9_]+)$/.exec(url.pathname);
   if (one) return json(session(one[1]));
   return json({ object: "list", data: [], has_more: false });
@@ -89,6 +92,38 @@ async function main(): Promise<void> {
   sentValues = [];
   is("sent", await sendServerPurchase(store, "cs_test_value000000001", buyer, NOW), "sent");
   is("with its own value and currency, never the store's", sentValues, ["50 EUR"]);
+
+  part("A renewal whose amount or currency does not read: nothing sent, no mark taken (Claude 1 2as's MEDIUM on #5241)");
+  const SUB = "sub_AdValue00000001";
+  // The cookies its first payment kept for its renewals (keepForRenewals), as the first payment would have.
+  redis.run(["SET", subKey(SUB), JSON.stringify({ _fbp: "fb.1.1700000000.123456789" })]);
+  const invoice = (id: string, paid: Record<string, unknown>) => ({
+    id,
+    status: "paid",
+    billing_reason: "subscription_cycle",
+    ...paid,
+    customer_email: "buyer@example.com",
+    created: Math.floor(NOW / 1000) - 300,
+    status_transitions: { paid_at: Math.floor(NOW / 1000) - 300 },
+    parent: { subscription_details: { subscription: SUB, metadata: { store: "advalue", product: "prod000001", ads: "a".repeat(32) } } },
+  });
+  let r = 0;
+  for (const [label, paid] of [
+    ["no currency", { amount_paid: 5000 }],
+    ["a currency that is not one", { amount_paid: 5000, currency: "dollars" }],
+    ["an amount as text", { amount_paid: "5000", currency: "usd" }],
+    ["a fractional amount", { amount_paid: 50.5, currency: "usd" }],
+  ] as [string, Record<string, unknown>][]) {
+    r += 1;
+    const id = `in_AdValueRenew${String(r).padStart(4, "0")}`;
+    invoices = [invoice(id, paid)];
+    sentValues = [];
+    is(`${label}: no renewal sent`, [await sendRenewals(store, NOW), sentValues.length], [0, 0]);
+    is(`${label}: no mark taken`, redis.run(["EXISTS", `nl:adsrv:sent:${id}`]), 0);
+  }
+  invoices = [invoice("in_AdValueRenew0001", { amount_paid: 5000, currency: "eur" })];
+  sentValues = [];
+  is("the same renewal read: sent once, with its own value and currency", [await sendRenewals(store, NOW), sentValues], [1, ["50 EUR"]]);
 
   part("A renewal whose currency does not read is not sent in the store's");
   const source = readFileSync(join(process.cwd(), "lib/ad-events.ts"), "utf8");

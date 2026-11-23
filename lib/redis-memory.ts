@@ -4066,6 +4066,17 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:store-for-hit:v1\n") && args[0] === "1" && args.length === 5) return this.storeForHit(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
+        // lib/order-data.ts ORDER_WRITE_IF_KEY: the ordinary measured write, only while its last key still exists; the
+        // key is removed before the ordinary write is modelled (Board #5010 row 187).
+        if (key.startsWith("-- marktmorgen:order-write-if-key:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          if (!Number.isSafeInteger(count) || count < 2) return [-1];
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", keys.at(-1) as string]) !== 1) return [-3];
+          return this.orderWrite([String(count - 1), ...keys.slice(0, -1), ...argv]);
+        }
         if (key.startsWith("-- marktmorgen:order-write-if-new:v1\n")) return this.orderWriteIfNew(args);
         // lib/order-data.ts ORDER_WRITE_IF_STORE_LIVE: the ordinary measured write, only while the store id still
         // exists and the closing walk has not installed its erasure field. The final two keys and final argument are

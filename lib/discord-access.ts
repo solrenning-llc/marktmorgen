@@ -92,7 +92,8 @@ export async function joinServer(input: { store: Store; email: string; accessTok
         // Its record then lists only the roles Discord still gives it: one taken is not held any more, so the next
         // check (rolesDiff(member.r, wanted)) gives it back while the buyer still holds it, and the failed one stays
         // on the record to be taken later (#4087 review).
-        if (old) await keepMember(room, store.sid, before, { ...old, r: kept }, input.now);
+        // Not kept when the server was disconnected meanwhile (Board #5010 row 187): the join then says the server is off.
+        if (old && !(await keepMember(room, store.sid, before, { ...old, r: kept }, input.now))) return { ok: false, reason: "off" };
         return { ok: false, reason: "failed" };
       }
       await forgetMember(room, store.sid, before, email);
@@ -118,7 +119,11 @@ export async function joinServer(input: { store: Store; email: string; accessTok
   }
   const at = Math.floor((input.now ?? Date.now()) / 1000);
   // A role no longer held whose take failed stays in `r`, as checkMember keeps it, so the next check takes it back.
-  await keepMember(room, store.sid, user.id, { e: email, n: user.name, p: held, r: given, at: mine?.at || at, checked: at }, input.now);
+  // Kept only while the server is still connected (Board #5010 row 187): a Disconnect that ran whole while this join
+  // waited on Discord leaves nothing of this person behind, and the join says the server is off.
+  if (!(await keepMember(room, store.sid, user.id, { e: email, n: user.name, p: held, r: given, at: mine?.at || at, checked: at }, input.now))) {
+    return { ok: false, reason: "off" };
+  }
   return { ok: true, serverId: server.id, added: placed === "added", roles: wanted.length };
 }
 
@@ -152,14 +157,20 @@ export async function checkMember(sid: string, userId: string, now = Date.now())
     return "gone";
   }
   const byProduct = await productRolesOrThrow(room);
+  // keepMember writes nothing once the server is disconnected (Board #5010 row 187): a check that was under way while
+  // the whole Disconnect ran then takes the person off the line instead of keeping a row nobody would forget.
+  const stay = async (kept: boolean, checked: Checked): Promise<Checked> => {
+    if (kept) return checked;
+    await dropDue(sid, userId);
+    return "gone";
+  };
   let held: string[];
   try {
     held = await heldProducts(store, member.e, [...byProduct.keys()]);
   } catch (error) {
     // Stripe could not be asked: nothing is taken on a guess.
     console.error("checking a Discord member's purchases failed", error);
-    await keepMember(room, sid, userId, member, now);
-    return "later";
+    return stay(await keepMember(room, sid, userId, member, now), "later");
   }
   const wanted = rolesFor(held, byProduct);
   const at = Math.floor(now / 1000);
@@ -174,8 +185,7 @@ export async function checkMember(sid: string, userId: string, now = Date.now())
       if (done === "failed") failed = true;
     }
     if (failed) {
-      await keepMember(room, sid, userId, member, now);
-      return "later";
+      return stay(await keepMember(room, sid, userId, member, now), "later");
     }
     if (server.kick && !left) {
       // Discord refused or did not answer: kept, its roles already gone, so the next check tries the removal again
@@ -184,8 +194,7 @@ export async function checkMember(sid: string, userId: string, now = Date.now())
       const out = await removeMember(server.id, userId, reason);
       const tried = (member.k ?? 0) + 1;
       if (out === "failed" && tried <= KICK_TRIES) {
-        await keepMember(room, sid, userId, { ...member, p: held, r: [], checked: at, k: tried }, now);
-        return "later";
+        return stay(await keepMember(room, sid, userId, { ...member, p: held, r: [], checked: at, k: tried }, now), "later");
       }
     }
     await forgetMember(room, sid, userId, member.e);
@@ -210,8 +219,7 @@ export async function checkMember(sid: string, userId: string, now = Date.now())
     await forgetMember(room, sid, userId, member.e);
     return "gone";
   }
-  await keepMember(room, sid, userId, { ...member, p: held, r: given, checked: at }, now);
-  return diff.add.length || diff.take.length ? "changed" : "kept";
+  return stay(await keepMember(room, sid, userId, { ...member, p: held, r: given, checked: at }, now), diff.add.length || diff.take.length ? "changed" : "kept");
 }
 
 /** Everyone due, checked until the deadline; those not reached stay first in line. */

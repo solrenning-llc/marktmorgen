@@ -8,6 +8,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
+import { MAX_PER_PERSON } from "@/lib/agreement-rules";
 import { agreementsOfPerson } from "@/lib/agreement-store";
 import { personKey } from "@/lib/person-key";
 import { store as redis } from "./redis-stub";
@@ -40,5 +41,20 @@ test("control: an exact index of valid ids still reads (records gone: an empty l
 
 test("control: an exact empty index is still no agreement", async () => {
   redis.clear();
+  assert.deepEqual(await agreementsOfPerson({ sid: SID }, EMAIL), []);
+});
+
+// Claude 1's NIT on #5293 @ea440e1909: a set larger than twice the per-person limit was cut in silence to its first
+// MAX_PER_PERSON * 2 ids, a shorter list read as "all of them". It cannot be made (the create refuses a person past
+// MAX_PER_PERSON), so if it is there it is unknown: null, as a malformed member is. Twice the limit still reads.
+const ids = (n: number) => Array.from({ length: n }, (_, i) => i.toString(16).padStart(32, "0"));
+
+test("a set larger than twice the per-person limit is unknown (null), never cut to a shorter list", async () => {
+  seed(ids(MAX_PER_PERSON * 2 + 1));
+  assert.equal(await agreementsOfPerson({ sid: SID }, EMAIL), null);
+});
+
+test("control: a set of exactly twice the per-person limit still reads", async () => {
+  seed(ids(MAX_PER_PERSON * 2));
   assert.deepEqual(await agreementsOfPerson({ sid: SID }, EMAIL), []);
 });

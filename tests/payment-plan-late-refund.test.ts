@@ -188,7 +188,8 @@ async function main(): Promise<void> {
   is("the two payments after the end are refunded, each once and in full", a.invoices.map((row) => madeFor(row).map((r) => r.amount)), [[], [], [], [5_000], [5_000]]);
   is("each under its own invoice's idempotency key and mark", posts.map((p) => [p.key, p.body.get("metadata[plan_late_refund]")]), [a.invoices[3], a.invoices[4]].map((row) => [`plan-late-refund:${row.id}`, row.id]));
   is("the invoices asked for are the subscription's paid ones from its end on", invoiceQueries.map((q) => [q.get("subscription"), q.get("status"), q.get("created[gte]")]), [[a.sub, "paid", String(a.end)]]);
-  is("the plan is settled and out of its lines", [first.done, await inALine(a.session)], [1, false]);
+  // Settled, and watched a while for a refund Stripe fails later (#3367, LOW 1 of 6938631896): read further below.
+  is("the plan is settled", first.done, 1);
   posts.length = 0;
   is("a second pass, the subscription canceled, refunds nothing more", [await finishPlan(ACCOUNT, a.session), posts.length], ["done", 0]);
 
@@ -390,6 +391,43 @@ async function main(): Promise<void> {
   refunds[intent] = [{ id: "re_externalSuccess", object: "refund", payment_intent: intent, amount: 2_000, currency: "usd", status: "succeeded", metadata: {} }];
   one.charge.amount_refunded = 2_000;
   is("the confirmed partial refund counts toward the total", [await finishPlan(ACCOUNT, partialSuccess.session), posts.map((item) => item.body.get("amount")), one.charge.amount_refunded], ["done", ["3000"], 5_000]);
+
+  part("A late refund Stripe fails after the plan settled is read again and made again (#3367, LOW 1 of 6938631896)");
+  {
+    reset();
+    redis.clear();
+    // Refunded and settled; Stripe then fails the refund (a closed card), after the buyer was told it went back. The
+    // plan is read again a week later, for LATE_REFUND_WATCH_DAYS, and the refund is made again under a key of its own.
+    const w = plan(2, 70, 3);
+    await rememberPlan(ACCOUNT, w.session);
+    const settled = await settlePlans();
+    is("refunded and settled", [madeFor(w.invoices[2]).map((one) => one.status), settled.done], [["succeeded"], 1]);
+    is("still in the retry line, watched for a refund failed later", await inALine(w.session), true);
+    const failedLater = madeFor(w.invoices[2])[0];
+    failedLater.status = "failed";
+    w.invoices[2].charge.amount_refunded = 0;
+    balance += failedLater.amount;
+    posts.length = 0;
+    Date.now = () => (clock + 6 * DAY) * 1000;
+    await settlePlans();
+    is("not read again before its week", posts.length, 0);
+    Date.now = () => (clock + 8 * DAY) * 1000;
+    await settlePlans();
+    is("read again a week later: the failed refund is made again", madeFor(w.invoices[2]).map((one) => one.status), ["failed", "succeeded"]);
+    is("under a key of its own", posts.map((one) => one.key), [`plan-late-refund:${w.invoices[2].id}:1`]);
+    is("still watched", await inALine(w.session), true);
+    // Past the watch: let go.
+    Date.now = () => (clock + 40 * DAY) * 1000;
+    await settlePlans();
+    is("let go once the watch has run out", await inALine(w.session), false);
+    // A plan whose late payments were all given back with nothing refunded here is not watched longer than one with them.
+    Date.now = () => clock * 1000;
+    reset();
+    const none = plan(3, 100, 3);
+    await rememberPlan(ACCOUNT, none.session);
+    await settlePlans();
+    is("control: a plan with no late payment is let go at once", await inALine(none.session), false);
+  }
 
   part("A try stays within the registry's Stripe calls");
   reset();

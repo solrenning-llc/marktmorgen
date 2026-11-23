@@ -39,13 +39,16 @@ export function NumbersNotes({
     setBusy(true);
     try {
       const response = await fetch("/api/store/notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; notes?: StatsNote[] };
+      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; notes?: StatsNote[]; message?: unknown };
       if (answer.ok && answer.notes) {
         onChange(answer.notes);
         toast(done);
         return true;
       }
-      toast("That did not save. Check the day and the words, and try again.");
+      // A refusal the route explains (410 "gone": the store is closed or moved) says why, in the route's words; any
+      // other answer keeps this box's own sentence.
+      const reason = typeof answer.message === "string" ? answer.message.trim() : "";
+      toast(reason || "That did not save. Check the day and the words, and try again.");
     } catch {
       toast("That did not save. Check your connection and try again.");
     } finally {

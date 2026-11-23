@@ -79,7 +79,7 @@ import {
 import { MAX_ALT_LENGTH } from "@/lib/product-image";
 import { indexBytes, indexPost, partsOf, unindexPost } from "@/lib/community-search";
 import { TRACED_SINCE, TRACE_ENTRY, traceKey } from "@/lib/community-trace";
-import { type DataStore, needData, giveData } from "@/lib/store-data";
+import { DataRoomError, type DataStore, needData, giveData } from "@/lib/store-data";
 import { type Held, LockBusyError, withLock } from "@/lib/redis-lock";
 import { likePoint } from "@/lib/community-points";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -1049,15 +1049,38 @@ export type NewPost = {
   id?: string;
 };
 
+/**
+ * A post that was certainly not written: createPost failed before the post's own write (its count, its number or its
+ * room could not be read). The caller may give back what the post would have taken (issue #3974: a community picture).
+ * An UnknownReplyError, so every caller that treats an unknown reply as an error still does.
+ */
+export class PostNotWritten extends UnknownReplyError {
+  constructor(readonly cause: unknown) {
+    super("a community post, before it was written");
+    this.name = "PostNotWritten";
+  }
+}
+
 /** Writes a post. The caller has checked who may, and cleaned what it says. */
 export async function createPost(id: string, input: NewPost, room: DataStore): Promise<{ ok: true; post: Post } | { ok: false; reason: "full" }> {
+  // Everything up to the post's own write is "before": a failure there (a reply in another shape, a lost connection,
+  // a data room that could not be counted) throws PostNotWritten, so the caller knows for sure no post exists and can
+  // give its picture back (issue #3974). DataRoomError (the room full) keeps its own type, as before.
+  const before = async <T>(step: () => Promise<T>): Promise<T> => {
+    try {
+      return await step();
+    } catch (error) {
+      if (error instanceof DataRoomError || error instanceof PostNotWritten) throw error;
+      throw new PostNotWritten(error);
+    }
+  };
   // An unreadable count is unknown, never under the cap (rule 24): nothing is written on it.
-  const count = countOf(repliesFor(await redisPipeline([["ZCARD", feedKey(id)]]), 1)?.[0]);
-  if (count === null) throw new UnknownReplyError("ZCARD of a community's feed");
+  const count = await before(async () => countOf(repliesFor(await redisPipeline([["ZCARD", feedKey(id)]]), 1)?.[0]));
+  if (count === null) throw new PostNotWritten(new UnknownReplyError("ZCARD of a community's feed"));
   if (count >= MAX_POSTS) return { ok: false, reason: "full" };
   // The post's number is the feeds' score: an unreadable one, or one INCR cannot give, writes nothing (rule 24).
-  const n = countOf(repliesFor(await redisPipeline([["INCR", seqKey(id)]]), 1)?.[0]);
-  if (n === null || n < 1) throw new UnknownReplyError("INCR of a community's post sequence");
+  const n = await before(async () => countOf(repliesFor(await redisPipeline([["INCR", seqKey(id)]]), 1)?.[0]));
+  if (n === null || n < 1) throw new PostNotWritten(new UnknownReplyError("INCR of a community's post sequence"));
   const post: Post = {
     id: input.id && ITEM_ID.test(input.id) ? input.id : newItemId(),
     n,
@@ -1074,7 +1097,8 @@ export async function createPost(id: string, input: NewPost, room: DataStore): P
   };
   // Its room first: refused here, nothing is written (DataRoomError).
   const traced = post.a !== CREATOR;
-  await needData(room, [{ slot: POST_SLOT(post.id), bytes: postBytes(post), set: true }, ...(traced ? [TRACE_ENTRY] : [])]);
+  await before(() => needData(room, [{ slot: POST_SLOT(post.id), bytes: postBytes(post), set: true }, ...(traced ? [TRACE_ENTRY] : [])]));
+  // From here the post may have been written even if the reply is lost: any failure is not PostNotWritten.
   await redisPipeline([
     ["SET", postKey(id, post.id), JSON.stringify(post)],
     ["ZADD", feedKey(id), post.n, post.id],

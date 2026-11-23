@@ -8,7 +8,7 @@
  * not read is 502 unavailable, never "not a course". Synthetic store, key and Redis only.
  */
 import { makeKey } from "@/lib/api-keys";
-import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
+import { COURSE_ID_PATTERN, editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setSubscription, storeForEmail } from "@/lib/store";
 import { GET as studentsRead } from "@/app/api/v1/students/route";
 import { paidPeriod } from "./billing-period-fixture";
@@ -72,11 +72,17 @@ async function main(): Promise<void> {
   is("(set-up) the 404 reads the course once and takes the request's allowance once", [absentSent.filter((c) => c === `GET ${courseKey}`).length, absentSent.filter((c) => c.startsWith("INCRBY nl:allow:api:")).length], [1, 1]);
 
   part("A course whose stored value does not read is unavailable, never 'not a course'");
-  const otherId = JSON.stringify({ ...JSON.parse(saved), id: "c_someoneelse01" });
+  // Another course's record under this key: its id must itself be valid, or parseCourse refuses it before the id check
+  // in readCourseExact is reached (Claude 3 yLYhi's LEVE on #5422). An id off the pattern is its own case.
+  const elsewhere = made.id.replace(/^./, (c) => (c === "0" ? "1" : "0"));
+  is("(set-up) the other course's id is valid and not this course's", [COURSE_ID_PATTERN.test(elsewhere), elsewhere !== made.id], [true, true]);
+  const otherId = JSON.stringify({ ...JSON.parse(saved), id: elsewhere });
+  const offPattern = JSON.stringify({ ...JSON.parse(saved), id: "c_someoneelse01" });
   for (const [label, value] of [
     ["broken JSON", "{\"id\":"],
     ["a number", "7"],
-    ["a well-formed course under another id", otherId],
+    ["a well-formed course under another valid id", otherId],
+    ["a course whose id is off the pattern", offPattern],
   ] as [string, string][]) {
     redis.run(["SET", courseKey, value]);
     const [answer, sent] = await logged(ask);

@@ -342,7 +342,9 @@ export async function releaseStockHold(store: Store, product: Listing, session: 
       `/checkout/sessions/${encodeURIComponent(session)}/expire`,
       new URLSearchParams(),
     );
-    if (closed.status !== "expired") return false;
+    // Let go only on Stripe's receipt for this very checkout (board #5285, row #4455, as payment requests already do):
+    // an "expired" naming another session says nothing about this one, which may still be paid.
+    if (closed.id !== session || closed.status !== "expired") return false;
   } catch {
     return false;
   }
@@ -622,7 +624,9 @@ export async function withCartStockHolds<T extends { id: string }>(
   if (store.stripeAccountId) {
     const closed = await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(value.id)}/expire`, new URLSearchParams()).catch(() => null);
     // One command a product, both fields at once, so the failure path stays inside CART_STOCK_COMMANDS_MOST (tests/cart-stock.test.ts).
-    if (closed?.status === "expired") await redisPipeline(keys.map((key) => ["HDEL", key, value.id, pending])).catch(() => {});
+    // Only Stripe's receipt for this very checkout (board #5285, row #4455): an "expired" naming another session says
+    // nothing about this one, which may still be open and be paid.
+    if (closed?.id === value.id && closed.status === "expired") await redisPipeline(keys.map((key) => ["HDEL", key, value.id, pending])).catch(() => {});
   }
   return { ok: false, reason: "busy" };
 }
@@ -677,7 +681,9 @@ export async function releaseCartStockHolds(store: Store, products: Listing[], s
   if (holding.length === 0) return false;
   try {
     const closed = await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}/expire`, new URLSearchParams());
-    if (closed.status !== "expired") return false;
+    // Let go only on Stripe's receipt for this very checkout (board #5285, row #4455, as payment requests already do):
+    // an "expired" naming another session says nothing about this one, which may still be paid.
+    if (closed.id !== session || closed.status !== "expired") return false;
   } catch {
     return false;
   }

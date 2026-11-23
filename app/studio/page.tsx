@@ -3488,7 +3488,7 @@ export default async function StudioPage({
                     )}
                     {PRO_ON_SALE ? (
                       <div className="mt-6 rounded-[var(--r-md)] bg-sand p-5">
-                        <p className="font-semibold text-ink">Pro</p>
+                        <p className="font-semibold text-ink">{PLAN_TITLES.pro}</p>
                         <p className="mt-1 text-sm text-ink-soft">
                           {`Everything above, plus email to your list: one-off emails, emails scheduled for later and automatic sequences, up to ${PRO_MONTHLY_EMAILS.toLocaleString("en-US")} a month${domainsOn ? ", and your own domain" : ""}.${withTrial ? ` The same ${TRIAL_DAYS}-day trial.` : ""}`}
                         </p>
@@ -3496,11 +3496,11 @@ export default async function StudioPage({
                           <input type="hidden" name="tier" value="pro" />
                           <button type="submit" name="cycle" value="month" className="btn btn-secondary btn-wrap">
                             {withTrial
-                              ? `Start the trial on Pro \u2014 ${priceWords("pro", "month")} after that`
-                              : `Start Pro \u2014 ${priceWords("pro", "month")}, from today`}
+                              ? `Start the trial on ${PLAN_TITLES.pro} \u2014 ${priceWords("pro", "month")} after that`
+                              : `Start ${PLAN_TITLES.pro} \u2014 ${priceWords("pro", "month")}, from today`}
                           </button>
                           <button type="submit" name="cycle" value="year" className="btn btn-secondary btn-wrap">
-                            {`Or Pro yearly: ${priceWords("pro", "year")}, $${(yearSaving("pro") / 100).toLocaleString("en-US")} less`}
+                            {`Or ${PLAN_TITLES.pro} yearly: ${priceWords("pro", "year")}, $${(yearSaving("pro") / 100).toLocaleString("en-US")} less`}
                           </button>
                         </form>
                         {/* Said, not sold: almost nobody starts with a list this

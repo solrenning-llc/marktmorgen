@@ -55,5 +55,5 @@ const sentences = (text: string) => text.split(/(?<=[.!?])\s+/).map((x) => x.tri
 const rest = JSON.stringify({ ...topic, blocks: (topic?.blocks ?? []).map((b) => ((b as { kind?: string }).kind === "faq" ? { ...b, items: faq?.items.slice(2) } : b)) });
 is("no sentence of the answers said elsewhere on the page, or twice among them", [now, later].map((l) => { const mine = l.flatMap((x) => sentences(x.a)); return mine.some((x) => rest.includes(x)) || new Set(mine).size !== mine.length; }), [false, false]);
 
-is("never says the studio calls a plan \"Pro\": the studio and the pricing page use PLAN_TITLES only (#4499, Codex X5)", [JSON.stringify([...outreachBeginnerQuestions(false), ...outreachBeginnerQuestions(true)]).includes("Pro"), "studioPlan" in OUTREACH_WORDS], [false, false]);
+is("never says the studio calls a plan \"Pro\": the pricing page, the platform pages and the studio's start-a-plan card use PLAN_TITLES (#4499, Codex X5)", [JSON.stringify([...outreachBeginnerQuestions(false), ...outreachBeginnerQuestions(true)]).match(/\bPro\b/) !== null, "studioPlan" in OUTREACH_WORDS], [false, false]);
 done();

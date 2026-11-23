@@ -5,8 +5,9 @@
  * on (AiOn, components/ai-assist.tsx), on for a paid-up Studio or Scale plan
  * where it is switched on (aiAvailableFor, lib/ai.ts: never in a trial, which
  * leaves out paid AI writing), and nothing kept until the creator saves. The
- * plan is named as the studio and the pricing page name it (PLAN_TITLES;
- * never "Pro", #4499). No figure. Shown first in the page's own
+ * plan is named by PLAN_TITLES, as the pricing page, the platform pages and
+ * the studio's start-a-plan card name it, never by "Pro", the internal billing
+ * id (#4499; other studio screens that still say "Pro" are #5010 row 166). No figure. Shown first in the page's own
  * "Questions" block.
  */
 import { PLANS_ON_SALE } from "@/lib/opening";

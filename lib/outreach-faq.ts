@@ -5,7 +5,9 @@
  * written with the writing help only a paid-up Studio or Scale plan has
  * (aiAvailableFor, lib/ai.ts: not in a trial, which leaves out paid AI
  * writing), the sender's name and postal address saved first, and nothing
- * ever sent from here. The plan is named as the studio names it (PLAN_TITLES; never "Pro", #4499). No figure. Shown first
+ * ever sent from here. The plan is named by PLAN_TITLES, as the pricing page, the platform pages and the studio's
+ * start-a-plan card name it, never by "Pro", the internal billing id (#4499; other studio screens that still say
+ * "Pro" are #5010 row 166). No figure. Shown first
  * in the page's own "Questions" block.
  */
 import { PLANS_ON_SALE } from "@/lib/opening";

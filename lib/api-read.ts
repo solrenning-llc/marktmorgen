@@ -255,7 +255,10 @@ async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolea
  * page at its most set aside before the scan, settled at what it read and
  * sends before anything is sent, as the list's.
  */
-export async function members(store: Store, cursor: string | null, hold: Hold): Promise<Page<Record<string, unknown>> | Response> {
+/** A page of the members, with how many it holds that could not be read (only when there are any), as the list's. */
+type MembersPage = Page<Record<string, unknown>> & { unreadable?: number };
+
+export async function members(store: Store, cursor: string | null, hold: Hold): Promise<MembersPage | Response> {
   const asked = listCursor(cursor, /^\d{1,20}$/);
   if (!asked.ok) return asked.refused;
   const id = store.community?.id;
@@ -276,6 +279,8 @@ export async function members(store: Store, cursor: string | null, hold: Hold): 
         last_seen_at: isoFromSeconds(m.seen),
       })),
       next: page.next === "0" ? null : page.next,
+      // A member who could not be read is left out and said (#4069), as GET /api/v1/leads says a contact.
+      ...(page.unreadable ? { unreadable: page.unreadable } : {}),
     };
     return { out, work: scannedPageWork(2, page.bytes, sentBytes(out)) };
   });

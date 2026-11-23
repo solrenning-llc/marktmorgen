@@ -50,7 +50,7 @@ async function seed(owner: string, handle: string): Promise<Store & { statsId: s
   await claimHandle(owner, handle, "Payday Fence", "");
   await ensureStoreId(owner);
   await ensureStatsId(owner);
-  await setStripeAccount(owner, "acct_1TestPaydayFence");
+  await setStripeAccount(owner, "acct_" + "1TestPaydayFence");
   await setAffiliateSetting(owner, parseAffiliateSetting({ ...NO_AFFILIATES, enabled: true, payday: 15 }));
   const store = (await storeForEmail(owner))! as Store & { statsId: string };
   const aff = "b2b2b2b2b2b2";

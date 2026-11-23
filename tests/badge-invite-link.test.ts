@@ -19,6 +19,10 @@
  */
 import { SITE_URL } from "@/lib/site-url";
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { StoreResting } from "@/components/store-resting";
+import { claimHandle, storeForEmail } from "@/lib/store";
 import { BADGE_HOME, INVITE_BADGE_LINK_ON, badgeHref, badgeInviteCode } from "@/lib/badge-link";
 import { existingInviteCode, inviteCode, myCodeKey } from "@/lib/creator-invites";
 import { INVITE_PROGRAM_OPEN } from "@/lib/creator-invite-rules";
@@ -91,6 +95,20 @@ async function main(): Promise<void> {
   part("6. A store that may take the badge off and did shows nothing");
   is("the badge is shown only when kept on or when the plan does not allow it off", /\{showBadge \? \(/.test(badge), true);
   is("and the code is read only when the badge is shown", /const showBadge = store\.look\.badge \|\| !canUse\(store, "branding"\);/.test(page) && /showBadge \? badgeInviteCode\(store\.sid\) : null/.test(page), true);
+
+  part("7. A resting or switched-off store's page leaves for Marktmorgen too (Claude 6's LEVE on #5304)");
+  // On a creator's own domain app/[handle]/page.tsx renders StoreResting for a resting or switched-off store: "/" and
+  // "/studio" there are that creator's pages, so both links must be absolute on Marktmorgen.
+  await claimHandle("resting-badge@example.com", "resting-badge-shop", "Resting Badge", "");
+  const resting = (await storeForEmail("resting-badge@example.com"))!;
+  for (const suspended of [false, true]) {
+    const html = renderToStaticMarkup(createElement(StoreResting, { store: resting, suspended }));
+    const hrefs = [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1].replace(/&amp;/g, "&"));
+    const label = suspended ? "switched off" : "resting";
+    is(`${label}: "Made with Marktmorgen" links to Marktmorgen's home page, absolute`, hrefs.includes(BADGE_HOME), true);
+    is(`${label}: the owner's link is Marktmorgen's studio, absolute`, hrefs.includes(`${SITE_URL}/studio`), true);
+    is(`${label}: no bare "/" or "/studio" left on the page`, hrefs.filter((h) => h === "/" || h === "/studio"), []);
+  }
 
   part("Cost: one command more on the front page only while the link is on");
   is("the front page's commands", COMMANDS.frontPage, 4 + (INVITE_BADGE_LINK_ON ? 1 : 0));

@@ -507,6 +507,18 @@ redis.call("SADD", KEYS[3], ARGV[4])
 redis.call("SET", KEYS[2], ARGV[2])
 return 1`;
 
+/**
+ * A team host's connection kept and listed in its account's index in one step, only while the lock is still ours
+ * (Claude 5 iZByNH's LEVE 1 on #5476). KEYS: the lock, the connection, the account's index; ARGV: the lock's token, the
+ * connection, the member (h:<host>). 1 kept, 0 the lock lost (nothing written), -1 malformed.
+ */
+export const KEEP_HOST = `-- marktmorgen:meet-keep-host:v1
+if #KEYS ~= 3 or #ARGV ~= 3 or ARGV[1] == "" or ARGV[2] == "" or ARGV[3] == "" then return -1 end
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("SADD", KEYS[3], ARGV[3])
+redis.call("SET", KEYS[2], ARGV[2])
+return 1`;
+
 /** A malformed prior read stops this attempt before the grant's write. */
 class PriorConnectionUnreadError extends UnknownReplyError {}
 
@@ -539,13 +551,18 @@ async function keepConnection(
     brokenAt: 0,
   };
   if (host) {
-    // Listed in its account's index before it is kept (issue #4011), as a store's is: a store's disconnect then sees
-    // that this host's calendar still uses the grant. An index that cannot be written keeps nothing.
-    const listed = repliesFor(await redisPipeline([["SADD", userKey(provider, traded.account.id), memberOf(input.statsId, host)]]), 1);
-    if (!listed || countOf(listed[0]) === null) throw new UnknownReplyError("listing a host's meeting connection under its account");
-    if (!(await setIfHeld(held, connKey(input.statsId, provider, host), JSON.stringify(connection)))) {
-      throw new LockBusyError("the connection changed while it was saved");
-    }
+    // Kept and listed in its account's index in one step, only while the lock is still ours (KEEP_HOST), as a store's
+    // is (issue #4011): a store's disconnect then sees that this host's calendar still uses the grant. Before, the
+    // SADD ran first and a lost lock left h:<host> listed with no connection behind it, so the grant was never given
+    // back and later disconnects said a calendar still used it (Claude 5 iZByNH's LEVE 1 on #5476).
+    const hostKeys = [held.key, connKey(input.statsId, provider, host), userKey(provider, traded.account.id)];
+    const hostReplies = repliesFor(
+      await redisPipeline([["EVAL", KEEP_HOST, hostKeys.length, ...hostKeys, held.token, JSON.stringify(connection), memberOf(input.statsId, host)]]),
+      1,
+    );
+    const hostKept = hostReplies ? countOf(hostReplies[0]) : null;
+    if (hostKept === 0) throw new LockBusyError("the connection changed while it was saved");
+    if (hostKept !== 1) throw new UnknownReplyError("keeping a host's meeting connection and listing it under its account");
     // A different account connected in its place leaves that account's index, and its access is given back unless
     // another store or host still uses it.
     if (before && before.account.id !== traded.account.id) {
@@ -704,15 +721,18 @@ export async function disconnectFor(statsId: string, provider: MeetProvider, hos
     // confirm is said in the answer, never taken as given back.
     // A grant another store or team host still uses is kept at the provider (issue #4011), and said so.
     // The connection leaves its account's index first, in the same step as counting who is left (Claude 3 xy6b's LOW on
-    // #5476): of two disconnects of one account at once, exactly one sees nobody left and gives the grant back. A count
-    // that does not read keeps the grant, never revoked on an unread answer.
+    // #5476): of two disconnects of one account at once, exactly one sees nobody left and gives the grant back.
     const others = await leaveAccount(provider, c.account.id, memberOf(statsId, host));
+    // Unknown whether another store or host still uses the grant: nothing is deleted and nothing is said, so the creator
+    // is never told to remove at the provider what another connection may use; a retry decides once it reads, as on the
+    // damaged path (Claude 5 iZByNH's LEVE 2 on #5476). The leave is idempotent: a retry's SREM finds nothing to do.
+    if (others === null) throw new UnknownReplyError("the stores still connected to a meeting connection's account");
     const back = others === 0
       ? { removed: await giveBack(statsId, c, host).catch((error) => {
           console.error("giving a meeting connection back failed", error);
           return false;
         }), shared: false }
-      : { removed: false, shared: others !== null };
+      : { removed: false, shared: true };
     const removed = back.removed;
     const kept = back.shared ? { sharedGrantKept: true } : {};
     if (!removed && !back.shared) console.error("a meeting connection was disconnected here without the provider confirming its access was given back", provider, host ? "host" : "store");

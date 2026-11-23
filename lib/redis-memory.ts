@@ -4238,6 +4238,17 @@ export class MemoryRedis {
           return 1;
         }
         if (key.startsWith("-- marktmorgen:meet-keep:v1\n")) return this.meetKeep(args);
+        // lib/meet-connect.ts KEEP_HOST: a team host's connection kept and listed under its account in one step, only
+        // while the lock is ours.
+        if (key.startsWith("-- marktmorgen:meet-keep-host:v1\n")) {
+          if (args.length !== 7 || args[0] !== "3" || !args[4] || !args[5] || !args[6]) return -1;
+          this.scriptCalls += 1;
+          if (this.run(["GET", args[1]]) !== args[4]) return 0;
+          this.scriptCalls += 2;
+          this.run(["SADD", args[3], args[6]]);
+          this.run(["SET", args[2], args[5]]);
+          return 1;
+        }
         // lib/meet-connect.ts LEAVE_ACCOUNT: a connection leaves its account's index and counts who is left, in one step.
         if (key.startsWith("-- marktmorgen:meet-leave-account:v1\n") && args[0] === "1" && args.length === 3) {
           this.scriptCalls += 2;

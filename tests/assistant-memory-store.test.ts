@@ -8,7 +8,7 @@
  * that failed.
  */
 import { MAX_MEMORY_NOTES, NOTE_ID, type MemoryNote } from "@/lib/assistant-memory-rules";
-import { MEMORY_STORE_REFUSALS, MemoryWriteUnconfirmed, changeNote, dropNote, forgetMemory, keepNote, newNoteId, readMemory, readMemoryState } from "@/lib/assistant-memory-store";
+import { MEMORY_LOCK_WAIT_MS, MEMORY_STORE_REFUSALS, MemoryWriteUnconfirmed, changeNote, dropNote, forgetMemory, keepNote, newNoteId, readMemory, readMemoryState } from "@/lib/assistant-memory-store";
 import { DataRoomError, dataUsed, needData, type DataStore } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -124,7 +124,10 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", `nl:amem:lock:${SAME}`, "someone-else", "NX", "EX", 10]]);
   const started = Date.now();
   is("refused as busy", await keepNote(SAME, { kind: "preference", text: "One while busy." }, ROOM, NOW), { ok: false, error: "busy" });
-  is("after waiting a little, not long", [Date.now() - started >= 1_000, Date.now() - started < 4_000], [true, true]);
+  // takeLock gives up when its next sleep would pass the wait, at most one sleep (250 ms) early; the wait follows
+  // MEMORY_LOCK_WAIT_MS (1,000 ms since #5285 row #3039, inside the studio shape), so the bounds are computed from it.
+  const waitedMs = Date.now() - started;
+  is("after waiting a little, not long", [waitedMs >= MEMORY_LOCK_WAIT_MS - 250, waitedMs < MEMORY_LOCK_WAIT_MS + 2_000], [true, true]);
   is("a removal refused as busy too", await dropNote(SAME, ids[1], ROOM), { ok: false, error: "busy" });
   is("the notes as they were", JSON.stringify(await readMemory(SAME)), before2);
   const [other] = await redis.pipeline([["GET", `nl:amem:lock:${SAME}`]]);

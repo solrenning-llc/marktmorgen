@@ -247,7 +247,8 @@ async function main(): Promise<void> {
   {
     const real = redis.pipeline.bind(redis);
     // The mark's own write: the open-batch script carrying m: 1. Answered in another shape, and not applied.
-    const isMark = (c: (string | number)[] | undefined) => c?.[0] === "EVAL" && /paypal-open-live/.test(String(c[1])) && /"m":1/.test(c.slice(3).map(String).join(" "));
+    // The mark's write: since Claude 5 idCF's MEDIUM on #5074 the mark and its count are one script (MARK_MANUAL_IF_LIVE).
+    const isMark = (c: (string | number)[] | undefined) => c?.[0] === "EVAL" && /paypal-(manual-mark|open-live)/.test(String(c[1])) && /"m":1/.test(c.slice(3).map(String).join(" "));
     for (const [what, answer] of [
       ["no slot", []],
       ["an empty envelope", [[]]],
@@ -255,7 +256,7 @@ async function main(): Promise<void> {
       ["one count only", [[0]]],
       ["three counts", [[0, 0, 0]]],
       ["a count as text", [["0", 0]]],
-      ["a set entry the mark never adds", [[0, 1]]],
+      ["a count other than once", [[1, 2]]],
     ] as const) {
       await seed(store);
       next = "drop-before";
@@ -277,6 +278,37 @@ async function main(): Promise<void> {
     const [raw] = await redis.pipeline([["HGETALL", OPEN]]);
     const kept = JSON.parse(String((raw as string[])[1])) as { m?: unknown };
     is("the next run marks it and counts it once, and sends nothing", [kept.m, (await counts()).manual, posts - p2, batches], [1, 1, 0, 0]);
+  }
+
+  part("The mark runs but its answer is lost: the batch is counted once, never left uncounted (Claude 5 idCF's MEDIUM on #5074)");
+  {
+    const real = redis.pipeline.bind(redis);
+    // The mark's write, whichever script carries it (the entry written with m: 1), so the same case runs on the code
+    // before this fix, where the mark landed, its answer was refused and the next runs never counted it.
+    const isMark = (c: (string | number)[] | undefined) => c?.[0] === "EVAL" && /paypal-(manual-mark|open-live)/.test(String(c[1])) && /"m":1/.test(c.slice(3).map(String).join(" "));
+    for (const [what, answer] of [["an empty envelope", [[]]], ["no slot", []], ["text", ["OK"]]] as const) {
+      await seed(store);
+      next = "drop-before";
+      await payWithPayPal(store);
+      await age("at", 7 * DAY);
+      // The script runs for real (the mark and its count land); only its answer comes back in another shape.
+      redis.pipeline = (async (commands: (string | number)[][]) => {
+        if (!isMark(commands[0])) return real(commands);
+        await real(commands);
+        return answer;
+      }) as typeof redis.pipeline;
+      try {
+        await settlePayPal(store);
+      } finally {
+        redis.pipeline = real;
+      }
+      const p3 = posts;
+      await settlePayPal(store);
+      await settlePayPal(store);
+      const [raw] = await redis.pipeline([["HGETALL", OPEN]]);
+      const kept = JSON.parse(String((raw as string[])[1])) as { m?: unknown };
+      is(`${what}: marked and counted once over three runs, nothing sent`, [kept.m, (await counts()).manual ?? 0, posts - p3], [1, 1, 0]);
+    }
   }
 
   part("The settling gets the batch back and writing its id fails: the evidence stays, nobody is paid twice (review of Codex G on #2681)");

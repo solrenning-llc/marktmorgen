@@ -1282,8 +1282,8 @@ export const READY_EXIGIDAS = 3;
 
 /**
  * As famílias cujo READY conta para enfileirar este head: READY escrito no PR neste head exato, de família que não é a
- * do autor (quem pediu e a do prefixo do ramo) nem tem commit no PR (CO (e), FQ (1)). null = NÃO CONFERIDO: o PR ou os
- * seus commits não puderam ser lidos agora.
+ * do autor (a do prefixo do ramo; num ramo sem prefixo, a de quem pediu) nem tem commit no PR (CO (e), FQ (1)).
+ * null = NÃO CONFERIDO: o PR ou os seus commits não puderam ser lidos agora.
  */
 export function readyQueContam(pr, sha, autores, ramo = null) {
   const a = aprovadoresNoPr(pr, sha);
@@ -1589,7 +1589,7 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     }
     if (!cf) naoConferido.push("o conflito com o main e com a fila de integração");
     const feito = [atual && !diferente && fonte !== "ref" ? `head ${atual.slice(0, 10)} igual ao do pedido (${fonte === "ramo" ? `pelo ramo ${ramoPedido}` : "pela referência"})` : null, cf ? `sem conflito com o main e com os ${cf.grupos} grupo(s) da fila de integração` : null].filter(Boolean);
-    return { pedido: alvo, aviso: `${feito.join("; ") || "nada conferido"}${naoConferido.length ? `. NÃO CONFERIDO (confira à mão): ${naoConferido.join("; ")}` : ""}. A ferramenta confere os ${READY_EXIGIDAS} READY de fora no verify-enqueue e no complete-enqueue (sem a família de quem pediu, a do prefixo do ramo e as com commit no PR); não confere a família de quem abriu o PR num ramo sem prefixo de família e sem commit dela, as 9 verificações, os CHANGES e achados ainda abertos, o SIM de workflow nem a vez de custo: isso é de quem enfileira (FQ (1), OWNER-20261123-1442)` };
+    return { pedido: alvo, aviso: `${feito.join("; ") || "nada conferido"}${naoConferido.length ? `. NÃO CONFERIDO (confira à mão): ${naoConferido.join("; ")}` : ""}. A ferramenta confere os ${READY_EXIGIDAS} READY de fora no verify-enqueue e no complete-enqueue (sem a família do prefixo do ramo, ou, num ramo sem prefixo, a de quem pediu, e sem as com commit no PR); não confere a família de quem abriu o PR num ramo sem prefixo de família e sem commit dela, as 9 verificações, os CHANGES e achados ainda abertos, o SIM de workflow nem a vez de custo: isso é de quem enfileira (FQ (1), OWNER-20261123-1442)` };
   }
   return { pedido: alvo };
 }
@@ -1749,7 +1749,11 @@ export function conferirTomada({ eu, id, agora = new Date() }) {
   if (!(sha.startsWith(p.sha) || p.sha.startsWith(sha))) throw new Error(`o head de #${p.pr} mudou de ${p.sha.slice(0, 10)} (o do pedido) para ${sha.slice(0, 10)}; não enfileire; conclua como recusado (--result declined) para o autor pedir de novo`);
   // OWNER-20261123-1442-THREE-REVIEWS: 3 READY de 3 famílias de fora no head exato, lidos agora no PR; sem lê-los, nada segue.
   const ramo = campoCabecalho(p.texto, "Ramo") || null;
-  const valem = readyQueContam(p.pr, sha, [p.familia, familiaDoRamo(ramo)].filter(Boolean), ramo);
+  // O autor é a família do prefixo do ramo; só num ramo sem prefixo de família a de quem pediu conta como autora (quem
+  // abriu o PR, que a ferramenta não vê de outro modo). Um revisor de outra família que pede a fila mantém o seu READY
+  // (MÉDIO do Claude 5 id8Ws no #5408 @dcee6a68d5: #5405, claude3/..., pedido pelo Claude 5, READY de 2, 5 e 6).
+  const doRamo = familiaDoRamo(ramo);
+  const valem = readyQueContam(p.pr, sha, doRamo ? [doRamo] : [p.familia].filter(Boolean), ramo);
   if (valem === null) throw new Error(`as revisões READY de #${p.pr} @${sha.slice(0, 10)} NÃO FORAM CONFERIDAS agora (o PR ou os seus commits não puderam ser lidos); não enfileire (passo 4: nada NÃO CONFERIDO segue); tente de novo`);
   if (valem.size < READY_EXIGIDAS) throw new Error(`#${p.pr} @${sha.slice(0, 10)} tem ${valem.size} READY de família de fora no head exato (${[...valem].sort().join(", ") || "nenhum"}); são ${READY_EXIGIDAS}, de ${READY_EXIGIDAS} famílias diferentes, sem a do autor e sem as que têm commit (OWNER-20261123-1442-THREE-REVIEWS); não enfileire; conclua como recusado (--result declined) para o autor pedir de novo com as ${READY_EXIGIDAS}`);
   return { p, head: sha };

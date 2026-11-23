@@ -106,6 +106,18 @@ test("a row whose own note says some of its items are at another rate: refused, 
   assert.equal(ukProductRateBps(water.section, water.item, day), 0);
 });
 
+test("a row that covers only \"certain\" items, which the table does not name: refused, never 0% (Claude 2 lpgvy)", () => {
+  for (const row of UK_VAT_PRODUCT_RATES.filter((r) => /\bcertain\b/i.test(r.item))) {
+    assert.equal(ukProductRateBps(row.section, row.item, day), null, row.item);
+  }
+  const fundraising = UK_VAT_PRODUCT_RATES.find((row) => row.item === "Certain goods sold at charitable fundraising events");
+  const lowVision = UK_VAT_PRODUCT_RATES.find((row) => /and certain low vision aids/i.test(row.item));
+  assert.ok(fundraising && lowVision);
+  assert.equal(ukProductRateBps(fundraising.section, fundraising.item, day), null);
+  assert.equal(ukProductRateBps(lowVision.section, lowVision.item, day), null);
+  for (const item of ["Books", "Magazines", "Newspapers"]) assert.equal(ukProductRateBps(PRINT, item, day), 0, item);
+});
+
 test("exempt, conditional, outside the scope, unknown, disagreeing or out of date: refused, never 0%", () => {
   for (const row of UK_VAT_PRODUCT_RATES.filter((r) => !["0%", "5%", "Standard-rated"].includes(r.rate))) {
     const same = UK_VAT_PRODUCT_RATES.filter((r) => r.section === row.section && r.item === row.item);

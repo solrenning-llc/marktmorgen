@@ -1412,6 +1412,25 @@ console.log("three READY from three outside families on the exact head before a 
   is("1442: three READY from three outside families on the head: verify-enqueue says enqueue", r.ok && new RegExp(`enfileire ${H}`).test(r.out), r.out);
   r = run(["complete-enqueue", "--as", "Claude 6 X", id, "--result", "enqueued", "--text", "t"], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Claude 4 Q"]) });
   is("1442: and complete-enqueue records it", r.ok, r.out);
+
+  // MEDIUM of Claude 5 id8Ws on #5408 @dcee6a68d5: on a branch with a family prefix the author is that family; a
+  // reviewer of another family who files the queue request keeps its READY (live case: #5405, claude3/..., READY from
+  // Claude 2, 5 and 6, request filed by Claude 5). Only on a branch with no family prefix does the requester count as
+  // the author (the opener the tool cannot see otherwise).
+  const g3 = (args) => g(args, P);
+  g3(["checkout", "-q", "-B", "claude3/fix-1443", M]); const H3b = commit("f1443.txt", "1443\n", "pr1443");
+  g3(["push", "-q", "../prs.git", "HEAD:refs/heads/claude3/fix-1443", "HEAD:refs/pull/1443/head"]);
+  const h3 = H3b.slice(0, 10);
+  const ready3 = (...quem) => quem.map((nome) => JSON.stringify([`${nome} review #1443 @${h3}: READY\n\nbody`, "COLLABORATOR"])).join("\n") + "\n";
+  r = run(["request-enqueue", "--from", "Claude 5", "--pr", "1443", "--sha", h3, "--text", "fila #1443"], { ...as("c5"), ...mq });
+  const id3 = /registrado: (\S+)/.exec(r.out)?.[1];
+  is("1443: the request records the PR's prefixed branch", r.ok && /Ramo: claude3\/fix-1443/.test(g(["show", `refs/heads/correio:fila/pedidos/${id3}.md`], join(T, "mail1442.git"))), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 7 X"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", ...mq });
+  is("1443: the request is delivered to a family outside the branch's and the requester's", /pegou/.test(r.out), r.out);
+  r = run(["verify-enqueue", "--as", "Claude 7 X", id3], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", ...mq, FAKE_COMMENTS: ready3("Claude 2 Q", "Claude 5 Q", "Claude 6 Q") });
+  is("1443: on a prefixed branch, the requester's READY counts: three from Claude 2, 5 and 6 pass", r.ok && new RegExp(`enfileire ${H3b}`).test(r.out), r.out);
+  r = run(["verify-enqueue", "--as", "Claude 7 X", id3], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", ...mq, FAKE_COMMENTS: ready3("Claude 2 Q", "Claude 3 Q", "Claude 6 Q") });
+  is("1443: the branch prefix's family's READY still does not count", !r.ok && /2 READY/.test(r.out), r.out);
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

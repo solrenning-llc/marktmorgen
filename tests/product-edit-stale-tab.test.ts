@@ -149,6 +149,31 @@ async function main(): Promise<void> {
   is("an edit whose base has no title writes the typed $15, so its yearly price is checked against $15 and refused", [noBase.ok, noBase.error], [false, "yearly_price"]);
   is("and nothing was saved: still $20 with its $200 yearly price", [(await readClub()).priceCents, (await readClub()).yearly?.cents ?? null], [2000, 20000]);
 
+  part("A base that does not read keeps nothing in the route either: the description is written like the summary (Claude 5 ibuF's LEVE on #5468)");
+  const openedK: Fields = { title: "Old screen title", summary: "Twelve lessons.", price: "0.00", pwyw: null, about: "Paints, paper and six lessons." };
+  is("(tab B writes a description)", (await save({ ...payload({ ...openedK, about: "B's description." }), base: payload(openedK) })).ok, true);
+  const unread = await save({ ...payload({ ...openedK, summary: "Thirteen lessons.", about: "" }), base: { ...payload({ ...openedK, about: "" }), title: "" } });
+  is("an edit whose base has no title saves", unread.ok, true);
+  const unreadAfter = await now();
+  is("its summary and its description are both written, as with no base", [unreadAfter.summary, unreadAfter.about], ["Thirteen lessons.", ""]);
+
+  part("A stale tab that left the schedule as it opened it is checked against the schedule the save leaves (Claude 3 K9t's LEVE on #5468)");
+  const ink = await addProduct(OWNER, "Ink club", "A brush a season.", "20", null);
+  if (!ink.ok) throw new Error("no third product");
+  const saveInk = async (body: Record<string, unknown>) => {
+    const response = await saveProduct(new NextRequest("https://marktmorgen.com/api/store/product", { method: "POST", headers: { "content-type": "application/json", "x-nimbus-store": store.sid, cookie }, body: JSON.stringify({ action: "edit", id: ink.product.id, ...body }) }));
+    return (await response.json()) as { ok: boolean; error?: string };
+  };
+  const inkOpened: Fields = { title: "Ink club", summary: "A brush a season.", price: "20.00", pwyw: null, about: "" };
+  const quarterly = { ...payload({ ...inkOpened, every: "month" }), everyCount: 3 };
+  is("(made a membership charged every 3 months)", (await saveInk({ ...quarterly, base: payload(inkOpened) })).ok, true);
+  const monthlyIntro = { ...payload({ ...inkOpened, every: "month" }), intro: { price: "10", count: 1 } };
+  is("tab B makes it monthly with a $10 introductory price", (await saveInk({ ...monthlyIntro, base: quarterly })).ok, true);
+  const titled = await saveInk({ ...quarterly, title: "Ink and brush club", base: quarterly });
+  is("tab A, opened before B saved, changes only the title and saves", [titled.ok, titled.error], [true, undefined]);
+  const inkNow = (await readProduct((await storeForEmail(OWNER))!, ink.product.id))!;
+  is("its title is written, and B's monthly schedule and introductory price are kept", [inkNow.title, inkNow.recurring?.interval, inkNow.recurring?.every ?? 1, inkNow.intro?.cents ?? null], ["Ink and brush club", "month", 1, 1000]);
+
   done();
 }
 

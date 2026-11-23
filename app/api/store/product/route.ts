@@ -21,6 +21,7 @@ import {
   editProduct,
   filesOnProduct,
   moveProduct,
+  readEditBase,
   removeProduct,
   setProductAbout,
   setProductHidden,
@@ -226,7 +227,7 @@ export async function POST(request: NextRequest) {
   // simply not written). A base that does not read is no base: every field sent is written, as before.
   const sent = body.base && typeof body.base === "object" && !Array.isArray(body.base) ? (body.base as Record<string, unknown>) : null;
   const baseRecurring = sent ? readRecurring(text(sent.every, 10), sent.trial, sent.payments, sent.everyCount) : null;
-  const base: ProductEditBase | undefined =
+  const sentBase: ProductEditBase | undefined =
     action === "edit" && sent && baseRecurring !== "trial" && baseRecurring !== "payments" && baseRecurring !== "every"
       ? {
           title: text(sent.title, MAX_TITLE_LENGTH),
@@ -236,6 +237,9 @@ export async function POST(request: NextRequest) {
           suggested: sent.pwyw !== undefined && sent.pwyw !== null && sent.pwyw !== false ? text(sent.pwyw, 20) : null,
         }
       : undefined;
+  // Read by the same test as afterEdit's, so the route and editProduct agree on whether there is a base (Claude 5
+  // ibuF's LEVE on #5468): one that does not read keeps no field here either.
+  const base = readEditBase(sentBase, guarded.store.currency);
   const untouched = (field: "intro" | "yearly" | "about") => base !== undefined && sent !== null && field in body && JSON.stringify(body[field]) === JSON.stringify(sent[field]);
   if (untouched("about")) about = null;
 
@@ -266,6 +270,8 @@ export async function POST(request: NextRequest) {
   // creator asked for.
   let intro: Intro | null | undefined;
   let yearly: Yearly | null | undefined;
+  // The schedule this save leaves (afterEdit, below): the typed one, or what is saved now when this tab did not change it.
+  let schedule = recurring;
   const introSent = "intro" in body && !untouched("intro");
   const yearlySent = "yearly" in body && !untouched("yearly");
   // The product as saved now, read once for both checks below (an edit only).
@@ -308,6 +314,7 @@ export async function POST(request: NextRequest) {
       intro: intro === undefined ? (current?.intro ?? null) : intro,
       yearly: yearly === undefined ? (current?.yearly ?? null) : yearly,
     };
+    schedule = after.recurring;
     const min = priceBounds(store.currency).min;
     if (after.intro) {
       const problem = introProblem(after, after.intro, min, store.tiers);
@@ -320,13 +327,14 @@ export async function POST(request: NextRequest) {
   }
 
   // Charged every N (609 [WP8]): what is still counted in single weeks or months is refused with its reason, against
-  // the product as this save leaves it, so nothing is ever charged on a schedule its page does not say.
-  if ((action === "add" || action === "edit") && recurring && everyOf(recurring) > 1) {
-    const problem = everyProblem(everyOf(recurring), {
+  // the product as this save leaves it, so nothing is ever charged on a schedule its page does not say. The schedule
+  // is the one the save leaves, never a stale tab's copy of it (Claude 3 K9t's LEVE on #5468).
+  if ((action === "add" || action === "edit") && schedule && everyOf(schedule) > 1) {
+    const problem = everyProblem(everyOf(schedule), {
       intro: intro === undefined ? current?.intro : intro,
       yearly: yearly === undefined ? current?.yearly : yearly,
       inTiers: action === "edit" && guarded.store.tiers.includes(id),
-      payments: recurring.payments,
+      payments: schedule.payments,
     });
     if (problem) return Response.json({ ok: false, error: `every_${problem}` }, { status: 400 });
   }

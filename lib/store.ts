@@ -4160,6 +4160,18 @@ function readSuggested(raw: string | null, currency: Currency): number | null | 
 }
 
 /**
+ * The base an edit sent (issue #4165), when it reads: its title and price read as a product's would, and its suggested
+ * price, if any, reads. Otherwise undefined, and the edit is taken as having no base, so every field sent is written.
+ * The one test of a readable base, used by afterEdit and by the product route before it keeps the introductory and
+ * yearly prices and the description (Claude 5 ibuF's LEVE on #5468), so the two never disagree on whether there is one.
+ */
+export function readEditBase(base: ProductEditBase | undefined, currency: Currency): ProductEditBase | undefined {
+  if (!base) return undefined;
+  if (typeof readFields(base.title, base.price, currency) === "string") return undefined;
+  return readSuggested(base.suggested, currency) === "bad" ? undefined : base;
+}
+
+/**
  * What an edit leaves of a product (issue #4165): each of the title, summary, price, membership and suggested price
  * that this tab sent exactly as it opened it (`base`) keeps what is saved now, so a stale tab never undoes another
  * tab's save. A base that does not read is no base: every typed field is written. One rule, read by editProduct under
@@ -4175,9 +4187,10 @@ export function afterEdit(
   const fields = readFields(typed.title, typed.price, currency);
   if (typeof fields === "string") return fields;
   const typedPwyw = readSuggested(typed.suggested, currency);
-  const opened = base ? readFields(base.title, base.price, currency) : null;
-  const openedPwyw = base ? readSuggested(base.suggested, currency) : null;
-  const known = base && opened && typeof opened !== "string" && openedPwyw !== "bad" ? { ...opened, summary: base.summary.trim().slice(0, MAX_SUMMARY_LENGTH), recurring: base.recurring, pwyw: openedPwyw } : null;
+  const readable = readEditBase(base, currency);
+  const opened = readable ? readFields(readable.title, readable.price, currency) : null;
+  const openedPwyw = readable ? readSuggested(readable.suggested, currency) : null;
+  const known = readable && opened && typeof opened !== "string" && openedPwyw !== "bad" ? { ...opened, summary: readable.summary.trim().slice(0, MAX_SUMMARY_LENGTH), recurring: readable.recurring, pwyw: openedPwyw } : null;
   const typedSummary = typed.summary.trim().slice(0, MAX_SUMMARY_LENGTH);
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   return {

@@ -13,7 +13,6 @@
  * Synthetic: the in-memory Redis, a Stripe stand-in with empty lists, no email.
  */
 import { NextRequest } from "next/server";
-import { UnknownReplyError } from "@/lib/redis-reply";
 import { GET as exportRoute } from "@/app/api/store/affiliates/export/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { putMember } from "@/lib/team";
@@ -61,13 +60,16 @@ let bookReads = 0;
 let breakBook: false | "unreadable" | "passing" | "envelope" = false;
 /** While set, the studio count that settles the file's size fails (Claude 7 xAF's LEVE 2 on #5256). */
 let breakSettle = false;
+/** Set once the book's sales were read in this request, so breakSettle fails only the count after the reading. */
+let salesRead = false;
 /** While set, reading the book's sales waits this long, so two downloads overlap (focal 3634, 1). */
 let slowBook = 0;
 redis.pipeline = (async (batch: Commands) => {
   const sales = batch.some((c) => String(c[0]).toUpperCase() === "HGETALL" && /^nl:aff:[^:]+:sales$/.test(String(c[1])));
   if (sales && breakBook === "passing") throw new Error("synthetic: the database did not answer");
   if (sales && breakBook === "envelope") return [] as never;
-  if (breakSettle && batch.some((c) => String(c[0]).toUpperCase() === "INCRBY" && String(c[1]).startsWith("nl:allow:studio:"))) throw new Error("synthetic: the count did not answer");
+  if (breakSettle && salesRead && batch.some((c) => String(c[0]).toUpperCase() === "INCRBY" && String(c[1]).startsWith("nl:allow:studio:"))) throw new Error("synthetic: the count did not answer");
+  if (sales) salesRead = true;
   if (sales && slowBook) await new Promise((resolve) => setTimeout(resolve, slowBook));
   const replies = await real(batch);
   // A sales record in a shape no reading accepts: the book's own record, the same on every reading.
@@ -178,6 +180,10 @@ async function main(): Promise<void> {
   // A new month opens its failed try again (the count is the month's own): the next parts start from it.
   await redis.pipeline(redis.keys().filter((key) => key.includes(":book-failed:")).map((key) => ["DEL", key]));
 
+  // The store's essential studio requests of the day (lib/studio-route.ts) are let go between parts: the parts below
+  // count what one download takes, not how many a day a store may ask for.
+  const freshDay = async () => { const keys = redis.keys().filter((key) => key.includes("studio-essential")); if (keys.length) await redis.pipeline([["DEL", ...keys]]); };
+  await freshDay();
   part("A reply that comes back without its slots is a passing failure, never the month's failed try (Claude 7 xAF's LEVE 1)");
   {
     breakBook = "envelope";
@@ -190,14 +196,23 @@ async function main(): Promise<void> {
 
   part("A count of the file's size that fails: the file is not sent (Claude 7 xAF's LEVE 2)");
   {
-    const before = await allowanceUsed(store, "studio");
+    // A programme whose file is larger than its reading, so the file's own size is counted after the reading.
+    const big = await shop("book-export-big@example.com", "bookexportbig");
+    await seed(big.store, 100, 30);
+    const bigSizes = (await bookSizes(big.store))!;
+    const bigReading = bookExportSettled(bigSizes, 0);
+    const before = await allowanceUsed(big.store, "studio");
     breakSettle = true;
-    const one = await get(session);
+    salesRead = false;
+    const one = await get(big.session);
     breakSettle = false;
     const body = await one.text();
     is("no file: a passing failure that says the reading counted and to try again", [one.status, (one.headers.get("content-type") ?? "").startsWith("text/csv"), body.includes("Try again in a moment.")], [500, false, true]);
-    is("only the reading's units were kept, nothing of a file that was not sent", (await allowanceUsed(store, "studio")) - before, reading);
-    is("and the next try is made at once", (await get(session)).status, 200);
+    is(`only the reading's units (${bigReading}) were kept, nothing of a file that was not sent`, (await allowanceUsed(big.store, "studio")) - before, bigReading);
+    const again = await get(big.session);
+    const file = await again.text();
+    is("and the next try is made at once", again.status, 200);
+    is("set-up: that file is larger than its reading, so its size was counted after it", bookExportSettled(bigSizes, Buffer.byteLength(file, "utf8")) > bigReading, true);
   }
 
   part("A store's turn outlasts the slowest reading (Claude 7 xAF's LEVE 3)");
@@ -228,6 +243,7 @@ async function main(): Promise<void> {
     is("only the file made was counted", kept > 0 && kept <= units, true);
   }
 
+  await freshDay();
   part("With the figure short of its reading, nothing of the book is read, and the answer says what it needs");
   const used = await allowanceUsed(store, "studio");
   if (!(await takeAllowance(store, "studio", STORE_ALLOWANCES.creator.studio - used - reading + 1)).ok) throw new Error("setup: the figure could not be filled");

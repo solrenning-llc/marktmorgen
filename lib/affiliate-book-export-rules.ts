@@ -16,8 +16,14 @@ export const BOOK_FAILED_TRIES: number = 1;
 
 const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
 
-/** How long one store's spreadsheet holds its turn (a second click waits for the first; focal 3634, 1). */
-export const BOOK_BUSY_SECONDS = 120;
+/**
+ * How long one store's spreadsheet holds its turn (a second click waits for the first; focal 3634, 1): the slowest
+ * reading, every Stripe page of the book (BOOK_STRIPE_PAGES, 23) at its request timeout (STRIPE_TIMEOUT_MS, 20 s), 460
+ * s, and a minute more to read the records and make the file (Claude 7 xAF's LEVE 3 on #5256). Released at once when
+ * the file is made; held this long only by a request that died. tests/affiliate-book-export-cost.test.ts holds it
+ * against those two figures.
+ */
+export const BOOK_BUSY_SECONDS = 9 * 60;
 
 /** Said to a second click while the first is being made: nothing was counted. */
 export const BOOK_BUSY_WORDS = "Your affiliate spreadsheet is already being made. It downloads in a moment. Nothing more was counted.";

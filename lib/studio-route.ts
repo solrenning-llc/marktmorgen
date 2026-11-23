@@ -280,7 +280,7 @@ export async function countStudio(store: Store, need: Need | null, units = 1): P
 export async function holdStudio(
   store: Store,
   units: number,
-): Promise<{ ok: true; give: (n: number) => Promise<void>; force: (n: number) => Promise<void> } | { ok: false; message: string; reason: "used" | "unknown" | "pool"; limit: number; left?: number; reset?: string }> {
+): Promise<{ ok: true; give: (n: number) => Promise<void>; force: (n: number) => Promise<boolean> } | { ok: false; message: string; reason: "used" | "unknown" | "pool"; limit: number; left?: number; reset?: string }> {
   const now = Date.now();
   const current = await refreshPeriod(store);
   const taken = await takeAllowance(current, "studio", units, now);
@@ -292,9 +292,9 @@ export async function holdStudio(
       if (Number.isSafeInteger(n) && n > 0 && n <= units) await giveAllowance(current, "studio", n, now);
     },
     // What a reading moved beyond what was taken for it, counted past the figure if it must: never refused after it.
-    force: async (n) => {
-      if (Number.isSafeInteger(n) && n > 0) await forceAllowance(current, "studio", n, now);
-    },
+    // true once Redis confirmed the count (or nothing was to count), false when it is not known, so a caller about to
+    // send what it counts can hold it back (Claude 7 xAF's LEVE 2 on #5256).
+    force: async (n) => !(Number.isSafeInteger(n) && n > 0) || (await forceAllowance(current, "studio", n, now)),
   };
 }
 

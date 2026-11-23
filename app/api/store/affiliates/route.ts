@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
   // (StudioNotPaidError, 429), or in bulk that part left out and named.
   const charge: Charge = async (units) => {
     const held = await holdStudio(guarded.store, units);
-    return held.ok ? { give: held.give, force: held.force } : null;
+    return held.ok ? { give: held.give, force: async (n) => { await held.force(n); } } : null;
   };
 
   try {

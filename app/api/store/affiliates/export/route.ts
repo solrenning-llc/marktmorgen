@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { creatorFrom, holdStudio } from "@/lib/studio-route";
-import { bookCsv, bookSizes, listAffiliates, readBook } from "@/lib/affiliates";
+import { BookRecordUnreadable, bookCsv, bookSizes, listAffiliates, readBook } from "@/lib/affiliates";
 import { bookExportSettled } from "@/lib/affiliate-book-export";
 import { shortWords } from "@/lib/list-download";
 import { ENDED_BOOK_EXPORTS } from "@/lib/plan-closing-rules";
@@ -10,7 +10,7 @@ import { windowCount, windowCountOf } from "@/lib/window-count";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { BOOK_BUSY_SECONDS, BOOK_BUSY_WORDS, BOOK_FAILED_TRIES, bookFailedUsedWords, bookFailedWords, bookPassingWords } from "@/lib/affiliate-book-export-rules";
 import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { repliesFor } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 import { allowanceWindow, resetWords, windowKeySeconds } from "@/lib/allowance-window";
 import { refreshPeriod } from "@/lib/billing-sync";
@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
 async function spreadsheet(store: Store, ended: boolean): Promise<Response> {
   // Given back when nothing of the book was read (#5256 audit, 7bab 1 and 3c4a 5). Once the book was read, a failure
   // keeps what its reading took (that cost was real, and pricing a free reading again has no room: Store 66 ceiling).
-  // A record that could not be read (UnknownReplyError, which fails the same way every time) also takes, while a plan
+  // A record of the book that could not be read (BookRecordUnreadable, the same every time) also takes, while a plan
   // runs, one of BOOK_FAILED_TRIES, so it is not read again and again (ea4f 2); a passing failure on our side does
   // not, so the download can be tried again at once (focal 3634, 2).
   let giveBack: () => Promise<void> = async () => {};
@@ -118,7 +118,9 @@ async function spreadsheet(store: Store, ended: boolean): Promise<Response> {
       giveBack = async () => { await held.give(units); };
       settle = async (sent) => {
         const more = bookExportSettled(sizes, sent) - units;
-        if (more > 0) await held.force(more);
+        // A count of the file that is not confirmed: the file is not sent, so nothing goes out uncounted (Claude 7 xAF's
+        // LEVE 2 on #5256); the reading stays counted, as for any passing failure.
+        if (more > 0 && !(await held.force(more))) throw new FileUncounted();
       };
     }
     // Counted ahead, the invoices kept between readings with it (bookExportWork), so the reading takes no more.
@@ -126,7 +128,7 @@ async function spreadsheet(store: Store, ended: boolean): Promise<Response> {
     const [book, people] = await Promise.all([readBook(store, undefined, { keptPaid: true }), listAffiliates(store)]);
     const day = new Date().toISOString().slice(0, 10);
     const csv = bookCsv(book, people);
-    if (settle) await settle(Buffer.byteLength(csv, "utf8")).catch((error: unknown) => console.error("counting an affiliate spreadsheet's file failed", error));
+    if (settle) await settle(Buffer.byteLength(csv, "utf8"));
     return new Response(csv, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
@@ -143,7 +145,7 @@ async function spreadsheet(store: Store, ended: boolean): Promise<Response> {
     // The reading was done, so it stays counted. A record that does not read fails the same way every time: it also
     // takes the window's failed try, so it is not read again. Anything else is a passing failure on our side: the
     // download can be tried again at once (focal 3634, 2).
-    if (error instanceof UnknownReplyError) {
+    if (error instanceof BookRecordUnreadable) {
       await failedOnce();
       return plain(500, bookFailedWords(ended, span));
     }
@@ -152,6 +154,14 @@ async function spreadsheet(store: Store, ended: boolean): Promise<Response> {
 }
 
 const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
+
+/** The file's size could not be counted: the file is held back, a passing failure (Claude 7 xAF's LEVE 2 on #5256). */
+class FileUncounted extends Error {
+  constructor() {
+    super("the affiliate spreadsheet's size was not counted");
+    this.name = "FileUncounted";
+  }
+}
 
 /** A count taken (INCR, kept `seconds`): the new count, or null when it could not be read. */
 async function counted(key: string, seconds: number, what: string): Promise<number | null> {

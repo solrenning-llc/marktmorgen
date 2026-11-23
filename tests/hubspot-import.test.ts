@@ -748,6 +748,14 @@ async function main(): Promise<void> {
       is(`an address past 254 ${name} is refused on the board as the address`, [refused.status, refused.body.error], [400, "email"]);
     }
     is("and nothing was saved for them", await dealCount(board.store.statsId!), 1);
+    // Coordinator's triple audit of #2048 @bbd4481d5d, LOW 4: an address that is not a full one was emptied and answered ok.
+    for (const email of ["jane@x", "a@b@c.com", "not an address"]) {
+      const malformed = await boardCall({ action: "deal", deal: { title: "Malformed address", email, stage: boardStage } });
+      is(`"${email}" is refused on the board as the address, never kept empty`, [malformed.status, malformed.body.error], [400, "email"]);
+    }
+    const noAddress = await boardCall({ action: "deal", deal: { title: "No address", email: "", stage: boardStage } });
+    is("control: no address at all is still a deal with no address", [noAddress.status, noAddress.body.deal?.email], [200, ""]);
+    is("and nothing was saved for the malformed ones", await dealCount(board.store.statsId!), 2);
 
     // Coordinator's LOW 2 on #2048 (32nd batch): an address within 64 before the "@" as written, past it once lowercased,
     // is one the deal would not keep: its row is refused, never brought in with the address dropped.

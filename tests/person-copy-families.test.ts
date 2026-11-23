@@ -132,7 +132,9 @@ async function main(): Promise<void> {
   is("nor an address that only contains theirs (rows, report, mail queue, webhook body)", [JSON.stringify(copy).includes(LONGER), JSON.stringify(copy).includes(PREFIXED)], [false, false]);
   is("an import whose only email waiting is to another address is not in it", section("lib/imports.ts").map((r) => r.import), ["buyers.csv"]);
   is("what is held only while a job is done is said, with how long", Array.isArray(copy.passing) && copy.passing.some((p) => p.includes("sending list") && p.includes("at most 60 days")), true);
-  is("everything was read: the copy is complete", [copy.complete, copy.notComplete], [true, []]);
+  // The one thing not copied is that cell's text, and the copy says so (Claude 5 iaqyQ's LEVE on #5378): never a
+  // silent empty value, never the other text.
+  is("everything else was read, and the copy names the one report text it left out", [copy.complete, copy.notComplete], [false, ['A line of the report of the import "buyers.csv" names this address among other text; that text was not copied.']]);
 
   part("A secondary-cell mention never includes a different person's pending import row");
   const ownershipCases = [
@@ -155,7 +157,8 @@ async function main(): Promise<void> {
       const longerOnly = specimen.other.map((cell) => cell.replaceAll(PERSON, LONGER));
       redis.run(["RPUSH", rowKey, JSON.stringify([...own, longerOnly])]);
       const control = await copyPerson((await erasureScope(store, PERSON))!, Date.now());
-      is(`${specimen.kind}: a different address does not create an unresolved trace`, control.complete, true);
+      // buyers.csv, still on the list from the part above, keeps its own withheld report line; nothing else may be said.
+      is(`${specimen.kind}: a different address does not create an unresolved trace`, control.notComplete.filter((line) => !line.includes('import "buyers.csv"')), []);
       is(`${specimen.kind}: that unrelated row is not copied`, JSON.stringify(control).includes(OTHER), false);
 
       redis.run(["DEL", rowKey]);

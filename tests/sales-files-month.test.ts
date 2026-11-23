@@ -5,12 +5,12 @@
  * (lib/sales-files.ts), never from the studio's requests or any other figure. Checked through the real route:
  *   - the owner's SALES_FILES_PER_MONTH files go, then the next is refused with how many and when it opens again,
  *     and a refusal takes no place (ea4f 7);
- *   - the team has as many of its own, and never uses up the owner's (ea4f 8);
+ *   - the count is the store's: its owner and its team share it (the owner's decision, OWNER-20261123-1205-COST-HOLDS);
  *   - the studio's requests are never touched;
  *   - a file whose sales were read keeps its place even when it fails (ea4f 9, 729c 11);
  *   - a store with no statsId is refused with nothing read (729c 13);
  *   - the button says what the files hold before the click (ea4f 6);
- *   - the cost is priced: the owner's and the team's files a month at the most a file costs, the file's bytes at
+ *   - the cost is priced: the store's files a month at the most a file costs, the file's bytes at
  *     their most, and twice that for a store that pays nothing (729c 14).
  * Synthetic: the in-memory Redis and a Stripe stand-in.
  */
@@ -109,12 +109,16 @@ async function main(): Promise<void> {
   await get(owner);
   is("a refusal takes no place", await count("sales"), SALES_FILES_PER_MONTH);
 
-  part("The team has as many of its own, and never uses up the owner's");
+  part("The count is the store's: its owner and its team share it (the owner's decision, OWNER-20261123-1205-COST-HOLDS)");
   await fresh();
-  const team: number[] = [];
-  for (let i = 0; i <= SALES_FILES_PER_MONTH; i += 1) team.push((await get(admin)).status);
-  is(`an Admin downloads ${SALES_FILES_PER_MONTH}, then is refused`, team, [...Array.from({ length: SALES_FILES_PER_MONTH }, () => 200), 429]);
-  is("the owner's count did not move", await count("sales"), SALES_FILES_PER_MONTH);
+  const shared: number[] = [];
+  for (let i = 1; i < SALES_FILES_PER_MONTH; i += 1) shared.push((await get(owner)).status);
+  shared.push((await get(admin)).status);
+  const adminRefused = await get(admin);
+  const ownerRefused = await get(owner);
+  is(`the owner's and an Admin's files together come to ${SALES_FILES_PER_MONTH}, then both are refused`, [...shared, adminRefused.status, ownerRefused.status], [...Array.from({ length: SALES_FILES_PER_MONTH }, () => 200), 429, 429]);
+  is("an Admin is told the store's files are used", (await adminRefused.text()).includes(`Your store has used all ${SALES_FILES_PER_MONTH} sales files this month`), true);
+  is("one count, the store's", [await count("sales"), redis.keys().some((k) => k.includes(":sales-team:"))], [SALES_FILES_PER_MONTH, false]);
   is("the studio's requests were never touched", (await allowanceUsed(store, "studio")) - studioBefore, 0);
 
   part(`Only ${SALES_FILES_UNREAD_TRIES} tries a month that read nothing give their place back`);
@@ -138,7 +142,7 @@ async function main(): Promise<void> {
   }
 
   part("Said before the click, and in plain words");
-  is("the button's note", SALES_FILES_WORDS, `The store's owner can download up to ${SALES_FILES_PER_MONTH} sales files a month (or in a trial), and the team up to ${SALES_FILES_PER_MONTH} more between them. A try counts once your sales are read. They never use up your monthly figures.`);
+  is("the button's note", SALES_FILES_WORDS, `Your store can download up to ${SALES_FILES_PER_MONTH} sales files a month (or in a trial), shared by its owner and team. A try counts once your sales are read. They never use up your monthly figures.`);
   is("the studio's button is described by it", /aria-describedby="sales-files-note"[\s\S]{0,200}id="sales-files-note"[^>]*>\{SALES_FILES_WORDS\}/.test(readFileSync("components/stats-panel.tsx", "utf8")), true);
   is("so is the paused page's", /aria-describedby="paused-sales-files-note"[\s\S]{0,200}id="paused-sales-files-note"[^>]*>\{SALES_FILES_WORDS\}/.test(readFileSync("app/studio/paused/page.tsx", "utf8")), true);
   is("the public page says how many", readFileSync("lib/site-pages.ts", "utf8").includes("up to ${SALES_FILES_PER_MONTH} times a month"), true);
@@ -146,7 +150,7 @@ async function main(): Promise<void> {
   part("Its cost is priced, for a store that pays and one that pays nothing");
   const line = COST_LINES.find((l) => l.id === "sales-files");
   is("its line is in the registry", Boolean(line), true);
-  is("the owner's and the team's", SALES_FILES_A_MONTH, 2 * SALES_FILES_PER_MONTH);
+  is("the store's, one count", SALES_FILES_A_MONTH, SALES_FILES_PER_MONTH);
   for (const tier of TIERS) is(`${tier}: ${SALES_FILES_A_MONTH} files a month at the most a file costs, and the tries that read nothing`, line ? Math.abs(line.monthlyUsd(tier) - (SALES_FILES_A_MONTH * SALES_FILE_COST + SALES_FILES_UNREAD_TRIES * SALES_FILE_UNREAD_COST)) < 1e-12 : false, true);
   is("a file's cost carries its bytes sent, at their most", SALES_FILE_COST > exportCost(1) && SALES_FILE_MAX_BYTES > 0, true);
   is("a store that pays nothing carries a trial's files and the month's after it", /\+ 2 \* \(SALES_FILES_A_MONTH \* SALES_FILE_COST \+ SALES_FILES_UNREAD_TRIES \* SALES_FILE_UNREAD_COST\)/.test(readFileSync("tests/plan-cost-registry.ts", "utf8")), true);

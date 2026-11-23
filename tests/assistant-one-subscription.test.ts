@@ -270,11 +270,29 @@ async function main(): Promise<void> {
   const old = await outcome(store);
   const oldId = old.slice(old.lastIndexOf("/") + 1);
   sessions.find((s) => s.id === oldId)!.amount_subtotal = 4900;
+  // Made before a price change, under the old price's id: another key (the stand-in has one price id, so its key is forgotten).
+  keys.clear();
   posts.length = 0;
   expired.length = 0;
   const now69 = await outcome(store);
   is("the old page is expired at Stripe, once", [expired, sessions.find((s) => s.id === oldId)?.status], [[oldId], "expired"]);
   is("and a new page is opened, never the old one given again", [now69.startsWith("checkout ") && !now69.endsWith(oldId), posts.length], [true, 1]);
+
+  part("Two tabs at the same moment, after a page at another price: one new page for both (Claude 5 ibuF's LEVE on #5349)");
+  store = await freshStore();
+  const before = await outcome(store);
+  sessions.find((s) => s.url === before.slice("checkout ".length))!.amount_subtotal = 4900;
+  keys.clear();
+  postDelayMs = 200;
+  expired.length = 0;
+  // The second tab lists the open pages after the first expired the old one and before its new page exists.
+  const firstTab = outcome(store);
+  while (expired.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+  const tabs = await Promise.all([firstTab, outcome(store)]);
+  postDelayMs = 0;
+  const open = sessions.filter((s) => s.status === "open");
+  is("both tabs get the same new page, or one is asked to try again: never two pages open", [open.length, tabs.filter((t) => t.startsWith("checkout ")).every((t) => t === `checkout ${open[0]?.url}`)], [1, true]);
+
   for (const [label, change] of [
     ["a page in another currency", (s: Session) => { s.currency = "eur"; }],
     ["a page whose price does not read", (s: Session) => { delete s.amount_subtotal; }],
@@ -283,11 +301,13 @@ async function main(): Promise<void> {
     const page = await outcome(store);
     change(sessions.find((s) => s.url === page.slice("checkout ".length))!);
     expired.length = 0;
-    is(`${label}: expired, and a new page opened`, [(await outcome(store)) !== page, expired.length], [true, 1]);
+    // The same price id, so the same key: Stripe answers it with the expired page, which is never given.
+    is(`${label}: expired, never given again, and no second page opened in this key's window`, [await outcome(store), expired.length, sessions.filter((s) => s.status === "open").length], ["refused", 1, 0]);
   }
   store = await freshStore();
   const stale = await outcome(store);
   sessions.find((s) => s.url === stale.slice("checkout ".length))!.amount_subtotal = 4900;
+  keys.clear();
   expireFails = true;
   posts.length = 0;
   is("an expiry Stripe does not confirm opens nothing", [await outcome(store), posts.length], ["refused", 0]);

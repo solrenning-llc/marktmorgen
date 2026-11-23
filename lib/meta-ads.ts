@@ -687,7 +687,12 @@ export function signedNotice(raw: unknown): { user: string; issuedAt: number } |
   const given = Buffer.from(sig, "base64url");
   // Node's decoder skips characters outside the alphabet, reads "+" and "/" and ignores "=", so a garbled
   // signature could decode to the right bytes: only its exact canonical base64url is one (input fuzz, Claude 7).
-  if (given.toString("base64url") !== sig) return null;
+  if (given.toString("base64url") !== sig) {
+    // Still refused, but said (Claude 3 on #4429, 6872606480): if Meta ever pads its signature, every notice would be
+    // refused with nothing to show why. A fixed line, never the signature, the payload or the secret.
+    if (/^[A-Za-z0-9_-]+=+$/.test(sig) && given.toString("base64url") === sig.replace(/=+$/, "")) console.warn("a Meta notice was refused: its signature came with base64 padding");
+    return null;
+  }
   if (given.length !== made.length || !timingSafeEqual(given, made)) return null;
   try {
     const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { algorithm?: string; user_id?: unknown; issued_at?: unknown };

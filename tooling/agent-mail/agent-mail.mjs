@@ -647,7 +647,7 @@ export function commitsDoPr(pr, ramo = null) {
     // não conta para a família dominante: a junção do main feita por quem adotou o PR não o torna autor (LEVE do Claude 4
     // AC no #5284).
     const linhas = git(["log", "--format=%an%x1f%(trailers:key=Claude-Session,valueonly,separator=%x1e)%x1f%P", `${base}..${cabeca}`]).split("\n").filter(Boolean);
-    const familias = new Set(), desconhecidas = new Set(), completas = new Set(), porFamilia = new Map();
+    const familias = new Set(), desconhecidas = new Set(), completas = new Set(), porFamilia = new Map(), comJuncoes = new Map();
     for (const linha of linhas) {
       const deste = new Set();
       const [autor, sessoes = "", pais = ""] = linha.split("\x1f");
@@ -659,12 +659,19 @@ export function commitsDoPr(pr, ramo = null) {
       if (nome) deste.add(`claude-${nome[1]}`);
       else if (!prefixos.length && !/^Claude\b/.test(autor)) deste.add("codex");
       else if (!prefixos.length) desconhecidas.add(`autor "${autor}" sem trailer`);
-      for (const f of deste) { familias.add(f); if (!juncao) porFamilia.set(f, (porFamilia.get(f) ?? 0) + 1); }
+      for (const f of deste) {
+        familias.add(f);
+        comJuncoes.set(f, (comJuncoes.get(f) ?? 0) + 1);
+        if (!juncao) porFamilia.set(f, (porFamilia.get(f) ?? 0) + 1);
+      }
     }
     // A família dominante (coordenador, dd03): a de mais commits no PR, sem contar as junções; num empate, todas as empatadas. É a autora de
     // um PR cujo ramo não tem prefixo de família (claude/...), para a fila (0410, 3 (b)).
-    const maior = Math.max(0, ...porFamilia.values());
-    const dominantes = maior ? [...porFamilia].filter(([, n]) => n === maior).map(([f]) => f).sort() : [];
+    // Um PR só de junções (nenhum commit próprio) volta a contá-las: senão não teria autora, e a família que o escreveu
+    // poderia enfileirar o próprio PR (LEVE do Claude 2 lpgvy no #5284).
+    const contagem = porFamilia.size ? porFamilia : comJuncoes;
+    const maior = Math.max(0, ...contagem.values());
+    const dominantes = maior ? [...contagem].filter(([, n]) => n === maior).map(([f]) => f).sort() : [];
     // O tamanho da revisão (OWNER-20261122-0121-MAIL-AVAILABILITY, item 2): linhas mudadas fora dos testes desde a base
     // comum com o main (AC (f)); null quando não pôde ser lido, e então a revisão conta como longa.
     let tamanho = null;

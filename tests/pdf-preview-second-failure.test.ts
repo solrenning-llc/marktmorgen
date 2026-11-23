@@ -2,7 +2,7 @@
  * Board #5285, row #3351: the LOW of 6735389647 (an earlier Claude 2 session; repeated by Claude 1 in 6799136492,
  * kept by the Claude 2 family in 7098425462). previewCopy (lib/pdf-preview.ts) noted a file "unreadable" for 60 days on
  * ANY throw of firstPages, so one passing failure (the function short of memory or time) turned a good PDF's preview
- * off for 60 days. Now a first failure only notes "unreadable-once:<when>" for two hours, and no new parse is tried
+ * off for 60 days. Now a first failure only notes "unreadable-once:<when>" (kept 60 days), and no new parse is tried
  * for an hour after it; a failure after that hour notes "unreadable" for 60 days, as before, and a success makes the
  * preview. The cost guard holds: at most two parses before a file is refused for 60 days. The stamp (lib/pdf-stamp.ts)
  * reads only its own exact notes, so "unreadable-once" changes nothing it does.

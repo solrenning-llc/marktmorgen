@@ -66,8 +66,9 @@ const MONTH_FIELD_BYTES = 64;
 /** As long as lib/pdf-stamp.ts keeps its note about a file that could not be stamped. */
 const UNREADABLE_SECONDS = 60 * 24 * 60 * 60;
 /**
- * A first failure to cut a preview is noted only "unreadable-once:<ms>", kept two hours, and no new parse is tried for
- * an hour after it: a passing failure (the function short of memory or time) never turns a good PDF's preview off for
+ * A first failure to cut a preview is noted only "unreadable-once:<ms>", kept as long as an unreadable note (so a
+ * failure asked hours later is still its second; Claude 2 lpgvy's LEVE on #5360), and no new parse is tried for an hour
+ * after it: a passing failure (the function short of memory or time) never turns a good PDF's preview off for
  * 60 days. A failure past that hour notes "unreadable" for UNREADABLE_SECONDS, as before, so a file pdf-lib cannot open
  * is parsed twice at most (#5285 row #3351, the LOW of 6735389647). The stamp reads only its own exact notes.
  */
@@ -146,12 +147,12 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
     try {
       bytes = await firstPages(original, pages);
     } catch (error) {
-      // What it answers decides nothing: there is no preview either way. A first failure is noted once, for two hours;
-      // one past its hour is noted unreadable for 60 days.
+      // What it answers decides nothing: there is no preview either way. A first failure is noted once (kept 60 days); one
+      // past its hour is noted unreadable for 60 days.
       if (isRedisConfigured()) {
         const command = failedOnce
           ? ["SET", problemKey(file.pathname), "unreadable", "EX", UNREADABLE_SECONDS]
-          : ["SET", problemKey(file.pathname), `${ONCE}${Date.now()}`, "EX", 2 * PREVIEW_RETRY_SECONDS];
+          : ["SET", problemKey(file.pathname), `${ONCE}${Date.now()}`, "EX", UNREADABLE_SECONDS];
         await redisPipeline([command]).catch(() => {});
       }
       throw error;

@@ -2,6 +2,15 @@
 export * from './redis-stub';
 export * from '../lib/meet-providers';
 export const storeForId=async()=>{throw new Error('Store lookup outside callback proof');};
+// lib/meta-ads.ts keeps a connection behind the store's fence (#5010 row 117): its names, not called in this proof.
+export const ERASING_KEY='nl:closed:erasing';
+export const STORE_ID_PATTERN=/^[0-9a-f]{32}$/;
+const outside=()=>{throw new Error('Store fence outside callback proof');};
+export const erasingField=async()=>outside();
+export const ownerKey=async()=>outside();
+export const storeIdCommand=()=>outside();
+export const storeRef=()=>outside();
+export const storeForIdExact=async()=>{throw new Error('Store lookup outside callback proof');};
 import { redisPipeline as normal, store } from './redis-stub';
 import type { Store } from '@/lib/store';
 export const fixture={sid:'oauth-proof-store',statsId:'oauth-proof-stats',handle:'oauth-proof',email:'owner@example.invalid',currency:'usd',tier:'pro',period:{funded:true}} as Store & {statsId:string};

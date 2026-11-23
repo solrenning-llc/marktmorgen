@@ -192,6 +192,7 @@ export type { CourseRef, Listing, Product };
  * inventing a different one for this store alone.
  */
 import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
+import { type ExitDestination, type ExitNotice, exitDestination, exitHoldSeconds, mayChooseExit, readExitNotice, releasedValue } from "@/lib/exit-redirect-rules";
 export { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 
 
@@ -376,6 +377,13 @@ export type Store = {
   firstOfferPublishedAt?: string;
   /** True only for stores registered after activation tracking was installed. */
   activationTracked?: boolean;
+  /**
+   * The new address its owner chose before the store's closing day, shown
+   * for EXIT_NOTICE_DAYS at its old addresses once the store is closed
+   * (queue item 97 [D2-OPEN-EXIT]; lib/exit-redirect-rules.ts). Read whole
+   * or dropped.
+   */
+  exitNotice?: ExitNotice;
   /** Addresses this store used before. They lead here until it lets them go. */
   previousHandles: string[];
   /**
@@ -1063,6 +1071,7 @@ function parseStore(raw: unknown): Store | null {
       createdAt: value.createdAt ?? "",
       activationTracked: value.activationTracked === true,
       ...(typeof value.firstOfferPublishedAt === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value.firstOfferPublishedAt) && Number.isFinite(Date.parse(value.firstOfferPublishedAt)) ? { firstOfferPublishedAt: value.firstOfferPublishedAt.slice(0, 30) } : {}),
+      ...((notice) => (notice ? { exitNotice: notice } : {}))(readExitNotice(value.exitNotice)),
       previousHandles: Array.isArray(value.previousHandles)
         ? value.previousHandles.filter((h) => typeof h === "string")
         : [],
@@ -1448,16 +1457,28 @@ export async function withRestartPublicationRecord<T>(
  finally{await releaseLockStrict(held);}
 }
 
+/**
+ * What a public address holds, read once: the store behind it, or, for a
+ * name that was let go, the value it is held with, in which a closed store's
+ * moved notice may be (lib/exit-redirect-rules.ts, exitAnswerForValue).
+ */
+export type HandleLookup = { store: Store | null; released: string | null };
+
+export async function handleLookup(handle: string): Promise<HandleLookup> {
+  const none: HandleLookup = { store: null, released: null };
+  if (!isRedisConfigured()) return none;
+  if (handleProblem(handle)) return none;
+  const [email] = await redisPipeline([["GET", handleKey(handle)]]);
+  if (typeof email !== "string" || !email) return none;
+  // A name that was let go is held, not owned: it leads nowhere on purpose.
+  if (email.startsWith(RELEASED_PREFIX)) return { store: null, released: email };
+  const [raw] = await redisPipeline([["GET", await ownerKey(email)]]);
+  return { store: parseStore(raw), released: null };
+}
+
 /** The store behind a public address, or null if that handle is free. */
 export async function storeForHandle(handle: string): Promise<Store | null> {
-  if (!isRedisConfigured()) return null;
-  if (handleProblem(handle)) return null;
-  const [email] = await redisPipeline([["GET", handleKey(handle)]]);
-  if (typeof email !== "string" || !email) return null;
-  // A name that was let go is held, not owned: it leads nowhere on purpose.
-  if (email.startsWith(RELEASED_PREFIX)) return null;
-  const [raw] = await redisPipeline([["GET", await ownerKey(email)]]);
-  return parseStore(raw);
+  return (await handleLookup(handle)).store;
 }
 
 /**
@@ -1634,11 +1655,15 @@ function unknownHandleReply(): never {
 }
 
 /**
- * The store behind a public address, read once per page view: the layout,
- * the page's head and the page itself ask for it, and all three are given
- * the one answer. Only for pages; anything that writes reads afresh.
+ * What a public address holds, read once per page view: the layout, the
+ * page's head and the page itself ask for it, and all three are given the
+ * one answer; the moved notice of a closed store is read from it too, with
+ * no read more. Only for pages; anything that writes reads afresh.
  */
-export const storeForPage = cache(storeForHandle);
+export const handleForPage = cache(handleLookup);
+
+/** The store behind a public address, from that one read per page view. */
+export const storeForPage = cache(async (handle: string): Promise<Store | null> => (await handleForPage(handle)).store);
 
 /**
  * Whether Redis says, exactly, that no store has this id: the one EXISTS reply is 0. A reply missing, cut short or of
@@ -2337,6 +2362,24 @@ export type CreateResult =
   | { ok: true; store: Store }
   | { ok: false; reason: "taken" | "reserved" | "shape" | "first" | "too_many"; limit?: number };
 
+/** How many times a refused store id's take-back is sent before it is said to be unknown. */
+const TAKE_BACK_TRIES = 3;
+
+/**
+ * Takes a refused new store id back out of its account's set, and reads that it went (Claude 4 AC's LOW on #4348).
+ * A take-back that is lost leaves the id in the set for good: on a full account the set then holds
+ * MAX_STORES_PER_ACCOUNT members, which the closing of that owner's stores reads as unknown, and they wait forever.
+ * So the reply is read exactly, 0 or 1 (already gone counts as gone); a throw or another shape sends it again, and
+ * after TAKE_BACK_TRIES the take-back is said as unknown instead of hidden.
+ */
+async function takeBackStoreId(account: string, sid: string): Promise<void> {
+  for (let tries = 0; tries < TAKE_BACK_TRIES; tries += 1) {
+    const reply = await redisPipeline([["SREM", account, sid]]).then((replies) => replies[0], () => undefined);
+    if (reply === 0 || reply === 1) return;
+  }
+  throw new UnknownReplyError("a refused store id's take-back from its account");
+}
+
 /**
  * Makes another store for an account that already has its first.
  *
@@ -2367,17 +2410,17 @@ export async function createStore(
   // another shape (NaN before, which passed the ceiling) takes the new id back out and makes no store.
   const count = added ? countOf(added[1]) : null;
   if (count === null) {
-    await redisPipeline([["SREM", account, sid]]);
+    await takeBackStoreId(account, sid);
     throw new UnknownReplyError("an account's count of stores");
   }
   if (count + 1 > MAX_STORES_PER_ACCOUNT) {
-    await redisPipeline([["SREM", account, sid]]);
+    await takeBackStoreId(account, sid);
     return { ok: false, reason: "too_many", limit: MAX_STORES_PER_ACCOUNT };
   }
 
   const [taken] = await redisPipeline([["SET", handleKey(handle), ref, "NX"]]);
   if (taken === null) {
-    await redisPipeline([["SREM", account, sid]]);
+    await takeBackStoreId(account, sid);
     return { ok: false, reason: "taken" };
   }
 
@@ -2540,7 +2583,6 @@ export async function closeStoreRecord(
   extraKeys: string[] = [],
   beforeDelete?: (fresh: Store | null, held: Held) => Promise<void>,
 ): Promise<boolean> {
-  const released = `${RELEASED_PREFIX}${new Date().toISOString()}`;
   const owner = await ownerKey(storeRef(store));
   let held: Held;
   try {
@@ -2573,12 +2615,22 @@ export async function closeStoreRecord(
     // leaves its account's list at both addresses read, as one moved since is the account's now (Claude 6 on #3643). An
     // answer that is not "done" or "not ours" throws before anything is said closed (rule 24): the closing walk reads the
     // record before it walks the store, and prepares it again while it is there.
+    // With a moved notice chosen, the notice goes into the same value and the addresses are held until it ends, never
+    // less than the quarantine (lib/exit-redirect-rules.ts); with none, exactly as before. Read from the record as it
+    // is under the lock, never from the caller's copy: a notice chosen or taken off since the caller's read is the one
+    // published (Codex X6's MEDIUM on #3648). With the record already gone, the caller's copy is the last known.
+    // A suspended store's old address carries no notice (review of #3730), suspended as the record says under the lock.
+    const kept = fresh ?? store;
+    const exitNotice = kept.suspended ? null : kept.exitNotice ?? null;
+    const now = Date.now();
+    const released = releasedValue(new Date(now), exitNotice);
+    const hold = exitNotice ? exitHoldSeconds(exitNotice.closedAt, now, RELEASE_QUARANTINE_DAYS) : RELEASE_QUARANTINE_DAYS * 24 * 60 * 60;
     const handles = new Set([store.handle, ...store.previousHandles, ...(fresh ? [fresh.handle, ...fresh.previousHandles] : [])]);
     const accounts = new Set(await Promise.all([store.email, ...(fresh ? [fresh.email] : [])].map((email) => accountKey(email))));
     // The id this record holds now: a store from before ids given one since (sameLegacy) releases that one.
     const sid = sameLegacy && fresh ? fresh.sid : store.sid;
     const changes: FencedChange[] = [
-      ...[...handles].map((handle) => ({ op: "SETEX", key: handleKey(handle), words: [released, String(RELEASE_QUARANTINE_DAYS * 24 * 60 * 60)] })),
+      ...[...handles].map((handle) => ({ op: "SETEX", key: handleKey(handle), words: [released, String(hold)] })),
       ...(STORE_ID_PATTERN.test(sid) ? [{ op: "DEL", key: storeIdKey(sid), words: [] }, ...[...accounts].map((account) => ({ op: "SREM", key: account, words: [sid] }))] : []),
       { op: "ZREM", key: ENDED_INDEX, words: [storeRef(store)] },
       { op: "SREM", key: SHARING_INDEX, words: [storeRef(store)] },
@@ -2595,6 +2647,65 @@ export async function closeStoreRecord(
   } finally {
     await releaseLock(held);
   }
+}
+
+export type ExitChoice =
+  | { ok: true; store: Store }
+  | { ok: false; reason: "none" | "not_closing" | "suspended" | Exclude<ExitDestination, { ok: true }>["reason"] };
+
+/**
+ * Keeps, or takes away (an empty address), the new address a closing
+ * store's owner gives for its moved notice (97 [D2-OPEN-EXIT];
+ * lib/exit-redirect-rules.ts): only for a store that closes whole and only
+ * before its closing day (mayChooseExit), with that store's own closing day,
+ * under the store's lock. A refused choice changes nothing.
+ */
+export async function chooseExitNotice(
+  ref: string,
+  raw: unknown,
+  closing: { endedAt: number; day: number } | null,
+  now = Date.now(),
+): Promise<ExitChoice> {
+  const result = await withStore<ExitChoice>(ref, async (store, save) => {
+    // Taken away at any time before the closing day, even by a store no longer closing (review of #3730); from that
+    // day the old address may already carry it (closeStoreRecord), so it stays as the visitors see it. No closing read
+    // (null) is either a closing cancelled before its day or one whose walk has gone far enough that it is no longer
+    // returned: then the notice's own day decides, so a passed one is never taken away (Codex N1's MEDIUM on #3730).
+    if (raw === "" || raw === null || raw === undefined) {
+      const noticeDay = store.exitNotice && Number.isFinite(store.exitNotice.closedAt) ? store.exitNotice.closedAt : null;
+      const closed = closing ? now >= closing.day : noticeDay !== null && now >= noticeDay;
+      if (!Number.isFinite(now) || closed) return { ok: false, reason: "not_closing" };
+      const { exitNotice: _gone, ...rest } = store;
+      void _gone;
+      return { ok: true, store: await save(rest) };
+    }
+    if (!closing || !mayChooseExit({ endedAt: closing.endedAt, closingDay: closing.day, now })) return { ok: false, reason: "not_closing" };
+    // A store switched off after notices about its content never sends its visitors elsewhere.
+    if (store.suspended) return { ok: false, reason: "suspended" };
+    const checked = exitDestination(raw);
+    if (!checked.ok) return { ok: false, reason: checked.reason };
+    return { ok: true, store: await save({ ...store, exitNotice: { to: checked.url, host: checked.host, closedAt: closing.day, setAt: now } }) };
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
+/**
+ * The closing day, once it has begun (lib/plan-closing.ts closingDay): a moved notice chosen before it is given the day
+ * the store really closed, so the copy its old address keeps (closeStoreRecord) counts its 90 days from that day, as
+ * the page does (Claude 1's MEDIUM 2 on #3730). Under the store's lock. true once kept, or when there is nothing to
+ * change (no notice, or that day already); false when the record could not be read or saved.
+ */
+export async function setExitNoticeDay(ref: string, day: number): Promise<boolean> {
+  if (!Number.isFinite(day) || day <= 0) return false;
+  const done = await withStore<boolean>(ref, async (store, save) => {
+    if (!store.exitNotice || store.exitNotice.closedAt === day) return true;
+    await save({ ...store, exitNotice: { ...store.exitNotice, closedAt: day } });
+    return true;
+  }).catch((error: unknown) => {
+    console.error("a moved notice could not be given the real closing day", error);
+    return null;
+  });
+  return done === true;
 }
 
 export type RenameResult =

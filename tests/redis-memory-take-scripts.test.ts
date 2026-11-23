@@ -15,6 +15,14 @@ type Case = { what: string; setup: Command[]; keys: string[]; argv: (string | nu
 
 const record = (statsId: string) => JSON.stringify({ statsId, handle: "shop" });
 const CASES: Record<string, Case[]> = {
+  "about-write-live:v2": [
+    { what: "a live store, written", setup: [["SET", "k:id", "ref1"], ["SET", "k:about", "old"]], keys: ["k:id", "k:erasing", "k:about"], argv: ["f1", "0", "", "new", "ref1"] },
+    { what: "a live store, compared and written", setup: [["SET", "k:id", "ref1"], ["SET", "k:about", "old"]], keys: ["k:id", "k:erasing", "k:about"], argv: ["f1", "1", "old", "new", "ref1"] },
+    { what: "a description changed meanwhile", setup: [["SET", "k:id", "ref1"], ["SET", "k:about", "other"]], keys: ["k:id", "k:erasing", "k:about"], argv: ["f1", "1", "old", "new", "ref1"] },
+    { what: "an empty text deletes it", setup: [["SET", "k:id", "ref1"], ["SET", "k:about", "old"]], keys: ["k:id", "k:erasing", "k:about"], argv: ["f1", "0", "", "", "ref1"] },
+    { what: "an id key holding another ref", setup: [["SET", "k:id", "ref2"], ["SET", "k:about", "old"]], keys: ["k:id", "k:erasing", "k:about"], argv: ["f1", "0", "", "new", "ref1"] },
+    { what: "an erasing store", setup: [["SET", "k:id", "ref1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:id", "k:erasing", "k:about"], argv: ["f1", "0", "", "new", "ref1"] },
+  ],
   "card-open-live:v1": [
     { what: "a live store", setup: [["SET", "k:id", "s1"]], keys: ["k:id", "k:erasing", "k:open"], argv: ["f1", "sess", 600] },
     { what: "no store", setup: [], keys: ["k:id", "k:erasing", "k:open"], argv: ["f1", "sess", 600] },
@@ -81,6 +89,15 @@ const CASES: Record<string, Case[]> = {
     { what: "no record", setup: [], keys: ["k:live", "k:erasing", "k:cache"], argv: ["f1", "v", 60, "st1", ""] },
     { what: "an erasing store", setup: [["SET", "k:live", "ref1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:live", "k:erasing", "k:cache"], argv: ["f1", "v", 60, "", "ref1"] },
   ],
+  "store-push-live:v1": [
+    { what: "an id key holding its ref, a line pushed and the list trimmed", setup: [["SET", "k:live", "ref1"], ["RPUSH", "k:list", "old1", "old2"]], keys: ["k:live", "k:erasing", "k:list"], argv: ["f1", "new", 60, "", "ref1", 2] },
+    { what: "an id key holding another ref", setup: [["SET", "k:live", "ref2"]], keys: ["k:live", "k:erasing", "k:list"], argv: ["f1", "new", 60, "", "ref1", 2] },
+    { what: "an owner's record carrying its statsId", setup: [["SET", "k:live", record("st1")]], keys: ["k:live", "k:erasing", "k:list"], argv: ["f1", "new", 60, "st1", "", 2] },
+    { what: "an owner's record of another store", setup: [["SET", "k:live", record("st2")]], keys: ["k:live", "k:erasing", "k:list"], argv: ["f1", "new", 60, "st1", "", 2] },
+    { what: "an owner's record that does not parse", setup: [["SET", "k:live", "{not json"]], keys: ["k:live", "k:erasing", "k:list"], argv: ["f1", "new", 60, "st1", "", 2] },
+    { what: "no record", setup: [], keys: ["k:live", "k:erasing", "k:list"], argv: ["f1", "new", 60, "st1", "", 2] },
+    { what: "an erasing store", setup: [["SET", "k:live", "ref1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:live", "k:erasing", "k:list"], argv: ["f1", "new", 60, "", "ref1", 2] },
+  ],
   "store-claim-live:v1": [
     { what: "an id key holding its ref", setup: [["SET", "k:live", "ref1"]], keys: ["k:live", "k:erasing", "k:mark"], argv: ["f1", "v", 60, "", "ref1"] },
     { what: "the mark already taken", setup: [["SET", "k:live", "ref1"], ["SET", "k:mark", "w"]], keys: ["k:live", "k:erasing", "k:mark"], argv: ["f1", "v", 60, "", "ref1"] },
@@ -88,6 +105,10 @@ const CASES: Record<string, Case[]> = {
     { what: "an owner's record that does not parse", setup: [["SET", "k:live", "{not json"]], keys: ["k:live", "k:erasing", "k:mark"], argv: ["f1", "v", 60, "st1", ""] },
     { what: "an owner's record of another store", setup: [["SET", "k:live", record("st2")]], keys: ["k:live", "k:erasing", "k:mark"], argv: ["f1", "v", 60, "st1", ""] },
     { what: "an erasing store", setup: [["SET", "k:live", "ref1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:live", "k:erasing", "k:mark"], argv: ["f1", "v", 60, "", "ref1"] },
+  ],
+  "store-forget-complete:v1": [
+    { what: "a store still in line", setup: [["HSET", "k:q", "st|s1", "{}"], ["HSET", "k:month", "done", "2"]], keys: ["k:q", "k:month"], argv: ["st|s1", 3600] },
+    { what: "a store no longer in line", setup: [["HSET", "k:q", "st|s2", "{}"]], keys: ["k:q", "k:month"], argv: ["st|s1", 3600] },
   ],
   "zset-take-count:v1": [
     { what: "a sorted set", setup: [["ZADD", "k:z", 1, "a", 2, "b"]], keys: ["k:z"], argv: [] },

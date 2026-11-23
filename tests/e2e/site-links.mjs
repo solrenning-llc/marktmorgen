@@ -330,7 +330,8 @@ try {
         const { status, body } = await answer(kind, key);
         if (status >= 400 || !body) continue; // the link itself is reported above
         const html = await body.text();
-        ids = new Set([...html.matchAll(/\s(?:id|name)="([^"]*)"/g)].map((m) => m[1].replace(/&amp;/g, "&").replace(/&quot;/g, '"')));
+        // "&amp;" last, so "&amp;quot;" reads as the text "&quot;", never as a quotation mark (CodeQL, double unescaping).
+        ids = new Set([...html.matchAll(/\s(?:id|name)="([^"]*)"/g)].map((m) => m[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&")));
         idsOf.set(key, ids);
       }
       if (!ids.has(place)) fail(`${kind} ${from}`, `links to ${key}#${place}, which is not on that page`);

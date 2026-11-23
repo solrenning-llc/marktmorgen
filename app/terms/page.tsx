@@ -555,7 +555,8 @@ export default function TermsPage() {
           price is shown before you confirm and is charged at once to the card
           your plan is paid with, on an invoice of its own. If our video
           provider refuses the request when it is made, what was paid is
-          refunded at once. If the lesson&apos;s video is deleted before its
+          refunded at once. If a request that was charged never reaches our
+          video provider, or the lesson&apos;s video is deleted before its
           captions are delivered, what was paid for them is refunded without
           waiting for the hours below. Otherwise, what was paid for a
           language whose captions are not delivered is refunded automatically

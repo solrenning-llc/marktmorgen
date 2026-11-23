@@ -1338,6 +1338,9 @@ console.log("ZA: what a READY's text may say (owner, 23/11/2026 12h29 Fortaleza:
   // Claude 5 icFoe's LEVE on #5404: a finding described with one of those words is still a finding.
   for (const t of ["0 findings\nLEVE: the stream is never closed when the read throws", "0 findings\nLEVE: a fixed 30-second timeout", "0 findings\nNIT: the error is resolved to a string", "0 findings\nMEDIUM: the address is already addressed to another store", "0 findings\nLOW 2 (copy) — the text is fixed width", "0 findings\n- LEVE - a closed store still answers"])
     is(`ZA: icFoe's case '${t.split("\n")[1].slice(0, 50)}' is refused`, !aceito(t), za(t).join("; "));
+  // Claude 3 yUZf's MÉDIO on #5404 (7107553863): a closure promised for later is a deferral, not a closure.
+  for (const t of ["0 findings; the LEVE is to be fixed in a later PR", "0 findings; Claude 1's NIT will be addressed later", "0 findings; the LOW can be resolved in another PR", "sem achados; o LEVE será corrigido depois", "0 findings; the LEVE should be fixed"])
+    is(`ZA: the promise '${t}' is refused`, !aceito(t), za(t).join("; "));
   is("ZA: yUZf's control 'READY, 0 findings, 1 LEVE: the log line is noisy.' is refused", !aceito("READY, 0 findings, 1 LEVE: the log line is noisy."), "");
   for (const t of ["0 findings; the LOW is not addressed", "sem achados; o LEVE não foi resolvido", "0 findings; the MEDIUM is unresolved", "0 findings; a follow-up PR for the name"])
     is(`ZA (d): '${t}' is refused`, !aceito(t), za(t).join("; "));

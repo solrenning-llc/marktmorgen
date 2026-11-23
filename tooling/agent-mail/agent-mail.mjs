@@ -1707,7 +1707,10 @@ export function motivosContraReady(texto) {
   // Claude 5 icFoe's LEVE on #5404: a line that describes a finding ("LEVE: the stream is never closed") is a finding, even
   // with one of these words in it; only a line that says them of the finding ("my LEVE closed") is resolved.
   const descreveAchado = (l) => /\b(GRAVE|ALTO|M[ÉE]DIO|LEVE|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE)S?\b\s*(\d+\s*)?(\([^)]*\)\s*)?[:—–]|\b(GRAVE|ALTO|M[ÉE]DIO|LEVE|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE)S?\b\s+-\s/.test(l);
-  const resolvido = (l) => !descreveAchado(l) && /corrigid|\bfixe[ds]\b|retirad|withdrawn|\bclosed\b|fechad|\baddressed\b|atendid|\bresolved\b|resolvid/i.test(l)
+  // Claude 3 yUZf's MÉDIO on #5404: "will be fixed", "to be addressed later", "será corrigido depois" are deferrals; a
+  // closure word counts only said in the past, with no future, modal or later marker on the line.
+  const prometido = (l) => /\b(will|shall|to be|can|could|should|may|might|would|must|later|another (pr|pull request|unit)|(a |the )?(next|separate|follow-?up|future) (pr|pull request|unit)|eventually|someday)\b|\b(ser[áa]o?|ficar[áa]|vai|v[ãa]o|pode(m|ria)?|deve(m|ria)?|depois|outro pr|pr[óo]ximo pr|futur[oa]|mais tarde|em seguida)\b/i.test(l);
+  const resolvido = (l) => !descreveAchado(l) && !prometido(l) && /corrigid|\bfixe[ds]\b|retirad|withdrawn|\bclosed\b|fechad|\baddressed\b|atendid|\bresolved\b|resolvid/i.test(l)
     && !/n[ãa]o (foi |est[áa] |foram |est[ãa]o )?(corrigid|retirad|fechad|atendid|resolvid)|not (been |yet )?(fixed|withdrawn|closed|addressed|resolved)|unfixed|unresolved|unaddressed|sem corre[çc][ãa]o/i.test(l);
   const linhas = todo.split("\n").filter((l) => !notas.test(l) && !resolvido(l)).join("\n")
     .replace(/\b(0|zero|nenhum|sem|no)\s+(achados?\s+)?(GRAVE|ALTO|M[ÉE]DIO|LEVE|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE)S?\b/gi, " ");

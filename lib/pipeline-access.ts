@@ -125,13 +125,21 @@ export async function writePipelineAccess(statsId: string, email: string, map: A
     // A route read this teammate under the team's lease. Its old read authorizes
     // no write once that lease is gone: removal may already have erased the field.
     // Reuse the shared atomic lock-and-change script; no separate GET can fence HSET.
+    let held: boolean | null;
     try {
-      written = (await applyIfHeld(teamLease, [{
+      held = await applyIfHeld(teamLease, [{
         op: value ? "HSET" : "HDEL", key: accessKey(statsId), words: value ? [who, value] : [who],
-      }])) ? 1 : null;
+      }]);
     } catch {
-      written = null;
+      held = null;
     }
+    // false: the lease was not the route's any more, so the script wrote nothing, for certain (applyIfHeld). The room
+    // this write took goes back before it is refused (Claude 3's LEVE on #5111); only an unknown answer keeps it, below.
+    if (held === false) {
+      if (grown > 0) await giveData(room, [{ slot: ACCESS_SLOT, bytes: grown }]);
+      throw new PipelineAccessWriteUnconfirmed();
+    }
+    written = held ? 1 : null;
   } else {
     written = oneAnswer(await redisPipeline([value ? ["HSET", accessKey(statsId), who, value] : ["HDEL", accessKey(statsId), who]]));
   }

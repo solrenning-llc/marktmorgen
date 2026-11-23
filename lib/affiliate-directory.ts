@@ -73,6 +73,15 @@ const KEEP_SECONDS = 600;
 const BUILD_HOLD_SECONDS = 60;
 
 /**
+ * How long one build may go on reading, from its start (Claude 7 xAF's MEDIO on #2921): the reads run in batches of
+ * DIRECTORY_READ_BATCH one after another, so under a slow Redis a build of MAX_ROWS stores could outlive its mark and
+ * let a second full build start. A batch not started by this deadline is not read; its stores are left out and
+ * counted, as a failed read is, and the page is kept partial. The last batch started may still take two store reads
+ * at REDIS_TIMEOUT_MS (5 s) each, so 40 s keeps the whole build under BUILD_HOLD_SECONDS.
+ */
+export const DIRECTORY_BUILD_DEADLINE_MS = 40_000;
+
+/**
  * How long, after a build that could not finish, the page answers "could not
  * be checked" without building again: the time a kept page is kept, so a
  * failure that persists costs one build in it, as a kept page does.
@@ -437,6 +446,7 @@ async function markFailed(token: string): Promise<void> {
  * and no row was read, the build throws the first of those failures.
  */
 async function buildDirectory(): Promise<{ rows: DirectoryRow[]; partial: false | "unknown" | "failed"; omitted: number; more: boolean }> {
+  const deadline = Date.now() + DIRECTORY_BUILD_DEADLINE_MS;
   // SSCAN may return a member more than once, in a page or across pages: each store is one row (Codex T on #2921).
   const sids = new Set<string>();
   let cursor = "0";
@@ -459,18 +469,18 @@ async function buildDirectory(): Promise<{ rows: DirectoryRow[]; partial: false 
   // cannot be read throws and is counted too, never taken for no store (rvB4 on #2921).
   const failures: unknown[] = [];
   // In batches of DIRECTORY_READ_BATCH, never MAX_ROWS reads at once (Claude 3 yUZf on #2921).
-  const stores = await inBatches([...sids].slice(0, MAX_ROWS), (sid) =>
+  // Stopped at the build's deadline (Claude 7 xAF on #2921): a store not read in time is left out and counted.
+  const storeReads = await inBatches([...sids].slice(0, MAX_ROWS), deadline, (sid) =>
     storeForIdExact(sid).catch((error: unknown) => {
       failures.push(error);
       return null;
     }),
   );
+  const stores = storeReads.done;
   // A failed numbers read still shows the row without numbers, but that page is
   // not kept for the next visitors.
   let partial: false | "unknown" | "failed" = false;
-  const rows = sortRows(
-    (
-      await inBatches(stores, async (store) => {
+  const numberReads = await inBatches(stores, deadline, async (store) => {
           const row = store ? directoryRow(store) : null;
           if (!row || !store || !store.affiliates.numbers) return row;
           const numbers = await programNumbers(store).catch((error: unknown) => {
@@ -480,20 +490,28 @@ async function buildDirectory(): Promise<{ rows: DirectoryRow[]; partial: false 
             return null;
           });
           return { ...row, numbers: directoryNumbers(numbers) };
-      })
-    ).filter((row): row is DirectoryRow => row !== null),
-  );
-  if (failures.length) {
+  });
+  const rows = sortRows(numberReads.done.filter((row): row is DirectoryRow => row !== null));
+  // Stores whose store read or numbers read was not started by the deadline: left out of this build and counted.
+  const lateStores = storeReads.rest.length + numberReads.rest.filter((store) => store !== null).length;
+  const omitted = failures.length + lateStores;
+  if (omitted) {
     // No program read and some could not be: the list could not be checked, never "no program is listed yet".
-    if (!rows.length) throw failures[0];
-    console.warn(`affiliate directory: ${failures.length} listed store(s) could not be read and are left out of this build`);
+    if (!rows.length) throw failures[0] ?? new Error("the affiliate directory's build ran out of time before any program was read");
+    console.warn(`affiliate directory: ${omitted} listed store(s) could not be read in this build (${lateStores} past its deadline) and are left out`);
   }
-  return { rows, partial, omitted: failures.length, more };
+  return { rows, partial, omitted, more };
 }
 
-/** Runs `work` over `items` DIRECTORY_READ_BATCH at a time, keeping their order. */
-async function inBatches<T, R>(items: T[], work: (item: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = [];
-  for (let i = 0; i < items.length; i += DIRECTORY_READ_BATCH) out.push(...(await Promise.all(items.slice(i, i + DIRECTORY_READ_BATCH).map(work))));
-  return out;
+/**
+ * Runs `work` over `items` DIRECTORY_READ_BATCH at a time, keeping their order, and starts no batch once `deadline`
+ * (a Date.now() time) has passed: `rest` holds the items of the batches not started.
+ */
+async function inBatches<T, R>(items: T[], deadline: number, work: (item: T) => Promise<R>): Promise<{ done: R[]; rest: T[] }> {
+  const done: R[] = [];
+  for (let i = 0; i < items.length; i += DIRECTORY_READ_BATCH) {
+    if (Date.now() >= deadline) return { done, rest: items.slice(i) };
+    done.push(...(await Promise.all(items.slice(i, i + DIRECTORY_READ_BATCH).map(work))));
+  }
+  return { done, rest: [] };
 }

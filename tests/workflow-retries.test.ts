@@ -44,6 +44,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
 import { installSesMailFixture } from "./ses-mail-fixture";
 import { skipWaits } from "./skip-waits";
+import { commandsOf } from "./flow-wait-inside";
 // The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
 skipWaits(["takeLock", "paced"]);
 
@@ -70,7 +71,7 @@ const sent = mail.sesAttempts;
 let commands = 0;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = ((list: (string | number)[][]) => {
-  commands += list.length;
+  commands += commandsOf(list);
   return pipeline(list);
 }) as typeof redis.pipeline;
 

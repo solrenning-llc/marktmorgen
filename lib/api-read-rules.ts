@@ -210,7 +210,7 @@ export const BOOK_INVOICES_KEPT_LINES = 5_000;
 export const KEPT_INVOICES_STUDIO_UNITS = 4;
 /**
  * The same path's commands as the API and MCP readers count it (bookWork): the GET, the write back and, past the
- * ceiling, the mark sent once more, each a store-fenced script of four (EVAL, EXISTS, HGET, SET): 1 + 4 + 4. Every
+ * ceiling, the mark sent once more, each a store-fenced script of four (EVAL, HGET, GET, SET; SET_IF_STORE_LIVE): 1 + 4 + 4. Every
  * script is billed with the commands inside it (Claude 7 HHH's MEDIO on #5384); it was counted as one command a script.
  */
 export const BOOK_KEPT_INVOICES_COMMANDS = 9;

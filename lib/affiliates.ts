@@ -6114,7 +6114,7 @@ async function readInvoiceKeep(statsId: string, account: string, tag: string, si
  * kept from before ids its record under its owner's address, Claude 4's MEDIUM on #4951) and its erasure has not begun
  * (ERASING_KEY, written before anything of the store is deleted, removed with its record and its id in the same fenced
  * step, lib/store.ts). A reading that started before the erasure and writes after it, or after it has finished, writes
- * nothing, so the invoice, payment and affiliate ids never come back. EVAL, EXISTS, HGET and SET: four commands in
+ * nothing, so the invoice, payment and affiliate ids never come back. EVAL, HGET, GET and SET: four commands in
  * place of the SET.
  */
 async function keepIfLive(store: Store, statsId: string, value: string): Promise<boolean> {

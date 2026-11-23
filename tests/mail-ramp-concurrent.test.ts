@@ -7,7 +7,10 @@
  *
  * Now both write only over the very record they read (mail-ramp-swap), reading again when it changed; a write that
  * keeps losing grants nothing. Checked with both reads held until each has read: the grants never pass the portion,
- * and a give-back racing a take keeps the take. Synthetic store id; the in-memory Redis.
+ * and a give-back racing a take keeps the take. Also held: a swap that keeps losing stops after RAMP_TRIES rounds and
+ * writes nothing; the finished final portion is cleared only while it is the record read, so an import's new portions
+ * written in between are kept; and an answer that is not confirmed never sends more nor gives back twice.
+ * Synthetic store id; the in-memory Redis.
  */
 import { RAMP_TRIES, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
 import { RAMP_FIRST, RAMP_LAST, RAMP_TRIGGER } from "@/lib/mail-health-rules";
@@ -115,6 +118,37 @@ async function main(): Promise<void> {
   redis.clear();
   redis.run(["SET", KEY, finished]);
   is("control: a finished final portion alone is cleared and the send goes whole", [await rampRoom(ID, 5_000), redis.run(["GET", KEY])], [5_000, null]);
+
+  part("An answer that is not confirmed never sends more nor gives back twice (Claude 3 xvBY8's LEVE 1 and 2 on 5582215846)");
+  redis.clear();
+  redis.run(["SET", KEY, finished]);
+  const unsure = redis.pipeline;
+  let lostClear = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // The clean-up's answer lost, and the DEL not applied.
+    if (!lostClear && commands.length === 1 && commands[0][0] === "EVAL" && commands[0][3] === KEY && commands[0][5] === "") { lostClear = true; return ["?"]; }
+    return unsure(commands);
+  }) as typeof redis.pipeline;
+  const unsureClear = await rampRoom(ID, 5_000);
+  redis.pipeline = unsure;
+  is("a clean-up whose answer is lost sends nothing, never the whole list", [lostClear, unsureClear], [true, 0]);
+  is("and the record is left as it was", redis.run(["GET", KEY]), finished);
+  redis.clear();
+  await startRamp(ID, RAMP_TRIGGER);
+  is("(60 taken)", await rampRoom(ID, 60), 60);
+  let backSwaps = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.length === 1 && commands[0][0] === "EVAL" && commands[0][3] === KEY) {
+      backSwaps += 1;
+      // The give-back applied, and its answer lost.
+      await unsure(commands);
+      return ["?"];
+    }
+    return unsure(commands);
+  }) as typeof redis.pipeline;
+  await rampBack(ID, 20);
+  redis.pipeline = unsure;
+  is("a give-back whose answer is lost is not tried again: one swap, the 20 given back once", [backSwaps, left()], [1, RAMP_FIRST - 40]);
 
   part("Control: one sender alone, as before");
   redis.clear();

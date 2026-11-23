@@ -109,7 +109,7 @@ import { MAX_ANSWER_TEXT, MAX_FEEDBACK, MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TR
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
 import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { MAX_STORE_LINKS } from "@/lib/store-link";
-import { CLAIM_PAGES, CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
+import { CLAIM_PAGES, CLOSING_DAYS, DEL_BATCH, ENDED_BOOK_EXPORTS, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
 import { PERSON_ARG_BYTES } from "@/lib/crm";
 import { BUYER_NOTICE_DAYS, BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
@@ -119,7 +119,9 @@ import { DELETED_STORE_DELETE_BATCH, DELETED_STORE_LIST_PAGES } from "@/lib/dele
 import { FORGET_LATE_PASSES, FORGET_TRIES } from "@/lib/store-forget-retry";
 import { NOTE_RUN_BYTES, NOTE_RUN_COMMANDS } from "@/lib/podcast-access";
 import { BODIES_PER_READ } from "@/lib/course";
-import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ, STUDENT_ROW_BYTES, bookWork } from "@/lib/api-read-rules";
+import { BOOK_PAYPAL_REFUNDS, COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ, STUDENT_ROW_BYTES, bookWork } from "@/lib/api-read-rules";
+import { bookExportWork } from "@/lib/affiliate-book-export";
+import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
 import { MAX_LEADS } from "@/lib/contact-rules";
 import { BESIDE_POOL_BYTES, DATA_ROOM_BYTES, ENTRY_BYTES, NON_PAYING_DATA_ROOM_BYTES } from "@/lib/store-data-rules";
@@ -174,7 +176,7 @@ import { DRIP_MONTH_UNITS_PER_STORE_EMAIL, DRIP_START_COMMANDS } from "@/lib/dri
 import { WINBACK_OPEN_STRIPE_CALLS } from "@/lib/winback";
 import { MAX_SHELF } from "@/lib/course-shelf-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
-import { BOOK_INVOICES_KEPT_BYTES, BOOK_INVOICES_KEPT_LINES, BOOK_KEPT_REFUND_BYTES, DONE_SET_BYTES, LISTING_BYTES, TASK_BYTES, type ReadWork } from "@/lib/api-read-rules";
+import { BOOK_INVOICES, BOOK_INVOICES_KEPT_BYTES, BOOK_INVOICES_KEPT_LINES, BOOK_KEPT_REFUND_BYTES, DONE_SET_BYTES, LISTING_BYTES, TASK_BYTES, type ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, MOVE_BYTES, MOVE_KEY_BYTES } from "@/lib/call-moves-read";
 import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY, MAX_LINES as AGREEMENT_LINES, MAX_LINE_TEXT as AGREEMENT_LINE_TEXT, MAX_NAME as AGREEMENT_NAME, MAX_TITLE as AGREEMENT_TITLE } from "@/lib/agreement-rules";
@@ -3526,6 +3528,9 @@ export const PER_PAYMENT_LINES: CostLine[] = [
       { file: "app/api/store/export/route.ts", names: ["ENDED_STORE_EXPORTS", "storeExport(store)"] },
       { file: "lib/store-export.ts", names: ["EXPORT_STRIPE_PAGES", "EXPORT_PAGE_SECONDS", "EXPORT_COMMANDS"] },
       { file: "lib/plan-closing-rules.ts", names: ["ENDED_LIST_DOWNLOADS"] },
+      // The affiliate spreadsheet once a plan has ended, its own (endedBookExportCost; #5010 row 150).
+      { file: "lib/plan-closing-rules.ts", names: ["ENDED_BOOK_EXPORTS"] },
+      { file: "app/api/store/affiliates/export/route.ts", names: ["ENDED_BOOK_EXPORTS", ":book-ended:"] },
       { file: "lib/list-download.ts", names: ["holdEndedListDownload", "ENDED_LIST_DOWNLOADS", ":list-ended:", "read: plainRead"] },
       { file: "lib/crm.ts", names: ["PERSON_ARG_BYTES = 35;", "valuesOf"] },
       { file: "lib/free.ts", names: ["Math.ceil(MAX_LEADS / 500) + 10"] },
@@ -3752,11 +3757,34 @@ export function endedListDownloadCost(bytes: number): number {
 }
 
 /**
+ * What one download of the affiliate programme's spreadsheet costs (app/api/store/affiliates/export,
+ * lib/affiliate-book-export.ts; #5010 row 150) for the work it does: its commands and every byte it reads and sends at
+ * a heavy request's price, a step's ten seconds for every 20 MB, and its wait on the creator's Stripe pages held at
+ * 2 GB, EXPORT_PAGE_SECONDS a page, as a whole export's wait is. bookExportUnits covers it at every size
+ * (tests/affiliate-book-export-cost.test.ts).
+ */
+export function bookExportCost(w: ReadWork): number {
+  return request("heavy", w.commands, w.bytes + w.sent) + Math.ceil((w.bytes + w.sent) / 20_000_000) * request("step", 0) + w.stripePages * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
+}
+
+/**
+ * One download of the affiliate spreadsheet once a plan has ended (ENDED_BOOK_EXPORTS of its own), at the largest
+ * programme a store of `bytes` can hold: its seven records are kept in the room, each entry counted there at ENTRY_BYTES
+ * at the least, so it holds at most bytes / ENTRY_BYTES of them; every affiliate there can be (MAX_AFFILIATES), the
+ * PayPal refunds and invoices the book reads at the most, and its Stripe pages; its work as bookExportWork counts it,
+ * at bookExportCost.
+ */
+export function endedBookExportCost(bytes: number): number {
+  const entries = Math.floor(bytes / ENTRY_BYTES);
+  return bookExportCost(bookExportWork({ kept: true, entries, people: MAX_AFFILIATES, leads: entries, paypalRefunds: BOOK_PAYPAL_REFUNDS, stripe: true, products: BOOK_INVOICES }));
+}
+
+/**
  * What closing one store costs at the most, once nobody pays for it: a store
  * of this plan, or a free trial's (`trial`, its room and its units). The
  * parts are said in the basis of the line closure.
  */
-export function closureCost(tier: Tier, trial = false): { deletes: number; follows: number; exports: number; lists: number; prepare: number; visits: number; total: number } {
+export function closureCost(tier: Tier, trial = false): { deletes: number; follows: number; exports: number; lists: number; books: number; prepare: number; visits: number; total: number } {
   const room = trial ? NON_PAYING_DATA_ROOM_BYTES.trial : DATA_ROOM_BYTES[tier];
   // A paying store's beside pool (C1-20261117): the records it holds for are deleted and followed with the room's;
   // they are not in an export or a list download, which read what the room holds.
@@ -3770,11 +3798,12 @@ export function closureCost(tier: Tier, trial = false): { deletes: number; follo
     follows: (kept + outside) * DB_BYTE + (Math.ceil((roomKeys + outside / MARK) / FOLLOW_BATCH) + FOLLOWED_FAMILIES.length * 4) * COMMAND,
     exports: ENDED_STORE_EXPORTS * exportCost(room + MAX_STORE_BYTES),
     lists: ENDED_LIST_DOWNLOADS * endedListDownloadCost(room + MAX_STORE_BYTES),
+    books: ENDED_BOOK_EXPORTS * endedBookExportCost(room + MAX_STORE_BYTES),
     prepare: PREPARE_COMMANDS * COMMAND + MAX_TEAM * STALE_ID_WIRE_BYTES * DB_BYTE,
     visits: CLOSING_VISIT_DAYS * closingVisitCost(),
     total: 0,
   };
-  out.total = out.deletes + out.follows + out.exports + out.lists + out.prepare + out.visits;
+  out.total = out.deletes + out.follows + out.exports + out.lists + out.books + out.prepare + out.visits;
   return out;
 }
 

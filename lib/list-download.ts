@@ -115,7 +115,7 @@ export const LIST_UNCOUNTED_WORDS = "This can't be counted right now. Try again 
 const ENDED_LIST_SECONDS = 60 * 86_400;
 
 /** The words for a download the studio figure has some room for, but not enough: what it needs and what is left, as holdAllowanceAt says it. */
-function shortWords(store: Store, units: number, held: { limit: number; left?: number; reset?: string }, atLeast = false): string {
+export function shortWords(store: Store, units: number, held: { limit: number; left?: number; reset?: string }, atLeast = false): string {
   const period = standingOf(store) === "trial" ? "in this trial" : "this month";
   const needs = `This download needs ${atLeast ? "at least " : ""}${units.toLocaleString("en-US")} of your ${KIND_WORDS.studio.many} ${period}`;
   if (held.left === undefined) return `${needs}, and your studio has ${held.limit.toLocaleString("en-US")} ${period} in all.`;

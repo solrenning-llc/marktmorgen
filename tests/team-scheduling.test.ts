@@ -119,7 +119,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const id = `cs_test_team${String(sessions).padStart(12, "0")}`;
     return answer({ id, url: `https://checkout.stripe.com/c/pay/${id}` });
   }
-  if (method === "POST" && /^\/checkout\/sessions\/[^/]+\/expire$/.test(path)) return answer({ status: "expired" });
+  // Stripe answers with the checkout it closed, its id included (lib/calls.ts reads it since board #5285, row #4455).
+  const closing = /^\/checkout\/sessions\/([^/]+)\/expire$/.exec(path);
+  if (method === "POST" && closing) return answer({ id: decodeURIComponent(closing[1]), status: "expired" });
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 

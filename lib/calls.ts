@@ -830,7 +830,9 @@ export async function releaseOwnHold(store: Store, session: string, { openedHere
 async function expireCheckout(account: string, session: string): Promise<boolean> {
   try {
     const closed = await onAccount("POST", account, `/checkout/sessions/${encodeURIComponent(session)}/expire`, new URLSearchParams());
-    return closed.status === "expired";
+    // Only Stripe's receipt for this very checkout (board #5285, row #4455, as payment requests already do): an
+    // "expired" naming another session says nothing about this one, which may still be paid.
+    return closed.id === session && closed.status === "expired";
   } catch (error) {
     console.error("Call checkout could not be closed at Stripe:", error instanceof Error ? error.message : error);
     return false;
@@ -1137,7 +1139,9 @@ export async function withCallLock<T>(store: Store | null, work: (keep: () => Pr
 async function closeUnheld(account: string, session: string): Promise<boolean> {
   try {
     const closed = await onAccount("POST", account, `/checkout/sessions/${encodeURIComponent(session)}/expire`, new URLSearchParams());
-    return closed.status === "expired";
+    // Only Stripe's receipt for this very checkout (board #5285, row #4455): an "expired" naming another session says
+    // nothing about this one.
+    return closed.id === session && closed.status === "expired";
   } catch (error) {
     console.error("closing a call checkout whose lock was lost failed", error);
     return false;

@@ -262,8 +262,12 @@ export function paidPeriodOf(invoice: Record<string, unknown>, email: string, in
   if (invoice.status !== "paid" || typeof invoice.id !== "string" || !INVOICE_ID.test(invoice.id)) return null;
   const line = membershipLineOf(invoice as Parameters<typeof membershipLineOf>[0]);
   const tot = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
-  const cur = typeof invoice.currency === "string" ? invoice.currency.toLowerCase() : "";
-  if (!line || !(tot > 0) || !cur) return null;
+  if (!line) return null;
+  // A paid membership whose currency does not read is money that could not be read, never no payment: it throws, and
+  // the member is tried again (coordinator 7091257612, LEVE 2).
+  if (typeof invoice.currency !== "string" || !/^[a-z]{3}$/i.test(invoice.currency)) throw new Error("a paid invoice's currency could not be read");
+  const cur = invoice.currency.toLowerCase();
+  if (!(tot > 0)) return null;
   const direct = idOf(invoice.payment_intent);
   const named = INTENT_ID.test(direct) ? direct : INTENT_ID.test(intent) ? intent : "";
   const listed = soleListedPayment(invoice.payments);

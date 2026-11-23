@@ -255,20 +255,24 @@ type InvoiceLine = {
  */
 export function membershipLineOf(invoice: { lines?: { data?: InvoiceLine[] } | null; subtotal?: unknown; total?: unknown; amount_paid?: unknown }): { amt: number; ps: number; pe: number } | null {
   const lines = invoice.lines?.data ?? [];
-  const own = lines.find((line) => {
+  // Every subscription line that is not a proration is the membership's own, read by what it is, never by whether its
+  // figures read (coordinator 7405): if any of them has an amount or a period that is text, NaN, past a safe integer
+  // or missing, or an end not after its start, the membership could not be read, so it throws (the member is tried
+  // again, f:) and an older invoice's period is never taken for it. Then the first with a positive amount is the paid
+  // one, so a US$0 item listed first never hides it (coordinator 7091257612); none positive is no paid membership.
+  const owns = lines.filter((line) => {
     const proration = line.proration === true || line.parent?.subscription_item_details?.proration === true;
     const subscription = line.type === "subscription" || line.parent?.type === "subscription_item_details";
     return subscription && !proration;
   });
+  for (const line of owns) {
+    if (!Number.isSafeInteger(line.amount)) throw new Error("a paid invoice's membership amount could not be read");
+    const start = line.period?.start, end = line.period?.end;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || (end as number) <= (start as number)) throw new Error("a paid invoice's membership period could not be read");
+  }
+  const own = owns.find((line) => (line.amount as number) > 0);
   if (!own) return null;
-  // The own line is picked by what it is, never by whether its figures read (Codex/coordinator 7405): a line whose
-  // amount or period is text, NaN, past a safe integer or missing, or whose end is not after its start, is a membership
-  // that could not be read, so it throws (the member is tried again, f:) and an older invoice's period is never taken
-  // for it. A read amount at or below zero is no paid membership: null.
-  if (!Number.isSafeInteger(own.amount)) throw new Error("a paid invoice's membership amount could not be read");
-  const ps = own.period?.start, pe = own.period?.end;
-  if (!Number.isSafeInteger(ps) || !Number.isSafeInteger(pe) || (pe as number) <= (ps as number)) throw new Error("a paid invoice's membership period could not be read");
-  if ((own.amount as number) <= 0) return null;
+  const ps = own.period!.start as number, pe = own.period!.end as number;
   // Every line's money is read as whole smallest units (rule 24): an amount or a discount that is text, a fraction,
   // past a safe integer, or a negative discount, is money that could not be read, never zero, so the share is not
   // made up; it throws, and the closing tries the member again (lib/closing-holds.ts, f:). The same for what the
@@ -287,7 +291,7 @@ export function membershipLineOf(invoice: { lines?: { data?: InvoiceLine[] } | n
   if (!Number.isSafeInteger(paid) || (paid as number) < 0) throw new Error("what a paid invoice took could not be read");
   const amt = Math.round(nets > 0 && (paid as number) > 0 ? (net(own) * (paid as number)) / nets : net(own));
   if (!(amt > 0)) return null;
-  return { amt, ps: ps as number, pe: pe as number };
+  return { amt, ps, pe };
 }
 
 /** Totals by currency, for a creator to read. */

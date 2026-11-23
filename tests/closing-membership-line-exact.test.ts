@@ -60,6 +60,8 @@ is("its period's start missing", share(invoice([membership({ period: { end: PERI
 is("its period ending before it starts", share(invoice([membership({ period: { start: PERIOD.end, end: PERIOD.start } }), other()])), "unknown");
 is("its amount read as 0: no paid membership, null", share(invoice([membership({ amount: 0, discount_amounts: [] }), other()], 1_000)), null);
 is("a proration line is still never the membership's own", share(invoice([membership({ proration: true }), other()])), null);
+is("a US$0 subscription line listed first never hides the paid one: its share, 1,000", share(invoice([membership({ amount: 0, discount_amounts: [] }), membership(), other()])), 1_000);
+is("a US$0 subscription line whose period does not read still throws", share(invoice([membership({ amount: 0, discount_amounts: [], period: { start: PERIOD.start } }), membership(), other()])), "unknown");
 
 part("What the invoice took must be whole cents too");
 is("amount_paid as text \"2000\"", share(invoice([membership(), other()], "2000")), "unknown");
@@ -114,8 +116,9 @@ async function hold(lineExtra: Record<string, unknown>, paidList: Record<string,
   lists = { open: [ownOpen], draft: [ownDraft], paid: paidList };
   const counts = await retryHolds(store, ENDED_AT, Date.now() + 10_000);
   const paid = await redis.run(["HGETALL", paidKey(folder)]);
+  const row = Array.isArray(paid) && paid.length >= 2 ? JSON.parse(String(paid[1])) as { pe?: number } : null;
   const keys = await redis.run(["HKEYS", workKey(folder)]);
-  return { counts, writes: [...writes], paid: Array.isArray(paid) ? paid.length : -1, retried: Array.isArray(keys) && keys.map(String).includes(`f:${MEMBER}`) };
+  return { counts, writes: [...writes], paid: Array.isArray(paid) ? paid.length : -1, pe: row?.pe, retried: Array.isArray(keys) && keys.map(String).includes(`f:${MEMBER}`) };
 }
 
 part("At a closing, a paid invoice whose money reads: the member is held as before");
@@ -132,11 +135,31 @@ for (const [what, extra] of [["another line's amount as text", { amount: "500" }
   is(`(${what}) no payment is written down, the member is tried again`, [got.paid, got.retried, got.counts.failed], [0, true, 1]);
 }
 part("At a closing, the newest paid invoice's own line does not read: nothing is written, an older invoice is never taken");
-for (const [what, own] of [["its amount as text", { amount: "2000" }], ["its amount NaN", { amount: Number.NaN }], ["its end not a number", { period: { start: PE - 30 * 86_400, end: String(PE) } }], ["its start missing", { period: { end: PE } }]] as const) {
+for (const [what, own] of [["its amount as text", { amount: "2000" }], ["its amount with a fraction", { amount: 2000.5 }], ["its end not a number", { period: { start: PE - 30 * 86_400, end: String(PE) } }], ["its start missing", { period: { end: PE } }]] as const) {
   const alone = await hold({}, [paidInvoice({}, own)]);
   is(`(${what}, no other paid invoice) nothing is written to Stripe, the member is tried again`, [alone.writes, alone.paid, alone.retried, alone.counts.failed], [[], 0, true, 1]);
   const older = await hold({}, [paidInvoice({}, own), paidInvoice({}, {}, 2, OLDER_PE)]);
   is(`(${what}, an older paid invoice behind it) the older, used-up period is never written down`, [older.writes, older.paid, older.retried, older.counts.failed], [[], 0, true, 1]);
+}
+
+part("At a closing, a US$0 subscription item listed first never hides the paid line (coordinator 7091257612)");
+{
+  const zeroFirst = (n = 1, pe = PE) => {
+    const inv = paidInvoice({}, {}, n, pe);
+    inv.lines.data.unshift({ type: "subscription", proration: false, amount: 0, discount_amounts: [], period: { start: pe - 30 * 86_400, end: pe } } as never);
+    return inv;
+  };
+  const alone = await hold({}, [zeroFirst()]);
+  is("(alone) held, the paid line's period written down", [alone.writes.includes(`POST /subscriptions/${MEMBER}`), alone.paid, alone.pe, alone.retried, alone.counts.failed], [true, 2, PE, false, 0]);
+  const older = await hold({}, [zeroFirst(), paidInvoice({}, {}, 2, OLDER_PE)]);
+  is("(an older, used-up invoice behind it) the newest paid period is written, never the older one", [older.paid, older.pe, older.retried, older.counts.failed], [2, PE, false, 0]);
+}
+
+part("At a closing, a paid membership whose currency does not read: nothing is written, the member is tried again (coordinator 7091257612, LEVE 2)");
+for (const [what, currency] of [["missing", undefined], ["a number", 840], ["empty", ""]] as const) {
+  const inv = { ...paidInvoice({}), currency } as Record<string, unknown>;
+  const got = await hold({}, [inv]);
+  is(`(currency ${what}) nothing is written to Stripe, the member is tried again`, [got.writes, got.paid, got.retried, got.counts.failed], [[], 0, true, 1]);
 }
 
 part("At a closing, an older paid invoice that does not read never blocks a member whose newest one does (coordinator 7405, LEVE 1)");

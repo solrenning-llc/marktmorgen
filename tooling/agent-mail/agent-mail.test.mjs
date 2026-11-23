@@ -943,7 +943,9 @@ console.log("a family with a verdict on the head written only on the PR does not
   const veredito = (familiaTxt, v) => JSON.stringify([`${familiaTxt} review #60 @${H60.slice(0, 10)}: ${v}\n\nbody`, "COLLABORATOR"]);
   const fora = JSON.stringify([`re-review needed #60 @${H60.slice(0, 10)} — revisores: Claude 7 X e Claude 3 X`, "COLLABORATOR"]);
   const comentarios = [veredito("Claude 2 X", "READY"), fora, JSON.stringify([`Claude 3 X review #60 @0000000000: READY`, "COLLABORATOR"]), JSON.stringify([`Claude 7 X review #60 @${H60.slice(0, 10)}: CHANGES`, "NONE"])].join("\n") + "\n";
-  r = run(["request-review", "--from", "Claude 4 X", "--pr", "60", "--sha", H60, "--text", "t"], { ...m60, ...as("c4"), FAKE_COMMENTS: comentarios });
+  // The request is made before the verdicts are written on the PR (c944 now leaves out a family that has one already),
+  // so the take is where ce2d still has to catch them.
+  r = run(["request-review", "--from", "Claude 4 X", "--pr", "60", "--sha", H60, "--text", "t"], { ...m60, ...as("c4"), FAKE_COMMENTS: "" });
   is("ce2d: the review request is written", r.ok, r.out);
   r = run(["claim-review", "--as", "Claude 2 X"], { ...m60, ...as("c2"), FAKE_COMMENTS: comentarios });
   is("ce2d: a family that gave READY on this head only in a PR comment does not take the review; it is returned with the reason", !/pegou:/.test(r.out) && /nenhum pedido/.test(r.out), r.out);
@@ -962,6 +964,38 @@ console.log("a family with a verdict on the head written only on the PR does not
   is("ce2d: with the PR's comments unreadable, the queue waits (NOT CHECKED)", !/pegou:/.test(r.out) && /NÃO CONFERIDO/.test(r.out), r.out);
   r = run(["claim-review", "--as", "Claude 2 X"], { ...m60, ...as("c2"), FAKE_COMMENTS_DOWN: "1" });
   is("ce2d: when the PR's comments cannot be read, nothing is taken (NOT CHECKED)", !/pegou:/.test(r.out), r.out);
+}
+
+console.log("a family with a verdict on the head is left out of a new review request, by mail or on the PR (coordinator 999b, Claude 1 yatz's c944)");
+{
+  const g6 = (args) => g(args, join(T, "p"));
+  g6(["checkout", "-q", "-B", "c944", M]); writeFileSync(join(T, "p", "c944.txt"), "x\n"); g6(["add", "."]); g6(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "c944\n\nClaude-Session: https://claude.ai/code/session_01S9eVA3KcXUkc6qPJmpNg4a"]);
+  g6(["push", "-q", "-f", "../prs.git", "HEAD:refs/heads/c944", "HEAD:refs/pull/944/head"]);
+  const H62 = g6(["rev-parse", "HEAD"]);
+  g(["init", "-q", "--bare", "mail944.git"]); g(["push", "-q", "../mail944.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m62 = { CORREIO_REPO: join(T, "mail944.git"), CORREIO_GIT_DIR: join(T, "dir944.git") };
+  const noPr = JSON.stringify([`Claude 2 X review #944 @${H62.slice(0, 10)}: READY\n\nbody`, "COLLABORATOR"]) + "\n";
+  const pedido = (id) => { try { return g(["show", `refs/heads/correio:revisao/pedidos/${id}.md`], join(T, "mail944.git")); } catch { return ""; } };
+  r = run(["request-review", "--from", "Claude 4 X", "--pr", "944", "--sha", H62, "--text", "t"], { ...m62, ...as("c4"), FAKE_COMMENTS: noPr });
+  const idA = /pedido registrado: (\S+)/.exec(r.out)?.[1] ?? "";
+  is("c944: a family with READY on this head in a PR comment goes into the request's Exclui", r.ok && /^Exclui: .*claude-2/m.test(pedido(idA)), r.out + pedido(idA));
+  is("c944: and is not listed among those who may review", /podem revisar: (?![^\n]*claude-2)/.test(r.out), r.out);
+  r = run(["watch", "--as", "Claude 2 X", "--also", "review", "--seconds", "1"], { ...m62, ...as("c2"), FAKE_COMMENTS: noPr });
+  is("c944: the watch does not wake that family for this request", !/revisao #944/.test(r.out), r.out);
+  r = run(["claim-review", "--as", "Claude 5 X"], { ...m62, ...as("c5"), FAKE_COMMENTS: noPr });
+  is("c944: another family takes it", /pegou:/.test(r.out), r.out);
+  r = run(["complete-review", "--as", "Claude 5 X", idA, "--result", "READY", "--text", "ok"], { ...m62, ...as("c5"), FAKE_COMMENTS: noPr });
+  r = run(["request-review", "--from", "Claude 4 X", "--pr", "944", "--sha", H62, "--text", "again"], { ...m62, ...as("c4"), FAKE_COMMENTS: noPr });
+  const idB = /pedido registrado: (\S+)/.exec(r.out)?.[1] ?? "";
+  is("c944: a family whose READY on this head is in the mail goes into Exclui of a new request on the same head", r.ok && /^Exclui: .*claude-5/m.test(pedido(idB)) && /podem revisar: (?![^\n]*claude-5)/.test(r.out), r.out + pedido(idB));
+  r = run(["claim-review", "--as", "Claude 5 Y"], { ...m62, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_012ST5iYYYYYYYYYYYYYYYYY", FAKE_COMMENTS: noPr });
+  is("c944: and another session of that family does not take it", !/pegou:/.test(r.out), r.out);
+  r = run(["claim-review", "--as", "Claude 6 X"], { ...m62, ...as("c6"), FAKE_COMMENTS: noPr });
+  const outroDaFamilia = noPr + JSON.stringify([`Claude 6 Y review #944 @${H62.slice(0, 10)}: READY\n\nbody`, "COLLABORATOR"]) + "\n";
+  r = run(["complete-review", "--as", "Claude 6 X", idB, "--result", "READY", "--text", "ok"], { ...m62, ...as("c6"), FAKE_COMMENTS: outroDaFamilia });
+  is("c944: a verdict written on the PR by the same family during the take is warned about at completion, without refusing", r.ok && /concluído/.test(r.out) && /aviso: .*claude-6.*já tem veredito/.test(r.out), r.out);
+  r = run(["request-review", "--from", "Claude 4 X", "--pr", "944", "--sha", H62, "--text", "down"], { ...m62, ...as("c4"), FAKE_COMMENTS_DOWN: "1" });
+  is("c944: with the PR's comments unreadable, the request is still written and says so (NOT CHECKED)", r.ok && /pedido registrado/.test(r.out) && /NÃO FORAM CONFERIDOS/.test(r.out), r.out);
 }
 
 console.log("ce2d: the reviewer of a comment, on the real formats of today (Claude 5 ibuF and Claude 1 E on #5141)");

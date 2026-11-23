@@ -1117,12 +1117,14 @@ export function revisoraDoComentario(corpo, curto) {
  * comentário de quem trabalha no repositório, com a revisora lida por revisoraDoComentario. null = NÃO CONFERIDO (o GitHub não respondeu); quem chama não entrega nada nesse caso (passo 4).
  */
 const vereditosNoPr = new Map();
+// c944: o texto de cada veredito no PR, por família, para quem conclui saber se foi outra sessão da família que o escreveu.
+const corposNoPr = new Map();
 export function revisoresNoPr(pr, sha) {
   if (testeLigado("CORREIO_SEM_GH")) return new Set();
   if (!/^\d+$/.test(String(pr ?? "")) || !sha) return null;
   const curto = String(sha).slice(0, 10), chaveCache = `${pr}@${curto}`;
   if (vereditosNoPr.has(chaveCache)) return vereditosNoPr.get(chaveCache);
-  const f = new Set();
+  const f = new Set(), corpos = new Map();
   try {
     for (const rota of [`repos/solrenning-llc/marktmorgen/issues/${pr}/comments`, `repos/solrenning-llc/marktmorgen/pulls/${pr}/reviews`]) {
       const saida = execFileSync("gh", ["api", "--paginate", rota, "--jq", '.[] | [(.body // ""), (.author_association // "")] | @json'],
@@ -1131,14 +1133,29 @@ export function revisoresNoPr(pr, sha) {
         const [corpo, associacao] = JSON.parse(linha);
         if (!QUEM_TRABALHA.has(String(associacao))) continue;
         const quem = revisoraDoComentario(corpo, curto);
-        if (quem) f.add(quem);
+        if (quem) { f.add(quem); corpos.set(quem, [...(corpos.get(quem) ?? []), String(corpo)]); }
       }
     }
   } catch {
     return null;
   }
   vereditosNoPr.set(chaveCache, f);
+  corposNoPr.set(chaveCache, corpos);
   return f;
+}
+
+/**
+ * c944 (Claude 1 yatz, coordenador 999b): outra sessão da família de `eu` já deu veredito neste head no PR? Vale o
+ * veredito cujo texto não nomeia a sessão de `eu` (o nome depois do número da família, como "UoHAG" em "Claude 6 UoHAG").
+ * Sem esse nome, não há como separar a própria sessão das irmãs, e a resposta é false. null = NÃO CONFERIDO.
+ */
+export function vereditoDeIrmaNoPr(pr, sha, eu) {
+  const f = revisoresNoPr(pr, sha);
+  if (f === null) return null;
+  const sessao = /^\s*(?:claude|codex)(?:\s*\d+)?\s+(\S+)/i.exec(String(eu))?.[1];
+  if (!sessao) return false;
+  const proprio = new RegExp(`(?:^|[^A-Za-z0-9])${sessao.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9])`);
+  return (corposNoPr.get(`${pr}@${String(sha).slice(0, 10)}`)?.get(familia(eu)) ?? []).some((corpo) => !proprio.test(corpo));
 }
 
 export function registrarRevisao({ eu, pr, sha, resultado, link, agora = new Date() }) {
@@ -1199,7 +1216,7 @@ export function registros(pr, commit = buscar(), atual = undefined) {
 }
 
 /** Registra um pedido de revisão ou de fila. */
-export function pedir({ tipo, de, pr, sha, texto = "", para = "", exclui = "", commits = undefined, agora = new Date() }) {
+export function pedir({ tipo, de, pr, sha, texto = "", para = "", exclui = "", commits = undefined, vereditos = undefined, agora = new Date() }) {
   if (!TIPOS.has(tipo)) throw new Error(`tipo desconhecido: ${tipo}`);
   if (!/^\d+$/.test(String(pr ?? ""))) throw new Error("--pr é obrigatório (o número do PR)");
   if (!/^[0-9a-f]{10,40}$/.test(String(sha ?? ""))) throw new Error("--sha é obrigatório (o head exato, 10 a 40 caracteres)");
@@ -1228,7 +1245,8 @@ export function pedir({ tipo, de, pr, sha, texto = "", para = "", exclui = "", c
       // Revisão: as famílias com commits no PR ficam de fora sozinhas, além das que o autor excluiu.
       const lidas = commits ?? null;
       // Fila: quem revisou este head pelo correio fica de fora sozinho (FQ (1)); revisões feitas fora do correio, o autor põe com --exclude.
-      const revisores = tipo === "fila" ? revisoresDoHead(pr, sha) : new Set();
+      // Revisão (c944, coordenador 999b): quem já deu veredito neste head, pelo correio ou no PR (`vereditos`), também fica de fora.
+      const revisores = new Set([...revisoresDoHead(pr, sha), ...(tipo === "revisao" ? vereditos ?? [] : [])]);
       // Commits no PR excluem só da revisão (CO (e)); na fila, a FQ (1) exclui só o autor e quem revisou o head
       // (coordenador, 21/11/2026, 19h41 UTC).
       const todas = new Set([...String(exclui).split(",").map((n) => n.trim()).filter(Boolean).map(familia), ...(tipo === "revisao" ? lidas?.familias ?? [] : []), ...revisores]);
@@ -2154,7 +2172,11 @@ async function main(argv) {
       const marca = estadoPr(o.pr);
       if (marca.ativo) console.log(`ATENÇÃO: #${o.pr} está com ${marca.acao} de ${marca.por}; enquanto ele valer, claim-enqueue não entrega o pedido. Se o trabalho acabou, rode release-pr --as "${marca.por}" --pr ${o.pr}.`);
     }
-    console.log(`pedido registrado: ${pedir({ tipo, de: o.de, pr: o.pr, sha: o.sha, texto, para, exclui: o.exclui === true ? "" : o.exclui ?? "", commits })}`);
+    // c944: na revisão, as famílias que já deram veredito neste head só no PR também ficam de fora; sem ler o PR, o pedido
+    // é feito mesmo assim e diz que isso NÃO FOI CONFERIDO.
+    const vereditos = tipo === "revisao" ? revisoresNoPr(o.pr, o.sha) : undefined;
+    if (vereditos === null) console.log(`ATENÇÃO: os vereditos escritos no #${o.pr} NÃO FORAM CONFERIDOS agora (o GitHub não respondeu); quem já revisou este head só no PR não ficou de fora; diga com --exclude.`);
+    console.log(`pedido registrado: ${pedir({ tipo, de: o.de, pr: o.pr, sha: o.sha, texto, para, exclui: o.exclui === true ? "" : o.exclui ?? "", commits, vereditos: vereditos ?? undefined })}`);
     {
       if (!commits) console.log("ATENÇÃO: não consegui ler os commits do PR; diga com --exclude as famílias que têm commits nele.");
       else {
@@ -2162,8 +2184,11 @@ async function main(argv) {
         // Na fila, as famílias com commit também ficam de fora (coordenador, 605b e 49de), salvo a exceção 4acb.
         const excluidas = String(o.exclui === true ? "" : o.exclui ?? "").split(",").map((n) => n.trim()).filter(Boolean).map(familia);
         const revisoresFila = tipo === "fila" ? [...revisoresDoHead(o.pr, o.sha)] : [];
-        const fora = new Set([...commits.familias, ...revisoresFila, familia(o.de), ...excluidas]);
+        // c944: na revisão, quem já deu veredito neste head (correio ou PR) não aparece entre os que podem revisar.
+        const jaRevisaram = tipo === "revisao" ? [...revisoresDoHead(o.pr, o.sha), ...(vereditos ?? [])] : [];
+        const fora = new Set([...commits.familias, ...revisoresFila, ...jaRevisaram, familia(o.de), ...excluidas]);
         console.log(`famílias com commits no PR (ficam de fora${tipo === "fila" ? ", coordenador 605b e 49de" : ""}): ${[...commits.familias].sort().join(", ") || "nenhuma além do autor"}`);
+        if (jaRevisaram.length) console.log(`famílias com veredito neste head (ficam de fora, c944): ${[...new Set(jaRevisaram)].sort().join(", ")}`);
         const podem = [...FAMILIAS].filter((f) => !fora.has(f));
         console.log(`${tipo === "fila" ? "podem enfileirar (sem o autor, as famílias com commits, quem revisou este head pelo correio e os excluídos; confira revisões feitas fora do correio)" : "podem revisar"}: ${podem.join(", ") || "NENHUMA família; peça ao coordenador"}`);
         if (tipo === "fila" && !podem.length) {
@@ -2229,6 +2254,11 @@ async function main(argv) {
     const texto = o.arquivo ? readFileSync(o.arquivo === "-" ? 0 : o.arquivo, "utf8") : (o.texto === true ? "" : o.texto ?? "");
     const p = concluir({ tipo: comando === "concluir-fila" ? "fila" : "revisao", eu: o.eu, id: o._[0], resultado: o.resultado, texto });
     console.log(`concluído: #${p.pr} ${o.resultado}; o autor (${p.autor}) recebeu no correio`);
+    // c944: o veredito de outra sessão da mesma família, escrito no PR durante a tomada, conta uma vez só para a família.
+    // Não recusa (o veredito já foi gravado e um a mais não faz mal); avisa, para o autor não contar duas revisões.
+    if (comando === "concluir-revisao" && vereditoDeIrmaNoPr(p.pr, p.sha, o.eu) === true) {
+      console.log(`aviso: a família ${familia(o.eu)} já tem veredito neste head no #${p.pr}, escrito por outra sessão; para a FQ (1), as duas contam como uma revisão só. Diga isso no PR.`);
+    }
   } else if (comando === "devolver-revisao" || comando === "devolver-fila") {
     if (!o.eu) throw new Error("--as é obrigatório");
     const p = devolver({ tipo: comando === "devolver-fila" ? "fila" : "revisao", eu: o.eu, id: o._[0], motivo: o.motivo === true ? "" : o.motivo ?? "" });

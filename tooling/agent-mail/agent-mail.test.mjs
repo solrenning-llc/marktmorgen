@@ -1181,6 +1181,22 @@ console.log("queue: only the author's family and the head's reviewers are left o
   is("and claim-enqueue does not hand it to that family", !/pegou/.test(r.out) && /maior parte dos commits da sua família/.test(r.out), r.out);
   r = run(["claim-enqueue", "--as", "Claude 7 X"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" });
   is("but another family takes it", /pegou/.test(r.out), r.out);
+  run(["complete-enqueue", "--as", "Claude 7 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" });
+  // LEVE of Claude 4 AC on #5284: merges do not count for the dominant family. Two author commits (Claude 4), then an
+  // adopter (Claude 2) merges main three times and asks for the queue: the author is still Claude 4, and is refused.
+  const c2trailer = "\n\nClaude-Session: https://claude.ai/code/session_01FR6Z1Q87JZvTFBRpZ8SNo8";
+  g(["fetch", "-q", "../prs.git", "main"], P); let mainAgora = g(["rev-parse", "FETCH_HEAD"], P);
+  g(["checkout", "-q", "-B", "pr66", mainAgora], P); commit("f66a.txt", "66\n", `pr66 by Claude 4${c4trailer}`); commit("f66b.txt", "66\n", `pr66 again by Claude 4${c4trailer}`);
+  for (const k of [1, 2, 3]) {
+    g(["checkout", "-q", "-B", "main66", mainAgora], P); mainAgora = commit(`main66-${k}.txt`, `${k}\n`, `main ${k}`); g(["push", "-q", "../prs.git", "HEAD:refs/heads/main"], P);
+    g(["checkout", "-q", "pr66"], P); g(["-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-ff", "-m", `Merge main ${k} (adopted by Claude 2)${c2trailer}`, mainAgora], P);
+  }
+  const H66 = g(["rev-parse", "HEAD"], P);
+  g(["push", "-q", "../prs.git", "HEAD:refs/heads/claude/adopted-66", "HEAD:refs/pull/66/head"], P);
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "66", "--sha", H66, "--text", "fila #66"], { ...m63, ...as("c2") });
+  is("an adopter's merges of main do not make it the author: the family with most non-merge commits is", r.ok && /mais commits no PR, num ramo sem prefixo de família \(claude-4\)/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 4 X"], { ...m63, ...as("c4") });
+  is("and the real author's family is refused the queue request of its own PR", !/pegou/.test(r.out) && /maior parte dos commits da sua família/.test(r.out), r.out);
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

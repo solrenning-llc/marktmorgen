@@ -643,11 +643,15 @@ export function commitsDoPr(pr, ramo = null) {
   const base = `refs/agent-mail-pr/prs-main-${sufixo}`, cabeca = `refs/agent-mail-pr/prs-${pr}-${sufixo}`;
   try {
     git(["fetch", "-q", "--no-tags", REPO_PRS, `+refs/heads/main:${base}`, `+${fonteDoHead(pr, ramo)}:${cabeca}`]);
-    const linhas = git(["log", "--format=%an%x1f%(trailers:key=Claude-Session,valueonly,separator=%x1e)", `${base}..${cabeca}`]).split("\n").filter(Boolean);
+    // %P: os pais do commit. Um commit de junção (mais de um pai) entra nas famílias com commit (a revisão as exclui), mas
+    // não conta para a família dominante: a junção do main feita por quem adotou o PR não o torna autor (LEVE do Claude 4
+    // AC no #5284).
+    const linhas = git(["log", "--format=%an%x1f%(trailers:key=Claude-Session,valueonly,separator=%x1e)%x1f%P", `${base}..${cabeca}`]).split("\n").filter(Boolean);
     const familias = new Set(), desconhecidas = new Set(), completas = new Set(), porFamilia = new Map();
     for (const linha of linhas) {
       const deste = new Set();
-      const [autor, sessoes = ""] = linha.split("\x1f");
+      const [autor, sessoes = "", pais = ""] = linha.split("\x1f");
+      const juncao = pais.trim().split(/\s+/).filter(Boolean).length > 1;
       for (const m of sessoes.matchAll(/session_([0-9A-Za-z]{20,40})/g)) completas.add(`session_${m[1]}`);
       const prefixos = [...sessoes.matchAll(/session_([0-9A-Za-z]{7})/g)].map((m) => m[1]);
       for (const pre of prefixos) (SESSOES[pre] ? deste.add(SESSOES[pre]) : desconhecidas.add(`session_${pre}`));
@@ -655,9 +659,9 @@ export function commitsDoPr(pr, ramo = null) {
       if (nome) deste.add(`claude-${nome[1]}`);
       else if (!prefixos.length && !/^Claude\b/.test(autor)) deste.add("codex");
       else if (!prefixos.length) desconhecidas.add(`autor "${autor}" sem trailer`);
-      for (const f of deste) { familias.add(f); porFamilia.set(f, (porFamilia.get(f) ?? 0) + 1); }
+      for (const f of deste) { familias.add(f); if (!juncao) porFamilia.set(f, (porFamilia.get(f) ?? 0) + 1); }
     }
-    // A família dominante (coordenador, dd03): a de mais commits no PR; num empate, todas as empatadas. É a autora de
+    // A família dominante (coordenador, dd03): a de mais commits no PR, sem contar as junções; num empate, todas as empatadas. É a autora de
     // um PR cujo ramo não tem prefixo de família (claude/...), para a fila (0410, 3 (b)).
     const maior = Math.max(0, ...porFamilia.values());
     const dominantes = maior ? [...porFamilia].filter(([, n]) => n === maior).map(([f]) => f).sort() : [];

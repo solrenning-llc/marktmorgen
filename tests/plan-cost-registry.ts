@@ -71,7 +71,7 @@ import { MAIL_CLICK_KEY_COMMANDS } from "@/lib/mail-clicks";
 import { MAIL_GAP_COMMANDS_PER_CHECK, MAIL_GAP_TRIAL_CHECKS, mailGapCheckLimit } from "@/lib/mail-frequency";
 /** A gap mark moved: its key (the gate's, the longest, is 92 characters with a 32-character store id: nl:mgap:gate:{32}:{32}:{13}) with a time or a claim value (23), rounded up (tests/store-data-registry.ts, MARK). */
 const MAIL_GAP_MARK_BYTES = 160;
-import { BESIDE_SAVE_COMMANDS } from "@/lib/store-data";
+import { BESIDE_SAVE_COMMANDS, takeDataCommands } from "@/lib/store-data";
 import { WINBACK_OFFER_COMMANDS } from "@/lib/winback";
 import { MAX_DOOR_BYTES } from "@/lib/upload-door";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
@@ -166,7 +166,7 @@ import {
 import { CDN_PER_REQUEST, PAGES_PER_VISIT, laterPageCost, readBeaconCost, readCeilingMarksCost, visitCost } from "./traffic-cost";
 import { SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_MISSES_PER_ADDRESS, SHORT_LINK_MISS_WINDOW_MS, SHORT_LINK_OFF_AFTER_MS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_REST_COMMANDS, SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_RESTING_OWNER_MS, SHORT_LINK_PAID_BURST_COMMANDS, SHORT_LINK_PAID_FLIGHT_PER_STORE, SHORT_LINK_PAID_REFUSALS_PER_HOUR, SHORT_LINK_STORE_COUNT_COMMANDS, SHORT_LINK_STORE_READS_PER_HOUR, SHORT_LINK_STORE_REFUND_COMMANDS, SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_PER_HOUR, SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_USED_UP_PAUSE_MS } from "@/lib/short-link-open-rules";
 import { MAX_LINKS } from "@/lib/short-link-rules";
-import { FLY_HOLD_SECONDS, FLY_SHARE_COMMANDS, MEASURE_LIST_PAGES } from "@/lib/stamp-cost-rules";
+import { COPY_NOTE_BYTES, FLY_HOLD_SECONDS, FLY_SHARE_COMMANDS, MEASURE_LIST_PAGES } from "@/lib/stamp-cost-rules";
 import { ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_CUTOFF_MS, ASSISTANT_START_LIST_PAGES, ASSISTANT_START_STRIPE_CALLS, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
@@ -1204,13 +1204,22 @@ export const MEASURE_DB_BYTES = 4 * 64 * 256;
  * without being charged again as new storage. Counted as STORAGE_MEASURE_UNITS public requests before it lists (lib/stamp-cost-rules.ts;
  * tests/plan-cost-registry.test.ts holds them above it). A preview's final record additionally uses a live-store
  * EVAL in place of SET: three more billed commands and at most 2 KiB more framing, included conservatively here.
+ * A buyer's copy is also noted under the buyer before it is written (board #5427, row #3312; lib/pdf-stamp.ts noteCopy
+ * and stillNoted): COPY_NOTE_COMMANDS, and, when the buyer's deletion read the note between the note and the write,
+ * the copy deleted again (lib/pdf-stamp.ts dropWrittenCopy: COPY_DROP_COMMANDS and one Blob operation, priced as a
+ * listing page, the dearer of the two stores), with the bytes of two notes and a deletion record.
  */
+/** noteCopy's room taken and given back (two TAKE_DATA), its SADD, SCARD and SREM, and stillNoted's SISMEMBER. */
+export const COPY_NOTE_COMMANDS = 2 * takeDataCommands(1) + 4;
+/** A copy deleted again: the deletion record kept (INCRBY, EXPIRE, RPUSH and EXPIRE, lib/backup-deletions.ts) and, failing, its folder listed for a retry (SADD). */
+export const COPY_DROP_COMMANDS = 5;
 export const STORAGE_MEASURE_READ =
   MEASURE_LIST_PAGES * (BLOB_LIST_PAGE + R2_LIST_PAGE)
   + FLY_HOLD_SECONDS * MEMORY_SECOND
   + FLY_HOLD_SECONDS * (SHAPES.wait.cpu / SHAPES.wait.seconds) * CPU_SECOND
-  + (MEASURE_COMMANDS + 3) * COMMAND
-  + (MEASURE_DB_BYTES + 2_048) * DB_BYTE
+  + (MEASURE_COMMANDS + 3 + COPY_NOTE_COMMANDS + COPY_DROP_COMMANDS) * COMMAND
+  + (MEASURE_DB_BYTES + 2_048 + 2 * COPY_NOTE_BYTES + 1_200) * DB_BYTE
+  + BLOB_LIST_PAGE
   + Math.max(micro(R2_CLASS_B_MICRO_USD_PER_MILLION) / 1e6, 0.8 / 1e6);
 /**
  * A copy stamped on the fly and sent without being kept (lib/pdf-stamp.ts stampedDelivery, "fly";
@@ -3018,7 +3027,7 @@ export const COST_LINES: CostLine[] = [
       // the original is read and settled at its measured work (C3-136, 12 November 2026; STORAGE_MEASURE_READ and
       // FLY_BASE, FLY_CPU_MS, FLY_BYTE held in tests/plan-cost-registry.test.ts).
       { file: "lib/stamp-cost-rules.ts", names: ["MEASURE_LIST_PAGES", "STORAGE_MEASURE_UNITS", "NO_ROOM_NOTE_SECONDS", "FLY_HOLD_SECONDS", "FLY_BASE_UNITS", "FLY_SHARE_COMMANDS", "FLY_CPU_MS_PER_UNIT", "FLY_CPU_PER_WALL_MS", "FLY_BYTES_PER_UNIT", "FLY_MAX_BYTES", "flyUnits", "flyHoldUnits"] },
-      { file: "lib/pdf-stamp.ts", names: ["meter.take(STORAGE_MEASURE_UNITS)", "noRoomKey(folder)", "NO_ROOM_NOTE_SECONDS", "if (!(await roomNotedOut(file)))", "const held = flyHoldUnits(file.bytes);", "await meter.take(held)", "meter.give(held - used)", "meter.take(used - held)", "meter.take(flyUnits(0, stamped.bytes.byteLength))"] },
+      { file: "lib/pdf-stamp.ts", names: ["meter.take(STORAGE_MEASURE_UNITS)", "() => noteCopy(store, sale.email, member)", "if (noteFirst && !(await noteFirst())) return \"not_noted\";", "noRoomKey(folder)", "NO_ROOM_NOTE_SECONDS", "if (!(await roomNotedOut(file)))", "const held = flyHoldUnits(file.bytes);", "await meter.take(held)", "meter.give(held - used)", "meter.take(used - held)", "meter.take(flyUnits(0, stamped.bytes.byteLength))"] },
       { file: "lib/pdf-preview.ts", names: ["if (await roomNotedOut(file)) return null;", "writeWithinStorage(file, pathname, bytes, \"application/pdf\", store, meter)"] },
       { file: "app/api/store/download/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now, \"buyer\", { shared: true })", "givePublicRequests(store, units, now, { shared: true })", "copyMeter(store)"] },
       { file: "app/api/store/preview/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now)", "givePublicRequests(store, units, now)"] },

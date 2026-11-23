@@ -50,6 +50,7 @@ import { openConversation, readInbox } from "@/lib/inbox";
 import { accountOf, readMember as readDiscordMember } from "@/lib/discord-store";
 import { readReview, reviewId } from "@/lib/reviews";
 import { storesKnownFor } from "@/lib/buyer-library";
+import { stampedCopiesOf } from "@/lib/pdf-stamp";
 import { readFlows, flowsStartedFor } from "@/lib/flows";
 import { personOf, readRun } from "@/lib/flow-runs";
 import { storeKey } from "@/lib/learn";
@@ -147,6 +148,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/customer-voice.ts": { how: "marks", what: "The store's monthly summary of what its customers said, which may quote your review words without your name; your reviews themselves are in this copy" },
   "lib/buyer-library.ts": { how: "copied", what: "The note that you bought from or joined the store, for your library" },
   "lib/erasure-index.ts": { how: "marks", what: "Links the store emailed you that still work (stop, waitlist, review, free-product and sign-up links)" },
+  "lib/pdf-stamp.ts": { how: "copied", what: "The stamped copy of each PDF or EPUB you downloaded, which carries your address on its pages: the files themselves are the ones your download links give you" },
   // What the erasure keeps on purpose (lib/person-data.ts, "kept"): still theirs to see.
   "lib/affiliates.ts": { how: "marks", what: "Commissions an affiliate earned on your purchases, which name the sale and not you" },
   "lib/community-dm.ts": { how: "marks", what: "Another member's choice not to get your messages, which is theirs and names nobody's address" },
@@ -509,6 +511,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return out;
   },
   "lib/buyer-library.ts": async (s) => ((await storesKnownFor(s.email)).includes(s.sid) ? [{ inYourLibrary: true }] : []),
+  "lib/pdf-stamp.ts": async (s) => (await stampedCopiesOf(s.sid, s.email)).paths.map((path) => ({ stampedCopyOf: path.slice(path.lastIndexOf("/") + 1) })),
   "lib/mail-clicks.ts": async (s) => (await clicksOf(s.listId, s.email)).map((email) => ({ email })),
   "lib/waitlist.ts": async (s) => (await waitlistPlacesOf(s.statsId, [...s.productIds, ...(s.waitlistIds ?? [])], s.email)).map((w) => ({ product: w.product, joined: iso(w.joined), confirmed: iso(w.confirmed), alsoAskedForNews: w.news })),
   "lib/stock-alerts.ts": async (s) => (await stockAlertsOf(s.statsId, s.productIds, s.email)).map((a) => ({ product: a.product, asked: iso(a.asked), confirmed: iso(a.confirmed) })),

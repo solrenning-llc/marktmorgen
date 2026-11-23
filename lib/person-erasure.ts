@@ -103,6 +103,7 @@ import { dropReviewQuotes, keepStoreQuotes } from "@/lib/store-quotes";
 import { forgetVoicePerson } from "@/lib/customer-voice";
 import { forgetLibraryPerson } from "@/lib/buyer-library";
 import { forgetNoted } from "@/lib/erasure-index";
+import { forgetStampedPerson, stampedCopiesOf } from "@/lib/pdf-stamp";
 import { forgetRequestsPerson } from "@/lib/payment-request-store";
 import { forgetAgreementsPerson } from "@/lib/agreement-store";
 import { forgetShipmentMail } from "@/lib/shipment-mail-outbox";
@@ -235,6 +236,17 @@ export const ERASERS: Eraser[] = [
   // The month's summary of what customers say quotes their reviews (rule 28): it goes after them, and a reading under way is not kept.
   { module: "lib/customer-voice.ts", run: (s) => forgetVoicePerson(s.statsId) },
   { module: "lib/buyer-library.ts", run: (s) => forgetLibraryPerson(s.sid, s.email) },
+  // A stamped PDF or EPUB carries their address on its pages (board #5427, row #3312): each copy noted under them is
+  // kept for a repeat first and deleted with their other files below; its record and its note go once that is kept.
+  {
+    module: "lib/pdf-stamp.ts",
+    run: async (s, files) => {
+      const found = await stampedCopiesOf(s.sid, s.email);
+      if (!(await keepFiles(s.listId as string, s.email, found.paths))) throw new Error("the paths of a person's stamped copies could not be kept before their notes are deleted");
+      files.push(...found.paths);
+      return forgetStampedPerson(s.store, s.email, found);
+    },
+  },
   { module: "lib/erasure-index.ts", run: (s) => forgetNoted(s.statsId, s.email) },
   { module: "lib/contacts.ts", after: ["lib/mail-clicks.ts"], run: (s) => forgetContactPerson(s.listId, s.email, s.store) },
 ];

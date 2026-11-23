@@ -987,6 +987,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:stamp:problem:@lib/pdf-stamp.ts": { what: "A file that could not be stamped", parts: [per("upload", 31, KB, "Per file.")] },
   "nl:stamp:noroom:@lib/pdf-stamp.ts": { what: "A store found without room for a new stamped copy or preview", parts: [capped(KEY + MARK, "One mark a store, kept NO_ROOM_NOTE_SECONDS (an hour).", src("lib/stamp-cost-rules.ts", "NO_ROOM_NOTE_SECONDS"))] },
   "nl:stamp:drop@lib/pdf-stamp.ts": company("Folders of stamped copies to delete again", "One set, members gone when done."),
+  "nl:stamp:who:@lib/pdf-stamp.ts": room("The stamped copies noted for one person, so deleting them finds each (board #5427, row #3312): at most COPIES_PER_PERSON, COPY_NOTE_BYTES each, taken before each is noted and given back when it goes", "lib/pdf-stamp.ts"),
   "nl:phone:cfg:@lib/phone-alerts.ts": { what: "Phones that hear of sales", parts: [capped(MAX_DEVICES * 6 * 2 * KB, "MAX_STORE_DEVICES devices.", src("lib/phone-alerts.ts", "MAX_DEVICES"))] },
   "nl:phone:seen:@lib/phone-alerts.ts": { what: "An event already sent to phones", parts: [per("order", 40, MARK, "A sale."), per("buyer", 40, MARK, "A buyer's action.")] },
   "nl:phone:st:@lib/phone-alerts.ts": { what: "How the last send went, a device", parts: [capped(MAX_DEVICES * 6 * KB, "One a device.", src("lib/phone-alerts.ts", "MAX_DEVICES"))] },

@@ -66,6 +66,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/welcome-offer-send.ts", how: "erased", what: "When their welcome offer began, that its reminder was set, and the reminder still waiting for its hour, with their address" },
   { file: "lib/winback-send.ts", how: "erased", what: "The marks that they heard a come-back offer about a product" },
   { file: "lib/erasure-index.ts", how: "erased", what: "Every link your store emailed them that is still kept: stop links, waitlist links, review links, free-product and sign-up links" },
+  { file: "lib/pdf-stamp.ts", how: "erased", what: "The stamped copy of each PDF or EPUB they downloaded, which carries their address on its pages, with its record and the note that finds it" },
   { file: "lib/email-sync.ts", how: "erased", what: "The record of sending them to your connected email platform, and any send still waiting" },
   { file: "lib/mail-frequency.ts", how: "expires", days: 7, what: "When a store last emailed you, kept under a one-way key so the store's chosen gap between emails holds; it says nothing else about you and is gone by itself within the longest gap" },
   { file: "lib/email-sync.ts", how: "expires", days: 30, what: "A one-way mark that a sign-up or purchase was already sent to your email platform. What the platform took is in your own account there: delete them there too" },

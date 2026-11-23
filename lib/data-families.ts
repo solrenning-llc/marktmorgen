@@ -29,6 +29,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
   "nl:product:pages:", "nl:product:pics:", "nl:rcpt:n:", "nl:rcpt:seq:", "nl:recover:off:", "nl:rev:", "nl:rev:all:", "nl:rev:new:",
   "nl:rev:hid:", "nl:rev:off:", "nl:rev:pay:", "nl:rev:stop:", "nl:rev:sum:", "nl:rev:vis:", "nl:sa:", "nl:sa:t:", "nl:save:", "nl:sblock:uses:",
   "nl:sold:", "nl:stamp:copy:", "nl:stock:", "nl:store:leads:", "nl:stream:cap:", "nl:stream:v:", "nl:sub:door:", "nl:sub:list:", "nl:sub:live:", "nl:sub:rec:", "nl:sub:setup:", "nl:sub:slots:", "nl:sub:who:",
+  "nl:stamp:who:",
   "nl:taxobs:v1:", "nl:tben:given:", "nl:tben:who:", "nl:tier:price:", "nl:upd:last:", "nl:upd:latest:", "nl:upd:off:", "nl:upd:stop:", "nl:vcard:", "nl:watch:last:",
   "nl:wf:held:", "nl:wf:log:", "nl:wf:run:", "nl:wf:runs:", "nl:wf:ver:", "nl:wf:ver:idx:", "nl:wl:", "nl:wl:t:", "nl:yearask:",
   "nl:yearly:price:",
@@ -486,6 +487,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:stamp:drop": C,
   // A store found without room for a new stamped copy or preview: one mark a store, kept NO_ROOM_NOTE_SECONDS (an hour), erased with it.
   "nl:stamp:noroom:": E,
+  // The stamped copies noted for one person (board #5427, row #3312): named by the store's id, erased with it.
+  "nl:stamp:who:": E,
   "nl:stats:": E,
   "nl:stock:": E, "nl:stock:back:": E, "nl:stock:lock:": E,
   "nl:storage:blob:": X(3),

@@ -105,6 +105,18 @@ export type ErasureSize = {
 export const ERASE_SUBMISSIONS: readonly [number, number] = [301, 70_000];
 
 /**
+ * A person's stamped copies (board #5427, row #3312; lib/pdf-stamp.ts stampedCopiesOf and forgetStampedPerson), at
+ * COPIES_PER_PERSON (lib/stamp-cost-rules.ts): their note read (SMEMBERS), their paths kept for a repeat (SADD), their
+ * records and members deleted (DEL and SREM) and their room given back (one TAKE_DATA, at most 10 commands); then, with
+ * the person's other files, their kept paths read and let go (SMEMBERS and SREM) and their deletion records kept
+ * (INCRBY, EXPIRE, RPUSH and EXPIRE): 20. Bytes, per copy: its member twice (a record key and a path, 355 bytes at
+ * most, COPY_PATH_MOST), its path four times more, its record key and its deletion record (1,200 bytes at most,
+ * lib/backup-deletions.ts RECORD_BYTES_MOST), 3,200 counted, so 160,000 for 50 copies. [commands, bytes], held by
+ * tests/stamped-copy-erasure.test.ts against COPIES_PER_PERSON and COPY_PATH_MOST.
+ */
+export const ERASE_STAMPED: readonly [number, number] = [20, 160_000];
+
+/**
  * Commands every erasure sends whatever the store: each module's own, workflows at their cap, a sync log at its length,
  * and (since 18 October 2026) a person's payment requests at their cap, four commands each for twice MAX_PER_PERSON
  * (lib/payment-request-store.ts): 260 before them; and (since 18 October 2026) a person's agreements at their cap, two
@@ -130,7 +142,7 @@ export const ERASE_SUBMISSIONS: readonly [number, number] = [301, 70_000];
 // ERASE_SUBMISSIONS: 575 before them.
 // And (review of #3929) the read of the note of the carts the person was reminded of (lib/checkout-recovery.ts,
 // forgetRecoveryPerson), one SMEMBERS, the note deleted inside the marks' one DEL: 576 before ERASE_SUBMISSIONS.
-export const ERASE_FIXED_COMMANDS = 576 + ERASE_SUBMISSIONS[0];
+export const ERASE_FIXED_COMMANDS = 576 + ERASE_SUBMISSIONS[0] + ERASE_STAMPED[0];
 /**
  * Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read
  * again, and those commands; 310,000 before (Claude 3 on #3473) the memberships whose invitations wait to be deleted
@@ -139,7 +151,7 @@ export const ERASE_FIXED_COMMANDS = 576 + ERASE_SUBMISSIONS[0];
  * 325,000 before (#4290) the atomic ask eraser's script, two keys, arguments and its two counts, 5,000; and (750 [CD1])
  * a person's files sent for review, ERASE_SUBMISSIONS: 330,000 before them.
  */
-export const ERASE_FIXED_BYTES = 330_000 + ERASE_SUBMISSIONS[1];
+export const ERASE_FIXED_BYTES = 330_000 + ERASE_SUBMISSIONS[1] + ERASE_STAMPED[1];
 /** Members removed per command in the atomic checkout-ask eraser; not a cap on a person's erasure. */
 export const ASK_ERASE_BATCH = 512;
 /** Per thing counted: [commands, bytes]. */

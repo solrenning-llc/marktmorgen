@@ -17,7 +17,9 @@
  * path derived from the sale and the file; every later download of the same
  * sale is served from it, so a buyer downloading three times costs one stamp.
  * A new file on the product means new copies, and the old ones are deleted
- * when the file they were made from is.
+ * when the file they were made from is. Each copy is noted under its buyer
+ * before it is kept (stampedCopiesKey), and deleting the buyer deletes it
+ * (forgetStampedPerson; board #5427, row #3312): it carries their address.
  *
  * Two kinds of PDF are handed over as they were uploaded, and the creator is
  * told in the studio rather than the buyer being refused a file they paid for:
@@ -51,11 +53,12 @@ import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-
 import { MAX_STAMP_BYTES, type ProductFile, isEpub, isStampable } from "@/lib/product-file";
 import { type EpubProblem, stampEpub } from "@/lib/epub-stamp";
 import { folderFromPathname } from "@/lib/delivery";
-import { type DataStore, keepFor } from "@/lib/store-data";
+import { type DataStore, giveData, keepFor, takeData } from "@/lib/store-data";
+import { personKey } from "@/lib/person-key";
 import { standingOf } from "@/lib/plan-standing";
 import { storageBrakeFor, storageUsed } from "@/lib/storage-quota";
 import { releaseStorage, reserveStorage } from "@/lib/storage-reservations";
-import { type CopyMeter, FLY_MAX_BYTES, NO_ROOM_NOTE_SECONDS, STORAGE_MEASURE_UNITS, flyHoldUnits, flyUnits } from "@/lib/stamp-cost-rules";
+import { COPIES_PER_PERSON, COPY_NOTE_BYTES, COPY_PATH_MOST, type CopyMeter, FLY_MAX_BYTES, NO_ROOM_NOTE_SECONDS, STORAGE_MEASURE_UNITS, flyHoldUnits, flyUnits } from "@/lib/stamp-cost-rules";
 import type { LanguageCode } from "@/lib/store-language";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -162,12 +165,16 @@ async function noteProblem(pathname: string, problem: StampProblem): Promise<voi
   await redisPipeline([["SET", problemKey(pathname), problem, "EX", PROBLEM_SECONDS]]).catch(() => {});
 }
 
-/** What writeWithinStorage did: kept the copy, found no room, could not pay for the measurement, or failed to write. */
-export type KeepOutcome = "kept" | "no_room" | "not_measured" | "failed";
+/**
+ * What writeWithinStorage did: kept the copy, found no room, could not pay for the measurement, could not confirm the
+ * note it was asked to make first (`noteFirst`), or failed to write.
+ */
+export type KeepOutcome = "kept" | "no_room" | "not_measured" | "not_noted" | "failed";
 
 /** Writes over a copy already in place that is at least as big: the store's storage does not grow. */
-async function writeOver(pathname: string, bytes: Uint8Array, contentType: string): Promise<KeepOutcome> {
+async function writeOver(pathname: string, bytes: Uint8Array, contentType: string, noteFirst?: () => Promise<boolean>): Promise<KeepOutcome> {
   try {
+    if (noteFirst && !(await noteFirst())) return "not_noted";
     await writeFileWhole(pathname, bytes, contentType);
     return "kept";
   } catch (error) {
@@ -206,6 +213,10 @@ export async function roomNotedOut(original: Pick<ProductFile, "pathname">): Pro
  *
  * The reservation goes once the write has answered, whether it wrote or threw: a copy that did land is then held
  * by the store's own listing, which is what every later reservation measures, so nothing is counted as room.
+ *
+ * `noteFirst`, when given, runs once the measurement is paid for and right before the write, and the write is made
+ * only when it answers true ("not_noted" otherwise): a buyer's copy is noted under the buyer (noteCopy) before it
+ * exists, so deleting the buyer always finds it.
  */
 export async function writeWithinStorage(
   original: Pick<ProductFile, "pathname">,
@@ -214,6 +225,7 @@ export async function writeWithinStorage(
   contentType: string,
   store: DataStore,
   meter: CopyMeter,
+  noteFirst?: () => Promise<boolean>,
 ): Promise<KeepOutcome> {
   const folder = folderFromPathname(original.pathname);
   if (!folder || folderFromPathname(pathname) !== folder || bytes.byteLength <= 0) return "failed";
@@ -228,7 +240,7 @@ export async function writeWithinStorage(
     () => 0,
   );
   const growth = bytes.byteLength - inPlace;
-  if (growth <= 0) return writeOver(pathname, bytes, contentType);
+  if (growth <= 0) return writeOver(pathname, bytes, contentType, noteFirst);
   let reservation: Awaited<ReturnType<typeof reserveStorage>>;
   try {
     reservation = await reserveStorage(folder, growth, brake, async () => {
@@ -242,6 +254,7 @@ export async function writeWithinStorage(
     return "no_room";
   }
   try {
+    if (noteFirst && !(await noteFirst())) return "not_noted";
     await writeFileWhole(pathname, bytes, contentType);
     return "kept";
   } catch (error) {
@@ -284,6 +297,99 @@ export function copyFolder(file: Pick<ProductFile, "pathname">): string {
   // buyer costs what handing over the original would.
   const root = isVaultPath(file.pathname) ? VAULT_PREFIX : "stores";
   return `${root}/${folder}/stamped/${sha(file.pathname).slice(0, 24)}/`;
+}
+
+/**
+ * The stamped copies kept for one person in one store (board #5427, row #3312): a set of "<record key> <copy's path>",
+ * under the store's id and a one-way key of the address, never the address. A copy carries the address on its pages,
+ * so it is noted here before it is written (noteCopy), and deleting the person (forgetStampedPerson) deletes each copy
+ * and its record. No expiry: a copy lives as long as the file it was made from, so the note that finds it must too.
+ * At most COPIES_PER_PERSON members, each counted in the store's data room at COPY_NOTE_BYTES while it is there;
+ * closing the store deletes it with the store's other keys.
+ */
+export const stampedCopiesKey = (sid: string, email: string) => `nl:stamp:who:${sid}:${personKey(sid, email)}`;
+/** The slot of the store's data room the notes are counted in. */
+const COPY_NOTE_SLOT = "stamp:who";
+/** One note: the copy's record key (copyKey), a space, its path. */
+const NOTED_COPY = new RegExp(`^(nl:stamp:copy:[0-9a-f]{40}) ((?:${VAULT_PREFIX}|stores)/[^/]+/stamped/[0-9a-f]{24}/[0-9a-f]{24}/[^/]+)$`);
+
+/**
+ * Notes a copy about to be kept under its buyer (stampedCopiesKey), its room taken in the store's data room first.
+ * True only when the note is confirmed there: SADD 0 or 1 and SCARD a count, read exactly (CX-123 rule 24). A copy
+ * past COPIES_PER_PERSON is taken out again and refused, and so is a path past COPY_PATH_MOST bytes, a store without an
+ * id or a room that does not take it. Unknown is false, and the room it took stays counted (the room looks fuller,
+ * never emptier). Never throws. Commands at the most: the room taken and given back (two TAKE_DATA), SADD, SCARD and
+ * SREM (tests/plan-cost-registry.ts COPY_NOTE_COMMANDS).
+ */
+async function noteCopy(store: DataStore, email: string, member: string): Promise<boolean> {
+  if (!isRedisConfigured() || !store.sid || !email || !NOTED_COPY.test(member)) return false;
+  if (Buffer.byteLength(member.slice(member.indexOf(" ") + 1), "utf8") > COPY_PATH_MOST) return false;
+  const key = stampedCopiesKey(store.sid, email);
+  const room = [{ slot: COPY_NOTE_SLOT, bytes: COPY_NOTE_BYTES }];
+  if (!(await takeData(store, room).then((taken) => taken.ok, () => false))) return false;
+  const replies = await redisPipeline([["SADD", key, member], ["SCARD", key]]).then((r) => repliesFor(r, 2), () => null);
+  const added = replies ? countOf(replies[0]) : null;
+  const held = replies ? countOf(replies[1]) : null;
+  if (added === null || added > 1 || held === null) return false;
+  if (added === 0) {
+    // Noted already (a copy written over in place): its room was counted then.
+    await giveData(store, room);
+    return true;
+  }
+  if (held <= COPIES_PER_PERSON) return true;
+  // One too many: taken out again, its room given back only once that is confirmed.
+  const gone = await redisPipeline([["SREM", key, member]]).then((r) => countOf(repliesFor(r, 1)?.[0]), () => null);
+  if (gone === 1) await giveData(store, room);
+  return false;
+}
+
+/**
+ * Whether a copy just written is still noted under its buyer: a deletion of the buyer that read the notes between
+ * the note and the write took it out and did not see the file, so such a copy is deleted again at once (rule 24: only
+ * SISMEMBER's 1 is "noted").
+ */
+async function stillNoted(store: DataStore, email: string, member: string): Promise<boolean> {
+  if (!store.sid) return false;
+  const replies = await redisPipeline([["SISMEMBER", stampedCopiesKey(store.sid, email), member]]).then((r) => repliesFor(r, 1), () => null);
+  return replies?.[0] === 1;
+}
+
+/**
+ * The stamped copies noted for this person in this store (stampedCopiesKey), for lib/person-erasure.ts: each copy's
+ * path, its record's key and the member itself. The set read in any shape but an exact list of text throws
+ * (UnknownReplyError), so the erasure is not done; a member not in the shape noteCopy writes is not a copy, and only
+ * its member is taken out.
+ */
+export async function stampedCopiesOf(sid: string, email: string): Promise<{ paths: string[]; records: string[]; members: string[] }> {
+  if (!sid || !isRedisConfigured()) return { paths: [], records: [], members: [] };
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", stampedCopiesKey(sid, email)]]), 1);
+  const members = replies ? stringList(replies[0]) : null;
+  if (!members) throw new UnknownReplyError("the stamped copies noted for a person");
+  const found = members.flatMap((member) => {
+    const match = NOTED_COPY.exec(member);
+    return match ? [{ record: match[1], path: match[2] }] : [];
+  });
+  return { paths: found.map((f) => f.path), records: found.map((f) => f.record), members };
+}
+
+/**
+ * Deletes, once their files are in the erasure's hands (lib/person-erasure.ts keeps their paths and deletes them),
+ * the records of these copies and takes exactly these members out of the person's note, giving back their room.
+ * Answers how many copies were noted. Replies read exactly: DEL at most the records named, SREM at most the members
+ * named; any other answer throws UnknownReplyError, and the erasure is not done (pressed again, it finds them again).
+ */
+export async function forgetStampedPerson(store: DataStore, email: string, found: { records: string[]; members: string[] }): Promise<number> {
+  if (!store.sid || !found.members.length) return 0;
+  const commands: (string | number)[][] = [["SREM", stampedCopiesKey(store.sid, email), ...found.members]];
+  if (found.records.length) commands.unshift(["DEL", ...found.records]);
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const counts = replies?.map(countOf);
+  const removed = counts?.[counts.length - 1];
+  if (!counts || counts.some((n) => n === null) || (found.records.length && (counts[0] as number) > found.records.length) || removed === null || removed === undefined || removed > found.members.length) {
+    throw new UnknownReplyError("the deletion of a person's stamped copies' notes");
+  }
+  if (removed > 0) await giveData(store, [{ slot: COPY_NOTE_SLOT, bytes: removed * COPY_NOTE_BYTES }]);
+  return found.records.length;
 }
 
 /**
@@ -457,7 +563,15 @@ export async function stampedDelivery(
     // beside the path, as it is for the original.
     const last = isVaultPath(file.pathname) ? keyName(file.name) : file.name;
     const pathname = `${copyFolder(file)}${sha(`${sale.reference}|${file.addedAt}`).slice(0, 24)}/${last}`;
-    const kept = await writeWithinStorage(file, pathname, stamped.bytes, stamped.contentType, store, meter);
+    // The copy carries the buyer's address: it is noted under them before it is written (noteCopy), so deleting them
+    // always finds it, and a copy whose note is not confirmed is not kept (board #5427, row #3312).
+    const member = `${key} ${pathname}`;
+    const kept = await writeWithinStorage(file, pathname, stamped.bytes, stamped.contentType, store, meter, () => noteCopy(store, sale.email, member));
+    if (kept === "kept" && !(await stillNoted(store, sale.email, member))) {
+      // The buyer's deletion ran between the note and the write: the copy goes again at once and is sent unkept.
+      await dropWrittenCopy(file, pathname);
+      return await sendUnkept(file, stamped, meter);
+    }
     if (kept !== "kept") {
       // The studio is told only what is true: no room was confirmed. A write that failed, or a measurement the store's
       // requests could not pay for, is not the storage running out.

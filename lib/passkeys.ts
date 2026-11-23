@@ -427,8 +427,10 @@ async function readDrop(email: string): Promise<DropRecord | null> {
     throw unknown();
   }
   const plain = (x: unknown): x is Record<string, unknown> => x !== null && typeof x === "object" && !Array.isArray(x);
-  // A moment as writeDrop writes it: whole milliseconds from 0 up (rule 24; Codex G, #4287 item 3).
-  const moment = (x: unknown): x is number => typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
+  // A moment as writeDrop writes it: whole milliseconds after 0 and within what a JavaScript date holds (rule 24; Codex
+  // G, #4287 item 3; Claude 3 yUZf's LEVE on #5144). A removal's moment of 0 would remove the passkey at once, and one
+  // past 8.64e15 would put it off for good: neither is ever written (atOf is the ask's time plus the wait).
+  const moment = (x: unknown): x is number => typeof x === "number" && Number.isSafeInteger(x) && x > 0 && x <= 8.64e15;
   if (!plain(parsed)) throw unknown();
   const value = parsed;
   // Built as entries, never by assigning keys, so an id such as "__proto__" stays an id.
@@ -454,7 +456,8 @@ async function readDrop(email: string): Promise<DropRecord | null> {
   // it, so only no key (null above) means nothing waits; a record with none in it ({atOf:{}}, an old {ids:[]}) is
   // not one this code wrote, and taking it as "nothing waits" would let a passkey whose removal is due log in.
   if (!moments.length || moments.length > MAX_PASSKEYS) throw unknown();
-  if (value.told !== undefined && !moment(value.told)) throw unknown();
+  // `told` is 0 until a notice was delivered (writeDrop stores before?.told ?? 0), otherwise a moment.
+  if (value.told !== undefined && value.told !== 0 && !moment(value.told)) throw unknown();
   let telling: Telling | undefined;
   if (value.telling !== undefined) {
     const t = value.telling;

@@ -81,6 +81,17 @@ async function main(): Promise<void> {
     }
   }
 
+  part("Item 3: a moment of 0, or past what a date holds, is unknown (Claude 3 yUZf's LEVE on #5144)");
+  // 0 as a removal's moment would remove the passkey at once; 9e15 (a safe integer past 8.64e15) would put it off for good.
+  for (const field of ["atOf", "since"] as const) {
+    is(`${field} 0: unknown`, await withMoment(field, 0), "unknown");
+  }
+  for (const field of ["atOf", "told", "since"] as const) {
+    is(`${field} past the last date (9e15): unknown`, await withMoment(field, 9e15), "unknown");
+  }
+  is("told 0, a notice not delivered yet, as writeDrop writes it: read", await withMoment("told", 0), "read");
+  is("the last moment a date holds (8.64e15) still reads", await withMoment("atOf", 8.64e15), "read");
+
   done();
 }
 main().catch((error) => {

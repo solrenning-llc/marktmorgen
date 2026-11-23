@@ -270,8 +270,14 @@ export async function keptReading<T>(store: ReadingStore, kind: ReadingKind, rea
     throw new ReadingFailed();
   }
   const text = JSON.stringify({ at: now, value });
-  if (value === null || value === undefined || Buffer.byteLength(text, "utf8") > READING_COPY_MAX_BYTES) return { value, at: now, stale: false };
+  if (value === null || value === undefined) return { value, at: now, stale: false };
   const names = guard ? [...new Set(guard.names(value))] : [];
+  // Too large to keep: never kept, so never checked where it is written (READING_COPY) against the people deleted while
+  // it was made. Shown with its totals and naming nobody, as a reading with no list is (#4758, Codex L); one naming
+  // nobody is shown as it was read.
+  if (Buffer.byteLength(text, "utf8") > READING_COPY_MAX_BYTES) {
+    return guard && names.length ? { value: guard.without(value, new Set(names)), at: now, stale: false, unnamed: true } : { value, at: now, stale: false };
+  }
   if (!guard || !names.length) {
     await keepCopy(store, key, text);
     return { value, at: now, stale: false };

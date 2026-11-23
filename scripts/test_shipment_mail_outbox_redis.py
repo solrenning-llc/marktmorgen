@@ -685,8 +685,12 @@ def main():
                           iso + "pool:one", iso + "all", iso + "closed", iso + "erased"]
         made.update(isolation_keys)
         billed = {}
-        reply, count = measured(eval_args("enqueue", isolation_row, isolation_keys), 27,
-                                between=lambda: [other.command("PING") for _ in range(5)], delta_out=billed)
+        try:
+            reply, count = measured(eval_args("enqueue", isolation_row, isolation_keys), 27,
+                                    between=lambda: [other.command("PING") for _ in range(5)], delta_out=billed)
+        finally:
+            # Closed once the step is measured (Claude 1's note on #5115): a failure above still lists it in CLIENT LIST.
+            other.close()
         assert reply[0] == "queued", reply
         assert "ping" not in billed, ("another client's commands were billed to the step", billed)
         print("PASS: the billing of a step counts this connection's EVAL alone; billed commands", count)

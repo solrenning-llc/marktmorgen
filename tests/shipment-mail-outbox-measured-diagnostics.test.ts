@@ -45,6 +45,15 @@ test("the script checks the isolation itself: five PINGs from another connection
   assert.match(source, /iso = prefix \+ "isolation:"/);
 });
 
+test("the other connection is closed once the step is measured, even when the measurement fails (Claude 1's note on #5115)", () => {
+  const opened = source.indexOf("other = LocalRedis()");
+  const step = source.indexOf('between=lambda: [other.command("PING") for _ in range(5)]');
+  const closed = source.indexOf("other.close()");
+  assert.ok(opened > -1 && step > opened, "the connection is opened before the step");
+  assert.ok(closed > step, "and closed after it");
+  assert.match(source.slice(step, closed), /finally:/, "in a finally, so a failing measurement closes it too");
+});
+
 test("the measured step keeps the difference of every command that moved, not only the sum", () => {
   assert.match(measured, /delta = \{cmd: n - before\.get\(cmd, 0\) for cmd, n in after\.items\(\) if n != before\.get\(cmd, 0\)\}/);
   assert.match(measured, /count = sum\(delta\.values\(\)\)/);

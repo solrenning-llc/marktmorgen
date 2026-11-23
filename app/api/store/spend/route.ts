@@ -12,7 +12,9 @@ import { UnknownReplyError } from "@/lib/redis-reply";
  * amounts unknown, never guessed). For whoever may see the numbers. Answers
  * the list as it is after; a list that cannot be read answers 503 `unread`,
  * with `unreadable` set to how many kept entries could not be read. A removal
- * it cannot confirm answers `{ ok: false, error: "unconfirmed" }` with status 503.
+ * it cannot confirm answers `{ ok: false, error: "unconfirmed" }` with status 503;
+ * a removal confirmed while another kept entry cannot be read answers
+ * `{ ok: true, unreadable }` with no list.
  */
 export async function POST(request: NextRequest) {
   // Removing the entries that cannot be read deletes, so a session let in without its second step may not do it,
@@ -33,6 +35,8 @@ export async function POST(request: NextRequest) {
       const removed = await removeSpend(store.statsId, body.id);
       // An unconfirmed removal is an error the owner can retry, never ok over a line that may still count.
       if (!removed.ok) return Response.json({ ok: false, error: removed.reason }, { status: 503, headers: { "Cache-Control": "no-store" } });
+      // Removed, but another saved entry could not be read: ok with how many, and no list (board #5285, row #3069).
+      if (removed.unreadable !== undefined) return Response.json({ ok: true, unreadable: removed.unreadable }, { headers: { "Cache-Control": "no-store" } });
       return Response.json({ ok: true, spends: removed.spends, spendsUnread: removed.metaUnread }, { headers: { "Cache-Control": "no-store" } });
     }
     if (body.action === "remove-unreadable") {

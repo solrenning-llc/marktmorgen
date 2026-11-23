@@ -56,6 +56,13 @@ function unreadableWords(count: number): string {
     : `${count} saved entries could not be read, so their amounts are unknown. Until they are removed, nothing new can be added and the figures that use ad spend are incomplete.`;
 }
 
+/** What the editor says when a line was removed but other saved entries could not be read (board #5285, row #3069). */
+export function removedWithUnreadable(count: number): string {
+  return count === 1
+    ? "Removed. 1 other saved entry could not be read. See the note in this section."
+    : `Removed. ${count} other saved entries could not be read. See the note in this section.`;
+}
+
 /** "October 13", for a day in UTC. */
 function longDay(seconds: number): string {
   return new Date(seconds * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
@@ -282,6 +289,13 @@ export function AdSpendEditor({
       }
       const count = typeof answer.unreadable === "number" && Number.isSafeInteger(answer.unreadable) && answer.unreadable > 0 ? answer.unreadable : 0;
       setUnreadable(count);
+      if (answer.ok && count && body.action === "remove") {
+        // The line is confirmed gone; other saved entries could not be read, so no list came back. The note in this
+        // section says the figures are incomplete until those are removed.
+        onChange(spends.filter((s) => s.id !== body.id), metaUnread);
+        toast(removedWithUnreadable(count));
+        return true;
+      }
       toast(count ? "That did not save, because a saved entry could not be read. See the note in this section." : (REASONS[answer.error ?? ""] ?? "That did not save. Try again."));
     } catch {
       toast("That could not be confirmed. Check your connection and try again without changing anything.");

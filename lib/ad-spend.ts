@@ -297,13 +297,25 @@ export async function removeUnreadableSpends(statsId: string): Promise<SpendRead
  * A removal Redis did not confirm, or a line still there, is "unconfirmed"
  * (issue #4434): the line may still count in the result after ads, so it is
  * never reported as removed, and no list is handed back as the new state.
+ * Once the line is confirmed gone, another saved entry that cannot be read does
+ * not turn the answer into "not removed" (board #5285, row #3069): it answers
+ * ok with `unreadable`, how many entries could not be read, and no list.
  */
-export async function removeSpend(statsId: string, id: unknown): Promise<({ ok: true } & SpendRead) | { ok: false; reason: "unconfirmed" }> {
+export async function removeSpend(
+  statsId: string,
+  id: unknown,
+): Promise<({ ok: true; unreadable?: undefined } & SpendRead) | { ok: true; unreadable: number; spends?: undefined; metaUnread?: undefined } | { ok: false; reason: "unconfirmed" }> {
   if (typeof id === "string" && ID.test(id) && isRedisConfigured()) {
     const [removed] = await redisPipeline([["HDEL", key(statsId), id]]);
     if (removed !== 0 && removed !== 1) return { ok: false, reason: "unconfirmed" };
     const [exists] = await redisPipeline([["HEXISTS", key(statsId), id]]);
     if (exists !== 0) return { ok: false, reason: "unconfirmed" };
+    try {
+      return { ok: true, ...(await readSpendLines(statsId)) };
+    } catch (error) {
+      if (error instanceof UnreadableSpendsError) return { ok: true, unreadable: error.count };
+      throw error;
+    }
   }
   return { ok: true, ...(await readSpendLines(statsId)) };
 }

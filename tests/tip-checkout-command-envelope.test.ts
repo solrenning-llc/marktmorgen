@@ -4,9 +4,11 @@
  * A tip checkout is the "tip" public request (tests/plan-cost-registry.ts, `tip: PUBLIC`). Its Redis work is measured
  * here on the real route, POST /api/store/tip, and must stay within the dearest public request of the model, a later
  * page (tests/traffic-cost.ts, COMMANDS.laterPage + COMMANDS.laterCount, 18). Every command is billed as Upstash bills
- * it: one a plain command, and an EVAL as the calls its script makes (at least one). Both the buyer's first checkout
- * in the window, the worst case (its counters also get their expiry), and a later one are measured. Measured on
- * 23 November 2026: 10 and 9, the tip mark written by setWhileStoreLive (Codex L-20261119-1636).
+ * it, by the registry's rule (tests/plan-cost-registry.ts, rule 964c): one a plain command, and an EVAL as one plus
+ * the calls its script makes. Both the buyer's first checkout in the window, the worst case (its counters also get
+ * their expiry), and a later one are measured. Measured on 23 November 2026: 11 and 10, the tip mark written by
+ * setWhileStoreLive (Codex L-20261119-1636). (Counted as max(1, calls) before the coordinator's triple audit
+ * 7091737647, which gave 10 and 9.)
  *
  * Synthetic store, Redis stand-in and Stripe stub only; nothing real is called.
  */
@@ -32,9 +34,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 });
 }) as typeof fetch;
 
-/** As Upstash bills it: a plain command is one; an EVAL is the calls its script makes, at least one. */
+/** The registry's rule (964c): a plain command is one; an EVAL is one plus the calls its script makes. */
 const billed = (command: (string | number)[]): number =>
-  command[0] === "EVAL" ? Math.max(1, (String(command[1]).match(/redis\.call\(/g) ?? []).length) : 1;
+  command[0] === "EVAL" ? 1 + (String(command[1]).match(/redis\.call\(/g) ?? []).length : 1;
 
 let sent = 0;
 const pipeline = redis.pipeline.bind(redis);

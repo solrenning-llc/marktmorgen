@@ -650,6 +650,21 @@ export class MemoryRedis {
           }
           return written;
         }
+        // lib/phone-alerts.ts PHONE_UNLIST_AND_FORGET: one person's devices off the list and their states deleted in one step.
+        if (key.startsWith("-- marktmorgen:phone-unlist-forget:v1\n") && args[0] === "2" && args.length >= 5) {
+          const [, list, states, read, written, ...ids] = args;
+          this.scriptCalls += 1;
+          const current = this.run(["GET", list]);
+          if (String(current ?? "") !== read) return -1;
+          this.scriptCalls += 1;
+          const kind = this.run(["TYPE", states]);
+          if (kind !== "hash" && kind !== "none") return -2;
+          this.scriptCalls += 1;
+          this.run(["SET", list, written]);
+          if (ids.length === 0) return 0;
+          this.scriptCalls += 1;
+          return this.run(["HDEL", states, ...ids]);
+        }
         // lib/plans.ts MOVE_IF_LIVE: a plan put back in the line of plans tried only while its store is live.
         if (key.startsWith("-- marktmorgen:plan-move-if-live:v1\n") && args[0] === "3" && args.length === 8) {
           const [, retry, idKey, erasing, at, member, ref, field] = args;

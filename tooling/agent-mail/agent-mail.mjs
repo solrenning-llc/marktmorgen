@@ -267,9 +267,9 @@ export function definirEscritor(nome) { ESCRITOR = nome && nome !== true ? Strin
 export const ENVIO_TENTATIVAS = 30;
 export const ENVIO_FALHAS_OUTRAS = 6;
 export const ENVIO_PRAZO_MS = 150000;
-/** Um envio recusado porque o ramo andou no meio (outro agente gravou antes), e não por outro motivo. */
 /** Uma falha passageira ao gravar um objeto (a manutenção do git de outro processo apagou a pasta no meio): tenta de novo. */
 export const falhaPassageira = (erro) => /unable to create temporary file|unable to write (?:loose )?object|insufficient permission for adding an object/i.test(String(erro?.stderr ?? erro?.message ?? erro));
+/** Um envio recusado porque o ramo andou no meio (outro agente gravou antes), e não por outro motivo. */
 export const perdeuCorrida = (erro) => /\(fetch first\)|non-fast-forward|failed to update ref|cannot lock ref|incorrect old value|but expected/i.test(String(erro?.stderr ?? erro?.message ?? erro));
 const esperar = (ms) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, Math.round(ms))); };
 
@@ -282,7 +282,16 @@ function acrescentar(novos, mensagem) {
   const blobs = Object.entries(novos).map(([caminho, texto]) => {
     // A sessão de quem escreve vai no fim de cada mensagem ou registro .md (os outros arquivos têm formato fixo).
     const gravado = caminho.endsWith(".md") ? `${String(texto).replace(/\n*$/, "\n")}Sessão: ${linhaSessao()}\n` : texto;
-    return [caminho, gitC(["hash-object", "-w", "--stdin"], gravado)];
+    // A gravação do blob também tenta de novo uma falha passageira, poucas vezes e com espera curta (LEVE do Claude 4
+    // 3Kc no #5147: ela fica fora do laço de tentativas abaixo).
+    for (let vez = 1; ; vez += 1) {
+      try {
+        return [caminho, gitC(["hash-object", "-w", "--stdin"], gravado)];
+      } catch (erro) {
+        if (!falhaPassageira(erro) || vez >= ENVIO_FALHAS_OUTRAS) throw erro;
+        esperar(200 + Math.random() * 800);
+      }
+    }
   });
   const inicio = Date.now();
   let corridas = 0, outras = 0;

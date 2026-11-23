@@ -4,7 +4,8 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 async function main() {
   redis.clear();
-  const store = { listId: "draft-versions", catalog: { items: [] } } as unknown as Store;
+  redis.run(["SET", "nl:store:id:" + "dd".repeat(16), "drafts-owner@example.test"]); // a live store with an id (#5010 row 111)
+  const store = { listId: "draft-versions", email: "drafts-owner@example.test", sid: "dd".repeat(16), extra: false, catalog: { items: [] } } as unknown as Store;
   const input = { subject: "Original", body: "Original", productId: "" };
   const first = await saveDraft(store, "owner@example.com", input);
   if (!first.ok) throw new Error("fixture failed");

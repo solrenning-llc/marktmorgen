@@ -1822,16 +1822,34 @@ export class MemoryRedis {
           this.data.set(record, next);
           return 1;
         }
-        // lib/mail-drafts.ts DRAFT_SET_HELD and DRAFT_DEL_HELD: a draft set or deleted only while its lease holds the writer's value.
-        if (key.startsWith("-- marktmorgen:draft-set-held:v1\n") && args[0] === "2" && args.length === 6) {
-          const [, drafts, lease, value, field, json] = args;
-          if (this.run(["GET", lease]) !== value) return -1;
-          return this.run(["HSET", drafts, field, json]);
-        }
+        // lib/mail-drafts.ts DRAFT_DEL_HELD: a draft deleted only while its lease holds the writer's value.
         if (key.startsWith("-- marktmorgen:draft-del-held:v1\n") && args[0] === "2" && args.length === 5) {
           const [, drafts, lease, value, field] = args;
           if (this.run(["GET", lease]) !== value) return -1;
           return this.run(["HDEL", drafts, field]);
+        }
+        // lib/mail-drafts.ts DRAFT_SET_LIVE: a draft written only while its store is live (the rule of store-cache-live:v3)
+        // and, for an edit, its lease still holds the writer's value (#5010 row 111). "gone" gone or erasing, -3 an owner's
+        // record that does not parse, -1 the lease not ours; otherwise HSET's reply.
+        if (key.startsWith("-- marktmorgen:draft-set-live:v1\n") && args[0] === "4" && args.length === 11) {
+          const [, drafts, lease, live, erasing, value, field, json, erasingField, statsId, ref] = args;
+          if (this.run(["HGET", erasing, erasingField]) !== null) return "gone";
+          if (statsId === "") {
+            if (this.run(["GET", live]) !== ref) return "gone";
+          } else {
+            const raw = this.run(["GET", live]);
+            if (raw === null) return "gone";
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -3;
+            }
+            if (!record || typeof record !== "object") return -3;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return "gone";
+          }
+          if (value !== "" && this.run(["GET", lease]) !== value) return -1;
+          return this.run(["HSET", drafts, field, json]);
         }
         // lib/calls.ts: a call lock's value swapped (take-over, renewal), and a hold written, only while the lock holds the value given.
         if (key.startsWith("-- marktmorgen:call-lock-swap:v1\n") && args[0] === "1" && args.length === 5) {

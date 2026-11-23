@@ -401,6 +401,14 @@ export type Store = {
    */
   stripeConnecting?: StripeConnecting;
   /**
+   * The attempts to open the creator's Stripe account that were replaced (past STRIPE_CONNECT_REUSE_SECONDS, or by a
+   * press in another country a day after the last one) or lapsed, newest last, at most STRIPE_CONNECT_REPLACED_KEPT:
+   * an account Stripe made with a lost answer can be found only by its idempotency key, which holds the attempt's id
+   * (Claude 1 2as's LOW 2 on #5095). Only the id, the country and the times: never the address or the name it was asked
+   * with. Kept with the store's record and gone with it.
+   */
+  stripeConnectReplaced?: StripeConnectReplaced[];
+  /**
    * Whether Stripe last told us that account can take a payment, and when we
    * asked. Kept as a snapshot so the studio does not have to call Stripe on
    * every page load, and shown with its date so it is never read as a promise
@@ -906,6 +914,10 @@ export const STRIPE_ACCOUNT_PATTERN = /^acct_[A-Za-z0-9]{8,64}$/;
  * the key had never been sent before (MEDIUM 1, 20261122T200746Z-claude-1-coord-305c).
  */
 export type StripeConnecting = { id: string; country: string; email: string; name: string; at: string; pressedAt: string; sends: number };
+/** A replaced or lapsed attempt (Store.stripeConnectReplaced): its id, its country, when it was first written and when it stopped being used. */
+export type StripeConnectReplaced = { id: string; country: string; at: string; until: string };
+/** How many replaced or lapsed attempts a store keeps: the newest, a few hundred bytes of its record at the most. */
+export const STRIPE_CONNECT_REPLACED_KEPT = 5;
 /**
  * How long an open attempt holds the store against its deletion and its closing (deleteStore, lib/closed-store-data.ts
  * prepareStore), from its last press: one day, the coordinator's choice on #5095 (20261122T070141Z-claude-1-coord-ce9a),

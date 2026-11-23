@@ -17,7 +17,7 @@
 import { NextRequest } from "next/server";
 import { POST as connectPOST } from "@/app/api/stripe/connect/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { ERASING_KEY, STRIPE_CONNECT_HOLD_SECONDS, STRIPE_CONNECT_REUSE_SECONDS, beginStripeConnect, claimHandle, clearStripeConnect, createStore, deleteStore as deleteWith, erasingField, finishStripeConnect, storeForId, storeRef } from "@/lib/store";
+import { ERASING_KEY, STRIPE_CONNECT_HOLD_SECONDS, STRIPE_CONNECT_REPLACED_KEPT, STRIPE_CONNECT_REUSE_SECONDS, beginStripeConnect, claimHandle, clearStripeConnect, createStore, deleteStore as deleteWith, erasingField, finishStripeConnect, setCommunity, storeForId, storeRef } from "@/lib/store";
 import { BATCH_KEY, StripeConnectingError, prepareStore, queueDeleted } from "@/lib/closed-store-data";
 import { FINAL_INDEX } from "@/lib/closing-holds";
 import { LOCKED_UNTIL_STAR_COMMANDS, STRIPE_CONNECT_PRESS_EXTRA_COMMANDS, TAKE_COMMANDS } from "./plan-cost-registry";
@@ -373,6 +373,40 @@ async function main(): Promise<void> {
     const stale = await beginStripeConnect(storeRef(other), other.sid, { country: "us", email: "connect-edge-other@example.com", name: "Edge" }, Date.now() - (STRIPE_CONNECT_REUSE_SECONDS + 60) * 1000);
     is("an answer for another attempt id still writes nothing", stale && "id" in stale ? await finishStripeConnect(storeRef(other), other.sid, "0".repeat(32), "acct_EdgeAnswer02") : null, null);
     is("a stale attempt's own late answer is written too", stale && "id" in stale ? (await finishStripeConnect(storeRef(other), other.sid, stale.id, "acct_EdgeAnswer03"))?.stripeAccountId ?? null : null, "acct_EdgeAnswer03");
+  }
+
+  part("An attempt that is replaced or lapses leaves its id on the store's record, never only a log (Claude 1 2as's LOW 2 on #5095)");
+  {
+    // Past its 29 days, or another country a day after the last press, an attempt is replaced: an account Stripe made
+    // with its lost answer can then be found only by its idempotency key, which holds its id. The id, the country and
+    // its times stay on the record (never the address or the name), at most STRIPE_CONNECT_REPLACED_KEPT of them.
+    reset();
+    const owner = "connect-replaced@example.com";
+    const store = await extraStore(owner, "crepfirst", "crepextra");
+    const old = await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: owner, name: "Replaced" }, Date.now() - (STRIPE_CONNECT_REUSE_SECONDS + 60) * 1000);
+    const oldId = old && "id" in old ? old.id : "none";
+    const fresh = await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: owner, name: "Replaced" });
+    const kept = (await storeForId(store.sid))?.stripeConnectReplaced ?? [];
+    is("a press past the 29 days writes a new attempt", fresh && "id" in fresh && fresh.id !== oldId, true);
+    is("and the old attempt's id and country stay on the record", kept.map((r) => [r.id, r.country]), [[oldId, "us"]]);
+    is("without the creator's address or name", JSON.stringify(kept).includes(owner) || JSON.stringify(kept).includes("Replaced"), false);
+
+    const other = await extraStore("connect-replaced-other@example.com", "crepofirst", "crepoextra");
+    const ca = await beginStripeConnect(storeRef(other), other.sid, { country: "ca", email: "connect-replaced-other@example.com", name: "Other" }, Date.now() - (STRIPE_CONNECT_HOLD_SECONDS + 60) * 1000);
+    await beginStripeConnect(storeRef(other), other.sid, { country: "us", email: "connect-replaced-other@example.com", name: "Other" });
+    is("another country a day after the last press: the replaced one is kept", ((await storeForId(other.sid))?.stripeConnectReplaced ?? []).map((r) => [r.id, r.country]), [[ca && "id" in ca ? ca.id : "none", "ca"]]);
+
+    const lapsed = await extraStore("connect-replaced-lapsed@example.com", "creplfirst", "creplextra");
+    const gone = await beginStripeConnect(storeRef(lapsed), lapsed.sid, { country: "us", email: "connect-replaced-lapsed@example.com", name: "Lapsed" }, Date.now() - (STRIPE_CONNECT_REUSE_SECONDS + 60) * 1000);
+    await setCommunity(storeRef(lapsed), true);
+    const after = await storeForId(lapsed.sid);
+    is("a lapsed attempt dropped by any later save leaves its id, not its address", [after?.stripeConnecting ?? null, (after?.stripeConnectReplaced ?? []).map((r) => r.id), JSON.stringify(after?.stripeConnectReplaced ?? []).includes("connect-replaced-lapsed@")], [null, [gone && "id" in gone ? gone.id : "none"], false]);
+
+    const many = await extraStore("connect-replaced-many@example.com", "crepmfirst", "crepmextra");
+    for (let i = 0; i < STRIPE_CONNECT_REPLACED_KEPT + 2; i += 1) {
+      await beginStripeConnect(storeRef(many), many.sid, { country: "us", email: "connect-replaced-many@example.com", name: "Many" }, Date.now() - (STRIPE_CONNECT_REUSE_SECONDS + 60 + (STRIPE_CONNECT_REPLACED_KEPT + 2 - i) * 60) * 1000);
+    }
+    is(`at most ${STRIPE_CONNECT_REPLACED_KEPT} kept, the newest`, ((await storeForId(many.sid))?.stripeConnectReplaced ?? []).length, STRIPE_CONNECT_REPLACED_KEPT);
   }
 
   part("A cross-border refusal closes the attempt even after an earlier send (coordinator's df44 on #5095, optional)");

@@ -51,7 +51,7 @@ export const PLAN_WITHDRAW_WORDS = {
     ending: { tone: "success", title: "Your withdrawal was received and your refund is on its way", body: "We end your plan once the refund goes through and email you then." },
     // Said in every case that reaches support, a payment Stripe could not read among them, where nothing may be owed:
     // none promises a refund; each says support checks the payment and any refund owed (Claude 5's LEVE B on #2849).
-    handled: { tone: "success", title: "Your withdrawal was received", body: "We could not finish it at once, so our support team checks your payment and any refund owed to you, ends your plan, and writes to you." },
+    handled: { tone: "success", title: "Your withdrawal was received", body: "We could not finish it at once. Our support team checks your payment and any refund owed to you. They end your plan and write to you." },
     pending: { tone: "warn", title: "Your withdrawal was received, but it is not with our team yet", body: "We could not finish it at once, and we could not pass it to our support team just now. Confirm again in a few minutes to try again." },
     unreached: { tone: "warn", title: "Your withdrawal was received, but we could not pass it on", body: `Your withdrawal is recorded with its date and time. We could not finish it at once or reach our support team. Email ${SUPPORT} with your subscription ID, and they check your payment and any refund owed to you.` },
     resent: { tone: "success", title: "Your receipt was sent", body: "It shows what you sent and the date and time of your first withdrawal." },

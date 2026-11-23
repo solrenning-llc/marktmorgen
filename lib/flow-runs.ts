@@ -146,6 +146,7 @@ export const RUN_RECORD_FIELDS: Readonly<Record<string, number>> = {
   offLooks: 2,
   retries: 2,
   waitAt: 2 + 1 + 10, // "step:second"
+  offAt: 2 + 1 + 10, // "step:second", this step's first look while its store was switched off (#5285 row #3428)
   sesParks: 2,
   sesAt: 2 + 1 + 10, // "step:second"
 };
@@ -368,7 +369,9 @@ export async function claimAttempts(
  * and reads the whole waits with it; otherwise a whole wait, read with the
  * looks. Null for anyone whose count could not be read, the other field
  * included (rule 24: only a missing field is none): an unknown count is not
- * room for one more wait.
+ * room for one more wait. A switched-off look also says since when this step
+ * has been looked at switched off (`offSince`), so its early look counts from
+ * there, not from its first wait for another reason (#5285 row #3428).
  */
 export async function countWaits(
   flowId: string,
@@ -377,8 +380,8 @@ export async function countWaits(
   nowSeconds = Math.floor(Date.now() / 1000),
   switchedOff = false,
   gens?: Map<string, string>,
-): Promise<Map<string, { waits: number; offLooks: number; since: number } | null>> {
-  const out = new Map<string, { waits: number; offLooks: number; since: number } | null>();
+): Promise<Map<string, { waits: number; offLooks: number; since: number; offSince?: number } | null>> {
+  const out = new Map<string, { waits: number; offLooks: number; since: number; offSince?: number } | null>();
   if (!emails.length) return out;
   const [counted, other] = switchedOff ? ["offLooks", "waits"] : ["waits", "offLooks"];
   // One command a person: counted only while the run is there and is the run this step was taken for (its
@@ -386,15 +389,15 @@ export async function countWaits(
   const reply = await redisPipeline(emails.map((email) => ["EVAL", WAIT_IF_RUN, 1, runKey(flowId, personOf(email)), index, nowSeconds, gens?.get(email) ?? ANY_GEN, counted, other])).catch(() => null);
   emails.forEach((email, i) => {
     const one = Array.isArray(reply) && reply.length === emails.length ? reply[i] : null;
-    const [added, kept, since] = Array.isArray(one) && one.length === 3 ? one : [null, undefined, null];
+    const [added, kept, since, offSince] = Array.isArray(one) && one.length === 4 ? one : [null, undefined, null, null];
     // The other field: only a missing one is none (the script answers "" for it); anything else unreadable is unknown.
     const keptCount = kept === "" ? 0 : typeof kept === "string" && /^(0|[1-9]\d{0,15})$/.test(kept) ? Number(kept) : NaN;
     // A run that is gone or another run ({-1}) or a reply in another shape: unknown, never room for one more wait.
-    if (typeof added !== "number" || !Number.isSafeInteger(added) || added < 1 || !Number.isSafeInteger(keptCount) || typeof since !== "number" || !Number.isSafeInteger(since) || since < 1) {
+    if (typeof added !== "number" || !Number.isSafeInteger(added) || added < 1 || !Number.isSafeInteger(keptCount) || typeof since !== "number" || !Number.isSafeInteger(since) || since < 1 || typeof offSince !== "number" || !Number.isSafeInteger(offSince) || offSince < 0 || (switchedOff && offSince < 1)) {
       out.set(email, null);
       return;
     }
-    out.set(email, { waits: switchedOff ? keptCount : added, offLooks: switchedOff ? added : keptCount, since });
+    out.set(email, { waits: switchedOff ? keptCount : added, offLooks: switchedOff ? added : keptCount, since, ...(switchedOff ? { offSince } : {}) });
   });
   return out;
 }
@@ -402,21 +405,31 @@ export async function countWaits(
 /**
  * One more wait counted on one run, only while the run is there (KEYS: the run's record; ARGV: the step, now, the
  * run's generation or ANY_GEN, the field counted ("waits", or "offLooks" for a look while the store is switched off)
- * and the other field): {counted, other, since}, the other field's raw value ("" when it is missing) and the step's
- * clock, started now on its first wait; {-1} when the run is gone or is another run (another generation), so a wait
+ * and the other field): {counted, other, since, offSince}, the other field's raw value ("" when it is missing), the
+ * step's clock, started now on its first wait, and, for a look while the store is switched off, the second this step
+ * was first looked at so (offAt, started now on its first such look; 0 for a whole wait); {-1} when the run is gone or is another run (another generation), so a wait
  * counted after an erasure makes no record again (Defect 4083) and never counts on the run the person started again
  * (Codex L on #4234). Modelled by lib/redis-memory.ts.
  */
-export const WAIT_IF_RUN = `-- marktmorgen:flow-wait:v3
+export const WAIT_IF_RUN = `-- marktmorgen:flow-wait:v4
 if redis.call("EXISTS", KEYS[1]) == 0 then return {-1} end
 if ARGV[3] ~= "*" and (redis.call("HGET", KEYS[1], "gen") or "") ~= ARGV[3] then return {-1} end
 local counted = redis.call("HINCRBY", KEYS[1], ARGV[4], 1)
 local other = redis.call("HGET", KEYS[1], ARGV[5]) or ""
+local off = 0
+if ARGV[4] == "offLooks" then
+  local oat = redis.call("HGET", KEYS[1], "offAt") or ""
+  local ostep, osince = string.match(oat, "^(%-?%d+):(%d+)$")
+  if ostep == ARGV[1] and tonumber(osince) > 0 then off = tonumber(osince) else
+    redis.call("HSET", KEYS[1], "offAt", ARGV[1] .. ":" .. ARGV[2])
+    off = tonumber(ARGV[2])
+  end
+end
 local at = redis.call("HGET", KEYS[1], "waitAt") or ""
 local step, since = string.match(at, "^(%-?%d+):(%d+)$")
-if step == ARGV[1] and tonumber(since) > 0 then return {counted, other, tonumber(since)} end
+if step == ARGV[1] and tonumber(since) > 0 then return {counted, other, tonumber(since), off} end
 redis.call("HSET", KEYS[1], "waitAt", ARGV[1] .. ":" .. ARGV[2])
-return {counted, other, tonumber(ARGV[2])}`;
+return {counted, other, tonumber(ARGV[2]), off}`;
 
 /**
  * The creator's retries counted on one run, only while the run is there (KEYS: the run's record; ARGV: 1 or -1):

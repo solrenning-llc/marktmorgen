@@ -191,8 +191,9 @@ async function main(): Promise<void> {
     is("each SAVE runs exactly PAYREQ_FENCE_COMMANDS fence calls", (fenceLine.match(/redis\.call\(/g) ?? []).length, PAYREQ_FENCE_COMMANDS);
     is("a request made and emailed takes at most the two SAVEs priced for its studio unit", saves(seen).length <= 2 && saves(seen).length >= 1, true);
     is("a change takes the one SAVE priced for its unit", saves(change).length, 1);
-    const fenceBytes = (c: Command) => JSON.stringify([c[7], c[8], c[c.length - 1]]).length;
-    is("the fence's keys and field fit the 512 wire bytes priced a SAVE", [...saves(seen), ...saves(change)].every((c) => fenceBytes(c) <= 512), true);
+    // The fence's two keys (KEYS[5], KEYS[6]) and its two arguments, the erasing field and the store's ref (the last two).
+    const fenceBytes = (c: Command) => JSON.stringify([c[7], c[8], c[c.length - 2], c[c.length - 1]]).length;
+    is("the fence's keys, field and ref fit the 512 wire bytes priced a SAVE", [...saves(seen), ...saves(change)].every((c) => fenceBytes(c) <= 512), true);
     console.log("PAYMENT_REQUEST_ROUTE", JSON.stringify({ making, makingBytes, oneChange, changeBytes, savesMaking: saves(seen).length, orderCompute: ORDER_COMPUTE, note: "row 141 measures the whole request against ORDER_COMPUTE" }));
     void COMMAND;
     void DB_BYTE;

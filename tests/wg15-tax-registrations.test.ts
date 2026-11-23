@@ -17,6 +17,7 @@ import {
   taxLocationsPage,
 } from "@/lib/tax-registrations";
 import { STRIPE_VERSION } from "@/lib/stripe-connect";
+import { ERASING_KEY, type Store, claimHandle, ensureStatsId, erasingField, setStripeAccount, storeForEmail, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -42,9 +43,19 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return new Response(JSON.stringify(body), { status: 200 });
 }) as typeof fetch;
 
-const store = { stripeAccountId: ACCOUNT };
+// A real store with the account connected: the kept copy is written through the store's fence (Codex L-20261119-1643),
+// which reads the store's own records, so a bare { stripeAccountId } would never be live.
+const OWNER = "tax-regs@example.com";
+let store: Store;
+async function liveStore(): Promise<void> {
+  if (!(await claimHandle(OWNER, "taxregsshop", "Tax Regs", "")).ok) throw new Error("no store");
+  await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, ACCOUNT, true);
+  store = (await storeForEmail(OWNER))!;
+}
 async function fresh(list: unknown[]) {
   redis.clear();
+  await liveStore();
   pages = list;
   asked = [];
   versions = [];
@@ -104,18 +115,43 @@ async function main(): Promise<void> {
 
   part("A kept copy that does not read back whole is not used");
   redis.clear();
+  await liveStore();
   redis.run(["SET", `nl:taxreg:${ACCOUNT}`, '[{"id":"nope"}]']);
   pages = [{ object: "list", data: [reg("taxreg_J1")], has_more: false }];
   asked = [];
   const healed = await readTaxRegistrations(store);
   is("Stripe asked again, and the answer used", [asked.length, healed.state === "ok" ? healed.list[0]?.id : healed.state], [1, "taxreg_J1"]);
 
+  part("A store erasing while Stripe is read gets nothing kept and nothing shown (Codex L-20261119-1643)");
+  redis.clear();
+  await liveStore();
+  const field = await erasingField(storeRef(store));
+  pages = [{ object: "list", data: [reg("taxreg_K1")], has_more: false }];
+  asked = [];
+  // The store's erasure begins while the registrations are being read from Stripe.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    redis.run(["HSET", ERASING_KEY, field, String(Date.now())]);
+    return realFetch(input, init);
+  }) as typeof fetch;
+  let erased;
+  try {
+    erased = await readTaxRegistrations(store);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  is("the late read is unknown, not a list shown for an erased store", [erased.state, asked.length], ["unknown", 1]);
+  is("and nothing is written back under the account", Number(redis.run(["EXISTS", `nl:taxreg:${ACCOUNT}`])), 0);
+  redis.run(["HDEL", ERASING_KEY, field]);
+  const live = await readTaxRegistrations(store);
+  is("control: the same read for a live store is kept and shown", [live.state, Number(redis.run(["EXISTS", `nl:taxreg:${ACCOUNT}`]))], ["ok", 1]);
+
   part("The read names its Stripe version (Claude 4 on #2735)");
   await fresh([{ object: "list", data: [reg("taxreg_V1")], has_more: false }]);
   is("every read sends the pinned Stripe-Version", versions.length > 0 && versions.every((v) => v === STRIPE_VERSION), true);
 
   part("No Stripe account connected");
-  is("said as none", (await readTaxRegistrations({ stripeAccountId: null })).state, "none");
+  is("said as none", (await readTaxRegistrations({ ...store, stripeAccountId: null })).state, "none");
 
   part("Places in words, never a bare code");
   is("a state, a province, a country", [placeOf({ country: "US", region: "CA" }), placeOf({ country: "CA", region: "BC" }), placeOf({ country: "DE", region: null })], ["California, United States", "British Columbia, Canada", "Germany"]);

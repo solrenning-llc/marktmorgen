@@ -84,6 +84,7 @@ test("the composer sends the label everywhere the audience goes, and shows it", 
   assert.ok(studio.includes("Only people with the label \u201c${audience.label}\u201d."), "the summary");
   assert.ok(studio.includes('<span className="field-label">Only people with the label (optional)</span>'));
   const route = readFileSync("app/api/store/mail/route.ts", "utf8").replace(/\s+/g, " ");
-  assert.ok(route.includes("label: text(body.label, 80),"), "the send reads it");
+  // The send passes it as it came, so createBroadcast refuses a wrong type instead of reading it as none (Codex L on #3925).
+  assert.ok(route.includes("label: body.label,"), "the send reads it");
   assert.ok(route.includes("const label = readTags([text(body.label, 80)])[0] || undefined;"), "the count reads it");
 });

@@ -33,6 +33,17 @@
       ]
     },
     {
+      "source": "app/[handle]/back-in-stock/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/back-in-stock",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/blog/[post]/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/blog/[post]",
@@ -810,6 +821,32 @@
       "parameters": []
     },
     {
+      "source": "app/help/[section]/[answer]/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/help/[section]/[answer]",
+      "parameters": [
+        {
+          "name": "section",
+          "kind": "segment"
+        },
+        {
+          "name": "answer",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
+      "source": "app/help/[section]/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/help/[section]",
+      "parameters": [
+        {
+          "name": "section",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/help/buyers/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/help/buyers",
@@ -1212,6 +1249,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/learning-paths/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/learning-paths",
+      "parameters": []
+    },
+    {
       "source": "app/studio/meetings/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/meetings",
@@ -1556,7 +1599,9 @@
     "components/group-link-box.tsx",
     "components/handle-form.tsx",
     "components/heard-ask.tsx",
+    "components/help-answer-tools.tsx",
     "components/help-search.tsx",
+    "components/help-topics.tsx",
     "components/home-claim.tsx",
     "components/home-examples.tsx",
     "components/home-interactive.tsx",
@@ -1574,6 +1619,7 @@
     "components/join-box-editor.tsx",
     "components/kept-by-currency.tsx",
     "components/kit-editor.tsx",
+    "components/learning-paths-editor.tsx",
     "components/leave-editor.tsx",
     "components/legal-page.tsx",
     "components/lesson-comments.tsx",
@@ -1591,6 +1637,7 @@
     "components/link-editor.tsx",
     "components/link-picture.tsx",
     "components/link-request-form.tsx",
+    "components/list-health-table.tsx",
     "components/local-clock.tsx",
     "components/local-day.tsx",
     "components/logo.tsx",
@@ -1725,6 +1772,7 @@
     "components/said-line.tsx",
     "components/sale-editor.tsx",
     "components/sales-blocks.tsx",
+    "components/sales-bulk-actions.tsx",
     "components/sales-goal-card.tsx",
     "components/sales-levers.tsx",
     "components/save-offer-editor.tsx",
@@ -2066,6 +2114,7 @@
     "app/api/store/kit/route.ts",
     "app/api/store/language/route.ts",
     "app/api/store/leads/route.ts",
+    "app/api/store/learning-paths/route.ts",
     "app/api/store/leaving/route.ts",
     "app/api/store/letters/link/route.ts",
     "app/api/store/letters/open/route.ts",
@@ -2151,6 +2200,7 @@
     "app/api/store/review/route.ts",
     "app/api/store/reviews/route.ts",
     "app/api/store/sale/route.ts",
+    "app/api/store/sales-bulk/route.ts",
     "app/api/store/sales-filters/route.ts",
     "app/api/store/save-offer/route.ts",
     "app/api/store/saved-blocks/route.ts",
@@ -2166,6 +2216,9 @@
     "app/api/store/stamp/route.ts",
     "app/api/store/stats/range/route.ts",
     "app/api/store/stats/route.ts",
+    "app/api/store/stock-alert/confirm/route.ts",
+    "app/api/store/stock-alert/leave/route.ts",
+    "app/api/store/stock-alert/route.ts",
     "app/api/store/store-copy/route.ts",
     "app/api/store/stores/route.ts",
     "app/api/store/stream/captions/route.ts",
@@ -2305,6 +2358,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 158
+    "pageTemplates": 162
   }
 }

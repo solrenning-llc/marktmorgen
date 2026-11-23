@@ -739,16 +739,26 @@ function conversionOf(store: Store, session: AdsSession, customer: Conversion["c
     kind: "purchase",
     id: adEventId(session.id as string),
     at: typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000),
-    cents: typeof session.amount_total === "number" ? session.amount_total : 0,
-    currency: typeof session.currency === "string" ? session.currency : store.currency,
+    // Read by ordinary (moneyReads) before any mark is taken: never 0 or the store's currency in their place.
+    cents: session.amount_total as number,
+    currency: session.currency as string,
     products: productsOf(meta),
     email: emailOf(session),
     customer,
   };
 }
 
+/**
+ * An amount and currency as Stripe writes them (#3952, rule 24): a whole, safe number of the currency's smallest unit
+ * from 0, and three lowercase letters. Anything else is not read as 0 or as the store's currency: the order or the
+ * renewal is not sent, and takes no mark, so it is sent once it reads.
+ */
+const moneyReads = (cents: unknown, currency: unknown): boolean =>
+  Number.isSafeInteger(cents) && (cents as number) >= 0 && typeof currency === "string" && /^[a-z]{3}$/.test(currency);
+
 const ordinary = (store: Store, s: AdsSession) =>
-  s.status === "complete" && s.payment_status === "paid" && saleHandles(store).has(s.metadata?.store ?? "") && s.metadata?.kind !== "tip";
+  s.status === "complete" && s.payment_status === "paid" && saleHandles(store).has(s.metadata?.store ?? "") && s.metadata?.kind !== "tip" &&
+  moneyReads(s.amount_total, s.currency);
 
 /**
  * Keeps what a membership's renewals are sent with: the cookies and clicks,
@@ -984,7 +994,7 @@ async function sendRenewalRows(store: Store, statsId: string, listedRows: Invoic
   const rows = listedRows.filter((row) => {
     if (typeof row.id !== "string" || row.billing_reason !== "subscription_cycle" || row.status !== "paid") return false;
     const meta = row.parent?.subscription_details?.metadata ?? row.subscription_details?.metadata ?? {};
-    return Boolean(meta.ads) && handles.has(meta.store ?? "") && typeof row.amount_paid === "number" && row.amount_paid > 0;
+    return Boolean(meta.ads) && handles.has(meta.store ?? "") && moneyReads(row.amount_paid, row.currency) && (row.amount_paid as number) > 0;
   });
   if (!rows.length) return 0;
   const subOf = (row: InvoiceRow) => {
@@ -1055,7 +1065,8 @@ async function sendRenewalRows(store: Store, statsId: string, listedRows: Invoic
       id: adEventId(row.id as string),
       at: paidAt,
       cents: row.amount_paid as number,
-      currency: typeof row.currency === "string" ? row.currency : store.currency,
+      // Read by the filter above (moneyReads) before the mark: never the store's currency in its place.
+      currency: row.currency as string,
       products: productsOf(meta),
       email: typeof row.customer_email === "string" ? row.customer_email : null,
       customer: "returning",

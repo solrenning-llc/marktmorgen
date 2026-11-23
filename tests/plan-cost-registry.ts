@@ -86,6 +86,7 @@ import { protocolInfrastructureMicroUsd } from "@/lib/spend-cost-table";
 import { PAID_UPLOAD_OPENS, uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
 import { BLOB_MEASURES_PER_DAY } from "@/lib/blob-tally";
 import { DAILY_RUNS_BY_TIER, SES_WAKE_JOB_COMMANDS, SES_WAKE_JOBS_PER_DAY, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
+import { REFUND_HISTORY_PAGE_BYTES, REFUND_HISTORY_READ_MS, REFUND_HISTORY_READS } from "@/lib/buyer-history";
 import { BLOCK_CHECK_COMMANDS, BLOCK_ENTRY_BYTES } from "@/lib/buyer-block";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
 import { BATCH_BYTES, HELD_UPLOAD_SWEEP_COMMANDS, IMPORT_END_EXTRA_COMMANDS, JOB_WRITE_IF_EXTRA_COMMANDS, MAX_REPORT_ROWS, MOVED_EMAIL_EXTRA_COMMANDS, MOVE_HELD_PASSES, MOVE_HELD_PASS_COMMANDS, PAUSED_IMPORT_CHECKS, PAUSED_IMPORT_CHECKS_MONTH, PAUSED_IMPORT_PASSES, PAUSED_IMPORT_PASSES_MONTH, PAUSED_IMPORT_PASS_BYTES, PAUSED_IMPORT_PASS_COMMANDS, PAUSED_IMPORT_SKIP_BYTES, PAUSED_IMPORT_SKIP_COMMANDS } from "@/lib/imports";
@@ -1409,6 +1410,15 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // each try carries at most its own line's read back.
   webhook: request("wait", 20 + TAKE_COMMANDS + WEBHOOK_ERASED_READ_COMMANDS + DELIVERY_READ_BACK.commands, 40_000 + DELIVERY_READ_BACK.bytes),
 };
+/**
+ * One refund-history check at its worst (lib/buyer-history.ts; Claude 7's MEDIUM on #3841): the inbox route's own
+ * studio request, and REFUND_HISTORY_READS listings of the creator's checkouts, each waited on for
+ * REFUND_HISTORY_READ_MS at 2 GB and an expanded page of REFUND_HISTORY_PAGE_BYTES worked through (lib/buyer-history.ts,
+ * the most onAccount reads of one listing; Codex X6 on #3841). The route takes
+ * REFUND_HISTORY_UNITS studio requests more before Stripe is asked; tests/buyer-history-cost.test.ts holds that they
+ * cover it. The creator's Stripe account bills none of the reads.
+ */
+export const REFUND_HISTORY_READ = UNIT_COST.studio + REFUND_HISTORY_READS * ((REFUND_HISTORY_READ_MS / 1000) * MEMORY_SECOND + perMegabyte(REFUND_HISTORY_PAGE_BYTES));
 
 /**
  * The most times takeLock (lib/redis-lock.ts) tries a lock's SET NX while it waits `waitMs` for another holder: it
@@ -3132,6 +3142,10 @@ export const COST_LINES: CostLine[] = [
       // try left it live (each run at most two calls to the creator's Stripe account, which bills none, and a few commands),
       // and one for each try of the email that it failed (unit 2: a few commands; the email itself from the store's email figure, EMAIL_SITES).
       { file: "app/api/store/discount/route.ts", names: ["countStudio(store, null, SCHEDULE_UNITS)"] },
+      // A creator's look at a buyer's past refunds and disputes in the store (567 [GD1] (f), unit 3): at most REFUND_HISTORY_PER_DAY a store a day, each
+      // taking REFUND_HISTORY_UNITS more studio requests, which cover its reads at their worst (REFUND_HISTORY_READ; the creator's Stripe account bills none), before Stripe is asked.
+      { file: "app/api/store/inbox/route.ts", names: ["countStudio(store, null, REFUND_HISTORY_UNITS)", "withinLimit(\"refund-history\""] },
+      { file: "lib/buyer-history.ts", names: ["REFUND_HISTORY_UNITS", "REFUND_HISTORY_PER_DAY", "REFUND_HISTORY_LIST"] },
       { file: "lib/discount-schedule-rules.ts", names: ["SCHEDULE_UNITS = ACTIVATION_TRIES + STOP_TRIES + NOTICE_TRIES", "STOP_TRIES = 3", "NOTICE_TRIES = 3", "MAX_SCHEDULED_CODES", "NOTICE_RETRY_SECONDS"] },
       // The terminal notice handoff is six commands including EVAL and its five calls. Failed enqueue work
       // spends the same NOTICE_TRIES counter before ZADD can fail; successful handoff restores that reservation
@@ -4269,7 +4283,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "lesson-comment": BURST("buyer-actions"), "lesson-comment-day": BURST("buyer-actions"), "task-hand-in": BURST("buyer-actions"), "submission-open": BURST("buyer-actions"), "lesson-note": BURST("buyer-actions"), "task-upload": BURST("buyer-actions"),
   // Per store, under a figure of the window.
   "api-add": BURST("rest-api"), "api-give": BURST("rest-api"),
-  "picture-door": BURST("studio"),
+  "picture-door": BURST("studio"), "refund-history": BURST("studio"),
   "inbox-new": BURST("inbox"), "chat-send": BURST("inbox"), "chat-start": BURST("inbox"),
   // A buyer's report of a problem with an order (567 [GD1] (a), app/api/store/order-problem): at most ORDER_PROBLEM_PER_DAY a buyer a store, each one inbox message from the store's figure (lib/inbox.ts, open) and its notice from the store's email figure (tellTeam).
   // Its own commands beyond the message (the per-buyer counter, the order's mark, the room: ORDER_PROBLEM_COMMANDS in

@@ -110,7 +110,7 @@ test("the route, counted as Upstash bills it, stays inside the studio unit it ta
   const plainPipeline = redis.pipeline;
   (redis as { run: typeof plainRun }).run = (command) => { billed += 1; return plainRun(command); };
   redis.pipeline = (async (batch: Batch) => {
-    if (batch[0]?.[0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:weekly-team-live:v1")) {
+    if (batch[0]?.[0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:weekly-team-live:v2")) {
       const held = billed;
       atWrite = await allowanceUsed((await storeForEmail(OWNER))!, "studio");
       billed = held;

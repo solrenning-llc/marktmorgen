@@ -107,7 +107,7 @@ const SCRIPTS: Record<string, Script> = {
   },
   // lib/stats-report.ts WEEKLY_TEAM_SET_IF_LIVE (mirrored in lib/redis-memory-take.ts): who gets the weekly email, replaced only while the store is live (the
   // identity rule of store-cache-live:v3); 1 kept, 0 gone or erasing, -1 unreadable.
-  "weekly-team-live:v1": (run, [live, erasing, team], [field, statsId, ref, ...emails]) => {
+  "weekly-team-live:v2": (run, [live, erasing, team, handle], [field, statsId, ref, ...emails]) => {
     if (run(["HGET", erasing, field]) !== null) return 0;
     if (statsId === "") {
       if (run(["GET", live]) !== ref) return 0;
@@ -123,6 +123,7 @@ const SCRIPTS: Record<string, Script> = {
       if (!record || typeof record !== "object") return -1;
       if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
     }
+    if (run(["GET", handle]) !== ref) return 0;
     run(["DEL", team]);
     if (emails.length) run(["SADD", team, ...emails]);
     return 1;

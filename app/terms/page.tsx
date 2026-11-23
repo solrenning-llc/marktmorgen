@@ -553,7 +553,9 @@ export default function TermsPage() {
           minute of the video, the minutes rounded up, for each language
           asked, and never less than {dollars(MIN_CENTS)} for one request. The
           price is shown before you confirm and is charged at once to the card
-          your plan is paid with, on an invoice of its own. What was paid for a
+          your plan is paid with, on an invoice of its own. If our video
+          provider refuses the request when it is made, what was paid is
+          refunded at once. What was paid for a
           language whose captions are not delivered is refunded automatically
           once our video provider confirms what it delivered, no sooner than{" "}
           {GIVE_UP_HOURS} hours after the order. If our video provider does not

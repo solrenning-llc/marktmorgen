@@ -327,8 +327,10 @@ try {
     try {
       let ids = idsOf.get(key);
       if (!ids) {
-        const { status } = await answer(kind, key);
-        if (status >= 400) continue; // the link itself is reported above
+        // No body under 400 is an address that leads off the site or loops (answer() follows at most 5): there is no page
+        // of this site to read places on, and the link itself is reported above (Claude 4 3Rj's NIT on #4094 @a152892c40).
+        const { status, body } = await answer(kind, key);
+        if (status >= 400 || !body) continue;
         // The page is opened in the browser, as the visited ones are, so a place drawn on the client counts and an input's
         // name never passes for one: only [id] and a[name] (review of #4094, Claude 6 UoHAG's NIT and the coordinator's).
         const page = await contexts[kind].newPage();

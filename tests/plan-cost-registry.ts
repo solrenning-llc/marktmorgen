@@ -3286,17 +3286,17 @@ export const COST_LINES: CostLine[] = [
   },
   {
     id: "sales-files",
-    feature: "Downloading the store's sales as a file: up to SALES_FILES_PER_MONTH a month for its owner and as many for its team, a count of its own (#5010 row 150)",
-    // Every file the month allows, the owner's and the team's, each at its most.
+    feature: "Downloading the store's sales as a file: up to SALES_FILES_PER_MONTH a month, the store's one count shared by its owner and team (#5010 row 150; OWNER-20261123-1205-COST-HOLDS)",
+    // Every file the month allows, the store's one count, each at its most.
     monthlyUsd: () => SALES_FILES_A_MONTH * SALES_FILE_COST + SALES_FILES_UNREAD_TRIES * SALES_FILE_UNREAD_COST,
     sources: [
       { file: "lib/studio-allowance-rules.ts", names: ["SALES_FILES_PER_MONTH"] },
-      { file: "lib/sales-files.ts", names: ["takeSalesFile", "count > SALES_FILES_PER_MONTH", "\"sales\" : \"sales-team\"", "refreshPeriod(store, now)", "tries > SALES_FILES_UNREAD_TRIES"] },
+      { file: "lib/sales-files.ts", names: ["takeSalesFile", "count > SALES_FILES_PER_MONTH", ":sales:${window.id}", "refreshPeriod(store, now)", "tries > SALES_FILES_UNREAD_TRIES"] },
       { file: "lib/studio-allowance-rules.ts", names: ["SALES_FILES_UNREAD_TRIES: number = 3"] },
       { file: "app/api/store/export/route.ts", names: ["takeSalesFile(sales, creator.role === \"owner\")", "stripeFirst: true"] },
       { file: "lib/stats.ts", names: ["EXPORT_PAGES", "salesCsv", "SALES_FILE_MAX_BYTES"] },
     ],
-    basis: "A sales file reads every sale again (lib/stats.ts salesCsv): up to EXPORT_PAGES pages of each of the creator's two Stripe lists, side by side, each page waited on at a whole export's EXPORT_PAGE_SECONDS, and up to EXPORT_PAGES hundred PayPal sales, each record at MAX_PAID_BYTES (SALES_FILE_COST, at exportCost). Before, it took one of the store's ESSENTIAL_PER_DAY requests a day, priced as a heavy request, which a whole file can cost many times over: at ten a day it could cost more than a Store plan carries. It now takes one of SALES_FILES_PER_MONTH files a month (or a trial) for the store's owner, or one of as many more for its team between them (SALES_FILES_A_MONTH in all), counted on its own before anything is read (lib/sales-files.ts) and never from a figure; a count refused is given back at once, and a file whose sales were read keeps its place even if it fails, so a failing account never reads them again for nothing. Stripe's pages are read before the PayPal records; a try that failed before Stripe's first page answered gives its place back, up to SALES_FILES_UNREAD_TRIES a window, each at most a waiting request and one Stripe page waited on (SALES_FILE_UNREAD_COST). What it sends is at most SALES_FILE_MAX_BYTES, past which the oldest sales are left out and the file is partial, at Fast Origin Transfer. A store that pays nothing may hold a trial's window and the month after it ends in the same billing month: twice the count (nonPayingWorst, #5267 audit 729c 14).",
+    basis: "A sales file reads every sale again (lib/stats.ts salesCsv): up to EXPORT_PAGES pages of each of the creator's two Stripe lists, side by side, each page waited on at a whole export's EXPORT_PAGE_SECONDS, and up to EXPORT_PAGES hundred PayPal sales, each record at MAX_PAID_BYTES (SALES_FILE_COST, at exportCost). Before, it took one of the store's ESSENTIAL_PER_DAY requests a day, priced as a heavy request, which a whole file can cost many times over: at ten a day it could cost more than a Store plan carries. It now takes one of SALES_FILES_PER_MONTH files a month (or a trial), the store's one count shared by its owner and team (SALES_FILES_A_MONTH; OWNER-20261123-1205-COST-HOLDS), counted on its own before anything is read (lib/sales-files.ts) and never from a figure; a count refused is given back at once, and a file whose sales were read keeps its place even if it fails, so a failing account never reads them again for nothing. Stripe's pages are read before the PayPal records; a try that failed before Stripe's first page answered gives its place back, up to SALES_FILES_UNREAD_TRIES a window, each at most a waiting request and one Stripe page waited on (SALES_FILE_UNREAD_COST). What it sends is at most SALES_FILE_MAX_BYTES, past which the oldest sales are left out and the file is partial, at Fast Origin Transfer. A store that pays nothing may hold a trial's window and the month after it ends in the same billing month: twice the count (nonPayingWorst, #5267 audit 729c 14).",
   },
   {
     id: "rest-api",
@@ -3756,8 +3756,8 @@ export function exportCost(bytes: number, commands = exportCommands(bytes)): num
  * salesCsv), at Fast Origin Transfer.
  */
 export const SALES_FILE_COST = exportCost(EXPORT_PAGES * 100 * MAX_PAID_BYTES, 40) + SALES_FILE_MAX_BYTES * ORIGIN_PER_BYTE;
-/** The sales files a month at the most: the owner's SALES_FILES_PER_MONTH and as many for the team (lib/sales-files.ts). */
-export const SALES_FILES_A_MONTH = 2 * SALES_FILES_PER_MONTH;
+/** The sales files a month at the most: the store's SALES_FILES_PER_MONTH, shared by its owner and team (lib/sales-files.ts; OWNER-20261123-1205-COST-HOLDS). */
+export const SALES_FILES_A_MONTH = SALES_FILES_PER_MONTH;
 /**
  * A sales file that failed before anything was read gives its place back (lib/sales-files.ts, #5267 focal 3634, 4), up
  * to SALES_FILES_UNREAD_TRIES a window: each is at most a waiting request and one Stripe page waited on, with no

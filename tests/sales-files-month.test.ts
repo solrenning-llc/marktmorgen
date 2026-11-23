@@ -111,6 +111,8 @@ async function main(): Promise<void> {
 
   part("The count is the store's: its owner and its team share it (the owner's decision, OWNER-20261123-1205-COST-HOLDS)");
   await fresh();
+  // A new month for this part: the files the owner used above are cleared.
+  await redis.pipeline(redis.keys().filter((key) => key.startsWith(`nl:rl:export:${store.statsId}:sales:`)).map((key) => ["DEL", key]));
   const shared: number[] = [];
   for (let i = 1; i < SALES_FILES_PER_MONTH; i += 1) shared.push((await get(owner)).status);
   shared.push((await get(admin)).status);

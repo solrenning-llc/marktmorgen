@@ -49,7 +49,7 @@ export const HELP_DATES: Readonly<Record<string, HelpDates>> = {
   "how-many-visits-does-my-plan-cover": { created: "2026-10-07", updated: "2026-11-16", digest: "1fa59d67e21e" },
   "what-if-i-sell-a-very-large-number-of-things": { created: "2026-10-13", updated: "2026-11-02", digest: "ea768336b3cf" },
   "when-do-my-plans-monthly-figures-start-again": { created: "2026-10-17", updated: "2026-11-09", digest: "c112d97ccdf2" },
-  "what-else-does-my-plan-cover-each-month": { created: "2026-10-17", updated: "2026-11-23", digest: "2edde2bd2a8c" },
+  "what-else-does-my-plan-cover-each-month": { created: "2026-10-17", updated: "2026-11-23", digest: "7a80a813ca19" },
   "how-much-can-my-store-hold": { created: "2026-10-07", updated: "2026-11-09", digest: "4a9c139efd68" },
   "what-happens-when-my-plan-ends": { created: "2026-10-17", updated: "2026-11-05", digest: "a2b62e19232b" },
   "how-do-i-refund-members-for-unused-time-when-my-store-closes": { created: "2026-11-12", updated: "2026-11-12", digest: "14702c6eae30" },

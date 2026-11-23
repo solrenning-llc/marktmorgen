@@ -37,4 +37,4 @@ export const SALES_FILES_PER_MONTH: number = 3;
 export const SALES_FILES_UNREAD_TRIES: number = 3;
 
 /** What the sales files hold, said before the click and on every page that promises them (#5267 audit, ea4f 5, 6, 10). */
-export const SALES_FILES_WORDS = `The store's owner can download up to ${SALES_FILES_PER_MONTH} sales files a month (or in a trial), and the team up to ${SALES_FILES_PER_MONTH} more between them. A try counts once your sales are read. They never use up your monthly figures.`;
+export const SALES_FILES_WORDS = `Your store can download up to ${SALES_FILES_PER_MONTH} sales files a month (or in a trial), shared by its owner and team. A try counts once your sales are read. They never use up your monthly figures.`;

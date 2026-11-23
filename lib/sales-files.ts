@@ -7,8 +7,9 @@
  * lib/allowance-window.ts), never taken from the studio's requests or any other figure, so downloading one's sales
  * still never depends on what the rest of the month used.
  *
- * The store's owner has SALES_FILES_PER_MONTH of their own, and the team (an Admin with "export") as many more between
- * them, so a teammate never uses up the owner's (#5267 audit, coordinator ea4f 8). A count taken and refused is given
+ * The count is the store's, shared by its owner and its team (an Admin with "export"): the owner's decision on #5267,
+ * OWNER-20261123-1205-COST-HOLDS ("A contagem é da loja; os membros da equipe usam a mesma"), which replaces the
+ * team's count of its own of the audit (coordinator ea4f 8). A count taken and refused is given
  * back at once (ea4f 7). Stripe's pages are read before the PayPal records, the dearer part; once Stripe's first page
  * has answered, the place is spent even if the file fails, since reading was done (ea4f 9, 729c 11). A failure before
  * that gives it back, up to SALES_FILES_UNREAD_TRIES a window (focal 3634, 4).
@@ -40,10 +41,10 @@ export function salesFilesSpan(store: Store, now = Date.now()): string {
   return standingOf(store, now / 1000) === "trial" ? "in this trial" : "this month";
 }
 
-/** The words for a window whose sales files are used: how many, whose, and when they open again. */
+/** The words for a window whose sales files are used: how many, said to the owner or to a teammate, and when they open again. */
 export function salesFilesUsedWords(store: Store, owner: boolean, now = Date.now()): string {
   const files = SALES_FILES_PER_MONTH === 1 ? "the 1 sales file" : `all ${SALES_FILES_PER_MONTH} sales files`;
-  const whose = owner ? "You have used" : "Your team has used";
+  const whose = owner ? "You have used" : "Your store has used";
   return `${whose} ${files} ${salesFilesSpan(store, now)}. A try counts once your sales were read, even if the file could not be made. They never use up your monthly figures. ${resetWords(store, now)}`;
 }
 
@@ -57,7 +58,8 @@ export function salesFileFailedWords(store: Store, counted: boolean, left: numbe
 }
 
 /**
- * Takes one of the window's sales files before anything is read, from the owner's own or the team's. "ok" with the
+ * Takes one of the window's sales files before anything is read, from the store's one count, the owner's and the team's
+ * alike. "ok" with the
  * store as read again for its billing month, how many are left after it, and `unread`, which gives the place back
  * when nothing was read (up to SALES_FILES_UNREAD_TRIES a window); otherwise the answer to send (503 when the count or
  * the month is not known, 429 when the files are used).
@@ -73,7 +75,7 @@ export async function takeSalesFile(
   const current = await refreshPeriod(store, now);
   const window = allowanceWindow(current, now);
   if (!window) return { ok: false, status: 503, message: resetWords(current, now) };
-  const key = `nl:rl:export:${store.statsId}:${owner ? "sales" : "sales-team"}:${window.id}`;
+  const key = `nl:rl:export:${store.statsId}:sales:${window.id}`;
   let count: number | null = null;
   try {
     count = windowCountOf(await redisPipeline(windowCount(key, windowKeySeconds(current, 86_400, now))));

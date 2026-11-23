@@ -185,6 +185,7 @@ export async function finishConnect(request: NextRequest, provider: MeetProvider
       verifier: taken.verifier,
       by: email,
       owner: { email: store.email, handle: store.handle },
+      sid: store.sid,
       startedAt: taken.at,
     });
     if (!result.ok) return back(`meet=${result.error}&p=${provider}`);

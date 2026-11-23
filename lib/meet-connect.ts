@@ -239,12 +239,44 @@ async function leftOnAccount(
 }
 
 /**
- * Gives a connection's grant back only when nothing else here uses its account (grantStillUsed). `removed` is true only
- * when the provider confirmed it; `shared` when the grant was kept for another connection; neither when the index
- * could not be read (kept) or the provider did not confirm.
+ * Whether anything here other than `self` still uses this account's grant, before it is given back without a
+ * disconnect (a store reconnecting with another account, a keep that lost its lock, a flow that expired): the index
+ * (grantStillUsed), and, for a store's Google grant the index finds nobody else on (not a host's own, not Zoom), a team
+ * host's calendar the index does not list (unlistedHostUses, which lists the one it finds; Claude 3 wSUb3's MEDIUM on
+ * #5476, 7116841447). `store` is the store's team id and its owner now; `ownerThen` the owner the grant was kept for.
+ * Commands, only when the index finds nobody: the team's GET (a store with a team id), one MGET, one EVAL a host
+ * found. Null when either cannot be read (logged): the grant is then kept, never given back on an unread answer.
  */
-async function giveBackUnlessShared(statsId: string, c: Connection, host = ""): Promise<{ removed: boolean; shared: boolean }> {
-  const used = await grantStillUsed(c.provider, c.account.id, memberOf(statsId, host));
+async function grantUsedElsewhere(
+  provider: MeetProvider,
+  accountId: string,
+  self: string,
+  host: string,
+  store: Pick<Store, "sid" | "email"> | undefined,
+  ownerThen: string,
+): Promise<boolean | null> {
+  const used = await grantStillUsed(provider, accountId, self);
+  if (used !== false || host || provider !== "google") return used;
+  try {
+    return await unlistedHostUses(accountId, store, ownerThen);
+  } catch (error) {
+    console.error("reading the team hosts' meeting connections before giving a grant back failed; the grant is kept", error);
+    return null;
+  }
+}
+
+/**
+ * Gives a connection's grant back only when nothing else here uses its account (grantUsedElsewhere). `removed` is true
+ * only when the provider confirmed it; `shared` when the grant was kept for another connection; neither when the
+ * index or the hosts' connections could not be read (kept) or the provider did not confirm.
+ */
+async function giveBackUnlessShared(
+  statsId: string,
+  c: Connection,
+  host = "",
+  store?: Pick<Store, "sid" | "email">,
+): Promise<{ removed: boolean; shared: boolean }> {
+  const used = await grantUsedElsewhere(c.provider, c.account.id, memberOf(statsId, host), host, store, c.owner.email);
   if (used !== false) return { removed: false, shared: used === true };
   return { removed: await giveBack(statsId, c, host), shared: false };
 }
@@ -520,6 +552,12 @@ export async function finishConsent(
     by: string;
     owner: { email: string; handle: string };
     host?: string;
+    /**
+     * The store's team id (beginConsent's sid; takeConsent's `sid`): a store's Google grant given back without a
+     * disconnect then also counts its team hosts' calendars the index does not list (grantUsedElsewhere). Without it,
+     * only the owner's are read.
+     */
+    sid?: string;
     /** When the consent flow began (beginConsent; takeConsent's `at`), in milliseconds. */
     startedAt: number;
   },
@@ -540,8 +578,8 @@ export async function finishConsent(
     // have stored the new grant: leave it live, rather than revoke what Redis may hold.
     if (error instanceof LockBusyError || error instanceof PriorConnectionUnreadError) {
       // Given back only when nothing here uses that account (issue #4011): a revoke ends the grant every connection
-      // to it shares, so another store's or host's would break.
-      if ((await grantStillUsed(provider, traded.account.id, "")) === false) {
+      // to it shares, so another store's or host's would break, a host's calendar the index does not list included.
+      if ((await grantUsedElsewhere(provider, traded.account.id, "", input.host ?? "", storeOf(input), input.owner.email)) === false) {
         await revoke(provider, provider === "zoom" ? traded.tokens.access : traded.tokens.refresh).catch(() => {});
       }
     }
@@ -583,9 +621,12 @@ return 1`;
 /** A malformed prior read stops this attempt before the grant's write. */
 class PriorConnectionUnreadError extends UnknownReplyError {}
 
+/** The store a consent was for, as grantUsedElsewhere reads it: its team id when the consent has it, its owner now. */
+const storeOf = (input: { sid?: string; owner: { email: string } }): Pick<Store, "sid" | "email"> => ({ sid: input.sid ?? "", email: input.owner.email });
+
 async function keepConnection(
   provider: MeetProvider,
-  input: { statsId: string; by: string; owner: { email: string; handle: string }; host?: string; startedAt: number },
+  input: { statsId: string; by: string; owner: { email: string; handle: string }; host?: string; sid?: string; startedAt: number },
   traded: { tokens: Tokens; account: Account },
   held: Held,
 ): Promise<ConnectResult> {
@@ -638,8 +679,10 @@ async function keepConnection(
   const access = provider === "zoom" ? traded.tokens.access : traded.tokens.refresh;
   if (!flowFresh(input.startedAt)) {
     // Not kept: given back only when nothing here uses that account (issue #4011), since a revoke ends the grant
-    // every connection to it shares.
-    if ((await grantStillUsed(provider, traded.account.id, "")) === false) await revoke(provider, access).catch(() => {});
+    // every connection to it shares, a host's calendar the index does not list included.
+    if ((await grantUsedElsewhere(provider, traded.account.id, "", "", storeOf(input), input.owner.email)) === false) {
+      await revoke(provider, access).catch(() => {});
+    }
     return { ok: false, error: "expired" };
   }
   const keys = [held.key, connKey(input.statsId, provider), userKey(provider, traded.account.id), goneKey(provider, traded.account.id)];
@@ -656,13 +699,14 @@ async function keepConnection(
   }
   if (keptAs !== 1) throw new UnknownReplyError("keeping a meeting connection only while its account was not deleted since");
   // A different account connected in its place: the store leaves that account's index first, and the old one's
-  // access is given back unless another store or host still uses it (issue #4011).
+  // access is given back unless another store or host still uses it (issue #4011), a host's calendar kept for the
+  // owner the old connection was made for, the owner now or the team, that the index does not list included.
   if (before && before.account.id !== traded.account.id) {
     await redisPipeline([
       ["SREM", userKey(provider, before.account.id), input.statsId],
       ["DEL", testKey(input.statsId, provider)],
     ]).catch(() => {});
-    await giveBackUnlessShared(input.statsId, before).catch(() => {});
+    await giveBackUnlessShared(input.statsId, before, "", storeOf(input)).catch(() => {});
   }
   return { ok: true, view: viewOf(connection), replaced: Boolean(before) };
 }

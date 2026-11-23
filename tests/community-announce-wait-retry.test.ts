@@ -60,6 +60,27 @@ async function main(): Promise<void> {
     const resumed = await advanceAnnouncement(id, load(store), Date.now() + 10_000);
     is("an hour on, back on: it goes out by itself, to both members, once", [resumed?.status, resumed?.sent, sent.length, db.run(["SISMEMBER", "nl:cm:mailq", id])], ["sent", 2, 1, 0]);
   }
+
+  // Claude 4 AC (2aab): a held send still has an end. Kept ANNOUNCEMENT_HELD_DAYS (60, as a product update held on a
+  // switched-off store), then it ends, out of line, saying so: never looked at once an hour for good.
+  const HELD_DAYS: unknown = (communityMail as Record<string, unknown>).ANNOUNCEMENT_HELD_DAYS;
+  is("a held send is kept 60 days, as a held product update", HELD_DAYS, 60);
+  for (const [label, held, why] of [
+    ["Switched off after notices, for good", { ...store, suspended: "2026-11-09T12:00:00.000Z" } as Store, /switched off/],
+    ["A plan without email, for good", { ...store, mail: undefined } as unknown as Store, /email/],
+  ] as const) {
+    part(label);
+    seed();
+    shift = 0;
+    await advanceAnnouncement(id, async () => held, Date.now() + 10_000);
+    shift = 59 * 86_400_000;
+    const day59 = await advanceAnnouncement(id, async () => held, Date.now() + 10_000);
+    is("on day 59 it still waits, in line", [day59?.status, db.run(["SISMEMBER", "nl:cm:mailq", id])], ["waiting", 1]);
+    shift = 60 * 86_400_000 + 3_600_000;
+    const ended = await advanceAnnouncement(id, async () => held, Date.now() + 10_000);
+    is("past 60 days it ends, out of line, nothing sent", [ended?.status, db.run(["SISMEMBER", "nl:cm:mailq", id]), sent.length], ["failed", 0, 0]);
+    is("saying why and that it waited 60 days", [why.test(ended?.note ?? ""), /60 days/.test(ended?.note ?? "")], [true, true]);
+  }
   Date.now = realNow;
   done();
 }

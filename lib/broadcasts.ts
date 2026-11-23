@@ -516,8 +516,10 @@ export type MeasuredHeads = { listId: string | null; ids: string[]; sizes: numbe
 export type HeadsOptions = {
   expired?: "skip";
   /**
-   * `more: true` (get_emails, issue #4062): the same LRANGE asks for one id past `limit`, never more; when it is there,
-   * the measured emails are still the newest `limit` and `more` says older ones exist. Without it, nothing changes.
+   * `more: true` (get_emails, issue #4062): the same LRANGE asks for one id past `limit`, never more, and the same size
+   * script asks that id's size too (paid with the others); the measured emails are still the newest `limit`, and
+   * `more` says an older one is still kept. An id whose record expired (-1) is gone, and so is every older one, kept
+   * the same RECORD_DAYS: then `more` is false (Claude 6's LEVE on #5431). Without it, nothing changes.
    */
   more?: true;
 };
@@ -588,14 +590,19 @@ export async function measureBroadcastHeads(listId: string | null, limit: number
   if (!index || !Array.isArray(index[0])) throw new Error("Campaign index is unavailable");
   const listed: unknown[] = index[0];
   if (listed.length > ask || listed.some((id) => typeof id !== "string" || !BROADCAST_ID.test(id)) || new Set(listed).size !== listed.length) throw new Error("Campaign index is incomplete");
-  // The one id past `limit` is only looked at, never measured or read: it says older emails exist (issue #4062).
-  const more = options.more ? { more: listed.length > limit } : {};
-  const ids = listed.slice(0, limit);
-  if (!ids.length) return { ok: true, listId, ids: [], sizes: [], ...more };
+  // The one id past `limit` is only sized, never measured as an email or read: whether its record is still kept says
+  // whether an older email exists (issue #4062; Claude 6's LEVE on #5431: a listed id whose record expired is none).
+  const ids = listed.slice(0, limit) as string[];
+  const past = options.more && listed.length > limit ? (listed[limit] as string) : null;
+  if (!ids.length) return { ok: true, listId, ids: [], sizes: [], ...(options.more ? { more: false } : {}) };
+  const asked = past ? [...ids, past] : ids;
   // Paid before it is sent: the script and a GET inside it for each email are not the caller's own request's to spend.
-  const paid = await paySizes(ids.length);
+  const paid = await paySizes(asked.length);
   if (paid.ok !== true) return { ok: false, refused: paid.message };
-  const sized = await headsOf((ids as string[]).map(bcKey), null);
+  const answered = await headsOf(asked.map(bcKey), null);
+  const sized = answered.slice(0, ids.length);
+  // Kept, readable or not, is an older email there; -1 is a record gone after RECORD_DAYS, and every older one with it.
+  const more = options.more ? { more: past !== null && answered[ids.length] !== -1 } : {};
   // With expired: "skip", a record that is not there (-1) is a campaign gone, left out; every other answer is checked.
   const skip = options.expired === "skip";
   const kept = (ids as string[]).flatMap((id, i) => (skip && sized[i] === -1 ? [] : [{ id, size: sized[i] }]));

@@ -26,6 +26,8 @@ const NOW = Math.floor(Date.now() / 1000);
 const sessionsByPayment: Record<string, Record<string, unknown>[]> = {};
 /** Every refund on the account, any order: listed newest first, as Stripe does. */
 let refunds: Record<string, unknown>[] = [];
+/** Stripe's closing events of lost disputes, newest first (part (f)); none in the other parts. */
+let lostEvents: Record<string, unknown>[] = [];
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -46,6 +48,12 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     return row ? answer(row) : answer({ error: { message: "No such refund" } }, 404);
   }
   if (/^\/payment_intents\/pi_/.test(path)) return answer({ id: path.split("/").pop(), object: "payment_intent", metadata: {} });
+  if (path === "/events" && url.searchParams.get("type") === "charge.dispute.closed") {
+    const from = url.searchParams.get("starting_after");
+    const start = from ? lostEvents.findIndex((row) => row.id === from) + 1 : 0;
+    const limit = Number(url.searchParams.get("limit") ?? 10);
+    return list(lostEvents.slice(start, start + limit), start + limit < lostEvents.length);
+  }
   return list([]);
 }) as typeof fetch;
 
@@ -83,6 +91,7 @@ const retried = async () => (await memory([["HGETALL", `nl:keys:${store.statsId}
 async function fresh(): Promise<void> {
   redis.clear();
   refunds = [];
+  lostEvents = [];
   await claimHandle(OWNER, HANDLE, "Licence Starve", "");
   await ensureStatsId(OWNER);
   await setStripeAccount(OWNER, ACCOUNT, true);
@@ -170,6 +179,22 @@ async function main(): Promise<void> {
   garbledReference = "";
   await run();
   is("and once its key can be told, it is revoked", await checkKey(store, app, lasting), "revoked");
+
+  // Claude 4 AC's NIT on #5321: a run that stopped mid-page, out of the pass's lookups, returned before the lost disputes'
+  // read was confirmed, so their cursor was never kept while a pass ran and every run read the same newest pages again.
+  part("(f) A run that stops mid-pass still keeps the lost disputes' place it read");
+  await fresh();
+  // More lost disputes than a run reads (LOST_DISPUTE_PAGES pages of 100), each with no payment to look up (read
+  // without a lookup), so every one read is handled and the read only needs its place kept.
+  lostEvents = Array.from({ length: 350 }, (_, i) => ({
+    id: `evt_StarveLost${String(i).padStart(5, "0")}`, object: "event", type: "charge.dispute.closed", created: NOW - 50 - i,
+    data: { object: { id: `du_StarveLost${i}`, object: "dispute", status: "lost", amount: 2900, charge: `ch_StarveLost${i}`, payment_intent: null } },
+  }));
+  // Refunds of payments of no sale here, each taking lookups: the pass runs out of its own and stops mid-page.
+  refunds = Array.from({ length: 30 }, (_, i) => refundRow(`re_StarveLook${String(i).padStart(4, "0")}`, `pi_StarveLook${String(i).padStart(5, "0")}`, NOW - 1_000 - i));
+  await run();
+  is("(setup) the run stopped mid-pass", (await memory([["GET", `nl:keys:${store.statsId}:refunds:pass`]]))[0] !== null, true);
+  is("the lost disputes' place is kept, so the next run reads on from there", (await memory([["GET", `nl:lostdispute:cursor:keys:${store.statsId}`]]))[0] !== null, true);
   done();
 }
 

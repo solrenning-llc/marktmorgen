@@ -1176,7 +1176,8 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
     }
     // Stripe did not answer: the making is given back once a day, so the app's next check tries again; past that
     // one it stays counted. The try itself stays counted either way (calendarAttemptsKey), so what it read is priced
-    // (inbox C4-53). The copy stands.
+    // (inbox C4-53). The copy stands while the changed mark was read; on an unreadable mark it is not answered as current
+    // (issue #3958), so the error goes up and the app asks again.
     if (await takeCounted(retriesKey(owner.statsId, day), CALENDAR_RETRIES_PER_DAY, 2 * 86_400)) await giveCounted(taken, 2 * 86_400);
     if (copy && changed !== null) return { state: "copy", ics: copy.ics };
     throw error;

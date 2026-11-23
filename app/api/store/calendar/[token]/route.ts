@@ -69,7 +69,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
     });
   } catch (error) {
     if (error instanceof FeedGone) return missing();
-    // Stripe did not answer and there is no copy yet. A calendar app asks again.
+    // Stripe did not answer and there is no copy to answer: none was kept yet, or the bookings-changed mark could not be
+    // read, so the old copy may miss a booking (issue #3958). A calendar app asks again.
     console.error("making a booking calendar failed", error);
     return later(503, 300);
   }

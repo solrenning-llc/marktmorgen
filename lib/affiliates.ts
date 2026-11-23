@@ -5153,8 +5153,11 @@ async function takenSince(
       if (!takes.has(status)) continue;
       const pi = paymentOf(row);
       if (pi === undefined) return incomplete;
-      if (pi !== null && !takenBack(byIntent, seen, row, pi, currencyOf)) return incomplete;
-      if (pi !== null && final && !takenBack(settled, seenSettled, row, pi, currencyOf)) return incomplete;
+      // A payment not on the book (no record of it in currencyOf) changes no line of it: its amount is never judged,
+      // so one damaged row of another payment does not hold the whole book (#5285 row #3189, Claude 1's LOW).
+      if (pi === null || !currencyOf.has(pi)) continue;
+      if (!takenBack(byIntent, seen, row, pi, currencyOf)) return incomplete;
+      if (final && !takenBack(settled, seenSettled, row, pi, currencyOf)) return incomplete;
     }
     if (!read.hasMore) return { byIntent, settled, open, complete: true };
     if (!read.lastId) return incomplete;

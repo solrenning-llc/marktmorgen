@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { UK_VAT_PRODUCT_RATES, UK_VAT_PRODUCT_RATES_VALID_UNTIL, UK_VAT_RATES_FILE, type UkProductRateRow, ukProductRateBps } from "@/lib/uk-vat-product-rates";
+import { RELIEF_NOT_BY_PRODUCT_ITEMS, RELIEF_NOT_BY_PRODUCT_NOTES, UK_VAT_PRODUCT_RATES, UK_VAT_PRODUCT_RATES_VALID_UNTIL, UK_VAT_RATES_FILE, type UkProductRateRow, ukProductRateBps } from "@/lib/uk-vat-product-rates";
 
 const root = process.cwd();
 const bytes = readFileSync(join(root, UK_VAT_RATES_FILE.path));
@@ -86,9 +86,8 @@ const day = "2026-11-21";
 test("a rate only where the page writes one", () => {
   assert.equal(ukProductRateBps("Printing, postage, publications — books, magazines and newspapers", "Books", day), 0);
   assert.equal(ukProductRateBps("Printing, postage, publications — books, magazines and newspapers", "Other postal services that are not subject to a universal service obligation", day), 2000);
-  const fivePercent = UK_VAT_PRODUCT_RATES.find((row) => row.rate === "5%" && !/rated|exempt|%/i.test(row.more));
-  assert.ok(fivePercent);
-  assert.equal(ukProductRateBps(fivePercent.section, fivePercent.item, day), 500);
+  // A 5% row whose rate depends only on the product (the first 5% row, "Mobility aids for the elderly", depends on the buyer).
+  assert.equal(ukProductRateBps("Clothing and footwear, protective and safety equipment", "Children’s car seats, booster seats and booster cushions", day), 500);
 });
 
 const PRINT = "Printing, postage, publications — books, magazines and newspapers";
@@ -155,6 +154,9 @@ test("a relief that depends on who buys, who sells or what the goods are used fo
     assert.ok(UK_VAT_PRODUCT_RATES.some((row) => row.section === section && row.item === item), `${item} is a row of the page`);
     assert.equal(ukProductRateBps(section, item, day), null, item);
   }
+  // Every note and item the module refuses this way is one the page has, so the list never goes stale unseen.
+  for (const note of Object.keys(RELIEF_NOT_BY_PRODUCT_NOTES)) assert.ok(UK_VAT_PRODUCT_RATES.some((row) => row.more.trim() === note), `note ${note} is on the page`);
+  for (const item of Object.keys(RELIEF_NOT_BY_PRODUCT_ITEMS)) assert.ok(UK_VAT_PRODUCT_RATES.some((row) => row.item === item), `item ${item} is on the page`);
   // A rate that depends only on the product stays as the page writes it.
   assert.equal(ukProductRateBps(PRINT, "Books", day), 0);
   assert.equal(ukProductRateBps("Clothing and footwear, protective and safety equipment", "Children’s clothes and footwear", day), 0);

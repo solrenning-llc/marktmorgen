@@ -13,7 +13,8 @@
  *     with a condition ("0% or 5%", "Exempt if ..."), "Outside the scope of VAT" and "The same rate as the goods ...",
  *     whose condition this table does not hold; a row whose own note says some of its items are at another rate
  *     ("Some items are ...", "But ...") or whose note names another rate at all; a row that covers only "certain"
- *     goods it does not name; a row the table does not have; two rows that disagree; and any day
+ *     goods it does not name; a row whose relief depends on who buys, who sells or the use, not on the product
+ *     (RELIEF_NOT_BY_PRODUCT_NOTES and _ITEMS); a row the table does not have; two rows that disagree; and any day
  *     past `UK_VAT_PRODUCT_RATES_VALID_UNTIL`, before which the page is read again at the source, with the date.
  *
  * Pure. Nothing calls it yet: which row a store's product falls under is the next step, and collecting UK VAT stays off
@@ -71,9 +72,39 @@ const NAMES_ANOTHER_RATE = /standard-rated|zero-rated|reduced-rated|\bexempt\b|\
  */
 const ONLY_CERTAIN_ITEMS = /\bcertain\b/i;
 
+/**
+ * The rows whose relief is a fact about who buys, who sells or what the goods or services are used for, never about the
+ * product alone (Claude 6 UoHAG, coordinator re-audit of #5045): a product mapped once to such a row would be sold at
+ * the reduced rate to every buyer, and Solrenning LLC would owe the standard rate it never collected. The next step maps
+ * products, not sales, so it cannot hold the condition either: these rows give no rate. Keyed by the page's own note,
+ * which names the HMRC notice that sets the condition, each with the reason; every key is a note the table has.
+ */
+export const RELIEF_NOT_BY_PRODUCT_NOTES: Readonly<Record<string, string>> = {
+  "Charitable donations and VAT": "the seller: a charity selling donated goods",
+  "Equipment for blind or partially sighted people": "the buyer: supplied to a blind or partially sighted person or a charity",
+  "Equipment for disabled people": "the buyer: supplied to a disabled person or a charity for their use",
+  "Mobility aids for older people": "the buyer: installed in the home of a person aged 60 or over",
+  "Notice 701/7 VAT reliefs for disabled people": "the buyer: a disabled person, in their own home",
+  "Building services for disabled people": "the buyer: a disabled person, in their own home",
+  "VAT Notice 701/7": "the buyer: supplied to a disabled person or a charity",
+  "VAT Notice 701/57": "the seller and the buyer: a registered pharmacist dispensing a prescription",
+  "VAT Notice 701/58": "the buyer: a charity",
+  "VAT Notice 703/1": "the place: goods sent outside the UK and the EU",
+  "VAT Notice 708": "the building and its use: a dwelling, a relevant residential or charitable purpose, a first sale",
+  "VAT Notice 708/6": "the place and the buyer: installed in residential or charitable buildings, or grant-funded for a qualifying person",
+  "VAT Notice 744B": "the route: freight to or from a place outside the UK",
+  "VAT Notice 744C": "the use: a qualifying ship or aircraft",
+};
+
+/** The same, for a row whose note it shares with rows that depend on the product alone (VAT Notice 701/23). */
+export const RELIEF_NOT_BY_PRODUCT_ITEMS: Readonly<Record<string, string>> = {
+  "Protective boots and helmets for industrial use": "the buyer: not supplied to an employer for its employees",
+};
+
 function basisPointsOf(rate: string, more: string, item: string): number | null {
   if (typeof more !== "string" || PART_AT_ANOTHER_RATE.test(more.trim()) || NAMES_ANOTHER_RATE.test(more)) return null;
   if (typeof item !== "string" || ONLY_CERTAIN_ITEMS.test(item)) return null;
+  if (Object.hasOwn(RELIEF_NOT_BY_PRODUCT_NOTES, more.trim()) || Object.hasOwn(RELIEF_NOT_BY_PRODUCT_ITEMS, item)) return null;
   if (rate === "0%") return 0;
   if (rate === "5%") return 500;
   if (rate === "Standard-rated") return UK_VAT_RATE.basisPoints;

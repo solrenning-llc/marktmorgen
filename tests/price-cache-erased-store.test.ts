@@ -11,7 +11,7 @@ import { claimHandle, ERASING_KEY, erasingField, ownerKey, storeIdCommand, store
 import type { Listing } from "@/lib/catalog";
 import { yearlyPrice } from "@/lib/yearly-switch";
 import { tierPrice } from "@/lib/tier-switch";
-import { pwywPriceId } from "@/lib/pay-what-you-want";
+import { PwywStoreGoneError, pwywPriceId } from "@/lib/pay-what-you-want";
 import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -73,8 +73,10 @@ async function main(): Promise<void> {
     const store = await shop(`price-cache-${how}@example.com`, `price-cache-${how}`);
     for (const [label, make] of makers) {
       duringPost = () => erase(store, how);
-      const id = await make(store).catch((error: unknown) => `threw: ${String(error)}`);
-      is(`${label}: Stripe's id is still handed back to this one request`, /^price_SyntheticCache\d{4}$/.test(id), true);
+      const id = await make(store).catch((error: unknown) => (error instanceof PwywStoreGoneError ? "gone" : `threw: ${String(error)}`));
+      // The pay-what-you-want price is not handed on either: no checkout follows it (#5010 row 83, tests/pwyw-checkout-after-erasure.test.ts).
+      if (label === "the pay-what-you-want price") is(`${label}: the request is told the store is gone`, id, "gone");
+      else is(`${label}: Stripe's id is still handed back to this one request`, /^price_SyntheticCache\d{4}$/.test(id), true);
     }
     duringPost = async () => {};
     for (const family of FAMILIES) is(`nothing kept under ${family}`, cached(family), []);
@@ -103,7 +105,10 @@ async function main(): Promise<void> {
   const legacyGone: Store = { ...oldGone, sid: "", extra: false };
   for (const [, make] of makers) {
     duringPost = () => erase(legacyGone, "gone");
-    await make(legacyGone);
+    // The pay-what-you-want price says the store is gone (#5010 row 83); the others hand Stripe's id back.
+    await make(legacyGone).catch((error: unknown) => {
+      if (!(error instanceof PwywStoreGoneError)) throw error;
+    });
   }
   duringPost = async () => {};
   for (const family of FAMILIES) is(`its record gone: nothing kept under ${family}`, cached(family), []);

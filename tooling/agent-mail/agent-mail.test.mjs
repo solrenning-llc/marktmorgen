@@ -1345,6 +1345,9 @@ console.log("ZA: what a READY's text may say (owner, 23/11/2026 12h29 Fortaleza:
   // Claude 3 yUZf's MÉDIO on #5404 (7107553863): a closure promised for later is a deferral, not a closure.
   for (const t of ["0 findings; the LEVE is to be fixed in a later PR", "0 findings; Claude 1's NIT will be addressed later", "0 findings; the LOW can be resolved in another PR", "sem achados; o LEVE será corrigido depois", "0 findings; the LEVE should be fixed"])
     is(`ZA: the promise '${t}' is refused`, !aceito(t), za(t).join("; "));
+  // Claude 2 upbeat's MÉDIO on #5404: a negated or partial closure, and a severity not in capitals, are findings.
+  for (const t of ["0 findings; the NIT is not fixed in 1234abcd", "sem achados; o LEVE não foi corrigido em 1234abcd", "0 findings; the LEVE is only partly fixed in 1234abcd", "0 findings; the LEVE was fixed in 1234abcd except the copy", "0 findings; the LEVE was fixed in 1234abcd, but a new LOW appears", "0 findings\nLeve: the name", "0 findings\nOne nit: the name", "sem achados\nachado leve no nome", "0 findings; 1 low in the log"])
+    is(`ZA: upbeat's case '${t.replace(/\n/g, " / ")}' is refused`, !aceito(t), za(t).join("; "));
   is("ZA: yUZf's control 'READY, 0 findings, 1 LEVE: the log line is noisy.' is refused", !aceito("READY, 0 findings, 1 LEVE: the log line is noisy."), "");
   for (const t of ["0 findings; the LOW is not addressed", "sem achados; o LEVE não foi resolvido", "0 findings; the MEDIUM is unresolved", "0 findings; a follow-up PR for the name"])
     is(`ZA (d): '${t}' is refused`, !aceito(t), za(t).join("; "));

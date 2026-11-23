@@ -1715,11 +1715,17 @@ export function motivosContraReady(texto) {
   // Futuro, condição, pendência ou modal: a oração promete, não fecha (Claude 3 yUZf 7107553863; Claude 5 iaqyQ 7107846397).
   const promete = /\b(will|shall|to be|should|must|would|might|may|can be|could be|needs? to|later|next|pending|once|after|until|when|unless|if|another|separate|future|eventually|follow-?up (pr|pull request|unit))\b|\b(fica|ficar[áa]|ser[áa]o?|vai|v[ãa]o|pode ser|podem ser|deve|devem|precisa|pr[óo]xim[oa]|quando|assim que|depois|se|caso|outro|outra|futur[oa]|mais tarde|em seguida|pendente)(?![\p{L}\d])/iu;
   const fecha = /\b(fixed|closed|addressed|resolved|corrigid[oa]s?|fechad[oa]s?|atendid[oa]s?|resolvid[oa]s?)\b[^;]{0,40}?(\b(in|by|on|at|em|no|na|pelo|pela|por)\s+(commit\s+)?([0-9a-f]{7,40}\b|this head\b|este head\b)|\s(neste|nesse) head\b)|\b(withdrawn|retirad[oa]s?)\b[^;]{0,30}?\b(by|por)\s+(its author|the reviewer who raised it|quem (o |a )?apontou|o autor do achado)/i;
-  const resolvida = (o) => fecha.test(o) && !descreve.test(o) && !promete.test(o);
+  // Claude 2 upbeat's MÉDIO (#5404): a negated or partial closure is no closure ("not fixed in", "only partly", "except",
+  // "but a new LOW"); any of these words voids it.
+  const limita = /\b(not|never|no longer|isn't|wasn't|hasn't|haven't|partly|partially|except|but|however|only|still|remains?|yet|n[ãa]o|nunca|parcial(mente)?|exceto|salvo|mas|por[ée]m|ainda|s[óo]|resta(m)?|menos)(?![\p{L}\d])/iu;
+  const resolvida = (o) => fecha.test(o) && !descreve.test(o) && !promete.test(o) && !limita.test(o);
   const orações = todo.split("\n").filter((l) => !notas.test(l)).flatMap((l) => l.split(/;|\.(?=\s|$)/));
   const resto = orações.filter((o) => !resolvida(o)).join("\n")
     .replace(new RegExp(`\\b(0|zero|nenhum|sem|no)\\s+(achados?\\s+)?(${SEV})S?\\b`, "gi"), " ");
-  const tamanho = new RegExp(`\\b(${SEV})S?\\b`).exec(resto);
+  // Severities as reviews write them, in capitals; in any case when they name a finding: "Leve:", "One nit:", "achado leve",
+  // "1 low" (Claude 2 upbeat's MÉDIO on #5404).
+  const tamanho = new RegExp(`\\b(${SEV})S?\\b`).exec(resto)
+    ?? new RegExp(`\\b(${SEV})S?\\b\\s*(\\d+\\s*)?(\\([^)]*\\)\\s*)?[:—–]|\\b(achados?|findings?|defeitos?|defects?)\\s+(${SEV})S?\\b|\\b(\\d+|one|two|three|um|uma|dois|duas|tr[êe]s)\\s+(${SEV})S?\\b`, "iu").exec(resto);
   if (tamanho) motivos.push(`o texto aponta um achado (${tamanho[0]}); um achado de head anterior só conta como resolvido no formato ${FORMATO_RESOLVIDO}`);
   const adiado = /n[ãa]o bloque(ia|ante)|non-?blocking|follow-?up(?!\s+(commit|push)s?\b)|fica para depois|fica pra depois/i.exec(resto);
   if (adiado) motivos.push(`o texto adia um achado ("${adiado[0]}")`);

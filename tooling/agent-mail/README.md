@@ -239,6 +239,7 @@ node ~/.agent-mail/agent-mail.mjs complete-review --as "Claude 5" <id> --result 
 - **READY só com zero achados** (ZA, dono, 23/11/2026, 12h29 Fortaleza). O `complete-review --result READY` recusa, sem gravar nada, o texto que:
   - não diz "sem achados" (ou "0 achados", "no findings");
   - aponta um achado de qualquer tamanho: GRAVE, ALTO, MÉDIO, LEVE ou NIT, ou os nomes em inglês;
+  - nomeia, em minúsculas, uma gravidade que vem como achado ("Leve:", "One nit:", "achado leve", "1 low");
   - adia um achado: "não bloqueia", "non-blocking", "follow-up" ou "fica para depois".
 
   Não contam como achado:
@@ -247,7 +248,7 @@ node ~/.agent-mail/agent-mail.mjs complete-review --as "Claude 5" <id> --result 
   - numa oração (o texto entre ";" ou "."), um achado de head anterior dado como resolvido **neste formato fixo**:
     - a palavra de fechamento no passado seguida do commit que o fechou ou do head: "fixed in <sha>", "closed by <sha>", "corrigido em <sha>", "addressed on this head", "corrigido neste head";
     - ou "withdrawn by its author" / "retirado por quem o apontou";
-    - sem nenhuma marca de futuro, condição ou pendência na oração ("will", "next", "pending", "once", "fica", "será", "próximo", "depois").
+    - sem nenhuma marca de futuro, condição ou pendência na oração ("will", "next", "pending", "once", "fica", "será", "próximo", "depois"), nem de negação ou correção parcial ("not", "não", "only", "partly", "except", "but", "mas", "ainda").
 
   Qualquer outra forma conta como achado, do lado seguro. A leitura livre deixou passar adiamentos em três revisões do #5404, e a mensagem de recusa mostra o formato aceito. "the follow-up commit" e "follow-up push" não são adiamento.
 

@@ -60,7 +60,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { PLAN_NAMES, PLAN_PRICES, type Tier, parseTier } from "@/lib/plan";
-import { setSubscription, storeForEmail, storeForRestartSource, storeRef, type Store } from "@/lib/store";
+import { erasingSince, setSubscription, storeForEmail, storeForRestartSource, storeRef, type Store } from "@/lib/store";
 import {
   PAID_MONTHS_BEFORE_PAUSE,
   PAUSE_EVERY_DAYS,
@@ -763,10 +763,15 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
       await tell(store, "restarted", record).catch(() => false);
       counts.restarted += 1;
     } catch (error) {
-      // Read as being erased right before the charge: nothing was sent, and nothing is told; the erasure deletes the
-      // break with the store. A read that could not tell is not that: it goes on below like any failure that is not the
-      // card's, tried again within RETRY_DAYS and then told as unconfirmed, never skipped untold for good.
-      if (error instanceof RestartStoreNotLive && error.reason === "erasing") { counts.failed += 1; continue; }
+      // Read as not live right before the charge: nothing was sent. The read's 0 means erasing or a key that is no longer
+      // this store's own (a live store whose id key is missing reads so too), so it is skipped untold only when the
+      // erasing mark itself confirms it (Claude 1 coord's near-MEDIUM on #5174); the erasure then deletes the break
+      // with the store. Anything else, the mark absent or unread included, goes on below like any failure that is not
+      // the card's: tried again within RETRY_DAYS and then told as unconfirmed, never skipped untold for good.
+      if (error instanceof RestartStoreNotLive && error.reason === "erasing" && (await erasingSince(ref).catch(() => null)) !== null) {
+        counts.failed += 1;
+        continue;
+      }
       console.error("starting a plan again after a break failed", store.handle, error);
       // The funded protocol retains every uncertain source/intent. It must not
       // enter the legacy retry window, forget its evidence, or announce success.

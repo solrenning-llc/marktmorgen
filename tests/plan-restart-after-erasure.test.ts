@@ -5,12 +5,18 @@
  * prepareStore before anything is deleted) still got that POST: a new paid subscription and its charge on a store being
  * erased, while setSubscription then refused to write it down, so nothing kept its id to reconcile it.
  *
- * Now restartPlan asks `beforePost` right before each POST (lib/inbox.ts contactStoreLive: the erasing mark absent, the
- * id key still the store's own, read in one step without writing). A store not read live gets no POST: its break and
- * its due entry are kept untouched, the creator is not told anything, and the erasure deletes them with the store.
+ * Now restartPlan asks `beforePost` right before each POST (lib/store-live-cache.ts storeIsLive, lib/live-fence.ts
+ * isStoreLive: the erasing mark absent, the id key still the store's own, read in one step without writing). A store
+ * whose erasing mark is there gets no POST: its break and its due entry are kept untouched, the creator is not told
+ * anything, and the erasure deletes them with the store. A read that is not live for any other reason (the id key
+ * missing, an unreadable reply) is tried again within RETRY_DAYS and then told as unconfirmed, never skipped for good.
+ * (Before this, setSubscription refused to write the new plan for a store being erased; billing-sync then keeps its
+ * subscription id, Claude 1 coord's B2 probe on #5174, and refuses the plan of a closing store with its refund.)
  * Synthetic store, Stripe and Redis stand-in only.
  */
-import { ERASING_KEY, claimHandle, ensureStatsId, ensureStoreId, erasingField, setSubscription, storeForEmail, storeRef } from "@/lib/store";
+import { ERASING_KEY, claimHandle, ensureStatsId, ensureStoreId, erasingField, setSubscription, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
+import { storeIsLive } from "@/lib/store-live-cache";
+import type { Store } from "@/lib/store";
 import { pauseEmail, pauseOf, pausePlan, runBreaks } from "@/lib/plan-pause";
 import { PLAN_PRICES } from "@/lib/plan";
 import { store as redis } from "./redis-stub";
@@ -139,6 +145,32 @@ async function main() {
     } finally {
       liveReadUnknown = null;
     }
+  }
+  part("A live store whose id key is missing reads 0 too, and is tried again and then told, never kept untold for good");
+  {
+    // Claude 1 coord's near-MEDIUM on #5174: the read's 0 means erasing or a key that is not this store's own, and a live
+    // store whose id key is missing (ensureStoreId writes it in two steps) reads 0 as well. Skipped untold only when its
+    // erasing mark confirms it; here there is none, so it goes the way of an unknown read.
+    const { store, until } = await onBreakDue("restart-noid@example.com", "restartnoid", "sub_RestartNoId01");
+    const record = (await pauseOf(store))!;
+    redis.run(["DEL", storeIdCommand(store.sid)[1]]);
+    created = 0;
+    emails.length = 0;
+    const first = await runBreaks(until + 60);
+    is("within the retry days: no POST, nothing restarted, nothing told", [created, first.restarted, emails], [0, 0, []]);
+    is("the break is kept to be tried again", (await pauseOf(store)) !== null, true);
+    await runBreaks(until + 4 * DAY);
+    is("after the retry days: still no POST", created, 0);
+    is("the creator is told the restart could not be confirmed", emails, [pauseEmail("unconfirmed", record).subject]);
+  }
+  part("A store kept from before ids, with no statsId, is read by its erasing mark alone");
+  {
+    // Claude 1 coord's LEVE on #5174: such a store cannot be told from its owner's next one, so only its erasing mark
+    // is read; before, it was always "unknown" and its restart was lost every time.
+    const legacy: Pick<Store, "email" | "sid" | "extra" | "statsId"> = { email: "restart-legacy@example.com", sid: "", extra: false, statsId: null };
+    is("no erasing mark: live", await storeIsLive(legacy), true);
+    redis.run(["HSET", ERASING_KEY, await erasingField(storeRef(legacy)), String(Date.now())]);
+    is("its erasing mark there: not live", await storeIsLive(legacy), false);
   }
   part("Control: a live store's plan starts again on the day");
   {

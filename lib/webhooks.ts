@@ -2065,13 +2065,22 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     const kind = meta.kind === "call" ? "call" : meta.kind === "plan" ? "payment_plan" : membership ? "membership" : "one_time";
     const totals = (object.total_details ?? {}) as { amount_discount?: unknown };
     // Sent once and for good, so read exactly: a missing or unreadable discount waits, never sent as 0 (Codex G-20261119-0600).
-    const discount = paidCents(totals.amount_discount, "a checkout's discount");
+    // Only sale.completed sends it, so an unreadable one holds the event only for a store that hears sale.completed. For
+    // one that does not, it is null and sale.completed is not made at all (an endpoint added during this visit is never
+    // sent a discount of 0 in its place), and membership.started still goes out (LEVE 1 of the triple audit of #5206).
+    let discount: number | null;
+    try {
+      discount = paidCents(totals.amount_discount, "a checkout's discount");
+    } catch (error) {
+      if (!(error instanceof StripeShapeError) || heard.has("sale.completed")) throw error;
+      discount = null;
+    }
     // A bundle names every product it handed over, from the list on the order.
     const inside = async (slot: BundleSlot) => {
       const ids = bundleFromMeta(meta, slot);
       return ids.length ? Promise.all(ids.map((id) => product(id))) : null;
     };
-    await emitEvent(store, "sale.completed", session, {
+    if (discount !== null) await emitEvent(store, "sale.completed", session, {
       checkout_session: session,
       kind,
       product: await product(meta.product),

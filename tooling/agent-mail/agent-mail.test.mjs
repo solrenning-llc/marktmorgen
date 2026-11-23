@@ -58,7 +58,33 @@ esac
 const base = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t", CORREIO_REPO: join(T, "mail.git"), CORREIO_PR_REPO: join(T, "prs.git"), CORREIO_SEM_VERSAO: "1", AGENT_MAIL_TEST: "1", CORREIO_GIT_DIR: join(T, "correio-local.git"), PATH: `${BIN}:${process.env.PATH}` };
 delete base.CLAUDE_CODE_REMOTE_SESSION_ID;
 // Both outputs are read: warnings go to stderr even when the command succeeds.
+// Writes several files straight into a mailbox in one commit (the reviews a test needs on a head).
+const rawMany = (files, repo) => {
+  const c = join(T, `raw-${Math.random().toString(16).slice(2)}`);
+  g(["clone", "-q", "-b", "correio", repo, c]);
+  for (const [path, text] of Object.entries(files)) { mkdirSync(join(c, path, ".."), { recursive: true }); writeFileSync(join(c, path), text); }
+  g(["add", "."], c); g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "raw"], c); g(["push", "-q", "origin", "HEAD:correio"], c);
+};
+/**
+ * The reviews concluded in the mail on a head, as complete-review writes them (revisao/feitas): `quem` is a list of
+ * reviewer names, or [name, result, head] triples. The 3-READY gate counts these (OWNER-20261123-1442).
+ */
+const revisoesNoCorreio = (repo, pr, sha, quem) => rawMany(Object.fromEntries(quem.map((q) => {
+  const [nome, resultado = "READY", head = sha] = Array.isArray(q) ? q : [q];
+  return [`revisao/feitas/t-${pr}-${Math.random().toString(16).slice(2, 10)}.md`, `Resultado: ${resultado}\nPR: ${pr}\nHead: ${head}\nPor: ${nome}\nData (UTC): 2026-11-23 00:00\n\nt\n`];
+})), repo);
 const run = (args, env = {}, cwd = join(T, "w")) => {
+  // FAKE_READY_ALL=1: before an enqueue is verified or completed, READY from five families on the request's head are
+  // concluded in that mailbox, so a test that only needs the PR enqueued meets the 3 READY (the tool still leaves out
+  // the author's and the commit families).
+  if (env.FAKE_READY_ALL === "1" && /^(verify-enqueue|complete-enqueue)$/.test(args[0])) {
+    const repo = env.CORREIO_REPO ?? base.CORREIO_REPO;
+    const id = args.find((a) => /^\d{8}T\d{6}Z-/.test(String(a)));
+    try {
+      const t = g(["show", `refs/heads/correio:fila/pedidos/${id}.md`], repo);
+      revisoesNoCorreio(repo, /^PR: (\d+)/m.exec(t)[1], /^Head: (\S+)/m.exec(t)[1], ["Claude 1 R", "Claude 3 R", "Claude 4 R", "Claude 5 R", "Claude 7 R"]);
+    } catch {}
+  }
   const r = spawnSync("node", [TOOL, ...args], { cwd, env: { ...base, ...env }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   return { ok: r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 };
@@ -1405,74 +1431,99 @@ console.log("e0bc: complete-review knows its own verdict on the PR, also for a n
 console.log("three READY from three outside families on the exact head before a PR is enqueued (owner, OWNER-20261123-1442-THREE-REVIEWS)");
 {
   g(["init", "-q", "--bare", "mail1442.git"]); g(["push", "-q", "../mail1442.git", "HEAD:refs/heads/correio"], join(T, "w"));
-  const mq = { CORREIO_REPO: join(T, "mail1442.git") };
+  const MQ = join(T, "mail1442.git"), mq = { CORREIO_REPO: MQ };
   const H = pr(1442, "f1442.txt", "1442\n"), h = H.slice(0, 10);
-  const ready = (...quem) => quem.map(([nome, sha]) => JSON.stringify([`${nome} review #1442 @${sha ?? h}: READY\n\nbody`, "COLLABORATOR"])).join("\n") + "\n";
+  const comentario = (t) => JSON.stringify([t, "COLLABORATOR"]) + "\n";
+  const verify = (id, quem, env = {}) => run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, ...env });
   r = run(["request-enqueue", "--from", "Claude 2", "--pr", "1442", "--sha", h, "--text", "fila #1442"], { ...as("c2"), ...mq });
   const id = /registrado: (\S+)/.exec(r.out)?.[1];
   r = run(["claim-enqueue", "--as", "Claude 6 X"], { ...as("c6"), ...mq });
   is("1442: the request is delivered", /pegou/.test(r.out), r.out);
-  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"]) });
+  revisoesNoCorreio(MQ, 1442, H, ["Claude 1 Q", "Claude 3 Q"]);
+  r = verify(id);
   is("1442: two READY on the head are not enough: verify-enqueue refuses and says 3", !r.ok && /2 READY/.test(r.out) && /\b3\b/.test(r.out) && /1442/.test(r.out), r.out);
-  // On a branch with no family prefix the author is the family with most commits (coordinator dd03, as filaVedadaPara):
-  // here the PR's commits carry no trailer and an author "t", so the Codex family (LEVE 1 of Claude 5 hed9 on #5408).
-  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Codex Q"]) });
+  // MEDIUM 1 of Claude 5 hed9 on #5408 (twice): the READY come from the mail's concluded reviews, never from the PR's
+  // text, so a status or request line, with "review" in it or not, adds nothing.
+  const status = [`Claude 1 coord: review status #1442 @${h} — 2 READY (Claude 3, Claude 5); needs 1 more`, `Claude 7: asked for a 3rd review on #1442 @${h}, READY so far from Claude 2`,
+    `Claude 4 B: review needed #1442 @${h} — READY from Claude 1`, `Claude 5 C: #1442 @${h} is READY for the queue`].map(comentario).join("");
+  r = verify(id, null, { FAKE_COMMENTS: status });
+  is("1442: status and request lines that say READY on the PR are never counted", !r.ok && /2 READY/.test(r.out), r.out);
+  revisoesNoCorreio(MQ, 1442, H, [["Claude 4 Q", "READY", "0000000000"]]);
+  r = verify(id);
+  is("1442: a READY concluded on another head does not count", !r.ok && /2 READY/.test(r.out), r.out);
+  // On a branch with no family prefix the author is the family with most commits (coordinator dd03): here the PR's
+  // commits carry no trailer and an author "t", so the Codex family (LEVE 1 of Claude 5 hed9 on #5408).
+  revisoesNoCorreio(MQ, 1442, H, ["Codex Q"]);
+  r = verify(id);
   is("1442: a READY from the author's family does not count", !r.ok && /2 READY/.test(r.out), r.out);
   is("1442: on an unprefixed branch the refusal names the family it counted as the author (NIT of Claude 5 id8Ws on #5408)",
     /sem a família codex \(a dominante nos commits, num ramo sem prefixo de família\)/.test(r.out), r.out);
-  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Claude 2 Q"]) });
-  is("1442: on an unprefixed branch the requester's own READY counts, as on a prefixed one (LEVE 1 of Claude 5 hed9 on #5408)", r.ok && new RegExp(`enfileire ${H}`).test(r.out), r.out);
-  // MEDIUM 1 of Claude 5 hed9 on #5408: a status or request line that names a family, the head and READY is no review.
-  const linha = (t) => JSON.stringify([t, "COLLABORATOR"]);
-  const status = [linha(`Claude 1 coord: #1442 @${h} — 2 READY (Claude 3, Claude 5); needs 1 more`), linha(`Claude 7: #1442 @${h} is READY for the queue`), linha(`Claude 4 B: #1442 @${h} needs READY from 3 families (has 2)`)].join("\n") + "\n";
-  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 3 Q"], ["Claude 5 Q"]) + status });
-  is("1442: status and request lines that say READY are not counted as reviews", !r.ok && /2 READY/.test(r.out), r.out);
-  // LEVE 2 of Claude 5 hed9 on #5408: a family whose last verdict on the head is CHANGES does not count.
-  const changes = JSON.stringify([`Claude 4 W review #1442 @${h}: CHANGES, 1 LEVE\n\nbody`, "COLLABORATOR"]) + "\n";
-  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Claude 4 Q"]) + changes });
-  is("1442: a READY followed by a CHANGES of the same family on the head does not count", !r.ok && /2 READY/.test(r.out), r.out);
-  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Claude 4 Q", "0000000000"]) });
-  is("1442: a READY on another head does not count", !r.ok && /2 READY/.test(r.out), r.out);
-  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS_DOWN: "1" });
-  is("1442: the PR's reviews unread: NOT CHECKED, nothing is enqueued", !r.ok && /NÃO FORAM CONFERIDAS/.test(r.out), r.out);
-  r = run(["complete-enqueue", "--as", "Claude 6 X", id, "--result", "enqueued", "--text", "t"], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"]) });
+  r = verify(id, null, { FAKE_COMMENTS_DOWN: "1" });
+  is("1442: the PR's comments unread: NOT CHECKED, nothing is enqueued", !r.ok && /NÃO FORAM CONFERIDAS/.test(r.out), r.out);
+  r = run(["complete-enqueue", "--as", "Claude 6 X", id, "--result", "enqueued", "--text", "t"], { ...as("c6"), ...mq });
   is("1442: complete-enqueue as enqueued is refused with two", !r.ok && /2 READY/.test(r.out), r.out);
-  r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Claude 4 Q"]) });
-  is("1442: three READY from three outside families on the head: verify-enqueue says enqueue", r.ok && new RegExp(`enfileire ${H}`).test(r.out), r.out);
-  r = run(["complete-enqueue", "--as", "Claude 6 X", id, "--result", "enqueued", "--text", "t"], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Claude 4 Q"]) });
-  is("1442: and complete-enqueue records it", r.ok, r.out);
+  revisoesNoCorreio(MQ, 1442, H, ["Claude 2 Q"]);
+  r = verify(id);
+  is("1442: on an unprefixed branch the requester's own READY counts, as on a prefixed one (LEVE 1 of Claude 5 hed9 on #5408)", r.ok && new RegExp(`enfileire ${H}`).test(r.out), r.out);
+  // MEDIUM 2 and LEVE 1 of Claude 5 hed9 on #5408 @0cebe29a68: a CHANGES or a written withdrawal of a family on this head
+  // in the PR takes that family out, whatever the order.
+  r = verify(id, null, { FAKE_COMMENTS: comentario(`Claude 2 W review #1442 @${h}: CHANGES, 1 LEVE`) });
+  is("1442: a CHANGES of the same family written on the PR takes its READY out", !r.ok && /2 READY/.test(r.out), r.out);
+  r = verify(id, null, { FAKE_COMMENTS: comentario(`WITHDRAWN: my READY 7111050238 on #1442 @${h} — Claude 3 Q`) });
+  is("1442: a READY withdrawn in writing on the PR does not count", !r.ok && /2 READY/.test(r.out), r.out);
+  revisoesNoCorreio(MQ, 1442, H, [["Claude 1 Q", "CHANGES"]]);
+  r = verify(id);
+  is("1442: a family whose last review in the mail is CHANGES does not count", !r.ok && /2 READY/.test(r.out), r.out);
+  revisoesNoCorreio(MQ, 1442, H, ["Claude 4 Q"]);
+  r = run(["complete-enqueue", "--as", "Claude 6 X", id, "--result", "enqueued", "--text", "t"], { ...as("c6"), ...mq });
+  is("1442: three READY from three outside families on the head: complete-enqueue records it", r.ok, r.out);
 
   // MEDIUM of Claude 5 id8Ws on #5408 @dcee6a68d5: on a branch with a family prefix the author is that family; a
-  // reviewer of another family who files the queue request keeps its READY (live case: #5405, claude3/..., READY from
-  // Claude 2, 5 and 6, request filed by Claude 5). Only on a branch with no family prefix does the requester count as
-  // the author (the opener the tool cannot see otherwise).
+  // reviewer of another family who files the queue request keeps its READY (live case: #5405).
   const g3 = (args) => g(args, P);
   g3(["checkout", "-q", "-B", "claude3/fix-1443", M]); const H3b = commit("f1443.txt", "1443\n", "pr1443");
   g3(["push", "-q", "../prs.git", "HEAD:refs/heads/claude3/fix-1443", "HEAD:refs/pull/1443/head"]);
-  const h3 = H3b.slice(0, 10);
-  const ready3 = (...quem) => quem.map((nome) => JSON.stringify([`${nome} review #1443 @${h3}: READY\n\nbody`, "COLLABORATOR"])).join("\n") + "\n";
+  const h3 = H3b.slice(0, 10), C7 = { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" };
   r = run(["request-enqueue", "--from", "Claude 5", "--pr", "1443", "--sha", h3, "--text", "fila #1443"], { ...as("c5"), ...mq });
   const id3 = /registrado: (\S+)/.exec(r.out)?.[1];
-  is("1443: the request records the PR's prefixed branch", r.ok && /Ramo: claude3\/fix-1443/.test(g(["show", `refs/heads/correio:fila/pedidos/${id3}.md`], join(T, "mail1442.git"))), r.out);
-  r = run(["claim-enqueue", "--as", "Claude 7 X"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", ...mq });
+  is("1443: the request records the PR's prefixed branch", r.ok && /Ramo: claude3\/fix-1443/.test(g(["show", `refs/heads/correio:fila/pedidos/${id3}.md`], MQ)), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 7 X"], { ...C7, ...mq });
   is("1443: the request is delivered to a family outside the branch's and the requester's", /pegou/.test(r.out), r.out);
-  r = run(["verify-enqueue", "--as", "Claude 7 X", id3], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", ...mq, FAKE_COMMENTS: ready3("Claude 2 Q", "Claude 5 Q", "Claude 6 Q") });
-  is("1443: on a prefixed branch, the requester's READY counts: three from Claude 2, 5 and 6 pass", r.ok && new RegExp(`enfileire ${H3b}`).test(r.out), r.out);
-  r = run(["verify-enqueue", "--as", "Claude 7 X", id3], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", ...mq, FAKE_COMMENTS: ready3("Claude 2 Q", "Claude 3 Q", "Claude 6 Q") });
-  is("1443: the branch prefix's family's READY still does not count", !r.ok && /2 READY/.test(r.out), r.out);
+  revisoesNoCorreio(MQ, 1443, H3b, ["Claude 2 Q", "Claude 3 Q", "Claude 6 Q"]);
+  r = run(["verify-enqueue", "--as", "Claude 7 X", id3], { ...C7, ...mq });
+  is("1443: the branch prefix's family's READY does not count", !r.ok && /2 READY/.test(r.out), r.out);
   is("1443: and the refusal names the branch prefix's family as the author", /sem a família claude-3 \(a do prefixo do ramo\)/.test(r.out), r.out);
+  revisoesNoCorreio(MQ, 1443, H3b, ["Claude 5 Q"]);
+  r = run(["verify-enqueue", "--as", "Claude 7 X", id3], { ...C7, ...mq });
+  is("1443: on a prefixed branch, the requester's READY counts: three from Claude 2, 5 and 6 pass", r.ok && new RegExp(`enfileire ${H3b}`).test(r.out), r.out);
+  run(["complete-enqueue", "--as", "Claude 7 X", id3, "--result", "declined", "--text", "test done"], { ...C7, ...mq });
+
   // MEDIUM 2 of Claude 5 hed9 on #5408: a commit of an unknown family (a "Claude" author with no trailer) is NOT CHECKED.
-  run(["complete-enqueue", "--as", "Claude 7 X", id3, "--result", "declined", "--text", "test done"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", ...mq });
   g3(["checkout", "-q", "-B", "claude3/fix-1444", M]);
   writeFileSync(join(P, "f1444.txt"), "1444\n"); g3(["add", "."]); g3(["-c", "user.name=Claude", "-c", "user.email=c@c", "commit", "-q", "-m", "pr1444 no trailer"]);
   g3(["push", "-q", "../prs.git", "HEAD:refs/heads/claude3/fix-1444", "HEAD:refs/pull/1444/head"]);
   const H4 = g3(["rev-parse", "HEAD"]), h4 = H4.slice(0, 10);
   r = run(["request-enqueue", "--from", "Claude 5", "--pr", "1444", "--sha", h4, "--text", "fila #1444"], { ...as("c5"), ...mq });
   const id4 = /registrado: (\S+)/.exec(r.out)?.[1];
-  r = run(["claim-enqueue", "--as", "Claude 7 X"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", ...mq });
-  const ready4 = ["Claude 1 Q", "Claude 2 Q", "Claude 6 Q"].map((nome) => JSON.stringify([`${nome} review #1444 @${h4}: READY\n\nbody`, "COLLABORATOR"])).join("\n") + "\n";
-  r = run(["verify-enqueue", "--as", "Claude 7 X", id4], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", ...mq, FAKE_COMMENTS: ready4 });
+  r = run(["claim-enqueue", "--as", "Claude 7 X"], { ...C7, ...mq });
+  revisoesNoCorreio(MQ, 1444, H4, ["Claude 1 Q", "Claude 2 Q", "Claude 6 Q"]);
+  r = run(["verify-enqueue", "--as", "Claude 7 X", id4], { ...C7, ...mq });
   is("1444: a commit of an unknown family makes the 3 READY NOT CHECKED, and nothing is enqueued", !r.ok && /NÃO FORAM CONFERIDAS/.test(r.out) && /família desconhecida/.test(r.out), r.out);
+  run(["complete-enqueue", "--as", "Claude 7 X", id4, "--result", "declined", "--text", "test done"], { ...C7, ...mq });
+
+  // MEDIUM 3 of Claude 5 hed9 on #5408 @0cebe29a68: a merge of main made without a trailer, whose tree is the one git
+  // makes by itself, is nobody's code, so it does not leave the PR NOT CHECKED forever.
+  g3(["checkout", "-q", "-B", "side-1445", M]); commit("s1445.txt", "side\n", "side");
+  g3(["checkout", "-q", "-B", "claude3/fix-1445", M]); commit("f1445.txt", "1445\n", "pr1445");
+  g3(["-c", "user.name=Claude", "-c", "user.email=c@c", "merge", "-q", "--no-edit", "side-1445"]);
+  g3(["push", "-q", "../prs.git", "HEAD:refs/heads/claude3/fix-1445", "HEAD:refs/pull/1445/head"]);
+  const H5 = g3(["rev-parse", "HEAD"]), h5 = H5.slice(0, 10);
+  r = run(["request-enqueue", "--from", "Claude 5", "--pr", "1445", "--sha", h5, "--text", "fila #1445"], { ...as("c5"), ...mq });
+  const id5 = /registrado: (\S+)/.exec(r.out)?.[1];
+  r = run(["claim-enqueue", "--as", "Claude 7 X"], { ...C7, ...mq });
+  revisoesNoCorreio(MQ, 1445, H5, ["Claude 1 Q", "Claude 2 Q", "Claude 6 Q"]);
+  r = run(["verify-enqueue", "--as", "Claude 7 X", id5], { ...C7, ...mq });
+  is("1445: a trailerless merge that is only git's own merge leaves the gate checked, and three READY pass", r.ok && new RegExp(`enfileire ${H5}`).test(r.out), r.out);
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

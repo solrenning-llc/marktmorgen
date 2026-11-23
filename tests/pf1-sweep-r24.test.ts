@@ -348,7 +348,8 @@ test("an answer not known (a 500) keeps the claim, and the next pass does not se
     refuseMailTo = "";
     refuseWith = 422;
   }
-  assert.equal(await markOf(id), "sending", "the \"sending\" mark is kept on an answer not known");
+  // Changed (rule 23, Codex N1 on #3929): the claim holds "sending:" and this pass's own value (RECOVERY_ADMIT).
+  assert.match(String(await markOf(id)), /^sending:/, "the \"sending\" mark is kept on an answer not known");
   const before = sent.length;
   assert.equal(await remindAbandoned(store, left(id, email)), "skip");
   assert.deepEqual(sent.slice(before), []);

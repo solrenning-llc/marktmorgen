@@ -37,7 +37,7 @@ test("an abandoned upload the provider already removed gives its reserved bytes 
   const empty = async () => ({ bytes: 0, brake: 100, left: 100, full: false, available: true });
   const input = { folder, ownerId: "product", name: "file.pdf", bytes: 100, type: "application/pdf" };
   try {
-    const opened = await openReservedVault(input, 100, empty);
+    const opened = await openReservedVault(input, 100, empty, async () => true);
     assert.equal(opened.ok, true);
     if (!opened.ok) throw new Error("open failed");
     // The creator closed the tab. Eight days later the upload's own record has expired (UPLOAD_SECONDS),
@@ -49,7 +49,7 @@ test("an abandoned upload the provider already removed gives its reserved bytes 
     original(["SET", ledger, JSON.stringify(rows)]);
     sessionsGone = true;
     // Nothing is stored and nothing can be: the store's whole room must be usable again.
-    const again = await openReservedVault(input, 100, empty);
+    const again = await openReservedVault(input, 100, empty, async () => true);
     assert.equal(again.ok, true);
   } finally { globalThis.fetch = saved; }
 });

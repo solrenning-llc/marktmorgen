@@ -65,7 +65,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
-import { type FencedChange, type Held as LockHeld, LockBusyError, applyIfHeld, holdLock } from "@/lib/redis-lock";
+import { type FencedChange, type Held as LockHeld, LockBusyError, applyIfHeld, holdLock, withLock } from "@/lib/redis-lock";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { CLAIM_PAGES, CLAIMS_LEFT_DAYS, DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE, closesStore } from "@/lib/plan-closing-rules";
 import { standingOf } from "@/lib/plan-standing";
@@ -79,7 +79,7 @@ import { domainKey } from "@/lib/domains";
 import { dropTeam, memberStoresExact, readTeam } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
 import { revokeAllKeys } from "@/lib/api-keys";
-import { forgetBoth, queueStoreForget } from "@/lib/store-forget-retry";
+import { forgetBoth, queueStoreForget, queueUnseenFiles } from "@/lib/store-forget-retry";
 import { forgetStoreWebhooks } from "@/lib/webhooks";
 import { forgetStoreSync } from "@/lib/email-sync";
 import { forgetShipmentMail } from "@/lib/shipment-mail-outbox";
@@ -168,6 +168,11 @@ export type Batched = {
   queued?: true;
   /** A deleted store's addresses that still led to it when it was deleted, held back again at its admission (settleDeletedStore). */
   holds?: string[];
+  /**
+   * A deleted store's community id, so a round its admission puts in line lists its community's pictures too
+   * (community/<folder>/), which nothing else names once its record is gone (Claude 5's LEVE 1 on #4348).
+   */
+  community?: string;
 };
 
 /** Every file-like record in what a store keeps: a path and the day it was added. */
@@ -481,8 +486,16 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
     // The erasing mark first (Codex N1's HIGH on #3156): written through the same fence as the deletes, before any of
     // them, so from the first delete on no plan starts on this store (lib/store.ts, setSubscription) and a payment for it
     // is returned (closingSince). Its write not proved throws here, with nothing deleted. It goes with the record.
-    await keep();
-    await apply([["HSET", ERASING_KEY, await erasingField(ref), String(now)]]);
+    // Written under the PayPal press's own lock too (Codex L-20261120-0448): a press holding it (lib/paypal-payouts.ts,
+    // payWithPayPal) finishes, its money asked for and its batch written down, before the erasure begins, and one that
+    // comes after finds the mark and asks for nothing (KEEP_OPEN_IF_LIVE). A lock held past its wait throws
+    // LockBusyError here, with nothing marked or deleted, and the walk tries the store again later.
+    const markErasing = async () => {
+      await keep();
+      await apply([["HSET", ERASING_KEY, await erasingField(ref), String(now)]]);
+    };
+    if (store.statsId) await withLock(`nl:pp:${store.statsId}:lock`, 120, 5_000, markErasing);
+    else await markErasing();
     // Its calendar hosts' claims, which are kept by the host, across the stores they serve: each page read exactly, each
     // HDEL made through the lock (fencedBy), the lock made to last before a host's first, and where a walk stopped kept
     // for the next (clearClaims, Claude 4 on #3660). The key of that place goes with the store's other keys below.
@@ -761,6 +774,7 @@ export async function queueDeleted(store: Store, now = Date.now()): Promise<Batc
     at: now,
     deleted: true,
     queued: true,
+    ...(store.community?.id ? { community: store.community.id } : {}),
   };
   const written = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]), 1)?.[0];
   if (written !== 0 && written !== 1) throw new UnknownReplyError("a deleted store's walk entry written");
@@ -847,10 +861,20 @@ async function admitDeleted(entries: Map<string, Batched>, raws: Map<string, str
         console.error("forgetting a deleted store's webhooks, keys and assistant notes at its walk failed; its walk waits, and it is put in line to try again", error);
         sure = false;
         try {
-          await queueStoreForget(entry.statsId ?? null, entry.sid);
+          // Its community too, checked there against COMMUNITY_ID, so the round lists its pictures as well.
+          await queueStoreForget(entry.statsId ?? null, entry.sid, Date.now(), typeof entry.community === "string" ? entry.community : null);
         } catch (queued) {
           console.error("putting a deleted store's webhooks, keys and assistant notes in line failed", queued);
         }
+        continue;
+      }
+      // Its files, when the delete's own try neither noted them as seen to nor put them in line (a request cut off part
+      // way): put in line now, before its entry joins the walk; not confirmed, the entry waits (Codex X6's LOW on #4348).
+      try {
+        await queueUnseenFiles(entry.statsId ?? null, entry.sid, Date.now(), typeof entry.community === "string" ? entry.community : null);
+      } catch (error) {
+        console.error("whether a deleted store's files were seen to could not be confirmed; its walk waits", error);
+        sure = false;
         continue;
       }
       const walkable: Batched = { ...entry };
@@ -976,7 +1000,10 @@ async function ownsAnother(email: string, sid: string): Promise<boolean> {
   if (!ids) throw new UnknownReplyError("the owner's other stores (SMEMBERS)");
   if (ids.some((id) => !STORE_ID_PATTERN.test(id))) throw new UnknownReplyError("the owner's other stores (an id that is not a store's)");
   const others = ids.filter((id) => id !== sid);
-  if (others.length > MAX_STORES_PER_ACCOUNT) throw new UnknownReplyError(`the owner's other stores, more than an account may have (SMEMBERS),`);
+  // The set holds only the stores after the account's first one, so at most MAX_STORES_PER_ACCOUNT - 1 members can
+  // remain after the closing store itself is left out. Exactly MAX_STORES_PER_ACCOUNT is already an impossible set,
+  // never proof that the owner has no other live store.
+  if (others.length >= MAX_STORES_PER_ACCOUNT) throw new UnknownReplyError(`the owner's other stores, more than an account may have (SMEMBERS),`);
   for (const id of others) {
     const other = await storeUnder(`#${id}`, "whether the owner of a closing store keeps another store (GET)");
     if (other && other.email.toLowerCase() === email.toLowerCase()) return true;
@@ -993,6 +1020,9 @@ async function accountHeld(email: string, account: string): Promise<boolean> {
   if (!replies || !Array.isArray(ids) || ids.some((id) => typeof id !== "string")) throw new UnknownReplyError("the owner's other stores (SMEMBERS)");
   // An id that is not a store's does not prove that no store holds the account: unknown, as in ownsAnother.
   if ((ids as string[]).some((id) => !STORE_ID_PATTERN.test(id))) throw new UnknownReplyError("the owner's other stores (an id that is not a store's)");
+  // The set holds only stores after the account's first one. Five members already exceed the four-extra-store bound;
+  // an impossible set is not proof that no live store keeps this shared account.
+  if (ids.length >= MAX_STORES_PER_ACCOUNT) throw new UnknownReplyError("the owner's other stores, more than an account may have (SMEMBERS)");
   for (const id of ids as string[]) {
     const other = await storeUnder(`#${id}`, "whether the owner's other store sells through a closing store's account (GET)");
     if (other && other.email.toLowerCase() === email.toLowerCase() && other.stripeAccountId === account) return true;
@@ -1725,8 +1755,11 @@ async function decideCalendars(entry: Batched): Promise<string[]> {
     const serves = typeof email === "string" ? await servesAnother(email, entry.sid) : null;
     if (serves === true) continue;
     if (serves === false) {
-      const reply = repliesFor(await redisPipeline([["DEL", ...hostCalendarKeys(hostId(email))]]), 1)?.[0];
-      if (Number.isSafeInteger(reply) && (reply as number) >= 0) continue;
+      // One DEL of the calendar's keys answers how many it removed: only 0 to that many is a count; anything above it
+      // proves nothing, and the host is decided again on the next run (Codex U, U-20261119-0633).
+      const keys = hostCalendarKeys(hostId(email));
+      const reply = repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0];
+      if (Number.isSafeInteger(reply) && (reply as number) >= 0 && (reply as number) <= keys.length) continue;
       console.error("deleting a closed store's host's calendar was not confirmed; it is decided again on the next run", reply);
     }
     undecided.push(email);

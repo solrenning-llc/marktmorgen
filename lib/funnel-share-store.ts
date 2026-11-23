@@ -24,6 +24,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type BundleOutline, type FunnelBundle } from "@/lib/funnel-bundle";
 import { MAX_SHARE_DAYS, MAX_SHARE_NAME, SHARE_CODE, SHARE_ID } from "@/lib/funnel-share-rules";
+import { ERASING_KEY, STORE_ID_PATTERN, type Store, ensureStoreId, erasingField, storeIdCommand, storeRef } from "@/lib/store";
 
 const listKey = (statsId: string) => `nl:fshares:${statsId}`;
 export const lookupKey = (hash: string) => `nl:fshare:${hash}`;
@@ -108,6 +109,16 @@ export async function createShare(
   input: { name: string; funnelId: string; days: number; from: string; bundle: FunnelBundle; outline: BundleOutline; limit: number },
   nowSeconds = Math.floor(Date.now() / 1000),
 ): Promise<{ ok: true; code: string; entry: ShareEntry } | { ok: false; error: "full" }> {
+  return makeShare(statsId, input, nowSeconds, null);
+}
+
+/** The share itself, with the store's erasure fence (createStoreShare) or without it (createShare, the tests' primitive). */
+async function makeShare(
+  statsId: string,
+  input: { name: string; funnelId: string; days: number; from: string; bundle: FunnelBundle; outline: BundleOutline; limit: number },
+  nowSeconds: number,
+  fence: { idKey: string; field: string; ref: string } | null,
+): Promise<{ ok: true; code: string; entry: ShareEntry } | { ok: false; error: "full" }> {
   const days = Math.min(Math.max(1, Math.floor(input.days)), MAX_SHARE_DAYS);
   const code = `mmf_${randomBytes(16).toString("hex")}`;
   const hash = hashOf(code);
@@ -121,13 +132,68 @@ export async function createShare(
     hash,
   };
   const record: ShareRecord = { statsId, id: entry.id, expiresAt: entry.expiresAt, from: input.from.slice(0, 80) };
+  const args = [entry.id, JSON.stringify(entry), JSON.stringify(record), JSON.stringify(input.outline), JSON.stringify(input.bundle), input.limit, days * 86_400];
   const replies = await redisPipeline([
-    ["EVAL", CREATE_SHARE, 2, listKey(statsId), lookupKey(hash), entry.id, JSON.stringify(entry), JSON.stringify(record), JSON.stringify(input.outline), JSON.stringify(input.bundle), input.limit, days * 86_400],
+    fence
+      ? ["EVAL", CREATE_STORE_SHARE, 4, listKey(statsId), lookupKey(hash), fence.idKey, ERASING_KEY, ...args, fence.field, fence.ref]
+      : ["EVAL", CREATE_SHARE, 2, listKey(statsId), lookupKey(hash), ...args],
   ]);
+  // Gone or erasing is an exact -4, read before countOf (which takes only counts): nothing was written.
+  if (fence && repliesFor(replies, 1) && replies[0] === -4) throw new ShareStoreGoneError();
   const reply = repliesFor(replies, 1) ? countOf(replies[0]) : null;
   if (reply === 1) return { ok: true, code, entry };
   if (reply === 0) return { ok: false, error: "full" };
   throw new Error("Share link could not be confirmed");
+}
+
+/**
+ * CREATE_SHARE fenced by the store's erasure (Codex L, L-20261120-1836): the same creation in one step with the check
+ * that the store is still live. A share is made after its funnel was collected from the store, so its creation can land
+ * after the closing walk passed the store's (empty) share list; a plain CREATE_SHARE would then put back the list and a
+ * snapshot that opens with the erased store's name as its sender, for up to MAX_SHARE_DAYS. The fence is
+ * lib/store-live-cache.ts's: the erasing mark (lib/store.ts ERASING_KEY) must be absent and the store's id key must
+ * still name the owner ref the request was admitted under (closeStoreRecord deletes it in the same fenced step as the
+ * mark). An account move (moveAccount) keeps the sid and statsId but changes that value, and the erasure then marks
+ * the NEW ref: a request admitted under the old ref is refused, so it cannot pass the new owner's erasing mark (Codex
+ * L, L-20261121-0043). -4 when either check fails, nothing written. KEYS as CREATE_SHARE's, then the store's id key
+ * and ERASING_KEY; ARGV as CREATE_SHARE's, then the store's erasing field and the admitted ref. Inner commands: HGET
+ * and GET more than CREATE_SHARE's (SHARE_FENCE_EXTRA_COMMANDS).
+ */
+export const CREATE_STORE_SHARE = `-- marktmorgen:funnel-share-live:v2
+if redis.call("HGET", KEYS[4], ARGV[8]) then return -4 end
+if redis.call("GET", KEYS[3]) ~= ARGV[9] then return -4 end
+${CREATE_SHARE.split("\n").slice(1).join("\n")}`;
+
+/** What the fence adds to a share's creation, as Upstash bills a script's inner commands: its HGET and GET. */
+export const SHARE_FENCE_EXTRA_COMMANDS = 2;
+/** The bytes the fence adds to a share's request: the admitted owner ref (a full UTF-8 address) and its framing. */
+export const SHARE_FENCE_EXTRA_BYTES = 2_048;
+
+/** A share refused because the store is gone or its erasure has begun: no list, snapshot or code was made. */
+export class ShareStoreGoneError extends Error {
+  constructor() {
+    super("the store is gone or being erased, so no share link was made");
+    this.name = "ShareStoreGoneError";
+  }
+}
+
+/**
+ * createShare for a live store, fenced by its erasure (CREATE_STORE_SHARE): the only one the studio's share route
+ * calls. A store from before ids is given its id first (ensureStoreId, once for good, as the owner's studio does), and
+ * only while its record still carries the same statsId; a new store under the same owner is refused, never written
+ * for. ShareStoreGoneError when the store is gone or erasing; "full" and every other answer as createShare.
+ */
+export async function createStoreShare(
+  store: Store,
+  input: { name: string; funnelId: string; days: number; from: string; bundle: FunnelBundle; outline: BundleOutline; limit: number },
+  nowSeconds = Math.floor(Date.now() / 1000),
+): Promise<{ ok: true; code: string; entry: ShareEntry } | { ok: false; error: "full" }> {
+  const statsId = store.statsId;
+  if (!statsId) throw new Error("a share link needs the store's statsId");
+  const named = STORE_ID_PATTERN.test(store.sid) ? store : await ensureStoreId(storeRef(store));
+  if (!named || !STORE_ID_PATTERN.test(named.sid) || named.statsId !== statsId) throw new ShareStoreGoneError();
+  const ref = storeRef(named);
+  return makeShare(statsId, input, nowSeconds, { idKey: storeIdCommand(named.sid)[1], field: await erasingField(ref), ref });
 }
 
 /** Revokes a link at once: its snapshot first, then its line in the list. Throws when a reply is in another shape: "not there" only on a confirmed absence. */

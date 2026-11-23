@@ -207,7 +207,16 @@ function throughAnchor(store: WindowFields, window: AllowanceWindow | null, now:
   if (anchor === undefined || anchor === null) return window;
   if (!isAllowanceAnchor(anchor)) return null;
   if (anchor.subscriptionId !== store.subscriptionId) return window;
-  return anchoredWindow(anchor, now);
+  const month = anchoredWindow(anchor, now);
+  // In a last period that does not renew, no month of the anchor opens before it ends: the month before runs on to
+  // its end, so the few days left of a paid month never get a whole allowance of their own (review of #4561, RED 1
+  // and RED 2: a switch and a stop gave two allowances for one paid month).
+  const period = store.period;
+  if (month && isPeriod(period) && !period.renews && month.start > period.start * 1000 && month.end > period.end * 1000) {
+    const before = anchoredWindow(anchor, month.start - 1);
+    return before ? { ...before, end: period.end * 1000 } : null;
+  }
+  return month;
 }
 
 /**
@@ -311,8 +320,14 @@ export function anchorAfter(previous: WindowFields, next: WindowFields, now = Da
     return isAllowanceAnchor(kept) && (skippedRenewal(previous, next) || !keptThroughStop(previous, next, kept, now)) ? null : kept;
   }
   if (!Number.isFinite(now)) return null;
-  if (standingOf(next, now / 1000) !== "paid" || !isPeriod(next.period)) return null;
   const old = { ...previous, allowanceAnchor: null };
+  // A paying record whose period is written as unknown (Stripe gave no ends) keeps the window open now as its anchor,
+  // so the period read after it cannot open one of its own (review of #4561, RED 5).
+  if (next.subscriptionActive && next.period === null && isPeriod(previous.period) && previous.subscriptionActive) {
+    const open = windowAt(old, now);
+    return open?.billing ? anchorFrom(next.subscriptionId, open) : null;
+  }
+  if (standingOf(next, now / 1000) !== "paid" || !isPeriod(next.period)) return null;
   const open = windowAt(old, now);
   if (!open || !open.billing) return null;
   // Only a period that begins inside the open window, after it began, moved without a renewal: one that begins at its
@@ -397,11 +412,27 @@ export function ledgerMonthOf(window: AllowanceWindow): string {
  * its start: a counter made ahead for a window worked out before the period
  * that holds it was known (a scheduled email's hold) never lapses while that
  * month still runs, which would open a second allowance in it, and a give-back
- * (lib/store-allowance.ts, giveAllowanceIn) still finds it (C3-112).
+ * (lib/store-allowance.ts, giveAllowanceIn) still finds it (C3-112). Since
+ * Claude 6's review of #4561, twice that: the last month of an anchor in a
+ * period that does not renew runs on to the period's end (throughAnchor), less
+ * than a month after its own end, and its counter, made before that stretch was
+ * known, must outlive it, or the next take makes a fresh one under the same id.
  */
+export const BILLING_COUNTER_KEEP_DAYS = 2 * LONGEST_WINDOW_DAYS;
 export function keepSecondsFor(window: AllowanceWindow, now = Date.now()): number {
-  const until = window.billing ? Math.max(window.end, window.start + LONGEST_WINDOW_DAYS * 86_400_000) : window.end;
+  const until = window.billing ? Math.max(window.end, window.start + BILLING_COUNTER_KEEP_DAYS * 86_400_000) : window.end;
   return Math.max(86_400, Math.ceil((until - now) / 1000) + 86_400);
+}
+
+/**
+ * Seconds a counter keyed by this store's window id (windowId) must be kept, at least `atLeast`: its own fixed keep,
+ * and never less than the window's (keepSecondsFor), so a window stretched to its period's end never outlives a
+ * counter made in it, which would open a second allowance under the same id (Claude 6 on #4561, rule 30). With no
+ * window, `atLeast`.
+ */
+export function windowKeySeconds(store: WindowFields, atLeast: number, now = Date.now()): number {
+  const window = allowanceWindow(store, now);
+  return window ? Math.max(atLeast, keepSecondsFor(window, now)) : atLeast;
 }
 
 /** "November 19" (or "November 19, 2027" in another year): the day an allowance opens again. */

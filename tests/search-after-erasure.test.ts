@@ -51,6 +51,31 @@ async function main(): Promise<void> {
     is("control: a live store's search finds its products and keeps the index", [live !== null && live !== "unavailable" && live.total > 0, exists(key)], [true, 1]);
   }
 
+  part("Review of #5252: a live store whose index could not be confirmed kept still answers the search it paid for");
+  {
+    const store = await searchStore();
+    const key = searchIndexKey(store);
+    // Redis fails on the step that keeps the index (the store-cache-live fence), as an outage on a live store would.
+    const pipeline = redis.pipeline.bind(redis);
+    let failed = 0;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("marktmorgen:store-cache-live"))) {
+        failed += 1;
+        throw new Error("synthetic Redis outage");
+      }
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    let found: Awaited<ReturnType<typeof searchStorePaid>>;
+    try {
+      found = await searchStorePaid(store, "lesson");
+    } finally {
+      redis.pipeline = pipeline;
+    }
+    is("the keeping step was tried and failed", failed, 1);
+    is("the search still shows the matches it read and paid for", found !== null && found !== "unavailable" && found.total > 0, true);
+    is("and no index is counted on", exists(key), 0);
+  }
+
   done();
 }
 

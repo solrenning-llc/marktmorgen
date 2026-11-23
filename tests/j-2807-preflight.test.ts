@@ -78,7 +78,7 @@ async function scenario(index: number, mode: Mode): Promise<void> {
     const file={path,name:"answer.pdf",bytes:1000,type:"application/pdf"};
     providerFiles.set(path,file.bytes);
     if(!await takeRoom(storeKey(store),file.bytes,undefined,path))throw new Error("room refused");
-    await handIn({data:store,courseId,lessonId:lesson.id,who,email:"student@example.com",task,text:"A real writer's synthetic answer.",file});
+    await handIn({ erasure: { listId: "list_synthetic", email: "student@example.com" },data:store,courseId,lessonId:lesson.id,who,email:"student@example.com",task,text:"A real writer's synthetic answer.",file});
     return {id,courseId,lessonId:lesson.id,who,path,earlier};
   }
   const target=await makeCourse("Requested course");

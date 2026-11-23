@@ -19,10 +19,23 @@ import { randomBytes } from "node:crypto";
 import type { Store } from "@/lib/store";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import type { MeetProvider } from "@/lib/call-setup";
-import { accessFor, testKey, NotConnected } from "@/lib/meet-connect";
+import { type MeetStore, accessFor, testKey, NotConnected } from "@/lib/meet-connect";
 import { eventId, googleCreate, googleDelete, googleMove, zoomCreate, zoomDelete, zoomMove } from "@/lib/meet-providers";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
+import { keepIfStoreLive } from "@/lib/live-fence";
+import { storeLiveFence } from "@/lib/store-live-cache";
+
+/**
+ * A test meeting's private link is kept locally only while its store is live and not being erased (Codex
+ * L-20261120-1540): a provider answering after the store's erasure began writes nothing back, and the creator is told
+ * the test meeting is unavailable. Kept with no expiry, as before, for a live store (lib/live-fence.ts
+ * keepIfStoreLive); any answer but "kept" is refused.
+ */
+async function keepTest(store: Store, key: string, test: TestMeeting): Promise<void> {
+  const kept = await keepIfStoreLive(await storeLiveFence(store), key, JSON.stringify(test)).catch(() => "unknown" as const);
+  if (kept !== "kept") throw new TestMeetingUnavailable();
+}
 
 export class TestMeetingUnavailable extends Error {
   constructor() { super("The test meeting could not be changed just now. Try again in a moment."); }
@@ -93,7 +106,7 @@ export async function makeTest(store: Store, provider: MeetProvider, now = Date.
   const had = (await readTests(statsId, [provider]))[provider];
   if (had) return had;
   if (store.period?.funded === true && !await reservePaidResourceWindow(store)) throw new TestMeetingUnavailable();
-  const access = await accessFor(statsId, provider);
+  const access = await accessFor(statsId, provider, undefined, "", store);
   // An hour from now, on the next five minutes: far enough not to ring anybody's phone as "starting".
   const start = Math.ceil((now + 3_600_000) / 300_000) * 300_000;
   const end = start + TEST_MEETING_MINUTES * 60_000;
@@ -109,7 +122,7 @@ export async function makeTest(store: Store, provider: MeetProvider, now = Date.
   };
   const meeting = provider === "zoom" ? await zoomCreate(access.token, spec) : await googleCreate(access.token, spec);
   const test: TestMeeting = { id: meeting.id, link: meeting.link, start, end, madeAt: now };
-  await redisPipeline([["SET", testKey(statsId, provider), JSON.stringify(test)]]);
+  await keepTest(store, testKey(statsId, provider), test);
   return test;
 }
 
@@ -127,21 +140,23 @@ export async function moveTest(store: Store, provider: MeetProvider): Promise<Te
   const had = (await readTests(statsId, [provider]))[provider];
   if (!had) return null;
   if (store.period?.funded === true && !await reservePaidResourceWindow(store)) throw new TestMeetingUnavailable();
-  const access = await accessFor(statsId, provider);
+  const access = await accessFor(statsId, provider, undefined, "", store);
   const shift = TEST_MOVE_MINUTES * 60_000;
   const when = { start: had.start + shift, end: had.end + shift, tz: "UTC" };
   if (provider === "zoom") await zoomMove(access.token, had.id, when);
   else await googleMove(access.token, had.id, when);
   const moved: TestMeeting = { ...had, start: when.start, end: when.end };
-  await redisPipeline([["SET", testKey(statsId, provider), JSON.stringify(moved)]]);
+  await keepTest(store, testKey(statsId, provider), moved);
   return moved;
 }
 
 /** Deletes the test meeting on the creator's account, and forgets it. False when there was none. */
-export async function removeTest(statsId: string, provider: MeetProvider): Promise<boolean> {
+export async function removeTest(store: MeetStore, provider: MeetProvider): Promise<boolean> {
+  const statsId = store.statsId;
+  if (!statsId) return false;
   const had = (await readTests(statsId, [provider]))[provider];
   if (!had) return false;
-  const access = await accessFor(statsId, provider);
+  const access = await accessFor(statsId, provider, undefined, "", store);
   if (provider === "zoom") await zoomDelete(access.token, had.id);
   else await googleDelete(access.token, had.id);
   // Read as written (CX-123 rule 24): a DEL whose reply is not a count is not known to be done, and is said so;

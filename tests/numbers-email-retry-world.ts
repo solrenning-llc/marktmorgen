@@ -62,7 +62,7 @@ export async function sendEmail(message: { to: string; subject: string; idempote
 }
 
 export async function storeOf(folder: string) {
-  return { handle: folder, name: "Fixture Store", email: "owner@example.test", statsId: "st-fixture", sid: "fixture-sid", currency: "usd", weeklyAi: false, subscriptionActive: true, trialEnds: 0 };
+  return { handle: folder, name: "Fixture Store", email: "owner@example.test", statsId: "b".repeat(32), sid: "f".repeat(32), currency: "usd", weeklyAi: false, subscriptionActive: true, trialEnds: 0 };
 }
 
 // lib/chat-summary.ts

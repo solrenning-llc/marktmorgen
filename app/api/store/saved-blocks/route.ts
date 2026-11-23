@@ -14,6 +14,7 @@ import { BLOCK_KINDS, type BlockKind } from "@/lib/sales-page";
 import { type SavedSection, SECTION_WHY, newSectionId, readSectionInput, updateProblem, withSection } from "@/lib/saved-blocks";
 import { dropSection, readSection, readSections, sectionUses, writeSection } from "@/lib/saved-block-store";
 import { MONTH_USE_SECONDS, countUse, storeMonthKey } from "@/lib/funnel-share-store";
+import { windowKeySeconds } from "@/lib/allowance-window";
 import { MAX_APPLY_PAGES, shareLimitsFor, monthOfUse } from "@/lib/funnel-share-rules";
 import type { Store } from "@/lib/store";
 
@@ -151,7 +152,7 @@ export async function POST(request: NextRequest) {
       const section: SavedSection = { id: existing?.id ?? newSectionId(), name: read.name, blocks: read.blocks, updatedAt: now };
       // The pages that use it are read before the section is written, so an unknown page read changes nothing.
       const uses = existing ? await usesOf(store, section, text(body.except, 40)) : [];
-      const written = await writeSection(statsId, section, !existing, limits.savedBlocks);
+      const written = await writeSection(store, section, !existing, limits.savedBlocks);
       if (written === "full") return refuse("sections_full", 400, { limit: limits.savedBlocks });
       if (written === "gone") return refuse("unknown", 404);
       return Response.json({ ok: true, section, picturesLeft: read.picturesLeft, uses });
@@ -171,7 +172,9 @@ export async function POST(request: NextRequest) {
       // The month's count is taken first, as before, so a request past the figure reads no page at all (Codex Z on
       // #2830: those reads would be beyond what the request's studio unit covers). Then every page is read before any
       // is written, so an unknown read writes nothing; the try it counted is said in the answer (page_unread_counted).
-      if (!(await countUse(storeMonthKey(statsId, "apply", month), limits.appliesPerMonth, MONTH_USE_SECONDS))) return refuse("applies_full", 429, { limit: limits.appliesPerMonth });
+      // Kept as long as its window, never a fixed 32 days: a stretched window would otherwise open a second priced
+      // allowance (Claude 6 on #4561, rule 30; as the funnel-share routes do).
+      if (!(await countUse(storeMonthKey(statsId, "apply", month), limits.appliesPerMonth, windowKeySeconds(store, MONTH_USE_SECONDS)))) return refuse("applies_full", 429, { limit: limits.appliesPerMonth });
       const titles = new Map([...(await readCards(store)).values()].map((card) => [card.id, card.title]));
       const planned: { key: string; next: NonNullable<ReturnType<typeof withSection>> }[] = [];
       const skipped: { key: string; why: string }[] = [];

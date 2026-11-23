@@ -7,10 +7,11 @@ import { heldBack, passedForGate } from "@/lib/quiz";
 import { plain, serveFile } from "@/lib/serve-file";
 import { readCourseListing } from "@/lib/catalog";
 import { coursesWords } from "@/lib/buyer-words/courses";
-import { takePublicRequest } from "@/lib/traffic";
+import { takePublicRequestExact } from "@/lib/traffic";
 import { speech } from "@/lib/buyer-words";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
+import { limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
 
 /**
  * A lesson's download: a worksheet, the slides. Handed over only to someone
@@ -56,7 +57,10 @@ export async function GET(request: NextRequest) {
     }
   }
   // One of the store's public requests: on the buyers' side, or the public's for a lesson anyone may preview (lib/buyer-actions.ts).
-  if (!(await takePublicRequest(store, found.lesson.preview ? "public" : "buyer"))) return plain(503, speech(store).w.restingTitle);
+  const taken = await takePublicRequestExact(store, found.lesson.preview ? "public" : "buyer").catch(unknownLimit);
+  // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
+  if (taken === "unknown") return limitUnknownResponse();
+  if (!taken) return plain(503, speech(store).w.restingTitle);
   // A preview lesson's file goes to anyone, signed in or not: a free copy, paused with the store's other free
   // downloads (lib/serve-file.ts), unless whoever asks holds the course (or owns the store), whose copy is a paid one.
   const paid = !found.lesson.preview || (await courseAccess(store, product, await cookies(), course)).state === "open";

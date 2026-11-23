@@ -25,17 +25,21 @@ const STEPS = new Set(["prepare", "files"]);
 const KEPT_AS_COMPANY: Record<string, string> = {
   "nl:ppsell:tell": "The company's line of canceled PayPal orders whose notices the sender refused: two members an order, each gone once sent, once its store is gone or is another store now (retryPayPalCancelNotices in lib/paypal-delivery.ts), or within thirty days (lib/paypal-sales.ts).",
   "nl:plan:closing:": "The closing job's record of the store: dates only, kept ERASED_KEPT_DAYS after (lib/plan-closing.ts).",
-  "nl:store:handle:": "The store's addresses, held back from anybody else for RELEASE_QUARANTINE_DAYS (lib/store.ts, closeStoreRecord).",
+  "nl:store:handle:": "The store's addresses, held back from anybody else for RELEASE_QUARANTINE_DAYS, or until its moved notice ends, EXIT_NOTICE_DAYS after its closing day (lib/store.ts, closeStoreRecord; lib/exit-redirect-rules.ts).",
   "nl:ship:done:": "The legacy physical delivery record has400days; a matching inactive outbox source has no TTL while pending and400days after an explicit outcome. The outbox cleanup handles pending payloads, not an invented universal expiry.",
 };
 /** Families gone by themselves whose time is set in code and not by a part of the registry. */
 const TIMED_IN_CODE: Record<string, [string, string]> = {
   "nl:taxobs:v1:": ["lib/checkout-sweep.ts", "TAX_OBSERVATION_KEEP_SECONDS"],
+  // The month's count of email gap checks (374 [SU7], a capped part): set with its own forty-day expiry.
+  "nl:mgap:checks:": ["lib/mail-frequency.ts", "MAIL_GAP_CHECK_WINDOW_SECONDS"],
   // The pace of a store's PayPal batch reads from the studio (a capped part): one mark kept five minutes.
   "nl:pp:pace:": ["lib/paypal-payouts.ts", "SETTLE_PACE_SECONDS"],
   "nl:pp:press:": ["lib/paypal-payouts.ts", "PRESS_PACE_SECONDS"],
   // A store's search index (a capped part): one record kept ten minutes.
   "nl:search:": ["lib/store-search-index.ts", "SEARCH_INDEX_SECONDS"],
+  // A store's Blob folder listed once a day, its total and the hourly tally (a capped part): each key kept three days.
+  "nl:storage:blob:": ["lib/blob-tally.ts", "BLOB_TALLY_KEEP_SECONDS"],
   // The mark of a passed-over Stripe event (a capped part): set with the same expiry as every event mark.
   "nl:hooks:evt:": ["lib/webhooks.ts", "EVENT_SECONDS"],
   "nl:call:confirmed:": ["lib/calls.ts", "CONFIRMED_SECONDS"],

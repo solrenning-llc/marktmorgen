@@ -104,6 +104,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/affiliates/paypal": row("money", never(MONEY)),
   "POST store/agreements": row("buyers", execute),
   "POST store/ai": row("pages", draft, "The writing help: its text comes back to the creator, nothing is saved by it."),
+  "POST store/ai-file": row("products", draft, "A draft product's file written with AI: the plan and the parts come back to the creator, and the PDF is kept only after the creator checks the text; the product stays a draft."),
   "POST store/announcement": row("pages", draft),
   "POST store/answers": row("pages", draft),
   "POST store/api-keys": row("access", never(ACCESS)),
@@ -125,6 +126,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/campaign-landing": row("pages", draft),
   "POST store/cart-deal": row("offers", draft),
   "POST store/chat-summary": row("connections", never(SECRET)),
+  "POST store/check-in": row("buyers", execute, "Lets one person in at an in-person event's door (36 [F5]): a ticket used cannot be taken back."),
   "POST store/closing-refunds": row("money", never(MONEY)),
   "POST store/collections": row("pages", draft),
   "POST store/come-back": row("offers", draft),
@@ -159,6 +161,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/dunning": row("email", draft),
   "POST store/email-sync": row("connections", never(CONNECT)),
   "POST store/embed-sites": row("settings", draft),
+  "POST store/exit": row("settings", draft, "A closing store's new address, shown for 90 days at its old address (97 [D2-OPEN-EXIT]): the agent may propose it, which the creator confirms; it sends visitors to another site."),
   "POST store/exit-offer": row("offers", draft),
   "GET store/export": row("buyers", never(PEOPLE_FILE)),
   "POST store/extras": row("products", draft),
@@ -194,6 +197,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/kit": row("pages", draft),
   "POST store/language": row("settings", draft),
   "GET store/leads": row("email", never(PEOPLE_FILE)),
+  "POST store/learning-paths": row("products", draft),
   "POST store/leaving": row("settings", draft),
   "POST store/letters": row("email", draft),
   "POST store/link-image": row("pages", draft),
@@ -231,6 +235,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/paypal/disconnect": row("money", never(MONEY)),
   "GET store/paypal/onboarded": row("money", never(BROWSER)),
   "POST store/person": row("buyers", execute, "Erasing a person cannot be undone: confirmed one person at a time, never in a batch."),
+  "POST store/person-refund": row("money", never(MONEY)),
   "POST store/phone": row("settings", never(BROWSER)),
   "POST store/photo": row("pages", draft),
   "POST store/physical-legal": row("products", draft),
@@ -252,12 +257,15 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/release": row("settings", execute, "Lets go of an old address for good."),
   "POST store/rename": row("settings", execute, "Moves the store's public address, which links elsewhere point to."),
   "POST store/resend": row("buyers", execute, "Sends a buyer their purchase email again."),
+  "POST store/sales-bulk": row("buyers", execute, "Sends several buyers their purchase email again, counted first."),
   "POST store/review-summary": row("community", read),
   "POST store/reviews": row("community", draft),
   "POST store/sale": row("offers", draft),
   "POST store/save-offer": row("offers", draft),
   "GET store/saved-blocks": row("pages", tool("list_saved_blocks")),
   "POST store/saved-blocks": row("pages", draft),
+  "GET store/sales-filters": row("buyers", read),
+  "POST store/sales-filters": row("buyers", draft),
   "POST store/sections": row("pages", draft),
   "POST store/setup": row("pages", draft),
   "GET store/shipped": row("buyers", read),
@@ -302,7 +310,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
 };
 
 /** Route prefixes where every action is money, so every row under them must be "never". */
-export const MONEY_PREFIXES = ["billing/", "stripe/", "store/paypal/", "store/closing-refunds", "store/affiliates/paypal", "store/affiliates/payout-batch"] as const;
+export const MONEY_PREFIXES = ["billing/", "stripe/", "store/paypal/", "store/closing-refunds", "store/affiliates/paypal", "store/affiliates/payout-batch", "store/person-refund"] as const;
 
 /** How many studio actions each kind of reach has: the measure of 631 (a). */
 export function coverageCounts(table: Readonly<Record<string, AgentAction>> = AGENT_COVERAGE): Record<AgentReach["kind"], number> {

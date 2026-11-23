@@ -222,6 +222,7 @@ import { COMMISSION_LIVE, canUse, hasPro, PLAN_PRICES, PLAN_TITLES, PRO_MONTHLY_
 import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { unusedSummary } from "@/lib/closing-refunds";
+import { EXIT_NOTICE_DAYS } from "@/lib/exit-redirect-rules";
 import { holdCounts } from "@/lib/closing-holds";
 import { CLOSING_CHECKOUT_SECONDS, lastPlanMoment } from "@/lib/closing-plan-guard";
 import { type Permission, type Role, ROLE_NAMES, ROLE_SUMMARIES, can } from "@/lib/team-roles";
@@ -237,11 +238,16 @@ import { PasskeySignIn } from "@/components/passkey-signin";
 import { TwoStepManager } from "@/components/two-step-manager";
 import { AppCodeInvite } from "@/components/app-code-invite";
 import { showAppCodeInvite } from "@/lib/app-code-invite-words";
-import { lockedUntil, twoStepStatus } from "@/lib/two-step";
+import { TwoStepAsk } from "@/components/two-step-ask";
+import { noSecondStep, showTwoStepAsk } from "@/lib/two-step-ask-rules";
+import { firstSaleKnown, lockKnown } from "@/lib/two-step-ask";
+import { twoStepStatus } from "@/lib/two-step";
 import { LOCKED_LIST } from "@/lib/locked-words";
 import { RecoveryAddressManager, RecoveryAddressUnread } from "@/components/recovery-address-manager";
 import { hideAddress, recoveryAddress } from "@/lib/recovery-address";
 import { ResendPurchase } from "@/components/resend-purchase";
+import { SalesBulkActions } from "@/components/sales-bulk-actions";
+import { bulkRowOf } from "@/lib/sales-bulk-rules";
 import { LeaveTeam } from "@/components/team-manager";
 import { productSegment } from "@/lib/product-slug";
 import { SharePanel } from "@/components/share-panel";
@@ -391,6 +397,11 @@ const META_NOTICES: Record<string, { title: string; body: string }> = {
   removed: {
     title: "Nothing was connected",
     body: "While this was connecting, Meta told us to delete this Facebook login's data. So nothing was kept, and the permission was given back to Meta. Connect again if you still want your ads read.",
+  },
+  // The store's closing began while Meta answered (lib/meta-ads.ts finishMeta): nothing of the connection was kept.
+  closed: {
+    title: "Nothing was connected",
+    body: "This store is closing, so Meta was not connected to it. Nothing was kept.",
   },
   refused: {
     title: "Meta did not finish connecting",
@@ -817,12 +828,15 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
   },
 };
 
-/** Comments under each course's lessons since the creator last opened that course's studio page. */
-async function newCommentsFor(products: { id: string; course?: { id: string } | null }[]): Promise<Record<string, number>> {
+/**
+ * Comments under each course's lessons since the creator last opened that course's studio page; null for every
+ * course when they could not be counted (rule 24), so the list says so instead of showing none.
+ */
+async function newCommentsFor(products: { id: string; course?: { id: string } | null }[]): Promise<Record<string, number | null>> {
   const courses = products.filter((p) => p.course).map((p) => [p.id, p.course!.id] as const);
   if (!courses.length) return {};
-  const counts = await freshCounts(courses.map(([, c]) => c)).catch(() => new Map<string, number>());
-  return Object.fromEntries(courses.map(([product, c]) => [product, counts.get(c) ?? 0]));
+  const counts = await freshCounts(courses.map(([, c]) => c)).catch(() => null);
+  return Object.fromEntries(courses.map(([product, c]) => [product, counts ? (counts.get(c) ?? null) : null]));
 }
 
 /** The products a store-wide sale can cover (lib/store-sale.ts), by title, for the sale's picker. */
@@ -961,8 +975,9 @@ export default async function StudioPage({
         store?.sid && may("team") ? readTeam(store.sid).catch(() => null) : Promise.resolve(null),
         isFreshSession(cookieStore.get(SESSION_COOKIE)?.value).catch(() => false),
         // Whether this browser got in without its second step, and until when what matters is locked (lib/two-step.ts).
-        // null when it could not be read: never taken for "not locked" (LOW 1 of Claude 1's review of #2945).
-        lockedUntil(cookieStore.get(SESSION_COOKIE)?.value).catch(() => null),
+        // null when it could not be read (lockKnown): never taken for "not locked" (LOW 1 of Claude 1's review of #2945),
+        // nor for "unlocked" by the first-sale ask (Codex H2 on #3511).
+        lockKnown(cookieStore.get(SESSION_COOKIE)?.value),
         // The person's two-step login (lib/two-step.ts), beside their passkeys.
         // null when it could not be read: never taken for "no request to turn it off" (Claude 4, C4-2980 on #2900).
         email ? twoStepStatus(email).catch(() => null) : Promise.resolve({ on: false, since: 0, codesLeft: 0, reset: 0, backup: "" }),
@@ -1345,13 +1360,18 @@ export default async function StudioPage({
   const passkeyRemovals: Record<string, number> = removed ? removed.atOf : {};
   const needsStep = firstReads.mayAdd ? !(await firstReads.mayAdd) : false;
   const canKeep = firstReads.liveStep ? mayKeepPasskey(await firstReads.liveStep) : false;
-  const [passkeysRead, team, freshLogin, lockedTill, twoStepRead, recoveryRead] = await firstReads.person;
+  const [passkeysRead, team, freshLogin, lockedRead, twoStepRead, recoveryRead] = await firstReads.person;
+  // An unread lock is null here and everywhere below: never "not locked" (rule 24), and the first-sale ask needs it for sure.
+  const lockedTill = lockedRead;
   // Not read just now (null) is not "no passkeys": each Passkeys section says so in place of its manager (rule 24).
   const passkeys = passkeysRead ?? [];
   // Not read just now (null) is not "none": the recovery section says so in place of its manager (rule 24).
   const recoveryShown = recoveryRead ?? "";
   // When it could not be read, the banner over Today and Two-step login below say so (unread); neither takes it for "off".
   const twoStep = twoStepRead ?? { on: false, since: 0, codesLeft: 0, reset: 0, backup: "" };
+  // 757 [STN4] unit 3: the store's first sale, read exactly and only for an account with no second step at all, so a
+  // protected one costs nothing; null (unknown) never asks (lib/two-step-ask.ts).
+  const soldFirstAt = store && noSecondStep({ appOn: twoStepRead === null ? null : twoStep.on, passkeys: passkeysRead === null ? null : passkeysRead.length, locked: lockedRead === null ? null : lockedRead > 0 }) ? await firstSaleKnown(store) : null;
   // This browser's lock: known and running (lockedNow), or not read just now (lockUnread). An unread lock is never
   // "not locked": the top of the page says so, the app's code is not offered and Two-step login offers nothing a lock
   // would refuse (tests/studio-lock-unread.test.ts).
@@ -1496,6 +1516,9 @@ export default async function StudioPage({
 
         {/* Passkeys but no app's code: a quiet invitation, once a browser session, from what was read above (owner C3-96). */}
         {store && twoStepRead !== null && !lockUnread && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedNow }) ? <AppCodeInvite /> : null}
+
+        {/* After the store's first sale, an account with no second step is asked to turn one on; dismissible, never blocking a sale (757 [STN4] unit 3). */}
+        {store && showTwoStepAsk({ firstSale: soldFirstAt, appOn: twoStepRead === null ? null : twoStep.on, passkeys: passkeysRead === null ? null : passkeysRead.length, locked: lockedRead === null ? null : lockedRead > 0 }) ? <TwoStepAsk sid={store.sid} seesSales={may("orders") || may("stats")} /> : null}
 
         {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
         {linksOff ? <ShortLinksOffNotice offAt={linksOff.offAt} backAt={linksOff.backAt} /> : null}
@@ -2785,6 +2808,18 @@ export default async function StudioPage({
                     </p>
                   </div>
                 ) : null}
+                {closing.today ? null : (
+                  <div className="mt-4">
+                    <p className="text-ink">
+                      {`Moving your store somewhere else? Give its new address, and for ${EXIT_NOTICE_DAYS} days after it closes, anyone who opens its old address here sees a short notice with a link to it.`}
+                    </p>
+                    <p className="mt-3">
+                      <a href={studioPath(store!, "", "moved")} className="btn btn-secondary">
+                        {store!.exitNotice ? "Change your new address" : "Give your new address"}
+                      </a>
+                    </p>
+                  </div>
+                )}
                 <p className="mt-4 text-ink-soft">
                   {`We keep no copy of your sales: every sale, refund and payout is on your own Stripe account, and stays there. Your account and sign-in stay. Tell your students to download their course certificates before that day: they can until then, and not after. Starting a plan again before that day keeps your store: everything stays as it is, your members' payments go on as they were with nothing charged for the days in between, and nothing is refunded.`}
                 </p>
@@ -3622,6 +3657,8 @@ export default async function StudioPage({
                         </li>
                       ))}
                     </ul>
+                    {/* 767 [STN14] unit 4: the same orders, chosen in a table, with what may be done to many at once. */}
+                    <SalesBulkActions sales={sold.sales.map(bulkRowOf)} canLabel={may("send")} canExport={may("export")} />
                     <p className="mt-4 text-sm text-ink-soft">
                       Up to {ORDERS_PAGE_SIZE} matching recent orders. For the full
                       history, open your Stripe dashboard.

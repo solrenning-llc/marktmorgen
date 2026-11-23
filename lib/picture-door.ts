@@ -154,14 +154,44 @@ export async function takePictureDoor(paths: string[], now = Date.now()): Promis
  * time read here is a second check that a file stored before its note (a door
  * asked again for somebody's picture) is kept. Anything that cannot be read is
  * kept. Best effort: nothing here throws.
+ *
+ * `known` holds the stored time this same request already read with its own
+ * head (app/api/store/image): that time is used, not asked for again, so a
+ * copy refused after its check costs the attaching request one head, as the
+ * line studio-blob prices it with the check (pictureCheckBlob; Codex N1, LOW 1
+ * on #2801). The check is the
+ * same: a name is never written over, so its stored time cannot change.
  */
-export async function dropTakenPictures(taken: Map<string, number>, paths: string[]): Promise<void> {
+export async function dropTakenPictures(taken: Map<string, number>, paths: string[], known?: ReadonlyMap<string, number>): Promise<void> {
   const ours: string[] = [];
   for (const path of new Set(paths)) {
     const noted = taken.get(path);
     if (noted === undefined) continue;
-    const stored = await head(path).then((found) => new Date(found.uploadedAt).getTime(), () => NaN);
+    const read = known?.get(path);
+    const stored = read !== undefined ? read : await head(path).then((found) => new Date(found.uploadedAt).getTime(), () => NaN);
     if (Number.isFinite(stored) && stored > noted) ours.push(path);
   }
   if (ours.length) await del(ours).catch(() => {});
+}
+
+/**
+ * Whether a note was put back on the door once already (returnToDoor): its time carries half a millisecond. A picture
+ * taken with such a note is checked again only paid for as a studio request (lib/picture-check.ts pictureChecker).
+ */
+export const putBackOnce = (noted: number): boolean => !Number.isInteger(noted);
+
+/**
+ * Puts pictures this request took from the door back on it, each at the time given (ms), after a check of the file
+ * did not finish (Claude 2 on #2843, 6750890970): the file is kept, and a later save finds the picture and checks it
+ * again. Only a path with a door list; best effort, nothing here throws (a note not put back leaves a file nothing
+ * shows, kept: storage, never a picture deleted).
+ */
+export async function returnToDoor(entries: ReadonlyArray<readonly [string, number]>): Promise<void> {
+  const commands: (string | number)[][] = [];
+  for (const [path, at] of entries) {
+    const key = doorsKey(path);
+    if (!key || !Number.isFinite(at) || at <= 0) continue;
+    commands.push(["ZADD", key, at, path], ["EXPIRE", key, PICTURE_DOOR_SECONDS]);
+  }
+  if (commands.length && isRedisConfigured()) await redisPipeline(commands).catch(() => {});
 }

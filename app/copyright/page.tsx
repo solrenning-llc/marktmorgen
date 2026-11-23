@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
+import { COUNTER_NOTICE_DAYS } from "@/lib/takedown-hold";
 
 export const metadata: Metadata = {
   title: "Copyright and Takedown Policy — Marktmorgen",
@@ -12,7 +13,7 @@ const link = "text-black underline underline-offset-2 hover:no-underline";
 
 export default function CopyrightPage() {
   return (
-    <LegalPage title="Copyright and Takedown Policy" lastUpdated="October 9, 2026" effective="October 9, 2026">
+    <LegalPage title="Copyright and Takedown Policy" lastUpdated="November 10, 2026" effective="October 9, 2026">
       <p>
         Marktmorgen hosts stores run by independent creators. Each creator is responsible for what they put on their
         store — the products, the pictures, the words, the links and anything played on the page — and our{" "}
@@ -65,6 +66,12 @@ export default function CopyrightPage() {
           We send a copy to the person who sent the notice. Unless they tell us within 10 business days that they have
           filed a court action to stop the infringement, we put the material back 10 to 14 business days after we received
           the counter-notice.
+        </p>
+        <p>
+          A link taken down for a copyright notice, with its picture, is kept for {COUNTER_NOTICE_DAYS} days, hidden from
+          everyone, so that we can put it back as it was. A counter-notice about it has to reach us within those{" "}
+          {COUNTER_NOTICE_DAYS} days. If none does, or if the person who sent the notice tells us they have gone to court,
+          the link and its picture are deleted when the {COUNTER_NOTICE_DAYS} days are over.
         </p>
       </LegalSection>
 

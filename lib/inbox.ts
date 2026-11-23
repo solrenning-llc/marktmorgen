@@ -38,7 +38,7 @@ import { alertCreator, messageEpisodeKey, messageEpisodeSeed } from "@/lib/phone
 import { SITE_URL } from "@/lib/site-url";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { chatWords } from "@/lib/buyer-words/chat";
-import type { Store } from "@/lib/store";
+import { ERASING_KEY, LIST_ID_PATTERN, MAX_STORE_BYTES, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { stringList } from "@/lib/redis-reply";
 import { type Member, readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
@@ -139,6 +139,59 @@ if #KEYS >= 5 then redis.call('SET', KEYS[5], ARGV[8], 'EX', ARGV[3]) end
 if ARGV[9] == '1' then redis.call('DEL', KEYS[4]) end
 return 1`;
 
+/** New conversations must belong to the same live store, in the write itself. The final two keys are
+ * identity and erasing; final three arguments are erasing field, expected ref and legacy statsId (or "").
+ * Legacy JSON is read with a byte bound and must name this very statsId, never just exist. */
+const INBOX_STORE_LIVE_LUA = `
+local legacy = ARGV[#ARGV]
+local ref = ARGV[#ARGV - 1]
+if legacy == '' then
+  if redis.call('GET', KEYS[#KEYS - 1]) ~= ref then return -1 end
+else
+  local raw = redis.call('GETRANGE', KEYS[#KEYS - 1], 0, ${MAX_STORE_BYTES})
+  if not raw or raw == '' or #raw > ${MAX_STORE_BYTES} then return -1 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= 'table' or record.statsId ~= legacy then return -1 end
+end
+if redis.call('HEXISTS', KEYS[#KEYS], ARGV[#ARGV - 2]) ~= 0 then return -1 end
+`;
+export const INBOX_STORE_LIVE = `-- marktmorgen:inbox-store-live:v1
+${INBOX_STORE_LIVE_LUA}return 1`;
+// The plain writer's body, with its token key taken by position: here the fence's identity and erasing keys come
+// last, so the token key (KEYS[5]) is there only with 7 keys. With "#KEYS >= 5", a new conversation without a token
+// (6 keys) would write "" over the store's identity key (Claude 6's LEVE on #5000).
+const OPEN_WRITE_BODY = INBOX_WRITE.slice(INBOX_WRITE.indexOf("\n") + 1).replace("if #KEYS >= 5 then", "if #KEYS >= 7 then");
+if (!OPEN_WRITE_BODY.includes("if #KEYS >= 7 then")) throw new Error("the inbox open writer lost its token test");
+export const INBOX_OPEN_WRITE = `-- marktmorgen:inbox-open-write:v2
+${INBOX_STORE_LIVE_LUA}${OPEN_WRITE_BODY}`;
+/** Two extra redis.call operations in the open writer; the pre-mail check is EVAL plus those same two calls. */
+export const INBOX_OPEN_FENCE_COMMANDS = 2;
+export const CONTACT_LIVE_COMMANDS = 1 + INBOX_OPEN_FENCE_COMMANDS;
+/** Extra wire bytes: the bounded script plus two keys, a 40-byte field, a ref of at most 320 code units
+ * (at most six JSON bytes per unit), a 32-byte legacy id and framing; no raw legacy JSON leaves Redis. */
+export const INBOX_LIVE_BYTES = 4_096;
+
+async function liveFence(store: Store): Promise<{ keys: string[]; args: string[] } | null> {
+  if (!store.email || (store.sid && !STORE_ID_PATTERN.test(store.sid)) || (store.extra && !store.sid) || (!store.sid && (!store.statsId || !LIST_ID_PATTERN.test(store.statsId)))) return null;
+  const ref = storeRef(store);
+  if (!ref || ref.length > 320) return null;
+  return {
+    keys: [store.sid ? storeIdCommand(store.sid)[1] : await ownerKey(ref), ERASING_KEY],
+    args: [await erasingField(ref), ref, store.sid ? "" : store.statsId!],
+  };
+}
+
+/** Read-only admission immediately before mail. Unknown is distinct from confirmed gone; no send on either. */
+export async function contactStoreLive(store: Store): Promise<boolean | null> {
+  const fence = await liveFence(store);
+  if (!fence) return false;
+  try {
+    const result = repliesFor(await redisPipeline([["EVAL", INBOX_STORE_LIVE, 2, ...fence.keys, ...fence.args]]), 1)?.[0];
+    return result === 1 ? true : result === -1 ? false : null;
+  } catch { return null; }
+}
+class InboxStoreGoneError extends Error {}
+
 /**
  * Writes a conversation, and its new message, only over `expected`: the exact record text it was read from ("" for
  * a new conversation). Its room is taken first: what the message adds in the month the conversation is counted in,
@@ -148,6 +201,8 @@ return 1`;
  * less than what is kept). An answer of unknown shape throws UnknownReplyError (rule 24).
  */
 async function write(store: Store, statsId: string, handle: string, conversation: Kept, add: Message | null, refusable: boolean, expected: string, now = Date.now()): Promise<Kept | null> {
+  const fence = expected === "" ? await liveFence(store) : null;
+  if (expected === "" && !fence) throw new InboxStoreGoneError();
   const [length, oldest] = add ? await redisPipeline([["LLEN", msgKey(statsId, conversation.id)], ["LINDEX", msgKey(statsId, conversation.id), 0]]) : [0, null];
   const dropped = add && Number(length) >= MAX_MESSAGES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
   const messages = Math.max(0, (conversation.b ?? 0) + (add ? dataBytes([JSON.stringify(add)], 1) : 0) - dropped);
@@ -167,12 +222,13 @@ async function write(store: Store, statsId: string, handle: string, conversation
     msgKey(statsId, conversation.id),
     messageEpisodeKey(statsId, conversation.id),
     ...(conversation.token ? [tokenKey(conversation.token)] : []),
+    ...(fence?.keys ?? []),
   ];
   const written = repliesFor(
     await redisPipeline([
       [
         "EVAL",
-        INBOX_WRITE,
+        fence ? INBOX_OPEN_WRITE : INBOX_WRITE,
         keys.length,
         ...keys,
         expected,
@@ -185,10 +241,12 @@ async function write(store: Store, statsId: string, handle: string, conversation
         conversation.token ? `${statsId}|${conversation.id}|${handle}` : "",
         // Read (or answered, or closed): the unread episode ends in this same write, so the next message tells the phones again.
         conversation.unread === 0 ? "1" : "0",
+        ...(fence?.args ?? []),
       ],
     ]),
     1,
   )?.[0];
+  if (fence && written === -1) throw new InboxStoreGoneError();
   if (written !== 0 && written !== 1) throw new UnknownReplyError("an inbox conversation's write");
   return written === 1 ? conversation : null;
 }
@@ -282,7 +340,13 @@ async function open(input: NewInput): Promise<{ ok: true; conversation: Kept; me
     token: randomBytes(24).toString("base64url"),
   };
   const message: Message = { at: now, from: "visitor", text };
-  const kept = await write(store, statsId, store.handle, conversation, message, true, "", now);
+  let kept: Kept | null;
+  try {
+    kept = await write(store, statsId, store.handle, conversation, message, true, "", now);
+  } catch (error) {
+    if (error instanceof InboxStoreGoneError) return { ok: false, reason: "closed" };
+    throw error;
+  }
   // A new random id that is already taken is not written over: said as an error, never as kept.
   if (!kept) throw new UnknownReplyError("a new inbox conversation whose id was already taken");
   await trim(statsId);
@@ -728,7 +792,13 @@ export async function writeToAffiliate(
     token: randomBytes(24).toString("base64url"),
   };
   const message: Message = { at: now, from: "store", text, by };
-  const kept = await write(store, statsId, store.handle, conversation, message, true, "", now);
+  let kept: Kept | null;
+  try {
+    kept = await write(store, statsId, store.handle, conversation, message, true, "", now);
+  } catch (error) {
+    if (error instanceof InboxStoreGoneError) return { ok: false, reason: "closed" };
+    throw error;
+  }
   if (!kept) throw new UnknownReplyError("a new inbox conversation whose id was already taken");
   await trim(statsId);
   const w = chatWords(store.language);

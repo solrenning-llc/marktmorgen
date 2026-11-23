@@ -32,7 +32,7 @@ import { grantUnlessErased, importedFor, takeGiven } from "@/lib/imported-purcha
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { mailDay, releaseDay, reserveDay } from "@/lib/mail";
-import { pausedFor } from "@/lib/mail-health";
+import { pauseForSending } from "@/lib/mail-health";
 import { isPaidUp } from "@/lib/billing";
 import { reserveMoved } from "@/lib/imports";
 import { storeBase } from "@/lib/purchase-email";
@@ -43,6 +43,7 @@ import { takeAllowance } from "@/lib/store-allowance";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { API_WRITE_UNITS } from "@/lib/store-allowance-rules";
 import { DataRoomError } from "@/lib/store-data";
+import { emailDocument, emailParagraphs } from "@/lib/email-document";
 
 export const ADDS_PER_DAY = 2_000;
 export const GIVES_PER_DAY = 1_000;
@@ -176,7 +177,11 @@ async function productFor(store: Store, raw: unknown) {
   return { product, listings };
 }
 
-const escapeHtml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+/** The access email as a whole HTML document beside its text, in the store's language, its subject as the title (AX274 Part A, item 5). */
+export function givenEmailHtml(store: Pick<Store, "language">, subject: string, text: string): string {
+  return emailDocument({ lang: LANGUAGES[parseLanguage(store.language)].locale, title: subject, body: emailParagraphs(text) });
+}
+
 
 function senderAddress(): string {
   const match = NIMBUS_FROM.match(/<([^>]+)>/);
@@ -240,7 +245,8 @@ export async function giveAccess(
   let emailed = false;
   // And just before the email, as an import's emails are: deleted since, or unknown, nothing is sent.
   const day = mailDay();
-  if (notify && !(await pausedFor(store.sid)) && (await notDeleted()) === true && (await reserveDay(1, day))) {
+  // A pause read in an unknown shape is not "no pause" (CX-123 rule 24, Claude 6's MEDIUM on #2687): no email.
+  if (notify && (await pauseForSending(store.sid)) === null && (await notDeleted()) === true && (await reserveDay(1, day))) {
     if ((await reserveMoved(store, 1)) < 1) await releaseDay(1, day);
     else {
       const a = accessWords(store.language);
@@ -254,15 +260,13 @@ export async function giveAccess(
         a.why(store.name),
         a.sentBy(store.name),
       ].join("\n");
+      const subject = a.subject(product.title, store.name).slice(0, 200);
       emailed = await sendEmail({ meter: { by: "monthly" },
         from: `"${store.name.replace(/["\\<>\r\n]/g, "").trim().slice(0, 60) || "A store"} via Marktmorgen" <${senderAddress()}>`,
         to: email,
-        subject: a.subject(product.title, store.name).slice(0, 200),
+        subject,
         text,
-        html: `<div lang="${LANGUAGES[parseLanguage(store.language)].locale}" style="font-family:system-ui,sans-serif;line-height:1.5">${text
-          .split("\n\n")
-          .map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`)
-          .join("")}</div>`,
+        html: givenEmailHtml(store, subject, text),
         replyTo: store.email,
       });
     }

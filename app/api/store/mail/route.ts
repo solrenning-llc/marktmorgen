@@ -156,12 +156,22 @@ export async function POST(request: NextRequest) {
       if (emails.length === 0) return fail("no_addresses");
       if (emails.length > MAX_IMPORT) return fail("too_many");
       store = (await ensureListId(ref)) ?? store;
-      const { added, already, full, roomFull } = await importContacts(store.listId as string, emails, store);
+      const work = await import("@/lib/contact-import-rules");
+      const extra = work.pastedContactWork(emails.length).extraStudioUnits;
+      if (extra > 0) {
+        const { takeAllowance } = await import("@/lib/store-allowance");
+        const admitted = await takeAllowance(store, "studio", extra);
+        if (!admitted.ok) return notCounted(admitted.message);
+      }
+      const { added, already, full, roomFull, notImported, notConfirmed } = await importContacts(store.listId as string, emails, store);
       // A hundred addresses or more, pasted in: of unknown age, so the next
       // emails go out in portions that double (lib/mail-health.ts), also
       // when the store's data room filled up partway and only some went in.
-      await startRamp(healthId(store), added);
-      return Response.json({ ok: true, added, already, skipped, full, roomFull: roomFull ?? null, counts: await listCounts(store.listId) });
+      // A lost write receipt may still have imported that whole batch. Apply
+      // the existing protection to its upper bound without claiming it landed.
+      if (notConfirmed) await startRamp(healthId(store), added + notConfirmed.left);
+      else await startRamp(healthId(store), added);
+      return Response.json({ ok: true, added, already, skipped, full, roomFull: roomFull ?? null, notImported: notImported ?? null, notConfirmed: notConfirmed ?? null, counts: await listCounts(store.listId) });
     }
 
     if (action === "count") {
@@ -270,11 +280,13 @@ export async function POST(request: NextRequest) {
       const created = await createBroadcast(store, {
         subject: text(body.subject, 400),
         body: text(body.body, MAX_MAIL_BODY * 2),
-        productId: text(body.productId, 40),
-        notProductId: text(body.notProductId, 40),
-        who: text(body.who, 10),
+        // The choices of who it reaches go as they came, so a wrong type is refused there, never turned into "" and so
+        // into everyone (Codex L on #3925); createBroadcast reads each exactly.
+        productId: body.productId,
+        notProductId: body.notProductId,
+        who: body.who,
         narrow: body.narrow,
-        label: text(body.label, 80),
+        label: body.label,
         sendAt: typeof body.sendAt === "number" ? body.sendAt : undefined,
         // A second subject line to try against the first; what it may be is
         // decided where the email is written down (lib/mail-test.ts).

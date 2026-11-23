@@ -113,7 +113,7 @@ async function main(): Promise<void> {
   const task: Task = { prompt: "Write it.", review: true, gate: true, file: true };
   await saveTask(course.id, first, task, ROOM);
   is("the prompt is kept apart from the outline", (await readTaskFor(course.id, first))?.prompt, "Write it.");
-  const one = await handIn({ data: ROOM, courseId: course.id, lessonId: first, who: WHO, email: "student@example.com", task, text: "My first go.", file: file("one"), now: 100 });
+  const one = await handIn({ erasure: { listId: "list_synthetic", email: "student@example.com" }, data: ROOM, courseId: course.id, lessonId: first, who: WHO, email: "student@example.com", task, text: "My first go.", file: file("one"), now: 100 });
   is("handed in, it waits for the creator", one.state, "waiting");
   is("and is in the creator's list", (await waitingWork(course.id)).rows.map((r) => r.who).join(), WHO);
   is("the lesson is not done yet", (await doneLessons(course.id, "student@example.com")).has(first), false);
@@ -124,11 +124,11 @@ async function main(): Promise<void> {
   is("nothing waits any more", (await waitingWork(course.id)).total, 0);
   is("work already answered is not answered twice", (await review({ data: ROOM, courseId: course.id, lessonId: first, who: WHO, email: "", verdict: "approved", feedback: "" })).ok, false);
 
-  const two = await handIn({ data: ROOM, courseId: course.id, lessonId: first, who: WHO, email: "student@example.com", task, text: "For beginners.", file: file("two"), now: 200 });
+  const two = await handIn({ erasure: { listId: "list_synthetic", email: "student@example.com" }, data: ROOM, courseId: course.id, lessonId: first, who: WHO, email: "student@example.com", task, text: "For beginners.", file: file("two"), now: 200 });
   is("the old file is handed back to be deleted", two.replaced?.path, "one.pdf");
   is("the second try is counted", (await submissionOf(course.id, first, WHO))?.tries, 2);
   is("and the old answer is cleared with it", (await submissionOf(course.id, first, WHO))?.feedback, "");
-  const three = await handIn({ data: ROOM, courseId: course.id, lessonId: first, who: WHO, email: "student@example.com", task, text: "For beginners, again.", file: file("two"), now: 300 });
+  const three = await handIn({ erasure: { listId: "list_synthetic", email: "student@example.com" }, data: ROOM, courseId: course.id, lessonId: first, who: WHO, email: "student@example.com", task, text: "For beginners, again.", file: file("two"), now: 300 });
   is("the same file kept is not deleted", three.replaced, null);
 
   const yes = await review({ data: ROOM, courseId: course.id, lessonId: first, who: WHO, email: "student@example.com", verdict: "approved", feedback: "Clear now." });
@@ -138,7 +138,7 @@ async function main(): Promise<void> {
 
   part("Not reviewed: handing in is enough");
   const quick: Task = { prompt: "Share a link.", review: false, gate: false, file: false };
-  const handed = await handIn({ data: ROOM, courseId: course.id, lessonId: second, who: OTHER, email: "other@example.com", task: quick, text: "Here.", file: null, now: 400 });
+  const handed = await handIn({ erasure: { listId: "list_synthetic", email: "student@example.com" }, data: ROOM, courseId: course.id, lessonId: second, who: OTHER, email: "other@example.com", task: quick, text: "Here.", file: null, now: 400 });
   is("done at once", handed.state, "approved");
   is("the lesson is marked done", (await doneLessons(course.id, "other@example.com")).has(second), true);
   is("nothing waits for the creator", (await waitingWork(course.id)).total, 0);

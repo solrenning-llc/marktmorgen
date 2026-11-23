@@ -19,7 +19,7 @@ is("its longest life is a once-note then an unreadable note, each that time", r.
 
 part("The data registry and the closing rule cover that longest life");
 const family = FAMILIES["nl:stamp:problem:@lib/pdf-stamp.ts"];
-const days = family?.parts.map((p) => ("days" in p ? Number((p as { days: number }).days) : 0)) ?? [];
+const days = (family?.parts ?? []).map((p) => ("days" in p ? Number((p as { days: number }).days) : 0));
 is("the registry prices the note per file for at least its longest life", days.length > 0 && days.every((d) => d >= (r.PROBLEM_NOTE_LONGEST_DAYS ?? Infinity)), true);
 const closing = closingOf("nl:stamp:problem:stores/abc/file.pdf");
 is("the key's closing rule says it expires within at least its longest life",

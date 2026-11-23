@@ -130,7 +130,8 @@ import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { SALE_TEXT_LIMITS, SALES_ID_LENGTH, SALES_PAGE, SALES_SAFE_ID_LENGTH, SALES_TITLE_IDS } from "@/lib/api-sales";
 import { BUMP_KEYS, MAX_BUNDLE_ITEMS, MAX_DELIVERED } from "@/lib/bundle-rules";
 import { MAX_TITLE_LENGTH as SALES_LISTING_TITLE } from "@/lib/catalog-rules";
-import { RESEND_TIMEOUT_MS, STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
+import { RESEND_TIMEOUT_MS, STREAM_TIMEOUT_MS, STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
+import { GIVE_UP_HOURS } from "@/lib/auto-captions-rules";
 import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { MAX_BUMPS } from "@/lib/product-extras";
@@ -1494,6 +1495,38 @@ export function paypalReadingCost(commands: number, bytes: number): number {
  * the integrations line at PAYPAL_PRESS.
  */
 export const PAYPAL_PRESSES_UNTAKEN = 1;
+/**
+ * The studio's captions route (app/api/store/stream/captions/route.ts) after the one "integration" unit it takes
+ * (withinServiceWhy "stream-captions"), at the worst each action was measured at by tests/stream-captions-cost.test.ts
+ * on the synthetic Redis, video service and Stripe of tests/auto-captions-own-captions.test.ts (Claude 7 and Claude 5
+ * on #3427, MEDIUM 1): its short-window count (INCR, EXPIRE), then the action's own commands, each script counted as
+ * one with every call inside it as Upstash bills them, with every claim and the request's write read back. `add` and
+ * `remove` hold the language (withOwnCaptions) and call the service once; `auto` (three languages, those the service
+ * lists written down) reads the service's list (askedFree) and asks it to write, and waits on Stripe: the most calls
+ * of any of its paths (a card declined after its invoice was made: the subscription, the customer, the invoice, its
+ * item, finalize, pay, void, and the order's invoice read back; LEVE 1 of Claude 7 on #3427, older than this PR, is
+ * priced here too). Each figure is the most of any path measured, taken apart, so their sum is above every path's.
+ * None fits the `integration` unit's ten commands and ten seconds, so the line integrations is priced at the dearer of
+ * the two for every unit of the figure (INTEGRATION_WORST_USD).
+ */
+export const STREAM_CAPTIONS_WORST = {
+  guardCommands: 2,
+  add: { commands: 11, videoCalls: 1, stripeCalls: 0 },
+  remove: { commands: 9, videoCalls: 1, stripeCalls: 0 },
+  auto: { commands: 16, videoCalls: 2, stripeCalls: 8 },
+  /** What any action moves through the database at the most: measured under 3 KB, a video's twelve caption languages listed. */
+  dbBytes: 20_000,
+} as const;
+/** One captions request of this action at its worst, in dollars: its call, its waits at 2 GB (each call to the video service at STREAM_TIMEOUT_MS, each to Stripe at STRIPE_TIMEOUT_MS, never under the wait shape), its commands and bytes. */
+export function streamCaptionsCost(action: "add" | "remove" | "auto"): number {
+  const worst = STREAM_CAPTIONS_WORST[action];
+  const seconds = Math.max(SHAPES.wait.seconds, (worst.videoCalls * STREAM_TIMEOUT_MS + worst.stripeCalls * STRIPE_TIMEOUT_MS) / 1000);
+  return CALL + SHAPES.wait.cpu * CPU_SECOND + seconds * MEMORY_SECOND + (STREAM_CAPTIONS_WORST.guardCommands + worst.commands + TAKE_COMMANDS) * COMMAND + STREAM_CAPTIONS_WORST.dbBytes * DB_BYTE;
+}
+/** The dearest captions request, in dollars. */
+export const STREAM_CAPTIONS_REQUEST_USD = Math.max(streamCaptionsCost("add"), streamCaptionsCost("remove"), streamCaptionsCost("auto"));
+/** One unit of the "integration" figure at the most it costs: a call out at UNIT_COST.integration, or a captions request. */
+export const INTEGRATION_WORST_USD = Math.max(UNIT_COST.integration, STREAM_CAPTIONS_REQUEST_USD);
 /**
  * A vault open refused for storage spends no monthly upload budget since #4019 (lib/vault-storage.ts, admit), so its
  * listings, the expired session it retired and its ledger commands are paid by the integration unit it took
@@ -3320,15 +3353,18 @@ export const COST_LINES: CostLine[] = [
     id: "integrations",
     feature: "Calls to other services: meetings and Zoom, a host's calendar checked by hand, Discord, email platforms, Meta ads, PayPal, affiliate kits and pay-to, outreach reads of a business's site, person lookups, the vault, video upload doors and captions, email pictures (17 October 2026)",
     // A press of "Pay with PayPal" takes its units at its size (paypalPressUnits); payday's auto-pay takes none, so it is added at its most (Claude 7 on #4488).
-    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "integration") + STORE_ALLOWANCES[tier].integration * VAULT_REFUSED_PASS + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS,
+    // A unit of the figure may be a captions request, dearer than a call out, so every unit is priced at the dearer (INTEGRATION_WORST_USD);
+    // and it may be a vault open refused for storage, priced on top (VAULT_REFUSED_PASS). Both kept in the merge of main (#3427).
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].integration * INTEGRATION_WORST_USD + STORE_ALLOWANCES[tier].integration * VAULT_REFUSED_PASS + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS,
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "integration"] },
       { file: "lib/metered-limits.ts", names: ["withinService", "withinServiceWhy"] },
       { file: "app/api/store/affiliates/paypal/route.ts", names: ['withinServiceWhy("paypal-pay", store.handle, 6, 3600, store, paypalPressUnits(sizes))', "bookSizes(store)", "maxDuration = 60"] },
       { file: "lib/paypal-payouts.ts", names: ["payWithPayPal", "holdLock(lock)", "withLock(`nl:pp:${statsId}:lock`, 120, 5_000", "readBook(store, undefined, { titles: false })", "paypalPressUnits", "PAYPAL_PRESS_BASE_UNITS", "PAYPAL_PRESS_UNIT_COMMANDS"] },
       { file: "lib/affiliate-payday.ts", names: ["claimMonth", "if (!(await keepMonth(store.statsId, month))) throw", "payWithPayPal(store)"] },
+      { file: "app/api/store/stream/captions/route.ts", names: ["withinServiceWhy(\"stream-captions\"", "requestAutoCaptions(store, pathname", "addStoreCaption(store, pathname", "dropStoreCaption(pathname, lang)"] },
     ],
-    basis: "Every call of the window, held at 2 GB for ten seconds while the other service answers; what the service charges is nothing to us, and AI captions are bought apart. A press of \"Pay with PayPal\" costs more than a call (its own commands with both lock EVALs, its whole book read with no product read for its title, up to sixty seconds), so it takes PAYPAL_PRESS_BASE_UNITS and one more for each PAYPAL_PRESS_UNIT_COMMANDS of its book read at the program's size, counted first, which cover it at every size; payday's auto-pay, one a month, takes no unit and is added once at its most (PAYPAL_PRESS). The bytes the press's book read moves are the open question every reader of the whole book shares, not priced here and never zero.",
+    basis: "Every call of the window, held at 2 GB for ten seconds while the other service answers, or a captions request of the studio at its worst when that is dearer (STREAM_CAPTIONS_WORST, held by tests/stream-captions-cost.test.ts: AI captions asked for wait on the video service twice and on Stripe up to eight times), every unit priced at the dearer (INTEGRATION_WORST_USD); what the service charges is nothing to us, and AI captions are bought apart. A press of \"Pay with PayPal\" costs more than a call (its own commands with both lock EVALs, its whole book read with no product read for its title, up to sixty seconds), so it takes PAYPAL_PRESS_BASE_UNITS and one more for each PAYPAL_PRESS_UNIT_COMMANDS of its book read at the program's size, counted first, which cover it at every size; payday's auto-pay, one a month, takes no unit and is added once at its most (PAYPAL_PRESS). The bytes the press's book read moves are the open question every reader of the whole book shares, not priced here and never zero.",
   },
   {
     id: "free-share",
@@ -3858,6 +3894,8 @@ export function nonPayingWorst(): number {
     + campaignLandingFenceCost(allowances)
     // Its payday's auto-pay takes no integration unit (a press from the studio takes its own, paypalPressUnits).
     + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS
+    // A unit of its integration figure may be a captions request, dearer than a call out (INTEGRATION_WORST_USD).
+    + allowances.integration * (INTEGRATION_WORST_USD - UNIT_COST.integration)
     // Its studio picture doors, checks and page saves, at its own studio figure (line studio-blob; Claude 7 on #2852).
     + studioBlobMonthly(allowances.studio)
     // Its business-card saves and removals' store fence, at its own studio figure (line creator-card-erasure-fence).
@@ -4025,6 +4063,67 @@ export const MOVE_COST_UNKNOWNS: readonly string[] = [
   "The ask and refused taps: the link's ask (app/api/store/address/route.ts, two company emails, MOVE_ASKS_PER_HOUR) is counted by the hour for an address, not by the month; and every tap reads the link, the second step and the room before it is refused. Neither is in MOVES_PER_MONTH.",
 ];
 /**
+ * AI captions requests given back in full (lib/auto-captions.ts; Claude 5's second money review of #3427, LOW 1): the
+ * whole price goes back, so no revenue pays for the looks at them, and an unknown cost is never zero. A look is a
+ * call to the video service waited on at most STREAM_TIMEOUT_MS (priced at the `wait` shape) with at most
+ * AUTO_CAPTIONS_LOOK_COMMANDS commands of the request's record, read and written whole (AUTO_CAPTIONS_RECORD_BYTES
+ * each way). A request is looked at `firstMs` after it is asked, then every `againMs` until GIVE_UP_HOURS; past it,
+ * while the service's answers stay unknown, a quarter of the time past apart (at least `againMs`, at most `maxGapMs`)
+ * for `deliveryLooksMs`; then at most `refundLooks` looks at a refund Stripe has not confirmed, each two Stripe calls
+ * waited on at most STRIPE_TIMEOUT_MS. These figures are lib/auto-captions.ts's own, held by
+ * tests/plan-cost-registry.test.ts.
+ *
+ * A company exposure (MR item 2: a refund, docs/funded-exposure-review.md), never a plan's line: one request given
+ * back costs at most AUTO_CAPTIONS_GIVEN_BACK_USD, and the five-minute job looks at no more than
+ * AUTO_CAPTIONS_LOOKS_PER_RUN videos a run, given back or not, so its month of looks is at most
+ * AUTO_CAPTIONS_LOOKS_MONTH_USD (a month of 31 days). Looks on the service's own announcements (app/api/stream/hook)
+ * are outside that monthly figure: at most AUTO_CAPTIONS_HOOK_LOOKS a request whatever the service announces
+ * (lib/auto-captions.ts HOOK_LOOKS_MAX, counted in the request's record before the service is asked, held by
+ * tests/stream-captions-cost.test.ts), each at most AUTO_CAPTIONS_HOOK_LOOK, a look and the count's compare-and-set;
+ * for a request given back in full they are inside AUTO_CAPTIONS_GIVEN_BACK_USD, and for one used its own price pays
+ * them. An announcement never calls Stripe (an order or a refund owed is left to the schedule). Neither figure is yet a
+ * line of lib/llc-fixed-costs.ts.
+ */
+export const AUTO_CAPTIONS_LOOK_TIMING = { firstMs: 3 * 60_000, againMs: 10 * 60_000, maxGapMs: 6 * 3_600_000, deliveryLooksMs: 14 * 86_400_000, refundLooks: 40 } as const;
+/** GET of the record, then at the most SET and ZADD of it, or DEL, ZREM and SREM with the languages listed (HSET). */
+export const AUTO_CAPTIONS_LOOK_COMMANDS = 6;
+/** A request's record at its largest: three languages, a payment, a path, a refund owed. */
+export const AUTO_CAPTIONS_RECORD_BYTES = 4_096;
+/** Videos the five-minute job looks at in one run (sweepAutoCaptions, ZRANGEBYSCORE with LIMIT 0 30). */
+export const AUTO_CAPTIONS_LOOKS_PER_RUN = 30;
+/** One look at the video service: it never waits longer than the `wait` shape holds (STREAM_TIMEOUT_MS). */
+export const AUTO_CAPTIONS_LOOK = request("wait", AUTO_CAPTIONS_LOOK_COMMANDS, 2 * AUTO_CAPTIONS_RECORD_BYTES);
+/** One look at a refund owed: Stripe's list of the payment's refunds and a refund asked for, each waited on at most STRIPE_TIMEOUT_MS. */
+export const AUTO_CAPTIONS_REFUND_LOOK = CALL + SHAPES.wait.cpu * CPU_SECOND + ((2 * STRIPE_TIMEOUT_MS) / 1000) * MEMORY_SECOND + AUTO_CAPTIONS_LOOK_COMMANDS * COMMAND + 2 * AUTO_CAPTIONS_RECORD_BYTES * DB_BYTE;
+/** The video service's wait a look is priced at, in milliseconds, held against the shape by the test. */
+export const AUTO_CAPTIONS_LOOK_WAIT_MS = STREAM_TIMEOUT_MS;
+/** The most looks the service's announcements take at one request (lib/auto-captions.ts HOOK_LOOKS_MAX). */
+export const AUTO_CAPTIONS_HOOK_LOOKS = 6;
+/** The count taken before each: one compare-and-set script with its GET and SET, as Upstash bills it. */
+export const AUTO_CAPTIONS_HOOK_COUNT_COMMANDS = 3;
+/** One look on an announcement: a look, and its count's script sending the record read and the record counted. */
+export const AUTO_CAPTIONS_HOOK_LOOK = request("wait", AUTO_CAPTIONS_LOOK_COMMANDS + AUTO_CAPTIONS_HOOK_COUNT_COMMANDS, 4 * AUTO_CAPTIONS_RECORD_BYTES);
+
+/** The most looks at the video service one request given back in full can take, by the schedule above. */
+export function autoCaptionsGivenBackLooks(): number {
+  const { firstMs, againMs, maxGapMs, deliveryLooksMs } = AUTO_CAPTIONS_LOOK_TIMING;
+  const giveUp = GIVE_UP_HOURS * 3_600_000;
+  let at = firstMs;
+  let looks = 0;
+  for (;;) {
+    looks += 1;
+    const past = at - giveUp;
+    if (past > deliveryLooksMs) return looks;
+    at += past <= 0 ? againMs : Math.min(maxGapMs, Math.max(againMs, past / 4));
+  }
+}
+
+/** What the looks at one request given back in full cost at the most, in dollars, with no revenue to pay them. */
+export const AUTO_CAPTIONS_GIVEN_BACK_USD = autoCaptionsGivenBackLooks() * AUTO_CAPTIONS_LOOK + AUTO_CAPTIONS_LOOK_TIMING.refundLooks * AUTO_CAPTIONS_REFUND_LOOK + AUTO_CAPTIONS_HOOK_LOOKS * AUTO_CAPTIONS_HOOK_LOOK;
+/** The five-minute job's looks at AI captions in a month of 31 days at the most, given back or not, in dollars. */
+export const AUTO_CAPTIONS_LOOKS_MONTH_USD = AUTO_CAPTIONS_LOOKS_PER_RUN * 12 * 24 * 31 * Math.max(AUTO_CAPTIONS_LOOK, AUTO_CAPTIONS_REFUND_LOOK);
+
+/**
  * The PayPal watch's two list reads (lib/paypal-sales.ts, watchPayPal, swept by lib/checkout-sweep.ts through
  * lib/paypal-delivery.ts, sweepPayPal; Claude 5 on #2909), in Redis commands, held to what the real sweep sends by
  * tests/paypal-watch-cost.test.ts:
@@ -4184,7 +4283,7 @@ export const NOT_A_COST: Record<string, string> = {
   RESEND_PER_STORE_PER_HOUR: "The same pace per store in an hour (lib/resend-limits.ts), shared by one email sent again and many at once: it only refuses; each email is taken from the store's email figure before it goes; its counter is the guard resend-store (METERED_EMAIL).",
   PICTURE_READS_PER_MINUTE: "A pace on how often one picture is read by a function (lib/picture-pace.ts, MM-SA-04), held in memory with no store command: it only refuses.",
   PICTURE_DOORS_PER_HOUR: "A pace on the studio's picture doors a store opens in an hour (lib/picture-door.ts, pictureDoorHour; rule 24 inventory A1), counted before the file store is asked or anything is signed: it only refuses, and each door it lets through has already taken a studio request (line studio). What a door writes is not priced by it: a picture never put on anything stays in the file store, at most PICTURE_DOOR_MAX fresh ones a store at a time, each at most MAX_IMAGE_BYTES (lib/product-image.ts), and is not deleted once its note is a day old. That retained storage and the file store's per-write charge have no line yet, so they are not certified, never zero.",
-  CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts).",
+  CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts); the looks at a request given back in full, which no revenue pays, are priced apart as a company exposure (AUTO_CAPTIONS_GIVEN_BACK_USD, AUTO_CAPTIONS_LOOKS_MONTH_USD).",
   LAUNCH_HOLD_SECONDS: "How long a waitlist launch may wait, from its start, while its store is switched off after notices (lib/waitlist.ts, runLaunches and holdLaunch): a scheduled job, bounded by its schedule (a company fixed cost), adding no email (nothing is reserved or sent while held). Each held run takes, beyond the GET of the launch's record and the store read it already made, one pipeline of two EXPIRE (its send list and its record), read exactly; once the bound passes (or a renewal reads in another shape in the hold's last week), one LRANGE of the addresses already handled and one pipeline of SET, HDEL, DEL and SREM, once a launch. While a launch sends, every batch after a run's first reads the store again (storeForHandle, two GET), so a switch-off stops the rest of the run: at most one read per LAUNCH_BATCH emails, inside the same deadline; each batch's record write renews its send list in the same pipeline (one EXPIRE per LAUNCH_BATCH emails), so the list never lapses while the record lives. Like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   MAX_PAGES_PER_STORE: "Pages of Stripe Checkout Sessions (GET /checkout/sessions, up to 100 each) the five-minute job reads per store per run in each of its two walks of the last day (lib/checkout-sweep.ts, walkDay; audit A2, 9 November 2026): the completed checkouts on every store it sweeps, and the expired ones (of the last OPEN_HOURS, 25 hours) on a store with reminders, a list or counted orders, never the open ones. On a store whose orders are counted, each page of expired checkouts also gives back the order place of each one that closed unpaid and that we recorded as holding one when it opened (lib/order-admission.ts, releaseExpiredHolds and holdCheckout, #3970): one MGET a page when any row names an hour still in the window, then one GETDEL and one EVAL (SETTLE_ADMITTED) once a checkout whose record matches, never again for it (the record, nl:orders:held:, is taken; tests/store-data-registry.ts); so at most 3 store commands a sweep for the pages plus 2 a checkout once, besides the walk keys below. So at most 2 x 3 = 6 list calls each time a store is swept; a run sweeps a store once, unless Redis's SCAN hands its key back on another page (#3064 makes that once a run too), so with one sweep a run 2 x 3 x 288 = 1,728 a UTC day, 55,296 a billing month of 32 UTC days; Stripe bills no API call, and each run stops at its deadline. Each walk keeps its place for the next run (nl:sweep:walk:, tests/store-data-registry.ts): one GET a walk and at most one SET or DEL, so at most 4 store commands each time a store is swept, with one sweep a run 1,152 a UTC day, 36,864 a billing month, and only 2 a sweep (the GETs) for a store whose day of checkouts fits in one run; each value at most 220 bytes, kept a day. Held by tests/checkout-sweep-complete.test.ts. On a store with affiliates on, each page of completed checkouts also asks which of its paid ones already had their affiliate step settled (nl:sweep:aff:, one ZMSCORE a page) and writes the ones settled that run (one EVAL a page, KEEP_AFFILIATE_SETTLED: its one ZADD, one ZREMRANGEBYSCORE and one EXPIRE together, so the mark never outlives its expiry; only when any were), so a settled checkout is never passed to noteSession again: its bond, contact, code and partner reads are made once a checkout, not once a run (#4413, Claude 4 cloud X and Codex G); held by tests/affiliate-bond-sweep.test.ts. Past 3 pages a run, a walk carries on next run instead of reading the same newest pages again, so every session of the day is read in turn; a walk that takes more than an hour to reach the end of the day is said in the log every run it goes on. A scheduled job, bounded by its schedule (a company fixed cost), not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   PENDING_LINK_SECONDS: "How long the five-minute job reads again a paid order whose affiliate link could not be read at checkout (lib/affiliates.ts notePendingLinks, owner's decision 6, 9 November 2026) before the creator is told: a span, not a figure; the reads it allows are PENDING_LINK_COMMANDS each run, and it ends well inside the day the job reads a store's checkouts (CONFIRM_WITHIN_SECONDS).",

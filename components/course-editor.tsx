@@ -77,12 +77,14 @@ const MESSAGES: Record<string, string> = {
   caption_many: `A video holds captions in up to ${MAX_CAPTION_TRACKS} languages. Remove one first.`,
   caption_not_ready: "The video has to finish uploading before captions can be added.",
   caption_language: "Choose a language from the list.",
-  caption_writing: "AI captions in this language are still being written for this video. Add your own file once they are done, or after the request ends.",
   caption_unknown: "That video is not there anymore. Reload the page.",
+  caption_auto_writing: `AI captions in this language are still on their way for this video. Until they arrive, or the charge for them is given back (no sooner than ${GIVE_UP_HOURS} hours after the order), captions in this language can't be uploaded or removed.`,
+  caption_changing: "Captions in this language are still being changed for this video. Try again in a few minutes.",
+  caption_auto_held: "We could not confirm earlier AI captions in this language with our video provider, so captions in this language can't be changed here yet. Write to " + SUPPORT_EMAIL + " about it.",
   auto_not_ready: "The video has to finish uploading and being prepared before captions can be written.",
   auto_language: "Choose languages this video has no captions in yet, the one spoken first, three at most.",
   auto_long: `Captions are written for videos of up to ${MAX_AUTO_MINUTES / 60} hours.`,
-  auto_busy: "Captions for this video are already being written. They appear here when they are done.",
+  auto_busy: `AI captions were already ordered for this video. They appear here when they arrive. What is not delivered is refunded once the video service confirms it, no sooner than ${GIVE_UP_HOURS} hours after the order.`,
   auto_checking: "Stripe has not confirmed yet whether this charge went through. Nothing more is charged for this video until it does, in about 15 minutes. If your card was charged and no captions are written, the charge is refunded on its own.",
   auto_plan: "Captions written by AI are charged to the card your plan is paid with, so they need a plan first.",
   auto_card: "There is no card on your plan to charge. Add one under Plan and billing, then try again.",
@@ -93,6 +95,7 @@ const MESSAGES: Record<string, string> = {
   auto_refunded: "The video service would not write these captions, so the charge was refunded to your card. Nothing is being written; try again in a moment.",
   auto_credited: "The video service would not write these captions, so the charge was returned to your account credit. Nothing is being written; try again in a moment.",
   auto_unavailable: "The video service could not take this just now. Nothing was charged; try again in a moment.",
+  auto_changing: "Captions in one of these languages are being changed for this video right now, so nothing was charged. Try again in a few minutes.",
   auto_unknown: "That video is not there anymore. Reload the page.",
   forbidden: "Your role on this store does not include charging the plan's card. Ask the owner to do this.",
   store_full: "Your store's data room is full. Delete something you no longer need, such as old posts, drafts, pages or contacts.",
@@ -1206,7 +1209,11 @@ function Captions({
 }) {
   const streams = useContext(Streams);
   const tracks = streams.captions[pathname] ?? [];
-  const [lang, setLang] = useState("en");
+  // A language AI captions are still being written in is not offered by hand: the server refuses it too (lib/auto-captions.ts, withOwnCaptions).
+  const writingHere = streams.writing[pathname] ?? [];
+  const choices = CAPTION_LANGUAGES.filter((language) => !writingHere.includes(language.code));
+  const [picked, setLang] = useState("en");
+  const lang = choices.some((language) => language.code === picked) ? picked : choices[0]?.code ?? picked;
   const [working, setWorking] = useState(false);
 
   async function send(payload: Record<string, unknown>, done: string) {
@@ -1270,7 +1277,7 @@ function Captions({
         </p>
       ) : (streams.writing[pathname] ?? []).length ? (
         <p className="mt-2 text-sm text-ink" role="status" data-captions-writing>
-          {`Being written by AI: ${(streams.writing[pathname] ?? []).map((code) => CAPTION_LANGUAGES.find((l) => l.code === code)?.label ?? code).join(", ")}. Most lessons take a few minutes; they appear here when they are done.`}
+          {`AI captions ordered: ${(streams.writing[pathname] ?? []).map((code) => CAPTION_LANGUAGES.find((l) => l.code === code)?.label ?? code).join(", ")}. They appear here when they arrive, usually within minutes. What is not delivered is refunded once the video service confirms it, no sooner than ${GIVE_UP_HOURS} hours after the order. Until then, captions in ${(streams.writing[pathname] ?? []).length > 1 ? "these languages" : "this language"} can't be uploaded here.`}
         </p>
       ) : streams.auto.can ? (
         <AutoCaptions lessonId={lessonId} pathname={pathname} have={tracks.map((t) => t.lang)} busy={busy || working} onError={onError} />
@@ -1279,7 +1286,7 @@ function Captions({
         <label htmlFor={selectId} className="block">
           <span className="sr-only">Captions language</span>
           <select id={selectId} className="field" value={lang} disabled={busy || working} onChange={(e) => setLang(e.target.value)}>
-            {CAPTION_LANGUAGES.map((language) => (
+            {choices.map((language) => (
               <option key={language.code} value={language.code}>{language.label}</option>
             ))}
           </select>
@@ -1357,7 +1364,12 @@ function AutoCaptions({
     if (data.ok && Array.isArray(data.writing)) {
       streams.wrote(pathname, (data.writing as unknown[]).filter((code): code is string => typeof code === "string"));
       setOpen(false);
-      toast(`Charged ${dollars(Number(data.cents) || 0)}. The captions are being written.`);
+      // The service did not confirm it started them: never said as being written (Claude 3's LOW 2 on #3427).
+      toast(
+        data.unconfirmed === true
+          ? `Charged ${dollars(Number(data.cents) || 0)}. We could not confirm that the video service started these captions. We keep checking by ourselves. What is not delivered is refunded once the video service confirms it, no sooner than ${GIVE_UP_HOURS} hours after the order.`
+          : `Charged ${dollars(Number(data.cents) || 0)}. The captions are being written.`,
+      );
     } else onError(MESSAGES[String(data.error ?? "")] ?? MESSAGES.server_error);
   }
 
@@ -1402,7 +1414,7 @@ function AutoCaptions({
             </div>
           </fieldset>
           <p className="text-sm text-ink" data-auto-price>
-            {`${minutes} ${minutes === 1 ? "minute" : "minutes"} of video × ${languages.length} ${languages.length === 1 ? "language" : "languages"} × ${dollars(CENTS_PER_MINUTE)} = ${dollars(cents)}${cents === MIN_CENTS && (minutes ?? 0) * languages.length * CENTS_PER_MINUTE < MIN_CENTS ? ` (the least one order is)` : ""}, charged now to the card your plan is paid with. Anything not delivered within ${GIVE_UP_HOURS} hours is refunded.`}
+            {`${minutes} ${minutes === 1 ? "minute" : "minutes"} of video × ${languages.length} ${languages.length === 1 ? "language" : "languages"} × ${dollars(CENTS_PER_MINUTE)} = ${dollars(cents)}${cents === MIN_CENTS && (minutes ?? 0) * languages.length * CENTS_PER_MINUTE < MIN_CENTS ? ` (the least one order is)` : ""}, charged now to the card your plan is paid with. What is not delivered is refunded once the video service confirms it, no sooner than ${GIVE_UP_HOURS} hours after the order.`}
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <button type="button" className="btn btn-primary btn-sm" disabled={busy || working} aria-busy={working} onClick={() => void order()}>

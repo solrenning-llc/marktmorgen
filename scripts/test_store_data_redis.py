@@ -218,7 +218,7 @@ def main():
             return sum(int(n) for n in re.findall(r"^cmdstat_[^:]+:calls=(\d+)", stats, re.M))
 
         def number(reference, limit=10**9):
-            return redis.command("EVAL", receipt_number, 5, room, numbers, counter, store_id, erasing, limit, "2026-11", reference, 352, 368, erasing_field)
+            return redis.command("EVAL", receipt_number, 5, room, numbers, counter, store_id, erasing, limit, "2026-11", reference, 352, 368, erasing_field, "synthetic-store")
 
         def billed(reference, limit=10**9):
             before = calls()
@@ -250,6 +250,13 @@ def main():
         redis.command("HDEL", erasing, erasing_field)
         redis.command("DEL", store_id)
         assert number("cs_test_gone") == [-2, 0]
+        assert redis.command("EXISTS", room, numbers, counter) == 0
+        redis.command("SET", store_id, "synthetic-store")
+        # The id moved to another ref (moveAccount) whose erasure began: the old ref's numbering is refused, with or
+        # without that mark (Claude 5 icEJ's audit on #5224, store-cache-live:v3's rule).
+        redis.command("DEL", room, numbers, counter)
+        redis.command("SET", store_id, "another-store")
+        assert number("cs_test_moved") == [-2, 0]
         assert redis.command("EXISTS", room, numbers, counter) == 0
         redis.command("SET", store_id, "synthetic-store")
         print("PASS: closing and erased stores recreate neither receipt numbers nor their room")

@@ -181,7 +181,7 @@ async function main(): Promise<void> {
   is("a new sale downloaded: the next number", [fresh.status, fresh.headers.get("content-disposition")], [200, 'attachment; filename="receipt-R-000006.pdf"']);
   const LATER = "cs_test_later0000000000001";
   answer(LATER, paidSession(LATER));
-  redis.pipeline = async (commands) => (commands.some((c) => String(c[0]) === "EVAL" && String(c[1]).startsWith("-- marktmorgen:receipt-number:v1")) ? [[7]] : pipeline(commands));
+  redis.pipeline = async (commands) => (commands.some((c) => String(c[0]) === "EVAL" && String(c[1]).startsWith("-- marktmorgen:receipt-number:v2")) ? [[7]] : pipeline(commands));
   const odd = await get(LATER);
   is("the number's reply not understood: 503, no PDF", [odd.status, odd.headers.get("content-type")?.startsWith("application/pdf") ?? false], [503, false]);
   redis.pipeline = pipeline;

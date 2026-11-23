@@ -36,3 +36,5 @@ export function quoteText(text: string): string {
   return `${(space > QUOTE_CHARS * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.-]+$/, "")}…`;
 }
 
+/** The least time between two refreshes of a store's quotes after review writes (refreshStoreQuotesHourly). */
+export const QUOTES_REFRESH_SECONDS = 3_600;

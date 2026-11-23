@@ -1,11 +1,12 @@
 import { withinStore } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
 import { originFrom } from "@/lib/request-origin";
-import { dropReviewQuote, refreshStoreQuotes } from "@/lib/store-quotes";
+import { dropReviewQuote, refreshStoreQuotesHourly } from "@/lib/store-quotes";
 import { ensureStatsId, normaliseHandle, setReviewed, storeForHandle, storeRef } from "@/lib/store";
-import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, withinMonthWhy, unknownLimit } from "@/lib/request-guard";
+import { windowId, windowKeySeconds } from "@/lib/allowance-window";
 import { type Door, doorFields, openDoor, readDoor, reviewPagePath } from "@/lib/review-proof";
-import { MAX_REVIEW_PHOTO_BYTES, type ReviewPhoto, deleteReview, markOneRefunded, readRating, readReview, reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
+import { MAX_REVIEW_PHOTO_BYTES, REVIEW_SAVES_PER_ORDER_MONTH, type ReviewPhoto, deleteReview, markOneRefunded, readRating, readReview, reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
 import { checkReviewPhoto, dropReviewPhoto, putReviewPhoto } from "@/lib/review-photo";
 import { newCostCode } from "@/lib/plan-standing";
 import { forgetReviewWords, forgetVoicePerson } from "@/lib/customer-voice";
@@ -99,7 +100,7 @@ export async function POST(request: NextRequest) {
       if (before) await dropReviewQuote(store, before);
       const done = await deleteReview(statsId, productId, id, store);
       if (done === "deleted") {
-        after(() => refreshStoreQuotes(store));
+        after(() => refreshStoreQuotesHourly(store));
         await dropReviewPhoto(before?.photo);
         // Nor quoted in the studio's summary of what customers said (lib/customer-voice.ts) once deleted; a try that
         // failed is made again after the answer.
@@ -119,7 +120,7 @@ export async function POST(request: NextRequest) {
       if (before && before.reference === proof.reference && !before.refunded) {
         await dropReviewQuote(store, before);
         await markOneRefunded(statsId, productId, id);
-        after(() => refreshStoreQuotes(store));
+        after(() => refreshStoreQuotesHourly(store));
       }
       return answer("refunded");
     }
@@ -135,6 +136,12 @@ export async function POST(request: NextRequest) {
     const sentPhoto = photoPaused ? "" : read("photo");
     const checked = sentPhoto ? checkReviewPhoto(sentPhoto) : null;
     if (checked === "photo") return answer("photo");
+    // One order saves its review at most REVIEW_SAVES_PER_ORDER_MONTH times in the store's month: the first review and
+    // each rewrite (#5010 row 180), so a month's review writes have the bound the cost line "review-writes" prices.
+    // Deleting is never counted against it. Past it, the page says so plainly; a count that cannot be read saves nothing.
+    const saves = await withinMonthWhy("review-saves", proof.reference, REVIEW_SAVES_PER_ORDER_MONTH, windowId(store), windowKeySeconds(store, 32 * 86_400));
+    if (saves === "over") return answer("savedEnough");
+    if (saves === "unknown") return answer("error");
     // The words are written first, and that same write grants the photo one of the review's MAX_REVIEW_PHOTOS
     // slots (C4-20261106-2720-C5-160): the put, a paid operation, is made only after a write that granted it.
     // A write that failed, was busy or had no room never puts.
@@ -179,8 +186,13 @@ export async function POST(request: NextRequest) {
     if ((saved.state === "created" || saved.state === "updated") && !store.reviewed) {
       await setReviewed(storeRef(store)).catch((error: unknown) => console.error("noting a store's first review failed", error));
     }
+    // Rewritten words leave the store page's quotes at once: the refresh after it runs at most once an hour (#5010 row
+    // 180), so the old words are never left showing until then. A read of the words before that failed counts as changed.
+    if (saved.state === "updated" && (wordsBefore === null || wordsBefore !== saved.review.text)) {
+      await dropReviewQuote(store, saved.review).catch((error: unknown) => console.error("taking a rewritten review's quote off failed", error));
+    }
     // "What buyers say" on the store page, kept on the store's record (lib/store-quotes.ts).
-    if (saved.state === "created" || saved.state === "updated") after(() => refreshStoreQuotes(store));
+    if (saved.state === "created" || saved.state === "updated") after(() => refreshStoreQuotesHourly(store));
     // Rewritten words are no longer quoted in the studio's summary of what customers said (lib/customer-voice.ts).
     if (saved.state === "updated" && wordsBefore === null) {
       await forgetVoicePerson(statsId).catch((error: unknown) => console.error("removing the customer summary failed", error));

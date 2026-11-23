@@ -104,6 +104,8 @@ function keptPhotoCount(raw: unknown): number {
   return typeof raw === "string" && /^\d{1,6}$/.test(raw) ? Math.min(Number(raw), MAX_REVIEW_PHOTOS) : MAX_REVIEW_PHOTOS;
 }
 export const REVIEW_STORES_KEY = "nl:rev:stores";
+export { REVIEW_SAVES_PER_ORDER_MONTH } from "@/lib/review-summary";
+
 
 /** One buyer's review of one product, always the same id, whatever order they write it from. */
 export function reviewId(statsId: string, productId: string, email: string): string {

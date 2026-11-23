@@ -177,3 +177,10 @@ export function hiddenLine(summary: Summary): string {
   return `${summary.hidden} ${summary.hidden === 1 ? "review" : "reviews"} hidden by the creator`;
 }
 
+/**
+ * How many times one order may save its review in one of the store's months (app/api/store/review; #5010 row 180):
+ * the first review and each rewrite. Deleting a review is never counted against it. With the review doors open 60 days
+ * (lib/review-proof.ts), this bounds a month's review writes, which the cost line "review-writes" of
+ * tests/plan-cost-registry.ts prices at their worst.
+ */
+export const REVIEW_SAVES_PER_ORDER_MONTH = 2;

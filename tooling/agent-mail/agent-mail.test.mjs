@@ -1256,5 +1256,61 @@ console.log("the watch fetches again before it says 'rewritten': a mark set by a
   is("an ordinary forward read is not a rewrite and needs no second fetch", v.reescrito === false && v.c === c2, JSON.stringify(v));
 }
 
+console.log("d993: a review request on a moved head is closed as superseded; a release by one session keeps only that session off");
+{
+  const g7 = (args) => g(args, join(T, "p"));
+  const novoHead = (texto) => {
+    writeFileSync(join(T, "p", "d993.txt"), texto); g7(["add", "."]);
+    g7(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "d993\n\nClaude-Session: https://claude.ai/code/session_01S9eVA3KcXUkc6qPJmpNg4a"]);
+    g7(["push", "-q", "-f", "../prs.git", "HEAD:refs/heads/d993", "HEAD:refs/pull/993/head"]);
+    return g7(["rev-parse", "HEAD"]);
+  };
+  g7(["checkout", "-q", "-B", "d993", M]);
+  const HA = novoHead("1\n");
+  g(["init", "-q", "--bare", "mail993.git"]); g(["push", "-q", "../mail993.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m = { CORREIO_REPO: join(T, "mail993.git"), CORREIO_GIT_DIR: join(T, "dir993.git"), FAKE_COMMENTS: "" };
+  const feita = (id) => { try { return g(["show", `refs/heads/correio:revisao/feitas/${id}.md`], join(T, "mail993.git")); } catch { return ""; } };
+  const idDe = (out) => /pedido registrado: (\S+)/.exec(out)?.[1] ?? "";
+  let r = run(["request-review", "--from", "Claude 4 X", "--pr", "993", "--sha", HA, "--text", "a"], { ...m, ...as("c4") });
+  const idA = idDe(r.out);
+  const HB = novoHead("2\n");
+  r = run(["claim-review", "--as", "Claude 5 X"], { ...m, ...as("c5") });
+  is("d993: claim-review does not hand out a request whose head moved", r.ok && !/pegou:/.test(r.out) && /nenhum pedido/.test(r.out), r.out);
+  is("d993: that request is closed as superseded, with the request's head and the current one", /Resultado: substituído/.test(feita(idA)) && feita(idA).includes(HA) && feita(idA).includes(HB), feita(idA));
+  r = run(["read", "--as", "Claude 4 X"], { ...m, ...as("c4") });
+  is("d993: and the author is told, in the mail", /: substituído/.test(r.out) && r.out.includes(idA), r.out);
+
+  r = run(["request-review", "--from", "Claude 4 X", "--pr", "993", "--sha", HB, "--text", "b"], { ...m, ...as("c4") });
+  const idB = idDe(r.out);
+  const HC = novoHead("3\n");
+  r = run(["request-review", "--from", "Claude 4 X", "--pr", "993", "--sha", HC, "--text", "c"], { ...m, ...as("c4") });
+  const idC = idDe(r.out);
+  is("d993: a new request on a new head closes the author family's older open request for that PR", r.ok && idC && r.out.includes(`substituído: ${idB}`) && /Resultado: substituído/.test(feita(idB)), r.out + feita(idB));
+  r = run(["list-reviews"], m);
+  is("d993: and only the new one is listed as open", !r.out.includes(idB) && r.out.includes(idC), r.out);
+
+  r = run(["claim-review", "--as", "Claude 5 X"], { ...m, ...as("c5") });
+  is("d993: the request on the current head is handed out", /pegou:/.test(r.out) && r.out.includes(idC), r.out);
+  r = run(["release-review", "--as", "Claude 5 X", idC, "--reason", "taken by mistake"], { ...m, ...as("c5") });
+  is("d993: a release says only this session is off", r.ok && /só esta sessão fica de fora/.test(r.out), r.out);
+  r = run(["claim-review", "--as", "Claude 5 X"], { ...m, ...as("c5") });
+  is("d993: the session that released does not take it again", !/pegou:/.test(r.out), r.out);
+  r = run(["claim-review", "--as", "Claude 5 Y"], { ...m, ...as("ibq") });
+  is("d993: another session of the same family takes it (the release was not the family's)", /pegou:/.test(r.out) && r.out.includes(idC), r.out);
+  r = run(["release-review", "--as", "Claude 5 Y", "--family", idC], { ...m, ...as("ibq") });
+  is("d993: --family with a value (the id after it) is refused, and nothing is released", !r.ok && /--family não leva valor/.test(r.out), r.out);
+  r = run(["release-review", "--as", "Claude 5 Y", idC, "--reason", "the family has a commit", "--family"], { ...m, ...as("ibq") });
+  is("d993: a release with --family says the whole family is off", r.ok && /família claude-5 inteira fica de fora/.test(r.out), r.out);
+  r = run(["claim-review", "--as", "Claude 5 Z"], { ...m, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_012ST5iZUmuf9ob1UKKczQnH" });
+  is("d993: then no session of that family takes it", !/pegou:/.test(r.out), r.out);
+  r = run(["claim-review", "--as", "Claude 7 X"], { ...m, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" });
+  is("d993: and another family does", /pegou:/.test(r.out) && r.out.includes(idC), r.out);
+  // A release written before this change (no scope line) keeps the family off, as it did.
+  const mod = await import(TOOL);
+  is("d993: the scope lines are exact, and a release without one is the family's, as before", mod.ESCOPO_SESSAO === "escopo: sessão" && mod.ESCOPO_FAMILIA === "escopo: família" &&
+    mod.devolvidoPara({ devolveram: new Set(["claude-5"]), devolveramSessoes: new Set() }, "Claude 5 Q") === true &&
+    mod.devolvidoPara({ devolveram: new Set(), devolveramSessoes: new Set(["claude-5-x"]) }, "Claude 5 Q") === false, "");
+}
+
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);
 process.exitCode = falhas ? 1 : 0;

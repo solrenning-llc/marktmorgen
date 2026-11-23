@@ -15,7 +15,8 @@
 //   node agent-mail.mjs list-pending --from "Claude 6"           # o que você mandou e ainda não foi lido, com a idade
 //   node agent-mail.mjs set-quota --as "Claude 3" --exhausted --until 2026-11-23T02:00-03:00 --by "Claude 6 (informado pelo dono)"   # por outra família
 //   node agent-mail.mjs request-review ... --exclude "Claude 2,Claude 4"   # a ferramenta já exclui sozinha quem tem commits no PR; --exclude acrescenta
-//   node agent-mail.mjs release-review --as "Claude 2" <id> --reason "tenho commits no PR"   # devolve na hora o que pegou
+//   node agent-mail.mjs release-review --as "Claude 2" <id> --reason "pegado por engano"   # devolve na hora o que pegou; só esta sessão fica de fora
+//   node agent-mail.mjs release-review --as "Claude 2" <id> --reason "tenho commits no PR" --family   # a família inteira fica de fora
 //   node agent-mail.mjs cancel-enqueue --as "Claude 6" <id> --reason "por quê"   # o autor, ou quem pôs HOLD, tira o pedido da fila
 //   node agent-mail.mjs request-review --from "Claude 6" --pr 4941 --sha 2e31152be3 --text "o que mudou"
 //   node agent-mail.mjs list-reviews                            # pedidos de revisão abertos, na ordem de chegada
@@ -566,6 +567,7 @@ export function pedidos(tipo, agora = new Date(), commit = buscar()) {
   const semCota = new Set(Object.entries(cotas(agora, commit)).filter(([, v]) => v.sem).map(([f]) => f));
   const tomadas = new Map();
   const devolvidas = new Map(); // id -> famílias que devolveram (por exemplo, por terem commits no PR); não pegam de novo
+  const devolvidasSessoes = new Map(); // id -> sessões que devolveram só por si (ESCOPO_SESSAO); a família continua apta
   const ord = ordem(commit);
   const maiorN = new Map();
   // Passo 3: as tomadas de cada pedido valem na ordem dos commits (o número n só dá nome ao arquivo); uma liberação do
@@ -577,10 +579,13 @@ export function pedidos(tipo, agora = new Date(), commit = buscar()) {
     const id = c.split("/")[2];
     maiorN.set(id, Math.max(maiorN.get(id) ?? -1, n));
     const texto = conteudo(commit, c);
-    const [marca, por, acao] = texto.split("\n");
+    const [marca, por, acao, escopo] = texto.split("\n");
     const quem = por || remetenteDe(marca);
     if (acao === "LIBERADO" && !privilegioValido(texto, quem)) continue;
-    if (acao === "DEVOLVIDO") devolvidas.set(id, new Set([...(devolvidas.get(id) ?? []), familia(quem)]));
+    // Uma devolução tira a família inteira, como sempre, salvo a que diz ESCOPO_SESSAO na 4ª linha: essa tira só a
+    // sessão que devolveu (coordenador, d993: a devolução por engano do Claude 2 main tirou a família toda do 9edf).
+    if (acao === "DEVOLVIDO" && escopo === ESCOPO_SESSAO) devolvidasSessoes.set(id, new Set([...(devolvidasSessoes.get(id) ?? []), slug(quem)]));
+    else if (acao === "DEVOLVIDO") devolvidas.set(id, new Set([...(devolvidas.get(id) ?? []), familia(quem)]));
     // A tomada vale da hora declarada ou da do commit, a que vier primeiro; uma declarada no futuro não vale.
     const declarada = dataDe(marca), feita = ord.get(c)?.t;
     const quando = noFuturo(declarada, agora) ? null : declarada && feita ? new Date(Math.min(declarada.getTime(), feita)) : declarada;
@@ -603,8 +608,18 @@ export function pedidos(tipo, agora = new Date(), commit = buscar()) {
     const estado = feitas.has(id) ? "feito" : viva ? "tomado" : "aberto";
     return { id, tipo, pr: campo(texto, "PR"), sha: campo(texto, "Head"), autor: campo(texto, "Autor"), familia: familia(campo(texto, "Autor")),
       texto, estado, tomadoPor: viva ? tomada.por : null, ultimaTomadaPor: tomada && !tomada.devolvida ? tomada.por : null,
-      proximaTomada: maiorN.has(id) ? maiorN.get(id) + 1 : 0, devolveram: devolvidas.get(id) ?? new Set() };
+      proximaTomada: maiorN.has(id) ? maiorN.get(id) + 1 : 0, devolveram: devolvidas.get(id) ?? new Set(),
+      devolveramSessoes: devolvidasSessoes.get(id) ?? new Set() };
   });
+}
+
+/** A 4ª linha de uma devolução que tira só a sessão que devolveu; sem ela, a devolução tira a família inteira. */
+export const ESCOPO_SESSAO = "escopo: sessão";
+export const ESCOPO_FAMILIA = "escopo: família";
+
+/** Se o pedido foi devolvido para `eu`: pela família inteira, ou só por esta sessão (ESCOPO_SESSAO). */
+export function devolvidoPara(p, eu) {
+  return p.devolveram.has(familia(eu)) || Boolean(p.devolveramSessoes?.has(slug(eu)));
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -1329,7 +1344,7 @@ export function pedir({ tipo, de, pr, sha, texto = "", para = "", exclui = "", c
  * acordar ninguém por um pedido que ele não pode pegar.
  */
 function revisaoParaMim(p, eu, agora, c) {
-  if (p.estado !== "aberto" || p.familia === familia(eu) || p.devolveram.has(familia(eu))) return false;
+  if (p.estado !== "aberto" || p.familia === familia(eu) || devolvidoPara(p, eu)) return false;
   if (campo(p.texto, "Exclui").split(", ").includes(familia(eu))) return false;
   // Cota baixa (OWNER-20261122-0121-MAIL-AVAILABILITY, item 2): revisão longa não vai a quem tem COTA_BAIXA% ou menos.
   if (c[familia(eu)]?.baixa && revisaoLonga(p)) return false;
@@ -1397,7 +1412,7 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     alvo = lista.find((p) => p.estado === "aberto");
     if (alvo && alvo.familia === familia(eu)) return { espera: `o primeiro da fila, #${alvo.pr}, é da sua família; outra família o enfileira` };
     // Quem devolveu o primeiro da fila, ou foi excluído no pedido, não o pega de volta; ele continua primeiro (achado do Claude 4 3rC).
-    if (alvo && (alvo.devolveram.has(familia(eu)) || campo(alvo.texto, "Exclui").split(", ").includes(familia(eu)) || revisoresDoHead(alvo.pr, alvo.sha).has(familia(eu)))) return { espera: `o primeiro da fila, #${alvo.pr}, foi devolvido ou excluído para a sua família; outra família o enfileira` };
+    if (alvo && (devolvidoPara(alvo, eu) || campo(alvo.texto, "Exclui").split(", ").includes(familia(eu)) || revisoresDoHead(alvo.pr, alvo.sha).has(familia(eu)))) return { espera: `o primeiro da fila, #${alvo.pr}, foi devolvido ou excluído para a sua família; outra família o enfileira` };
     // Fila (dono, OWNER-20261123-0410, item 3 (b), posterior à regra 605b/49de do coordenador, que ela substitui; aplicação
     // do coordenador interino, ca32): ficam de fora só a família do autor e quem revisou aquele head. Uma família com commit
     // no PR que não seja a do autor nem revisora enfileira, como qualquer outra (FQ (1)); a exceção 4acb deixa de existir.
@@ -1418,6 +1433,14 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     // Na hora de pegar, confere de novo os commits do PR (o head pode ter mudado): se a família de `eu` tem commit nele,
     // devolve sozinha com o motivo, para ela não receber esse pedido de novo, e segue para o próximo.
     for (const p of lista.filter((x) => revisaoParaMim(x, eu, agora, c))) {
+      // d993: um pedido cujo head deixou de ser o do PR, lido de fonte que vale (o ramo do PR, ou um repositório local), é
+      // fechado como substituído, com aviso ao autor, e não é entregue. Sem o head lido assim, segue como antes: quem
+      // revisa confere o head no PR.
+      const lidoHead = headDoPr(p.pr, campoCabecalho(p.texto, "Ramo") || null);
+      if (lidoHead.sha && lidoHead.fonte !== "ref" && !(lidoHead.sha.startsWith(String(p.sha)) || String(p.sha).startsWith(lidoHead.sha))) {
+        substituir({ p, atual: lidoHead.sha, eu, agora });
+        continue;
+      }
       // ce2d: quem deu READY neste head só no PR também devolve, com o motivo; sem ler o PR, nada é entregue. Um CHANGES
       // não devolve: é a mesma regra do request-review, para quem ele mostra como apto ser quem recebe (LEVE 1 do
       // Claude 7 xAF no #5261).
@@ -1512,10 +1535,13 @@ export function pegar({ tipo, eu, agora = new Date() }) {
 }
 
 /**
- * Devolve na hora um pedido que `eu` tomou e não pode atender (por exemplo, tem commits no PR: FQ (2) e RV). O pedido
- * volta a ser o primeiro aberto, e a família de `eu` não o pega de novo. O autor recebe o aviso.
+ * Devolve na hora um pedido que `eu` tomou e não pode atender. O pedido volta a ser o primeiro aberto, e o autor recebe o
+ * aviso. Por padrão, só esta sessão não o pega de novo (ESCOPO_SESSAO): uma devolução por engano, ou por algo da sessão
+ * (sem node_modules, sem tsc), não tira a família toda (coordenador, d993; caso do 9edf, 23/11/2026). Com `familiaToda`
+ * (--family), por exemplo quando a família tem commits no PR (FQ (2) e RV), a família inteira fica de fora, como antes.
+ * Commits e vereditos da família no PR continuam conferidos sozinhos pelo claim-review, em qualquer escopo.
  */
-export function devolver({ tipo, eu, id, motivo = "", agora = new Date() }) {
+export function devolver({ tipo, eu, id, motivo = "", familiaToda = false, agora = new Date() }) {
   const p = pedidos(tipo, agora).find((x) => x.id === id);
   if (!p) throw new Error(`pedido não encontrado: ${id}`);
   if (p.estado !== "tomado" || familia(p.tomadoPor) !== familia(eu)) throw new Error(`o pedido ${id} não está tomado pela sua família`);
@@ -1523,7 +1549,7 @@ export function devolver({ tipo, eu, id, motivo = "", agora = new Date() }) {
   if (slug(p.tomadoPor) !== slug(eu)) throw new Error(`o pedido ${id} foi pegado por ${p.tomadoPor}; só essa sessão o devolve`);
   const carimbo = agora.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
   const marca = `${carimbo}-${slug(eu)}-${randomBytes(2).toString("hex")}`;
-  acrescentar({ [`${tipo}/tomadas/${id}/${p.proximaTomada}`]: `${marca}\n${eu}\nDEVOLVIDO\n${String(motivo).trim()}\n` }, `${eu} devolveu ${tipo} #${p.pr}`);
+  acrescentar({ [`${tipo}/tomadas/${id}/${p.proximaTomada}`]: `${marca}\n${eu}\nDEVOLVIDO\n${familiaToda ? ESCOPO_FAMILIA : ESCOPO_SESSAO}\n${String(motivo).trim()}\n` }, `${eu} devolveu ${tipo} #${p.pr}`);
   enviar({ de: eu, para: p.autor, assunto: `${tipo === "fila" ? "Fila" : "Revisão"} #${p.pr} @${p.sha}: devolvido`, texto: `Devolvido por ${eu}. ${motivo}`.trim(), responde: id, agora });
   return p;
 }
@@ -1703,6 +1729,36 @@ export function retirar({ tipo, eu, id, motivo = "", agora = new Date() }) {
   acrescentar({ [`${tipo}/feitas/${id}.md`]: corpo }, `${tipo} #${p.pr}: retirado (${eu})`);
   if (familia(eu) !== p.familia) enviar({ de: eu, para: p.autor, assunto: `${tipo === "fila" ? "Fila" : "Revisão"} #${p.pr} @${p.sha}: retirado`, texto: corpo, responde: id, agora });
   return p;
+}
+
+/**
+ * Fecha, sem revisão, um pedido de revisão cujo head deixou de ser o do PR (coordenador, d993; caso do 9edf, 23/11/2026:
+ * o pedido do head velho continuou aberto, foi entregue de novo e teve de ser devolvido à mão). O registro diz o head do
+ * pedido e o atual; o autor é avisado quando quem fecha é outra família. Quem chega junto e acha o registro já gravado não
+ * faz nada.
+ */
+export function substituir({ tipo = "revisao", p, atual, eu, agora = new Date() }) {
+  const corpo = [`Resultado: substituído`, `PR: ${p.pr}`, `Head: ${p.sha}`, `Head atual: ${atual}`, `Por: ${eu}`, `Data (UTC): ${agora.toISOString().slice(0, 16).replace("T", " ")}`, "",
+    `O head de #${p.pr} mudou de ${String(p.sha).slice(0, 10)} para ${String(atual).slice(0, 10)}, e uma revisão vale para um head só: este pedido foi fechado sem revisão. A revisão do head novo é outro pedido.`, ""].join("\n");
+  try {
+    acrescentar({ [`${tipo}/feitas/${p.id}.md`]: corpo }, `${tipo} #${p.pr}: substituído (${eu})`);
+  } catch (erro) {
+    if (/já existe no correio/.test(String(erro.message ?? erro))) return false;
+    throw erro;
+  }
+  if (familia(eu) !== p.familia) enviar({ de: eu, para: p.autor, assunto: `Revisão #${p.pr} @${p.sha}: substituído`, texto: corpo, responde: p.id, agora });
+  return true;
+}
+
+/**
+ * Depois de um pedido de revisão novo (`id`, head `sha`), fecha os pedidos de revisão ainda abertos da mesma família para
+ * o mesmo PR em outro head (coordenador, d993). Um pedido já tomado não é fechado: quem o pegou termina ou devolve, e o
+ * claim-review não o entrega de novo com o head mudado. Devolve os pedidos fechados.
+ */
+export function fecharSubstituidos({ de, pr, sha, id, agora = new Date() }) {
+  const mesmo = (x) => x.startsWith(String(sha).slice(0, 10)) && String(sha).startsWith(x.slice(0, 10));
+  const velhos = pedidos("revisao", agora).filter((x) => x.estado === "aberto" && x.id !== id && x.pr === String(pr) && x.familia === familia(de) && !mesmo(String(x.sha)));
+  return velhos.filter((p) => substituir({ p, atual: sha, eu: de, agora }));
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -2102,7 +2158,7 @@ export const OPCOES = {
   as: "eu", from: "de", to: "para", subject: "assunto", text: "texto", file: "arquivo", "reply-to": "responde", all: ["tudo", "todas"],
   exhausted: "sem", out: "sem", available: "com", until: "ate", by: "por", remaining: "resta", renews: "renova", also: "tambem", seconds: "segundos", exclude: "exclui",
   result: "resultado", reason: "motivo", name: "nome", on: "ligar", off: "desligar", link: "link", request: "pedido", "owner-message": "dono",
-  "owner-hold": "holdDono", "owner-decision": "liberacaoDono",
+  "owner-hold": "holdDono", "owner-decision": "liberacaoDono", family: "familiaToda",
 };
 /**
  * Os nomes internos que algum comando lê (o.<nome>), além dos de OPCOES. Uma opção fora dos dois é recusada: antes, ela
@@ -2219,7 +2275,7 @@ async function main(argv) {
           const ps = pedidos(tipo);
           const agora = new Date(), c = cotas(agora);
           const vez = tipo === "fila"
-            ? (ps.some((p) => p.estado === "tomado") ? [] : ps.filter((p) => p.estado === "aberto").slice(0, 1).filter((p) => p.familia !== familia(o.eu) && !p.devolveram.has(familia(o.eu)) && !campo(p.texto, "Exclui").split(", ").includes(familia(o.eu)) && !revisoresDoHead(p.pr, p.sha).has(familia(o.eu)) && !(() => { const m = estadoPr(p.pr); return m.ativo && (m.acao === "HOLD" || familia(m.por) !== familia(o.eu)); })() && !vedadaNaVigia(p, o.eu)))
+            ? (ps.some((p) => p.estado === "tomado") ? [] : ps.filter((p) => p.estado === "aberto").slice(0, 1).filter((p) => p.familia !== familia(o.eu) && !devolvidoPara(p, o.eu) && !campo(p.texto, "Exclui").split(", ").includes(familia(o.eu)) && !revisoresDoHead(p.pr, p.sha).has(familia(o.eu)) && !(() => { const m = estadoPr(p.pr); return m.ativo && (m.acao === "HOLD" || familia(m.por) !== familia(o.eu)); })() && !vedadaNaVigia(p, o.eu)))
             : ps.filter((p) => revisaoParaMim(p, o.eu, agora, c));
           abertos.push(...vez.map((p) => `${tipo} #${p.pr}`));
         }
@@ -2299,7 +2355,13 @@ async function main(argv) {
     // é feito mesmo assim e diz que isso NÃO FOI CONFERIDO.
     const vereditos = tipo === "revisao" ? aprovadoresNoPr(o.pr, o.sha) : undefined;
     if (vereditos === null) console.log(`ATENÇÃO: os vereditos escritos no #${o.pr} NÃO FORAM CONFERIDOS agora (o GitHub não respondeu); quem já deu READY neste head só no PR não ficou de fora; diga com --exclude.`);
-    console.log(`pedido registrado: ${pedir({ tipo, de: o.de, pr: o.pr, sha: o.sha, texto, para, exclui: o.exclui === true ? "" : o.exclui ?? "", commits, vereditos: vereditos ?? undefined })}`);
+    const novoId = pedir({ tipo, de: o.de, pr: o.pr, sha: o.sha, texto, para, exclui: o.exclui === true ? "" : o.exclui ?? "", commits, vereditos: vereditos ?? undefined });
+    console.log(`pedido registrado: ${novoId}`);
+    // d993: os pedidos de revisão da mesma família para este PR, ainda abertos em outro head, saem como substituídos.
+    if (tipo === "revisao") {
+      const novo = pedidos("revisao").find((x) => x.id === novoId);
+      for (const v of novo ? fecharSubstituidos({ de: o.de, pr: o.pr, sha: novo.sha, id: novoId }) : []) console.log(`substituído: ${v.id} (#${v.pr} @${String(v.sha).slice(0, 10)}, head antigo; fechado sem revisão)`);
+    }
     {
       if (!commits) console.log("ATENÇÃO: não consegui ler os commits do PR; diga com --exclude as famílias que têm commits nele.");
       else {
@@ -2387,8 +2449,11 @@ async function main(argv) {
     }
   } else if (comando === "devolver-revisao" || comando === "devolver-fila") {
     if (!o.eu) throw new Error("--as é obrigatório");
-    const p = devolver({ tipo: comando === "devolver-fila" ? "fila" : "revisao", eu: o.eu, id: o._[0], motivo: o.motivo === true ? "" : o.motivo ?? "" });
-    console.log(`devolvido: #${p.pr} @${p.sha}; outra família pode pegar agora`);
+    if (o.familiaToda !== undefined && o.familiaToda !== true) throw new Error("--family não leva valor; nada foi devolvido. Ponha a id do pedido antes dele: release-review --as \"Claude N\" <id> --reason \"...\" --family");
+    const familiaToda = o.familiaToda === true;
+    const p = devolver({ tipo: comando === "devolver-fila" ? "fila" : "revisao", eu: o.eu, id: o._[0], motivo: o.motivo === true ? "" : o.motivo ?? "", familiaToda });
+    console.log(familiaToda ? `devolvido: #${p.pr} @${p.sha}; a família ${familia(o.eu)} inteira fica de fora deste pedido; outra família pode pegar agora`
+      : `devolvido: #${p.pr} @${p.sha}; só esta sessão fica de fora; outra sessão, inclusive da família ${familia(o.eu)}, pode pegar agora (se a família tem commits no PR, devolva com --family)`);
   } else if (comando === "retirar-fila" || comando === "retirar-revisao") {
     if (!o.eu) throw new Error("--as é obrigatório");
     const p = retirar({ tipo: comando === "retirar-fila" ? "fila" : "revisao", eu: o.eu, id: o._[0], motivo: o.motivo === true ? "" : o.motivo ?? "" });

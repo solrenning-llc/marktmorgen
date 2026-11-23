@@ -33,7 +33,7 @@ export const INDEX_SECONDS = 401 * 86_400;
 const indexKey = (statsId: string, email: string) =>
   `nl:erase:ix:${statsId}:${createHash("sha256").update(`nimbus-erase-ix:${statsId}:${normaliseEmail(email)}`).digest("hex").slice(0, 32)}`;
 /** The same, scored by when each key was noted (since 18 October 2026): a set of the old kind cannot take a score. */
-const notesKey = (statsId: string, email: string) => `${indexKey(statsId, email)}:z`;
+export const notesKey = (statsId: string, email: string) => `${indexKey(statsId, email)}:z`;
 
 /**
  * Commands that note a record made for this address, to send with the

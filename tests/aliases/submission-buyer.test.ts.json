@@ -1,4 +1,5 @@
 {
+  "@/lib/auth": "submission-upload-world.ts",
   "@/lib/request-guard": "submission-upload-world.ts",
   "@/lib/store": "submission-upload-world.ts",
   "@/lib/store-exact": "submission-upload-world.ts",

@@ -24,9 +24,9 @@ import {
 } from "@/lib/assignment-rules";
 import { deleteFile, headFile } from "@/lib/file-store";
 import { plain, serveFile } from "@/lib/serve-file";
-import { essentialLimitState, fromAnotherSite, limited } from "@/lib/request-guard";
+import { essentialLimitState, fromAnotherSite, limited, limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
 import { noteIfFinished } from "@/lib/course-finish";
-import { takeBuyerAction, takeBuyerRead } from "@/lib/buyer-actions";
+import { takeBuyerAction, takeBuyerReadExact } from "@/lib/buyer-actions";
 import { speech } from "@/lib/buyer-words";
 
 /** Hand-ins one student may make in an hour. */
@@ -204,7 +204,10 @@ export async function GET(request: NextRequest) {
     const on = await studentOnTask(q.get("h") ?? "", q.get("p") ?? "", lessonId, await cookies());
     if (!on.ok) return plain(on.reason === "unknown" ? 404 : 403, "Not found.");
     // One of the store's public requests on the buyers' side (lib/buyer-actions.ts).
-    if (!(await takeBuyerRead(on.store))) return plain(503, speech(on.store).w.restingTitle);
+    const taken = await takeBuyerReadExact(on.store).catch(unknownLimit);
+    // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
+    if (taken === "unknown") return limitUnknownResponse();
+    if (!taken) return plain(503, speech(on.store).w.restingTitle);
     courseId = on.course.id;
     who = on.who;
   }

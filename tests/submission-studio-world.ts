@@ -56,6 +56,8 @@ export function findLesson(_course: unknown, lessonId: string) {
 }
 // lib/store.ts
 export const storeFolder = async () => FOLDER;
+/** lib/auth.ts normaliseEmail, which lib/suppression.ts (the open's ask whether the buyer was deleted) reads. */
+export const normaliseEmail = (email: string) => email.trim().toLowerCase();
 export const storeRef = () => "owner@example.test";
 // Read by lib/auth.ts (through lib/handle-prefill.ts), which the buyer's reply email loads for its address checks (unit 6).
 export const normaliseHandle = (raw: string) => raw.trim().replace(/^@+/, "").toLowerCase();

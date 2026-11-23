@@ -9,6 +9,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { researchAccountMark } from "@/lib/creator-research-room";
 
 export const RESPONSES_KEY = "nl:creators:responses";
 
@@ -103,6 +104,24 @@ function senderOf(entry: string): string {
   return sender;
 }
 
+/**
+ * The person an answer is looked for as: the typed address, and the account marks a reserved place carries
+ * (reservedFor, lib/creator-research-room.ts researchAccountMark, under this deployment's key and the earlier one), so
+ * an account that typed another address is still found (Claude 2's MEDIUM on #3584).
+ */
+type Person = { address: string; marks: string[] };
+async function personOf(email: string): Promise<Person> {
+  const address = addressOf(email);
+  const marks = [await researchAccountMark(address), await researchAccountMark(address, true)].filter(Boolean);
+  return { address, marks };
+}
+/** Whether a kept answer is the person's: sent from their address, or kept in a place reserved for their account. */
+function isTheirs(entry: string, person: Person): boolean {
+  if (senderOf(entry) === person.address) return true;
+  const mark = Object.getOwnPropertyDescriptor(JSON.parse(entry) as object, "reservedFor")?.value;
+  return typeof mark === "string" && person.marks.includes(mark);
+}
+
 /** Walks one look may begin: a walk that finds the list moved under it starts again, at most this many times. */
 const WALK_TRIES = 3;
 
@@ -116,7 +135,7 @@ class ListMoved extends Error {}
  * already read, and the answer after it would be passed over: so an anchor not found where it can be means the walk
  * cannot tell it read everything, and says so. A walk from the oldest end would be moved by the daily pruning.
  */
-async function walkOnce(address: string): Promise<string[]> {
+async function walkOnce(person: Person): Promise<string[]> {
   const found: string[] = [];
   const seen = new Set<string>();
   let start = 0;
@@ -133,7 +152,7 @@ async function walkOnce(address: string): Promise<string[]> {
     }
     for (let i = from; i < items.length; i += 1) {
       const entry = items[i];
-      if (senderOf(entry) !== address || seen.has(entry)) continue;
+      if (!isTheirs(entry, person) || seen.has(entry)) continue;
       seen.add(entry);
       found.push(entry);
     }
@@ -146,15 +165,15 @@ async function walkOnce(address: string): Promise<string[]> {
 }
 
 /**
- * Every answer kept under the address, exactly as stored, newest first, from one whole walk of the list. A page not
+ * Every answer kept under the address or the account's mark, exactly as stored, newest first, from one whole walk of the list. A page not
  * read in its exact shape, an answer that cannot be read, a list longer than the walk's ceiling, or a list that moved
  * under every try throws UnknownReplyError; an empty list (no key) is confirmed absence.
  */
-async function answersOf(address: string): Promise<string[]> {
+async function answersOf(person: Person): Promise<string[]> {
   if (!isRedisConfigured()) throw new UnknownReplyError("the creator research answers (no database)");
   for (let walk = 0; walk < WALK_TRIES; walk += 1) {
     try {
-      return await walkOnce(address);
+      return await walkOnce(person);
     } catch (error) {
       if (!(error instanceof ListMoved)) throw error;
     }
@@ -167,24 +186,24 @@ async function answersOf(address: string): Promise<string[]> {
  * throws (UnknownReplyError), never an empty copy; an address with nothing kept gets [].
  */
 export async function researchCopyPerson(email: string): Promise<ResearchAnswerCopy[]> {
-  const address = addressOf(email);
-  return (await answersOf(address)).map((entry) => JSON.parse(entry) as ResearchAnswerCopy);
+  const person = await personOf(email);
+  return (await answersOf(person)).map((entry) => JSON.parse(entry) as ResearchAnswerCopy);
 }
 
 /**
- * Deletes every research answer sent from the address (its name, email, country, link and answers), and returns
+ * Deletes every research answer sent from the address or kept in a place reserved for its account (its name, email, country, link and answers), and returns
  * how many went. Done only when a whole walk of the list finds none of theirs left. A page or answer that cannot be
  * read throws UnknownReplyError before anything is removed; a removal whose receipt is not an exact count, or
  * answers still found after the last walk, throw ResearchForgetIncomplete with what was removed, never a finished
  * deletion. A receipt of 0 is an answer another job (the 24-month pruning) took first.
  */
 export async function forgetResearchPerson(email: string): Promise<number> {
-  const address = addressOf(email);
+  const person = await personOf(email);
   let removed = 0;
   for (let walk = 0; walk < FORGET_WALKS; walk += 1) {
     let found: string[];
     try {
-      found = await answersOf(address);
+      found = await answersOf(person);
     } catch (error) {
       if (removed === 0) throw error;
       throw new ResearchForgetIncomplete(removed, "the list could not be read again", error);

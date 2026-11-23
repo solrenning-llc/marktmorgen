@@ -30,7 +30,7 @@ export default function PrivacyPage() {
   // Named only while the files creators sell are kept there (lib/vault.ts).
   const cloudflare = isVaultConfigured();
   return (
-    <LegalPage title="Privacy Policy" lastUpdated="November 13, 2026">
+    <LegalPage title="Privacy Policy" lastUpdated="November 22, 2026">
       <p>
         Marktmorgen (“Marktmorgen,” “we,” “us,” or “our”) is operated by
         Solrenning, an independent software studio. This Privacy Policy
@@ -1773,6 +1773,16 @@ export default function PrivacyPage() {
           answers, the date you sent them, and the consent choices you checked.
           To limit abuse, we also keep a one-way hash of your IP address for
           one hour; we do not store the IP address itself with your answers.
+          If you are signed in to a Marktmorgen account when you send the
+          form, we also store a short code made from your account&rsquo;s
+          email address with a secret key only we hold. It is not your email
+          address, and nobody can work it out from your address without that
+          key. We use it to keep a few places in the form for creators with an
+          account, so a flood of fake answers cannot fill it, and to allow
+          only one such answer per account. We keep the code with your answers
+          and delete it with them, after 24 months or when you ask us to delete
+          them. When you ask for a copy or for deletion, we find your answers by
+          this code as well as by the email address you typed.
         </p>
         <p>
           <strong className="text-black">Research outreach.</strong> If we
@@ -2373,6 +2383,9 @@ export default function PrivacyPage() {
             What is kept, and why: a one-way fingerprint of your address, under
             that store, so it never emails you again and no import brings you
             back, which only you can lift by joining its list again yourself;
+            a one-way mark of you under that store, so none of its companies
+            (the businesses the creator keeps notes on) takes you again, kept
+            401 days or until you join its list again yourself;
             any stop you pressed on one kind of its emails, also a one-way hash;
             your payments, which are on the creator&apos;s own Stripe account as
             their sales and tax records and are not stored by us; and the few

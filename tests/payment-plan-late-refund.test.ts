@@ -429,6 +429,25 @@ async function main(): Promise<void> {
     is("control: a plan with no late payment is let go at once", await inALine(none.session), false);
   }
 
+  part("A plan owed today is read again by the next daily run, even one that starts a little early (#3367, LOW 3 of 6938631896)");
+  {
+    reset();
+    redis.clear();
+    Date.now = () => clock * 1000;
+    // The balance does not cover the refund: owed, read again "the next day". A daily cron starts some minutes either
+    // side of 24 hours after this run; due at exactly 24 hours, a run two minutes early skips it to the day after.
+    const o = plan(2, 70, 3);
+    balance = 1_000;
+    await rememberPlan(ACCOUNT, o.session);
+    const owedRun = await settlePlans();
+    is("owed, nothing refunded", [owedRun.owed, madeFor(o.invoices[2]).length], [1, 0]);
+    balance = 1_000_000;
+    Date.now = () => (clock + DAY - 120) * 1000;
+    await settlePlans();
+    is("the next daily run, two minutes early, reads it again and refunds", madeFor(o.invoices[2]).length, 1);
+    Date.now = () => clock * 1000;
+  }
+
   part("A try stays within the registry's Stripe calls");
   reset();
   const declared = (registry as Record<string, unknown>).PLAN_SETTLE_RUN as Record<string, number>;

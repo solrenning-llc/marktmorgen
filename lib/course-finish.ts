@@ -36,7 +36,7 @@ import { enroll, enrollOrThrow } from "@/lib/flows";
 import { MIN_REACHED_SHARE, REACHED_SHARE_STEP, reachedShare } from "@/lib/flow-rules";
 import { takeBuyerAction } from "@/lib/buyer-actions";
 import { exactReplies, UnknownReply } from "@/lib/redis-exact";
-import type { Store } from "@/lib/store";
+import { ownerKey, storeRef, type Store } from "@/lib/store";
 import { FINISH_KEEP_SECONDS } from "@/lib/course-finish-rules";
 import { claimValue, releaseMark } from "@/lib/claim-mark";
 import { REDIS_TIMEOUT_MS, withCutoff } from "@/lib/fetch-timeout";
@@ -51,14 +51,17 @@ const CONFIRM_FINISH = '-- marktmorgen:course-finish-confirm:v1\nif redis.call("
 /**
  * A share mark written after its sequences started (Codex X6's LOW on #3989), in one step: never lowered (a view that
  * read 25 and reached 50 does not land over a 75 another view wrote meanwhile) and never written back after the
- * student's erasure (a mark the read saw that is gone now, or a deletion print that changed since the read). Returns 1
- * when it wrote, 0 otherwise.
+ * student's erasure (a mark the read saw that is gone now, or a deletion print that changed since the read). A store
+ * with no list yet has no deletion print, and a person's erasure gives it its list (lib/person-erasure.ts erasureScope,
+ * ensureListId), so there the store record is read in the same step instead: a list there now, or a record that is gone
+ * or does not read, writes nothing (Claude 5 ibqho's NIT on #3989). The next lesson view, past the same step, tries
+ * again with the list. Returns 1 when it wrote, 0 otherwise.
  *
- *   KEYS[1] the share mark, KEYS[2] the store's deletion prints (only with a list)
- *   ARGV[1] the step, ARGV[2] the mark as read ("" for none), ARGV[3] seconds kept, ARGV[4] the print's field, ARGV[5]
- *   the print as read ("" for none)
+ *   KEYS[1] the share mark, KEYS[2] the store's deletion prints (with a list) or the store record (without one)
+ *   ARGV[1] the step, ARGV[2] the mark as read ("" for none), ARGV[3] seconds kept, ARGV[4] the print's field ("" for
+ *   a store with no list), ARGV[5] the print as read ("" for none)
  */
-const RAISE_REACHED = '-- marktmorgen:course-reach-raise:v1\nlocal cur = redis.call("GET", KEYS[1])\nif cur and tonumber(cur) and tonumber(cur) >= tonumber(ARGV[1]) then return 0 end\nif not cur and ARGV[2] ~= "" then return 0 end\nif #KEYS == 2 and (redis.call("HGET", KEYS[2], ARGV[4]) or "") ~= ARGV[5] then return 0 end\nredis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[3])\nreturn 1';
+const RAISE_REACHED = '-- marktmorgen:course-reach-raise:v2\nlocal cur = redis.call("GET", KEYS[1])\nif cur and tonumber(cur) and tonumber(cur) >= tonumber(ARGV[1]) then return 0 end\nif not cur and ARGV[2] ~= "" then return 0 end\nif ARGV[4] ~= "" then\n  if (redis.call("HGET", KEYS[2], ARGV[4]) or "") ~= ARGV[5] then return 0 end\nelse\n  local raw = redis.call("GET", KEYS[2])\n  if not raw then return 0 end\n  local ok, record = pcall(cjson.decode, raw)\n  if not ok or type(record) ~= "table" or type(record.listId) == "string" then return 0 end\nend\nredis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[3])\nreturn 1';
 
 const finishedKeyOf = (courseId: string, learner: string) => `nl:course:${courseId}:fin:${learner}`;
 const openedKeyOf = (courseId: string, learner: string) => `nl:course:${courseId}:open:${learner}`;
@@ -97,8 +100,9 @@ async function noteReached(store: Store, productId: string, courseId: string, em
   // Started first, and the share written down only once that is known (Codex X5's MEDIUM on #3989): a start that
   // failed leaves the mark where it was, so the next lesson view tries again (each start is still claimed once).
   await enrollOrThrow(store, email, { joined: false, reached: { productId, share } });
-  // Raised only, and only while the student is not erased since the read: one step (RAISE_REACHED).
-  const keys = listId ? [mark, suppressedKey(listId)] : [mark];
+  // Raised only, and only while the student is not erased since the read: one step (RAISE_REACHED). With no list, the
+  // store record stands in for the deletion print: an erasure gives the store its list first.
+  const keys = [mark, listId ? suppressedKey(listId) : await ownerKey(storeRef(store))];
   await redisPipeline([["EVAL", RAISE_REACHED, keys.length, ...keys, String(step), kept === null ? "" : String(kept), FINISH_KEEP_SECONDS, listId ? suppressionPrint(listId, email) : "", print === null ? "" : String(print)]]);
 }
 

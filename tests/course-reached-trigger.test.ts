@@ -22,7 +22,7 @@ import { emailKey, markLesson } from "@/lib/learn";
 import { noteIfFinished } from "@/lib/course-finish";
 import { erasePerson } from "@/lib/person-erasure";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
-import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductCourse, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, ownerKey, setMailSettings, setProductCourse, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -277,6 +277,54 @@ async function main(): Promise<void> {
     const [left] = (await real([["EXISTS", gilMark]])) as unknown[];
     is("the erasure ran between the start and the write", erasedOk, true);
     is("and no share mark is left for the erased person", left, 0);
+  }
+
+  part("A store with no list yet: an erasure between the start and the write leaves no share mark (Claude 5 ibqho's NIT on #3989)");
+  {
+    // A store from before list ids has no deletion print to compare. The person's erasure gives it its list
+    // (lib/person-erasure.ts erasureScope, ensureListId), so the write checks the store record's list instead.
+    const LEGACY = "legacy-reached@example.com";
+    await claimHandle(LEGACY, "legacyreached", "Legacy Kitchen", "");
+    await ensureStatsId(LEGACY);
+    await setStripeAccount(LEGACY, "acct_1TestReached002", true);
+    await setSubscription(LEGACY, { customerId: "cus_Reached0002", subscriptionId: "sub_Reached0002", active: true, tier: "pro", period: paidPeriod() });
+    const legacyMade = await addProduct(LEGACY, "Legacy Course", "Four dinners.", "29", null);
+    if (!legacyMade.ok) throw new Error("no legacy product");
+    let legacyCourse = emptyCourse();
+    for (const title of ["L1", "L2", "L3", "L4"]) {
+      const added = editCourse(legacyCourse, { op: "lesson-add", moduleId: legacyCourse.modules[0].id, title });
+      if (!added.ok) throw new Error("no legacy lesson");
+      legacyCourse = added.course;
+    }
+    await saveCourse(legacyCourse, ROOM);
+    const legacySet = await setProductCourse(LEGACY, legacyMade.product.id, { id: legacyCourse.id, lessons: 4 });
+    if (!legacySet.ok) throw new Error(`not a legacy course: ${JSON.stringify(legacySet)}`);
+    const [l1, l2] = legacyCourse.modules[0].lessons.map((l) => l.id);
+    // New stores get a list at creation (lib/store.ts freshStore), so the record is turned into one from before list ids.
+    const legacyKey = await ownerKey(LEGACY);
+    const [legacyRaw] = (await real([["GET", legacyKey]])) as unknown[];
+    await real([["SET", legacyKey, JSON.stringify({ ...JSON.parse(legacyRaw as string), listId: null })]]);
+    const legacy = (await storeForEmail(LEGACY))!;
+    is("the store has no list yet", legacy.listId, null);
+
+    // With no erasure, the step is written as before.
+    const hal = "hal-reach@example.com";
+    for (const lesson of [l1, l2]) await markLesson(legacyCourse.id, hal, lesson, true, ROOM);
+    await noteIfFinished(legacy, legacyMade.product.id, legacyCourse.id, hal);
+    const [halKept] = (await real([["GET", `nl:course:${legacyCourse.id}:reach:${emailKey(hal)}`]])) as unknown[];
+    is("a listless store still keeps the step reached", halKept, "50");
+
+    // The request read the store before the erasure: the store it holds still has no list.
+    const ivy = "ivy-reach@example.com";
+    for (const lesson of [l1, l2]) await markLesson(legacyCourse.id, ivy, lesson, true, ROOM);
+    const ivyMark = `nl:course:${legacyCourse.id}:reach:${emailKey(ivy)}`;
+    let ivyErased = false;
+    beforeReachWrite = async () => { ivyErased = (await erasePerson(legacy, ivy, { kind: "person" })).ok; };
+    await noteIfFinished(legacy, legacyMade.product.id, legacyCourse.id, ivy);
+    beforeReachWrite = undefined;
+    const [ivyLeft] = (await real([["EXISTS", ivyMark]])) as unknown[];
+    is("the erasure ran between the start and the write, and gave the store its list", [ivyErased, typeof (await storeForEmail(LEGACY))?.listId], [true, "string"]);
+    is("and no share mark is left for the person erased in a listless store", ivyLeft, 0);
   }
 
   part("Only who agreed");

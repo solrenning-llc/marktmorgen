@@ -37,9 +37,13 @@ import { TEAM_LIMITS } from "@/lib/team-scheduling-rules";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_KEEP_SECONDS, NEXT_OFFER_OUTPUT_TOKENS, NEXT_OFFER_PRODUCTS, NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { ASSIST_REMINDERS_PER_STORE_DAY, ASSIST_REMIND_KEEP_SECONDS, ASSIST_REMIND_OUTPUT_TOKENS, ASSIST_REMIND_PRODUCTS, ASSIST_REMIND_REQUEST_UNITS, ASSIST_REMIND_VERSION } from "@/lib/assistant-reminder-rules";
 import { ADD_ON_ROOM_CENTS, ADD_ON_FEES, ASSISTANT_INPUT_BYTES, ASSISTANT_KEEP_SECONDS, ASSISTANT_MESSAGES_MONTHLY, ASSISTANT_MODEL, ASSISTANT_OUTPUT_TOKENS, ASSISTANT_PRICE_CENTS, DISPUTE_RESERVE_BPS, REFUND_RESERVE_BPS, REMITTANCE_BPS } from "@/lib/store-assistant-rules";
+/** Every plan sold today, monthly and yearly, at full use. Until 20/11/2026 the list also required
+ * "video_overage", "visits_overage" and "orders_overage": use past a plan, sold no longer (visits and orders since
+ * 17/10/2026, lesson video since 31/10/2026; their meters owe nothing), so those scenarios had no revenue and could
+ * never pass. Owner's decision 3 (b), 20/11/2026: they are out of the review; tests/commercial-unsold-overages.test.ts
+ * fails, and they come back, if any of them is sold again. */
 export const REQUIRED_MARGIN_SCENARIOS=[
  "creator_month_full","creator_year_full","pro_month_full","pro_year_full","scale_month_full","scale_year_full",
- "video_overage","visits_overage","orders_overage",
 ] as const;
 export type MarginScenario=typeof REQUIRED_MARGIN_SCENARIOS[number];
 /** Base-plan worst cases cannot rely on future sales, overages or twelve monthly
@@ -73,7 +77,8 @@ function scenarioWithPlanRoom(key: MarginScenario, scenario: CustomerWorstCase |
 export const CURRENT_COMMERCIAL_TERMS = {
  // Since 18 October 2026 (schema 22): the price list of the owner's decision of 11:21, one list with no share of a sale, and the limits raised with it.
  // Schema24: a complete LLC inventory and its ceilings bind every financial review.
- schemaVersion: 29,
+ // Schema 30 (owner's decision 3 (b), 20/11/2026, #5017): the review requires only the six plan scenarios.
+ schemaVersion: 30,
  customerTaxReview: CUSTOMER_TAX_REVIEW_POLICY,
  planPaymentDisputes: PLAN_PAYMENT_DISPUTE_COST_RULES,
  marginPolicy: { decision: '2026-10-27T07:42:00-03:00', unit: 'strictly-positive-net-cents', minimumNetProfitCents: MINIMUM_NET_PROFIT_CENTS, company: 'nonnegative-at-computed-minimum-base', companyTargetBps: 6000, targetBasis: 'monthly-reconciled-actual-not-a-sales-gate', spendFloorRoom: COMMERCIAL_SPEND_FLOOR_ROOM_CENTS, assistantCostRoomCents: ADD_ON_ROOM_CENTS },

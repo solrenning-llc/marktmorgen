@@ -186,8 +186,14 @@ export function commercialGateReasons(): { check: string; passes: boolean | null
   out.push({ check: "Funded exposure approved (assessFundedExposure)", passes: exposure.approved, detail: `Reason: ${exposure.reason}; ${EXPOSURE_SCOPES.length} scopes (${EXPOSURE_SCOPES.join(", ")}).` });
   const base = assessMinimumCustomerBase(Object.keys(BASE_PLAN_REVENUE_CEILINGS).map((key) => ({ months: key.includes("_year_") ? 12 as const : 1 as const, scenario: null })), review?.companyBase ?? null);
   out.push({ check: "Minimum customer base sufficient (assessMinimumCustomerBase)", passes: base.reviewedBaseSufficient, detail: `Status: ${base.status}.` });
+  // A required scenario with no plan revenue ceiling could only pass as overage revenue, which is never collected.
+  // Since the owner's decision 3 (b) of 20 November 2026 there is none (#5017); the check still names any that returns.
   const overages = REQUIRED_MARGIN_SCENARIOS.filter((key) => BASE_PLAN_REVENUE_CEILINGS[key] === undefined);
-  out.push({ check: "All required scenarios approved, including the overage ones", passes: review === null || overages.length > 0 ? false : null, detail: `${review === null ? "No review, so no scenario is approved. " : ""}${overages.join(", ")} are still required. In CURRENT_COMMERCIAL_TERMS, traffic overage is "${CURRENT_COMMERCIAL_TERMS.traffic.overage}" and orders overage "${CURRENT_COMMERCIAL_TERMS.orders.overage}"; the video overage price (${VIDEO_CENTS_PER_HOUR_OVER}¢ an hour) is historical, never charged since 31 October 2026 (lib/watch-rules.ts). A scenario with no collected revenue is refused, so these cannot pass as overage revenue.` });
+  const terms = `In CURRENT_COMMERCIAL_TERMS, traffic overage is "${CURRENT_COMMERCIAL_TERMS.traffic.overage}" and orders overage "${CURRENT_COMMERCIAL_TERMS.orders.overage}"; the video overage price (${VIDEO_CENTS_PER_HOUR_OVER}¢ an hour) is historical, never charged since 31 October 2026 (lib/watch-rules.ts).`;
+  const required = overages.length
+    ? `${overages.join(", ")} are still required. ${terms} A scenario with no collected revenue is refused, so these cannot pass as overage revenue.`
+    : `The ${REQUIRED_MARGIN_SCENARIOS.length} required scenarios are the plan scenarios at full use; the overage scenarios are no longer required (the owner's decision 3 (b), 20 November 2026). ${terms}`;
+  out.push({ check: "All required scenarios approved", passes: review === null || overages.length > 0 ? false : null, detail: `${review === null ? "No review, so no scenario is approved. " : ""}${required}` });
   return out;
 }
 

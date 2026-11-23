@@ -11,4 +11,6 @@
  */
 export const PUBLISHED_COMMERCIAL_TERMS: Readonly<Record<number, string>> = Object.freeze({
   29: 'v29:sha256:41cc7b04fd0f8d1741eb5eacafefb1c2b316cf490540b65761fa71ec76afcfde',
+  // Owner's decision 3 (b), 20/11/2026 (#5017): REQUIRED_MARGIN_SCENARIOS holds only the six plan scenarios.
+  30: 'v30:sha256:e5e89942b990c54ccdbdb12e1140dfa3f6d2056f05d3848dfc8a9bbab1ea304d',
 });

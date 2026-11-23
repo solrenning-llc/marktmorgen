@@ -42,7 +42,7 @@ Prepared by Claude 4 (cloud AC) on 14 November 2026, queue message C4-202 (owner
 | `costAndLimitEvidence` | string | Non-empty evidence for costs and limits. |
 | `allocatedFixedCostsVerified` | boolean | Must be `true`. |
 | `prepaidUsageEnforced` | boolean | Must be `true`. |
-| `scenarios` | map of `CustomerWorstCase` (`lib/net-margin-rules.ts:14`) | All 9 scenarios of `REQUIRED_MARGIN_SCENARIOS` (`lib/commercial-margin.ts:39`): the 6 plan contracts at full use plus `video_overage`, `visits_overage`, `orders_overage`. |
+| `scenarios` | map of `CustomerWorstCase` (`lib/net-margin-rules.ts:14`) | All 6 scenarios of `REQUIRED_MARGIN_SCENARIOS` (`lib/commercial-margin.ts:45`): the 6 plan contracts at full use. The three overage scenarios (`video_overage`, `visits_overage`, `orders_overage`) are no longer required (3.3). |
 
 Each `CustomerWorstCase` holds the revenue collected, the refundable revenue, a tax ceiling, a ceiling for each of 11 cost categories, three flags (`allCostsBounded`, `allTaxesReviewed`, `revenueCollected`) and a TX tax review (`taxReview`, `taxContext`). `assessCustomerWorstCase` (`lib/net-margin-rules.ts:59`) approves it only when every amount is known, the tax ceiling is at least the reviewed TX ceiling, and the net is at least 1 cent (`MINIMUM_NET_PROFIT_CENTS`, `lib/net-margin-rules.ts:7`).
 
@@ -74,7 +74,7 @@ Each `CustomerWorstCase` holds the revenue collected, the refundable revenue, a 
 | Minimum customer base sufficient, with fixed costs plus exposure budget | 241–244 | Needs the above. |
 | Non-paying AI pools funded in exposure | 247–253 | Passes vacuously today (no non-paying AI pool). |
 | Upload and AI pools funded for every reviewed paying customer, **and every plan's AI ceiling at least the largest single request** (`aiPolicy.storeMicroUsd[tier] >= max(requestMicroUsd)` for creator, pro and scale) | 255 | **No, for any customer count.** Store's AI ceiling is 0 µUSD (Store has no AI rights) against a largest request of 2,266,342 µUSD (Sonnet) or 566,842 µUSD (Haiku). Studio (3,353,710) and Scale (6,369,120) pass this part. It needs a code decision (section 5). |
-| All 9 scenarios approved, plan revenue at most the published price, AI cost at least the plan's AI ceiling, with the spend-floor room (25¢ monthly, $1 yearly, `lib/commercial-margin.ts:56`) | 256–267 | **No**: see 3.3 for the three overage scenarios. |
+| All 6 scenarios approved, plan revenue at most the published price, AI cost at least the plan's AI ceiling, with the spend-floor room (25¢ monthly, $1 yearly, `lib/commercial-margin.ts:61`) | 256–267 | **No**: see 3.1 and 3.2. |
 
 The other opening gates (`taxGateValid`, `deemedSupplierReady`, `stripePlatformEligibilityReady`, `lib/opening.ts:33`) are not part of gate 4 and are not reviewed here.
 
@@ -251,7 +251,7 @@ The most-tax column at today's ceiling matches the generated `docs/margin-alignm
 3. All 22 LLC fixed-cost ceilings are `null` (`lib/llc-fixed-costs.ts:44`), so `allocateEntireLlcFixedCosts` returns `null` (3.4).
 4. `CURRENT_EXPOSURE_BUDGET_POLICY` and `CURRENT_CONTRACT_FUNDING_POLICY` are `null`.
 5. `contractLifecycleReady()` is `false`: resource allocations, renewals and settlement/reserve reconciliation are not covered.
-6. The three overage scenarios cannot pass as overage revenue (3.3).
+6. Closed: the three overage scenarios, which could not pass as overage revenue, are no longer required (3.3).
 7. The check at `lib/commercial-margin.ts:255` fails for any customer count. It requires every plan's AI ceiling to cover the largest single request, and Store's ceiling is 0 µUSD against 2,266,342 µUSD (Sonnet) or 566,842 µUSD (Haiku). Store sells no AI, so no review can pass this without a code decision: for example, skip a plan whose AI rights are zero, or fund Store a ceiling of one largest request.
 
 ### 3.2 Per unit, MR rule (net profit above zero with the spend-floor room)
@@ -271,7 +271,9 @@ With Haiku 5.5 as the only allowed model **and** the AI ceilings raised to $187.
 
 ### 3.3 The three overage scenarios
 
-`REQUIRED_MARGIN_SCENARIOS` still requires `video_overage`, `visits_overage` and `orders_overage` to be approved (`lib/commercial-margin.ts:39` and `:256`). None of these overages is sold any more: visits and orders are `"not-sold"` in `CURRENT_COMMERCIAL_TERMS` (`traffic.overage`, `orders.overage`), and the video overage price has not been charged since 31 October 2026 (`lib/watch-rules.ts:13`). A scenario with no collected revenue is refused (`"no_revenue"`, `lib/net-margin-rules.ts:81`), so these scenarios **cannot pass as overage revenue**. The check itself only runs `assessCustomerWorstCase` on them, so a review could instead define each one as the plan's own scenario: the plan's revenue, with use stopping at the plan's figure. That redefinition, or dropping the obsolete scenarios from `REQUIRED_MARGIN_SCENARIOS`, is a decision for the owner and a separately reviewed change. This draft does not choose one.
+**Decided and in code.** By the owner's decision 3 (b) of 20 November 2026, `REQUIRED_MARGIN_SCENARIOS` (`lib/commercial-margin.ts:45`) holds only the 6 plan scenarios; `video_overage`, `visits_overage` and `orders_overage` were dropped (#5017, `tests/commercial-unsold-overages.test.ts`). None of these overages is sold: visits and orders are `"not-sold"` in `CURRENT_COMMERCIAL_TERMS` (`traffic.overage`, `orders.overage`), and the video overage price has not been charged since 31 October 2026 (`lib/watch-rules.ts:13`). A scenario with no collected revenue is refused (`"no_revenue"`, `lib/net-margin-rules.ts:81`), so they could never pass as overage revenue.
+
+History, kept: before that decision this section said the three scenarios were still required and that dropping or redefining them was a decision for the owner and a separately reviewed change.
 
 ### 3.4 What is unknown and fails (never zero)
 
@@ -358,9 +360,6 @@ export const DRAFT_COMMERCIAL_MARGIN_REVIEW: CommercialMarginReview = {
     pro_year_full: plan(449_000, 12, { infrastructure: 12_557, storageDeliveryVideo: 1_711, email: 937, ai: 4_025, paymentAndFx: 44_403, supportAndOperations: null, acquisitionAndAffiliates: 0, fixedBusinessCosts: 0, postCancellation: 143, refundAndDisputeFees: 10_223, other: 0 }, 57_677),
     scale_month_full: plan(99_900, 1, { infrastructure: 2_358, storageDeliveryVideo: 288, email: 121, ai: 637, paymentAndFx: 9_906, supportAndOperations: null, acquisitionAndAffiliates: 0, fixedBusinessCosts: 0, postCancellation: 274, refundAndDisputeFees: 3_999, other: 0 }, 12_661),
     scale_year_full: plan(999_000, 12, { infrastructure: 28_286, storageDeliveryVideo: 3_447, email: 1_448, ai: 7_643, paymentAndFx: 98_754, supportAndOperations: null, acquisitionAndAffiliates: 0, fixedBusinessCosts: 0, postCancellation: 274, refundAndDisputeFees: 22_708, other: 0 }, 128_645),
-    video_overage: null, // CANNOT PASS: overage not sold (section 3.3); needs a code decision
-    visits_overage: null, // same
-    orders_overage: null, // same
   },
 };
 ```
@@ -376,7 +375,7 @@ With the known amounts above, each plan scenario's net after the code's room wou
 
    Each option is a code change for a separate, reviewed PR. No visible limit may be cut (owner, 18 October 2026).
 2. **Store's AI ceiling at `lib/commercial-margin.ts:255`** (3.1, item 7). Approve a code change that skips a plan with zero AI rights in that check, or that funds Store one largest request. Without it, no review can pass, whatever is decided on Studio and Scale.
-3. **The three overage scenarios** (3.3). Either define each one as the plan's own scenario (use stops at the plan's figure), or approve a code change that removes them.
+3. **The three overage scenarios** (3.3). Decided by the owner (decision 3 (b), 20 November 2026): removed from `REQUIRED_MARGIN_SCENARIOS`. Nothing left to decide here.
 4. **Fixed costs:** a reviewed monthly and yearly ceiling for each of the 22 LLC lines, with source and date; without them there is no base.
 5. **Funded exposure:** a monthly budget and case limits for the 8 scopes.
 6. **Support:** whether support is only the owner's own time (no paid tool), so `supportAndOperations` can be an evidenced 0.

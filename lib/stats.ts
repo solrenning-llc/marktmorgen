@@ -1285,22 +1285,43 @@ function financialPage(list: { data?: unknown; has_more?: unknown }, seen: Set<s
   return rows;
 }
 
-export async function readPaidSales(store: Store, since: number, pages: number): Promise<{ sales: Sale[]; partial: boolean; gaps: SalesGap[] }> {
+export async function readPaidSales(
+  store: Store,
+  since: number,
+  pages: number,
+  /**
+   * `stripeFirst`: the creator's Stripe pages are read before the PayPal records, the dearer part (a sales file,
+   * #5267 focal 3634, 4), and `read` is called once the first Stripe page has answered (or before the PayPal records,
+   * for a store with no Stripe account): from then on, something was read.
+   */
+  options: { stripeFirst?: boolean; read?: () => void } = {},
+): Promise<{ sales: Sale[]; partial: boolean; gaps: SalesGap[] }> {
   if (!readsSales(store)) return { sales: [], partial: false, gaps: [] };
   const handles = saleHandles(store);
   const sales: Sale[] = [];
   let partial = false;
   const gaps = new Set<SalesGap>();
+  let told = false;
+  const read = () => {
+    if (!told) {
+      told = true;
+      options.read?.();
+    }
+  };
   // Sales paid with PayPal, written down as each was paid (lib/paypal-sales.ts): counted beside Stripe's.
-  const paypal = await readPayPalSales(store.statsId, since, pages * 100).catch((error) => {
-    console.error("reading PayPal sales failed", error);
-    return { sales: [], partial: true };
-  });
-  for (const paid of paypal.sales) sales.push(payPalSale(paid));
-  if (paypal.partial) {
-    partial = true;
-    gaps.add("paypal");
-  }
+  const readPayPal = async () => {
+    read();
+    const paypal = await readPayPalSales(store.statsId, since, pages * 100).catch((error) => {
+      console.error("reading PayPal sales failed", error);
+      return { sales: [], partial: true };
+    });
+    for (const paid of paypal.sales) sales.push(payPalSale(paid));
+    if (paypal.partial) {
+      partial = true;
+      gaps.add("paypal");
+    }
+  };
+  if (!options.stripeFirst || !store.stripeAccountId) await readPayPal();
   if (!store.stripeAccountId) {
     sales.sort((a, b) => b.created - a.created);
     return { sales, partial, gaps: [...gaps] };
@@ -1314,6 +1335,7 @@ export async function readPaidSales(store: Store, since: number, pages: number):
         store.stripeAccountId as string,
         `${path}${since > 0 ? `&created[gte]=${since}` : ""}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
       )) as { data?: unknown; has_more?: unknown };
+      read();
       const rows = financialPage(list, seen);
       rows.forEach(take);
       if (!list.has_more) return;
@@ -1407,6 +1429,7 @@ export async function readPaidSales(store: Store, since: number, pages: number):
     });
   });
   await Promise.all([checkouts, extras]);
+  if (options.stripeFirst) await readPayPal();
   sales.sort((a, b) => b.created - a.created);
   return { sales, partial, gaps: [...gaps] };
 }
@@ -2868,8 +2891,8 @@ export const EXPORT_PAGES = 50;
  */
 export const SALES_FILE_MAX_BYTES = 16_000_000;
 
-export async function salesCsv(store: Store, sinceSeconds: number, maxBytes = SALES_FILE_MAX_BYTES): Promise<{ csv: string; rows: number; partial: boolean; gaps: SalesGap[] }> {
-  const read = await readPaidSales(store, sinceSeconds, EXPORT_PAGES);
+export async function salesCsv(store: Store, sinceSeconds: number, maxBytes = SALES_FILE_MAX_BYTES, options: { stripeFirst?: boolean; read?: () => void } = {}): Promise<{ csv: string; rows: number; partial: boolean; gaps: SalesGap[] }> {
+  const read = await readPaidSales(store, sinceSeconds, EXPORT_PAGES, options);
   const { sales } = read;
   let partial = read.partial;
   const gaps = [...read.gaps];

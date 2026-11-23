@@ -1,4 +1,4 @@
-import { SALES_FILES_PER_MONTH } from "@/lib/studio-allowance-rules";
+import { SALES_FILES_PER_MONTH, SALES_FILES_WORDS } from "@/lib/studio-allowance-rules";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies } from "next/headers";
@@ -115,9 +115,10 @@ export default async function StudioPausedPage({ searchParams }: Params) {
                       <input type="hidden" name="store" value={store.sid} />
                       <input type="hidden" name="what" value="sales" />
                       <input type="hidden" name="range" value="all" />
-                      <button type="submit" className="btn btn-secondary btn-sm">
+                      <button type="submit" className="btn btn-secondary btn-sm" aria-describedby="paused-sales-files-note">
                         Download all sales (CSV)
                       </button>
+                      <p id="paused-sales-files-note" className="mt-1 text-xs text-ink-soft">{SALES_FILES_WORDS}</p>
                     </form>
                   ) : null}
                   {paying && mayChange && isBillingConfigured() && store.subscriptionId ? (

@@ -29,5 +29,12 @@ export const ESSENTIAL_PER_DAY = 10;
  */
 export const SALES_FILES_PER_MONTH: number = 3;
 
+/**
+ * How many tries a window may fail before anything was read and still give their place back (lib/sales-files.ts;
+ * #5267 focal 3634, 4): Stripe not answering its first page, say. Past them, such a try keeps its place, so an account
+ * that always fails cannot read Stripe for free; each is priced in tests/plan-cost-registry.ts (SALES_FILE_UNREAD_COST).
+ */
+export const SALES_FILES_UNREAD_TRIES: number = 3;
+
 /** What the sales files hold, said before the click and on every page that promises them (#5267 audit, ea4f 5, 6, 10). */
-export const SALES_FILES_WORDS = `You can download up to ${SALES_FILES_PER_MONTH} sales files a month (or in your trial), and your team up to ${SALES_FILES_PER_MONTH} more. They never use up your monthly figures.`;
+export const SALES_FILES_WORDS = `The store's owner can download up to ${SALES_FILES_PER_MONTH} sales files a month (or in a trial), and the team up to ${SALES_FILES_PER_MONTH} more between them. A try counts once your sales are read. They never use up your monthly figures.`;

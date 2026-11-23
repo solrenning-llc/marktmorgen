@@ -53,7 +53,7 @@ import { MAX_ADDRESSES } from "@/lib/store-field-rules";
 import { LANDINGS_FENCE_COMMANDS } from "@/lib/campaign-landing-store";
 import { CARD_FENCE_COMMANDS } from "@/lib/creator-card";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
-import { ESSENTIAL_PER_DAY, SALES_FILES_PER_MONTH, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
+import { ESSENTIAL_PER_DAY, SALES_FILES_PER_MONTH, SALES_FILES_UNREAD_TRIES, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { MAX_BENEFITS_KEPT, MAX_BENEFIT_TEXT } from "@/lib/tier-benefit-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS, publicVisitLimit } from "@/lib/traffic-rules";
 import { READ_SAMPLE } from "@/lib/page-read-sample";
@@ -3288,14 +3288,15 @@ export const COST_LINES: CostLine[] = [
     id: "sales-files",
     feature: "Downloading the store's sales as a file: up to SALES_FILES_PER_MONTH a month for its owner and as many for its team, a count of its own (#5010 row 150)",
     // Every file the month allows, the owner's and the team's, each at its most.
-    monthlyUsd: () => SALES_FILES_A_MONTH * SALES_FILE_COST,
+    monthlyUsd: () => SALES_FILES_A_MONTH * SALES_FILE_COST + SALES_FILES_UNREAD_TRIES * SALES_FILE_UNREAD_COST,
     sources: [
       { file: "lib/studio-allowance-rules.ts", names: ["SALES_FILES_PER_MONTH"] },
-      { file: "lib/sales-files.ts", names: ["takeSalesFile", "count > SALES_FILES_PER_MONTH", "\"sales\" : \"sales-team\"", "refreshPeriod(store, now)"] },
-      { file: "app/api/store/export/route.ts", names: ["takeSalesFile(store, creator.role === \"owner\")"] },
+      { file: "lib/sales-files.ts", names: ["takeSalesFile", "count > SALES_FILES_PER_MONTH", "\"sales\" : \"sales-team\"", "refreshPeriod(store, now)", "tries > SALES_FILES_UNREAD_TRIES"] },
+      { file: "lib/studio-allowance-rules.ts", names: ["SALES_FILES_UNREAD_TRIES: number = 3"] },
+      { file: "app/api/store/export/route.ts", names: ["takeSalesFile(sales, creator.role === \"owner\")", "stripeFirst: true"] },
       { file: "lib/stats.ts", names: ["EXPORT_PAGES", "salesCsv", "SALES_FILE_MAX_BYTES"] },
     ],
-    basis: "A sales file reads every sale again (lib/stats.ts salesCsv): up to EXPORT_PAGES pages of each of the creator's two Stripe lists, side by side, each page waited on at a whole export's EXPORT_PAGE_SECONDS, and up to EXPORT_PAGES hundred PayPal sales, each record at MAX_PAID_BYTES (SALES_FILE_COST, at exportCost). Before, it took one of the store's ESSENTIAL_PER_DAY requests a day, priced as a heavy request, which a whole file can cost many times over: at ten a day it could cost more than a Store plan carries. It now takes one of SALES_FILES_PER_MONTH files a month (or a trial) for the store's owner, or one of as many more for its team between them (SALES_FILES_A_MONTH in all), counted on its own before anything is read (lib/sales-files.ts) and never from a figure; a count refused is given back at once, and a file whose sales were read keeps its place even if it fails, so a failing account never reads them again for nothing. What it sends is at most SALES_FILE_MAX_BYTES, past which the oldest sales are left out and the file is partial, at Fast Origin Transfer. A store that pays nothing may hold a trial's window and the month after it ends in the same billing month: twice the count (nonPayingWorst, #5267 audit 729c 14).",
+    basis: "A sales file reads every sale again (lib/stats.ts salesCsv): up to EXPORT_PAGES pages of each of the creator's two Stripe lists, side by side, each page waited on at a whole export's EXPORT_PAGE_SECONDS, and up to EXPORT_PAGES hundred PayPal sales, each record at MAX_PAID_BYTES (SALES_FILE_COST, at exportCost). Before, it took one of the store's ESSENTIAL_PER_DAY requests a day, priced as a heavy request, which a whole file can cost many times over: at ten a day it could cost more than a Store plan carries. It now takes one of SALES_FILES_PER_MONTH files a month (or a trial) for the store's owner, or one of as many more for its team between them (SALES_FILES_A_MONTH in all), counted on its own before anything is read (lib/sales-files.ts) and never from a figure; a count refused is given back at once, and a file whose sales were read keeps its place even if it fails, so a failing account never reads them again for nothing. Stripe's pages are read before the PayPal records; a try that failed before Stripe's first page answered gives its place back, up to SALES_FILES_UNREAD_TRIES a window, each at most a waiting request and one Stripe page waited on (SALES_FILE_UNREAD_COST). What it sends is at most SALES_FILE_MAX_BYTES, past which the oldest sales are left out and the file is partial, at Fast Origin Transfer. A store that pays nothing may hold a trial's window and the month after it ends in the same billing month: twice the count (nonPayingWorst, #5267 audit 729c 14).",
   },
   {
     id: "rest-api",
@@ -3757,6 +3758,12 @@ export function exportCost(bytes: number, commands = exportCommands(bytes)): num
 export const SALES_FILE_COST = exportCost(EXPORT_PAGES * 100 * MAX_PAID_BYTES, 40) + SALES_FILE_MAX_BYTES * ORIGIN_PER_BYTE;
 /** The sales files a month at the most: the owner's SALES_FILES_PER_MONTH and as many for the team (lib/sales-files.ts). */
 export const SALES_FILES_A_MONTH = 2 * SALES_FILES_PER_MONTH;
+/**
+ * A sales file that failed before anything was read gives its place back (lib/sales-files.ts, #5267 focal 3634, 4), up
+ * to SALES_FILES_UNREAD_TRIES a window: each is at most a waiting request and one Stripe page waited on, with no
+ * PayPal record read.
+ */
+export const SALES_FILE_UNREAD_COST = request("wait", 10 + TAKE_COMMANDS, 4_000) + EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 
 /**
  * What one list download costs at the most once a plan has ended
@@ -3881,7 +3888,7 @@ export function nonPayingWorst(): number {
     + allowances.api * API_HOOK_ACCESS_EXTRA_COMMANDS * COMMAND
     // Its sales files: a trial's window and the month after it ended can fall in the same billing month, so twice a
     // paying store's count (line sales-files; #5267 audit 729c 14).
-    + 2 * SALES_FILES_A_MONTH * SALES_FILE_COST
+    + 2 * (SALES_FILES_A_MONTH * SALES_FILE_COST + SALES_FILES_UNREAD_TRIES * SALES_FILE_UNREAD_COST)
     + campaignLandingFenceCost(allowances)
     // Its payday's auto-pay takes no integration unit (a press from the studio takes its own, paypalPressUnits).
     + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS

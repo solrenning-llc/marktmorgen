@@ -4,7 +4,9 @@ import { creatorFrom } from "@/lib/studio-route";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { readStats, salesCsv, sourcesCsv, studioStats, visitsCsv, readsSales } from "@/lib/stats";
 import { exportShape, exportUnits, storeExport } from "@/lib/store-export";
-import { takeSalesFile } from "@/lib/sales-files";
+import { SALES_FILE_BUSY_SECONDS, SALES_FILE_BUSY_WORDS, SALES_FILES_UNCOUNTED, salesFileFailedWords, takeSalesFile } from "@/lib/sales-files";
+import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
+import { ensureStatsId, storeRef } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
 import { ENDED_STORE_EXPORTS } from "@/lib/plan-closing-rules";
 
@@ -122,19 +124,36 @@ export async function GET(request: NextRequest) {
       const days = range === "30" ? 30 : range === "90" ? 90 : range === "all" ? 0 : -1;
       if (days < 0) return plain(400, "Choose 30 days, 90 days or all time.");
       const since = days ? Math.floor(Date.now() / 1000) - days * 86400 : 0;
-      // One of the window's sales files, the owner's own or the team's, counted on its own before anything is read
-      // (lib/sales-files.ts). Once the reading has started, a failure keeps the place: that reading was done.
-      const taken = await takeSalesFile(store, creator.role === "owner");
-      if (!taken.ok) return plain(taken.status, taken.message);
-      let csv: string;
-      let partial: boolean;
-      try {
-        ({ csv, partial } = await salesCsv(taken.store, since));
-      } catch (error) {
-        console.error("making a sales file failed", error);
-        return plain(502, "Stripe or our records did not answer while your sales were read. This try counted as one of your sales files, because they were read. Try again in a moment.");
+      // A store from before it had a statsId gets one now, so its sales files are counted (729c 13).
+      const sales = store.statsId || !isRedisConfigured() ? store : ((await ensureStatsId(storeRef(store))) ?? store);
+      // One sales file at a time for a store (focal 3634, 5): a second click waits, with nothing counted.
+      let busy: Held | null = null;
+      if (isRedisConfigured() && sales.statsId) {
+        try {
+          busy = await takeLock(`nl:rl:export:${sales.statsId}:sales-busy`, SALES_FILE_BUSY_SECONDS, 0);
+        } catch (error) {
+          if (error instanceof LockBusyError) return plain(429, SALES_FILE_BUSY_WORDS);
+          console.error("taking a sales file's turn failed", error);
+          return plain(503, SALES_FILES_UNCOUNTED);
+        }
       }
-      return file(csv, `${store.handle}-sales-${days ? `${days}-days` : "all"}-${day}${partial ? "-partial" : ""}.csv`);
+      try {
+        // One of the window's sales files, the owner's own or the team's, counted on its own before anything is read
+        // (lib/sales-files.ts). Stripe's pages are read first; once its first page answered, a failure keeps the place.
+        const taken = await takeSalesFile(sales, creator.role === "owner");
+        if (!taken.ok) return plain(taken.status, taken.message);
+        let read = false;
+        try {
+          const made = await salesCsv(taken.store, since, undefined, { stripeFirst: true, read: () => { read = true; } });
+          return file(made.csv, `${store.handle}-sales-${days ? `${days}-days` : "all"}-${day}${made.partial ? "-partial" : ""}.csv`);
+        } catch (error) {
+          console.error("making a sales file failed", error);
+          const back = !read && (await taken.unread());
+          return plain(502, salesFileFailedWords(taken.store, !back, back ? taken.left + 1 : taken.left));
+        }
+      } finally {
+        if (busy) await releaseLock(busy);
+      }
     }
     if (what === "visits") {
       return file(await visitsCsv(store), `${store.handle}-visits-${day}.csv`);

@@ -652,15 +652,6 @@ export const SESSOES = { "01DKvYQ": "claude-1", "01FR6Z1": "claude-2", "014YNUx"
   "012ST5i": "claude-5", "018ZjhH": "claude-6", "01Hfzoz": "claude-7" };
 
 /** As famílias com commits no PR e as sessões que não se sabe de quem são; null quando o PR não pôde ser lido. */
-/** Se a árvore de uma junção de dois pais é exatamente a que o git faz sozinho, sem conflito: nada foi escrito nela. */
-function juncaoPura([a, b], arvore) {
-  try {
-    return /^[0-9a-f]{40}$/.test(arvore) && git(["merge-tree", "--write-tree", a, b]).split("\n")[0].trim() === arvore;
-  } catch {
-    return false;
-  }
-}
-
 export function commitsDoPr(pr, ramo = null) {
   if (testeLigado("CORREIO_SEM_COMMITS")) return null;
   const sufixo = `${process.pid}-${randomBytes(4).toString("hex")}`;
@@ -670,23 +661,22 @@ export function commitsDoPr(pr, ramo = null) {
     // %P: os pais do commit. Um commit de junção (mais de um pai) entra nas famílias com commit (a revisão as exclui), mas
     // não conta para a família dominante: a junção do main feita por quem adotou o PR não o torna autor (LEVE do Claude 4
     // AC no #5284).
-    const linhas = git(["log", "--format=%an%x1f%(trailers:key=Claude-Session,valueonly,separator=%x1e)%x1f%P%x1f%H%x1f%T", `${base}..${cabeca}`]).split("\n").filter(Boolean);
+    const linhas = git(["log", "--format=%an%x1f%(trailers:key=Claude-Session,valueonly,separator=%x1e)%x1f%P", `${base}..${cabeca}`]).split("\n").filter(Boolean);
     const familias = new Set(), desconhecidas = new Set(), completas = new Set(), porFamilia = new Map(), comJuncoes = new Map();
     for (const linha of linhas) {
       const deste = new Set();
-      const [autor, sessoes = "", pais = "", , arvore = ""] = linha.split("\x1f");
-      const listaPais = pais.trim().split(/\s+/).filter(Boolean);
-      const juncao = listaPais.length > 1;
+      const [autor, sessoes = "", pais = ""] = linha.split("\x1f");
+      const juncao = pais.trim().split(/\s+/).filter(Boolean).length > 1;
       for (const m of sessoes.matchAll(/session_([0-9A-Za-z]{20,40})/g)) completas.add(`session_${m[1]}`);
       const prefixos = [...sessoes.matchAll(/session_([0-9A-Za-z]{7})/g)].map((m) => m[1]);
       for (const pre of prefixos) (SESSOES[pre] ? deste.add(SESSOES[pre]) : desconhecidas.add(`session_${pre}`));
       const nome = /^Claude (\d+)\b/.exec(autor);
       if (nome) deste.add(`claude-${nome[1]}`);
       else if (!prefixos.length && !/^Claude\b/.test(autor)) deste.add("codex");
-      // Uma junção sem trailer cuja árvore é a da junção automática dos pais não traz código de ninguém: não é família
-      // desconhecida (MÉDIO 3 do Claude 5 hed9 no #5408: 275 junções do main assim no main, que deixariam o PR NÃO
-      // CONFERIDO para sempre). Uma junção que resolveu conflito, ou que não deu para conferir, continua desconhecida.
-      else if (!prefixos.length && !(listaPais.length === 2 && juncaoPura(listaPais, arvore))) desconhecidas.add(`autor "${autor}" sem trailer`);
+      // Um commit "Claude" sem trailer, junção do main inclusive, é de família desconhecida: pode ser de quem revisa (CO
+      // (e): "nem de junção do main"), e a trava de 3 READY fica NÃO CONFERIDA (MÉDIO 3 do Claude 5 hed9 no #5408 @c615434258;
+      // uma junção pura deixar de contar é decisão do coordenador, a escrever na CO (e)).
+      else if (!prefixos.length) desconhecidas.add(`autor "${autor}" sem trailer`);
       for (const f of deste) {
         familias.add(f);
         comJuncoes.set(f, (comJuncoes.get(f) ?? 0) + 1);
@@ -1190,6 +1180,8 @@ const vereditosNoPr = new Map();
 // c944: o texto e o resultado de cada veredito no PR, por família: para quem conclui saber se foi outra sessão da família
 // que o escreveu, e para o pedido de revisão deixar de fora só quem deu READY.
 const corposNoPr = new Map();
+// Todos os comentários e revisões do PR de quem trabalha no repositório, na ordem do tempo, para a trava de 3 READY.
+const textosNoPr = new Map();
 /** READY ou CHANGES: o primeiro dos dois nas duas primeiras linhas, fora das contagens ("1 of 2 READY"). */
 function vereditoDoCorpo(corpo) {
   const linhas = String(corpo ?? "").split(/\r?\n/).filter((l) => l.trim()).slice(0, 2).join("\n");
@@ -1200,14 +1192,17 @@ export function revisoresNoPr(pr, sha) {
   if (!/^\d+$/.test(String(pr ?? "")) || !sha) return null;
   const curto = String(sha).slice(0, 10), chaveCache = `${pr}@${curto}`;
   if (vereditosNoPr.has(chaveCache)) return vereditosNoPr.get(chaveCache);
-  const f = new Set(), corpos = new Map();
+  const f = new Set(), corpos = new Map(), textos = [];
   try {
     for (const rota of [`repos/solrenning-llc/marktmorgen/issues/${pr}/comments`, `repos/solrenning-llc/marktmorgen/pulls/${pr}/reviews`]) {
-      const saida = execFileSync("gh", ["api", "--paginate", rota, "--jq", '.[] | [(.body // ""), (.author_association // "")] | @json'],
+      // A data (created_at do comentário, submitted_at da revisão) põe os dois caminhos na ordem do tempo para a trava
+      // de 3 READY (LEVE B do Claude 5 zr no #5408 @0cebe29a68).
+      const saida = execFileSync("gh", ["api", "--paginate", rota, "--jq", '.[] | [(.body // ""), (.author_association // ""), (.created_at // .submitted_at // "")] | @json'],
         { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
       for (const linha of saida.split("\n").filter((l) => l.trim())) {
-        const [corpo, associacao] = JSON.parse(linha);
+        const [corpo, associacao, em = ""] = JSON.parse(linha);
         if (!QUEM_TRABALHA.has(String(associacao))) continue;
+        textos.push({ corpo: String(corpo), em: String(em ?? ""), i: textos.length });
         const quem = revisoraDoComentario(corpo, curto);
         if (quem) { f.add(quem); corpos.set(quem, [...(corpos.get(quem) ?? []), { corpo: String(corpo), veredito: vereditoDoCorpo(corpo) }]); }
       }
@@ -1217,6 +1212,7 @@ export function revisoresNoPr(pr, sha) {
   }
   vereditosNoPr.set(chaveCache, f);
   corposNoPr.set(chaveCache, corpos);
+  textosNoPr.set(chaveCache, textos.sort((a, b) => (a.em < b.em ? -1 : a.em > b.em ? 1 : a.i - b.i)));
   return f;
 }
 
@@ -1302,42 +1298,90 @@ export function aprovadoresNoPr(pr, sha) {
 /** Revisões READY exigidas para enfileirar qualquer PR (dono, OWNER-20261123-1442-THREE-REVIEWS, 23/11/2026, 14h42 Fortaleza: "agora são 3 revisões para qualquer tipo de pr"). */
 export const READY_EXIGIDAS = 3;
 
-/** Uma retirada de READY escrita no PR ("WITHDRAWN: my READY ...", "my READY ... is withdrawn", "Correction to my READY"). */
-const RETIRADA = /\b(?:withdr[ae]w\w*|retract\w*|retir\w*|correction to my ready)\b/i;
+/**
+ * Uma revisão escrita no PR na forma de cabeçalho, a única que a trava de 3 READY conta (CO (l): o comentário no PR é a
+ * única prova da revisão; ALTO do Claude 5 hed9 no #5408 @c615434258). Lê só a primeira linha com texto (e a segunda,
+ * quando a primeira acaba no head), sem as marcas de markdown (* _ ` > #). Devolve { familia, veredito } com o veredito
+ * READY, CHANGES ou RETIRADA, ou null. Formas aceitas, com o head citado sendo o começo (7 ou mais caracteres) do head
+ * exato e o veredito logo depois, sem "from", "so far", "by", "of", "needed", "requested", "still" ou "pending" em seguida:
+ *  - "<família> [rótulo] [focal] review #N @<head>: VERDICT" e "<família> [rótulo] #N @<head>: VERDICT", com o rótulo
+ *    sem dois-pontos (os dois-pontos depois do nome marcam uma linha de situação: "Claude 1 coord: #N @h — 2 READY") e sem
+ *    as palavras de situação ou pedido (needed, status, tally, asked, request, waiting, still, pending, queue, fila);
+ *  - "<família> [rótulo] VERDICT #N @<head>" (a transcrição do Codex: "Codex X6 READY #N @h (transcribed by ...)");
+ *  - "<família> [rótulo] #N @<head>" e, na segunda linha, o veredito sozinho ("READY: tests pass");
+ *  - "VERDICT [(focal)] #N @<head> ...", com a família assinada em "by/por/— <família>" ou, sem isso, a primeira citada nas
+ *    linhas 1 a 3 (sugestão dos Claude 5 L4qm e hed9);
+ *  - "... review #N @<head> by <família> [rótulo]: VERDICT" ("Money focal review #N @h by Claude 2 upbeat: READY").
+ * Uma retirada só nas formas explícitas, com o PR e o head citados nas duas primeiras linhas: "WITHDRAWN: my READY ...
+ * — <família>", "<família> ...: I withdraw my READY/approval", "<família> ... my READY ... withdrawn/retracted/retirado",
+ * "Correction to my READY". "Re:", linhas de situação, contagens, pedidos e "re-review needed" nunca contam (MÉDIO 1 e
+ * MÉDIO 2 do hed9). Uma revisão em outra forma não conta: a trava fica do lado seguro, e quem revisou escreve a linha.
+ */
+const SITUACAO = /\b(?:needed|status|tally|asked|request\w*|waiting|still|pending|queue|fila)\b/i;
+export function revisaoCanonica(corpo, pr, sha) {
+  const limpa = (l) => l.replace(/[*_`]/g, "").replace(/^[\s>#-]+/, "").trim();
+  const linhas = String(corpo ?? "").split(/\r?\n/).filter((l) => l.trim()).slice(0, 3).map(limpa);
+  const [l1 = "", l2 = "", l3 = ""] = linhas;
+  const cheio = String(sha ?? "").toLowerCase();
+  if (!/^\d+$/.test(String(pr ?? "")) || cheio.length < 7) return null;
+  const doHead = (h) => h.length >= 7 && cheio.startsWith(h.toLowerCase());
+  const FAM = String.raw`(Claude \d+|Codex)\b`, ROT = String.raw`([^:#\n]{0,60}?)`;
+  const REF = String.raw`#${pr}\s+@([0-9a-fA-F]{7,40})\b(?:\.{3}|…)?`;
+  const VER = String.raw`(READY|CHANGES)\b(?!\s+(?:from|so\s+far|by|of|needed|requested|still|pending)\b)`;
+  const nome = (t) => familia(t);
+  const rotuloOk = (r) => !SITUACAO.test(r ?? "");
+  let m;
+  if ((m = new RegExp(`^${FAM}${ROT}${REF}\\s*[:—–,-]?\\s*${VER}`, "i").exec(l1)) && rotuloOk(m[2]) && doHead(m[3])) return { familia: nome(m[1]), veredito: m[4].toUpperCase() };
+  if ((m = new RegExp(`^${FAM}${ROT}${VER}\\s+${REF}`, "i").exec(l1)) && rotuloOk(m[2]) && doHead(m[4])) return { familia: nome(m[1]), veredito: m[3].toUpperCase() };
+  if ((m = new RegExp(`^${FAM}${ROT}${REF}[\\s.:—–-]*$`, "i").exec(l1)) && rotuloOk(m[2]) && doHead(m[3])) {
+    const v = new RegExp(`^(?:verdict\\s*:?\\s*)?${VER}\\s*(?:$|[:(—–,.;-])`, "i").exec(l2);
+    if (v) return { familia: nome(m[1]), veredito: v[1].toUpperCase() };
+  }
+  if ((m = new RegExp(`^${VER}(?:\\s*\\([^)]{0,30}\\))?\\s+${REF}`, "i").exec(l1)) && doHead(m[2])) {
+    const resto = [l1.slice(m[0].length), l2, l3].join("\n");
+    const quem = new RegExp(`(?:\\bby|\\bpor|[—–])\\s+${FAM}`, "i").exec(resto) ?? new RegExp(FAM, "i").exec(resto);
+    if (quem) return { familia: nome(quem[1]), veredito: m[1].toUpperCase() };
+  }
+  if ((m = new RegExp(`\\breview\\s+${REF}\\s+by\\s+${FAM}[^:\\n]{0,40}:\\s*${VER}`, "i").exec(l1)) && doHead(m[1])) return { familia: nome(m[2]), veredito: m[3].toUpperCase() };
+  // Retirada: o PR e o head citados nas duas primeiras linhas, e uma das formas explícitas.
+  const cita = [...[l1, l2].join("\n").matchAll(new RegExp(REF, "gi"))].some((r) => doHead(r[1]));
+  if (!cita) return null;
+  const RET = [
+    [new RegExp(`^withdrawn\\b.*?\\bmy\\s+(?:READY|approval)\\b.*?(?:\\bby|[—–])\\s*${FAM}`, "i"), 1],
+    [new RegExp(`^${FAM}[^\\n]*?\\b(?:withdraw\\w*|withdrew|retract\\w*|retiro|retira)\\s+(?:my|our|meu|o meu|nosso)\\s+(?:READY|approval|aprova[cç][aã]o)\\b`, "i"), 1],
+    [new RegExp(`^${FAM}[^\\n]*?\\bmy\\s+READY\\b[^\\n]*?\\b(?:withdrawn|retracted|retirado)\\b`, "i"), 1],
+    [new RegExp(`^${FAM}[^\\n]*?\\bcorrection\\s+to\\s+my\\s+READY\\b`, "i"), 1],
+    [new RegExp(`^correction\\s+to\\s+my\\s+READY\\b.*?(?:\\bby|[—–])\\s*${FAM}`, "i"), 1],
+  ];
+  for (const [re, g] of RET) if ((m = re.exec(l1))) return { familia: nome(m[g]), veredito: "RETIRADA" };
+  return null;
+}
 
 /**
- * As famílias cujo READY conta para enfileirar este head (OWNER-20261123-1442-THREE-REVIEWS). O READY vem do que o
- * correio gravou, não do texto dos comentários: a revisão concluída pelo correio neste head exato (complete-review,
- * `revisao/feitas`), com o último resultado da família READY, e o registro conferido de record-review. Assim, uma linha
- * de situação ou de pedido no PR nunca vira READY (MÉDIO 1 do Claude 5 hed9 no #5408, duas vezes). O PR só tira: uma
- * família com um CHANGES ou uma retirada escrita no PR neste head deixa de contar, seja qual for a ordem (MÉDIO 2 e
- * LEVE 1 do hed9 em 0cebe29a68; ZA: achado aberto barra). Ficam de fora a família autora (a do prefixo do ramo; num
- * ramo sem prefixo de família, a de mais commits, dd03) e toda família com commit no PR (CO (e), FQ (1)).
- * NÃO CONFERIDO (naoConferido) quando o PR ou os commits não puderam ser lidos agora, ou quando há commit de família
- * desconhecida que não é uma junção pura (MÉDIO 2 e MÉDIO 3 do hed9; passo 4: nada NÃO CONFERIDO segue).
+ * As famílias cujo READY conta para enfileirar este head (OWNER-20261123-1442-THREE-REVIEWS). A prova é o comentário ou
+ * a revisão no PR (CO (l)), lido em revisaoCanonica; o correio (complete-review, record-review) não acrescenta nenhum
+ * READY, e serve só para tirar famílias dos pedidos (ALTO do Claude 5 hed9 no #5408 @c615434258). Vale o último veredito
+ * de cada família neste head, na ordem do tempo dos comentários e revisões: um READY depois de um CHANGES conta (o autor
+ * pode responder por escrito e pedir que a família olhe de novo o mesmo head; MÉDIO 1 do hed9), um CHANGES ou uma
+ * retirada depois do READY o tiram. Ficam de fora a família autora (a do prefixo do ramo; num ramo sem prefixo de
+ * família, a de mais commits, dd03) e toda família com commit no PR (CO (e), FQ (1)). NÃO CONFERIDO (naoConferido)
+ * quando o PR ou os commits não puderam ser lidos agora, ou quando há commit de família desconhecida, junção sem trailer
+ * inclusive (MÉDIO 3 do hed9; passo 4: nada NÃO CONFERIDO segue).
  */
-export function readyQueContam(pr, sha, ramo = null, commit = buscar()) {
+export function readyQueContam(pr, sha, ramo = null) {
   const noPr = revisoresNoPr(pr, sha);
   if (noPr === null) return { naoConferido: "os comentários do PR não puderam ser lidos agora" };
   const cm = commitsDoPr(pr, ramo);
   if (!cm) return { naoConferido: "os commits do PR não puderam ser lidos agora" };
   if (cm.desconhecidas.size) return { naoConferido: `o PR tem commit de família desconhecida (${[...cm.desconhecidas].join(", ")}), que pode ser a de um dos revisores` };
-  const mesmoHead = (h) => Boolean(h) && (h.startsWith(String(sha).slice(0, 10)) || String(sha).startsWith(h.slice(0, 10)));
-  const ord = ordem(commit);
   const ultimo = new Map();
-  for (const c of arquivos(commit, "revisao/feitas").sort((x, y) => (ord.get(x)?.i ?? -1) - (ord.get(y)?.i ?? -1))) {
-    const texto = conteudo(commit, c);
-    const resultado = campo(texto, "Resultado");
-    if (campo(texto, "PR") === String(pr) && mesmoHead(campo(texto, "Head")) && /^(READY|CHANGES)$/.test(resultado)) ultimo.set(familia(campo(texto, "Por")), resultado);
+  for (const t of textosNoPr.get(`${pr}@${String(sha).slice(0, 10)}`) ?? []) {
+    const r = revisaoCanonica(t.corpo, pr, sha);
+    if (r) ultimo.set(r.familia, r.veredito);
   }
-  if (arquivos(commit, "revisao/registros").length) {
-    for (const r of registros(pr, commit, null)) if (r.excluiDaFila && mesmoHead(r.sha) && /^(READY|CHANGES)$/.test(r.resultado)) ultimo.set(familia(r.por), r.resultado);
-  }
-  const corpos = corposNoPr.get(`${pr}@${String(sha).slice(0, 10)}`) ?? new Map();
-  const vetada = (fam) => (corpos.get(fam) ?? []).some((c) => c.veredito === "CHANGES" || RETIRADA.test((String(c.corpo).split(/\r?\n/).find((l) => l.trim()) ?? "")));
   const doRamo = familiaDoRamo(ramo);
   const autores = doRamo ? [doRamo] : cm.dominantes;
-  const valem = new Set([...ultimo].filter(([fam, r]) => r === "READY" && !vetada(fam) && !autores.includes(fam) && !cm.familias.has(fam)).map(([fam]) => fam));
+  const valem = new Set([...ultimo].filter(([fam, v]) => v === "READY" && !autores.includes(fam) && !cm.familias.has(fam)).map(([fam]) => fam));
   return { valem, autor: autores.join(", ") || "(nenhuma)", comoAutor: doRamo ? "a do prefixo do ramo" : "a dominante nos commits, num ramo sem prefixo de família" };
 }
 
@@ -1637,7 +1681,7 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     }
     if (!cf) naoConferido.push("o conflito com o main e com a fila de integração");
     const feito = [atual && !diferente && fonte !== "ref" ? `head ${atual.slice(0, 10)} igual ao do pedido (${fonte === "ramo" ? `pelo ramo ${ramoPedido}` : "pela referência"})` : null, cf ? `sem conflito com o main e com os ${cf.grupos} grupo(s) da fila de integração` : null].filter(Boolean);
-    return { pedido: alvo, aviso: `${feito.join("; ") || "nada conferido"}${naoConferido.length ? `. NÃO CONFERIDO (confira à mão): ${naoConferido.join("; ")}` : ""}. A ferramenta confere os ${READY_EXIGIDAS} READY de fora no verify-enqueue e no complete-enqueue (as revisões concluídas pelo correio neste head, com o último resultado da família READY e sem CHANGES nem retirada dela escritos no PR; sem a família do prefixo do ramo, ou, num ramo sem prefixo, a de mais commits, e sem as com commit no PR; commit de família desconhecida que não seja junção pura não segue; uma revisão feita só no PR não conta: peça-a pelo correio ou registre-a com record-review); não confere a família de quem abriu o PR num ramo sem prefixo de família e sem commit dela, as 9 verificações, os CHANGES e achados ainda abertos, o SIM de workflow nem a vez de custo: isso é de quem enfileira (FQ (1), OWNER-20261123-1442)` };
+    return { pedido: alvo, aviso: `${feito.join("; ") || "nada conferido"}${naoConferido.length ? `. NÃO CONFERIDO (confira à mão): ${naoConferido.join("; ")}` : ""}. A ferramenta confere os ${READY_EXIGIDAS} READY de fora no verify-enqueue e no complete-enqueue (a prova é a revisão escrita no PR neste head, na primeira linha, em forma de cabeçalho: "<família> review #N @<head>: READY", "READY #N @<head> ... <família>" ou a transcrição do Codex; vale o último veredito de cada família, na ordem do tempo, e uma retirada escrita a tira; linhas de situação, pedidos e "Re:" não contam; sem a família do prefixo do ramo, ou, num ramo sem prefixo, a de mais commits, e sem as com commit no PR; commit de família desconhecida, junção sem trailer inclusive, não segue); não confere a família de quem abriu o PR num ramo sem prefixo de família e sem commit dela, as 9 verificações, os CHANGES e achados ainda abertos, o SIM de workflow nem a vez de custo: isso é de quem enfileira (FQ (1), OWNER-20261123-1442)` };
   }
   return { pedido: alvo };
 }

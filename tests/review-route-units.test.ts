@@ -28,7 +28,7 @@ import { withinLimit } from "@/lib/request-guard";
 import { GIVING_WORDS } from "@/lib/buyer-words/giving";
 import { MAX_ASK_DAYS } from "@/lib/review-ask";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
-import { REVIEW_DELETES_PER_ORDER_MONTH, REVIEW_DOOR_MONTHS, REVIEW_LINK_MONTHS, REVIEW_WRITE_WORST, request, reviewWritesMonthlyUsd } from "./plan-cost-registry";
+import { REVIEW_DELETES_PER_ORDER_MONTH, REVIEW_DOOR_MONTHS, REVIEW_WRITE_WORST, request, reviewWritesMonthlyUsd } from "./plan-cost-registry";
 import { REVIEW_LINK_SECONDS, REVIEW_SAVE_SECONDS } from "@/lib/review-proof";
 import { COMMANDS, PAGE_BYTES } from "./traffic-cost";
 import { paidPeriod } from "./billing-period-fixture";
@@ -233,20 +233,14 @@ async function main(): Promise<void> {
   nextReviewMonth();
   is("next month the second product's review is saved", statusOf(await send({ product: bumpId, rating: "4", text: words(907) })), "saved");
 
-  part("Claude 5 ia5d's MEDIUM 2 on #5400: in one month an order deletes every review it saved through its link, never refused");
+  part("Claude 5 ia5d's MEDIUM 2 on #5400: in one month an order deletes every review it saved, never refused, and never more than it saved");
   is("deletes the first product's review, saved last month", statusOf(await send({ action: "delete", confirm: "yes" })), "deleted");
   is("and the second's, saved this month", statusOf(await send({ product: bumpId, action: "delete", confirm: "yes" })), "deleted");
+  const nothingLeft = await measured({ product: bumpId, action: "delete", confirm: "yes" });
+  is("a third delete finds nothing to delete: deletes never outnumber the reviews saves made", nothingLeft.status, "deleted");
+  is("and it stays inside its one public request", nothingLeft.commands <= COMMANDS.laterPage + COMMANDS.laterCount && nothingLeft.bytes <= PAGE_BYTES, true);
   bumpId = "";
-  // A link is open REVIEW_LINK_SECONDS; a store month is at least 28 days. Every start day of real calendars, with
-  // month-long windows (the shortest a store month is), touches at most REVIEW_LINK_MONTHS of them.
-  let most = 0;
-  for (let at = Date.UTC(2026, 0, 1); at < Date.UTC(2031, 0, 1); at += 86_400_000) {
-    const first = new Date(at);
-    const last = new Date(at + REVIEW_LINK_SECONDS * 1000);
-    most = Math.max(most, (last.getUTCFullYear() - first.getUTCFullYear()) * 12 + last.getUTCMonth() - first.getUTCMonth() + 1);
-  }
-  is(`a link touches at most ${most} calendar months, within REVIEW_LINK_MONTHS (${REVIEW_LINK_MONTHS})`, most <= REVIEW_LINK_MONTHS, true);
-  is("so an order's deletions in a month are priced at REVIEW_SAVES_PER_ORDER_MONTH a store month its link touches", REVIEW_DELETES_PER_ORDER_MONTH, REVIEW_SAVES_PER_ORDER_MONTH * REVIEW_LINK_MONTHS);
+  is("so each save is priced with the one delete it can later need", REVIEW_DELETES_PER_ORDER_MONTH, REVIEW_SAVES_PER_ORDER_MONTH);
 
   part("The cost line, recomputed from the model (AC (n))");
   const per = (w: { commands: number; bytes: number }) => request("heavy", w.commands, w.bytes);

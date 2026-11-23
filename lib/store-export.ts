@@ -34,6 +34,7 @@ import { standingOf } from "@/lib/plan-standing";
 import { ENDED_STORE_EXPORTS } from "@/lib/plan-closing-rules";
 import { readThanksNotes } from "@/lib/thanks-note-store";
 import { listValuesShape } from "@/lib/free";
+import { EXPORT_BYTES_PER_UNIT, EXPORT_COMMANDS_PER_UNIT } from "@/lib/export-unit-rules";
 
 /**
  * What an export reads: every byte the store's data room counts at the
@@ -56,9 +57,10 @@ export const EXPORT_COMMANDS = { product: 0.03, course: 0.01, lesson: 0.002, pos
  * database at a studio request's time (tests/plan-cost-registry.ts,
  * UNIT_COST); an export is counted at fewer commands, and at a megabyte of
  * what it reads, which costs about half a unit: the bytes moved and the time
- * to write them out (tests/closing-cost.test.ts holds it).
+ * to write them out (tests/closing-cost.test.ts holds it). Kept in
+ * lib/export-unit-rules.ts, which imports nothing, and read here as before.
  */
-export { EXPORT_BYTES_PER_UNIT, EXPORT_COMMANDS_PER_UNIT } from "@/lib/export-unit-rules";
+export { EXPORT_BYTES_PER_UNIT, EXPORT_COMMANDS_PER_UNIT };
 /** The pages of the store's sales read from its Stripe account at the most: its checkouts' and its one-click extras' (lib/stats.ts, salesCsv), the two read side by side. */
 export const EXPORT_STRIPE_PAGES = 2 * EXPORT_PAGES;
 /** How long one of those pages is waited for at the most, held at 2 GB: a review ceiling. The two lists are read at once, so the wait is for one list's pages. */

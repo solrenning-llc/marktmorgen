@@ -220,9 +220,10 @@ is("the weakest text pair, recorded so a change is seen", Math.round(weakest * 1
 const paused = "app/studio/paused/page.tsx";
 const pausedProof = pagePairs(css, DARK_SELECTOR, closure([paused, ...layoutsOf(paused)]));
 const pausedWeakest = Math.min(...pausedProof.pairs.filter((p) => p.min === 7).map((p) => p.ratio));
-is("the paused studio screen alone: its pair count and weakest text pair, recorded so a growing screen is seen", [pausedProof.pairs.length, Math.round(pausedWeakest * 100) / 100], [83, 8.08]);
+is("the paused studio screen alone: its pair count and weakest text pair, recorded so a growing screen is seen", [pausedProof.pairs.length, Math.round(pausedWeakest * 100) / 100], [84, 8.08]);
 // 57 → 83 pairs (Codex N1 LOWs on #3561): the way-on block now drawn in every branch, with its support link; the
-// weakest text pair is unchanged.
+// weakest text pair is unchanged. 83 → 84 on the merge of main (650754aa0c changed app/studio/paused/page.tsx; Claude
+// 6 hsz3's ad4a): the figure the model computes, the weakest pair still 8.08.
 
 part("In light, the role tokens are the same white as before");
 const light = css.slice(0, css.indexOf(DARK_BLOCK_START));

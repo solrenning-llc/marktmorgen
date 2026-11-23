@@ -35,3 +35,17 @@ test("Chile evidence adds no zero cost and no conclusion about the LLC, and list
   assert.doesNotMatch(doc, /(?:LLC|Marktmorgen)\s+(?:must|will|need(?:s)? to)\s+(?:file|register|appoint|pay)/i);
   for (const text of ["Owner-dependent", "reviewed legal facts", "complete funded cost evidence", "not compliance, profitability, deployment or customer-availability certification"]) assert.ok(doc.includes(text), text);
 });
+// Claude 3 yaQt's LEVE on #5414 @6e2c549c2d: the rest of Claude 5's LOW #3 on #2633. An added threshold with an amount
+// ("A registration threshold of USD 100,000 applies before any obligation.") contradicts the note, which found none, and
+// the sources were pinned only by fragments of their file names.
+test("Chile evidence states no threshold amount and cites each source by its full address", () => {
+  const doc = readFileSync(path, "utf8");
+  assert.doesNotMatch(doc, /threshold[^.\n]{0,60}?(?:USD|EUR|CLP|US\$|€|\$|UF|UTM)\s*[\d.,]*\d/i);
+  assert.doesNotMatch(doc, /(?:USD|EUR|CLP|US\$|€|\$|UF|UTM)\s*[\d.,]*\d[^.\n]{0,60}?threshold/i);
+  for (const url of [
+    "https://www.sii.cl/normativa_legislacion/resoluciones/2024/reso107.pdf",
+    "https://www.sii.cl/normativa_legislacion/resoluciones/2025/reso84.pdf",
+    "https://www.sii.cl/normativa_legislacion/resoluciones/2025/reso93.pdf",
+    "https://www.sii.cl/vat/index.html",
+  ]) assert.ok(doc.includes(`](${url})`), url);
+});

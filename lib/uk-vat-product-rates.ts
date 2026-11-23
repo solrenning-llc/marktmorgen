@@ -14,7 +14,7 @@
  *     whose condition this table does not hold; a row whose own note says some of its items are at another rate
  *     ("Some items are ...", "But ...") or whose note names another rate at all; a row that covers only "certain"
  *     goods it does not name; a row whose relief depends on who buys, who sells or the use, not on the product
- *     (RELIEF_NOT_BY_PRODUCT_NOTES and _ITEMS); a row the table does not have; two rows that disagree; and any day
+ *     (RELIEF_NOT_BY_PRODUCT_WORDS in the item, RELIEF_NOT_BY_PRODUCT_NOTES by its notice, _ITEMS); a row the table does not have; two rows that disagree; and any day
  *     past `UK_VAT_PRODUCT_RATES_VALID_UNTIL`, before which the page is read again at the source, with the date.
  *
  * Pure. Nothing calls it yet: which row a store's product falls under is the next step, and collecting UK VAT stays off
@@ -96,6 +96,16 @@ export const RELIEF_NOT_BY_PRODUCT_NOTES: Readonly<Record<string, string>> = {
   "VAT Notice 744C": "the use: a qualifying ship or aircraft",
 };
 
+/**
+ * The same rule read in the row's own words, so a row the page adds later is caught before anyone reviews its note: an
+ * item that names who buys or who sells ("for disabled people", "for the elderly", "for charities", "by a registered
+ * pharmacist", "Charity shops") or a use or a place ("for industrial use", "for a relevant charitable purpose", "to a
+ * place outside the UK", "a dwelling", "used as"). Some rows say none of it in the item (Incontinence products, Low
+ * vision aids, the energy-saving rows): their note names the notice that sets the condition, read just above.
+ */
+export const RELIEF_NOT_BY_PRODUCT_WORDS =
+  /\bfor (?:disabled|blind|partially sighted|the elderly|older|charit|industrial use|a relevant|relevant)|\bcharit(?:y|ies|able)\b|\bby a registered\b|\boutside the UK\b|\bdwellings?\b|\bresidential\b|\bused as\b|\bin their own home\b/i;
+
 /** The same, for a row whose note it shares with rows that depend on the product alone (VAT Notice 701/23). */
 export const RELIEF_NOT_BY_PRODUCT_ITEMS: Readonly<Record<string, string>> = {
   "Protective boots and helmets for industrial use": "the buyer: not supplied to an employer for its employees",
@@ -104,7 +114,7 @@ export const RELIEF_NOT_BY_PRODUCT_ITEMS: Readonly<Record<string, string>> = {
 function basisPointsOf(rate: string, more: string, item: string): number | null {
   if (typeof more !== "string" || PART_AT_ANOTHER_RATE.test(more.trim()) || NAMES_ANOTHER_RATE.test(more)) return null;
   if (typeof item !== "string" || ONLY_CERTAIN_ITEMS.test(item)) return null;
-  if (Object.hasOwn(RELIEF_NOT_BY_PRODUCT_NOTES, more.trim()) || Object.hasOwn(RELIEF_NOT_BY_PRODUCT_ITEMS, item)) return null;
+  if (RELIEF_NOT_BY_PRODUCT_WORDS.test(item) || Object.hasOwn(RELIEF_NOT_BY_PRODUCT_NOTES, more.trim()) || Object.hasOwn(RELIEF_NOT_BY_PRODUCT_ITEMS, item)) return null;
   if (rate === "0%") return 0;
   if (rate === "5%") return 500;
   if (rate === "Standard-rated") return UK_VAT_RATE.basisPoints;

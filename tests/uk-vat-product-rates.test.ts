@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { RELIEF_NOT_BY_PRODUCT_ITEMS, RELIEF_NOT_BY_PRODUCT_NOTES, UK_VAT_PRODUCT_RATES, UK_VAT_PRODUCT_RATES_VALID_UNTIL, UK_VAT_RATES_FILE, type UkProductRateRow, ukProductRateBps } from "@/lib/uk-vat-product-rates";
+import { RELIEF_NOT_BY_PRODUCT_ITEMS, RELIEF_NOT_BY_PRODUCT_NOTES, RELIEF_NOT_BY_PRODUCT_WORDS, UK_VAT_PRODUCT_RATES, UK_VAT_PRODUCT_RATES_VALID_UNTIL, UK_VAT_RATES_FILE, type UkProductRateRow, ukProductRateBps } from "@/lib/uk-vat-product-rates";
 
 const root = process.cwd();
 const bytes = readFileSync(join(root, UK_VAT_RATES_FILE.path));
@@ -153,6 +153,14 @@ test("a relief that depends on who buys, who sells or what the goods are used fo
   for (const [section, item] of probed) {
     assert.ok(UK_VAT_PRODUCT_RATES.some((row) => row.section === section && row.item === item), `${item} is a row of the page`);
     assert.equal(ukProductRateBps(section, item, day), null, item);
+  }
+  // The words alone catch the rows that say who buys, who sells or the use in the item, whatever their note.
+  for (const item of ["Equipment for disabled people", "Mobility aids for the elderly", "Advertising services for charities", "Protective boots and helmets for industrial use", "Charity shops — selling donated goods", "Dispensing of prescriptions by a registered pharmacist", "Freight containers — sale, lease or hire to a place outside the UK and the EU"]) {
+    assert.ok(RELIEF_NOT_BY_PRODUCT_WORDS.test(item), item);
+  }
+  // ... and leave every row that depends only on the product.
+  for (const item of ["Books", "Children’s clothes and footwear", "Cycle helmets — CE marked", "Motorcycle helmets that meet safety standards", "Passenger transport in a vehicle, boat or aircraft that carries not less than 10 passengers", "Sanitary protection products"]) {
+    assert.equal(RELIEF_NOT_BY_PRODUCT_WORDS.test(item), false, item);
   }
   // Every note and item the module refuses this way is one the page has, so the list never goes stale unseen.
   for (const note of Object.keys(RELIEF_NOT_BY_PRODUCT_NOTES)) assert.ok(UK_VAT_PRODUCT_RATES.some((row) => row.more.trim() === note), `note ${note} is on the page`);

@@ -3,7 +3,7 @@
  * document without app/globals.css, so it carries the site's own tokens as plain values: light from `:root`, dark
  * from the dormant dark block of lib/dark-tokens.ts, which this page never switches on itself (ivory and ink, the
  * violet action and link, the focus ring). Each text pair keeps 7:1 (WCAG 1.4.6) and the ring 3:1
- * (tests/global-error-page.test.ts).
+ * (tests/global-error-page.test.ts). The skip link takes the link's color on the page.
  */
 export const GLOBAL_ERROR_LOOK = {
   light: {
@@ -29,7 +29,7 @@ export const GLOBAL_ERROR_LOOK = {
 type Look = (typeof GLOBAL_ERROR_LOOK)[keyof typeof GLOBAL_ERROR_LOOK];
 
 const colors = (c: Look) =>
-  `body{background:${c.page};color:${c.text}}.ge-muted{color:${c.muted}}.ge-primary{background:${c.primary};color:${c.primaryText};border-color:${c.primary}}.ge-link{color:${c.link};border-color:${c.link}}:focus-visible{outline-color:${c.focus}}`;
+  `body{background:${c.page};color:${c.text}}.ge-muted{color:${c.muted}}.ge-primary{background:${c.primary};color:${c.primaryText};border-color:${c.primary}}.ge-link{color:${c.link};border-color:${c.link}}.ge-skip{color:${c.link};border-color:${c.link}}:focus-visible{outline-color:${c.focus}}`;
 
 /** The page's whole style sheet: its layout, its 44 px targets, its focus ring and both schemes' colors. */
 export const GLOBAL_ERROR_STYLE = [
@@ -42,6 +42,10 @@ export const GLOBAL_ERROR_STYLE = [
   ".ge-steps{display:flex;flex-wrap:wrap;gap:1rem;margin-top:1.75rem}",
   ".ge-action{min-height:44px;min-width:44px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;padding:0.625rem 1.25rem;border:2px solid;border-radius:0.75rem;font:inherit;font-weight:600;text-decoration:none;cursor:pointer}",
   ".ge-link{background:transparent;text-decoration:underline;text-underline-offset:4px}",
+  // The skip link (AX274 Part A 4): off screen, never display:none, until it takes the focus; then in view as a 44 px
+  // target on the page's own background, in the link color (7:1, tests/global-error-page.test.ts).
+  ".ge-skip{position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden}",
+  ".ge-skip:focus{left:1rem;top:1rem;z-index:10;width:auto;height:auto;overflow:visible;min-height:44px;min-width:44px;box-sizing:border-box;display:inline-flex;align-items:center;padding:0.625rem 1rem;border:2px solid;border-radius:0.75rem;background:inherit;font-weight:600;text-decoration:underline;text-underline-offset:4px}",
   ":focus-visible{outline:3px solid;outline-offset:3px}",
   "@media (prefers-reduced-motion: no-preference){.ge-action{transition:none}}",
   colors(GLOBAL_ERROR_LOOK.light),

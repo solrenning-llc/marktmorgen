@@ -19,7 +19,7 @@ import { affiliates as apiAffiliates } from "@/lib/api-read";
 import { affiliatesTool } from "@/lib/mcp-tools";
 import { connectPayPal, payWithPayPal, unsettledBook } from "@/lib/paypal-payouts";
 import { takeAllowance } from "@/lib/store-allowance";
-import type { Store } from "@/lib/store";
+import { MAX_STORE_BYTES, type Store } from "@/lib/store";
 import { UNIT_COST, perMegabyte, request } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { markLive } from "./live-store";
@@ -112,6 +112,13 @@ async function main(): Promise<void> {
   const cost = request("heavy", 5, kept) + perMegabyte(kept);
   is("a whole number of studio requests, at least one", Number.isSafeInteger(units) && units >= 1, true);
   is("worth at least the five commands and both megabytes at a heavy request's price", units * UNIT_COST.studio >= cost, true);
+  // Past the ceiling (Board #5285 row #3378): the GET, and the mark of it written in place of the invoices, its script
+  // sent twice when the first answer is not "kept": nine commands, the kept invoices one way and two marks the other.
+  // A mark is the record's fixed fields and the store's sale handles, which live in the store's own record: at most
+  // MAX_STORE_BYTES, and a few hundred bytes for the rest (the account id, `since` and `over`).
+  const MARK_BYTES = MAX_STORE_BYTES + 512;
+  const ceilingCost = request("heavy", 9, BOOK_INVOICES_KEPT_BYTES + 2 * MARK_BYTES) + perMegabyte(BOOK_INVOICES_KEPT_BYTES + 2 * MARK_BYTES);
+  is("past the ceiling, worth at least the nine commands, the kept invoices read and two marks written", units * UNIT_COST.studio >= ceilingCost, true);
 
   part("A studio or payout reading takes them before it reads, and reads whole");
   const before = await left(store);

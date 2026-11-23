@@ -201,7 +201,9 @@ export const BOOK_INVOICES_KEPT_LINES = 5_000;
  * The studio requests a reading of the book that was not counted ahead takes before it reads and writes back those
  * kept invoices (lib/affiliates.ts, readBook): the studio's affiliates page, its spreadsheet, the payout file and its
  * confirmation, the PayPal press, payday and the PayPal settling. Five commands (the GET, and the write back as one
- * script of four, fenced by the store's erasure: lib/affiliates.ts keepIfLive, lib/store-live-cache.ts setWhileStoreLive) and BOOK_INVOICES_KEPT_BYTES each way
+ * script of four, fenced by the store's erasure: lib/affiliates.ts keepIfLive, lib/store-live-cache.ts setWhileStoreLive;
+ * past the ceiling, nine: the GET and the mark's script sent twice when its first answer is not "kept", Board #5285 row
+ * #3378, with BOOK_INVOICES_KEPT_BYTES one way only) and BOOK_INVOICES_KEPT_BYTES each way
  * at a heavy request's price, held in tests/affiliate-kept-invoices-counted.test.ts. The API and MCP readers count
  * them in bookWork, and the affiliate's own page in affiliatePageCost (AFFILIATE_KEPT_INVOICES_UNITS).
  */
@@ -224,7 +226,9 @@ export function bookWork(s: BookSizes, stripePages: number): ReadWork {
   const moves = Math.min(s.leads, BOOK_MOVES);
   const stripe = s.stripe && s.people > 0;
   const products = stripe ? Math.min(s.products, BOOK_INVOICES) : 0;
-  // The invoices kept between readings (BOOK_INVOICES_KEPT_BYTES): read, then written back, one command and one trip each.
+  // The invoices kept between readings (BOOK_INVOICES_KEPT_BYTES): read, then written back, one command and one trip each,
+  // and past their ceiling a mark in place of the write, sent once more when its answer is not "kept" (Board #5285 row
+  // #3378): one more command and one more trip, its bytes inside the write's.
   const kept = stripe ? 1 : 0;
   // Up to REFUND_MARKS_PER_READ records could have their refund kept, one script for each of the three hashes: one trip.
   const marks = s.stripe && any ? 3 : 0;
@@ -235,12 +239,12 @@ export function bookWork(s: BookSizes, stripePages: number): ReadWork {
     // and its records (1 + paypal) are no longer read by the book, still counted as a ceiling. Main's refund marks
     // (REFUND_MARKS_PER_READ, one round trip) are added on top: both are paid. The invoices kept between readings
     // (2 * kept, audit A1 on #3378) are counted on top of both.
-    commands: 8 + 7 + (any ? 1 + paypal + 2 * Math.ceil(s.entries / BOOK_KEPT_SLICE) : 0) + moveReads(moves) + products + 2 * kept + marks,
+    commands: 8 + 7 + (any ? 1 + paypal + 2 * Math.ceil(s.entries / BOOK_KEPT_SLICE) : 0) + moveReads(moves) + products + 3 * kept + marks,
     bytes: s.entries * AFFILIATE_ENTRY_BYTES + (any ? s.entries * BOOK_KEPT_REFUND_BYTES : 0) + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES + 2 * kept * BOOK_INVOICES_KEPT_BYTES + (marks ? Math.min(s.entries, REFUND_MARKS_PER_READ) * REFUND_MARK_BYTES : 0),
     sent: s.people * AFFILIATE_SENT_BYTES,
     // Invoices while it has affiliates; refunds and disputes while it has anything credited.
     stripePages: s.stripe && any ? stripePages : 0,
-    roundTrips: 2 + (any ? 2 + paypal : 0) + (moves ? 1 : 0) + (products ? 1 : 0) + 2 * kept + (marks ? 1 : 0),
+    roundTrips: 2 + (any ? 2 + paypal : 0) + (moves ? 1 : 0) + (products ? 1 : 0) + 3 * kept + (marks ? 1 : 0),
   };
 }
 

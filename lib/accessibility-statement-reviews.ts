@@ -162,6 +162,7 @@ export const STATEMENT_REVIEWS: Readonly<Record<string, { date: string; digest: 
   "page:/studio/learning-paths": { date: "November 20, 2026", digest: "eba44788522343cb" },
   "page:/studio/meetings": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/studio/memberships": { date: "November 18, 2026", digest: "eba44788522343cb" },
+  "page:/studio/moved": { date: "November 19, 2026", digest: "eba44788522343cb" },
   "page:/studio/new": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/studio/notifications": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/studio/outreach": { date: "November 18, 2026", digest: "eba44788522343cb" },

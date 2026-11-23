@@ -25,13 +25,17 @@ async function main() {
   part("Real writes refuse future annotations before changing the stored notes");
   redis.clear();
   const stats = "d".repeat(32);
-  is("future note is not recorded", await addNote(stats, "2026-11-05", "A launch that has not happened", now), null);
+  // A note is written through the store's fence (Codex L-20261119-1516, #5010 row 128): a store with an id whose key is
+  // written here reads as live.
+  const noteStore = { statsId: stats, sid: "e".repeat(32), email: "note-date@example.test", extra: false };
+  redis.run(["SET", `nl:store:id:${noteStore.sid}`, noteStore.email]);
+  is("future note is not recorded", await addNote(noteStore, "2026-11-05", "A launch that has not happened", now), null);
   is("future note creates no data", await redis.pipeline([["HGETALL", `nl:stats:${stats}:notes`]]), [[]]);
-  const recorded = await addNote(stats, "2026-11-04", "Posted the launch", now);
+  const recorded = await addNote(noteStore, "2026-11-04", "Posted the launch", now);
   is("today is recorded as before", recorded?.map(n => [n.day, n.text]), [["2026-11-04", "Posted the launch"]]);
-  is("future note beside existing history is refused", await addNote(stats, "2026-11-05", "Future launch", now), null);
+  is("future note beside existing history is refused", await addNote(noteStore, "2026-11-05", "Future launch", now), null);
   is("existing note remains byte-for-byte in the reading", await readNotes(stats), recorded);
-  is("invalid clock cannot authorize a write", await addNote(stats, "2026-11-04", "Unknown time", NaN), null);
+  is("invalid clock cannot authorize a write", await addNote(noteStore, "2026-11-04", "Unknown time", NaN), null);
   is("unknown clock preserves existing history", await readNotes(stats), recorded);
   done();
 }

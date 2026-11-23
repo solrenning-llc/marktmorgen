@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
       const section: SavedSection = { id: existing?.id ?? newSectionId(), name: read.name, blocks: read.blocks, updatedAt: now };
       // The pages that use it are read before the section is written, so an unknown page read changes nothing.
       const uses = existing ? await usesOf(store, section, text(body.except, 40)) : [];
-      const written = await writeSection(statsId, section, !existing, limits.savedBlocks);
+      const written = await writeSection(store, section, !existing, limits.savedBlocks);
       if (written === "full") return refuse("sections_full", 400, { limit: limits.savedBlocks });
       if (written === "gone") return refuse("unknown", 404);
       return Response.json({ ok: true, section, picturesLeft: read.picturesLeft, uses });

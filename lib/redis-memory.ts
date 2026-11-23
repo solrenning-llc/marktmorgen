@@ -1498,9 +1498,10 @@ export class MemoryRedis {
           if (this.run(["HGET", slots, who]) !== expected) return 0;
           return this.run(["HDEL", slots, who]);
         }
-        // lib/assignment.ts HAND_IN_WRITE_IF: a student's work written only over the one it was read as.
-        if (key.startsWith("-- marktmorgen:hand-in-write-if:v1\n") && args[0] === "4" && args.length === 12) {
-          const [, sub, files, waiting, all, expected, json, path, bytes, review, at, member] = args;
+        // lib/assignment.ts HAND_IN_WRITE_IF: a student's work written only over the one it was read as, and never once their erasure began (#4271).
+        if (key.startsWith("-- marktmorgen:hand-in-write-if:v2\n") && args[0] === "5" && args.length === 14) {
+          const [, sub, files, waiting, all, erased, expected, json, path, bytes, review, at, member, print] = args;
+          if (this.run(["HEXISTS", erased, print]) === 1) return -1;
           const now = this.run(["GET", sub]);
           if ((typeof now === "string" ? now : "") !== expected) return 0;
           this.run(["SET", sub, json]);
@@ -1662,8 +1663,38 @@ export class MemoryRedis {
         // lib/assistant-memory-store.ts MEMORY_WRITE: the notes written or deleted only while the change's lock is its own.
         if (key.startsWith("-- marktmorgen:amem-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, notes, token, json] = args;
+          // Every redis.call the script makes is an inner call Upstash bills (Claude 5 ibqho's note on #5112).
+          this.scriptCalls += 1;
           if (this.run(["GET", lock]) !== token) return 0;
+          this.scriptCalls += 1;
           this.run(json === "" ? ["DEL", notes] : ["SET", notes, json]);
+          return 1;
+        }
+        // lib/assistant-memory-store.ts MEMORY_WRITE_LIVE: MEMORY_WRITE, only while the notes' store is still live.
+        if (key.startsWith("-- marktmorgen:amem-write-live:v1\n") && args[0] === "4" && args.length === 10) {
+          const [, lock, notes, live, erasing, token, json, field, statsId, ref] = args;
+          // Every redis.call the script makes is an inner call Upstash bills.
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          if (call(["GET", lock]) !== token) return 0;
+          if (call(["HGET", erasing, field]) !== null) return -4;
+          if (statsId === "") {
+            const held = call(["GET", live]);
+            if (held === null) return -4;
+            if (held !== ref) return -5;
+          } else {
+            const raw = call(["GET", live]);
+            if (raw === null) return -4;
+            if (typeof raw !== "string") throw new Error("WRONGTYPE amem-write-live: the store's record");
+            let record: unknown;
+            try { record = JSON.parse(raw); } catch { return -3; }
+            // cjson decodes a JSON array to a table too: only a value that is no table is unreadable (Claude 6 on #5112).
+            if (!record || typeof record !== "object") return -3;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return -4;
+          }
+          call(json === "" ? ["DEL", notes] : ["SET", notes, json]);
           return 1;
         }
         // lib/assistant-memory-store.ts MEMORY_FORGET: the lock made the forgetting's own and the notes deleted in one step.
@@ -1679,6 +1710,20 @@ export class MemoryRedis {
           if (this.run(["GET", marker]) !== token || this.run(["HGET", contacts, email]) !== raw) return 0;
           this.run(["SADD", used, campaign]);
           this.run(["EXPIRE", used, seconds]);
+          return 1;
+        }
+        // lib/mail-clicks.ts MAIL_CLICK_KEY_LIVE: a reader's link key, written only while they still allow it.
+        if (key.startsWith("-- marktmorgen:mail-click-key-live:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, prints, contacts, marker, print, email, token, seconds] = args;
+          if (this.run(["HGET", prints, print]) !== null) return 0;
+          const raw = this.run(["HGET", contacts, email]);
+          if (typeof raw !== "string") return 0;
+          let row: unknown;
+          try { row = JSON.parse(raw); } catch { return 0; }
+          if (!row || typeof row !== "object" || Array.isArray(row)) return 0;
+          const r = row as Record<string, unknown>;
+          if (r.t !== token || r.agreed !== true || r.unsub === true || typeof r.clicks !== "string" || r.clicks === "") return 0;
+          this.run(["SET", marker, token, "EX", seconds]);
           return 1;
         }
         // DR1: one provider receipt and its campaign counter, atomically.
@@ -2185,7 +2230,7 @@ export class MemoryRedis {
           this.until.set(marker, this.now() + 3456000 * 1000);
           return 1;
         }
-        // lib/page-funnel-store.ts SAVE_STORE_PAGE_FUNNEL: the store-live guard (v2: a store with an id's id key must hold its ref), then funnel-save:v1's body.
+        // lib/page-funnel-store.ts SAVE_STORE_PAGE_FUNNEL: the store-live guard (v3: a store with an id's id key must hold its ref, -5 when it holds another, the store moved; -4 when gone or being erased), then funnel-save:v1's body.
         if (key.startsWith("-- marktmorgen:funnel-save-live:v3\n") && args[0] === "3" && args.length === 11) {
           const [, target, live, erasing, id, body, max, mode, field, statsId, ref] = args;
           if (this.run(["HGET", erasing, field]) !== null) return -4;
@@ -4154,32 +4199,23 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:studio-demo-seed:v1\n")) return this.studioDemo("seed", args);
         if (key.startsWith("-- marktmorgen:studio-demo-take:v1\n")) return this.studioDemo("take", args);
         // lib/team.ts TEAM_INDEX_OFF_TEAM: an id leaves a person's team index only when its team, read in the same step,
-        // is gone or lists everyone but them; a team record that does not read keeps the id (Codex U on #3660).
-        if (key.startsWith("-- marktmorgen:team-index-off-team:v1\n")) {
+        // is still byte for byte the record the read past accepted without them, or still gone (sent as ""):
+        // never a second reading of the JSON (Codex L-20261119-0634 on #5010 row 133; before it, Codex U on #3660).
+        if (key.startsWith("-- marktmorgen:team-index-off-team:v2\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
           const argv = args.slice(1 + count);
-          if (!Number.isInteger(count) || count < 2 || argv.length !== count) throw new Error("ERR team-index-off-team: wrong number of keys or arguments");
+          if (!Number.isInteger(count) || count < 2 || argv.length !== 2 * (count - 1)) throw new Error("ERR team-index-off-team: wrong number of keys or arguments");
           const [index, ...teams] = keys;
-          const [address, ...sids] = argv;
           let removed = 0;
           teams.forEach((team, i) => {
             this.scriptCalls += 1;
             const raw = this.run(["GET", team]);
-            let off = raw === null;
-            if (typeof raw === "string") {
-              try {
-                const parsed = JSON.parse(raw) as { members?: unknown; invites?: unknown };
-                if (Array.isArray(parsed.members) && Array.isArray(parsed.invites)) {
-                  off = !parsed.members.some((m) => !!m && typeof m === "object" && typeof (m as { email?: unknown }).email === "string" && (m as { email: string }).email.trim().toLowerCase() === address);
-                }
-              } catch {
-                off = false;
-              }
-            }
-            if (off) {
+            const seen = argv[2 * i + 1];
+            const same = seen === "" ? raw === null : raw === seen;
+            if (same) {
               this.scriptCalls += 1;
-              removed += Number(this.run(["SREM", index, sids[i]]));
+              removed += Number(this.run(["SREM", index, argv[2 * i]]));
             }
           });
           return removed;

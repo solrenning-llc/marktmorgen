@@ -272,7 +272,8 @@ async function main() {
       commands.some((cmd) => cmd[0] === "HINCRBY" && cmd[2] === "ht") ? commands.map(() => ["not", "a", "reply"]) : plain(commands)) as typeof redis.pipeline;
     const uncounted = await withdrawFromPlan(shopN, { name: NAME, reference: n.subId, email: ADDRESS }).catch(() => "threw");
     redis.pipeline = plain;
-    is("a try that cannot be counted is not made, and is not said to be handled", [["error", "threw"].includes(uncounted), supportTries, n.refunds().length], [true, 0, 0]);
+    // The statement is recorded by then: "pending" (confirm again), never "error" ("not sent") (Claude 5's LEVE A on #2849).
+    is("a try that cannot be counted is not made, and is not said to be handled", [uncounted, supportTries, n.refunds().length], ["pending", 0, 0]);
   } finally {
     globalThis.fetch = healthy;
   }

@@ -34,6 +34,28 @@ async function refused(run: () => Promise<unknown>): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
+  // #5285 row #5251 (Claude 1's NIT on the merged head 68c1875166): the note's EVAL reply was taken as the first of
+  // whatever came back, so two replies to one command ([1, x]) read as "kept". One command answers once (rule 24):
+  // any other count is unknown, and the note is not said to be kept.
+  part("Two replies to the note's one command are unknown, never 'kept'");
+  {
+    const store = await liveStore();
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const answers = await real(commands);
+      return commands.length === 1 && commands[0][0] === "EVAL" ? [...answers, "x"] : answers;
+    }) as typeof redis.pipeline;
+    let thrown: unknown = null;
+    try {
+      await addNote(store, DAY, "Posted the reel", NOW);
+    } catch (error) {
+      thrown = error;
+    } finally {
+      redis.pipeline = real;
+    }
+    is("RED: the note is not said to be kept (UnknownReplyError)", (thrown as Error | null)?.name, "UnknownReplyError");
+  }
+
   part("A live store's note is kept, billed as the EVAL and its four calls");
   {
     const store = await liveStore();

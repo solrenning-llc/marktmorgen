@@ -175,7 +175,7 @@ async function main(): Promise<void> {
   is("no preview right now", await ask(full.id), 404);
   is("and the PDF is not read", blobReads.get(full.file.pathname) ?? 0, 0);
 
-  for (const state of ["live", "erasing", "closed", "moved-live", "moved-erasing"] as const) {
+  for (const state of ["live", "erasing", "erased-before-write", "closed", "moved-live", "moved-erasing"] as const) {
     part(`A final preview record at the store boundary: ${state}`);
     redis.clear();
     files.clear();
@@ -208,6 +208,11 @@ async function main(): Promise<void> {
         } else if (state === "erasing" || state === "moved-erasing") {
           await pipeline([["HSET", ERASING_KEY, await erasingField(storeRef(current)), String(Date.now())], ["DEL", key, dataKey(current)!]]);
           files.clear(); // This record's family and its already-created copy have been visited by the walk.
+        } else if (state === "erased-before-write") {
+          // The erasure's folder cleanup finished before the preview's file was written (Claude 4 Z's LOW on #5068,
+          // 7073862902): its walk passed an empty folder, and the file written since is still there when the keeper
+          // answers "gone". Nothing is cleared here, so what stays is exactly what the preview left behind.
+          await pipeline([["HSET", ERASING_KEY, await erasingField(storeRef(current)), String(Date.now())], ["DEL", key, dataKey(current)!]]);
         }
       }
       return pipeline(commands);
@@ -221,6 +226,9 @@ async function main(): Promise<void> {
       is("the live route serves and keeps its preview name", [status, typeof kept === "string" && kept.includes(privateLabel)], [200, true]);
     } else {
       is("the stale/erased request is refused, with no retained preview record", [status, kept], [404, null]);
+      if (state === "erased-before-write") {
+        is("and no preview file is left in the erased store's folder", [...files.keys()].filter((p) => /\/preview-[^/]+\.pdf$/.test(p)), []);
+      }
       if (state === "erasing" || state === "moved-erasing") {
         const finishing = await storeForEmail(state === "moved-erasing" ? "moved-preview@example.test" : OWNER);
         if (!finishing) throw new Error("closing fixture missing");

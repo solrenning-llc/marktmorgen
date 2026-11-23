@@ -54,13 +54,22 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 }) as typeof fetch;
 
 const pipeline = redis.pipeline.bind(redis);
-/** How the host's stored Google connection is read: as stored, failing, or with no usable reply. */
-function connectionRead(mode: "real" | "throws" | "nothing"): void {
+/**
+ * How the host's stored Google connection is read: as stored, failing, with no usable reply, or in a shape a real
+ * pipeline can give (Board #5285, row #3158: Codex X6's re-check said "nothing" only stood for a whole pipeline of
+ * undefined, which production never returns): the connection's slot missing ("empty"), a number, or an object.
+ */
+type ReadMode = "real" | "throws" | "nothing" | "empty" | "number" | "object";
+function connectionRead(mode: ReadMode): void {
   redis.pipeline = (async (sent: (string | number)[][]) => {
-    const reads = sent.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:meet:conn:"));
+    const isConn = (c: (string | number)[]) => c[0] === "GET" && String(c[1]).startsWith("nl:meet:conn:");
+    const reads = sent.some(isConn);
     if (reads && mode === "throws") throw new Error("connection read failed");
     if (reads && mode === "nothing") return undefined as never;
-    return pipeline(sent);
+    const replies = (await pipeline(sent)) as unknown[];
+    if (!reads || mode === "real" || mode === "throws" || mode === "nothing") return replies as never;
+    if (mode === "empty") return replies.filter((_, i) => !isConn(sent[i])) as never;
+    return replies.map((reply, i) => (isConn(sent[i]) ? (mode === "number" ? 7 : {}) : reply)) as never;
   }) as typeof redis.pipeline;
 }
 
@@ -91,7 +100,7 @@ async function main(): Promise<void> {
   is("picking Google as the source goes through", await setHostSource(store, OWNER, "google"), null);
   is("picking no source again goes through", await setHostSource(store, OWNER, "none"), null);
 
-  for (const mode of ["throws", "nothing"] as const) {
+  for (const mode of ["throws", "nothing", "empty", "number", "object"] as const) {
     part(`The stored connection cannot be read (${mode}): unavailable, never "connect first"`);
     connectionRead(mode);
     const from = asked.length;

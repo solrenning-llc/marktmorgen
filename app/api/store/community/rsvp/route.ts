@@ -57,15 +57,18 @@ export async function POST(request: NextRequest) {
     const id = store.community.id;
     const event = await readEvent(id, eventId);
     if (!event) return back(`${home}/events`, "gone");
+    // Giving a place back never asks whether the member may come: somebody who no longer holds what the event asks
+    // for (a refund, an ended membership), or whose holding cannot be read now, must still free the place they took,
+    // or it stays taken from those who can.
+    if (field("action", 12) === "notgoing") {
+      if (!(await within(id, viewer.key, "rsvp"))) return back(page, "slow");
+      await cancelRsvp(id, event, viewer.key, store);
+      return back(page, "notgoing");
+    }
     // Not known is said as not checked, never as an event that is not theirs (the pre-review of 9 November 2026, P4).
     const may = await mayAttend(store, viewer.config, event, { owner: false, email: viewer.email, holdings: viewer.holdings });
     if (may !== true) return back(page, may === "unknown" ? (unknownForGood(viewer.holdings) ? "eventunknownlasting" : "eventunknown") : "eventlocked");
     if (!(await within(id, viewer.key, "rsvp"))) return back(page, "slow");
-
-    if (field("action", 12) === "notgoing") {
-      await cancelRsvp(id, event, viewer.key, store);
-      return back(page, "notgoing");
-    }
     // The store's stable list id, so the write is fenced by the person's erasure print (Codex L, L-20261120-1245).
     const listId = store.listId ?? (await ensureListId(storeRef(store)))?.listId;
     if (!listId) return back(page, "error");

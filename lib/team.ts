@@ -409,40 +409,38 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
 }
 
 /**
- * Takes ids out of a person's team index only where the same Redis step reads the store's team as gone or as listing
- * everyone but them (Codex U's MEDIUM on #3660). A join that lands before this step keeps its id; one that lands after
- * it adds the id itself with its own SADD. A team record that does not read as a team keeps the id: unknown is never
- * "not on the team". The read past (memberStoresExact) calls it for the ids it read off their team; one command.
+ * Takes ids out of a person's team index only where the same Redis step reads the store's team exactly as the read
+ * past read it and accepted it without them (Codex U's MEDIUM on #3660; Codex L-20261119-0634 on #5010 row 133): still
+ * gone, or byte for byte the very record parseTeam read, sent back with the call (no digest: redis.sha1hex is not
+ * confirmed on Upstash, Claude 5 ibuF's MEDIUM on #5175). The script never reads the JSON again by a rule of its own:
+ * cjson turns a JSON object and an array alike into a table, so the v1 script took a team whose members or invites were
+ * objects, which parseTeam refuses, for a team without them and dropped a live store's id. A join that lands before this
+ * step changes the record and keeps its id; one that lands after it adds the id itself with its own SADD. A record that
+ * changed in any way keeps the id: unknown is never "not on the team". The read past (memberStoresExact) calls it for
+ * the ids it read off their team; one command, the same GET and SREM a store as v1, with each record read sent back
+ * (at most the team's capped size; tests/plan-cost-registry.ts, STALE_ID_WIRE_BYTES).
  */
-export const TEAM_INDEX_OFF_TEAM = `-- marktmorgen:team-index-off-team:v1
-local address, removed = ARGV[1], 0
+export const TEAM_INDEX_OFF_TEAM = `-- marktmorgen:team-index-off-team:v2
+local removed = 0
 for i = 2, #KEYS do
   local raw = redis.call('GET', KEYS[i])
-  local off = false
-  if not raw then
-    off = true
-  else
-    local ok, team = pcall(cjson.decode, raw)
-    if ok and type(team) == 'table' and type(team.members) == 'table' and type(team.invites) == 'table' then
-      off = true
-      for _, member in ipairs(team.members) do
-        if type(member) == 'table' and type(member.email) == 'string' and string.lower(string.match(member.email, '^%s*(.-)%s*$')) == address then
-          off = false
-          break
-        end
-      end
-    end
-  end
-  if off then removed = removed + redis.call('SREM', KEYS[1], ARGV[i]) end
+  local seen = ARGV[(i - 2) * 2 + 2]
+  local same
+  if seen == '' then same = not raw else same = raw == seen end
+  if same then removed = removed + redis.call('SREM', KEYS[1], ARGV[(i - 2) * 2 + 1]) end
 end
 return removed`;
 
-/** Runs TEAM_INDEX_OFF_TEAM for `sids`; throws on a reply that is not a count of at most that many (rule 24). */
-async function dropOffTeam(address: string, sids: string[]): Promise<void> {
-  if (!sids.length) return;
-  const replies = repliesFor(await redisPipeline([["EVAL", TEAM_INDEX_OFF_TEAM, 1 + sids.length, indexKey(address), ...sids.map(teamKey), address, ...sids]]), 1);
+/** What the read past read of a team it found without the person: the record exactly, or null when it was gone (sent as "", which no record is: parseTeam refuses it). */
+type ReadOffTeam = { sid: string; raw: string | null };
+
+/** Runs TEAM_INDEX_OFF_TEAM for `teams`; throws on a reply that is not a count of at most that many (rule 24). */
+async function dropOffTeam(address: string, teams: ReadOffTeam[]): Promise<void> {
+  if (!teams.length) return;
+  const seen = teams.flatMap(({ sid, raw }) => [sid, raw ?? ""]);
+  const replies = repliesFor(await redisPipeline([["EVAL", TEAM_INDEX_OFF_TEAM, 1 + teams.length, indexKey(address), ...teams.map(({ sid }) => teamKey(sid)), ...seen]]), 1);
   const removed = replies ? countOf(replies[0]) : null;
-  if (removed === null || removed > sids.length) throw new UnknownReplyError("ids taken out of a teammate's store index");
+  if (removed === null || removed > teams.length) throw new UnknownReplyError("ids taken out of a teammate's store index");
 }
 
 /**
@@ -481,12 +479,16 @@ export async function memberStoresExact(email: string, other?: string): Promise<
   // LEVE and Codex U's MEDIUM on #3660). An id with no store (nil) or a store
   // they own, whose team still lists them, is no store they serve whoever joins: it leaves the index for good, so the
   // read past gets further every read (decideCalendarRuns).
-  const offTeam: string[] = [];
+  const offTeam: ReadOffTeam[] = [];
   for (const sid of ids.slice(0, MEMBER_STORES_READ)) {
-    const member = (await readTeam(sid)).members.find((m) => m.email === address);
+    // The record itself, kept with what parseTeam read of it: the removal below takes the id out only while the record
+    // is still exactly this one (TEAM_INDEX_OFF_TEAM v2). parseTeam throws on any other shape, so only a record read
+    // exactly, or none, gets here.
+    const raw = await teamRecord(sid);
+    const member = parseTeam(raw).members.find((m) => m.email === address);
     if (!member) {
       stale.push(sid);
-      offTeam.push(sid);
+      offTeam.push({ sid, raw: typeof raw === "string" ? raw : null });
       continue;
     }
     const store = await storeForIdExact(sid);
@@ -500,7 +502,7 @@ export async function memberStoresExact(email: string, other?: string): Promise<
     // time; the answer is unknown either way, so this read never decides.
     if (stale.length) {
       // An id with no store, or a store they own, is no store they serve whoever joins: it leaves for good.
-      const forGood = stale.filter((sid) => !offTeam.includes(sid));
+      const forGood = stale.filter((sid) => !offTeam.some((read) => read.sid === sid));
       if (forGood.length) await redisPipeline([["SREM", indexKey(address), ...forGood]]).catch(() => {});
       // An id read off its team leaves only where the same Redis step still reads them off it, so a join that landed
       // after the read is never taken out, and there is no repair write to fail (Codex U's MEDIUM on #3660; before it,

@@ -60,7 +60,8 @@ async function main(): Promise<void> {
 
   // #5285 row #4566 (Claude 2's LEVE on the merged head 559812978c): unsub was read only as `=== true`, so a row whose
   // unsub is in another shape ("true" as text, 1) counted as still on the list and was sent to, even marked gone.
-  // Rows are written with a boolean, so another shape is unknown (rule 24), as parseContact reads it.
+  // Rows are written with a boolean, so another shape is unknown (rule 24), as lib/checkout-recovery.ts contactExact
+  // reads it.
   for (const odd of ["true", 1, null] as const) {
     part(`A list row whose unsub is ${JSON.stringify(odd)} (not true or false) is unknown`);
     seed(contact({ unsub: odd, unsubAt: "2026-11-01T00:00:00.000Z", gone: "bounced" }));

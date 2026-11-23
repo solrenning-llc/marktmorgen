@@ -19,6 +19,7 @@ import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { claimHandle, ensureStatsId, ensureStoreId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { GET, POST } from "@/app/api/store/affiliates/payout-batch/route";
+import { postBatch } from "@/components/affiliate-studio";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -130,6 +131,26 @@ async function main(): Promise<void> {
   is("one file is taken as it is; several need a choice", studio.includes("files.length === 1 ? files[0] : null"), true);
   is("the choice is required, with no file picked at first", [studio.includes('<option value="" disabled>'), studio.split("\n").some((line) => line.includes('id="batch-f"') && /\brequired>/.test(line))], [true, true]);
   is("the partial answer has its own message", /unrecorded: /.test(studio), true);
+
+  part("The part not written down is shown in the file's own currency (Codex X6 on #3906, MEDIUM)");
+  // A USD file confirmed after the store switched to JPY: $30.00, never ¥3,000.
+  const realFetch = globalThis.fetch;
+  const sent: unknown[] = [];
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    sent.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ error: "unrecorded", written: 1, held: 0, unrecorded: 1, unrecordedCents: 3_000 }), { status: 409 });
+  }) as typeof fetch;
+  try {
+    const usd = await postBatch({ date: "2026-11-20", reference: "PayPal batch 9" }, { id: "f-usd", currency: "usd" });
+    const message = "error" in usd ? usd.error : "";
+    is("a USD file's part is said in dollars, not in the store's yen", [/\(\$30(\.00)?\)/.test(message), /¥/.test(message)], [true, false]);
+    is("the request names the chosen file, with the date and reference typed", sent[0], { date: "2026-11-20", reference: "PayPal batch 9", file: "f-usd" });
+    const jpy = await postBatch({ date: "2026-11-20", reference: "PayPal batch 9" }, { id: "f-jpy", currency: "jpy" });
+    is("a JPY file's part is said in yen", "error" in jpy && /¥3,000/.test(jpy.error), true);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  is("the studio confirms with the chosen file itself, never with the store's currency", [studio.includes("postBatch({ date: batchDate, reference: batchReference }, chosenFile)"), /postBatch\([^)]*\),\s*currency\)/.test(studio)], [true, false]);
   done();
 }
 

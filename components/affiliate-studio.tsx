@@ -197,13 +197,16 @@ function unrecordedMessage(inBook: number, unrecorded: number, cents: number, cu
  * Writing down a whole batch the creator has just paid in their own provider.
  * Separate from `post` because it answers with how many payouts it wrote, and
  * because it is the one call that touches several affiliates at once.
+ * It takes the chosen file itself, so the part that could not be written down is
+ * shown in the file's own currency, never the store's current one (Codex X6 on
+ * #3906, MEDIUM: a USD file after a switch to JPY read as ¥3,000, not $30.00).
  */
-async function postBatch(payload: Record<string, unknown>, currency: string): Promise<{ written: number; held: number; left: number | null } | { error: string }> {
+export async function postBatch(batch: { date: string; reference: string }, file: { id: string; currency: string }): Promise<{ written: number; held: number; left: number | null } | { error: string }> {
   try {
     const response = await fetch("/api/store/affiliates/payout-batch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ date: batch.date, reference: batch.reference, file: file.id }),
     });
     const data = (await response.json().catch(() => ({}))) as {
       ok?: boolean;
@@ -216,7 +219,7 @@ async function postBatch(payload: Record<string, unknown>, currency: string): Pr
     };
     const count = (n: unknown) => (Number.isSafeInteger(n) && (n as number) >= 0 ? (n as number) : 0);
     if (data.ok) return { written: count(data.written), held: count(data.held), left: typeof data.left === "number" ? data.left : null };
-    if (data.error === "unrecorded" && count(data.unrecorded) > 0) return { error: unrecordedMessage(count(data.written) + count(data.held), count(data.unrecorded), count(data.unrecordedCents), currency) };
+    if (data.error === "unrecorded" && count(data.unrecorded) > 0) return { error: unrecordedMessage(count(data.written) + count(data.held), count(data.unrecorded), count(data.unrecordedCents), file.currency) };
     return { error: MESSAGES[data.error ?? ""] ?? MESSAGES.server_error };
   } catch {
     return { error: MESSAGES.server_error };
@@ -477,7 +480,7 @@ export function AffiliateStudio({
                     }
                     setBusy("batch");
                     setError(null);
-                    const done = await postBatch({ date: batchDate, reference: batchReference, file: chosenFile.id }, currency);
+                    const done = await postBatch({ date: batchDate, reference: batchReference }, chosenFile);
                     setBusy(null);
                     if ("error" in done) {
                       setError({ where: "batch", text: done.error });

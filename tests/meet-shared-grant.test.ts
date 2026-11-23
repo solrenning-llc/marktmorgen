@@ -103,6 +103,19 @@ async function main() {
   await disconnectFor(B, "google");
   is("a store connected since that disconnects keeps the grant the host still uses", revokes, 0);
 
+  for (const provider of ["google", "zoom"] as const) {
+    part(`${provider}: two disconnects of one account at once give the grant back once (Claude 3 xy6b's LOW on #5476)`);
+    // Each connection has its own renewal lock, so two disconnects of one account run together: each read the index
+    // before either left it, saw the other and kept the grant, and the grant stayed at the provider with nothing here
+    // left to give it back. The last one is now decided in the same step as leaving the index.
+    await seed(provider, [A, B]);
+    const [a, b] = await Promise.all([disconnectFor(A, provider), disconnectFor(B, provider)]);
+    is("the grant is given back exactly once", revokes, 1);
+    is("by exactly one of the two, and the other says it was kept for the other connection",
+      [a.providerAccessRemoved, b.providerAccessRemoved].filter(Boolean).length === 1 && [a.sharedGrantKept, b.sharedGrantKept].filter(Boolean).length === 1, true);
+    is("and the account's index is empty", (await redis.pipeline([["SCARD", userKey(provider)]]))[0], 0);
+  }
+
   part("An index that cannot be read keeps the grant");
   await seed("google", [A, B]);
   const real = redis.pipeline.bind(redis);
